@@ -62,6 +62,7 @@ func TestSplit_NoFalsePositives(t *testing.T) {
 		"foo.go:bar",       // non-numeric, non-keyword suffix
 		"foo.go:1.2",       // float-like, not a line spec
 		`C:\Users\me\a.go`, // windows drive letter: suffix is not a line spec
+		`C:43`,             // windows drive-relative path, not a selector
 		"dir:1/file.go",    // colon lives in a directory component, not the file
 		":43-94",           // empty base
 		"main.go:",         // empty selector

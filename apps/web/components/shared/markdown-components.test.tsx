@@ -208,7 +208,7 @@ describe("markdownComponents omp read selectors", () => {
     };
   });
 
-  it("opens file links with omp range and multi-range selectors in the editor", () => {
+  it("opens file links with omp range selectors in the editor", () => {
     render(<Markdown>{"[readme](docs/README.md:16-20)"}</Markdown>);
     fireEvent.click(screen.getByRole("link", { name: "readme" }));
     expect(openFile).toHaveBeenCalledWith("docs/README.md");

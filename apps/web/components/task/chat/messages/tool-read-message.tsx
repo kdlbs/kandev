@@ -1,13 +1,13 @@
 "use client";
 
-import { memo, useCallback } from "react";
+import { memo } from "react";
 import { IconCheck, IconX, IconFileCode2 } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { FilePathButton } from "./file-path-button";
 import type { Message } from "@/lib/types/http";
 import { ExpandableRow } from "./expandable-row";
 import { useExpandState } from "./use-expand-state";
-import { setPendingCursorPosition, scrollEditorIfMounted } from "@/hooks/use-file-editors";
+import { useOpenFileAtLine } from "@/hooks/use-file-editors";
 
 type ReadFileOutput = {
   content?: string;
@@ -86,21 +86,7 @@ export const ToolReadMessage = memo(function ToolReadMessage({
     parseReadMetadata(comment);
   const autoExpanded = status === "running";
   const { isExpanded, handleToggle } = useExpandState(status, autoExpanded);
-  // Navigate the editor to the line the agent read (offset). For a newly opened
-  // file the pending position is consumed on editor mount; for an already-open
-  // file no mount happens, so scroll the live editor directly.
-  const handleOpenFile = useCallback(
-    (path: string) => {
-      if (startLine && startLine > 0) {
-        setPendingCursorPosition(path, startLine, 1);
-        onOpenFile?.(path);
-        scrollEditorIfMounted(path, worktreePath ?? null, startLine, 1);
-        return;
-      }
-      onOpenFile?.(path);
-    },
-    [onOpenFile, startLine, worktreePath],
-  );
+  const handleOpenFile = useOpenFileAtLine(onOpenFile, startLine, worktreePath);
 
   return (
     <ExpandableRow

@@ -76,6 +76,25 @@ export function scrollEditorIfMounted(
   return false;
 }
 
+export function useOpenFileAtLine(
+  onOpenFile: ((path: string) => void) | undefined,
+  startLine: number | undefined,
+  worktreePath: string | null | undefined,
+) {
+  return useCallback(
+    (path: string) => {
+      if (startLine && startLine > 0) {
+        setPendingCursorPosition(path, startLine, 1);
+        onOpenFile?.(path);
+        scrollEditorIfMounted(path, worktreePath ?? null, startLine, 1);
+        return;
+      }
+      onOpenFile?.(path);
+    },
+    [onOpenFile, startLine, worktreePath],
+  );
+}
+
 /** Read openFiles from the store without subscribing to changes. */
 function getOpenFiles() {
   return useDockviewStore.getState().openFiles;

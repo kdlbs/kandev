@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, memo, useCallback } from "react";
+import { useState, memo } from "react";
 import {
   IconCheck,
   IconX,
@@ -16,7 +16,7 @@ import { DiffViewBlock } from "./diff-view-block";
 import { ExpandableRow } from "./expandable-row";
 import { transformFileMutation, type FileMutation } from "@/lib/diff";
 import { useExpandState } from "./use-expand-state";
-import { setPendingCursorPosition, scrollEditorIfMounted } from "@/hooks/use-file-editors";
+import { useOpenFileAtLine } from "@/hooks/use-file-editors";
 
 type ModifyFilePayload = {
   file_path?: string;
@@ -187,21 +187,7 @@ export const ToolEditMessage = memo(function ToolEditMessage({
     }
   };
 
-  // Navigate the editor to the first changed line. For a newly opened file the
-  // pending position is consumed on editor mount; for an already-open file no
-  // mount happens, so scroll the live editor directly.
-  const handleOpenFile = useCallback(
-    (path: string) => {
-      if (startLine && startLine > 0) {
-        setPendingCursorPosition(path, startLine, 1);
-        onOpenFile?.(path);
-        scrollEditorIfMounted(path, worktreePath ?? null, startLine, 1);
-        return;
-      }
-      onOpenFile?.(path);
-    },
-    [onOpenFile, startLine, worktreePath],
-  );
+  const handleOpenFile = useOpenFileAtLine(onOpenFile, startLine, worktreePath);
 
   return (
     <ExpandableRow

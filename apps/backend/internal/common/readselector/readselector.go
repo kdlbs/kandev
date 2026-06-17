@@ -40,6 +40,9 @@ func Split(raw string) (path string, startLine, lineCount int) {
 		return raw, 0, 0
 	}
 	colon := lastSep + 1 + rel
+	if lastSep < 0 && isWindowsDrivePrefix(raw, colon) {
+		return raw, 0, 0
+	}
 	base, suffix := raw[:colon], raw[colon+1:]
 	if base == "" || suffix == "" {
 		return raw, 0, 0
@@ -49,6 +52,14 @@ func Split(raw string) (path string, startLine, lineCount int) {
 		return raw, 0, 0
 	}
 	return base, start, count
+}
+
+func isWindowsDrivePrefix(raw string, colon int) bool {
+	return colon == 1 && len(raw) >= 2 && isASCIIAlpha(raw[0])
+}
+
+func isASCIIAlpha(b byte) bool {
+	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z')
 }
 
 // parseReadSelector validates the full selector tail (everything after the
