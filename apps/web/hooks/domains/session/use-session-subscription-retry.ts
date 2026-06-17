@@ -4,8 +4,8 @@ import type { TaskSessionState } from "@/lib/types/http";
 import { generateUUID } from "@/lib/utils";
 import { getWebSocketClient } from "@/lib/ws/connection";
 
-const UNKNOWN_SESSION_RESUBSCRIBE_MS = 1000;
-const MAX_UNKNOWN_SESSION_RESUBSCRIBE_ATTEMPTS = 15;
+const UNKNOWN_SESSION_INITIAL_RESUBSCRIBE_MS = 1000;
+const UNKNOWN_SESSION_MAX_RESUBSCRIBE_MS = 30000;
 
 type RetryState = {
   sessionId: string | null;
@@ -36,18 +36,30 @@ export function useUnknownSessionSubscriptionRetry(params: {
   useEffect(() => {
     if (!shouldRetry) return;
     let attempts = 0;
-    const id = window.setInterval(() => {
-      attempts += 1;
-      setRetryState({ sessionId, count: attempts });
-      if (attempts >= MAX_UNKNOWN_SESSION_RESUBSCRIBE_ATTEMPTS) {
-        window.clearInterval(id);
-      }
-    }, UNKNOWN_SESSION_RESUBSCRIBE_MS);
-    return () => window.clearInterval(id);
+    let timeoutId: number | null = null;
+    const schedule = () => {
+      timeoutId = window.setTimeout(() => {
+        const nextAttempts = attempts + 1;
+        attempts = nextAttempts;
+        setRetryState({ sessionId, count: nextAttempts });
+        schedule();
+      }, getUnknownSessionRetryDelay(attempts));
+    };
+    schedule();
+    return () => {
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
   }, [sessionId, shouldRetry]);
 
   if (!shouldRetry || retryState.sessionId !== sessionId) return 0;
   return retryState.count;
+}
+
+export function getUnknownSessionRetryDelay(attempts: number) {
+  return Math.min(
+    UNKNOWN_SESSION_INITIAL_RESUBSCRIBE_MS * 2 ** attempts,
+    UNKNOWN_SESSION_MAX_RESUBSCRIBE_MS,
+  );
 }
 
 export function useUnknownSessionSubscriptionRetryEffect(params: {
