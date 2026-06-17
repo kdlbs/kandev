@@ -28,6 +28,8 @@ export function PassthroughSuggestionMenu({
     <div
       className="absolute bottom-14 left-2 z-20 w-80 max-w-[calc(100vw-1rem)] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md"
       data-testid="passthrough-composer-suggestions"
+      role="listbox"
+      aria-label={suggestion.kind === "command" ? "Command suggestions" : "File suggestions"}
     >
       <div className="border-b px-3 py-1 text-xs font-medium text-muted-foreground">
         {suggestion.kind === "command" ? "Commands" : "Files"}
@@ -62,6 +64,9 @@ function SuggestionButton({
   return (
     <button
       type="button"
+      role="option"
+      aria-selected={selected}
+      aria-label={suggestionLabel(item)}
       className={`flex w-full cursor-pointer items-start gap-2 px-3 py-2 text-left text-sm ${
         selected ? "bg-accent" : ""
       }`}
