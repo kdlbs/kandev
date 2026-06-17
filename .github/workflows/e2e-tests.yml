@@ -284,12 +284,38 @@ jobs:
             cp -a /ms-playwright/. /dest/
           echo "PLAYWRIGHT_BROWSERS_PATH=/tmp/ms-playwright" >> "$GITHUB_ENV"
 
-      # Browser binaries come from the image above; this only installs the
-      # apt-level shared libs chromium links against. Fast (~20–30s) and avoids
-      # any CDN dependency.
-      - name: Install Playwright system deps
+      # Browser binaries come from the image above. GitHub's Ubuntu runners
+      # usually already have the shared libs Chromium needs, so smoke-test the
+      # copied browser first and only hit apt as a bounded fallback.
+      - name: Verify Playwright browser runtime
         working-directory: apps/web
-        run: npx playwright install-deps chromium
+        run: |
+          set -euo pipefail
+
+          smoke_test() {
+            node <<'NODE'
+          const { chromium } = require("@playwright/test");
+
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            const page = await browser.newPage();
+            await page.goto("data:text/html,ok");
+            await browser.close();
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+          }
+
+          if smoke_test; then
+            echo "Playwright Chromium launches with existing runner packages."
+            exit 0
+          fi
+
+          echo "::warning::Playwright Chromium failed to launch; installing missing host packages."
+          timeout 180s npx playwright install-deps chromium
+          smoke_test
 
       - name: Download backend build
         uses: actions/download-artifact@v5
