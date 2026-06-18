@@ -6,6 +6,7 @@ import type { TaskSessionStateChangedPayload } from "@/lib/types/backend";
 import { sessionId, taskId } from "@/lib/types/http";
 
 const STATE_CHANGED_EVENT = "session.state_changed";
+const TASK_TITLE = "Running task";
 
 function makeStore(overrides: Partial<AppState> = {}) {
   const state = {
@@ -48,7 +49,7 @@ function makeMessage(payload: TaskSessionStateChangedPayload) {
   };
 }
 
-describe("session.state_changed -> kanban primary session state", () => {
+describe("session.state_changed -> primary kanban card state", () => {
   it("updates kanban card primary session state in workflow snapshots", () => {
     const store = makeStore({
       kanban: {
@@ -58,7 +59,7 @@ describe("session.state_changed -> kanban primary session state", () => {
           {
             id: "t-1",
             workflowStepId: "step-1",
-            title: "Running task",
+            title: TASK_TITLE,
             position: 0,
             primarySessionId: "s-1",
             primarySessionState: "WAITING_FOR_INPUT",
@@ -76,7 +77,7 @@ describe("session.state_changed -> kanban primary session state", () => {
               {
                 id: "t-1",
                 workflowStepId: "step-1",
-                title: "Running task",
+                title: TASK_TITLE,
                 position: 0,
                 primarySessionId: "s-1",
                 primarySessionState: "WAITING_FOR_INPUT",
@@ -106,9 +107,25 @@ describe("session.state_changed -> kanban primary session state", () => {
       "RUNNING",
     );
   });
+});
 
+describe("session.state_changed -> non-primary kanban card state", () => {
   it("does not update kanban cards for non-primary session transitions", () => {
     const store = makeStore({
+      kanban: {
+        workflowId: "wf-1",
+        steps: [],
+        tasks: [
+          {
+            id: "t-1",
+            workflowStepId: "step-1",
+            title: TASK_TITLE,
+            position: 0,
+            primarySessionId: "s-primary",
+            primarySessionState: "WAITING_FOR_INPUT",
+          },
+        ],
+      },
       kanbanMulti: {
         isLoading: false,
         snapshots: {
@@ -120,7 +137,7 @@ describe("session.state_changed -> kanban primary session state", () => {
               {
                 id: "t-1",
                 workflowStepId: "step-1",
-                title: "Running task",
+                title: TASK_TITLE,
                 position: 0,
                 primarySessionId: "s-primary",
                 primarySessionState: "WAITING_FOR_INPUT",
@@ -145,8 +162,105 @@ describe("session.state_changed -> kanban primary session state", () => {
 
     handler(makeMessage({ task_id: "t-1", session_id: "s-secondary", new_state: "RUNNING" }));
 
+    expect(store.getState().kanban.tasks[0]?.primarySessionState).toBe("WAITING_FOR_INPUT");
     expect(store.getState().kanbanMulti.snapshots["wf-1"]?.tasks[0]?.primarySessionState).toBe(
       "WAITING_FOR_INPUT",
     );
+  });
+});
+
+describe("session.state_changed -> kanban sync guards", () => {
+  it("does not write kanban state when the event has no new state", () => {
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          "s-1": {
+            id: sessionId("s-1"),
+            task_id: taskId("t-1"),
+            state: "WAITING_FOR_INPUT",
+            started_at: "",
+            updated_at: "",
+          },
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(makeMessage({ task_id: "t-1", session_id: "s-1" }));
+
+    expect(store.setState).not.toHaveBeenCalled();
+  });
+
+  it("keeps task arrays by reference when the primary state is already current", () => {
+    const kanbanTasks = [
+      {
+        id: "t-1",
+        workflowStepId: "step-1",
+        title: TASK_TITLE,
+        position: 0,
+        primarySessionId: "s-1",
+        primarySessionState: "RUNNING",
+      },
+    ];
+    const snapshotTasks = [...kanbanTasks];
+    const store = makeStore({
+      kanban: { workflowId: "wf-1", steps: [], tasks: kanbanTasks },
+      kanbanMulti: {
+        isLoading: false,
+        snapshots: {
+          "wf-1": {
+            workflowId: "wf-1",
+            workflowName: "Development",
+            steps: [],
+            tasks: snapshotTasks,
+          },
+        },
+      },
+      taskSessions: {
+        items: {
+          "s-1": {
+            id: sessionId("s-1"),
+            task_id: taskId("t-1"),
+            state: "RUNNING",
+            started_at: "",
+            updated_at: "",
+          },
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(makeMessage({ task_id: "t-1", session_id: "s-1", new_state: "RUNNING" }));
+
+    expect(store.getState().kanban.tasks).toBe(kanbanTasks);
+    expect(store.getState().kanbanMulti.snapshots["wf-1"]?.tasks).toBe(snapshotTasks);
+  });
+
+  it("does not write kanban state for stale session events", () => {
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          "s-1": {
+            id: sessionId("s-1"),
+            task_id: taskId("t-1"),
+            state: "WAITING_FOR_INPUT",
+            started_at: "",
+            updated_at: "2026-06-18T12:00:00.000Z",
+          },
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        new_state: "RUNNING",
+        updated_at: "2026-06-18T11:00:00.000Z",
+      }),
+    );
+
+    expect(store.setState).not.toHaveBeenCalled();
   });
 });
