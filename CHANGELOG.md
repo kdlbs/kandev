@@ -2,6 +2,27 @@
 
 All notable changes to Kandev.
 
+## 0.65.0 - 2026-06-18
+
+### Bug Fixes
+
+- backfill running chat turns without prompt frame ([#1429](https://github.com/kdlbs/kandev/pull/1429))
+- split multi-file agent read links and strip line-range selectors ([#1426](https://github.com/kdlbs/kandev/pull/1426)) by @ClemDNL
+- stop session-tab flicker when same-task sessions have diverged env ids ([#1428](https://github.com/kdlbs/kandev/pull/1428))
+- prefer local copilot CLI over npx at launch ([#1384](https://github.com/kdlbs/kandev/pull/1384))
+- render er diagrams in task plans ([#1425](https://github.com/kdlbs/kandev/pull/1425))
+- restore diff expansion for committed-source review rows ([#1423](https://github.com/kdlbs/kandev/pull/1423))
+- show quick chat session model options ([#1422](https://github.com/kdlbs/kandev/pull/1422))
+
+### Performance
+
+- fix board lag, memory growth, and rebase-driven CPU spikes ([#1427](https://github.com/kdlbs/kandev/pull/1427))
+
+### Documentation
+
+- refresh feature documentation ([#1424](https://github.com/kdlbs/kandev/pull/1424))
+- record PR fixup harness learnings ([#1416](https://github.com/kdlbs/kandev/pull/1416))
+
 ## 0.64.0 - 2026-06-17
 
 ### Bug Fixes
