@@ -51,6 +51,10 @@ jobs:
         run: |
           set -euo pipefail
 
+          REVIEW_DIR=.opencode-review
+          rm -rf "$REVIEW_DIR"
+          mkdir -p "$REVIEW_DIR"
+
           if [[ "$ACTION" == "synchronize" ]] &&
              [[ -n "${BEFORE:-}" ]] &&
              [[ "$BEFORE" != "0000000000000000000000000000000000000000" ]] &&
@@ -62,14 +66,14 @@ jobs:
             MODE="full-pr"
           fi
 
-          git diff --find-renames --find-copies --unified=80 "$RANGE" > /tmp/opencode-review.patch
-          git diff --name-only "$RANGE" > /tmp/opencode-review-files.txt
+          git diff --find-renames --find-copies --unified=80 "$RANGE" > "$REVIEW_DIR/review.patch"
+          git diff --name-only "$RANGE" > "$REVIEW_DIR/files.txt"
           {
             echo "Review mode: $MODE"
             echo "Diff range: $RANGE"
             echo
             echo "Changed files:"
-            sed 's/^/- /' /tmp/opencode-review-files.txt
+            sed 's/^/- /' "$REVIEW_DIR/files.txt"
             echo
             echo "Repository review guidelines from base commit:"
             echo
@@ -78,7 +82,7 @@ jobs:
             echo "Code review skill from base commit:"
             echo
             git show "$BASE_SHA:.agents/skills/code-review/SKILL.md" 2>/dev/null | sed -n '1,220p' || echo "(code-review skill not present in base commit)"
-          } > /tmp/opencode-review-guidelines.md
+          } > "$REVIEW_DIR/guidelines.md"
 
           {
             echo "mode=$MODE"
@@ -110,6 +114,9 @@ jobs:
         run: |
           set -euo pipefail
 
+          REVIEW_DIR=.opencode-review
+          mkdir -p "$REVIEW_DIR"
+          rm -rf .opencode
           mkdir -p .opencode/agents
           cat > .opencode/agents/github-pr-review.md <<'EOF'
           ---
@@ -155,15 +162,28 @@ jobs:
           - Use an empty array when there are no high-confidence findings.
           EOF
 
+          set +e
           "$HOME/.opencode/bin/opencode" run \
             --agent github-pr-review \
             --model "$OPENCODE_MODEL" \
             --title "PR #${{ github.event.pull_request.number }} OpenCode review" \
-            --file /tmp/opencode-review-guidelines.md \
-            --file /tmp/opencode-review.patch \
+            --file "$REVIEW_DIR/guidelines.md" \
+            --file "$REVIEW_DIR/review.patch" \
             -- \
             "Review PR #${{ github.event.pull_request.number }} in ${REVIEW_MODE} mode. The attached patch is the review scope. Read repository files only when needed to understand architecture around the patched files. Return only the requested JSON findings block; a trusted workflow step will publish inline comments." \
-            > /tmp/opencode-review-output.txt
+            > "$REVIEW_DIR/opencode.stdout" \
+            2> "$REVIEW_DIR/opencode.stderr"
+          opencode_status=$?
+          set -e
+
+          cp "$REVIEW_DIR/opencode.stdout" "$REVIEW_DIR/output.txt"
+          printf '%s\n' "$opencode_status" > "$REVIEW_DIR/opencode.status"
+          {
+            echo "## OpenCode command"
+            echo
+            echo "OpenCode exit status: \`$opencode_status\`"
+            echo "Output files are preserved under \`$REVIEW_DIR/\`."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Post OpenCode findings
         env:
@@ -174,134 +194,21 @@ jobs:
         run: |
           set -euo pipefail
 
-          python3 <<'PY'
-          import json
-          import os
-          import re
-          import subprocess
-          from pathlib import Path
+          python3 scripts/opencode-code-review post-findings \
+            --output .opencode-review/output.txt \
+            --files .opencode-review/files.txt \
+            --opencode-status .opencode-review/opencode.status \
+            --stdout .opencode-review/opencode.stdout \
+            --stderr .opencode-review/opencode.stderr \
+            --summary "$GITHUB_STEP_SUMMARY"
 
-          raw = Path("/tmp/opencode-review-output.txt").read_text()
-          changed_paths = set(Path("/tmp/opencode-review-files.txt").read_text().splitlines())
-          match = re.search(r"<opencode_findings>\s*(\[.*?\])\s*</opencode_findings>", raw, re.S)
-          if not match:
-            print("OpenCode did not return a valid findings block; skipping comments.")
-            raise SystemExit(0)
-
-          try:
-            findings = json.loads(match.group(1))
-          except json.JSONDecodeError as exc:
-            print(f"OpenCode returned invalid findings JSON: {exc}")
-            raise SystemExit(0)
-
-          if not isinstance(findings, list):
-            print("OpenCode findings payload was not a JSON array; skipping comments.")
-            raise SystemExit(0)
-
-          if not findings:
-            marker = "<!-- opencode-review:no-findings -->"
-            short_sha = os.environ["HEAD_SHA"][:12]
-            model = os.environ["OPENCODE_MODEL"]
-            body = (
-              f"{marker}\n"
-              "**OpenCode review complete**\n\n"
-              f"OpenCode model: `{model}`\n\n"
-              f"No suggestions found for commit `{short_sha}`."
-            )
-
-            comments_result = subprocess.run(
-              [
-                "gh", "api", "--paginate",
-                f"repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['PR_NUMBER']}/comments?per_page=100",
-              ],
-              text=True,
-              capture_output=True,
-              check=False,
-            )
-            comment_id = None
-            if comments_result.returncode == 0:
-              try:
-                comments = json.loads(comments_result.stdout)
-              except json.JSONDecodeError as exc:
-                print(f"Could not parse existing PR comments: {exc}")
-                comments = []
-              for comment in reversed(comments):
-                if marker in (comment.get("body") or ""):
-                  comment_id = comment.get("id")
-                  break
-            else:
-              print(f"Could not list existing PR comments: {comments_result.stderr.strip()}")
-
-            method = "PATCH" if comment_id else "POST"
-            endpoint = (
-              f"repos/{os.environ['GITHUB_REPOSITORY']}/issues/comments/{comment_id}"
-              if comment_id
-              else f"repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['PR_NUMBER']}/comments"
-            )
-            result = subprocess.run(
-              [
-                "gh", "api", "-X", method,
-                endpoint,
-                "-f", f"body={body}",
-              ],
-              text=True,
-              capture_output=True,
-              check=False,
-            )
-            if result.returncode == 0:
-              action = "Updated" if comment_id else "Posted"
-              print(f"{action} OpenCode no-suggestions comment.")
-            else:
-              print(f"Skipped OpenCode no-suggestions comment: {result.stderr.strip()}")
-            raise SystemExit(0)
-
-          posted = 0
-          for finding in findings[:20]:
-            if not isinstance(finding, dict):
-              continue
-            path = finding.get("path")
-            line = finding.get("line")
-            title = finding.get("title")
-            body = finding.get("body")
-            if not isinstance(path, str) or not isinstance(line, int):
-              continue
-            if not isinstance(title, str) or not isinstance(body, str):
-              continue
-            if path not in changed_paths:
-              print(f"Skipped OpenCode finding outside diff scope: {path}:{line}")
-              continue
-            comment = f"**OpenCode: {title.strip()}**\n\n{body.strip()}"[:4000]
-            result = subprocess.run(
-              [
-                "gh", "api", "-X", "POST",
-                f"repos/{os.environ['GITHUB_REPOSITORY']}/pulls/{os.environ['PR_NUMBER']}/comments",
-                "-f", f"body={comment}",
-                "-f", f"commit_id={os.environ['HEAD_SHA']}",
-                "-f", f"path={path}",
-                "-F", f"line={line}",
-                "-f", "side=RIGHT",
-              ],
-              text=True,
-              capture_output=True,
-              check=False,
-            )
-            if result.returncode == 0:
-              posted += 1
-            else:
-              print(f"Skipped OpenCode finding for {path}:{line}: {result.stderr.strip()}")
-
-          print(f"Posted {posted} OpenCode inline comments.")
-          PY
-
-      - name: Summarize OpenCode review
-        run: |
-          set -euo pipefail
-
-          {
-            echo "## OpenCode review"
-            echo
-            sed -n '1,180p' /tmp/opencode-review-output.txt
-          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload OpenCode review artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencode-review-same-repo-${{ github.event.pull_request.number }}
+          path: .opencode-review/
+          if-no-files-found: ignore
 
   # Strip safe-to-review label on new pushes to fork PRs.
   # Together with the `github.event.action != 'synchronize'` guard on the
@@ -371,6 +278,9 @@ jobs:
         run: |
           set -euo pipefail
 
+          REVIEW_DIR=.opencode-review
+          rm -rf "$REVIEW_DIR"
+          mkdir -p "$REVIEW_DIR"
           git fetch --no-tags --prune --depth=1 origin "$BASE_SHA"
 
           if [[ "$ACTION" == "synchronize" ]] &&
@@ -384,14 +294,14 @@ jobs:
             MODE="full-pr"
           fi
 
-          git diff --find-renames --find-copies --unified=80 "$RANGE" > /tmp/opencode-review.patch
-          git diff --name-only "$RANGE" > /tmp/opencode-review-files.txt
+          git diff --find-renames --find-copies --unified=80 "$RANGE" > "$REVIEW_DIR/review.patch"
+          git diff --name-only "$RANGE" > "$REVIEW_DIR/files.txt"
           {
             echo "Review mode: $MODE"
             echo "Diff range: $RANGE"
             echo
             echo "Changed files:"
-            sed 's/^/- /' /tmp/opencode-review-files.txt
+            sed 's/^/- /' "$REVIEW_DIR/files.txt"
             echo
             echo "Repository review guidelines from base commit:"
             echo
@@ -400,7 +310,7 @@ jobs:
             echo "Code review skill from base commit:"
             echo
             git show "$BASE_SHA:.agents/skills/code-review/SKILL.md" 2>/dev/null | sed -n '1,220p' || echo "(code-review skill not present in base commit)"
-          } > /tmp/opencode-review-guidelines.md
+          } > "$REVIEW_DIR/guidelines.md"
 
           {
             echo "mode=$MODE"
@@ -432,6 +342,9 @@ jobs:
         run: |
           set -euo pipefail
 
+          REVIEW_DIR=.opencode-review
+          mkdir -p "$REVIEW_DIR"
+          rm -rf .opencode
           mkdir -p .opencode/agents
           cat > .opencode/agents/github-pr-review.md <<'EOF'
           ---
@@ -477,15 +390,28 @@ jobs:
           - Use an empty array when there are no high-confidence findings.
           EOF
 
+          set +e
           "$HOME/.opencode/bin/opencode" run \
             --agent github-pr-review \
             --model "$OPENCODE_MODEL" \
             --title "PR #${{ github.event.pull_request.number }} OpenCode review" \
-            --file /tmp/opencode-review-guidelines.md \
-            --file /tmp/opencode-review.patch \
+            --file "$REVIEW_DIR/guidelines.md" \
+            --file "$REVIEW_DIR/review.patch" \
             -- \
             "Review PR #${{ github.event.pull_request.number }} in ${REVIEW_MODE} mode. The attached patch is the review scope. Read repository files only when needed to understand architecture around the patched files. Return only the requested JSON findings block; a trusted workflow step will publish inline comments." \
-            > /tmp/opencode-review-output.txt
+            > "$REVIEW_DIR/opencode.stdout" \
+            2> "$REVIEW_DIR/opencode.stderr"
+          opencode_status=$?
+          set -e
+
+          cp "$REVIEW_DIR/opencode.stdout" "$REVIEW_DIR/output.txt"
+          printf '%s\n' "$opencode_status" > "$REVIEW_DIR/opencode.status"
+          {
+            echo "## OpenCode command"
+            echo
+            echo "OpenCode exit status: \`$opencode_status\`"
+            echo "Output files are preserved under \`$REVIEW_DIR/\`."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Post OpenCode findings
         env:
@@ -493,134 +419,23 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
 
-          python3 <<'PY'
-          import json
-          import os
-          import re
-          import subprocess
-          from pathlib import Path
+          git show "$BASE_SHA:scripts/opencode-code-review" > .opencode-review/opencode-code-review
+          python3 .opencode-review/opencode-code-review post-findings \
+            --output .opencode-review/output.txt \
+            --files .opencode-review/files.txt \
+            --opencode-status .opencode-review/opencode.status \
+            --stdout .opencode-review/opencode.stdout \
+            --stderr .opencode-review/opencode.stderr \
+            --summary "$GITHUB_STEP_SUMMARY"
 
-          raw = Path("/tmp/opencode-review-output.txt").read_text()
-          changed_paths = set(Path("/tmp/opencode-review-files.txt").read_text().splitlines())
-          match = re.search(r"<opencode_findings>\s*(\[.*?\])\s*</opencode_findings>", raw, re.S)
-          if not match:
-            print("OpenCode did not return a valid findings block; skipping comments.")
-            raise SystemExit(0)
-
-          try:
-            findings = json.loads(match.group(1))
-          except json.JSONDecodeError as exc:
-            print(f"OpenCode returned invalid findings JSON: {exc}")
-            raise SystemExit(0)
-
-          if not isinstance(findings, list):
-            print("OpenCode findings payload was not a JSON array; skipping comments.")
-            raise SystemExit(0)
-
-          if not findings:
-            marker = "<!-- opencode-review:no-findings -->"
-            short_sha = os.environ["HEAD_SHA"][:12]
-            model = os.environ["OPENCODE_MODEL"]
-            body = (
-              f"{marker}\n"
-              "**OpenCode review complete**\n\n"
-              f"OpenCode model: `{model}`\n\n"
-              f"No suggestions found for commit `{short_sha}`."
-            )
-
-            comments_result = subprocess.run(
-              [
-                "gh", "api", "--paginate",
-                f"repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['PR_NUMBER']}/comments?per_page=100",
-              ],
-              text=True,
-              capture_output=True,
-              check=False,
-            )
-            comment_id = None
-            if comments_result.returncode == 0:
-              try:
-                comments = json.loads(comments_result.stdout)
-              except json.JSONDecodeError as exc:
-                print(f"Could not parse existing PR comments: {exc}")
-                comments = []
-              for comment in reversed(comments):
-                if marker in (comment.get("body") or ""):
-                  comment_id = comment.get("id")
-                  break
-            else:
-              print(f"Could not list existing PR comments: {comments_result.stderr.strip()}")
-
-            method = "PATCH" if comment_id else "POST"
-            endpoint = (
-              f"repos/{os.environ['GITHUB_REPOSITORY']}/issues/comments/{comment_id}"
-              if comment_id
-              else f"repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['PR_NUMBER']}/comments"
-            )
-            result = subprocess.run(
-              [
-                "gh", "api", "-X", method,
-                endpoint,
-                "-f", f"body={body}",
-              ],
-              text=True,
-              capture_output=True,
-              check=False,
-            )
-            if result.returncode == 0:
-              action = "Updated" if comment_id else "Posted"
-              print(f"{action} OpenCode no-suggestions comment.")
-            else:
-              print(f"Skipped OpenCode no-suggestions comment: {result.stderr.strip()}")
-            raise SystemExit(0)
-
-          posted = 0
-          for finding in findings[:20]:
-            if not isinstance(finding, dict):
-              continue
-            path = finding.get("path")
-            line = finding.get("line")
-            title = finding.get("title")
-            body = finding.get("body")
-            if not isinstance(path, str) or not isinstance(line, int):
-              continue
-            if not isinstance(title, str) or not isinstance(body, str):
-              continue
-            if path not in changed_paths:
-              print(f"Skipped OpenCode finding outside diff scope: {path}:{line}")
-              continue
-            comment = f"**OpenCode: {title.strip()}**\n\n{body.strip()}"[:4000]
-            result = subprocess.run(
-              [
-                "gh", "api", "-X", "POST",
-                f"repos/{os.environ['GITHUB_REPOSITORY']}/pulls/{os.environ['PR_NUMBER']}/comments",
-                "-f", f"body={comment}",
-                "-f", f"commit_id={os.environ['HEAD_SHA']}",
-                "-f", f"path={path}",
-                "-F", f"line={line}",
-                "-f", "side=RIGHT",
-              ],
-              text=True,
-              capture_output=True,
-              check=False,
-            )
-            if result.returncode == 0:
-              posted += 1
-            else:
-              print(f"Skipped OpenCode finding for {path}:{line}: {result.stderr.strip()}")
-
-          print(f"Posted {posted} OpenCode inline comments.")
-          PY
-
-      - name: Summarize OpenCode review
-        run: |
-          set -euo pipefail
-
-          {
-            echo "## OpenCode review"
-            echo
-            sed -n '1,180p' /tmp/opencode-review-output.txt
-          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload OpenCode review artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencode-review-fork-${{ github.event.pull_request.number }}
+          path: .opencode-review/
+          if-no-files-found: ignore

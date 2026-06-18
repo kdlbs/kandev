@@ -1,0 +1,330 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+
+MAX_INLINE_FINDINGS = 20
+NO_FINDINGS_MARKER = "<!-- opencode-review:no-findings -->"
+DIAGNOSTIC_MARKER = "<!-- opencode-review:diagnostic -->"
+FALLBACK_MARKER = "<!-- opencode-review:fallback-findings -->"
+
+
+def required_env(name: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        raise RuntimeError(f"{name} is required")
+    return value
+
+
+def gh_api(args: list[str]) -> subprocess.CompletedProcess[str]:
+    gh_bin = os.environ.get("GH_BIN", "gh")
+    return subprocess.run(
+        [gh_bin, "api", *args],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def list_issue_comments() -> list[dict[str, Any]]:
+    repository = required_env("GITHUB_REPOSITORY")
+    pr_number = required_env("PR_NUMBER")
+    result = gh_api(["--paginate", f"repos/{repository}/issues/{pr_number}/comments?per_page=100"])
+    if result.returncode != 0:
+        print(f"Could not list existing PR comments: {result.stderr.strip()}", file=sys.stderr)
+        return []
+    try:
+        comments = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        print(f"Could not parse existing PR comments: {exc}", file=sys.stderr)
+        return []
+    if isinstance(comments, list):
+        return [comment for comment in comments if isinstance(comment, dict)]
+    return []
+
+
+def upsert_issue_comment(marker: str, body: str) -> bool:
+    repository = required_env("GITHUB_REPOSITORY")
+    pr_number = required_env("PR_NUMBER")
+    comment_id = None
+    for comment in reversed(list_issue_comments()):
+        if marker in (comment.get("body") or ""):
+            comment_id = comment.get("id")
+            break
+
+    method = "PATCH" if comment_id else "POST"
+    endpoint = (
+        f"repos/{repository}/issues/comments/{comment_id}"
+        if comment_id
+        else f"repos/{repository}/issues/{pr_number}/comments"
+    )
+    result = gh_api(["-X", method, endpoint, "-f", f"body={body}"])
+    if result.returncode == 0:
+        action = "Updated" if comment_id else "Posted"
+        print(f"{action} OpenCode comment for marker {marker}.")
+        return True
+    print(f"Could not post OpenCode comment for marker {marker}: {result.stderr.strip()}", file=sys.stderr)
+    return False
+
+
+def append_summary(path: Path, title: str, lines: list[str]) -> None:
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(f"## {title}\n\n")
+        for line in lines:
+            handle.write(f"{line}\n")
+        handle.write("\n")
+
+
+def snippet(label: str, text: str, *, max_chars: int = 12000) -> list[str]:
+    trimmed = text.strip()
+    if len(trimmed) > max_chars:
+        trimmed = trimmed[:max_chars] + "\n... truncated ..."
+    if not trimmed:
+        trimmed = "(empty)"
+    return [f"### {label}", "", "```text", trimmed, "```", ""]
+
+
+def read_status(path: Path) -> int:
+    try:
+        return int(path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return 1
+
+
+def parse_findings(raw: str) -> tuple[list[Any] | None, str | None]:
+    match = re.search(r"<opencode_findings>\s*(.*?)\s*</opencode_findings>", raw, re.S)
+    if not match:
+        return None, "No parseable findings block was found."
+    try:
+        payload = json.loads(match.group(1))
+    except json.JSONDecodeError as exc:
+        return None, f"Findings block contained invalid JSON: {exc}"
+    if not isinstance(payload, list):
+        return None, "Findings block JSON was not an array."
+    return payload, None
+
+
+def diagnostic_body(reason: str, status: int, stdout: str, stderr: str) -> str:
+    short_sha = required_env("HEAD_SHA")[:12]
+    model = required_env("OPENCODE_MODEL")
+    lines = [
+        DIAGNOSTIC_MARKER,
+        "**OpenCode review diagnostic**",
+        "",
+        "OpenCode did not produce parseable findings, so the review check failed instead of silently skipping comments.",
+        "",
+        f"OpenCode model: `{model}`",
+        f"Commit: `{short_sha}`",
+        f"OpenCode exit status: `{status}`",
+        f"Reason: {reason}",
+    ]
+    stderr_text = stderr.strip()
+    stdout_text = stdout.strip()
+    if stderr_text:
+        lines.extend(["", "Recent stderr:", "```text", stderr_text[-1800:], "```"])
+    elif stdout_text:
+        lines.extend(["", "Recent stdout:", "```text", stdout_text[-1800:], "```"])
+    return "\n".join(lines)
+
+
+def no_findings_body() -> str:
+    short_sha = required_env("HEAD_SHA")[:12]
+    model = required_env("OPENCODE_MODEL")
+    return (
+        f"{NO_FINDINGS_MARKER}\n"
+        "**OpenCode review complete**\n\n"
+        f"OpenCode model: `{model}`\n\n"
+        f"No suggestions found for commit `{short_sha}`."
+    )
+
+
+def fallback_body(rejected: list[dict[str, Any]]) -> str:
+    model = required_env("OPENCODE_MODEL")
+    short_sha = required_env("HEAD_SHA")[:12]
+    sections = [
+        FALLBACK_MARKER,
+        "**OpenCode findings that could not be posted inline**",
+        "",
+        f"OpenCode model: `{model}`",
+        f"Commit: `{short_sha}`",
+        "",
+        "GitHub rejected inline placement for these findings, so they are preserved here.",
+    ]
+    for finding in rejected[:MAX_INLINE_FINDINGS]:
+        sections.extend(
+            [
+                "",
+                f"### {finding['path']}:{finding['line']} - {finding['title']}",
+                "",
+                str(finding["body"]).strip(),
+            ]
+        )
+    return "\n".join(sections)[:60000]
+
+
+def normalize_finding(value: Any, changed_paths: set[str]) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    path = value.get("path")
+    line = value.get("line")
+    title = value.get("title")
+    body = value.get("body")
+    if not isinstance(path, str) or not isinstance(line, int):
+        return None
+    if not isinstance(title, str) or not isinstance(body, str):
+        return None
+    if path not in changed_paths:
+        print(f"Skipped OpenCode finding outside diff scope: {path}:{line}")
+        return None
+    return {
+        "path": path,
+        "line": line,
+        "title": title.strip(),
+        "body": body.strip(),
+    }
+
+
+def post_inline_finding(finding: dict[str, Any]) -> tuple[bool, str]:
+    repository = required_env("GITHUB_REPOSITORY")
+    pr_number = required_env("PR_NUMBER")
+    head_sha = required_env("HEAD_SHA")
+    comment = f"**OpenCode: {finding['title']}**\n\n{finding['body']}"[:4000]
+    result = gh_api(
+        [
+            "-X",
+            "POST",
+            f"repos/{repository}/pulls/{pr_number}/comments",
+            "-f",
+            f"body={comment}",
+            "-f",
+            f"commit_id={head_sha}",
+            "-f",
+            f"path={finding['path']}",
+            "-F",
+            f"line={finding['line']}",
+            "-f",
+            "side=RIGHT",
+        ]
+    )
+    if result.returncode == 0:
+        return True, ""
+    return False, result.stderr.strip()
+
+
+def handle_diagnostic(args: argparse.Namespace, reason: str, status: int, stdout: str, stderr: str, raw: str) -> int:
+    append_summary(
+        args.summary,
+        "OpenCode review diagnostic",
+        [
+            f"OpenCode status: `{status}`",
+            f"Reason: {reason}",
+            "",
+            *snippet("OpenCode stdout", stdout),
+            *snippet("OpenCode stderr", stderr),
+            *snippet("OpenCode findings output", raw),
+        ],
+    )
+    upsert_issue_comment(DIAGNOSTIC_MARKER, diagnostic_body(reason, status, stdout, stderr))
+    print(f"OpenCode did not produce parseable findings: {reason}", file=sys.stderr)
+    return 1
+
+
+def post_findings(args: argparse.Namespace) -> int:
+    raw = args.output.read_text(encoding="utf-8")
+    stdout = args.stdout.read_text(encoding="utf-8") if args.stdout.exists() else raw
+    stderr = args.stderr.read_text(encoding="utf-8") if args.stderr.exists() else ""
+    status = read_status(args.opencode_status)
+
+    if status != 0:
+        return handle_diagnostic(args, f"OpenCode exited with status {status}.", status, stdout, stderr, raw)
+
+    findings, error = parse_findings(raw)
+    if error is not None or findings is None:
+        return handle_diagnostic(args, error or "Unknown parser error.", status, stdout, stderr, raw)
+
+    if not findings:
+        upsert_issue_comment(NO_FINDINGS_MARKER, no_findings_body())
+        append_summary(
+            args.summary,
+            "OpenCode review",
+            [
+                "OpenCode returned a valid empty findings array.",
+                "",
+                *snippet("OpenCode stdout", stdout),
+                *snippet("OpenCode stderr", stderr),
+            ],
+        )
+        return 0
+
+    changed_paths = set(args.files.read_text(encoding="utf-8").splitlines())
+    posted = 0
+    rejected = []
+    valid_findings = [
+        finding
+        for finding in (normalize_finding(item, changed_paths) for item in findings[:MAX_INLINE_FINDINGS])
+        if finding is not None
+    ]
+
+    for finding in valid_findings:
+        ok, error_message = post_inline_finding(finding)
+        if ok:
+            posted += 1
+        else:
+            print(
+                f"GitHub rejected OpenCode inline finding for {finding['path']}:{finding['line']}: {error_message}",
+                file=sys.stderr,
+            )
+            rejected.append(finding)
+
+    if rejected:
+        upsert_issue_comment(FALLBACK_MARKER, fallback_body(rejected))
+
+    append_summary(
+        args.summary,
+        "OpenCode review",
+        [
+            f"Parsed findings: `{len(findings)}`",
+            f"Inline comments posted: `{posted}`",
+            f"Fallback findings posted: `{len(rejected)}`",
+            "",
+            *snippet("OpenCode stdout", stdout),
+            *snippet("OpenCode stderr", stderr),
+        ],
+    )
+    print(f"Posted {posted} OpenCode inline comments; preserved {len(rejected)} fallback findings.")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="OpenCode PR review workflow helpers")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    post = subparsers.add_parser("post-findings")
+    post.add_argument("--output", type=Path, required=True)
+    post.add_argument("--files", type=Path, required=True)
+    post.add_argument("--opencode-status", type=Path, required=True)
+    post.add_argument("--stdout", type=Path, required=True)
+    post.add_argument("--stderr", type=Path, required=True)
+    post.add_argument("--summary", type=Path, required=True)
+    post.set_defaults(func=post_findings)
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+    try:
+        return args.func(args)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

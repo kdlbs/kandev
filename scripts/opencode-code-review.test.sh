@@ -16,7 +16,7 @@ fail() {
 count_occurrences() {
   local pattern=$1
   local output
-  output="$(rg --fixed-strings --count-matches "$pattern" "$WORKFLOW" || true)"
+  output="$(rg --fixed-strings --count-matches -- "$pattern" "$WORKFLOW" || true)"
   if [[ -z "$output" ]]; then
     printf '0\n'
     return
@@ -28,14 +28,38 @@ count_occurrences() {
   awk -F: '{ print $2 }' <<<"$output"
 }
 
-model_reference_count="$(count_occurrences 'OpenCode model: `{model}`')"
-if [[ "$model_reference_count" != "2" ]]; then
-  fail "OpenCode no-suggestions comments include the model in both workflow paths"
+tmp_review_reference_count="$(count_occurrences '/tmp/opencode-review')"
+if [[ "$tmp_review_reference_count" != "0" ]]; then
+  fail "OpenCode review artifacts are not written under /tmp"
 fi
-pass "OpenCode no-suggestions comments include the model in both workflow paths"
+pass "OpenCode review artifacts are not written under /tmp"
 
-paginated_comment_lookup_count="$(count_occurrences '"gh", "api", "--paginate",')"
-if [[ "$paginated_comment_lookup_count" != "2" ]]; then
-  fail "OpenCode no-suggestions comment lookup paginates in both workflow paths"
+relative_guidelines_count="$(count_occurrences '--file "$REVIEW_DIR/guidelines.md"')"
+if [[ "$relative_guidelines_count" != "2" ]]; then
+  fail "OpenCode guidelines are passed as relative workspace files in both workflow paths"
 fi
-pass "OpenCode no-suggestions comment lookup paginates in both workflow paths"
+pass "OpenCode guidelines are passed as relative workspace files in both workflow paths"
+
+relative_patch_count="$(count_occurrences '--file "$REVIEW_DIR/review.patch"')"
+if [[ "$relative_patch_count" != "2" ]]; then
+  fail "OpenCode patches are passed as relative workspace files in both workflow paths"
+fi
+pass "OpenCode patches are passed as relative workspace files in both workflow paths"
+
+recreate_config_count="$(count_occurrences 'rm -rf .opencode')"
+if [[ "$recreate_config_count" != "2" ]]; then
+  fail "OpenCode project config is recreated before writing the review agent"
+fi
+pass "OpenCode project config is recreated before writing the review agent"
+
+trusted_fork_script_count="$(count_occurrences 'git show "$BASE_SHA:scripts/opencode-code-review" > .opencode-review/opencode-code-review')"
+if [[ "$trusted_fork_script_count" != "1" ]]; then
+  fail "Fork review executes the parser script from the trusted base commit"
+fi
+pass "Fork review executes the parser script from the trusted base commit"
+
+artifact_upload_count="$(count_occurrences 'uses: actions/upload-artifact@v4')"
+if [[ "$artifact_upload_count" != "2" ]]; then
+  fail "OpenCode review artifacts are uploaded from both workflow paths"
+fi
+pass "OpenCode review artifacts are uploaded from both workflow paths"
