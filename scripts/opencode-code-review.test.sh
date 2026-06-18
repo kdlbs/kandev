@@ -52,6 +52,12 @@ if [[ "$recreate_config_count" != "2" ]]; then
 fi
 pass "OpenCode project config is recreated before writing the review agent"
 
+explicit_model_env_count="$(count_occurrences 'OPENCODE_MODEL: ${{ env.OPENCODE_MODEL }}')"
+if [[ "$explicit_model_env_count" != "2" ]]; then
+  fail "OpenCode posting steps explicitly pass OPENCODE_MODEL"
+fi
+pass "OpenCode posting steps explicitly pass OPENCODE_MODEL"
+
 trusted_fork_script_count="$(count_occurrences 'git show "$BASE_SHA:scripts/opencode-code-review" > .opencode-review/opencode-code-review')"
 if [[ "$trusted_fork_script_count" != "1" ]]; then
   fail "Fork review executes the parser script from the trusted base commit"

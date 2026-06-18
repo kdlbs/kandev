@@ -55,8 +55,12 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
                     print("[]")
                     raise SystemExit(0)
 
-                if "/pulls/" in " ".join(args) and os.environ.get("INLINE_FAIL") == "1":
+                joined = " ".join(args)
+                if "/pulls/" in joined and os.environ.get("INLINE_FAIL") == "1":
                     print("line is not part of the diff", file=sys.stderr)
+                    raise SystemExit(1)
+                if "/issues/" in joined and os.environ.get("ISSUE_COMMENT_FAIL") == "1":
+                    print("issue comments unavailable", file=sys.stderr)
                     raise SystemExit(1)
 
                 print("{}")
@@ -67,7 +71,13 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
         fake_gh.chmod(0o755)
         return fake_gh
 
-    def run_script(self, *, output: str, inline_fail: bool = False) -> subprocess.CompletedProcess[str]:
+    def run_script(
+        self,
+        *,
+        output: str,
+        inline_fail: bool = False,
+        issue_comment_fail: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
         self.output_path.write_text(output, encoding="utf-8")
         env = {
             **os.environ,
@@ -80,6 +90,8 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
         }
         if inline_fail:
             env["INLINE_FAIL"] = "1"
+        if issue_comment_fail:
+            env["ISSUE_COMMENT_FAIL"] = "1"
         return subprocess.run(
             [
                 sys.executable,
@@ -160,6 +172,36 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
         bodies = self.bodies()
         self.assertTrue(any("<!-- opencode-review:fallback-findings -->" in body for body in bodies))
         self.assertTrue(any("src/app.ts:99" in body for body in bodies))
+
+    def test_inline_findings_beyond_limit_are_preserved_in_fallback_comment(self) -> None:
+        findings = [
+            {"path": "src/app.ts", "line": index + 1, "title": f"Finding {index + 1}", "body": "body"}
+            for index in range(21)
+        ]
+
+        result = self.run_script(output=f"<opencode_findings>{json.dumps(findings)}</opencode_findings>\n")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        bodies = self.bodies()
+        self.assertTrue(any("<!-- opencode-review:fallback-findings -->" in body for body in bodies))
+        self.assertTrue(any("src/app.ts:21" in body for body in bodies))
+        self.assertIn("Findings beyond inline limit: `1`", self.summary_path.read_text())
+
+    def test_fallback_comment_failure_fails_the_step(self) -> None:
+        result = self.run_script(
+            output=textwrap.dedent(
+                """\
+                <opencode_findings>
+                [{"path":"src/app.ts","line":99,"title":"Bad line","body":"This line moved."}]
+                </opencode_findings>
+                """
+            ),
+            inline_fail=True,
+            issue_comment_fail=True,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Could not post OpenCode comment", result.stderr)
 
 
 if __name__ == "__main__":

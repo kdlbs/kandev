@@ -191,6 +191,7 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          OPENCODE_MODEL: ${{ env.OPENCODE_MODEL }}
         run: |
           set -euo pipefail
 
@@ -420,6 +421,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          OPENCODE_MODEL: ${{ env.OPENCODE_MODEL }}
         run: |
           set -euo pipefail
 

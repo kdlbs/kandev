@@ -249,7 +249,7 @@ def post_findings(args: argparse.Namespace) -> int:
         return handle_diagnostic(args, error or "Unknown parser error.", status, stdout, stderr, raw)
 
     if not findings:
-        upsert_issue_comment(NO_FINDINGS_MARKER, no_findings_body())
+        posted_no_findings = upsert_issue_comment(NO_FINDINGS_MARKER, no_findings_body())
         append_summary(
             args.summary,
             "OpenCode review",
@@ -260,18 +260,20 @@ def post_findings(args: argparse.Namespace) -> int:
                 *snippet("OpenCode stderr", stderr),
             ],
         )
-        return 0
+        return 0 if posted_no_findings else 1
 
     changed_paths = set(args.files.read_text(encoding="utf-8").splitlines())
     posted = 0
     rejected = []
     valid_findings = [
         finding
-        for finding in (normalize_finding(item, changed_paths) for item in findings[:MAX_INLINE_FINDINGS])
+        for finding in (normalize_finding(item, changed_paths) for item in findings)
         if finding is not None
     ]
+    inline_findings = valid_findings[:MAX_INLINE_FINDINGS]
+    overflow_findings = valid_findings[MAX_INLINE_FINDINGS:]
 
-    for finding in valid_findings:
+    for finding in inline_findings:
         ok, error_message = post_inline_finding(finding)
         if ok:
             posted += 1
@@ -282,8 +284,13 @@ def post_findings(args: argparse.Namespace) -> int:
             )
             rejected.append(finding)
 
+    if overflow_findings:
+        print(f"Preserving {len(overflow_findings)} OpenCode findings beyond inline limit in fallback comment.")
+        rejected.extend(overflow_findings)
+
+    posted_fallback = True
     if rejected:
-        upsert_issue_comment(FALLBACK_MARKER, fallback_body(rejected))
+        posted_fallback = upsert_issue_comment(FALLBACK_MARKER, fallback_body(rejected))
 
     append_summary(
         args.summary,
@@ -291,6 +298,7 @@ def post_findings(args: argparse.Namespace) -> int:
         [
             f"Parsed findings: `{len(findings)}`",
             f"Inline comments posted: `{posted}`",
+            f"Findings beyond inline limit: `{len(overflow_findings)}`",
             f"Fallback findings posted: `{len(rejected)}`",
             "",
             *snippet("OpenCode stdout", stdout),
@@ -298,7 +306,7 @@ def post_findings(args: argparse.Namespace) -> int:
         ],
     )
     print(f"Posted {posted} OpenCode inline comments; preserved {len(rejected)} fallback findings.")
-    return 0
+    return 0 if posted_fallback else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
