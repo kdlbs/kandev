@@ -8,6 +8,7 @@ import (
 )
 
 const bootPayloadGlobal = "window.__KANDEV_BOOT_PAYLOAD__"
+const debugGlobalAssignment = "window.__KANDEV_DEBUG=true;"
 const maxInt = int(^uint(0) >> 1)
 
 var headCloseTag = []byte("</head>")
@@ -42,8 +43,13 @@ func BootPayloadScript(payload BootPayload) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal boot payload: %w", err)
 	}
-	script := make([]byte, 0, bytesCapacity(len(data), len(bootPayloadGlobal), 32))
+	debugPrefix := ""
+	if payload.Runtime.Debug {
+		debugPrefix = debugGlobalAssignment
+	}
+	script := make([]byte, 0, bytesCapacity(len(data), len(debugPrefix), len(bootPayloadGlobal), 32))
 	script = append(script, "<script>"...)
+	script = append(script, debugPrefix...)
 	script = append(script, bootPayloadGlobal...)
 	script = append(script, "="...)
 	script = append(script, data...)

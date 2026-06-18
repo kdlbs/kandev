@@ -57,6 +57,19 @@ describe("readBootPayload", () => {
 
     expect(readBootPayload(win).route?.params).toBeUndefined();
   });
+
+  it("enables the runtime debug global when boot payload debug is true", () => {
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: {
+        runtime: {
+          debug: true,
+        },
+      },
+    } as unknown as Window;
+
+    expect(readBootPayload(win).runtime?.debug).toBe(true);
+    expect(win.__KANDEV_DEBUG).toBe(true);
+  });
 });
 
 describe("loadBootPayload", () => {

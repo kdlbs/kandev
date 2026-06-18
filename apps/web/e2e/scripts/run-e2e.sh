@@ -71,7 +71,7 @@ clean_artifacts() {
 
 build_fe() {
   log "building Vite web assets"
-  ( cd "$REPO_ROOT/apps" && NEXT_PUBLIC_KANDEV_E2E_MOCK=true pnpm --filter @kandev/web build ) \
+  ( cd "$REPO_ROOT/apps" && pnpm --filter @kandev/web build ) \
     || die "FE build failed"
 }
 

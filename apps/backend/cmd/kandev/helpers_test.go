@@ -517,6 +517,27 @@ func TestBootRouteDataTasksUsesActiveWorkspaceCookie(t *testing.T) {
 	}
 }
 
+func TestBootPayloadIncludesDebugRuntimeWhenDevMode(t *testing.T) {
+	t.Parallel()
+
+	payload := bootPayload(context.Background(), nil, routeParams{devMode: true}, webapp.ClassifyRoute("/"))
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("Marshal payload: %v", err)
+	}
+	var decoded struct {
+		Runtime struct {
+			Debug bool `json:"debug"`
+		} `json:"runtime"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("Unmarshal payload: %v", err)
+	}
+	if !decoded.Runtime.Debug {
+		t.Fatal("runtime.debug = false, want true when backend devMode is enabled")
+	}
+}
+
 func TestBootRouteDataIntegrationRouteIncludesOnlyLocalContext(t *testing.T) {
 	taskSvc, workflowSvc := newBootStateTestServices(t)
 	ctx := context.Background()

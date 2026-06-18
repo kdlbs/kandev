@@ -17,6 +17,7 @@ type BootPayload struct {
 type RuntimeConfig struct {
 	APIPrefix     string `json:"apiPrefix"`
 	WebSocketPath string `json:"webSocketPath"`
+	Debug         bool   `json:"debug,omitempty"`
 }
 
 // BootError is a serializable non-fatal boot-data error for partial hydration.

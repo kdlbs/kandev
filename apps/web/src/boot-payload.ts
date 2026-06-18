@@ -13,6 +13,7 @@ export type BootRoute = {
 export type BootRuntime = {
   apiPrefix?: string;
   webSocketPath?: string;
+  debug?: boolean;
 };
 
 export type BootRouteData = {
@@ -43,16 +44,21 @@ export type BootPayload = {
 
 type BootWindow = Window & {
   __KANDEV_BOOT_PAYLOAD__?: unknown;
+  __KANDEV_DEBUG?: boolean;
 };
 
 export function readBootPayload(win: Window = window): BootPayload {
   const payload = (win as BootWindow).__KANDEV_BOOT_PAYLOAD__;
   if (!isRecord(payload)) return { initialState: {} };
+  const runtime = isRecord(payload.runtime) ? readRuntime(payload.runtime) : undefined;
+  if (runtime?.debug) {
+    (win as BootWindow).__KANDEV_DEBUG = true;
+  }
 
   return {
     version: typeof payload.version === "number" ? payload.version : undefined,
     route: isRecord(payload.route) ? readRoute(payload.route) : undefined,
-    runtime: isRecord(payload.runtime) ? readRuntime(payload.runtime) : undefined,
+    runtime,
     initialState: isRecord(payload.initialState) ? (payload.initialState as Partial<AppState>) : {},
     routeData: isRecord(payload.routeData) ? (payload.routeData as BootRouteData) : undefined,
   };
@@ -94,6 +100,7 @@ function readRuntime(value: Record<string, unknown>): BootRuntime {
   return {
     apiPrefix: readString(value.apiPrefix),
     webSocketPath: readString(value.webSocketPath),
+    debug: value.debug === true ? true : undefined,
   };
 }
 

@@ -60,6 +60,30 @@ func TestBootPayloadScriptEscapesScriptTerminators(t *testing.T) {
 	}
 }
 
+func TestBootPayloadScriptSetsDebugGlobalBeforeBootPayload(t *testing.T) {
+	t.Parallel()
+
+	payload := NewBootPayload(
+		ClassifyRoute("/"),
+		RuntimeConfig{Debug: true},
+		nil,
+	)
+
+	script, err := BootPayloadScript(payload)
+	if err != nil {
+		t.Fatalf("BootPayloadScript: %v", err)
+	}
+	got := string(script)
+	debugIdx := strings.Index(got, "window.__KANDEV_DEBUG=true;")
+	payloadIdx := strings.Index(got, bootPayloadGlobal)
+	if debugIdx < 0 {
+		t.Fatalf("script missing debug global assignment: %s", got)
+	}
+	if payloadIdx < 0 || debugIdx > payloadIdx {
+		t.Fatalf("debug global should be assigned before boot payload: %s", got)
+	}
+}
+
 func TestRenderShellPrependsScriptWhenHeadCloseIsMissing(t *testing.T) {
 	t.Parallel()
 
