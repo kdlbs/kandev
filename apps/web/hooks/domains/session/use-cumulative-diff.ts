@@ -157,6 +157,10 @@ export function useCumulativeDiff(sessionId: string | null) {
       // pending state if needed.
       if (pendingInvalidationByEnvKey[envKey]) {
         delete pendingInvalidationByEnvKey[envKey];
+        // The invalidation that set the pending flag also queued a coalesced
+        // timer. We're about to drain it immediately, so cancel that timer —
+        // otherwise it fires later and triggers a redundant duplicate refetch.
+        clearInvalidationTimer(envKey);
         debug("fetch.drain.pending", { sessionId, envKey });
         listeners.forEach((fn) => fn({ envKey, kind: "invalidated" }));
       }

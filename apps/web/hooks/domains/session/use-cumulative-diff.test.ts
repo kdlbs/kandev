@@ -86,6 +86,43 @@ describe("useCumulativeDiff invalidation coalescing", () => {
     expect(mockRequest).toHaveBeenCalledTimes(0);
   });
 
+  it("does not double-fetch when a mid-flight invalidation drains alongside a queued timer", async () => {
+    const sid = "sess-drain";
+    let resolveFirst: (v: unknown) => void = () => {};
+    mockRequest.mockReset();
+    mockRequest
+      .mockImplementationOnce(
+        () =>
+          new Promise((r) => {
+            resolveFirst = r;
+          }),
+      )
+      .mockResolvedValue({ cumulative_diff: { session_id: "x", files: {} } });
+
+    renderHook(() => useCumulativeDiff(sid));
+    // Mount fetch is in-flight (request #1 pending).
+    expect(mockRequest).toHaveBeenCalledTimes(1);
+
+    // Invalidate while in-flight → sets the pending flag AND queues a timer.
+    act(() => {
+      invalidateCumulativeDiffCache(sid);
+    });
+
+    // Resolve the in-flight fetch → finally drains the pending flag (immediate
+    // follow-up fetch #2) and must cancel the queued timer.
+    await act(async () => {
+      resolveFirst({ cumulative_diff: { session_id: "x", files: {} } });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mockRequest).toHaveBeenCalledTimes(2);
+
+    // The cancelled timer must NOT fire a third fetch.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(WINDOW);
+    });
+    expect(mockRequest).toHaveBeenCalledTimes(2);
+  });
+
   it("uses independent timers per envKey", async () => {
     const sidA = "sess-A";
     const sidB = "sess-B";
