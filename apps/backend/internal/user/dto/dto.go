@@ -107,9 +107,16 @@ type UpdateUserSettingsRequest struct {
 	VoiceMode                   *models.VoiceModeSettings            `json:"voice_mode,omitempty"`
 }
 
+// NullableSidebarDraft preserves the JSON PATCH distinction between an omitted
+// sidebar_draft field and an explicit null value. Prefer JSON decoding or
+// NewNullableSidebarDraft; the zero value intentionally means "field omitted".
 type NullableSidebarDraft struct {
 	Set   bool
 	Value *models.SidebarViewDraft
+}
+
+func NewNullableSidebarDraft(value *models.SidebarViewDraft) NullableSidebarDraft {
+	return NullableSidebarDraft{Set: true, Value: value}
 }
 
 func (n *NullableSidebarDraft) UnmarshalJSON(data []byte) error {

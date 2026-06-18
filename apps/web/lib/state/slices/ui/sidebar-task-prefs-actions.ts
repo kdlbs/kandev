@@ -28,7 +28,7 @@ function syncSidebarTaskPrefs(prefs: UISlice["sidebarTaskPrefs"], set: ImmerSet)
         .catch((err) => {
           const message = err instanceof Error ? err.message : "Failed to sync sidebar task prefs";
           set((draft) => {
-            draft.sidebarViews.syncError = message;
+            draft.sidebarTaskPrefs.syncError = message;
           });
         })
         .then(() => undefined),

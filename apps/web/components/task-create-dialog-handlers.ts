@@ -17,6 +17,10 @@ type TaskCreateLastUsedPatch = {
 let pendingLastUsed: TaskCreateLastUsedPatch = {};
 let lastUsedSync = Promise.resolve();
 
+export function resetTaskCreateLastUsedSync() {
+  pendingLastUsed = {};
+}
+
 function syncTaskCreateLastUsed(patch: TaskCreateLastUsedPatch) {
   pendingLastUsed = { ...pendingLastUsed, ...patch };
   const payload = { ...pendingLastUsed };

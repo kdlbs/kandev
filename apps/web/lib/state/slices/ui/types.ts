@@ -114,6 +114,7 @@ export type SidebarTaskPrefsState = {
    * Independent of the global `orderedTaskIds` and the view's sort spec.
    */
   subtaskOrderByParentId: Record<string, string[]>;
+  syncError?: string | null;
 };
 
 /** Unified AppSidebar collapse + per-section expand state (localStorage). */

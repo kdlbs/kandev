@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback } from "react";
+import { FormEvent, useCallback, useEffect } from "react";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 import { Dialog, DialogContent, DialogHeader, DialogFooter } from "@kandev/ui/dialog";
@@ -42,6 +42,7 @@ import {
   buildDialogFooterProps,
   buildDialogFormBodyProps,
 } from "@/components/task-create-dialog-prop-builders";
+import { resetTaskCreateLastUsedSync } from "@/components/task-create-dialog-handlers";
 
 export interface TaskCreateDialogProps {
   open: boolean;
@@ -481,6 +482,9 @@ const VOICE_SUBMIT_EVENT = { preventDefault: () => {} } as unknown as FormEvent;
 export function TaskCreateDialog(props: TaskCreateDialogProps) {
   const setup = useTaskCreateDialogSetup(props);
   const { guardedHandleSubmit } = setup;
+  useEffect(() => {
+    if (!props.open) resetTaskCreateLastUsedSync();
+  }, [props.open]);
   // Voice auto-send invokes the same submit handler as the in-form Submit
   // button. Every existing validation gate (missing title/repo/branch/agent,
   // `submitBlockedReason`, in-flight create) still applies because they live

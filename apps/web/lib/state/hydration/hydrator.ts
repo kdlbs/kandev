@@ -106,29 +106,36 @@ function bridgeSidebarViewsFromUserSettings(
   if (userSettings.sidebarDraft !== undefined) {
     draft.sidebarViews.draft = userSettings.sidebarDraft;
   }
-  if (userSettings.sidebarTaskPrefs && shouldHydrateSidebarTaskPrefs(draft, userSettings)) {
-    draft.sidebarTaskPrefs = userSettings.sidebarTaskPrefs;
+  if (userSettings.sidebarTaskPrefs) {
+    draft.sidebarTaskPrefs = mergeSidebarTaskPrefs(draft, userSettings.sidebarTaskPrefs);
   }
 }
 
-function shouldHydrateSidebarTaskPrefs(
+function mergeSidebarTaskPrefs(
   draft: Draft<AppState>,
-  userSettings: Partial<AppState["userSettings"]>,
-): boolean {
-  const server = userSettings.sidebarTaskPrefs;
-  if (!server) return false;
-  if (
-    server.pinnedTaskIds.length > 0 ||
-    server.orderedTaskIds.length > 0 ||
-    Object.keys(server.subtaskOrderByParentId).length > 0
-  ) {
-    return true;
-  }
-  return (
-    draft.sidebarTaskPrefs.pinnedTaskIds.length === 0 &&
-    draft.sidebarTaskPrefs.orderedTaskIds.length === 0 &&
-    Object.keys(draft.sidebarTaskPrefs.subtaskOrderByParentId).length === 0
-  );
+  server: AppState["userSettings"]["sidebarTaskPrefs"],
+): AppState["sidebarTaskPrefs"] {
+  const local = draft.sidebarTaskPrefs;
+  const serverSubtaskKeys = Object.keys(server.subtaskOrderByParentId);
+  const localIsEmpty =
+    local.pinnedTaskIds.length === 0 &&
+    local.orderedTaskIds.length === 0 &&
+    Object.keys(local.subtaskOrderByParentId).length === 0;
+  const serverIsEmpty =
+    server.pinnedTaskIds.length === 0 &&
+    server.orderedTaskIds.length === 0 &&
+    serverSubtaskKeys.length === 0;
+  if (serverIsEmpty && !localIsEmpty) return local;
+  const merged: AppState["sidebarTaskPrefs"] = {
+    pinnedTaskIds: server.pinnedTaskIds.length > 0 ? server.pinnedTaskIds : local.pinnedTaskIds,
+    orderedTaskIds: server.orderedTaskIds.length > 0 ? server.orderedTaskIds : local.orderedTaskIds,
+    subtaskOrderByParentId:
+      serverSubtaskKeys.length > 0
+        ? { ...local.subtaskOrderByParentId, ...server.subtaskOrderByParentId }
+        : local.subtaskOrderByParentId,
+  };
+  if (local.syncError) merged.syncError = local.syncError;
+  return merged;
 }
 
 /** Hydrate session slices, protecting active sessions. */
