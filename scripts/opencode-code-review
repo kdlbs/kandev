@@ -156,7 +156,7 @@ def fallback_body(rejected: list[dict[str, Any]]) -> str:
         "",
         "GitHub rejected inline placement for these findings, so they are preserved here.",
     ]
-    for finding in rejected[:MAX_INLINE_FINDINGS]:
+    for finding in rejected:
         sections.extend(
             [
                 "",

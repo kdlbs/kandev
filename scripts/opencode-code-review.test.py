@@ -176,16 +176,21 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
     def test_inline_findings_beyond_limit_are_preserved_in_fallback_comment(self) -> None:
         findings = [
             {"path": "src/app.ts", "line": index + 1, "title": f"Finding {index + 1}", "body": "body"}
-            for index in range(21)
+            for index in range(30)
         ]
 
-        result = self.run_script(output=f"<opencode_findings>{json.dumps(findings)}</opencode_findings>\n")
+        result = self.run_script(
+            output=f"<opencode_findings>{json.dumps(findings)}</opencode_findings>\n",
+            inline_fail=True,
+        )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         bodies = self.bodies()
         self.assertTrue(any("<!-- opencode-review:fallback-findings -->" in body for body in bodies))
-        self.assertTrue(any("src/app.ts:21" in body for body in bodies))
-        self.assertIn("Findings beyond inline limit: `1`", self.summary_path.read_text())
+        self.assertTrue(any("src/app.ts:1" in body for body in bodies))
+        self.assertTrue(any("src/app.ts:30" in body for body in bodies))
+        self.assertIn("Fallback findings posted: `30`", self.summary_path.read_text())
+        self.assertIn("Findings beyond inline limit: `10`", self.summary_path.read_text())
 
     def test_fallback_comment_failure_fails_the_step(self) -> None:
         result = self.run_script(
