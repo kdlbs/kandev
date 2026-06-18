@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { Page } from "@playwright/test";
 import { SessionPage } from "../../pages/session-page";
 import { makeGitEnv } from "../../helpers/git-helper";
 import fs from "node:fs";
@@ -27,6 +28,32 @@ class GitHelper {
   commit(message: string) {
     this.exec(`git commit -m "${message}"`);
   }
+}
+
+function changesTab(testPage: Page) {
+  return testPage.locator(".dv-tab", {
+    has: testPage.locator(".dv-default-tab").filter({ hasText: /^Changes/ }),
+  });
+}
+
+async function moveChangesToTerminalGroupAndFocusTerminal(testPage: Page) {
+  await testPage.evaluate(() => {
+    type Group = { id: string };
+    type PanelApi = {
+      moveTo: (opts: { group: Group }) => void;
+      setActive: () => void;
+    };
+    type Panel = { id: string; api: PanelApi; group?: Group };
+    type Api = { getPanel: (id: string) => Panel | undefined };
+    const dockview = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+    const changes = dockview?.getPanel("changes");
+    const terminal = dockview?.getPanel("terminal-default");
+    if (!changes || !terminal?.group) {
+      throw new Error("Dockview changes or terminal panel was not available");
+    }
+    changes.api.moveTo({ group: terminal.group });
+    terminal.api.setActive();
+  });
 }
 
 test.describe("Changes panel focus behavior", () => {
@@ -158,5 +185,50 @@ test.describe("Changes panel focus behavior", () => {
 
     // Chat should still be visible (active)
     await expect(session.chat).toBeVisible();
+  });
+
+  test("new git updates focus the changes tab in its current non-agent group", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(90_000);
+
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const gitEnv = makeGitEnv(backend.tmpDir);
+    const git = new GitHelper(repoDir, gitEnv);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Moved changes panel focus test",
+      seedData.agentProfileId,
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.waitForDockviewReady();
+
+    git.createFile("first-change.txt", "one");
+    await expect(
+      testPage.locator(".dv-default-tab").filter({ hasText: /^Changes \(1\)$/ }),
+    ).toBeVisible({ timeout: 15_000 });
+
+    await moveChangesToTerminalGroupAndFocusTerminal(testPage);
+    await expect(changesTab(testPage)).not.toHaveClass(/dv-active-tab/, { timeout: 5_000 });
+
+    git.createFile("second-change.txt", "two");
+    await expect(
+      testPage.locator(".dv-default-tab").filter({ hasText: /^Changes \(2\)$/ }),
+    ).toBeVisible({ timeout: 15_000 });
+
+    await expect(changesTab(testPage)).toHaveClass(/dv-active-tab/, { timeout: 5_000 });
+    await expect(session.changesFileRow("second-change.txt")).toBeVisible({ timeout: 10_000 });
   });
 });
