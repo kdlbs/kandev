@@ -62,7 +62,9 @@ test.describe("Workflow auto-advance", () => {
     await expect(session.stepperStep("Done")).toHaveAttribute("aria-current", "step", {
       timeout: 10_000,
     });
-    await expect(session.chat.getByText("delayed step response", { exact: true })).toBeVisible({
+    await expect(
+      session.activeChat().getByText("delayed step response", { exact: true }),
+    ).toBeVisible({
       timeout: 30_000,
     });
     await session.waitForChatIdle({ timeout: 15_000 });
@@ -125,7 +127,7 @@ test.describe("Workflow auto-advance", () => {
     await expect(session.stepperStep("Done")).toHaveAttribute("aria-current", "step", {
       timeout: 45_000,
     });
-    await expect(session.chat.getByText(workMarker, { exact: true })).toBeVisible({
+    await expect(session.activeChat().getByText(workMarker, { exact: true })).toBeVisible({
       timeout: 30_000,
     });
     await session.waitForChatIdle({ timeout: 30_000 });
