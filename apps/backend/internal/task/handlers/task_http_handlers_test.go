@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -27,15 +28,22 @@ import (
 // LaunchSession to short-circuit the two-phase create flow before its async
 // start goroutine spawns (keeping assertions race-free).
 type captureOrchestrator struct {
-	mu       sync.Mutex
-	requests []*orchestrator.LaunchSessionRequest
-	prepErr  error
+	mu                 sync.Mutex
+	requests           []*orchestrator.LaunchSessionRequest
+	prepErr            error
+	startCreatedCalled chan struct{}
 }
 
 func (m *captureOrchestrator) LaunchSession(_ context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
 	m.mu.Lock()
 	m.requests = append(m.requests, req)
 	m.mu.Unlock()
+	if req.Intent == orchestrator.IntentStartCreated && m.startCreatedCalled != nil {
+		select {
+		case m.startCreatedCalled <- struct{}{}:
+		default:
+		}
+	}
 	if m.prepErr != nil {
 		return nil, m.prepErr
 	}
@@ -136,7 +144,8 @@ func TestHttpStartConfigChat_SetsDeferredStart(t *testing.T) {
 
 type captureCreateTaskRepo struct {
 	mockRepository
-	captured *models.Task
+	captured       *models.Task
+	updateStateErr error
 }
 
 func (m *captureCreateTaskRepo) GetWorkspaceTaskPrefix(_ context.Context, _ string) (string, string, error) {
@@ -158,6 +167,9 @@ func (m *captureCreateTaskRepo) GetTask(_ context.Context, id string) (*models.T
 func (m *captureCreateTaskRepo) UpdateTaskState(_ context.Context, id string, state v1.TaskState) error {
 	if m.captured == nil || m.captured.ID != id {
 		return errors.New("task not found")
+	}
+	if m.updateStateErr != nil {
+		return m.updateStateErr
 	}
 	m.captured.State = state
 	return nil
@@ -213,7 +225,9 @@ func TestHTTPCreateTask_StartAgentReturnsSchedulingTask(t *testing.T) {
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
-	h := &TaskHandlers{service: svc, orchestrator: &captureOrchestrator{}, logger: log}
+	startCreatedCalled := make(chan struct{}, 1)
+	orch := &captureOrchestrator{startCreatedCalled: startCreatedCalled}
+	h := &TaskHandlers{service: svc, orchestrator: orch, logger: log}
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -232,8 +246,62 @@ func TestHTTPCreateTask_StartAgentReturnsSchedulingTask(t *testing.T) {
 	h.httpCreateTask(c)
 
 	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	var response createTaskResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
 	assert.Equal(t, v1.TaskStateScheduling, repo.captured.State)
-	assert.Contains(t, rec.Body.String(), `"state":"SCHEDULING"`)
+	assert.Equal(t, v1.TaskStateScheduling, response.State)
+	assert.Equal(t, "sess-1", response.TaskSessionID)
+	requireStartCreatedLaunch(t, startCreatedCalled)
+}
+
+func TestHTTPCreateTask_StartAgentKeepsCreatedStateWhenSchedulingUpdateFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+
+	repo := &captureCreateTaskRepo{updateStateErr: errors.New("database locked")}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	startCreatedCalled := make(chan struct{}, 1)
+	orch := &captureOrchestrator{startCreatedCalled: startCreatedCalled}
+	h := &TaskHandlers{service: svc, orchestrator: orch, logger: log}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(`{
+		"workspace_id": "ws-1",
+		"workflow_id": "wf-1",
+		"workflow_step_id": "step-1",
+		"title": "Boot an agent",
+		"description": "Do the thing",
+		"priority": "medium",
+		"agent_profile_id": "profile-1",
+		"start_agent": true
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpCreateTask(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	var response createTaskResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	assert.Equal(t, v1.TaskStateCreated, repo.captured.State)
+	assert.Equal(t, v1.TaskStateCreated, response.State)
+	assert.Equal(t, "sess-1", response.TaskSessionID)
+	requireStartCreatedLaunch(t, startCreatedCalled)
+}
+
+func requireStartCreatedLaunch(t *testing.T, started <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-started:
+	case <-time.After(1 * time.Second):
+		t.Fatal("async IntentStartCreated launch did not complete")
+	}
 }
 
 func TestValidateAttachments_DeliveryMode(t *testing.T) {
