@@ -10,19 +10,17 @@ type Command string
 
 const (
 	CommandRun   Command = "run"
-	CommandDev   Command = "dev"
 	CommandStart Command = "start"
 )
 
 type Options struct {
-	Command        Command
-	RuntimeVersion string
-	BackendPort    int
-	Verbose        bool
-	Debug          bool
-	ShowVersion    bool
-	Headless       bool
-	ShowHelp       bool
+	Command     Command
+	BackendPort int
+	Verbose     bool
+	Debug       bool
+	ShowVersion bool
+	Headless    bool
+	ShowHelp    bool
 }
 
 type ParseError struct {
@@ -50,8 +48,8 @@ func parseArgAt(argv []string, i int, opts *Options) (int, error) {
 	if parseSimpleArg(arg, opts) {
 		return i, nil
 	}
-	if next, ok, err := parseRuntimeArg(argv, i, opts); ok || err != nil {
-		return next, err
+	if isRuntimeVersionArg(arg) {
+		return i, ParseError{Message: "--runtime-version is not supported by the native launcher"}
 	}
 	if next, ok, err := parsePortArg(argv, i, opts); ok || err != nil {
 		return next, err
@@ -67,8 +65,6 @@ func parseCommandArg(arg string, opts *Options) bool {
 	switch arg {
 	case "run":
 		opts.Command = CommandRun
-	case "dev", "--dev":
-		opts.Command = CommandDev
 	case string(CommandStart):
 		opts.Command = CommandStart
 	default:
@@ -95,17 +91,8 @@ func parseBooleanFlag(arg string, opts *Options) bool {
 	return true
 }
 
-func parseRuntimeArg(argv []string, i int, opts *Options) (int, bool, error) {
-	arg := argv[i]
-	switch {
-	case arg == "--runtime-version":
-		next, err := parseRuntimeVersion(argv, i, opts)
-		return next, true, err
-	case strings.HasPrefix(arg, "--runtime-version="):
-		return i, true, parseRuntimeVersionValue(arg, opts)
-	default:
-		return i, false, nil
-	}
+func isRuntimeVersionArg(arg string) bool {
+	return arg == "--runtime-version" || strings.HasPrefix(arg, "--runtime-version=")
 }
 
 func parsePortArg(argv []string, i int, opts *Options) (int, bool, error) {
@@ -121,24 +108,6 @@ func parsePortArg(argv []string, i int, opts *Options) (int, bool, error) {
 	default:
 		return i, false, nil
 	}
-}
-
-func parseRuntimeVersion(argv []string, i int, opts *Options) (int, error) {
-	v, err := takeValue(argv, i, argv[i])
-	if err != nil {
-		return i, err
-	}
-	opts.RuntimeVersion = v
-	return i + 1, nil
-}
-
-func parseRuntimeVersionValue(arg string, opts *Options) error {
-	v := strings.TrimPrefix(arg, "--runtime-version=")
-	if v == "" {
-		return ParseError{Message: "--runtime-version requires a value"}
-	}
-	opts.RuntimeVersion = v
-	return nil
 }
 
 func parseBackendPort(argv []string, i int, opts *Options) (int, error) {

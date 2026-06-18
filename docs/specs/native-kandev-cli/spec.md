@@ -14,7 +14,8 @@ Users start Kandev from the terminal through `kandev`, but the current launcher 
 
 - `kandev` remains the public command for Homebrew, npm/npx, global npm installs, service units, and local development.
 - Homebrew and release bundle installs provide a native `bin/kandev` executable that can launch Kandev without executing the TypeScript CLI bundle.
-- The native `kandev` executable supports the public launcher commands users need after the web runtime merge: default run, `run`, `start`, `dev`, `service`, `--help`, `--version`, `--port`, `--backend-port`, `--verbose`, `--debug`, and `--headless`.
+- The native `kandev` executable supports the public launcher commands users need after the web runtime merge: default run, `run`, `start`, `service`, `--help`, `--version`, `--port`, `--backend-port`, `--verbose`, `--debug`, and `--headless`.
+- Native `dev` mode is deferred until it can be ported with parity; the native launcher does not advertise or accept `dev`/`--dev`.
 - The native launcher starts the backend as a supervised child process by re-executing the same `bin/kandev` binary in a hidden backend mode.
 - The hidden backend mode is not a public command and is not shown in normal help output.
 - Backend restarts restart only the backend child process; the launcher/supervisor remains alive unless the shutdown policy requires the whole app to exit.
@@ -32,8 +33,6 @@ Users start Kandev from the terminal through `kandev`, but the current launcher 
 kandev [--port <port>] [--verbose] [--debug] [--headless]
 kandev run [--port <port>] [--verbose] [--debug] [--headless]
 kandev start [--port <port>] [--verbose] [--debug] [--headless]
-kandev dev [--port <port>]
-kandev --dev [--port <port>]
 kandev service install|uninstall|start|stop|restart|status|logs|config [--system]
 kandev --version
 kandev --help
@@ -44,6 +43,7 @@ Port flags and environment variables:
 - `--port` and `--backend-port` select the public backend port.
 - `KANDEV_PORT` and `KANDEV_BACKEND_PORT` provide backend port defaults.
 - There is no production web port flag or environment variable. The Go backend serves the embedded SPA on the backend port.
+- `--runtime-version` is not supported by the native launcher and is rejected as a usage error.
 
 Logging/debug flags:
 
@@ -151,5 +151,5 @@ Transitions:
 ## Open questions
 
 - Should hidden backend mode be selected by the `__backend` argv token or by `KANDEV_INTERNAL_ROLE=backend`? Recommendation: `__backend`.
-- Should `--runtime-version <tag>` be ported in the first native launcher implementation or deferred/deprecated?
+- Should `--runtime-version <tag>` be ported in a later native launcher implementation or remain deprecated?
 - Should one release ship both the old Node CLI bundle and the native `bin/kandev` for compatibility while Homebrew/npm packaging switches over?

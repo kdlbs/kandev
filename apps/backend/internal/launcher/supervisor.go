@@ -209,8 +209,7 @@ func writeManifest(manifest launchManifest, targetPath string) error {
 }
 
 func startControlServer(socket string, onRestart func()) error {
-	_ = os.Remove(socket)
-	ln, err := net.Listen("unix", socket)
+	ln, err := listenControlSocket(socket)
 	if err != nil {
 		return err
 	}
@@ -224,6 +223,19 @@ func startControlServer(socket string, onRestart func()) error {
 		}
 	}()
 	return nil
+}
+
+func listenControlSocket(socket string) (net.Listener, error) {
+	_ = os.Remove(socket)
+	ln, err := net.Listen("unix", socket)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(socket, 0o600); err != nil {
+		_ = ln.Close()
+		return nil, err
+	}
+	return ln, nil
 }
 
 func handleControlConn(conn net.Conn, onRestart func()) {

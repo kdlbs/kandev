@@ -21,21 +21,8 @@ type buildInfo struct {
 	BuildTime string
 }
 
-var runBackend = func(args []string, build buildInfo) int {
-	return backendapp.Run(args, backendapp.BuildInfo{
-		Version:   build.Version,
-		Commit:    build.Commit,
-		BuildTime: build.BuildTime,
-	})
-}
-
-var runLauncher = func(args []string, build buildInfo) int {
-	return launcher.Run(args, launcher.BuildInfo{
-		Version:   build.Version,
-		Commit:    build.Commit,
-		BuildTime: build.BuildTime,
-	})
-}
+type backendRunner func(args []string, build backendapp.BuildInfo) int
+type launcherRunner func(args []string, build launcher.BuildInfo) int
 
 func main() {
 	os.Exit(run(os.Args[1:]))
@@ -43,8 +30,20 @@ func main() {
 
 func run(args []string) int {
 	build := buildInfo{Version: Version, Commit: Commit, BuildTime: BuildTime}
+	return dispatch(args, build, backendapp.Run, launcher.Run)
+}
+
+func dispatch(args []string, build buildInfo, backend backendRunner, launch launcherRunner) int {
 	if len(args) > 0 && args[0] == "__backend" {
-		return runBackend(args[1:], build)
+		return backend(args[1:], backendapp.BuildInfo{
+			Version:   build.Version,
+			Commit:    build.Commit,
+			BuildTime: build.BuildTime,
+		})
 	}
-	return runLauncher(args, build)
+	return launch(args, launcher.BuildInfo{
+		Version:   build.Version,
+		Commit:    build.Commit,
+		BuildTime: build.BuildTime,
+	})
 }

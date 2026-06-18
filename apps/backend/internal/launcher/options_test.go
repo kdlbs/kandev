@@ -28,3 +28,32 @@ func TestParseArgsRejectsRemovedWebPort(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestParseArgsRejectsUnsupportedDevMode(t *testing.T) {
+	for _, argv := range [][]string{{"dev"}, {"--dev"}} {
+		_, err := parseArgs(argv)
+		if err == nil {
+			t.Fatalf("parseArgs(%v) returned nil error", argv)
+		}
+		if _, ok := err.(ParseError); !ok {
+			t.Fatalf("parseArgs(%v) error = %T, want ParseError", argv, err)
+		}
+	}
+}
+
+func TestParseArgsRejectsUnsupportedRuntimeVersion(t *testing.T) {
+	for _, argv := range [][]string{
+		{"--runtime-version", "v1.2.3"},
+		{"--runtime-version=v1.2.3"},
+		{"--runtime-version"},
+		{"--runtime-version="},
+	} {
+		_, err := parseArgs(argv)
+		if err == nil {
+			t.Fatalf("parseArgs(%v) returned nil error", argv)
+		}
+		if err.Error() != "--runtime-version is not supported by the native launcher" {
+			t.Fatalf("parseArgs(%v) error = %q", argv, err)
+		}
+	}
+}

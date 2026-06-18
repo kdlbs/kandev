@@ -1,29 +1,29 @@
 package main
 
-import "testing"
+import (
+	"testing"
 
-func TestRunDispatchesHiddenBackendMode(t *testing.T) {
+	"github.com/kandev/kandev/internal/backendapp"
+	"github.com/kandev/kandev/internal/launcher"
+)
+
+func TestDispatchesHiddenBackendMode(t *testing.T) {
 	backendCalled := false
 	launcherCalled := false
-	oldBackend := runBackend
-	oldLauncher := runLauncher
-	t.Cleanup(func() {
-		runBackend = oldBackend
-		runLauncher = oldLauncher
-	})
-	runBackend = func(args []string, build buildInfo) int {
+
+	code := dispatch([]string{"__backend", "--version"}, buildInfo{Version: "test"}, func(args []string, build backendapp.BuildInfo) int {
 		backendCalled = true
 		if len(args) != 1 || args[0] != "--version" {
 			t.Fatalf("backend args = %v, want [--version]", args)
 		}
+		if build.Version != "test" {
+			t.Fatalf("backend build = %+v", build)
+		}
 		return 7
-	}
-	runLauncher = func(args []string, build buildInfo) int {
+	}, func(args []string, build launcher.BuildInfo) int {
 		launcherCalled = true
 		return 0
-	}
-
-	code := run([]string{"__backend", "--version"})
+	})
 
 	if code != 7 {
 		t.Fatalf("exit code = %d, want 7", code)
@@ -36,28 +36,23 @@ func TestRunDispatchesHiddenBackendMode(t *testing.T) {
 	}
 }
 
-func TestRunDefaultsToLauncherMode(t *testing.T) {
+func TestDispatchDefaultsToLauncherMode(t *testing.T) {
 	backendCalled := false
 	launcherCalled := false
-	oldBackend := runBackend
-	oldLauncher := runLauncher
-	t.Cleanup(func() {
-		runBackend = oldBackend
-		runLauncher = oldLauncher
-	})
-	runBackend = func(args []string, build buildInfo) int {
+
+	code := dispatch([]string{"--help"}, buildInfo{Commit: "abc"}, func(args []string, build backendapp.BuildInfo) int {
 		backendCalled = true
 		return 0
-	}
-	runLauncher = func(args []string, build buildInfo) int {
+	}, func(args []string, build launcher.BuildInfo) int {
 		launcherCalled = true
 		if len(args) != 1 || args[0] != "--help" {
 			t.Fatalf("launcher args = %v, want [--help]", args)
 		}
+		if build.Commit != "abc" {
+			t.Fatalf("launcher build = %+v", build)
+		}
 		return 3
-	}
-
-	code := run([]string{"--help"})
+	})
 
 	if code != 3 {
 		t.Fatalf("exit code = %d, want 3", code)

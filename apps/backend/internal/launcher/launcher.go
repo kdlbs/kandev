@@ -35,9 +35,6 @@ func Run(args []string, build BuildInfo) int {
 		return runStart(opts)
 	case CommandRun:
 		return runInstalled(opts)
-	case CommandDev:
-		fmt.Fprintln(os.Stderr, "[kandev] native launcher dev mode is not implemented yet")
-		return 1
 	}
 	fmt.Fprintf(os.Stderr, "[kandev] native launcher command %q is not implemented yet\n", opts.Command)
 	return 1

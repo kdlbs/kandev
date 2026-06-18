@@ -7,10 +7,6 @@ import (
 )
 
 func runInstalled(opts Options) int {
-	if opts.RuntimeVersion != "" {
-		fmt.Fprintln(os.Stderr, "[kandev] --runtime-version is not implemented in the native launcher yet")
-		return 1
-	}
 	backendPort, err := resolvePorts(opts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())

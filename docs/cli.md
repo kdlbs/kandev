@@ -90,22 +90,8 @@ kandev run
 1. Resolves the runtime bundle (KANDEV_BUNDLE_DIR → npm package).
 2. Starts the backend server.
 3. Waits for backend health check.
-4. Starts the web app.
+4. Serves the embedded web UI from the backend.
 5. Opens browser when ready.
-
-### `kandev dev`
-
-Runs the application in development mode with hot-reloading. Requires a local repository checkout.
-
-```bash
-# From the repo root or any subdirectory
-kandev dev
-```
-
-**What happens:**
-1. Locates the repo root (looks for `apps/backend` and `apps/web`).
-2. Runs `make dev` for the backend (Go with hot-reload).
-3. Runs `pnpm dev` for the web app (Vite dev server).
 
 ### `kandev start`
 
@@ -123,8 +109,7 @@ kandev start
 |--------|-------------|---------|
 | `--version`, `-V` | Print CLI version and exit | `kandev --version` |
 | `--port <port>` | Backend port (alias: `--backend-port`) | `--port 3000` |
-| `--web-internal-port <port>` | Override internal web app port | `--web-internal-port 13000` |
-| `--verbose`, `-v` | Show info logs from backend + web | `--verbose` |
+| `--verbose`, `-v` | Show info logs from backend | `--verbose` |
 | `--debug` | Show debug logs + agent message dumps | `--debug` |
 | `--help`, `-h` | Show help | `--help` |
 
@@ -134,11 +119,8 @@ kandev start
 # Print CLI version
 kandev --version
 
-# Custom ports
-kandev --port 18080 --web-internal-port 13000
-
-# Dev mode
-kandev dev --port 18080
+# Custom port
+kandev --port 18080
 
 ```
 
@@ -214,15 +196,6 @@ Increase the health check timeout:
 
 ```bash
 KANDEV_HEALTH_TIMEOUT_MS=60000 kandev
-```
-
-### Dev Mode: "Unable to locate repo root"
-
-Run from within the kandev repository:
-
-```bash
-cd /path/to/kandev
-kandev dev
 ```
 
 ### Start Mode: "Backend binary not found"

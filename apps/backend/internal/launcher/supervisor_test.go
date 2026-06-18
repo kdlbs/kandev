@@ -1,7 +1,9 @@
 package launcher
 
 import (
+	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -42,6 +44,31 @@ func TestPrepareSupervisorEnvWritesExpectedPaths(t *testing.T) {
 	got := allowedSupervisorEnv(env)
 	if got["KANDEV_RESTART_ADAPTER"] != "supervisor" {
 		t.Fatalf("restart adapter env = %+v", got)
+	}
+}
+
+func TestListenControlSocketUsesOwnerOnlyMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix sockets are not supported on windows")
+	}
+	dir, err := os.MkdirTemp("", "kandev-sock-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	socket := filepath.Join(dir, "control.sock")
+	ln, err := listenControlSocket(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	info, err := os.Stat(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("socket mode = %#o, want 0600", got)
 	}
 }
 

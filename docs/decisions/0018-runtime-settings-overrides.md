@@ -34,9 +34,9 @@ message debug logs; agent message logs are not a separate top-level toggle.
 
 V1 toggle changes require restart. Restart is launcher/supervisor mediated:
 
-- In CLI-managed modes (`kandev start`, `kandev run`, `kandev dev`), the Go
-  backend requests restart from the Node launcher, and the launcher restarts
-  its backend and web children.
+- In CLI-managed modes (`kandev start`, `kandev run`), the Go backend requests
+  restart from the native launcher, and the launcher restarts its backend
+  child.
 - In service-managed modes, restart delegates to systemd or launchd when the
   backend can prove it is safe.
 - If no supported supervisor is available, the UI shows manual restart
