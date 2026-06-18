@@ -398,24 +398,45 @@ export function SwimlaneKanbanContent({
   const { sensors, handleDragStart, handleDragEnd, handleDragCancel, moveTaskToStep, activeTask } =
     useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError });
 
-  if (steps.length === 0) return null;
+  // Memoized so the layout components don't re-render from a fresh props object
+  // on every parent render. Declared before the early return to keep hook order
+  // stable.
+  const sharedProps = useMemo(
+    () => ({
+      steps,
+      tasks,
+      onPreviewTask,
+      onOpenTask,
+      onEditTask,
+      onDeleteTask,
+      onArchiveTask,
+      moveTaskToStep,
+      showMaximizeButton,
+      deletingTaskId,
+      archivingTaskId,
+      selectedIds,
+      onToggleSelect,
+      isMultiSelectMode,
+    }),
+    [
+      steps,
+      tasks,
+      onPreviewTask,
+      onOpenTask,
+      onEditTask,
+      onDeleteTask,
+      onArchiveTask,
+      moveTaskToStep,
+      showMaximizeButton,
+      deletingTaskId,
+      archivingTaskId,
+      selectedIds,
+      onToggleSelect,
+      isMultiSelectMode,
+    ],
+  );
 
-  const sharedProps = {
-    steps,
-    tasks,
-    onPreviewTask,
-    onOpenTask,
-    onEditTask,
-    onDeleteTask,
-    onArchiveTask,
-    moveTaskToStep,
-    showMaximizeButton,
-    deletingTaskId,
-    archivingTaskId,
-    selectedIds,
-    onToggleSelect,
-    isMultiSelectMode,
-  };
+  if (steps.length === 0) return null;
 
   let layoutContent: React.ReactNode;
   if (isMobile) {

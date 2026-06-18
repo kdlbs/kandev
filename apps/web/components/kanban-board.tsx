@@ -334,15 +334,22 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
   // the search bar after navigating to another route.
   useEffect(() => () => setMobileSearchOpen(false), [setMobileSearchOpen]);
 
+  // Memoized so the dialog/child components don't see a new array identity on
+  // every board re-render. Declared before the early return to keep hook order
+  // stable.
+  const stepOptions = useMemo(
+    () =>
+      s.activeSteps.map((step) => ({
+        id: step.id,
+        title: step.title,
+        events: step.events,
+      })),
+    [s.activeSteps],
+  );
+
   if (!s.isMounted) {
     return <div className="h-dvh w-full bg-background" />;
   }
-
-  const stepOptions = s.activeSteps.map((step) => ({
-    id: step.id,
-    title: step.title,
-    events: step.events,
-  }));
 
   return (
     <div className="h-dvh w-full flex flex-col" data-testid="kanban-board">
