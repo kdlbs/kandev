@@ -329,9 +329,13 @@ func updateReadFileInput(rf *streams.ReadFilePayload, supplemental, inputMap map
 	// Multiple comma-joined files can't share one Offset/Limit; keep the raw path
 	// for the UI to split (mirrors normalizeRead).
 	if len(files) > 1 {
-		if rf.FilePath == "" {
-			rf.FilePath = path
-		}
+		// Mirror normalizeRead: a multi-file read keeps the raw comma-joined path
+		// (the UI splits it) and carries no single Offset/Limit. Overwrite any
+		// stale single-file state from an earlier update that streamed a partial,
+		// single-file path before the full multi-file path arrived.
+		rf.FilePath = path
+		rf.Offset = 0
+		rf.Limit = 0
 		return
 	}
 	if rf.FilePath == "" {

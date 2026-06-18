@@ -1062,6 +1062,32 @@ func TestUpdatePayloadInput_ReadFile(t *testing.T) {
 			t.Errorf("expected FilePath '/workspace/README.md', got %q", payload.ReadFile().FilePath)
 		}
 	})
+
+	t.Run("switches stale single-file state to raw multi-file path", func(t *testing.T) {
+		// An earlier update streamed a single-file path with a range; a later
+		// update carries the full multi-file path. The payload must drop the
+		// stale single-file Offset/Limit and keep the raw comma-joined path for
+		// the UI to split (mirrors normalizeRead).
+		payload := normalizer.NormalizeToolCall("read", map[string]any{
+			"kind": "read",
+			"raw_input": map[string]any{
+				"path": "a.go:1-10",
+			},
+		})
+		if rf := payload.ReadFile(); rf.FilePath != "a.go" || rf.Offset != 1 || rf.Limit != 10 {
+			t.Fatalf("unexpected initial state: %+v", rf)
+		}
+		normalizer.UpdatePayloadInput(payload, map[string]any{
+			"file_path": "a.go:1-10,b.go:1-10",
+		}, nil)
+		rf := payload.ReadFile()
+		if rf.FilePath != "a.go:1-10,b.go:1-10" {
+			t.Errorf("expected raw multi-file FilePath, got %q", rf.FilePath)
+		}
+		if rf.Offset != 0 || rf.Limit != 0 {
+			t.Errorf("expected Offset/Limit cleared, got Offset=%d Limit=%d", rf.Offset, rf.Limit)
+		}
+	})
 }
 
 // TestSplitLines tests the line splitting utility.
