@@ -11,6 +11,7 @@ from typing import Any
 
 MAX_INLINE_FINDINGS = 20
 MAX_COMMENT_BODY = 60000
+OMISSION_NOTICE_RESERVE = 256
 NO_FINDINGS_MARKER = "<!-- opencode-review:no-findings -->"
 DIAGNOSTIC_MARKER = "<!-- opencode-review:diagnostic -->"
 FALLBACK_MARKER = "<!-- opencode-review:fallback-findings -->"
@@ -160,6 +161,7 @@ def no_findings_body() -> str:
 def fallback_body(rejected: list[dict[str, Any]], overflow: list[dict[str, Any]]) -> tuple[str, int, int]:
     model = required_env("OPENCODE_MODEL")
     short_sha = required_env("HEAD_SHA")[:12]
+    body_limit = MAX_COMMENT_BODY - OMISSION_NOTICE_RESERVE
     body = "\n".join(
         [
             FALLBACK_MARKER,
@@ -179,7 +181,7 @@ def fallback_body(rejected: list[dict[str, Any]], overflow: list[dict[str, Any]]
         if not findings:
             return
         heading = f"\n\n## {title}"
-        if len(body) + len(heading) > MAX_COMMENT_BODY:
+        if len(body) + len(heading) > body_limit:
             omitted += len(findings)
             return
         body += heading
@@ -192,7 +194,7 @@ def fallback_body(rejected: list[dict[str, Any]], overflow: list[dict[str, Any]]
                     str(finding["body"]).strip(),
                 ]
             )
-            if len(body) + len(section) > MAX_COMMENT_BODY:
+            if len(body) + len(section) > body_limit:
                 omitted += 1
                 continue
             body += section
@@ -203,8 +205,8 @@ def fallback_body(rejected: list[dict[str, Any]], overflow: list[dict[str, Any]]
 
     if omitted:
         notice = f"\n\n_Additional fallback findings omitted from this comment due to GitHub body size limits: {omitted}._"
-        if len(body) + len(notice) > MAX_COMMENT_BODY:
-            body = body[: MAX_COMMENT_BODY - len(notice)].rstrip()
+        if len(notice) > OMISSION_NOTICE_RESERVE:
+            notice = notice[: OMISSION_NOTICE_RESERVE - 3].rstrip() + "..."
         body += notice
 
     return body, included, omitted
@@ -218,6 +220,7 @@ def normalize_finding(value: Any, changed_paths: set[str]) -> dict[str, Any] | N
     title = value.get("title")
     body = value.get("body")
     if not isinstance(path, str):
+        print(f"Skipped OpenCode finding with invalid path value: {path}")
         return None
     if isinstance(line, bool):
         print(f"Skipped OpenCode finding with invalid line value: {path}:{line}")

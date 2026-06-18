@@ -204,6 +204,20 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(any("-F" in call and "line=99" in call for call in self.read_calls()))
 
+    def test_invalid_path_values_are_logged(self) -> None:
+        result = self.run_script(
+            output=textwrap.dedent(
+                """\
+                <opencode_findings>
+                [{"path":42,"line":99,"title":"Bad line","body":"This line moved."}]
+                </opencode_findings>
+                """
+            ),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("invalid path value", result.stdout)
+
     def test_inline_findings_beyond_limit_are_preserved_in_fallback_comment(self) -> None:
         findings = [
             {"path": "src/app.ts", "line": index + 1, "title": f"Finding {index + 1}", "body": "body"}
@@ -244,7 +258,10 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
         self.assertTrue(any("Additional fallback findings omitted" in body for body in bodies))
         self.assertTrue(all(len(body) <= 60000 for body in bodies))
         summary = self.summary_path.read_text()
-        self.assertRegex(summary, r"Fallback findings included in comment: `1[0-9]`")
+        included_match = re.search(r"Fallback findings included in comment: `([1-9][0-9]*)`", summary)
+        self.assertIsNotNone(included_match, summary)
+        fallback = next(body for body in bodies if "<!-- opencode-review:fallback-findings -->" in body)
+        self.assertEqual(fallback.count("### src/app.ts:"), int(included_match.group(1)))
         omitted_match = re.search(r"Fallback findings omitted from comment: `([1-9][0-9]*)`", summary)
         self.assertIsNotNone(omitted_match, summary)
 
