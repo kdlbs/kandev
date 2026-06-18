@@ -102,7 +102,7 @@ describe("useDefaultQueryPresets", () => {
 
     await waitFor(() => expect(fetchUserSettings).toHaveBeenCalled());
     localStorageMock.setItem(STORAGE_KEY, JSON.stringify(crossTab));
-    const event = new StorageEvent("storage");
+    const event = new Event("storage");
     Object.defineProperty(event, "key", { value: STORAGE_KEY });
     window.dispatchEvent(event);
     resolveFetch({
