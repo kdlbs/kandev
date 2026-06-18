@@ -524,10 +524,12 @@ func TestApplyUserPreferenceBlobs(t *testing.T) {
 	}
 	patch := models.TaskCreateLastUsed{Branch: "feature"}
 
-	applyUserPreferenceBlobs(settings, &UpdateUserSettingsRequest{
+	if err := applyUserPreferenceBlobs(settings, &UpdateUserSettingsRequest{
 		TaskCreateLastUsed: &patch,
 		GitHubSavedPresets: ptr(json.RawMessage(`[{"id":"p1"}]`)),
-	})
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if settings.TaskCreateLastUsed.RepositoryID != "repo-1" {
 		t.Fatalf("expected repository id to be preserved, got %q", settings.TaskCreateLastUsed.RepositoryID)
@@ -538,6 +540,39 @@ func TestApplyUserPreferenceBlobs(t *testing.T) {
 	if string(settings.GitHubSavedPresets) != `[{"id":"p1"}]` {
 		t.Fatalf("expected GitHub presets to apply, got %s", string(settings.GitHubSavedPresets))
 	}
+}
+
+func TestApplyUserPreferenceBlobsValidation(t *testing.T) {
+	t.Run("accepts arrays objects and null", func(t *testing.T) {
+		settings := &models.UserSettings{}
+		req := &UpdateUserSettingsRequest{
+			JiraSavedViews:            ptr(json.RawMessage(`[]`)),
+			GitHubDefaultQueryPresets: ptr(json.RawMessage(`{"pr":[],"issue":[]}`)),
+			GitLabSavedPresets:        ptr(json.RawMessage(`null`)),
+		}
+		if err := applyUserPreferenceBlobs(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("rejects scalar blobs", func(t *testing.T) {
+		settings := &models.UserSettings{}
+		req := &UpdateUserSettingsRequest{GitHubSavedPresets: ptr(json.RawMessage(`"bad"`))}
+		err := applyUserPreferenceBlobs(settings, req)
+		if err == nil || !strings.Contains(err.Error(), "github_saved_presets") {
+			t.Fatalf("expected github_saved_presets validation error, got %v", err)
+		}
+	})
+
+	t.Run("rejects oversized blobs", func(t *testing.T) {
+		settings := &models.UserSettings{}
+		raw := json.RawMessage(`["` + strings.Repeat("x", maxUserPreferenceBlobBytes) + `"]`)
+		req := &UpdateUserSettingsRequest{JiraSavedViews: &raw}
+		err := applyUserPreferenceBlobs(settings, req)
+		if err == nil || !strings.Contains(err.Error(), "max") {
+			t.Fatalf("expected size validation error, got %v", err)
+		}
+	})
 }
 
 func TestApplyVoiceMode(t *testing.T) {

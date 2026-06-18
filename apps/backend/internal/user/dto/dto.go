@@ -88,7 +88,7 @@ type UpdateUserSettingsRequest struct {
 	SavedLayouts                *[]models.SavedLayout                `json:"saved_layouts,omitempty"`
 	SidebarViews                *[]models.SidebarView                `json:"sidebar_views,omitempty"`
 	SidebarActiveViewID         *string                              `json:"sidebar_active_view_id,omitempty"`
-	SidebarDraft                **models.SidebarViewDraft            `json:"sidebar_draft,omitempty"`
+	SidebarDraft                NullableSidebarDraft                 `json:"sidebar_draft,omitempty"`
 	SidebarTaskPrefs            *models.SidebarTaskPrefs             `json:"sidebar_task_prefs,omitempty"`
 	TaskCreateLastUsed          *models.TaskCreateLastUsed           `json:"task_create_last_used,omitempty"`
 	JiraSavedViews              *json.RawMessage                     `json:"jira_saved_views,omitempty"`
@@ -105,6 +105,32 @@ type UpdateUserSettingsRequest struct {
 	ChangesPanelLayout          *string                              `json:"changes_panel_layout,omitempty"`
 	SystemMetricsDisplay        *models.SystemMetricsDisplaySettings `json:"system_metrics_display,omitempty"`
 	VoiceMode                   *models.VoiceModeSettings            `json:"voice_mode,omitempty"`
+}
+
+type NullableSidebarDraft struct {
+	Set   bool
+	Value *models.SidebarViewDraft
+}
+
+func (n *NullableSidebarDraft) UnmarshalJSON(data []byte) error {
+	n.Set = true
+	if string(data) == "null" {
+		n.Value = nil
+		return nil
+	}
+	var value models.SidebarViewDraft
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	n.Value = &value
+	return nil
+}
+
+func (n NullableSidebarDraft) ServiceValue() **models.SidebarViewDraft {
+	if !n.Set {
+		return nil
+	}
+	return &n.Value
 }
 
 func FromUser(user *models.User) UserDTO {

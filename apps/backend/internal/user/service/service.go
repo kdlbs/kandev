@@ -137,7 +137,9 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 	if err := applySidebarViewState(settings, req); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
-	applyUserPreferenceBlobs(settings, req)
+	if err := applyUserPreferenceBlobs(settings, req); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+	}
 	if err := applyVoiceMode(settings, req.VoiceMode); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
@@ -398,7 +400,9 @@ func applySidebarViewState(settings *models.UserSettings, req *UpdateUserSetting
 	return nil
 }
 
-func applyUserPreferenceBlobs(settings *models.UserSettings, req *UpdateUserSettingsRequest) {
+const maxUserPreferenceBlobBytes = 64 * 1024
+
+func applyUserPreferenceBlobs(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
 	if req.SidebarTaskPrefs != nil {
 		settings.SidebarTaskPrefs = *req.SidebarTaskPrefs
 	}
@@ -406,19 +410,51 @@ func applyUserPreferenceBlobs(settings *models.UserSettings, req *UpdateUserSett
 		mergeTaskCreateLastUsed(&settings.TaskCreateLastUsed, *req.TaskCreateLastUsed)
 	}
 	if req.JiraSavedViews != nil {
+		if err := validateUserPreferenceBlob("jira_saved_views", *req.JiraSavedViews); err != nil {
+			return err
+		}
 		settings.JiraSavedViews = *req.JiraSavedViews
 	}
 	if req.JiraTaskPresets != nil {
+		if err := validateUserPreferenceBlob("jira_task_presets", *req.JiraTaskPresets); err != nil {
+			return err
+		}
 		settings.JiraTaskPresets = *req.JiraTaskPresets
 	}
 	if req.GitHubSavedPresets != nil {
+		if err := validateUserPreferenceBlob("github_saved_presets", *req.GitHubSavedPresets); err != nil {
+			return err
+		}
 		settings.GitHubSavedPresets = *req.GitHubSavedPresets
 	}
 	if req.GitHubDefaultQueryPresets != nil {
+		if err := validateUserPreferenceBlob("github_default_query_presets", *req.GitHubDefaultQueryPresets); err != nil {
+			return err
+		}
 		settings.GitHubDefaultQueryPresets = *req.GitHubDefaultQueryPresets
 	}
 	if req.GitLabSavedPresets != nil {
+		if err := validateUserPreferenceBlob("gitlab_saved_presets", *req.GitLabSavedPresets); err != nil {
+			return err
+		}
 		settings.GitLabSavedPresets = *req.GitLabSavedPresets
+	}
+	return nil
+}
+
+func validateUserPreferenceBlob(field string, value json.RawMessage) error {
+	if len(value) > maxUserPreferenceBlobBytes {
+		return fmt.Errorf("%s: max %d bytes allowed", field, maxUserPreferenceBlobBytes)
+	}
+	var decoded interface{}
+	if err := json.Unmarshal(value, &decoded); err != nil {
+		return fmt.Errorf("%s: must be valid JSON", field)
+	}
+	switch decoded.(type) {
+	case nil, []interface{}, map[string]interface{}:
+		return nil
+	default:
+		return fmt.Errorf("%s: must be a JSON object, array, or null", field)
 	}
 }
 

@@ -84,6 +84,10 @@ function syncServer(next: SavedPreset[]) {
   updateUserSettings({ gitlab_saved_presets: next }).catch(() => {});
 }
 
+function snapshotKey(value: SavedPreset[]): string {
+  return JSON.stringify(value);
+}
+
 // Test-only: drop the module-level snapshot so the next read goes through
 // readStorage again. Used by the hook tests so each `it` starts from a known
 // empty state independent of test execution order.
@@ -97,10 +101,15 @@ export function useSavedPresets() {
 
   useEffect(() => {
     let cancelled = false;
+    const initialKey = snapshotKey(readStorage());
     fetchUserSettings({ cache: "no-store" })
       .then((response) => {
         const serverPresets = readServerPresets(response.settings.gitlab_saved_presets);
-        if (!cancelled && serverPresets) publish(serverPresets);
+        if (cancelled || !serverPresets) return;
+        const local = readStorage();
+        if (snapshotKey(local) !== initialKey) return;
+        if (serverPresets.length === 0 && local.length > 0) return;
+        publish(serverPresets);
       })
       .catch(() => {});
     return () => {

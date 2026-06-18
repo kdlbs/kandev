@@ -72,7 +72,6 @@ function readServerDefaults(value: unknown): StoredDefaults | null | undefined {
   if (value === null) return null;
   if (
     typeof value !== "object" ||
-    value === null ||
     !Array.isArray((value as StoredDefaults).pr) ||
     !Array.isArray((value as StoredDefaults).issue)
   ) {
@@ -83,6 +82,10 @@ function readServerDefaults(value: unknown): StoredDefaults | null | undefined {
 
 function syncServer(defaults: StoredDefaults | null) {
   updateUserSettings({ github_default_query_presets: defaults }).catch(() => {});
+}
+
+function snapshotKey(value: StoredDefaults | null): string {
+  return JSON.stringify(value);
 }
 
 function subscribe(cb: () => void) {
@@ -106,10 +109,15 @@ export function useDefaultQueryPresets() {
 
   useEffect(() => {
     let cancelled = false;
+    const initialKey = snapshotKey(getSnapshot());
     fetchUserSettings({ cache: "no-store" })
       .then((response) => {
         const serverDefaults = readServerDefaults(response.settings.github_default_query_presets);
-        if (!cancelled && serverDefaults !== undefined) publish(serverDefaults);
+        if (cancelled || serverDefaults === undefined) return;
+        const local = getSnapshot();
+        if (snapshotKey(local) !== initialKey) return;
+        if (serverDefaults === null && local !== null) return;
+        publish(serverDefaults);
       })
       .catch(() => {});
     return () => {

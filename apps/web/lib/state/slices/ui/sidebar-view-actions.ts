@@ -71,6 +71,10 @@ function toSidebarSettingsPayload(s: SidebarSnapshot | UISliceState["sidebarView
   };
 }
 
+function draftsEqual(a: SidebarViewDraft | null, b: SidebarViewDraft | null): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 function syncSidebarViewState(
   set: ImmerSet,
   payload: {
@@ -98,6 +102,7 @@ function mutateViews(
   });
   if (!committed) return;
   const after = get().sidebarViews;
+  const afterSnapshot = snapshotSidebar(after);
   writeCacheFromSidebar(after);
   const thisRequestId = ++viewsSyncRequestId;
   updateUserSettings(toSidebarSettingsPayload(after)).catch((err) => {
@@ -106,10 +111,12 @@ function mutateViews(
     set((draft) => {
       draft.sidebarViews.views = snapshot.views;
       draft.sidebarViews.activeViewId = snapshot.activeViewId;
-      draft.sidebarViews.draft = snapshot.draft;
+      if (draftsEqual(draft.sidebarViews.draft, afterSnapshot.draft)) {
+        draft.sidebarViews.draft = snapshot.draft;
+      }
       draft.sidebarViews.syncError = message;
     });
-    writeCacheFromSidebar(snapshot);
+    writeCacheFromSidebar(get().sidebarViews);
   });
 }
 

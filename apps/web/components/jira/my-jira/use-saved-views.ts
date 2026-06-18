@@ -91,6 +91,10 @@ function syncServer(views: SavedView[]): void {
   updateUserSettings({ jira_saved_views: views }).catch(() => {});
 }
 
+function snapshotKey(views: SavedView[]): string {
+  return JSON.stringify(views);
+}
+
 export function useSavedViews() {
   const [custom, setCustom] = useState<SavedView[]>([]);
 
@@ -98,10 +102,14 @@ export function useSavedViews() {
     let cancelled = false;
     async function init() {
       const loaded = readStorage();
+      const initialKey = snapshotKey(loaded);
       if (!cancelled) setCustom(loaded);
       const response = await fetchUserSettings({ cache: "no-store" }).catch(() => null);
       const serverViews = readServerViews(response?.settings.jira_saved_views);
       if (!cancelled && serverViews) {
+        const local = readStorage();
+        if (snapshotKey(local) !== initialKey) return;
+        if (serverViews.length === 0 && local.length > 0) return;
         writeStorage(serverViews);
         setCustom(serverViews);
       }
@@ -120,24 +128,20 @@ export function useSavedViews() {
         filters,
         customJql,
       };
-      setCustom((prev) => {
-        const next = [...prev, view];
-        writeStorage(next);
-        syncServer(next);
-        return next;
-      });
+      const next = [...readStorage(), view];
+      writeStorage(next);
+      syncServer(next);
+      setCustom(next);
       return view;
     },
     [],
   );
 
   const remove = useCallback((id: string) => {
-    setCustom((prev) => {
-      const next = prev.filter((v) => v.id !== id);
-      writeStorage(next);
-      syncServer(next);
-      return next;
-    });
+    const next = readStorage().filter((v) => v.id !== id);
+    writeStorage(next);
+    syncServer(next);
+    setCustom(next);
   }, []);
 
   return {

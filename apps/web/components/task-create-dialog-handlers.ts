@@ -7,13 +7,26 @@ import { setLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 
-function syncTaskCreateLastUsed(patch: {
+type TaskCreateLastUsedPatch = {
   repository_id?: string;
   branch?: string;
   agent_profile_id?: string;
   executor_profile_id?: string;
-}) {
-  updateUserSettings({ task_create_last_used: patch }).catch(() => {});
+};
+
+let pendingLastUsed: TaskCreateLastUsedPatch = {};
+let lastUsedSync = Promise.resolve();
+
+function syncTaskCreateLastUsed(patch: TaskCreateLastUsedPatch) {
+  pendingLastUsed = { ...pendingLastUsed, ...patch };
+  const payload = { ...pendingLastUsed };
+  lastUsedSync = lastUsedSync
+    .catch(() => undefined)
+    .then(() =>
+      updateUserSettings({ task_create_last_used: payload })
+        .then(() => undefined)
+        .catch(() => undefined),
+    );
 }
 
 /**

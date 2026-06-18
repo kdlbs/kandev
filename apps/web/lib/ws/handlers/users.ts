@@ -80,16 +80,22 @@ function buildBehaviorSettings(payload: UserSettingsUpdatedPayload) {
 }
 
 function buildSidebarSettings(payload: UserSettingsUpdatedPayload) {
+  const sidebarViews = (payload.sidebar_views ?? []).map(fromApiSidebarView).map(migrateView);
   return {
-    sidebarViews: (payload.sidebar_views ?? []).map(fromApiSidebarView),
+    sidebarViews,
     sidebarActiveViewId: payload.sidebar_active_view_id || null,
-    sidebarDraft: payload.sidebar_draft ? fromApiSidebarDraft(payload.sidebar_draft) : null,
+    sidebarDraft: parseSidebarDraftForSettings(payload),
     sidebarTaskPrefs: {
       pinnedTaskIds: payload.sidebar_task_prefs?.pinned_task_ids ?? [],
       orderedTaskIds: payload.sidebar_task_prefs?.ordered_task_ids ?? [],
       subtaskOrderByParentId: payload.sidebar_task_prefs?.subtask_order_by_parent_id ?? {},
     },
   };
+}
+
+function parseSidebarDraftForSettings(payload: UserSettingsUpdatedPayload) {
+  if (payload.sidebar_draft === undefined || payload.sidebar_draft === null) return null;
+  return fromApiSidebarDraft(payload.sidebar_draft);
 }
 
 function buildSidebarTaskPrefsState(state: AppState, payload: UserSettingsUpdatedPayload) {
@@ -103,15 +109,30 @@ function buildSidebarTaskPrefsState(state: AppState, payload: UserSettingsUpdate
 
 function buildSidebarViewsState(state: AppState, payload: UserSettingsUpdatedPayload) {
   const views = (payload.sidebar_views ?? []).map(fromApiSidebarView).map(migrateView);
-  if (views.length === 0) return state.sidebarViews;
+  const draft = parseSidebarDraftForViews(state, payload);
+  if (views.length === 0) return { ...state.sidebarViews, draft };
+  const collapsedById = new Map(
+    state.sidebarViews.views.map((view) => [view.id, view.collapsedGroups]),
+  );
+  const mergedViews = views.map((view) => ({
+    ...view,
+    collapsedGroups: collapsedById.get(view.id) ?? view.collapsedGroups,
+  }));
   const activeViewId =
-    payload.sidebar_active_view_id && views.some((v) => v.id === payload.sidebar_active_view_id)
+    payload.sidebar_active_view_id &&
+    mergedViews.some((v) => v.id === payload.sidebar_active_view_id)
       ? payload.sidebar_active_view_id
       : state.sidebarViews.activeViewId;
   return {
     ...state.sidebarViews,
-    views,
-    activeViewId: views.some((v) => v.id === activeViewId) ? activeViewId : views[0].id,
-    draft: payload.sidebar_draft ? fromApiSidebarDraft(payload.sidebar_draft) : null,
+    views: mergedViews,
+    activeViewId: mergedViews.some((v) => v.id === activeViewId) ? activeViewId : mergedViews[0].id,
+    draft,
   };
+}
+
+function parseSidebarDraftForViews(state: AppState, payload: UserSettingsUpdatedPayload) {
+  if (payload.sidebar_draft === undefined) return state.sidebarViews.draft;
+  if (payload.sidebar_draft === null) return null;
+  return fromApiSidebarDraft(payload.sidebar_draft);
 }

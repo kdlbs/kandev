@@ -86,15 +86,24 @@ function syncServer(next: SavedPreset[]) {
   updateUserSettings({ github_saved_presets: next }).catch(() => {});
 }
 
+function snapshotKey(value: SavedPreset[]): string {
+  return JSON.stringify(value);
+}
+
 export function useSavedPresets() {
   const presets = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   useEffect(() => {
     let cancelled = false;
+    const initialKey = snapshotKey(readStorage());
     fetchUserSettings({ cache: "no-store" })
       .then((response) => {
         const serverPresets = readServerPresets(response.settings.github_saved_presets);
-        if (!cancelled && serverPresets) publish(serverPresets);
+        if (cancelled || !serverPresets) return;
+        const local = readStorage();
+        if (snapshotKey(local) !== initialKey) return;
+        if (serverPresets.length === 0 && local.length > 0) return;
+        publish(serverPresets);
       })
       .catch(() => {});
     return () => {
@@ -108,14 +117,14 @@ export function useSavedPresets() {
       id: `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
       createdAt: new Date().toISOString(),
     };
-    const next = [...(snapshot ?? readStorage()), preset];
+    const next = [...readStorage(), preset];
     publish(next);
     syncServer(next);
     return preset;
   }, []);
 
   const remove = useCallback((id: string) => {
-    const next = (snapshot ?? readStorage()).filter((p) => p.id !== id);
+    const next = readStorage().filter((p) => p.id !== id);
     publish(next);
     syncServer(next);
   }, []);

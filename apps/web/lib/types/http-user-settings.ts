@@ -104,11 +104,11 @@ export type UserSettingsUpdatePayload = {
   sidebar_draft?: SidebarViewDraftApi | null;
   sidebar_task_prefs?: SidebarTaskPrefsApi;
   task_create_last_used?: TaskCreateLastUsedApi;
-  jira_saved_views?: unknown;
-  jira_task_presets?: unknown;
-  github_saved_presets?: unknown;
-  github_default_query_presets?: unknown;
-  gitlab_saved_presets?: unknown;
+  jira_saved_views?: unknown[] | null;
+  jira_task_presets?: unknown[] | null;
+  github_saved_presets?: unknown[] | null;
+  github_default_query_presets?: object | null;
+  gitlab_saved_presets?: unknown[] | null;
   default_utility_agent_id?: string;
   default_utility_model?: string;
   keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;

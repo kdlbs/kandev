@@ -112,4 +112,47 @@ describe("hydrateState — sidebar views from user settings", () => {
       group: "workflow",
     });
   });
+
+  it("clears stale local draft when backend draft is null", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.sidebarViews.draft = {
+        baseViewId: "local",
+        filters: [],
+        sort: { key: "state", direction: "asc" },
+        group: "state",
+      };
+      hydrateState(draft, {
+        userSettings: {
+          sidebarDraft: null,
+        },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.sidebarViews.draft).toBeNull();
+  });
+
+  it("does not replace local task prefs with empty backend defaults during first hydration", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.sidebarTaskPrefs = {
+        pinnedTaskIds: ["local-pin"],
+        orderedTaskIds: ["local-order"],
+        subtaskOrderByParentId: { parent: ["child"] },
+      };
+      hydrateState(draft, {
+        userSettings: {
+          sidebarTaskPrefs: {
+            pinnedTaskIds: [],
+            orderedTaskIds: [],
+            subtaskOrderByParentId: {},
+          },
+        },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.sidebarTaskPrefs).toEqual({
+      pinnedTaskIds: ["local-pin"],
+      orderedTaskIds: ["local-order"],
+      subtaskOrderByParentId: { parent: ["child"] },
+    });
+  });
 });

@@ -9,14 +9,30 @@ import type { UISlice } from "./types";
 
 type ImmerSet = (recipe: (draft: UISlice) => void, shouldReplace?: false | undefined) => void;
 
-function syncSidebarTaskPrefs(prefs: UISlice["sidebarTaskPrefs"]) {
-  updateUserSettings({
+let sidebarTaskPrefsSync = Promise.resolve();
+
+function syncSidebarTaskPrefs(prefs: UISlice["sidebarTaskPrefs"], set: ImmerSet) {
+  const payload = {
     sidebar_task_prefs: {
-      pinned_task_ids: prefs.pinnedTaskIds,
-      ordered_task_ids: prefs.orderedTaskIds,
-      subtask_order_by_parent_id: prefs.subtaskOrderByParentId,
+      pinned_task_ids: [...prefs.pinnedTaskIds],
+      ordered_task_ids: [...prefs.orderedTaskIds],
+      subtask_order_by_parent_id: Object.fromEntries(
+        Object.entries(prefs.subtaskOrderByParentId).map(([key, ids]) => [key, [...ids]]),
+      ),
     },
-  }).catch(() => {});
+  };
+  sidebarTaskPrefsSync = sidebarTaskPrefsSync
+    .catch(() => undefined)
+    .then(() =>
+      updateUserSettings(payload)
+        .catch((err) => {
+          const message = err instanceof Error ? err.message : "Failed to sync sidebar task prefs";
+          set((draft) => {
+            draft.sidebarViews.syncError = message;
+          });
+        })
+        .then(() => undefined),
+    );
 }
 
 export function buildSidebarTaskPrefsActions(set: ImmerSet, get: () => UISlice) {
@@ -29,14 +45,14 @@ export function buildSidebarTaskPrefsActions(set: ImmerSet, get: () => UISlice) 
         else list.splice(idx, 1);
         setStoredPinnedTaskIds(list);
       });
-      syncSidebarTaskPrefs(get().sidebarTaskPrefs);
+      syncSidebarTaskPrefs(get().sidebarTaskPrefs, set);
     },
     setSidebarTaskOrder: (orderedTaskIds: string[]) => {
       set((draft) => {
         draft.sidebarTaskPrefs.orderedTaskIds = orderedTaskIds;
         setStoredOrderedTaskIds(orderedTaskIds);
       });
-      syncSidebarTaskPrefs(get().sidebarTaskPrefs);
+      syncSidebarTaskPrefs(get().sidebarTaskPrefs, set);
     },
     setSubtaskOrder: (parentTaskId: string, orderedSubtaskIds: string[]) => {
       set((draft) => {
@@ -45,7 +61,7 @@ export function buildSidebarTaskPrefsActions(set: ImmerSet, get: () => UISlice) 
         else map[parentTaskId] = orderedSubtaskIds;
         setStoredSubtaskOrderByParentId(map);
       });
-      syncSidebarTaskPrefs(get().sidebarTaskPrefs);
+      syncSidebarTaskPrefs(get().sidebarTaskPrefs, set);
     },
     removeTaskFromSidebarPrefs: (taskId: string) => {
       let changed = false;
@@ -68,7 +84,7 @@ export function buildSidebarTaskPrefsActions(set: ImmerSet, get: () => UISlice) 
           setStoredSubtaskOrderByParentId(prefs.subtaskOrderByParentId);
         }
       });
-      if (changed) syncSidebarTaskPrefs(get().sidebarTaskPrefs);
+      if (changed) syncSidebarTaskPrefs(get().sidebarTaskPrefs, set);
     },
   };
 }

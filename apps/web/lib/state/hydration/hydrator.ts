@@ -103,12 +103,32 @@ function bridgeSidebarViewsFromUserSettings(
   ) {
     draft.sidebarViews.activeViewId = draft.sidebarViews.views[0].id;
   }
-  if (userSettings.sidebarDraft) {
+  if (userSettings.sidebarDraft !== undefined) {
     draft.sidebarViews.draft = userSettings.sidebarDraft;
   }
-  if (userSettings.sidebarTaskPrefs) {
+  if (userSettings.sidebarTaskPrefs && shouldHydrateSidebarTaskPrefs(draft, userSettings)) {
     draft.sidebarTaskPrefs = userSettings.sidebarTaskPrefs;
   }
+}
+
+function shouldHydrateSidebarTaskPrefs(
+  draft: Draft<AppState>,
+  userSettings: Partial<AppState["userSettings"]>,
+): boolean {
+  const server = userSettings.sidebarTaskPrefs;
+  if (!server) return false;
+  if (
+    server.pinnedTaskIds.length > 0 ||
+    server.orderedTaskIds.length > 0 ||
+    Object.keys(server.subtaskOrderByParentId).length > 0
+  ) {
+    return true;
+  }
+  return (
+    draft.sidebarTaskPrefs.pinnedTaskIds.length === 0 &&
+    draft.sidebarTaskPrefs.orderedTaskIds.length === 0 &&
+    Object.keys(draft.sidebarTaskPrefs.subtaskOrderByParentId).length === 0
+  );
 }
 
 /** Hydrate session slices, protecting active sessions. */

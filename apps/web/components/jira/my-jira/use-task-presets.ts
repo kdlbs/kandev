@@ -62,6 +62,10 @@ function syncServer(presets: JiraStoredPreset[] | null): void {
   updateUserSettings({ jira_task_presets: presets }).catch(() => {});
 }
 
+function snapshotKey(presets: JiraStoredPreset[] | null): string {
+  return JSON.stringify(presets);
+}
+
 export function useJiraTaskPresets() {
   const [stored, setStored] = useState<JiraStoredPreset[] | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -70,6 +74,7 @@ export function useJiraTaskPresets() {
     let cancelled = false;
     async function init() {
       const value = readStorage();
+      const initialKey = snapshotKey(value);
       if (!cancelled) {
         setStored(value);
         setLoaded(true);
@@ -77,6 +82,9 @@ export function useJiraTaskPresets() {
       const response = await fetchUserSettings({ cache: "no-store" }).catch(() => null);
       const serverValue = readServerPresets(response?.settings.jira_task_presets);
       if (!cancelled && serverValue !== undefined) {
+        const local = readStorage();
+        if (snapshotKey(local) !== initialKey) return;
+        if (serverValue === null && local !== null) return;
         writeStorage(serverValue);
         setStored(serverValue);
       }
