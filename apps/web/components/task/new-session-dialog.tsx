@@ -402,7 +402,7 @@ function NewSessionForm({
   );
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="min-w-0 space-y-4">
       <SessionFormHeader
         executorLabel={executorLabel}
         worktreeBranch={worktreeBranch}
@@ -524,9 +524,9 @@ export function NewSessionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[520px]">
+      <DialogContent className="min-w-0 overflow-hidden sm:max-w-[520px]">
         <DialogHeader>
-          <DialogTitle className="text-sm font-medium">
+          <DialogTitle className="min-w-0 break-words pr-6 text-sm font-medium">
             {handoffLabel ? (
               <>
                 Hand off to <span className="text-foreground">{handoffLabel}</span>

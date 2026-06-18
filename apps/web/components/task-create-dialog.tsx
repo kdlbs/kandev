@@ -493,7 +493,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent
         data-testid="create-task-dialog"
-        className="w-full h-full max-w-full max-h-full rounded-none sm:w-[900px] sm:h-auto sm:max-w-none sm:max-h-[85vh] sm:rounded-lg flex flex-col"
+        className="w-full h-full min-w-0 max-w-full max-h-full overflow-hidden rounded-none sm:w-[900px] sm:h-auto sm:max-w-none sm:max-h-[85vh] sm:rounded-lg flex flex-col"
       >
         <DialogHeader>
           <DialogHeaderContent
@@ -503,7 +503,10 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             initialTitle={props.initialValues?.title}
           />
         </DialogHeader>
-        <form onSubmit={guardedHandleSubmit} className="flex flex-col gap-4 overflow-hidden">
+        <form
+          onSubmit={guardedHandleSubmit}
+          className="flex min-w-0 flex-col gap-4 overflow-hidden"
+        >
           <DialogFormBody
             {...buildDialogFormBodyProps(setup, props)}
             onVoiceAutoSend={handleVoiceAutoSend}

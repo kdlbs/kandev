@@ -33,19 +33,21 @@ export function EnvironmentBadges({
   description?: string;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+    <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
       {executorLabel && (
         <Badge variant="secondary" className="text-xs font-normal">
           {executorLabel}
         </Badge>
       )}
       {worktreeBranch && (
-        <Badge variant="outline" className="text-xs font-normal gap-1">
+        <Badge variant="outline" className="min-w-0 max-w-full gap-1 text-xs font-normal">
           <IconGitBranch className="h-3 w-3" />
-          {worktreeBranch}
+          <span className="min-w-0 truncate">{worktreeBranch}</span>
         </Badge>
       )}
-      <span>{description ?? "Same environment as current session"}</span>
+      <span className="min-w-0 break-words">
+        {description ?? "Same environment as current session"}
+      </span>
     </div>
   );
 }
@@ -80,9 +82,9 @@ export function ContextSelect({
   return (
     <div className="space-y-1.5">
       <label className="text-xs font-medium text-muted-foreground">Context</label>
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 items-center gap-2">
         <Select value={value} onValueChange={onValueChange} disabled={isSummarizing}>
-          <SelectTrigger className="w-full text-xs">
+          <SelectTrigger className="w-full min-w-0 text-xs">
             <SelectValue>{isSummarizing ? "Summarizing..." : displayLabel}</SelectValue>
           </SelectTrigger>
           <SelectContent>

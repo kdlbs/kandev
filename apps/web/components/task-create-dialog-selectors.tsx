@@ -270,7 +270,7 @@ export const InlineTaskName = memo(function InlineTaskName({
       onChange={(e) => onChange(e.target.value)}
       placeholder="Task name"
       data-testid="task-title-input"
-      className="w-full border border-input bg-input/20 dark:bg-input/30 text-sm font-medium rounded-md px-3 py-2 placeholder:text-muted-foreground/70 outline-none focus-visible:border-ring transition-colors"
+      className="w-full min-w-0 max-w-full border border-input bg-input/20 dark:bg-input/30 text-sm font-medium rounded-md px-3 py-2 placeholder:text-muted-foreground/70 outline-none focus-visible:border-ring transition-colors"
     />
   );
 });
@@ -733,13 +733,13 @@ export const TaskFormInputs = memo(function TaskFormInputs({
 
   return (
     <div
-      className="relative"
+      className="relative min-w-0 max-w-full"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
       <div
-        className={`rounded-md border border-input bg-transparent ${contextItems.length > 0 ? "ring-0" : ""}`}
+        className={`min-w-0 max-w-full rounded-md border border-input bg-transparent ${contextItems.length > 0 ? "ring-0" : ""}`}
       >
         <ContextZone items={contextItems} />
         <Textarea
@@ -756,7 +756,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
           onPaste={handlePaste}
           data-testid="task-description-input"
           rows={2}
-          className={`border-0 focus-visible:ring-0 focus-visible:ring-offset-0 ${isSessionMode ? "min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]" : "min-h-[96px] max-h-[240px] resize-y overflow-auto text-[13px]"}`}
+          className={`min-w-0 max-w-full overflow-wrap-anywhere border-0 focus-visible:ring-0 focus-visible:ring-offset-0 ${isSessionMode ? "min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]" : "min-h-[96px] max-h-[240px] resize-y overflow-auto text-[13px]"}`}
           required={isSessionMode}
           disabled={disabled}
         />

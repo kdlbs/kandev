@@ -128,17 +128,17 @@ export function PromptZone({
   const inputDisabled = isCreating || isSummarizing;
   return (
     <div
-      className="relative"
+      className="relative min-w-0 max-w-full"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div className="rounded-md border border-input bg-transparent">
+      <div className="min-w-0 max-w-full rounded-md border border-input bg-transparent">
         <ContextZone items={contextItems} />
         <Textarea
           ref={promptRef}
           placeholder="What should the agent work on?"
-          className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]"
+          className="min-w-0 max-w-full overflow-wrap-anywhere border-0 focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]"
           autoFocus
           disabled={inputDisabled}
           data-testid="subtask-prompt-input"
@@ -400,7 +400,7 @@ export function SubtaskFormBody({
   const showWorktreeBadge = shouldShowWorktreeBadge(fs, worktreeBranch, parentRepositoryId);
   const inheritParent = workspaceMode === "inherit_parent";
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
+    <form onSubmit={onSubmit} className="min-w-0 space-y-4">
       <div className="space-y-1.5">
         <label htmlFor="subtask-title-input" className="text-xs font-medium text-muted-foreground">
           Title
@@ -410,7 +410,7 @@ export function SubtaskFormBody({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Subtask title"
-          className="text-sm"
+          className="min-w-0 max-w-full text-sm"
           data-testid="subtask-title-input"
           disabled={isCreating}
         />

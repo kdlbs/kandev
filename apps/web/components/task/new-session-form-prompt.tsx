@@ -52,13 +52,18 @@ export function SessionPromptField({
   onFileInputChange,
 }: SessionPromptFieldProps) {
   return (
-    <div className="relative" onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
-      <div className="rounded-md border border-input bg-transparent">
+    <div
+      className="relative min-w-0 max-w-full"
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
+      <div className="min-w-0 max-w-full rounded-md border border-input bg-transparent">
         <ContextZone items={contextItems} />
         <Textarea
           ref={promptRef}
           placeholder="What should the agent work on?"
-          className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]"
+          className="min-w-0 max-w-full overflow-wrap-anywhere border-0 focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]"
           autoFocus
           disabled={isBusy}
           onInput={onPromptInput}
