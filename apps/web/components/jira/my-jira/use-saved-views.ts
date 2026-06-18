@@ -17,6 +17,7 @@ export type SavedView = {
 
 const STORAGE_KEY = "kandev:jira:saved-views:v1";
 const MIGRATED_KEY = "kandev:jira:saved-views:migrated-to-backend:v1";
+const SYNC_FAILED_KEY = "kandev:jira:saved-views:sync-failed:v1";
 
 const BUILTIN_VIEWS: SavedView[] = [
   {
@@ -88,8 +89,29 @@ function readServerViews(value: unknown): SavedView[] | null {
   return value.filter(isSavedView);
 }
 
-function syncServer(views: SavedView[]): void {
-  updateUserSettings({ jira_saved_views: views }).catch(() => {});
+function hasFailedSync(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(SYNC_FAILED_KEY) === "1";
+}
+
+function setFailedSync(failed: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (failed) window.localStorage.setItem(SYNC_FAILED_KEY, "1");
+    else window.localStorage.removeItem(SYNC_FAILED_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function syncServer(views: SavedView[]): Promise<void> {
+  return updateUserSettings({ jira_saved_views: views })
+    .then(() => {
+      setFailedSync(false);
+    })
+    .catch(() => {
+      setFailedSync(true);
+    });
 }
 
 function snapshotKey(views: SavedView[]): string {
@@ -129,8 +151,12 @@ export function useSavedViews() {
       if (!cancelled && serverViews) {
         const local = readStorage();
         if (snapshotKey(local) !== initialKey) return;
+        if (hasFailedSync() && local.length > 0) {
+          void syncServer(local);
+          return;
+        }
         if (serverViews.length === 0 && local.length > 0 && !hasMigratedToBackend()) {
-          syncServer(local);
+          void syncServer(local);
           markMigratedToBackend();
           return;
         }
@@ -156,7 +182,7 @@ export function useSavedViews() {
       setCustom((prev) => {
         const next = [...latestSavedViews(prev), view];
         writeStorage(next);
-        syncServer(next);
+        void syncServer(next);
         markMigratedToBackend();
         return next;
       });
@@ -169,7 +195,7 @@ export function useSavedViews() {
     setCustom((prev) => {
       const next = latestSavedViews(prev).filter((v) => v.id !== id);
       writeStorage(next);
-      syncServer(next);
+      void syncServer(next);
       markMigratedToBackend();
       return next;
     });

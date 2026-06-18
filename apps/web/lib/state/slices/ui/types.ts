@@ -212,6 +212,7 @@ export type UISliceActions = {
   toggleSidebarGroupCollapsed: (viewId: string, groupKey: string) => void;
   toggleSubtaskCollapsed: (parentTaskId: string) => void;
   clearSidebarSyncError: () => void;
+  clearSidebarTaskPrefsSyncError: () => void;
   migrateLocalViewsToBackend: () => void;
   setKanbanPreviewedTaskId: (taskId: string | null) => void;
   togglePinnedTask: (taskId: string) => void;

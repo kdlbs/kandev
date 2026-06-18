@@ -25,6 +25,11 @@ function syncSidebarTaskPrefs(prefs: UISlice["sidebarTaskPrefs"], set: ImmerSet)
     .catch(() => undefined)
     .then(() =>
       updateUserSettings(payload)
+        .then(() => {
+          set((draft) => {
+            draft.sidebarTaskPrefs.syncError = null;
+          });
+        })
         .catch((err) => {
           const message = err instanceof Error ? err.message : "Failed to sync sidebar task prefs";
           set((draft) => {
@@ -37,6 +42,10 @@ function syncSidebarTaskPrefs(prefs: UISlice["sidebarTaskPrefs"], set: ImmerSet)
 
 export function buildSidebarTaskPrefsActions(set: ImmerSet, get: () => UISlice) {
   return {
+    clearSidebarTaskPrefsSyncError: () =>
+      set((draft) => {
+        draft.sidebarTaskPrefs.syncError = null;
+      }),
     togglePinnedTask: (taskId: string) => {
       set((draft) => {
         const list = draft.sidebarTaskPrefs.pinnedTaskIds;

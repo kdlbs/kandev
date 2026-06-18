@@ -131,7 +131,7 @@ describe("hydrateState — sidebar views from user settings", () => {
     expect(result.sidebarViews.draft).toBeNull();
   });
 
-  it("does not replace local task prefs with empty backend defaults during first hydration", () => {
+  it("hydrates sidebar task prefs from backend, including explicit clears", () => {
     const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
       draft.sidebarTaskPrefs = {
         pinnedTaskIds: ["local-pin"],
@@ -150,9 +150,36 @@ describe("hydrateState — sidebar views from user settings", () => {
     });
 
     expect(result.sidebarTaskPrefs).toEqual({
-      pinnedTaskIds: ["local-pin"],
-      orderedTaskIds: ["local-order"],
-      subtaskOrderByParentId: { parent: ["child"] },
+      pinnedTaskIds: [],
+      orderedTaskIds: [],
+      subtaskOrderByParentId: {},
+    });
+  });
+
+  it("uses backend sidebar task prefs as the authoritative hydrated value", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.sidebarTaskPrefs = {
+        pinnedTaskIds: ["local-pin"],
+        orderedTaskIds: ["local-order"],
+        subtaskOrderByParentId: { shared: ["local-child"], localOnly: ["child"] },
+        syncError: "retry",
+      };
+      hydrateState(draft, {
+        userSettings: {
+          sidebarTaskPrefs: {
+            pinnedTaskIds: ["server-pin"],
+            orderedTaskIds: ["server-order"],
+            subtaskOrderByParentId: { shared: ["server-child"], serverOnly: ["child"] },
+          },
+        },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.sidebarTaskPrefs).toEqual({
+      pinnedTaskIds: ["server-pin"],
+      orderedTaskIds: ["server-order"],
+      subtaskOrderByParentId: { shared: ["server-child"], serverOnly: ["child"] },
+      syncError: "retry",
     });
   });
 });

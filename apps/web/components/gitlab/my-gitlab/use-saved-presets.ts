@@ -5,6 +5,7 @@ import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/setting
 
 const STORAGE_KEY = "kandev:gitlab-presets:v1";
 const MIGRATED_KEY = "kandev:gitlab-presets:migrated-to-backend:v1";
+const SYNC_FAILED_KEY = "kandev:gitlab-presets:sync-failed:v1";
 
 export type SavedPreset = {
   id: string;
@@ -81,8 +82,29 @@ function readServerPresets(value: unknown): SavedPreset[] | null {
   return value.filter(isSavedPreset);
 }
 
-function syncServer(next: SavedPreset[]) {
-  updateUserSettings({ gitlab_saved_presets: next }).catch(() => {});
+function hasFailedSync(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(SYNC_FAILED_KEY) === "1";
+}
+
+function setFailedSync(failed: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (failed) window.localStorage.setItem(SYNC_FAILED_KEY, "1");
+    else window.localStorage.removeItem(SYNC_FAILED_KEY);
+  } catch {
+    /* ignore storage failures */
+  }
+}
+
+function syncServer(next: SavedPreset[]): Promise<void> {
+  return updateUserSettings({ gitlab_saved_presets: next })
+    .then(() => {
+      setFailedSync(false);
+    })
+    .catch(() => {
+      setFailedSync(true);
+    });
 }
 
 function snapshotKey(value: SavedPreset[]): string {
@@ -123,8 +145,12 @@ export function useSavedPresets() {
         if (cancelled || !serverPresets) return;
         const local = readStorage();
         if (snapshotKey(local) !== initialKey) return;
+        if (hasFailedSync() && local.length > 0) {
+          void syncServer(local);
+          return;
+        }
         if (serverPresets.length === 0 && local.length > 0 && !hasMigratedToBackend()) {
-          syncServer(local);
+          void syncServer(local);
           markMigratedToBackend();
           return;
         }
@@ -149,7 +175,7 @@ export function useSavedPresets() {
     };
     const next = [...readStorage(), preset];
     publish(next);
-    syncServer(next);
+    void syncServer(next);
     markMigratedToBackend();
     return preset;
   }, []);
@@ -157,7 +183,7 @@ export function useSavedPresets() {
   const remove = useCallback((id: string) => {
     const next = readStorage().filter((p) => p.id !== id);
     publish(next);
-    syncServer(next);
+    void syncServer(next);
     markMigratedToBackend();
   }, []);
 

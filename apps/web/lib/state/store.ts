@@ -517,6 +517,7 @@ export type AppState = {
   toggleSidebarGroupCollapsed: UIA["toggleSidebarGroupCollapsed"];
   toggleSubtaskCollapsed: UIA["toggleSubtaskCollapsed"];
   clearSidebarSyncError: UIA["clearSidebarSyncError"];
+  clearSidebarTaskPrefsSyncError: UIA["clearSidebarTaskPrefsSyncError"];
   migrateLocalViewsToBackend: UIA["migrateLocalViewsToBackend"];
   setKanbanPreviewedTaskId: UIA["setKanbanPreviewedTaskId"];
   togglePinnedTask: UIA["togglePinnedTask"];

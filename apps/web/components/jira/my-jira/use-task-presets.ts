@@ -11,6 +11,7 @@ import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/setting
 
 const STORAGE_KEY = "kandev:jira:task-presets:v1";
 const MIGRATED_KEY = "kandev:jira:task-presets:migrated-to-backend:v1";
+const SYNC_FAILED_KEY = "kandev:jira:task-presets:sync-failed:v1";
 
 function isStoredPreset(v: unknown): v is JiraStoredPreset {
   if (!v || typeof v !== "object") return false;
@@ -59,8 +60,29 @@ function readServerPresets(value: unknown): JiraStoredPreset[] | null | undefine
   return value.filter(isStoredPreset);
 }
 
-function syncServer(presets: JiraStoredPreset[] | null): void {
-  updateUserSettings({ jira_task_presets: presets }).catch(() => {});
+function hasFailedSync(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(SYNC_FAILED_KEY) === "1";
+}
+
+function setFailedSync(failed: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (failed) window.localStorage.setItem(SYNC_FAILED_KEY, "1");
+    else window.localStorage.removeItem(SYNC_FAILED_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function syncServer(presets: JiraStoredPreset[] | null): Promise<void> {
+  return updateUserSettings({ jira_task_presets: presets })
+    .then(() => {
+      setFailedSync(false);
+    })
+    .catch(() => {
+      setFailedSync(true);
+    });
 }
 
 function snapshotKey(presets: JiraStoredPreset[] | null): string {
@@ -99,8 +121,12 @@ export function useJiraTaskPresets() {
       if (!cancelled && serverValue !== undefined) {
         const local = readStorage();
         if (snapshotKey(local) !== initialKey) return;
+        if (hasFailedSync() && local !== null) {
+          void syncServer(local);
+          return;
+        }
         if (serverValue === null && local !== null && !hasMigratedToBackend()) {
-          syncServer(local);
+          void syncServer(local);
           markMigratedToBackend();
           return;
         }
@@ -117,14 +143,14 @@ export function useJiraTaskPresets() {
 
   const save = useCallback((next: JiraStoredPreset[]) => {
     writeStorage(next);
-    syncServer(next);
+    void syncServer(next);
     markMigratedToBackend();
     setStored(next);
   }, []);
 
   const reset = useCallback(() => {
     writeStorage(null);
-    syncServer(null);
+    void syncServer(null);
     markMigratedToBackend();
     setStored(null);
   }, []);

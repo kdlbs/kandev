@@ -107,35 +107,10 @@ function bridgeSidebarViewsFromUserSettings(
     draft.sidebarViews.draft = userSettings.sidebarDraft;
   }
   if (userSettings.sidebarTaskPrefs) {
-    draft.sidebarTaskPrefs = mergeSidebarTaskPrefs(draft, userSettings.sidebarTaskPrefs);
+    const nextPrefs = { ...userSettings.sidebarTaskPrefs };
+    if (draft.sidebarTaskPrefs.syncError) nextPrefs.syncError = draft.sidebarTaskPrefs.syncError;
+    draft.sidebarTaskPrefs = nextPrefs;
   }
-}
-
-function mergeSidebarTaskPrefs(
-  draft: Draft<AppState>,
-  server: AppState["userSettings"]["sidebarTaskPrefs"],
-): AppState["sidebarTaskPrefs"] {
-  const local = draft.sidebarTaskPrefs;
-  const serverSubtaskKeys = Object.keys(server.subtaskOrderByParentId);
-  const localIsEmpty =
-    local.pinnedTaskIds.length === 0 &&
-    local.orderedTaskIds.length === 0 &&
-    Object.keys(local.subtaskOrderByParentId).length === 0;
-  const serverIsEmpty =
-    server.pinnedTaskIds.length === 0 &&
-    server.orderedTaskIds.length === 0 &&
-    serverSubtaskKeys.length === 0;
-  if (serverIsEmpty && !localIsEmpty) return local;
-  const merged: AppState["sidebarTaskPrefs"] = {
-    pinnedTaskIds: server.pinnedTaskIds.length > 0 ? server.pinnedTaskIds : local.pinnedTaskIds,
-    orderedTaskIds: server.orderedTaskIds.length > 0 ? server.orderedTaskIds : local.orderedTaskIds,
-    subtaskOrderByParentId:
-      serverSubtaskKeys.length > 0
-        ? { ...local.subtaskOrderByParentId, ...server.subtaskOrderByParentId }
-        : local.subtaskOrderByParentId,
-  };
-  if (local.syncError) merged.syncError = local.syncError;
-  return merged;
 }
 
 /** Hydrate session slices, protecting active sessions. */

@@ -10,6 +10,7 @@ import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/setting
 
 const STORAGE_KEY = "kandev:github-default-queries:v1";
 const MIGRATED_KEY = "kandev:github-default-queries:migrated-to-backend:v1";
+const SYNC_FAILED_KEY = "kandev:github-default-queries:sync-failed:v1";
 
 export type StoredQueryPreset = {
   value: string;
@@ -81,8 +82,29 @@ function readServerDefaults(value: unknown): StoredDefaults | null | undefined {
   return value as StoredDefaults;
 }
 
-function syncServer(defaults: StoredDefaults | null) {
-  updateUserSettings({ github_default_query_presets: defaults }).catch(() => {});
+function hasFailedSync(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(SYNC_FAILED_KEY) === "1";
+}
+
+function setFailedSync(failed: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (failed) window.localStorage.setItem(SYNC_FAILED_KEY, "1");
+    else window.localStorage.removeItem(SYNC_FAILED_KEY);
+  } catch {
+    /* ignore storage failures */
+  }
+}
+
+function syncServer(defaults: StoredDefaults | null): Promise<void> {
+  return updateUserSettings({ github_default_query_presets: defaults })
+    .then(() => {
+      setFailedSync(false);
+    })
+    .catch(() => {
+      setFailedSync(true);
+    });
 }
 
 function snapshotKey(value: StoredDefaults | null): string {
@@ -131,8 +153,12 @@ export function useDefaultQueryPresets() {
         if (cancelled || serverDefaults === undefined) return;
         const local = getSnapshot();
         if (snapshotKey(local) !== initialKey) return;
+        if (hasFailedSync() && local !== null) {
+          void syncServer(local);
+          return;
+        }
         if (serverDefaults === null && local !== null && !hasMigratedToBackend()) {
-          syncServer(local);
+          void syncServer(local);
           markMigratedToBackend();
           return;
         }
@@ -150,13 +176,13 @@ export function useDefaultQueryPresets() {
 
   const save = useCallback((defaults: StoredDefaults) => {
     publish(defaults);
-    syncServer(defaults);
+    void syncServer(defaults);
     markMigratedToBackend();
   }, []);
 
   const reset = useCallback(() => {
     publish(null);
-    syncServer(null);
+    void syncServer(null);
     markMigratedToBackend();
   }, []);
 
