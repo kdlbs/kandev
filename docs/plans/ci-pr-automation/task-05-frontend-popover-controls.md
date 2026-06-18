@@ -21,7 +21,7 @@ spec: "../../specs/ui/ci-pr-automation.md"
 ## Verification
 
 ```bash
-cd apps && rtk pnpm --filter @kandev/web test -- pr-automation-controls
+cd apps && rtk pnpm --filter @kandev/web test -- pr-ci-popover.automation.test.tsx
 cd apps && rtk pnpm --filter @kandev/web test -- pr-ci-popover
 cd apps && rtk pnpm --filter @kandev/web typecheck
 ```
@@ -31,9 +31,9 @@ cd apps && rtk pnpm --filter @kandev/web typecheck
 - `apps/web/components/github/pr-ci-popover.tsx`
 - `apps/web/components/github/multi-pr-ci-popover.tsx`
 - `apps/web/components/github/pr-status-chip.tsx`
-- `apps/web/components/github/pr-automation-controls.tsx`
-- `apps/web/components/github/pr-automation-controls.test.tsx`
-- `apps/web/components/github/pr-ci-popover.test.tsx`
+- `apps/web/components/github/pr-ci-automation-controls.tsx`
+- `apps/web/components/github/pr-ci-popover.automation.test.tsx`
+- `apps/web/components/github/pr-ci-popover.test.ts`
 - `apps/web/components/github/pr-status-chip.test.tsx`
 - `apps/web/components/settings/prompts-settings.tsx` only if the new built-in prompt needs explicit UI affordances
 
