@@ -184,6 +184,20 @@ test.describe("Quick Chat", () => {
     await expect(testPage.getByText("/error")).toBeVisible({ timeout: 5_000 });
   });
 
+  test("model selector shows dynamic session options before first message", async ({
+    testPage,
+  }) => {
+    const dialog = await openQuickChatWithAgent(testPage);
+
+    const trigger = dialog.getByRole("button", { name: "Session model settings" });
+    await expect(trigger).toContainText("Mock Fast", { timeout: 15_000 });
+    await trigger.click();
+
+    await expect(testPage.getByTestId("config-option-section-effort")).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+
   test("supports multiple chat tabs and switching between them", async ({ testPage }) => {
     test.setTimeout(90_000);
 

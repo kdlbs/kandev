@@ -4,6 +4,12 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { TaskSessionState, Message } from "@/lib/types/http";
 import { listTaskSessionMessages } from "@/lib/api";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import {
+  useUnknownSessionSubscriptionRetry,
+  useUnknownSessionSubscriptionRetryEffect,
+} from "./use-session-subscription-retry";
+
+export { shouldRetryUnknownSessionSubscription } from "./use-session-subscription-retry";
 
 const INITIAL_FETCH_LIMIT = 100;
 const BACKFILL_PAGE_LIMIT = 100;
@@ -563,6 +569,46 @@ function useSessionMessageInputs(taskSessionId: string | null) {
   return { messages, messagesMeta, taskSessionState, activeTurnId, connectionStatus };
 }
 
+function useSessionLifecycleSubscriptions(params: {
+  taskSessionId: string | null;
+  taskSessionState: TaskSessionState | null;
+  connectionStatus: string;
+  activeTurnId: string | null;
+  messages: Message[];
+  store: ReturnType<typeof useAppStoreApi>;
+}) {
+  const { taskSessionId, taskSessionState, connectionStatus, activeTurnId, messages, store } =
+    params;
+  // Bool flips exactly once when a freshly-adopted session leaves STARTING,
+  // so the subscription effect re-runs then (covering the backend race where
+  // session.subscribe arrives before the session is fully constructed) without
+  // churning on every subsequent RUNNING ↔ WAITING_FOR_INPUT transition.
+  const isSessionStartingOrUnknown = taskSessionState === null || taskSessionState === "STARTING";
+  const unknownSessionRetryToken = useUnknownSessionSubscriptionRetry({
+    taskSessionId,
+    taskSessionState,
+    connectionStatus,
+  });
+
+  useSessionSubscription(taskSessionId, connectionStatus, isSessionStartingOrUnknown, store);
+  useUnknownSessionSubscriptionRetryEffect({
+    taskSessionId,
+    connectionStatus,
+    retryToken: unknownSessionRetryToken,
+  });
+  useResyncOnTurnSettle(taskSessionId, taskSessionState, connectionStatus, store);
+  useRunningMessageBackfill(
+    taskSessionId,
+    shouldRunMessageBackfill({
+      taskSessionState,
+      connectionStatus,
+      activeTurnId,
+      messages,
+    }),
+    store,
+  );
+}
+
 export function useSessionMessages(taskSessionId: string | null): UseSessionMessagesReturn {
   const store = useAppStoreApi();
   const { messages, messagesMeta, taskSessionState, activeTurnId, connectionStatus } =
@@ -646,24 +692,15 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     fetchRefs,
   ]);
 
-  // Bool flips exactly once when a freshly-adopted session leaves STARTING,
-  // so the subscription effect re-runs then (covering the backend race where
-  // session.subscribe arrives before the session is fully constructed) without
-  // churning on every subsequent RUNNING ↔ WAITING_FOR_INPUT transition.
-  const isSessionStartingOrUnknown = taskSessionState === null || taskSessionState === "STARTING";
-
-  useSessionSubscription(taskSessionId, connectionStatus, isSessionStartingOrUnknown, store);
-  useResyncOnTurnSettle(taskSessionId, taskSessionState, connectionStatus, store);
-  useRunningMessageBackfill(
+  useSessionLifecycleSubscriptions({
     taskSessionId,
-    shouldRunMessageBackfill({
-      taskSessionState,
-      connectionStatus,
-      activeTurnId,
-      messages,
-    }),
+    taskSessionState,
+    connectionStatus,
+    activeTurnId,
+    messages,
     store,
-  );
+  });
+
   useVisibilityBackfill(taskSessionId, store);
 
   useTerminalStateFetch(taskSessionId, taskSessionState, hasAgentMessage, fetchRefs);
