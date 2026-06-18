@@ -54,6 +54,70 @@ func Split(raw string) (path string, startLine, lineCount int) {
 	return base, start, count
 }
 
+// File is one file reference parsed out of a (possibly multi-file) read path.
+type File struct {
+	Path      string
+	StartLine int
+	LineCount int
+}
+
+// SplitFiles splits an omp read path that may reference several comma-joined
+// files ("a.yaml:1-80,b.yaml:1-80") into one File per file, each with its own
+// parsed line range. A comma segment that is purely a line-spec list ("960-973")
+// or a mode keyword ("raw"/"conflicts") is treated as an additional range of the
+// preceding file — so a single file's multi-range selector ("main.go:5-16,40-80")
+// stays one File, matching Split (first range wins).
+//
+// Multiple files are only reported when every parsed segment yields a real file
+// path (one containing a path separator or a filename extension); otherwise —
+// e.g. a directory name that legitimately contains a comma — it returns the
+// single Split result, so single-file behavior is never disturbed.
+func SplitFiles(raw string) []File {
+	parts := strings.Split(raw, ",")
+	files := make([]File, 0, len(parts))
+	for i, part := range parts {
+		if i > 0 && isContinuationRange(part) {
+			continue
+		}
+		path, start, count := Split(part)
+		files = append(files, File{Path: path, StartLine: start, LineCount: count})
+	}
+	if len(files) > 1 && allFileish(files) {
+		return files
+	}
+	path, start, count := Split(raw)
+	return []File{{Path: path, StartLine: start, LineCount: count}}
+}
+
+// isContinuationRange reports whether a comma segment is an extra range of the
+// preceding file rather than a new file: a bare line-spec list or a mode keyword.
+func isContinuationRange(part string) bool {
+	if part == "raw" || part == "conflicts" {
+		return true
+	}
+	_, _, ok := parseLineSpecList(part)
+	return ok
+}
+
+func allFileish(files []File) bool {
+	for _, f := range files {
+		if !isFileish(f.Path) {
+			return false
+		}
+	}
+	return true
+}
+
+// isFileish reports whether a path looks like a concrete file: it has a path
+// separator or a "." in its final segment. Used to distinguish a real second
+// file from a comma that merely lives inside a single path.
+func isFileish(path string) bool {
+	if strings.ContainsAny(path, `/\`) {
+		return true
+	}
+	return strings.Contains(path, ".")
+}
+
 func isWindowsDrivePrefix(raw string, colon int) bool {
 	return colon == 1 && len(raw) >= 2 && isASCIIAlpha(raw[0])
 }

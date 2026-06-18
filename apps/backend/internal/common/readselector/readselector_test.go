@@ -80,3 +80,55 @@ func TestSplit_NoFalsePositives(t *testing.T) {
 		})
 	}
 }
+
+// TestSplitFiles covers omp reads that reference several comma-joined files in a
+// single read call (e.g. "a.yaml:1-80,b.yaml:1-80"). Each file becomes its own
+// entry so the UI can render a separate, openable link per file. A comma segment
+// that is purely a line spec ("960-973") stays an extra range of the preceding
+// file, and a comma that merely lives inside a directory name falls back to the
+// single-file Split result.
+func TestSplitFiles(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want []File
+	}{
+		{"single no selector", "config.json", []File{{Path: "config.json"}}},
+		{
+			"single with range",
+			"apps/backend/internal/sentry/handlers.go:43-94",
+			[]File{{Path: "apps/backend/internal/sentry/handlers.go", StartLine: 43, LineCount: 52}},
+		},
+		{"single multi-range stays one file", "main.go:5-16,960-973", []File{{Path: "main.go", StartLine: 5, LineCount: 12}}},
+		{
+			"two files with ranges",
+			"deployments/cluster-tools/values.backupprod.yaml:1-80,deployments/cluster-tools/values.au-backupprod.yaml:1-80",
+			[]File{
+				{Path: "deployments/cluster-tools/values.backupprod.yaml", StartLine: 1, LineCount: 80},
+				{Path: "deployments/cluster-tools/values.au-backupprod.yaml", StartLine: 1, LineCount: 80},
+			},
+		},
+		{"two bare-extension files", "a.go:1,b.go:2", []File{{Path: "a.go", StartLine: 1}, {Path: "b.go", StartLine: 2}}},
+		{
+			"multi-range first file then second file",
+			"a.go:5-16,40-80,b.go:10",
+			[]File{{Path: "a.go", StartLine: 5, LineCount: 12}, {Path: "b.go", StartLine: 10}},
+		},
+		{"files with mode selectors", "a.go:2-4:raw,b.go:raw", []File{{Path: "a.go", StartLine: 2, LineCount: 3}, {Path: "b.go"}}},
+		{"second file without range still openable", "a/x.yaml:1-80,b/y.yaml", []File{{Path: "a/x.yaml", StartLine: 1, LineCount: 80}, {Path: "b/y.yaml"}}},
+		{"comma inside directory name falls back to single", "a,b/foo.go:1-80", []File{{Path: "a,b/foo.go", StartLine: 1, LineCount: 80}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SplitFiles(tt.raw)
+			if len(got) != len(tt.want) {
+				t.Fatalf("SplitFiles(%q) = %+v (%d files), want %d", tt.raw, got, len(got), len(tt.want))
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("file[%d] = %+v, want %+v", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}

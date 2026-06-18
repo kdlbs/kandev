@@ -8,6 +8,7 @@ import type { Message } from "@/lib/types/http";
 import { ExpandableRow } from "./expandable-row";
 import { useExpandState } from "./use-expand-state";
 import { useOpenFileAtLine } from "@/hooks/use-file-editors";
+import { splitReadFiles, type ReadFileRef } from "@/lib/read-selector";
 
 type ReadFileOutput = {
   content?: string;
@@ -75,6 +76,34 @@ function parseReadMetadata(comment: Message) {
   return { status, readOutput, filePath, startLine, lineRange, hasOutput, isSuccess };
 }
 
+// ReadFileLink renders one openable file link plus its line-range badge. Used
+// for each file when a single read references several comma-joined files; the
+// per-file startLine drives the scroll-to-line on open.
+function ReadFileLink({
+  file,
+  worktreePath,
+  onOpenFile,
+}: {
+  file: ReadFileRef;
+  worktreePath?: string;
+  onOpenFile?: (path: string) => void;
+}) {
+  const handleOpenFile = useOpenFileAtLine(onOpenFile, file.startLine, worktreePath);
+  const lineRange = formatLineRange(file.startLine, file.lineCount);
+  return (
+    <span className="inline-flex items-baseline min-w-0">
+      <FilePathButton
+        filePath={file.path}
+        worktreePath={worktreePath}
+        onOpenFile={onOpenFile ? handleOpenFile : undefined}
+      />
+      {lineRange && (
+        <span className="font-mono text-xs text-muted-foreground/70 shrink-0">{lineRange}</span>
+      )}
+    </span>
+  );
+}
+
 // ToolReadMessage renders a read tool call: the file link, line-range badge, and
 // the (expandable) read output.
 export const ToolReadMessage = memo(function ToolReadMessage({
@@ -87,6 +116,8 @@ export const ToolReadMessage = memo(function ToolReadMessage({
   const autoExpanded = status === "running";
   const { isExpanded, handleToggle } = useExpandState(status, autoExpanded);
   const handleOpenFile = useOpenFileAtLine(onOpenFile, startLine, worktreePath);
+  // splitReadFiles is pure and cheap; the React Compiler memoizes the render.
+  const multiFiles = filePath ? splitReadFiles(filePath) : [];
 
   return (
     <ExpandableRow
@@ -99,20 +130,32 @@ export const ToolReadMessage = memo(function ToolReadMessage({
             </span>
             {!isSuccess && <ReadStatusIcon status={status} />}
           </span>
-          {filePath && (
-            <span className="inline-flex items-baseline min-w-0">
-              <FilePathButton
-                filePath={filePath}
-                worktreePath={worktreePath}
-                onOpenFile={onOpenFile ? handleOpenFile : undefined}
-              />
-              {lineRange && (
-                <span className="font-mono text-xs text-muted-foreground/70 shrink-0">
-                  {lineRange}
-                </span>
-              )}
-            </span>
-          )}
+          {filePath &&
+            (multiFiles.length > 1 ? (
+              <span className="inline-flex flex-wrap items-baseline gap-x-1 min-w-0">
+                {multiFiles.map((file, idx) => (
+                  <span key={`${file.path}-${idx}`} className="inline-flex items-baseline min-w-0">
+                    <ReadFileLink file={file} worktreePath={worktreePath} onOpenFile={onOpenFile} />
+                    {idx < multiFiles.length - 1 && (
+                      <span className="text-muted-foreground/50">,</span>
+                    )}
+                  </span>
+                ))}
+              </span>
+            ) : (
+              <span className="inline-flex items-baseline min-w-0">
+                <FilePathButton
+                  filePath={filePath}
+                  worktreePath={worktreePath}
+                  onOpenFile={onOpenFile ? handleOpenFile : undefined}
+                />
+                {lineRange && (
+                  <span className="font-mono text-xs text-muted-foreground/70 shrink-0">
+                    {lineRange}
+                  </span>
+                )}
+              </span>
+            ))}
           {readOutput?.truncated && (
             <span className="text-xs text-amber-500/80 shrink-0">(truncated)</span>
           )}

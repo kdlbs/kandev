@@ -321,17 +321,27 @@ func updateReadFileInput(rf *streams.ReadFilePayload, supplemental, inputMap map
 	// Parse the selector on every update — a later tool_call_update can carry the
 	// line range (e.g. "main.go:50+150") even when an earlier frame already set
 	// FilePath, so range metadata must not be gated on FilePath being empty.
-	if path := pathFromArgs(supplemental, inputMap); path != "" {
-		clean, startLine, lineCount := readselector.Split(path)
+	path := pathFromArgs(supplemental, inputMap)
+	if path == "" {
+		return
+	}
+	files := readselector.SplitFiles(path)
+	// Multiple comma-joined files can't share one Offset/Limit; keep the raw path
+	// for the UI to split (mirrors normalizeRead).
+	if len(files) > 1 {
 		if rf.FilePath == "" {
-			rf.FilePath = clean
+			rf.FilePath = path
 		}
-		if rf.Offset == 0 {
-			rf.Offset = startLine
-		}
-		if rf.Limit == 0 {
-			rf.Limit = lineCount
-		}
+		return
+	}
+	if rf.FilePath == "" {
+		rf.FilePath = files[0].Path
+	}
+	if rf.Offset == 0 {
+		rf.Offset = files[0].StartLine
+	}
+	if rf.Limit == 0 {
+		rf.Limit = files[0].LineCount
 	}
 }
 
@@ -439,16 +449,24 @@ func (n *Normalizer) normalizeRead(args map[string]any) *streams.NormalizedPaylo
 
 	path := pathFromArgs(args, rawInput)
 	// OMP's read tool embeds a line/range/mode selector in the path
-	// (e.g. "foo.go:43-94"); strip it so the file link stays openable and
-	// carry the parsed range via offset/limit. No-op for other agents.
-	path, startLine, lineCount := readselector.Split(path)
+	// (e.g. "foo.go:43-94"), and can reference several comma-joined files in a
+	// single read ("a.yaml:1-80,b.yaml:1-80"). Split into one entry per file so
+	// links stay openable; the range is carried via offset/limit. No-op for
+	// other agents.
+	files := readselector.SplitFiles(path)
 
-	// Check if this is a directory read - treat as code search (file listing)
+	// Check if this is a directory read - treat as code search (file listing).
 	if readType := shared.GetString(rawInput, "type"); readType == readTypeDirectory {
-		return streams.NewCodeSearch("", "", path, "")
+		return streams.NewCodeSearch("", "", files[0].Path, "")
 	}
 
-	return streams.NewReadFile(path, startLine, lineCount)
+	// A single Offset/Limit cannot describe multiple files, so for a multi-file
+	// read keep the raw comma-joined path verbatim and let the UI split it into
+	// one link per file.
+	if len(files) > 1 {
+		return streams.NewReadFile(path, 0, 0)
+	}
+	return streams.NewReadFile(files[0].Path, files[0].StartLine, files[0].LineCount)
 }
 
 // normalizeExecute converts ACP execute/bash tool data.
