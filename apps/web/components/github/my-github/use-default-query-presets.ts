@@ -7,6 +7,10 @@ import {
   type PresetOption,
 } from "./search-bar";
 import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
+import {
+  hasUserSettingsSyncFailure,
+  setUserSettingsSyncFailure,
+} from "@/lib/user-settings-sync-failure";
 
 const STORAGE_KEY = "kandev:github-default-queries:v1";
 const MIGRATED_KEY = "kandev:github-default-queries:migrated-to-backend:v1";
@@ -82,28 +86,13 @@ function readServerDefaults(value: unknown): StoredDefaults | null | undefined {
   return value as StoredDefaults;
 }
 
-function hasFailedSync(): boolean {
-  if (typeof window === "undefined") return false;
-  return window.localStorage.getItem(SYNC_FAILED_KEY) === "1";
-}
-
-function setFailedSync(failed: boolean): void {
-  if (typeof window === "undefined") return;
-  try {
-    if (failed) window.localStorage.setItem(SYNC_FAILED_KEY, "1");
-    else window.localStorage.removeItem(SYNC_FAILED_KEY);
-  } catch {
-    /* ignore storage failures */
-  }
-}
-
 function syncServer(defaults: StoredDefaults | null): Promise<void> {
   return updateUserSettings({ github_default_query_presets: defaults })
     .then(() => {
-      setFailedSync(false);
+      setUserSettingsSyncFailure(SYNC_FAILED_KEY, false);
     })
     .catch(() => {
-      setFailedSync(true);
+      setUserSettingsSyncFailure(SYNC_FAILED_KEY, true);
     });
 }
 
@@ -141,6 +130,11 @@ function getServerSnapshot(): StoredDefaults | null {
   return null;
 }
 
+export function __resetSnapshotForTests() {
+  snapshot = undefined;
+  listeners.forEach((fn) => fn());
+}
+
 export function useDefaultQueryPresets() {
   const stored = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
@@ -153,7 +147,7 @@ export function useDefaultQueryPresets() {
         if (cancelled || serverDefaults === undefined) return;
         const local = getSnapshot();
         if (snapshotKey(local) !== initialKey) return;
-        if (hasFailedSync() && local !== null) {
+        if (hasUserSettingsSyncFailure(SYNC_FAILED_KEY) && local !== null) {
           void syncServer(local);
           return;
         }

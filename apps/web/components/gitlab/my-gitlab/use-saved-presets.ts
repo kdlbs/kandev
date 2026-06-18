@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
+import {
+  hasUserSettingsSyncFailure,
+  setUserSettingsSyncFailure,
+} from "@/lib/user-settings-sync-failure";
 
 const STORAGE_KEY = "kandev:gitlab-presets:v1";
 const MIGRATED_KEY = "kandev:gitlab-presets:migrated-to-backend:v1";
@@ -82,28 +86,13 @@ function readServerPresets(value: unknown): SavedPreset[] | null {
   return value.filter(isSavedPreset);
 }
 
-function hasFailedSync(): boolean {
-  if (typeof window === "undefined") return false;
-  return window.localStorage.getItem(SYNC_FAILED_KEY) === "1";
-}
-
-function setFailedSync(failed: boolean): void {
-  if (typeof window === "undefined") return;
-  try {
-    if (failed) window.localStorage.setItem(SYNC_FAILED_KEY, "1");
-    else window.localStorage.removeItem(SYNC_FAILED_KEY);
-  } catch {
-    /* ignore storage failures */
-  }
-}
-
 function syncServer(next: SavedPreset[]): Promise<void> {
   return updateUserSettings({ gitlab_saved_presets: next })
     .then(() => {
-      setFailedSync(false);
+      setUserSettingsSyncFailure(SYNC_FAILED_KEY, false);
     })
     .catch(() => {
-      setFailedSync(true);
+      setUserSettingsSyncFailure(SYNC_FAILED_KEY, true);
     });
 }
 
@@ -145,7 +134,7 @@ export function useSavedPresets() {
         if (cancelled || !serverPresets) return;
         const local = readStorage();
         if (snapshotKey(local) !== initialKey) return;
-        if (hasFailedSync() && local.length > 0) {
+        if (hasUserSettingsSyncFailure(SYNC_FAILED_KEY) && local.length > 0) {
           void syncServer(local);
           return;
         }

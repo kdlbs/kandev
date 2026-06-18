@@ -1,7 +1,20 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { readStorage, type SavedPreset } from "./use-saved-presets";
+import { renderHook, waitFor } from "@testing-library/react";
+import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
+import {
+  __resetSnapshotForTests,
+  readStorage,
+  useSavedPresets,
+  type SavedPreset,
+} from "./use-saved-presets";
 
 const STORAGE_KEY = "kandev:github-presets:v1";
+const SYNC_FAILED_KEY = "kandev:github-presets:sync-failed:v1";
+
+vi.mock("@/lib/api/domains/settings-api", () => ({
+  fetchUserSettings: vi.fn(),
+  updateUserSettings: vi.fn(),
+}));
 
 // Provide a simple in-memory localStorage mock so the tests are not sensitive
 // to how the test runner exposes window.localStorage (e.g. Node's
@@ -40,6 +53,9 @@ const valid: SavedPreset = {
 describe("readStorage", () => {
   beforeEach(() => {
     localStorageMock.clear();
+    __resetSnapshotForTests();
+    vi.mocked(fetchUserSettings).mockReset();
+    vi.mocked(updateUserSettings).mockReset();
   });
 
   it("returns empty array when no value is stored", () => {
@@ -87,5 +103,23 @@ describe("readStorage", () => {
     const issue: SavedPreset = { ...valid, kind: "issue" };
     set(JSON.stringify([issue]));
     expect(readStorage()).toEqual([issue]);
+  });
+
+  it("retries local presets after a failed backend sync and clears the marker", async () => {
+    set(JSON.stringify([valid]));
+    localStorageMock.setItem(SYNC_FAILED_KEY, "1");
+    vi.mocked(fetchUserSettings).mockResolvedValue({
+      settings: { github_saved_presets: [] },
+    } as Awaited<ReturnType<typeof fetchUserSettings>>);
+    vi.mocked(updateUserSettings).mockResolvedValue({
+      settings: {},
+    } as Awaited<ReturnType<typeof updateUserSettings>>);
+
+    renderHook(() => useSavedPresets());
+
+    await waitFor(() => {
+      expect(updateUserSettings).toHaveBeenCalledWith({ github_saved_presets: [valid] });
+      expect(localStorageMock.getItem(SYNC_FAILED_KEY)).toBeNull();
+    });
   });
 });

@@ -110,7 +110,9 @@ function mutateViews(
     const message = err instanceof Error ? err.message : "Failed to sync sidebar views";
     set((draft) => {
       draft.sidebarViews.views = snapshot.views;
-      draft.sidebarViews.activeViewId = snapshot.activeViewId;
+      if (draft.sidebarViews.activeViewId === afterSnapshot.activeViewId) {
+        draft.sidebarViews.activeViewId = snapshot.activeViewId;
+      }
       if (draftsEqual(draft.sidebarViews.draft, afterSnapshot.draft)) {
         draft.sidebarViews.draft = snapshot.draft;
       }

@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { DEFAULT_FILTERS, type FilterState } from "./filter-model";
 import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
+import {
+  hasUserSettingsSyncFailure,
+  setUserSettingsSyncFailure,
+} from "@/lib/user-settings-sync-failure";
 
 export type SavedView = {
   id: string;
@@ -89,28 +93,13 @@ function readServerViews(value: unknown): SavedView[] | null {
   return value.filter(isSavedView);
 }
 
-function hasFailedSync(): boolean {
-  if (typeof window === "undefined") return false;
-  return window.localStorage.getItem(SYNC_FAILED_KEY) === "1";
-}
-
-function setFailedSync(failed: boolean): void {
-  if (typeof window === "undefined") return;
-  try {
-    if (failed) window.localStorage.setItem(SYNC_FAILED_KEY, "1");
-    else window.localStorage.removeItem(SYNC_FAILED_KEY);
-  } catch {
-    // Ignore storage failures.
-  }
-}
-
 function syncServer(views: SavedView[]): Promise<void> {
   return updateUserSettings({ jira_saved_views: views })
     .then(() => {
-      setFailedSync(false);
+      setUserSettingsSyncFailure(SYNC_FAILED_KEY, false);
     })
     .catch(() => {
-      setFailedSync(true);
+      setUserSettingsSyncFailure(SYNC_FAILED_KEY, true);
     });
 }
 
@@ -151,7 +140,7 @@ export function useSavedViews() {
       if (!cancelled && serverViews) {
         const local = readStorage();
         if (snapshotKey(local) !== initialKey) return;
-        if (hasFailedSync() && local.length > 0) {
+        if (hasUserSettingsSyncFailure(SYNC_FAILED_KEY) && local.length > 0) {
           void syncServer(local);
           return;
         }

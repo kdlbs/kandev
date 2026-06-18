@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { create } from "zustand";
+import { create, type StoreApi, type UseBoundStore } from "zustand";
+import { waitFor } from "@testing-library/react";
 import { immer } from "zustand/middleware/immer";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import { createUISlice } from "./ui-slice";
@@ -18,12 +19,15 @@ function makeStore() {
   );
 }
 
+type UIStore = UseBoundStore<StoreApi<UISlice>>;
+
 const KEY = "kandev.sidebar.collapsedSubtasks";
 const TASK_A = "task-a";
 const TASK_B = "task-b";
 const SIDEBAR_VIEWS_KEY = "kandev.sidebar.views";
 const SIDEBAR_ACTIVE_VIEW_KEY = "kandev.sidebar.activeViewId";
 const SIDEBAR_DRAFT_KEY = "kandev.sidebar.draft";
+const BACKEND_DOWN = "backend down";
 
 function makeSidebarView(id: string, name: string) {
   return {
@@ -82,6 +86,9 @@ describe("sidebar task prefs (pin + manual order)", () => {
 
   beforeEach(() => {
     window.localStorage.clear();
+    vi.mocked(updateUserSettings).mockResolvedValue({
+      settings: {},
+    } as Awaited<ReturnType<typeof updateUserSettings>>);
   });
 
   it("hydrates pinned + ordered from localStorage", () => {
@@ -143,6 +150,82 @@ describe("sidebar task prefs (pin + manual order)", () => {
     store.getState().removeTaskFromSidebarPrefs("ghost");
     expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["t1"]);
     expect(window.localStorage.getItem(PINNED_KEY)).toBe(before);
+  });
+
+  it("records sync errors and clears them after a later successful sync", async () => {
+    const store = makeStore();
+    vi.mocked(updateUserSettings).mockRejectedValueOnce(new Error(BACKEND_DOWN));
+
+    store.getState().togglePinnedTask("t1");
+
+    await waitFor(() => {
+      expect(store.getState().sidebarTaskPrefs.syncError).toBe(BACKEND_DOWN);
+    });
+
+    vi.mocked(updateUserSettings).mockResolvedValueOnce({
+      settings: {},
+    } as Awaited<ReturnType<typeof updateUserSettings>>);
+
+    store.getState().togglePinnedTask("t2");
+
+    await waitFor(() => {
+      expect(store.getState().sidebarTaskPrefs.syncError).toBeNull();
+    });
+  });
+
+  it("clears task preference sync errors on demand", async () => {
+    const store = makeStore();
+    vi.mocked(updateUserSettings).mockRejectedValueOnce(new Error(BACKEND_DOWN));
+    store.getState().togglePinnedTask("t1");
+
+    await waitFor(() => {
+      expect(store.getState().sidebarTaskPrefs.syncError).toBe(BACKEND_DOWN);
+    });
+
+    store.getState().clearSidebarTaskPrefsSyncError();
+
+    expect(store.getState().sidebarTaskPrefs.syncError).toBeNull();
+  });
+});
+
+describe("sidebar view sync rollback", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.mocked(updateUserSettings).mockResolvedValue({
+      settings: {},
+    } as Awaited<ReturnType<typeof updateUserSettings>>);
+  });
+
+  function seedViews(store: UIStore) {
+    store.setState((state) => ({
+      ...state,
+      sidebarViews: {
+        ...state.sidebarViews,
+        views: [makeSidebarView("view-a", "View A"), makeSidebarView("view-b", "View B")],
+        activeViewId: "view-a",
+        draft: null,
+      },
+    }));
+  }
+
+  it("does not roll back an active view changed after a failed view mutation", async () => {
+    const store = makeStore();
+    seedViews(store);
+    vi.mocked(updateUserSettings)
+      .mockRejectedValueOnce(new Error("rename failed"))
+      .mockResolvedValueOnce({
+        settings: {},
+      } as Awaited<ReturnType<typeof updateUserSettings>>);
+
+    store.getState().renameSidebarView("view-a", "Renamed");
+    store.getState().setSidebarActiveView("view-b");
+
+    await waitFor(() => {
+      expect(store.getState().sidebarViews.syncError).toBe("rename failed");
+    });
+
+    expect(store.getState().sidebarViews.activeViewId).toBe("view-b");
+    expect(store.getState().sidebarViews.views.find((v) => v.id === "view-a")?.name).toBe("View A");
   });
 });
 

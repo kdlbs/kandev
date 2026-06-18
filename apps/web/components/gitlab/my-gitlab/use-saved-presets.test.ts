@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
 import {
   __resetSnapshotForTests,
   readStorage,
@@ -8,6 +9,12 @@ import {
 } from "./use-saved-presets";
 
 const STORAGE_KEY = "kandev:gitlab-presets:v1";
+const SYNC_FAILED_KEY = "kandev:gitlab-presets:sync-failed:v1";
+
+vi.mock("@/lib/api/domains/settings-api", () => ({
+  fetchUserSettings: vi.fn(),
+  updateUserSettings: vi.fn(),
+}));
 
 function makeLocalStorageMock() {
   const store = new Map<string, string>();
@@ -118,6 +125,12 @@ describe("useSavedPresets (gitlab)", () => {
   beforeEach(() => {
     localStorageMock.clear();
     __resetSnapshotForTests();
+    vi.mocked(fetchUserSettings).mockResolvedValue({
+      settings: { gitlab_saved_presets: [] },
+    } as Awaited<ReturnType<typeof fetchUserSettings>>);
+    vi.mocked(updateUserSettings).mockResolvedValue({
+      settings: {},
+    } as Awaited<ReturnType<typeof updateUserSettings>>);
   });
 
   it("save appends a preset and assigns id + createdAt", () => {
@@ -168,5 +181,17 @@ describe("useSavedPresets (gitlab)", () => {
     expect(a.result.current.presets).toHaveLength(1);
     expect(b.result.current.presets).toHaveLength(1);
     expect(b.result.current.presets[0].label).toBe("Shared");
+  });
+
+  it("retries local presets after a failed backend sync and clears the marker", async () => {
+    set(JSON.stringify([valid]));
+    localStorageMock.setItem(SYNC_FAILED_KEY, "1");
+
+    renderHook(() => useSavedPresets());
+
+    await waitFor(() => {
+      expect(updateUserSettings).toHaveBeenCalledWith({ gitlab_saved_presets: [valid] });
+      expect(localStorageMock.getItem(SYNC_FAILED_KEY)).toBeNull();
+    });
   });
 });
