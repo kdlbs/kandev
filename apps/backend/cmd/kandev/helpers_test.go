@@ -21,6 +21,9 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	usercontroller "github.com/kandev/kandev/internal/user/controller"
+	userservice "github.com/kandev/kandev/internal/user/service"
+	userstore "github.com/kandev/kandev/internal/user/store"
 	"github.com/kandev/kandev/internal/webapp"
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
@@ -228,6 +231,78 @@ func TestBootInitialStateHomeIncludesKanbanFirstPaintState(t *testing.T) {
 	}
 	if decoded.KanbanMulti.IsLoading || decoded.Kanban.IsLoading {
 		t.Fatal("boot payload should mark kanban data loaded")
+	}
+}
+
+func TestBootInitialStateHomePreservesSavedAllWorkflowsFilter(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+
+	workspaces, err := harness.taskSvc.ListWorkspaces(ctx)
+	if err != nil {
+		t.Fatalf("ListWorkspaces: %v", err)
+	}
+	if len(workspaces) == 0 {
+		t.Fatal("expected seeded default workspace")
+	}
+	workflowB, err := harness.taskSvc.CreateWorkflow(ctx, &taskservice.CreateWorkflowRequest{
+		WorkspaceID: workspaces[0].ID,
+		Name:        "Workflow B",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+
+	allWorkflows := ""
+	repositoryIDs := []string{}
+	if _, err := harness.userSvc.UpdateUserSettings(ctx, &userservice.UpdateUserSettingsRequest{
+		WorkspaceID:      &workspaces[0].ID,
+		WorkflowFilterID: &allWorkflows,
+		RepositoryIDs:    &repositoryIDs,
+	}); err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+
+	state := bootInitialState(
+		ctx,
+		nil,
+		routeParams{
+			taskSvc:  harness.taskSvc,
+			userCtrl: harness.userCtrl,
+			services: &Services{
+				Workflow: harness.workflowSvc,
+			},
+		},
+		webapp.ClassifyRoute("/"),
+	)
+
+	raw, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("Marshal state: %v", err)
+	}
+	var decoded struct {
+		Workflows struct {
+			ActiveID *string `json:"activeId"`
+		} `json:"workflows"`
+		UserSettings struct {
+			WorkflowID *string `json:"workflowId"`
+		} `json:"userSettings"`
+		KanbanMulti struct {
+			Snapshots map[string]json.RawMessage `json:"snapshots"`
+		} `json:"kanbanMulti"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("Unmarshal state: %v", err)
+	}
+
+	if decoded.Workflows.ActiveID != nil {
+		t.Fatalf("active workflow = %q, want nil for All Workflows", *decoded.Workflows.ActiveID)
+	}
+	if decoded.UserSettings.WorkflowID != nil {
+		t.Fatalf("user settings workflow = %q, want nil for All Workflows", *decoded.UserSettings.WorkflowID)
+	}
+	if _, ok := decoded.KanbanMulti.Snapshots[workflowB.ID]; !ok {
+		t.Fatalf("expected boot snapshots to include second workflow %q", workflowB.ID)
 	}
 }
 
@@ -583,7 +658,19 @@ func TestQueryValueReadsRouteQueryFromAppStatePath(t *testing.T) {
 	}
 }
 
+type bootStateTestHarness struct {
+	taskSvc     *taskservice.Service
+	workflowSvc *workflowservice.Service
+	userCtrl    *usercontroller.Controller
+	userSvc     *userservice.Service
+}
+
 func newBootStateTestServices(t *testing.T) (*taskservice.Service, *workflowservice.Service) {
+	harness := newBootStateTestHarness(t)
+	return harness.taskSvc, harness.workflowSvc
+}
+
+func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -601,6 +688,10 @@ func newBootStateTestServices(t *testing.T) (*taskservice.Service, *workflowserv
 	if err != nil {
 		t.Fatalf("workflow repository: %v", err)
 	}
+	userRepo, userCleanup, err := userstore.Provide(sqlxDB, sqlxDB)
+	if err != nil {
+		t.Fatalf("user repository: %v", err)
+	}
 	t.Cleanup(func() {
 		if err := sqlxDB.Close(); err != nil {
 			t.Errorf("close db: %v", err)
@@ -608,9 +699,14 @@ func newBootStateTestServices(t *testing.T) (*taskservice.Service, *workflowserv
 		if err := cleanup(); err != nil {
 			t.Errorf("close task repo: %v", err)
 		}
+		if err := userCleanup(); err != nil {
+			t.Errorf("close user repo: %v", err)
+		}
 	})
 
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	eventBus := bus.NewMemoryEventBus(log)
+	userSvc := userservice.NewService(userRepo, eventBus, log)
 	workflowSvc := workflowservice.NewService(workflowRepo, log)
 	taskSvc := taskservice.NewService(
 		taskservice.Repos{
@@ -628,7 +724,7 @@ func newBootStateTestServices(t *testing.T) (*taskservice.Service, *workflowserv
 			TaskEnvironments: taskRepo,
 			Reviews:          taskRepo,
 		},
-		bus.NewMemoryEventBus(log),
+		eventBus,
 		log,
 		taskservice.RepositoryDiscoveryConfig{},
 	)
@@ -636,7 +732,12 @@ func newBootStateTestServices(t *testing.T) (*taskservice.Service, *workflowserv
 	taskSvc.SetWorkflowStepGetter(&workflowStepGetterAdapter{svc: workflowSvc})
 	taskSvc.SetStartStepResolver(&startStepResolverAdapter{svc: workflowSvc})
 	workflowSvc.SetWorkflowProvider(&workflowProviderAdapter{svc: taskSvc})
-	return taskSvc, workflowSvc
+	return bootStateTestHarness{
+		taskSvc:     taskSvc,
+		workflowSvc: workflowSvc,
+		userCtrl:    usercontroller.NewController(userSvc),
+		userSvc:     userSvc,
+	}
 }
 
 func TestNewWebAppHandlerUsesEmbeddedAssetsWithoutDistDir(t *testing.T) {
