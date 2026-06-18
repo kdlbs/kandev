@@ -4,7 +4,7 @@ import { reviewFileKey } from "@/components/review/types";
 
 /** Composite key for the file currently selected in single-file mode. */
 export function useSelectedFileKey(
-  mode: string,
+  mode: "all" | "file",
   filePath: string | undefined,
   fileRepositoryName: string | undefined,
 ): string | undefined {
