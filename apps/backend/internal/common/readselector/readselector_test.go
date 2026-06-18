@@ -117,6 +117,22 @@ func TestSplitFiles(t *testing.T) {
 		{"files with mode selectors", "a.go:2-4:raw,b.go:raw", []File{{Path: "a.go", StartLine: 2, LineCount: 3}, {Path: "b.go"}}},
 		{"second file without range still openable", "a/x.yaml:1-80,b/y.yaml", []File{{Path: "a/x.yaml", StartLine: 1, LineCount: 80}, {Path: "b/y.yaml"}}},
 		{"comma inside directory name falls back to single", "a,b/foo.go:1-80", []File{{Path: "a,b/foo.go", StartLine: 1, LineCount: 80}}},
+		{
+			"hyphenated dirs two files",
+			"deployments/tailscale-ingress-extras/values.prod.yaml:1-180,deployments/tailscale-ingress-extras/values.staging.yaml:1-180",
+			[]File{
+				{Path: "deployments/tailscale-ingress-extras/values.prod.yaml", StartLine: 1, LineCount: 180},
+				{Path: "deployments/tailscale-ingress-extras/values.staging.yaml", StartLine: 1, LineCount: 180},
+			},
+		},
+		{
+			"hyphenated dirs legacy half-stripped trailing range",
+			"deployments/tailscale-ingress-extras/values.prod.yaml:1-180,deployments/tailscale-ingress-extras/values.staging.yaml",
+			[]File{
+				{Path: "deployments/tailscale-ingress-extras/values.prod.yaml", StartLine: 1, LineCount: 180},
+				{Path: "deployments/tailscale-ingress-extras/values.staging.yaml"},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -75,4 +75,30 @@ describe("ToolReadMessage", () => {
     expect(openFile).toHaveBeenCalledWith("deployments/values.au-backupprod.yaml");
     expect(openFile).not.toHaveBeenCalledWith("deployments/values.au-backupprod.yaml:1-80");
   });
+
+  it("splits the hyphenated multi-file example into separate openable links", () => {
+    // Exact shape seen in a real session: hyphenated dirs + per-file ranges.
+    const openFile = vi.fn();
+    render(
+      <ToolReadMessage
+        comment={readComment(
+          "deployments/tailscale-ingress-extras/values.prod.yaml:1-180,deployments/tailscale-ingress-extras/values.staging.yaml:1-180",
+        )}
+        onOpenFile={openFile}
+      />,
+    );
+
+    const prod = screen.getByText("deployments/tailscale-ingress-extras/values.prod.yaml");
+    const staging = screen.getByText("deployments/tailscale-ingress-extras/values.staging.yaml");
+    expect(prod).toBeTruthy();
+    expect(staging).toBeTruthy();
+
+    fireEvent.click(staging);
+    expect(openFile).toHaveBeenCalledWith(
+      "deployments/tailscale-ingress-extras/values.staging.yaml",
+    );
+    expect(openFile).not.toHaveBeenCalledWith(
+      "deployments/tailscale-ingress-extras/values.staging.yaml:1-180",
+    );
+  });
 });

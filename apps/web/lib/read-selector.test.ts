@@ -70,6 +70,32 @@ describe("splitReadFiles", () => {
     expect(splitReadFiles("a,b/foo.go:1-80")).toEqual([ref("a,b/foo.go", 1, 80)]);
   });
 
+  it("splits the hyphenated multi-file example each with its own range", () => {
+    // The hyphens in "tailscale-ingress-extras" must not be mistaken for a line
+    // range separator when deciding a segment is a new file.
+    expect(
+      splitReadFiles(
+        "deployments/tailscale-ingress-extras/values.prod.yaml:1-180,deployments/tailscale-ingress-extras/values.staging.yaml:1-180",
+      ),
+    ).toEqual([
+      ref("deployments/tailscale-ingress-extras/values.prod.yaml", 1, 180),
+      ref("deployments/tailscale-ingress-extras/values.staging.yaml", 1, 180),
+    ]);
+  });
+
+  it("splits a legacy half-stripped multi-file path (trailing file's range moved to offset)", () => {
+    // Pre-fix backend stored the bundle with only the LAST file's range stripped;
+    // both files must still split into openable links.
+    expect(
+      splitReadFiles(
+        "deployments/tailscale-ingress-extras/values.prod.yaml:1-180,deployments/tailscale-ingress-extras/values.staging.yaml",
+      ),
+    ).toEqual([
+      ref("deployments/tailscale-ingress-extras/values.prod.yaml", 1, 180),
+      ref("deployments/tailscale-ingress-extras/values.staging.yaml"),
+    ]);
+  });
+
   it("falls back to a single entry when a segment is not file-like", () => {
     // "5" alone is a line spec, not a file, so this is not a real multi-file read.
     expect(splitReadFiles("main.go:1,5")).toEqual([ref("main.go", 1)]);
