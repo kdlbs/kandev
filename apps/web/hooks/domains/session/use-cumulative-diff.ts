@@ -178,11 +178,13 @@ export function useCumulativeDiff(sessionId: string | null) {
       setDiff(null);
     }
     setLoading(false);
-    // Drop any pending coalesced refetch for this envKey on unmount / env
-    // change, so navigating away doesn't fire a stale fetch.
-    return () => {
-      if (envKey) clearInvalidationTimer(envKey);
-    };
+    // NOTE: intentionally do NOT clear the coalesced invalidation timer here.
+    // The timer is shared per envKey across every subscriber on that
+    // environment; clearing it on one subscriber's unmount/env-change would
+    // cancel a pending refetch the others still need. Staleness is already
+    // prevented by the listener-subscription cleanup below — an unmounted hook
+    // removes its listener, so a timer that fires later is a harmless no-op for
+    // it while still refreshing the remaining subscribers.
   }, [envKey]);
 
   // Fetch on mount and when cache is invalidated

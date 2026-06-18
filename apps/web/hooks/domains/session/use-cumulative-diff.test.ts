@@ -62,7 +62,7 @@ describe("useCumulativeDiff invalidation coalescing", () => {
     expect(mockRequest).toHaveBeenCalledTimes(1);
   });
 
-  it("does not refetch when the timer is cleared on unmount", async () => {
+  it("does not refetch after an unmounted subscriber's coalesced timer fires", async () => {
     const sid = "sess-unmount";
     const { unmount } = renderHook(() => useCumulativeDiff(sid));
 
@@ -74,7 +74,9 @@ describe("useCumulativeDiff invalidation coalescing", () => {
     act(() => {
       invalidateCumulativeDiffCache(sid);
     });
-    // Unmount before the window elapses — the pending timer must be cleared.
+    // Unmount before the window elapses. The timer is NOT cleared (it is shared
+    // per envKey), but the listener-subscription cleanup removed this hook's
+    // handler, so the timer firing is a no-op for the unmounted subscriber.
     act(() => {
       unmount();
     });
