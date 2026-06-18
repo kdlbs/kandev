@@ -468,18 +468,45 @@ const VALID_COMPONENTS = new Set(Object.keys(components));
 // useEnvSwitchCleanup — backup layout switch for external session changes
 // ---------------------------------------------------------------------------
 
-function useEnvSwitchCleanup(effectiveSessionId: string | null, effectiveEnvId: string | null) {
+function useEnvSwitchCleanup(
+  effectiveSessionId: string | null,
+  effectiveEnvId: string | null,
+  activeTaskId: string | null,
+) {
   const prevEnvRef = useRef<string | null | undefined>(undefined);
+  const prevTaskRef = useRef<string | null | undefined>(undefined);
   useEffect(() => {
     const newEnvId = effectiveEnvId;
+    const newTaskId = activeTaskId;
     if (prevEnvRef.current === undefined) {
       prevEnvRef.current = newEnvId;
+      prevTaskRef.current = newTaskId;
       return;
     }
-    if (prevEnvRef.current === newEnvId) return;
+    if (prevEnvRef.current === newEnvId) {
+      prevTaskRef.current = newTaskId;
+      return;
+    }
+
+    // Every session of a task shares ONE task_environment_id by design — the
+    // backend reuses the task's environment for each session it launches (see
+    // assignLaunchTaskEnvironmentID). A same-task env-id *change* between two
+    // real envs therefore only happens via a launch race, and acting on it is
+    // destructive: performEnvSwitch rebuilds the env-keyed layout and strips
+    // the sibling session's chat panel (keepSessionId). With the active session
+    // bouncing between the two envs the session tabs are repeatedly removed and
+    // re-added — the "flicker between the old and new session". Sessions of one
+    // task render in one shared layout, so keep the current layout and do NOT
+    // advance prevEnvRef (preserve the task's stable env for a later real
+    // task switch).
+    const taskChanged = prevTaskRef.current !== newTaskId;
+    if (!taskChanged && prevEnvRef.current && newEnvId) {
+      return;
+    }
 
     const oldEnvId = prevEnvRef.current;
     prevEnvRef.current = newEnvId;
+    prevTaskRef.current = newTaskId;
 
     // Portal cleanup is handled synchronously inside switchEnvLayout (in the
     // dockview store action) before any fromJSON call. This hook serves as a
@@ -489,7 +516,7 @@ function useEnvSwitchCleanup(effectiveSessionId: string | null, effectiveEnvId: 
     if (newEnvId) {
       performLayoutSwitch(oldEnvId, newEnvId, effectiveSessionId);
     }
-  }, [effectiveEnvId, effectiveSessionId]);
+  }, [effectiveEnvId, effectiveSessionId, activeTaskId]);
 }
 
 // ---------------------------------------------------------------------------
@@ -521,6 +548,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
   const effectiveSessionId =
     useAppStore((state) => state.tasks.activeSessionId) ?? sessionId ?? null;
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const effectiveEnvId = useAppStore((state) =>
     effectiveSessionId ? (state.environmentIdBySessionId[effectiveSessionId] ?? null) : null,
   );
@@ -568,7 +596,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   // IMPORTANT: this must run BEFORE useAutoSessionTab so the old layout is
   // saved before a new session tab is created — otherwise the new session's
   // panel could leak into the old session's persisted layout.
-  useEnvSwitchCleanup(effectiveSessionId, effectiveEnvId);
+  useEnvSwitchCleanup(effectiveSessionId, effectiveEnvId, activeTaskId);
 
   // Auto-create a session tab when a session becomes active
   useAutoSessionTab(effectiveSessionId);
