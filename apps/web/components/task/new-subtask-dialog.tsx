@@ -363,7 +363,7 @@ export function NewSubtaskDialog({
         className="w-full h-full min-w-0 max-w-full max-h-full overflow-hidden rounded-none sm:w-[800px] sm:h-auto sm:max-w-none sm:max-h-[85vh] sm:rounded-lg flex flex-col"
       >
         <DialogHeader>
-          <DialogTitle className="min-w-0 break-words pr-6 text-sm font-medium">
+          <DialogTitle className="min-w-0 wrap-break-word pr-6 text-sm font-medium">
             New subtask for <span className="text-foreground">{parentTaskTitle}</span>
           </DialogTitle>
         </DialogHeader>

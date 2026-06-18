@@ -526,7 +526,7 @@ export function NewSessionDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="min-w-0 overflow-hidden sm:max-w-[520px]">
         <DialogHeader>
-          <DialogTitle className="min-w-0 break-words pr-6 text-sm font-medium">
+          <DialogTitle className="min-w-0 wrap-break-word pr-6 text-sm font-medium">
             {handoffLabel ? (
               <>
                 Hand off to <span className="text-foreground">{handoffLabel}</span>

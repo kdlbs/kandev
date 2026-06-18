@@ -133,12 +133,12 @@ export function PromptZone({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div className="min-w-0 max-w-full rounded-md border border-input bg-transparent">
+      <div className="min-w-0 max-w-full rounded-md border border-input bg-transparent focus-within:ring-2 focus-within:ring-ring/30">
         <ContextZone items={contextItems} />
         <Textarea
           ref={promptRef}
           placeholder="What should the agent work on?"
-          className="min-w-0 max-w-full overflow-wrap-anywhere border-0 focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]"
+          className="min-w-0 max-w-full field-sizing-fixed wrap-anywhere border-0 focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]"
           autoFocus
           disabled={inputDisabled}
           data-testid="subtask-prompt-input"
