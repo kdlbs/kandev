@@ -58,11 +58,11 @@ if [[ "$explicit_model_env_count" != "2" ]]; then
 fi
 pass "OpenCode posting steps explicitly pass OPENCODE_MODEL"
 
-trusted_fork_script_count="$(count_occurrences 'git show "$BASE_SHA:scripts/opencode-code-review" > .opencode-review/opencode-code-review')"
-if [[ "$trusted_fork_script_count" != "1" ]]; then
-  fail "Fork review executes the parser script from the trusted base commit"
+trusted_script_count="$(count_occurrences 'git show "$BASE_SHA:scripts/opencode-code-review" > .opencode-review/opencode-code-review')"
+if [[ "$trusted_script_count" != "2" ]]; then
+  fail "OpenCode review executes the parser script from the trusted base commit in both workflow paths"
 fi
-pass "Fork review executes the parser script from the trusted base commit"
+pass "OpenCode review executes the parser script from the trusted base commit in both workflow paths"
 
 artifact_upload_count="$(count_occurrences 'uses: actions/upload-artifact@v4')"
 if [[ "$artifact_upload_count" != "2" ]]; then

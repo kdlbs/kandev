@@ -191,11 +191,13 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           OPENCODE_MODEL: ${{ env.OPENCODE_MODEL }}
         run: |
           set -euo pipefail
 
-          python3 scripts/opencode-code-review post-findings \
+          git show "$BASE_SHA:scripts/opencode-code-review" > .opencode-review/opencode-code-review
+          python3 .opencode-review/opencode-code-review post-findings \
             --output .opencode-review/output.txt \
             --files .opencode-review/files.txt \
             --opencode-status .opencode-review/opencode.status \
