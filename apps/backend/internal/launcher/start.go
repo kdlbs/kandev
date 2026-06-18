@@ -94,26 +94,6 @@ func runManagedApp(cfg managedAppConfig) int {
 	return waitForAppExit(supervisor, backend)
 }
 
-func findRepoRoot(startDir string) (string, error) {
-	current, err := filepath.Abs(startDir)
-	if err != nil {
-		return "", err
-	}
-	for {
-		if filepath.Base(current) == "apps" && exists(filepath.Join(current, "backend")) && exists(filepath.Join(current, "web")) {
-			return filepath.Dir(current), nil
-		}
-		if exists(filepath.Join(current, "apps", "backend")) && exists(filepath.Join(current, "apps", "web")) {
-			return current, nil
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			return "", fmt.Errorf("unable to locate repo root for start. Run from the repo")
-		}
-		current = parent
-	}
-}
-
 func logStartup(header string, ports portConfig, dbPath, logLevel string) {
 	fmt.Println("[kandev] " + header)
 	fmt.Println("[kandev] url:", ports.BackendURL)
@@ -145,12 +125,4 @@ func openBrowser(url string) {
 func exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
-}
-
-func mustGetwd() string {
-	wd, err := os.Getwd()
-	if err != nil {
-		return "."
-	}
-	return wd
 }

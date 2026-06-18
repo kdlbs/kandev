@@ -173,7 +173,7 @@ func runLinuxService(args serviceArgs) int {
 			journalArgs = append([]string{"--user-unit", serviceUnitName}, journalArgs...)
 		}
 		if args.Follow {
-			journalArgs = journalArgs[:len(journalArgs)-2]
+			journalArgs = journalArgs[:len(journalArgs)-1]
 			journalArgs = append(journalArgs, "-f")
 		}
 		if err := runCommand("journalctl", journalArgs...); err != nil {

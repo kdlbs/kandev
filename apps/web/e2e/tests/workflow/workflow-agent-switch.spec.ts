@@ -55,6 +55,31 @@ async function waitForSessionEnvironmentId(
   throw new Error(`session for profile ${agentProfileId} did not get environment id: ${details}`);
 }
 
+async function pollSessionsForEnvironmentInheritance(
+  apiClient: InstanceType<typeof import("../../helpers/api-client").ApiClient>,
+  taskId: string,
+  sourceProfileId: string,
+  targetProfileId: string,
+  timeoutMs = 30_000,
+) {
+  const start = Date.now();
+  let latestSessions: Awaited<ReturnType<typeof pollSessions>> = [];
+  while (Date.now() - start < timeoutMs) {
+    const { sessions } = await apiClient.listTaskSessions(taskId);
+    latestSessions = sessions;
+    const sourceSession = sessions.find((s) => s.agent_profile_id === sourceProfileId);
+    const targetSession = sessions.find((s) => s.agent_profile_id === targetProfileId);
+    if (
+      sourceSession?.task_environment_id &&
+      targetSession?.task_environment_id === sourceSession.task_environment_id
+    ) {
+      return sessions;
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return latestSessions;
+}
+
 test.describe("Workflow agent profile switching", () => {
   test("manual step move creates new session with step's agent profile", async ({
     apiClient,
@@ -402,10 +427,17 @@ test.describe("Workflow agent profile switching", () => {
     // Move to Step2
     await apiClient.moveTask(task.id, workflow.id, step2.id);
 
-    const step2EnvironmentId = await waitForSessionEnvironmentId(apiClient, task.id, profileB.id);
-    const { sessions: finalSessions } = await apiClient.listTaskSessions(task.id);
+    // Wait for the second session and the async environment handoff.
+    const finalSessions = await pollSessionsForEnvironmentInheritance(
+      apiClient,
+      task.id,
+      profileA.id,
+      profileB.id,
+      30_000,
+    );
     const step2Session = finalSessions.find((s) => s.agent_profile_id === profileB.id);
     expect(step2Session).toBeDefined();
+    const step2EnvironmentId = step2Session?.task_environment_id;
     expect(step2EnvironmentId).toBe(step1EnvironmentId);
   });
 
