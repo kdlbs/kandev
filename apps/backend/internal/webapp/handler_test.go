@@ -29,6 +29,26 @@ func TestHandlerServesStaticAssetBeforeRouteClassification(t *testing.T) {
 	}
 }
 
+func TestHandlerServesWebManifestWithManifestContentType(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(fstest.MapFS{
+		"index.html":           {Data: []byte("<html><head></head><body></body></html>")},
+		"manifest.webmanifest": {Data: []byte(`{"name":"Kandev"}`)},
+	})
+
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/manifest.webmanifest", nil)
+	handler.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.Code, http.StatusOK)
+	}
+	if got := resp.Header().Get("Content-Type"); got != "application/manifest+json" {
+		t.Fatalf("Content-Type = %q, want application/manifest+json", got)
+	}
+}
+
 func TestHandlerInjectsBootPayloadForSPARoutes(t *testing.T) {
 	t.Parallel()
 

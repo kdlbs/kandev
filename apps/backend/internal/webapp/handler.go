@@ -11,6 +11,10 @@ import (
 
 const IndexHTML = "index.html"
 
+func init() {
+	_ = mime.AddExtensionType(".webmanifest", "application/manifest+json")
+}
+
 type PayloadBuilder func(*http.Request, RouteClassification) BootPayload
 
 type Handler struct {
