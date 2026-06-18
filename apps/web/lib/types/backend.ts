@@ -70,6 +70,7 @@ export type BackendMessageType =
   | "secrets.deleted"
   | "message.queue.status_changed"
   | "github.task_pr.updated"
+  | "github.task_ci_options.updated"
   | "github.rate_limit.updated"
   | OfficeEventType
   | "run.event.appended";
@@ -92,7 +93,7 @@ import type {
 } from "@/lib/types/http";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { GitEventPayload } from "@/lib/types/git-events";
-import type { GitHubRateLimitUpdate, TaskPR } from "@/lib/types/github";
+import type { GitHubRateLimitUpdate, TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
 import type { FileChangeNotificationPayload } from "./workspace-files";
 import type {
   AgentCapabilitiesPayload,
@@ -617,6 +618,10 @@ export type BackendMessageMap = OfficeBackendMessageMap & {
     QueueStatusChangedPayload
   >;
   "github.task_pr.updated": BackendMessage<"github.task_pr.updated", TaskPR>;
+  "github.task_ci_options.updated": BackendMessage<
+    "github.task_ci_options.updated",
+    TaskCIAutomationOptions
+  >;
   "github.rate_limit.updated": BackendMessage<"github.rate_limit.updated", GitHubRateLimitUpdate>;
   "run.event.appended": BackendMessage<"run.event.appended", RunEventAppendedPayload>;
 };

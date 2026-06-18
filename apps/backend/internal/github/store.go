@@ -1016,41 +1016,42 @@ func (s *Store) GetTaskCIOptions(ctx context.Context, taskID string) (*TaskCIOpt
 
 // UpdateTaskCIOptions applies a partial update to task CI automation options.
 func (s *Store) UpdateTaskCIOptions(ctx context.Context, taskID string, patch TaskCIOptionsPatch) (*TaskCIOptions, error) {
-	current, err := s.GetTaskCIOptions(ctx, taskID)
+	writeCtx := context.WithoutCancel(ctx)
+	now := time.Now().UTC()
+	tx, err := s.db.BeginTxx(writeCtx, nil)
 	if err != nil {
 		return nil, err
 	}
-	if patch.AutoFixEnabled != nil {
-		current.AutoFixEnabled = *patch.AutoFixEnabled
-	}
-	if patch.AutoMergeEnabled != nil {
-		current.AutoMergeEnabled = *patch.AutoMergeEnabled
-	}
-	if patch.AutoFixPromptOverride != nil {
-		trimmed := strings.TrimSpace(*patch.AutoFixPromptOverride)
-		if trimmed == "" {
-			current.AutoFixPromptOverride = nil
-		} else {
-			current.AutoFixPromptOverride = &trimmed
-		}
-	}
-	now := time.Now().UTC()
-	if current.CreatedAt.IsZero() {
-		current.CreatedAt = now
-	}
-	current.UpdatedAt = now
-	_, err = s.db.ExecContext(ctx, `
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(writeCtx, `
 		INSERT INTO github_task_ci_options (
 			task_id, auto_fix_enabled, auto_merge_enabled, auto_fix_prompt_override, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(task_id) DO UPDATE SET
-			auto_fix_enabled = excluded.auto_fix_enabled,
-			auto_merge_enabled = excluded.auto_merge_enabled,
-			auto_fix_prompt_override = excluded.auto_fix_prompt_override,
-			updated_at = excluded.updated_at`,
-		current.TaskID, current.AutoFixEnabled, current.AutoMergeEnabled,
-		current.AutoFixPromptOverride, current.CreatedAt, current.UpdatedAt)
-	if err != nil {
+		) VALUES (?, 0, 0, NULL, ?, ?)
+		ON CONFLICT(task_id) DO NOTHING`,
+		taskID, now, now); err != nil {
+		return nil, err
+	}
+	autoFixSet, autoFixValue := boolPatchValue(patch.AutoFixEnabled)
+	autoMergeSet, autoMergeValue := boolPatchValue(patch.AutoMergeEnabled)
+	promptSet := patch.AutoFixPromptOverride != nil
+	var promptValue *string
+	if promptSet {
+		trimmed := strings.TrimSpace(*patch.AutoFixPromptOverride)
+		if trimmed != "" {
+			promptValue = &trimmed
+		}
+	}
+	if _, err := tx.ExecContext(writeCtx, `
+		UPDATE github_task_ci_options SET
+			auto_fix_enabled = CASE WHEN ? THEN ? ELSE auto_fix_enabled END,
+			auto_merge_enabled = CASE WHEN ? THEN ? ELSE auto_merge_enabled END,
+			auto_fix_prompt_override = CASE WHEN ? THEN ? ELSE auto_fix_prompt_override END,
+			updated_at = ?
+		WHERE task_id = ?`,
+		autoFixSet, autoFixValue, autoMergeSet, autoMergeValue, promptSet, promptValue, now, taskID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return s.GetTaskCIOptions(ctx, taskID)
@@ -1086,6 +1087,7 @@ func (s *Store) GetTaskCIPRState(ctx context.Context, taskID, repositoryID strin
 
 // RecordTaskCIFixAttempt records the feedback checkpoint that produced an auto-fix prompt.
 func (s *Store) RecordTaskCIFixAttempt(ctx context.Context, attempt TaskCIFixAttempt) error {
+	ctx = context.WithoutCancel(ctx)
 	when := attempt.EnqueuedAt
 	if when.IsZero() {
 		when = time.Now().UTC()
@@ -1110,6 +1112,7 @@ func (s *Store) RecordTaskCIFixAttempt(ctx context.Context, attempt TaskCIFixAtt
 
 // RecordTaskCIMergeAttempt records an auto-merge attempt signature.
 func (s *Store) RecordTaskCIMergeAttempt(ctx context.Context, attempt TaskCIMergeAttempt) error {
+	ctx = context.WithoutCancel(ctx)
 	when := attempt.AttemptedAt
 	if when.IsZero() {
 		when = time.Now().UTC()
@@ -1130,6 +1133,7 @@ func (s *Store) RecordTaskCIMergeAttempt(ctx context.Context, attempt TaskCIMerg
 
 // RecordTaskCIError stores the latest user-visible CI automation error for a task PR.
 func (s *Store) RecordTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error {
+	ctx = context.WithoutCancel(ctx)
 	now := time.Now().UTC()
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO github_task_ci_pr_state (
@@ -1144,6 +1148,7 @@ func (s *Store) RecordTaskCIError(ctx context.Context, taskID, repositoryID stri
 
 // ClearTaskCIError clears the latest CI automation error for a task PR.
 func (s *Store) ClearTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int) error {
+	ctx = context.WithoutCancel(ctx)
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE github_task_ci_pr_state SET last_error = NULL, updated_at = ?
 		WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
@@ -1156,6 +1161,13 @@ func nullableString(value string) *string {
 		return nil
 	}
 	return &value
+}
+
+func boolPatchValue(value *bool) (bool, bool) {
+	if value == nil {
+		return false, false
+	}
+	return true, *value
 }
 
 // --- Review Watch operations ---

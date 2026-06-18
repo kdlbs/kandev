@@ -382,27 +382,28 @@ const (
 
 // GitHub integration actions
 const (
-	ActionGitHubStatus            = "github.status"
-	ActionGitHubTaskPRsList       = "github.task_prs.list"
-	ActionGitHubTaskPRGet         = "github.task_pr.get"
-	ActionGitHubPRFeedbackGet     = "github.pr_feedback.get"
-	ActionGitHubReviewWatchesList = "github.review_watches.list"
-	ActionGitHubReviewWatchCreate = "github.review_watches.create"
-	ActionGitHubReviewWatchUpdate = "github.review_watches.update"
-	ActionGitHubReviewWatchDelete = "github.review_watches.delete"
-	ActionGitHubReviewTrigger     = "github.review_watches.trigger"
-	ActionGitHubReviewTriggerAll  = "github.review_watches.trigger_all"
-	ActionGitHubPRWatchesList     = "github.pr_watches.list"
-	ActionGitHubPRWatchDelete     = "github.pr_watches.delete"
-	ActionGitHubPRFilesGet        = "github.pr_files.get"
-	ActionGitHubPRCommitsGet      = "github.pr_commits.get"
-	ActionGitHubTaskPRUpdated     = "github.task_pr.updated"      // Notification
-	ActionGitHubRateLimitUpdated  = "github.rate_limit.updated"   // Notification
-	ActionGitHubPRFeedbackNotify  = "github.pr_feedback.notify"   // Notification
-	ActionGitHubNewReviewPRNotify = "github.new_review_pr.notify" // Notification
-	ActionGitHubTaskPRSync        = "github.task_pr.sync"
-	ActionGitHubStats             = "github.stats"
-	ActionGitHubCheckSessionPR    = "github.check_session_pr"
+	ActionGitHubStatus               = "github.status"
+	ActionGitHubTaskPRsList          = "github.task_prs.list"
+	ActionGitHubTaskPRGet            = "github.task_pr.get"
+	ActionGitHubPRFeedbackGet        = "github.pr_feedback.get"
+	ActionGitHubReviewWatchesList    = "github.review_watches.list"
+	ActionGitHubReviewWatchCreate    = "github.review_watches.create"
+	ActionGitHubReviewWatchUpdate    = "github.review_watches.update"
+	ActionGitHubReviewWatchDelete    = "github.review_watches.delete"
+	ActionGitHubReviewTrigger        = "github.review_watches.trigger"
+	ActionGitHubReviewTriggerAll     = "github.review_watches.trigger_all"
+	ActionGitHubPRWatchesList        = "github.pr_watches.list"
+	ActionGitHubPRWatchDelete        = "github.pr_watches.delete"
+	ActionGitHubPRFilesGet           = "github.pr_files.get"
+	ActionGitHubPRCommitsGet         = "github.pr_commits.get"
+	ActionGitHubTaskPRUpdated        = "github.task_pr.updated"         // Notification
+	ActionGitHubTaskCIOptionsUpdated = "github.task_ci_options.updated" // Notification
+	ActionGitHubRateLimitUpdated     = "github.rate_limit.updated"      // Notification
+	ActionGitHubPRFeedbackNotify     = "github.pr_feedback.notify"      // Notification
+	ActionGitHubNewReviewPRNotify    = "github.new_review_pr.notify"    // Notification
+	ActionGitHubTaskPRSync           = "github.task_pr.sync"
+	ActionGitHubStats                = "github.stats"
+	ActionGitHubCheckSessionPR       = "github.check_session_pr"
 
 	// Issue watch actions
 	ActionGitHubIssueWatchesList = "github.issue_watches.list"

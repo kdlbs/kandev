@@ -180,7 +180,15 @@ func (s *Service) RateTracker() *RateTracker {
 
 // SetPromptResolver wires the editable prompt service into GitHub automation.
 func (s *Service) SetPromptResolver(resolver PromptResolver) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.promptResolver = resolver
+}
+
+func (s *Service) getPromptResolver() PromptResolver {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.promptResolver
 }
 
 // newPATClient builds a PATClient pre-wired with the service's shared rate

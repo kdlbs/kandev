@@ -137,7 +137,11 @@ func TestService_ResolvePromptContentUsesStoredPrompt(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	prompt, err := svc.UpdatePrompt(ctx, "builtin-ci-auto-fix", nil, stringPtr("custom default"))
+	seeded, err := svc.repo.GetPromptByName(ctx, "ci-auto-fix")
+	if err != nil {
+		t.Fatalf("get built-in prompt: %v", err)
+	}
+	prompt, err := svc.UpdatePrompt(ctx, seeded.ID, nil, stringPtr("custom default"))
 	if err != nil {
 		t.Fatalf("update built-in prompt: %v", err)
 	}

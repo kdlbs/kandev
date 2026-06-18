@@ -11,7 +11,7 @@ import (
 // GetTaskCIOptionsResponse returns task CI automation options plus effective prompt text.
 func (s *Service) GetTaskCIOptionsResponse(ctx context.Context, taskID string) (*TaskCIOptionsResponse, error) {
 	if s.store == nil {
-		return nil, fmt.Errorf("github store not configured")
+		return nil, errStoreUnavailable
 	}
 	opts, err := s.store.GetTaskCIOptions(ctx, taskID)
 	if err != nil {
@@ -23,7 +23,7 @@ func (s *Service) GetTaskCIOptionsResponse(ctx context.Context, taskID string) (
 // UpdateTaskCIOptions updates task CI automation options and returns the response shape.
 func (s *Service) UpdateTaskCIOptions(ctx context.Context, taskID string, patch TaskCIOptionsPatch) (*TaskCIOptionsResponse, error) {
 	if s.store == nil {
-		return nil, fmt.Errorf("github store not configured")
+		return nil, errStoreUnavailable
 	}
 	opts, err := s.store.UpdateTaskCIOptions(ctx, taskID, patch)
 	if err != nil {
@@ -35,7 +35,7 @@ func (s *Service) UpdateTaskCIOptions(ctx context.Context, taskID string, patch 
 // GetTaskCIPRState returns per-PR CI automation state, or nil.
 func (s *Service) GetTaskCIPRState(ctx context.Context, taskID, repositoryID string, prNumber int) (*TaskCIPRAutomationState, error) {
 	if s.store == nil {
-		return nil, fmt.Errorf("github store not configured")
+		return nil, errStoreUnavailable
 	}
 	return s.store.GetTaskCIPRState(ctx, taskID, repositoryID, prNumber)
 }
@@ -43,7 +43,7 @@ func (s *Service) GetTaskCIPRState(ctx context.Context, taskID, repositoryID str
 // RecordTaskCIFixAttempt records an auto-fix attempt.
 func (s *Service) RecordTaskCIFixAttempt(ctx context.Context, attempt TaskCIFixAttempt) error {
 	if s.store == nil {
-		return fmt.Errorf("github store not configured")
+		return errStoreUnavailable
 	}
 	return s.store.RecordTaskCIFixAttempt(ctx, attempt)
 }
@@ -51,7 +51,7 @@ func (s *Service) RecordTaskCIFixAttempt(ctx context.Context, attempt TaskCIFixA
 // RecordTaskCIMergeAttempt records an auto-merge attempt.
 func (s *Service) RecordTaskCIMergeAttempt(ctx context.Context, attempt TaskCIMergeAttempt) error {
 	if s.store == nil {
-		return fmt.Errorf("github store not configured")
+		return errStoreUnavailable
 	}
 	return s.store.RecordTaskCIMergeAttempt(ctx, attempt)
 }
@@ -59,7 +59,7 @@ func (s *Service) RecordTaskCIMergeAttempt(ctx context.Context, attempt TaskCIMe
 // RecordTaskCIError records a CI automation error.
 func (s *Service) RecordTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error {
 	if s.store == nil {
-		return fmt.Errorf("github store not configured")
+		return errStoreUnavailable
 	}
 	return s.store.RecordTaskCIError(ctx, taskID, repositoryID, prNumber, message)
 }
@@ -67,7 +67,7 @@ func (s *Service) RecordTaskCIError(ctx context.Context, taskID, repositoryID st
 // ClearTaskCIError clears a CI automation error.
 func (s *Service) ClearTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int) error {
 	if s.store == nil {
-		return fmt.Errorf("github store not configured")
+		return errStoreUnavailable
 	}
 	return s.store.ClearTaskCIError(ctx, taskID, repositoryID, prNumber)
 }
@@ -97,10 +97,11 @@ func (s *Service) effectiveCIAutoFixPrompt(ctx context.Context, opts *TaskCIOpti
 		}
 	}
 	fallback := promptcfg.Get(defaultCIAutoFixPromptName)
-	if s.promptResolver == nil {
+	resolver := s.getPromptResolver()
+	if resolver == nil {
 		return fallback, true
 	}
-	return s.promptResolver.ResolvePromptContent(ctx, defaultCIAutoFixPromptName, fallback), true
+	return resolver.ResolvePromptContent(ctx, defaultCIAutoFixPromptName, fallback), true
 }
 
 func (s *Service) taskCIPRStates(ctx context.Context, taskID string) ([]*TaskCIPRAutomationState, error) {

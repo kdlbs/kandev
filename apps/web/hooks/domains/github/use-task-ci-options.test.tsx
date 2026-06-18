@@ -75,4 +75,73 @@ describe("useTaskCIAutomationOptions", () => {
     expect(result.current.options?.auto_fix_prompt_override).toBeNull();
     expect(result.current.saving).toBe(false);
   });
+
+  it("does not auto-retry after a load error", async () => {
+    apiMocks.getOptionsMock.mockRejectedValue(new Error("backend unavailable"));
+
+    const { result } = renderHook(() => useTaskCIAutomationOptions("task-1"), { wrapper });
+
+    await waitFor(() => expect(result.current.error).toBe("backend unavailable"));
+    expect(apiMocks.getOptionsMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(apiMocks.getOptionsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores stale refresh responses", async () => {
+    let resolveFirst: (value: TaskCIAutomationOptions) => void = () => {};
+    let resolveSecond: (value: TaskCIAutomationOptions) => void = () => {};
+    apiMocks.getOptionsMock
+      .mockReturnValueOnce(new Promise((resolve) => (resolveFirst = resolve)))
+      .mockReturnValueOnce(new Promise((resolve) => (resolveSecond = resolve)));
+
+    const { result } = renderHook(() => useTaskCIAutomationOptions("task-1"), { wrapper });
+
+    await waitFor(() => expect(apiMocks.getOptionsMock).toHaveBeenCalledTimes(1));
+    let secondRefresh: Promise<TaskCIAutomationOptions | null>;
+    await act(async () => {
+      secondRefresh = result.current.refresh();
+    });
+    resolveSecond(makeOptions({ auto_fix_enabled: true }));
+    await act(async () => {
+      await secondRefresh!;
+    });
+    resolveFirst(makeOptions({ auto_fix_enabled: false }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(result.current.options?.auto_fix_enabled).toBe(true);
+  });
+
+  it("ignores stale update responses", async () => {
+    apiMocks.getOptionsMock.mockResolvedValue(makeOptions());
+    let resolveFirst: (value: TaskCIAutomationOptions) => void = () => {};
+    let resolveSecond: (value: TaskCIAutomationOptions) => void = () => {};
+    apiMocks.updateOptionsMock
+      .mockReturnValueOnce(new Promise((resolve) => (resolveFirst = resolve)))
+      .mockReturnValueOnce(new Promise((resolve) => (resolveSecond = resolve)));
+
+    const { result } = renderHook(() => useTaskCIAutomationOptions("task-1"), { wrapper });
+    await waitFor(() => expect(result.current.options).not.toBeNull());
+
+    let firstUpdate: Promise<TaskCIAutomationOptions | null>;
+    let secondUpdate: Promise<TaskCIAutomationOptions | null>;
+    await act(async () => {
+      firstUpdate = result.current.update({ auto_fix_enabled: true });
+      secondUpdate = result.current.update({ auto_merge_enabled: true });
+    });
+    resolveSecond(makeOptions({ auto_merge_enabled: true }));
+    await act(async () => {
+      await secondUpdate!;
+    });
+    resolveFirst(makeOptions({ auto_fix_enabled: true }));
+    await act(async () => {
+      await firstUpdate!;
+    });
+
+    expect(result.current.options?.auto_merge_enabled).toBe(true);
+    expect(result.current.options?.auto_fix_enabled).toBe(false);
+  });
 });

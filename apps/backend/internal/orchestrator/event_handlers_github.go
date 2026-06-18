@@ -166,7 +166,11 @@ func (s *Service) handlePRFeedback(ctx context.Context, event *bus.Event) error 
 			return nil
 		}
 		if pr != nil {
-			return s.handleTaskPRCIAutomation(ctx, pr)
+			go func() {
+				if err := s.handleTaskPRCIAutomation(context.Background(), pr); err != nil {
+					s.logger.Debug("CI automation handling failed", zap.String("task_id", pr.TaskID), zap.Error(err))
+				}
+			}()
 		}
 	}
 	return nil
@@ -177,7 +181,12 @@ func (s *Service) handleTaskPRUpdated(ctx context.Context, event *bus.Event) err
 	if !ok || pr == nil {
 		return nil
 	}
-	return s.handleTaskPRCIAutomation(ctx, pr)
+	go func() {
+		if err := s.handleTaskPRCIAutomation(context.Background(), pr); err != nil {
+			s.logger.Debug("CI automation handling failed", zap.String("task_id", pr.TaskID), zap.Error(err))
+		}
+	}()
+	return nil
 }
 
 // handleNewReviewPR creates a task for a new PR needing review.

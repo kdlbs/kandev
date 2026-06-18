@@ -79,7 +79,7 @@ func TestCIAutomationFeedbackDelta(t *testing.T) {
 	}
 	checkpoint := ciAutomationCheckpoint{
 		FailedChecks: []ciAutomationCheckSnapshot{{Name: "unit", Conclusion: "failure", HTMLURL: "https://ci/1"}},
-		Comments:     []ciAutomationCommentSnapshot{{ID: 10}},
+		Comments:     []ciAutomationCommentSnapshot{{ID: 10, Body: "fix this", Path: "main.go", Line: 12}},
 	}
 
 	delta := ciAutomationBuildDelta(feedback, checkpoint)
@@ -92,5 +92,42 @@ func TestCIAutomationFeedbackDelta(t *testing.T) {
 	prompt := ciAutomationRenderPrompt("Base instructions", &github.TaskPR{Owner: "acme", Repo: "widget", PRNumber: 42}, delta)
 	if !strings.Contains(prompt, "Base instructions") || !strings.Contains(prompt, "acme/widget#42") || !strings.Contains(prompt, "also this") {
 		t.Fatalf("rendered prompt missing expected content:\n%s", prompt)
+	}
+}
+
+func TestCIAutomationCheckpointPrunesResolvedFailures(t *testing.T) {
+	failed := &github.PRFeedback{
+		Checks: []github.CheckRun{{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/stable"}},
+	}
+	previous := ciAutomationCurrentCheckpoint(failed)
+
+	passing := &github.PRFeedback{
+		Checks: []github.CheckRun{{Name: "unit", Status: "completed", Conclusion: "success", HTMLURL: "https://ci/stable"}},
+	}
+	pruned := ciAutomationCurrentCheckpoint(passing)
+	if len(pruned.FailedChecks) != 0 {
+		t.Fatalf("expected passing check to be pruned, got %+v", pruned.FailedChecks)
+	}
+
+	regressed := ciAutomationBuildDelta(failed, pruned)
+	if len(regressed.FailedChecks) != 1 {
+		t.Fatalf("expected same check to retrigger after prune, got %+v", regressed.FailedChecks)
+	}
+	if again := ciAutomationBuildDelta(failed, previous); len(again.FailedChecks) != 0 {
+		t.Fatalf("expected unchanged failure to remain deduped, got %+v", again.FailedChecks)
+	}
+}
+
+func TestCIAutomationFeedbackDeltaIncludesEditedComments(t *testing.T) {
+	previous := ciAutomationCheckpoint{
+		Comments: []ciAutomationCommentSnapshot{{ID: 10, Body: "old body", Path: "main.go", Line: 12}},
+	}
+	feedback := &github.PRFeedback{
+		Comments: []github.PRComment{{ID: 10, Body: "new body", Path: "main.go", Line: 12}},
+	}
+
+	delta := ciAutomationBuildDelta(feedback, previous)
+	if len(delta.Comments) != 1 || delta.Comments[0].Body != "new body" {
+		t.Fatalf("expected edited comment in delta, got %+v", delta.Comments)
 	}
 }

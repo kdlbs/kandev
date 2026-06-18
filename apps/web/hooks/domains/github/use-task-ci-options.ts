@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import {
   getTaskCIAutomationOptions,
   updateTaskCIAutomationOptions,
@@ -13,6 +13,8 @@ function errorMessage(error: unknown): string {
 }
 
 export function useTaskCIAutomationOptions(taskId: string | null) {
+  const refreshRequestRef = useRef(0);
+  const updateRequestRef = useRef(0);
   const options = useAppStore((state) =>
     taskId ? (state.taskCIAutomation.byTaskId[taskId] ?? null) : null,
   );
@@ -32,34 +34,50 @@ export function useTaskCIAutomationOptions(taskId: string | null) {
 
   const refresh = useCallback(async (): Promise<TaskCIAutomationOptions | null> => {
     if (!taskId) return null;
+    const requestId = refreshRequestRef.current + 1;
+    refreshRequestRef.current = requestId;
     setLoading(taskId, true);
     setError(taskId, null);
     try {
       const response = await getTaskCIAutomationOptions(taskId, { cache: "no-store" });
-      setOptions(taskId, response);
+      if (refreshRequestRef.current === requestId) {
+        setOptions(taskId, response);
+      }
       return response;
     } catch (err) {
-      setError(taskId, errorMessage(err));
+      if (refreshRequestRef.current === requestId) {
+        setError(taskId, errorMessage(err));
+      }
       throw err;
     } finally {
-      setLoading(taskId, false);
+      if (refreshRequestRef.current === requestId) {
+        setLoading(taskId, false);
+      }
     }
   }, [setError, setLoading, setOptions, taskId]);
 
   const update = useCallback(
     async (patch: TaskCIAutomationPatch): Promise<TaskCIAutomationOptions | null> => {
       if (!taskId) return null;
+      const requestId = updateRequestRef.current + 1;
+      updateRequestRef.current = requestId;
       setSaving(taskId, true);
       setError(taskId, null);
       try {
         const response = await updateTaskCIAutomationOptions(taskId, patch, { cache: "no-store" });
-        setOptions(taskId, response);
+        if (updateRequestRef.current === requestId) {
+          setOptions(taskId, response);
+        }
         return response;
       } catch (err) {
-        setError(taskId, errorMessage(err));
+        if (updateRequestRef.current === requestId) {
+          setError(taskId, errorMessage(err));
+        }
         throw err;
       } finally {
-        setSaving(taskId, false);
+        if (updateRequestRef.current === requestId) {
+          setSaving(taskId, false);
+        }
       }
     },
     [setError, setOptions, setSaving, taskId],
@@ -68,11 +86,11 @@ export function useTaskCIAutomationOptions(taskId: string | null) {
   const resetPrompt = useCallback(() => update({ auto_fix_prompt_override: null }), [update]);
 
   useEffect(() => {
-    if (!taskId || options || loading) return;
+    if (!taskId || options || loading || error) return;
     void refresh().catch(() => {
       // Error state is stored for the UI; callers can retry via refresh.
     });
-  }, [loading, options, refresh, taskId]);
+  }, [error, loading, options, refresh, taskId]);
 
   return { options, loading, saving, error, refresh, update, resetPrompt };
 }

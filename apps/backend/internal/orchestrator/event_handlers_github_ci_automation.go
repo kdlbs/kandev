@@ -75,10 +75,23 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 	}
 	previous := decodeCIAutomationCheckpoint(state)
 	delta := ciAutomationBuildDelta(feedback, previous)
+	checkpoint := ciAutomationCurrentCheckpoint(feedback)
 	if len(delta.FailedChecks) == 0 && len(delta.Comments) == 0 {
+		if state != nil && len(previous.FailedChecks)+len(previous.Comments) > 0 {
+			checkpointJSON, signature := encodeCIAutomationCheckpoint(checkpoint)
+			if err := s.githubService.RecordTaskCIFixAttempt(context.WithoutCancel(ctx), github.TaskCIFixAttempt{
+				TaskID:         pr.TaskID,
+				RepositoryID:   pr.RepositoryID,
+				PRNumber:       pr.PRNumber,
+				Signature:      signature,
+				CheckpointJSON: checkpointJSON,
+				EnqueuedAt:     time.Now().UTC(),
+			}); err != nil {
+				s.logger.Debug("record CI auto-fix checkpoint refresh failed", zap.String("task_id", pr.TaskID), zap.Error(err))
+			}
+		}
 		return
 	}
-	checkpoint := ciAutomationCheckpoint{FailedChecks: append(previous.FailedChecks, delta.FailedChecks...), Comments: append(previous.Comments, delta.Comments...)}
 	checkpointJSON, signature := encodeCIAutomationCheckpoint(checkpoint)
 	if state != nil && state.LastFixSignature == signature {
 		return
@@ -86,14 +99,13 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 	prompt := ciAutomationRenderPrompt(options.EffectiveAutoFixPrompt, pr, delta)
 	session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, pr.TaskID)
 	if err != nil || session == nil {
-		s.recordCIAutomationError(ctx, pr, "no promptable task session for CI auto-fix")
 		return
 	}
 	if err := s.dispatchCIAutomationPrompt(ctx, session, prompt); err != nil {
 		s.recordCIAutomationError(ctx, pr, err.Error())
 		return
 	}
-	if err := s.githubService.RecordTaskCIFixAttempt(ctx, github.TaskCIFixAttempt{
+	if err := s.githubService.RecordTaskCIFixAttempt(context.WithoutCancel(ctx), github.TaskCIFixAttempt{
 		TaskID:         pr.TaskID,
 		RepositoryID:   pr.RepositoryID,
 		PRNumber:       pr.PRNumber,
@@ -109,7 +121,11 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 func (s *Service) handleTaskPRCIAutoMerge(ctx context.Context, pr *github.TaskPR) {
 	signature := ciAutomationMergeSignature(pr)
 	state, err := s.githubService.GetTaskCIPRState(ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber)
-	if err == nil && state != nil && state.LastMergeSignature == signature {
+	if err != nil {
+		s.recordCIAutomationError(ctx, pr, fmt.Sprintf("load CI automation state: %v", err))
+		return
+	}
+	if state != nil && state.LastMergeSignature == signature {
 		return
 	}
 	attempt := github.TaskCIMergeAttempt{
@@ -120,12 +136,12 @@ func (s *Service) handleTaskPRCIAutoMerge(ctx context.Context, pr *github.TaskPR
 		AttemptedAt:  time.Now().UTC(),
 	}
 	if err := s.githubService.MergePR(ctx, pr.Owner, pr.Repo, pr.PRNumber, ""); err != nil {
-		_ = s.githubService.RecordTaskCIMergeAttempt(ctx, attempt)
+		_ = s.githubService.RecordTaskCIMergeAttempt(context.WithoutCancel(ctx), attempt)
 		s.recordCIAutomationError(ctx, pr, fmt.Sprintf("merge PR: %v", err))
 		return
 	}
-	_ = s.githubService.RecordTaskCIMergeAttempt(ctx, attempt)
-	_ = s.githubService.ClearTaskCIError(ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber)
+	_ = s.githubService.RecordTaskCIMergeAttempt(context.WithoutCancel(ctx), attempt)
+	_ = s.githubService.ClearTaskCIError(context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber)
 }
 
 func (s *Service) dispatchCIAutomationPrompt(ctx context.Context, session *models.TaskSession, prompt string) error {
@@ -151,7 +167,7 @@ func (s *Service) dispatchCIAutomationPrompt(ctx context.Context, session *model
 }
 
 func (s *Service) recordCIAutomationError(ctx context.Context, pr *github.TaskPR, message string) {
-	if err := s.githubService.RecordTaskCIError(ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber, message); err != nil {
+	if err := s.githubService.RecordTaskCIError(context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber, message); err != nil {
 		s.logger.Debug("record CI automation error failed", zap.String("task_id", pr.TaskID), zap.Error(err))
 	}
 }
@@ -184,9 +200,9 @@ func ciAutomationBuildDelta(feedback *github.PRFeedback, previous ciAutomationCh
 	for _, check := range previous.FailedChecks {
 		prevChecks[check.Name+"|"+check.Conclusion+"|"+check.HTMLURL] = struct{}{}
 	}
-	prevComments := make(map[int64]struct{}, len(previous.Comments))
+	prevComments := make(map[int64]ciAutomationCommentSnapshot, len(previous.Comments))
 	for _, comment := range previous.Comments {
-		prevComments[comment.ID] = struct{}{}
+		prevComments[comment.ID] = comment
 	}
 	var delta ciAutomationCheckpoint
 	if feedback == nil {
@@ -202,14 +218,19 @@ func ciAutomationBuildDelta(feedback *github.PRFeedback, previous ciAutomationCh
 		}
 	}
 	for _, comment := range feedback.Comments {
-		if _, seen := prevComments[comment.ID]; seen {
+		snap := ciAutomationCommentSnapshot{
+			ID: comment.ID, Body: comment.Body, Path: comment.Path, Line: comment.Line,
+		}
+		if previous, seen := prevComments[comment.ID]; seen && previous == snap {
 			continue
 		}
-		delta.Comments = append(delta.Comments, ciAutomationCommentSnapshot{
-			ID: comment.ID, Body: comment.Body, Path: comment.Path, Line: comment.Line,
-		})
+		delta.Comments = append(delta.Comments, snap)
 	}
 	return delta
+}
+
+func ciAutomationCurrentCheckpoint(feedback *github.PRFeedback) ciAutomationCheckpoint {
+	return ciAutomationBuildDelta(feedback, ciAutomationCheckpoint{})
 }
 
 func ciAutomationRenderPrompt(base string, pr *github.TaskPR, delta ciAutomationCheckpoint) string {
