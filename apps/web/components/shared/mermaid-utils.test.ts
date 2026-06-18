@@ -81,6 +81,21 @@ describe("sanitizeMermaidCode", () => {
     expect(out).toContain(`B["/api/x"]`);
   });
 
+  it("does not match an edge label that spans a newline", () => {
+    const input = `A -->|open\nB | C`;
+    expect(sanitizeMermaidCode(input)).toBe(input);
+  });
+
+  it("does not match a bracket label that spans a newline", () => {
+    const input = `A[open\nB]`;
+    expect(sanitizeMermaidCode(input)).toBe(input);
+  });
+
+  it("does not match a parenthesis label that spans a newline", () => {
+    const input = `A(open\n/path)`;
+    expect(sanitizeMermaidCode(input)).toBe(input);
+  });
+
   it("does not quote ER diagram cardinality bars as flowchart edge labels", () => {
     const input = [
       "erDiagram",

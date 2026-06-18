@@ -85,7 +85,7 @@ const inAnyRange = (offset: number, ranges: Array<[number, number]>): boolean =>
 export function sanitizeMermaidCode(code: string): string {
   // Quote node labels: [text] or [[text]] etc. Match brackets that aren't already quoted.
   let quoted = findQuotedRanges(code);
-  let result = code.replace(/(\[+)([^\]"]+?)(\]+)/g, (match, open, text, close, offset) => {
+  let result = code.replace(/(\[+)([^\]\n"]+?)(\]+)/g, (match, open, text, close, offset) => {
     if (inAnyRange(offset, quoted)) return match;
     if (BRACKET_TRIGGER_RE.test(text)) {
       return `${open}"${text}"${close}`;
@@ -105,7 +105,7 @@ export function sanitizeMermaidCode(code: string): string {
 
   // Quote parentheses labels: (text) for stadium/circle nodes
   quoted = findQuotedRanges(result);
-  result = result.replace(/(\(+)([^)"]+?)(\)+)/g, (match, open, text, close, offset) => {
+  result = result.replace(/(\(+)([^)\n"]+?)(\)+)/g, (match, open, text, close, offset) => {
     if (inAnyRange(offset, quoted)) return match;
     // Skip if it looks like a subgraph or keyword
     if (/^(subgraph|end|graph|flowchart|sequenceDiagram)\b/.test(text.trim())) {
