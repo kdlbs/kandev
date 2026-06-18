@@ -126,25 +126,6 @@ export function hasGitStatusChanged(existing: GitStatusEntry, incoming: GitStatu
   // The backend also emits fresh snapshots for focus/startup/poll events. Those
   // can carry a new timestamp for identical git data, so timestamp alone must
   // not force a store update or diff-cache invalidation.
-
-  // Fast path: identical HEAD+base SHAs and identical file-status lists ⇒ the
-  // working tree is unchanged, so the O(N) per-file diff-string walk in
-  // sameFiles can be skipped. This is the dominant cost when WorkspaceTracker
-  // re-emits the same snapshot under heavy rebase load. Requires both sides to
-  // carry head_commit; degraded/legacy payloads without it fall through to the
-  // full compare. hasFileStatsChanged is intentionally excluded: identical SHAs
-  // + lists imply identical totals, so it would only waste cycles.
-  if (
-    existing.head_commit &&
-    incoming.head_commit &&
-    existing.head_commit === incoming.head_commit &&
-    (existing.base_commit ?? "") === (incoming.base_commit ?? "") &&
-    !hasFileListsChanged(existing, incoming) &&
-    !hasBranchSummaryChanged(existing, incoming)
-  ) {
-    return false;
-  }
-
   return (
     hasBranchSummaryChanged(existing, incoming) ||
     hasFileListsChanged(existing, incoming) ||

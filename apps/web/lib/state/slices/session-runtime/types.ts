@@ -78,15 +78,6 @@ export type GitStatusEntry = {
    * GitStatusState.byEnvironmentRepo.
    */
   repository_name?: string;
-  /**
-   * Current HEAD and merge-base SHAs from the backend status stream. Used by
-   * hasGitStatusChanged as a fast-path fingerprint: when both SHAs and the
-   * file-status lists are unchanged, the working tree is identical and the
-   * expensive per-file diff-string deep compare can be skipped. Optional
-   * because degraded git states (and legacy payloads) may omit them.
-   */
-  head_commit?: string;
-  base_commit?: string;
 };
 
 export type GitStatusState = {
