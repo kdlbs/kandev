@@ -21,6 +21,12 @@ func RenderShell(assets fs.FS, indexPath string, payload BootPayload) ([]byte, e
 		return nil, fmt.Errorf("read web shell: %w", err)
 	}
 
+	return RenderShellHTML(indexHTML, payload)
+}
+
+// RenderShellHTML injects the boot payload into an already-loaded HTML shell.
+// Dev mode uses this with Vite's in-memory index.html.
+func RenderShellHTML(indexHTML []byte, payload BootPayload) ([]byte, error) {
 	script, err := BootPayloadScript(payload)
 	if err != nil {
 		return nil, err

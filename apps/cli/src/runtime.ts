@@ -75,12 +75,4 @@ export function validateBundle(bundleDir: string): void {
   if (!fs.existsSync(agentctlBin)) {
     throw new Error(`agentctl binary not found in bundle at ${bundleDir}`);
   }
-  const webIndex = path.join(bundleDir, "web", "index.html");
-  if (!fs.existsSync(webIndex)) {
-    throw new Error(`Web assets not found in bundle at ${bundleDir}`);
-  }
-  const webAssetsDir = path.join(bundleDir, "web", "assets");
-  if (!fs.existsSync(webAssetsDir) || !fs.statSync(webAssetsDir).isDirectory()) {
-    throw new Error(`Web assets not found in bundle at ${bundleDir}`);
-  }
 }

@@ -110,6 +110,13 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
     if (lastFetchedRef.current === key) {
       return;
     }
+    if (
+      lastFetchedRef.current === "" &&
+      workspaceWorkflows.every((wf) => store.getState().kanbanMulti.snapshots[wf.id])
+    ) {
+      lastFetchedRef.current = key;
+      return;
+    }
     lastFetchedRef.current = key;
 
     const myGen = fetchGenRef.current;

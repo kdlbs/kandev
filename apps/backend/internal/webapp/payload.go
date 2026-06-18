@@ -9,6 +9,7 @@ type BootPayload struct {
 	Route        RouteClassification `json:"route"`
 	Runtime      RuntimeConfig       `json:"runtime"`
 	InitialState map[string]any      `json:"initialState"`
+	RouteData    map[string]any      `json:"routeData,omitempty"`
 	Errors       []BootError         `json:"errors,omitempty"`
 }
 

@@ -178,7 +178,7 @@ describe("isDebug", () => {
   it("is true in a production build when window.__KANDEV_DEBUG is set", async () => {
     // Simulates `make start-debug`: production bundle, runtime window flag.
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("NEXT_PUBLIC_KANDEV_DEBUG", "");
+    vi.stubEnv("VITE_KANDEV_DEBUG", "");
     vi.stubGlobal("window", { __KANDEV_DEBUG: true });
     const { isDebug } = await import("./log");
     expect(isDebug()).toBe(true);
@@ -186,15 +186,15 @@ describe("isDebug", () => {
 
   it("is false in a production build with no flag set", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("NEXT_PUBLIC_KANDEV_DEBUG", "");
+    vi.stubEnv("VITE_KANDEV_DEBUG", "");
     vi.stubGlobal("window", {});
     const { isDebug } = await import("./log");
     expect(isDebug()).toBe(false);
   });
 
-  it("is true when NEXT_PUBLIC_KANDEV_DEBUG=true at build time", async () => {
+  it("is true when VITE_KANDEV_DEBUG=true at build time", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("NEXT_PUBLIC_KANDEV_DEBUG", "true");
+    vi.stubEnv("VITE_KANDEV_DEBUG", "true");
     vi.stubGlobal("window", {});
     const { isDebug } = await import("./log");
     expect(isDebug()).toBe(true);

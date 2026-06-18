@@ -2,10 +2,33 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
+import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+
+const ACTIVE_WORKSPACE_COOKIE = "kandev-active-workspace";
+
+async function activeWorkspaceCookie(page: Page): Promise<string | null> {
+  return page.evaluate((name) => {
+    const prefix = `${name}=`;
+    const match = document.cookie
+      .split(";")
+      .map((part) => part.trim())
+      .find((part) => part.startsWith(prefix));
+    return match ? decodeURIComponent(match.slice(prefix.length)) : null;
+  }, ACTIVE_WORKSPACE_COOKIE);
+}
+
+async function gotoTaskList(page: Page): Promise<void> {
+  await page.goto("/tasks");
+  await page.getByTestId("display-button").waitFor();
+}
+
+function taskInList(page: Page, title: string): Locator {
+  return page.getByRole("table").getByText(title);
+}
 
 // Office off: the picker routes a workspace switch to `/office` only when the
 // office feature is on, and `/office` requires onboarding this regular fixture
@@ -72,6 +95,14 @@ test.describe("Sidebar — cross-workspace isolation", () => {
 
     await expect(kanban.taskCard(taskB.id)).toBeVisible({ timeout: 10_000 });
     await expect(kanban.taskCard(taskA.id)).not.toBeVisible();
+    await expect.poll(() => activeWorkspaceCookie(testPage)).toBe(workspaceB.id);
+
+    // A hard reload must bootstrap the same active workspace from the cookie,
+    // before client-side effects have a chance to switch from the default seed workspace.
+    await testPage.reload();
+    await kanban.board.waitFor({ state: "visible" });
+    await expect(kanban.taskCard(taskB.id)).toBeVisible({ timeout: 10_000 });
+    await expect(kanban.taskCard(taskA.id)).not.toBeVisible();
 
     // --- Open task B; verify sidebar shows only workspace B's task ---
     await kanban.taskCard(taskB.id).click();
@@ -85,5 +116,10 @@ test.describe("Sidebar — cross-workspace isolation", () => {
 
     await expect(session.sidebar.getByText("Workspace A Task", { exact: true })).toHaveCount(0);
     await expect(session.sidebar.getByTestId("sidebar-repo-group-Unassigned")).toHaveCount(0);
+
+    // Direct route bootstrapping should use the same cookie-backed workspace.
+    await gotoTaskList(testPage);
+    await expect(taskInList(testPage, "Workspace B Task")).toBeVisible({ timeout: 10_000 });
+    await expect(taskInList(testPage, "Workspace A Task")).not.toBeVisible();
   });
 });

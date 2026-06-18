@@ -54,21 +54,11 @@ describe("validateBundle", () => {
     expect(() => validateBundle(tmpDir)).toThrow(/agentctl binary not found/);
   });
 
-  it("throws when static web assets are missing", () => {
+  it("does not require external web assets", () => {
     fs.mkdirSync(path.join(tmpDir, "bin"), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, "bin", "kandev"), "fake");
     fs.writeFileSync(path.join(tmpDir, "bin", "agentctl"), "fake");
-    expect(() => validateBundle(tmpDir)).toThrow(/Web assets not found/);
-  });
-
-  it("throws when the web assets directory is missing", () => {
-    fs.mkdirSync(path.join(tmpDir, "bin"), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, "bin", "kandev"), "fake");
-    fs.writeFileSync(path.join(tmpDir, "bin", "agentctl"), "fake");
-    fs.mkdirSync(path.join(tmpDir, "web"), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, "web", "index.html"), "");
-
-    expect(() => validateBundle(tmpDir)).toThrow(/Web assets not found/);
+    expect(() => validateBundle(tmpDir)).not.toThrow();
   });
 
   it("does not require a Node web server in the runtime bundle", () => {

@@ -207,7 +207,6 @@ async function prepareBundleForLaunch({
     webProxy: false,
     extra: {
       KANDEV_DATABASE_PATH: dbPath,
-      KANDEV_WEB_DIST_DIR: path.join(bundleDir, "web"),
       ...(debug ? { KANDEV_DEBUG_AGENT_MESSAGES: "true", KANDEV_DEBUG_PPROF_ENABLED: "true" } : {}),
     },
   });

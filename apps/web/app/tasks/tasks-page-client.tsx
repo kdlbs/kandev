@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import type { PaginationState } from "@tanstack/react-table";
 import { DataTable } from "@/components/ui/data-table";
@@ -17,6 +17,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useDebounce } from "@/hooks/use-debounce";
+import { shouldSkipInitialTasksFetch } from "./tasks-page-fetch-policy";
 
 interface TasksPageClientProps {
   workspaces: Workspace[];
@@ -26,6 +27,7 @@ interface TasksPageClientProps {
   initialRepositories: Repository[];
   initialTasks: Task[];
   initialTotal: number;
+  initialDataLoaded?: boolean;
 }
 
 type UseTaskOperationsParams = {
@@ -280,6 +282,7 @@ function useTasksPageEffects({
   showArchived,
   activeWorkflowId,
   selectedRepositoryId,
+  initialDataLoaded = false,
 }: {
   debouncedQuery: string;
   setPagination: (next: PaginationState | ((prev: PaginationState) => PaginationState)) => void;
@@ -289,12 +292,27 @@ function useTasksPageEffects({
   showArchived: boolean;
   activeWorkflowId: string | null;
   selectedRepositoryId: string | null;
+  initialDataLoaded?: boolean;
 }) {
+  const skippedInitialFetchRef = useRef(false);
+
   useEffect(() => {
     void Promise.resolve().then(() => setPagination((prev) => ({ ...prev, pageIndex: 0 })));
   }, [debouncedQuery, activeWorkflowId, selectedRepositoryId, setPagination]);
 
   useEffect(() => {
+    if (
+      shouldSkipInitialTasksFetch({
+        hasInitialData: initialDataLoaded,
+        alreadySkipped: skippedInitialFetchRef.current,
+        pageIndex: pagination.pageIndex,
+        debouncedQuery,
+        showArchived,
+      })
+    ) {
+      skippedInitialFetchRef.current = true;
+      return;
+    }
     if (activeWorkspaceId) fetchTasks();
   }, [
     activeWorkspaceId,
@@ -303,6 +321,7 @@ function useTasksPageEffects({
     debouncedQuery,
     showArchived,
     fetchTasks,
+    initialDataLoaded,
   ]);
 }
 
@@ -395,6 +414,7 @@ function useTasksPageSetup(props: TasksPageClientProps) {
     showArchived: viewState.showArchived,
     activeWorkflowId,
     selectedRepositoryId,
+    initialDataLoaded: props.initialDataLoaded,
   });
   const computed = useTasksPageComputed({
     total: viewState.total,

@@ -16,6 +16,7 @@ type TaskDetailRouteProps = {
   layout?: string | null;
   simple?: string;
   mode?: string;
+  initialData?: FetchedSessionData;
 };
 
 type TaskDetailRouteState =
@@ -23,13 +24,40 @@ type TaskDetailRouteState =
   | { status: "loaded"; data: FetchedSessionData }
   | { status: "error"; data: null };
 
-export function TaskDetailRoute({ taskId, sessionId, layout, simple, mode }: TaskDetailRouteProps) {
-  const [routeState, setRouteState] = useState<TaskDetailRouteState>({
-    status: "loading",
-    data: null,
-  });
+function routeDataMatchesTask(
+  data: FetchedSessionData | undefined,
+  taskId: string,
+): data is FetchedSessionData {
+  return data?.task?.id === taskId;
+}
+
+function initialRouteState(
+  initialData: FetchedSessionData | undefined,
+  taskId: string,
+): TaskDetailRouteState {
+  if (routeDataMatchesTask(initialData, taskId)) {
+    return { status: "loaded", data: initialData };
+  }
+  return { status: "loading", data: null };
+}
+
+export function TaskDetailRoute({
+  taskId,
+  sessionId,
+  layout,
+  simple,
+  mode,
+  initialData,
+}: TaskDetailRouteProps) {
+  const [routeState, setRouteState] = useState<TaskDetailRouteState>(() =>
+    initialRouteState(initialData, taskId),
+  );
 
   useEffect(() => {
+    if (routeDataMatchesTask(initialData, taskId)) {
+      setRouteState({ status: "loaded", data: initialData });
+      return;
+    }
     let cancelled = false;
     setRouteState({ status: "loading", data: null });
     fetchSessionDataForTask(taskId)
@@ -48,7 +76,7 @@ export function TaskDetailRoute({ taskId, sessionId, layout, simple, mode }: Tas
     return () => {
       cancelled = true;
     };
-  }, [taskId]);
+  }, [initialData, taskId]);
 
   if (routeState.status === "loading") {
     return <div className="h-screen w-full bg-background" />;

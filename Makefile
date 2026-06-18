@@ -5,6 +5,7 @@
 BACKEND_DIR := apps/backend
 WEB_DIR := apps/web
 APPS_DIR := apps
+EMBEDDED_WEB_DIR := $(BACKEND_DIR)/internal/webapp/embedded/generated
 
 # Tools
 PNPM := pnpm
@@ -194,7 +195,7 @@ dev-web:
 #
 
 .PHONY: build
-build: build-backend build-web
+build: build-web sync-embedded-web build-backend
 	@printf "\n$(GREEN)$(BOLD)✓ Build complete!$(RESET)\n"
 
 #
@@ -208,8 +209,9 @@ start:
 	@$(MAKE) -s install-web
 	$(call success,Dependencies installed)
 	$(call phase,Building)
-	@$(MAKE) -s build-backend-quiet
 	@$(MAKE) -s build-web-quiet
+	@$(MAKE) -s sync-embedded-web
+	@$(MAKE) -s build-backend-quiet
 	$(call success,Build complete)
 	$(call phase,Starting Server)
 	@cd $(APPS_DIR) && $(PNPM) -C cli dev -- start $(if $(filter 1 true yes,$(VERBOSE)),--verbose,) $(if $(filter 1 true yes,$(DEBUG)),--debug,)
@@ -229,7 +231,6 @@ start-debug:
 .PHONY: service-bundle
 service-bundle: install build
 	$(call phase,Packaging Service Bundle)
-	@scripts/release/package-web.sh
 	@scripts/release/package-cli.sh
 	@test -n "$(SERVICE_BUNDLE_DIR)" || { echo "SERVICE_BUNDLE_DIR is empty; aborting."; exit 1; }
 	@test "$(SERVICE_BUNDLE_DIR)" != "/" || { echo "SERVICE_BUNDLE_DIR must not be /; aborting."; exit 1; }
@@ -299,12 +300,20 @@ build-backend-quiet:
 .PHONY: build-web
 build-web:
 	@printf "$(CYAN)Building web app...$(RESET)\n"
-	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web build
+	@cd $(APPS_DIR) && VITE_KANDEV_API_PORT= VITE_KANDEV_DEBUG= $(PNPM) --filter @kandev/web build
 
 .PHONY: build-web-quiet
 build-web-quiet:
 	@printf "  $(DIM)Web app$(RESET)\n"
-	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web build 2>&1 | grep -v "Warning:" | grep -v "parseLineType" | grep -v "^$$" || true
+	@cd $(APPS_DIR) && VITE_KANDEV_API_PORT= VITE_KANDEV_DEBUG= $(PNPM) --filter @kandev/web build 2>&1 | grep -v "Warning:" | grep -v "parseLineType" | grep -v "^$$" || true
+
+.PHONY: sync-embedded-web
+sync-embedded-web:
+	@test -f "$(WEB_DIR)/dist/index.html" || { echo "Missing $(WEB_DIR)/dist/index.html; run 'make build-web' first."; exit 1; }
+	@mkdir -p "$(EMBEDDED_WEB_DIR)"
+	@find "$(EMBEDDED_WEB_DIR)" -mindepth 1 ! -name .gitignore ! -name keep.txt -exec rm -rf {} +
+	@cp -R "$(WEB_DIR)/dist/." "$(EMBEDDED_WEB_DIR)/"
+	@printf "  $(DIM)Embedded web assets$(RESET)\n"
 
 #
 # Installation

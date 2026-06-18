@@ -11,21 +11,21 @@ describe("isDebugUI", () => {
   });
 
   it("is true when window.__KANDEV_DEBUG is set at runtime", async () => {
-    vi.stubEnv("NEXT_PUBLIC_KANDEV_DEBUG", "");
+    vi.stubEnv("VITE_KANDEV_DEBUG", "");
     vi.stubGlobal("window", { __KANDEV_DEBUG: true });
     const { isDebugUI } = await import("./config");
     expect(isDebugUI()).toBe(true);
   });
 
   it("is false in production with no flags", async () => {
-    vi.stubEnv("NEXT_PUBLIC_KANDEV_DEBUG", "");
+    vi.stubEnv("VITE_KANDEV_DEBUG", "");
     vi.stubGlobal("window", {});
     const { isDebugUI } = await import("./config");
     expect(isDebugUI()).toBe(false);
   });
 
-  it("is true when NEXT_PUBLIC_KANDEV_DEBUG=true", async () => {
-    vi.stubEnv("NEXT_PUBLIC_KANDEV_DEBUG", "true");
+  it("is true when VITE_KANDEV_DEBUG=true", async () => {
+    vi.stubEnv("VITE_KANDEV_DEBUG", "true");
     vi.stubGlobal("window", {});
     const { isDebugUI } = await import("./config");
     expect(isDebugUI()).toBe(true);

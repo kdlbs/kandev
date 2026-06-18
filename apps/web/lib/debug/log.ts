@@ -3,7 +3,7 @@
  *
  * Active when any of the following is true:
  *   - `NODE_ENV !== "production"` (i.e. `make dev`)
- *   - `NEXT_PUBLIC_KANDEV_DEBUG=true` at build time (inlined into the bundle)
+ *   - `VITE_KANDEV_DEBUG=true` at build time (inlined into the bundle)
  *   - `window.__KANDEV_DEBUG === true` at runtime (set by `layout.tsx` when
  *     the server-side env var is present, e.g. `make start-debug`)
  *
@@ -202,11 +202,36 @@ let debugCached: boolean | undefined;
 /** Whether namespaced debug logging is active. Evaluated lazily so production start-debug works. */
 export function isDebug(): boolean {
   if (debugCached !== undefined) return debugCached;
+  const env = getViteEnv();
+  const nodeEnv = typeof process !== "undefined" ? process.env.NODE_ENV : undefined;
+  const viteDev = env.DEV === true && nodeEnv !== "production";
+  const processDev = typeof process !== "undefined" && process.env.NODE_ENV !== "production";
+  const processDebug =
+    typeof process !== "undefined" &&
+    (process.env.KANDEV_DEBUG === "true" || process.env.VITE_KANDEV_DEBUG === "true");
   debugCached =
-    process.env.NODE_ENV !== "production" ||
-    process.env.NEXT_PUBLIC_KANDEV_DEBUG === "true" ||
+    viteDev ||
+    processDev ||
+    env.VITE_KANDEV_DEBUG === "true" ||
+    processDebug ||
     (typeof window !== "undefined" && window.__KANDEV_DEBUG === true);
   return debugCached;
+}
+
+function getViteEnv(): {
+  DEV?: boolean;
+  VITE_KANDEV_DEBUG?: string;
+} {
+  return (
+    (
+      import.meta as unknown as {
+        env?: {
+          DEV?: boolean;
+          VITE_KANDEV_DEBUG?: string;
+        };
+      }
+    ).env ?? {}
+  );
 }
 
 const BARE_VALUE_RE = /^[A-Za-z0-9_\-:./@+]+$/;

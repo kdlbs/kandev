@@ -41,11 +41,11 @@ export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Pr
   const logLevel =
     process.env.KANDEV_LOGGING_LEVEL?.trim() || process.env.KANDEV_LOG_LEVEL?.trim() || "info";
   const webUrl = `http://localhost:${ports.webPort}`;
+  const appUrl = ports.backendUrl;
 
   logStartupInfo({
     header: "dev mode: using local repo",
     ports,
-    primary: "web",
     dbPath,
     logLevel,
   });
@@ -85,8 +85,8 @@ export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Pr
     label: "web",
   });
   await waitForUrlReady(webUrl, webProc, healthTimeoutMs);
-  console.log(`[kandev] open: ${webUrl}`);
-  openBrowser(webUrl);
+  console.log(`[kandev] open: ${appUrl}`);
+  openBrowser(appUrl);
 }
 
 type DevBackendEnv = {

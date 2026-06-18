@@ -12,7 +12,7 @@ flowchart TB
 
     run --> resolve["Resolve installed runtime"]
     dev --> makedev["make dev"]
-    start --> binary["Local binary + Vite dist"]
+    start --> binary["Local binary<br/>(embedded Vite assets)"]
 
     resolve --> envvar["KANDEV_BUNDLE_DIR<br/>(Homebrew, tests)"]
     resolve --> npmpkg["@kdlbs/runtime-{platform}<br/>(npm/npx)"]
@@ -111,7 +111,8 @@ kandev dev
 
 ### `kandev start`
 
-Runs the application using local production builds. Requires running `make build` first.
+Runs the application using the local production backend binary. Requires running
+`make build` first so the Vite SPA is embedded into that binary.
 
 ```bash
 make build

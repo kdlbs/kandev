@@ -2,13 +2,12 @@
  * Production start command for running local builds.
  *
  * This module implements the `kandev start` command, which runs the locally
- * built backend binary and web app in production mode. Unlike `kandev dev`
+ * built backend binary in production mode. Unlike `kandev dev`
  * which uses hot-reloading, this runs the optimized production builds.
  *
  * Prerequisites:
  * - Backend must be built: `make build-backend`
- * - Web app must be built: `make build-web`
- * - Or simply: `make build` (builds both)
+ * - Or simply: `make build`
  */
 
 import fs from "node:fs";
@@ -52,7 +51,7 @@ export type StartOptions = {
  * 4. Waits for the backend to be healthy before announcing readiness
  *
  * @param options - Configuration for the start command
- * @throws Error if backend binary or web build is not found
+ * @throws Error if backend binary is not found
  */
 export async function runStart({
   repoRoot,
@@ -67,11 +66,6 @@ export async function runStart({
   const backendBin = path.join(repoRoot, "apps", "backend", "bin", getBinaryName("kandev"));
   if (!fs.existsSync(backendBin)) {
     throw new Error("Backend binary not found. Run `make build` first.");
-  }
-
-  const webDistDir = path.join(repoRoot, "apps", "web", "dist");
-  if (!fs.existsSync(path.join(webDistDir, "index.html"))) {
-    throw new Error("Vite web build not found. Run `make build` first.");
   }
 
   // Production mode: use warn log level for clean output unless verbose/debug
@@ -89,7 +83,6 @@ export async function runStart({
     webProxy: false,
     extra: {
       KANDEV_DATABASE_PATH: dbPath,
-      KANDEV_WEB_DIST_DIR: webDistDir,
       ...(debug ? { KANDEV_DEBUG_AGENT_MESSAGES: "true", KANDEV_DEBUG_PPROF_ENABLED: "true" } : {}),
     },
   });

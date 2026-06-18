@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { readBootPayload } from "./boot-payload";
+import { describe, expect, it, vi } from "vitest";
+import { loadBootPayload, readBootPayload } from "./boot-payload";
 
 describe("readBootPayload", () => {
   it("returns an empty initial state when Go has not injected boot data yet", () => {
@@ -56,5 +56,38 @@ describe("readBootPayload", () => {
     } as unknown as Window;
 
     expect(readBootPayload(win).route?.params).toBeUndefined();
+  });
+});
+
+describe("loadBootPayload", () => {
+  it("uses the injected Go boot payload without fetching", async () => {
+    const win = Object.assign(new Window(), {
+      __KANDEV_BOOT_PAYLOAD__: { version: 1, initialState: { features: { office: true } } },
+    }) as Window;
+    const fetcher = vi.fn();
+
+    await expect(loadBootPayload(win, fetcher)).resolves.toMatchObject({
+      initialState: { features: { office: true } },
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("fetches app-state before mount when no boot payload was injected", async () => {
+    const win = new Window();
+    Object.defineProperty(win, "location", {
+      value: { pathname: "/", search: "?workspaceId=ws-1" },
+    });
+    const fetcher = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ version: 1, initialState: { workflows: { activeId: "wf-1" } } }),
+    });
+
+    await expect(loadBootPayload(win, fetcher)).resolves.toMatchObject({
+      initialState: { workflows: { activeId: "wf-1" } },
+    });
+    expect(fetcher).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/app-state?path=%2F%3FworkspaceId%3Dws-1"),
+      expect.objectContaining({ cache: "no-store", credentials: "include" }),
+    );
   });
 });

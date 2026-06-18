@@ -24,6 +24,14 @@ type Handler struct {
 type HandlerOption func(*Handler)
 
 func NewHandler(assets fs.FS, opts ...HandlerOption) *Handler {
+	h := newHandlerDefaults(assets)
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
+}
+
+func newHandlerDefaults(assets fs.FS) *Handler {
 	h := &Handler{
 		assets:       assets,
 		runtime:      RuntimeConfig{APIPrefix: "/api/v1", WebSocketPath: "/ws"},
@@ -32,9 +40,6 @@ func NewHandler(assets fs.FS, opts ...HandlerOption) *Handler {
 	}
 	h.payloadFor = func(_ *http.Request, route RouteClassification) BootPayload {
 		return NewBootPayload(route, h.runtime, nil)
-	}
-	for _, opt := range opts {
-		opt(h)
 	}
 	return h
 }

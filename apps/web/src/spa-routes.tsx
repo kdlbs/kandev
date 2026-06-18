@@ -9,13 +9,15 @@ import { isRangeKey } from "@/app/stats/stats-utils";
 import type { RangeKey } from "@/app/stats/stats-utils";
 import { TasksPageClient } from "@/app/tasks/tasks-page-client";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import type { BootRouteData } from "./boot-payload";
 import { fetchJson } from "@/lib/api/client";
 import { listWorkflows } from "@/lib/api/domains/kanban-api";
 import { fetchUserSettings } from "@/lib/api/domains/settings-api";
 import { listRepositories, listWorkspaces } from "@/lib/api/domains/workspace-api";
 import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
+import { hasHydratedKanbanRouteState } from "@/lib/routing/kanban-route-hydration";
 import { usePathname, useSearchParams } from "@/lib/routing/client-router";
-import { mapWorkspaceItem, readCookie } from "@/lib/routing/route-bootstrap";
+import { mapWorkspaceItem, readActiveWorkspaceCookie } from "@/lib/routing/route-bootstrap";
 import { resolveActiveId } from "@/lib/ssr/resolve-active-id";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type {
@@ -59,6 +61,15 @@ type SpaRoute =
   | { kind: "stats"; range?: RangeKey }
   | { kind: "settings"; pathname: string }
   | { kind: "office"; pathname: string };
+
+type DataBackedSpaRoute = Exclude<SpaRoute, { kind: "kanban" | "settings" | "office" }>;
+
+type RouteDataState = {
+  activeWorkspaceId: string | null;
+  workflows: Workflow[];
+  steps: WorkflowStep[];
+  repositories: Repository[];
+};
 
 export function resolveSpaRoute(pathname: string, searchParams: URLSearchParams): SpaRoute {
   const normalized = normalizePath(pathname);
@@ -127,7 +138,7 @@ function resolveKanbanRoute(searchParams: URLSearchParams): SpaRoute {
   };
 }
 
-export function SpaRoutes() {
+export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const route = resolveSpaRoute(pathname, searchParams);
@@ -143,6 +154,7 @@ export function SpaRoutes() {
         layout={route.layout}
         simple={route.simple}
         mode={route.mode}
+        initialData={routeData?.taskDetail}
       />
     );
   }
@@ -161,7 +173,7 @@ export function SpaRoutes() {
     );
   }
 
-  return <DataBackedRoute route={route} />;
+  return <DataBackedRoute route={route} routeData={routeData} />;
 }
 
 function KanbanRoute({ route }: { route: Extract<SpaRoute, { kind: "kanban" }> }) {
@@ -173,6 +185,8 @@ function useKanbanRouteBootstrap(route: Extract<SpaRoute, { kind: "kanban" }>) {
   const store = useAppStoreApi();
 
   useEffect(() => {
+    if (hasHydratedKanbanRouteState(store.getState(), route)) return;
+
     let cancelled = false;
 
     async function bootstrap() {
@@ -188,7 +202,7 @@ function useKanbanRouteBootstrap(route: Extract<SpaRoute, { kind: "kanban" }>) {
       const activeWorkspaceId = resolveActiveId(
         workspaceItems,
         route.workspaceId,
-        readCookie("office-active-workspace"),
+        readActiveWorkspaceCookie(),
         settingsWorkspaceId,
       );
 
@@ -241,67 +255,99 @@ function useKanbanRouteBootstrap(route: Extract<SpaRoute, { kind: "kanban" }>) {
 
 function DataBackedRoute({
   route,
+  routeData,
 }: {
-  route: Exclude<SpaRoute, { kind: "kanban" | "settings" | "office" }>;
+  route: DataBackedSpaRoute;
+  routeData?: BootRouteData;
 }) {
-  const { activeWorkspaceId, workflows, steps, repositories } = useRouteData();
+  const tasksPage = route.kind === "tasks" ? routeData?.tasksPage : undefined;
+  const routeContext = routeData?.routeContext;
+  const bootstrapped = useRouteData({
+    skipBootstrap: Boolean(tasksPage || routeContext),
+  });
+  if (route.kind === "tasks") {
+    return <TasksDataRoute bootstrapped={bootstrapped} tasksPage={tasksPage} />;
+  }
+
+  const effectiveData = resolveEffectiveRouteData(routeContext, bootstrapped);
+  return <ExternalDataRoute route={route} data={effectiveData} />;
+}
+
+function TasksDataRoute({
+  bootstrapped,
+  tasksPage,
+}: {
+  bootstrapped: RouteDataState;
+  tasksPage?: BootRouteData["tasksPage"];
+}) {
+  return (
+    <TasksPageClient
+      workspaces={[]}
+      initialWorkspaceId={
+        tasksPage?.activeWorkspaceId ?? bootstrapped.activeWorkspaceId ?? undefined
+      }
+      initialWorkflows={tasksPage?.workflows ?? bootstrapped.workflows}
+      initialSteps={tasksPage?.steps ?? bootstrapped.steps}
+      initialRepositories={tasksPage?.repositories ?? bootstrapped.repositories}
+      initialTasks={tasksPage?.tasks ?? []}
+      initialTotal={tasksPage?.total ?? 0}
+      initialDataLoaded={Boolean(tasksPage)}
+    />
+  );
+}
+
+function ExternalDataRoute({
+  route,
+  data,
+}: {
+  route: Exclude<DataBackedSpaRoute, { kind: "tasks" }>;
+  data: RouteDataState;
+}) {
+  const workspaceId = data.activeWorkspaceId ?? undefined;
   switch (route.kind) {
-    case "tasks":
-      return (
-        <TasksPageClient
-          workspaces={[]}
-          initialWorkspaceId={activeWorkspaceId ?? undefined}
-          initialWorkflows={workflows}
-          initialSteps={steps}
-          initialRepositories={repositories}
-          initialTasks={[]}
-          initialTotal={0}
-        />
-      );
     case "github":
       return (
         <GitHubPageClient
-          workspaceId={activeWorkspaceId ?? undefined}
-          workflows={workflows}
-          steps={steps}
-          repositories={repositories}
+          workspaceId={workspaceId}
+          workflows={data.workflows}
+          steps={data.steps}
+          repositories={data.repositories}
         />
       );
     case "gitlab":
-      return <GitLabPageClient workspaceId={activeWorkspaceId ?? undefined} />;
+      return <GitLabPageClient workspaceId={workspaceId} />;
     case "jira":
       return (
-        <JiraPageClient
-          workspaceId={activeWorkspaceId ?? undefined}
-          workflows={workflows}
-          steps={steps}
-        />
+        <JiraPageClient workspaceId={workspaceId} workflows={data.workflows} steps={data.steps} />
       );
     case "linear":
       return (
-        <LinearPageClient
-          workspaceId={activeWorkspaceId ?? undefined}
-          workflows={workflows}
-          steps={steps}
-        />
+        <LinearPageClient workspaceId={workspaceId} workflows={data.workflows} steps={data.steps} />
       );
     case "stats":
       return (
-        <StatsPageClient
-          workspaceId={activeWorkspaceId ?? undefined}
-          activeRange={route.range}
-          initialError={null}
-        />
+        <StatsPageClient workspaceId={workspaceId} activeRange={route.range} initialError={null} />
       );
   }
 }
 
-function useRouteData(): {
-  activeWorkspaceId: string | null;
-  workflows: Workflow[];
-  steps: WorkflowStep[];
-  repositories: Repository[];
-} {
+function resolveEffectiveRouteData(
+  routeContext: BootRouteData["routeContext"],
+  fallback: RouteDataState,
+): RouteDataState {
+  return {
+    activeWorkspaceId: routeContext?.activeWorkspaceId ?? fallback.activeWorkspaceId,
+    workflows: routeContext?.workflows ?? fallback.workflows,
+    steps: routeContext?.steps ?? fallback.steps,
+    repositories: routeContext?.repositories ?? fallback.repositories,
+  };
+}
+
+function useRouteData({
+  skipBootstrap = false,
+}: {
+  skipBootstrap?: boolean;
+} = {}): RouteDataState {
   const store = useAppStoreApi();
   const bootstrappedRef = useRef(false);
   const [workflows, setRouteWorkflows] = useState<Workflow[]>([]);
@@ -315,6 +361,7 @@ function useRouteData(): {
 
   useEffect(() => {
     if (bootstrappedRef.current) return;
+    if (skipBootstrap) return;
     bootstrappedRef.current = true;
     let cancelled = false;
 
@@ -364,7 +411,7 @@ function useRouteData(): {
       cancelled = true;
       bootstrappedRef.current = false;
     };
-  }, [store]);
+  }, [skipBootstrap, store]);
 
   return { activeWorkspaceId, workflows, steps, repositories };
 }

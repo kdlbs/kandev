@@ -25,6 +25,7 @@ import {
   toggleFolderExpand,
   fetchAndOpenFile,
 } from "./file-browser-hooks";
+import { resolveFileBrowserPaths } from "./file-browser-path";
 import { getVisiblePaths, moveNodesInTree, computeMoveTargets } from "./file-tree-utils";
 
 type FileBrowserHeaderProps = {
@@ -362,6 +363,15 @@ function useKeyboardShortcuts(
   }, [containerRef, clearSelection, selectAll]);
 }
 
+function useFileBrowserResetKey(sessionId: string, environmentId?: string | null) {
+  // Worktree count participates in the tree's reset key so an add_branch_to_task
+  // call that materializes a sibling worktree forces a fresh tree load.
+  const worktreeCount = useAppStore(
+    (state) => state.sessionWorktreesBySessionId.itemsBySessionId[sessionId]?.length ?? 0,
+  );
+  return environmentId ? `${environmentId}:${worktreeCount}` : undefined;
+}
+
 export function FileBrowser({
   sessionId,
   environmentId,
@@ -380,15 +390,7 @@ export function FileBrowser({
   const containerRef = useRef<HTMLDivElement>(null);
 
   const search = useFileBrowserSearch(sessionId);
-  // Worktree count participates in the tree's reset key so an add_branch_to_task
-  // call that materializes a sibling worktree forces a fresh tree load — the
-  // backend's workspace_path has just been promoted from the primary worktree
-  // to the task root, and the cached tree (rooted at the old primary) would
-  // otherwise still be shown.
-  const worktreeCount = useAppStore(
-    (state) => state.sessionWorktreesBySessionId.itemsBySessionId[sessionId]?.length ?? 0,
-  );
-  const resetKey = environmentId ? `${environmentId}:${worktreeCount}` : undefined;
+  const resetKey = useFileBrowserResetKey(sessionId, environmentId);
   const treeState = useFileBrowserTree(sessionId, resetKey);
   const isTreeLoaded = !treeState.isLoadingTree && treeState.tree !== null;
   useScrollPersistence(sessionId, isTreeLoaded, scrollAreaRef, treeState.tree);
@@ -398,8 +400,12 @@ export function FileBrowser({
       new Map(Object.entries(gitStatus?.files ?? {}).map(([path, info]) => [path, info.status])),
     [gitStatus?.files],
   );
-  const fullPath = session?.worktree_path || repository?.local_path || treeState.tree?.path || "";
-  const displayPath = fullPath.replace(/^\/(?:Users|home)\/[^/]+\//, "~/");
+  const { fullPath, displayPath } = resolveFileBrowserPaths({
+    sessionWorktreePath: session?.worktree_path,
+    repositoryLocalPath: repository?.local_path,
+    treePath: treeState.tree?.path,
+    treeLoaded: isTreeLoaded,
+  });
 
   const handlers = useFileBrowserHandlers(sessionId, onOpenFile, onCreateFile, treeState);
   const { multiSelect, dnd, handleClickOutside } = useSelectionInteractions(

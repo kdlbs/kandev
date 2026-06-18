@@ -5,9 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -77,6 +76,7 @@ import (
 	voicehandlers "github.com/kandev/kandev/internal/voice/handlers"
 	"github.com/kandev/kandev/internal/voice/transcribe"
 	"github.com/kandev/kandev/internal/webapp"
+	webembedded "github.com/kandev/kandev/internal/webapp/embedded"
 	workflowcontroller "github.com/kandev/kandev/internal/workflow/controller"
 	workflowhandlers "github.com/kandev/kandev/internal/workflow/handlers"
 	"github.com/kandev/kandev/internal/worktree"
@@ -145,6 +145,9 @@ func appendAgentctlStatusMessage(
 	}
 	if execution.TaskEnvironmentID != "" {
 		payload["task_environment_id"] = execution.TaskEnvironmentID
+	}
+	if execution.WorkspacePath != "" {
+		payload["worktree_path"] = execution.WorkspacePath
 	}
 	action := ws.ActionSessionAgentctlStarting
 	if execution.GetWorkspaceStream() != nil {
@@ -566,11 +569,7 @@ func registerRoutes(p routeParams) {
 			routePath = c.Request.URL.Path
 		}
 		route := webapp.ClassifyRoute(routePath)
-		payload := webapp.NewBootPayload(
-			route,
-			webapp.RuntimeConfig{APIPrefix: "/api/v1", WebSocketPath: "/ws"},
-			bootInitialState(c.Request.Context(), c.Request, p, route),
-		)
+		payload := bootPayload(c.Request.Context(), c.Request, p, route)
 		c.JSON(http.StatusOK, payload)
 	})
 
@@ -585,19 +584,10 @@ func registerRoutes(p routeParams) {
 	}
 
 	if p.webInternalURL != "" {
-		target, err := url.Parse(p.webInternalURL)
+		handler, err := newWebDevHandler(p)
 		if err != nil {
-			p.log.Error("Invalid web internal URL, skipping reverse proxy", zap.String("url", p.webInternalURL), zap.Error(err))
+			p.log.Error("Invalid web internal URL, skipping web dev handler", zap.String("url", p.webInternalURL), zap.Error(err))
 		} else {
-			proxy := httputil.NewSingleHostReverseProxy(target)
-			proxy.FlushInterval = -1
-			// ErrorHandler catches upstream failures (e.g., connection refused)
-			// that occur before any response headers are written, returning a
-			// clean 502 instead of letting the default handler log an error.
-			proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, err error) {
-				p.log.Debug("Web proxy error", zap.Error(err))
-				w.WriteHeader(http.StatusBadGateway)
-			}
 			p.router.NoRoute(func(c *gin.Context) {
 				path := c.Request.URL.Path
 				if strings.HasPrefix(path, "/api/") || path == "/ws" || path == "/health" {
@@ -617,33 +607,58 @@ func registerRoutes(p routeParams) {
 						panic(r)
 					}
 				}()
-				proxy.ServeHTTP(c.Writer, c.Request)
+				handler.ServeHTTP(c.Writer, c.Request)
 			})
-			p.log.Info("Web reverse proxy enabled", zap.String("target", p.webInternalURL))
+			p.log.Info("Web dev handler enabled", zap.String("target", p.webInternalURL))
 		}
 	}
 }
 
 func newWebAppHandler(p routeParams) (*webapp.Handler, string, bool) {
+	assets, source, ok := webAssetsFS()
+	if !ok {
+		return nil, "", false
+	}
+	handler := webapp.NewHandler(assets, webAppHandlerOptions(p)...)
+	return handler, source, true
+}
+
+func newWebDevHandler(p routeParams) (*webapp.DevHandler, error) {
+	return webapp.NewDevHandler(p.webInternalURL, webAppHandlerOptions(p)...)
+}
+
+func webAppHandlerOptions(p routeParams) []webapp.HandlerOption {
+	return []webapp.HandlerOption{
+		webapp.WithRuntimeConfig(webapp.RuntimeConfig{APIPrefix: "/api/v1", WebSocketPath: "/ws"}),
+		webapp.WithPayloadBuilder(func(req *http.Request, route webapp.RouteClassification) webapp.BootPayload {
+			return bootPayload(req.Context(), req, p, route)
+		}),
+	}
+}
+
+func bootPayload(ctx context.Context, req *http.Request, p routeParams, route webapp.RouteClassification) webapp.BootPayload {
+	payload := webapp.NewBootPayload(
+		route,
+		webapp.RuntimeConfig{APIPrefix: "/api/v1", WebSocketPath: "/ws"},
+		bootInitialState(ctx, req, p, route),
+	)
+	payload.RouteData = bootRouteData(ctx, req, p, route)
+	return payload
+}
+
+func webAssetsFS() (fs.FS, string, bool) {
 	distDir := os.Getenv("KANDEV_WEB_DIST_DIR")
 	if distDir == "" {
 		distDir = firstExistingDir("apps/web/dist", "../web/dist", "../../apps/web/dist")
 	}
-	if distDir == "" {
+	if distDir != "" {
+		return os.DirFS(distDir), distDir, true
+	}
+	assets, err := webembedded.FS()
+	if err != nil {
 		return nil, "", false
 	}
-	handler := webapp.NewHandler(
-		os.DirFS(distDir),
-		webapp.WithRuntimeConfig(webapp.RuntimeConfig{APIPrefix: "/api/v1", WebSocketPath: "/ws"}),
-		webapp.WithPayloadBuilder(func(req *http.Request, route webapp.RouteClassification) webapp.BootPayload {
-			return webapp.NewBootPayload(
-				route,
-				webapp.RuntimeConfig{APIPrefix: "/api/v1", WebSocketPath: "/ws"},
-				bootInitialState(req.Context(), req, p, route),
-			)
-		}),
-	)
-	return handler, distDir, true
+	return assets, "embedded", true
 }
 
 func firstExistingDir(candidates ...string) string {

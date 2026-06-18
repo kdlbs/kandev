@@ -83,4 +83,12 @@ describe("TaskDetailRoute", () => {
       expect(screen.getByTestId("kanban-task-shell").getAttribute("data-task-id")).toBe("task-1");
     });
   });
+
+  it("uses boot route data without fetching again", async () => {
+    render(<TaskDetailRoute taskId="task-1" initialData={makeFetchedData()} />);
+
+    expect(mocks.fetchSessionDataForTask).not.toHaveBeenCalled();
+    expect(screen.getByTestId("kanban-task-shell").getAttribute("data-task-id")).toBe("task-1");
+    expect(screen.getByTestId("state-hydrator")).toBeTruthy();
+  });
 });

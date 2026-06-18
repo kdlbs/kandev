@@ -261,6 +261,9 @@ function syncEnvFromAgentctlPayload(
     started_at: existing?.started_at ?? "",
     updated_at: existing?.updated_at ?? "",
     task_environment_id: envId,
+    worktree_id: payload.worktree_id,
+    worktree_path: payload.worktree_path,
+    worktree_branch: payload.worktree_branch,
   });
 }
 

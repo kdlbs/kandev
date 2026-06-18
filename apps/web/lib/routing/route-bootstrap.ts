@@ -1,6 +1,9 @@
 import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
 import type { ListWorkspacesResponse } from "@/lib/types/http";
 
+export const ACTIVE_WORKSPACE_COOKIE = "kandev-active-workspace";
+export const LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE = "office-active-workspace";
+
 type WorkspaceItem = ListWorkspacesResponse["workspaces"][number];
 
 export function mapWorkspaceItem(ws: WorkspaceItem): WorkspaceState["items"][number] {
@@ -22,9 +25,14 @@ export function mapWorkspaceItem(ws: WorkspaceItem): WorkspaceState["items"][num
 export function readCookie(name: string): string | null {
   if (typeof document === "undefined") return null;
   const encodedName = `${encodeURIComponent(name)}=`;
-  const entry = document.cookie
+  const entries = document.cookie
     .split(";")
     .map((part) => part.trim())
-    .find((part) => part.startsWith(encodedName));
+    .filter((part) => part.startsWith(encodedName));
+  const entry = entries[entries.length - 1];
   return entry ? decodeURIComponent(entry.slice(encodedName.length)) : null;
+}
+
+export function readActiveWorkspaceCookie(): string | null {
+  return readCookie(ACTIVE_WORKSPACE_COOKIE) || readCookie(LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE);
 }

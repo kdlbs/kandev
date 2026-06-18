@@ -36,12 +36,7 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // API port injection for dev mode (browser opens at web port, API on backend port).
-  // In production single-port mode, this is not needed — the client uses
-  // window.location.origin (same-origin, works for any domain / reverse proxy).
-  const apiPort = process.env.NEXT_PUBLIC_KANDEV_API_PORT ?? null;
-  const envDebugMode =
-    process.env.KANDEV_DEBUG === "true" || process.env.NEXT_PUBLIC_KANDEV_DEBUG === "true";
+  const envDebugMode = process.env.KANDEV_DEBUG === "true";
 
   // SSR-fetch the deployment's feature flags so the entire client tree
   // (including the sidebar nav and gated routes) renders with the correct
@@ -53,15 +48,7 @@ export default async function RootLayout({
   ]);
   const debugMode = envDebugMode || runtimeDebugMode;
 
-  const runtimeConfigScript =
-    apiPort || debugMode
-      ? [
-          apiPort ? `window.__KANDEV_API_PORT = ${JSON.stringify(apiPort)};` : "",
-          debugMode ? `window.__KANDEV_DEBUG = true;` : "",
-        ]
-          .filter(Boolean)
-          .join("\n")
-      : null;
+  const runtimeConfigScript = debugMode ? "window.__KANDEV_DEBUG = true;" : null;
 
   return (
     <html lang="en" suppressHydrationWarning>

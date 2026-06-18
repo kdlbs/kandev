@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { mapWorkspaceItem, readCookie } from "./route-bootstrap";
+import { mapWorkspaceItem, readActiveWorkspaceCookie, readCookie } from "./route-bootstrap";
 import type { ListWorkspacesResponse } from "@/lib/types/http";
 
 type WorkspaceItem = ListWorkspacesResponse["workspaces"][number];
 
 beforeEach(() => {
-  document.cookie = "office-active-workspace=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/";
+  document.cookie = "kandev-active-workspace=; path=/; max-age=0";
+  document.cookie = "office-active-workspace=; path=/; max-age=0";
 });
 
 describe("mapWorkspaceItem", () => {
@@ -41,5 +42,18 @@ describe("readCookie", () => {
 
     expect(readCookie("office-active-workspace")).toBe("ws 1/2");
     expect(readCookie("missing")).toBeNull();
+  });
+
+  it("prefers the general active workspace cookie over the legacy office cookie", () => {
+    document.cookie = "office-active-workspace=office-1; path=/";
+    document.cookie = "kandev-active-workspace=kanban-1; path=/";
+
+    expect(readActiveWorkspaceCookie()).toBe("kanban-1");
+  });
+
+  it("falls back to the legacy office active workspace cookie", () => {
+    document.cookie = "office-active-workspace=office-1; path=/";
+
+    expect(readActiveWorkspaceCookie()).toBe("office-1");
   });
 });

@@ -4,7 +4,9 @@ export type SidebarWorkspace = {
 };
 
 export const LAST_KANBAN_WORKSPACE_KEY = "kandev.lastKanbanWorkspaceId";
+export const ACTIVE_WORKSPACE_COOKIE = "kandev-active-workspace";
 export const OFFICE_ACTIVE_WORKSPACE_COOKIE = "office-active-workspace";
+const ACTIVE_WORKSPACE_COOKIE_MAX_AGE = 31536000;
 
 export function isOfficeWorkspace(workspace: SidebarWorkspace | undefined): boolean {
   return Boolean(workspace?.office_workflow_id);
@@ -19,11 +21,13 @@ export function workspaceHomeHref(workspace: SidebarWorkspace | undefined): stri
 export function rememberLastKanbanWorkspace(workspace: SidebarWorkspace | undefined): void {
   if (!workspace || isOfficeWorkspace(workspace) || typeof window === "undefined") return;
   window.localStorage.setItem(LAST_KANBAN_WORKSPACE_KEY, workspace.id);
+  writeWorkspaceCookie(ACTIVE_WORKSPACE_COOKIE, workspace.id);
 }
 
 export function rememberLastOfficeWorkspace(workspace: SidebarWorkspace | undefined): void {
   if (!workspace || !isOfficeWorkspace(workspace) || typeof document === "undefined") return;
-  document.cookie = `${OFFICE_ACTIVE_WORKSPACE_COOKIE}=${encodeURIComponent(workspace.id)}; path=/; max-age=86400; samesite=strict; secure`;
+  writeWorkspaceCookie(ACTIVE_WORKSPACE_COOKIE, workspace.id);
+  writeWorkspaceCookie(OFFICE_ACTIVE_WORKSPACE_COOKIE, workspace.id);
 }
 
 export function resolveLastKanbanWorkspace(
@@ -31,6 +35,13 @@ export function resolveLastKanbanWorkspace(
 ): SidebarWorkspace | null {
   const kanbanWorkspaces = workspaces.filter((workspace) => !isOfficeWorkspace(workspace));
   if (kanbanWorkspaces.length === 0) return null;
+
+  const activeCookieId =
+    typeof document === "undefined" ? null : readCookieValue(ACTIVE_WORKSPACE_COOKIE);
+  const activeCookieWorkspace = kanbanWorkspaces.find(
+    (workspace) => workspace.id === activeCookieId,
+  );
+  if (activeCookieWorkspace) return activeCookieWorkspace;
 
   if (typeof window !== "undefined") {
     const storedId = window.localStorage.getItem(LAST_KANBAN_WORKSPACE_KEY);
@@ -47,14 +58,28 @@ export function resolveLastOfficeWorkspace(
   const officeWorkspaces = workspaces.filter(isOfficeWorkspace);
   if (officeWorkspaces.length === 0) return null;
 
-  const storedId =
+  const activeCookieId =
+    typeof document === "undefined" ? null : readCookieValue(ACTIVE_WORKSPACE_COOKIE);
+  const activeCookieWorkspace = officeWorkspaces.find(
+    (workspace) => workspace.id === activeCookieId,
+  );
+  if (activeCookieWorkspace) return activeCookieWorkspace;
+
+  const officeCookieId =
     typeof document === "undefined" ? null : readCookieValue(OFFICE_ACTIVE_WORKSPACE_COOKIE);
-  const stored = officeWorkspaces.find((workspace) => workspace.id === storedId);
-  return stored ?? officeWorkspaces[0] ?? null;
+  const officeCookieWorkspace = officeWorkspaces.find(
+    (workspace) => workspace.id === officeCookieId,
+  );
+  return officeCookieWorkspace ?? officeWorkspaces[0] ?? null;
+}
+
+function writeWorkspaceCookie(name: string, value: string): void {
+  if (typeof document === "undefined") return;
+  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${ACTIVE_WORKSPACE_COOKIE_MAX_AGE}; samesite=strict`;
 }
 
 function readCookieValue(name: string): string | null {
-  const prefix = `${name}=`;
+  const prefix = `${encodeURIComponent(name)}=`;
   const match = document.cookie
     .split(";")
     .map((part) => part.trim())

@@ -14,6 +14,7 @@ const eslintConfig = defineConfig([
   js.configs.recommended,
   ...tseslint.configs.recommended,
   globalIgnores([
+    ".next/**",
     "out/**",
     "build/**",
     "dist/**",

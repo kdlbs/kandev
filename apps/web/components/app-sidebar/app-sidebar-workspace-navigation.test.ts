@@ -9,6 +9,7 @@ import {
   workspaceHomeHref,
 } from "./app-sidebar-workspace-navigation";
 
+const ACTIVE_WORKSPACE_COOKIE = "kandev-active-workspace";
 const kanban = { id: "kanban-1", office_workflow_id: "" };
 const kanbanTwo = { id: "kanban-2", office_workflow_id: null };
 const office = { id: "office-1", office_workflow_id: "wf-office" };
@@ -21,6 +22,7 @@ const officeWithReservedChars = {
 describe("app sidebar workspace navigation", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    document.cookie = "kandev-active-workspace=; path=/; max-age=0";
     document.cookie = "office-active-workspace=; path=/; max-age=0";
   });
 
@@ -34,6 +36,14 @@ describe("app sidebar workspace navigation", () => {
     rememberLastKanbanWorkspace(kanbanTwo);
 
     expect(window.localStorage.getItem(LAST_KANBAN_WORKSPACE_KEY)).toBe("kanban-2");
+    expect(document.cookie).toContain(`${ACTIVE_WORKSPACE_COOKIE}=kanban-2`);
+    expect(resolveLastKanbanWorkspace([kanban, office, kanbanTwo])).toBe(kanbanTwo);
+  });
+
+  it("resolves the last kanban workspace from the active workspace cookie", () => {
+    rememberLastKanbanWorkspace(kanban);
+    document.cookie = `${ACTIVE_WORKSPACE_COOKIE}=kanban-2; path=/`;
+
     expect(resolveLastKanbanWorkspace([kanban, office, kanbanTwo])).toBe(kanbanTwo);
   });
 
@@ -44,10 +54,13 @@ describe("app sidebar workspace navigation", () => {
     expect(resolveLastKanbanWorkspace([kanban, office])).toBe(kanban);
   });
 
-  it("writes the last office workspace cookie with an encoded id", () => {
+  it("writes active and legacy office workspace cookies with an encoded id", () => {
     rememberLastOfficeWorkspace(officeWithReservedChars);
 
-    expect(document.cookie).toBe(
+    expect(document.cookie).toContain(
+      `${ACTIVE_WORKSPACE_COOKIE}=${encodeURIComponent(officeWithReservedChars.id)}`,
+    );
+    expect(document.cookie).toContain(
       `${OFFICE_ACTIVE_WORKSPACE_COOKIE}=${encodeURIComponent(officeWithReservedChars.id)}`,
     );
     expect(resolveLastOfficeWorkspace([office, officeWithReservedChars])).toBe(
@@ -62,6 +75,20 @@ describe("app sidebar workspace navigation", () => {
 
   it("resolves the last office workspace from the office-active-workspace cookie", () => {
     document.cookie = "office-active-workspace=office-2; path=/";
+
+    expect(resolveLastOfficeWorkspace([kanban, office, officeTwo])).toBe(officeTwo);
+  });
+
+  it("resolves the last office workspace from the active workspace cookie first", () => {
+    document.cookie = "office-active-workspace=office-1; path=/";
+    document.cookie = `${ACTIVE_WORKSPACE_COOKIE}=office-2; path=/`;
+
+    expect(resolveLastOfficeWorkspace([kanban, office, officeTwo])).toBe(officeTwo);
+  });
+
+  it("falls back to the office workspace cookie when the active cookie is kanban", () => {
+    document.cookie = "office-active-workspace=office-2; path=/";
+    document.cookie = `${ACTIVE_WORKSPACE_COOKIE}=kanban-1; path=/`;
 
     expect(resolveLastOfficeWorkspace([kanban, office, officeTwo])).toBe(officeTwo);
   });

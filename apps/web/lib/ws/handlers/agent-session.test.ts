@@ -547,7 +547,7 @@ describe("session.state_changed → agentctl ready fallback", () => {
     expect(setSessionAgentctlStatus).not.toHaveBeenCalled();
   });
 
-  it("seeds env mapping from agentctl_starting payload via upsertTaskSessionFromEvent", () => {
+  it("seeds env mapping and workspace path from agentctl_starting payload", () => {
     const upsertTaskSessionFromEvent = vi.fn();
     const store = makeStore({
       taskSessions: {
@@ -569,12 +569,17 @@ describe("session.state_changed → agentctl ready fallback", () => {
         session_id: "s-1",
         agent_execution_id: "ae-1",
         task_environment_id: "env-1",
+        worktree_path: "/tmp/kandev/tasks/ws/task-1",
       },
     });
 
     expect(upsertTaskSessionFromEvent).toHaveBeenCalledWith(
       "t-1",
-      expect.objectContaining({ id: "s-1", task_environment_id: "env-1" }),
+      expect.objectContaining({
+        id: "s-1",
+        task_environment_id: "env-1",
+        worktree_path: "/tmp/kandev/tasks/ws/task-1",
+      }),
     );
   });
 

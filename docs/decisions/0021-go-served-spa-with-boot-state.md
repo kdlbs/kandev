@@ -12,6 +12,12 @@ Kandev currently ships a Go backend plus a Next.js standalone web server. The CL
 
 Kandev will migrate the web runtime to a Vite-built React SPA served by the Go backend. Production will not run a Node.js web server. The Go backend will serve embedded frontend assets, route unknown browser paths to the SPA shell, and inject a JSON boot payload containing runtime config, route metadata, and `Partial<AppState>` initial state.
 
+ADR-0022 specifies the packaging detail for those frontend assets: release-quality production builds embed the Vite output into the backend binary, with `KANDEV_WEB_DIST_DIR` retained as an explicit override for non-release workflows.
+
+ADR-0023 specifies the active-workspace persistence rule used by boot state: only the current workspace ID is stored in a server-readable cookie, while broader settings stay in backend settings, URL params, or localStorage.
+
+ADR-0024 specifies the development-mode counterpart: `make dev` still runs Vite internally for transforms and HMR, but browser document requests enter through Go so boot payload behavior matches production.
+
 The boot-state builder will live on the Go side and use backend services directly where practical. The SPA will initialize `StateProvider` from the injected payload, and client-side route transitions that require preloaded data will fetch the same payload shape from a backend app-state endpoint before rendering the destination view.
 
 Full React SSR from Go is explicitly out of scope. The server-rendered surface is the HTML shell and serialized data contract; React renders in the browser.

@@ -35,7 +35,7 @@ import {
 } from "@/lib/api/domains/office-api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
-import { mapWorkspaceItem, readCookie } from "@/lib/routing/route-bootstrap";
+import { mapWorkspaceItem, readActiveWorkspaceCookie } from "@/lib/routing/route-bootstrap";
 import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import {
@@ -195,7 +195,7 @@ function useOfficeRouteBootstrap(
       const activeWorkspaceId = resolveActiveOfficeWorkspaceId(
         officeWorkspaceItems,
         routeWorkspaceId,
-        readCookie("office-active-workspace"),
+        readActiveWorkspaceCookie(),
         userSettingsResponse?.settings?.workspace_id ?? null,
       );
 
