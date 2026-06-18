@@ -45,6 +45,7 @@ type FlickerWindow = {
   __dockviewApi__?: DockApi;
   __activeLog__?: Array<string | null>;
   __panelRemovals__?: string[];
+  __divergeIntervalId__?: number;
 };
 
 type SetupResult = {
@@ -208,14 +209,19 @@ test.describe("Session flicker", () => {
       const w = window as unknown as FlickerWindow;
       const store = w.__KANDEV_E2E_STORE__;
       if (!store) throw new Error("E2E store bridge missing");
-      setInterval(() => {
+      // Fail fast if the dockview bridge is absent — otherwise the removal
+      // listener below would never register and the teardown assertion would
+      // pass trivially (false green).
+      const dockviewApi = w.__dockviewApi__;
+      if (!dockviewApi) throw new Error("Dockview API bridge missing");
+      w.__divergeIntervalId__ = window.setInterval(() => {
         store.setState((s) => {
           s.environmentIdBySessionId[sid2] = "diverged-env-for-session-2";
         });
       }, 30);
       const removals: string[] = [];
       w.__panelRemovals__ = removals;
-      w.__dockviewApi__?.onDidRemovePanel((p: { id: string }) => {
+      dockviewApi.onDidRemovePanel((p: { id: string }) => {
         if (p.id.startsWith("session:")) removals.push(p.id);
       });
     }, session2Id);
@@ -248,9 +254,15 @@ test.describe("Session flicker", () => {
     expect(panels).toContain(`session:${session1Id}`);
     expect(panels).toContain(`session:${session2Id}`);
 
-    const removals = await testPage.evaluate(
-      () => (window as unknown as { __panelRemovals__?: string[] }).__panelRemovals__ ?? [],
-    );
+    const removals = await testPage.evaluate(() => {
+      const w = window as unknown as FlickerWindow;
+      // Stop forcing the diverged env so the interval can't outlive the test.
+      if (w.__divergeIntervalId__ !== undefined) {
+        clearInterval(w.__divergeIntervalId__);
+        w.__divergeIntervalId__ = undefined;
+      }
+      return w.__panelRemovals__ ?? [];
+    });
     expect(removals).toEqual([]);
   });
 });
