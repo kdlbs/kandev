@@ -227,6 +227,12 @@ export type UseReviewSourcesResult = {
   hasPR: boolean;
   cumulativeLoading: boolean;
   prDiffLoading: boolean;
+  /**
+   * Files the backend dropped from the cumulative diff because the range
+   * exceeded its file cap (large rebase). Zero when nothing was hidden;
+   * surfaced by TaskChangesPanel as a banner.
+   */
+  truncatedFilesCount: number;
   /** Raw single-repo gitStatus (kept for `useAutoCloseWhenEmpty` consumers). */
   gitStatus: ReturnType<typeof useSessionGitStatus>;
   /**
@@ -318,7 +324,16 @@ export function useReviewSources(sessionId: string | null | undefined): UseRevie
     prDiffLoading,
     gitStatus,
     rawPRFiles,
+    truncatedFilesCount: readTruncatedFilesCount(cumulativeDiff),
   };
+}
+
+/** Cumulative-diff file-truncation count, defaulting to 0 when absent. Kept as
+ *  a module helper so the branches don't add to useReviewSources' complexity. */
+function readTruncatedFilesCount(
+  cumulativeDiff: { truncated_files_count?: number } | null | undefined,
+): number {
+  return cumulativeDiff?.truncated_files_count ?? 0;
 }
 
 export type { CumulativeFile, UncommittedFile };
