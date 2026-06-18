@@ -52,6 +52,18 @@ if [[ "$recreate_config_count" != "2" ]]; then
 fi
 pass "OpenCode project config is recreated before writing the review agent"
 
+allowed_tools_prompt_count="$(count_occurrences 'Use only read/search tools made available by OpenCode, such as glob, grep, and read.')"
+if [[ "$allowed_tools_prompt_count" != "2" ]]; then
+  fail "OpenCode review prompts explicitly limit the model to read/search tools"
+fi
+pass "OpenCode review prompts explicitly limit the model to read/search tools"
+
+deny_bash_prompt_count="$(count_occurrences 'Never call bash, shell, edit, patch, task, todo, fetch, or web tools.')"
+if [[ "$deny_bash_prompt_count" != "2" ]]; then
+  fail "OpenCode review prompts explicitly forbid bash and mutation tools"
+fi
+pass "OpenCode review prompts explicitly forbid bash and mutation tools"
+
 explicit_model_env_count="$(count_occurrences 'OPENCODE_MODEL: ${{ env.OPENCODE_MODEL }}')"
 if [[ "$explicit_model_env_count" != "2" ]]; then
   fail "OpenCode posting steps explicitly pass OPENCODE_MODEL"
