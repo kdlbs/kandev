@@ -147,11 +147,12 @@ export class SessionPage {
     while (Date.now() - start < softTotalTimeout) {
       if (await idle.isVisible()) return;
 
-      if (await this.recoveryResumeButton().isVisible()) {
-        await this.recoveryResumeButton().click();
-        await this.recoveryResumeButton()
-          .waitFor({ state: "hidden", timeout: pollSlice })
-          .catch(() => undefined);
+      const resumeButton = this.recoveryResumeButton();
+      if (await resumeButton.isVisible()) {
+        if (await resumeButton.isEnabled()) {
+          await resumeButton.click();
+        }
+        await resumeButton.waitFor({ state: "hidden", timeout: pollSlice }).catch(() => undefined);
         continue;
       }
 
