@@ -478,3 +478,131 @@ func TestLaunchRestoreWorkspace_IncludesWorktreeInfo(t *testing.T) {
 		t.Errorf("expected worktree_branch 'feature/test', got %v", resp.WorktreeBranch)
 	}
 }
+
+// --- launchStart reuse of prepared sessions ---
+
+// TestFindReusableCreatedSession pins the lookup that lets an explicit Start
+// adopt a session.ensure-prepared row instead of creating a duplicate.
+func TestFindReusableCreatedSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	t.Run("returns nil when task has no sessions", func(t *testing.T) {
+		if got := svc.findReusableCreatedSession(ctx, "task-missing"); got != nil {
+			t.Fatalf("expected nil, got %+v", got)
+		}
+	})
+
+	t.Run("skips non-CREATED sessions", func(t *testing.T) {
+		seedTaskAndSession(t, repo, "task-running", "s-running", models.TaskSessionStateRunning)
+		if got := svc.findReusableCreatedSession(ctx, "task-running"); got != nil {
+			t.Fatalf("expected nil for RUNNING-only task, got %+v", got)
+		}
+	})
+
+	t.Run("prefers primary CREATED over newer non-primary", func(t *testing.T) {
+		seedTaskAndSession(t, repo, "task-primary", "s-primary", models.TaskSessionStateCreated)
+		if err := repo.SetSessionPrimary(ctx, "s-primary"); err != nil {
+			t.Fatalf("set primary: %v", err)
+		}
+		newer := &models.TaskSession{
+			ID:        "s-newer",
+			TaskID:    "task-primary",
+			State:     models.TaskSessionStateCreated,
+			StartedAt: time.Now().UTC().Add(time.Minute),
+			UpdatedAt: time.Now().UTC().Add(time.Minute),
+		}
+		if err := repo.CreateTaskSession(ctx, newer); err != nil {
+			t.Fatalf("create newer: %v", err)
+		}
+		got := svc.findReusableCreatedSession(ctx, "task-primary")
+		if got == nil || got.ID != "s-primary" {
+			t.Fatalf("expected primary session, got %+v", got)
+		}
+	})
+
+	t.Run("falls back to newest CREATED when no primary", func(t *testing.T) {
+		seedTaskAndSession(t, repo, "task-no-primary", "s-old", models.TaskSessionStateCreated)
+		older := time.Now().UTC().Add(-time.Hour)
+		if old, err := repo.GetTaskSession(ctx, "s-old"); err == nil {
+			old.UpdatedAt = older
+			_ = repo.UpdateTaskSession(ctx, old)
+		}
+		newer := &models.TaskSession{
+			ID:        "s-new",
+			TaskID:    "task-no-primary",
+			State:     models.TaskSessionStateCreated,
+			StartedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
+		}
+		if err := repo.CreateTaskSession(ctx, newer); err != nil {
+			t.Fatalf("create newer: %v", err)
+		}
+		got := svc.findReusableCreatedSession(ctx, "task-no-primary")
+		if got == nil || got.ID != "s-new" {
+			t.Fatalf("expected newest CREATED session, got %+v", got)
+		}
+	})
+}
+
+// TestLaunchStart_ReusesPreparedSession regression-tests the duplicate-session
+// bug: opening a task whose step lacks auto_start_agent calls session.ensure
+// (creates a CREATED session via prepare); the subsequent edit-dialog "Start
+// Agent" click must adopt that session instead of letting StartTask create a
+// second row.
+func TestLaunchStart_ReusesPreparedSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+
+	seedTaskAndSession(t, repo, "task1", "session-prepared", models.TaskSessionStateCreated)
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", WorkspaceID: "ws1", Title: "Test", Description: "desc"}
+	if err := repo.SetSessionPrimary(ctx, "session-prepared"); err != nil {
+		t.Fatalf("set primary: %v", err)
+	}
+	prepared, err := repo.GetTaskSession(ctx, "session-prepared")
+	if err != nil {
+		t.Fatalf("load seeded session: %v", err)
+	}
+	prepared.AgentProfileID = "profile1"
+	if err := repo.UpdateTaskSession(ctx, prepared); err != nil {
+		t.Fatalf("update seeded profile: %v", err)
+	}
+
+	// Mirrors buildStartRequest from the edit dialog: explicit start, no
+	// session_id, agent profile + prompt supplied. Downstream agent launch
+	// panics on the stub scheduler — that's expected and not what this test
+	// pins. Run the call in a recovered goroutine so we can still inspect
+	// the post-state session count from the main goroutine.
+	done := make(chan struct{})
+	go func() {
+		defer func() {
+			_ = recover()
+			close(done)
+		}()
+		_, _ = svc.LaunchSession(ctx, &LaunchSessionRequest{
+			TaskID:         "task1",
+			Intent:         IntentStart,
+			AgentProfileID: "profile1",
+			Prompt:         "hello",
+		})
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("LaunchSession hung")
+	}
+
+	sessions, err := repo.ListTaskSessions(ctx, "task1")
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected single session after reuse, got %d", len(sessions))
+	}
+	if sessions[0].ID != "session-prepared" {
+		t.Fatalf("expected reused session id, got %q", sessions[0].ID)
+	}
+}

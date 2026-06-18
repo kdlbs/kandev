@@ -170,6 +170,24 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		return s.launchPrepare(ctx, req)
 	}
 
+	// Opening a task whose step lacks auto_start_agent calls session.ensure
+	// which creates a CREATED session via prepare. A subsequent explicit start
+	// (e.g. the edit-dialog "Start Agent" button) would otherwise create a
+	// duplicate session row and surface two tabs on a fresh task. Promote the
+	// prepared session to a start_created launch instead. ensureLocks is shared
+	// with EnsureSession so the two paths cannot race and both decide to create.
+	if req.SessionID == "" {
+		release := acquireEnsureLock(req.TaskID)
+		defer release()
+		if reused := s.findReusableCreatedSession(ctx, req.TaskID); reused != nil {
+			req.SessionID = reused.ID
+			if req.AgentProfileID == "" {
+				req.AgentProfileID = reused.AgentProfileID
+			}
+			return s.launchStartCreated(ctx, req)
+		}
+	}
+
 	execution, err := s.StartTask(
 		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.Priority, req.Prompt,
@@ -179,6 +197,32 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		return nil, err
 	}
 	return executionToLaunchResponse(req.TaskID, execution), nil
+}
+
+// findReusableCreatedSession returns a CREATED session on the task that an
+// explicit start should adopt instead of creating a new row. Primary wins; the
+// most-recently-updated CREATED session is the fallback. Non-CREATED states
+// (RUNNING, WAITING_FOR_INPUT, COMPLETED, FAILED, CANCELLED) are skipped — they
+// reflect either an active agent or an explicit terminal state and must not be
+// implicitly revived from a fresh start request.
+func (s *Service) findReusableCreatedSession(ctx context.Context, taskID string) *models.TaskSession {
+	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return nil
+	}
+	var best *models.TaskSession
+	for _, sess := range sessions {
+		if sess.State != models.TaskSessionStateCreated {
+			continue
+		}
+		if sess.IsPrimary {
+			return sess
+		}
+		if best == nil || sess.UpdatedAt.After(best.UpdatedAt) {
+			best = sess
+		}
+	}
+	return best
 }
 
 // shouldBlockAutoStart checks whether the task's workflow step allows auto-starting
