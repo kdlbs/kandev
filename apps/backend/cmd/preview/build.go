@@ -10,7 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
+	"regexp"
 )
 
 // appsDir is the apps/ workspace root relative to the working directory (apps/backend/).
@@ -217,10 +217,19 @@ func validateViteWebDist(webDistDir string) error {
 	return nil
 }
 
+var (
+	scriptTagPattern      = regexp.MustCompile(`(?is)<script\b[^>]*>`)
+	moduleTypeAttrPattern = regexp.MustCompile(`(?is)\btype\s*=\s*["']module["']`)
+	assetSrcAttrPattern   = regexp.MustCompile(`(?is)\bsrc\s*=\s*["']/assets/`)
+)
+
 func viteIndexHasEntrypoint(indexHTML string) bool {
-	return strings.Contains(indexHTML, "<script") &&
-		strings.Contains(indexHTML, `type="module"`) &&
-		strings.Contains(indexHTML, `src="/assets/`)
+	for _, tag := range scriptTagPattern.FindAllString(indexHTML, -1) {
+		if moduleTypeAttrPattern.MatchString(tag) && assetSrcAttrPattern.MatchString(tag) {
+			return true
+		}
+	}
+	return false
 }
 
 func addFileToTar(tw *tar.Writer, src, dst string, mode fs.FileMode) error {
