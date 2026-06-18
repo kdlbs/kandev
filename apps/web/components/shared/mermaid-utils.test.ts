@@ -80,4 +80,14 @@ describe("sanitizeMermaidCode", () => {
     const out = sanitizeMermaidCode(input);
     expect(out).toContain(`B["/api/x"]`);
   });
+
+  it("does not quote ER diagram cardinality bars as flowchart edge labels", () => {
+    const input = [
+      "erDiagram",
+      "workspaces ||--o{ workflows : owns",
+      "workflows ||--o{ workflow_steps : contains",
+    ].join("\n");
+
+    expect(sanitizeMermaidCode(input)).toBe(input);
+  });
 });

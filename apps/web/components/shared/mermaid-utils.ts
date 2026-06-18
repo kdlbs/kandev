@@ -95,7 +95,7 @@ export function sanitizeMermaidCode(code: string): string {
 
   // Quote edge labels: |text|
   quoted = findQuotedRanges(result);
-  result = result.replace(/\|([^|"]+?)\|/g, (match, text, offset) => {
+  result = result.replace(/\|([^|\n"]+?)\|/g, (match, text, offset) => {
     if (inAnyRange(offset, quoted)) return match;
     if (SPECIAL_CHARS_RE.test(text)) {
       return `|"${text}"|`;
