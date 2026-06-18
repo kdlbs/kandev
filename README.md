@@ -2,7 +2,7 @@
 
 Manage and run tasks in parallel. Orchestrate agents. Review changes. Ship value.
 
-[Workflows](docs/workflow-tips.md) | [Run as a Service](docs/run-as-a-service.md) | [Roadmap](docs/roadmap.md) | [Contributing](CONTRIBUTING.md) | [Architecture](docs/ARCHITECTURE.md) | [Discord](https://discord.gg/gWdCPGcFCD)
+[Features](docs/features.md) | [Workflows](docs/workflow-tips.md) | [Run as a Service](docs/run-as-a-service.md) | [Roadmap](docs/roadmap.md) | [Contributing](CONTRIBUTING.md) | [Architecture](docs/ARCHITECTURE.md) | [Discord](https://discord.gg/gWdCPGcFCD)
 
 <p align="center">
   <img src="docs/screenshots/readme-intro.gif" alt="Kandev Demo">
@@ -39,8 +39,19 @@ Open source, multi-provider, no telemetry, not tied to any cloud.
 - **Workspace isolation** - Git worktrees prevent concurrent agents from conflicting
 - **Multi-repository tasks** - Span a single task across multiple repositories, with one worktree per repo, per-repo branches, per-repo PRs, and per-repo grouping in the Changes panel and review dialog
 - **Flexible runtimes** - Run agents as local processes, in isolated Docker containers, on remote servers via SSH, or in cloud executors like sprites.dev
+- **Runtime settings** - Executor profiles, secrets, custom prompts, utility agents, voice mode, and resource metrics are configurable from Settings
+- **Task-agent MCP** - Agents can create subtasks, target sibling repos, attach extra branches for multiple PRs, message other tasks, read conversations, and inspect related tasks
+- **External MCP** - Manage Kandev from outside coding agents over streamable HTTP or SSE, with copyable config snippets for popular agent CLIs
+- **Workflow portability** - Export and import workflows as portable YAML across workspaces or Kandev installs
 - **Session management** - Resume and review agent conversations
+- **Shareable task snapshots** - Publish redacted task conversation snapshots as secret GitHub Gists, with preview and revoke controls
 - **Stats** - Track your productivity with stats on the completed tasks, agent turns, etc
+
+See [docs/features.md](docs/features.md) for the full feature inventory, including settings, secrets, custom prompts, and MCP task capabilities.
+
+### In progress: Office mode
+
+We're working on **Office mode**, a feature-flagged autonomy layer for persistent agent teams. The direction is agent instances with roles and permissions, dashboards, inbox/approvals, routines, task delegation, skills, memory, cost tracking, budgets, and workspace config sync. We'll document Office as a supported feature after it is live.
 
 ## Integrations
 
@@ -82,7 +93,7 @@ Connect Kandev to the tools your team already uses — pull issues into the kanb
 
 ### Bring your own TUI agents
 
-There is support for running any agent as TUI inside a terminal. Just add the cli command in the agent profile settings and the task will start the agent inside a PTY terminal instead of using ACP.
+Kandev can run any agent CLI as a TUI inside a terminal, even when it does not speak ACP. Add the command in agent profile settings and the task starts that agent inside a PTY terminal. CLI passthrough keeps the agent's native terminal UX available while still giving Kandev task tracking, worktrees, review, and session management.
 
 ## Supported Executors
 
@@ -93,7 +104,7 @@ There is support for running any agent as TUI inside a terminal. Just add the cl
 | **SSH** | Runs the agent on a remote server over SSH |
 | **Sprites** | Runs the agent in a remote cloud environment via [sprites.dev](https://sprites.dev) |
 
-Each executor uses git worktrees for workspace isolation, preventing concurrent agents from conflicting.
+Executors support profiles for reusable runtime configuration: prepare scripts, environment variables, credentials, and settings. Worktree-based tasks can also attach multiple repositories or multiple branches from the same repository, which lets one task produce several PRs when the work needs it.
 
 ## Quick Start
 
