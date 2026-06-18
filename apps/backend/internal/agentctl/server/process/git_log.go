@@ -495,13 +495,31 @@ func (g *GitOperator) parseCommitDiffWithOptions(output string, opts parseCommit
 
 // applyDiffBudget enforces the per-file and cumulative byte budgets in opts and
 // returns the (possibly truncated/empty) diff content plus a skip reason. A zero
-// budget means "no cap" for that dimension.
+// budget means "no cap" for that dimension. The cumulative budget is strict: the
+// running total never exceeds totalMaxBytes — a file that would cross the
+// boundary is clamped to the remaining budget rather than emitted in full.
 func applyDiffBudget(diffContent string, totalSoFar int, opts parseCommitDiffOptions) (diff, skipReason string) {
-	if opts.totalMaxBytes > 0 && totalSoFar >= opts.totalMaxBytes {
-		return "", diffSkipReasonBudgetExceeded
+	limit := len(diffContent)
+	truncated := false
+
+	if opts.totalMaxBytes > 0 {
+		remaining := opts.totalMaxBytes - totalSoFar
+		if remaining <= 0 {
+			return "", diffSkipReasonBudgetExceeded
+		}
+		if remaining < limit {
+			limit = remaining
+			truncated = true
+		}
 	}
-	if opts.perFileMaxBytes > 0 && len(diffContent) > opts.perFileMaxBytes {
-		return diffContent[:opts.perFileMaxBytes], diffSkipReasonTruncated
+
+	if opts.perFileMaxBytes > 0 && opts.perFileMaxBytes < limit {
+		limit = opts.perFileMaxBytes
+		truncated = true
+	}
+
+	if truncated {
+		return diffContent[:limit], diffSkipReasonTruncated
 	}
 	return diffContent, ""
 }
