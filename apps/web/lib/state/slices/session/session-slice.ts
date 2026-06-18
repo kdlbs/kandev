@@ -3,7 +3,11 @@ import { original } from "immer";
 import type { Message, TaskSession } from "@/lib/types/http";
 import type { SessionSlice, SessionSliceState } from "./types";
 import { reconcileMessages } from "./message-signature";
-import { migrateEnvKeyedData } from "@/lib/state/slices/session-runtime/session-runtime-slice";
+import {
+  migrateEnvKeyedData,
+  purgeSessionRuntimeState,
+} from "@/lib/state/slices/session-runtime/session-runtime-slice";
+import type { SessionRuntimeSliceState } from "@/lib/state/slices/session-runtime/types";
 import { prepareResultToSessionState } from "@/lib/state/slices/session-runtime/prepare-result";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { getPlanLastSeen, setPlanLastSeen } from "@/lib/local-storage";
@@ -386,8 +390,14 @@ function buildTaskSessionActions(set: ImmerSet) {
             (s) => s.id !== sessionId,
           );
         }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        delete (draft as any).environmentIdBySessionId[sessionId];
+        // Drop the conversation history owned by this session.
+        delete draft.messages.bySession[sessionId];
+        delete draft.messages.metaBySession[sessionId];
+        delete draft.turns.bySession[sessionId];
+        delete draft.turns.activeBySession[sessionId];
+        // Cascade into the runtime slice (shell/process/git buffers + per-session
+        // maps); this also removes the environmentIdBySessionId mapping.
+        purgeSessionRuntimeState(draft as unknown as SessionRuntimeSliceState, sessionId);
       }),
     setTaskSessionsForTask: (
       taskId: string,

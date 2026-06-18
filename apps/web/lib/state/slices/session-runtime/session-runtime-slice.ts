@@ -11,6 +11,10 @@ import { createDebugLogger, isDebug } from "@/lib/debug/log";
 const debugGit = createDebugLogger("git-status:store");
 
 const maxProcessOutputBytes = 2 * 1024 * 1024;
+// Shell + terminal streams are unbounded over a session's lifetime; cap them at
+// the same 2MB tail the process buffer uses so a chatty shell can't grow the
+// store without limit (the xterm view only renders the tail anyway).
+const maxShellOutputBytes = 2 * 1024 * 1024;
 
 /** Compute total additions/deletions across all files. */
 function computeFileStats(files: Record<string, FileInfo> | undefined): {
@@ -147,11 +151,124 @@ export function hasGitStatusChanged(existing: GitStatusEntry, incoming: GitStatu
   );
 }
 
-function trimProcessOutput(value: string) {
-  if (value.length <= maxProcessOutputBytes) {
+/** Write a git-status update into the env/per-repo maps, skipping writes when
+ *  nothing meaningfully changed. Returns whether git state changed so the WS
+ *  handler can invalidate derived caches without repeating the deep (per-file,
+ *  full-diff-string) comparison — the dominant cost under a massive rebase. */
+function applyGitStatus(
+  state: SessionRuntimeSliceState,
+  sessionId: string,
+  gitStatus: GitStatusEntry,
+): boolean {
+  const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
+  // Multi-repo: when the update is tagged with repository_name, route it into
+  // the per-repo map. Single-repo updates (no name) keep the legacy single-
+  // status path; the per-repo map mirrors the same entry under an empty key so
+  // consumers using only byEnvironmentRepo still see it.
+  const repoName = gitStatus.repository_name ?? "";
+  const repoMap = (state.gitStatus.byEnvironmentRepo[envKey] ??= {});
+  const existingRepo = repoMap[repoName];
+  const repoChanged = !existingRepo || hasGitStatusChanged(existingRepo, gitStatus);
+  if (isDebug()) {
+    debugGit("setGitStatus", {
+      sessionId,
+      envKey,
+      usingFallbackKey: envKey === sessionId,
+      repoName,
+      prevFileCount: Object.keys(existingRepo?.files ?? {}).length,
+      nextFileCount: Object.keys(gitStatus.files ?? {}).length,
+      prevRepoKeys: Object.keys(repoMap),
+      willMutate: repoChanged,
+    });
+  }
+  if (repoChanged) {
+    repoMap[repoName] = gitStatus;
+  }
+  if (repoName !== "") {
+    // Multi-repo: only mirror into the legacy map when this repo's entry changed.
+    if (repoChanged) state.gitStatus.byEnvironmentId[envKey] = gitStatus;
+    return repoChanged;
+  }
+  // The empty-repo entry and byEnvironmentId track together (written and cleared
+  // as a pair), so existingRepo presence/equality matches the env entry — reuse
+  // repoChanged instead of comparing diffs again.
+  const changed = !state.gitStatus.byEnvironmentId[envKey] || repoChanged;
+  if (changed) state.gitStatus.byEnvironmentId[envKey] = gitStatus;
+  return changed;
+}
+
+function trimTailBytes(value: string, maxBytes: number) {
+  if (value.length <= maxBytes) {
     return value;
   }
-  return value.slice(value.length - maxProcessOutputBytes);
+  return value.slice(value.length - maxBytes);
+}
+
+function trimProcessOutput(value: string) {
+  return trimTailBytes(value, maxProcessOutputBytes);
+}
+
+/** Append a chunk to a terminal's output array, dropping the oldest chunks once
+ *  the buffered total exceeds the cap so the array can't grow without bound. */
+function appendTerminalChunk(output: string[], data: string) {
+  output.push(data);
+  let total = output.reduce((sum, chunk) => sum + chunk.length, 0);
+  while (output.length > 1 && total > maxShellOutputBytes) {
+    total -= output[0].length;
+    output.shift();
+  }
+}
+
+/** Per-session runtime maps (keyed directly by sessionId). */
+function purgePerSessionRuntime(state: SessionRuntimeSliceState, sessionId: string) {
+  delete state.contextWindow.bySessionId[sessionId];
+  delete state.availableCommands.bySessionId[sessionId];
+  delete state.sessionMode.bySessionId[sessionId];
+  delete state.agentCapabilities.bySessionId[sessionId];
+  delete state.sessionModels.bySessionId[sessionId];
+  delete state.promptUsage.bySessionId[sessionId];
+  delete state.sessionTodos.bySessionId[sessionId];
+  delete state.prepareProgress.bySessionId[sessionId];
+  delete state.sessionPollMode.bySessionId[sessionId];
+}
+
+/** Process status + output for every process owned by the session. */
+function purgeSessionProcesses(state: SessionRuntimeSliceState, sessionId: string) {
+  const processIds = state.processes.processIdsBySessionId[sessionId] ?? [];
+  for (const processId of processIds) {
+    delete state.processes.outputsByProcessId[processId];
+    delete state.processes.processesById[processId];
+  }
+  delete state.processes.processIdsBySessionId[sessionId];
+  delete state.processes.activeProcessBySessionId[sessionId];
+  delete state.processes.devProcessBySessionId[sessionId];
+}
+
+/** Environment-scoped maps are shared by every session in the same environment,
+ *  so only drop them once the last session for that environment is gone. */
+function purgeEnvScopedRuntime(state: SessionRuntimeSliceState, envKey: string) {
+  const stillReferenced = Object.values(state.environmentIdBySessionId).includes(envKey);
+  if (stillReferenced) return;
+  delete state.shell.outputs[envKey];
+  delete state.shell.statuses[envKey];
+  delete state.gitStatus.byEnvironmentId[envKey];
+  delete state.gitStatus.byEnvironmentRepo[envKey];
+  delete state.sessionCommits.byEnvironmentId[envKey];
+  delete state.sessionCommits.loading[envKey];
+  delete state.sessionCommits.refetchTrigger[envKey];
+  delete state.userShells.byEnvironmentId[envKey];
+  delete state.userShells.loading[envKey];
+  delete state.userShells.loaded[envKey];
+}
+
+/** Drop all runtime state tied to a removed session so closed/replaced sessions
+ *  don't leave orphaned buffers, process output, and per-session maps behind. */
+export function purgeSessionRuntimeState(state: SessionRuntimeSliceState, sessionId: string) {
+  const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
+  purgePerSessionRuntime(state, sessionId);
+  purgeSessionProcesses(state, sessionId);
+  delete state.environmentIdBySessionId[sessionId];
+  purgeEnvScopedRuntime(state, envKey);
 }
 
 export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
@@ -188,7 +305,7 @@ function buildTerminalShellProcessActions(set: ImmerSet) {
       set((draft) => {
         const existing = draft.terminal.terminals.find((terminal) => terminal.id === terminalId);
         if (existing) {
-          existing.output.push(data);
+          appendTerminalChunk(existing.output, data);
         } else {
           draft.terminal.terminals.push({ id: terminalId, output: [data] });
         }
@@ -196,7 +313,10 @@ function buildTerminalShellProcessActions(set: ImmerSet) {
     appendShellOutput: (sessionId: string, data: string) =>
       set((draft) => {
         const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
-        draft.shell.outputs[envKey] = (draft.shell.outputs[envKey] || "") + data;
+        draft.shell.outputs[envKey] = trimTailBytes(
+          (draft.shell.outputs[envKey] || "") + data,
+          maxShellOutputBytes,
+        );
       }),
     setShellStatus: (
       sessionId: string,
@@ -406,42 +526,19 @@ export const createSessionRuntimeSlice: StateCreator<
 > = (set) => ({
   ...defaultSessionRuntimeState,
   ...buildTerminalShellProcessActions(set),
-  setGitStatus: (sessionId, gitStatus) =>
+  // Returns whether the git state meaningfully changed so callers (the WS
+  // handler) can decide to invalidate derived caches without re-running the
+  // expensive deep comparison themselves. The comparison walks every file's
+  // full diff string, so under a heavy rebase (thousands of files, frequent
+  // updates) it must run at most once per event — not once here and again in
+  // the caller.
+  setGitStatus: (sessionId, gitStatus) => {
+    let changed = false;
     set((draft) => {
-      const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
-      // Multi-repo: when the update is tagged with repository_name, route it
-      // into the per-repo map. Single-repo updates (no name) keep the legacy
-      // single-status path; the per-repo map mirrors the same entry under an
-      // empty key so consumers using only byEnvironmentRepo still see it.
-      const repoName = gitStatus.repository_name ?? "";
-      const repoMap = (draft.gitStatus.byEnvironmentRepo[envKey] ??= {});
-      const existingRepo = repoMap[repoName];
-      const repoChanged = !existingRepo || hasGitStatusChanged(existingRepo, gitStatus);
-      if (isDebug()) {
-        debugGit("setGitStatus", {
-          sessionId,
-          envKey,
-          usingFallbackKey: envKey === sessionId,
-          repoName,
-          prevFileCount: Object.keys(existingRepo?.files ?? {}).length,
-          nextFileCount: Object.keys(gitStatus.files ?? {}).length,
-          prevRepoKeys: Object.keys(repoMap),
-          willMutate: gitStatusWouldMutate(draft.gitStatus, envKey, gitStatus),
-        });
-      }
-      if (repoChanged) {
-        repoMap[repoName] = gitStatus;
-      }
-      if (repoName === "") {
-        const existing = draft.gitStatus.byEnvironmentId[envKey];
-        if (!existing || hasGitStatusChanged(existing, gitStatus)) {
-          draft.gitStatus.byEnvironmentId[envKey] = gitStatus;
-        }
-      } else if (repoChanged) {
-        // Multi-repo: only mirror into the legacy map when this repo's entry changed.
-        draft.gitStatus.byEnvironmentId[envKey] = gitStatus;
-      }
-    }),
+      changed = applyGitStatus(draft, sessionId, gitStatus);
+    });
+    return changed;
+  },
   clearGitStatus: (sessionId) =>
     set((draft) => {
       const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;

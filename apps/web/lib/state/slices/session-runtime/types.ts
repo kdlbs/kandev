@@ -359,7 +359,9 @@ export type SessionRuntimeSliceActions = {
   upsertProcessStatus: (status: ProcessStatusEntry) => void;
   clearProcessOutput: (processId: string) => void;
   setActiveProcess: (sessionId: string, processId: string) => void;
-  setGitStatus: (sessionId: string, gitStatus: GitStatusEntry) => void;
+  /** Returns true when the update meaningfully changed git state (so callers
+   *  can invalidate derived caches without repeating the deep comparison). */
+  setGitStatus: (sessionId: string, gitStatus: GitStatusEntry) => boolean;
   clearGitStatus: (sessionId: string) => void;
   /** Drops the pre-multi-repo (empty-repo-name) git-status entries so a
    *  freshly-multi-branch session doesn't surface a stale snapshot from the

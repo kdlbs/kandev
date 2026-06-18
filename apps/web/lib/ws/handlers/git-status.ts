@@ -2,7 +2,6 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
-import { gitStatusWouldMutate } from "@/lib/state/slices/session-runtime/session-runtime-slice";
 import type {
   GitEventPayload,
   GitStatusUpdateEvent,
@@ -49,20 +48,13 @@ function buildGitStatusEntry(event: GitStatusUpdateEvent): GitStatusEntry {
   };
 }
 
-function statusUpdateChangesGitState(
-  store: StoreApi<AppState>,
-  sessionId: string,
-  gitStatus: GitStatusEntry,
-): boolean {
-  const state = store.getState();
-  const envKey = resolveEnvKey(store, sessionId);
-  return gitStatusWouldMutate(state.gitStatus, envKey, gitStatus);
-}
-
 const gitEventHandlers: GitEventHandlers = {
   status_update: (store, event) => {
     const gitStatus = buildGitStatusEntry(event);
-    const changed = statusUpdateChangesGitState(store, event.session_id, gitStatus);
+    // setGitStatus performs the deep change comparison once and reports back
+    // whether anything changed; reuse that instead of comparing again here.
+    // Under a massive rebase the comparison is the dominant CPU cost.
+    const changed = store.getState().setGitStatus(event.session_id, gitStatus);
     if (isDebug()) {
       debug("status_update", {
         sessionId: event.session_id,
@@ -80,7 +72,6 @@ const gitEventHandlers: GitEventHandlers = {
         changed,
       });
     }
-    store.getState().setGitStatus(event.session_id, gitStatus);
     if (changed) {
       invalidateCumulativeDiffCache(resolveEnvKey(store, event.session_id));
     }
