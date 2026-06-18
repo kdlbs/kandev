@@ -192,9 +192,11 @@ function trimProcessOutput(value: string) {
 }
 
 /** Append a chunk to a terminal's output array, dropping the oldest chunks once
- *  the buffered total exceeds the cap so the array can't grow without bound. */
+ *  the buffered total exceeds the cap so the array can't grow without bound. A
+ *  single chunk larger than the cap is itself clamped to the tail, so the buffer
+ *  stays bounded even on the very first (or one giant) write. */
 function appendTerminalChunk(output: string[], data: string) {
-  output.push(data);
+  output.push(trimTailBytes(data, maxShellOutputBytes));
   let total = output.reduce((sum, chunk) => sum + chunk.length, 0);
   while (output.length > 1 && total > maxShellOutputBytes) {
     total -= output[0].length;
@@ -290,7 +292,11 @@ function buildTerminalShellProcessActions(set: ImmerSet) {
         if (existing) {
           appendTerminalChunk(existing.output, data);
         } else {
-          draft.terminal.terminals.push({ id: terminalId, output: [data] });
+          // Route the first chunk through appendTerminalChunk too so the cap is
+          // enforced even on the initial WS payload for a new terminal.
+          const output: string[] = [];
+          appendTerminalChunk(output, data);
+          draft.terminal.terminals.push({ id: terminalId, output });
         }
       }),
     appendShellOutput: (sessionId: string, data: string) =>

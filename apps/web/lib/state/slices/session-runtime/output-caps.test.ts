@@ -58,4 +58,20 @@ describe("shell + terminal output caps", () => {
     const terminal = store.getState().terminal.terminals.find((t) => t.id === "term-1");
     expect(terminal?.output).toEqual(["a", "b"]);
   });
+
+  it("setTerminalOutput clamps a single oversized chunk to the cap", () => {
+    // A lone chunk bigger than the cap must not slip through untrimmed.
+    store.getState().setTerminalOutput("term-1", "z".repeat(MAX_BYTES + 1024));
+    const terminal = store.getState().terminal.terminals.find((t) => t.id === "term-1");
+    const total = terminal?.output.reduce((sum, c) => sum + c.length, 0) ?? 0;
+    expect(total).toBe(MAX_BYTES);
+  });
+
+  it("setTerminalOutput enforces the cap on the first chunk of a new terminal", () => {
+    // The new-terminal branch must go through the same cap as appends.
+    store.getState().setTerminalOutput("fresh", "q".repeat(MAX_BYTES + 4096));
+    const terminal = store.getState().terminal.terminals.find((t) => t.id === "fresh");
+    const total = terminal?.output.reduce((sum, c) => sum + c.length, 0) ?? 0;
+    expect(total).toBe(MAX_BYTES);
+  });
 });
