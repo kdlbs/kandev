@@ -17,6 +17,9 @@ func TestBuildExtractScript(t *testing.T) {
 	if !strings.Contains(script, "KANDEV_MOCK_AGENT=only") {
 		t.Errorf("expected KANDEV_MOCK_AGENT=only in script")
 	}
+	if !strings.Contains(script, "KANDEV_WEB_DIST_DIR=/app/apps/web/dist") {
+		t.Errorf("expected KANDEV_WEB_DIST_DIR to point at packaged Vite dist")
+	}
 	if !strings.Contains(script, "ln -sf /usr/local/lib/kandev-cli/bin/cli.js /usr/local/bin/kandev") {
 		t.Errorf("expected kandev cli symlink in script")
 	}

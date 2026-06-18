@@ -132,6 +132,9 @@ export KANDEV_DOCKER_ENABLED=false
 export KANDEV_LOG_LEVEL=info
 # Preview mode: only register the mock agent, suppress real agent discovery.
 export KANDEV_MOCK_AGENT=only
+# The preview service runs from /app, so the backend's relative dist probes do
+# not reach the packaged Vite build under /app/apps/web/dist.
+export KANDEV_WEB_DIST_DIR=/app/apps/web/dist
 
 # Launch through the CLI so the backend runs under the restart supervisor.
 exec kandev start \
