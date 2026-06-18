@@ -47,9 +47,10 @@ async function getSidebarWidth(sidebar: Locator): Promise<number> {
   return Math.round(box.width);
 }
 
-// boundingBox returns floats and sub-pixel rounding can shift the measured
-// width by a pixel across renderers, so compare with a small tolerance.
-function expectWidthNear(actual: number, expected: number, tolerance = 1) {
+// boundingBox returns rendered border-box floats; flex layout, borders, and
+// sub-pixel rounding can shift the measured width by a couple of pixels across
+// CI/browser environments, so compare with a small tolerance.
+function expectWidthNear(actual: number, expected: number, tolerance = 2) {
   expect(actual).toBeGreaterThanOrEqual(expected - tolerance);
   expect(actual).toBeLessThanOrEqual(expected + tolerance);
 }
@@ -66,7 +67,7 @@ async function dragHandle(testPage: Page, handle: Locator, deltaX: number) {
 }
 
 test.describe("Review dialog sidebar resize", () => {
-  test.describe.configure({ retries: 2, timeout: 120_000 });
+  test.describe.configure({ timeout: 120_000 });
 
   test("dragging the handle resizes the sidebar and persists to sessionStorage", async ({
     testPage,

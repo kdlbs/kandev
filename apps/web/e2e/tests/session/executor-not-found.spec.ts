@@ -19,9 +19,6 @@ async function openTaskSession(page: Page, title: string): Promise<SessionPage> 
 }
 
 test.describe("Executor not found after backend restart", () => {
-  // Backend restart tests can be flaky
-  test.describe.configure({ retries: 1 });
-
   test("agent starts successfully when sending new prompt after backend restart", async ({
     testPage,
     apiClient,
@@ -68,6 +65,6 @@ test.describe("Executor not found after backend restart", () => {
     await session.sendMessage("/e2e:simple-message");
 
     // 7. The agent should respond successfully (not fail with executor not found)
-    await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
+    await session.expectChatResponseVisible("simple mock response", 1, { timeout: 60_000 });
   });
 });

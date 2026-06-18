@@ -48,7 +48,10 @@ var ErrSessionResetInProgress = errors.New("session reset in progress")
 var ErrSessionNotPromptable = errors.New("session not promptable")
 
 const (
-	agentPromptReadyTimeout  = 10 * time.Second
+	// Backend restart recovery can restore the session state before the ACP
+	// stream is promptable again. Keep this above CI's slow-start tail so a
+	// valid resume waits instead of surfacing "Failed to send message to agent".
+	agentPromptReadyTimeout  = 30 * time.Second
 	agentPromptReadyInterval = 100 * time.Millisecond
 )
 
