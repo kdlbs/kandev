@@ -102,7 +102,9 @@ describe("useDefaultQueryPresets", () => {
 
     await waitFor(() => expect(fetchUserSettings).toHaveBeenCalled());
     localStorageMock.setItem(STORAGE_KEY, JSON.stringify(crossTab));
-    window.dispatchEvent(new StorageEvent("storage", { key: STORAGE_KEY }));
+    const event = new StorageEvent("storage");
+    Object.defineProperty(event, "key", { value: STORAGE_KEY });
+    window.dispatchEvent(event);
     resolveFetch({
       settings: { github_default_query_presets: server },
     } as Awaited<ReturnType<typeof fetchUserSettings>>);
