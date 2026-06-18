@@ -854,6 +854,14 @@ func (h *TaskHandlers) startAgentForNewTask(
 	}
 	sessionID := prepResp.SessionID
 	response.TaskSessionID = sessionID
+	if updatedTask, updateErr := h.service.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); updateErr != nil {
+		h.logger.Warn("failed to mark task scheduling after preparing start session",
+			zap.Error(updateErr),
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+	} else {
+		response.State = updatedTask.State
+	}
 
 	// Launch agent asynchronously so the HTTP request can return immediately.
 	// The frontend will receive WebSocket updates when the agent actually starts.

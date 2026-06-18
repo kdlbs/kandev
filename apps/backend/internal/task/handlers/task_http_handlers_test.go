@@ -148,6 +148,21 @@ func (m *captureCreateTaskRepo) CreateTask(_ context.Context, task *models.Task)
 	return nil
 }
 
+func (m *captureCreateTaskRepo) GetTask(_ context.Context, id string) (*models.Task, error) {
+	if m.captured == nil || m.captured.ID != id {
+		return nil, errors.New("task not found")
+	}
+	return m.captured, nil
+}
+
+func (m *captureCreateTaskRepo) UpdateTaskState(_ context.Context, id string, state v1.TaskState) error {
+	if m.captured == nil || m.captured.ID != id {
+		return errors.New("task not found")
+	}
+	m.captured.State = state
+	return nil
+}
+
 // TestHTTPCreateTask_ProjectIDReachesOfficePath guards the wiring that broke
 // the office "New Task" dialog: when the request body sets project_id (and
 // omits workflow_id), the handler must forward it to the service so
@@ -184,6 +199,41 @@ func TestHTTPCreateTask_ProjectIDReachesOfficePath(t *testing.T) {
 	require.NotNil(t, repo.captured, "service.CreateTask was not called")
 	assert.Equal(t, "proj-1", repo.captured.ProjectID)
 	assert.Equal(t, "wf-office", repo.captured.WorkflowID, "office workflow should be auto-resolved")
+}
+
+func TestHTTPCreateTask_StartAgentReturnsSchedulingTask(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := &TaskHandlers{service: svc, orchestrator: &captureOrchestrator{}, logger: log}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(`{
+		"workspace_id": "ws-1",
+		"workflow_id": "wf-1",
+		"workflow_step_id": "step-1",
+		"title": "Boot an agent",
+		"description": "Do the thing",
+		"priority": "medium",
+		"agent_profile_id": "profile-1",
+		"start_agent": true
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpCreateTask(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	assert.Equal(t, v1.TaskStateScheduling, repo.captured.State)
+	assert.Contains(t, rec.Body.String(), `"state":"SCHEDULING"`)
 }
 
 func TestValidateAttachments_DeliveryMode(t *testing.T) {
