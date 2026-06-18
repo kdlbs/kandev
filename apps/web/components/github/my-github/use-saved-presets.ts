@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
 
 const STORAGE_KEY = "kandev:github-presets:v1";
 
@@ -69,8 +70,37 @@ function publish(next: SavedPreset[]) {
   for (const l of listeners) l();
 }
 
+function readServerPresets(value: unknown): SavedPreset[] | null {
+  if (!Array.isArray(value)) return null;
+  return value.filter(
+    (p): p is SavedPreset =>
+      typeof p === "object" &&
+      p !== null &&
+      typeof (p as SavedPreset).id === "string" &&
+      ((p as SavedPreset).kind === "pr" || (p as SavedPreset).kind === "issue") &&
+      typeof (p as SavedPreset).label === "string",
+  );
+}
+
+function syncServer(next: SavedPreset[]) {
+  updateUserSettings({ github_saved_presets: next }).catch(() => {});
+}
+
 export function useSavedPresets() {
   const presets = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchUserSettings({ cache: "no-store" })
+      .then((response) => {
+        const serverPresets = readServerPresets(response.settings.github_saved_presets);
+        if (!cancelled && serverPresets) publish(serverPresets);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const save = useCallback((input: Omit<SavedPreset, "id" | "createdAt">) => {
     const preset: SavedPreset = {
@@ -78,12 +108,16 @@ export function useSavedPresets() {
       id: `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
       createdAt: new Date().toISOString(),
     };
-    publish([...(snapshot ?? readStorage()), preset]);
+    const next = [...(snapshot ?? readStorage()), preset];
+    publish(next);
+    syncServer(next);
     return preset;
   }, []);
 
   const remove = useCallback((id: string) => {
-    publish((snapshot ?? readStorage()).filter((p) => p.id !== id));
+    const next = (snapshot ?? readStorage()).filter((p) => p.id !== id);
+    publish(next);
+    syncServer(next);
   }, []);
 
   return { presets, save, remove };

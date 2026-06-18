@@ -1,7 +1,7 @@
-import { fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
-import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
+import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
+import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
 import { DEFAULT_VOICE_MODE_STATE, type VoiceModeState } from "@/lib/state/slices/settings/types";
-import type { SavedLayout, UserSettingsResponse } from "@/lib/types/http";
+import type { SavedLayout, SidebarTaskPrefsApi, UserSettingsResponse } from "@/lib/types/http";
 import type { VoiceModeSettings } from "@/lib/types/http-voice";
 
 export type UserSettingsData = NonNullable<UserSettingsResponse["settings"]>;
@@ -56,6 +56,23 @@ function buildSystemMetricsDisplayFields(s: UserSettingsData | undefined) {
   };
 }
 
+function parseSidebarTaskPrefs(value: SidebarTaskPrefsApi | undefined) {
+  return {
+    pinnedTaskIds: value?.pinned_task_ids ?? [],
+    orderedTaskIds: value?.ordered_task_ids ?? [],
+    subtaskOrderByParentId: value?.subtask_order_by_parent_id ?? {},
+  };
+}
+
+function parseTaskCreateLastUsed(value: UserSettingsData["task_create_last_used"] | undefined) {
+  return {
+    repositoryId: value?.repository_id || null,
+    branch: value?.branch || null,
+    agentProfileId: value?.agent_profile_id || null,
+    executorProfileId: value?.executor_profile_id || null,
+  };
+}
+
 function buildIdentityFields(s: UserSettingsData) {
   return {
     workspaceId: s.workspace_id || null,
@@ -85,6 +102,17 @@ export function buildCoreFields(s: UserSettingsData) {
     ...buildBehaviorFields(s),
     savedLayouts: s.saved_layouts ?? [],
     sidebarViews: (s.sidebar_views ?? []).map(fromApiSidebarView) as SidebarView[],
+    sidebarActiveViewId: s.sidebar_active_view_id || null,
+    sidebarDraft: s.sidebar_draft
+      ? (fromApiSidebarDraft(s.sidebar_draft) as SidebarViewDraft)
+      : null,
+    sidebarTaskPrefs: parseSidebarTaskPrefs(s.sidebar_task_prefs),
+    taskCreateLastUsed: parseTaskCreateLastUsed(s.task_create_last_used),
+    jiraSavedViews: s.jira_saved_views,
+    jiraTaskPresets: s.jira_task_presets,
+    githubSavedPresets: s.github_saved_presets,
+    githubDefaultQueryPresets: s.github_default_query_presets,
+    gitlabSavedPresets: s.gitlab_saved_presets,
     ...buildTerminalFields(s),
     ...buildSystemMetricsDisplayFields(s),
     ...buildVoiceModeFields(s),
@@ -122,6 +150,15 @@ export function mapUserSettingsResponse(response: UserSettingsResponse | null) {
       releaseNotesLastSeenVersion: null,
       savedLayouts: [] as SavedLayout[],
       sidebarViews: [] as SidebarView[],
+      sidebarActiveViewId: null,
+      sidebarDraft: null,
+      sidebarTaskPrefs: parseSidebarTaskPrefs(undefined),
+      taskCreateLastUsed: parseTaskCreateLastUsed(undefined),
+      jiraSavedViews: undefined,
+      jiraTaskPresets: undefined,
+      githubSavedPresets: undefined,
+      githubDefaultQueryPresets: undefined,
+      gitlabSavedPresets: undefined,
       defaultUtilityAgentId: null,
       keyboardShortcuts: {} as Record<string, { key: string; modifiers?: Record<string, boolean> }>,
       terminalLinkBehavior: "new_tab" as const,

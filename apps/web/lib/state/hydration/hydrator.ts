@@ -88,11 +88,26 @@ function bridgeSidebarViewsFromUserSettings(
   userSettings: Partial<AppState["userSettings"]>,
 ): void {
   const serverViews = userSettings.sidebarViews;
-  if (!serverViews || serverViews.length === 0) return;
-  const normalized = serverViews.map(migrateView);
-  draft.sidebarViews.views = normalized;
-  if (!normalized.some((v) => v.id === draft.sidebarViews.activeViewId)) {
-    draft.sidebarViews.activeViewId = normalized[0].id;
+  const normalized = serverViews?.map(migrateView) ?? [];
+  if (normalized.length > 0) {
+    draft.sidebarViews.views = normalized;
+  }
+  if (
+    userSettings.sidebarActiveViewId &&
+    draft.sidebarViews.views.some((v) => v.id === userSettings.sidebarActiveViewId)
+  ) {
+    draft.sidebarViews.activeViewId = userSettings.sidebarActiveViewId;
+  } else if (
+    draft.sidebarViews.views.length > 0 &&
+    !draft.sidebarViews.views.some((v) => v.id === draft.sidebarViews.activeViewId)
+  ) {
+    draft.sidebarViews.activeViewId = draft.sidebarViews.views[0].id;
+  }
+  if (userSettings.sidebarDraft) {
+    draft.sidebarViews.draft = userSettings.sidebarDraft;
+  }
+  if (userSettings.sidebarTaskPrefs) {
+    draft.sidebarTaskPrefs = userSettings.sidebarTaskPrefs;
   }
 }
 

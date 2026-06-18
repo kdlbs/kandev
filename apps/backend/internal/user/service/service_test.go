@@ -442,6 +442,104 @@ func TestApplySidebarViews(t *testing.T) {
 	}
 }
 
+func TestApplySidebarViewState(t *testing.T) {
+	t.Run("nil fields leave active view and draft unchanged", func(t *testing.T) {
+		settings := &models.UserSettings{
+			SidebarActiveViewID: "view-existing",
+			SidebarDraft: &models.SidebarViewDraft{
+				BaseViewID: "view-existing",
+				Filters:    []models.SidebarViewClause{},
+				Sort:       models.SidebarViewSort{Key: "state", Direction: "asc"},
+				Group:      "state",
+			},
+		}
+		if err := applySidebarViewState(settings, &UpdateUserSettingsRequest{}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.SidebarActiveViewID != "view-existing" {
+			t.Fatalf("expected active view unchanged, got %q", settings.SidebarActiveViewID)
+		}
+		if settings.SidebarDraft == nil || settings.SidebarDraft.BaseViewID != "view-existing" {
+			t.Fatalf("expected draft unchanged, got %+v", settings.SidebarDraft)
+		}
+	})
+
+	t.Run("applies active view and draft", func(t *testing.T) {
+		draft := &models.SidebarViewDraft{
+			BaseViewID: "view-1",
+			Filters: []models.SidebarViewClause{{
+				ID:        "clause-1",
+				Dimension: "titleMatch",
+				Op:        "matches",
+				Value:     json.RawMessage(`"bug"`),
+			}},
+			Sort:  models.SidebarViewSort{Key: "updatedAt", Direction: "desc"},
+			Group: "workflow",
+		}
+		settings := &models.UserSettings{}
+		req := &UpdateUserSettingsRequest{
+			SidebarActiveViewID: ptr("view-1"),
+			SidebarDraft:        &draft,
+		}
+		if err := applySidebarViewState(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.SidebarActiveViewID != "view-1" {
+			t.Fatalf("expected active view view-1, got %q", settings.SidebarActiveViewID)
+		}
+		if settings.SidebarDraft == nil || settings.SidebarDraft.Group != "workflow" {
+			t.Fatalf("expected draft to be applied, got %+v", settings.SidebarDraft)
+		}
+	})
+
+	t.Run("clears draft when null is provided", func(t *testing.T) {
+		settings := &models.UserSettings{
+			SidebarDraft: &models.SidebarViewDraft{BaseViewID: "view-1"},
+		}
+		req := &UpdateUserSettingsRequest{SidebarDraft: ptr((*models.SidebarViewDraft)(nil))}
+		if err := applySidebarViewState(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.SidebarDraft != nil {
+			t.Fatalf("expected draft cleared, got %+v", settings.SidebarDraft)
+		}
+	})
+
+	t.Run("rejects whitespace-only active view id", func(t *testing.T) {
+		req := &UpdateUserSettingsRequest{SidebarActiveViewID: ptr("  ")}
+		if err := applySidebarViewState(&models.UserSettings{}, req); err == nil {
+			t.Fatal("expected validation error, got nil")
+		}
+	})
+}
+
+func TestApplyUserPreferenceBlobs(t *testing.T) {
+	settings := &models.UserSettings{
+		TaskCreateLastUsed: models.TaskCreateLastUsed{
+			RepositoryID:      "repo-1",
+			Branch:            "main",
+			AgentProfileID:    "agent-1",
+			ExecutorProfileID: "exec-1",
+		},
+	}
+	patch := models.TaskCreateLastUsed{Branch: "feature"}
+
+	applyUserPreferenceBlobs(settings, &UpdateUserSettingsRequest{
+		TaskCreateLastUsed: &patch,
+		GitHubSavedPresets: ptr(json.RawMessage(`[{"id":"p1"}]`)),
+	})
+
+	if settings.TaskCreateLastUsed.RepositoryID != "repo-1" {
+		t.Fatalf("expected repository id to be preserved, got %q", settings.TaskCreateLastUsed.RepositoryID)
+	}
+	if settings.TaskCreateLastUsed.Branch != "feature" {
+		t.Fatalf("expected branch to update, got %q", settings.TaskCreateLastUsed.Branch)
+	}
+	if string(settings.GitHubSavedPresets) != `[{"id":"p1"}]` {
+		t.Fatalf("expected GitHub presets to apply, got %s", string(settings.GitHubSavedPresets))
+	}
+}
+
 func TestApplyVoiceMode(t *testing.T) {
 	t.Run("nil value leaves settings unchanged", func(t *testing.T) {
 		settings := &models.UserSettings{

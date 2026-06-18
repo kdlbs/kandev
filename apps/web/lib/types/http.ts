@@ -1,4 +1,5 @@
 import type { ExecutorType } from "./executor";
+import type { UserSettings } from "./http-user-settings";
 import type {
   AgentProfileId,
   RepositoryId,
@@ -10,6 +11,16 @@ import type {
 import type { OnEnterActionType, StepEvents } from "./workflow-actions";
 
 export type { ExecutorType } from "./executor";
+export type {
+  SavedLayout,
+  SidebarViewApi,
+  SidebarViewDraftApi,
+  SidebarTaskPrefsApi,
+  TaskCreateLastUsedApi,
+  UserSettings,
+  UserSettingsResponse,
+  UserSettingsUpdatePayload,
+} from "./http-user-settings";
 export * from "./ids";
 export type {
   MoveToStepConfig,
@@ -395,59 +406,6 @@ export type User = {
   email: string;
   created_at: string;
   updated_at: string;
-};
-
-export type SavedLayout = {
-  id: string;
-  name: string;
-  is_default: boolean;
-  layout: Record<string, unknown>;
-  created_at: string;
-};
-
-export type SidebarViewApi = {
-  id: string;
-  name: string;
-  filters: Array<{ id: string; dimension: string; op: string; value: unknown }>;
-  sort: { key: string; direction: string };
-  group: string;
-  collapsed_groups: string[];
-};
-
-export type UserSettings = {
-  user_id: string;
-  workspace_id: WorkspaceId;
-  kanban_view_mode?: string;
-  workflow_filter_id?: string;
-  repository_ids: string[];
-  initial_setup_complete?: boolean;
-  preferred_shell?: string;
-  default_editor_id?: string;
-  enable_preview_on_click?: boolean;
-  chat_submit_key?: "enter" | "cmd_enter";
-  review_auto_mark_on_scroll?: boolean;
-  show_release_notification?: boolean;
-  release_notes_last_seen_version?: string;
-  lsp_auto_start_languages?: string[];
-  lsp_auto_install_languages?: string[];
-  lsp_server_configs?: Record<string, Record<string, unknown>>;
-  saved_layouts?: SavedLayout[];
-  sidebar_views?: SidebarViewApi[];
-  default_utility_agent_id?: string;
-  default_utility_model?: string;
-  keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
-  terminal_link_behavior?: string;
-  terminal_font_family?: string;
-  terminal_font_size?: number;
-  changes_panel_layout?: "flat" | "tree";
-  system_metrics_display?: { show_in_topbar?: boolean };
-  voice_mode?: import("./http-voice").VoiceModeSettings;
-  updated_at: string;
-};
-
-export type UserSettingsResponse = {
-  settings: UserSettings;
-  shell_options?: Array<{ value: string; label: string }>;
 };
 
 export type EditorOption = {

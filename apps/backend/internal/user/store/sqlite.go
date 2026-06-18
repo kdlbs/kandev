@@ -133,6 +133,7 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 	if sidebarViews == nil {
 		sidebarViews = []models.SidebarView{}
 	}
+	sidebarTaskPrefs := normalizeSidebarTaskPrefs(settings.SidebarTaskPrefs)
 	keyboardShortcuts := settings.KeyboardShortcuts
 	if keyboardShortcuts == nil {
 		keyboardShortcuts = map[string]interface{}{}
@@ -155,6 +156,15 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 		"lsp_server_configs":              lspServerConfigs,
 		"saved_layouts":                   savedLayouts,
 		"sidebar_views":                   sidebarViews,
+		"sidebar_active_view_id":          settings.SidebarActiveViewID,
+		"sidebar_draft":                   settings.SidebarDraft,
+		"sidebar_task_prefs":              sidebarTaskPrefs,
+		"task_create_last_used":           settings.TaskCreateLastUsed,
+		"jira_saved_views":                settings.JiraSavedViews,
+		"jira_task_presets":               settings.JiraTaskPresets,
+		"github_saved_presets":            settings.GitHubSavedPresets,
+		"github_default_query_presets":    settings.GitHubDefaultQueryPresets,
+		"gitlab_saved_presets":            settings.GitLabSavedPresets,
 		"default_utility_agent_id":        settings.DefaultUtilityAgentID,
 		"default_utility_model":           settings.DefaultUtilityModel,
 		"keyboard_shortcuts":              keyboardShortcuts,
@@ -262,6 +272,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.TerminalLinkBehavior = "new_tab"
 		settings.ChangesPanelLayout = "tree"
 		settings.SidebarViews = []models.SidebarView{}
+		settings.SidebarTaskPrefs = normalizeSidebarTaskPrefs(models.SidebarTaskPrefs{})
 		settings.VoiceMode = defaultVoiceModeSettings()
 		return settings, nil
 	}
@@ -283,6 +294,15 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		LspServerConfigs            map[string]map[string]interface{}   `json:"lsp_server_configs"`
 		SavedLayouts                []models.SavedLayout                `json:"saved_layouts"`
 		SidebarViews                []models.SidebarView                `json:"sidebar_views"`
+		SidebarActiveViewID         string                              `json:"sidebar_active_view_id"`
+		SidebarDraft                *models.SidebarViewDraft            `json:"sidebar_draft"`
+		SidebarTaskPrefs            models.SidebarTaskPrefs             `json:"sidebar_task_prefs"`
+		TaskCreateLastUsed          models.TaskCreateLastUsed           `json:"task_create_last_used"`
+		JiraSavedViews              json.RawMessage                     `json:"jira_saved_views"`
+		JiraTaskPresets             json.RawMessage                     `json:"jira_task_presets"`
+		GitHubSavedPresets          json.RawMessage                     `json:"github_saved_presets"`
+		GitHubDefaultQueryPresets   json.RawMessage                     `json:"github_default_query_presets"`
+		GitLabSavedPresets          json.RawMessage                     `json:"gitlab_saved_presets"`
 		DefaultUtilityAgentID       string                              `json:"default_utility_agent_id"`
 		DefaultUtilityModel         string                              `json:"default_utility_model"`
 		KeyboardShortcuts           map[string]interface{}              `json:"keyboard_shortcuts"`
@@ -338,6 +358,15 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	if settings.SidebarViews == nil {
 		settings.SidebarViews = []models.SidebarView{}
 	}
+	settings.SidebarActiveViewID = payload.SidebarActiveViewID
+	settings.SidebarDraft = payload.SidebarDraft
+	settings.SidebarTaskPrefs = normalizeSidebarTaskPrefs(payload.SidebarTaskPrefs)
+	settings.TaskCreateLastUsed = payload.TaskCreateLastUsed
+	settings.JiraSavedViews = payload.JiraSavedViews
+	settings.JiraTaskPresets = payload.JiraTaskPresets
+	settings.GitHubSavedPresets = payload.GitHubSavedPresets
+	settings.GitHubDefaultQueryPresets = payload.GitHubDefaultQueryPresets
+	settings.GitLabSavedPresets = payload.GitLabSavedPresets
 	settings.DefaultUtilityAgentID = payload.DefaultUtilityAgentID
 	settings.DefaultUtilityModel = payload.DefaultUtilityModel
 	settings.KeyboardShortcuts = payload.KeyboardShortcuts
@@ -359,4 +388,17 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.ChangesPanelLayout = "tree"
 	}
 	return settings, nil
+}
+
+func normalizeSidebarTaskPrefs(prefs models.SidebarTaskPrefs) models.SidebarTaskPrefs {
+	if prefs.PinnedTaskIDs == nil {
+		prefs.PinnedTaskIDs = []string{}
+	}
+	if prefs.OrderedTaskIDs == nil {
+		prefs.OrderedTaskIDs = []string{}
+	}
+	if prefs.SubtaskOrderByParentID == nil {
+		prefs.SubtaskOrderByParentID = map[string][]string{}
+	}
+	return prefs
 }

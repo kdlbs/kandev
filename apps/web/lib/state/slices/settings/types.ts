@@ -16,7 +16,8 @@ import type {
   VoiceInputEngine,
   WhisperWebModelSize,
 } from "@/lib/types/http-voice";
-import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
+import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
+import type { SidebarTaskPrefsState } from "@/lib/state/slices/ui/types";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
 
@@ -155,6 +156,15 @@ export type UserSettingsState = {
   lspServerConfigs: Record<string, Record<string, unknown>>;
   savedLayouts: SavedLayout[];
   sidebarViews: SidebarView[];
+  sidebarActiveViewId: string | null;
+  sidebarDraft: SidebarViewDraft | null;
+  sidebarTaskPrefs: SidebarTaskPrefsState;
+  taskCreateLastUsed: TaskCreateLastUsedState;
+  jiraSavedViews: unknown;
+  jiraTaskPresets: unknown;
+  githubSavedPresets: unknown;
+  githubDefaultQueryPresets: unknown;
+  gitlabSavedPresets: unknown;
   defaultUtilityAgentId: string | null;
   keyboardShortcuts: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   terminalLinkBehavior: "new_tab" | "browser_panel";
@@ -164,6 +174,13 @@ export type UserSettingsState = {
   systemMetricsDisplay: { showInTopbar: boolean };
   voiceMode: VoiceModeState;
   loaded: boolean;
+};
+
+export type TaskCreateLastUsedState = {
+  repositoryId: string | null;
+  branch: string | null;
+  agentProfileId: string | null;
+  executorProfileId: string | null;
 };
 
 export type VoiceModeState = {

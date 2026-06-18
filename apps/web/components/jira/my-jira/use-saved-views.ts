@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { DEFAULT_FILTERS, type FilterState } from "./filter-model";
+import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
 
 export type SavedView = {
   id: string;
@@ -81,6 +82,15 @@ function writeStorage(views: SavedView[]): void {
   }
 }
 
+function readServerViews(value: unknown): SavedView[] | null {
+  if (!Array.isArray(value)) return null;
+  return value.filter(isSavedView);
+}
+
+function syncServer(views: SavedView[]): void {
+  updateUserSettings({ jira_saved_views: views }).catch(() => {});
+}
+
 export function useSavedViews() {
   const [custom, setCustom] = useState<SavedView[]>([]);
 
@@ -89,6 +99,12 @@ export function useSavedViews() {
     async function init() {
       const loaded = readStorage();
       if (!cancelled) setCustom(loaded);
+      const response = await fetchUserSettings({ cache: "no-store" }).catch(() => null);
+      const serverViews = readServerViews(response?.settings.jira_saved_views);
+      if (!cancelled && serverViews) {
+        writeStorage(serverViews);
+        setCustom(serverViews);
+      }
     }
     void init();
     return () => {
@@ -107,6 +123,7 @@ export function useSavedViews() {
       setCustom((prev) => {
         const next = [...prev, view];
         writeStorage(next);
+        syncServer(next);
         return next;
       });
       return view;
@@ -118,6 +135,7 @@ export function useSavedViews() {
     setCustom((prev) => {
       const next = prev.filter((v) => v.id !== id);
       writeStorage(next);
+      syncServer(next);
       return next;
     });
   }, []);

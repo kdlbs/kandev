@@ -31,6 +31,15 @@ type UserSettings struct {
 	LspServerConfigs            map[string]map[string]interface{} `json:"lsp_server_configs"`
 	SavedLayouts                []SavedLayout                     `json:"saved_layouts"`
 	SidebarViews                []SidebarView                     `json:"sidebar_views"`
+	SidebarActiveViewID         string                            `json:"sidebar_active_view_id"`
+	SidebarDraft                *SidebarViewDraft                 `json:"sidebar_draft"`
+	SidebarTaskPrefs            SidebarTaskPrefs                  `json:"sidebar_task_prefs"`
+	TaskCreateLastUsed          TaskCreateLastUsed                `json:"task_create_last_used"`
+	JiraSavedViews              json.RawMessage                   `json:"jira_saved_views"`
+	JiraTaskPresets             json.RawMessage                   `json:"jira_task_presets"`
+	GitHubSavedPresets          json.RawMessage                   `json:"github_saved_presets"`
+	GitHubDefaultQueryPresets   json.RawMessage                   `json:"github_default_query_presets"`
+	GitLabSavedPresets          json.RawMessage                   `json:"gitlab_saved_presets"`
 	DefaultUtilityAgentID       string                            `json:"default_utility_agent_id"` // Default inference agent for utility agents
 	DefaultUtilityModel         string                            `json:"default_utility_model"`    // Default model for utility agents
 	KeyboardShortcuts           map[string]interface{}            `json:"keyboard_shortcuts"`       // User-configured keyboard shortcut overrides
@@ -104,4 +113,24 @@ type SidebarViewClause struct {
 type SidebarViewSort struct {
 	Key       string `json:"key"`
 	Direction string `json:"direction"`
+}
+
+type SidebarViewDraft struct {
+	BaseViewID string              `json:"base_view_id"`
+	Filters    []SidebarViewClause `json:"filters"`
+	Sort       SidebarViewSort     `json:"sort"`
+	Group      string              `json:"group"`
+}
+
+type SidebarTaskPrefs struct {
+	PinnedTaskIDs          []string            `json:"pinned_task_ids"`
+	OrderedTaskIDs         []string            `json:"ordered_task_ids"`
+	SubtaskOrderByParentID map[string][]string `json:"subtask_order_by_parent_id"`
+}
+
+type TaskCreateLastUsed struct {
+	RepositoryID      string `json:"repository_id"`
+	Branch            string `json:"branch"`
+	AgentProfileID    string `json:"agent_profile_id"`
+	ExecutorProfileID string `json:"executor_profile_id"`
 }

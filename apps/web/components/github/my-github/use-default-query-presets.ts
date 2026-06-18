@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import {
   PR_PRESETS as BUILTIN_PR_PRESETS,
   ISSUE_PRESETS as BUILTIN_ISSUE_PRESETS,
   type PresetOption,
 } from "./search-bar";
+import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
 
 const STORAGE_KEY = "kandev:github-default-queries:v1";
 
@@ -67,6 +68,23 @@ function publish(next: StoredDefaults | null) {
   listeners.forEach((fn) => fn());
 }
 
+function readServerDefaults(value: unknown): StoredDefaults | null | undefined {
+  if (value === null) return null;
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !Array.isArray((value as StoredDefaults).pr) ||
+    !Array.isArray((value as StoredDefaults).issue)
+  ) {
+    return undefined;
+  }
+  return value as StoredDefaults;
+}
+
+function syncServer(defaults: StoredDefaults | null) {
+  updateUserSettings({ github_default_query_presets: defaults }).catch(() => {});
+}
+
 function subscribe(cb: () => void) {
   listeners.add(cb);
   return () => {
@@ -86,15 +104,30 @@ function getServerSnapshot(): StoredDefaults | null {
 export function useDefaultQueryPresets() {
   const stored = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetchUserSettings({ cache: "no-store" })
+      .then((response) => {
+        const serverDefaults = readServerDefaults(response.settings.github_default_query_presets);
+        if (!cancelled && serverDefaults !== undefined) publish(serverDefaults);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const prPresets = useMemo(() => stored?.pr ?? toStored(BUILTIN_PR_PRESETS), [stored]);
   const issuePresets = useMemo(() => stored?.issue ?? toStored(BUILTIN_ISSUE_PRESETS), [stored]);
 
   const save = useCallback((defaults: StoredDefaults) => {
     publish(defaults);
+    syncServer(defaults);
   }, []);
 
   const reset = useCallback(() => {
     publish(null);
+    syncServer(null);
   }, []);
 
   const isCustomized = stored !== null;

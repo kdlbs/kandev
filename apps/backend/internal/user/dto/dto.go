@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/kandev/kandev/internal/user/models"
@@ -32,6 +33,15 @@ type UserSettingsDTO struct {
 	LspServerConfigs            map[string]map[string]interface{}   `json:"lsp_server_configs,omitempty"`
 	SavedLayouts                []models.SavedLayout                `json:"saved_layouts"`
 	SidebarViews                []models.SidebarView                `json:"sidebar_views"`
+	SidebarActiveViewID         string                              `json:"sidebar_active_view_id"`
+	SidebarDraft                *models.SidebarViewDraft            `json:"sidebar_draft"`
+	SidebarTaskPrefs            models.SidebarTaskPrefs             `json:"sidebar_task_prefs"`
+	TaskCreateLastUsed          models.TaskCreateLastUsed           `json:"task_create_last_used"`
+	JiraSavedViews              json.RawMessage                     `json:"jira_saved_views,omitempty"`
+	JiraTaskPresets             json.RawMessage                     `json:"jira_task_presets,omitempty"`
+	GitHubSavedPresets          json.RawMessage                     `json:"github_saved_presets,omitempty"`
+	GitHubDefaultQueryPresets   json.RawMessage                     `json:"github_default_query_presets,omitempty"`
+	GitLabSavedPresets          json.RawMessage                     `json:"gitlab_saved_presets,omitempty"`
 	DefaultUtilityAgentID       string                              `json:"default_utility_agent_id"`
 	DefaultUtilityModel         string                              `json:"default_utility_model"`
 	KeyboardShortcuts           map[string]interface{}              `json:"keyboard_shortcuts,omitempty"`
@@ -77,6 +87,15 @@ type UpdateUserSettingsRequest struct {
 	LspServerConfigs            *map[string]map[string]interface{}   `json:"lsp_server_configs,omitempty"`
 	SavedLayouts                *[]models.SavedLayout                `json:"saved_layouts,omitempty"`
 	SidebarViews                *[]models.SidebarView                `json:"sidebar_views,omitempty"`
+	SidebarActiveViewID         *string                              `json:"sidebar_active_view_id,omitempty"`
+	SidebarDraft                **models.SidebarViewDraft            `json:"sidebar_draft,omitempty"`
+	SidebarTaskPrefs            *models.SidebarTaskPrefs             `json:"sidebar_task_prefs,omitempty"`
+	TaskCreateLastUsed          *models.TaskCreateLastUsed           `json:"task_create_last_used,omitempty"`
+	JiraSavedViews              *json.RawMessage                     `json:"jira_saved_views,omitempty"`
+	JiraTaskPresets             *json.RawMessage                     `json:"jira_task_presets,omitempty"`
+	GitHubSavedPresets          *json.RawMessage                     `json:"github_saved_presets,omitempty"`
+	GitHubDefaultQueryPresets   *json.RawMessage                     `json:"github_default_query_presets,omitempty"`
+	GitLabSavedPresets          *json.RawMessage                     `json:"gitlab_saved_presets,omitempty"`
 	DefaultUtilityAgentID       *string                              `json:"default_utility_agent_id,omitempty"`
 	DefaultUtilityModel         *string                              `json:"default_utility_model,omitempty"`
 	KeyboardShortcuts           *map[string]interface{}              `json:"keyboard_shortcuts,omitempty"`
@@ -117,6 +136,15 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		LspServerConfigs:            settings.LspServerConfigs,
 		SavedLayouts:                settings.SavedLayouts,
 		SidebarViews:                settings.SidebarViews,
+		SidebarActiveViewID:         settings.SidebarActiveViewID,
+		SidebarDraft:                settings.SidebarDraft,
+		SidebarTaskPrefs:            settings.SidebarTaskPrefs,
+		TaskCreateLastUsed:          settings.TaskCreateLastUsed,
+		JiraSavedViews:              settings.JiraSavedViews,
+		JiraTaskPresets:             settings.JiraTaskPresets,
+		GitHubSavedPresets:          settings.GitHubSavedPresets,
+		GitHubDefaultQueryPresets:   settings.GitHubDefaultQueryPresets,
+		GitLabSavedPresets:          settings.GitLabSavedPresets,
 		DefaultUtilityAgentID:       settings.DefaultUtilityAgentID,
 		DefaultUtilityModel:         settings.DefaultUtilityModel,
 		KeyboardShortcuts:           settings.KeyboardShortcuts,

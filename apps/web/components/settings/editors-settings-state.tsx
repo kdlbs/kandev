@@ -13,7 +13,7 @@ import {
   parseTerminalLinkBehavior,
   parseVoiceMode,
 } from "@/lib/ssr/user-settings";
-import { fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
+import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
 import {
   type EditorFormState,
   buildConfig,
@@ -217,16 +217,64 @@ function mapEditorSettingsFields(
   s: NonNullable<NonNullable<UpdateUserSettingsResponse>["settings"]>,
 ) {
   return {
+    ...mapEditorBehaviorFields(s),
+    ...mapEditorLspFields(s),
+    ...mapEditorSidebarFields(s),
+    ...mapEditorSyncedLocalFields(s),
+    loaded: true as const,
+  };
+}
+
+function mapEditorBehaviorFields(
+  s: NonNullable<NonNullable<UpdateUserSettingsResponse>["settings"]>,
+) {
+  return {
     chatSubmitKey: s.chat_submit_key ?? "cmd_enter",
     reviewAutoMarkOnScroll: s.review_auto_mark_on_scroll ?? true,
     showReleaseNotification: s.show_release_notification ?? true,
     releaseNotesLastSeenVersion: (s.release_notes_last_seen_version as string) || null,
+    savedLayouts: s.saved_layouts ?? [],
+  };
+}
+
+function mapEditorLspFields(s: NonNullable<NonNullable<UpdateUserSettingsResponse>["settings"]>) {
+  return {
     lspAutoStartLanguages: s.lsp_auto_start_languages ?? [],
     lspAutoInstallLanguages: s.lsp_auto_install_languages ?? [],
     lspServerConfigs: s.lsp_server_configs ?? {},
-    savedLayouts: s.saved_layouts ?? [],
+  };
+}
+
+function mapEditorSidebarFields(
+  s: NonNullable<NonNullable<UpdateUserSettingsResponse>["settings"]>,
+) {
+  return {
     sidebarViews: (s.sidebar_views ?? []).map(fromApiSidebarView),
-    loaded: true as const,
+    sidebarActiveViewId: s.sidebar_active_view_id || null,
+    sidebarDraft: s.sidebar_draft ? fromApiSidebarDraft(s.sidebar_draft) : null,
+    sidebarTaskPrefs: {
+      pinnedTaskIds: s.sidebar_task_prefs?.pinned_task_ids ?? [],
+      orderedTaskIds: s.sidebar_task_prefs?.ordered_task_ids ?? [],
+      subtaskOrderByParentId: s.sidebar_task_prefs?.subtask_order_by_parent_id ?? {},
+    },
+  };
+}
+
+function mapEditorSyncedLocalFields(
+  s: NonNullable<NonNullable<UpdateUserSettingsResponse>["settings"]>,
+) {
+  return {
+    taskCreateLastUsed: {
+      repositoryId: s.task_create_last_used?.repository_id || null,
+      branch: s.task_create_last_used?.branch || null,
+      agentProfileId: s.task_create_last_used?.agent_profile_id || null,
+      executorProfileId: s.task_create_last_used?.executor_profile_id || null,
+    },
+    jiraSavedViews: s.jira_saved_views,
+    jiraTaskPresets: s.jira_task_presets,
+    githubSavedPresets: s.github_saved_presets,
+    githubDefaultQueryPresets: s.github_default_query_presets,
+    gitlabSavedPresets: s.gitlab_saved_presets,
   };
 }
 

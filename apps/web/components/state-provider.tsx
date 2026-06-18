@@ -6,6 +6,8 @@ import { useStore } from "zustand";
 import { isDebug, registerSessionTaskResolver } from "@/lib/debug/log";
 import type { AppState, StoreProviderProps } from "@/lib/state/store";
 import { createAppStore } from "@/lib/state/store";
+import { setLocalStorage } from "@/lib/local-storage";
+import { STORAGE_KEYS } from "@/lib/settings/constants";
 
 const StoreContext = createContext<StoreApi<AppState> | null>(null);
 
@@ -31,6 +33,11 @@ export function StateProvider({ children, initialState }: StoreProviderProps) {
     }
   }, [store]);
 
+  useEffect(() => {
+    syncTaskCreateLastUsedCache(store.getState());
+    return store.subscribe(syncTaskCreateLastUsedCache);
+  }, [store]);
+
   // In debug builds, let the namespaced debug logger annotate every line that
   // carries a sessionId with `task_id=<...>` so console/log filters can scope to
   // a single task (see lib/debug/log.ts). No-op in production.
@@ -42,6 +49,18 @@ export function StateProvider({ children, initialState }: StoreProviderProps) {
   }, [store]);
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
+}
+
+function syncTaskCreateLastUsedCache(state: AppState) {
+  const lastUsed = state.userSettings.taskCreateLastUsed;
+  if (!lastUsed) return;
+  if (lastUsed.repositoryId)
+    setLocalStorage(STORAGE_KEYS.LAST_REPOSITORY_ID, lastUsed.repositoryId);
+  if (lastUsed.branch) setLocalStorage(STORAGE_KEYS.LAST_BRANCH, lastUsed.branch);
+  if (lastUsed.agentProfileId)
+    setLocalStorage(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, lastUsed.agentProfileId);
+  if (lastUsed.executorProfileId)
+    setLocalStorage(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, lastUsed.executorProfileId);
 }
 
 export function useAppStore<T>(selector: (state: AppState) => T) {

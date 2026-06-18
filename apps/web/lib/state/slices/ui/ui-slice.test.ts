@@ -22,6 +22,8 @@ const KEY = "kandev.sidebar.collapsedSubtasks";
 const TASK_A = "task-a";
 const TASK_B = "task-b";
 const SIDEBAR_VIEWS_KEY = "kandev.sidebar.views";
+const SIDEBAR_ACTIVE_VIEW_KEY = "kandev.sidebar.activeViewId";
+const SIDEBAR_DRAFT_KEY = "kandev.sidebar.draft";
 
 function makeSidebarView(id: string, name: string) {
   return {
@@ -360,6 +362,8 @@ describe("reorderSidebarViews", () => {
         expect.objectContaining({ id: "two" }),
         expect.objectContaining({ id: "one" }),
       ],
+      sidebar_active_view_id: "two",
+      sidebar_draft: null,
     });
   });
 
@@ -410,5 +414,103 @@ describe("reorderSidebarViews", () => {
 
     expect(store.getState().sidebarViews.views.map((v) => v.id)).toEqual(["all", "one", "two"]);
     expect(updateUserSettings).not.toHaveBeenCalled();
+  });
+});
+
+describe("sidebar view backend state", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.mocked(updateUserSettings).mockClear();
+  });
+
+  it("syncs active view changes to backend user settings", () => {
+    const store = makeStore();
+    store.setState((state) => ({
+      ...state,
+      sidebarViews: {
+        ...state.sidebarViews,
+        views: [makeSidebarView("all", "All"), makeSidebarView("mine", "Mine")],
+        activeViewId: "all",
+        draft: {
+          baseViewId: "all",
+          filters: [],
+          sort: { key: "state", direction: "asc" },
+          group: "state",
+        },
+      },
+    }));
+
+    store.getState().setSidebarActiveView("mine");
+
+    expect(store.getState().sidebarViews.activeViewId).toBe("mine");
+    expect(window.localStorage.getItem(SIDEBAR_ACTIVE_VIEW_KEY)).toBe(JSON.stringify("mine"));
+    expect(window.localStorage.getItem(SIDEBAR_DRAFT_KEY)).toBeNull();
+    expect(updateUserSettings).toHaveBeenCalledWith({
+      sidebar_active_view_id: "mine",
+      sidebar_draft: null,
+    });
+  });
+
+  it("syncs filter sort and group drafts to backend user settings", () => {
+    const store = makeStore();
+    store.setState((state) => ({
+      ...state,
+      sidebarViews: {
+        ...state.sidebarViews,
+        views: [makeSidebarView("all", "All")],
+        activeViewId: "all",
+        draft: null,
+      },
+    }));
+
+    store.getState().updateSidebarDraft({
+      sort: { key: "updatedAt", direction: "desc" },
+      group: "workflow",
+    });
+
+    expect(updateUserSettings).toHaveBeenCalledWith({
+      sidebar_active_view_id: "all",
+      sidebar_draft: {
+        base_view_id: "all",
+        filters: [],
+        sort: { key: "updatedAt", direction: "desc" },
+        group: "workflow",
+      },
+    });
+  });
+
+  it("includes active view and draft state when syncing saved view mutations", () => {
+    const draft: SidebarViewDraft = {
+      baseViewId: "all",
+      filters: [],
+      sort: { key: "updatedAt", direction: "desc" },
+      group: "state",
+    };
+    const store = makeStore();
+    store.setState((state) => ({
+      ...state,
+      sidebarViews: {
+        ...state.sidebarViews,
+        views: [makeSidebarView("all", "All"), makeSidebarView("two", "Two")],
+        activeViewId: "all",
+        draft,
+      },
+    }));
+
+    store.getState().reorderSidebarViews("two", "all");
+
+    expect(updateUserSettings).toHaveBeenCalledWith({
+      sidebar_views: [
+        expect.objectContaining({ id: "two" }),
+        expect.objectContaining({ id: "all" }),
+      ],
+      sidebar_active_view_id: "all",
+      sidebar_draft: {
+        base_view_id: "all",
+        filters: [],
+        sort: { key: "updatedAt", direction: "desc" },
+        group: "state",
+      },
+    });
   });
 });

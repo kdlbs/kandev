@@ -7,6 +7,7 @@ import {
   type JiraStoredPreset,
   type JiraTaskPreset,
 } from "./presets";
+import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
 
 const STORAGE_KEY = "kandev:jira:task-presets:v1";
 
@@ -51,6 +52,16 @@ function writeStorage(presets: JiraStoredPreset[] | null): void {
   }
 }
 
+function readServerPresets(value: unknown): JiraStoredPreset[] | null | undefined {
+  if (value === null) return null;
+  if (!Array.isArray(value)) return undefined;
+  return value.filter(isStoredPreset);
+}
+
+function syncServer(presets: JiraStoredPreset[] | null): void {
+  updateUserSettings({ jira_task_presets: presets }).catch(() => {});
+}
+
 export function useJiraTaskPresets() {
   const [stored, setStored] = useState<JiraStoredPreset[] | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -63,6 +74,12 @@ export function useJiraTaskPresets() {
         setStored(value);
         setLoaded(true);
       }
+      const response = await fetchUserSettings({ cache: "no-store" }).catch(() => null);
+      const serverValue = readServerPresets(response?.settings.jira_task_presets);
+      if (!cancelled && serverValue !== undefined) {
+        writeStorage(serverValue);
+        setStored(serverValue);
+      }
     }
     void init();
     return () => {
@@ -72,11 +89,13 @@ export function useJiraTaskPresets() {
 
   const save = useCallback((next: JiraStoredPreset[]) => {
     writeStorage(next);
+    syncServer(next);
     setStored(next);
   }, []);
 
   const reset = useCallback(() => {
     writeStorage(null);
+    syncServer(null);
     setStored(null);
   }, []);
 

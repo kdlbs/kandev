@@ -5,6 +5,16 @@ import type { Repository } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dialog-types";
 import { setLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
+import { updateUserSettings } from "@/lib/api/domains/settings-api";
+
+function syncTaskCreateLastUsed(patch: {
+  repository_id?: string;
+  branch?: string;
+  agent_profile_id?: string;
+  executor_profile_id?: string;
+}) {
+  updateUserSettings({ task_create_last_used: patch }).catch(() => {});
+}
 
 /**
  * Centralizes form-field change handlers for the task-create dialog.
@@ -42,7 +52,10 @@ function useRepositoryHandlers(fs: DialogFormState, repositories: Repository[]) 
         ? { repositoryId: value, localPath: undefined, branch: "" }
         : { repositoryId: undefined, localPath: value, branch: "" };
       fs.updateRepository(key, patch);
-      if (isWorkspaceRepo) setLocalStorage(STORAGE_KEYS.LAST_REPOSITORY_ID, value);
+      if (isWorkspaceRepo) {
+        setLocalStorage(STORAGE_KEYS.LAST_REPOSITORY_ID, value);
+        syncTaskCreateLastUsed({ repository_id: value });
+      }
       // Switching the repo invalidates whatever local-status the fresh-branch
       // panel had cached.
       clearFreshBranch(fs);
@@ -54,6 +67,7 @@ function useRepositoryHandlers(fs: DialogFormState, repositories: Repository[]) 
     (key: string, value: string) => {
       fs.updateRepository(key, { branch: value });
       setLocalStorage(STORAGE_KEYS.LAST_BRANCH, value);
+      syncTaskCreateLastUsed({ branch: value });
     },
     [fs],
   );
@@ -66,6 +80,7 @@ function useProfileAndNameHandlers(fs: DialogFormState) {
     (value: string) => {
       fs.setAgentProfileId(value);
       setLocalStorage(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, value);
+      syncTaskCreateLastUsed({ agent_profile_id: value });
     },
     [fs],
   );
@@ -73,6 +88,7 @@ function useProfileAndNameHandlers(fs: DialogFormState) {
     (value: string) => {
       fs.setExecutorProfileId(value);
       setLocalStorage(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, value);
+      syncTaskCreateLastUsed({ executor_profile_id: value });
     },
     [fs],
   );

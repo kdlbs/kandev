@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -51,6 +52,15 @@ type UpdateUserSettingsRequest struct {
 	LspServerConfigs            *map[string]map[string]interface{}
 	SavedLayouts                *[]models.SavedLayout
 	SidebarViews                *[]models.SidebarView
+	SidebarActiveViewID         *string
+	SidebarDraft                **models.SidebarViewDraft
+	SidebarTaskPrefs            *models.SidebarTaskPrefs
+	TaskCreateLastUsed          *models.TaskCreateLastUsed
+	JiraSavedViews              *json.RawMessage
+	JiraTaskPresets             *json.RawMessage
+	GitHubSavedPresets          *json.RawMessage
+	GitHubDefaultQueryPresets   *json.RawMessage
+	GitLabSavedPresets          *json.RawMessage
 	DefaultUtilityAgentID       *string
 	DefaultUtilityModel         *string
 	KeyboardShortcuts           *map[string]interface{}
@@ -124,6 +134,10 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 	if err := applySidebarViews(settings, req); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
+	if err := applySidebarViewState(settings, req); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+	}
+	applyUserPreferenceBlobs(settings, req)
 	if err := applyVoiceMode(settings, req.VoiceMode); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
@@ -370,6 +384,59 @@ func applySidebarViews(settings *models.UserSettings, req *UpdateUserSettingsReq
 	return nil
 }
 
+func applySidebarViewState(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if req.SidebarActiveViewID != nil {
+		activeViewID := strings.TrimSpace(*req.SidebarActiveViewID)
+		if activeViewID == "" {
+			return errors.New("sidebar_active_view_id must not be empty")
+		}
+		settings.SidebarActiveViewID = activeViewID
+	}
+	if req.SidebarDraft != nil {
+		settings.SidebarDraft = *req.SidebarDraft
+	}
+	return nil
+}
+
+func applyUserPreferenceBlobs(settings *models.UserSettings, req *UpdateUserSettingsRequest) {
+	if req.SidebarTaskPrefs != nil {
+		settings.SidebarTaskPrefs = *req.SidebarTaskPrefs
+	}
+	if req.TaskCreateLastUsed != nil {
+		mergeTaskCreateLastUsed(&settings.TaskCreateLastUsed, *req.TaskCreateLastUsed)
+	}
+	if req.JiraSavedViews != nil {
+		settings.JiraSavedViews = *req.JiraSavedViews
+	}
+	if req.JiraTaskPresets != nil {
+		settings.JiraTaskPresets = *req.JiraTaskPresets
+	}
+	if req.GitHubSavedPresets != nil {
+		settings.GitHubSavedPresets = *req.GitHubSavedPresets
+	}
+	if req.GitHubDefaultQueryPresets != nil {
+		settings.GitHubDefaultQueryPresets = *req.GitHubDefaultQueryPresets
+	}
+	if req.GitLabSavedPresets != nil {
+		settings.GitLabSavedPresets = *req.GitLabSavedPresets
+	}
+}
+
+func mergeTaskCreateLastUsed(current *models.TaskCreateLastUsed, patch models.TaskCreateLastUsed) {
+	if patch.RepositoryID != "" {
+		current.RepositoryID = patch.RepositoryID
+	}
+	if patch.Branch != "" {
+		current.Branch = patch.Branch
+	}
+	if patch.AgentProfileID != "" {
+		current.AgentProfileID = patch.AgentProfileID
+	}
+	if patch.ExecutorProfileID != "" {
+		current.ExecutorProfileID = patch.ExecutorProfileID
+	}
+}
+
 func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models.UserSettings) {
 	if s.eventBus == nil || settings == nil {
 		return
@@ -393,6 +460,15 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"lsp_server_configs":              settings.LspServerConfigs,
 		"saved_layouts":                   settings.SavedLayouts,
 		"sidebar_views":                   settings.SidebarViews,
+		"sidebar_active_view_id":          settings.SidebarActiveViewID,
+		"sidebar_draft":                   settings.SidebarDraft,
+		"sidebar_task_prefs":              settings.SidebarTaskPrefs,
+		"task_create_last_used":           settings.TaskCreateLastUsed,
+		"jira_saved_views":                settings.JiraSavedViews,
+		"jira_task_presets":               settings.JiraTaskPresets,
+		"github_saved_presets":            settings.GitHubSavedPresets,
+		"github_default_query_presets":    settings.GitHubDefaultQueryPresets,
+		"gitlab_saved_presets":            settings.GitLabSavedPresets,
 		"default_utility_agent_id":        settings.DefaultUtilityAgentID,
 		"default_utility_model":           settings.DefaultUtilityModel,
 		"keyboard_shortcuts":              settings.KeyboardShortcuts,

@@ -5,11 +5,12 @@ import {
   parseChangesPanelLayout,
   parseVoiceMode,
 } from "./user-settings";
+import { workspaceId as toWorkspaceId } from "@/lib/types/ids";
 
 describe("buildCoreFields", () => {
   it("maps terminal_font_family to terminalFontFamily", () => {
     const settings = {
-      workspace_id: "",
+      workspace_id: toWorkspaceId(""),
       workflow_filter_id: "",
       kanban_view_mode: "",
       repository_ids: [],
@@ -35,7 +36,7 @@ describe("buildCoreFields", () => {
 
   it("returns null when terminal_font_family is empty", () => {
     const settings = {
-      workspace_id: "",
+      workspace_id: toWorkspaceId(""),
       workflow_filter_id: "",
       kanban_view_mode: "",
       repository_ids: [],
@@ -93,6 +94,42 @@ describe("mapUserSettingsResponse", () => {
   it("defaults changesPanelLayout to tree when response is null", () => {
     const result = mapUserSettingsResponse(null);
     expect(result.changesPanelLayout).toBe("tree");
+  });
+
+  it("maps sidebar active view and draft state", () => {
+    const result = mapUserSettingsResponse({
+      settings: {
+        user_id: "default-user",
+        workspace_id: toWorkspaceId(""),
+        repository_ids: [],
+        sidebar_views: [
+          {
+            id: "all",
+            name: "All",
+            filters: [],
+            sort: { key: "state", direction: "asc" },
+            group: "none",
+            collapsed_groups: [],
+          },
+        ],
+        sidebar_active_view_id: "all",
+        sidebar_draft: {
+          base_view_id: "all",
+          filters: [],
+          sort: { key: "updatedAt", direction: "desc" },
+          group: "workflow",
+        },
+        updated_at: "2026-01-01T00:00:00Z",
+      },
+    });
+
+    expect(result.sidebarActiveViewId).toBe("all");
+    expect(result.sidebarDraft).toEqual({
+      baseViewId: "all",
+      filters: [],
+      sort: { key: "updatedAt", direction: "desc" },
+      group: "workflow",
+    });
   });
 });
 

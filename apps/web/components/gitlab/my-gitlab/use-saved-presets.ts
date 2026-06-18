@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
 
 const STORAGE_KEY = "kandev:gitlab-presets:v1";
 
@@ -20,17 +21,7 @@ export function readStorage(): SavedPreset[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (p): p is SavedPreset =>
-        typeof p === "object" &&
-        p !== null &&
-        typeof (p as SavedPreset).id === "string" &&
-        ((p as SavedPreset).kind === "mr" || (p as SavedPreset).kind === "issue") &&
-        typeof (p as SavedPreset).label === "string" &&
-        typeof (p as SavedPreset).customQuery === "string" &&
-        typeof (p as SavedPreset).projectFilter === "string" &&
-        typeof (p as SavedPreset).createdAt === "string",
-    );
+    return parsed.filter(isSavedPreset);
   } catch {
     return [];
   }
@@ -71,6 +62,28 @@ function publish(next: SavedPreset[]) {
   for (const l of listeners) l();
 }
 
+function isSavedPreset(p: unknown): p is SavedPreset {
+  return (
+    typeof p === "object" &&
+    p !== null &&
+    typeof (p as SavedPreset).id === "string" &&
+    ((p as SavedPreset).kind === "mr" || (p as SavedPreset).kind === "issue") &&
+    typeof (p as SavedPreset).label === "string" &&
+    typeof (p as SavedPreset).customQuery === "string" &&
+    typeof (p as SavedPreset).projectFilter === "string" &&
+    typeof (p as SavedPreset).createdAt === "string"
+  );
+}
+
+function readServerPresets(value: unknown): SavedPreset[] | null {
+  if (!Array.isArray(value)) return null;
+  return value.filter(isSavedPreset);
+}
+
+function syncServer(next: SavedPreset[]) {
+  updateUserSettings({ gitlab_saved_presets: next }).catch(() => {});
+}
+
 // Test-only: drop the module-level snapshot so the next read goes through
 // readStorage again. Used by the hook tests so each `it` starts from a known
 // empty state independent of test execution order.
@@ -82,6 +95,19 @@ export function __resetSnapshotForTests() {
 export function useSavedPresets() {
   const presets = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetchUserSettings({ cache: "no-store" })
+      .then((response) => {
+        const serverPresets = readServerPresets(response.settings.gitlab_saved_presets);
+        if (!cancelled && serverPresets) publish(serverPresets);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Always merge against the latest localStorage read instead of the in-memory
   // snapshot. With two tabs open, snapshot in tab A is stale the moment tab B
   // writes — appending to it would silently drop B's preset. readStorage is
@@ -92,12 +118,16 @@ export function useSavedPresets() {
       id: `g_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
       createdAt: new Date().toISOString(),
     };
-    publish([...readStorage(), preset]);
+    const next = [...readStorage(), preset];
+    publish(next);
+    syncServer(next);
     return preset;
   }, []);
 
   const remove = useCallback((id: string) => {
-    publish(readStorage().filter((p) => p.id !== id));
+    const next = readStorage().filter((p) => p.id !== id);
+    publish(next);
+    syncServer(next);
   }, []);
 
   return { presets, save, remove };

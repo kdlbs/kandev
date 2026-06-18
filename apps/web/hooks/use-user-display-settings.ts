@@ -57,7 +57,6 @@ function carryForwardCoreSettings(current: DisplaySettings) {
     showReleaseNotification: current.showReleaseNotification ?? true,
     releaseNotesLastSeenVersion: current.releaseNotesLastSeenVersion ?? null,
     savedLayouts: current.savedLayouts ?? [],
-    sidebarViews: current.sidebarViews ?? [],
     defaultUtilityAgentId: current.defaultUtilityAgentId ?? null,
     keyboardShortcuts: current.keyboardShortcuts ?? {},
     changesPanelLayout: current.changesPanelLayout ?? "tree",
@@ -66,9 +65,40 @@ function carryForwardCoreSettings(current: DisplaySettings) {
   };
 }
 
+function carryForwardSidebarSettings(current: DisplaySettings) {
+  return {
+    sidebarViews: current.sidebarViews ?? [],
+    sidebarActiveViewId: current.sidebarActiveViewId ?? null,
+    sidebarDraft: current.sidebarDraft ?? null,
+    sidebarTaskPrefs: current.sidebarTaskPrefs ?? {
+      pinnedTaskIds: [],
+      orderedTaskIds: [],
+      subtaskOrderByParentId: {},
+    },
+  };
+}
+
+function carryForwardSyncedLocalSettings(current: DisplaySettings) {
+  return {
+    taskCreateLastUsed: current.taskCreateLastUsed ?? {
+      repositoryId: null,
+      branch: null,
+      agentProfileId: null,
+      executorProfileId: null,
+    },
+    jiraSavedViews: current.jiraSavedViews,
+    jiraTaskPresets: current.jiraTaskPresets,
+    githubSavedPresets: current.githubSavedPresets,
+    githubDefaultQueryPresets: current.githubDefaultQueryPresets,
+    gitlabSavedPresets: current.gitlabSavedPresets,
+  };
+}
+
 function carryForwardSettings(current: DisplaySettings) {
   return {
     ...carryForwardCoreSettings(current),
+    ...carryForwardSidebarSettings(current),
+    ...carryForwardSyncedLocalSettings(current),
     ...carryForwardLspSettings(current),
     ...carryForwardTerminalSettings(current),
   };
