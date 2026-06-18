@@ -9,6 +9,7 @@ import {
 import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
 
 const STORAGE_KEY = "kandev:github-default-queries:v1";
+const MIGRATED_KEY = "kandev:github-default-queries:migrated-to-backend:v1";
 
 export type StoredQueryPreset = {
   value: string;
@@ -88,6 +89,20 @@ function snapshotKey(value: StoredDefaults | null): string {
   return JSON.stringify(value);
 }
 
+function hasMigratedToBackend(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(MIGRATED_KEY) === "1";
+}
+
+function markMigratedToBackend(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(MIGRATED_KEY, "1");
+  } catch {
+    /* ignore storage failures */
+  }
+}
+
 function subscribe(cb: () => void) {
   listeners.add(cb);
   return () => {
@@ -116,8 +131,13 @@ export function useDefaultQueryPresets() {
         if (cancelled || serverDefaults === undefined) return;
         const local = getSnapshot();
         if (snapshotKey(local) !== initialKey) return;
-        if (serverDefaults === null && local !== null) return;
+        if (serverDefaults === null && local !== null && !hasMigratedToBackend()) {
+          syncServer(local);
+          markMigratedToBackend();
+          return;
+        }
         publish(serverDefaults);
+        markMigratedToBackend();
       })
       .catch(() => {});
     return () => {
@@ -131,11 +151,13 @@ export function useDefaultQueryPresets() {
   const save = useCallback((defaults: StoredDefaults) => {
     publish(defaults);
     syncServer(defaults);
+    markMigratedToBackend();
   }, []);
 
   const reset = useCallback(() => {
     publish(null);
     syncServer(null);
+    markMigratedToBackend();
   }, []);
 
   const isCustomized = stored !== null;

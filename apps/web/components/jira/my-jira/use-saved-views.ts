@@ -16,6 +16,7 @@ export type SavedView = {
 };
 
 const STORAGE_KEY = "kandev:jira:saved-views:v1";
+const MIGRATED_KEY = "kandev:jira:saved-views:migrated-to-backend:v1";
 
 const BUILTIN_VIEWS: SavedView[] = [
   {
@@ -95,6 +96,25 @@ function snapshotKey(views: SavedView[]): string {
   return JSON.stringify(views);
 }
 
+function hasMigratedToBackend(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(MIGRATED_KEY) === "1";
+}
+
+function markMigratedToBackend(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(MIGRATED_KEY, "1");
+  } catch {
+    // Ignore write failures.
+  }
+}
+
+function latestSavedViews(fallback: SavedView[]): SavedView[] {
+  const stored = readStorage();
+  return stored.length > 0 ? stored : fallback;
+}
+
 export function useSavedViews() {
   const [custom, setCustom] = useState<SavedView[]>([]);
 
@@ -109,9 +129,14 @@ export function useSavedViews() {
       if (!cancelled && serverViews) {
         const local = readStorage();
         if (snapshotKey(local) !== initialKey) return;
-        if (serverViews.length === 0 && local.length > 0) return;
+        if (serverViews.length === 0 && local.length > 0 && !hasMigratedToBackend()) {
+          syncServer(local);
+          markMigratedToBackend();
+          return;
+        }
         writeStorage(serverViews);
         setCustom(serverViews);
+        markMigratedToBackend();
       }
     }
     void init();
@@ -128,20 +153,26 @@ export function useSavedViews() {
         filters,
         customJql,
       };
-      const next = [...readStorage(), view];
-      writeStorage(next);
-      syncServer(next);
-      setCustom(next);
+      setCustom((prev) => {
+        const next = [...latestSavedViews(prev), view];
+        writeStorage(next);
+        syncServer(next);
+        markMigratedToBackend();
+        return next;
+      });
       return view;
     },
     [],
   );
 
   const remove = useCallback((id: string) => {
-    const next = readStorage().filter((v) => v.id !== id);
-    writeStorage(next);
-    syncServer(next);
-    setCustom(next);
+    setCustom((prev) => {
+      const next = latestSavedViews(prev).filter((v) => v.id !== id);
+      writeStorage(next);
+      syncServer(next);
+      markMigratedToBackend();
+      return next;
+    });
   }, []);
 
   return {

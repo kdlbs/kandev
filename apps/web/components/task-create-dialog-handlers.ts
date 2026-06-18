@@ -24,7 +24,11 @@ function syncTaskCreateLastUsed(patch: TaskCreateLastUsedPatch) {
     .catch(() => undefined)
     .then(() =>
       updateUserSettings({ task_create_last_used: payload })
-        .then(() => undefined)
+        .then(() => {
+          if (JSON.stringify(pendingLastUsed) === JSON.stringify(payload)) {
+            pendingLastUsed = {};
+          }
+        })
         .catch(() => undefined),
     );
 }

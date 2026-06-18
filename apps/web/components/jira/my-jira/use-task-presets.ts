@@ -10,6 +10,7 @@ import {
 import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
 
 const STORAGE_KEY = "kandev:jira:task-presets:v1";
+const MIGRATED_KEY = "kandev:jira:task-presets:migrated-to-backend:v1";
 
 function isStoredPreset(v: unknown): v is JiraStoredPreset {
   if (!v || typeof v !== "object") return false;
@@ -66,6 +67,20 @@ function snapshotKey(presets: JiraStoredPreset[] | null): string {
   return JSON.stringify(presets);
 }
 
+function hasMigratedToBackend(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(MIGRATED_KEY) === "1";
+}
+
+function markMigratedToBackend(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(MIGRATED_KEY, "1");
+  } catch {
+    // Ignore write failures.
+  }
+}
+
 export function useJiraTaskPresets() {
   const [stored, setStored] = useState<JiraStoredPreset[] | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -84,9 +99,14 @@ export function useJiraTaskPresets() {
       if (!cancelled && serverValue !== undefined) {
         const local = readStorage();
         if (snapshotKey(local) !== initialKey) return;
-        if (serverValue === null && local !== null) return;
+        if (serverValue === null && local !== null && !hasMigratedToBackend()) {
+          syncServer(local);
+          markMigratedToBackend();
+          return;
+        }
         writeStorage(serverValue);
         setStored(serverValue);
+        markMigratedToBackend();
       }
     }
     void init();
@@ -98,12 +118,14 @@ export function useJiraTaskPresets() {
   const save = useCallback((next: JiraStoredPreset[]) => {
     writeStorage(next);
     syncServer(next);
+    markMigratedToBackend();
     setStored(next);
   }, []);
 
   const reset = useCallback(() => {
     writeStorage(null);
     syncServer(null);
+    markMigratedToBackend();
     setStored(null);
   }, []);
 

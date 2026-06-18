@@ -4,6 +4,7 @@ import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
 
 const STORAGE_KEY = "kandev:gitlab-presets:v1";
+const MIGRATED_KEY = "kandev:gitlab-presets:migrated-to-backend:v1";
 
 export type SavedPreset = {
   id: string;
@@ -88,6 +89,20 @@ function snapshotKey(value: SavedPreset[]): string {
   return JSON.stringify(value);
 }
 
+function hasMigratedToBackend(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(MIGRATED_KEY) === "1";
+}
+
+function markMigratedToBackend(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(MIGRATED_KEY, "1");
+  } catch {
+    /* ignore storage failures */
+  }
+}
+
 // Test-only: drop the module-level snapshot so the next read goes through
 // readStorage again. Used by the hook tests so each `it` starts from a known
 // empty state independent of test execution order.
@@ -108,8 +123,13 @@ export function useSavedPresets() {
         if (cancelled || !serverPresets) return;
         const local = readStorage();
         if (snapshotKey(local) !== initialKey) return;
-        if (serverPresets.length === 0 && local.length > 0) return;
+        if (serverPresets.length === 0 && local.length > 0 && !hasMigratedToBackend()) {
+          syncServer(local);
+          markMigratedToBackend();
+          return;
+        }
         publish(serverPresets);
+        markMigratedToBackend();
       })
       .catch(() => {});
     return () => {
@@ -130,6 +150,7 @@ export function useSavedPresets() {
     const next = [...readStorage(), preset];
     publish(next);
     syncServer(next);
+    markMigratedToBackend();
     return preset;
   }, []);
 
@@ -137,6 +158,7 @@ export function useSavedPresets() {
     const next = readStorage().filter((p) => p.id !== id);
     publish(next);
     syncServer(next);
+    markMigratedToBackend();
   }, []);
 
   return { presets, save, remove };
