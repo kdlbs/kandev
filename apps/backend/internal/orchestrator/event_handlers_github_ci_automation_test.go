@@ -1,10 +1,12 @@
 package orchestrator
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func TestCIAutomationShouldAutoFix(t *testing.T) {
@@ -129,5 +131,64 @@ func TestCIAutomationFeedbackDeltaIncludesEditedComments(t *testing.T) {
 	delta := ciAutomationBuildDelta(feedback, previous)
 	if len(delta.Comments) != 1 || delta.Comments[0].Body != "new body" {
 		t.Fatalf("expected edited comment in delta, got %+v", delta.Comments)
+	}
+}
+
+func TestHandleTaskPRCIAutomationQueuesFixDedupesAndMerges(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	pr := &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		Owner:        "acme",
+		Repo:         "widget",
+		PRNumber:     42,
+		State:        "open",
+		ChecksState:  "failure",
+	}
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			EffectiveAutoFixPrompt: "Fix the PR",
+		},
+		prFeedback: &github.PRFeedback{
+			Checks: []github.CheckRun{{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit"}},
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle auto-fix: %v", err)
+	}
+	status := svc.messageQueue.GetStatus(ctx, "session-1")
+	if status.Count != 1 || !strings.Contains(status.Entries[0].Content, "acme/widget#42") || !strings.Contains(status.Entries[0].Content, "unit") {
+		t.Fatalf("expected queued CI fix prompt, got %+v", status)
+	}
+	if len(ghSvc.fixAttempts) != 1 {
+		t.Fatalf("expected one fix attempt, got %d", len(ghSvc.fixAttempts))
+	}
+
+	_, signature := encodeCIAutomationCheckpoint(ciAutomationCurrentCheckpoint(ghSvc.prFeedback))
+	ghSvc.ciPRState = &github.TaskCIPRAutomationState{LastFixSignature: signature, LastFixCheckpointJSON: ghSvc.fixAttempts[0].CheckpointJSON}
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle dedupe: %v", err)
+	}
+	if got := svc.messageQueue.GetStatus(ctx, "session-1").Count; got != 1 {
+		t.Fatalf("expected dedupe to avoid second queued prompt, got %d", got)
+	}
+
+	pr.ChecksState = "success"
+	pr.ReviewState = "approved"
+	pr.MergeableState = "clean"
+	ghSvc.ciOptionsResp.AutoFixEnabled = false
+	ghSvc.ciOptionsResp.AutoMergeEnabled = true
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle auto-merge: %v", err)
+	}
+	if ghSvc.mergeCalls != 1 || len(ghSvc.mergeAttempts) != 1 {
+		t.Fatalf("expected one merge call and attempt, got calls=%d attempts=%d", ghSvc.mergeCalls, len(ghSvc.mergeAttempts))
 	}
 }
