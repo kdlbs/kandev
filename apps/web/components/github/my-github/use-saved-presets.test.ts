@@ -104,6 +104,15 @@ describe("readStorage", () => {
     set(JSON.stringify([issue]));
     expect(readStorage()).toEqual([issue]);
   });
+});
+
+describe("useSavedPresets", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+    __resetSnapshotForTests();
+    vi.mocked(fetchUserSettings).mockReset();
+    vi.mocked(updateUserSettings).mockReset();
+  });
 
   it("retries local presets after a failed backend sync and clears the marker", async () => {
     set(JSON.stringify([valid]));
