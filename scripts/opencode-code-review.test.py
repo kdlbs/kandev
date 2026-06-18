@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -189,8 +190,32 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
         self.assertTrue(any("<!-- opencode-review:fallback-findings -->" in body for body in bodies))
         self.assertTrue(any("src/app.ts:1" in body for body in bodies))
         self.assertTrue(any("src/app.ts:30" in body for body in bodies))
-        self.assertIn("Fallback findings posted: `30`", self.summary_path.read_text())
-        self.assertIn("Findings beyond inline limit: `10`", self.summary_path.read_text())
+        self.assertTrue(any("## GitHub rejected inline placement" in body for body in bodies))
+        self.assertTrue(any("## Additional findings beyond inline comment limit" in body for body in bodies))
+        summary = self.summary_path.read_text()
+        self.assertIn("Inline comments rejected: `20`", summary)
+        self.assertIn("Findings beyond inline limit: `10`", summary)
+        self.assertIn("Fallback findings included in comment: `30`", summary)
+        self.assertIn("Fallback findings omitted from comment: `0`", summary)
+
+    def test_fallback_comment_reports_findings_omitted_by_body_limit(self) -> None:
+        findings = [
+            {"path": "src/app.ts", "line": index + 1, "title": f"Finding {index + 1}", "body": "x" * 4000}
+            for index in range(30)
+        ]
+
+        result = self.run_script(
+            output=f"<opencode_findings>{json.dumps(findings)}</opencode_findings>\n",
+            inline_fail=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        bodies = self.bodies()
+        self.assertTrue(any("Additional fallback findings omitted" in body for body in bodies))
+        summary = self.summary_path.read_text()
+        self.assertRegex(summary, r"Fallback findings included in comment: `1[0-9]`")
+        omitted_match = re.search(r"Fallback findings omitted from comment: `([1-9][0-9]*)`", summary)
+        self.assertIsNotNone(omitted_match, summary)
 
     def test_fallback_comment_failure_fails_the_step(self) -> None:
         result = self.run_script(

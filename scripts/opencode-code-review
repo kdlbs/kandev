@@ -10,6 +10,7 @@ from typing import Any
 
 
 MAX_INLINE_FINDINGS = 20
+MAX_COMMENT_BODY = 60000
 NO_FINDINGS_MARKER = "<!-- opencode-review:no-findings -->"
 DIAGNOSTIC_MARKER = "<!-- opencode-review:diagnostic -->"
 FALLBACK_MARKER = "<!-- opencode-review:fallback-findings -->"
@@ -144,28 +145,56 @@ def no_findings_body() -> str:
     )
 
 
-def fallback_body(rejected: list[dict[str, Any]]) -> str:
+def fallback_body(rejected: list[dict[str, Any]], overflow: list[dict[str, Any]]) -> tuple[str, int, int]:
     model = required_env("OPENCODE_MODEL")
     short_sha = required_env("HEAD_SHA")[:12]
-    sections = [
-        FALLBACK_MARKER,
-        "**OpenCode findings that could not be posted inline**",
-        "",
-        f"OpenCode model: `{model}`",
-        f"Commit: `{short_sha}`",
-        "",
-        "GitHub rejected inline placement for these findings, so they are preserved here.",
-    ]
-    for finding in rejected:
-        sections.extend(
-            [
-                "",
-                f"### {finding['path']}:{finding['line']} - {finding['title']}",
-                "",
-                str(finding["body"]).strip(),
-            ]
-        )
-    return "\n".join(sections)[:60000]
+    body = "\n".join(
+        [
+            FALLBACK_MARKER,
+            "**OpenCode findings that could not be posted inline**",
+            "",
+            f"OpenCode model: `{model}`",
+            f"Commit: `{short_sha}`",
+            "",
+            "Some findings could not be posted inline, so they are preserved here.",
+        ]
+    )
+    included = 0
+    omitted = 0
+
+    def append_section(title: str, findings: list[dict[str, Any]]) -> None:
+        nonlocal body, included, omitted
+        if not findings:
+            return
+        heading = f"\n\n## {title}"
+        if len(body) + len(heading) > MAX_COMMENT_BODY:
+            omitted += len(findings)
+            return
+        body += heading
+
+        for finding in findings:
+            section = "\n\n".join(
+                [
+                    "",
+                    f"### {finding['path']}:{finding['line']} - {finding['title']}",
+                    str(finding["body"]).strip(),
+                ]
+            )
+            if len(body) + len(section) > MAX_COMMENT_BODY:
+                omitted += 1
+                continue
+            body += section
+            included += 1
+
+    append_section("GitHub rejected inline placement", rejected)
+    append_section("Additional findings beyond inline comment limit", overflow)
+
+    if omitted:
+        notice = f"\n\n_Additional fallback findings omitted from this comment due to GitHub body size limits: {omitted}._"
+        if len(body) + len(notice) <= MAX_COMMENT_BODY:
+            body += notice
+
+    return body, included, omitted
 
 
 def normalize_finding(value: Any, changed_paths: set[str]) -> dict[str, Any] | None:
@@ -286,11 +315,13 @@ def post_findings(args: argparse.Namespace) -> int:
 
     if overflow_findings:
         print(f"Preserving {len(overflow_findings)} OpenCode findings beyond inline limit in fallback comment.")
-        rejected.extend(overflow_findings)
 
     posted_fallback = True
-    if rejected:
-        posted_fallback = upsert_issue_comment(FALLBACK_MARKER, fallback_body(rejected))
+    fallback_included = 0
+    fallback_omitted = 0
+    if rejected or overflow_findings:
+        fallback_comment, fallback_included, fallback_omitted = fallback_body(rejected, overflow_findings)
+        posted_fallback = upsert_issue_comment(FALLBACK_MARKER, fallback_comment)
 
     append_summary(
         args.summary,
@@ -298,14 +329,16 @@ def post_findings(args: argparse.Namespace) -> int:
         [
             f"Parsed findings: `{len(findings)}`",
             f"Inline comments posted: `{posted}`",
+            f"Inline comments rejected: `{len(rejected)}`",
             f"Findings beyond inline limit: `{len(overflow_findings)}`",
-            f"Fallback findings posted: `{len(rejected)}`",
+            f"Fallback findings included in comment: `{fallback_included}`",
+            f"Fallback findings omitted from comment: `{fallback_omitted}`",
             "",
             *snippet("OpenCode stdout", stdout),
             *snippet("OpenCode stderr", stderr),
         ],
     )
-    print(f"Posted {posted} OpenCode inline comments; preserved {len(rejected)} fallback findings.")
+    print(f"Posted {posted} OpenCode inline comments; preserved {fallback_included} fallback findings.")
     return 0 if posted_fallback else 1
 
 
