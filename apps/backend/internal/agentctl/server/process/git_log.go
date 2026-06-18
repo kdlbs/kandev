@@ -55,11 +55,17 @@ type CumulativeDiffResult struct {
 	HeadCommit   string                 `json:"head_commit"`
 	TotalCommits int                    `json:"total_commits"`
 	Files        map[string]interface{} `json:"files"`
-	// TruncatedFilesCount is how many files were dropped from Files because the
-	// cumulative range exceeded maxCumulativeDiffFiles. Zero (omitted) when the
-	// full file set fit. The frontend surfaces this as a "N more files hidden"
-	// banner — a mid-rebase cumulative diff can otherwise enumerate tens of
-	// thousands of files, one rendered row each.
+	// TruncatedFilesCount is how many files were dropped from Files entirely
+	// because the cumulative range exceeded maxCumulativeDiffFiles. Zero
+	// (omitted) when the full file set fit. The frontend surfaces this as a
+	// "N more files hidden" banner — a mid-rebase cumulative diff can otherwise
+	// enumerate tens of thousands of files, one rendered row each.
+	//
+	// This counts only fully-dropped files. Files kept in the map but whose
+	// diff was emptied by the byte budget (diff_skip_reason "budget_exceeded")
+	// are NOT counted here — they remain listed and carry their own per-file
+	// skip reason that the diff viewer renders, so they are visible-but-capped
+	// rather than hidden.
 	TruncatedFilesCount int    `json:"truncated_files_count,omitempty"`
 	Error               string `json:"error,omitempty"`
 }
