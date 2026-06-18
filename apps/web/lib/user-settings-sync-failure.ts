@@ -1,6 +1,10 @@
 export function hasUserSettingsSyncFailure(storageKey: string): boolean {
   if (typeof window === "undefined") return false;
-  return window.localStorage.getItem(storageKey) === "1";
+  try {
+    return window.localStorage.getItem(storageKey) === "1";
+  } catch {
+    return false;
+  }
 }
 
 export function setUserSettingsSyncFailure(storageKey: string, failed: boolean): void {

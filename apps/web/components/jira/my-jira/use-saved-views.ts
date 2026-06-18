@@ -2,11 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { DEFAULT_FILTERS, type FilterState } from "./filter-model";
-import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
-import {
-  hasUserSettingsSyncFailure,
-  setUserSettingsSyncFailure,
-} from "@/lib/user-settings-sync-failure";
+import { fetchUserSettings } from "@/lib/api/domains/settings-api";
+import { createQueuedUserSettingsSync } from "@/lib/user-settings-sync";
+import { hasUserSettingsSyncFailure } from "@/lib/user-settings-sync-failure";
 
 export type SavedView = {
   id: string;
@@ -93,15 +91,9 @@ function readServerViews(value: unknown): SavedView[] | null {
   return value.filter(isSavedView);
 }
 
-function syncServer(views: SavedView[]): Promise<void> {
-  return updateUserSettings({ jira_saved_views: views })
-    .then(() => {
-      setUserSettingsSyncFailure(SYNC_FAILED_KEY, false);
-    })
-    .catch(() => {
-      setUserSettingsSyncFailure(SYNC_FAILED_KEY, true);
-    });
-}
+const syncServer = createQueuedUserSettingsSync<SavedView[]>(SYNC_FAILED_KEY, (views) => ({
+  jira_saved_views: views,
+}));
 
 function snapshotKey(views: SavedView[]): string {
   return JSON.stringify(views);
@@ -122,8 +114,16 @@ function markMigratedToBackend(): void {
 }
 
 function latestSavedViews(fallback: SavedView[]): SavedView[] {
-  const stored = readStorage();
-  return stored.length > 0 ? stored : fallback;
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (raw === null) return fallback;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return fallback;
+    return parsed.filter(isSavedView);
+  } catch {
+    return fallback;
+  }
 }
 
 export function useSavedViews() {
@@ -140,7 +140,7 @@ export function useSavedViews() {
       if (!cancelled && serverViews) {
         const local = readStorage();
         if (snapshotKey(local) !== initialKey) return;
-        if (hasUserSettingsSyncFailure(SYNC_FAILED_KEY) && local.length > 0) {
+        if (hasUserSettingsSyncFailure(SYNC_FAILED_KEY)) {
           void syncServer(local);
           return;
         }

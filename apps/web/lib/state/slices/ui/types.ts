@@ -115,6 +115,7 @@ export type SidebarTaskPrefsState = {
    */
   subtaskOrderByParentId: Record<string, string[]>;
   syncError?: string | null;
+  syncPending?: boolean;
 };
 
 /** Unified AppSidebar collapse + per-section expand state (localStorage). */
@@ -151,7 +152,7 @@ export type UISliceState = {
   collapsedSubtaskParents: string[];
   /** Task ID currently shown in the kanban preview side-panel, or null if closed. */
   kanbanPreviewedTaskId: string | null;
-  /** Sidebar pin + manual-order. Per-browser, persisted to localStorage. */
+  /** Sidebar pin + manual-order. Synced to backend, with localStorage fallback. */
   sidebarTaskPrefs: SidebarTaskPrefsState;
   /** Unified AppSidebar collapse + section expand state (localStorage). */
   appSidebar: AppSidebarState;

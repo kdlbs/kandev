@@ -3,7 +3,7 @@
 import { useCallback } from "react";
 import type { Repository } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dialog-types";
-import { setLocalStorage } from "@/lib/local-storage";
+import { removeLocalStorage, setLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 
@@ -16,14 +16,41 @@ type TaskCreateLastUsedPatch = {
 
 let pendingLastUsed: TaskCreateLastUsedPatch = {};
 let lastUsedSync = Promise.resolve();
+const PENDING_LAST_USED_SYNC_KEY = "kandev.taskCreateLastUsed.pendingSync";
 
 export function resetTaskCreateLastUsedSync() {
   pendingLastUsed = {};
 }
 
-function syncTaskCreateLastUsed(patch: TaskCreateLastUsedPatch) {
-  pendingLastUsed = { ...pendingLastUsed, ...patch };
+function readPendingLastUsedSync(): TaskCreateLastUsedPatch {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(PENDING_LAST_USED_SYNC_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return {};
+    const record = parsed as Record<string, unknown>;
+    return {
+      repository_id: typeof record.repository_id === "string" ? record.repository_id : undefined,
+      branch: typeof record.branch === "string" ? record.branch : undefined,
+      agent_profile_id:
+        typeof record.agent_profile_id === "string" ? record.agent_profile_id : undefined,
+      executor_profile_id:
+        typeof record.executor_profile_id === "string" ? record.executor_profile_id : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+function persistPendingLastUsedSync(patch: TaskCreateLastUsedPatch) {
+  setLocalStorage(PENDING_LAST_USED_SYNC_KEY, patch as Record<string, string>);
+}
+
+export function syncTaskCreateLastUsed(patch: TaskCreateLastUsedPatch) {
+  pendingLastUsed = { ...readPendingLastUsedSync(), ...pendingLastUsed, ...patch };
   const payload = { ...pendingLastUsed };
+  persistPendingLastUsedSync(payload);
   lastUsedSync = lastUsedSync
     .catch(() => undefined)
     .then(() =>
@@ -31,6 +58,7 @@ function syncTaskCreateLastUsed(patch: TaskCreateLastUsedPatch) {
         .then(() => {
           if (JSON.stringify(pendingLastUsed) === JSON.stringify(payload)) {
             pendingLastUsed = {};
+            removeLocalStorage(PENDING_LAST_USED_SYNC_KEY);
           }
         })
         .catch(() => undefined),

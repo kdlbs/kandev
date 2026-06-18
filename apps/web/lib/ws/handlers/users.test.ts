@@ -90,3 +90,75 @@ describe("user settings websocket handler", () => {
     expect(store.getState().sidebarViews.draft).toBeNull();
   });
 });
+
+describe("user settings websocket sidebar settings", () => {
+  it("preserves userSettings sidebar fields when payload omits them", () => {
+    const store = makeStore();
+    const sidebarView = {
+      id: "all",
+      name: "All",
+      filters: [],
+      sort: { key: "state" as const, direction: "asc" as const },
+      group: "state" as const,
+      collapsedGroups: [],
+    };
+    store.setState((state) => ({
+      ...state,
+      userSettings: {
+        ...state.userSettings,
+        sidebarViews: [sidebarView],
+        sidebarActiveViewId: "all",
+        sidebarDraft: {
+          baseViewId: "all",
+          filters: [],
+          sort: { key: "state", direction: "asc" },
+          group: "state",
+        },
+        sidebarTaskPrefs: {
+          pinnedTaskIds: ["task-1"],
+          orderedTaskIds: ["task-2"],
+          subtaskOrderByParentId: { parent: ["child"] },
+        },
+      },
+    }));
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
+
+    expect(store.getState().userSettings.sidebarActiveViewId).toBe("all");
+    expect(store.getState().userSettings.sidebarDraft).toMatchObject({ baseViewId: "all" });
+    expect(store.getState().userSettings.sidebarTaskPrefs).toEqual({
+      pinnedTaskIds: ["task-1"],
+      orderedTaskIds: ["task-2"],
+      subtaskOrderByParentId: { parent: ["child"] },
+    });
+  });
+
+  it("preserves pending local sidebar task prefs when server broadcasts stale prefs", () => {
+    const store = makeStore();
+    store.setState((state) => ({
+      ...state,
+      sidebarTaskPrefs: {
+        pinnedTaskIds: ["local"],
+        orderedTaskIds: ["local"],
+        subtaskOrderByParentId: {},
+        syncPending: true,
+      },
+    }));
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        sidebar_task_prefs: {
+          pinned_task_ids: ["server"],
+          ordered_task_ids: ["server"],
+          subtask_order_by_parent_id: {},
+        },
+      }),
+    );
+
+    expect(store.getState().sidebarTaskPrefs).toMatchObject({
+      pinnedTaskIds: ["local"],
+      orderedTaskIds: ["local"],
+      syncPending: true,
+    });
+  });
+});

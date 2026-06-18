@@ -62,4 +62,19 @@ describe("useSavedViews", () => {
       expect(localStorageMock.getItem(SYNC_FAILED_KEY)).toBeNull();
     });
   });
+
+  it("retries empty local views after a failed backend sync", async () => {
+    localStorageMock.setItem(STORAGE_KEY, JSON.stringify([]));
+    localStorageMock.setItem(SYNC_FAILED_KEY, "1");
+    vi.mocked(fetchUserSettings).mockResolvedValue({
+      settings: { jira_saved_views: [view] },
+    } as Awaited<ReturnType<typeof fetchUserSettings>>);
+
+    renderHook(() => useSavedViews());
+
+    await waitFor(() => {
+      expect(updateUserSettings).toHaveBeenCalledWith({ jira_saved_views: [] });
+      expect(localStorageMock.getItem(SYNC_FAILED_KEY)).toBeNull();
+    });
+  });
 });

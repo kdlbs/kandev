@@ -27,7 +27,7 @@ function buildUserSettingsState(state: AppState, payload: UserSettingsUpdatedPay
   return {
     ...state.userSettings,
     ...buildBehaviorSettings(payload),
-    ...buildSidebarSettings(payload),
+    ...buildSidebarSettings(state, payload),
     ...buildLspSettings(payload),
     ...buildSyncedLocalSettings(payload),
     defaultUtilityAgentId: payload.default_utility_agent_id || null,
@@ -79,31 +79,43 @@ function buildBehaviorSettings(payload: UserSettingsUpdatedPayload) {
   };
 }
 
-function buildSidebarSettings(payload: UserSettingsUpdatedPayload) {
-  const sidebarViews = (payload.sidebar_views ?? []).map(fromApiSidebarView).map(migrateView);
+function buildSidebarSettings(state: AppState, payload: UserSettingsUpdatedPayload) {
+  const sidebarViews =
+    payload.sidebar_views === undefined
+      ? state.userSettings.sidebarViews
+      : (payload.sidebar_views ?? []).map(fromApiSidebarView).map(migrateView);
   return {
     sidebarViews,
-    sidebarActiveViewId: payload.sidebar_active_view_id || null,
-    sidebarDraft: parseSidebarDraftForSettings(payload),
-    sidebarTaskPrefs: {
-      pinnedTaskIds: payload.sidebar_task_prefs?.pinned_task_ids ?? [],
-      orderedTaskIds: payload.sidebar_task_prefs?.ordered_task_ids ?? [],
-      subtaskOrderByParentId: payload.sidebar_task_prefs?.subtask_order_by_parent_id ?? {},
-    },
+    sidebarActiveViewId:
+      payload.sidebar_active_view_id === undefined
+        ? state.userSettings.sidebarActiveViewId
+        : payload.sidebar_active_view_id || null,
+    sidebarDraft: parseSidebarDraftForSettings(state, payload),
+    sidebarTaskPrefs:
+      payload.sidebar_task_prefs === undefined
+        ? state.userSettings.sidebarTaskPrefs
+        : {
+            pinnedTaskIds: payload.sidebar_task_prefs.pinned_task_ids ?? [],
+            orderedTaskIds: payload.sidebar_task_prefs.ordered_task_ids ?? [],
+            subtaskOrderByParentId: payload.sidebar_task_prefs.subtask_order_by_parent_id ?? {},
+          },
   };
 }
 
-function parseSidebarDraftForSettings(payload: UserSettingsUpdatedPayload) {
-  if (payload.sidebar_draft === undefined || payload.sidebar_draft === null) return null;
+function parseSidebarDraftForSettings(state: AppState, payload: UserSettingsUpdatedPayload) {
+  if (payload.sidebar_draft === undefined) return state.userSettings.sidebarDraft;
+  if (payload.sidebar_draft === null) return null;
   return fromApiSidebarDraft(payload.sidebar_draft);
 }
 
 function buildSidebarTaskPrefsState(state: AppState, payload: UserSettingsUpdatedPayload) {
   if (!payload.sidebar_task_prefs) return state.sidebarTaskPrefs;
+  if (state.sidebarTaskPrefs.syncPending) return state.sidebarTaskPrefs;
   return {
     pinnedTaskIds: payload.sidebar_task_prefs.pinned_task_ids ?? [],
     orderedTaskIds: payload.sidebar_task_prefs.ordered_task_ids ?? [],
     subtaskOrderByParentId: payload.sidebar_task_prefs.subtask_order_by_parent_id ?? {},
+    syncError: state.sidebarTaskPrefs.syncError,
   };
 }
 

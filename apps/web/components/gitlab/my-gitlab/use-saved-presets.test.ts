@@ -194,4 +194,19 @@ describe("useSavedPresets (gitlab)", () => {
       expect(localStorageMock.getItem(SYNC_FAILED_KEY)).toBeNull();
     });
   });
+
+  it("retries empty local presets after a failed backend sync", async () => {
+    set(JSON.stringify([]));
+    localStorageMock.setItem(SYNC_FAILED_KEY, "1");
+    vi.mocked(fetchUserSettings).mockResolvedValue({
+      settings: { gitlab_saved_presets: [valid] },
+    } as Awaited<ReturnType<typeof fetchUserSettings>>);
+
+    renderHook(() => useSavedPresets());
+
+    await waitFor(() => {
+      expect(updateUserSettings).toHaveBeenCalledWith({ gitlab_saved_presets: [] });
+      expect(localStorageMock.getItem(SYNC_FAILED_KEY)).toBeNull();
+    });
+  });
 });

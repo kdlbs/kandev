@@ -91,11 +91,11 @@ type UpdateUserSettingsRequest struct {
 	SidebarDraft                NullableSidebarDraft                 `json:"sidebar_draft,omitempty"`
 	SidebarTaskPrefs            *models.SidebarTaskPrefs             `json:"sidebar_task_prefs,omitempty"`
 	TaskCreateLastUsed          *models.TaskCreateLastUsed           `json:"task_create_last_used,omitempty"`
-	JiraSavedViews              *json.RawMessage                     `json:"jira_saved_views,omitempty"`
-	JiraTaskPresets             *json.RawMessage                     `json:"jira_task_presets,omitempty"`
-	GitHubSavedPresets          *json.RawMessage                     `json:"github_saved_presets,omitempty"`
-	GitHubDefaultQueryPresets   *json.RawMessage                     `json:"github_default_query_presets,omitempty"`
-	GitLabSavedPresets          *json.RawMessage                     `json:"gitlab_saved_presets,omitempty"`
+	JiraSavedViews              NullableRawMessage                   `json:"jira_saved_views,omitempty"`
+	JiraTaskPresets             NullableRawMessage                   `json:"jira_task_presets,omitempty"`
+	GitHubSavedPresets          NullableRawMessage                   `json:"github_saved_presets,omitempty"`
+	GitHubDefaultQueryPresets   NullableRawMessage                   `json:"github_default_query_presets,omitempty"`
+	GitLabSavedPresets          NullableRawMessage                   `json:"gitlab_saved_presets,omitempty"`
 	DefaultUtilityAgentID       *string                              `json:"default_utility_agent_id,omitempty"`
 	DefaultUtilityModel         *string                              `json:"default_utility_model,omitempty"`
 	KeyboardShortcuts           *map[string]interface{}              `json:"keyboard_shortcuts,omitempty"`
@@ -134,6 +134,34 @@ func (n *NullableSidebarDraft) UnmarshalJSON(data []byte) error {
 }
 
 func (n NullableSidebarDraft) ServiceValue() **models.SidebarViewDraft {
+	if !n.Set {
+		return nil
+	}
+	return &n.Value
+}
+
+// NullableRawMessage preserves PATCH semantics for raw JSON preference blobs:
+// omitted means "leave unchanged"; explicit null means "clear".
+type NullableRawMessage struct {
+	Set   bool
+	Value *json.RawMessage
+}
+
+func (n *NullableRawMessage) UnmarshalJSON(data []byte) error {
+	n.Set = true
+	if string(data) == "null" {
+		n.Value = nil
+		return nil
+	}
+	var value json.RawMessage
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	n.Value = &value
+	return nil
+}
+
+func (n NullableRawMessage) ServiceValue() **json.RawMessage {
 	if !n.Set {
 		return nil
 	}

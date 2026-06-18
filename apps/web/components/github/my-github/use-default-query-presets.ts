@@ -6,11 +6,9 @@ import {
   ISSUE_PRESETS as BUILTIN_ISSUE_PRESETS,
   type PresetOption,
 } from "./search-bar";
-import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
-import {
-  hasUserSettingsSyncFailure,
-  setUserSettingsSyncFailure,
-} from "@/lib/user-settings-sync-failure";
+import { fetchUserSettings } from "@/lib/api/domains/settings-api";
+import { createQueuedUserSettingsSync } from "@/lib/user-settings-sync";
+import { hasUserSettingsSyncFailure } from "@/lib/user-settings-sync-failure";
 
 const STORAGE_KEY = "kandev:github-default-queries:v1";
 const MIGRATED_KEY = "kandev:github-default-queries:migrated-to-backend:v1";
@@ -86,15 +84,12 @@ function readServerDefaults(value: unknown): StoredDefaults | null | undefined {
   return value as StoredDefaults;
 }
 
-function syncServer(defaults: StoredDefaults | null): Promise<void> {
-  return updateUserSettings({ github_default_query_presets: defaults })
-    .then(() => {
-      setUserSettingsSyncFailure(SYNC_FAILED_KEY, false);
-    })
-    .catch(() => {
-      setUserSettingsSyncFailure(SYNC_FAILED_KEY, true);
-    });
-}
+const syncServer = createQueuedUserSettingsSync<StoredDefaults | null>(
+  SYNC_FAILED_KEY,
+  (defaults) => ({
+    github_default_query_presets: defaults,
+  }),
+);
 
 function snapshotKey(value: StoredDefaults | null): string {
   return JSON.stringify(value);
@@ -147,7 +142,7 @@ export function useDefaultQueryPresets() {
         if (cancelled || serverDefaults === undefined) return;
         const local = getSnapshot();
         if (snapshotKey(local) !== initialKey) return;
-        if (hasUserSettingsSyncFailure(SYNC_FAILED_KEY) && local !== null) {
+        if (hasUserSettingsSyncFailure(SYNC_FAILED_KEY)) {
           void syncServer(local);
           return;
         }

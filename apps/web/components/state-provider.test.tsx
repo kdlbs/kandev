@@ -1,6 +1,7 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultSettingsState } from "@/lib/state/slices/settings/settings-slice";
+import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { StateProvider, useAppStore } from "./state-provider";
 
 function ShowMetricsPreference({ label }: { label: string }) {
@@ -32,6 +33,11 @@ function EnableMetricsFromNestedProvider() {
 }
 
 describe("StateProvider", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.restoreAllMocks();
+  });
+
   it("reuses the parent store for nested route providers", async () => {
     render(
       <StateProvider>
@@ -53,5 +59,59 @@ describe("StateProvider", () => {
     expect(screen.getByText("root:off")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Enable metrics" }));
     expect(await screen.findByText("root:on")).toBeTruthy();
+  });
+
+  it("syncs task-create last-used settings to localStorage without redundant writes", async () => {
+    function UpdateUnrelatedSetting() {
+      const setUserSettings = useAppStore((state) => state.setUserSettings);
+      const userSettings = useAppStore((state) => state.userSettings);
+      return (
+        <button
+          type="button"
+          onClick={() =>
+            setUserSettings({
+              ...userSettings,
+              showReleaseNotification: !userSettings.showReleaseNotification,
+            })
+          }
+        >
+          Toggle unrelated
+        </button>
+      );
+    }
+
+    const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
+    render(
+      <StateProvider
+        initialState={{
+          userSettings: {
+            ...defaultSettingsState.userSettings,
+            loaded: true,
+            taskCreateLastUsed: {
+              repositoryId: "repo-1",
+              branch: "main",
+              agentProfileId: "agent-1",
+              executorProfileId: "exec-1",
+            },
+          },
+        }}
+      >
+        <UpdateUnrelatedSetting />
+      </StateProvider>,
+    );
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem(STORAGE_KEYS.LAST_REPOSITORY_ID)).toBe(
+        JSON.stringify("repo-1"),
+      );
+    });
+    const writesAfterInitialSync = setItemSpy.mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle unrelated" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Toggle unrelated" })).toBeTruthy();
+    });
+    expect(setItemSpy).toHaveBeenCalledTimes(writesAfterInitialSync);
   });
 });

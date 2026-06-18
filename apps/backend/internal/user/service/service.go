@@ -56,11 +56,11 @@ type UpdateUserSettingsRequest struct {
 	SidebarDraft                **models.SidebarViewDraft
 	SidebarTaskPrefs            *models.SidebarTaskPrefs
 	TaskCreateLastUsed          *models.TaskCreateLastUsed
-	JiraSavedViews              *json.RawMessage
-	JiraTaskPresets             *json.RawMessage
-	GitHubSavedPresets          *json.RawMessage
-	GitHubDefaultQueryPresets   *json.RawMessage
-	GitLabSavedPresets          *json.RawMessage
+	JiraSavedViews              **json.RawMessage
+	JiraTaskPresets             **json.RawMessage
+	GitHubSavedPresets          **json.RawMessage
+	GitHubDefaultQueryPresets   **json.RawMessage
+	GitLabSavedPresets          **json.RawMessage
 	DefaultUtilityAgentID       *string
 	DefaultUtilityModel         *string
 	KeyboardShortcuts           *map[string]interface{}
@@ -409,36 +409,36 @@ func applyUserPreferenceBlobs(settings *models.UserSettings, req *UpdateUserSett
 	if req.TaskCreateLastUsed != nil {
 		mergeTaskCreateLastUsed(&settings.TaskCreateLastUsed, *req.TaskCreateLastUsed)
 	}
-	if req.JiraSavedViews != nil {
-		if err := validateUserPreferenceBlob("jira_saved_views", *req.JiraSavedViews); err != nil {
-			return err
-		}
-		settings.JiraSavedViews = *req.JiraSavedViews
+	if err := applyUserPreferenceBlob("jira_saved_views", req.JiraSavedViews, &settings.JiraSavedViews); err != nil {
+		return err
 	}
-	if req.JiraTaskPresets != nil {
-		if err := validateUserPreferenceBlob("jira_task_presets", *req.JiraTaskPresets); err != nil {
-			return err
-		}
-		settings.JiraTaskPresets = *req.JiraTaskPresets
+	if err := applyUserPreferenceBlob("jira_task_presets", req.JiraTaskPresets, &settings.JiraTaskPresets); err != nil {
+		return err
 	}
-	if req.GitHubSavedPresets != nil {
-		if err := validateUserPreferenceBlob("github_saved_presets", *req.GitHubSavedPresets); err != nil {
-			return err
-		}
-		settings.GitHubSavedPresets = *req.GitHubSavedPresets
+	if err := applyUserPreferenceBlob("github_saved_presets", req.GitHubSavedPresets, &settings.GitHubSavedPresets); err != nil {
+		return err
 	}
-	if req.GitHubDefaultQueryPresets != nil {
-		if err := validateUserPreferenceBlob("github_default_query_presets", *req.GitHubDefaultQueryPresets); err != nil {
-			return err
-		}
-		settings.GitHubDefaultQueryPresets = *req.GitHubDefaultQueryPresets
+	if err := applyUserPreferenceBlob("github_default_query_presets", req.GitHubDefaultQueryPresets, &settings.GitHubDefaultQueryPresets); err != nil {
+		return err
 	}
-	if req.GitLabSavedPresets != nil {
-		if err := validateUserPreferenceBlob("gitlab_saved_presets", *req.GitLabSavedPresets); err != nil {
-			return err
-		}
-		settings.GitLabSavedPresets = *req.GitLabSavedPresets
+	if err := applyUserPreferenceBlob("gitlab_saved_presets", req.GitLabSavedPresets, &settings.GitLabSavedPresets); err != nil {
+		return err
 	}
+	return nil
+}
+
+func applyUserPreferenceBlob(field string, value **json.RawMessage, target *json.RawMessage) error {
+	if value == nil {
+		return nil
+	}
+	if *value == nil {
+		*target = nil
+		return nil
+	}
+	if err := validateUserPreferenceBlob(field, **value); err != nil {
+		return err
+	}
+	*target = **value
 	return nil
 }
 

@@ -107,6 +107,7 @@ function bridgeSidebarViewsFromUserSettings(
     draft.sidebarViews.draft = userSettings.sidebarDraft;
   }
   if (userSettings.sidebarTaskPrefs) {
+    if (draft.sidebarTaskPrefs.syncPending) return;
     const nextPrefs = { ...userSettings.sidebarTaskPrefs };
     if (draft.sidebarTaskPrefs.syncError) nextPrefs.syncError = draft.sidebarTaskPrefs.syncError;
     draft.sidebarTaskPrefs = nextPrefs;

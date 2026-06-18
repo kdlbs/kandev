@@ -7,11 +7,9 @@ import {
   type JiraStoredPreset,
   type JiraTaskPreset,
 } from "./presets";
-import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
-import {
-  hasUserSettingsSyncFailure,
-  setUserSettingsSyncFailure,
-} from "@/lib/user-settings-sync-failure";
+import { fetchUserSettings } from "@/lib/api/domains/settings-api";
+import { createQueuedUserSettingsSync } from "@/lib/user-settings-sync";
+import { hasUserSettingsSyncFailure } from "@/lib/user-settings-sync-failure";
 
 const STORAGE_KEY = "kandev:jira:task-presets:v1";
 const MIGRATED_KEY = "kandev:jira:task-presets:migrated-to-backend:v1";
@@ -64,15 +62,10 @@ function readServerPresets(value: unknown): JiraStoredPreset[] | null | undefine
   return value.filter(isStoredPreset);
 }
 
-function syncServer(presets: JiraStoredPreset[] | null): Promise<void> {
-  return updateUserSettings({ jira_task_presets: presets })
-    .then(() => {
-      setUserSettingsSyncFailure(SYNC_FAILED_KEY, false);
-    })
-    .catch(() => {
-      setUserSettingsSyncFailure(SYNC_FAILED_KEY, true);
-    });
-}
+const syncServer = createQueuedUserSettingsSync<JiraStoredPreset[] | null>(
+  SYNC_FAILED_KEY,
+  (presets) => ({ jira_task_presets: presets }),
+);
 
 function snapshotKey(presets: JiraStoredPreset[] | null): string {
   return JSON.stringify(presets);
@@ -110,7 +103,7 @@ export function useJiraTaskPresets() {
       if (!cancelled && serverValue !== undefined) {
         const local = readStorage();
         if (snapshotKey(local) !== initialKey) return;
-        if (hasUserSettingsSyncFailure(SYNC_FAILED_KEY) && local !== null) {
+        if (hasUserSettingsSyncFailure(SYNC_FAILED_KEY)) {
           void syncServer(local);
           return;
         }

@@ -11,6 +11,14 @@ import (
 
 func ptr[T any](v T) *T { return &v }
 
+func rawPatch(v json.RawMessage) **json.RawMessage {
+	return ptr(ptr(v))
+}
+
+func rawClear() **json.RawMessage {
+	return ptr((*json.RawMessage)(nil))
+}
+
 func makeLayouts(n int) []models.SavedLayout {
 	layouts := make([]models.SavedLayout, n)
 	for i := range layouts {
@@ -526,7 +534,7 @@ func TestApplyUserPreferenceBlobs(t *testing.T) {
 
 	if err := applyUserPreferenceBlobs(settings, &UpdateUserSettingsRequest{
 		TaskCreateLastUsed: &patch,
-		GitHubSavedPresets: ptr(json.RawMessage(`[{"id":"p1"}]`)),
+		GitHubSavedPresets: rawPatch(json.RawMessage(`[{"id":"p1"}]`)),
 	}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -546,9 +554,9 @@ func TestApplyUserPreferenceBlobsValidation(t *testing.T) {
 	t.Run("accepts arrays objects and null", func(t *testing.T) {
 		settings := &models.UserSettings{}
 		req := &UpdateUserSettingsRequest{
-			JiraSavedViews:            ptr(json.RawMessage(`[]`)),
-			GitHubDefaultQueryPresets: ptr(json.RawMessage(`{"pr":[],"issue":[]}`)),
-			GitLabSavedPresets:        ptr(json.RawMessage(`null`)),
+			JiraSavedViews:            rawPatch(json.RawMessage(`[]`)),
+			GitHubDefaultQueryPresets: rawPatch(json.RawMessage(`{"pr":[],"issue":[]}`)),
+			GitLabSavedPresets:        rawClear(),
 		}
 		if err := applyUserPreferenceBlobs(settings, req); err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -557,7 +565,7 @@ func TestApplyUserPreferenceBlobsValidation(t *testing.T) {
 
 	t.Run("rejects scalar blobs", func(t *testing.T) {
 		settings := &models.UserSettings{}
-		req := &UpdateUserSettingsRequest{GitHubSavedPresets: ptr(json.RawMessage(`"bad"`))}
+		req := &UpdateUserSettingsRequest{GitHubSavedPresets: rawPatch(json.RawMessage(`"bad"`))}
 		err := applyUserPreferenceBlobs(settings, req)
 		if err == nil || !strings.Contains(err.Error(), "github_saved_presets") {
 			t.Fatalf("expected github_saved_presets validation error, got %v", err)
@@ -567,10 +575,21 @@ func TestApplyUserPreferenceBlobsValidation(t *testing.T) {
 	t.Run("rejects oversized blobs", func(t *testing.T) {
 		settings := &models.UserSettings{}
 		raw := json.RawMessage(`["` + strings.Repeat("x", maxUserPreferenceBlobBytes) + `"]`)
-		req := &UpdateUserSettingsRequest{JiraSavedViews: &raw}
+		req := &UpdateUserSettingsRequest{JiraSavedViews: rawPatch(raw)}
 		err := applyUserPreferenceBlobs(settings, req)
 		if err == nil || !strings.Contains(err.Error(), "max") {
 			t.Fatalf("expected size validation error, got %v", err)
+		}
+	})
+
+	t.Run("explicit null clears blob", func(t *testing.T) {
+		settings := &models.UserSettings{JiraSavedViews: json.RawMessage(`[{"id":"view"}]`)}
+		req := &UpdateUserSettingsRequest{JiraSavedViews: rawClear()}
+		if err := applyUserPreferenceBlobs(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.JiraSavedViews != nil {
+			t.Fatalf("expected explicit null to clear blob, got %s", string(settings.JiraSavedViews))
 		}
 	})
 }

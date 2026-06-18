@@ -65,4 +65,20 @@ describe("useDefaultQueryPresets", () => {
       expect(localStorageMock.getItem(SYNC_FAILED_KEY)).toBeNull();
     });
   });
+
+  it("retries null local defaults after a failed reset sync", async () => {
+    localStorageMock.setItem(SYNC_FAILED_KEY, "1");
+    vi.mocked(fetchUserSettings).mockResolvedValue({
+      settings: { github_default_query_presets: { pr: [preset], issue: [] } },
+    } as Awaited<ReturnType<typeof fetchUserSettings>>);
+
+    renderHook(() => useDefaultQueryPresets());
+
+    await waitFor(() => {
+      expect(updateUserSettings).toHaveBeenCalledWith({
+        github_default_query_presets: null,
+      });
+      expect(localStorageMock.getItem(SYNC_FAILED_KEY)).toBeNull();
+    });
+  });
 });

@@ -28,12 +28,14 @@ function syncSidebarTaskPrefs(prefs: UISlice["sidebarTaskPrefs"], set: ImmerSet)
         .then(() => {
           set((draft) => {
             draft.sidebarTaskPrefs.syncError = null;
+            draft.sidebarTaskPrefs.syncPending = false;
           });
         })
         .catch((err) => {
           const message = err instanceof Error ? err.message : "Failed to sync sidebar task prefs";
           set((draft) => {
             draft.sidebarTaskPrefs.syncError = message;
+            draft.sidebarTaskPrefs.syncPending = true;
           });
         })
         .then(() => undefined),
@@ -49,6 +51,7 @@ export function buildSidebarTaskPrefsActions(set: ImmerSet, get: () => UISlice) 
     togglePinnedTask: (taskId: string) => {
       set((draft) => {
         const list = draft.sidebarTaskPrefs.pinnedTaskIds;
+        draft.sidebarTaskPrefs.syncPending = true;
         const idx = list.indexOf(taskId);
         if (idx === -1) list.push(taskId);
         else list.splice(idx, 1);
@@ -58,6 +61,7 @@ export function buildSidebarTaskPrefsActions(set: ImmerSet, get: () => UISlice) 
     },
     setSidebarTaskOrder: (orderedTaskIds: string[]) => {
       set((draft) => {
+        draft.sidebarTaskPrefs.syncPending = true;
         draft.sidebarTaskPrefs.orderedTaskIds = orderedTaskIds;
         setStoredOrderedTaskIds(orderedTaskIds);
       });
@@ -65,6 +69,7 @@ export function buildSidebarTaskPrefsActions(set: ImmerSet, get: () => UISlice) 
     },
     setSubtaskOrder: (parentTaskId: string, orderedSubtaskIds: string[]) => {
       set((draft) => {
+        draft.sidebarTaskPrefs.syncPending = true;
         const map = draft.sidebarTaskPrefs.subtaskOrderByParentId;
         if (orderedSubtaskIds.length === 0) delete map[parentTaskId];
         else map[parentTaskId] = orderedSubtaskIds;
@@ -79,17 +84,20 @@ export function buildSidebarTaskPrefsActions(set: ImmerSet, get: () => UISlice) 
         const pinIdx = prefs.pinnedTaskIds.indexOf(taskId);
         if (pinIdx !== -1) {
           changed = true;
+          prefs.syncPending = true;
           prefs.pinnedTaskIds.splice(pinIdx, 1);
           setStoredPinnedTaskIds(prefs.pinnedTaskIds);
         }
         const orderIdx = prefs.orderedTaskIds.indexOf(taskId);
         if (orderIdx !== -1) {
           changed = true;
+          prefs.syncPending = true;
           prefs.orderedTaskIds.splice(orderIdx, 1);
           setStoredOrderedTaskIds(prefs.orderedTaskIds);
         }
         if (pruneSubtaskOrder(prefs.subtaskOrderByParentId, taskId)) {
           changed = true;
+          prefs.syncPending = true;
           setStoredSubtaskOrderByParentId(prefs.subtaskOrderByParentId);
         }
       });

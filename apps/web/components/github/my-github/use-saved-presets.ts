@@ -1,11 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useSyncExternalStore } from "react";
-import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
-import {
-  hasUserSettingsSyncFailure,
-  setUserSettingsSyncFailure,
-} from "@/lib/user-settings-sync-failure";
+import { fetchUserSettings } from "@/lib/api/domains/settings-api";
+import { createQueuedUserSettingsSync } from "@/lib/user-settings-sync";
+import { hasUserSettingsSyncFailure } from "@/lib/user-settings-sync-failure";
 
 const STORAGE_KEY = "kandev:github-presets:v1";
 const MIGRATED_KEY = "kandev:github-presets:migrated-to-backend:v1";
@@ -88,15 +86,9 @@ function readServerPresets(value: unknown): SavedPreset[] | null {
   );
 }
 
-function syncServer(next: SavedPreset[]): Promise<void> {
-  return updateUserSettings({ github_saved_presets: next })
-    .then(() => {
-      setUserSettingsSyncFailure(SYNC_FAILED_KEY, false);
-    })
-    .catch(() => {
-      setUserSettingsSyncFailure(SYNC_FAILED_KEY, true);
-    });
-}
+const syncServer = createQueuedUserSettingsSync<SavedPreset[]>(SYNC_FAILED_KEY, (next) => ({
+  github_saved_presets: next,
+}));
 
 function snapshotKey(value: SavedPreset[]): string {
   return JSON.stringify(value);
@@ -133,7 +125,7 @@ export function useSavedPresets() {
         if (cancelled || !serverPresets) return;
         const local = readStorage();
         if (snapshotKey(local) !== initialKey) return;
-        if (hasUserSettingsSyncFailure(SYNC_FAILED_KEY) && local.length > 0) {
+        if (hasUserSettingsSyncFailure(SYNC_FAILED_KEY)) {
           void syncServer(local);
           return;
         }

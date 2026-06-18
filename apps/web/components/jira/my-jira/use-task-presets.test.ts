@@ -59,4 +59,18 @@ describe("useJiraTaskPresets", () => {
       expect(localStorageMock.getItem(SYNC_FAILED_KEY)).toBeNull();
     });
   });
+
+  it("retries null local presets after a failed reset sync", async () => {
+    localStorageMock.setItem(SYNC_FAILED_KEY, "1");
+    vi.mocked(fetchUserSettings).mockResolvedValue({
+      settings: { jira_task_presets: [preset] },
+    } as Awaited<ReturnType<typeof fetchUserSettings>>);
+
+    renderHook(() => useJiraTaskPresets());
+
+    await waitFor(() => {
+      expect(updateUserSettings).toHaveBeenCalledWith({ jira_task_presets: null });
+      expect(localStorageMock.getItem(SYNC_FAILED_KEY)).toBeNull();
+    });
+  });
 });

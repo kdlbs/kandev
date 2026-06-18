@@ -35,7 +35,18 @@ export function StateProvider({ children, initialState }: StoreProviderProps) {
 
   useEffect(() => {
     syncTaskCreateLastUsedCache(store.getState());
-    return store.subscribe(syncTaskCreateLastUsedCache);
+    return store.subscribe((state, prevState) => {
+      if (
+        state.userSettings.loaded === prevState.userSettings.loaded &&
+        taskCreateLastUsedEqual(
+          state.userSettings.taskCreateLastUsed,
+          prevState.userSettings.taskCreateLastUsed,
+        )
+      ) {
+        return;
+      }
+      syncTaskCreateLastUsedCache(state);
+    });
   }, [store]);
 
   // In debug builds, let the namespaced debug logger annotate every line that
@@ -75,6 +86,18 @@ function syncTaskCreateLastUsedCache(state: AppState) {
   } else {
     removeLocalStorage(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID);
   }
+}
+
+function taskCreateLastUsedEqual(
+  a: AppState["userSettings"]["taskCreateLastUsed"],
+  b: AppState["userSettings"]["taskCreateLastUsed"],
+) {
+  return (
+    a?.repositoryId === b?.repositoryId &&
+    a?.branch === b?.branch &&
+    a?.agentProfileId === b?.agentProfileId &&
+    a?.executorProfileId === b?.executorProfileId
+  );
 }
 
 export function useAppStore<T>(selector: (state: AppState) => T) {
