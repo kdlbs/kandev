@@ -49,6 +49,16 @@ export const ReviewDiffList = memo(function ReviewDiffList({
   fileRefs,
 }: ReviewDiffListProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  // Resolve base branches once per list (not per row) — the value is identical
+  // for every file. Only a single-repo task has an unambiguous fallback; with
+  // multiple repos a committed file lacking `repository_name` must NOT borrow
+  // an arbitrary repo's base branch, so the fallback stays undefined there.
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const baseBranchByRepo = useBaseBranchByRepo(activeTaskId);
+  const fallbackBaseBranch = useMemo(() => {
+    const branches = Object.values(baseBranchByRepo);
+    return branches.length === 1 ? branches[0] : undefined;
+  }, [baseBranchByRepo]);
   // All in-memory state (selectedFile, reviewedFiles, staleFiles, fileRefs)
   // is keyed by `reviewFileKey(file)` so two files at the same path in
   // different repos (e.g. `kandev/README.md` + `lvc/README.md`) get
@@ -93,6 +103,8 @@ export const ReviewDiffList = memo(function ReviewDiffList({
                 onPreviewMarkdown={onPreviewMarkdown}
                 sectionRef={fileRefs.get(key)}
                 scrollContainer={scrollContainerRef}
+                baseBranchByRepo={baseBranchByRepo}
+                fallbackBaseBranch={fallbackBaseBranch}
               />
             );
           })}
@@ -124,6 +136,10 @@ type FileDiffSectionProps = {
   onPreviewMarkdown?: (filePath: string) => void;
   sectionRef?: React.RefObject<HTMLDivElement | null>;
   scrollContainer: React.RefObject<HTMLDivElement | null>;
+  /** Per-repo base branches + single-repo fallback, resolved once by the list
+   *  and shared across rows so diff expansion can fetch the correct old side. */
+  baseBranchByRepo: Record<string, string>;
+  fallbackBaseBranch?: string;
 };
 
 function useLazyVisible(scrollContainer: React.RefObject<HTMLDivElement | null>) {
@@ -474,6 +490,8 @@ function FileDiffSection({
   onPreviewMarkdown,
   sectionRef,
   scrollContainer,
+  baseBranchByRepo,
+  fallbackBaseBranch,
 }: FileDiffSectionProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [expandUnchanged, setExpandUnchanged] = useState(false);
@@ -518,12 +536,6 @@ function FileDiffSection({
 
   const handleCommentRun = useCommentRunHandler(sessionId);
 
-  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const baseBranchByRepo = useBaseBranchByRepo(activeTaskId);
-  // Single-repo tasks key the base branch under the real repo name while a
-  // review file carries an empty `repository_name`; fall back to the task's
-  // sole base branch so committed-row expansion still resolves a ref.
-  const fallbackBaseBranch = useMemo(() => Object.values(baseBranchByRepo)[0], [baseBranchByRepo]);
   const { enableExpansion, baseRef } = resolveDiffExpansion(
     file,
     baseBranchByRepo,

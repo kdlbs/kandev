@@ -56,6 +56,17 @@ describe("resolveDiffExpansion", () => {
     });
   });
 
+  // Multi-repo guard, unnamed-file case: ReviewDiffList passes an undefined
+  // fallback when the task has multiple repos, so a committed file with no
+  // repository_name disables expansion rather than borrowing an arbitrary base.
+  it("disables expansion for an unnamed committed file when the fallback is undefined", () => {
+    const f = file({ source: "committed", repository_name: undefined });
+    expect(resolveDiffExpansion(f, MULTI_REPO_BASES, undefined)).toEqual({
+      enableExpansion: false,
+      baseRef: "HEAD",
+    });
+  });
+
   // Single-repo files carry no repository_name; the map is keyed by the real
   // repo name, so the lookup misses and the sole-base fallback applies.
   it("uses the fallback base branch for a single-repo committed file", () => {
