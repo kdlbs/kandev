@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { routeMainWebSocketWithPromptDrop } from "../../helpers/ws-drop";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
@@ -108,6 +109,86 @@ test.describe("Manual proceed to next workflow step", () => {
 
     // Session returns to idle in default (non-plan) mode
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
+  });
+
+  test("shows next step auto-start prompt when its message-added notification is missed", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const wsDrop = await routeMainWebSocketWithPromptDrop(testPage);
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Proceed Message Gap Workflow",
+    );
+
+    const specStep = await apiClient.createWorkflowStep(workflow.id, "Spec", 0);
+    const workStep = await apiClient.createWorkflowStep(workflow.id, "Work", 1);
+    await apiClient.createWorkflowStep(workflow.id, "Done", 2);
+
+    await apiClient.updateWorkflowStep(specStep.id, {
+      prompt: 'e2e:message("spec done")\n{{task_prompt}}',
+      events: {
+        on_enter: [{ type: "auto_start_agent" }],
+      },
+    });
+
+    const workPrompt = "/slow 8s";
+    await apiClient.updateWorkflowStep(workStep.id, {
+      prompt: `${workPrompt}\n{{task_prompt}}`,
+      events: {
+        on_enter: [{ type: "auto_start_agent" }],
+      },
+    });
+
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+      enable_preview_on_click: false,
+    });
+
+    await apiClient.createTask(seedData.workspaceId, "Proceed Message Gap Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: specStep.id,
+      agent_profile_id: seedData.agentProfileId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    const card = kanban.taskCardInColumn("Proceed Message Gap Task", specStep.id);
+    await expect(card).toBeVisible({ timeout: 15_000 });
+    await card.click();
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await expect(session.stepperStep("Spec")).toHaveAttribute("aria-current", "step", {
+      timeout: 10_000,
+    });
+
+    const proceedBtn = session.proceedNextStepButton();
+    await expect(proceedBtn).toBeVisible({ timeout: 10_000 });
+
+    wsDrop.dropPrompt(workPrompt);
+    await proceedBtn.click();
+
+    await expect(session.stepperStep("Work")).toHaveAttribute("aria-current", "step", {
+      timeout: 15_000,
+    });
+    await expect(
+      session.chat.locator(".chat-message-list:visible").getByText(workPrompt, { exact: false }),
+    ).toBeVisible({ timeout: 5_000 });
+    await expect
+      .poll(wsDrop.droppedCount, {
+        message: "expected the test proxy to drop the workflow prompt's message-added frame",
+        timeout: 10_000,
+      })
+      .toBeGreaterThan(0);
   });
 
   /**

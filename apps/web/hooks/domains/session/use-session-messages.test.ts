@@ -185,7 +185,7 @@ describe("running message backfill guards", () => {
     ).toBe(false);
   });
 
-  it("runs only for a connected RUNNING session with an active-turn user prompt", () => {
+  it("runs for a connected RUNNING session with an active turn", () => {
     const messages = [makeMessage({ id: "u1", turn_id: "turn-1", author_type: "user" })];
     expect(
       shouldRunMessageBackfill({
@@ -193,6 +193,14 @@ describe("running message backfill guards", () => {
         connectionStatus: "connected",
         activeTurnId: "turn-1",
         messages,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRunMessageBackfill({
+        taskSessionState: "RUNNING",
+        connectionStatus: "connected",
+        activeTurnId: "turn-1",
+        messages: [],
       }),
     ).toBe(true);
     expect(
