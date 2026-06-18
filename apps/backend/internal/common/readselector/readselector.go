@@ -68,21 +68,26 @@ type File struct {
 // preceding file — so a single file's multi-range selector ("main.go:5-16,40-80")
 // stays one File, matching Split (first range wins).
 //
-// Multiple files are only reported when every parsed segment yields a real file
-// path (one containing a path separator or a filename extension); otherwise —
-// e.g. a directory name that legitimately contains a comma — it returns the
-// single Split result, so single-file behavior is never disturbed.
+// Multiple files are only reported when every segment is a self-contained file
+// reference — it carries a read selector or its basename has an extension.
+// Otherwise it returns the single Split result, so single-file behavior is never
+// disturbed: a comma inside a directory name ("a,b/foo.go") or inside a filename
+// ("src/foo,bar.go:1-20") stays one File rather than splitting into phantoms.
 func SplitFiles(raw string) []File {
 	parts := strings.Split(raw, ",")
 	files := make([]File, 0, len(parts))
+	multi := true
 	for i, part := range parts {
 		if i > 0 && isContinuationRange(part) {
 			continue
 		}
+		if !isStrongFile(part) {
+			multi = false
+		}
 		path, start, count := Split(part)
 		files = append(files, File{Path: path, StartLine: start, LineCount: count})
 	}
-	if len(files) > 1 && allFileish(files) {
+	if multi && len(files) > 1 {
 		return files
 	}
 	path, start, count := Split(raw)
@@ -99,23 +104,20 @@ func isContinuationRange(part string) bool {
 	return ok
 }
 
-func allFileish(files []File) bool {
-	for _, f := range files {
-		if !isFileish(f.Path) {
-			return false
-		}
-	}
-	return true
-}
-
-// isFileish reports whether a path looks like a concrete file: it has a path
-// separator or a "." in its final segment. Used to distinguish a real second
-// file from a comma that merely lives inside a single path.
-func isFileish(path string) bool {
-	if strings.ContainsAny(path, `/\`) {
+// isStrongFile reports whether a comma segment is a self-contained file
+// reference: it carries a read selector (Split strips it) or its basename has an
+// extension. A segment that looks fileish only via a path separator ("src/foo"
+// in the single filename "src/foo,bar.go") is NOT a file boundary, so a comma
+// inside a filename is not mistaken for a multi-file bundle.
+func isStrongFile(part string) bool {
+	if path, _, _ := Split(part); path != part {
 		return true
 	}
-	return strings.Contains(path, ".")
+	base := part
+	if i := strings.LastIndexAny(part, `/\`); i >= 0 {
+		base = part[i+1:]
+	}
+	return strings.Contains(base, ".")
 }
 
 func isWindowsDrivePrefix(raw string, colon int) bool {

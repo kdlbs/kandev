@@ -100,4 +100,24 @@ describe("splitReadFiles", () => {
     // "5" alone is a line spec, not a file, so this is not a real multi-file read.
     expect(splitReadFiles("main.go:1,5")).toEqual([ref("main.go", 1)]);
   });
+
+  it("treats a comma inside a filename as a single file", () => {
+    // "src/foo" is file-like only via its separator (no selector, no extension),
+    // so it is not a file boundary and the whole path stays one entry.
+    expect(splitReadFiles("src/foo,bar.go:1-20")).toEqual([ref("src/foo,bar.go", 1, 20)]);
+  });
+
+  it("still splits two files when the first carries an extension", () => {
+    expect(splitReadFiles("src/a.go,src/b.go:1-20")).toEqual([
+      ref("src/a.go"),
+      ref("src/b.go", 1, 20),
+    ]);
+  });
+
+  it("still splits an extensionless first file that carries a selector", () => {
+    expect(splitReadFiles("Makefile:10,foo.go:20")).toEqual([
+      ref("Makefile", 10),
+      ref("foo.go", 20),
+    ]);
+  });
 });

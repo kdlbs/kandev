@@ -133,6 +133,16 @@ func TestSplitFiles(t *testing.T) {
 				{Path: "deployments/tailscale-ingress-extras/values.staging.yaml"},
 			},
 		},
+		// A comma inside a single filename must not be split into phantom files:
+		// "src/foo" is fileish only via its separator (no selector, no extension),
+		// so it is not a file boundary and the whole path stays one File.
+		{"comma inside filename falls back to single", "src/foo,bar.go:1-20", []File{{Path: "src/foo,bar.go", StartLine: 1, LineCount: 20}}},
+		{
+			"two files first with extension still splits",
+			"src/a.go,src/b.go:1-20",
+			[]File{{Path: "src/a.go"}, {Path: "src/b.go", StartLine: 1, LineCount: 20}},
+		},
+		{"extensionless first file with selector still splits", "Makefile:10,foo.go:20", []File{{Path: "Makefile", StartLine: 10}, {Path: "foo.go", StartLine: 20}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

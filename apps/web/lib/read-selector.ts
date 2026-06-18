@@ -101,26 +101,40 @@ function splitOne(raw: string): ReadFileRef {
   return { path: base, startLine: parsed.startLine, lineCount: parsed.lineCount };
 }
 
+// isStrongFile reports whether a comma segment is a self-contained file
+// reference: it carries a read selector (splitOne strips it) or its basename has
+// an extension. A segment that looks fileish only via a path separator ("src/foo"
+// in the single filename "src/foo,bar.go") is NOT a file boundary, so a comma
+// inside a filename is not mistaken for a multi-file bundle.
+function isStrongFile(part: string): boolean {
+  if (splitOne(part).path !== part) return true;
+  const sep = Math.max(part.lastIndexOf("/"), part.lastIndexOf("\\"));
+  const base = sep >= 0 ? part.slice(sep + 1) : part;
+  return base.includes(".");
+}
+
 /**
  * Split an omp read path that may reference several comma-joined files into one
  * {@link ReadFileRef} per file. A single file (with or without a multi-range
  * selector) returns exactly one entry identical to the Go `Split`; multiple
- * files are only reported when every segment yields a real file path (one with a
- * path separator or a filename extension), so a comma living inside a directory
- * name is preserved as a single entry.
+ * files are only reported when every segment is a self-contained file reference
+ * (it carries a read selector or its basename has an extension), so a comma
+ * inside a directory name ("a,b/foo.go") or a filename ("src/foo,bar.go:1-20")
+ * stays a single entry rather than splitting into phantom files.
  */
 export function splitReadFiles(raw: string): ReadFileRef[] {
   const parts = raw.split(",");
   const files: ReadFileRef[] = [];
+  let multi = true;
   parts.forEach((part, i) => {
     // A bare line-spec list or mode keyword is an extra range of the preceding
     // file, not a new file.
     const isContinuationRange =
       part === "raw" || part === "conflicts" || parseLineSpecList(part) !== null;
     if (i > 0 && isContinuationRange) return;
+    if (!isStrongFile(part)) multi = false;
     files.push(splitOne(part));
   });
-  const allFileish = files.every((f) => /[/\\]/.test(f.path) || f.path.includes("."));
-  if (files.length > 1 && allFileish) return files;
+  if (multi && files.length > 1) return files;
   return [splitOne(raw)];
 }
