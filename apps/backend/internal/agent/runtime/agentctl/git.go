@@ -440,7 +440,11 @@ type CumulativeDiffResult struct {
 	HeadCommit   string                 `json:"head_commit"`
 	TotalCommits int                    `json:"total_commits"`
 	Files        map[string]interface{} `json:"files"`
-	Error        string                 `json:"error,omitempty"`
+	// TruncatedFilesCount is how many files agentctl dropped because the
+	// cumulative range exceeded its per-request file cap (large rebase).
+	// Surfaced to the UI as a "N more files hidden" banner.
+	TruncatedFilesCount int    `json:"truncated_files_count,omitempty"`
+	Error               string `json:"error,omitempty"`
 }
 
 // GetCumulativeDiff gets the cumulative diff from baseCommit to HEAD.

@@ -522,3 +522,164 @@ func readScriptArgs(t *testing.T, path string) []string {
 	}
 	return strings.Split(trimmed, "\n")
 }
+
+// fileEntryDiff returns the diff string and skip reason for a file entry from a
+// CumulativeDiffResult/CommitDiffResult Files map.
+func fileEntryDiff(t *testing.T, files map[string]interface{}, path string) (diff, skipReason string) {
+	t.Helper()
+	raw, ok := files[path]
+	if !ok {
+		t.Fatalf("Files missing key %q; keys=%v", path, fileKeys(files))
+	}
+	entry, ok := raw.(map[string]interface{})
+	if !ok {
+		t.Fatalf("Files[%q] is %T, want map[string]interface{}", path, raw)
+	}
+	diff, _ = entry["diff"].(string)
+	skipReason, _ = entry["diff_skip_reason"].(string)
+	return diff, skipReason
+}
+
+func fileKeys(files map[string]interface{}) []string {
+	keys := make([]string, 0, len(files))
+	for k := range files {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// TestGetCumulativeDiff_TruncatesLargeFile verifies a single file whose diff
+// exceeds maxDiffOutputSize is truncated and flagged.
+func TestGetCumulativeDiff_TruncatesLargeFile(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	log := newTestLogger(t)
+	base := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
+
+	// README.md is already tracked; overwrite it with >256 KB of new content so
+	// `git diff <base>` produces a single large per-file diff.
+	large := strings.Repeat("an additional line of content for the big diff\n", 8000) // ~376 KB
+	writeFile(t, repoDir, "README.md", large)
+
+	gitOp := NewGitOperator(repoDir, log, nil)
+	result, err := gitOp.GetCumulativeDiff(context.Background(), base)
+	if err != nil {
+		t.Fatalf("GetCumulativeDiff error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("GetCumulativeDiff failed: %+v", result)
+	}
+
+	diff, skipReason := fileEntryDiff(t, result.Files, "README.md")
+	if skipReason != diffSkipReasonTruncated {
+		t.Errorf("diff_skip_reason = %q, want %q", skipReason, diffSkipReasonTruncated)
+	}
+	if len(diff) > maxDiffOutputSize {
+		t.Errorf("truncated diff len = %d, want <= %d", len(diff), maxDiffOutputSize)
+	}
+}
+
+// TestGetCumulativeDiff_BudgetExceeded verifies that once the cumulative diff
+// budget is crossed, later files get an empty diff flagged budget_exceeded.
+func TestGetCumulativeDiff_BudgetExceeded(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	log := newTestLogger(t)
+	base := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
+
+	// 20 files of ~200 KB each (~4 MB total) so the 2 MB budget trips partway.
+	body := strings.Repeat("line of content for the budget test\n", 5700) // ~200 KB
+	for i := 0; i < 20; i++ {
+		writeFile(t, repoDir, fmt.Sprintf("file_%02d.txt", i), body)
+	}
+	runGit(t, repoDir, "add", ".")
+
+	gitOp := NewGitOperator(repoDir, log, nil)
+	result, err := gitOp.GetCumulativeDiff(context.Background(), base)
+	if err != nil {
+		t.Fatalf("GetCumulativeDiff error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("GetCumulativeDiff failed: %+v", result)
+	}
+
+	budgetExceeded := 0
+	for path := range result.Files {
+		diff, skipReason := fileEntryDiff(t, result.Files, path)
+		if skipReason == diffSkipReasonBudgetExceeded {
+			budgetExceeded++
+			if diff != "" {
+				t.Errorf("budget_exceeded file %q has non-empty diff (len %d)", path, len(diff))
+			}
+		}
+	}
+	if budgetExceeded == 0 {
+		t.Errorf("expected at least one budget_exceeded file, got none across %d files", len(result.Files))
+	}
+}
+
+// TestGetCumulativeDiff_CapsFileCount verifies the file-count cap drops excess
+// entries and reports the count.
+func TestGetCumulativeDiff_CapsFileCount(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	log := newTestLogger(t)
+	base := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
+
+	const totalFiles = maxCumulativeDiffFiles + 100
+	for i := 0; i < totalFiles; i++ {
+		writeFile(t, repoDir, fmt.Sprintf("f%04d.txt", i), "small change\n")
+	}
+	runGit(t, repoDir, "add", ".")
+
+	gitOp := NewGitOperator(repoDir, log, nil)
+	result, err := gitOp.GetCumulativeDiff(context.Background(), base)
+	if err != nil {
+		t.Fatalf("GetCumulativeDiff error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("GetCumulativeDiff failed: %+v", result)
+	}
+
+	if len(result.Files) != maxCumulativeDiffFiles {
+		t.Errorf("len(Files) = %d, want %d", len(result.Files), maxCumulativeDiffFiles)
+	}
+	if result.TruncatedFilesCount != totalFiles-maxCumulativeDiffFiles {
+		t.Errorf("TruncatedFilesCount = %d, want %d", result.TruncatedFilesCount, totalFiles-maxCumulativeDiffFiles)
+	}
+}
+
+// TestShowCommit_NotCapped is a regression test: ShowCommit must return the full
+// diff for a large file (no per-file truncation), unlike GetCumulativeDiff.
+func TestShowCommit_NotCapped(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	log := newTestLogger(t)
+
+	large := strings.Repeat("an additional line of content for the big diff\n", 8000) // ~376 KB
+	writeFile(t, repoDir, "big.txt", large)
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "add big file")
+	sha := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
+
+	gitOp := NewGitOperator(repoDir, log, nil)
+	result, err := gitOp.ShowCommit(context.Background(), sha)
+	if err != nil {
+		t.Fatalf("ShowCommit error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("ShowCommit failed: %+v", result)
+	}
+
+	diff, skipReason := fileEntryDiff(t, result.Files, "big.txt")
+	if skipReason != "" {
+		t.Errorf("ShowCommit diff_skip_reason = %q, want empty (uncapped)", skipReason)
+	}
+	if len(diff) <= maxDiffOutputSize {
+		t.Errorf("ShowCommit diff len = %d, want > %d (full, uncapped)", len(diff), maxDiffOutputSize)
+	}
+}
