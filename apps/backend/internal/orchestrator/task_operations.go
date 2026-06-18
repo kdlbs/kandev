@@ -2095,6 +2095,8 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 
 	// Ensure the agent process is actually running. After a lazy backend restart,
 	// the session may be in WAITING_FOR_INPUT but no agent process exists yet.
+	_, hadExecutionBeforeEnsure := s.executor.GetExecutionBySession(sessionID)
+	resumedForPrompt := !hadExecutionBeforeEnsure
 	if err := s.ensureSessionRunning(ctx, sessionID, session); err != nil {
 		return nil, fmt.Errorf("failed to ensure session is running: %w", err)
 	}
@@ -2139,6 +2141,16 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	promptCtx := context.WithoutCancel(ctx)
 	result, err := s.executor.Prompt(promptCtx, taskID, sessionID, effectivePrompt, attachments, dispatchOnly, session)
 	if err != nil {
+		if resumedForPrompt && errors.Is(err, executor.ErrExecutionNotFound) {
+			s.logger.Warn("prompt after lazy resume hit missing execution; falling back to fresh launch",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID))
+			if freshErr := s.fallbackFreshLaunchOnMissingExecution(ctx, taskID, sessionID, prompt, planMode, nil, attachments); freshErr == nil {
+				return &PromptResult{}, nil
+			} else {
+				err = freshErr
+			}
+		}
 		return nil, s.handlePromptError(ctx, taskID, sessionID, previousSessionState, err)
 	}
 	return &PromptResult{

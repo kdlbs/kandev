@@ -5,10 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/queue"
+	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -398,5 +402,89 @@ func TestEnsureSessionRunning_WaitsForPromptReadyWhenExecutionExists(t *testing.
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("ensureSessionRunning did not return after prompt readiness")
+	}
+}
+
+func TestPromptTask_LazyResumeExecutionNotFoundFallsBackToFreshLaunch(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateIdle)
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentExecutionID = "exec-before-restart"
+	session.AgentProfileID = "profile1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-before-restart")
+
+	var launchCalls atomic.Int32
+	launchPrompts := make(chan string, 2)
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		promptErr:              lifecycle.ErrExecutionNotFound,
+		isAgentRunningFn: func(_ context.Context, _ string) bool {
+			return launchCalls.Load() > 0
+		},
+		isAgentReadyFn: func(_ context.Context, _ string) bool {
+			return launchCalls.Load() > 0
+		},
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			call := launchCalls.Add(1)
+			launchPrompts <- req.TaskDescription
+			if call == 1 {
+				go func(sessionID string) {
+					tick := time.NewTicker(5 * time.Millisecond)
+					defer tick.Stop()
+					timeout := time.After(5 * time.Second)
+					for {
+						select {
+						case <-tick.C:
+							sess, err := repo.GetTaskSession(context.Background(), sessionID)
+							if err == nil && sess != nil && sess.State == models.TaskSessionStateStarting {
+								sess.State = models.TaskSessionStateWaitingForInput
+								sess.UpdatedAt = time.Now().UTC()
+								_ = repo.UpdateTaskSession(context.Background(), sess)
+								return
+							}
+						case <-timeout:
+							return
+						}
+					}
+				}(req.SessionID)
+			}
+			return &executor.LaunchAgentResponse{AgentExecutionID: fmt.Sprintf("exec-resumed-%d", call)}, nil
+		},
+	}
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID:    "task1",
+		Title: "Test Task",
+		State: v1.TaskStateInProgress,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	exec := executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = exec
+	svc.scheduler = scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, testLogger(), scheduler.DefaultSchedulerConfig())
+
+	prompt := "follow-up after restart"
+	if _, err := svc.PromptTask(ctx, "task1", "session1", prompt, "", false, nil, false); err != nil {
+		t.Fatalf("expected fresh-launch fallback to recover missing execution, got: %v", err)
+	}
+
+	if got := launchCalls.Load(); got != 2 {
+		t.Fatalf("expected resume launch plus fresh fallback launch, got %d launches", got)
+	}
+	<-launchPrompts // resume prompt; empty for the lazy resume path.
+	freshPrompt := <-launchPrompts
+	if !strings.Contains(freshPrompt, prompt) {
+		t.Fatalf("fresh launch prompt %q does not contain original prompt %q", freshPrompt, prompt)
+	}
+	if len(agentMgr.capturedPromptCalls) != 1 {
+		t.Fatalf("expected one failed PromptAgent attempt before fallback, got %d", len(agentMgr.capturedPromptCalls))
 	}
 }

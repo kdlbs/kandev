@@ -35,8 +35,9 @@ type CountsView = {
 };
 
 const CHECK_GROUP_ORDER: CheckBucket[] = ["passed", "in_progress", "failed"];
+
 export const PR_CI_DESKTOP_POPOVER_SCROLL_CLASS =
-  "max-h-[min(28rem,calc(100vh-8rem))] overflow-y-auto";
+  "max-h-[min(28rem,calc(100vh-8rem))] overflow-y-auto overscroll-contain";
 
 function countForBucket(counts: CountsView, kind: CheckBucket): number {
   if (kind === "passed") return counts.passed;

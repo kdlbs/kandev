@@ -5,6 +5,7 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { PRStatusChip, aggregateChipStatus } from "./pr-status-chip";
+import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS } from "./pr-ci-popover";
 import type { AppState } from "@/lib/state/store";
 import type { TaskPR } from "@/lib/types/github";
 
@@ -93,9 +94,12 @@ function multiState(prs: TaskPR[]): Partial<AppState> {
 async function expectDesktopHoverPopoverConstrained() {
   fireEvent.pointerEnter(screen.getByTestId(CHIP_TESTID));
   const inner = await screen.findByTestId("pr-topbar-popover-inner");
-  const contentClass = inner.parentElement?.className ?? "";
-  expect(contentClass).toContain("max-h-[min(28rem,calc(100vh-8rem))]");
-  expect(contentClass).toContain("overflow-y-auto");
+  const content = inner.closest<HTMLElement>(".overflow-y-auto");
+  expect(content).not.toBeNull();
+  const classNames = content!.className.split(/\s+/);
+  expect(classNames).toEqual(
+    expect.arrayContaining(PR_CI_DESKTOP_POPOVER_SCROLL_CLASS.split(/\s+/)),
+  );
 }
 
 describe("PRStatusChip", () => {
@@ -250,6 +254,11 @@ describe("PRStatusChip — multiple PRs", () => {
     expect(chip.getAttribute("data-pr-count")).toBe("2");
     // PR #2 is failing, so the aggregate glyph is red.
     expect(chip.getAttribute(ATTR_STATUS)).toBe("failed");
+  });
+
+  it("constrains the aggregate hover popover to the available viewport height", async () => {
+    renderWithStore(multiState(TWO_OPEN), <PRStatusChip taskId="task-1" />);
+    await expectDesktopHoverPopoverConstrained();
   });
 
   it("stays visible while at least one PR is still open", () => {
