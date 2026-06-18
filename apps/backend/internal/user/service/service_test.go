@@ -484,7 +484,7 @@ func TestApplySidebarViewState(t *testing.T) {
 			Sort:  models.SidebarViewSort{Key: "updatedAt", Direction: "desc"},
 			Group: "workflow",
 		}
-		settings := &models.UserSettings{}
+		settings := &models.UserSettings{SidebarViews: []models.SidebarView{{ID: "view-1", Name: "View 1"}}}
 		req := &UpdateUserSettingsRequest{
 			SidebarActiveViewID: ptr("view-1"),
 			SidebarDraft:        &draft,
@@ -517,6 +517,17 @@ func TestApplySidebarViewState(t *testing.T) {
 		req := &UpdateUserSettingsRequest{SidebarActiveViewID: ptr("  ")}
 		if err := applySidebarViewState(&models.UserSettings{}, req); err == nil {
 			t.Fatal("expected validation error, got nil")
+		}
+	})
+
+	t.Run("rejects active view id missing from saved views", func(t *testing.T) {
+		settings := &models.UserSettings{SidebarViews: []models.SidebarView{{ID: "view-1", Name: "View 1"}}}
+		req := &UpdateUserSettingsRequest{SidebarActiveViewID: ptr("missing")}
+		if err := applySidebarViewState(settings, req); err == nil {
+			t.Fatal("expected validation error, got nil")
+		}
+		if settings.SidebarActiveViewID != "" {
+			t.Fatalf("expected active view unchanged, got %q", settings.SidebarActiveViewID)
 		}
 	})
 }

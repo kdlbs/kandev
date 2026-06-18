@@ -392,12 +392,24 @@ func applySidebarViewState(settings *models.UserSettings, req *UpdateUserSetting
 		if activeViewID == "" {
 			return errors.New("sidebar_active_view_id must not be empty")
 		}
+		if !sidebarViewIDExists(settings.SidebarViews, activeViewID) {
+			return fmt.Errorf("sidebar_active_view_id %q does not match any saved view", activeViewID)
+		}
 		settings.SidebarActiveViewID = activeViewID
 	}
 	if req.SidebarDraft != nil {
 		settings.SidebarDraft = *req.SidebarDraft
 	}
 	return nil
+}
+
+func sidebarViewIDExists(views []models.SidebarView, id string) bool {
+	for _, view := range views {
+		if view.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 const maxUserPreferenceBlobBytes = 64 * 1024
