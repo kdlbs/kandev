@@ -56,6 +56,8 @@ export function buildStateOverrides(m: DefaultState) {
     reviewWatches: m.reviewWatches,
     issueWatches: m.issueWatches,
     actionPresets: m.actionPresets,
+    prFeedbackCache: m.prFeedbackCache,
+    taskCIAutomation: m.taskCIAutomation,
     taskMRs: m.taskMRs,
     gitlabReviewWatches: m.gitlabReviewWatches,
     gitlabIssueWatches: m.gitlabIssueWatches,

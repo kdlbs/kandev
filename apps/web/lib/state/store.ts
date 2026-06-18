@@ -185,6 +185,7 @@ export type AppState = {
   issueWatches: (typeof defaultGitHubState)["issueWatches"];
   actionPresets: (typeof defaultGitHubState)["actionPresets"];
   prFeedbackCache: (typeof defaultGitHubState)["prFeedbackCache"];
+  taskCIAutomation: (typeof defaultGitHubState)["taskCIAutomation"];
 
   // GitLab slice
   taskMRs: (typeof defaultGitLabState)["taskMRs"];

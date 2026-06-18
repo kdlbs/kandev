@@ -112,3 +112,17 @@ func (s *Service) DeletePrompt(ctx context.Context, promptID string) error {
 	}
 	return s.repo.DeletePrompt(ctx, promptID)
 }
+
+// ResolvePromptContent returns the stored prompt content by name, falling back
+// to fallback when the row is missing or temporarily unreadable.
+func (s *Service) ResolvePromptContent(ctx context.Context, name, fallback string) string {
+	prompt, err := s.repo.GetPromptByName(ctx, strings.TrimSpace(name))
+	if err != nil || prompt == nil {
+		return fallback
+	}
+	content := strings.TrimSpace(prompt.Content)
+	if content == "" {
+		return fallback
+	}
+	return content
+}

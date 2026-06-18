@@ -132,6 +132,34 @@ func TestService_UpdatePromptSameName(t *testing.T) {
 	}
 }
 
+func TestService_ResolvePromptContentUsesStoredPrompt(t *testing.T) {
+	svc, cleanup := createService(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	prompt, err := svc.UpdatePrompt(ctx, "builtin-ci-auto-fix", nil, stringPtr("custom default"))
+	if err != nil {
+		t.Fatalf("update built-in prompt: %v", err)
+	}
+	if prompt.Content != "custom default" {
+		t.Fatalf("updated content=%q", prompt.Content)
+	}
+
+	got := svc.ResolvePromptContent(ctx, "ci-auto-fix", "embedded fallback")
+	if got != "custom default" {
+		t.Fatalf("resolved content=%q, want custom default", got)
+	}
+}
+
+func TestService_ResolvePromptContentFallsBack(t *testing.T) {
+	svc := NewService(&raceRepo{})
+
+	got := svc.ResolvePromptContent(context.Background(), "missing", "embedded fallback")
+	if got != "embedded fallback" {
+		t.Fatalf("resolved content=%q, want fallback", got)
+	}
+}
+
 // raceRepo simulates a TOCTOU loss against the SQLite UNIQUE index: the
 // pre-check sees no row, but the write fails because a concurrent insert
 // landed first. The service must translate that into ErrPromptAlreadyExists
@@ -173,3 +201,5 @@ func TestService_UpdatePrompt_TranslatesUniqueConstraintRace(t *testing.T) {
 		t.Fatalf("expected ErrPromptAlreadyExists, got %v", err)
 	}
 }
+
+func stringPtr(v string) *string { return &v }

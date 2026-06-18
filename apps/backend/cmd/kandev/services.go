@@ -93,6 +93,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	)
 
 	githubSvc := initGitHubService(dbPool, eventBus, repos.Secrets, log)
+	if githubSvc != nil {
+		githubSvc.SetPromptResolver(promptSvc)
+	}
 	gitlabSvc := initGitLabService(dbPool, eventBus, repos.Secrets, log)
 	jiraSvc := initJiraService(dbPool, eventBus, repos.Secrets, log)
 	linearSvc := initLinearService(dbPool, eventBus, repos.Secrets, log)

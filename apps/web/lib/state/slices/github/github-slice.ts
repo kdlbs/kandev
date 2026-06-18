@@ -10,6 +10,7 @@ export const defaultGitHubState: GitHubSliceState = {
   issueWatches: { items: [], loaded: false, loading: false },
   actionPresets: { byWorkspaceId: {}, loading: {} },
   prFeedbackCache: { byKey: {} },
+  taskCIAutomation: { byTaskId: {}, loading: {}, saving: {}, errors: {} },
 };
 
 const PR_FEEDBACK_CACHE_LIMIT = 20;
@@ -232,6 +233,35 @@ function createPRFeedbackCacheActions(
   };
 }
 
+function createTaskCIAutomationActions(
+  set: ImmerSet,
+): Pick<
+  GitHubSlice,
+  | "setTaskCIAutomationOptions"
+  | "setTaskCIAutomationLoading"
+  | "setTaskCIAutomationSaving"
+  | "setTaskCIAutomationError"
+> {
+  return {
+    setTaskCIAutomationOptions: (taskId, options) =>
+      set((draft) => {
+        draft.taskCIAutomation.byTaskId[taskId] = options;
+      }),
+    setTaskCIAutomationLoading: (taskId, loading) =>
+      set((draft) => {
+        draft.taskCIAutomation.loading[taskId] = loading;
+      }),
+    setTaskCIAutomationSaving: (taskId, saving) =>
+      set((draft) => {
+        draft.taskCIAutomation.saving[taskId] = saving;
+      }),
+    setTaskCIAutomationError: (taskId, error) =>
+      set((draft) => {
+        draft.taskCIAutomation.errors[taskId] = error;
+      }),
+  };
+}
+
 function createRateLimitActions(set: ImmerSet): Pick<GitHubSlice, "applyGitHubRateLimitUpdate"> {
   return {
     applyGitHubRateLimitUpdate: (update) =>
@@ -263,4 +293,5 @@ export const createGitHubSlice: StateCreator<
   ...createActionPresetActions(set),
   ...createRateLimitActions(set),
   ...createPRFeedbackCacheActions(set),
+  ...createTaskCIAutomationActions(set),
 });

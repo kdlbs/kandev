@@ -161,6 +161,31 @@ const createTablesSQL = `
 		issue_presets TEXT NOT NULL DEFAULT '[]',
 		updated_at DATETIME NOT NULL
 	);
+
+	CREATE TABLE IF NOT EXISTS github_task_ci_options (
+		task_id TEXT PRIMARY KEY,
+		auto_fix_enabled BOOLEAN NOT NULL DEFAULT 0,
+		auto_merge_enabled BOOLEAN NOT NULL DEFAULT 0,
+		auto_fix_prompt_override TEXT,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS github_task_ci_pr_state (
+		task_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL DEFAULT '',
+		pr_number INTEGER NOT NULL,
+		last_fix_signature TEXT NOT NULL DEFAULT '',
+		last_fix_checkpoint_json TEXT NOT NULL DEFAULT '',
+		last_fix_enqueued_at DATETIME,
+		last_fix_session_id TEXT,
+		last_merge_signature TEXT NOT NULL DEFAULT '',
+		last_merge_attempt_at DATETIME,
+		last_error TEXT,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		PRIMARY KEY (task_id, repository_id, pr_number)
+	);
 `
 
 func (s *Store) initSchema() error {
@@ -211,6 +236,7 @@ func (s *Store) initSchema() error {
 	// so SQLite can't use that index for the PR-number task search. Add a
 	// dedicated leading-key index so lookups by PR number stay index-backed.
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_github_task_prs_pr_number ON github_task_prs (pr_number)`)
+	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_github_task_ci_pr_state_task ON github_task_ci_pr_state (task_id)`)
 	return nil
 }
 
@@ -973,6 +999,163 @@ func (s *Store) UpdateTaskPR(ctx context.Context, tp *TaskPR) error {
 		tp.Additions, tp.Deletions, tp.PRTitle, tp.BaseBranch,
 		tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.UpdatedAt, tp.ID)
 	return err
+}
+
+// --- Task CI automation operations ---
+
+// GetTaskCIOptions returns persisted task CI automation options, or disabled defaults.
+func (s *Store) GetTaskCIOptions(ctx context.Context, taskID string) (*TaskCIOptions, error) {
+	var opts TaskCIOptions
+	err := s.ro.GetContext(ctx, &opts, `SELECT * FROM github_task_ci_options WHERE task_id = ?`, taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		now := time.Now().UTC()
+		return &TaskCIOptions{TaskID: taskID, CreatedAt: now, UpdatedAt: now}, nil
+	}
+	return &opts, err
+}
+
+// UpdateTaskCIOptions applies a partial update to task CI automation options.
+func (s *Store) UpdateTaskCIOptions(ctx context.Context, taskID string, patch TaskCIOptionsPatch) (*TaskCIOptions, error) {
+	current, err := s.GetTaskCIOptions(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if patch.AutoFixEnabled != nil {
+		current.AutoFixEnabled = *patch.AutoFixEnabled
+	}
+	if patch.AutoMergeEnabled != nil {
+		current.AutoMergeEnabled = *patch.AutoMergeEnabled
+	}
+	if patch.AutoFixPromptOverride != nil {
+		trimmed := strings.TrimSpace(*patch.AutoFixPromptOverride)
+		if trimmed == "" {
+			current.AutoFixPromptOverride = nil
+		} else {
+			current.AutoFixPromptOverride = &trimmed
+		}
+	}
+	now := time.Now().UTC()
+	if current.CreatedAt.IsZero() {
+		current.CreatedAt = now
+	}
+	current.UpdatedAt = now
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO github_task_ci_options (
+			task_id, auto_fix_enabled, auto_merge_enabled, auto_fix_prompt_override, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(task_id) DO UPDATE SET
+			auto_fix_enabled = excluded.auto_fix_enabled,
+			auto_merge_enabled = excluded.auto_merge_enabled,
+			auto_fix_prompt_override = excluded.auto_fix_prompt_override,
+			updated_at = excluded.updated_at`,
+		current.TaskID, current.AutoFixEnabled, current.AutoMergeEnabled,
+		current.AutoFixPromptOverride, current.CreatedAt, current.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetTaskCIOptions(ctx, taskID)
+}
+
+// ListTaskCIPRStates returns CI automation state rows for a task.
+func (s *Store) ListTaskCIPRStates(ctx context.Context, taskID string) ([]*TaskCIPRAutomationState, error) {
+	var rows []TaskCIPRAutomationState
+	if err := s.ro.SelectContext(ctx, &rows,
+		`SELECT * FROM github_task_ci_pr_state WHERE task_id = ? ORDER BY repository_id ASC, pr_number ASC`,
+		taskID); err != nil {
+		return nil, err
+	}
+	out := make([]*TaskCIPRAutomationState, 0, len(rows))
+	for i := range rows {
+		out = append(out, &rows[i])
+	}
+	return out, nil
+}
+
+// GetTaskCIPRState returns one task/PR automation state row, or nil.
+func (s *Store) GetTaskCIPRState(ctx context.Context, taskID, repositoryID string, prNumber int) (*TaskCIPRAutomationState, error) {
+	var state TaskCIPRAutomationState
+	err := s.ro.GetContext(ctx, &state,
+		`SELECT * FROM github_task_ci_pr_state
+		 WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
+		taskID, repositoryID, prNumber)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &state, err
+}
+
+// RecordTaskCIFixAttempt records the feedback checkpoint that produced an auto-fix prompt.
+func (s *Store) RecordTaskCIFixAttempt(ctx context.Context, attempt TaskCIFixAttempt) error {
+	when := attempt.EnqueuedAt
+	if when.IsZero() {
+		when = time.Now().UTC()
+	}
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO github_task_ci_pr_state (
+			task_id, repository_id, pr_number, last_fix_signature, last_fix_checkpoint_json,
+			last_fix_enqueued_at, last_fix_session_id, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
+			last_fix_signature = excluded.last_fix_signature,
+			last_fix_checkpoint_json = excluded.last_fix_checkpoint_json,
+			last_fix_enqueued_at = excluded.last_fix_enqueued_at,
+			last_fix_session_id = excluded.last_fix_session_id,
+			last_error = NULL,
+			updated_at = excluded.updated_at`,
+		attempt.TaskID, attempt.RepositoryID, attempt.PRNumber, attempt.Signature,
+		attempt.CheckpointJSON, when, nullableString(attempt.SessionID), now, now)
+	return err
+}
+
+// RecordTaskCIMergeAttempt records an auto-merge attempt signature.
+func (s *Store) RecordTaskCIMergeAttempt(ctx context.Context, attempt TaskCIMergeAttempt) error {
+	when := attempt.AttemptedAt
+	if when.IsZero() {
+		when = time.Now().UTC()
+	}
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO github_task_ci_pr_state (
+			task_id, repository_id, pr_number, last_merge_signature, last_merge_attempt_at, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
+			last_merge_signature = excluded.last_merge_signature,
+			last_merge_attempt_at = excluded.last_merge_attempt_at,
+			last_error = NULL,
+			updated_at = excluded.updated_at`,
+		attempt.TaskID, attempt.RepositoryID, attempt.PRNumber, attempt.Signature, when, now, now)
+	return err
+}
+
+// RecordTaskCIError stores the latest user-visible CI automation error for a task PR.
+func (s *Store) RecordTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error {
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO github_task_ci_pr_state (
+			task_id, repository_id, pr_number, last_error, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
+			last_error = excluded.last_error,
+			updated_at = excluded.updated_at`,
+		taskID, repositoryID, prNumber, strings.TrimSpace(message), now, now)
+	return err
+}
+
+// ClearTaskCIError clears the latest CI automation error for a task PR.
+func (s *Store) ClearTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE github_task_ci_pr_state SET last_error = NULL, updated_at = ?
+		WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
+		time.Now().UTC(), taskID, repositoryID, prNumber)
+	return err
+}
+
+func nullableString(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 // --- Review Watch operations ---

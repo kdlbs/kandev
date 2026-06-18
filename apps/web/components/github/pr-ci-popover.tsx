@@ -26,6 +26,7 @@ import {
   type WorkflowGroup,
 } from "@/lib/github/check-buckets";
 import type { CheckRun, TaskPR } from "@/lib/types/github";
+import { PRCIAutomationControls } from "./pr-ci-automation-controls";
 import { PRMergeButton } from "./pr-merge-button";
 import { PRMergeabilityRow } from "./pr-mergeability-row";
 
@@ -545,6 +546,7 @@ export function PRCIPopover({
             <PRCommentsRow pr={pr} />
           </div>
           <PRMergeabilityRow pr={pr} />
+          <PRCIAutomationControls pr={pr} />
           <PRMergeButton taskPR={pr} onMerged={refetch} compact />
         </>
       )}

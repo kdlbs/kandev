@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { PRStatusChip, aggregateChipStatus } from "./pr-status-chip";
 import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS } from "./pr-ci-popover";
 import type { AppState } from "@/lib/state/store";
-import type { TaskPR } from "@/lib/types/github";
+import type { TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
 
 const isMobileMock = vi.fn(() => false);
 vi.mock("@/hooks/use-mobile", () => ({
@@ -19,6 +19,16 @@ vi.mock("@/lib/api/domains/github-api", async (importOriginal) => {
   return {
     ...actual,
     getPRFeedback: vi.fn().mockResolvedValue(null),
+    getTaskCIAutomationOptions: vi.fn().mockResolvedValue({
+      task_id: "task-1",
+      auto_fix_enabled: false,
+      auto_merge_enabled: false,
+      auto_fix_prompt_override: null,
+      effective_auto_fix_prompt: "Default CI fix prompt",
+      using_default_prompt: true,
+      updated_at: "2026-06-18T10:00:00Z",
+      pr_states: [],
+    }),
     listWorkspaceTaskPRs: vi.fn().mockResolvedValue({ task_prs: {} }),
   };
 });
@@ -70,6 +80,20 @@ function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   };
 }
 
+function makeCIOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCIAutomationOptions {
+  return {
+    task_id: "task-1",
+    auto_fix_enabled: false,
+    auto_merge_enabled: false,
+    auto_fix_prompt_override: null,
+    effective_auto_fix_prompt: "Default CI fix prompt",
+    using_default_prompt: true,
+    updated_at: "2026-06-18T10:00:00Z",
+    pr_states: [],
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   isMobileMock.mockReturnValue(false);
 });
@@ -85,6 +109,12 @@ const ATTR_STATUS = "data-status";
 const DRAWER_SELECTOR = "[data-testid='pr-status-chip-drawer']";
 const seededState: Partial<AppState> = {
   taskPRs: { byTaskId: { "task-1": [makePR()] } },
+  taskCIAutomation: {
+    byTaskId: { "task-1": makeCIOptions() },
+    loading: {},
+    saving: {},
+    errors: {},
+  },
 };
 
 function multiState(prs: TaskPR[]): Partial<AppState> {
@@ -267,6 +297,33 @@ describe("PRStatusChip — mergeability", () => {
       <PRStatusChip taskId="task-1" />,
     );
     expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("in_progress");
+  });
+});
+
+describe("PRStatusChip CI automation mobile parity", () => {
+  beforeEach(() => isMobileMock.mockReturnValue(true));
+
+  it("renders controls and prompt editing inside the drawer", async () => {
+    renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
+    act(() => {
+      fireEvent.click(screen.getByTestId(CHIP_TESTID));
+    });
+
+    const drawer = document.querySelector(DRAWER_SELECTOR);
+    expect(drawer?.textContent).toContain("Auto-fix CI and address comments");
+    expect(drawer?.textContent).toContain("Auto-merge when ready");
+
+    act(() => {
+      fireEvent.click(screen.getByLabelText("Edit auto-fix prompt for this task"));
+    });
+    await waitFor(() => {
+      expect(
+        screen.getAllByRole("dialog").some((el) => el.textContent?.includes("Auto-fix prompt")),
+      ).toBe(true);
+    });
+    expect(screen.getByRole("link", { name: "Edit default prompt" }).getAttribute("href")).toBe(
+      "/settings/prompts",
+    );
   });
 });
 

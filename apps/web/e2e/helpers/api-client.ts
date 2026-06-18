@@ -7,6 +7,7 @@ import type {
   TaskSessionState,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
+import type { TaskCIAutomationOptions, TaskCIAutomationPatch } from "../../lib/types/github";
 import type { VoiceModeSettings } from "../../lib/types/http-voice";
 import type {
   SSHAgentReadinessResponse,
@@ -1012,6 +1013,21 @@ export class ApiClient {
     unresolved_review_threads?: number;
   }): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/task-prs", data);
+  }
+
+  async getTaskCIAutomationOptions(taskId: string): Promise<TaskCIAutomationOptions> {
+    return this.request("GET", `/api/v1/github/tasks/${encodeURIComponent(taskId)}/ci-options`);
+  }
+
+  async updateTaskCIAutomationOptions(
+    taskId: string,
+    patch: TaskCIAutomationPatch,
+  ): Promise<TaskCIAutomationOptions> {
+    return this.request(
+      "PATCH",
+      `/api/v1/github/tasks/${encodeURIComponent(taskId)}/ci-options`,
+      patch,
+    );
   }
 
   async getTaskPR(taskId: string): Promise<{

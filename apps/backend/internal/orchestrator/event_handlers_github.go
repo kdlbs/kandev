@@ -40,6 +40,14 @@ type GitHubService interface {
 	ResetPRWatch(ctx context.Context, id, branch string) error
 	AssociatePRWithTask(ctx context.Context, taskID, repositoryID string, pr *github.PR) (*github.TaskPR, error)
 	GetTaskPR(ctx context.Context, taskID string) (*github.TaskPR, error)
+	GetTaskCIOptionsResponse(ctx context.Context, taskID string) (*github.TaskCIOptionsResponse, error)
+	GetTaskCIPRState(ctx context.Context, taskID, repositoryID string, prNumber int) (*github.TaskCIPRAutomationState, error)
+	RecordTaskCIFixAttempt(ctx context.Context, attempt github.TaskCIFixAttempt) error
+	RecordTaskCIMergeAttempt(ctx context.Context, attempt github.TaskCIMergeAttempt) error
+	RecordTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error
+	ClearTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int) error
+	GetPRFeedback(ctx context.Context, owner, repo string, number int) (*github.PRFeedback, error)
+	MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error
 	ListActivePRWatches(ctx context.Context) ([]*github.PRWatch, error)
 	ReserveReviewPRTask(ctx context.Context, watchID, repoOwner, repoName string, prNumber int, prURL string) (bool, error)
 	AssignReviewPRTaskID(ctx context.Context, watchID, repoOwner, repoName string, prNumber int, taskID string) error
@@ -143,7 +151,7 @@ func (s *Service) SetIssueTaskCreator(tc IssueTaskCreator) {
 }
 
 // handlePRFeedback logs PR feedback events. WS broadcasting is handled in main.go.
-func (s *Service) handlePRFeedback(_ context.Context, event *bus.Event) error {
+func (s *Service) handlePRFeedback(ctx context.Context, event *bus.Event) error {
 	feedbackEvt, ok := event.Data.(*github.PRFeedbackEvent)
 	if !ok {
 		return nil
@@ -151,7 +159,25 @@ func (s *Service) handlePRFeedback(_ context.Context, event *bus.Event) error {
 	s.logger.Debug("received PR feedback event",
 		zap.String("session_id", feedbackEvt.SessionID),
 		zap.Int("pr_number", feedbackEvt.PRNumber))
+	if s.githubService != nil {
+		pr, err := s.githubService.GetTaskPR(ctx, feedbackEvt.TaskID)
+		if err != nil {
+			s.logger.Debug("failed to load task PR for CI automation", zap.String("task_id", feedbackEvt.TaskID), zap.Error(err))
+			return nil
+		}
+		if pr != nil {
+			return s.handleTaskPRCIAutomation(ctx, pr)
+		}
+	}
 	return nil
+}
+
+func (s *Service) handleTaskPRUpdated(ctx context.Context, event *bus.Event) error {
+	pr, ok := event.Data.(*github.TaskPR)
+	if !ok || pr == nil {
+		return nil
+	}
+	return s.handleTaskPRCIAutomation(ctx, pr)
 }
 
 // handleNewReviewPR creates a task for a new PR needing review.
@@ -1094,6 +1120,9 @@ func (s *Service) subscribeGitHubEvents() {
 	}
 	if _, err := s.eventBus.Subscribe(events.GitHubPRFeedback, s.handlePRFeedback); err != nil {
 		s.logger.Error("failed to subscribe to github.pr_feedback events", zap.Error(err))
+	}
+	if _, err := s.eventBus.Subscribe(events.GitHubTaskPRUpdated, s.handleTaskPRUpdated); err != nil {
+		s.logger.Error("failed to subscribe to github.task_pr.updated events", zap.Error(err))
 	}
 	if _, err := s.eventBus.Subscribe(events.GitHubNewReviewPR, s.handleNewReviewPR); err != nil {
 		s.logger.Error("failed to subscribe to github.new_pr_to_review events", zap.Error(err))

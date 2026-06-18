@@ -192,5 +192,6 @@ func (r *sqliteRepository) getBuiltinPrompts() []*models.Prompt {
 		{ID: "builtin-code-review", Name: "code-review", Builtin: true, CreatedAt: now, UpdatedAt: now, Content: promptcfg.Get("code-review")},
 		{ID: "builtin-open-pr", Name: "open-pr", Builtin: true, CreatedAt: now, UpdatedAt: now, Content: promptcfg.Get("open-pr")},
 		{ID: "builtin-merge-base", Name: "merge-base", Builtin: true, CreatedAt: now, UpdatedAt: now, Content: promptcfg.Get("merge-base")},
+		{ID: "builtin-ci-auto-fix", Name: "ci-auto-fix", Builtin: true, CreatedAt: now, UpdatedAt: now, Content: promptcfg.Get("ci-auto-fix")},
 	}
 }

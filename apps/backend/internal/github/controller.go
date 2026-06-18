@@ -1,6 +1,7 @@
 package github
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -35,6 +36,8 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.GET("/task-prs", c.httpListTaskPRs)
 	api.POST("/task-prs", c.httpCreateTaskPR)
 	api.GET("/task-prs/:taskId", c.httpGetTaskPR)
+	api.GET("/tasks/:taskId/ci-options", c.httpGetTaskCIOptions)
+	api.PATCH("/tasks/:taskId/ci-options", c.httpPatchTaskCIOptions)
 
 	api.GET("/prs/:owner/:repo/:number", c.httpGetPRFeedback)
 	api.GET("/prs/:owner/:repo/:number/info", c.httpGetPRInfo)
@@ -190,6 +193,65 @@ func (c *Controller) httpGetTaskPR(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, tp)
+}
+
+func (c *Controller) httpGetTaskCIOptions(ctx *gin.Context) {
+	resp, err := c.service.GetTaskCIOptionsResponse(ctx.Request.Context(), ctx.Param("taskId"))
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, resp)
+}
+
+func (c *Controller) httpPatchTaskCIOptions(ctx *gin.Context) {
+	patch, err := parseTaskCIOptionsPatch(ctx)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	resp, err := c.service.UpdateTaskCIOptions(ctx.Request.Context(), ctx.Param("taskId"), patch)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, resp)
+}
+
+func parseTaskCIOptionsPatch(ctx *gin.Context) (TaskCIOptionsPatch, error) {
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(ctx.Request.Body).Decode(&raw); err != nil {
+		return TaskCIOptionsPatch{}, err
+	}
+	var patch TaskCIOptionsPatch
+	for key, value := range raw {
+		switch key {
+		case "auto_fix_enabled":
+			var enabled bool
+			if err := json.Unmarshal(value, &enabled); err != nil {
+				return TaskCIOptionsPatch{}, err
+			}
+			patch.AutoFixEnabled = &enabled
+		case "auto_merge_enabled":
+			var enabled bool
+			if err := json.Unmarshal(value, &enabled); err != nil {
+				return TaskCIOptionsPatch{}, err
+			}
+			patch.AutoMergeEnabled = &enabled
+		case "auto_fix_prompt_override":
+			if string(value) == "null" {
+				empty := ""
+				patch.AutoFixPromptOverride = &empty
+				continue
+			}
+			var prompt string
+			if err := json.Unmarshal(value, &prompt); err != nil {
+				return TaskCIOptionsPatch{}, err
+			}
+			patch.AutoFixPromptOverride = &prompt
+		}
+	}
+	return patch, nil
 }
 
 func (c *Controller) httpGetPRFeedback(ctx *gin.Context) {

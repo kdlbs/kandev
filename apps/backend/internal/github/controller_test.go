@@ -8,13 +8,16 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/db"
 )
 
 // stubClient implements Client with no-op defaults; override fields as needed.
@@ -128,6 +131,120 @@ func setupControllerTest(client Client) (*gin.Engine, *Controller) {
 	router := gin.New()
 	ctrl.RegisterHTTPRoutes(router)
 	return router, ctrl
+}
+
+type staticPromptResolver struct {
+	content string
+}
+
+func (r staticPromptResolver) ResolvePromptContent(context.Context, string, string) string {
+	if r.content == "" {
+		return "default auto-fix prompt"
+	}
+	return r.content
+}
+
+func setupControllerStoreTest(t *testing.T) (*gin.Engine, *Store) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	tmp := t.TempDir()
+	dbConn, err := db.OpenSQLite(filepath.Join(tmp, "github.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = sqlxDB.Close() })
+	if _, err := sqlxDB.Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT, archived_at DATETIME)`); err != nil {
+		t.Fatalf("create tasks table: %v", err)
+	}
+	store, err := NewStore(sqlxDB, sqlxDB)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	log := newControllerTestLogger()
+	svc := NewService(&stubClient{}, "pat", nil, store, nil, log)
+	svc.SetPromptResolver(staticPromptResolver{content: "resolved default prompt"})
+	ctrl := NewController(svc, log)
+	router := gin.New()
+	ctrl.RegisterHTTPRoutes(router)
+	return router, store
+}
+
+func TestHttpTaskCIOptions_DefaultAndPatch(t *testing.T) {
+	router, store := setupControllerStoreTest(t)
+	ctx := context.Background()
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1",
+		Owner: "acme", Repo: "widget", PRNumber: 42,
+		PRURL: "https://github.com/acme/widget/pull/42", PRTitle: "Fix",
+		State: "open", CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed task pr: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/tasks/task-1/ci-options", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var got TaskCIOptionsResponse
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode default response: %v", err)
+	}
+	if got.TaskID != "task-1" || got.AutoFixEnabled || got.AutoMergeEnabled {
+		t.Fatalf("unexpected defaults: %+v", got)
+	}
+	if !got.UsingDefaultPrompt || got.EffectiveAutoFixPrompt != "resolved default prompt" {
+		t.Fatalf("unexpected prompt fields: %+v", got)
+	}
+	if len(got.PRStates) != 1 || got.PRStates[0].PRNumber != 42 {
+		t.Fatalf("expected synthesized PR state for PR #42, got %+v", got.PRStates)
+	}
+
+	body := bytes.NewBufferString(`{"auto_fix_enabled":true,"auto_merge_enabled":true,"auto_fix_prompt_override":"Task prompt"}`)
+	req = httptest.NewRequest(http.MethodPatch, "/api/v1/github/tasks/task-1/ci-options", body)
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode patch response: %v", err)
+	}
+	if !got.AutoFixEnabled || !got.AutoMergeEnabled || got.AutoFixPromptOverride == nil || *got.AutoFixPromptOverride != "Task prompt" {
+		t.Fatalf("unexpected patched response: %+v", got)
+	}
+	if got.UsingDefaultPrompt || got.EffectiveAutoFixPrompt != "Task prompt" {
+		t.Fatalf("expected task override to be effective, got %+v", got)
+	}
+
+	body = bytes.NewBufferString(`{"auto_fix_prompt_override":null}`)
+	req = httptest.NewRequest(http.MethodPatch, "/api/v1/github/tasks/task-1/ci-options", body)
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode reset response: %v", err)
+	}
+	if got.AutoFixPromptOverride != nil || !got.UsingDefaultPrompt {
+		t.Fatalf("expected reset to default prompt, got %+v", got)
+	}
+}
+
+func TestHttpPatchTaskCIOptions_InvalidPayload(t *testing.T) {
+	router, _ := setupControllerStoreTest(t)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/github/tasks/task-1/ci-options", bytes.NewBufferString(`{"auto_fix_enabled":"yes"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
 }
 
 func TestHttpGetPRInfo_Success(t *testing.T) {

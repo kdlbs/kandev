@@ -191,6 +191,71 @@ type TaskPR struct {
 	UpdatedAt               time.Time  `json:"updated_at" db:"updated_at"`
 }
 
+// TaskCIOptions stores task-level PR automation preferences.
+type TaskCIOptions struct {
+	TaskID                string    `json:"task_id" db:"task_id"`
+	AutoFixEnabled        bool      `json:"auto_fix_enabled" db:"auto_fix_enabled"`
+	AutoMergeEnabled      bool      `json:"auto_merge_enabled" db:"auto_merge_enabled"`
+	AutoFixPromptOverride *string   `json:"auto_fix_prompt_override,omitempty" db:"auto_fix_prompt_override"`
+	CreatedAt             time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at" db:"updated_at"`
+}
+
+// TaskCIOptionsPatch is a partial update for task CI automation options.
+type TaskCIOptionsPatch struct {
+	AutoFixEnabled        *bool
+	AutoMergeEnabled      *bool
+	AutoFixPromptOverride *string
+}
+
+// TaskCIOptionsResponse is the HTTP shape for task CI automation options.
+type TaskCIOptionsResponse struct {
+	TaskID                 string                     `json:"task_id"`
+	AutoFixEnabled         bool                       `json:"auto_fix_enabled"`
+	AutoMergeEnabled       bool                       `json:"auto_merge_enabled"`
+	AutoFixPromptOverride  *string                    `json:"auto_fix_prompt_override"`
+	EffectiveAutoFixPrompt string                     `json:"effective_auto_fix_prompt"`
+	UsingDefaultPrompt     bool                       `json:"using_default_prompt"`
+	UpdatedAt              time.Time                  `json:"updated_at"`
+	PRStates               []*TaskCIPRAutomationState `json:"pr_states"`
+}
+
+// TaskCIPRAutomationState stores per-PR dedupe and error state for CI automation.
+type TaskCIPRAutomationState struct {
+	TaskID                string     `json:"task_id" db:"task_id"`
+	RepositoryID          string     `json:"repository_id" db:"repository_id"`
+	PRNumber              int        `json:"pr_number" db:"pr_number"`
+	LastFixSignature      string     `json:"last_fix_signature" db:"last_fix_signature"`
+	LastFixCheckpointJSON string     `json:"last_fix_checkpoint_json" db:"last_fix_checkpoint_json"`
+	LastFixEnqueuedAt     *time.Time `json:"last_fix_enqueued_at,omitempty" db:"last_fix_enqueued_at"`
+	LastFixSessionID      *string    `json:"last_fix_session_id,omitempty" db:"last_fix_session_id"`
+	LastMergeSignature    string     `json:"last_merge_signature" db:"last_merge_signature"`
+	LastMergeAttemptAt    *time.Time `json:"last_merge_attempt_at,omitempty" db:"last_merge_attempt_at"`
+	LastError             *string    `json:"last_error,omitempty" db:"last_error"`
+	CreatedAt             time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt             time.Time  `json:"updated_at" db:"updated_at"`
+}
+
+// TaskCIFixAttempt records an auto-fix prompt attempt for a task PR.
+type TaskCIFixAttempt struct {
+	TaskID         string
+	RepositoryID   string
+	PRNumber       int
+	Signature      string
+	CheckpointJSON string
+	SessionID      string
+	EnqueuedAt     time.Time
+}
+
+// TaskCIMergeAttempt records an auto-merge attempt for a task PR.
+type TaskCIMergeAttempt struct {
+	TaskID       string
+	RepositoryID string
+	PRNumber     int
+	Signature    string
+	AttemptedAt  time.Time
+}
+
 // RepoFilter identifies a GitHub repository for review watch filtering.
 type RepoFilter struct {
 	Owner string `json:"owner"`

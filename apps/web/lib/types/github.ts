@@ -184,6 +184,38 @@ export type TaskPR = {
   updated_at: string;
 };
 
+export type TaskCIPRAutomationState = {
+  task_id: string;
+  repository_id: string;
+  pr_number: number;
+  last_fix_signature: string;
+  last_fix_checkpoint_json: string;
+  last_fix_enqueued_at: string | null;
+  last_fix_session_id: string | null;
+  last_merge_signature: string;
+  last_merge_attempt_at: string | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TaskCIAutomationOptions = {
+  task_id: string;
+  auto_fix_enabled: boolean;
+  auto_merge_enabled: boolean;
+  auto_fix_prompt_override: string | null;
+  effective_auto_fix_prompt: string;
+  using_default_prompt: boolean;
+  updated_at: string;
+  pr_states: TaskCIPRAutomationState[];
+};
+
+export type TaskCIAutomationPatch = {
+  auto_fix_enabled?: boolean;
+  auto_merge_enabled?: boolean;
+  auto_fix_prompt_override?: string | null;
+};
+
 export type PRWatch = {
   id: string;
   session_id: string;

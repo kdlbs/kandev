@@ -27,6 +27,8 @@ import type {
   CleanupTasksResponse,
   MergeMethod,
   RepoMergeMethods,
+  TaskCIAutomationOptions,
+  TaskCIAutomationPatch,
 } from "@/lib/types/github";
 
 // Status
@@ -80,6 +82,31 @@ export async function createTaskPR(
       body: JSON.stringify(data),
     },
   });
+}
+
+export async function getTaskCIAutomationOptions(taskId: string, options?: ApiRequestOptions) {
+  return fetchJson<TaskCIAutomationOptions>(
+    `/api/v1/github/tasks/${encodeURIComponent(taskId)}/ci-options`,
+    options,
+  );
+}
+
+export async function updateTaskCIAutomationOptions(
+  taskId: string,
+  patch: TaskCIAutomationPatch,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<TaskCIAutomationOptions>(
+    `/api/v1/github/tasks/${encodeURIComponent(taskId)}/ci-options`,
+    {
+      ...options,
+      init: {
+        ...(options?.init ?? {}),
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      },
+    },
+  );
 }
 
 // PR feedback (live from GitHub)

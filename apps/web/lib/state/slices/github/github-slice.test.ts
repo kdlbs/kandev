@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createGitHubSlice } from "./github-slice";
 import type { GitHubSlice } from "./types";
-import type { GitHubStatus, TaskPR } from "@/lib/types/github";
+import type { GitHubStatus, TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
 
 function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
@@ -40,6 +40,20 @@ function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
 
 function makeStore() {
   return create<GitHubSlice>()(immer((...a) => createGitHubSlice(...a)));
+}
+
+function makeCIOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCIAutomationOptions {
+  return {
+    task_id: "task-1",
+    auto_fix_enabled: false,
+    auto_merge_enabled: false,
+    auto_fix_prompt_override: null,
+    effective_auto_fix_prompt: "Default CI prompt",
+    using_default_prompt: true,
+    updated_at: "2026-06-18T10:00:00Z",
+    pr_states: [],
+    ...overrides,
+  };
 }
 
 const FUTURE_RESET = "2030-01-01T00:00:00Z";
@@ -228,5 +242,23 @@ describe("setPendingPrUrlForTask", () => {
 
     expect(store.getState().pendingPrUrlByTaskId.byTaskId["task-1"]?.["repo-b"]).toBe(urlB);
     expect(store.getState().pendingPrUrlByTaskId.byTaskId["task-1"]?.["repo-a"]).toBeUndefined();
+  });
+});
+
+describe("task CI automation options", () => {
+  it("stores task options and per-task loading/saving/error state", () => {
+    const store = makeStore();
+    const options = makeCIOptions({ auto_fix_enabled: true });
+
+    store.getState().setTaskCIAutomationLoading("task-1", true);
+    store.getState().setTaskCIAutomationSaving("task-1", true);
+    store.getState().setTaskCIAutomationError("task-1", "failed");
+    store.getState().setTaskCIAutomationOptions("task-1", options);
+
+    const state = store.getState().taskCIAutomation;
+    expect(state.loading["task-1"]).toBe(true);
+    expect(state.saving["task-1"]).toBe(true);
+    expect(state.errors["task-1"]).toBe("failed");
+    expect(state.byTaskId["task-1"]).toEqual(options);
   });
 });

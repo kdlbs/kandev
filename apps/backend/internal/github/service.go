@@ -19,6 +19,8 @@ const (
 	AuthMethodPAT  = "pat"
 )
 
+const defaultCIAutoFixPromptName = "ci-auto-fix"
+
 // defaultBranchMain and defaultBranchMaster are the conventional default branch
 // names sorted to the top of branch pickers.
 const (
@@ -69,6 +71,11 @@ type SecretManager interface {
 	Delete(ctx context.Context, id string) error
 }
 
+// PromptResolver resolves editable prompt content by name.
+type PromptResolver interface {
+	ResolvePromptContent(ctx context.Context, name, fallback string) string
+}
+
 // Service coordinates GitHub integration operations.
 type Service struct {
 	mu            sync.Mutex
@@ -97,6 +104,7 @@ type Service struct {
 	repoErrorCache       *ttlCache
 	protectionCache      *branchProtectionCache
 	rateTracker          *RateTracker
+	promptResolver       PromptResolver
 
 	// cleanupFailureMu guards cleanupFailureCounts; the cleanup loop is the
 	// only writer but the global sweep + per-watch sweep can run concurrently
@@ -168,6 +176,11 @@ func (s *Service) Stop() {
 // can wire it into individual clients.
 func (s *Service) RateTracker() *RateTracker {
 	return s.rateTracker
+}
+
+// SetPromptResolver wires the editable prompt service into GitHub automation.
+func (s *Service) SetPromptResolver(resolver PromptResolver) {
+	s.promptResolver = resolver
 }
 
 // newPATClient builds a PATClient pre-wired with the service's shared rate

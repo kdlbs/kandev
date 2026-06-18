@@ -28,7 +28,12 @@ export type {
   SessionRuntimeSliceActions,
 } from "./session-runtime/types";
 export type { UISlice, UISliceState, UISliceActions } from "./ui/types";
-export type { GitHubSlice, GitHubSliceState, GitHubSliceActions } from "./github/types";
+export type {
+  GitHubSlice,
+  GitHubSliceState,
+  GitHubSliceActions,
+  TaskCIAutomationOptionsState,
+} from "./github/types";
 export type {
   GitLabSlice,
   GitLabSliceState,

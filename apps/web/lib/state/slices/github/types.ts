@@ -7,6 +7,7 @@ import type {
   IssueWatch,
   GitHubActionPresets,
   PRFeedback,
+  TaskCIAutomationOptions,
 } from "@/lib/types/github";
 
 export type GitHubStatusState = {
@@ -61,6 +62,13 @@ export type PRFeedbackCacheState = {
   byKey: Record<string, PRFeedbackCacheEntry>;
 };
 
+export type TaskCIAutomationOptionsState = {
+  byTaskId: Record<string, TaskCIAutomationOptions>;
+  loading: Record<string, boolean>;
+  saving: Record<string, boolean>;
+  errors: Record<string, string | null>;
+};
+
 export type GitHubSliceState = {
   githubStatus: GitHubStatusState;
   taskPRs: TaskPRsState;
@@ -70,6 +78,7 @@ export type GitHubSliceState = {
   issueWatches: IssueWatchesState;
   actionPresets: ActionPresetsState;
   prFeedbackCache: PRFeedbackCacheState;
+  taskCIAutomation: TaskCIAutomationOptionsState;
 };
 
 export type GitHubSliceActions = {
@@ -96,6 +105,10 @@ export type GitHubSliceActions = {
   applyGitHubRateLimitUpdate: (update: GitHubRateLimitUpdate) => void;
   setPRFeedbackCacheEntry: (key: string, feedback: PRFeedback) => void;
   removePRFeedbackCacheEntry: (key: string) => void;
+  setTaskCIAutomationOptions: (taskId: string, options: TaskCIAutomationOptions) => void;
+  setTaskCIAutomationLoading: (taskId: string, loading: boolean) => void;
+  setTaskCIAutomationSaving: (taskId: string, saving: boolean) => void;
+  setTaskCIAutomationError: (taskId: string, error: string | null) => void;
 };
 
 export type GitHubSlice = GitHubSliceState & GitHubSliceActions;

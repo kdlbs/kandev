@@ -72,7 +72,7 @@ func TestSQLiteRepository_CRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list prompts: %v", err)
 	}
-	// Should have 1 custom prompt + 3 built-in prompts
+	// Should have 1 custom prompt + built-in prompts.
 	if len(list) < 1 {
 		t.Fatalf("expected at least 1 prompt, got %d", len(list))
 	}
@@ -96,7 +96,7 @@ func TestSQLiteRepository_CRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list prompts after delete: %v", err)
 	}
-	// Should only have built-in prompts left (3)
+	// Should only have built-in prompts left.
 	builtinCount := 0
 	for _, p := range list {
 		if p.Builtin {
@@ -106,8 +106,8 @@ func TestSQLiteRepository_CRUD(t *testing.T) {
 			t.Fatalf("expected custom prompt to be deleted, but it still exists")
 		}
 	}
-	if builtinCount != 3 {
-		t.Fatalf("expected 3 built-in prompts, got %d", builtinCount)
+	if builtinCount != 4 {
+		t.Fatalf("expected 4 built-in prompts, got %d", builtinCount)
 	}
 }
 
@@ -122,15 +122,22 @@ func TestSQLiteRepository_BuiltinPrompts(t *testing.T) {
 		t.Fatalf("list prompts: %v", err)
 	}
 
-	// Should have 3 built-in prompts
+	// Should include the CI auto-fix built-in prompt.
 	builtinCount := 0
+	var foundCIAutoFix bool
 	for _, p := range list {
 		if p.Builtin {
 			builtinCount++
 		}
+		if p.ID == "builtin-ci-auto-fix" && p.Name == "ci-auto-fix" && p.Content != "" {
+			foundCIAutoFix = true
+		}
 	}
 
-	if builtinCount != 3 {
-		t.Fatalf("expected 3 built-in prompts, got %d", builtinCount)
+	if builtinCount != 4 {
+		t.Fatalf("expected 4 built-in prompts, got %d", builtinCount)
+	}
+	if !foundCIAutoFix {
+		t.Fatalf("expected ci-auto-fix built-in prompt")
 	}
 }

@@ -4,7 +4,13 @@ vi.mock("@/lib/config", () => ({
   getBackendConfig: () => ({ apiBaseUrl: "http://api.test" }),
 }));
 
-import { fetchAccessibleRepos, GitHubUnavailableError, type AccessibleRepo } from "./github-api";
+import {
+  fetchAccessibleRepos,
+  getTaskCIAutomationOptions,
+  GitHubUnavailableError,
+  updateTaskCIAutomationOptions,
+  type AccessibleRepo,
+} from "./github-api";
 
 type FetchInput = Parameters<typeof fetch>[0];
 type FetchInit = Parameters<typeof fetch>[1];
@@ -166,5 +172,58 @@ describe("fetchAccessibleRepos — errors & signal", () => {
     const promise = fetchAccessibleRepos({ signal: controller.signal });
     controller.abort();
     await expect(promise).rejects.toThrow();
+  });
+});
+
+describe("task CI automation options", () => {
+  it("fetches options for a task", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        task_id: "task-1",
+        auto_fix_enabled: true,
+        auto_merge_enabled: false,
+        auto_fix_prompt_override: null,
+        effective_auto_fix_prompt: "Fix CI.",
+        using_default_prompt: true,
+        updated_at: "2026-06-18T10:00:00Z",
+        pr_states: [],
+      }),
+    );
+
+    const response = await getTaskCIAutomationOptions("task-1");
+
+    expect(lastCallUrl()).toBe("http://api.test/api/v1/github/tasks/task-1/ci-options");
+    expect(response.auto_fix_enabled).toBe(true);
+    expect(response.using_default_prompt).toBe(true);
+  });
+
+  it("patches task options and allows clearing the prompt override", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        task_id: "task-1",
+        auto_fix_enabled: false,
+        auto_merge_enabled: true,
+        auto_fix_prompt_override: null,
+        effective_auto_fix_prompt: "Default prompt",
+        using_default_prompt: true,
+        updated_at: "2026-06-18T10:01:00Z",
+        pr_states: [],
+      }),
+    );
+
+    await updateTaskCIAutomationOptions("task-1", {
+      auto_fix_enabled: false,
+      auto_merge_enabled: true,
+      auto_fix_prompt_override: null,
+    });
+
+    const call = fetchSpy.mock.calls.at(-1);
+    expect(String(call?.[0])).toBe("http://api.test/api/v1/github/tasks/task-1/ci-options");
+    expect(call?.[1]?.method).toBe("PATCH");
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      auto_fix_enabled: false,
+      auto_merge_enabled: true,
+      auto_fix_prompt_override: null,
+    });
   });
 });

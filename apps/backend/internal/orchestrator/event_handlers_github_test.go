@@ -57,11 +57,47 @@ type mockGitHubService struct {
 	disableReviewWatchCalls  int
 	lastDisableReviewWatchID string
 	lastDisableReviewCause   string
+
+	ciOptionsResp *github.TaskCIOptionsResponse
+	ciPRState     *github.TaskCIPRAutomationState
+	prFeedback    *github.PRFeedback
+	mergeCalls    int
 }
 
 func (m *mockGitHubService) Client() github.Client { return m.client }
 func (m *mockGitHubService) GetTaskPR(_ context.Context, _ string) (*github.TaskPR, error) {
 	return m.taskPR, m.taskPRErr
+}
+func (m *mockGitHubService) GetTaskCIOptionsResponse(context.Context, string) (*github.TaskCIOptionsResponse, error) {
+	if m.ciOptionsResp != nil {
+		return m.ciOptionsResp, nil
+	}
+	return &github.TaskCIOptionsResponse{}, nil
+}
+func (m *mockGitHubService) GetTaskCIPRState(context.Context, string, string, int) (*github.TaskCIPRAutomationState, error) {
+	return m.ciPRState, nil
+}
+func (m *mockGitHubService) RecordTaskCIFixAttempt(context.Context, github.TaskCIFixAttempt) error {
+	return nil
+}
+func (m *mockGitHubService) RecordTaskCIMergeAttempt(context.Context, github.TaskCIMergeAttempt) error {
+	return nil
+}
+func (m *mockGitHubService) RecordTaskCIError(context.Context, string, string, int, string) error {
+	return nil
+}
+func (m *mockGitHubService) ClearTaskCIError(context.Context, string, string, int) error {
+	return nil
+}
+func (m *mockGitHubService) GetPRFeedback(context.Context, string, string, int) (*github.PRFeedback, error) {
+	if m.prFeedback != nil {
+		return m.prFeedback, nil
+	}
+	return &github.PRFeedback{}, nil
+}
+func (m *mockGitHubService) MergePR(context.Context, string, string, int, string) error {
+	m.mergeCalls++
+	return nil
 }
 func (m *mockGitHubService) EnsurePRWatch(_ context.Context, _, _, _, _, _, branch string) (*github.PRWatch, error) {
 	m.ensureWatchCalls++
