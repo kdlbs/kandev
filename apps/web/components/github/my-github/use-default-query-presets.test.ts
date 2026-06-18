@@ -41,6 +41,7 @@ const preset: StoredQueryPreset = {
 
 describe("useDefaultQueryPresets", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     localStorageMock.clear();
     __resetSnapshotForTests();
     vi.mocked(fetchUserSettings).mockResolvedValue({
@@ -80,5 +81,35 @@ describe("useDefaultQueryPresets", () => {
       });
       expect(localStorageMock.getItem(SYNC_FAILED_KEY)).toBeNull();
     });
+  });
+
+  it("does not overwrite cross-tab local changes with a stale hydration response", async () => {
+    const initial = { pr: [preset], issue: [] };
+    const crossTab = { pr: [], issue: [preset] };
+    const server = {
+      pr: [{ ...preset, value: "server", label: "Server" }],
+      issue: [],
+    };
+    let resolveFetch: (value: Awaited<ReturnType<typeof fetchUserSettings>>) => void = () => {};
+    vi.mocked(fetchUserSettings).mockReturnValue(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+    localStorageMock.setItem(STORAGE_KEY, JSON.stringify(initial));
+
+    renderHook(() => useDefaultQueryPresets());
+
+    await waitFor(() => expect(fetchUserSettings).toHaveBeenCalled());
+    localStorageMock.setItem(STORAGE_KEY, JSON.stringify(crossTab));
+    window.dispatchEvent(new StorageEvent("storage", { key: STORAGE_KEY }));
+    resolveFetch({
+      settings: { github_default_query_presets: server },
+    } as Awaited<ReturnType<typeof fetchUserSettings>>);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(localStorageMock.getItem(STORAGE_KEY)).toBe(JSON.stringify(crossTab));
+    expect(updateUserSettings).not.toHaveBeenCalled();
   });
 });

@@ -111,8 +111,15 @@ function markMigratedToBackend(): void {
 
 function subscribe(cb: () => void) {
   listeners.add(cb);
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== STORAGE_KEY) return;
+    snapshot = readStorage();
+    listeners.forEach((fn) => fn());
+  };
+  window.addEventListener("storage", onStorage);
   return () => {
     listeners.delete(cb);
+    window.removeEventListener("storage", onStorage);
   };
 }
 
