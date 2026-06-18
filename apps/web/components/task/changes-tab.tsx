@@ -81,6 +81,7 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
       prevTotalRef.current = totalCount;
       seenCountRef.current = api.isActive ? totalCount : 0;
       initializedRef.current = false;
+      setBadgeCount(0);
     }
 
     if (api.isActive) {
