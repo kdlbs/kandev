@@ -92,10 +92,11 @@ export function shouldRunMessageBackfill(params: {
   activeTurnId: string | null;
   messages: Message[];
 }) {
+  // The active prompt may be the missed WS frame; start backfill once the turn exists.
   return (
     params.connectionStatus === "connected" &&
     params.taskSessionState === "RUNNING" &&
-    hasUserPromptInActiveTurn(params.messages, params.activeTurnId)
+    params.activeTurnId !== null
   );
 }
 
