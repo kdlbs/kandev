@@ -283,7 +283,7 @@ export function Graph2TaskPipeline({
   return (
     <div
       data-testid={`pipeline-task-${task.id}`}
-      className="flex items-center justify-center rounded-lg hover:bg-muted/30 transition-colors px-3 py-2"
+      className="flex items-center rounded-lg hover:bg-muted/30 transition-colors px-3 py-2"
     >
       <div className="flex items-center gap-3">
         {showCheckbox && (
