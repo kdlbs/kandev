@@ -121,23 +121,6 @@ function hasFileStatsChanged(existing: GitStatusEntry, incoming: GitStatusEntry)
   );
 }
 
-/** True when setGitStatus would write at least one map entry for this update. */
-export function gitStatusWouldMutate(
-  gitStatusState: SessionRuntimeSliceState["gitStatus"],
-  envKey: string,
-  gitStatus: GitStatusEntry,
-): boolean {
-  const repoName = gitStatus.repository_name ?? "";
-  const existingEnv = gitStatusState.byEnvironmentId[envKey];
-  const existingRepo = gitStatusState.byEnvironmentRepo[envKey]?.[repoName];
-  const repoChanged = !existingRepo || hasGitStatusChanged(existingRepo, gitStatus);
-  if (repoName !== "") {
-    return repoChanged;
-  }
-  const envChanged = !existingEnv || hasGitStatusChanged(existingEnv, gitStatus);
-  return envChanged || repoChanged;
-}
-
 /** Compare two git status entries to determine if a meaningful change occurred. */
 export function hasGitStatusChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
   // The backend also emits fresh snapshots for focus/startup/poll events. Those
