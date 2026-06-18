@@ -9,7 +9,6 @@ import (
 func TestBuildManifestUsesSameBinaryBackendMode(t *testing.T) {
 	env := []string{
 		"KANDEV_SERVER_PORT=1234",
-		"KANDEV_WEB_INTERNAL_URL=http://localhost:5678",
 		"UNRELATED=value",
 	}
 	manifest := buildManifest("/opt/kandev/bin/kandev", []string{"__backend"}, "/opt/kandev/bin", env, "/tmp/home", 1234, "run")

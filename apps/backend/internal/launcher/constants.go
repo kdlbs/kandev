@@ -8,7 +8,6 @@ import (
 
 const (
 	defaultBackendPort  = 38429
-	defaultWebPort      = 37429
 	defaultAgentctlPort = 39429
 
 	healthTimeoutReleaseMS = 45000

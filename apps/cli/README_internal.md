@@ -46,9 +46,7 @@ kandev/
 
 # npm runtime package (@kdlbs/runtime-{platform})
 @kdlbs/runtime-{platform}/
-├── bin/{kandev,agentctl}
-├── web/index.html
-└── web/assets/
+└── bin/{kandev,agentctl,agentctl-linux-amd64}
 ```
 
 For npm installs, the main `kandev` package provides only a tiny Node bin shim that execs `bin/kandev` from the platform runtime package.
@@ -67,7 +65,7 @@ For npm installs, the main `kandev` package provides only a tiny Node bin shim t
 | -------------------------- | ---------------------------------------------------------- |
 | `--version`, `-V`          | Print CLI version and exit                                 |
 | `--port`, `--backend-port` | Backend port                                               |
-| `--web-internal-port`      | Override internal dev web port                             |
+| `--web-internal-port`      | Override internal Vite dev web port                        |
 | `--verbose`, `-v`          | Show info logs                                             |
 | `--debug`                  | Show debug logs + agent message dumps                      |
 | `--runtime-version <tag>`  | **Advanced/debug**: download a specific GitHub runtime tag |
@@ -139,7 +137,7 @@ Versioning:
 | ------------------------------------- | -------------------------------------------------------------- |
 | `KANDEV_BUNDLE_DIR`                   | Force runtime bundle location (set by Homebrew wrapper, tests) |
 | `KANDEV_PORT` / `KANDEV_BACKEND_PORT` | Backend port                                                   |
-| `KANDEV_WEB_PORT`                     | Internal Next.js port                                          |
+| `KANDEV_WEB_PORT`                     | Internal Vite dev web port override                            |
 | `KANDEV_HEALTH_TIMEOUT_MS`            | Override health check timeout (ms)                             |
 
 ## Supported Platforms

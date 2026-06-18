@@ -11,12 +11,12 @@ func runInstalled(opts Options) int {
 		fmt.Fprintln(os.Stderr, "[kandev] --runtime-version is not implemented in the native launcher yet")
 		return 1
 	}
-	backendPort, webPort, err := resolvePorts(opts)
+	backendPort, err := resolvePorts(opts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 2
 	}
-	ports, err := pickPorts(backendPort, webPort)
+	ports, err := pickPorts(backendPort)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
@@ -41,8 +41,6 @@ func runInstalled(opts Options) int {
 		Mode:       "run",
 		Backend:    bundle.Launcher,
 		BackendCWD: filepath.Dir(bundle.Launcher),
-		WebServer:  bundle.WebServer,
-		WebCWD:     filepath.Dir(bundle.WebServer),
 		Ports:      ports,
 		LogLevel:   logLevel,
 		Opts:       opts,

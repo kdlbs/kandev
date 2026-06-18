@@ -22,7 +22,7 @@ import {
 import { resolveHealthTimeoutMs, waitForHealth } from "./health";
 import { getBinaryName } from "./platform";
 import { createProcessSupervisor } from "./process";
-import { buildBackendEnv, logStartupInfo, pickPorts } from "./shared";
+import { buildBackendEnv, logStartupInfo, pickBackendPorts } from "./shared";
 import { launchRestartableBackend } from "./supervisor/backend";
 import { openBrowser } from "./web";
 
@@ -31,8 +31,6 @@ export type StartOptions = {
   repoRoot: string;
   /** Optional preferred backend port (finds available port if not specified) */
   backendPort?: number;
-  /** Optional preferred web port (finds available port if not specified) */
-  webPort?: number;
   /** Show info logs from backend + web */
   verbose?: boolean;
   /** Show debug logs + agent message dumps */
@@ -56,12 +54,11 @@ export type StartOptions = {
 export async function runStart({
   repoRoot,
   backendPort,
-  webPort,
   verbose = false,
   debug = false,
   headless = false,
 }: StartOptions): Promise<void> {
-  const ports = await pickPorts(backendPort, webPort);
+  const ports = await pickBackendPorts(backendPort);
 
   const backendBin = path.join(repoRoot, "apps", "backend", "bin", getBinaryName("kandev"));
   if (!fs.existsSync(backendBin)) {

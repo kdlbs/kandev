@@ -18,13 +18,11 @@ type Options struct {
 	Command        Command
 	RuntimeVersion string
 	BackendPort    int
-	WebPort        int
 	Verbose        bool
 	Debug          bool
 	ShowVersion    bool
 	Headless       bool
 	ShowHelp       bool
-	Deprecated     []string
 }
 
 type ParseError struct {
@@ -120,13 +118,6 @@ func parsePortArg(argv []string, i int, opts *Options) (int, bool, error) {
 		return i, true, parseBackendPortValue("--port", strings.TrimPrefix(arg, "--port="), opts)
 	case strings.HasPrefix(arg, "--backend-port="):
 		return i, true, parseBackendPortValue("--backend-port", strings.TrimPrefix(arg, "--backend-port="), opts)
-	case arg == "--web-internal-port" || arg == "--web-port":
-		next, err := parseWebPort(argv, i, opts)
-		return next, true, err
-	case strings.HasPrefix(arg, "--web-internal-port="):
-		return i, true, parseWebPortValue("--web-internal-port", strings.TrimPrefix(arg, "--web-internal-port="), opts)
-	case strings.HasPrefix(arg, "--web-port="):
-		return i, true, parseWebPortValue("--web-port", strings.TrimPrefix(arg, "--web-port="), opts)
 	default:
 		return i, false, nil
 	}
@@ -170,29 +161,6 @@ func parseBackendPortValue(flag, value string, opts *Options) error {
 	return nil
 }
 
-func parseWebPort(argv []string, i int, opts *Options) (int, error) {
-	v, err := takeValue(argv, i, argv[i])
-	if err != nil {
-		return i, err
-	}
-	if err := parseWebPortValue(argv[i], v, opts); err != nil {
-		return i, err
-	}
-	return i + 1, nil
-}
-
-func parseWebPortValue(flag, value string, opts *Options) error {
-	port, err := parsePort(value, flag)
-	if err != nil {
-		return err
-	}
-	opts.WebPort = port
-	if flag == "--web-port" {
-		opts.Deprecated = appendDeprecated(opts.Deprecated, flag)
-	}
-	return nil
-}
-
 func takeValue(argv []string, i int, flag string) (string, error) {
 	if i+1 >= len(argv) || strings.HasPrefix(argv[i+1], "-") {
 		return "", ParseError{Message: fmt.Sprintf("%s requires a value", flag)}
@@ -206,13 +174,4 @@ func parsePort(raw, flag string) (int, error) {
 		return 0, ParseError{Message: fmt.Sprintf("%s value must be an integer between 1 and 65535, got %q", flag, raw)}
 	}
 	return n, nil
-}
-
-func appendDeprecated(flags []string, flag string) []string {
-	for _, existing := range flags {
-		if existing == flag {
-			return flags
-		}
-	}
-	return append(flags, flag)
 }

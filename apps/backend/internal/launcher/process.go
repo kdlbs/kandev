@@ -141,14 +141,8 @@ func (p *managedProcess) kill() {
 	<-p.done
 }
 
-func waitForAppExit(supervisor *processSupervisor, backend *restartableBackend, web *managedProcess) int {
-	select {
-	case code := <-backend.exitCh:
-		supervisor.shutdown("backend exit")
-		return code
-	case <-web.done:
-		_, code := web.Exited()
-		supervisor.shutdown("web exit")
-		return code
-	}
+func waitForAppExit(supervisor *processSupervisor, backend *restartableBackend) int {
+	code := <-backend.exitCh
+	supervisor.shutdown("backend exit")
+	return code
 }

@@ -3,7 +3,7 @@
 # Single-stage build that consumes prebuilt artifacts. The release workflow
 # (.github/workflows/release.yml) extracts the per-arch release bundle
 # (`kandev-linux-{x64,arm64}.tar.gz`) into the build context, then this file
-# just COPYs the binaries + web standalone into the runtime layout.
+# just COPYs the native binaries into the runtime layout.
 #
 # Building this file outside CI (manual `docker build .`) will fail because
 # the `bundle/` directory isn't present in the build context. To build
@@ -14,12 +14,7 @@
 # Run:
 #   docker run -p 38429:38429 -v kandev-data:/data ghcr.io/kdlbs/kandev:latest
 
-ARG PNPM_VERSION=9.15.9
-
 FROM node:24-bookworm-slim
-
-ARG PNPM_VERSION
-LABEL org.opencontainers.image.pnpm-version="${PNPM_VERSION}"
 
 # Install runtime dependencies. gh is included because the GitHub integration
 # (PR review, webhooks) shells out to it for auth fallback when GITHUB_TOKEN
@@ -53,15 +48,13 @@ RUN mkdir -p /data/home/.azure && \
 
 # Create app directory structure matching what `kandev start` expects:
 #   /app/apps/backend/bin/kandev
-#   /app/apps/web/.next/standalone/web/server.js
-RUN mkdir -p /app/apps/backend/bin /app/apps/web/.next/standalone /data/worktrees
+RUN mkdir -p /app/apps/backend/bin /data/worktrees
 
 # Build context layout (prepared by the release workflow from the extracted
 # bundle tarball):
 #   bundle/bin/kandev                  - native Go backend (per-arch)
 #   bundle/bin/agentctl                - native agentctl (per-arch)
 #   bundle/bin/agentctl-linux-amd64    - amd64 agentctl helper (always amd64)
-#   bundle/web/...                     - Next.js standalone + static + public
 #
 # The bundle's `bin/agentctl-linux-amd64` variant is bind-mounted into
 # Docker-executor sandboxes by the lifecycle manager; ship it next to kandev
@@ -69,7 +62,6 @@ RUN mkdir -p /app/apps/backend/bin /app/apps/web/.next/standalone /data/worktree
 COPY bundle/bin/kandev               /app/apps/backend/bin/kandev
 COPY bundle/bin/agentctl-linux-amd64 /app/apps/backend/bin/agentctl-linux-amd64
 COPY bundle/bin/agentctl             /usr/local/bin/agentctl
-COPY bundle/web/                     /app/apps/web/.next/standalone/
 COPY docker-entrypoint.sh            /usr/local/bin/docker-entrypoint.sh
 
 # Re-apply executable bits stripped by tar/COPY edge cases, then link the native
@@ -99,10 +91,10 @@ ENV KANDEV_NO_BROWSER=1 \
 
 WORKDIR /app
 
-# Only the backend port is exposed — it reverse-proxies the Next.js frontend
-# (which listens on 37429 internally), so users hit a single port.
+# Only the backend port is exposed; the Go backend serves API, WebSocket, and
+# embedded SPA assets on the same listener.
 EXPOSE 38429
 
 # tini as PID 1 for signal handling; entrypoint handles privilege drop
 ENTRYPOINT ["tini", "--", "docker-entrypoint.sh"]
-CMD ["kandev", "start", "--backend-port", "38429", "--web-port", "37429", "--verbose"]
+CMD ["kandev", "start", "--backend-port", "38429", "--verbose"]

@@ -12,9 +12,7 @@ class Kandev < Formula
 
   depends_on "go"   => :build
   depends_on "pnpm" => :build
-  depends_on "node"
 
-  uses_from_macos "rsync" => :build
   uses_from_macos "sqlite"
 
   def install
@@ -22,7 +20,7 @@ class Kandev < Formula
 
     system "pnpm", "-C", "apps", "install", "--frozen-lockfile"
     system "pnpm", "-C", "apps", "--filter", "@kandev/web", "build"
-    system "./scripts/release/package-web.sh"
+    system "make", "sync-embedded-web"
 
     bundle = buildpath/"dist/kandev"
     (bundle/"bin").mkpath
@@ -46,17 +44,6 @@ class Kandev < Formula
     end
 
     system "./scripts/release/package-bundle.sh"
-
-    # The Next.js standalone tracer pulls platform-tagged native modules
-    # into the bundle, including musl-libc variants of sharp, @swc/core,
-    # and lightningcss that brew linkage --test flags on glibc-only
-    # Linuxbrew. Strip them — rm_r handles both directory trees (the
-    # current shape) and bare .node files (in case a future bundler
-    # version inlines them). The exist? guard handles the glob
-    # returning a parent dir and its musl-named children together —
-    # removing the parent makes the child paths vanish before we get
-    # to them.
-    bundle.glob("web/**/*musl*").each { |p| rm_r(p) if p.exist? }
 
     libexec.install Dir[bundle/"*"]
 

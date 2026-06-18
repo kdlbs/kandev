@@ -102,9 +102,7 @@ Changes:
 
 - Detect repo root using current `findRepoRoot` semantics.
 - Resolve local backend by using `os.Executable()` and spawning `<self> __backend`.
-- Resolve standalone Next server path under `apps/web/.next/standalone`.
-- Link `.next/static` and `public` into standalone output when missing.
-- Start backend, wait for health, then start `node server.js`.
+- Start backend and wait for health; the backend serves the embedded Vite SPA.
 - Update `make start` to invoke `apps/backend/bin/kandev start`.
 
 Reason:
@@ -124,7 +122,6 @@ Changes:
 - Validate release bundle layout with one `bin/kandev` executable.
 - Resolve runtime via `KANDEV_BUNDLE_DIR` and explicit bundle context.
 - Spawn backend using `<bundle>/bin/kandev __backend`.
-- Start web using `node <bundle>/web/server.js`.
 - Preserve quiet backend log buffering and verbose/debug/headless behavior.
 - Decide separately whether to port `--runtime-version`; if deferred, return a clear unsupported/deprecated error.
 
@@ -218,11 +215,10 @@ Changes:
 kandev/
 ├── bin/kandev
 ├── bin/agentctl
-├── bin/agentctl-linux-amd64
-└── web/server.js
+└── bin/agentctl-linux-amd64
 ```
 
-- Stop requiring `dist/kandev/cli` for Homebrew; platform bundles contain `bin/` and `web/`.
+- Stop requiring `dist/kandev/cli` for Homebrew; platform bundles contain native `bin/` artifacts with web assets embedded in `bin/kandev`.
 - Add smoke tests for `bin/kandev --help`, `bin/kandev --version`, `bin/kandev run --headless`, and `bin/kandev service --help`.
 
 ### npm/npx Shim
@@ -255,7 +251,6 @@ Changes:
 
 - Document that `kandev` is native for Homebrew/release bundles.
 - Document that npm/npx still uses Node as the package dispatch mechanism.
-- Document that the Next.js standalone server still requires Node until a separate web-runtime migration.
 - Remove stale references to Homebrew requiring `dist/cli.bundle.js`.
 
 ---
@@ -274,9 +269,9 @@ Changes:
   **File:** `apps/backend/internal/launcher/env/*_test.go`, `apps/backend/internal/launcher/ports/*_test.go`
   **How:** table-driven unit tests for flags and env vars.
 
-- **What:** `start` resolves standalone server paths and links assets.
+- **What:** `start` runs the native backend with embedded or filesystem Vite assets.
   **File:** `apps/backend/internal/launcher/start/*_test.go`
-  **How:** temp directory fixtures for `.next/standalone`, `.next/static`, and `public`.
+  **How:** temp directory fixtures for repo roots, `apps/web/dist`, and embedded-asset fallback.
 
 - **What:** bundle validation accepts the single-binary layout.
   **File:** `apps/backend/internal/launcher/bundle/*_test.go`

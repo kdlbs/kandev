@@ -392,7 +392,7 @@ jobs:
   # ---------------------------------------------------------------------------
   # Docker base image — split per arch onto native runners, then stitched into
   # a multi-arch manifest list. Each arch consumes the matching linux bundle
-  # produced by build-bundles, so no Go/Next.js/pnpm work happens inside the
+  # produced by build-bundles, so no Go/Vite/pnpm work happens inside the
   # Docker build (the Dockerfile is reduced to apt-get + COPY).
   # ---------------------------------------------------------------------------
   docker-amd64:

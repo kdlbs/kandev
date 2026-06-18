@@ -30,9 +30,6 @@ func Run(args []string, build BuildInfo) int {
 		fmt.Print(cli.Help())
 		return 0
 	}
-	for _, flag := range opts.Deprecated {
-		fmt.Fprintf(os.Stderr, "[kandev] %s is deprecated; use --web-internal-port\n", flag)
-	}
 	switch opts.Command {
 	case CommandStart:
 		return runStart(opts)

@@ -52,7 +52,6 @@ Advanced:
   --web-internal-port    Override the internal dev web port. The Go backend
                          reverse-proxies to it in dev; start/run serve from Go.
                          Also reads KANDEV_WEB_PORT.
-  --web-port             Deprecated alias for --web-internal-port.
   --runtime-version <tag>  Download and use a specific release tag instead of
                            the installed runtime. For debugging only.
                            Example: kandev --runtime-version v0.16.0
@@ -90,7 +89,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const { options, showHelp, deprecatedFlags } = parseArgs(process.argv.slice(2));
+  const { options, showHelp } = parseArgs(process.argv.slice(2));
 
   if (options.showVersion) {
     console.log(pkg.version);
@@ -102,13 +101,10 @@ async function main(): Promise<void> {
     return;
   }
 
-  for (const flag of deprecatedFlags) {
-    process.stderr.write(`[kandev] ${flag} is deprecated; use --web-internal-port\n`);
-  }
-
   const resolved = resolvePorts(options, process.env);
   const backendPort = ensureValidPort(resolved.backendPort, "backend port");
-  const webPort = ensureValidPort(resolved.webPort, "web port");
+  const webPort =
+    options.command === "dev" ? ensureValidPort(resolved.webPort, "web port") : undefined;
 
   // After an npm/brew upgrade, paths baked into an installed service unit may
   // be stale. Warn once before launch so the user knows to re-run install.
@@ -135,7 +131,6 @@ async function main(): Promise<void> {
     await runStart({
       repoRoot,
       backendPort,
-      webPort,
       verbose: options.verbose,
       debug: options.debug,
       headless: options.headless,
@@ -146,7 +141,6 @@ async function main(): Promise<void> {
   await runRelease({
     runtimeVersion: options.runtimeVersion,
     backendPort,
-    webPort,
     verbose: options.verbose,
     debug: options.debug,
     headless: options.headless,

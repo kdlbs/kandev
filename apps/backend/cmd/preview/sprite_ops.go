@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kandev/kandev/internal/common/ports"
 	sprites "github.com/superfly/sprites-go"
 )
 
@@ -121,14 +120,13 @@ mkdir -p /data
 
 # Kill any agentctl orphans from previous runs.
 pkill -f agentctl || true
-# Kill any stale web (node) process from older preview deployments.
-pkill -f '/app/apps/web/.*/server.js' || true
 sleep 1
 cd /app
 
 export KANDEV_HOME_DIR=/data
 export KANDEV_DOCKER_ENABLED=false
 export KANDEV_LOG_LEVEL=info
+export KANDEV_WEB_DIST_DIR=/app/apps/web/dist
 # Preview mode: only register the mock agent, suppress real agent discovery.
 export KANDEV_MOCK_AGENT=only
 # The preview service runs from /app, so the backend's relative dist probes do
@@ -138,12 +136,11 @@ export KANDEV_WEB_DIST_DIR=/app/apps/web/dist
 # Launch through the CLI so the backend runs under the restart supervisor.
 exec kandev start \
   --backend-port %d \
-  --web-internal-port %d \
   --verbose \
   --headless \
   > /var/log/kandev.log 2>&1
 STARTSCRIPT
-chmod +x /app/start-kandev.sh`, backendPort, ports.Web)
+chmod +x /app/start-kandev.sh`, backendPort)
 }
 
 // deployService stops any running kandev service, registers (or updates) its
