@@ -10,8 +10,10 @@ import type { UISlice } from "./types";
 type ImmerSet = (recipe: (draft: UISlice) => void, shouldReplace?: false | undefined) => void;
 
 let sidebarTaskPrefsSync = Promise.resolve();
+let sidebarTaskPrefsSyncVersion = 0;
 
 function syncSidebarTaskPrefs(prefs: UISlice["sidebarTaskPrefs"], set: ImmerSet) {
+  const syncVersion = ++sidebarTaskPrefsSyncVersion;
   const payload = {
     sidebar_task_prefs: {
       pinned_task_ids: [...prefs.pinnedTaskIds],
@@ -27,6 +29,7 @@ function syncSidebarTaskPrefs(prefs: UISlice["sidebarTaskPrefs"], set: ImmerSet)
       updateUserSettings(payload)
         .then(() => {
           set((draft) => {
+            if (syncVersion !== sidebarTaskPrefsSyncVersion) return;
             draft.sidebarTaskPrefs.syncError = null;
             draft.sidebarTaskPrefs.syncPending = false;
           });
@@ -34,8 +37,9 @@ function syncSidebarTaskPrefs(prefs: UISlice["sidebarTaskPrefs"], set: ImmerSet)
         .catch((err) => {
           const message = err instanceof Error ? err.message : "Failed to sync sidebar task prefs";
           set((draft) => {
+            if (syncVersion !== sidebarTaskPrefsSyncVersion) return;
             draft.sidebarTaskPrefs.syncError = message;
-            draft.sidebarTaskPrefs.syncPending = true;
+            draft.sidebarTaskPrefs.syncPending = false;
           });
         })
         .then(() => undefined),

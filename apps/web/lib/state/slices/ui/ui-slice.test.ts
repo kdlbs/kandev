@@ -160,6 +160,7 @@ describe("sidebar task prefs (pin + manual order)", () => {
 
     await waitFor(() => {
       expect(store.getState().sidebarTaskPrefs.syncError).toBe(BACKEND_DOWN);
+      expect(store.getState().sidebarTaskPrefs.syncPending).toBe(false);
     });
 
     vi.mocked(updateUserSettings).mockResolvedValueOnce({

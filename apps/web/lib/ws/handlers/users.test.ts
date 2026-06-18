@@ -161,4 +161,34 @@ describe("user settings websocket sidebar settings", () => {
       syncPending: true,
     });
   });
+
+  it("applies server sidebar task prefs after a failed sync is no longer pending", () => {
+    const store = makeStore();
+    store.setState((state) => ({
+      ...state,
+      sidebarTaskPrefs: {
+        pinnedTaskIds: ["local"],
+        orderedTaskIds: ["local"],
+        subtaskOrderByParentId: {},
+        syncError: "Failed to sync",
+        syncPending: false,
+      },
+    }));
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        sidebar_task_prefs: {
+          pinned_task_ids: ["server"],
+          ordered_task_ids: ["server"],
+          subtask_order_by_parent_id: {},
+        },
+      }),
+    );
+
+    expect(store.getState().sidebarTaskPrefs).toMatchObject({
+      pinnedTaskIds: ["server"],
+      orderedTaskIds: ["server"],
+      syncError: "Failed to sync",
+    });
+  });
 });
