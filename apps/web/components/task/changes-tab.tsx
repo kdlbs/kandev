@@ -100,6 +100,8 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
     if (!initializedRef.current) {
       if (gitStatusLoaded) initializedRef.current = true;
     } else if (increased) {
+      // The product behavior is to surface every new git update unless the
+      // changes panel shares a group with agent session panels.
       autoActivateChangesPanel();
     }
 

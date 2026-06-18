@@ -56,6 +56,27 @@ async function moveChangesToTerminalGroupAndFocusTerminal(testPage: Page) {
   });
 }
 
+async function moveChangesToChatGroupAndFocusChat(testPage: Page) {
+  await testPage.evaluate(() => {
+    type Group = { id: string };
+    type PanelApi = {
+      moveTo: (opts: { group: Group }) => void;
+      setActive: () => void;
+    };
+    type Panel = { id: string; api: PanelApi; group?: Group };
+    type Api = { panels: Panel[]; getPanel: (id: string) => Panel | undefined };
+    const dockview = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+    const changes = dockview?.getPanel("changes");
+    const chat =
+      dockview?.getPanel("chat") ?? dockview?.panels.find((p) => p.id.startsWith("session:"));
+    if (!changes || !chat?.group) {
+      throw new Error("Dockview changes or chat panel was not available");
+    }
+    changes.api.moveTo({ group: chat.group });
+    chat.api.setActive();
+  });
+}
+
 test.describe("Changes panel focus behavior", () => {
   /**
    * Verifies the changes panel does NOT steal focus from the chat tab
@@ -126,12 +147,7 @@ test.describe("Changes panel focus behavior", () => {
     await expect(session.chat).toBeVisible({ timeout: 5_000 });
   });
 
-  /**
-   * Verifies the changes panel does NOT auto-focus when it is in the center
-   * group (e.g. plan mode layout). Even when new changes appear, the chat
-   * panel should stay focused.
-   */
-  test("changes panel does not auto-focus when in center group", async ({
+  test("changes panel does not auto-focus when grouped with agent session panels", async ({
     testPage,
     apiClient,
     seedData,
@@ -157,17 +173,13 @@ test.describe("Changes panel focus behavior", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
+    await session.waitForDockviewReady();
 
-    // Toggle plan mode — this moves changes into the center group
-    await session.togglePlanMode();
-    await expect(session.planPanel).toBeVisible({ timeout: 10_000 });
+    await moveChangesToChatGroupAndFocusChat(testPage);
     await expect(session.chat).toBeVisible();
 
-    // Verify the chat/session tab is active, not changes
-    const changesTab = testPage.locator(".dv-default-tab:has-text('Changes')");
-    await expect(changesTab).not.toHaveClass(/dv-active-tab/, { timeout: 5_000 });
+    await expect(changesTab(testPage)).not.toHaveClass(/dv-active-tab/, { timeout: 5_000 });
 
-    // Create new changes — this would previously trigger auto-activate
     git.createFile("new-file.txt", "new content");
     git.stageAll();
     git.commit("new commit");
@@ -180,10 +192,8 @@ test.describe("Changes panel focus behavior", () => {
     // Wait a bit for any async auto-activate to fire
     await testPage.waitForTimeout(2_000);
 
-    // Changes tab should NOT have stolen focus
-    await expect(changesTab).not.toHaveClass(/dv-active-tab/, { timeout: 5_000 });
+    await expect(changesTab(testPage)).not.toHaveClass(/dv-active-tab/, { timeout: 5_000 });
 
-    // Chat should still be visible (active)
     await expect(session.chat).toBeVisible();
   });
 
