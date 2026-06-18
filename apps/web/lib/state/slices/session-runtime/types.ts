@@ -78,6 +78,15 @@ export type GitStatusEntry = {
    * GitStatusState.byEnvironmentRepo.
    */
   repository_name?: string;
+  /**
+   * Current HEAD and merge-base SHAs from the backend status stream. Used by
+   * hasGitStatusChanged as a fast-path fingerprint: when both SHAs and the
+   * file-status lists are unchanged, the working tree is identical and the
+   * expensive per-file diff-string deep compare can be skipped. Optional
+   * because degraded git states (and legacy payloads) may omit them.
+   */
+  head_commit?: string;
+  base_commit?: string;
 };
 
 export type GitStatusState = {
@@ -128,6 +137,13 @@ export type CumulativeDiff = {
   head_commit: string;
   total_commits: number;
   files: Record<string, FileInfo>;
+  /**
+   * Files dropped from `files` because the cumulative range exceeded the
+   * backend's per-request file cap (a mid-rebase base→working-tree diff can
+   * enumerate tens of thousands of files). Zero/absent when the full set fit.
+   * Surfaced to the user as a "N more files hidden" banner.
+   */
+  truncated_files_count?: number;
 };
 
 export type SessionCommitsState = {

@@ -45,6 +45,9 @@ function buildGitStatusEntry(event: GitStatusUpdateEvent): GitStatusEntry {
     // Multi-repo workspaces tag each status with the repository it belongs to;
     // setGitStatus routes the entry into byEnvironmentRepo accordingly.
     repository_name: event.status.repository_name,
+    // HEAD + merge-base SHAs power hasGitStatusChanged's fast-path fingerprint.
+    head_commit: event.status.head_commit,
+    base_commit: event.status.base_commit,
   };
 }
 
