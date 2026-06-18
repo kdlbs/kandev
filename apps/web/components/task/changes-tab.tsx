@@ -22,7 +22,7 @@ import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 type DockviewPanel = NonNullable<ReturnType<DockviewApi["getPanel"]>>;
 
 function groupContainsAgentSessionPanel(panel: DockviewPanel): boolean {
-  return panel?.group.panels.some((p) => p.id === "chat" || p.id.startsWith("session:")) ?? false;
+  return panel.group.panels.some((p) => p.id === "chat" || p.id.startsWith("session:"));
 }
 
 /** Auto-activate the changes panel unless it shares a group with agent sessions. */
@@ -54,6 +54,7 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
 
   const prevTotalRef = useRef(totalCount);
   const seenCountRef = useRef(api.isActive ? totalCount : 0);
+  const activeSessionRef = useRef(activeSessionId);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Armed once we know the initial git data has settled. Until then, any
   // 0→N transition is treated as an initial load, not a real new change.
@@ -75,6 +76,13 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
 
   // React to totalCount changes: auto-activate, flash, badge
   useEffect(() => {
+    if (activeSessionRef.current !== activeSessionId) {
+      activeSessionRef.current = activeSessionId;
+      prevTotalRef.current = totalCount;
+      seenCountRef.current = api.isActive ? totalCount : 0;
+      initializedRef.current = false;
+    }
+
     if (api.isActive) {
       seenCountRef.current = totalCount;
     }
@@ -105,7 +113,7 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
       const unseen = Math.max(0, totalCount - seenCountRef.current);
       requestAnimationFrame(() => setBadgeCount(unseen));
     }
-  }, [totalCount, api, gitStatusLoaded]);
+  }, [totalCount, api, gitStatusLoaded, activeSessionId]);
 
   // Cleanup flash timer on unmount
   useEffect(() => {
