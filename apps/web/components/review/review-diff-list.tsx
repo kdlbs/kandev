@@ -11,6 +11,7 @@ import { generateUnifiedDiff, calculateHash } from "@/lib/utils/file-diff";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
+import { useBaseBranchByRepo } from "@/hooks/domains/session/use-base-branch-by-repo";
 import type { DiffComment } from "@/lib/diff/types";
 import { diffSkipReasonLabel, reviewFileKey } from "./types";
 import type { ReviewFile } from "./types";
@@ -348,12 +349,62 @@ function useScrollIntoViewOnSelect(
   }, [isSelected, sectionRef, setCollapsed]);
 }
 
+/**
+ * Decide whether a review row can expand its collapsed context, and which git
+ * ref supplies the "old" side when reconstructing full file context.
+ *
+ * Expansion reveals the *unmodified* lines hidden between hunks. @pierre/diffs
+ * needs the full old+new file contents (paired with the patch) to render those
+ * controls; we fetch the new side from the working tree and the old side from
+ * `baseRef`. The ref has to match the base the diff was computed against, or
+ * the reparse comes out inconsistent and silently falls back to a partial
+ * (controls-less) render:
+ *
+ *  - uncommitted rows: diff is working-tree-vs-HEAD, so baseRef="HEAD".
+ *  - committed rows: diff is base-branch-vs-HEAD, so baseRef is the repo's
+ *    base branch. HEAD already contains the commits, so expanding against it
+ *    pairs identical old/new content and yields no controls (the bug behind
+ *    "expansion stopped working in the review screen"). With no known base
+ *    branch we can't fetch the pre-change content, so expansion is disabled
+ *    rather than rendering dead separators.
+ *  - PR rows: the working tree belongs to the local branch, not the PR head,
+ *    so the fetched content would be paired with the wrong patch — disabled.
+ *  - untracked files: a synthetic all-additions hunk against /dev/null with no
+ *    real context to expand — disabled.
+ *
+ * The @pierre/diffs trailing-context guard in `useExpandableDiff` keeps any
+ * mismatch (stale snapshot, wrong base, file edited mid-flight) from crashing
+ * the renderer, so enabling expansion here is always safe.
+ */
+export function resolveDiffExpansion(
+  file: Pick<ReviewFile, "source" | "status" | "repository_name">,
+  baseBranchByRepo: Record<string, string>,
+  fallbackBaseBranch?: string,
+): { enableExpansion: boolean; baseRef: string } {
+  if (file.source === "pr" || file.status === "untracked") {
+    return { enableExpansion: false, baseRef: "HEAD" };
+  }
+  if (file.source === "committed") {
+    const repoName = file.repository_name ?? "";
+    // Exact per-repo base wins. Fall back to the task's sole base branch ONLY
+    // for single-repo files (no repository_name) — a multi-repo file whose repo
+    // isn't in the map must NOT borrow another repo's base branch, which would
+    // fetch the wrong "old" content and silently drop expansion.
+    const base = baseBranchByRepo[repoName] ?? (repoName === "" ? fallbackBaseBranch : undefined);
+    if (!base) return { enableExpansion: false, baseRef: "HEAD" };
+    return { enableExpansion: true, baseRef: base };
+  }
+  return { enableExpansion: true, baseRef: "HEAD" };
+}
+
 function renderDiffContent(opts: {
   shouldRender: boolean;
   file: ReviewFile;
   sessionId: string;
   wordWrap: boolean;
   expandUnchanged: boolean;
+  enableExpansion: boolean;
+  baseRef: string;
   onRevertBlock: (filePath: string, info: RevertBlockInfo) => void;
   onCommentRun: (comment: DiffComment) => void;
   onToggleExpandUnchanged: () => void;
@@ -364,33 +415,13 @@ function renderDiffContent(opts: {
     sessionId,
     wordWrap,
     expandUnchanged,
+    enableExpansion,
+    baseRef,
     onRevertBlock,
     onCommentRun,
     onToggleExpandUnchanged,
   } = opts;
   if (shouldRender && file.diff) {
-    // Expansion fetches the file content from the working tree to reconstruct
-    // full context around hunks. For PR files the working tree's content
-    // belongs to the local branch, not the PR head — when the same file has
-    // both PR and local changes, the wrong content gets paired with the PR
-    // patch and @pierre/diffs 1.1.x renders nothing/errors. Disable expansion
-    // for PR-sourced rows.
-    //
-    // Also disable expansion for committed-source rows: the backend computes
-    // the diff against the session's stored base commit, not HEAD. HEAD
-    // already contains the committed changes, so fetching old content at
-    // baseRef="HEAD" returns the same content as the working tree, leaving
-    // processFile's trailing-context counts inconsistent and crashing the
-    // renderer. Using the right base would need the session's base SHA
-    // plumbed in here; that's a follow-up.
-    //
-    // Also disable expansion for untracked files: the backend synthesizes a
-    // single all-additions hunk against /dev/null, so there is no real
-    // context to expand. Re-parsing with the live working-tree content
-    // races with concurrent edits — if the file shrinks after the snapshot,
-    // the cached hunk header advertises more lines than the fetched content
-    // has and @pierre/diffs' DiffHunksRenderer throws.
-    const enableExpansion = file.source === "uncommitted" && file.status !== "untracked";
     return (
       <>
         <DiffErrorBoundary filePath={file.path}>
@@ -405,7 +436,7 @@ function renderDiffContent(opts: {
             sessionId={sessionId}
             wordWrap={wordWrap}
             enableExpansion={enableExpansion}
-            baseRef="HEAD"
+            baseRef={baseRef}
             hideHeader
             expandUnchanged={expandUnchanged}
             onToggleExpandUnchanged={onToggleExpandUnchanged}
@@ -487,6 +518,18 @@ function FileDiffSection({
 
   const handleCommentRun = useCommentRunHandler(sessionId);
 
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const baseBranchByRepo = useBaseBranchByRepo(activeTaskId);
+  // Single-repo tasks key the base branch under the real repo name while a
+  // review file carries an empty `repository_name`; fall back to the task's
+  // sole base branch so committed-row expansion still resolves a ref.
+  const fallbackBaseBranch = useMemo(() => Object.values(baseBranchByRepo)[0], [baseBranchByRepo]);
+  const { enableExpansion, baseRef } = resolveDiffExpansion(
+    file,
+    baseBranchByRepo,
+    fallbackBaseBranch,
+  );
+
   return (
     <div ref={sectionRef} className="border-b border-border">
       <div ref={scrollSentinelRef} className="h-0" />
@@ -514,6 +557,8 @@ function FileDiffSection({
           sessionId,
           wordWrap: effectiveWordWrap,
           expandUnchanged,
+          enableExpansion,
+          baseRef,
           onRevertBlock: handleRevertBlock,
           onCommentRun: handleCommentRun,
           onToggleExpandUnchanged: handleToggleExpandUnchanged,
