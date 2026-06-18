@@ -25,12 +25,20 @@ def required_env(name: str) -> str:
 
 def gh_api(args: list[str]) -> subprocess.CompletedProcess[str]:
     gh_bin = os.environ.get("GH_BIN", "gh")
-    return subprocess.run(
-        [gh_bin, "api", *args],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    try:
+        return subprocess.run(
+            [gh_bin, "api", *args],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        return subprocess.CompletedProcess(
+            args=[gh_bin, "api", *args],
+            returncode=127,
+            stdout="",
+            stderr=f"Binary not found: {exc}",
+        )
 
 
 def list_issue_comments() -> list[dict[str, Any]]:
@@ -102,8 +110,12 @@ def parse_findings(raw: str) -> tuple[list[Any] | None, str | None]:
     match = re.search(r"<opencode_findings>\s*(.*?)\s*</opencode_findings>", raw, re.S)
     if not match:
         return None, "No parseable findings block was found."
+    payload_text = match.group(1).strip()
+    fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", payload_text, re.S)
+    if fenced:
+        payload_text = fenced.group(1).strip()
     try:
-        payload = json.loads(match.group(1))
+        payload = json.loads(payload_text)
     except json.JSONDecodeError as exc:
         return None, f"Findings block contained invalid JSON: {exc}"
     if not isinstance(payload, list):
@@ -118,7 +130,7 @@ def diagnostic_body(reason: str, status: int, stdout: str, stderr: str) -> str:
         DIAGNOSTIC_MARKER,
         "**OpenCode review diagnostic**",
         "",
-        "OpenCode did not produce parseable findings, so the review check failed instead of silently skipping comments.",
+        "OpenCode did not produce parseable findings, so the workflow posted this diagnostic instead of silently skipping comments.",
         "",
         f"OpenCode model: `{model}`",
         f"Commit: `{short_sha}`",
@@ -191,8 +203,9 @@ def fallback_body(rejected: list[dict[str, Any]], overflow: list[dict[str, Any]]
 
     if omitted:
         notice = f"\n\n_Additional fallback findings omitted from this comment due to GitHub body size limits: {omitted}._"
-        if len(body) + len(notice) <= MAX_COMMENT_BODY:
-            body += notice
+        if len(body) + len(notice) > MAX_COMMENT_BODY:
+            body = body[: MAX_COMMENT_BODY - len(notice)].rstrip()
+        body += notice
 
     return body, included, omitted
 
@@ -204,7 +217,15 @@ def normalize_finding(value: Any, changed_paths: set[str]) -> dict[str, Any] | N
     line = value.get("line")
     title = value.get("title")
     body = value.get("body")
-    if not isinstance(path, str) or not isinstance(line, int):
+    if not isinstance(path, str):
+        return None
+    if isinstance(line, bool):
+        print(f"Skipped OpenCode finding with invalid line value: {path}:{line}")
+        return None
+    if isinstance(line, float) and line.is_integer():
+        line = int(line)
+    if not isinstance(line, int):
+        print(f"Skipped OpenCode finding with invalid line value: {path}:{line}")
         return None
     if not isinstance(title, str) or not isinstance(body, str):
         return None
@@ -246,7 +267,16 @@ def post_inline_finding(finding: dict[str, Any]) -> tuple[bool, str]:
     return False, result.stderr.strip()
 
 
-def handle_diagnostic(args: argparse.Namespace, reason: str, status: int, stdout: str, stderr: str, raw: str) -> int:
+def handle_diagnostic(
+    args: argparse.Namespace,
+    reason: str,
+    status: int,
+    stdout: str,
+    stderr: str,
+    raw: str,
+    *,
+    fail_check: bool,
+) -> int:
     append_summary(
         args.summary,
         "OpenCode review diagnostic",
@@ -261,7 +291,7 @@ def handle_diagnostic(args: argparse.Namespace, reason: str, status: int, stdout
     )
     upsert_issue_comment(DIAGNOSTIC_MARKER, diagnostic_body(reason, status, stdout, stderr))
     print(f"OpenCode did not produce parseable findings: {reason}", file=sys.stderr)
-    return 1
+    return 1 if fail_check else 0
 
 
 def post_findings(args: argparse.Namespace) -> int:
@@ -271,11 +301,27 @@ def post_findings(args: argparse.Namespace) -> int:
     status = read_status(args.opencode_status)
 
     if status != 0:
-        return handle_diagnostic(args, f"OpenCode exited with status {status}.", status, stdout, stderr, raw)
+        return handle_diagnostic(
+            args,
+            f"OpenCode exited with status {status}.",
+            status,
+            stdout,
+            stderr,
+            raw,
+            fail_check=True,
+        )
 
     findings, error = parse_findings(raw)
     if error is not None or findings is None:
-        return handle_diagnostic(args, error or "Unknown parser error.", status, stdout, stderr, raw)
+        return handle_diagnostic(
+            args,
+            error or "Unknown parser error.",
+            status,
+            stdout,
+            stderr,
+            raw,
+            fail_check=False,
+        )
 
     if not findings:
         posted_no_findings = upsert_issue_comment(NO_FINDINGS_MARKER, no_findings_body())

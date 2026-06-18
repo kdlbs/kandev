@@ -78,11 +78,12 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
         output: str,
         inline_fail: bool = False,
         issue_comment_fail: bool = False,
+        gh_bin: Path | None = None,
     ) -> subprocess.CompletedProcess[str]:
         self.output_path.write_text(output, encoding="utf-8")
         env = {
             **os.environ,
-            "GH_BIN": str(self.fake_gh),
+            "GH_BIN": str(gh_bin or self.fake_gh),
             "GH_CALLS": str(self.calls_path),
             "GITHUB_REPOSITORY": "kdlbs/kandev",
             "PR_NUMBER": "42",
@@ -130,10 +131,10 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
                     bodies.append(call[index + 1][len("body=") :])
         return bodies
 
-    def test_missing_findings_block_fails_and_posts_diagnostic(self) -> None:
+    def test_missing_findings_block_posts_diagnostic_without_failing(self) -> None:
         result = self.run_script(output="OpenCode refused to read external_directory (/tmp/*)\n")
 
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 0)
         self.assertIn("did not produce parseable findings", result.stderr)
         self.assertTrue(
             any("<!-- opencode-review:diagnostic -->" in body for body in self.bodies()),
@@ -141,13 +142,28 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
         )
         self.assertIn("No parseable findings block", self.summary_path.read_text())
 
-    def test_invalid_findings_json_fails_and_posts_diagnostic(self) -> None:
+    def test_invalid_findings_json_posts_diagnostic_without_failing(self) -> None:
         result = self.run_script(output="<opencode_findings>{}</opencode_findings>\n")
 
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 0)
         self.assertIn("did not produce parseable findings", result.stderr)
         self.assertTrue(any("<!-- opencode-review:diagnostic -->" in body for body in self.bodies()))
         self.assertIn("not an array", self.summary_path.read_text())
+
+    def test_fenced_json_findings_are_accepted(self) -> None:
+        result = self.run_script(output="<opencode_findings>```json\n[]\n```</opencode_findings>\n")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(any("<!-- opencode-review:no-findings -->" in body for body in self.bodies()))
+
+    def test_missing_gh_binary_reports_gracefully(self) -> None:
+        result = self.run_script(
+            output="<opencode_findings>[]</opencode_findings>\n",
+            gh_bin=self.workdir / "missing-gh",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Binary not found", result.stderr)
 
     def test_valid_empty_array_posts_no_findings_comment(self) -> None:
         result = self.run_script(output="<opencode_findings>[]</opencode_findings>\n")
@@ -173,6 +189,20 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
         bodies = self.bodies()
         self.assertTrue(any("<!-- opencode-review:fallback-findings -->" in body for body in bodies))
         self.assertTrue(any("src/app.ts:99" in body for body in bodies))
+
+    def test_integral_float_line_values_are_normalized(self) -> None:
+        result = self.run_script(
+            output=textwrap.dedent(
+                """\
+                <opencode_findings>
+                [{"path":"src/app.ts","line":99.0,"title":"Bad line","body":"This line moved."}]
+                </opencode_findings>
+                """
+            ),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(any("-F" in call and "line=99" in call for call in self.read_calls()))
 
     def test_inline_findings_beyond_limit_are_preserved_in_fallback_comment(self) -> None:
         findings = [
@@ -212,6 +242,7 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         bodies = self.bodies()
         self.assertTrue(any("Additional fallback findings omitted" in body for body in bodies))
+        self.assertTrue(all(len(body) <= 60000 for body in bodies))
         summary = self.summary_path.read_text()
         self.assertRegex(summary, r"Fallback findings included in comment: `1[0-9]`")
         omitted_match = re.search(r"Fallback findings omitted from comment: `([1-9][0-9]*)`", summary)
