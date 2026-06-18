@@ -90,6 +90,14 @@ async function associatePR(
   });
 }
 
+function manyRunningChecks(count: number) {
+  return Array.from({ length: count }, (_, index) => ({
+    name: `E2E Shard ${index + 1}/${count} / run`,
+    status: "in_progress",
+    html_url: `https://example.com/checks/${index + 1}`,
+  }));
+}
+
 async function openTaskAndWait(
   testPage: import("@playwright/test").Page,
   apiClient: ApiClient,
@@ -209,6 +217,56 @@ test.describe("PR top-bar CI popover", () => {
     await expect(session.prWorkflowRow("E2E")).toBeVisible();
     await expect(session.prWorkflowRow("Lint")).toContainText("0/1 passed");
     await expect(session.prWorkflowRow("E2E")).toContainText("4/5 passed");
+  });
+
+  test("chat-input CI chip popover scrolls instead of overflowing the viewport", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const title = "Many Running Checks";
+    const seed = await seedTask(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      title,
+    );
+    await associatePR(apiClient, seed.taskId, {
+      checks_state: "pending",
+      checks_total: 30,
+      checks_passing: 0,
+    });
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      checks: manyRunningChecks(30),
+    });
+    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+
+    await expect(session.prStatusChip()).toBeVisible();
+    await session.prStatusChip().hover();
+    const popoverInner = testPage.getByTestId("pr-topbar-popover-inner");
+    await expect(popoverInner).toBeVisible({ timeout: 10_000 });
+
+    const metrics = await popoverInner.evaluate((inner) => {
+      const content = inner.parentElement;
+      const rect = content?.getBoundingClientRect();
+      return {
+        top: rect?.top ?? -1,
+        bottom: rect?.bottom ?? -1,
+        clientHeight: content?.clientHeight ?? 0,
+        scrollHeight: content?.scrollHeight ?? 0,
+        overflowY: content ? getComputedStyle(content).overflowY : "",
+      };
+    });
+    const viewportHeight = testPage.viewportSize()?.height ?? 0;
+    expect(metrics.top).toBeGreaterThanOrEqual(0);
+    expect(metrics.bottom).toBeLessThanOrEqual(viewportHeight);
+    expect(metrics.overflowY).toBe("auto");
+    expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
   });
 
   test("review row shows N / M required + unresolved comments count", async ({

@@ -21,7 +21,7 @@ import {
 import { Button } from "@kandev/ui/button";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { usePRFeedbackBackgroundSync } from "@/hooks/domains/github/use-pr-ci-popover";
-import { PRCIPopover } from "@/components/github/pr-ci-popover";
+import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS, PRCIPopover } from "@/components/github/pr-ci-popover";
 import { MultiPRCIPopover } from "@/components/github/multi-pr-ci-popover";
 import {
   isPRAwaitingReview,
@@ -176,7 +176,7 @@ function PRStatusChipHoverCard({ pr }: { pr: TaskPR }) {
         side="top"
         align="start"
         sideOffset={8}
-        className="w-80 p-2.5"
+        className={`w-80 p-2.5 ${PR_CI_DESKTOP_POPOVER_SCROLL_CLASS}`}
         onPointerDownOutside={onPointerDownOutside}
       >
         <PRCIPopover pr={pr} enabled={true} />
@@ -233,7 +233,7 @@ function PRStatusChipMultiHoverCard({ prs }: { prs: TaskPR[] }) {
         side="top"
         align="start"
         sideOffset={8}
-        className="w-96 p-2.5"
+        className={`w-96 p-2.5 ${PR_CI_DESKTOP_POPOVER_SCROLL_CLASS}`}
         onPointerDownOutside={onPointerDownOutside}
       >
         <MultiPRCIPopover prs={prs} enabled={true} />

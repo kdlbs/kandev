@@ -90,6 +90,14 @@ function multiState(prs: TaskPR[]): Partial<AppState> {
   return { taskPRs: { byTaskId: { "task-1": prs } } };
 }
 
+async function expectDesktopHoverPopoverConstrained() {
+  fireEvent.pointerEnter(screen.getByTestId(CHIP_TESTID));
+  const inner = await screen.findByTestId("pr-topbar-popover-inner");
+  const contentClass = inner.parentElement?.className ?? "";
+  expect(contentClass).toContain("max-h-[min(28rem,calc(100vh-8rem))]");
+  expect(contentClass).toContain("overflow-y-auto");
+}
+
 describe("PRStatusChip", () => {
   it("returns null when the task has no PR", () => {
     renderWithStore(undefined, <PRStatusChip taskId="missing" />);
@@ -125,6 +133,11 @@ describe("PRStatusChip", () => {
         fireEvent.click(chip);
       });
       expect(document.querySelector(DRAWER_SELECTOR)).toBeNull();
+    });
+
+    it("constrains the hover popover to the available viewport height", async () => {
+      renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
+      await expectDesktopHoverPopoverConstrained();
     });
 
     it("exposes the canonical data attributes that desktop tests rely on", () => {

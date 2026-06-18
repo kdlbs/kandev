@@ -29,7 +29,7 @@ import {
   isPRReadyToMerge,
 } from "@/components/github/pr-task-icon";
 import { prTaskKey } from "@/components/github/pr-detail-panel";
-import { PRCIPopover } from "@/components/github/pr-ci-popover";
+import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS, PRCIPopover } from "@/components/github/pr-ci-popover";
 import { MultiPRCIPopover } from "@/components/github/multi-pr-ci-popover";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
@@ -186,7 +186,7 @@ function PRSingleButton({ pr }: { pr: TaskPR }) {
         data-testid="pr-topbar-popover"
         align="end"
         sideOffset={4}
-        className="w-80"
+        className={`w-80 ${PR_CI_DESKTOP_POPOVER_SCROLL_CLASS}`}
         onMouseEnter={handleEnter}
         onMouseLeave={handleLeave}
         onOpenAutoFocus={(e) => e.preventDefault()}
@@ -258,7 +258,7 @@ function PRMultiButton({ prs }: { prs: TaskPR[] }) {
         data-testid="pr-topbar-popover"
         align="end"
         sideOffset={4}
-        className="w-96"
+        className={`w-96 ${PR_CI_DESKTOP_POPOVER_SCROLL_CLASS}`}
         onMouseEnter={handleEnter}
         onMouseLeave={handleLeave}
         onOpenAutoFocus={(e) => e.preventDefault()}
