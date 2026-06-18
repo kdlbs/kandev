@@ -106,8 +106,7 @@ test.describe("Quick chat queue", () => {
 
     // Send a slow command so the agent stays busy for 10 seconds.
     const editor = dialog.locator(".tiptap.ProseMirror");
-    await editor.click();
-    await editor.fill("/slow 10s");
+    await typeWhileBusy(testPage, editor, "/slow 10s");
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
     await editor.press(`${modifier}+Enter`);
 
@@ -148,8 +147,7 @@ test.describe("Quick chat queue", () => {
 
     // Send a slow command so the agent stays busy for 10 seconds.
     const editor = dialog.locator(".tiptap.ProseMirror");
-    await editor.click();
-    await editor.fill("/slow 10s");
+    await typeWhileBusy(testPage, editor, "/slow 10s");
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
     await editor.press(`${modifier}+Enter`);
 
