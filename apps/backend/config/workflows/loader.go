@@ -23,17 +23,18 @@ type templateYAML struct {
 
 // stepDefYAML is the YAML-friendly representation of a step definition.
 type stepDefYAML struct {
-	ID                    string         `yaml:"id"`
-	Name                  string         `yaml:"name"`
-	Position              int            `yaml:"position"`
-	Color                 string         `yaml:"color"`
-	Prompt                string         `yaml:"prompt,omitempty"`
-	StageType             string         `yaml:"stage_type,omitempty"`
-	IsStartStep           bool           `yaml:"is_start_step,omitempty"`
-	ShowInCommandPanel    bool           `yaml:"show_in_command_panel,omitempty"`
-	AllowManualMove       bool           `yaml:"allow_manual_move,omitempty"`
-	AutoArchiveAfterHours int            `yaml:"auto_archive_after_hours,omitempty"`
-	Events                stepEventsYAML `yaml:"events,omitempty"`
+	ID                        string         `yaml:"id"`
+	Name                      string         `yaml:"name"`
+	Position                  int            `yaml:"position"`
+	Color                     string         `yaml:"color"`
+	Prompt                    string         `yaml:"prompt,omitempty"`
+	StageType                 string         `yaml:"stage_type,omitempty"`
+	IsStartStep               bool           `yaml:"is_start_step,omitempty"`
+	ShowInCommandPanel        bool           `yaml:"show_in_command_panel,omitempty"`
+	AllowManualMove           bool           `yaml:"allow_manual_move,omitempty"`
+	AutoArchiveAfterHours     int            `yaml:"auto_archive_after_hours,omitempty"`
+	AutoAdvanceRequiresSignal bool           `yaml:"auto_advance_requires_signal,omitempty"`
+	Events                    stepEventsYAML `yaml:"events,omitempty"`
 }
 
 // stepEventsYAML is the YAML-friendly representation of step events.
@@ -162,17 +163,18 @@ func convertStep(s stepDefYAML) (models.StepDefinition, error) {
 		return models.StepDefinition{}, fmt.Errorf("step %q: %w", s.ID, err)
 	}
 	return models.StepDefinition{
-		ID:                    s.ID,
-		Name:                  s.Name,
-		Position:              s.Position,
-		Color:                 s.Color,
-		Prompt:                strings.TrimSpace(s.Prompt),
-		Events:                events,
-		AllowManualMove:       s.AllowManualMove,
-		IsStartStep:           s.IsStartStep,
-		ShowInCommandPanel:    s.ShowInCommandPanel,
-		AutoArchiveAfterHours: s.AutoArchiveAfterHours,
-		StageType:             stage,
+		ID:                        s.ID,
+		Name:                      s.Name,
+		Position:                  s.Position,
+		Color:                     s.Color,
+		Prompt:                    strings.TrimSpace(s.Prompt),
+		Events:                    events,
+		AllowManualMove:           s.AllowManualMove,
+		IsStartStep:               s.IsStartStep,
+		ShowInCommandPanel:        s.ShowInCommandPanel,
+		AutoArchiveAfterHours:     s.AutoArchiveAfterHours,
+		AutoAdvanceRequiresSignal: s.AutoAdvanceRequiresSignal,
+		StageType:                 stage,
 	}, nil
 }
 

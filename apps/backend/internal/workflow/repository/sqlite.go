@@ -193,12 +193,14 @@ func (r *Repository) seedDefaultWorkflowSteps() error {
 			if _, err := r.db.Exec(r.db.Rebind(`
 				INSERT INTO workflow_steps (
 					id, workflow_id, name, position, color,
-					prompt, events, allow_manual_move, is_start_step, show_in_command_panel, created_at, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					prompt, events, allow_manual_move, is_start_step, show_in_command_panel,
+					auto_advance_requires_signal, created_at, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`),
 				idMap[stepDef.ID], workflowID, stepDef.Name, stepDef.Position, stepDef.Color,
 				stepDef.Prompt, string(eventsJSON), dialect.BoolToInt(stepDef.AllowManualMove),
-				dialect.BoolToInt(stepDef.IsStartStep), dialect.BoolToInt(stepDef.ShowInCommandPanel), now, now,
+				dialect.BoolToInt(stepDef.IsStartStep), dialect.BoolToInt(stepDef.ShowInCommandPanel),
+				dialect.BoolToInt(stepDef.AutoAdvanceRequiresSignal), now, now,
 			); err != nil {
 				return err
 			}

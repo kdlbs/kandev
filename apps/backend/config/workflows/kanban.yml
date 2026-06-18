@@ -30,6 +30,12 @@ steps:
     is_start_step: true
     show_in_command_panel: true
     allow_manual_move: true
+    # The agent auto-starts here and the description promises a move to Review
+    # "when done". Gate the on_turn_complete move on an explicit completion
+    # signal (step_complete_kandev) so the task is not promoted on the agent's
+    # first bare turn-end — e.g. an auto-started agent that has barely read its
+    # prompt — which would land work-in-progress tasks in Review prematurely.
+    auto_advance_requires_signal: true
     events:
       on_enter:
         - type: auto_start_agent
