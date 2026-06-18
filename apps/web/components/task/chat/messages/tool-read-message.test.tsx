@@ -36,6 +36,26 @@ describe("ToolReadMessage", () => {
     expect(openFile).toHaveBeenCalledWith("apps/web/lib/utils.ts");
   });
 
+  it("opens a single-file link whose path still carries a line-range selector", () => {
+    // Legacy / not-yet-normalized reads keep the selector glued to file_path
+    // (e.g. "scripts/au/setup-au-sentry-secrets.sh:88-137"). The card must strip
+    // it so the link opens the bare path rather than a non-existent file.
+    const openFile = vi.fn();
+    render(
+      <ToolReadMessage
+        comment={readComment("scripts/au/setup-au-sentry-secrets.sh:88-137")}
+        onOpenFile={openFile}
+      />,
+    );
+
+    const links = screen.getAllByRole("button");
+    expect(links).toHaveLength(1);
+    expect(screen.getByText("scripts/au/setup-au-sentry-secrets.sh")).toBeTruthy();
+    fireEvent.click(links[0]);
+    expect(openFile).toHaveBeenCalledWith("scripts/au/setup-au-sentry-secrets.sh");
+    expect(openFile).not.toHaveBeenCalledWith("scripts/au/setup-au-sentry-secrets.sh:88-137");
+  });
+
   it("splits a comma-joined multi-file read into one link per file", () => {
     const openFile = vi.fn();
     render(
