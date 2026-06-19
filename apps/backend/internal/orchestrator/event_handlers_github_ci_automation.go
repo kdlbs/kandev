@@ -143,6 +143,9 @@ func (s *Service) dispatchCIAutomationPrompt(ctx context.Context, session *model
 		if s.messageQueue == nil {
 			return fmt.Errorf("message queue is not configured")
 		}
+		if !s.recordCIAutomationUserMessage(ctx, session.TaskID, session.ID, chatPrompt) {
+			return fmt.Errorf("failed to record CI automation user message")
+		}
 		metadata := map[string]interface{}{
 			"origin":                   ciAutomationOrigin,
 			metaKeyUserMessageRecorded: true,
@@ -151,7 +154,6 @@ func (s *Service) dispatchCIAutomationPrompt(ctx context.Context, session *model
 		if err != nil {
 			return err
 		}
-		s.recordCIAutomationUserMessage(ctx, session.TaskID, session.ID, chatPrompt)
 		s.publishQueueStatusEvent(ctx, session.ID)
 		return nil
 	case models.TaskSessionStateWaitingForInput, models.TaskSessionStateIdle:

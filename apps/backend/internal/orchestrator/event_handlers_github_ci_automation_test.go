@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -252,6 +253,28 @@ func TestDispatchCIAutomationPromptDoesNotRecordUserMessageWhenQueueFails(t *tes
 	}
 	if len(messageCreator.userMessages) != 0 {
 		t.Fatalf("expected no visible CI automation user message on queue failure, got %d", len(messageCreator.userMessages))
+	}
+}
+
+func TestDispatchCIAutomationPromptFailsWhenRunningUserMessageCannotBeRecorded(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageQueue = messagequeue.NewServiceMemory(testLogger())
+	messageCreator := &mockMessageCreator{userMessageErr: errors.New("message db unavailable")}
+	svc.messageCreator = messageCreator
+	session, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+
+	err = svc.dispatchCIAutomationPrompt(ctx, session, "Fix the PR")
+	if err == nil || !strings.Contains(err.Error(), "failed to record CI automation user message") {
+		t.Fatalf("expected user-message failure, got %v", err)
+	}
+	if got := svc.messageQueue.GetStatus(ctx, "session-1").Count; got != 0 {
+		t.Fatalf("expected no queued prompt when user message could not be recorded, got %d", got)
 	}
 }
 
