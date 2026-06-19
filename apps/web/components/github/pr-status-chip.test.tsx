@@ -153,104 +153,140 @@ describe("PRStatusChip", () => {
     );
     expect(screen.queryByTestId(CHIP_TESTID)).toBeNull();
   });
+});
 
-  describe("desktop branch", () => {
-    beforeEach(() => isMobileMock.mockReturnValue(false));
+describe("PRStatusChip desktop branch", () => {
+  beforeEach(() => isMobileMock.mockReturnValue(false));
 
-    it("renders the chip button without a Drawer", () => {
-      renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
-      const chip = screen.getByTestId(CHIP_TESTID);
-      expect(chip).toBeTruthy();
-      // The chip's HoverCard popover is hover-only on desktop; clicking the
-      // chip must not surface the mobile Drawer testid.
-      act(() => {
-        fireEvent.click(chip);
-      });
-      expect(document.querySelector(DRAWER_SELECTOR)).toBeNull();
+  it("renders the chip button without a Drawer", () => {
+    renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
+    const chip = screen.getByTestId(CHIP_TESTID);
+    expect(chip).toBeTruthy();
+    // The chip's HoverCard popover is hover-only on desktop; clicking the
+    // chip must not surface the mobile Drawer testid.
+    act(() => {
+      fireEvent.click(chip);
     });
-
-    it("constrains the hover popover to the available viewport height", async () => {
-      renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
-      await expectDesktopHoverPopoverConstrained();
-    });
-
-    it("exposes the canonical data attributes that desktop tests rely on", () => {
-      renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
-      const chip = screen.getByTestId(CHIP_TESTID);
-      expect(chip.getAttribute(ATTR_PR_NUMBER)).toBe("42");
-      expect(chip.getAttribute("data-pr-state")).toBe("open");
-      expect(chip.getAttribute(ATTR_STATUS)).toBe("passed");
-      expect(chip.getAttribute("data-pr-ready-to-merge")).toBe("true");
-    });
+    expect(document.querySelector(DRAWER_SELECTOR)).toBeNull();
   });
 
-  describe("mobile branch", () => {
-    beforeEach(() => isMobileMock.mockReturnValue(true));
+  it("constrains the hover popover to the available viewport height", async () => {
+    renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
+    await expectDesktopHoverPopoverConstrained();
+  });
 
-    it("renders the chip closed and opens the drawer on click", () => {
-      renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
-      // Drawer must not be in the DOM before the user taps the chip — relied
-      // on by the e2e spec's `toHaveCount(0)` precondition.
-      expect(document.querySelector(DRAWER_SELECTOR)).toBeNull();
+  it("exposes the canonical data attributes that desktop tests rely on", () => {
+    renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
+    const chip = screen.getByTestId(CHIP_TESTID);
+    expect(chip.getAttribute(ATTR_PR_NUMBER)).toBe("42");
+    expect(chip.getAttribute("data-pr-state")).toBe("open");
+    expect(chip.getAttribute(ATTR_STATUS)).toBe("passed");
+    expect(chip.getAttribute("data-pr-ready-to-merge")).toBe("true");
+  });
 
-      const chip = screen.getByTestId(CHIP_TESTID);
-      act(() => {
-        fireEvent.click(chip);
-      });
+  it("shows automation badges when auto-fix or auto-merge are enabled", () => {
+    renderWithStore(
+      {
+        taskPRs: { byTaskId: { "task-1": [makePR()] } },
+        taskCIAutomation: {
+          byTaskId: {
+            "task-1": makeCIOptions({ auto_fix_enabled: true, auto_merge_enabled: true }),
+          },
+          loading: {},
+          saving: {},
+          errors: {},
+        },
+      },
+      <PRStatusChip taskId="task-1" />,
+    );
+    expect(screen.getByTestId("pr-status-auto-fix-chip").textContent).toBe("Auto-fix");
+    expect(screen.getByTestId("pr-status-auto-merge-chip").textContent).toBe("Auto-merge");
+  });
+});
 
-      const drawer = document.querySelector(DRAWER_SELECTOR);
-      expect(drawer).not.toBeNull();
-      // Inner popover body + close button render inside the drawer.
-      expect(document.querySelector("[data-testid='pr-topbar-popover-inner']")).not.toBeNull();
-      expect(document.querySelector("[data-testid='pr-status-chip-drawer-close']")).not.toBeNull();
+describe("PRStatusChip mobile branch", () => {
+  beforeEach(() => isMobileMock.mockReturnValue(true));
+
+  it("renders the chip closed and opens the drawer on click", () => {
+    renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
+    // Drawer must not be in the DOM before the user taps the chip — relied
+    // on by the e2e spec's `toHaveCount(0)` precondition.
+    expect(document.querySelector(DRAWER_SELECTOR)).toBeNull();
+
+    const chip = screen.getByTestId(CHIP_TESTID);
+    act(() => {
+      fireEvent.click(chip);
     });
 
-    it("preserves the same data attributes as the desktop chip", () => {
-      renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
-      const chip = screen.getByTestId(CHIP_TESTID);
-      expect(chip.getAttribute(ATTR_PR_NUMBER)).toBe("42");
-      expect(chip.getAttribute("data-pr-state")).toBe("open");
-      expect(chip.getAttribute(ATTR_STATUS)).toBe("passed");
-      expect(chip.getAttribute("data-pr-ready-to-merge")).toBe("true");
-    });
+    const drawer = document.querySelector(DRAWER_SELECTOR);
+    expect(drawer).not.toBeNull();
+    // Inner popover body + close button render inside the drawer.
+    expect(document.querySelector("[data-testid='pr-topbar-popover-inner']")).not.toBeNull();
+    expect(document.querySelector("[data-testid='pr-status-chip-drawer-close']")).not.toBeNull();
+  });
 
-    it("reflects a failed PR with data-status='failed'", () => {
-      renderWithStore(
-        { taskPRs: { byTaskId: { "task-1": [makePR({ checks_state: "failure" })] } } },
-        <PRStatusChip taskId="task-1" />,
-      );
-      expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("failed");
-    });
+  it("preserves the same data attributes as the desktop chip", () => {
+    renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
+    const chip = screen.getByTestId(CHIP_TESTID);
+    expect(chip.getAttribute(ATTR_PR_NUMBER)).toBe("42");
+    expect(chip.getAttribute("data-pr-state")).toBe("open");
+    expect(chip.getAttribute(ATTR_STATUS)).toBe("passed");
+    expect(chip.getAttribute("data-pr-ready-to-merge")).toBe("true");
+  });
 
-    // NOTE: vaul's close animation depends on CSS transition events that
-    // happy-dom does not fire, so the drawer never unmounts in this env.
-    // The mobile-pr-ci-chip.spec.ts e2e covers close-button dismissal in a
-    // real browser.
+  it("reflects a failed PR with data-status='failed'", () => {
+    renderWithStore(
+      { taskPRs: { byTaskId: { "task-1": [makePR({ checks_state: "failure" })] } } },
+      <PRStatusChip taskId="task-1" />,
+    );
+    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("failed");
+  });
 
-    it("renders the no-checks empty state in the drawer when the PR has no checks", () => {
-      renderWithStore(
-        {
-          taskPRs: {
-            byTaskId: {
-              "task-1": [
-                makePR({
-                  checks_state: "",
-                  checks_total: 0,
-                  checks_passing: 0,
-                  review_state: "",
-                  mergeable_state: "",
-                }),
-              ],
-            },
+  it("shows automation badges on the mobile chip trigger", () => {
+    renderWithStore(
+      {
+        taskPRs: { byTaskId: { "task-1": [makePR()] } },
+        taskCIAutomation: {
+          byTaskId: { "task-1": makeCIOptions({ auto_fix_enabled: true }) },
+          loading: {},
+          saving: {},
+          errors: {},
+        },
+      },
+      <PRStatusChip taskId="task-1" />,
+    );
+    expect(screen.getByTestId("pr-status-auto-fix-chip").textContent).toBe("Auto-fix");
+    expect(screen.queryByTestId("pr-status-auto-merge-chip")).toBeNull();
+  });
+
+  // NOTE: vaul's close animation depends on CSS transition events that
+  // happy-dom does not fire, so the drawer never unmounts in this env.
+  // The mobile-pr-ci-chip.spec.ts e2e covers close-button dismissal in a
+  // real browser.
+
+  it("renders the no-checks empty state in the drawer when the PR has no checks", () => {
+    renderWithStore(
+      {
+        taskPRs: {
+          byTaskId: {
+            "task-1": [
+              makePR({
+                checks_state: "",
+                checks_total: 0,
+                checks_passing: 0,
+                review_state: "",
+                mergeable_state: "",
+              }),
+            ],
           },
         },
-        <PRStatusChip taskId="task-1" />,
-      );
-      act(() => {
-        fireEvent.click(screen.getByTestId(CHIP_TESTID));
-      });
-      expect(document.querySelector("[data-testid='pr-checks-empty']")).not.toBeNull();
+      },
+      <PRStatusChip taskId="task-1" />,
+    );
+    act(() => {
+      fireEvent.click(screen.getByTestId(CHIP_TESTID));
     });
+    expect(document.querySelector("[data-testid='pr-checks-empty']")).not.toBeNull();
   });
 });
 

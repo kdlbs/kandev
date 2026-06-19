@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -143,25 +144,59 @@ func (s *Service) handleTaskPRCIAutoMerge(ctx context.Context, pr *github.TaskPR
 }
 
 func (s *Service) dispatchCIAutomationPrompt(ctx context.Context, session *models.TaskSession, prompt string) error {
+	chatPrompt := ciAutomationChatPrompt(prompt)
+	userMessageRecorded := s.recordCIAutomationUserMessage(ctx, session.TaskID, session.ID, chatPrompt)
 	switch session.State {
 	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
 		if s.messageQueue == nil {
 			return fmt.Errorf("message queue is not configured")
 		}
-		_, err := s.messageQueue.QueueMessageWithMetadata(ctx, session.ID, session.TaskID, prompt, "", messagequeue.QueuedByWorkflow, false, nil, map[string]interface{}{
+		metadata := map[string]interface{}{
 			"origin": ciAutomationOrigin,
-		})
+		}
+		if userMessageRecorded {
+			metadata[metaKeyUserMessageRecorded] = true
+		}
+		_, err := s.messageQueue.QueueMessageWithMetadata(ctx, session.ID, session.TaskID, chatPrompt, "", messagequeue.QueuedByWorkflow, false, nil, metadata)
 		if err != nil {
 			return err
 		}
 		s.publishQueueStatusEvent(ctx, session.ID)
 		return nil
 	case models.TaskSessionStateWaitingForInput, models.TaskSessionStateIdle:
-		_, err := s.PromptTask(ctx, session.TaskID, session.ID, prompt, "", false, nil, false)
+		_, err := s.PromptTask(ctx, session.TaskID, session.ID, chatPrompt, "", false, nil, false)
 		return err
 	default:
 		return fmt.Errorf("session is not promptable: %s", session.State)
 	}
+}
+
+func (s *Service) recordCIAutomationUserMessage(ctx context.Context, taskID, sessionID, prompt string) bool {
+	if s.messageCreator == nil || prompt == "" {
+		return false
+	}
+	turnID := s.getActiveTurnID(sessionID)
+	if turnID == "" {
+		s.startTurnForSession(ctx, sessionID)
+		turnID = s.getActiveTurnID(sessionID)
+	}
+	meta := NewUserMessageMeta().WithAutoStart(true).ToMap()
+	if meta == nil {
+		meta = map[string]interface{}{}
+	}
+	meta["origin"] = ciAutomationOrigin
+	if err := s.messageCreator.CreateUserMessage(ctx, taskID, prompt, sessionID, turnID, meta); err != nil {
+		s.logger.Error("failed to create CI automation user message",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return false
+	}
+	return true
+}
+
+func ciAutomationChatPrompt(prompt string) string {
+	return "@ci auto fix\n\n" + sysprompt.Wrap(prompt)
 }
 
 func (s *Service) recordCIAutomationError(ctx context.Context, pr *github.TaskPR, message string) {

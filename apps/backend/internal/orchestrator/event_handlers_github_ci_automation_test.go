@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -140,6 +141,8 @@ func TestHandleTaskPRCIAutomationQueuesFixDedupesAndMerges(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	messageCreator := &mockMessageCreator{}
+	svc.messageCreator = messageCreator
 	pr := &github.TaskPR{
 		TaskID:       "task-1",
 		RepositoryID: "repo-1",
@@ -165,8 +168,24 @@ func TestHandleTaskPRCIAutomationQueuesFixDedupesAndMerges(t *testing.T) {
 		t.Fatalf("handle auto-fix: %v", err)
 	}
 	status := svc.messageQueue.GetStatus(ctx, "session-1")
-	if status.Count != 1 || !strings.Contains(status.Entries[0].Content, "acme/widget#42") || !strings.Contains(status.Entries[0].Content, "unit") {
+	if status.Count != 1 || !strings.Contains(status.Entries[0].Content, "@ci auto fix") || !strings.Contains(status.Entries[0].Content, "acme/widget#42") || !strings.Contains(status.Entries[0].Content, "unit") {
 		t.Fatalf("expected queued CI fix prompt, got %+v", status)
+	}
+	if status.Entries[0].Metadata[metaKeyUserMessageRecorded] != true {
+		t.Fatalf("expected queued prompt to be tagged as already recorded, got %+v", status.Entries[0].Metadata)
+	}
+	if len(messageCreator.userMessages) != 1 {
+		t.Fatalf("expected one visible CI automation user message, got %d", len(messageCreator.userMessages))
+	}
+	chatMessage := messageCreator.userMessages[0]
+	if got := sysprompt.StripSystemContent(chatMessage.content); got != "@ci auto fix" {
+		t.Fatalf("expected visible chat prompt to be @ci auto fix, got %q", got)
+	}
+	if !strings.Contains(chatMessage.content, "<kandev-system>") || !strings.Contains(chatMessage.content, "Fix the PR") || !strings.Contains(chatMessage.content, "unit") {
+		t.Fatalf("expected raw chat message to preserve hidden CI prompt, got %q", chatMessage.content)
+	}
+	if chatMessage.metadata["origin"] != ciAutomationOrigin || chatMessage.metadata["auto_start"] != true {
+		t.Fatalf("expected CI automation metadata, got %+v", chatMessage.metadata)
 	}
 	if len(ghSvc.fixAttempts) != 1 {
 		t.Fatalf("expected one fix attempt, got %d", len(ghSvc.fixAttempts))
@@ -179,6 +198,9 @@ func TestHandleTaskPRCIAutomationQueuesFixDedupesAndMerges(t *testing.T) {
 	}
 	if got := svc.messageQueue.GetStatus(ctx, "session-1").Count; got != 1 {
 		t.Fatalf("expected dedupe to avoid second queued prompt, got %d", got)
+	}
+	if len(messageCreator.userMessages) != 1 {
+		t.Fatalf("expected dedupe to avoid second chat message, got %d", len(messageCreator.userMessages))
 	}
 
 	pr.ChecksState = "success"

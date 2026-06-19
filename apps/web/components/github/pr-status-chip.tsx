@@ -23,6 +23,7 @@ import { Button } from "@kandev/ui/button";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { usePRFeedbackBackgroundSync } from "@/hooks/domains/github/use-pr-ci-popover";
 import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS, PRCIPopover } from "@/components/github/pr-ci-popover";
+import { useTaskCIAutomationOptions } from "@/hooks/domains/github/use-task-ci-options";
 import { MultiPRCIPopover } from "@/components/github/multi-pr-ci-popover";
 import {
   isPRAwaitingReview,
@@ -38,13 +39,17 @@ const HOVER_CLOSE_DELAY_MS = 150;
 // Terminal states (merged / closed) never reach here — PRStatusChip returns
 // null for them before rendering — so the chip status union omits them.
 type ChipStatus =
-  | "passed"
-  | "failed"
-  | "conflict"
-  | "blocked"
-  | "behind"
-  | "in_progress"
-  | "neutral";
+	| "passed"
+	| "failed"
+	| "conflict"
+	| "blocked"
+	| "behind"
+	| "in_progress"
+	| "neutral";
+type AutomationFlags = {
+	autoFix: boolean;
+	autoMerge: boolean;
+};
 
 function chipStatus(pr: TaskPR): ChipStatus {
   if (pr.review_state === "changes_requested" || pr.checks_state === "failure") return "failed";
@@ -133,6 +138,11 @@ function useChipTriggerGuard() {
  */
 export function PRStatusChip({ taskId }: { taskId: string | null }) {
   const { prs } = useTaskPR(taskId);
+  const { options: automationOptions } = useTaskCIAutomationOptions(taskId);
+  const automationFlags: AutomationFlags = {
+    autoFix: Boolean(automationOptions?.auto_fix_enabled),
+    autoMerge: Boolean(automationOptions?.auto_merge_enabled),
+  };
   // Defensive Array.isArray: a partial hydration can briefly seed the store
   // with a non-array value (same guard as PRTaskIcon).
   // Only open PRs are worth a CI chip — terminal PRs (merged/closed) are
@@ -148,8 +158,9 @@ export function PRStatusChip({ taskId }: { taskId: string | null }) {
   // task warm when the popover opens.
   usePRFeedbackBackgroundSync(pickDefaultPR(openPRs));
   if (openPRs.length === 0) return null;
-  if (openPRs.length === 1) return <PRStatusChipInner pr={openPRs[0]} />;
-  return <PRStatusChipMultiInner prs={openPRs} />;
+  if (openPRs.length === 1)
+    return <PRStatusChipInner pr={openPRs[0]} automation={automationFlags} />;
+  return <PRStatusChipMultiInner prs={openPRs} automation={automationFlags} />;
 }
 
 type ChipButtonAttrs = {
@@ -174,13 +185,37 @@ function chipButtonAttrs(pr: TaskPR, status: ChipStatus): ChipButtonAttrs {
   };
 }
 
-function PRStatusChipInner({ pr }: { pr: TaskPR }) {
-  const isMobile = useIsMobile();
-  if (isMobile) return <PRStatusChipDrawer pr={pr} />;
-  return <PRStatusChipHoverCard pr={pr} />;
+function AutomationFlagBadges({ automation }: { automation: AutomationFlags }) {
+  if (!automation.autoFix && !automation.autoMerge) return null;
+  return (
+    <>
+      {automation.autoFix && (
+        <span
+          data-testid="pr-status-auto-fix-chip"
+          className="rounded-sm bg-emerald-500/15 px-1 py-0.5 text-[9px] font-medium leading-none text-emerald-500"
+        >
+          Auto-fix
+        </span>
+      )}
+      {automation.autoMerge && (
+        <span
+          data-testid="pr-status-auto-merge-chip"
+          className="rounded-sm bg-sky-500/15 px-1 py-0.5 text-[9px] font-medium leading-none text-sky-500"
+        >
+          Auto-merge
+        </span>
+      )}
+    </>
+  );
 }
 
-function PRStatusChipHoverCard({ pr }: { pr: TaskPR }) {
+function PRStatusChipInner({ pr, automation }: { pr: TaskPR; automation: AutomationFlags }) {
+  const isMobile = useIsMobile();
+  if (isMobile) return <PRStatusChipDrawer pr={pr} automation={automation} />;
+  return <PRStatusChipHoverCard pr={pr} automation={automation} />;
+}
+
+function PRStatusChipHoverCard({ pr, automation }: { pr: TaskPR; automation: AutomationFlags }) {
   const status = chipStatus(pr);
   const { ref, onPointerDownOutside } = useChipTriggerGuard();
   return (
@@ -189,6 +224,7 @@ function PRStatusChipHoverCard({ pr }: { pr: TaskPR }) {
         <button ref={ref} type="button" {...chipButtonAttrs(pr, status)}>
           <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
           <ChipStatusGlyph status={status} />
+          <AutomationFlagBadges automation={automation} />
         </button>
       </HoverCardTrigger>
       <HoverCardContent
@@ -204,10 +240,16 @@ function PRStatusChipHoverCard({ pr }: { pr: TaskPR }) {
   );
 }
 
-function PRStatusChipMultiInner({ prs }: { prs: TaskPR[] }) {
+function PRStatusChipMultiInner({
+  prs,
+  automation,
+}: {
+  prs: TaskPR[];
+  automation: AutomationFlags;
+}) {
   const isMobile = useIsMobile();
-  if (isMobile) return <PRStatusChipMultiDrawer prs={prs} />;
-  return <PRStatusChipMultiHoverCard prs={prs} />;
+  if (isMobile) return <PRStatusChipMultiDrawer prs={prs} automation={automation} />;
+  return <PRStatusChipMultiHoverCard prs={prs} automation={automation} />;
 }
 
 type MultiChipButtonAttrs = {
@@ -228,24 +270,39 @@ function multiChipButtonAttrs(prs: TaskPR[], status: ChipStatus): MultiChipButto
   };
 }
 
-function MultiChipGlyph({ prs, status }: { prs: TaskPR[]; status: ChipStatus }) {
+function MultiChipGlyph({
+  prs,
+  status,
+  automation,
+}: {
+  prs: TaskPR[];
+  status: ChipStatus;
+  automation: AutomationFlags;
+}) {
   return (
     <>
       <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
       <ChipStatusGlyph status={status} />
       <span className="text-[9px] font-semibold leading-none tabular-nums">{prs.length}</span>
+      <AutomationFlagBadges automation={automation} />
     </>
   );
 }
 
-function PRStatusChipMultiHoverCard({ prs }: { prs: TaskPR[] }) {
+function PRStatusChipMultiHoverCard({
+  prs,
+  automation,
+}: {
+  prs: TaskPR[];
+  automation: AutomationFlags;
+}) {
   const status = aggregateChipStatus(prs);
   const { ref, onPointerDownOutside } = useChipTriggerGuard();
   return (
     <HoverCard openDelay={HOVER_OPEN_DELAY_MS} closeDelay={HOVER_CLOSE_DELAY_MS}>
       <HoverCardTrigger asChild>
         <button ref={ref} type="button" {...multiChipButtonAttrs(prs, status)}>
-          <MultiChipGlyph prs={prs} status={status} />
+          <MultiChipGlyph prs={prs} status={status} automation={automation} />
         </button>
       </HoverCardTrigger>
       <HoverCardContent
@@ -261,7 +318,13 @@ function PRStatusChipMultiHoverCard({ prs }: { prs: TaskPR[] }) {
   );
 }
 
-function PRStatusChipMultiDrawer({ prs }: { prs: TaskPR[] }) {
+function PRStatusChipMultiDrawer({
+  prs,
+  automation,
+}: {
+  prs: TaskPR[];
+  automation: AutomationFlags;
+}) {
   const status = aggregateChipStatus(prs);
   const [open, setOpen] = useState(false);
   return (
@@ -273,7 +336,7 @@ function PRStatusChipMultiDrawer({ prs }: { prs: TaskPR[] }) {
         onClick={() => setOpen(true)}
         {...multiChipButtonAttrs(prs, status)}
       >
-        <MultiChipGlyph prs={prs} status={status} />
+        <MultiChipGlyph prs={prs} status={status} automation={automation} />
       </button>
       <DrawerContent data-testid="pr-status-chip-drawer" className="max-h-[80vh] flex flex-col">
         <DrawerHeader className="flex flex-row items-center justify-between border-b py-2">
@@ -301,7 +364,7 @@ function PRStatusChipMultiDrawer({ prs }: { prs: TaskPR[] }) {
   );
 }
 
-function PRStatusChipDrawer({ pr }: { pr: TaskPR }) {
+function PRStatusChipDrawer({ pr, automation }: { pr: TaskPR; automation: AutomationFlags }) {
   const status = chipStatus(pr);
   const [open, setOpen] = useState(false);
   return (
@@ -315,6 +378,7 @@ function PRStatusChipDrawer({ pr }: { pr: TaskPR }) {
       >
         <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
         <ChipStatusGlyph status={status} />
+        <AutomationFlagBadges automation={automation} />
       </button>
       <DrawerContent data-testid="pr-status-chip-drawer" className="max-h-[80vh] flex flex-col">
         <DrawerHeader className="flex flex-row items-center justify-between border-b py-2">
