@@ -1054,7 +1054,7 @@ func (s *Store) UpdateTaskCIOptions(ctx context.Context, taskID string, patch Ta
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return s.GetTaskCIOptions(ctx, taskID)
+	return s.GetTaskCIOptions(writeCtx, taskID)
 }
 
 // ListTaskCIPRStates returns CI automation state rows for a task.

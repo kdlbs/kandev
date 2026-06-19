@@ -254,6 +254,9 @@ type Service struct {
 
 	// GitHub service for PR auto-detection on push
 	githubService GitHubService
+	// ciAutomationInFlight prevents PR feedback and task-PR update events from
+	// racing duplicate auto-fix prompts or merge calls for the same PR.
+	ciAutomationInFlight sync.Map
 
 	// Office task-handoffs materializer (phase 6 wiring) — invoked from
 	// PrepareTaskSession to flip workspace groups to materialized once

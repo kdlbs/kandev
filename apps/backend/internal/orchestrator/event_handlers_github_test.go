@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +14,8 @@ import (
 
 // mockGitHubService implements GitHubService for testing.
 type mockGitHubService struct {
+	mu sync.Mutex
+
 	client              github.Client
 	taskPR              *github.TaskPR
 	taskPRErr           error
@@ -58,13 +61,17 @@ type mockGitHubService struct {
 	lastDisableReviewWatchID string
 	lastDisableReviewCause   string
 
-	ciOptionsResp *github.TaskCIOptionsResponse
-	ciPRState     *github.TaskCIPRAutomationState
-	ciPRStateErr  error
-	prFeedback    *github.PRFeedback
-	fixAttempts   []github.TaskCIFixAttempt
-	mergeAttempts []github.TaskCIMergeAttempt
-	mergeCalls    int
+	ciOptionsResp        *github.TaskCIOptionsResponse
+	ciOptionsCalls       int
+	ciOptionsStarted     chan struct{}
+	ciOptionsStartedOnce sync.Once
+	ciOptionsBlock       chan struct{}
+	ciPRState            *github.TaskCIPRAutomationState
+	ciPRStateErr         error
+	prFeedback           *github.PRFeedback
+	fixAttempts          []github.TaskCIFixAttempt
+	mergeAttempts        []github.TaskCIMergeAttempt
+	mergeCalls           int
 }
 
 func (m *mockGitHubService) Client() github.Client { return m.client }
@@ -72,6 +79,15 @@ func (m *mockGitHubService) GetTaskPR(_ context.Context, _ string) (*github.Task
 	return m.taskPR, m.taskPRErr
 }
 func (m *mockGitHubService) GetTaskCIOptionsResponse(context.Context, string) (*github.TaskCIOptionsResponse, error) {
+	m.mu.Lock()
+	m.ciOptionsCalls++
+	m.mu.Unlock()
+	if m.ciOptionsStarted != nil {
+		m.ciOptionsStartedOnce.Do(func() { close(m.ciOptionsStarted) })
+	}
+	if m.ciOptionsBlock != nil {
+		<-m.ciOptionsBlock
+	}
 	if m.ciOptionsResp != nil {
 		return m.ciOptionsResp, nil
 	}

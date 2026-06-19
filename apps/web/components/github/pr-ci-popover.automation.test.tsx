@@ -137,4 +137,16 @@ describe("PRCIPopover CI automation controls", () => {
       });
     });
   });
+
+  it("uses the default prompt when requested", async () => {
+    renderPopover();
+
+    fireEvent.click(screen.getByLabelText("Edit auto-fix prompt for this task"));
+    fireEvent.click(screen.getByRole("button", { name: "Use default" }));
+
+    await waitFor(() => {
+      expect(hookMocks.resetPromptMock).toHaveBeenCalledTimes(1);
+    });
+    expect(hookMocks.updateMock).not.toHaveBeenCalled();
+  });
 });

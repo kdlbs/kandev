@@ -231,7 +231,7 @@ func ciAutomationReadyToMerge(pr *github.TaskPR) bool {
 func ciAutomationBuildDelta(feedback *github.PRFeedback, previous ciAutomationCheckpoint) ciAutomationCheckpoint {
 	prevChecks := make(map[string]struct{}, len(previous.FailedChecks))
 	for _, check := range previous.FailedChecks {
-		prevChecks[check.Name+"|"+check.Conclusion+"|"+check.HTMLURL] = struct{}{}
+		prevChecks[ciAutomationCheckKey(check)] = struct{}{}
 	}
 	prevComments := make(map[int64]ciAutomationCommentSnapshot, len(previous.Comments))
 	for _, comment := range previous.Comments {
@@ -246,7 +246,7 @@ func ciAutomationBuildDelta(feedback *github.PRFeedback, previous ciAutomationCh
 			continue
 		}
 		snap := ciAutomationCheckSnapshot{Name: check.Name, Conclusion: check.Conclusion, HTMLURL: check.HTMLURL, Output: check.Output}
-		if _, seen := prevChecks[snap.Name+"|"+snap.Conclusion+"|"+snap.HTMLURL]; !seen {
+		if _, seen := prevChecks[ciAutomationCheckKey(snap)]; !seen {
 			delta.FailedChecks = append(delta.FailedChecks, snap)
 		}
 	}
@@ -260,6 +260,10 @@ func ciAutomationBuildDelta(feedback *github.PRFeedback, previous ciAutomationCh
 		delta.Comments = append(delta.Comments, snap)
 	}
 	return delta
+}
+
+func ciAutomationCheckKey(check ciAutomationCheckSnapshot) string {
+	return check.Name + "|" + check.Conclusion + "|" + check.HTMLURL + "|" + check.Output
 }
 
 func ciAutomationCurrentCheckpoint(feedback *github.PRFeedback) ciAutomationCheckpoint {

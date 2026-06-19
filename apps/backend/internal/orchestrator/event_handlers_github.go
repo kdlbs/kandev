@@ -19,8 +19,9 @@ import (
 )
 
 const (
-	issueWatchIDKey = "issue_watch_id"
-	issueNumberKey  = "issue_number"
+	issueWatchIDKey             = "issue_watch_id"
+	issueNumberKey              = "issue_number"
+	ciAutomationDetachedTimeout = 2 * time.Minute
 )
 
 // GitHubService is the interface the orchestrator uses for GitHub operations.
@@ -166,12 +167,7 @@ func (s *Service) handlePRFeedback(ctx context.Context, event *bus.Event) error 
 			return nil
 		}
 		if pr != nil {
-			automationCtx := context.WithoutCancel(ctx)
-			go func() {
-				if err := s.handleTaskPRCIAutomation(automationCtx, pr); err != nil {
-					s.logger.Debug("CI automation handling failed", zap.String("task_id", pr.TaskID), zap.Error(err))
-				}
-			}()
+			s.startTaskPRCIAutomation(ctx, pr)
 		}
 	}
 	return nil
@@ -182,13 +178,30 @@ func (s *Service) handleTaskPRUpdated(ctx context.Context, event *bus.Event) err
 	if !ok || pr == nil {
 		return nil
 	}
-	automationCtx := context.WithoutCancel(ctx)
+	s.startTaskPRCIAutomation(ctx, pr)
+	return nil
+}
+
+func (s *Service) startTaskPRCIAutomation(ctx context.Context, pr *github.TaskPR) {
+	if pr == nil {
+		return
+	}
+	key := fmt.Sprintf("%s|%s|%d", pr.TaskID, pr.RepositoryID, pr.PRNumber)
+	if _, loaded := s.ciAutomationInFlight.LoadOrStore(key, struct{}{}); loaded {
+		s.logger.Debug("CI automation already in flight",
+			zap.String("task_id", pr.TaskID),
+			zap.String("repository_id", pr.RepositoryID),
+			zap.Int("pr_number", pr.PRNumber))
+		return
+	}
 	go func() {
+		defer s.ciAutomationInFlight.Delete(key)
+		automationCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ciAutomationDetachedTimeout)
+		defer cancel()
 		if err := s.handleTaskPRCIAutomation(automationCtx, pr); err != nil {
 			s.logger.Debug("CI automation handling failed", zap.String("task_id", pr.TaskID), zap.Error(err))
 		}
 	}()
-	return nil
 }
 
 // handleNewReviewPR creates a task for a new PR needing review.

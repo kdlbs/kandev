@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/sysprompt"
@@ -136,6 +137,20 @@ func TestCIAutomationFeedbackDeltaIncludesEditedComments(t *testing.T) {
 	}
 }
 
+func TestCIAutomationFeedbackDeltaIncludesChangedCheckOutput(t *testing.T) {
+	previous := ciAutomationCheckpoint{
+		FailedChecks: []ciAutomationCheckSnapshot{{Name: "unit", Conclusion: "failure", HTMLURL: "https://ci/unit", Output: "old"}},
+	}
+	feedback := &github.PRFeedback{
+		Checks: []github.CheckRun{{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit", Output: "new"}},
+	}
+
+	delta := ciAutomationBuildDelta(feedback, previous)
+	if len(delta.FailedChecks) != 1 || delta.FailedChecks[0].Output != "new" {
+		t.Fatalf("expected changed check output in delta, got %+v", delta.FailedChecks)
+	}
+}
+
 func TestHandleTaskPRCIAutomationQueuesFixDedupesAndMerges(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -246,5 +261,41 @@ func TestHandleTaskPRCIAutomationMergesWhenStateReadFails(t *testing.T) {
 	}
 	if ghSvc.mergeCalls != 1 {
 		t.Fatalf("expected merge to proceed when dedupe state is unavailable, got %d", ghSvc.mergeCalls)
+	}
+}
+
+func TestStartTaskPRCIAutomationSkipsDuplicateInFlightPR(t *testing.T) {
+	ctx := context.Background()
+	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	started := make(chan struct{})
+	block := make(chan struct{})
+	ghSvc := &mockGitHubService{
+		ciOptionsResp:    &github.TaskCIOptionsResponse{TaskID: "task-1"},
+		ciOptionsStarted: started,
+		ciOptionsBlock:   block,
+	}
+	svc.SetGitHubService(ghSvc)
+	pr := &github.TaskPR{TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42}
+
+	svc.startTaskPRCIAutomation(ctx, pr)
+	<-started
+	svc.startTaskPRCIAutomation(ctx, pr)
+	time.Sleep(20 * time.Millisecond)
+	ghSvc.mu.Lock()
+	callsWhileBlocked := ghSvc.ciOptionsCalls
+	ghSvc.mu.Unlock()
+	if callsWhileBlocked != 1 {
+		t.Fatalf("expected duplicate event to be skipped while first run is active, got %d calls", callsWhileBlocked)
+	}
+
+	close(block)
+	time.Sleep(20 * time.Millisecond)
+	svc.startTaskPRCIAutomation(ctx, pr)
+	time.Sleep(20 * time.Millisecond)
+	ghSvc.mu.Lock()
+	callsAfterRelease := ghSvc.ciOptionsCalls
+	ghSvc.mu.Unlock()
+	if callsAfterRelease != 2 {
+		t.Fatalf("expected later event to run after in-flight guard clears, got %d calls", callsAfterRelease)
 	}
 }
