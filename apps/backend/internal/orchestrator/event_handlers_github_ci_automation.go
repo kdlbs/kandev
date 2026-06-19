@@ -122,10 +122,8 @@ func (s *Service) handleTaskPRCIAutoMerge(ctx context.Context, pr *github.TaskPR
 	signature := ciAutomationMergeSignature(pr)
 	state, err := s.githubService.GetTaskCIPRState(ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber)
 	if err != nil {
-		s.recordCIAutomationError(ctx, pr, fmt.Sprintf("load CI automation state: %v", err))
-		return
-	}
-	if state != nil && state.LastMergeSignature == signature {
+		s.logger.Debug("load CI automation merge state failed; attempting merge without dedupe", zap.String("task_id", pr.TaskID), zap.Error(err))
+	} else if state != nil && state.LastMergeSignature == signature {
 		return
 	}
 	attempt := github.TaskCIMergeAttempt{

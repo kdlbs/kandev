@@ -60,6 +60,7 @@ type mockGitHubService struct {
 
 	ciOptionsResp *github.TaskCIOptionsResponse
 	ciPRState     *github.TaskCIPRAutomationState
+	ciPRStateErr  error
 	prFeedback    *github.PRFeedback
 	fixAttempts   []github.TaskCIFixAttempt
 	mergeAttempts []github.TaskCIMergeAttempt
@@ -77,6 +78,9 @@ func (m *mockGitHubService) GetTaskCIOptionsResponse(context.Context, string) (*
 	return &github.TaskCIOptionsResponse{}, nil
 }
 func (m *mockGitHubService) GetTaskCIPRState(context.Context, string, string, int) (*github.TaskCIPRAutomationState, error) {
+	if m.ciPRStateErr != nil {
+		return nil, m.ciPRStateErr
+	}
 	return m.ciPRState, nil
 }
 func (m *mockGitHubService) RecordTaskCIFixAttempt(_ context.Context, attempt github.TaskCIFixAttempt) error {

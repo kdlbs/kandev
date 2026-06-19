@@ -13,8 +13,8 @@ function errorMessage(error: unknown): string {
 }
 
 export function useTaskCIAutomationOptions(taskId: string | null) {
-  const refreshRequestRef = useRef(0);
-  const updateRequestRef = useRef(0);
+  const refreshRequestRef = useRef<Record<string, number>>({});
+  const updateRequestRef = useRef<Record<string, number>>({});
   const options = useAppStore((state) =>
     taskId ? (state.taskCIAutomation.byTaskId[taskId] ?? null) : null,
   );
@@ -34,23 +34,23 @@ export function useTaskCIAutomationOptions(taskId: string | null) {
 
   const refresh = useCallback(async (): Promise<TaskCIAutomationOptions | null> => {
     if (!taskId) return null;
-    const requestId = refreshRequestRef.current + 1;
-    refreshRequestRef.current = requestId;
+    const requestId = (refreshRequestRef.current[taskId] ?? 0) + 1;
+    refreshRequestRef.current[taskId] = requestId;
     setLoading(taskId, true);
     setError(taskId, null);
     try {
       const response = await getTaskCIAutomationOptions(taskId, { cache: "no-store" });
-      if (refreshRequestRef.current === requestId) {
+      if (refreshRequestRef.current[taskId] === requestId) {
         setOptions(taskId, response);
       }
       return response;
     } catch (err) {
-      if (refreshRequestRef.current === requestId) {
+      if (refreshRequestRef.current[taskId] === requestId) {
         setError(taskId, errorMessage(err));
       }
       throw err;
     } finally {
-      if (refreshRequestRef.current === requestId) {
+      if (refreshRequestRef.current[taskId] === requestId) {
         setLoading(taskId, false);
       }
     }
@@ -59,23 +59,23 @@ export function useTaskCIAutomationOptions(taskId: string | null) {
   const update = useCallback(
     async (patch: TaskCIAutomationPatch): Promise<TaskCIAutomationOptions | null> => {
       if (!taskId) return null;
-      const requestId = updateRequestRef.current + 1;
-      updateRequestRef.current = requestId;
+      const requestId = (updateRequestRef.current[taskId] ?? 0) + 1;
+      updateRequestRef.current[taskId] = requestId;
       setSaving(taskId, true);
       setError(taskId, null);
       try {
         const response = await updateTaskCIAutomationOptions(taskId, patch, { cache: "no-store" });
-        if (updateRequestRef.current === requestId) {
+        if (updateRequestRef.current[taskId] === requestId) {
           setOptions(taskId, response);
         }
         return response;
       } catch (err) {
-        if (updateRequestRef.current === requestId) {
+        if (updateRequestRef.current[taskId] === requestId) {
           setError(taskId, errorMessage(err));
         }
         throw err;
       } finally {
-        if (updateRequestRef.current === requestId) {
+        if (updateRequestRef.current[taskId] === requestId) {
           setSaving(taskId, false);
         }
       }

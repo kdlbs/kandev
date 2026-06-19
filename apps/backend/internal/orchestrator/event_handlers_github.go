@@ -166,8 +166,9 @@ func (s *Service) handlePRFeedback(ctx context.Context, event *bus.Event) error 
 			return nil
 		}
 		if pr != nil {
+			automationCtx := context.WithoutCancel(ctx)
 			go func() {
-				if err := s.handleTaskPRCIAutomation(context.Background(), pr); err != nil {
+				if err := s.handleTaskPRCIAutomation(automationCtx, pr); err != nil {
 					s.logger.Debug("CI automation handling failed", zap.String("task_id", pr.TaskID), zap.Error(err))
 				}
 			}()
@@ -181,8 +182,9 @@ func (s *Service) handleTaskPRUpdated(ctx context.Context, event *bus.Event) err
 	if !ok || pr == nil {
 		return nil
 	}
+	automationCtx := context.WithoutCancel(ctx)
 	go func() {
-		if err := s.handleTaskPRCIAutomation(context.Background(), pr); err != nil {
+		if err := s.handleTaskPRCIAutomation(automationCtx, pr); err != nil {
 			s.logger.Debug("CI automation handling failed", zap.String("task_id", pr.TaskID), zap.Error(err))
 		}
 	}()

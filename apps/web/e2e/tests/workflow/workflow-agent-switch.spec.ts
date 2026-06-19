@@ -33,6 +33,28 @@ async function pollSessions(
   return sessions;
 }
 
+async function waitForSessionEnvironmentId(
+  apiClient: InstanceType<typeof import("../../helpers/api-client").ApiClient>,
+  taskId: string,
+  agentProfileId: string,
+  timeoutMs = 30_000,
+) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const { sessions } = await apiClient.listTaskSessions(taskId);
+    const environmentId = sessions.find(
+      (s) => s.agent_profile_id === agentProfileId,
+    )?.task_environment_id;
+    if (environmentId) return environmentId;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  const { sessions } = await apiClient.listTaskSessions(taskId);
+  const details = sessions
+    .map((s) => `${s.id}:${s.agent_profile_id}:${s.state}:${s.task_environment_id ?? "none"}`)
+    .join(", ");
+  throw new Error(`session for profile ${agentProfileId} did not get environment id: ${details}`);
+}
+
 test.describe("Workflow agent profile switching", () => {
   test("manual step move creates new session with step's agent profile", async ({
     apiClient,
@@ -375,20 +397,16 @@ test.describe("Workflow agent profile switching", () => {
       if (sessions.some((s) => s.state === "WAITING_FOR_INPUT")) break;
       await new Promise((r) => setTimeout(r, 500));
     }
+    const step1EnvironmentId = await waitForSessionEnvironmentId(apiClient, task.id, profileA.id);
 
     // Move to Step2
     await apiClient.moveTask(task.id, workflow.id, step2.id);
 
-    // Wait for second session
-    const finalSessions = await pollSessions(apiClient, task.id, 2, 30_000);
+    const step2EnvironmentId = await waitForSessionEnvironmentId(apiClient, task.id, profileB.id);
+    const { sessions: finalSessions } = await apiClient.listTaskSessions(task.id);
     const step2Session = finalSessions.find((s) => s.agent_profile_id === profileB.id);
     expect(step2Session).toBeDefined();
-
-    // The new session should inherit task_environment_id from the old session
-    const step1Session = finalSessions.find((s) => s.agent_profile_id === profileA.id);
-    if (step1Session?.task_environment_id) {
-      expect(step2Session!.task_environment_id).toBe(step1Session.task_environment_id);
-    }
+    expect(step2EnvironmentId).toBe(step1EnvironmentId);
   });
 
   /**

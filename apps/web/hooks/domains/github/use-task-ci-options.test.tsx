@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement, type ReactNode } from "react";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import { StateProvider } from "@/components/state-provider";
+import { StateProvider, useAppStore } from "@/components/state-provider";
 import type { TaskCIAutomationOptions } from "@/lib/types/github";
 
 const apiMocks = vi.hoisted(() => ({
@@ -114,7 +114,41 @@ describe("useTaskCIAutomationOptions", () => {
 
     expect(result.current.options?.auto_fix_enabled).toBe(true);
   });
+});
 
+describe("useTaskCIAutomationOptions task switching", () => {
+  it("clears loading for the original task when switching tasks mid-refresh", async () => {
+    let resolveFirst: (value: TaskCIAutomationOptions) => void = () => {};
+    let resolveSecond: (value: TaskCIAutomationOptions) => void = () => {};
+    apiMocks.getOptionsMock
+      .mockReturnValueOnce(new Promise((resolve) => (resolveFirst = resolve)))
+      .mockReturnValueOnce(new Promise((resolve) => (resolveSecond = resolve)));
+
+    const { result, rerender } = renderHook(
+      ({ taskId }) => ({
+        hook: useTaskCIAutomationOptions(taskId),
+        automation: useAppStore((state) => state.taskCIAutomation),
+      }),
+      { wrapper, initialProps: { taskId: "task-1" } },
+    );
+
+    await waitFor(() => expect(result.current.automation.loading["task-1"]).toBe(true));
+    rerender({ taskId: "task-2" });
+    await waitFor(() => expect(result.current.automation.loading["task-2"]).toBe(true));
+
+    resolveFirst(makeOptions({ task_id: "task-1" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(result.current.automation.loading["task-1"]).toBe(false);
+    expect(result.current.automation.loading["task-2"]).toBe(true);
+
+    resolveSecond(makeOptions({ task_id: "task-2" }));
+    await waitFor(() => expect(result.current.automation.loading["task-2"]).toBe(false));
+  });
+});
+
+describe("useTaskCIAutomationOptions updates", () => {
   it("ignores stale update responses", async () => {
     apiMocks.getOptionsMock.mockResolvedValue(makeOptions());
     let resolveFirst: (value: TaskCIAutomationOptions) => void = () => {};

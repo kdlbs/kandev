@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -190,5 +191,38 @@ func TestHandleTaskPRCIAutomationQueuesFixDedupesAndMerges(t *testing.T) {
 	}
 	if ghSvc.mergeCalls != 1 || len(ghSvc.mergeAttempts) != 1 {
 		t.Fatalf("expected one merge call and attempt, got calls=%d attempts=%d", ghSvc.mergeCalls, len(ghSvc.mergeAttempts))
+	}
+}
+
+func TestHandleTaskPRCIAutomationMergesWhenStateReadFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:           "task-1",
+			AutoMergeEnabled: true,
+		},
+		ciPRStateErr: errors.New("sqlite busy"),
+	}
+	svc.SetGitHubService(ghSvc)
+
+	err := svc.handleTaskPRCIAutomation(ctx, &github.TaskPR{
+		TaskID:         "task-1",
+		RepositoryID:   "repo-1",
+		Owner:          "acme",
+		Repo:           "widget",
+		PRNumber:       42,
+		State:          "open",
+		ChecksState:    "success",
+		ReviewState:    "approved",
+		MergeableState: "clean",
+	})
+	if err != nil {
+		t.Fatalf("handle auto-merge: %v", err)
+	}
+	if ghSvc.mergeCalls != 1 {
+		t.Fatalf("expected merge to proceed when dedupe state is unavailable, got %d", ghSvc.mergeCalls)
 	}
 }
