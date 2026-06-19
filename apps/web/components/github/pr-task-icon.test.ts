@@ -45,6 +45,8 @@ function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
 }
 
 const SKY_400 = "text-sky-400";
+const RED_500 = "text-red-500";
+const YELLOW_500 = "text-yellow-500";
 
 describe("isPRReadyToMerge", () => {
   it("is true when open + approved + success + clean", () => {
@@ -207,14 +209,16 @@ describe("getPRStatusColor", () => {
     expect(getPRStatusColor(pr)).toBe("text-emerald-400");
   });
 
-  it("returns plain green for approved+success but mergeable_state blocked", () => {
+  it("returns yellow for approved+success but mergeable_state blocked (branch protection)", () => {
+    // Blocked-by-branch-protection with no outstanding review request is an
+    // attention state — the plain green would imply the PR is good to go.
     const pr = makePR({
       state: "open",
       review_state: "approved",
       checks_state: "success",
       mergeable_state: "blocked",
     });
-    expect(getPRStatusColor(pr)).toBe("text-green-500");
+    expect(getPRStatusColor(pr)).toBe(YELLOW_500);
   });
 
   it("returns sky-400 for approved PR that still has pending reviewers (1 of N required)", () => {
@@ -296,16 +300,47 @@ describe("getPRStatusColor", () => {
       checks_state: "success",
       mergeable_state: "clean",
     });
-    expect(getPRStatusColor(pr)).toBe("text-red-500");
+    expect(getPRStatusColor(pr)).toBe(RED_500);
   });
 
   it("returns yellow for pending CI", () => {
     const pr = makePR({ state: "open", checks_state: "pending" });
-    expect(getPRStatusColor(pr)).toBe("text-yellow-500");
+    expect(getPRStatusColor(pr)).toBe(YELLOW_500);
   });
 
   it("returns purple for merged", () => {
     expect(getPRStatusColor(makePR({ state: "merged" }))).toBe("text-purple-500");
+  });
+});
+
+describe("getPRStatusColor — mergeability", () => {
+  it("returns red for a dirty (merge-conflict) PR even when approved + checks pass", () => {
+    // Regression: before the mergeability branch, an approved+success but
+    // conflicted PR fell through to plain green — the icon read "good" while
+    // the PR could not be merged.
+    const pr = makePR({
+      state: "open",
+      review_state: "approved",
+      checks_state: "success",
+      mergeable_state: "dirty",
+    });
+    expect(getPRStatusColor(pr)).toBe(RED_500);
+  });
+
+  it("returns yellow for a behind-base PR that is otherwise approved + green", () => {
+    const pr = makePR({
+      state: "open",
+      review_state: "approved",
+      checks_state: "success",
+      mergeable_state: "behind",
+    });
+    expect(getPRStatusColor(pr)).toBe(YELLOW_500);
+  });
+
+  it("ignores dirty/behind mergeable_state on terminal (merged) PRs", () => {
+    expect(getPRStatusColor(makePR({ state: "merged", mergeable_state: "dirty" }))).toBe(
+      "text-purple-500",
+    );
   });
 });
 
@@ -406,7 +441,7 @@ describe("aggregatePRStatusColor", () => {
       review_state: "changes_requested",
       checks_state: "success",
     });
-    expect(aggregatePRStatusColor([green, red])).toBe("text-red-500");
+    expect(aggregatePRStatusColor([green, red])).toBe(RED_500);
   });
 
   it("returns emerald only when all PRs are ready to merge", () => {
@@ -422,7 +457,7 @@ describe("aggregatePRStatusColor", () => {
   it("yellow CI pending beats merged purple", () => {
     const pending = makePR({ state: "open", checks_state: "pending" });
     const merged = makePR({ state: "merged" });
-    expect(aggregatePRStatusColor([merged, pending])).toBe("text-yellow-500");
+    expect(aggregatePRStatusColor([merged, pending])).toBe(YELLOW_500);
   });
 
   it("ignores a merged PR when a fresh open PR has no status yet", () => {
@@ -450,7 +485,7 @@ describe("aggregatePRStatusColor", () => {
     const merged = makePR({ state: "merged" });
     expect(aggregatePRStatusColor([merged, merged])).toBe("text-purple-500");
     const closed = makePR({ state: "closed" });
-    expect(aggregatePRStatusColor([closed, closed])).toBe("text-red-500");
+    expect(aggregatePRStatusColor([closed, closed])).toBe(RED_500);
   });
 });
 

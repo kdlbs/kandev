@@ -207,6 +207,52 @@ describe("PRStatusChip", () => {
   });
 });
 
+describe("PRStatusChip — mergeability", () => {
+  it("is 'conflict' (not 'passed') for a dirty PR even with green checks + approval", () => {
+    // Regression: the chip read mergeable_state-blind and showed the green
+    // "passed" check on a PR that actually had merge conflicts.
+    renderWithStore(
+      { taskPRs: { byTaskId: { "task-1": [makePR({ mergeable_state: "dirty" })] } } },
+      <PRStatusChip taskId="task-1" />,
+    );
+    const chip = screen.getByTestId(CHIP_TESTID);
+    expect(chip.getAttribute(ATTR_STATUS)).toBe("conflict");
+    expect(chip.getAttribute("data-pr-ready-to-merge")).toBe("false");
+  });
+
+  it("is 'behind' for a behind-base PR that is otherwise green", () => {
+    renderWithStore(
+      { taskPRs: { byTaskId: { "task-1": [makePR({ mergeable_state: "behind" })] } } },
+      <PRStatusChip taskId="task-1" />,
+    );
+    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("behind");
+  });
+
+  it("is 'blocked' (amber, not green) for a blocked PR with green checks + approval", () => {
+    renderWithStore(
+      { taskPRs: { byTaskId: { "task-1": [makePR({ mergeable_state: "blocked" })] } } },
+      <PRStatusChip taskId="task-1" />,
+    );
+    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("blocked");
+  });
+
+  it("stays 'in_progress' for a blocked PR that is still awaiting a requested review", () => {
+    // Blocked because a reviewer is still pending → that's the awaiting-review
+    // gate, not a generic protection block. Keep the in-progress reading.
+    renderWithStore(
+      {
+        taskPRs: {
+          byTaskId: {
+            "task-1": [makePR({ mergeable_state: "blocked", pending_review_count: 1 })],
+          },
+        },
+      },
+      <PRStatusChip taskId="task-1" />,
+    );
+    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("in_progress");
+  });
+});
+
 describe("aggregateChipStatus", () => {
   it("returns 'neutral' for an empty list", () => {
     expect(aggregateChipStatus([])).toBe("neutral");
@@ -222,6 +268,18 @@ describe("aggregateChipStatus", () => {
     const passing = makePR();
     const pending = makePR({ id: "pend", review_state: "", checks_state: "pending" });
     expect(aggregateChipStatus([passing, pending])).toBe("in_progress");
+  });
+
+  it("lets a conflicting PR dominate a passing sibling", () => {
+    const passing = makePR();
+    const conflict = makePR({ id: "dirty", mergeable_state: "dirty" });
+    expect(aggregateChipStatus([passing, conflict])).toBe("conflict");
+  });
+
+  it("ranks a failing PR above a conflicting one", () => {
+    const conflict = makePR({ id: "dirty", mergeable_state: "dirty" });
+    const failing = makePR({ id: "fail", checks_state: "failure" });
+    expect(aggregateChipStatus([conflict, failing])).toBe("failed");
   });
 });
 

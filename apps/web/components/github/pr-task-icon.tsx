@@ -51,12 +51,26 @@ export function isPRAwaitingReview(pr: TaskPR): boolean {
   return pr.review_state === "pending" || pr.pending_review_count > 0;
 }
 
+// Colour for the hard merge blockers that must beat ready/awaiting-review:
+// conflicts ("dirty") are a hard stop, "behind" needs a base update first.
+// Returns null for every other state so the caller falls through to its
+// review/check-driven colours. ("blocked" is handled later, after
+// awaiting-review, so an outstanding review still reads as sky.)
+function openMergeBlockerColor(pr: TaskPR): string | null {
+  if (pr.state !== "open") return null;
+  if (pr.mergeable_state === "dirty") return "text-red-500";
+  if (pr.mergeable_state === "behind") return "text-yellow-500";
+  return null;
+}
+
 export function getPRStatusColor(pr: TaskPR): string {
   if (pr.state === "merged") return "text-purple-500";
   if (pr.state === "closed") return "text-red-500";
   if (pr.review_state === "changes_requested" || pr.checks_state === "failure") {
     return "text-red-500";
   }
+  const blockerColor = openMergeBlockerColor(pr);
+  if (blockerColor) return blockerColor;
   if (isPRReadyToMerge(pr)) {
     return "text-emerald-400";
   }
@@ -64,6 +78,12 @@ export function getPRStatusColor(pr: TaskPR): string {
   // with pending reviewers (1 of N required) doesn't read as fully approved.
   if (isPRAwaitingReview(pr)) {
     return "text-sky-400";
+  }
+  // Blocked by branch protection (a rule other than outstanding reviews, which
+  // the awaiting-review branch above already caught) is an attention state —
+  // not the plain green of an approved+passing PR.
+  if (pr.state === "open" && pr.mergeable_state === "blocked") {
+    return "text-yellow-500";
   }
   if (pr.review_state === "approved" && pr.checks_state === "success") {
     return "text-green-500";

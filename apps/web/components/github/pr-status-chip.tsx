@@ -7,6 +7,7 @@ import {
   IconChecklist,
   IconLoader2,
   IconPointFilled,
+  IconAlertTriangleFilled,
   IconX,
 } from "@tabler/icons-react";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
@@ -36,10 +37,22 @@ const HOVER_CLOSE_DELAY_MS = 150;
 
 // Terminal states (merged / closed) never reach here — PRStatusChip returns
 // null for them before rendering — so the chip status union omits them.
-type ChipStatus = "passed" | "failed" | "in_progress" | "neutral";
+type ChipStatus =
+  | "passed"
+  | "failed"
+  | "conflict"
+  | "blocked"
+  | "behind"
+  | "in_progress"
+  | "neutral";
 
 function chipStatus(pr: TaskPR): ChipStatus {
   if (pr.review_state === "changes_requested" || pr.checks_state === "failure") return "failed";
+  // Merge conflicts / behind-base block the merge even when CI is green — the
+  // chip must never read as a passed check in that case. Mirrors
+  // getPRStatusColor + PRStatusIcon (dirty = red, behind = amber).
+  if (pr.mergeable_state === "dirty") return "conflict";
+  if (pr.mergeable_state === "behind") return "behind";
   // Pending checks / pending review must beat checks_state === "success" so a
   // PR with all checks green but reviewers still outstanding renders as
   // in-progress, not passed. Without this order, the chip flips to green the
@@ -49,14 +62,20 @@ function chipStatus(pr: TaskPR): ChipStatus {
   // Mirror getPRStatusColor priority: ready-to-merge beats awaiting-review so
   // the chip and icon never disagree on a (theoretical) clean+approved+pending PR.
   if (isPRAwaitingReview(pr) && !isPRReadyToMerge(pr)) return "in_progress";
+  // Blocked-by-branch-protection that isn't just an outstanding review (those
+  // are caught above) is a real gate — amber, not the green "passed" check.
+  if (pr.mergeable_state === "blocked") return "blocked";
   if (pr.checks_state === "success") return "passed";
   return "neutral";
 }
 
 // Higher = more attention-worthy. Drives the aggregate glyph when a task has
-// multiple open PRs — one failing PR colours the whole chip red.
+// multiple open PRs — one failing/conflicting PR colours the whole chip.
 const CHIP_STATUS_RANK: Record<ChipStatus, number> = {
-  failed: 3,
+  failed: 6,
+  conflict: 5,
+  blocked: 4,
+  behind: 3,
   in_progress: 2,
   passed: 1,
   neutral: 0,
@@ -329,6 +348,11 @@ function ChipStatusGlyph({ status }: { status: ChipStatus }) {
       return <IconCircleCheckFilled className="h-3.5 w-3.5 text-green-500" aria-hidden="true" />;
     case "failed":
       return <IconCircleXFilled className="h-3.5 w-3.5 text-red-500" aria-hidden="true" />;
+    case "conflict":
+      return <IconAlertTriangleFilled className="h-3.5 w-3.5 text-red-500" aria-hidden="true" />;
+    case "behind":
+    case "blocked":
+      return <IconAlertTriangleFilled className="h-3.5 w-3.5 text-yellow-500" aria-hidden="true" />;
     case "in_progress":
       // CI runs take minutes, so slow the spin to ~3s/rotation — the default
       // animate-spin (1s) feels frantic for a long-running task.

@@ -1,12 +1,13 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   IconGitPullRequest,
   IconCheck,
   IconX,
   IconClock,
   IconChevronDown,
+  IconAlertTriangle,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
@@ -37,6 +38,21 @@ import type { TaskPR } from "@/lib/types/github";
 const POPOVER_OPEN_DELAY_MS = 150;
 const POPOVER_CLOSE_DELAY_MS = 150;
 
+// Badge for the hard merge blockers that must beat ready/awaiting-review:
+// conflicts (red) and behind-base (amber). Mirrors openMergeBlockerColor so
+// the badge agrees with the pill colour. Returns null otherwise. ("blocked"
+// is handled later, after awaiting-review.)
+function mergeBlockerBadge(pr: TaskPR): ReactNode | null {
+  if (pr.state !== "open") return null;
+  if (pr.mergeable_state === "dirty") {
+    return <IconAlertTriangle className="h-3 w-3 text-red-500" />;
+  }
+  if (pr.mergeable_state === "behind") {
+    return <IconAlertTriangle className="h-3 w-3 text-yellow-500" />;
+  }
+  return null;
+}
+
 function PRStatusIcon({ pr }: { pr: TaskPR }) {
   // Terminal states take priority
   if (pr.state === "merged") {
@@ -49,6 +65,8 @@ function PRStatusIcon({ pr }: { pr: TaskPR }) {
   if (pr.checks_state === "failure" || pr.review_state === "changes_requested") {
     return <IconX className="h-3 w-3 text-red-500" />;
   }
+  const blockerBadge = mergeBlockerBadge(pr);
+  if (blockerBadge) return blockerBadge;
   if (isPRReadyToMerge(pr)) {
     return <IconCheck className="h-3 w-3 text-emerald-400" />;
   }
@@ -56,6 +74,11 @@ function PRStatusIcon({ pr }: { pr: TaskPR }) {
   // with pending reviewers (1 of N required) doesn't read as fully approved.
   if (isPRAwaitingReview(pr)) {
     return <IconClock className="h-3 w-3 text-sky-400" />;
+  }
+  // Blocked by branch protection (not just an outstanding review) → amber,
+  // never the green "all good" check.
+  if (pr.state === "open" && pr.mergeable_state === "blocked") {
+    return <IconAlertTriangle className="h-3 w-3 text-yellow-500" />;
   }
   if (pr.checks_state === "success" && pr.review_state === "approved") {
     return <IconCheck className="h-3 w-3 text-green-500" />;
@@ -90,6 +113,12 @@ function usePopoverInteractions() {
   const [open, setOpen] = useState(false);
   const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Set while a nested menu (e.g. the merge-method dropdown) is open. Its
+  // content renders in a portal *outside* PopoverContent, so moving the
+  // pointer onto it fires the popover's onMouseLeave and Radix flags an
+  // outside-interaction — both would otherwise close the popover out from
+  // under the menu. While this is true we ignore every close request.
+  const keepOpen = useRef(false);
 
   const clearOpen = useCallback(() => {
     if (openTimer.current) {
@@ -111,10 +140,14 @@ function usePopoverInteractions() {
   }, [isMobile, clearClose]);
 
   const handleLeave = useCallback(() => {
-    if (isMobile) return;
+    if (isMobile || keepOpen.current) return;
     clearOpen();
     closeTimer.current = setTimeout(() => setOpen(false), POPOVER_CLOSE_DELAY_MS);
   }, [isMobile, clearOpen]);
+
+  const setKeepOpen = useCallback((next: boolean) => {
+    keepOpen.current = next;
+  }, []);
 
   useEffect(
     () => () => {
@@ -129,6 +162,7 @@ function usePopoverInteractions() {
     open,
     onOpenChange: (next: boolean) => {
       if (!next) {
+        if (keepOpen.current) return;
         clearOpen();
         clearClose();
         setOpen(false);
@@ -136,6 +170,7 @@ function usePopoverInteractions() {
     },
     handleEnter,
     handleLeave,
+    setKeepOpen,
   };
 }
 
@@ -143,7 +178,8 @@ function PRSingleButton({ pr }: { pr: TaskPR }) {
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const tooltip = `${pr.owner}/${pr.repo} #${pr.pr_number} — ${pr.pr_title}`;
-  const { isMobile, open, onOpenChange, handleEnter, handleLeave } = usePopoverInteractions();
+  const { isMobile, open, onOpenChange, handleEnter, handleLeave, setKeepOpen } =
+    usePopoverInteractions();
   // Background sync lives on PRStatusChip (always mounted in the chat
   // input area); the chip and this popover share prFeedbackCache so a
   // single subscription warms both.
@@ -191,7 +227,7 @@ function PRSingleButton({ pr }: { pr: TaskPR }) {
         onMouseLeave={handleLeave}
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
-        <PRCIPopover pr={pr} enabled={open} />
+        <PRCIPopover pr={pr} enabled={open} onMergeMenuOpenChange={setKeepOpen} />
       </PopoverContent>
     </Popover>
   );
