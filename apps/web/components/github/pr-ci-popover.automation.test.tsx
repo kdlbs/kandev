@@ -121,6 +121,15 @@ describe("PRCIPopover CI automation controls", () => {
     expect(hookMocks.updateMock).toHaveBeenCalledWith({ auto_merge_enabled: true });
   });
 
+  it("uses the PR title in the header and omits the redundant detail link", () => {
+    renderPopover();
+
+    expect(screen.getByTestId("pr-popover-title").textContent).toBe("Test PR");
+    expect(screen.queryByText("CI status")).toBeNull();
+    expect(screen.queryByText("Open PR details")).toBeNull();
+    expect(screen.getByLabelText("View pull request on GitHub")).not.toBeNull();
+  });
+
   it("opens a task prompt dialog with a settings link and saves overrides", async () => {
     renderPopover();
 

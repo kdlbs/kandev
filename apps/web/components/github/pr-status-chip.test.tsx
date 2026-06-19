@@ -226,6 +226,8 @@ describe("PRStatusChip mobile branch", () => {
     // Inner popover body + close button render inside the drawer.
     expect(document.querySelector("[data-testid='pr-topbar-popover-inner']")).not.toBeNull();
     expect(document.querySelector("[data-testid='pr-status-chip-drawer-close']")).not.toBeNull();
+    expect(screen.getByTestId("pr-popover-title").textContent).toBe("Test PR");
+    expect(drawer?.textContent).not.toContain("Open PR details");
   });
 
   it("preserves the same data attributes as the desktop chip", () => {

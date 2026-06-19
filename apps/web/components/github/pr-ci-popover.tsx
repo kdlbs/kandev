@@ -83,13 +83,20 @@ export function hasNoChecksAtAll(
 
 function PRCIPopoverHeader({ pr }: { pr: TaskPR }) {
   const checksUrl = `${pr.pr_url}/checks`;
+  const title = pr.pr_title || `PR #${pr.pr_number}`;
   return (
     <div
       data-testid="pr-popover-header"
       className="flex items-center justify-between gap-2 border-b border-border/50 pb-2"
     >
-      <div className="flex items-center gap-1.5">
-        <span className="text-sm font-medium">CI status</span>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <span
+          data-testid="pr-popover-title"
+          className="min-w-0 truncate text-sm font-medium"
+          title={title}
+        >
+          {title}
+        </span>
         <a
           data-testid="pr-popover-external-link"
           href={checksUrl}
@@ -511,7 +518,6 @@ function ReconnectGitHubBlock() {
 export function PRCIPopover({
   pr,
   enabled,
-  onOpenDetailPanel,
 }: {
   pr: TaskPR;
   enabled: boolean;
@@ -549,18 +555,6 @@ export function PRCIPopover({
           <PRCIAutomationControls pr={pr} />
           <PRMergeButton taskPR={pr} onMerged={refetch} compact />
         </>
-      )}
-      {onOpenDetailPanel && (
-        <Button
-          data-testid="pr-popover-open-detail"
-          size="sm"
-          variant="ghost"
-          className="cursor-pointer justify-start gap-1.5 px-2"
-          onClick={onOpenDetailPanel}
-        >
-          <IconGitPullRequest className="h-3.5 w-3.5" />
-          <span>Open PR details</span>
-        </Button>
       )}
       <PRPopoverFooter lastUpdatedAt={lastUpdatedAt} />
     </div>
