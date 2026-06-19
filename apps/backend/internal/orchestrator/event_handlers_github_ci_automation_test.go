@@ -289,6 +289,35 @@ func TestDispatchCIAutomationPromptRecordsUserMessageBeforeDirectPrompt(t *testi
 	}
 }
 
+func TestDispatchCIAutomationPromptFailsWhenDirectUserMessageCannotBeRecorded(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateWaitingForInput)
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.agentManager = agentMgr
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	messageCreator := &mockMessageCreator{userMessageErr: errors.New("message db unavailable")}
+	svc.messageCreator = messageCreator
+	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
+	session, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.AgentExecutionID = "exec-1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session execution: %v", err)
+	}
+
+	err = svc.dispatchCIAutomationPrompt(ctx, session, "Fix the PR")
+	if err == nil || !strings.Contains(err.Error(), "failed to record CI automation user message") {
+		t.Fatalf("expected user-message failure, got %v", err)
+	}
+	if len(agentMgr.capturedPrompts) != 0 {
+		t.Fatalf("expected no direct prompt when user message could not be recorded, got %d", len(agentMgr.capturedPrompts))
+	}
+}
+
 func TestCIAutomationMergeSignatureIncludesPRContentVersion(t *testing.T) {
 	pr := &github.TaskPR{
 		TaskID:       "task-1",
@@ -305,6 +334,65 @@ func TestCIAutomationMergeSignatureIncludesPRContentVersion(t *testing.T) {
 	after := ciAutomationMergeSignature(pr)
 	if before == after {
 		t.Fatal("expected PR content/version change to alter merge signature")
+	}
+}
+
+func TestCIAutomationMergeSignatureIgnoresVolatileUpdatedAt(t *testing.T) {
+	pr := &github.TaskPR{
+		TaskID:         "task-1",
+		RepositoryID:   "repo-1",
+		PRNumber:       42,
+		HeadBranch:     "feature",
+		ChecksState:    "success",
+		ReviewState:    "approved",
+		MergeableState: "clean",
+		UpdatedAt:      time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC),
+	}
+	before := ciAutomationMergeSignature(pr)
+	pr.UpdatedAt = pr.UpdatedAt.Add(time.Minute)
+	if after := ciAutomationMergeSignature(pr); after != before {
+		t.Fatalf("expected updated_at-only change not to alter signature: before=%s after=%s", before, after)
+	}
+	pr.ReviewCount++
+	if after := ciAutomationMergeSignature(pr); after == before {
+		t.Fatal("expected semantic readiness change to alter signature")
+	}
+}
+
+func TestHandleTaskPRCIAutomationRecordsErrorWhenNoPromptableSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateCompleted)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			EffectiveAutoFixPrompt: "Fix the PR",
+		},
+		prFeedback: &github.PRFeedback{
+			Checks: []github.CheckRun{{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit"}},
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	err := svc.handleTaskPRCIAutomation(ctx, &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		Owner:        "acme",
+		Repo:         "widget",
+		PRNumber:     42,
+		State:        "open",
+		ChecksState:  "failure",
+	})
+	if err != nil {
+		t.Fatalf("handle auto-fix: %v", err)
+	}
+	if len(ghSvc.ciErrors) != 1 || ghSvc.ciErrors[0].LastError == nil || *ghSvc.ciErrors[0].LastError != "no promptable task session for CI auto-fix" {
+		t.Fatalf("expected no-session CI automation error, got %+v", ghSvc.ciErrors)
+	}
+	if len(ghSvc.fixAttempts) != 0 {
+		t.Fatalf("expected no fix attempt without promptable session, got %+v", ghSvc.fixAttempts)
 	}
 }
 

@@ -93,6 +93,7 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 	prompt := ciAutomationRenderPrompt(options.EffectiveAutoFixPrompt, pr, delta)
 	session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, pr.TaskID)
 	if err != nil || session == nil {
+		s.recordCIAutomationError(ctx, pr, "no promptable task session for CI auto-fix")
 		return
 	}
 	if err := s.dispatchCIAutomationPrompt(ctx, session, prompt); err != nil {
@@ -154,7 +155,9 @@ func (s *Service) dispatchCIAutomationPrompt(ctx context.Context, session *model
 		s.publishQueueStatusEvent(ctx, session.ID)
 		return nil
 	case models.TaskSessionStateWaitingForInput, models.TaskSessionStateIdle:
-		s.recordCIAutomationUserMessage(ctx, session.TaskID, session.ID, chatPrompt)
+		if !s.recordCIAutomationUserMessage(ctx, session.TaskID, session.ID, chatPrompt) {
+			return fmt.Errorf("failed to record CI automation user message")
+		}
 		_, err := s.PromptTask(ctx, session.TaskID, session.ID, chatPrompt, "", false, nil, false)
 		return err
 	default:
@@ -302,7 +305,7 @@ func encodeCIAutomationCheckpoint(checkpoint ciAutomationCheckpoint) (string, st
 }
 
 func ciAutomationMergeSignature(pr *github.TaskPR) string {
-	payload := fmt.Sprintf("%s|%s|%d|%s|%s|%d|%d|%s|%s|%s|%d|%d", pr.TaskID, pr.RepositoryID, pr.PRNumber, pr.HeadBranch, pr.UpdatedAt.Format(time.RFC3339Nano), pr.Additions, pr.Deletions, pr.ChecksState, pr.ReviewState, pr.MergeableState, pr.ReviewCount, pr.UnresolvedReviewThreads)
+	payload := fmt.Sprintf("%s|%s|%d|%s|%d|%d|%s|%s|%s|%d|%d", pr.TaskID, pr.RepositoryID, pr.PRNumber, pr.HeadBranch, pr.Additions, pr.Deletions, pr.ChecksState, pr.ReviewState, pr.MergeableState, pr.ReviewCount, pr.UnresolvedReviewThreads)
 	sum := sha256.Sum256([]byte(payload))
 	return hex.EncodeToString(sum[:])
 }

@@ -6,6 +6,8 @@ import { ToastProvider } from "@/components/toast-provider";
 import type { TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
 
 const hookMocks = vi.hoisted(() => ({
+  error: null as string | null,
+  refreshMock: vi.fn(),
   updateMock: vi.fn(),
   resetPromptMock: vi.fn(),
 }));
@@ -28,8 +30,8 @@ vi.mock("@/hooks/domains/github/use-task-ci-options", () => ({
     options: makeOptions(),
     loading: false,
     saving: false,
-    error: null,
-    refresh: vi.fn(),
+    error: hookMocks.error,
+    refresh: hookMocks.refreshMock,
     update: hookMocks.updateMock,
     resetPrompt: hookMocks.resetPromptMock,
   }),
@@ -98,6 +100,8 @@ function renderPopover() {
 
 describe("PRCIPopover CI automation controls", () => {
   beforeEach(() => {
+    hookMocks.error = null;
+    hookMocks.refreshMock.mockReset();
     hookMocks.updateMock.mockReset();
     hookMocks.resetPromptMock.mockReset();
   });
@@ -148,5 +152,15 @@ describe("PRCIPopover CI automation controls", () => {
       expect(hookMocks.resetPromptMock).toHaveBeenCalledTimes(1);
     });
     expect(hookMocks.updateMock).not.toHaveBeenCalled();
+  });
+
+  it("offers retry after CI automation options fail to load", () => {
+    hookMocks.error = "backend unavailable";
+    renderPopover();
+
+    expect(screen.getByText("backend unavailable")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(hookMocks.refreshMock).toHaveBeenCalledTimes(1);
   });
 });

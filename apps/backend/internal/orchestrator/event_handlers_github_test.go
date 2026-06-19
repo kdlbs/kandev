@@ -78,6 +78,7 @@ type mockGitHubService struct {
 	mergeAttempts        []github.TaskCIMergeAttempt
 	mergeCalls           int
 	mergeErr             error
+	ciErrors             []github.TaskCIPRAutomationState
 }
 
 func (m *mockGitHubService) Client() github.Client { return m.client }
@@ -137,7 +138,13 @@ func (m *mockGitHubService) RecordTaskCIMergeAttempt(_ context.Context, attempt 
 	m.mergeAttempts = append(m.mergeAttempts, attempt)
 	return nil
 }
-func (m *mockGitHubService) RecordTaskCIError(context.Context, string, string, int, string) error {
+func (m *mockGitHubService) RecordTaskCIError(_ context.Context, taskID, repositoryID string, prNumber int, message string) error {
+	m.ciErrors = append(m.ciErrors, github.TaskCIPRAutomationState{
+		TaskID:       taskID,
+		RepositoryID: repositoryID,
+		PRNumber:     prNumber,
+		LastError:    &message,
+	})
 	return nil
 }
 func (m *mockGitHubService) ClearTaskCIError(context.Context, string, string, int) error {

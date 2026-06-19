@@ -761,6 +761,7 @@ func TestStartCreatedSession_WorkflowOverridePromotesPreparedWhenTaskHasNoPrimar
 type mockMessageCreator struct {
 	userMessages    []mockUserMessage
 	sessionMessages []mockSessionMessage
+	userMessageErr  error
 }
 
 type mockUserMessage struct {
@@ -775,6 +776,9 @@ type mockSessionMessage struct {
 }
 
 func (m *mockMessageCreator) CreateUserMessage(_ context.Context, taskID, content, sessionID, turnID string, metadata map[string]interface{}) error {
+	if m.userMessageErr != nil {
+		return m.userMessageErr
+	}
 	m.userMessages = append(m.userMessages, mockUserMessage{taskID, content, sessionID, turnID, metadata})
 	return nil
 }

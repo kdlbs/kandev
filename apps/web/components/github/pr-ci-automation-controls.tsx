@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { IconEdit, IconInfoCircle } from "@tabler/icons-react";
+import { IconEdit, IconInfoCircle, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -140,10 +140,36 @@ function CIAutomationRow({
   );
 }
 
-export function PRCIAutomationControls({ pr }: { pr: TaskPR }) {
-  const { options, loading, saving, error, update, resetPrompt } = useTaskCIAutomationOptions(
-    pr.task_id,
+function CIAutomationErrorRow({
+  error,
+  loading,
+  onRetry,
+}: {
+  error: string;
+  loading: boolean;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2 px-1 text-[11px] text-destructive">
+      <span className="min-w-0 flex-1 truncate">{error}</span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="h-6 cursor-pointer gap-1 px-2 text-[11px]"
+        disabled={loading}
+        onClick={onRetry}
+      >
+        <IconRefresh className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} />
+        Retry
+      </Button>
+    </div>
   );
+}
+
+export function PRCIAutomationControls({ pr }: { pr: TaskPR }) {
+  const { options, loading, saving, error, refresh, update, resetPrompt } =
+    useTaskCIAutomationOptions(pr.task_id);
   const { toast } = useToast();
   const [promptOpen, setPromptOpen] = useState(false);
   const [promptDraft, setPromptDraft] = useState("");
@@ -180,6 +206,10 @@ export function PRCIAutomationControls({ pr }: { pr: TaskPR }) {
       .then(() => setPromptOpen(false))
       .catch(() => reportError("Failed to reset auto-fix prompt."));
   }, [reportError, resetPrompt]);
+
+  const retryLoad = useCallback(() => {
+    Promise.resolve(refresh()).catch(() => reportError("Failed to load CI automation."));
+  }, [refresh, reportError]);
 
   const disabled = loading || saving || !options;
   return (
@@ -218,7 +248,7 @@ export function PRCIAutomationControls({ pr }: { pr: TaskPR }) {
         disabled={disabled}
         onCheckedChange={(checked) => patchOption({ auto_merge_enabled: checked })}
       />
-      {error && <div className="px-1 text-[11px] text-destructive">{error}</div>}
+      {error && <CIAutomationErrorRow error={error} loading={loading} onRetry={retryLoad} />}
       <CIAutomationPromptDialog
         open={promptOpen}
         prompt={promptDraft}
