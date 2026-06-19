@@ -80,14 +80,7 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 	if len(delta.FailedChecks) == 0 && len(delta.Comments) == 0 {
 		if state != nil && len(previous.FailedChecks)+len(previous.Comments) > 0 {
 			checkpointJSON, signature := encodeCIAutomationCheckpoint(checkpoint)
-			if err := s.githubService.RecordTaskCIFixAttempt(context.WithoutCancel(ctx), github.TaskCIFixAttempt{
-				TaskID:         pr.TaskID,
-				RepositoryID:   pr.RepositoryID,
-				PRNumber:       pr.PRNumber,
-				Signature:      signature,
-				CheckpointJSON: checkpointJSON,
-				EnqueuedAt:     time.Now().UTC(),
-			}); err != nil {
+			if err := s.githubService.RefreshTaskCIFixCheckpoint(context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber, signature, checkpointJSON); err != nil {
 				s.logger.Debug("record CI auto-fix checkpoint refresh failed", zap.String("task_id", pr.TaskID), zap.Error(err))
 			}
 		}
@@ -135,7 +128,6 @@ func (s *Service) handleTaskPRCIAutoMerge(ctx context.Context, pr *github.TaskPR
 		AttemptedAt:  time.Now().UTC(),
 	}
 	if err := s.githubService.MergePR(ctx, pr.Owner, pr.Repo, pr.PRNumber, ""); err != nil {
-		_ = s.githubService.RecordTaskCIMergeAttempt(context.WithoutCancel(ctx), attempt)
 		s.recordCIAutomationError(ctx, pr, fmt.Sprintf("merge PR: %v", err))
 		return
 	}
@@ -145,25 +137,24 @@ func (s *Service) handleTaskPRCIAutoMerge(ctx context.Context, pr *github.TaskPR
 
 func (s *Service) dispatchCIAutomationPrompt(ctx context.Context, session *models.TaskSession, prompt string) error {
 	chatPrompt := ciAutomationChatPrompt(prompt)
-	userMessageRecorded := s.recordCIAutomationUserMessage(ctx, session.TaskID, session.ID, chatPrompt)
 	switch session.State {
 	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
 		if s.messageQueue == nil {
 			return fmt.Errorf("message queue is not configured")
 		}
 		metadata := map[string]interface{}{
-			"origin": ciAutomationOrigin,
-		}
-		if userMessageRecorded {
-			metadata[metaKeyUserMessageRecorded] = true
+			"origin":                   ciAutomationOrigin,
+			metaKeyUserMessageRecorded: true,
 		}
 		_, err := s.messageQueue.QueueMessageWithMetadata(ctx, session.ID, session.TaskID, chatPrompt, "", messagequeue.QueuedByWorkflow, false, nil, metadata)
 		if err != nil {
 			return err
 		}
+		s.recordCIAutomationUserMessage(ctx, session.TaskID, session.ID, chatPrompt)
 		s.publishQueueStatusEvent(ctx, session.ID)
 		return nil
 	case models.TaskSessionStateWaitingForInput, models.TaskSessionStateIdle:
+		s.recordCIAutomationUserMessage(ctx, session.TaskID, session.ID, chatPrompt)
 		_, err := s.PromptTask(ctx, session.TaskID, session.ID, chatPrompt, "", false, nil, false)
 		return err
 	default:
@@ -311,7 +302,7 @@ func encodeCIAutomationCheckpoint(checkpoint ciAutomationCheckpoint) (string, st
 }
 
 func ciAutomationMergeSignature(pr *github.TaskPR) string {
-	payload := fmt.Sprintf("%s|%s|%d|%s|%s|%s|%d|%d", pr.TaskID, pr.RepositoryID, pr.PRNumber, pr.ChecksState, pr.ReviewState, pr.MergeableState, pr.ReviewCount, pr.UnresolvedReviewThreads)
+	payload := fmt.Sprintf("%s|%s|%d|%s|%s|%d|%d|%s|%s|%s|%d|%d", pr.TaskID, pr.RepositoryID, pr.PRNumber, pr.HeadBranch, pr.UpdatedAt.Format(time.RFC3339Nano), pr.Additions, pr.Deletions, pr.ChecksState, pr.ReviewState, pr.MergeableState, pr.ReviewCount, pr.UnresolvedReviewThreads)
 	sum := sha256.Sum256([]byte(payload))
 	return hex.EncodeToString(sum[:])
 }

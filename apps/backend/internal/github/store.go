@@ -1110,6 +1110,23 @@ func (s *Store) RecordTaskCIFixAttempt(ctx context.Context, attempt TaskCIFixAtt
 	return err
 }
 
+// RefreshTaskCIFixCheckpoint updates the current feedback checkpoint without recording a new prompt dispatch.
+func (s *Store) RefreshTaskCIFixCheckpoint(ctx context.Context, taskID, repositoryID string, prNumber int, signature, checkpointJSON string) error {
+	ctx = context.WithoutCancel(ctx)
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO github_task_ci_pr_state (
+			task_id, repository_id, pr_number, last_fix_signature, last_fix_checkpoint_json, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
+			last_fix_signature = excluded.last_fix_signature,
+			last_fix_checkpoint_json = excluded.last_fix_checkpoint_json,
+			last_error = NULL,
+			updated_at = excluded.updated_at`,
+		taskID, repositoryID, prNumber, signature, checkpointJSON, now, now)
+	return err
+}
+
 // RecordTaskCIMergeAttempt records an auto-merge attempt signature.
 func (s *Store) RecordTaskCIMergeAttempt(ctx context.Context, attempt TaskCIMergeAttempt) error {
 	ctx = context.WithoutCancel(ctx)

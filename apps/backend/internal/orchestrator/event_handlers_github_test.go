@@ -18,7 +18,11 @@ type mockGitHubService struct {
 
 	client              github.Client
 	taskPR              *github.TaskPR
+	taskPRs             []*github.TaskPR
 	taskPRErr           error
+	getTaskPRCalls      int
+	exactTaskPRCalls    int
+	lastExactPRLookup   github.PRFeedbackEvent
 	prWatch             *github.PRWatch // returned by GetPRWatchBySession (nil = no watch)
 	ensureWatchCalls    int
 	createWatchCalls    int
@@ -70,13 +74,29 @@ type mockGitHubService struct {
 	ciPRStateErr         error
 	prFeedback           *github.PRFeedback
 	fixAttempts          []github.TaskCIFixAttempt
+	fixCheckpointRefresh []github.TaskCIFixAttempt
 	mergeAttempts        []github.TaskCIMergeAttempt
 	mergeCalls           int
+	mergeErr             error
 }
 
 func (m *mockGitHubService) Client() github.Client { return m.client }
 func (m *mockGitHubService) GetTaskPR(_ context.Context, _ string) (*github.TaskPR, error) {
+	m.getTaskPRCalls++
 	return m.taskPR, m.taskPRErr
+}
+func (m *mockGitHubService) GetTaskPRByOwnerRepoNumber(_ context.Context, taskID, owner, repo string, prNumber int) (*github.TaskPR, error) {
+	m.exactTaskPRCalls++
+	m.lastExactPRLookup = github.PRFeedbackEvent{TaskID: taskID, Owner: owner, Repo: repo, PRNumber: prNumber}
+	if m.taskPRErr != nil {
+		return nil, m.taskPRErr
+	}
+	for _, pr := range m.taskPRs {
+		if pr.TaskID == taskID && pr.Owner == owner && pr.Repo == repo && pr.PRNumber == prNumber {
+			return pr, nil
+		}
+	}
+	return m.taskPR, nil
 }
 func (m *mockGitHubService) GetTaskCIOptionsResponse(context.Context, string) (*github.TaskCIOptionsResponse, error) {
 	m.mu.Lock()
@@ -103,6 +123,16 @@ func (m *mockGitHubService) RecordTaskCIFixAttempt(_ context.Context, attempt gi
 	m.fixAttempts = append(m.fixAttempts, attempt)
 	return nil
 }
+func (m *mockGitHubService) RefreshTaskCIFixCheckpoint(_ context.Context, taskID, repositoryID string, prNumber int, signature, checkpointJSON string) error {
+	m.fixCheckpointRefresh = append(m.fixCheckpointRefresh, github.TaskCIFixAttempt{
+		TaskID:         taskID,
+		RepositoryID:   repositoryID,
+		PRNumber:       prNumber,
+		Signature:      signature,
+		CheckpointJSON: checkpointJSON,
+	})
+	return nil
+}
 func (m *mockGitHubService) RecordTaskCIMergeAttempt(_ context.Context, attempt github.TaskCIMergeAttempt) error {
 	m.mergeAttempts = append(m.mergeAttempts, attempt)
 	return nil
@@ -121,7 +151,7 @@ func (m *mockGitHubService) GetPRFeedback(context.Context, string, string, int) 
 }
 func (m *mockGitHubService) MergePR(context.Context, string, string, int, string) error {
 	m.mergeCalls++
-	return nil
+	return m.mergeErr
 }
 func (m *mockGitHubService) EnsurePRWatch(_ context.Context, _, _, _, _, _, branch string) (*github.PRWatch, error) {
 	m.ensureWatchCalls++

@@ -236,6 +236,36 @@ func TestHttpTaskCIOptions_DefaultAndPatch(t *testing.T) {
 	}
 }
 
+func TestHttpPatchTaskCIOptions_EmptyPatchDoesNotUpdateRow(t *testing.T) {
+	router, _ := setupControllerStoreTest(t)
+	body := bytes.NewBufferString(`{"auto_fix_enabled":true}`)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/github/tasks/task-1/ci-options", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var before TaskCIOptionsResponse
+	if err := json.NewDecoder(w.Body).Decode(&before); err != nil {
+		t.Fatalf("decode patch response: %v", err)
+	}
+
+	req = httptest.NewRequest(http.MethodPatch, "/api/v1/github/tasks/task-1/ci-options", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var after TaskCIOptionsResponse
+	if err := json.NewDecoder(w.Body).Decode(&after); err != nil {
+		t.Fatalf("decode empty patch response: %v", err)
+	}
+	if !after.UpdatedAt.Equal(before.UpdatedAt) {
+		t.Fatalf("empty patch updated row timestamp: before=%v after=%v", before.UpdatedAt, after.UpdatedAt)
+	}
+}
+
 func TestHttpPatchTaskCIOptions_InvalidPayload(t *testing.T) {
 	router, _ := setupControllerStoreTest(t)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/github/tasks/task-1/ci-options", bytes.NewBufferString(`{"auto_fix_enabled":"yes"}`))

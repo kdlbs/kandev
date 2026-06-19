@@ -41,9 +41,11 @@ type GitHubService interface {
 	ResetPRWatch(ctx context.Context, id, branch string) error
 	AssociatePRWithTask(ctx context.Context, taskID, repositoryID string, pr *github.PR) (*github.TaskPR, error)
 	GetTaskPR(ctx context.Context, taskID string) (*github.TaskPR, error)
+	GetTaskPRByOwnerRepoNumber(ctx context.Context, taskID, owner, repo string, prNumber int) (*github.TaskPR, error)
 	GetTaskCIOptionsResponse(ctx context.Context, taskID string) (*github.TaskCIOptionsResponse, error)
 	GetTaskCIPRState(ctx context.Context, taskID, repositoryID string, prNumber int) (*github.TaskCIPRAutomationState, error)
 	RecordTaskCIFixAttempt(ctx context.Context, attempt github.TaskCIFixAttempt) error
+	RefreshTaskCIFixCheckpoint(ctx context.Context, taskID, repositoryID string, prNumber int, signature, checkpointJSON string) error
 	RecordTaskCIMergeAttempt(ctx context.Context, attempt github.TaskCIMergeAttempt) error
 	RecordTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error
 	ClearTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int) error
@@ -161,7 +163,7 @@ func (s *Service) handlePRFeedback(ctx context.Context, event *bus.Event) error 
 		zap.String("session_id", feedbackEvt.SessionID),
 		zap.Int("pr_number", feedbackEvt.PRNumber))
 	if s.githubService != nil {
-		pr, err := s.githubService.GetTaskPR(ctx, feedbackEvt.TaskID)
+		pr, err := s.githubService.GetTaskPRByOwnerRepoNumber(ctx, feedbackEvt.TaskID, feedbackEvt.Owner, feedbackEvt.Repo, feedbackEvt.PRNumber)
 		if err != nil {
 			s.logger.Debug("failed to load task PR for CI automation", zap.String("task_id", feedbackEvt.TaskID), zap.Error(err))
 			return nil

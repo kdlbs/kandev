@@ -131,4 +131,39 @@ func TestStoreTaskCIPRState_RecordAttemptsAndError(t *testing.T) {
 	}
 }
 
+func TestStoreTaskCIPRState_RefreshCheckpointPreservesPromptDispatchMetadata(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	enqueuedAt := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+
+	if err := store.RecordTaskCIFixAttempt(ctx, TaskCIFixAttempt{
+		TaskID:         "task-1",
+		RepositoryID:   "repo-1",
+		PRNumber:       42,
+		Signature:      "before",
+		CheckpointJSON: `{"failed_checks":[{"name":"unit"}]}`,
+		SessionID:      "session-1",
+		EnqueuedAt:     enqueuedAt,
+	}); err != nil {
+		t.Fatalf("record fix attempt: %v", err)
+	}
+	if err := store.RefreshTaskCIFixCheckpoint(ctx, "task-1", "repo-1", 42, "after", `{"failed_checks":[]}`); err != nil {
+		t.Fatalf("refresh checkpoint: %v", err)
+	}
+
+	state, err := store.GetTaskCIPRState(ctx, "task-1", "repo-1", 42)
+	if err != nil {
+		t.Fatalf("get state: %v", err)
+	}
+	if state.LastFixSignature != "after" || state.LastFixCheckpointJSON != `{"failed_checks":[]}` {
+		t.Fatalf("checkpoint was not refreshed: %+v", state)
+	}
+	if state.LastFixSessionID == nil || *state.LastFixSessionID != "session-1" {
+		t.Fatalf("LastFixSessionID=%v, want session-1", state.LastFixSessionID)
+	}
+	if state.LastFixEnqueuedAt == nil || !state.LastFixEnqueuedAt.Equal(enqueuedAt) {
+		t.Fatalf("LastFixEnqueuedAt=%v, want %v", state.LastFixEnqueuedAt, enqueuedAt)
+	}
+}
+
 func boolPtr(v bool) *bool { return &v }

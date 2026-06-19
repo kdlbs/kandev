@@ -48,6 +48,14 @@ func (s *Service) RecordTaskCIFixAttempt(ctx context.Context, attempt TaskCIFixA
 	return s.store.RecordTaskCIFixAttempt(ctx, attempt)
 }
 
+// RefreshTaskCIFixCheckpoint records the current CI checkpoint without recording a prompt dispatch.
+func (s *Service) RefreshTaskCIFixCheckpoint(ctx context.Context, taskID, repositoryID string, prNumber int, signature, checkpointJSON string) error {
+	if s.store == nil {
+		return errStoreUnavailable
+	}
+	return s.store.RefreshTaskCIFixCheckpoint(ctx, taskID, repositoryID, prNumber, signature, checkpointJSON)
+}
+
 // RecordTaskCIMergeAttempt records an auto-merge attempt.
 func (s *Service) RecordTaskCIMergeAttempt(ctx context.Context, attempt TaskCIMergeAttempt) error {
 	if s.store == nil {

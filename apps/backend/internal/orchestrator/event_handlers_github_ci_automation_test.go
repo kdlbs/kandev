@@ -7,7 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -231,6 +233,81 @@ func TestHandleTaskPRCIAutomationQueuesFixDedupesAndMerges(t *testing.T) {
 	}
 }
 
+func TestDispatchCIAutomationPromptDoesNotRecordUserMessageWhenQueueFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageQueue = nil
+	messageCreator := &mockMessageCreator{}
+	svc.messageCreator = messageCreator
+
+	err := svc.dispatchCIAutomationPrompt(ctx, &models.TaskSession{
+		ID:     "session-1",
+		TaskID: "task-1",
+		State:  models.TaskSessionStateRunning,
+	}, "Fix the PR")
+	if err == nil {
+		t.Fatal("expected queue failure")
+	}
+	if len(messageCreator.userMessages) != 0 {
+		t.Fatalf("expected no visible CI automation user message on queue failure, got %d", len(messageCreator.userMessages))
+	}
+}
+
+func TestDispatchCIAutomationPromptRecordsUserMessageBeforeDirectPrompt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateWaitingForInput)
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.agentManager = agentMgr
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	messageCreator := &mockMessageCreator{}
+	svc.messageCreator = messageCreator
+	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
+	session, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.AgentExecutionID = "exec-1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session execution: %v", err)
+	}
+
+	if err := svc.dispatchCIAutomationPrompt(ctx, session, "Fix the PR"); err != nil {
+		t.Fatalf("dispatch direct prompt: %v", err)
+	}
+	if len(messageCreator.userMessages) != 1 {
+		t.Fatalf("expected one visible CI automation user message, got %d", len(messageCreator.userMessages))
+	}
+	if len(agentMgr.capturedPrompts) != 1 {
+		t.Fatalf("expected one direct prompt call, got %d", len(agentMgr.capturedPrompts))
+	}
+	if messageCreator.userMessages[0].metadata["origin"] != ciAutomationOrigin {
+		t.Fatalf("expected CI automation user message metadata, got %+v", messageCreator.userMessages[0].metadata)
+	}
+}
+
+func TestCIAutomationMergeSignatureIncludesPRContentVersion(t *testing.T) {
+	pr := &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		PRNumber:     42,
+		HeadBranch:   "feature",
+		ChecksState:  "success",
+		ReviewState:  "approved",
+		UpdatedAt:    time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC),
+	}
+	before := ciAutomationMergeSignature(pr)
+	pr.UpdatedAt = pr.UpdatedAt.Add(time.Minute)
+	pr.Additions++
+	after := ciAutomationMergeSignature(pr)
+	if before == after {
+		t.Fatal("expected PR content/version change to alter merge signature")
+	}
+}
+
 func TestHandleTaskPRCIAutomationMergesWhenStateReadFails(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -264,6 +341,92 @@ func TestHandleTaskPRCIAutomationMergesWhenStateReadFails(t *testing.T) {
 	}
 }
 
+func TestHandleTaskPRCIAutomationRetriesMergeAfterTransientFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:           "task-1",
+			AutoMergeEnabled: true,
+		},
+		mergeErr: errors.New("github unavailable"),
+	}
+	svc.SetGitHubService(ghSvc)
+	pr := &github.TaskPR{
+		TaskID:         "task-1",
+		RepositoryID:   "repo-1",
+		Owner:          "acme",
+		Repo:           "widget",
+		PRNumber:       42,
+		State:          "open",
+		ChecksState:    "success",
+		ReviewState:    "approved",
+		MergeableState: "clean",
+	}
+
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle failed auto-merge: %v", err)
+	}
+	if ghSvc.mergeCalls != 1 {
+		t.Fatalf("expected one merge call, got %d", ghSvc.mergeCalls)
+	}
+	if len(ghSvc.mergeAttempts) != 0 {
+		t.Fatalf("expected failed merge not to record dedupe signature, got %+v", ghSvc.mergeAttempts)
+	}
+
+	ghSvc.mergeErr = nil
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("retry auto-merge: %v", err)
+	}
+	if ghSvc.mergeCalls != 2 || len(ghSvc.mergeAttempts) != 1 {
+		t.Fatalf("expected retry to merge and record one attempt, calls=%d attempts=%d", ghSvc.mergeCalls, len(ghSvc.mergeAttempts))
+	}
+}
+
+func TestHandlePRFeedbackStartsAutomationForMatchingPR(t *testing.T) {
+	ctx := context.Background()
+	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	started := make(chan struct{})
+	block := make(chan struct{})
+	ghSvc := &mockGitHubService{
+		taskPRs: []*github.TaskPR{
+			{TaskID: "task-1", RepositoryID: "repo-front", Owner: "acme", Repo: "front", PRNumber: 1},
+			{TaskID: "task-1", RepositoryID: "repo-back", Owner: "acme", Repo: "back", PRNumber: 2},
+		},
+		ciOptionsResp:    &github.TaskCIOptionsResponse{TaskID: "task-1"},
+		ciOptionsStarted: started,
+		ciOptionsBlock:   block,
+	}
+	svc.SetGitHubService(ghSvc)
+
+	err := svc.handlePRFeedback(ctx, &bus.Event{Data: &github.PRFeedbackEvent{
+		TaskID:   "task-1",
+		Owner:    "acme",
+		Repo:     "back",
+		PRNumber: 2,
+	}})
+	if err != nil {
+		t.Fatalf("handle PR feedback: %v", err)
+	}
+	<-started
+	if ghSvc.getTaskPRCalls != 0 || ghSvc.exactTaskPRCalls != 1 {
+		t.Fatalf("expected exact PR lookup only, GetTaskPR=%d exact=%d", ghSvc.getTaskPRCalls, ghSvc.exactTaskPRCalls)
+	}
+	if ghSvc.lastExactPRLookup.Owner != "acme" || ghSvc.lastExactPRLookup.Repo != "back" || ghSvc.lastExactPRLookup.PRNumber != 2 {
+		t.Fatalf("unexpected exact lookup: %+v", ghSvc.lastExactPRLookup)
+	}
+	if _, loaded := svc.ciAutomationInFlight.Load("task-1|repo-back|2"); !loaded {
+		t.Fatal("expected automation to run for matching repo-back PR")
+	}
+	if _, loaded := svc.ciAutomationInFlight.Load("task-1|repo-front|1"); loaded {
+		t.Fatal("unexpected automation for non-matching repo-front PR")
+	}
+	close(block)
+	waitForCIAutomationIdle(t, svc, "task-1|repo-back|2", 200*time.Millisecond)
+}
+
 func TestStartTaskPRCIAutomationSkipsDuplicateInFlightPR(t *testing.T) {
 	ctx := context.Background()
 	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
@@ -280,22 +443,49 @@ func TestStartTaskPRCIAutomationSkipsDuplicateInFlightPR(t *testing.T) {
 	svc.startTaskPRCIAutomation(ctx, pr)
 	<-started
 	svc.startTaskPRCIAutomation(ctx, pr)
-	time.Sleep(20 * time.Millisecond)
-	ghSvc.mu.Lock()
-	callsWhileBlocked := ghSvc.ciOptionsCalls
-	ghSvc.mu.Unlock()
-	if callsWhileBlocked != 1 {
-		t.Fatalf("expected duplicate event to be skipped while first run is active, got %d calls", callsWhileBlocked)
-	}
+	waitForCIOptionsCalls(t, ghSvc, 1, 200*time.Millisecond)
 
 	close(block)
-	time.Sleep(20 * time.Millisecond)
+	waitForCIAutomationIdle(t, svc, "task-1|repo-1|42", 200*time.Millisecond)
 	svc.startTaskPRCIAutomation(ctx, pr)
-	time.Sleep(20 * time.Millisecond)
-	ghSvc.mu.Lock()
-	callsAfterRelease := ghSvc.ciOptionsCalls
-	ghSvc.mu.Unlock()
-	if callsAfterRelease != 2 {
-		t.Fatalf("expected later event to run after in-flight guard clears, got %d calls", callsAfterRelease)
+	waitForCIOptionsCalls(t, ghSvc, 2, 200*time.Millisecond)
+}
+
+func waitForCIOptionsCalls(t *testing.T, ghSvc *mockGitHubService, want int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		ghSvc.mu.Lock()
+		got := ghSvc.ciOptionsCalls
+		ghSvc.mu.Unlock()
+		if got == want {
+			return
+		}
+		select {
+		case <-deadline.C:
+			t.Fatalf("ciOptionsCalls=%d, want %d", got, want)
+		case <-ticker.C:
+		}
+	}
+}
+
+func waitForCIAutomationIdle(t *testing.T, svc *Service, key string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if _, loaded := svc.ciAutomationInFlight.Load(key); !loaded {
+			return
+		}
+		select {
+		case <-deadline.C:
+			t.Fatalf("CI automation key %q remained in flight", key)
+		case <-ticker.C:
+		}
 	}
 }

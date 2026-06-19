@@ -216,6 +216,16 @@ func (c *Controller) httpPatchTaskCIOptions(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
+	if !patch.HasAny() {
+		resp, err := c.service.GetTaskCIOptionsResponse(ctx.Request.Context(), ctx.Param("taskId"))
+		if err != nil {
+			c.logger.Error("load task CI options failed", zap.String("task_id", ctx.Param("taskId")), zap.Error(err))
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load CI automation options"})
+			return
+		}
+		ctx.JSON(http.StatusOK, resp)
+		return
+	}
 	resp, err := c.service.UpdateTaskCIOptions(ctx.Request.Context(), ctx.Param("taskId"), patch)
 	if err != nil {
 		c.logger.Error("update task CI options failed", zap.String("task_id", ctx.Param("taskId")), zap.Error(err))

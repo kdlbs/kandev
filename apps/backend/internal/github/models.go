@@ -208,6 +208,11 @@ type TaskCIOptionsPatch struct {
 	AutoFixPromptOverride *string
 }
 
+// HasAny reports whether the patch contains at least one requested field change.
+func (p TaskCIOptionsPatch) HasAny() bool {
+	return p.AutoFixEnabled != nil || p.AutoMergeEnabled != nil || p.AutoFixPromptOverride != nil
+}
+
 // TaskCIOptionsResponse is the HTTP shape for task CI automation options.
 type TaskCIOptionsResponse struct {
 	TaskID                 string                     `json:"task_id"`

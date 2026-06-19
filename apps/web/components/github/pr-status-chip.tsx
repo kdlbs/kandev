@@ -39,16 +39,16 @@ const HOVER_CLOSE_DELAY_MS = 150;
 // Terminal states (merged / closed) never reach here — PRStatusChip returns
 // null for them before rendering — so the chip status union omits them.
 type ChipStatus =
-	| "passed"
-	| "failed"
-	| "conflict"
-	| "blocked"
-	| "behind"
-	| "in_progress"
-	| "neutral";
+  | "passed"
+  | "failed"
+  | "conflict"
+  | "blocked"
+  | "behind"
+  | "in_progress"
+  | "neutral";
 type AutomationFlags = {
-	autoFix: boolean;
-	autoMerge: boolean;
+  autoFix: boolean;
+  autoMerge: boolean;
 };
 
 function chipStatus(pr: TaskPR): ChipStatus {

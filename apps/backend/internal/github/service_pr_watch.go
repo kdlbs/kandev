@@ -348,6 +348,20 @@ func (s *Service) GetTaskPR(ctx context.Context, taskID string) (*TaskPR, error)
 	return s.store.GetTaskPR(ctx, taskID)
 }
 
+// GetTaskPRByOwnerRepoNumber returns the task PR row matching a PR feedback event.
+func (s *Service) GetTaskPRByOwnerRepoNumber(ctx context.Context, taskID, owner, repo string, prNumber int) (*TaskPR, error) {
+	prs, err := s.store.ListTaskPRsByTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	for _, pr := range prs {
+		if pr.Owner == owner && pr.Repo == repo && pr.PRNumber == prNumber {
+			return pr, nil
+		}
+	}
+	return nil, nil
+}
+
 // ListTaskPRs returns PR associations for multiple tasks, grouped by task_id.
 // Multi-repo tasks may have more than one PR per task.
 func (s *Service) ListTaskPRs(ctx context.Context, taskIDs []string) (map[string][]*TaskPR, error) {
