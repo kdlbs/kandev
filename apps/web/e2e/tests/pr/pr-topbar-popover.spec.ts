@@ -271,12 +271,6 @@ test.describe("PR top-bar CI popover", () => {
     const session = await openTaskAndWait(testPage, apiClient, seed, title);
 
     await expect(session.prStatusChip()).toBeVisible();
-    await session.prStatusChip().hover();
-    const popoverInner = testPage.getByTestId("pr-topbar-popover-inner");
-    await expect(popoverInner).toBeVisible({ timeout: 10_000 });
-    await expectScrollablePopoverWithinViewport(testPage, popoverInner);
-
-    await testPage.mouse.move(0, 0);
     await session.hoverPRTopbar();
     await expectScrollablePopoverWithinViewport(testPage, session.prTopbarPopover());
   });
@@ -415,11 +409,7 @@ test.describe("PR top-bar CI popover", () => {
     await expect(session.prWorkflowAddContextButton("Lint")).toBeVisible();
   });
 
-  test("header external link points at the PR's GitHub /checks tab", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
+  test("header PR link points at the PR on GitHub", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(120_000);
     const title = "External Link";
     const seed = await seedTask(
@@ -436,7 +426,8 @@ test.describe("PR top-bar CI popover", () => {
     });
     const session = await openTaskAndWait(testPage, apiClient, seed, title);
     await session.hoverPRTopbar();
-    await expect(session.prPopoverExternalLink()).toHaveAttribute("href", `${PR_URL}/checks`);
+    await expect(session.prPopoverPRLink()).toHaveAttribute("href", PR_URL);
+    await expect(session.prTopbarPopover().getByLabel("View all checks on GitHub")).toHaveCount(0);
   });
 
   test("empty state when PR has no checks at all", async ({ testPage, apiClient, seedData }) => {

@@ -59,7 +59,7 @@ test.describe("mobile PR CI automation options", () => {
     await session.tapPRStatusChip();
 
     const drawer = session.prStatusChipDrawer();
-    await expect(drawer.getByText("Automation")).toBeVisible();
+    await expect(drawer.getByTestId("pr-ci-automation-controls")).toBeVisible();
     await expect(
       drawer.getByRole("switch", { name: "Auto-fix CI and address comments" }),
     ).toBeVisible();

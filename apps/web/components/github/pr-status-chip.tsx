@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   IconCircleCheckFilled,
   IconCircleXFilled,
@@ -11,7 +11,6 @@ import {
   IconAlertTriangleFilled,
   IconX,
 } from "@tabler/icons-react";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
 import {
   Drawer,
   DrawerClose,
@@ -21,6 +20,7 @@ import {
   DrawerTitle,
 } from "@kandev/ui/drawer";
 import { Button } from "@kandev/ui/button";
+import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { usePRFeedbackBackgroundSync } from "@/hooks/domains/github/use-pr-ci-popover";
 import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS, PRCIPopover } from "@/components/github/pr-ci-popover";
@@ -54,6 +54,10 @@ type AutomationFlags = {
   autoMerge: boolean;
 };
 
+function hasRunningChecks(pr: TaskPR): boolean {
+  return pr.checks_total <= 0 || pr.checks_passing < pr.checks_total;
+}
+
 function chipStatus(pr: TaskPR): ChipStatus {
   if (pr.review_state === "changes_requested" || pr.checks_state === "failure") return "failed";
   // Merge conflicts / behind-base block the merge even when CI is green — the
@@ -66,7 +70,9 @@ function chipStatus(pr: TaskPR): ChipStatus {
   // in-progress, not passed. Without this order, the chip flips to green the
   // moment CI finishes and ignores the human gate. isPRAwaitingReview also
   // covers approved PRs where branch protection requires more reviewers.
-  if (pr.checks_state === "pending" || pr.review_state === "pending") return "in_progress";
+  if ((pr.checks_state === "pending" && hasRunningChecks(pr)) || pr.review_state === "pending") {
+    return "in_progress";
+  }
   // Mirror getPRStatusColor priority: ready-to-merge beats awaiting-review so
   // the chip and icon never disagree on a (theoretical) clean+approved+pending PR.
   if (isPRAwaitingReview(pr) && !isPRReadyToMerge(pr)) return "in_progress";
@@ -119,6 +125,59 @@ function useChipTriggerGuard() {
     [],
   );
   return { ref, onPointerDownOutside };
+}
+
+function useChipPopoverInteractions() {
+  const [open, setOpen] = useState(false);
+  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearOpen = useCallback(() => {
+    if (openTimer.current) {
+      clearTimeout(openTimer.current);
+      openTimer.current = null;
+    }
+  }, []);
+  const clearClose = useCallback(() => {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  }, []);
+
+  const handleEnter = useCallback(() => {
+    if (open || openTimer.current) return;
+    clearClose();
+    openTimer.current = setTimeout(() => setOpen(true), HOVER_OPEN_DELAY_MS);
+  }, [clearClose, open]);
+
+  const handleLeave = useCallback(() => {
+    clearOpen();
+    closeTimer.current = setTimeout(() => setOpen(false), HOVER_CLOSE_DELAY_MS);
+  }, [clearOpen]);
+
+  const onOpenChange = useCallback(
+    (next: boolean) => {
+      if (next) {
+        setOpen(true);
+        return;
+      }
+      clearOpen();
+      clearClose();
+      setOpen(false);
+    },
+    [clearClose, clearOpen],
+  );
+
+  useEffect(
+    () => () => {
+      clearOpen();
+      clearClose();
+    },
+    [clearOpen, clearClose],
+  );
+
+  return { open, onOpenChange, handleEnter, handleLeave };
 }
 
 /**
@@ -233,25 +292,43 @@ function PRStatusChipInner({ pr, automation }: { pr: TaskPR; automation: Automat
 function PRStatusChipHoverCard({ pr, automation }: { pr: TaskPR; automation: AutomationFlags }) {
   const status = chipStatus(pr);
   const { ref, onPointerDownOutside } = useChipTriggerGuard();
+  const { open, onOpenChange, handleEnter, handleLeave } = useChipPopoverInteractions();
   return (
-    <HoverCard openDelay={HOVER_OPEN_DELAY_MS} closeDelay={HOVER_CLOSE_DELAY_MS}>
-      <HoverCardTrigger asChild>
-        <button ref={ref} type="button" {...chipButtonAttrs(pr, status, automation)}>
-          <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-          <ChipStatusGlyph status={status} />
-          <AutomationFlagBadges automation={automation} />
-        </button>
-      </HoverCardTrigger>
-      <HoverCardContent
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <span
+        className="inline-flex"
+        onMouseOver={handleEnter}
+        onMouseEnter={handleEnter}
+        onMouseMove={handleEnter}
+        onPointerOver={handleEnter}
+        onPointerEnter={handleEnter}
+        onPointerMove={handleEnter}
+        onMouseLeave={handleLeave}
+        onPointerLeave={handleLeave}
+        onFocus={handleEnter}
+        onBlur={handleLeave}
+      >
+        <PopoverAnchor asChild>
+          <button ref={ref} type="button" {...chipButtonAttrs(pr, status, automation)}>
+            <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+            <ChipStatusGlyph status={status} />
+            <AutomationFlagBadges automation={automation} />
+          </button>
+        </PopoverAnchor>
+      </span>
+      <PopoverContent
         side="top"
         align="start"
         sideOffset={8}
         className={`w-80 p-2.5 ${PR_CI_DESKTOP_POPOVER_SCROLL_CLASS}`}
+        onMouseEnter={handleEnter}
+        onMouseLeave={handleLeave}
         onPointerDownOutside={onPointerDownOutside}
+        onOpenAutoFocus={(e) => e.preventDefault()}
       >
-        <PRCIPopover pr={pr} enabled={true} />
-      </HoverCardContent>
-    </HoverCard>
+        <PRCIPopover pr={pr} enabled={open} />
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -317,23 +394,41 @@ function PRStatusChipMultiHoverCard({
 }) {
   const status = aggregateChipStatus(prs);
   const { ref, onPointerDownOutside } = useChipTriggerGuard();
+  const { open, onOpenChange, handleEnter, handleLeave } = useChipPopoverInteractions();
   return (
-    <HoverCard openDelay={HOVER_OPEN_DELAY_MS} closeDelay={HOVER_CLOSE_DELAY_MS}>
-      <HoverCardTrigger asChild>
-        <button ref={ref} type="button" {...multiChipButtonAttrs(prs, status, automation)}>
-          <MultiChipGlyph prs={prs} status={status} automation={automation} />
-        </button>
-      </HoverCardTrigger>
-      <HoverCardContent
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <span
+        className="inline-flex"
+        onMouseOver={handleEnter}
+        onMouseEnter={handleEnter}
+        onMouseMove={handleEnter}
+        onPointerOver={handleEnter}
+        onPointerEnter={handleEnter}
+        onPointerMove={handleEnter}
+        onMouseLeave={handleLeave}
+        onPointerLeave={handleLeave}
+        onFocus={handleEnter}
+        onBlur={handleLeave}
+      >
+        <PopoverAnchor asChild>
+          <button ref={ref} type="button" {...multiChipButtonAttrs(prs, status, automation)}>
+            <MultiChipGlyph prs={prs} status={status} automation={automation} />
+          </button>
+        </PopoverAnchor>
+      </span>
+      <PopoverContent
         side="top"
         align="start"
         sideOffset={8}
         className={`w-96 p-2.5 ${PR_CI_DESKTOP_POPOVER_SCROLL_CLASS}`}
+        onMouseEnter={handleEnter}
+        onMouseLeave={handleLeave}
         onPointerDownOutside={onPointerDownOutside}
+        onOpenAutoFocus={(e) => e.preventDefault()}
       >
-        <MultiPRCIPopover prs={prs} enabled={true} />
-      </HoverCardContent>
-    </HoverCard>
+        <MultiPRCIPopover prs={prs} enabled={open} />
+      </PopoverContent>
+    </Popover>
   );
 }
 

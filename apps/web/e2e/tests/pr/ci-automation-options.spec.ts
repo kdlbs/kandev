@@ -53,6 +53,15 @@ async function openTask(testPage: import("@playwright/test").Page, taskId: strin
   return session;
 }
 
+async function openPromptDialog(session: SessionPage) {
+  await session.hoverPRTopbar();
+  const popover = session.prTopbarPopover();
+  await popover.hover();
+  const editButton = popover.getByLabel("Edit auto-fix prompt for this task");
+  await expect(editButton).toBeVisible();
+  await editButton.click({ force: true });
+}
+
 test.describe("PR CI automation options", () => {
   test("desktop popover persists toggles and task prompt overrides", async ({
     testPage,
@@ -64,7 +73,7 @@ test.describe("PR CI automation options", () => {
     const session = await openTask(testPage, taskId);
     const popover = session.prTopbarPopover();
 
-    await expect(popover.getByText("Automation")).toBeVisible();
+    await expect(popover.getByTestId("pr-ci-automation-controls")).toBeVisible();
     await expect(
       popover.getByRole("switch", { name: "Auto-fix CI and address comments" }),
     ).toBeVisible();
@@ -81,7 +90,7 @@ test.describe("PR CI automation options", () => {
     await expect(testPage.getByText(/1 minute PR refresh loop/)).toBeVisible();
     await expect(testPage.getByText(/snapshots what was handled/)).toBeVisible();
 
-    await popover.getByLabel("Edit auto-fix prompt for this task").click();
+    await openPromptDialog(session);
     await expect(testPage.getByRole("dialog", { name: "Auto-fix prompt" })).toBeVisible();
     await expect(testPage.getByRole("link", { name: "Edit default prompt" })).toHaveAttribute(
       "href",
@@ -94,7 +103,7 @@ test.describe("PR CI automation options", () => {
       .poll(async () => apiClient.getTaskCIAutomationOptions(taskId))
       .toMatchObject({ auto_fix_prompt_override: "Please fix only the new CI issues." });
 
-    await popover.getByLabel("Edit auto-fix prompt for this task").click();
+    await openPromptDialog(session);
     await testPage.getByRole("button", { name: "Use default" }).click();
     await expect
       .poll(async () => apiClient.getTaskCIAutomationOptions(taskId))

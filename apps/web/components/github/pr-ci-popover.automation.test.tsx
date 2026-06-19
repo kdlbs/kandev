@@ -126,9 +126,10 @@ describe("PRCIPopover CI automation controls", () => {
   it("uses the PR title in the header and omits the redundant detail link", () => {
     renderPopover();
 
-    expect(screen.getByTestId("pr-popover-title").textContent).toBe("Test PR");
+    expect(screen.getByTestId("pr-popover-title").textContent).toBe("#1 Test PR");
     expect(screen.queryByText("CI status")).toBeNull();
     expect(screen.queryByText("Open PR details")).toBeNull();
+    expect(screen.queryByLabelText("View all checks on GitHub")).toBeNull();
     expect(screen.getByLabelText("View pull request on GitHub")).not.toBeNull();
   });
 
@@ -151,7 +152,7 @@ describe("PRCIPopover CI automation controls", () => {
       </TooltipProvider>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Open Second PR details" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open #2 Second PR details" }));
 
     expect(onOpenDetailPanel).toHaveBeenCalledTimes(1);
     expect(onOpenDetailPanel).toHaveBeenCalledWith(expect.objectContaining({ id: "b" }));

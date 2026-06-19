@@ -120,8 +120,7 @@ function PRCIPopoverHeader({
   pr: TaskPR;
   onOpenDetailPanel?: () => void;
 }) {
-  const checksUrl = `${pr.pr_url}/checks`;
-  const title = pr.pr_title || `PR #${pr.pr_number}`;
+  const title = `#${pr.pr_number} ${pr.pr_title || "Untitled PR"}`;
   return (
     <div
       data-testid="pr-popover-header"
@@ -129,17 +128,6 @@ function PRCIPopoverHeader({
     >
       <div className="flex min-w-0 items-center gap-1.5">
         <PRPopoverTitle title={title} onOpenDetailPanel={onOpenDetailPanel} />
-        <a
-          data-testid="pr-popover-external-link"
-          href={checksUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="cursor-pointer text-muted-foreground hover:text-foreground"
-          aria-label="View all checks on GitHub"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <IconExternalLink className="h-3.5 w-3.5" />
-        </a>
       </div>
       <a
         data-testid="pr-popover-pr-link"

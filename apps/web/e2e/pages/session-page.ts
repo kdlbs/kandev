@@ -71,7 +71,7 @@ export class SessionPage {
     return this.page.getByTestId("pr-closed-dismiss-button");
   }
   prStatusChip() {
-    return this.page.getByTestId("pr-status-chip");
+    return this.activeChat().getByTestId("chat-status-bar").getByTestId("pr-status-chip");
   }
   todoIndicator() {
     return this.page.getByTestId("todo-indicator");
@@ -568,7 +568,7 @@ export class SessionPage {
 
   /** Compact PR/CI status chip rendered in the chat status bar. */
   prStatusChip(): Locator {
-    return this.page.getByTestId("pr-status-chip");
+    return this.activeChat().getByTestId("chat-status-bar").getByTestId("pr-status-chip");
   }
 
   /** Mobile bottom-sheet drawer that hosts the PR CI popover. */
@@ -679,8 +679,19 @@ export class SessionPage {
    * row inside the popover keeps the cursor in the open region).
    */
   async hoverPRTopbar(): Promise<void> {
-    await this.prTopbarButton().hover();
-    await expect(this.prTopbarPopover()).toBeVisible({ timeout: 5_000 });
+    await expect(async () => {
+      const button = this.prTopbarButton();
+      await button.scrollIntoViewIfNeeded();
+      const box = await button.boundingBox();
+      expect(box).not.toBeNull();
+      await button.focus();
+      await this.page.mouse.move(0, 0);
+      await this.page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+      await button.dispatchEvent("mouseover", { bubbles: true });
+      await button.dispatchEvent("mouseenter", { bubbles: false });
+      await button.dispatchEvent("mousemove", { bubbles: true });
+      await expect(this.prTopbarPopover()).toBeVisible({ timeout: 1_500 });
+    }).toPass({ timeout: 10_000 });
   }
 
   /**

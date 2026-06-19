@@ -128,9 +128,10 @@ function usePopoverInteractions() {
 
   const handleEnter = useCallback(() => {
     if (isMobile) return;
+    if (open || openTimer.current) return;
     clearClose();
     openTimer.current = setTimeout(() => setOpen(true), POPOVER_OPEN_DELAY_MS);
-  }, [isMobile, clearClose]);
+  }, [isMobile, clearClose, open]);
 
   const handleLeave = useCallback(() => {
     if (isMobile) return;
@@ -179,8 +180,16 @@ function PRSingleButton({ pr }: { pr: TaskPR }) {
       size="sm"
       variant="outline"
       className="cursor-pointer gap-1.5 px-2"
+      onMouseOver={handleEnter}
       onMouseEnter={handleEnter}
+      onMouseMove={handleEnter}
+      onPointerOver={handleEnter}
+      onPointerEnter={handleEnter}
+      onPointerMove={handleEnter}
       onMouseLeave={handleLeave}
+      onPointerLeave={handleLeave}
+      onFocus={handleEnter}
+      onBlur={handleLeave}
       onClick={() => {
         addPRPanel(prTaskKey(pr), activeSessionId);
         onOpenChange(false);
@@ -244,8 +253,16 @@ function PRMultiButton({ prs }: { prs: TaskPR[] }) {
         size="sm"
         variant="outline"
         className="cursor-pointer gap-1.5 px-2"
+        onMouseOver={menuOpen ? undefined : handleEnter}
         onMouseEnter={menuOpen ? undefined : handleEnter}
+        onMouseMove={menuOpen ? undefined : handleEnter}
+        onPointerOver={menuOpen ? undefined : handleEnter}
+        onPointerEnter={menuOpen ? undefined : handleEnter}
+        onPointerMove={menuOpen ? undefined : handleEnter}
         onMouseLeave={handleLeave}
+        onPointerLeave={handleLeave}
+        onFocus={menuOpen ? undefined : handleEnter}
+        onBlur={handleLeave}
       >
         <IconGitPullRequest className={`h-4 w-4 ${aggColor}`} />
         <span className="text-xs font-medium">{prs.length} PRs</span>

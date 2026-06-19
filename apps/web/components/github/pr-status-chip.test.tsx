@@ -122,7 +122,7 @@ function multiState(prs: TaskPR[]): Partial<AppState> {
 }
 
 async function expectDesktopHoverPopoverConstrained() {
-  fireEvent.pointerEnter(screen.getByTestId(CHIP_TESTID));
+  fireEvent.mouseEnter(screen.getByTestId(CHIP_TESTID));
   const inner = await screen.findByTestId("pr-topbar-popover-inner");
   const content = inner.closest<HTMLElement>(".overflow-y-auto");
   expect(content).not.toBeNull();
@@ -226,7 +226,7 @@ describe("PRStatusChip mobile branch", () => {
     // Inner popover body + close button render inside the drawer.
     expect(document.querySelector("[data-testid='pr-topbar-popover-inner']")).not.toBeNull();
     expect(document.querySelector("[data-testid='pr-status-chip-drawer-close']")).not.toBeNull();
-    expect(screen.getByTestId("pr-popover-title").textContent).toBe("Test PR");
+    expect(screen.getByTestId("pr-popover-title").textContent).toBe("#42 Test PR");
     expect(drawer?.textContent).not.toContain("Open PR details");
   });
 
@@ -342,6 +342,20 @@ describe("PRStatusChip — mergeability", () => {
     );
     expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("in_progress");
   });
+
+  it("does not show in-progress for skipped-only checks", () => {
+    renderWithStore(
+      {
+        taskPRs: {
+          byTaskId: {
+            "task-1": [makePR({ checks_state: "pending", checks_total: 1, checks_passing: 1 })],
+          },
+        },
+      },
+      <PRStatusChip taskId="task-1" />,
+    );
+    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("neutral");
+  });
 });
 
 describe("PRStatusChip CI automation mobile parity", () => {
@@ -384,7 +398,12 @@ describe("aggregateChipStatus", () => {
 
   it("returns 'in_progress' when the worst is a pending PR", () => {
     const passing = makePR();
-    const pending = makePR({ id: "pend", review_state: "", checks_state: "pending" });
+    const pending = makePR({
+      id: "pend",
+      review_state: "",
+      checks_state: "pending",
+      checks_passing: 1,
+    });
     expect(aggregateChipStatus([passing, pending])).toBe("in_progress");
   });
 
