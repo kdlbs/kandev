@@ -75,8 +75,8 @@ func TestService_GetTaskPRByOwnerRepoNumber(t *testing.T) {
 	t.Run("propagates store list errors", func(t *testing.T) {
 		store := newTestStore(t)
 		svc := NewService(nil, "pat", nil, store, nil, testLogger(t))
-		if err := store.db.Close(); err != nil {
-			t.Fatalf("close store db: %v", err)
+		if err := store.ro.Close(); err != nil {
+			t.Fatalf("close store read db: %v", err)
 		}
 
 		got, err := svc.GetTaskPRByOwnerRepoNumber(ctx, "task-1", "kdlbs", "kandev", 1446)

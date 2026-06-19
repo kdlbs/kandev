@@ -81,7 +81,45 @@ export function hasNoChecksAtAll(
   );
 }
 
-function PRCIPopoverHeader({ pr }: { pr: TaskPR }) {
+function PRPopoverTitle({
+  title,
+  onOpenDetailPanel,
+}: {
+  title: string;
+  onOpenDetailPanel?: () => void;
+}) {
+  const className = "min-w-0 truncate text-sm font-medium";
+  if (!onOpenDetailPanel) {
+    return (
+      <span data-testid="pr-popover-title" className={className} title={title}>
+        {title}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      data-testid="pr-popover-title"
+      className={`${className} cursor-pointer text-left hover:underline`}
+      title={title}
+      aria-label={`Open ${title} details`}
+      onClick={(e) => {
+        e.stopPropagation();
+        onOpenDetailPanel();
+      }}
+    >
+      {title}
+    </button>
+  );
+}
+
+function PRCIPopoverHeader({
+  pr,
+  onOpenDetailPanel,
+}: {
+  pr: TaskPR;
+  onOpenDetailPanel?: () => void;
+}) {
   const checksUrl = `${pr.pr_url}/checks`;
   const title = pr.pr_title || `PR #${pr.pr_number}`;
   return (
@@ -90,13 +128,7 @@ function PRCIPopoverHeader({ pr }: { pr: TaskPR }) {
       className="flex items-center justify-between gap-2 border-b border-border/50 pb-2"
     >
       <div className="flex min-w-0 items-center gap-1.5">
-        <span
-          data-testid="pr-popover-title"
-          className="min-w-0 truncate text-sm font-medium"
-          title={title}
-        >
-          {title}
-        </span>
+        <PRPopoverTitle title={title} onOpenDetailPanel={onOpenDetailPanel} />
         <a
           data-testid="pr-popover-external-link"
           href={checksUrl}
@@ -518,6 +550,7 @@ function ReconnectGitHubBlock() {
 export function PRCIPopover({
   pr,
   enabled,
+  onOpenDetailPanel,
 }: {
   pr: TaskPR;
   enabled: boolean;
@@ -536,7 +569,7 @@ export function PRCIPopover({
       className="flex flex-col gap-2"
       onClick={(e) => e.stopPropagation()}
     >
-      <PRCIPopoverHeader pr={pr} />
+      <PRCIPopoverHeader pr={pr} onOpenDetailPanel={onOpenDetailPanel} />
       {authLost ? (
         <ReconnectGitHubBlock />
       ) : (

@@ -17,6 +17,7 @@ vi.mock("@/hooks/domains/github/use-github-status", () => ({
 }));
 
 vi.mock("@/hooks/domains/github/use-pr-ci-popover", () => ({
+  usePRFeedbackBackgroundSync: vi.fn(),
   usePRCIPopover: () => ({
     feedback: null,
     isFetching: false,
@@ -38,6 +39,7 @@ vi.mock("@/hooks/domains/github/use-task-ci-options", () => ({
 }));
 
 import { PRCIPopover } from "./pr-ci-popover";
+import { MultiPRCIPopover } from "./multi-pr-ci-popover";
 
 function makeOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCIAutomationOptions {
   return {
@@ -128,6 +130,32 @@ describe("PRCIPopover CI automation controls", () => {
     expect(screen.queryByText("CI status")).toBeNull();
     expect(screen.queryByText("Open PR details")).toBeNull();
     expect(screen.getByLabelText("View pull request on GitHub")).not.toBeNull();
+  });
+
+  it("opens the in-app detail panel from the selected multi-PR title", () => {
+    const onOpenDetailPanel = vi.fn();
+    render(
+      <TooltipProvider>
+        <StateProvider>
+          <ToastProvider>
+            <MultiPRCIPopover
+              prs={[
+                makePR({ id: "a", pr_number: 1, pr_title: "First PR", checks_state: "success" }),
+                makePR({ id: "b", pr_number: 2, pr_title: "Second PR" }),
+              ]}
+              enabled={true}
+              onOpenDetailPanel={onOpenDetailPanel}
+            />
+          </ToastProvider>
+        </StateProvider>
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Second PR details" }));
+
+    expect(onOpenDetailPanel).toHaveBeenCalledTimes(1);
+    expect(onOpenDetailPanel).toHaveBeenCalledWith(expect.objectContaining({ id: "b" }));
+    expect(screen.queryByText("Open PR details")).toBeNull();
   });
 
   it("opens a task prompt dialog with a settings link and saves overrides", async () => {
