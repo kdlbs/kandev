@@ -266,17 +266,22 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 		return nil, fmt.Errorf("session is not in CREATED or WAITING_FOR_INPUT state (current: %s)", session.State)
 	}
 
-	// Use agent profile from request, fall back to session's stored value
+	// Use agent profile from request, fall back to session's stored value.
 	effectiveProfileID := agentProfileID
 	if effectiveProfileID == "" {
 		effectiveProfileID = session.AgentProfileID
 	}
+
+	// Resolve the workflow step override / workflow default before the
+	// required-profile guard, so a session without its own agent_profile_id
+	// inherits the workflow's default agent. resolveEffectiveAgentProfile keeps
+	// the caller profile only when neither a step override nor a workflow
+	// default applies; either of those overrides a non-empty caller.
+	effectiveProfileID = s.resolveEffectiveAgentProfile(ctx, taskID, "", effectiveProfileID)
+
 	if effectiveProfileID == "" {
 		return nil, fmt.Errorf("agent_profile_id is required")
 	}
-
-	// Override with workflow step's agent profile if one is configured.
-	effectiveProfileID = s.resolveEffectiveAgentProfile(ctx, taskID, "", effectiveProfileID)
 
 	// If the workflow step overrode the profile, update the session record in DB
 	// so the frontend tab displays the correct agent (it reads session.agent_profile_id).
