@@ -26,14 +26,10 @@ export function PRMergeButton({
   taskPR,
   onMerged,
   compact = false,
-  onMenuOpenChange,
 }: {
   taskPR: TaskPR;
   onMerged?: () => void;
   compact?: boolean;
-  /** Bubbles the merge-method dropdown's open state so a host hover-popover
-   *  can stay open while the (portaled) menu is active. */
-  onMenuOpenChange?: (open: boolean) => void;
 }) {
   const { toast } = useToast();
   const [merging, setMerging] = useState(false);
@@ -93,7 +89,6 @@ export function PRMergeButton({
       onPrimaryClick={handlePrimary}
       extraMethods={allowed.filter((m) => m !== primary)}
       onPickMethod={(m) => void runMerge(m)}
-      onMenuOpenChange={onMenuOpenChange}
     />
   );
 }
@@ -105,7 +100,6 @@ function MergeButtonShell({
   onPrimaryClick,
   extraMethods,
   onPickMethod,
-  onMenuOpenChange,
 }: {
   compact: boolean;
   label: string;
@@ -113,7 +107,6 @@ function MergeButtonShell({
   onPrimaryClick: (e: React.MouseEvent) => void;
   extraMethods: MergeMethod[];
   onPickMethod: (m: MergeMethod) => void;
-  onMenuOpenChange?: (open: boolean) => void;
 }) {
   // Compact (hover popover): a single full-width primary button plus quiet
   // "or <method>" links for the alternates. Deliberately avoids a dropdown —
@@ -178,7 +171,7 @@ function MergeButtonShell({
   return (
     <span className="self-end inline-flex">
       {primaryBtn}
-      <DropdownMenu onOpenChange={onMenuOpenChange}>
+      <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
             type="button"

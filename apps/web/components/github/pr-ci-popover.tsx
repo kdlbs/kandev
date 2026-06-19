@@ -508,14 +508,10 @@ export function PRCIPopover({
   pr,
   enabled,
   onOpenDetailPanel,
-  onMergeMenuOpenChange,
 }: {
   pr: TaskPR;
   enabled: boolean;
   onOpenDetailPanel?: () => void;
-  /** Notifies the host popover that the merge-method dropdown opened/closed so
-   *  it can keep itself open while the menu (a detached portal) is active. */
-  onMergeMenuOpenChange?: (open: boolean) => void;
 }) {
   const ghStatus = useAppStore((s) => s.githubStatus.status);
   const authLost = ghStatus !== null && !ghStatus.authenticated;
@@ -546,12 +542,7 @@ export function PRCIPopover({
             <PRCommentsRow pr={pr} />
           </div>
           <PRMergeabilityRow pr={pr} />
-          <PRMergeButton
-            taskPR={pr}
-            onMerged={refetch}
-            compact
-            onMenuOpenChange={onMergeMenuOpenChange}
-          />
+          <PRMergeButton taskPR={pr} onMerged={refetch} compact />
         </>
       )}
       {onOpenDetailPanel && (

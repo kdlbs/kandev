@@ -113,12 +113,6 @@ function usePopoverInteractions() {
   const [open, setOpen] = useState(false);
   const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Set while a nested menu (e.g. the merge-method dropdown) is open. Its
-  // content renders in a portal *outside* PopoverContent, so moving the
-  // pointer onto it fires the popover's onMouseLeave and Radix flags an
-  // outside-interaction — both would otherwise close the popover out from
-  // under the menu. While this is true we ignore every close request.
-  const keepOpen = useRef(false);
 
   const clearOpen = useCallback(() => {
     if (openTimer.current) {
@@ -140,14 +134,10 @@ function usePopoverInteractions() {
   }, [isMobile, clearClose]);
 
   const handleLeave = useCallback(() => {
-    if (isMobile || keepOpen.current) return;
+    if (isMobile) return;
     clearOpen();
     closeTimer.current = setTimeout(() => setOpen(false), POPOVER_CLOSE_DELAY_MS);
   }, [isMobile, clearOpen]);
-
-  const setKeepOpen = useCallback((next: boolean) => {
-    keepOpen.current = next;
-  }, []);
 
   useEffect(
     () => () => {
@@ -162,7 +152,6 @@ function usePopoverInteractions() {
     open,
     onOpenChange: (next: boolean) => {
       if (!next) {
-        if (keepOpen.current) return;
         clearOpen();
         clearClose();
         setOpen(false);
@@ -170,7 +159,6 @@ function usePopoverInteractions() {
     },
     handleEnter,
     handleLeave,
-    setKeepOpen,
   };
 }
 
@@ -178,8 +166,7 @@ function PRSingleButton({ pr }: { pr: TaskPR }) {
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const tooltip = `${pr.owner}/${pr.repo} #${pr.pr_number} — ${pr.pr_title}`;
-  const { isMobile, open, onOpenChange, handleEnter, handleLeave, setKeepOpen } =
-    usePopoverInteractions();
+  const { isMobile, open, onOpenChange, handleEnter, handleLeave } = usePopoverInteractions();
   // Background sync lives on PRStatusChip (always mounted in the chat
   // input area); the chip and this popover share prFeedbackCache so a
   // single subscription warms both.
@@ -227,7 +214,7 @@ function PRSingleButton({ pr }: { pr: TaskPR }) {
         onMouseLeave={handleLeave}
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
-        <PRCIPopover pr={pr} enabled={open} onMergeMenuOpenChange={setKeepOpen} />
+        <PRCIPopover pr={pr} enabled={open} />
       </PopoverContent>
     </Popover>
   );
