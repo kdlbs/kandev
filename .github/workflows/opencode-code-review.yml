@@ -286,7 +286,7 @@ jobs:
           REVIEW_DIR=.opencode-review
           rm -rf "$REVIEW_DIR"
           mkdir -p "$REVIEW_DIR"
-          git fetch --no-tags --prune --depth=1 origin "$BASE_SHA"
+          git fetch --no-tags --prune origin "$BASE_SHA"
 
           if [[ "$ACTION" == "synchronize" ]] &&
              [[ -n "${BEFORE:-}" ]] &&

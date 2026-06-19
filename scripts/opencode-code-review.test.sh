@@ -46,6 +46,18 @@ if [[ "$relative_patch_count" != "2" ]]; then
 fi
 pass "OpenCode patches are passed as relative workspace files in both workflow paths"
 
+fork_base_fetch_count="$(count_occurrences 'git fetch --no-tags --prune origin "$BASE_SHA"')"
+if [[ "$fork_base_fetch_count" != "1" ]]; then
+  fail "Fork review fetches the trusted base commit before building the diff"
+fi
+pass "Fork review fetches the trusted base commit before building the diff"
+
+shallow_base_fetch_count="$(count_occurrences 'git fetch --no-tags --prune --depth=1 origin "$BASE_SHA"')"
+if [[ "$shallow_base_fetch_count" != "0" ]]; then
+  fail "Fork review does not shallow-fetch the base commit before a three-dot diff"
+fi
+pass "Fork review does not shallow-fetch the base commit before a three-dot diff"
+
 recreate_config_count="$(count_occurrences 'rm -rf .opencode')"
 if [[ "$recreate_config_count" != "2" ]]; then
   fail "OpenCode project config is recreated before writing the review agent"
