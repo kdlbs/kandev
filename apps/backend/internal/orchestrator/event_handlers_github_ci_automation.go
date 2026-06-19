@@ -190,7 +190,7 @@ func (s *Service) recordCIAutomationUserMessage(ctx context.Context, taskID, ses
 }
 
 func ciAutomationChatPrompt(prompt string) string {
-	return "@ci auto fix\n\n" + sysprompt.Wrap(prompt)
+	return "@ci-auto-fix\n\n" + sysprompt.Wrap(prompt)
 }
 
 func (s *Service) recordCIAutomationError(ctx context.Context, pr *github.TaskPR, message string) {

@@ -185,7 +185,7 @@ func TestHandleTaskPRCIAutomationQueuesFixDedupesAndMerges(t *testing.T) {
 		t.Fatalf("handle auto-fix: %v", err)
 	}
 	status := svc.messageQueue.GetStatus(ctx, "session-1")
-	if status.Count != 1 || !strings.Contains(status.Entries[0].Content, "@ci auto fix") || !strings.Contains(status.Entries[0].Content, "acme/widget#42") || !strings.Contains(status.Entries[0].Content, "unit") {
+	if status.Count != 1 || !strings.Contains(status.Entries[0].Content, "@ci-auto-fix") || !strings.Contains(status.Entries[0].Content, "acme/widget#42") || !strings.Contains(status.Entries[0].Content, "unit") {
 		t.Fatalf("expected queued CI fix prompt, got %+v", status)
 	}
 	if status.Entries[0].Metadata[metaKeyUserMessageRecorded] != true {
@@ -195,8 +195,8 @@ func TestHandleTaskPRCIAutomationQueuesFixDedupesAndMerges(t *testing.T) {
 		t.Fatalf("expected one visible CI automation user message, got %d", len(messageCreator.userMessages))
 	}
 	chatMessage := messageCreator.userMessages[0]
-	if got := sysprompt.StripSystemContent(chatMessage.content); got != "@ci auto fix" {
-		t.Fatalf("expected visible chat prompt to be @ci auto fix, got %q", got)
+	if got := sysprompt.StripSystemContent(chatMessage.content); got != "@ci-auto-fix" {
+		t.Fatalf("expected visible chat prompt to be @ci-auto-fix, got %q", got)
 	}
 	if !strings.Contains(chatMessage.content, "<kandev-system>") || !strings.Contains(chatMessage.content, "Fix the PR") || !strings.Contains(chatMessage.content, "unit") {
 		t.Fatalf("expected raw chat message to preserve hidden CI prompt, got %q", chatMessage.content)
