@@ -10,6 +10,7 @@ import {
   type PRFeedbackComment,
 } from "@/lib/state/slices/comments";
 import type { TaskPR } from "@/lib/types/github";
+import { isPRAwaitingReview } from "./pr-task-icon";
 import { PRMergeabilityNotice, buildConflictResolutionMessage } from "./pr-mergeability-notice";
 
 /**
@@ -75,8 +76,13 @@ function useResolveConflicts(pr: TaskPR): {
 export function PRMergeabilityRow({ pr }: { pr: TaskPR }) {
   const { onResolveConflicts, conflictQueued } = useResolveConflicts(pr);
   // "blocked" gets a richer note than the bare chip: it explains *why* the
-  // merge is gated (the bare "Blocked" left users guessing).
+  // merge is gated. But when the block is only an outstanding requested review,
+  // stay silent — the review row above already conveys that and the
+  // pill/chip/badge deliberately read it as the calm "awaiting review" state,
+  // so a "Blocked by branch protection" note (or even the bare chip) here would
+  // contradict them.
   if (pr.state === "open" && pr.mergeable_state === "blocked") {
+    if (isPRAwaitingReview(pr)) return null;
     return <BlockedNote reason={blockedReason(pr)} />;
   }
   return (
@@ -105,7 +111,9 @@ export function blockedReason(pr: TaskPR): string {
     const missing = required - pr.review_count;
     return `Needs ${missing} more approval${missing === 1 ? "" : "s"} before it can merge.`;
   }
-  if (pr.checks_state !== "success") {
+  // Only "failure"/"pending" indicate an actual check problem; "" means no CI
+  // is configured (or it hasn't loaded), which isn't a status-check block.
+  if (pr.checks_state === "failure" || pr.checks_state === "pending") {
     return "A required status check hasn't passed yet.";
   }
   return "A branch protection rule (required reviews, checks, or code owners) must be satisfied.";

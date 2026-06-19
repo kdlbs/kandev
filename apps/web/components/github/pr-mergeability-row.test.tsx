@@ -75,10 +75,26 @@ describe("PRMergeabilityRow", () => {
   });
 
   it("explains *why* a blocked PR is gated (not just 'Blocked')", () => {
-    const { container, queryByTestId } = renderRow(makePR({ mergeable_state: "blocked" }));
+    const { container, queryByTestId } = renderRow(
+      makePR({ mergeable_state: "blocked", checks_state: "failure" }),
+    );
     expect(queryByTestId("pr-conflict-banner")).toBeNull();
     expect(queryByTestId("pr-blocked-note")).not.toBeNull();
     expect(container.textContent).toContain("Blocked by branch protection");
+  });
+
+  it("stays silent for a blocked PR that is only awaiting a requested review", () => {
+    // The block is just an outstanding reviewer — the review row + calm chip
+    // already convey that, so the row must not show a contradictory note/chip.
+    const { getByTestId } = renderRow(
+      makePR({
+        mergeable_state: "blocked",
+        review_state: "approved",
+        checks_state: "success",
+        pending_review_count: 1,
+      }),
+    );
+    expect(getByTestId("row-host").childElementCount).toBe(0);
   });
 
   it("shows a Behind base chip for a behind PR", () => {
@@ -133,10 +149,21 @@ describe("blockedReason", () => {
     );
   });
 
-  it("points at a failing required check when CI isn't green", () => {
+  it("points at a failing required check when CI is failure/pending", () => {
     expect(blockedReason(makePR({ checks_state: "failure" })).toLowerCase()).toContain(
       "required status check",
     );
+    expect(blockedReason(makePR({ checks_state: "pending" })).toLowerCase()).toContain(
+      "required status check",
+    );
+  });
+
+  it("does not claim a check failed when no CI is configured (empty checks_state)", () => {
+    // Regression: `checks_state !== "success"` also matched "" and falsely
+    // reported a status-check block on a code-owners/conversation gate.
+    const msg = blockedReason(makePR({ checks_state: "" })).toLowerCase();
+    expect(msg).not.toContain("required status check");
+    expect(msg).toContain("branch protection rule");
   });
 
   it("falls back to a generic protection note for other rules", () => {
