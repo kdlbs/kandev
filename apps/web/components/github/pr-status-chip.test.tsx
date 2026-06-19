@@ -319,12 +319,12 @@ describe("PRStatusChip — mergeability", () => {
     expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("behind");
   });
 
-  it("is 'blocked' (amber, not green) for a blocked PR with green checks + approval", () => {
+  it("is 'waiting' for normal branch protection after checks pass", () => {
     renderWithStore(
       { taskPRs: { byTaskId: { "task-1": [makePR({ mergeable_state: "blocked" })] } } },
       <PRStatusChip taskId="task-1" />,
     );
-    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("blocked");
+    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("waiting");
   });
 
   it("stays 'in_progress' for a blocked PR that is still awaiting a requested review", () => {

@@ -83,6 +83,19 @@ describe("PRMergeabilityRow", () => {
     expect(container.textContent).toContain("Blocked by branch protection");
   });
 
+  it("shows normal branch protection as a neutral waiting state", () => {
+    const { container, queryByTestId } = renderRow(
+      makePR({
+        mergeable_state: "blocked",
+        checks_state: "success",
+        review_state: "approved",
+      }),
+    );
+    expect(queryByTestId("pr-blocked-note")).toBeNull();
+    expect(queryByTestId("pr-branch-protection-wait-note")).not.toBeNull();
+    expect(container.textContent).toContain("Waiting on branch protection");
+  });
+
   it("stays silent for a blocked PR that is only awaiting a requested review", () => {
     // The block is just an outstanding reviewer — the review row + calm chip
     // already convey that, so the row must not show a contradictory note/chip.
@@ -163,13 +176,13 @@ describe("blockedReason", () => {
     // reported a status-check block on a code-owners/conversation gate.
     const msg = blockedReason(makePR({ checks_state: "" })).toLowerCase();
     expect(msg).not.toContain("required status check");
-    expect(msg).toContain("branch protection rule");
+    expect(msg).toContain("repository rules");
   });
 
   it("falls back to a generic protection note for other rules", () => {
     const msg = blockedReason(
       makePR({ checks_state: "success", required_reviews: 1, review_count: 1 }),
     );
-    expect(msg.toLowerCase()).toContain("branch protection rule");
+    expect(msg.toLowerCase()).toContain("repository rules");
   });
 });

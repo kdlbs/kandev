@@ -6,6 +6,7 @@ import {
   getPRTooltip,
   isPRAwaitingReview,
   isPRReadyToMerge,
+  isPRWaitingOnBranchProtection,
   pickDefaultPR,
   prStatusRank,
 } from "./pr-task-icon";
@@ -47,6 +48,7 @@ function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
 const SKY_400 = "text-sky-400";
 const RED_500 = "text-red-500";
 const YELLOW_500 = "text-yellow-500";
+const MUTED_FOREGROUND = "text-muted-foreground";
 
 describe("isPRReadyToMerge", () => {
   it("is true when open + approved + success + clean", () => {
@@ -209,16 +211,17 @@ describe("getPRStatusColor", () => {
     expect(getPRStatusColor(pr)).toBe("text-emerald-400");
   });
 
-  it("returns yellow for approved+success but mergeable_state blocked (branch protection)", () => {
-    // Blocked-by-branch-protection with no outstanding review request is an
-    // attention state — the plain green would imply the PR is good to go.
+  it("returns muted for approved+success but mergeable_state blocked (branch protection)", () => {
+    // Branch protection is a normal repository-rule wait after CI passes, not
+    // a warning state.
     const pr = makePR({
       state: "open",
       review_state: "approved",
       checks_state: "success",
       mergeable_state: "blocked",
     });
-    expect(getPRStatusColor(pr)).toBe(YELLOW_500);
+    expect(getPRStatusColor(pr)).toBe(MUTED_FOREGROUND);
+    expect(isPRWaitingOnBranchProtection(pr)).toBe(true);
   });
 
   it("returns sky-400 for approved PR that still has pending reviewers (1 of N required)", () => {
@@ -426,7 +429,7 @@ describe("isPRAwaitingReview", () => {
 
 describe("aggregatePRStatusColor", () => {
   it("returns muted for empty list", () => {
-    expect(aggregatePRStatusColor([])).toBe("text-muted-foreground");
+    expect(aggregatePRStatusColor([])).toBe(MUTED_FOREGROUND);
   });
 
   it("surfaces the worst-of state — one red dominates a green sibling", () => {
@@ -466,7 +469,7 @@ describe("aggregatePRStatusColor", () => {
     // 0, but the icon must reflect the live PR, not the closed one.
     const merged = makePR({ state: "merged" });
     const fresh = makePR({ state: "open", review_state: "", checks_state: "" });
-    expect(aggregatePRStatusColor([merged, fresh])).toBe("text-muted-foreground");
+    expect(aggregatePRStatusColor([merged, fresh])).toBe(MUTED_FOREGROUND);
   });
 
   it("ignores a closed PR when a fresh open PR is present", () => {
@@ -475,7 +478,7 @@ describe("aggregatePRStatusColor", () => {
     // terminal PR shouldn't drive the live status indicator.
     const closed = makePR({ state: "closed" });
     const fresh = makePR({ state: "open", review_state: "", checks_state: "" });
-    expect(aggregatePRStatusColor([closed, fresh])).toBe("text-muted-foreground");
+    expect(aggregatePRStatusColor([closed, fresh])).toBe(MUTED_FOREGROUND);
   });
 
   it("falls back to terminal state when every PR is merged/closed", () => {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import { IconAlertTriangle } from "@tabler/icons-react";
+import { IconAlertTriangle, IconClock } from "@tabler/icons-react";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
 import {
@@ -10,7 +10,7 @@ import {
   type PRFeedbackComment,
 } from "@/lib/state/slices/comments";
 import type { TaskPR } from "@/lib/types/github";
-import { isPRAwaitingReview } from "./pr-task-icon";
+import { isPRAwaitingReview, isPRWaitingOnBranchProtection } from "./pr-task-icon";
 import { PRMergeabilityNotice, buildConflictResolutionMessage } from "./pr-mergeability-notice";
 
 /**
@@ -83,6 +83,9 @@ export function PRMergeabilityRow({ pr }: { pr: TaskPR }) {
   // contradict them.
   if (pr.state === "open" && pr.mergeable_state === "blocked") {
     if (isPRAwaitingReview(pr)) return null;
+    if (isPRWaitingOnBranchProtection(pr)) {
+      return <BranchProtectionWaitNote reason={blockedReason(pr)} />;
+    }
     return <BlockedNote reason={blockedReason(pr)} />;
   }
   return (
@@ -116,7 +119,7 @@ export function blockedReason(pr: TaskPR): string {
   if (pr.checks_state === "failure" || pr.checks_state === "pending") {
     return "A required status check hasn't passed yet.";
   }
-  return "A branch protection rule (required reviews, checks, or code owners) must be satisfied.";
+  return "Required reviews, code owners, or repository rules still need to clear.";
 }
 
 function BlockedNote({ reason }: { reason: string }) {
@@ -127,6 +130,21 @@ function BlockedNote({ reason }: { reason: string }) {
         <div className="font-medium text-amber-600 dark:text-amber-400">
           Blocked by branch protection
         </div>
+        <p className="text-[11px] leading-snug text-muted-foreground">{reason}</p>
+      </div>
+    </div>
+  );
+}
+
+function BranchProtectionWaitNote({ reason }: { reason: string }) {
+  return (
+    <div
+      data-testid="pr-branch-protection-wait-note"
+      className="flex items-start gap-1.5 px-1 py-1 text-xs"
+    >
+      <IconClock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <div className="min-w-0">
+        <div className="font-medium text-muted-foreground">Waiting on branch protection</div>
         <p className="text-[11px] leading-snug text-muted-foreground">{reason}</p>
       </div>
     </div>

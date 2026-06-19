@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
 
+const MUTED_FOREGROUND = "text-muted-foreground";
+
 const STATUS_RANK: Record<string, number> = {
   // Higher = more attention-worthy. Drives the aggregated icon color when a
   // task has multiple PRs (we surface the worst state).
@@ -15,7 +17,7 @@ const STATUS_RANK: Record<string, number> = {
   "text-emerald-400": 2,
   "text-green-500": 1,
   "text-purple-500": 0,
-  "text-muted-foreground": 0,
+  [MUTED_FOREGROUND]: 0,
 };
 
 // Requires checks_state === "success" (not just "") so repos with no CI configured
@@ -51,6 +53,14 @@ export function isPRAwaitingReview(pr: TaskPR): boolean {
   return pr.review_state === "pending" || pr.pending_review_count > 0;
 }
 
+export function isPRWaitingOnBranchProtection(pr: TaskPR): boolean {
+  if (pr.state !== "open") return false;
+  if (pr.mergeable_state !== "blocked") return false;
+  if (pr.checks_state !== "success") return false;
+  if (pr.review_state === "changes_requested") return false;
+  return !isPRAwaitingReview(pr);
+}
+
 // Colour for the hard merge blockers that must beat ready/awaiting-review:
 // conflicts ("dirty") are a hard stop, "behind" needs a base update first.
 // Returns null for every other state so the caller falls through to its
@@ -79,11 +89,10 @@ export function getPRStatusColor(pr: TaskPR): string {
   if (isPRAwaitingReview(pr)) {
     return "text-sky-400";
   }
-  // Blocked by branch protection (a rule other than outstanding reviews, which
-  // the awaiting-review branch above already caught) is an attention state —
-  // not the plain green of an approved+passing PR.
-  if (pr.state === "open" && pr.mergeable_state === "blocked") {
-    return "text-yellow-500";
+  // Branch protection can be a normal repository-rule wait after CI has passed.
+  // Keep it muted so it doesn't read like a failure.
+  if (isPRWaitingOnBranchProtection(pr)) {
+    return MUTED_FOREGROUND;
   }
   if (pr.review_state === "approved" && pr.checks_state === "success") {
     return "text-green-500";
@@ -91,7 +100,7 @@ export function getPRStatusColor(pr: TaskPR): string {
   if (pr.checks_state === "pending" || pr.review_state === "pending") {
     return "text-yellow-500";
   }
-  return "text-muted-foreground";
+  return MUTED_FOREGROUND;
 }
 
 export function getPRTooltip(pr: TaskPR): string {
@@ -115,10 +124,10 @@ export function getPRTooltip(pr: TaskPR): string {
  * live PR's status instead of the merged-purple from the closed one.
  */
 export function aggregatePRStatusColor(prs: TaskPR[]): string {
-  if (prs.length === 0) return "text-muted-foreground";
+  if (prs.length === 0) return MUTED_FOREGROUND;
   const open = prs.filter((p) => p.state === "open");
   const target = open.length > 0 ? open : prs;
-  let bestColor = "text-muted-foreground";
+  let bestColor = MUTED_FOREGROUND;
   let bestRank = -1;
   for (const pr of target) {
     const color = getPRStatusColor(pr);

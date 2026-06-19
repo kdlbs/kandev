@@ -28,6 +28,7 @@ import {
   getPRStatusColor,
   isPRAwaitingReview,
   isPRReadyToMerge,
+  isPRWaitingOnBranchProtection,
 } from "@/components/github/pr-task-icon";
 import { prTaskKey } from "@/components/github/pr-detail-panel";
 import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS, PRCIPopover } from "@/components/github/pr-ci-popover";
@@ -75,10 +76,8 @@ function PRStatusIcon({ pr }: { pr: TaskPR }) {
   if (isPRAwaitingReview(pr)) {
     return <IconClock className="h-3 w-3 text-sky-400" />;
   }
-  // Blocked by branch protection (not just an outstanding review) → amber,
-  // never the green "all good" check.
-  if (pr.state === "open" && pr.mergeable_state === "blocked") {
-    return <IconAlertTriangle className="h-3 w-3 text-yellow-500" />;
+  if (isPRWaitingOnBranchProtection(pr)) {
+    return <IconClock className="h-3 w-3 text-muted-foreground" />;
   }
   if (pr.checks_state === "success" && pr.review_state === "approved") {
     return <IconCheck className="h-3 w-3 text-green-500" />;

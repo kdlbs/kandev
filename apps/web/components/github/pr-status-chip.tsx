@@ -5,6 +5,7 @@ import {
   IconCircleCheckFilled,
   IconCircleXFilled,
   IconChecklist,
+  IconClock,
   IconLoader2,
   IconPointFilled,
   IconAlertTriangleFilled,
@@ -28,6 +29,7 @@ import { MultiPRCIPopover } from "@/components/github/multi-pr-ci-popover";
 import {
   isPRAwaitingReview,
   isPRReadyToMerge,
+  isPRWaitingOnBranchProtection,
   pickDefaultPR,
 } from "@/components/github/pr-task-icon";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -44,6 +46,7 @@ type ChipStatus =
   | "conflict"
   | "blocked"
   | "behind"
+  | "waiting"
   | "in_progress"
   | "neutral";
 type AutomationFlags = {
@@ -67,8 +70,7 @@ function chipStatus(pr: TaskPR): ChipStatus {
   // Mirror getPRStatusColor priority: ready-to-merge beats awaiting-review so
   // the chip and icon never disagree on a (theoretical) clean+approved+pending PR.
   if (isPRAwaitingReview(pr) && !isPRReadyToMerge(pr)) return "in_progress";
-  // Blocked-by-branch-protection that isn't just an outstanding review (those
-  // are caught above) is a real gate — amber, not the green "passed" check.
+  if (isPRWaitingOnBranchProtection(pr)) return "waiting";
   if (pr.mergeable_state === "blocked") return "blocked";
   if (pr.checks_state === "success") return "passed";
   return "neutral";
@@ -82,6 +84,7 @@ const CHIP_STATUS_RANK: Record<ChipStatus, number> = {
   blocked: 4,
   behind: 3,
   in_progress: 2,
+  waiting: 1.5,
   passed: 1,
   neutral: 0,
 };
@@ -433,6 +436,8 @@ function ChipStatusGlyph({ status }: { status: ChipStatus }) {
     case "behind":
     case "blocked":
       return <IconAlertTriangleFilled className="h-3.5 w-3.5 text-yellow-500" aria-hidden="true" />;
+    case "waiting":
+      return <IconClock className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />;
     case "in_progress":
       // CI runs take minutes, so slow the spin to ~3s/rotation — the default
       // animate-spin (1s) feels frantic for a long-running task.
