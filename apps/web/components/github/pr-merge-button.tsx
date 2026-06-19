@@ -26,10 +26,14 @@ export function PRMergeButton({
   taskPR,
   onMerged,
   compact = false,
+  onMenuOpenChange,
 }: {
   taskPR: TaskPR;
   onMerged?: () => void;
   compact?: boolean;
+  /** Bubbles the merge-method dropdown's open state so a host hover-popover
+   *  can stay open while the (portaled) menu is active. */
+  onMenuOpenChange?: (open: boolean) => void;
 }) {
   const { toast } = useToast();
   const [merging, setMerging] = useState(false);
@@ -89,6 +93,7 @@ export function PRMergeButton({
       onPrimaryClick={handlePrimary}
       extraMethods={allowed.filter((m) => m !== primary)}
       onPickMethod={(m) => void runMerge(m)}
+      onMenuOpenChange={onMenuOpenChange}
     />
   );
 }
@@ -100,6 +105,7 @@ function MergeButtonShell({
   onPrimaryClick,
   extraMethods,
   onPickMethod,
+  onMenuOpenChange,
 }: {
   compact: boolean;
   label: string;
@@ -107,20 +113,52 @@ function MergeButtonShell({
   onPrimaryClick: (e: React.MouseEvent) => void;
   extraMethods: MergeMethod[];
   onPickMethod: (m: MergeMethod) => void;
+  onMenuOpenChange?: (open: boolean) => void;
 }) {
+  // Compact (hover popover): a single full-width primary button plus quiet
+  // "or <method>" links for the alternates. Deliberately avoids a dropdown —
+  // its menu renders in a detached portal that closes the hover popover the
+  // moment the pointer leaves it (the bug this replaces). Plain buttons keep
+  // every action inside the popover's own DOM.
+  if (compact) {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <button
+          type="button"
+          data-testid="pr-merge-button"
+          onClick={onPrimaryClick}
+          disabled={disabled}
+          className="inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-green-600 px-2 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-green-700 disabled:cursor-default disabled:opacity-60 cursor-pointer"
+        >
+          <IconGitMerge className="h-3.5 w-3.5" />
+          {label}
+        </button>
+        {extraMethods.length > 0 && (
+          <div className="flex items-center justify-center gap-1 text-[11px] text-muted-foreground">
+            <span>or</span>
+            {extraMethods.map((m) => (
+              <button
+                key={m}
+                type="button"
+                data-testid={`pr-merge-method-${m}`}
+                disabled={disabled}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPickMethod(m);
+                }}
+                className="cursor-pointer rounded px-1.5 py-0.5 font-medium hover:bg-muted hover:text-foreground disabled:opacity-60"
+              >
+                {mergeShortLabel(m)}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   const showDropdown = extraMethods.length > 0;
-  const primaryBtn = compact ? (
-    <button
-      type="button"
-      data-testid="pr-merge-button"
-      onClick={onPrimaryClick}
-      disabled={disabled}
-      className={`inline-flex items-center gap-1 bg-green-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500 disabled:opacity-60 cursor-pointer ${showDropdown ? "rounded-l-full" : "rounded-full"}`}
-    >
-      <IconGitMerge className="h-3 w-3" />
-      {label}
-    </button>
-  ) : (
+  const primaryBtn = (
     <Button
       data-testid="pr-merge-button"
       size="sm"
@@ -134,13 +172,13 @@ function MergeButtonShell({
   );
 
   if (!showDropdown) {
-    return compact ? primaryBtn : <span className="self-end">{primaryBtn}</span>;
+    return <span className="self-end">{primaryBtn}</span>;
   }
 
   return (
-    <span className={compact ? "inline-flex" : "self-end inline-flex"}>
+    <span className="self-end inline-flex">
       {primaryBtn}
-      <DropdownMenu>
+      <DropdownMenu onOpenChange={onMenuOpenChange}>
         <DropdownMenuTrigger asChild>
           <button
             type="button"
@@ -148,13 +186,9 @@ function MergeButtonShell({
             aria-label="Choose merge method"
             disabled={disabled}
             onClick={(e) => e.stopPropagation()}
-            className={
-              compact
-                ? "inline-flex items-center rounded-r-full border-l border-green-700/40 bg-green-600 px-1.5 py-0.5 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500 disabled:opacity-60 cursor-pointer"
-                : "inline-flex items-center rounded-r-md border-l border-green-700/40 bg-green-600 px-2 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500 disabled:opacity-60 cursor-pointer"
-            }
+            className="inline-flex items-center rounded-r-md border-l border-green-700/40 bg-green-600 px-2 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500 disabled:opacity-60 cursor-pointer"
           >
-            <IconChevronDown className={compact ? "h-3 w-3" : "h-3.5 w-3.5"} />
+            <IconChevronDown className="h-3.5 w-3.5" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-auto">
@@ -179,6 +213,19 @@ function mergeLabel(method?: MergeMethod): string {
       return "Create a merge commit";
     default:
       return "Merge PR";
+  }
+}
+
+// Short form used by the compact "or <method>" alternates so the row fits the
+// narrow popover without wrapping.
+function mergeShortLabel(method: MergeMethod): string {
+  switch (method) {
+    case "squash":
+      return "Squash";
+    case "rebase":
+      return "Rebase";
+    case "merge":
+      return "Merge commit";
   }
 }
 

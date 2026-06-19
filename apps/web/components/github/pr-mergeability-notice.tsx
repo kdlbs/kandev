@@ -2,6 +2,7 @@
 
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { cn } from "@/lib/utils";
 import type { MergeableState } from "@/lib/types/github";
 
 // --- Pure descriptor (unit-tested) ---
@@ -67,15 +68,20 @@ function ConflictBanner({
   baseBranch,
   onResolveConflicts,
   resolveDisabled,
+  compact,
 }: {
   baseBranch: string;
   onResolveConflicts?: () => void;
   resolveDisabled?: boolean;
+  compact?: boolean;
 }) {
   return (
     <div
       data-testid="pr-conflict-banner"
-      className="flex items-start gap-2.5 rounded-md border border-red-500/35 bg-red-500/10 px-3 py-2.5"
+      className={cn(
+        "flex items-start gap-2.5 rounded-md border border-red-500/35 bg-red-500/10",
+        compact ? "px-2.5 py-2" : "px-3 py-2.5",
+      )}
     >
       <IconAlertTriangle className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400 mt-0.5" />
       <div className="min-w-0 flex-1">
@@ -102,19 +108,29 @@ function ConflictBanner({
   );
 }
 
-function MergeabilityChip({ label }: { label: string }) {
+function MergeabilityChip({ label, compact }: { label: string; compact?: boolean }) {
   return (
-    <span className="flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400">
-      <IconAlertTriangle className="h-3 w-3" />
+    <span
+      className={cn(
+        "flex items-center text-amber-600 dark:text-amber-400",
+        compact ? "gap-1.5 text-xs" : "gap-1 text-[10px]",
+      )}
+    >
+      <IconAlertTriangle className={compact ? "h-3.5 w-3.5" : "h-3 w-3"} />
       {label}
     </span>
   );
 }
 
-function NotMergeableText() {
+function NotMergeableText({ compact }: { compact?: boolean }) {
   return (
-    <span className="flex items-center gap-1 text-[10px] text-yellow-600 dark:text-yellow-400">
-      <IconAlertTriangle className="h-3 w-3" />
+    <span
+      className={cn(
+        "flex items-center text-yellow-600 dark:text-yellow-400",
+        compact ? "gap-1.5 text-xs" : "gap-1 text-[10px]",
+      )}
+    >
+      <IconAlertTriangle className={compact ? "h-3.5 w-3.5" : "h-3 w-3"} />
       Not mergeable
     </span>
   );
@@ -128,6 +144,7 @@ export function PRMergeabilityNotice({
   baseBranch,
   onResolveConflicts,
   resolveDisabled,
+  compact,
 }: {
   state: MergeableState | undefined;
   mergeable: boolean;
@@ -136,6 +153,7 @@ export function PRMergeabilityNotice({
   baseBranch: string;
   onResolveConflicts?: () => void;
   resolveDisabled?: boolean;
+  compact?: boolean;
 }) {
   const notice = describeMergeability({ state, mergeable, isDraft, prState });
   if (notice.kind === "none") return null;
@@ -145,11 +163,16 @@ export function PRMergeabilityNotice({
         baseBranch={baseBranch}
         onResolveConflicts={onResolveConflicts}
         resolveDisabled={resolveDisabled}
+        compact={compact}
       />
     );
   return (
-    <div className="flex items-center gap-1.5 flex-wrap">
-      {notice.kind === "chip" ? <MergeabilityChip label={notice.label} /> : <NotMergeableText />}
+    <div className={cn("flex items-center gap-1.5 flex-wrap", compact && "px-1 py-1")}>
+      {notice.kind === "chip" ? (
+        <MergeabilityChip label={notice.label} compact={compact} />
+      ) : (
+        <NotMergeableText compact={compact} />
+      )}
     </div>
   );
 }

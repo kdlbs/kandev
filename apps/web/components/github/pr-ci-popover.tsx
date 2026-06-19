@@ -27,6 +27,7 @@ import {
 } from "@/lib/github/check-buckets";
 import type { CheckRun, TaskPR } from "@/lib/types/github";
 import { PRMergeButton } from "./pr-merge-button";
+import { PRMergeabilityRow } from "./pr-mergeability-row";
 
 type CountsView = {
   passed: number;
@@ -507,10 +508,14 @@ export function PRCIPopover({
   pr,
   enabled,
   onOpenDetailPanel,
+  onMergeMenuOpenChange,
 }: {
   pr: TaskPR;
   enabled: boolean;
   onOpenDetailPanel?: () => void;
+  /** Notifies the host popover that the merge-method dropdown opened/closed so
+   *  it can keep itself open while the menu (a detached portal) is active. */
+  onMergeMenuOpenChange?: (open: boolean) => void;
 }) {
   const ghStatus = useAppStore((s) => s.githubStatus.status);
   const authLost = ghStatus !== null && !ghStatus.authenticated;
@@ -540,7 +545,13 @@ export function PRCIPopover({
             <PRReviewRow pr={pr} />
             <PRCommentsRow pr={pr} />
           </div>
-          <PRMergeButton taskPR={pr} onMerged={refetch} compact />
+          <PRMergeabilityRow pr={pr} />
+          <PRMergeButton
+            taskPR={pr}
+            onMerged={refetch}
+            compact
+            onMenuOpenChange={onMergeMenuOpenChange}
+          />
         </>
       )}
       {onOpenDetailPanel && (
