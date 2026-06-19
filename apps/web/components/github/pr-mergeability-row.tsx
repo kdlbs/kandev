@@ -87,7 +87,7 @@ export function PRMergeabilityRow({ pr }: { pr: TaskPR }) {
   }
   return (
     <PRMergeabilityNotice
-      compact
+      popover
       state={pr.mergeable_state}
       mergeable
       isDraft={pr.mergeable_state === "draft"}
