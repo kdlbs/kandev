@@ -139,7 +139,7 @@ function MergeButtonShell({
                   e.stopPropagation();
                   onPickMethod(m);
                 }}
-                className="cursor-pointer rounded px-1.5 py-0.5 font-medium hover:bg-muted hover:text-foreground disabled:opacity-60"
+                className="cursor-pointer rounded px-1.5 py-0.5 font-medium hover:bg-muted hover:text-foreground disabled:cursor-default disabled:opacity-60"
               >
                 {mergeShortLabel(m)}
               </button>
