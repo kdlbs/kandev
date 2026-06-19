@@ -21,6 +21,7 @@ func (r *Repository) initSchema() error {
 		r.initSessionSchema,
 		r.initGitSchema,
 		r.initReviewSchema,
+		r.initMantisSchema,
 		r.migrateExecutorProfiles,
 		r.migrateTaskSessions,
 		r.ensureDefaultWorkspace,
@@ -682,5 +683,71 @@ func (r *Repository) initReviewSchema() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_session_file_reviews_session ON session_file_reviews(session_id);
 	`)
+	return err
+}
+
+// mantisSchemaDDL groups mantis_configs, mantis_issue_watches, and
+// mantis_issue_watch_tasks DDL. Unlike Jira/Linear — which are install-wide
+// singletons — Mantis is configured per workspace, so mantis_configs has a
+// (workspace_id) primary key with no singleton CHECK constraint.
+//
+// All statements use CREATE TABLE / CREATE INDEX IF NOT EXISTS so the block
+// is safe to run on both fresh and existing databases. Per the schema rule
+// in apps/backend/CLAUDE.md, evolving columns later must happen via ADD
+// COLUMN inside runMigrations(), not by mutating this DDL.
+const mantisSchemaDDL = `
+	CREATE TABLE IF NOT EXISTS mantis_configs (
+		workspace_id TEXT PRIMARY KEY,
+		base_url TEXT NOT NULL,
+		username TEXT NOT NULL DEFAULT '',
+		auth_method TEXT NOT NULL DEFAULT 'api_token',
+		default_project_id INTEGER NOT NULL DEFAULT 0,
+		last_checked_at DATETIME,
+		last_ok INTEGER NOT NULL DEFAULT 0,
+		last_error TEXT NOT NULL DEFAULT '',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS mantis_issue_watches (
+		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		workflow_id TEXT NOT NULL,
+		workflow_step_id TEXT NOT NULL,
+		filter TEXT NOT NULL DEFAULT '{}',
+		agent_profile_id TEXT NOT NULL DEFAULT '',
+		executor_profile_id TEXT NOT NULL DEFAULT '',
+		prompt TEXT NOT NULL DEFAULT '',
+		enabled INTEGER NOT NULL DEFAULT 1,
+		poll_interval_seconds INTEGER NOT NULL DEFAULT 300,
+		max_inflight_tasks INTEGER DEFAULT 5,
+		last_polled_at DATETIME,
+		last_error TEXT NOT NULL DEFAULT '',
+		last_error_at DATETIME,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_mantis_issue_watches_workspace
+		ON mantis_issue_watches(workspace_id);
+
+	CREATE TABLE IF NOT EXISTS mantis_issue_watch_tasks (
+		id TEXT PRIMARY KEY,
+		issue_watch_id TEXT NOT NULL,
+		issue_id TEXT NOT NULL,
+		issue_url TEXT NOT NULL,
+		task_id TEXT NOT NULL DEFAULT '',
+		created_at DATETIME NOT NULL,
+		UNIQUE(issue_watch_id, issue_id),
+		FOREIGN KEY(issue_watch_id) REFERENCES mantis_issue_watches(id) ON DELETE CASCADE
+	);
+`
+
+// initMantisSchema creates the Mantis integration tables on fresh databases.
+// The DDL is idempotent (CREATE TABLE / CREATE INDEX IF NOT EXISTS) so the
+// step is also safe to re-invoke on existing databases — runMigrations calls
+// it a second time as a belt-and-suspenders for installs upgrading past this
+// release.
+func (r *Repository) initMantisSchema() error {
+	_, err := r.db.Exec(mantisSchemaDDL)
 	return err
 }
