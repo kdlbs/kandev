@@ -173,14 +173,26 @@ type ChipButtonAttrs = {
   className: string;
 };
 
-function chipButtonAttrs(pr: TaskPR, status: ChipStatus): ChipButtonAttrs {
+function automationAriaSuffix(automation: AutomationFlags): string {
+  const flags = [
+    automation.autoFix ? "auto-fix enabled" : null,
+    automation.autoMerge ? "auto-merge enabled" : null,
+  ].filter(Boolean);
+  return flags.length > 0 ? `, ${flags.join(", ")}` : "";
+}
+
+function chipButtonAttrs(
+  pr: TaskPR,
+  status: ChipStatus,
+  automation: AutomationFlags,
+): ChipButtonAttrs {
   return {
     "data-testid": "pr-status-chip",
     "data-pr-number": pr.pr_number,
     "data-pr-state": pr.state,
     "data-status": status,
     "data-pr-ready-to-merge": isPRReadyToMerge(pr) ? "true" : "false",
-    "aria-label": `Pull request #${pr.pr_number} CI status`,
+    "aria-label": `Pull request #${pr.pr_number} CI status${automationAriaSuffix(automation)}`,
     className: CHIP_BUTTON_CLASS,
   };
 }
@@ -221,7 +233,7 @@ function PRStatusChipHoverCard({ pr, automation }: { pr: TaskPR; automation: Aut
   return (
     <HoverCard openDelay={HOVER_OPEN_DELAY_MS} closeDelay={HOVER_CLOSE_DELAY_MS}>
       <HoverCardTrigger asChild>
-        <button ref={ref} type="button" {...chipButtonAttrs(pr, status)}>
+        <button ref={ref} type="button" {...chipButtonAttrs(pr, status, automation)}>
           <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
           <ChipStatusGlyph status={status} />
           <AutomationFlagBadges automation={automation} />
@@ -260,12 +272,16 @@ type MultiChipButtonAttrs = {
   className: string;
 };
 
-function multiChipButtonAttrs(prs: TaskPR[], status: ChipStatus): MultiChipButtonAttrs {
+function multiChipButtonAttrs(
+  prs: TaskPR[],
+  status: ChipStatus,
+  automation: AutomationFlags,
+): MultiChipButtonAttrs {
   return {
     "data-testid": "pr-status-chip",
     "data-pr-count": prs.length,
     "data-status": status,
-    "aria-label": `${prs.length} pull requests CI status`,
+    "aria-label": `${prs.length} pull requests CI status${automationAriaSuffix(automation)}`,
     className: CHIP_BUTTON_CLASS,
   };
 }
@@ -301,7 +317,7 @@ function PRStatusChipMultiHoverCard({
   return (
     <HoverCard openDelay={HOVER_OPEN_DELAY_MS} closeDelay={HOVER_CLOSE_DELAY_MS}>
       <HoverCardTrigger asChild>
-        <button ref={ref} type="button" {...multiChipButtonAttrs(prs, status)}>
+        <button ref={ref} type="button" {...multiChipButtonAttrs(prs, status, automation)}>
           <MultiChipGlyph prs={prs} status={status} automation={automation} />
         </button>
       </HoverCardTrigger>
@@ -334,7 +350,7 @@ function PRStatusChipMultiDrawer({
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen(true)}
-        {...multiChipButtonAttrs(prs, status)}
+        {...multiChipButtonAttrs(prs, status, automation)}
       >
         <MultiChipGlyph prs={prs} status={status} automation={automation} />
       </button>
@@ -374,7 +390,7 @@ function PRStatusChipDrawer({ pr, automation }: { pr: TaskPR; automation: Automa
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen(true)}
-        {...chipButtonAttrs(pr, status)}
+        {...chipButtonAttrs(pr, status, automation)}
       >
         <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
         <ChipStatusGlyph status={status} />

@@ -201,6 +201,9 @@ describe("PRStatusChip desktop branch", () => {
     );
     expect(screen.getByTestId("pr-status-auto-fix-chip").textContent).toBe("Auto-fix");
     expect(screen.getByTestId("pr-status-auto-merge-chip").textContent).toBe("Auto-merge");
+    expect(screen.getByTestId(CHIP_TESTID).getAttribute("aria-label")).toBe(
+      "Pull request #42 CI status, auto-fix enabled, auto-merge enabled",
+    );
   });
 });
 
@@ -257,6 +260,9 @@ describe("PRStatusChip mobile branch", () => {
     );
     expect(screen.getByTestId("pr-status-auto-fix-chip").textContent).toBe("Auto-fix");
     expect(screen.queryByTestId("pr-status-auto-merge-chip")).toBeNull();
+    expect(screen.getByTestId(CHIP_TESTID).getAttribute("aria-label")).toBe(
+      "Pull request #42 CI status, auto-fix enabled",
+    );
   });
 
   // NOTE: vaul's close animation depends on CSS transition events that
