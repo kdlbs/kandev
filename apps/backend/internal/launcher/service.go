@@ -29,6 +29,7 @@ const (
 	actionStatus    = "status"
 	actionStop      = "stop"
 	flagHelp        = "--help"
+	goosLinux       = "linux"
 	goosDarwin      = "darwin"
 	managedMarker   = "managed by kandev"
 	serviceUnitName = "kandev.service"
@@ -59,7 +60,7 @@ func runService(argv []string, build BuildInfo) int {
 		return 0
 	}
 	switch runtime.GOOS {
-	case "linux":
+	case goosLinux:
 		return runLinuxService(args, build)
 	case goosDarwin:
 		return runLaunchdService(args, build)
@@ -553,7 +554,7 @@ func printServiceConfig(args serviceArgs) {
 	fmt.Println("manager:", runtime.GOOS)
 	fmt.Println("mode:", map[bool]string{true: "system", false: "user"}[args.System])
 	fmt.Println("home:", serviceHomeDir(args))
-	if runtime.GOOS == "linux" {
+	if runtime.GOOS == goosLinux {
 		fmt.Println("unit:", linuxUnitPath(args.System))
 	}
 	if runtime.GOOS == goosDarwin {
