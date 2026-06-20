@@ -365,6 +365,50 @@ func TestOpenCodeStrategy_NoPath(t *testing.T) {
 	}
 }
 
+// --- Antigravity -------------------------------------------------------------
+
+func TestAntigravityStrategy_GlobalGeminiConfig(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("HOME", home)
+
+	art, err := AntigravityStrategy{}.BuildPassthroughMCP(sampleServers, PassthroughPaths{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(art.Args) != 0 || len(art.Env) != 0 {
+		t.Fatalf("antigravity strategy should use only config file merge artifacts, got %+v", art)
+	}
+	if len(art.Files) != 1 {
+		t.Fatalf("expected one file, got %+v", art.Files)
+	}
+	file := art.Files[0]
+	wantPath := filepath.Join(home, ".gemini", "config", "mcp_config.json")
+	if file.Path != wantPath {
+		t.Fatalf("Path = %q, want %q", file.Path, wantPath)
+	}
+	if file.MergeKey != "mcpServers" || file.CleanupMergeKey != "mcpServers" {
+		t.Fatalf("merge cleanup keys = %q/%q, want mcpServers/mcpServers", file.MergeKey, file.CleanupMergeKey)
+	}
+	if !reflect.DeepEqual(file.CleanupNames, []string{"kandev", "github", "stream"}) {
+		t.Fatalf("CleanupNames = %v", file.CleanupNames)
+	}
+
+	var got antigravityMCPFile
+	if err := json.Unmarshal(file.Content, &got); err != nil {
+		t.Fatalf("content not valid JSON: %v", err)
+	}
+	if got.MCPServers["kandev"].Type != "http" || got.MCPServers["kandev"].URL != "http://localhost:1234/mcp" {
+		t.Fatalf("kandev entry = %+v", got.MCPServers["kandev"])
+	}
+	gh := got.MCPServers["github"]
+	if gh.Type != "stdio" || gh.Command != "npx" || gh.Env["GITHUB_TOKEN"] != "tok" {
+		t.Fatalf("github entry = %+v", gh)
+	}
+	if got.MCPServers["stream"].Type != "streamable_http" {
+		t.Fatalf("stream Type = %q, want streamable_http", got.MCPServers["stream"].Type)
+	}
+}
+
 // When every server is filtered out (blank/reserved names), the file-based
 // strategies must emit nothing — no empty config file, flag, or env var.
 func TestStrategies_NoArtifactsWhenAllServersFiltered(t *testing.T) {
@@ -378,6 +422,9 @@ func TestStrategies_NoArtifactsWhenAllServersFiltered(t *testing.T) {
 	}
 	if art, _ := (OpenCodeStrategy{}).BuildPassthroughMCP(filtered, PassthroughPaths{TempConfigPath: "/tmp/oc.json"}); len(art.Files) != 0 || len(art.Env) != 0 {
 		t.Errorf("opencode: want no artifacts, got %+v", art)
+	}
+	if art, _ := (AntigravityStrategy{}).BuildPassthroughMCP(filtered, PassthroughPaths{}); len(art.Files) != 0 {
+		t.Errorf("antigravity: want no artifacts, got %+v", art)
 	}
 	// Claude additionally filters the reserved "workspace" name.
 	reserved := []types.McpServer{{Name: "workspace", Type: "stdio", Command: "y"}}
@@ -393,6 +440,7 @@ func TestStrategiesImplementInterface(t *testing.T) {
 	var _ PassthroughMCPStrategy = CursorStrategy{}
 	var _ PassthroughMCPStrategy = PiStrategy{}
 	var _ PassthroughMCPStrategy = OpenCodeStrategy{}
+	var _ PassthroughMCPStrategy = AntigravityStrategy{}
 }
 
 // Each strategy reports a non-empty, distinct human-readable injection mechanism.
@@ -406,6 +454,10 @@ func TestStrategiesDescribe(t *testing.T) {
 		"cursor":   {CursorStrategy{}, "a project-local .cursor/mcp.json file (merged into an existing one)"},
 		"pi":       {PiStrategy{}, "a project-local .pi/mcp.json file (merged into an existing one)"},
 		"opencode": {OpenCodeStrategy{}, "a temp MCP config file referenced by the OPENCODE_CONFIG env var"},
+		"antigravity": {
+			AntigravityStrategy{},
+			"reversible entries merged into ~/.gemini/config/mcp_config.json",
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

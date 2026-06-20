@@ -645,6 +645,131 @@ func TestWritePassthroughMCPFilesUnionTrackingOnRelaunch(t *testing.T) {
 	}
 }
 
+func TestPassthroughMCPMergeCleanupRestoresOriginalEntries(t *testing.T) {
+	mgr := newTestManager(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mcp_config.json")
+	original := []byte(`{
+  "mcpServers": {
+    "kandev": {"type": "stdio", "command": "user-kandev"},
+    "user": {"type": "stdio", "command": "user-server"}
+  },
+  "other": true
+}
+`)
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	execution := &AgentExecution{Metadata: map[string]interface{}{}}
+
+	content := []byte(`{
+  "mcpServers": {
+    "kandev": {"type": "http", "url": "http://localhost:45678/mcp"},
+    "github": {"type": "stdio", "command": "npx"}
+  }
+}
+`)
+	if err := mgr.writePassthroughMCPFiles(execution, []mcpconfig.PassthroughConfigFile{{
+		Path:            path,
+		Content:         content,
+		MergeKey:        "mcpServers",
+		CleanupMergeKey: "mcpServers",
+		CleanupNames:    []string{"kandev", "github"},
+	}}); err != nil {
+		t.Fatalf("writePassthroughMCPFiles: %v", err)
+	}
+
+	var merged struct {
+		MCPServers map[string]struct {
+			Type    string `json:"type"`
+			Command string `json:"command"`
+			URL     string `json:"url"`
+		} `json:"mcpServers"`
+		Other bool `json:"other"`
+	}
+	data, _ := os.ReadFile(path)
+	if err := json.Unmarshal(data, &merged); err != nil {
+		t.Fatalf("merged config is invalid JSON: %v", err)
+	}
+	if merged.MCPServers["kandev"].URL != "http://localhost:45678/mcp" {
+		t.Fatalf("kandev was not overwritten by generated entry: %+v", merged.MCPServers["kandev"])
+	}
+	if merged.MCPServers["github"].Command != "npx" {
+		t.Fatalf("github generated entry missing: %+v", merged.MCPServers["github"])
+	}
+	if !merged.Other {
+		t.Fatal("unrelated top-level keys were not preserved during merge")
+	}
+
+	mgr.cleanupPassthroughMCPConfig(execution)
+	var restored struct {
+		MCPServers map[string]struct {
+			Type    string `json:"type"`
+			Command string `json:"command"`
+			URL     string `json:"url"`
+		} `json:"mcpServers"`
+		Other bool `json:"other"`
+	}
+	data, _ = os.ReadFile(path)
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatalf("restored config is invalid JSON: %v", err)
+	}
+	if restored.MCPServers["kandev"].Command != "user-kandev" || restored.MCPServers["kandev"].URL != "" {
+		t.Fatalf("kandev original entry not restored: %+v", restored.MCPServers["kandev"])
+	}
+	if _, ok := restored.MCPServers["github"]; ok {
+		t.Fatalf("generated github entry was not removed: %+v", restored.MCPServers["github"])
+	}
+	if restored.MCPServers["user"].Command != "user-server" {
+		t.Fatalf("unrelated user entry changed: %+v", restored.MCPServers["user"])
+	}
+	if !restored.Other {
+		t.Fatal("unrelated top-level key not preserved during cleanup")
+	}
+}
+
+func TestPassthroughMCPMergeCleanupPreservesFirstSnapshotAcrossRelaunch(t *testing.T) {
+	mgr := newTestManager(t)
+	path := filepath.Join(t.TempDir(), "mcp_config.json")
+	if err := os.WriteFile(path, []byte(`{"mcpServers":{"kandev":{"type":"stdio","command":"user-kandev"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	execution := &AgentExecution{Metadata: map[string]interface{}{}}
+	file := mcpconfig.PassthroughConfigFile{
+		Path:            path,
+		Content:         []byte(`{"mcpServers":{"kandev":{"type":"http","url":"http://localhost:1/mcp"}}}`),
+		MergeKey:        "mcpServers",
+		CleanupMergeKey: "mcpServers",
+		CleanupNames:    []string{"kandev"},
+	}
+	if err := mgr.writePassthroughMCPFiles(execution, []mcpconfig.PassthroughConfigFile{file}); err != nil {
+		t.Fatalf("first write: %v", err)
+	}
+	file.Content = []byte(`{"mcpServers":{"kandev":{"type":"http","url":"http://localhost:2/mcp"},"github":{"type":"stdio","command":"npx"}}}`)
+	file.CleanupNames = []string{"kandev", "github"}
+	if err := mgr.writePassthroughMCPFiles(execution, []mcpconfig.PassthroughConfigFile{file}); err != nil {
+		t.Fatalf("second write: %v", err)
+	}
+
+	mgr.cleanupPassthroughMCPConfig(execution)
+	var restored struct {
+		MCPServers map[string]struct {
+			Command string `json:"command"`
+			URL     string `json:"url"`
+		} `json:"mcpServers"`
+	}
+	data, _ := os.ReadFile(path)
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatalf("restored config is invalid JSON: %v", err)
+	}
+	if restored.MCPServers["kandev"].Command != "user-kandev" || restored.MCPServers["kandev"].URL != "" {
+		t.Fatalf("first snapshot was not preserved: %+v", restored.MCPServers["kandev"])
+	}
+	if _, ok := restored.MCPServers["github"]; ok {
+		t.Fatalf("generated github entry was not removed: %+v", restored.MCPServers["github"])
+	}
+}
+
 type fakeMcpConfigProvider struct {
 	config *mcpconfig.ProfileConfig
 }

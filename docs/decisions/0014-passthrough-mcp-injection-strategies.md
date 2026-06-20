@@ -14,6 +14,7 @@ The naive fix — "write a JSON file and pass `--mcp-config`" — only works for
 - **Codex** — no MCP-config-file flag at all; servers come from `~/.codex/config.toml` or repeatable `-c key=value` CLI overrides.
 - **Cursor (`cursor-agent`)** — no MCP flag and no reliable MCP env var; only auto-discovers a project-local `.cursor/mcp.json`.
 - **OpenCode** — no config CLI flag; config file is selected via the `OPENCODE_CONFIG` env var; schema uses an `mcp` block with `local`/`remote` types.
+- **Antigravity CLI (`agy`)** — no public MCP config flag; it loads the shared Gemini/Antigravity config at `~/.gemini/config/mcp_config.json`.
 
 A hard requirement was that kandev must **never modify the user's global CLI config** (`~/.claude.json`, `~/.codex/config.toml`, `~/.cursor/mcp.json`, `~/.config/opencode`).
 
@@ -30,19 +31,21 @@ type PassthroughMCPStrategy interface {
 // PassthroughArtifacts: Files (to write, with SkipIfExists), Args (appended to cmd), Env (merged into process env)
 ```
 
-Four implementations:
+Six implementations:
 
 | CLI | Mechanism | Schema | Global config touched |
 |-----|-----------|--------|----------------------|
 | Claude | temp file + `--mcp-config <path>` args | `{"mcpServers":{…}}`, `streamable_http`→`streamable-http` | No |
 | Codex | repeated `-c mcp_servers.<name>.<key>=<json>` args | transport inferred from `command` vs `url`; no `type` key | No |
 | Cursor | project-local `<workspace>/.cursor/mcp.json` (merged into an existing file, else created) | `{"mcpServers":{…}}` | No |
+| Pi | project-local `<workspace>/.pi/mcp.json` (merged into an existing file, else created) | `{"mcpServers":{…}}`, `transport` values | No |
 | OpenCode | temp file + `OPENCODE_CONFIG` env var | `{"mcp":{name:{type:"local"\|"remote",…}}}` | No |
+| Antigravity | reversible merge into `~/.gemini/config/mcp_config.json` | `{"mcpServers":{…}}` | Temporarily, restored on cleanup |
 
 Runtime wiring (`internal/agent/runtime/lifecycle/manager_passthrough.go`, `applyPassthroughMCP`):
 
 1. **Resolve once, reuse the ACP path.** Profile servers come from the same `resolveMcpServersWithParams` ACP already uses (transport policy, allow/deny, URL rewrite, env injection all apply identically). Kandev's own HTTP tools server is prepended; a profile server named `kandev` is dropped so it cannot shadow the real one.
-2. **Strategy emits, runtime writes.** Files are written 0600 under a kandev-owned temp dir (Claude/OpenCode) or the worktree (Cursor); kandev-created files are tracked (unioned across relaunch/resume/restart) in `execution.Metadata` for cleanup. An existing symlink at a target path is never written or read through. `MergeKey` files (Cursor) merge into an existing user file and are not tracked for cleanup. Strategy env is merged in `buildPassthroughEnv`; strategy args are appended **last** to the command. Each strategy also `Describe()`s its mechanism, surfaced on the profile MCP card (`passthrough_config.mcp_injection`) so users see how MCP is wired.
+2. **Strategy emits, runtime writes.** Files are written 0600 under a kandev-owned temp dir (Claude/OpenCode), the worktree (Cursor/Pi), or the CLI's required global config location (Antigravity); kandev-created files are tracked (unioned across relaunch/resume/restart) in `execution.Metadata` for cleanup. An existing symlink at a target path is never written or read through. `MergeKey` files merge into an existing user file. Project files are preserved after the run; strategies that set `CleanupMergeKey` and `CleanupNames` (Antigravity) snapshot overwritten entries and remove or restore only Kandev's entries on cleanup. Strategy env is merged in `buildPassthroughEnv`; strategy args are appended **last** to the command. Each strategy also `Describe()`s its mechanism, surfaced on the profile MCP card (`passthrough_config.mcp_injection`) so users see how MCP is wired.
 3. **Cleanup** removes only kandev-written files when the execution is removed.
 
 The old `MCPConfigFlag Param` / `CmdBuilder.MCPConfig` / `PassthroughOptions.MCPConfigPath` mechanism was removed in favor of `MCPStrategy` and `PassthroughOptions.MCPArgs`.
@@ -52,6 +55,7 @@ The old `MCPConfigFlag Param` / `CmdBuilder.MCPConfig` / `PassthroughOptions.MCP
 - **MCP args are appended *last* in the built command.** Claude's `--mcp-config` is variadic and would otherwise swallow a positional prompt as an extra config path. Codex's `-c` overrides are order-insensitive, so trailing placement is safe for both. (Only Claude and Codex emit args; Cursor/OpenCode use files/env.)
 - **Claude injection is additive (no `--strict-mcp-config`).** Kandev's servers merge with the user's `~/.claude.json` and project `.mcp.json` rather than replacing them. `ClaudeStrategy{Strict: true}` is available if isolation is ever wanted, but the friendlier default preserves the user's own servers.
 - **Cursor merges into an existing `.cursor/mcp.json`.** When the file is absent kandev creates it; when present, kandev's servers are merged into its `mcpServers` (user entries preserved, ours win on name collision) via `PassthroughConfigFile.MergeKey`, so kandev tools are available even when the user has their own project config. An existing symlink at the path is refused (never written/read through), and a merged user file is not tracked for cleanup. (Earlier this skipped-if-exists, which left Cursor without kandev tools whenever a project file pre-existed.)
+- **Antigravity uses reversible global config merging.** The public `agy` CLI does not expose a working `--mcp-config`/config-path flag, so Kandev merges the resolved servers into `~/.gemini/config/mcp_config.json` under `mcpServers`. Before the merge, cleanup metadata stores any existing entries for the same server names. Teardown restores those original entries and deletes only names Kandev introduced, leaving unrelated user servers and top-level config intact.
 - **Passthrough must open the agent updates stream for MCP to work.** The agentctl instance serves `/mcp` and proxies tool calls to the backend over the agent updates WebSocket, drained only while that stream is open. The ACP path opens it; passthrough originally opened only the workspace stream, so `tools/list` worked (local) but `tools/call` hung. `applyPassthroughMCP`'s launch/resume/fallback paths now also open a passthrough-safe MCP stream (`connectMCPStream`) — it wires the MCP handler but is log-only on disconnect (it must not mark the execution failed, since passthrough completion is PTY-idle).
 
 ## Consequences

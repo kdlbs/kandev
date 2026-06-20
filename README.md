@@ -29,7 +29,7 @@ Open source, multi-provider, no telemetry, not tied to any cloud.
 
 ## Features
 
-- **Multi-agent support** - Claude Code, Codex, GitHub Copilot, Gemini CLI, Amp, Auggie, OpenCode, Cursor, Qwen, Factory Droid, iFlow, Kilocode, Pi, Kimi, AWS Kiro, Qoder, Trae, Oh My Pi
+- **Multi-agent support** - Claude Code, Codex, GitHub Copilot, Gemini CLI, Antigravity CLI, Amp, Auggie, OpenCode, Cursor, Qwen, Factory Droid, iFlow, Kilocode, Pi, Kimi, AWS Kiro, Qoder, Trae, Oh My Pi
 - **Parallel task execution** – start and manage multiple tasks from different sources simultaneously, boosting productivity with AI agents
 - **Integrated workspace** - Built-in terminal, code editor with LSP, git changes panel, embedded vscode and chat in one IDE-like view
 - **Kanban task management** - Drag-and-drop boards, columns, and workflow automation
@@ -74,6 +74,7 @@ Connect Kandev to the tools your team already uses — pull issues into the kanb
 | **Codex** | `npx -y @zed-industries/codex-acp` |
 | **GitHub Copilot** | `npx -y @github/copilot --acp` |
 | **Gemini CLI** | `npx -y @google/gemini-cli --acp` |
+| **Antigravity CLI** | `agy` *(CLI passthrough)* |
 | **Amp** | `npx -y amp-acp` |
 | **Auggie** | `npx -y @augmentcode/auggie --acp` |
 | **OpenCode** | `opencode acp` |
@@ -248,7 +249,7 @@ There are a few similar tools in this space, and new ones appearing everyday. He
 
 - **Server-first architecture** - Not a desktop app. Runs as a server you can access from any device, including your phone. Start a task away from your computer and check in on it later.
 - **Remote runtimes** - Run agents on remote servers via SSH, Docker hosts, and cloud environments, not just your local machine.
-- **Multi-provider** - Use Claude Code, Codex, Copilot, Gemini, Amp, Auggie, OpenCode, Cursor, Qwen, Droid, iFlow, Kilocode, Pi, Kimi, Kiro, Qoder, Trae, and Oh My Pi side by side. Not locked to one vendor.
+- **Multi-provider** - Use Claude Code, Codex, Copilot, Gemini, Antigravity, Amp, Auggie, OpenCode, Cursor, Qwen, Droid, iFlow, Kilocode, Pi, Kimi, Kiro, Qoder, Trae, and Oh My Pi side by side. Not locked to one vendor.
 - **CLI passthrough and chat** - Interact with agents through structured chat messages or drop into raw CLI mode for full agent TUI capabilities.
 - **Open source and self-hostable** - No vendor lock-in, no telemetry, runs on your infrastructure.
 

@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -231,6 +232,9 @@ const (
 	// metadataKeyPassthroughMCPEnv carries env vars the MCP strategy needs on the
 	// agent process (e.g. opencode's OPENCODE_CONFIG), merged in buildPassthroughEnv.
 	metadataKeyPassthroughMCPEnv = "passthrough_mcp_env"
+	// metadataKeyPassthroughMCPMergeCleanups carries reversible JSON-object
+	// merge records for global config strategies such as Antigravity.
+	metadataKeyPassthroughMCPMergeCleanups = "passthrough_mcp_merge_cleanups"
 	// kandevMCPServerName is the reserved name of kandev's own HTTP MCP server,
 	// which exposes the task tools to the agent.
 	kandevMCPServerName = "kandev"
@@ -427,7 +431,11 @@ func (m *Manager) materializePassthroughFile(execution *AgentExecution, f mcpcon
 		return false, nil
 	case statErr == nil && f.MergeKey != "":
 		// Merge kandev's servers into the user's existing regular file. Not
-		// tracked — it's the user's file; we only appended our entries.
+		// tracked as an owned file. Strategies that set CleanupMergeKey record
+		// enough state to restore/remove just Kandev's entries on teardown.
+		if f.CleanupMergeKey != "" && len(f.CleanupNames) > 0 {
+			m.recordPassthroughMergeCleanup(execution, f)
+		}
 		return false, m.mergePassthroughConfig(f)
 	case statErr == nil:
 		// Existing kandev-owned temp file (Claude/OpenCode) — overwrite it.
@@ -467,6 +475,52 @@ func (m *Manager) mergePassthroughConfig(f mcpconfig.PassthroughConfigFile) erro
 		return fmt.Errorf("write merged passthrough MCP config: %w", err)
 	}
 	return nil
+}
+
+type passthroughMCPMergeCleanup struct {
+	Path      string            `json:"path"`
+	MergeKey  string            `json:"merge_key"`
+	Names     []string          `json:"names"`
+	Originals map[string]string `json:"originals,omitempty"`
+}
+
+// recordPassthroughMergeCleanup snapshots the pre-merge JSON values for the
+// entries a strategy will overwrite. Missing entries are intentionally absent
+// from Originals, so cleanup deletes them instead of restoring an invented null.
+func (m *Manager) recordPassthroughMergeCleanup(execution *AgentExecution, f mcpconfig.PassthroughConfigFile) {
+	existing, err := os.ReadFile(f.Path)
+	if err != nil {
+		m.logger.Warn("cannot read existing MCP config for reversible merge cleanup",
+			zap.String("path", f.Path), zap.Error(err))
+		return
+	}
+	originals := map[string]string{}
+	doc := map[string]json.RawMessage{}
+	if err := json.Unmarshal(existing, &doc); err != nil {
+		m.logger.Warn("cannot parse existing MCP config for reversible merge cleanup",
+			zap.String("path", f.Path), zap.Error(err))
+		return
+	}
+	entries := map[string]json.RawMessage{}
+	if raw, ok := doc[f.CleanupMergeKey]; ok {
+		if err := json.Unmarshal(raw, &entries); err != nil {
+			m.logger.Warn("cannot parse existing MCP config merge key for reversible cleanup",
+				zap.String("path", f.Path), zap.String("merge_key", f.CleanupMergeKey), zap.Error(err))
+			return
+		}
+	}
+	for _, name := range f.CleanupNames {
+		if raw, ok := entries[name]; ok {
+			originals[name] = string(raw)
+		}
+	}
+	cleanup := passthroughMCPMergeCleanup{
+		Path:      f.Path,
+		MergeKey:  f.CleanupMergeKey,
+		Names:     append([]string(nil), f.CleanupNames...),
+		Originals: originals,
+	}
+	setPassthroughMCPMergeCleanups(execution, appendPassthroughMCPMergeCleanup(getPassthroughMCPMergeCleanups(execution), cleanup))
 }
 
 // writeFileNoFollow creates path with O_EXCL so it never follows or overwrites
@@ -543,10 +597,60 @@ func (m *Manager) cleanupPassthroughMCPConfig(execution *AgentExecution) {
 				zap.Error(err))
 		}
 	}
+	for _, cleanup := range getPassthroughMCPMergeCleanups(execution) {
+		if err := m.restorePassthroughMCPMerge(cleanup); err != nil {
+			m.logger.Warn("failed to restore merged passthrough MCP config",
+				zap.String("path", cleanup.Path),
+				zap.String("merge_key", cleanup.MergeKey),
+				zap.Error(err))
+		}
+	}
 	if execution.Metadata != nil {
 		delete(execution.Metadata, metadataKeyPassthroughMCPFiles)
 		delete(execution.Metadata, metadataKeyPassthroughMCPEnv)
+		delete(execution.Metadata, metadataKeyPassthroughMCPMergeCleanups)
 	}
+}
+
+func (m *Manager) restorePassthroughMCPMerge(cleanup passthroughMCPMergeCleanup) error {
+	if cleanup.Path == "" || cleanup.MergeKey == "" || len(cleanup.Names) == 0 {
+		return nil
+	}
+	current, err := os.ReadFile(cleanup.Path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read merged MCP config: %w", err)
+	}
+	doc := map[string]json.RawMessage{}
+	if err := json.Unmarshal(current, &doc); err != nil {
+		return fmt.Errorf("parse merged MCP config: %w", err)
+	}
+	entries := map[string]json.RawMessage{}
+	if raw, ok := doc[cleanup.MergeKey]; ok {
+		if err := json.Unmarshal(raw, &entries); err != nil {
+			return fmt.Errorf("parse merged MCP config key %q: %w", cleanup.MergeKey, err)
+		}
+	}
+	for _, name := range cleanup.Names {
+		if raw, ok := cleanup.Originals[name]; ok {
+			entries[name] = json.RawMessage(raw)
+		} else {
+			delete(entries, name)
+		}
+	}
+	mergedKey, err := json.Marshal(entries)
+	if err != nil {
+		return err
+	}
+	doc[cleanup.MergeKey] = mergedKey
+	restored, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return err
+	}
+	restored = append(restored, '\n')
+	return os.WriteFile(cleanup.Path, restored, 0o600)
 }
 
 func appendUnique(list []string, value string) []string {
@@ -617,6 +721,68 @@ func setPassthroughMCPEnv(execution *AgentExecution, env map[string]string) {
 		execution.Metadata = map[string]interface{}{}
 	}
 	execution.Metadata[metadataKeyPassthroughMCPEnv] = env
+}
+
+func appendPassthroughMCPMergeCleanup(list []passthroughMCPMergeCleanup, cleanup passthroughMCPMergeCleanup) []passthroughMCPMergeCleanup {
+	for i, existing := range list {
+		if existing.Path == cleanup.Path && existing.MergeKey == cleanup.MergeKey {
+			known := make(map[string]bool, len(existing.Names))
+			for _, name := range existing.Names {
+				known[name] = true
+			}
+			for _, name := range cleanup.Names {
+				if known[name] {
+					continue
+				}
+				existing.Names = append(existing.Names, name)
+				if raw, ok := cleanup.Originals[name]; ok {
+					if existing.Originals == nil {
+						existing.Originals = map[string]string{}
+					}
+					existing.Originals[name] = raw
+				}
+			}
+			list[i] = existing
+			return list
+		}
+	}
+	return append(list, cleanup)
+}
+
+func getPassthroughMCPMergeCleanups(execution *AgentExecution) []passthroughMCPMergeCleanup {
+	if execution == nil || execution.Metadata == nil {
+		return nil
+	}
+	raw, ok := execution.Metadata[metadataKeyPassthroughMCPMergeCleanups]
+	if !ok {
+		return nil
+	}
+	switch v := raw.(type) {
+	case []passthroughMCPMergeCleanup:
+		return append([]passthroughMCPMergeCleanup(nil), v...)
+	case []interface{}:
+		data, err := json.Marshal(v)
+		if err != nil {
+			return nil
+		}
+		var out []passthroughMCPMergeCleanup
+		if err := json.Unmarshal(data, &out); err != nil {
+			return nil
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func setPassthroughMCPMergeCleanups(execution *AgentExecution, cleanups []passthroughMCPMergeCleanup) {
+	if len(cleanups) == 0 {
+		return
+	}
+	if execution.Metadata == nil {
+		execution.Metadata = map[string]interface{}{}
+	}
+	execution.Metadata[metadataKeyPassthroughMCPMergeCleanups] = cleanups
 }
 
 // passthroughAgentCommand validates passthrough support and builds the command for a passthrough session.

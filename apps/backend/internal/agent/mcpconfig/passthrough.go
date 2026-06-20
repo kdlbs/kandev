@@ -3,6 +3,7 @@ package mcpconfig
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -32,6 +33,13 @@ type PassthroughConfigFile struct {
 	// servers to a user's existing .cursor/mcp.json instead of clobbering it.
 	// When the file does not exist, Content is written as-is.
 	MergeKey string
+	// CleanupMergeKey/CleanupNames request reversible cleanup for entries merged
+	// under a pre-existing JSON object. The lifecycle stores the previous raw
+	// JSON values for these names before merging; cleanup restores entries that
+	// existed and removes entries Kandev introduced. Leave empty for project
+	// files where Kandev should preserve merged entries after the run.
+	CleanupMergeKey string
+	CleanupNames    []string
 }
 
 // PassthroughArtifacts is what a strategy produces for a single passthrough launch.
@@ -449,6 +457,82 @@ func (OpenCodeStrategy) BuildPassthroughMCP(servers []types.McpServer, paths Pas
 
 func (OpenCodeStrategy) Describe() string {
 	return "a temp MCP config file referenced by the OPENCODE_CONFIG env var"
+}
+
+// --- Antigravity -------------------------------------------------------------
+
+// AntigravityStrategy merges MCP servers into Antigravity CLI's shared Gemini
+// config file. The CLI does not expose a public --mcp-config or config-path
+// flag; it reads ~/.gemini/config/mcp_config.json, which is also what the GUI
+// and plugin system use. The lifecycle marks these merged entries reversible so
+// Kandev restores any pre-existing user entries on session cleanup.
+type AntigravityStrategy struct{}
+
+type antigravityMCPFile struct {
+	MCPServers map[string]antigravityServerEntry `json:"mcpServers"`
+}
+
+type antigravityServerEntry struct {
+	Type    string            `json:"type,omitempty"`
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+	URL     string            `json:"url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
+func (AntigravityStrategy) BuildPassthroughMCP(servers []types.McpServer, _ PassthroughPaths) (PassthroughArtifacts, error) {
+	if len(servers) == 0 {
+		return PassthroughArtifacts{}, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return PassthroughArtifacts{}, nil
+	}
+	entries := make(map[string]antigravityServerEntry, len(servers))
+	cleanupNames := make([]string, 0, len(servers))
+	for _, srv := range servers {
+		if srv.Name == "" {
+			continue
+		}
+		cleanupNames = append(cleanupNames, srv.Name)
+		if isStdioServer(srv) {
+			entries[srv.Name] = antigravityServerEntry{Type: string(ServerTypeStdio), Command: srv.Command, Args: srv.Args, Env: srv.Env}
+		} else {
+			entries[srv.Name] = antigravityServerEntry{Type: antigravityRemoteType(srv.Type), URL: srv.URL, Headers: srv.Headers}
+		}
+	}
+	if len(entries) == 0 {
+		return PassthroughArtifacts{}, nil
+	}
+	content, err := marshalMCPFile(antigravityMCPFile{MCPServers: entries})
+	if err != nil {
+		return PassthroughArtifacts{}, err
+	}
+	return PassthroughArtifacts{
+		Files: []PassthroughConfigFile{{
+			Path:            filepath.Join(home, ".gemini", "config", "mcp_config.json"),
+			Content:         content,
+			MergeKey:        "mcpServers",
+			CleanupMergeKey: "mcpServers",
+			CleanupNames:    cleanupNames,
+		}},
+	}, nil
+}
+
+func (AntigravityStrategy) Describe() string {
+	return "reversible entries merged into ~/.gemini/config/mcp_config.json"
+}
+
+func antigravityRemoteType(t string) string {
+	switch t {
+	case string(ServerTypeSSE):
+		return string(ServerTypeSSE)
+	case string(ServerTypeStreamableHTTP):
+		return string(ServerTypeStreamableHTTP)
+	default:
+		return string(ServerTypeHTTP)
+	}
 }
 
 // --- Merge helper ------------------------------------------------------------

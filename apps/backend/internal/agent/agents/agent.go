@@ -78,6 +78,13 @@ type PassthroughAgent interface {
 	BuildPassthroughCommand(opts PassthroughOptions) Command
 }
 
+// PassthroughOnlyAgent marks agents whose public integration surface is the raw
+// CLI/TUI. Profiles for these agents should default to CLI passthrough rather
+// than attempting to launch them through agentctl's ACP protocol adapter.
+type PassthroughOnlyAgent interface {
+	PassthroughOnly() bool
+}
+
 // NativeBinaryAgent is an optional capability for agents whose npm package also
 // ships a standalone CLI binary that behaves identically to `npx -y <pkg>`.
 // When that binary is present in the execution environment, the lifecycle
@@ -112,6 +119,9 @@ type LoginAgent interface {
 // IsPassthroughOnly returns true if the agent only supports passthrough mode
 // and should not have interactive MCP tools (e.g. ask_user_question) registered.
 func IsPassthroughOnly(a Agent) bool {
+	if p, ok := a.(PassthroughOnlyAgent); ok && p.PassthroughOnly() {
+		return true
+	}
 	_, ok := a.(*TUIAgent)
 	return ok
 }
