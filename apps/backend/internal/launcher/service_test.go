@@ -90,6 +90,80 @@ func TestRenderLaunchdPlistCanDisableBootStart(t *testing.T) {
 	}
 }
 
+func TestInstallSystemdMessagesDistinguishBootStart(t *testing.T) {
+	tests := []struct {
+		name            string
+		noBootStart     bool
+		wantMessage     string
+		wantEnableNow   bool
+		wantStartAction bool
+	}{
+		{
+			name:          "default install",
+			wantMessage:   "[kandev] service enabled and started",
+			wantEnableNow: true,
+		},
+		{
+			name:            "no boot start",
+			noBootStart:     true,
+			wantMessage:     "[kandev] service installed and started (boot-start disabled)",
+			wantStartAction: true,
+		},
+	}
+
+	originalExecutablePath := executablePath
+	originalExecuteServiceCommand := executeServiceCommand
+	originalServicePrintln := servicePrintln
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		executeServiceCommand = originalExecuteServiceCommand
+		servicePrintln = originalServicePrintln
+	})
+
+	executablePath = func() (string, error) {
+		return "/opt/kandev/bin/kandev", nil
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var commands []string
+			var messages []string
+			executeServiceCommand = func(name string, args ...string) error {
+				commands = append(commands, name+" "+strings.Join(args, " "))
+				return nil
+			}
+			servicePrintln = func(message string) {
+				messages = append(messages, message)
+			}
+
+			tmp := t.TempDir()
+			code := installSystemd(
+				serviceArgs{
+					Action:      actionInstall,
+					HomeDir:     filepath.Join(tmp, "home"),
+					NoBootStart: tt.noBootStart,
+				},
+				BuildInfo{Version: "test"},
+				filepath.Join(tmp, "kandev.service"),
+			)
+			if code != 0 {
+				t.Fatalf("installSystemd() = %d, want 0", code)
+			}
+			if !slices.Equal(messages, []string{tt.wantMessage}) {
+				t.Fatalf("messages = %v, want %q", messages, tt.wantMessage)
+			}
+			gotEnableNow := slices.Contains(commands, "systemctl --user enable --now kandev.service")
+			if gotEnableNow != tt.wantEnableNow {
+				t.Fatalf("enable --now command presence = %v, want %v; commands=%v", gotEnableNow, tt.wantEnableNow, commands)
+			}
+			gotStartAction := slices.Contains(commands, "systemctl --user start kandev.service")
+			if gotStartAction != tt.wantStartAction {
+				t.Fatalf("start command presence = %v, want %v; commands=%v", gotStartAction, tt.wantStartAction, commands)
+			}
+		})
+	}
+}
+
 func TestInstallLaunchdMessagesDistinguishBootStart(t *testing.T) {
 	tests := []struct {
 		name          string

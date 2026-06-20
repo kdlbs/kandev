@@ -232,13 +232,13 @@ func installSystemd(args serviceArgs, build BuildInfo, unitPath string) int {
 		if err := runCommand("systemctl", append(systemctlScope(args.System), string(CommandStart), serviceUnitName)...); err != nil {
 			return 1
 		}
-		fmt.Println("[kandev] service installed and started")
+		servicePrintln("[kandev] service installed and started (boot-start disabled)")
 		return 0
 	}
 	if err := runCommand("systemctl", append(systemctlScope(args.System), "enable", "--now", serviceUnitName)...); err != nil {
 		return 1
 	}
-	fmt.Println("[kandev] service enabled and started")
+	servicePrintln("[kandev] service enabled and started")
 	return 0
 }
 
