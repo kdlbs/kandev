@@ -59,6 +59,7 @@ func startProcess(command string, args []string, cwd string, env []string, quiet
 	cmd.Dir = cwd
 	cmd.Env = env
 	cmd.Stdin = nil
+	configureManagedProcess(cmd)
 	stdout := newLimitedBuffer(capturedOutputLimit)
 	if quiet {
 		cmd.Stdout = stdout
@@ -137,7 +138,9 @@ func (p *managedProcess) kill() {
 	if p.cmd.Process == nil {
 		return
 	}
-	_ = p.cmd.Process.Kill()
+	if err := killManagedProcessGroup(p.cmd.Process.Pid); err != nil {
+		_ = p.cmd.Process.Kill()
+	}
 	<-p.done
 }
 

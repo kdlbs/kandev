@@ -14,7 +14,7 @@
 # Run:
 #   docker run -p 38429:38429 -v kandev-data:/data ghcr.io/kdlbs/kandev:latest
 
-FROM node:24-bookworm-slim
+FROM debian:bookworm-slim
 
 # Install runtime dependencies. gh is included because the GitHub integration
 # (PR review, webhooks) shells out to it for auth fallback when GITHUB_TOKEN
@@ -36,10 +36,10 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/* && \
     PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install apprise
 
-# Replace the node base image's default user so we own uid 1000.
+# Create the runtime user with uid 1000.
 # Home is placed under /data so agent CLI auth state (gh, claude, codex, auggie,
 # copilot, amp, ...) lives on the PV and survives pod restarts and image upgrades.
-RUN userdel -r node && groupadd -r kandev && useradd -r -g kandev -u 1000 -d /data/home -M kandev
+RUN groupadd -r kandev && useradd -r -g kandev -u 1000 -d /data/home -M kandev
 
 # Install azure-devops extension under the runtime user's Azure config dir on /data.
 RUN mkdir -p /data/home/.azure && \

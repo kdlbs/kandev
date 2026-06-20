@@ -30,6 +30,7 @@ const (
 	actionStop      = "stop"
 	flagHelp        = "--help"
 	goosDarwin      = "darwin"
+	managedMarker   = "managed by kandev"
 	serviceUnitName = "kandev.service"
 )
 
@@ -43,7 +44,7 @@ Usage:
   kandev service config [--system]
 `
 
-func runService(argv []string) int {
+func runService(argv []string, build BuildInfo) int {
 	args, err := parseServiceArgs(argv)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
@@ -59,9 +60,9 @@ func runService(argv []string) int {
 	}
 	switch runtime.GOOS {
 	case "linux":
-		return runLinuxService(args)
+		return runLinuxService(args, build)
 	case goosDarwin:
-		return runLaunchdService(args)
+		return runLaunchdService(args, build)
 	default:
 		fmt.Fprintf(os.Stderr, "[kandev] service is not supported on %s\n", runtime.GOOS)
 		return 1
@@ -150,11 +151,11 @@ func parseServiceHomeDir(argv []string, i int, out *serviceArgs) (int, error) {
 	return i + 1, nil
 }
 
-func runLinuxService(args serviceArgs) int {
+func runLinuxService(args serviceArgs, build BuildInfo) int {
 	unitPath := linuxUnitPath(args.System)
 	switch args.Action {
 	case actionInstall:
-		return installSystemd(args, unitPath)
+		return installSystemd(args, build, unitPath)
 	case actionUninstall:
 		_ = runCommand("systemctl", append(systemctlScope(args.System), "disable", "--now", serviceUnitName)...)
 		_ = os.Remove(unitPath)
@@ -188,8 +189,8 @@ func buildJournalArgs(args serviceArgs) []string {
 	return journalArgs
 }
 
-func installSystemd(args serviceArgs, unitPath string) int {
-	self, err := os.Executable()
+func installSystemd(args serviceArgs, build BuildInfo, unitPath string) int {
+	self, err := executablePath()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
@@ -207,7 +208,13 @@ func installSystemd(args serviceArgs, unitPath string) int {
 		Port:       args.Port,
 		System:     args.System,
 		SystemUser: serviceUser(args.System),
+		BundleDir:  serviceBundleDir(self),
+		Version:    serviceVersion(build.Version),
 	})
+	if err := backupUnmanagedServiceFile(unitPath); err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return 1
+	}
 	if err := os.WriteFile(unitPath, []byte(unit), 0o644); err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
@@ -229,7 +236,7 @@ func installSystemd(args serviceArgs, unitPath string) int {
 	return 0
 }
 
-func runLaunchdService(args serviceArgs) int {
+func runLaunchdService(args serviceArgs, build BuildInfo) int {
 	plistPath := launchdPlistPath(args.System)
 	target := "gui/" + fmt.Sprint(os.Getuid()) + "/com.kdlbs.kandev"
 	domain := "gui/" + fmt.Sprint(os.Getuid())
@@ -239,7 +246,7 @@ func runLaunchdService(args serviceArgs) int {
 	}
 	switch args.Action {
 	case actionInstall:
-		return installLaunchd(args, plistPath, target, domain)
+		return installLaunchd(args, build, plistPath, target, domain)
 	case "uninstall":
 		_ = runCommand("launchctl", "bootout", target)
 		_ = os.Remove(plistPath)
@@ -271,8 +278,8 @@ func runLaunchdService(args serviceArgs) int {
 	return 1
 }
 
-func installLaunchd(args serviceArgs, plistPath, target, domain string) int {
-	self, err := os.Executable()
+func installLaunchd(args serviceArgs, build BuildInfo, plistPath, target, domain string) int {
+	self, err := executablePath()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
@@ -295,7 +302,13 @@ func installLaunchd(args serviceArgs, plistPath, target, domain string) int {
 		System:      args.System,
 		SystemUser:  serviceUser(args.System),
 		NoBootStart: args.NoBootStart,
+		BundleDir:   serviceBundleDir(self),
+		Version:     serviceVersion(build.Version),
 	})
+	if err := backupUnmanagedServiceFile(plistPath); err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return 1
+	}
 	if err := os.WriteFile(plistPath, []byte(plist), 0o644); err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
@@ -324,22 +337,24 @@ type nativeServiceUnitInput struct {
 	System      bool
 	SystemUser  string
 	NoBootStart bool
+	BundleDir   string
+	Version     string
 }
 
 func renderSystemdUnit(input nativeServiceUnitInput) string {
 	env := []string{
 		serviceEnvLine("KANDEV_HOME_DIR", input.HomeDir),
 		serviceEnvLine("KANDEV_LOG_LEVEL", "info"),
-		serviceEnvLine("PATH", "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin:%h/.local/bin:%h/.bun/bin:%h/.opencode/bin"),
+		serviceEnvLineAllowSpecifiers("PATH", "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin:%h/.local/bin:%h/.bun/bin:%h/.opencode/bin"),
 	}
 	if input.Port != 0 {
 		env = append(env, serviceEnvLine("KANDEV_SERVER_PORT", fmt.Sprint(input.Port)))
 	}
-	if v := os.Getenv("KANDEV_BUNDLE_DIR"); v != "" {
-		env = append(env, serviceEnvLine("KANDEV_BUNDLE_DIR", v))
+	if input.BundleDir != "" {
+		env = append(env, serviceEnvLine("KANDEV_BUNDLE_DIR", input.BundleDir))
 	}
-	if v := os.Getenv("KANDEV_VERSION"); v != "" {
-		env = append(env, serviceEnvLine("KANDEV_VERSION", v))
+	if input.Version != "" {
+		env = append(env, serviceEnvLine("KANDEV_VERSION", input.Version))
 	}
 	userLine := ""
 	wantedBy := "default.target"
@@ -361,11 +376,11 @@ func renderLaunchdPlist(input nativeServiceUnitInput) string {
 	if input.Port != 0 {
 		envEntries = append(envEntries, [2]string{"KANDEV_SERVER_PORT", fmt.Sprint(input.Port)})
 	}
-	if v := os.Getenv("KANDEV_BUNDLE_DIR"); v != "" {
-		envEntries = append(envEntries, [2]string{"KANDEV_BUNDLE_DIR", v})
+	if input.BundleDir != "" {
+		envEntries = append(envEntries, [2]string{"KANDEV_BUNDLE_DIR", input.BundleDir})
 	}
-	if v := os.Getenv("KANDEV_VERSION"); v != "" {
-		envEntries = append(envEntries, [2]string{"KANDEV_VERSION", v})
+	if input.Version != "" {
+		envEntries = append(envEntries, [2]string{"KANDEV_VERSION", input.Version})
 	}
 	var envXML strings.Builder
 	for _, entry := range envEntries {
@@ -416,12 +431,72 @@ func serviceEnvLine(key, value string) string {
 	return "Environment=" + quoteForUnit(key+"="+value)
 }
 
+func serviceEnvLineAllowSpecifiers(key, value string) string {
+	return "Environment=" + quoteForUnitAllowSpecifiers(key+"="+value)
+}
+
 func quoteForUnit(value string) string {
-	if !strings.ContainsAny(value, " \\\"") {
+	return quoteForUnitValue(value, true)
+}
+
+func quoteForUnitAllowSpecifiers(value string) string {
+	return quoteForUnitValue(value, false)
+}
+
+func quoteForUnitValue(value string, escapeSystemdSpecifiers bool) string {
+	chars := " \\\"$"
+	if escapeSystemdSpecifiers {
+		chars += "%"
+	}
+	if !strings.ContainsAny(value, chars) {
 		return value
 	}
-	escaped := strings.ReplaceAll(strings.ReplaceAll(value, "\\", "\\\\"), "\"", "\\\"")
+	replacements := []string{"\\", "\\\\", "$", "$$", "\"", "\\\""}
+	if escapeSystemdSpecifiers {
+		replacements = append(replacements, "%", "%%")
+	}
+	escaped := strings.NewReplacer(replacements...).Replace(value)
 	return `"` + escaped + `"`
+}
+
+func serviceBundleDir(executable string) string {
+	if v := os.Getenv("KANDEV_BUNDLE_DIR"); v != "" {
+		return v
+	}
+	return filepath.Dir(filepath.Dir(executable))
+}
+
+func serviceVersion(buildVersion string) string {
+	if v := os.Getenv("KANDEV_VERSION"); v != "" {
+		return v
+	}
+	return buildVersion
+}
+
+func backupUnmanagedServiceFile(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("%s is a directory", path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if strings.Contains(string(data), managedMarker) {
+		return nil
+	}
+	backupPath := path + ".bak"
+	if err := os.WriteFile(backupPath, data, info.Mode().Perm()); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "[kandev] WARNING: existing unmanaged service file backed up to %s\n", backupPath)
+	return nil
 }
 
 func escapeXML(value string) string {

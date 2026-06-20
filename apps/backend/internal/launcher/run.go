@@ -32,7 +32,7 @@ func runInstalled(opts Options) int {
 	if releaseTag == "" {
 		releaseTag = "(" + bundle.Source + ")"
 	}
-	return runManagedApp(managedAppConfig{
+	return launchManaged(managedAppConfig{
 		Header:     "release: " + releaseTag,
 		Mode:       "run",
 		Backend:    bundle.Launcher,

@@ -8,6 +8,11 @@ import (
 	"runtime"
 )
 
+var (
+	executablePath = os.Executable
+	launchManaged  = runManagedApp
+)
+
 func runStart(opts Options) int {
 	backendPort, err := resolvePorts(opts)
 	if err != nil {
@@ -26,12 +31,12 @@ func runStart(opts Options) int {
 
 	logLevel := resolveLogLevel(opts)
 
-	self, err := os.Executable()
+	self, err := executablePath()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
-	return runManagedApp(managedAppConfig{
+	return launchManaged(managedAppConfig{
 		Header:     "start mode: using local build",
 		Mode:       "start",
 		Backend:    self,

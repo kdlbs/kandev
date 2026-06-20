@@ -15,7 +15,7 @@ type BuildInfo struct {
 
 func Run(args []string, build BuildInfo) int {
 	if len(args) > 0 && args[0] == "service" {
-		return runService(args[1:])
+		return runService(args[1:], build)
 	}
 	opts, err := parseArgs(args)
 	if err != nil {

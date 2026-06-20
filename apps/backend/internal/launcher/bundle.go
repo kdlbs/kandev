@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 type runtimeBundle struct {
@@ -29,7 +30,15 @@ func validateRuntimeBundle(dir, source string) (runtimeBundle, error) {
 	if !exists(agentctl) {
 		return runtimeBundle{}, fmt.Errorf("agentctl binary not found in bundle at %s", agentctl)
 	}
+	agentctlLinuxAMD64 := filepath.Join(dir, "bin", "agentctl-linux-amd64")
+	if requiresAgentctlLinuxAMD64(runtime.GOOS, runtime.GOARCH) && !exists(agentctlLinuxAMD64) {
+		return runtimeBundle{}, fmt.Errorf("agentctl linux/amd64 helper not found in bundle at %s", agentctlLinuxAMD64)
+	}
 	return runtimeBundle{Dir: dir, Launcher: launcher, Source: source}, nil
+}
+
+func requiresAgentctlLinuxAMD64(goos, goarch string) bool {
+	return goos != "linux" || goarch != "amd64"
 }
 
 func executableName(name string) string {
