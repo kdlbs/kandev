@@ -54,7 +54,7 @@ type AutomationFlags = {
   autoMerge: boolean;
 };
 
-function hasRunningChecks(pr: TaskPR): boolean {
+function hasUnknownOrInProgressChecks(pr: TaskPR): boolean {
   return pr.checks_total <= 0 || pr.checks_passing < pr.checks_total;
 }
 
@@ -70,7 +70,10 @@ function chipStatus(pr: TaskPR): ChipStatus {
   // in-progress, not passed. Without this order, the chip flips to green the
   // moment CI finishes and ignores the human gate. isPRAwaitingReview also
   // covers approved PRs where branch protection requires more reviewers.
-  if ((pr.checks_state === "pending" && hasRunningChecks(pr)) || pr.review_state === "pending") {
+  if (
+    (pr.checks_state === "pending" && hasUnknownOrInProgressChecks(pr)) ||
+    pr.review_state === "pending"
+  ) {
     return "in_progress";
   }
   // Mirror getPRStatusColor priority: ready-to-merge beats awaiting-review so

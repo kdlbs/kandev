@@ -157,11 +157,13 @@ func (s *Service) dispatchCIAutomationPrompt(ctx context.Context, session *model
 		s.publishQueueStatusEvent(ctx, session.ID)
 		return nil
 	case models.TaskSessionStateWaitingForInput, models.TaskSessionStateIdle:
+		if _, err := s.PromptTask(ctx, session.TaskID, session.ID, chatPrompt, "", false, nil, false); err != nil {
+			return err
+		}
 		if !s.recordCIAutomationUserMessage(ctx, session.TaskID, session.ID, chatPrompt) {
 			return fmt.Errorf("failed to record CI automation user message")
 		}
-		_, err := s.PromptTask(ctx, session.TaskID, session.ID, chatPrompt, "", false, nil, false)
-		return err
+		return nil
 	default:
 		return fmt.Errorf("session is not promptable: %s", session.State)
 	}

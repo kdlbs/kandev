@@ -278,7 +278,7 @@ func TestDispatchCIAutomationPromptFailsWhenRunningUserMessageCannotBeRecorded(t
 	}
 }
 
-func TestDispatchCIAutomationPromptRecordsUserMessageBeforeDirectPrompt(t *testing.T) {
+func TestDispatchCIAutomationPromptRecordsUserMessageAfterDirectPrompt(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateWaitingForInput)
@@ -312,15 +312,19 @@ func TestDispatchCIAutomationPromptRecordsUserMessageBeforeDirectPrompt(t *testi
 	}
 }
 
-func TestDispatchCIAutomationPromptFailsWhenDirectUserMessageCannotBeRecorded(t *testing.T) {
+func TestDispatchCIAutomationPromptDoesNotRecordUserMessageWhenDirectPromptFails(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateWaitingForInput)
-	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptErr:              errors.New("agent rejected prompt"),
+	}
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.agentManager = agentMgr
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
-	messageCreator := &mockMessageCreator{userMessageErr: errors.New("message db unavailable")}
+	messageCreator := &mockMessageCreator{}
 	svc.messageCreator = messageCreator
 	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
 	session, err := repo.GetTaskSession(ctx, "session-1")
@@ -333,11 +337,11 @@ func TestDispatchCIAutomationPromptFailsWhenDirectUserMessageCannotBeRecorded(t 
 	}
 
 	err = svc.dispatchCIAutomationPrompt(ctx, session, "Fix the PR")
-	if err == nil || !strings.Contains(err.Error(), "failed to record CI automation user message") {
-		t.Fatalf("expected user-message failure, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "agent rejected prompt") {
+		t.Fatalf("expected prompt failure, got %v", err)
 	}
-	if len(agentMgr.capturedPrompts) != 0 {
-		t.Fatalf("expected no direct prompt when user message could not be recorded, got %d", len(agentMgr.capturedPrompts))
+	if len(messageCreator.userMessages) != 0 {
+		t.Fatalf("expected no visible CI automation user message on prompt failure, got %d", len(messageCreator.userMessages))
 	}
 }
 
