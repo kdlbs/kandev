@@ -27,7 +27,7 @@ Users can already see pull request CI/review status above the task chat input, b
 - Emptying or resetting the task prompt override returns the task to the default `ci-auto-fix` prompt.
 - For tasks with multiple linked PRs, the controls are task-level and apply to every open linked PR. Dedupe, last-attempt, and error state are tracked per linked PR.
 - Kandev checks watched PRs through the existing lightweight PR watch poller, which runs once per minute. It fetches full PR feedback only when a watched PR is a candidate for auto-fix or when a user opens/refreshes PR feedback UI.
-- Every auto-fix attempt records the actionable feedback snapshot it used. Later fix rounds include only new or materially changed CI/review feedback since the last recorded round, with enough summary context for the agent to understand the PR.
+- Every auto-fix attempt records the latest feedback snapshot it used, including non-actionable snapshots that were intentionally no-ops. Later fix rounds include only new or materially changed CI/review feedback since the last recorded round, with enough summary context for the agent to understand the PR.
 - Automation must not repeatedly prompt for the same failure/comment snapshot or repeatedly retry the same failed merge attempt on every poll.
 - Automation controls persist across Kandev restarts.
 
@@ -48,8 +48,8 @@ Users can already see pull request CI/review status above the task chat input, b
 - `task_id` string. References the Kandev task.
 - `repository_id` string. Identifies which linked repository/branch row produced the PR.
 - `pr_number` integer.
-- `last_fix_signature` string nullable. Deterministic hash of the last actionable feedback snapshot that produced an auto-fix prompt.
-- `last_fix_checkpoint_json` string nullable. JSON snapshot of actionable feedback used in the last fix round.
+- `last_fix_signature` string nullable. Deterministic hash of the latest feedback snapshot, actionable or non-actionable, that produced an auto-fix prompt.
+- `last_fix_checkpoint_json` string nullable. JSON snapshot of feedback used in the last fix round. This includes non-actionable no-op snapshots so identical bot summaries/status updates are not repeatedly sent.
 - `last_fix_enqueued_at` timestamp nullable.
 - `last_fix_session_id` string nullable.
 - `last_merge_signature` string nullable. Deterministic hash of the last readiness state used for a merge attempt.
@@ -134,7 +134,7 @@ Auto-fix cycle for one task/PR:
 1. Existing PR watch poll updates lightweight PR state.
 2. Kandev sees a candidate state: failed checks, requested changes, unresolved review threads, or new actionable review feedback.
 3. Kandev fetches full PR feedback.
-4. Kandev compares the current actionable snapshot to `last_fix_checkpoint_json` and `last_fix_signature`.
+4. Kandev compares the current feedback snapshot to `last_fix_checkpoint_json` and `last_fix_signature`.
 5. If there is no material change, the cycle ends without prompting.
 6. If there is new or materially changed feedback, Kandev renders the task override or default `ci-auto-fix` prompt and sends or queues it for the task session.
 7. The default prompt instructs the agent to classify the new feedback before editing. If the
@@ -142,8 +142,8 @@ Auto-fix cycle for one task/PR:
    addressed comments, rate-limit notices, or other non-actionable review diagnostics, the agent
    must not modify files, commit, or push; it should only report that there is nothing actionable
    to address.
-8. Kandev records the new signature/checkpoint and attempt metadata so the same non-actionable
-   snapshot is not sent repeatedly.
+8. Kandev records the new signature/checkpoint and attempt metadata for the latest feedback
+   snapshot, actionable or non-actionable, so identical snapshots are not sent repeatedly.
 
 Auto-merge cycle for one task/PR:
 
