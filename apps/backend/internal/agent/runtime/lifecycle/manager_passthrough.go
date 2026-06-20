@@ -477,6 +477,9 @@ func (m *Manager) mergePassthroughConfig(f mcpconfig.PassthroughConfigFile) erro
 	return nil
 }
 
+// passthroughMCPMergeCleanup records what to restore in a shared config file
+// after a reversible merge: the file path, the merge key, the names Kandev
+// introduced, and the raw original JSON for any names that pre-existed.
 type passthroughMCPMergeCleanup struct {
 	Path      string            `json:"path"`
 	MergeKey  string            `json:"merge_key"`
@@ -612,6 +615,9 @@ func (m *Manager) cleanupPassthroughMCPConfig(execution *AgentExecution) {
 	}
 }
 
+// restorePassthroughMCPMerge reverses a recorded merge: it rewrites each
+// snapshotted name back to its original value and deletes the names Kandev
+// introduced, leaving unrelated entries and top-level keys untouched.
 func (m *Manager) restorePassthroughMCPMerge(cleanup passthroughMCPMergeCleanup) error {
 	if cleanup.Path == "" || cleanup.MergeKey == "" || len(cleanup.Names) == 0 {
 		return nil
@@ -723,6 +729,9 @@ func setPassthroughMCPEnv(execution *AgentExecution, env map[string]string) {
 	execution.Metadata[metadataKeyPassthroughMCPEnv] = env
 }
 
+// appendPassthroughMCPMergeCleanup merges a new cleanup record into the list,
+// unioning names (and their original snapshots) into any existing record for
+// the same path+key so the first snapshot is preserved across relaunches.
 func appendPassthroughMCPMergeCleanup(list []passthroughMCPMergeCleanup, cleanup passthroughMCPMergeCleanup) []passthroughMCPMergeCleanup {
 	for i, existing := range list {
 		if existing.Path == cleanup.Path && existing.MergeKey == cleanup.MergeKey {
@@ -749,6 +758,8 @@ func appendPassthroughMCPMergeCleanup(list []passthroughMCPMergeCleanup, cleanup
 	return append(list, cleanup)
 }
 
+// getPassthroughMCPMergeCleanups reads the merge-cleanup records from execution
+// metadata, decoding either the in-process slice or its JSON-roundtripped form.
 func getPassthroughMCPMergeCleanups(execution *AgentExecution) []passthroughMCPMergeCleanup {
 	if execution == nil || execution.Metadata == nil {
 		return nil
@@ -775,6 +786,8 @@ func getPassthroughMCPMergeCleanups(execution *AgentExecution) []passthroughMCPM
 	}
 }
 
+// setPassthroughMCPMergeCleanups stores the merge-cleanup records on execution
+// metadata, initializing the map if needed and ignoring an empty list.
 func setPassthroughMCPMergeCleanups(execution *AgentExecution, cleanups []passthroughMCPMergeCleanup) {
 	if len(cleanups) == 0 {
 		return

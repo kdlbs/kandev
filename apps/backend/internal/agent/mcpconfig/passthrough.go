@@ -468,10 +468,13 @@ func (OpenCodeStrategy) Describe() string {
 // Kandev restores any pre-existing user entries on session cleanup.
 type AntigravityStrategy struct{}
 
+// antigravityMCPFile is the on-disk shape of ~/.gemini/config/mcp_config.json.
 type antigravityMCPFile struct {
 	MCPServers map[string]antigravityServerEntry `json:"mcpServers"`
 }
 
+// antigravityServerEntry is a single MCP server definition (stdio or remote) as
+// stored under the mcpServers map.
 type antigravityServerEntry struct {
 	Type    string            `json:"type,omitempty"`
 	Command string            `json:"command,omitempty"`
@@ -481,6 +484,9 @@ type antigravityServerEntry struct {
 	Headers map[string]string `json:"headers,omitempty"`
 }
 
+// BuildPassthroughMCP renders the resolved servers into a reversible merge of
+// ~/.gemini/config/mcp_config.json. It returns no artifacts when the home dir
+// is unavailable or every server is filtered out.
 func (AntigravityStrategy) BuildPassthroughMCP(servers []types.McpServer, _ PassthroughPaths) (PassthroughArtifacts, error) {
 	if len(servers) == 0 {
 		return PassthroughArtifacts{}, nil
@@ -520,10 +526,13 @@ func (AntigravityStrategy) BuildPassthroughMCP(servers []types.McpServer, _ Pass
 	}, nil
 }
 
+// Describe returns the human-readable injection mechanism for the profile card.
 func (AntigravityStrategy) Describe() string {
 	return "reversible entries merged into ~/.gemini/config/mcp_config.json"
 }
 
+// antigravityRemoteType maps a Kandev server transport to the value Antigravity
+// expects for a remote MCP entry, defaulting to plain HTTP.
 func antigravityRemoteType(t string) string {
 	switch t {
 	case string(ServerTypeSSE):
