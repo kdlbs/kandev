@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -50,5 +51,43 @@ func TestRenderLaunchdPlistCanDisableBootStart(t *testing.T) {
 
 	if !strings.Contains(plist, "<key>RunAtLoad</key>\n  <false/>") {
 		t.Fatalf("plist should not start at load with no boot start:\n%s", plist)
+	}
+}
+
+func TestBuildJournalArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		args serviceArgs
+		want []string
+	}{
+		{
+			name: "user logs",
+			args: serviceArgs{Action: actionLogs},
+			want: []string{"--user-unit", "kandev.service", "-n", "200", "--no-pager"},
+		},
+		{
+			name: "user logs follow keeps line count",
+			args: serviceArgs{Action: actionLogs, Follow: true},
+			want: []string{"--user-unit", "kandev.service", "-n", "200", "-f"},
+		},
+		{
+			name: "system logs",
+			args: serviceArgs{Action: actionLogs, System: true},
+			want: []string{"-u", "kandev.service", "-n", "200", "--no-pager"},
+		},
+		{
+			name: "system logs follow keeps line count",
+			args: serviceArgs{Action: actionLogs, System: true, Follow: true},
+			want: []string{"-u", "kandev.service", "-n", "200", "-f"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildJournalArgs(tt.args)
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("buildJournalArgs() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

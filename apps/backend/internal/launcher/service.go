@@ -166,22 +166,26 @@ func runLinuxService(args serviceArgs) int {
 		}
 		return 0
 	case actionLogs:
-		journalArgs := []string{"-n", "200", "--no-pager"}
-		if args.System {
-			journalArgs = append([]string{"-u", serviceUnitName}, journalArgs...)
-		} else {
-			journalArgs = append([]string{"--user-unit", serviceUnitName}, journalArgs...)
-		}
-		if args.Follow {
-			journalArgs = journalArgs[:len(journalArgs)-1]
-			journalArgs = append(journalArgs, "-f")
-		}
-		if err := runCommand("journalctl", journalArgs...); err != nil {
+		if err := runCommand("journalctl", buildJournalArgs(args)...); err != nil {
 			return 1
 		}
 		return 0
 	}
 	return 1
+}
+
+func buildJournalArgs(args serviceArgs) []string {
+	journalArgs := []string{"-n", "200", "--no-pager"}
+	if args.System {
+		journalArgs = append([]string{"-u", serviceUnitName}, journalArgs...)
+	} else {
+		journalArgs = append([]string{"--user-unit", serviceUnitName}, journalArgs...)
+	}
+	if args.Follow {
+		journalArgs = journalArgs[:len(journalArgs)-1]
+		journalArgs = append(journalArgs, "-f")
+	}
+	return journalArgs
 }
 
 func installSystemd(args serviceArgs, unitPath string) int {
