@@ -137,7 +137,13 @@ Auto-fix cycle for one task/PR:
 4. Kandev compares the current actionable snapshot to `last_fix_checkpoint_json` and `last_fix_signature`.
 5. If there is no material change, the cycle ends without prompting.
 6. If there is new or materially changed feedback, Kandev renders the task override or default `ci-auto-fix` prompt and sends or queues it for the task session.
-7. Kandev records the new signature/checkpoint and attempt metadata.
+7. The default prompt instructs the agent to classify the new feedback before editing. If the
+   new feedback is only summaries, status updates, no-finding reports, duplicated or already
+   addressed comments, rate-limit notices, or other non-actionable review diagnostics, the agent
+   must not modify files, commit, or push; it should only report that there is nothing actionable
+   to address.
+8. Kandev records the new signature/checkpoint and attempt metadata so the same non-actionable
+   snapshot is not sent repeatedly.
 
 Auto-merge cycle for one task/PR:
 
@@ -189,6 +195,7 @@ Auto-merge cycle for one task/PR:
 - **GIVEN** auto-fix is enabled and a watched PR transitions from passing to failing CI, **WHEN** the 1-minute PR watch poll observes the failure, **THEN** Kandev fetches full PR feedback and sends or queues one auto-fix prompt for that failure snapshot.
 - **GIVEN** auto-fix already prompted for a failure snapshot, **WHEN** the same failure is observed again on a later poll, **THEN** no duplicate prompt is sent.
 - **GIVEN** auto-fix already prompted for a failure snapshot, **WHEN** a new failed check or new unresolved review comment appears, **THEN** Kandev sends or queues a new prompt containing the new or materially changed feedback.
+- **GIVEN** auto-fix sends a prompt for a snapshot that contains only non-actionable automation summaries or status updates, **WHEN** the agent reviews that prompt, **THEN** the agent does not modify files, commit, or push and only reports that there is nothing actionable to address.
 - **GIVEN** auto-fix is enabled and the task session is running, **WHEN** new actionable PR feedback appears, **THEN** the prompt is queued and delivered after the current turn rather than interrupting the running session.
 - **GIVEN** auto-merge is enabled and the PR has passing checks, required reviews, no unresolved threads, and clean mergeability, **WHEN** the PR watch poll observes the ready state, **THEN** Kandev merges the PR with the existing backend merge-method selection.
 - **GIVEN** auto-merge is enabled but the PR has requested changes, pending required review, failing checks, unresolved threads, or dirty mergeability, **WHEN** the PR watch poll observes the state, **THEN** Kandev does not merge.

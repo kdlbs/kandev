@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -124,20 +125,30 @@ func TestSQLiteRepository_BuiltinPrompts(t *testing.T) {
 
 	// Should include the CI auto-fix built-in prompt.
 	builtinCount := 0
-	var foundCIAutoFix bool
+	var ciAutoFixContent string
 	for _, p := range list {
 		if p.Builtin {
 			builtinCount++
 		}
 		if p.ID == "builtin-ci-auto-fix" && p.Name == "ci-auto-fix" && p.Content != "" {
-			foundCIAutoFix = true
+			ciAutoFixContent = p.Content
 		}
 	}
 
 	if builtinCount != 4 {
 		t.Fatalf("expected 4 built-in prompts, got %d", builtinCount)
 	}
-	if !foundCIAutoFix {
+	if ciAutoFixContent == "" {
 		t.Fatalf("expected ci-auto-fix built-in prompt")
+	}
+	for _, want := range []string{
+		"If the new feedback is not actionable",
+		"do not modify files",
+		"do not commit",
+		"do not push",
+	} {
+		if !strings.Contains(ciAutoFixContent, want) {
+			t.Fatalf("expected ci-auto-fix prompt to contain %q, got:\n%s", want, ciAutoFixContent)
+		}
 	}
 }
