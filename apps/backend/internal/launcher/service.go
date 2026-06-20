@@ -45,6 +45,11 @@ Usage:
   kandev service config [--system]
 `
 
+var (
+	executeServiceCommand = defaultRunCommand
+	servicePrintln        = func(message string) { fmt.Println(message) }
+)
+
 func runService(argv []string, build BuildInfo) int {
 	args, err := parseServiceArgs(argv)
 	if err != nil {
@@ -323,10 +328,10 @@ func installLaunchd(args serviceArgs, build BuildInfo, plistPath, target, domain
 		if err := runCommand("launchctl", "kickstart", target); err != nil {
 			return 1
 		}
-		fmt.Println("[kandev] service loaded and started")
+		servicePrintln("[kandev] service loaded and started (boot-start disabled)")
 		return 0
 	}
-	fmt.Println("[kandev] service loaded and started")
+	servicePrintln("[kandev] service loaded, enabled, and started")
 	return 0
 }
 
@@ -585,6 +590,10 @@ func mustHomeDir() string {
 }
 
 func runCommand(name string, args ...string) error {
+	return executeServiceCommand(name, args...)
+}
+
+func defaultRunCommand(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

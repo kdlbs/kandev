@@ -90,6 +90,77 @@ func TestRenderLaunchdPlistCanDisableBootStart(t *testing.T) {
 	}
 }
 
+func TestInstallLaunchdMessagesDistinguishBootStart(t *testing.T) {
+	tests := []struct {
+		name          string
+		noBootStart   bool
+		wantMessage   string
+		wantKickstart bool
+	}{
+		{
+			name:          "default install",
+			wantMessage:   "[kandev] service loaded, enabled, and started",
+			wantKickstart: false,
+		},
+		{
+			name:          "no boot start",
+			noBootStart:   true,
+			wantMessage:   "[kandev] service loaded and started (boot-start disabled)",
+			wantKickstart: true,
+		},
+	}
+
+	originalExecutablePath := executablePath
+	originalExecuteServiceCommand := executeServiceCommand
+	originalServicePrintln := servicePrintln
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		executeServiceCommand = originalExecuteServiceCommand
+		servicePrintln = originalServicePrintln
+	})
+
+	executablePath = func() (string, error) {
+		return "/opt/kandev/bin/kandev", nil
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var commands []string
+			var messages []string
+			executeServiceCommand = func(name string, args ...string) error {
+				commands = append(commands, name+" "+strings.Join(args, " "))
+				return nil
+			}
+			servicePrintln = func(message string) {
+				messages = append(messages, message)
+			}
+
+			tmp := t.TempDir()
+			code := installLaunchd(
+				serviceArgs{
+					Action:      actionInstall,
+					HomeDir:     filepath.Join(tmp, "home"),
+					NoBootStart: tt.noBootStart,
+				},
+				BuildInfo{Version: "test"},
+				filepath.Join(tmp, "com.kdlbs.kandev.plist"),
+				"gui/501/com.kdlbs.kandev",
+				"gui/501",
+			)
+			if code != 0 {
+				t.Fatalf("installLaunchd() = %d, want 0", code)
+			}
+			if !slices.Equal(messages, []string{tt.wantMessage}) {
+				t.Fatalf("messages = %v, want %q", messages, tt.wantMessage)
+			}
+			gotKickstart := slices.Contains(commands, "launchctl kickstart gui/501/com.kdlbs.kandev")
+			if gotKickstart != tt.wantKickstart {
+				t.Fatalf("kickstart command presence = %v, want %v; commands=%v", gotKickstart, tt.wantKickstart, commands)
+			}
+		})
+	}
+}
+
 func TestBuildJournalArgs(t *testing.T) {
 	tests := []struct {
 		name string
