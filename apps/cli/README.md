@@ -27,14 +27,6 @@ The package manager owns the runtime version. `kandev@X.Y.Z` ships with the matc
 - **Update via npm/npx**: `npx kandev@latest` or `npm install -g kandev@latest`
 - **Print CLI version**: `kandev --version`
 
-### Advanced: pin a specific runtime tag
-
-`--runtime-version <tag>` downloads a specific GitHub release runtime instead of using the installed one. For debugging compatibility issues only:
-
-```bash
-kandev --runtime-version v0.16.0
-```
-
 ## Run as a Service
 
 Install kandev as a systemd (Linux) or launchd (macOS) service so it auto-starts and stays running across reboots:

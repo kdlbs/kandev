@@ -14,7 +14,7 @@ import { createProcessSupervisor } from "./process";
 
 export type PortConfig = {
   backendPort: number;
-  webPort: number;
+  webPort?: number;
   agentctlPort: number;
   backendUrl: string;
 };
@@ -39,6 +39,17 @@ export async function pickPorts(backendPort?: number, webPort?: number): Promise
   };
 }
 
+export async function pickBackendPorts(backendPort?: number): Promise<PortConfig> {
+  const resolvedBackendPort = backendPort ?? (await pickAvailablePort(DEFAULT_BACKEND_PORT));
+  const agentctlPort = await pickAvailablePort(DEFAULT_AGENTCTL_PORT);
+
+  return {
+    backendPort: resolvedBackendPort,
+    agentctlPort,
+    backendUrl: `http://localhost:${resolvedBackendPort}`,
+  };
+}
+
 export type BackendEnvOptions = {
   ports: PortConfig;
   /** Log level: debug, info, warn, error (default: info) */
@@ -57,6 +68,9 @@ export type BackendEnvOptions = {
  */
 export function buildBackendEnv(options: BackendEnvOptions): NodeJS.ProcessEnv {
   const { ports, logLevel, webProxy = true, extra } = options;
+  if (webProxy && ports.webPort === undefined) {
+    throw new Error("webProxy requires a web port");
+  }
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     KANDEV_SERVER_PORT: String(ports.backendPort),
@@ -87,6 +101,9 @@ export type WebEnvOptions = {
  */
 export function buildWebEnv(options: WebEnvOptions): NodeJS.ProcessEnv {
   const { ports, production = false, debug = false } = options;
+  if (ports.webPort === undefined) {
+    throw new Error("web env requires a web port");
+  }
 
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -171,7 +188,13 @@ export type StartupInfoOptions = {
  */
 export function logStartupInfo(options: StartupInfoOptions): void {
   const { header, ports, primary = "backend", dbPath, logLevel } = options;
-  const primaryPort = primary === "web" ? ports.webPort : ports.backendPort;
+  let primaryPort = ports.backendPort;
+  if (primary === "web") {
+    if (ports.webPort === undefined) {
+      throw new Error("web startup info requires a web port");
+    }
+    primaryPort = ports.webPort;
+  }
   const primaryUrl = `http://localhost:${primaryPort}`;
   const networkHosts = listHostNetworkAddresses();
 

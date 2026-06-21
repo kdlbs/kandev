@@ -2,7 +2,7 @@
 # Generate per-platform npm runtime packages from built dist/release-assets.
 #
 # Each platform bundle (kandev-{platform}.tar.gz) is repackaged as an npm package
-# containing only bin/ and web/ (no cli/). These are the @kdlbs/runtime-* packages
+# containing the native bin/ directory. These are the @kdlbs/runtime-* packages
 # that the main kandev npm package declares as optionalDependencies.
 #
 # Usage:
@@ -70,7 +70,7 @@ for platform in linux-x64 linux-arm64 macos-x64 macos-arm64 windows-x64; do
   rm -rf "$pkg_out"
   mkdir -p "$pkg_out"
 
-  # Extract only bin/ and web/ from the archive (skip cli/)
+  # Extract the native runtime bundle from the archive.
   local_tmp="$pkg_out/.extract_tmp"
   mkdir -p "$local_tmp"
   tar -xzf "$archive" -C "$local_tmp"
@@ -83,7 +83,6 @@ for platform in linux-x64 linux-arm64 macos-x64 macos-arm64 windows-x64; do
   fi
 
   cp -R "$bundle_root/bin" "$pkg_out/bin"
-  cp -R "$bundle_root/web" "$pkg_out/web"
   rm -rf "$local_tmp"
 
   os_field="${PLATFORM_TO_OS[$platform]}"
@@ -106,8 +105,7 @@ for platform in linux-x64 linux-arm64 macos-x64 macos-arm64 windows-x64; do
   "os": $os_field,
   "cpu": $cpu_field,
   "files": [
-    "bin",
-    "web"
+    "bin"
   ]
 }
 EOF

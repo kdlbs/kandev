@@ -6,7 +6,6 @@ import { ensureExtracted, findBundleRoot } from "./bundle";
 import {
   DEFAULT_AGENTCTL_PORT,
   DEFAULT_BACKEND_PORT,
-  DEFAULT_WEB_PORT,
   HEALTH_TIMEOUT_MS_RELEASE,
   resolveCacheDir,
   resolveDataDir,
@@ -14,7 +13,7 @@ import {
   resolveKandevHomeDir,
 } from "./constants";
 import { ensureAsset, getRelease } from "./github";
-import { resolveHealthTimeoutMs, waitForHealth, waitForUrlReady } from "./health";
+import { resolveHealthTimeoutMs, waitForHealth } from "./health";
 import { getBinaryName, getPlatformDir } from "./platform";
 import { sortVersionsDesc } from "./version";
 import { pickAvailablePort } from "./ports";
@@ -27,7 +26,6 @@ import { openBrowser } from "./web";
 export type RunOptions = {
   runtimeVersion?: string;
   backendPort?: number;
-  webPort?: number;
   /** Show info logs from backend + web */
   verbose?: boolean;
   /** Show debug logs + agent message dumps */
@@ -42,7 +40,6 @@ type PreparedBundle = {
   backendUrl: string;
   backendEnv: NodeJS.ProcessEnv;
   releaseTag: string;
-  webPort: number;
   agentctlPort: number;
   dbPath: string;
   logLevel: string;
@@ -142,7 +139,6 @@ async function downloadRuntimeVersion(runtimeVersion: string): Promise<string> {
 async function prepareBundleForLaunch({
   runtimeVersion,
   backendPort,
-  webPort,
   verbose = false,
   debug = false,
 }: RunOptions): Promise<PreparedBundle> {
@@ -183,7 +179,6 @@ async function prepareBundleForLaunch({
   }
 
   const actualBackendPort = backendPort ?? (await pickAvailablePort(DEFAULT_BACKEND_PORT));
-  const actualWebPort = webPort ?? (await pickAvailablePort(DEFAULT_WEB_PORT));
   const agentctlPort = await pickAvailablePort(DEFAULT_AGENTCTL_PORT);
   const backendUrl = `http://localhost:${actualBackendPort}`;
   const showOutput = verbose || debug;
@@ -199,7 +194,6 @@ async function prepareBundleForLaunch({
   const backendEnv = buildBackendEnv({
     ports: {
       backendPort: actualBackendPort,
-      webPort: actualWebPort,
       agentctlPort,
       backendUrl,
     },
@@ -217,7 +211,6 @@ async function prepareBundleForLaunch({
     backendUrl,
     backendEnv,
     releaseTag,
-    webPort: actualWebPort,
     agentctlPort,
     dbPath,
     logLevel,
@@ -253,7 +246,6 @@ async function launchBundle(prepared: PreparedBundle): Promise<{
     header: `release: ${prepared.releaseTag}`,
     ports: {
       backendPort: Number(prepared.backendEnv.KANDEV_SERVER_PORT),
-      webPort: prepared.webPort,
       agentctlPort: prepared.agentctlPort,
       backendUrl: prepared.backendUrl,
     },
@@ -272,7 +264,6 @@ async function launchBundle(prepared: PreparedBundle): Promise<{
     homeDir: resolveKandevHomeDir(),
     ports: {
       backendPort: Number(prepared.backendEnv.KANDEV_SERVER_PORT),
-      webPort: prepared.webPort,
       agentctlPort: prepared.agentctlPort,
       backendUrl: prepared.backendUrl,
     },
@@ -300,7 +291,6 @@ async function launchBundle(prepared: PreparedBundle): Promise<{
 export async function runRelease({
   runtimeVersion,
   backendPort,
-  webPort,
   verbose = false,
   debug = false,
   headless = false,
@@ -308,7 +298,6 @@ export async function runRelease({
   const prepared = await prepareBundleForLaunch({
     runtimeVersion,
     backendPort,
-    webPort,
     verbose,
     debug,
   });

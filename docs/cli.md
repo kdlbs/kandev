@@ -16,11 +16,9 @@ flowchart TB
 
     resolve --> envvar["KANDEV_BUNDLE_DIR<br/>(Homebrew, tests)"]
     resolve --> npmpkg["@kdlbs/runtime-{platform}<br/>(npm/npx)"]
-    resolve --> cache["~/.kandev/bin cache<br/>(--runtime-version only)"]
 
     envvar --> supervisor
     npmpkg --> supervisor
-    cache --> supervisor
     makedev --> supervisor
     binary --> supervisor
 
@@ -89,25 +87,11 @@ kandev run
 ```
 
 **What happens:**
-1. Resolves the runtime bundle (KANDEV_BUNDLE_DIR → npm package → cache).
+1. Resolves the runtime bundle (KANDEV_BUNDLE_DIR → npm package).
 2. Starts the backend server.
 3. Waits for backend health check.
-4. Starts the web app.
+4. Serves the embedded web UI from the backend.
 5. Opens browser when ready.
-
-### `kandev dev`
-
-Runs the application in development mode with hot-reloading. Requires a local repository checkout.
-
-```bash
-# From the repo root or any subdirectory
-kandev dev
-```
-
-**What happens:**
-1. Locates the repo root (looks for `apps/backend` and `apps/web`).
-2. Runs `make dev` for the backend (Go with hot-reload).
-3. Runs `pnpm dev` for the web app (Vite dev server).
 
 ### `kandev start`
 
@@ -125,11 +109,9 @@ kandev start
 |--------|-------------|---------|
 | `--version`, `-V` | Print CLI version and exit | `kandev --version` |
 | `--port <port>` | Backend port (alias: `--backend-port`) | `--port 3000` |
-| `--web-internal-port <port>` | Override internal web app port | `--web-internal-port 13000` |
-| `--verbose`, `-v` | Show info logs from backend + web | `--verbose` |
+| `--verbose`, `-v` | Show info logs from backend | `--verbose` |
 | `--debug` | Show debug logs + agent message dumps | `--debug` |
 | `--help`, `-h` | Show help | `--help` |
-| `--runtime-version <tag>` | **Advanced/debug only**: download a specific runtime tag from GitHub releases instead of using the installed runtime | `--runtime-version v0.16.0` |
 
 ### Examples
 
@@ -137,14 +119,9 @@ kandev start
 # Print CLI version
 kandev --version
 
-# Custom ports
-kandev --port 18080 --web-internal-port 13000
+# Custom port
+kandev --port 18080
 
-# Dev mode
-kandev dev --port 18080
-
-# Force a specific runtime version (debug)
-kandev --runtime-version v0.16.0
 ```
 
 ## Port Selection
@@ -167,8 +144,6 @@ If the default port is in use, the CLI finds the next available port automatical
 | `KANDEV_PORT` / `KANDEV_BACKEND_PORT` | Backend port (CLI flag wins) |
 | `KANDEV_WEB_PORT` | Internal web app port |
 | `KANDEV_HEALTH_TIMEOUT_MS` | Override health check timeout (ms) |
-| `KANDEV_GITHUB_OWNER` / `KANDEV_GITHUB_REPO` | Override GitHub repo for `--runtime-version` downloads |
-| `KANDEV_GITHUB_TOKEN` | GitHub token for `--runtime-version` API access |
 
 ## Makefile Integration
 
@@ -223,15 +198,6 @@ Increase the health check timeout:
 KANDEV_HEALTH_TIMEOUT_MS=60000 kandev
 ```
 
-### Dev Mode: "Unable to locate repo root"
-
-Run from within the kandev repository:
-
-```bash
-cd /path/to/kandev
-kandev dev
-```
-
 ### Start Mode: "Backend binary not found"
 
 Build the project first:
@@ -245,7 +211,6 @@ kandev start
 
 | Path | Contents |
 |------|----------|
-| `~/.kandev/bin/` | Cached downloads from `--runtime-version` (debug only) |
 | `~/.kandev/data/` | SQLite database and app data |
 | Homebrew Cellar | Installed runtime (when installed via brew) |
 | `<npm cache>/node_modules/@kdlbs/runtime-{platform}/` | Installed runtime (when installed via npm/npx) |

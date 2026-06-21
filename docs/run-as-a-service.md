@@ -96,7 +96,7 @@ kandev service config [--system]
 
 If Kandev is running as a user-mode service installed by `kandev service install`, open **Settings → System → Updates** and use **Apply update** when it appears. The button is shown only when the backend can prove it is running from a kandev-managed service unit/plist with valid service metadata.
 
-Both `npm` and Homebrew install kandev under a versioned directory (e.g. `node_modules/kandev/0.49.0/`, `Cellar/kandev/0.49.0/`). Manual upgrades replace those paths, so the unit file must be refreshed afterward.
+Both npm runtime packages and Homebrew install kandev under versioned package-manager paths. Manual upgrades replace those paths, so the unit file must be refreshed afterward.
 
 **Manual fix:** re-run install. It's idempotent.
 
@@ -105,7 +105,7 @@ npm i -g kandev@latest          # or: brew upgrade kandev
 kandev service install          # rewrites the unit with the new paths
 ```
 
-If you launch `kandev` interactively after an upgrade, it will detect a stale unit and print a one-line reminder. You can also check with `kandev service config` — the `cli entry:` and `node path:` lines tell you the paths that *would* be baked in by the next install.
+If you launch `kandev` interactively after an upgrade, it will detect a stale unit and print a one-line reminder. You can also check with `kandev service config` to see the paths that would be baked in by the next install.
 
 System services (`kandev service install --system`) do not expose UI self-update. Update them from a privileged shell, then re-run `sudo kandev service install --system`.
 
@@ -139,7 +139,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/node /usr/local/lib/node_modules/kandev/bin/cli.js --headless
+ExecStart=/usr/local/lib/node_modules/@kdlbs/runtime-linux-x64/bin/kandev --headless
 Environment=KANDEV_HOME_DIR=/home/alice/.kandev
 Environment=KANDEV_LOG_LEVEL=info
 Environment=PATH=%h/.local/bin:%h/.bun/bin:%h/.opencode/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin

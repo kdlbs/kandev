@@ -156,7 +156,7 @@ function spawnBackendProcess(
   debug: boolean,
   port: number,
 ): ChildProcess {
-  const proc = spawn(KANDEV_BIN, [], {
+  const proc = spawn(KANDEV_BIN, ["__backend"], {
     env: env as unknown as NodeJS.ProcessEnv,
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,

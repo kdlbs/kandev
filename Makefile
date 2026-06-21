@@ -32,7 +32,7 @@ MAGENTA := \033[35m
 
 VERBOSE ?= 0
 NODE ?= $(shell command -v node 2>/dev/null || echo node)
-SERVICE_CLI := $(CURDIR)/dist/kandev/cli/bin/cli.js
+SERVICE_LAUNCHER := $(CURDIR)/dist/kandev/bin/kandev
 SERVICE_BUNDLE_DIR := $(CURDIR)/dist/kandev
 SERVICE_VERSION := $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 SERVICE_ENV := KANDEV_BUNDLE_DIR="$(SERVICE_BUNDLE_DIR)" KANDEV_VERSION="$(SERVICE_VERSION)"
@@ -65,11 +65,11 @@ help:
 	@echo "Development Commands:"
 	@echo "  bootstrap        Install mise tools, workspace deps, and git hooks"
 	@echo "  bootstrap-e2e    Bootstrap plus Playwright browser/system deps"
-	@echo "  dev              Run backend + web via CLI (auto ports)"
+	@echo "  dev              Run backend + web via local CLI (auto ports)"
 	@echo "  dev-prod-db      Run dev mode against the production db at ~/.kandev"
 	@echo "  dev-backend      Run backend in development mode (port 38429)"
 	@echo "  dev-web          Run web app in development mode (port 37429)"
-	@echo "  dev              Note: Uses apps/cli launcher (auto ports)"
+	@echo "  dev              Note: Uses local development launcher (auto ports)"
 	@echo "  doctor           Idempotently wire up pre-commit hooks (runs automatically before dev)"
 	@echo ""
 	@echo "Production Commands:"
@@ -214,7 +214,7 @@ start:
 	@$(MAKE) -s build-backend-quiet
 	$(call success,Build complete)
 	$(call phase,Starting Server)
-	@cd $(APPS_DIR) && $(PNPM) -C cli dev -- start $(if $(filter 1 true yes,$(VERBOSE)),--verbose,) $(if $(filter 1 true yes,$(DEBUG)),--debug,)
+	@$(BACKEND_DIR)/bin/kandev start $(if $(filter 1 true yes,$(VERBOSE)),--verbose,) $(if $(filter 1 true yes,$(DEBUG)),--debug,)
 
 .PHONY: start-verbose
 start-verbose:
@@ -231,7 +231,6 @@ start-debug:
 .PHONY: service-bundle
 service-bundle: install build
 	$(call phase,Packaging Service Bundle)
-	@scripts/release/package-cli.sh
 	@test -n "$(SERVICE_BUNDLE_DIR)" || { echo "SERVICE_BUNDLE_DIR is empty; aborting."; exit 1; }
 	@test "$(SERVICE_BUNDLE_DIR)" != "/" || { echo "SERVICE_BUNDLE_DIR must not be /; aborting."; exit 1; }
 	@test -f "$(BACKEND_DIR)/bin/agentctl-linux-amd64" || $(MAKE) -C $(BACKEND_DIR) build-agentctl-linux
@@ -243,40 +242,40 @@ service-bundle: install build
 
 .PHONY: service-cli-check
 service-cli-check:
-	@test -f "$(SERVICE_CLI)" || { echo "Missing $(SERVICE_CLI). Run 'make service-install' first."; exit 1; }
+	@test -f "$(SERVICE_LAUNCHER)" || { echo "Missing $(SERVICE_LAUNCHER). Run 'make service-install' first."; exit 1; }
 
 .PHONY: service-install
 service-install: service-bundle
-	@$(SERVICE_ENV) "$(NODE)" "$(SERVICE_CLI)" service install $(SERVICE_INSTALL_FLAGS)
+	@$(SERVICE_ENV) "$(SERVICE_LAUNCHER)" service install $(SERVICE_INSTALL_FLAGS)
 
 .PHONY: service-install-system
 service-install-system: service-bundle
-	@sudo env $(SERVICE_ENV) "$(NODE)" "$(SERVICE_CLI)" service install --system $(SERVICE_INSTALL_FLAGS)
+	@sudo env $(SERVICE_ENV) "$(SERVICE_LAUNCHER)" service install --system $(SERVICE_INSTALL_FLAGS)
 
 .PHONY: service-uninstall service-start service-stop service-restart service-status service-logs service-logs-follow service-config
 service-uninstall: service-cli-check
-	@$(SERVICE_ENV) "$(NODE)" "$(SERVICE_CLI)" service uninstall
+	@$(SERVICE_ENV) "$(SERVICE_LAUNCHER)" service uninstall
 
 service-start: service-cli-check
-	@$(SERVICE_ENV) "$(NODE)" "$(SERVICE_CLI)" service start
+	@$(SERVICE_ENV) "$(SERVICE_LAUNCHER)" service start
 
 service-stop: service-cli-check
-	@$(SERVICE_ENV) "$(NODE)" "$(SERVICE_CLI)" service stop
+	@$(SERVICE_ENV) "$(SERVICE_LAUNCHER)" service stop
 
 service-restart: service-cli-check
-	@$(SERVICE_ENV) "$(NODE)" "$(SERVICE_CLI)" service restart
+	@$(SERVICE_ENV) "$(SERVICE_LAUNCHER)" service restart
 
 service-status: service-cli-check
-	@$(SERVICE_ENV) "$(NODE)" "$(SERVICE_CLI)" service status
+	@$(SERVICE_ENV) "$(SERVICE_LAUNCHER)" service status
 
 service-logs: service-cli-check
-	@$(SERVICE_ENV) "$(NODE)" "$(SERVICE_CLI)" service logs
+	@$(SERVICE_ENV) "$(SERVICE_LAUNCHER)" service logs
 
 service-logs-follow: service-cli-check
-	@$(SERVICE_ENV) "$(NODE)" "$(SERVICE_CLI)" service logs -f
+	@$(SERVICE_ENV) "$(SERVICE_LAUNCHER)" service logs -f
 
 service-config: service-cli-check
-	@$(SERVICE_ENV) "$(NODE)" "$(SERVICE_CLI)" service config
+	@$(SERVICE_ENV) "$(SERVICE_LAUNCHER)" service config
 
 .PHONY: build-backend
 build-backend:

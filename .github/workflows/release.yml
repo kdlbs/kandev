@@ -6,8 +6,7 @@ name: release
 # Flow (one click → everything below):
 #   1. prepare           — bump version, regen CHANGELOG, open + merge release PR, push tag vX.Y.Z
 #   2. build-web         — build Vite SPA bundle (shared across arches)
-#   3. build-cli         — build + esbuild-bundle CLI (shared across arches)
-#   4. build-bundles     — assemble bin/ + web/ + cli/ tarballs for 5 platforms
+#   3. build-bundles     — assemble native bin/ tarballs for 5 platforms
 #   5. docker-{amd64,arm64} — native per-arch image builds (no QEMU), consuming
 #                          the prebuilt linux bundles from step 4
 #   6. docker-manifest   — stitch the two arch digests into the user-facing
@@ -281,35 +280,9 @@ jobs:
           path: apps/web/dist
           include-hidden-files: true
 
-  build-cli:
-    name: Build & bundle CLI
-    needs: prepare
-    if: ${{ !inputs.dry_run }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.prepare.outputs.tag }}
-      - uses: pnpm/action-setup@v5
-        with:
-          version: "9.15.9"
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-          cache: pnpm
-          cache-dependency-path: apps/pnpm-lock.yaml
-      - name: Install dependencies
-        run: pnpm -C apps install --frozen-lockfile
-      - name: Build and bundle CLI
-        run: bash scripts/release/package-cli.sh
-      - uses: actions/upload-artifact@v5
-        with:
-          name: cli-bundle
-          path: dist/kandev/cli
-
   build-bundles:
     name: Build platform bundle (${{ matrix.platform }})
-    needs: [prepare, build-web, build-cli]
+    needs: [prepare, build-web]
     if: ${{ !inputs.dry_run }}
     strategy:
       matrix:
@@ -352,10 +325,6 @@ jobs:
         with:
           name: web-bundle
           path: apps/backend/internal/webapp/embedded/generated
-      - uses: actions/download-artifact@v5
-        with:
-          name: cli-bundle
-          path: dist/kandev/cli
 
       - name: Install cross-compilation tools
         if: matrix.cc
@@ -403,18 +372,12 @@ jobs:
 
       - name: Package bundle
         run: |
-          rm -rf dist/kandev/bin dist/kandev/web
+          rm -rf dist/kandev
           mkdir -p dist/kandev/bin
           EXT=${{ matrix.goos == 'windows' && '.exe' || '' }}
           cp apps/backend/bin/kandev${EXT} dist/kandev/bin/
           cp apps/backend/bin/agentctl${EXT} dist/kandev/bin/
           cp apps/backend/bin/agentctl-linux-amd64 dist/kandev/bin/
-          # cli/ was already placed by the build-cli job (downloaded above).
-          # actions/upload-artifact + download-artifact zip-roundtrip strips the
-          # executable bit, so re-apply it. The Homebrew formula's wrapper at
-          # bin/kandev does `exec libexec/cli/bin/cli.js`, which fails with
-          # "Permission denied" if this isn't +x.
-          chmod +x dist/kandev/cli/bin/cli.js
           cd dist
           tar -czf "kandev-${{ matrix.platform }}.tar.gz" kandev
           shasum -a 256 "kandev-${{ matrix.platform }}.tar.gz" > "kandev-${{ matrix.platform }}.tar.gz.sha256"
@@ -429,7 +392,7 @@ jobs:
   # ---------------------------------------------------------------------------
   # Docker base image — split per arch onto native runners, then stitched into
   # a multi-arch manifest list. Each arch consumes the matching linux bundle
-  # produced by build-bundles, so no Go/Next.js/pnpm work happens inside the
+  # produced by build-bundles, so no Go/Vite/pnpm work happens inside the
   # Docker build (the Dockerfile is reduced to apt-get + COPY).
   # ---------------------------------------------------------------------------
   docker-amd64:
@@ -459,7 +422,7 @@ jobs:
           set -euo pipefail
           mkdir -p ctx/bundle
           # --strip-components=1 drops the top-level `kandev/` dir inside the
-          # tarball so ctx/bundle/ ends up with bin/, web/, cli/ directly.
+          # tarball so ctx/bundle/ ends up with bin/ directly.
           tar -xzf dist/bundle/kandev-linux-x64.tar.gz --strip-components=1 -C ctx/bundle
           cp docker-entrypoint.sh ctx/
 
