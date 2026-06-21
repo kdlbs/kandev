@@ -100,7 +100,7 @@ func (a *Antigravity) DisplayName() string { return "Antigravity" }
 
 // Description returns a one-line summary of the agent.
 func (a *Antigravity) Description() string {
-	return "Google Antigravity CLI coding agent using terminal passthrough."
+	return "Google Antigravity CLI coding agent using ACP chat mode (with optional terminal passthrough)."
 }
 
 // Enabled reports whether the agent is selectable by default.

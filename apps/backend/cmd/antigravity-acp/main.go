@@ -21,9 +21,14 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 )
+
+// modelsListTimeout bounds the `agy models` subprocess invoked on the ACP
+// request path so a hung CLI cannot stall NewSession/SetSessionConfigOption.
+const modelsListTimeout = 3 * time.Second
 
 // logOutput is the writer for diagnostic logs (stderr; stdout is reserved for
 // the ACP JSON-RPC stream). Tests may override it.
@@ -106,7 +111,9 @@ func (a *antigravityAgent) NewSession(ctx context.Context, req acp.NewSessionReq
 // "model" select option. Returns nil when listing fails so the host falls back
 // to a free-text model field rather than an empty dropdown.
 func (a *antigravityAgent) modelConfigOptions(ctx context.Context, current string) []acp.SessionConfigOption {
-	out, err := exec.CommandContext(ctx, agyBinary, "models").Output()
+	cmdCtx, cancel := context.WithTimeout(ctx, modelsListTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(cmdCtx, agyBinary, "models").Output()
 	if err != nil {
 		return nil
 	}
@@ -165,8 +172,8 @@ func (a *antigravityAgent) registerResumedSession(sid acp.SessionId, cwd string)
 // stdout back as an agent message. The first prompt in a session starts a fresh
 // conversation; subsequent prompts add --continue so agy threads them.
 func (a *antigravityAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptResponse, error) {
-	st := a.session(req.SessionId)
-	if st == nil {
+	st, ok := a.sessionSnapshot(req.SessionId)
+	if !ok {
 		return acp.PromptResponse{}, fmt.Errorf("unknown session %q", req.SessionId)
 	}
 	prompt := extractPromptText(req.Prompt)
@@ -210,6 +217,13 @@ func (a *antigravityAgent) runAndStream(ctx context.Context, sid acp.SessionId, 
 	for scanner.Scan() {
 		emitted = true
 		a.emitText(ctx, sid, scanner.Text()+"\n")
+	}
+	if scanErr := scanner.Err(); scanErr != nil {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = cmd.Wait()
+		return "", fmt.Errorf("read agy stdout: %w", scanErr)
 	}
 
 	waitErr := cmd.Wait()
@@ -256,14 +270,10 @@ func (a *antigravityAgent) SetSessionConfigOption(ctx context.Context, params ac
 	if v == nil || v.ConfigId != "model" {
 		return acp.SetSessionConfigOptionResponse{}, nil
 	}
-	st := a.session(v.SessionId)
-	if st == nil {
+	model, ok := a.setSessionModel(v.SessionId, string(v.Value))
+	if !ok {
 		return acp.SetSessionConfigOptionResponse{}, nil
 	}
-	a.mu.Lock()
-	st.model = string(v.Value)
-	model := st.model
-	a.mu.Unlock()
 	return acp.SetSessionConfigOptionResponse{ConfigOptions: a.modelConfigOptions(ctx, model)}, nil
 }
 
@@ -295,10 +305,30 @@ func (a *antigravityAgent) SetSessionMode(_ context.Context, _ acp.SetSessionMod
 
 // --- helpers ----------------------------------------------------------------
 
-func (a *antigravityAgent) session(sid acp.SessionId) *sessionState {
+// sessionSnapshot returns a copy of the session state under the mutex, so
+// callers read model/cwd/hadTurn without racing concurrent writers (a model
+// change can arrive via SetSessionConfigOption while a prompt is running).
+func (a *antigravityAgent) sessionSnapshot(sid acp.SessionId) (sessionState, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.sessions[sid]
+	st, ok := a.sessions[sid]
+	if !ok {
+		return sessionState{}, false
+	}
+	return *st, true
+}
+
+// setSessionModel updates the session model under the mutex and returns the
+// stored value, reporting ok=false when the session is unknown.
+func (a *antigravityAgent) setSessionModel(sid acp.SessionId, model string) (string, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	st, ok := a.sessions[sid]
+	if !ok {
+		return "", false
+	}
+	st.model = model
+	return st.model, true
 }
 
 func (a *antigravityAgent) markTurnComplete(sid acp.SessionId) {

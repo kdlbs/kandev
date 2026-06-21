@@ -162,6 +162,15 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyImageTagOverride:    true,
 	MetadataKeyContainerID:         true,
 	MetadataKeyWorktreeBranch:      true,
+
+	// Passthrough reversible-merge cleanup state. These record entries Kandev
+	// added to the user's persistent config (e.g. ~/.gemini/mcp_config.json and
+	// trustedFolders.json) so cleanup removes only what Kandev wrote. They must
+	// survive a backend restart mid-session — otherwise cleanup runs with no
+	// record and leaves orphaned entries in the user's files. (Unlike the
+	// kandev-owned temp-dir MCP file keys, which are disposable on restart.)
+	metadataKeyPassthroughMCPMergeCleanups: true,
+	metadataKeyPassthroughTrustFile:        true,
 }
 
 // persistentMetadataPrefixes lists key prefixes that should persist.

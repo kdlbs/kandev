@@ -74,7 +74,7 @@ Connect Kandev to the tools your team already uses — pull issues into the kanb
 | **Codex** | `npx -y @zed-industries/codex-acp` |
 | **GitHub Copilot** | `npx -y @github/copilot --acp` |
 | **Gemini CLI** | `npx -y @google/gemini-cli --acp` |
-| **Antigravity CLI** | `agy` *(CLI passthrough)* |
+| **Antigravity CLI** | `antigravity-acp` shim over `agy` *(ACP chat by default; optional CLI passthrough)* |
 | **Amp** | `npx -y amp-acp` |
 | **Auggie** | `npx -y @augmentcode/auggie --acp` |
 | **OpenCode** | `opencode acp` |

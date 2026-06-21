@@ -74,7 +74,7 @@ The image sets `HOME=/data/home`, so every CLI that writes its auth under `$HOME
 - `gh` CLI — `~/.config/gh/hosts.yml`
 - Claude Code — `~/.claude/.credentials.json`, `~/.claude.json`
 - Codex — `~/.codex/auth.json`, `~/.codex/config.toml`
-- Antigravity CLI — `~/.gemini/oauth_creds.json`, `~/.gemini/google_accounts.json`, `~/.gemini/settings.json`, `~/.gemini/config/*`
+- Antigravity CLI — `~/.gemini/oauth_creds.json`, `~/.gemini/google_accounts.json`, `~/.gemini/settings.json`, `~/.gemini/config/*`, `~/.gemini/trustedFolders.json`
 - Auggie — `~/.augment/session.json`
 - GitHub Copilot — `~/.copilot/...`
 - OpenCode, Amp — `~/.config/<tool>/...`

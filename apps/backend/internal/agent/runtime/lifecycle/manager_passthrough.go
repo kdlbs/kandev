@@ -370,7 +370,9 @@ func (m *Manager) applyPassthroughTrust(execution *AgentExecution, agentConfig a
 	if !ok || path == "" {
 		return
 	}
+	m.trustFileMu.Lock()
 	added, err := m.seedTrustedFolder(path, filepath.Clean(workspace), trustValue)
+	m.trustFileMu.Unlock()
 	if err != nil {
 		m.logger.Warn("failed to seed trusted folder for passthrough agent",
 			zap.String("agent", agentConfig.ID()),
@@ -431,6 +433,10 @@ func (m *Manager) cleanupPassthroughTrust(execution *AgentExecution) {
 	if workspace == "" {
 		return
 	}
+	// Serialize with seedTrustedFolder so a concurrent seed/cleanup on the same
+	// file can't lose the other's edit (read-modify-write is not atomic).
+	m.trustFileMu.Lock()
+	defer m.trustFileMu.Unlock()
 	existing, err := os.ReadFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {

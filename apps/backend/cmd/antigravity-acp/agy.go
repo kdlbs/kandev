@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,12 +64,12 @@ func trustedFoldersPath() (string, bool) {
 
 // seedTrustedFolder adds workspace→TRUST_FOLDER to the flat JSON map at path,
 // creating the file if missing and preserving existing entries. It is a no-op
-// when the folder is already present, and never writes through a symlink. Any
-// error is returned so the caller can log and continue (trust seeding is a
-// convenience, not a hard requirement).
+// when the folder is already present, and returns an error (rather than writing
+// through it) when the target is a symlink. Any error is returned so the caller
+// can log and continue (trust seeding is a convenience, not a hard requirement).
 func seedTrustedFolder(path, workspace string) error {
 	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		return nil
+		return fmt.Errorf("trusted-folders file is a symlink: %s", path)
 	}
 	folders := map[string]string{}
 	switch data, err := os.ReadFile(path); {
@@ -105,5 +106,7 @@ func trustWorkspace(workspace string) {
 	if !ok {
 		return
 	}
-	_ = seedTrustedFolder(path, workspace)
+	if err := seedTrustedFolder(path, workspace); err != nil {
+		fmt.Fprintf(logOutput, "antigravity-acp: trust seeding skipped: %v\n", err)
+	}
 }

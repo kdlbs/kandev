@@ -259,6 +259,14 @@ func configureAntigravity(reg *Registry, log *logger.Logger) {
 		binaryName += ".exe"
 	}
 	binaryPath := filepath.Join(filepath.Dir(exePath), binaryName)
+	if _, err := os.Stat(binaryPath); err != nil {
+		// The shim was not built beside the executable (partial/dev build); leave
+		// binaryPath empty so launches fall back to PATH resolution instead of
+		// pointing at a file that does not exist.
+		log.Warn("antigravity ACP shim not found; falling back to PATH",
+			zap.String("cmd", binaryPath), zap.Error(err))
+		return
+	}
 	antigravity.SetBinaryPath(binaryPath)
 	log.Info("antigravity ACP shim configured", zap.String("cmd", binaryPath))
 }

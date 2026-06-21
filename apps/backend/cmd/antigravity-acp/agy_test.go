@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -97,5 +98,46 @@ func TestSeedTrustedFolder(t *testing.T) {
 	_ = json.Unmarshal(data, &folders)
 	if folders[ws] != trustValue || folders["/other"] != trustValue {
 		t.Fatalf("expected both entries, got %v", folders)
+	}
+}
+
+func TestSeedTrustedFolderSymlinkRefused(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real.json")
+	if err := os.WriteFile(target, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	link := filepath.Join(dir, "trustedFolders.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unsupported on this platform: %v", err)
+	}
+
+	err := seedTrustedFolder(link, "/work/space")
+	if err == nil {
+		t.Fatal("expected error for symlink target, got nil")
+	}
+	// The symlinked target must be left untouched (no write through the link).
+	if data, _ := os.ReadFile(target); string(data) != "{}" {
+		t.Fatalf("symlink target was modified: %q", data)
+	}
+}
+
+func TestTrustWorkspaceHomeUnresolvable(t *testing.T) {
+	// With no resolvable home directory, trustedFoldersPath returns ok=false and
+	// trustWorkspace must return early without panicking or logging a failure.
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "") // Windows fallback used by os.UserHomeDir.
+	if _, ok := trustedFoldersPath(); ok {
+		t.Skip("home directory still resolvable; cannot exercise early-return path")
+	}
+
+	var logs strings.Builder
+	orig := logOutput
+	logOutput = &logs
+	t.Cleanup(func() { logOutput = orig })
+
+	trustWorkspace("/work/space") // must not panic
+	if logs.Len() != 0 {
+		t.Fatalf("expected no log output on early return, got %q", logs.String())
 	}
 }

@@ -123,6 +123,12 @@ type Manager struct {
 	// returns CodeNpxCacheCorrupted. NewManager wires routingerr.RemediateNpxCache;
 	// tests override it to avoid touching the real filesystem.
 	remediateNpxCache func(path string, log *zap.Logger) error
+
+	// trustFileMu serializes read-modify-write of an agent's trusted-folders
+	// file (e.g. ~/.gemini/trustedFolders.json) so two passthrough sessions
+	// launching concurrently in different workspaces don't clobber each other's
+	// entry (last-writer-wins would drop one). See manager_passthrough.go.
+	trustFileMu sync.Mutex
 }
 
 // NewManager creates a new lifecycle manager.
