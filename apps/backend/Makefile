@@ -48,7 +48,7 @@ BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || powershell -c
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
-.PHONY: all build build-all build-agentctl build-agentctl-linux build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint fmt vet help
+.PHONY: all build build-all build-agentctl build-agentctl-linux build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-antigravity-acp build-preview build-winjob clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint fmt vet help
 
 ## Default target
 all: build
@@ -64,6 +64,13 @@ build-mock-agent:
 	@echo "Building mock-agent..."
 	-@$(MKDIR) $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/mock-agent$(EXE) ./cmd/mock-agent
+
+## Build the antigravity-acp shim — speaks ACP toward agentctl and drives
+## `agy --print` underneath so Antigravity renders as a chat dialog.
+build-antigravity-acp:
+	@echo "Building antigravity-acp..."
+	-@$(MKDIR) $(BUILD_DIR)
+	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/antigravity-acp$(EXE) ./cmd/antigravity-acp
 
 ## Build the winjob helper — wraps a subprocess in a Windows Job Object so
 ## Ctrl-C at the top of the chain reliably terminates the entire subtree
@@ -88,7 +95,7 @@ build-acpdbg:
 ## variant because remote executors (local Docker, remote Docker, Sprites)
 ## bind-mount it into containers — without it, the first Docker session on a
 ## non-Linux host fails with "agentctl linux binary not found".
-build: build-agentctl build-agentctl-linux build-mock-agent build-acpdbg build-winjob
+build: build-agentctl build-agentctl-linux build-mock-agent build-antigravity-acp build-acpdbg build-winjob
 	@echo "Building $(BINARY_NAME)..."
 	-@$(MKDIR) $(BUILD_DIR)
 	$(CGO_PREFIX) $(GO) build $(GOFLAGS) -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)$(EXE) ./cmd/kandev

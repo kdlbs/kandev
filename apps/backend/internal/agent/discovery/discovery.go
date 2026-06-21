@@ -37,6 +37,14 @@ type KnownAgent struct {
 	Capabilities      Capabilities `json:"capabilities"`
 }
 
+// Model is a single model advertised by an agent's CLI (e.g. `agy models`).
+// Populated only for passthrough-only agents that are not ACP-probed; ACP
+// agents' models come from the host utility capability cache.
+type Model struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 // Availability represents the result of detecting an agent's installation.
 type Availability struct {
 	Name              string       `json:"name"`
@@ -46,6 +54,7 @@ type Availability struct {
 	Available         bool         `json:"available"`
 	MatchedPath       string       `json:"matched_path,omitempty"`
 	Capabilities      Capabilities `json:"capabilities"`
+	Models            []Model      `json:"models,omitempty"`
 }
 
 // Registry manages agent discovery using the agents.Agent interface.
@@ -161,6 +170,18 @@ func (r *Registry) getCached() []Availability {
 	return copied
 }
 
+// discoveredModels converts agent-layer models into the discovery DTO shape.
+func discoveredModels(in []agents.DiscoveredModel) []Model {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]Model, 0, len(in))
+	for _, m := range in {
+		out = append(out, Model{ID: m.ID, Name: m.Name})
+	}
+	return out
+}
+
 const detectAllTimeout = 15 * time.Second
 
 // detectAll runs IsInstalled for all agents concurrently.
@@ -203,6 +224,7 @@ func (r *Registry) detectAll(ctx context.Context) []Availability {
 						SupportsShell:         result.Capabilities.SupportsShell,
 						SupportsWorkspaceOnly: result.Capabilities.SupportsWorkspaceOnly,
 					},
+					Models: discoveredModels(result.Models),
 				},
 			}
 		}(i, ag)

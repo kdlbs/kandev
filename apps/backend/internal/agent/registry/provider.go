@@ -45,6 +45,7 @@ func Provide(log *logger.Logger) (*Registry, func() error, error) {
 		validateMockProviders(reg, mockProviders, log)
 	} else {
 		reg.LoadDefaults()
+		configureAntigravity(reg, log)
 		if mockMode == "true" {
 			// Dev mode: enable the base mock agent alongside the real
 			// agents. KANDEV_MOCK_PROVIDERS is opt-in — when set, the
@@ -233,4 +234,31 @@ func configureMockAgent(reg *Registry, id string, log *logger.Logger) {
 		zap.String("id", id),
 		zap.String("cmd", binaryPath),
 		zap.Bool("supports_mcp", mock.SupportsMCPEnabled()))
+}
+
+// configureAntigravity points the Antigravity agent at the antigravity-acp shim
+// binary that ships next to the kandev executable. The shim speaks ACP toward
+// agentctl and drives `agy --print` underneath, so Antigravity runs as a chat
+// dialog rather than a raw terminal. On host (standalone) launches the absolute
+// path is required because dev-mode $PATH does not include apps/backend/bin.
+func configureAntigravity(reg *Registry, log *logger.Logger) {
+	ag, ok := reg.Get("antigravity")
+	if !ok {
+		return
+	}
+	antigravity, ok := ag.(*agents.Antigravity)
+	if !ok {
+		return
+	}
+	exePath, err := os.Executable()
+	if err != nil {
+		return
+	}
+	binaryName := "antigravity-acp"
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+	binaryPath := filepath.Join(filepath.Dir(exePath), binaryName)
+	antigravity.SetBinaryPath(binaryPath)
+	log.Info("antigravity ACP shim configured", zap.String("cmd", binaryPath))
 }

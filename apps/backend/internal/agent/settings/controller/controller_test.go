@@ -33,6 +33,9 @@ type testAgent struct {
 	// tests don't care and the zero value matches the legacy behaviour.
 	supportsMCP    bool
 	mcpConfigPaths []string
+	// models feeds DiscoveryResult.Models so tests can exercise the CLI-model
+	// path used by passthrough-only agents (e.g. Antigravity's `agy models`).
+	models []agents.DiscoveredModel
 }
 
 func (a *testAgent) ID() string          { return a.id }
@@ -49,6 +52,7 @@ func (a *testAgent) IsInstalled(ctx context.Context) (*agents.DiscoveryResult, e
 		Available:      false,
 		SupportsMCP:    a.supportsMCP,
 		MCPConfigPaths: a.mcpConfigPaths,
+		Models:         a.models,
 	}, nil
 }
 

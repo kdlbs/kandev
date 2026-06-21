@@ -243,6 +243,18 @@ func (c *Controller) FetchDynamicModels(ctx context.Context, agentName string, r
 	if _, ok := c.agentRegistry.Get(agentName); !ok {
 		return nil, fmt.Errorf("agent %q not found", agentName)
 	}
+
+	// Passthrough-only agents (e.g. Antigravity) are never ACP-probed, so their
+	// models come from the agent's CLI via discovery rather than the host
+	// utility cache. Prefer that source when present. Refresh re-runs the CLI
+	// listing by invalidating the discovery cache first.
+	if refresh {
+		c.InvalidateDiscoveryCache()
+	}
+	if resp := c.cliModelsResponse(ctx, agentName); resp != nil {
+		return resp, nil
+	}
+
 	if c.hostUtility == nil {
 		return &dto.DynamicModelsResponse{
 			AgentName: agentName,
@@ -309,4 +321,30 @@ func (c *Controller) FetchDynamicModels(ctx context.Context, agentName string, r
 		})
 	}
 	return resp, nil
+}
+
+// cliModelsResponse returns a models response sourced from the agent's CLI
+// (via discovery) when the agent advertises CLI models. Returns nil for agents
+// without CLI models so the caller falls through to the host utility path.
+func (c *Controller) cliModelsResponse(ctx context.Context, agentName string) *dto.DynamicModelsResponse {
+	results, err := c.detectAgents(ctx)
+	if err != nil {
+		return nil
+	}
+	for _, r := range results {
+		if r.Name != agentName || len(r.Models) == 0 {
+			continue
+		}
+		resp := &dto.DynamicModelsResponse{
+			AgentName: agentName,
+			Status:    string(hostutility.StatusOK),
+			Models:    make([]dto.ModelEntryDTO, 0, len(r.Models)),
+			Modes:     []dto.ModeEntryDTO{},
+		}
+		for _, m := range r.Models {
+			resp.Models = append(resp.Models, dto.ModelEntryDTO{ID: m.ID, Name: m.Name})
+		}
+		return resp
+	}
+	return nil
 }

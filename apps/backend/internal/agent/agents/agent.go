@@ -116,6 +116,19 @@ type LoginAgent interface {
 	LoginCommand() *LoginCommand
 }
 
+// PassthroughTrustAgent is implemented by passthrough-only agents whose CLI
+// shows an interactive "do you trust this folder?" prompt the first time it
+// runs in an unknown directory (e.g. Antigravity's `agy`). ACP agents never
+// hit this because trust is delegated to the protocol; passthrough agents run
+// the raw TUI, so Kandev pre-trusts the workspace to keep launch unattended.
+type PassthroughTrustAgent interface {
+	// TrustedFoldersFile returns the absolute path to the agent's trusted-
+	// folders registry (a flat JSON map of folder path → trust value) and the
+	// value that marks a folder trusted. ok is false when the path cannot be
+	// resolved (e.g. no home directory), in which case Kandev skips seeding.
+	TrustedFoldersFile() (path string, trustValue string, ok bool)
+}
+
 // IsPassthroughOnly returns true if the agent only supports passthrough mode
 // and should not have interactive MCP tools (e.g. ask_user_question) registered.
 func IsPassthroughOnly(a Agent) bool {
@@ -142,6 +155,21 @@ type DiscoveryResult struct {
 	MCPConfigPaths    []string
 	InstallationPaths []string
 	Capabilities      DiscoveryCapabilities
+	// Models is the list of models the agent's CLI advertises. It is populated
+	// only for passthrough-only agents that expose a model-list subcommand
+	// (e.g. `agy models`) and are therefore never probed via ACP by the host
+	// utility manager. ACP agents leave this empty — their models come from the
+	// host utility capability cache instead.
+	Models []DiscoveredModel
+}
+
+// DiscoveredModel is a single model advertised by an agent's CLI. ID is the
+// exact string passed to the agent's --model flag; Name is the human-readable
+// label shown in the model picker. For CLI agents that only print model names
+// (no separate identifier), ID and Name are equal.
+type DiscoveredModel struct {
+	ID   string
+	Name string
 }
 
 // DiscoveryCapabilities describes what the agent supports.

@@ -235,6 +235,12 @@ const (
 	// metadataKeyPassthroughMCPMergeCleanups carries reversible JSON-object
 	// merge records for global config strategies such as Antigravity.
 	metadataKeyPassthroughMCPMergeCleanups = "passthrough_mcp_merge_cleanups"
+	// metadataKeyPassthroughTrustFile records the trusted-folders file Kandev
+	// seeded for a passthrough agent (e.g. Antigravity's `agy`) so the entry it
+	// added for the workspace can be removed on teardown. Empty when Kandev did
+	// not add an entry (agent doesn't gate on trust, or the path was already
+	// trusted by the user).
+	metadataKeyPassthroughTrustFile = "passthrough_trust_file"
 	// kandevMCPServerName is the reserved name of kandev's own HTTP MCP server,
 	// which exposes the task tools to the agent.
 	kandevMCPServerName = "kandev"
@@ -318,6 +324,12 @@ func safePassthroughMCPConfigName(value string) string {
 // and returns the extra CLI args to append to the passthrough command. It is a
 // no-op for agents that declare no strategy.
 func (m *Manager) applyPassthroughMCP(ctx context.Context, execution *AgentExecution, pt agents.PassthroughConfig, agentConfig agents.Agent) ([]string, error) {
+	// Pre-trust the workspace for agents whose CLI gates on a folder-trust
+	// prompt. Done here (not in a launch-path-specific spot) so it covers the
+	// initial launch, restart, and resume flows that all funnel through this
+	// method. Failure is non-fatal: the agent still launches, the user just
+	// sees the trust prompt.
+	m.applyPassthroughTrust(execution, agentConfig)
 	if pt.MCPStrategy == nil {
 		return nil, nil
 	}
@@ -337,6 +349,115 @@ func (m *Manager) applyPassthroughMCP(ctx context.Context, execution *AgentExecu
 	}
 	setPassthroughMCPEnv(execution, artifacts.Env)
 	return artifacts.Args, nil
+}
+
+// applyPassthroughTrust pre-trusts the session workspace for agents that gate on
+// an interactive folder-trust prompt (PassthroughTrustAgent). It adds the
+// workspace path to the agent's trusted-folders file if absent, preserving all
+// existing entries, and records the file so cleanup can remove only the entry
+// Kandev added. Every failure is logged and swallowed — trust seeding is a
+// convenience, never a launch blocker.
+func (m *Manager) applyPassthroughTrust(execution *AgentExecution, agentConfig agents.Agent) {
+	trustAgent, ok := agentConfig.(agents.PassthroughTrustAgent)
+	if !ok {
+		return
+	}
+	workspace := strings.TrimSpace(execution.WorkspacePath)
+	if workspace == "" {
+		return
+	}
+	path, trustValue, ok := trustAgent.TrustedFoldersFile()
+	if !ok || path == "" {
+		return
+	}
+	added, err := m.seedTrustedFolder(path, filepath.Clean(workspace), trustValue)
+	if err != nil {
+		m.logger.Warn("failed to seed trusted folder for passthrough agent",
+			zap.String("agent", agentConfig.ID()),
+			zap.String("path", path),
+			zap.Error(err))
+		return
+	}
+	if added {
+		setPassthroughTrustFile(execution, path)
+	}
+}
+
+// seedTrustedFolder adds workspace→trustValue to a flat JSON map at path,
+// creating the file if missing and preserving any existing entries. It returns
+// added=true only when it introduced the workspace key (already-trusted folders
+// and pre-existing entries are left untouched, so cleanup never deletes a
+// folder the user trusted themselves). It refuses to write through a symlink.
+func (m *Manager) seedTrustedFolder(path, workspace, trustValue string) (bool, error) {
+	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return false, fmt.Errorf("trusted-folders file is a symlink: %s", path)
+	}
+	folders := map[string]string{}
+	switch existing, err := os.ReadFile(path); {
+	case err == nil:
+		if uerr := json.Unmarshal(existing, &folders); uerr != nil {
+			return false, fmt.Errorf("parse trusted-folders file: %w", uerr)
+		}
+	case !os.IsNotExist(err):
+		return false, fmt.Errorf("read trusted-folders file: %w", err)
+	}
+	if _, present := folders[workspace]; present {
+		return false, nil
+	}
+	folders[workspace] = trustValue
+	content, err := json.MarshalIndent(folders, "", "  ")
+	if err != nil {
+		return false, err
+	}
+	content = append(content, '\n')
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return false, fmt.Errorf("create trusted-folders dir: %w", err)
+	}
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		return false, fmt.Errorf("write trusted-folders file: %w", err)
+	}
+	return true, nil
+}
+
+// cleanupPassthroughTrust removes the workspace entry Kandev added to the
+// agent's trusted-folders file, leaving every other entry intact. A no-op when
+// Kandev added nothing (no metadata recorded).
+func (m *Manager) cleanupPassthroughTrust(execution *AgentExecution) {
+	path := getPassthroughTrustFile(execution)
+	if path == "" {
+		return
+	}
+	workspace := filepath.Clean(strings.TrimSpace(execution.WorkspacePath))
+	if workspace == "" {
+		return
+	}
+	existing, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			m.logger.Warn("failed to read trusted-folders file for cleanup",
+				zap.String("path", path), zap.Error(err))
+		}
+		return
+	}
+	folders := map[string]string{}
+	if uerr := json.Unmarshal(existing, &folders); uerr != nil {
+		m.logger.Warn("failed to parse trusted-folders file for cleanup",
+			zap.String("path", path), zap.Error(uerr))
+		return
+	}
+	if _, present := folders[workspace]; !present {
+		return
+	}
+	delete(folders, workspace)
+	content, err := json.MarshalIndent(folders, "", "  ")
+	if err != nil {
+		return
+	}
+	content = append(content, '\n')
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		m.logger.Warn("failed to rewrite trusted-folders file for cleanup",
+			zap.String("path", path), zap.Error(err))
+	}
 }
 
 // passthroughMCPServers returns kandev's own HTTP MCP server followed by the
@@ -608,10 +729,12 @@ func (m *Manager) cleanupPassthroughMCPConfig(execution *AgentExecution) {
 				zap.Error(err))
 		}
 	}
+	m.cleanupPassthroughTrust(execution)
 	if execution.Metadata != nil {
 		delete(execution.Metadata, metadataKeyPassthroughMCPFiles)
 		delete(execution.Metadata, metadataKeyPassthroughMCPEnv)
 		delete(execution.Metadata, metadataKeyPassthroughMCPMergeCleanups)
+		delete(execution.Metadata, metadataKeyPassthroughTrustFile)
 	}
 }
 
@@ -727,6 +850,25 @@ func setPassthroughMCPEnv(execution *AgentExecution, env map[string]string) {
 		execution.Metadata = map[string]interface{}{}
 	}
 	execution.Metadata[metadataKeyPassthroughMCPEnv] = env
+}
+
+// getPassthroughTrustFile reads the recorded trusted-folders file path Kandev
+// seeded for this execution (empty when none was added).
+func getPassthroughTrustFile(execution *AgentExecution) string {
+	if execution == nil || execution.Metadata == nil {
+		return ""
+	}
+	if s, ok := execution.Metadata[metadataKeyPassthroughTrustFile].(string); ok {
+		return s
+	}
+	return ""
+}
+
+func setPassthroughTrustFile(execution *AgentExecution, path string) {
+	if execution.Metadata == nil {
+		execution.Metadata = map[string]interface{}{}
+	}
+	execution.Metadata[metadataKeyPassthroughTrustFile] = path
 }
 
 // appendPassthroughMCPMergeCleanup merges a new cleanup record into the list,

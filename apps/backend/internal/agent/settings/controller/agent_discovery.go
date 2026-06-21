@@ -91,7 +91,7 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 		displayName = ag.Name()
 	}
 
-	modelConfig := c.buildModelConfigFromHostUtility(ag.ID())
+	modelConfig := c.buildModelConfig(ag.ID(), availability)
 	_ = ctx
 
 	capabilities := dto.AgentCapabilitiesDTO{
@@ -167,6 +167,36 @@ func buildLoginCommandDTO(ag agents.Agent) *dto.LoginCommandDTO {
 		Cmd:         lc.Cmd,
 		Description: lc.Description,
 	}
+}
+
+// buildModelConfig resolves the model config for an agent. ACP agents get
+// their models from the host utility capability cache; passthrough-only agents
+// that advertise a CLI model list (e.g. Antigravity's `agy models`) fall back
+// to the models surfaced by discovery.
+func (c *Controller) buildModelConfig(agentID string, availability discovery.Availability) dto.ModelConfigDTO {
+	cfg := c.buildModelConfigFromHostUtility(agentID)
+	if len(cfg.AvailableModels) == 0 && len(availability.Models) > 0 {
+		return buildModelConfigFromCLIModels(availability.Models)
+	}
+	return cfg
+}
+
+// buildModelConfigFromCLIModels builds a dynamic-model config from a CLI model
+// list. There is no probe status to report, so it is marked "ok".
+func buildModelConfigFromCLIModels(models []discovery.Model) dto.ModelConfigDTO {
+	cfg := dto.ModelConfigDTO{
+		SupportsDynamicModels: true,
+		Status:                string(hostutility.StatusOK),
+		AvailableModels:       make([]dto.ModelEntryDTO, 0, len(models)),
+		AvailableModes:        []dto.ModeEntryDTO{},
+	}
+	for _, m := range models {
+		cfg.AvailableModels = append(cfg.AvailableModels, dto.ModelEntryDTO{
+			ID:   m.ID,
+			Name: m.Name,
+		})
+	}
+	return cfg
 }
 
 // buildModelConfigFromHostUtility reads cached ACP probe data for the agent
@@ -308,8 +338,12 @@ func (c *Controller) updateExistingProfiles(ctx context.Context, profiles []*mod
 			profile.DangerouslySkipPermissions = p.skipPermissions
 			updated = true
 		}
-		if p.isPassthrough && !profile.CLIPassthrough {
-			profile.CLIPassthrough = true
+		// Sync passthrough to the agent's current default in both directions so
+		// a non-user-modified profile follows the agent. This matters when an
+		// agent stops being passthrough-only (e.g. Antigravity gained an ACP
+		// shim): the old passthrough profile must flip back to the ACP chat.
+		if profile.CLIPassthrough != p.isPassthrough {
+			profile.CLIPassthrough = p.isPassthrough
 			updated = true
 		}
 		if updated {
@@ -544,6 +578,9 @@ func (c *Controller) synthAvailabilityFromRegistry() []discovery.Availability {
 			av.SupportsMCP = probe.SupportsMCP
 			if len(probe.MCPConfigPaths) > 0 {
 				av.MCPConfigPath = probe.MCPConfigPaths[0]
+			}
+			for _, m := range probe.Models {
+				av.Models = append(av.Models, discovery.Model{ID: m.ID, Name: m.Name})
 			}
 		}
 		results = append(results, av)
