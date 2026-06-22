@@ -64,6 +64,11 @@ if [[ "${GH_FAIL_REPO:-0}" == "1" && "$1" == "repo" && "$2" == "view" ]]; then
   exit 1
 fi
 
+if [[ "${GH_FAIL_COMMENT:-0}" == "1" && "$1" == "api" && "$2" == repos/kdlbs/kandev/pulls/comments/* ]]; then
+  echo "comment api failed" >&2
+  exit 1
+fi
+
 if [[ "$1" == "repo" && "$2" == "view" ]]; then
   printf '{"owner":{"login":"kdlbs"},"name":"kandev"}\n'
   exit 0
@@ -565,6 +570,25 @@ test_comment_mode_returns_full_review_comment() {
   pass "--comment returns full review comment"
 }
 
+test_comment_mode_reports_fetch_failure() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  if GH_FAIL_COMMENT=1 PATH="$tmp/bin:$PATH" "$SCRIPT" --comment 999 >"$tmp/out.json" 2>"$tmp/err.log"; then
+    fail "--comment failure exits non-zero"
+  fi
+
+  if [ -s "$tmp/out.json" ]; then
+    fail "--comment failure does not emit JSON"
+  fi
+  if ! grep -q "failed to fetch PR comment 999" "$tmp/err.log"; then
+    fail "--comment failure reports clear error"
+  fi
+
+  pass "--comment reports fetch failure"
+}
+
 test_snapshot_happy_path
 test_partial_failure_records_error_but_keeps_other_data
 test_pr_view_failure_with_non_numeric_ref_keeps_schema
@@ -575,3 +599,4 @@ test_all_flag_includes_historical_comments_and_reviews
 test_summary_mode_returns_compact_fixup_state
 test_summary_all_flag_includes_historical_unresolved_threads
 test_comment_mode_returns_full_review_comment
+test_comment_mode_reports_fetch_failure

@@ -138,7 +138,11 @@ emit_comment_json() {
     return 1
   fi
 
-  comment_json="$(gh_json api "repos/$owner/$repo/pulls/comments/$comment_id")"
+  if ! comment_json="$(gh_json api "repos/$owner/$repo/pulls/comments/$comment_id")"; then
+    printf 'failed to fetch PR comment %s\n' "$comment_id" >&2
+    return 1
+  fi
+
   jq -c '{
     comment_id: (.id // null),
     author: (.user.login // "unknown"),
