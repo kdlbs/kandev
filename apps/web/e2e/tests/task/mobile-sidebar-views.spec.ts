@@ -72,8 +72,10 @@ test.describe("Mobile sidebar — view system", () => {
     await expect(sheet.getByText("Update deps")).toBeVisible();
 
     await addTitleFilter(testPage, sheet, "auth");
-    // Draft is active — the gear shows its unsaved indicator.
-    await expect(testPage.getByTestId("sidebar-filter-gear-indicator")).toBeVisible();
+    // Draft is active — the gear shows its unsaved indicator. Scope to the sheet:
+    // the globally-mounted (hidden on mobile) AppSidebar TasksViewPicker renders
+    // the same testid, so a page-level query is a strict-mode collision.
+    await expect(sheet.getByTestId("sidebar-filter-gear-indicator")).toBeVisible();
     await testPage.keyboard.press("Escape");
 
     // The list inside the sheet re-filters live via applyView.
