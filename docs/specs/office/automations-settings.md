@@ -75,7 +75,7 @@ Inherits PR #406's model (no per-action authorization gates). The flat `/setting
 | `listWorkspaces` fails on the flat page | Page renders the empty state (treating "couldn't load" as "no workspaces"). |
 | Run-mode automation's task starts but agent fails | AutomationRun transitions from `task_created` to `failed`; the row surfaces the failure instead of remaining "Running". |
 | Run-mode automation's agent completes its turn successfully | AutomationRun transitions from `task_created` to `succeeded`; the agent execution and ephemeral worktree are torn down. |
-| Run-mode automation's turn is cancelled by the user | The stream-complete handler defers to the cancel path instead of marking the run `succeeded` or `failed`; cancellation-owned lifecycle cleanup remains responsible for the final outcome. |
+| Run-mode automation's turn is cancelled by the user | AutomationRun transitions from `task_created` to `failed` with a cancellation error; the hidden session is marked `CANCELLED` and the agent execution is torn down. |
 | User manually drags a run-mode task on the kanban | Cannot happen — ephemeral tasks are hidden from the kanban. The "auto-start" rule fires once at trigger time; no manual recovery path. |
 | Existing automation upgraded from pre-execution_mode version | Migration sets `execution_mode = 'task'` for all existing rows. UI shows them with "Task" badge. |
 | User edits `execution_mode` from `task` to `run` on an enabled automation | Next firing uses the new mode. In-flight runs are unaffected. |

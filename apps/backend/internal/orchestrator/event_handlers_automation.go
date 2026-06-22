@@ -404,7 +404,7 @@ func (s *Service) recordSuccessRun(ctx context.Context, evt *automation.Automati
 func (s *Service) handleAutomationTurnComplete(
 	ctx context.Context, taskID, sessionID string, session *models.TaskSession, stopReason string, isError bool, errMsg string,
 ) bool {
-	if taskID == "" || sessionID == "" || stopReason == stopReasonCancelled {
+	if taskID == "" || sessionID == "" {
 		return false
 	}
 	task, err := s.repo.GetTask(ctx, taskID)
@@ -415,7 +415,18 @@ func (s *Service) handleAutomationTurnComplete(
 		return false
 	}
 
-	success := !isError && stopReason != "error"
+	cancelled := stopReason == stopReasonCancelled
+	success := !isError && stopReason != "error" && !cancelled
+	if cancelled && errMsg == "" {
+		errMsg = stopReasonCancelled
+	}
+	nextState := models.TaskSessionStateCompleted
+	if cancelled {
+		nextState = models.TaskSessionStateCancelled
+	} else if !success {
+		nextState = models.TaskSessionStateFailed
+	}
+	s.updateTaskSessionState(ctx, taskID, sessionID, nextState, errMsg, false, session)
 	s.markAutomationRunTerminal(ctx, taskID, success, errMsg)
 	s.stopAutomationAgent(ctx, taskID, sessionID, session)
 	s.reapAutomationWorktree(ctx, taskID, sessionID)

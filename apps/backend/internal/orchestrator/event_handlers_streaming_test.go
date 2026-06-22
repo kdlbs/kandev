@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -32,8 +33,9 @@ type failSetSessionMetadataRepo struct {
 }
 
 type mockAutomationRunService struct {
-	succeededTaskIDs []string
-	failedTaskIDs    []string
+	succeededTaskIDs  []string
+	failedTaskIDs     []string
+	failedErrorByTask map[string]string
 }
 
 func (m *mockAutomationRunService) GetAutomation(context.Context, string) (*automation.Automation, error) {
@@ -44,8 +46,12 @@ func (m *mockAutomationRunService) RecordRun(context.Context, *automation.Automa
 	return nil
 }
 
-func (m *mockAutomationRunService) MarkRunFailedByTaskID(_ context.Context, taskID, _ string) error {
+func (m *mockAutomationRunService) MarkRunFailedByTaskID(_ context.Context, taskID, errMsg string) error {
 	m.failedTaskIDs = append(m.failedTaskIDs, taskID)
+	if m.failedErrorByTask == nil {
+		m.failedErrorByTask = make(map[string]string)
+	}
+	m.failedErrorByTask[taskID] = errMsg
 	return nil
 }
 
@@ -638,19 +644,23 @@ func TestHandleCompleteStreamEvent_NaturalOfficeCompleteStillIdle(t *testing.T) 
 		"natural office turn completion must still call StopAgent to tear down the executor")
 }
 
-func TestHandleCompleteStreamEvent_RunModeAutomationStopsAndFinalizes(t *testing.T) {
+func seedRunModeAutomationSession(
+	t *testing.T,
+	repo *sqliterepo.Repository,
+	taskID, sessionID, executionID string,
+) {
+	t.Helper()
 	ctx := context.Background()
-	repo := setupTestRepo(t)
 	now := time.Now().UTC()
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
-		ID:        "ws-automation",
+		ID:        "ws-" + taskID,
 		Name:      "Automation",
 		CreatedAt: now,
 		UpdatedAt: now,
 	}))
 	require.NoError(t, repo.CreateTask(ctx, &models.Task{
-		ID:          "t-auto-run",
-		WorkspaceID: "ws-automation",
+		ID:          taskID,
+		WorkspaceID: "ws-" + taskID,
 		Title:       "Automation run",
 		Description: "run this",
 		State:       v1.TaskStateInProgress,
@@ -663,13 +673,19 @@ func TestHandleCompleteStreamEvent_RunModeAutomationStopsAndFinalizes(t *testing
 		UpdatedAt: now,
 	}))
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID:        "s-auto-run",
-		TaskID:    "t-auto-run",
+		ID:        sessionID,
+		TaskID:    taskID,
 		State:     models.TaskSessionStateRunning,
 		StartedAt: now,
 		UpdatedAt: now,
 	}))
-	seedExecutorRunning(t, repo, "s-auto-run", "t-auto-run", "exec-auto-run")
+	seedExecutorRunning(t, repo, sessionID, taskID, executionID)
+}
+
+func TestHandleCompleteStreamEvent_RunModeAutomationStopsAndFinalizes(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedRunModeAutomationSession(t, repo, "t-auto-run", "s-auto-run", "exec-auto-run")
 
 	mgr := &mockAgentManager{}
 	automationSvc := &mockAutomationRunService{}
@@ -692,11 +708,90 @@ func TestHandleCompleteStreamEvent_RunModeAutomationStopsAndFinalizes(t *testing
 
 	require.Equal(t, []string{"t-auto-run"}, automationSvc.succeededTaskIDs)
 	require.Empty(t, automationSvc.failedTaskIDs)
+	gotSession, err := repo.GetTaskSession(ctx, "s-auto-run")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateCompleted, gotSession.State)
 
 	mgr.mu.Lock()
 	stopCalls := append([]stopAgentCall(nil), mgr.stopAgentArgs...)
 	mgr.mu.Unlock()
 	require.Equal(t, []stopAgentCall{{ExecutionID: "exec-auto-run"}}, stopCalls)
+}
+
+func TestHandleCompleteStreamEvent_RunModeAutomationFailureStopsAndFinalizes(t *testing.T) {
+	cases := []struct {
+		name        string
+		data        map[string]interface{}
+		wantErrMsg  string
+		wantSession models.TaskSessionState
+	}{
+		{
+			name: "stop_reason_error",
+			data: map[string]interface{}{
+				"stop_reason": "error",
+				"error":       "agent failed",
+			},
+			wantErrMsg:  "agent failed",
+			wantSession: models.TaskSessionStateFailed,
+		},
+		{
+			name: "is_error_true",
+			data: map[string]interface{}{
+				"is_error": true,
+				"message":  "adapter failed",
+			},
+			wantErrMsg:  "adapter failed",
+			wantSession: models.TaskSessionStateFailed,
+		},
+		{
+			name: "cancelled",
+			data: map[string]interface{}{
+				"stop_reason": "cancelled",
+			},
+			wantErrMsg:  "cancelled",
+			wantSession: models.TaskSessionStateCancelled,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			taskID := "t-auto-" + tc.name
+			sessionID := "s-auto-" + tc.name
+			executionID := "exec-auto-" + tc.name
+			seedRunModeAutomationSession(t, repo, taskID, sessionID, executionID)
+
+			mgr := &mockAgentManager{}
+			automationSvc := &mockAutomationRunService{}
+			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), mgr)
+			svc.SetAutomationService(automationSvc)
+
+			payload := &lifecycle.AgentStreamEventPayload{
+				TaskID:      taskID,
+				SessionID:   sessionID,
+				ExecutionID: executionID,
+				Data: &lifecycle.AgentStreamEventData{
+					Type: agentEventComplete,
+					Data: tc.data,
+				},
+			}
+
+			svc.handleCompleteStreamEvent(ctx, payload)
+
+			require.Empty(t, automationSvc.succeededTaskIDs)
+			require.Equal(t, []string{taskID}, automationSvc.failedTaskIDs)
+			require.Equal(t, tc.wantErrMsg, automationSvc.failedErrorByTask[taskID])
+			gotSession, err := repo.GetTaskSession(ctx, sessionID)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantSession, gotSession.State)
+
+			mgr.mu.Lock()
+			stopCalls := append([]stopAgentCall(nil), mgr.stopAgentArgs...)
+			mgr.mu.Unlock()
+			require.Equal(t, []stopAgentCall{{ExecutionID: executionID}}, stopCalls)
+		})
+	}
 }
 
 // TestSetSessionWaitingForInput_WritesOnTransition is the symmetric counterpart
