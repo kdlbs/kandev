@@ -3,7 +3,8 @@
 import { useCallback, useRef, type PointerEvent } from "react";
 import {
   DndContext,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   closestCenter,
   type DragEndEvent,
   useSensor,
@@ -12,26 +13,29 @@ import {
 import { SortableContext, horizontalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useAppStore } from "@/components/state-provider";
-import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import { cn } from "@/lib/utils";
 
 const DRAG_ACTIVATION_DISTANCE = 8;
+const TOUCH_DRAG_DELAY_MS = 200;
+const TOUCH_DRAG_TOLERANCE = 8;
 
 export function SidebarViewChips() {
   const views = useAppStore((s) => s.sidebarViews.views);
   const activeViewId = useAppStore((s) => s.sidebarViews.activeViewId);
   const setActive = useAppStore((s) => s.setSidebarActiveView);
   const reorderViews = useAppStore((s) => s.reorderSidebarViews);
-  // Drag-to-reorder is a fine-pointer (mouse) affordance only. On touch, the
-  // dnd-kit PointerSensor's 8px activation would hijack horizontal swipe-scroll
-  // of an overflowing chip row, leaving overflow chips unreachable — so we drop
-  // the sensor on coarse pointers and let the row scroll natively.
-  const { isFinePointer } = useResponsiveBreakpoint();
-  const pointerSensor = useSensor(PointerSensor, {
-    activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE },
-  });
-  const sensors = useSensors(...(isFinePointer ? [pointerSensor] : []));
+  // Split sensors by input device rather than gating on a pointer media query
+  // (which misclassifies hybrid touch+mouse devices). Mouse drags activate
+  // immediately past 8px; touch requires a short press-and-hold, so a quick
+  // horizontal swipe scrolls an overflowing chip row natively instead of being
+  // hijacked into a drag.
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE } }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: TOUCH_DRAG_DELAY_MS, tolerance: TOUCH_DRAG_TOLERANCE },
+    }),
+  );
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
