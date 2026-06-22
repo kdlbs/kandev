@@ -601,11 +601,25 @@ test_comment_mode_rejects_incompatible_flags() {
     fail "--comment --summary prints usage"
   fi
 
+  if PATH="$tmp/bin:$PATH" "$SCRIPT" --all --comment 111 >"$tmp/out.log" 2>&1; then
+    fail "--comment rejects --all"
+  fi
+  if ! grep -q "scripts/pr-state --comment <comment_id>" "$tmp/out.log"; then
+    fail "--comment --all prints usage"
+  fi
+
   if PATH="$tmp/bin:$PATH" "$SCRIPT" --comment --summary >"$tmp/out.log" 2>&1; then
     fail "--comment rejects flag-shaped id"
   fi
   if ! grep -q "scripts/pr-state --comment <comment_id>" "$tmp/out.log"; then
     fail "--comment flag-shaped id prints usage"
+  fi
+
+  if PATH="$tmp/bin:$PATH" "$SCRIPT" --comment abc >"$tmp/out.log" 2>&1; then
+    fail "--comment rejects non-numeric id"
+  fi
+  if ! grep -q "scripts/pr-state --comment <comment_id>" "$tmp/out.log"; then
+    fail "--comment non-numeric id prints usage"
   fi
 
   pass "--comment rejects incompatible flags"
