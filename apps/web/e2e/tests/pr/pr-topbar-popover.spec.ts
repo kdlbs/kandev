@@ -366,6 +366,106 @@ test.describe("PR top-bar CI popover", () => {
     await expect(session.prTopbarPopover()).toHaveCount(0, { timeout: 5_000 });
   });
 
+  test("popover survives the cursor crossing from the button onto it", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const title = "Hover Bridge Topbar";
+    const seed = await seedTask(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      title,
+    );
+    await associatePR(apiClient, seed.taskId, {
+      checks_state: "failure",
+      checks_total: 1,
+      checks_passing: 0,
+    });
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      checks: [
+        {
+          name: "Lint / check",
+          status: "completed",
+          conclusion: "failure",
+          html_url: "https://example.com/lint-run-1",
+          output: "lint failed",
+        },
+      ],
+    });
+    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    await session.hoverPRTopbar();
+
+    // Real cursor crossing from the trigger button into the popover content
+    // over the sideOffset gap. The browser fires a native mouseleave on the
+    // button (queuing the close timer) immediately followed by a mouseenter on
+    // the popover — the enter handler must cancel the pending close, otherwise
+    // the popover vanishes before the user can click anything inside it.
+    const popover = session.prTopbarPopover();
+    const box = await popover.boundingBox();
+    expect(box).not.toBeNull();
+    await testPage.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2, { steps: 10 });
+
+    // Past the 150ms close delay the popover must still be open and its
+    // buttons clickable.
+    await testPage.waitForTimeout(600);
+    await expect(popover).toBeVisible();
+    await expect(session.prWorkflowOpenButton("Lint")).toBeVisible();
+    await expect(session.prWorkflowAddContextButton("Lint")).toBeEnabled();
+  });
+
+  test("chip popover survives the cursor crossing from the chip onto it", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const title = "Hover Bridge Chip";
+    const seed = await seedTask(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      title,
+    );
+    await associatePR(apiClient, seed.taskId, {
+      checks_state: "failure",
+      checks_total: 1,
+      checks_passing: 0,
+    });
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      checks: [
+        {
+          name: "Lint / check",
+          status: "completed",
+          conclusion: "failure",
+          html_url: "https://example.com/lint-run-1",
+          output: "lint failed",
+        },
+      ],
+    });
+    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    await expect(session.prStatusChip()).toBeVisible();
+    await session.hoverPRChip();
+
+    const popover = session.prChipPopover();
+    const box = await popover.boundingBox();
+    expect(box).not.toBeNull();
+    await testPage.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2, { steps: 10 });
+
+    await testPage.waitForTimeout(600);
+    await expect(popover).toBeVisible();
+  });
+
   test("failed workflow row exposes open + add-to-context buttons", async ({
     testPage,
     apiClient,
