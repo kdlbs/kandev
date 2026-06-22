@@ -44,11 +44,12 @@ make lint
 ```
 
 Before rebasing, check whether `origin/main` is already an ancestor of `HEAD`.
-If `git rebase origin/main` fails because there are unstaged tracked changes,
-stash only the relevant tracked changes for the intended commit, rebase, then
-pop the stash before running `make fmt/typecheck/test/lint`. Do not stash
-unrelated user changes blindly. Resolve conflicts before continuing
-verification.
+If tracked files for the intended change are dirty, stash only those pathspecs
+before `git rebase origin/main`, then pop the stash before running
+`make fmt/typecheck/test/lint`. Do not use a broad `git stash` that could hide
+unrelated user changes. If you miss this and `git rebase origin/main` fails
+because of unstaged tracked changes, apply the same pathspec-only stash flow,
+then rerun the rebase. Resolve conflicts before continuing verification.
 
 If `make fmt` changes files, review the diff and continue with the remaining commands. If any command fails, fix the issue and re-run the failed command; for formatter-caused changes, re-run any affected checks before reporting success.
 

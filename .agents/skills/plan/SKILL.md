@@ -129,7 +129,7 @@ For each user-facing scenario in the spec:
 
 Group all task files into waves. Parallelism rules:
 - Backend packages: can run in parallel
-- Frontend (Next.js): single build — only one task at a time
+- Frontend (Vite/React SPA): usually sequential because shared build, type, and state surfaces overlap
 - E2E: after all backend + frontend changes are done
 
 ```

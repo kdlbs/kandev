@@ -148,7 +148,7 @@ Wave 4: E2E, integration, QA, docs
 
 Parallelize only when safe:
 - Backend packages can often run in parallel if they do not edit the same files or migrations.
-- Frontend tasks are usually sequential because Next.js build/types/state surfaces overlap.
+- Frontend tasks are usually sequential because Vite/React SPA build, type, and state surfaces overlap.
 - Database migrations, generated API types, shared DTOs, and package-wide config are sequential.
 - E2E runs happen after backend/frontend integration is coherent.
 

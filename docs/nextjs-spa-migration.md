@@ -29,6 +29,20 @@ payload needed for first paint.
 4. Add or update focused tests before broad verification.
 5. Re-run the Next audit command before handing off.
 
+### Rebase loop checklist
+
+Use this loop when bringing an older branch across the SPA migration boundary:
+
+1. Capture the old base: `old_main="$(git rev-parse origin/main)"`.
+2. Fetch and rebase onto the new `origin/main`.
+3. Inspect only newly merged main commits: `git log --oneline "$old_main"..origin/main`.
+4. For web files touched by those commits, scan for `next/*`, server-data,
+   route-loading, and boot-payload regressions before changing code.
+5. Migrate only when the rebased branch reintroduces old Next runtime patterns
+   or conflicts with the Go-served SPA contract.
+6. Run focused E2E for the touched area; broaden only when the touched area is
+   shared routing, boot payload, or app shell behavior.
+
 Useful audit commands:
 
 ```bash

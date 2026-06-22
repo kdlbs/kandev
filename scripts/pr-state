@@ -3,6 +3,7 @@
 #
 # Usage:
 #   scripts/pr-state [--summary] [--all] <PR>
+#   scripts/pr-state --comment <comment_id>
 #
 # Raw output:
 #   JSON object with:
@@ -30,6 +31,10 @@
 #   - summary_notes: [<short human-readable notes>]
 #   - errors: [{ source, message }]
 #
+# Comment output (--comment):
+#   JSON object for one PR review comment:
+#   - comment_id, author, body, path, line, original_line, commit_id, html_url, created_at, updated_at
+#
 # By default, comments/reviews/review threads are limited to items created after
 # the PR head commit. Checks are already scoped by GitHub to the current head.
 # Pass --all to include historical comments and reviews.
@@ -45,6 +50,7 @@ usage() {
 
 INCLUDE_ALL=0
 SUMMARY=0
+COMMENT_ID=''
 PR=''
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -54,6 +60,12 @@ while [[ $# -gt 0 ]]; do
       ;;
     --summary)
       SUMMARY=1
+      shift
+      ;;
+    --comment)
+      shift
+      [[ $# -gt 0 && -z "${COMMENT_ID:-}" && -z "${PR:-}" ]] || usage 1
+      COMMENT_ID=$1
       shift
       ;;
     -h | --help)
@@ -79,8 +91,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[ -n "${PR:-}" ] || usage
 [ $# -eq 0 ] || usage
+
+if [[ -n "${COMMENT_ID:-}" ]]; then
+  [[ -z "${PR:-}" && "$SUMMARY" == "0" && "$INCLUDE_ALL" == "0" ]] || usage
+else
+  [ -n "${PR:-}" ] || usage
+fi
 
 errors='[]'
 pr_json='{}'
@@ -105,6 +122,41 @@ gh_json() {
     GH_PAGER=cat GH_PROMPT_DISABLED=1 GH_NO_UPDATE_NOTIFIER=1 \
     gh "$@" 2>/dev/null
 }
+
+emit_comment_json() {
+  local comment_id=$1
+  local repo_json
+  local owner
+  local repo
+  local comment_json
+
+  repo_json="$(gh_json repo view --json owner,name)"
+  owner="$(jq -r '.owner.login // ""' <<<"$repo_json")"
+  repo="$(jq -r '.name // ""' <<<"$repo_json")"
+  if [[ -z "$owner" || -z "$repo" ]]; then
+    printf 'failed to resolve repository identity\n' >&2
+    return 1
+  fi
+
+  comment_json="$(gh_json api "repos/$owner/$repo/pulls/comments/$comment_id")"
+  jq -c '{
+    comment_id: (.id // null),
+    author: (.user.login // "unknown"),
+    body: (.body // ""),
+    path: (.path // null),
+    line: (.line // null),
+    original_line: (.original_line // null),
+    commit_id: (.commit_id // null),
+    html_url: (.html_url // null),
+    created_at: (.created_at // null),
+    updated_at: (.updated_at // null)
+  }' <<<"$comment_json"
+}
+
+if [[ -n "${COMMENT_ID:-}" ]]; then
+  emit_comment_json "$COMMENT_ID"
+  exit $?
+fi
 
 extract_checks_json() {
   local status_json=$1

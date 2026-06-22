@@ -50,6 +50,7 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
    - Fill the template's required sections from the actual diff, commits, and verification performed.
    - Remove optional sections that add no value for this change.
    - Preserve static required sections such as checklists exactly as the template provides them; do not pre-fill unchecked boxes.
+   - For docs-only PRs, keep code-centric checklist items unchanged when they do not apply, and list the docs-safe validation commands actually run.
    - Include related issue closing text only when an actual issue number is known.
    - Remove all HTML comments/placeholders from the final body.
    - Do NOT add tool attribution footers.

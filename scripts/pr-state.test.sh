@@ -69,6 +69,24 @@ if [[ "$1" == "repo" && "$2" == "view" ]]; then
   exit 0
 fi
 
+if [[ "$1" == "api" && "$2" == "repos/kdlbs/kandev/pulls/comments/111" ]]; then
+  cat <<'JSON'
+{
+  "id": 111,
+  "user": { "login": "greptile-apps[bot]" },
+  "body": "Please rename this helper\n\nFull rationale here.",
+  "path": "apps/web/file.ts",
+  "line": 42,
+  "original_line": 40,
+  "commit_id": "abc123",
+  "html_url": "https://github.com/kdlbs/kandev/pull/123#discussion_r111",
+  "created_at": "2026-06-01T10:00:00Z",
+  "updated_at": "2026-06-01T10:01:00Z"
+}
+JSON
+  exit 0
+fi
+
 if [[ "$1" == "pr" && "$2" == "view" && "$4" == "--json" ]]; then
   if [[ "${GH_NO_PR_URL:-0}" == "1" ]]; then
     pr_url='null'
@@ -530,6 +548,23 @@ test_summary_all_flag_includes_historical_unresolved_threads() {
   pass "--summary --all includes historical unresolved thread comments"
 }
 
+test_comment_mode_returns_full_review_comment() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  PATH="$tmp/bin:$PATH" "$SCRIPT" --comment 111 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "comment id" '.comment_id == 111' "$json"
+  assert_jq "comment body is full" '.body | contains("Full rationale here.")' "$json"
+  assert_jq "comment path" '.path == "apps/web/file.ts"' "$json"
+  assert_jq "comment line" '.line == 42' "$json"
+  assert_jq "comment author" '.author == "greptile-apps[bot]"' "$json"
+  pass "--comment returns full review comment"
+}
+
 test_snapshot_happy_path
 test_partial_failure_records_error_but_keeps_other_data
 test_pr_view_failure_with_non_numeric_ref_keeps_schema
@@ -539,3 +574,4 @@ test_graphql_pagination_collects_all_threads
 test_all_flag_includes_historical_comments_and_reviews
 test_summary_mode_returns_compact_fixup_state
 test_summary_all_flag_includes_historical_unresolved_threads
+test_comment_mode_returns_full_review_comment
