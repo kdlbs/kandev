@@ -1514,8 +1514,71 @@ export class ApiClient {
     await this.request("PUT", "/api/v1/sentry/mock/auth-result", result);
   }
 
-  async mockSentrySetAuthHealth(args: { ok: boolean; error?: string }): Promise<void> {
+  async mockSentrySetAuthHealth(args: {
+    instanceId: string;
+    ok: boolean;
+    error?: string;
+  }): Promise<void> {
     await this.request("PUT", "/api/v1/sentry/mock/auth-health", args);
+  }
+
+  // --- Sentry instance + watch helpers ---
+
+  async listSentryInstances(): Promise<SentryInstanceRow[]> {
+    const res = await this.request<{ instances: SentryInstanceRow[] }>(
+      "GET",
+      "/api/v1/sentry/instances",
+    );
+    return res.instances ?? [];
+  }
+
+  // findSentryInstanceByName returns the configured instance whose name matches,
+  // or null. Used by specs that created instances through the UI and need their
+  // server-assigned ids.
+  async findSentryInstanceByName(name: string): Promise<SentryInstanceRow | null> {
+    const instances = await this.listSentryInstances();
+    return instances.find((i) => i.name === name) ?? null;
+  }
+
+  // waitForSentryInstanceHealthy polls until the named-by-id instance reports a
+  // healthy probe. CreateInstance kicks off an async auth-health probe, so the
+  // row's lastOk flips shortly after with no synchronous signal.
+  async waitForSentryInstanceHealthy(instanceId: string, timeoutMs = 5_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const inst = (await this.listSentryInstances()).find((i) => i.id === instanceId);
+      if (inst && inst.hasSecret && inst.lastOk) return;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    throw new Error(
+      `Sentry instance ${instanceId} never reported lastOk: true within ${timeoutMs}ms`,
+    );
+  }
+
+  async createSentryIssueWatch(opts: {
+    workspaceId: string;
+    instanceId: string;
+    workflowId: string;
+    workflowStepId: string;
+    agentProfileId: string;
+    executorProfileId?: string;
+    filter?: { orgSlug?: string; projectSlug?: string };
+    prompt?: string;
+    enabled?: boolean;
+    pollIntervalSeconds?: number;
+  }): Promise<{ id: string }> {
+    return this.request("POST", "/api/v1/sentry/watches/issue", {
+      workspaceId: opts.workspaceId,
+      instanceId: opts.instanceId,
+      workflowId: opts.workflowId,
+      workflowStepId: opts.workflowStepId,
+      agentProfileId: opts.agentProfileId,
+      executorProfileId: opts.executorProfileId ?? "",
+      filter: { orgSlug: "my-org", projectSlug: "my-proj", ...(opts.filter ?? {}) },
+      prompt: opts.prompt ?? "Investigate {{issue.shortId}}",
+      enabled: opts.enabled ?? true,
+      pollIntervalSeconds: opts.pollIntervalSeconds ?? 300,
+    });
   }
 
   async mockSentrySetOrganizations(organizations: MockSentryOrganization[]): Promise<void> {
@@ -1880,3 +1943,13 @@ export type MockLinearIssue = {
 export type MockSentryOrganization = { id: string; slug: string; name: string };
 
 export type MockSentryProject = { id: string; slug: string; name: string; orgSlug: string };
+
+export type SentryInstanceRow = {
+  id: string;
+  name: string;
+  url: string;
+  hasSecret: boolean;
+  lastOk: boolean;
+  lastCheckedAt?: string | null;
+  lastError?: string;
+};

@@ -177,7 +177,7 @@ func (p *Poller) fireIssueTickHook() {
 type svcProber struct{ svc *Service }
 
 func (s svcProber) HasConfig(ctx context.Context) (bool, error) {
-	return s.svc.Store().HasConfig(ctx)
+	return s.svc.Store().HasAnyConfig(ctx)
 }
 
 func (s svcProber) RecordAuthHealth(ctx context.Context) {

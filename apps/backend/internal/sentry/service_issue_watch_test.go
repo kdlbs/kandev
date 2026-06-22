@@ -23,9 +23,25 @@ func validFilter() SearchFilter {
 	return SearchFilter{OrgSlug: "acme", ProjectSlug: "frontend"}
 }
 
+// seedWatchInstance persists a usable instance (config row + secret) directly
+// and returns its id, so issue-watch tests can bind watches to a real instance.
+func seedWatchInstance(t *testing.T, f *svcFixture) string {
+	t.Helper()
+	ctx := context.Background()
+	cfg := &SentryConfig{Name: "Inst", AuthMethod: AuthMethodAuthToken, URL: "https://sentry.io"}
+	if err := f.store.CreateConfig(ctx, cfg); err != nil {
+		t.Fatalf("seed instance: %v", err)
+	}
+	if err := f.secrets.Set(ctx, secretKeyFor(cfg.ID), "sentry", "tok"); err != nil {
+		t.Fatalf("seed secret: %v", err)
+	}
+	return cfg.ID
+}
+
 func TestService_CreateIssueWatch_DefaultsAndValidation(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
+	instanceID := seedWatchInstance(t, f)
 
 	// Missing org/project is rejected — a watch must name what it polls.
 	for name, filter := range map[string]SearchFilter{
@@ -35,6 +51,7 @@ func TestService_CreateIssueWatch_DefaultsAndValidation(t *testing.T) {
 	} {
 		if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
 			WorkspaceID:    "ws-1",
+			InstanceID:     instanceID,
 			WorkflowID:     "wf",
 			WorkflowStepID: "step",
 			Filter:         filter,
@@ -46,6 +63,7 @@ func TestService_CreateIssueWatch_DefaultsAndValidation(t *testing.T) {
 	// Happy path assigns ID + defaults Enabled=true.
 	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
 		WorkspaceID:    "ws-1",
+		InstanceID:     instanceID,
 		WorkflowID:     "wf",
 		WorkflowStepID: "step",
 		Filter:         validFilter(),
@@ -56,6 +74,9 @@ func TestService_CreateIssueWatch_DefaultsAndValidation(t *testing.T) {
 	if w.ID == "" {
 		t.Fatal("expected ID assigned")
 	}
+	if w.InstanceID != instanceID {
+		t.Errorf("instance not persisted: %q", w.InstanceID)
+	}
 	if !w.Enabled {
 		t.Error("expected Enabled defaulted to true")
 	}
@@ -64,12 +85,31 @@ func TestService_CreateIssueWatch_DefaultsAndValidation(t *testing.T) {
 	}
 }
 
+func TestService_CreateIssueWatch_RejectsMissingInstance(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	// Empty instance id.
+	if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step", Filter: validFilter(),
+	}); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("expected ErrInvalidConfig for missing instance, got %v", err)
+	}
+	// Unknown instance id.
+	if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", InstanceID: "ghost", WorkflowID: "wf", WorkflowStepID: "step", Filter: validFilter(),
+	}); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("expected ErrInvalidConfig for unknown instance, got %v", err)
+	}
+}
+
 func TestService_UpdateIssueWatch_PartialPatch(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
+	instanceID := seedWatchInstance(t, f)
 
 	created, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
 		WorkspaceID:    "ws-1",
+		InstanceID:     instanceID,
 		WorkflowID:     "wf",
 		WorkflowStepID: "step",
 		Filter:         validFilter(),
@@ -90,7 +130,7 @@ func TestService_UpdateIssueWatch_PartialPatch(t *testing.T) {
 	if updated.Prompt != "updated" {
 		t.Errorf("prompt not patched: %q", updated.Prompt)
 	}
-	if updated.Filter.OrgSlug != "acme" || updated.WorkspaceID != created.WorkspaceID {
+	if updated.Filter.OrgSlug != "acme" || updated.WorkspaceID != created.WorkspaceID || updated.InstanceID != instanceID {
 		t.Errorf("unexpected mutation of unset fields: %+v", updated)
 	}
 
@@ -101,13 +141,40 @@ func TestService_UpdateIssueWatch_PartialPatch(t *testing.T) {
 	}
 }
 
+func TestService_UpdateIssueWatch_RepointInstance(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	instanceA := seedWatchInstance(t, f)
+	instanceB := seedWatchInstance(t, f)
+	created, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", InstanceID: instanceA, WorkflowID: "wf", WorkflowStepID: "step", Filter: validFilter(),
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	updated, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{InstanceID: &instanceB})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.InstanceID != instanceB {
+		t.Errorf("expected instance re-pointed to %q, got %q", instanceB, updated.InstanceID)
+	}
+	// Re-pointing to an unknown instance is rejected.
+	ghost := "ghost"
+	if _, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{InstanceID: &ghost}); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("expected ErrInvalidConfig re-pointing to unknown instance, got %v", err)
+	}
+}
+
 func TestService_IssueWatch_MaxInflightTasks(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
+	instanceID := seedWatchInstance(t, f)
 
 	// A non-positive cap is rejected at create.
 	if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
 		WorkspaceID:      "ws-1",
+		InstanceID:       instanceID,
 		WorkflowID:       "wf",
 		WorkflowStepID:   "step",
 		Filter:           validFilter(),
@@ -119,6 +186,7 @@ func TestService_IssueWatch_MaxInflightTasks(t *testing.T) {
 	// A positive cap round-trips through the store.
 	created, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
 		WorkspaceID:      "ws-1",
+		InstanceID:       instanceID,
 		WorkflowID:       "wf",
 		WorkflowStepID:   "step",
 		Filter:           validFilter(),
@@ -166,9 +234,11 @@ func TestService_IssueWatch_MaxInflightTasks(t *testing.T) {
 func TestService_CreateIssueWatch_RejectsOutOfRangeInterval(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
+	instanceID := seedWatchInstance(t, f)
 	for _, n := range []int{1, 30, 59, 3601, 86400} {
 		_, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
 			WorkspaceID:         "ws-1",
+			InstanceID:          instanceID,
 			WorkflowID:          "wf",
 			WorkflowStepID:      "step",
 			Filter:              validFilter(),
@@ -181,6 +251,7 @@ func TestService_CreateIssueWatch_RejectsOutOfRangeInterval(t *testing.T) {
 	// Zero is allowed (the store coerces to default).
 	if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
 		WorkspaceID:    "ws-1",
+		InstanceID:     instanceID,
 		WorkflowID:     "wf",
 		WorkflowStepID: "step",
 		Filter:         validFilter(),
@@ -192,8 +263,9 @@ func TestService_CreateIssueWatch_RejectsOutOfRangeInterval(t *testing.T) {
 func TestService_UpdateIssueWatch_RejectsEmptyWorkflowFields(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
+	instanceID := seedWatchInstance(t, f)
 	created, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
-		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		WorkspaceID: "ws-1", InstanceID: instanceID, WorkflowID: "wf", WorkflowStepID: "step",
 		Filter: validFilter(),
 	})
 	if err != nil {
@@ -222,12 +294,7 @@ func TestService_UpdateIssueWatch_NotFound(t *testing.T) {
 func TestService_CheckIssueWatch_FiltersAlreadySeen(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
-
-	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
-		AuthMethod: AuthMethodAuthToken, Secret: "sntrys_abc",
-	}); err != nil {
-		t.Fatalf("set config: %v", err)
-	}
+	instanceID := seedWatchInstance(t, f)
 
 	f.client.withSearchResults([]SentryIssue{
 		{ShortID: "PROJ-1", Title: "one", Permalink: "https://sentry.io/issues/PROJ-1"},
@@ -236,7 +303,7 @@ func TestService_CheckIssueWatch_FiltersAlreadySeen(t *testing.T) {
 	})
 
 	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
-		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		WorkspaceID: "ws-1", InstanceID: instanceID, WorkflowID: "wf", WorkflowStepID: "step",
 		Filter: validFilter(),
 	})
 	if err != nil {
@@ -270,16 +337,12 @@ func TestService_CheckIssueWatch_FiltersAlreadySeen(t *testing.T) {
 func TestService_CheckIssueWatch_StampsLastPolledOnError(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
-	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
-		AuthMethod: AuthMethodAuthToken, Secret: "sntrys_abc",
-	}); err != nil {
-		t.Fatalf("set config: %v", err)
-	}
+	instanceID := seedWatchInstance(t, f)
 	f.client.searchIssuesFn = func(_ SearchFilter, _ string) (*SearchResult, error) {
 		return nil, errors.New("upstream 500")
 	}
 	w, _ := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
-		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		WorkspaceID: "ws-1", InstanceID: instanceID, WorkflowID: "wf", WorkflowStepID: "step",
 		Filter: validFilter(),
 	})
 	if _, err := f.svc.CheckIssueWatch(ctx, w); err == nil {

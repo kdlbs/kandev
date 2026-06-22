@@ -49,7 +49,7 @@ func (r *recordingSubscriber) snapshot() []*NewSentryIssueEvent {
 func TestPoller_CheckIssueWatches_PublishesNewIssuesOnly(t *testing.T) {
 	f := newPollerFixture(t)
 	ctx := context.Background()
-	f.saveConfig(t, "tok")
+	instanceID := f.saveConfig(t, "tok")
 
 	eb := bus.NewMemoryEventBus(logger.Default())
 	defer eb.Close()
@@ -61,6 +61,7 @@ func TestPoller_CheckIssueWatches_PublishesNewIssuesOnly(t *testing.T) {
 	}
 
 	w := newTestIssueWatch("ws-1")
+	w.InstanceID = instanceID
 	if err := f.store.CreateIssueWatch(ctx, w); err != nil {
 		t.Fatalf("create watch: %v", err)
 	}
@@ -108,13 +109,14 @@ func TestPoller_CheckIssueWatches_PublishesNewIssuesOnly(t *testing.T) {
 func TestPoller_CheckIssueWatches_SkipsDisabled(t *testing.T) {
 	f := newPollerFixture(t)
 	ctx := context.Background()
-	f.saveConfig(t, "tok")
+	instanceID := f.saveConfig(t, "tok")
 
 	eb := bus.NewMemoryEventBus(logger.Default())
 	defer eb.Close()
 	f.svc.SetEventBus(eb)
 
 	disabled := newTestIssueWatch("ws-1")
+	disabled.InstanceID = instanceID
 	disabled.Enabled = false
 	if err := f.store.CreateIssueWatch(ctx, disabled); err != nil {
 		t.Fatalf("create disabled: %v", err)
@@ -183,13 +185,14 @@ func TestIsIssueWatchDue(t *testing.T) {
 func TestPoller_CheckIssueWatches_RespectsPerWatchInterval(t *testing.T) {
 	f := newPollerFixture(t)
 	ctx := context.Background()
-	f.saveConfig(t, "tok")
+	instanceID := f.saveConfig(t, "tok")
 
 	eb := bus.NewMemoryEventBus(logger.Default())
 	defer eb.Close()
 	f.svc.SetEventBus(eb)
 
 	w := newTestIssueWatch("ws-1")
+	w.InstanceID = instanceID
 	w.PollIntervalSeconds = 300
 	if err := f.store.CreateIssueWatch(ctx, w); err != nil {
 		t.Fatalf("create: %v", err)

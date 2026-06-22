@@ -30,29 +30,31 @@ func newPollerFixture(t *testing.T) *pollerFixture {
 	return f
 }
 
-// saveConfig persists the singleton directly via store + secret fakes,
-// bypassing Service.SetConfig (and its async probe).
-func (f *pollerFixture) saveConfig(t *testing.T, secret string) {
+// saveConfig persists an instance directly via store + secret fakes, bypassing
+// Service.CreateInstance (and its async probe), and returns the instance id.
+func (f *pollerFixture) saveConfig(t *testing.T, secret string) string {
 	t.Helper()
 	ctx := context.Background()
-	if err := f.store.UpsertConfig(ctx, &SentryConfig{AuthMethod: AuthMethodAuthToken}); err != nil {
+	cfg := &SentryConfig{Name: "Prod", AuthMethod: AuthMethodAuthToken, URL: "https://sentry.io"}
+	if err := f.store.CreateConfig(ctx, cfg); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
-	if err := f.secrets.Set(ctx, SecretKey, "sentry", secret); err != nil {
+	if err := f.secrets.Set(ctx, secretKeyFor(cfg.ID), "sentry", secret); err != nil {
 		t.Fatalf("save secret: %v", err)
 	}
+	return cfg.ID
 }
 
 func TestService_RecordAuthHealth_Success(t *testing.T) {
 	f := newPollerFixture(t)
-	f.saveConfig(t, "tok")
+	id := f.saveConfig(t, "tok")
 	f.client.testAuthFn = func() (*TestConnectionResult, error) {
 		return &TestConnectionResult{OK: true}, nil
 	}
 
 	f.svc.RecordAuthHealth(context.Background())
 
-	cfg, _ := f.store.GetConfig(context.Background())
+	cfg, _ := f.store.GetConfig(context.Background(), id)
 	if cfg == nil || !cfg.LastOk {
 		t.Errorf("expected LastOk=true, got %+v", cfg)
 	}
@@ -60,14 +62,14 @@ func TestService_RecordAuthHealth_Success(t *testing.T) {
 
 func TestService_RecordAuthHealth_Failure(t *testing.T) {
 	f := newPollerFixture(t)
-	f.saveConfig(t, "tok")
+	id := f.saveConfig(t, "tok")
 	f.client.testAuthFn = func() (*TestConnectionResult, error) {
 		return &TestConnectionResult{OK: false, Error: "401 unauthorized"}, nil
 	}
 
 	f.svc.RecordAuthHealth(context.Background())
 
-	cfg, _ := f.store.GetConfig(context.Background())
+	cfg, _ := f.store.GetConfig(context.Background(), id)
 	if cfg.LastOk {
 		t.Error("expected LastOk=false")
 	}

@@ -40,6 +40,9 @@ export type ValidatedPopoverProps<T> = {
   align?: "start" | "end";
   headline: string;
   placeholder: string;
+  // aboveInput renders custom content (e.g. an instance picker) between the
+  // headline and the input. Optional — existing callers render nothing extra.
+  aboveInput?: ReactNode;
   // Validation: extract a key from the user's input. Returning null shows the
   // hint as an error. The hint typically reads "Paste a Jira ticket URL or
   // key (PROJ-123)" or similar — integration-specific copy.
@@ -115,6 +118,7 @@ function TriggerButton({
 type PopoverBodyProps = {
   headline: string;
   placeholder: string;
+  aboveInput?: ReactNode;
   value: string;
   onChange: (next: string) => void;
   onSubmit: () => void | Promise<void>;
@@ -128,6 +132,7 @@ type PopoverBodyProps = {
 function PopoverBody({
   headline,
   placeholder,
+  aboveInput,
   value,
   onChange,
   onSubmit,
@@ -140,6 +145,7 @@ function PopoverBody({
   return (
     <div className="space-y-2">
       <div className="text-xs font-medium">{headline}</div>
+      {aboveInput}
       <Input
         autoFocus
         value={value}
@@ -258,6 +264,7 @@ export function ValidatedPopover<T>(props: ValidatedPopoverProps<T>) {
         <PopoverBody
           headline={headline}
           placeholder={placeholder}
+          aboveInput={props.aboveInput}
           value={value}
           onChange={setValue}
           onSubmit={submit}

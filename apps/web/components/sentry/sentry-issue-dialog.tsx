@@ -8,8 +8,13 @@ import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { listSentryProjects, searchSentryIssues } from "@/lib/api/domains/sentry-api";
+import {
+  listSentryProjects,
+  searchSentryIssues,
+  listSentryInstances,
+} from "@/lib/api/domains/sentry-api";
 import type {
+  SentryConfig,
   SentryIssue,
   SentryLevel,
   SentryProject,
@@ -71,18 +76,20 @@ type DialogState = ReturnType<typeof useDialogState>;
 
 function useDialogState(open: boolean) {
   const [filter, setFilter] = useState<FilterState>(initialFilter);
+  const [instances, setInstances] = useState<SentryConfig[]>([]);
+  const [instanceId, setInstanceId] = useState<string>("");
   const [projects, setProjects] = useState<SentryProject[]>([]);
   const [issues, setIssues] = useState<SentryIssue[]>([]);
   const [nextCursor, setNextCursor] = useState<string | undefined>();
   const [isLast, setIsLast] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [configLoaded, setConfigLoaded] = useState(false);
   // Monotonic request id: only the most recent search may write results, so an
   // out-of-order response from a superseded search can't clobber the list.
   const searchSeq = useRef(0);
 
-  useBrowseProjects(open, configLoaded, setFilter, setConfigLoaded, setProjects);
+  useBrowseInstances(open, setInstances, setInstanceId);
+  useBrowseProjects(open, instanceId, setFilter, setProjects);
 
   const updateFilter = useCallback(
     <K extends keyof FilterState>(key: K, value: FilterState[K]) =>
@@ -92,6 +99,10 @@ function useDialogState(open: boolean) {
 
   const search = useCallback(
     async (nextCursorValue?: string) => {
+      if (!instanceId) {
+        setError("Select a Sentry instance");
+        return;
+      }
       if (!filter.orgSlug) {
         setError("Organization slug is required");
         return;
@@ -101,7 +112,7 @@ function useDialogState(open: boolean) {
       setError(null);
       try {
         const payload = toSearchFilter(filter);
-        const res = await searchSentryIssues(payload, nextCursorValue);
+        const res = await searchSentryIssues(instanceId, payload, nextCursorValue);
         // A newer search started while this one was in flight — drop the result.
         if (seq !== searchSeq.current) return;
         const page = res.issues ?? [];
@@ -116,12 +127,15 @@ function useDialogState(open: boolean) {
         if (seq === searchSeq.current) setLoading(false);
       }
     },
-    [filter],
+    [filter, instanceId],
   );
 
   return {
     filter,
     updateFilter,
+    instances,
+    instanceId,
+    setInstanceId,
     projects,
     issues,
     nextCursor,
@@ -146,47 +160,94 @@ function toSearchFilter(filter: FilterState): SentrySearchFilter {
 
 function useBrowseProjects(
   open: boolean,
-  loaded: boolean,
+  instanceId: string,
   setFilter: (f: (prev: FilterState) => FilterState) => void,
-  setLoaded: (v: boolean) => void,
   setProjects: (p: SentryProject[]) => void,
 ) {
+  // Track which instance's projects are loaded so switching instances refetches
+  // and reopening the dialog (component stays mounted) starts fresh.
+  const loadedFor = useRef<string | null>(null);
   useEffect(() => {
-    // Reset when the dialog closes so reopening (component stays mounted)
-    // refetches projects rather than showing a stale snapshot.
     if (!open) {
-      setLoaded(false);
+      loadedFor.current = null;
       return;
     }
-    if (loaded) return;
+    if (!instanceId) {
+      setProjects([]);
+      return;
+    }
+    if (loadedFor.current === instanceId) return;
     let cancelled = false;
     (async () => {
-      try {
-        const res = await listSentryProjects().catch(() => ({
-          projects: [] as SentryProject[],
-        }));
-        if (cancelled) return;
-        const projects = res.projects ?? [];
-        setProjects(projects);
-        // Auto-select the sole org so the required org field is pre-filled when
-        // the token only sees one organization.
-        const orgs = Array.from(new Set(projects.map((p) => p.orgSlug).filter(Boolean)));
-        if (orgs.length === 1) {
-          setFilter((prev) => (prev.orgSlug ? prev : { ...prev, orgSlug: orgs[0] }));
-        }
-      } finally {
-        if (!cancelled) setLoaded(true);
+      const res = await listSentryProjects(instanceId).catch(() => ({
+        projects: [] as SentryProject[],
+      }));
+      if (cancelled) return;
+      loadedFor.current = instanceId;
+      const projects = res.projects ?? [];
+      setProjects(projects);
+      // Auto-select the sole org so the required org field is pre-filled when
+      // the token only sees one organization.
+      const orgs = Array.from(new Set(projects.map((p) => p.orgSlug).filter(Boolean)));
+      if (orgs.length === 1) {
+        setFilter((prev) => (prev.orgSlug ? prev : { ...prev, orgSlug: orgs[0] }));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [open, loaded, setFilter, setLoaded, setProjects]);
+  }, [open, instanceId, setFilter, setProjects]);
+}
+
+// useBrowseInstances loads the configured instances and auto-selects the sole
+// instance so single-instance installs need no extra picker interaction.
+function useBrowseInstances(
+  open: boolean,
+  setInstances: (i: SentryConfig[]) => void,
+  setInstanceId: (id: string) => void,
+) {
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    listSentryInstances()
+      .then((list) => {
+        if (cancelled) return;
+        setInstances(list);
+        if (list.length === 1) setInstanceId(list[0].id);
+      })
+      .catch(() => {
+        if (!cancelled) setInstances([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, setInstances, setInstanceId]);
+}
+
+function InstanceSelect({ state }: { state: DialogState }) {
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs text-muted-foreground">Sentry instance</Label>
+      <Select value={state.instanceId || undefined} onValueChange={state.setInstanceId}>
+        <SelectTrigger className="h-8 text-xs" data-testid="sentry-browse-instance-select">
+          <SelectValue placeholder="Select Sentry instance" />
+        </SelectTrigger>
+        <SelectContent>
+          {state.instances.map((i) => (
+            <SelectItem key={i.id} value={i.id}>
+              {i.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
 }
 
 function FiltersBar({ state }: { state: DialogState }) {
   return (
     <div className="border-b px-5 py-4 space-y-3 shrink-0">
+      {state.instances.length > 1 && <InstanceSelect state={state} />}
       <FilterTopRow state={state} />
       <FilterChipRow
         label="Level"
@@ -343,7 +404,7 @@ function FilterChipRow({ label, options, selected, onToggle, chipClass }: ChipRo
 }
 
 function SearchActionRow({ state }: { state: DialogState }) {
-  const { filter, updateFilter, loading, search } = state;
+  const { filter, updateFilter, instanceId, loading, search } = state;
   return (
     <div className="flex items-end gap-2">
       <div className="flex-1 space-y-1">
@@ -368,7 +429,7 @@ function SearchActionRow({ state }: { state: DialogState }) {
         type="button"
         size="sm"
         onClick={() => void search()}
-        disabled={loading || !filter.orgSlug}
+        disabled={loading || !instanceId || !filter.orgSlug}
         className="cursor-pointer gap-1.5"
       >
         {loading ? (

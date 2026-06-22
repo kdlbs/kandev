@@ -8,6 +8,8 @@ export const SENTRY_AUTH_METHOD: SentryAuthMethod = "auth_token";
 export const SENTRY_DEFAULT_URL = "https://sentry.io";
 
 export interface SentryConfig {
+  id: string;
+  name: string;
   authMethod: SentryAuthMethod;
   url: string;
   hasSecret: boolean;
@@ -19,6 +21,7 @@ export interface SentryConfig {
 }
 
 export interface SetSentryConfigRequest {
+  name: string;
   authMethod: SentryAuthMethod;
   url: string;
   secret: string;
@@ -85,6 +88,7 @@ export interface SentrySearchResult {
 export interface SentryIssueWatch {
   id: string;
   workspaceId: string;
+  instanceId: string;
   workflowId: string;
   workflowStepId: string;
   filter: SentrySearchFilter;
@@ -101,6 +105,7 @@ export interface SentryIssueWatch {
 
 export interface CreateSentryIssueWatchRequest {
   workspaceId: string;
+  instanceId: string;
   workflowId: string;
   workflowStepId: string;
   filter: SentrySearchFilter;
@@ -113,6 +118,7 @@ export interface CreateSentryIssueWatchRequest {
 }
 
 export interface UpdateSentryIssueWatchRequest {
+  instanceId?: string;
   workflowId?: string;
   workflowStepId?: string;
   filter?: SentrySearchFilter;

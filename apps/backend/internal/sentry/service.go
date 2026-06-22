@@ -24,20 +24,23 @@ type SecretStore interface {
 	Exists(ctx context.Context, id string) (bool, error)
 }
 
-// Service orchestrates Sentry config storage, the cached client, and the
-// browse operations used by the HTTP handlers.
+// Service orchestrates Sentry instance storage, the per-instance cached
+// clients, and the browse operations used by the HTTP handlers.
 type Service struct {
 	store    *Store
 	secrets  SecretStore
 	log      *logger.Logger
 	mu       sync.Mutex
 	clientFn ClientFactory
-	client   Client
-	// clientGen is incremented by invalidateClient each time the cached client
-	// is discarded. clientFor captures it before I/O and only stores a newly
-	// built client when the value is unchanged, preventing a stale client from
-	// clobbering a concurrent invalidation.
-	clientGen uint64
+	// clients caches one built Client per instance id. invalidateInstance drops
+	// an entry so the next request rebuilds it from fresh config + secret.
+	clients map[string]Client
+	// gens is a per-instance generation counter incremented by invalidateInstance
+	// each time an instance's cached client is discarded. clientForInstance
+	// captures it before I/O and only stores a newly built client when the value
+	// is unchanged, preventing a stale client from clobbering a concurrent
+	// invalidation. Survives in the map even while clients[id] is absent.
+	gens      map[string]uint64
 	probeHook func()
 	// mockClient is non-nil only when Provide built the service with a MockClient.
 	mockClient *MockClient
@@ -85,6 +88,8 @@ func NewService(store *Store, secrets SecretStore, clientFn ClientFactory, log *
 		secrets:  secrets,
 		log:      log,
 		clientFn: clientFn,
+		clients:  make(map[string]Client),
+		gens:     make(map[string]uint64),
 	}
 }
 
@@ -93,66 +98,145 @@ func (s *Service) Store() *Store {
 	return s.store
 }
 
-// GetConfig returns the singleton config enriched with a HasSecret flag.
-func (s *Service) GetConfig(ctx context.Context) (*SentryConfig, error) {
-	cfg, err := s.store.GetConfig(ctx)
+// ErrInstanceNotFound is returned by instance operations targeting an unknown id.
+var ErrInstanceNotFound = errors.New("sentry: instance not found")
+
+// ErrInstanceInUse is returned by DeleteInstance when issue watches still
+// reference the instance. The dependent watch count is surfaced so the API
+// layer can explain why the delete was blocked.
+type ErrInstanceInUse struct {
+	WatchCount int
+}
+
+func (e *ErrInstanceInUse) Error() string {
+	return fmt.Sprintf("sentry: instance is referenced by %d issue watch(es)", e.WatchCount)
+}
+
+// ListInstances returns every configured Sentry instance, each enriched with a
+// HasSecret flag.
+func (s *Service) ListInstances(ctx context.Context) ([]*SentryConfig, error) {
+	configs, err := s.store.ListConfigs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, cfg := range configs {
+		s.enrichHasSecret(ctx, cfg)
+	}
+	return configs, nil
+}
+
+// GetInstance returns one instance config enriched with HasSecret, or nil when
+// no instance has that id.
+func (s *Service) GetInstance(ctx context.Context, id string) (*SentryConfig, error) {
+	cfg, err := s.store.GetConfig(ctx, id)
 	if err != nil || cfg == nil {
 		return cfg, err
 	}
-	if s.secrets == nil {
-		return cfg, nil
-	}
-	exists, existsErr := s.secrets.Exists(ctx, SecretKey)
-	if existsErr != nil {
-		s.log.Warn("sentry: secret exists check failed", zap.Error(existsErr))
-	}
-	cfg.HasSecret = exists
+	s.enrichHasSecret(ctx, cfg)
 	return cfg, nil
 }
 
-// ErrInvalidConfig is returned by SetConfig when the request fails validation.
+func (s *Service) enrichHasSecret(ctx context.Context, cfg *SentryConfig) {
+	if s.secrets == nil {
+		return
+	}
+	exists, err := s.secrets.Exists(ctx, secretKeyFor(cfg.ID))
+	if err != nil {
+		s.log.Warn("sentry: secret exists check failed", zap.Error(err))
+		return
+	}
+	cfg.HasSecret = exists
+}
+
+// ErrInvalidConfig is returned by CreateInstance/UpdateInstance when the request
+// fails validation.
 var ErrInvalidConfig = errors.New("sentry: invalid configuration")
 
-// SetConfig is upsert. An empty Secret on update keeps the existing token.
-func (s *Service) SetConfig(ctx context.Context, req *SetConfigRequest) (*SentryConfig, error) {
+// CreateInstance validates the request and persists a new Sentry instance.
+func (s *Service) CreateInstance(ctx context.Context, req *SetConfigRequest) (*SentryConfig, error) {
 	if err := validateConfigRequest(req); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidConfig, err.Error())
 	}
-	cfg := &SentryConfig{AuthMethod: req.AuthMethod, URL: req.URL}
-	if err := s.store.UpsertConfig(ctx, cfg); err != nil {
-		return nil, fmt.Errorf("upsert sentry config: %w", err)
+	cfg := &SentryConfig{Name: instanceName(req.Name, req.URL), AuthMethod: req.AuthMethod, URL: req.URL}
+	if err := s.store.CreateConfig(ctx, cfg); err != nil {
+		return nil, fmt.Errorf("create sentry config: %w", err)
 	}
 	if req.Secret != "" && s.secrets != nil {
-		if err := s.secrets.Set(ctx, SecretKey, "Sentry auth token", req.Secret); err != nil {
+		if err := s.secrets.Set(ctx, secretKeyFor(cfg.ID), "Sentry auth token", req.Secret); err != nil {
 			return nil, fmt.Errorf("store sentry secret: %w", err)
 		}
 	}
-	s.invalidateClient()
+	s.invalidateInstance(cfg.ID)
 	// Probe asynchronously so a slow Sentry doesn't stall the save response.
-	go func() {
-		s.RecordAuthHealth(context.Background())
-	}()
-	return s.GetConfig(ctx)
+	go s.probeOne(context.Background(), cfg.ID)
+	return s.GetInstance(ctx, cfg.ID)
 }
 
-// DeleteConfig removes both the config row and the stored secret.
-func (s *Service) DeleteConfig(ctx context.Context) error {
-	if err := s.store.DeleteConfig(ctx); err != nil {
+// UpdateInstance applies a full update to an existing instance. An empty Secret
+// keeps the stored token; a non-empty Secret replaces it.
+func (s *Service) UpdateInstance(ctx context.Context, id string, req *SetConfigRequest) (*SentryConfig, error) {
+	if err := validateConfigRequest(req); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidConfig, err.Error())
+	}
+	existing, err := s.store.GetConfig(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil {
+		return nil, ErrInstanceNotFound
+	}
+	existing.Name = instanceName(req.Name, req.URL)
+	existing.AuthMethod = req.AuthMethod
+	existing.URL = req.URL
+	if err := s.store.UpdateConfig(ctx, existing); err != nil {
+		return nil, fmt.Errorf("update sentry config: %w", err)
+	}
+	if req.Secret != "" && s.secrets != nil {
+		if err := s.secrets.Set(ctx, secretKeyFor(id), "Sentry auth token", req.Secret); err != nil {
+			return nil, fmt.Errorf("store sentry secret: %w", err)
+		}
+	}
+	s.invalidateInstance(id)
+	go s.probeOne(context.Background(), id)
+	return s.GetInstance(ctx, id)
+}
+
+// DeleteInstance removes an instance config + its stored secret. It is blocked
+// with ErrInstanceInUse when issue watches still reference the instance, so a
+// delete can never silently orphan watches.
+func (s *Service) DeleteInstance(ctx context.Context, id string) error {
+	n, err := s.store.CountWatchesForInstance(ctx, id)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return &ErrInstanceInUse{WatchCount: n}
+	}
+	if err := s.store.DeleteConfig(ctx, id); err != nil {
 		return err
 	}
 	if s.secrets != nil {
-		if err := s.secrets.Delete(ctx, SecretKey); err != nil {
-			s.log.Warn("sentry: secret delete failed", zap.Error(err))
+		if err := s.secrets.Delete(ctx, secretKeyFor(id)); err != nil {
+			s.log.Warn("sentry: secret delete failed", zap.String("instance_id", id), zap.Error(err))
 		}
 	}
-	s.invalidateClient()
+	s.invalidateInstance(id)
 	return nil
 }
 
-// TestConnection validates credentials either from a fresh SetConfigRequest
-// (before persisting) or from the stored config (after saving).
-func (s *Service) TestConnection(ctx context.Context, req *SetConfigRequest) (*TestConnectionResult, error) {
-	cfg, secret, err := s.resolveCredentials(ctx, req)
+// instanceName returns a non-empty instance name: the trimmed user-supplied
+// name when present, otherwise one derived from the instance URL.
+func instanceName(name, instanceURL string) string {
+	if n := strings.TrimSpace(name); n != "" {
+		return n
+	}
+	return instanceNameFromURL(instanceURL)
+}
+
+// TestConnection validates credentials for instance id. When id is "" (testing
+// an unsaved instance), the request must carry an inline secret.
+func (s *Service) TestConnection(ctx context.Context, id string, req *SetConfigRequest) (*TestConnectionResult, error) {
+	cfg, secret, err := s.resolveCredentials(ctx, id, req)
 	if err != nil {
 		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
 	}
@@ -160,9 +244,9 @@ func (s *Service) TestConnection(ctx context.Context, req *SetConfigRequest) (*T
 	return client.TestAuth(ctx)
 }
 
-// ProbeAuth validates the stored credentials.
-func (s *Service) ProbeAuth(ctx context.Context) (*TestConnectionResult, error) {
-	client, err := s.clientFor(ctx)
+// probeAuthFor validates the stored credentials of one instance.
+func (s *Service) probeAuthFor(ctx context.Context, id string) (*TestConnectionResult, error) {
+	client, err := s.clientForInstance(ctx, id)
 	if err != nil {
 		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
 	}
@@ -176,19 +260,52 @@ const authProbeTimeout = 15 * time.Second
 const authHealthWriteTimeout = 5 * time.Second
 
 // SetProbeHook installs a callback fired at the end of each RecordAuthHealth
-// call. Production code never sets this; tests use it to synchronise on probe
-// completion without sleep-polling.
+// pass (and each async create/update probe). Production code never sets this;
+// tests use it to synchronise on probe completion without sleep-polling.
 func (s *Service) SetProbeHook(fn func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.probeHook = fn
 }
 
-// RecordAuthHealth probes credentials and writes the outcome onto the row.
+func (s *Service) fireProbeHook() {
+	s.mu.Lock()
+	hook := s.probeHook
+	s.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+}
+
+// RecordAuthHealth probes the stored credentials of every configured instance
+// and writes each outcome onto its row.
 func (s *Service) RecordAuthHealth(ctx context.Context) {
+	configs, err := s.store.ListConfigs(ctx)
+	if err != nil {
+		s.log.Warn("sentry: list configs for auth health failed", zap.Error(err))
+		return
+	}
+	for _, cfg := range configs {
+		if ctx.Err() != nil {
+			return
+		}
+		s.recordAuthHealthFor(ctx, cfg.ID)
+	}
+	s.fireProbeHook()
+}
+
+// probeOne probes a single instance then fires the probe hook (used by the
+// async create/update path).
+func (s *Service) probeOne(ctx context.Context, id string) {
+	s.recordAuthHealthFor(ctx, id)
+	s.fireProbeHook()
+}
+
+// recordAuthHealthFor probes one instance's credentials and stamps the outcome.
+func (s *Service) recordAuthHealthFor(ctx context.Context, id string) {
 	probeCtx, cancel := context.WithTimeout(ctx, authProbeTimeout)
 	defer cancel()
-	res, err := s.ProbeAuth(probeCtx)
+	res, err := s.probeAuthFor(probeCtx, id)
 	ok := err == nil && res != nil && res.OK
 	errMsg := ""
 	switch {
@@ -201,71 +318,67 @@ func (s *Service) RecordAuthHealth(ctx context.Context) {
 	// still record the failure.
 	writeCtx, writeCancel := context.WithTimeout(context.Background(), authHealthWriteTimeout)
 	defer writeCancel()
-	if updateErr := s.store.UpdateAuthHealth(writeCtx, ok, errMsg, time.Now().UTC()); updateErr != nil {
-		s.log.Warn("sentry: update auth health failed", zap.Error(updateErr))
-	}
-	s.mu.Lock()
-	hook := s.probeHook
-	s.mu.Unlock()
-	if hook != nil {
-		hook()
+	if updateErr := s.store.UpdateAuthHealth(writeCtx, id, ok, errMsg, time.Now().UTC()); updateErr != nil {
+		s.log.Warn("sentry: update auth health failed", zap.String("instance_id", id), zap.Error(updateErr))
 	}
 }
 
-// ListOrganizations returns the organizations the stored token can access.
-func (s *Service) ListOrganizations(ctx context.Context) ([]SentryOrganization, error) {
-	client, err := s.clientFor(ctx)
+// ListOrganizations returns the organizations the instance's token can access.
+func (s *Service) ListOrganizations(ctx context.Context, instanceID string) ([]SentryOrganization, error) {
+	client, err := s.clientForInstance(ctx, instanceID)
 	if err != nil {
 		return nil, err
 	}
 	return client.ListOrganizations(ctx)
 }
 
-// ListProjects returns the projects the stored token can access.
-func (s *Service) ListProjects(ctx context.Context) ([]SentryProject, error) {
-	client, err := s.clientFor(ctx)
+// ListProjects returns the projects the instance's token can access.
+func (s *Service) ListProjects(ctx context.Context, instanceID string) ([]SentryProject, error) {
+	client, err := s.clientForInstance(ctx, instanceID)
 	if err != nil {
 		return nil, err
 	}
 	return client.ListProjects(ctx)
 }
 
-// SearchIssues runs a filtered search. The caller supplies the org/project to
-// search — there is no install-wide default to fall back on.
-func (s *Service) SearchIssues(ctx context.Context, filter SearchFilter, cursor string) (*SearchResult, error) {
-	client, err := s.clientFor(ctx)
+// SearchIssues runs a filtered search against one instance. The caller supplies
+// the org/project to search — there is no install-wide default to fall back on.
+func (s *Service) SearchIssues(ctx context.Context, instanceID string, filter SearchFilter, cursor string) (*SearchResult, error) {
+	client, err := s.clientForInstance(ctx, instanceID)
 	if err != nil {
 		return nil, err
 	}
 	return client.SearchIssues(ctx, filter, cursor)
 }
 
-// GetIssue loads a single issue by short ID or numeric ID.
-func (s *Service) GetIssue(ctx context.Context, idOrShortID string) (*SentryIssue, error) {
-	client, err := s.clientFor(ctx)
+// GetIssue loads a single issue by short ID or numeric ID from one instance.
+func (s *Service) GetIssue(ctx context.Context, instanceID, idOrShortID string) (*SentryIssue, error) {
+	client, err := s.clientForInstance(ctx, instanceID)
 	if err != nil {
 		return nil, err
 	}
 	return client.GetIssue(ctx, idOrShortID)
 }
 
-// clientFor returns the cached client, creating it if needed.
-// It captures the generation counter before releasing the lock for I/O so
-// that a concurrent invalidateClient call during the build window is not
+// clientForInstance returns the cached client for an instance, creating it if
+// needed. It captures the instance's generation counter before releasing the
+// lock for I/O so a concurrent invalidateInstance during the build window is not
 // silently overwritten: if the counter changed the freshly built client is
-// returned to the caller without being cached, and the next call rebuilds
-// with the updated config.
-func (s *Service) clientFor(ctx context.Context) (Client, error) {
+// returned to the caller without being cached, and the next call rebuilds with
+// the updated config.
+func (s *Service) clientForInstance(ctx context.Context, instanceID string) (Client, error) {
+	if instanceID == "" {
+		return nil, ErrNotConfigured
+	}
 	s.mu.Lock()
-	if s.client != nil {
-		c := s.client
+	if c := s.clients[instanceID]; c != nil {
 		s.mu.Unlock()
 		return c, nil
 	}
-	gen := s.clientGen
+	gen := s.gens[instanceID]
 	s.mu.Unlock()
 
-	cfg, err := s.store.GetConfig(ctx)
+	cfg, err := s.store.GetConfig(ctx, instanceID)
 	if err != nil {
 		return nil, err
 	}
@@ -274,7 +387,17 @@ func (s *Service) clientFor(ctx context.Context) (Client, error) {
 	}
 	secret := ""
 	if s.secrets != nil {
-		secret, err = s.secrets.Reveal(ctx, SecretKey)
+		// Check existence first so an instance saved without a token reports
+		// "not configured" (503) instead of leaking the store's not-found error
+		// as a 500. A real Reveal error after Exists==true still propagates.
+		exists, existsErr := s.secrets.Exists(ctx, secretKeyFor(instanceID))
+		if existsErr != nil {
+			return nil, fmt.Errorf("check sentry secret: %w", existsErr)
+		}
+		if !exists {
+			return nil, ErrNotConfigured
+		}
+		secret, err = s.secrets.Reveal(ctx, secretKeyFor(instanceID))
 		if err != nil {
 			return nil, fmt.Errorf("read sentry secret: %w", err)
 		}
@@ -285,33 +408,34 @@ func (s *Service) clientFor(ctx context.Context) (Client, error) {
 	client := s.clientFn(cfg, secret)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.client != nil {
+	if c := s.clients[instanceID]; c != nil {
 		// Another goroutine already cached a client; use that one.
-		return s.client, nil
+		return c, nil
 	}
-	if s.clientGen != gen {
-		// invalidateClient ran while we were doing I/O — the config/secret we
+	if s.gens[instanceID] != gen {
+		// invalidateInstance ran while we were doing I/O — the config/secret we
 		// read is now stale. Return the client to the caller for this call only;
 		// the next call will rebuild with fresh credentials.
 		return client, nil
 	}
-	s.client = client
+	s.clients[instanceID] = client
 	return client, nil
 }
 
-// invalidateClient drops the cached client so the next request rebuilds it.
-// The generation counter is incremented so a concurrent clientFor build does
-// not restore a client built from the now-stale config.
-func (s *Service) invalidateClient() {
+// invalidateInstance drops the cached client for an instance so the next request
+// rebuilds it. The generation counter is incremented so a concurrent
+// clientForInstance build does not restore a client built from the now-stale
+// config.
+func (s *Service) invalidateInstance(instanceID string) {
 	s.mu.Lock()
-	s.client = nil
-	s.clientGen++
+	delete(s.clients, instanceID)
+	s.gens[instanceID]++
 	s.mu.Unlock()
 }
 
 // resolveCredentials picks credentials for a test: inline if the request
-// carries a secret, otherwise the stored secret.
-func (s *Service) resolveCredentials(ctx context.Context, req *SetConfigRequest) (*SentryConfig, string, error) {
+// carries a secret, otherwise the stored secret for instance id.
+func (s *Service) resolveCredentials(ctx context.Context, id string, req *SetConfigRequest) (*SentryConfig, string, error) {
 	cfg := &SentryConfig{AuthMethod: req.AuthMethod, URL: normalizeSentryURL(req.URL)}
 	if req.Secret != "" {
 		if cfg.URL == "" {
@@ -322,7 +446,10 @@ func (s *Service) resolveCredentials(ctx context.Context, req *SetConfigRequest)
 	if s.secrets == nil {
 		return nil, "", errors.New("no secret store configured")
 	}
-	secret, err := s.secrets.Reveal(ctx, SecretKey)
+	if id == "" {
+		return nil, "", errors.New("no auth token stored — paste one to test")
+	}
+	secret, err := s.secrets.Reveal(ctx, secretKeyFor(id))
 	if err != nil {
 		s.log.Warn("sentry: secret reveal failed", zap.Error(err))
 		return nil, "", fmt.Errorf("read sentry secret: %w", err)
@@ -330,7 +457,7 @@ func (s *Service) resolveCredentials(ctx context.Context, req *SetConfigRequest)
 	if secret == "" {
 		return nil, "", errors.New("no auth token stored — paste one to test")
 	}
-	stored, storeErr := s.store.GetConfig(ctx)
+	stored, storeErr := s.store.GetConfig(ctx, id)
 	if storeErr != nil {
 		s.log.Warn("sentry: load stored config for credential resolution failed", zap.Error(storeErr))
 	}

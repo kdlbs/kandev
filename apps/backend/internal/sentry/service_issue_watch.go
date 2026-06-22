@@ -31,8 +31,12 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 	if err := validateIssueWatchCreate(req); err != nil {
 		return nil, err
 	}
+	if err := s.requireInstance(ctx, req.InstanceID); err != nil {
+		return nil, err
+	}
 	w := &IssueWatch{
 		WorkspaceID:         req.WorkspaceID,
+		InstanceID:          req.InstanceID,
 		WorkflowID:          req.WorkflowID,
 		WorkflowStepID:      req.WorkflowStepID,
 		Filter:              normalizeFilter(req.Filter),
@@ -82,6 +86,9 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 		return nil, err
 	}
 	applyIssueWatchPatch(w, req)
+	if err := s.requireInstance(ctx, w.InstanceID); err != nil {
+		return nil, err
+	}
 	if err := validateFilter(w.Filter); err != nil {
 		return nil, err
 	}
@@ -103,6 +110,23 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 // DeleteIssueWatch removes the watch and its dedup rows. Idempotent.
 func (s *Service) DeleteIssueWatch(ctx context.Context, id string) error {
 	return s.store.DeleteIssueWatch(ctx, id)
+}
+
+// requireInstance returns ErrInvalidConfig when the instance id is empty or
+// names no configured Sentry instance. Used to keep watches from binding to a
+// non-existent instance.
+func (s *Service) requireInstance(ctx context.Context, instanceID string) error {
+	if instanceID == "" {
+		return fmt.Errorf("%w: instanceId required", ErrInvalidConfig)
+	}
+	cfg, err := s.store.GetConfig(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	if cfg == nil {
+		return fmt.Errorf("%w: unknown Sentry instance %q", ErrInvalidConfig, instanceID)
+	}
+	return nil
 }
 
 // sentryIssueWatchResetter is the watchreset.Resetter adapter for a single
@@ -154,7 +178,7 @@ func (s *Service) ResetIssueWatch(ctx context.Context, watchID string) (int, err
 // bails. Same pattern as the Linear / Jira watchers.
 func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*SentryIssue, error) {
 	defer s.stampWatchLastPolled(w.ID)
-	client, err := s.clientFor(ctx)
+	client, err := s.clientForInstance(ctx, w.InstanceID)
 	if err != nil {
 		return nil, err
 	}
@@ -226,6 +250,7 @@ func (s *Service) publishNewSentryIssueEvent(ctx context.Context, w *IssueWatch,
 	}
 	evt := bus.NewEvent(events.SentryNewIssue, "sentry", &NewSentryIssueEvent{
 		IssueWatchID:      w.ID,
+		InstanceID:        w.InstanceID,
 		WorkspaceID:       w.WorkspaceID,
 		WorkflowID:        w.WorkflowID,
 		WorkflowStepID:    w.WorkflowStepID,
@@ -244,6 +269,9 @@ func (s *Service) publishNewSentryIssueEvent(ctx context.Context, w *IssueWatch,
 func validateIssueWatchCreate(req *CreateIssueWatchRequest) error {
 	if req.WorkspaceID == "" {
 		return fmt.Errorf("%w: workspaceId required", ErrInvalidConfig)
+	}
+	if req.InstanceID == "" {
+		return fmt.Errorf("%w: instanceId required", ErrInvalidConfig)
 	}
 	if req.WorkflowID == "" || req.WorkflowStepID == "" {
 		return fmt.Errorf("%w: workflowId and workflowStepId required", ErrInvalidConfig)
@@ -322,6 +350,9 @@ func normalizeFilter(f SearchFilter) SearchFilter {
 }
 
 func applyIssueWatchPatch(w *IssueWatch, req *UpdateIssueWatchRequest) {
+	if req.InstanceID != nil {
+		w.InstanceID = *req.InstanceID
+	}
 	if req.WorkflowID != nil {
 		w.WorkflowID = *req.WorkflowID
 	}
