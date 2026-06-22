@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   IconCircleCheckFilled,
   IconCircleXFilled,
@@ -22,6 +22,7 @@ import {
 import { Button } from "@kandev/ui/button";
 import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { useHoverPopover } from "@/hooks/domains/github/use-hover-popover";
 import { usePRFeedbackBackgroundSync } from "@/hooks/domains/github/use-pr-ci-popover";
 import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS, PRCIPopover } from "@/components/github/pr-ci-popover";
 import { useTaskCIAutomationOptions } from "@/hooks/domains/github/use-task-ci-options";
@@ -130,62 +131,16 @@ function useChipTriggerGuard() {
   return { ref, onPointerDownOutside };
 }
 
+// Hover-bridge lifecycle for the chip's desktop popover. Delegates to the
+// shared hook so the chip and the top-bar PR button keep identical
+// trigger->content bridge behavior (the popover must survive the cursor
+// crossing the sideOffset gap). The chip's mobile surface is a Drawer, so no
+// mobile guard is needed here.
 function useChipPopoverInteractions() {
-  const [open, setOpen] = useState(false);
-  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const clearOpen = useCallback(() => {
-    if (openTimer.current) {
-      clearTimeout(openTimer.current);
-      openTimer.current = null;
-    }
-  }, []);
-  const clearClose = useCallback(() => {
-    if (closeTimer.current) {
-      clearTimeout(closeTimer.current);
-      closeTimer.current = null;
-    }
-  }, []);
-
-  const handleEnter = useCallback(() => {
-    // Cancel any pending close FIRST. Crossing from the chip onto the already-
-    // open popover fires this with `open` already true — the early return below
-    // must not strand the close timer queued by handleLeave when the cursor
-    // left the chip, or the popover vanishes mid-hover and its buttons become
-    // unclickable.
-    clearClose();
-    if (open || openTimer.current) return;
-    openTimer.current = setTimeout(() => setOpen(true), HOVER_OPEN_DELAY_MS);
-  }, [clearClose, open]);
-
-  const handleLeave = useCallback(() => {
-    clearOpen();
-    closeTimer.current = setTimeout(() => setOpen(false), HOVER_CLOSE_DELAY_MS);
-  }, [clearOpen]);
-
-  const onOpenChange = useCallback(
-    (next: boolean) => {
-      if (next) {
-        setOpen(true);
-        return;
-      }
-      clearOpen();
-      clearClose();
-      setOpen(false);
-    },
-    [clearClose, clearOpen],
-  );
-
-  useEffect(
-    () => () => {
-      clearOpen();
-      clearClose();
-    },
-    [clearOpen, clearClose],
-  );
-
-  return { open, onOpenChange, handleEnter, handleLeave };
+  return useHoverPopover({
+    openDelayMs: HOVER_OPEN_DELAY_MS,
+    closeDelayMs: HOVER_CLOSE_DELAY_MS,
+  });
 }
 
 /**
@@ -300,21 +255,22 @@ function PRStatusChipInner({ pr, automation }: { pr: TaskPR; automation: Automat
 function PRStatusChipHoverCard({ pr, automation }: { pr: TaskPR; automation: AutomationFlags }) {
   const status = chipStatus(pr);
   const { ref, onPointerDownOutside } = useChipTriggerGuard();
-  const { open, onOpenChange, handleEnter, handleLeave } = useChipPopoverInteractions();
+  const { open, onOpenChange, onTriggerEnter, onTriggerLeave, onContentEnter, onContentLeave } =
+    useChipPopoverInteractions();
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <span
         className="inline-flex"
-        onMouseOver={handleEnter}
-        onMouseEnter={handleEnter}
-        onMouseMove={handleEnter}
-        onPointerOver={handleEnter}
-        onPointerEnter={handleEnter}
-        onPointerMove={handleEnter}
-        onMouseLeave={handleLeave}
-        onPointerLeave={handleLeave}
-        onFocus={handleEnter}
-        onBlur={handleLeave}
+        onMouseOver={onTriggerEnter}
+        onMouseEnter={onTriggerEnter}
+        onMouseMove={onTriggerEnter}
+        onPointerOver={onTriggerEnter}
+        onPointerEnter={onTriggerEnter}
+        onPointerMove={onTriggerEnter}
+        onMouseLeave={onTriggerLeave}
+        onPointerLeave={onTriggerLeave}
+        onFocus={onTriggerEnter}
+        onBlur={onTriggerLeave}
       >
         <PopoverAnchor asChild>
           <button ref={ref} type="button" {...chipButtonAttrs(pr, status, automation)}>
@@ -329,8 +285,9 @@ function PRStatusChipHoverCard({ pr, automation }: { pr: TaskPR; automation: Aut
         align="start"
         sideOffset={8}
         className={`w-80 p-2.5 ${PR_CI_DESKTOP_POPOVER_SCROLL_CLASS}`}
-        onMouseEnter={handleEnter}
-        onMouseLeave={handleLeave}
+        onMouseEnter={onContentEnter}
+        onMouseMove={onContentEnter}
+        onMouseLeave={onContentLeave}
         onPointerDownOutside={onPointerDownOutside}
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
@@ -402,21 +359,22 @@ function PRStatusChipMultiHoverCard({
 }) {
   const status = aggregateChipStatus(prs);
   const { ref, onPointerDownOutside } = useChipTriggerGuard();
-  const { open, onOpenChange, handleEnter, handleLeave } = useChipPopoverInteractions();
+  const { open, onOpenChange, onTriggerEnter, onTriggerLeave, onContentEnter, onContentLeave } =
+    useChipPopoverInteractions();
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <span
         className="inline-flex"
-        onMouseOver={handleEnter}
-        onMouseEnter={handleEnter}
-        onMouseMove={handleEnter}
-        onPointerOver={handleEnter}
-        onPointerEnter={handleEnter}
-        onPointerMove={handleEnter}
-        onMouseLeave={handleLeave}
-        onPointerLeave={handleLeave}
-        onFocus={handleEnter}
-        onBlur={handleLeave}
+        onMouseOver={onTriggerEnter}
+        onMouseEnter={onTriggerEnter}
+        onMouseMove={onTriggerEnter}
+        onPointerOver={onTriggerEnter}
+        onPointerEnter={onTriggerEnter}
+        onPointerMove={onTriggerEnter}
+        onMouseLeave={onTriggerLeave}
+        onPointerLeave={onTriggerLeave}
+        onFocus={onTriggerEnter}
+        onBlur={onTriggerLeave}
       >
         <PopoverAnchor asChild>
           <button ref={ref} type="button" {...multiChipButtonAttrs(prs, status, automation)}>
@@ -429,8 +387,9 @@ function PRStatusChipMultiHoverCard({
         align="start"
         sideOffset={8}
         className={`w-96 p-2.5 ${PR_CI_DESKTOP_POPOVER_SCROLL_CLASS}`}
-        onMouseEnter={handleEnter}
-        onMouseLeave={handleLeave}
+        onMouseEnter={onContentEnter}
+        onMouseMove={onContentEnter}
+        onMouseLeave={onContentLeave}
         onPointerDownOutside={onPointerDownOutside}
         onOpenAutoFocus={(e) => e.preventDefault()}
       >

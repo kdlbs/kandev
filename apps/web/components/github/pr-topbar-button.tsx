@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useState, type ReactNode } from "react";
 import {
   IconGitPullRequest,
   IconCheck,
@@ -22,6 +22,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { useHoverPopover } from "@/hooks/domains/github/use-hover-popover";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
   aggregatePRStatusColor,
@@ -106,72 +107,34 @@ export const PRTopbarButton = memo(function PRTopbarButton() {
  * behavior, and hover is what reveals the CI popover. On touch devices the
  * popover is suppressed entirely so the button click falls through to the
  * existing detail-panel handler.
+ *
+ * The hover-bridge logic (keeping the popover open while the cursor crosses
+ * from the trigger onto the portalled content) lives in the shared
+ * {@link useHoverPopover} hook so the chip and this button stay in sync.
  */
 function usePopoverInteractions() {
   const isMobile = useIsMobile();
-  const [open, setOpen] = useState(false);
-  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const clearOpen = useCallback(() => {
-    if (openTimer.current) {
-      clearTimeout(openTimer.current);
-      openTimer.current = null;
-    }
-  }, []);
-  const clearClose = useCallback(() => {
-    if (closeTimer.current) {
-      clearTimeout(closeTimer.current);
-      closeTimer.current = null;
-    }
-  }, []);
-
-  const handleEnter = useCallback(() => {
-    if (isMobile) return;
-    // Cancel any pending close FIRST. When the cursor crosses from the trigger
-    // onto the already-open popover, this fires with `open` already true — the
-    // early return below must not strand the close timer queued by handleLeave
-    // when the cursor left the trigger, or the popover vanishes mid-hover and
-    // its buttons become unclickable.
-    clearClose();
-    if (open || openTimer.current) return;
-    openTimer.current = setTimeout(() => setOpen(true), POPOVER_OPEN_DELAY_MS);
-  }, [isMobile, clearClose, open]);
-
-  const handleLeave = useCallback(() => {
-    if (isMobile) return;
-    clearOpen();
-    closeTimer.current = setTimeout(() => setOpen(false), POPOVER_CLOSE_DELAY_MS);
-  }, [isMobile, clearOpen]);
-
-  useEffect(
-    () => () => {
-      clearOpen();
-      clearClose();
-    },
-    [clearOpen, clearClose],
-  );
-
-  return {
-    isMobile,
-    open,
-    onOpenChange: (next: boolean) => {
-      if (!next) {
-        clearOpen();
-        clearClose();
-        setOpen(false);
-      }
-    },
-    handleEnter,
-    handleLeave,
-  };
+  const hover = useHoverPopover({
+    openDelayMs: POPOVER_OPEN_DELAY_MS,
+    closeDelayMs: POPOVER_CLOSE_DELAY_MS,
+    disabled: isMobile,
+  });
+  return { isMobile, ...hover };
 }
 
 function PRSingleButton({ pr }: { pr: TaskPR }) {
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const tooltip = `${pr.owner}/${pr.repo} #${pr.pr_number} — ${pr.pr_title}`;
-  const { isMobile, open, onOpenChange, handleEnter, handleLeave } = usePopoverInteractions();
+  const {
+    isMobile,
+    open,
+    onOpenChange,
+    onTriggerEnter,
+    onTriggerLeave,
+    onContentEnter,
+    onContentLeave,
+  } = usePopoverInteractions();
   // Background sync lives on PRStatusChip (always mounted in the chat
   // input area); the chip and this popover share prFeedbackCache so a
   // single subscription warms both.
@@ -185,16 +148,16 @@ function PRSingleButton({ pr }: { pr: TaskPR }) {
       size="sm"
       variant="outline"
       className="cursor-pointer gap-1.5 px-2"
-      onMouseOver={handleEnter}
-      onMouseEnter={handleEnter}
-      onMouseMove={handleEnter}
-      onPointerOver={handleEnter}
-      onPointerEnter={handleEnter}
-      onPointerMove={handleEnter}
-      onMouseLeave={handleLeave}
-      onPointerLeave={handleLeave}
-      onFocus={handleEnter}
-      onBlur={handleLeave}
+      onMouseOver={onTriggerEnter}
+      onMouseEnter={onTriggerEnter}
+      onMouseMove={onTriggerEnter}
+      onPointerOver={onTriggerEnter}
+      onPointerEnter={onTriggerEnter}
+      onPointerMove={onTriggerEnter}
+      onMouseLeave={onTriggerLeave}
+      onPointerLeave={onTriggerLeave}
+      onFocus={onTriggerEnter}
+      onBlur={onTriggerLeave}
       onClick={() => {
         addPRPanel(prTaskKey(pr), activeSessionId);
         onOpenChange(false);
@@ -223,8 +186,9 @@ function PRSingleButton({ pr }: { pr: TaskPR }) {
         align="end"
         sideOffset={4}
         className={`w-80 ${PR_CI_DESKTOP_POPOVER_SCROLL_CLASS}`}
-        onMouseEnter={handleEnter}
-        onMouseLeave={handleLeave}
+        onMouseEnter={onContentEnter}
+        onMouseMove={onContentEnter}
+        onMouseLeave={onContentLeave}
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <PRCIPopover pr={pr} enabled={open} />
@@ -240,7 +204,15 @@ function PRMultiButton({ prs }: { prs: TaskPR[] }) {
   // there is no hover.
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
-  const { isMobile, open, onOpenChange, handleEnter, handleLeave } = usePopoverInteractions();
+  const {
+    isMobile,
+    open,
+    onOpenChange,
+    onTriggerEnter,
+    onTriggerLeave,
+    onContentEnter,
+    onContentLeave,
+  } = usePopoverInteractions();
   const [menuOpen, setMenuOpen] = useState(false);
   const aggColor = aggregatePRStatusColor(prs);
 
@@ -258,16 +230,16 @@ function PRMultiButton({ prs }: { prs: TaskPR[] }) {
         size="sm"
         variant="outline"
         className="cursor-pointer gap-1.5 px-2"
-        onMouseOver={menuOpen ? undefined : handleEnter}
-        onMouseEnter={menuOpen ? undefined : handleEnter}
-        onMouseMove={menuOpen ? undefined : handleEnter}
-        onPointerOver={menuOpen ? undefined : handleEnter}
-        onPointerEnter={menuOpen ? undefined : handleEnter}
-        onPointerMove={menuOpen ? undefined : handleEnter}
-        onMouseLeave={handleLeave}
-        onPointerLeave={handleLeave}
-        onFocus={menuOpen ? undefined : handleEnter}
-        onBlur={handleLeave}
+        onMouseOver={menuOpen ? undefined : onTriggerEnter}
+        onMouseEnter={menuOpen ? undefined : onTriggerEnter}
+        onMouseMove={menuOpen ? undefined : onTriggerEnter}
+        onPointerOver={menuOpen ? undefined : onTriggerEnter}
+        onPointerEnter={menuOpen ? undefined : onTriggerEnter}
+        onPointerMove={menuOpen ? undefined : onTriggerEnter}
+        onMouseLeave={onTriggerLeave}
+        onPointerLeave={onTriggerLeave}
+        onFocus={menuOpen ? undefined : onTriggerEnter}
+        onBlur={onTriggerLeave}
       >
         <IconGitPullRequest className={`h-4 w-4 ${aggColor}`} />
         <span className="text-xs font-medium">{prs.length} PRs</span>
@@ -303,8 +275,9 @@ function PRMultiButton({ prs }: { prs: TaskPR[] }) {
         align="end"
         sideOffset={4}
         className={`w-96 ${PR_CI_DESKTOP_POPOVER_SCROLL_CLASS}`}
-        onMouseEnter={handleEnter}
-        onMouseLeave={handleLeave}
+        onMouseEnter={onContentEnter}
+        onMouseMove={onContentEnter}
+        onMouseLeave={onContentLeave}
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <MultiPRCIPopover
