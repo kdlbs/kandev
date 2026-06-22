@@ -101,6 +101,15 @@ type Refs = {
 
 type SetState = React.Dispatch<React.SetStateAction<Record<string, URLState>>>;
 
+type SuccessArgs<T> = {
+  refs: Refs;
+  setState: SetState;
+  url: string;
+  seq: number;
+  value: T;
+  buildInfo: (value: T) => PRInfo;
+};
+
 /** Marks the entry as loading=true (preserving any prior info) and bumps the
  *  per-URL sequence counter. */
 function initRequest(
@@ -120,41 +129,13 @@ function initRequest(
   return { seq, signal: controller.signal };
 }
 
-/** Writes the successful PR info when the request is still current. */
-function handlePRSuccess(
-  refs: Refs,
-  setState: SetState,
-  url: string,
-  seq: number,
-  pr: Awaited<ReturnType<typeof fetchPRInfo>>,
-): void {
+/** Writes successful GitHub URL info when the request is still current. */
+function handleSuccess<T>(args: SuccessArgs<T>): void {
+  const { refs, setState, url, seq, value, buildInfo } = args;
   if (!refs.mountedRef.current) return;
   if (refs.seqRef.current.get(url) !== seq) return;
   refs.loadedRef.current.add(url);
-  const info: PRInfo = {
-    prHeadBranch: pr.head_branch,
-    prBaseBranch: pr.base_branch,
-    prNumber: pr.number,
-    suggestedTitle: `PR #${pr.number}: ${pr.title}`,
-  };
-  setState((prev) => ({ ...prev, [url]: { info, loading: false } }));
-}
-
-function handleIssueSuccess(
-  refs: Refs,
-  setState: SetState,
-  url: string,
-  seq: number,
-  issue: Awaited<ReturnType<typeof fetchIssueInfo>>,
-): void {
-  if (!refs.mountedRef.current) return;
-  if (refs.seqRef.current.get(url) !== seq) return;
-  refs.loadedRef.current.add(url);
-  const info: PRInfo = {
-    issueNumber: issue.number,
-    suggestedTitle: `Issue #${issue.number}: ${issue.title}`,
-  };
-  setState((prev) => ({ ...prev, [url]: { info, loading: false } }));
+  setState((prev) => ({ ...prev, [url]: { info: buildInfo(value), loading: false } }));
 }
 
 /** Marks loaded on failure (we don't want to retry in a tight loop) and
@@ -174,6 +155,57 @@ function finalizeRequest(refs: Refs, url: string, seq: number): void {
   if (refs.seqRef.current.get(url) !== seq) return;
   refs.inFlightRef.current.delete(url);
   refs.abortersRef.current.delete(url);
+}
+
+function runGitHubInfoRequest(args: {
+  refs: Refs;
+  setState: SetState;
+  url: string;
+  seq: number;
+  signal: AbortSignal;
+  pr: NonNullable<ReturnType<typeof parseGitHubPrUrl>> | null;
+  issue: ReturnType<typeof parseGitHubIssueUrl>;
+}): void {
+  const { refs, setState, url, seq, signal, pr, issue } = args;
+  let request: Promise<void>;
+  if (pr) {
+    request = fetchPRInfo(pr.owner, pr.repo, pr.prNumber, { init: { signal } }).then((res) =>
+      handleSuccess({
+        refs,
+        setState,
+        url,
+        seq,
+        value: res,
+        buildInfo: (value) => ({
+          prHeadBranch: value.head_branch,
+          prBaseBranch: value.base_branch,
+          prNumber: value.number,
+          suggestedTitle: `PR #${value.number}: ${value.title}`,
+        }),
+      }),
+    );
+  } else if (issue) {
+    request = fetchIssueInfo(issue.owner, issue.repo, issue.issueNumber, {
+      init: { signal },
+    }).then((res) =>
+      handleSuccess({
+        refs,
+        setState,
+        url,
+        seq,
+        value: res,
+        buildInfo: (value) => ({
+          issueNumber: value.number,
+          suggestedTitle: `Issue #${value.number}: ${value.title}`,
+        }),
+      }),
+    );
+  } else {
+    return;
+  }
+  request
+    .catch(() => handleFailure(refs, setState, url, seq))
+    .finally(() => finalizeRequest(refs, url, seq));
 }
 
 export function usePRInfoByURL(): UsePRInfoByURLResult {
@@ -229,21 +261,7 @@ export function usePRInfoByURL(): UsePRInfoByURLResult {
     }
     const refs = refsRef.current;
     const { seq, signal } = initRequest(refs, setState, url);
-    let request: Promise<void>;
-    if (pr) {
-      request = fetchPRInfo(pr.owner, pr.repo, pr.prNumber, { init: { signal } }).then((res) =>
-        handlePRSuccess(refs, setState, url, seq, res),
-      );
-    } else if (issue) {
-      request = fetchIssueInfo(issue.owner, issue.repo, issue.issueNumber, {
-        init: { signal },
-      }).then((res) => handleIssueSuccess(refs, setState, url, seq, res));
-    } else {
-      return;
-    }
-    request
-      .catch(() => handleFailure(refs, setState, url, seq))
-      .finally(() => finalizeRequest(refs, url, seq));
+    runGitHubInfoRequest({ refs, setState, url, seq, signal, pr, issue });
   }, []);
 
   const info = useCallback(

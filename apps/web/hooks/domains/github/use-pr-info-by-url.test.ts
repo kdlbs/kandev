@@ -177,7 +177,9 @@ describe("usePRInfoByURL", () => {
     await waitFor(() => expect(result.current.loading(PR_URL_A)).toBe(false));
     expect(result.current.info(PR_URL_A)).toBeDefined();
   });
+});
 
+describe("usePRInfoByURL — non-PR and issue URLs", () => {
   it("no-ops (no fetch, no cached info) for a non-PR repo URL", async () => {
     const { result } = renderHook(() => usePRInfoByURL());
 
@@ -197,6 +199,21 @@ describe("usePRInfoByURL", () => {
     expect(fetchPRInfoMock).not.toHaveBeenCalled();
   });
 
+  it("clear() is a no-op after ensure() records a non-GitHub URL as loaded", () => {
+    const url = "https://example.com/not-github";
+    const { result } = renderHook(() => usePRInfoByURL());
+
+    act(() => {
+      result.current.ensure(url);
+      result.current.clear(url);
+    });
+
+    expect(fetchPRInfoMock).not.toHaveBeenCalled();
+    expect(fetchIssueInfoMock).not.toHaveBeenCalled();
+    expect(result.current.info(url)).toBeUndefined();
+    expect(result.current.loading(url)).toBe(false);
+  });
+
   it("fetches issue info and exposes a suggested title for GitHub issue URLs", async () => {
     fetchIssueInfoMock.mockResolvedValue(makeIssue({ number: 1456, title: "Fix remote picker" }));
 
@@ -207,6 +224,7 @@ describe("usePRInfoByURL", () => {
     });
 
     await waitFor(() => expect(result.current.info(ISSUE_URL_A)).toBeDefined());
+    expect(fetchIssueInfoMock).toHaveBeenCalledTimes(1);
     expect(fetchIssueInfoMock).toHaveBeenCalledWith("acme", "site", 1456, expect.any(Object));
     expect(fetchPRInfoMock).not.toHaveBeenCalled();
     expect(result.current.info(ISSUE_URL_A)).toMatchObject({

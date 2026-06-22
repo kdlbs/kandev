@@ -393,6 +393,7 @@ func parseRouteNumber(ctx *gin.Context, invalidMessage string) (int, bool) {
 
 func handleGitHubInfoError(ctx *gin.Context, err error) {
 	status := http.StatusInternalServerError
+	message := "failed to fetch GitHub info"
 	var apiErr *GitHubAPIError
 	if errors.As(err, &apiErr) {
 		switch apiErr.StatusCode {
@@ -404,7 +405,10 @@ func handleGitHubInfoError(ctx *gin.Context, err error) {
 			status = http.StatusForbidden
 		}
 	}
-	ctx.JSON(status, gin.H{"error": err.Error()})
+	if status != http.StatusInternalServerError {
+		message = err.Error()
+	}
+	ctx.JSON(status, gin.H{"error": message})
 }
 
 func (c *Controller) httpSubmitReview(ctx *gin.Context) {
