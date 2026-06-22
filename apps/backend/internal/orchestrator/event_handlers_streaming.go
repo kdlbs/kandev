@@ -845,9 +845,6 @@ func extractCompleteErrorMessage(payload *lifecycle.AgentStreamEventPayload) str
 	if payload.Data.Error != "" {
 		return payload.Data.Error
 	}
-	if payload.Data.Text != "" {
-		return payload.Data.Text
-	}
 	data, ok := payload.Data.Data.(map[string]interface{})
 	if !ok {
 		return ""

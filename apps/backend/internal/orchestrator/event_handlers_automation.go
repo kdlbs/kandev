@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -504,6 +505,12 @@ func (s *Service) reapAutomationWorktree(ctx context.Context, taskID, sessionID 
 		return
 	}
 	if err := s.worktreeMgr.RemoveByID(ctx, running.WorktreeID, true); err != nil {
+		if errors.Is(err, worktree.ErrWorktreeNotFound) {
+			s.logger.Debug("automation worktree already reaped",
+				zap.String("task_id", taskID),
+				zap.String("worktree_id", running.WorktreeID))
+			return
+		}
 		s.logger.Warn("failed to reap automation worktree",
 			zap.String("task_id", taskID),
 			zap.String("worktree_id", running.WorktreeID),
