@@ -65,6 +65,7 @@ while [[ $# -gt 0 ]]; do
     --comment)
       shift
       [[ $# -gt 0 && -z "${COMMENT_ID:-}" && -z "${PR:-}" ]] || usage 1
+      [[ "$1" != -* ]] || usage 1
       COMMENT_ID=$1
       shift
       ;;

@@ -589,6 +589,28 @@ test_comment_mode_reports_fetch_failure() {
   pass "--comment reports fetch failure"
 }
 
+test_comment_mode_rejects_incompatible_flags() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  if PATH="$tmp/bin:$PATH" "$SCRIPT" --summary --comment 111 >"$tmp/out.log" 2>&1; then
+    fail "--comment rejects --summary"
+  fi
+  if ! grep -q "scripts/pr-state --comment <comment_id>" "$tmp/out.log"; then
+    fail "--comment --summary prints usage"
+  fi
+
+  if PATH="$tmp/bin:$PATH" "$SCRIPT" --comment --summary >"$tmp/out.log" 2>&1; then
+    fail "--comment rejects flag-shaped id"
+  fi
+  if ! grep -q "scripts/pr-state --comment <comment_id>" "$tmp/out.log"; then
+    fail "--comment flag-shaped id prints usage"
+  fi
+
+  pass "--comment rejects incompatible flags"
+}
+
 test_snapshot_happy_path
 test_partial_failure_records_error_but_keeps_other_data
 test_pr_view_failure_with_non_numeric_ref_keeps_schema
@@ -600,3 +622,4 @@ test_summary_mode_returns_compact_fixup_state
 test_summary_all_flag_includes_historical_unresolved_threads
 test_comment_mode_returns_full_review_comment
 test_comment_mode_reports_fetch_failure
+test_comment_mode_rejects_incompatible_flags
