@@ -988,16 +988,14 @@ func convertPatPR(raw *patPR, owner, repo string) *PR {
 }
 
 func convertPatIssue(raw *patIssue, owner, repo string) *Issue {
-	labels := collectIssueStrings(raw.Labels, func(label struct {
-		Name string `json:"name"`
-	}) string {
-		return label.Name
-	})
-	assignees := collectIssueStrings(raw.Assignees, func(assignee struct {
-		Login string `json:"login"`
-	}) string {
-		return assignee.Login
-	})
+	labels := make([]string, len(raw.Labels))
+	for i, label := range raw.Labels {
+		labels[i] = label.Name
+	}
+	assignees := make([]string, len(raw.Assignees))
+	for i, assignee := range raw.Assignees {
+		assignees[i] = assignee.Login
+	}
 	issue := &Issue{
 		Number:      raw.Number,
 		Title:       raw.Title,

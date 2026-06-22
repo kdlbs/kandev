@@ -344,6 +344,48 @@ func TestHttpGetPRInfo_ServiceError(t *testing.T) {
 	}
 }
 
+func TestHttpGetPRInfo_NoClient(t *testing.T) {
+	router, _ := setupControllerTest(nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/prs/acme/widget/99/info", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", w.Code, w.Body.String())
+	}
+	var got struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Code != "github_not_configured" {
+		t.Fatalf("expected github_not_configured code, got %q", got.Code)
+	}
+}
+
+func TestHttpGetPRInfo_GitHubAPIErrorStatus(t *testing.T) {
+	sc := &stubClient{
+		getPRFunc: func(context.Context, string, string, int) (*PR, error) {
+			return nil, &GitHubAPIError{
+				StatusCode: http.StatusNotFound,
+				Endpoint:   "/repos/acme/widget/pulls/99",
+				Body:       "upstream error",
+			}
+		},
+	}
+	router, _ := setupControllerTest(sc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/prs/acme/widget/99/info", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
 func TestHttpGetIssueInfo_Success(t *testing.T) {
 	sc := &stubClient{
 		getIssueFunc: func(_ context.Context, owner, repo string, number int) (*Issue, error) {

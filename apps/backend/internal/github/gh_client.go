@@ -230,6 +230,13 @@ func (c *GHClient) GetPR(ctx context.Context, owner, repo string, number int) (*
 		"--repo", fmt.Sprintf("%s/%s", owner, repo),
 		"--json", "number,title,url,state,body,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,mergeStateStatus,additions,deletions,createdAt,updatedAt,mergedAt,closedAt,reviewRequests")
 	if err != nil {
+		if isNotFoundErr(err) {
+			return nil, &GitHubAPIError{
+				StatusCode: http.StatusNotFound,
+				Endpoint:   fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, number),
+				Body:       err.Error(),
+			}
+		}
 		return nil, fmt.Errorf("get PR #%d: %w", number, err)
 	}
 	var raw ghPR
@@ -1096,16 +1103,14 @@ func convertGHPR(raw *ghPR, owner, repo string) *PR {
 }
 
 func convertGHIssue(raw *ghIssue, owner, repo string) *Issue {
-	labels := collectIssueStrings(raw.Labels, func(label struct {
-		Name string `json:"name"`
-	}) string {
-		return label.Name
-	})
-	assignees := collectIssueStrings(raw.Assignees, func(assignee struct {
-		Login string `json:"login"`
-	}) string {
-		return assignee.Login
-	})
+	labels := make([]string, len(raw.Labels))
+	for i, label := range raw.Labels {
+		labels[i] = label.Name
+	}
+	assignees := make([]string, len(raw.Assignees))
+	for i, assignee := range raw.Assignees {
+		assignees[i] = assignee.Login
+	}
 	return &Issue{
 		Number:      raw.Number,
 		Title:       raw.Title,
@@ -1122,14 +1127,6 @@ func convertGHIssue(raw *ghIssue, owner, repo string) *Issue {
 		UpdatedAt:   raw.UpdatedAt,
 		ClosedAt:    parseTimePtr(raw.ClosedAt),
 	}
-}
-
-func collectIssueStrings[T any](items []T, value func(T) string) []string {
-	values := make([]string, len(items))
-	for i, item := range items {
-		values[i] = value(item)
-	}
-	return values
 }
 
 func convertGHRequestedReviewers(raw []ghRequestedReviewer) []RequestedReviewer {

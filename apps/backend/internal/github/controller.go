@@ -392,6 +392,13 @@ func parseRouteNumber(ctx *gin.Context, invalidMessage string) (int, bool) {
 }
 
 func handleGitHubInfoError(ctx *gin.Context, err error) {
+	if errors.Is(err, ErrNoClient) {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "GitHub is not configured. Connect GitHub in Settings > Integrations.",
+			"code":  "github_not_configured",
+		})
+		return
+	}
 	status := http.StatusInternalServerError
 	message := "failed to fetch GitHub info"
 	var apiErr *GitHubAPIError
