@@ -74,7 +74,7 @@ func TestMockClient_AddIssueGetIssueAndReset(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := m.GetIssue(ctx, "owner", "repo", 1456)
-	if err == nil || !errors.Is(err, ErrNoClient) && err.Error() != "mock: issue owner/repo#1456 not found" {
+	if err == nil || err.Error() != "mock: issue owner/repo#1456 not found" {
 		t.Fatalf("expected missing issue error, got %v", err)
 	}
 
@@ -95,7 +95,7 @@ func TestMockClient_AddIssueGetIssueAndReset(t *testing.T) {
 
 	m.Reset()
 	_, err = m.GetIssue(ctx, "owner", "repo", 1456)
-	if err == nil || !errors.Is(err, ErrNoClient) && err.Error() != "mock: issue owner/repo#1456 not found" {
+	if err == nil || err.Error() != "mock: issue owner/repo#1456 not found" {
 		t.Fatalf("expected reset issue error, got %v", err)
 	}
 }

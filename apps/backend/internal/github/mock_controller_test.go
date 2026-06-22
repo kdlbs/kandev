@@ -7,11 +7,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
-func setupMockControllerTest() (*gin.Engine, *MockClient) {
+func setupMockControllerTestForAddIssues() (*gin.Engine, *MockClient) {
 	gin.SetMode(gin.TestMode)
 	mock := NewMockClient()
 	ctrl := NewMockController(mock, nil, nil, nil, newControllerTestLogger())
@@ -21,7 +22,7 @@ func setupMockControllerTest() (*gin.Engine, *MockClient) {
 }
 
 func TestMockControllerAddIssues(t *testing.T) {
-	router, mock := setupMockControllerTest()
+	router, mock := setupMockControllerTestForAddIssues()
 	body := bytes.NewBufferString(`{"issues":[{"number":1456,"title":"Fix picker","repo_owner":"owner","repo_name":"repo"}]}`)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/github/mock/issues", body)
@@ -51,7 +52,7 @@ func TestMockControllerAddIssues(t *testing.T) {
 }
 
 func TestMockControllerAddIssuesInvalidPayload(t *testing.T) {
-	router, _ := setupMockControllerTest()
+	router, _ := setupMockControllerTestForAddIssues()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/github/mock/issues", bytes.NewBufferString(`{`))
 	req.Header.Set("Content-Type", "application/json")
@@ -60,5 +61,35 @@ func TestMockControllerAddIssuesInvalidPayload(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestEnsureMockPRForRequestCopiesMergeableState(t *testing.T) {
+	mock := NewMockClient()
+	controller := &MockController{mock: mock}
+	req := &associateTaskPRRequest{
+		Owner:          "testorg",
+		Repo:           "testrepo",
+		PRNumber:       102,
+		PRURL:          "https://github.com/testorg/testrepo/pull/102",
+		PRTitle:        "Ready to ship",
+		HeadBranch:     "feat/ready",
+		BaseBranch:     "main",
+		AuthorLogin:    "test-user",
+		State:          "open",
+		MergeableState: "clean",
+	}
+
+	controller.ensureMockPRForRequest(context.Background(), req, time.Now().UTC())
+
+	pr, err := mock.GetPR(context.Background(), req.Owner, req.Repo, req.PRNumber)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if pr == nil {
+		t.Fatal("expected synthetic PR")
+	}
+	if pr.MergeableState != "clean" {
+		t.Fatalf("MergeableState = %q, want clean", pr.MergeableState)
 	}
 }
