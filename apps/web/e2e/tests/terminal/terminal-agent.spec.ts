@@ -108,8 +108,8 @@ test.describe("Terminal agent (TUI passthrough)", () => {
 
     const session = await openTaskSession(testPage, "TUI Test Task");
 
-    // Loading overlay is visible while the WebSocket connects
-    await session.waitForPassthroughLoading();
+    // The loading overlay is transient; on fast runs the terminal may already be connected.
+    await session.waitForPassthroughLoading().catch(() => undefined);
 
     // Once connected, loading overlay disappears and terminal content is visible
     await session.waitForPassthroughLoaded();

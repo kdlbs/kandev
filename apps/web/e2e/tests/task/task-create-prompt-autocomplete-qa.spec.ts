@@ -245,6 +245,7 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await kanban.createTaskButton.first().click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
+    await testPage.getByRole("radio", { name: "None" }).click();
     await testPage.getByTestId("task-title-input").fill("qa-submit-task");
     const textarea = testPage.getByTestId("task-description-input");
     await textarea.click();
