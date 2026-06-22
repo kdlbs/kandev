@@ -219,8 +219,9 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 func (r *Repository) ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
 	rows, err := r.ro.QueryContext(ctx, `
 		SELECT id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
-			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port,
-			worktree_id, worktree_path, worktree_branch, metadata, created_at, updated_at
+			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid,
+			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
+			created_at, updated_at
 		FROM executors_running
 		ORDER BY updated_at DESC
 	`)
@@ -229,44 +230,28 @@ func (r *Repository) ListExecutorsRunning(ctx context.Context) ([]*models.Execut
 	}
 	defer func() { _ = rows.Close() }()
 
-	var results []*models.ExecutorRunning
-	for rows.Next() {
-		running := &models.ExecutorRunning{}
-		var metadataJSON string
-		if scanErr := rows.Scan(
-			&running.ID,
-			&running.SessionID,
-			&running.TaskID,
-			&running.ExecutorID,
-			&running.Runtime,
-			&running.Status,
-			&running.Resumable,
-			&running.ResumeToken,
-			&running.LastMessageUUID,
-			&running.AgentExecutionID,
-			&running.ContainerID,
-			&running.AgentctlURL,
-			&running.AgentctlPort,
-			&running.WorktreeID,
-			&running.WorktreePath,
-			&running.WorktreeBranch,
-			&metadataJSON,
-			&running.CreatedAt,
-			&running.UpdatedAt,
-		); scanErr != nil {
-			return nil, scanErr
-		}
-		if metadataJSON != "" && metadataJSON != "{}" {
-			if jsonErr := json.Unmarshal([]byte(metadataJSON), &running.Metadata); jsonErr != nil {
-				return nil, fmt.Errorf("failed to deserialize executor running metadata: %w", jsonErr)
-			}
-		}
-		results = append(results, running)
+	return scanExecutorRunningRows(rows)
+}
+
+func (r *Repository) ListExecutorsRunningByTaskID(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error) {
+	if taskID == "" {
+		return nil, fmt.Errorf("task_id is required")
 	}
-	if err := rows.Err(); err != nil {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
+			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid,
+			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
+			created_at, updated_at
+		FROM executors_running
+		WHERE task_id = ?
+		ORDER BY updated_at DESC
+	`), taskID)
+	if err != nil {
 		return nil, err
 	}
-	return results, nil
+	defer func() { _ = rows.Close() }()
+
+	return scanExecutorRunningRows(rows)
 }
 
 func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error) {
@@ -325,6 +310,58 @@ func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionI
 		}
 	}
 	return running, nil
+}
+
+func scanExecutorRunningRows(rows *sql.Rows) ([]*models.ExecutorRunning, error) {
+	var results []*models.ExecutorRunning
+	for rows.Next() {
+		running := &models.ExecutorRunning{}
+		var (
+			resumable    int
+			lastSeen     sql.NullTime
+			metadataJSON string
+		)
+		if scanErr := rows.Scan(
+			&running.ID,
+			&running.SessionID,
+			&running.TaskID,
+			&running.ExecutorID,
+			&running.Runtime,
+			&running.Status,
+			&resumable,
+			&running.ResumeToken,
+			&running.LastMessageUUID,
+			&running.AgentExecutionID,
+			&running.ContainerID,
+			&running.AgentctlURL,
+			&running.AgentctlPort,
+			&running.PID,
+			&running.WorktreeID,
+			&running.WorktreePath,
+			&running.WorktreeBranch,
+			&lastSeen,
+			&running.ErrorMessage,
+			&metadataJSON,
+			&running.CreatedAt,
+			&running.UpdatedAt,
+		); scanErr != nil {
+			return nil, scanErr
+		}
+		running.Resumable = resumable == 1
+		if lastSeen.Valid {
+			running.LastSeenAt = &lastSeen.Time
+		}
+		if metadataJSON != "" && metadataJSON != "{}" {
+			if jsonErr := json.Unmarshal([]byte(metadataJSON), &running.Metadata); jsonErr != nil {
+				return nil, fmt.Errorf("failed to deserialize executor running metadata: %w", jsonErr)
+			}
+		}
+		results = append(results, running)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return results, nil
 }
 
 func (r *Repository) DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error {

@@ -45,6 +45,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [subtask-checklist](tasks/subtask-checklist.md) | shipped |
 | [subtree-controls](tasks/subtree-controls.md) | shipped |
 | [blocked-task-escalation](tasks/blocked-task-escalation.md) | draft |
+| [runtime-cleanup](tasks/runtime-cleanup.md) | draft |
 | [multi-branch](tasks/multi-branch/spec.md) | shipped |
 
 ## agents/ — agent governance

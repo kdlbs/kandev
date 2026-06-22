@@ -1756,22 +1756,139 @@ func TestReconcileSessionsOnStartup(t *testing.T) {
 		seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCompleted)
 
 		err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
-			ID:        "er1",
-			SessionID: "session1",
-			TaskID:    "task1",
-			CreatedAt: now,
-			UpdatedAt: now,
+			ID:               "er1",
+			SessionID:        "session1",
+			TaskID:           "task1",
+			AgentExecutionID: "exec-terminal",
+			CreatedAt:        now,
+			UpdatedAt:        now,
 		})
 		if err != nil {
 			t.Fatalf("failed to upsert executor running: %v", err)
 		}
 
-		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+		agentMgr := &mockAgentManager{}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 		svc.reconcileSessionsOnStartup(ctx)
 
 		_, err = repo.GetExecutorRunningBySessionID(ctx, "session1")
 		if err == nil {
 			t.Fatal("expected ExecutorRunning record to be deleted for terminal session")
+		}
+		agentMgr.mu.Lock()
+		stopCalls := append([]stopAgentCall(nil), agentMgr.stopAgentWithReasonArgs...)
+		agentMgr.mu.Unlock()
+		if len(stopCalls) != 1 {
+			t.Fatalf("expected one StopAgentWithReason call, got %d", len(stopCalls))
+		}
+		if stopCalls[0] != (stopAgentCall{
+			ExecutionID: "exec-terminal",
+			Reason:      "startup terminal session cleanup",
+			Force:       true,
+		}) {
+			t.Fatalf("unexpected StopAgentWithReason call: %#v", stopCalls[0])
+		}
+	})
+
+	t.Run("terminal_session_stop_failure_preserves_executor_row", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+
+		seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCompleted)
+
+		err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID:               "er1",
+			SessionID:        "session1",
+			TaskID:           "task1",
+			AgentExecutionID: "exec-terminal",
+			CreatedAt:        now,
+			UpdatedAt:        now,
+		})
+		if err != nil {
+			t.Fatalf("failed to upsert executor running: %v", err)
+		}
+
+		agentMgr := &mockAgentManager{stopAgentWithReasonErr: errors.New("runtime still running")}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+		svc.reconcileSessionsOnStartup(ctx)
+
+		running, err := repo.GetExecutorRunningBySessionID(ctx, "session1")
+		if err != nil {
+			t.Fatalf("expected ExecutorRunning record to be preserved after stop failure: %v", err)
+		}
+		if running.AgentExecutionID != "exec-terminal" {
+			t.Fatalf("expected execution ID to be preserved, got %q", running.AgentExecutionID)
+		}
+	})
+
+	t.Run("missing_session_runtime_cleaned_up", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+
+		err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID:               "er1",
+			SessionID:        "session-deleted",
+			TaskID:           "task-deleted",
+			AgentExecutionID: "exec-deleted",
+			CreatedAt:        now,
+			UpdatedAt:        now,
+		})
+		if err != nil {
+			t.Fatalf("failed to upsert executor running: %v", err)
+		}
+
+		agentMgr := &mockAgentManager{}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+		svc.reconcileSessionsOnStartup(ctx)
+
+		_, err = repo.GetExecutorRunningBySessionID(ctx, "session-deleted")
+		if err == nil {
+			t.Fatal("expected ExecutorRunning record to be deleted for missing session after stop")
+		}
+		agentMgr.mu.Lock()
+		stopCalls := append([]stopAgentCall(nil), agentMgr.stopAgentWithReasonArgs...)
+		agentMgr.mu.Unlock()
+		if len(stopCalls) != 1 {
+			t.Fatalf("expected one StopAgentWithReason call, got %d", len(stopCalls))
+		}
+		if stopCalls[0] != (stopAgentCall{
+			ExecutionID: "exec-deleted",
+			Reason:      "startup missing session cleanup",
+			Force:       true,
+		}) {
+			t.Fatalf("unexpected StopAgentWithReason call: %#v", stopCalls[0])
+		}
+	})
+
+	t.Run("missing_session_stop_failure_preserves_executor_row", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+
+		err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID:               "er1",
+			SessionID:        "session-deleted",
+			TaskID:           "task-deleted",
+			AgentExecutionID: "exec-deleted",
+			CreatedAt:        now,
+			UpdatedAt:        now,
+		})
+		if err != nil {
+			t.Fatalf("failed to upsert executor running: %v", err)
+		}
+
+		agentMgr := &mockAgentManager{stopAgentWithReasonErr: errors.New("runtime still running")}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+		svc.reconcileSessionsOnStartup(ctx)
+
+		running, err := repo.GetExecutorRunningBySessionID(ctx, "session-deleted")
+		if err != nil {
+			t.Fatalf("expected ExecutorRunning record to be preserved after stop failure: %v", err)
+		}
+		if running.AgentExecutionID != "exec-deleted" {
+			t.Fatalf("expected execution ID to be preserved, got %q", running.AgentExecutionID)
 		}
 	})
 

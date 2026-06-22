@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -477,6 +479,187 @@ func TestService_DeleteTask(t *testing.T) {
 	}
 }
 
+func TestService_DeleteTaskStopsExecutorRunningForTerminalSession(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	stopper := newRecordingTaskExecutionStopper()
+	svc.SetExecutionStopper(stopper)
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test", Priority: "medium"})
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:     "session-completed",
+		TaskID: "task-123",
+		State:  models.TaskSessionStateCompleted,
+	})
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:               "session-completed",
+		SessionID:        "session-completed",
+		TaskID:           "task-123",
+		ExecutorID:       "executor-1",
+		Runtime:          agentruntime.RuntimeStandalone,
+		Status:           models.ExecutorRunningStatusStarting,
+		AgentExecutionID: "exec-terminal",
+	}); err != nil {
+		t.Fatalf("seed executor running: %v", err)
+	}
+
+	if err := svc.DeleteTask(ctx, "task-123"); err != nil {
+		t.Fatalf("DeleteTask: %v", err)
+	}
+
+	call := stopper.waitForStopExecution(t)
+	if call.executionID != "exec-terminal" {
+		t.Fatalf("StopExecution executionID = %q, want exec-terminal", call.executionID)
+	}
+	if call.reason != "task deleted" {
+		t.Fatalf("StopExecution reason = %q, want task deleted", call.reason)
+	}
+	if !call.force {
+		t.Fatal("StopExecution force = false, want true")
+	}
+}
+
+func TestService_DeleteTaskPreservesExecutorRunningWhenStopFails(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	stopper := newRecordingTaskExecutionStopper()
+	stopper.stopExecutionErr = errors.New("runtime still shutting down")
+	svc.SetExecutionStopper(stopper)
+	quickChatDir := t.TempDir()
+	svc.SetQuickChatDir(quickChatDir)
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test", Priority: "medium"})
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:     "session-completed",
+		TaskID: "task-123",
+		State:  models.TaskSessionStateCompleted,
+	})
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:               "session-completed",
+		SessionID:        "session-completed",
+		TaskID:           "task-123",
+		ExecutorID:       "executor-1",
+		Runtime:          agentruntime.RuntimeStandalone,
+		Status:           models.ExecutorRunningStatusStarting,
+		AgentExecutionID: "exec-terminal",
+	}); err != nil {
+		t.Fatalf("seed executor running: %v", err)
+	}
+	sessionDir := filepath.Join(quickChatDir, "session-completed")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+
+	if err := svc.DeleteTask(ctx, "task-123"); err != nil {
+		t.Fatalf("DeleteTask: %v", err)
+	}
+	_ = stopper.waitForStopExecution(t)
+	time.Sleep(50 * time.Millisecond)
+
+	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session-completed"); err != nil {
+		t.Fatalf("executor row should remain retryable after stop failure: %v", err)
+	}
+	if _, err := os.Stat(sessionDir); err != nil {
+		t.Fatalf("quick-chat directory should remain when stop fails: %v", err)
+	}
+}
+
+func TestService_ArchiveTaskStopsExecutorRunningForTerminalSession(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	stopper := newRecordingTaskExecutionStopper()
+	svc.SetExecutionStopper(stopper)
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test", Priority: "medium"})
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:     "session-completed",
+		TaskID: "task-123",
+		State:  models.TaskSessionStateCompleted,
+	})
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:               "session-completed",
+		SessionID:        "session-completed",
+		TaskID:           "task-123",
+		ExecutorID:       "executor-1",
+		Runtime:          agentruntime.RuntimeStandalone,
+		Status:           models.ExecutorRunningStatusStarting,
+		AgentExecutionID: "exec-terminal",
+	}); err != nil {
+		t.Fatalf("seed executor running: %v", err)
+	}
+
+	if err := svc.ArchiveTask(ctx, "task-123"); err != nil {
+		t.Fatalf("ArchiveTask: %v", err)
+	}
+
+	call := stopper.waitForStopExecution(t)
+	if call.executionID != "exec-terminal" {
+		t.Fatalf("StopExecution executionID = %q, want exec-terminal", call.executionID)
+	}
+	if call.reason != "task archived" {
+		t.Fatalf("StopExecution reason = %q, want task archived", call.reason)
+	}
+	if !call.force {
+		t.Fatal("StopExecution force = false, want true")
+	}
+}
+
+func TestService_DeleteTaskFailsClosedWhenRuntimeInventoryFails(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	inventoryErr := errors.New("inventory unavailable")
+	svc.SetExecutionStopper(newRecordingTaskExecutionStopper())
+	svc.executors = failingExecutorRepository{
+		ExecutorRepository: repo,
+		listByTaskErr:      inventoryErr,
+	}
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test", Priority: "medium"})
+
+	err := svc.DeleteTask(ctx, "task-123")
+	if !errors.Is(err, inventoryErr) {
+		t.Fatalf("DeleteTask error = %v, want inventory error", err)
+	}
+	if _, err := repo.GetTask(ctx, "task-123"); err != nil {
+		t.Fatalf("task should remain when runtime inventory fails: %v", err)
+	}
+}
+
+func TestService_ArchiveTaskFailsClosedWhenRuntimeInventoryFails(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	inventoryErr := errors.New("inventory unavailable")
+	svc.SetExecutionStopper(newRecordingTaskExecutionStopper())
+	svc.executors = failingExecutorRepository{
+		ExecutorRepository: repo,
+		listByTaskErr:      inventoryErr,
+	}
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test", Priority: "medium"})
+
+	err := svc.ArchiveTask(ctx, "task-123")
+	if !errors.Is(err, inventoryErr) {
+		t.Fatalf("ArchiveTask error = %v, want inventory error", err)
+	}
+	task, err := repo.GetTask(ctx, "task-123")
+	if err != nil {
+		t.Fatalf("task should remain when runtime inventory fails: %v", err)
+	}
+	if task.ArchivedAt != nil {
+		t.Fatal("task should not be archived when runtime inventory fails")
+	}
+}
+
 func TestService_ListTasks(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -493,6 +676,54 @@ func TestService_ListTasks(t *testing.T) {
 	if len(tasks) != 2 {
 		t.Errorf("expected 2 tasks, got %d", len(tasks))
 	}
+}
+
+type stopExecutionCall struct {
+	executionID string
+	reason      string
+	force       bool
+}
+
+type recordingTaskExecutionStopper struct {
+	stopExecutionCh  chan stopExecutionCall
+	stopExecutionErr error
+}
+
+func newRecordingTaskExecutionStopper() *recordingTaskExecutionStopper {
+	return &recordingTaskExecutionStopper{stopExecutionCh: make(chan stopExecutionCall, 8)}
+}
+
+func (s *recordingTaskExecutionStopper) StopTask(context.Context, string, string, bool) error {
+	return nil
+}
+
+func (s *recordingTaskExecutionStopper) StopSession(context.Context, string, string, bool) error {
+	return nil
+}
+
+func (s *recordingTaskExecutionStopper) StopExecution(_ context.Context, executionID, reason string, force bool) error {
+	s.stopExecutionCh <- stopExecutionCall{executionID: executionID, reason: reason, force: force}
+	return s.stopExecutionErr
+}
+
+func (s *recordingTaskExecutionStopper) waitForStopExecution(t *testing.T) stopExecutionCall {
+	t.Helper()
+	select {
+	case call := <-s.stopExecutionCh:
+		return call
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for StopExecution")
+		return stopExecutionCall{}
+	}
+}
+
+type failingExecutorRepository struct {
+	repository.ExecutorRepository
+	listByTaskErr error
+}
+
+func (r failingExecutorRepository) ListExecutorsRunningByTaskID(context.Context, string) ([]*models.ExecutorRunning, error) {
+	return nil, r.listByTaskErr
 }
 
 func TestService_UpdateTaskState(t *testing.T) {

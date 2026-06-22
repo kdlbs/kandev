@@ -748,7 +748,10 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 			zap.Error(err))
 	}
 	if s.executionStopper != nil {
-		stopTargets = s.buildStopTargets(ctx, id, activeSessions)
+		stopTargets, err = s.buildStopTargets(ctx, id, activeSessions)
+		if err != nil {
+			return fmt.Errorf("list runtime cleanup inventory: %w", err)
+		}
 	}
 
 	// 2b. Capture git archive snapshot for active sessions BEFORE stopping agents
@@ -864,7 +867,10 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 				zap.String("task_id", id),
 				zap.Error(err))
 		}
-		stopTargets = s.buildStopTargets(ctx, id, activeSessions)
+		stopTargets, err = s.buildStopTargets(ctx, id, activeSessions)
+		if err != nil {
+			return fmt.Errorf("list runtime cleanup inventory: %w", err)
+		}
 	}
 
 	// 4. Delete from DB (sync, fast)
@@ -902,8 +908,10 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 // teardown those wrappers run via runAsyncTaskCleanup. Without this call the
 // agent gets stopped but its container/sandbox leaks indefinitely.
 //
-// The caller is expected to have cancelled active runs separately (cascade
-// does this via runCanceller before invoking us), so stopTargets is empty.
+// The caller may already have cancelled active runs separately (cascade does
+// this via runCanceller before invoking us), but terminal sessions can still
+// have executors_running rows. We still derive runtime stop targets from
+// executors_running here so cascade cleanup does not drop durable handles.
 // deleteEnvRow controls whether the task_environment row is removed (true
 // for delete cascade, false for archive — archive preserves the row).
 // Best-effort and idempotent; failures are logged.
@@ -914,17 +922,27 @@ func (s *Service) CleanupTaskResources(ctx context.Context, taskID string, delet
 			zap.String("task_id", taskID),
 			zap.Error(err))
 	}
+	var stopTargets []taskStopTarget
+	if s.executionStopper != nil {
+		stopTargets, err = s.buildStopTargets(ctx, taskID, sessions)
+		if err != nil {
+			s.logger.Warn("skipping cascade cleanup because runtime inventory failed",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+			return
+		}
+	}
 	worktrees := s.gatherWorktreesForDelete(ctx, taskID)
 	taskEnv := s.gatherTaskEnvironmentForCleanup(ctx, taskID)
 	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: deleteEnvRow}
-	if len(sessions) == 0 && len(worktrees) == 0 && taskEnv == nil {
+	if len(sessions) == 0 && len(worktrees) == 0 && len(stopTargets) == 0 && taskEnv == nil {
 		return
 	}
 	reason := "cascade archive"
 	if deleteEnvRow {
 		reason = "cascade delete"
 	}
-	s.runAsyncTaskCleanup(taskID, sessions, worktrees, nil, envCleanup, false,
+	s.runAsyncTaskCleanup(taskID, sessions, worktrees, stopTargets, envCleanup, false,
 		reason, "failed to stop session on cascade cleanup", "cascade cleanup completed")
 }
 
@@ -982,28 +1000,9 @@ func (s *Service) runAsyncTaskCleanup(
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 
-		if s.executionStopper != nil && len(stopTargets) > 0 {
-			for _, target := range stopTargets {
-				if target.executionID != "" {
-					if err := s.executionStopper.StopExecution(cleanupCtx, target.executionID, stopReason, true); err != nil {
-						s.logger.Warn(stopFailMsg,
-							zap.String("task_id", id),
-							zap.String("session_id", target.sessionID),
-							zap.String("execution_id", target.executionID),
-							zap.Error(err))
-					}
-					continue
-				}
-				if err := s.executionStopper.StopSession(cleanupCtx, target.sessionID, stopReason, true); err != nil {
-					s.logger.Warn(stopFailMsg,
-						zap.String("task_id", id),
-						zap.String("session_id", target.sessionID),
-						zap.Error(err))
-				}
-			}
-		}
+		failedStops := s.stopTaskRuntimeTargets(cleanupCtx, id, stopTargets, stopReason, stopFailMsg)
 
-		cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, envCleanup, isEphemeral)
+		cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, envCleanup, isEphemeral, failedStops)
 
 		if len(cleanupErrors) > 0 {
 			s.logger.Warn(cleanupMsg+" with errors",
@@ -1018,17 +1017,38 @@ func (s *Service) runAsyncTaskCleanup(
 	}()
 }
 
-func (s *Service) buildStopTargets(ctx context.Context, taskID string, activeSessions []*models.TaskSession) []taskStopTarget {
+func (s *Service) buildStopTargets(ctx context.Context, taskID string, activeSessions []*models.TaskSession) ([]taskStopTarget, error) {
 	targets := make([]taskStopTarget, 0, len(activeSessions))
+	seen := make(map[string]struct{})
+	if s.executors != nil {
+		runningRows, err := s.executors.ListExecutorsRunningByTaskID(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+		for _, running := range runningRows {
+			if running == nil || running.SessionID == "" {
+				continue
+			}
+			target := taskStopTarget{
+				sessionID:   running.SessionID,
+				executionID: strings.TrimSpace(running.AgentExecutionID),
+			}
+			targets = append(targets, target)
+			seen[target.sessionID] = struct{}{}
+		}
+	}
 	for _, sess := range activeSessions {
 		if sess == nil || sess.ID == "" {
+			continue
+		}
+		if _, ok := seen[sess.ID]; ok {
 			continue
 		}
 		target := taskStopTarget{
 			sessionID:   sess.ID,
 			executionID: strings.TrimSpace(sess.AgentExecutionID),
 		}
-		if target.executionID == "" {
+		if target.executionID == "" && s.executors != nil {
 			running, err := s.executors.GetExecutorRunningBySessionID(ctx, sess.ID)
 			if err == nil && running != nil {
 				target.executionID = strings.TrimSpace(running.AgentExecutionID)
@@ -1039,7 +1059,35 @@ func (s *Service) buildStopTargets(ctx context.Context, taskID string, activeSes
 	s.logger.Debug("prepared task cleanup stop targets",
 		zap.String("task_id", taskID),
 		zap.Int("count", len(targets)))
-	return targets
+	return targets, nil
+}
+
+func (s *Service) stopTaskRuntimeTargets(ctx context.Context, taskID string, stopTargets []taskStopTarget, stopReason, stopFailMsg string) map[string]struct{} {
+	failedStops := make(map[string]struct{})
+	if s.executionStopper == nil || len(stopTargets) == 0 {
+		return failedStops
+	}
+	for _, target := range stopTargets {
+		if target.executionID != "" {
+			if err := s.executionStopper.StopExecution(ctx, target.executionID, stopReason, true); err != nil {
+				failedStops[target.sessionID] = struct{}{}
+				s.logger.Warn(stopFailMsg,
+					zap.String("task_id", taskID),
+					zap.String("session_id", target.sessionID),
+					zap.String("execution_id", target.executionID),
+					zap.Error(err))
+			}
+			continue
+		}
+		if err := s.executionStopper.StopSession(ctx, target.sessionID, stopReason, true); err != nil {
+			failedStops[target.sessionID] = struct{}{}
+			s.logger.Warn(stopFailMsg,
+				zap.String("task_id", taskID),
+				zap.String("session_id", target.sessionID),
+				zap.Error(err))
+		}
+	}
+	return failedStops
 }
 
 // performTaskCleanup handles post-deletion cleanup operations.
@@ -1053,27 +1101,28 @@ func (s *Service) performTaskCleanup(
 	worktrees []*worktree.Worktree,
 	envCleanup taskEnvironmentCleanup,
 	isEphemeral bool,
+	preserveExecutorRows map[string]struct{},
 ) []error {
 	var errs []error
+	hasPreservedRuntimes := len(preserveExecutorRows) > 0
 
-	errs = append(errs, s.cleanupTaskEnvironment(ctx, taskID, envCleanup)...)
-	worktrees = excludeEnvironmentWorktree(worktrees, envCleanup.env)
-
-	// Cleanup worktrees
-	if len(worktrees) > 0 {
-		if cleaner, ok := s.worktreeCleanup.(WorktreeBatchCleaner); ok {
-			if err := cleaner.CleanupWorktrees(ctx, worktrees); err != nil {
-				s.logger.Warn("failed to cleanup worktrees after delete",
-					zap.String("task_id", taskID),
-					zap.Error(err))
-				errs = append(errs, fmt.Errorf("cleanup worktrees: %w", err))
-			}
-		}
+	if hasPreservedRuntimes {
+		s.logger.Warn("skipping destructive task cleanup after failed runtime stop",
+			zap.String("task_id", taskID),
+			zap.Int("preserved_runtime_count", len(preserveExecutorRows)))
+	} else {
+		errs = append(errs, s.cleanupDestructiveTaskResources(ctx, taskID, worktrees, envCleanup)...)
 	}
 
 	// Delete executor running records for sessions
 	for _, session := range sessions {
 		if session == nil || session.ID == "" {
+			continue
+		}
+		if _, preserve := preserveExecutorRows[session.ID]; preserve {
+			s.logger.Warn("preserving executor runtime row after failed stop",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID))
 			continue
 		}
 		if err := s.executors.DeleteExecutorRunningBySessionID(ctx, session.ID); err != nil {
@@ -1088,7 +1137,7 @@ func (s *Service) performTaskCleanup(
 	// Cleanup quick-chat workspace directories for all tasks (not just ephemeral).
 	// Non-ephemeral office tasks also get quick-chat dirs allocated by manager_launch.go;
 	// both cases must be cleaned up to avoid a disk leak.
-	if s.quickChatDir != "" {
+	if s.quickChatDir != "" && !hasPreservedRuntimes {
 		for _, session := range sessions {
 			if session == nil || session.ID == "" {
 				continue
@@ -1114,6 +1163,31 @@ func (s *Service) performTaskCleanup(
 		}
 	}
 
+	return errs
+}
+
+func (s *Service) cleanupDestructiveTaskResources(
+	ctx context.Context,
+	taskID string,
+	worktrees []*worktree.Worktree,
+	envCleanup taskEnvironmentCleanup,
+) []error {
+	var errs []error
+	errs = append(errs, s.cleanupTaskEnvironment(ctx, taskID, envCleanup)...)
+	worktrees = excludeEnvironmentWorktree(worktrees, envCleanup.env)
+	if len(worktrees) == 0 {
+		return errs
+	}
+	cleaner, ok := s.worktreeCleanup.(WorktreeBatchCleaner)
+	if !ok {
+		return errs
+	}
+	if err := cleaner.CleanupWorktrees(ctx, worktrees); err != nil {
+		s.logger.Warn("failed to cleanup worktrees after delete",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		errs = append(errs, fmt.Errorf("cleanup worktrees: %w", err))
+	}
 	return errs
 }
 

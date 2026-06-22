@@ -30,3 +30,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0022 | [Embedded Vite assets](0022-embedded-vite-assets.md)                                                                                | accepted   | backend, frontend, cli      | 2026-06-17 |
 | 0023 | [Active workspace cookie for boot state](0023-active-workspace-cookie.md)                                                           | accepted   | backend, frontend           | 2026-06-18 |
 | 0024 | [Go-fronted Vite dev mode](0024-go-fronted-vite-dev-mode.md)                                                                        | accepted   | backend, frontend, cli      | 2026-06-18 |
+| 0025 | [Runtime cleanup uses `executors_running`](0025-runtime-cleanup-uses-executors-running.md)                                          | accepted   | backend                     | 2026-06-22 |
