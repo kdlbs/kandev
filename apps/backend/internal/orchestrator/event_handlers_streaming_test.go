@@ -794,6 +794,43 @@ func TestHandleCompleteStreamEvent_RunModeAutomationFailureStopsAndFinalizes(t *
 	}
 }
 
+func TestExtractCompleteErrorMessage(t *testing.T) {
+	cases := []struct {
+		name string
+		data *lifecycle.AgentStreamEventData
+		want string
+	}{
+		{name: "nil_data", data: nil, want: ""},
+		{
+			name: "data_error",
+			data: &lifecycle.AgentStreamEventData{Error: "top-level error"},
+			want: "top-level error",
+		},
+		{
+			name: "structured_error",
+			data: &lifecycle.AgentStreamEventData{Data: map[string]interface{}{"error": "structured error"}},
+			want: "structured error",
+		},
+		{
+			name: "structured_message",
+			data: &lifecycle.AgentStreamEventData{Data: map[string]interface{}{"message": "structured message"}},
+			want: "structured message",
+		},
+		{
+			name: "agent_text_ignored",
+			data: &lifecycle.AgentStreamEventData{Text: "agent output"},
+			want: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := extractCompleteErrorMessage(&lifecycle.AgentStreamEventPayload{Data: tc.data})
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
 // TestSetSessionWaitingForInput_WritesOnTransition is the symmetric counterpart
 // to TestSetSessionRunning_WritesOnTransition: when the session is NOT already
 // WAITING_FOR_INPUT, setSessionWaitingForInput MUST still fire the task write.

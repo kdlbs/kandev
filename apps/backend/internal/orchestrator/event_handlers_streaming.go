@@ -845,6 +845,8 @@ func extractCompleteErrorMessage(payload *lifecycle.AgentStreamEventPayload) str
 	if payload.Data.Error != "" {
 		return payload.Data.Error
 	}
+	// Complete-event text is user-facing agent output; only structured error
+	// fields should become AutomationRun.error_message.
 	data, ok := payload.Data.Data.(map[string]interface{})
 	if !ok {
 		return ""
