@@ -149,8 +149,13 @@ function useChipPopoverInteractions() {
   }, []);
 
   const handleEnter = useCallback(() => {
-    if (open || openTimer.current) return;
+    // Cancel any pending close FIRST. Crossing from the chip onto the already-
+    // open popover fires this with `open` already true — the early return below
+    // must not strand the close timer queued by handleLeave when the cursor
+    // left the chip, or the popover vanishes mid-hover and its buttons become
+    // unclickable.
     clearClose();
+    if (open || openTimer.current) return;
     openTimer.current = setTimeout(() => setOpen(true), HOVER_OPEN_DELAY_MS);
   }, [clearClose, open]);
 

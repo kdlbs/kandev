@@ -128,8 +128,13 @@ function usePopoverInteractions() {
 
   const handleEnter = useCallback(() => {
     if (isMobile) return;
-    if (open || openTimer.current) return;
+    // Cancel any pending close FIRST. When the cursor crosses from the trigger
+    // onto the already-open popover, this fires with `open` already true — the
+    // early return below must not strand the close timer queued by handleLeave
+    // when the cursor left the trigger, or the popover vanishes mid-hover and
+    // its buttons become unclickable.
     clearClose();
+    if (open || openTimer.current) return;
     openTimer.current = setTimeout(() => setOpen(true), POPOVER_OPEN_DELAY_MS);
   }, [isMobile, clearClose, open]);
 
