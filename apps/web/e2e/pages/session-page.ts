@@ -701,7 +701,10 @@ export class SessionPage {
    * open hover card.
    */
   prChipPopover(): Locator {
-    return this.page.getByTestId("pr-topbar-popover-inner");
+    // Scope to the visible instance: dock/mobile layouts can leave stale or
+    // hidden popover mounts in the DOM, and an unscoped getByTestId would bind
+    // to one of those and make hover assertions flaky.
+    return this.page.locator("[data-testid='pr-topbar-popover-inner']:visible").first();
   }
 
   /**

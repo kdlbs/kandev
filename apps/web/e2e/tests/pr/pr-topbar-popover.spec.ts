@@ -464,6 +464,10 @@ test.describe("PR top-bar CI popover", () => {
 
     await testPage.waitForTimeout(600);
     await expect(popover).toBeVisible();
+    // Parity with the topbar test: the bridge fix must keep the popover
+    // interactive, not merely mounted — assert its buttons are still reachable.
+    await expect(popover.getByTestId("pr-workflow-open").first()).toBeVisible();
+    await expect(popover.getByTestId("pr-workflow-add-context").first()).toBeEnabled();
   });
 
   test("failed workflow row exposes open + add-to-context buttons", async ({
