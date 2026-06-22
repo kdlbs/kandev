@@ -269,6 +269,40 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
         self.assertFalse(any("src/app.ts:10" in body for body in bodies))
         self.assertIn("Inline comments skipped before posting: `1`", self.summary_path.read_text())
 
+    def test_deleted_lines_starting_with_dashes_do_not_shift_right_lines(self) -> None:
+        self.patch_path.write_text(
+            textwrap.dedent(
+                """\
+                diff --git a/src/app.ts b/src/app.ts
+                index 1111111..2222222 100644
+                --- a/src/app.ts
+                +++ b/src/app.ts
+                @@ -8,4 +8,3 @@
+                 const before = 1;
+                --- removed separator
+                 const after = 2;
+                """
+            ),
+            encoding="utf-8",
+        )
+        findings = [
+            {"path": "src/app.ts", "line": 9, "title": "After context", "body": "Still commentable."},
+            {"path": "src/app.ts", "line": 10, "title": "Shifted line", "body": "Should be outside hunk."},
+        ]
+
+        result = self.run_script(
+            output=f"<opencode_findings>{json.dumps(findings)}</opencode_findings>\n",
+            include_patch=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        pull_comment_calls = [call for call in self.read_calls() if any("/pulls/" in arg for arg in call)]
+        self.assertEqual(len(pull_comment_calls), 1, pull_comment_calls)
+        self.assertTrue(any("line=9" in arg for arg in pull_comment_calls[0]))
+        self.assertFalse(any("line=10" in arg for call in self.read_calls() for arg in call))
+        fallback = next(body for body in self.bodies() if "<!-- opencode-review:fallback-findings -->" in body)
+        self.assertIn("src/app.ts:10", fallback)
+
     def test_integral_float_line_values_are_normalized(self) -> None:
         result = self.run_script(
             output=textwrap.dedent(
