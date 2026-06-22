@@ -568,6 +568,88 @@ func TestService_DeleteTaskPreservesExecutorRunningWhenStopFails(t *testing.T) {
 	}
 }
 
+func TestService_DeleteTaskCleansSuccessfulSessionResourcesOnPartialStopFailure(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	stopper := newRecordingTaskExecutionStopper()
+	stopper.stopExecutionErrByID = map[string]error{
+		"exec-failed": errors.New("runtime still shutting down"),
+	}
+	svc.SetExecutionStopper(stopper)
+	quickChatDir := t.TempDir()
+	svc.SetQuickChatDir(quickChatDir)
+	cleanup := &recordingWorktreeCleanup{
+		worktrees: []*worktree.Worktree{
+			{ID: "wt-failed", TaskID: "task-123", SessionID: "session-failed"},
+			{ID: "wt-ok", TaskID: "task-123", SessionID: "session-ok"},
+		},
+	}
+	svc.SetWorktreeCleanup(cleanup)
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test", Priority: "medium"})
+	for _, sessionID := range []string{"session-failed", "session-ok"} {
+		_ = repo.CreateTaskSession(ctx, &models.TaskSession{
+			ID:     sessionID,
+			TaskID: "task-123",
+			State:  models.TaskSessionStateCompleted,
+		})
+		sessionDir := filepath.Join(quickChatDir, sessionID)
+		if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+			t.Fatalf("mkdir session dir: %v", err)
+		}
+	}
+	for _, row := range []*models.ExecutorRunning{
+		{
+			ID:               "session-failed",
+			SessionID:        "session-failed",
+			TaskID:           "task-123",
+			ExecutorID:       "executor-1",
+			Runtime:          agentruntime.RuntimeStandalone,
+			Status:           models.ExecutorRunningStatusStarting,
+			AgentExecutionID: "exec-failed",
+		},
+		{
+			ID:               "session-ok",
+			SessionID:        "session-ok",
+			TaskID:           "task-123",
+			ExecutorID:       "executor-1",
+			Runtime:          agentruntime.RuntimeStandalone,
+			Status:           models.ExecutorRunningStatusStarting,
+			AgentExecutionID: "exec-ok",
+		},
+	} {
+		if err := repo.UpsertExecutorRunning(ctx, row); err != nil {
+			t.Fatalf("seed executor running: %v", err)
+		}
+	}
+
+	if err := svc.DeleteTask(ctx, "task-123"); err != nil {
+		t.Fatalf("DeleteTask: %v", err)
+	}
+	calls := map[string]bool{}
+	for i := 0; i < 2; i++ {
+		calls[stopper.waitForStopExecution(t).executionID] = true
+	}
+	if !calls["exec-failed"] || !calls["exec-ok"] {
+		t.Fatalf("unexpected StopExecution calls: %#v", calls)
+	}
+	waitForPathRemoved(t, filepath.Join(quickChatDir, "session-ok"))
+	if _, err := os.Stat(filepath.Join(quickChatDir, "session-failed")); err != nil {
+		t.Fatalf("failed session quick-chat directory should remain: %v", err)
+	}
+	if len(cleanup.cleaned) != 1 || cleanup.cleaned[0].ID != "wt-ok" {
+		t.Fatalf("expected only successful session worktree cleanup, got %#v", cleanup.cleaned)
+	}
+	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session-failed"); err != nil {
+		t.Fatalf("failed session executor row should remain retryable: %v", err)
+	}
+	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session-ok"); err == nil {
+		t.Fatal("successful session executor row should be removed")
+	}
+}
+
 func TestService_ArchiveTaskStopsExecutorRunningForTerminalSession(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -685,8 +767,9 @@ type stopExecutionCall struct {
 }
 
 type recordingTaskExecutionStopper struct {
-	stopExecutionCh  chan stopExecutionCall
-	stopExecutionErr error
+	stopExecutionCh      chan stopExecutionCall
+	stopExecutionErr     error
+	stopExecutionErrByID map[string]error
 }
 
 func newRecordingTaskExecutionStopper() *recordingTaskExecutionStopper {
@@ -703,6 +786,11 @@ func (s *recordingTaskExecutionStopper) StopSession(context.Context, string, str
 
 func (s *recordingTaskExecutionStopper) StopExecution(_ context.Context, executionID, reason string, force bool) error {
 	s.stopExecutionCh <- stopExecutionCall{executionID: executionID, reason: reason, force: force}
+	if s.stopExecutionErrByID != nil {
+		if err := s.stopExecutionErrByID[executionID]; err != nil {
+			return err
+		}
+	}
 	return s.stopExecutionErr
 }
 
@@ -724,6 +812,38 @@ type failingExecutorRepository struct {
 
 func (r failingExecutorRepository) ListExecutorsRunningByTaskID(context.Context, string) ([]*models.ExecutorRunning, error) {
 	return nil, r.listByTaskErr
+}
+
+type recordingWorktreeCleanup struct {
+	worktrees []*worktree.Worktree
+	cleaned   []*worktree.Worktree
+}
+
+func (c *recordingWorktreeCleanup) OnTaskDeleted(context.Context, string) error {
+	return nil
+}
+
+func (c *recordingWorktreeCleanup) GetAllByTaskID(context.Context, string) ([]*worktree.Worktree, error) {
+	return c.worktrees, nil
+}
+
+func (c *recordingWorktreeCleanup) CleanupWorktrees(_ context.Context, worktrees []*worktree.Worktree) error {
+	c.cleaned = append(c.cleaned, worktrees...)
+	return nil
+}
+
+func waitForPathRemoved(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s to be removed", path)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func TestService_UpdateTaskState(t *testing.T) {

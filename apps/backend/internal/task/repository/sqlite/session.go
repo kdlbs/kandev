@@ -315,7 +315,10 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 	)
 
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("%s", noRowsErr)
+		if noRowsErr == sessionNotFoundMsg || noRowsErr == noPrimarySessionSentinel {
+			return nil, fmt.Errorf("%s", noRowsErr)
+		}
+		return nil, fmt.Errorf("%w: %s", models.ErrTaskSessionNotFound, noRowsErr)
 	}
 	if err != nil {
 		return nil, err
@@ -523,7 +526,7 @@ func (r *Repository) updateTaskSession(
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("agent session not found: %s", session.ID)
+		return fmt.Errorf("%w: agent session not found: %s", models.ErrTaskSessionNotFound, session.ID)
 	}
 	return nil
 }
@@ -546,7 +549,7 @@ func (r *Repository) UpdateTaskSessionState(ctx context.Context, id string, stat
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("agent session not found: %s", id)
+		return fmt.Errorf("%w: agent session not found: %s", models.ErrTaskSessionNotFound, id)
 	}
 	return nil
 }
@@ -707,7 +710,7 @@ func (r *Repository) UpdateTaskSessionBaseCommit(ctx context.Context, id string,
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("agent session not found: %s", id)
+		return fmt.Errorf("%w: agent session not found: %s", models.ErrTaskSessionNotFound, id)
 	}
 	return nil
 }

@@ -1123,11 +1123,7 @@ func (s *Service) handleMissingSessionOnStartup(ctx context.Context, running *mo
 }
 
 func isTaskSessionNotFound(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "agent session not found") || strings.Contains(msg, "session not found")
+	return errors.Is(err, models.ErrTaskSessionNotFound)
 }
 
 // handleTerminalSessionOnStartup processes sessions in terminal states during startup.

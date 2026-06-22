@@ -1107,12 +1107,11 @@ func (s *Service) performTaskCleanup(
 	hasPreservedRuntimes := len(preserveExecutorRows) > 0
 
 	if hasPreservedRuntimes {
-		s.logger.Warn("skipping destructive task cleanup after failed runtime stop",
+		s.logger.Warn("skipping shared environment cleanup after failed runtime stop",
 			zap.String("task_id", taskID),
 			zap.Int("preserved_runtime_count", len(preserveExecutorRows)))
-	} else {
-		errs = append(errs, s.cleanupDestructiveTaskResources(ctx, taskID, worktrees, envCleanup)...)
 	}
+	errs = append(errs, s.cleanupDestructiveTaskResources(ctx, taskID, worktrees, envCleanup, preserveExecutorRows)...)
 
 	// Delete executor running records for sessions
 	for _, session := range sessions {
@@ -1137,32 +1136,46 @@ func (s *Service) performTaskCleanup(
 	// Cleanup quick-chat workspace directories for all tasks (not just ephemeral).
 	// Non-ephemeral office tasks also get quick-chat dirs allocated by manager_launch.go;
 	// both cases must be cleaned up to avoid a disk leak.
-	if s.quickChatDir != "" && !hasPreservedRuntimes {
-		for _, session := range sessions {
-			if session == nil || session.ID == "" {
-				continue
-			}
-			sessionDir := filepath.Join(s.quickChatDir, session.ID)
-			if _, statErr := os.Stat(sessionDir); statErr != nil {
-				// Directory does not exist — nothing to remove.
-				continue
-			}
-			if err := os.RemoveAll(sessionDir); err != nil {
-				s.logger.Warn("failed to cleanup quick-chat workspace directory",
-					zap.String("task_id", taskID),
-					zap.String("session_id", session.ID),
-					zap.String("path", sessionDir),
-					zap.Error(err))
-				errs = append(errs, fmt.Errorf("cleanup quick-chat dir %s: %w", session.ID, err))
-			} else {
-				s.logger.Debug("cleaned up quick-chat workspace directory",
-					zap.String("task_id", taskID),
-					zap.String("session_id", session.ID),
-					zap.String("path", sessionDir))
-			}
-		}
-	}
+	errs = append(errs, s.cleanupQuickChatDirs(taskID, sessions, preserveExecutorRows)...)
 
+	return errs
+}
+
+func (s *Service) cleanupQuickChatDirs(
+	taskID string,
+	sessions []*models.TaskSession,
+	preserveExecutorRows map[string]struct{},
+) []error {
+	if s.quickChatDir == "" {
+		return nil
+	}
+	var errs []error
+	for _, session := range sessions {
+		if session == nil || session.ID == "" {
+			continue
+		}
+		if _, preserve := preserveExecutorRows[session.ID]; preserve {
+			continue
+		}
+		sessionDir := filepath.Join(s.quickChatDir, session.ID)
+		if _, statErr := os.Stat(sessionDir); statErr != nil {
+			// Directory does not exist — nothing to remove.
+			continue
+		}
+		if err := os.RemoveAll(sessionDir); err != nil {
+			s.logger.Warn("failed to cleanup quick-chat workspace directory",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.String("path", sessionDir),
+				zap.Error(err))
+			errs = append(errs, fmt.Errorf("cleanup quick-chat dir %s: %w", session.ID, err))
+			continue
+		}
+		s.logger.Debug("cleaned up quick-chat workspace directory",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.String("path", sessionDir))
+	}
 	return errs
 }
 
@@ -1171,10 +1184,13 @@ func (s *Service) cleanupDestructiveTaskResources(
 	taskID string,
 	worktrees []*worktree.Worktree,
 	envCleanup taskEnvironmentCleanup,
+	preserveExecutorRows map[string]struct{},
 ) []error {
 	var errs []error
-	errs = append(errs, s.cleanupTaskEnvironment(ctx, taskID, envCleanup)...)
-	worktrees = excludeEnvironmentWorktree(worktrees, envCleanup.env)
+	if len(preserveExecutorRows) == 0 {
+		errs = append(errs, s.cleanupTaskEnvironment(ctx, taskID, envCleanup)...)
+	}
+	worktrees = cleanupEligibleWorktrees(worktrees, envCleanup.env, preserveExecutorRows)
 	if len(worktrees) == 0 {
 		return errs
 	}
@@ -1189,6 +1205,24 @@ func (s *Service) cleanupDestructiveTaskResources(
 		errs = append(errs, fmt.Errorf("cleanup worktrees: %w", err))
 	}
 	return errs
+}
+
+func cleanupEligibleWorktrees(worktrees []*worktree.Worktree, env *models.TaskEnvironment, preserveExecutorRows map[string]struct{}) []*worktree.Worktree {
+	worktrees = excludeEnvironmentWorktree(worktrees, env)
+	if len(preserveExecutorRows) == 0 || len(worktrees) == 0 {
+		return worktrees
+	}
+	filtered := worktrees[:0]
+	for _, wt := range worktrees {
+		if wt == nil {
+			continue
+		}
+		if _, preserve := preserveExecutorRows[wt.SessionID]; preserve {
+			continue
+		}
+		filtered = append(filtered, wt)
+	}
+	return filtered
 }
 
 func (s *Service) cleanupTaskEnvironment(
