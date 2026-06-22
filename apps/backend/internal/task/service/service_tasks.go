@@ -912,8 +912,8 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 // have executors_running rows. We still derive runtime stop targets from
 // executors_running here so cascade cleanup does not drop durable handles.
 // deleteEnvRow controls whether the task_environment row is removed (true
-// for delete cascade, false for archive — archive preserves the row).
-// Best-effort and idempotent; failures are logged.
+// for delete cascade, false for archive — archive preserves the row). Runtime
+// inventory failures abort cleanup so durable stop handles remain retryable.
 func (s *Service) CleanupTaskResources(ctx context.Context, taskID string, deleteEnvRow bool) {
 	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
 	if err != nil {
