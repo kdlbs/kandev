@@ -205,7 +205,8 @@ jobs:
             --opencode-status .opencode-review/opencode.status \
             --stdout .opencode-review/opencode.stdout \
             --stderr .opencode-review/opencode.stderr \
-            --summary "$GITHUB_STEP_SUMMARY"
+            --summary "$GITHUB_STEP_SUMMARY" \
+            --patch .opencode-review/review.patch
 
       - name: Upload OpenCode review artifacts
         if: always()
@@ -438,7 +439,8 @@ jobs:
             --opencode-status .opencode-review/opencode.status \
             --stdout .opencode-review/opencode.stdout \
             --stderr .opencode-review/opencode.stderr \
-            --summary "$GITHUB_STEP_SUMMARY"
+            --summary "$GITHUB_STEP_SUMMARY" \
+            --patch .opencode-review/review.patch
 
       - name: Upload OpenCode review artifacts
         if: always()
