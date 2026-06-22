@@ -6,6 +6,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { Button } from "@kandev/ui/button";
 import { TaskSwitcher } from "../task-switcher";
 import type { TaskSwitcherItem } from "../task-switcher";
+import { SidebarFilterBar } from "../sidebar-filter/sidebar-filter-bar";
 import type { StepDef } from "../task-switcher-context-menu";
 import type { TaskMoveWorkflow } from "../task-move-context-menu";
 import { applyView } from "@/lib/sidebar/apply-view";
@@ -124,6 +125,8 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
             />
           </div>
         </SheetHeader>
+
+        <SidebarFilterBar />
 
         <div className="flex-1 min-h-0 overflow-y-auto p-2">
           <MobileTaskList
