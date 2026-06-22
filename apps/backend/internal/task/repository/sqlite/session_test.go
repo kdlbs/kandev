@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -70,6 +71,43 @@ func insertAgentMsg(t *testing.T, repo *Repository, id, sessionID, turnID, autho
 	`), id, sessionID, turnID, authorType, content, ts)
 	if err != nil {
 		t.Fatalf("insert message %s: %v", id, err)
+	}
+}
+
+func TestTaskSessionNotFoundErrorsAreTyped(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+
+	if _, err := repo.GetTaskSession(ctx, "missing-session"); !errors.Is(err, models.ErrTaskSessionNotFound) {
+		t.Fatalf("GetTaskSession error = %v, want ErrTaskSessionNotFound", err)
+	}
+	if err := repo.UpdateTaskSession(ctx, &models.TaskSession{ID: "missing-session"}); !errors.Is(err, models.ErrTaskSessionNotFound) {
+		t.Fatalf("UpdateTaskSession error = %v, want ErrTaskSessionNotFound", err)
+	}
+	if err := repo.UpdateTaskSessionState(ctx, "missing-session", models.TaskSessionStateCompleted, ""); !errors.Is(err, models.ErrTaskSessionNotFound) {
+		t.Fatalf("UpdateTaskSessionState error = %v, want ErrTaskSessionNotFound", err)
+	}
+	if err := repo.UpdateTaskSessionBaseCommit(ctx, "missing-session", "abc123"); !errors.Is(err, models.ErrTaskSessionNotFound) {
+		t.Fatalf("UpdateTaskSessionBaseCommit error = %v, want ErrTaskSessionNotFound", err)
+	}
+
+	session, err := repo.GetTaskSessionByTaskAndAgent(ctx, "task-missing", "agent-missing")
+	if err != nil {
+		t.Fatalf("GetTaskSessionByTaskAndAgent should translate not found to nil, nil: %v", err)
+	}
+	if session != nil {
+		t.Fatalf("GetTaskSessionByTaskAndAgent session = %#v, want nil", session)
+	}
+	if _, err := repo.GetPrimarySessionByTaskID(ctx, "task-missing"); !errors.Is(err, ErrNoPrimarySession) {
+		t.Fatalf("GetPrimarySessionByTaskID error = %v, want ErrNoPrimarySession", err)
+	}
+
+	seedForMsgTest(t, repo, "task-found", "session-found", "turn-found")
+	if _, err := repo.GetTaskSession(ctx, "session-found"); err != nil {
+		t.Fatalf("GetTaskSession existing row: %v", err)
+	}
+	if err := repo.UpdateTaskSessionState(ctx, "session-found", models.TaskSessionStateCompleted, ""); err != nil {
+		t.Fatalf("UpdateTaskSessionState existing row: %v", err)
 	}
 }
 
