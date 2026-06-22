@@ -484,7 +484,7 @@ func TestService_DeleteTaskStopsExecutorRunningForTerminalSession(t *testing.T) 
 	ctx := context.Background()
 	stopper := newRecordingTaskExecutionStopper()
 	svc.SetExecutionStopper(stopper)
-	svc.cleanupDoneForTest = make(chan struct{}, 1)
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
@@ -532,7 +532,7 @@ func TestService_DeleteTaskPreservesExecutorRunningWhenStopFails(t *testing.T) {
 	stopper := newRecordingTaskExecutionStopper()
 	stopper.stopExecutionErr = errors.New("runtime still shutting down")
 	svc.SetExecutionStopper(stopper)
-	svc.cleanupDoneForTest = make(chan struct{}, 1)
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
 	quickChatDir := t.TempDir()
 	svc.SetQuickChatDir(quickChatDir)
 
@@ -582,7 +582,7 @@ func TestService_DeleteTaskCleansSuccessfulSessionResourcesOnPartialStopFailure(
 		"exec-failed": errors.New("runtime still shutting down"),
 	}
 	svc.SetExecutionStopper(stopper)
-	svc.cleanupDoneForTest = make(chan struct{}, 1)
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
 	quickChatDir := t.TempDir()
 	svc.SetQuickChatDir(quickChatDir)
 	cleanup := &recordingWorktreeCleanup{
@@ -665,7 +665,7 @@ func TestService_DeleteTaskCleansMissingSessionExecutorRowAfterStop(t *testing.T
 	ctx := context.Background()
 	stopper := newRecordingTaskExecutionStopper()
 	svc.SetExecutionStopper(stopper)
-	svc.cleanupDoneForTest = make(chan struct{}, 1)
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
@@ -700,7 +700,7 @@ func TestService_ArchiveTaskStopsExecutorRunningForTerminalSession(t *testing.T)
 	ctx := context.Background()
 	stopper := newRecordingTaskExecutionStopper()
 	svc.SetExecutionStopper(stopper)
-	svc.cleanupDoneForTest = make(chan struct{}, 1)
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
@@ -789,6 +789,61 @@ func TestService_ArchiveTaskFailsClosedWhenRuntimeInventoryFails(t *testing.T) {
 	}
 	if task.ArchivedAt != nil {
 		t.Fatal("task should not be archived when runtime inventory fails")
+	}
+}
+
+func TestService_CleanupTaskResourcesFailsClosedWhenRuntimeInventoryFails(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	inventoryErr := errors.New("inventory unavailable")
+	svc.SetExecutionStopper(newRecordingTaskExecutionStopper())
+	svc.executors = failingExecutorRepository{
+		ExecutorRepository: repo,
+		listByTaskErr:      inventoryErr,
+	}
+	quickChatDir := t.TempDir()
+	svc.SetQuickChatDir(quickChatDir)
+	cleanup := &recordingWorktreeCleanup{
+		worktrees: []*worktree.Worktree{
+			{ID: "wt-1", TaskID: "task-123", SessionID: "session-completed"},
+		},
+	}
+	svc.SetWorktreeCleanup(cleanup)
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test", Priority: "medium"})
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:     "session-completed",
+		TaskID: "task-123",
+		State:  models.TaskSessionStateCompleted,
+	})
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:               "session-completed",
+		SessionID:        "session-completed",
+		TaskID:           "task-123",
+		ExecutorID:       "executor-1",
+		Runtime:          agentruntime.RuntimeStandalone,
+		Status:           models.ExecutorRunningStatusStarting,
+		AgentExecutionID: "exec-terminal",
+	}); err != nil {
+		t.Fatalf("seed executor running: %v", err)
+	}
+	sessionDir := filepath.Join(quickChatDir, "session-completed")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+
+	svc.CleanupTaskResources(ctx, "task-123", true)
+
+	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session-completed"); err != nil {
+		t.Fatalf("executor row should remain when runtime inventory fails: %v", err)
+	}
+	if _, err := os.Stat(sessionDir); err != nil {
+		t.Fatalf("quick-chat directory should remain when runtime inventory fails: %v", err)
+	}
+	if len(cleanup.cleaned) != 0 {
+		t.Fatalf("worktrees should not be cleaned when runtime inventory fails, got %#v", cleanup.cleaned)
 	}
 }
 

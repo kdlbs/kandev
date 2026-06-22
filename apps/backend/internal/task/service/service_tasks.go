@@ -824,10 +824,9 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 		zap.Duration("duration", time.Since(start)))
 
 	// 6. Background: Stop agents and cleanup worktrees
-	// Note: isEphemeral=false for archive to preserve quick-chat directories
 	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: true}
 	if len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || taskEnv != nil {
-		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup, false,
+		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup,
 			"task archived", "failed to stop session on task archive", "task archive cleanup completed")
 	}
 
@@ -892,7 +891,7 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: false}
 	hasCleanup := len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || task.IsEphemeral || taskEnv != nil
 	if hasCleanup {
-		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup, task.IsEphemeral,
+		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup,
 			"task deleted", "failed to stop session on task delete", "task cleanup completed")
 	}
 
@@ -926,9 +925,10 @@ func (s *Service) CleanupTaskResources(ctx context.Context, taskID string, delet
 	if s.executionStopper != nil {
 		stopTargets, err = s.buildStopTargets(ctx, taskID, sessions)
 		if err != nil {
-			s.logger.Warn("continuing cascade cleanup without runtime stop targets because runtime inventory failed",
+			s.logger.Warn("skipping cascade cleanup because runtime inventory failed",
 				zap.String("task_id", taskID),
 				zap.Error(err))
+			return
 		}
 	}
 	worktrees := s.gatherWorktreesForDelete(ctx, taskID)
@@ -941,7 +941,7 @@ func (s *Service) CleanupTaskResources(ctx context.Context, taskID string, delet
 	if deleteEnvRow {
 		reason = "cascade delete"
 	}
-	s.runAsyncTaskCleanup(taskID, sessions, worktrees, stopTargets, envCleanup, false,
+	s.runAsyncTaskCleanup(taskID, sessions, worktrees, stopTargets, envCleanup,
 		reason, "failed to stop session on cascade cleanup", "cascade cleanup completed")
 }
 
@@ -991,7 +991,6 @@ func (s *Service) runAsyncTaskCleanup(
 	worktrees []*worktree.Worktree,
 	stopTargets []taskStopTarget,
 	envCleanup taskEnvironmentCleanup,
-	isEphemeral bool,
 	stopReason, stopFailMsg, cleanupMsg string,
 ) {
 	go func() {
@@ -1001,7 +1000,7 @@ func (s *Service) runAsyncTaskCleanup(
 
 		failedStops := s.stopTaskRuntimeTargets(cleanupCtx, id, stopTargets, stopReason, stopFailMsg)
 
-		cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, stopTargets, envCleanup, isEphemeral, failedStops)
+		cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, stopTargets, envCleanup, failedStops)
 
 		if len(cleanupErrors) > 0 {
 			s.logger.Warn(cleanupMsg+" with errors",
@@ -1101,7 +1100,6 @@ func (s *Service) performTaskCleanup(
 	worktrees []*worktree.Worktree,
 	stopTargets []taskStopTarget,
 	envCleanup taskEnvironmentCleanup,
-	isEphemeral bool,
 	preserveExecutorRows map[string]struct{},
 ) []error {
 	var errs []error
