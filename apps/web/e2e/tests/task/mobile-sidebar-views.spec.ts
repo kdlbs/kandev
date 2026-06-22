@@ -117,4 +117,27 @@ test.describe("Mobile sidebar — view system", () => {
     await expect(sheet.getByText("Update deps")).toBeVisible();
     await expect(sheet.getByText("Fix auth bug")).toBeVisible();
   });
+
+  test("tapping a group header collapses and expands the group in the sheet", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // The default "All tasks" view groups by repository, so the seeded tasks
+    // render under a collapsible group header in the sheet.
+    const sheet = await seedAndOpenSheet(testPage, apiClient, seedData, [
+      "Collapse Task A",
+      "Collapse Task B",
+    ]);
+
+    const header = sheet.getByTestId("sidebar-group-header").first();
+    await expect(header).toBeVisible();
+    await expect(sheet.getByText("Collapse Task A")).toBeVisible();
+
+    // Collapse hides the group's tasks; expand brings them back.
+    await header.click();
+    await expect(sheet.getByText("Collapse Task A")).toHaveCount(0);
+    await header.click();
+    await expect(sheet.getByText("Collapse Task A")).toBeVisible();
+  });
 });
