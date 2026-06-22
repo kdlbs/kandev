@@ -6,6 +6,7 @@ vi.mock("@/lib/config", () => ({
 
 import {
   fetchAccessibleRepos,
+  fetchIssueInfo,
   getTaskCIAutomationOptions,
   GitHubUnavailableError,
   updateTaskCIAutomationOptions,
@@ -110,6 +111,20 @@ describe("fetchAccessibleRepos — URL & parsing", () => {
     });
     expect(repos[1].pushed_at).toBeUndefined();
     expect(repos[1].description).toBeUndefined();
+  });
+});
+
+describe("fetchIssueInfo", () => {
+  it("builds the encoded issue info endpoint and forwards options", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ number: 1456, title: "Fix picker" }));
+
+    await fetchIssueInfo("acme org", "site/repo", 1456, { cache: "no-store" });
+
+    const call = fetchSpy.mock.calls.at(-1);
+    expect(String(call?.[0])).toBe(
+      "http://api.test/api/v1/github/issues/acme%20org/site%2Frepo/1456/info",
+    );
+    expect(call?.[1]).toMatchObject({ cache: "no-store" });
   });
 });
 

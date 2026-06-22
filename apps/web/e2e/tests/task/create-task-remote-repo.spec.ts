@@ -235,9 +235,8 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
 
     await testPage.getByTestId("remote-repo-chip-trigger").first().click();
     await expectPopoverFitsDialog(testPage);
-    const pasteInput = testPage.getByTestId("remote-paste-url-input").last();
-    await pasteInput.fill("https://github.com/issue-owner/issue-repo/issues/1456");
-    await pasteInput.press("Enter");
+    await testPage.keyboard.press("Escape");
+    await pasteUrlInChip(testPage, "https://github.com/issue-owner/issue-repo/issues/1456", 0);
 
     await expect(testPage.getByTestId("task-title-input")).toHaveValue(
       "Issue #1456: Fix remote repo picker clipping",

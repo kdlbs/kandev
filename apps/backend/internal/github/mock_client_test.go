@@ -69,6 +69,37 @@ func TestMockClient_AddPR_GetPR(t *testing.T) {
 	}
 }
 
+func TestMockClient_AddIssueGetIssueAndReset(t *testing.T) {
+	m := NewMockClient()
+	ctx := context.Background()
+
+	_, err := m.GetIssue(ctx, "owner", "repo", 1456)
+	if err == nil || !errors.Is(err, ErrNoClient) && err.Error() != "mock: issue owner/repo#1456 not found" {
+		t.Fatalf("expected missing issue error, got %v", err)
+	}
+
+	m.AddIssue(&Issue{
+		Number:    1456,
+		Title:     "Test issue",
+		RepoOwner: "owner",
+		RepoName:  "repo",
+	})
+
+	issue, err := m.GetIssue(ctx, "owner", "repo", 1456)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if issue.Title != "Test issue" {
+		t.Fatalf("expected title 'Test issue', got %q", issue.Title)
+	}
+
+	m.Reset()
+	_, err = m.GetIssue(ctx, "owner", "repo", 1456)
+	if err == nil || !errors.Is(err, ErrNoClient) && err.Error() != "mock: issue owner/repo#1456 not found" {
+		t.Fatalf("expected reset issue error, got %v", err)
+	}
+}
+
 func TestMockClient_FindPRByBranch(t *testing.T) {
 	m := NewMockClient()
 	ctx := context.Background()
