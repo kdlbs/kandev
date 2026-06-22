@@ -3,7 +3,7 @@
 import { useCallback, useRef, type PointerEvent } from "react";
 import {
   DndContext,
-  MouseSensor,
+  PointerSensor,
   TouchSensor,
   closestCenter,
   type DragEndEvent,
@@ -17,21 +17,22 @@ import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import { cn } from "@/lib/utils";
 
 const DRAG_ACTIVATION_DISTANCE = 8;
-const TOUCH_DRAG_DELAY_MS = 200;
-const TOUCH_DRAG_TOLERANCE = 8;
+const TOUCH_DRAG_DELAY_MS = 250;
+const TOUCH_DRAG_TOLERANCE = 5;
 
 export function SidebarViewChips() {
   const views = useAppStore((s) => s.sidebarViews.views);
   const activeViewId = useAppStore((s) => s.sidebarViews.activeViewId);
   const setActive = useAppStore((s) => s.setSidebarActiveView);
   const reorderViews = useAppStore((s) => s.reorderSidebarViews);
-  // Split sensors by input device rather than gating on a pointer media query
-  // (which misclassifies hybrid touch+mouse devices). Mouse drags activate
-  // immediately past 8px; touch requires a short press-and-hold, so a quick
-  // horizontal swipe scrolls an overflowing chip row natively instead of being
-  // hijacked into a drag.
+  // Same pointer/touch sensor split the kanban boards use (see
+  // kanban-board-grid.tsx, swimlane-kanban-content.tsx). PointerSensor covers
+  // mouse + pen and activates past 8px; TouchSensor requires a short
+  // press-and-hold, so a quick horizontal swipe scrolls an overflowing chip row
+  // natively instead of being hijacked into a drag — on touch and hybrid
+  // touch+mouse devices alike.
   const sensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE } }),
+    useSensor(PointerSensor, { activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE } }),
     useSensor(TouchSensor, {
       activationConstraint: { delay: TOUCH_DRAG_DELAY_MS, tolerance: TOUCH_DRAG_TOLERANCE },
     }),
