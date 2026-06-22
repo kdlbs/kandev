@@ -18,6 +18,12 @@ type prKey struct {
 	Number int
 }
 
+type issueKey struct {
+	Owner  string
+	Repo   string
+	Number int
+}
+
 // branchKey is a composite key for PR lookups by owner/repo/branch.
 type branchKey struct {
 	Owner  string
@@ -70,6 +76,7 @@ type MockClient struct {
 	// the whole mock client out of the wiring.
 	reposUnavailable bool
 	prs              map[prKey]*PR
+	issues           map[issueKey]*Issue
 	prsByBranch      map[branchKey]*PR
 	orgs             []GitHubOrg
 	repos            map[string][]GitHubRepo
@@ -115,6 +122,7 @@ func NewMockClient() *MockClient {
 		user:          mockDefaultUser,
 		authenticated: true,
 		prs:           make(map[prKey]*PR),
+		issues:        make(map[issueKey]*Issue),
 		prsByBranch:   make(map[branchKey]*PR),
 		repos:         make(map[string][]GitHubRepo),
 		branches:      make(map[repoKey][]RepoBranch),
@@ -150,6 +158,16 @@ func (m *MockClient) GetPR(_ context.Context, owner, repo string, number int) (*
 		return nil, fmt.Errorf("mock: PR %s/%s#%d not found", owner, repo, number)
 	}
 	return pr, nil
+}
+
+func (m *MockClient) GetIssue(_ context.Context, owner, repo string, number int) (*Issue, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	issue, ok := m.issues[issueKey{owner, repo, number}]
+	if !ok {
+		return nil, fmt.Errorf("mock: issue %s/%s#%d not found", owner, repo, number)
+	}
+	return issue, nil
 }
 
 func (m *MockClient) FindPRByBranch(_ context.Context, owner, repo, branch string) (*PR, error) {
@@ -523,6 +541,12 @@ func (m *MockClient) AddPR(pr *PR) {
 	}
 }
 
+func (m *MockClient) AddIssue(issue *Issue) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.issues[issueKey{issue.RepoOwner, issue.RepoName, issue.Number}] = issue
+}
+
 // AddOrgs appends organizations to the mock data store.
 func (m *MockClient) AddOrgs(orgs []GitHubOrg) {
 	m.mu.Lock()
@@ -625,6 +649,7 @@ func (m *MockClient) Reset() {
 	m.authError = ""
 	m.reposUnavailable = false
 	m.prs = make(map[prKey]*PR)
+	m.issues = make(map[issueKey]*Issue)
 	m.prsByBranch = make(map[branchKey]*PR)
 	m.orgs = nil
 	m.repos = make(map[string][]GitHubRepo)

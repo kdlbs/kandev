@@ -107,6 +107,14 @@ func (s *Service) GetPR(ctx context.Context, owner, repo string, number int) (*P
 	return s.client.GetPR(ctx, owner, repo, number)
 }
 
+// GetIssue fetches basic issue details from GitHub.
+func (s *Service) GetIssue(ctx context.Context, owner, repo string, number int) (*Issue, error) {
+	if s.client == nil {
+		return nil, fmt.Errorf("github client not available")
+	}
+	return s.client.GetIssue(ctx, owner, repo, number)
+}
+
 // GetPRFeedback fetches live PR feedback from GitHub. Cached briefly with
 // singleflight coalescing: the task page fires this for the same PR many times
 // in quick succession (chat-bar CI chip, detail panel, hover popover — each on

@@ -16,6 +16,9 @@ type Client interface {
 	// GetPR retrieves a single pull request by number.
 	GetPR(ctx context.Context, owner, repo string, number int) (*PR, error)
 
+	// GetIssue retrieves a single GitHub issue by number.
+	GetIssue(ctx context.Context, owner, repo string, number int) (*Issue, error)
+
 	// FindPRByBranch finds an open PR for the given head branch.
 	FindPRByBranch(ctx context.Context, owner, repo, branch string) (*PR, error)
 

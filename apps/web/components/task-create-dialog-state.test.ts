@@ -18,11 +18,17 @@ vi.mock("@/hooks/domains/github/use-branches-by-url", () => ({
 
 // `usePRInfoByURL` also touches the network on ensure(); stub it to a
 // per-test-controlled cache so the title-autofill effect can be exercised
-// without an actual fetch. Each test that needs a specific PR-info value
-// writes into `prInfoMap` before calling `setUseRemote(true)`.
+// without an actual fetch. Each test that needs a specific GitHub URL info
+// value writes into `prInfoMap` before calling `setUseRemote(true)`.
 const prInfoMap = new Map<
   string,
-  { prHeadBranch: string; prBaseBranch: string; prNumber: number; suggestedTitle: string }
+  {
+    prHeadBranch?: string;
+    prBaseBranch?: string;
+    prNumber?: number;
+    issueNumber?: number;
+    suggestedTitle: string;
+  }
 >();
 vi.mock("@/hooks/domains/github/use-pr-info-by-url", async (importOriginal) => {
   const original =
@@ -256,7 +262,14 @@ function seedPRInfo(url: string, prNumber: number, suggestedTitle: string) {
   });
 }
 
-describe("useDialogFormState — title autofill from first row PR info", () => {
+function seedIssueInfo(url: string, issueNumber: number, suggestedTitle: string) {
+  prInfoMap.set(url, {
+    issueNumber,
+    suggestedTitle,
+  });
+}
+
+describe("useDialogFormState — title autofill from first row GitHub URL info", () => {
   beforeEach(() => {
     prInfoMap.clear();
   });
@@ -360,5 +373,26 @@ describe("useDialogFormState — title autofill from first row PR info", () => {
       result.current.updateRemoteRepo(secondKey!, { url: SECOND_PR_URL });
     });
     expect(result.current.taskName).toBe("");
+  });
+});
+
+describe("useDialogFormState — title autofill from first row GitHub issue info", () => {
+  beforeEach(() => {
+    prInfoMap.clear();
+  });
+
+  it("seeds the task title from the first row's issue info when title is empty", () => {
+    const issueURL = "https://github.com/acme/site/issues/1456";
+    seedIssueInfo(issueURL, 1456, "Issue #1456: Fix remote picker");
+    const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
+    act(() => {
+      result.current.setUseRemote(true);
+    });
+    const key = result.current.remoteRepos[0]?.key;
+    act(() => {
+      result.current.updateRemoteRepo(key!, { url: issueURL });
+    });
+    expect(result.current.taskName).toBe("Issue #1456: Fix remote picker");
+    expect(result.current.hasTitle).toBe(true);
   });
 });

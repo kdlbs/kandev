@@ -216,7 +216,12 @@ function RemoteRepoPill({
           <span className="truncate max-w-[240px]">{triggerLabel}</span>
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-[380px] p-0" align="start" portal={false}>
+      <PopoverContent
+        data-testid="remote-repo-popover-content"
+        className="w-[380px] max-w-[calc(100vw-2rem)] max-h-[min(420px,calc(100vh-12rem))] overflow-y-auto p-0"
+        align="start"
+        portal={false}
+      >
         <RemoteRepoPopoverContent
           accessible={accessibleRepos}
           onPick={(repo) => {
@@ -410,7 +415,7 @@ function PasteSection({ onPaste }: { onPaste: (value: string) => void }) {
   return (
     <div className="flex flex-col gap-1 p-2">
       <label className="text-[11px] text-muted-foreground" htmlFor="remote-paste-url-input">
-        …or paste a URL/PR
+        …or paste a URL/PR/issue
       </label>
       <input
         id="remote-paste-url-input"
@@ -438,7 +443,7 @@ function PasteSection({ onPaste }: { onPaste: (value: string) => void }) {
             commit();
           }
         }}
-        placeholder="github.com/owner/repo or .../pull/123"
+        placeholder="github.com/owner/repo, .../pull/123, or .../issues/123"
         data-testid="remote-paste-url-input"
         className={cn(
           "h-8 rounded-md px-2 text-xs bg-muted/30 border border-border/60",

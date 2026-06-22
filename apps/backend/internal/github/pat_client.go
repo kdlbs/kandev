@@ -165,6 +165,15 @@ func (c *PATClient) GetPR(ctx context.Context, owner, repo string, number int) (
 	return convertPatPR(&raw, owner, repo), nil
 }
 
+func (c *PATClient) GetIssue(ctx context.Context, owner, repo string, number int) (*Issue, error) {
+	var raw patIssue
+	endpoint := fmt.Sprintf("/repos/%s/%s/issues/%d", owner, repo, number)
+	if err := c.get(ctx, endpoint, &raw); err != nil {
+		return nil, fmt.Errorf("get issue #%d: %w", number, err)
+	}
+	return convertPatIssue(&raw, owner, repo), nil
+}
+
 func (c *PATClient) FindPRByBranch(ctx context.Context, owner, repo, branch string) (*PR, error) {
 	statuses, err := runBatchedBranchQuery(ctx, c, []graphQLBranchRef{{
 		Owner:  owner,
@@ -905,6 +914,26 @@ type patPR struct {
 	} `json:"base"`
 }
 
+type patIssue struct {
+	Number    int       `json:"number"`
+	Title     string    `json:"title"`
+	HTMLURL   string    `json:"html_url"`
+	Body      string    `json:"body"`
+	State     string    `json:"state"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	ClosedAt  *string   `json:"closed_at"`
+	User      struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	Labels []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
+	Assignees []struct {
+		Login string `json:"login"`
+	} `json:"assignees"`
+}
+
 type patSearchItem struct {
 	Number        int       `json:"number"`
 	Title         string    `json:"title"`
@@ -956,6 +985,36 @@ func convertPatPR(raw *patPR, owner, repo string) *PR {
 		pr.ClosedAt = parseTimePtr(*raw.ClosedAt)
 	}
 	return pr
+}
+
+func convertPatIssue(raw *patIssue, owner, repo string) *Issue {
+	labels := make([]string, len(raw.Labels))
+	for i, label := range raw.Labels {
+		labels[i] = label.Name
+	}
+	assignees := make([]string, len(raw.Assignees))
+	for i, assignee := range raw.Assignees {
+		assignees[i] = assignee.Login
+	}
+	issue := &Issue{
+		Number:      raw.Number,
+		Title:       raw.Title,
+		URL:         raw.HTMLURL,
+		HTMLURL:     raw.HTMLURL,
+		State:       strings.ToLower(raw.State),
+		Body:        raw.Body,
+		AuthorLogin: raw.User.Login,
+		RepoOwner:   owner,
+		RepoName:    repo,
+		Labels:      labels,
+		Assignees:   assignees,
+		CreatedAt:   raw.CreatedAt,
+		UpdatedAt:   raw.UpdatedAt,
+	}
+	if raw.ClosedAt != nil {
+		issue.ClosedAt = parseTimePtr(*raw.ClosedAt)
+	}
+	return issue
 }
 
 func convertPatRequestedReviewers(raw *patPR) []RequestedReviewer {

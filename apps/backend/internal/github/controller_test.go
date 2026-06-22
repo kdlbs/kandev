@@ -23,6 +23,7 @@ import (
 // stubClient implements Client with no-op defaults; override fields as needed.
 type stubClient struct {
 	getPRFunc             func(ctx context.Context, owner, repo string, number int) (*PR, error)
+	getIssueFunc          func(ctx context.Context, owner, repo string, number int) (*Issue, error)
 	mergePRFn             func(ctx context.Context, owner, repo string, number int, mergeMethod string) error
 	getRepoMergeMethodsFn func() (RepoMergeMethods, error)
 }
@@ -34,6 +35,12 @@ func (s *stubClient) GetAuthenticatedUser(context.Context) (string, error) {
 func (s *stubClient) GetPR(ctx context.Context, owner, repo string, number int) (*PR, error) {
 	if s.getPRFunc != nil {
 		return s.getPRFunc(ctx, owner, repo, number)
+	}
+	return nil, fmt.Errorf("not implemented")
+}
+func (s *stubClient) GetIssue(ctx context.Context, owner, repo string, number int) (*Issue, error) {
+	if s.getIssueFunc != nil {
+		return s.getIssueFunc(ctx, owner, repo, number)
 	}
 	return nil, fmt.Errorf("not implemented")
 }
@@ -334,6 +341,49 @@ func TestHttpGetPRInfo_ServiceError(t *testing.T) {
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d", w.Code)
+	}
+}
+
+func TestHttpGetIssueInfo_Success(t *testing.T) {
+	sc := &stubClient{
+		getIssueFunc: func(_ context.Context, owner, repo string, number int) (*Issue, error) {
+			if owner != "acme" || repo != "widget" || number != 1456 {
+				t.Errorf("unexpected params: %s/%s#%d", owner, repo, number)
+			}
+			return &Issue{Number: 1456, Title: "fix remote picker"}, nil
+		},
+	}
+	router, _ := setupControllerTest(sc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/issues/acme/widget/1456/info", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var issue Issue
+	if err := json.NewDecoder(w.Body).Decode(&issue); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if issue.Number != 1456 {
+		t.Errorf("expected issue number 1456, got %d", issue.Number)
+	}
+	if issue.Title != "fix remote picker" {
+		t.Errorf("expected issue title, got %q", issue.Title)
+	}
+}
+
+func TestHttpGetIssueInfo_InvalidNumber(t *testing.T) {
+	router, _ := setupControllerTest(&stubClient{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/issues/acme/widget/abc/info", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
 	}
 }
 

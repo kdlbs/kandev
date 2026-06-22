@@ -338,6 +338,25 @@ describe("RemoteRepoChip — picker loading state", () => {
 });
 
 describe("RemoteRepoChip — popover content", () => {
+  it("constrains the inline popover to fit inside the create-task dialog body", () => {
+    renderInProvider(
+      <RemoteRepoChip
+        row={row()}
+        branches={[]}
+        branchesLoading={false}
+        accessibleRepos={makeAccessible()}
+        onURLChange={vi.fn()}
+        onBranchChange={noopBranch}
+        onRemove={noopRemove}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(TRIGGER_TID));
+    const content = screen.getByTestId("remote-repo-popover-content");
+    expect(content.className).toContain("max-w-[calc(100vw-2rem)]");
+    expect(content.className).toContain("max-h-[min(420px,calc(100vh-12rem))]");
+    expect(content.className).toContain("overflow-y-auto");
+  });
+
   it("renders the 'Connect GitHub' banner when accessibleRepos.unavailable=true", () => {
     renderInProvider(
       <RemoteRepoChip
