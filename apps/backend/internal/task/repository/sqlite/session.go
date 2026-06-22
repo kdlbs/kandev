@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -315,9 +316,6 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 	)
 
 	if err == sql.ErrNoRows {
-		if noRowsErr == sessionNotFoundMsg || noRowsErr == noPrimarySessionSentinel {
-			return nil, fmt.Errorf("%s", noRowsErr)
-		}
 		return nil, fmt.Errorf("%w: %s", models.ErrTaskSessionNotFound, noRowsErr)
 	}
 	if err != nil {
@@ -400,21 +398,12 @@ func (r *Repository) GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, a
 		 WHERE ts.task_id = ? AND ts.agent_profile_id = ?
 		 ORDER BY ts.started_at DESC LIMIT 1`,
 	), taskID, agentInstanceID)
-	session, err := r.scanTaskSession(ctx, row, sessionNotFoundMsg)
-	if err != nil && err.Error() == sessionNotFoundMsg {
+	session, err := r.scanTaskSession(ctx, row, "task_sessions: no matching row")
+	if errors.Is(err, models.ErrTaskSessionNotFound) {
 		return nil, nil
 	}
 	return session, err
 }
-
-// sessionNotFoundMsg is the sentinel string used by GetTaskSessionByTaskAndAgent
-// to detect "no row found" so the caller gets nil, nil instead of an error.
-const sessionNotFoundMsg = "task_sessions: no matching row"
-
-// noPrimarySessionSentinel is the no-rows marker passed to scanTaskSession by
-// GetPrimarySessionByTaskID. Matching this exact string lets the function wrap
-// the result with ErrNoPrimarySession so callers can use errors.Is.
-const noPrimarySessionSentinel = "task_sessions: no primary session row"
 
 // ListNonTerminalSessionsByAgentInstance returns every office task_session row
 // for the given agent_profile_id whose state is NOT terminal
@@ -1231,8 +1220,8 @@ func (r *Repository) GetPrimarySessionByTaskID(ctx context.Context, taskID strin
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(
 		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+` WHERE ts.task_id = ? AND ts.is_primary = 1 LIMIT 1`,
 	), taskID)
-	session, err := r.scanTaskSession(ctx, row, noPrimarySessionSentinel)
-	if err != nil && err.Error() == noPrimarySessionSentinel {
+	session, err := r.scanTaskSession(ctx, row, "task_sessions: no primary session row")
+	if errors.Is(err, models.ErrTaskSessionNotFound) {
 		return nil, fmt.Errorf("%w: %s", ErrNoPrimarySession, taskID)
 	}
 	return session, err

@@ -1165,7 +1165,7 @@ func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *mod
 	// If session failed, ensure task is in REVIEW state (not stuck IN_PROGRESS)
 	if session.TaskID != "" {
 		task, taskErr := s.taskRepo.GetTask(ctx, session.TaskID)
-		if taskErr == nil && task.State == v1.TaskStateInProgress {
+		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress {
 			s.logger.Info("fixing task state: session failed but task still IN_PROGRESS",
 				zap.String("task_id", session.TaskID),
 				zap.String("session_id", sessionID))
@@ -1181,9 +1181,19 @@ func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *mod
 			zap.String("session_id", sessionID),
 			zap.String("task_id", session.TaskID))
 	} else {
-		s.logger.Info("cleaning up executor record for non-resumable failed session",
+		s.logger.Info("stopping failed session runtime before cleaning up executor record",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", session.TaskID))
+		executionID := strings.TrimSpace(running.AgentExecutionID)
+		if executionID != "" && s.agentManager != nil {
+			if err := s.agentManager.StopAgentWithReason(ctx, executionID, "startup failed session cleanup", true); err != nil {
+				s.logger.Warn("failed to stop failed session runtime; preserving executor record",
+					zap.String("session_id", sessionID),
+					zap.String("execution_id", executionID),
+					zap.Error(err))
+				return
+			}
+		}
 		if err := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
 			s.logger.Warn("failed to remove executor record for failed session",
 				zap.String("session_id", sessionID),

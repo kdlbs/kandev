@@ -1221,8 +1221,15 @@ func (s *Service) cleanupDestructiveTaskResources(
 	if len(preserveExecutorRows) == 0 {
 		errs = append(errs, s.cleanupTaskEnvironment(ctx, taskID, envCleanup)...)
 	}
+	originalWorktreeCount := len(worktrees)
 	worktrees = cleanupEligibleWorktrees(worktrees, envCleanup.env, preserveExecutorRows)
 	if len(worktrees) == 0 {
+		if originalWorktreeCount > 0 {
+			s.logger.Debug("no task worktrees eligible for cleanup",
+				zap.String("task_id", taskID),
+				zap.Int("input_count", originalWorktreeCount),
+				zap.Int("preserved_runtime_count", len(preserveExecutorRows)))
+		}
 		return errs
 	}
 	cleaner, ok := s.worktreeCleanup.(WorktreeBatchCleaner)

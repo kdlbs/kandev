@@ -643,7 +643,9 @@ func TestService_DeleteTaskCleansSuccessfulSessionResourcesOnPartialStopFailure(
 		t.Fatalf("unexpected StopExecution calls: %#v", calls)
 	}
 	waitForCleanupDone(t, svc)
-	waitForPathRemoved(t, filepath.Join(quickChatDir, "session-ok"))
+	if _, err := os.Stat(filepath.Join(quickChatDir, "session-ok")); !os.IsNotExist(err) {
+		t.Fatalf("successful session quick-chat directory should be removed, got %v", err)
+	}
 	if _, err := os.Stat(filepath.Join(quickChatDir, "session-failed")); err != nil {
 		t.Fatalf("failed session quick-chat directory should remain: %v", err)
 	}
@@ -878,20 +880,6 @@ func (c *recordingWorktreeCleanup) GetAllByTaskID(context.Context, string) ([]*w
 func (c *recordingWorktreeCleanup) CleanupWorktrees(_ context.Context, worktrees []*worktree.Worktree) error {
 	c.cleaned = append(c.cleaned, worktrees...)
 	return nil
-}
-
-func waitForPathRemoved(t *testing.T, path string) {
-	t.Helper()
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s to be removed", path)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
 }
 
 func waitForCleanupDone(t *testing.T, svc *Service) {
