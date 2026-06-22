@@ -291,12 +291,21 @@ func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, bool,
 		return content, size, isBinary, resolved, nil
 	}
 	if alt := expandHomePath(stripReadSelector(reqPath)); alt != reqPath {
-		if c, s, b, r, altErr := wt.readResolvedPath(alt); altErr == nil {
+		c, s, b, r, altErr := wt.readResolvedPath(alt)
+		if altErr == nil {
 			return c, s, b, r, nil
+		}
+		// When the request used a "~" home shorthand, the literal attempt
+		// joins the tilde onto the workspace root (".../<workspace>/~/...:
+		// no such file"), which reads as a mangled path rather than a missing
+		// file. Surface the expanded-path error, which names the real home
+		// location that was actually checked.
+		if isHomeShorthand(reqPath) {
+			return c, s, b, r, altErr
 		}
 	}
 	// Neither the literal path nor the stripped/expanded fallback opened;
-	// surface the original (literal-path) error, which is the most meaningful.
+	// surface the original (literal-path) error.
 	return content, size, isBinary, resolved, err
 }
 
@@ -315,11 +324,21 @@ func (wt *WorkspaceTracker) readResolvedPath(reqPath string) (string, int64, boo
 	if err != nil {
 		if errors.Is(err, errPathTraversal) {
 			externalPath, ok := absoluteReadPath(reqPath)
-			if !ok {
-				return "", 0, false, "", err
+			if ok {
+				content, size, isBinary, readErr := readFileContent(externalPath)
+				return content, size, isBinary, "", readErr
 			}
-			content, size, isBinary, readErr := readFileContent(externalPath)
-			return content, size, isBinary, "", readErr
+			// An absolute path that simply doesn't exist is not a traversal
+			// attempt — report a plain "file not found" naming the real path
+			// instead of the alarming "path traversal detected". Only remap
+			// genuine not-exist errors; permission/IO failures keep the
+			// original error so they aren't mislabeled as missing.
+			if cleaned := filepath.Clean(reqPath); filepath.IsAbs(cleaned) {
+				if _, statErr := os.Stat(cleaned); errors.Is(statErr, fs.ErrNotExist) {
+					return "", 0, false, "", fmt.Errorf("file not found: %w", statErr)
+				}
+			}
+			return "", 0, false, "", err
 		}
 		return "", 0, false, "", err
 	}
@@ -336,7 +355,7 @@ func (wt *WorkspaceTracker) readResolvedPath(reqPath string) (string, int64, boo
 // real filesystem path, so it must be expanded before stat/serve. Other paths
 // (absolute, workspace-relative) are returned unchanged.
 func expandHomePath(path string) string {
-	if path != "~" && !strings.HasPrefix(path, "~/") && !strings.HasPrefix(path, `~\`) {
+	if !isHomeShorthand(path) {
 		return path
 	}
 	home, err := os.UserHomeDir()
@@ -347,6 +366,12 @@ func expandHomePath(path string) string {
 		return home
 	}
 	return filepath.Join(home, path[2:])
+}
+
+// isHomeShorthand reports whether path uses the leading "~" / "~/" (or "~\" on
+// Windows) home shorthand that expandHomePath rewrites.
+func isHomeShorthand(path string) bool {
+	return path == "~" || strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`)
 }
 
 func readFileContent(safePath string) (string, int64, bool, error) {

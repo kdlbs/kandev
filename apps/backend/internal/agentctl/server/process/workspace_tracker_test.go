@@ -669,6 +669,58 @@ func TestGetFileContent_PrefersLiteralTildePath(t *testing.T) {
 	}
 }
 
+// TestGetFileContent_MissingTildePathReportsHomeLocation reproduces the
+// "Failed to open file" bug: clicking an agent read link like
+// "~/.kandev/.../account-mapping.spec.ts" for a file that does not exist must
+// not glue the tilde onto the workspace root
+// (".../<workspace>/~/.kandev/...: no such file"). The error must name the real
+// home-expanded location and must not read as a path-traversal attempt.
+func TestGetFileContent_MissingTildePathReportsHomeLocation(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	_, wt := setupTestDir(t)
+
+	_, _, _, _, err := wt.GetFileContent("~/notes/missing/account-mapping.spec.ts:760-860")
+	if err == nil {
+		t.Fatal("expected error for missing tilde path, got nil")
+	}
+	// The tilde must never be path-joined onto the workspace root.
+	mangled := string(os.PathSeparator) + "~" + string(os.PathSeparator)
+	if strings.Contains(err.Error(), mangled) {
+		t.Fatalf("error joins tilde onto workspace (mangled path): %v", err)
+	}
+	// The error must name the real home-expanded location.
+	want := filepath.Join(home, "notes", "missing", "account-mapping.spec.ts")
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("error %q does not name expanded home path %q", err.Error(), want)
+	}
+	// A missing file is not a traversal attempt.
+	if strings.Contains(err.Error(), "path traversal") {
+		t.Fatalf("missing tilde file reported as traversal: %v", err)
+	}
+}
+
+// TestGetFileContent_MissingAbsolutePathNotTraversal verifies that an absolute
+// path to a non-existent file (read-only external access per ADR 0016) reports
+// a plain "file not found" naming the path, not the alarming "path traversal
+// detected".
+func TestGetFileContent_MissingAbsolutePathNotTraversal(t *testing.T) {
+	_, wt := setupTestDir(t)
+	missing := filepath.Join(t.TempDir(), "nope", "file.txt")
+
+	_, _, _, _, err := wt.GetFileContent(missing)
+	if err == nil {
+		t.Fatal("expected error for missing absolute path, got nil")
+	}
+	if strings.Contains(err.Error(), "path traversal") {
+		t.Fatalf("missing absolute file reported as traversal: %v", err)
+	}
+	if !strings.Contains(err.Error(), missing) {
+		t.Fatalf("error %q does not name the requested path %q", err.Error(), missing)
+	}
+}
+
 // setupTestDir creates a temp directory with a WorkspaceTracker (no git required).
 func setupTestDir(t *testing.T) (string, *WorkspaceTracker) {
 	t.Helper()
