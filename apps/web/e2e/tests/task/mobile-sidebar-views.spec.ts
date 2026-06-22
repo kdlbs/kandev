@@ -51,6 +51,9 @@ async function addTitleFilter(testPage: Page, sheet: Locator, value: string): Pr
   await expect(popover).toBeVisible();
   await popover.getByTestId("filter-add-button").click();
   await popover.getByTestId("filter-dimension-select").click();
+  // Radix Select portals options to document.body (not under `popover`), so we
+  // can't scope to the popover here; `.first()` is the deliberate convention for
+  // this case (see apps/web/CLAUDE.md). Only one select is open at a time.
   await testPage.getByRole("option", { name: "Title", exact: false }).first().click();
   await popover.getByTestId("filter-value-input").fill(value);
 }

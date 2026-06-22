@@ -12,6 +12,7 @@ import {
 import { SortableContext, horizontalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useAppStore } from "@/components/state-provider";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import { cn } from "@/lib/utils";
 
@@ -22,9 +23,15 @@ export function SidebarViewChips() {
   const activeViewId = useAppStore((s) => s.sidebarViews.activeViewId);
   const setActive = useAppStore((s) => s.setSidebarActiveView);
   const reorderViews = useAppStore((s) => s.reorderSidebarViews);
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE } }),
-  );
+  // Drag-to-reorder is a fine-pointer (mouse) affordance only. On touch, the
+  // dnd-kit PointerSensor's 8px activation would hijack horizontal swipe-scroll
+  // of an overflowing chip row, leaving overflow chips unreachable — so we drop
+  // the sensor on coarse pointers and let the row scroll natively.
+  const { isFinePointer } = useResponsiveBreakpoint();
+  const pointerSensor = useSensor(PointerSensor, {
+    activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE },
+  });
+  const sensors = useSensors(...(isFinePointer ? [pointerSensor] : []));
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
