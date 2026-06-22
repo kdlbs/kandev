@@ -101,6 +101,13 @@ func TestCIAutomationFeedbackDelta(t *testing.T) {
 	if !strings.Contains(prompt, "Base instructions") || !strings.Contains(prompt, "acme/widget#42") || !strings.Contains(prompt, "also this") {
 		t.Fatalf("rendered prompt missing expected content:\n%s", prompt)
 	}
+	visible := sysprompt.StripSystemContent(prompt)
+	if strings.Contains(visible, "Base instructions") {
+		t.Fatalf("shared CI prompt should be hidden from visible chat content, got:\n%s", visible)
+	}
+	if !strings.Contains(visible, "acme/widget#42") || !strings.Contains(visible, "also this") {
+		t.Fatalf("PR snapshot should remain visible, got:\n%s", visible)
+	}
 }
 
 func TestCIAutomationCheckpointPrunesResolvedFailures(t *testing.T) {
@@ -189,21 +196,11 @@ func TestHandleTaskPRCIAutomationQueuesFixDedupesAndMerges(t *testing.T) {
 	if status.Count != 1 || !strings.Contains(status.Entries[0].Content, "@ci-auto-fix") || !strings.Contains(status.Entries[0].Content, "acme/widget#42") || !strings.Contains(status.Entries[0].Content, "unit") {
 		t.Fatalf("expected queued CI fix prompt, got %+v", status)
 	}
-	if status.Entries[0].Metadata[metaKeyUserMessageRecorded] != true {
-		t.Fatalf("expected queued prompt to be tagged as already recorded, got %+v", status.Entries[0].Metadata)
+	if status.Entries[0].Metadata[metaKeyUserMessageRecorded] == true {
+		t.Fatalf("expected queued CI prompt to be recorded when drained, got %+v", status.Entries[0].Metadata)
 	}
-	if len(messageCreator.userMessages) != 1 {
-		t.Fatalf("expected one visible CI automation user message, got %d", len(messageCreator.userMessages))
-	}
-	chatMessage := messageCreator.userMessages[0]
-	if got := sysprompt.StripSystemContent(chatMessage.content); got != "@ci-auto-fix" {
-		t.Fatalf("expected visible chat prompt to be @ci-auto-fix, got %q", got)
-	}
-	if !strings.Contains(chatMessage.content, "<kandev-system>") || !strings.Contains(chatMessage.content, "Fix the PR") || !strings.Contains(chatMessage.content, "unit") {
-		t.Fatalf("expected raw chat message to preserve hidden CI prompt, got %q", chatMessage.content)
-	}
-	if chatMessage.metadata["origin"] != ciAutomationOrigin || chatMessage.metadata["auto_start"] != true {
-		t.Fatalf("expected CI automation metadata, got %+v", chatMessage.metadata)
+	if len(messageCreator.userMessages) != 0 {
+		t.Fatalf("expected queued CI automation to record chat message on drain, got %d", len(messageCreator.userMessages))
 	}
 	if len(ghSvc.fixAttempts) != 1 {
 		t.Fatalf("expected one fix attempt, got %d", len(ghSvc.fixAttempts))
@@ -217,7 +214,7 @@ func TestHandleTaskPRCIAutomationQueuesFixDedupesAndMerges(t *testing.T) {
 	if got := svc.messageQueue.GetStatus(ctx, "session-1").Count; got != 1 {
 		t.Fatalf("expected dedupe to avoid second queued prompt, got %d", got)
 	}
-	if len(messageCreator.userMessages) != 1 {
+	if len(messageCreator.userMessages) != 0 {
 		t.Fatalf("expected dedupe to avoid second chat message, got %d", len(messageCreator.userMessages))
 	}
 
@@ -256,7 +253,7 @@ func TestDispatchCIAutomationPromptDoesNotRecordUserMessageWhenQueueFails(t *tes
 	}
 }
 
-func TestDispatchCIAutomationPromptFailsWhenRunningUserMessageCannotBeRecorded(t *testing.T) {
+func TestDispatchCIAutomationPromptQueuesWhenRunningUserMessageCannotBeRecorded(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
@@ -270,15 +267,19 @@ func TestDispatchCIAutomationPromptFailsWhenRunningUserMessageCannotBeRecorded(t
 	}
 
 	err = svc.dispatchCIAutomationPrompt(ctx, session, "Fix the PR")
-	if err == nil || !strings.Contains(err.Error(), "failed to record CI automation user message") {
-		t.Fatalf("expected user-message failure, got %v", err)
+	if err != nil {
+		t.Fatalf("expected queued CI automation prompt, got %v", err)
 	}
-	if got := svc.messageQueue.GetStatus(ctx, "session-1").Count; got != 0 {
-		t.Fatalf("expected no queued prompt when user message could not be recorded, got %d", got)
+	status := svc.messageQueue.GetStatus(ctx, "session-1")
+	if status.Count != 1 {
+		t.Fatalf("expected queued prompt when user message cannot be recorded yet, got %d", status.Count)
+	}
+	if status.Entries[0].Metadata[metaKeyUserMessageRecorded] == true {
+		t.Fatalf("expected queued prompt to retry user-message recording on drain, got %+v", status.Entries[0].Metadata)
 	}
 }
 
-func TestDispatchCIAutomationPromptRecordsUserMessageAfterDirectPrompt(t *testing.T) {
+func TestDispatchCIAutomationPromptRecordsUserMessageBeforeDirectPrompt(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateWaitingForInput)
@@ -312,7 +313,7 @@ func TestDispatchCIAutomationPromptRecordsUserMessageAfterDirectPrompt(t *testin
 	}
 }
 
-func TestDispatchCIAutomationPromptDoesNotRecordUserMessageWhenDirectPromptFails(t *testing.T) {
+func TestDispatchCIAutomationPromptRecordsUserMessageBeforeDirectPromptFailure(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateWaitingForInput)
@@ -340,8 +341,8 @@ func TestDispatchCIAutomationPromptDoesNotRecordUserMessageWhenDirectPromptFails
 	if err == nil || !strings.Contains(err.Error(), "agent rejected prompt") {
 		t.Fatalf("expected prompt failure, got %v", err)
 	}
-	if len(messageCreator.userMessages) != 0 {
-		t.Fatalf("expected no visible CI automation user message on prompt failure, got %d", len(messageCreator.userMessages))
+	if len(messageCreator.userMessages) != 1 {
+		t.Fatalf("expected visible CI automation user message before prompt failure, got %d", len(messageCreator.userMessages))
 	}
 }
 

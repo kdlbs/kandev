@@ -136,7 +136,7 @@ Auto-fix cycle for one task/PR:
 3. Kandev fetches full PR feedback.
 4. Kandev compares the current feedback snapshot to `last_fix_checkpoint_json` and `last_fix_signature`.
 5. If there is no material change, the cycle ends without prompting.
-6. If there is new or materially changed feedback, Kandev renders the task override or default `ci-auto-fix` prompt and sends or queues it for the task session.
+6. If there is new or materially changed feedback, Kandev renders the task override or default `ci-auto-fix` prompt and sends or queues it for the task session. The saved/shared `ci-auto-fix` instructions are hidden system context, but the PR snapshot details are visible in the chat message after `@ci-auto-fix`, before the agent output for that automation turn.
 7. The default prompt instructs the agent to classify the new feedback before editing. If the
    new feedback is only summaries, status updates, no-finding reports, duplicated or already
    addressed comments, rate-limit notices, or other non-actionable review diagnostics, the agent
@@ -168,7 +168,7 @@ Auto-merge cycle for one task/PR:
 | PR is closed or merged | Controls are disabled for that PR; no automation runs. |
 | Full PR feedback fetch fails | Auto-fix does not prompt; per-PR automation state records the error and the next materially changed lightweight status may retry. |
 | Task has no promptable session | Auto-fix records an error instead of creating a surprising new session. |
-| Task session is busy | Auto-fix queues the rendered prompt with workflow/automation metadata for later delivery. |
+| Task session is busy | Auto-fix queues the rendered prompt with workflow/automation metadata for later delivery; the visible `@ci-auto-fix` chat message, including PR snapshot details, is created when the queued prompt is delivered and before the agent's response for that turn. |
 | Same feedback snapshot repeats | Auto-fix does not send another prompt. |
 | GitHub merge fails | Auto-merge records the error and does not retry until the readiness signature changes. |
 | Default prompt row is missing | Backend falls back to the embedded `ci-auto-fix.md` content. |
@@ -196,7 +196,7 @@ Auto-merge cycle for one task/PR:
 - **GIVEN** auto-fix already prompted for a failure snapshot, **WHEN** the same failure is observed again on a later poll, **THEN** no duplicate prompt is sent.
 - **GIVEN** auto-fix already prompted for a failure snapshot, **WHEN** a new failed check or new unresolved review comment appears, **THEN** Kandev sends or queues a new prompt containing the new or materially changed feedback.
 - **GIVEN** auto-fix sends a prompt for a snapshot that contains only non-actionable automation summaries or status updates, **WHEN** the agent reviews that prompt, **THEN** the agent does not modify files, commit, or push and only reports that there is nothing actionable to address.
-- **GIVEN** auto-fix is enabled and the task session is running, **WHEN** new actionable PR feedback appears, **THEN** the prompt is queued and delivered after the current turn rather than interrupting the running session.
+- **GIVEN** auto-fix is enabled and the task session is running, **WHEN** new actionable PR feedback appears, **THEN** the prompt is queued and delivered after the current turn rather than interrupting the running session, and the chat history shows the `@ci-auto-fix` user message with visible PR snapshot details before the agent output for the queued turn.
 - **GIVEN** auto-merge is enabled and the PR has passing checks, required reviews, no unresolved threads, and clean mergeability, **WHEN** the PR watch poll observes the ready state, **THEN** Kandev merges the PR with the existing backend merge-method selection.
 - **GIVEN** auto-merge is enabled but the PR has requested changes, pending required review, failing checks, unresolved threads, or dirty mergeability, **WHEN** the PR watch poll observes the state, **THEN** Kandev does not merge.
 - **GIVEN** auto-merge attempted a ready-state merge and GitHub rejected it, **WHEN** the same ready state is observed again, **THEN** Kandev does not retry until the readiness signature changes.
