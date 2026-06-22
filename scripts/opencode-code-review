@@ -240,6 +240,7 @@ def parse_commentable_right_lines(patch: str) -> dict[str, set[int]]:
             continue
         if line.startswith("\\"):
             continue
+        commentable.setdefault(path, set()).add(next_right_line)
         next_right_line += 1
 
     return commentable
@@ -375,11 +376,13 @@ def post_findings(args: argparse.Namespace) -> int:
 
     changed_paths = set(args.files.read_text(encoding="utf-8").splitlines())
     commentable_lines = None
+    patch_filter_warning = ""
     if args.patch is not None:
         try:
             commentable_lines = parse_commentable_right_lines(args.patch.read_text(encoding="utf-8"))
         except OSError as exc:
-            print(f"Could not read OpenCode review patch for inline filtering: {exc}", file=sys.stderr)
+            patch_filter_warning = f"Could not read OpenCode review patch for inline filtering: {exc}"
+            print(patch_filter_warning, file=sys.stderr)
     posted = 0
     rejected = []
     valid_findings = [
@@ -424,22 +427,19 @@ def post_findings(args: argparse.Namespace) -> int:
         fallback_comment, fallback_included, fallback_omitted = fallback_body(unplaced_findings, overflow_findings)
         posted_fallback = upsert_issue_comment(FALLBACK_MARKER, fallback_comment)
 
-    append_summary(
-        args.summary,
-        "OpenCode review",
-        [
-            f"Parsed findings: `{len(findings)}`",
-            f"Inline comments posted: `{posted}`",
-            f"Inline comments skipped before posting: `{len(prefiltered)}`",
-            f"Inline comments rejected: `{len(rejected)}`",
-            f"Findings beyond inline limit: `{len(overflow_findings)}`",
-            f"Fallback findings included in comment: `{fallback_included}`",
-            f"Fallback findings omitted from comment: `{fallback_omitted}`",
-            "",
-            *snippet("OpenCode stdout", stdout),
-            *snippet("OpenCode stderr", stderr),
-        ],
-    )
+    summary_lines = [
+        f"Parsed findings: `{len(findings)}`",
+        f"Inline comments posted: `{posted}`",
+        f"Inline comments skipped before posting: `{len(prefiltered)}`",
+        f"Inline comments rejected: `{len(rejected)}`",
+        f"Findings beyond inline limit: `{len(overflow_findings)}`",
+        f"Fallback findings included in comment: `{fallback_included}`",
+        f"Fallback findings omitted from comment: `{fallback_omitted}`",
+    ]
+    if patch_filter_warning:
+        summary_lines.append(f"Patch filtering warning: {patch_filter_warning}")
+    summary_lines.extend(["", *snippet("OpenCode stdout", stdout), *snippet("OpenCode stderr", stderr)])
+    append_summary(args.summary, "OpenCode review", summary_lines)
     print(f"Posted {posted} OpenCode inline comments; preserved {fallback_included} fallback findings.")
     return 0 if posted_fallback else 1
 

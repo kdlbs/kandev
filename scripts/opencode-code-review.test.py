@@ -196,7 +196,7 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
         self.assertTrue(any("<!-- opencode-review:fallback-findings -->" in body for body in bodies))
         self.assertTrue(any("src/app.ts:99" in body for body in bodies))
 
-    def test_non_added_lines_are_prefiltered_to_fallback_when_patch_is_available(self) -> None:
+    def test_context_lines_are_commentable_when_patch_is_available(self) -> None:
         self.patch_path.write_text(
             textwrap.dedent(
                 """\
@@ -225,12 +225,47 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         pull_comment_calls = [call for call in self.read_calls() if any("/pulls/" in arg for arg in call)]
+        self.assertEqual(len(pull_comment_calls), 2, pull_comment_calls)
+        self.assertTrue(any("line=9" in arg for call in pull_comment_calls for arg in call))
+        self.assertTrue(any("line=10" in arg for call in pull_comment_calls for arg in call))
+        self.assertFalse(any("<!-- opencode-review:fallback-findings -->" in body for body in self.bodies()))
+        self.assertIn("Inline comments skipped before posting: `0`", self.summary_path.read_text())
+
+    def test_lines_outside_patch_hunks_are_prefiltered_to_fallback(self) -> None:
+        self.patch_path.write_text(
+            textwrap.dedent(
+                """\
+                diff --git a/src/app.ts b/src/app.ts
+                index 1111111..2222222 100644
+                --- a/src/app.ts
+                +++ b/src/app.ts
+                @@ -8,5 +8,6 @@
+                 const before = 1;
+                 const existing = 2;
+                +const added = 3;
+                 const after = 4;
+                """
+            ),
+            encoding="utf-8",
+        )
+        findings = [
+            {"path": "src/app.ts", "line": 99, "title": "Outside hunk", "body": "This is not in the diff."},
+            {"path": "src/app.ts", "line": 10, "title": "Added line", "body": "This is added."},
+        ]
+
+        result = self.run_script(
+            output=f"<opencode_findings>{json.dumps(findings)}</opencode_findings>\n",
+            include_patch=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        pull_comment_calls = [call for call in self.read_calls() if any("/pulls/" in arg for arg in call)]
         self.assertEqual(len(pull_comment_calls), 1, pull_comment_calls)
         self.assertTrue(any("line=10" in arg for arg in pull_comment_calls[0]))
-        self.assertFalse(any("line=9" in arg for call in self.read_calls() for arg in call))
+        self.assertFalse(any("line=99" in arg for call in self.read_calls() for arg in call))
         bodies = self.bodies()
         self.assertTrue(any("<!-- opencode-review:fallback-findings -->" in body for body in bodies))
-        self.assertTrue(any("src/app.ts:9" in body for body in bodies))
+        self.assertTrue(any("src/app.ts:99" in body for body in bodies))
         self.assertFalse(any("src/app.ts:10" in body for body in bodies))
         self.assertIn("Inline comments skipped before posting: `1`", self.summary_path.read_text())
 

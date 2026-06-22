@@ -82,7 +82,13 @@ if [[ "$explicit_model_env_count" != "2" ]]; then
 fi
 pass "OpenCode posting steps explicitly pass OPENCODE_MODEL"
 
-explicit_patch_arg_count="$(count_occurrences '--patch .opencode-review/review.patch')"
+patch_capability_count="$(count_occurrences 'post-findings --help | grep -q -- "--patch"')"
+if [[ "$patch_capability_count" != "2" ]]; then
+  fail "OpenCode posting steps check trusted parser support before passing review.patch"
+fi
+pass "OpenCode posting steps check trusted parser support before passing review.patch"
+
+explicit_patch_arg_count="$(count_occurrences 'post_args+=(--patch .opencode-review/review.patch)')"
 if [[ "$explicit_patch_arg_count" != "2" ]]; then
   fail "OpenCode posting steps explicitly pass review.patch for inline filtering"
 fi
