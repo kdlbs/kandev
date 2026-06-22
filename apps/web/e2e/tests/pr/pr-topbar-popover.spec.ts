@@ -402,21 +402,24 @@ test.describe("PR top-bar CI popover", () => {
     const session = await openTaskAndWait(testPage, apiClient, seed, title);
     await session.hoverPRTopbar();
 
-    // Real cursor crossing from the trigger button into the popover content
-    // over the sideOffset gap. The browser fires a native mouseleave on the
-    // button (queuing the close timer) immediately followed by a mouseenter on
-    // the popover — the enter handler must cancel the pending close, otherwise
-    // the popover vanishes before the user can click anything inside it.
+    // Wait for the async CI content so the popover is at its final size/position
+    // before we cross onto it (it grows/repositions once checks load).
     const popover = session.prTopbarPopover();
-    const box = await popover.boundingBox();
-    expect(box).not.toBeNull();
-    await testPage.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2, { steps: 10 });
+    const openButton = session.prWorkflowOpenButton("Lint");
+    await expect(openButton).toBeVisible({ timeout: 10_000 });
 
-    // Past the 150ms close delay the popover must still be open and its
-    // buttons clickable.
+    // Real cursor crossing from the trigger button onto a control *inside* the
+    // popover, over the sideOffset gap. The browser fires a native mouseleave on
+    // the button (queuing the close timer) immediately followed by a mouseenter
+    // on the popover — the enter handler must cancel the pending close, else the
+    // popover vanishes before the user can reach anything inside it.
+    await openButton.hover();
+
+    // Past the 150ms close delay the popover must still be open and its buttons
+    // clickable.
     await testPage.waitForTimeout(600);
     await expect(popover).toBeVisible();
-    await expect(session.prWorkflowOpenButton("Lint")).toBeVisible();
+    await expect(openButton).toBeVisible();
     await expect(session.prWorkflowAddContextButton("Lint")).toBeEnabled();
   });
 
@@ -457,16 +460,22 @@ test.describe("PR top-bar CI popover", () => {
     await expect(session.prStatusChip()).toBeVisible();
     await session.hoverPRChip();
 
+    // Wait for the async CI content so the popover is at its final size/position
+    // before crossing onto it.
     const popover = session.prChipPopover();
-    const box = await popover.boundingBox();
-    expect(box).not.toBeNull();
-    await testPage.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2, { steps: 10 });
+    const openButton = popover.getByTestId("pr-workflow-open").first();
+    await expect(openButton).toBeVisible({ timeout: 10_000 });
 
+    // Cross from the chip onto a control inside the popover (over the sideOffset
+    // gap). The enter handler must cancel the close queued when the cursor left
+    // the chip, or the popover vanishes before its buttons can be used.
+    await openButton.hover();
+
+    // Past the 150ms close delay the popover must still be open and interactive,
+    // not merely mounted — parity with the topbar test.
     await testPage.waitForTimeout(600);
     await expect(popover).toBeVisible();
-    // Parity with the topbar test: the bridge fix must keep the popover
-    // interactive, not merely mounted — assert its buttons are still reachable.
-    await expect(popover.getByTestId("pr-workflow-open").first()).toBeVisible();
+    await expect(openButton).toBeVisible();
     await expect(popover.getByTestId("pr-workflow-add-context").first()).toBeEnabled();
   });
 
