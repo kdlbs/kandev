@@ -194,6 +194,7 @@ type Service struct {
 	blockers              BlockerRepository
 	comments              CommentRepository
 	baseBranchPusher      AgentBaseBranchPusher
+	cleanupDoneForTest    chan struct{}
 }
 
 // NewService creates a new task service

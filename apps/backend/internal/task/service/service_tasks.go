@@ -926,10 +926,9 @@ func (s *Service) CleanupTaskResources(ctx context.Context, taskID string, delet
 	if s.executionStopper != nil {
 		stopTargets, err = s.buildStopTargets(ctx, taskID, sessions)
 		if err != nil {
-			s.logger.Warn("skipping cascade cleanup because runtime inventory failed",
+			s.logger.Warn("continuing cascade cleanup without runtime stop targets because runtime inventory failed",
 				zap.String("task_id", taskID),
 				zap.Error(err))
-			return
 		}
 	}
 	worktrees := s.gatherWorktreesForDelete(ctx, taskID)
@@ -1002,7 +1001,7 @@ func (s *Service) runAsyncTaskCleanup(
 
 		failedStops := s.stopTaskRuntimeTargets(cleanupCtx, id, stopTargets, stopReason, stopFailMsg)
 
-		cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, envCleanup, isEphemeral, failedStops)
+		cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, stopTargets, envCleanup, isEphemeral, failedStops)
 
 		if len(cleanupErrors) > 0 {
 			s.logger.Warn(cleanupMsg+" with errors",
@@ -1014,6 +1013,7 @@ func (s *Service) runAsyncTaskCleanup(
 				zap.String("task_id", id),
 				zap.Duration("duration", time.Since(cleanupStart)))
 		}
+		s.signalCleanupDoneForTest()
 	}()
 }
 
@@ -1099,6 +1099,7 @@ func (s *Service) performTaskCleanup(
 	taskID string,
 	sessions []*models.TaskSession,
 	worktrees []*worktree.Worktree,
+	stopTargets []taskStopTarget,
 	envCleanup taskEnvironmentCleanup,
 	isEphemeral bool,
 	preserveExecutorRows map[string]struct{},
@@ -1113,21 +1114,18 @@ func (s *Service) performTaskCleanup(
 	}
 	errs = append(errs, s.cleanupDestructiveTaskResources(ctx, taskID, worktrees, envCleanup, preserveExecutorRows)...)
 
-	// Delete executor running records for sessions
-	for _, session := range sessions {
-		if session == nil || session.ID == "" {
-			continue
-		}
-		if _, preserve := preserveExecutorRows[session.ID]; preserve {
+	sessionIDs := cleanupSessionIDs(sessions, stopTargets)
+	for _, sessionID := range sessionIDs {
+		if _, preserve := preserveExecutorRows[sessionID]; preserve {
 			s.logger.Warn("preserving executor runtime row after failed stop",
 				zap.String("task_id", taskID),
-				zap.String("session_id", session.ID))
+				zap.String("session_id", sessionID))
 			continue
 		}
-		if err := s.executors.DeleteExecutorRunningBySessionID(ctx, session.ID); err != nil {
+		if err := s.executors.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
 			s.logger.Debug("failed to delete executor runtime for session",
 				zap.String("task_id", taskID),
-				zap.String("session_id", session.ID),
+				zap.String("session_id", sessionID),
 				zap.Error(err))
 			// Don't add to errs - this is a debug-level issue
 		}
@@ -1136,28 +1134,61 @@ func (s *Service) performTaskCleanup(
 	// Cleanup quick-chat workspace directories for all tasks (not just ephemeral).
 	// Non-ephemeral office tasks also get quick-chat dirs allocated by manager_launch.go;
 	// both cases must be cleaned up to avoid a disk leak.
-	errs = append(errs, s.cleanupQuickChatDirs(taskID, sessions, preserveExecutorRows)...)
+	errs = append(errs, s.cleanupQuickChatDirs(taskID, sessionIDs, preserveExecutorRows)...)
 
 	return errs
 }
 
+func (s *Service) signalCleanupDoneForTest() {
+	if s.cleanupDoneForTest == nil {
+		return
+	}
+	select {
+	case s.cleanupDoneForTest <- struct{}{}:
+	default:
+	}
+}
+
+func cleanupSessionIDs(sessions []*models.TaskSession, stopTargets []taskStopTarget) []string {
+	sessionIDs := make([]string, 0, len(sessions)+len(stopTargets))
+	seen := make(map[string]struct{})
+	for _, session := range sessions {
+		if session == nil {
+			continue
+		}
+		sessionIDs = appendUniqueSessionID(sessionIDs, seen, session.ID)
+	}
+	for _, target := range stopTargets {
+		sessionIDs = appendUniqueSessionID(sessionIDs, seen, target.sessionID)
+	}
+	return sessionIDs
+}
+
+func appendUniqueSessionID(sessionIDs []string, seen map[string]struct{}, sessionID string) []string {
+	if sessionID == "" {
+		return sessionIDs
+	}
+	if _, ok := seen[sessionID]; ok {
+		return sessionIDs
+	}
+	seen[sessionID] = struct{}{}
+	return append(sessionIDs, sessionID)
+}
+
 func (s *Service) cleanupQuickChatDirs(
 	taskID string,
-	sessions []*models.TaskSession,
+	sessionIDs []string,
 	preserveExecutorRows map[string]struct{},
 ) []error {
 	if s.quickChatDir == "" {
 		return nil
 	}
 	var errs []error
-	for _, session := range sessions {
-		if session == nil || session.ID == "" {
+	for _, sessionID := range sessionIDs {
+		if _, preserve := preserveExecutorRows[sessionID]; preserve {
 			continue
 		}
-		if _, preserve := preserveExecutorRows[session.ID]; preserve {
-			continue
-		}
-		sessionDir := filepath.Join(s.quickChatDir, session.ID)
+		sessionDir := filepath.Join(s.quickChatDir, sessionID)
 		if _, statErr := os.Stat(sessionDir); statErr != nil {
 			// Directory does not exist — nothing to remove.
 			continue
@@ -1165,15 +1196,15 @@ func (s *Service) cleanupQuickChatDirs(
 		if err := os.RemoveAll(sessionDir); err != nil {
 			s.logger.Warn("failed to cleanup quick-chat workspace directory",
 				zap.String("task_id", taskID),
-				zap.String("session_id", session.ID),
+				zap.String("session_id", sessionID),
 				zap.String("path", sessionDir),
 				zap.Error(err))
-			errs = append(errs, fmt.Errorf("cleanup quick-chat dir %s: %w", session.ID, err))
+			errs = append(errs, fmt.Errorf("cleanup quick-chat dir %s: %w", sessionID, err))
 			continue
 		}
 		s.logger.Debug("cleaned up quick-chat workspace directory",
 			zap.String("task_id", taskID),
-			zap.String("session_id", session.ID),
+			zap.String("session_id", sessionID),
 			zap.String("path", sessionDir))
 	}
 	return errs

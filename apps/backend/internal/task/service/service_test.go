@@ -484,6 +484,7 @@ func TestService_DeleteTaskStopsExecutorRunningForTerminalSession(t *testing.T) 
 	ctx := context.Background()
 	stopper := newRecordingTaskExecutionStopper()
 	svc.SetExecutionStopper(stopper)
+	svc.cleanupDoneForTest = make(chan struct{}, 1)
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
@@ -519,6 +520,10 @@ func TestService_DeleteTaskStopsExecutorRunningForTerminalSession(t *testing.T) 
 	if !call.force {
 		t.Fatal("StopExecution force = false, want true")
 	}
+	waitForCleanupDone(t, svc)
+	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session-completed"); !errors.Is(err, models.ErrExecutorRunningNotFound) {
+		t.Fatalf("executor row should be removed after successful stop, got %v", err)
+	}
 }
 
 func TestService_DeleteTaskPreservesExecutorRunningWhenStopFails(t *testing.T) {
@@ -527,6 +532,7 @@ func TestService_DeleteTaskPreservesExecutorRunningWhenStopFails(t *testing.T) {
 	stopper := newRecordingTaskExecutionStopper()
 	stopper.stopExecutionErr = errors.New("runtime still shutting down")
 	svc.SetExecutionStopper(stopper)
+	svc.cleanupDoneForTest = make(chan struct{}, 1)
 	quickChatDir := t.TempDir()
 	svc.SetQuickChatDir(quickChatDir)
 
@@ -558,7 +564,7 @@ func TestService_DeleteTaskPreservesExecutorRunningWhenStopFails(t *testing.T) {
 		t.Fatalf("DeleteTask: %v", err)
 	}
 	_ = stopper.waitForStopExecution(t)
-	time.Sleep(50 * time.Millisecond)
+	waitForCleanupDone(t, svc)
 
 	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session-completed"); err != nil {
 		t.Fatalf("executor row should remain retryable after stop failure: %v", err)
@@ -576,6 +582,7 @@ func TestService_DeleteTaskCleansSuccessfulSessionResourcesOnPartialStopFailure(
 		"exec-failed": errors.New("runtime still shutting down"),
 	}
 	svc.SetExecutionStopper(stopper)
+	svc.cleanupDoneForTest = make(chan struct{}, 1)
 	quickChatDir := t.TempDir()
 	svc.SetQuickChatDir(quickChatDir)
 	cleanup := &recordingWorktreeCleanup{
@@ -635,6 +642,7 @@ func TestService_DeleteTaskCleansSuccessfulSessionResourcesOnPartialStopFailure(
 	if !calls["exec-failed"] || !calls["exec-ok"] {
 		t.Fatalf("unexpected StopExecution calls: %#v", calls)
 	}
+	waitForCleanupDone(t, svc)
 	waitForPathRemoved(t, filepath.Join(quickChatDir, "session-ok"))
 	if _, err := os.Stat(filepath.Join(quickChatDir, "session-failed")); err != nil {
 		t.Fatalf("failed session quick-chat directory should remain: %v", err)
@@ -650,11 +658,47 @@ func TestService_DeleteTaskCleansSuccessfulSessionResourcesOnPartialStopFailure(
 	}
 }
 
+func TestService_DeleteTaskCleansMissingSessionExecutorRowAfterStop(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	stopper := newRecordingTaskExecutionStopper()
+	svc.SetExecutionStopper(stopper)
+	svc.cleanupDoneForTest = make(chan struct{}, 1)
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test", Priority: "medium"})
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:               "session-missing",
+		SessionID:        "session-missing",
+		TaskID:           "task-123",
+		ExecutorID:       "executor-1",
+		Runtime:          agentruntime.RuntimeStandalone,
+		Status:           models.ExecutorRunningStatusStarting,
+		AgentExecutionID: "exec-missing",
+	}); err != nil {
+		t.Fatalf("seed executor running: %v", err)
+	}
+
+	if err := svc.DeleteTask(ctx, "task-123"); err != nil {
+		t.Fatalf("DeleteTask: %v", err)
+	}
+	call := stopper.waitForStopExecution(t)
+	if call.executionID != "exec-missing" {
+		t.Fatalf("StopExecution executionID = %q, want exec-missing", call.executionID)
+	}
+	waitForCleanupDone(t, svc)
+	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session-missing"); !errors.Is(err, models.ErrExecutorRunningNotFound) {
+		t.Fatalf("missing-session executor row should be removed after successful stop, got %v", err)
+	}
+}
+
 func TestService_ArchiveTaskStopsExecutorRunningForTerminalSession(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	stopper := newRecordingTaskExecutionStopper()
 	svc.SetExecutionStopper(stopper)
+	svc.cleanupDoneForTest = make(chan struct{}, 1)
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
@@ -689,6 +733,10 @@ func TestService_ArchiveTaskStopsExecutorRunningForTerminalSession(t *testing.T)
 	}
 	if !call.force {
 		t.Fatal("StopExecution force = false, want true")
+	}
+	waitForCleanupDone(t, svc)
+	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session-completed"); !errors.Is(err, models.ErrExecutorRunningNotFound) {
+		t.Fatalf("executor row should be removed after successful stop, got %v", err)
 	}
 }
 
@@ -843,6 +891,15 @@ func waitForPathRemoved(t *testing.T, path string) {
 			t.Fatalf("timed out waiting for %s to be removed", path)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func waitForCleanupDone(t *testing.T, svc *Service) {
+	t.Helper()
+	select {
+	case <-svc.cleanupDoneForTest:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for async task cleanup")
 	}
 }
 

@@ -103,7 +103,8 @@ Allowed transitions:
 - `tracked` -> `stop_requested` by archive/delete/session stop/reconciliation.
 - `stop_requested` -> `stopped` when runtime shutdown succeeds or the runtime is
   confirmed absent.
-- `stopped` -> `tracking_removed` after worktree/environment cleanup finishes.
+- `stopped` -> `tracking_removed` after worktree/environment cleanup has been
+  attempted and the runtime row is no longer needed as the durable stop handle.
 - `stop_requested` -> `retryable_failure` on timeout or uncertain runtime state.
 - `retryable_failure` -> `stop_requested` on the next cleanup attempt.
 
@@ -119,6 +120,10 @@ Allowed transitions:
 - If a runtime row points at a missing in-memory execution, cleanup attempts the
   runtime-specific persisted handle when available. If no handle can be used, the
   row is preserved with a warning instead of being silently dropped.
+- If worktree or task environment cleanup fails after runtime shutdown is
+  confirmed, the runtime tracking row can still be removed because it no longer
+  identifies a live process. The resource cleanup error is logged and handled by
+  the resource-specific retry path.
 - If an agentctl process exits unexpectedly, its owned agent subprocess group is
   killed before agentctl shutdown completes.
 - If startup reconciliation finds rows for archived tasks, deleted tasks, missing

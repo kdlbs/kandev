@@ -1820,6 +1820,19 @@ func TestReconcileSessionsOnStartup(t *testing.T) {
 		if running.AgentExecutionID != "exec-terminal" {
 			t.Fatalf("expected execution ID to be preserved, got %q", running.AgentExecutionID)
 		}
+		agentMgr.mu.Lock()
+		stopCalls := append([]stopAgentCall(nil), agentMgr.stopAgentWithReasonArgs...)
+		agentMgr.mu.Unlock()
+		if len(stopCalls) != 1 {
+			t.Fatalf("expected one StopAgentWithReason call, got %d", len(stopCalls))
+		}
+		if stopCalls[0] != (stopAgentCall{
+			ExecutionID: "exec-terminal",
+			Reason:      "startup terminal session cleanup",
+			Force:       true,
+		}) {
+			t.Fatalf("unexpected StopAgentWithReason call: %#v", stopCalls[0])
+		}
 	})
 
 	t.Run("missing_session_runtime_cleaned_up", func(t *testing.T) {
@@ -1889,6 +1902,19 @@ func TestReconcileSessionsOnStartup(t *testing.T) {
 		}
 		if running.AgentExecutionID != "exec-deleted" {
 			t.Fatalf("expected execution ID to be preserved, got %q", running.AgentExecutionID)
+		}
+		agentMgr.mu.Lock()
+		stopCalls := append([]stopAgentCall(nil), agentMgr.stopAgentWithReasonArgs...)
+		agentMgr.mu.Unlock()
+		if len(stopCalls) != 1 {
+			t.Fatalf("expected one StopAgentWithReason call, got %d", len(stopCalls))
+		}
+		if stopCalls[0] != (stopAgentCall{
+			ExecutionID: "exec-deleted",
+			Reason:      "startup missing session cleanup",
+			Force:       true,
+		}) {
+			t.Fatalf("unexpected StopAgentWithReason call: %#v", stopCalls[0])
 		}
 	})
 

@@ -28,7 +28,7 @@ cd apps/backend && go test ./internal/task/repository/sqlite
 
 - `apps/backend/internal/task/repository/interface.go`
 - `apps/backend/internal/task/repository/sqlite/executor.go`
-- `apps/backend/internal/task/repository/sqlite/executor_test.go`
+- `apps/backend/internal/task/repository/sqlite/executor_cleanup_test.go`
 
 ## Dependencies
 
