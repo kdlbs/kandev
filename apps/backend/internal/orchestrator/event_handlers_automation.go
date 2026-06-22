@@ -396,6 +396,31 @@ func (s *Service) recordSuccessRun(ctx context.Context, evt *automation.Automati
 	}
 }
 
+// handleAutomationTurnComplete closes out a run-mode automation on the stream
+// complete event. ACP agents can stay alive after stop_reason=end_turn, so
+// waiting for agent.completed would leave the AutomationRun stuck at
+// task_created and keep the executor alive.
+func (s *Service) handleAutomationTurnComplete(
+	ctx context.Context, taskID, sessionID string, session *models.TaskSession, stopReason string, isError bool, errMsg string,
+) bool {
+	if taskID == "" || sessionID == "" || stopReason == stopReasonCancelled {
+		return false
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		return false
+	}
+	if !task.IsEphemeral || task.Origin != models.TaskOriginAutomationRun {
+		return false
+	}
+
+	success := !isError && stopReason != "error"
+	s.markAutomationRunTerminal(ctx, taskID, success, errMsg)
+	s.stopAutomationAgent(ctx, taskID, sessionID, session)
+	s.reapAutomationWorktree(ctx, taskID, sessionID)
+	return true
+}
+
 // finalizeAutomationRunIfEphemeral closes out a run-mode automation run when
 // its agent terminates. For ephemeral automation tasks it (a) flips the
 // AutomationRun row from task_created → succeeded|failed, and (b) reaps the
@@ -412,6 +437,11 @@ func (s *Service) finalizeAutomationRunIfEphemeral(ctx context.Context, taskID, 
 		return
 	}
 
+	s.markAutomationRunTerminal(ctx, taskID, success, errMsg)
+	s.reapAutomationWorktree(ctx, taskID, sessionID)
+}
+
+func (s *Service) markAutomationRunTerminal(ctx context.Context, taskID string, success bool, errMsg string) {
 	if s.automationService != nil {
 		var markErr error
 		if success {
@@ -426,8 +456,41 @@ func (s *Service) finalizeAutomationRunIfEphemeral(ctx context.Context, taskID, 
 				zap.Error(markErr))
 		}
 	}
+}
 
-	s.reapAutomationWorktree(ctx, taskID, sessionID)
+func (s *Service) stopAutomationAgent(
+	ctx context.Context, taskID, sessionID string, session *models.TaskSession,
+) {
+	if s.agentManager == nil {
+		return
+	}
+	executionID := ""
+	if session != nil {
+		executionID = session.AgentExecutionID
+	}
+	if executionID == "" {
+		running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+		if err != nil {
+			s.logger.Warn("failed to resolve automation execution for turn-complete stop",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			return
+		}
+		if running != nil {
+			executionID = running.AgentExecutionID
+		}
+	}
+	if executionID == "" {
+		return
+	}
+	if err := s.agentManager.StopAgent(ctx, executionID, false); err != nil {
+		s.logger.Warn("failed to stop automation agent on turn complete",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", executionID),
+			zap.Error(err))
+	}
 }
 
 // reapAutomationWorktree removes the ephemeral worktree (and its branch)
