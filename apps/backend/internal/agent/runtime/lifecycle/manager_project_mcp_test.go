@@ -50,6 +50,44 @@ func TestMaterializeRuntimeProjectMCPForPiWritesProjectFile(t *testing.T) {
 	}
 }
 
+func TestMaterializeRuntimeProjectMCPForCursorWritesProjectFile(t *testing.T) {
+	mgr := newTestManager(t)
+	execution := &AgentExecution{
+		ID:             "exec-1",
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		AgentProfileID: "profile-1",
+		WorkspacePath:  t.TempDir(),
+		Metadata:       map[string]interface{}{},
+		standalonePort: 45678,
+	}
+	agentConfig, ok := mgr.registry.Get("cursor-acp")
+	if !ok {
+		t.Fatal("cursor-acp agent missing from test registry")
+	}
+
+	if err := mgr.materializeRuntimeProjectMCP(context.Background(), execution, agentConfig); err != nil {
+		t.Fatalf("materializeRuntimeProjectMCP: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(execution.WorkspacePath, ".cursor", "mcp.json"))
+	if err != nil {
+		t.Fatalf("cursor mcp.json not written: %v", err)
+	}
+	var payload struct {
+		MCPServers map[string]struct {
+			URL string `json:"url"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("cursor mcp.json not valid JSON: %v\n%s", err, data)
+	}
+	kandev := payload.MCPServers[kandevMCPServerName]
+	if kandev.URL != "http://localhost:45678/mcp" {
+		t.Fatalf("kandev URL = %q", kandev.URL)
+	}
+}
+
 func TestMaterializeRuntimeProjectMCPSkipsWhenPortUnavailable(t *testing.T) {
 	mgr := newTestManager(t)
 	execution := &AgentExecution{
