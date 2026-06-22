@@ -252,6 +252,9 @@ describe("buildRepositoriesPayload — remoteRepos rows", () => {
 
 const PR_URL_42 = "https://github.com/acme/site/pull/42";
 const PR_TITLE_42 = "PR #42: Test PR";
+const USER_TYPED_TITLE = "my own title";
+const ISSUE_URL_1456 = "https://github.com/acme/site/issues/1456";
+const ISSUE_TITLE_1456 = "Issue #1456: Fix remote picker";
 
 function seedPRInfo(url: string, prNumber: number, suggestedTitle: string) {
   prInfoMap.set(url, {
@@ -292,14 +295,14 @@ describe("useDialogFormState — title autofill from first row GitHub URL info",
     seedPRInfo(PR_URL_42, 42, PR_TITLE_42);
     const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
     act(() => {
-      result.current.setTaskName("my own title");
+      result.current.setTaskName(USER_TYPED_TITLE);
       result.current.setUseRemote(true);
     });
     const key = result.current.remoteRepos[0]?.key;
     act(() => {
       result.current.updateRemoteRepo(key!, { url: PR_URL_42 });
     });
-    expect(result.current.taskName).toBe("my own title");
+    expect(result.current.taskName).toBe(USER_TYPED_TITLE);
   });
 
   it("does NOT re-apply autofill after the user clears the title (user took ownership)", () => {
@@ -382,17 +385,71 @@ describe("useDialogFormState — title autofill from first row GitHub issue info
   });
 
   it("seeds the task title from the first row's issue info when title is empty", () => {
-    const issueURL = "https://github.com/acme/site/issues/1456";
-    seedIssueInfo(issueURL, 1456, "Issue #1456: Fix remote picker");
+    seedIssueInfo(ISSUE_URL_1456, 1456, ISSUE_TITLE_1456);
     const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
     act(() => {
       result.current.setUseRemote(true);
     });
     const key = result.current.remoteRepos[0]?.key;
     act(() => {
-      result.current.updateRemoteRepo(key!, { url: issueURL });
+      result.current.updateRemoteRepo(key!, { url: ISSUE_URL_1456 });
     });
-    expect(result.current.taskName).toBe("Issue #1456: Fix remote picker");
+    expect(result.current.taskName).toBe(ISSUE_TITLE_1456);
     expect(result.current.hasTitle).toBe(true);
+  });
+
+  it("does NOT overwrite a title the user typed themselves", () => {
+    seedIssueInfo(ISSUE_URL_1456, 1456, ISSUE_TITLE_1456);
+    const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
+    act(() => {
+      result.current.setTaskName(USER_TYPED_TITLE);
+      result.current.setUseRemote(true);
+    });
+    const key = result.current.remoteRepos[0]?.key;
+    act(() => {
+      result.current.updateRemoteRepo(key!, { url: ISSUE_URL_1456 });
+    });
+    expect(result.current.taskName).toBe(USER_TYPED_TITLE);
+  });
+
+  it("does NOT re-apply autofill after the user clears the title", () => {
+    seedIssueInfo(ISSUE_URL_1456, 1456, ISSUE_TITLE_1456);
+    const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
+    act(() => {
+      result.current.setUseRemote(true);
+    });
+    const key = result.current.remoteRepos[0]?.key;
+    act(() => {
+      result.current.updateRemoteRepo(key!, { url: ISSUE_URL_1456 });
+    });
+    expect(result.current.taskName).toBe(ISSUE_TITLE_1456);
+    act(() => {
+      result.current.setTaskName("");
+    });
+    expect(result.current.taskName).toBe("");
+  });
+
+  it("re-applies autofill when the user switches to a different issue URL", () => {
+    const newIssueURL = "https://github.com/acme/site/issues/1457";
+    seedIssueInfo(ISSUE_URL_1456, 1456, ISSUE_TITLE_1456);
+    seedIssueInfo(newIssueURL, 1457, "Issue #1457: Add issue URL paste");
+    const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
+    act(() => {
+      result.current.setUseRemote(true);
+    });
+    const key = result.current.remoteRepos[0]?.key;
+    act(() => {
+      result.current.updateRemoteRepo(key!, { url: ISSUE_URL_1456 });
+    });
+    expect(result.current.taskName).toBe(ISSUE_TITLE_1456);
+    act(() => {
+      result.current.setTaskName("");
+    });
+    expect(result.current.taskName).toBe("");
+
+    act(() => {
+      result.current.updateRemoteRepo(key!, { url: newIssueURL });
+    });
+    expect(result.current.taskName).toBe("Issue #1457: Add issue URL paste");
   });
 });
