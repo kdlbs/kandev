@@ -26,7 +26,7 @@ type SessionTaskSwitcherSheetProps = {
   workflowId: string | null;
 };
 
-function MobileTaskList({
+export function MobileTaskList({
   tasks,
   workflows,
   stepsByWorkflowId,

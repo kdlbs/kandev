@@ -21,6 +21,7 @@ type SeedTaskArgs = {
   apiClient: ApiClient;
   seedData: SeedData;
   title: string;
+  description?: string;
   prOverrides?: Partial<Parameters<ApiClient["mockGitHubAssociateTaskPR"]>[0]>;
 };
 
@@ -28,6 +29,7 @@ async function seedTaskWithPR({
   apiClient,
   seedData,
   title,
+  description = "/e2e:simple-message",
   prOverrides = {},
 }: SeedTaskArgs): Promise<string> {
   await apiClient.mockGitHubReset();
@@ -37,7 +39,7 @@ async function seedTaskWithPR({
     title,
     seedData.agentProfileId,
     {
-      description: "/e2e:simple-message",
+      description,
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
@@ -61,6 +63,22 @@ async function seedTaskWithPR({
   return task.id;
 }
 
+async function seedTaskWithPRAndTodos(args: SeedTaskArgs): Promise<string> {
+  return seedTaskWithPR({
+    ...args,
+    description: [
+      'e2e:plan([{"content":"Review mobile toolbar","status":"completed"},{"content":"Verify todo tap","status":"in_progress"}])',
+      'e2e:message("mobile todo and ci response")',
+    ].join("\n"),
+    prOverrides: {
+      checks_state: "success",
+      checks_total: 4,
+      checks_passing: 4,
+      ...args.prOverrides,
+    },
+  });
+}
+
 async function openTask(testPage: import("@playwright/test").Page, taskId: string) {
   await testPage.goto(`/t/${taskId}`);
   const session = new SessionPage(testPage);
@@ -69,6 +87,29 @@ async function openTask(testPage: import("@playwright/test").Page, taskId: strin
 }
 
 test.describe("mobile PR CI chip drawer", () => {
+  test("tapping the todo indicator beside the CI chip opens the todo list", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const taskId = await seedTaskWithPRAndTodos({
+      apiClient,
+      seedData,
+      title: "Mobile todo tap-open",
+    });
+    const session = await openTask(testPage, taskId);
+
+    await expect(session.prStatusChip()).toBeVisible({ timeout: 15_000 });
+    await expect(session.todoIndicator()).toBeVisible({ timeout: 15_000 });
+
+    await session.todoIndicator().tap();
+
+    const todoPopover = testPage.getByTestId("todo-indicator-popover");
+    await expect(todoPopover.getByText("Todos", { exact: true })).toBeVisible();
+    await expect(todoPopover.getByText("Verify todo tap", { exact: true })).toBeVisible();
+  });
+
   test("tapping the chip opens the drawer with PR CI content", async ({
     testPage,
     apiClient,

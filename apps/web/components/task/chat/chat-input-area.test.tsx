@@ -40,11 +40,6 @@ vi.mock("@/components/task/share/share-button", () => ({
   shareableSessionStateClient: () => false,
 }));
 
-vi.mock("@/components/task/chat/queued-ghost-list", () => ({
-  QueueAffordance: ({ children }: { children: (queueChip: React.ReactNode) => React.ReactNode }) =>
-    children(null),
-}));
-
 vi.mock("@/components/task/chat/chat-input-container", () => ({
   ChatInputContainer: () => null,
 }));
@@ -82,7 +77,8 @@ vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ send: vi.fn() }),
 }));
 
-vi.mock("@/lib/local-storage", () => ({
+vi.mock("@/lib/local-storage", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/local-storage")>()),
   markPRClosedBannerDismissed: vi.fn(),
   markPRMergedBannerDismissed: vi.fn(),
   wasPRClosedBannerDismissed: () => false,

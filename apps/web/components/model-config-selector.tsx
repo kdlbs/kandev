@@ -189,6 +189,7 @@ export type ModelConfigSelectorProps = {
   ariaLabel?: string;
   variant?: "compact" | "field";
   popoverSide?: "top" | "bottom";
+  triggerClassName?: string;
 };
 
 export const ModelConfigSelector = memo(function ModelConfigSelector({
@@ -202,6 +203,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
   ariaLabel = "Model settings",
   variant = "field",
   popoverSide = "bottom",
+  triggerClassName: customTriggerClassName,
 }: ModelConfigSelectorProps) {
   const [open, setOpen] = useState(false);
   const selectConfigOptions = usableConfigOptions(configOptions);
@@ -219,7 +221,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
     }
   };
 
-  const triggerClassName =
+  const baseTriggerClassName =
     variant === "compact"
       ? "h-7 max-w-[min(18rem,70vw)] cursor-pointer gap-1 px-2 text-xs hover:bg-muted/40"
       : "w-full justify-between font-normal cursor-pointer";
@@ -231,7 +233,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
           type="button"
           variant={variant === "compact" ? "ghost" : "outline"}
           size={variant === "compact" ? "sm" : "default"}
-          className={triggerClassName}
+          className={cn(baseTriggerClassName, customTriggerClassName)}
           aria-label={ariaLabel}
           disabled={disabled}
         >

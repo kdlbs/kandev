@@ -3,6 +3,7 @@
 import { Button } from "@kandev/ui/button";
 import { IconMenu2, IconSearch } from "@tabler/icons-react";
 import { PageTopbar } from "@/components/page-topbar";
+import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
 import { useAppStore } from "@/components/state-provider";
 
@@ -33,6 +34,7 @@ export function KanbanHeaderMobile({
   const setMenuOpen = useAppStore((state) => state.setMobileKanbanMenuOpen);
   const isSearchOpen = useAppStore((state) => state.mobileKanban.isSearchOpen);
   const setSearchOpen = useAppStore((state) => state.setMobileKanbanSearchOpen);
+  const isHome = title === "Home";
 
   const toggleSearch = () => {
     const next = !isSearchOpen;
@@ -43,14 +45,26 @@ export function KanbanHeaderMobile({
 
   return (
     <>
+      {/* Keep mobile root chrome compact so metrics and actions stay visible. */}
       <PageTopbar
         title={title}
-        subtitle={workspaceLabel}
-        backLabel={title === "Home" ? "" : "Kandev"}
+        backLabel="Kandev"
         className="h-10 px-3 py-1"
-        variant={title === "Home" ? "root" : "breadcrumb"}
+        variant="root"
+        leftActions={
+          <span className="flex min-w-0 max-w-[38vw] flex-col leading-tight">
+            <span className="truncate text-sm font-medium text-muted-foreground">{title}</span>
+            {!isHome && (
+              <span className="truncate text-[10px] text-muted-foreground/60">
+                {workspaceLabel}
+              </span>
+            )}
+          </span>
+        }
+        actionsClassName="gap-2"
         actions={
           <>
+            <TopbarMetrics />
             {onSearchChange && (
               <Button
                 variant={isSearchOpen ? "secondary" : "outline"}
