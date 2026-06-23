@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 import { Dialog, DialogContent, DialogHeader, DialogFooter } from "@kandev/ui/dialog";
@@ -43,6 +43,7 @@ import {
   buildDialogFormBodyProps,
 } from "@/components/task-create-dialog-prop-builders";
 import { resetTaskCreateLastUsedSync } from "@/components/task-create-dialog-handlers";
+import { TaskCreateDialogPopoverContainerProvider } from "@/hooks/use-task-create-dialog-popover-container";
 
 export interface TaskCreateDialogProps {
   open: boolean;
@@ -482,6 +483,7 @@ const VOICE_SUBMIT_EVENT = { preventDefault: () => {} } as unknown as FormEvent;
 export function TaskCreateDialog(props: TaskCreateDialogProps) {
   const setup = useTaskCreateDialogSetup(props);
   const { guardedHandleSubmit } = setup;
+  const [popoverContainer, setPopoverContainer] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!props.open) resetTaskCreateLastUsedSync();
   }, [props.open]);
@@ -496,30 +498,33 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent
+        ref={setPopoverContainer}
         data-testid="create-task-dialog"
         className="w-full h-full min-w-0 max-w-full max-h-full overflow-visible rounded-none sm:w-[900px] sm:h-auto sm:max-w-none sm:max-h-[85vh] sm:rounded-lg flex flex-col"
       >
-        <DialogHeader>
-          <DialogHeaderContent
-            isCreateMode={setup.isCreateMode}
-            isEditMode={setup.isEditMode}
-            sessionRepoName={setup.sessionRepoName}
-            initialTitle={props.initialValues?.title}
-          />
-        </DialogHeader>
-        <form
-          onSubmit={guardedHandleSubmit}
-          className="flex min-w-0 flex-col gap-4 overflow-hidden"
-        >
-          <DialogFormBody
-            {...buildDialogFormBodyProps(setup, props)}
-            onVoiceAutoSend={handleVoiceAutoSend}
-          />
-          <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
-            <TaskCreateDialogFooter {...buildDialogFooterProps(setup, props)} />
-          </DialogFooter>
-        </form>
-        <PendingDiscardModal pending={setup.submitHandlers.pendingDiscard} />
+        <TaskCreateDialogPopoverContainerProvider container={popoverContainer}>
+          <DialogHeader>
+            <DialogHeaderContent
+              isCreateMode={setup.isCreateMode}
+              isEditMode={setup.isEditMode}
+              sessionRepoName={setup.sessionRepoName}
+              initialTitle={props.initialValues?.title}
+            />
+          </DialogHeader>
+          <form
+            onSubmit={guardedHandleSubmit}
+            className="flex min-w-0 flex-col gap-4 overflow-hidden"
+          >
+            <DialogFormBody
+              {...buildDialogFormBodyProps(setup, props)}
+              onVoiceAutoSend={handleVoiceAutoSend}
+            />
+            <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
+              <TaskCreateDialogFooter {...buildDialogFooterProps(setup, props)} />
+            </DialogFooter>
+          </form>
+          <PendingDiscardModal pending={setup.submitHandlers.pendingDiscard} />
+        </TaskCreateDialogPopoverContainerProvider>
       </DialogContent>
     </Dialog>
   );

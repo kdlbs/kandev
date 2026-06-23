@@ -277,6 +277,8 @@ export function Pill({
     prefix,
   });
 
+  // Disabled buttons swallow pointer/focus events, so the wrapper owns tooltip
+  // focus while the button stays disabled.
   if (disabled && disabledReason && !open) {
     return (
       <DisabledPillTooltip
@@ -309,6 +311,8 @@ export function Pill({
 
   if (!tooltip) return popover;
 
+  // Suppress the hover tooltip while the popover is open, then briefly after
+  // close so lingering hover cannot immediately reopen it.
   const tooltipOpen = open || suppressTooltip ? false : tooltipOpenState;
   return (
     <Tooltip open={tooltipOpen} onOpenChange={handleTooltipOpenChange}>
