@@ -117,7 +117,6 @@ export function ListToolbar({
         className="md:min-w-[360px]"
         testId="github-repo-filter-trigger"
         dropdownTestId="github-repo-filter-dropdown"
-        legacyDropdownTestId="github-repo-filter-search"
       />
       <div className="w-full md:flex-1 md:min-w-[240px] relative">
         <Input

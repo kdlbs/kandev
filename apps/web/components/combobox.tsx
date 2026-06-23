@@ -47,6 +47,7 @@ interface ComboboxProps {
   showSearch?: boolean;
   testId?: string;
   dropdownTestId?: string;
+  /** Backwards-compat alias rendered as data-legacy-testid for test id renames. */
   legacyDropdownTestId?: string;
   popoverSide?: "top" | "right" | "bottom" | "left";
   popoverAlign?: "start" | "center" | "end";

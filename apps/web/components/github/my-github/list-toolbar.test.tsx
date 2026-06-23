@@ -8,7 +8,6 @@ afterEach(() => cleanup());
 const ALL_REPOS_LABEL = "All repos";
 const REPO_SEARCH_PLACEHOLDER = "Filter repositories...";
 const REPO_DROPDOWN_TEST_ID = "github-repo-filter-dropdown";
-const LEGACY_REPO_DROPDOWN_TEST_ID = "github-repo-filter-search";
 const KANDEV_REPO = "kdlbs/kandev";
 
 function renderToolbar({ repoFilter = "" }: { repoFilter?: string } = {}) {
@@ -42,9 +41,6 @@ describe("ListToolbar", () => {
 
     expect(await screen.findByPlaceholderText(REPO_SEARCH_PLACEHOLDER)).toBeTruthy();
     expect(screen.getByTestId(REPO_DROPDOWN_TEST_ID)).toBeTruthy();
-    expect(screen.getByTestId(REPO_DROPDOWN_TEST_ID).dataset.legacyTestid).toBe(
-      LEGACY_REPO_DROPDOWN_TEST_ID,
-    );
     expect(screen.getByText(KANDEV_REPO)).toBeTruthy();
   });
 
