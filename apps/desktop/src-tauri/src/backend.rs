@@ -2,7 +2,7 @@ use std::{
     collections::BTreeMap,
     env,
     ffi::{OsStr, OsString},
-    io::{Read, Write},
+    io::{ErrorKind, Read, Write},
     net::{TcpListener, TcpStream, ToSocketAddrs},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -297,7 +297,9 @@ where
         let mut buffer = [0_u8; 1024];
         loop {
             match reader.read(&mut buffer) {
-                Ok(0) | Err(_) => return,
+                Ok(0) => return,
+                Err(err) if err.kind() == ErrorKind::Interrupted => continue,
+                Err(_) => return,
                 Ok(n) => output
                     .lock()
                     .expect("startup output mutex poisoned")
@@ -636,6 +638,27 @@ mod tests {
     }
 
     #[test]
+    fn capture_stream_retries_interrupted_reads() {
+        let output = Arc::new(Mutex::new(StartupOutput::default()));
+
+        capture_stream("stdout", InterruptedThenData::new(b"backend ready"), output.clone());
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while Instant::now() < deadline {
+            if output
+                .lock()
+                .expect("startup output mutex poisoned")
+                .text()
+                .is_some_and(|text| text.contains("backend ready"))
+            {
+                return;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        panic!("capture_stream did not retry interrupted read");
+    }
+
+    #[test]
     fn read_http_status_prefix_reads_past_short_first_chunk() {
         let mut reader = ShortReader::new(b"HTTP/1.1 200 OK\r\nignored", 4);
 
@@ -722,6 +745,38 @@ mod tests {
                 .min(self.data.len() - self.position);
             buffer[..len].copy_from_slice(&self.data[self.position..self.position + len]);
             self.position += len;
+            Ok(len)
+        }
+    }
+
+    struct InterruptedThenData {
+        data: &'static [u8],
+        interrupted: bool,
+        drained: bool,
+    }
+
+    impl InterruptedThenData {
+        fn new(data: &'static [u8]) -> Self {
+            Self {
+                data,
+                interrupted: false,
+                drained: false,
+            }
+        }
+    }
+
+    impl Read for InterruptedThenData {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            if !self.interrupted {
+                self.interrupted = true;
+                return Err(std::io::Error::from(ErrorKind::Interrupted));
+            }
+            if self.drained {
+                return Ok(0);
+            }
+            let len = buffer.len().min(self.data.len());
+            buffer[..len].copy_from_slice(&self.data[..len]);
+            self.drained = true;
             Ok(len)
         }
     }

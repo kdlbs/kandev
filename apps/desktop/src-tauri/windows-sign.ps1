@@ -22,9 +22,7 @@ if (!(Test-Path $Path)) {
 }
 
 $certificatePath = Join-Path $env:RUNNER_TEMP "kandev-code-signing.pfx"
-if (!(Test-Path $certificatePath)) {
-  [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
-}
+[IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
 
 $timestampUrl = if ([string]::IsNullOrWhiteSpace($env:WINDOWS_TIMESTAMP_URL)) {
   "http://timestamp.digicert.com"
@@ -38,5 +36,31 @@ $signTool = if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNTOOL_PATH)) {
   $env:WINDOWS_SIGNTOOL_PATH
 }
 
-& $signTool sign /fd SHA256 /td SHA256 /tr $timestampUrl /f $certificatePath /p $env:WINDOWS_CERTIFICATE_PASSWORD $Path
-& $signTool verify /pa $Path
+function Invoke-SignTool {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$Arguments,
+    [Parameter(Mandatory = $true)]
+    [string]$Description
+  )
+
+  & $signTool @Arguments
+  if ($LASTEXITCODE -ne 0) {
+    throw "$Description failed with exit code $LASTEXITCODE"
+  }
+}
+
+Invoke-SignTool `
+  -Description "signtool sign" `
+  -Arguments @(
+    "sign",
+    "/fd", "SHA256",
+    "/td", "SHA256",
+    "/tr", $timestampUrl,
+    "/f", $certificatePath,
+    "/p", $env:WINDOWS_CERTIFICATE_PASSWORD,
+    $Path
+  )
+Invoke-SignTool `
+  -Description "signtool verify" `
+  -Arguments @("verify", "/pa", $Path)

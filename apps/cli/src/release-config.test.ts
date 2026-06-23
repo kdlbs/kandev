@@ -195,7 +195,9 @@ describe("release desktop artifacts", () => {
     expect(workflow).toMatch(/\n  build-desktop:\n/);
     expect(workflow).toContain("needs: [prepare, build-bundles]");
     expect(workflow).toContain("scripts/release/prepare-desktop-runtime.sh");
-    expect(workflow).toContain("dtolnay/rust-toolchain@stable");
+    expect(workflow).toContain(
+      'rustup toolchain install stable --profile minimal --target "${{ matrix.rust_target }}"',
+    );
     expect(workflow).toContain("Swatinem/rust-cache@v2");
 
     for (const platform of desktopPlatforms) {
