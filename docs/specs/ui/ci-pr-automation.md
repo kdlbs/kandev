@@ -29,7 +29,7 @@ Users can already see pull request CI/review status above the task chat input, b
 - Emptying or resetting the task prompt override returns the task to the default `ci-auto-fix` prompt.
 - For tasks with multiple linked PRs, the controls are task-level and apply to every open linked PR. Dedupe, last-attempt, and error state are tracked per linked PR.
 - Kandev checks watched PRs through the existing lightweight PR watch poller, which runs once per minute. It fetches full PR feedback only when a watched PR is a candidate for auto-fix or when a user opens/refreshes PR feedback UI.
-- Enabling `Auto-fix CI & address comments` or `Auto-merge when ready` immediately evaluates the task's current linked PRs instead of waiting for the next PR watch poll.
+- Saving CI automation options while `Auto-fix CI & address comments` or `Auto-merge when ready` is enabled immediately evaluates the task's current linked PRs instead of waiting for the next PR watch poll. This includes prompt edits made while automation is already enabled; unchanged feedback is still deduped by the per-PR checkpoint.
 - Every auto-fix attempt records the latest feedback snapshot it used, including non-actionable snapshots that were intentionally no-ops. Later fix rounds include only new or materially changed CI/review feedback since the last recorded round, with enough summary context for the agent to understand the PR.
 - Automation must not repeatedly prompt for the same failure/comment snapshot or repeatedly retry the same failed merge attempt on every poll.
 - Automation controls persist across Kandev restarts.
@@ -128,8 +128,8 @@ Optional websocket notification:
 Task CI automation options:
 
 - `disabled`: both toggles are false. PR watch events update UI only.
-- `auto_fix_enabled`: Kandev evaluates actionable PR feedback immediately when enabled and on later PR watch events.
-- `auto_merge_enabled`: Kandev evaluates PR merge readiness immediately when enabled and on later PR watch events.
+- `auto_fix_enabled`: Kandev evaluates actionable PR feedback immediately when enabled, when CI automation options are saved while it remains enabled, and on later PR watch events.
+- `auto_merge_enabled`: Kandev evaluates PR merge readiness immediately when enabled, when CI automation options are saved while it remains enabled, and on later PR watch events.
 - `both_enabled`: Kandev evaluates both paths. Auto-fix does not merge; auto-merge merges only after readiness conditions are satisfied.
 
 Auto-fix cycle for one task/PR:
