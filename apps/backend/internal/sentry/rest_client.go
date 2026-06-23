@@ -386,8 +386,9 @@ func issuesSearchPath(orgSlug, projectSlug string) string {
 // SearchFilter. Multiple levels use Sentry's IN-filter bracket syntax
 // (`level:[error, fatal]`), which matches any of the listed values; a single
 // level renders as a plain `level:foo` token. The `is:` keyword has no bracket
-// form in Sentry search, so statuses are emitted as plain `is:bar` tokens and a
-// watch should set a single status.
+// form in Sentry search, so statuses are emitted as plain `is:bar` tokens;
+// watch filters are limited to a single status (enforced by validateFilter)
+// because two `is:` tokens would AND-combine and match nothing.
 func buildIssueQueryString(f SearchFilter) string {
 	parts := make([]string, 0, 4)
 	levels := make([]string, 0, len(f.Levels))

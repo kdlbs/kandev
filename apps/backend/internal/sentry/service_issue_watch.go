@@ -275,14 +275,19 @@ func validateMaxInflightTasks(v *int) error {
 }
 
 // validateFilter requires the minimum identity for a Sentry search: an org and
-// a project. Other fields (environment, levels, statuses, query, statsPeriod)
-// are optional.
+// a project. Environment, levels, query and statsPeriod are optional. At most
+// one status may be set: Sentry has no OR form for the `is:` keyword (unlike
+// levels, which use the `level:[...]` bracket syntax), so two statuses would be
+// AND-combined into a query that silently matches nothing.
 func validateFilter(f SearchFilter) error {
 	if f.OrgSlug == "" {
 		return fmt.Errorf("%w: filter.orgSlug is required", ErrInvalidConfig)
 	}
 	if f.ProjectSlug == "" {
 		return fmt.Errorf("%w: filter.projectSlug is required", ErrInvalidConfig)
+	}
+	if len(f.Statuses) > 1 {
+		return fmt.Errorf("%w: filter.statuses must contain at most one status because Sentry has no OR form for the is keyword", ErrInvalidConfig)
 	}
 	return nil
 }

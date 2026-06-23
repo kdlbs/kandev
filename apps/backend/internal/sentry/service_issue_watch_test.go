@@ -32,6 +32,9 @@ func TestService_CreateIssueWatch_DefaultsAndValidation(t *testing.T) {
 		"empty":          {},
 		"org only":       {OrgSlug: "acme"},
 		"whitespace org": {OrgSlug: "   ", ProjectSlug: "frontend"},
+		// Sentry has no OR form for is:, so multiple statuses would AND-combine
+		// into a query that matches nothing — reject at save time.
+		"multi status": {OrgSlug: "acme", ProjectSlug: "frontend", Statuses: []string{"unresolved", "ignored"}},
 	} {
 		if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
 			WorkspaceID:    "ws-1",
