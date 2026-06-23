@@ -74,7 +74,7 @@ test.describe("Desktop /github scope bar", () => {
     await testPage.goto("/github");
 
     await testPage.getByTestId("github-repo-filter-trigger").click();
-    const search = testPage.getByTestId("github-repo-filter-search").getByRole("combobox");
+    const search = testPage.getByTestId("github-repo-filter-dropdown").getByRole("combobox");
     await expect(search).toBeVisible();
 
     await search.fill("testorg");

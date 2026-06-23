@@ -104,7 +104,10 @@ export function ListToolbar({
       </div>
       <Combobox
         value={selectValue}
-        onValueChange={(v) => onRepoFilterChange(v === ALL_REPOS || !v ? "" : v)}
+        onValueChange={(v) => {
+          if (!v) return;
+          onRepoFilterChange(v === ALL_REPOS ? "" : v);
+        }}
         options={repoFilterOptions}
         placeholder="All repos"
         searchPlaceholder="Filter repositories..."
@@ -112,7 +115,7 @@ export function ListToolbar({
         triggerClassName="w-full md:w-[220px] h-8 border border-input bg-background hover:bg-secondary/50 px-2 py-1.5 text-xs/relaxed"
         className="md:min-w-[360px]"
         testId="github-repo-filter-trigger"
-        searchInputTestId="github-repo-filter-search"
+        dropdownTestId="github-repo-filter-dropdown"
       />
       <div className="w-full md:flex-1 md:min-w-[240px] relative">
         <Input
