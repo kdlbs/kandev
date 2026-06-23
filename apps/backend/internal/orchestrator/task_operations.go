@@ -1254,7 +1254,7 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 				zap.String("session_id", sessionID),
 				zap.Error(stateErr))
 		} else {
-			s.processParentChildrenCompletedForTaskState(ctx, session.TaskID, v1.TaskStateFailed)
+			s.processParentChildrenCompletedForTaskState(resumeCtx, session.TaskID, v1.TaskStateFailed)
 		}
 		return fmt.Errorf("failed to resume session: %w", err)
 	}

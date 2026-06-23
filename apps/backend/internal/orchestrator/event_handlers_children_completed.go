@@ -141,13 +141,33 @@ func (s *Service) childCompletionAlreadyApplied(ctx context.Context, parentID, o
 	return applied
 }
 
+type childCompletionOperationLock struct {
+	mu   sync.Mutex
+	refs int
+}
+
 func (s *Service) lockChildCompletionOperation(operationID string) func() {
-	value, _ := s.childCompletionLocks.LoadOrStore(operationID, &sync.Mutex{})
-	mu := value.(*sync.Mutex)
-	mu.Lock()
+	s.childCompletionLocksMu.Lock()
+	if s.childCompletionLocks == nil {
+		s.childCompletionLocks = make(map[string]*childCompletionOperationLock)
+	}
+	entry := s.childCompletionLocks[operationID]
+	if entry == nil {
+		entry = &childCompletionOperationLock{}
+		s.childCompletionLocks[operationID] = entry
+	}
+	entry.refs++
+	s.childCompletionLocksMu.Unlock()
+
+	entry.mu.Lock()
 	return func() {
-		mu.Unlock()
-		s.childCompletionLocks.Delete(operationID)
+		s.childCompletionLocksMu.Lock()
+		entry.refs--
+		if entry.refs == 0 {
+			delete(s.childCompletionLocks, operationID)
+		}
+		s.childCompletionLocksMu.Unlock()
+		entry.mu.Unlock()
 	}
 }
 

@@ -190,7 +190,7 @@ make fmt
 Targeted backend tests:
 
 ```bash
-go test ./internal/task/repository ./internal/task/dto ./internal/orchestrator ./internal/workflow/engine
+cd apps/backend && go test ./internal/task/repository/... ./internal/task/dto/... ./internal/orchestrator/... ./internal/workflow/engine/...
 ```
 
 Frontend typecheck:

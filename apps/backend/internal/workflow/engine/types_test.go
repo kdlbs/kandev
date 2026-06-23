@@ -114,6 +114,9 @@ func TestCompileStep_CompilesGenericTransitionGuards(t *testing.T) {
 	if action.Guard.WaitForQuorum.Role != "reviewer" {
 		t.Fatalf("guard role = %q, want reviewer", action.Guard.WaitForQuorum.Role)
 	}
+	if action.Guard.WaitForQuorum.Threshold != "all_approve" {
+		t.Fatalf("guard threshold = %q, want all_approve", action.Guard.WaitForQuorum.Threshold)
+	}
 }
 
 func TestCompileStep_SetSessionMode(t *testing.T) {

@@ -21,7 +21,7 @@ spec: "../../specs/tasks/subtask-completion-trigger.md"
 ## Verification
 
 ```bash
-go test ./internal/task/repository/...
+cd apps/backend && go test ./internal/task/repository/...
 ```
 
 ## Files Likely Touched

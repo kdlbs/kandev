@@ -232,9 +232,9 @@ type Service struct {
 	// Workflow engine for typed state-machine evaluation of step transitions
 	workflowEngine *engine.Engine
 	workflowStore  *workflowStore
-	// childCompletionLocks serializes duplicate on_children_completed deliveries
-	// for the same completed child set across watcher and executor callbacks.
-	childCompletionLocks sync.Map
+	// childCompletionLocks serializes duplicate on_children_completed deliveries.
+	childCompletionLocksMu sync.Mutex
+	childCompletionLocks   map[string]*childCompletionOperationLock
 	// onProcessOnEnterComplete is a package-test hook for synchronizing with
 	// applyEngineTransition's asynchronous processOnEnter goroutine.
 	onProcessOnEnterComplete func()
