@@ -247,6 +247,8 @@ describe("release desktop artifacts", () => {
     expect(workflow).toContain("allow_unsigned_desktop");
     expect(workflow).toContain("Unsigned desktop artifacts are internal validation only");
     expect(workflow).toContain("if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}");
+    expect(workflow).toContain("docker-amd64:");
+    expect(workflow).toContain("docker-universal-manifest:");
 
     for (const key of [
       "APPLE_CERTIFICATE",
@@ -263,6 +265,8 @@ describe("release desktop artifacts", () => {
     for (const key of ["WINDOWS_CERTIFICATE", "WINDOWS_CERTIFICATE_PASSWORD", "signtool sign"]) {
       expect(workflow, `release.yml must wire ${key}`).toContain(key);
     }
+    expect(workflow).toContain("Invoke-SignTool");
+    expect(workflow).toContain("$LASTEXITCODE -ne 0");
 
     expect(tauriConfig).toContain('"publisher": "Kandev"');
     expect(tauriConfig).toContain('"timestampUrl"');
@@ -272,5 +276,7 @@ describe("release desktop artifacts", () => {
     expect(signingDocs).toContain("Public recommended desktop releases require signing");
     expect(signingDocs).toContain("allow_unsigned_desktop");
     expect(signingDocs).toContain("does not publish a GitHub release");
+    expect(signingDocs).toContain("public container tags");
+    expect(signingDocs).toContain("Ubuntu 22.04");
   });
 });

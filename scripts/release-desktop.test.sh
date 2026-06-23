@@ -48,27 +48,24 @@ chmod_runtime "$runtime_dir"
 "$ROOT_DIR/scripts/release/verify-desktop-runtime.sh" --platform macos-arm64 "$runtime_dir" >/dev/null
 pass "verify-desktop-runtime accepts executable runtime"
 
-linux_runtime_dir="$TMP_DIR/linux-runtime"
-write_runtime "$linux_runtime_dir" without-helper
-chmod_runtime "$linux_runtime_dir"
-"$ROOT_DIR/scripts/release/verify-desktop-runtime.sh" --platform linux-x64 "$linux_runtime_dir" >/dev/null
-pass "verify-desktop-runtime accepts linux-x64 runtime without helper"
-
-if "$ROOT_DIR/scripts/release/verify-desktop-runtime.sh" --platform linux-arm64 "$linux_runtime_dir" >"$OUT_FILE" 2>"$ERR_FILE"; then
-  fail "verify-desktop-runtime should require helper for linux-arm64"
+missing_helper_runtime_dir="$TMP_DIR/missing-helper-runtime"
+write_runtime "$missing_helper_runtime_dir" without-helper
+chmod_runtime "$missing_helper_runtime_dir"
+if "$ROOT_DIR/scripts/release/verify-desktop-runtime.sh" --platform linux-x64 "$missing_helper_runtime_dir" >"$OUT_FILE" 2>"$ERR_FILE"; then
+  fail "verify-desktop-runtime should require helper for linux-x64"
 fi
 grep -q "Missing agentctl linux/amd64 helper" "$ERR_FILE" || fail "verify-desktop-runtime did not explain missing helper"
-pass "verify-desktop-runtime requires helper for non-linux-x64 runtime"
+pass "verify-desktop-runtime requires helper for linux-x64 runtime"
 
 linux_output_dir="$TMP_DIR/linux-output"
 "$ROOT_DIR/scripts/release/prepare-desktop-runtime.sh" \
-  --bundle-dir "$linux_runtime_dir" \
+  --bundle-dir "$runtime_dir" \
   --platform linux-x64 \
   --output-dir "$linux_output_dir" >/dev/null
-if [ -e "$linux_output_dir/bin/agentctl-linux-amd64" ]; then
-  fail "prepare-desktop-runtime should not copy helper for linux-x64"
+if [ ! -x "$linux_output_dir/bin/agentctl-linux-amd64" ]; then
+  fail "prepare-desktop-runtime should copy executable helper for linux-x64"
 fi
-pass "prepare-desktop-runtime skips helper for linux-x64"
+pass "prepare-desktop-runtime copies helper for linux-x64"
 
 macos_output_dir="$TMP_DIR/macos-output"
 "$ROOT_DIR/scripts/release/prepare-desktop-runtime.sh" \

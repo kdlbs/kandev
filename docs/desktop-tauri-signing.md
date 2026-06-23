@@ -2,7 +2,7 @@
 
 Public recommended desktop releases require signing on macOS and Windows. The release workflow fails closed by default when those secrets are missing.
 
-Use `allow_unsigned_desktop=true` only for internal validation builds. That mode may upload workflow artifacts for maintainer inspection, but it does not publish a GitHub release. Unsigned desktop artifacts are internal validation only and must not be presented as trusted public downloads.
+Use `allow_unsigned_desktop=true` only for internal validation builds. That mode may upload workflow artifacts for maintainer inspection, but it does not publish a GitHub release, npm packages, Homebrew updates, or public container tags. Unsigned desktop artifacts are internal validation only and must not be presented as trusted public downloads.
 
 ## macOS
 
@@ -33,4 +33,4 @@ Optional:
 - `WINDOWS_TIMESTAMP_URL`: timestamp server, defaults to `http://timestamp.digicert.com`.
 - `WINDOWS_SIGNTOOL_PATH`: custom `signtool.exe` path.
 
-Linux desktop artifacts are checksum-gated. GPG/RPM signing can be added later without changing the macOS and Windows trust gate.
+Linux desktop artifacts are checksum-gated. The x64 `.deb`/`.rpm` artifacts are built on Ubuntu 22.04 for an older glibc baseline. The arm64 artifacts use GitHub's Ubuntu 24.04 arm64 runner baseline. GPG/RPM signing can be added later without changing the macOS and Windows trust gate.

@@ -435,7 +435,7 @@ jobs:
             rust_target: x86_64-apple-darwin
             tauri_bundles: dmg
           - platform: linux-x64
-            os: ubuntu-latest
+            os: ubuntu-22.04
             rust_target: x86_64-unknown-linux-gnu
             tauri_bundles: deb,rpm
           - platform: linux-arm64
@@ -656,10 +656,36 @@ jobs:
             exit 1
           }
 
+          function Invoke-SignTool {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string[]]$Arguments,
+              [Parameter(Mandatory = $true)]
+              [string]$Description
+            )
+
+            & $signTool @Arguments
+            if ($LASTEXITCODE -ne 0) {
+              throw "$Description failed with exit code $LASTEXITCODE"
+            }
+          }
+
           # signtool sign is the default Windows signing mechanism for CI artifacts.
           foreach ($artifact in $artifacts) {
-            & $signTool sign /fd SHA256 /td SHA256 /tr $timestampUrl /f $certificatePath /p $env:WINDOWS_CERTIFICATE_PASSWORD $artifact.FullName
-            & $signTool verify /pa $artifact.FullName
+            $signArguments = @(
+              "sign", "/fd", "SHA256", "/td", "SHA256", "/tr", $timestampUrl,
+              "/f", $certificatePath,
+              "/p", $env:WINDOWS_CERTIFICATE_PASSWORD,
+              $artifact.FullName
+            )
+            $verifyArguments = @("verify", "/pa", $artifact.FullName)
+
+            Invoke-SignTool `
+              -Description "signtool sign $($artifact.Name)" `
+              -Arguments $signArguments
+            Invoke-SignTool `
+              -Description "signtool verify $($artifact.Name)" `
+              -Arguments $verifyArguments
           }
 
       - name: Collect desktop artifacts
@@ -715,7 +741,7 @@ jobs:
   docker-amd64:
     name: Build & push container image (amd64)
     needs: [prepare, build-bundles]
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -786,7 +812,7 @@ jobs:
   docker-arm64:
     name: Build & push container image (arm64)
     needs: [prepare, build-bundles]
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -845,7 +871,7 @@ jobs:
   docker-manifest:
     name: Assemble multi-arch base manifest
     needs: [prepare, docker-amd64, docker-arm64]
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -899,7 +925,7 @@ jobs:
   docker-universal-amd64:
     name: Build & push universal image (amd64)
     needs: [prepare, docker-manifest]
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -951,7 +977,7 @@ jobs:
   docker-universal-arm64:
     name: Build & push universal image (arm64)
     needs: [prepare, docker-manifest]
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -1002,7 +1028,7 @@ jobs:
     # docker-universal-manifest is included in publish-release's `needs` so
     # its size gate (and any per-arch build failure) blocks the release.
     needs: [prepare, docker-universal-amd64, docker-universal-arm64]
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1123,7 +1149,7 @@ jobs:
   publish-npm:
     name: Publish npm packages
     needs: [prepare, publish-release]
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write    # Required for OIDC trusted publishing
@@ -1158,7 +1184,7 @@ jobs:
   update-homebrew-tap:
     name: Update Homebrew tap
     needs: [prepare, publish-release]
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

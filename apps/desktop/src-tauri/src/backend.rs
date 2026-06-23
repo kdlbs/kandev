@@ -454,7 +454,9 @@ fn set_status(window: &WebviewWindow, title: &str, detail: &str, failed: bool) {
         "detail": detail,
         "failed": failed,
     });
-    let script = format!("window.__KANDEV_DESKTOP_SET_STATUS?.({payload});");
+    let script = format!(
+        "window.__KANDEV_DESKTOP_PENDING_STATUS={payload};window.__KANDEV_DESKTOP_SET_STATUS?.({payload});"
+    );
     let _ = window.eval(&script);
 }
 
