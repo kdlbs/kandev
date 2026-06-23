@@ -276,7 +276,8 @@ func TestHttpLinkTaskIssue_ErrorMapping(t *testing.T) {
 			client:     &stubClient{},
 			body:       `{"issue":"https://github.com/kdlbs/kandev/issues/1470"}`,
 			wantStatus: http.StatusServiceUnavailable,
-			wantError:  "GitHub task issue linking is not available",
+			wantError:  "GitHub task issue linking is temporarily unavailable. Please try again.",
+			wantCode:   "github_task_issue_unavailable",
 		},
 		{
 			name:       "invalid reference",
@@ -337,7 +338,7 @@ func TestHttpLinkTaskIssue_ErrorMapping(t *testing.T) {
 			client: &stubClient{getIssueFunc: func(context.Context, string, string, int) (*Issue, error) {
 				return &Issue{Number: 1470, HTMLURL: "https://github.com/kdlbs/kandev/issues/1470", RepoOwner: "kdlbs", RepoName: "kandev"}, nil
 			}},
-			store:      &fakeTaskIssueStore{},
+			store:      &fakeTaskIssueStore{taskErr: fmt.Errorf("task lookup failed: %w", ErrTaskNotFound)},
 			body:       `{"issue":"https://github.com/kdlbs/kandev/issues/1470"}`,
 			wantStatus: http.StatusNotFound,
 			wantError:  "task not found",

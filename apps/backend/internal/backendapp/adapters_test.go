@@ -2,10 +2,14 @@ package backendapp
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	githubsvc "github.com/kandev/kandev/internal/github"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
@@ -46,7 +50,7 @@ func TestGetSessionModel_Caching(t *testing.T) {
 
 	// Test cache miss for unknown session returns ""
 	// (svc is nil, so DB lookup would fail gracefully)
-	// We need a non-nil svc to avoid panic — use a minimal mock approach
+	// We need a non-nil svc to avoid panic - use a minimal mock approach
 	// Instead, verify the cache was populated for existing entries
 	adapter.sessionModelMu.RLock()
 	if len(adapter.sessionModelCache) != 2 {
@@ -106,6 +110,22 @@ func TestMessageCreatorAdapter_StructFields(t *testing.T) {
 	}
 	if adapter.svc != nil {
 		t.Error("expected nil svc")
+	}
+}
+
+func TestWrapGitHubTaskIssueStoreError(t *testing.T) {
+	taskErr := fmt.Errorf("load task: %w", taskrepo.ErrTaskNotFound)
+	wrapped := wrapGitHubTaskIssueStoreError(taskErr)
+	if !errors.Is(wrapped, githubsvc.ErrTaskNotFound) {
+		t.Fatalf("wrapped error should match github ErrTaskNotFound: %v", wrapped)
+	}
+	if !errors.Is(wrapped, taskrepo.ErrTaskNotFound) {
+		t.Fatalf("wrapped error should preserve task repo ErrTaskNotFound: %v", wrapped)
+	}
+
+	otherErr := errors.New("database unavailable")
+	if got := wrapGitHubTaskIssueStoreError(otherErr); got != otherErr {
+		t.Fatalf("non-not-found error changed: got %v, want %v", got, otherErr)
 	}
 }
 

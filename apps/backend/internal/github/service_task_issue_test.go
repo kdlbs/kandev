@@ -15,11 +15,15 @@ type fakeTaskIssueStore struct {
 	entities             map[string]*taskmodels.Repository
 	repositoryErrs       map[string]error
 	failOnCanceledUpdate bool
+	taskErr              error
 	updateErr            error
 	updated              map[string]interface{}
 }
 
 func (f *fakeTaskIssueStore) GetTask(_ context.Context, taskID string) (*taskmodels.Task, error) {
+	if f.taskErr != nil {
+		return nil, f.taskErr
+	}
 	if f.task == nil || f.task.ID != taskID {
 		return nil, errors.New("task not found")
 	}
@@ -27,6 +31,9 @@ func (f *fakeTaskIssueStore) GetTask(_ context.Context, taskID string) (*taskmod
 }
 
 func (f *fakeTaskIssueStore) ListTaskRepositories(_ context.Context, taskID string) ([]*taskmodels.TaskRepository, error) {
+	if f.taskErr != nil {
+		return nil, f.taskErr
+	}
 	if f.task == nil || f.task.ID != taskID {
 		return nil, errors.New("task not found")
 	}
@@ -44,6 +51,9 @@ func (f *fakeTaskIssueStore) GetRepository(_ context.Context, repositoryID strin
 }
 
 func (f *fakeTaskIssueStore) UpdateTaskMetadata(ctx context.Context, taskID string, metadata map[string]interface{}) (*taskmodels.Task, error) {
+	if f.taskErr != nil {
+		return nil, f.taskErr
+	}
 	if f.task == nil || f.task.ID != taskID {
 		return nil, errors.New("task not found")
 	}

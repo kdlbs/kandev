@@ -257,6 +257,16 @@ func TestParsePRURL(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "zero PR number",
+			url:     "https://github.com/owner/repo/pull/0",
+			wantErr: true,
+		},
+		{
+			name:    "negative PR number",
+			url:     "https://github.com/owner/repo/pull/-1",
+			wantErr: true,
+		},
+		{
 			name:    "too short path",
 			url:     "/pull/1",
 			wantErr: true,

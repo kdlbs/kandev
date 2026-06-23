@@ -327,6 +327,9 @@ func parsePRURL(prURL string) (owner, repo string, number int, err error) {
 	if err != nil {
 		return "", "", 0, fmt.Errorf("invalid PR number in URL %s: %w", prURL, err)
 	}
+	if number <= 0 {
+		return "", "", 0, fmt.Errorf("invalid PR number in URL %s: must be greater than zero", prURL)
+	}
 
 	// Parse owner/repo from path before /pull/
 	pathBefore := prURL[:idx]

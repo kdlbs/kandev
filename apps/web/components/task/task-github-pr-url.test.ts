@@ -93,6 +93,8 @@ describe("parseGitHubPullRequestURL", () => {
   it("rejects malformed or non-GitHub pull request inputs", () => {
     expect(parseGitHubPullRequestURL("https://gitlab.com/kdlbs/kandev/pull/1471")).toBeNull();
     expect(parseGitHubPullRequestURL("https://github.com/kdlbs/kandev/issues/1471")).toBeNull();
+    expect(parseGitHubPullRequestURL("https://github.com/kdlbs/kandev/pull/0")).toBeNull();
+    expect(parseGitHubPullRequestURL("https://github.com/kdlbs/kandev/pull/00")).toBeNull();
     expect(parseGitHubPullRequestURL("not a url")).toBeNull();
   });
 });
@@ -113,6 +115,17 @@ describe("pullRequestPayload", () => {
   it("does not infer bare numbers for multi-repo tasks", () => {
     expect(pullRequestPayload("1471", githubRepos)).toEqual({
       pr_url: "1471",
+      repository_id: undefined,
+    });
+  });
+
+  it("does not infer non-positive PR numbers", () => {
+    expect(pullRequestPayload("#0", [githubRepos[0]])).toEqual({
+      pr_url: "#0",
+      repository_id: undefined,
+    });
+    expect(pullRequestPayload("00", [githubRepos[0]])).toEqual({
+      pr_url: "00",
       repository_id: undefined,
     });
   });

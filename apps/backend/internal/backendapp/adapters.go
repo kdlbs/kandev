@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -15,9 +16,11 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/logger"
+	githubsvc "github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/pkg/api/v1"
 )
@@ -541,13 +544,17 @@ type githubTaskIssueStoreAdapter struct {
 }
 
 func (a githubTaskIssueStoreAdapter) GetTask(ctx context.Context, taskID string) (*models.Task, error) {
-	return a.svc.GetTask(ctx, taskID)
+	task, err := a.svc.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, wrapGitHubTaskIssueStoreError(err)
+	}
+	return task, nil
 }
 
 func (a githubTaskIssueStoreAdapter) ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error) {
 	task, err := a.svc.GetTask(ctx, taskID)
 	if err != nil {
-		return nil, err
+		return nil, wrapGitHubTaskIssueStoreError(err)
 	}
 	return task.Repositories, nil
 }
@@ -557,7 +564,18 @@ func (a githubTaskIssueStoreAdapter) GetRepository(ctx context.Context, reposito
 }
 
 func (a githubTaskIssueStoreAdapter) UpdateTaskMetadata(ctx context.Context, taskID string, metadata map[string]interface{}) (*models.Task, error) {
-	return a.svc.UpdateTask(ctx, taskID, &taskservice.UpdateTaskRequest{Metadata: metadata})
+	task, err := a.svc.UpdateTask(ctx, taskID, &taskservice.UpdateTaskRequest{Metadata: metadata})
+	if err != nil {
+		return nil, wrapGitHubTaskIssueStoreError(err)
+	}
+	return task, nil
+}
+
+func wrapGitHubTaskIssueStoreError(err error) error {
+	if errors.Is(err, taskrepo.ErrTaskNotFound) {
+		return fmt.Errorf("%w: %w", githubsvc.ErrTaskNotFound, err)
+	}
+	return err
 }
 
 // ProcessOnTurnStart forwards to the orchestrator service.

@@ -43,21 +43,31 @@ export function parseGitHubPullRequestURL(input: string): ParsedPullRequestURL |
     .match(/^(?:https?:\/\/)?github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)(?:[/?#].*)?$/i);
   if (!match) return null;
   const [, owner, repo, number] = match;
+  const parsedNumber = Number(number);
+  if (!Number.isSafeInteger(parsedNumber) || parsedNumber <= 0) return null;
   return {
     owner,
     repo,
-    number: Number(number),
-    url: `https://github.com/${owner}/${repo}/pull/${number}`,
+    number: parsedNumber,
+    url: `https://github.com/${owner}/${repo}/pull/${parsedNumber}`,
   };
+}
+
+function positivePullRequestNumber(input: string): string | null {
+  const number = input.replace(/^#/, "");
+  if (!/^\d+$/.test(number)) return null;
+  const parsedNumber = Number(number);
+  if (!Number.isSafeInteger(parsedNumber) || parsedNumber <= 0) return null;
+  return String(parsedNumber);
 }
 
 export function pullRequestPayload(input: string, githubRepos: GitHubPRRepoRef[]) {
   const trimmed = input.trim();
-  const inferredRepo = /^#?\d+$/.test(trimmed) && githubRepos.length === 1 ? githubRepos[0] : null;
-  if (inferredRepo) {
-    const number = trimmed.replace(/^#/, "");
+  const inferredNumber = positivePullRequestNumber(trimmed);
+  const inferredRepo = inferredNumber && githubRepos.length === 1 ? githubRepos[0] : null;
+  if (inferredRepo && inferredNumber) {
     return {
-      pr_url: `https://github.com/${inferredRepo.owner}/${inferredRepo.repo}/pull/${number}`,
+      pr_url: `https://github.com/${inferredRepo.owner}/${inferredRepo.repo}/pull/${inferredNumber}`,
       repository_id: inferredRepo.repositoryId,
     };
   }
