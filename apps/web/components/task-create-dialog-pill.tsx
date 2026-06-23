@@ -15,6 +15,8 @@ import {
 } from "@kandev/ui/command";
 import type { Branch } from "@/lib/types/http";
 import { BranchRefreshButton } from "@/components/branch-refresh-button";
+import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dialog-popover-container";
+import { useTooltipMountGate } from "@/hooks/use-tooltip-mount-gate";
 
 export type PillOption = {
   value: string;
@@ -118,31 +120,6 @@ function pillTriggerClass(disabled: boolean, flat: boolean, hasValue: boolean): 
   );
 }
 
-function useTooltipMountGate() {
-  const [tooltipOpenState, setTooltipOpenState] = useState(false);
-  const canOpenTooltipRef = useRef(false);
-
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      canOpenTooltipRef.current = true;
-    });
-    return () => cancelAnimationFrame(frame);
-  }, []);
-
-  const handleTooltipOpenChange = useCallback((next: boolean) => {
-    if (next && !canOpenTooltipRef.current) return;
-    setTooltipOpenState(next);
-  }, []);
-
-  const closeTooltip = useCallback(() => setTooltipOpenState(false), []);
-
-  return {
-    tooltipOpenState,
-    handleTooltipOpenChange,
-    closeTooltip,
-  };
-}
-
 function DisabledPillTooltip({
   open,
   onOpenChange,
@@ -157,7 +134,9 @@ function DisabledPillTooltip({
   return (
     <Tooltip open={open} onOpenChange={onOpenChange}>
       <TooltipTrigger asChild>
-        <span className="inline-flex">{triggerButton}</span>
+        <span className="inline-flex" tabIndex={0} aria-label={disabledReason}>
+          {triggerButton}
+        </span>
       </TooltipTrigger>
       <TooltipContent>{disabledReason}</TooltipContent>
     </Tooltip>
@@ -173,6 +152,7 @@ function PillPopoverContent({
   onSelect,
   setOpen,
   emptyMessage,
+  portalContainer,
 }: {
   filter?: PillProps["filter"];
   searchPlaceholder: string;
@@ -182,9 +162,10 @@ function PillPopoverContent({
   onSelect: (value: string) => void;
   setOpen: (open: boolean) => void;
   emptyMessage: string;
+  portalContainer: HTMLElement | null;
 }) {
   return (
-    <PopoverContent className="w-[360px] p-0" align="start">
+    <PopoverContent className="w-[360px] p-0" align="start" portalContainer={portalContainer}>
       <Command filter={filter}>
         <div className="flex items-center gap-1 px-2 pt-1">
           <CommandInput placeholder={searchPlaceholder} className="h-9 flex-1" />
@@ -198,6 +179,35 @@ function PillPopoverContent({
         />
       </Command>
     </PopoverContent>
+  );
+}
+
+function renderPillTriggerButton({
+  icon,
+  value,
+  placeholder,
+  disabled,
+  flat,
+  hasValue,
+  testId,
+  prefix,
+}: Pick<PillProps, "icon" | "value" | "placeholder" | "disabled" | "flat" | "testId" | "prefix"> & {
+  hasValue: boolean;
+}): React.ReactElement {
+  const showPrefix = !!prefix && hasValue;
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      data-testid={testId}
+      className={pillTriggerClass(Boolean(disabled), Boolean(flat), hasValue)}
+    >
+      {icon}
+      <span className="truncate max-w-[240px]">
+        {showPrefix && <span className="text-muted-foreground">{prefix}</span>}
+        {value || placeholder}
+      </span>
+    </button>
   );
 }
 
@@ -226,6 +236,7 @@ export function Pill({
 }: PillProps) {
   const [open, setOpenState] = useState(false);
   const { tooltipOpenState, handleTooltipOpenChange, closeTooltip } = useTooltipMountGate();
+  const portalContainer = useTaskCreateDialogPopoverContainer();
   const [suppressTooltip, setSuppressTooltip] = useState(false);
   const suppressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const setOpen = useCallback(
@@ -255,29 +266,17 @@ export function Pill({
     [],
   );
   const hasValue = !!value;
-  // Prefix only renders alongside a real value; an empty chip with placeholder
-  // ("branch") doesn't need "current: " in front of it.
-  const showPrefix = !!prefix && hasValue;
-  const triggerButton = (
-    <button
-      type="button"
-      disabled={disabled}
-      data-testid={testId}
-      className={pillTriggerClass(disabled, flat, hasValue)}
-    >
-      {icon}
-      <span className="truncate max-w-[240px]">
-        {showPrefix && <span className="text-muted-foreground">{prefix}</span>}
-        {value || placeholder}
-      </span>
-    </button>
-  );
+  const triggerButton = renderPillTriggerButton({
+    icon,
+    value,
+    placeholder,
+    disabled,
+    flat,
+    hasValue,
+    testId,
+    prefix,
+  });
 
-  // A disabled <button> swallows pointer events, so wrap it in a span that
-  // forwards hover to the tooltip trigger. Keep the Popover render path while
-  // the popover is open even if `disabled` flips true mid-interaction (e.g.
-  // refresh sets branchesLoading=true) — otherwise the popover unmounts and
-  // the user loses their place.
   if (disabled && disabledReason && !open) {
     return (
       <DisabledPillTooltip
@@ -303,16 +302,13 @@ export function Pill({
         onSelect={onSelect}
         setOpen={setOpen}
         emptyMessage={emptyMessage}
+        portalContainer={portalContainer}
       />
     </Popover>
   );
 
   if (!tooltip) return popover;
 
-  // Suppress the hover tooltip while the popover is open so they don't stack,
-  // and for a brief window after it closes so a lingering hover doesn't pop
-  // the tooltip back in (which Radix would otherwise do the moment we flip
-  // from controlled-closed back to uncontrolled).
   const tooltipOpen = open || suppressTooltip ? false : tooltipOpenState;
   return (
     <Tooltip open={tooltipOpen} onOpenChange={handleTooltipOpenChange}>

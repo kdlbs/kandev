@@ -6,18 +6,15 @@ import { test, expect } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 
-// Regression: Combobox popovers (Repository / Base Branch / Agent Profile)
-// rendered inside the task creation Dialog were portaled to document.body,
-// which placed them outside react-remove-scroll's allowed subtree so mouse
-// wheel events were swallowed and the list could not be scrolled. The fix
-// renders these popovers inline (portal={false}) so they live inside the
-// Dialog content tree.
+// Regression: the task creation repository selector portals out of the clipped
+// form subtree, but remains inside the dialog so modal scroll locking still
+// permits wheel scrolling.
 
 // Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
 useRegularMode();
 
-test.describe("repository selector scroll inside dialog", () => {
-  test("wheel scrolls the repository list and the list is inside the dialog", async ({
+test.describe("repository selector scroll", () => {
+  test("wheel scrolls the repository list portaled inside the dialog", async ({
     testPage,
     apiClient,
     seedData,
@@ -54,32 +51,33 @@ test.describe("repository selector scroll inside dialog", () => {
     // single repository-selector combobox).
     await testPage.getByTestId("repo-chip-trigger").first().click();
 
-    // The popover's cmdk list must live inside the dialog DOM (not portaled
-    // to body), otherwise react-remove-scroll eats wheel events.
-    const listInDialog = dialog.locator("[cmdk-list]");
-    await expect(listInDialog).toBeVisible();
+    const list = testPage.locator("[cmdk-list]").first();
+    await expect(list).toBeVisible();
+    await expect
+      .poll(() => list.evaluate((el) => Boolean(el.closest('[data-testid="create-task-dialog"]'))))
+      .toBe(true);
 
     // Sanity: the list is actually overflowing.
-    const { clientHeight, scrollHeight } = await listInDialog.evaluate((el) => ({
+    const { clientHeight, scrollHeight } = await list.evaluate((el) => ({
       clientHeight: el.clientHeight,
       scrollHeight: el.scrollHeight,
     }));
     expect(scrollHeight).toBeGreaterThan(clientHeight);
 
     // Force the list to the top so we can reliably detect a downward wheel.
-    await listInDialog.evaluate((el) => {
+    await list.evaluate((el) => {
       el.scrollTop = 0;
     });
-    expect(await listInDialog.evaluate((el) => el.scrollTop)).toBe(0);
+    expect(await list.evaluate((el) => el.scrollTop)).toBe(0);
 
     // Dispatch a real wheel event via the mouse at the center of the list.
-    const box = await listInDialog.boundingBox();
+    const box = await list.boundingBox();
     if (!box) throw new Error("repository list has no bounding box");
     await testPage.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await testPage.mouse.wheel(0, 400);
 
     await expect
-      .poll(() => listInDialog.evaluate((el) => el.scrollTop), { timeout: 2000 })
+      .poll(() => list.evaluate((el) => el.scrollTop), { timeout: 2000 })
       .toBeGreaterThan(0);
   });
 });

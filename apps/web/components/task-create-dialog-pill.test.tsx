@@ -151,6 +151,25 @@ describe("Pill tooltip", () => {
       expect(screen.getByTestId("tooltip-root").getAttribute("data-open")).toBe("false");
     });
   });
+
+  it("makes the disabled tooltip wrapper keyboard focusable", () => {
+    render(
+      <Pill
+        icon={<span aria-hidden="true" />}
+        value=""
+        placeholder="branch"
+        options={[]}
+        onSelect={vi.fn()}
+        searchPlaceholder="Search branches..."
+        emptyMessage="No branches"
+        disabled
+        disabledReason="Select a repository first"
+      />,
+    );
+
+    const tooltipTrigger = screen.getByLabelText("Select a repository first");
+    expect(tooltipTrigger.getAttribute("tabindex")).toBe("0");
+  });
 });
 
 describe("Pill popover", () => {

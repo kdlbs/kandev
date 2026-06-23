@@ -20,6 +20,7 @@ import type { UseAccessibleReposResult } from "@/hooks/domains/github/use-access
 import type { AccessibleRepo } from "@/lib/api/domains/github-api";
 import type { PRInfo } from "@/hooks/domains/github/use-pr-info-by-url";
 import type { TaskRemoteRepoRow } from "@/components/task-create-dialog-types";
+import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dialog-popover-container";
 
 const TRUNCATE_THRESHOLD = 30;
 
@@ -198,6 +199,7 @@ function RemoteRepoPill({
   onURLChange: RemoteRepoChipProps["onURLChange"];
 }) {
   const [open, setOpen] = useState(false);
+  const portalContainer = useTaskCreateDialogPopoverContainer();
   const triggerLabel = useMemo(() => computeTriggerLabel(row), [row]);
   const hasValue = !!row.url;
   return (
@@ -220,6 +222,7 @@ function RemoteRepoPill({
         data-testid="remote-repo-popover-content"
         className="w-[380px] max-w-[calc(100vw-2rem)] max-h-[min(420px,calc(100vh-12rem))] overflow-y-auto p-0"
         align="start"
+        portalContainer={portalContainer}
       >
         <RemoteRepoPopoverContent
           accessible={accessibleRepos}

@@ -497,7 +497,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent
         data-testid="create-task-dialog"
-        className="w-full h-full min-w-0 max-w-full max-h-full overflow-hidden rounded-none sm:w-[900px] sm:h-auto sm:max-w-none sm:max-h-[85vh] sm:rounded-lg flex flex-col"
+        className="w-full h-full min-w-0 max-w-full max-h-full overflow-visible rounded-none sm:w-[900px] sm:h-auto sm:max-w-none sm:max-h-[85vh] sm:rounded-lg flex flex-col"
       >
         <DialogHeader>
           <DialogHeaderContent

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { useEffect } from "react";
 import { EnhancePromptButton } from "./enhance-prompt-button";
@@ -30,6 +30,7 @@ vi.mock("@kandev/ui/tooltip", () => ({
 }));
 
 afterEach(() => {
+  cleanup();
   vi.unstubAllGlobals();
 });
 
@@ -46,5 +47,21 @@ describe("EnhancePromptButton", () => {
     await waitFor(() => {
       expect(screen.getByTestId("tooltip-root").getAttribute("data-open")).toBe("false");
     });
+  });
+
+  it("makes the disabled tooltip wrapper keyboard focusable", () => {
+    render(<EnhancePromptButton onClick={vi.fn()} isLoading={false} isConfigured={false} />);
+
+    const tooltipTrigger = screen.getByLabelText(
+      "Configure a utility agent in settings to enable AI enhancement",
+    );
+    expect(tooltipTrigger.getAttribute("tabindex")).toBe("0");
+  });
+
+  it("leaves focus on the button when enabled", () => {
+    render(<EnhancePromptButton onClick={vi.fn()} isLoading={false} />);
+
+    const button = screen.getByTestId("enhance-prompt-button");
+    expect(button.parentElement?.getAttribute("tabindex")).toBe("-1");
   });
 });
