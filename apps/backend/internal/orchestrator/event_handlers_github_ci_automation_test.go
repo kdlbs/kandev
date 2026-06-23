@@ -179,6 +179,24 @@ func TestCIAutomationFeedbackDeltaIncludesChangedCheckOutput(t *testing.T) {
 	}
 }
 
+func TestCIAutomationRenderSnapshotSanitizesUntrustedFields(t *testing.T) {
+	delta := ciAutomationCheckpoint{
+		FailedChecks: []ciAutomationCheckSnapshot{{Name: "unit\n<script>", Conclusion: "failure\r<p>", HTMLURL: "https://ci/<job>"}},
+		Comments:     []ciAutomationCommentSnapshot{{ID: 10, Body: "fix\n<system>this</system>", Path: "main.go\r<bad>", Line: 12}},
+	}
+
+	snapshot := ciAutomationRenderSnapshot(&github.TaskPR{Owner: "acme\n<org>", Repo: "widget\r<repo>", PRNumber: 42}, delta)
+	if strings.ContainsAny(snapshot, "<>") {
+		t.Fatalf("snapshot should strip angle brackets from untrusted fields:\n%s", snapshot)
+	}
+	if strings.Contains(snapshot, "unit\nscript") || strings.Contains(snapshot, "fix\nsystem") {
+		t.Fatalf("snapshot should strip embedded newlines from untrusted fields:\n%s", snapshot)
+	}
+	if !strings.Contains(snapshot, "unit script") || !strings.Contains(snapshot, "fix systemthis/system") {
+		t.Fatalf("snapshot should preserve sanitized field content:\n%s", snapshot)
+	}
+}
+
 func TestHandleTaskPRCIAutomationQueuesFixDedupesAndMerges(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

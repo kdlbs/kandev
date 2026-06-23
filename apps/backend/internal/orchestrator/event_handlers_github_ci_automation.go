@@ -27,6 +27,8 @@ const (
 	ciAutomationPRFeedbackToken  = "{{pr.feedback}}"
 )
 
+var ciAutomationSnapshotFieldReplacer = strings.NewReplacer("\r", " ", "\n", " ", "<", "", ">", "")
+
 type ciAutomationCheckpoint struct {
 	FailedChecks []ciAutomationCheckSnapshot   `json:"failed_checks"`
 	Comments     []ciAutomationCommentSnapshot `json:"comments"`
@@ -302,14 +304,14 @@ func ciAutomationRenderSnapshot(pr *github.TaskPR, delta ciAutomationCheckpoint)
 	}
 	var b strings.Builder
 	b.WriteString("PR: ")
-	b.WriteString(fmt.Sprintf("%s/%s#%d", pr.Owner, pr.Repo, pr.PRNumber))
+	b.WriteString(fmt.Sprintf("%s/%s#%d", ciAutomationSanitizeSnapshotField(pr.Owner), ciAutomationSanitizeSnapshotField(pr.Repo), pr.PRNumber))
 	if len(delta.FailedChecks) > 0 {
 		b.WriteString("\n\nNew or changed failing checks:")
 		for _, check := range delta.FailedChecks {
-			b.WriteString(fmt.Sprintf("\n- %s: %s", check.Name, check.Conclusion))
+			b.WriteString(fmt.Sprintf("\n- %s: %s", ciAutomationSanitizeSnapshotField(check.Name), ciAutomationSanitizeSnapshotField(check.Conclusion)))
 			if check.HTMLURL != "" {
 				b.WriteString(" (")
-				b.WriteString(check.HTMLURL)
+				b.WriteString(ciAutomationSanitizeSnapshotField(check.HTMLURL))
 				b.WriteString(")")
 			}
 		}
@@ -317,10 +319,14 @@ func ciAutomationRenderSnapshot(pr *github.TaskPR, delta ciAutomationCheckpoint)
 	if len(delta.Comments) > 0 {
 		b.WriteString("\n\nNew or changed review comments:")
 		for _, comment := range delta.Comments {
-			b.WriteString(fmt.Sprintf("\n- %s:%d %s", comment.Path, comment.Line, strings.TrimSpace(comment.Body)))
+			b.WriteString(fmt.Sprintf("\n- %s:%d %s", ciAutomationSanitizeSnapshotField(comment.Path), comment.Line, ciAutomationSanitizeSnapshotField(strings.TrimSpace(comment.Body))))
 		}
 	}
 	return b.String()
+}
+
+func ciAutomationSanitizeSnapshotField(value string) string {
+	return strings.TrimSpace(ciAutomationSnapshotFieldReplacer.Replace(value))
 }
 
 func decodeCIAutomationCheckpoint(state *github.TaskCIPRAutomationState) ciAutomationCheckpoint {

@@ -77,7 +77,11 @@ test.describe("mobile PR CI automation options", () => {
       "href",
       "/settings/prompts",
     );
-    await expect(promptDialog.locator("code").filter({ hasText: "{{pr.feedback}}" })).toBeVisible();
-    await expect(testPage.getByText(/new or changed review comments/)).toBeVisible();
+    await expect(promptDialog.getByTestId("ci-auto-fix-pr-feedback-placeholder")).toHaveText(
+      "{{pr.feedback}}",
+    );
+    await expect(promptDialog.getByTestId("ci-auto-fix-pr-feedback-help")).toContainText(
+      "new or changed review comments",
+    );
   });
 });

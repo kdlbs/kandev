@@ -77,7 +77,10 @@ function CIAutomationPromptDialog({
           <DialogTitle>Auto-fix prompt</DialogTitle>
           <DialogDescription>
             This prompt is used only for this task. Leave it blank to use the default prompt. Add{" "}
-            <code className="rounded bg-muted px-1 py-0.5 text-[11px]">
+            <code
+              data-testid="ci-auto-fix-pr-feedback-placeholder"
+              className="rounded bg-muted px-1 py-0.5 text-[11px]"
+            >
               {PR_FEEDBACK_PLACEHOLDER}
             </code>{" "}
             when you want Kandev to include its PR feedback snapshot.
@@ -107,7 +110,10 @@ function CIAutomationPromptDialog({
               </a>
             </div>
           </div>
-          <div className="rounded-md border border-border/70 bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
+          <div
+            data-testid="ci-auto-fix-pr-feedback-help"
+            className="rounded-md border border-border/70 bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground"
+          >
             <p>
               The placeholder inserts the current PR identifier, new or changed failing checks with
               GitHub job links, and new or changed review comments with file, line, and body text.

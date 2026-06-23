@@ -190,7 +190,9 @@ func (s *Service) handleTaskCIOptionsUpdated(ctx context.Context, event *bus.Eve
 	if !ok || options == nil || (!options.AutoFixEnabled && !options.AutoMergeEnabled) || s.githubService == nil {
 		return nil
 	}
-	prsByTask, err := s.githubService.ListTaskPRs(ctx, []string{options.TaskID})
+	detachedCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ciAutomationDetachedTimeout)
+	defer cancel()
+	prsByTask, err := s.githubService.ListTaskPRs(detachedCtx, []string{options.TaskID})
 	if err != nil {
 		s.logger.Debug("failed to load task PRs for CI automation options update", zap.String("task_id", options.TaskID), zap.Error(err))
 		return nil

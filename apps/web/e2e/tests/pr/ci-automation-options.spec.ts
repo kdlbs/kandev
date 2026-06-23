@@ -97,9 +97,12 @@ test.describe("PR CI automation options", () => {
       "href",
       "/settings/prompts",
     );
-    await expect(promptDialog.locator("code").filter({ hasText: "{{pr.feedback}}" })).toBeVisible();
-    await expect(testPage.getByText(/new or changed failing checks/)).toBeVisible();
-    await expect(testPage.getByText(/pull or fetch the branch/)).toBeVisible();
+    await expect(promptDialog.getByTestId("ci-auto-fix-pr-feedback-placeholder")).toHaveText(
+      "{{pr.feedback}}",
+    );
+    const feedbackHelp = promptDialog.getByTestId("ci-auto-fix-pr-feedback-help");
+    await expect(feedbackHelp).toContainText("new or changed failing checks");
+    await expect(feedbackHelp).toContainText("pull or fetch the branch");
     await testPage.getByLabel("Task auto-fix prompt").fill("Please fix only the new CI issues.");
     await testPage.getByRole("button", { name: "Save prompt" }).click();
 
