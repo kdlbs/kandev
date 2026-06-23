@@ -111,7 +111,6 @@ export function ListToolbar({
         emptyMessage="No repositories found."
         triggerClassName="w-full md:w-[220px] h-8 border border-input bg-background hover:bg-secondary/50 px-2 py-1.5 text-xs/relaxed"
         className="md:min-w-[360px]"
-        plainTrigger
         testId="github-repo-filter-trigger"
       />
       <div className="w-full md:flex-1 md:min-w-[240px] relative">
