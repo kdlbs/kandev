@@ -168,8 +168,13 @@ describe("PRCIPopover CI automation controls", () => {
     expect(screen.getByRole("link", { name: "Edit default prompt" }).getAttribute("href")).toBe(
       "/settings/prompts",
     );
+    expect(screen.getByRole("dialog").textContent).toContain("{{pr.feedback}}");
+    expect(screen.getByRole("dialog").textContent).toContain("new or changed failing checks");
+    expect(screen.getByRole("dialog").textContent).toContain("review comments");
 
     const textarea = screen.getByLabelText("Task auto-fix prompt");
+    fireEvent.click(screen.getByRole("button", { name: "Insert PR feedback" }));
+    expect((textarea as HTMLTextAreaElement).value).toContain("{{pr.feedback}}");
     fireEvent.change(textarea, { target: { value: "Please fix this PR." } });
     fireEvent.click(screen.getByRole("button", { name: "Save prompt" }));
 

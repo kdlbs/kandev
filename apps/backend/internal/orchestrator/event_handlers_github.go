@@ -41,6 +41,7 @@ type GitHubService interface {
 	ResetPRWatch(ctx context.Context, id, branch string) error
 	AssociatePRWithTask(ctx context.Context, taskID, repositoryID string, pr *github.PR) (*github.TaskPR, error)
 	GetTaskPR(ctx context.Context, taskID string) (*github.TaskPR, error)
+	ListTaskPRs(ctx context.Context, taskIDs []string) (map[string][]*github.TaskPR, error)
 	GetTaskPRByOwnerRepoNumber(ctx context.Context, taskID, owner, repo string, prNumber int) (*github.TaskPR, error)
 	GetTaskCIOptionsResponse(ctx context.Context, taskID string) (*github.TaskCIOptionsResponse, error)
 	GetTaskCIPRState(ctx context.Context, taskID, repositoryID string, prNumber int) (*github.TaskCIPRAutomationState, error)
@@ -181,6 +182,22 @@ func (s *Service) handleTaskPRUpdated(ctx context.Context, event *bus.Event) err
 		return nil
 	}
 	s.startTaskPRCIAutomation(ctx, pr)
+	return nil
+}
+
+func (s *Service) handleTaskCIOptionsUpdated(ctx context.Context, event *bus.Event) error {
+	options, ok := event.Data.(*github.TaskCIOptionsResponse)
+	if !ok || options == nil || (!options.AutoFixEnabled && !options.AutoMergeEnabled) || s.githubService == nil {
+		return nil
+	}
+	prsByTask, err := s.githubService.ListTaskPRs(ctx, []string{options.TaskID})
+	if err != nil {
+		s.logger.Debug("failed to load task PRs for CI automation options update", zap.String("task_id", options.TaskID), zap.Error(err))
+		return nil
+	}
+	for _, pr := range prsByTask[options.TaskID] {
+		s.startTaskPRCIAutomation(ctx, pr)
+	}
 	return nil
 }
 
@@ -1149,6 +1166,9 @@ func (s *Service) subscribeGitHubEvents() {
 	}
 	if _, err := s.eventBus.Subscribe(events.GitHubTaskPRUpdated, s.handleTaskPRUpdated); err != nil {
 		s.logger.Error("failed to subscribe to github.task_pr.updated events", zap.Error(err))
+	}
+	if _, err := s.eventBus.Subscribe(events.GitHubTaskCIOptionsUpdated, s.handleTaskCIOptionsUpdated); err != nil {
+		s.logger.Error("failed to subscribe to github.task_ci_options.updated events", zap.Error(err))
 	}
 	if _, err := s.eventBus.Subscribe(events.GitHubNewReviewPR, s.handleNewReviewPR); err != nil {
 		s.logger.Error("failed to subscribe to github.new_pr_to_review events", zap.Error(err))

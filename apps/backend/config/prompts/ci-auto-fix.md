@@ -2,6 +2,8 @@ You are continuing work on a pull request because Kandev detected new CI or revi
 
 Focus on the current pull request feedback provided in the task message:
 
+{{pr.feedback}}
+
 - Fix failing checks and actionable review comments.
 - Prioritize feedback marked as new or changed since the last automated fix round.
 - Preserve unrelated work and avoid broad refactors.

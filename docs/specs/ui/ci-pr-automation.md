@@ -22,11 +22,14 @@ Users can already see pull request CI/review status above the task chat input, b
 - The auto-fix prompt is customizable per task from the PR CI popover.
 - The per-task prompt editor is opened from an edit button in the automation section.
 - The per-task prompt editor links to Settings > Prompts so the user can edit the default `ci-auto-fix` prompt.
+- The per-task prompt editor explains that `{{pr.feedback}}` is the placeholder that inserts Kandev's PR feedback snapshot. The explanation lists the included data: PR identifier, new or changed failing checks with job links, and new or changed review comments with file, line, and body text.
+- Omitting `{{pr.feedback}}` from the prompt means Kandev still evaluates PR feedback for dedupe and trigger decisions, but it does not include the PR snapshot in the agent message. This supports prompts that tell the agent to pull/fetch the branch and inspect GitHub itself.
 - If a task has no custom auto-fix prompt, Kandev uses a built-in default prompt named `ci-auto-fix`.
 - The default `ci-auto-fix` prompt is editable from Settings > Prompts like other built-in prompts.
 - Emptying or resetting the task prompt override returns the task to the default `ci-auto-fix` prompt.
 - For tasks with multiple linked PRs, the controls are task-level and apply to every open linked PR. Dedupe, last-attempt, and error state are tracked per linked PR.
 - Kandev checks watched PRs through the existing lightweight PR watch poller, which runs once per minute. It fetches full PR feedback only when a watched PR is a candidate for auto-fix or when a user opens/refreshes PR feedback UI.
+- Enabling `Auto-fix CI & address comments` or `Auto-merge when ready` immediately evaluates the task's current linked PRs instead of waiting for the next PR watch poll.
 - Every auto-fix attempt records the latest feedback snapshot it used, including non-actionable snapshots that were intentionally no-ops. Later fix rounds include only new or materially changed CI/review feedback since the last recorded round, with enough summary context for the agent to understand the PR.
 - Automation must not repeatedly prompt for the same failure/comment snapshot or repeatedly retry the same failed merge attempt on every poll.
 - Automation controls persist across Kandev restarts.
@@ -118,15 +121,15 @@ Optional websocket notification:
 
 - `github.task_ci_options.updated`
 - Payload: the same options response shape.
-- The event is emitted after a successful options update so other open tabs refresh immediately.
+- The event is emitted after a successful options update so other open tabs refresh immediately and the backend can evaluate any currently linked PRs when automation is enabled.
 
 ## State machine
 
 Task CI automation options:
 
 - `disabled`: both toggles are false. PR watch events update UI only.
-- `auto_fix_enabled`: Kandev evaluates actionable PR feedback on PR watch events.
-- `auto_merge_enabled`: Kandev evaluates PR merge readiness on PR watch events.
+- `auto_fix_enabled`: Kandev evaluates actionable PR feedback immediately when enabled and on later PR watch events.
+- `auto_merge_enabled`: Kandev evaluates PR merge readiness immediately when enabled and on later PR watch events.
 - `both_enabled`: Kandev evaluates both paths. Auto-fix does not merge; auto-merge merges only after readiness conditions are satisfied.
 
 Auto-fix cycle for one task/PR:
@@ -136,14 +139,13 @@ Auto-fix cycle for one task/PR:
 3. Kandev fetches full PR feedback.
 4. Kandev compares the current feedback snapshot to `last_fix_checkpoint_json` and `last_fix_signature`.
 5. If there is no material change, the cycle ends without prompting.
-6. If there is new or materially changed feedback, Kandev renders the task override or default `ci-auto-fix` prompt and sends or queues it for the task session. The saved/shared `ci-auto-fix` instructions are hidden system context, but the PR snapshot details are visible in the chat message after `@ci-auto-fix`, before the agent output for that automation turn.
+6. If there is new or materially changed feedback, Kandev renders the task override or default `ci-auto-fix` prompt and sends or queues it for the task session. The saved/shared `ci-auto-fix` instructions are hidden system context. If the rendered prompt contains `{{pr.feedback}}`, Kandev replaces it with visible PR snapshot details after `@ci-auto-fix`, before the agent output for that automation turn. If the placeholder is absent, no PR snapshot is included in the chat message.
 7. The default prompt instructs the agent to classify the new feedback before editing. If the
    new feedback is only summaries, status updates, no-finding reports, duplicated or already
    addressed comments, rate-limit notices, or other non-actionable review diagnostics, the agent
    must not modify files, commit, or push; it should only report that there is nothing actionable
    to address.
-8. Kandev records the new signature/checkpoint and attempt metadata for the latest feedback
-   snapshot, actionable or non-actionable, so identical snapshots are not sent repeatedly.
+8. Once the prompt is queued or accepted by the agent runtime, Kandev records the new signature/checkpoint and attempt metadata for the latest feedback snapshot, actionable or non-actionable, so identical snapshots are not sent repeatedly while the agent is still working.
 
 Auto-merge cycle for one task/PR:
 

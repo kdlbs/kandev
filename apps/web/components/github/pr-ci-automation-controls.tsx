@@ -19,6 +19,8 @@ import { useToast } from "@/components/toast-provider";
 import { useTaskCIAutomationOptions } from "@/hooks/domains/github/use-task-ci-options";
 import type { TaskCIAutomationPatch, TaskPR } from "@/lib/types/github";
 
+const PR_FEEDBACK_PLACEHOLDER = "{{pr.feedback}}";
+
 function CIAutomationInfoButton() {
   return (
     <Tooltip>
@@ -35,12 +37,19 @@ function CIAutomationInfoButton() {
       </TooltipTrigger>
       <TooltipContent side="top" align="end" className="max-w-[280px] text-xs leading-relaxed">
         Watches this task's linked pull request during the 1 minute PR refresh loop. Auto-fix queues
-        a task prompt for new failed checks and unresolved review comments, then snapshots what was
-        handled so the next round only sends newly observed issues. Auto-merge runs only after CI,
-        review, and mergeability are ready.
+        a task prompt for new failed checks and unresolved review comments when the prompt includes
+        the PR feedback placeholder, then snapshots what was handled so the next round only sends
+        newly observed issues. Auto-merge runs only after CI, review, and mergeability are ready.
       </TooltipContent>
     </Tooltip>
   );
+}
+
+function insertPRFeedbackPlaceholder(prompt: string) {
+  if (prompt.includes(PR_FEEDBACK_PLACEHOLDER)) return prompt;
+  const trimmedEnd = prompt.trimEnd();
+  if (!trimmedEnd) return PR_FEEDBACK_PLACEHOLDER;
+  return `${trimmedEnd}\n\n${PR_FEEDBACK_PLACEHOLDER}`;
 }
 
 function CIAutomationPromptDialog({
@@ -67,21 +76,46 @@ function CIAutomationPromptDialog({
         <DialogHeader>
           <DialogTitle>Auto-fix prompt</DialogTitle>
           <DialogDescription>
-            This prompt is used only for this task. Leave it blank to use the default prompt.
+            This prompt is used only for this task. Leave it blank to use the default prompt. Add{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-[11px]">
+              {PR_FEEDBACK_PLACEHOLDER}
+            </code>{" "}
+            when you want Kandev to include its PR feedback snapshot.
           </DialogDescription>
         </DialogHeader>
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <Label htmlFor="task-ci-auto-fix-prompt" className="text-xs">
               Task auto-fix prompt
             </Label>
-            <a
-              href="/settings/prompts"
-              className="cursor-pointer text-xs text-primary hover:underline"
-              onClick={(e) => e.stopPropagation()}
-            >
-              Edit default prompt
-            </a>
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 cursor-pointer px-2 text-xs"
+                onClick={() => onPromptChange(insertPRFeedbackPlaceholder(prompt))}
+              >
+                Insert PR feedback
+              </Button>
+              <a
+                href="/settings/prompts"
+                className="cursor-pointer text-xs text-primary hover:underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                Edit default prompt
+              </a>
+            </div>
+          </div>
+          <div className="rounded-md border border-border/70 bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
+            <p>
+              The placeholder inserts the current PR identifier, new or changed failing checks with
+              GitHub job links, and new or changed review comments with file, line, and body text.
+            </p>
+            <p className="mt-2">
+              Omit the placeholder if you want the agent to pull or fetch the branch and inspect
+              GitHub itself instead of receiving Kandev's snapshot.
+            </p>
           </div>
           <Textarea
             id="task-ci-auto-fix-prompt"

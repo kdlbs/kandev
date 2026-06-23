@@ -233,8 +233,9 @@ type stopAgentCall struct {
 
 // promptCall records one PromptAgent invocation with its target execution ID.
 type promptCall struct {
-	ExecutionID string
-	Prompt      string
+	ExecutionID  string
+	Prompt       string
+	DispatchOnly bool
 }
 
 type passthroughStdinCall struct {
@@ -265,11 +266,11 @@ func (m *mockAgentManager) StopAgentWithReason(_ context.Context, agentExecution
 	})
 	return m.stopAgentWithReasonErr
 }
-func (m *mockAgentManager) PromptAgent(_ context.Context, executionID string, prompt string, _ []v1.MessageAttachment, _ bool) (*executor.PromptResult, error) {
+func (m *mockAgentManager) PromptAgent(_ context.Context, executionID string, prompt string, _ []v1.MessageAttachment, dispatchOnly bool) (*executor.PromptResult, error) {
 	m.mu.Lock()
 	first := len(m.capturedPrompts) == 0
 	m.capturedPrompts = append(m.capturedPrompts, prompt)
-	m.capturedPromptCalls = append(m.capturedPromptCalls, promptCall{ExecutionID: executionID, Prompt: prompt})
+	m.capturedPromptCalls = append(m.capturedPromptCalls, promptCall{ExecutionID: executionID, Prompt: prompt, DispatchOnly: dispatchOnly})
 	promptErr := m.promptErr
 	promptResult := m.promptResult
 	doneCh := m.promptDone

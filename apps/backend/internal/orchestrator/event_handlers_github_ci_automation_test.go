@@ -97,9 +97,12 @@ func TestCIAutomationFeedbackDelta(t *testing.T) {
 	if len(delta.Comments) != 1 || delta.Comments[0].ID != 11 {
 		t.Fatalf("expected only comment 11, got %+v", delta.Comments)
 	}
-	prompt := ciAutomationRenderPrompt("Base instructions", &github.TaskPR{Owner: "acme", Repo: "widget", PRNumber: 42}, delta)
+	prompt := ciAutomationRenderPrompt("Base instructions\n\n{{pr.feedback}}", &github.TaskPR{Owner: "acme", Repo: "widget", PRNumber: 42}, delta)
 	if !strings.Contains(prompt, "Base instructions") || !strings.Contains(prompt, "acme/widget#42") || !strings.Contains(prompt, "also this") {
 		t.Fatalf("rendered prompt missing expected content:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "{{pr.feedback}}") {
+		t.Fatalf("rendered prompt should replace PR feedback placeholder:\n%s", prompt)
 	}
 	visible := sysprompt.StripSystemContent(prompt)
 	if strings.Contains(visible, "Base instructions") {
@@ -107,6 +110,21 @@ func TestCIAutomationFeedbackDelta(t *testing.T) {
 	}
 	if !strings.Contains(visible, "acme/widget#42") || !strings.Contains(visible, "also this") {
 		t.Fatalf("PR snapshot should remain visible, got:\n%s", visible)
+	}
+}
+
+func TestCIAutomationPromptOmitsSnapshotWithoutPlaceholder(t *testing.T) {
+	delta := ciAutomationCheckpoint{
+		FailedChecks: []ciAutomationCheckSnapshot{{Name: "unit", Conclusion: "failure", HTMLURL: "https://ci/unit"}},
+		Comments:     []ciAutomationCommentSnapshot{{ID: 10, Body: "fix this", Path: "main.go", Line: 12}},
+	}
+
+	prompt := ciAutomationRenderPrompt("Pull the branch and inspect the PR yourself.", &github.TaskPR{Owner: "acme", Repo: "widget", PRNumber: 42}, delta)
+	if strings.Contains(prompt, "acme/widget#42") || strings.Contains(prompt, "unit") || strings.Contains(prompt, "fix this") {
+		t.Fatalf("rendered prompt should omit PR snapshot without placeholder:\n%s", prompt)
+	}
+	if visible := sysprompt.StripSystemContent(prompt); strings.TrimSpace(visible) != "" {
+		t.Fatalf("expected no visible PR snapshot without placeholder, got:\n%s", visible)
 	}
 }
 
@@ -181,7 +199,7 @@ func TestHandleTaskPRCIAutomationQueuesFixDedupesAndMerges(t *testing.T) {
 		ciOptionsResp: &github.TaskCIOptionsResponse{
 			TaskID:                 "task-1",
 			AutoFixEnabled:         true,
-			EffectiveAutoFixPrompt: "Fix the PR",
+			EffectiveAutoFixPrompt: "Fix the PR\n\n{{pr.feedback}}",
 		},
 		prFeedback: &github.PRFeedback{
 			Checks: []github.CheckRun{{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit"}},
@@ -307,6 +325,9 @@ func TestDispatchCIAutomationPromptRecordsUserMessageBeforeDirectPrompt(t *testi
 	}
 	if len(agentMgr.capturedPrompts) != 1 {
 		t.Fatalf("expected one direct prompt call, got %d", len(agentMgr.capturedPrompts))
+	}
+	if len(agentMgr.capturedPromptCalls) != 1 || !agentMgr.capturedPromptCalls[0].DispatchOnly {
+		t.Fatalf("expected CI automation direct prompt to dispatch only, got %+v", agentMgr.capturedPromptCalls)
 	}
 	if messageCreator.userMessages[0].metadata["origin"] != ciAutomationOrigin {
 		t.Fatalf("expected CI automation user message metadata, got %+v", messageCreator.userMessages[0].metadata)
@@ -540,6 +561,41 @@ func TestHandlePRFeedbackStartsAutomationForMatchingPR(t *testing.T) {
 		t.Fatal("unexpected automation for non-matching repo-front PR")
 	}
 	close(block)
+	waitForCIAutomationIdle(t, svc, "task-1|repo-back|2", 200*time.Millisecond)
+}
+
+func TestHandleTaskCIOptionsUpdatedStartsAutomationForTaskPRs(t *testing.T) {
+	ctx := context.Background()
+	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	started := make(chan struct{})
+	block := make(chan struct{})
+	ghSvc := &mockGitHubService{
+		taskPRs: []*github.TaskPR{
+			{TaskID: "task-1", RepositoryID: "repo-front", Owner: "acme", Repo: "front", PRNumber: 1},
+			{TaskID: "task-1", RepositoryID: "repo-back", Owner: "acme", Repo: "back", PRNumber: 2},
+		},
+		ciOptionsResp:    &github.TaskCIOptionsResponse{TaskID: "task-1"},
+		ciOptionsStarted: started,
+		ciOptionsBlock:   block,
+	}
+	svc.SetGitHubService(ghSvc)
+
+	err := svc.handleTaskCIOptionsUpdated(ctx, &bus.Event{Data: &github.TaskCIOptionsResponse{
+		TaskID:         "task-1",
+		AutoFixEnabled: true,
+	}})
+	if err != nil {
+		t.Fatalf("handle CI options updated: %v", err)
+	}
+	<-started
+	if _, loaded := svc.ciAutomationInFlight.Load("task-1|repo-front|1"); !loaded {
+		t.Fatal("expected automation to run for repo-front PR")
+	}
+	if _, loaded := svc.ciAutomationInFlight.Load("task-1|repo-back|2"); !loaded {
+		t.Fatal("expected automation to run for repo-back PR")
+	}
+	close(block)
+	waitForCIAutomationIdle(t, svc, "task-1|repo-front|1", 200*time.Millisecond)
 	waitForCIAutomationIdle(t, svc, "task-1|repo-back|2", 200*time.Millisecond)
 }
 

@@ -86,6 +86,23 @@ func (m *mockGitHubService) GetTaskPR(_ context.Context, _ string) (*github.Task
 	m.getTaskPRCalls++
 	return m.taskPR, m.taskPRErr
 }
+func (m *mockGitHubService) ListTaskPRs(_ context.Context, taskIDs []string) (map[string][]*github.TaskPR, error) {
+	if m.taskPRErr != nil {
+		return nil, m.taskPRErr
+	}
+	result := make(map[string][]*github.TaskPR, len(taskIDs))
+	for _, taskID := range taskIDs {
+		for _, pr := range m.taskPRs {
+			if pr.TaskID == taskID {
+				result[taskID] = append(result[taskID], pr)
+			}
+		}
+		if len(result[taskID]) == 0 && m.taskPR != nil && m.taskPR.TaskID == taskID {
+			result[taskID] = []*github.TaskPR{m.taskPR}
+		}
+	}
+	return result, nil
+}
 func (m *mockGitHubService) GetTaskPRByOwnerRepoNumber(_ context.Context, taskID, owner, repo string, prNumber int) (*github.TaskPR, error) {
 	m.exactTaskPRCalls++
 	m.lastExactPRLookup = github.PRFeedbackEvent{TaskID: taskID, Owner: owner, Repo: repo, PRNumber: prNumber}

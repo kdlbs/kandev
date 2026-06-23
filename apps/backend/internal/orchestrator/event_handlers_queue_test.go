@@ -134,7 +134,7 @@ func TestExecuteQueuedMessage_RecordsCIAutomationPromptOnDrain(t *testing.T) {
 		SessionID: "s1",
 		TaskID:    "t1",
 		Content: ciAutomationChatPrompt(ciAutomationRenderPrompt(
-			"Fix the PR",
+			"Fix the PR\n\n{{pr.feedback}}",
 			&github.TaskPR{Owner: "acme", Repo: "widget", PRNumber: 42},
 			ciAutomationCheckpoint{
 				FailedChecks: []ciAutomationCheckSnapshot{{Name: "unit", Conclusion: "failure"}},

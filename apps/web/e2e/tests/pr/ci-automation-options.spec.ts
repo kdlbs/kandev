@@ -91,11 +91,15 @@ test.describe("PR CI automation options", () => {
     await expect(testPage.getByText(/snapshots what was handled/)).toBeVisible();
 
     await openPromptDialog(session);
-    await expect(testPage.getByRole("dialog", { name: "Auto-fix prompt" })).toBeVisible();
+    const promptDialog = testPage.getByRole("dialog", { name: "Auto-fix prompt" });
+    await expect(promptDialog).toBeVisible();
     await expect(testPage.getByRole("link", { name: "Edit default prompt" })).toHaveAttribute(
       "href",
       "/settings/prompts",
     );
+    await expect(promptDialog.locator("code").filter({ hasText: "{{pr.feedback}}" })).toBeVisible();
+    await expect(testPage.getByText(/new or changed failing checks/)).toBeVisible();
+    await expect(testPage.getByText(/pull or fetch the branch/)).toBeVisible();
     await testPage.getByLabel("Task auto-fix prompt").fill("Please fix only the new CI issues.");
     await testPage.getByRole("button", { name: "Save prompt" }).click();
 
