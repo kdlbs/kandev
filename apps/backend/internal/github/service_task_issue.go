@@ -70,15 +70,15 @@ func (s *Service) LinkTaskIssue(ctx context.Context, taskID string, req LinkTask
 	if err != nil {
 		return nil, err
 	}
+	task, err := store.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
 	issue, err := s.client.GetIssue(ctx, owner, repo, number)
 	if err != nil {
 		return nil, err
 	}
 	if err := s.validateIssueTaskRepository(ctx, store, taskID, issue.RepoOwner, issue.RepoName); err != nil {
-		return nil, err
-	}
-	task, err := store.GetTask(ctx, taskID)
-	if err != nil {
 		return nil, err
 	}
 	metadata := copyMetadata(task.Metadata)

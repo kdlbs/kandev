@@ -153,6 +153,21 @@ func TestLinkTaskIssue_PropagatesRepositoryLookupError(t *testing.T) {
 	}
 }
 
+func TestLinkTaskIssue_ChecksTaskBeforeFetchingIssue(t *testing.T) {
+	client := NewMockClient()
+	taskErr := errors.New("task lookup failed")
+	store := &fakeTaskIssueStore{taskErr: taskErr}
+	svc := NewService(client, AuthMethodPAT, nil, nil, nil, testLogger(t))
+	svc.SetTaskIssueStore(store)
+
+	_, err := svc.LinkTaskIssue(context.Background(), "missing-task", LinkTaskIssueRequest{
+		Issue: "https://github.com/kdlbs/kandev/issues/1470",
+	})
+	if !errors.Is(err, taskErr) {
+		t.Fatalf("expected task lookup error before GitHub fetch, got %v", err)
+	}
+}
+
 func TestLinkTaskIssue_RejectsIssueFromDifferentTaskRepository(t *testing.T) {
 	client := NewMockClient()
 	client.AddIssue(&Issue{

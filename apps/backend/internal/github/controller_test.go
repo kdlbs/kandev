@@ -323,7 +323,7 @@ func TestHttpLinkTaskIssue_ErrorMapping(t *testing.T) {
 			client: &stubClient{getIssueFunc: func(context.Context, string, string, int) (*Issue, error) {
 				return nil, &GitHubAPIError{StatusCode: http.StatusNotFound, Endpoint: "/repos/kdlbs/kandev/issues/1470", Body: "private detail"}
 			}},
-			store:      &fakeTaskIssueStore{},
+			store:      &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-1", Metadata: map[string]interface{}{}}},
 			body:       `{"issue":"https://github.com/kdlbs/kandev/issues/1470"}`,
 			wantStatus: http.StatusNotFound,
 			wantError:  "failed to fetch GitHub issue",
@@ -333,7 +333,7 @@ func TestHttpLinkTaskIssue_ErrorMapping(t *testing.T) {
 			client: &stubClient{getIssueFunc: func(context.Context, string, string, int) (*Issue, error) {
 				return nil, &GitHubAPIError{StatusCode: http.StatusUnauthorized, Endpoint: "/repos/kdlbs/kandev/issues/1470", Body: "private detail"}
 			}},
-			store:      &fakeTaskIssueStore{},
+			store:      &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-1", Metadata: map[string]interface{}{}}},
 			body:       `{"issue":"https://github.com/kdlbs/kandev/issues/1470"}`,
 			wantStatus: http.StatusUnauthorized,
 			wantError:  "failed to fetch GitHub issue",
@@ -343,7 +343,7 @@ func TestHttpLinkTaskIssue_ErrorMapping(t *testing.T) {
 			client: &stubClient{getIssueFunc: func(context.Context, string, string, int) (*Issue, error) {
 				return nil, &GitHubAPIError{StatusCode: http.StatusForbidden, Endpoint: "/repos/kdlbs/kandev/issues/1470", Body: "private detail"}
 			}},
-			store:      &fakeTaskIssueStore{},
+			store:      &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-1", Metadata: map[string]interface{}{}}},
 			body:       `{"issue":"https://github.com/kdlbs/kandev/issues/1470"}`,
 			wantStatus: http.StatusForbidden,
 			wantError:  "failed to fetch GitHub issue",
