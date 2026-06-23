@@ -100,6 +100,28 @@ func TestHTTPSearchIssues_MultiValueLevelsAndStatuses(t *testing.T) {
 	}
 }
 
+func TestHTTPSearchIssues_RejectsMultiStatus(t *testing.T) {
+	ctrl, router, client := newTestController(t)
+	seedConfig(t, ctrl)
+	called := false
+	client.searchIssuesFn = func(SearchFilter, string) (*SearchResult, error) {
+		called = true
+		return &SearchResult{IsLast: true}, nil
+	}
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/sentry/issues?orgSlug=acme&projectSlug=fe&status=unresolved&status=ignored", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	// Sentry has no OR form for is:, so a multi-status search would AND-combine
+	// and match nothing — reject it before hitting the API.
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if called {
+		t.Error("SearchIssues must not be called for an invalid multi-status filter")
+	}
+}
+
 func TestHTTPGetIssue_ForwardsID(t *testing.T) {
 	ctrl, router, client := newTestController(t)
 	seedConfig(t, ctrl)

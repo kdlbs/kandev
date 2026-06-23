@@ -85,6 +85,14 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 	if err := validateFilter(w.Filter); err != nil {
 		return nil, err
 	}
+	// Only enforce the single-status rule when the caller actually changed the
+	// filter. A partial update that leaves the filter untouched (e.g. the
+	// enable/disable toggle) must not fail on a legacy multi-status watch.
+	if req.Filter != nil {
+		if err := validateFilterStatuses(w.Filter); err != nil {
+			return nil, err
+		}
+	}
 	if w.WorkflowID == "" || w.WorkflowStepID == "" {
 		return nil, fmt.Errorf("%w: workflowId and workflowStepId cannot be empty", ErrInvalidConfig)
 	}
@@ -248,7 +256,11 @@ func validateIssueWatchCreate(req *CreateIssueWatchRequest) error {
 	if req.WorkflowID == "" || req.WorkflowStepID == "" {
 		return fmt.Errorf("%w: workflowId and workflowStepId required", ErrInvalidConfig)
 	}
-	if err := validateFilter(normalizeFilter(req.Filter)); err != nil {
+	nf := normalizeFilter(req.Filter)
+	if err := validateFilter(nf); err != nil {
+		return err
+	}
+	if err := validateFilterStatuses(nf); err != nil {
 		return err
 	}
 	if err := validateMaxInflightTasks(req.MaxInflightTasks); err != nil {
@@ -275,10 +287,8 @@ func validateMaxInflightTasks(v *int) error {
 }
 
 // validateFilter requires the minimum identity for a Sentry search: an org and
-// a project. Environment, levels, query and statsPeriod are optional. At most
-// one status may be set: Sentry has no OR form for the `is:` keyword (unlike
-// levels, which use the `level:[...]` bracket syntax), so two statuses would be
-// AND-combined into a query that silently matches nothing.
+// a project. Other fields (environment, levels, statuses, query, statsPeriod)
+// are optional.
 func validateFilter(f SearchFilter) error {
 	if f.OrgSlug == "" {
 		return fmt.Errorf("%w: filter.orgSlug is required", ErrInvalidConfig)
@@ -286,6 +296,16 @@ func validateFilter(f SearchFilter) error {
 	if f.ProjectSlug == "" {
 		return fmt.Errorf("%w: filter.projectSlug is required", ErrInvalidConfig)
 	}
+	return nil
+}
+
+// validateFilterStatuses rejects a filter that carries more than one status.
+// Sentry has no OR form for the `is:` keyword (unlike levels, which use the
+// `level:[...]` bracket syntax), so two `is:` tokens would AND-combine into a
+// query that silently matches nothing. Applied when a filter is created or
+// changed — never against an unchanged stored filter, so a legacy multi-status
+// watch can still be paused/resumed without first being edited.
+func validateFilterStatuses(f SearchFilter) error {
 	if len(f.Statuses) > 1 {
 		return fmt.Errorf("%w: filter.statuses must contain at most one status because Sentry has no OR form for the is keyword", ErrInvalidConfig)
 	}

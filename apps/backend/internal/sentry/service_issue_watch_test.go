@@ -67,6 +67,33 @@ func TestService_CreateIssueWatch_DefaultsAndValidation(t *testing.T) {
 	}
 }
 
+func TestService_UpdateIssueWatch_LegacyMultiStatusToggle(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+
+	// Seed a legacy watch carrying multiple statuses directly through the
+	// store, bypassing service validation — mirrors rows created before the
+	// single-status rule existed.
+	w := newTestIssueWatch("ws-1")
+	w.Filter.Statuses = []string{"unresolved", "ignored"}
+	if err := f.store.CreateIssueWatch(ctx, w); err != nil {
+		t.Fatalf("seed watch: %v", err)
+	}
+
+	// A partial update that leaves the filter untouched (the enable/disable
+	// toggle sends only {enabled}) must still succeed for the legacy watch.
+	disabled := false
+	if _, err := f.svc.UpdateIssueWatch(ctx, w.ID, &UpdateIssueWatchRequest{Enabled: &disabled}); err != nil {
+		t.Fatalf("toggle on legacy multi-status watch should succeed, got %v", err)
+	}
+
+	// Patching the filter to keep multiple statuses must be rejected.
+	bad := SearchFilter{OrgSlug: "acme", ProjectSlug: "frontend", Statuses: []string{"unresolved", "ignored"}}
+	if _, err := f.svc.UpdateIssueWatch(ctx, w.ID, &UpdateIssueWatchRequest{Filter: &bad}); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("filter patch with multiple statuses should be rejected, got %v", err)
+	}
+}
+
 func TestService_UpdateIssueWatch_PartialPatch(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
