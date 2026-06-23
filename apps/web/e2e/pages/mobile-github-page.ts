@@ -16,7 +16,7 @@ export class MobileGitHubPage {
     this.inlineSidebar = page.getByTestId("github-presets-scope-bar");
     this.toolbarTitle = page.getByTestId("github-list-toolbar-title");
     this.repoFilterTrigger = page.getByTestId("github-repo-filter-trigger");
-    this.repoSearchInput = page.getByPlaceholder("Filter repositories...");
+    this.repoSearchInput = page.getByTestId("github-repo-filter-search").getByRole("combobox");
   }
 
   async goto() {

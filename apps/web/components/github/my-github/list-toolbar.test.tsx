@@ -7,6 +7,7 @@ afterEach(() => cleanup());
 
 const ALL_REPOS_LABEL = "All repos";
 const REPO_SEARCH_PLACEHOLDER = "Filter repositories...";
+const REPO_SEARCH_TEST_ID = "github-repo-filter-search";
 const KANDEV_REPO = "kdlbs/kandev";
 
 function renderToolbar() {
@@ -39,6 +40,7 @@ describe("ListToolbar", () => {
     fireEvent.click(screen.getByText(ALL_REPOS_LABEL));
 
     expect(await screen.findByPlaceholderText(REPO_SEARCH_PLACEHOLDER)).toBeTruthy();
+    expect(screen.getByTestId(REPO_SEARCH_TEST_ID)).toBeTruthy();
     expect(screen.getByText(KANDEV_REPO)).toBeTruthy();
   });
 
