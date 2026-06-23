@@ -199,13 +199,19 @@ jobs:
           set -euo pipefail
 
           git show "$BASE_SHA:scripts/opencode-code-review" > .opencode-review/opencode-code-review
-          python3 .opencode-review/opencode-code-review post-findings \
-            --output .opencode-review/output.txt \
-            --files .opencode-review/files.txt \
-            --opencode-status .opencode-review/opencode.status \
-            --stdout .opencode-review/opencode.stdout \
-            --stderr .opencode-review/opencode.stderr \
+          post_args=(
+            post-findings
+            --output .opencode-review/output.txt
+            --files .opencode-review/files.txt
+            --opencode-status .opencode-review/opencode.status
+            --stdout .opencode-review/opencode.stdout
+            --stderr .opencode-review/opencode.stderr
             --summary "$GITHUB_STEP_SUMMARY"
+          )
+          if python3 .opencode-review/opencode-code-review post-findings --help | grep -q -- "--patch"; then
+            post_args+=(--patch .opencode-review/review.patch)
+          fi
+          python3 .opencode-review/opencode-code-review "${post_args[@]}"
 
       - name: Upload OpenCode review artifacts
         if: always()
@@ -432,13 +438,19 @@ jobs:
           set -euo pipefail
 
           git show "$BASE_SHA:scripts/opencode-code-review" > .opencode-review/opencode-code-review
-          python3 .opencode-review/opencode-code-review post-findings \
-            --output .opencode-review/output.txt \
-            --files .opencode-review/files.txt \
-            --opencode-status .opencode-review/opencode.status \
-            --stdout .opencode-review/opencode.stdout \
-            --stderr .opencode-review/opencode.stderr \
+          post_args=(
+            post-findings
+            --output .opencode-review/output.txt
+            --files .opencode-review/files.txt
+            --opencode-status .opencode-review/opencode.status
+            --stdout .opencode-review/opencode.stdout
+            --stderr .opencode-review/opencode.stderr
             --summary "$GITHUB_STEP_SUMMARY"
+          )
+          if python3 .opencode-review/opencode-code-review post-findings --help | grep -q -- "--patch"; then
+            post_args+=(--patch .opencode-review/review.patch)
+          fi
+          python3 .opencode-review/opencode-code-review "${post_args[@]}"
 
       - name: Upload OpenCode review artifacts
         if: always()

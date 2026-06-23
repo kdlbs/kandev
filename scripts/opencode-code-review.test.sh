@@ -82,6 +82,18 @@ if [[ "$explicit_model_env_count" != "2" ]]; then
 fi
 pass "OpenCode posting steps explicitly pass OPENCODE_MODEL"
 
+patch_capability_count="$(count_occurrences 'post-findings --help | grep -q -- "--patch"')"
+if [[ "$patch_capability_count" != "2" ]]; then
+  fail "OpenCode posting steps check trusted parser support before passing review.patch"
+fi
+pass "OpenCode posting steps check trusted parser support before passing review.patch"
+
+explicit_patch_arg_count="$(count_occurrences 'post_args+=(--patch .opencode-review/review.patch)')"
+if [[ "$explicit_patch_arg_count" != "2" ]]; then
+  fail "OpenCode posting steps explicitly pass review.patch for inline filtering"
+fi
+pass "OpenCode posting steps explicitly pass review.patch for inline filtering"
+
 trusted_script_count="$(count_occurrences 'git show "$BASE_SHA:scripts/opencode-code-review" > .opencode-review/opencode-code-review')"
 if [[ "$trusted_script_count" != "2" ]]; then
   fail "OpenCode review executes the parser script from the trusted base commit in both workflow paths"

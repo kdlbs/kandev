@@ -26,11 +26,13 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
         self.stdout_path = self.workdir / "stdout.txt"
         self.stderr_path = self.workdir / "stderr.txt"
         self.summary_path = self.workdir / "summary.md"
+        self.patch_path = self.workdir / "review.patch"
         self.files_path.write_text("src/app.ts\n", encoding="utf-8")
         self.status_path.write_text("0\n", encoding="utf-8")
         self.stdout_path.write_text("stdout line\n", encoding="utf-8")
         self.stderr_path.write_text("stderr line\n", encoding="utf-8")
         self.summary_path.write_text("", encoding="utf-8")
+        self.patch_path.write_text("", encoding="utf-8")
         self.fake_gh = self.write_fake_gh()
 
     def write_fake_gh(self) -> Path:
@@ -79,6 +81,7 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
         inline_fail: bool = False,
         issue_comment_fail: bool = False,
         gh_bin: Path | None = None,
+        include_patch: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         self.output_path.write_text(output, encoding="utf-8")
         env = {
@@ -94,24 +97,27 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
             env["INLINE_FAIL"] = "1"
         if issue_comment_fail:
             env["ISSUE_COMMENT_FAIL"] = "1"
+        command = [
+            sys.executable,
+            str(SCRIPT),
+            "post-findings",
+            "--output",
+            str(self.output_path),
+            "--files",
+            str(self.files_path),
+            "--opencode-status",
+            str(self.status_path),
+            "--stdout",
+            str(self.stdout_path),
+            "--stderr",
+            str(self.stderr_path),
+            "--summary",
+            str(self.summary_path),
+        ]
+        if include_patch:
+            command.extend(["--patch", str(self.patch_path)])
         return subprocess.run(
-            [
-                sys.executable,
-                str(SCRIPT),
-                "post-findings",
-                "--output",
-                str(self.output_path),
-                "--files",
-                str(self.files_path),
-                "--opencode-status",
-                str(self.status_path),
-                "--stdout",
-                str(self.stdout_path),
-                "--stderr",
-                str(self.stderr_path),
-                "--summary",
-                str(self.summary_path),
-            ],
+            command,
             text=True,
             capture_output=True,
             env=env,
@@ -190,6 +196,113 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
         self.assertTrue(any("<!-- opencode-review:fallback-findings -->" in body for body in bodies))
         self.assertTrue(any("src/app.ts:99" in body for body in bodies))
 
+    def test_context_lines_are_commentable_when_patch_is_available(self) -> None:
+        self.patch_path.write_text(
+            textwrap.dedent(
+                """\
+                diff --git a/src/app.ts b/src/app.ts
+                index 1111111..2222222 100644
+                --- a/src/app.ts
+                +++ b/src/app.ts
+                @@ -8,5 +8,6 @@
+                 const before = 1;
+                 const existing = 2;
+                +const added = 3;
+                 const after = 4;
+                """
+            ),
+            encoding="utf-8",
+        )
+        findings = [
+            {"path": "src/app.ts", "line": 9, "title": "Context line", "body": "This is unchanged context."},
+            {"path": "src/app.ts", "line": 10, "title": "Added line", "body": "This is added."},
+        ]
+
+        result = self.run_script(
+            output=f"<opencode_findings>{json.dumps(findings)}</opencode_findings>\n",
+            include_patch=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        pull_comment_calls = [call for call in self.read_calls() if any("/pulls/" in arg for arg in call)]
+        self.assertEqual(len(pull_comment_calls), 2, pull_comment_calls)
+        self.assertTrue(any("line=9" in arg for call in pull_comment_calls for arg in call))
+        self.assertTrue(any("line=10" in arg for call in pull_comment_calls for arg in call))
+        self.assertFalse(any("<!-- opencode-review:fallback-findings -->" in body for body in self.bodies()))
+        self.assertIn("Inline comments skipped before posting: `0`", self.summary_path.read_text())
+
+    def test_lines_outside_patch_hunks_are_prefiltered_to_fallback(self) -> None:
+        self.patch_path.write_text(
+            textwrap.dedent(
+                """\
+                diff --git a/src/app.ts b/src/app.ts
+                index 1111111..2222222 100644
+                --- a/src/app.ts
+                +++ b/src/app.ts
+                @@ -8,5 +8,6 @@
+                 const before = 1;
+                 const existing = 2;
+                +const added = 3;
+                 const after = 4;
+                """
+            ),
+            encoding="utf-8",
+        )
+        findings = [
+            {"path": "src/app.ts", "line": 99, "title": "Outside hunk", "body": "This is not in the diff."},
+            {"path": "src/app.ts", "line": 10, "title": "Added line", "body": "This is added."},
+        ]
+
+        result = self.run_script(
+            output=f"<opencode_findings>{json.dumps(findings)}</opencode_findings>\n",
+            include_patch=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        pull_comment_calls = [call for call in self.read_calls() if any("/pulls/" in arg for arg in call)]
+        self.assertEqual(len(pull_comment_calls), 1, pull_comment_calls)
+        self.assertTrue(any("line=10" in arg for arg in pull_comment_calls[0]))
+        self.assertFalse(any("line=99" in arg for call in self.read_calls() for arg in call))
+        bodies = self.bodies()
+        self.assertTrue(any("<!-- opencode-review:fallback-findings -->" in body for body in bodies))
+        self.assertTrue(any("src/app.ts:99" in body for body in bodies))
+        self.assertFalse(any("src/app.ts:10" in body for body in bodies))
+        self.assertIn("Inline comments skipped before posting: `1`", self.summary_path.read_text())
+
+    def test_deleted_lines_starting_with_dashes_do_not_shift_right_lines(self) -> None:
+        self.patch_path.write_text(
+            textwrap.dedent(
+                """\
+                diff --git a/src/app.ts b/src/app.ts
+                index 1111111..2222222 100644
+                --- a/src/app.ts
+                +++ b/src/app.ts
+                @@ -8,4 +8,3 @@
+                 const before = 1;
+                --- removed separator
+                 const after = 2;
+                """
+            ),
+            encoding="utf-8",
+        )
+        findings = [
+            {"path": "src/app.ts", "line": 9, "title": "After context", "body": "Still commentable."},
+            {"path": "src/app.ts", "line": 10, "title": "Shifted line", "body": "Should be outside hunk."},
+        ]
+
+        result = self.run_script(
+            output=f"<opencode_findings>{json.dumps(findings)}</opencode_findings>\n",
+            include_patch=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        pull_comment_calls = [call for call in self.read_calls() if any("/pulls/" in arg for arg in call)]
+        self.assertEqual(len(pull_comment_calls), 1, pull_comment_calls)
+        self.assertTrue(any("line=9" in arg for arg in pull_comment_calls[0]))
+        self.assertFalse(any("line=10" in arg for call in self.read_calls() for arg in call))
+        fallback = next(body for body in self.bodies() if "<!-- opencode-review:fallback-findings -->" in body)
+        self.assertIn("src/app.ts:10", fallback)
+
     def test_integral_float_line_values_are_normalized(self) -> None:
         result = self.run_script(
             output=textwrap.dedent(
@@ -234,7 +347,7 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
         self.assertTrue(any("<!-- opencode-review:fallback-findings -->" in body for body in bodies))
         self.assertTrue(any("src/app.ts:1" in body for body in bodies))
         self.assertTrue(any("src/app.ts:30" in body for body in bodies))
-        self.assertTrue(any("## GitHub rejected inline placement" in body for body in bodies))
+        self.assertTrue(any("## Inline placement unavailable" in body for body in bodies))
         self.assertTrue(any("## Additional findings beyond inline comment limit" in body for body in bodies))
         summary = self.summary_path.read_text()
         self.assertIn("Inline comments rejected: `20`", summary)

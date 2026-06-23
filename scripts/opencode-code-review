@@ -200,7 +200,7 @@ def fallback_body(rejected: list[dict[str, Any]], overflow: list[dict[str, Any]]
             body += section
             included += 1
 
-    append_section("GitHub rejected inline placement", rejected)
+    append_section("Inline placement unavailable", rejected)
     append_section("Additional findings beyond inline comment limit", overflow)
 
     if omitted:
@@ -210,6 +210,40 @@ def fallback_body(rejected: list[dict[str, Any]], overflow: list[dict[str, Any]]
         body += notice
 
     return body, included, omitted
+
+
+def parse_commentable_right_lines(patch: str) -> dict[str, set[int]]:
+    commentable: dict[str, set[int]] = {}
+    path: str | None = None
+    next_right_line: int | None = None
+
+    for line in patch.splitlines():
+        if line.startswith("diff --git "):
+            path = None
+            next_right_line = None
+            continue
+        if line.startswith("+++ b/"):
+            path = line[len("+++ b/") :]
+            commentable.setdefault(path, set())
+            continue
+        if line.startswith("@@ "):
+            match = re.search(r"\+(\d+)(?:,(\d+))?", line)
+            next_right_line = int(match.group(1)) if match else None
+            continue
+        if path is None or next_right_line is None:
+            continue
+        if line.startswith("+") and not line.startswith("+++ "):
+            commentable.setdefault(path, set()).add(next_right_line)
+            next_right_line += 1
+            continue
+        if line.startswith("-"):
+            continue
+        if line.startswith("\\"):
+            continue
+        commentable.setdefault(path, set()).add(next_right_line)
+        next_right_line += 1
+
+    return commentable
 
 
 def normalize_finding(value: Any, changed_paths: set[str]) -> dict[str, Any] | None:
@@ -341,6 +375,14 @@ def post_findings(args: argparse.Namespace) -> int:
         return 0 if posted_no_findings else 1
 
     changed_paths = set(args.files.read_text(encoding="utf-8").splitlines())
+    commentable_lines = None
+    patch_filter_warning = ""
+    if args.patch is not None:
+        try:
+            commentable_lines = parse_commentable_right_lines(args.patch.read_text(encoding="utf-8"))
+        except OSError as exc:
+            patch_filter_warning = f"Could not read OpenCode review patch for inline filtering: {exc}"
+            print(patch_filter_warning, file=sys.stderr)
     posted = 0
     rejected = []
     valid_findings = [
@@ -348,8 +390,20 @@ def post_findings(args: argparse.Namespace) -> int:
         for finding in (normalize_finding(item, changed_paths) for item in findings)
         if finding is not None
     ]
-    inline_findings = valid_findings[:MAX_INLINE_FINDINGS]
-    overflow_findings = valid_findings[MAX_INLINE_FINDINGS:]
+    prefiltered = []
+    inline_candidates = []
+    for finding in valid_findings:
+        if commentable_lines is not None and finding["line"] not in commentable_lines.get(finding["path"], set()):
+            print(
+                f"Skipped OpenCode inline finding outside commentable diff lines: {finding['path']}:{finding['line']}",
+                file=sys.stderr,
+            )
+            prefiltered.append(finding)
+            continue
+        inline_candidates.append(finding)
+
+    inline_findings = inline_candidates[:MAX_INLINE_FINDINGS]
+    overflow_findings = inline_candidates[MAX_INLINE_FINDINGS:]
 
     for finding in inline_findings:
         ok, error_message = post_inline_finding(finding)
@@ -368,25 +422,24 @@ def post_findings(args: argparse.Namespace) -> int:
     posted_fallback = True
     fallback_included = 0
     fallback_omitted = 0
-    if rejected or overflow_findings:
-        fallback_comment, fallback_included, fallback_omitted = fallback_body(rejected, overflow_findings)
+    unplaced_findings = prefiltered + rejected
+    if unplaced_findings or overflow_findings:
+        fallback_comment, fallback_included, fallback_omitted = fallback_body(unplaced_findings, overflow_findings)
         posted_fallback = upsert_issue_comment(FALLBACK_MARKER, fallback_comment)
 
-    append_summary(
-        args.summary,
-        "OpenCode review",
-        [
-            f"Parsed findings: `{len(findings)}`",
-            f"Inline comments posted: `{posted}`",
-            f"Inline comments rejected: `{len(rejected)}`",
-            f"Findings beyond inline limit: `{len(overflow_findings)}`",
-            f"Fallback findings included in comment: `{fallback_included}`",
-            f"Fallback findings omitted from comment: `{fallback_omitted}`",
-            "",
-            *snippet("OpenCode stdout", stdout),
-            *snippet("OpenCode stderr", stderr),
-        ],
-    )
+    summary_lines = [
+        f"Parsed findings: `{len(findings)}`",
+        f"Inline comments posted: `{posted}`",
+        f"Inline comments skipped before posting: `{len(prefiltered)}`",
+        f"Inline comments rejected: `{len(rejected)}`",
+        f"Findings beyond inline limit: `{len(overflow_findings)}`",
+        f"Fallback findings included in comment: `{fallback_included}`",
+        f"Fallback findings omitted from comment: `{fallback_omitted}`",
+    ]
+    if patch_filter_warning:
+        summary_lines.append(f"Patch filtering warning: {patch_filter_warning}")
+    summary_lines.extend(["", *snippet("OpenCode stdout", stdout), *snippet("OpenCode stderr", stderr)])
+    append_summary(args.summary, "OpenCode review", summary_lines)
     print(f"Posted {posted} OpenCode inline comments; preserved {fallback_included} fallback findings.")
     return 0 if posted_fallback else 1
 
@@ -402,6 +455,7 @@ def build_parser() -> argparse.ArgumentParser:
     post.add_argument("--stdout", type=Path, required=True)
     post.add_argument("--stderr", type=Path, required=True)
     post.add_argument("--summary", type=Path, required=True)
+    post.add_argument("--patch", type=Path)
     post.set_defaults(func=post_findings)
     return parser
 
