@@ -253,7 +253,7 @@ make doctor
 
 There are a few similar tools in this space, and new ones appearing everyday. Here's what sets this one apart:
 
-- **Server-first architecture** - Not a desktop app. Runs as a server you can access from any device, including your phone. Start a task away from your computer and check in on it later.
+- **Server-first architecture** - The core app runs as a server you can access from any device, including your phone. The desktop app wraps that local runtime when you want an OS launcher.
 - **Remote runtimes** - Run agents on remote servers via SSH, Docker hosts, and cloud environments, not just your local machine.
 - **Multi-provider** - Use Claude Code, Codex, Copilot, Gemini, Amp, Auggie, OpenCode, Cursor, Qwen, Droid, iFlow, Kilocode, Pi, Kimi, Kiro, Qoder, Trae, and Oh My Pi side by side. Not locked to one vendor.
 - **CLI passthrough and chat** - Interact with agents through structured chat messages or drop into raw CLI mode for full agent TUI capabilities.

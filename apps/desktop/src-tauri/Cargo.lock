@@ -1785,12 +1785,6 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-single-instance",
  "tauri-runtime",
- "time",
- "zbus",
- "zbus_macros",
- "zvariant",
- "zvariant_derive",
- "zvariant_utils",
 ]
 
 [[package]]

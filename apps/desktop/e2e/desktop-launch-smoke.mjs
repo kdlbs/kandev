@@ -55,12 +55,15 @@ async function runSmoke() {
     stderr += chunk;
   });
 
+  const failIfExited = () => {
+    if (child.exitCode !== null) {
+      throw new Error(`desktop app exited early with code ${child.exitCode}\n${stdout}\n${stderr}`);
+    }
+  };
+
   try {
-    await waitForFile(join(stateDir, "root-requested"), 45_000, () => {
-      if (child.exitCode !== null) {
-        throw new Error(`desktop app exited early with code ${child.exitCode}\n${stdout}\n${stderr}`);
-      }
-    });
+    await waitForFile(join(stateDir, "health-requested"), 45_000, failIfExited);
+    await waitForFile(join(stateDir, "root-requested"), 45_000, failIfExited);
   } finally {
     await stopProcess(child);
   }

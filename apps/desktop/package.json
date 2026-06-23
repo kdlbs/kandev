@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tauri dev --features desktop-runtime",
     "dev:vite": "vite --host 127.0.0.1 --port 1420",
-    "build": "pnpm build:vite && tauri build --features desktop-runtime --bundles deb,rpm",
+    "build": "tauri build --features desktop-runtime --bundles deb,rpm",
     "build:vite": "vite build",
     "e2e": "pnpm build && node e2e/desktop-launch-smoke.mjs",
     "typecheck": "tsc --noEmit"

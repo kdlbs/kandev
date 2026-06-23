@@ -44,10 +44,15 @@ impl BackendState {
     }
 
     pub fn stop(&self) {
+        self.shutdown_started.store(true, Ordering::SeqCst);
         let child = self.child.lock().expect("backend child mutex poisoned").take();
         if let Some(mut child) = child {
             terminate_child(&mut child);
         }
+    }
+
+    fn is_shutdown_started(&self) -> bool {
+        self.shutdown_started.load(Ordering::SeqCst)
     }
 
     fn set_child(&self, child: Child) {
@@ -305,6 +310,9 @@ where
 fn wait_for_backend(port: u16, state: &BackendState, timeout: Duration) -> Result<(), String> {
     let deadline = Instant::now() + timeout;
     loop {
+        if state.is_shutdown_started() {
+            return Err("Desktop startup cancelled".to_string());
+        }
         if health_ready(port) {
             return Ok(());
         }
@@ -354,10 +362,27 @@ fn request_health(port: u16) -> Result<bool, String> {
                 .as_bytes(),
         )
         .map_err(|err| err.to_string())?;
-    let mut response = [0_u8; 64];
-    let n = stream.read(&mut response).map_err(|err| err.to_string())?;
-    Ok(response[..n].starts_with(b"HTTP/1.1 200")
-        || response[..n].starts_with(b"HTTP/1.0 200"))
+    let response = read_http_status_prefix(&mut stream)?;
+    Ok(response.starts_with(b"HTTP/1.1 200") || response.starts_with(b"HTTP/1.0 200"))
+}
+
+fn read_http_status_prefix<R: Read>(reader: &mut R) -> Result<Vec<u8>, String> {
+    let mut response = Vec::with_capacity(64);
+    let mut buffer = [0_u8; 16];
+    while response.len() < 64 {
+        let read_len = buffer.len().min(64 - response.len());
+        let n = reader
+            .read(&mut buffer[..read_len])
+            .map_err(|err| err.to_string())?;
+        if n == 0 {
+            break;
+        }
+        response.extend_from_slice(&buffer[..n]);
+        if response.windows(2).any(|window| window == b"\r\n") {
+            break;
+        }
+    }
+    Ok(response)
 }
 
 fn normalized_path(existing: Option<&OsString>, home_dir: Option<&Path>) -> OsString {
@@ -583,6 +608,15 @@ mod tests {
     }
 
     #[test]
+    fn stop_marks_shutdown_started() {
+        let state = BackendState::default();
+
+        state.stop();
+
+        assert!(state.is_shutdown_started());
+    }
+
+    #[test]
     fn launcher_exit_message_includes_recent_output() {
         let message = launcher_exit_message("exit status: 1", Some("database failed".to_string()));
 
@@ -599,6 +633,19 @@ mod tests {
         output.push("stderr", &chunk);
 
         assert!(output.bytes.len() <= STARTUP_OUTPUT_LIMIT);
+    }
+
+    #[test]
+    fn read_http_status_prefix_reads_past_short_first_chunk() {
+        let mut reader = ShortReader::new(b"HTTP/1.1 200 OK\r\nignored", 4);
+
+        let prefix = read_http_status_prefix(&mut reader).expect("status prefix");
+
+        assert!(prefix.starts_with(b"HTTP/1.1 200"));
+        assert!(
+            prefix.windows(2).any(|window| window == b"\r\n"),
+            "status prefix should include the line terminator"
+        );
     }
 
     #[cfg(unix)]
@@ -646,5 +693,36 @@ mod tests {
     #[cfg(unix)]
     fn process_exists(pid: u32) -> bool {
         unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
+
+    struct ShortReader {
+        data: &'static [u8],
+        position: usize,
+        chunk_size: usize,
+    }
+
+    impl ShortReader {
+        fn new(data: &'static [u8], chunk_size: usize) -> Self {
+            Self {
+                data,
+                position: 0,
+                chunk_size,
+            }
+        }
+    }
+
+    impl Read for ShortReader {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            if self.position >= self.data.len() {
+                return Ok(0);
+            }
+            let len = buffer
+                .len()
+                .min(self.chunk_size)
+                .min(self.data.len() - self.position);
+            buffer[..len].copy_from_slice(&self.data[self.position..self.position + len]);
+            self.position += len;
+            Ok(len)
+        }
     }
 }

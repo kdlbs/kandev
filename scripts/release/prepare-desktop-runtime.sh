@@ -48,6 +48,18 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+refuse_dangerous_output_dir() {
+  case "$OUTPUT_DIR" in
+    ""|"/"|"/."|"/..")
+      printf 'Refusing dangerous desktop runtime output directory: %s\n' "${OUTPUT_DIR:-<empty>}" >&2
+      exit 1
+      ;;
+  esac
+}
+
+refuse_dangerous_output_dir
+chmod +x "$BUNDLE_DIR/bin/kandev" "$BUNDLE_DIR/bin/agentctl" "$BUNDLE_DIR/bin/agentctl-linux-amd64" 2>/dev/null || true
+chmod +x "$BUNDLE_DIR/bin/kandev.exe" "$BUNDLE_DIR/bin/agentctl.exe" 2>/dev/null || true
 "$VERIFY_SCRIPT" "$BUNDLE_DIR" >/dev/null
 
 rm -rf "$OUTPUT_DIR"

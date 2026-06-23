@@ -20,11 +20,6 @@ desktop-runtime = [
   "dep:tauri",
   "dep:tauri-plugin-single-instance",
   "dep:tauri-runtime",
-  "dep:zbus",
-  "dep:zbus_macros",
-  "dep:zvariant",
-  "dep:zvariant_derive",
-  "dep:zvariant_utils",
 ]
 
 [build-dependencies]
@@ -40,9 +35,3 @@ serde_with = "=3.15.0"
 tauri = { version = "=2.8.4", features = [], optional = true }
 tauri-runtime = { version = "=2.9.0", optional = true }
 tauri-plugin-single-instance = { version = "=2.2.1", optional = true }
-time = "=0.3.41"
-zbus = { version = "=5.13.2", optional = true }
-zbus_macros = { version = "=5.13.2", optional = true }
-zvariant = { version = "=5.9.2", optional = true }
-zvariant_derive = { version = "=5.9.2", optional = true }
-zvariant_utils = { version = "=3.3.0", optional = true }

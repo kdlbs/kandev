@@ -35,24 +35,45 @@ esac
 
 BIN_DIR="$RUNTIME_DIR/bin"
 
+is_executable_file() {
+  local path="$1"
+  if [ -x "$path" ]; then
+    return 0
+  fi
+  # MSYS/Git Bash can report Windows executables differently from Unix mode bits.
+  [ "${OS:-}" = "Windows_NT" ] && [[ "$path" == *.exe ]]
+}
+
 require_one() {
   local label="$1"
   shift
   local candidate
+  local found=""
   for candidate in "$@"; do
     if [ -f "$candidate" ]; then
-      return 0
+      found="$candidate"
+      if is_executable_file "$candidate"; then
+        return 0
+      fi
     fi
   done
+  if [ -n "$found" ]; then
+    printf '%s is not executable: %s\n' "$label" "$found" >&2
+    exit 1
+  fi
   printf 'Missing %s in %s\n' "$label" "$BIN_DIR" >&2
   exit 1
 }
 
-require_file() {
+require_executable() {
   local label="$1"
   local path="$2"
   if [ ! -f "$path" ]; then
     printf 'Missing %s at %s\n' "$label" "$path" >&2
+    exit 1
+  fi
+  if ! is_executable_file "$path"; then
+    printf '%s is not executable: %s\n' "$label" "$path" >&2
     exit 1
   fi
 }
@@ -64,6 +85,6 @@ fi
 
 require_one "Kandev launcher binary" "$BIN_DIR/kandev" "$BIN_DIR/kandev.exe"
 require_one "agentctl binary" "$BIN_DIR/agentctl" "$BIN_DIR/agentctl.exe"
-require_file "agentctl linux/amd64 helper" "$BIN_DIR/agentctl-linux-amd64"
+require_executable "agentctl linux/amd64 helper" "$BIN_DIR/agentctl-linux-amd64"
 
 printf 'Desktop runtime verified at %s\n' "$RUNTIME_DIR"
