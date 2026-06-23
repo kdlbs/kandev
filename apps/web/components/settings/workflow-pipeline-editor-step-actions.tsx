@@ -290,7 +290,8 @@ export function ChildrenCompletedSelect({
   const configuredTargetStepId =
     (step.events?.on_children_completed?.find((a) => a.type === "move_to_step")?.config
       ?.step_id as string) ?? "";
-  const defaultTargetStepId = configuredTargetStepId || otherSteps[0]?.id || "";
+  const validConfiguredTargetStepId = otherSteps.find((s) => s.id === configuredTargetStepId)?.id;
+  const defaultTargetStepId = validConfiguredTargetStepId || otherSteps[0]?.id || "";
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-1.5">
@@ -329,7 +330,7 @@ export function ChildrenCompletedSelect({
       </Select>
       {transitionType === "move_to_step" && (
         <Select
-          value={configuredTargetStepId}
+          value={defaultTargetStepId}
           onValueChange={(value) => {
             if (readOnly) return;
             const currentEvents = step.events ?? {};
