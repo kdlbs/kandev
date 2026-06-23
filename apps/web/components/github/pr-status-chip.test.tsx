@@ -319,6 +319,26 @@ describe("PRStatusChip — mergeability", () => {
     expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("behind");
   });
 
+  it("uses a shield glyph for branch-protection blocks", () => {
+    renderWithStore(
+      {
+        taskPRs: {
+          byTaskId: {
+            "task-1": [
+              makePR({
+                mergeable_state: "blocked",
+                checks_state: "",
+              }),
+            ],
+          },
+        },
+      },
+      <PRStatusChip taskId="task-1" />,
+    );
+    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("blocked");
+    expect(screen.getByTestId("pr-status-glyph-blocked")).toBeTruthy();
+  });
+
   it("is 'waiting' for normal branch protection after checks pass", () => {
     renderWithStore(
       { taskPRs: { byTaskId: { "task-1": [makePR({ mergeable_state: "blocked" })] } } },

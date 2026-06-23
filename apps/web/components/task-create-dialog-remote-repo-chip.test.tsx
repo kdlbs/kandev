@@ -338,20 +338,23 @@ describe("RemoteRepoChip — picker loading state", () => {
 });
 
 describe("RemoteRepoChip — popover content", () => {
-  it("constrains the inline popover to fit inside the create-task dialog body", () => {
+  it("portals and constrains the repo picker so dialog overflow cannot clip it", () => {
     renderInProvider(
-      <RemoteRepoChip
-        row={row()}
-        branches={[]}
-        branchesLoading={false}
-        accessibleRepos={makeAccessible()}
-        onURLChange={vi.fn()}
-        onBranchChange={noopBranch}
-        onRemove={noopRemove}
-      />,
+      <div data-testid="clipping-host" className="overflow-hidden">
+        <RemoteRepoChip
+          row={row()}
+          branches={[]}
+          branchesLoading={false}
+          accessibleRepos={makeAccessible()}
+          onURLChange={vi.fn()}
+          onBranchChange={noopBranch}
+          onRemove={noopRemove}
+        />
+      </div>,
     );
     fireEvent.click(screen.getByTestId(TRIGGER_TID));
     const content = screen.getByTestId("remote-repo-popover-content");
+    expect(screen.getByTestId("clipping-host").contains(content)).toBe(false);
     expect(content.className).toContain("max-w-[calc(100vw-2rem)]");
     expect(content.className).toContain("max-h-[min(420px,calc(100vh-12rem))]");
     expect(content.className).toContain("overflow-y-auto");

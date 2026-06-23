@@ -220,7 +220,6 @@ function RemoteRepoPill({
         data-testid="remote-repo-popover-content"
         className="w-[380px] max-w-[calc(100vw-2rem)] max-h-[min(420px,calc(100vh-12rem))] overflow-y-auto p-0"
         align="start"
-        portal={false}
       >
         <RemoteRepoPopoverContent
           accessible={accessibleRepos}

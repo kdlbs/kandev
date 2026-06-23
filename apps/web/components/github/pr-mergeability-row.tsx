@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import { IconAlertTriangle, IconClock } from "@tabler/icons-react";
+import { IconClock, IconShield } from "@tabler/icons-react";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
 import {
@@ -125,7 +125,10 @@ export function blockedReason(pr: TaskPR): string {
 function BlockedNote({ reason }: { reason: string }) {
   return (
     <div data-testid="pr-blocked-note" className="flex items-start gap-1.5 px-1 py-1 text-xs">
-      <IconAlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+      <IconShield
+        data-testid="pr-blocked-shield-icon"
+        className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400"
+      />
       <div className="min-w-0">
         <div className="font-medium text-amber-600 dark:text-amber-400">
           Blocked by branch protection

@@ -9,6 +9,7 @@ import {
   IconLoader2,
   IconPointFilled,
   IconAlertTriangleFilled,
+  IconShield,
   IconX,
 } from "@tabler/icons-react";
 import {
@@ -496,8 +497,15 @@ function ChipStatusGlyph({ status }: { status: ChipStatus }) {
     case "conflict":
       return <IconAlertTriangleFilled className="h-3.5 w-3.5 text-red-500" aria-hidden="true" />;
     case "behind":
-    case "blocked":
       return <IconAlertTriangleFilled className="h-3.5 w-3.5 text-yellow-500" aria-hidden="true" />;
+    case "blocked":
+      return (
+        <IconShield
+          data-testid="pr-status-glyph-blocked"
+          className="h-3.5 w-3.5 text-yellow-500"
+          aria-hidden="true"
+        />
+      );
     case "waiting":
       return <IconClock className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />;
     case "in_progress":

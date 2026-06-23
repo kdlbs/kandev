@@ -118,6 +118,89 @@ function pillTriggerClass(disabled: boolean, flat: boolean, hasValue: boolean): 
   );
 }
 
+function useTooltipMountGate() {
+  const [tooltipOpenState, setTooltipOpenState] = useState(false);
+  const canOpenTooltipRef = useRef(false);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      canOpenTooltipRef.current = true;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  const handleTooltipOpenChange = useCallback((next: boolean) => {
+    if (next && !canOpenTooltipRef.current) return;
+    setTooltipOpenState(next);
+  }, []);
+
+  const closeTooltip = useCallback(() => setTooltipOpenState(false), []);
+
+  return {
+    tooltipOpenState,
+    handleTooltipOpenChange,
+    closeTooltip,
+  };
+}
+
+function DisabledPillTooltip({
+  open,
+  onOpenChange,
+  triggerButton,
+  disabledReason,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  triggerButton: React.ReactNode;
+  disabledReason: string;
+}) {
+  return (
+    <Tooltip open={open} onOpenChange={onOpenChange}>
+      <TooltipTrigger asChild>
+        <span className="inline-flex">{triggerButton}</span>
+      </TooltipTrigger>
+      <TooltipContent>{disabledReason}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function PillPopoverContent({
+  filter,
+  searchPlaceholder,
+  onRefresh,
+  refreshing,
+  options,
+  onSelect,
+  setOpen,
+  emptyMessage,
+}: {
+  filter?: PillProps["filter"];
+  searchPlaceholder: string;
+  onRefresh?: () => void;
+  refreshing?: boolean;
+  options: PillOption[];
+  onSelect: (value: string) => void;
+  setOpen: (open: boolean) => void;
+  emptyMessage: string;
+}) {
+  return (
+    <PopoverContent className="w-[360px] p-0" align="start">
+      <Command filter={filter}>
+        <div className="flex items-center gap-1 px-2 pt-1">
+          <CommandInput placeholder={searchPlaceholder} className="h-9 flex-1" />
+          {onRefresh && <BranchRefreshButton onRefresh={onRefresh} refreshing={refreshing} />}
+        </div>
+        <PillCommandList
+          options={options}
+          onSelect={onSelect}
+          setOpen={setOpen}
+          emptyMessage={emptyMessage}
+        />
+      </Command>
+    </PopoverContent>
+  );
+}
+
 /**
  * Compact pill trigger that opens a popover with a search list. Auto-widths
  * to its content (no `w-full`, no chevron) so multiple pills can sit on one
@@ -142,29 +225,26 @@ export function Pill({
   prefix,
 }: PillProps) {
   const [open, setOpenState] = useState(false);
-  // Tracks the brief window after the popover closes during which the cursor
-  // is still hovering the trigger. Without this, Radix's Tooltip becomes
-  // uncontrolled the moment `open` flips to false and pops back open from the
-  // lingering hover. Holding `open={false}` for ~200ms lets the user move
-  // away naturally and prevents the tooltip from racing back in.
+  const { tooltipOpenState, handleTooltipOpenChange, closeTooltip } = useTooltipMountGate();
   const [suppressTooltip, setSuppressTooltip] = useState(false);
   const suppressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const setOpen = useCallback((next: boolean) => {
-    setOpenState((prev) => {
-      if (prev && !next) {
-        if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current);
-        setSuppressTooltip(true);
-        suppressTimerRef.current = setTimeout(() => {
-          setSuppressTooltip(false);
-          suppressTimerRef.current = null;
-        }, 200);
-      }
-      return next;
-    });
-  }, []);
-  // Clear the suppression timer if the component unmounts while it's still
-  // ticking, so the eventual `setSuppressTooltip(false)` doesn't fire on a
-  // dead component.
+  const setOpen = useCallback(
+    (next: boolean) => {
+      if (next) closeTooltip();
+      setOpenState((prev) => {
+        if (prev && !next) {
+          if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current);
+          setSuppressTooltip(true);
+          suppressTimerRef.current = setTimeout(() => {
+            setSuppressTooltip(false);
+            suppressTimerRef.current = null;
+          }, 200);
+        }
+        return next;
+      });
+    },
+    [closeTooltip],
+  );
   useEffect(
     () => () => {
       if (suppressTimerRef.current) {
@@ -200,12 +280,12 @@ export function Pill({
   // the user loses their place.
   if (disabled && disabledReason && !open) {
     return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="inline-flex">{triggerButton}</span>
-        </TooltipTrigger>
-        <TooltipContent>{disabledReason}</TooltipContent>
-      </Tooltip>
+      <DisabledPillTooltip
+        open={tooltipOpenState}
+        onOpenChange={handleTooltipOpenChange}
+        triggerButton={triggerButton}
+        disabledReason={disabledReason}
+      />
     );
   }
 
@@ -214,20 +294,16 @@ export function Pill({
       <PopoverTrigger asChild>
         {tooltip ? <TooltipTrigger asChild>{triggerButton}</TooltipTrigger> : triggerButton}
       </PopoverTrigger>
-      <PopoverContent className="w-[360px] p-0" align="start" portal={false}>
-        <Command filter={filter}>
-          <div className="flex items-center gap-1 px-2 pt-1">
-            <CommandInput placeholder={searchPlaceholder} className="h-9 flex-1" />
-            {onRefresh && <BranchRefreshButton onRefresh={onRefresh} refreshing={refreshing} />}
-          </div>
-          <PillCommandList
-            options={options}
-            onSelect={onSelect}
-            setOpen={setOpen}
-            emptyMessage={emptyMessage}
-          />
-        </Command>
-      </PopoverContent>
+      <PillPopoverContent
+        filter={filter}
+        searchPlaceholder={searchPlaceholder}
+        onRefresh={onRefresh}
+        refreshing={refreshing}
+        options={options}
+        onSelect={onSelect}
+        setOpen={setOpen}
+        emptyMessage={emptyMessage}
+      />
     </Popover>
   );
 
@@ -237,9 +313,9 @@ export function Pill({
   // and for a brief window after it closes so a lingering hover doesn't pop
   // the tooltip back in (which Radix would otherwise do the moment we flip
   // from controlled-closed back to uncontrolled).
-  const tooltipOpen = open || suppressTooltip ? false : undefined;
+  const tooltipOpen = open || suppressTooltip ? false : tooltipOpenState;
   return (
-    <Tooltip open={tooltipOpen}>
+    <Tooltip open={tooltipOpen} onOpenChange={handleTooltipOpenChange}>
       {popover}
       <TooltipContent>{tooltip}</TooltipContent>
     </Tooltip>

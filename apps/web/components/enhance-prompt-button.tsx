@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { IconSparkles } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -16,13 +17,27 @@ export function EnhancePromptButton({
   isLoading,
   isConfigured = true,
 }: EnhancePromptButtonProps) {
+  const [tooltipOpen, setTooltipOpen] = useState(false);
+  const canOpenTooltipRef = useRef(false);
   const isDisabled = !isConfigured || isLoading;
   const tooltipText = isConfigured
     ? "Enhance prompt with AI"
     : "Configure a utility agent in settings to enable AI enhancement";
 
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      canOpenTooltipRef.current = true;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  const handleTooltipOpenChange = (open: boolean) => {
+    if (open && !canOpenTooltipRef.current) return;
+    setTooltipOpen(open);
+  };
+
   return (
-    <Tooltip>
+    <Tooltip open={tooltipOpen} onOpenChange={handleTooltipOpenChange}>
       <TooltipTrigger asChild>
         {/* Wrap in span so tooltip works even when button is disabled */}
         <span className="inline-flex">

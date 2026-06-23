@@ -80,6 +80,7 @@ describe("PRMergeabilityRow", () => {
     );
     expect(queryByTestId("pr-conflict-banner")).toBeNull();
     expect(queryByTestId("pr-blocked-note")).not.toBeNull();
+    expect(queryByTestId("pr-blocked-shield-icon")).not.toBeNull();
     expect(container.textContent).toContain("Blocked by branch protection");
   });
 
