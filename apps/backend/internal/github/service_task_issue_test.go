@@ -15,9 +15,11 @@ type fakeTaskIssueStore struct {
 	entities             map[string]*taskmodels.Repository
 	repositoryErrs       map[string]error
 	failOnCanceledUpdate bool
-	taskErr              error
-	updateErr            error
-	updated              map[string]interface{}
+	// taskErr takes priority over the task-not-set fallback. Set it to an
+	// error wrapping ErrTaskNotFound when a test needs the controller's 404 path.
+	taskErr   error
+	updateErr error
+	updated   map[string]interface{}
 }
 
 func (f *fakeTaskIssueStore) GetTask(_ context.Context, taskID string) (*taskmodels.Task, error) {

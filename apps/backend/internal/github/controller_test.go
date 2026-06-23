@@ -252,6 +252,21 @@ func TestHttpUnlinkTaskIssue_Success(t *testing.T) {
 	}
 }
 
+func TestHttpUnlinkTaskIssue_TaskNotFound(t *testing.T) {
+	router, ctrl := setupControllerTest(&stubClient{})
+	ctrl.service.SetTaskIssueStore(&fakeTaskIssueStore{
+		taskErr: fmt.Errorf("task lookup failed: %w", ErrTaskNotFound),
+	})
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/github/tasks/missing-task/issue", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected unlink task-not-found status 404, got %d: %s", w.Code, w.Body.String())
+	}
+	assertJSONError(t, w.Body.Bytes(), "task not found")
+}
+
 func TestHttpLinkTaskIssue_ErrorMapping(t *testing.T) {
 	tests := []struct {
 		name       string
