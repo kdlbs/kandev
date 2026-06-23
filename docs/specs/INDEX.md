@@ -43,6 +43,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [model-unification](tasks/model-unification.md) | draft |
 | [without-repositories](tasks/without-repositories.md) | draft |
 | [subtask-checklist](tasks/subtask-checklist.md) | shipped |
+| [subtask-completion-trigger](tasks/subtask-completion-trigger.md) | draft |
 | [subtree-controls](tasks/subtree-controls.md) | shipped |
 | [blocked-task-escalation](tasks/blocked-task-escalation.md) | draft |
 | [runtime-cleanup](tasks/runtime-cleanup.md) | draft |

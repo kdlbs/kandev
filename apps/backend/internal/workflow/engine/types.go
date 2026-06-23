@@ -376,6 +376,18 @@ func compileGenericActions(actions []wfmodels.GenericAction) []Action {
 	out := make([]Action, 0, len(actions))
 	for _, a := range actions {
 		switch a.Type {
+		case wfmodels.GenericActionMoveToNext:
+			out = append(out, Action{Kind: ActionMoveToNext})
+		case wfmodels.GenericActionMoveToPrevious:
+			out = append(out, Action{Kind: ActionMoveToPrevious})
+		case wfmodels.GenericActionMoveToStep:
+			stepID, err := readStepID(a.Config)
+			if err != nil {
+				continue // skip malformed move_to_step actions
+			}
+			out = append(out, Action{Kind: ActionMoveToStep, MoveToStep: &MoveToStepAction{StepID: stepID}})
+		case wfmodels.GenericActionAutoStartAgent:
+			out = append(out, Action{Kind: ActionAutoStartAgent, AutoStartAgent: &AutoStartAgentAction{QueueIfBusy: true}})
 		case wfmodels.GenericActionQueueRun:
 			out = append(out, Action{
 				Kind:     ActionQueueRun,

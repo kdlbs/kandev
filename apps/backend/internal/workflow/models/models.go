@@ -83,6 +83,14 @@ type OnExitAction struct {
 type GenericActionType string
 
 const (
+	// GenericActionMoveToNext transitions to the next workflow step.
+	GenericActionMoveToNext GenericActionType = "move_to_next"
+	// GenericActionMoveToPrevious transitions to the previous workflow step.
+	GenericActionMoveToPrevious GenericActionType = "move_to_previous"
+	// GenericActionMoveToStep transitions to a configured workflow step.
+	GenericActionMoveToStep GenericActionType = "move_to_step"
+	// GenericActionAutoStartAgent starts the step's agent.
+	GenericActionAutoStartAgent GenericActionType = "auto_start_agent"
 	// GenericActionQueueRun queues a run on a target task/agent.
 	GenericActionQueueRun GenericActionType = "queue_run"
 	// GenericActionClearDecisions clears recorded decisions for the

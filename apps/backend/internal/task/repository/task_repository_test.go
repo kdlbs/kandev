@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/db"
@@ -176,6 +177,116 @@ func TestSQLiteRepository_UpdateTaskStateIfCurrentIn(t *testing.T) {
 	}
 	if updated {
 		t.Fatal("expected no update for missing task")
+	}
+}
+
+func TestSQLiteRepository_ListChildCompletionRows_ActiveChildren(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Workflow"})
+
+	now := time.Now().UTC()
+	parent := &models.Task{
+		ID:             "parent-1",
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "step-1",
+		Title:          "Parent",
+		State:          v1.TaskStateInProgress,
+		Priority:       "medium",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if err := repo.CreateTask(ctx, parent); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	createChild := func(id string, state v1.TaskState, archived, ephemeral bool) {
+		t.Helper()
+		child := &models.Task{
+			ID:             id,
+			WorkspaceID:    "ws-1",
+			WorkflowID:     "wf-1",
+			WorkflowStepID: "step-1",
+			Title:          id,
+			State:          state,
+			Priority:       "medium",
+			ParentID:       parent.ID,
+			IsEphemeral:    ephemeral,
+			CreatedAt:      now.Add(time.Duration(len(id)) * time.Second),
+			UpdatedAt:      now.Add(time.Duration(len(id)) * time.Minute),
+		}
+		if err := repo.CreateTask(ctx, child); err != nil {
+			t.Fatalf("create child %s: %v", id, err)
+		}
+		if archived {
+			if err := repo.ArchiveTask(ctx, id); err != nil {
+				t.Fatalf("archive child %s: %v", id, err)
+			}
+		}
+	}
+
+	createChild("child-completed", v1.TaskStateCompleted, false, false)
+	createChild("child-failed", v1.TaskStateFailed, false, false)
+	createChild("child-cancelled", v1.TaskStateCancelled, false, false)
+	createChild("child-open", v1.TaskStateInProgress, false, false)
+	createChild("child-archived", v1.TaskStateTODO, true, false)
+	createChild("child-ephemeral", v1.TaskStateTODO, false, true)
+
+	rows, err := repo.ListChildCompletionRows(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("ListChildCompletionRows: %v", err)
+	}
+	gotIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		gotIDs = append(gotIDs, row.ID)
+		if row.Title == "" {
+			t.Errorf("row %s missing title", row.ID)
+		}
+		if row.UpdatedAt.IsZero() {
+			t.Errorf("row %s missing updated_at", row.ID)
+		}
+	}
+	wantIDs := []string{"child-archived", "child-cancelled", "child-completed", "child-ephemeral", "child-failed", "child-open"}
+	if len(gotIDs) != 4 {
+		t.Fatalf("active child rows = %v, want 4 active rows (excluding archived/ephemeral), all created IDs were %v", gotIDs, wantIDs)
+	}
+	for _, want := range []string{"child-cancelled", "child-completed", "child-failed", "child-open"} {
+		found := false
+		for _, got := range gotIDs {
+			if got == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("missing active child %s in %v", want, gotIDs)
+		}
+	}
+}
+
+func TestIsTerminalTaskState(t *testing.T) {
+	tests := []struct {
+		state v1.TaskState
+		want  bool
+	}{
+		{v1.TaskStateCompleted, true},
+		{v1.TaskStateFailed, true},
+		{v1.TaskStateCancelled, true},
+		{v1.TaskStateTODO, false},
+		{v1.TaskStateCreated, false},
+		{v1.TaskStateScheduling, false},
+		{v1.TaskStateInProgress, false},
+		{v1.TaskStateReview, false},
+		{v1.TaskStateBlocked, false},
+		{v1.TaskStateWaitingForInput, false},
+	}
+	for _, tt := range tests {
+		if got := IsTerminalTaskState(tt.state); got != tt.want {
+			t.Errorf("IsTerminalTaskState(%s) = %v, want %v", tt.state, got, tt.want)
+		}
 	}
 }
 

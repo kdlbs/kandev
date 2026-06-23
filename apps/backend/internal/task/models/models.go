@@ -352,6 +352,26 @@ type Task struct {
 	IsFromOffice bool `json:"is_from_office,omitempty"`
 }
 
+// ChildCompletionRow is the compact active-child projection used to decide
+// whether a parent task's on_children_completed trigger is ready to fire.
+type ChildCompletionRow struct {
+	ID        string       `json:"id" db:"id"`
+	State     v1.TaskState `json:"state" db:"state"`
+	Title     string       `json:"title" db:"title"`
+	UpdatedAt time.Time    `json:"updated_at" db:"updated_at"`
+}
+
+// IsTerminalTaskState reports whether a task state means no further child work
+// is expected from that task.
+func IsTerminalTaskState(state v1.TaskState) bool {
+	switch state {
+	case v1.TaskStateCompleted, v1.TaskStateFailed, v1.TaskStateCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
 // TaskTreeFilters provides filter options for the task tree query.
 type TaskTreeFilters struct {
 	ProjectID  string

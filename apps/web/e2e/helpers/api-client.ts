@@ -313,7 +313,7 @@ export class ApiClient {
 
   async updateTaskState(
     taskId: string,
-    state: "BACKLOG" | "IN_PROGRESS" | "REVIEW" | "COMPLETED",
+    state: "BACKLOG" | "IN_PROGRESS" | "REVIEW" | "COMPLETED" | "FAILED" | "CANCELLED",
   ): Promise<void> {
     await this.request("PATCH", `/api/v1/tasks/${taskId}`, { state });
   }
@@ -675,6 +675,13 @@ export class ApiClient {
         on_turn_start?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_exit?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_comment?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_blocker_resolved?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_children_completed?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_approval_resolved?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_heartbeat?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_budget_alert?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_agent_error?: Array<{ type: string; config?: Record<string, unknown> }>;
       };
     },
   ): Promise<void> {

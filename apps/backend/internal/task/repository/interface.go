@@ -79,6 +79,12 @@ type TaskRepository interface {
 	GetWorkspaceTaskPrefix(ctx context.Context, workspaceID string) (prefix, officeWorkflowID string, err error)
 }
 
+// IsTerminalTaskState reports whether a task state is terminal for
+// parent-child completion detection.
+func IsTerminalTaskState(state v1.TaskState) bool {
+	return models.IsTerminalTaskState(state)
+}
+
 // TaskRepoRepository handles the task↔repository junction table (models.TaskRepository rows).
 // Named TaskRepoRepository to reduce reader confusion with the TaskRepository sub-interface above.
 type TaskRepoRepository interface {

@@ -46,6 +46,40 @@ func TestCompileStep_CompilesLegacyActionsToTypedActions(t *testing.T) {
 	}
 }
 
+func TestCompileStep_CompilesGenericTransitionActions(t *testing.T) {
+	step := &wfmodels.WorkflowStep{
+		ID:         "s1",
+		WorkflowID: "wf1",
+		Name:       "Parent Wait",
+		Position:   0,
+		Events: wfmodels.StepEvents{
+			OnChildrenCompleted: []wfmodels.GenericAction{
+				{Type: wfmodels.GenericActionMoveToNext},
+				{Type: wfmodels.GenericActionMoveToStep, Config: map[string]any{"step_id": "s3"}},
+				{Type: wfmodels.GenericActionAutoStartAgent},
+			},
+		},
+	}
+
+	spec := CompileStep(step)
+	actions := spec.Events[TriggerOnChildrenCompleted]
+	if len(actions) != 3 {
+		t.Fatalf("expected 3 on_children_completed actions, got %d", len(actions))
+	}
+	if actions[0].Kind != ActionMoveToNext {
+		t.Fatalf("expected first action to move_to_next, got %s", actions[0].Kind)
+	}
+	if actions[1].Kind != ActionMoveToStep {
+		t.Fatalf("expected second action to move_to_step, got %s", actions[1].Kind)
+	}
+	if actions[1].MoveToStep == nil || actions[1].MoveToStep.StepID != "s3" {
+		t.Fatalf("expected move_to_step target s3, got %+v", actions[1].MoveToStep)
+	}
+	if actions[2].Kind != ActionAutoStartAgent {
+		t.Fatalf("expected third action to auto_start_agent, got %s", actions[2].Kind)
+	}
+}
+
 func TestCompileStep_SetSessionMode(t *testing.T) {
 	t.Run("compiles set_session_mode with mode config", func(t *testing.T) {
 		step := &wfmodels.WorkflowStep{

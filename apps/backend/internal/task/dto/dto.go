@@ -700,8 +700,17 @@ type WorkflowStepDTO struct {
 
 // StepEventsDTO represents step events for API responses
 type StepEventsDTO struct {
-	OnEnter        []StepActionDTO `json:"on_enter,omitempty"`
-	OnTurnComplete []StepActionDTO `json:"on_turn_complete,omitempty"`
+	OnEnter             []StepActionDTO `json:"on_enter,omitempty"`
+	OnTurnStart         []StepActionDTO `json:"on_turn_start,omitempty"`
+	OnTurnComplete      []StepActionDTO `json:"on_turn_complete,omitempty"`
+	OnExit              []StepActionDTO `json:"on_exit,omitempty"`
+	OnComment           []StepActionDTO `json:"on_comment,omitempty"`
+	OnBlockerResolved   []StepActionDTO `json:"on_blocker_resolved,omitempty"`
+	OnChildrenCompleted []StepActionDTO `json:"on_children_completed,omitempty"`
+	OnApprovalResolved  []StepActionDTO `json:"on_approval_resolved,omitempty"`
+	OnHeartbeat         []StepActionDTO `json:"on_heartbeat,omitempty"`
+	OnBudgetAlert       []StepActionDTO `json:"on_budget_alert,omitempty"`
+	OnAgentError        []StepActionDTO `json:"on_agent_error,omitempty"`
 }
 
 // StepActionDTO represents a step action for API responses

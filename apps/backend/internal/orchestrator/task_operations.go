@@ -2481,6 +2481,7 @@ func (s *Service) CompleteTask(ctx context.Context, taskID string) error {
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateCompleted); err != nil {
 		return fmt.Errorf("failed to update task state: %w", err)
 	}
+	s.processParentChildrenCompletedForTaskState(ctx, taskID, v1.TaskStateCompleted)
 
 	s.logger.Info("task marked as COMPLETED",
 		zap.String("task_id", taskID))

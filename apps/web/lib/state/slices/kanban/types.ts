@@ -5,6 +5,13 @@ export type KanbanStepEvents = {
   on_turn_start?: Array<{ type: string; config?: Record<string, unknown> }>;
   on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
   on_exit?: Array<{ type: string; config?: Record<string, unknown> }>;
+  on_comment?: Array<{ type: string; config?: Record<string, unknown> }>;
+  on_blocker_resolved?: Array<{ type: string; config?: Record<string, unknown> }>;
+  on_children_completed?: Array<{ type: string; config?: Record<string, unknown> }>;
+  on_approval_resolved?: Array<{ type: string; config?: Record<string, unknown> }>;
+  on_heartbeat?: Array<{ type: string; config?: Record<string, unknown> }>;
+  on_budget_alert?: Array<{ type: string; config?: Record<string, unknown> }>;
+  on_agent_error?: Array<{ type: string; config?: Record<string, unknown> }>;
 };
 
 export type KanbanState = {

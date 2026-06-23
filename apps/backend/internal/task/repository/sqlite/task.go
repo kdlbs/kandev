@@ -310,6 +310,25 @@ func (r *Repository) ListChildren(ctx context.Context, parentID string) ([]*mode
 	return r.scanTasks(rows)
 }
 
+// ListChildCompletionRows returns active direct children with the compact
+// fields needed for on_children_completed readiness and operation idempotency.
+func (r *Repository) ListChildCompletionRows(ctx context.Context, parentID string) ([]models.ChildCompletionRow, error) {
+	if parentID == "" {
+		return []models.ChildCompletionRow{}, nil
+	}
+	var rows []models.ChildCompletionRow
+	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
+		SELECT id, state, title, updated_at
+		FROM tasks
+		WHERE parent_id = ? AND archived_at IS NULL AND is_ephemeral = 0
+		ORDER BY created_at ASC, id ASC
+	`), parentID)
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // ListChildrenIncludingArchived returns every child task of parentID
 // regardless of archived state. Used by the office task-handoffs
 // unarchive cascade (phase 6) to walk a previously-archived descendant

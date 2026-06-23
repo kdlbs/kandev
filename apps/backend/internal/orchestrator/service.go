@@ -171,6 +171,7 @@ type sessionExecutorStore interface {
 	// Task
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 	UpdateTask(ctx context.Context, task *models.Task) error
+	ListChildCompletionRows(ctx context.Context, parentID string) ([]models.ChildCompletionRow, error)
 	// Git snapshots and commits
 	GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
 	CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
@@ -457,7 +458,11 @@ func NewService(
 	// (e.g. WebSocket notifications to the frontend). Must be set after service
 	// construction so the session callback can reference s.updateTaskSessionState.
 	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
-		return taskRepo.UpdateTaskState(ctx, taskID, state)
+		if err := taskRepo.UpdateTaskState(ctx, taskID, state); err != nil {
+			return err
+		}
+		s.processParentChildrenCompletedForTaskState(ctx, taskID, state)
+		return nil
 	})
 	exec.SetOnSessionStateChange(func(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error {
 		s.updateTaskSessionState(ctx, taskID, sessionID, state, errorMessage, true)
@@ -472,6 +477,7 @@ func NewService(
 	// Create the watcher with event handlers that wire everything together
 	handlers := watcher.EventHandlers{
 		OnTaskDeleted:          s.handleTaskDeleted,
+		OnTaskStateChanged:     s.handleTaskStateChanged,
 		OnAgentRunning:         s.handleAgentRunning,
 		OnAgentBootReady:       s.handleAgentBootReady,
 		OnAgentReady:           s.handleAgentReady,
