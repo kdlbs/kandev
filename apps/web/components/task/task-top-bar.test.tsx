@@ -117,6 +117,7 @@ describe("TaskTopBar GitHub issue link", () => {
     const pr = screen.getByTestId("pr-topbar-button");
 
     expect(issue.textContent).toContain("#1470");
+    expect(issue.className).toContain("h-7");
     expect(issue.compareDocumentPosition(pr) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
