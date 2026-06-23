@@ -44,4 +44,43 @@ test.describe("Desktop /github scope bar", () => {
     await scopeBar.getByRole("button", { name: "Issues" }).click();
     await expect(title).toContainText("Assigned");
   });
+
+  test("repo filter menu can be searched", async ({ testPage, apiClient }) => {
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("test-user");
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: 21,
+        title: "Searchable repo filter PR",
+        state: "open",
+        head_branch: "feat/search",
+        base_branch: "main",
+        author_login: "test-user",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+      },
+      {
+        number: 22,
+        title: "Searchable repo filter second PR",
+        state: "open",
+        head_branch: "feat/other",
+        base_branch: "main",
+        author_login: "test-user",
+        repo_owner: "anotherorg",
+        repo_name: "secondrepo",
+      },
+    ]);
+
+    await testPage.goto("/github");
+
+    await testPage.getByTestId("github-repo-filter-trigger").click();
+    const search = testPage.getByPlaceholder("Filter repositories...");
+    await expect(search).toBeVisible();
+
+    await search.fill("testorg");
+    await testPage.getByRole("option", { name: "testorg/testrepo" }).click();
+    await expect(testPage.getByTestId("github-repo-filter-trigger")).toContainText(
+      "testorg/testrepo",
+    );
+  });
 });

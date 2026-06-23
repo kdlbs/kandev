@@ -5,6 +5,8 @@ export class MobileGitHubPage {
   readonly mobileSidebar: Locator;
   readonly inlineSidebar: Locator;
   readonly toolbarTitle: Locator;
+  readonly repoFilterTrigger: Locator;
+  readonly repoSearchInput: Locator;
 
   constructor(private page: Page) {
     this.mobileMenuButton = page.getByTestId("github-mobile-menu-button");
@@ -13,6 +15,8 @@ export class MobileGitHubPage {
     // mobile, where the presets live in the hamburger sheet instead.
     this.inlineSidebar = page.getByTestId("github-presets-scope-bar");
     this.toolbarTitle = page.getByTestId("github-list-toolbar-title");
+    this.repoFilterTrigger = page.getByTestId("github-repo-filter-trigger");
+    this.repoSearchInput = page.getByPlaceholder("Filter repositories...");
   }
 
   async goto() {

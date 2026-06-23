@@ -45,4 +45,41 @@ test.describe("Mobile /github sidebar", () => {
     await expect(page.mobileSidebar).toBeHidden();
     await expect(page.toolbarTitle).toContainText("Mentions");
   });
+
+  test("repo filter menu can be searched", async ({ testPage, apiClient }) => {
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("test-user");
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: 210,
+        title: "Mobile repo search PR",
+        state: "open",
+        head_branch: "feat/mobile-search",
+        base_branch: "main",
+        author_login: "test-user",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+      },
+      {
+        number: 211,
+        title: "Mobile repo search second PR",
+        state: "open",
+        head_branch: "feat/mobile-other",
+        base_branch: "main",
+        author_login: "test-user",
+        repo_owner: "anotherorg",
+        repo_name: "secondrepo",
+      },
+    ]);
+
+    const page = new MobileGitHubPage(testPage);
+    await page.goto();
+
+    await page.repoFilterTrigger.tap();
+    await expect(page.repoSearchInput).toBeVisible();
+
+    await page.repoSearchInput.fill("testorg");
+    await testPage.getByRole("option", { name: "testorg/testrepo" }).tap();
+    await expect(page.repoFilterTrigger).toContainText("testorg/testrepo");
+  });
 });

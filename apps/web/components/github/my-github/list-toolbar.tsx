@@ -1,9 +1,10 @@
 "use client";
 
+import { useMemo } from "react";
 import { IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils";
 
@@ -57,6 +58,13 @@ function RefreshControls({
   );
 }
 
+function buildRepoFilterOptions(repoOptions: string[]): ComboboxOption[] {
+  return [
+    { value: ALL_REPOS, label: "All repos", keywords: ["all", "repositories", "repos"] },
+    ...repoOptions.map((key) => ({ value: key, label: key, keywords: [key] })),
+  ];
+}
+
 export function ListToolbar({
   title,
   count,
@@ -73,6 +81,7 @@ export function ListToolbar({
 }: ListToolbarProps) {
   const selectValue = repoFilter || ALL_REPOS;
   const dirty = customQuery !== committedQuery;
+  const repoFilterOptions = useMemo(() => buildRepoFilterOptions(repoOptions), [repoOptions]);
   return (
     <div className="px-4 sm:px-6 py-2.5 border-b shrink-0 flex flex-col md:flex-row md:items-center md:flex-wrap gap-2 md:gap-3">
       <div className="flex items-center gap-2 min-w-0">
@@ -93,24 +102,18 @@ export function ListToolbar({
           />
         </div>
       </div>
-      <Select
+      <Combobox
         value={selectValue}
-        onValueChange={(v) => onRepoFilterChange(v === ALL_REPOS ? "" : v)}
-      >
-        <SelectTrigger className="w-full md:w-[220px] h-8 cursor-pointer">
-          <SelectValue placeholder="All repos" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={ALL_REPOS} className="cursor-pointer">
-            All repos
-          </SelectItem>
-          {repoOptions.map((key) => (
-            <SelectItem key={key} value={key} className="cursor-pointer">
-              {key}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        onValueChange={(v) => onRepoFilterChange(v === ALL_REPOS || !v ? "" : v)}
+        options={repoFilterOptions}
+        placeholder="All repos"
+        searchPlaceholder="Filter repositories..."
+        emptyMessage="No repositories found."
+        triggerClassName="w-full md:w-[220px] h-8 border border-input bg-background hover:bg-secondary/50 px-2 py-1.5 text-xs/relaxed"
+        className="md:min-w-[360px]"
+        plainTrigger
+        testId="github-repo-filter-trigger"
+      />
       <div className="w-full md:flex-1 md:min-w-[240px] relative">
         <Input
           value={customQuery}
