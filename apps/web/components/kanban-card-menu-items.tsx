@@ -4,6 +4,7 @@ import { useMemo, type ReactNode } from "react";
 import {
   IconArchive,
   IconArrowRight,
+  IconCircleDot,
   IconLoader,
   IconLogicBuffer,
   IconPencil,
@@ -75,9 +76,11 @@ type BuildKanbanCardMenuEntriesArgs = {
   disabled?: boolean;
   isDeleting?: boolean;
   isArchiving?: boolean;
+  hasLinkedIssue?: boolean;
   onEdit?: () => void;
   onArchive?: () => void;
   onDelete?: () => void;
+  onLinkIssue?: () => void;
   onMoveToStep?: (stepId: string) => void;
   onSendToWorkflow?: (workflowId: string, stepId: string) => void;
 };
@@ -221,9 +224,11 @@ export function buildKanbanCardMenuEntries({
   disabled,
   isDeleting,
   isArchiving,
+  hasLinkedIssue,
   onEdit,
   onArchive,
   onDelete,
+  onLinkIssue,
   onMoveToStep,
   onSendToWorkflow,
 }: BuildKanbanCardMenuEntriesArgs): KanbanCardMenuEntry[] {
@@ -257,6 +262,16 @@ export function buildKanbanCardMenuEntries({
     onSendToWorkflow,
   });
   if (sendToEntry) entries.push(sendToEntry);
+
+  entries.push({
+    kind: "item",
+    key: "link-github-issue",
+    testId: "task-context-link-github-issue",
+    icon: <IconCircleDot className="mr-2 h-4 w-4" />,
+    label: hasLinkedIssue ? "Change GitHub issue" : "Link GitHub issue",
+    disabled: isProcessing || !onLinkIssue,
+    onSelect: onLinkIssue,
+  });
 
   entries.push({
     kind: "item",

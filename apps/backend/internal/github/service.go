@@ -78,15 +78,16 @@ type PromptResolver interface {
 
 // Service coordinates GitHub integration operations.
 type Service struct {
-	mu            sync.Mutex
-	client        Client
-	authMethod    string
-	secrets       SecretProvider
-	secretManager SecretManager
-	store         *Store
-	eventBus      bus.EventBus
-	logger        *logger.Logger
-	taskDeleter   TaskDeleter
+	mu             sync.Mutex
+	client         Client
+	authMethod     string
+	secrets        SecretProvider
+	secretManager  SecretManager
+	store          *Store
+	eventBus       bus.EventBus
+	logger         *logger.Logger
+	taskDeleter    TaskDeleter
+	taskIssueStore TaskIssueStore
 	// cascadeTaskDeleter is the cascade-delete entry point used by the
 	// watch reset flow. It is distinct from taskDeleter (which only deletes
 	// a single task by ID) because reset must walk the task tree and clean

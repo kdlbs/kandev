@@ -20,6 +20,7 @@ import type {
   UpdateIssueWatchRequest,
   TriggerIssueResponse,
   GitHubIssue,
+  TaskIssueLink,
   SearchPRsResponse,
   SearchIssuesResponse,
   GitHubPRStatus,
@@ -83,6 +84,34 @@ export async function createTaskPR(
       body: JSON.stringify(data),
     },
   });
+}
+
+export async function linkTaskIssue(
+  taskId: string,
+  data: { issue: string; owner?: string; repo?: string; number?: number },
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<TaskIssueLink>(`/api/v1/github/tasks/${encodeURIComponent(taskId)}/issue`, {
+    ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "PUT",
+      body: JSON.stringify(data),
+    },
+  });
+}
+
+export async function unlinkTaskIssue(taskId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ unlinked: boolean }>(
+    `/api/v1/github/tasks/${encodeURIComponent(taskId)}/issue`,
+    {
+      ...options,
+      init: {
+        ...(options?.init ?? {}),
+        method: "DELETE",
+      },
+    },
+  );
 }
 
 export async function getTaskCIAutomationOptions(taskId: string, options?: ApiRequestOptions) {

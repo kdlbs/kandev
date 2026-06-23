@@ -9,6 +9,8 @@ import {
   fetchIssueInfo,
   getTaskCIAutomationOptions,
   GitHubUnavailableError,
+  linkTaskIssue,
+  unlinkTaskIssue,
   updateTaskCIAutomationOptions,
   type AccessibleRepo,
 } from "./github-api";
@@ -125,6 +127,48 @@ describe("fetchIssueInfo", () => {
       "http://api.test/api/v1/github/issues/acme%20org/site%2Frepo/1456/info",
     );
     expect(call?.[1]).toMatchObject({ cache: "no-store" });
+  });
+});
+
+describe("task issue link helpers", () => {
+  it("links a GitHub issue to a task", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        task_id: "task-1",
+        owner: "kdlbs",
+        repo: "kandev",
+        issue_number: 1470,
+        issue_url: "https://github.com/kdlbs/kandev/issues/1470",
+        issue_title: "Link issue",
+      }),
+    );
+
+    await linkTaskIssue("task-1", {
+      issue: "#1470",
+      owner: "kdlbs",
+      repo: "kandev",
+      number: 1470,
+    });
+
+    const call = fetchSpy.mock.calls.at(-1);
+    expect(String(call?.[0])).toBe("http://api.test/api/v1/github/tasks/task-1/issue");
+    expect(call?.[1]?.method).toBe("PUT");
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      issue: "#1470",
+      owner: "kdlbs",
+      repo: "kandev",
+      number: 1470,
+    });
+  });
+
+  it("unlinks a GitHub issue from a task", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ unlinked: true }));
+
+    await unlinkTaskIssue("task-1");
+
+    const call = fetchSpy.mock.calls.at(-1);
+    expect(String(call?.[0])).toBe("http://api.test/api/v1/github/tasks/task-1/issue");
+    expect(call?.[1]?.method).toBe("DELETE");
   });
 });
 

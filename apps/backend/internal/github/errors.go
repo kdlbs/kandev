@@ -10,6 +10,14 @@ import (
 // into a 400 instead of a generic 500.
 var ErrInvalidPRURL = errors.New("invalid PR URL")
 
+// ErrInvalidIssueReference signals that a caller-supplied GitHub issue URL or
+// number could not be resolved to a concrete issue.
+var ErrInvalidIssueReference = errors.New("invalid GitHub issue reference")
+
+// ErrIssueRepositoryMismatch signals that the issue belongs to a repository
+// that is not attached to the target task.
+var ErrIssueRepositoryMismatch = errors.New("GitHub issue repository is not attached to task")
+
 // ErrTaskNotFound is the sentinel that cleanup paths check to distinguish
 // "the task is already gone — fine, mop up the dedup row" from a real
 // upstream failure. Adapter implementations of TaskDeleter wrap this when

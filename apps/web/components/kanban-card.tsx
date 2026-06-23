@@ -11,6 +11,7 @@ import {
 import { useAppStore } from "@/components/state-provider";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
+import { TaskGitHubIssueDialog } from "@/components/task/task-github-issue-dialog";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { getRepositoryDisplayName } from "@/lib/utils";
 import { repositoryId as toRepositoryId, type Repository, type TaskState } from "@/lib/types/http";
@@ -41,6 +42,8 @@ export interface Task {
   parentTaskId?: string | null;
   updatedAt?: string;
   createdAt?: string;
+  issueUrl?: string;
+  issueNumber?: number;
 }
 
 export interface WorkflowStep {
@@ -103,6 +106,7 @@ function useKanbanCardMenus({
   const moveTasks = useTaskWorkflowMove();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [showIssueDialog, setShowIssueDialog] = useState(false);
   const disabled = Boolean(isDeleting || isArchiving);
 
   const runMoveTasks = (taskIds: string[], workflowId: string, stepId: string) => {
@@ -139,9 +143,11 @@ function useKanbanCardMenus({
     disabled,
     isDeleting,
     isArchiving,
+    hasLinkedIssue: Boolean(task.issueUrl || task.issueNumber),
     onEdit: onEdit ? () => onEdit(task) : undefined,
     onArchive: onArchive ? () => setShowArchiveConfirm(true) : undefined,
     onDelete: onDelete ? () => setShowDeleteConfirm(true) : undefined,
+    onLinkIssue: () => setShowIssueDialog(true),
   };
 
   return {
@@ -163,7 +169,66 @@ function useKanbanCardMenus({
     setShowDeleteConfirm,
     showArchiveConfirm,
     setShowArchiveConfirm,
+    showIssueDialog,
+    setShowIssueDialog,
   };
+}
+
+function KanbanCardDialogs({
+  task,
+  repositories,
+  showDeleteConfirm,
+  setShowDeleteConfirm,
+  showArchiveConfirm,
+  setShowArchiveConfirm,
+  showIssueDialog,
+  setShowIssueDialog,
+  isDeleting,
+  isArchiving,
+  onDelete,
+  onArchive,
+}: {
+  task: Task;
+  repositories: Repository[];
+  showDeleteConfirm: boolean;
+  setShowDeleteConfirm: (open: boolean) => void;
+  showArchiveConfirm: boolean;
+  setShowArchiveConfirm: (open: boolean) => void;
+  showIssueDialog: boolean;
+  setShowIssueDialog: (open: boolean) => void;
+  isDeleting?: boolean;
+  isArchiving?: boolean;
+  onDelete?: KanbanCardProps["onDelete"];
+  onArchive?: KanbanCardProps["onArchive"];
+}) {
+  return (
+    <>
+      <TaskDeleteConfirmDialog
+        open={showDeleteConfirm}
+        onOpenChange={setShowDeleteConfirm}
+        taskTitle={task.title}
+        taskId={task.id}
+        executorType={task.primaryExecutorType}
+        isDeleting={isDeleting}
+        onConfirm={({ cascade }) => onDelete?.(task, { cascade })}
+      />
+      <TaskArchiveConfirmDialog
+        open={showArchiveConfirm}
+        onOpenChange={setShowArchiveConfirm}
+        taskTitle={task.title}
+        taskId={task.id}
+        executorType={task.primaryExecutorType}
+        isArchiving={isArchiving}
+        onConfirm={({ cascade }) => onArchive?.(task, { cascade })}
+      />
+      <TaskGitHubIssueDialog
+        open={showIssueDialog}
+        onOpenChange={setShowIssueDialog}
+        task={task}
+        repositories={repositories}
+      />
+    </>
+  );
 }
 
 export function KanbanCard({
@@ -189,6 +254,10 @@ export function KanbanCard({
     disabled: isMultiSelectMode,
   });
   const isPreviewed = useAppStore((state) => state.kanbanPreviewedTaskId === task.id);
+  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
+  const repositories = useAppStore((state) =>
+    activeWorkspaceId ? (state.repositories.itemsByWorkspaceId[activeWorkspaceId] ?? []) : [],
+  );
   const {
     dropdownMenuEntries,
     contextMenuEntries,
@@ -196,6 +265,8 @@ export function KanbanCard({
     setShowDeleteConfirm,
     showArchiveConfirm,
     setShowArchiveConfirm,
+    showIssueDialog,
+    setShowIssueDialog,
   } = useKanbanCardMenus({
     task,
     steps,
@@ -245,23 +316,19 @@ export function KanbanCard({
           onOpenFullPage={onOpenFullPage}
         />
       </KanbanCardContextMenu>
-      <TaskDeleteConfirmDialog
-        open={showDeleteConfirm}
-        onOpenChange={setShowDeleteConfirm}
-        taskTitle={task.title}
-        taskId={task.id}
-        executorType={task.primaryExecutorType}
+      <KanbanCardDialogs
+        task={task}
+        repositories={repositories}
+        showDeleteConfirm={showDeleteConfirm}
+        setShowDeleteConfirm={setShowDeleteConfirm}
+        showArchiveConfirm={showArchiveConfirm}
+        setShowArchiveConfirm={setShowArchiveConfirm}
+        showIssueDialog={showIssueDialog}
+        setShowIssueDialog={setShowIssueDialog}
         isDeleting={isDeleting}
-        onConfirm={({ cascade }) => onDelete?.(task, { cascade })}
-      />
-      <TaskArchiveConfirmDialog
-        open={showArchiveConfirm}
-        onOpenChange={setShowArchiveConfirm}
-        taskTitle={task.title}
-        taskId={task.id}
-        executorType={task.primaryExecutorType}
         isArchiving={isArchiving}
-        onConfirm={({ cascade }) => onArchive?.(task, { cascade })}
+        onDelete={onDelete}
+        onArchive={onArchive}
       />
     </>
   );

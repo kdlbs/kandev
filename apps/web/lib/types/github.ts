@@ -425,6 +425,15 @@ export type GitHubIssue = {
   closed_at: string | null;
 };
 
+export type TaskIssueLink = {
+  task_id: string;
+  owner: string;
+  repo: string;
+  issue_number: number;
+  issue_url: string;
+  issue_title: string;
+};
+
 export type SearchPRsResponse = {
   prs: GitHubPR[];
   total_count: number;

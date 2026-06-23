@@ -536,6 +536,30 @@ func (w *orchestratorWrapper) StartCreatedSession(ctx context.Context, taskID, s
 	return err
 }
 
+type githubTaskIssueStoreAdapter struct {
+	svc *taskservice.Service
+}
+
+func (a githubTaskIssueStoreAdapter) GetTask(ctx context.Context, taskID string) (*models.Task, error) {
+	return a.svc.GetTask(ctx, taskID)
+}
+
+func (a githubTaskIssueStoreAdapter) ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error) {
+	task, err := a.svc.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return task.Repositories, nil
+}
+
+func (a githubTaskIssueStoreAdapter) GetRepository(ctx context.Context, repositoryID string) (*models.Repository, error) {
+	return a.svc.GetRepository(ctx, repositoryID)
+}
+
+func (a githubTaskIssueStoreAdapter) UpdateTaskMetadata(ctx context.Context, taskID string, metadata map[string]interface{}) (*models.Task, error) {
+	return a.svc.UpdateTask(ctx, taskID, &taskservice.UpdateTaskRequest{Metadata: metadata})
+}
+
 // ProcessOnTurnStart forwards to the orchestrator service.
 func (w *orchestratorWrapper) ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error {
 	return w.svc.ProcessOnTurnStart(ctx, taskID, sessionID)
