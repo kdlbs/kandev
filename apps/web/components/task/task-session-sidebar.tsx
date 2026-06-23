@@ -607,9 +607,10 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     handleLinkPullRequestTask,
     handleLinkIssueTask,
   } = sidebarActions;
-  const repositories = useAppStore((state) =>
-    workspaceId ? (state.repositories.itemsByWorkspaceId[workspaceId] ?? []) : [],
-  );
+  const repositories =
+    useAppStore((state) =>
+      workspaceId ? state.repositories.itemsByWorkspaceId[workspaceId] : undefined,
+    ) ?? [];
 
   const displayTasks = useMemo(() => {
     if (MOCK_SIDEBAR) return MOCK_ITEMS;

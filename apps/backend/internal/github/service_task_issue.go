@@ -16,7 +16,6 @@ const (
 	taskMetaIssueOwner    = "issue_owner"
 	taskMetaIssueRepo     = "issue_repo"
 	taskMetaIssueLinked   = "github_issue_linked"
-	taskMetaIssueWatchID  = "issue_watch_id"
 	githubProviderName    = "github"
 	githubIssuePathMarker = "/issues/"
 )
@@ -65,7 +64,7 @@ func (s *Service) LinkTaskIssue(ctx context.Context, taskID string, req LinkTask
 	}
 	store := s.getTaskIssueStore()
 	if store == nil {
-		return nil, fmt.Errorf("task issue store is not configured")
+		return nil, errStoreUnavailable
 	}
 	owner, repo, number, err := resolveIssueReference(req)
 	if err != nil {
@@ -88,7 +87,7 @@ func (s *Service) LinkTaskIssue(ctx context.Context, taskID string, req LinkTask
 	metadata[taskMetaIssueOwner] = issue.RepoOwner
 	metadata[taskMetaIssueRepo] = issue.RepoName
 	metadata[taskMetaIssueLinked] = true
-	if _, err := store.UpdateTaskMetadata(ctx, taskID, metadata); err != nil {
+	if _, err := store.UpdateTaskMetadata(context.WithoutCancel(ctx), taskID, metadata); err != nil {
 		return nil, err
 	}
 	return taskIssueResponse(taskID, issue), nil
@@ -97,7 +96,7 @@ func (s *Service) LinkTaskIssue(ctx context.Context, taskID string, req LinkTask
 func (s *Service) UnlinkTaskIssue(ctx context.Context, taskID string) error {
 	store := s.getTaskIssueStore()
 	if store == nil {
-		return fmt.Errorf("task issue store is not configured")
+		return errStoreUnavailable
 	}
 	task, err := store.GetTask(ctx, taskID)
 	if err != nil {
@@ -109,7 +108,7 @@ func (s *Service) UnlinkTaskIssue(ctx context.Context, taskID string) error {
 	delete(metadata, taskMetaIssueOwner)
 	delete(metadata, taskMetaIssueRepo)
 	delete(metadata, taskMetaIssueLinked)
-	_, err = store.UpdateTaskMetadata(ctx, taskID, metadata)
+	_, err = store.UpdateTaskMetadata(context.WithoutCancel(ctx), taskID, metadata)
 	return err
 }
 
@@ -163,7 +162,10 @@ func (s *Service) validateIssueTaskRepository(ctx context.Context, store TaskIss
 	}
 	for _, taskRepo := range taskRepos {
 		entity, err := store.GetRepository(ctx, taskRepo.RepositoryID)
-		if err != nil || entity == nil {
+		if err != nil {
+			return err
+		}
+		if entity == nil {
 			continue
 		}
 		if strings.EqualFold(entity.Provider, githubProviderName) &&

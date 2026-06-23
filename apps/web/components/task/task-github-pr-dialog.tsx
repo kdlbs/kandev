@@ -15,92 +15,18 @@ import { Label } from "@kandev/ui/label";
 import { useToast } from "@/components/toast-provider";
 import { createTaskPR } from "@/lib/api/domains/github-api";
 import type { Repository } from "@/lib/types/http";
-
-type TaskPullRequest = {
-  id: string;
-  title: string;
-  repositoryId?: string;
-  repositories?: Array<{ id?: string; repository_id: string }>;
-};
-
-type GitHubRepoRef = {
-  owner: string;
-  repo: string;
-  taskRepositoryId?: string;
-};
+import {
+  githubReposForTask,
+  pullRequestPayload,
+  type TaskPullRequestLinkTarget,
+} from "./task-github-pr-url";
 
 type TaskGitHubPRDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  task: TaskPullRequest;
+  task: TaskPullRequestLinkTarget;
   repositories: Repository[];
 };
-
-type ParsedPullRequestURL = {
-  owner: string;
-  repo: string;
-  number: number;
-  url: string;
-};
-
-function githubReposForTask(task: TaskPullRequest, repositories: Repository[]): GitHubRepoRef[] {
-  const taskRepoIdsByRepoId = new Map<string, string | undefined>();
-  for (const repo of task.repositories ?? []) {
-    taskRepoIdsByRepoId.set(repo.repository_id, repo.id);
-  }
-  if (task.repositoryId && !taskRepoIdsByRepoId.has(task.repositoryId)) {
-    taskRepoIdsByRepoId.set(task.repositoryId, undefined);
-  }
-
-  return repositories
-    .filter((repo) => taskRepoIdsByRepoId.has(repo.id) && repo.provider === "github")
-    .map((repo) => ({
-      owner: repo.provider_owner,
-      repo: repo.provider_name,
-      taskRepositoryId: taskRepoIdsByRepoId.get(repo.id),
-    }))
-    .filter((repo) => repo.owner && repo.repo);
-}
-
-function parseGitHubPullRequestURL(input: string): ParsedPullRequestURL | null {
-  const match = input
-    .trim()
-    .match(/^(?:https?:\/\/)?github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)(?:[/?#].*)?$/i);
-  if (!match) return null;
-  const [, owner, repo, number] = match;
-  return {
-    owner,
-    repo,
-    number: Number(number),
-    url: `https://github.com/${owner}/${repo}/pull/${number}`,
-  };
-}
-
-function pullRequestPayload(input: string, githubRepos: GitHubRepoRef[]) {
-  const trimmed = input.trim();
-  const inferredRepo = /^#?\d+$/.test(trimmed) && githubRepos.length === 1 ? githubRepos[0] : null;
-  if (inferredRepo) {
-    const number = trimmed.replace(/^#/, "");
-    return {
-      pr_url: `https://github.com/${inferredRepo.owner}/${inferredRepo.repo}/pull/${number}`,
-      repository_id: inferredRepo.taskRepositoryId,
-    };
-  }
-
-  const parsed = parseGitHubPullRequestURL(trimmed);
-  const matchingRepo = parsed
-    ? githubRepos.find(
-        (repo) =>
-          repo.owner.toLowerCase() === parsed.owner.toLowerCase() &&
-          repo.repo.toLowerCase() === parsed.repo.toLowerCase(),
-      )
-    : null;
-
-  return {
-    pr_url: parsed?.url ?? trimmed,
-    repository_id: matchingRepo?.taskRepositoryId,
-  };
-}
 
 export function TaskGitHubPRDialog({
   open,

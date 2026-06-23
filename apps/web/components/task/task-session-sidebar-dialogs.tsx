@@ -6,16 +6,10 @@ import { TaskDeleteConfirmDialog } from "./task-delete-confirm-dialog";
 import { TaskGitHubIssueDialog } from "./task-github-issue-dialog";
 import { TaskGitHubPRDialog } from "./task-github-pr-dialog";
 import type { Repository } from "@/lib/types/http";
+import type { SidebarLinkTarget } from "./task-session-sidebar-link-actions";
 
 type Target = { id: string; title: string; executorType?: string | null } | null;
-type LinkTarget = {
-  id: string;
-  title: string;
-  repositoryId?: string;
-  issueUrl?: string;
-  issueNumber?: number;
-  repositories?: Array<{ id?: string; repository_id: string; position?: number }>;
-} | null;
+type LinkTarget = SidebarLinkTarget | null;
 
 export type SidebarDialogsActions = {
   renamingTask: Target;
@@ -95,7 +89,7 @@ export function SidebarDialogs({
       />
       {linkingPullRequestTask && (
         <TaskGitHubPRDialog
-          open={linkingPullRequestTask !== null}
+          open={true}
           onOpenChange={(open) => {
             if (!open) setLinkingPullRequestTask(null);
           }}
@@ -105,7 +99,7 @@ export function SidebarDialogs({
       )}
       {linkingIssueTask && (
         <TaskGitHubIssueDialog
-          open={linkingIssueTask !== null}
+          open={true}
           onOpenChange={(open) => {
             if (!open) setLinkingIssueTask(null);
           }}

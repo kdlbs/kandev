@@ -236,17 +236,28 @@ func (c *Controller) handleTaskIssueLinkError(ctx *gin.Context, err error) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	case errors.Is(err, ErrIssueRepositoryMismatch):
 		ctx.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+	case errors.Is(err, errStoreUnavailable):
+		c.logger.Error("task issue store unavailable", zap.Error(err))
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "GitHub task issue linking is not available"})
+	case isTaskIssueTaskNotFound(err):
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
 	default:
 		var apiErr *GitHubAPIError
 		if errors.As(err, &apiErr) {
 			switch apiErr.StatusCode {
 			case http.StatusNotFound, http.StatusUnauthorized, http.StatusForbidden:
-				ctx.JSON(apiErr.StatusCode, gin.H{"error": err.Error()})
+				c.logger.Debug("GitHub issue fetch failed", zap.Int("status", apiErr.StatusCode), zap.Error(err))
+				ctx.JSON(apiErr.StatusCode, gin.H{"error": "failed to fetch GitHub issue"})
 				return
 			}
 		}
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.logger.Error("task issue link request failed", zap.Error(err))
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to link GitHub issue"})
 	}
+}
+
+func isTaskIssueTaskNotFound(err error) bool {
+	return errors.Is(err, ErrTaskNotFound) || strings.Contains(strings.ToLower(err.Error()), "task not found")
 }
 
 func (c *Controller) httpGetTaskCIOptions(ctx *gin.Context) {

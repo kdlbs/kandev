@@ -161,7 +161,12 @@ export function TaskGitHubIssueDialog({
   const [input, setInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const currentLabel = task.issueNumber ? `#${task.issueNumber}` : null;
+  let currentLabel: string | null = null;
+  if (task.issueNumber) {
+    currentLabel = `#${task.issueNumber}`;
+  } else if (task.issueUrl) {
+    currentLabel = "Linked issue";
+  }
   const githubRepos = useMemo(() => githubReposForTask(task, repositories), [task, repositories]);
   const inferredRepo = githubRepos.length === 1 ? githubRepos[0] : null;
 

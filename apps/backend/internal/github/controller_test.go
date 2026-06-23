@@ -18,6 +18,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
 // stubClient implements Client with no-op defaults; override fields as needed.
@@ -175,6 +176,218 @@ func setupControllerStoreTest(t *testing.T) (*gin.Engine, *Store) {
 	router := gin.New()
 	ctrl.RegisterHTTPRoutes(router)
 	return router, store
+}
+
+func TestHttpLinkTaskIssue_SuccessAndInvalidJSON(t *testing.T) {
+	router, ctrl := setupControllerTest(&stubClient{
+		getIssueFunc: func(_ context.Context, owner, repo string, number int) (*Issue, error) {
+			return &Issue{
+				Number:    number,
+				Title:     "Link existing task",
+				HTMLURL:   fmt.Sprintf("https://github.com/%s/%s/issues/%d", owner, repo, number),
+				RepoOwner: owner,
+				RepoName:  repo,
+			}, nil
+		},
+	})
+	ctrl.service.SetTaskIssueStore(&fakeTaskIssueStore{
+		task:  &taskmodels.Task{ID: "task-1", Metadata: map[string]interface{}{"keep": "me"}},
+		repos: []*taskmodels.TaskRepository{{RepositoryID: "repo-1"}},
+		entities: map[string]*taskmodels.Repository{
+			"repo-1": {ID: "repo-1", Provider: "github", ProviderOwner: "kdlbs", ProviderName: "kandev"},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/github/tasks/task-1/issue", bytes.NewBufferString(`{"issue":`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected invalid JSON status 400, got %d: %s", w.Code, w.Body.String())
+	}
+	assertJSONError(t, w.Body.Bytes(), "invalid payload")
+
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/github/tasks/task-1/issue", bytes.NewBufferString(`{"issue":"https://github.com/kdlbs/kandev/issues/1470"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected link status 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var got TaskIssueLinkResponse
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.TaskID != "task-1" || got.Owner != "kdlbs" || got.Repo != "kandev" || got.IssueNumber != 1470 {
+		t.Fatalf("unexpected response: %+v", got)
+	}
+}
+
+func TestHttpUnlinkTaskIssue_Success(t *testing.T) {
+	router, ctrl := setupControllerTest(&stubClient{})
+	store := &fakeTaskIssueStore{
+		task: &taskmodels.Task{ID: "task-1", Metadata: map[string]interface{}{
+			taskMetaIssueURL:    "https://github.com/kdlbs/kandev/issues/1470",
+			taskMetaIssueNumber: 1470,
+			"keep":              "me",
+		}},
+	}
+	ctrl.service.SetTaskIssueStore(store)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/github/tasks/task-1/issue", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected unlink status 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var got map[string]bool
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !got["unlinked"] {
+		t.Fatalf("unexpected response: %+v", got)
+	}
+	if _, ok := store.updated[taskMetaIssueURL]; ok {
+		t.Fatalf("issue metadata should be removed: %+v", store.updated)
+	}
+}
+
+func TestHttpLinkTaskIssue_ErrorMapping(t *testing.T) {
+	tests := []struct {
+		name       string
+		client     Client
+		store      TaskIssueStore
+		body       string
+		wantStatus int
+		wantError  string
+		wantCode   string
+	}{
+		{
+			name:       "no client",
+			client:     nil,
+			store:      &fakeTaskIssueStore{},
+			body:       `{"issue":"https://github.com/kdlbs/kandev/issues/1470"}`,
+			wantStatus: http.StatusServiceUnavailable,
+			wantError:  "GitHub is not configured. Connect GitHub in Settings > Integrations.",
+			wantCode:   "github_not_configured",
+		},
+		{
+			name:       "store unavailable",
+			client:     &stubClient{},
+			body:       `{"issue":"https://github.com/kdlbs/kandev/issues/1470"}`,
+			wantStatus: http.StatusServiceUnavailable,
+			wantError:  "GitHub task issue linking is not available",
+		},
+		{
+			name:       "invalid reference",
+			client:     &stubClient{},
+			store:      &fakeTaskIssueStore{},
+			body:       `{"issue":"#1470"}`,
+			wantStatus: http.StatusBadRequest,
+			wantError:  "invalid GitHub issue reference: owner and repo are required for issue numbers",
+		},
+		{
+			name: "repository mismatch",
+			client: &stubClient{getIssueFunc: func(context.Context, string, string, int) (*Issue, error) {
+				return &Issue{Number: 1, HTMLURL: "https://github.com/other/repo/issues/1", RepoOwner: "other", RepoName: "repo"}, nil
+			}},
+			store: &fakeTaskIssueStore{
+				task:  &taskmodels.Task{ID: "task-1", Metadata: map[string]interface{}{}},
+				repos: []*taskmodels.TaskRepository{{RepositoryID: "repo-1"}},
+				entities: map[string]*taskmodels.Repository{
+					"repo-1": {ID: "repo-1", Provider: "github", ProviderOwner: "kdlbs", ProviderName: "kandev"},
+				},
+			},
+			body:       `{"issue":"https://github.com/other/repo/issues/1"}`,
+			wantStatus: http.StatusUnprocessableEntity,
+			wantError:  "GitHub issue repository is not attached to task",
+		},
+		{
+			name: "upstream not found",
+			client: &stubClient{getIssueFunc: func(context.Context, string, string, int) (*Issue, error) {
+				return nil, &GitHubAPIError{StatusCode: http.StatusNotFound, Endpoint: "/repos/kdlbs/kandev/issues/1470", Body: "private detail"}
+			}},
+			store:      &fakeTaskIssueStore{},
+			body:       `{"issue":"https://github.com/kdlbs/kandev/issues/1470"}`,
+			wantStatus: http.StatusNotFound,
+			wantError:  "failed to fetch GitHub issue",
+		},
+		{
+			name: "upstream unauthorized",
+			client: &stubClient{getIssueFunc: func(context.Context, string, string, int) (*Issue, error) {
+				return nil, &GitHubAPIError{StatusCode: http.StatusUnauthorized, Endpoint: "/repos/kdlbs/kandev/issues/1470", Body: "private detail"}
+			}},
+			store:      &fakeTaskIssueStore{},
+			body:       `{"issue":"https://github.com/kdlbs/kandev/issues/1470"}`,
+			wantStatus: http.StatusUnauthorized,
+			wantError:  "failed to fetch GitHub issue",
+		},
+		{
+			name: "upstream forbidden",
+			client: &stubClient{getIssueFunc: func(context.Context, string, string, int) (*Issue, error) {
+				return nil, &GitHubAPIError{StatusCode: http.StatusForbidden, Endpoint: "/repos/kdlbs/kandev/issues/1470", Body: "private detail"}
+			}},
+			store:      &fakeTaskIssueStore{},
+			body:       `{"issue":"https://github.com/kdlbs/kandev/issues/1470"}`,
+			wantStatus: http.StatusForbidden,
+			wantError:  "failed to fetch GitHub issue",
+		},
+		{
+			name: "task not found",
+			client: &stubClient{getIssueFunc: func(context.Context, string, string, int) (*Issue, error) {
+				return &Issue{Number: 1470, HTMLURL: "https://github.com/kdlbs/kandev/issues/1470", RepoOwner: "kdlbs", RepoName: "kandev"}, nil
+			}},
+			store:      &fakeTaskIssueStore{},
+			body:       `{"issue":"https://github.com/kdlbs/kandev/issues/1470"}`,
+			wantStatus: http.StatusNotFound,
+			wantError:  "task not found",
+		},
+		{
+			name: "default error",
+			client: &stubClient{getIssueFunc: func(context.Context, string, string, int) (*Issue, error) {
+				return &Issue{Number: 1470, HTMLURL: "https://github.com/kdlbs/kandev/issues/1470", RepoOwner: "kdlbs", RepoName: "kandev"}, nil
+			}},
+			store: &fakeTaskIssueStore{
+				task:      &taskmodels.Task{ID: "task-1", Metadata: map[string]interface{}{}},
+				updateErr: errors.New("database unavailable"),
+			},
+			body:       `{"issue":"https://github.com/kdlbs/kandev/issues/1470"}`,
+			wantStatus: http.StatusInternalServerError,
+			wantError:  "failed to link GitHub issue",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			router, ctrl := setupControllerTest(tt.client)
+			if tt.store != nil {
+				ctrl.service.SetTaskIssueStore(tt.store)
+			}
+			req := httptest.NewRequest(http.MethodPut, "/api/v1/github/tasks/task-1/issue", bytes.NewBufferString(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			if w.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d: %s", w.Code, tt.wantStatus, w.Body.String())
+			}
+			got := assertJSONError(t, w.Body.Bytes(), tt.wantError)
+			if tt.wantCode != "" && got["code"] != tt.wantCode {
+				t.Fatalf("code = %v, want %s; body=%+v", got["code"], tt.wantCode, got)
+			}
+		})
+	}
+}
+
+func assertJSONError(t *testing.T, body []byte, want string) map[string]string {
+	t.Helper()
+	var got map[string]string
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode error body: %v; body=%s", err, string(body))
+	}
+	if got["error"] != want {
+		t.Fatalf("error = %q, want %q; body=%+v", got["error"], want, got)
+	}
+	return got
 }
 
 func TestHttpTaskCIOptions_DefaultAndPatch(t *testing.T) {
