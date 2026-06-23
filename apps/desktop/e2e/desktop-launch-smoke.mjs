@@ -113,7 +113,11 @@ async function runFakeRuntime(stateDir, args) {
   const server = createServer(async (req, res) => {
     if (req.url === "/health") {
       await writeFile(join(stateDir, "health-requested"), "1");
-      res.writeHead(200, { "content-type": "application/json" });
+      const headers = { "content-type": "application/json" };
+      if (process.env.KANDEV_DESKTOP_HEALTH_TOKEN) {
+        headers["x-kandev-desktop-health-token"] = process.env.KANDEV_DESKTOP_HEALTH_TOKEN;
+      }
+      res.writeHead(200, headers);
       res.end('{"status":"ok"}');
       return;
     }
