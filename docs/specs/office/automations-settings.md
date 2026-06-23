@@ -61,6 +61,7 @@ trigger fires
   → record AutomationRun (status=task_created, task_id set)
   → associate PR if github_pr trigger
   → if mode==run OR step.auto_start_agent: StartTask
+  → for mode==run: agent terminal turn outcome marks AutomationRun succeeded/failed and tears down the execution/worktree
 ```
 
 ## Permissions
@@ -72,7 +73,9 @@ Inherits PR #406's model (no per-action authorization gates). The flat `/setting
 | Dependency / invariant | Behavior |
 |---|---|
 | `listWorkspaces` fails on the flat page | Page renders the empty state (treating "couldn't load" as "no workspaces"). |
-| Run-mode automation's task starts but agent fails | AutomationRun stays at `task_created` status; task error_message reflects the failure. User sees the failed AutomationRun row. |
+| Run-mode automation's task starts but agent fails | AutomationRun transitions from `task_created` to `failed`; the row surfaces the failure instead of remaining "Running". |
+| Run-mode automation's agent completes its turn successfully | AutomationRun transitions from `task_created` to `succeeded`; the agent execution and ephemeral worktree are torn down. |
+| Run-mode automation's turn is cancelled by the user | AutomationRun transitions from `task_created` to `failed` with a cancellation error; the hidden session is marked `CANCELLED` and the agent execution is torn down. |
 | User manually drags a run-mode task on the kanban | Cannot happen — ephemeral tasks are hidden from the kanban. The "auto-start" rule fires once at trigger time; no manual recovery path. |
 | Existing automation upgraded from pre-execution_mode version | Migration sets `execution_mode = 'task'` for all existing rows. UI shows them with "Task" badge. |
 | User edits `execution_mode` from `task` to `run` on an enabled automation | Next firing uses the new mode. In-flight runs are unaffected. |
@@ -85,6 +88,7 @@ Inherits PR #406's model (no per-action authorization gates). The flat `/setting
 
 - **GIVEN** a user creates an automation with `execution_mode = "task"` and a cron trigger, **WHEN** the cron fires, **THEN** a normal kanban task appears with the rendered title; the user can click it, drag it, comment on it.
 - **GIVEN** a user creates an automation with `execution_mode = "run"` and a cron trigger, **WHEN** the cron fires, **THEN** an ephemeral task is created (not visible on the kanban), the agent starts automatically, and the AutomationRun row in the automation's history shows the result.
+- **GIVEN** a run-mode automation agent finishes a turn with `stop_reason = "end_turn"`, **WHEN** the complete event is handled, **THEN** the AutomationRun row is marked `succeeded` and the agent execution is stopped instead of waiting for process exit.
 - **GIVEN** a user opens `/settings/automations` in an install with one workspace, **WHEN** the page loads, **THEN** the browser redirects to `/settings/workspace/<id>/automations`.
 - **GIVEN** a user opens `/settings/automations` in an install with three workspaces, **WHEN** the page loads, **THEN** a workspace picker is shown; clicking one navigates to its automations.
 - **GIVEN** a user opens `/settings/automations` in a fresh install with zero workspaces, **WHEN** the page loads, **THEN** an empty-state card explains "create a workspace first" with a CTA.

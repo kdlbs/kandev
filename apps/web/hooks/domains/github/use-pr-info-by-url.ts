@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchPRInfo } from "@/lib/api/domains/github-api";
+import { fetchIssueInfo, fetchPRInfo } from "@/lib/api/domains/github-api";
 import { parseGitHubRepoUrl } from "@/lib/github/parse-url";
 
 /**
@@ -27,9 +27,10 @@ import { parseGitHubRepoUrl } from "@/lib/github/parse-url";
  */
 
 export type PRInfo = {
-  prHeadBranch: string;
-  prBaseBranch: string;
-  prNumber: number;
+  prHeadBranch?: string;
+  prBaseBranch?: string;
+  prNumber?: number;
+  issueNumber?: number;
   suggestedTitle: string;
 };
 
@@ -60,14 +61,30 @@ export function parseGitHubPrUrl(
   return { owner: prMatch[1], repo: prMatch[2], prNumber: parseInt(prMatch[3], 10) };
 }
 
-/** Parse a GitHub URL as either a PR URL or a plain repo URL. Re-exported
+/** Parse a GitHub URL and return the owner/repo/issueNumber when it's an
+ * issue URL. Returns null for PR URLs, plain repos, invalid input. */
+export function parseGitHubIssueUrl(
+  url: string,
+): { owner: string; repo: string; issueNumber: number } | null {
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  const issueMatch = trimmed.match(
+    /^(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/issues\/(\d+)(?:[/?#].*)?$/,
+  );
+  if (!issueMatch) return null;
+  return { owner: issueMatch[1], repo: issueMatch[2], issueNumber: parseInt(issueMatch[3], 10) };
+}
+
+/** Parse a GitHub URL as a PR URL, issue URL, or plain repo URL. Re-exported
  * so the legacy `parseGitHubUrl` shape (used elsewhere in the dialog code)
  * has a single canonical implementation. */
 export function parseGitHubAnyUrl(
   url: string,
-): { owner: string; repo: string; prNumber?: number } | null {
+): { owner: string; repo: string; prNumber?: number; issueNumber?: number } | null {
   const pr = parseGitHubPrUrl(url);
   if (pr) return pr;
+  const issue = parseGitHubIssueUrl(url);
+  if (issue) return issue;
   return parseGitHubRepoUrl(url);
 }
 
@@ -83,6 +100,15 @@ type Refs = {
 };
 
 type SetState = React.Dispatch<React.SetStateAction<Record<string, URLState>>>;
+
+type SuccessArgs<T> = {
+  refs: Refs;
+  setState: SetState;
+  url: string;
+  seq: number;
+  value: T;
+  buildInfo: (value: T) => PRInfo;
+};
 
 /** Marks the entry as loading=true (preserving any prior info) and bumps the
  *  per-URL sequence counter. */
@@ -103,24 +129,13 @@ function initRequest(
   return { seq, signal: controller.signal };
 }
 
-/** Writes the successful PR info when the request is still current. */
-function handleSuccess(
-  refs: Refs,
-  setState: SetState,
-  url: string,
-  seq: number,
-  pr: Awaited<ReturnType<typeof fetchPRInfo>>,
-): void {
+/** Writes successful GitHub URL info when the request is still current. */
+function handleSuccess<T>(args: SuccessArgs<T>): void {
+  const { refs, setState, url, seq, value, buildInfo } = args;
   if (!refs.mountedRef.current) return;
   if (refs.seqRef.current.get(url) !== seq) return;
   refs.loadedRef.current.add(url);
-  const info: PRInfo = {
-    prHeadBranch: pr.head_branch,
-    prBaseBranch: pr.base_branch,
-    prNumber: pr.number,
-    suggestedTitle: `PR #${pr.number}: ${pr.title}`,
-  };
-  setState((prev) => ({ ...prev, [url]: { info, loading: false } }));
+  setState((prev) => ({ ...prev, [url]: { info: buildInfo(value), loading: false } }));
 }
 
 /** Marks loaded on failure (we don't want to retry in a tight loop) and
@@ -140,6 +155,57 @@ function finalizeRequest(refs: Refs, url: string, seq: number): void {
   if (refs.seqRef.current.get(url) !== seq) return;
   refs.inFlightRef.current.delete(url);
   refs.abortersRef.current.delete(url);
+}
+
+function runGitHubInfoRequest(args: {
+  refs: Refs;
+  setState: SetState;
+  url: string;
+  seq: number;
+  signal: AbortSignal;
+  pr: NonNullable<ReturnType<typeof parseGitHubPrUrl>> | null;
+  issue: ReturnType<typeof parseGitHubIssueUrl>;
+}): void {
+  const { refs, setState, url, seq, signal, pr, issue } = args;
+  let request: Promise<void>;
+  if (pr) {
+    request = fetchPRInfo(pr.owner, pr.repo, pr.prNumber, { init: { signal } }).then((res) =>
+      handleSuccess({
+        refs,
+        setState,
+        url,
+        seq,
+        value: res,
+        buildInfo: (value) => ({
+          prHeadBranch: value.head_branch,
+          prBaseBranch: value.base_branch,
+          prNumber: value.number,
+          suggestedTitle: `PR #${value.number}: ${value.title}`,
+        }),
+      }),
+    );
+  } else if (issue) {
+    request = fetchIssueInfo(issue.owner, issue.repo, issue.issueNumber, {
+      init: { signal },
+    }).then((res) =>
+      handleSuccess({
+        refs,
+        setState,
+        url,
+        seq,
+        value: res,
+        buildInfo: (value) => ({
+          issueNumber: value.number,
+          suggestedTitle: `Issue #${value.number}: ${value.title}`,
+        }),
+      }),
+    );
+  } else {
+    return;
+  }
+  request
+    .catch(() => handleFailure(refs, setState, url, seq))
+    .finally(() => finalizeRequest(refs, url, seq));
 }
 
 export function usePRInfoByURL(): UsePRInfoByURLResult {
@@ -184,8 +250,9 @@ export function usePRInfoByURL(): UsePRInfoByURLResult {
     const url = rawUrl.trim();
     if (!url) return;
     if (inFlightRef.current.has(url) || loadedRef.current.has(url)) return;
-    const parsed = parseGitHubPrUrl(url);
-    if (!parsed) {
+    const pr = parseGitHubPrUrl(url);
+    const issue = pr ? null : parseGitHubIssueUrl(url);
+    if (!pr && !issue) {
       // Non-PR URLs (plain repo, invalid) are recorded as "loaded with no
       // info" so subsequent ensure() calls for the same URL no-op instead
       // of re-parsing on every call.
@@ -194,10 +261,7 @@ export function usePRInfoByURL(): UsePRInfoByURLResult {
     }
     const refs = refsRef.current;
     const { seq, signal } = initRequest(refs, setState, url);
-    fetchPRInfo(parsed.owner, parsed.repo, parsed.prNumber, { init: { signal } })
-      .then((pr) => handleSuccess(refs, setState, url, seq, pr))
-      .catch(() => handleFailure(refs, setState, url, seq))
-      .finally(() => finalizeRequest(refs, url, seq));
+    runGitHubInfoRequest({ refs, setState, url, seq, signal, pr, issue });
   }, []);
 
   const info = useCallback(

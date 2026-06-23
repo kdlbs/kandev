@@ -695,6 +695,39 @@ export class SessionPage {
   }
 
   /**
+   * Desktop chip hover popover content. The chip's Popover renders PRCIPopover
+   * (test id `pr-topbar-popover-inner`) directly, without the topbar's
+   * `pr-topbar-popover` wrapper, so this is the chip-scoped accessor for the
+   * open hover card.
+   */
+  prChipPopover(): Locator {
+    // Scope to the visible instance: dock/mobile layouts can leave stale or
+    // hidden popover mounts in the DOM, and an unscoped getByTestId would bind
+    // to one of those and make hover assertions flaky.
+    return this.page.locator("[data-testid='pr-topbar-popover-inner']:visible").first();
+  }
+
+  /**
+   * Open the chip's hover popover by hovering the chat-status-bar CI chip.
+   * Mirrors {@link hoverPRTopbar}: moves the real cursor onto the chip and
+   * also dispatches the hover events so the open is reliable across browsers.
+   */
+  async hoverPRChip(): Promise<void> {
+    await expect(async () => {
+      const chip = this.prStatusChip();
+      await chip.scrollIntoViewIfNeeded();
+      const box = await chip.boundingBox();
+      expect(box).not.toBeNull();
+      await this.page.mouse.move(0, 0);
+      await this.page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+      await chip.dispatchEvent("mouseover", { bubbles: true });
+      await chip.dispatchEvent("mouseenter", { bubbles: false });
+      await chip.dispatchEvent("mousemove", { bubbles: true });
+      await expect(this.prChipPopover()).toBeVisible({ timeout: 1_500 });
+    }).toPass({ timeout: 10_000 });
+  }
+
+  /**
    * Assert the `pr-detail` panel's dockview group contains at least one
    * `session:{sessionId}` panel — i.e. the PR opened as a tab next to a
    * session chat, not as a split in a separate group. Regression guard for

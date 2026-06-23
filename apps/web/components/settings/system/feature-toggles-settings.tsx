@@ -2,6 +2,7 @@
 
 import {
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -12,6 +13,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
+import { Spinner } from "@kandev/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconInfoCircle, IconPower, IconRotateClockwise } from "@tabler/icons-react";
 import { useToast } from "@/components/toast-provider";
@@ -27,32 +29,50 @@ type Props = {
   restartCapability: RestartCapability | null;
 };
 
+let bootstrapRuntimeFlagsRequest: ReturnType<typeof fetchRuntimeFlags> | null = null;
+
 export function FeatureTogglesSettings({ initialFlags, restartCapability }: Props) {
   const [flags, setFlags] = useState(initialFlags);
+  const [isLoadingFlags, setIsLoadingFlags] = useState(initialFlags.length === 0);
   const [savingKeys, setSavingKeys] = useState<Set<string>>(() => new Set());
   const requestSeqRef = useRef(0);
+  const attemptedEmptyInitialReloadRef = useRef(false);
   const { toast } = useToast();
   const pendingRestart = useMemo(
     () => flags.some((flag) => flag.requires_restart_to_apply),
     [flags],
   );
 
-  const reload = useCallback(async () => {
-    const seq = nextRequestSeq(requestSeqRef);
-    try {
-      const res = await fetchRuntimeFlags();
-      setFlagsIfLatest(requestSeqRef, seq, res.flags, setFlags);
-    } catch (err) {
-      toast({
-        title: "Failed to load feature toggles",
-        description: errorMessage(err),
-        variant: "error",
-      });
-    }
-  }, [toast]);
+  const reload = useCallback(
+    async (options?: { bootstrap?: boolean }) => {
+      const seq = nextRequestSeq(requestSeqRef);
+      setIsLoadingFlags(true);
+      try {
+        const res = await fetchRuntimeFlagsForReload(options?.bootstrap === true);
+        setFlagsIfLatest(requestSeqRef, seq, res.flags, setFlags);
+      } catch (err) {
+        toast({
+          title: "Failed to load feature toggles",
+          description: errorMessage(err),
+          variant: "error",
+        });
+      } finally {
+        if (seq === requestSeqRef.current) {
+          setIsLoadingFlags(false);
+        }
+      }
+    },
+    [toast],
+  );
 
   const onRestartComplete = useCallback(() => void reload(), [reload]);
   const restart = useKandevRestart({ onComplete: onRestartComplete });
+
+  useEffect(() => {
+    if (flags.length > 0 || attemptedEmptyInitialReloadRef.current) return;
+    attemptedEmptyInitialReloadRef.current = true;
+    void reload({ bootstrap: true });
+  }, [flags.length, reload]);
 
   const setOverride = async (flag: RuntimeFlagState, override: boolean | null) => {
     const seq = nextRequestSeq(requestSeqRef);
@@ -99,18 +119,7 @@ export function FeatureTogglesSettings({ initialFlags, restartCapability }: Prop
         />
       ))}
       {flags.length === 0 && (
-        <Card>
-          <CardContent className="py-6 text-sm text-muted-foreground">
-            Feature toggles could not be loaded.
-            <Button
-              variant="link"
-              className="h-auto px-1 cursor-pointer"
-              onClick={() => void reload()}
-            >
-              Retry
-            </Button>
-          </CardContent>
-        </Card>
+        <FeatureTogglesEmptyState isLoading={isLoadingFlags} onRetry={() => void reload()} />
       )}
       <RestartProgressDialog
         phase={restart.phase}
@@ -118,6 +127,45 @@ export function FeatureTogglesSettings({ initialFlags, restartCapability }: Prop
         onDismiss={restart.dismiss}
       />
     </div>
+  );
+}
+
+function fetchRuntimeFlagsForReload(bootstrap: boolean): ReturnType<typeof fetchRuntimeFlags> {
+  if (!bootstrap) return fetchRuntimeFlags();
+  if (bootstrapRuntimeFlagsRequest === null) {
+    bootstrapRuntimeFlagsRequest = fetchRuntimeFlags().finally(() => {
+      bootstrapRuntimeFlagsRequest = null;
+    });
+  }
+  return bootstrapRuntimeFlagsRequest;
+}
+
+function FeatureTogglesEmptyState({
+  isLoading,
+  onRetry,
+}: {
+  isLoading: boolean;
+  onRetry: () => void;
+}) {
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+          <Spinner className="size-4" />
+          Loading feature toggles...
+        </CardContent>
+      </Card>
+    );
+  }
+  return (
+    <Card>
+      <CardContent className="py-6 text-sm text-muted-foreground">
+        Feature toggles could not be loaded.
+        <Button variant="link" className="h-auto px-1 cursor-pointer" onClick={onRetry}>
+          Retry
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 

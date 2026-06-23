@@ -64,8 +64,31 @@ if [[ "${GH_FAIL_REPO:-0}" == "1" && "$1" == "repo" && "$2" == "view" ]]; then
   exit 1
 fi
 
+if [[ "${GH_FAIL_COMMENT:-0}" == "1" && "$1" == "api" && "$2" == repos/kdlbs/kandev/pulls/comments/* ]]; then
+  echo "comment api failed" >&2
+  exit 1
+fi
+
 if [[ "$1" == "repo" && "$2" == "view" ]]; then
   printf '{"owner":{"login":"kdlbs"},"name":"kandev"}\n'
+  exit 0
+fi
+
+if [[ "$1" == "api" && "$2" == "repos/kdlbs/kandev/pulls/comments/111" ]]; then
+  cat <<'JSON'
+{
+  "id": 111,
+  "user": { "login": "greptile-apps[bot]" },
+  "body": "Please rename this helper\n\nFull rationale here.",
+  "path": "apps/web/file.ts",
+  "line": 42,
+  "original_line": 40,
+  "commit_id": "abc123",
+  "html_url": "https://github.com/kdlbs/kandev/pull/123#discussion_r111",
+  "created_at": "2026-06-01T10:00:00Z",
+  "updated_at": "2026-06-01T10:01:00Z"
+}
+JSON
   exit 0
 fi
 
@@ -530,6 +553,78 @@ test_summary_all_flag_includes_historical_unresolved_threads() {
   pass "--summary --all includes historical unresolved thread comments"
 }
 
+test_comment_mode_returns_full_review_comment() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  PATH="$tmp/bin:$PATH" "$SCRIPT" --comment 111 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "comment id" '.comment_id == 111' "$json"
+  assert_jq "comment body is full" '.body | contains("Full rationale here.")' "$json"
+  assert_jq "comment path" '.path == "apps/web/file.ts"' "$json"
+  assert_jq "comment line" '.line == 42' "$json"
+  assert_jq "comment author" '.author == "greptile-apps[bot]"' "$json"
+  pass "--comment returns full review comment"
+}
+
+test_comment_mode_reports_fetch_failure() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  if GH_FAIL_COMMENT=1 PATH="$tmp/bin:$PATH" "$SCRIPT" --comment 999 >"$tmp/out.json" 2>"$tmp/err.log"; then
+    fail "--comment failure exits non-zero"
+  fi
+
+  if [ -s "$tmp/out.json" ]; then
+    fail "--comment failure does not emit JSON"
+  fi
+  if ! grep -q "failed to fetch PR comment 999" "$tmp/err.log"; then
+    fail "--comment failure reports clear error"
+  fi
+
+  pass "--comment reports fetch failure"
+}
+
+test_comment_mode_rejects_incompatible_flags() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  if PATH="$tmp/bin:$PATH" "$SCRIPT" --summary --comment 111 >"$tmp/out.log" 2>&1; then
+    fail "--comment rejects --summary"
+  fi
+  if ! grep -q "scripts/pr-state --comment <comment_id>" "$tmp/out.log"; then
+    fail "--comment --summary prints usage"
+  fi
+
+  if PATH="$tmp/bin:$PATH" "$SCRIPT" --all --comment 111 >"$tmp/out.log" 2>&1; then
+    fail "--comment rejects --all"
+  fi
+  if ! grep -q "scripts/pr-state --comment <comment_id>" "$tmp/out.log"; then
+    fail "--comment --all prints usage"
+  fi
+
+  if PATH="$tmp/bin:$PATH" "$SCRIPT" --comment --summary >"$tmp/out.log" 2>&1; then
+    fail "--comment rejects flag-shaped id"
+  fi
+  if ! grep -q "scripts/pr-state --comment <comment_id>" "$tmp/out.log"; then
+    fail "--comment flag-shaped id prints usage"
+  fi
+
+  if PATH="$tmp/bin:$PATH" "$SCRIPT" --comment abc >"$tmp/out.log" 2>&1; then
+    fail "--comment rejects non-numeric id"
+  fi
+  if ! grep -q "scripts/pr-state --comment <comment_id>" "$tmp/out.log"; then
+    fail "--comment non-numeric id prints usage"
+  fi
+
+  pass "--comment rejects incompatible flags"
+}
+
 test_snapshot_happy_path
 test_partial_failure_records_error_but_keeps_other_data
 test_pr_view_failure_with_non_numeric_ref_keeps_schema
@@ -539,3 +634,6 @@ test_graphql_pagination_collects_all_threads
 test_all_flag_includes_historical_comments_and_reviews
 test_summary_mode_returns_compact_fixup_state
 test_summary_all_flag_includes_historical_unresolved_threads
+test_comment_mode_returns_full_review_comment
+test_comment_mode_reports_fetch_failure
+test_comment_mode_rejects_incompatible_flags

@@ -143,13 +143,7 @@ func (s *Service) dispatchCIAutomationPrompt(ctx context.Context, session *model
 		if s.messageQueue == nil {
 			return fmt.Errorf("message queue is not configured")
 		}
-		if !s.recordCIAutomationUserMessage(ctx, session.TaskID, session.ID, chatPrompt) {
-			return fmt.Errorf("failed to record CI automation user message")
-		}
-		metadata := map[string]interface{}{
-			"origin":                   ciAutomationOrigin,
-			metaKeyUserMessageRecorded: true,
-		}
+		metadata := ciAutomationMessageMetadata()
 		_, err := s.messageQueue.QueueMessageWithMetadata(ctx, session.ID, session.TaskID, chatPrompt, "", messagequeue.QueuedByWorkflow, false, nil, metadata)
 		if err != nil {
 			return err
@@ -157,11 +151,11 @@ func (s *Service) dispatchCIAutomationPrompt(ctx context.Context, session *model
 		s.publishQueueStatusEvent(ctx, session.ID)
 		return nil
 	case models.TaskSessionStateWaitingForInput, models.TaskSessionStateIdle:
-		if _, err := s.PromptTask(ctx, session.TaskID, session.ID, chatPrompt, "", false, nil, false); err != nil {
-			return err
-		}
 		if !s.recordCIAutomationUserMessage(ctx, session.TaskID, session.ID, chatPrompt) {
 			return fmt.Errorf("failed to record CI automation user message")
+		}
+		if _, err := s.PromptTask(ctx, session.TaskID, session.ID, chatPrompt, "", false, nil, false); err != nil {
+			return err
 		}
 		return nil
 	default:
@@ -178,11 +172,7 @@ func (s *Service) recordCIAutomationUserMessage(ctx context.Context, taskID, ses
 		s.startTurnForSession(ctx, sessionID)
 		turnID = s.getActiveTurnID(sessionID)
 	}
-	meta := NewUserMessageMeta().WithAutoStart(true).ToMap()
-	if meta == nil {
-		meta = map[string]interface{}{}
-	}
-	meta["origin"] = ciAutomationOrigin
+	meta := ciAutomationMessageMetadata()
 	if err := s.messageCreator.CreateUserMessage(ctx, taskID, prompt, sessionID, turnID, meta); err != nil {
 		s.logger.Error("failed to create CI automation user message",
 			zap.String("task_id", taskID),
@@ -193,8 +183,21 @@ func (s *Service) recordCIAutomationUserMessage(ctx context.Context, taskID, ses
 	return true
 }
 
+func ciAutomationMessageMetadata() map[string]interface{} {
+	meta := NewUserMessageMeta().WithAutoStart(true).ToMap()
+	if meta == nil {
+		meta = map[string]interface{}{}
+	}
+	meta["origin"] = ciAutomationOrigin
+	return meta
+}
+
 func ciAutomationChatPrompt(prompt string) string {
-	return "@ci-auto-fix\n\n" + sysprompt.Wrap(prompt)
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return "@ci-auto-fix"
+	}
+	return "@ci-auto-fix\n\n" + prompt
 }
 
 func (s *Service) recordCIAutomationError(ctx context.Context, pr *github.TaskPR, message string) {
@@ -269,9 +272,22 @@ func ciAutomationCurrentCheckpoint(feedback *github.PRFeedback) ciAutomationChec
 }
 
 func ciAutomationRenderPrompt(base string, pr *github.TaskPR, delta ciAutomationCheckpoint) string {
+	var parts []string
+	if base = strings.TrimSpace(base); base != "" {
+		parts = append(parts, sysprompt.Wrap(base))
+	}
+	if snapshot := ciAutomationRenderSnapshot(pr, delta); snapshot != "" {
+		parts = append(parts, snapshot)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func ciAutomationRenderSnapshot(pr *github.TaskPR, delta ciAutomationCheckpoint) string {
+	if pr == nil {
+		return ""
+	}
 	var b strings.Builder
-	b.WriteString(strings.TrimSpace(base))
-	b.WriteString("\n\nPR: ")
+	b.WriteString("PR: ")
 	b.WriteString(fmt.Sprintf("%s/%s#%d", pr.Owner, pr.Repo, pr.PRNumber))
 	if len(delta.FailedChecks) > 0 {
 		b.WriteString("\n\nNew or changed failing checks:")

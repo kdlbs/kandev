@@ -61,7 +61,7 @@ pnpm e2e:docker                                # force the docker CI image (full
 pnpm e2e:clean                                 # remove build/test artifacts, incl. root-owned ones from prior docker runs
 ```
 
-The runner solves the sharp edges hand-rolling would hit: in docker it builds the CGO backend on the **host** and runs it in the runtime image (forward-compatible when the host glibc ≤ the image's — the usual case; it smoke-tests this and only falls back to the build image if the host is newer), builds the FE standalone on the host, pre-creates the standalone symlinks as relative links so in-container `global-setup` doesn't recreate them as root, and keeps Playwright output container-local. See `apps/web/e2e/README.md` → "the managed runner".
+The runner solves the sharp edges hand-rolling would hit: in docker it builds the CGO backend on the **host** and runs it in the runtime image (forward-compatible when the host glibc ≤ the image's — the usual case; it smoke-tests this and only falls back to the build image if the host is newer), builds the Vite web assets on the host, runs them through the Go-served SPA, and keeps Playwright output container-local. See `apps/web/e2e/README.md` → "the managed runner".
 
 ### Raw commands (when you need fine control)
 
@@ -107,7 +107,7 @@ terminal stuck on "Starting terminal...".
 
 When a PR-specific E2E shard fails, first identify the failed spec(s). If failures are in unrelated existing specs and no changed code plausibly affects that surface, record the failure as unrelated in the PR fixup summary instead of changing unrelated tests.
 
-**CRITICAL: E2E tests run against the production build** (`.next/standalone/`), not dev mode. After any frontend code change, you **must** rebuild before running tests (`pnpm e2e:run` does this for you):
+**CRITICAL: E2E tests run against the production Vite build served by the Go backend**, not dev mode. After any frontend code change, you **must** rebuild before running tests (`pnpm e2e:run` does this for you):
 
 ```bash
 make build-web   # ~30s, required after every frontend change
@@ -118,7 +118,7 @@ Without this, tests run against stale code and failures are misleading. `make bu
 ## Writing a test
 
 1. Read `helpers/api-client.ts` and `pages/` to discover available seed methods and page objects
-2. Import fixtures from `../../fixtures/test-base` — provides `testPage`, `apiClient`, and `seedData` (pre-created workspace with default workflow). Pull `backend` from the fixture too when you need the backend URL — it's worker-scoped, dynamic, and `process.env.KANDEV_API_BASE_URL` is **not** set in the Playwright runner (only in the frontend SSR child process). Use `backend.baseUrl`.
+2. Import fixtures from `../../fixtures/test-base` — provides `testPage`, `apiClient`, and `seedData` (pre-created workspace with default workflow). Pull `backend` from the fixture too when you need the backend URL — it's worker-scoped, dynamic, and `process.env.KANDEV_API_BASE_URL` is **not** set in the Playwright runner. Use `backend.baseUrl`.
 3. Use `data-testid` attributes for selectors — add them to components as needed
 4. Use page objects for common interactions; create new ones for new pages
 5. For GitHub features, use `apiClient.mockGitHub*()` methods to seed mock data
@@ -128,7 +128,7 @@ Without this, tests run against stale code and failures are misleading. `make bu
 - **`apiClient.createTaskWithAgent(...)` returns `CreateTaskResponse`**, which is `Task & { session_id?: string; agent_execution_id?: string }`. Read `created.session_id` directly — don't call `listTaskSessions(taskId)` just to fetch the session that was auto-started by the same call.
 - **The URL `/t/:id` contains the TASK ID**, not the session ID. Backend routes like `/port-proxy/:sessionId/:port/*path` expect the session ID. Don't extract IDs from `window.location.pathname` when you need a session ID — pull from the API response.
 - **`page.request` shares cookies/storage with the page context**. Fine for the current no-auth local backend; if auth ever lands, this is where you'd plug it in.
-- **Flows that go through a Next.js server action fetch the backend server-side** (from the SSR process, not the browser). `page.waitForResponse("**/api/v1/...")` on the backend URL will never fire — the browser only sees the POST to the server-action endpoint. Assert the user-visible outcome (redirect, toast, store change) and/or re-query state via `apiClient` instead. Client-side fetches (most `lib/api/domains/*` calls) *are* visible to `waitForResponse`; server actions in `app/actions/*` are not.
+- **Go boot-payload data is available before React mounts.** Routes that hydrate from `window.__KANDEV_BOOT_PAYLOAD__` may not issue a browser-visible API request on first paint. Use `apiClient` to seed or re-query backend state, assert the user-visible outcome, and reserve `page.waitForResponse("**/api/v1/...")` for client-side fetches that the browser actually performs.
 - **Preview iframe tests:** the seed repo has no `dev_script` configured, so the preview panel renders a placeholder ("Configure a dev script…") and the URL input never appears — tests that try to drive it hang on the locator timeout. To use the preview iframe in a test, set one first: `await apiClient.updateRepository(seedData.repositoryId, { dev_script: "echo dev" })`. Then click the Preview dockview tab (`await session.clickTab("Preview")`) — the toolbar will mount and the URL input becomes targetable.
 
 Example:
@@ -234,7 +234,7 @@ Create `apps/web/.pr-assets/manifest.json` so the `/pr` skill picks them up:
 
 ### Final verification
 
-Always verify against the production build before finishing — dev mode can hide SSR/hydration issues:
+Always verify against the production build before finishing — dev mode can hide boot-payload, asset-serving, or hydration issues:
 
 ```bash
 playwright-cli close
@@ -256,7 +256,7 @@ Tests are grouped by feature area in subdirectories under `tests/`. When creatin
 ## Test quality guidelines
 
 - **Test through the UI, not the API.** E2E tests verify user-facing behavior. Don't write tests that only call the API and assert the response -- those are integration tests. Instead, navigate to the page, interact with UI elements, and assert what the user sees.
-- **Verify persistence with page reload.** After changing a setting or creating data, reload the page (`testPage.reload()`) and assert the state is still correct. This catches hydration bugs and SSR/client mismatches.
+- **Verify persistence with page reload.** After changing a setting or creating data, reload the page (`testPage.reload()`) and assert the state is still correct. This catches hydration bugs and Go boot-payload/client-store mismatches.
 - **Seed via API, assert via UI.** Use `apiClient` to set up preconditions quickly, but always verify the result by opening the page and checking the DOM.
 - **Workflow/session invariants.** For session-primary/profile behavior, prefer polling backend state with `apiClient.listTaskSessions(taskId)` for invariants such as `agent_profile_id`, `is_primary`, `state`, and session count, then add UI assertions as secondary evidence. UI tab markers can lag or be absent when the backend invariant is the behavior under test.
 - **Scope terminal helpers to the active panel.** Terminal/mobile helpers must avoid document-wide `.xterm` or `terminal-xterm-host` selectors because multiple terminal panels can be mounted at once. Scope locators through `data-testid="terminal-panel"` and prefer the visible or latest panel for `page.evaluate` helpers.
@@ -295,7 +295,7 @@ When a test fails:
 - **"Backend did not become healthy"** — run `make build-backend build-web`, check with `E2E_DEBUG=1`
 - **"Cannot find module"** — run `cd apps && pnpm install`
 - **Port conflicts** — backends use 18080+ and frontends use 13000+ (per worker), auto-offset by `E2E_PORT_OFFSET` (derived from PID). Set `E2E_PORT_OFFSET=0` for deterministic ports
-- **Auto-started session never goes idle** — for sessions started by the same call that creates them, the mock agent can finish before the client WS subscription registers, so a raw `idleInput()` visibility wait hangs. Use `SessionPage.waitForChatIdle()` instead; it reloads once and re-derives state from SSR.
+- **Auto-started session never goes idle** — for sessions started by the same call that creates them, the mock agent can finish before the client WS subscription registers, so a raw `idleInput()` visibility wait hangs. Use `SessionPage.waitForChatIdle()` instead; it reloads once and re-derives state from the Go boot payload.
 - **Flaky timeouts** — **never increase locator timeouts to fix flaky tests.** If a locator times out, the root cause is almost always something else: a setup failure, missing navigation, race condition, or the element genuinely not rendering. Investigate why the element never appears instead of giving it more time. Note: infrastructure health timeouts (30s in `fixtures/backend.ts`) and overall test timeouts (60s in `playwright.config.ts`) are separate and should not be modified either.
 - Screenshots on failure, video on first retry (CI)
 
@@ -312,7 +312,7 @@ make build-backend build-web
 cd apps/web && npx playwright test --config e2e/playwright.config.ts --shard=2/10
 ```
 
-E2E tests run against the **production build** (`next build`), not dev mode. Always rebuild with `make build-web` (or `pnpm --filter @kandev/web build`) after code changes before running E2E tests locally.
+E2E tests run against the **production Vite build served by the Go backend**, not dev mode. Always rebuild with `make build-web` (or `pnpm --filter @kandev/web build`) after code changes before running E2E tests locally.
 
 ```bash
 # Unzip a shard's blob report from CI artifacts

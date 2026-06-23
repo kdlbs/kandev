@@ -5,7 +5,7 @@ description: Review changed code for quality, security, and architecture complia
 
 # Code Review
 
-Review the current changes in the codebase (Go + Next.js monorepo). Every finding needs a `file_path:line_number` reference, an explanation of *why* it matters, and a concrete fix.
+Review the current changes in the codebase (Go backend + Vite/React SPA monorepo). Every finding needs a `file_path:line_number` reference, an explanation of *why* it matters, and a concrete fix.
 
 Start from intent and evidence: read the spec/task first when available, then changed tests before production code. Tests reveal the expected behavior and whether the change is actually verified.
 

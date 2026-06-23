@@ -41,6 +41,23 @@ export type MockPR = {
   requested_reviewers?: Array<{ login: string; type: string }>;
 };
 
+export type MockIssue = {
+  number: number;
+  title: string;
+  body?: string;
+  url?: string;
+  html_url?: string;
+  state?: string;
+  author_login?: string;
+  repo_owner: string;
+  repo_name: string;
+  labels?: string[];
+  assignees?: string[];
+  created_at?: string;
+  updated_at?: string;
+  closed_at?: string | null;
+};
+
 export type MockOrg = {
   login: string;
   avatar_url?: string;
@@ -900,6 +917,10 @@ export class ApiClient {
 
   async mockGitHubAddPRs(prs: MockPR[]): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/prs", { prs });
+  }
+
+  async mockGitHubAddIssues(issues: MockIssue[]): Promise<void> {
+    await this.request("POST", "/api/v1/github/mock/issues", { issues });
   }
 
   async mockGitHubAddOrgs(orgs: MockOrg[]): Promise<void> {

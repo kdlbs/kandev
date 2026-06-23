@@ -164,10 +164,9 @@ export function useBranchesByURL(): UseBranchesByURLResult {
     const url = rawUrl.trim();
     if (!url) return;
     if (inFlightRef.current.has(url) || loadedRef.current.has(url)) return;
-    // Accept both plain repo URLs (`github.com/owner/repo`) and PR URLs
-    // (`github.com/owner/repo/pull/123`) — branches are listed against the
-    // repo in both cases, so we extract just `{ owner, repo }` and ignore
-    // the PR number. Using the repo-only parser here used to reject PR URLs
+    // Accept plain repo URLs plus PR/issue URLs — branches are listed against
+    // the repo in every case, so we extract just `{ owner, repo }` and ignore
+    // the item number. Using the repo-only parser here used to reject PR URLs
     // outright, leaving the branch picker permanently empty when the user
     // pasted a PR link into the Remote tab.
     const parsed = parseGitHubAnyUrl(url);

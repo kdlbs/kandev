@@ -204,11 +204,39 @@ type ghPR struct {
 	} `json:"author"`
 }
 
+type ghIssue struct {
+	Number    int       `json:"number"`
+	Title     string    `json:"title"`
+	URL       string    `json:"url"`
+	State     string    `json:"state"`
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+	// The gh CLI currently emits an empty string for open issues.
+	ClosedAt string `json:"closedAt"`
+	Author   struct {
+		Login string `json:"login"`
+	} `json:"author"`
+	Labels []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
+	Assignees []struct {
+		Login string `json:"login"`
+	} `json:"assignees"`
+}
+
 func (c *GHClient) GetPR(ctx context.Context, owner, repo string, number int) (*PR, error) {
 	out, err := c.run(ctx, "pr", "view", fmt.Sprintf("%d", number),
 		"--repo", fmt.Sprintf("%s/%s", owner, repo),
 		"--json", "number,title,url,state,body,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,mergeStateStatus,additions,deletions,createdAt,updatedAt,mergedAt,closedAt,reviewRequests")
 	if err != nil {
+		if isNotFoundErr(err) {
+			return nil, &GitHubAPIError{
+				StatusCode: http.StatusNotFound,
+				Endpoint:   fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, number),
+				Body:       err.Error(),
+			}
+		}
 		return nil, fmt.Errorf("get PR #%d: %w", number, err)
 	}
 	var raw ghPR
@@ -216,6 +244,27 @@ func (c *GHClient) GetPR(ctx context.Context, owner, repo string, number int) (*
 		return nil, fmt.Errorf("parse PR response: %w", err)
 	}
 	return convertGHPR(&raw, owner, repo), nil
+}
+
+func (c *GHClient) GetIssue(ctx context.Context, owner, repo string, number int) (*Issue, error) {
+	out, err := c.run(ctx, "issue", "view", fmt.Sprintf("%d", number),
+		"--repo", fmt.Sprintf("%s/%s", owner, repo),
+		"--json", "number,title,url,state,body,author,labels,assignees,createdAt,updatedAt,closedAt")
+	if err != nil {
+		if isNotFoundErr(err) {
+			return nil, &GitHubAPIError{
+				StatusCode: http.StatusNotFound,
+				Endpoint:   fmt.Sprintf("/repos/%s/%s/issues/%d", owner, repo, number),
+				Body:       err.Error(),
+			}
+		}
+		return nil, fmt.Errorf("get issue #%d: %w", number, err)
+	}
+	var raw ghIssue
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		return nil, fmt.Errorf("parse issue response: %w", err)
+	}
+	return convertGHIssue(&raw, owner, repo), nil
 }
 
 func (c *GHClient) FindPRByBranch(ctx context.Context, owner, repo, branch string) (*PR, error) {
@@ -1051,6 +1100,33 @@ func convertGHPR(raw *ghPR, owner, repo string) *PR {
 		ClosedAt:           parseTimePtr(raw.ClosedAt),
 	}
 	return pr
+}
+
+func convertGHIssue(raw *ghIssue, owner, repo string) *Issue {
+	labels := make([]string, len(raw.Labels))
+	for i, label := range raw.Labels {
+		labels[i] = label.Name
+	}
+	assignees := make([]string, len(raw.Assignees))
+	for i, assignee := range raw.Assignees {
+		assignees[i] = assignee.Login
+	}
+	return &Issue{
+		Number:      raw.Number,
+		Title:       raw.Title,
+		URL:         raw.URL,
+		HTMLURL:     raw.URL,
+		State:       strings.ToLower(raw.State),
+		Body:        raw.Body,
+		AuthorLogin: raw.Author.Login,
+		RepoOwner:   owner,
+		RepoName:    repo,
+		Labels:      labels,
+		Assignees:   assignees,
+		CreatedAt:   raw.CreatedAt,
+		UpdatedAt:   raw.UpdatedAt,
+		ClosedAt:    parseTimePtr(raw.ClosedAt),
+	}
 }
 
 func convertGHRequestedReviewers(raw []ghRequestedReviewer) []RequestedReviewer {

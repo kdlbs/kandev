@@ -50,6 +50,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.POST("/prs/statuses", c.httpGetPRStatusesBatch)
 	api.POST("/prs/:owner/:repo/:number/reviews", c.httpSubmitReview)
 	api.PUT("/prs/:owner/:repo/:number/merge", c.httpMergePR)
+	api.GET("/issues/:owner/:repo/:number/info", c.httpGetIssueInfo)
 
 	api.GET("/watches/pr", c.httpListPRWatches)
 	api.DELETE("/watches/pr/:id", c.httpDeletePRWatch)
@@ -354,30 +355,67 @@ func (c *Controller) httpGetPRStatusesBatch(ctx *gin.Context) {
 func (c *Controller) httpGetPRInfo(ctx *gin.Context) {
 	owner := ctx.Param("owner")
 	repo := ctx.Param("repo")
-	numberStr := ctx.Param("number")
-	number, err := strconv.Atoi(numberStr)
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid PR number"})
+	number, ok := parseRouteNumber(ctx, "invalid PR number")
+	if !ok {
 		return
 	}
 	pr, err := c.service.GetPR(ctx.Request.Context(), owner, repo, number)
 	if err != nil {
-		status := http.StatusInternalServerError
-		var apiErr *GitHubAPIError
-		if errors.As(err, &apiErr) {
-			switch apiErr.StatusCode {
-			case http.StatusNotFound:
-				status = http.StatusNotFound
-			case http.StatusUnauthorized:
-				status = http.StatusUnauthorized
-			case http.StatusForbidden:
-				status = http.StatusForbidden
-			}
-		}
-		ctx.JSON(status, gin.H{"error": err.Error()})
+		handleGitHubInfoError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, pr)
+}
+
+func (c *Controller) httpGetIssueInfo(ctx *gin.Context) {
+	owner := ctx.Param("owner")
+	repo := ctx.Param("repo")
+	number, ok := parseRouteNumber(ctx, "invalid issue number")
+	if !ok {
+		return
+	}
+	issue, err := c.service.GetIssue(ctx.Request.Context(), owner, repo, number)
+	if err != nil {
+		handleGitHubInfoError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, issue)
+}
+
+func parseRouteNumber(ctx *gin.Context, invalidMessage string) (int, bool) {
+	number, err := strconv.Atoi(ctx.Param("number"))
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": invalidMessage})
+		return 0, false
+	}
+	return number, true
+}
+
+func handleGitHubInfoError(ctx *gin.Context, err error) {
+	if errors.Is(err, ErrNoClient) {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "GitHub is not configured. Connect GitHub in Settings > Integrations.",
+			"code":  "github_not_configured",
+		})
+		return
+	}
+	status := http.StatusInternalServerError
+	message := "failed to fetch GitHub info"
+	var apiErr *GitHubAPIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.StatusCode {
+		case http.StatusNotFound:
+			status = http.StatusNotFound
+		case http.StatusUnauthorized:
+			status = http.StatusUnauthorized
+		case http.StatusForbidden:
+			status = http.StatusForbidden
+		}
+	}
+	if status != http.StatusInternalServerError {
+		message = err.Error()
+	}
+	ctx.JSON(status, gin.H{"error": message})
 }
 
 func (c *Controller) httpSubmitReview(ctx *gin.Context) {

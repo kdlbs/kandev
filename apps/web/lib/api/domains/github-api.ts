@@ -19,6 +19,7 @@ import type {
   CreateIssueWatchRequest,
   UpdateIssueWatchRequest,
   TriggerIssueResponse,
+  GitHubIssue,
   SearchPRsResponse,
   SearchIssuesResponse,
   GitHubPRStatus,
@@ -393,6 +394,19 @@ export async function fetchPRInfo(
 ) {
   return fetchJson<GitHubPR>(
     `/api/v1/github/prs/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/info`,
+    options,
+  );
+}
+
+// Issue info (lightweight)
+export async function fetchIssueInfo(
+  owner: string,
+  repo: string,
+  number: number,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<GitHubIssue>(
+    `/api/v1/github/issues/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/info`,
     options,
   );
 }

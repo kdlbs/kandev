@@ -23,6 +23,7 @@ import (
 // stubClient implements Client with no-op defaults; override fields as needed.
 type stubClient struct {
 	getPRFunc             func(ctx context.Context, owner, repo string, number int) (*PR, error)
+	getIssueFunc          func(ctx context.Context, owner, repo string, number int) (*Issue, error)
 	mergePRFn             func(ctx context.Context, owner, repo string, number int, mergeMethod string) error
 	getRepoMergeMethodsFn func() (RepoMergeMethods, error)
 }
@@ -34,6 +35,12 @@ func (s *stubClient) GetAuthenticatedUser(context.Context) (string, error) {
 func (s *stubClient) GetPR(ctx context.Context, owner, repo string, number int) (*PR, error) {
 	if s.getPRFunc != nil {
 		return s.getPRFunc(ctx, owner, repo, number)
+	}
+	return nil, fmt.Errorf("not implemented")
+}
+func (s *stubClient) GetIssue(ctx context.Context, owner, repo string, number int) (*Issue, error) {
+	if s.getIssueFunc != nil {
+		return s.getIssueFunc(ctx, owner, repo, number)
 	}
 	return nil, fmt.Errorf("not implemented")
 }
@@ -334,6 +341,143 @@ func TestHttpGetPRInfo_ServiceError(t *testing.T) {
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d", w.Code)
+	}
+}
+
+func TestHttpGetPRInfo_NoClient(t *testing.T) {
+	router, _ := setupControllerTest(nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/prs/acme/widget/99/info", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", w.Code, w.Body.String())
+	}
+	var got struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Code != "github_not_configured" {
+		t.Fatalf("expected github_not_configured code, got %q", got.Code)
+	}
+}
+
+func TestHttpGetPRInfo_GitHubAPIErrorStatus(t *testing.T) {
+	sc := &stubClient{
+		getPRFunc: func(context.Context, string, string, int) (*PR, error) {
+			return nil, &GitHubAPIError{
+				StatusCode: http.StatusNotFound,
+				Endpoint:   "/repos/acme/widget/pulls/99",
+				Body:       "upstream error",
+			}
+		},
+	}
+	router, _ := setupControllerTest(sc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/prs/acme/widget/99/info", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestHttpGetIssueInfo_Success(t *testing.T) {
+	sc := &stubClient{
+		getIssueFunc: func(_ context.Context, owner, repo string, number int) (*Issue, error) {
+			if owner != "acme" || repo != "widget" || number != 1456 {
+				t.Errorf("unexpected params: %s/%s#%d", owner, repo, number)
+			}
+			return &Issue{Number: 1456, Title: "fix remote picker"}, nil
+		},
+	}
+	router, _ := setupControllerTest(sc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/issues/acme/widget/1456/info", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var issue Issue
+	if err := json.NewDecoder(w.Body).Decode(&issue); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if issue.Number != 1456 {
+		t.Errorf("expected issue number 1456, got %d", issue.Number)
+	}
+	if issue.Title != "fix remote picker" {
+		t.Errorf("expected issue title, got %q", issue.Title)
+	}
+}
+
+func TestHttpGetIssueInfo_InvalidNumber(t *testing.T) {
+	router, _ := setupControllerTest(&stubClient{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/issues/acme/widget/abc/info", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestHttpGetIssueInfo_ServiceError(t *testing.T) {
+	sc := &stubClient{
+		getIssueFunc: func(context.Context, string, string, int) (*Issue, error) {
+			return nil, fmt.Errorf("not found")
+		},
+	}
+	router, _ := setupControllerTest(sc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/issues/acme/widget/99/info", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", w.Code)
+	}
+}
+
+func TestHttpGetIssueInfo_GitHubAPIErrorStatus(t *testing.T) {
+	tests := []struct {
+		name       string
+		apiStatus  int
+		wantStatus int
+	}{
+		{name: "not found", apiStatus: http.StatusNotFound, wantStatus: http.StatusNotFound},
+		{name: "unauthorized", apiStatus: http.StatusUnauthorized, wantStatus: http.StatusUnauthorized},
+		{name: "forbidden", apiStatus: http.StatusForbidden, wantStatus: http.StatusForbidden},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sc := &stubClient{
+				getIssueFunc: func(context.Context, string, string, int) (*Issue, error) {
+					return nil, &GitHubAPIError{
+						StatusCode: tt.apiStatus,
+						Endpoint:   "/repos/acme/widget/issues/99",
+						Body:       "upstream error",
+					}
+				},
+			}
+			router, _ := setupControllerTest(sc)
+
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/github/issues/acme/widget/99/info", nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			if w.Code != tt.wantStatus {
+				t.Fatalf("expected %d, got %d", tt.wantStatus, w.Code)
+			}
+		})
 	}
 }
 

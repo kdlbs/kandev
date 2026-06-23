@@ -96,6 +96,16 @@ async function pasteUrlInChip(testPage: Page, url: string, chipIndex = 0): Promi
   await pasteInput.press("Enter");
 }
 
+async function expectPopoverFitsDialog(testPage: Page): Promise<void> {
+  const dialogBox = await testPage.getByTestId("create-task-dialog").boundingBox();
+  const popoverBox = await testPage.getByTestId("remote-repo-popover-content").boundingBox();
+  expect(dialogBox).not.toBeNull();
+  expect(popoverBox).not.toBeNull();
+  expect(popoverBox!.y + popoverBox!.height).toBeLessThanOrEqual(
+    dialogBox!.y + dialogBox!.height + 1,
+  );
+}
+
 test.describe("Task creation from Remote tab (chip picker)", () => {
   test.describe.configure({ retries: 1 });
 
@@ -198,6 +208,45 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     const repoRow = await fetchRepoById(apiClient, repos[0].repository_id);
     expect(repoRow.provider_owner).toBe("paste-owner");
     expect(repoRow.provider_name).toBe("paste-repo");
+  });
+
+  test("pasted GitHub issue URL fills the title and keeps the picker inside the dialog", async ({
+    testPage,
+    apiClient,
+  }) => {
+    test.setTimeout(60_000);
+    await apiClient.mockGitHubAddBranches("issue-owner", "issue-repo", [{ name: "main" }]);
+    await apiClient.mockGitHubAddIssues([
+      {
+        number: 1456,
+        title: "Fix remote repo picker clipping",
+        body: "The picker overlaps the dialog footer.",
+        state: "open",
+        author_login: "mock-user",
+        repo_owner: "issue-owner",
+        repo_name: "issue-repo",
+        html_url: "https://github.com/issue-owner/issue-repo/issues/1456",
+      },
+    ]);
+
+    const kanban = new KanbanPage(testPage);
+    await openCreateDialog(testPage, kanban);
+    await clickRemoteMode(testPage);
+
+    await testPage.getByTestId("remote-repo-chip-trigger").first().click();
+    await expectPopoverFitsDialog(testPage);
+    const pasteInput = testPage.getByTestId("remote-paste-url-input").last();
+    await pasteInput.fill("https://github.com/issue-owner/issue-repo/issues/1456");
+    await pasteInput.press("Enter");
+
+    await expect(testPage.getByTestId("task-title-input")).toHaveValue(
+      "Issue #1456: Fix remote repo picker clipping",
+      { timeout: 10_000 },
+    );
+    await expect(testPage.getByTestId("remote-repo-chip-trigger").first()).toContainText(
+      "issues/1456",
+      { timeout: 5_000 },
+    );
   });
 
   test("scenario 3: three mixed rows (picker + paste-repo + paste-PR)", async ({

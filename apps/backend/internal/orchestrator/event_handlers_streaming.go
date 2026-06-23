@@ -767,6 +767,17 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	if session != nil && s.handleOfficeTurnComplete(ctx, payload.TaskID, payload.SessionID, session, stopReason) {
 		return
 	}
+	if session != nil && s.handleAutomationTurnComplete(
+		ctx,
+		payload.TaskID,
+		payload.SessionID,
+		session,
+		stopReason,
+		extractCompleteIsError(payload),
+		extractCompleteErrorMessage(payload),
+	) {
+		return
+	}
 
 	// READY events own workflow transitions and queued prompt execution.
 	// If we're still RUNNING here, avoid racing READY by forcing WAITING/REVIEW.
@@ -813,6 +824,40 @@ func extractStopReason(payload *lifecycle.AgentStreamEventPayload) string {
 	}
 	sr, _ := data["stop_reason"].(string)
 	return sr
+}
+
+func extractCompleteIsError(payload *lifecycle.AgentStreamEventPayload) bool {
+	if payload == nil || payload.Data == nil {
+		return false
+	}
+	data, ok := payload.Data.Data.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	isError, _ := data["is_error"].(bool)
+	return isError
+}
+
+func extractCompleteErrorMessage(payload *lifecycle.AgentStreamEventPayload) string {
+	if payload == nil || payload.Data == nil {
+		return ""
+	}
+	if payload.Data.Error != "" {
+		return payload.Data.Error
+	}
+	// Complete-event text is user-facing agent output; only structured error
+	// fields should become AutomationRun.error_message.
+	data, ok := payload.Data.Data.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	if message, ok := data["error"].(string); ok {
+		return message
+	}
+	if message, ok := data["message"].(string); ok {
+		return message
+	}
+	return ""
 }
 
 // Mirrors the "cancelled" literal in lifecycle/manager_events.go — not extracted to avoid cross-package coupling.

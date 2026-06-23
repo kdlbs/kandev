@@ -20,7 +20,7 @@ Use an isolated instance for browser/UI repros and API probing that mutates data
 # Backend only:
 scripts/dev-isolated
 
-# Backend + Next.js frontend:
+# Backend + web frontend:
 scripts/dev-isolated --web
 ```
 

@@ -179,8 +179,8 @@ func TestGetPR_NilClient(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when client is nil")
 	}
-	if !strings.Contains(err.Error(), "github client not available") {
-		t.Errorf("unexpected error: %v", err)
+	if !errors.Is(err, ErrNoClient) {
+		t.Errorf("err = %v, want ErrNoClient", err)
 	}
 }
 

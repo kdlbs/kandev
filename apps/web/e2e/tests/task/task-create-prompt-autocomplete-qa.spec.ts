@@ -245,6 +245,8 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await kanban.createTaskButton.first().click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
+    // Use scratch mode so submit does not depend on a pre-selected repository.
+    await testPage.getByTestId("source-mode-scratch").click();
     await testPage.getByTestId("task-title-input").fill("qa-submit-task");
     const textarea = testPage.getByTestId("task-description-input");
     await textarea.click();

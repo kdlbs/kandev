@@ -35,7 +35,7 @@ Create these tasks immediately (use your task/todo tracking tool if available):
 3. **Triage review comments** — Classify each comment as valid, already addressed, nitpick, or wrong
 4. **Address each comment** — Fix or reply with reasoning, resolve threads
 5. **Verify, commit, push** — Use `verify` when available; otherwise run the full verification commands directly; commit fixes; push
-6. **Re-check** — Use `pr-poller` again when available; otherwise re-check directly. If new failures, loop back to task 2
+6. **Re-check** — Use `pr-poller` again when available; otherwise re-check directly until failures, pending checks, and unresolved review threads are clear. If new failures, loop back to task 2
 7. **Summary** — Report what was done
 
 Then start with task 1. Mark each task in_progress when you begin it and completed when you finish it.
@@ -238,9 +238,26 @@ gh api repos/:owner/:repo/pulls/<number>/comments
 gh pr view <number> --json comments
 ```
 
+When `scripts/pr-resolve list <PR>` returns a `comment_id`, prefer fetching the exact review comment over bulk-fetching all PR comments/reviews if only one or two unresolved threads are actionable:
+
+```bash
+gh api repos/:owner/:repo/pulls/comments/<comment_id> --jq .body
+```
+
+This keeps context small and avoids mixing current unresolved review comments with old bot summaries.
+
 When piping `gh api` or `gh api graphql` to `jq`, never use `2>&1`. `gh` writes diagnostics to stderr, and merging them corrupts the JSON stream (`jq: parse error: Invalid numeric literal`). Use `2>/dev/null` or `gh`'s built-in `--jq`.
 
 Bot issue comments such as CodeRabbit walkthroughs, Claude summaries, Greptile summaries, and historical "actionable comments posted" notices are informational once `scripts/pr-resolve list <PR>` is empty and the latest bot check is passing. Do not reply to old top-level summaries unless they contain a current unresolved request.
+
+To verify whether OpenCode posted a no-findings or diagnostic PR-visible comment, search issue comments for its stable markers, not only review threads:
+
+```bash
+gh api repos/:owner/:repo/issues/<PR>/comments \
+  --jq '.[] | select(.body | contains("opencode-review")) | {user:.user.login, created_at, updated_at, body}'
+```
+
+OpenCode valid-empty output is represented by `<!-- opencode-review:no-findings -->`; absence of inline review comments does not mean OpenCode skipped review.
 
 **Verify before implementing.** Do not blindly accept review feedback — evaluate each comment technically:
 
@@ -317,6 +334,9 @@ scripts/pr-resolve show <PR> <THREAD_ID_OR_COMMENT_ID>
 # Raw fallback for a single review comment:
 gh api repos/:owner/:repo/pulls/comments/<comment_id> --jq '{body,path,line,commit_id,html_url}'
 
+# Repo helper fallback for a single review comment:
+scripts/pr-state --comment <comment_id>
+
 # Raw fallback for all PR review comments when the helper only supports list/reply:
 gh api repos/:owner/:repo/pulls/<PR>/comments --paginate
 
@@ -327,6 +347,8 @@ gh api repos/:owner/:repo/pulls/<PR>/comments --paginate
 Bots may post duplicate or stale review threads against the previous head immediately after a fix push. Check `commit_id` on the full comment. If the current branch already contains the fix, reply and resolve with wording like "Fixed in <new commit>."
 
 For valid comments: read the file, implement the fix, then call `pr-resolve reply` with a body that names the commit or the file:line of the fix.
+
+If the fix moves, splits, or deletes tests or source files, check both the original and destination paths before committing. Use `rg` for symbols or imports that were removed from the original file, and run targeted lint/typecheck commands that cover every touched file. File splits can leave missing imports or stale references in the file that stayed behind even when the moved test passes.
 
 For skipped comments (already addressed, nitpick, wrong, outdated): call `pr-resolve reply` with a body that explains why. Examples:
 - "This is already handled by X on line Y."
@@ -443,8 +465,9 @@ After the push, CI restarts and bots may re-review. Use `pr-poller` again when a
 
 - Before waiting on CI, run `scripts/pr-resolve list <PR>` and address any newly opened review threads. Review bots may add new unresolved threads after earlier threads were resolved.
 - The final re-check must include `scripts/pr-state --summary <PR>` (or a fresh pr-poller report), not only CI status. New review threads can arrive after a fresh push even when the previous unresolved count was zero.
-- If `ci_failed:` is empty AND `unresolved_review_threads: 0` AND `issue_comments_from_bots: 0` (no new bot comments to address) → mark task 6 completed and proceed to summary.
-- If a pushed fix restarts CI while previous checks were already in progress, continue using `scripts/pr-state --summary <PR>`. Treat a stable state of `failed_checks: []` plus `unresolved_review_thread_count: 0` as the actionable fixup completion point once all current review threads have been resolved. Current-head CI can legitimately reset to queued after a push, especially for long E2E, CodeQL, or preview jobs. If checks remain pending after several clean polls, report the exact pending checks instead of waiting indefinitely unless the user explicitly asks to wait for all CI.
+- If `ci_failed:` is empty AND `unresolved_review_threads: 0` AND `issue_comments_from_bots: 0` (no new bot comments to address) → keep polling until the equivalent `scripts/pr-state --summary <PR>` fields are also clean: `failed_checks: []`, `pending_checks: []`, and `unresolved_review_thread_count: 0`.
+- Treat a clean intermediate state as provisional while bot checks are still pending. Reviewer services can add new unresolved threads after CI is mostly green, so after resolving bot feedback and pushing a fixup, wait for both `pending_checks: []` and `unresolved_review_thread_count: 0` before declaring done.
+- If a pushed fix restarts CI while previous checks were already in progress, continue using `scripts/pr-state --summary <PR>`. Treat `filtered_review_thread_count` as informational when `unresolved_review_thread_count` is `0`; do not re-open or re-handle already-resolved historical/current-head filtered threads. Current-head CI can legitimately reset to queued after a push, especially for long E2E, CodeQL, or preview jobs. If checks remain pending when the 20-min cap or 3-iteration loop limit is reached, report the exact pending checks instead of waiting indefinitely unless the user explicitly asks to keep waiting.
 - If new CI failures appeared from the latest commit → loop back to task 2 and reset task 2-5 to `in_progress` as needed.
 - If new review comments appeared after the push → loop back to task 3.
 - If the poller hit its cap (`recommendation:` mentions "timed out") → surface the remaining pending items to the user and stop.

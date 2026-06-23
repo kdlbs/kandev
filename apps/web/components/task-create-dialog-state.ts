@@ -396,7 +396,7 @@ export function useDialogFormState(
   // Title autofill: the first remote-repo row's PR info seeds the task title
   // when the user hasn't typed one. Keyed only off row 0 — adding more PR
   // rows later never overwrites the title.
-  useTitleAutofillFromFirstRowPRInfo({
+  useTitleAutofillFromFirstRowGitHubInfo({
     open: open && ghUrl.useRemote,
     firstRowUrl: remoteRepos.remoteRepos[0]?.url ?? "",
     prInfoByUrl,
@@ -428,19 +428,19 @@ export function useDialogFormState(
 }
 
 /**
- * Seeds the task title from the first Remote row's PR info (when present)
+ * Seeds the task title from the first Remote row's GitHub URL info (when present)
  * the first time it arrives, and only when the user hasn't typed a title.
- * Subsequent PR-info changes for the same URL don't overwrite — the
- * lastAutoFilledRef tracks our own writes so re-pasting a different PR URL
- * still works while a user-edited title is preserved.
+ * Subsequent info changes for the same URL don't overwrite — the
+ * lastAutoFilledRef tracks our own writes so re-pasting a different GitHub
+ * URL still works while a user-edited title is preserved.
  */
 /** Sentinel stored in `lastAutoFilledRef` once the user clears an
  * auto-filled title. Distinguishable from any real suggested title (which
- * always begins with `"PR #"`) so the effect can refuse to re-apply autofill
- * for the current URL until the URL itself changes. */
+ * comes from the GitHub info loader) so the effect can refuse to re-apply
+ * autofill for the current URL until the URL itself changes. */
 const USER_CLEARED_SENTINEL = "\0cleared";
 
-function useTitleAutofillFromFirstRowPRInfo(args: {
+function useTitleAutofillFromFirstRowGitHubInfo(args: {
   open: boolean;
   firstRowUrl: string;
   prInfoByUrl: ReturnType<typeof usePRInfoByURL>;

@@ -171,6 +171,23 @@ describe("useBranchesByURL — failure & invalidation", () => {
     expect(fetchRepoBranchesMock).toHaveBeenCalledTimes(1);
   });
 
+  it("accepts an issue URL and fetches branches against the underlying repo", async () => {
+    fetchRepoBranchesMock.mockImplementation((owner: string, repo: string) => {
+      expect(owner).toBe("acme");
+      expect(repo).toBe("site");
+      return Promise.resolve({ branches: [{ name: "main" }, { name: "fix/issue" }] });
+    });
+    const { result } = renderHook(() => useBranchesByURL());
+    const issueURL = "https://github.com/acme/site/issues/1456";
+
+    act(() => {
+      result.current.ensure(issueURL);
+    });
+
+    await waitFor(() => expect(result.current.branches(issueURL)).toHaveLength(2));
+    expect(fetchRepoBranchesMock).toHaveBeenCalledTimes(1);
+  });
+
   it("clear(url) lets the next ensure() refetch a successfully loaded URL", async () => {
     fetchRepoBranchesMock.mockResolvedValue({ branches: [{ name: "main" }] });
 

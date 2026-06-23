@@ -60,8 +60,8 @@ func NewCursorACP() *CursorACP {
 				ModelFlag:      NewParam("--model", "{model}"),
 				IdleTimeout:    3 * time.Second,
 				BufferMaxBytes: DefaultBufferMaxBytes,
-				// cursor-agent has no MCP flag/env; write a project-local
-				// .cursor/mcp.json into the worktree (only if absent).
+				// cursor-agent has no MCP flag/env; write or merge a
+				// project-local .cursor/mcp.json into the worktree.
 				MCPStrategy: mcpconfig.CursorStrategy{},
 			},
 		},
@@ -105,12 +105,13 @@ func (a *CursorACP) BuildCommand(opts CommandOptions) Command {
 func (a *CursorACP) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd:            Cmd(cursorACPBin, "acp").Build(),
-		WorkingDir:     "{workspace}",
-		Env:            map[string]string{},
-		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
-		Protocol:       agent.ProtocolACP,
-		UserSkillDir:   ".cursor/skills",
+		Cmd:                Cmd(cursorACPBin, "acp").Build(),
+		WorkingDir:         "{workspace}",
+		Env:                map[string]string{},
+		ResourceLimits:     ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
+		Protocol:           agent.ProtocolACP,
+		UserSkillDir:       ".cursor/skills",
+		ProjectMCPStrategy: mcpconfig.CursorStrategy{},
 		SessionConfig: SessionConfig{
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,

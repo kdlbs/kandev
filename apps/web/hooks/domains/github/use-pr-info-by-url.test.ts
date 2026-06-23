@@ -2,22 +2,26 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 
 const fetchPRInfoMock = vi.fn();
+const fetchIssueInfoMock = vi.fn();
 
 vi.mock("@/lib/api/domains/github-api", () => ({
   fetchPRInfo: (...args: unknown[]) => fetchPRInfoMock(...args),
+  fetchIssueInfo: (...args: unknown[]) => fetchIssueInfoMock(...args),
 }));
 
 // Import after mocks so the hook picks up the mocked module.
-import { usePRInfoByURL, parseGitHubPrUrl } from "./use-pr-info-by-url";
+import { usePRInfoByURL, parseGitHubIssueUrl, parseGitHubPrUrl } from "./use-pr-info-by-url";
 
 afterEach(() => {
   cleanup();
   fetchPRInfoMock.mockReset();
+  fetchIssueInfoMock.mockReset();
   vi.useRealTimers();
 });
 
 const PR_URL_A = "https://github.com/acme/site/pull/42";
 const PR_URL_B = "https://github.com/acme/api/pull/7";
+const ISSUE_URL_A = "https://github.com/acme/site/issues/1456";
 const REPO_URL = "https://github.com/acme/site";
 
 function makePR(overrides: { number: number; title?: string; head?: string; base?: string }) {
@@ -34,6 +38,25 @@ function makePR(overrides: { number: number; title?: string; head?: string; base
     repo_owner: "",
     repo_name: "",
     draft: false,
+  };
+}
+
+function makeIssue(overrides: { number: number; title?: string; body?: string }) {
+  return {
+    number: overrides.number,
+    title: overrides.title ?? "Test issue",
+    body: overrides.body ?? "Issue body",
+    url: "",
+    html_url: "",
+    state: "open" as const,
+    author_login: "octocat",
+    repo_owner: "acme",
+    repo_name: "site",
+    labels: [],
+    assignees: [],
+    created_at: "",
+    updated_at: "",
+    closed_at: null,
   };
 }
 
@@ -56,6 +79,31 @@ describe("parseGitHubPrUrl", () => {
     expect(parseGitHubPrUrl(REPO_URL)).toBeNull();
     expect(parseGitHubPrUrl("not a url")).toBeNull();
     expect(parseGitHubPrUrl("")).toBeNull();
+  });
+});
+
+describe("parseGitHubIssueUrl", () => {
+  it("returns owner/repo/issueNumber for a canonical issue URL", () => {
+    expect(parseGitHubIssueUrl(ISSUE_URL_A)).toEqual({
+      owner: "acme",
+      repo: "site",
+      issueNumber: 1456,
+    });
+  });
+
+  it("tolerates trailing path/hash", () => {
+    expect(parseGitHubIssueUrl(`${ISSUE_URL_A}#issuecomment-1`)).toEqual({
+      owner: "acme",
+      repo: "site",
+      issueNumber: 1456,
+    });
+  });
+
+  it("returns null for PR URLs, plain repo URLs, invalid input, and empty input", () => {
+    expect(parseGitHubIssueUrl(PR_URL_A)).toBeNull();
+    expect(parseGitHubIssueUrl(REPO_URL)).toBeNull();
+    expect(parseGitHubIssueUrl("not a url")).toBeNull();
+    expect(parseGitHubIssueUrl("")).toBeNull();
   });
 });
 
@@ -129,7 +177,9 @@ describe("usePRInfoByURL", () => {
     await waitFor(() => expect(result.current.loading(PR_URL_A)).toBe(false));
     expect(result.current.info(PR_URL_A)).toBeDefined();
   });
+});
 
+describe("usePRInfoByURL — non-PR and issue URLs", () => {
   it("no-ops (no fetch, no cached info) for a non-PR repo URL", async () => {
     const { result } = renderHook(() => usePRInfoByURL());
 
@@ -147,6 +197,40 @@ describe("usePRInfoByURL", () => {
       result.current.ensure(REPO_URL);
     });
     expect(fetchPRInfoMock).not.toHaveBeenCalled();
+  });
+
+  it("clear() is a no-op after ensure() records a non-GitHub URL as loaded", () => {
+    const url = "https://example.com/not-github";
+    const { result } = renderHook(() => usePRInfoByURL());
+
+    act(() => {
+      result.current.ensure(url);
+      result.current.clear(url);
+    });
+
+    expect(fetchPRInfoMock).not.toHaveBeenCalled();
+    expect(fetchIssueInfoMock).not.toHaveBeenCalled();
+    expect(result.current.info(url)).toBeUndefined();
+    expect(result.current.loading(url)).toBe(false);
+  });
+
+  it("fetches issue info and exposes a suggested title for GitHub issue URLs", async () => {
+    fetchIssueInfoMock.mockResolvedValue(makeIssue({ number: 1456, title: "Fix remote picker" }));
+
+    const { result } = renderHook(() => usePRInfoByURL());
+
+    act(() => {
+      result.current.ensure(ISSUE_URL_A);
+    });
+
+    await waitFor(() => expect(result.current.info(ISSUE_URL_A)).toBeDefined());
+    expect(fetchIssueInfoMock).toHaveBeenCalledTimes(1);
+    expect(fetchIssueInfoMock).toHaveBeenCalledWith("acme", "site", 1456, expect.any(Object));
+    expect(fetchPRInfoMock).not.toHaveBeenCalled();
+    expect(result.current.info(ISSUE_URL_A)).toMatchObject({
+      issueNumber: 1456,
+      suggestedTitle: "Issue #1456: Fix remote picker",
+    });
   });
 
   it("ignores ensure() with empty string", () => {

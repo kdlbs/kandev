@@ -102,9 +102,18 @@ func pickDefaultMergeMethod(m RepoMergeMethods) string {
 // GetPR fetches basic PR details from GitHub.
 func (s *Service) GetPR(ctx context.Context, owner, repo string, number int) (*PR, error) {
 	if s.client == nil {
-		return nil, fmt.Errorf("github client not available")
+		return nil, ErrNoClient
 	}
 	return s.client.GetPR(ctx, owner, repo, number)
+}
+
+// GetIssue fetches basic issue details from GitHub. The create-task dialog is
+// currently the only caller and dedupes requests per URL on the frontend.
+func (s *Service) GetIssue(ctx context.Context, owner, repo string, number int) (*Issue, error) {
+	if s.client == nil {
+		return nil, ErrNoClient
+	}
+	return s.client.GetIssue(ctx, owner, repo, number)
 }
 
 // GetPRFeedback fetches live PR feedback from GitHub. Cached briefly with

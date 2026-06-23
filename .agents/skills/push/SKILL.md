@@ -38,6 +38,8 @@ Commit any pending changes and push to the remote branch.
    git push
    ```
    If the branch has no upstream, use `git push -u origin <branch>`.
+   If the branch was rebased or history was rewritten, first confirm the current
+   branch is not `main` or `master`, then use `git push --force-with-lease`.
 
 4. **Report** the pushed commit hash and branch.
 

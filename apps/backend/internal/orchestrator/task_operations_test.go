@@ -754,6 +754,60 @@ func TestStartCreatedSession_WorkflowOverridePromotesPreparedWhenTaskHasNoPrimar
 	}
 }
 
+// TestStartCreatedSession_EmptyProfileFallsBackToWorkflowDefault pins the bug
+// where an auto-started session prepared without an agent_profile_id (e.g. a
+// task imported from Linear whose metadata agent_profile_id is empty) recorded
+// the auto-start step prompt but never launched the agent. StartCreatedSession
+// aborted with "agent_profile_id is required" because the required-profile
+// guard ran before the workflow-default resolution. The launch must instead
+// inherit the workflow's default agent profile and persist it on the session.
+func TestStartCreatedSession_EmptyProfileFallsBackToWorkflowDefault(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	// executors_running lets LaunchPreparedSession take the existing-workspace
+	// fast path instead of launching a real agent.
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	// Bind the task to a workflow step whose workflow defines a default agent
+	// profile, with no step-level override — the Auto Dispatch Workflow shape.
+	dbTask, err := repo.GetTask(ctx, "task1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	dbTask.WorkflowStepID = "step1"
+	if err := repo.UpdateTask(ctx, dbTask); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1"}
+	stepGetter.workflowAgentProfileID = "wf-default-profile"
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", Title: "Test Task", State: v1.TaskStateInProgress}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+	svc.messageCreator = &mockMessageCreator{}
+
+	// The auto-start path passes the session's stored profile, which is empty
+	// here. The previous code aborted with "agent_profile_id is required".
+	_, err = svc.StartCreatedSession(ctx, "task1", "session1", "", "Do the work", true, false, true, nil)
+	if err != nil {
+		t.Fatalf("StartCreatedSession must resolve the workflow default for an empty profile, got error: %v", err)
+	}
+
+	// The resolved workflow default must be persisted on the session so the
+	// agent actually launches under it (and the UI shows the right agent).
+	got, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	if got.AgentProfileID != "wf-default-profile" {
+		t.Errorf("expected session to inherit workflow default %q, got %q", "wf-default-profile", got.AgentProfileID)
+	}
+}
+
 // --- recordInitialMessage ---
 
 // mockMessageCreator implements MessageCreator for testing.

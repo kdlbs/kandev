@@ -35,6 +35,7 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api := router.Group("/api/v1/github/mock")
 	api.PUT("/user", c.setUser)
 	api.POST("/prs", c.addPRs)
+	api.POST("/issues", c.addIssues)
 	api.POST("/orgs", c.addOrgs)
 	api.POST("/repos", c.addRepos)
 	api.POST("/reviews", c.addReviews)
@@ -109,6 +110,20 @@ func (c *MockController) addPRs(ctx *gin.Context) {
 		c.mock.AddPR(&req.PRs[i])
 	}
 	ctx.JSON(http.StatusOK, gin.H{"added": len(req.PRs)})
+}
+
+func (c *MockController) addIssues(ctx *gin.Context) {
+	var req struct {
+		Issues []Issue `json:"issues"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	for i := range req.Issues {
+		c.mock.AddIssue(&req.Issues[i])
+	}
+	ctx.JSON(http.StatusOK, gin.H{"added": len(req.Issues)})
 }
 
 func (c *MockController) addOrgs(ctx *gin.Context) {

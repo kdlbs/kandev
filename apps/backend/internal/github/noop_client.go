@@ -25,6 +25,10 @@ func (c *NoopClient) GetPR(context.Context, string, string, int) (*PR, error) {
 	return nil, ErrNoClient
 }
 
+func (c *NoopClient) GetIssue(context.Context, string, string, int) (*Issue, error) {
+	return nil, ErrNoClient
+}
+
 func (c *NoopClient) FindPRByBranch(context.Context, string, string, string) (*PR, error) {
 	return nil, ErrNoClient
 }
