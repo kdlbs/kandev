@@ -2,7 +2,7 @@
 
 import { memo, type ReactNode } from "react";
 import Link from "@/components/routing/app-link";
-import { IconBug } from "@tabler/icons-react";
+import { IconBug, IconCircleDot } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage } from "@kandev/ui/breadcrumb";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -37,6 +37,8 @@ type TaskTopBarProps = {
   currentStepId?: string | null;
   workflowId?: string | null;
   workspaceId?: string | null;
+  issueUrl?: string;
+  issueNumber?: number;
   isArchived?: boolean;
   isRemoteExecutor?: boolean;
   isAgentctlReady?: boolean;
@@ -65,6 +67,8 @@ const TaskTopBar = memo(function TaskTopBar({
   isArchived,
   isRemoteExecutor,
   isAgentctlReady,
+  issueUrl,
+  issueNumber,
   remoteExecutorType,
   officeTaskHref,
 }: TaskTopBarProps) {
@@ -101,6 +105,8 @@ const TaskTopBar = memo(function TaskTopBar({
         isRemoteExecutor={isRemoteExecutor}
         isAgentctlReady={isAgentctlReady}
         taskTitle={taskTitle}
+        issueUrl={issueUrl}
+        issueNumber={issueNumber}
         officeTaskHref={officeTaskHref}
       />
     </header>
@@ -228,6 +234,8 @@ function AttentionStatusGroup({
   isRemoteExecutor,
   isAgentctlReady,
   taskTitle,
+  issueUrl,
+  issueNumber,
 }: {
   taskId?: string | null;
   activeSessionId?: string | null;
@@ -236,6 +244,8 @@ function AttentionStatusGroup({
   isRemoteExecutor?: boolean;
   isAgentctlReady?: boolean;
   taskTitle?: string;
+  issueUrl?: string;
+  issueNumber?: number;
 }) {
   return (
     <TopbarCluster label="Task status and attention" className="[&_button]:h-7 [&_button]:text-xs">
@@ -250,12 +260,45 @@ function AttentionStatusGroup({
           {/* PR (GitHub) and MR (GitLab) buttons each render nothing when no
               rows match, so showing both covers GitHub-only, GitLab-only, and
               multi-repo tasks without needing an explicit provider switch. */}
+          <GitHubIssueTopbarButton issueUrl={issueUrl} issueNumber={issueNumber} />
           <PRTopbarButton />
           <MRTopbarButton />
           <IssueTrackerButtons taskId={taskId} workspaceId={workspaceId} taskTitle={taskTitle} />
         </>
       )}
     </TopbarCluster>
+  );
+}
+
+function GitHubIssueTopbarButton({
+  issueUrl,
+  issueNumber,
+}: {
+  issueUrl?: string;
+  issueNumber?: number;
+}) {
+  if (!issueUrl) return null;
+  const label = issueNumber ? `#${issueNumber}` : "Issue";
+  const tooltip = issueNumber ? `GitHub issue #${issueNumber}` : "GitHub issue";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          asChild
+          data-testid="issue-topbar-button"
+          data-issue-number={issueNumber}
+          size="sm"
+          variant="outline"
+          className="cursor-pointer gap-1.5 px-2"
+        >
+          <Link href={issueUrl} target="_blank" rel="noopener noreferrer">
+            <IconCircleDot className="h-4 w-4 text-green-500" />
+            <span className="text-xs font-medium">{label}</span>
+          </Link>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -303,6 +346,8 @@ function TopBarRight({
   isRemoteExecutor,
   isAgentctlReady,
   taskTitle,
+  issueUrl,
+  issueNumber,
   officeTaskHref,
 }: {
   taskId?: string | null;
@@ -314,6 +359,8 @@ function TopBarRight({
   isRemoteExecutor?: boolean;
   isAgentctlReady?: boolean;
   taskTitle?: string;
+  issueUrl?: string;
+  issueNumber?: number;
   officeTaskHref?: string | null;
 }) {
   return (
@@ -334,6 +381,8 @@ function TopBarRight({
         isRemoteExecutor={isRemoteExecutor}
         isAgentctlReady={isAgentctlReady}
         taskTitle={taskTitle}
+        issueUrl={issueUrl}
+        issueNumber={issueNumber}
       />
       <TopbarToolsGroup
         activeSessionId={activeSessionId}

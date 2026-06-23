@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildDebugEntries } from "./task-page-content-helpers";
+import type { Task } from "@/lib/types/http";
+import { buildDebugEntries, resolveTaskProps } from "./task-page-content-helpers";
 
 function baseParams(overrides: Partial<Parameters<typeof buildDebugEntries>[0]> = {}) {
   return {
@@ -39,5 +40,24 @@ describe("buildDebugEntries", () => {
     expect(entries.acp_session_title).toBe("List files");
     expect(entries.acp_session_updated_at).toBe("2026-06-13T19:37:46Z");
     expect(entries.acp_meta).toEqual({ cursor: { requestId: "req-1" } });
+  });
+});
+
+describe("resolveTaskProps", () => {
+  it("exposes linked GitHub issue metadata for the top bar", () => {
+    const props = resolveTaskProps(
+      {
+        id: "task-1",
+        title: "Link issue",
+        metadata: {
+          issue_url: "https://github.com/kdlbs/kandev/issues/1470",
+          issue_number: 1470,
+        },
+      } as unknown as Task,
+      null,
+    );
+
+    expect(props.issueUrl).toBe("https://github.com/kdlbs/kandev/issues/1470");
+    expect(props.issueNumber).toBe(1470);
   });
 });

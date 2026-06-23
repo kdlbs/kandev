@@ -32,7 +32,7 @@ vi.mock("@/components/vcs-split-button", () => ({
 }));
 
 vi.mock("@/components/github/pr-topbar-button", () => ({
-  PRTopbarButton: () => null,
+  PRTopbarButton: () => <button data-testid="pr-topbar-button">#1472</button>,
 }));
 
 vi.mock("@/components/gitlab/mr-topbar-button", () => ({
@@ -100,6 +100,24 @@ describe("TaskTopBar executor environment controls", () => {
     renderTopBar(<TaskTopBar taskId="task-1" remoteExecutorType="local_docker" />);
 
     expect(screen.getByTestId("executor-settings-button")).toBeTruthy();
+  });
+});
+
+describe("TaskTopBar GitHub issue link", () => {
+  it("shows the linked issue before linked pull requests", () => {
+    renderTopBar(
+      <TaskTopBar
+        taskId="task-1"
+        issueUrl="https://github.com/kdlbs/kandev/issues/1470"
+        issueNumber={1470}
+      />,
+    );
+
+    const issue = screen.getByTestId("issue-topbar-button");
+    const pr = screen.getByTestId("pr-topbar-button");
+
+    expect(issue.textContent).toContain("#1470");
+    expect(issue.compareDocumentPosition(pr) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 

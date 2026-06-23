@@ -1,4 +1,5 @@
 import type { Repository, Task } from "@/lib/types/http";
+import { issueFieldsFromMetadata } from "@/lib/metadata-utils";
 
 type ACPDebugInfo = {
   sessionId: unknown;
@@ -116,10 +117,13 @@ export function resolveTaskIds(task: Task | null) {
 
 export function resolveTaskProps(task: Task | null, repository: Repository | null) {
   const ids = resolveTaskIds(task);
+  const issue = issueFieldsFromMetadata(task?.metadata);
   return {
     ...ids,
     taskTitle: task?.title,
     taskDescription: task?.description,
+    issueUrl: issue.issueUrl,
+    issueNumber: issue.issueNumber,
     repositoryPath: repository?.local_path ?? null,
     repositoryName: repository?.name ?? null,
     /**
