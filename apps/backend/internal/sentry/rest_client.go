@@ -387,8 +387,9 @@ func issuesSearchPath(orgSlug, projectSlug string) string {
 // (`level:[error, fatal]`), which matches any of the listed values; a single
 // level renders as a plain `level:foo` token. The `is:` keyword has no bracket
 // form in Sentry search, so statuses are emitted as plain `is:bar` tokens;
-// filters are limited to a single status (enforced by validateFilterStatuses)
-// because two `is:` tokens would AND-combine and match nothing.
+// watch filters are limited to a single status (enforced by
+// validateFilterStatuses) because two `is:` tokens would AND-combine and match
+// nothing.
 func buildIssueQueryString(f SearchFilter) string {
 	parts := make([]string, 0, 4)
 	levels := make([]string, 0, len(f.Levels))

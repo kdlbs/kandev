@@ -122,10 +122,6 @@ func (c *Controller) httpSearchIssues(ctx *gin.Context) {
 		Levels:      trimAll(q["level"]),
 		Statuses:    trimAll(q["status"]),
 	}
-	if err := validateFilterStatuses(filter); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
 	cursor := q.Get("cursor")
 	result, err := c.service.SearchIssues(ctx.Request.Context(), filter, cursor)
 	if err != nil {
