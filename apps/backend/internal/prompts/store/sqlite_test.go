@@ -148,6 +148,7 @@ func TestSQLiteRepository_BuiltinPrompts(t *testing.T) {
 		"do not push",
 		"nothing actionable to address",
 		"{{pr.feedback}}",
+		"resolve the addressed PR review threads",
 	} {
 		if !strings.Contains(ciAutoFixContent, want) {
 			t.Fatalf("expected ci-auto-fix prompt to contain %q, got:\n%s", want, ciAutoFixContent)

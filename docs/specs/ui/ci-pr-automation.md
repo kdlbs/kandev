@@ -144,7 +144,9 @@ Auto-fix cycle for one task/PR:
    new feedback is only summaries, status updates, no-finding reports, duplicated or already
    addressed comments, rate-limit notices, or other non-actionable review diagnostics, the agent
    must not modify files, commit, or push; it should only report that there is nothing actionable
-   to address.
+   to address. When the agent addresses actionable PR review comments, the default prompt instructs
+   it to reply with a fix summary and resolve the addressed PR review threads so they do not keep
+   the PR blocked.
 8. Once the prompt is queued or accepted by the agent runtime, Kandev records the new signature/checkpoint and attempt metadata for the latest feedback snapshot, actionable or non-actionable, so identical snapshots are not sent repeatedly while the agent is still working.
 
 Auto-merge cycle for one task/PR:

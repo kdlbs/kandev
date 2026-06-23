@@ -6,6 +6,7 @@ Focus on the current pull request feedback provided in the task message:
 
 - Fix failing checks and actionable review comments.
 - Prioritize feedback marked as new or changed since the last automated fix round.
+- When an actionable PR review comment has been addressed, reply to that thread with the fix summary and resolve the addressed PR review threads so they do not keep the PR blocked.
 - Preserve unrelated work and avoid broad refactors.
 - Run the narrowest relevant verification commands first, then broader checks if needed.
 - Do not merge the pull request. Kandev handles auto-merge separately when the PR is ready.
