@@ -22,6 +22,16 @@ type fakeTaskIssueStore struct {
 	updated   map[string]interface{}
 }
 
+type countingIssueClient struct {
+	*MockClient
+	getIssueCalls int
+}
+
+func (c *countingIssueClient) GetIssue(ctx context.Context, owner, repo string, number int) (*Issue, error) {
+	c.getIssueCalls++
+	return c.MockClient.GetIssue(ctx, owner, repo, number)
+}
+
 func (f *fakeTaskIssueStore) GetTask(_ context.Context, taskID string) (*taskmodels.Task, error) {
 	if f.taskErr != nil {
 		return nil, f.taskErr
@@ -154,7 +164,7 @@ func TestLinkTaskIssue_PropagatesRepositoryLookupError(t *testing.T) {
 }
 
 func TestLinkTaskIssue_ChecksTaskBeforeFetchingIssue(t *testing.T) {
-	client := NewMockClient()
+	client := &countingIssueClient{MockClient: NewMockClient()}
 	taskErr := errors.New("task lookup failed")
 	store := &fakeTaskIssueStore{taskErr: taskErr}
 	svc := NewService(client, AuthMethodPAT, nil, nil, nil, testLogger(t))
@@ -165,6 +175,9 @@ func TestLinkTaskIssue_ChecksTaskBeforeFetchingIssue(t *testing.T) {
 	})
 	if !errors.Is(err, taskErr) {
 		t.Fatalf("expected task lookup error before GitHub fetch, got %v", err)
+	}
+	if client.getIssueCalls != 0 {
+		t.Fatalf("GetIssue called %d times before task lookup succeeded", client.getIssueCalls)
 	}
 }
 
