@@ -17,7 +17,7 @@ Options:
   --bundle-dir DIR  Source runtime bundle. Defaults to dist/kandev.
   --output-dir DIR  Destination runtime resource directory.
                     Defaults to apps/desktop/src-tauri/resources/kandev.
-  --platform NAME   Release platform, accepted for workflow compatibility.
+  --platform NAME   Release platform to include in verification output.
   -h, --help        Show this help.
 EOF
 }
@@ -26,6 +26,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUNDLE_DIR="${ROOT_DIR}/dist/kandev"
 OUTPUT_DIR="${ROOT_DIR}/apps/desktop/src-tauri/resources/kandev"
 VERIFY_SCRIPT="${ROOT_DIR}/scripts/release/verify-desktop-runtime.sh"
+PLATFORM=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -38,7 +39,7 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     --platform)
-      : "${2:?Missing value for --platform}"
+      PLATFORM="${2:?Missing value for --platform}"
       shift 2
       ;;
     -h|--help)
@@ -65,7 +66,11 @@ refuse_dangerous_output_dir() {
 refuse_dangerous_output_dir
 chmod +x "$BUNDLE_DIR/bin/kandev" "$BUNDLE_DIR/bin/agentctl" "$BUNDLE_DIR/bin/agentctl-linux-amd64" 2>/dev/null || true
 chmod +x "$BUNDLE_DIR/bin/kandev.exe" "$BUNDLE_DIR/bin/agentctl.exe" 2>/dev/null || true
-"$VERIFY_SCRIPT" "$BUNDLE_DIR" >/dev/null
+VERIFY_ARGS=()
+if [ -n "$PLATFORM" ]; then
+  VERIFY_ARGS=(--platform "$PLATFORM")
+fi
+"$VERIFY_SCRIPT" "${VERIFY_ARGS[@]}" "$BUNDLE_DIR" >/dev/null
 
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR/bin"
@@ -91,5 +96,9 @@ copy_one "agentctl binary" "$BUNDLE_DIR/bin/agentctl" "$BUNDLE_DIR/bin/agentctl.
 cp "$BUNDLE_DIR/bin/agentctl-linux-amd64" "$OUTPUT_DIR/bin/agentctl-linux-amd64"
 chmod +x "$OUTPUT_DIR/bin/agentctl-linux-amd64" 2>/dev/null || true
 
-"$VERIFY_SCRIPT" "$OUTPUT_DIR" >/dev/null
-printf 'Desktop runtime prepared at %s\n' "$OUTPUT_DIR"
+"$VERIFY_SCRIPT" "${VERIFY_ARGS[@]}" "$OUTPUT_DIR" >/dev/null
+if [ -n "$PLATFORM" ]; then
+  printf 'Desktop runtime prepared for %s at %s\n' "$PLATFORM" "$OUTPUT_DIR"
+else
+  printf 'Desktop runtime prepared at %s\n' "$OUTPUT_DIR"
+fi

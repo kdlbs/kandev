@@ -21,11 +21,12 @@ EOF
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RUNTIME_DIR="${ROOT_DIR}/apps/desktop/src-tauri/resources/kandev"
 RUNTIME_DIR_SET=false
+PLATFORM=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --platform)
-      : "${2:?Missing value for --platform}"
+      PLATFORM="${2:?Missing value for --platform}"
       shift 2
       ;;
     -h|--help)
@@ -104,4 +105,8 @@ require_one "Kandev launcher binary" "$BIN_DIR/kandev" "$BIN_DIR/kandev.exe"
 require_one "agentctl binary" "$BIN_DIR/agentctl" "$BIN_DIR/agentctl.exe"
 require_executable "agentctl linux/amd64 helper" "$BIN_DIR/agentctl-linux-amd64"
 
-printf 'Desktop runtime verified at %s\n' "$RUNTIME_DIR"
+if [ -n "$PLATFORM" ]; then
+  printf 'Desktop runtime verified for %s at %s\n' "$PLATFORM" "$RUNTIME_DIR"
+else
+  printf 'Desktop runtime verified at %s\n' "$RUNTIME_DIR"
+fi

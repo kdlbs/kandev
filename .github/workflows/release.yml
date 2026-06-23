@@ -66,6 +66,7 @@ jobs:
     outputs:
       version: ${{ steps.compute.outputs.version }}
       tag: ${{ steps.compute.outputs.tag }}
+      ref: ${{ steps.compute.outputs.ref }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -107,6 +108,8 @@ jobs:
         id: compute
         env:
           BUMP: ${{ inputs.bump }}
+          ALLOW_UNSIGNED_DESKTOP: ${{ inputs.allow_unsigned_desktop }}
+          CURRENT_REF: ${{ github.sha }}
         run: |
           set -euo pipefail
           PKG_VERSION="$(node -p "require('./apps/cli/package.json').version")"
@@ -156,6 +159,11 @@ jobs:
           echo "Next tag:                     $TAG"
           echo "version=$NEXT" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if [ "$ALLOW_UNSIGNED_DESKTOP" = "true" ]; then
+            echo "ref=$CURRENT_REF" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=$TAG" >> "$GITHUB_OUTPUT"
+          fi
 
           # Sanity: tag must not already exist
           if git rev-parse "$TAG" >/dev/null 2>&1; then
@@ -168,7 +176,7 @@ jobs:
           fi
 
       - name: Bump version + generate CHANGELOG (in working tree)
-        if: ${{ !inputs.dry_run }}
+        if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}
         env:
           NEXT: ${{ steps.compute.outputs.version }}
           TAG: ${{ steps.compute.outputs.tag }}
@@ -206,7 +214,7 @@ jobs:
           git-cliff --tag "$TAG" -o CHANGELOG.md
 
       - name: Create release PR + squash-merge + tag
-        if: ${{ !inputs.dry_run }}
+        if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NEXT: ${{ steps.compute.outputs.version }}
@@ -261,6 +269,17 @@ jobs:
             }
           }
 
+      - name: Unsigned desktop validation summary
+        if: ${{ !inputs.dry_run && inputs.allow_unsigned_desktop }}
+        env:
+          NEXT: ${{ steps.compute.outputs.version }}
+          TAG: ${{ steps.compute.outputs.tag }}
+          REF: ${{ steps.compute.outputs.ref }}
+        run: |
+          echo "Unsigned desktop validation for $TAG / $NEXT."
+          echo "No release PR, tag, GitHub release, public container tags, npm publish, or Homebrew update will be created."
+          echo "Build jobs will check out $REF."
+
       - name: Dry-run summary
         if: ${{ inputs.dry_run }}
         env:
@@ -287,7 +306,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
       - uses: pnpm/action-setup@v5
         with:
           version: "9.15.9"
@@ -317,7 +336,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             platform: linux-x64
             goos: linux
             goarch: amd64
@@ -346,7 +365,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: apps/backend/go.mod
@@ -453,7 +472,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
 
       - uses: pnpm/action-setup@v5
         with:

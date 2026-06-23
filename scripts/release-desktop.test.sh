@@ -45,7 +45,8 @@ grep -q "not executable" "$ERR_FILE" || fail "verify-desktop-runtime did not exp
 pass "verify-desktop-runtime rejects non-executable binaries"
 
 chmod_runtime "$runtime_dir"
-"$ROOT_DIR/scripts/release/verify-desktop-runtime.sh" --platform macos-arm64 "$runtime_dir" >/dev/null
+"$ROOT_DIR/scripts/release/verify-desktop-runtime.sh" --platform macos-arm64 "$runtime_dir" >"$OUT_FILE"
+grep -q "verified for macos-arm64" "$OUT_FILE" || fail "verify-desktop-runtime did not include platform output"
 pass "verify-desktop-runtime accepts executable runtime"
 
 missing_helper_runtime_dir="$TMP_DIR/missing-helper-runtime"
@@ -61,7 +62,8 @@ linux_output_dir="$TMP_DIR/linux-output"
 "$ROOT_DIR/scripts/release/prepare-desktop-runtime.sh" \
   --bundle-dir "$runtime_dir" \
   --platform linux-x64 \
-  --output-dir "$linux_output_dir" >/dev/null
+  --output-dir "$linux_output_dir" >"$OUT_FILE"
+grep -q "prepared for linux-x64" "$OUT_FILE" || fail "prepare-desktop-runtime did not include platform output"
 if [ ! -x "$linux_output_dir/bin/agentctl-linux-amd64" ]; then
   fail "prepare-desktop-runtime should copy executable helper for linux-x64"
 fi

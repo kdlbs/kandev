@@ -239,6 +239,19 @@ describe("release desktop artifacts", () => {
     expect(workflow).toContain("apps/desktop/src-tauri/Cargo.lock");
   });
 
+  it("pins linux x64 desktop release builds to Ubuntu 22.04", () => {
+    const workflow = releaseWorkflow();
+
+    expect(workflow).toContain(`- os: ubuntu-22.04
+            platform: linux-x64
+            goos: linux
+            goarch: amd64`);
+    expect(workflow).toContain(`- platform: linux-x64
+            os: ubuntu-22.04
+            rust_target: x86_64-unknown-linux-gnu
+            tauri_bundles: deb,rpm`);
+  });
+
   it("fails public macOS and Windows desktop builds closed when signing secrets are absent", () => {
     const workflow = releaseWorkflow();
     const signingDocs = readRepoFile("docs/desktop-tauri-signing.md");
@@ -246,6 +259,9 @@ describe("release desktop artifacts", () => {
 
     expect(workflow).toContain("allow_unsigned_desktop");
     expect(workflow).toContain("Unsigned desktop artifacts are internal validation only");
+    expect(workflow).toContain("ref: ${{ needs.prepare.outputs.ref }}");
+    expect(workflow).toContain("Unsigned desktop validation summary");
+    expect(workflow).toContain("No release PR, tag, GitHub release, public container tags");
     expect(workflow).toContain("if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}");
     expect(workflow).toContain("docker-amd64:");
     expect(workflow).toContain("docker-universal-manifest:");
