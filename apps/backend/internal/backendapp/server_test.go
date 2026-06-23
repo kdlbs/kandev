@@ -2,7 +2,6 @@ package backendapp
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"net/http"
 	"testing"
@@ -18,15 +17,14 @@ func TestStartHTTPServerUsesServerAddr(t *testing.T) {
 	}
 
 	blocked := listenOnFreePort(t)
-	defer func() {
+	t.Cleanup(func() {
 		if err := blocked.Close(); err != nil {
 			t.Errorf("close blocked listener: %v", err)
 		}
-	}()
+	})
 
-	targetPort := reserveFreePort(t)
 	server := &http.Server{
-		Addr:    fmt.Sprintf("127.0.0.1:%d", targetPort),
+		Addr:    "127.0.0.1:0",
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }),
 	}
 	defer func() {
@@ -57,6 +55,14 @@ func TestServerListenAddr(t *testing.T) {
 				t.Fatalf("serverListenAddr(%q, %d) = %q, want %q", tt.host, tt.port, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDesktopHealthTokenTrimsEnv(t *testing.T) {
+	t.Setenv(desktopHealthTokenEnv, "  token-value  ")
+
+	if got := desktopHealthToken(); got != "token-value" {
+		t.Fatalf("desktopHealthToken() = %q, want token-value", got)
 	}
 }
 
@@ -98,14 +104,4 @@ func listenerPort(t *testing.T, ln net.Listener) int {
 		t.Fatalf("expected TCP listener, got %T", ln.Addr())
 	}
 	return tcpAddr.Port
-}
-
-func reserveFreePort(t *testing.T) int {
-	t.Helper()
-	ln := listenOnFreePort(t)
-	port := listenerPort(t, ln)
-	if err := ln.Close(); err != nil {
-		t.Fatalf("close reserved listener: %v", err)
-	}
-	return port
 }

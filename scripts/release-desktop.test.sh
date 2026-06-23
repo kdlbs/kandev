@@ -84,3 +84,26 @@ if "$ROOT_DIR/scripts/release/prepare-desktop-runtime.sh" --bundle-dir "$runtime
 fi
 grep -q "Refusing dangerous desktop runtime output directory" "$ERR_FILE" || fail "prepare-desktop-runtime did not explain dangerous output directory"
 pass "prepare-desktop-runtime rejects dangerous output directory"
+
+safe_cwd="$TMP_DIR/safe-cwd"
+mkdir -p "$safe_cwd"
+if (cd "$safe_cwd" && "$ROOT_DIR/scripts/release/prepare-desktop-runtime.sh" --bundle-dir "$runtime_dir" --output-dir . >"$OUT_FILE" 2>"$ERR_FILE"); then
+  fail "prepare-desktop-runtime should reject current-directory output"
+fi
+grep -q "Refusing dangerous desktop runtime output directory" "$ERR_FILE" || fail "prepare-desktop-runtime did not explain current-directory output"
+pass "prepare-desktop-runtime rejects current-directory output"
+
+assets_dir="$TMP_DIR/assets"
+mkdir -p "$assets_dir"
+artifact="$assets_dir/kandev-desktop-linux-x64-test.deb"
+printf 'desktop artifact\n' > "$artifact"
+(cd "$assets_dir" && shasum -a 256 "$(basename "$artifact")" > "$(basename "$artifact").sha256")
+"$ROOT_DIR/scripts/release/verify-desktop-assets.sh" "$assets_dir" linux-x64 >/dev/null
+pass "verify-desktop-assets accepts matching checksums"
+
+printf 'tampered artifact\n' > "$artifact"
+if "$ROOT_DIR/scripts/release/verify-desktop-assets.sh" "$assets_dir" linux-x64 >"$OUT_FILE" 2>"$ERR_FILE"; then
+  fail "verify-desktop-assets should reject checksum mismatches"
+fi
+grep -q "Checksum verification failed" "$ERR_FILE" || fail "verify-desktop-assets did not explain checksum mismatch"
+pass "verify-desktop-assets rejects checksum mismatches"

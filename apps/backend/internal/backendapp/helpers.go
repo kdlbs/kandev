@@ -83,6 +83,11 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
+const (
+	desktopHealthTokenEnv    = "KANDEV_DESKTOP_HEALTH_TOKEN"
+	desktopHealthTokenHeader = "X-Kandev-Desktop-Health-Token"
+)
+
 // buildSessionDataProvider constructs the session data provider function used by the WebSocket hub
 // to send initial data (git status, context window, available commands) when a client subscribes.
 func buildSessionDataProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, log *logger.Logger) func(context.Context, string) ([]*ws.Message, error) {
@@ -551,6 +556,9 @@ func registerRoutes(p routeParams) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "starting", "service": "kandev"})
 			return
 		}
+		if token := desktopHealthToken(); token != "" {
+			c.Header(desktopHealthTokenHeader, token)
+		}
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "kandev", "mode": "websocket+http"})
 	})
 
@@ -612,6 +620,10 @@ func registerRoutes(p routeParams) {
 			p.log.Info("Web dev handler enabled", zap.String("target", p.webInternalURL))
 		}
 	}
+}
+
+func desktopHealthToken() string {
+	return strings.TrimSpace(os.Getenv(desktopHealthTokenEnv))
 }
 
 func newWebAppHandler(p routeParams) (*webapp.Handler, string, bool) {

@@ -21,7 +21,10 @@ const HEALTH_TIMEOUT: Duration = Duration::from_secs(60);
 const LOOPBACK_HOST: &str = "127.0.0.1";
 const DEFAULT_DESKTOP_PORT: u16 = 38430;
 const DESKTOP_PORT_ENV: &str = "KANDEV_DESKTOP_PORT";
+const DESKTOP_HEALTH_TOKEN_ENV: &str = "KANDEV_DESKTOP_HEALTH_TOKEN";
+const DESKTOP_HEALTH_TOKEN_HEADER: &str = "x-kandev-desktop-health-token";
 const STARTUP_OUTPUT_LIMIT: usize = 12 * 1024;
+const HEALTH_READY_SETTLE: Duration = Duration::from_millis(100);
 
 #[derive(Clone)]
 pub struct BackendState {
@@ -57,9 +60,15 @@ impl BackendState {
         self.shutdown_started.load(Ordering::SeqCst)
     }
 
-    fn set_child(&self, child: Child) {
+    fn set_child(&self, mut child: Child) -> bool {
         let mut guard = self.child.lock().expect("backend child mutex poisoned");
+        if self.is_shutdown_started() {
+            drop(guard);
+            terminate_child(&mut child);
+            return false;
+        }
         *guard = Some(child);
+        true
     }
 
     fn reset_startup_output(&self) {
@@ -167,17 +176,28 @@ pub fn start_desktop_backend(app: AppHandle, window: WebviewWindow) {
 fn launch_and_wait(app: &AppHandle, state: &BackendState) -> Result<String, String> {
     let runtime_dir = resolve_runtime_dir(app)?;
     let port = pick_desktop_port()?;
+    let health_token = desktop_health_token()?;
+    let mut inherited_env: BTreeMap<OsString, OsString> = env::vars_os().collect();
+    inherited_env.insert(
+        OsString::from(DESKTOP_HEALTH_TOKEN_ENV),
+        OsString::from(&health_token),
+    );
     let spec = build_backend_command(
         &runtime_dir,
         port,
-        env::vars_os().collect(),
+        inherited_env,
         current_home_dir().as_deref(),
     )?;
     state.reset_startup_output();
+    if state.is_shutdown_started() {
+        return Err("Desktop startup cancelled".to_string());
+    }
     let mut child = spawn_backend_command(&spec)?;
     capture_child_output(&mut child, state.startup_output.clone());
-    state.set_child(child);
-    wait_for_backend(port, state, HEALTH_TIMEOUT)?;
+    if !state.set_child(child) {
+        return Err("Desktop startup cancelled".to_string());
+    }
+    wait_for_backend(port, state, HEALTH_TIMEOUT, &health_token)?;
     Ok(format!("http://{LOOPBACK_HOST}:{port}/"))
 }
 
@@ -220,9 +240,7 @@ pub fn validate_runtime_dir(runtime_dir: &Path) -> Result<(), String> {
     let bin_dir = runtime_dir.join("bin");
     require_runtime_file(&bin_dir.join(executable_name("kandev")), "Kandev launcher binary")?;
     require_runtime_file(&bin_dir.join(executable_name("agentctl")), "agentctl binary")?;
-    if requires_agentctl_linux_amd64(env::consts::OS, env::consts::ARCH) {
-        require_runtime_file(&bin_dir.join("agentctl-linux-amd64"), "agentctl linux/amd64 helper")?;
-    }
+    require_runtime_file(&bin_dir.join("agentctl-linux-amd64"), "agentctl linux/amd64 helper")?;
     Ok(())
 }
 
@@ -232,10 +250,6 @@ fn require_runtime_file(path: &Path, label: &str) -> Result<(), String> {
     } else {
         Err(format!("{label} is missing at {}", path.display()))
     }
-}
-
-fn requires_agentctl_linux_amd64(os: &str, arch: &str) -> bool {
-    os != "linux" || arch != "x86_64"
 }
 
 pub fn desktop_environment(
@@ -267,6 +281,23 @@ pub fn pick_loopback_port() -> Result<u16, String> {
 pub fn pick_desktop_port() -> Result<u16, String> {
     let preferred = preferred_desktop_port(env::var_os(DESKTOP_PORT_ENV))?;
     pick_available_loopback_port(preferred)
+}
+
+fn desktop_health_token() -> Result<String, String> {
+    let mut bytes = [0_u8; 32];
+    getrandom::fill(&mut bytes)
+        .map_err(|err| format!("Could not generate desktop health token: {err}"))?;
+    Ok(hex_encode(&bytes))
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
 }
 
 fn preferred_desktop_port(value: Option<OsString>) -> Result<u16, String> {
@@ -344,17 +375,28 @@ where
     });
 }
 
-fn wait_for_backend(port: u16, state: &BackendState, timeout: Duration) -> Result<(), String> {
+fn wait_for_backend(
+    port: u16,
+    state: &BackendState,
+    timeout: Duration,
+    expected_health_token: &str,
+) -> Result<(), String> {
     let deadline = Instant::now() + timeout;
     loop {
         if state.is_shutdown_started() {
             return Err("Desktop startup cancelled".to_string());
         }
-        if health_ready(port) {
-            return Ok(());
-        }
         if let Some(message) = state.child_exit_message()? {
             return Err(format!("Kandev launcher exited before /health became ready ({message})"));
+        }
+        if health_ready(port, expected_health_token) {
+            thread::sleep(HEALTH_READY_SETTLE);
+            if let Some(message) = state.child_exit_message()? {
+                return Err(format!(
+                    "Kandev launcher exited before /health became ready ({message})"
+                ));
+            }
+            return Ok(());
         }
         if Instant::now() >= deadline {
             let mut message = format!("Timed out waiting for http://{LOOPBACK_HOST}:{port}/health");
@@ -378,36 +420,46 @@ fn append_recent_output(message: &mut String, output: Option<String>) {
     }
 }
 
-fn health_ready(port: u16) -> bool {
-    request_health(port).unwrap_or(false)
+fn health_ready(port: u16, expected_health_token: &str) -> bool {
+    request_health(port, expected_health_token).unwrap_or(false)
 }
 
-fn request_health(port: u16) -> Result<bool, String> {
+fn request_health(port: u16, expected_health_token: &str) -> Result<bool, String> {
     let addr = (LOOPBACK_HOST, port)
         .to_socket_addrs()
         .map_err(|err| err.to_string())?
         .next()
         .ok_or_else(|| format!("Could not resolve {LOOPBACK_HOST}:{port}"))?;
-    let mut stream =
-        TcpStream::connect_timeout(&addr, Duration::from_millis(250)).map_err(|err| err.to_string())?;
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(250))
+        .map_err(|err| err.to_string())?;
     stream
         .set_read_timeout(Some(Duration::from_millis(250)))
         .map_err(|err| err.to_string())?;
     stream
         .write_all(
-            format!("GET /health HTTP/1.1\r\nHost: {LOOPBACK_HOST}:{port}\r\nConnection: close\r\n\r\n")
-                .as_bytes(),
+            format!(
+                "GET /health HTTP/1.1\r\nHost: {LOOPBACK_HOST}:{port}\r\nConnection: close\r\n\r\n"
+            )
+            .as_bytes(),
         )
         .map_err(|err| err.to_string())?;
-    let response = read_http_status_prefix(&mut stream)?;
-    Ok(response.starts_with(b"HTTP/1.1 200") || response.starts_with(b"HTTP/1.0 200"))
+    let response = read_http_response_head(&mut stream)?;
+    if !(response.starts_with(b"HTTP/1.1 200") || response.starts_with(b"HTTP/1.0 200")) {
+        return Ok(false);
+    }
+    Ok(response_has_header(
+        &response,
+        DESKTOP_HEALTH_TOKEN_HEADER,
+        expected_health_token,
+    ))
 }
 
-fn read_http_status_prefix<R: Read>(reader: &mut R) -> Result<Vec<u8>, String> {
-    let mut response = Vec::with_capacity(64);
+fn read_http_response_head<R: Read>(reader: &mut R) -> Result<Vec<u8>, String> {
+    const MAX_HEADER_BYTES: usize = 8 * 1024;
+    let mut response = Vec::with_capacity(512);
     let mut buffer = [0_u8; 16];
-    while response.len() < 64 {
-        let read_len = buffer.len().min(64 - response.len());
+    while response.len() < MAX_HEADER_BYTES {
+        let read_len = buffer.len().min(MAX_HEADER_BYTES - response.len());
         let n = reader
             .read(&mut buffer[..read_len])
             .map_err(|err| err.to_string())?;
@@ -415,11 +467,24 @@ fn read_http_status_prefix<R: Read>(reader: &mut R) -> Result<Vec<u8>, String> {
             break;
         }
         response.extend_from_slice(&buffer[..n]);
-        if response.windows(2).any(|window| window == b"\r\n") {
+        if response.windows(4).any(|window| window == b"\r\n\r\n") {
             break;
         }
     }
     Ok(response)
+}
+
+fn response_has_header(response: &[u8], expected_name: &str, expected_value: &str) -> bool {
+    let response = String::from_utf8_lossy(response);
+    for line in response.lines().skip(1) {
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        if name.eq_ignore_ascii_case(expected_name) && value.trim() == expected_value {
+            return true;
+        }
+    }
+    false
 }
 
 fn normalized_path(existing: Option<&OsString>, home_dir: Option<&Path>) -> OsString {
@@ -559,6 +624,10 @@ mod tests {
         let runtime_dir = temp_runtime_dir("command-spec");
         let mut inherited = BTreeMap::new();
         inherited.insert(OsString::from("CUSTOM_ENV"), OsString::from("kept"));
+        inherited.insert(
+            OsString::from(DESKTOP_HEALTH_TOKEN_ENV),
+            OsString::from("health-token"),
+        );
         inherited.insert(OsString::from("PATH"), OsString::from("/existing/bin"));
 
         let spec = build_backend_command(
@@ -587,6 +656,10 @@ mod tests {
             spec.env.get(OsStr::new("KANDEV_BUNDLE_DIR")),
             Some(&runtime_dir.as_os_str().to_os_string())
         );
+        assert_eq!(
+            spec.env.get(OsStr::new(DESKTOP_HEALTH_TOKEN_ENV)),
+            Some(&OsString::from("health-token"))
+        );
     }
 
     #[test]
@@ -608,7 +681,8 @@ mod tests {
     #[test]
     fn missing_launcher_returns_readable_error() {
         let dir = temp_root("missing-launcher");
-        let err = build_backend_command(&dir, 48123, BTreeMap::new(), None).expect_err("missing launcher");
+        let err =
+            build_backend_command(&dir, 48123, BTreeMap::new(), None).expect_err("missing launcher");
         assert!(err.contains("Kandev launcher binary is missing"), "{err}");
     }
 
@@ -619,17 +693,24 @@ mod tests {
         fs::create_dir_all(&bin).expect("create bin");
         fs::write(bin.join(executable_name("kandev")), b"stub").expect("write launcher");
 
-        let err = build_backend_command(&dir, 48123, BTreeMap::new(), None).expect_err("missing agentctl");
+        let err =
+            build_backend_command(&dir, 48123, BTreeMap::new(), None).expect_err("missing agentctl");
 
         assert!(err.contains("agentctl binary is missing"), "{err}");
     }
 
     #[test]
-    fn linux_amd64_helper_requirement_matches_native_launcher() {
-        assert!(!requires_agentctl_linux_amd64("linux", "x86_64"));
-        assert!(requires_agentctl_linux_amd64("linux", "aarch64"));
-        assert!(requires_agentctl_linux_amd64("macos", "aarch64"));
-        assert!(requires_agentctl_linux_amd64("windows", "x86_64"));
+    fn missing_linux_helper_returns_readable_error() {
+        let dir = temp_root("missing-linux-helper");
+        let bin = dir.join("bin");
+        fs::create_dir_all(&bin).expect("create bin");
+        fs::write(bin.join(executable_name("kandev")), b"stub").expect("write launcher");
+        fs::write(bin.join(executable_name("agentctl")), b"stub").expect("write agentctl");
+
+        let err =
+            build_backend_command(&dir, 48123, BTreeMap::new(), None).expect_err("missing helper");
+
+        assert!(err.contains("agentctl linux/amd64 helper is missing"), "{err}");
     }
 
     #[test]
@@ -659,6 +740,14 @@ mod tests {
         let err = preferred_desktop_port(Some(OsString::from("0"))).expect_err("zero port");
 
         assert!(err.contains(DESKTOP_PORT_ENV), "{err}");
+    }
+
+    #[test]
+    fn desktop_health_token_is_hex_encoded() {
+        let token = desktop_health_token().expect("desktop health token");
+
+        assert_eq!(token.len(), 64);
+        assert!(token.chars().all(|ch| ch.is_ascii_hexdigit()), "{token}");
     }
 
     #[test]
@@ -742,16 +831,32 @@ mod tests {
     }
 
     #[test]
-    fn read_http_status_prefix_reads_past_short_first_chunk() {
-        let mut reader = ShortReader::new(b"HTTP/1.1 200 OK\r\nignored", 4);
+    fn read_http_response_head_reads_past_short_first_chunk() {
+        let mut reader = ShortReader::new(
+            b"HTTP/1.1 200 OK\r\nx-kandev-desktop-health-token: token\r\n\r\nignored",
+            4,
+        );
 
-        let prefix = read_http_status_prefix(&mut reader).expect("status prefix");
+        let prefix = read_http_response_head(&mut reader).expect("response head");
 
         assert!(prefix.starts_with(b"HTTP/1.1 200"));
         assert!(
-            prefix.windows(2).any(|window| window == b"\r\n"),
-            "status prefix should include the line terminator"
+            prefix.windows(4).any(|window| window == b"\r\n\r\n"),
+            "response head should include the header terminator"
         );
+    }
+
+    #[test]
+    fn response_header_check_requires_matching_desktop_health_token() {
+        let response = b"HTTP/1.1 200 OK\r\nX-Kandev-Desktop-Health-Token: token\r\n\r\n";
+
+        assert!(response_has_header(response, DESKTOP_HEALTH_TOKEN_HEADER, "token"));
+        assert!(!response_has_header(response, DESKTOP_HEALTH_TOKEN_HEADER, "other-token"));
+        assert!(!response_has_header(
+            b"HTTP/1.1 200 OK\r\n\r\n",
+            DESKTOP_HEALTH_TOKEN_HEADER,
+            "token"
+        ));
     }
 
     #[cfg(unix)]
@@ -768,9 +873,29 @@ mod tests {
             .expect("spawn long-running child");
         let pid = child.id();
 
-        state.set_child(child);
+        assert!(state.set_child(child));
         state.stop();
 
+        assert!(!process_exists(pid), "backend child {pid} should be terminated");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn set_child_terminates_child_when_shutdown_already_started() {
+        let state = BackendState::default();
+        let child = Command::new("sh")
+            .arg("-c")
+            .arg("trap 'exit 0' TERM; while true; do sleep 1; done")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn long-running child");
+        let pid = child.id();
+
+        state.stop();
+
+        assert!(!state.set_child(child));
         assert!(!process_exists(pid), "backend child {pid} should be terminated");
     }
 
@@ -780,9 +905,7 @@ mod tests {
         fs::create_dir_all(&bin).expect("create bin");
         fs::write(bin.join(executable_name("kandev")), b"stub").expect("write launcher");
         fs::write(bin.join(executable_name("agentctl")), b"stub").expect("write agentctl");
-        if requires_agentctl_linux_amd64(env::consts::OS, env::consts::ARCH) {
-            fs::write(bin.join("agentctl-linux-amd64"), b"stub").expect("write linux helper");
-        }
+        fs::write(bin.join("agentctl-linux-amd64"), b"stub").expect("write linux helper");
         dir
     }
 

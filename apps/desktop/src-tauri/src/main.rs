@@ -35,8 +35,16 @@ fn main() {
         .expect("error while building Kandev desktop app");
 
     app.run(|app_handle, event| {
-        if let RunEvent::ExitRequested { .. } = event {
-            app_handle.state::<backend::BackendState>().inner().stop();
+        if let RunEvent::ExitRequested { api, .. } = event {
+            let state = app_handle.state::<backend::BackendState>().inner().clone();
+            if state.begin_shutdown() {
+                api.prevent_exit();
+                let app_handle = app_handle.clone();
+                thread::spawn(move || {
+                    state.stop();
+                    app_handle.exit(0);
+                });
+            }
         }
     });
 }

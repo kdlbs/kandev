@@ -45,10 +45,18 @@ for platform in "${REQUIRED_PLATFORMS[@]}"; do
       continue
     fi
     found=$((found + 1))
-    if [ ! -f "$artifact.sha256" ]; then
-      echo "Missing desktop checksum: $artifact.sha256" >&2
+    checksum_file="$artifact.sha256"
+    if [ ! -f "$checksum_file" ]; then
+      echo "Missing desktop checksum: $checksum_file" >&2
       exit 1
     fi
+    (
+      cd "$ASSETS_DIR"
+      shasum -a 256 -c "$(basename "$checksum_file")" >/dev/null
+    ) || {
+      echo "Checksum verification failed for: $artifact" >&2
+      exit 1
+    }
   done
 
   if [ "$found" -eq 0 ]; then

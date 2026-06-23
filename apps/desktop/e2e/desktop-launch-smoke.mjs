@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
@@ -175,5 +175,8 @@ async function stopProcess(child) {
 
 function commandExists(command) {
   const path = process.env.PATH ?? "";
-  return path.split(":").some((entry) => existsSync(join(entry, command)));
+  return path
+    .split(delimiter)
+    .filter(Boolean)
+    .some((entry) => existsSync(join(entry, command)));
 }

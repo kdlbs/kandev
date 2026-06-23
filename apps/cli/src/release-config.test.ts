@@ -256,10 +256,12 @@ describe("release desktop artifacts", () => {
     const workflow = releaseWorkflow();
     const signingDocs = readRepoFile("docs/desktop-tauri-signing.md");
     const tauriConfig = readRepoFile("apps/desktop/src-tauri/tauri.conf.json");
+    const windowsSignScript = readRepoFile("apps/desktop/src-tauri/windows-sign.ps1");
 
     expect(workflow).toContain("allow_unsigned_desktop");
     expect(workflow).toContain("Unsigned desktop artifacts are internal validation only");
     expect(workflow).toContain("ref: ${{ needs.prepare.outputs.ref }}");
+    expect(workflow).toContain("persist-credentials: false");
     expect(workflow).toContain("Unsigned desktop validation summary");
     expect(workflow).toContain("No release PR, tag, GitHub release, public container tags");
     expect(workflow).toContain("if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}");
@@ -290,12 +292,18 @@ describe("release desktop artifacts", () => {
       'codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY"',
     );
     expect(workflow).toContain("codesign --verify --strict");
+    expect(workflow).toContain("Sign Windows desktop runtime binaries");
+    expect(workflow).toContain('foreach ($binary in @("kandev.exe", "agentctl.exe"))');
+    expect(workflow).toContain("Remove-Item -LiteralPath $certificatePath");
 
     expect(tauriConfig).toContain('"publisher": "Kandev"');
     expect(tauriConfig).toContain('"timestampUrl"');
+    expect(tauriConfig).toContain('"timestampUrl": "https://timestamp.digicert.com"');
     expect(tauriConfig).toContain('"signCommand"');
     expect(tauriConfig).toContain("windows-sign.ps1");
     expect(tauriConfig).not.toContain('"csp": null');
+    expect(windowsSignScript).toContain('"https://timestamp.digicert.com"');
+    expect(windowsSignScript).toContain("Remove-Item -LiteralPath $certificatePath");
     expect(signingDocs).toContain("Public recommended desktop releases require signing");
     expect(signingDocs).toContain("allow_unsigned_desktop");
     expect(signingDocs).toContain("does not publish a GitHub release");

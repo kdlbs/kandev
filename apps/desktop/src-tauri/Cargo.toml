@@ -27,6 +27,7 @@ tauri-build = { version = "=2.4.1", features = [] }
 
 [dependencies]
 darling = "=0.21.3"
+getrandom = "0.3"
 idna_adapter = "=1.0.0"
 libc = "0.2"
 plist = "=1.7.1"

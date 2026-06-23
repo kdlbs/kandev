@@ -47,7 +47,13 @@ The launcher starts the backend through the existing hidden backend mode and kee
 GET http://127.0.0.1:<port>/health
 ```
 
-When `/health` reports ready, the desktop window navigates to:
+Desktop launches pass a per-launch `KANDEV_DESKTOP_HEALTH_TOKEN` to the native launcher
+environment. The backend echoes the token in the `X-Kandev-Desktop-Health-Token` response
+header on successful `/health` responses. The desktop shell treats `/health` as ready only
+when the status is successful and the response header matches its generated token, so a
+separate local process on the same loopback port cannot satisfy desktop readiness.
+
+When `/health` reports ready for that launch, the desktop window navigates to:
 
 ```text
 http://127.0.0.1:<port>/

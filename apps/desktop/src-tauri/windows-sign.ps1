@@ -25,7 +25,7 @@ $certificatePath = Join-Path $env:RUNNER_TEMP "kandev-code-signing.pfx"
 [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
 
 $timestampUrl = if ([string]::IsNullOrWhiteSpace($env:WINDOWS_TIMESTAMP_URL)) {
-  "http://timestamp.digicert.com"
+  "https://timestamp.digicert.com"
 } else {
   $env:WINDOWS_TIMESTAMP_URL
 }
@@ -50,17 +50,23 @@ function Invoke-SignTool {
   }
 }
 
-Invoke-SignTool `
-  -Description "signtool sign" `
-  -Arguments @(
-    "sign",
-    "/fd", "SHA256",
-    "/td", "SHA256",
-    "/tr", $timestampUrl,
-    "/f", $certificatePath,
-    "/p", $env:WINDOWS_CERTIFICATE_PASSWORD,
-    $Path
-  )
-Invoke-SignTool `
-  -Description "signtool verify" `
-  -Arguments @("verify", "/pa", $Path)
+try {
+  Invoke-SignTool `
+    -Description "signtool sign" `
+    -Arguments @(
+      "sign",
+      "/fd", "SHA256",
+      "/td", "SHA256",
+      "/tr", $timestampUrl,
+      "/f", $certificatePath,
+      "/p", $env:WINDOWS_CERTIFICATE_PASSWORD,
+      $Path
+    )
+  Invoke-SignTool `
+    -Description "signtool verify" `
+    -Arguments @("verify", "/pa", $Path)
+} finally {
+  if (Test-Path -LiteralPath $certificatePath) {
+    Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
+  }
+}

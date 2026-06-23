@@ -1776,6 +1776,7 @@ name = "kandev-desktop"
 version = "0.1.0"
 dependencies = [
  "darling",
+ "getrandom 0.3.4",
  "idna_adapter",
  "libc",
  "plist",

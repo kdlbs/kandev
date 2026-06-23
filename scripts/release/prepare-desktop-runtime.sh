@@ -55,12 +55,22 @@ while [ "$#" -gt 0 ]; do
 done
 
 refuse_dangerous_output_dir() {
+  local output_parent output_base resolved_parent resolved_output
   case "$OUTPUT_DIR" in
-    ""|"/"|"/."|"/..")
+    ""|"."|".."|"/"|"/."|"/..")
       printf 'Refusing dangerous desktop runtime output directory: %s\n' "${OUTPUT_DIR:-<empty>}" >&2
       exit 1
       ;;
   esac
+  output_parent="$(dirname "$OUTPUT_DIR")"
+  output_base="$(basename "$OUTPUT_DIR")"
+  if resolved_parent="$(cd "$output_parent" 2>/dev/null && pwd -P)"; then
+    resolved_output="$resolved_parent/$output_base"
+    if [ "$resolved_output" = "/" ] || [ "$resolved_output" = "$ROOT_DIR" ]; then
+      printf 'Refusing dangerous desktop runtime output directory: %s\n' "$OUTPUT_DIR" >&2
+      exit 1
+    fi
+  fi
 }
 
 refuse_dangerous_output_dir
@@ -72,7 +82,7 @@ if [ -n "$PLATFORM" ]; then
 fi
 "$VERIFY_SCRIPT" "${VERIFY_ARGS[@]}" "$BUNDLE_DIR" >/dev/null
 
-rm -rf "$OUTPUT_DIR"
+rm -rf -- "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR/bin"
 printf '*\n!.gitignore\n' > "$OUTPUT_DIR/.gitignore"
 
