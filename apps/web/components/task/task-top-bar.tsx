@@ -248,7 +248,10 @@ function AttentionStatusGroup({
   issueNumber?: number;
 }) {
   return (
-    <TopbarCluster label="Task status and attention" className="[&_button]:h-7 [&_button]:text-xs">
+    <TopbarCluster
+      label="Task status and attention"
+      className="[&_button]:h-7 [&_a]:h-7 [&_button]:text-xs [&_a]:text-xs"
+    >
       <DocumentControls activeSessionId={activeSessionId ?? null} />
       {!isArchived && (
         <>
@@ -289,7 +292,7 @@ function GitHubIssueTopbarButton({
           data-issue-number={issueNumber}
           size="sm"
           variant="outline"
-          className="h-7 cursor-pointer gap-1.5 px-2 text-xs"
+          className="cursor-pointer gap-1.5 px-2"
         >
           <Link href={issueUrl} target="_blank" rel="noopener noreferrer">
             <IconCircleDot className="h-4 w-4 text-green-500" />
