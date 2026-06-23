@@ -33,10 +33,15 @@ test.describe("Workflow children completed trigger", () => {
       agent_profile_id: seedData.agentProfileId,
       repository_ids: [seedData.repositoryId],
     });
-    await apiClient.seedTaskSession(parent.id, {
+    const { session_id: parentSessionId } = await apiClient.seedTaskSession(parent.id, {
       state: "WAITING_FOR_INPUT",
+      sessionId: `children-completed-parent-${parent.id}`,
       agentProfileId: seedData.agentProfileId,
     });
+    const parentSessions = await apiClient.listTaskSessions(parent.id);
+    expect(parentSessions.sessions).toContainEqual(
+      expect.objectContaining({ id: parentSessionId, task_id: parent.id }),
+    );
 
     const firstChild = await apiClient.createTask(seedData.workspaceId, "First child task", {
       workflow_id: workflow.id,

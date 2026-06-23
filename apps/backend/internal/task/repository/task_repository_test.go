@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -250,43 +251,10 @@ func TestSQLiteRepository_ListChildCompletionRows_ActiveChildren(t *testing.T) {
 			t.Errorf("row %s missing updated_at", row.ID)
 		}
 	}
-	wantIDs := []string{"child-archived", "child-cancelled", "child-completed", "child-ephemeral", "child-failed", "child-open"}
-	if len(gotIDs) != 4 {
-		t.Fatalf("active child rows = %v, want 4 active rows (excluding archived/ephemeral), all created IDs were %v", gotIDs, wantIDs)
-	}
-	for _, want := range []string{"child-cancelled", "child-completed", "child-failed", "child-open"} {
-		found := false
-		for _, got := range gotIDs {
-			if got == want {
-				found = true
-			}
-		}
-		if !found {
-			t.Errorf("missing active child %s in %v", want, gotIDs)
-		}
-	}
-}
-
-func TestIsTerminalTaskState(t *testing.T) {
-	tests := []struct {
-		state v1.TaskState
-		want  bool
-	}{
-		{v1.TaskStateCompleted, true},
-		{v1.TaskStateFailed, true},
-		{v1.TaskStateCancelled, true},
-		{v1.TaskStateTODO, false},
-		{v1.TaskStateCreated, false},
-		{v1.TaskStateScheduling, false},
-		{v1.TaskStateInProgress, false},
-		{v1.TaskStateReview, false},
-		{v1.TaskStateBlocked, false},
-		{v1.TaskStateWaitingForInput, false},
-	}
-	for _, tt := range tests {
-		if got := IsTerminalTaskState(tt.state); got != tt.want {
-			t.Errorf("IsTerminalTaskState(%s) = %v, want %v", tt.state, got, tt.want)
-		}
+	wantIDs := []string{"child-cancelled", "child-completed", "child-failed", "child-open"}
+	slices.Sort(gotIDs)
+	if !slices.Equal(gotIDs, wantIDs) {
+		t.Fatalf("active child rows = %v, want %v", gotIDs, wantIDs)
 	}
 }
 

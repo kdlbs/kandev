@@ -54,7 +54,7 @@ func TestCompileStep_CompilesGenericTransitionActions(t *testing.T) {
 		Position:   0,
 		Events: wfmodels.StepEvents{
 			OnChildrenCompleted: []wfmodels.GenericAction{
-				{Type: wfmodels.GenericActionMoveToNext},
+				{Type: wfmodels.GenericActionMoveToNext, Config: map[string]any{"requires_approval": true}},
 				{Type: wfmodels.GenericActionMoveToStep, Config: map[string]any{"step_id": "s3"}},
 				{Type: wfmodels.GenericActionAutoStartAgent},
 			},
@@ -69,6 +69,9 @@ func TestCompileStep_CompilesGenericTransitionActions(t *testing.T) {
 	if actions[0].Kind != ActionMoveToNext {
 		t.Fatalf("expected first action to move_to_next, got %s", actions[0].Kind)
 	}
+	if !actions[0].RequiresApproval {
+		t.Fatalf("expected generic move_to_next to preserve requires_approval")
+	}
 	if actions[1].Kind != ActionMoveToStep {
 		t.Fatalf("expected second action to move_to_step, got %s", actions[1].Kind)
 	}
@@ -77,6 +80,39 @@ func TestCompileStep_CompilesGenericTransitionActions(t *testing.T) {
 	}
 	if actions[2].Kind != ActionAutoStartAgent {
 		t.Fatalf("expected third action to auto_start_agent, got %s", actions[2].Kind)
+	}
+}
+
+func TestCompileStep_CompilesGenericTransitionGuards(t *testing.T) {
+	step := &wfmodels.WorkflowStep{
+		ID:         "s1",
+		WorkflowID: "wf1",
+		Name:       "Review",
+		Events: wfmodels.StepEvents{
+			OnChildrenCompleted: []wfmodels.GenericAction{
+				{
+					Type: wfmodels.GenericActionMoveToStep,
+					Config: map[string]any{
+						"step_id": "s2",
+						"if": map[string]any{
+							"wait_for_quorum": map[string]any{
+								"role":      "reviewer",
+								"threshold": "all_approve",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	spec := CompileStep(step)
+	action := spec.Events[TriggerOnChildrenCompleted][0]
+	if action.Guard == nil || action.Guard.WaitForQuorum == nil {
+		t.Fatalf("expected generic move_to_step to preserve transition guard")
+	}
+	if action.Guard.WaitForQuorum.Role != "reviewer" {
+		t.Fatalf("guard role = %q, want reviewer", action.Guard.WaitForQuorum.Role)
 	}
 }
 

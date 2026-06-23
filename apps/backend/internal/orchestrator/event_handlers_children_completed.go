@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -59,6 +60,9 @@ func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID strin
 	}
 
 	operationID := childCompletionOperationID(parentID, rows)
+	unlock := s.lockChildCompletionOperation(operationID)
+	defer unlock()
+
 	if s.childCompletionAlreadyApplied(ctx, parentID, operationID) {
 		return false
 	}
@@ -135,6 +139,16 @@ func (s *Service) childCompletionAlreadyApplied(ctx context.Context, parentID, o
 		return true
 	}
 	return applied
+}
+
+func (s *Service) lockChildCompletionOperation(operationID string) func() {
+	value, _ := s.childCompletionLocks.LoadOrStore(operationID, &sync.Mutex{})
+	mu := value.(*sync.Mutex)
+	mu.Lock()
+	return func() {
+		mu.Unlock()
+		s.childCompletionLocks.Delete(operationID)
+	}
 }
 
 func (s *Service) evaluateChildrenCompleted(

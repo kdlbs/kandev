@@ -63,6 +63,29 @@ func TestTaskStateConstants(t *testing.T) {
 	}
 }
 
+func TestIsTerminalTaskState(t *testing.T) {
+	tests := []struct {
+		state v1.TaskState
+		want  bool
+	}{
+		{v1.TaskStateCompleted, true},
+		{v1.TaskStateFailed, true},
+		{v1.TaskStateCancelled, true},
+		{v1.TaskStateTODO, false},
+		{v1.TaskStateCreated, false},
+		{v1.TaskStateScheduling, false},
+		{v1.TaskStateInProgress, false},
+		{v1.TaskStateReview, false},
+		{v1.TaskStateBlocked, false},
+		{v1.TaskStateWaitingForInput, false},
+	}
+	for _, tt := range tests {
+		if got := IsTerminalTaskState(tt.state); got != tt.want {
+			t.Errorf("IsTerminalTaskState(%s) = %v, want %v", tt.state, got, tt.want)
+		}
+	}
+}
+
 func TestTaskStructInitialization(t *testing.T) {
 	now := time.Now().UTC()
 	repos := []*TaskRepository{

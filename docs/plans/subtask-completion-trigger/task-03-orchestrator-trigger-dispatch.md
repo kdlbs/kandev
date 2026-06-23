@@ -23,7 +23,7 @@ spec: "../../specs/tasks/subtask-completion-trigger.md"
 ## Verification
 
 ```bash
-make -C apps/backend test ARGS="./internal/orchestrator/..."
+go test ./internal/orchestrator/...
 ```
 
 ## Files Likely Touched

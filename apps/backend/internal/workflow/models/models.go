@@ -263,40 +263,53 @@ func RemapStepEvents(events StepEvents, idMap map[string]string) StepEvents {
 	result := StepEvents{}
 	result.OnEnter = append(result.OnEnter, events.OnEnter...)
 	for _, a := range events.OnTurnStart {
-		if a.Type == OnTurnStartMoveToStep && a.Config != nil {
-			if stepID, ok := a.Config["step_id"].(string); ok {
-				if newID, found := idMap[stepID]; found {
-					cfg := make(map[string]any, len(a.Config))
-					maps.Copy(cfg, a.Config)
-					cfg["step_id"] = newID
-					a.Config = cfg
-				}
-			}
+		if a.Type == OnTurnStartMoveToStep {
+			a.Config = remapActionStepID(a.Config, idMap)
 		}
 		result.OnTurnStart = append(result.OnTurnStart, a)
 	}
 	for _, a := range events.OnTurnComplete {
-		if a.Type == OnTurnCompleteMoveToStep && a.Config != nil {
-			if stepID, ok := a.Config["step_id"].(string); ok {
-				if newID, found := idMap[stepID]; found {
-					cfg := make(map[string]any, len(a.Config))
-					maps.Copy(cfg, a.Config)
-					cfg["step_id"] = newID
-					a.Config = cfg
-				}
-			}
+		if a.Type == OnTurnCompleteMoveToStep {
+			a.Config = remapActionStepID(a.Config, idMap)
 		}
 		result.OnTurnComplete = append(result.OnTurnComplete, a)
 	}
 	result.OnExit = append(result.OnExit, events.OnExit...)
-	// Phase 2 (ADR-0004) — copy generic-action lists through. None of these
-	// actions carry step_id references today, so a shallow copy suffices.
-	result.OnComment = append(result.OnComment, events.OnComment...)
-	result.OnBlockerResolved = append(result.OnBlockerResolved, events.OnBlockerResolved...)
-	result.OnChildrenCompleted = append(result.OnChildrenCompleted, events.OnChildrenCompleted...)
-	result.OnApprovalResolved = append(result.OnApprovalResolved, events.OnApprovalResolved...)
-	result.OnHeartbeat = append(result.OnHeartbeat, events.OnHeartbeat...)
-	result.OnBudgetAlert = append(result.OnBudgetAlert, events.OnBudgetAlert...)
-	result.OnAgentError = append(result.OnAgentError, events.OnAgentError...)
+	result.OnComment = remapGenericStepEvents(events.OnComment, idMap)
+	result.OnBlockerResolved = remapGenericStepEvents(events.OnBlockerResolved, idMap)
+	result.OnChildrenCompleted = remapGenericStepEvents(events.OnChildrenCompleted, idMap)
+	result.OnApprovalResolved = remapGenericStepEvents(events.OnApprovalResolved, idMap)
+	result.OnHeartbeat = remapGenericStepEvents(events.OnHeartbeat, idMap)
+	result.OnBudgetAlert = remapGenericStepEvents(events.OnBudgetAlert, idMap)
+	result.OnAgentError = remapGenericStepEvents(events.OnAgentError, idMap)
 	return result
+}
+
+func remapGenericStepEvents(actions []GenericAction, idMap map[string]string) []GenericAction {
+	result := make([]GenericAction, 0, len(actions))
+	for _, action := range actions {
+		if action.Type == GenericActionMoveToStep {
+			action.Config = remapActionStepID(action.Config, idMap)
+		}
+		result = append(result, action)
+	}
+	return result
+}
+
+func remapActionStepID(config map[string]any, idMap map[string]string) map[string]any {
+	if config == nil {
+		return nil
+	}
+	stepID, ok := config["step_id"].(string)
+	if !ok {
+		return config
+	}
+	newID, found := idMap[stepID]
+	if !found {
+		return config
+	}
+	cfg := make(map[string]any, len(config))
+	maps.Copy(cfg, config)
+	cfg["step_id"] = newID
+	return cfg
 }

@@ -2164,8 +2164,25 @@ func (s *Service) applyEngineTransition(
 	// ResetAgentContext → sendStreamRequest, which blocks G_reader waiting for a response
 	// that can only be delivered by G_reader reading from the same WebSocket — a deadlock.
 	// The DB transition is already persisted above, so it's safe to process on_enter async.
-	go s.processOnEnter(context.WithoutCancel(ctx), taskID, session, targetStep, taskDescription)
+	s.launchProcessOnEnter(context.WithoutCancel(ctx), taskID, session, targetStep, taskDescription)
 	return true
+}
+
+func (s *Service) launchProcessOnEnter(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	targetStep *wfmodels.WorkflowStep,
+	taskDescription string,
+) {
+	go func() {
+		defer func() {
+			if s.onProcessOnEnterComplete != nil {
+				s.onProcessOnEnterComplete()
+			}
+		}()
+		s.processOnEnter(ctx, taskID, session, targetStep, taskDescription)
+	}()
 }
 
 // processOnTurnStartViaEngine uses the workflow engine to evaluate on_turn_start

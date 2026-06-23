@@ -1045,6 +1045,8 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
 				zap.Error(stateErr))
+		} else {
+			s.processParentChildrenCompletedForTaskState(resumeCtx, taskID, v1.TaskStateFailed)
 		}
 		return nil, err
 	}
@@ -1251,6 +1253,8 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 				zap.String("task_id", session.TaskID),
 				zap.String("session_id", sessionID),
 				zap.Error(stateErr))
+		} else {
+			s.processParentChildrenCompletedForTaskState(ctx, session.TaskID, v1.TaskStateFailed)
 		}
 		return fmt.Errorf("failed to resume session: %w", err)
 	}

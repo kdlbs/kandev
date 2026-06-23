@@ -36,6 +36,13 @@ func TestProcessOnChildrenCompleted_TransitionsParentWhenAllActiveChildrenTermin
 
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createEngineService(t, repo, stepGetter, agentMgr)
+	onEnterDone := make(chan struct{}, 1)
+	svc.onProcessOnEnterComplete = func() {
+		select {
+		case onEnterDone <- struct{}{}:
+		default:
+		}
+	}
 
 	now := time.Now().UTC()
 	for _, child := range []*models.Task{
@@ -80,6 +87,7 @@ func TestProcessOnChildrenCompleted_TransitionsParentWhenAllActiveChildrenTermin
 	if transitioned := svc.processOnChildrenCompleted(ctx, "parent"); !transitioned {
 		t.Fatalf("expected all-terminal active children to transition parent")
 	}
+	waitForChildrenCompletedOnEnter(t, onEnterDone)
 
 	parent, err = repo.GetTask(ctx, "parent")
 	if err != nil {
@@ -87,5 +95,24 @@ func TestProcessOnChildrenCompleted_TransitionsParentWhenAllActiveChildrenTermin
 	}
 	if parent.WorkflowStepID != "step_done" {
 		t.Fatalf("expected parent to move to step_done, got %q", parent.WorkflowStepID)
+	}
+	if transitioned := svc.processOnChildrenCompleted(ctx, "parent"); transitioned {
+		t.Fatalf("expected duplicate all-terminal evaluation not to transition parent again")
+	}
+	parent, err = repo.GetTask(ctx, "parent")
+	if err != nil {
+		t.Fatalf("load parent after duplicate evaluation: %v", err)
+	}
+	if parent.WorkflowStepID != "step_done" {
+		t.Fatalf("expected parent to remain on step_done after duplicate evaluation, got %q", parent.WorkflowStepID)
+	}
+}
+
+func waitForChildrenCompletedOnEnter(t *testing.T, done <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for processOnEnter goroutine")
 	}
 }

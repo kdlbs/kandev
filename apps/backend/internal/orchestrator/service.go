@@ -232,6 +232,12 @@ type Service struct {
 	// Workflow engine for typed state-machine evaluation of step transitions
 	workflowEngine *engine.Engine
 	workflowStore  *workflowStore
+	// childCompletionLocks serializes duplicate on_children_completed deliveries
+	// for the same completed child set across watcher and executor callbacks.
+	childCompletionLocks sync.Map
+	// onProcessOnEnterComplete is a package-test hook for synchronizing with
+	// applyEngineTransition's asynchronous processOnEnter goroutine.
+	onProcessOnEnterComplete func()
 	// engineOptions are applied each time initWorkflowEngine runs. Wired
 	// from cmd/kandev (Phase 3.2) to plug Phase 2 ADR-0004 dependencies
 	// — RunQueueAdapter, ParticipantStore, DecisionStore, and the CEO /

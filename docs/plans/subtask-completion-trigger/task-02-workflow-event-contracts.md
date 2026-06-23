@@ -20,7 +20,7 @@ spec: "../../specs/tasks/subtask-completion-trigger.md"
 ## Verification
 
 ```bash
-make -C apps/backend test ARGS="./internal/task/dto/..."
+go test ./internal/task/dto/...
 cd apps && pnpm --filter @kandev/web typecheck
 ```
 
