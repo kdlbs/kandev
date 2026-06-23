@@ -4,7 +4,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: verify-desktop-runtime.sh [runtime-dir]
+Usage: verify-desktop-runtime.sh [--platform PLATFORM] [runtime-dir]
 
 Validate a desktop runtime directory with this layout:
 
@@ -12,7 +12,7 @@ Validate a desktop runtime directory with this layout:
     bin/
       kandev[.exe]
       agentctl[.exe]
-      agentctl-linux-amd64
+      agentctl-linux-amd64 (required unless PLATFORM is linux-x64)
 
 If runtime-dir is omitted, apps/desktop/src-tauri/resources/kandev is checked.
 EOF
@@ -20,20 +20,59 @@ EOF
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RUNTIME_DIR="${ROOT_DIR}/apps/desktop/src-tauri/resources/kandev"
+RUNTIME_DIR_SET=false
 
-case "${1:-}" in
-  -h|--help)
-    usage
-    exit 0
-    ;;
-  "")
-    ;;
-  *)
-    RUNTIME_DIR="$1"
-    ;;
-esac
+detect_platform() {
+  local os arch
+  case "$(uname -s)" in
+    Linux) os="linux" ;;
+    Darwin) os="macos" ;;
+    MINGW*|MSYS*|CYGWIN*) os="windows" ;;
+    *) os="unknown" ;;
+  esac
+  case "$(uname -m)" in
+    x86_64|amd64) arch="x64" ;;
+    aarch64|arm64) arch="arm64" ;;
+    *) arch="$(uname -m)" ;;
+  esac
+  printf '%s-%s\n' "$os" "$arch"
+}
+
+PLATFORM="$(detect_platform)"
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --platform)
+      PLATFORM="${2:?Missing value for --platform}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -*)
+      printf 'Unknown argument: %s\n\n' "$1" >&2
+      usage >&2
+      exit 2
+      ;;
+    *)
+      if [ "$RUNTIME_DIR_SET" = true ]; then
+        printf 'Unexpected extra runtime directory: %s\n\n' "$1" >&2
+        usage >&2
+        exit 2
+      fi
+      RUNTIME_DIR="$1"
+      RUNTIME_DIR_SET=true
+      shift
+      ;;
+  esac
+done
 
 BIN_DIR="$RUNTIME_DIR/bin"
+
+requires_agentctl_linux_amd64() {
+  [ "$PLATFORM" != "linux-x64" ]
+}
 
 is_executable_file() {
   local path="$1"
@@ -85,6 +124,8 @@ fi
 
 require_one "Kandev launcher binary" "$BIN_DIR/kandev" "$BIN_DIR/kandev.exe"
 require_one "agentctl binary" "$BIN_DIR/agentctl" "$BIN_DIR/agentctl.exe"
-require_executable "agentctl linux/amd64 helper" "$BIN_DIR/agentctl-linux-amd64"
+if requires_agentctl_linux_amd64; then
+  require_executable "agentctl linux/amd64 helper" "$BIN_DIR/agentctl-linux-amd64"
+fi
 
 printf 'Desktop runtime verified at %s\n' "$RUNTIME_DIR"

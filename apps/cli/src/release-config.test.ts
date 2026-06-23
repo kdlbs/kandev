@@ -195,6 +195,7 @@ describe("release desktop artifacts", () => {
     expect(workflow).toMatch(/\n  build-desktop:\n/);
     expect(workflow).toContain("needs: [prepare, build-bundles]");
     expect(workflow).toContain("scripts/release/prepare-desktop-runtime.sh");
+    expect(workflow).toContain('--platform "${{ matrix.platform }}"');
     expect(workflow).toContain(
       'rustup toolchain install stable --profile minimal --target "${{ matrix.rust_target }}"',
     );

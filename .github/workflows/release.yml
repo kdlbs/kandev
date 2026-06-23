@@ -502,6 +502,7 @@ jobs:
           tar -xzf "dist/desktop-runtime/kandev-${{ matrix.platform }}.tar.gz" -C dist/desktop-runtime-src
           scripts/release/prepare-desktop-runtime.sh \
             --bundle-dir "dist/desktop-runtime-src/kandev" \
+            --platform "${{ matrix.platform }}" \
             --output-dir "apps/desktop/src-tauri/resources/kandev"
 
       - name: Configure macOS signing and notarization
