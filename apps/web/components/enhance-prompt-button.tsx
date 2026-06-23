@@ -32,19 +32,25 @@ export function EnhancePromptButton({
           tabIndex={isDisabled ? 0 : -1}
           aria-label={isDisabled ? tooltipText : undefined}
         >
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 cursor-pointer hover:bg-muted/40 text-slate-400"
-            onClick={isConfigured ? onClick : undefined}
-            disabled={isDisabled}
-            aria-label="Enhance prompt with AI"
-            aria-busy={isLoading}
-            data-testid="enhance-prompt-button"
-          >
-            {isLoading ? <GridSpinner className="h-4 w-4" /> : <IconSparkles className="h-4 w-4" />}
-          </Button>
+          <span aria-hidden={isDisabled ? "true" : undefined} className="inline-flex">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 cursor-pointer hover:bg-muted/40 text-slate-400"
+              onClick={isConfigured ? onClick : undefined}
+              disabled={isDisabled}
+              aria-label="Enhance prompt with AI"
+              aria-busy={isLoading}
+              data-testid="enhance-prompt-button"
+            >
+              {isLoading ? (
+                <GridSpinner className="h-4 w-4" />
+              ) : (
+                <IconSparkles className="h-4 w-4" />
+              )}
+            </Button>
+          </span>
         </span>
       </TooltipTrigger>
       <TooltipContent>{tooltipText}</TooltipContent>

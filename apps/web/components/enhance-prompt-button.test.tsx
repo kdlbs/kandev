@@ -56,12 +56,14 @@ describe("EnhancePromptButton", () => {
       "Configure a utility agent in settings to enable AI enhancement",
     );
     expect(tooltipTrigger.getAttribute("tabindex")).toBe("0");
+    expect(tooltipTrigger.querySelector("[aria-hidden='true'] button")).not.toBeNull();
   });
 
   it("leaves focus on the button when enabled", () => {
     render(<EnhancePromptButton onClick={vi.fn()} isLoading={false} />);
 
     const button = screen.getByTestId("enhance-prompt-button");
-    expect(button.parentElement?.getAttribute("tabindex")).toBe("-1");
+    expect(button.parentElement?.parentElement?.getAttribute("tabindex")).toBe("-1");
+    expect(button.parentElement?.getAttribute("aria-hidden")).toBeNull();
   });
 });
