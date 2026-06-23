@@ -195,6 +195,8 @@ describe("release desktop artifacts", () => {
     expect(workflow).toMatch(/\n  build-desktop:\n/);
     expect(workflow).toContain("needs: [prepare, build-bundles]");
     expect(workflow).toContain("scripts/release/prepare-desktop-runtime.sh");
+    expect(workflow).toContain("dtolnay/rust-toolchain@stable");
+    expect(workflow).toContain("Swatinem/rust-cache@v2");
 
     for (const platform of desktopPlatforms) {
       expect(workflow, `release.yml must include desktop platform ${platform}`).toContain(
@@ -214,11 +216,24 @@ describe("release desktop artifacts", () => {
     expect(workflow).toContain("pattern: desktop-*");
     expect(workflow).toContain("scripts/release/verify-desktop-assets.sh");
     expect(workflow).toContain("dist/release-assets/kandev-desktop-*");
+    expect(workflow).toContain('shasum -a 256 "$(basename "$dest")"');
 
     expect(publishNpmScript).toContain('asset="kandev-${platform}.tar.gz"');
     expect(publishNpmScript).not.toContain("kandev-desktop-");
     expect(homebrewScript).toContain('local sha_file="kandev-${platform}.tar.gz.sha256"');
     expect(homebrewScript).not.toContain("kandev-desktop-");
+  });
+
+  it("bumps desktop package and Tauri versions during release preparation", () => {
+    const workflow = releaseWorkflow();
+
+    expect(workflow).toContain('(cd apps/desktop && npm version --no-git-tag-version "$NEXT")');
+    expect(workflow).toContain("tauriConfig.version = next");
+    expect(workflow).toContain('cargoToml.replace(/^version = ".*"$/m, `version = "${next}"`)');
+    expect(workflow).toContain('name = "kandev-desktop"');
+    expect(workflow).toContain("apps/desktop/src-tauri/tauri.conf.json");
+    expect(workflow).toContain("apps/desktop/src-tauri/Cargo.toml");
+    expect(workflow).toContain("apps/desktop/src-tauri/Cargo.lock");
   });
 
   it("fails public macOS and Windows desktop builds closed when signing secrets are absent", () => {
@@ -228,6 +243,7 @@ describe("release desktop artifacts", () => {
 
     expect(workflow).toContain("allow_unsigned_desktop");
     expect(workflow).toContain("Unsigned desktop artifacts are internal validation only");
+    expect(workflow).toContain("if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}");
 
     for (const key of [
       "APPLE_CERTIFICATE",
@@ -247,7 +263,11 @@ describe("release desktop artifacts", () => {
 
     expect(tauriConfig).toContain('"publisher": "Kandev"');
     expect(tauriConfig).toContain('"timestampUrl"');
+    expect(tauriConfig).toContain('"signCommand"');
+    expect(tauriConfig).toContain("windows-sign.ps1");
+    expect(tauriConfig).not.toContain('"csp": null');
     expect(signingDocs).toContain("Public recommended desktop releases require signing");
     expect(signingDocs).toContain("allow_unsigned_desktop");
+    expect(signingDocs).toContain("does not publish a GitHub release");
   });
 });

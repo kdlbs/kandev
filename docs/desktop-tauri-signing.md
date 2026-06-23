@@ -2,7 +2,7 @@
 
 Public recommended desktop releases require signing on macOS and Windows. The release workflow fails closed by default when those secrets are missing.
 
-Use `allow_unsigned_desktop=true` only for internal validation builds. Unsigned desktop artifacts are internal validation only and must not be presented as trusted public downloads.
+Use `allow_unsigned_desktop=true` only for internal validation builds. That mode may upload workflow artifacts for maintainer inspection, but it does not publish a GitHub release. Unsigned desktop artifacts are internal validation only and must not be presented as trusted public downloads.
 
 ## macOS
 

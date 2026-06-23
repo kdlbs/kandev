@@ -385,6 +385,15 @@ jobs:
           cache: pnpm
           cache-dependency-path: apps/pnpm-lock.yaml
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          key: desktop-e2e
+
       - name: Install desktop system dependencies
         run: |
           sudo apt-get update

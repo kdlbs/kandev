@@ -1,4 +1,5 @@
 use kandev_desktop::backend;
+use std::thread;
 use tauri::{Manager, WindowEvent};
 
 fn main() {
@@ -18,8 +19,16 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if matches!(event, WindowEvent::CloseRequested { .. }) {
-                window.app_handle().state::<backend::BackendState>().stop();
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let state = window.app_handle().state::<backend::BackendState>().inner().clone();
+                if state.begin_shutdown() {
+                    api.prevent_close();
+                    let window = window.clone();
+                    thread::spawn(move || {
+                        state.stop();
+                        let _ = window.close();
+                    });
+                }
             }
         })
         .run(tauri::generate_context!())

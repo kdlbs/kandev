@@ -180,6 +180,28 @@ jobs:
           # rewrites them to the real version in-flight before publishing,
           # once the matching @kdlbs/runtime-* tarballs exist on npm.
           (cd apps/cli && npm version --no-git-tag-version "$NEXT")
+          (cd apps/desktop && npm version --no-git-tag-version "$NEXT")
+          node <<'NODE'
+          const fs = require("node:fs");
+          const next = process.env.NEXT;
+
+          const tauriConfigPath = "apps/desktop/src-tauri/tauri.conf.json";
+          const tauriConfig = JSON.parse(fs.readFileSync(tauriConfigPath, "utf8"));
+          tauriConfig.version = next;
+          fs.writeFileSync(tauriConfigPath, `${JSON.stringify(tauriConfig, null, 2)}\n`);
+
+          const cargoTomlPath = "apps/desktop/src-tauri/Cargo.toml";
+          const cargoToml = fs.readFileSync(cargoTomlPath, "utf8");
+          fs.writeFileSync(cargoTomlPath, cargoToml.replace(/^version = ".*"$/m, `version = "${next}"`));
+
+          const cargoLockPath = "apps/desktop/src-tauri/Cargo.lock";
+          const cargoLock = fs.readFileSync(cargoLockPath, "utf8");
+          const packageBlock = /(\[\[package\]\]\nname = "kandev-desktop"\nversion = ")[^"]+(")/;
+          if (!packageBlock.test(cargoLock)) {
+            throw new Error("Could not find kandev-desktop package entry in Cargo.lock");
+          }
+          fs.writeFileSync(cargoLockPath, cargoLock.replace(packageBlock, `$1${next}$2`));
+          NODE
           pnpm -C apps install --no-frozen-lockfile
           git-cliff --tag "$TAG" -o CHANGELOG.md
 
@@ -197,7 +219,7 @@ jobs:
           MSG="release: $NEXT"
 
           git checkout -b "$BRANCH"
-          git add apps/cli/package.json CHANGELOG.md apps/pnpm-lock.yaml
+          git add apps/cli/package.json apps/desktop/package.json apps/desktop/src-tauri/Cargo.lock apps/desktop/src-tauri/Cargo.toml apps/desktop/src-tauri/tauri.conf.json CHANGELOG.md apps/pnpm-lock.yaml
           git commit -m "$MSG"
           # If a previous run pushed this branch but failed before the merge
           # landed, the remote branch still exists. Delete it so the push
@@ -443,6 +465,17 @@ jobs:
           cache: pnpm
           cache-dependency-path: apps/pnpm-lock.yaml
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          key: desktop-${{ matrix.platform }}-${{ matrix.rust_target }}
+
       - name: Install Linux desktop dependencies
         if: startsWith(matrix.platform, 'linux-')
         run: |
@@ -455,9 +488,6 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             patchelf
-
-      - name: Install Rust target
-        run: rustup target add "${{ matrix.rust_target }}"
 
       - name: Install dependencies
         run: pnpm -C apps install --frozen-lockfile
@@ -570,6 +600,11 @@ jobs:
           APPLE_PROVIDER_SHORT_NAME: ${{ secrets.APPLE_PROVIDER_SHORT_NAME }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          ALLOW_UNSIGNED_DESKTOP: ${{ inputs.allow_unsigned_desktop }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+          WINDOWS_SIGNTOOL_PATH: ${{ secrets.WINDOWS_SIGNTOOL_PATH }}
         run: |
           set -euo pipefail
           pnpm -C apps --filter @kandev/desktop build:vite
@@ -648,7 +683,7 @@ jobs:
             base="$(basename "$artifact")"
             dest="$out_dir/kandev-desktop-${{ matrix.platform }}-$base"
             cp "$artifact" "$dest"
-            shasum -a 256 "$dest" > "$dest.sha256"
+            (cd "$out_dir" && shasum -a 256 "$(basename "$dest")" > "$(basename "$dest").sha256")
             found=$((found + 1))
           done < <(find "$bundle_dir" -type f \( \
             -name '*.dmg' -o \
@@ -1025,7 +1060,7 @@ jobs:
   publish-release:
     name: Publish GitHub release
     needs: [prepare, build-bundles, build-desktop, docker-universal-manifest]
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}
     runs-on: ubuntu-latest
     permissions:
       contents: write    # softprops/action-gh-release creates the release

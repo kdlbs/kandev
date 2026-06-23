@@ -24,7 +24,7 @@
     ],
     "security": {
       "capabilities": ["default"],
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*; frame-ancestors 'none'"
     }
   },
   "bundle": {
@@ -44,7 +44,8 @@
     ],
     "windows": {
       "digestAlgorithm": "sha256",
-      "timestampUrl": "http://timestamp.digicert.com"
+      "timestampUrl": "http://timestamp.digicert.com",
+      "signCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File ./windows-sign.ps1 %1"
     }
   }
 }

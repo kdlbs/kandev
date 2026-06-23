@@ -6,7 +6,10 @@ use std::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -16,13 +19,30 @@ use tauri::{AppHandle, Manager, WebviewWindow};
 
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(60);
 const LOOPBACK_HOST: &str = "127.0.0.1";
+const STARTUP_OUTPUT_LIMIT: usize = 12 * 1024;
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct BackendState {
     child: Arc<Mutex<Option<Child>>>,
+    startup_output: Arc<Mutex<StartupOutput>>,
+    shutdown_started: Arc<AtomicBool>,
+}
+
+impl Default for BackendState {
+    fn default() -> Self {
+        Self {
+            child: Arc::new(Mutex::new(None)),
+            startup_output: Arc::new(Mutex::new(StartupOutput::default())),
+            shutdown_started: Arc::new(AtomicBool::new(false)),
+        }
+    }
 }
 
 impl BackendState {
+    pub fn begin_shutdown(&self) -> bool {
+        !self.shutdown_started.swap(true, Ordering::SeqCst)
+    }
+
     pub fn stop(&self) {
         let child = self.child.lock().expect("backend child mutex poisoned").take();
         if let Some(mut child) = child {
@@ -35,14 +55,66 @@ impl BackendState {
         *guard = Some(child);
     }
 
+    fn reset_startup_output(&self) {
+        self.startup_output
+            .lock()
+            .expect("startup output mutex poisoned")
+            .clear();
+    }
+
+    fn recent_startup_output(&self) -> Option<String> {
+        self.startup_output
+            .lock()
+            .expect("startup output mutex poisoned")
+            .text()
+    }
+
     fn child_exit_message(&self) -> Result<Option<String>, String> {
         let mut guard = self.child.lock().expect("backend child mutex poisoned");
         if let Some(child) = guard.as_mut() {
             if let Some(status) = child.try_wait().map_err(|err| err.to_string())? {
-                return Ok(Some(status.to_string()));
+                thread::sleep(Duration::from_millis(50));
+                return Ok(Some(launcher_exit_message(
+                    &status.to_string(),
+                    self.recent_startup_output(),
+                )));
             }
         }
         Ok(None)
+    }
+}
+
+#[derive(Default)]
+struct StartupOutput {
+    bytes: Vec<u8>,
+}
+
+impl StartupOutput {
+    fn clear(&mut self) {
+        self.bytes.clear();
+    }
+
+    fn push(&mut self, stream: &str, chunk: &[u8]) {
+        if chunk.is_empty() {
+            return;
+        }
+
+        self.bytes
+            .extend_from_slice(format!("\n[{stream}] ").as_bytes());
+        self.bytes.extend_from_slice(chunk);
+        if self.bytes.len() > STARTUP_OUTPUT_LIMIT {
+            let overflow = self.bytes.len() - STARTUP_OUTPUT_LIMIT;
+            self.bytes.drain(0..overflow);
+        }
+    }
+
+    fn text(&self) -> Option<String> {
+        let text = String::from_utf8_lossy(&self.bytes).trim().to_string();
+        if text.is_empty() {
+            None
+        } else {
+            Some(text)
+        }
     }
 }
 
@@ -94,7 +166,9 @@ fn launch_and_wait(app: &AppHandle, state: &BackendState) -> Result<String, Stri
         env::vars_os().collect(),
         current_home_dir().as_deref(),
     )?;
-    let child = spawn_backend_command(&spec)?;
+    state.reset_startup_output();
+    let mut child = spawn_backend_command(&spec)?;
+    capture_child_output(&mut child, state.startup_output.clone());
     state.set_child(child);
     wait_for_backend(port, state, HEALTH_TIMEOUT)?;
     Ok(format!("http://{LOOPBACK_HOST}:{port}/"))
@@ -191,8 +265,8 @@ fn spawn_backend_command(spec: &BackendCommandSpec) -> Result<Child, String> {
         .env_clear()
         .envs(&spec.env)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     command.spawn().map_err(|err| {
         format!(
             "Failed to start Kandev launcher at {}: {err}",
@@ -201,23 +275,61 @@ fn spawn_backend_command(spec: &BackendCommandSpec) -> Result<Child, String> {
     })
 }
 
+fn capture_child_output(child: &mut Child, output: Arc<Mutex<StartupOutput>>) {
+    if let Some(stdout) = child.stdout.take() {
+        capture_stream("stdout", stdout, output.clone());
+    }
+    if let Some(stderr) = child.stderr.take() {
+        capture_stream("stderr", stderr, output);
+    }
+}
+
+fn capture_stream<R>(stream: &'static str, mut reader: R, output: Arc<Mutex<StartupOutput>>)
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut buffer = [0_u8; 1024];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) | Err(_) => return,
+                Ok(n) => output
+                    .lock()
+                    .expect("startup output mutex poisoned")
+                    .push(stream, &buffer[..n]),
+            }
+        }
+    });
+}
+
 fn wait_for_backend(port: u16, state: &BackendState, timeout: Duration) -> Result<(), String> {
     let deadline = Instant::now() + timeout;
     loop {
         if health_ready(port) {
             return Ok(());
         }
-        if let Some(status) = state.child_exit_message()? {
-            return Err(format!(
-                "Kandev launcher exited before /health became ready ({status})"
-            ));
+        if let Some(message) = state.child_exit_message()? {
+            return Err(format!("Kandev launcher exited before /health became ready ({message})"));
         }
         if Instant::now() >= deadline {
-            return Err(format!(
-                "Timed out waiting for http://{LOOPBACK_HOST}:{port}/health"
-            ));
+            let mut message = format!("Timed out waiting for http://{LOOPBACK_HOST}:{port}/health");
+            append_recent_output(&mut message, state.recent_startup_output());
+            return Err(message);
         }
         thread::sleep(Duration::from_millis(250));
+    }
+}
+
+fn launcher_exit_message(status: &str, output: Option<String>) -> String {
+    let mut message = status.to_string();
+    append_recent_output(&mut message, output);
+    message
+}
+
+fn append_recent_output(message: &mut String, output: Option<String>) {
+    if let Some(output) = output {
+        message.push_str("\n\nRecent backend output:\n");
+        message.push_str(&output);
     }
 }
 
@@ -333,7 +445,12 @@ fn terminate_child(child: &mut Child) {
     wait_or_kill(child, Duration::from_secs(5));
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn terminate_child(child: &mut Child) {
+    wait_or_kill(child, Duration::from_secs(0));
+}
+
+#[cfg(not(any(unix, windows)))]
 fn terminate_child(child: &mut Child) {
     wait_or_kill(child, Duration::from_secs(0));
 }
@@ -347,8 +464,25 @@ fn wait_or_kill(child: &mut Child, graceful_timeout: Duration) {
             Ok(None) | Err(_) => break,
         }
     }
-    let _ = child.kill();
+    force_kill_child(child);
     let _ = child.wait();
+}
+
+#[cfg(windows)]
+fn force_kill_child(child: &mut Child) {
+    let pid = child.id().to_string();
+    let _ = Command::new("taskkill")
+        .args(["/PID", &pid, "/T", "/F"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let _ = child.kill();
+}
+
+#[cfg(not(windows))]
+fn force_kill_child(child: &mut Child) {
+    let _ = child.kill();
 }
 
 #[cfg(test)]
@@ -438,6 +572,33 @@ mod tests {
     fn pick_loopback_port_returns_valid_port() {
         let port = pick_loopback_port().expect("loopback port");
         assert_ne!(port, 0);
+    }
+
+    #[test]
+    fn shutdown_request_is_one_shot() {
+        let state = BackendState::default();
+
+        assert!(state.begin_shutdown());
+        assert!(!state.begin_shutdown());
+    }
+
+    #[test]
+    fn launcher_exit_message_includes_recent_output() {
+        let message = launcher_exit_message("exit status: 1", Some("database failed".to_string()));
+
+        assert!(message.contains("exit status: 1"));
+        assert!(message.contains("Recent backend output"));
+        assert!(message.contains("database failed"));
+    }
+
+    #[test]
+    fn startup_output_is_bounded() {
+        let mut output = StartupOutput::default();
+        let chunk = vec![b'x'; STARTUP_OUTPUT_LIMIT + 256];
+
+        output.push("stderr", &chunk);
+
+        assert!(output.bytes.len() <= STARTUP_OUTPUT_LIMIT);
     }
 
     #[cfg(unix)]
