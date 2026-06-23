@@ -19,6 +19,8 @@ use tauri::{AppHandle, Manager, WebviewWindow};
 
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(60);
 const LOOPBACK_HOST: &str = "127.0.0.1";
+const DEFAULT_DESKTOP_PORT: u16 = 38430;
+const DESKTOP_PORT_ENV: &str = "KANDEV_DESKTOP_PORT";
 const STARTUP_OUTPUT_LIMIT: usize = 12 * 1024;
 
 #[derive(Clone)]
@@ -164,7 +166,7 @@ pub fn start_desktop_backend(app: AppHandle, window: WebviewWindow) {
 #[cfg(feature = "desktop-runtime")]
 fn launch_and_wait(app: &AppHandle, state: &BackendState) -> Result<String, String> {
     let runtime_dir = resolve_runtime_dir(app)?;
-    let port = pick_loopback_port()?;
+    let port = pick_desktop_port()?;
     let spec = build_backend_command(
         &runtime_dir,
         port,
@@ -260,6 +262,39 @@ pub fn pick_loopback_port() -> Result<u16, String> {
         .local_addr()
         .map(|addr| addr.port())
         .map_err(|err| err.to_string())
+}
+
+pub fn pick_desktop_port() -> Result<u16, String> {
+    let preferred = preferred_desktop_port(env::var_os(DESKTOP_PORT_ENV))?;
+    pick_available_loopback_port(preferred)
+}
+
+fn preferred_desktop_port(value: Option<OsString>) -> Result<u16, String> {
+    let Some(value) = value else {
+        return Ok(DEFAULT_DESKTOP_PORT);
+    };
+    let value = value
+        .into_string()
+        .map_err(|_| format!("{DESKTOP_PORT_ENV} must be valid UTF-8"))?;
+    let port = value
+        .parse::<u16>()
+        .map_err(|_| format!("{DESKTOP_PORT_ENV} must be a TCP port between 1 and 65535"))?;
+    if port == 0 {
+        Err(format!("{DESKTOP_PORT_ENV} must be a TCP port between 1 and 65535"))
+    } else {
+        Ok(port)
+    }
+}
+
+fn pick_available_loopback_port(preferred: u16) -> Result<u16, String> {
+    match TcpListener::bind((LOOPBACK_HOST, preferred)) {
+        Ok(listener) => listener
+            .local_addr()
+            .map(|addr| addr.port())
+            .map_err(|err| err.to_string()),
+        Err(err) if err.kind() == ErrorKind::AddrInUse => pick_loopback_port(),
+        Err(err) => Err(format!("Could not reserve {LOOPBACK_HOST}:{preferred}: {err}")),
+    }
 }
 
 fn spawn_backend_command(spec: &BackendCommandSpec) -> Result<Child, String> {
@@ -601,6 +636,52 @@ mod tests {
     fn pick_loopback_port_returns_valid_port() {
         let port = pick_loopback_port().expect("loopback port");
         assert_ne!(port, 0);
+    }
+
+    #[test]
+    fn preferred_desktop_port_defaults_to_stable_origin() {
+        assert_eq!(
+            preferred_desktop_port(None).expect("default desktop port"),
+            DEFAULT_DESKTOP_PORT
+        );
+    }
+
+    #[test]
+    fn preferred_desktop_port_accepts_env_override() {
+        assert_eq!(
+            preferred_desktop_port(Some(OsString::from("49152"))).expect("env desktop port"),
+            49152
+        );
+    }
+
+    #[test]
+    fn preferred_desktop_port_rejects_invalid_env_override() {
+        let err = preferred_desktop_port(Some(OsString::from("0"))).expect_err("zero port");
+
+        assert!(err.contains(DESKTOP_PORT_ENV), "{err}");
+    }
+
+    #[test]
+    fn pick_available_loopback_port_returns_preferred_port() {
+        let listener = TcpListener::bind((LOOPBACK_HOST, 0)).expect("reserve candidate");
+        let port = listener.local_addr().expect("candidate address").port();
+        drop(listener);
+
+        assert_eq!(
+            pick_available_loopback_port(port).expect("preferred port"),
+            port
+        );
+    }
+
+    #[test]
+    fn pick_available_loopback_port_falls_back_when_preferred_port_is_taken() {
+        let listener = TcpListener::bind((LOOPBACK_HOST, 0)).expect("reserve occupied port");
+        let occupied = listener.local_addr().expect("occupied address").port();
+
+        let picked = pick_available_loopback_port(occupied).expect("fallback port");
+
+        assert_ne!(picked, occupied);
+        assert_ne!(picked, 0);
     }
 
     #[test]

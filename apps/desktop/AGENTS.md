@@ -27,7 +27,7 @@ Use `scripts/release/prepare-desktop-runtime.sh` and `scripts/release/verify-des
 
 - Frontend code in `src/` is only the startup/error surface. The real product UI is still served by the Go backend after `/health` succeeds.
 - Rust code owns backend process spawning and cleanup. Do not expose broad shell or filesystem permissions to frontend JavaScript.
-- Desktop launches force `KANDEV_SERVER_HOST=127.0.0.1`, pick a local port, and pass `KANDEV_BUNDLE_DIR` to the native launcher.
+- Desktop launches force `KANDEV_SERVER_HOST=127.0.0.1`, prefer a stable desktop port with random fallback, and pass `KANDEV_BUNDLE_DIR` to the native launcher.
 - `KANDEV_DESKTOP_RUNTIME_DIR` is a test/development override for runtime resources.
 
 ## Release

@@ -607,6 +607,21 @@ jobs:
             echo "APPLE_API_KEY_PATH=$private_keys_dir/AuthKey_${APPLE_API_KEY}.p8" >> "$GITHUB_ENV"
           fi
 
+      - name: Sign macOS desktop runtime binaries
+        if: startsWith(matrix.platform, 'macos-') && !inputs.allow_unsigned_desktop
+        run: |
+          set -euo pipefail
+          runtime_bin="apps/desktop/src-tauri/resources/kandev/bin"
+          for binary in kandev agentctl; do
+            path="$runtime_bin/$binary"
+            if [ ! -f "$path" ]; then
+              echo "::error::Missing macOS runtime binary at $path" >&2
+              exit 1
+            fi
+            codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$path"
+            codesign --verify --strict --verbose=2 "$path"
+          done
+
       - name: Build Tauri desktop app
         env:
           CI: "true"
