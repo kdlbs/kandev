@@ -417,7 +417,7 @@ jobs:
 
   e2e-report:
     name: Merge E2E Reports
-    needs: [e2e, e2e-containers]
+    needs: [e2e, e2e-containers, desktop-e2e]
     if: always()
     runs-on: ubuntu-latest
     # Pre-baked image bundles Node 24, pnpm 9.15.9, and the Playwright CLI.
@@ -471,3 +471,24 @@ jobs:
           name: playwright-report
           path: apps/web/playwright-report/
           retention-days: 14
+
+      - name: Verify required E2E jobs passed
+        if: always()
+        env:
+          E2E_RESULT: ${{ needs.e2e.result }}
+          E2E_CONTAINERS_RESULT: ${{ needs['e2e-containers'].result }}
+          DESKTOP_E2E_RESULT: ${{ needs['desktop-e2e'].result }}
+        run: |
+          set -euo pipefail
+          if [ "$E2E_RESULT" != "success" ]; then
+            echo "e2e finished with result: $E2E_RESULT" >&2
+            exit 1
+          fi
+          if [ "$E2E_CONTAINERS_RESULT" != "success" ]; then
+            echo "e2e-containers finished with result: $E2E_CONTAINERS_RESULT" >&2
+            exit 1
+          fi
+          if [ "$DESKTOP_E2E_RESULT" != "success" ]; then
+            echo "desktop-e2e finished with result: $DESKTOP_E2E_RESULT" >&2
+            exit 1
+          fi

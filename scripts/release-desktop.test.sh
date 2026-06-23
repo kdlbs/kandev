@@ -70,6 +70,16 @@ if [ -e "$linux_output_dir/bin/agentctl-linux-amd64" ]; then
 fi
 pass "prepare-desktop-runtime skips helper for linux-x64"
 
+macos_output_dir="$TMP_DIR/macos-output"
+"$ROOT_DIR/scripts/release/prepare-desktop-runtime.sh" \
+  --bundle-dir "$runtime_dir" \
+  --platform macos-arm64 \
+  --output-dir "$macos_output_dir" >/dev/null
+if [ ! -x "$macos_output_dir/bin/agentctl-linux-amd64" ]; then
+  fail "prepare-desktop-runtime should copy executable helper for macos-arm64"
+fi
+pass "prepare-desktop-runtime copies helper for non-linux-x64"
+
 if "$ROOT_DIR/scripts/release/prepare-desktop-runtime.sh" --bundle-dir "$runtime_dir" --output-dir / >"$OUT_FILE" 2>"$ERR_FILE"; then
   fail "prepare-desktop-runtime should reject root output directory"
 fi
