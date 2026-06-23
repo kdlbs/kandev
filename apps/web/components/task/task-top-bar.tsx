@@ -289,7 +289,7 @@ function GitHubIssueTopbarButton({
           data-issue-number={issueNumber}
           size="sm"
           variant="outline"
-          className="h-7 cursor-pointer gap-1.5 px-2"
+          className="h-7 cursor-pointer gap-1.5 px-2 text-xs"
         >
           <Link href={issueUrl} target="_blank" rel="noopener noreferrer">
             <IconCircleDot className="h-4 w-4 text-green-500" />
