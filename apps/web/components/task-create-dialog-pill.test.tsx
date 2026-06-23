@@ -169,6 +169,7 @@ describe("Pill tooltip", () => {
 
     const tooltipTrigger = screen.getByLabelText("Select a repository first");
     expect(tooltipTrigger.getAttribute("tabindex")).toBe("0");
+    expect(tooltipTrigger.querySelector("[aria-hidden='true'] button")).not.toBeNull();
   });
 });
 

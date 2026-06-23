@@ -135,7 +135,9 @@ function DisabledPillTooltip({
     <Tooltip open={open} onOpenChange={onOpenChange}>
       <TooltipTrigger asChild>
         <span className="inline-flex" tabIndex={0} aria-label={disabledReason}>
-          {triggerButton}
+          <span aria-hidden="true" className="inline-flex">
+            {triggerButton}
+          </span>
         </span>
       </TooltipTrigger>
       <TooltipContent>{disabledReason}</TooltipContent>
