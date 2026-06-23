@@ -47,8 +47,6 @@ interface ComboboxProps {
   showSearch?: boolean;
   testId?: string;
   dropdownTestId?: string;
-  /** Backwards-compat alias rendered as data-legacy-testid for test id renames. */
-  legacyDropdownTestId?: string;
   popoverSide?: "top" | "right" | "bottom" | "left";
   popoverAlign?: "start" | "center" | "end";
   /** When true, the trigger always renders the plain label text instead of renderLabel. */
@@ -151,7 +149,6 @@ export const Combobox = memo(function Combobox({
   showSearch = true,
   testId,
   dropdownTestId,
-  legacyDropdownTestId,
   popoverSide,
   popoverAlign = "start",
   plainTrigger = false,
@@ -211,7 +208,6 @@ export const Combobox = memo(function Combobox({
           onValueChange={setHighlighted}
           filter={filter}
           data-testid={dropdownTestId}
-          data-legacy-testid={legacyDropdownTestId}
         >
           {dropdownLabel || headerAction ? (
             <div className="text-muted-foreground flex items-center justify-between gap-2 px-2 py-1 text-xs border-b">
