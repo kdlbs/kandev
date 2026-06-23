@@ -250,7 +250,14 @@ function AttentionStatusGroup({
   return (
     <TopbarCluster
       label="Task status and attention"
-      className="[&_button]:h-7 [&_a]:h-7 [&_button]:text-xs [&_a]:text-xs"
+      className={[
+        "[&_button]:h-7",
+        "[&_button]:text-xs",
+        "[&_[data-testid=issue-topbar-button]]:h-7",
+        "[&_[data-testid=issue-topbar-button]]:text-xs",
+        "[&_[data-testid=mr-topbar-button]]:h-7",
+        "[&_[data-testid=mr-topbar-button]]:text-xs",
+      ].join(" ")}
     >
       <DocumentControls activeSessionId={activeSessionId ?? null} />
       {!isArchived && (
