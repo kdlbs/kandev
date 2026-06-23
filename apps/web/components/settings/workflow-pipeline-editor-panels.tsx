@@ -28,6 +28,7 @@ import {
   useStepActions,
   TurnStartSelect,
   TurnCompleteSelect,
+  ChildrenCompletedSelect,
 } from "./workflow-pipeline-editor-step-actions";
 
 const STEP_PROMPT_PLACEHOLDERS: ScriptPlaceholder[] = [
@@ -335,6 +336,7 @@ type StepTransitionsSectionProps = {
   onUpdate: (updates: Partial<WorkflowStep>) => void;
   setTransition: (type: string) => void;
   setOnTurnStartTransition: (type: string) => void;
+  setChildrenCompletedTransition: (type: string) => void;
   toggleDisablePlanMode: () => void;
   toggleOnExitAction: (type: string) => void;
   readOnly: boolean;
@@ -346,6 +348,7 @@ function StepTransitionsSection({
   onUpdate,
   setTransition,
   setOnTurnStartTransition,
+  setChildrenCompletedTransition,
   toggleDisablePlanMode,
   toggleOnExitAction,
   readOnly,
@@ -360,7 +363,7 @@ function StepTransitionsSection({
           Transitions
         </Label>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         <TurnStartSelect
           step={step}
           otherSteps={otherSteps}
@@ -375,6 +378,13 @@ function StepTransitionsSection({
           setTransition={setTransition}
           toggleDisablePlanMode={toggleDisablePlanMode}
           planModeEnabled={planModeEnabled}
+          readOnly={readOnly}
+        />
+        <ChildrenCompletedSelect
+          step={step}
+          otherSteps={otherSteps}
+          onUpdate={onUpdate}
+          setChildrenCompletedTransition={setChildrenCompletedTransition}
           readOnly={readOnly}
         />
       </div>
@@ -531,6 +541,7 @@ export function StepConfigPanel({
           onUpdate={onUpdate}
           setTransition={actions.setTransition}
           setOnTurnStartTransition={actions.setOnTurnStartTransition}
+          setChildrenCompletedTransition={actions.setChildrenCompletedTransition}
           toggleDisablePlanMode={actions.toggleDisablePlanMode}
           toggleOnExitAction={actions.toggleOnExitAction}
           readOnly={readOnly}

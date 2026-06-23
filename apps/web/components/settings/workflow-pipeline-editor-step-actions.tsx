@@ -10,11 +10,13 @@ import type {
   OnTurnCompleteAction,
   OnExitAction,
 } from "@/lib/types/http";
+import type { GenericAction } from "@/lib/types/workflow-actions";
 import { cn } from "@/lib/utils";
 import {
   HelpTip,
   getTransitionType,
   getOnTurnStartTransitionType,
+  getChildrenCompletedTransitionType,
   hasDisablePlanMode,
 } from "./workflow-pipeline-editor-helpers";
 
@@ -54,6 +56,15 @@ export function useStepActions({ step, onUpdate }: UseStepActionsArgs) {
     onUpdate({ events: { ...currentEvents, on_turn_start: onTurnStart } });
   };
 
+  const setChildrenCompletedTransition = (type: string) => {
+    const currentEvents = step.events ?? {};
+    const onChildrenCompleted = (currentEvents.on_children_completed ?? []).filter(
+      (a) => !["move_to_next", "move_to_previous", "move_to_step"].includes(a.type),
+    );
+    if (type !== "none") onChildrenCompleted.push({ type } as GenericAction);
+    onUpdate({ events: { ...currentEvents, on_children_completed: onChildrenCompleted } });
+  };
+
   const toggleDisablePlanMode = () => {
     const currentEvents = step.events ?? {};
     const onTurnComplete = currentEvents.on_turn_complete ?? [];
@@ -78,6 +89,7 @@ export function useStepActions({ step, onUpdate }: UseStepActionsArgs) {
     toggleOnEnterAction,
     setTransition,
     setOnTurnStartTransition,
+    setChildrenCompletedTransition,
     toggleDisablePlanMode,
     toggleOnExitAction,
   };
@@ -251,6 +263,91 @@ export function TurnCompleteSelect({
       )}
       {transitionType !== "none" && (
         <ExplicitCompletionToggle step={step} onUpdate={onUpdate} readOnly={readOnly} />
+      )}
+    </div>
+  );
+}
+
+// --- ChildrenCompletedSelect ---
+
+type ChildrenCompletedSelectProps = StepSelectProps & {
+  setChildrenCompletedTransition: (t: string) => void;
+};
+
+export function ChildrenCompletedSelect({
+  step,
+  otherSteps,
+  onUpdate,
+  setChildrenCompletedTransition,
+  readOnly,
+}: ChildrenCompletedSelectProps) {
+  const transitionType = getChildrenCompletedTransitionType(step);
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-1.5">
+        <Label className="text-xs font-medium">When Child Tasks Complete</Label>
+        <HelpTip
+          testId={`${step.id}-children-completed-help`}
+          ariaLabel="How child task completion transitions work"
+          text="Use this on a parent task step. When every active direct child task is COMPLETED, FAILED, or CANCELLED, Kandev runs this transition once. Archived and ephemeral child tasks are ignored. Grandchildren do not count here, and nothing runs if the parent has no child tasks."
+        />
+      </div>
+      <Select
+        value={transitionType}
+        onValueChange={(value) => {
+          if (readOnly) return;
+          setChildrenCompletedTransition(value);
+        }}
+        disabled={readOnly}
+      >
+        <SelectTrigger
+          className="w-full h-8"
+          data-testid={`${step.id}-children-completed-transition-select`}
+        >
+          <SelectValue placeholder="Select action" />
+        </SelectTrigger>
+        <SelectContent position="popper" side="bottom" align="start">
+          <SelectItem value="none">Do nothing</SelectItem>
+          <SelectItem value="move_to_next">Move to next step</SelectItem>
+          <SelectItem value="move_to_previous">Move to previous step</SelectItem>
+          <SelectItem value="move_to_step">Move to specific step</SelectItem>
+        </SelectContent>
+      </Select>
+      {transitionType === "move_to_step" && (
+        <Select
+          value={
+            (step.events?.on_children_completed?.find((a) => a.type === "move_to_step")?.config
+              ?.step_id as string) ?? ""
+          }
+          onValueChange={(value) => {
+            if (readOnly) return;
+            const currentEvents = step.events ?? {};
+            const onChildrenCompleted = (currentEvents.on_children_completed ?? []).map((a) =>
+              a.type === "move_to_step" ? { ...a, config: { step_id: value } } : a,
+            );
+            onUpdate({
+              events: { ...currentEvents, on_children_completed: onChildrenCompleted },
+            });
+          }}
+          disabled={readOnly}
+        >
+          <SelectTrigger
+            className="w-full h-8"
+            data-testid={`${step.id}-children-completed-step-select`}
+          >
+            <SelectValue placeholder="Select step" />
+          </SelectTrigger>
+          <SelectContent position="popper" side="bottom" align="start">
+            {otherSteps.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                <div className="flex items-center gap-2">
+                  <div className={cn("w-2 h-2 rounded-full", s.color)} />
+                  {s.name}
+                </div>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       )}
     </div>
   );

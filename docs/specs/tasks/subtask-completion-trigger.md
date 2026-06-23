@@ -23,6 +23,11 @@ orchestration logic into the parent prompt instead of the workflow system.
   `create_task_kandev` with `parent_id`.
 - The event runs the step actions configured on `on_children_completed`, such as
   queueing a parent-agent run or moving the parent to a verification step.
+- Workflow authors can configure the event from the workflow step editor with
+  the "When Child Tasks Complete" transition selector. The editor explains that
+  the trigger belongs on the parent step, waits for direct active children only,
+  treats `COMPLETED`, `FAILED`, and `CANCELLED` as terminal, and ignores
+  archived or ephemeral child tasks.
 - The event fires at most once for the same completed child set. If a child is
   reopened and later returns to a terminal state, the parent can receive a new
   event for the new completion cycle.
@@ -76,6 +81,23 @@ existing `events` object:
           "target": "primary",
           "task_id": "this",
           "reason": "children_completed"
+        }
+      }
+    ]
+  }
+}
+```
+
+The workflow settings UI exposes the transition-oriented subset of this event:
+
+```json
+{
+  "events": {
+    "on_children_completed": [
+      {
+        "type": "move_to_step",
+        "config": {
+          "step_id": "verification-step-id"
         }
       }
     ]
