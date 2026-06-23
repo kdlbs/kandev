@@ -12,6 +12,7 @@ import { useAppStore } from "@/components/state-provider";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { TaskGitHubIssueDialog } from "@/components/task/task-github-issue-dialog";
+import { TaskGitHubPRDialog } from "@/components/task/task-github-pr-dialog";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { getRepositoryDisplayName } from "@/lib/utils";
 import { repositoryId as toRepositoryId, type Repository, type TaskState } from "@/lib/types/http";
@@ -106,6 +107,7 @@ function useKanbanCardMenus({
   const moveTasks = useTaskWorkflowMove();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [showPRDialog, setShowPRDialog] = useState(false);
   const [showIssueDialog, setShowIssueDialog] = useState(false);
   const disabled = Boolean(isDeleting || isArchiving);
 
@@ -143,10 +145,10 @@ function useKanbanCardMenus({
     disabled,
     isDeleting,
     isArchiving,
-    hasLinkedIssue: Boolean(task.issueUrl || task.issueNumber),
     onEdit: onEdit ? () => onEdit(task) : undefined,
     onArchive: onArchive ? () => setShowArchiveConfirm(true) : undefined,
     onDelete: onDelete ? () => setShowDeleteConfirm(true) : undefined,
+    onLinkPullRequest: () => setShowPRDialog(true),
     onLinkIssue: () => setShowIssueDialog(true),
   };
 
@@ -169,6 +171,8 @@ function useKanbanCardMenus({
     setShowDeleteConfirm,
     showArchiveConfirm,
     setShowArchiveConfirm,
+    showPRDialog,
+    setShowPRDialog,
     showIssueDialog,
     setShowIssueDialog,
   };
@@ -181,6 +185,8 @@ function KanbanCardDialogs({
   setShowDeleteConfirm,
   showArchiveConfirm,
   setShowArchiveConfirm,
+  showPRDialog,
+  setShowPRDialog,
   showIssueDialog,
   setShowIssueDialog,
   isDeleting,
@@ -194,6 +200,8 @@ function KanbanCardDialogs({
   setShowDeleteConfirm: (open: boolean) => void;
   showArchiveConfirm: boolean;
   setShowArchiveConfirm: (open: boolean) => void;
+  showPRDialog: boolean;
+  setShowPRDialog: (open: boolean) => void;
   showIssueDialog: boolean;
   setShowIssueDialog: (open: boolean) => void;
   isDeleting?: boolean;
@@ -221,6 +229,12 @@ function KanbanCardDialogs({
         isArchiving={isArchiving}
         onConfirm={({ cascade }) => onArchive?.(task, { cascade })}
       />
+      <TaskGitHubPRDialog
+        open={showPRDialog}
+        onOpenChange={setShowPRDialog}
+        task={task}
+        repositories={repositories}
+      />
       <TaskGitHubIssueDialog
         open={showIssueDialog}
         onOpenChange={setShowIssueDialog}
@@ -228,6 +242,13 @@ function KanbanCardDialogs({
         repositories={repositories}
       />
     </>
+  );
+}
+
+function useActiveWorkspaceRepositories() {
+  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
+  return useAppStore((state) =>
+    activeWorkspaceId ? (state.repositories.itemsByWorkspaceId[activeWorkspaceId] ?? []) : [],
   );
 }
 
@@ -254,10 +275,7 @@ export function KanbanCard({
     disabled: isMultiSelectMode,
   });
   const isPreviewed = useAppStore((state) => state.kanbanPreviewedTaskId === task.id);
-  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
-  const repositories = useAppStore((state) =>
-    activeWorkspaceId ? (state.repositories.itemsByWorkspaceId[activeWorkspaceId] ?? []) : [],
-  );
+  const repositories = useActiveWorkspaceRepositories();
   const {
     dropdownMenuEntries,
     contextMenuEntries,
@@ -265,6 +283,8 @@ export function KanbanCard({
     setShowDeleteConfirm,
     showArchiveConfirm,
     setShowArchiveConfirm,
+    showPRDialog,
+    setShowPRDialog,
     showIssueDialog,
     setShowIssueDialog,
   } = useKanbanCardMenus({
@@ -323,6 +343,8 @@ export function KanbanCard({
         setShowDeleteConfirm={setShowDeleteConfirm}
         showArchiveConfirm={showArchiveConfirm}
         setShowArchiveConfirm={setShowArchiveConfirm}
+        showPRDialog={showPRDialog}
+        setShowPRDialog={setShowPRDialog}
         showIssueDialog={showIssueDialog}
         setShowIssueDialog={setShowIssueDialog}
         isDeleting={isDeleting}

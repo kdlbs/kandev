@@ -5,6 +5,8 @@ import {
   IconArchive,
   IconArrowRight,
   IconCircleDot,
+  IconGitPullRequest,
+  IconLink,
   IconLoader,
   IconLogicBuffer,
   IconPencil,
@@ -76,10 +78,10 @@ type BuildKanbanCardMenuEntriesArgs = {
   disabled?: boolean;
   isDeleting?: boolean;
   isArchiving?: boolean;
-  hasLinkedIssue?: boolean;
   onEdit?: () => void;
   onArchive?: () => void;
   onDelete?: () => void;
+  onLinkPullRequest?: () => void;
   onLinkIssue?: () => void;
   onMoveToStep?: (stepId: string) => void;
   onSendToWorkflow?: (workflowId: string, stepId: string) => void;
@@ -216,6 +218,47 @@ function buildSendToWorkflowSubmenu({
   };
 }
 
+function buildLinkSubmenu({
+  disabled,
+  onLinkPullRequest,
+  onLinkIssue,
+}: {
+  disabled?: boolean;
+  onLinkPullRequest?: () => void;
+  onLinkIssue?: () => void;
+}): KanbanCardMenuEntry | null {
+  if (!onLinkPullRequest && !onLinkIssue) return null;
+  return {
+    kind: "submenu",
+    key: "link",
+    testId: "task-context-link",
+    icon: <IconLink className="mr-2 h-4 w-4" />,
+    label: "Link",
+    disabled,
+    className: "w-56",
+    children: [
+      {
+        kind: "item",
+        key: "link-github-pull-request",
+        testId: "task-context-link-github-pull-request",
+        icon: <IconGitPullRequest className="mr-2 h-4 w-4" />,
+        label: "GitHub Pull Request",
+        disabled: disabled || !onLinkPullRequest,
+        onSelect: onLinkPullRequest,
+      },
+      {
+        kind: "item",
+        key: "link-github-issue",
+        testId: "task-context-link-github-issue",
+        icon: <IconCircleDot className="mr-2 h-4 w-4" />,
+        label: "GitHub Issue",
+        disabled: disabled || !onLinkIssue,
+        onSelect: onLinkIssue,
+      },
+    ],
+  };
+}
+
 export function buildKanbanCardMenuEntries({
   currentWorkflowId,
   currentStepId,
@@ -224,10 +267,10 @@ export function buildKanbanCardMenuEntries({
   disabled,
   isDeleting,
   isArchiving,
-  hasLinkedIssue,
   onEdit,
   onArchive,
   onDelete,
+  onLinkPullRequest,
   onLinkIssue,
   onMoveToStep,
   onSendToWorkflow,
@@ -263,15 +306,12 @@ export function buildKanbanCardMenuEntries({
   });
   if (sendToEntry) entries.push(sendToEntry);
 
-  entries.push({
-    kind: "item",
-    key: "link-github-issue",
-    testId: "task-context-link-github-issue",
-    icon: <IconCircleDot className="mr-2 h-4 w-4" />,
-    label: hasLinkedIssue ? "Change GitHub issue" : "Link GitHub issue",
-    disabled: isProcessing || !onLinkIssue,
-    onSelect: onLinkIssue,
+  const linkEntry = buildLinkSubmenu({
+    disabled: isProcessing,
+    onLinkPullRequest,
+    onLinkIssue,
   });
+  if (linkEntry) entries.push(linkEntry);
 
   entries.push({
     kind: "item",

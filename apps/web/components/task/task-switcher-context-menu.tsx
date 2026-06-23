@@ -5,6 +5,9 @@ import {
   IconArchive,
   IconCheck,
   IconCopy,
+  IconCircleDot,
+  IconGitPullRequest,
+  IconLink,
   IconLoader,
   IconPalette,
   IconPencil,
@@ -53,6 +56,8 @@ type ContextMenuProps = {
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
+  onLinkPullRequest?: (taskId: string) => void;
+  onLinkIssue?: (taskId: string) => void;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onTogglePin?: (taskId: string) => void;
   isPinned?: boolean;
@@ -68,6 +73,8 @@ export function TaskItemWithContextMenu({
   onRenameTask,
   onArchiveTask,
   onDeleteTask,
+  onLinkPullRequest,
+  onLinkIssue,
   onMoveToStep,
   onTogglePin,
   isPinned,
@@ -88,76 +95,95 @@ export function TaskItemWithContextMenu({
         <div>{cloneWithMenuOpen(children, menuOpen)}</div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-48">
-        {onTogglePin && (
-          <ContextMenuItem disabled={isDeleting} onSelect={() => onTogglePin(task.id)}>
-            {isPinned ? (
-              <IconPinFilled className="mr-2 h-4 w-4" />
-            ) : (
-              <IconPin className="mr-2 h-4 w-4" />
-            )}
-            {isPinned ? "Unpin" : "Pin"}
-          </ContextMenuItem>
-        )}
-        {onRenameTask && (
-          <ContextMenuItem disabled={isDeleting} onSelect={() => onRenameTask(task.id, task.title)}>
-            <IconPencil className="mr-2 h-4 w-4" />
-            Rename
-          </ContextMenuItem>
-        )}
-        <ContextMenuItem disabled>
-          <IconCopy className="mr-2 h-4 w-4" />
-          Duplicate
-        </ContextMenuItem>
-        {onArchiveTask && (
-          <ContextMenuItem disabled={isDeleting} onSelect={() => onArchiveTask(task.id)}>
-            <IconArchive className="mr-2 h-4 w-4" />
-            Archive
-          </ContextMenuItem>
-        )}
-        <TaskColorMenu taskId={task.id} disabled={isDeleting} />
-        {task.workflowId && (
-          <TaskMoveContextMenuItems
-            currentWorkflowId={task.workflowId}
-            currentStepId={task.workflowStepId}
-            workflows={workflows ?? []}
-            stepsByWorkflowId={stepsByWorkflowId ?? (steps ? { [task.workflowId]: steps } : {})}
-            disabled={isDeleting || task.isArchived}
-            onMoveToStep={
-              onMoveToStep
-                ? (stepId) => {
-                    closeMenu();
-                    onMoveToStep(task.id, task.workflowId!, stepId);
-                  }
-                : undefined
-            }
-            onSendToWorkflow={(workflowId, stepId) => {
-              closeMenu();
-              void moveTasks([task.id], workflowId, stepId).catch(() => {
-                // useTaskWorkflowMove already shows the failure toast.
-              });
-            }}
-          />
-        )}
-        {onDeleteTask && (
-          <>
-            <ContextMenuSeparator />
-            <ContextMenuItem
-              variant="destructive"
-              disabled={isDeleting}
-              onSelect={() => onDeleteTask(task.id)}
-            >
-              {isDeleting ? (
-                <IconLoader className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <IconTrash className="mr-2 h-4 w-4" />
-              )}
-              Delete
-            </ContextMenuItem>
-          </>
-        )}
+        <TaskContextMenuItems
+          task={task}
+          workflows={workflows}
+          stepsByWorkflowId={stepsByWorkflowId}
+          steps={steps}
+          onRenameTask={onRenameTask}
+          onArchiveTask={onArchiveTask}
+          onDeleteTask={onDeleteTask}
+          onLinkPullRequest={onLinkPullRequest}
+          onLinkIssue={onLinkIssue}
+          onMoveToStep={onMoveToStep}
+          onTogglePin={onTogglePin}
+          isPinned={isPinned}
+          isDeleting={isDeleting}
+          closeMenu={closeMenu}
+          moveTasks={moveTasks}
+        />
       </ContextMenuContent>
     </ContextMenu>
   );
+}
+
+type TaskContextMenuItemsProps = Omit<ContextMenuProps, "children"> & {
+  closeMenu: () => void;
+  moveTasks: ReturnType<typeof useTaskWorkflowMove>;
+};
+
+function TaskContextMenuItems({
+  task,
+  workflows,
+  stepsByWorkflowId,
+  steps,
+  onRenameTask,
+  onArchiveTask,
+  onDeleteTask,
+  onLinkPullRequest,
+  onLinkIssue,
+  onMoveToStep,
+  onTogglePin,
+  isPinned,
+  isDeleting,
+  closeMenu,
+  moveTasks,
+}: TaskContextMenuItemsProps) {
+  return (
+    <>
+      <TaskPinItem
+        taskId={task.id}
+        isPinned={isPinned}
+        disabled={isDeleting}
+        onTogglePin={onTogglePin}
+      />
+      <TaskRenameItem task={task} disabled={isDeleting} onRenameTask={onRenameTask} />
+      <ContextMenuItem disabled>
+        <IconCopy className="mr-2 h-4 w-4" />
+        Duplicate
+      </ContextMenuItem>
+      <TaskArchiveItem taskId={task.id} disabled={isDeleting} onArchiveTask={onArchiveTask} />
+      <TaskColorMenu taskId={task.id} disabled={isDeleting} />
+      <TaskLinkMenu
+        disabled={isDeleting}
+        onLinkPullRequest={selectTaskAction(task.id, onLinkPullRequest, closeMenu)}
+        onLinkIssue={selectTaskAction(task.id, onLinkIssue, closeMenu)}
+      />
+      <TaskMoveItems
+        task={task}
+        workflows={workflows}
+        stepsByWorkflowId={stepsByWorkflowId}
+        steps={steps}
+        isDeleting={isDeleting}
+        onMoveToStep={onMoveToStep}
+        closeMenu={closeMenu}
+        moveTasks={moveTasks}
+      />
+      <TaskDeleteItem taskId={task.id} isDeleting={isDeleting} onDeleteTask={onDeleteTask} />
+    </>
+  );
+}
+
+function selectTaskAction(
+  taskId: string,
+  handler: ((taskId: string) => void) | undefined,
+  closeMenu: () => void,
+) {
+  if (!handler) return undefined;
+  return () => {
+    closeMenu();
+    handler(taskId);
+  };
 }
 
 function cloneWithMenuOpen(
@@ -166,6 +192,163 @@ function cloneWithMenuOpen(
 ): React.ReactNode {
   if (isValidElement(children)) return cloneElement(children, { menuOpen });
   return children;
+}
+
+function TaskPinItem({
+  taskId,
+  isPinned,
+  disabled,
+  onTogglePin,
+}: {
+  taskId: string;
+  isPinned?: boolean;
+  disabled?: boolean;
+  onTogglePin?: (taskId: string) => void;
+}) {
+  if (!onTogglePin) return null;
+  return (
+    <ContextMenuItem disabled={disabled} onSelect={() => onTogglePin(taskId)}>
+      {isPinned ? <IconPinFilled className="mr-2 h-4 w-4" /> : <IconPin className="mr-2 h-4 w-4" />}
+      {isPinned ? "Unpin" : "Pin"}
+    </ContextMenuItem>
+  );
+}
+
+function TaskRenameItem({
+  task,
+  disabled,
+  onRenameTask,
+}: {
+  task: TaskSwitcherItem;
+  disabled?: boolean;
+  onRenameTask?: (taskId: string, currentTitle: string) => void;
+}) {
+  if (!onRenameTask) return null;
+  return (
+    <ContextMenuItem disabled={disabled} onSelect={() => onRenameTask(task.id, task.title)}>
+      <IconPencil className="mr-2 h-4 w-4" />
+      Rename
+    </ContextMenuItem>
+  );
+}
+
+function TaskArchiveItem({
+  taskId,
+  disabled,
+  onArchiveTask,
+}: {
+  taskId: string;
+  disabled?: boolean;
+  onArchiveTask?: (taskId: string) => void;
+}) {
+  if (!onArchiveTask) return null;
+  return (
+    <ContextMenuItem disabled={disabled} onSelect={() => onArchiveTask(taskId)}>
+      <IconArchive className="mr-2 h-4 w-4" />
+      Archive
+    </ContextMenuItem>
+  );
+}
+
+function TaskMoveItems({
+  task,
+  workflows,
+  stepsByWorkflowId,
+  steps,
+  isDeleting,
+  onMoveToStep,
+  closeMenu,
+  moveTasks,
+}: Omit<TaskContextMenuItemsProps, "onRenameTask" | "onArchiveTask" | "onDeleteTask">) {
+  if (!task.workflowId) return null;
+  return (
+    <TaskMoveContextMenuItems
+      currentWorkflowId={task.workflowId}
+      currentStepId={task.workflowStepId}
+      workflows={workflows ?? []}
+      stepsByWorkflowId={stepsByWorkflowId ?? (steps ? { [task.workflowId]: steps } : {})}
+      disabled={isDeleting || task.isArchived}
+      onMoveToStep={selectMoveAction(task.id, task.workflowId, onMoveToStep, closeMenu)}
+      onSendToWorkflow={(workflowId, stepId) => {
+        closeMenu();
+        void moveTasks([task.id], workflowId, stepId).catch(() => {
+          // useTaskWorkflowMove already shows the failure toast.
+        });
+      }}
+    />
+  );
+}
+
+function selectMoveAction(
+  taskId: string,
+  workflowId: string,
+  handler: ((taskId: string, workflowId: string, targetStepId: string) => void) | undefined,
+  closeMenu: () => void,
+) {
+  if (!handler) return undefined;
+  return (stepId: string) => {
+    closeMenu();
+    handler(taskId, workflowId, stepId);
+  };
+}
+
+function TaskDeleteItem({
+  taskId,
+  isDeleting,
+  onDeleteTask,
+}: {
+  taskId: string;
+  isDeleting?: boolean;
+  onDeleteTask?: (taskId: string) => void;
+}) {
+  if (!onDeleteTask) return null;
+  return (
+    <>
+      <ContextMenuSeparator />
+      <ContextMenuItem
+        variant="destructive"
+        disabled={isDeleting}
+        onSelect={() => onDeleteTask(taskId)}
+      >
+        {isDeleting ? (
+          <IconLoader className="mr-2 h-4 w-4 animate-spin" />
+        ) : (
+          <IconTrash className="mr-2 h-4 w-4" />
+        )}
+        Delete
+      </ContextMenuItem>
+    </>
+  );
+}
+
+function TaskLinkMenu({
+  disabled,
+  onLinkPullRequest,
+  onLinkIssue,
+}: {
+  disabled?: boolean;
+  onLinkPullRequest?: () => void;
+  onLinkIssue?: () => void;
+}) {
+  if (!onLinkPullRequest && !onLinkIssue) return null;
+  return (
+    <ContextMenuSub>
+      <ContextMenuSubTrigger disabled={disabled}>
+        <IconLink className="mr-2 h-4 w-4" />
+        Link
+      </ContextMenuSubTrigger>
+      <ContextMenuSubContent className="w-56">
+        <ContextMenuItem disabled={disabled || !onLinkPullRequest} onSelect={onLinkPullRequest}>
+          <IconGitPullRequest className="mr-2 h-4 w-4" />
+          GitHub Pull Request
+        </ContextMenuItem>
+        <ContextMenuItem disabled={disabled || !onLinkIssue} onSelect={onLinkIssue}>
+          <IconCircleDot className="mr-2 h-4 w-4" />
+          GitHub Issue
+        </ContextMenuItem>
+      </ContextMenuSubContent>
+    </ContextMenuSub>
+  );
 }
 
 function TaskColorMenu({ taskId, disabled }: { taskId: string; disabled?: boolean }) {

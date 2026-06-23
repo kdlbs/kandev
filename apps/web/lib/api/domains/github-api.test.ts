@@ -5,6 +5,7 @@ vi.mock("@/lib/config", () => ({
 }));
 
 import {
+  createTaskPR,
   fetchAccessibleRepos,
   fetchIssueInfo,
   getTaskCIAutomationOptions,
@@ -131,6 +132,36 @@ describe("fetchIssueInfo", () => {
 });
 
 describe("task issue link helpers", () => {
+  it("links a GitHub pull request to a task", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        id: "task-pr-1",
+        task_id: "task-1",
+        repository_id: "task-repo-1",
+        owner: "kdlbs",
+        repo: "kandev",
+        pr_number: 1471,
+        pr_url: "https://github.com/kdlbs/kandev/pull/1471",
+        pr_title: "Link references",
+      }),
+    );
+
+    await createTaskPR({
+      task_id: "task-1",
+      repository_id: "task-repo-1",
+      pr_url: "https://github.com/kdlbs/kandev/pull/1471",
+    });
+
+    const call = fetchSpy.mock.calls.at(-1);
+    expect(String(call?.[0])).toBe("http://api.test/api/v1/github/task-prs");
+    expect(call?.[1]?.method).toBe("POST");
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      task_id: "task-1",
+      repository_id: "task-repo-1",
+      pr_url: "https://github.com/kdlbs/kandev/pull/1471",
+    });
+  });
+
   it("links a GitHub issue to a task", async () => {
     fetchSpy.mockResolvedValueOnce(
       jsonResponse({

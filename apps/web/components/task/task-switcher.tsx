@@ -59,6 +59,8 @@ type TaskSwitcherProps = {
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
+  onLinkPullRequest?: (taskId: string) => void;
+  onLinkIssue?: (taskId: string) => void;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onTogglePin?: (taskId: string) => void;
   onReorderGroup?: (groupTaskIds: string[]) => void;
@@ -135,6 +137,8 @@ type TaskRowProps = {
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
+  onLinkPullRequest?: (taskId: string) => void;
+  onLinkIssue?: (taskId: string) => void;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onTogglePin?: (taskId: string) => void;
   isPinned?: boolean;
@@ -154,6 +158,8 @@ function TaskRow({
   onRenameTask,
   onArchiveTask,
   onDeleteTask,
+  onLinkPullRequest,
+  onLinkIssue,
   onMoveToStep,
   onTogglePin,
   isPinned,
@@ -170,6 +176,8 @@ function TaskRow({
       onRenameTask={onRenameTask}
       onArchiveTask={onArchiveTask}
       onDeleteTask={onDeleteTask}
+      onLinkPullRequest={onLinkPullRequest}
+      onLinkIssue={onLinkIssue}
       onMoveToStep={onMoveToStep}
       onTogglePin={onTogglePin}
       isPinned={isPinned}
@@ -327,6 +335,8 @@ type GroupSectionProps = {
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
+  onLinkPullRequest?: (taskId: string) => void;
+  onLinkIssue?: (taskId: string) => void;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onTogglePin?: (taskId: string) => void;
   onReorderGroup?: (groupTaskIds: string[]) => void;
@@ -351,6 +361,8 @@ function GroupSection({
   onRenameTask,
   onArchiveTask,
   onDeleteTask,
+  onLinkPullRequest,
+  onLinkIssue,
   onMoveToStep,
   onTogglePin,
   onReorderGroup,
@@ -373,6 +385,8 @@ function GroupSection({
       onRenameTask,
       onArchiveTask,
       onDeleteTask,
+      onLinkPullRequest,
+      onLinkIssue,
       onMoveToStep,
       onTogglePin,
       deletingTaskId,
@@ -413,6 +427,8 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   onRenameTask,
   onArchiveTask,
   onDeleteTask,
+  onLinkPullRequest,
+  onLinkIssue,
   onMoveToStep,
   onTogglePin,
   onReorderGroup,
@@ -454,6 +470,8 @@ export const TaskSwitcher = memo(function TaskSwitcher({
           onRenameTask={onRenameTask}
           onArchiveTask={onArchiveTask}
           onDeleteTask={onDeleteTask}
+          onLinkPullRequest={onLinkPullRequest}
+          onLinkIssue={onLinkIssue}
           onMoveToStep={onMoveToStep}
           onTogglePin={onTogglePin}
           onReorderGroup={onReorderGroup}

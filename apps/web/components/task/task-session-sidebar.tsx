@@ -7,16 +7,13 @@ import type { Repository, TaskSession, TaskSessionState, TaskState } from "@/lib
 import type { TaskPR } from "@/lib/types/github";
 import type { KanbanState } from "@/lib/state/slices";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
-import { TaskSwitcher, type TaskSwitcherItem } from "./task-switcher";
-import { applyView } from "@/lib/sidebar/apply-view";
+import { TaskSwitcher } from "./task-switcher";
 import { SidebarFilterBar } from "./sidebar-filter/sidebar-filter-bar";
 import { MOCK_ITEMS, MOCK_SIDEBAR } from "./sidebar-mock-data";
 import { SidebarDialogs } from "./task-session-sidebar-dialogs";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useWorkspaceSidebarTasks } from "@/hooks/domains/kanban/use-workspace-sidebar-tasks";
-import { useEffectiveSidebarView } from "@/hooks/domains/sidebar/use-effective-sidebar-view";
-import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-prefs";
 import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
@@ -28,6 +25,8 @@ import { useArchivedTaskState } from "./task-archived-context";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import { buildPendingFlags, readPendingFlags } from "./task-session-sidebar-aggregate";
+import { useGroupedSidebarView } from "./task-session-sidebar-grouped-view";
+import { useSidebarLinkActions } from "./task-session-sidebar-link-actions";
 import { useShallow } from "zustand/react/shallow";
 import { type AgentErrorOptions, agentErrorMessageForTask } from "@/lib/task-agent-error";
 
@@ -514,6 +513,7 @@ function useSidebarActions(store: StoreApi) {
 
   const archiveActions = useArchiveActions(store);
   const deleteActions = useDeleteActions(store, removeTaskFromBoard);
+  const linkActions = useSidebarLinkActions(store);
 
   const [renamingTask, setRenamingTask] = useState<{ id: string; title: string } | null>(null);
 
@@ -544,6 +544,7 @@ function useSidebarActions(store: StoreApi) {
     setRenamingTask,
     handleRenameTask,
     handleRenameSubmit,
+    ...linkActions,
     ...archiveActions,
     ...deleteActions,
   };
@@ -563,22 +564,6 @@ function useBulkGitStatusSubscription(primarySessionIds: string[]) {
     const unsubscribes = backgroundIds.map((id) => client.subscribeSession(id));
     return () => unsubscribes.forEach((u) => u());
   }, [primarySessionIds, connectionStatus, activeSessionId]);
-}
-
-function useGroupedSidebarView(displayTasks: TaskSwitcherItem[]) {
-  const prefs = useSidebarTaskPrefs();
-  const effectiveView = useEffectiveSidebarView();
-  const { pinnedTaskIds, orderedTaskIds, subtaskOrderByParentId } = prefs;
-  const grouped = useMemo(
-    () =>
-      applyView(displayTasks, effectiveView, {
-        pinnedTaskIds,
-        orderedTaskIds,
-        subtaskOrderByParentId,
-      }),
-    [displayTasks, effectiveView, pinnedTaskIds, orderedTaskIds, subtaskOrderByParentId],
-  );
-  return { grouped, effectiveView, prefs };
 }
 
 export const TaskSessionSidebar = memo(function TaskSessionSidebar({
@@ -619,7 +604,12 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     handleDeleteTask,
     handleMoveToStep,
     handleRenameTask,
+    handleLinkPullRequestTask,
+    handleLinkIssueTask,
   } = sidebarActions;
+  const repositories = useAppStore((state) =>
+    workspaceId ? (state.repositories.itemsByWorkspaceId[workspaceId] ?? []) : [],
+  );
 
   const displayTasks = useMemo(() => {
     if (MOCK_SIDEBAR) return MOCK_ITEMS;
@@ -635,8 +625,6 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   const toggleSubtaskCollapsed = useAppStore((state) => state.toggleSubtaskCollapsed);
   const { grouped, effectiveView, prefs } = useGroupedSidebarView(displayTasks);
   const { pinnedTaskIds, togglePinnedTask, handleReorderGroup, handleReorderSubtasks } = prefs;
-  // Stable ref: an inline arrow here would defeat TaskSwitcher's memo() and
-  // re-render every task row whenever this component renders.
   const handleToggleGroup = useCallback(
     (groupKey: string) => toggleSidebarGroupCollapsed(effectiveView.id, groupKey),
     [toggleSidebarGroupCollapsed, effectiveView.id],
@@ -659,6 +647,8 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
           onRenameTask={handleRenameTask}
           onArchiveTask={handleArchiveTask}
           onDeleteTask={handleDeleteTask}
+          onLinkPullRequest={handleLinkPullRequestTask}
+          onLinkIssue={handleLinkIssueTask}
           onMoveToStep={handleMoveToStep}
           onTogglePin={togglePinnedTask}
           onReorderGroup={handleReorderGroup}
@@ -669,7 +659,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
           totalTaskCount={displayTasks.length}
         />
       </PanelBody>
-      <SidebarDialogs actions={sidebarActions} />
+      <SidebarDialogs actions={sidebarActions} repositories={repositories} />
     </PanelRoot>
   );
 });
