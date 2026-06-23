@@ -1,0 +1,48 @@
+[package]
+name = "kandev-desktop"
+version = "0.1.0"
+description = "Kandev desktop shell"
+authors = ["Kandev"]
+license = "AGPL-3.0-only"
+repository = "https://github.com/kdlbs/kandev"
+edition = "2021"
+rust-version = "1.85"
+
+[[bin]]
+name = "kandev-desktop"
+path = "src/main.rs"
+required-features = ["desktop-runtime"]
+test = false
+
+[features]
+default = []
+desktop-runtime = [
+  "dep:tauri",
+  "dep:tauri-plugin-single-instance",
+  "dep:tauri-runtime",
+  "dep:zbus",
+  "dep:zbus_macros",
+  "dep:zvariant",
+  "dep:zvariant_derive",
+  "dep:zvariant_utils",
+]
+
+[build-dependencies]
+tauri-build = { version = "=2.4.1", features = [] }
+
+[dependencies]
+darling = "=0.21.3"
+idna_adapter = "=1.0.0"
+libc = "0.2"
+plist = "=1.7.1"
+serde_json = "1"
+serde_with = "=3.15.0"
+tauri = { version = "=2.8.4", features = [], optional = true }
+tauri-runtime = { version = "=2.9.0", optional = true }
+tauri-plugin-single-instance = { version = "=2.2.1", optional = true }
+time = "=0.3.41"
+zbus = { version = "=5.13.2", optional = true }
+zbus_macros = { version = "=5.13.2", optional = true }
+zvariant = { version = "=5.9.2", optional = true }
+zvariant_derive = { version = "=5.9.2", optional = true }
+zvariant_utils = { version = "=3.3.0", optional = true }

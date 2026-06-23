@@ -47,9 +47,14 @@ kandev/
 # npm runtime package (@kdlbs/runtime-{platform})
 @kdlbs/runtime-{platform}/
 └── bin/{kandev,agentctl,agentctl-linux-amd64}
+
+# Tauri desktop resource directory
+apps/desktop/src-tauri/resources/kandev/
+└── bin/{kandev[.exe],agentctl[.exe],agentctl-linux-amd64}
 ```
 
 For npm installs, the main `kandev` package provides only a tiny Node bin shim that execs `bin/kandev` from the platform runtime package.
+For desktop release builds, `scripts/release/prepare-desktop-runtime.sh` extracts the matching GitHub release bundle into the Tauri resource directory before `tauri build` runs.
 
 ## Commands
 
@@ -121,9 +126,9 @@ Releases run entirely in GitHub Actions. From the GHA UI:
 4. Optionally tick `dry_run` to validate without publishing.
 5. Click **Run workflow**.
 
-The workflow does everything: version bump, CHANGELOG, PR, merge, tag, build, npm publish, Homebrew tap update. See [/.github/workflows/release.yml](../../.github/workflows/release.yml).
+The workflow does everything: version bump, CHANGELOG, PR, merge, tag, runtime bundles, desktop artifacts, npm publish, Homebrew tap update. See [/.github/workflows/release.yml](../../.github/workflows/release.yml).
 
-Single SemVer flow: `apps/cli/package.json` version, git tag, npm packages, and Homebrew formula are all bumped to the same `X.Y.Z`.
+Single SemVer flow: `apps/cli/package.json` version, git tag, npm packages, Homebrew formula, GitHub runtime tarballs, and desktop artifacts are all bumped to the same `X.Y.Z`.
 
 Versioning:
 

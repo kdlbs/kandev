@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -740,27 +741,51 @@ func startGatewayAndServe(
 	// after we bind the socket above; probe the local listener with a short
 	// retry loop — once a single connect succeeds, the kernel queue is up and
 	// any subsequent /health call will land on a wired route.
-	go waitListenerThenMarkReady(port, log)
+	go waitListenerThenMarkReady(server.Addr, log)
 
 	awaitShutdown(server, orchestratorSvc, lifecycleMgr, runCleanups, log)
 	return true
 }
 
 func startHTTPServer(server *http.Server, port int, log *logger.Logger) bool {
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	addr := strings.TrimSpace(server.Addr)
+	if addr == "" {
+		addr = serverListenAddr("", port)
+	}
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		log.Error("Server listen error", zap.Error(err))
 		return false
 	}
 
 	go func() {
-		log.Info("WebSocket server listening", zap.Int("port", port))
+		log.Info("WebSocket server listening", zap.String("addr", ln.Addr().String()), zap.Int("port", port))
 		if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
 			log.Error("Server serve error", zap.Error(err))
 		}
 	}()
 
 	return true
+}
+
+func serverListenAddr(host string, port int) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return fmt.Sprintf(":%d", port)
+	}
+	return net.JoinHostPort(host, fmt.Sprint(port))
+}
+
+func serverProbeAddr(listenAddr string) string {
+	host, port, err := net.SplitHostPort(listenAddr)
+	if err != nil {
+		return listenAddr
+	}
+	switch host {
+	case "", "0.0.0.0", "::":
+		host = "127.0.0.1"
+	}
+	return net.JoinHostPort(host, port)
 }
 
 // waitListenerThenMarkReady probes the local HTTP listener until a
@@ -773,8 +798,8 @@ func startHTTPServer(server *http.Server, port int, log *logger.Logger) bool {
 // of seconds. If the budget expires the flag still flips, so the
 // backend doesn't permanently advertise "not ready" if probing fails
 // for some unrelated reason (e.g. an iptables hiccup on a dev box).
-func waitListenerThenMarkReady(port int, log *logger.Logger) {
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
+func waitListenerThenMarkReady(listenAddr string, log *logger.Logger) {
+	addr := serverProbeAddr(listenAddr)
 	deadline := time.Now().Add(30 * time.Second)
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
@@ -784,12 +809,12 @@ func waitListenerThenMarkReady(port int, log *logger.Logger) {
 			_ = conn.Close()
 			// A successful TCP dial proves the listener is bound.
 			ready.Store(true)
-			log.Info("backend ready", zap.Int("port", port))
+			log.Info("backend ready", zap.String("addr", addr))
 			return
 		}
 		if time.Now().After(deadline) {
 			log.Warn("backend readiness probe never connected; flipping ready anyway",
-				zap.Int("port", port))
+				zap.String("addr", addr))
 			ready.Store(true)
 			return
 		}
@@ -1630,7 +1655,7 @@ func buildHTTPServer(
 	})
 
 	return &http.Server{
-		Addr:         fmt.Sprintf(":%d", port),
+		Addr:         serverListenAddr(cfg.Server.Host, port),
 		Handler:      router,
 		ReadTimeout:  cfg.Server.ReadTimeoutDuration(),
 		WriteTimeout: cfg.Server.WriteTimeoutDuration(),

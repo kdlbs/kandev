@@ -181,3 +181,73 @@ describe("release npm publishing", () => {
     expect(script).toContain("treated as idempotent success");
   });
 });
+
+describe("release desktop artifacts", () => {
+  const desktopPlatforms = ["macos-arm64", "macos-x64", "linux-x64", "linux-arm64", "windows-x64"];
+
+  function releaseWorkflow(): string {
+    return readRepoFile(".github/workflows/release.yml");
+  }
+
+  it("builds desktop artifacts for every supported runtime platform", () => {
+    const workflow = releaseWorkflow();
+
+    expect(workflow).toMatch(/\n  build-desktop:\n/);
+    expect(workflow).toContain("needs: [prepare, build-bundles]");
+    expect(workflow).toContain("scripts/release/prepare-desktop-runtime.sh");
+
+    for (const platform of desktopPlatforms) {
+      expect(workflow, `release.yml must include desktop platform ${platform}`).toContain(
+        `platform: ${platform}`,
+      );
+    }
+  });
+
+  it("publishes desktop artifacts while leaving npm and Homebrew tied to runtime tarballs", () => {
+    const workflow = releaseWorkflow();
+    const publishNpmScript = readRepoFile("scripts/release/publish-npm.sh");
+    const homebrewScript = readRepoFile("scripts/release/update-homebrew-tap.sh");
+
+    expect(workflow).toContain(
+      "needs: [prepare, build-bundles, build-desktop, docker-universal-manifest]",
+    );
+    expect(workflow).toContain("pattern: desktop-*");
+    expect(workflow).toContain("scripts/release/verify-desktop-assets.sh");
+    expect(workflow).toContain("dist/release-assets/kandev-desktop-*");
+
+    expect(publishNpmScript).toContain('asset="kandev-${platform}.tar.gz"');
+    expect(publishNpmScript).not.toContain("kandev-desktop-");
+    expect(homebrewScript).toContain('local sha_file="kandev-${platform}.tar.gz.sha256"');
+    expect(homebrewScript).not.toContain("kandev-desktop-");
+  });
+
+  it("fails public macOS and Windows desktop builds closed when signing secrets are absent", () => {
+    const workflow = releaseWorkflow();
+    const signingDocs = readRepoFile("docs/desktop-tauri-signing.md");
+    const tauriConfig = readRepoFile("apps/desktop/src-tauri/tauri.conf.json");
+
+    expect(workflow).toContain("allow_unsigned_desktop");
+    expect(workflow).toContain("Unsigned desktop artifacts are internal validation only");
+
+    for (const key of [
+      "APPLE_CERTIFICATE",
+      "APPLE_CERTIFICATE_PASSWORD",
+      "KEYCHAIN_PASSWORD",
+      "APPLE_SIGNING_IDENTITY",
+      "APPLE_API_KEY_P8",
+      "APPLE_API_KEY_PATH",
+      "APPLE_TEAM_ID",
+    ]) {
+      expect(workflow, `release.yml must wire ${key}`).toContain(key);
+    }
+
+    for (const key of ["WINDOWS_CERTIFICATE", "WINDOWS_CERTIFICATE_PASSWORD", "signtool sign"]) {
+      expect(workflow, `release.yml must wire ${key}`).toContain(key);
+    }
+
+    expect(tauriConfig).toContain('"publisher": "Kandev"');
+    expect(tauriConfig).toContain('"timestampUrl"');
+    expect(signingDocs).toContain("Public recommended desktop releases require signing");
+    expect(signingDocs).toContain("allow_unsigned_desktop");
+  });
+});

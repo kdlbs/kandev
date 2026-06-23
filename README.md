@@ -108,6 +108,12 @@ Executors support profiles for reusable runtime configuration: prepare scripts, 
 
 ## Quick Start
 
+### Desktop App
+
+Download the platform desktop artifact from [GitHub Releases](https://github.com/kdlbs/kandev/releases). The desktop app launches Kandev from the OS app launcher, starts the local backend itself, and does not require Node.js at runtime.
+
+See [docs/desktop-app.md](docs/desktop-app.md) for artifact names, signing status, update expectations, and agent CLI discovery notes.
+
 ### Homebrew (macOS, Linux)
 
 ```bash
@@ -135,6 +141,7 @@ kandev
 - `brew upgrade kandev`
 - `npx kandev@latest` (always uses the latest published version)
 - `npm install -g kandev@latest`
+- Download and install the newer desktop artifact from GitHub Releases
 
 The worktrees and sqlite db live in `~/.kandev` by default. Works on macOS, Linux, and Windows (WSL or native).
 
