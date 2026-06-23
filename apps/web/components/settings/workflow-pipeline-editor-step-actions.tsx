@@ -56,12 +56,17 @@ export function useStepActions({ step, onUpdate }: UseStepActionsArgs) {
     onUpdate({ events: { ...currentEvents, on_turn_start: onTurnStart } });
   };
 
-  const setChildrenCompletedTransition = (type: string) => {
+  const setChildrenCompletedTransition = (type: string, targetStepId?: string) => {
     const currentEvents = step.events ?? {};
     const onChildrenCompleted = (currentEvents.on_children_completed ?? []).filter(
       (a) => !["move_to_next", "move_to_previous", "move_to_step"].includes(a.type),
     );
-    if (type !== "none") onChildrenCompleted.push({ type } as GenericAction);
+    if (type === "move_to_step") {
+      if (!targetStepId) return;
+      onChildrenCompleted.push({ type, config: { step_id: targetStepId } } as GenericAction);
+    } else if (type !== "none") {
+      onChildrenCompleted.push({ type } as GenericAction);
+    }
     onUpdate({ events: { ...currentEvents, on_children_completed: onChildrenCompleted } });
   };
 
@@ -271,7 +276,7 @@ export function TurnCompleteSelect({
 // --- ChildrenCompletedSelect ---
 
 type ChildrenCompletedSelectProps = StepSelectProps & {
-  setChildrenCompletedTransition: (t: string) => void;
+  setChildrenCompletedTransition: (t: string, targetStepId?: string) => void;
 };
 
 export function ChildrenCompletedSelect({
@@ -282,6 +287,10 @@ export function ChildrenCompletedSelect({
   readOnly,
 }: ChildrenCompletedSelectProps) {
   const transitionType = getChildrenCompletedTransitionType(step);
+  const configuredTargetStepId =
+    (step.events?.on_children_completed?.find((a) => a.type === "move_to_step")?.config
+      ?.step_id as string) ?? "";
+  const defaultTargetStepId = configuredTargetStepId || otherSteps[0]?.id || "";
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-1.5">
@@ -296,7 +305,10 @@ export function ChildrenCompletedSelect({
         value={transitionType}
         onValueChange={(value) => {
           if (readOnly) return;
-          setChildrenCompletedTransition(value);
+          setChildrenCompletedTransition(
+            value,
+            value === "move_to_step" ? defaultTargetStepId : undefined,
+          );
         }}
         disabled={readOnly}
       >
@@ -310,15 +322,14 @@ export function ChildrenCompletedSelect({
           <SelectItem value="none">Do nothing</SelectItem>
           <SelectItem value="move_to_next">Move to next step</SelectItem>
           <SelectItem value="move_to_previous">Move to previous step</SelectItem>
-          <SelectItem value="move_to_step">Move to specific step</SelectItem>
+          <SelectItem value="move_to_step" disabled={!defaultTargetStepId}>
+            Move to specific step
+          </SelectItem>
         </SelectContent>
       </Select>
       {transitionType === "move_to_step" && (
         <Select
-          value={
-            (step.events?.on_children_completed?.find((a) => a.type === "move_to_step")?.config
-              ?.step_id as string) ?? ""
-          }
+          value={configuredTargetStepId}
           onValueChange={(value) => {
             if (readOnly) return;
             const currentEvents = step.events ?? {};

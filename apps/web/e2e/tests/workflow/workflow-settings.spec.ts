@@ -123,17 +123,17 @@ test.describe("Workflow settings", () => {
 
     await card.getByTestId(`${waitStep.id}-children-completed-transition-select`).click();
     await testPage.getByRole("option", { name: "Move to specific step" }).click();
-    await card.getByTestId(`${waitStep.id}-children-completed-step-select`).click();
-    await testPage.getByRole("option", { name: "All Children Done" }).click();
+    await expect(card.getByTestId(`${waitStep.id}-children-completed-step-select`)).toContainText(
+      "All Children Done",
+    );
 
     await page.saveButton(card).click();
-    await testPage.waitForTimeout(1000);
-
-    const { steps } = await apiClient.listWorkflowSteps(workflow.id);
-    const savedWaitStep = steps.find((step) => step.id === waitStep.id);
-    expect(savedWaitStep?.events?.on_children_completed).toEqual([
-      { type: "move_to_step", config: { step_id: doneStep.id } },
-    ]);
+    await expect
+      .poll(async () => {
+        const { steps } = await apiClient.listWorkflowSteps(workflow.id);
+        return steps.find((step) => step.id === waitStep.id)?.events?.on_children_completed;
+      })
+      .toEqual([{ type: "move_to_step", config: { step_id: doneStep.id } }]);
   });
 
   test("modifies a template step name and persists after save", async ({ testPage, seedData }) => {

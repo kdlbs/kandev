@@ -29,10 +29,11 @@ test.describe("Workflow settings on mobile", () => {
     await testPage.getByRole("option", { name: "Move to next step" }).click();
 
     await page.saveButton(card).click();
-    await testPage.waitForTimeout(1000);
-
-    const { steps } = await apiClient.listWorkflowSteps(workflow.id);
-    const savedWaitStep = steps.find((step) => step.id === waitStep.id);
-    expect(savedWaitStep?.events?.on_children_completed).toEqual([{ type: "move_to_next" }]);
+    await expect
+      .poll(async () => {
+        const { steps } = await apiClient.listWorkflowSteps(workflow.id);
+        return steps.find((step) => step.id === waitStep.id)?.events?.on_children_completed;
+      })
+      .toEqual([{ type: "move_to_next" }]);
   });
 });
