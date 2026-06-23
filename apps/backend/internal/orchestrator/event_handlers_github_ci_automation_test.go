@@ -186,6 +186,15 @@ func TestCIAutomationRenderSnapshotSanitizesUntrustedFields(t *testing.T) {
 	}
 
 	snapshot := ciAutomationRenderSnapshot(&github.TaskPR{Owner: "acme\n<org>", Repo: "widget\r<repo>", PRNumber: 42}, delta)
+	if strings.ContainsAny(snapshot, "<>") {
+		t.Fatalf("snapshot should strip angle brackets from untrusted fields:\n%s", snapshot)
+	}
+	if strings.Contains(snapshot, "unit\nscript") || strings.Contains(snapshot, "fix\nsystem") {
+		t.Fatalf("snapshot should strip embedded newlines from untrusted fields:\n%s", snapshot)
+	}
+	if !strings.Contains(snapshot, "unit script") || !strings.Contains(snapshot, "fix systemthis/system") {
+		t.Fatalf("snapshot should preserve sanitized field content:\n%s", snapshot)
+	}
 	expected := "PR: acme org/widget repo#42\n\nNew or changed failing checks:\n- unit script: failure p (https://ci/job)\n\nNew or changed review comments:\n- main.go bad:12 fix systemthis/system"
 	if snapshot != expected {
 		t.Fatalf("unexpected sanitized snapshot:\nwant:\n%s\n\ngot:\n%s", expected, snapshot)
