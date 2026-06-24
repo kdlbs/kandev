@@ -204,8 +204,12 @@ func workspaceDeletionTableSpec(table string) workspaceDeletionCountSpec {
 		return workspaceDeletionCountSpec{column: "run_id", operator: "LIKE", value: likeID}
 	case "office_routine_triggers", "office_routine_runs":
 		return workspaceDeletionCountSpec{column: "routine_id", operator: "LIKE", value: likeID}
-	case "office_task_labels", "task_workspace_group_members", "office_task_tree_hold_members":
+	case "office_task_labels":
 		return workspaceDeletionCountSpec{column: "task_id", operator: "LIKE", value: likeID}
+	case "task_workspace_group_members":
+		return workspaceDeletionCountSpec{column: "workspace_group_id", operator: "LIKE", value: likeID}
+	case "office_task_tree_hold_members":
+		return workspaceDeletionCountSpec{column: "hold_id", operator: "LIKE", value: likeID}
 	case "task_workspace_groups":
 		return workspaceDeletionCountSpec{column: "id", operator: "LIKE", value: likeID}
 	case "office_task_tree_holds":
