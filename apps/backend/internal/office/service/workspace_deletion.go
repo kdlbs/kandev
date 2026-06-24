@@ -61,18 +61,16 @@ func (s *Service) DeleteWorkspace(ctx context.Context, workspaceID string) error
 		return err
 	}
 
-	cleanupCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
 	defer cancel()
 	s.cancelWorkspaceTasks(cleanupCtx, tasks)
 
 	if s.workspaceGroupCleaner != nil {
-		groupCleanupCtx, groupCleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
-		defer groupCleanupCancel()
-		if err := s.workspaceGroupCleaner.CleanupWorkspaceGroups(groupCleanupCtx, workspaceID); err != nil {
+		if err := s.workspaceGroupCleaner.CleanupWorkspaceGroups(cleanupCtx, workspaceID); err != nil {
 			return fmt.Errorf("clean workspace groups: %w", err)
 		}
 	}
-	if err := s.repo.DeleteWorkspaceData(ctx, workspaceID); err != nil {
+	if err := s.repo.DeleteWorkspaceData(cleanupCtx, workspaceID); err != nil {
 		return fmt.Errorf("delete office workspace data: %w", err)
 	}
 	for _, task := range tasks {
