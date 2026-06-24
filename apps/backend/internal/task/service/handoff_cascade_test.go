@@ -682,6 +682,11 @@ func TestCleanupWorkspaceGroupsWaitsForActiveExecutions(t *testing.T) {
 	if len(cleaner.plainFolders) != 1 || cleaner.plainFolders[0] != "/tmp/kandev-owned-group" {
 		t.Fatalf("plain folder cleanups = %#v, want owned group path", cleaner.plainFolders)
 	}
+	sessions.mu.Lock()
+	if sessions.checks < 2 {
+		t.Errorf("HasExecutorRunningRow called %d times, want >= 2", sessions.checks)
+	}
+	sessions.mu.Unlock()
 	if got := groups.cleanupStatuses["group-owned"]; got != orchmodels.WorkspaceCleanupStatusCleaned {
 		t.Fatalf("owned group cleanup status = %q, want cleaned", got)
 	}
