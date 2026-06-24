@@ -49,23 +49,7 @@ afterEach(() => {
 
 describe("SpaRoutes data-backed workspace context", () => {
   it("keeps the currently active workspace when opening GitHub from another workspace", async () => {
-    window.history.replaceState({}, "", "/github");
-    mocks.listWorkspaces.mockResolvedValue({
-      workspaces: [workspace(DEFAULT_WORKSPACE_ID), workspace(SELECTED_WORKSPACE_ID)],
-    });
-    mocks.fetchUserSettings.mockResolvedValue({
-      settings: {
-        workspace_id: DEFAULT_WORKSPACE_ID,
-        workflow_filter_id: "",
-        repository_ids: [],
-        updated_at: TEST_TIMESTAMP,
-      },
-    });
-    mocks.listWorkflows.mockResolvedValue({
-      workflows: [workflow("wf-selected", SELECTED_WORKSPACE_ID)],
-    });
-    mocks.listRepositories.mockResolvedValue({ repositories: [] });
-    mocks.fetchJson.mockResolvedValue({ steps: [], total: 0 });
+    mockGitHubWorkspaceBootstrap();
 
     render(
       <StateProvider
@@ -80,35 +64,12 @@ describe("SpaRoutes data-backed workspace context", () => {
       </StateProvider>,
     );
 
-    await waitFor(() => {
-      expect(screen.getByTestId("github-page").getAttribute("data-workspace-id")).toBe(
-        SELECTED_WORKSPACE_ID,
-      );
-    });
-    expect(mocks.listWorkflows).toHaveBeenCalledWith(SELECTED_WORKSPACE_ID, {
-      cache: "no-store",
-    });
+    await expectSelectedWorkspace();
   });
 
   it("uses the active workspace cookie when the store has no active workspace yet", async () => {
-    window.history.replaceState({}, "", "/github");
     document.cookie = `kandev-active-workspace=${SELECTED_WORKSPACE_ID}; path=/`;
-    mocks.listWorkspaces.mockResolvedValue({
-      workspaces: [workspace(DEFAULT_WORKSPACE_ID), workspace(SELECTED_WORKSPACE_ID)],
-    });
-    mocks.fetchUserSettings.mockResolvedValue({
-      settings: {
-        workspace_id: DEFAULT_WORKSPACE_ID,
-        workflow_filter_id: "",
-        repository_ids: [],
-        updated_at: TEST_TIMESTAMP,
-      },
-    });
-    mocks.listWorkflows.mockResolvedValue({
-      workflows: [workflow("wf-selected", SELECTED_WORKSPACE_ID)],
-    });
-    mocks.listRepositories.mockResolvedValue({ repositories: [] });
-    mocks.fetchJson.mockResolvedValue({ steps: [], total: 0 });
+    mockGitHubWorkspaceBootstrap();
 
     render(
       <StateProvider>
@@ -116,16 +77,57 @@ describe("SpaRoutes data-backed workspace context", () => {
       </StateProvider>,
     );
 
-    await waitFor(() => {
-      expect(screen.getByTestId("github-page").getAttribute("data-workspace-id")).toBe(
-        SELECTED_WORKSPACE_ID,
-      );
-    });
-    expect(mocks.listWorkflows).toHaveBeenCalledWith(SELECTED_WORKSPACE_ID, {
-      cache: "no-store",
-    });
+    await expectSelectedWorkspace();
+  });
+
+  it("keeps a known active workspace when the workspace list request fails", async () => {
+    document.cookie = `kandev-active-workspace=${SELECTED_WORKSPACE_ID}; path=/`;
+    mockGitHubWorkspaceBootstrap({ workspacesError: new Error("network down") });
+
+    render(
+      <StateProvider>
+        <SpaRoutes />
+      </StateProvider>,
+    );
+
+    await expectSelectedWorkspace();
   });
 });
+
+function mockGitHubWorkspaceBootstrap({ workspacesError }: { workspacesError?: Error } = {}) {
+  window.history.replaceState({}, "", "/github");
+  if (workspacesError) {
+    mocks.listWorkspaces.mockRejectedValue(workspacesError);
+  } else {
+    mocks.listWorkspaces.mockResolvedValue({
+      workspaces: [workspace(DEFAULT_WORKSPACE_ID), workspace(SELECTED_WORKSPACE_ID)],
+    });
+  }
+  mocks.fetchUserSettings.mockResolvedValue({
+    settings: {
+      workspace_id: DEFAULT_WORKSPACE_ID,
+      workflow_filter_id: "",
+      repository_ids: [],
+      updated_at: TEST_TIMESTAMP,
+    },
+  });
+  mocks.listWorkflows.mockResolvedValue({
+    workflows: [workflow("wf-selected", SELECTED_WORKSPACE_ID)],
+  });
+  mocks.listRepositories.mockResolvedValue({ repositories: [] });
+  mocks.fetchJson.mockResolvedValue({ steps: [], total: 0 });
+}
+
+async function expectSelectedWorkspace() {
+  await waitFor(() => {
+    expect(screen.getByTestId("github-page").getAttribute("data-workspace-id")).toBe(
+      SELECTED_WORKSPACE_ID,
+    );
+  });
+  expect(mocks.listWorkflows).toHaveBeenCalledWith(SELECTED_WORKSPACE_ID, {
+    cache: "no-store",
+  });
+}
 
 function workspace(id: string) {
   return {

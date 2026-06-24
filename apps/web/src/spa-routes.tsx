@@ -367,21 +367,26 @@ function useRouteData({
 
     async function bootstrap() {
       const [workspacesResponse, settingsResponse] = await Promise.all([
-        listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
+        listWorkspaces({ cache: "no-store" }).catch(() => null),
         fetchUserSettings({ cache: "no-store" }).catch(() => null),
       ]);
       if (cancelled) return;
 
-      const workspaces = workspacesResponse.workspaces;
       const settingsWorkspaceId = settingsResponse?.settings?.workspace_id || null;
       const settingsWorkflowId = settingsResponse?.settings?.workflow_filter_id || null;
-      const workspaceItems = workspaces.map(mapWorkspaceItem);
-      const workspaceId = resolveActiveId(
-        workspaceItems,
-        store.getState().workspaces.activeId,
-        readActiveWorkspaceCookie(),
-        settingsWorkspaceId,
-      );
+      const storeWorkspaceId = store.getState().workspaces.activeId;
+      const cookieWorkspaceId = readActiveWorkspaceCookie();
+      const workspaceItems =
+        workspacesResponse?.workspaces.map(mapWorkspaceItem) ?? store.getState().workspaces.items;
+      const workspaceId =
+        workspaceItems.length > 0
+          ? resolveActiveId(
+              workspaceItems,
+              storeWorkspaceId,
+              cookieWorkspaceId,
+              settingsWorkspaceId,
+            )
+          : firstKnownWorkspaceId(storeWorkspaceId, cookieWorkspaceId, settingsWorkspaceId);
       store.getState().hydrate({
         workspaces: { items: workspaceItems, activeId: workspaceId },
         workflows: { items: store.getState().workflows.items, activeId: settingsWorkflowId },
@@ -427,6 +432,14 @@ function listWorkspaceWorkflowSteps(workspaceId: string) {
   return fetchJson<ListWorkflowStepsResponse>(`/api/v1/workspaces/${workspaceId}/workflow-steps`, {
     cache: "no-store",
   });
+}
+
+function firstKnownWorkspaceId(...ids: (string | null | undefined)[]): string | null {
+  for (const id of ids) {
+    const value = id?.trim();
+    if (value) return value;
+  }
+  return null;
 }
 
 function mapWorkflowItem(workflow: Workflow) {
