@@ -32,6 +32,9 @@ func TestDeleteWorkspaceDataDeletesOwnedOfficeRows(t *testing.T) {
 		"office_agent_instructions",
 		"office_agent_runtime",
 		"runs",
+		"office_run_route_attempts",
+		"office_provider_health",
+		"office_workspace_routing",
 		"office_routine_triggers",
 		"office_routine_runs",
 		"office_task_labels",
@@ -99,6 +102,9 @@ func seedWorkspaceDeletionRows(t *testing.T, repo *sqlite.Repository, workspaceI
 	execRaw(t, repo, `INSERT INTO office_agent_memory (id, agent_profile_id, layer, key, created_at, updated_at) VALUES (?, ?, 'project', 'note', ?, ?)`, workspaceID+"-memory", agentID, now, now)
 	execRaw(t, repo, `INSERT INTO office_agent_instructions (id, agent_profile_id, filename, content, created_at, updated_at) VALUES (?, ?, 'guide.md', 'content', ?, ?)`, workspaceID+"-instruction", agentID, now, now)
 	execRaw(t, repo, `INSERT INTO runs (id, agent_profile_id, reason, requested_at) VALUES (?, ?, 'test', ?)`, workspaceID+"-run", agentID, now)
+	execRaw(t, repo, `INSERT INTO office_run_route_attempts (run_id, seq, provider_id, model, tier, outcome, started_at) VALUES (?, 1, 'codex', 'gpt-5', 'balanced', 'launched', ?)`, workspaceID+"-run", now)
+	execRaw(t, repo, `INSERT INTO office_provider_health (workspace_id, provider_id, scope, scope_value, state) VALUES (?, 'codex', 'workspace', ?, 'degraded')`, workspaceID, workspaceID)
+	execRaw(t, repo, `INSERT INTO office_workspace_routing (workspace_id, enabled, default_tier, provider_order, provider_profiles, tier_per_reason) VALUES (?, 1, 'balanced', '[]', '{}', '{}')`, workspaceID)
 	execRaw(t, repo, `INSERT INTO office_cost_events (id, agent_profile_id, project_id, occurred_at, created_at) VALUES (?, ?, ?, ?, ?)`, workspaceID+"-cost", agentID, projectID, now, now)
 	execRaw(t, repo, `INSERT INTO office_budget_policies (id, workspace_id, scope_type, scope_id, limit_subcents, period, created_at, updated_at) VALUES (?, ?, 'workspace', ?, 100, 'month', ?, ?)`, workspaceID+"-budget", workspaceID, workspaceID, now, now)
 	execRaw(t, repo, `INSERT INTO office_routines (id, workspace_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, routineID, workspaceID, "Routine "+workspaceID, now, now)
@@ -169,6 +175,8 @@ func workspaceDeletionTableSpec(table string) workspaceDeletionCountSpec {
 		return workspaceDeletionCountSpec{column: "id", operator: "LIKE", value: likeID}
 	case "office_agent_memory", "office_agent_instructions", "runs":
 		return workspaceDeletionCountSpec{column: "agent_profile_id", operator: "LIKE", value: likeID}
+	case "office_run_route_attempts":
+		return workspaceDeletionCountSpec{column: "run_id", operator: "LIKE", value: likeID}
 	case "office_agent_runtime":
 		return workspaceDeletionCountSpec{column: "agent_id", operator: "LIKE", value: likeID}
 	case "office_routine_triggers", "office_routine_runs":

@@ -6,7 +6,13 @@ import {
 } from "@/app/actions/workspaces";
 import { fetchUserSettings } from "@/lib/api";
 import { StateHydrator } from "@/components/state-hydrator";
+import {
+  ACTIVE_WORKSPACE_COOKIE,
+  LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE,
+} from "@/lib/routing/route-bootstrap";
+import { readCookies, type CookieStore } from "@/lib/server/cookies";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import { resolveActiveId } from "@/lib/ssr/resolve-active-id";
 import { GitHubPageClient } from "./github-page-client";
 import type {
   Workflow,
@@ -16,6 +22,21 @@ import type {
   UserSettingsResponse,
 } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
+
+function resolveGithubWorkspaceId(
+  workspaces: Workspace[],
+  settingsResponse: UserSettingsResponse | null,
+  cookieStore: CookieStore | null,
+): string | undefined {
+  return (
+    resolveActiveId(
+      workspaces,
+      cookieStore?.get(ACTIVE_WORKSPACE_COOKIE)?.value,
+      cookieStore?.get(LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE)?.value,
+      settingsResponse?.settings?.workspace_id,
+    ) ?? undefined
+  );
+}
 
 export default async function GitHubPage() {
   let workspaces: Workspace[] = [];
@@ -31,9 +52,10 @@ export default async function GitHubPage() {
       listWorkspacesAction(),
       fetchUserSettings({ cache: "no-store" }).catch(() => null),
     ]);
+    const cookieStore = await readCookies().catch(() => null);
     workspaces = workspacesResponse.workspaces;
     userSettingsResponse = settingsResponse;
-    workspaceId = settingsResponse?.settings?.workspace_id || workspaces[0]?.id;
+    workspaceId = resolveGithubWorkspaceId(workspaces, settingsResponse, cookieStore);
 
     if (workspaceId) {
       const [workflowsRes, reposRes, stepsRes] = await Promise.all([

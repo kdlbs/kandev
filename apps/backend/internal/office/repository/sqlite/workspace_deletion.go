@@ -51,7 +51,10 @@ func (r *Repository) deleteWorkspaceDataTx(ctx context.Context, tx *sqlx.Tx, wor
 	// We delete them via the merged table; shallow kanban profiles
 	// (workspace_id = '') are unaffected.
 	statements := []string{
+		`DELETE FROM office_run_route_attempts WHERE run_id IN (SELECT id FROM runs WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?))`,
 		`DELETE FROM runs WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)`,
+		`DELETE FROM office_provider_health WHERE workspace_id = ?`,
+		`DELETE FROM office_workspace_routing WHERE workspace_id = ?`,
 		`DELETE FROM office_agent_memory WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)`,
 		`DELETE FROM office_agent_instructions WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)`,
 		`DELETE FROM office_agent_runtime WHERE agent_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)`,
