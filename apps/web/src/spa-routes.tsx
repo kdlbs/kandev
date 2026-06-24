@@ -373,10 +373,17 @@ function useRouteData({
       if (cancelled) return;
 
       const workspaces = workspacesResponse.workspaces;
-      const workspaceId = settingsResponse?.settings?.workspace_id || workspaces[0]?.id || null;
+      const settingsWorkspaceId = settingsResponse?.settings?.workspace_id || null;
       const settingsWorkflowId = settingsResponse?.settings?.workflow_filter_id || null;
+      const workspaceItems = workspaces.map(mapWorkspaceItem);
+      const workspaceId = resolveActiveId(
+        workspaceItems,
+        store.getState().workspaces.activeId,
+        readActiveWorkspaceCookie(),
+        settingsWorkspaceId,
+      );
       store.getState().hydrate({
-        workspaces: { items: workspaces, activeId: workspaceId },
+        workspaces: { items: workspaceItems, activeId: workspaceId },
         workflows: { items: store.getState().workflows.items, activeId: settingsWorkflowId },
         userSettings: { ...mapUserSettingsResponse(settingsResponse), workspaceId },
       });

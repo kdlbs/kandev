@@ -7,6 +7,12 @@ import {
 import { fetchUserSettings } from "@/lib/api";
 import { StateHydrator } from "@/components/state-hydrator";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import { resolveActiveId } from "@/lib/ssr/resolve-active-id";
+import { readCookies } from "@/lib/server/cookies";
+import {
+  ACTIVE_WORKSPACE_COOKIE,
+  LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE,
+} from "@/lib/routing/route-bootstrap";
 import { GitHubPageClient } from "./github-page-client";
 import type {
   Workflow,
@@ -17,38 +23,79 @@ import type {
 } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
 
-export default async function GitHubPage() {
-  let workspaces: Workspace[] = [];
-  let workflows: Workflow[] = [];
-  let steps: WorkflowStep[] = [];
-  let repositories: Repository[] = [];
-  let workspaceId: string | undefined;
-  let workspaceDataLoaded = false;
-  let userSettingsResponse: UserSettingsResponse | null = null;
+type GitHubPageData = {
+  workspaces: Workspace[];
+  workflows: Workflow[];
+  steps: WorkflowStep[];
+  repositories: Repository[];
+  workspaceId: string | undefined;
+  workspaceDataLoaded: boolean;
+  userSettingsResponse: UserSettingsResponse | null;
+};
 
+const EMPTY_GITHUB_PAGE_DATA: GitHubPageData = {
+  workspaces: [],
+  workflows: [],
+  steps: [],
+  repositories: [],
+  workspaceId: undefined,
+  workspaceDataLoaded: false,
+  userSettingsResponse: null,
+};
+
+async function loadGitHubPageData(): Promise<GitHubPageData> {
   try {
-    const [workspacesResponse, settingsResponse] = await Promise.all([
+    const [workspacesResponse, settingsResponse, cookieStore] = await Promise.all([
       listWorkspacesAction(),
       fetchUserSettings({ cache: "no-store" }).catch(() => null),
+      readCookies().catch((error) => {
+        console.error("Failed to read cookies on GitHub page:", error);
+        return null;
+      }),
     ]);
-    workspaces = workspacesResponse.workspaces;
-    userSettingsResponse = settingsResponse;
-    workspaceId = settingsResponse?.settings?.workspace_id || workspaces[0]?.id;
+    const workspaces = workspacesResponse.workspaces;
+    const cookieWorkspaceId =
+      cookieStore?.get(ACTIVE_WORKSPACE_COOKIE)?.value ??
+      cookieStore?.get(LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE)?.value ??
+      null;
+    const workspaceId =
+      resolveActiveId(workspaces, cookieWorkspaceId, settingsResponse?.settings?.workspace_id) ??
+      undefined;
 
-    if (workspaceId) {
-      const [workflowsRes, reposRes, stepsRes] = await Promise.all([
-        listWorkflowsAction(workspaceId),
-        listRepositoriesAction(workspaceId),
-        listWorkspaceWorkflowStepsAction(workspaceId),
-      ]);
-      workflows = workflowsRes.workflows;
-      repositories = reposRes.repositories;
-      steps = stepsRes.steps;
-      workspaceDataLoaded = true;
+    if (!workspaceId) {
+      return { ...EMPTY_GITHUB_PAGE_DATA, workspaces, userSettingsResponse: settingsResponse };
     }
+
+    const [workflowsRes, reposRes, stepsRes] = await Promise.all([
+      listWorkflowsAction(workspaceId),
+      listRepositoriesAction(workspaceId),
+      listWorkspaceWorkflowStepsAction(workspaceId),
+    ]);
+    return {
+      workspaces,
+      workflows: workflowsRes.workflows,
+      steps: stepsRes.steps,
+      repositories: reposRes.repositories,
+      workspaceId,
+      workspaceDataLoaded: true,
+      userSettingsResponse: settingsResponse,
+    };
   } catch (error) {
     console.error("Failed to load GitHub page data:", error);
+    return EMPTY_GITHUB_PAGE_DATA;
   }
+}
+
+export default async function GitHubPage() {
+  const {
+    workspaces,
+    workflows,
+    steps,
+    repositories,
+    workspaceId,
+    workspaceDataLoaded,
+    userSettingsResponse,
+  } = await loadGitHubPageData();
 
   const mappedUserSettings = mapUserSettingsResponse(userSettingsResponse);
 
