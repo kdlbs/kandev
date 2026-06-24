@@ -45,6 +45,23 @@ func acquireEnsureLock(taskID string) func() {
 	return mu.Unlock
 }
 
+// ensureLockHeldKey marks a context whose caller already owns the per-task
+// ensureLocks mutex. launchStart consults it to skip a recursive acquire when
+// EnsureSession re-enters via LaunchSession — sync.Mutex isn't reentrant, so
+// without this the second Lock would deadlock the request.
+type ensureLockHeldCtxKey struct{}
+
+var ensureLockHeldKey = ensureLockHeldCtxKey{}
+
+func withEnsureLockHeld(ctx context.Context) context.Context {
+	return context.WithValue(ctx, ensureLockHeldKey, true)
+}
+
+func ensureLockHeld(ctx context.Context) bool {
+	v, _ := ctx.Value(ensureLockHeldKey).(bool)
+	return v
+}
+
 // EnsureSession is the server-authoritative idempotent entry point for opening
 // a task: it returns the existing primary (or newest) session if any, otherwise
 // resolves the agent profile from the task's full context and creates a session
@@ -61,6 +78,7 @@ func (s *Service) EnsureSession(ctx context.Context, taskID string, opts ...Ensu
 	}
 	release := acquireEnsureLock(taskID)
 	defer release()
+	ctx = withEnsureLockHeld(ctx)
 
 	var o EnsureSessionOptions
 	if len(opts) > 0 {
