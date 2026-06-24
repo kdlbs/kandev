@@ -1049,7 +1049,8 @@ type ghSearchItem struct {
 		Login string `json:"login"`
 	} `json:"user"`
 	PullRequest struct {
-		URL string `json:"url"`
+		URL      string `json:"url"`
+		MergedAt string `json:"merged_at"`
 	} `json:"pull_request"`
 	RepositoryURL string `json:"repository_url"`
 }
@@ -1063,8 +1064,8 @@ func (c *GHClient) parseSearchResults(data string) ([]*PR, error) {
 	for i, item := range items {
 		prs[i] = convertSearchItemToPR(
 			item.Number, item.Title, item.HTMLURL, item.State,
-			item.User.Login, item.RepositoryURL, item.Draft,
-			item.CreatedAt, item.UpdatedAt,
+			item.User.Login, item.RepositoryURL, item.PullRequest.MergedAt,
+			item.Draft, item.CreatedAt, item.UpdatedAt,
 		)
 	}
 	return prs, nil

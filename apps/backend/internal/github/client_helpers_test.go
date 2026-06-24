@@ -322,7 +322,7 @@ func TestConvertSearchItemToPR(t *testing.T) {
 	now := time.Now()
 	pr := convertSearchItemToPR(
 		42, "Fix bug", "https://github.com/owner/repo/pull/42", "open",
-		"alice", "https://api.github.com/repos/myorg/myrepo", false,
+		"alice", "https://api.github.com/repos/myorg/myrepo", "", false,
 		now, now,
 	)
 
@@ -337,6 +337,29 @@ func TestConvertSearchItemToPR(t *testing.T) {
 	}
 	if pr.RepoName != "myrepo" {
 		t.Errorf("expected repo myrepo, got %s", pr.RepoName)
+	}
+	if pr.State != "open" {
+		t.Errorf("expected state open, got %s", pr.State)
+	}
+}
+
+// GitHub's search API returns merged PRs with state "closed" plus a non-empty
+// pull_request.merged_at. The converter must promote those to "merged" so the
+// UI shows the purple merged icon instead of the red closed one.
+func TestConvertSearchItemToPRMerged(t *testing.T) {
+	now := time.Now()
+	mergedAt := "2025-01-02T03:04:05Z"
+	pr := convertSearchItemToPR(
+		7, "Land feature", "https://github.com/owner/repo/pull/7", "closed",
+		"bob", "https://api.github.com/repos/myorg/myrepo", mergedAt, false,
+		now, now,
+	)
+
+	if pr.State != prStateMerged {
+		t.Errorf("expected state %q, got %q", prStateMerged, pr.State)
+	}
+	if pr.MergedAt == nil {
+		t.Fatal("expected MergedAt to be set, got nil")
 	}
 }
 

@@ -399,11 +399,17 @@ func isNewerCheck(a, b CheckRun) bool {
 }
 
 // convertSearchItemToPR converts common search result fields into a PR struct.
+// GitHub's /search/issues API returns merged PRs with state "closed" and a
+// non-empty pull_request.merged_at; promote those to the "merged" state so the
+// UI renders the purple merged icon instead of the red closed one.
 func convertSearchItemToPR(
-	number int, title, htmlURL, state, authorLogin, repositoryURL string,
+	number int, title, htmlURL, state, authorLogin, repositoryURL, mergedAt string,
 	draft bool, createdAt, updatedAt time.Time,
 ) *PR {
 	owner, repo := parseRepoURL(repositoryURL)
+	if mergedAt != "" {
+		state = prStateMerged
+	}
 	return &PR{
 		Number:      number,
 		Title:       title,
@@ -415,6 +421,7 @@ func convertSearchItemToPR(
 		RepoName:    repo,
 		CreatedAt:   createdAt,
 		UpdatedAt:   updatedAt,
+		MergedAt:    parseTimePtr(mergedAt),
 	}
 }
 

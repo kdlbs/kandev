@@ -222,8 +222,8 @@ func (c *PATClient) ListReviewRequestedPRs(ctx context.Context, scope, filter, c
 	for i, item := range result.Items {
 		prs[i] = convertSearchItemToPR(
 			item.Number, item.Title, item.HTMLURL, item.State,
-			item.User.Login, item.RepositoryURL, item.Draft,
-			item.CreatedAt, item.UpdatedAt,
+			item.User.Login, item.RepositoryURL, item.PullRequest.MergedAt,
+			item.Draft, item.CreatedAt, item.UpdatedAt,
 		)
 	}
 	return prs, nil
@@ -253,8 +253,8 @@ func (c *PATClient) SearchPRsPaged(ctx context.Context, filter, customQuery stri
 	for i, item := range result.Items {
 		prs[i] = convertSearchItemToPR(
 			item.Number, item.Title, item.HTMLURL, item.State,
-			item.User.Login, item.RepositoryURL, item.Draft,
-			item.CreatedAt, item.UpdatedAt,
+			item.User.Login, item.RepositoryURL, item.PullRequest.MergedAt,
+			item.Draft, item.CreatedAt, item.UpdatedAt,
 		)
 	}
 	return &PRSearchPage{PRs: prs, TotalCount: result.TotalCount, Page: page, PerPage: perPage}, nil
@@ -946,6 +946,9 @@ type patSearchItem struct {
 	User          struct {
 		Login string `json:"login"`
 	} `json:"user"`
+	PullRequest struct {
+		MergedAt string `json:"merged_at"`
+	} `json:"pull_request"`
 }
 
 func convertPatPR(raw *patPR, owner, repo string) *PR {
