@@ -2,6 +2,7 @@ package gitlab
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/kandev/kandev/internal/common/logger"
 )
@@ -21,7 +22,11 @@ func Provide(
 ) (*Service, func() error, error) {
 	host := DefaultHost
 	if hostStore != nil {
-		if persisted, err := hostStore.GetHost(ctx); err == nil && persisted != "" {
+		persisted, err := hostStore.GetHost(ctx)
+		if err != nil {
+			return nil, nil, fmt.Errorf("load GitLab host: %w", err)
+		}
+		if persisted != "" {
 			host = persisted
 		}
 	}

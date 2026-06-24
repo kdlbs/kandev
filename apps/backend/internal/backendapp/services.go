@@ -346,6 +346,7 @@ func initGitLabService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secr
 	hostStore, hostStoreErr := newGitLabHostStore(dbPool)
 	if hostStoreErr != nil {
 		log.Warn("GitLab host store unavailable (non-fatal)", zap.Error(hostStoreErr))
+		return nil
 	}
 	svc, _, err := gitlab.Provide(context.Background(), adapter, hostStore, log)
 	if err != nil {
