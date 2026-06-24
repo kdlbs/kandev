@@ -81,6 +81,16 @@ func TestIsAlreadyExistsError(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "sqlite table already exists",
+			err:  errors.New("table task_session_worktrees already exists"),
+			want: true,
+		},
+		{
+			name: "sqlite unrelated already exists text",
+			err:  errors.New("migration failed because a dependency already exists in an invalid state"),
+			want: false,
+		},
+		{
 			name: "postgres duplicate column",
 			err:  &pgconn.PgError{Code: postgresDuplicateColumn},
 			want: true,

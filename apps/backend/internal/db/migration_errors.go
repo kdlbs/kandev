@@ -44,5 +44,12 @@ func IsAlreadyExistsError(err error) bool {
 
 	s := err.Error()
 	return strings.Contains(s, "duplicate column name") ||
-		strings.Contains(s, "already exists")
+		isSQLiteDuplicateObjectMessage(s)
+}
+
+func isSQLiteDuplicateObjectMessage(s string) bool {
+	return strings.HasPrefix(s, "table ") && strings.Contains(s, " already exists") ||
+		strings.HasPrefix(s, "index ") && strings.Contains(s, " already exists") ||
+		strings.HasPrefix(s, "trigger ") && strings.Contains(s, " already exists") ||
+		strings.HasPrefix(s, "view ") && strings.Contains(s, " already exists")
 }

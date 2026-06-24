@@ -7,7 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/testutil"
 )
 
-func TestPostgresStore_ReinitializesSchema(t *testing.T) {
+func TestSQLiteStore_ReinitializesSchemaOnPostgres(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 
 	if _, err := tasksqlite.NewWithDB(db, db, nil); err != nil {
