@@ -7,11 +7,14 @@ import (
 	"github.com/kandev/kandev/internal/testutil"
 )
 
-func TestPostgresFreshSchemaInitializes(t *testing.T) {
+func TestPostgresSchemaReinitializes(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 
 	if _, err := NewWithDB(db, db, nil); err != nil {
-		t.Fatalf("init fresh postgres schema: %v", err)
+		t.Fatalf("first postgres schema init: %v", err)
+	}
+	if _, err := NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("second postgres schema init: %v", err)
 	}
 }
 

@@ -27,6 +27,21 @@ func newTestStore(t *testing.T) *SQLiteStore {
 	return store
 }
 
+func TestSQLiteStore_ReinitializesSchema(t *testing.T) {
+	db, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	if _, err := NewSQLiteStore(db, db); err != nil {
+		t.Fatalf("first store init: %v", err)
+	}
+	if _, err := NewSQLiteStore(db, db); err != nil {
+		t.Fatalf("second store init: %v", err)
+	}
+}
+
 func TestSQLiteStore_ListActiveWorktreePaths(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

@@ -4,11 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+
+	"github.com/kandev/kandev/internal/db"
 )
 
 // SQLiteStore implements Store interface using SQLite.
@@ -64,24 +65,13 @@ func (s *SQLiteStore) initSchema() error {
 	// Idempotent ALTER for upgrades. Pre-existing rows get branch_slug='' which
 	// matches the legacy single-branch identity exactly.
 	if _, err := s.db.Exec(`ALTER TABLE task_session_worktrees ADD COLUMN branch_slug TEXT NOT NULL DEFAULT ''`); err != nil {
-		// SQLite returns "duplicate column name" when the column already exists;
-		// treat that as success so the migration is replay-safe.
-		if !isDuplicateColumnError(err) {
+		// SQLite and Postgres report duplicate columns differently; treat both
+		// as success so the migration is replay-safe.
+		if !db.IsDuplicateColumnError(err) {
 			return err
 		}
 	}
 	return nil
-}
-
-func isDuplicateColumnError(err error) bool {
-	if err == nil {
-		return false
-	}
-	// SQLite emits "duplicate column name: <col>" for ALTER TABLE ADD COLUMN
-	// against an existing column. The broader "already exists" substring also
-	// matches unrelated DDL errors (e.g. "table X already exists"), which
-	// would silently swallow real schema failures — keep the match narrow.
-	return strings.Contains(err.Error(), "duplicate column name")
 }
 
 // CreateWorktree persists a new worktree record.

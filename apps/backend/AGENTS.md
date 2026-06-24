@@ -206,6 +206,7 @@ Every long-running goroutine must have a single owner with explicit start and st
 - Boot aborts if the backup fails — the pool is closed and `Provide` returns an error.
 - After all repos complete `initSchema`, `cmd/kandev/storage.go:recordSchemaVersion` writes the current binary version into `kandev_meta` (non-fatal; a failure just means the next boot will take a fresh snapshot).
 - Migration logging: `db.MigrateLogger.Apply(name, stmt)` — success logs Info, "already exists" / "duplicate column name" is silently swallowed, anything else logs Warn but never returns an error (preserving the existing swallow-error contract).
+- Schema replay handling: use `internal/db` helpers such as `IsDuplicateColumnError` / `IsAlreadyExistsError` instead of local error-string matching. Startup schema owners need fresh-DB plus same-DB replay tests for SQLite; add the same env-gated Postgres replay coverage when the path supports Postgres. See `docs/decisions/0027-replayable-schema-migrations.md`.
 
 ## Schema & migrations (SQLite repository)
 
