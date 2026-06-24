@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
-import { Switch } from "@kandev/ui/switch";
 import { Label } from "@kandev/ui/label";
 import { Input } from "@kandev/ui/input";
 import {
@@ -29,6 +28,7 @@ import {
 import {
   LabelMultiSelect,
   PriorityMultiSelect,
+  SettingsFields,
   StateMultiSelect,
   useTeamsAndStates,
 } from "./linear-issue-watch-fields";
@@ -45,7 +45,6 @@ import {
   formStateFromWatch,
   isWatchFormReady,
   makeEmptyForm,
-  parseMaxInflightTasks,
   userOptionLabel,
 } from "./linear-issue-watch-form";
 import type {
@@ -464,76 +463,6 @@ function AutomationFields({
             { id: STEP_DEFAULT, label: STEP_DEFAULT_LABEL },
             ...allExecutorProfiles.map((p) => ({ id: p.id, label: p.name })),
           ]}
-        />
-      </div>
-    </>
-  );
-}
-
-function MaxInflightTasksField({
-  form,
-  setForm,
-}: {
-  form: FormState;
-  setForm: React.Dispatch<React.SetStateAction<FormState>>;
-}) {
-  const parsed = parseMaxInflightTasks(form.maxInflightTasks);
-  const invalid = parsed === "invalid";
-  return (
-    <div className="space-y-1.5">
-      <Label>Max in-flight tasks</Label>
-      <p className="text-xs text-muted-foreground">
-        Cap on open tasks created by this watcher. Leave blank for no cap. New matches are deferred
-        to the next poll when the cap is reached.
-      </p>
-      <Input
-        type="number"
-        value={form.maxInflightTasks}
-        onChange={(e) => setForm((p) => ({ ...p, maxInflightTasks: e.target.value }))}
-        min={1}
-        step={1}
-        placeholder="(no cap)"
-        aria-invalid={invalid}
-      />
-      {invalid && (
-        <p className="text-xs text-destructive">Enter a positive integer or leave blank.</p>
-      )}
-    </div>
-  );
-}
-
-function SettingsFields({
-  form,
-  setForm,
-}: {
-  form: FormState;
-  setForm: React.Dispatch<React.SetStateAction<FormState>>;
-}) {
-  return (
-    <>
-      <div className="space-y-1.5">
-        <Label>Poll Interval (seconds)</Label>
-        <p className="text-xs text-muted-foreground">
-          How often to re-run the search. Minimum 60s, maximum 3600s.
-        </p>
-        <Input
-          type="number"
-          value={form.pollInterval}
-          onChange={(e) => setForm((p) => ({ ...p, pollInterval: Number(e.target.value) }))}
-          min={60}
-          max={3600}
-        />
-      </div>
-      <MaxInflightTasksField form={form} setForm={setForm} />
-      <div className="flex items-center justify-between">
-        <div>
-          <Label>Enabled</Label>
-          <p className="text-xs text-muted-foreground">Pause or resume polling.</p>
-        </div>
-        <Switch
-          checked={form.enabled}
-          onCheckedChange={(v) => setForm((p) => ({ ...p, enabled: v }))}
-          className="cursor-pointer"
         />
       </div>
     </>

@@ -1,14 +1,22 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from "react";
 import { Badge } from "@kandev/ui/badge";
+import { Input } from "@kandev/ui/input";
+import { Label } from "@kandev/ui/label";
+import { Switch } from "@kandev/ui/switch";
 import {
   listLinearLabels,
   listLinearStates,
   listLinearTeams,
   listLinearUsers,
 } from "@/lib/api/domains/linear-api";
-import { PRIORITY_OPTIONS, type LinearPriority } from "./linear-issue-watch-form";
+import {
+  PRIORITY_OPTIONS,
+  parseMaxInflightTasks,
+  type FormState,
+  type LinearPriority,
+} from "./linear-issue-watch-form";
 import type { LinearLabel, LinearTeam, LinearUser, LinearWorkflowState } from "@/lib/types/linear";
 
 // useTeamsAndStates loads the team list once Linear is configured, plus the
@@ -217,5 +225,70 @@ export function LabelMultiSelect({
         );
       })}
     </div>
+  );
+}
+
+type FormSetter = Dispatch<SetStateAction<FormState>>;
+
+// MaxInflightTasksField renders the per-watcher throttle-cap input with inline
+// validation. Lives here (rather than the dialog) to keep the dialog file under
+// its line ceiling.
+export function MaxInflightTasksField({ form, setForm }: { form: FormState; setForm: FormSetter }) {
+  const parsed = parseMaxInflightTasks(form.maxInflightTasks);
+  const invalid = parsed === "invalid";
+  return (
+    <div className="space-y-1.5">
+      <Label>Max in-flight tasks</Label>
+      <p className="text-xs text-muted-foreground">
+        Cap on open tasks created by this watcher. Leave blank for no cap. New matches are deferred
+        to the next poll when the cap is reached.
+      </p>
+      <Input
+        type="number"
+        value={form.maxInflightTasks}
+        onChange={(e) => setForm((p) => ({ ...p, maxInflightTasks: e.target.value }))}
+        min={1}
+        step={1}
+        placeholder="(no cap)"
+        aria-invalid={invalid}
+      />
+      {invalid && (
+        <p className="text-xs text-destructive">Enter a positive integer or leave blank.</p>
+      )}
+    </div>
+  );
+}
+
+// SettingsFields renders the poll-interval, throttle-cap, and enabled toggle —
+// the trailing "Settings" block of the watcher dialog.
+export function SettingsFields({ form, setForm }: { form: FormState; setForm: FormSetter }) {
+  return (
+    <>
+      <div className="space-y-1.5">
+        <Label>Poll Interval (seconds)</Label>
+        <p className="text-xs text-muted-foreground">
+          How often to re-run the search. Minimum 60s, maximum 3600s.
+        </p>
+        <Input
+          type="number"
+          value={form.pollInterval}
+          onChange={(e) => setForm((p) => ({ ...p, pollInterval: Number(e.target.value) }))}
+          min={60}
+          max={3600}
+        />
+      </div>
+      <MaxInflightTasksField form={form} setForm={setForm} />
+      <div className="flex items-center justify-between">
+        <div>
+          <Label>Enabled</Label>
+          <p className="text-xs text-muted-foreground">Pause or resume polling.</p>
+        </div>
+        <Switch
+          checked={form.enabled}
+          onCheckedChange={(v) => setForm((p) => ({ ...p, enabled: v }))}
+          className="cursor-pointer"
+        />
+      </div>
+    </>
   );
 }
