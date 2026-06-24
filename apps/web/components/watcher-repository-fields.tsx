@@ -79,7 +79,7 @@ export function WatcherRepositoryFields({
     <div className="grid grid-cols-2 gap-4">
       <PickSelect
         label="Repository"
-        description="Optional — the repository the agent works in. Leave unset to run with no repository."
+        description="Optional — the repository the agent works in."
         value={repositoryId || NO_REPOSITORY}
         onChange={(v) => onRepositoryChange(resolveRepositoryId(v))}
         placeholder={NO_REPOSITORY_LABEL}
