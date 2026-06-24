@@ -270,10 +270,26 @@ func TestBuildIssueQueryString(t *testing.T) {
 		Statuses: []string{"unresolved"},
 		Query:    "boom",
 	})
-	for _, want := range []string{"level:error", "level:fatal", "is:unresolved", "boom"} {
+	// Multiple levels must use Sentry's IN-filter bracket syntax, which matches
+	// any of the listed values (OR). Space-separated `level:error level:fatal`
+	// is AND-combined by Sentry and matches nothing, since no issue has more
+	// than one level.
+	if !strings.Contains(got, "level:[error, fatal]") {
+		t.Errorf("multi-level query must use bracket OR syntax, got %q", got)
+	}
+	if strings.Contains(got, "level:error level:fatal") {
+		t.Errorf("multi-level query must not AND-combine space-separated level tokens, got %q", got)
+	}
+	for _, want := range []string{"is:unresolved", "boom"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("query string %q missing %q", got, want)
 		}
+	}
+
+	// A single level renders as a plain token (no brackets), keeping the
+	// common single-level watch query simple.
+	if got := buildIssueQueryString(SearchFilter{Levels: []string{"error"}}); got != "level:error" {
+		t.Errorf("single level should render as %q, got %q", "level:error", got)
 	}
 }
 

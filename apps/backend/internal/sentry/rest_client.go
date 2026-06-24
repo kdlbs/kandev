@@ -383,16 +383,31 @@ func issuesSearchPath(orgSlug, projectSlug string) string {
 }
 
 // buildIssueQueryString assembles Sentry's search-bar syntax from a
-// SearchFilter. Levels and statuses are encoded as repeated `level:foo` /
-// `is:bar` tokens — Sentry treats repeated tokens of the same key as an OR.
+// SearchFilter. Multiple levels use Sentry's IN-filter bracket syntax
+// (`level:[error, fatal]`), which matches any of the listed values; a single
+// level renders as a plain `level:foo` token. The `is:` keyword has no bracket
+// form in Sentry search, so statuses are emitted as plain `is:bar` tokens;
+// watch filters are limited to a single status (enforced by
+// validateFilterStatuses) because two `is:` tokens would AND-combine and match
+// nothing.
 func buildIssueQueryString(f SearchFilter) string {
 	parts := make([]string, 0, 4)
+	levels := make([]string, 0, len(f.Levels))
 	for _, lvl := range f.Levels {
-		lvl = strings.TrimSpace(lvl)
-		if lvl == "" {
-			continue
+		if lvl = strings.TrimSpace(lvl); lvl != "" {
+			levels = append(levels, lvl)
 		}
-		parts = append(parts, "level:"+lvl)
+	}
+	switch len(levels) {
+	case 0:
+		// no level filter
+	case 1:
+		parts = append(parts, "level:"+levels[0])
+	default:
+		// Sentry's IN-filter bracket syntax matches any listed value (OR).
+		// Space-separated repeated `level:` tokens are AND-combined and match
+		// nothing, since no issue has more than one level.
+		parts = append(parts, "level:["+strings.Join(levels, ", ")+"]")
 	}
 	for _, st := range f.Statuses {
 		st = strings.TrimSpace(st)
