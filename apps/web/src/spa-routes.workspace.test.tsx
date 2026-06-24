@@ -42,6 +42,8 @@ vi.mock("@/lib/api/client", () => ({
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  document.cookie = "kandev-active-workspace=; path=/; max-age=0";
+  document.cookie = "office-active-workspace=; path=/; max-age=0";
   window.history.replaceState({}, "", "/");
 });
 
@@ -74,6 +76,42 @@ describe("SpaRoutes data-backed workspace context", () => {
           },
         }}
       >
+        <SpaRoutes />
+      </StateProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("github-page").getAttribute("data-workspace-id")).toBe(
+        SELECTED_WORKSPACE_ID,
+      );
+    });
+    expect(mocks.listWorkflows).toHaveBeenCalledWith(SELECTED_WORKSPACE_ID, {
+      cache: "no-store",
+    });
+  });
+
+  it("uses the active workspace cookie when the store has no active workspace yet", async () => {
+    window.history.replaceState({}, "", "/github");
+    document.cookie = `kandev-active-workspace=${SELECTED_WORKSPACE_ID}; path=/`;
+    mocks.listWorkspaces.mockResolvedValue({
+      workspaces: [workspace(DEFAULT_WORKSPACE_ID), workspace(SELECTED_WORKSPACE_ID)],
+    });
+    mocks.fetchUserSettings.mockResolvedValue({
+      settings: {
+        workspace_id: DEFAULT_WORKSPACE_ID,
+        workflow_filter_id: "",
+        repository_ids: [],
+        updated_at: TEST_TIMESTAMP,
+      },
+    });
+    mocks.listWorkflows.mockResolvedValue({
+      workflows: [workflow("wf-selected", SELECTED_WORKSPACE_ID)],
+    });
+    mocks.listRepositories.mockResolvedValue({ repositories: [] });
+    mocks.fetchJson.mockResolvedValue({ steps: [], total: 0 });
+
+    render(
+      <StateProvider>
         <SpaRoutes />
       </StateProvider>,
     );

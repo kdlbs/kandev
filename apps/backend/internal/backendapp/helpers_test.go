@@ -633,6 +633,78 @@ func TestBootRouteDataIntegrationRouteUsesActiveWorkspaceCookie(t *testing.T) {
 	}
 }
 
+func TestBootRouteDataIntegrationRouteCookieWinsOverSettingsWorkspace(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	workspaces, err := harness.taskSvc.ListWorkspaces(ctx)
+	if err != nil {
+		t.Fatalf("ListWorkspaces: %v", err)
+	}
+	if len(workspaces) == 0 {
+		t.Fatal("expected seeded default workspace")
+	}
+	settingsWorkspaceID := workspaces[0].ID
+	cookieWorkspace, err := harness.taskSvc.CreateWorkspace(ctx, &taskservice.CreateWorkspaceRequest{
+		Name: "Cookie Workspace",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if _, err := harness.taskSvc.CreateWorkflow(ctx, &taskservice.CreateWorkflowRequest{
+		WorkspaceID: cookieWorkspace.ID,
+		Name:        "Cookie Workflow",
+	}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if _, err := harness.userSvc.UpdateUserSettings(ctx, &userservice.UpdateUserSettingsRequest{
+		WorkspaceID: &settingsWorkspaceID,
+	}); err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/app-state?path=%2Fgithub", nil)
+	req.AddCookie(&http.Cookie{Name: "kandev-active-workspace", Value: cookieWorkspace.ID})
+	payload := bootPayload(ctx, req, routeParams{
+		taskSvc:  harness.taskSvc,
+		userCtrl: harness.userCtrl,
+		services: &Services{
+			Workflow: harness.workflowSvc,
+		},
+	}, webapp.ClassifyRoute("/github"))
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("Marshal payload: %v", err)
+	}
+	var decoded struct {
+		InitialState struct {
+			Workspaces struct {
+				ActiveID string `json:"activeId"`
+			} `json:"workspaces"`
+			UserSettings struct {
+				WorkspaceID string `json:"workspaceId"`
+			} `json:"userSettings"`
+		} `json:"initialState"`
+		RouteData struct {
+			RouteContext struct {
+				ActiveWorkspaceID string `json:"activeWorkspaceId"`
+			} `json:"routeContext"`
+		} `json:"routeData"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("Unmarshal payload: %v", err)
+	}
+	if decoded.InitialState.Workspaces.ActiveID != cookieWorkspace.ID {
+		t.Fatalf("initial active workspace = %q, want %q", decoded.InitialState.Workspaces.ActiveID, cookieWorkspace.ID)
+	}
+	if decoded.InitialState.UserSettings.WorkspaceID != cookieWorkspace.ID {
+		t.Fatalf("user settings workspace = %q, want %q", decoded.InitialState.UserSettings.WorkspaceID, cookieWorkspace.ID)
+	}
+	if decoded.RouteData.RouteContext.ActiveWorkspaceID != cookieWorkspace.ID {
+		t.Fatalf("route active workspace = %q, want %q", decoded.RouteData.RouteContext.ActiveWorkspaceID, cookieWorkspace.ID)
+	}
+}
+
 func nonFallbackWorkspace(t *testing.T, ctx context.Context, taskSvc *taskservice.Service) *models.Workspace {
 	t.Helper()
 	workspaces, err := taskSvc.ListWorkspaces(ctx)
