@@ -27,38 +27,42 @@ func newTestStore(t *testing.T) *Store {
 	return store
 }
 
-func TestStore_UpsertGetDelete(t *testing.T) {
+// createTestConfig inserts a config and returns its generated id.
+func createTestConfig(t *testing.T, store *Store, name, url string) string {
+	t.Helper()
+	cfg := &SentryConfig{Name: name, AuthMethod: AuthMethodAuthToken, URL: url}
+	if err := store.CreateConfig(context.Background(), cfg); err != nil {
+		t.Fatalf("create config: %v", err)
+	}
+	if cfg.ID == "" {
+		t.Fatal("expected generated id on create")
+	}
+	return cfg.ID
+}
+
+func TestStore_CreateGetDelete(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	cfg := &SentryConfig{AuthMethod: AuthMethodAuthToken}
-	if err := store.UpsertConfig(ctx, cfg); err != nil {
-		t.Fatalf("upsert: %v", err)
-	}
-
-	got, err := store.GetConfig(ctx)
+	id := createTestConfig(t, store, "Prod", "https://sentry.io")
+	got, err := store.GetConfig(ctx, id)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
 	if got == nil {
 		t.Fatal("expected config, got nil")
 	}
-	if got.AuthMethod != cfg.AuthMethod {
-		t.Errorf("round-trip mismatch: %+v vs %+v", got, cfg)
+	if got.ID != id || got.Name != "Prod" || got.AuthMethod != AuthMethodAuthToken {
+		t.Errorf("round-trip mismatch: %+v", got)
 	}
 	if got.CreatedAt.IsZero() || got.UpdatedAt.IsZero() {
 		t.Error("timestamps not set")
 	}
 
-	// Idempotent upsert does not duplicate rows.
-	if err := store.UpsertConfig(ctx, cfg); err != nil {
-		t.Fatalf("update upsert: %v", err)
-	}
-
-	if err := store.DeleteConfig(ctx); err != nil {
+	if err := store.DeleteConfig(ctx, id); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	gone, err := store.GetConfig(ctx)
+	gone, err := store.GetConfig(ctx, id)
 	if err != nil {
 		t.Fatalf("get after delete: %v", err)
 	}
@@ -69,7 +73,7 @@ func TestStore_UpsertGetDelete(t *testing.T) {
 
 func TestStore_GetConfig_Missing(t *testing.T) {
 	store := newTestStore(t)
-	cfg, err := store.GetConfig(context.Background())
+	cfg, err := store.GetConfig(context.Background(), "nope")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -78,39 +82,74 @@ func TestStore_GetConfig_Missing(t *testing.T) {
 	}
 }
 
-func TestStore_HasConfig(t *testing.T) {
+// TestStore_MultipleInstancesCoexist is the core multi-instance assertion: two
+// distinct instances persist side by side and ListConfigs returns both.
+func TestStore_MultipleInstancesCoexist(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	has, _ := store.HasConfig(ctx)
+	idA := createTestConfig(t, store, "SaaS", "https://sentry.io")
+	idB := createTestConfig(t, store, "Self-hosted", "https://sentry.acme.com")
+	if idA == idB {
+		t.Fatal("expected distinct instance ids")
+	}
+	configs, err := store.ListConfigs(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(configs) != 2 {
+		t.Fatalf("expected 2 instances, got %d", len(configs))
+	}
+	byID := map[string]*SentryConfig{configs[0].ID: configs[0], configs[1].ID: configs[1]}
+	if byID[idA].URL != "https://sentry.io" || byID[idB].URL != "https://sentry.acme.com" {
+		t.Errorf("instance URLs not preserved: %+v", configs)
+	}
+}
+
+func TestStore_HasAnyConfig(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	has, _ := store.HasAnyConfig(ctx)
 	if has {
-		t.Errorf("expected HasConfig=false on empty store")
+		t.Errorf("expected HasAnyConfig=false on empty store")
 	}
-	if err := store.UpsertConfig(ctx, &SentryConfig{AuthMethod: AuthMethodAuthToken}); err != nil {
-		t.Fatalf("upsert: %v", err)
-	}
-	has, _ = store.HasConfig(ctx)
+	createTestConfig(t, store, "Prod", "https://sentry.io")
+	has, _ = store.HasAnyConfig(ctx)
 	if !has {
-		t.Errorf("expected HasConfig=true after upsert")
+		t.Errorf("expected HasAnyConfig=true after create")
+	}
+}
+
+func TestStore_UpdateConfig_RoundTripsNameAndURL(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	id := createTestConfig(t, store, "Old", "https://sentry.io")
+	if err := store.UpdateConfig(ctx, &SentryConfig{ID: id, Name: "New", AuthMethod: AuthMethodAuthToken, URL: "https://sentry.example.com"}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	got, err := store.GetConfig(ctx, id)
+	if err != nil || got == nil {
+		t.Fatalf("get: %v / %v", err, got)
+	}
+	if got.Name != "New" || got.URL != "https://sentry.example.com" {
+		t.Errorf("update not persisted: %+v", got)
 	}
 }
 
 func TestStore_UpdateAuthHealth(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	if err := store.UpsertConfig(ctx, &SentryConfig{AuthMethod: AuthMethodAuthToken}); err != nil {
-		t.Fatalf("upsert: %v", err)
-	}
+	id := createTestConfig(t, store, "Prod", "https://sentry.io")
 
-	cfg, _ := store.GetConfig(ctx)
+	cfg, _ := store.GetConfig(ctx, id)
 	if cfg.LastCheckedAt != nil {
 		t.Errorf("expected nil last_checked_at on fresh row, got %v", cfg.LastCheckedAt)
 	}
 
 	now := time.Now().UTC().Truncate(time.Second)
-	if err := store.UpdateAuthHealth(ctx, true, "", now); err != nil {
+	if err := store.UpdateAuthHealth(ctx, id, true, "", now); err != nil {
 		t.Fatalf("update ok: %v", err)
 	}
-	cfg, _ = store.GetConfig(ctx)
+	cfg, _ = store.GetConfig(ctx, id)
 	if !cfg.LastOk {
 		t.Error("expected last_ok=true after successful probe")
 	}
@@ -119,10 +158,10 @@ func TestStore_UpdateAuthHealth(t *testing.T) {
 	}
 
 	failAt := now.Add(time.Minute)
-	if err := store.UpdateAuthHealth(ctx, false, "401 unauthorized", failAt); err != nil {
+	if err := store.UpdateAuthHealth(ctx, id, false, "401 unauthorized", failAt); err != nil {
 		t.Fatalf("update fail: %v", err)
 	}
-	cfg, _ = store.GetConfig(ctx)
+	cfg, _ = store.GetConfig(ctx, id)
 	if cfg.LastOk {
 		t.Error("expected last_ok=false after failure")
 	}
@@ -131,28 +170,147 @@ func TestStore_UpdateAuthHealth(t *testing.T) {
 	}
 }
 
-// TestStore_UpsertGetConfig_RoundTripsURL asserts the instance URL persists
-// through an upsert/get cycle.
-func TestStore_UpsertGetConfig_RoundTripsURL(t *testing.T) {
+// TestStore_UpdateAuthHealth_PerInstance asserts a probe write targets only the
+// addressed instance, never bleeding into a sibling instance's row.
+func TestStore_UpdateAuthHealth_PerInstance(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	cfg := &SentryConfig{AuthMethod: AuthMethodAuthToken, URL: "https://sentry.example.com"}
-	if err := store.UpsertConfig(ctx, cfg); err != nil {
-		t.Fatalf("upsert: %v", err)
+	idA := createTestConfig(t, store, "A", "https://sentry.io")
+	idB := createTestConfig(t, store, "B", "https://sentry.acme.com")
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := store.UpdateAuthHealth(ctx, idA, true, "", now); err != nil {
+		t.Fatalf("update A: %v", err)
 	}
-	got, err := store.GetConfig(ctx)
-	if err != nil || got == nil {
-		t.Fatalf("get: %v / %v", err, got)
+	a, _ := store.GetConfig(ctx, idA)
+	b, _ := store.GetConfig(ctx, idB)
+	if !a.LastOk {
+		t.Error("expected A healthy")
 	}
-	if got.URL != "https://sentry.example.com" {
-		t.Errorf("url not persisted: got %q", got.URL)
+	if b.LastCheckedAt != nil {
+		t.Error("expected B untouched by A's probe write")
 	}
 }
 
-// TestStore_MigratesURLColumn seeds a pre-self-hosted sentry_configs table (no
-// url column) and verifies NewStore adds the column, backfilling the existing
-// SaaS row to the sentry.io default rather than an empty string.
-func TestStore_MigratesURLColumn(t *testing.T) {
+func TestStore_CountWatchesForInstance(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	id := createTestConfig(t, store, "A", "https://sentry.io")
+	if n, _ := store.CountWatchesForInstance(ctx, id); n != 0 {
+		t.Fatalf("expected 0 watches, got %d", n)
+	}
+	w := &IssueWatch{
+		WorkspaceID:    "ws-1",
+		InstanceID:     id,
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "step-1",
+		Filter:         SearchFilter{OrgSlug: "org", ProjectSlug: "proj"},
+	}
+	if err := store.CreateIssueWatch(ctx, w); err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+	if n, _ := store.CountWatchesForInstance(ctx, id); n != 1 {
+		t.Fatalf("expected 1 watch, got %d", n)
+	}
+	if n, _ := store.CountWatchesForInstance(ctx, "other"); n != 0 {
+		t.Fatalf("expected 0 watches for other instance, got %d", n)
+	}
+}
+
+// TestStore_MigratesSingletonToInstance seeds the legacy single-tenant schema
+// (CHECK(id='singleton'), no name column) plus a watch bound to it, then asserts
+// NewStore promotes the row to a generated instance id, names it after its URL
+// host, exposes the migrated id, and backfills the watch.
+func TestStore_MigratesSingletonToInstance(t *testing.T) {
+	db := newRawDB(t)
+	now := time.Now().UTC()
+	seedLegacyConfigs(t, db, true)
+	if _, err := db.Exec(`INSERT INTO sentry_configs (id, auth_method, url, created_at, updated_at)
+		VALUES ('singleton', ?, 'https://sentry.acme.com', ?, ?)`, AuthMethodAuthToken, now, now); err != nil {
+		t.Fatalf("seed legacy config: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE sentry_issue_watches (
+		id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, workflow_id TEXT NOT NULL,
+		workflow_step_id TEXT NOT NULL, filter_json TEXT NOT NULL DEFAULT '{}',
+		agent_profile_id TEXT NOT NULL DEFAULT '', executor_profile_id TEXT NOT NULL DEFAULT '',
+		prompt TEXT NOT NULL DEFAULT '', enabled BOOLEAN NOT NULL DEFAULT 1,
+		poll_interval_seconds INTEGER NOT NULL DEFAULT 300,
+		max_inflight_tasks INTEGER DEFAULT 5,
+		last_polled_at DATETIME,
+		last_error TEXT NOT NULL DEFAULT '', last_error_at DATETIME,
+		created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)`); err != nil {
+		t.Fatalf("seed legacy watches: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO sentry_issue_watches (id, workspace_id, workflow_id, workflow_step_id, created_at, updated_at)
+		VALUES ('watch-1', 'ws-1', 'wf-1', 'step-1', ?, ?)`, now, now); err != nil {
+		t.Fatalf("seed legacy watch row: %v", err)
+	}
+
+	store, err := NewStore(db, db)
+	if err != nil {
+		t.Fatalf("new store (migrate): %v", err)
+	}
+	if store.MigratedSingletonID() == "" {
+		t.Fatal("expected MigratedSingletonID to be set")
+	}
+	configs, err := store.ListConfigs(context.Background())
+	if err != nil || len(configs) != 1 {
+		t.Fatalf("expected 1 migrated instance, got %d (%v)", len(configs), err)
+	}
+	migrated := configs[0]
+	if migrated.ID == legacySingletonID || migrated.ID != store.MigratedSingletonID() {
+		t.Errorf("expected generated id, got %q", migrated.ID)
+	}
+	if migrated.Name != "sentry.acme.com" {
+		t.Errorf("expected name derived from URL host, got %q", migrated.Name)
+	}
+	if migrated.URL != "https://sentry.acme.com" {
+		t.Errorf("expected URL preserved, got %q", migrated.URL)
+	}
+	// The legacy watch must now point at the migrated instance.
+	w, err := store.GetIssueWatch(context.Background(), "watch-1")
+	if err != nil || w == nil {
+		t.Fatalf("get migrated watch: %v / %v", err, w)
+	}
+	if w.InstanceID != store.MigratedSingletonID() {
+		t.Errorf("expected watch backfilled to %q, got %q", store.MigratedSingletonID(), w.InstanceID)
+	}
+}
+
+// TestStore_MigratesLegacyWithoutURLColumn covers the oldest schema (no url
+// column): the url is backfilled to the SaaS default before the table rebuild,
+// and the promoted instance is named after that default host.
+func TestStore_MigratesLegacyWithoutURLColumn(t *testing.T) {
+	db := newRawDB(t)
+	now := time.Now().UTC()
+	seedLegacyConfigs(t, db, false)
+	if _, err := db.Exec(`INSERT INTO sentry_configs (id, auth_method, created_at, updated_at)
+		VALUES ('singleton', ?, ?, ?)`, AuthMethodAuthToken, now, now); err != nil {
+		t.Fatalf("seed legacy row: %v", err)
+	}
+	store, err := NewStore(db, db)
+	if err != nil {
+		t.Fatalf("new store (migrate): %v", err)
+	}
+	configs, err := store.ListConfigs(context.Background())
+	if err != nil || len(configs) != 1 {
+		t.Fatalf("expected 1 migrated instance, got %d (%v)", len(configs), err)
+	}
+	if configs[0].URL != DefaultSentryURL {
+		t.Errorf("expected url backfilled to %q, got %q", DefaultSentryURL, configs[0].URL)
+	}
+}
+
+// TestStore_FreshInstall_NoMigration confirms a fresh DB needs no rebuild and
+// records no migrated singleton id.
+func TestStore_FreshInstall_NoMigration(t *testing.T) {
+	store := newTestStore(t)
+	if store.MigratedSingletonID() != "" {
+		t.Errorf("expected no migration on fresh install, got %q", store.MigratedSingletonID())
+	}
+}
+
+func newRawDB(t *testing.T) *sqlx.DB {
+	t.Helper()
 	raw, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -161,34 +319,25 @@ func TestStore_MigratesURLColumn(t *testing.T) {
 	raw.SetMaxIdleConns(1)
 	db := sqlx.NewDb(raw, "sqlite3")
 	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
 
-	now := time.Now().UTC()
-	if _, err := db.Exec(`
-		CREATE TABLE sentry_configs (
-			id TEXT PRIMARY KEY CHECK(id = 'singleton'),
-			auth_method TEXT NOT NULL,
-			last_checked_at DATETIME,
-			last_ok INTEGER NOT NULL DEFAULT 0,
-			last_error TEXT NOT NULL DEFAULT '',
-			created_at DATETIME NOT NULL,
-			updated_at DATETIME NOT NULL
-		)`); err != nil {
+// seedLegacyConfigs creates the legacy singleton sentry_configs table, with or
+// without the url column, to drive the migration tests.
+func seedLegacyConfigs(t *testing.T, db *sqlx.DB, withURL bool) {
+	t.Helper()
+	urlCol := ""
+	if withURL {
+		urlCol = "url TEXT NOT NULL DEFAULT 'https://sentry.io',\n"
+	}
+	if _, err := db.Exec(`CREATE TABLE sentry_configs (
+		id TEXT PRIMARY KEY CHECK(id = 'singleton'),
+		auth_method TEXT NOT NULL,
+		` + urlCol + `last_checked_at DATETIME,
+		last_ok INTEGER NOT NULL DEFAULT 0,
+		last_error TEXT NOT NULL DEFAULT '',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL)`); err != nil {
 		t.Fatalf("create legacy schema: %v", err)
-	}
-	if _, err := db.Exec(`INSERT INTO sentry_configs (id, auth_method, created_at, updated_at)
-		VALUES ('singleton', ?, ?, ?)`, AuthMethodAuthToken, now, now); err != nil {
-		t.Fatalf("seed legacy row: %v", err)
-	}
-
-	store, err := NewStore(db, db)
-	if err != nil {
-		t.Fatalf("new store (migrate): %v", err)
-	}
-	cfg, err := store.GetConfig(context.Background())
-	if err != nil || cfg == nil {
-		t.Fatalf("get after migrate: %v / %v", err, cfg)
-	}
-	if cfg.URL != DefaultSentryURL {
-		t.Errorf("expected legacy row backfilled to %q, got %q", DefaultSentryURL, cfg.URL)
 	}
 }

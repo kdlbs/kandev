@@ -139,13 +139,26 @@ func newSvcFixture(t *testing.T) *svcFixture {
 	return f
 }
 
-func waitForAuthProbe(t *testing.T, f *svcFixture) *SentryConfig {
+// create persists an instance via the service and returns it (fails the test on
+// error).
+func (f *svcFixture) create(t *testing.T, req *SetConfigRequest) *SentryConfig {
+	t.Helper()
+	cfg, err := f.svc.CreateInstance(context.Background(), req)
+	if err != nil {
+		t.Fatalf("create instance: %v", err)
+	}
+	return cfg
+}
+
+// waitProbe blocks until the async auth probe fires, then returns the refreshed
+// instance config.
+func (f *svcFixture) waitProbe(t *testing.T, id string) *SentryConfig {
 	t.Helper()
 	select {
 	case <-f.probed:
-		cfg, err := f.svc.GetConfig(context.Background())
+		cfg, err := f.svc.GetInstance(context.Background(), id)
 		if err != nil {
-			t.Fatalf("get config after probe: %v", err)
+			t.Fatalf("get instance after probe: %v", err)
 		}
 		return cfg
 	case <-time.After(2 * time.Second):
@@ -154,37 +167,26 @@ func waitForAuthProbe(t *testing.T, f *svcFixture) *SentryConfig {
 	}
 }
 
-func TestService_SetConfig_PersistsAndStoresSecret(t *testing.T) {
+func TestService_CreateInstance_PersistsAndStoresSecret(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
-	cfg, err := f.svc.SetConfig(ctx, &SetConfigRequest{
-		AuthMethod: AuthMethodAuthToken,
-		Secret:     "sntrys_xyz",
-	})
-	if err != nil {
-		t.Fatalf("set: %v", err)
-	}
-	if cfg.AuthMethod != AuthMethodAuthToken {
+	cfg := f.create(t, &SetConfigRequest{Name: "Prod", AuthMethod: AuthMethodAuthToken, Secret: "sntrys_xyz"})
+	if cfg.ID == "" || cfg.Name != "Prod" || cfg.AuthMethod != AuthMethodAuthToken {
 		t.Errorf("config not stored: %+v", cfg)
 	}
 	if !cfg.HasSecret {
 		t.Error("expected HasSecret=true")
 	}
-	if got, _ := f.secrets.Reveal(ctx, SecretKey); got != "sntrys_xyz" {
+	if got, _ := f.secrets.Reveal(ctx, secretKeyFor(cfg.ID)); got != "sntrys_xyz" {
 		t.Errorf("secret stored = %q", got)
 	}
 }
 
-func TestService_GetConfig_HidesSecretValue(t *testing.T) {
-	// GetConfig must surface HasSecret=true but never the secret itself.
+func TestService_GetInstance_HidesSecretValue(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
-	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
-		AuthMethod: AuthMethodAuthToken, Secret: "secret-tok",
-	}); err != nil {
-		t.Fatalf("set: %v", err)
-	}
-	cfg, err := f.svc.GetConfig(ctx)
+	created := f.create(t, &SetConfigRequest{AuthMethod: AuthMethodAuthToken, Secret: "secret-tok"})
+	cfg, err := f.svc.GetInstance(ctx, created.ID)
 	if err != nil || cfg == nil {
 		t.Fatalf("get: %v / %v", err, cfg)
 	}
@@ -193,52 +195,48 @@ func TestService_GetConfig_HidesSecretValue(t *testing.T) {
 	}
 }
 
-func TestService_SetConfig_EmptySecret_KeepsExisting(t *testing.T) {
+func TestService_UpdateInstance_EmptySecret_KeepsExisting(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
-	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
-		AuthMethod: AuthMethodAuthToken, Secret: "first",
-	}); err != nil {
-		t.Fatalf("initial: %v", err)
-	}
-	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
-		AuthMethod: AuthMethodAuthToken,
-	}); err != nil {
+	created := f.create(t, &SetConfigRequest{AuthMethod: AuthMethodAuthToken, Secret: "first"})
+	if _, err := f.svc.UpdateInstance(ctx, created.ID, &SetConfigRequest{AuthMethod: AuthMethodAuthToken}); err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if got, _ := f.secrets.Reveal(ctx, SecretKey); got != "first" {
+	if got, _ := f.secrets.Reveal(ctx, secretKeyFor(created.ID)); got != "first" {
 		t.Errorf("secret should be preserved, got %q", got)
 	}
 }
 
-func TestService_SetConfig_ProbesAsync(t *testing.T) {
+func TestService_UpdateInstance_UnknownID(t *testing.T) {
+	f := newSvcFixture(t)
+	_, err := f.svc.UpdateInstance(context.Background(), "ghost", &SetConfigRequest{AuthMethod: AuthMethodAuthToken})
+	if !errors.Is(err, ErrInstanceNotFound) {
+		t.Errorf("expected ErrInstanceNotFound, got %v", err)
+	}
+}
+
+func TestService_CreateInstance_ProbesAsync(t *testing.T) {
 	f := newSvcFixture(t)
 	f.client.testAuthFn = func() (*TestConnectionResult, error) {
 		return &TestConnectionResult{OK: true, DisplayName: "Alice"}, nil
 	}
-	if _, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
-		AuthMethod: AuthMethodAuthToken, Secret: "tok",
-	}); err != nil {
-		t.Fatalf("set: %v", err)
-	}
-	cfg := waitForAuthProbe(t, f)
-	if !cfg.LastOk {
-		t.Errorf("expected LastOk=true after async probe, got %+v", cfg)
+	cfg := f.create(t, &SetConfigRequest{AuthMethod: AuthMethodAuthToken, Secret: "tok"})
+	got := f.waitProbe(t, cfg.ID)
+	if !got.LastOk {
+		t.Errorf("expected LastOk=true after async probe, got %+v", got)
 	}
 }
 
 func TestService_Validation_RejectsBadAuth(t *testing.T) {
 	f := newSvcFixture(t)
-	if _, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
-		AuthMethod: "bogus",
-	}); err == nil {
+	if _, err := f.svc.CreateInstance(context.Background(), &SetConfigRequest{AuthMethod: "bogus"}); err == nil {
 		t.Error("expected validation error for unknown auth method")
 	}
 }
 
 func TestService_Validation_DefaultsAuthMethod(t *testing.T) {
 	f := newSvcFixture(t)
-	if _, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{Secret: "tok"}); err != nil {
+	if _, err := f.svc.CreateInstance(context.Background(), &SetConfigRequest{Secret: "tok"}); err != nil {
 		t.Fatalf("expected default auth method, got error: %v", err)
 	}
 }
@@ -250,7 +248,7 @@ func TestService_TestConnection_InlineSecret(t *testing.T) {
 		called = true
 		return &TestConnectionResult{OK: true, DisplayName: "Alice"}, nil
 	}
-	res, err := f.svc.TestConnection(context.Background(), &SetConfigRequest{
+	res, err := f.svc.TestConnection(context.Background(), "", &SetConfigRequest{
 		AuthMethod: AuthMethodAuthToken, Secret: "inline-tok",
 	})
 	if err != nil || !called {
@@ -264,18 +262,14 @@ func TestService_TestConnection_InlineSecret(t *testing.T) {
 func TestService_TestConnection_UsesStoredSecretWhenRequestEmpty(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
-	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
-		AuthMethod: AuthMethodAuthToken, Secret: "stored",
-	}); err != nil {
-		t.Fatalf("set: %v", err)
-	}
-	waitForAuthProbe(t, f)
+	created := f.create(t, &SetConfigRequest{AuthMethod: AuthMethodAuthToken, Secret: "stored"})
+	f.waitProbe(t, created.ID)
 	var sawSecret string
 	f.svc.clientFn = func(_ *SentryConfig, secret string) Client {
 		sawSecret = secret
 		return f.client
 	}
-	if _, err := f.svc.TestConnection(ctx, &SetConfigRequest{AuthMethod: AuthMethodAuthToken}); err != nil {
+	if _, err := f.svc.TestConnection(ctx, created.ID, &SetConfigRequest{AuthMethod: AuthMethodAuthToken}); err != nil {
 		t.Fatalf("test: %v", err)
 	}
 	if sawSecret != "stored" {
@@ -285,9 +279,7 @@ func TestService_TestConnection_UsesStoredSecretWhenRequestEmpty(t *testing.T) {
 
 func TestService_TestConnection_NoStoredSecret_ReturnsFailure(t *testing.T) {
 	f := newSvcFixture(t)
-	res, err := f.svc.TestConnection(context.Background(), &SetConfigRequest{
-		AuthMethod: AuthMethodAuthToken,
-	})
+	res, err := f.svc.TestConnection(context.Background(), "", &SetConfigRequest{AuthMethod: AuthMethodAuthToken})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -299,18 +291,14 @@ func TestService_TestConnection_NoStoredSecret_ReturnsFailure(t *testing.T) {
 func TestService_SearchIssues_PassesFilterThrough(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
-	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
-		AuthMethod: AuthMethodAuthToken, Secret: "t",
-	}); err != nil {
-		t.Fatalf("set: %v", err)
-	}
-	waitForAuthProbe(t, f)
+	created := f.create(t, &SetConfigRequest{AuthMethod: AuthMethodAuthToken, Secret: "t"})
+	f.waitProbe(t, created.ID)
 	var seenOrg string
 	f.client.searchIssuesFn = func(filter SearchFilter, _ string) (*SearchResult, error) {
 		seenOrg = filter.OrgSlug
 		return &SearchResult{IsLast: true}, nil
 	}
-	if _, err := f.svc.SearchIssues(ctx, SearchFilter{OrgSlug: "acme"}, ""); err != nil {
+	if _, err := f.svc.SearchIssues(ctx, created.ID, SearchFilter{OrgSlug: "acme"}, ""); err != nil {
 		t.Fatalf("search: %v", err)
 	}
 	if seenOrg != "acme" {
@@ -320,135 +308,242 @@ func TestService_SearchIssues_PassesFilterThrough(t *testing.T) {
 
 func TestService_GetIssue_NotConfigured(t *testing.T) {
 	f := newSvcFixture(t)
-	_, err := f.svc.GetIssue(context.Background(), "PROJ-1")
+	_, err := f.svc.GetIssue(context.Background(), "ghost-instance", "PROJ-1")
 	if !errors.Is(err, ErrNotConfigured) {
 		t.Errorf("expected ErrNotConfigured, got %v", err)
 	}
 }
 
-func TestService_DeleteConfig_RemovesSecretAndCache(t *testing.T) {
+func TestService_GetIssue_EmptyInstance(t *testing.T) {
+	f := newSvcFixture(t)
+	_, err := f.svc.GetIssue(context.Background(), "", "PROJ-1")
+	if !errors.Is(err, ErrNotConfigured) {
+		t.Errorf("expected ErrNotConfigured for empty instance id, got %v", err)
+	}
+}
+
+func TestService_DeleteInstance_RemovesSecretAndCache(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
-	_, _ = f.svc.SetConfig(ctx, &SetConfigRequest{
-		AuthMethod: AuthMethodAuthToken, Secret: "t",
-	})
-	waitForAuthProbe(t, f)
-	if err := f.svc.DeleteConfig(ctx); err != nil {
+	created := f.create(t, &SetConfigRequest{AuthMethod: AuthMethodAuthToken, Secret: "t"})
+	f.waitProbe(t, created.ID)
+	if err := f.svc.DeleteInstance(ctx, created.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if exists, _ := f.secrets.Exists(ctx, SecretKey); exists {
+	if exists, _ := f.secrets.Exists(ctx, secretKeyFor(created.ID)); exists {
 		t.Error("expected secret removed")
 	}
-	cfg, _ := f.svc.GetConfig(ctx)
+	cfg, _ := f.svc.GetInstance(ctx, created.ID)
 	if cfg != nil {
 		t.Errorf("expected config gone, got %+v", cfg)
 	}
 }
 
-// TestService_ClientFor_InvalidateDuringBuild verifies the TOCTOU fix: when
-// invalidateClient runs while clientFor is blocked on I/O, the freshly built
-// (now-stale) client must not be stored in s.client. The subsequent call must
-// rebuild, hitting the factory a second time.
-func TestService_ClientFor_InvalidateDuringBuild(t *testing.T) {
-	fakes := newFakeSecretStore()
-	_ = fakes.Set(context.Background(), SecretKey, "tok", "sntrys_xyz")
+// TestService_DeleteInstance_InUse_Blocked asserts a delete is refused with
+// ErrInstanceInUse (carrying the watch count) while watches still reference it.
+func TestService_DeleteInstance_InUse_Blocked(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	created := f.create(t, &SetConfigRequest{AuthMethod: AuthMethodAuthToken, Secret: "t"})
+	if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID:    "ws-1",
+		InstanceID:     created.ID,
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "step-1",
+		Filter:         SearchFilter{OrgSlug: "org", ProjectSlug: "proj"},
+	}); err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+	err := f.svc.DeleteInstance(ctx, created.ID)
+	var inUse *ErrInstanceInUse
+	if !errors.As(err, &inUse) {
+		t.Fatalf("expected ErrInstanceInUse, got %v", err)
+	}
+	if inUse.WatchCount != 1 {
+		t.Errorf("expected WatchCount=1, got %d", inUse.WatchCount)
+	}
+	// The instance must still exist after a blocked delete.
+	if cfg, _ := f.svc.GetInstance(ctx, created.ID); cfg == nil {
+		t.Error("instance should remain after blocked delete")
+	}
+}
 
+// TestService_TwoInstances_DistinctClients asserts each instance builds a client
+// from its own config (distinct URLs), proving the per-instance cache routes
+// browse calls to the right Sentry host.
+func TestService_TwoInstances_DistinctClients(t *testing.T) {
+	store := newTestStore(t)
+	secrets := newFakeSecretStore()
+	ctx := context.Background()
+
+	var mu sync.Mutex
+	builtURLs := map[string]int{}
+	svc := NewService(store, secrets, func(cfg *SentryConfig, _ string) Client {
+		mu.Lock()
+		builtURLs[cfg.URL]++
+		mu.Unlock()
+		return &fakeClient{}
+	}, logger.Default())
+
+	a := mustCreate(t, svc, &SetConfigRequest{Name: "A", AuthMethod: AuthMethodAuthToken, Secret: "ta", URL: "https://sentry.io"})
+	b := mustCreate(t, svc, &SetConfigRequest{Name: "B", AuthMethod: AuthMethodAuthToken, Secret: "tb", URL: "https://sentry.acme.com"})
+
+	if _, err := svc.ListProjects(ctx, a.ID); err != nil {
+		t.Fatalf("list projects A: %v", err)
+	}
+	if _, err := svc.ListProjects(ctx, b.ID); err != nil {
+		t.Fatalf("list projects B: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if builtURLs["https://sentry.io"] == 0 || builtURLs["https://sentry.acme.com"] == 0 {
+		t.Errorf("expected a client built per instance URL, got %v", builtURLs)
+	}
+}
+
+// TestService_InvalidateInstance_KeepsOthersCached asserts invalidating one
+// instance does not drop a sibling's cached client.
+func TestService_InvalidateInstance_KeepsOthersCached(t *testing.T) {
+	store := newTestStore(t)
+	secrets := newFakeSecretStore()
+	ctx := context.Background()
+
+	var hits atomic.Int32
+	svc := NewService(store, secrets, func(_ *SentryConfig, _ string) Client {
+		hits.Add(1)
+		return &fakeClient{}
+	}, logger.Default())
+
+	a := mustCreate(t, svc, &SetConfigRequest{Name: "A", AuthMethod: AuthMethodAuthToken, Secret: "ta"})
+	b := mustCreate(t, svc, &SetConfigRequest{Name: "B", AuthMethod: AuthMethodAuthToken, Secret: "tb"})
+	// Warm both caches.
+	_, _ = svc.ListProjects(ctx, a.ID)
+	_, _ = svc.ListProjects(ctx, b.ID)
+	hitsAfterWarm := hits.Load()
+
+	svc.invalidateInstance(a.ID)
+	// B stays cached: no new factory hit.
+	if _, err := svc.ListProjects(ctx, b.ID); err != nil {
+		t.Fatalf("list B: %v", err)
+	}
+	if hits.Load() != hitsAfterWarm {
+		t.Errorf("invalidating A should not rebuild B; hits %d -> %d", hitsAfterWarm, hits.Load())
+	}
+	// A rebuilds.
+	if _, err := svc.ListProjects(ctx, a.ID); err != nil {
+		t.Fatalf("list A: %v", err)
+	}
+	if hits.Load() <= hitsAfterWarm {
+		t.Errorf("expected A to rebuild after invalidation, hits=%d", hits.Load())
+	}
+}
+
+// TestService_RecordAuthHealth_StampsAllInstances asserts the poller-facing
+// RecordAuthHealth probes and stamps every configured instance.
+func TestService_RecordAuthHealth_StampsAllInstances(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	a := f.create(t, &SetConfigRequest{Name: "A", AuthMethod: AuthMethodAuthToken, Secret: "ta"})
+	b := f.create(t, &SetConfigRequest{Name: "B", AuthMethod: AuthMethodAuthToken, Secret: "tb"})
+	// Drain probes from the two async creates.
+	f.waitProbe(t, a.ID)
+	f.waitProbe(t, b.ID)
+
+	f.svc.RecordAuthHealth(ctx)
+	for _, id := range []string{a.ID, b.ID} {
+		cfg, _ := f.svc.GetInstance(ctx, id)
+		if cfg == nil || cfg.LastCheckedAt == nil {
+			t.Errorf("expected instance %s probed, got %+v", id, cfg)
+		}
+	}
+}
+
+func mustCreate(t *testing.T, svc *Service, req *SetConfigRequest) *SentryConfig {
+	t.Helper()
+	cfg, err := svc.CreateInstance(context.Background(), req)
+	if err != nil {
+		t.Fatalf("create instance: %v", err)
+	}
+	return cfg
+}
+
+// TestService_ClientForInstance_InvalidateDuringBuild verifies the per-instance
+// TOCTOU fix: when invalidateInstance runs while clientForInstance is blocked on
+// I/O, the freshly built (now-stale) client must not be cached. The subsequent
+// call must rebuild, hitting the factory a second time.
+func TestService_ClientForInstance_InvalidateDuringBuild(t *testing.T) {
+	fakes := newFakeSecretStore()
 	store := newTestStore(t)
 	ctx := context.Background()
-	// Seed a config row so clientFor gets past the nil-config check.
-	if err := store.UpsertConfig(ctx, &SentryConfig{
-		AuthMethod: AuthMethodAuthToken,
-	}); err != nil {
-		t.Fatalf("seed config: %v", err)
-	}
+	id := createTestConfig(t, store, "A", "https://sentry.io")
+	_ = fakes.Set(ctx, secretKeyFor(id), "tok", "sntrys_xyz")
 
 	var factoryHit atomic.Int32
 	client := &fakeClient{}
 
-	// invalidateCh is closed by the Reveal hook to signal the main goroutine
-	// to call invalidateClient while the first clientFor is mid-I/O.
 	invalidateCh := make(chan struct{})
-	// doneCh is closed by the Reveal hook after it has signalled.
 	doneCh := make(chan struct{})
 
 	slow := &slowSecretStore{fakeSecretStore: fakes}
-
 	svc := NewService(store, slow, func(_ *SentryConfig, _ string) Client {
 		factoryHit.Add(1)
 		return client
 	}, logger.Default())
 
 	slow.revealHook = func() {
-		// Signal that we're mid-I/O, then wait for the invalidation to complete.
 		close(invalidateCh)
-		// Give the invalidation goroutine time to run.
 		time.Sleep(10 * time.Millisecond)
 		close(doneCh)
 	}
 
-	// First clientFor call — will block in Reveal while we invalidate.
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := svc.clientFor(ctx)
+		_, err := svc.clientForInstance(ctx, id)
 		errCh <- err
 	}()
 
-	// Wait until clientFor is inside Reveal, then invalidate.
 	<-invalidateCh
-	svc.invalidateClient()
+	svc.invalidateInstance(id)
 
-	// Wait for the first clientFor to finish.
 	if err := <-errCh; err != nil {
-		t.Fatalf("first clientFor: %v", err)
+		t.Fatalf("first clientForInstance: %v", err)
 	}
 
-	// The invalidation must have reset the cache, so s.client should be nil now.
-	// A second clientFor must hit the factory again (not return the cached stale client).
-	slow.revealHook = nil // no more blocking
-	if _, err := svc.clientFor(ctx); err != nil {
-		t.Fatalf("second clientFor: %v", err)
+	slow.revealHook = nil
+	if _, err := svc.clientForInstance(ctx, id); err != nil {
+		t.Fatalf("second clientForInstance: %v", err)
 	}
 
 	if got := factoryHit.Load(); got < 2 {
-		t.Errorf("expected factory called at least twice (once per clientFor after invalidation), got %d", got)
+		t.Errorf("expected factory called at least twice after invalidation, got %d", got)
 	}
 }
 
-// TestService_SetConfig_DefaultsURLToSentryIO asserts a blank instance URL is
-// stored as the sentry.io SaaS default.
-func TestService_SetConfig_DefaultsURLToSentryIO(t *testing.T) {
+// TestService_CreateInstance_DefaultsURLToSentryIO asserts a blank instance URL
+// is stored as the sentry.io SaaS default.
+func TestService_CreateInstance_DefaultsURLToSentryIO(t *testing.T) {
 	f := newSvcFixture(t)
-	cfg, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
-		AuthMethod: AuthMethodAuthToken, Secret: "tok",
-	})
-	if err != nil {
-		t.Fatalf("set: %v", err)
-	}
+	cfg := f.create(t, &SetConfigRequest{AuthMethod: AuthMethodAuthToken, Secret: "tok"})
 	if cfg.URL != DefaultSentryURL {
 		t.Errorf("expected URL defaulted to %q, got %q", DefaultSentryURL, cfg.URL)
 	}
 }
 
-// TestService_SetConfig_NormalizesAndPersistsURL asserts a host-only URL is
+// TestService_CreateInstance_NormalizesAndPersistsURL asserts a host-only URL is
 // normalized (scheme added, trailing slash trimmed) before being stored.
-func TestService_SetConfig_NormalizesAndPersistsURL(t *testing.T) {
+func TestService_CreateInstance_NormalizesAndPersistsURL(t *testing.T) {
 	f := newSvcFixture(t)
-	cfg, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
-		AuthMethod: AuthMethodAuthToken, Secret: "tok", URL: "sentry.example.com/",
-	})
-	if err != nil {
-		t.Fatalf("set: %v", err)
-	}
+	cfg := f.create(t, &SetConfigRequest{AuthMethod: AuthMethodAuthToken, Secret: "tok", URL: "sentry.example.com/"})
 	if cfg.URL != "https://sentry.example.com" {
 		t.Errorf("expected normalized URL, got %q", cfg.URL)
 	}
 }
 
-// TestService_SetConfig_RejectsMalformedURL asserts a non-http(s) URL is
+// TestService_CreateInstance_RejectsMalformedURL asserts a non-http(s) URL is
 // rejected at save time.
-func TestService_SetConfig_RejectsMalformedURL(t *testing.T) {
+func TestService_CreateInstance_RejectsMalformedURL(t *testing.T) {
 	f := newSvcFixture(t)
-	_, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
+	_, err := f.svc.CreateInstance(context.Background(), &SetConfigRequest{
 		AuthMethod: AuthMethodAuthToken, Secret: "tok", URL: "ftp://nope",
 	})
 	if err == nil {
@@ -457,8 +552,8 @@ func TestService_SetConfig_RejectsMalformedURL(t *testing.T) {
 }
 
 // TestService_TestConnection_PassesConfiguredURL ensures a pre-save test uses
-// the URL the user typed in the form, so a self-hosted instance can be
-// validated before the config is persisted.
+// the URL the user typed in the form, so a self-hosted instance can be validated
+// before the config is persisted.
 func TestService_TestConnection_PassesConfiguredURL(t *testing.T) {
 	f := newSvcFixture(t)
 	var sawURL string
@@ -466,7 +561,7 @@ func TestService_TestConnection_PassesConfiguredURL(t *testing.T) {
 		sawURL = cfg.URL
 		return f.client
 	}
-	if _, err := f.svc.TestConnection(context.Background(), &SetConfigRequest{
+	if _, err := f.svc.TestConnection(context.Background(), "", &SetConfigRequest{
 		AuthMethod: AuthMethodAuthToken, Secret: "inline", URL: "https://sentry.example.com",
 	}); err != nil {
 		t.Fatalf("test: %v", err)
@@ -477,23 +572,19 @@ func TestService_TestConnection_PassesConfiguredURL(t *testing.T) {
 }
 
 // TestService_TestConnection_FallsBackToStoredURL covers the post-save "Test
-// connection" path (blank secret, blank URL in the request): the stored
-// instance URL must be used rather than silently reverting to sentry.io.
+// connection" path (blank secret, blank URL in the request): the stored instance
+// URL must be used rather than silently reverting to sentry.io.
 func TestService_TestConnection_FallsBackToStoredURL(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
-	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
-		AuthMethod: AuthMethodAuthToken, Secret: "stored", URL: "https://sentry.example.com",
-	}); err != nil {
-		t.Fatalf("set: %v", err)
-	}
-	waitForAuthProbe(t, f)
+	created := f.create(t, &SetConfigRequest{AuthMethod: AuthMethodAuthToken, Secret: "stored", URL: "https://sentry.example.com"})
+	f.waitProbe(t, created.ID)
 	var sawURL string
 	f.svc.clientFn = func(cfg *SentryConfig, _ string) Client {
 		sawURL = cfg.URL
 		return f.client
 	}
-	if _, err := f.svc.TestConnection(ctx, &SetConfigRequest{AuthMethod: AuthMethodAuthToken}); err != nil {
+	if _, err := f.svc.TestConnection(ctx, created.ID, &SetConfigRequest{AuthMethod: AuthMethodAuthToken}); err != nil {
 		t.Fatalf("test: %v", err)
 	}
 	if sawURL != "https://sentry.example.com" {
@@ -501,9 +592,10 @@ func TestService_TestConnection_FallsBackToStoredURL(t *testing.T) {
 	}
 }
 
-// TestService_SetConfig_RejectsNonRootURL asserts URLs carrying a path, query,
-// or fragment are rejected, so /api/0 cannot be appended to a malformed base.
-func TestService_SetConfig_RejectsNonRootURL(t *testing.T) {
+// TestService_CreateInstance_RejectsNonRootURL asserts URLs carrying a path,
+// query, or fragment are rejected, so /api/0 cannot be appended to a malformed
+// base.
+func TestService_CreateInstance_RejectsNonRootURL(t *testing.T) {
 	cases := []struct {
 		name string
 		url  string
@@ -515,7 +607,7 @@ func TestService_SetConfig_RejectsNonRootURL(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newSvcFixture(t)
-			_, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
+			_, err := f.svc.CreateInstance(context.Background(), &SetConfigRequest{
 				AuthMethod: AuthMethodAuthToken, Secret: "tok", URL: tc.url,
 			})
 			if err == nil {
@@ -525,17 +617,12 @@ func TestService_SetConfig_RejectsNonRootURL(t *testing.T) {
 	}
 }
 
-// TestService_SetConfig_AllowsHostRootWithTrailingSlash guards the boundary:
-// a bare host root (with or without a trailing slash) must still be accepted
-// and normalized, so the non-root rejection above doesn't over-reach.
-func TestService_SetConfig_AllowsHostRootWithTrailingSlash(t *testing.T) {
+// TestService_CreateInstance_AllowsHostRootWithTrailingSlash guards the boundary:
+// a bare host root (with or without a trailing slash) must still be accepted and
+// normalized, so the non-root rejection above doesn't over-reach.
+func TestService_CreateInstance_AllowsHostRootWithTrailingSlash(t *testing.T) {
 	f := newSvcFixture(t)
-	cfg, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
-		AuthMethod: AuthMethodAuthToken, Secret: "tok", URL: "https://sentry.example.com/",
-	})
-	if err != nil {
-		t.Fatalf("host root with trailing slash should be accepted: %v", err)
-	}
+	cfg := f.create(t, &SetConfigRequest{AuthMethod: AuthMethodAuthToken, Secret: "tok", URL: "https://sentry.example.com/"})
 	if cfg.URL != "https://sentry.example.com" {
 		t.Errorf("expected trailing slash trimmed, got %q", cfg.URL)
 	}

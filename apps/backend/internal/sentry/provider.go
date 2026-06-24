@@ -1,10 +1,13 @@
 package sentry
 
 import (
+	"context"
 	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
+	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -30,6 +33,7 @@ func Provide(writer, reader *sqlx.DB, secrets SecretStore, eventBus bus.EventBus
 	if err != nil {
 		return nil, nil, err
 	}
+	migrateLegacySecret(store, secrets, log)
 	clientFn := DefaultClientFactory
 	var mock *MockClient
 	if MockEnabled() {
@@ -44,6 +48,44 @@ func Provide(writer, reader *sqlx.DB, secrets SecretStore, eventBus bus.EventBus
 	}
 	cleanup := func() error { return nil }
 	return svc, cleanup, nil
+}
+
+// migrateLegacySecret moves the install-wide singleton token onto its
+// per-instance key after the singleton→multi-instance upgrade, then deletes the
+// legacy entry. Crash-safe: the target id normally comes from the in-memory
+// migration record, but if that was lost (process crashed after the DB rebuild
+// but before this ran), it recovers the mapping only when unambiguous — exactly
+// one configured instance with no per-instance secret yet. Best-effort: any
+// error is logged; worst case the user re-pastes the token in settings.
+func migrateLegacySecret(store *Store, secrets SecretStore, log *logger.Logger) {
+	if secrets == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	target := store.MigratedSingletonID()
+	if target == "" {
+		configs, err := store.ListConfigs(ctx)
+		if err != nil || len(configs) != 1 {
+			return
+		}
+		target = configs[0].ID
+	}
+	if exists, err := secrets.Exists(ctx, secretKeyFor(target)); err == nil && exists {
+		return
+	}
+	value, err := secrets.Reveal(ctx, legacySecretKey)
+	if err != nil || value == "" {
+		return
+	}
+	if err := secrets.Set(ctx, secretKeyFor(target), "Sentry auth token", value); err != nil {
+		log.Warn("sentry: legacy secret migration failed", zap.Error(err))
+		return
+	}
+	if err := secrets.Delete(ctx, legacySecretKey); err != nil {
+		log.Warn("sentry: legacy secret cleanup failed", zap.Error(err))
+	}
 }
 
 // RegisterMockRoutes mounts the mock control routes when the service was built

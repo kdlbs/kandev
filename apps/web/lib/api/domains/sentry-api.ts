@@ -13,39 +13,59 @@ import type {
   UpdateSentryIssueWatchRequest,
 } from "@/lib/types/sentry";
 
-// fetchSentryConfig returns undefined when the backend responds 204 (no config yet).
-export async function fetchSentryConfig(
-  options?: ApiRequestOptions,
-): Promise<SentryConfig | undefined> {
-  return fetchJson<SentryConfig | undefined>(`/api/v1/sentry/config`, options);
+// listSentryInstances returns every configured Sentry instance.
+export async function listSentryInstances(options?: ApiRequestOptions): Promise<SentryConfig[]> {
+  const res = await fetchJson<{ instances: SentryConfig[] }>(`/api/v1/sentry/instances`, options);
+  return res.instances ?? [];
 }
 
-export async function saveSentryConfig(
+export async function getSentryInstance(id: string, options?: ApiRequestOptions) {
+  return fetchJson<SentryConfig>(`/api/v1/sentry/instances/${encodeURIComponent(id)}`, options);
+}
+
+export async function createSentryInstance(
   payload: SetSentryConfigRequest,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<SentryConfig>(`/api/v1/sentry/config`, {
+  return fetchJson<SentryConfig>(`/api/v1/sentry/instances`, {
+    ...options,
+    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
+  });
+}
+
+export async function updateSentryInstance(
+  id: string,
+  payload: SetSentryConfigRequest,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<SentryConfig>(`/api/v1/sentry/instances/${encodeURIComponent(id)}`, {
     ...options,
     init: { ...(options?.init ?? {}), method: "PUT", body: JSON.stringify(payload) },
   });
 }
 
-export async function deleteSentryConfig(options?: ApiRequestOptions) {
-  return fetchJson<{ deleted: boolean }>(`/api/v1/sentry/config`, {
+export async function deleteSentryInstance(id: string, options?: ApiRequestOptions) {
+  return fetchJson<{ deleted: boolean }>(`/api/v1/sentry/instances/${encodeURIComponent(id)}`, {
     ...options,
     init: { ...(options?.init ?? {}), method: "DELETE" },
   });
 }
 
+// testSentryConnection validates credentials. Pass an instanceId to test a saved
+// instance (using its stored token when secret is omitted); omit it to test
+// unsaved credentials before creating an instance.
 export async function testSentryConnection(
-  secret?: string,
-  url?: string,
+  args: { instanceId?: string; name?: string; secret?: string; url?: string },
   options?: ApiRequestOptions,
 ) {
-  const payload: { secret?: string; url?: string } = {};
-  if (secret) payload.secret = secret;
-  if (url) payload.url = url;
-  return fetchJson<TestSentryConnectionResult>(`/api/v1/sentry/config/test`, {
+  const payload: { name?: string; secret?: string; url?: string } = {};
+  if (args.name) payload.name = args.name;
+  if (args.secret) payload.secret = args.secret;
+  if (args.url) payload.url = args.url;
+  const path = args.instanceId
+    ? `/api/v1/sentry/instances/${encodeURIComponent(args.instanceId)}/test`
+    : `/api/v1/sentry/test-connection`;
+  return fetchJson<TestSentryConnectionResult>(path, {
     ...options,
     init: {
       ...(options?.init ?? {}),
@@ -55,15 +75,18 @@ export async function testSentryConnection(
   });
 }
 
-export async function listSentryOrganizations(options?: ApiRequestOptions) {
+export async function listSentryOrganizations(instanceId: string, options?: ApiRequestOptions) {
   return fetchJson<{ organizations: SentryOrganization[] }>(
-    `/api/v1/sentry/organizations`,
+    `/api/v1/sentry/organizations?instanceId=${encodeURIComponent(instanceId)}`,
     options,
   );
 }
 
-export async function listSentryProjects(options?: ApiRequestOptions) {
-  return fetchJson<{ projects: SentryProject[] }>(`/api/v1/sentry/projects`, options);
+export async function listSentryProjects(instanceId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ projects: SentryProject[] }>(
+    `/api/v1/sentry/projects?instanceId=${encodeURIComponent(instanceId)}`,
+    options,
+  );
 }
 
 function appendFilter(search: URLSearchParams, filter: SentrySearchFilter): void {
@@ -77,19 +100,25 @@ function appendFilter(search: URLSearchParams, filter: SentrySearchFilter): void
 }
 
 export async function searchSentryIssues(
+  instanceId: string,
   filter: SentrySearchFilter,
   cursor?: string,
   options?: ApiRequestOptions,
 ) {
   const search = new URLSearchParams();
+  search.set("instanceId", instanceId);
   appendFilter(search, filter);
   if (cursor) search.set("cursor", cursor);
   return fetchJson<SentrySearchResult>(`/api/v1/sentry/issues?${search.toString()}`, options);
 }
 
-export async function getSentryIssue(idOrShortId: string, options?: ApiRequestOptions) {
+export async function getSentryIssue(
+  instanceId: string,
+  idOrShortId: string,
+  options?: ApiRequestOptions,
+) {
   return fetchJson<SentryIssue>(
-    `/api/v1/sentry/issues/${encodeURIComponent(idOrShortId)}`,
+    `/api/v1/sentry/issues/${encodeURIComponent(idOrShortId)}?instanceId=${encodeURIComponent(instanceId)}`,
     options,
   );
 }

@@ -20,6 +20,7 @@ export const STATS_PERIOD_OPTIONS: { value: string; label: string }[] = [
 
 export interface FormState {
   workspaceId: string;
+  instanceId: string;
   orgSlug: string;
   projectSlug: string;
   environment: string;
@@ -40,6 +41,7 @@ export interface FormState {
 export function makeEmptyForm(workspaceId: string): FormState {
   return {
     workspaceId,
+    instanceId: "",
     orgSlug: "",
     projectSlug: "",
     environment: "",
@@ -62,6 +64,7 @@ export function formStateFromWatch(w: SentryIssueWatch): FormState {
   const f: SentrySearchFilter = w.filter ?? { orgSlug: "" };
   return {
     workspaceId: w.workspaceId,
+    instanceId: w.instanceId,
     orgSlug: f.orgSlug ?? "",
     projectSlug: f.projectSlug ?? "",
     environment: f.environment ?? "",
@@ -139,6 +142,7 @@ export function projectSelectItems(projects: SentryProject[], current: string): 
 export function isWatchFormReady(form: FormState): boolean {
   return (
     !!form.workspaceId &&
+    !!form.instanceId &&
     !!form.orgSlug.trim() &&
     !!form.projectSlug.trim() &&
     !!form.workflowId &&

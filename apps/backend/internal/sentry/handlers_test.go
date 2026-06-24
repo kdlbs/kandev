@@ -30,59 +30,160 @@ func newTestController(t *testing.T) (*Controller, *gin.Engine, *fakeClient) {
 	return ctrl, router, client
 }
 
-// seedConfig persists a singleton config + secret without going through
-// Service.SetConfig (which fires an async probe we'd have to drain).
-func seedConfig(t *testing.T, ctrl *Controller) {
+// seedInstance persists a config + secret directly (bypassing Service.Create,
+// which fires an async probe we'd have to drain) and returns the instance id.
+func seedInstance(t *testing.T, ctrl *Controller) string {
 	t.Helper()
 	ctx := context.Background()
-	if err := ctrl.service.store.UpsertConfig(ctx, &SentryConfig{
-		AuthMethod: AuthMethodAuthToken,
-	}); err != nil {
-		t.Fatalf("upsert: %v", err)
+	cfg := &SentryConfig{Name: "Prod", AuthMethod: AuthMethodAuthToken, URL: "https://sentry.io"}
+	if err := ctrl.service.store.CreateConfig(ctx, cfg); err != nil {
+		t.Fatalf("create config: %v", err)
 	}
-	if err := ctrl.service.secrets.Set(ctx, SecretKey, "sentry", "tok"); err != nil {
+	if err := ctrl.service.secrets.Set(ctx, secretKeyFor(cfg.ID), "sentry", "tok"); err != nil {
 		t.Fatalf("set secret: %v", err)
 	}
+	return cfg.ID
 }
 
-func TestHTTPGetConfig_NoConfig_Returns204(t *testing.T) {
-	_, router, _ := newTestController(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sentry/config", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	if w.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204", w.Code)
+// seedInstanceNoSecret persists a config row without a token, modelling an
+// instance that exists but is not yet usable.
+func seedInstanceNoSecret(t *testing.T, ctrl *Controller) string {
+	t.Helper()
+	cfg := &SentryConfig{Name: "Half", AuthMethod: AuthMethodAuthToken, URL: "https://sentry.io"}
+	if err := ctrl.service.store.CreateConfig(context.Background(), cfg); err != nil {
+		t.Fatalf("create config: %v", err)
 	}
+	return cfg.ID
 }
 
-func TestHTTPGetConfig_ReturnsConfig(t *testing.T) {
-	ctrl, router, _ := newTestController(t)
-	seedConfig(t, ctrl)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sentry/config", nil)
+func TestHTTPListInstances_Empty(t *testing.T) {
+	_, router, _ := newTestController(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sentry/instances", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", w.Code)
+		t.Fatalf("status = %d, want 200", w.Code)
 	}
-	var cfg SentryConfig
-	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+	var resp struct {
+		Instances []SentryConfig `json:"instances"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if cfg.AuthMethod != AuthMethodAuthToken || !cfg.HasSecret {
-		t.Errorf("config = %+v", cfg)
+	if len(resp.Instances) != 0 {
+		t.Errorf("expected no instances, got %d", len(resp.Instances))
+	}
+}
+
+func TestHTTPInstances_CreateListGetDelete(t *testing.T) {
+	_, router, _ := newTestController(t)
+
+	// Create
+	body := `{"name":"Prod","authMethod":"auth_token","url":"https://sentry.io","secret":"tok"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sentry/instances", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var created SentryConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created: %v", err)
+	}
+	if created.ID == "" || created.Name != "Prod" || !created.HasSecret {
+		t.Fatalf("created instance = %+v", created)
+	}
+
+	// List
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/sentry/instances", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	var listResp struct {
+		Instances []SentryConfig `json:"instances"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &listResp)
+	if len(listResp.Instances) != 1 {
+		t.Fatalf("expected 1 instance, got %d", len(listResp.Instances))
+	}
+
+	// Get
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/sentry/instances/"+created.ID, nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("get status = %d", w.Code)
+	}
+
+	// Delete
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/sentry/instances/"+created.ID, nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete status = %d", w.Code)
+	}
+}
+
+func TestHTTPGetInstance_NotFound(t *testing.T) {
+	_, router, _ := newTestController(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sentry/instances/ghost", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `"code":"SENTRY_INSTANCE_NOT_FOUND"`) {
+		t.Errorf("missing code in body: %s", w.Body.String())
+	}
+}
+
+func TestHTTPDeleteInstance_InUse_Returns409(t *testing.T) {
+	ctrl, router, _ := newTestController(t)
+	id := seedInstance(t, ctrl)
+	if err := ctrl.service.store.CreateIssueWatch(context.Background(), &IssueWatch{
+		WorkspaceID:    "ws-1",
+		InstanceID:     id,
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "step-1",
+		Filter:         SearchFilter{OrgSlug: "org", ProjectSlug: "proj"},
+	}); err != nil {
+		t.Fatalf("seed watch: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sentry/instances/"+id, nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409, body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"code":"SENTRY_INSTANCE_IN_USE"`) {
+		t.Errorf("missing code in body: %s", w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"watchCount":1`) {
+		t.Errorf("missing watchCount in body: %s", w.Body.String())
+	}
+}
+
+func TestHTTPCreateInstance_BadJSON(t *testing.T) {
+	_, router, _ := newTestController(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sentry/instances", strings.NewReader("not-json"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
 	}
 }
 
 func TestHTTPSearchIssues_MultiValueLevelsAndStatuses(t *testing.T) {
 	ctrl, router, client := newTestController(t)
-	seedConfig(t, ctrl)
+	id := seedInstance(t, ctrl)
 	var seen SearchFilter
 	client.searchIssuesFn = func(filter SearchFilter, _ string) (*SearchResult, error) {
 		seen = filter
 		return &SearchResult{IsLast: true}, nil
 	}
 	req := httptest.NewRequest(http.MethodGet,
-		"/api/v1/sentry/issues?orgSlug=acme&projectSlug=fe&level=error&level=fatal&status=unresolved&query=boom&statsPeriod=24h",
+		"/api/v1/sentry/issues?instanceId="+id+"&orgSlug=acme&projectSlug=fe&level=error&level=fatal&status=unresolved&query=boom&statsPeriod=24h",
 		nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -100,15 +201,28 @@ func TestHTTPSearchIssues_MultiValueLevelsAndStatuses(t *testing.T) {
 	}
 }
 
+func TestHTTPSearchIssues_MissingInstance_Returns400(t *testing.T) {
+	_, router, _ := newTestController(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sentry/issues?orgSlug=acme&projectSlug=fe", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `"code":"SENTRY_INSTANCE_REQUIRED"`) {
+		t.Errorf("missing code in body: %s", w.Body.String())
+	}
+}
+
 func TestHTTPGetIssue_ForwardsID(t *testing.T) {
 	ctrl, router, client := newTestController(t)
-	seedConfig(t, ctrl)
+	id := seedInstance(t, ctrl)
 	var seenID string
-	client.getIssueFn = func(id string) (*SentryIssue, error) {
-		seenID = id
-		return &SentryIssue{ID: "99", ShortID: id}, nil
+	client.getIssueFn = func(issueID string) (*SentryIssue, error) {
+		seenID = issueID
+		return &SentryIssue{ID: "99", ShortID: issueID}, nil
 	}
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sentry/issues/PROJ-7", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sentry/issues/PROJ-7?instanceId="+id, nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -120,8 +234,9 @@ func TestHTTPGetIssue_ForwardsID(t *testing.T) {
 }
 
 func TestHTTPListProjects_NotConfigured_Returns503(t *testing.T) {
-	_, router, _ := newTestController(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sentry/projects", nil)
+	ctrl, router, _ := newTestController(t)
+	id := seedInstanceNoSecret(t, ctrl)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sentry/projects?instanceId="+id, nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusServiceUnavailable {
@@ -132,13 +247,23 @@ func TestHTTPListProjects_NotConfigured_Returns503(t *testing.T) {
 	}
 }
 
+func TestHTTPListProjects_MissingInstance_Returns400(t *testing.T) {
+	_, router, _ := newTestController(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sentry/projects", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
 func TestHTTPListOrganizations_ReturnsOrganizations(t *testing.T) {
 	ctrl, router, client := newTestController(t)
-	seedConfig(t, ctrl)
+	id := seedInstance(t, ctrl)
 	client.listOrganizationsFn = func() ([]SentryOrganization, error) {
 		return []SentryOrganization{{ID: "1", Slug: "acme", Name: "Acme"}}, nil
 	}
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sentry/organizations", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sentry/organizations?instanceId="+id, nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -155,23 +280,9 @@ func TestHTTPListOrganizations_ReturnsOrganizations(t *testing.T) {
 	}
 }
 
-func TestHTTPListOrganizations_NotConfigured_Returns503(t *testing.T) {
+func TestHTTPListOrganizations_MissingInstance_Returns400(t *testing.T) {
 	_, router, _ := newTestController(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/sentry/organizations", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("status = %d, want 503", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), `"code":"SENTRY_NOT_CONFIGURED"`) {
-		t.Errorf("missing code in body: %s", w.Body.String())
-	}
-}
-
-func TestHTTPSetConfig_BadJSON(t *testing.T) {
-	_, router, _ := newTestController(t)
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/sentry/config", strings.NewReader("not-json"))
-	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
@@ -212,8 +323,8 @@ func TestWriteClientError_GenericError(t *testing.T) {
 }
 
 func TestRegisterRoutes_AcceptsNilDispatcher(t *testing.T) {
-	// Sanity check that RegisterRoutes can be called with a real dispatcher
-	// without registering any WS handlers (Phase 1 has no WS surface).
+	// Sanity check that RegisterRoutes wires the instance + browse routes
+	// without registering any WS handlers (no WS surface).
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	store := newTestStore(t)

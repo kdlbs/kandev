@@ -25,7 +25,11 @@ import {
   ScriptEditor,
   computeEditorHeight,
 } from "@/components/settings/profile-edit/script-editor";
-import { listSentryProjects, listSentryOrganizations } from "@/lib/api/domains/sentry-api";
+import {
+  listSentryProjects,
+  listSentryOrganizations,
+  listSentryInstances,
+} from "@/lib/api/domains/sentry-api";
 import { SENTRY_ISSUE_WATCH_PLACEHOLDERS } from "./sentry-issue-watch-placeholders";
 import { LevelMultiSelect, StatusMultiSelect } from "./sentry-issue-watch-multiselect";
 import { MaxInflightTasksField } from "./sentry-issue-watch-throttle-field";
@@ -42,6 +46,7 @@ import {
 } from "./sentry-issue-watch-form";
 import type {
   CreateSentryIssueWatchRequest,
+  SentryConfig,
   SentryIssueWatch,
   SentryLevel,
   SentryProject,
@@ -83,11 +88,21 @@ function useFormData(workspaceId: string) {
   return { workflows, agentProfiles: filteredAgentProfiles, allExecutorProfiles };
 }
 
-function useSentryProjects(orgSlug: string) {
+function useSentryProjects(instanceId: string, orgSlug: string) {
   const [projects, setProjects] = useState<SentryProject[]>([]);
   useEffect(() => {
     let cancelled = false;
-    listSentryProjects()
+    if (!instanceId) {
+      // Defer the reset out of the synchronous effect body (react-hooks rule);
+      // a microtask clears stale projects when the instance is unset.
+      void Promise.resolve().then(() => {
+        if (!cancelled) setProjects([]);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    listSentryProjects(instanceId)
       .then((res) => {
         if (!cancelled) setProjects(res.projects ?? []);
       })
@@ -97,7 +112,7 @@ function useSentryProjects(orgSlug: string) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [instanceId]);
   // Sentry's auth-token endpoint already filters to the user's accessible orgs;
   // if an orgSlug is set, restrict to projects that match.
   return useMemo(
@@ -192,7 +207,7 @@ function FilterFields({
   setForm: FormSetter;
   orgs: string[];
 }) {
-  const projects = useSentryProjects(form.orgSlug);
+  const projects = useSentryProjects(form.instanceId, form.orgSlug);
   const toggleLevel = useCallback(
     (level: SentryLevel) =>
       setForm((p) => ({
@@ -332,6 +347,30 @@ function WorkspacePicker({
   );
 }
 
+function InstancePicker({
+  value,
+  instances,
+  onChange,
+}: {
+  value: string;
+  instances: SentryConfig[];
+  onChange: (v: string) => void;
+}) {
+  return (
+    <SelectField
+      label="Sentry instance"
+      description="Which configured Sentry instance to poll for matching issues."
+      value={value}
+      onChange={onChange}
+      placeholder={
+        instances.length === 0 ? "No Sentry instances configured" : "Select Sentry instance"
+      }
+      items={instances.map((i) => ({ id: i.id, label: i.name }))}
+      disabled={instances.length === 0}
+    />
+  );
+}
+
 function AutomationFields({ form, setForm }: { form: FormState; setForm: FormSetter }) {
   const { workflows, agentProfiles, allExecutorProfiles } = useFormData(form.workspaceId);
   const { steps, loading: stepsLoading } = useWorkflowSteps(form.workflowId);
@@ -415,14 +454,46 @@ function savingLabel(saving: boolean, isEdit: boolean): string {
   return isEdit ? "Update" : "Create";
 }
 
-// useWatchOrgs loads the org list for the org dropdown and auto-selects the
-// sole org on a fresh create (with one choice there is nothing to pick).
-function useWatchOrgs(open: boolean, hasWatch: boolean, setForm: FormSetter) {
-  const [orgs, setOrgs] = useState<string[]>([]);
+// useWatchInstances loads the configured Sentry instances for the instance
+// dropdown and auto-selects the sole instance on a fresh create.
+function useWatchInstances(open: boolean, hasWatch: boolean, setForm: FormSetter) {
+  const [instances, setInstances] = useState<SentryConfig[]>([]);
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    listSentryOrganizations()
+    listSentryInstances()
+      .then((list) => {
+        if (!cancelled) setInstances(list);
+      })
+      .catch(() => {
+        if (!cancelled) setInstances([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+  useEffect(() => {
+    if (hasWatch || instances.length !== 1) return;
+    setForm((p) => (p.instanceId ? p : { ...p, instanceId: instances[0].id }));
+  }, [hasWatch, instances, setForm]);
+  return instances;
+}
+
+// useWatchOrgs loads the org list for the selected instance and auto-selects the
+// sole org on a fresh create. The list stays empty until an instance is chosen.
+function useWatchOrgs(open: boolean, instanceId: string, hasWatch: boolean, setForm: FormSetter) {
+  const [orgs, setOrgs] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!open || !instanceId) {
+      void Promise.resolve().then(() => {
+        if (!cancelled) setOrgs([]);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    listSentryOrganizations(instanceId)
       .then((res) => {
         if (!cancelled) setOrgs((res.organizations ?? []).map((o) => o.slug));
       })
@@ -432,7 +503,7 @@ function useWatchOrgs(open: boolean, hasWatch: boolean, setForm: FormSetter) {
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, instanceId]);
   useEffect(() => {
     if (hasWatch || orgs.length !== 1) return;
     setForm((p) => (p.orgSlug ? p : { ...p, orgSlug: orgs[0] }));
@@ -460,7 +531,8 @@ export function SentryIssueWatchDialog({
     }
   }, [watch, open, workspaceId, activeWorkspaceId]);
 
-  const orgs = useWatchOrgs(open, !!watch, setForm);
+  const instances = useWatchInstances(open, !!watch, setForm);
+  const orgs = useWatchOrgs(open, form.instanceId, !!watch, setForm);
 
   const workspaceLocked = !!watch || !!workspaceId;
 
@@ -474,6 +546,7 @@ export function SentryIssueWatchDialog({
       const filter = buildFilterPayload(form);
       const payload = {
         filter,
+        instanceId: form.instanceId,
         workflowId: form.workflowId,
         workflowStepId: form.workflowStepId,
         agentProfileId: form.agentProfileId,
@@ -515,6 +588,13 @@ export function SentryIssueWatchDialog({
             disabled={workspaceLocked}
           />
           <Separator />
+          <InstancePicker
+            value={form.instanceId}
+            instances={instances}
+            onChange={(v) =>
+              setForm((p) => ({ ...p, instanceId: v, orgSlug: "", projectSlug: "" }))
+            }
+          />
           <FilterFields form={form} setForm={setForm} orgs={orgs} />
           <Separator />
           <AutomationFields form={form} setForm={setForm} />

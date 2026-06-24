@@ -13,12 +13,23 @@ import (
 // user or organization auth token sent as `Authorization: Bearer <token>`.
 const AuthMethodAuthToken = "auth_token"
 
-// SecretKey is the secret-store key used for the install-wide Sentry token.
-const SecretKey = "sentry:singleton:token"
+// legacySecretKey is the secret-store key the integration used while it was an
+// install-wide singleton. The provider migrates it to a per-instance key on
+// first boot after the multi-instance upgrade.
+const legacySecretKey = "sentry:singleton:token"
 
-// SentryConfig is the install-wide configuration for the Sentry integration.
-// The token is stored separately in the encrypted secret store under SecretKey.
+// secretKeyFor returns the secret-store key holding the auth token for one
+// Sentry instance. Each instance owns an independent encrypted secret.
+func secretKeyFor(instanceID string) string {
+	return "sentry:" + instanceID + ":token"
+}
+
+// SentryConfig is one configured Sentry instance (a SaaS org or a self-hosted
+// host). The token is stored separately in the encrypted secret store under
+// secretKeyFor(ID).
 type SentryConfig struct {
+	ID         string `json:"id" db:"id"`
+	Name       string `json:"name" db:"name"`
 	AuthMethod string `json:"authMethod" db:"auth_method"`
 	// URL is the base URL of the Sentry instance (e.g. https://sentry.io for
 	// SaaS, or a self-hosted host). The REST client appends /api/0. Defaults
@@ -35,10 +46,12 @@ type SentryConfig struct {
 	UpdatedAt     time.Time  `json:"updatedAt" db:"updated_at"`
 }
 
-// SetConfigRequest is the payload sent by the UI to create or update the
-// Sentry configuration. When Secret is empty on update, the existing secret
-// is retained; when non-empty it replaces the stored value.
+// SetConfigRequest is the payload sent by the UI to create or update a Sentry
+// instance. When Secret is empty on update, the existing secret is retained;
+// when non-empty it replaces the stored value.
 type SetConfigRequest struct {
+	// Name is the user-facing label for the instance (e.g. "Production SaaS").
+	Name       string `json:"name"`
 	AuthMethod string `json:"authMethod"`
 	// URL is the Sentry instance base URL. Optional: blank defaults to the
 	// sentry.io SaaS endpoint, preserving the prior single-tenant behavior.
@@ -133,6 +146,7 @@ const (
 type IssueWatch struct {
 	ID                  string       `json:"id" db:"id"`
 	WorkspaceID         string       `json:"workspaceId" db:"workspace_id"`
+	InstanceID          string       `json:"instanceId" db:"sentry_instance_id"`
 	WorkflowID          string       `json:"workflowId" db:"workflow_id"`
 	WorkflowStepID      string       `json:"workflowStepId" db:"workflow_step_id"`
 	Filter              SearchFilter `json:"filter"`
@@ -172,6 +186,7 @@ type IssueWatchTask struct {
 // consumes this to create (and optionally auto-start) a Kandev task.
 type NewSentryIssueEvent struct {
 	IssueWatchID      string `json:"issueWatchId"`
+	InstanceID        string `json:"instanceId"`
 	WorkspaceID       string `json:"workspaceId"`
 	WorkflowID        string `json:"workflowId"`
 	WorkflowStepID    string `json:"workflowStepId"`
@@ -188,6 +203,7 @@ type NewSentryIssueEvent struct {
 // CreateIssueWatchRequest is the payload for POST /api/v1/sentry/watches/issue.
 type CreateIssueWatchRequest struct {
 	WorkspaceID         string       `json:"workspaceId"`
+	InstanceID          string       `json:"instanceId"`
 	WorkflowID          string       `json:"workflowId"`
 	WorkflowStepID      string       `json:"workflowStepId"`
 	Filter              SearchFilter `json:"filter"`
@@ -202,6 +218,7 @@ type CreateIssueWatchRequest struct {
 // UpdateIssueWatchRequest is the payload for PATCH /api/v1/sentry/watches/issue/:id.
 // All fields are pointers so the caller can omit ones it doesn't want to change.
 type UpdateIssueWatchRequest struct {
+	InstanceID          *string       `json:"instanceId,omitempty"`
 	WorkflowID          *string       `json:"workflowId,omitempty"`
 	WorkflowStepID      *string       `json:"workflowStepId,omitempty"`
 	Filter              *SearchFilter `json:"filter,omitempty"`

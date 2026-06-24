@@ -106,6 +106,7 @@ func (s *SentryWatcherSource) BuildTaskRequest(evt any) (*IssueTaskRequest, erro
 		Description:    interpolateSentryPrompt(e.Prompt, e.Issue),
 		Metadata: map[string]interface{}{
 			sentryWatchMetadataKey:          e.IssueWatchID,
+			"sentry_instance_id":            e.InstanceID,
 			"sentry_issue_short_id":         e.Issue.ShortID,
 			"sentry_issue_url":              e.Issue.Permalink,
 			"sentry_issue_level":            e.Issue.Level,

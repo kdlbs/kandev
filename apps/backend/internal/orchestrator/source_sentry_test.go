@@ -45,6 +45,7 @@ func (f *fakeSentryService) DisableIssueWatchWithError(_ context.Context, watchI
 func sampleSentryEvent() *sentry.NewSentryIssueEvent {
 	return &sentry.NewSentryIssueEvent{
 		IssueWatchID:      "watch-1",
+		InstanceID:        "inst-1",
 		WorkspaceID:       "ws-1",
 		WorkflowID:        "wf-1",
 		WorkflowStepID:    "step-1",
@@ -132,6 +133,9 @@ func TestSentrySource_BuildTaskRequest(t *testing.T) {
 	}
 	if req.Metadata["sentry_issue_watch_id"] != "watch-1" {
 		t.Errorf("missing sentry_issue_watch_id metadata")
+	}
+	if req.Metadata["sentry_instance_id"] != "inst-1" {
+		t.Errorf("missing sentry_instance_id metadata")
 	}
 	if req.Metadata["sentry_issue_short_id"] != "PROJ-1" {
 		t.Errorf("missing sentry_issue_short_id metadata")
