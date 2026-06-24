@@ -668,20 +668,12 @@ func TestCleanupWorkspaceGroupsWaitsForActiveExecutions(t *testing.T) {
 	if err := groups.AddWorkspaceGroupMember(ctx, "group-owned", "task-1", "owner"); err != nil {
 		t.Fatalf("add group member: %v", err)
 	}
-	sessions := newFakeSessionReader()
-	sessions.sessions["task-1"] = []*models.TaskSession{{ID: "session-1", TaskID: "task-1"}}
-	sessions.sessionsWithRunningExecutor["session-1"] = true
+	sessions := &flippingActiveSessionReader{taskID: "task-1", sessionID: "session-1"}
 	cleaner := &fakeWorkspaceCleaner{}
 	svc := NewHandoffService(nil, nil, nil, nil, groups, nil)
 	svc.SetSessionReader(sessions)
 	svc.SetWorkspaceCleaner(cleaner)
 
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		sessions.mu.Lock()
-		defer sessions.mu.Unlock()
-		sessions.sessionsWithRunningExecutor["session-1"] = false
-	}()
 	cleanupCtx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	if err := svc.CleanupWorkspaceGroups(cleanupCtx, "ws-delete"); err != nil {
@@ -735,6 +727,38 @@ func (f *fakeWorkspaceCleaner) CleanupMultiRepoRoot(context.Context, string, []s
 
 func (f *fakeWorkspaceCleaner) CleanupRemoteEnvironment(context.Context, string, string) error {
 	return nil
+}
+
+type flippingActiveSessionReader struct {
+	mu        sync.Mutex
+	taskID    string
+	sessionID string
+	checks    int
+}
+
+func (f *flippingActiveSessionReader) ListTaskSessions(_ context.Context, taskID string) ([]*models.TaskSession, error) {
+	if taskID != f.taskID {
+		return nil, nil
+	}
+	return []*models.TaskSession{{ID: f.sessionID, TaskID: f.taskID}}, nil
+}
+
+func (f *flippingActiveSessionReader) ListTaskSessionWorktrees(context.Context, string) ([]*models.TaskSessionWorktree, error) {
+	return nil, nil
+}
+
+func (f *flippingActiveSessionReader) GetTask(context.Context, string) (*models.Task, error) {
+	return nil, nil
+}
+
+func (f *flippingActiveSessionReader) HasExecutorRunningRow(_ context.Context, sessionID string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if sessionID != f.sessionID {
+		return false, nil
+	}
+	f.checks++
+	return f.checks == 1, nil
 }
 
 // TestArchiveTaskTree_InvokesResourceCleanerPerTask pins the regression
