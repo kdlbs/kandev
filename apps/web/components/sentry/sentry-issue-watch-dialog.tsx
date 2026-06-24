@@ -26,6 +26,7 @@ import {
   computeEditorHeight,
 } from "@/components/settings/profile-edit/script-editor";
 import { listSentryProjects, listSentryOrganizations } from "@/lib/api/domains/sentry-api";
+import { WatcherRepositoryFields } from "@/components/watcher-repository-fields";
 import { SENTRY_ISSUE_WATCH_PLACEHOLDERS } from "./sentry-issue-watch-placeholders";
 import { LevelMultiSelect, StatusMultiSelect } from "./sentry-issue-watch-multiselect";
 import { MaxInflightTasksField } from "./sentry-issue-watch-throttle-field";
@@ -356,6 +357,15 @@ function AutomationFields({ form, setForm }: { form: FormState; setForm: FormSet
           disabled={!form.workflowId || stepsLoading || steps.length === 0}
         />
       </div>
+      <WatcherRepositoryFields
+        workspaceId={form.workspaceId}
+        repositoryId={form.repositoryId}
+        baseBranch={form.baseBranch}
+        onRepositoryChange={(repositoryId) =>
+          setForm((p) => ({ ...p, repositoryId, baseBranch: "" }))
+        }
+        onBaseBranchChange={(baseBranch) => setForm((p) => ({ ...p, baseBranch }))}
+      />
       <div className="grid grid-cols-2 gap-4">
         <SelectField
           label="Agent Profile"
@@ -476,6 +486,10 @@ export function SentryIssueWatchDialog({
         filter,
         workflowId: form.workflowId,
         workflowStepId: form.workflowStepId,
+        // Empty repositoryId clears the binding; empty base branch is sent
+        // verbatim so the backend fills the repo's default at save time.
+        repositoryId: form.repositoryId,
+        baseBranch: form.repositoryId ? form.baseBranch : "",
         agentProfileId: form.agentProfileId,
         executorProfileId: form.executorProfileId,
         prompt: form.prompt,
@@ -503,7 +517,8 @@ export function SentryIssueWatchDialog({
           <DialogTitle>{watch ? "Edit Sentry Watcher" : "Create Sentry Watcher"}</DialogTitle>
           <DialogDescription>
             Poll Sentry with a structured filter and auto-create a Kandev task for each
-            newly-matching issue. The workflow step&apos;s defaults decide where the task runs.
+            newly-matching issue. Bind a repository to run each task in an isolated worktree, or
+            leave it unset to use the workflow step&apos;s defaults.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-5">

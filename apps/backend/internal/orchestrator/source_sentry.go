@@ -98,7 +98,7 @@ func (s *SentryWatcherSource) BuildTaskRequest(evt any) (*IssueTaskRequest, erro
 	if !ok || e == nil || e.Issue == nil {
 		return nil, errors.New("sentry source: event payload missing or wrong type")
 	}
-	return &IssueTaskRequest{
+	req := &IssueTaskRequest{
 		WorkspaceID:    e.WorkspaceID,
 		WorkflowID:     e.WorkflowID,
 		WorkflowStepID: e.WorkflowStepID,
@@ -114,7 +114,16 @@ func (s *SentryWatcherSource) BuildTaskRequest(evt any) (*IssueTaskRequest, erro
 			models.MetaKeyAgentProfileID:    e.AgentProfileID,
 			models.MetaKeyExecutorProfileID: e.ExecutorProfileID,
 		},
-	}, nil
+	}
+	// Only a bound watch carries Repositories. An unbound watch leaves the slice
+	// nil so the launch path falls to the historical blank-scratch behaviour.
+	if e.RepositoryID != "" {
+		req.Repositories = []IssueTaskRepository{{
+			RepositoryID: e.RepositoryID,
+			BaseBranch:   e.BaseBranch,
+		}}
+	}
+	return req, nil
 }
 
 func (s *SentryWatcherSource) AttachTaskID(ctx context.Context, evt any, taskID string) error {

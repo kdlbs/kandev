@@ -25,6 +25,15 @@ type SecretStore interface {
 	Exists(ctx context.Context, id string) (bool, error)
 }
 
+// RepositoryLookup is the subset of the task service used to validate a watch's
+// optional repository binding (workspace ownership + default-branch fill).
+// Wired post-construction via SetRepositoryLookup to avoid an import cycle with
+// the task service. ok is false when the repository does not exist or has been
+// soft-deleted.
+type RepositoryLookup interface {
+	GetRepository(ctx context.Context, id string) (workspaceID, defaultBranch string, ok bool)
+}
+
 // Service orchestrates Jira config storage, the cached client, and the
 // fetch/transition operations used by the WebSocket + HTTP handlers.
 type Service struct {
@@ -41,6 +50,10 @@ type Service struct {
 	// the import cycle that would result from passing the concrete
 	// *task.HandoffService into NewService.
 	taskDeleter watchreset.TaskDeleter
+	// repoLookup validates an optional repository binding on create/update.
+	// Wired post-construction via SetRepositoryLookup. When nil (e.g. unit
+	// tests), the binding is accepted as-is and default-branch fill is skipped.
+	repoLookup RepositoryLookup
 	// mockClient is non-nil only when Provide built the service with a MockClient
 	// (KANDEV_MOCK_JIRA=true). Exposed via MockClient() so the e2e control routes
 	// can drive the same instance the clientFn returns.
@@ -54,6 +67,21 @@ func (s *Service) SetTaskDeleter(td watchreset.TaskDeleter) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.taskDeleter = td
+}
+
+// SetRepositoryLookup wires the repository validator used by CreateIssueWatch /
+// UpdateIssueWatch. Optional — when unset, a repository binding is persisted
+// as-is without workspace/default-branch resolution.
+func (s *Service) SetRepositoryLookup(rl RepositoryLookup) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.repoLookup = rl
+}
+
+func (s *Service) getRepositoryLookup() RepositoryLookup {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.repoLookup
 }
 
 // MockClient returns the shared mock client when the service was built in mock
@@ -517,10 +545,16 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 	if err := validateIssueWatchCreate(req); err != nil {
 		return nil, err
 	}
+	repositoryID, baseBranch, err := s.resolveRepositoryBinding(ctx, req.WorkspaceID, req.RepositoryID, req.BaseBranch)
+	if err != nil {
+		return nil, err
+	}
 	w := &IssueWatch{
 		WorkspaceID:         req.WorkspaceID,
 		WorkflowID:          req.WorkflowID,
 		WorkflowStepID:      req.WorkflowStepID,
+		RepositoryID:        repositoryID,
+		BaseBranch:          baseBranch,
 		JQL:                 strings.TrimSpace(req.JQL),
 		AgentProfileID:      req.AgentProfileID,
 		ExecutorProfileID:   req.ExecutorProfileID,
@@ -584,6 +618,12 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 	if err := validateMaxInflightTasks(w.MaxInflightTasks); err != nil {
 		return nil, err
 	}
+	repositoryID, baseBranch, err := s.resolveRepositoryBinding(ctx, w.WorkspaceID, w.RepositoryID, w.BaseBranch)
+	if err != nil {
+		return nil, err
+	}
+	w.RepositoryID = repositoryID
+	w.BaseBranch = baseBranch
 	if err := s.store.UpdateIssueWatch(ctx, w); err != nil {
 		return nil, err
 	}
@@ -700,6 +740,8 @@ func (s *Service) publishNewJiraIssueEvent(ctx context.Context, w *IssueWatch, t
 		WorkspaceID:       w.WorkspaceID,
 		WorkflowID:        w.WorkflowID,
 		WorkflowStepID:    w.WorkflowStepID,
+		RepositoryID:      w.RepositoryID,
+		BaseBranch:        w.BaseBranch,
 		AgentProfileID:    w.AgentProfileID,
 		ExecutorProfileID: w.ExecutorProfileID,
 		Prompt:            w.Prompt,
@@ -725,6 +767,35 @@ const (
 	MinIssueWatchPollInterval = 60
 	MaxIssueWatchPollInterval = 3600
 )
+
+// resolveRepositoryBinding validates the watch's optional repository binding
+// against its workspace and fills an empty base branch with the repository's
+// default branch. An empty repositoryID clears the binding (and forces an empty
+// base branch), preserving the historical repo-less behaviour. When no
+// RepositoryLookup is wired (unit tests, early boot), the binding is accepted
+// as-is and the default-branch fill is skipped.
+func (s *Service) resolveRepositoryBinding(ctx context.Context, workspaceID, repositoryID, baseBranch string) (string, string, error) {
+	repositoryID = strings.TrimSpace(repositoryID)
+	baseBranch = strings.TrimSpace(baseBranch)
+	if repositoryID == "" {
+		return "", "", nil
+	}
+	rl := s.getRepositoryLookup()
+	if rl == nil {
+		return repositoryID, baseBranch, nil
+	}
+	repoWorkspace, defaultBranch, ok := rl.GetRepository(ctx, repositoryID)
+	if !ok {
+		return "", "", fmt.Errorf("%w: repository %q not found", ErrInvalidConfig, repositoryID)
+	}
+	if repoWorkspace != workspaceID {
+		return "", "", fmt.Errorf("%w: repository %q does not belong to this workspace", ErrInvalidConfig, repositoryID)
+	}
+	if baseBranch == "" {
+		baseBranch = defaultBranch
+	}
+	return repositoryID, baseBranch, nil
+}
 
 func validateIssueWatchCreate(req *CreateIssueWatchRequest) error {
 	if req.WorkspaceID == "" {

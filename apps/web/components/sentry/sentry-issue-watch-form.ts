@@ -29,6 +29,10 @@ export interface FormState {
   statsPeriod: string;
   workflowId: string;
   workflowStepId: string;
+  /** Optional repository binding; "" = unbound (repo-less task). */
+  repositoryId: string;
+  /** Base branch for the worktree; "" = the repository's default branch. */
+  baseBranch: string;
   agentProfileId: string;
   executorProfileId: string;
   prompt: string;
@@ -49,6 +53,8 @@ export function makeEmptyForm(workspaceId: string): FormState {
     statsPeriod: "24h",
     workflowId: "",
     workflowStepId: "",
+    repositoryId: "",
+    baseBranch: "",
     agentProfileId: "",
     executorProfileId: "",
     prompt: DEFAULT_SENTRY_ISSUE_WATCH_PROMPT,
@@ -71,6 +77,8 @@ export function formStateFromWatch(w: SentryIssueWatch): FormState {
     statsPeriod: f.statsPeriod ?? "",
     workflowId: w.workflowId,
     workflowStepId: w.workflowStepId,
+    repositoryId: w.repositoryId ?? "",
+    baseBranch: w.baseBranch ?? "",
     agentProfileId: w.agentProfileId,
     executorProfileId: w.executorProfileId,
     prompt: w.prompt || DEFAULT_SENTRY_ISSUE_WATCH_PROMPT,

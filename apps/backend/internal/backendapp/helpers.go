@@ -516,14 +516,22 @@ func registerRoutes(p routeParams) {
 	if p.services.GitHub != nil {
 		p.services.GitHub.SetCascadeTaskDeleter(handoffSvc)
 	}
+	// repoLookup validates a watcher's optional repository binding (workspace
+	// ownership + default-branch fill) on create/update. Shared across the three
+	// repo-less watchers; one concrete adapter satisfies each package's
+	// structurally-identical RepositoryLookup interface.
+	repoLookup := &repositoryLookupAdapter{svc: p.taskSvc}
 	if p.services.Jira != nil {
 		p.services.Jira.SetTaskDeleter(handoffSvc)
+		p.services.Jira.SetRepositoryLookup(repoLookup)
 	}
 	if p.services.Linear != nil {
 		p.services.Linear.SetTaskDeleter(handoffSvc)
+		p.services.Linear.SetRepositoryLookup(repoLookup)
 	}
 	if p.services.Sentry != nil {
 		p.services.Sentry.SetTaskDeleter(handoffSvc)
+		p.services.Sentry.SetRepositoryLookup(repoLookup)
 	}
 	p.orchestratorSvc.SetWorkspaceMaterializer(handoffSvc)
 	// Phase 8 prompt enrichment — wire the office scheduler's

@@ -57,6 +57,11 @@ const createTablesSQL = `
 		workspace_id TEXT NOT NULL,
 		workflow_id TEXT NOT NULL,
 		workflow_step_id TEXT NOT NULL,
+		-- Optional repository binding. Empty = unbound (repo-less task, the
+		-- historical behaviour). When set, watcher-created tasks launch in an
+		-- isolated worktree of this repo cut from base_branch.
+		repository_id TEXT NOT NULL DEFAULT '',
+		base_branch TEXT NOT NULL DEFAULT '',
 		filter_json TEXT NOT NULL DEFAULT '{}',
 		agent_profile_id TEXT NOT NULL DEFAULT '',
 		executor_profile_id TEXT NOT NULL DEFAULT '',
@@ -103,6 +108,33 @@ func (s *Store) initSchema() error {
 	}
 	if err := s.addIssueWatchLastErrorColumns(); err != nil {
 		return err
+	}
+	if err := s.addIssueWatchRepositoryColumns(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// addIssueWatchRepositoryColumns brings older databases up to the current
+// schema by appending repository_id / base_branch to linear_issue_watches when
+// missing. Both backfill to ” (unbound), so existing repo-less watches keep
+// their behaviour. Fresh installs hit the column-already-present branch since
+// createTablesSQL declares both columns. Idempotent — column lookup before each
+// ALTER avoids the "duplicate column name" error.
+func (s *Store) addIssueWatchRepositoryColumns() error {
+	cols, err := s.tableColumns("linear_issue_watches")
+	if err != nil {
+		return err
+	}
+	if _, ok := cols["repository_id"]; !ok {
+		if _, err := s.db.Exec(`ALTER TABLE linear_issue_watches ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add repository_id column: %w", err)
+		}
+	}
+	if _, ok := cols["base_branch"]; !ok {
+		if _, err := s.db.Exec(`ALTER TABLE linear_issue_watches ADD COLUMN base_branch TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add base_branch column: %w", err)
+		}
 	}
 	return nil
 }

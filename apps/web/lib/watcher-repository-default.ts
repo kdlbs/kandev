@@ -1,0 +1,30 @@
+// Sentinels for the optional repository binding in the watcher dialogs (Linear,
+// Jira, Sentry). The form stores "" to mean "no repository" (repo-less task,
+// the historical behaviour) and "" for the base branch to mean "the
+// repository's default branch". Radix disallows <SelectItem value="">, so the
+// dropdown options carry these sentinel values and map back to "" on change.
+export const NO_REPOSITORY = "__no_repository__";
+export const NO_REPOSITORY_LABEL = "(no repository — use step default)";
+export const DEFAULT_BRANCH = "__default_branch__";
+export const DEFAULT_BRANCH_LABEL = "(repository default branch)";
+
+// Map a repository select value back to the stored id, collapsing the sentinel
+// to "" so the payload keeps signalling "no repository".
+export function resolveRepositoryId(value: string): string {
+  return value === NO_REPOSITORY ? "" : value;
+}
+
+// Map a branch select value back to the stored branch, collapsing the sentinel
+// to "" so the backend fills the repository's default branch at save time.
+export function resolveBaseBranch(value: string): string {
+  return value === DEFAULT_BRANCH ? "" : value;
+}
+
+// branchPlaceholder mirrors the workflow-step placeholder pattern: it nudges the
+// user to pick a repository first, then shows a loading hint while branches
+// stream in.
+export function branchPlaceholder(repositoryId: string, loading: boolean): string {
+  if (!repositoryId) return "Pick a repository first";
+  if (loading) return "Loading…";
+  return DEFAULT_BRANCH_LABEL;
+}

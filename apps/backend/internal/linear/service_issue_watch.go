@@ -32,10 +32,16 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 	if err := validateIssueWatchCreate(req); err != nil {
 		return nil, err
 	}
+	repositoryID, baseBranch, err := s.resolveRepositoryBinding(ctx, req.WorkspaceID, req.RepositoryID, req.BaseBranch)
+	if err != nil {
+		return nil, err
+	}
 	w := &IssueWatch{
 		WorkspaceID:         req.WorkspaceID,
 		WorkflowID:          req.WorkflowID,
 		WorkflowStepID:      req.WorkflowStepID,
+		RepositoryID:        repositoryID,
+		BaseBranch:          baseBranch,
 		Filter:              normalizeFilter(req.Filter),
 		AgentProfileID:      req.AgentProfileID,
 		ExecutorProfileID:   req.ExecutorProfileID,
@@ -98,6 +104,12 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 	if err := validateMaxInflightTasks(w.MaxInflightTasks); err != nil {
 		return nil, err
 	}
+	repositoryID, baseBranch, err := s.resolveRepositoryBinding(ctx, w.WorkspaceID, w.RepositoryID, w.BaseBranch)
+	if err != nil {
+		return nil, err
+	}
+	w.RepositoryID = repositoryID
+	w.BaseBranch = baseBranch
 	if err := s.store.UpdateIssueWatch(ctx, w); err != nil {
 		return nil, err
 	}
@@ -215,6 +227,8 @@ func (s *Service) publishNewLinearIssueEvent(ctx context.Context, w *IssueWatch,
 		WorkspaceID:       w.WorkspaceID,
 		WorkflowID:        w.WorkflowID,
 		WorkflowStepID:    w.WorkflowStepID,
+		RepositoryID:      w.RepositoryID,
+		BaseBranch:        w.BaseBranch,
 		AgentProfileID:    w.AgentProfileID,
 		ExecutorProfileID: w.ExecutorProfileID,
 		Prompt:            w.Prompt,
@@ -238,6 +252,35 @@ const (
 	MinIssueWatchPollInterval = 60
 	MaxIssueWatchPollInterval = 3600
 )
+
+// resolveRepositoryBinding validates the watch's optional repository binding
+// against its workspace and fills an empty base branch with the repository's
+// default branch. An empty repositoryID clears the binding (and forces an empty
+// base branch), preserving the historical repo-less behaviour. When no
+// RepositoryLookup is wired (unit tests, early boot), the binding is accepted
+// as-is and the default-branch fill is skipped.
+func (s *Service) resolveRepositoryBinding(ctx context.Context, workspaceID, repositoryID, baseBranch string) (string, string, error) {
+	repositoryID = strings.TrimSpace(repositoryID)
+	baseBranch = strings.TrimSpace(baseBranch)
+	if repositoryID == "" {
+		return "", "", nil
+	}
+	rl := s.getRepositoryLookup()
+	if rl == nil {
+		return repositoryID, baseBranch, nil
+	}
+	repoWorkspace, defaultBranch, ok := rl.GetRepository(ctx, repositoryID)
+	if !ok {
+		return "", "", fmt.Errorf("%w: repository %q not found", ErrInvalidConfig, repositoryID)
+	}
+	if repoWorkspace != workspaceID {
+		return "", "", fmt.Errorf("%w: repository %q does not belong to this workspace", ErrInvalidConfig, repositoryID)
+	}
+	if baseBranch == "" {
+		baseBranch = defaultBranch
+	}
+	return repositoryID, baseBranch, nil
+}
 
 func validateIssueWatchCreate(req *CreateIssueWatchRequest) error {
 	if req.WorkspaceID == "" {

@@ -34,6 +34,7 @@ import {
 } from "./linear-issue-watch-fields";
 import { LINEAR_ISSUE_WATCH_PLACEHOLDERS } from "./linear-issue-watch-placeholders";
 import { STEP_DEFAULT, STEP_DEFAULT_LABEL, resolveProfileId } from "@/lib/watcher-profile-default";
+import { WatcherRepositoryFields } from "@/components/watcher-repository-fields";
 import {
   ASSIGNED_ANY,
   CREATOR_ANY,
@@ -428,6 +429,15 @@ function AutomationFields({
           disabled={!form.workflowId || stepsLoading || steps.length === 0}
         />
       </div>
+      <WatcherRepositoryFields
+        workspaceId={form.workspaceId}
+        repositoryId={form.repositoryId}
+        baseBranch={form.baseBranch}
+        onRepositoryChange={(repositoryId) =>
+          setForm((p) => ({ ...p, repositoryId, baseBranch: "" }))
+        }
+        onBaseBranchChange={(baseBranch) => setForm((p) => ({ ...p, baseBranch }))}
+      />
       <div className="grid grid-cols-2 gap-4">
         <SelectField
           label="Agent Profile"
@@ -583,8 +593,8 @@ export function LinearIssueWatchDialog({
           <DialogTitle>{watch ? "Edit Linear Watcher" : "Create Linear Watcher"}</DialogTitle>
           <DialogDescription>
             Poll Linear with a structured filter and auto-create a Kandev task for each
-            newly-matching issue. Issues are not bound to a repository — the workflow step&apos;s
-            defaults decide where the task runs.
+            newly-matching issue. Bind a repository to run each task in an isolated worktree, or
+            leave it unset to use the workflow step&apos;s defaults.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-5">

@@ -103,6 +103,14 @@ export interface JiraIssueWatch {
   workspaceId: string;
   workflowId: string;
   workflowStepId: string;
+  /**
+   * Optional repository binding. Empty string = unbound: watcher-created tasks
+   * launch in a blank scratch checkout (historical behaviour). When set, tasks
+   * launch in an isolated worktree of this repository cut from `baseBranch`.
+   */
+  repositoryId: string;
+  /** Branch the per-task worktree is cut from; empty = the repo's default. */
+  baseBranch: string;
   jql: string;
   agentProfileId: string;
   executorProfileId: string;
@@ -125,6 +133,10 @@ export interface CreateJiraIssueWatchInput {
   workspaceId: string;
   workflowId: string;
   workflowStepId: string;
+  /** Optional repository binding; empty/omitted = unbound (repo-less task). */
+  repositoryId?: string;
+  /** Base branch for the worktree; empty defaults to the repo's default branch. */
+  baseBranch?: string;
   jql: string;
   agentProfileId?: string;
   executorProfileId?: string;
@@ -139,6 +151,8 @@ export interface CreateJiraIssueWatchInput {
 export interface UpdateJiraIssueWatchInput {
   workflowId?: string;
   workflowStepId?: string;
+  repositoryId?: string;
+  baseBranch?: string;
   jql?: string;
   agentProfileId?: string;
   executorProfileId?: string;
