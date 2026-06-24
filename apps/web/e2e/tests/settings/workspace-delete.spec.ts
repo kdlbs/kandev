@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { OfficeApiClient } from "../../helpers/office-api-client";
 
 test.describe("Workspace settings deletion", () => {
   test("deletes a workspace from the settings edit page", async ({ testPage, apiClient }) => {
@@ -43,5 +44,55 @@ test.describe("Workspace settings deletion", () => {
 
     const { workspaces } = await apiClient.listWorkspaces();
     expect(workspaces.some((item) => item.id === workspace.id)).toBe(false);
+  });
+
+  test("deletes an office workspace from the settings edit page", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    const officeApi = new OfficeApiClient(backend.baseUrl);
+    const suffix = Date.now().toString(36);
+    const workspaceName = `Settings Office Delete ${suffix}`;
+    const onboarded = await officeApi.completeOnboarding({
+      workspaceName,
+      taskPrefix: `SOD${suffix.toUpperCase().slice(0, 3)}`,
+      agentName: "Settings Delete CEO",
+      agentProfileId: seedData.agentProfileId,
+      executorPreference: "local_pc",
+    });
+
+    await officeApi.createSkill(onboarded.workspaceId, {
+      name: `Settings Cleanup Skill ${suffix}`,
+      slug: `settings-cleanup-skill-${suffix}`,
+      content: "# Settings cleanup skill\n",
+    });
+
+    await testPage.goto(`/settings/workspace/${onboarded.workspaceId}`);
+    await expect(testPage.getByRole("heading", { name: workspaceName })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    await testPage.getByTestId("workspace-settings-delete-button").click();
+    const confirmInput = testPage.getByTestId("workspace-settings-delete-confirm-input");
+    const confirmButton = testPage.getByTestId("workspace-settings-delete-confirm-button");
+    await expect(confirmInput).toBeVisible();
+
+    await confirmInput.fill(workspaceName);
+    await expect(confirmButton).toBeEnabled();
+    await confirmButton.click();
+    await expect(testPage).toHaveURL(/\/settings\/workspace$/, { timeout: 10_000 });
+
+    const { workspaces } = await apiClient.listWorkspaces();
+    expect(workspaces.some((item) => item.id === onboarded.workspaceId)).toBe(false);
+
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: seedData.workflowId,
+      keyboard_shortcuts: {},
+      enable_preview_on_click: false,
+      sidebar_views: [],
+    });
   });
 });
