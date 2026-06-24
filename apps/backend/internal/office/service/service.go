@@ -108,6 +108,12 @@ type TaskWorkspaceService interface {
 	GetLastAgentMessage(ctx context.Context, sessionID string) (string, error)
 }
 
+// WorkspaceGroupCleaner removes Kandev-owned materialized task workspaces
+// before the office repository deletes the rows holding their cleanup handles.
+type WorkspaceGroupCleaner interface {
+	CleanupWorkspaceGroups(ctx context.Context, workspaceID string) error
+}
+
 // TaskStarterFunc adapts a function to the TaskStarter interface.
 // Useful for wrapping callers whose StartTask returns additional values.
 type TaskStarterFunc func(ctx context.Context, taskID, agentProfileID, executorID,
@@ -200,6 +206,7 @@ type ServiceOptions struct {
 	TaskStarter             TaskStarter
 	TaskCanceller           TaskCanceller
 	TaskWorkspace           TaskWorkspaceService
+	WorkspaceGroupCleaner   WorkspaceGroupCleaner
 	TaskCreator             TaskCreator
 	WorkspaceCreator        WorkspaceCreator
 	AgentTypeResolver       AgentTypeResolver
@@ -224,6 +231,7 @@ type Service struct {
 	routingDispatcher       RoutingDispatcher
 	taskCanceller           TaskCanceller
 	taskWorkspace           TaskWorkspaceService
+	workspaceGroupCleaner   WorkspaceGroupCleaner
 	taskCreator             TaskCreator
 	workspaceCreator        WorkspaceCreator
 	taskPRs                 TaskPRLister
@@ -338,6 +346,7 @@ func NewService(opts ServiceOptions) *Service {
 		taskStarter:             opts.TaskStarter,
 		taskCanceller:           opts.TaskCanceller,
 		taskWorkspace:           opts.TaskWorkspace,
+		workspaceGroupCleaner:   opts.WorkspaceGroupCleaner,
 		taskCreator:             opts.TaskCreator,
 		workspaceCreator:        opts.WorkspaceCreator,
 		taskPRs:                 opts.TaskPRs,
@@ -348,6 +357,12 @@ func NewService(opts ServiceOptions) *Service {
 	}
 	svc.relay = NewChannelRelay(svc)
 	return svc
+}
+
+// SetWorkspaceGroupCleaner wires the handoff cleanup service after startup
+// constructs the shared HandoffService instance.
+func (s *Service) SetWorkspaceGroupCleaner(cleaner WorkspaceGroupCleaner) {
+	s.workspaceGroupCleaner = cleaner
 }
 
 // SetAgentctlBinaryPath overrides the host path to the agentctl binary.

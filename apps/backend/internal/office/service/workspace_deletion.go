@@ -65,6 +65,11 @@ func (s *Service) DeleteWorkspace(ctx context.Context, workspaceID string) error
 	defer cancel()
 	s.cancelWorkspaceTasks(cleanupCtx, tasks)
 
+	if s.workspaceGroupCleaner != nil {
+		if err := s.workspaceGroupCleaner.CleanupWorkspaceGroups(cleanupCtx, workspaceID); err != nil {
+			return fmt.Errorf("clean workspace groups: %w", err)
+		}
+	}
 	if err := s.repo.DeleteWorkspaceData(ctx, workspaceID); err != nil {
 		return fmt.Errorf("delete office workspace data: %w", err)
 	}

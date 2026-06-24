@@ -605,6 +605,51 @@ func TestCascade_NilEventPublisher_NoCrash(t *testing.T) {
 	}
 }
 
+func TestCleanupWorkspaceGroupsUsesStoredMaterializedHandles(t *testing.T) {
+	groups := newCascadeWSGroupRepo()
+	ctx := context.Background()
+	if err := groups.CreateWorkspaceGroup(ctx, &orchmodels.WorkspaceGroup{
+		ID:               "group-owned",
+		WorkspaceID:      "ws-delete",
+		OwnerTaskID:      "task-1",
+		MaterializedPath: "/tmp/kandev-owned-group",
+		MaterializedKind: orchmodels.WorkspaceGroupKindPlainFolder,
+		OwnedByKandev:    true,
+		CleanupPolicy:    orchmodels.WorkspaceCleanupPolicyDeleteWhenLastMemberArchivedOrDel,
+		CleanupStatus:    orchmodels.WorkspaceCleanupStatusActive,
+	}); err != nil {
+		t.Fatalf("create owned group: %v", err)
+	}
+	if err := groups.CreateWorkspaceGroup(ctx, &orchmodels.WorkspaceGroup{
+		ID:               "group-user",
+		WorkspaceID:      "ws-delete",
+		OwnerTaskID:      "task-2",
+		MaterializedPath: "/tmp/user-owned-group",
+		MaterializedKind: orchmodels.WorkspaceGroupKindPlainFolder,
+		OwnedByKandev:    false,
+		CleanupPolicy:    orchmodels.WorkspaceCleanupPolicyNeverDelete,
+		CleanupStatus:    orchmodels.WorkspaceCleanupStatusActive,
+	}); err != nil {
+		t.Fatalf("create user group: %v", err)
+	}
+	cleaner := &fakeWorkspaceCleaner{}
+	svc := NewHandoffService(nil, nil, nil, nil, groups, nil)
+	svc.SetWorkspaceCleaner(cleaner)
+
+	if err := svc.CleanupWorkspaceGroups(ctx, "ws-delete"); err != nil {
+		t.Fatalf("cleanup workspace groups: %v", err)
+	}
+	if len(cleaner.plainFolders) != 1 || cleaner.plainFolders[0] != "/tmp/kandev-owned-group" {
+		t.Fatalf("plain folder cleanups = %#v, want owned group path", cleaner.plainFolders)
+	}
+	if got := groups.cleanupStatuses["group-owned"]; got != orchmodels.WorkspaceCleanupStatusCleaned {
+		t.Fatalf("owned group cleanup status = %q, want cleaned", got)
+	}
+	if _, ok := groups.cleanupStatuses["group-user"]; ok {
+		t.Fatal("user-owned group should not be cleaned")
+	}
+}
+
 // fakeResourceCleaner captures the (taskID, deleteEnvRow) pair delivered
 // to CleanupTaskResources by each cascade invocation. Mirrors
 // fakeEventPublisher above — the same regression class (cascade silently
@@ -624,6 +669,27 @@ func (f *fakeResourceCleaner) CleanupTaskResources(_ context.Context, taskID str
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, resourceCleanerCall{taskID: taskID, deleteEnvRow: deleteEnvRow})
+}
+
+type fakeWorkspaceCleaner struct {
+	plainFolders []string
+}
+
+func (f *fakeWorkspaceCleaner) CleanupPlainFolder(_ context.Context, path string) error {
+	f.plainFolders = append(f.plainFolders, path)
+	return nil
+}
+
+func (f *fakeWorkspaceCleaner) CleanupSingleRepoWorktree(context.Context, string) error {
+	return nil
+}
+
+func (f *fakeWorkspaceCleaner) CleanupMultiRepoRoot(context.Context, string, []string) error {
+	return nil
+}
+
+func (f *fakeWorkspaceCleaner) CleanupRemoteEnvironment(context.Context, string, string) error {
+	return nil
 }
 
 // TestArchiveTaskTree_InvokesResourceCleanerPerTask pins the regression

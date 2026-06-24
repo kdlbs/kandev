@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	orchmodels "github.com/kandev/kandev/internal/office/models"
 )
@@ -33,6 +34,54 @@ type WorkspaceCleaner interface {
 	// provider. The provider+id are read out of the group's restore
 	// config; the implementation refuses unknown providers.
 	CleanupRemoteEnvironment(ctx context.Context, provider, environmentID string) error
+}
+
+type workspaceGroupLister interface {
+	ListWorkspaceGroupsByWorkspace(ctx context.Context, workspaceID string) ([]*orchmodels.WorkspaceGroup, error)
+}
+
+// CleanupWorkspaceGroups removes materialized Kandev-owned workspace groups
+// before workspace deletion removes the rows containing their cleanup handles.
+func (s *HandoffService) CleanupWorkspaceGroups(ctx context.Context, workspaceID string) error {
+	if s.cleaner == nil || s.wsGroups == nil {
+		return nil
+	}
+	lister, ok := s.wsGroups.(workspaceGroupLister)
+	if !ok {
+		return nil
+	}
+	groups, err := lister.ListWorkspaceGroupsByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	for _, g := range groups {
+		if g == nil || !g.OwnedByKandev ||
+			g.CleanupPolicy != orchmodels.WorkspaceCleanupPolicyDeleteWhenLastMemberArchivedOrDel {
+			continue
+		}
+		hasActive, err := s.hasActiveExecutionsForGroup(ctx, g.ID)
+		if err != nil {
+			return fmt.Errorf("check active workspace group %s: %w", g.ID, err)
+		}
+		if hasActive {
+			return fmt.Errorf("workspace group %s still has active executions", g.ID)
+		}
+		if err := s.wsGroups.UpdateWorkspaceGroupCleanupStatus(ctx, g.ID,
+			orchmodels.WorkspaceCleanupStatusPending, "", nil); err != nil {
+			return err
+		}
+		if err := s.runWorkspaceGroupCleanup(ctx, g); err != nil {
+			_ = s.wsGroups.UpdateWorkspaceGroupCleanupStatus(ctx, g.ID,
+				orchmodels.WorkspaceCleanupStatusFailed, err.Error(), nil)
+			return fmt.Errorf("clean workspace group %s: %w", g.ID, err)
+		}
+		now := time.Now().UTC()
+		if err := s.wsGroups.UpdateWorkspaceGroupCleanupStatus(ctx, g.ID,
+			orchmodels.WorkspaceCleanupStatusCleaned, "", &now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // runWorkspaceGroupCleanup is the dispatcher invoked by

@@ -508,6 +508,9 @@ func registerRoutes(p routeParams) {
 	// the kanban board doesn't react to subtree archive/delete until a
 	// full reload.
 	handoffSvc.SetTaskEventPublisher(p.taskSvc)
+	if p.services.Office != nil {
+		p.services.Office.SetWorkspaceGroupCleaner(handoffSvc)
+	}
 	// Cascade archive/delete must tear down runtime resources
 	// (container, sandbox, worktree, executor_running rows) for every
 	// task in the tree. Without this wiring the agent gets stopped via
