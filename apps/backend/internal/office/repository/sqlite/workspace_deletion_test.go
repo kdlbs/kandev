@@ -32,9 +32,21 @@ func TestDeleteWorkspaceDataDeletesOwnedOfficeRows(t *testing.T) {
 		"office_agent_instructions",
 		"office_agent_runtime",
 		"runs",
+		"run_events",
+		"office_run_route_attempts",
+		"office_run_skills",
+		"agent_wakeup_requests",
+		"agent_continuation_summaries",
 		"office_routine_triggers",
 		"office_routine_runs",
 		"office_task_labels",
+		"office_provider_health",
+		"office_workspace_routing",
+		"office_workspace_settings",
+		"task_workspace_groups",
+		"task_workspace_group_members",
+		"office_task_tree_holds",
+		"office_task_tree_hold_members",
 	} {
 		assertTableCount(t, db, table, "ws-delete", 0)
 		assertTableCount(t, db, table, "ws-keep", 1)
@@ -85,6 +97,10 @@ func seedWorkspaceDeletionRows(t *testing.T, repo *sqlite.Repository, workspaceI
 	projectID := workspaceID + "-project"
 	routineID := workspaceID + "-routine"
 	labelID := workspaceID + "-label"
+	runID := workspaceID + "-run"
+	groupID := workspaceID + "-group"
+	treeHoldID := workspaceID + "-hold"
+	taskID := workspaceID + "-task"
 
 	// Office agents now live in agent_profiles (workspace_id != ''). The
 	// seed inserts the minimum columns the merged schema requires.
@@ -98,19 +114,31 @@ func seedWorkspaceDeletionRows(t *testing.T, repo *sqlite.Repository, workspaceI
 	execRaw(t, repo, `INSERT INTO office_agent_runtime (agent_id, status, updated_at) VALUES (?, 'running', ?)`, agentID, now)
 	execRaw(t, repo, `INSERT INTO office_agent_memory (id, agent_profile_id, layer, key, created_at, updated_at) VALUES (?, ?, 'project', 'note', ?, ?)`, workspaceID+"-memory", agentID, now, now)
 	execRaw(t, repo, `INSERT INTO office_agent_instructions (id, agent_profile_id, filename, content, created_at, updated_at) VALUES (?, ?, 'guide.md', 'content', ?, ?)`, workspaceID+"-instruction", agentID, now, now)
-	execRaw(t, repo, `INSERT INTO runs (id, agent_profile_id, reason, requested_at) VALUES (?, ?, 'test', ?)`, workspaceID+"-run", agentID, now)
+	execRaw(t, repo, `INSERT INTO runs (id, agent_profile_id, reason, requested_at) VALUES (?, ?, 'test', ?)`, runID, agentID, now)
+	execRaw(t, repo, `INSERT INTO run_events (run_id, seq, event_type, payload, created_at) VALUES (?, 1, 'queued', '{}', ?)`, runID, now)
+	execRaw(t, repo, `INSERT INTO office_run_route_attempts (run_id, seq, provider_id, model, tier, outcome, started_at) VALUES (?, 1, 'codex', 'gpt', 'balanced', 'failed', ?)`, runID, now)
+	execRaw(t, repo, `INSERT INTO office_run_skills (run_id, skill_id, version, content_hash, materialized_path) VALUES (?, ?, 'v1', 'hash', '/tmp/skill')`, runID, workspaceID+"-skill")
+	execRaw(t, repo, `INSERT INTO agent_wakeup_requests (id, agent_profile_id, source, status, requested_at) VALUES (?, ?, 'test', 'queued', ?)`, workspaceID+"-wakeup", agentID, now)
+	execRaw(t, repo, `INSERT INTO agent_continuation_summaries (agent_profile_id, scope, content) VALUES (?, 'workspace', 'summary')`, agentID)
 	execRaw(t, repo, `INSERT INTO office_cost_events (id, agent_profile_id, project_id, occurred_at, created_at) VALUES (?, ?, ?, ?, ?)`, workspaceID+"-cost", agentID, projectID, now, now)
 	execRaw(t, repo, `INSERT INTO office_budget_policies (id, workspace_id, scope_type, scope_id, limit_subcents, period, created_at, updated_at) VALUES (?, ?, 'workspace', ?, 100, 'month', ?, ?)`, workspaceID+"-budget", workspaceID, workspaceID, now, now)
 	execRaw(t, repo, `INSERT INTO office_routines (id, workspace_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, routineID, workspaceID, "Routine "+workspaceID, now, now)
 	execRaw(t, repo, `INSERT INTO office_routine_triggers (id, routine_id, kind, created_at, updated_at) VALUES (?, ?, 'manual', ?, ?)`, workspaceID+"-trigger", routineID, now, now)
-	execRaw(t, repo, `INSERT INTO office_routine_runs (id, routine_id, source, created_at) VALUES (?, ?, 'manual', ?)`, workspaceID+"-run", routineID, now)
+	execRaw(t, repo, `INSERT INTO office_routine_runs (id, routine_id, source, created_at) VALUES (?, ?, 'manual', ?)`, workspaceID+"-routine-run", routineID, now)
 	execRaw(t, repo, `INSERT INTO office_labels (id, workspace_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, labelID, workspaceID, "Label "+workspaceID, now, now)
-	execRaw(t, repo, `INSERT INTO office_task_labels (task_id, label_id, created_at) VALUES (?, ?, ?)`, workspaceID+"-task", labelID, now)
+	execRaw(t, repo, `INSERT INTO office_task_labels (task_id, label_id, created_at) VALUES (?, ?, ?)`, taskID, labelID, now)
 	execRaw(t, repo, `INSERT INTO office_channels (id, workspace_id, agent_profile_id, platform, created_at, updated_at) VALUES (?, ?, ?, 'slack', ?, ?)`, workspaceID+"-channel", workspaceID, agentID, now, now)
 	execRaw(t, repo, `INSERT INTO office_approvals (id, workspace_id, type, created_at, updated_at) VALUES (?, ?, 'test', ?, ?)`, workspaceID+"-approval", workspaceID, now, now)
 	execRaw(t, repo, `INSERT INTO office_activity_log (id, workspace_id, actor_type, actor_id, action, created_at) VALUES (?, ?, 'agent', ?, 'created', ?)`, workspaceID+"-activity", workspaceID, agentID, now)
 	execRaw(t, repo, `INSERT INTO office_onboarding (workspace_id, completed, ceo_agent_id, created_at) VALUES (?, 1, ?, ?)`, workspaceID, agentID, now)
 	execRaw(t, repo, `INSERT INTO office_workspace_governance (workspace_id, key, value) VALUES (?, 'require_approval_for_new_agents', 1)`, workspaceID)
+	execRaw(t, repo, `INSERT INTO office_workspace_routing (workspace_id, enabled, default_tier, provider_order, provider_profiles, updated_at) VALUES (?, 1, 'balanced', '["codex"]', '{}', ?)`, workspaceID, now)
+	execRaw(t, repo, `INSERT INTO office_provider_health (workspace_id, provider_id, scope, scope_value, state, updated_at) VALUES (?, 'codex', 'provider', '', 'degraded', ?)`, workspaceID, now)
+	execRaw(t, repo, `INSERT INTO office_workspace_settings (workspace_id, agent_failure_threshold, updated_at) VALUES (?, 3, ?)`, workspaceID, now)
+	execRaw(t, repo, `INSERT INTO task_workspace_groups (id, workspace_id, owner_task_id, materialized_kind, created_at, updated_at) VALUES (?, ?, ?, 'local', ?, ?)`, groupID, workspaceID, taskID, now, now)
+	execRaw(t, repo, `INSERT INTO task_workspace_group_members (workspace_group_id, task_id, created_at) VALUES (?, ?, ?)`, groupID, taskID, now)
+	execRaw(t, repo, `INSERT INTO office_task_tree_holds (id, workspace_id, root_task_id, mode, created_at) VALUES (?, ?, ?, 'manual', ?)`, treeHoldID, workspaceID, taskID, now)
+	execRaw(t, repo, `INSERT INTO office_task_tree_hold_members (hold_id, task_id, depth) VALUES (?, ?, 0)`, treeHoldID, taskID)
 }
 
 func execRaw(t *testing.T, repo *sqlite.Repository, query string, args ...interface{}) {
@@ -167,14 +195,21 @@ func workspaceDeletionTableSpec(table string) workspaceDeletionCountSpec {
 		"office_budget_policies", "office_routines", "office_labels", "office_channels",
 		"office_approvals", "office_activity_log":
 		return workspaceDeletionCountSpec{column: "id", operator: "LIKE", value: likeID}
-	case "office_agent_memory", "office_agent_instructions", "runs":
+	case "office_agent_memory", "office_agent_instructions", "runs", "agent_wakeup_requests",
+		"agent_continuation_summaries":
 		return workspaceDeletionCountSpec{column: "agent_profile_id", operator: "LIKE", value: likeID}
 	case "office_agent_runtime":
 		return workspaceDeletionCountSpec{column: "agent_id", operator: "LIKE", value: likeID}
+	case "run_events", "office_run_route_attempts", "office_run_skills":
+		return workspaceDeletionCountSpec{column: "run_id", operator: "LIKE", value: likeID}
 	case "office_routine_triggers", "office_routine_runs":
 		return workspaceDeletionCountSpec{column: "routine_id", operator: "LIKE", value: likeID}
-	case "office_task_labels":
-		return workspaceDeletionCountSpec{column: "label_id", operator: "LIKE", value: likeID}
+	case "office_task_labels", "task_workspace_group_members", "office_task_tree_hold_members":
+		return workspaceDeletionCountSpec{column: "task_id", operator: "LIKE", value: likeID}
+	case "task_workspace_groups":
+		return workspaceDeletionCountSpec{column: "id", operator: "LIKE", value: likeID}
+	case "office_task_tree_holds":
+		return workspaceDeletionCountSpec{column: "id", operator: "LIKE", value: likeID}
 	default:
 		return workspaceDeletionCountSpec{column: "workspace_id", operator: "=", value: eqWorkspace}
 	}

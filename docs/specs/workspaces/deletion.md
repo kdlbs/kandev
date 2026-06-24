@@ -15,7 +15,7 @@ Users who create a workspace by mistake, finish an experiment, or consolidate wo
 - The workspace settings page shows a "Delete workspace" button in a danger zone section.
 - Clicking it opens a confirmation dialog that shows a summary of what will be deleted: number of tasks, agents, and skills. It also displays the full filesystem path that will be removed (e.g. `~/.kandev/workspaces/my-workspace/`). The user must type the workspace name to proceed.
 - Deletion stops all running agents in the workspace before removing data.
-- All workspace-owned data is removed: agents (+ memory, instructions, runtime), skills, projects, routines (+ triggers, runs), approvals, channels, labels, cost events, budget policies, wakeup queue entries, activity logs, governance settings, and the onboarding record.
+- All workspace-owned data is removed: agents (+ memory, instructions, runtime), skills, projects, routines (+ triggers, runs), run events, run route attempts, run skill materializations, approvals, channels, labels, cost events, budget policies, wakeup queue entries, routing settings, provider health, activity logs, governance settings, workspace groups, tree holds, workspace settings, and the onboarding record.
 - All tasks in the workspace are deleted, including their sessions, worktrees, blockers, and comments.
 - The filesystem config directory (`~/.kandev/workspaces/<slug>/`) and any quick-chat workspace directories created for the workspace's sessions are removed.
 - After deletion the user is redirected to `/office/setup` if no other workspaces remain, or to `/office` with the next available workspace selected.
