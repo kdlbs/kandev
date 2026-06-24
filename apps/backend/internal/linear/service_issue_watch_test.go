@@ -456,3 +456,42 @@ func TestService_CheckIssueWatch_StampsLastPolledOnError(t *testing.T) {
 		t.Error("expected last_polled_at stamped even on search failure (liveness signal)")
 	}
 }
+
+func TestService_UpdateIssueWatch_RepositoryBinding(t *testing.T) {
+	ctx := context.Background()
+	f := newSvcFixture(t)
+	f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-1", defaultBranch: "main", ok: true})
+
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf",
+		WorkflowStepID: "step",
+		Filter:         SearchFilter{TeamKey: "ENG"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if w.RepositoryID != "" {
+		t.Fatalf("expected unbound on create, got %q", w.RepositoryID)
+	}
+
+	// Bind an existing watch via update — the edit path must persist it.
+	repoID := "repo-1"
+	updated, err := f.svc.UpdateIssueWatch(ctx, w.ID, &UpdateIssueWatchRequest{RepositoryID: &repoID})
+	if err != nil {
+		t.Fatalf("update bind: %v", err)
+	}
+	if updated.RepositoryID != "repo-1" || updated.BaseBranch != "main" {
+		t.Fatalf("expected repo-1@main after update, got repo=%q branch=%q", updated.RepositoryID, updated.BaseBranch)
+	}
+
+	// Unbind via update (empty string).
+	empty := ""
+	cleared, err := f.svc.UpdateIssueWatch(ctx, w.ID, &UpdateIssueWatchRequest{RepositoryID: &empty})
+	if err != nil {
+		t.Fatalf("update unbind: %v", err)
+	}
+	if cleared.RepositoryID != "" || cleared.BaseBranch != "" {
+		t.Fatalf("expected cleared after update, got repo=%q branch=%q", cleared.RepositoryID, cleared.BaseBranch)
+	}
+}

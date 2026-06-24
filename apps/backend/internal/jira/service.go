@@ -847,6 +847,15 @@ func applyIssueWatchPatch(w *IssueWatch, req *UpdateIssueWatchRequest) {
 	if req.WorkflowStepID != nil {
 		w.WorkflowStepID = *req.WorkflowStepID
 	}
+	// RepositoryID / BaseBranch are applied verbatim here; UpdateIssueWatch then
+	// runs them through resolveRepositoryBinding (workspace check + default-branch
+	// fill, or clear when empty). An empty RepositoryID unbinds the watch.
+	if req.RepositoryID != nil {
+		w.RepositoryID = *req.RepositoryID
+	}
+	if req.BaseBranch != nil {
+		w.BaseBranch = *req.BaseBranch
+	}
 	if req.JQL != nil {
 		w.JQL = strings.TrimSpace(*req.JQL)
 	}
