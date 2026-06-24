@@ -71,9 +71,7 @@ export function WatcherRepositoryFields({
   onBaseBranchChange: (baseBranch: string) => void;
 }) {
   const { repositories } = useRepositories(workspaceId, !!workspaceId);
-  const branchSource = repositoryId
-    ? ({ kind: "id", workspaceId, repositoryId } as const)
-    : null;
+  const branchSource = repositoryId ? ({ kind: "id", workspaceId, repositoryId } as const) : null;
   const { branches, isLoading: branchesLoading } = useBranches(branchSource, !!repositoryId);
   return (
     <div className="grid grid-cols-2 gap-4">
