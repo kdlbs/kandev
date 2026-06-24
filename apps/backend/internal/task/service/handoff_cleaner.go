@@ -52,7 +52,8 @@ func (s *HandoffService) CleanupWorkspaceGroups(ctx context.Context, workspaceID
 	statusCtx := context.WithoutCancel(ctx)
 	for _, g := range groups {
 		if g == nil || !g.OwnedByKandev ||
-			g.CleanupPolicy != orchmodels.WorkspaceCleanupPolicyDeleteWhenLastMemberArchivedOrDel {
+			g.CleanupPolicy != orchmodels.WorkspaceCleanupPolicyDeleteWhenLastMemberArchivedOrDel ||
+			g.CleanupStatus == orchmodels.WorkspaceCleanupStatusCleaned {
 			continue
 		}
 		hasActive, err := s.hasActiveExecutionsForGroup(ctx, g.ID)

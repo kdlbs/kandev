@@ -71,11 +71,40 @@ func TestDeleteWorkspaceStopsTasksDeletesDataAndConfig(t *testing.T) {
 	}
 }
 
+func TestDeleteWorkspaceUsesFreshDataDeletionTimeoutAfterGroupCleanup(t *testing.T) {
+	ctx := context.Background()
+	taskSvc := &fakeWorkspaceTaskService{
+		workspace: &taskmodels.Workspace{ID: "ws-delete", Name: "default"},
+		tasks:     []*taskmodels.Task{{ID: "task-1", WorkspaceID: "ws-delete"}},
+	}
+	groupCleaner := &deadlineWorkspaceGroupCleaner{}
+	svc := newTestService(t, service.ServiceOptions{
+		TaskWorkspace:         taskSvc,
+		TaskCanceller:         &fakeTaskCanceller{},
+		WorkspaceGroupCleaner: groupCleaner,
+	})
+
+	if err := svc.DeleteWorkspace(ctx, "ws-delete"); err != nil {
+		t.Fatalf("DeleteWorkspace: %v", err)
+	}
+	if groupCleaner.deadline.IsZero() {
+		t.Fatal("workspace group cleanup did not receive a timeout")
+	}
+	if len(taskSvc.deletedTaskDeadlines) != 1 {
+		t.Fatalf("deleted task deadlines = %#v, want one deadline", taskSvc.deletedTaskDeadlines)
+	}
+	if !taskSvc.deletedTaskDeadlines[0].After(groupCleaner.deadline) {
+		t.Fatalf("task deletion deadline = %v, want after group cleanup deadline %v",
+			taskSvc.deletedTaskDeadlines[0], groupCleaner.deadline)
+	}
+}
+
 type fakeWorkspaceTaskService struct {
-	workspace        *taskmodels.Workspace
-	tasks            []*taskmodels.Task
-	deletedTasks     []string
-	deletedWorkspace string
+	workspace            *taskmodels.Workspace
+	tasks                []*taskmodels.Task
+	deletedTasks         []string
+	deletedTaskDeadlines []time.Time
+	deletedWorkspace     string
 }
 
 func (f *fakeWorkspaceTaskService) GetWorkspace(context.Context, string) (*taskmodels.Workspace, error) {
@@ -107,8 +136,11 @@ func (f *fakeWorkspaceTaskService) ListTasksByWorkspace(
 	return f.tasks, len(f.tasks), nil
 }
 
-func (f *fakeWorkspaceTaskService) DeleteTask(_ context.Context, id string) error {
+func (f *fakeWorkspaceTaskService) DeleteTask(ctx context.Context, id string) error {
 	f.deletedTasks = append(f.deletedTasks, id)
+	if deadline, ok := ctx.Deadline(); ok {
+		f.deletedTaskDeadlines = append(f.deletedTaskDeadlines, deadline)
+	}
 	return nil
 }
 
@@ -130,6 +162,17 @@ func (f *fakeWorkspaceGroupCleaner) CleanupWorkspaceGroups(ctx context.Context, 
 		return err
 	}
 	f.groupExistedDuringCleanup = group != nil && group.WorkspaceID == workspaceID
+	return nil
+}
+
+type deadlineWorkspaceGroupCleaner struct {
+	deadline time.Time
+}
+
+func (f *deadlineWorkspaceGroupCleaner) CleanupWorkspaceGroups(ctx context.Context, _ string) error {
+	if deadline, ok := ctx.Deadline(); ok {
+		f.deadline = deadline
+	}
 	return nil
 }
 

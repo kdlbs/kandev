@@ -632,6 +632,18 @@ func TestCleanupWorkspaceGroupsUsesStoredMaterializedHandles(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create user group: %v", err)
 	}
+	if err := groups.CreateWorkspaceGroup(ctx, &orchmodels.WorkspaceGroup{
+		ID:               "group-cleaned",
+		WorkspaceID:      "ws-delete",
+		OwnerTaskID:      "task-3",
+		MaterializedPath: "/tmp/already-cleaned-group",
+		MaterializedKind: orchmodels.WorkspaceGroupKindPlainFolder,
+		OwnedByKandev:    true,
+		CleanupPolicy:    orchmodels.WorkspaceCleanupPolicyDeleteWhenLastMemberArchivedOrDel,
+		CleanupStatus:    orchmodels.WorkspaceCleanupStatusCleaned,
+	}); err != nil {
+		t.Fatalf("create cleaned group: %v", err)
+	}
 	cleaner := &fakeWorkspaceCleaner{}
 	svc := NewHandoffService(nil, nil, nil, nil, groups, nil)
 	svc.SetWorkspaceCleaner(cleaner)
