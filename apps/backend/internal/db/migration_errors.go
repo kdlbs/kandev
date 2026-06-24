@@ -11,6 +11,7 @@ const (
 	postgresDuplicateColumn = "42701"
 	postgresDuplicateTable  = "42P07"
 	postgresDuplicateObject = "42710"
+	sqliteAlreadyExistsText = " already exists"
 )
 
 // IsDuplicateColumnError reports whether err means an ADD COLUMN migration has
@@ -48,8 +49,8 @@ func IsAlreadyExistsError(err error) bool {
 }
 
 func isSQLiteDuplicateObjectMessage(s string) bool {
-	return strings.HasPrefix(s, "table ") && strings.Contains(s, " already exists") ||
-		strings.HasPrefix(s, "index ") && strings.Contains(s, " already exists") ||
-		strings.HasPrefix(s, "trigger ") && strings.Contains(s, " already exists") ||
-		strings.HasPrefix(s, "view ") && strings.Contains(s, " already exists")
+	return strings.HasPrefix(s, "table ") && strings.Contains(s, sqliteAlreadyExistsText) ||
+		strings.HasPrefix(s, "index ") && strings.Contains(s, sqliteAlreadyExistsText) ||
+		strings.HasPrefix(s, "trigger ") && strings.Contains(s, sqliteAlreadyExistsText) ||
+		strings.HasPrefix(s, "view ") && strings.Contains(s, sqliteAlreadyExistsText)
 }
