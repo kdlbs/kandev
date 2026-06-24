@@ -51,8 +51,10 @@ function PickSelect(props: {
 
 /**
  * Shared repository + base-branch picker for the Linear / Jira / Sentry watcher
- * dialogs. Binds the watcher to an optional repository so its tasks launch in
- * an isolated worktree; an empty repository = unbound (repo-less task). The
+ * dialogs. Binds the watcher to an optional repository so its tasks run against
+ * that codebase instead of an empty scratch checkout; an empty repository =
+ * unbound (repo-less task). How the repository is materialised (isolated
+ * worktree vs in-place) is decided by the executor profile, not this field. The
  * base-branch select is disabled until a repository is chosen and defaults to
  * the repository's default branch. The `onChange` callbacks receive values
  * already collapsed from the dropdown sentinels back to "".
@@ -77,7 +79,7 @@ export function WatcherRepositoryFields({
     <div className="grid grid-cols-2 gap-4">
       <PickSelect
         label="Repository"
-        description="Optional — run tasks in an isolated worktree of this repo."
+        description="Optional — the repository the agent works in. Leave unset to run with no repository."
         value={repositoryId || NO_REPOSITORY}
         onChange={(v) => onRepositoryChange(resolveRepositoryId(v))}
         placeholder={NO_REPOSITORY_LABEL}
@@ -88,7 +90,7 @@ export function WatcherRepositoryFields({
       />
       <PickSelect
         label="Base Branch"
-        description="Branch the per-task worktree is cut from."
+        description="The base branch the agent starts from."
         value={baseBranch || DEFAULT_BRANCH}
         onChange={(v) => onBaseBranchChange(resolveBaseBranch(v))}
         placeholder={branchPlaceholder(repositoryId, branchesLoading)}

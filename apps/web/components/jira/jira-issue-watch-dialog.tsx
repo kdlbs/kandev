@@ -527,9 +527,9 @@ export function JiraIssueWatchDialog({
         <DialogHeader>
           <DialogTitle>{watch ? "Edit JIRA Watcher" : "Create JIRA Watcher"}</DialogTitle>
           <DialogDescription>
-            Poll a JQL query and auto-create a Kandev task for each newly-matching ticket. Bind a
-            repository to run each task in an isolated worktree, or leave it unset to use the
-            workflow step&apos;s defaults.
+            Poll a JQL query and auto-create a Kandev task for each newly-matching ticket.
+            Optionally bind a repository so each task runs against that codebase, or leave it unset
+            to run with no repository.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-5">

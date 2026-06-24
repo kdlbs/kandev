@@ -3,8 +3,11 @@
 // the historical behaviour) and "" for the base branch to mean "the
 // repository's default branch". Radix disallows <SelectItem value="">, so the
 // dropdown options carry these sentinel values and map back to "" on change.
+//
+// Note: there is no "step default" for a repository — a workflow step has no
+// repository association — so the empty state means literally "no repository".
 export const NO_REPOSITORY = "__no_repository__";
-export const NO_REPOSITORY_LABEL = "(no repository — use step default)";
+export const NO_REPOSITORY_LABEL = "(no repository)";
 export const DEFAULT_BRANCH = "__default_branch__";
 export const DEFAULT_BRANCH_LABEL = "(repository default branch)";
 

@@ -517,8 +517,8 @@ export function SentryIssueWatchDialog({
           <DialogTitle>{watch ? "Edit Sentry Watcher" : "Create Sentry Watcher"}</DialogTitle>
           <DialogDescription>
             Poll Sentry with a structured filter and auto-create a Kandev task for each
-            newly-matching issue. Bind a repository to run each task in an isolated worktree, or
-            leave it unset to use the workflow step&apos;s defaults.
+            newly-matching issue. Optionally bind a repository so each task runs against that
+            codebase, or leave it unset to run with no repository.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-5">
