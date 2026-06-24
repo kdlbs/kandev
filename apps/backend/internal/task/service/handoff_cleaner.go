@@ -51,9 +51,7 @@ func (s *HandoffService) CleanupWorkspaceGroups(ctx context.Context, workspaceID
 	}
 	statusCtx := context.WithoutCancel(ctx)
 	for _, g := range groups {
-		if g == nil || !g.OwnedByKandev ||
-			g.CleanupPolicy != orchmodels.WorkspaceCleanupPolicyDeleteWhenLastMemberArchivedOrDel ||
-			g.CleanupStatus == orchmodels.WorkspaceCleanupStatusCleaned {
+		if !shouldCleanupWorkspaceGroup(g) {
 			continue
 		}
 		hasActive, err := s.hasActiveExecutionsForGroup(ctx, g.ID)
@@ -89,6 +87,13 @@ func (s *HandoffService) CleanupWorkspaceGroups(ctx context.Context, workspaceID
 		}
 	}
 	return nil
+}
+
+func shouldCleanupWorkspaceGroup(g *orchmodels.WorkspaceGroup) bool {
+	return g != nil &&
+		g.OwnedByKandev &&
+		g.CleanupPolicy == orchmodels.WorkspaceCleanupPolicyDeleteWhenLastMemberArchivedOrDel &&
+		g.CleanupStatus != orchmodels.WorkspaceCleanupStatusCleaned
 }
 
 func (s *HandoffService) waitForWorkspaceGroupIdle(ctx context.Context, workspaceID, groupID string) error {
