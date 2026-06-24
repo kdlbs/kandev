@@ -66,7 +66,9 @@ func (s *Service) DeleteWorkspace(ctx context.Context, workspaceID string) error
 	s.cancelWorkspaceTasks(cleanupCtx, tasks)
 
 	if s.workspaceGroupCleaner != nil {
-		if err := s.workspaceGroupCleaner.CleanupWorkspaceGroups(cleanupCtx, workspaceID); err != nil {
+		groupCleanupCtx, groupCleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
+		defer groupCleanupCancel()
+		if err := s.workspaceGroupCleaner.CleanupWorkspaceGroups(groupCleanupCtx, workspaceID); err != nil {
 			return fmt.Errorf("clean workspace groups: %w", err)
 		}
 	}

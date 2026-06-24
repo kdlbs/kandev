@@ -7,6 +7,7 @@ import (
 	"time"
 
 	orchmodels "github.com/kandev/kandev/internal/office/models"
+	"go.uber.org/zap"
 )
 
 // WorkspaceCleaner is the disk-cleanup surface evaluateWorkspaceGroupCleanup
@@ -36,9 +37,7 @@ type WorkspaceCleaner interface {
 	CleanupRemoteEnvironment(ctx context.Context, provider, environmentID string) error
 }
 
-type workspaceGroupLister interface {
-	ListWorkspaceGroupsByWorkspace(ctx context.Context, workspaceID string) ([]*orchmodels.WorkspaceGroup, error)
-}
+const workspaceGroupCleanupPollInterval = 100 * time.Millisecond
 
 // CleanupWorkspaceGroups removes materialized Kandev-owned workspace groups
 // before workspace deletion removes the rows containing their cleanup handles.
@@ -46,14 +45,11 @@ func (s *HandoffService) CleanupWorkspaceGroups(ctx context.Context, workspaceID
 	if s.cleaner == nil || s.wsGroups == nil {
 		return nil
 	}
-	lister, ok := s.wsGroups.(workspaceGroupLister)
-	if !ok {
-		return nil
-	}
-	groups, err := lister.ListWorkspaceGroupsByWorkspace(ctx, workspaceID)
+	groups, err := s.wsGroups.ListWorkspaceGroupsByWorkspace(ctx, workspaceID)
 	if err != nil {
 		return err
 	}
+	statusCtx := context.WithoutCancel(ctx)
 	for _, g := range groups {
 		if g == nil || !g.OwnedByKandev ||
 			g.CleanupPolicy != orchmodels.WorkspaceCleanupPolicyDeleteWhenLastMemberArchivedOrDel {
@@ -64,24 +60,56 @@ func (s *HandoffService) CleanupWorkspaceGroups(ctx context.Context, workspaceID
 			return fmt.Errorf("check active workspace group %s: %w", g.ID, err)
 		}
 		if hasActive {
-			return fmt.Errorf("workspace group %s still has active executions", g.ID)
+			s.logf().Warn("workspace group cleanup: active executions remain",
+				zap.String("workspace_id", workspaceID),
+				zap.String("group_id", g.ID))
+			if err := s.wsGroups.UpdateWorkspaceGroupCleanupStatus(statusCtx, g.ID,
+				orchmodels.WorkspaceCleanupStatusPending,
+				"active executor still bound during workspace deletion", nil); err != nil {
+				return err
+			}
+			if err := s.waitForWorkspaceGroupIdle(ctx, workspaceID, g.ID); err != nil {
+				return err
+			}
 		}
-		if err := s.wsGroups.UpdateWorkspaceGroupCleanupStatus(ctx, g.ID,
+		if err := s.wsGroups.UpdateWorkspaceGroupCleanupStatus(statusCtx, g.ID,
 			orchmodels.WorkspaceCleanupStatusPending, "", nil); err != nil {
 			return err
 		}
 		if err := s.runWorkspaceGroupCleanup(ctx, g); err != nil {
-			_ = s.wsGroups.UpdateWorkspaceGroupCleanupStatus(ctx, g.ID,
+			_ = s.wsGroups.UpdateWorkspaceGroupCleanupStatus(statusCtx, g.ID,
 				orchmodels.WorkspaceCleanupStatusFailed, err.Error(), nil)
 			return fmt.Errorf("clean workspace group %s: %w", g.ID, err)
 		}
 		now := time.Now().UTC()
-		if err := s.wsGroups.UpdateWorkspaceGroupCleanupStatus(ctx, g.ID,
+		if err := s.wsGroups.UpdateWorkspaceGroupCleanupStatus(statusCtx, g.ID,
 			orchmodels.WorkspaceCleanupStatusCleaned, "", &now); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (s *HandoffService) waitForWorkspaceGroupIdle(ctx context.Context, workspaceID, groupID string) error {
+	ticker := time.NewTicker(workspaceGroupCleanupPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("workspace group %s still has active executions: %w", groupID, ctx.Err())
+		case <-ticker.C:
+			hasActive, err := s.hasActiveExecutionsForGroup(ctx, groupID)
+			if err != nil {
+				return fmt.Errorf("check active workspace group %s: %w", groupID, err)
+			}
+			if !hasActive {
+				s.logf().Info("workspace group cleanup: active executions stopped",
+					zap.String("workspace_id", workspaceID),
+					zap.String("group_id", groupID))
+				return nil
+			}
+		}
+	}
 }
 
 // runWorkspaceGroupCleanup is the dispatcher invoked by

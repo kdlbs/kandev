@@ -30,6 +30,7 @@ const (
 type WorkspaceGroupRepo interface {
 	CreateWorkspaceGroup(ctx context.Context, g *orchmodels.WorkspaceGroup) error
 	GetWorkspaceGroup(ctx context.Context, id string) (*orchmodels.WorkspaceGroup, error)
+	ListWorkspaceGroupsByWorkspace(ctx context.Context, workspaceID string) ([]*orchmodels.WorkspaceGroup, error)
 	GetWorkspaceGroupForTask(ctx context.Context, taskID string) (*orchmodels.WorkspaceGroup, error)
 	AddWorkspaceGroupMember(ctx context.Context, groupID, taskID, role string) error
 	// Phase 6 surface — cascade release / restore + cleanup status updates.

@@ -650,6 +650,51 @@ func TestCleanupWorkspaceGroupsUsesStoredMaterializedHandles(t *testing.T) {
 	}
 }
 
+func TestCleanupWorkspaceGroupsWaitsForActiveExecutions(t *testing.T) {
+	groups := newCascadeWSGroupRepo()
+	ctx := context.Background()
+	if err := groups.CreateWorkspaceGroup(ctx, &orchmodels.WorkspaceGroup{
+		ID:               "group-owned",
+		WorkspaceID:      "ws-delete",
+		OwnerTaskID:      "task-1",
+		MaterializedPath: "/tmp/kandev-owned-group",
+		MaterializedKind: orchmodels.WorkspaceGroupKindPlainFolder,
+		OwnedByKandev:    true,
+		CleanupPolicy:    orchmodels.WorkspaceCleanupPolicyDeleteWhenLastMemberArchivedOrDel,
+		CleanupStatus:    orchmodels.WorkspaceCleanupStatusActive,
+	}); err != nil {
+		t.Fatalf("create owned group: %v", err)
+	}
+	if err := groups.AddWorkspaceGroupMember(ctx, "group-owned", "task-1", "owner"); err != nil {
+		t.Fatalf("add group member: %v", err)
+	}
+	sessions := newFakeSessionReader()
+	sessions.sessions["task-1"] = []*models.TaskSession{{ID: "session-1", TaskID: "task-1"}}
+	sessions.sessionsWithRunningExecutor["session-1"] = true
+	cleaner := &fakeWorkspaceCleaner{}
+	svc := NewHandoffService(nil, nil, nil, nil, groups, nil)
+	svc.SetSessionReader(sessions)
+	svc.SetWorkspaceCleaner(cleaner)
+
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		sessions.mu.Lock()
+		defer sessions.mu.Unlock()
+		sessions.sessionsWithRunningExecutor["session-1"] = false
+	}()
+	cleanupCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	if err := svc.CleanupWorkspaceGroups(cleanupCtx, "ws-delete"); err != nil {
+		t.Fatalf("cleanup workspace groups: %v", err)
+	}
+	if len(cleaner.plainFolders) != 1 || cleaner.plainFolders[0] != "/tmp/kandev-owned-group" {
+		t.Fatalf("plain folder cleanups = %#v, want owned group path", cleaner.plainFolders)
+	}
+	if got := groups.cleanupStatuses["group-owned"]; got != orchmodels.WorkspaceCleanupStatusCleaned {
+		t.Fatalf("owned group cleanup status = %q, want cleaned", got)
+	}
+}
+
 // fakeResourceCleaner captures the (taskID, deleteEnvRow) pair delivered
 // to CleanupTaskResources by each cascade invocation. Mirrors
 // fakeEventPublisher above — the same regression class (cascade silently
