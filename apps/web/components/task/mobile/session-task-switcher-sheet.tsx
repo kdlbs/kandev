@@ -1,14 +1,16 @@
 "use client";
 
-import { useMemo, useState, memo } from "react";
+import { useCallback, useMemo, useState, memo } from "react";
 import { IconPlus } from "@tabler/icons-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { Button } from "@kandev/ui/button";
 import { TaskSwitcher } from "../task-switcher";
 import type { TaskSwitcherItem } from "../task-switcher";
+import { SidebarFilterBar } from "../sidebar-filter/sidebar-filter-bar";
 import type { StepDef } from "../task-switcher-context-menu";
 import type { TaskMoveWorkflow } from "../task-move-context-menu";
 import { applyView } from "@/lib/sidebar/apply-view";
+import { useAppStore } from "@/components/state-provider";
 import { useEffectiveSidebarView } from "@/hooks/domains/sidebar/use-effective-sidebar-view";
 import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-prefs";
 import { WorkspaceSwitcher } from "../workspace-switcher";
@@ -56,6 +58,13 @@ function MobileTaskList({
     handleReorderGroup,
     handleReorderSubtasks,
   } = useSidebarTaskPrefs();
+  const toggleSidebarGroupCollapsed = useAppStore((s) => s.toggleSidebarGroupCollapsed);
+  const collapsedSubtaskParents = useAppStore((s) => s.collapsedSubtaskParents);
+  const toggleSubtaskCollapsed = useAppStore((s) => s.toggleSubtaskCollapsed);
+  const handleToggleGroup = useCallback(
+    (groupKey: string) => toggleSidebarGroupCollapsed(view.id, groupKey),
+    [toggleSidebarGroupCollapsed, view.id],
+  );
   const grouped = useMemo(
     () =>
       applyView(tasks, view, {
@@ -72,6 +81,10 @@ function MobileTaskList({
       stepsByWorkflowId={stepsByWorkflowId}
       activeTaskId={activeTaskId}
       selectedTaskId={selectedTaskId}
+      collapsedGroupKeys={view.collapsedGroups}
+      onToggleGroup={handleToggleGroup}
+      collapsedSubtaskParentIds={collapsedSubtaskParents}
+      onToggleSubtasks={toggleSubtaskCollapsed}
       onSelectTask={onSelectTask}
       onArchiveTask={onArchiveTask}
       onDeleteTask={onDeleteTask}
@@ -124,6 +137,8 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
             />
           </div>
         </SheetHeader>
+
+        <SidebarFilterBar />
 
         <div className="flex-1 min-h-0 overflow-y-auto p-2">
           <MobileTaskList
