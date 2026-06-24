@@ -35,7 +35,8 @@ repository or store packages.
   in schema-owning packages. If a new dialect-specific replay case is needed,
   add it to `internal/db` with tests.
 
-Every startup schema owner must have replay coverage:
+Every startup schema owner touched by a schema change must have replay coverage
+in the same PR:
 
 1. Initialize schema on a fresh SQLite database.
 2. Initialize the same schema on the same SQLite database again.
@@ -59,6 +60,9 @@ Every startup schema owner must have replay coverage:
 - Schema tests need an extra same-connection replay step.
 - Postgres replay coverage depends on `KANDEV_TEST_POSTGRES_DSN` being available
   in the environment running the integration tests.
+- Existing startup schema owners that are not touched by this issue may still
+  lack replay tests. Backfill them in focused follow-up work instead of
+  broadening unrelated bug fixes.
 - The current imperative migration style remains; this ADR does not introduce a
   numbered migration framework.
 

@@ -2,6 +2,7 @@ package db
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -24,6 +25,14 @@ func TestIsDuplicateColumnError(t *testing.T) {
 				Code:    postgresDuplicateColumn,
 				Message: `column "branch_slug" of relation "task_session_worktrees" already exists`,
 			},
+			want: true,
+		},
+		{
+			name: "wrapped postgres duplicate column",
+			err: fmt.Errorf("add column: %w", &pgconn.PgError{
+				Code:    postgresDuplicateColumn,
+				Message: `column "branch_slug" of relation "task_session_worktrees" already exists`,
+			}),
 			want: true,
 		},
 		{
@@ -74,6 +83,11 @@ func TestIsAlreadyExistsError(t *testing.T) {
 		{
 			name: "postgres duplicate column",
 			err:  &pgconn.PgError{Code: postgresDuplicateColumn},
+			want: true,
+		},
+		{
+			name: "wrapped postgres duplicate column",
+			err:  fmt.Errorf("add column: %w", &pgconn.PgError{Code: postgresDuplicateColumn}),
 			want: true,
 		},
 		{
