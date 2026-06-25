@@ -113,6 +113,7 @@ function makeSelectionHarness(args: {
   envIds?: Record<string, string>;
   sessions?: Record<string, { id: string; task_id: string }>;
 }) {
+  const listeners: Array<(state: AppState, previousState: AppState) => void> = [];
   const state = {
     tasks: {
       activeTaskId: args.activeTaskId,
@@ -123,14 +124,32 @@ function makeSelectionHarness(args: {
     environmentIdBySessionId: args.envIds ?? {},
     taskSessions: { items: (args.sessions ?? {}) as Record<string, TaskSession> },
   };
+  const snapshot = () =>
+    ({
+      ...state,
+      tasks: { ...state.tasks },
+    }) as unknown as AppState;
+  const notify = (previousState: AppState) => {
+    for (const listener of listeners) {
+      listener(state as unknown as AppState, previousState);
+    }
+  };
   const store = {
     getState: () => state as unknown as AppState,
     setState: vi.fn(),
-    subscribe: vi.fn(),
+    subscribe: vi.fn((listener: (state: AppState, previousState: AppState) => void) => {
+      listeners.push(listener);
+      return () => {
+        const index = listeners.indexOf(listener);
+        if (index >= 0) listeners.splice(index, 1);
+      };
+    }),
   } as unknown as StoreApi<AppState>;
   const setActiveTask = vi.fn((taskId: string) => {
+    const previousState = snapshot();
     state.tasks.activeTaskId = taskId;
     state.tasks.activeSessionId = null;
+    notify(previousState);
   });
   return { state, store, setActiveTask };
 }
@@ -463,6 +482,41 @@ describe("selectTaskWithLayout — external active-task changes", () => {
 
     state.tasks.activeTaskId = OTHER;
     state.tasks.activeSessionId = null;
+    resolveLoad([
+      { id: PENDING_SESSION_ID, task_id: PENDING_TASK_ID, is_primary: true } as TaskSession,
+    ]);
+    await flushTaskSelection();
+
+    expect(switchToSession).not.toHaveBeenCalled();
+    expect(replaceTaskUrl).not.toHaveBeenCalledWith(PENDING_TASK_ID);
+  });
+
+  it("does not apply a pending selection after an external task switch returns to the original task", async () => {
+    const OTHER = "task-other";
+    const switchToSession = vi.fn();
+    const { store, setActiveTask } = makeSelectionHarness({
+      activeTaskId: ORIGINAL_TASK_ID,
+      activeSessionId: ORIGINAL_SESSION_ID,
+      envIds: { [ORIGINAL_SESSION_ID]: "env-original" },
+      sessions: {
+        [PENDING_SESSION_ID]: { id: PENDING_SESSION_ID, task_id: PENDING_TASK_ID },
+        [ORIGINAL_SESSION_ID]: { id: ORIGINAL_SESSION_ID, task_id: ORIGINAL_TASK_ID },
+      },
+    });
+    const { loadTaskSessionsForTask, resolveLoad } = makeDeferredSessionLoader();
+
+    selectTaskWithLayout({
+      taskId: PENDING_TASK_ID,
+      task: { primarySessionId: PENDING_SESSION_ID },
+      store,
+      switchToSession,
+      loadTaskSessionsForTask,
+      setActiveTask,
+      setPreparingTaskId: vi.fn(),
+    });
+
+    setActiveTask(OTHER);
+    setActiveTask(ORIGINAL_TASK_ID);
     resolveLoad([
       { id: PENDING_SESSION_ID, task_id: PENDING_TASK_ID, is_primary: true } as TaskSession,
     ]);

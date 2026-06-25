@@ -178,8 +178,20 @@ export function selectTaskWithLayout(params: {
   const selectionToken = nextTaskSelectionToken();
   const startActiveTaskId = state.tasks.activeTaskId ?? null;
   const oldSessionId = state.tasks.activeSessionId;
+  let activeTaskChangedExternally = false;
+  const unsubscribeSelectionGuard = store.subscribe((current, previous) => {
+    const currentTaskId = current.tasks.activeTaskId ?? null;
+    const previousTaskId = previous.tasks.activeTaskId ?? null;
+    if (currentTaskId !== previousTaskId && currentTaskId !== taskId) {
+      activeTaskChangedExternally = true;
+    }
+  });
+  const disposeSelectionGuard = () => {
+    if (typeof unsubscribeSelectionGuard === "function") unsubscribeSelectionGuard();
+  };
   const selectionWasSuperseded = () => {
     if (taskSelectionWasSuperseded(selectionToken)) return true;
+    if (activeTaskChangedExternally) return true;
     const activeTaskId = store.getState().tasks.activeTaskId ?? null;
     return activeTaskId !== startActiveTaskId && activeTaskId !== taskId;
   };
@@ -201,49 +213,58 @@ export function selectTaskWithLayout(params: {
     });
     const hasEnvId = !!state.environmentIdBySessionId[targetSessionId];
     if (hasEnvId) {
+      disposeSelectionGuard();
       switchToSession(taskId, targetSessionId, oldSessionId);
       loadTaskSessionsForTask(taskId);
       replaceTaskUrl(taskId);
       return;
     }
     loadTaskSessionsForTask(taskId).then((sessions) => {
-      if (selectionWasSuperseded()) return;
-      switchToSession(taskId, resolveLoadedSessionId(sessions, targetSessionId), oldSessionId);
-      replaceTaskUrl(taskId);
+      try {
+        if (selectionWasSuperseded()) return;
+        switchToSession(taskId, resolveLoadedSessionId(sessions, targetSessionId), oldSessionId);
+        replaceTaskUrl(taskId);
+      } finally {
+        disposeSelectionGuard();
+      }
     });
     return;
   }
 
   loadTaskSessionsForTask(taskId).then(async (sessions) => {
-    if (selectionWasSuperseded()) return;
-    const currentOldSessionId = store.getState().tasks.activeSessionId;
-    const primary = sessions.find((s) => s.is_primary);
-    const sessionId = primary?.id ?? sessions[0]?.id ?? null;
-    if (sessionId) {
-      switchToSession(taskId, sessionId, currentOldSessionId);
-      replaceTaskUrl(taskId);
-      return;
-    }
+    try {
+      if (selectionWasSuperseded()) return;
+      const currentOldSessionId = store.getState().tasks.activeSessionId;
+      const primary = sessions.find((s) => s.is_primary);
+      const sessionId = primary?.id ?? sessions[0]?.id ?? null;
+      if (sessionId) {
+        switchToSession(taskId, sessionId, currentOldSessionId);
+        replaceTaskUrl(taskId);
+        return;
+      }
 
-    const switched = await prepareAndSwitchTask(
-      taskId,
-      store,
-      switchToSession,
-      params.setPreparingTaskId,
-      () => !selectionWasSuperseded(),
-    );
-    if (switched) {
-      replaceTaskUrl(taskId);
-      return;
-    }
-    if (selectionWasSuperseded()) return;
+      const switched = await prepareAndSwitchTask(
+        taskId,
+        store,
+        switchToSession,
+        params.setPreparingTaskId,
+        () => !selectionWasSuperseded(),
+      );
+      if (switched) {
+        replaceTaskUrl(taskId);
+        return;
+      }
+      if (selectionWasSuperseded()) return;
 
-    // Failure path: prepareAndSwitchTask already called releaseLayoutToDefault
-    // before awaiting, so the outgoing env's layout is already saved and the
-    // dockview is showing the default layout. A second release here would
-    // overwrite the just-saved env layout with `api.toJSON()` (the default),
-    // losing the user's real layout for the originating task.
-    params.setActiveTask(taskId);
-    replaceTaskUrl(taskId);
+      // Failure path: prepareAndSwitchTask already called releaseLayoutToDefault
+      // before awaiting, so the outgoing env's layout is already saved and the
+      // dockview is showing the default layout. A second release here would
+      // overwrite the just-saved env layout with `api.toJSON()` (the default),
+      // losing the user's real layout for the originating task.
+      params.setActiveTask(taskId);
+      replaceTaskUrl(taskId);
+    } finally {
+      disposeSelectionGuard();
+    }
   });
 }
