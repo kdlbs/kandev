@@ -3,6 +3,9 @@ package github
 import (
 	"context"
 	"errors"
+	"fmt"
+
+	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/watchreset"
 )
@@ -82,8 +85,8 @@ func (s *Service) PreviewResetReviewWatch(ctx context.Context, watchID string) (
 
 // ResetReviewWatch is destructive: cascade-deletes every task previously
 // created by the review watch (including archived), wipes the per-watch
-// dedup rows, and nulls last_polled_at so the next poll re-imports every
-// currently-matching PR. Returns the count of tasks deleted.
+// dedup rows, and then immediately re-runs the watch so currently-matching
+// PRs are published for task creation. Returns the count of tasks deleted.
 func (s *Service) ResetReviewWatch(ctx context.Context, watchID string) (int, error) {
 	if s.store == nil {
 		return 0, errStoreUnavailable
@@ -97,5 +100,20 @@ func (s *Service) ResetReviewWatch(ctx context.Context, watchID string) (int, er
 	res, err := watchreset.Run(ctx,
 		&githubReviewWatchResetter{store: s.store, watchID: watchID},
 		td, s.logger)
-	return res.TasksDeleted, err
+	if err != nil {
+		return res.TasksDeleted, err
+	}
+	watch, err := s.GetReviewWatch(ctx, watchID)
+	if err != nil {
+		return res.TasksDeleted, fmt.Errorf("load review watch after reset: %w", err)
+	}
+	if watch == nil || !watch.Enabled {
+		return res.TasksDeleted, nil
+	}
+	if _, err := s.TriggerReviewWatch(ctx, watch); err != nil {
+		s.logger.Warn("reset review watch: re-import failed",
+			zap.String("watch_id", watchID),
+			zap.Error(err))
+	}
+	return res.TasksDeleted, nil
 }

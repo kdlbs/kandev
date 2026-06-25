@@ -5,8 +5,8 @@ import { test, expect } from "../../fixtures/test-base";
  *   1. Watch creates a task for a mock PR (via trigger).
  *   2. User clicks Reset on the settings page → confirmation dialog shows
  *      the preview count ("delete N task(s)").
- *   3. Confirm → backend cascade-deletes the task, wipes dedup, nulls
- *      last_polled_at; next trigger re-imports the same PR.
+ *   3. Confirm → backend cascade-deletes the task, wipes dedup, and
+ *      immediately re-imports the same PR.
  *
  * The same controller wiring backs Jira / Linear / Sentry / GitHub-issue
  * watches (`watchreset.Run`), so this single spec exercises the shared
@@ -74,13 +74,21 @@ test.describe("GitHub review watch reset", () => {
     expect(reset.status).toBe(200);
     expect(await reset.json()).toMatchObject({ tasksDeleted: 1 });
 
-    // Task is gone from the workspace.
-    const { tasks: afterReset } = await apiClient.listTasks(seedData.workspaceId);
-    expect(afterReset.find((t) => t.title.includes("PR #5101"))).toBeUndefined();
+    // Reset immediately queues the matching PR again, so a replacement task
+    // appears without waiting for a manual trigger or poll tick.
+    await expect
+      .poll(
+        async () => {
+          const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+          return tasks.filter((t) => t.title.includes("PR #5101")).length;
+        },
+        { timeout: 15_000 },
+      )
+      .toBe(1);
 
-    // Watch's polling cursor was cleared so the next poll cycle will
-    // re-evaluate every currently-matching PR. last_polled_at sits on
-    // the watch row exposed by the list endpoint.
+    // Watch's polling cursor reflects the immediate re-check that reset
+    // performed. last_polled_at sits on the watch row exposed by the list
+    // endpoint.
     const listRes = await apiClient.rawRequest(
       "GET",
       `/api/v1/github/watches/review?workspace_id=${seedData.workspaceId}`,
@@ -91,16 +99,12 @@ test.describe("GitHub review watch reset", () => {
     };
     const refreshed = list.watches.find((w) => w.id === watch.id);
     expect(refreshed).toBeDefined();
-    // The Go model marshals *time.Time with omitempty, so a nil cursor is
-    // serialised as either null or omitted — both are valid "cleared" shapes.
-    expect(refreshed!.last_polled_at ?? null).toBeNull();
+    expect(refreshed!.last_polled_at).toBeTruthy();
 
-    // CheckReviewWatch now reports PR #5101 as new again — the dedup
-    // wipe means the periodic poller will publish a NewReviewPR event for
-    // it on the next tick. (The HTTP trigger handler intentionally only
-    // probes; event publishing is the poller's job.)
+    // The reset-triggered re-import already reserved the PR, so a manual
+    // trigger has nothing new to create.
     const trigger = await apiClient.triggerReviewWatch(watch.id);
-    expect(trigger.new_prs).toBe(1);
+    expect(trigger.new_prs).toBe(0);
   });
 
   test("settings page reset flow shows preview count and deletes the task", async ({
@@ -172,8 +176,15 @@ test.describe("GitHub review watch reset", () => {
     // Success toast surfaces the deletion count.
     await expect(testPage.getByText(/deleted 1 task/i)).toBeVisible({ timeout: 10_000 });
 
-    // The task was actually removed.
-    const { tasks } = await apiClient.listTasks(seedData.workspaceId);
-    expect(tasks.find((t) => t.title.includes("PR #5201"))).toBeUndefined();
+    // The matching PR is recreated after the reset clears the old task.
+    await expect
+      .poll(
+        async () => {
+          const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+          return tasks.filter((t) => t.title.includes("PR #5201")).length;
+        },
+        { timeout: 15_000 },
+      )
+      .toBe(1);
   });
 });

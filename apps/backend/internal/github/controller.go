@@ -648,7 +648,7 @@ func (c *Controller) httpTriggerReviewWatch(ctx *gin.Context) {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "review watch not found"})
 		return
 	}
-	newPRs, err := c.service.CheckReviewWatch(ctx.Request.Context(), watch)
+	newPRs, err := c.service.TriggerReviewWatch(ctx.Request.Context(), watch)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

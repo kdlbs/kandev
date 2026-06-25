@@ -65,14 +65,11 @@ func (s *Service) CreateReviewWatch(ctx context.Context, req *CreateReviewWatchR
 
 // initialReviewCheck runs a single poll for a newly created review watch.
 func (s *Service) initialReviewCheck(ctx context.Context, watch *ReviewWatch) {
-	newPRs, err := s.CheckReviewWatch(ctx, watch)
+	newPRs, err := s.TriggerReviewWatch(ctx, watch)
 	if err != nil {
 		s.logger.Debug("initial review check failed",
 			zap.String("watch_id", watch.ID), zap.Error(err))
 		return
-	}
-	for _, pr := range newPRs {
-		s.publishNewReviewPREvent(ctx, watch, pr)
 	}
 	if len(newPRs) > 0 {
 		s.logger.Info("initial review check found PRs",
@@ -269,6 +266,19 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 	watch.LastPolledAt = &now
 	_ = s.store.UpdateReviewWatch(ctx, watch)
 
+	return newPRs, nil
+}
+
+// TriggerReviewWatch checks one watch and publishes events for every newly
+// observed PR so the orchestrator can create the corresponding tasks.
+func (s *Service) TriggerReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*PR, error) {
+	newPRs, err := s.CheckReviewWatch(ctx, watch)
+	if err != nil {
+		return nil, err
+	}
+	for _, pr := range newPRs {
+		s.publishNewReviewPREvent(ctx, watch, pr)
+	}
 	return newPRs, nil
 }
 
@@ -658,14 +668,11 @@ func (s *Service) TriggerAllReviewChecks(ctx context.Context, workspaceID string
 		if !watch.Enabled {
 			continue
 		}
-		newPRs, err := s.CheckReviewWatch(ctx, watch)
+		newPRs, err := s.TriggerReviewWatch(ctx, watch)
 		if err != nil {
 			s.logger.Error("failed to check review watch",
 				zap.String("id", watch.ID), zap.Error(err))
 			continue
-		}
-		for _, pr := range newPRs {
-			s.publishNewReviewPREvent(ctx, watch, pr)
 		}
 		totalNew += len(newPRs)
 	}

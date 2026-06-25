@@ -25,8 +25,8 @@ func (c *Controller) httpPreviewResetReviewWatch(ctx *gin.Context) {
 
 // httpResetReviewWatch executes the destructive reset: cascade-deletes
 // every task previously created by the review watch (including archived),
-// wipes its dedup table, and nulls last_polled_at so the next poll
-// re-imports every currently-matching PR.
+// wipes its dedup table, and immediately re-runs the watch so currently
+// matching PRs are published for task creation.
 func (c *Controller) httpResetReviewWatch(ctx *gin.Context) {
 	id := ctx.Param("id")
 	if !c.requireReviewWatchInWorkspace(ctx, id) {

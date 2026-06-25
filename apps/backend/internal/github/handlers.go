@@ -343,7 +343,7 @@ func wsTriggerReviewWatch(svc *Service, _ *logger.Logger) func(ctx context.Conte
 		if watch == nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "review watch not found", nil)
 		}
-		newPRs, err := svc.CheckReviewWatch(ctx, watch)
+		newPRs, err := svc.TriggerReviewWatch(ctx, watch)
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}

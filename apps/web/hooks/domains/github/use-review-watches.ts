@@ -11,7 +11,7 @@ import {
   previewResetReviewWatch,
   resetReviewWatch,
 } from "@/lib/api/domains/github-api";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStore } from "@/components/state-provider";
 import type { CreateReviewWatchRequest, UpdateReviewWatchRequest } from "@/lib/types/github";
 
 // useReviewWatches has three modes:
@@ -27,10 +27,6 @@ export function useReviewWatches(workspaceId?: string | null) {
   const addWatch = useAppStore((state) => state.addReviewWatch);
   const updateWatch = useAppStore((state) => state.updateReviewWatch);
   const removeWatch = useAppStore((state) => state.removeReviewWatch);
-  // storeApi exposes getState() without subscribing — used in reset() to
-  // read the current watch row outside of the React render cycle so the
-  // callback doesn't need `items` as a dependency.
-  const storeApi = useAppStoreApi();
 
   useEffect(() => {
     if (workspaceId === null || loaded || loading) return;
@@ -86,17 +82,9 @@ export function useReviewWatches(workspaceId?: string | null) {
     return previewResetReviewWatch(id, watchWorkspaceId);
   }, []);
 
-  const reset = useCallback(
-    async (id: string, watchWorkspaceId: string) => {
-      const res = await resetReviewWatch(id, watchWorkspaceId);
-      // Patch the cached watch so the "Last polled" column reflects the
-      // reset immediately without waiting for the next poll tick.
-      const current = storeApi.getState().reviewWatches.items.find((w) => w.id === id);
-      if (current) updateWatch({ ...current, last_polled_at: null });
-      return res;
-    },
-    [storeApi, updateWatch],
-  );
+  const reset = useCallback((id: string, watchWorkspaceId: string) => {
+    return resetReviewWatch(id, watchWorkspaceId);
+  }, []);
 
   return {
     items,

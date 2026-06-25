@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
 // stubClient implements Client with no-op defaults; override fields as needed.
@@ -176,6 +177,144 @@ func setupControllerStoreTest(t *testing.T) (*gin.Engine, *Store) {
 	router := gin.New()
 	ctrl.RegisterHTTPRoutes(router)
 	return router, store
+}
+
+func TestHttpTriggerReviewWatchPublishesNewPREvents(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tmp := t.TempDir()
+	dbConn, err := db.OpenSQLite(filepath.Join(tmp, "github.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = sqlxDB.Close() })
+	store, err := NewStore(sqlxDB, sqlxDB)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	client := NewMockClient()
+	client.AddPR(&PR{
+		Number:     42,
+		Title:      "Review me",
+		HTMLURL:    "https://github.com/acme/widget/pull/42",
+		State:      "open",
+		HeadBranch: "feature/review",
+		BaseBranch: "main",
+		RepoOwner:  "acme",
+		RepoName:   "widget",
+		RequestedReviewers: []RequestedReviewer{
+			{Login: "test-user", Type: "user"},
+		},
+	})
+
+	watch := &ReviewWatch{
+		WorkspaceID:         "ws-1",
+		WorkflowID:          "wf-1",
+		WorkflowStepID:      "step-1",
+		Repos:               []RepoFilter{{Owner: "acme", Name: "widget"}},
+		ReviewScope:         ReviewScopeUserAndTeams,
+		Enabled:             true,
+		PollIntervalSeconds: defaultWatchPollIntervalSec,
+		CleanupPolicy:       CleanupPolicyNever,
+	}
+	if err := store.CreateReviewWatch(context.Background(), watch); err != nil {
+		t.Fatalf("create review watch: %v", err)
+	}
+
+	log := newControllerTestLogger()
+	eb := &mockEventBus{}
+	svc := NewService(client, "pat", nil, store, eb, log)
+	router := gin.New()
+	NewController(svc, log).RegisterHTTPRoutes(router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/github/watches/review/"+watch.ID+"/trigger", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if got := eb.publishedCount(); got != 1 {
+		t.Fatalf("published events = %d, want 1", got)
+	}
+}
+
+type noopCascadeTaskDeleter struct{}
+
+func (noopCascadeTaskDeleter) DeleteTaskTree(
+	context.Context,
+	string,
+	bool,
+) (*taskservice.CascadeOutcome, error) {
+	return &taskservice.CascadeOutcome{}, nil
+}
+
+func TestResetReviewWatchPublishesNewPREvents(t *testing.T) {
+	tmp := t.TempDir()
+	dbConn, err := db.OpenSQLite(filepath.Join(tmp, "github.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = sqlxDB.Close() })
+	store, err := NewStore(sqlxDB, sqlxDB)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	client := NewMockClient()
+	client.AddPR(&PR{
+		Number:     42,
+		Title:      "Review me again",
+		HTMLURL:    "https://github.com/acme/widget/pull/42",
+		State:      "open",
+		HeadBranch: "feature/review-again",
+		BaseBranch: "main",
+		RepoOwner:  "acme",
+		RepoName:   "widget",
+		RequestedReviewers: []RequestedReviewer{
+			{Login: "test-user", Type: "user"},
+		},
+	})
+
+	watch := &ReviewWatch{
+		WorkspaceID:         "ws-1",
+		WorkflowID:          "wf-1",
+		WorkflowStepID:      "step-1",
+		Repos:               []RepoFilter{{Owner: "acme", Name: "widget"}},
+		ReviewScope:         ReviewScopeUserAndTeams,
+		Enabled:             true,
+		PollIntervalSeconds: defaultWatchPollIntervalSec,
+		CleanupPolicy:       CleanupPolicyNever,
+	}
+	if err := store.CreateReviewWatch(context.Background(), watch); err != nil {
+		t.Fatalf("create review watch: %v", err)
+	}
+	if err := store.CreateReviewPRTask(context.Background(), &ReviewPRTask{
+		ReviewWatchID: watch.ID,
+		RepoOwner:     "acme",
+		RepoName:      "widget",
+		PRNumber:      42,
+		PRURL:         "https://github.com/acme/widget/pull/42",
+		TaskID:        "task-old",
+	}); err != nil {
+		t.Fatalf("create review PR task: %v", err)
+	}
+
+	log := newControllerTestLogger()
+	eb := &mockEventBus{}
+	svc := NewService(client, "pat", nil, store, eb, log)
+	svc.SetCascadeTaskDeleter(noopCascadeTaskDeleter{})
+
+	deleted, err := svc.ResetReviewWatch(context.Background(), watch.ID)
+	if err != nil {
+		t.Fatalf("reset review watch: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("deleted = %d, want 1", deleted)
+	}
+	if got := eb.publishedCount(); got != 1 {
+		t.Fatalf("published events = %d, want 1", got)
+	}
 }
 
 func TestHttpLinkTaskIssue_SuccessAndInvalidJSON(t *testing.T) {

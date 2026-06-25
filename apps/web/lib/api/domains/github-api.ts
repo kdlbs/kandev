@@ -298,8 +298,8 @@ export async function previewResetReviewWatch(
 }
 
 // resetReviewWatch deletes every task previously created by the review
-// watch (including archived), wipes its dedup table, and nulls
-// last_polled_at so the next poll re-imports every currently-matching PR.
+// watch (including archived), wipes its dedup table, and immediately
+// re-runs the watch so currently-matching PRs are queued for task creation.
 export async function resetReviewWatch(
   id: string,
   workspaceId: string,
