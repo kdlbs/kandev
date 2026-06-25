@@ -3,7 +3,6 @@ package github
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"go.uber.org/zap"
 
@@ -103,19 +102,21 @@ func (s *Service) ResetReviewWatch(ctx context.Context, watchID string) (int, er
 	if err != nil {
 		return res.TasksDeleted, err
 	}
-	runCtx := context.Background()
-	watch, err := s.GetReviewWatch(runCtx, watchID)
-	if err != nil {
-		return res.TasksDeleted, fmt.Errorf("load review watch after reset: %w", err)
-	}
-	if watch == nil || !watch.Enabled {
-		return res.TasksDeleted, nil
-	}
-	go s.reimportReviewWatchAfterReset(runCtx, watch)
+	go s.reimportReviewWatchAfterReset(context.Background(), watchID)
 	return res.TasksDeleted, nil
 }
 
-func (s *Service) reimportReviewWatchAfterReset(ctx context.Context, watch *ReviewWatch) {
+func (s *Service) reimportReviewWatchAfterReset(ctx context.Context, watchID string) {
+	watch, err := s.GetReviewWatch(ctx, watchID)
+	if err != nil {
+		s.logger.Warn("reset review watch: could not load watch for re-import",
+			zap.String("watch_id", watchID),
+			zap.Error(err))
+		return
+	}
+	if watch == nil || !watch.Enabled {
+		return
+	}
 	if _, err := s.TriggerReviewWatch(ctx, watch); err != nil {
 		s.logger.Warn("reset review watch: re-import failed",
 			zap.String("watch_id", watch.ID),

@@ -82,9 +82,19 @@ export function useReviewWatches(workspaceId?: string | null) {
     return previewResetReviewWatch(id, watchWorkspaceId);
   }, []);
 
-  const reset = useCallback((id: string, watchWorkspaceId: string) => {
-    return resetReviewWatch(id, watchWorkspaceId);
-  }, []);
+  const reset = useCallback(
+    async (id: string, watchWorkspaceId: string) => {
+      const result = await resetReviewWatch(id, watchWorkspaceId);
+      try {
+        const response = await listReviewWatches(workspaceId ?? undefined, { cache: "no-store" });
+        setReviewWatches(response?.watches ?? []);
+      } catch {
+        // Reset succeeded; a stale settings table is less harmful than failing the action.
+      }
+      return result;
+    },
+    [setReviewWatches, workspaceId],
+  );
 
   return {
     items,
