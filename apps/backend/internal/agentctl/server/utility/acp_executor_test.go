@@ -414,8 +414,8 @@ func TestRemoveEnvEntry(t *testing.T) {
 }
 
 func TestSanitizeEnvForAgent(t *testing.T) {
-	// 核心 case：strip 掉列出的 var、保留其余 var。
-	// 覆盖 RemoveEnvEntry + sanitizeEnvForAgent 的主路径。
+	// Core case: strip listed vars while keeping the rest. This covers the
+	// main RemoveEnvEntry + sanitizeEnvForAgent path.
 	t.Setenv("ACP_BACKEND", "windsurf")
 	t.Setenv("TEST_KEEP_ME", "yes")
 

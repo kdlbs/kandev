@@ -169,8 +169,8 @@ func TestNewACPAgents_AllCommandSurfaces(t *testing.T) {
 			}
 			assertArgvEqual(t, "Runtime.Cmd", rt.Cmd.Args(), tc.spec.expectedArgv)
 
-			// StripEnv 是持久会话路径的唯一真相源（RuntimeConfig.StripEnv）；
-			// inference 路径从此派生，不再独立断言。
+			// RuntimeConfig.StripEnv is the single source of truth for the
+			// persistent session path; inference derives from it separately.
 			if tc.spec.stripEnv != nil {
 				if !slices.Equal(rt.StripEnv, tc.spec.stripEnv) {
 					t.Errorf("Runtime.StripEnv = %v, want %v", rt.StripEnv, tc.spec.stripEnv)

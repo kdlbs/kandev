@@ -46,8 +46,8 @@ func (m *Manager) ExecuteInferencePrompt(ctx context.Context, sessionID, agentID
 		return nil, fmt.Errorf("agentctl client not available for session %s", sessionID)
 	}
 
-	// Build request with inference config. StripEnv 从 Runtime().StripEnv
-	// 派生（agents.StripEnvFor），InferenceConfig 不再独立声明。
+	// Build request with inference config. StripEnv is derived from
+	// Runtime().StripEnv via agents.StripEnvFor, not declared separately.
 	req := &utility.PromptRequest{
 		Prompt:  prompt,
 		AgentID: agentID,
