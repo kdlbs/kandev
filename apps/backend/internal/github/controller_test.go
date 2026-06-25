@@ -239,6 +239,20 @@ func TestHttpTriggerReviewWatchPublishesNewPREvents(t *testing.T) {
 	}
 }
 
+func waitForPublishedCount(t *testing.T, eb *mockEventBus, want int) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for {
+		if got := eb.publishedCount(); got == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("published events = %d, want %d", eb.publishedCount(), want)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 type noopCascadeTaskDeleter struct{}
 
 func (noopCascadeTaskDeleter) DeleteTaskTree(
@@ -312,9 +326,7 @@ func TestResetReviewWatchPublishesNewPREvents(t *testing.T) {
 	if deleted != 1 {
 		t.Fatalf("deleted = %d, want 1", deleted)
 	}
-	if got := eb.publishedCount(); got != 1 {
-		t.Fatalf("published events = %d, want 1", got)
-	}
+	waitForPublishedCount(t, eb, 1)
 }
 
 func TestHttpLinkTaskIssue_SuccessAndInvalidJSON(t *testing.T) {

@@ -5,12 +5,10 @@ import { test, expect } from "../../fixtures/test-base";
  *   1. Watch creates a task for a mock PR (via trigger).
  *   2. User clicks Reset on the settings page → confirmation dialog shows
  *      the preview count ("delete N task(s)").
- *   3. Confirm → backend cascade-deletes the task, wipes dedup, and
- *      immediately re-imports the same PR.
+ *   3. Confirm → backend cascade-deletes the task, wipes dedup, and queues
+ *      the same PR for re-import.
  *
- * The same controller wiring backs Jira / Linear / Sentry / GitHub-issue
- * watches (`watchreset.Run`), so this single spec exercises the shared
- * orchestration end-to-end. Per-integration store coverage lives in the
+ * Store-level reset coverage for the shared `watchreset.Run` flow lives in
  * Go unit tests.
  */
 test.describe("GitHub review watch reset", () => {
@@ -74,7 +72,7 @@ test.describe("GitHub review watch reset", () => {
     expect(reset.status).toBe(200);
     expect(await reset.json()).toMatchObject({ tasksDeleted: 1 });
 
-    // Reset immediately queues the matching PR again, so a replacement task
+    // Reset queues the matching PR again, so a replacement task
     // appears without waiting for a manual trigger or poll tick.
     await expect
       .poll(
@@ -86,9 +84,8 @@ test.describe("GitHub review watch reset", () => {
       )
       .toBe(1);
 
-    // Watch's polling cursor reflects the immediate re-check that reset
-    // performed. last_polled_at sits on the watch row exposed by the list
-    // endpoint.
+    // Watch's polling cursor reflects the re-check that reset scheduled.
+    // last_polled_at sits on the watch row exposed by the list endpoint.
     const listRes = await apiClient.rawRequest(
       "GET",
       `/api/v1/github/watches/review?workspace_id=${seedData.workspaceId}`,

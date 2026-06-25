@@ -85,7 +85,7 @@ func (s *Service) PreviewResetReviewWatch(ctx context.Context, watchID string) (
 
 // ResetReviewWatch is destructive: cascade-deletes every task previously
 // created by the review watch (including archived), wipes the per-watch
-// dedup rows, and then immediately re-runs the watch so currently-matching
+// dedup rows, and then schedules the watch to re-run so currently-matching
 // PRs are published for task creation. Returns the count of tasks deleted.
 func (s *Service) ResetReviewWatch(ctx context.Context, watchID string) (int, error) {
 	if s.store == nil {
@@ -110,10 +110,14 @@ func (s *Service) ResetReviewWatch(ctx context.Context, watchID string) (int, er
 	if watch == nil || !watch.Enabled {
 		return res.TasksDeleted, nil
 	}
+	go s.reimportReviewWatchAfterReset(context.Background(), watch)
+	return res.TasksDeleted, nil
+}
+
+func (s *Service) reimportReviewWatchAfterReset(ctx context.Context, watch *ReviewWatch) {
 	if _, err := s.TriggerReviewWatch(ctx, watch); err != nil {
 		s.logger.Warn("reset review watch: re-import failed",
-			zap.String("watch_id", watchID),
+			zap.String("watch_id", watch.ID),
 			zap.Error(err))
 	}
-	return res.TasksDeleted, nil
 }
