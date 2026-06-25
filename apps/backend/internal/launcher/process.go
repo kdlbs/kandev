@@ -15,6 +15,7 @@ import (
 
 const capturedOutputLimit = 64 * 1024
 const managedProcessShutdownGrace = 40 * time.Second
+const managedProcessForceKillWait = 2 * time.Second
 
 var launcherShutdownDebug atomic.Bool
 var launcherStatusOutput io.Writer = os.Stderr
@@ -104,6 +105,25 @@ func (s *processSupervisor) runShutdown(reason string) {
 	shutdownDebugf("launcher shutdown complete reason=%q", reason)
 }
 
+func (s *processSupervisor) forceKillAll(reason string) []managedProcessShutdownResult {
+	s.mu.Lock()
+	children := append([]*managedProcess(nil), s.children...)
+	s.mu.Unlock()
+	shutdownDebugf("launcher force kill begin reason=%q launcher_pid=%d children=%d", reason, os.Getpid(), len(children))
+	results := make([]managedProcessShutdownResult, len(children))
+	var wg sync.WaitGroup
+	for i, child := range children {
+		wg.Add(1)
+		go func(i int, child *managedProcess) {
+			defer wg.Done()
+			results[i] = child.forceKill(reason)
+		}(i, child)
+	}
+	wg.Wait()
+	shutdownDebugf("launcher force kill complete reason=%q", reason)
+	return results
+}
+
 func (s *processSupervisor) attachSignals() {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
@@ -119,7 +139,11 @@ func (s *processSupervisor) attachSignals() {
 		select {
 		case nextSig := <-ch:
 			shutdownDebugf("launcher received signal during shutdown=%s launcher_pid=%d", nextSig.String(), os.Getpid())
+			forceStart := time.Now()
 			launcherInfof("forced shutdown after second signal (signal=%s)", nextSig.String())
+			results := s.forceKillAll("second signal " + nextSig.String())
+			logForcedShutdownComplete(time.Since(forceStart), results)
+			signal.Stop(ch)
 			launcherExit(1)
 		case <-shutdownDone:
 			signal.Stop(ch)
@@ -321,10 +345,62 @@ func (p *managedProcess) kill() managedProcessShutdownResult {
 	return result
 }
 
+func (p *managedProcess) forceKill(reason string) managedProcessShutdownResult {
+	start := time.Now()
+	result := managedProcessShutdownResult{label: p.label}
+	if p.cmd.Process == nil {
+		shutdownDebugf("managed process force kill skipped: process nil")
+		result.err = fmt.Errorf("process is nil")
+		return result
+	}
+	pid := p.cmd.Process.Pid
+	result.pid = pid
+	select {
+	case <-p.done:
+		result.duration = time.Since(start)
+		result.graceful = true
+		shutdownDebugf("managed process force kill skipped; already exited label=%q pid=%d reason=%q", p.label, pid, reason)
+		return result
+	default:
+	}
+	shutdownDebugf("managed process group SIGKILL requested label=%q pgid=%d reason=%q", p.label, pid, reason)
+	result.forceKilled = true
+	if err := killManagedProcessGroup(pid); err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			result.forceKilled = false
+			result.graceful = true
+			result.duration = time.Since(start)
+			shutdownDebugf("managed process group already gone before force kill label=%q pid=%d", p.label, pid)
+			return result
+		}
+		shutdownDebugf("managed process group SIGKILL failed pid=%d err=%v; killing process", pid, err)
+		shutdownDebugf("managed process SIGKILL requested label=%q pid=%d reason=%q", p.label, pid, "force_kill_group_failed")
+		_ = p.cmd.Process.Kill()
+		result.err = err
+	}
+	select {
+	case <-p.done:
+		result.duration = time.Since(start)
+		shutdownDebugf("managed process force killed pid=%d", pid)
+		return result
+	case <-time.After(managedProcessForceKillWait):
+		result.duration = time.Since(start)
+		result.err = errors.Join(result.err, fmt.Errorf("timed out waiting for process %d after SIGKILL", pid))
+		shutdownDebugf("managed process force kill wait timed out pid=%d", pid)
+		return result
+	}
+}
+
 func waitForAppExit(supervisor *processSupervisor, backend *restartableBackend) int {
 	code := <-backend.exitCh
 	supervisor.shutdown("backend exit")
 	return code
+}
+
+func logForcedShutdownComplete(duration time.Duration, results []managedProcessShutdownResult) {
+	summary := summarizeShutdown(results)
+	launcherInfof("forced shutdown complete (duration=%s, graceful=%d, force_killed=%d, failed=%d)",
+		duration.Round(time.Millisecond), summary.graceful, summary.forceKilled, summary.failed)
 }
 
 func logShutdownComplete(duration time.Duration, results []managedProcessShutdownResult) {

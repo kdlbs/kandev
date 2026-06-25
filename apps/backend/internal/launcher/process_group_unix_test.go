@@ -3,10 +3,12 @@
 package launcher
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -73,6 +75,53 @@ func TestManagedProcessKillSendsGracefulSignalBeforeForceKill(t *testing.T) {
 	}
 }
 
+func TestAttachSignalsSingleSignalGracefulShutdown(t *testing.T) {
+	tempDir := t.TempDir()
+	termFile := filepath.Join(tempDir, "term")
+	proc := startManagedSignalHelper(t, termFile, "")
+
+	exitCh, output := captureLauncherExit(t)
+	supervisor := newSupervisor()
+	supervisor.add(proc)
+	supervisor.attachSignals()
+
+	sendLauncherTestSignal(t, os.Interrupt)
+
+	waitForLauncherExitCode(t, exitCh, 0)
+	waitForManagedProcessDone(t, proc, 5*time.Second)
+	if raw, err := os.ReadFile(termFile); err != nil || string(raw) != "term" {
+		t.Fatalf("SIGTERM marker = %q, %v; want term, nil", string(raw), err)
+	}
+	if got := output.String(); !strings.Contains(got, "graceful shutdown complete") {
+		t.Fatalf("shutdown output missing graceful completion: %q", got)
+	}
+}
+
+func TestAttachSignalsSecondSignalForceKillsChildren(t *testing.T) {
+	tempDir := t.TempDir()
+	termFile := filepath.Join(tempDir, "term")
+	proc := startManagedSignalHelper(t, termFile, "hold-after-term")
+
+	exitCh, output := captureLauncherExit(t)
+	supervisor := newSupervisor()
+	supervisor.add(proc)
+	supervisor.attachSignals()
+
+	sendLauncherTestSignal(t, os.Interrupt)
+	waitForFile(t, termFile)
+	sendLauncherTestSignal(t, os.Interrupt)
+
+	waitForLauncherExitCode(t, exitCh, 1)
+	waitForManagedProcessDone(t, proc, 5*time.Second)
+	got := output.String()
+	if !strings.Contains(got, "forced shutdown after second signal") {
+		t.Fatalf("shutdown output missing forced shutdown start: %q", got)
+	}
+	if !strings.Contains(got, "forced shutdown complete") {
+		t.Fatalf("shutdown output missing forced shutdown completion: %q", got)
+	}
+}
+
 func TestLauncherSignalHelper(t *testing.T) {
 	if os.Getenv(launcherSignalHelperEnv) != "1" {
 		return
@@ -94,7 +143,101 @@ func TestLauncherSignalHelper(t *testing.T) {
 	if err := os.WriteFile(termFile, []byte("term"), 0o600); err != nil {
 		os.Exit(3)
 	}
+	if os.Getenv("KANDEV_LAUNCHER_SIGNAL_HELPER_MODE") == "hold-after-term" {
+		for {
+			time.Sleep(time.Hour)
+		}
+	}
 	os.Exit(0)
+}
+
+func startManagedSignalHelper(t *testing.T, termFile string, mode string) *managedProcess {
+	t.Helper()
+	readyFile := filepath.Join(t.TempDir(), "ready")
+	cmd := exec.Command(os.Args[0], "-test.run=TestLauncherSignalHelper")
+	cmd.Env = append(os.Environ(),
+		launcherSignalHelperEnv+"=1",
+		"KANDEV_LAUNCHER_SIGNAL_HELPER_READY_FILE="+readyFile,
+		"KANDEV_LAUNCHER_SIGNAL_HELPER_FILE="+termFile,
+		"KANDEV_LAUNCHER_SIGNAL_HELPER_MODE="+mode,
+	)
+	configureManagedProcess(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start fixture: %v", err)
+	}
+	proc := &managedProcess{label: "fixture", cmd: cmd, done: make(chan struct{})}
+	go func() {
+		err := cmd.Wait()
+		code := 0
+		if err != nil {
+			code = 1
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				code = exitErr.ExitCode()
+			}
+		}
+		proc.mu.Lock()
+		proc.exitCode = code
+		proc.exited = true
+		proc.mu.Unlock()
+		close(proc.done)
+	}()
+	t.Cleanup(func() {
+		if exited, _ := proc.Exited(); !exited {
+			_ = killManagedProcessGroup(cmd.Process.Pid)
+			waitForManagedProcessDone(t, proc, 5*time.Second)
+		}
+	})
+	waitForFile(t, readyFile)
+	return proc
+}
+
+func captureLauncherExit(t *testing.T) (chan int, *bytes.Buffer) {
+	t.Helper()
+	exitCh := make(chan int, 1)
+	var output bytes.Buffer
+	oldExit := launcherExit
+	oldStatusOutput := launcherStatusOutput
+	launcherExit = func(code int) {
+		exitCh <- code
+	}
+	launcherStatusOutput = &output
+	t.Cleanup(func() {
+		launcherExit = oldExit
+		launcherStatusOutput = oldStatusOutput
+	})
+	return exitCh, &output
+}
+
+func sendLauncherTestSignal(t *testing.T, sig os.Signal) {
+	t.Helper()
+	proc, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		t.Fatalf("find current process: %v", err)
+	}
+	if err := proc.Signal(sig); err != nil {
+		t.Fatalf("send signal %v: %v", sig, err)
+	}
+}
+
+func waitForLauncherExitCode(t *testing.T, exitCh <-chan int, want int) {
+	t.Helper()
+	select {
+	case got := <-exitCh:
+		if got != want {
+			t.Fatalf("launcher exit code = %d, want %d", got, want)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for launcher exit code %d", want)
+	}
+}
+
+func waitForManagedProcessDone(t *testing.T, proc *managedProcess, timeout time.Duration) {
+	t.Helper()
+	select {
+	case <-proc.done:
+	case <-time.After(timeout):
+		t.Fatalf("timed out waiting for managed process pid=%d", proc.cmd.Process.Pid)
+	}
 }
 
 func waitForFile(t *testing.T, path string) {
