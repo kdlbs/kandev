@@ -21,6 +21,10 @@ import (
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
+	workflowcontroller "github.com/kandev/kandev/internal/workflow/controller"
+	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
+	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -62,6 +66,43 @@ func newTestTaskService(t *testing.T) (*service.Service, *sqliterepo.Repository)
 		Reviews:      repo,
 	}, eventBus, log, service.RepositoryDiscoveryConfig{})
 	return svc, repo
+}
+
+func newTestTaskServiceWithWorkflow(t *testing.T) (*service.Service, *sqliterepo.Repository, *workflowcontroller.Controller, *workflowrepo.Repository) {
+	t.Helper()
+	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
+	require.NoError(t, err)
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	repo, cleanup, err := repository.Provide(sqlxDB, sqlxDB, nil)
+	require.NoError(t, err)
+	workflowRepo, err := workflowrepo.NewWithDB(sqlxDB, sqlxDB, testLogger(t))
+	require.NoError(t, err)
+	_, err = worktree.NewSQLiteStore(sqlxDB, sqlxDB)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = sqlxDB.Close()
+		_ = cleanup()
+	})
+
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	eventBus := bus.NewMemoryEventBus(log)
+	t.Cleanup(func() { eventBus.Close() })
+	svc := service.NewService(service.Repos{
+		Workspaces:   repo,
+		Tasks:        repo,
+		TaskRepos:    repo,
+		Workflows:    repo,
+		Messages:     repo,
+		Turns:        repo,
+		Sessions:     repo,
+		GitSnapshots: repo,
+		RepoEntities: repo,
+		Executors:    repo,
+		Environments: repo,
+		Reviews:      repo,
+	}, eventBus, log, service.RepositoryDiscoveryConfig{})
+	workflowSvc := workflowservice.NewService(workflowRepo, log)
+	return svc, repo, workflowcontroller.NewController(workflowSvc), workflowRepo
 }
 
 func seedMCPHandlerSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID string, state models.TaskSessionState) {
@@ -335,6 +376,100 @@ func TestHandleCreateTask_StartAgentUsesWorkspaceDefaultAgentProfile(t *testing.
 	}
 	req := launcher.getRequest()
 	assert.Equal(t, defaultProfileID, req.AgentProfileID)
+}
+
+func TestResolveMCPAutoStartConfig_UsesWorkflowStepAgentProfile(t *testing.T) {
+	svc, _, workflowCtrl, workflowRepo := newTestTaskServiceWithWorkflow(t)
+	ctx := context.Background()
+	workspace, workflow := defaultWorkspaceAndWorkflow(t, ctx, svc)
+	step := seedWorkflowStep(t, ctx, workflowRepo, &workflowmodels.WorkflowStep{
+		WorkflowID:      workflow.ID,
+		Name:            "Implement",
+		Position:        1,
+		AgentProfileID:  "step-profile",
+		AllowManualMove: true,
+	})
+	h := &Handlers{taskSvc: svc, workflowCtrl: workflowCtrl, logger: testLogger(t).WithFields()}
+
+	config := h.resolveMCPAutoStartConfig(ctx, &models.Task{
+		WorkspaceID:    workspace.ID,
+		WorkflowID:     workflow.ID,
+		WorkflowStepID: step.ID,
+	}, "", "", "")
+
+	assert.Equal(t, "step-profile", config.AgentProfileID)
+}
+
+func TestResolveMCPAutoStartConfig_UsesLowestPositionStepAgentProfileWhenNoStartStep(t *testing.T) {
+	svc, _, workflowCtrl, workflowRepo := newTestTaskServiceWithWorkflow(t)
+	ctx := context.Background()
+	workspace, workflow := defaultWorkspaceAndWorkflow(t, ctx, svc)
+	seedWorkflowStep(t, ctx, workflowRepo, &workflowmodels.WorkflowStep{
+		WorkflowID:      workflow.ID,
+		Name:            "Later",
+		Position:        10,
+		AgentProfileID:  "later-profile",
+		AllowManualMove: true,
+	})
+	seedWorkflowStep(t, ctx, workflowRepo, &workflowmodels.WorkflowStep{
+		WorkflowID:      workflow.ID,
+		Name:            "First",
+		Position:        2,
+		AgentProfileID:  "first-profile",
+		AllowManualMove: true,
+	})
+	h := &Handlers{taskSvc: svc, workflowCtrl: workflowCtrl, logger: testLogger(t).WithFields()}
+
+	config := h.resolveMCPAutoStartConfig(ctx, &models.Task{
+		WorkspaceID: workspace.ID,
+		WorkflowID:  workflow.ID,
+	}, "", "", "")
+
+	assert.Equal(t, "first-profile", config.AgentProfileID)
+}
+
+func TestResolveMCPAutoStartConfig_FallsBackToWorkflowAgentProfile(t *testing.T) {
+	svc, _, workflowCtrl, workflowRepo := newTestTaskServiceWithWorkflow(t)
+	ctx := context.Background()
+	workspace, workflow := defaultWorkspaceAndWorkflow(t, ctx, svc)
+	workflowProfileID := "workflow-profile"
+	_, err := svc.UpdateWorkflow(ctx, workflow.ID, &service.UpdateWorkflowRequest{
+		AgentProfileID: &workflowProfileID,
+	})
+	require.NoError(t, err)
+	seedWorkflowStep(t, ctx, workflowRepo, &workflowmodels.WorkflowStep{
+		WorkflowID:      workflow.ID,
+		Name:            "Unassigned",
+		Position:        1,
+		AllowManualMove: true,
+	})
+	h := &Handlers{taskSvc: svc, workflowCtrl: workflowCtrl, logger: testLogger(t).WithFields()}
+
+	config := h.resolveMCPAutoStartConfig(ctx, &models.Task{
+		WorkspaceID: workspace.ID,
+		WorkflowID:  workflow.ID,
+	}, "", "", "")
+
+	assert.Equal(t, workflowProfileID, config.AgentProfileID)
+}
+
+func defaultWorkspaceAndWorkflow(t *testing.T, ctx context.Context, svc *service.Service) (*models.Workspace, *models.Workflow) {
+	t.Helper()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	workflow, err := svc.CreateWorkflow(ctx, &service.CreateWorkflowRequest{
+		WorkspaceID: workspaces[0].ID,
+		Name:        "Workflow under test",
+	})
+	require.NoError(t, err)
+	return workspaces[0], workflow
+}
+
+func seedWorkflowStep(t *testing.T, ctx context.Context, repo *workflowrepo.Repository, step *workflowmodels.WorkflowStep) *workflowmodels.WorkflowStep {
+	t.Helper()
+	require.NoError(t, repo.CreateStep(ctx, step))
+	return step
 }
 
 // mockSessionLauncher captures LaunchSession calls for testing autoStartTask.
