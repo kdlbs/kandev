@@ -194,6 +194,7 @@ export const ExecutorSelector = memo(function ExecutorSelector({
   disabled,
   placeholder,
   triggerClassName,
+  popoverPortal,
 }: ExecutorSelectorProps) {
   return (
     <Combobox
@@ -206,6 +207,7 @@ export const ExecutorSelector = memo(function ExecutorSelector({
       dropdownLabel="Executor"
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
       triggerClassName={triggerClassName}
+      popoverPortal={popoverPortal}
       showSearch={false}
     />
   );

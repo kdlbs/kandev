@@ -79,16 +79,18 @@ export function useRepositoryAutoSelectEffect(
       pickId = repositories[0].id;
       source = "single-workspace-repo";
     }
-    selectionDebug("repository-autopick", {
-      workspace_id: workspaceId,
-      local_storage_id: lastUsedRepoId ?? "-",
-      local_storage_valid: Boolean(
-        lastUsedRepoId && repositories.some((r: Repository) => r.id === lastUsedRepoId),
-      ),
-      repo_count: repositories.length,
-      source,
-      pick: pickId ?? "-",
-    });
+    if (isDebug()) {
+      selectionDebug("repository-autopick", {
+        workspace_id: workspaceId,
+        local_storage_id: lastUsedRepoId ?? "-",
+        local_storage_valid: Boolean(
+          lastUsedRepoId && repositories.some((r: Repository) => r.id === lastUsedRepoId),
+        ),
+        repo_count: repositories.length,
+        source,
+        pick: pickId ?? "-",
+      });
+    }
     // Use the functional setter so the deferred microtask sees fresh state.
     // Without this, a sibling effect (resetTaskForm / useLockedFieldSync) that
     // seeds rows from `initialValues.repositoryId` synchronously races with
@@ -97,10 +99,12 @@ export function useRepositoryAutoSelectEffect(
     void Promise.resolve().then(() => {
       setRepositories((prev) => {
         if (prev.length > 0) {
-          selectionDebug("repository-autopick-skip", {
-            reason: "rows-seeded-before-microtask",
-            row_count: prev.length,
-          });
+          if (isDebug()) {
+            selectionDebug("repository-autopick-skip", {
+              reason: "rows-seeded-before-microtask",
+              row_count: prev.length,
+            });
+          }
           return prev;
         }
         return [
@@ -356,14 +360,16 @@ function useExecutorIdAutopickEffect({
       noRepository,
       preferLocalExecutor,
     );
-    selectionDebug("executor-autopick", {
-      current: "-",
-      pick: pick ?? "-",
-      executor_count: executors.length,
-      workspace_default: workspaceDefaults?.default_executor_id ?? "-",
-      no_repository: noRepository,
-      prefer_local_executor: preferLocalExecutor,
-    });
+    if (isDebug()) {
+      selectionDebug("executor-autopick", {
+        current: "-",
+        pick: pick ?? "-",
+        executor_count: executors.length,
+        workspace_default: workspaceDefaults?.default_executor_id ?? "-",
+        no_repository: noRepository,
+        prefer_local_executor: preferLocalExecutor,
+      });
+    }
     if (pick) void Promise.resolve().then(() => setExecutorId(pick));
   }, [
     open,
@@ -467,10 +473,12 @@ export function useDefaultSelectionsEffect(
     for (const executor of executors) {
       const match = (executor.profiles ?? []).find((p) => p.id === executorProfileId);
       if (match) {
-        selectionDebug("executor-derived-from-profile", {
-          executor_profile_id: executorProfileId,
-          executor_id: executor.id,
-        });
+        if (isDebug()) {
+          selectionDebug("executor-derived-from-profile", {
+            executor_profile_id: executorProfileId,
+            executor_id: executor.id,
+          });
+        }
         void Promise.resolve().then(() => setExecutorId(executor.id));
         return;
       }
