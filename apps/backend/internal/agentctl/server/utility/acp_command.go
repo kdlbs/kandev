@@ -1,6 +1,7 @@
 package utility
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"time"
@@ -32,7 +33,7 @@ func configureACPCommand(cmd *exec.Cmd, log *zap.Logger) {
 	}
 }
 
-func cleanupACPCommand(cmd *exec.Cmd, log *zap.Logger) {
+func cleanupACPCommand(ctx context.Context, cmd *exec.Cmd, log *zap.Logger) {
 	log = acpCommandLogger(log)
 	if cmd == nil {
 		log.Debug("ACP command cleanup skipped", zap.String("reason", "nil_command"))
@@ -62,9 +63,9 @@ func cleanupACPCommand(cmd *exec.Cmd, log *zap.Logger) {
 		waitCh <- cmd.Wait()
 	}()
 
-	if waitForACPCommand(waitCh, acpCommandTerminateGrace) {
+	if waitForACPCommand(ctx, waitCh, acpCommandTerminateGrace) {
 		log.Debug("ACP command exited after SIGTERM", zap.Int("pid", pid))
-		reapACPProcessGroup(pid, log)
+		reapACPProcessGroup(ctx, pid, log)
 		return
 	}
 
@@ -81,22 +82,24 @@ func cleanupACPCommand(cmd *exec.Cmd, log *zap.Logger) {
 			zap.String("reason", "process_group_kill_failed"))
 		_ = cmd.Process.Kill()
 	}
-	_ = waitForACPCommand(waitCh, acpCommandForceKillGrace)
-	reapACPProcessGroup(pid, log)
+	_ = waitForACPCommand(ctx, waitCh, acpCommandForceKillGrace)
+	reapACPProcessGroup(ctx, pid, log)
 }
 
-func waitForACPCommand(waitCh <-chan error, timeout time.Duration) bool {
+func waitForACPCommand(ctx context.Context, waitCh <-chan error, timeout time.Duration) bool {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
 	case <-waitCh:
 		return true
+	case <-ctx.Done():
+		return false
 	case <-timer.C:
 		return false
 	}
 }
 
-func reapACPProcessGroup(pid int, log *zap.Logger) {
+func reapACPProcessGroup(ctx context.Context, pid int, log *zap.Logger) {
 	log = acpCommandLogger(log)
 	if !acpProcessGroupAlive(pid) {
 		return
@@ -110,7 +113,7 @@ func reapACPProcessGroup(pid int, log *zap.Logger) {
 			zap.String("reason", "reap_descendants"),
 			zap.Error(err))
 	}
-	waitForACPProcessGroupExit(pid, acpCommandTerminateGrace)
+	waitForACPProcessGroupExit(ctx, pid, acpCommandTerminateGrace)
 	if !acpProcessGroupAlive(pid) {
 		return
 	}
@@ -123,7 +126,7 @@ func reapACPProcessGroup(pid int, log *zap.Logger) {
 			zap.String("reason", "reap_descendants_timeout"),
 			zap.Error(err))
 	}
-	waitForACPProcessGroupExit(pid, acpCommandForceKillGrace)
+	waitForACPProcessGroupExit(ctx, pid, acpCommandForceKillGrace)
 }
 
 func acpCommandLogger(log *zap.Logger) *zap.Logger {
@@ -133,12 +136,24 @@ func acpCommandLogger(log *zap.Logger) *zap.Logger {
 	return log
 }
 
-func waitForACPProcessGroupExit(pid int, timeout time.Duration) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if !acpProcessGroupAlive(pid) {
-			return
+func waitForACPProcessGroupExit(ctx context.Context, pid int, timeout time.Duration) bool {
+	if !acpProcessGroupAlive(pid) {
+		return true
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	ticker := time.NewTicker(acpCommandPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-timer.C:
+			return false
+		case <-ticker.C:
+			if !acpProcessGroupAlive(pid) {
+				return true
+			}
 		}
-		time.Sleep(acpCommandPollInterval)
 	}
 }

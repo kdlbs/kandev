@@ -1218,6 +1218,11 @@ func (m *Manager) Stop(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Stop intentionally serializes the full teardown under m.mu. The shutdown
+	// path closes adapters, stdin, shell sessions, and process groups as one
+	// lifecycle transition; concurrent readers may briefly block while process
+	// group reaping finishes.
+
 	// Stop trackers before the status guard: passthrough never calls Start() so the early return below would otherwise leak them.
 	m.stopWorkspaceTrackers()
 

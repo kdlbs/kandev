@@ -203,6 +203,7 @@ func (w *processOutput) Write(p []byte) (int, error) {
 		}
 		w.sinkDisabled = true
 		shutdownDebugf("disabling broken output sink label=%q err=%v", w.label, err)
+		launcherInfof("warning: disabling %s output sink after write failure: %v", w.label, err)
 	}
 	return len(p), nil
 }

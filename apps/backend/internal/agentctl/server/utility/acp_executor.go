@@ -92,7 +92,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		return &PromptResponse{Success: false, Error: fmt.Sprintf("start: %v", err)}, nil
 	}
 
-	defer cleanupACPCommand(cmd, e.logger)
+	defer cleanupACPCommand(ctx, cmd, e.logger)
 
 	// Execute ACP protocol
 	mcpServers, dropped := toACPMcpServers(req.MCPServers)
@@ -330,7 +330,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	if err := cmd.Start(); err != nil {
 		return &ProbeResponse{Success: false, Error: fmt.Sprintf("start: %v", err)}, nil
 	}
-	defer cleanupACPCommand(cmd, e.logger)
+	defer cleanupACPCommand(ctx, cmd, e.logger)
 
 	resp, err := e.probeACPSession(ctx, stdin, stdout, workDir)
 	if err != nil {

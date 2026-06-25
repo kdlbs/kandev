@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -62,6 +63,36 @@ func TestProbeCleansUpDescendantProcessOnTimeout(t *testing.T) {
 		if !zapLogsContain(observed, message) {
 			t.Fatalf("expected debug log %q, got %#v", message, observed.All())
 		}
+	}
+}
+
+func TestWaitForACPProcessGroupExitHonorsContextCancellation(t *testing.T) {
+	cmd := exec.Command("sleep", "30")
+	setACPCommandProcAttr(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start sleep: %v", err)
+	}
+	pid := cmd.Process.Pid
+	t.Cleanup(func() {
+		_ = killACPProcessGroup(pid)
+		done := make(chan error, 1)
+		go func() { done <- cmd.Wait() }()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			_ = cmd.Process.Kill()
+		}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+	if waitForACPProcessGroupExit(ctx, pid, 2*time.Second) {
+		t.Fatal("wait unexpectedly reported process group exit")
+	}
+	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
+		t.Fatalf("wait ignored canceled context; elapsed=%s", elapsed)
 	}
 }
 

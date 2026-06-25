@@ -35,6 +35,13 @@ func TestLimitedBufferBytesReturnsSnapshot(t *testing.T) {
 }
 
 func TestProcessOutputKeepsDrainingAfterSinkBreaks(t *testing.T) {
+	var output bytes.Buffer
+	oldStatusOutput := launcherStatusOutput
+	launcherStatusOutput = &output
+	t.Cleanup(func() {
+		launcherStatusOutput = oldStatusOutput
+	})
+
 	sink := &failingWriter{err: errors.New("broken pipe")}
 	buf := newLimitedBuffer(20)
 	out := newProcessOutput(buf, sink, nil, "test")
@@ -50,6 +57,9 @@ func TestProcessOutputKeepsDrainingAfterSinkBreaks(t *testing.T) {
 	}
 	if got := string(buf.Bytes()); got != "firstsecond" {
 		t.Fatalf("buffer = %q, want firstsecond", got)
+	}
+	if got := output.String(); !strings.Contains(got, "warning: disabling test output sink") {
+		t.Fatalf("status output did not warn about disabled sink: %q", got)
 	}
 }
 
