@@ -15,7 +15,6 @@ export function cleanupMermaidOrphans(id: string): void {
 type MermaidFitScaleInput = {
   viewportWidth: number;
   svgWidth: number;
-  defaultScale?: number;
 };
 
 function clampScale(scale: number): number {
@@ -25,11 +24,9 @@ function clampScale(scale: number): number {
 export function calculateMermaidFitScale({
   viewportWidth,
   svgWidth,
-  defaultScale = DEFAULT_SCALE,
 }: MermaidFitScaleInput): number {
-  const clampedDefault = clampScale(defaultScale);
-  if (viewportWidth <= 0 || svgWidth <= 0) return clampedDefault;
-  const fitScale = Math.min(clampedDefault, viewportWidth / svgWidth);
+  if (viewportWidth <= 0 || svgWidth <= 0) return DEFAULT_SCALE;
+  const fitScale = Math.min(DEFAULT_SCALE, viewportWidth / svgWidth);
   return clampScale(fitScale);
 }
 

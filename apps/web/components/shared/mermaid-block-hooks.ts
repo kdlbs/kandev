@@ -1,6 +1,6 @@
 "use client";
 
-import { type RefObject, useCallback, useLayoutEffect, useState } from "react";
+import { useCallback, useLayoutEffect, useState } from "react";
 import {
   DEFAULT_SCALE,
   SCALE_STEP,
@@ -10,19 +10,18 @@ import {
   getElementContentWidth,
 } from "./mermaid-utils";
 
-export function useMermaidViewportWidth(scrollRegionRef: RefObject<HTMLElement | null>): number {
+export function useMermaidViewportWidth(scrollRegionElement: HTMLElement | null): number {
   const [viewportWidth, setViewportWidth] = useState(0);
 
   const measureViewport = useCallback(() => {
-    if (!scrollRegionRef.current) return;
-    if (window.getComputedStyle(scrollRegionRef.current).display === "none") return;
-    setViewportWidth(getElementContentWidth(scrollRegionRef.current));
-  }, [scrollRegionRef]);
+    if (!scrollRegionElement) return;
+    if (window.getComputedStyle(scrollRegionElement).display === "none") return;
+    setViewportWidth(getElementContentWidth(scrollRegionElement));
+  }, [scrollRegionElement]);
 
   useLayoutEffect(() => {
     measureViewport();
-    const element = scrollRegionRef.current;
-    if (!element) return;
+    if (!scrollRegionElement) return;
 
     if (typeof ResizeObserver === "undefined") {
       window.addEventListener("resize", measureViewport);
@@ -30,9 +29,9 @@ export function useMermaidViewportWidth(scrollRegionRef: RefObject<HTMLElement |
     }
 
     const observer = new ResizeObserver(measureViewport);
-    observer.observe(element);
+    observer.observe(scrollRegionElement);
     return () => observer.disconnect();
-  }, [measureViewport, scrollRegionRef]);
+  }, [measureViewport, scrollRegionElement]);
 
   return viewportWidth;
 }

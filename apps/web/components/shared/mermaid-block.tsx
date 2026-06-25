@@ -110,13 +110,14 @@ function useMermaidRender(code: string, resolvedTheme: string | undefined, toast
 
 export function MermaidBlock({ code }: MermaidBlockProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const scrollRegionRef = useRef<HTMLDivElement>(null);
+  const svgSizeRef = useRef<{ w: number; h: number } | null>(null);
   const [svgSize, setSvgSize] = useState<{ w: number; h: number } | null>(null);
+  const [scrollRegionElement, setScrollRegionElement] = useState<HTMLDivElement | null>(null);
   const [showCode, setShowCode] = useState(false);
   const { resolvedTheme } = useTheme();
   const { toast } = useToast();
   const { svg, error } = useMermaidRender(code, resolvedTheme, toast);
-  const viewportWidth = useMermaidViewportWidth(scrollRegionRef);
+  const viewportWidth = useMermaidViewportWidth(scrollRegionElement);
   const { scale, zoomIn, zoomOut, zoomReset, resetAutoScale } = useMermaidScale(
     svgSize,
     viewportWidth,
@@ -128,17 +129,20 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
   useLayoutEffect(() => {
     if (svg && containerRef.current) {
       const nextSize = getSvgDimensions(containerRef.current);
-      setSvgSize((prevSize) => {
-        if (sameSvgSize(prevSize, nextSize)) return prevSize;
+      if (!sameSvgSize(svgSizeRef.current, nextSize)) {
+        svgSizeRef.current = nextSize;
+        setSvgSize(nextSize);
         resetAutoScale();
-        return nextSize;
-      });
+      }
       return;
     }
     // svg reset back to null — drop the stale footprint so the wrapper
     // doesn't reserve space for a diagram that's no longer rendered.
-    setSvgSize(null);
-    resetAutoScale();
+    if (svgSizeRef.current !== null) {
+      svgSizeRef.current = null;
+      setSvgSize(null);
+      resetAutoScale();
+    }
   }, [svg, resetAutoScale]);
 
   const toggleCode = useCallback(() => setShowCode((v) => !v), []);
@@ -169,7 +173,7 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
   return (
     <div className="mermaid-block group/mermaid relative my-3 block w-full max-w-full min-w-0 rounded-md border border-border/50 bg-muted/20">
       <div
-        ref={scrollRegionRef}
+        ref={setScrollRegionElement}
         className="mermaid-scroll-region w-full overflow-x-auto overflow-y-hidden p-3"
         style={{ display: showCode ? "none" : undefined }}
       >

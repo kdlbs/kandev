@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_SCALE,
-  MAX_SCALE,
   calculateMermaidFitScale,
   getElementContentWidth,
   sanitizeMermaidCode,
@@ -23,21 +22,6 @@ describe("calculateMermaidFitScale", () => {
   it("uses the default scale until valid measurements are available", () => {
     expect(calculateMermaidFitScale({ viewportWidth: 0, svgWidth: 1200 })).toBe(DEFAULT_SCALE);
     expect(calculateMermaidFitScale({ viewportWidth: 600, svgWidth: 0 })).toBe(DEFAULT_SCALE);
-  });
-
-  it("honors an explicit default scale as the maximum fitted scale", () => {
-    expect(calculateMermaidFitScale({ viewportWidth: 900, svgWidth: 800, defaultScale: 1 })).toBe(
-      1,
-    );
-    expect(calculateMermaidFitScale({ viewportWidth: 600, svgWidth: 800, defaultScale: 1 })).toBe(
-      0.75,
-    );
-  });
-
-  it("clamps explicit default scales before using them", () => {
-    expect(calculateMermaidFitScale({ viewportWidth: 0, svgWidth: 1200, defaultScale: 99 })).toBe(
-      MAX_SCALE,
-    );
   });
 });
 

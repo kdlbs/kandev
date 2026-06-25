@@ -6,10 +6,6 @@ function setClientWidth(element: HTMLElement, width: number) {
   Object.defineProperty(element, "clientWidth", { value: width, configurable: true });
 }
 
-function makeRef(element: HTMLElement | null) {
-  return { current: element };
-}
-
 function disableResizeObserver() {
   Object.defineProperty(window, "ResizeObserver", {
     configurable: true,
@@ -38,7 +34,7 @@ describe("useMermaidViewportWidth", () => {
     document.body.appendChild(el);
 
     try {
-      const { result } = renderHook(() => useMermaidViewportWidth(makeRef(el)));
+      const { result } = renderHook(() => useMermaidViewportWidth(el));
 
       expect(result.current).toBe(280);
     } finally {
@@ -51,7 +47,7 @@ describe("useMermaidViewportWidth", () => {
     const el = document.createElement("div");
     setClientWidth(el, 300);
     document.body.appendChild(el);
-    const { result } = renderHook(() => useMermaidViewportWidth(makeRef(el)));
+    const { result } = renderHook(() => useMermaidViewportWidth(el));
 
     act(() => {
       setClientWidth(el, 240);
@@ -67,7 +63,7 @@ describe("useMermaidViewportWidth", () => {
     const el = document.createElement("div");
     setClientWidth(el, 300);
     document.body.appendChild(el);
-    const { result } = renderHook(() => useMermaidViewportWidth(makeRef(el)));
+    const { result } = renderHook(() => useMermaidViewportWidth(el));
 
     act(() => {
       el.style.display = "none";
@@ -77,6 +73,54 @@ describe("useMermaidViewportWidth", () => {
 
     expect(result.current).toBe(300);
     el.remove();
+  });
+
+  it("observes a replacement scroll region after the element changes", () => {
+    window.ResizeObserver = class {
+      private readonly callback: ResizeObserverCallback;
+      observed: Element | null = null;
+
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+      }
+
+      observe(element: Element) {
+        this.observed = element;
+      }
+
+      disconnect() {
+        this.observed = null;
+      }
+
+      unobserve() {
+        this.observed = null;
+      }
+
+      trigger() {
+        this.callback([], this);
+      }
+    };
+
+    const first = document.createElement("div");
+    const second = document.createElement("div");
+    setClientWidth(first, 200);
+    setClientWidth(second, 320);
+    document.body.append(first, second);
+
+    try {
+      const { result, rerender } = renderHook(({ element }) => useMermaidViewportWidth(element), {
+        initialProps: { element: first },
+      });
+
+      expect(result.current).toBe(200);
+
+      rerender({ element: second });
+
+      expect(result.current).toBe(320);
+    } finally {
+      first.remove();
+      second.remove();
+    }
   });
 });
 
