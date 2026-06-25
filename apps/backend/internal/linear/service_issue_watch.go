@@ -104,12 +104,17 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 	if err := validateMaxInflightTasks(w.MaxInflightTasks); err != nil {
 		return nil, err
 	}
-	repositoryID, baseBranch, err := s.resolveRepositoryBinding(ctx, w.WorkspaceID, w.RepositoryID, w.BaseBranch)
-	if err != nil {
-		return nil, err
+	// Only validate/resolve the binding when this PATCH actually touches it.
+	// Re-resolving an unchanged binding would block edits to other fields (prompt,
+	// filter, …) whenever the bound repository has since been soft-deleted.
+	if req.RepositoryID != nil || req.BaseBranch != nil {
+		repositoryID, baseBranch, err := s.resolveRepositoryBinding(ctx, w.WorkspaceID, w.RepositoryID, w.BaseBranch)
+		if err != nil {
+			return nil, err
+		}
+		w.RepositoryID = repositoryID
+		w.BaseBranch = baseBranch
 	}
-	w.RepositoryID = repositoryID
-	w.BaseBranch = baseBranch
 	if err := s.store.UpdateIssueWatch(ctx, w); err != nil {
 		return nil, err
 	}
@@ -414,10 +419,15 @@ func applyIssueWatchPatch(w *IssueWatch, req *UpdateIssueWatchRequest) {
 	if req.WorkflowStepID != nil {
 		w.WorkflowStepID = *req.WorkflowStepID
 	}
-	// RepositoryID / BaseBranch are applied verbatim here; UpdateIssueWatch then
-	// runs them through resolveRepositoryBinding (workspace check + default-branch
-	// fill, or clear when empty). An empty RepositoryID unbinds the watch.
+	// RepositoryID / BaseBranch are applied here; UpdateIssueWatch then runs them
+	// through resolveRepositoryBinding (workspace check + default-branch fill, or
+	// clear when empty). An empty RepositoryID unbinds the watch. Switching to a
+	// different repository without an explicit base branch resets the branch so
+	// the new repo's default is used instead of carrying the old repo's branch.
 	if req.RepositoryID != nil {
+		if *req.RepositoryID != w.RepositoryID && req.BaseBranch == nil {
+			w.BaseBranch = ""
+		}
 		w.RepositoryID = *req.RepositoryID
 	}
 	if req.BaseBranch != nil {

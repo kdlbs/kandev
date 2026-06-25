@@ -1,10 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { useAppStore } from "@/components/state-provider";
-import { listRepositories } from "@/lib/api";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useBranches } from "@/hooks/domains/workspace/use-repository-branches";
 import {
@@ -75,24 +72,11 @@ export function WatcherRepositoryFields({
   onRepositoryChange: (repositoryId: string) => void;
   onBaseBranchChange: (baseBranch: string) => void;
 }) {
-  const { repositories } = useRepositories(workspaceId, !!workspaceId);
-  // useRepositories fetches a workspace's repos only once (gated by isLoaded),
-  // and creating a repo in settings doesn't update that shared slice — so a
-  // newly-created repo wouldn't appear here without a reload. Pull a fresh list
-  // once each time the picker opens for a workspace so it always reflects
-  // repositories created since the slice was first loaded.
-  const setRepositories = useAppStore((s) => s.setRepositories);
-  const refreshedFor = useRef<string | null>(null);
-  useEffect(() => {
-    if (!workspaceId || refreshedFor.current === workspaceId) return;
-    refreshedFor.current = workspaceId;
-    listRepositories(workspaceId, undefined, { cache: "no-store" })
-      .then((res) => setRepositories(workspaceId, res.repositories))
-      .catch(() => {
-        // Leave the cached list in place on failure; useRepositories still
-        // serves whatever was previously loaded.
-      });
-  }, [workspaceId, setRepositories]);
+  // forceRefresh: a repo created in settings doesn't update the shared store
+  // slice, and the lazy fetch is gated by isLoaded — so without this the picker
+  // could miss repositories created since the slice first loaded. The hook owns
+  // the fetch (keeps data-flow in the hook layer, not the component).
+  const { repositories } = useRepositories(workspaceId, !!workspaceId, true);
   const branchSource = repositoryId ? ({ kind: "id", workspaceId, repositoryId } as const) : null;
   const { branches, isLoading: branchesLoading } = useBranches(branchSource, !!repositoryId);
   // A branch name can appear twice (local + remote tracking, e.g. "main" and

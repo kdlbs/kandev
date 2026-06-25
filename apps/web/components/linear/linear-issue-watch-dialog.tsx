@@ -469,6 +469,20 @@ function AutomationFields({
   );
 }
 
+// formWithWorkspace switches the workspace and clears everything scoped to it
+// (workflow/step + repository binding) so stale cross-workspace refs can't be
+// saved. Module-scoped to keep the dialog component under its line limit.
+function formWithWorkspace(prev: FormState, workspaceId: string): FormState {
+  return {
+    ...prev,
+    workspaceId,
+    workflowId: "",
+    workflowStepId: "",
+    repositoryId: "",
+    baseBranch: "",
+  };
+}
+
 function savingLabel(saving: boolean, isEdit: boolean): string {
   if (saving) return "Saving…";
   return isEdit ? "Update" : "Create";
@@ -529,9 +543,7 @@ export function LinearIssueWatchDialog({
         <div className="space-y-5">
           <WorkspacePicker
             value={form.workspaceId}
-            onChange={(v) =>
-              setForm((p) => ({ ...p, workspaceId: v, workflowId: "", workflowStepId: "" }))
-            }
+            onChange={(v) => setForm((p) => formWithWorkspace(p, v))}
             disabled={workspaceLocked}
           />
           {/* Hairlines separate the five conceptual blocks (Destination /

@@ -127,3 +127,40 @@ func TestService_UpdateIssueWatch_RepositoryBinding(t *testing.T) {
 		t.Fatalf("expected cleared after update, got repo=%q branch=%q", cleared.RepositoryID, cleared.BaseBranch)
 	}
 }
+
+func TestService_UpdateIssueWatch_RebindAndDeletedRepo(t *testing.T) {
+	ctx := context.Background()
+	f := newSvcFixture(t)
+	f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-1", defaultBranch: "main", ok: true})
+
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step", JQL: "project = PROJ",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	repo1 := "repo-1"
+	if _, err := f.svc.UpdateIssueWatch(ctx, w.ID, &UpdateIssueWatchRequest{RepositoryID: &repo1}); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+
+	f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-1", defaultBranch: "develop", ok: true})
+	repo2 := "repo-2"
+	rebound, err := f.svc.UpdateIssueWatch(ctx, w.ID, &UpdateIssueWatchRequest{RepositoryID: &repo2})
+	if err != nil {
+		t.Fatalf("rebind: %v", err)
+	}
+	if rebound.RepositoryID != "repo-2" || rebound.BaseBranch != "develop" {
+		t.Fatalf("rebind should reset branch to new default, got repo=%q branch=%q", rebound.RepositoryID, rebound.BaseBranch)
+	}
+
+	f.svc.SetRepositoryLookup(fakeRepoLookup{ok: false})
+	prompt := "updated prompt"
+	edited, err := f.svc.UpdateIssueWatch(ctx, w.ID, &UpdateIssueWatchRequest{Prompt: &prompt})
+	if err != nil {
+		t.Fatalf("unrelated edit blocked by deleted bound repo: %v", err)
+	}
+	if edited.Prompt != "updated prompt" || edited.RepositoryID != "repo-2" {
+		t.Fatalf("expected prompt updated + binding preserved, got prompt=%q repo=%q", edited.Prompt, edited.RepositoryID)
+	}
+}

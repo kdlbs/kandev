@@ -134,6 +134,9 @@ func (s *Store) addIssueWatchRepositoryColumns() error {
 	if err != nil {
 		return err
 	}
+	if len(cols) == 0 {
+		return nil
+	}
 	if _, ok := cols["repository_id"]; !ok {
 		if _, err := s.db.Exec(`ALTER TABLE jira_issue_watches ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`); err != nil {
 			return fmt.Errorf("add repository_id column: %w", err)

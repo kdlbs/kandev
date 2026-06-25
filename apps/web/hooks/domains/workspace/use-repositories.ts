@@ -5,7 +5,15 @@ import { listRepositories } from "@/lib/api";
 
 const EMPTY_REPOSITORIES: Repository[] = [];
 
-export function useRepositories(workspaceId: string | null, enabled = true) {
+/**
+ * Loads a workspace's repositories from the store, fetching once when not yet
+ * loaded. Pass `forceRefresh` to instead pull a fresh list once per workspace on
+ * mount (e.g. a picker that must reflect repos created since the slice was first
+ * loaded) — the lazy path is disabled in that mode so there's no double fetch,
+ * and the per-workspace guard is only marked on success so a failed fetch can
+ * retry on the next mount.
+ */
+export function useRepositories(workspaceId: string | null, enabled = true, forceRefresh = false) {
   const repositories = useAppStore((state) =>
     workspaceId
       ? (state.repositories.itemsByWorkspaceId[workspaceId] ?? EMPTY_REPOSITORIES)
@@ -20,6 +28,7 @@ export function useRepositories(workspaceId: string | null, enabled = true) {
   const setRepositories = useAppStore((state) => state.setRepositories);
   const setRepositoriesLoading = useAppStore((state) => state.setRepositoriesLoading);
   const inFlightRef = useRef(false);
+  const forcedRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!enabled || !workspaceId) return;
@@ -28,8 +37,35 @@ export function useRepositories(workspaceId: string | null, enabled = true) {
     }
   }, [enabled, isLoaded, isLoading, setRepositoriesLoading, workspaceId]);
 
+  // Force-refresh: pull a fresh list once per workspace, bypassing the
+  // isLoaded cache. forcedRef is set only on success so a failed fetch retries.
   useEffect(() => {
-    if (!enabled || !workspaceId) return;
+    if (!enabled || !workspaceId || !forceRefresh) return;
+    if (forcedRef.current === workspaceId || inFlightRef.current) return;
+    let cancelled = false;
+    inFlightRef.current = true;
+    setRepositoriesLoading(workspaceId, true);
+    listRepositories(workspaceId, undefined, { cache: "no-store" })
+      .then((response) => {
+        if (cancelled) return;
+        forcedRef.current = workspaceId;
+        setRepositories(workspaceId, response.repositories);
+      })
+      .catch(() => {
+        // Leave forcedRef unset so the next mount retries; keep cached repos.
+      })
+      .finally(() => {
+        inFlightRef.current = false;
+        if (cancelled) return;
+        setRepositoriesLoading(workspaceId, false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, forceRefresh, workspaceId, setRepositories, setRepositoriesLoading]);
+
+  useEffect(() => {
+    if (!enabled || !workspaceId || forceRefresh) return;
     if (isLoaded || inFlightRef.current) return;
     let cancelled = false;
     inFlightRef.current = true;
@@ -51,7 +87,7 @@ export function useRepositories(workspaceId: string | null, enabled = true) {
     return () => {
       cancelled = true;
     };
-  }, [enabled, isLoaded, setRepositories, setRepositoriesLoading, workspaceId]);
+  }, [enabled, forceRefresh, isLoaded, setRepositories, setRepositoriesLoading, workspaceId]);
 
   return { repositories, isLoading };
 }

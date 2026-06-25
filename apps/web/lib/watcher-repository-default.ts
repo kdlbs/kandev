@@ -6,9 +6,13 @@
 //
 // Note: there is no "step default" for a repository — a workflow step has no
 // repository association — so the empty state means literally "no repository".
-export const NO_REPOSITORY = "__no_repository__";
+// The sentinel values contain ":" which is illegal in Git ref names and never
+// appears in a repository UUID, so they cannot collide with a real branch name
+// or repository id (which would otherwise let resolve*() silently rewrite a
+// user's selection).
+export const NO_REPOSITORY = "kandev:no-repository";
 export const NO_REPOSITORY_LABEL = "(no repository)";
-export const DEFAULT_BRANCH = "__default_branch__";
+export const DEFAULT_BRANCH = "kandev:default-branch";
 export const DEFAULT_BRANCH_LABEL = "(repository default branch)";
 
 // Map a repository select value back to the stored id, collapsing the sentinel
