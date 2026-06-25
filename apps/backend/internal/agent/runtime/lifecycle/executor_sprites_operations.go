@@ -370,6 +370,7 @@ func (r *SpritesExecutor) createAgentInstance(
 		McpServers:          req.McpServers,
 		McpMode:             req.McpMode,
 		RequiresProcessKill: requiresProcessKillFromReq(req),
+		StripEnv:            stripEnvFromReq(req),
 		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 	}
 	reqJSON, err := json.Marshal(instanceReq)
@@ -486,6 +487,20 @@ func requiresProcessKillFromReq(req *ExecutorCreateRequest) bool {
 		return false
 	}
 	return rt.RequiresProcessKill
+}
+
+// stripEnvFromReq returns the agent's StripEnv list from its RuntimeConfig
+// (nil when unset). Used by remote executors (SSH, Sprites) that serialize
+// the CreateInstanceRequest over the wire.
+func stripEnvFromReq(req *ExecutorCreateRequest) []string {
+	if req == nil || req.AgentConfig == nil {
+		return nil
+	}
+	rt := req.AgentConfig.Runtime()
+	if rt == nil {
+		return nil
+	}
+	return rt.StripEnv
 }
 
 func (r *SpritesExecutor) waitForHealth(ctx context.Context, sprite *sprites.Sprite) error {

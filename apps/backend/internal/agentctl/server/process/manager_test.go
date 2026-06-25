@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/pkg/agent"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -165,5 +167,39 @@ func TestFormatAgentStartError_E2BIGIncludesEnvDiagnostics(t *testing.T) {
 	}
 	if !errors.Is(err, syscall.E2BIG) {
 		t.Fatalf("formatted error must preserve E2BIG wrapping: %v", err)
+	}
+}
+
+func TestBuildAdapterConfig_StripEnvRemovesDeclaredVars(t *testing.T) {
+	log := newTestLogger(t)
+
+	m := &Manager{
+		cfg: &config.InstanceConfig{
+			AgentArgs: []string{"cat"},
+			WorkDir:   t.TempDir(),
+			AgentEnv: []string{
+				"ACP_BACKEND=windsurf",
+				"PATH=/usr/bin",
+				"HOME=/root",
+			},
+			StripEnv: []string{"ACP_BACKEND"},
+			Protocol: agent.ProtocolACP,
+		},
+		logger: log,
+	}
+
+	require.NoError(t, m.buildAdapterConfig())
+	t.Cleanup(func() { _ = m.adapter.Close() })
+
+	for _, e := range m.cfg.AgentEnv {
+		if strings.HasPrefix(e, "ACP_BACKEND=") {
+			t.Errorf("ACP_BACKEND not stripped from AgentEnv: %q", e)
+		}
+	}
+	if !slices.Contains(m.cfg.AgentEnv, "PATH=/usr/bin") {
+		t.Errorf("PATH was stripped but should have been kept")
+	}
+	if !slices.Contains(m.cfg.AgentEnv, "HOME=/root") {
+		t.Errorf("HOME was stripped but should have been kept")
 	}
 }

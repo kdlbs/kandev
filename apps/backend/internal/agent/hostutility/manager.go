@@ -382,6 +382,7 @@ func (m *Manager) probe(ctx context.Context, inst *instance, ia agents.Inference
 			Command:   cfg.Command.Args(),
 			ModelFlag: cfg.ModelFlag.Args(),
 			WorkDir:   inst.workDir,
+			StripEnv:  stripEnvFor(ia),
 		},
 	}
 	resp, err := inst.client.Probe(probeCtx, req)

@@ -14,6 +14,18 @@ import (
 // (HTTP 400) rather than a server-side failure.
 var ErrInferenceAgentIDRequired = errors.New("agent_id is required")
 
+// stripEnvFromAgent 返回 agent 在持久会话路径声明的 StripEnv
+// （RuntimeConfig.StripEnv），作为一次性 inference 子进程的唯一真相源。
+// 与 hostutility.stripEnvFor 同源；InferenceConfig 不再独立声明 StripEnv。
+func stripEnvFromAgent(ia agents.InferenceAgent) []string {
+	if a, ok := ia.(agents.Agent); ok {
+		if rt := a.Runtime(); rt != nil {
+			return rt.StripEnv
+		}
+	}
+	return nil
+}
+
 // ExecuteInferencePrompt executes an inference prompt via an active session's agentctl.
 // It looks up the inference config from the agent registry and passes it to agentctl.
 func (m *Manager) ExecuteInferencePrompt(ctx context.Context, sessionID, agentID, model, prompt string) (*utility.PromptResponse, error) {
@@ -46,7 +58,8 @@ func (m *Manager) ExecuteInferencePrompt(ctx context.Context, sessionID, agentID
 		return nil, fmt.Errorf("agentctl client not available for session %s", sessionID)
 	}
 
-	// Build request with inference config
+	// Build request with inference config. StripEnv 从 Runtime().StripEnv
+	// 派生（与 hostutility.stripEnvFor 同源），InferenceConfig 不再独立声明。
 	req := &utility.PromptRequest{
 		Prompt:  prompt,
 		AgentID: agentID,
@@ -55,6 +68,7 @@ func (m *Manager) ExecuteInferencePrompt(ctx context.Context, sessionID, agentID
 			Command:   cfg.Command.Args(),
 			ModelFlag: cfg.ModelFlag.Args(),
 			WorkDir:   execution.WorkspacePath,
+			StripEnv:  stripEnvFromAgent(ia),
 		},
 	}
 

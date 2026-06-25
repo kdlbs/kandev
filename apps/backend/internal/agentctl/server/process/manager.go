@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
+	"github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -850,6 +851,17 @@ func (m *Manager) buildAdapterConfig() error {
 	}
 	for k, v := range adapterEnv {
 		m.cfg.AgentEnv = append(m.cfg.AgentEnv, fmt.Sprintf("%s=%s", k, v))
+	}
+
+	// Strip agent-declared environment variables from the final child process
+	// environment entirely (not just set to empty). Applied after adapter env
+	// merge so that adapter-injected values are also stripped. Some programs
+	// distinguish unset from empty string — see RuntimeConfig.StripEnv docs.
+	for _, key := range m.cfg.StripEnv {
+		m.cfg.AgentEnv = utility.RemoveEnvEntry(m.cfg.AgentEnv, key)
+	}
+	if m.adapterCfg.OneShotConfig != nil {
+		m.adapterCfg.OneShotConfig.Env = m.cfg.AgentEnv
 	}
 	return nil
 }

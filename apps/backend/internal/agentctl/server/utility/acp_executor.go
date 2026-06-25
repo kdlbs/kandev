@@ -72,6 +72,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	//nolint:gosec // resolvedCmd is from a hard-coded allow-list; args[1:] are CLI flags
 	cmd := exec.CommandContext(ctx, resolvedCmd, args[1:]...)
 	cmd.Dir = workDir
+	cmd.Env = sanitizeEnvForAgent(req.InferenceConfig)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -316,6 +317,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	//nolint:gosec // resolvedCmd is from a hard-coded allow-list; args[1:] are CLI flags
 	cmd := exec.CommandContext(ctx, resolvedCmd, args[1:]...)
 	cmd.Dir = workDir
+	cmd.Env = sanitizeEnvForAgent(req.InferenceConfig)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -705,6 +707,7 @@ func derefString(p *string) string {
 var allowedProbeCommands = map[string]string{
 	"auggie":        "auggie",
 	"cursor-agent":  "cursor-agent",
+	"devin":         "devin",
 	"kimi":          "kimi",
 	"kiro-cli-chat": "kiro-cli-chat",
 	"mock-agent":    "mock-agent",
@@ -719,6 +722,34 @@ var allowedProbeCommands = map[string]string{
 // the given command. Returns the empty string if the command is not allowed.
 func resolveProbeCommand(name string) string {
 	return allowedProbeCommands[filepath.Base(name)]
+}
+
+// sanitizeEnvForAgent returns a child-process environment with agent-declared
+// variables (InferenceConfigDTO.StripEnv) removed. Applied to one-shot
+// probe/inference subprocesses; the persistent session path strips in
+// process.Manager.buildAdapterConfig instead.
+func sanitizeEnvForAgent(cfg *InferenceConfigDTO) []string {
+	env := os.Environ()
+	if cfg != nil {
+		for _, key := range cfg.StripEnv {
+			env = RemoveEnvEntry(env, key)
+		}
+	}
+	return env
+}
+
+// RemoveEnvEntry removes all entries for the given key from the env slice.
+// Used to ensure a variable is truly absent (not just empty) in the child
+// process environment — some programs distinguish unset from empty string.
+func RemoveEnvEntry(env []string, key string) []string {
+	prefix := key + "="
+	next := make([]string, 0, len(env))
+	for _, e := range env {
+		if !strings.HasPrefix(e, prefix) {
+			next = append(next, e)
+		}
+	}
+	return next
 }
 
 // buildACPCommand builds the command arguments for ACP inference. The model

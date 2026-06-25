@@ -161,6 +161,10 @@ type CreateRequest struct {
 	// opencode acp, which spawns MCP server children that leak otherwise).
 	RequiresProcessKill bool `json:"requires_process_kill,omitempty"`
 
+	// StripEnv lists environment variables to strip from the agent's child
+	// process environment entirely (not just set to empty).
+	StripEnv []string `json:"strip_env,omitempty"`
+
 	// BaseBranches maps RepositoryName → base branch ref for per-repo diff
 	// stats. The empty key "" applies to the root / single-repo tracker.
 	// Each WorkspaceTracker reads its entry at startup and uses it as the

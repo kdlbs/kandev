@@ -4,6 +4,7 @@ import (
 	"maps"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -357,5 +358,83 @@ func TestApplySessionProbeFields_FlattensGroupedConfigOptions(t *testing.T) {
 	}
 	if out.Modes[0].ID != "default" || out.Modes[1].ID != "bypass" {
 		t.Fatalf("Modes = %+v, want [default bypass]", out.Modes)
+	}
+}
+
+func TestRemoveEnvEntry(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		env  []string
+		key  string
+		want []string
+	}{
+		{
+			name: "removes single match",
+			env:  []string{"ACP_BACKEND=windsurf", "PATH=/usr/bin"},
+			key:  "ACP_BACKEND",
+			want: []string{"PATH=/usr/bin"},
+		},
+		{
+			name: "removes all matches",
+			env:  []string{"ACP_BACKEND=a", "PATH=/usr/bin", "ACP_BACKEND=b"},
+			key:  "ACP_BACKEND",
+			want: []string{"PATH=/usr/bin"},
+		},
+		{
+			name: "no match returns unchanged",
+			env:  []string{"PATH=/usr/bin", "HOME=/root"},
+			key:  "ACP_BACKEND",
+			want: []string{"PATH=/usr/bin", "HOME=/root"},
+		},
+		{
+			name: "prefix-only key not removed",
+			env:  []string{"ACP_BACKEND_URL=http://x", "ACP_BACKEND=windsurf"},
+			key:  "ACP_BACKEND",
+			want: []string{"ACP_BACKEND_URL=http://x"},
+		},
+		{
+			name: "empty env",
+			env:  []string{},
+			key:  "ACP_BACKEND",
+			want: []string{},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := RemoveEnvEntry(tc.env, tc.key)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("RemoveEnvEntry(%v, %q) = %v, want %v", tc.env, tc.key, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSanitizeEnvForAgent(t *testing.T) {
+	// 核心 case：strip 掉列出的 var、保留其余 var。
+	// 覆盖 RemoveEnvEntry + sanitizeEnvForAgent 的主路径。
+	t.Setenv("ACP_BACKEND", "windsurf")
+	t.Setenv("TEST_KEEP_ME", "yes")
+
+	env := sanitizeEnvForAgent(&InferenceConfigDTO{
+		StripEnv: []string{"ACP_BACKEND"},
+	})
+	for _, e := range env {
+		if strings.HasPrefix(e, "ACP_BACKEND=") {
+			t.Errorf("ACP_BACKEND not stripped: %q", e)
+		}
+	}
+	found := false
+	for _, e := range env {
+		if e == "TEST_KEEP_ME=yes" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("TEST_KEEP_ME was stripped but should have been kept")
 	}
 }
