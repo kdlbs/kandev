@@ -251,15 +251,16 @@ func TestHttpTriggerReviewWatchPublishesNewPREvents(t *testing.T) {
 
 func waitForPublishedCount(t *testing.T, eb *mockEventBus, want int) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
+	timeout := time.After(time.Second)
 	for {
 		if got := eb.publishedCount(); got == want {
 			return
 		}
-		if time.Now().After(deadline) {
+		select {
+		case <-eb.publishedCh:
+		case <-timeout:
 			t.Fatalf("published events = %d, want %d", eb.publishedCount(), want)
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -325,7 +326,7 @@ func TestResetReviewWatchPublishesNewPREvents(t *testing.T) {
 	}
 
 	log := newControllerTestLogger()
-	eb := &mockEventBus{}
+	eb := &mockEventBus{publishedCh: make(chan struct{}, 1)}
 	svc := NewService(client, "pat", nil, store, eb, log)
 	svc.SetCascadeTaskDeleter(noopCascadeTaskDeleter{})
 
@@ -392,7 +393,7 @@ func TestHttpResetReviewWatchPublishesNewPREvents(t *testing.T) {
 	}
 
 	log := newControllerTestLogger()
-	eb := &mockEventBus{}
+	eb := &mockEventBus{publishedCh: make(chan struct{}, 1)}
 	svc := NewService(client, "pat", nil, store, eb, log)
 	svc.SetCascadeTaskDeleter(noopCascadeTaskDeleter{})
 	router := gin.New()
