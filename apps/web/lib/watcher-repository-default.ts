@@ -40,6 +40,9 @@ export function clearWorkspaceScopedForm<
     baseBranch: string;
   },
 >(prev: T, workspaceId: string): T {
+  // No-op when the workspace didn't actually change, so re-selecting the current
+  // workspace doesn't wipe the user's workflow/step/repository choices.
+  if (prev.workspaceId === workspaceId) return prev;
   return {
     ...prev,
     workspaceId,

@@ -27,10 +27,10 @@ export function useRepositories(workspaceId: string | null, enabled = true, forc
   );
   const setRepositories = useAppStore((state) => state.setRepositories);
   const setRepositoriesLoading = useAppStore((state) => state.setRepositoriesLoading);
-  // Tracks the workspace whose fetch is currently in flight (not a bare bool):
-  // a fetch for one workspace must not block a fetch for another when the
-  // selected workspace changes mid-request.
-  const inFlightRef = useRef<string | null>(null);
+  // No in-flight ref: the effect deps (enabled/forceRefresh/workspaceId + stable
+  // store actions) don't change mid-fetch, so the effect can't re-run and start
+  // a duplicate fetch for the same workspace; `cancelled` discards stale results
+  // on workspace switch, and forcedRef/isLoaded gate re-fetches after success.
   const forcedRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -44,9 +44,8 @@ export function useRepositories(workspaceId: string | null, enabled = true, forc
   // isLoaded cache. forcedRef is set only on success so a failed fetch retries.
   useEffect(() => {
     if (!enabled || !workspaceId || !forceRefresh) return;
-    if (forcedRef.current === workspaceId || inFlightRef.current === workspaceId) return;
+    if (forcedRef.current === workspaceId) return;
     let cancelled = false;
-    inFlightRef.current = workspaceId;
     setRepositoriesLoading(workspaceId, true);
     listRepositories(workspaceId, undefined, { cache: "no-store" })
       .then((response) => {
@@ -58,7 +57,6 @@ export function useRepositories(workspaceId: string | null, enabled = true, forc
         // Leave forcedRef unset so the next mount retries; keep cached repos.
       })
       .finally(() => {
-        if (inFlightRef.current === workspaceId) inFlightRef.current = null;
         if (cancelled) return;
         setRepositoriesLoading(workspaceId, false);
       });
@@ -69,9 +67,8 @@ export function useRepositories(workspaceId: string | null, enabled = true, forc
 
   useEffect(() => {
     if (!enabled || !workspaceId || forceRefresh) return;
-    if (isLoaded || inFlightRef.current === workspaceId) return;
+    if (isLoaded) return;
     let cancelled = false;
-    inFlightRef.current = workspaceId;
     setRepositoriesLoading(workspaceId, true);
     listRepositories(workspaceId, undefined, { cache: "no-store" })
       .then((response) => {
@@ -83,7 +80,6 @@ export function useRepositories(workspaceId: string | null, enabled = true, forc
         setRepositories(workspaceId, []);
       })
       .finally(() => {
-        if (inFlightRef.current === workspaceId) inFlightRef.current = null;
         if (cancelled) return;
         setRepositoriesLoading(workspaceId, false);
       });
