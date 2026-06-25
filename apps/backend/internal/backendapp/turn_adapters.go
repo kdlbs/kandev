@@ -124,3 +124,21 @@ func (a *repositoryLookupAdapter) GetRepository(ctx context.Context, id string) 
 	}
 	return repo.WorkspaceID, repo.DefaultBranch, true
 }
+
+// RepositoryExists satisfies orchestrator.RepositoryChecker. It uses the
+// workspace listing (which excludes soft-deleted repos) so a definitive
+// "absent" is distinguishable from a transient error: a non-nil err lets the
+// dispatch pre-flight fail open, while (false, nil) means the bound repository
+// was removed and the watcher should self-heal.
+func (a *repositoryLookupAdapter) RepositoryExists(ctx context.Context, workspaceID, repositoryID string) (bool, error) {
+	repos, err := a.svc.ListRepositories(ctx, workspaceID)
+	if err != nil {
+		return false, err
+	}
+	for _, repo := range repos {
+		if repo.ID == repositoryID {
+			return true, nil
+		}
+	}
+	return false, nil
+}

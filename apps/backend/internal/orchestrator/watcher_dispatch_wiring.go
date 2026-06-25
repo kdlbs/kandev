@@ -47,6 +47,23 @@ func (s *Service) initWatcherCoordinatorLocked() {
 	if s.profileLookup != nil {
 		s.watcherCoordinator.SetProfileLookup(s.profileLookup)
 	}
+	if s.repoChecker != nil {
+		s.watcherCoordinator.SetRepositoryChecker(s.repoChecker)
+	}
+}
+
+// SetRepositoryChecker wires the deleted-repository pre-flight into the
+// coordinator (Linear/Jira/Sentry dispatch). Mirrors SetProfileLookup: safe to
+// call before or after SetIssueTaskCreator; the coordinator picks it up on its
+// next initWatcherCoordinatorLocked pass.
+func (s *Service) SetRepositoryChecker(r RepositoryChecker) {
+	s.mu.Lock()
+	s.repoChecker = r
+	coord := s.watcherCoordinator
+	s.mu.Unlock()
+	if coord != nil {
+		coord.SetRepositoryChecker(r)
+	}
 }
 
 // SetProfileLookup wires the soft-deleted-profile pre-flight check into both
