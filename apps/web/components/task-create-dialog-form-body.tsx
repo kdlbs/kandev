@@ -137,6 +137,7 @@ function AgentColumn({
         onValueChange={onAgentProfileChange}
         placeholder={placeholder}
         disabled={agentProfilesLoading || isCreatingSession || workflowAgentLocked}
+        triggerClassName="min-w-0"
       />
       {workflowAgentLocked && (
         <p className="text-[11px] text-muted-foreground mt-1">Agent set by workflow</p>
@@ -161,11 +162,11 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
   // branch strategy) live in the chip row above the description; this row
   // carries only agent and executor profile selectors.
   return (
-    <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
-      <div>
+    <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="min-w-0">
         <AgentColumn {...props} />
       </div>
-      <div>
+      <div className="min-w-0">
         <ExecutorProfileSelectorComponent
           options={executorProfileOptions}
           value={executorProfileId}
@@ -224,13 +225,14 @@ export const SessionSelectors = memo(function SessionSelectors({
   ExecutorProfileSelectorComponent,
 }: SessionSelectorsProps) {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+    <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
       <AgentSelectorComponent
         options={agentProfileOptions}
         value={agentProfileId}
         onValueChange={onAgentProfileChange}
         placeholder={agentProfilesLoading ? "Loading agent profiles..." : "Select agent profile"}
         disabled={agentProfilesLoading || isCreatingSession}
+        triggerClassName="min-w-0"
       />
       <ExecutorProfileSelectorComponent
         options={executorProfileOptions}
@@ -238,6 +240,7 @@ export const SessionSelectors = memo(function SessionSelectors({
         onValueChange={onExecutorProfileChange}
         placeholder={executorsLoading ? "Loading profiles..." : "Select profile"}
         disabled={executorsLoading || isCreatingSession}
+        triggerClassName="min-w-0"
       />
     </div>
   );

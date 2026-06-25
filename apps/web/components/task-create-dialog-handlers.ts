@@ -6,6 +6,7 @@ import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dial
 import { removeLocalStorage, setLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
+import { createDebugLogger } from "@/lib/debug/log";
 
 type TaskCreateLastUsedPatch = {
   repository_id?: string;
@@ -17,9 +18,12 @@ type TaskCreateLastUsedPatch = {
 let pendingLastUsed: TaskCreateLastUsedPatch = {};
 let lastUsedSync = Promise.resolve();
 const PENDING_LAST_USED_SYNC_KEY = "kandev.taskCreateLastUsed.pendingSync";
+const LOCAL_STORAGE_WRITE_EVENT = "localStorage-write";
+const lastUsedDebug = createDebugLogger("task-create:last-used");
 
 export function resetTaskCreateLastUsedSync() {
   pendingLastUsed = {};
+  lastUsedDebug("pending-reset");
 }
 
 function readPendingLastUsedSync(): TaskCreateLastUsedPatch {
@@ -39,6 +43,7 @@ function readPendingLastUsedSync(): TaskCreateLastUsedPatch {
         typeof record.executor_profile_id === "string" ? record.executor_profile_id : undefined,
     };
   } catch {
+    lastUsedDebug("pending-read-failed");
     return {};
   }
 }
@@ -50,18 +55,25 @@ function persistPendingLastUsedSync(patch: TaskCreateLastUsedPatch) {
 export function syncTaskCreateLastUsed(patch: TaskCreateLastUsedPatch) {
   pendingLastUsed = { ...readPendingLastUsedSync(), ...pendingLastUsed, ...patch };
   const payload = { ...pendingLastUsed };
+  lastUsedDebug("sync-queued", { patch, payload });
   persistPendingLastUsedSync(payload);
   lastUsedSync = lastUsedSync
     .catch(() => undefined)
     .then(() =>
       updateUserSettings({ task_create_last_used: payload })
         .then(() => {
+          lastUsedDebug("sync-success", { payload });
           if (JSON.stringify(pendingLastUsed) === JSON.stringify(payload)) {
             pendingLastUsed = {};
             removeLocalStorage(PENDING_LAST_USED_SYNC_KEY);
           }
         })
-        .catch(() => undefined),
+        .catch((error) => {
+          lastUsedDebug("sync-failed", {
+            payload,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }),
     );
 }
 
@@ -104,6 +116,11 @@ function useRepositoryHandlers(fs: DialogFormState, repositories: Repository[]) 
       if (isWorkspaceRepo) {
         setLocalStorage(STORAGE_KEYS.LAST_REPOSITORY_ID, value);
         syncTaskCreateLastUsed({ repository_id: value });
+        lastUsedDebug(LOCAL_STORAGE_WRITE_EVENT, {
+          key: "lastRepositoryId",
+          value,
+          row_key: key,
+        });
       }
       // Switching the repo invalidates whatever local-status the fresh-branch
       // panel had cached.
@@ -117,6 +134,7 @@ function useRepositoryHandlers(fs: DialogFormState, repositories: Repository[]) 
       fs.updateRepository(key, { branch: value });
       setLocalStorage(STORAGE_KEYS.LAST_BRANCH, value);
       syncTaskCreateLastUsed({ branch: value });
+      lastUsedDebug(LOCAL_STORAGE_WRITE_EVENT, { key: "lastBranch", value, row_key: key });
     },
     [fs],
   );
@@ -130,6 +148,7 @@ function useProfileAndNameHandlers(fs: DialogFormState) {
       fs.setAgentProfileId(value);
       setLocalStorage(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, value);
       syncTaskCreateLastUsed({ agent_profile_id: value });
+      lastUsedDebug(LOCAL_STORAGE_WRITE_EVENT, { key: "lastAgentProfileId", value });
     },
     [fs],
   );
@@ -138,6 +157,7 @@ function useProfileAndNameHandlers(fs: DialogFormState) {
       fs.setExecutorProfileId(value);
       setLocalStorage(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, value);
       syncTaskCreateLastUsed({ executor_profile_id: value });
+      lastUsedDebug(LOCAL_STORAGE_WRITE_EVENT, { key: "lastExecutorProfileId", value });
     },
     [fs],
   );

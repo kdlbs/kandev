@@ -166,8 +166,8 @@ export const AgentSelector = memo(function AgentSelector({
       emptyMessage="No agent found."
       disabled={disabled}
       dropdownLabel="Agent Profile"
-      className={`min-w-[380px]${disabled ? "" : ` ${CURSOR_POINTER_CLASS}`}`}
-      triggerClassName={triggerClassName}
+      className={disabled ? undefined : CURSOR_POINTER_CLASS}
+      triggerClassName={`min-w-0 ${triggerClassName ?? ""}`}
       testId="agent-profile-selector"
     />
   );
@@ -234,7 +234,7 @@ export const ExecutorProfileSelector = memo(function ExecutorProfileSelector({
       disabled={disabled}
       dropdownLabel="Executor Profile"
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
-      triggerClassName={triggerClassName}
+      triggerClassName={`min-w-0 ${triggerClassName ?? ""}`}
       testId="executor-profile-selector"
     />
   );

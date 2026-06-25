@@ -283,7 +283,7 @@ function SessionFormHeader({
         executorProfileName={executorProfileName}
       />
       {showAgentSelector && (
-        <div className="space-y-1.5">
+        <div className="min-w-0 space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">Agent Profile</label>
           <AgentSelector
             options={profileOptions}
@@ -291,6 +291,7 @@ function SessionFormHeader({
             onValueChange={onProfileChange}
             disabled={isCreating}
             placeholder="Select agent profile"
+            triggerClassName="min-w-0"
           />
         </div>
       )}

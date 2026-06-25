@@ -12,6 +12,7 @@ import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import { selectPreferredBranch } from "@/lib/utils";
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
+import { createDebugLogger } from "@/lib/debug/log";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { linkToTask } from "@/lib/links";
 import { INTENT_PLAN } from "@/lib/state/layout-manager";
@@ -20,6 +21,7 @@ import type { FileAttachment } from "@/components/task/chat/file-attachment";
 import type { MessageAttachment } from "@/lib/services/session-launch-service";
 
 type CreateTaskParams = Parameters<typeof createTask>[0];
+const selectionDebug = createDebugLogger("task-create:selection");
 
 export type { CreateTaskParams };
 
@@ -49,17 +51,32 @@ export function toMessageAttachments(
 
 export function autoSelectBranch(branchList: Branch[], setBranch: (value: string) => void): void {
   const lastUsedBranch = getLocalStorage<string | null>(STORAGE_KEYS.LAST_BRANCH, null);
-  if (
+  const lastUsedValid = Boolean(
     lastUsedBranch &&
     branchList.some((b) => {
       const displayName = b.type === "remote" && b.remote ? `${b.remote}/${b.name}` : b.name;
       return displayName === lastUsedBranch;
-    })
-  ) {
+    }),
+  );
+  if (lastUsedBranch && lastUsedValid) {
+    selectionDebug("branch-autopick", {
+      source: "localStorage:lastBranch",
+      pick: lastUsedBranch,
+      local_storage_value: lastUsedBranch,
+      local_storage_valid: true,
+      branch_count: branchList.length,
+    });
     setBranch(lastUsedBranch);
     return;
   }
   const preferredBranch = selectPreferredBranch(branchList);
+  selectionDebug("branch-autopick", {
+    source: preferredBranch ? "preferred" : "none",
+    pick: preferredBranch ?? "-",
+    local_storage_value: lastUsedBranch ?? "-",
+    local_storage_valid: lastUsedValid,
+    branch_count: branchList.length,
+  });
   if (preferredBranch) setBranch(preferredBranch);
 }
 

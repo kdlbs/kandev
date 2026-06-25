@@ -22,11 +22,14 @@ import {
   useWorkflowAgentProfileEffect,
 } from "@/components/task-create-dialog-autopick";
 import { computeSelectedRepoCount } from "@/components/task-create-dialog-computed";
+import { createDebugLogger } from "@/lib/debug/log";
 
 // Re-export autopick hooks for callers that imported them from this module.
 export { useWorkflowAgentProfileEffect };
 // Also re-exported for the test file, which expects the symbol to live here.
 export { decideAgentProfileAutopick } from "@/components/task-create-dialog-autopick";
+
+const selectionDebug = createDebugLogger("task-create:selection");
 
 export function useWorkflowStepsEffect(fs: DialogFormState, workflowId: string | null) {
   const { selectedWorkflowId, setFetchedSteps } = fs;
@@ -68,11 +71,24 @@ export function useRepositoryAutoSelectEffect(
     if (rows.length > 0) return;
     const lastUsedRepoId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_REPOSITORY_ID, null);
     let pickId: string | null = null;
+    let source = "empty-row";
     if (lastUsedRepoId && repositories.some((r: Repository) => r.id === lastUsedRepoId)) {
       pickId = lastUsedRepoId;
+      source = "localStorage:lastRepositoryId";
     } else if (repositories.length === 1) {
       pickId = repositories[0].id;
+      source = "single-workspace-repo";
     }
+    selectionDebug("repository-autopick", {
+      workspace_id: workspaceId,
+      local_storage_id: lastUsedRepoId ?? "-",
+      local_storage_valid: Boolean(
+        lastUsedRepoId && repositories.some((r: Repository) => r.id === lastUsedRepoId),
+      ),
+      repo_count: repositories.length,
+      source,
+      pick: pickId ?? "-",
+    });
     // Use the functional setter so the deferred microtask sees fresh state.
     // Without this, a sibling effect (resetTaskForm / useLockedFieldSync) that
     // seeds rows from `initialValues.repositoryId` synchronously races with
@@ -80,7 +96,13 @@ export function useRepositoryAutoSelectEffect(
     // and would blindly clobber the initialValues-seeded row.
     void Promise.resolve().then(() => {
       setRepositories((prev) => {
-        if (prev.length > 0) return prev;
+        if (prev.length > 0) {
+          selectionDebug("repository-autopick-skip", {
+            reason: "rows-seeded-before-microtask",
+            row_count: prev.length,
+          });
+          return prev;
+        }
         return [
           pickId
             ? { key: "row-0", repositoryId: pickId, branch: "" }
@@ -307,6 +329,102 @@ function useMultiRepoGuardEffect(
   }, [open, executorProfileId, executors, selectedRepoCount, setExecutorProfileId]);
 }
 
+function useExecutorIdAutopickEffect({
+  open,
+  executorId,
+  executors,
+  workspaceDefaults,
+  noRepository,
+  preferLocalExecutor,
+  setExecutorId,
+}: {
+  open: boolean;
+  executorId: string;
+  executors: Executor[];
+  workspaceDefaults: StoreSelections["workspaceDefaults"];
+  noRepository: boolean;
+  preferLocalExecutor: boolean;
+  setExecutorId: (id: string) => void;
+}) {
+  useEffect(() => {
+    if (!open || executorId || executors.length === 0) return;
+    const pick = pickDefaultExecutorId(
+      executors,
+      workspaceDefaults,
+      noRepository,
+      preferLocalExecutor,
+    );
+    selectionDebug("executor-autopick", {
+      current: executorId || "-",
+      pick: pick ?? "-",
+      executor_count: executors.length,
+      workspace_default: workspaceDefaults?.default_executor_id ?? "-",
+      no_repository: noRepository,
+      prefer_local_executor: preferLocalExecutor,
+    });
+    if (pick) void Promise.resolve().then(() => setExecutorId(pick));
+  }, [
+    open,
+    executorId,
+    executors,
+    workspaceDefaults,
+    setExecutorId,
+    noRepository,
+    preferLocalExecutor,
+  ]);
+}
+
+function useExecutorProfileAutopickEffect({
+  open,
+  executorProfileId,
+  executors,
+  workspaceDefaults,
+  noRepository,
+  preferLocalExecutor,
+  setExecutorProfileId,
+}: {
+  open: boolean;
+  executorProfileId: string;
+  executors: Executor[];
+  workspaceDefaults: StoreSelections["workspaceDefaults"];
+  noRepository: boolean;
+  preferLocalExecutor: boolean;
+  setExecutorProfileId: (id: string) => void;
+}) {
+  useEffect(() => {
+    // Auto-select executor profile: last used (localStorage) → source-aware
+    // executor default → first eligible profile.
+    if (!open || executorProfileId || executors.length === 0) return;
+    const pick = pickDefaultExecutorProfileId(
+      executors,
+      workspaceDefaults,
+      noRepository,
+      preferLocalExecutor,
+    );
+    const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, null);
+    const allProfiles = flattenExecutorProfiles(executors);
+    selectionDebug("executor-profile-autopick", {
+      current: executorProfileId || "-",
+      pick: pick ?? "-",
+      local_storage_id: lastId ?? "-",
+      local_storage_valid: Boolean(lastId && allProfiles.some((p) => p.id === lastId)),
+      profile_count: allProfiles.length,
+      workspace_default_executor: workspaceDefaults?.default_executor_id ?? "-",
+      no_repository: noRepository,
+      prefer_local_executor: preferLocalExecutor,
+    });
+    if (pick) void Promise.resolve().then(() => setExecutorProfileId(pick));
+  }, [
+    open,
+    executorProfileId,
+    executors,
+    workspaceDefaults,
+    setExecutorProfileId,
+    noRepository,
+    preferLocalExecutor,
+  ]);
+}
+
 export function useDefaultSelectionsEffect(
   fs: DialogFormState,
   open: boolean,
@@ -327,46 +445,24 @@ export function useDefaultSelectionsEffect(
   const preferLocalExecutor =
     !noRepository && !useRemote && repositories.some((row) => Boolean(row.localPath));
   useAgentProfileAutopickEffect(fs, open, sel, workflows);
-
-  useEffect(() => {
-    if (!open || executorId || executors.length === 0) return;
-    const pick = pickDefaultExecutorId(
-      executors,
-      workspaceDefaults,
-      noRepository,
-      preferLocalExecutor,
-    );
-    if (pick) void Promise.resolve().then(() => setExecutorId(pick));
-  }, [
+  useExecutorIdAutopickEffect({
     open,
     executorId,
     executors,
     workspaceDefaults,
-    setExecutorId,
     noRepository,
     preferLocalExecutor,
-  ]);
-
-  useEffect(() => {
-    // Auto-select executor profile: last used (localStorage) → source-aware
-    // executor default → first eligible profile.
-    if (!open || executorProfileId || executors.length === 0) return;
-    const pick = pickDefaultExecutorProfileId(
-      executors,
-      workspaceDefaults,
-      noRepository,
-      preferLocalExecutor,
-    );
-    if (pick) void Promise.resolve().then(() => setExecutorProfileId(pick));
-  }, [
+    setExecutorId,
+  });
+  useExecutorProfileAutopickEffect({
     open,
     executorProfileId,
     executors,
     workspaceDefaults,
-    setExecutorProfileId,
     noRepository,
     preferLocalExecutor,
-  ]);
+    setExecutorProfileId,
+  });
 
   // Derive executorId from the selected executor profile
   useEffect(() => {
@@ -374,6 +470,10 @@ export function useDefaultSelectionsEffect(
     for (const executor of executors) {
       const match = (executor.profiles ?? []).find((p) => p.id === executorProfileId);
       if (match) {
+        selectionDebug("executor-derived-from-profile", {
+          executor_profile_id: executorProfileId,
+          executor_id: executor.id,
+        });
         void Promise.resolve().then(() => setExecutorId(executor.id));
         return;
       }

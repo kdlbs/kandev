@@ -65,24 +65,26 @@ export function SelectorsRow({
 }: SelectorsRowProps) {
   const noAgents = profileOptions.length === 0;
   return (
-    <div className={"grid gap-4 grid-cols-1" + (hideExecutor ? "" : " sm:grid-cols-2")}>
-      <div>
+    <div className={"grid min-w-0 grid-cols-1 gap-4" + (hideExecutor ? "" : " sm:grid-cols-2")}>
+      <div className="min-w-0">
         <AgentSelector
           options={profileOptions}
           value={agentProfileId}
           onValueChange={onAgentProfileChange}
           disabled={disabled || noAgents}
           placeholder={noAgents ? "No agents found" : "Select agent profile"}
+          triggerClassName="min-w-0"
         />
       </div>
       {!hideExecutor && (
-        <div>
+        <div className="min-w-0">
           <ExecutorProfileSelector
             options={executorProfileOptions}
             value={executorProfileId}
             onValueChange={onExecutorProfileChange}
             disabled={disabled}
             placeholder="Select executor profile"
+            triggerClassName="min-w-0"
           />
         </div>
       )}
