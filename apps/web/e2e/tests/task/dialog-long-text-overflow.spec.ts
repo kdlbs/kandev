@@ -22,6 +22,11 @@ async function assertProfileDropdownFits(trigger: Locator, dropdownLabel: string
     .last();
   await expect(dropdown).toBeVisible();
   await assertLocatorWithinViewportX(dropdown, dropdownLabel);
+  const searchInput = dropdown.getByPlaceholder(/Search (agents|profiles)/);
+  if ((await searchInput.count()) > 0) {
+    await searchInput.click();
+    await expect(searchInput).toBeFocused();
+  }
   await trigger.page().keyboard.press("Escape");
 }
 
