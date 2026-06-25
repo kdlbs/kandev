@@ -22,7 +22,7 @@ import {
   useWorkflowAgentProfileEffect,
 } from "@/components/task-create-dialog-autopick";
 import { computeSelectedRepoCount } from "@/components/task-create-dialog-computed";
-import { createDebugLogger } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 // Re-export autopick hooks for callers that imported them from this module.
 export { useWorkflowAgentProfileEffect };
@@ -297,6 +297,13 @@ function pickDefaultExecutorProfileId(
   return executorProfile?.id ?? eligibleProfiles[0].id;
 }
 
+type ExecutorAutopickContext = {
+  executors: Executor[];
+  workspaceDefaults: StoreSelections["workspaceDefaults"];
+  noRepository: boolean;
+  preferLocalExecutor: boolean;
+};
+
 function useMultiRepoGuardEffect(
   open: boolean,
   executorProfileId: string,
@@ -332,20 +339,15 @@ function useMultiRepoGuardEffect(
 function useExecutorIdAutopickEffect({
   open,
   executorId,
-  executors,
-  workspaceDefaults,
-  noRepository,
-  preferLocalExecutor,
+  context,
   setExecutorId,
 }: {
   open: boolean;
   executorId: string;
-  executors: Executor[];
-  workspaceDefaults: StoreSelections["workspaceDefaults"];
-  noRepository: boolean;
-  preferLocalExecutor: boolean;
+  context: ExecutorAutopickContext;
   setExecutorId: (id: string) => void;
 }) {
+  const { executors, workspaceDefaults, noRepository, preferLocalExecutor } = context;
   useEffect(() => {
     if (!open || executorId || executors.length === 0) return;
     const pick = pickDefaultExecutorId(
@@ -377,20 +379,15 @@ function useExecutorIdAutopickEffect({
 function useExecutorProfileAutopickEffect({
   open,
   executorProfileId,
-  executors,
-  workspaceDefaults,
-  noRepository,
-  preferLocalExecutor,
+  context,
   setExecutorProfileId,
 }: {
   open: boolean;
   executorProfileId: string;
-  executors: Executor[];
-  workspaceDefaults: StoreSelections["workspaceDefaults"];
-  noRepository: boolean;
-  preferLocalExecutor: boolean;
+  context: ExecutorAutopickContext;
   setExecutorProfileId: (id: string) => void;
 }) {
+  const { executors, workspaceDefaults, noRepository, preferLocalExecutor } = context;
   useEffect(() => {
     // Auto-select executor profile: last used (localStorage) → source-aware
     // executor default → first eligible profile.
@@ -401,18 +398,20 @@ function useExecutorProfileAutopickEffect({
       noRepository,
       preferLocalExecutor,
     );
-    const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, null);
-    const allProfiles = flattenExecutorProfiles(executors);
-    selectionDebug("executor-profile-autopick", {
-      current: "-",
-      pick: pick ?? "-",
-      local_storage_id: lastId ?? "-",
-      local_storage_valid: Boolean(lastId && allProfiles.some((p) => p.id === lastId)),
-      profile_count: allProfiles.length,
-      workspace_default_executor: workspaceDefaults?.default_executor_id ?? "-",
-      no_repository: noRepository,
-      prefer_local_executor: preferLocalExecutor,
-    });
+    if (isDebug()) {
+      const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, null);
+      const allProfiles = flattenExecutorProfiles(executors);
+      selectionDebug("executor-profile-autopick", {
+        current: "-",
+        pick: pick ?? "-",
+        local_storage_id: lastId ?? "-",
+        local_storage_valid: Boolean(lastId && allProfiles.some((p) => p.id === lastId)),
+        profile_count: allProfiles.length,
+        workspace_default_executor: workspaceDefaults?.default_executor_id ?? "-",
+        no_repository: noRepository,
+        prefer_local_executor: preferLocalExecutor,
+      });
+    }
     if (pick) void Promise.resolve().then(() => setExecutorProfileId(pick));
   }, [
     open,
@@ -444,23 +443,21 @@ export function useDefaultSelectionsEffect(
   } = fs;
   const preferLocalExecutor =
     !noRepository && !useRemote && repositories.some((row) => Boolean(row.localPath));
+  const executorAutopickContext = useMemo(
+    () => ({ executors, workspaceDefaults, noRepository, preferLocalExecutor }),
+    [executors, workspaceDefaults, noRepository, preferLocalExecutor],
+  );
   useAgentProfileAutopickEffect(fs, open, sel, workflows);
   useExecutorIdAutopickEffect({
     open,
     executorId,
-    executors,
-    workspaceDefaults,
-    noRepository,
-    preferLocalExecutor,
+    context: executorAutopickContext,
     setExecutorId,
   });
   useExecutorProfileAutopickEffect({
     open,
     executorProfileId,
-    executors,
-    workspaceDefaults,
-    noRepository,
-    preferLocalExecutor,
+    context: executorAutopickContext,
     setExecutorProfileId,
   });
 

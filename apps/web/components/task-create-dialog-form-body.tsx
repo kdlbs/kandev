@@ -41,6 +41,7 @@ type CreateEditSelectorsProps = {
     disabled: boolean;
     placeholder: string;
     triggerClassName?: string;
+    popoverPortal?: boolean;
   }>;
   ExecutorProfileSelectorComponent: React.ComponentType<{
     options: Array<{ value: string; label: string; renderLabel?: () => React.ReactNode }>;
@@ -49,6 +50,7 @@ type CreateEditSelectorsProps = {
     disabled: boolean;
     placeholder: string;
     triggerClassName?: string;
+    popoverPortal?: boolean;
   }>;
   workflowAgentLocked: boolean;
   noCompatibleAgent: boolean;
@@ -137,7 +139,7 @@ function AgentColumn({
         onValueChange={onAgentProfileChange}
         placeholder={placeholder}
         disabled={agentProfilesLoading || isCreatingSession || workflowAgentLocked}
-        triggerClassName="min-w-0"
+        popoverPortal
       />
       {workflowAgentLocked && (
         <p className="text-[11px] text-muted-foreground mt-1">Agent set by workflow</p>
@@ -173,6 +175,7 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
           onValueChange={onExecutorProfileChange}
           placeholder={executorsLoading ? "Loading profiles..." : "Select profile"}
           disabled={executorsLoading}
+          popoverPortal
         />
       </div>
     </div>
@@ -200,6 +203,7 @@ type SessionSelectorsProps = {
     disabled: boolean;
     placeholder: string;
     triggerClassName?: string;
+    popoverPortal?: boolean;
   }>;
   ExecutorProfileSelectorComponent: React.ComponentType<{
     options: Array<{ value: string; label: string; renderLabel?: () => React.ReactNode }>;
@@ -208,6 +212,7 @@ type SessionSelectorsProps = {
     disabled: boolean;
     placeholder: string;
     triggerClassName?: string;
+    popoverPortal?: boolean;
   }>;
 };
 
@@ -232,7 +237,7 @@ export const SessionSelectors = memo(function SessionSelectors({
         onValueChange={onAgentProfileChange}
         placeholder={agentProfilesLoading ? "Loading agent profiles..." : "Select agent profile"}
         disabled={agentProfilesLoading || isCreatingSession}
-        triggerClassName="min-w-0"
+        popoverPortal
       />
       <ExecutorProfileSelectorComponent
         options={executorProfileOptions}
@@ -240,7 +245,7 @@ export const SessionSelectors = memo(function SessionSelectors({
         onValueChange={onExecutorProfileChange}
         placeholder={executorsLoading ? "Loading profiles..." : "Select profile"}
         disabled={executorsLoading || isCreatingSession}
-        triggerClassName="min-w-0"
+        popoverPortal
       />
     </div>
   );

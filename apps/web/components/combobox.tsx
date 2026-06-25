@@ -49,6 +49,7 @@ interface ComboboxProps {
   dropdownTestId?: string;
   popoverSide?: "top" | "right" | "bottom" | "left";
   popoverAlign?: "start" | "center" | "end";
+  popoverPortal?: boolean;
   /** When true, the trigger always renders the plain label text instead of renderLabel. */
   plainTrigger?: boolean;
   /** Optional custom filter; defaults to cmdk's built-in command-score. */
@@ -151,6 +152,7 @@ export const Combobox = memo(function Combobox({
   dropdownTestId,
   popoverSide,
   popoverAlign = "start",
+  popoverPortal = false,
   plainTrigger = false,
   filter,
   headerAction,
@@ -201,6 +203,7 @@ export const Combobox = memo(function Combobox({
         )}
         side={popoverSide}
         align={popoverAlign}
+        portal={popoverPortal}
       >
         <Command
           value={highlighted}

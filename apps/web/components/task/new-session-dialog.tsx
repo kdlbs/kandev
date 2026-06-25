@@ -291,7 +291,7 @@ function SessionFormHeader({
             onValueChange={onProfileChange}
             disabled={isCreating}
             placeholder="Select agent profile"
-            triggerClassName="min-w-0"
+            popoverPortal
           />
         </div>
       )}

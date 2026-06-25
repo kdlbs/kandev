@@ -73,7 +73,7 @@ export function SelectorsRow({
           onValueChange={onAgentProfileChange}
           disabled={disabled || noAgents}
           placeholder={noAgents ? "No agents found" : "Select agent profile"}
-          triggerClassName="min-w-0"
+          popoverPortal
         />
       </div>
       {!hideExecutor && (
@@ -84,7 +84,7 @@ export function SelectorsRow({
             onValueChange={onExecutorProfileChange}
             disabled={disabled}
             placeholder="Select executor profile"
-            triggerClassName="min-w-0"
+            popoverPortal
           />
         </div>
       )}
