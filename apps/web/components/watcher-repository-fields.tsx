@@ -95,6 +95,11 @@ export function WatcherRepositoryFields({
   }, [workspaceId, setRepositories]);
   const branchSource = repositoryId ? ({ kind: "id", workspaceId, repositoryId } as const) : null;
   const { branches, isLoading: branchesLoading } = useBranches(branchSource, !!repositoryId);
+  // A branch name can appear twice (local + remote tracking, e.g. "main" and
+  // origin/"main"), which would emit two <SelectItem value="main"> — Radix then
+  // renders every matching item's text in the trigger ("mainmain") and React
+  // warns on duplicate keys. Dedupe by name so each branch is one option.
+  const uniqueBranchNames = Array.from(new Set(branches.map((b) => b.name)));
   return (
     <div className="grid grid-cols-2 gap-4">
       <PickSelect
@@ -116,7 +121,7 @@ export function WatcherRepositoryFields({
         placeholder={branchPlaceholder(repositoryId, branchesLoading)}
         items={[
           { id: DEFAULT_BRANCH, label: DEFAULT_BRANCH_LABEL },
-          ...branches.map((b) => ({ id: b.name, label: b.name })),
+          ...uniqueBranchNames.map((name) => ({ id: name, label: name })),
         ]}
         disabled={!repositoryId || branchesLoading}
       />
