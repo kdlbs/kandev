@@ -26,6 +26,7 @@ import { VoiceInputButton } from "@/components/task/chat/voice-input-button";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 import { useTaskCreatePromptMention } from "@/hooks/use-task-create-prompt-mention";
+import { cn } from "@/lib/utils";
 
 const CURSOR_POINTER_CLASS = "cursor-pointer";
 
@@ -146,6 +147,7 @@ type AgentSelectorProps = {
   disabled: boolean;
   placeholder: string;
   triggerClassName?: string;
+  popoverPortal?: boolean;
 };
 
 export const AgentSelector = memo(function AgentSelector({
@@ -155,6 +157,7 @@ export const AgentSelector = memo(function AgentSelector({
   disabled,
   placeholder,
   triggerClassName,
+  popoverPortal,
 }: AgentSelectorProps) {
   return (
     <Combobox
@@ -166,8 +169,9 @@ export const AgentSelector = memo(function AgentSelector({
       emptyMessage="No agent found."
       disabled={disabled}
       dropdownLabel="Agent Profile"
-      className={`min-w-[380px]${disabled ? "" : ` ${CURSOR_POINTER_CLASS}`}`}
-      triggerClassName={triggerClassName}
+      className={disabled ? undefined : CURSOR_POINTER_CLASS}
+      triggerClassName={cn("min-w-0", triggerClassName)}
+      popoverPortal={popoverPortal}
       testId="agent-profile-selector"
     />
   );
@@ -180,6 +184,7 @@ type ExecutorSelectorProps = {
   disabled: boolean;
   placeholder: string;
   triggerClassName?: string;
+  popoverPortal?: boolean;
 };
 
 export const ExecutorSelector = memo(function ExecutorSelector({
@@ -189,6 +194,7 @@ export const ExecutorSelector = memo(function ExecutorSelector({
   disabled,
   placeholder,
   triggerClassName,
+  popoverPortal,
 }: ExecutorSelectorProps) {
   return (
     <Combobox
@@ -201,6 +207,7 @@ export const ExecutorSelector = memo(function ExecutorSelector({
       dropdownLabel="Executor"
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
       triggerClassName={triggerClassName}
+      popoverPortal={popoverPortal}
       showSearch={false}
     />
   );
@@ -213,6 +220,7 @@ type ExecutorProfileSelectorProps = {
   disabled: boolean;
   placeholder: string;
   triggerClassName?: string;
+  popoverPortal?: boolean;
 };
 
 export const ExecutorProfileSelector = memo(function ExecutorProfileSelector({
@@ -222,6 +230,7 @@ export const ExecutorProfileSelector = memo(function ExecutorProfileSelector({
   disabled,
   placeholder,
   triggerClassName,
+  popoverPortal,
 }: ExecutorProfileSelectorProps) {
   return (
     <Combobox
@@ -234,7 +243,8 @@ export const ExecutorProfileSelector = memo(function ExecutorProfileSelector({
       disabled={disabled}
       dropdownLabel="Executor Profile"
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
-      triggerClassName={triggerClassName}
+      triggerClassName={cn("min-w-0", triggerClassName)}
+      popoverPortal={popoverPortal}
       testId="executor-profile-selector"
     />
   );

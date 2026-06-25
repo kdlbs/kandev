@@ -102,3 +102,27 @@ export async function assertNoDocumentHorizontalOverflow(
     `${label}: scrollWidth (${widths.scroll}) exceeds clientWidth (${widths.client})`,
   ).toBeLessThanOrEqual(widths.client + 1);
 }
+
+/**
+ * Asserts that a visible locator fits inside the viewport horizontally.
+ * Useful for popovers that portal outside their dialog/container.
+ */
+export async function assertLocatorWithinViewportX(
+  locator: Locator,
+  label = "element",
+): Promise<void> {
+  const box = await locator.boundingBox();
+  expect(box, `${label}: locator has no bounding box`).not.toBeNull();
+  if (!box) return;
+  const viewport = locator.page().viewportSize();
+  expect(viewport, `${label}: page has no viewport`).not.toBeNull();
+  if (!viewport) return;
+  expect(
+    box.x,
+    `${label}: left edge ${box.x.toFixed(1)} is outside viewport`,
+  ).toBeGreaterThanOrEqual(-1);
+  expect(
+    box.x + box.width,
+    `${label}: right edge ${(box.x + box.width).toFixed(1)} exceeds viewport ${viewport.width}`,
+  ).toBeLessThanOrEqual(viewport.width + 1);
+}

@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
-import { createDebugLogger } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import type { DialogFormState, StoreSelections } from "@/components/task-create-dialog-types";
 
 /**
@@ -43,6 +43,7 @@ export function decideAgentProfileAutopick(input: {
   authLoaded: boolean;
   executorProfileId: string;
   hasExecutors: boolean;
+  lastAgentProfileId: string | null;
   defaultAgentProfileId: string | null;
 }): AutopickDecision {
   if (!input.open) return { kind: "skip", reason: "closed" };
@@ -63,7 +64,7 @@ export function decideAgentProfileAutopick(input: {
   }
   if (input.compatibleAgentProfiles.length === 0) return { kind: "skip", reason: "no-compatible" };
 
-  const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, null);
+  const lastId = input.lastAgentProfileId;
   if (lastId && input.compatibleAgentProfiles.some((p) => p.id === lastId)) {
     return { kind: "pick", source: "lastId", id: lastId };
   }
@@ -72,6 +73,39 @@ export function decideAgentProfileAutopick(input: {
     return { kind: "pick", source: "defId", id: defId };
   }
   return { kind: "pick", source: "first", id: input.compatibleAgentProfiles[0].id };
+}
+
+function buildAgentAutopickDebugFields(input: {
+  decision: AutopickDecision;
+  agentProfileId: string;
+  selectedWorkflowId: string | null;
+  executorProfileId: string;
+  agentProfiles: AgentProfileOption[];
+  compatibleAgentProfiles: AgentProfileOption[];
+  authLoaded: boolean;
+  lastAgentProfileId: string | null;
+  defaultAgentProfileId: string | null;
+}) {
+  const lastId = input.lastAgentProfileId;
+  const defId = input.defaultAgentProfileId;
+  return {
+    reason: input.decision.kind === "pick" ? input.decision.source : input.decision.reason,
+    pick: input.decision.kind === "pick" ? input.decision.id : "-",
+    current: input.agentProfileId || "-",
+    workflow_id: input.selectedWorkflowId ?? "-",
+    executor_profile_id: input.executorProfileId || "-",
+    local_storage_id: lastId ?? "-",
+    local_storage_valid: Boolean(
+      lastId && input.compatibleAgentProfiles.some((p) => p.id === lastId),
+    ),
+    workspace_default_id: defId ?? "-",
+    workspace_default_valid: Boolean(
+      defId && input.compatibleAgentProfiles.some((p) => p.id === defId),
+    ),
+    agent_count: input.agentProfiles.length,
+    compat_count: input.compatibleAgentProfiles.length,
+    auth_loaded: input.authLoaded,
+  };
 }
 
 export function useWorkflowAgentProfileEffect(
@@ -156,6 +190,11 @@ export function useAgentProfileAutopickEffect(
     const workflowHasAgent = selectedWorkflowId
       ? workflows.some((w) => w.id === selectedWorkflowId && w.agent_profile_id)
       : false;
+    const lastAgentProfileId = getLocalStorage<string | null>(
+      STORAGE_KEYS.LAST_AGENT_PROFILE_ID,
+      null,
+    );
+    const defaultAgentProfileId = workspaceDefaults?.default_agent_profile_id ?? null;
     const decision = decideAgentProfileAutopick({
       open,
       agentProfileId,
@@ -166,18 +205,25 @@ export function useAgentProfileAutopickEffect(
       authLoaded,
       executorProfileId,
       hasExecutors: executors.length > 0,
-      defaultAgentProfileId: workspaceDefaults?.default_agent_profile_id ?? null,
+      lastAgentProfileId,
+      defaultAgentProfileId,
     });
-    autopickDebug(decision.kind, {
-      reason: decision.kind === "pick" ? decision.source : decision.reason,
-      pick: decision.kind === "pick" ? decision.id : "-",
-      current: agentProfileId || "-",
-      workflow_id: selectedWorkflowId ?? "-",
-      executor_profile_id: executorProfileId || "-",
-      agent_count: agentProfiles.length,
-      compat_count: compatibleAgentProfiles.length,
-      auth_loaded: authLoaded,
-    });
+    if (isDebug()) {
+      autopickDebug(
+        decision.kind,
+        buildAgentAutopickDebugFields({
+          decision,
+          agentProfileId,
+          selectedWorkflowId,
+          executorProfileId,
+          agentProfiles,
+          compatibleAgentProfiles,
+          authLoaded,
+          lastAgentProfileId,
+          defaultAgentProfileId,
+        }),
+      );
+    }
     if (decision.kind === "pick") {
       const id = decision.id;
       void Promise.resolve().then(() => setAgentProfileId(id));

@@ -41,6 +41,7 @@ type CreateEditSelectorsProps = {
     disabled: boolean;
     placeholder: string;
     triggerClassName?: string;
+    popoverPortal?: boolean;
   }>;
   ExecutorProfileSelectorComponent: React.ComponentType<{
     options: Array<{ value: string; label: string; renderLabel?: () => React.ReactNode }>;
@@ -49,6 +50,7 @@ type CreateEditSelectorsProps = {
     disabled: boolean;
     placeholder: string;
     triggerClassName?: string;
+    popoverPortal?: boolean;
   }>;
   workflowAgentLocked: boolean;
   noCompatibleAgent: boolean;
@@ -137,6 +139,7 @@ function AgentColumn({
         onValueChange={onAgentProfileChange}
         placeholder={placeholder}
         disabled={agentProfilesLoading || isCreatingSession || workflowAgentLocked}
+        popoverPortal
       />
       {workflowAgentLocked && (
         <p className="text-[11px] text-muted-foreground mt-1">Agent set by workflow</p>
@@ -161,17 +164,18 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
   // branch strategy) live in the chip row above the description; this row
   // carries only agent and executor profile selectors.
   return (
-    <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
-      <div>
+    <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="min-w-0">
         <AgentColumn {...props} />
       </div>
-      <div>
+      <div className="min-w-0">
         <ExecutorProfileSelectorComponent
           options={executorProfileOptions}
           value={executorProfileId}
           onValueChange={onExecutorProfileChange}
           placeholder={executorsLoading ? "Loading profiles..." : "Select profile"}
           disabled={executorsLoading}
+          popoverPortal
         />
       </div>
     </div>
@@ -199,6 +203,7 @@ type SessionSelectorsProps = {
     disabled: boolean;
     placeholder: string;
     triggerClassName?: string;
+    popoverPortal?: boolean;
   }>;
   ExecutorProfileSelectorComponent: React.ComponentType<{
     options: Array<{ value: string; label: string; renderLabel?: () => React.ReactNode }>;
@@ -207,6 +212,7 @@ type SessionSelectorsProps = {
     disabled: boolean;
     placeholder: string;
     triggerClassName?: string;
+    popoverPortal?: boolean;
   }>;
 };
 
@@ -224,13 +230,14 @@ export const SessionSelectors = memo(function SessionSelectors({
   ExecutorProfileSelectorComponent,
 }: SessionSelectorsProps) {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+    <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
       <AgentSelectorComponent
         options={agentProfileOptions}
         value={agentProfileId}
         onValueChange={onAgentProfileChange}
         placeholder={agentProfilesLoading ? "Loading agent profiles..." : "Select agent profile"}
         disabled={agentProfilesLoading || isCreatingSession}
+        popoverPortal
       />
       <ExecutorProfileSelectorComponent
         options={executorProfileOptions}
@@ -238,6 +245,7 @@ export const SessionSelectors = memo(function SessionSelectors({
         onValueChange={onExecutorProfileChange}
         placeholder={executorsLoading ? "Loading profiles..." : "Select profile"}
         disabled={executorsLoading || isCreatingSession}
+        popoverPortal
       />
     </div>
   );

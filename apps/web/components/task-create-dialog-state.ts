@@ -24,6 +24,9 @@ import {
   useRepositoriesState,
 } from "@/components/task-create-dialog-repositories-state";
 import { useDialogComputed } from "@/components/task-create-dialog-computed";
+import { createDebugLogger } from "@/lib/debug/log";
+
+const stateDebug = createDebugLogger("task-create:state");
 
 export type {
   StepType,
@@ -88,6 +91,15 @@ function useFormResetEffects({
     setOpenCycle((c) => c + 1);
 
     const defaults = resolveFormDefaults(initialValues, workspaceId);
+    stateDebug("open-reset", {
+      workspace_id: workspaceId ?? "-",
+      workflow_id: workflowId ?? "-",
+      source: defaults.source,
+      title_present: defaults.name.trim().length > 0,
+      description_present: defaults.description.trim().length > 0,
+      initial_repository_id: initialValues?.repositoryId ?? "-",
+      initial_branch: initialValues?.branch ?? initialValues?.checkoutBranch ?? "-",
+    });
     setCurrentDefaults(defaults);
     resetTaskForm(resetters, defaults.name, defaults.description, workflowId, initialValues);
     setDraftDescription(defaults.description);
@@ -96,6 +108,11 @@ function useFormResetEffects({
 
   useEffect(() => {
     if (!open) return;
+    stateDebug("discovery-reset", {
+      workspace_id: workspaceId ?? "-",
+      github_url: initialValues?.githubUrl ?? "-",
+      seeded_remote_branch: initialValues?.checkoutBranch ?? initialValues?.branch ?? "-",
+    });
     resetDiscoveryState(resetters, initialValues);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, workspaceId]);
@@ -121,7 +138,17 @@ function resolveFormDefaults(
   return {
     name: draft?.title ?? initTitle,
     description: draft?.description ?? initDesc,
+    source: resolveDefaultsSource(Boolean(draft), initialValues),
   };
+}
+
+function resolveDefaultsSource(
+  hasDraft: boolean,
+  initialValues: TaskCreateDialogInitialValues | undefined,
+) {
+  if (hasDraft) return "draft";
+  if (hasUserContent(initialValues)) return "initial-values";
+  return "empty";
 }
 
 /** Resets task form fields to specified values */

@@ -65,6 +65,16 @@
  *     [file-browser:changes]  session.workspace.file.changes events + folder refresh
  *
  *   Task-create dialog (bug: "No compatible agent profiles for <executor>")
+ *     [task-create:state]     dialog open-cycle reset decisions: draft vs
+ *                              initial values, seeded repo/branch hints, and
+ *                              source-mode/discovery reset.
+ *     [task-create:selection] repository/executor/executor-profile auto-pick
+ *                              decisions: localStorage id, validity, workspace
+ *                              defaults from settings, selected source, and
+ *                              races where another effect seeded rows first.
+ *     [task-create:last-used] manual selector persistence: localStorage writes,
+ *                              pending task_create_last_used payloads, DB sync
+ *                              success/failure, and pending-sync recovery.
  *     [executor-compat:specs]  remote-auth catalog fetch (count + agent ids)
  *     [executor-compat]        per-agent compat decision: ok + reason
  *                              (no-spec / no-creds / files-match / env-secret / …)
