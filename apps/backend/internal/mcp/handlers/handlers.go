@@ -757,22 +757,22 @@ func startStepAgentProfile(steps []*workflowmodels.WorkflowStep) string {
 	if len(steps) == 0 {
 		return ""
 	}
-	var first *workflowmodels.WorkflowStep
+	var firstByPosition *workflowmodels.WorkflowStep
 	for _, step := range steps {
 		if step == nil {
 			continue
 		}
-		if first == nil {
-			first = step
+		if firstByPosition == nil || step.Position < firstByPosition.Position {
+			firstByPosition = step
 		}
 		if step.IsStartStep {
 			return step.AgentProfileID
 		}
 	}
-	if first == nil {
+	if firstByPosition == nil {
 		return ""
 	}
-	return first.AgentProfileID
+	return firstByPosition.AgentProfileID
 }
 
 func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, config mcpAutoStartConfig) {

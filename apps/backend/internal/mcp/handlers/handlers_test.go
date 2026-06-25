@@ -428,6 +428,16 @@ func TestResolveMCPAutoStartConfig_UsesLowestPositionStepAgentProfileWhenNoStart
 	assert.Equal(t, "first-profile", config.AgentProfileID)
 }
 
+func TestStartStepAgentProfile_UsesLowestPositionWhenNoStartStep(t *testing.T) {
+	profileID := startStepAgentProfile([]*workflowmodels.WorkflowStep{
+		{Position: 10, AgentProfileID: "later-profile"},
+		nil,
+		{Position: 2, AgentProfileID: "first-profile"},
+	})
+
+	assert.Equal(t, "first-profile", profileID)
+}
+
 func TestResolveMCPAutoStartConfig_UsesMarkedStartStepAgentProfile(t *testing.T) {
 	svc, _, workflowCtrl, workflowRepo := newTestTaskServiceWithWorkflow(t)
 	ctx := context.Background()
