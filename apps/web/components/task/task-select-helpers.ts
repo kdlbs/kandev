@@ -109,11 +109,25 @@ export function buildSwitchToSession(
   };
 }
 
+function taskSelectionWasSuperseded(
+  store: StoreApi<AppState>,
+  taskId: string,
+  startActiveTaskId: string | null,
+  startActiveSessionId: string | null,
+): boolean {
+  const current = store.getState().tasks;
+  if (current.activeTaskId === taskId) return false;
+  return (
+    current.activeTaskId !== startActiveTaskId || current.activeSessionId !== startActiveSessionId
+  );
+}
+
 export async function prepareAndSwitchTask(
   taskId: string,
   store: StoreApi<AppState>,
   switchToSession: SwitchToSessionFn,
   setPreparingTaskId: (id: string | null) => void,
+  shouldContinue: () => boolean = () => true,
 ): Promise<boolean> {
   setPreparingTaskId(taskId);
   // Capture before the async launch; WS events may update activeSessionId
@@ -131,6 +145,7 @@ export async function prepareAndSwitchTask(
   try {
     const { request } = buildPrepareRequest(taskId);
     const resp = await launchSession(request);
+    if (!shouldContinue()) return false;
     if (resp.session_id) {
       // Pass `null` instead of the original oldSessionId — releaseLayoutToDefault
       // already saved + released the outgoing env, and the dockview now holds the
@@ -163,7 +178,10 @@ export function selectTaskWithLayout(params: {
 }): void {
   const { taskId, task, store, switchToSession, loadTaskSessionsForTask } = params;
   const state = store.getState();
+  const startActiveTaskId = state.tasks.activeTaskId ?? null;
   const oldSessionId = state.tasks.activeSessionId;
+  const selectionWasSuperseded = () =>
+    taskSelectionWasSuperseded(store, taskId, startActiveTaskId, oldSessionId ?? null);
   if (isDebug()) {
     debug("selectTaskWithLayout: entry", {
       taskId,
@@ -188,6 +206,7 @@ export function selectTaskWithLayout(params: {
       return;
     }
     loadTaskSessionsForTask(taskId).then((sessions) => {
+      if (selectionWasSuperseded()) return;
       switchToSession(taskId, resolveLoadedSessionId(sessions, targetSessionId), oldSessionId);
       replaceTaskUrl(taskId);
     });
@@ -195,6 +214,7 @@ export function selectTaskWithLayout(params: {
   }
 
   loadTaskSessionsForTask(taskId).then(async (sessions) => {
+    if (selectionWasSuperseded()) return;
     const currentOldSessionId = store.getState().tasks.activeSessionId;
     const primary = sessions.find((s) => s.is_primary);
     const sessionId = primary?.id ?? sessions[0]?.id ?? null;
@@ -209,11 +229,13 @@ export function selectTaskWithLayout(params: {
       store,
       switchToSession,
       params.setPreparingTaskId,
+      () => !selectionWasSuperseded(),
     );
     if (switched) {
       replaceTaskUrl(taskId);
       return;
     }
+    if (selectionWasSuperseded()) return;
 
     // Failure path: prepareAndSwitchTask already called releaseLayoutToDefault
     // before awaiting, so the outgoing env's layout is already saved and the

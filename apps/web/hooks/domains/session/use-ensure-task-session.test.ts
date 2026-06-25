@@ -29,20 +29,22 @@ function flushMicrotasks() {
   return act(() => Promise.resolve());
 }
 
-describe("useEnsureTaskSession", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockLoadSessions.mockResolvedValue(undefined);
-    mockSessionsResult = { sessions: [], isLoaded: true, loadSessions: mockLoadSessions };
-    mockEnsureTaskSession.mockResolvedValue({
-      success: true,
-      task_id: "task-1",
-      session_id: "sess-new",
-      state: "CREATED",
-      source: "created_prepare",
-      newly_created: true,
-    });
+function resetEnsureTaskSessionMocks() {
+  vi.clearAllMocks();
+  mockLoadSessions.mockResolvedValue(undefined);
+  mockSessionsResult = { sessions: [], isLoaded: true, loadSessions: mockLoadSessions };
+  mockEnsureTaskSession.mockResolvedValue({
+    success: true,
+    task_id: "task-1",
+    session_id: "sess-new",
+    state: "CREATED",
+    source: "created_prepare",
+    newly_created: true,
   });
+}
+
+describe("useEnsureTaskSession", () => {
+  beforeEach(resetEnsureTaskSessionMocks);
 
   it("calls the backend ensure endpoint once when the task has no sessions", async () => {
     const { result } = renderHook(() => useEnsureTaskSession(TASK));
@@ -116,6 +118,33 @@ describe("useEnsureTaskSession", () => {
     expect(mockEnsureTaskSession).toHaveBeenCalledTimes(2);
     await flushMicrotasks();
     expect(result.current.status).toBe("idle");
+  });
+});
+
+describe("useEnsureTaskSession — task changes", () => {
+  beforeEach(resetEnsureTaskSessionMocks);
+
+  it("clears a stale error when switching to a task that already has a session", async () => {
+    mockEnsureTaskSession.mockRejectedValueOnce(new Error("task one failed"));
+    const { result, rerender } = renderHook(
+      ({ task }: { task: { id: string } }) => useEnsureTaskSession(task),
+      { initialProps: { task: TASK } },
+    );
+
+    await flushMicrotasks();
+    expect(result.current.status).toBe("error");
+    expect(result.current.error?.message).toBe("task one failed");
+
+    mockSessionsResult = {
+      sessions: [{ id: "sess-2" }],
+      isLoaded: true,
+      loadSessions: mockLoadSessions,
+    };
+    rerender({ task: { id: "task-2" } });
+
+    expect(result.current.status).toBe("idle");
+    expect(result.current.error).toBeNull();
+    expect(mockEnsureTaskSession).toHaveBeenCalledTimes(1);
   });
 
   it("calls ensure again when the task id changes", () => {

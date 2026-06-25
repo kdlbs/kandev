@@ -264,6 +264,79 @@ func TestHandleCreateTask_TopLevel_MissingWorkflowID(t *testing.T) {
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 }
 
+func TestHandleCreateTask_StartAgentRequiresResolvableAgentProfile(t *testing.T) {
+	svc, _ := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	require.Len(t, workflows, 1)
+
+	h := &Handlers{
+		taskSvc:         svc,
+		sessionLauncher: newMockSessionLauncher(),
+		logger:          testLogger(t).WithFields(),
+	}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"workspace_id": workspaces[0].ID,
+		"workflow_id":  workflows[0].ID,
+		"title":        "Invalid auto-start task",
+		"description":  "This should not be persisted without a profile.",
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+
+	tasks, err := svc.ListTasks(ctx, workflows[0].ID)
+	require.NoError(t, err)
+	assert.Empty(t, tasks, "failed auto-start preflight must not leave a broken task behind")
+}
+
+func TestHandleCreateTask_StartAgentUsesWorkspaceDefaultAgentProfile(t *testing.T) {
+	svc, _ := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	require.Len(t, workflows, 1)
+
+	defaultProfileID := "workspace-default-profile"
+	_, err = svc.UpdateWorkspace(ctx, workspaces[0].ID, &service.UpdateWorkspaceRequest{
+		DefaultAgentProfileID: &defaultProfileID,
+	})
+	require.NoError(t, err)
+
+	launcher := newMockSessionLauncher()
+	h := &Handlers{
+		taskSvc:         svc,
+		sessionLauncher: launcher,
+		logger:          testLogger(t).WithFields(),
+	}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"workspace_id": workspaces[0].ID,
+		"workflow_id":  workflows[0].ID,
+		"title":        "Valid auto-start task",
+		"description":  "This should launch with the workspace default profile.",
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
+
+	select {
+	case <-launcher.called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("LaunchSession was not called within timeout")
+	}
+	req := launcher.getRequest()
+	assert.Equal(t, defaultProfileID, req.AgentProfileID)
+}
+
 // mockSessionLauncher captures LaunchSession calls for testing autoStartTask.
 type mockSessionLauncher struct {
 	mu     sync.Mutex
