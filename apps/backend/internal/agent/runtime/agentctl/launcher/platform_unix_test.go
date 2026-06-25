@@ -3,9 +3,11 @@
 package launcher
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -104,7 +106,23 @@ func processExistsForLauncherTest(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
-	return syscall.Kill(pid, 0) == nil
+	if runtime.GOOS == "linux" {
+		raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+		if err != nil {
+			return false
+		}
+		s := string(raw)
+		idx := strings.LastIndex(s, ") ")
+		if idx == -1 || idx+2 >= len(s) {
+			return false
+		}
+		return s[idx+2] != 'Z'
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return proc.Signal(syscall.Signal(0)) == nil
 }
 
 func waitUntilLauncherTest(t *testing.T, timeout time.Duration, condition func() bool, format string, args ...any) {

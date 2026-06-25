@@ -44,6 +44,11 @@ func cleanupACPCommand(ctx context.Context, cmd *exec.Cmd, log *zap.Logger) {
 		return
 	}
 	pid := cmd.Process.Pid
+	cleanupCtx, cancel := context.WithTimeout(
+		context.WithoutCancel(ctx),
+		2*acpCommandTerminateGrace+2*acpCommandForceKillGrace,
+	)
+	defer cancel()
 	log.Debug("ACP command cleanup requested",
 		zap.Int("pid", pid),
 		zap.String("path", cmd.Path),
@@ -63,9 +68,9 @@ func cleanupACPCommand(ctx context.Context, cmd *exec.Cmd, log *zap.Logger) {
 		waitCh <- cmd.Wait()
 	}()
 
-	if waitForACPCommand(ctx, waitCh, acpCommandTerminateGrace) {
+	if waitForACPCommand(cleanupCtx, waitCh, acpCommandTerminateGrace) {
 		log.Debug("ACP command exited after SIGTERM", zap.Int("pid", pid))
-		reapACPProcessGroup(ctx, pid, log)
+		reapACPProcessGroup(cleanupCtx, pid, log)
 		return
 	}
 
@@ -82,8 +87,8 @@ func cleanupACPCommand(ctx context.Context, cmd *exec.Cmd, log *zap.Logger) {
 			zap.String("reason", "process_group_kill_failed"))
 		_ = cmd.Process.Kill()
 	}
-	_ = waitForACPCommand(ctx, waitCh, acpCommandForceKillGrace)
-	reapACPProcessGroup(ctx, pid, log)
+	_ = waitForACPCommand(cleanupCtx, waitCh, acpCommandForceKillGrace)
+	reapACPProcessGroup(cleanupCtx, pid, log)
 }
 
 func waitForACPCommand(ctx context.Context, waitCh <-chan error, timeout time.Duration) bool {

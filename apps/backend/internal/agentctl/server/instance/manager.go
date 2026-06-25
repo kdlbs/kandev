@@ -392,7 +392,7 @@ func (m *Manager) stopHTTPServer(ctx context.Context, id string, port int, serve
 			zap.Error(closeErr))
 		return fmt.Errorf("close HTTP server for instance %s: %w", id, closeErr)
 	}
-	if !errors.Is(err, context.DeadlineExceeded) {
+	if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("shutdown HTTP server for instance %s: %w", id, err)
 	}
 	return nil

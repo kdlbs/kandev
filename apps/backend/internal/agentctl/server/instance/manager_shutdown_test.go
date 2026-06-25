@@ -108,6 +108,20 @@ func TestStopHTTPServerReturnsCloseError(t *testing.T) {
 	require.True(t, server.closed)
 }
 
+func TestStopHTTPServerTreatsCanceledShutdownAsStoppedAfterClose(t *testing.T) {
+	log := newTestLogger(t)
+	mgr := NewManager(&config.Config{
+		Ports:    config.PortConfig{Base: 0, Max: 0},
+		Defaults: config.InstanceDefaults{Protocol: agent.ProtocolACP},
+	}, log)
+
+	server := &fakeHTTPServer{shutdownErr: context.Canceled}
+
+	err := mgr.stopHTTPServer(context.Background(), "canceled-shutdown", 12345, server)
+	require.NoError(t, err)
+	require.True(t, server.closed)
+}
+
 type fakeHTTPServer struct {
 	shutdownErr error
 	closeErr    error

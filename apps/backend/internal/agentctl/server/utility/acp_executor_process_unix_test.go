@@ -96,6 +96,37 @@ func TestWaitForACPProcessGroupExitHonorsContextCancellation(t *testing.T) {
 	}
 }
 
+func TestCleanupACPCommandWaitsAfterRequestContextCancellation(t *testing.T) {
+	cmd := exec.Command("sleep", "30")
+	setACPCommandProcAttr(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start sleep: %v", err)
+	}
+	pid := cmd.Process.Pid
+	waited := false
+	t.Cleanup(func() {
+		if waited {
+			return
+		}
+		_ = killACPProcessGroup(pid)
+		_ = cmd.Wait()
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	core, observed := observer.New(zapcore.DebugLevel)
+
+	cleanupACPCommand(ctx, cmd, zap.New(core))
+	waited = true
+
+	if !zapLogsContain(observed, "ACP command exited after SIGTERM") {
+		t.Fatalf("cleanup did not wait for SIGTERM exit after canceled context; logs=%#v", observed.All())
+	}
+	if processRunning(pid) {
+		t.Fatalf("process %d still running after cleanup", pid)
+	}
+}
+
 func zapLogsContain(logs *observer.ObservedLogs, message string) bool {
 	for _, entry := range logs.All() {
 		if entry.Message == message {

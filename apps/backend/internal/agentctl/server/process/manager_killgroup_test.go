@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/stretchr/testify/require"
 )
 
@@ -174,6 +175,39 @@ func TestWaitForProcessExit_ReapsProcessGroupAfterLeaderExit(t *testing.T) {
 		"child process %d should be reaped even after the group leader exits", childPID)
 }
 
+func TestWaitForExit_ReapsProcessGroupAfterNaturalLeaderExit(t *testing.T) {
+	log := newTestLogger(t)
+	pidFile := filepath.Join(t.TempDir(), "child.pid")
+
+	m := &Manager{
+		logger:    log,
+		updatesCh: make(chan adapter.AgentEvent, 1),
+		doneCh:    make(chan struct{}),
+	}
+	m.status.Store(StatusRunning)
+	m.cmd = fixtureCmd("exit-with-child " + pidFile + " 30")
+	setProcGroup(m.cmd)
+	require.NoError(t, m.cmd.Start())
+	parentPID := m.cmd.Process.Pid
+	t.Cleanup(func() {
+		_ = killProcessGroup(parentPID)
+	})
+
+	childPID := waitForChildPID(t, pidFile, 5*time.Second)
+	m.wg.Add(1)
+	go m.waitForExit()
+
+	select {
+	case <-m.doneCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for process manager waitForExit")
+	}
+	require.Eventually(t, func() bool {
+		return !processAlive(childPID)
+	}, 5*time.Second, 50*time.Millisecond,
+		"child process %d should be reaped when the leader exits naturally", childPID)
+}
+
 func TestWaitForProcessExit_TerminatesBeforeParentContextDeadline(t *testing.T) {
 	log, observed := newObservedTestLogger(t)
 
@@ -218,15 +252,14 @@ func TestWaitForProcessExit_TerminatesBeforeParentContextDeadline(t *testing.T) 
 		"agent process %d should be killed after local graceful wait", parentPID)
 }
 
-func TestStop_ReapsProcessGroupWhenStatusAlreadyStopped(t *testing.T) {
-	log := newTestLogger(t)
-	pidFile := filepath.Join(t.TempDir(), "child.pid")
+func TestStop_DoesNotReapStaleProcessGroupWhenStatusAlreadyStopped(t *testing.T) {
+	log, observed := newObservedTestLogger(t)
 
 	m := &Manager{
 		logger: log,
 	}
 	m.status.Store(StatusStopped)
-	m.cmd = fixtureCmd("exit-with-child " + pidFile + " 30")
+	m.cmd = fixtureCmd("sleep 30")
 	setProcGroup(m.cmd)
 	require.NoError(t, m.cmd.Start())
 	parentPID := m.cmd.Process.Pid
@@ -245,25 +278,12 @@ func TestStop_ReapsProcessGroupWhenStatusAlreadyStopped(t *testing.T) {
 		}
 	})
 
-	childPID := waitForChildPID(t, pidFile, 5*time.Second)
-	require.Eventually(t, func() bool {
-		select {
-		case <-waitDone:
-			return true
-		default:
-			return false
-		}
-	}, 5*time.Second, 50*time.Millisecond, "fixture leader should exit before Stop")
-	require.True(t, processAlive(childPID), "child process should still be alive before Stop")
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	require.NoError(t, m.Stop(ctx))
-
-	require.Eventually(t, func() bool {
-		return !processAlive(childPID)
-	}, 5*time.Second, 50*time.Millisecond,
-		"child process %d should be reaped even when Stop starts from stopped status", childPID)
+	require.True(t, processAlive(parentPID), "stopped manager should not signal a cached process PID")
+	require.False(t, observedLogsContain(observed, "agent process group SIGTERM requested"),
+		"stopped manager should not attempt process-group termination")
 }
 
 // waitForChildPID polls pidFile until it contains a valid PID or timeout

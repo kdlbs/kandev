@@ -87,6 +87,23 @@ func TestDockerExecutor_GetInteractiveRunner(t *testing.T) {
 	}
 }
 
+func TestDockerStopInstancePreservesContainerOnPlainStop(t *testing.T) {
+	log := newTestDockerLogger()
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
+	exec.newClientFunc = func(_ config.DockerConfig, _ *logger.Logger) (*docker.Client, error) {
+		t.Fatal("plain stop should not initialize docker client")
+		return nil, nil
+	}
+
+	if err := exec.StopInstance(context.Background(), &ExecutorInstance{
+		InstanceID:  "inst-1",
+		ContainerID: "container-1",
+		StopReason:  "stopped via API",
+	}, false); err != nil {
+		t.Fatalf("StopInstance: %v", err)
+	}
+}
+
 func TestDockerExecutor_EnsureClient_Success(t *testing.T) {
 	log := newTestDockerLogger()
 	exec := NewDockerExecutor(config.DockerConfig{}, "", log)

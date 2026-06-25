@@ -18,6 +18,7 @@ const managedProcessShutdownGrace = 40 * time.Second
 
 var launcherShutdownDebug atomic.Bool
 var launcherStatusOutput io.Writer = os.Stderr
+var launcherExit = os.Exit
 
 type processSupervisor struct {
 	mu           sync.Mutex
@@ -110,8 +111,20 @@ func (s *processSupervisor) attachSignals() {
 	go func() {
 		sig := <-ch
 		shutdownDebugf("launcher received signal=%s launcher_pid=%d", sig.String(), os.Getpid())
-		s.shutdown("signal " + sig.String())
-		os.Exit(0)
+		shutdownDone := make(chan struct{})
+		go func() {
+			s.shutdown("signal " + sig.String())
+			close(shutdownDone)
+		}()
+		select {
+		case nextSig := <-ch:
+			shutdownDebugf("launcher received signal during shutdown=%s launcher_pid=%d", nextSig.String(), os.Getpid())
+			launcherInfof("forced shutdown after second signal (signal=%s)", nextSig.String())
+			launcherExit(1)
+		case <-shutdownDone:
+			signal.Stop(ch)
+			launcherExit(0)
+		}
 	}()
 }
 

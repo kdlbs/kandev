@@ -1231,9 +1231,6 @@ func (m *Manager) Stop(ctx context.Context) error {
 		m.logger.Info("Stop called but already stopped/stopping",
 			zap.String("status", string(status)),
 			zap.Int("pid", m.agentPID()))
-		if status == StatusStopped && m.cmd != nil && m.cmd.Process != nil {
-			m.reapRemainingProcessGroup(ctx, m.cmd.Process.Pid)
-		}
 		return nil
 	}
 
@@ -1590,6 +1587,7 @@ func (m *Manager) waitForExit() {
 	defer m.wg.Done()
 	defer close(m.doneCh)
 
+	pid := m.agentPID()
 	err := m.cmd.Wait()
 
 	if err != nil {
@@ -1628,6 +1626,9 @@ func (m *Manager) waitForExit() {
 		m.logger.Info("agent process exited successfully")
 	}
 
+	if m.Status() != StatusStopping {
+		m.reapRemainingProcessGroup(context.Background(), pid)
+	}
 	m.status.Store(StatusStopped)
 }
 
