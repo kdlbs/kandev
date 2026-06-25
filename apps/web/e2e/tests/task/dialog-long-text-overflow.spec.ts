@@ -27,7 +27,10 @@ async function assertProfileDropdownFits(trigger: Locator, dropdownLabel: string
     await searchInput.click();
     await expect(searchInput).toBeFocused();
   }
-  await trigger.page().keyboard.press("Escape");
+  const option = dropdown.getByRole("option").first();
+  await expect(option).toBeVisible();
+  await option.click();
+  await expect(dropdown).not.toBeVisible();
 }
 
 test.describe("Dialog long text layout", () => {
