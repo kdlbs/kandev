@@ -1355,8 +1355,16 @@ export class ApiClient {
     await this.request("DELETE", `/api/v1/github/watches/review/${watchId}`);
   }
 
-  async triggerReviewWatch(watchId: string): Promise<{ new_prs: number; cleaned?: number }> {
-    return this.request("POST", `/api/v1/github/watches/review/${watchId}/trigger`, undefined);
+  async triggerReviewWatch(
+    watchId: string,
+    workspaceId: string,
+  ): Promise<{ new_prs: number; new_prs_found: number; cleaned?: number }> {
+    const params = new URLSearchParams({ workspace_id: workspaceId });
+    return this.request(
+      "POST",
+      `/api/v1/github/watches/review/${watchId}/trigger?${params}`,
+      undefined,
+    );
   }
 
   /**

@@ -227,12 +227,22 @@ func TestHttpTriggerReviewWatchPublishesNewPREvents(t *testing.T) {
 	router := gin.New()
 	NewController(svc, log).RegisterHTTPRoutes(router)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/github/watches/review/"+watch.ID+"/trigger", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/github/watches/review/"+watch.ID+"/trigger?workspace_id=ws-1", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		NewPRs      int `json:"new_prs"`
+		NewPRsFound int `json:"new_prs_found"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode trigger response: %v", err)
+	}
+	if body.NewPRs != 1 || body.NewPRsFound != 1 {
+		t.Fatalf("response counts = %+v, want both counts 1", body)
 	}
 	if got := eb.publishedCount(); got != 1 {
 		t.Fatalf("published events = %d, want 1", got)
@@ -325,6 +335,84 @@ func TestResetReviewWatchPublishesNewPREvents(t *testing.T) {
 	}
 	if deleted != 1 {
 		t.Fatalf("deleted = %d, want 1", deleted)
+	}
+	waitForPublishedCount(t, eb, 1)
+}
+
+func TestHttpResetReviewWatchPublishesNewPREvents(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tmp := t.TempDir()
+	dbConn, err := db.OpenSQLite(filepath.Join(tmp, "github.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = sqlxDB.Close() })
+	store, err := NewStore(sqlxDB, sqlxDB)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	client := NewMockClient()
+	client.AddPR(&PR{
+		Number:     42,
+		Title:      "Review me through reset",
+		HTMLURL:    "https://github.com/acme/widget/pull/42",
+		State:      "open",
+		HeadBranch: "feature/review-reset",
+		BaseBranch: "main",
+		RepoOwner:  "acme",
+		RepoName:   "widget",
+		RequestedReviewers: []RequestedReviewer{
+			{Login: "test-user", Type: "user"},
+		},
+	})
+
+	watch := &ReviewWatch{
+		WorkspaceID:         "ws-1",
+		WorkflowID:          "wf-1",
+		WorkflowStepID:      "step-1",
+		Repos:               []RepoFilter{{Owner: "acme", Name: "widget"}},
+		ReviewScope:         ReviewScopeUserAndTeams,
+		Enabled:             true,
+		PollIntervalSeconds: defaultWatchPollIntervalSec,
+		CleanupPolicy:       CleanupPolicyNever,
+	}
+	if err := store.CreateReviewWatch(context.Background(), watch); err != nil {
+		t.Fatalf("create review watch: %v", err)
+	}
+	if err := store.CreateReviewPRTask(context.Background(), &ReviewPRTask{
+		ReviewWatchID: watch.ID,
+		RepoOwner:     "acme",
+		RepoName:      "widget",
+		PRNumber:      42,
+		PRURL:         "https://github.com/acme/widget/pull/42",
+		TaskID:        "task-old",
+	}); err != nil {
+		t.Fatalf("create review PR task: %v", err)
+	}
+
+	log := newControllerTestLogger()
+	eb := &mockEventBus{}
+	svc := NewService(client, "pat", nil, store, eb, log)
+	svc.SetCascadeTaskDeleter(noopCascadeTaskDeleter{})
+	router := gin.New()
+	NewController(svc, log).RegisterHTTPRoutes(router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/github/watches/review/"+watch.ID+"/reset?workspace_id=ws-1", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		TasksDeleted int `json:"tasksDeleted"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode reset response: %v", err)
+	}
+	if body.TasksDeleted != 1 {
+		t.Fatalf("tasksDeleted = %d, want 1", body.TasksDeleted)
 	}
 	waitForPublishedCount(t, eb, 1)
 }

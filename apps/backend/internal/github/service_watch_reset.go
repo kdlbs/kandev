@@ -103,14 +103,15 @@ func (s *Service) ResetReviewWatch(ctx context.Context, watchID string) (int, er
 	if err != nil {
 		return res.TasksDeleted, err
 	}
-	watch, err := s.GetReviewWatch(ctx, watchID)
+	runCtx := context.Background()
+	watch, err := s.GetReviewWatch(runCtx, watchID)
 	if err != nil {
 		return res.TasksDeleted, fmt.Errorf("load review watch after reset: %w", err)
 	}
 	if watch == nil || !watch.Enabled {
 		return res.TasksDeleted, nil
 	}
-	go s.reimportReviewWatchAfterReset(context.Background(), watch)
+	go s.reimportReviewWatchAfterReset(runCtx, watch)
 	return res.TasksDeleted, nil
 }
 

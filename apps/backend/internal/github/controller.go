@@ -639,6 +639,9 @@ func (c *Controller) httpDeleteReviewWatch(ctx *gin.Context) {
 
 func (c *Controller) httpTriggerReviewWatch(ctx *gin.Context) {
 	id := ctx.Param("id")
+	if !c.requireReviewWatchInWorkspace(ctx, id) {
+		return
+	}
 	watch, err := c.service.GetReviewWatch(ctx.Request.Context(), id)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -655,7 +658,12 @@ func (c *Controller) httpTriggerReviewWatch(ctx *gin.Context) {
 	}
 	// Clean up tasks for merged/closed PRs that haven't been started.
 	cleaned, _ := c.service.CleanupMergedReviewTasks(ctx.Request.Context(), watch)
-	ctx.JSON(http.StatusOK, gin.H{"new_prs": len(newPRs), "prs": newPRs, "cleaned": cleaned})
+	ctx.JSON(http.StatusOK, gin.H{
+		"new_prs":       len(newPRs),
+		"new_prs_found": len(newPRs),
+		"prs":           newPRs,
+		"cleaned":       cleaned,
+	})
 }
 
 func (c *Controller) httpTriggerAllReviewChecks(ctx *gin.Context) {

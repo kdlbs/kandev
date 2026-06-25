@@ -274,8 +274,13 @@ export async function deleteReviewWatch(id: string, options?: ApiRequestOptions)
   });
 }
 
-export async function triggerReviewWatch(id: string, options?: ApiRequestOptions) {
-  return fetchJson<TriggerReviewResponse>(`/api/v1/github/watches/review/${id}/trigger`, {
+export async function triggerReviewWatch(
+  id: string,
+  workspaceId: string,
+  options?: ApiRequestOptions,
+) {
+  const params = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<TriggerReviewResponse>(`/api/v1/github/watches/review/${id}/trigger?${params}`, {
     ...options,
     init: { method: "POST", ...(options?.init ?? {}) },
   });

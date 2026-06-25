@@ -336,18 +336,26 @@ func wsTriggerReviewWatch(svc *Service, _ *logger.Logger) func(ctx context.Conte
 		if id == "" {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, errMsgIDRequired, nil)
 		}
+		workspaceID, _ := payload["workspace_id"].(string)
+		if workspaceID == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "workspace_id is required", nil)
+		}
 		watch, err := svc.GetReviewWatch(ctx, id)
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
-		if watch == nil {
+		if watch == nil || watch.WorkspaceID != workspaceID {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "review watch not found", nil)
 		}
 		newPRs, err := svc.TriggerReviewWatch(ctx, watch)
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
-		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"new_prs": len(newPRs), "prs": newPRs})
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+			"new_prs":       len(newPRs),
+			"new_prs_found": len(newPRs),
+			"prs":           newPRs,
+		})
 	}
 }
 

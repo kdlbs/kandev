@@ -79,7 +79,7 @@ test.describe("PR watcher cleanup policy", () => {
       { repos: [{ owner: "testorg", name: "testrepo" }] },
     );
 
-    await apiClient.triggerReviewWatch(watch.id);
+    await apiClient.triggerReviewWatch(watch.id, watch.workspace_id);
     let prTask: { id: string; title: string } | undefined;
     await expect
       .poll(
@@ -121,7 +121,7 @@ test.describe("PR watcher cleanup policy", () => {
       },
     ]);
 
-    await apiClient.triggerReviewWatch(watch.id);
+    await apiClient.triggerReviewWatch(watch.id, watch.workspace_id);
 
     await expect(kanban.taskCardByTitle("PR #401: Auto-start only")).not.toBeVisible({
       timeout: 15_000,
@@ -170,7 +170,7 @@ test.describe("PR watcher cleanup policy", () => {
       },
     );
 
-    await apiClient.triggerReviewWatch(watch.id);
+    await apiClient.triggerReviewWatch(watch.id, watch.workspace_id);
     await expect
       .poll(
         async () => {
@@ -200,7 +200,7 @@ test.describe("PR watcher cleanup policy", () => {
         repo_name: "testrepo",
       },
     ]);
-    await apiClient.triggerReviewWatch(watch.id);
+    await apiClient.triggerReviewWatch(watch.id, watch.workspace_id);
     const manualResult = await apiClient.cleanupMergedReviewTasks();
     expect(manualResult.deleted).toBe(0);
 
@@ -280,7 +280,7 @@ test.describe("PR watcher cleanup policy", () => {
       },
     );
 
-    await apiClient.triggerReviewWatch(watch.id);
+    await apiClient.triggerReviewWatch(watch.id, watch.workspace_id);
     let prTask: { id: string; title: string } | undefined;
     await expect
       .poll(
@@ -319,7 +319,7 @@ test.describe("PR watcher cleanup policy", () => {
       },
     ]);
 
-    await apiClient.triggerReviewWatch(watch.id);
+    await apiClient.triggerReviewWatch(watch.id, watch.workspace_id);
 
     await expect(kanban.taskCardByTitle("PR #601: Always delete")).not.toBeVisible({
       timeout: 15_000,
@@ -366,7 +366,7 @@ test.describe("PR watcher cleanup policy", () => {
       { repos: [{ owner: "testorg", name: "testrepo" }] },
     );
 
-    await apiClient.triggerReviewWatch(watch.id);
+    await apiClient.triggerReviewWatch(watch.id, watch.workspace_id);
     await expect
       .poll(
         async () => {
@@ -445,7 +445,7 @@ test.describe("PR watcher cleanup policy", () => {
       { repos: [{ owner: "testorg", name: "testrepo" }] },
     );
 
-    await apiClient.triggerReviewWatch(watch.id);
+    await apiClient.triggerReviewWatch(watch.id, watch.workspace_id);
     await expect
       .poll(
         async () => {
@@ -509,7 +509,7 @@ test.describe("PR watcher cleanup policy", () => {
       { repos: [{ owner: "testorg", name: "testrepo" }] },
     );
 
-    await apiClient.triggerReviewWatch(watch.id);
+    await apiClient.triggerReviewWatch(watch.id, watch.workspace_id);
     await expect
       .poll(
         async () => {

@@ -69,8 +69,8 @@ export function useReviewWatches(workspaceId?: string | null) {
     [removeWatch],
   );
 
-  const trigger = useCallback(async (id: string) => {
-    return triggerReviewWatch(id);
+  const trigger = useCallback(async (id: string, watchWorkspaceId: string) => {
+    return triggerReviewWatch(id, watchWorkspaceId);
   }, []);
 
   const triggerAll = useCallback(async () => {

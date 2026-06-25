@@ -43,7 +43,7 @@ test.describe("GitHub review watch reset", () => {
       { repos: [{ owner: "testorg", name: "testrepo" }] },
     );
 
-    await apiClient.triggerReviewWatch(watch.id);
+    await apiClient.triggerReviewWatch(watch.id, watch.workspace_id);
     await expect
       .poll(
         async () => {
@@ -100,7 +100,7 @@ test.describe("GitHub review watch reset", () => {
 
     // The reset-triggered re-import already reserved the PR, so a manual
     // trigger has nothing new to create.
-    const trigger = await apiClient.triggerReviewWatch(watch.id);
+    const trigger = await apiClient.triggerReviewWatch(watch.id, watch.workspace_id);
     expect(trigger.new_prs).toBe(0);
   });
 
@@ -136,7 +136,7 @@ test.describe("GitHub review watch reset", () => {
       { repos: [{ owner: "testorg", name: "testrepo" }] },
     );
 
-    await apiClient.triggerReviewWatch(watch.id);
+    await apiClient.triggerReviewWatch(watch.id, watch.workspace_id);
     await expect
       .poll(
         async () => {

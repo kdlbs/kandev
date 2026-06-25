@@ -69,7 +69,7 @@ func (c *Controller) httpResetIssueWatch(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"tasksDeleted": n})
 }
 
-// requireReviewWatchInWorkspace guards the reset endpoints against IDOR:
+// requireReviewWatchInWorkspace guards review watch mutation endpoints against IDOR:
 // the caller must supply `?workspace_id=...` matching the watch's stored
 // workspace. Mismatch and not-found both return 404 so a probing client
 // can't tell whether a watch ID exists in another workspace.
