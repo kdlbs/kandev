@@ -503,19 +503,23 @@ func seedWorkflowStep(t *testing.T, ctx context.Context, repo *workflowrepo.Repo
 
 // mockSessionLauncher captures LaunchSession calls for testing autoStartTask.
 type mockSessionLauncher struct {
-	mu     sync.Mutex
-	req    *orchestrator.LaunchSessionRequest
-	called chan struct{}
+	mu      sync.Mutex
+	req     *orchestrator.LaunchSessionRequest
+	called  chan struct{}
+	inspect func(context.Context)
 }
 
 func newMockSessionLauncher() *mockSessionLauncher {
 	return &mockSessionLauncher{called: make(chan struct{})}
 }
 
-func (m *mockSessionLauncher) LaunchSession(_ context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
+func (m *mockSessionLauncher) LaunchSession(ctx context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
 	m.mu.Lock()
 	m.req = req
 	m.mu.Unlock()
+	if m.inspect != nil {
+		m.inspect(ctx)
+	}
 	close(m.called)
 	return &orchestrator.LaunchSessionResponse{
 		Success:   true,
@@ -599,6 +603,45 @@ func TestAutoStartTask_ExplicitExecutorProfilePreserved(t *testing.T) {
 	req := launcher.getRequest()
 	assert.Equal(t, "exec-profile-docker", req.ExecutorProfileID, "explicit executor profile should be preserved")
 	assert.Equal(t, "", req.ExecutorID, "executorID should be empty when profile is set")
+}
+
+func TestLaunchAutoStartTask_PreservesContextValuesWithoutCallerCancellation(t *testing.T) {
+	type contextKey string
+
+	launcher := newMockSessionLauncher()
+	log := testLogger(t)
+	h := &Handlers{
+		sessionLauncher: launcher,
+		logger:          log.WithFields(),
+	}
+
+	key := contextKey("request-id")
+	var capturedValue any
+	var capturedErr error
+	launcher.inspect = func(ctx context.Context) {
+		capturedValue = ctx.Value(key)
+		capturedErr = ctx.Err()
+	}
+
+	parentCtx, cancel := context.WithCancel(context.WithValue(context.Background(), key, "request-1"))
+	cancel()
+
+	h.launchAutoStartTask(parentCtx, &models.Task{
+		ID:          "task-1",
+		WorkspaceID: "ws-1",
+	}, mcpAutoStartConfig{
+		AgentProfileID: "agent-profile-1",
+		ExecutorID:     models.ExecutorIDWorktree,
+	})
+
+	select {
+	case <-launcher.called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("LaunchSession was not called within timeout")
+	}
+
+	assert.Equal(t, "request-1", capturedValue)
+	assert.NoError(t, capturedErr)
 }
 
 func TestResolveTaskRepositories_ExplicitRepos(t *testing.T) {

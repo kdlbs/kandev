@@ -504,7 +504,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			config := h.resolveMCPAutoStartConfig(ctx, task, req.AgentProfileID, req.ExecutorProfileID, req.SourceTaskID)
 			autoStartConfig = &config
 		}
-		h.launchAutoStartTask(task, *autoStartConfig)
+		h.launchAutoStartTask(ctx, task, *autoStartConfig)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
@@ -658,8 +658,9 @@ type mcpAutoStartConfig struct {
 // uses resolveMCPAutoStartConfig before persisting so invalid auto-start
 // requests fail synchronously.
 func (h *Handlers) autoStartTask(task *models.Task, agentProfileID, executorProfileID, sourceTaskID string) {
-	config := h.resolveMCPAutoStartConfig(context.Background(), task, agentProfileID, executorProfileID, sourceTaskID)
-	h.launchAutoStartTask(task, config)
+	ctx := context.Background()
+	config := h.resolveMCPAutoStartConfig(ctx, task, agentProfileID, executorProfileID, sourceTaskID)
+	h.launchAutoStartTask(ctx, task, config)
 }
 
 // resolveMCPAutoStartConfig resolves the agent profile and executor for
@@ -774,7 +775,7 @@ func startStepAgentProfile(steps []*workflowmodels.WorkflowStep) string {
 	return first.AgentProfileID
 }
 
-func (h *Handlers) launchAutoStartTask(task *models.Task, config mcpAutoStartConfig) {
+func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, config mcpAutoStartConfig) {
 	if h.sessionLauncher == nil {
 		return
 	}
@@ -785,7 +786,7 @@ func (h *Handlers) launchAutoStartTask(task *models.Task, config mcpAutoStartCon
 	}
 
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), constants.AgentLaunchTimeout)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.AgentLaunchTimeout)
 		defer cancel()
 
 		resp, err := h.sessionLauncher.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
