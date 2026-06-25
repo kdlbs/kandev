@@ -58,6 +58,7 @@ const ORIGINAL_TASK_ID = "task-original";
 const PENDING_TASK_ID = "task-pending";
 const ORIGINAL_SESSION_ID = "sess-original";
 const PENDING_SESSION_ID = "sess-pending";
+const ORIGINAL_ENV_ID = "env-original";
 
 function makeKanbanStore(args: {
   activeTaskId?: string | null;
@@ -151,7 +152,7 @@ function makeSelectionHarness(args: {
     state.tasks.activeSessionId = null;
     notify(previousState);
   });
-  return { state, store, setActiveTask };
+  return { state, store, setActiveTask, getListenerCount: () => listeners.length };
 }
 
 function makeDeferredSessionLoader() {
@@ -417,7 +418,7 @@ describe("selectTaskWithLayout — pending selection races", () => {
     const { store, setActiveTask } = makeSelectionHarness({
       activeTaskId: ORIGINAL_TASK_ID,
       activeSessionId: ORIGINAL_SESSION_ID,
-      envIds: { [ORIGINAL_SESSION_ID]: "env-original" },
+      envIds: { [ORIGINAL_SESSION_ID]: ORIGINAL_ENV_ID },
       sessions: {
         [ORIGINAL_SESSION_ID]: { id: ORIGINAL_SESSION_ID, task_id: ORIGINAL_TASK_ID },
       },
@@ -462,7 +463,7 @@ describe("selectTaskWithLayout — external active-task changes", () => {
     const { state, store, setActiveTask } = makeSelectionHarness({
       activeTaskId: ORIGINAL_TASK_ID,
       activeSessionId: ORIGINAL_SESSION_ID,
-      envIds: { [ORIGINAL_SESSION_ID]: "env-original" },
+      envIds: { [ORIGINAL_SESSION_ID]: ORIGINAL_ENV_ID },
       sessions: {
         [PENDING_SESSION_ID]: { id: PENDING_SESSION_ID, task_id: PENDING_TASK_ID },
         [ORIGINAL_SESSION_ID]: { id: ORIGINAL_SESSION_ID, task_id: ORIGINAL_TASK_ID },
@@ -497,7 +498,7 @@ describe("selectTaskWithLayout — external active-task changes", () => {
     const { store, setActiveTask } = makeSelectionHarness({
       activeTaskId: ORIGINAL_TASK_ID,
       activeSessionId: ORIGINAL_SESSION_ID,
-      envIds: { [ORIGINAL_SESSION_ID]: "env-original" },
+      envIds: { [ORIGINAL_SESSION_ID]: ORIGINAL_ENV_ID },
       sessions: {
         [PENDING_SESSION_ID]: { id: PENDING_SESSION_ID, task_id: PENDING_TASK_ID },
         [ORIGINAL_SESSION_ID]: { id: ORIGINAL_SESSION_ID, task_id: ORIGINAL_TASK_ID },
@@ -524,6 +525,62 @@ describe("selectTaskWithLayout — external active-task changes", () => {
 
     expect(switchToSession).not.toHaveBeenCalled();
     expect(replaceTaskUrl).not.toHaveBeenCalledWith(PENDING_TASK_ID);
+  });
+});
+
+describe("selectTaskWithLayout — selection guard cleanup", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("disposes the selection guard when loading a primary task's sessions rejects", async () => {
+    const { store, setActiveTask, getListenerCount } = makeSelectionHarness({
+      activeTaskId: ORIGINAL_TASK_ID,
+      activeSessionId: ORIGINAL_SESSION_ID,
+      envIds: { [ORIGINAL_SESSION_ID]: ORIGINAL_ENV_ID },
+    });
+
+    selectTaskWithLayout({
+      taskId: PENDING_TASK_ID,
+      task: { primarySessionId: PENDING_SESSION_ID },
+      store,
+      switchToSession: vi.fn(),
+      loadTaskSessionsForTask: vi.fn(async () => {
+        throw new Error("load failed");
+      }),
+      setActiveTask,
+      setPreparingTaskId: vi.fn(),
+    });
+
+    expect(getListenerCount()).toBe(1);
+    await flushTaskSelection();
+
+    expect(getListenerCount()).toBe(0);
+  });
+
+  it("disposes the selection guard when loading a sessionless task rejects", async () => {
+    const { store, setActiveTask, getListenerCount } = makeSelectionHarness({
+      activeTaskId: ORIGINAL_TASK_ID,
+      activeSessionId: ORIGINAL_SESSION_ID,
+      envIds: { [ORIGINAL_SESSION_ID]: ORIGINAL_ENV_ID },
+    });
+
+    selectTaskWithLayout({
+      taskId: PENDING_TASK_ID,
+      task: undefined,
+      store,
+      switchToSession: vi.fn(),
+      loadTaskSessionsForTask: vi.fn(async () => {
+        throw new Error("load failed");
+      }),
+      setActiveTask,
+      setPreparingTaskId: vi.fn(),
+    });
+
+    expect(getListenerCount()).toBe(1);
+    await flushTaskSelection();
+
+    expect(getListenerCount()).toBe(0);
   });
 });
 

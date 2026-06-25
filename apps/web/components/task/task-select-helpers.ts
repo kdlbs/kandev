@@ -219,20 +219,19 @@ export function selectTaskWithLayout(params: {
       replaceTaskUrl(taskId);
       return;
     }
-    loadTaskSessionsForTask(taskId).then((sessions) => {
-      try {
+    void loadTaskSessionsForTask(taskId)
+      .then((sessions) => {
         if (selectionWasSuperseded()) return;
         switchToSession(taskId, resolveLoadedSessionId(sessions, targetSessionId), oldSessionId);
         replaceTaskUrl(taskId);
-      } finally {
-        disposeSelectionGuard();
-      }
-    });
+      })
+      .finally(disposeSelectionGuard)
+      .catch(() => undefined);
     return;
   }
 
-  loadTaskSessionsForTask(taskId).then(async (sessions) => {
-    try {
+  void loadTaskSessionsForTask(taskId)
+    .then(async (sessions) => {
       if (selectionWasSuperseded()) return;
       const currentOldSessionId = store.getState().tasks.activeSessionId;
       const primary = sessions.find((s) => s.is_primary);
@@ -263,8 +262,7 @@ export function selectTaskWithLayout(params: {
       // losing the user's real layout for the originating task.
       params.setActiveTask(taskId);
       replaceTaskUrl(taskId);
-    } finally {
-      disposeSelectionGuard();
-    }
-  });
+    })
+    .finally(disposeSelectionGuard)
+    .catch(() => undefined);
 }

@@ -73,16 +73,18 @@ func newTestTaskServiceWithWorkflow(t *testing.T) (*service.Service, *sqliterepo
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() {
+		_ = sqlxDB.Close()
+	})
 	repo, cleanup, err := repository.Provide(sqlxDB, sqlxDB, nil)
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = cleanup()
+	})
 	workflowRepo, err := workflowrepo.NewWithDB(sqlxDB, sqlxDB, testLogger(t))
 	require.NoError(t, err)
 	_, err = worktree.NewSQLiteStore(sqlxDB, sqlxDB)
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = sqlxDB.Close()
-		_ = cleanup()
-	})
 
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	eventBus := bus.NewMemoryEventBus(log)
