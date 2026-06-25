@@ -1,15 +1,14 @@
 import type React from "react";
-import type { LocalRepository, Repository, Executor, Task } from "@/lib/types/http";
+import type { LocalRepository, Repository, Executor, Task, Workspace } from "@/lib/types/http";
 import type { UseBranchesByURLResult } from "@/hooks/domains/github/use-branches-by-url";
 import type { UsePRInfoByURLResult } from "@/hooks/domains/github/use-pr-info-by-url";
-import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
+import type { AgentProfileOption } from "@/lib/state/slices";
 import type {
   KanbanMultiState,
   WorkflowItem,
   WorkflowSnapshotData,
 } from "@/lib/state/slices/kanban/types";
 
-type Workspace = WorkspaceState["items"][number];
 import type {
   useRepositoryOptions,
   useBranchOptions,

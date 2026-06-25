@@ -39,7 +39,7 @@ function mapWorkspaceItem(ws: WorkspaceItem) {
     default_environment_id: ws.default_environment_id ?? null,
     default_agent_profile_id: ws.default_agent_profile_id ?? null,
     default_config_agent_profile_id: ws.default_config_agent_profile_id ?? null,
-    office_workflow_id: ws.office_workflow_id ?? null,
+    office_workflow_id: ws.office_workflow_id ?? undefined,
     created_at: ws.created_at,
     updated_at: ws.updated_at,
   };

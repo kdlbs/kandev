@@ -27,6 +27,7 @@ import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type {
   ListWorkflowStepsResponse,
   Repository,
+  Workspace,
   Workflow,
   WorkflowStep,
 } from "@/lib/types/http";
@@ -212,6 +213,7 @@ function useKanbanRouteBootstrap(route: Extract<SpaRoute, { kind: "kanban" }>) {
       const settingsWorkspaceId = settingsResponse?.settings?.workspace_id || null;
       const settingsWorkflowId = settingsResponse?.settings?.workflow_filter_id || null;
       const workspaceItems = workspacesResponse.workspaces.map(mapWorkspaceItem);
+      queryClient.setQueryData(qk.workspaces.all(), workspaceItems);
       const activeWorkspaceId = resolveActiveId(
         workspaceItems,
         route.workspaceId,
@@ -220,7 +222,7 @@ function useKanbanRouteBootstrap(route: Extract<SpaRoute, { kind: "kanban" }>) {
       );
 
       store.getState().hydrate({
-        workspaces: { items: workspaceItems, activeId: activeWorkspaceId },
+        workspaces: { activeId: activeWorkspaceId },
         userSettings: {
           ...mapUserSettingsResponse(settingsResponse),
           workspaceId: activeWorkspaceId,
@@ -393,7 +395,12 @@ function useRouteData({
       const storeWorkspaceId = store.getState().workspaces.activeId;
       const cookieWorkspaceId = readActiveWorkspaceCookie();
       const workspaceItems =
-        workspacesResponse?.workspaces.map(mapWorkspaceItem) ?? store.getState().workspaces.items;
+        workspacesResponse?.workspaces.map(mapWorkspaceItem) ??
+        queryClient.getQueryData<Workspace[]>(qk.workspaces.all()) ??
+        [];
+      if (workspacesResponse) {
+        queryClient.setQueryData(qk.workspaces.all(), workspaceItems);
+      }
       const workspaceId =
         workspaceItems.length > 0
           ? resolveActiveId(
@@ -404,7 +411,7 @@ function useRouteData({
             )
           : firstKnownWorkspaceId(storeWorkspaceId, cookieWorkspaceId, settingsWorkspaceId);
       store.getState().hydrate({
-        workspaces: { items: workspaceItems, activeId: workspaceId },
+        workspaces: { activeId: workspaceId },
         workflows: { activeId: settingsWorkflowId },
         userSettings: { ...mapUserSettingsResponse(settingsResponse), workspaceId },
       });

@@ -21,7 +21,7 @@ export function StateHydrator({ initialState, sessionId }: StateHydratorProps) {
   // decide whether to fetch data.
   useLayoutEffect(() => {
     if (Object.keys(initialState).length) {
-      store.getState().hydrate(initialState as Partial<AppState>, {
+      store.getState().hydrate(toStoreInitialState(initialState), {
         forceMergeSessionId: sessionId,
       });
       seedQueryClientFromInitialState(queryClient, initialState, { sessionId });
@@ -29,4 +29,12 @@ export function StateHydrator({ initialState, sessionId }: StateHydratorProps) {
   }, [initialState, queryClient, sessionId, store]);
 
   return null;
+}
+
+function toStoreInitialState(initialState: QuerySeedInitialState): Partial<AppState> {
+  const { workspaces, ...rest } = initialState;
+  return {
+    ...(rest as Partial<AppState>),
+    ...(workspaces ? { workspaces: { activeId: workspaces.activeId ?? null } } : {}),
+  };
 }

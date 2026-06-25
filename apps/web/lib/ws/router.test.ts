@@ -13,6 +13,9 @@ describe("registerWsHandlers", () => {
     expect(handlers).not.toHaveProperty("workflow.step.created");
     expect(handlers).not.toHaveProperty("workflow.step.updated");
     expect(handlers).not.toHaveProperty("workflow.step.deleted");
+    expect(handlers).not.toHaveProperty("workspace.created");
+    expect(handlers).not.toHaveProperty("workspace.updated");
+    expect(handlers).not.toHaveProperty("workspace.deleted");
     expect(handlers).not.toHaveProperty("terminal.output");
     expect(handlers).not.toHaveProperty("session.agent_capabilities");
     expect(handlers).not.toHaveProperty("session.poll_mode_changed");

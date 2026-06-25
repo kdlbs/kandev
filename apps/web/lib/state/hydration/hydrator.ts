@@ -22,7 +22,9 @@ function hydrateNavigationAndWorkspace(draft: Draft<AppState>, state: Partial<Ap
     draft.workflows.activeId = state.workflows.activeId ?? draft.workflows.activeId;
   }
   if (state.tasks) deepMerge(draft.tasks, state.tasks);
-  if (state.workspaces) deepMerge(draft.workspaces, state.workspaces);
+  if (state.workspaces) {
+    draft.workspaces.activeId = state.workspaces.activeId ?? draft.workspaces.activeId;
+  }
 }
 
 /** Hydrate settings slices, preserving loading states. */

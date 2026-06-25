@@ -85,7 +85,7 @@ function renderConfigurationTab(agent: AgentProfile) {
     <QueryClientProvider client={queryClient}>
       <StateProvider
         initialState={{
-          workspaces: { activeId: "ws-1", items: [] },
+          workspaces: { activeId: "ws-1" },
           office: { ...defaultOfficeState.office, agentProfiles: [agent] },
         }}
       >

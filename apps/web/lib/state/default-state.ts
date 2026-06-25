@@ -67,7 +67,10 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
       activeId: initialState.workflows?.activeId ?? defaultState.workflows.activeId,
     },
     tasks: { ...defaultState.tasks, ...initialState.tasks },
-    workspaces: { ...defaultState.workspaces, ...initialState.workspaces },
+    workspaces: {
+      ...defaultState.workspaces,
+      activeId: initialState.workspaces?.activeId ?? defaultState.workspaces.activeId,
+    },
     userSettings: { ...defaultState.userSettings, ...initialState.userSettings },
     messages: { ...defaultState.messages, ...initialState.messages },
     turns: { ...defaultState.turns, ...initialState.turns },

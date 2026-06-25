@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { Card, CardContent } from "@kandev/ui/card";
 import { useAppStore } from "@/components/state-provider";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import { WorkspaceSwitcher } from "@/components/task/workspace-switcher";
 
 type WorkspaceScopedSectionProps = {
@@ -21,7 +22,7 @@ export function WorkspaceScopedSection({
   emptyMessage,
   children,
 }: WorkspaceScopedSectionProps) {
-  const workspaces = useAppStore((s) => s.workspaces.items);
+  const { items: workspaces } = useWorkspaces();
   const activeId = useAppStore((s) => s.workspaces.activeId);
   const [override, setOverride] = useState<string | null>(null);
 

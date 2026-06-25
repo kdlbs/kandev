@@ -54,7 +54,6 @@ describe("SpaRoutes data-backed workspace context", () => {
 
     renderSpaRoutes({
       workspaces: {
-        items: [workspaceState(DEFAULT_WORKSPACE_ID), workspaceState(SELECTED_WORKSPACE_ID)],
         activeId: SELECTED_WORKSPACE_ID,
       },
     });
@@ -143,10 +142,6 @@ function workspace(id: string) {
     created_at: TEST_TIMESTAMP,
     updated_at: TEST_TIMESTAMP,
   };
-}
-
-function workspaceState(id: string) {
-  return workspace(id);
 }
 
 function workflow(id: string, workspaceId: string) {

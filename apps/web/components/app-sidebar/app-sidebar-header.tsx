@@ -4,7 +4,7 @@ import Link from "@/components/routing/app-link";
 import { IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useAppStore } from "@/components/state-provider";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import { cn } from "@/lib/utils";
 import { workspaceHomeHref } from "./app-sidebar-workspace-navigation";
 import { AppSidebarWorkspacePicker } from "./app-sidebar-workspace-picker";
@@ -17,11 +17,8 @@ type AppSidebarHeaderProps = {
 const COLLAPSE_BUTTON_CLASS = "h-7 w-7 shrink-0 cursor-pointer";
 
 export function AppSidebarHeader({ collapsed, onToggleCollapse }: AppSidebarHeaderProps) {
-  const workspaces = useAppStore((s) => s.workspaces);
-  const activeWorkspace = workspaces.items.find(
-    (workspace) => workspace.id === workspaces.activeId,
-  );
-  const homeHref = workspaceHomeHref(activeWorkspace);
+  const { activeWorkspace } = useWorkspaces();
+  const homeHref = workspaceHomeHref(activeWorkspace ?? undefined);
 
   if (collapsed) {
     // Minimal rail: brand home + expand. The workspace switcher lives only in

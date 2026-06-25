@@ -93,13 +93,13 @@ describe("OfficePageClient boot hydration", () => {
     const data = dashboard();
     getDashboardMock.mockResolvedValue(data);
 
-    renderOfficePage();
+    const { queryClient } = renderOfficePage();
 
     await waitFor(() => {
       expect(getDashboardMock).toHaveBeenCalledWith("workspace-1", expect.anything());
     });
     await waitFor(() => {
-      expect(setDashboardMock).toHaveBeenCalledWith(data);
+      expect(queryClient.getQueryData(qk.office.dashboard("workspace-1"))).toEqual(data);
     });
   });
 
@@ -127,9 +127,12 @@ describe("OfficePageClient boot hydration", () => {
 });
 
 function renderOfficePage(queryClient = makeQueryClient()) {
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <OfficePageClient initialDashboard={null} />
-    </QueryClientProvider>,
-  );
+  return {
+    queryClient,
+    ...render(
+      <QueryClientProvider client={queryClient}>
+        <OfficePageClient initialDashboard={null} />
+      </QueryClientProvider>,
+    ),
+  };
 }

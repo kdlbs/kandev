@@ -14,7 +14,7 @@ function makeStore(activeWorkspaceId: string | null) {
   const appendRunAttempt = vi.fn();
   const setWorkspaceRouting = vi.fn();
   let state = {
-    workspaces: { items: [], activeId: activeWorkspaceId },
+    workspaces: { activeId: activeWorkspaceId },
     office: { tasks: { items: [] } },
     setOfficeRefetchTrigger,
     updateOfficeAgentProfile,

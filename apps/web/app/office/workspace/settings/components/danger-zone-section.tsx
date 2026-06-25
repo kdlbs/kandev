@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@/lib/routing/client-router";
 import { IconTrash } from "@tabler/icons-react";
 import { toast } from "sonner";
@@ -20,9 +21,8 @@ import {
   getWorkspaceDeletionSummary,
   type WorkspaceDeletionSummary,
 } from "@/lib/api/domains/office-api";
-import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
-
-type Workspace = WorkspaceState["items"][number];
+import { removeWorkspaceCache } from "@/lib/query/workspace-cache";
+import type { Workspace } from "@/lib/types/http";
 
 function SettingCard({ children }: { children: React.ReactNode }) {
   return <div className="rounded-lg border border-border p-4 space-y-4">{children}</div>;
@@ -96,15 +96,14 @@ function DeleteWorkspaceDialog({
 export function DangerZoneSection({
   workspace,
   workspaces,
-  setWorkspaces,
   setActiveWorkspace,
 }: {
   workspace: Workspace;
   workspaces: Workspace[];
-  setWorkspaces: (items: Workspace[]) => void;
   setActiveWorkspace: (id: string | null) => void;
 }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [summary, setSummary] = useState<WorkspaceDeletionSummary | null>(null);
@@ -134,7 +133,7 @@ export function DangerZoneSection({
       await deleteWorkspace(workspace.id, confirmName);
       const remaining = workspaces.filter((item) => item.id !== workspace.id);
       const nextWorkspace = remaining[0] ?? null;
-      setWorkspaces(remaining);
+      removeWorkspaceCache(queryClient, workspace.id);
       setActiveWorkspace(nextWorkspace?.id ?? null);
       router.push(nextWorkspace ? "/office" : "/office/setup");
       toast.success("Workspace deleted");

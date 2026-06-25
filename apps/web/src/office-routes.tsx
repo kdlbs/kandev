@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import ProjectDetailPage from "@/app/office/projects/[id]/page";
 import AgentDetailLayout from "@/app/office/agents/[id]/layout";
 import AgentChannelsPage from "@/app/office/agents/[id]/channels/page";
@@ -34,9 +35,11 @@ import {
   listProjects,
 } from "@/lib/api/domains/office-api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { mapWorkspaceItem, readActiveWorkspaceCookie } from "@/lib/routing/route-bootstrap";
-import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
+import { qk } from "@/lib/query/keys";
+import type { Workspace } from "@/lib/types/http";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import {
   AgentDashboardRoute,
@@ -67,7 +70,7 @@ const OFFICE_ROUTES: Record<string, RouteRenderer> = {
 export function OfficeRoutes({ pathname }: { pathname: string }) {
   const router = useRouter();
   const officeEnabled = useAppStore((state) => state.features.office);
-  const workspaces = useAppStore((state) => state.workspaces);
+  const { items: workspaceItems, activeId: activeWorkspaceId } = useWorkspaces();
   const normalizedPathname = normalizeOfficePath(pathname);
   const routeWorkspaceId = useSearchParams().get("workspaceId");
   const bootstrap = useOfficeRouteBootstrap(officeEnabled, routeWorkspaceId);
@@ -75,7 +78,7 @@ export function OfficeRoutes({ pathname }: { pathname: string }) {
     normalizedPathname,
     bootstrap.complete,
     bootstrap.onboardingComplete,
-    workspaces.items,
+    workspaceItems,
   );
 
   useEffect(() => {
@@ -93,7 +96,12 @@ export function OfficeRoutes({ pathname }: { pathname: string }) {
 
   if (
     setupRedirectHref ||
-    shouldHoldOfficeHomeForBootstrap(normalizedPathname, bootstrap.complete, workspaces)
+    shouldHoldOfficeHomeForBootstrap(
+      normalizedPathname,
+      bootstrap.complete,
+      workspaceItems,
+      activeWorkspaceId,
+    )
   ) {
     return <OfficeRouteLoading />;
   }
@@ -118,7 +126,7 @@ export function resolveOfficeHomeSetupRedirect(
   pathname: string,
   bootstrapComplete: boolean,
   onboardingComplete: boolean | null,
-  workspaceItems: WorkspaceState["items"],
+  workspaceItems: Workspace[],
 ): "/office/setup" | "/office/setup?mode=new" | null {
   if (pathname !== "/office" || !bootstrapComplete) return null;
   if (onboardingComplete === false) return "/office/setup";
@@ -159,6 +167,7 @@ function useOfficeRouteBootstrap(
   routeWorkspaceId: string | null,
 ): OfficeBootstrapState {
   const store = useAppStoreApi();
+  const queryClient = useQueryClient();
   const [bootstrap, setBootstrap] = useState<OfficeBootstrapState>({
     complete: false,
     onboardingComplete: null,
@@ -189,6 +198,7 @@ function useOfficeRouteBootstrap(
       }
 
       const workspaceItems = workspacesResponse.workspaces.map(mapWorkspaceItem);
+      queryClient.setQueryData(qk.workspaces.all(), workspaceItems);
       const officeWorkspaceItems = workspaceItems.filter(
         (workspace) => workspace.office_workflow_id,
       );
@@ -200,7 +210,7 @@ function useOfficeRouteBootstrap(
       );
 
       store.getState().hydrate({
-        workspaces: { items: workspaceItems, activeId: activeWorkspaceId },
+        workspaces: { activeId: activeWorkspaceId },
         userSettings: {
           ...mapUserSettingsResponse(userSettingsResponse),
           workspaceId: activeWorkspaceId,
@@ -236,7 +246,7 @@ function useOfficeRouteBootstrap(
     return () => {
       cancelled = true;
     };
-  }, [officeEnabled, routeWorkspaceId, store]);
+  }, [officeEnabled, queryClient, routeWorkspaceId, store]);
 
   return bootstrap;
 }
@@ -343,16 +353,17 @@ function OfficeRouteLoading() {
 function shouldHoldOfficeHomeForBootstrap(
   pathname: string,
   bootstrapComplete: boolean,
-  workspaces: WorkspaceState,
+  workspaceItems: Workspace[],
+  activeWorkspaceId: string | null,
 ): boolean {
   return (
     pathname === "/office" &&
     !bootstrapComplete &&
-    (!hasOfficeWorkspace(workspaces.items) || !workspaces.activeId)
+    (!hasOfficeWorkspace(workspaceItems) || !activeWorkspaceId)
   );
 }
 
-function hasOfficeWorkspace(workspaceItems: WorkspaceState["items"]): boolean {
+function hasOfficeWorkspace(workspaceItems: Workspace[]): boolean {
   return workspaceItems.some((workspace) => Boolean(workspace.office_workflow_id));
 }
 

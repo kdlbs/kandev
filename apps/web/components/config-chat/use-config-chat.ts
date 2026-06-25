@@ -1,15 +1,19 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useShallow } from "zustand/react/shallow";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStore } from "@/components/state-provider";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import { startConfigChat } from "@/lib/api/domains/workspace-api";
 import { updateWorkspaceAction } from "@/app/actions/workspaces";
+import { patchWorkspaceCache } from "@/lib/query/workspace-cache";
 import {
   agentProfileId as toAgentProfileId,
   sessionId as toSessionId,
   taskId as toTaskId,
 } from "@/lib/types/ids";
+import type { Workspace } from "@/lib/types/http";
 
 function useConfigChatStore() {
   return useAppStore(
@@ -24,29 +28,27 @@ function useConfigChatStore() {
       closeConfigChatSession: s.closeConfigChatSession,
       setActiveConfigChatSession: s.setActiveConfigChatSession,
       renameConfigChatSession: s.renameConfigChatSession,
+      setTaskSession: s.setTaskSession,
     })),
   );
 }
 
-function useUpdateWorkspaceInStore() {
-  const storeApi = useAppStoreApi();
-  return (workspaceId: string, updates: Record<string, unknown>) => {
-    const { workspaces, setWorkspaces } = storeApi.getState();
-    setWorkspaces(workspaces.items.map((w) => (w.id === workspaceId ? { ...w, ...updates } : w)));
+function usePatchWorkspaceDefaults() {
+  const queryClient = useQueryClient();
+  return (workspaceId: string, updates: Partial<Workspace>) => {
+    patchWorkspaceCache(queryClient, workspaceId, updates);
   };
 }
 
 export function useConfigChat(workspaceId: string) {
   const store = useConfigChatStore();
-  const storeApi = useAppStoreApi();
   const [isStarting, setIsStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
-  const updateWorkspaceInStore = useUpdateWorkspaceInStore();
+  const patchWorkspaceDefaults = usePatchWorkspaceDefaults();
 
-  const workspace = useAppStore(
-    (s) => s.workspaces.items.find((w) => w.id === workspaceId) ?? null,
-  );
+  const { items: workspaceItems } = useWorkspaces();
+  const workspace = workspaceItems.find((w) => w.id === workspaceId) ?? null;
 
   const defaultProfileId =
     workspace?.default_config_agent_profile_id ?? workspace?.default_agent_profile_id ?? undefined;
@@ -75,7 +77,7 @@ export function useConfigChat(workspaceId: string) {
 
         // Seed the task session in the main store so QuickChatContent can find it
         // immediately. The WS event will merge on top when it arrives.
-        storeApi.getState().setTaskSession({
+        store.setTaskSession({
           id: toSessionId(response.session_id),
           task_id: toTaskId(response.task_id),
           state: "CREATED",
@@ -96,8 +98,8 @@ export function useConfigChat(workspaceId: string) {
             await updateWorkspaceAction(workspaceId, {
               default_config_agent_profile_id: agentProfileId,
             });
-            updateWorkspaceInStore(workspaceId, {
-              default_config_agent_profile_id: agentProfileId,
+            patchWorkspaceDefaults(workspaceId, {
+              default_config_agent_profile_id: toAgentProfileId(agentProfileId),
             });
           } catch {
             // Non-critical — don't fail the chat start for this
@@ -114,9 +116,8 @@ export function useConfigChat(workspaceId: string) {
       workspaceId,
       isStarting,
       store,
-      storeApi,
       workspace?.default_config_agent_profile_id,
-      updateWorkspaceInStore,
+      patchWorkspaceDefaults,
     ],
   );
 

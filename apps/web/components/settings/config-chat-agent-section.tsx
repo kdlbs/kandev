@@ -1,23 +1,23 @@
 "use client";
 
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { updateWorkspaceAction } from "@/app/actions/workspaces";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
+import { patchWorkspaceCache } from "@/lib/query/workspace-cache";
+import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 
 export function ConfigChatAgentSection() {
-  const workspace = useAppStore(
-    (s) => s.workspaces.items.find((w) => w.id === s.workspaces.activeId) ?? null,
-  );
+  const { activeWorkspace: workspace } = useWorkspaces();
   const { agentProfiles: profiles } = useSettingsData(true);
   const currentProfileId = workspace?.default_config_agent_profile_id ?? "";
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
-
-  const storeApi = useAppStoreApi();
+  const queryClient = useQueryClient();
 
   const handleChange = async (value: string) => {
     const effectiveValue = value === "none" ? "" : value;
@@ -27,12 +27,9 @@ export function ConfigChatAgentSection() {
       await updateWorkspaceAction(workspace.id, {
         default_config_agent_profile_id: effectiveValue,
       });
-      const { workspaces, setWorkspaces } = storeApi.getState();
-      setWorkspaces(
-        workspaces.items.map((w) =>
-          w.id === workspace.id ? { ...w, default_config_agent_profile_id: effectiveValue } : w,
-        ),
-      );
+      patchWorkspaceCache(queryClient, workspace.id, {
+        default_config_agent_profile_id: effectiveValue ? toAgentProfileId(effectiveValue) : null,
+      });
       toast({ title: "Configuration agent updated", variant: "success" });
     } catch (error) {
       toast({

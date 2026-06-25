@@ -12,7 +12,6 @@ import { registerTasksHandlers } from "@/lib/ws/handlers/tasks";
 import { registerTerminalsHandlers } from "@/lib/ws/handlers/terminals";
 import { registerTurnsHandlers } from "@/lib/ws/handlers/turns";
 import { registerUsersHandlers } from "@/lib/ws/handlers/users";
-import { registerWorkspacesHandlers } from "@/lib/ws/handlers/workspaces";
 import { registerOfficeHandlers } from "@/lib/ws/handlers/office";
 import { registerRunHandlers } from "@/lib/ws/handlers/run";
 
@@ -20,7 +19,6 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
   return {
     ...registerTasksHandlers(store),
 
-    ...registerWorkspacesHandlers(store),
     ...registerExecutorPrepareHandlers(store),
     ...registerTaskSessionHandlers(store),
     ...registerSessionModelsHandlers(store),

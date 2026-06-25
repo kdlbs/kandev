@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import Link from "@/components/routing/app-link";
 import { IconFolder, IconPlus, IconChevronRight } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -12,10 +13,9 @@ import { createWorkspaceAction } from "@/app/actions/workspaces";
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
 import { RequestIndicator } from "@/components/request-indicator";
-import { useAppStore } from "@/components/state-provider";
-import type { WorkspaceState } from "@/lib/state/slices";
-
-type Workspace = WorkspaceState["items"][number];
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
+import { upsertWorkspaceCache } from "@/lib/query/workspace-cache";
+import type { Workspace } from "@/lib/types/http";
 
 type AddWorkspaceFormProps = {
   newWorkspaceName: string;
@@ -92,8 +92,8 @@ function WorkspaceListItem({ workspace }: { workspace: Workspace }) {
 }
 
 export function WorkspacesPageClient() {
-  const items = useAppStore((state) => state.workspaces.items);
-  const setWorkspaces = useAppStore((state) => state.setWorkspaces);
+  const { items } = useWorkspaces();
+  const queryClient = useQueryClient();
   const [isAdding, setIsAdding] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const createRequest = useRequest(createWorkspaceAction);
@@ -104,30 +104,7 @@ export function WorkspacesPageClient() {
     if (!newWorkspaceName.trim()) return;
     try {
       const created = await createRequest.run({ name: newWorkspaceName.trim() });
-      setWorkspaces([
-        {
-          id: created.id,
-          name: created.name,
-          description: created.description ?? null,
-          owner_id: created.owner_id,
-          default_executor_id: created.default_executor_id ?? null,
-          default_environment_id: created.default_environment_id ?? null,
-          default_agent_profile_id: created.default_agent_profile_id ?? null,
-          created_at: created.created_at,
-          updated_at: created.updated_at,
-        },
-        ...items.map((workspace: Workspace) => ({
-          id: workspace.id,
-          name: workspace.name,
-          description: workspace.description ?? null,
-          owner_id: workspace.owner_id,
-          default_executor_id: workspace.default_executor_id ?? null,
-          default_environment_id: workspace.default_environment_id ?? null,
-          default_agent_profile_id: workspace.default_agent_profile_id ?? null,
-          created_at: workspace.created_at,
-          updated_at: workspace.updated_at,
-        })),
-      ]);
+      upsertWorkspaceCache(queryClient, created);
       setNewWorkspaceName("");
       setIsAdding(false);
     } catch (error) {

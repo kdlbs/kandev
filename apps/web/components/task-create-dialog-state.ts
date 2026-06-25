@@ -13,6 +13,7 @@ import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow
 import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 import { useAllCachedRepositories } from "@/hooks/domains/workspace/use-repository-cache";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
 import { getTaskCreateDraft, setTaskCreateDraft, removeTaskCreateDraft } from "@/lib/local-storage";
@@ -560,7 +561,7 @@ export function useTaskCreateDialogData(
   fs: DialogFormState,
 ) {
   const { workflows } = useWorkflows(workspaceId, open);
-  const workspaces = useAppStore((state) => state.workspaces.items);
+  const { items: workspaces } = useWorkspaces();
   const taskCreateLastUsed = useAppStore((state) => state.userSettings.taskCreateLastUsed);
   const { snapshots } = useAllWorkflowSnapshots(workspaceId);
 

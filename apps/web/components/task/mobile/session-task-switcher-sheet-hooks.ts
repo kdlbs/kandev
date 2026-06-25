@@ -8,6 +8,7 @@ import { launchSession } from "@/lib/services/session-launch-service";
 import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
 import { useWorkspaceSidebarTasks } from "@/hooks/domains/kanban/use-workspace-sidebar-tasks";
 import { useCachedRepositories } from "@/hooks/domains/workspace/use-repository-cache";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { getSessionInfoForTask } from "@/lib/utils/session-info";
@@ -118,7 +119,7 @@ export function useSheetData(workspaceId: string | null) {
     workflows,
     isLoading: tasksLoading,
   } = useWorkspaceSidebarTasks(workspaceId);
-  const workspaces = useAppStore((state) => state.workspaces.items);
+  const { items: workspaces } = useWorkspaces();
   const repositories = useCachedRepositories(workspaceId);
 
   const selectedTaskId = useMemo(() => {

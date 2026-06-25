@@ -178,7 +178,7 @@ function queryClientWithWorkflowSnapshot() {
 
 function wrapperFor(queryClient: QueryClient) {
   const initialState = {
-    workspaces: { activeId: WORKSPACE_ID, items: [] },
+    workspaces: { activeId: WORKSPACE_ID },
     kanbanMulti: { snapshots: {} },
   } as Partial<AppState>;
 

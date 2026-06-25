@@ -5,7 +5,7 @@ import { makeQueryClient } from "@/lib/query/client";
 import { qk } from "@/lib/query/keys";
 import type { AppState } from "@/lib/state/store";
 import { QueryProvider } from "@/lib/query/provider";
-import type { Message } from "@/lib/types/http";
+import type { Message, Workspace } from "@/lib/types/http";
 import { StateProvider } from "./state-provider";
 import { StateHydrator } from "./state-hydrator";
 
@@ -66,7 +66,7 @@ describe("StateHydrator", () => {
                   {
                     id: "workspace-1",
                     name: "Office",
-                  } as AppState["workspaces"]["items"][number],
+                  } as Workspace,
                 ],
                 activeId: "workspace-1",
               },

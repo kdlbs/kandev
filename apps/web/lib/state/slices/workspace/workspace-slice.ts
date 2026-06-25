@@ -2,7 +2,7 @@ import type { StateCreator } from "zustand";
 import type { WorkspaceSlice, WorkspaceSliceState } from "./types";
 
 export const defaultWorkspaceState: WorkspaceSliceState = {
-  workspaces: { items: [], activeId: null },
+  workspaces: { activeId: null },
 };
 
 export const createWorkspaceSlice: StateCreator<
@@ -20,11 +20,4 @@ export const createWorkspaceSlice: StateCreator<
       draft.workspaces.activeId = workspaceId;
     });
   },
-  setWorkspaces: (workspaces) =>
-    set((draft) => {
-      draft.workspaces.items = workspaces;
-      if (!draft.workspaces.activeId && workspaces.length) {
-        draft.workspaces.activeId = workspaces[0].id;
-      }
-    }),
 });

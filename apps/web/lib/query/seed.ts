@@ -12,6 +12,7 @@ import type {
   Repository,
   RepositoryScript,
   ToolStatus,
+  Workspace,
   Workflow,
   WorkflowSnapshot,
 } from "@/lib/types/http";
@@ -29,7 +30,10 @@ type SeedOptions = {
   sessionId?: string;
 };
 
-export type QuerySeedInitialState = Omit<Partial<AppState>, "workflows"> & {
+export type QuerySeedInitialState = Omit<Partial<AppState>, "workflows" | "workspaces"> & {
+  workspaces?: Partial<AppState["workspaces"]> & {
+    items?: Workspace[];
+  };
   workflows?: Partial<AppState["workflows"]> & {
     items?: Array<Workflow | WorkflowItem>;
   };

@@ -26,7 +26,7 @@ function createQueryClient() {
 
 function wrapperFor(queryClient: QueryClient) {
   const initialState = {
-    workspaces: { activeId: WORKSPACE_ID, items: [] },
+    workspaces: { activeId: WORKSPACE_ID },
     workflows: { activeId: WORKFLOW_ID },
     kanban: {
       workflowId: null,
@@ -106,7 +106,7 @@ describe("useKanbanActions", () => {
     const { result } = renderHook(
       () =>
         useKanbanActions({
-          workspaceState: { activeId: WORKSPACE_ID, items: [] },
+          workspaceState: { activeId: WORKSPACE_ID },
           workflowsState: { activeId: WORKFLOW_ID },
         }),
       { wrapper: wrapperFor(queryClient) },
@@ -130,7 +130,7 @@ describe("useKanbanActions", () => {
     const { result } = renderHook(
       () =>
         useKanbanActions({
-          workspaceState: { activeId: WORKSPACE_ID, items: [] },
+          workspaceState: { activeId: WORKSPACE_ID },
           workflowsState: { activeId: WORKFLOW_ID },
         }),
       { wrapper: wrapperFor(queryClient) },

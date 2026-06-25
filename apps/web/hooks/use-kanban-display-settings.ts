@@ -1,11 +1,10 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useCallback } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import { useUserDisplaySettings } from "@/hooks/use-user-display-settings";
 import { useWorkflows } from "@/hooks/use-workflows";
-import { workspacesQueryOptions } from "@/lib/query/query-options";
 
 type UserSettingsFields = {
   workspaceId: string | null;
@@ -23,19 +22,9 @@ function baseSettingsPayload(settings: UserSettingsFields): UserSettingsFields {
 }
 
 function useWorkspaceSelectionData() {
-  const storeWorkspaces = useAppStore((state) => state.workspaces.items);
-  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
+  const { items: workspaceItems, activeId } = useWorkspaces();
   const activeWorkflowId = useAppStore((state) => state.workflows.activeId);
-  const setWorkspaces = useAppStore((state) => state.setWorkspaces);
-  const workspacesQuery = useQuery(workspacesQueryOptions());
-  const workspaces = workspacesQuery.data ?? storeWorkspaces;
-
-  useEffect(() => {
-    if (!workspacesQuery.data) return;
-    setWorkspaces(workspacesQuery.data);
-  }, [setWorkspaces, workspacesQuery.data]);
-
-  return { workspaces, activeWorkspaceId, activeWorkflowId };
+  return { workspaces: workspaceItems, activeWorkspaceId: activeId, activeWorkflowId };
 }
 
 /**

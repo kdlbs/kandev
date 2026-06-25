@@ -18,6 +18,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import { cn } from "@/lib/utils";
 import {
   rememberLastOfficeWorkspace,
@@ -81,11 +82,11 @@ function WorkspaceTypeIcon({ type, className }: { type: WorkspaceType; className
 export function AppSidebarWorkspacePicker() {
   const router = useRouter();
   const officeEnabled = useFeature("office");
-  const workspaces = useAppStore((s) => s.workspaces);
+  const { items: workspaceItems, activeId: activeWorkspaceId } = useWorkspaces();
   const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace);
   const [open, setOpen] = useState(false);
 
-  const activeWorkspace = workspaces.items.find((w) => w.id === workspaces.activeId);
+  const activeWorkspace = workspaceItems.find((w) => w.id === activeWorkspaceId);
   const activeId = activeWorkspace?.id ?? null;
   const activeName = activeWorkspace?.name ?? "Workspace";
 
@@ -120,10 +121,10 @@ export function AppSidebarWorkspacePicker() {
         <WorkspaceTrigger activeName={activeName} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-72">
-        {workspaces.items.length === 0 ? (
+        {workspaceItems.length === 0 ? (
           <DropdownMenuItem disabled>No workspaces</DropdownMenuItem>
         ) : (
-          workspaces.items.map((ws) => {
+          workspaceItems.map((ws) => {
             const type = workspaceType(ws);
             return (
               <DropdownMenuItem

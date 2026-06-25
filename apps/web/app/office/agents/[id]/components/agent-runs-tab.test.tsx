@@ -42,7 +42,7 @@ function renderTab(agent = ceo) {
   const queryClient = makeQueryClient();
   return render(
     <QueryClientProvider client={queryClient}>
-      <StateProvider initialState={{ workspaces: { activeId: "ws-1", items: [] } }}>
+      <StateProvider initialState={{ workspaces: { activeId: "ws-1" } }}>
         <AgentRunsTab agent={agent} />
       </StateProvider>
     </QueryClientProvider>,

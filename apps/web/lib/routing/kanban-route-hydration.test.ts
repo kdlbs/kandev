@@ -9,7 +9,7 @@ const workflows: WorkflowItem[] = [{ id: "wf-1", workspaceId: "ws-1", name: "Dev
 
 function state(overrides: Partial<HydrationState> = {}): HydrationState {
   return {
-    workspaces: { activeId: "ws-1", items: [] },
+    workspaces: { activeId: "ws-1" },
     workflows: { activeId: "wf-1" },
     ...overrides,
   };
@@ -31,7 +31,7 @@ describe("hasHydratedKanbanRouteState", () => {
   it("rejects missing or mismatched route state so the client can fetch", () => {
     expect(
       hasHydratedKanbanRouteState(
-        state({ workspaces: { activeId: null, items: [] } }),
+        state({ workspaces: { activeId: null } }),
         {},
         workflows,
         new Set(["wf-1"]),

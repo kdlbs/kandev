@@ -25,7 +25,6 @@ import {
   defaultGitHubState,
   defaultOfficeState,
   defaultFeaturesState,
-  type WorkspaceState,
   type UserSettingsState,
   type ProcessStatusEntry,
   type Worktree,
@@ -140,7 +139,6 @@ export type AppState = {
   // Actions from all slices
   hydrate: (state: Partial<AppState>, options?: HydrationOptions) => void;
   setActiveWorkspace: (workspaceId: string | null) => void;
-  setWorkspaces: (workspaces: WorkspaceState["items"]) => void;
   setActiveWorkflow: (workflowId: string | null) => void;
   setUserSettings: (settings: UserSettingsState) => void;
   appendShellOutput: (sessionId: string, data: string) => void;
