@@ -214,7 +214,7 @@ start:
 	@$(MAKE) -s build-backend-quiet
 	$(call success,Build complete)
 	$(call phase,Starting Server)
-	@$(BACKEND_DIR)/bin/kandev start $(if $(filter 1 true yes,$(VERBOSE)),--verbose,) $(if $(filter 1 true yes,$(DEBUG)),--debug,)
+	@exec $(BACKEND_DIR)/bin/kandev start $(if $(filter 1 true yes,$(VERBOSE)),--verbose,) $(if $(filter 1 true yes,$(DEBUG)),--debug,)
 
 .PHONY: start-verbose
 start-verbose:

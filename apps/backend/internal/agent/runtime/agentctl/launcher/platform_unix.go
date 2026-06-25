@@ -11,8 +11,12 @@ import (
 // gracefulStop sends SIGTERM to the process for graceful shutdown.
 // Falls back to SIGKILL if SIGTERM fails.
 func (l *Launcher) gracefulStop(pid int) error {
+	l.logger.Debug("agentctl subprocess SIGTERM requested", zap.Int("pid", pid))
 	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
 		l.logger.Warn("failed to send SIGTERM, trying SIGKILL", zap.Error(err))
+		l.logger.Debug("agentctl subprocess SIGKILL requested",
+			zap.Int("pid", pid),
+			zap.String("reason", "sigterm_failed"))
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 		return err
 	}
@@ -21,5 +25,8 @@ func (l *Launcher) gracefulStop(pid int) error {
 
 // forceKill sends SIGKILL to the agentctl process.
 func (l *Launcher) forceKill(pid int) {
+	l.logger.Debug("agentctl subprocess SIGKILL requested",
+		zap.Int("pid", pid),
+		zap.String("reason", "force_kill"))
 	_ = syscall.Kill(pid, syscall.SIGKILL)
 }

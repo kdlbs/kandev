@@ -34,3 +34,13 @@ func terminateProcessGroup(pid int) error {
 	kill := exec.Command("taskkill", "/T", "/PID", fmt.Sprintf("%d", pid))
 	return kill.Run()
 }
+
+func processGroupAlive(_ int) bool {
+	// taskkill /T is the authoritative process-tree operation on Windows.
+	// There is no Unix-style process group to poll here.
+	return false
+}
+
+func isProcessGroupMissing(_ error) bool {
+	return false
+}

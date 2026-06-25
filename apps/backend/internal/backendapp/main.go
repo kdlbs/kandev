@@ -1678,6 +1678,9 @@ func awaitShutdown(
 	// ============================================
 	quit := make(chan os.Signal, 2)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	log.Debug("shutdown signal handler armed",
+		zap.Int("pid", os.Getpid()),
+		zap.Int("ppid", os.Getppid()))
 	sig := <-quit
 
 	// If we get a second signal, exit immediately.
@@ -1688,6 +1691,8 @@ func awaitShutdown(
 		os.Exit(1)
 	}()
 
-	log.Info("Received shutdown signal", zap.String("signal", sig.String()))
+	log.Info("Received shutdown signal",
+		zap.String("signal", sig.String()),
+		zap.Int("pid", os.Getpid()))
 	runGracefulShutdown(server, orchestratorSvc, lifecycleMgr, runCleanups, log)
 }

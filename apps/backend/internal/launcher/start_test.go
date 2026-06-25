@@ -2,7 +2,9 @@ package launcher
 
 import (
 	"path/filepath"
+	"reflect"
 	"testing"
+	"time"
 )
 
 func TestRunStartUsesSelfExecutableAndBackendCWD(t *testing.T) {
@@ -43,5 +45,66 @@ func TestRunStartUsesSelfExecutableAndBackendCWD(t *testing.T) {
 	}
 	if !got.Opts.Headless {
 		t.Fatal("expected Headless option to be preserved")
+	}
+}
+
+func TestRunManagedAppAttachesSignalsAfterBackendLaunch(t *testing.T) {
+	oldNewSupervisor := newSupervisorFn
+	oldLaunchBackend := launchBackendFn
+	oldAttachSignals := attachSignalsFn
+	oldWaitForHealth := waitForHealthFn
+	t.Cleanup(func() {
+		newSupervisorFn = oldNewSupervisor
+		launchBackendFn = oldLaunchBackend
+		attachSignalsFn = oldAttachSignals
+		waitForHealthFn = oldWaitForHealth
+	})
+
+	var events []string
+	newSupervisorFn = func() *processSupervisor {
+		events = append(events, "new-supervisor")
+		return newSupervisor()
+	}
+	launchBackendFn = func(
+		_ string,
+		_ []string,
+		_ string,
+		_ []string,
+		_ bool,
+		_ portConfig,
+		_ string,
+		_ *processSupervisor,
+	) (*restartableBackend, func(), error) {
+		events = append(events, "launch-backend")
+		exitCh := make(chan int, 1)
+		exitCh <- 0
+		return &restartableBackend{exitCh: exitCh}, func() {}, nil
+	}
+	attachSignalsFn = func(_ *processSupervisor) {
+		events = append(events, "attach-signals")
+	}
+	waitForHealthFn = func(_ string, _ childState, _ time.Duration, _ func()) error {
+		events = append(events, "wait-health")
+		return nil
+	}
+	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
+
+	code := runManagedApp(managedAppConfig{
+		Header:     "test",
+		Mode:       "start",
+		Backend:    "kandev",
+		BackendCWD: t.TempDir(),
+		Ports: portConfig{
+			BackendPort: 48123,
+			BackendURL:  "http://localhost:48123",
+		},
+		Opts: Options{Headless: true},
+	})
+	if code != 0 {
+		t.Fatalf("runManagedApp() = %d, want 0", code)
+	}
+	want := []string{"new-supervisor", "launch-backend", "attach-signals", "wait-health"}
+	if !reflect.DeepEqual(events, want) {
+		t.Fatalf("events = %v, want %v", events, want)
 	}
 }

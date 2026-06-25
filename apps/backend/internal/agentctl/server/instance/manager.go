@@ -24,6 +24,8 @@ import (
 // ServerFactory creates an HTTP handler for an instance given its config and process manager.
 type ServerFactory func(cfg *config.InstanceConfig, procMgr *process.Manager, log *logger.Logger) http.Handler
 
+const instanceHTTPShutdownGrace = 250 * time.Millisecond
+
 // Manager manages multiple agent instances.
 // It handles creation, tracking, and removal of agent instances,
 // each with their own HTTP server on a dedicated port.
@@ -347,10 +349,20 @@ func (m *Manager) StopInstance(ctx context.Context, id string) error {
 
 	// Shutdown HTTP server (potentially slow, done without lock)
 	if inst.server != nil {
-		if err := inst.server.Shutdown(ctx); err != nil {
-			m.logger.Warn("error shutting down HTTP server",
+		serverCtx, cancel := context.WithTimeout(ctx, instanceHTTPShutdownGrace)
+		err := inst.server.Shutdown(serverCtx)
+		cancel()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			m.logger.Debug("StopInstance: HTTP server graceful shutdown expired, closing active connections",
 				zap.String("instance_id", id),
+				zap.Int("port", inst.Port),
+				zap.Duration("grace", instanceHTTPShutdownGrace),
 				zap.Error(err))
+			if closeErr := inst.server.Close(); closeErr != nil && !errors.Is(closeErr, http.ErrServerClosed) {
+				m.logger.Warn("error closing HTTP server",
+					zap.String("instance_id", id),
+					zap.Error(closeErr))
+			}
 		}
 	}
 

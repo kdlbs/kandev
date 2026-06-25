@@ -48,6 +48,8 @@ type Manager struct {
 	mu          sync.RWMutex
 	instances   map[string]*instance // keyed by agent type
 	createGroup singleflight.Group
+	startCancel context.CancelFunc
+	stopped     bool
 }
 
 // instance is a single warm agentctl instance bound to an agent type.
@@ -86,13 +88,39 @@ func (m *Manager) SetAuthToken(token string) {
 // initial probe against each in parallel. Individual agent failures are
 // captured in the cache but do not abort the other agents.
 func (m *Manager) Start(ctx context.Context) error {
+	startCtx, cancel := context.WithCancel(ctx)
+	m.mu.Lock()
+	if m.stopped {
+		m.mu.Unlock()
+		cancel()
+		return nil
+	}
+	m.startCancel = cancel
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		m.startCancel = nil
+		m.mu.Unlock()
+		cancel()
+	}()
+
 	// Create a process-scoped parent dir so concurrent kandev processes do not
 	// share state, and so Stop only removes dirs owned by this process.
 	parent, err := os.MkdirTemp("", fmt.Sprintf("kandev-host-utility-%d-*", os.Getpid()))
 	if err != nil {
 		return fmt.Errorf("create host utility tmp dir: %w", err)
 	}
+	m.mu.Lock()
+	if m.stopped {
+		m.mu.Unlock()
+		if err := os.RemoveAll(parent); err != nil {
+			m.log.Warn("failed to remove unused host utility parent tmp dir",
+				zap.String("path", parent), zap.Error(err))
+		}
+		return nil
+	}
 	m.parentTmpDir = parent
+	m.mu.Unlock()
 	m.log.Info("host utility parent tmp dir created", zap.String("path", parent))
 
 	targets := m.eligibleAgents()
@@ -101,7 +129,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		return nil
 	}
 
-	g, gctx := errgroup.WithContext(ctx)
+	g, gctx := errgroup.WithContext(startCtx)
 	for _, ag := range targets {
 		ag := ag
 		g.Go(func() error {
@@ -118,28 +146,43 @@ func (m *Manager) Start(ctx context.Context) error {
 // are untouched.
 func (m *Manager) Stop(ctx context.Context) {
 	m.mu.Lock()
+	m.stopped = true
+	cancel := m.startCancel
+	m.startCancel = nil
 	instances := make([]*instance, 0, len(m.instances))
 	for _, inst := range m.instances {
 		instances = append(instances, inst)
 	}
 	m.instances = make(map[string]*instance)
+	parentTmpDir := m.parentTmpDir
+	m.parentTmpDir = ""
 	m.mu.Unlock()
 
-	for _, inst := range instances {
-		if err := m.controlClient.DeleteInstance(ctx, inst.instanceID); err != nil {
-			m.log.Warn("failed to delete host utility instance",
-				zap.String("agent_type", inst.agentType),
-				zap.String("instance_id", inst.instanceID),
-				zap.Error(err))
-		}
+	if cancel != nil {
+		cancel()
 	}
 
-	if m.parentTmpDir != "" {
-		if err := os.RemoveAll(m.parentTmpDir); err != nil {
+	for _, inst := range instances {
+		m.deleteInstance(ctx, inst)
+	}
+
+	if parentTmpDir != "" {
+		if err := os.RemoveAll(parentTmpDir); err != nil {
 			m.log.Warn("failed to remove host utility parent tmp dir",
-				zap.String("path", m.parentTmpDir), zap.Error(err))
+				zap.String("path", parentTmpDir), zap.Error(err))
 		}
-		m.parentTmpDir = ""
+	}
+}
+
+func (m *Manager) deleteInstance(ctx context.Context, inst *instance) {
+	if inst == nil || m.controlClient == nil {
+		return
+	}
+	if err := m.controlClient.DeleteInstance(ctx, inst.instanceID); err != nil {
+		m.log.Warn("failed to delete host utility instance",
+			zap.String("agent_type", inst.agentType),
+			zap.String("instance_id", inst.instanceID),
+			zap.Error(err))
 	}
 }
 
@@ -217,7 +260,17 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 		return
 	}
 
+	if ctx.Err() != nil {
+		m.deleteInstance(context.Background(), inst)
+		return
+	}
+
 	m.mu.Lock()
+	if m.stopped {
+		m.mu.Unlock()
+		m.deleteInstance(context.Background(), inst)
+		return
+	}
 	m.instances[agentType] = inst
 	m.mu.Unlock()
 
@@ -242,7 +295,17 @@ func (m *Manager) createInstance(ctx context.Context, agentType string) (*instan
 	if !safeAgentTypeName.MatchString(agentType) {
 		return nil, fmt.Errorf("invalid agent type %q: must match %s", agentType, safeAgentTypeName.String())
 	}
-	workDir := filepath.Join(m.parentTmpDir, agentType)
+	m.mu.RLock()
+	parentTmpDir := m.parentTmpDir
+	stopped := m.stopped
+	m.mu.RUnlock()
+	if stopped {
+		return nil, errManagerStopped
+	}
+	if parentTmpDir == "" {
+		return nil, errors.New("host utility manager not started")
+	}
+	workDir := filepath.Join(parentTmpDir, agentType)
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		return nil, fmt.Errorf("mkdir %s: %w", workDir, err)
 	}
@@ -303,6 +366,7 @@ func waitForClientHealthy(ctx context.Context, c *agentctlclient.Client) error {
 // installed on the host. The Refresh path uses it to classify Status
 // accurately instead of lumping every error into StatusFailed.
 var errAgentNotInstalled = errors.New("agent not installed")
+var errManagerStopped = errors.New("host utility manager stopped")
 
 // getInstance returns the warm instance for the agent type, lazily recreating
 // it if missing (e.g. after a previous failure or crash).
@@ -320,13 +384,18 @@ func (m *Manager) getInstance(ctx context.Context, agentType string) (*instance,
 	}
 
 	m.mu.RLock()
+	if m.stopped {
+		m.mu.RUnlock()
+		return nil, nil, errManagerStopped
+	}
 	inst := m.instances[agentType]
+	parentTmpDir := m.parentTmpDir
 	m.mu.RUnlock()
 	if inst != nil {
 		return inst, ia, nil
 	}
 
-	if m.parentTmpDir == "" {
+	if parentTmpDir == "" {
 		return nil, nil, errors.New("host utility manager not started")
 	}
 
@@ -351,6 +420,11 @@ func (m *Manager) getInstance(ctx context.Context, agentType string) (*instance,
 			return nil, cerr
 		}
 		m.mu.Lock()
+		if m.stopped {
+			m.mu.Unlock()
+			m.deleteInstance(context.Background(), created)
+			return nil, errManagerStopped
+		}
 		m.instances[agentType] = created
 		m.mu.Unlock()
 		return created, nil

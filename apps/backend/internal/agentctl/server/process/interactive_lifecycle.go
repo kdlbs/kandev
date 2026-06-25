@@ -404,6 +404,9 @@ func (r *InteractiveRunner) Stop(ctx context.Context, processID string) error {
 
 	// Terminate the process directly (PTY handles its own session management)
 	if proc.cmd != nil && proc.cmd.Process != nil {
+		r.logger.Debug("interactive process terminate requested",
+			zap.String("process_id", processID),
+			zap.Int("pid", pid))
 		_ = terminateProcess(proc.cmd.Process)
 
 		// Wait for the wait() goroutine to finish (it calls cmd.Wait).
@@ -414,11 +417,19 @@ func (r *InteractiveRunner) Stop(ctx context.Context, processID string) error {
 				zap.String("process_id", processID),
 				zap.Int("os_pid", pid),
 				zap.Error(ctx.Err()))
+			r.logger.Debug("interactive process SIGKILL requested",
+				zap.String("process_id", processID),
+				zap.Int("pid", pid),
+				zap.String("reason", "context_canceled"))
 			_ = proc.cmd.Process.Kill()
 		case <-time.After(2 * time.Second):
 			r.logger.Warn("interactive process stop timed out; killing process",
 				zap.String("process_id", processID),
 				zap.Int("os_pid", pid))
+			r.logger.Debug("interactive process SIGKILL requested",
+				zap.String("process_id", processID),
+				zap.Int("pid", pid),
+				zap.String("reason", "grace_expired"))
 			_ = proc.cmd.Process.Kill()
 		case <-proc.waitDone:
 			// Process exited cleanly

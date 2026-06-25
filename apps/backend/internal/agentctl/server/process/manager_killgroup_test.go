@@ -24,7 +24,7 @@ import (
 // After the fix, killProcessGroup is delivered to the leader's pgid so the
 // whole tree dies.
 func TestWaitForProcessExit_KillsProcessGroupOnTimeout(t *testing.T) {
-	log := newTestLogger(t)
+	log, observed := newObservedTestLogger(t)
 	pidFile := filepath.Join(t.TempDir(), "child.pid")
 
 	m := &Manager{
@@ -68,6 +68,8 @@ func TestWaitForProcessExit_KillsProcessGroupOnTimeout(t *testing.T) {
 	cancel()
 
 	m.waitForProcessExit(ctx)
+	require.True(t, observedLogsContain(observed, "agent process group SIGKILL requested"),
+		"shutdown should log the process-group SIGKILL attempt")
 
 	// Both parent and child must be reaped within a short window. We waited
 	// the parent ourselves; for the child we treat both "process gone" and
@@ -80,6 +82,143 @@ func TestWaitForProcessExit_KillsProcessGroupOnTimeout(t *testing.T) {
 		return !processAlive(childPID)
 	}, 15*time.Second, 50*time.Millisecond,
 		"child process %d should be killed by process-group reap", childPID)
+}
+
+func TestWaitForProcessExit_ReapsProcessGroupAfterLeaderExit(t *testing.T) {
+	log := newTestLogger(t)
+	pidFile := filepath.Join(t.TempDir(), "child.pid")
+
+	m := &Manager{
+		logger: log,
+	}
+	m.cmd = fixtureCmd("exit-with-child " + pidFile + " 30")
+	setProcGroup(m.cmd)
+	require.NoError(t, m.cmd.Start())
+	parentPID := m.cmd.Process.Pid
+
+	waitDone := make(chan struct{})
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		_ = m.cmd.Wait()
+		close(waitDone)
+	}()
+	t.Cleanup(func() {
+		_ = killProcessGroup(parentPID)
+		select {
+		case <-waitDone:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for fixture parent to exit")
+		}
+	})
+
+	childPID := waitForChildPID(t, pidFile, 5*time.Second)
+	childPGID, err := syscall.Getpgid(childPID)
+	require.NoError(t, err)
+	require.Equal(t, parentPID, childPGID,
+		"child must remain in the leader's pgid after the leader exits")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	m.waitForProcessExit(ctx)
+
+	require.Eventually(t, func() bool {
+		return !processAlive(childPID)
+	}, 5*time.Second, 50*time.Millisecond,
+		"child process %d should be reaped even after the group leader exits", childPID)
+}
+
+func TestWaitForProcessExit_TerminatesBeforeParentContextDeadline(t *testing.T) {
+	log, observed := newObservedTestLogger(t)
+
+	m := &Manager{
+		logger: log,
+	}
+	m.cmd = fixtureCmd("sleep 30")
+	setProcGroup(m.cmd)
+	require.NoError(t, m.cmd.Start())
+	parentPID := m.cmd.Process.Pid
+
+	waitDone := make(chan struct{})
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		_ = m.cmd.Wait()
+		close(waitDone)
+	}()
+	t.Cleanup(func() {
+		_ = killProcessGroup(parentPID)
+		select {
+		case <-waitDone:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for fixture parent to exit")
+		}
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	startedAt := time.Now()
+	m.waitForProcessExit(ctx)
+	elapsed := time.Since(startedAt)
+
+	require.Less(t, elapsed, 700*time.Millisecond,
+		"shutdown should terminate a non-exiting agent without spending a full second in local grace")
+	require.True(t, observedLogsContain(observed, "agent process group SIGTERM requested"),
+		"shutdown should log the process-group SIGTERM attempt")
+	require.Eventually(t, func() bool {
+		return !processAlive(parentPID)
+	}, 5*time.Second, 50*time.Millisecond,
+		"agent process %d should be killed after local graceful wait", parentPID)
+}
+
+func TestStop_ReapsProcessGroupWhenStatusAlreadyStopped(t *testing.T) {
+	log := newTestLogger(t)
+	pidFile := filepath.Join(t.TempDir(), "child.pid")
+
+	m := &Manager{
+		logger: log,
+	}
+	m.status.Store(StatusStopped)
+	m.cmd = fixtureCmd("exit-with-child " + pidFile + " 30")
+	setProcGroup(m.cmd)
+	require.NoError(t, m.cmd.Start())
+	parentPID := m.cmd.Process.Pid
+
+	waitDone := make(chan struct{})
+	go func() {
+		_ = m.cmd.Wait()
+		close(waitDone)
+	}()
+	t.Cleanup(func() {
+		_ = killProcessGroup(parentPID)
+		select {
+		case <-waitDone:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for fixture parent to exit")
+		}
+	})
+
+	childPID := waitForChildPID(t, pidFile, 5*time.Second)
+	require.Eventually(t, func() bool {
+		select {
+		case <-waitDone:
+			return true
+		default:
+			return false
+		}
+	}, 5*time.Second, 50*time.Millisecond, "fixture leader should exit before Stop")
+	require.True(t, processAlive(childPID), "child process should still be alive before Stop")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, m.Stop(ctx))
+
+	require.Eventually(t, func() bool {
+		return !processAlive(childPID)
+	}, 5*time.Second, 50*time.Millisecond,
+		"child process %d should be reaped even when Stop starts from stopped status", childPID)
 }
 
 // waitForChildPID polls pidFile until it contains a valid PID or timeout
