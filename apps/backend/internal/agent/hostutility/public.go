@@ -95,7 +95,7 @@ func (m *Manager) ExecutePromptWithMCP(
 			Command:   cfg.Command.Args(),
 			ModelFlag: cfg.ModelFlag.Args(),
 			WorkDir:   inst.workDir,
-			StripEnv:  stripEnvFor(ia),
+			StripEnv:  agents.StripEnvFor(ia),
 		},
 		MCPServers: mcpServers,
 	}

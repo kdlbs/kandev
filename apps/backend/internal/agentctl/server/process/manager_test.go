@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
@@ -29,6 +30,16 @@ type stubAdapter struct {
 func newStubAdapter() *stubAdapter {
 	return &stubAdapter{updatesCh: make(chan adapter.AgentEvent, 10)}
 }
+
+type oneShotStubAdapter struct {
+	*stubAdapter
+}
+
+func newOneShotStubAdapter() *oneShotStubAdapter {
+	return &oneShotStubAdapter{stubAdapter: newStubAdapter()}
+}
+
+func (s *oneShotStubAdapter) IsOneShot() bool { return true }
 
 func (s *stubAdapter) PrepareEnvironment() (map[string]string, error) { return nil, nil }
 func (s *stubAdapter) PrepareCommandArgs() []string                   { return nil }
@@ -201,5 +212,43 @@ func TestBuildAdapterConfig_StripEnvRemovesDeclaredVars(t *testing.T) {
 	}
 	if !slices.Contains(m.cfg.AgentEnv, "HOME=/root") {
 		t.Errorf("HOME was stripped but should have been kept")
+	}
+}
+
+func TestStartOneShotRestoresTempEnvAfterStrip(t *testing.T) {
+	log := newTestLogger(t)
+	workDir := t.TempDir()
+
+	m := &Manager{
+		cfg: &config.InstanceConfig{
+			SessionID: "session-1",
+			WorkDir:   workDir,
+			AgentEnv:  []string{"PATH=/usr/bin"},
+		},
+		logger:  log,
+		adapter: newOneShotStubAdapter(),
+		adapterCfg: &adapter.Config{
+			OneShotConfig: &adapter.OneShotConfig{
+				Env:     []string{"PATH=/usr/bin"},
+				WorkDir: workDir,
+			},
+		},
+		updatesCh:          make(chan adapter.AgentEvent, 100),
+		pendingPermissions: make(map[string]*PendingPermission),
+		workspaceTracker:   NewWorkspaceTracker(workDir, log),
+	}
+
+	require.NoError(t, m.startOneShot())
+	t.Cleanup(func() {
+		close(m.stopCh)
+		m.wg.Wait()
+		m.workspaceTracker.Stop()
+	})
+
+	wantDir := filepath.Join(os.TempDir(), agentTempDirRoot, agentTempDirName("session-1", 0))
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		if got := lookupEnvValue(m.adapterCfg.OneShotConfig.Env, key); got != wantDir {
+			t.Fatalf("OneShotConfig.Env %s = %q, want %q", key, got, wantDir)
+		}
 	}
 }

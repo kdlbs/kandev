@@ -95,9 +95,9 @@ The strip list flows agent → instance config → process manager via a single 
 1. `agents.RuntimeConfig.StripEnv` (set `[]string{"ACP_BACKEND"}` on `DevinACP`).
 2. The lifecycle executors copy it into `agentctl.CreateInstanceRequest.StripEnv`.
 3. `instance.Manager` stores it on `config.InstanceConfig.StripEnv`.
-4. `process.Manager.buildAdapterConfig` iterates the list and calls `utility.RemoveEnvEntry` on `m.cfg.AgentEnv` before the adapter or one-shot config sees it.
+4. `process.Manager.buildAdapterConfig` iterates the list and calls `utility.RemoveEnvEntry` on `m.cfg.AgentEnv` before that env is used to spawn child processes.
 
-For the one-shot probe/inference path, the strip list is derived from `Runtime().StripEnv` via `hostutility.stripEnvFor` (and the lifecycle mirror `stripEnvFromAgent`) — it is not an independent field on `InferenceConfig`. The derived value is propagated through `InferenceConfigDTO.StripEnv` and applied by `utility.sanitizeEnvForAgent` before spawning the ephemeral subprocess.
+For the one-shot probe/inference path, the strip list is derived from `Runtime().StripEnv` via the shared `agents.StripEnvFor` helper — it is not an independent field on `InferenceConfig`. The derived value is propagated through `InferenceConfigDTO.StripEnv` and applied by `utility.sanitizeEnvForAgent` before spawning the ephemeral subprocess.
 
 To add another agent that needs env vars stripped: set `StripEnv: []string{"VAR_NAME"}` in its `Runtime()` — that's all.
 

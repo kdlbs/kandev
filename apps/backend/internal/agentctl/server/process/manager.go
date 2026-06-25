@@ -772,6 +772,15 @@ func (m *Manager) Start(ctx context.Context) error {
 // startOneShot initialises a one-shot adapter without spawning a long-lived subprocess.
 // The adapter manages its own per-prompt subprocess lifecycle internally.
 func (m *Manager) startOneShot() error {
+	// One-shot adapters bypass buildFinalCommand, so restore temp env vars
+	// after StripEnv before their per-prompt subprocesses inherit Env.
+	if err := m.ensureAgentTempEnv(); err != nil {
+		return err
+	}
+	if m.adapterCfg != nil && m.adapterCfg.OneShotConfig != nil {
+		m.adapterCfg.OneShotConfig.Env = m.cfg.AgentEnv
+	}
+
 	m.stopCh = make(chan struct{})
 	m.doneCh = make(chan struct{})
 
