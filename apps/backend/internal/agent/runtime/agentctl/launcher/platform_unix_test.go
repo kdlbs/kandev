@@ -55,9 +55,6 @@ func TestLauncherForceKillSignalsProcessGroup(t *testing.T) {
 	var childPID int
 	t.Cleanup(func() {
 		_ = syscall.Kill(-pgid, syscall.SIGKILL)
-		if childPID > 0 {
-			_ = syscall.Kill(childPID, syscall.SIGKILL)
-		}
 		_ = cmd.Wait()
 	})
 
