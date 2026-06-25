@@ -1,5 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeMermaidCode } from "./mermaid-utils";
+import { DEFAULT_SCALE, calculateMermaidFitScale, sanitizeMermaidCode } from "./mermaid-utils";
+
+describe("calculateMermaidFitScale", () => {
+  it("keeps the default scale when the diagram already fits", () => {
+    expect(calculateMermaidFitScale({ viewportWidth: 900, svgWidth: 800 })).toBe(DEFAULT_SCALE);
+  });
+
+  it("shrinks below the default scale when the diagram is wider than the viewport", () => {
+    expect(calculateMermaidFitScale({ viewportWidth: 600, svgWidth: 1200 })).toBe(0.5);
+  });
+
+  it("clamps to the minimum scale for extremely wide diagrams", () => {
+    expect(calculateMermaidFitScale({ viewportWidth: 100, svgWidth: 4000 })).toBe(0.1);
+  });
+
+  it("uses the default scale until valid measurements are available", () => {
+    expect(calculateMermaidFitScale({ viewportWidth: 0, svgWidth: 1200 })).toBe(DEFAULT_SCALE);
+    expect(calculateMermaidFitScale({ viewportWidth: 600, svgWidth: 0 })).toBe(DEFAULT_SCALE);
+  });
+});
 
 describe("sanitizeMermaidCode", () => {
   it("leaves a pre-quoted bracket label with parens inside untouched", () => {

@@ -12,6 +12,22 @@ export function cleanupMermaidOrphans(id: string): void {
   document.getElementById(`d${id}`)?.remove();
 }
 
+type MermaidFitScaleInput = {
+  viewportWidth: number;
+  svgWidth: number;
+  defaultScale?: number;
+};
+
+export function calculateMermaidFitScale({
+  viewportWidth,
+  svgWidth,
+  defaultScale = DEFAULT_SCALE,
+}: MermaidFitScaleInput): number {
+  if (viewportWidth <= 0 || svgWidth <= 0) return defaultScale;
+  const fitScale = Math.min(defaultScale, viewportWidth / svgWidth);
+  return Math.max(MIN_SCALE, Math.min(MAX_SCALE, fitScale));
+}
+
 export function emitMermaidRenderError(message: string): void {
   document.dispatchEvent(new CustomEvent(MERMAID_ERROR_EVENT, { detail: { message } }));
 }
