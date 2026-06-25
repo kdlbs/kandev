@@ -19,6 +19,7 @@ import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const debug = createDebugLogger("dockview:task-select");
+let taskSelectionSequence = 0;
 
 export type SwitchToSessionFn = (
   taskId: string,
@@ -109,17 +110,13 @@ export function buildSwitchToSession(
   };
 }
 
-function taskSelectionWasSuperseded(
-  store: StoreApi<AppState>,
-  taskId: string,
-  startActiveTaskId: string | null,
-  startActiveSessionId: string | null,
-): boolean {
-  const current = store.getState().tasks;
-  if (current.activeTaskId === taskId) return false;
-  return (
-    current.activeTaskId !== startActiveTaskId || current.activeSessionId !== startActiveSessionId
-  );
+function nextTaskSelectionToken(): number {
+  taskSelectionSequence += 1;
+  return taskSelectionSequence;
+}
+
+function taskSelectionWasSuperseded(selectionToken: number): boolean {
+  return selectionToken !== taskSelectionSequence;
 }
 
 export async function prepareAndSwitchTask(
@@ -178,10 +175,9 @@ export function selectTaskWithLayout(params: {
 }): void {
   const { taskId, task, store, switchToSession, loadTaskSessionsForTask } = params;
   const state = store.getState();
-  const startActiveTaskId = state.tasks.activeTaskId ?? null;
+  const selectionToken = nextTaskSelectionToken();
   const oldSessionId = state.tasks.activeSessionId;
-  const selectionWasSuperseded = () =>
-    taskSelectionWasSuperseded(store, taskId, startActiveTaskId, oldSessionId ?? null);
+  const selectionWasSuperseded = () => taskSelectionWasSuperseded(selectionToken);
   if (isDebug()) {
     debug("selectTaskWithLayout: entry", {
       taskId,

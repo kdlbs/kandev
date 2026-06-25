@@ -428,6 +428,35 @@ func TestResolveMCPAutoStartConfig_UsesLowestPositionStepAgentProfileWhenNoStart
 	assert.Equal(t, "first-profile", config.AgentProfileID)
 }
 
+func TestResolveMCPAutoStartConfig_UsesMarkedStartStepAgentProfile(t *testing.T) {
+	svc, _, workflowCtrl, workflowRepo := newTestTaskServiceWithWorkflow(t)
+	ctx := context.Background()
+	workspace, workflow := defaultWorkspaceAndWorkflow(t, ctx, svc)
+	seedWorkflowStep(t, ctx, workflowRepo, &workflowmodels.WorkflowStep{
+		WorkflowID:      workflow.ID,
+		Name:            "First",
+		Position:        1,
+		AgentProfileID:  "first-profile",
+		AllowManualMove: true,
+	})
+	seedWorkflowStep(t, ctx, workflowRepo, &workflowmodels.WorkflowStep{
+		WorkflowID:      workflow.ID,
+		Name:            "Start Here",
+		Position:        2,
+		IsStartStep:     true,
+		AgentProfileID:  "start-profile",
+		AllowManualMove: true,
+	})
+	h := &Handlers{taskSvc: svc, workflowCtrl: workflowCtrl, logger: testLogger(t).WithFields()}
+
+	config := h.resolveMCPAutoStartConfig(ctx, &models.Task{
+		WorkspaceID: workspace.ID,
+		WorkflowID:  workflow.ID,
+	}, "", "", "")
+
+	assert.Equal(t, "start-profile", config.AgentProfileID)
+}
+
 func TestResolveMCPAutoStartConfig_FallsBackToWorkflowAgentProfile(t *testing.T) {
 	svc, _, workflowCtrl, workflowRepo := newTestTaskServiceWithWorkflow(t)
 	ctx := context.Background()
@@ -524,8 +553,9 @@ func TestAutoStartTask_DefaultsToWorktreeExecutor(t *testing.T) {
 	}
 
 	task := &models.Task{
-		ID:          "task-1",
-		WorkspaceID: "ws-1",
+		ID:             "task-1",
+		WorkspaceID:    "ws-1",
+		WorkflowStepID: "step-1",
 	}
 
 	// Call with agent profile but no executor info
@@ -541,6 +571,7 @@ func TestAutoStartTask_DefaultsToWorktreeExecutor(t *testing.T) {
 	assert.Equal(t, models.ExecutorIDWorktree, req.ExecutorID, "should default to exec-worktree")
 	assert.Equal(t, "", req.ExecutorProfileID)
 	assert.Equal(t, "agent-profile-1", req.AgentProfileID)
+	assert.Equal(t, "step-1", req.WorkflowStepID)
 }
 
 func TestAutoStartTask_ExplicitExecutorProfilePreserved(t *testing.T) {

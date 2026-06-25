@@ -499,7 +499,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	// Auto-start agent session asynchronously only if requested
-	if startAgent {
+	if startAgent && h.sessionLauncher != nil {
 		if autoStartConfig == nil {
 			config := h.resolveMCPAutoStartConfig(ctx, task, req.AgentProfileID, req.ExecutorProfileID, req.SourceTaskID)
 			autoStartConfig = &config
@@ -756,16 +756,16 @@ func startStepAgentProfile(steps []*workflowmodels.WorkflowStep) string {
 	if len(steps) == 0 {
 		return ""
 	}
-	first := steps[0]
+	var first *workflowmodels.WorkflowStep
 	for _, step := range steps {
 		if step == nil {
 			continue
 		}
+		if first == nil {
+			first = step
+		}
 		if step.IsStartStep {
 			return step.AgentProfileID
-		}
-		if first == nil || step.Position < first.Position {
-			first = step
 		}
 	}
 	if first == nil {
@@ -794,6 +794,7 @@ func (h *Handlers) launchAutoStartTask(task *models.Task, config mcpAutoStartCon
 			AgentProfileID:    config.AgentProfileID,
 			ExecutorID:        config.ExecutorID,
 			ExecutorProfileID: config.ExecutorProfileID,
+			WorkflowStepID:    task.WorkflowStepID,
 			Prompt:            task.Description,
 		})
 		if err != nil {
