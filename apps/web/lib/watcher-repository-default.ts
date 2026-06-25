@@ -27,6 +27,29 @@ export function resolveBaseBranch(value: string): string {
   return value === DEFAULT_BRANCH ? "" : value;
 }
 
+// clearWorkspaceScopedForm switches a watcher form to a new workspace and clears
+// every field scoped to the previous one (workflow, step, and the repository
+// binding) so a stale cross-workspace reference can't be saved. Shared across
+// the Linear/Jira/Sentry dialogs to keep this data-loss guard in one place.
+export function clearWorkspaceScopedForm<
+  T extends {
+    workspaceId: string;
+    workflowId: string;
+    workflowStepId: string;
+    repositoryId: string;
+    baseBranch: string;
+  },
+>(prev: T, workspaceId: string): T {
+  return {
+    ...prev,
+    workspaceId,
+    workflowId: "",
+    workflowStepId: "",
+    repositoryId: "",
+    baseBranch: "",
+  };
+}
+
 // branchPlaceholder mirrors the workflow-step placeholder pattern: it nudges the
 // user to pick a repository first, then shows a loading hint while branches
 // stream in.

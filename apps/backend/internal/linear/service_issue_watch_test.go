@@ -533,7 +533,7 @@ func TestService_UpdateIssueWatch_RebindAndDeletedRepo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unrelated edit blocked by deleted bound repo: %v", err)
 	}
-	if edited.Prompt != "updated prompt" || edited.RepositoryID != "repo-2" {
-		t.Fatalf("expected prompt updated + binding preserved, got prompt=%q repo=%q", edited.Prompt, edited.RepositoryID)
+	if edited.Prompt != "updated prompt" || edited.RepositoryID != "repo-2" || edited.BaseBranch != "develop" {
+		t.Fatalf("expected prompt updated + binding preserved, got prompt=%q repo=%q branch=%q", edited.Prompt, edited.RepositoryID, edited.BaseBranch)
 	}
 }

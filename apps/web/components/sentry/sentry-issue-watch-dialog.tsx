@@ -27,6 +27,7 @@ import {
 } from "@/components/settings/profile-edit/script-editor";
 import { listSentryProjects, listSentryOrganizations } from "@/lib/api/domains/sentry-api";
 import { WatcherRepositoryFields } from "@/components/watcher-repository-fields";
+import { clearWorkspaceScopedForm } from "@/lib/watcher-repository-default";
 import { SENTRY_ISSUE_WATCH_PLACEHOLDERS } from "./sentry-issue-watch-placeholders";
 import { LevelMultiSelect, StatusMultiSelect } from "./sentry-issue-watch-multiselect";
 import { MaxInflightTasksField } from "./sentry-issue-watch-throttle-field";
@@ -420,20 +421,6 @@ function SettingsFields({ form, setForm }: { form: FormState; setForm: FormSette
   );
 }
 
-// formWithWorkspace switches the workspace and clears everything scoped to it
-// (workflow/step + repository binding) so stale cross-workspace refs can't be
-// saved. Module-scoped to keep the dialog component under its line limit.
-function formWithWorkspace(prev: FormState, workspaceId: string): FormState {
-  return {
-    ...prev,
-    workspaceId,
-    workflowId: "",
-    workflowStepId: "",
-    repositoryId: "",
-    baseBranch: "",
-  };
-}
-
 function savingLabel(saving: boolean, isEdit: boolean): string {
   if (saving) return "Saving…";
   return isEdit ? "Update" : "Create";
@@ -538,7 +525,7 @@ export function SentryIssueWatchDialog({
         <div className="space-y-5">
           <WorkspacePicker
             value={form.workspaceId}
-            onChange={(v) => setForm((p) => formWithWorkspace(p, v))}
+            onChange={(v) => setForm((p) => clearWorkspaceScopedForm(p, v))}
             disabled={workspaceLocked}
           />
           <Separator />

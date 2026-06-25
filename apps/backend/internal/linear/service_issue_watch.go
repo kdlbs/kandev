@@ -88,6 +88,7 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 	if err != nil {
 		return nil, err
 	}
+	prevRepositoryID, prevBaseBranch := w.RepositoryID, w.BaseBranch
 	applyIssueWatchPatch(w, req)
 	if filterIsEmpty(w.Filter) {
 		return nil, fmt.Errorf("%w: filter must specify at least one of query, teamKey, stateIds, assigned, priorities, labelIds, creatorId, or estimate range", ErrInvalidConfig)
@@ -104,10 +105,11 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 	if err := validateMaxInflightTasks(w.MaxInflightTasks); err != nil {
 		return nil, err
 	}
-	// Only validate/resolve the binding when this PATCH actually touches it.
-	// Re-resolving an unchanged binding would block edits to other fields (prompt,
-	// filter, …) whenever the bound repository has since been soft-deleted.
-	if req.RepositoryID != nil || req.BaseBranch != nil {
+	// Only validate/resolve the binding when its value actually changed. The
+	// dialog re-sends repositoryId/baseBranch on every PATCH, and an unchanged
+	// binding whose repo was since soft-deleted must not block edits to other
+	// fields (prompt, filter, …).
+	if w.RepositoryID != prevRepositoryID || w.BaseBranch != prevBaseBranch {
 		repositoryID, baseBranch, err := s.resolveRepositoryBinding(ctx, w.WorkspaceID, w.RepositoryID, w.BaseBranch)
 		if err != nil {
 			return nil, err

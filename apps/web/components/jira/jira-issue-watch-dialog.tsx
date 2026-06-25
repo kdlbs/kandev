@@ -33,6 +33,7 @@ import {
 } from "@/components/jira/jira-issue-watch-placeholders";
 import { STEP_DEFAULT, STEP_DEFAULT_LABEL, resolveProfileId } from "@/lib/watcher-profile-default";
 import { WatcherRepositoryFields } from "@/components/watcher-repository-fields";
+import { clearWorkspaceScopedForm } from "@/lib/watcher-repository-default";
 import type {
   CreateJiraIssueWatchInput,
   JiraIssueWatch,
@@ -443,20 +444,6 @@ function SettingsFields({
   );
 }
 
-// formWithWorkspace switches the workspace and clears everything scoped to it
-// (workflow/step + repository binding) so stale cross-workspace refs can't be
-// saved. Module-scoped to keep the dialog component under its line limit.
-function formWithWorkspace(prev: FormState, workspaceId: string): FormState {
-  return {
-    ...prev,
-    workspaceId,
-    workflowId: "",
-    workflowStepId: "",
-    repositoryId: "",
-    baseBranch: "",
-  };
-}
-
 function savingLabel(saving: boolean, isEdit: boolean): string {
   if (saving) return "Saving…";
   return isEdit ? "Update" : "Create";
@@ -549,7 +536,7 @@ export function JiraIssueWatchDialog({
         <div className="space-y-5">
           <WorkspacePicker
             value={form.workspaceId}
-            onChange={(v) => setForm((p) => formWithWorkspace(p, v))}
+            onChange={(v) => setForm((p) => clearWorkspaceScopedForm(p, v))}
             disabled={workspaceLocked}
           />
           <JQLField jql={form.jql} onChange={(v) => setForm((p) => ({ ...p, jql: v }))} />
