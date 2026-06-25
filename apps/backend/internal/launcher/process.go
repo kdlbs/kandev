@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -88,10 +89,16 @@ func (s *processSupervisor) runShutdown(reason string) {
 	launcherInfof("graceful shutdown started (reason=%s, timeout=%s, processes=%d)",
 		reason, managedProcessShutdownGrace, len(children))
 	shutdownDebugf("launcher shutdown begin reason=%q launcher_pid=%d children=%d", reason, os.Getpid(), len(children))
-	results := make([]managedProcessShutdownResult, 0, len(children))
-	for _, child := range children {
-		results = append(results, child.kill())
+	results := make([]managedProcessShutdownResult, len(children))
+	var wg sync.WaitGroup
+	for i, child := range children {
+		wg.Add(1)
+		go func(i int, child *managedProcess) {
+			defer wg.Done()
+			results[i] = child.kill()
+		}(i, child)
 	}
+	wg.Wait()
 	logShutdownComplete(time.Since(start), results)
 	shutdownDebugf("launcher shutdown complete reason=%q", reason)
 }
@@ -244,9 +251,23 @@ func (p *managedProcess) kill() managedProcessShutdownResult {
 	}
 	pid := p.cmd.Process.Pid
 	result.pid = pid
+	select {
+	case <-p.done:
+		result.duration = time.Since(start)
+		result.graceful = true
+		shutdownDebugf("managed process kill skipped; already exited label=%q pid=%d", p.label, pid)
+		return result
+	default:
+	}
 	shutdownDebugf("managed process kill begin label=%q pid=%d grace=%s", p.label, pid, managedProcessShutdownGrace)
 	shutdownDebugf("managed process group SIGTERM requested label=%q pgid=%d", p.label, pid)
 	if err := terminateManagedProcessGroup(pid); err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			result.duration = time.Since(start)
+			result.graceful = true
+			shutdownDebugf("managed process group already gone label=%q pid=%d", p.label, pid)
+			return result
+		}
 		shutdownDebugf("managed process group SIGTERM failed pid=%d err=%v; killing process", pid, err)
 		shutdownDebugf("managed process SIGKILL requested label=%q pid=%d reason=%q", p.label, pid, "sigterm_failed")
 		_ = p.cmd.Process.Kill()
@@ -269,6 +290,13 @@ func (p *managedProcess) kill() managedProcessShutdownResult {
 	shutdownDebugf("managed process grace expired; sending SIGKILL pgid=%d", pid)
 	result.forceKilled = true
 	if err := killManagedProcessGroup(pid); err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			result.forceKilled = false
+			result.graceful = true
+			result.duration = time.Since(start)
+			shutdownDebugf("managed process group already gone before SIGKILL label=%q pid=%d", p.label, pid)
+			return result
+		}
 		shutdownDebugf("managed process group SIGKILL failed pid=%d err=%v; killing process", pid, err)
 		shutdownDebugf("managed process SIGKILL requested label=%q pid=%d reason=%q", p.label, pid, "process_group_kill_failed")
 		_ = p.cmd.Process.Kill()

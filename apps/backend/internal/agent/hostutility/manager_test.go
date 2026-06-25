@@ -2,6 +2,8 @@ package hostutility
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -53,6 +55,35 @@ func TestStopCancelsInFlightBootstrap(t *testing.T) {
 		require.NoError(t, err)
 	case <-time.After(time.Second):
 		t.Fatal("host utility Start did not return after Stop")
+	}
+}
+
+func TestDeleteInstanceRemovesWorkDirWithoutControlClient(t *testing.T) {
+	log := newTestLogger(t)
+	mgr := NewManager(registry.NewRegistry(log), "127.0.0.1", 1, nil, log)
+	workDir := filepath.Join(t.TempDir(), "codex-acp")
+	require.NoError(t, os.MkdirAll(workDir, 0o755))
+
+	mgr.deleteInstance(context.Background(), &instance{
+		agentType: "codex-acp",
+		workDir:   workDir,
+	})
+
+	_, err := os.Stat(workDir)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestHostUtilityDeleteContextIgnoresParentCancellation(t *testing.T) {
+	parent, cancelParent := context.WithCancel(context.Background())
+	cancelParent()
+
+	ctx, cancel := hostUtilityDeleteContext(parent)
+	defer cancel()
+
+	select {
+	case <-ctx.Done():
+		t.Fatal("delete context should not inherit parent cancellation")
+	default:
 	}
 }
 

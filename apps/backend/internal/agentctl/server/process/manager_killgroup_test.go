@@ -84,6 +84,51 @@ func TestWaitForProcessExit_KillsProcessGroupOnTimeout(t *testing.T) {
 		"child process %d should be killed by process-group reap", childPID)
 }
 
+func TestWaitForProcessExit_ContextCanceledWaitsAfterForceKill(t *testing.T) {
+	log := newTestLogger(t)
+	pidFile := filepath.Join(t.TempDir(), "child.pid")
+
+	m := &Manager{
+		logger: log,
+	}
+	m.cmd = fixtureCmd("sleep-with-child " + pidFile + " 30")
+	setProcGroup(m.cmd)
+	require.NoError(t, m.cmd.Start())
+	parentPID := m.cmd.Process.Pid
+
+	waitDone := make(chan struct{})
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		_ = m.cmd.Wait()
+		close(waitDone)
+	}()
+	t.Cleanup(func() {
+		_ = killProcessGroup(parentPID)
+		select {
+		case <-waitDone:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for fixture parent to exit")
+		}
+	})
+
+	childPID := waitForChildPID(t, pidFile, 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	m.waitForProcessExit(ctx)
+
+	select {
+	case <-waitDone:
+	default:
+		t.Fatal("waitForProcessExit returned before command wait completed after force kill")
+	}
+	require.Eventually(t, func() bool {
+		return !processAlive(childPID)
+	}, 5*time.Second, 50*time.Millisecond,
+		"child process %d should be killed by process-group force kill", childPID)
+}
+
 func TestWaitForProcessExit_ReapsProcessGroupAfterLeaderExit(t *testing.T) {
 	log := newTestLogger(t)
 	pidFile := filepath.Join(t.TempDir(), "child.pid")

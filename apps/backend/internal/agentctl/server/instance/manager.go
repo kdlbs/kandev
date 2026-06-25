@@ -347,22 +347,9 @@ func (m *Manager) StopInstance(ctx context.Context, id string) error {
 		zap.String("instance_id", id),
 		zap.Int("port", inst.Port))
 
-	// Shutdown HTTP server (potentially slow, done without lock)
 	if inst.server != nil {
-		serverCtx, cancel := context.WithTimeout(ctx, instanceHTTPShutdownGrace)
-		err := inst.server.Shutdown(serverCtx)
-		cancel()
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			m.logger.Debug("StopInstance: HTTP server graceful shutdown expired, closing active connections",
-				zap.String("instance_id", id),
-				zap.Int("port", inst.Port),
-				zap.Duration("grace", instanceHTTPShutdownGrace),
-				zap.Error(err))
-			if closeErr := inst.server.Close(); closeErr != nil && !errors.Is(closeErr, http.ErrServerClosed) {
-				m.logger.Warn("error closing HTTP server",
-					zap.String("instance_id", id),
-					zap.Error(closeErr))
-			}
+		if err := m.stopHTTPServer(ctx, id, inst.Port, inst.server); err != nil {
+			return err
 		}
 	}
 
@@ -379,6 +366,35 @@ func (m *Manager) StopInstance(ctx context.Context, id string) error {
 		zap.String("instance_id", id),
 		zap.Int("port", inst.Port))
 
+	return nil
+}
+
+type instanceHTTPServer interface {
+	Shutdown(context.Context) error
+	Close() error
+}
+
+func (m *Manager) stopHTTPServer(ctx context.Context, id string, port int, server instanceHTTPServer) error {
+	serverCtx, cancel := context.WithTimeout(ctx, instanceHTTPShutdownGrace)
+	err := server.Shutdown(serverCtx)
+	cancel()
+	if err == nil || errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	m.logger.Debug("StopInstance: HTTP server graceful shutdown expired, closing active connections",
+		zap.String("instance_id", id),
+		zap.Int("port", port),
+		zap.Duration("grace", instanceHTTPShutdownGrace),
+		zap.Error(err))
+	if closeErr := server.Close(); closeErr != nil && !errors.Is(closeErr, http.ErrServerClosed) {
+		m.logger.Warn("error closing HTTP server",
+			zap.String("instance_id", id),
+			zap.Error(closeErr))
+		return fmt.Errorf("close HTTP server for instance %s: %w", id, closeErr)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("shutdown HTTP server for instance %s: %w", id, err)
+	}
 	return nil
 }
 

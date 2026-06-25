@@ -167,6 +167,7 @@ func (s *Session) start(cfg Config) error {
 	s.cmd = exec.Command(s.shell, s.shellArgs...)
 	s.cmd.Dir = cfg.WorkDir
 	s.cmd.Env = buildShellEnv(cfg.WorkDir)
+	configureShellProcess(s.cmd)
 
 	// Start with PTY
 	var err error
@@ -239,10 +240,14 @@ func (s *Session) Stop() error {
 			zap.Int("pid", pid),
 			zap.Duration("grace", shellStopGrace))
 		if s.cmd != nil && s.cmd.Process != nil {
-			s.logger.Debug("shell session process SIGKILL requested",
+			s.logger.Debug("shell session process group SIGKILL requested",
 				zap.Int("pid", pid),
 				zap.String("reason", "stop_timeout"))
-			_ = s.cmd.Process.Kill()
+			if err := killShellProcessGroup(s.cmd.Process); err != nil {
+				s.logger.Debug("shell session process group SIGKILL failed",
+					zap.Int("pid", pid),
+					zap.Error(err))
+			}
 		}
 	}
 

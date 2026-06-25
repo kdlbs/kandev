@@ -84,14 +84,15 @@ func runManagedApp(cfg managedAppConfig) int {
 	shutdownDebugf("runManagedApp start mode=%q backend=%q backend_cwd=%q debug=%t", cfg.Mode, cfg.Backend, cfg.BackendCWD, cfg.Opts.Debug)
 
 	supervisor := newSupervisorFn()
+	attachSignalsFn(supervisor)
+	shutdownDebugf("runManagedApp signal handler attached")
 	showOutput := cfg.Opts.Verbose || cfg.Opts.Debug
 	backend, dumpLogs, err := launchBackendFn(cfg.Backend, []string{"__backend"}, cfg.BackendCWD, backendEnv(cfg.Ports, cfg.LogLevel, cfg.Opts.Debug), !showOutput, cfg.Ports, cfg.Mode, supervisor)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
-	attachSignalsFn(supervisor)
-	shutdownDebugf("runManagedApp backend launched and signal handler attached")
+	shutdownDebugf("runManagedApp backend launched")
 	fmt.Println("[kandev] starting backend...")
 	if err := waitForHealthFn(cfg.Ports.BackendURL, backend, healthTimeout(healthTimeoutReleaseMS), dumpLogs); err != nil {
 		supervisor.shutdown("backend health failure")

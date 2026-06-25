@@ -1387,7 +1387,7 @@ func (m *Manager) waitForProcessExit(ctx context.Context) {
 	}
 	if ctx.Err() != nil {
 		m.logger.Warn("force killing agent process group", zap.Int("pgid", pid))
-		m.forceKillProcessGroup(pid)
+		m.forceKillProcessGroupAndWait(done, pid)
 		return
 	}
 
@@ -1403,7 +1403,7 @@ func (m *Manager) waitForProcessExit(ctx context.Context) {
 			m.logger.Warn("failed to terminate agent process group, force killing",
 				zap.Int("pgid", pid),
 				zap.Error(err))
-			m.forceKillProcessGroup(pid)
+			m.forceKillProcessGroupAndWait(done, pid)
 		}
 		return
 	}
@@ -1415,7 +1415,7 @@ func (m *Manager) waitForProcessExit(ctx context.Context) {
 	}
 	m.logger.Warn("agent process did not stop after termination; force killing process group",
 		zap.Int("pgid", pid))
-	m.forceKillProcessGroup(pid)
+	m.forceKillProcessGroupAndWait(done, pid)
 }
 
 func waitForManagerDone(ctx context.Context, done <-chan struct{}, timeout time.Duration) bool {
@@ -1448,7 +1448,7 @@ func (m *Manager) reapRemainingProcessGroup(ctx context.Context, pid int) {
 		m.logger.Warn("failed to terminate agent process group, force killing",
 			zap.Int("pgid", pid),
 			zap.Error(err))
-		m.forceKillProcessGroup(pid)
+		m.forceKillProcessGroupAndWait(nil, pid)
 		return
 	}
 
@@ -1462,7 +1462,7 @@ func (m *Manager) reapRemainingProcessGroup(ctx context.Context, pid int) {
 
 	m.logger.Warn("agent process group did not stop after termination; force killing",
 		zap.Int("pgid", pid))
-	m.forceKillProcessGroup(pid)
+	m.forceKillProcessGroupAndWait(nil, pid)
 }
 
 func (m *Manager) forceKillProcessGroup(pid int) {
@@ -1486,6 +1486,27 @@ func (m *Manager) forceKillProcessGroup(pid int) {
 		}
 		m.logger.Warn("failed to kill agent process group", zap.Error(err))
 	}
+}
+
+func (m *Manager) forceKillProcessGroupAndWait(done <-chan struct{}, pid int) {
+	m.forceKillProcessGroup(pid)
+
+	waitCtx, cancel := context.WithTimeout(context.Background(), processGroupTerminateGrace)
+	defer cancel()
+	if done != nil && waitForManagerDone(waitCtx, done, processGroupTerminateGrace) {
+		m.logger.Info("agent process stopped after force kill",
+			zap.Int("pgid", pid))
+		m.reapRemainingProcessGroup(context.Background(), pid)
+		return
+	}
+	if waitForProcessGroupExit(waitCtx, pid) {
+		m.logger.Info("agent process group stopped after force kill",
+			zap.Int("pgid", pid))
+		return
+	}
+	m.logger.Warn("agent process group still alive after force kill wait",
+		zap.Int("pgid", pid),
+		zap.Duration("grace", processGroupTerminateGrace))
 }
 
 func waitForProcessGroupExit(ctx context.Context, pid int) bool {

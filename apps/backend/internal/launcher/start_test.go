@@ -48,7 +48,7 @@ func TestRunStartUsesSelfExecutableAndBackendCWD(t *testing.T) {
 	}
 }
 
-func TestRunManagedAppAttachesSignalsAfterBackendLaunch(t *testing.T) {
+func TestRunManagedAppAttachesSignalsBeforeBackendLaunch(t *testing.T) {
 	oldNewSupervisor := newSupervisorFn
 	oldLaunchBackend := launchBackendFn
 	oldAttachSignals := attachSignalsFn
@@ -103,7 +103,7 @@ func TestRunManagedAppAttachesSignalsAfterBackendLaunch(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("runManagedApp() = %d, want 0", code)
 	}
-	want := []string{"new-supervisor", "launch-backend", "attach-signals", "wait-health"}
+	want := []string{"new-supervisor", "attach-signals", "launch-backend", "wait-health"}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("events = %v, want %v", events, want)
 	}

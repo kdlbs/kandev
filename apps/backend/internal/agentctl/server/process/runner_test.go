@@ -118,6 +118,11 @@ func TestProcessRunnerStopLogsSignalAttempts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to start process: %v", err)
 	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_ = runner.Stop(cleanupCtx, StopProcessRequest{ProcessID: info.ID})
+	})
 
 	stopCtx, stopCancel := context.WithCancel(context.Background())
 	stopCancel()

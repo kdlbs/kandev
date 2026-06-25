@@ -5,6 +5,8 @@ package utility
 import (
 	"fmt"
 	"os/exec"
+	"strconv"
+	"strings"
 	"syscall"
 )
 
@@ -15,19 +17,47 @@ func setACPCommandProcAttr(cmd *exec.Cmd) {
 }
 
 func terminateACPProcessGroup(pid int) error {
-	kill := exec.Command("taskkill", "/T", "/PID", fmt.Sprintf("%d", pid))
-	return kill.Run()
+	return runTaskkill("/T", "/PID", fmt.Sprintf("%d", pid))
 }
 
 func killACPProcessGroup(pid int) error {
-	kill := exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprintf("%d", pid))
-	return kill.Run()
+	return runTaskkill("/F", "/T", "/PID", fmt.Sprintf("%d", pid))
 }
 
-func acpProcessGroupAlive(_ int) bool {
-	return false
+func runTaskkill(args ...string) error {
+	output, err := exec.Command("taskkill", args...).CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	msg := strings.TrimSpace(string(output))
+	if msg == "" {
+		return err
+	}
+	return fmt.Errorf("%w: %s", err, msg)
 }
 
-func acpProcessGroupMissing(_ error) bool {
-	return false
+func acpProcessGroupAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	output, err := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH").Output()
+	if err != nil {
+		return false
+	}
+	text := strings.ToLower(string(output))
+	if strings.Contains(text, "no tasks") {
+		return false
+	}
+	return strings.Contains(text, strconv.Itoa(pid))
+}
+
+func acpProcessGroupMissing(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "not found") ||
+		strings.Contains(msg, "not be found") ||
+		strings.Contains(msg, "no running instance") ||
+		strings.Contains(msg, "not running")
 }

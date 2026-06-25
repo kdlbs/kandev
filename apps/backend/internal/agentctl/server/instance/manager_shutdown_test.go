@@ -2,6 +2,7 @@ package instance
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"testing"
@@ -87,4 +88,37 @@ func TestStopInstanceBoundsHTTPServerShutdown(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("test HTTP server did not stop")
 	}
+}
+
+func TestStopHTTPServerReturnsCloseError(t *testing.T) {
+	log := newTestLogger(t)
+	mgr := NewManager(&config.Config{
+		Ports:    config.PortConfig{Base: 0, Max: 0},
+		Defaults: config.InstanceDefaults{Protocol: agent.ProtocolACP},
+	}, log)
+
+	closeErr := errors.New("listener close failed")
+	server := &fakeHTTPServer{
+		shutdownErr: context.DeadlineExceeded,
+		closeErr:    closeErr,
+	}
+
+	err := mgr.stopHTTPServer(context.Background(), "close-failure", 12345, server)
+	require.ErrorIs(t, err, closeErr)
+	require.True(t, server.closed)
+}
+
+type fakeHTTPServer struct {
+	shutdownErr error
+	closeErr    error
+	closed      bool
+}
+
+func (s *fakeHTTPServer) Shutdown(context.Context) error {
+	return s.shutdownErr
+}
+
+func (s *fakeHTTPServer) Close() error {
+	s.closed = true
+	return s.closeErr
 }

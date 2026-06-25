@@ -163,7 +163,9 @@ func (m *Manager) Stop(ctx context.Context) {
 	}
 
 	for _, inst := range instances {
-		m.deleteInstance(ctx, inst)
+		deleteCtx, cancel := hostUtilityDeleteContext(ctx)
+		m.deleteInstance(deleteCtx, inst)
+		cancel()
 	}
 
 	if parentTmpDir != "" {
@@ -174,14 +176,31 @@ func (m *Manager) Stop(ctx context.Context) {
 	}
 }
 
+const hostUtilityDeleteTimeout = 2 * time.Second
+
+func hostUtilityDeleteContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(parent), hostUtilityDeleteTimeout)
+}
+
 func (m *Manager) deleteInstance(ctx context.Context, inst *instance) {
-	if inst == nil || m.controlClient == nil {
+	if inst == nil {
 		return
 	}
-	if err := m.controlClient.DeleteInstance(ctx, inst.instanceID); err != nil {
-		m.log.Warn("failed to delete host utility instance",
+	if m.controlClient != nil {
+		if err := m.controlClient.DeleteInstance(ctx, inst.instanceID); err != nil {
+			m.log.Warn("failed to delete host utility instance",
+				zap.String("agent_type", inst.agentType),
+				zap.String("instance_id", inst.instanceID),
+				zap.Error(err))
+		}
+	}
+	if inst.workDir == "" {
+		return
+	}
+	if err := os.RemoveAll(inst.workDir); err != nil {
+		m.log.Warn("failed to remove host utility work dir",
 			zap.String("agent_type", inst.agentType),
-			zap.String("instance_id", inst.instanceID),
+			zap.String("path", inst.workDir),
 			zap.Error(err))
 	}
 }
@@ -261,14 +280,18 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 	}
 
 	if ctx.Err() != nil {
-		m.deleteInstance(context.Background(), inst)
+		deleteCtx, cancel := hostUtilityDeleteContext(ctx)
+		m.deleteInstance(deleteCtx, inst)
+		cancel()
 		return
 	}
 
 	m.mu.Lock()
 	if m.stopped {
 		m.mu.Unlock()
-		m.deleteInstance(context.Background(), inst)
+		deleteCtx, cancel := hostUtilityDeleteContext(ctx)
+		m.deleteInstance(deleteCtx, inst)
+		cancel()
 		return
 	}
 	m.instances[agentType] = inst
@@ -329,7 +352,14 @@ func (m *Manager) createInstance(ctx context.Context, agentType string) (*instan
 	healthCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	if err := waitForClientHealthy(healthCtx, client); err != nil {
-		_ = m.controlClient.DeleteInstance(context.Background(), resp.ID)
+		deleteCtx, deleteCancel := hostUtilityDeleteContext(ctx)
+		m.deleteInstance(deleteCtx, &instance{
+			agentType:  agentType,
+			instanceID: resp.ID,
+			workDir:    workDir,
+			client:     client,
+		})
+		deleteCancel()
 		return nil, fmt.Errorf("instance %s not healthy: %w", resp.ID, err)
 	}
 
@@ -422,7 +452,9 @@ func (m *Manager) getInstance(ctx context.Context, agentType string) (*instance,
 		m.mu.Lock()
 		if m.stopped {
 			m.mu.Unlock()
-			m.deleteInstance(context.Background(), created)
+			deleteCtx, cancel := hostUtilityDeleteContext(ctx)
+			m.deleteInstance(deleteCtx, created)
+			cancel()
 			return nil, errManagerStopped
 		}
 		m.instances[agentType] = created
