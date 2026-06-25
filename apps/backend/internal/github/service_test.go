@@ -673,7 +673,7 @@ func TestFindLatestCommentTime(t *testing.T) {
 	}
 }
 
-// --- mockEventBus for SyncTaskPR tests ---
+// --- mockEventBus shared by SyncTaskPR and review-watch tests ---
 
 type mockEventBus struct {
 	mu          sync.Mutex
