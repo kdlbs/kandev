@@ -14,6 +14,40 @@ function disableResizeObserver() {
   });
 }
 
+class MockResizeObserver implements ResizeObserver {
+  private readonly callback: ResizeObserverCallback;
+  observed: Element | null = null;
+
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+    mockObservers.push(this);
+  }
+
+  observe(element: Element) {
+    this.observed = element;
+  }
+
+  disconnect() {
+    this.observed = null;
+  }
+
+  unobserve() {
+    this.observed = null;
+  }
+
+  trigger() {
+    this.callback([], this);
+  }
+}
+
+let mockObservers: MockResizeObserver[] = [];
+
+function installMockResizeObserver() {
+  mockObservers = [];
+  window.ResizeObserver = MockResizeObserver;
+  return mockObservers;
+}
+
 describe("useMermaidViewportWidth", () => {
   const originalResizeObserver = window.ResizeObserver;
 
@@ -76,30 +110,7 @@ describe("useMermaidViewportWidth", () => {
   });
 
   it("observes a replacement scroll region after the element changes", () => {
-    window.ResizeObserver = class {
-      private readonly callback: ResizeObserverCallback;
-      observed: Element | null = null;
-
-      constructor(callback: ResizeObserverCallback) {
-        this.callback = callback;
-      }
-
-      observe(element: Element) {
-        this.observed = element;
-      }
-
-      disconnect() {
-        this.observed = null;
-      }
-
-      unobserve() {
-        this.observed = null;
-      }
-
-      trigger() {
-        this.callback([], this);
-      }
-    };
+    const observers = installMockResizeObserver();
 
     const first = document.createElement("div");
     const second = document.createElement("div");
@@ -113,10 +124,22 @@ describe("useMermaidViewportWidth", () => {
       });
 
       expect(result.current).toBe(200);
+      expect(observers).toHaveLength(1);
+      expect(observers[0].observed).toBe(first);
 
       rerender({ element: second });
 
       expect(result.current).toBe(320);
+      expect(observers).toHaveLength(2);
+      expect(observers[0].observed).toBeNull();
+      expect(observers[1].observed).toBe(second);
+
+      act(() => {
+        setClientWidth(second, 360);
+        observers[1].trigger();
+      });
+
+      expect(result.current).toBe(360);
     } finally {
       first.remove();
       second.remove();
