@@ -176,8 +176,13 @@ export function selectTaskWithLayout(params: {
   const { taskId, task, store, switchToSession, loadTaskSessionsForTask } = params;
   const state = store.getState();
   const selectionToken = nextTaskSelectionToken();
+  const startActiveTaskId = state.tasks.activeTaskId ?? null;
   const oldSessionId = state.tasks.activeSessionId;
-  const selectionWasSuperseded = () => taskSelectionWasSuperseded(selectionToken);
+  const selectionWasSuperseded = () => {
+    if (taskSelectionWasSuperseded(selectionToken)) return true;
+    const activeTaskId = store.getState().tasks.activeTaskId ?? null;
+    return activeTaskId !== startActiveTaskId && activeTaskId !== taskId;
+  };
   if (isDebug()) {
     debug("selectTaskWithLayout: entry", {
       taskId,

@@ -54,6 +54,10 @@ function makeEnvStore(envIds: Record<string, string>): StoreApi<AppState> {
 
 const TASK_ID = "task-A";
 const PRIMARY = "sess-primary";
+const ORIGINAL_TASK_ID = "task-original";
+const PENDING_TASK_ID = "task-pending";
+const ORIGINAL_SESSION_ID = "sess-original";
+const PENDING_SESSION_ID = "sess-pending";
 
 function makeKanbanStore(args: {
   activeTaskId?: string | null;
@@ -391,18 +395,18 @@ describe("selectTaskWithLayout — pending selection races", () => {
   });
 
   it("does not switch to an old pending selection after the user clicks back to the original task", async () => {
-    const ORIGINAL = "task-original";
-    const PENDING = "task-pending";
     const { store, setActiveTask } = makeSelectionHarness({
-      activeTaskId: ORIGINAL,
-      activeSessionId: "sess-original",
-      envIds: { "sess-original": "env-original" },
-      sessions: { "sess-original": { id: "sess-original", task_id: ORIGINAL } },
+      activeTaskId: ORIGINAL_TASK_ID,
+      activeSessionId: ORIGINAL_SESSION_ID,
+      envIds: { [ORIGINAL_SESSION_ID]: "env-original" },
+      sessions: {
+        [ORIGINAL_SESSION_ID]: { id: ORIGINAL_SESSION_ID, task_id: ORIGINAL_TASK_ID },
+      },
     });
     const { loadTaskSessionsForTask, resolveLoad } = makeDeferredSessionLoader();
 
     selectTaskWithLayout({
-      taskId: PENDING,
+      taskId: PENDING_TASK_ID,
       task: undefined,
       store,
       switchToSession: vi.fn(),
@@ -412,8 +416,8 @@ describe("selectTaskWithLayout — pending selection races", () => {
     });
 
     selectTaskWithLayout({
-      taskId: ORIGINAL,
-      task: { primarySessionId: "sess-original" },
+      taskId: ORIGINAL_TASK_ID,
+      task: { primarySessionId: ORIGINAL_SESSION_ID },
       store,
       switchToSession: vi.fn(),
       loadTaskSessionsForTask: vi.fn(async () => []),
@@ -423,8 +427,55 @@ describe("selectTaskWithLayout — pending selection races", () => {
     resolveLoad([]);
     await flushTaskSelection();
 
-    expect(setActiveTask).not.toHaveBeenCalledWith(PENDING);
-    expect(replaceTaskUrl).not.toHaveBeenCalledWith(PENDING);
+    expect(setActiveTask).not.toHaveBeenCalledWith(PENDING_TASK_ID);
+    expect(replaceTaskUrl).not.toHaveBeenCalledWith(PENDING_TASK_ID);
+  });
+});
+
+describe("selectTaskWithLayout — external active-task changes", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("does not apply a pending selection after an external active-task change", async () => {
+    const OTHER = "task-other";
+    const switchToSession = vi.fn();
+    const { state, store, setActiveTask } = makeSelectionHarness({
+      activeTaskId: ORIGINAL_TASK_ID,
+      activeSessionId: ORIGINAL_SESSION_ID,
+      envIds: { [ORIGINAL_SESSION_ID]: "env-original" },
+      sessions: {
+        [PENDING_SESSION_ID]: { id: PENDING_SESSION_ID, task_id: PENDING_TASK_ID },
+        [ORIGINAL_SESSION_ID]: { id: ORIGINAL_SESSION_ID, task_id: ORIGINAL_TASK_ID },
+      },
+    });
+    const { loadTaskSessionsForTask, resolveLoad } = makeDeferredSessionLoader();
+
+    selectTaskWithLayout({
+      taskId: PENDING_TASK_ID,
+      task: { primarySessionId: PENDING_SESSION_ID },
+      store,
+      switchToSession,
+      loadTaskSessionsForTask,
+      setActiveTask,
+      setPreparingTaskId: vi.fn(),
+    });
+
+    state.tasks.activeTaskId = OTHER;
+    state.tasks.activeSessionId = null;
+    resolveLoad([
+      { id: PENDING_SESSION_ID, task_id: PENDING_TASK_ID, is_primary: true } as TaskSession,
+    ]);
+    await flushTaskSelection();
+
+    expect(switchToSession).not.toHaveBeenCalled();
+    expect(replaceTaskUrl).not.toHaveBeenCalledWith(PENDING_TASK_ID);
+  });
+});
+
+describe("selectTaskWithLayout — pending old-session changes", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
   it("keeps a pending selection alive when only the old task's session id changes", async () => {
