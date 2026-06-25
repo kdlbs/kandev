@@ -1,5 +1,8 @@
+/* eslint-disable max-lines-per-function */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const mockRequest = vi.fn();
 // setSessionCommits is the only mock whose default behaviour matters: the
@@ -33,6 +36,13 @@ vi.mock("@/components/state-provider", () => ({
 
 import { useSessionCommits } from "./use-session-commits";
 
+function createWrapper() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return createElement(QueryClientProvider, { client }, children);
+  };
+}
+
 function setStore(connectionStatus: "connected" | "disconnected" = "connected") {
   storeState = {
     environmentIdBySessionId: {} as Record<string, string>,
@@ -62,7 +72,7 @@ describe("useSessionCommits", () => {
       commits: [{ commit_sha: "abc", insertions: 10, deletions: 2 }],
     });
 
-    renderHook(() => useSessionCommits("sess-1"));
+    renderHook(() => useSessionCommits("sess-1"), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(mockSetSessionCommits).toHaveBeenCalledWith(
@@ -78,7 +88,7 @@ describe("useSessionCommits", () => {
       commits: [{ commit_sha: "abc", insertions: 5, deletions: 1 }],
     });
 
-    renderHook(() => useSessionCommits("sess-1"));
+    renderHook(() => useSessionCommits("sess-1"), { wrapper: createWrapper() });
 
     // First request fires immediately.
     await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(1));
@@ -108,7 +118,7 @@ describe("useSessionCommits", () => {
       commits: [{ commit_sha: "abc" }],
     });
 
-    renderHook(() => useSessionCommits("sess-1"));
+    renderHook(() => useSessionCommits("sess-1"), { wrapper: createWrapper() });
 
     // First request resolves with ready:false — the hook should set loading
     // to true at the start, then leave it as-is (no setLoading(false) call)
@@ -133,7 +143,7 @@ describe("useSessionCommits", () => {
       ready: true,
     });
 
-    renderHook(() => useSessionCommits("sess-1"));
+    renderHook(() => useSessionCommits("sess-1"), { wrapper: createWrapper() });
 
     await waitFor(() => expect(mockSetSessionCommits).toHaveBeenCalledTimes(1));
 
@@ -144,12 +154,12 @@ describe("useSessionCommits", () => {
 
   it("does not fetch when disconnected", () => {
     setStore("disconnected");
-    renderHook(() => useSessionCommits("sess-1"));
+    renderHook(() => useSessionCommits("sess-1"), { wrapper: createWrapper() });
     expect(mockRequest).not.toHaveBeenCalled();
   });
 
   it("does not fetch when sessionId is null", () => {
-    renderHook(() => useSessionCommits(null));
+    renderHook(() => useSessionCommits(null), { wrapper: createWrapper() });
     expect(mockRequest).not.toHaveBeenCalled();
   });
 });
@@ -203,7 +213,7 @@ describe("useSessionCommits — authoritative snapshot on mount", () => {
       ready: true,
     });
 
-    renderHook(() => useSessionCommits("sess-1"));
+    renderHook(() => useSessionCommits("sess-1"), { wrapper: createWrapper() });
 
     await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(1));
     await waitFor(() => {
@@ -231,6 +241,7 @@ describe("useSessionCommits — authoritative snapshot on mount", () => {
 
     const { rerender } = renderHook(({ id }) => useSessionCommits(id), {
       initialProps: { id: "sess-1" as string | null },
+      wrapper: createWrapper(),
     });
     await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(1));
 
@@ -282,7 +293,9 @@ describe("useSessionCommits — stale-while-revalidate on trigger bump", () => {
 
   it("refetches when refetchTrigger bumps without nulling the visible list", async () => {
     const resolveRequest = await seedAndDeferRefetch("sess-1");
-    const { rerender } = renderHook(() => useSessionCommits("sess-1"));
+    const { rerender } = renderHook(() => useSessionCommits("sess-1"), {
+      wrapper: createWrapper(),
+    });
     // The mount-time snapshot fetch fires once with the seeded data.
     await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(1));
 
@@ -321,7 +334,9 @@ describe("useSessionCommits — stale-while-revalidate on trigger bump", () => {
     // Trigger-bump fetch returns the authoritative empty list.
     mockRequest.mockResolvedValueOnce({ commits: [], ready: true });
 
-    const { rerender } = renderHook(() => useSessionCommits("sess-1"));
+    const { rerender } = renderHook(() => useSessionCommits("sess-1"), {
+      wrapper: createWrapper(),
+    });
     await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(1));
     bumpTrigger("sess-1", 1);
     rerender();
@@ -361,7 +376,9 @@ describe("useSessionCommits — stale-while-revalidate on trigger bump", () => {
         }),
       );
 
-    const { rerender } = renderHook(() => useSessionCommits("sess-1"));
+    const { rerender } = renderHook(() => useSessionCommits("sess-1"), {
+      wrapper: createWrapper(),
+    });
     await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(1));
 
     bumpTrigger("sess-1", 1);

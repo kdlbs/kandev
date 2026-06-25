@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { IconHexagon } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
@@ -17,14 +18,14 @@ import {
   IntegrationAuthStatusBanner,
   type IntegrationAuthHealth,
 } from "@/components/integrations/auth-status-banner";
-import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import {
-  getLinearConfig,
   setLinearConfig,
   deleteLinearConfig,
   testLinearConnection,
   listLinearTeams,
 } from "@/lib/api/domains/linear-api";
+import { qk } from "@/lib/query/keys";
+import { linearConfigQueryOptions } from "@/lib/query/query-options/linear";
 import type { LinearConfig, LinearTeam, TestLinearConnectionResult } from "@/lib/types/linear";
 import { LinearIssueWatchersSection } from "./linear-issue-watchers-section";
 
@@ -211,6 +212,7 @@ type SettingsActionsArgs = {
 
 function useSettingsActions({ form, setConfig, setForm, setTestResult }: SettingsActionsArgs) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
 
@@ -238,6 +240,7 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
         defaultTeamKey: form.defaultTeamKey,
         secret: form.secret || undefined,
       });
+      queryClient.setQueryData(qk.integrations.linear.config(), saved);
       setConfig(saved);
       setForm(configToForm(saved));
       setTestResult(null);
@@ -247,12 +250,13 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
     } finally {
       setSaving(false);
     }
-  }, [form, toast, setConfig, setForm, setTestResult]);
+  }, [form, queryClient, toast, setConfig, setForm, setTestResult]);
 
   const handleDelete = useCallback(async () => {
     if (!confirm("Remove Linear configuration?")) return;
     try {
       await deleteLinearConfig();
+      queryClient.setQueryData(qk.integrations.linear.config(), null);
       setConfig(null);
       setForm(emptyForm);
       setTestResult(null);
@@ -260,7 +264,7 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
     } catch (err) {
       toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
     }
-  }, [toast, setConfig, setForm, setTestResult]);
+  }, [queryClient, toast, setConfig, setForm, setTestResult]);
 
   return { saving, testing, handleTest, handleSave, handleDelete };
 }
@@ -294,41 +298,31 @@ function useTeamsLoader(hasSecret: boolean | undefined, lastOk: boolean | undefi
 
 function useLinearSettings() {
   const { toast } = useToast();
+  const configQuery = useQuery(linearConfigQueryOptions());
   const [config, setConfig] = useState<LinearConfig | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
-  const [loading, setLoading] = useState(true);
   const [testResult, setTestResult] = useState<TestLinearConnectionResult | null>(null);
+  const formHydratedRef = useRef(false);
   const health = configToHealth(config);
   const { teams, loadingTeams } = useTeamsLoader(config?.hasSecret, config?.lastOk);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const cfg = await getLinearConfig();
-      setConfig(cfg);
+  useEffect(() => {
+    if (!configQuery.isSuccess) return;
+    const cfg = configQuery.data ?? null;
+    setConfig(cfg);
+    if (!formHydratedRef.current) {
       setForm(configToForm(cfg));
-    } catch (err) {
-      toast({ description: `Failed to load Linear config: ${String(err)}`, variant: "error" });
-    } finally {
-      setLoading(false);
+      formHydratedRef.current = true;
     }
-  }, [toast]);
+  }, [configQuery.data, configQuery.isSuccess]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
-
-  // Background refresh so the auth-health banner picks up new probe results.
-  useEffect(() => {
-    const id = setInterval(() => {
-      getLinearConfig()
-        .then((cfg) => setConfig(cfg))
-        .catch(() => {
-          /* transient failures are fine — next tick retries */
-        });
-    }, INTEGRATION_STATUS_REFRESH_MS);
-    return () => clearInterval(id);
-  }, []);
+    if (!configQuery.isError) return;
+    toast({
+      description: `Failed to load Linear config: ${String(configQuery.error)}`,
+      variant: "error",
+    });
+  }, [configQuery.error, configQuery.isError, toast]);
 
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -346,7 +340,7 @@ function useLinearSettings() {
   return {
     config,
     form,
-    loading,
+    loading: configQuery.isFetching && !configQuery.isSuccess,
     saving,
     testing,
     testResult,

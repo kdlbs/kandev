@@ -1,9 +1,15 @@
+/* eslint-disable sonarjs/no-duplicate-string */
 import { cleanup, render, waitFor } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { makeQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
 import type { DashboardData } from "@/lib/state/slices/office/types";
 
 const getDashboardMock = vi.hoisted(() => vi.fn());
+const listAgentProfilesMock = vi.hoisted(() => vi.fn(async () => ({ agents: [] })));
 const setDashboardMock = vi.hoisted(() => vi.fn());
+const setOfficeAgentProfilesMock = vi.hoisted(() => vi.fn());
 
 const state = {
   workspaces: { activeId: "workspace-1" },
@@ -18,6 +24,7 @@ const state = {
     providerHealth: { byWorkspace: {} },
   },
   setDashboard: setDashboardMock,
+  setOfficeAgentProfiles: setOfficeAgentProfilesMock,
 };
 
 vi.mock("@/components/state-provider", () => ({
@@ -30,6 +37,11 @@ vi.mock("@/hooks/use-office-refetch", () => ({
 
 vi.mock("@/lib/api/domains/office-api", () => ({
   getDashboard: getDashboardMock,
+  listAgentProfiles: listAgentProfilesMock,
+}));
+
+vi.mock("./components/routing/provider-health-card", () => ({
+  ProviderHealthCard: () => null,
 }));
 
 import { OfficePageClient } from "./page-client";
@@ -65,9 +77,12 @@ describe("OfficePageClient boot hydration", () => {
   });
 
   it("does not fetch dashboard data when Go boot state already hydrated it", async () => {
-    state.office.dashboard = dashboard();
+    const queryClient = makeQueryClient();
+    const data = dashboard();
+    state.office.dashboard = data;
+    queryClient.setQueryData(qk.office.dashboard("workspace-1"), data);
 
-    render(<OfficePageClient initialDashboard={null} />);
+    renderOfficePage(queryClient);
 
     await waitFor(() => {
       expect(getDashboardMock).not.toHaveBeenCalled();
@@ -78,10 +93,10 @@ describe("OfficePageClient boot hydration", () => {
     const data = dashboard();
     getDashboardMock.mockResolvedValue(data);
 
-    render(<OfficePageClient initialDashboard={null} />);
+    renderOfficePage();
 
     await waitFor(() => {
-      expect(getDashboardMock).toHaveBeenCalledWith("workspace-1");
+      expect(getDashboardMock).toHaveBeenCalledWith("workspace-1", expect.anything());
     });
     await waitFor(() => {
       expect(setDashboardMock).toHaveBeenCalledWith(data);
@@ -92,15 +107,29 @@ describe("OfficePageClient boot hydration", () => {
     state.office.dashboard = dashboard();
     getDashboardMock.mockResolvedValue({ ...dashboard(), agent_count: 2 });
 
-    const { rerender } = render(<OfficePageClient initialDashboard={null} />);
+    const queryClient = makeQueryClient();
+    queryClient.setQueryData(qk.office.dashboard("workspace-1"), state.office.dashboard);
+    const { rerender } = renderOfficePage(queryClient);
 
     expect(getDashboardMock).not.toHaveBeenCalled();
 
     state.workspaces.activeId = "workspace-2";
-    rerender(<OfficePageClient initialDashboard={null} />);
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <OfficePageClient initialDashboard={null} />
+      </QueryClientProvider>,
+    );
 
     await waitFor(() => {
-      expect(getDashboardMock).toHaveBeenCalledWith("workspace-2");
+      expect(getDashboardMock).toHaveBeenCalledWith("workspace-2", expect.anything());
     });
   });
 });
+
+function renderOfficePage(queryClient = makeQueryClient()) {
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <OfficePageClient initialDashboard={null} />
+    </QueryClientProvider>,
+  );
+}

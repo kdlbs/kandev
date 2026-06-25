@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { toast } from "sonner";
-import { listActivity } from "@/lib/api/domains/office-api";
+import { useOfficeRefetch } from "@/hooks/use-office-refetch";
+import { useOfficeActivityData } from "@/hooks/domains/office/use-office-data";
 import type { ActivityEntry } from "@/lib/state/slices/office/types";
 import { ActivityRow } from "./activity-row";
 import { EmptyState } from "../../components/shared/empty-state";
@@ -19,17 +19,18 @@ const FILTER_OPTIONS = [
   { value: "system", label: "System" },
 ];
 
-export function ActivityFeed({ workspaceId }: { workspaceId: string }) {
-  const [entries, setEntries] = useState<ActivityEntry[]>([]);
+export function ActivityFeed({
+  workspaceId,
+  initialActivity = [],
+}: {
+  workspaceId: string;
+  initialActivity?: ActivityEntry[];
+}) {
   const [filterType, setFilterType] = useState("all");
+  const activityQuery = useOfficeActivityData(workspaceId, filterType, initialActivity);
+  const entries = activityQuery.data?.activity ?? (filterType === "all" ? initialActivity : []);
 
-  useEffect(() => {
-    listActivity(workspaceId, filterType)
-      .then((res) => setEntries(res.activity ?? []))
-      .catch((err) => {
-        toast.error(err instanceof Error ? err.message : "Failed to load activity");
-      });
-  }, [workspaceId, filterType]);
+  useOfficeRefetch("activity", () => void activityQuery.refetch());
 
   return (
     <div className="space-y-4">

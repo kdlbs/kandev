@@ -122,6 +122,13 @@ async function expectScrollablePopoverWithinViewport(testPage: Page, locator: Lo
   expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
 }
 
+async function waitForWorkflowRows(session: SessionPage, count: number) {
+  await expect(session.prTopbarPopover().locator("[data-testid='pr-workflow-row']")).toHaveCount(
+    count,
+    { timeout: 10_000 },
+  );
+}
+
 async function openTaskAndWait(
   testPage: import("@playwright/test").Page,
   apiClient: ApiClient,
@@ -272,6 +279,7 @@ test.describe("PR top-bar CI popover", () => {
 
     await expect(session.prStatusChip()).toBeVisible();
     await session.hoverPRTopbar();
+    await waitForWorkflowRows(session, 30);
     await expectScrollablePopoverWithinViewport(testPage, session.prTopbarPopover());
   });
 
@@ -405,6 +413,7 @@ test.describe("PR top-bar CI popover", () => {
     // Wait for the async CI content so the popover is at its final size/position
     // before we cross onto it (it grows/repositions once checks load).
     const popover = session.prTopbarPopover();
+    await waitForWorkflowRows(session, 1);
     const openButton = session.prWorkflowOpenButton("Lint");
     await expect(openButton).toBeVisible({ timeout: 10_000 });
 

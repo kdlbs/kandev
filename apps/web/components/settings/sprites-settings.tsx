@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
@@ -15,13 +16,18 @@ import {
   IconSparkles,
 } from "@tabler/icons-react";
 import { useSprites } from "@/hooks/domains/settings/use-sprites";
-import { useAppStore } from "@/components/state-provider";
 import {
   testSpritesConnection,
   destroySprite,
   destroyAllSprites,
 } from "@/lib/api/domains/sprites-api";
-import type { SpritesInstance, SpritesTestResult, SpritesTestStep } from "@/lib/types/http-sprites";
+import { qk } from "@/lib/query/keys";
+import type {
+  SpritesInstance,
+  SpritesStatus,
+  SpritesTestResult,
+  SpritesTestStep,
+} from "@/lib/types/http-sprites";
 
 export function SpritesConnectionCard({ secretId }: { secretId?: string }) {
   const { status } = useSprites(secretId);
@@ -156,8 +162,8 @@ function StepRow({ step }: { step: SpritesTestStep }) {
 }
 
 export function SpritesInstancesCard({ secretId }: { secretId?: string }) {
+  const queryClient = useQueryClient();
   const { instances, loading } = useSprites(secretId);
-  const removeSpritesInstance = useAppStore((state) => state.removeSpritesInstance);
   const [destroying, setDestroying] = useState<string | null>(null);
   const [destroyingAll, setDestroyingAll] = useState(false);
 
@@ -166,25 +172,39 @@ export function SpritesInstancesCard({ secretId }: { secretId?: string }) {
       setDestroying(name);
       try {
         await destroySprite(name, secretId);
-        removeSpritesInstance(name);
+        queryClient.setQueryData<SpritesInstance[]>(
+          qk.settings.spritesInstances(secretId),
+          (prev) => (prev ?? []).filter((instance) => instance.name !== name),
+        );
+        queryClient.setQueryData<SpritesStatus | null>(
+          qk.settings.spritesStatus(secretId),
+          (prev) =>
+            prev
+              ? {
+                  ...prev,
+                  instance_count: Math.max(0, prev.instance_count - 1),
+                }
+              : prev,
+        );
       } finally {
         setDestroying(null);
       }
     },
-    [secretId, removeSpritesInstance],
+    [queryClient, secretId],
   );
 
   const handleDestroyAll = useCallback(async () => {
     setDestroyingAll(true);
     try {
       await destroyAllSprites(secretId);
-      for (const inst of instances) {
-        removeSpritesInstance(inst.name);
-      }
+      queryClient.setQueryData<SpritesInstance[]>(qk.settings.spritesInstances(secretId), []);
+      queryClient.setQueryData<SpritesStatus | null>(qk.settings.spritesStatus(secretId), (prev) =>
+        prev ? { ...prev, instance_count: 0 } : prev,
+      );
     } finally {
       setDestroyingAll(false);
     }
-  }, [secretId, instances, removeSpritesInstance]);
+  }, [queryClient, secretId]);
 
   return (
     <Card>

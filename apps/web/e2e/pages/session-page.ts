@@ -89,11 +89,108 @@ export class SessionPage {
     return this.page.locator("[data-testid='session-chat']:visible").first();
   }
 
+  private chatEditor(): Locator {
+    return this.activeChat().locator(".tiptap.ProseMirror").first();
+  }
+
+  private sessionTabTriggers(): Locator {
+    return this.page.locator(
+      '[data-testid^="session-tab-"]:not([data-testid^="session-tab-close-"])',
+    );
+  }
+
+  private visibleSessionTabTriggers(): Locator {
+    return this.page.locator(
+      '[data-testid^="session-tab-"]:not([data-testid^="session-tab-close-"]):visible',
+    );
+  }
+
+  private visibleSessionDockTabs(): Locator {
+    return this.page.locator(".dv-default-tab").filter({
+      has: this.visibleSessionTabTriggers(),
+    });
+  }
+
+  private currentRouteSessionId(): string | null {
+    try {
+      return new URL(this.page.url()).searchParams.get("sessionId");
+    } catch {
+      return null;
+    }
+  }
+
+  private currentRouteSessionTabTrigger(): Locator | null {
+    const sessionId = this.currentRouteSessionId();
+    return sessionId ? this.page.getByTestId(`session-tab-${sessionId}`) : null;
+  }
+
+  private currentRouteSessionDockTab(): Locator | null {
+    const routeTab = this.currentRouteSessionTabTrigger();
+    return routeTab ? this.page.locator(".dv-default-tab").filter({ has: routeTab }).first() : null;
+  }
+
+  private sessionTabClickCandidates(): Locator[] {
+    const candidates: Locator[] = [];
+    const routeDockTab = this.currentRouteSessionDockTab();
+    const routeTrigger = this.currentRouteSessionTabTrigger();
+    if (routeDockTab) candidates.push(routeDockTab);
+    if (routeTrigger) candidates.push(routeTrigger);
+    candidates.push(this.visibleSessionDockTabs().first());
+    candidates.push(this.visibleSessionTabTriggers().first());
+    return candidates;
+  }
+
+  private async clickFirstAvailableSessionTab(timeout = 15_000): Promise<void> {
+    let lastError: unknown;
+    const candidateTimeout = Math.min(timeout, 5_000);
+
+    for (const tab of this.sessionTabClickCandidates()) {
+      try {
+        await tab.waitFor({ state: "visible", timeout: candidateTimeout });
+        await tab.click();
+        return;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    if (lastError instanceof Error) throw lastError;
+    throw new Error("no session tab could be clicked");
+  }
+
+  private async foregroundSessionChatFromTab(timeout = 15_000): Promise<void> {
+    let lastError: unknown;
+    const candidateTimeout = Math.min(timeout, 5_000);
+
+    for (const tab of this.sessionTabClickCandidates()) {
+      try {
+        await tab.waitFor({ state: "visible", timeout: candidateTimeout });
+        await tab.click();
+        await this.activeChat().waitFor({ state: "visible", timeout: candidateTimeout });
+        return;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    if (lastError instanceof Error) throw lastError;
+    throw new Error("session chat did not become visible");
+  }
+
+  private async waitForEditableChatEditor(timeout = 15_000): Promise<Locator> {
+    const editor = this.chatEditor();
+    await expect(editor).toBeVisible({ timeout });
+    await expect(editor).toHaveAttribute("contenteditable", "true", { timeout });
+    return editor;
+  }
+
   async waitForLoad(timeout = 15_000) {
     // When multiple session tabs are open, multiple session-chat panels exist in
     // the DOM but only the active one is visible. Use :visible to avoid matching
     // a hidden background panel (which would cause the wait to time out).
-    await this.activeChat().waitFor({ state: "visible", timeout });
+    await this.activeChat()
+      .waitFor({ state: "visible", timeout })
+      .catch(() => this.showSessionContext(timeout));
   }
 
   /**
@@ -110,12 +207,23 @@ export class SessionPage {
    * already foregrounded.
    */
   async showSessionContext(timeout = 15_000): Promise<void> {
-    const tab = this.page.locator("[data-testid^='session-tab-']").first();
-    await tab.waitFor({ state: "visible", timeout });
-    // Clicking a tab that's already active is harmless; clicking a background
-    // one promotes its panel to the foreground.
-    await tab.click();
-    await this.activeChat().waitFor({ state: "visible", timeout });
+    if (await this.activeChat().isVisible()) return;
+
+    let lastError: unknown;
+    for (const reloadFirst of [false, true]) {
+      try {
+        if (reloadFirst) await this.page.reload();
+        // Clicking a tab that's already active is harmless; clicking a background
+        // one promotes its panel to the foreground.
+        await this.foregroundSessionChatFromTab(timeout);
+        return;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    if (lastError instanceof Error) throw lastError;
+    throw new Error("session chat did not become visible");
   }
 
   /**
@@ -328,7 +436,7 @@ export class SessionPage {
 
   /** Clarification overlay (visible when a clarification request is pending). */
   clarificationOverlay(): Locator {
-    return this.page.getByTestId("clarification-overlay");
+    return this.activeChat().getByTestId("clarification-overlay");
   }
 
   /** A specific clarification option button by its text label. */
@@ -340,22 +448,22 @@ export class SessionPage {
 
   /** Skip (X) button on the clarification overlay. */
   clarificationSkip(): Locator {
-    return this.page.getByTestId("clarification-skip");
+    return this.clarificationOverlay().getByTestId("clarification-skip");
   }
 
   /** Custom text input on the clarification overlay. */
   clarificationInput(): Locator {
-    return this.page.getByTestId("clarification-input");
+    return this.clarificationOverlay().getByTestId("clarification-input");
   }
 
   /** Deferred notice shown when agent has disconnected from clarification. */
   clarificationDeferredNotice(): Locator {
-    return this.page.getByTestId("clarification-deferred-notice");
+    return this.clarificationOverlay().getByTestId("clarification-deferred-notice");
   }
 
   /** Expired notice rendered in chat history when the agent timed out waiting. */
   clarificationExpiredNotice(): Locator {
-    return this.page.getByTestId("clarification-expired-notice");
+    return this.activeChat().getByTestId("clarification-expired-notice");
   }
 
   /** Label span inside a clarification option. */
@@ -436,18 +544,20 @@ export class SessionPage {
 
   /** All visible "Approve / Deny" rows for pending permission requests. */
   permissionActionRows(): Locator {
-    return this.chat.getByTestId("permission-action-row");
+    return this.activeChat().getByTestId("permission-action-row");
   }
 
   /** All "Approve" buttons for pending permission requests. */
   permissionApproveButtons(): Locator {
-    return this.chat.getByTestId("permission-approve");
+    return this.activeChat().getByTestId("permission-approve");
   }
 
   /** Kandev-MCP-only "Approve" buttons (excludes the generic ToolCallMessage
    *  fallback row that may briefly duplicate the same pending_id). */
   kandevPermissionApproveButtons(): Locator {
-    return this.chat.getByTestId("kandev-tool-permission").getByTestId("permission-approve");
+    return this.activeChat()
+      .getByTestId("kandev-tool-permission")
+      .getByTestId("permission-approve");
   }
 
   /** Reset context button in the chat input toolbar. */
@@ -816,7 +926,7 @@ export class SessionPage {
    * so this uses the stable data-testid on the ContextMenuTrigger instead.
    */
   async clickSessionChatTab(): Promise<void> {
-    await this.page.locator('[data-testid^="session-tab-"]').first().click();
+    await this.clickFirstAvailableSessionTab();
   }
 
   /** PR files section within the changes panel. */
@@ -833,10 +943,16 @@ export class SessionPage {
   async expandChangesSection(testId: string): Promise<void> {
     const toggle = this.changes.getByTestId(`${testId}-collapse-toggle`);
     await expect(toggle).toBeVisible({ timeout: 15_000 });
-    if ((await toggle.getAttribute("aria-expanded")) === "false") {
-      await toggle.click();
-      await expect(toggle).toHaveAttribute("aria-expanded", "true");
-    }
+    await expect
+      .poll(
+        async () => {
+          if ((await toggle.getAttribute("aria-expanded")) === "true") return true;
+          await toggle.click();
+          return (await toggle.getAttribute("aria-expanded")) === "true";
+        },
+        { timeout: 15_000 },
+      )
+      .toBe(true);
   }
 
   /** Expand the commits section (collapsed by default in the changes panel). */
@@ -855,7 +971,7 @@ export class SessionPage {
    * TipTap maps "Mod" to Meta on macOS and Control on Linux/Windows.
    */
   async sendMessage(text: string) {
-    const editor = this.page.locator(".tiptap.ProseMirror").first();
+    const editor = await this.waitForEditableChatEditor();
     await editor.click();
     await editor.fill(text);
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
@@ -867,10 +983,10 @@ export class SessionPage {
    * don't submit on Ctrl/Cmd+Enter, so mobile specs use this instead.
    */
   async sendMessageViaButton(text: string) {
-    const editor = this.page.locator(".tiptap.ProseMirror").first();
+    const editor = await this.waitForEditableChatEditor();
     await editor.click();
     await editor.fill(text);
-    await this.page.getByTestId("submit-message-button").click();
+    await this.activeChat().getByTestId("submit-message-button").click();
   }
 
   /**
@@ -1195,7 +1311,7 @@ export class SessionPage {
 
   /** Dockview session tab matched by partial text (e.g., "Mock Agent" or index "1"). */
   sessionTabByText(text: string): Locator {
-    return this.page.locator(`[data-testid^='session-tab-']:has-text('${text}')`);
+    return this.sessionTabTriggers().filter({ hasText: text });
   }
 
   /** Session tab container identified by session ID (data-testid="session-tab-{id}"). */
@@ -1210,13 +1326,13 @@ export class SessionPage {
 
   /** Context menu on a dockview tab — right-click the tab to trigger it. */
   async rightClickTab(text: string): Promise<void> {
-    const tab = this.page.locator(`[data-testid^='session-tab-']:has-text('${text}')`);
+    const tab = this.sessionTabByText(text);
     await tab.click({ button: "right" });
   }
 
   /** Right-click the first session tab (useful when there is only one session). */
   async rightClickFirstSessionTab(): Promise<void> {
-    const tab = this.page.locator("[data-testid^='session-tab-']").first();
+    const tab = this.sessionTabTriggers().first();
     await tab.click({ button: "right" });
   }
 

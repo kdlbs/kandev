@@ -31,12 +31,29 @@ async function seedClarificationTask(
 
   if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
+  await waitForSessionMessage(apiClient, task.session_id, "Which database");
   await testPage.goto(`/t/${task.id}`);
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
 
   return session;
+}
+
+async function waitForSessionMessage(
+  apiClient: ApiClient,
+  sessionId: string,
+  content: string,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const { messages } = await apiClient.listSessionMessages(sessionId);
+        return messages.some((message) => message.content.includes(content));
+      },
+      { timeout: 45_000, message: `session should contain message: ${content}` },
+    )
+    .toBe(true);
 }
 
 // Exercises the regular task-create dialog (New Task in the sidebar); run with office off.

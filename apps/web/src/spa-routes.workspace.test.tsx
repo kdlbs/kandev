@@ -1,4 +1,5 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { StateProvider } from "@/components/state-provider";
@@ -51,18 +52,12 @@ describe("SpaRoutes data-backed workspace context", () => {
   it("keeps the currently active workspace when opening GitHub from another workspace", async () => {
     mockGitHubWorkspaceBootstrap();
 
-    render(
-      <StateProvider
-        initialState={{
-          workspaces: {
-            items: [workspaceState(DEFAULT_WORKSPACE_ID), workspaceState(SELECTED_WORKSPACE_ID)],
-            activeId: SELECTED_WORKSPACE_ID,
-          },
-        }}
-      >
-        <SpaRoutes />
-      </StateProvider>,
-    );
+    renderSpaRoutes({
+      workspaces: {
+        items: [workspaceState(DEFAULT_WORKSPACE_ID), workspaceState(SELECTED_WORKSPACE_ID)],
+        activeId: SELECTED_WORKSPACE_ID,
+      },
+    });
 
     await expectSelectedWorkspace();
   });
@@ -71,11 +66,7 @@ describe("SpaRoutes data-backed workspace context", () => {
     document.cookie = `kandev-active-workspace=${SELECTED_WORKSPACE_ID}; path=/`;
     mockGitHubWorkspaceBootstrap();
 
-    render(
-      <StateProvider>
-        <SpaRoutes />
-      </StateProvider>,
-    );
+    renderSpaRoutes();
 
     await expectSelectedWorkspace();
   });
@@ -84,15 +75,24 @@ describe("SpaRoutes data-backed workspace context", () => {
     document.cookie = `kandev-active-workspace=${SELECTED_WORKSPACE_ID}; path=/`;
     mockGitHubWorkspaceBootstrap({ workspacesError: new Error("network down") });
 
-    render(
-      <StateProvider>
-        <SpaRoutes />
-      </StateProvider>,
-    );
+    renderSpaRoutes();
 
     await expectSelectedWorkspace();
   });
 });
+
+function renderSpaRoutes(initialState?: Parameters<typeof StateProvider>[0]["initialState"]) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <StateProvider initialState={initialState}>
+        <SpaRoutes />
+      </StateProvider>
+    </QueryClientProvider>,
+  );
+}
 
 function mockGitHubWorkspaceBootstrap({ workspacesError }: { workspacesError?: Error } = {}) {
   window.history.replaceState({}, "", "/github");

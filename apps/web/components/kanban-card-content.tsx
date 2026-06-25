@@ -20,8 +20,8 @@ import {
   KanbanCardDropdownMenuItems,
   type KanbanCardMenuEntry,
 } from "@/components/kanban-card-menu-items";
-import { useAppStore } from "@/components/state-provider";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 import { useTaskPendingClarification } from "@/hooks/use-task-pending-clarification";
 import {
   getTaskStateIcon,
@@ -142,10 +142,8 @@ export function KanbanCardBody({
 }
 
 function KanbanCardBadges({ task }: { task: Task }) {
-  const parentTitle = useAppStore((s) => {
-    if (!task.parentTaskId) return null;
-    return s.kanban.tasks.find((t) => t.id === task.parentTaskId)?.title ?? null;
-  });
+  const parentTask = useTaskById(task.parentTaskId);
+  const parentTitle = parentTask?.title ?? null;
 
   const showRow =
     (task.sessionCount && task.sessionCount > 1) ||

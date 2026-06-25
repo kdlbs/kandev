@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
 import { useOfficeRefetch } from "@/hooks/use-office-refetch";
-import { listRoutines } from "@/lib/api/domains/office-api";
+import { qk } from "@/lib/query/keys";
 import type { Routine } from "@/lib/state/slices/office/types";
 import { RoutinesContent } from "./routines-content";
 
@@ -14,24 +15,22 @@ type RoutinesPageClientProps = {
 export function RoutinesPageClient({ initialRoutines }: RoutinesPageClientProps) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const setRoutines = useAppStore((s) => s.setRoutines);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     if (initialRoutines.length > 0) {
+      if (workspaceId) {
+        queryClient.setQueryData(qk.office.routines(workspaceId), { routines: initialRoutines });
+      }
       setRoutines(initialRoutines);
     }
-  }, [initialRoutines, setRoutines]);
+  }, [initialRoutines, queryClient, setRoutines, workspaceId]);
 
-  const refetchRoutines = useCallback(async () => {
+  useOfficeRefetch("routines", () => {
     if (!workspaceId) return;
-    const res = await listRoutines(workspaceId).catch(() => ({ routines: [] as Routine[] }));
-    setRoutines(res.routines ?? []);
-  }, [workspaceId, setRoutines]);
-
-  useEffect(() => {
-    void refetchRoutines();
-  }, [refetchRoutines]);
-
-  useOfficeRefetch("routines", refetchRoutines);
+    void queryClient.invalidateQueries({ queryKey: qk.office.routines(workspaceId) });
+    void queryClient.invalidateQueries({ queryKey: qk.office.routineRuns(workspaceId) });
+  });
 
   return <RoutinesContent />;
 }

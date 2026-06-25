@@ -80,15 +80,18 @@ describe("task plan slice", () => {
     expect(store.getState().taskPlans.lastSeenUpdatedAtByTaskId[TASK_ID]).toBe(TS_EPOCH);
   });
 
-  it("clearTaskPlan removes the lastSeen entry", () => {
-    const store = makeStore();
-    store.getState().setTaskPlan(TASK_ID, makePlan());
-    store.getState().markTaskPlanSeen(TASK_ID);
+  it("does not expose plan revision server-state through the session slice", () => {
+    const state = makeStore().getState() as unknown as {
+      taskPlans: Record<string, unknown>;
+    } & Record<string, unknown>;
 
-    store.getState().clearTaskPlan(TASK_ID);
-
-    expect(store.getState().taskPlans.lastSeenUpdatedAtByTaskId[TASK_ID]).toBeUndefined();
-    expect(store.getState().taskPlans.byTaskId[TASK_ID]).toBeUndefined();
-    expect(mockSetPlanLastSeen).toHaveBeenCalledWith(TASK_ID, null);
+    expect("revisionsByTaskId" in state.taskPlans).toBe(false);
+    expect("revisionsLoadingByTaskId" in state.taskPlans).toBe(false);
+    expect("revisionsLoadedByTaskId" in state.taskPlans).toBe(false);
+    expect("revisionContentCache" in state.taskPlans).toBe(false);
+    expect("setPlanRevisions" in state).toBe(false);
+    expect("upsertPlanRevision" in state).toBe(false);
+    expect("setPlanRevisionsLoading" in state).toBe(false);
+    expect("cachePlanRevisionContent" in state).toBe(false);
   });
 });

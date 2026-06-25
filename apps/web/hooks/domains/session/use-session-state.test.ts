@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { TaskSession } from "@/lib/types/http";
 
 // Mock state
@@ -36,6 +38,13 @@ vi.mock("@/hooks/use-task", () => ({
 
 import { useSessionState } from "./use-session-state";
 
+function createWrapper() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return createElement(QueryClientProvider, { client }, children);
+  };
+}
+
 const createMockSession = (
   id: string,
   taskId: string,
@@ -65,7 +74,9 @@ describe("useSessionState", () => {
       mockActiveSessionId = "session-old";
       mockSessionItems = { "session-old": createMockSession("session-old", "task-old") };
 
-      const { result } = renderHook(() => useSessionState("session-explicit"));
+      const { result } = renderHook(() => useSessionState("session-explicit"), {
+        wrapper: createWrapper(),
+      });
 
       expect(result.current.resolvedSessionId).toBe("session-explicit");
     });
@@ -75,7 +86,7 @@ describe("useSessionState", () => {
       mockActiveSessionId = "session-1";
       mockSessionItems = { "session-1": createMockSession("session-1", "task-1") };
 
-      const { result } = renderHook(() => useSessionState(null));
+      const { result } = renderHook(() => useSessionState(null), { wrapper: createWrapper() });
 
       expect(result.current.resolvedSessionId).toBe("session-1");
     });
@@ -85,7 +96,7 @@ describe("useSessionState", () => {
       mockActiveSessionId = "session-1";
       mockSessionItems = { "session-1": createMockSession("session-1", "task-1") };
 
-      const { result } = renderHook(() => useSessionState(null));
+      const { result } = renderHook(() => useSessionState(null), { wrapper: createWrapper() });
 
       expect(result.current.resolvedSessionId).toBeNull();
     });
@@ -95,7 +106,7 @@ describe("useSessionState", () => {
       mockActiveSessionId = "session-1";
       mockSessionItems = {}; // Session not loaded yet
 
-      const { result } = renderHook(() => useSessionState(null));
+      const { result } = renderHook(() => useSessionState(null), { wrapper: createWrapper() });
 
       expect(result.current.resolvedSessionId).toBeNull();
     });
@@ -105,7 +116,7 @@ describe("useSessionState", () => {
       mockActiveSessionId = null;
       mockSessionItems = {};
 
-      const { result } = renderHook(() => useSessionState(null));
+      const { result } = renderHook(() => useSessionState(null), { wrapper: createWrapper() });
 
       expect(result.current.resolvedSessionId).toBeNull();
     });
@@ -132,7 +143,9 @@ describe("useSessionState", () => {
     it("sets isStarting when session state is STARTING", () => {
       mockSession = createMockSession("session-1", "task-1", "STARTING");
 
-      const { result } = renderHook(() => useSessionState("session-1"));
+      const { result } = renderHook(() => useSessionState("session-1"), {
+        wrapper: createWrapper(),
+      });
 
       expect(result.current.isStarting).toBe(true);
       expect(result.current.isWorking).toBe(true);
@@ -141,7 +154,9 @@ describe("useSessionState", () => {
     it("does not set isStarting when session state is CREATED", () => {
       mockSession = createMockSession("session-1", "task-1", "CREATED");
 
-      const { result } = renderHook(() => useSessionState("session-1"));
+      const { result } = renderHook(() => useSessionState("session-1"), {
+        wrapper: createWrapper(),
+      });
 
       // CREATED is not isStarting — the input should be enabled so tests
       // that create sessions and immediately fill() the input work correctly.
@@ -151,7 +166,9 @@ describe("useSessionState", () => {
     it("does not set isStarting when WAITING_FOR_INPUT", () => {
       mockSession = createMockSession("session-1", "task-1", "WAITING_FOR_INPUT");
 
-      const { result } = renderHook(() => useSessionState("session-1"));
+      const { result } = renderHook(() => useSessionState("session-1"), {
+        wrapper: createWrapper(),
+      });
 
       expect(result.current.isStarting).toBe(false);
       expect(result.current.isWorking).toBe(false);
@@ -161,7 +178,9 @@ describe("useSessionState", () => {
       mockSession = createMockSession("session-1", "task-1", "WAITING_FOR_INPUT");
       mockPrepareProgress = { "session-1": { status: "preparing" } };
 
-      const { result } = renderHook(() => useSessionState("session-1"));
+      const { result } = renderHook(() => useSessionState("session-1"), {
+        wrapper: createWrapper(),
+      });
 
       expect(result.current.isStarting).toBe(true);
       expect(result.current.isWorking).toBe(true);
@@ -170,7 +189,9 @@ describe("useSessionState", () => {
     it("sets isAgentBusy when session state is RUNNING", () => {
       mockSession = createMockSession("session-1", "task-1", "RUNNING");
 
-      const { result } = renderHook(() => useSessionState("session-1"));
+      const { result } = renderHook(() => useSessionState("session-1"), {
+        wrapper: createWrapper(),
+      });
 
       expect(result.current.isAgentBusy).toBe(true);
       expect(result.current.isWorking).toBe(true);
@@ -179,7 +200,9 @@ describe("useSessionState", () => {
     it("sets isFailed when session state is FAILED", () => {
       mockSession = createMockSession("session-1", "task-1", "FAILED");
 
-      const { result } = renderHook(() => useSessionState("session-1"));
+      const { result } = renderHook(() => useSessionState("session-1"), {
+        wrapper: createWrapper(),
+      });
 
       expect(result.current.isFailed).toBe(true);
     });

@@ -3,7 +3,7 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
-import { TimeoutError, type Page } from "@playwright/test";
+import { errors, type Page } from "@playwright/test";
 
 // ---------------------------------------------------------------------------
 // Helpers shared across TUI passthrough tests
@@ -113,7 +113,7 @@ test.describe("Terminal agent (TUI passthrough)", () => {
       await session.waitForPassthroughLoading();
     } catch (error) {
       // Keep tolerance for "didn't appear in time", but preserve real failures.
-      if (!(error instanceof TimeoutError)) throw error;
+      if (!(error instanceof errors.TimeoutError)) throw error;
     }
 
     // Once connected, loading overlay disappears and terminal content is visible
@@ -285,12 +285,17 @@ test.describe("Terminal agent (TUI passthrough)", () => {
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
     });
-    await apiClient.createTaskWithAgent(seedData.workspaceId, "TUI Beta Task", profile.id, {
-      description: "beta-unique-marker",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    });
+    const betaTask = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "TUI Beta Task",
+      profile.id,
+      {
+        description: "beta-unique-marker",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
 
     const session = await openTaskSession(testPage, "TUI Alpha Task");
 
@@ -298,10 +303,10 @@ test.describe("Terminal agent (TUI passthrough)", () => {
     await session.expectPassthroughHasText("alpha-unique-marker", 15_000);
 
     // Switch to task B via sidebar
-    const taskB = session.taskInSidebar("TUI Beta Task");
+    const taskB = session.sidebarTaskItem("TUI Beta Task");
     await expect(taskB).toBeVisible({ timeout: 15_000 });
     await taskB.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(new RegExp(`/t/${betaTask.id}`), { timeout: 15_000 });
 
     // Wait for task B's passthrough terminal to load
     await session.waitForPassthroughLoad();

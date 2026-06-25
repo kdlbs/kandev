@@ -1,31 +1,14 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { fetchGitLabStats } from "@/lib/api/domains/gitlab-api";
-import { useAppStore } from "@/components/state-provider";
+import { useQuery } from "@tanstack/react-query";
+import { gitlabStatsQueryOptions } from "@/lib/query/query-options/gitlab";
 
 /**
  * useGitLabStats subscribes to the open-MRs / awaiting-review / open-issues
- * counts surfaced on the /gitlab page header. Per-mount attempted flag
- * prevents an infinite re-fetch loop when GitLab is unreachable.
+ * counts surfaced on the /gitlab page header.
  */
 export function useGitLabStats() {
-  const stats = useAppStore((state) => state.gitlabStats.data);
-  const loading = useAppStore((state) => state.gitlabStats.loading);
-  const loadedAt = useAppStore((state) => state.gitlabStats.loadedAt);
-  const setStats = useAppStore((state) => state.setGitLabStats);
-  const setStatsLoading = useAppStore((state) => state.setGitLabStatsLoading);
-  const attemptedRef = useRef(false);
+  const query = useQuery(gitlabStatsQueryOptions());
 
-  useEffect(() => {
-    if (loading || loadedAt !== null || attemptedRef.current) return;
-    attemptedRef.current = true;
-    setStatsLoading(true);
-    fetchGitLabStats()
-      .then((res) => setStats(res ?? null))
-      .catch(() => setStats(null))
-      .finally(() => setStatsLoading(false));
-  }, [loading, loadedAt, setStats, setStatsLoading]);
-
-  return { stats, loading };
+  return { stats: query.data ?? null, loading: query.isFetching && !query.isSuccess };
 }

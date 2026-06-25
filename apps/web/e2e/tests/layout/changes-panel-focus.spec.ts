@@ -110,7 +110,8 @@ test.describe("Changes panel focus behavior", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
-    await testPage.goto(`/t/${task.id}`);
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+    await testPage.goto(`/t/${task.id}?sessionId=${task.session_id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
@@ -169,7 +170,8 @@ test.describe("Changes panel focus behavior", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
-    await testPage.goto(`/t/${task.id}`);
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+    await testPage.goto(`/t/${task.id}?sessionId=${task.session_id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
@@ -219,7 +221,8 @@ test.describe("Changes panel focus behavior", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
-    await testPage.goto(`/t/${task.id}`);
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+    await testPage.goto(`/t/${task.id}?sessionId=${task.session_id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });

@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createElement, type ReactNode } from "react";
+import { createElement, type ReactNode, useState } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import { StateProvider, useAppStore } from "@/components/state-provider";
+import { StateProvider } from "@/components/state-provider";
 import type { TaskCIAutomationOptions } from "@/lib/types/github";
 
 const apiMocks = vi.hoisted(() => ({
@@ -17,7 +18,14 @@ vi.mock("@/lib/api/domains/github-api", () => ({
 import { useTaskCIAutomationOptions } from "./use-task-ci-options";
 
 function wrapper({ children }: { children: ReactNode }) {
-  return createElement(StateProvider, null, children);
+  const [queryClient] = useState(
+    () => new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+  );
+  return createElement(
+    QueryClientProvider,
+    { client: queryClient },
+    createElement(StateProvider, null, children),
+  );
 }
 
 function makeOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCIAutomationOptions {
@@ -50,7 +58,12 @@ describe("useTaskCIAutomationOptions", () => {
     const { result } = renderHook(() => useTaskCIAutomationOptions("task-1"), { wrapper });
 
     await waitFor(() => expect(result.current.options?.auto_fix_enabled).toBe(true));
-    expect(apiMocks.getOptionsMock).toHaveBeenCalledWith("task-1", { cache: "no-store" });
+    expect(apiMocks.getOptionsMock).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        init: expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      }),
+    );
     expect(result.current.loading).toBe(false);
   });
 
@@ -124,27 +137,23 @@ describe("useTaskCIAutomationOptions task switching", () => {
       .mockReturnValueOnce(new Promise((resolve) => (resolveFirst = resolve)))
       .mockReturnValueOnce(new Promise((resolve) => (resolveSecond = resolve)));
 
-    const { result, rerender } = renderHook(
-      ({ taskId }) => ({
-        hook: useTaskCIAutomationOptions(taskId),
-        automation: useAppStore((state) => state.taskCIAutomation),
-      }),
-      { wrapper, initialProps: { taskId: "task-1" } },
-    );
+    const { result, rerender } = renderHook(({ taskId }) => useTaskCIAutomationOptions(taskId), {
+      wrapper,
+      initialProps: { taskId: "task-1" },
+    });
 
-    await waitFor(() => expect(result.current.automation.loading["task-1"]).toBe(true));
+    await waitFor(() => expect(result.current.loading).toBe(true));
     rerender({ taskId: "task-2" });
-    await waitFor(() => expect(result.current.automation.loading["task-2"]).toBe(true));
+    await waitFor(() => expect(result.current.loading).toBe(true));
 
     resolveFirst(makeOptions({ task_id: "task-1" }));
     await act(async () => {
       await Promise.resolve();
     });
-    expect(result.current.automation.loading["task-1"]).toBe(false);
-    expect(result.current.automation.loading["task-2"]).toBe(true);
+    expect(result.current.loading).toBe(true);
 
     resolveSecond(makeOptions({ task_id: "task-2" }));
-    await waitFor(() => expect(result.current.automation.loading["task-2"]).toBe(false));
+    await waitFor(() => expect(result.current.loading).toBe(false));
   });
 });
 

@@ -6,12 +6,13 @@ import { Separator } from "@kandev/ui/separator";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { updateWorkspaceAction } from "@/app/actions/workspaces";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 
 export function ConfigChatAgentSection() {
   const workspace = useAppStore(
     (s) => s.workspaces.items.find((w) => w.id === s.workspaces.activeId) ?? null,
   );
-  const profiles = useAppStore((s) => s.agentProfiles.items ?? []);
+  const { agentProfiles: profiles } = useSettingsData(true);
   const currentProfileId = workspace?.default_config_agent_profile_id ?? "";
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();

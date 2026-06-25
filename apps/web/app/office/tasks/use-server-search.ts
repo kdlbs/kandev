@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { searchTasks } from "@/lib/api/domains/office-api";
+import { useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useState } from "react";
+import { officeTaskSearchQueryOptions } from "@/lib/query/query-options";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
 
 const DEBOUNCE_MS = 300;
@@ -10,33 +11,31 @@ const DEBOUNCE_MS = 300;
  * a handler to trigger searches.
  */
 export function useServerSearch(workspaceId: string | null) {
-  const [results, setResults] = useState<OfficeTask[] | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [searchInput, setSearchInput] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
 
-  const search = useCallback(
-    (query: string) => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-
-      if (!query.trim()) {
-        setResults(null);
-        return;
-      }
-      if (!workspaceId) return;
-
-      debounceRef.current = setTimeout(() => {
-        searchTasks(workspaceId, query)
-          .then((res) => setResults(res.tasks ?? []))
-          .catch(() => setResults(null));
-      }, DEBOUNCE_MS);
-    },
-    [workspaceId],
-  );
+  const search = useCallback((query: string) => {
+    setSearchInput(query);
+  }, []);
 
   useEffect(() => {
+    const normalizedSearch = searchInput.trim();
+    if (!normalizedSearch || !workspaceId) {
+      setDebouncedSearch("");
+      return;
+    }
+    const timeout = setTimeout(() => {
+      setDebouncedSearch(normalizedSearch);
+    }, DEBOUNCE_MS);
     return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
+      clearTimeout(timeout);
     };
-  }, []);
+  }, [searchInput, workspaceId]);
+
+  const searchQuery = useQuery(officeTaskSearchQueryOptions(workspaceId ?? "", debouncedSearch));
+  const isActiveSearch = Boolean(workspaceId && debouncedSearch);
+  const results: OfficeTask[] | null =
+    isActiveSearch && !searchQuery.isError ? (searchQuery.data?.tasks ?? []) : null;
 
   return { searchResults: results, triggerSearch: search };
 }

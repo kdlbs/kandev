@@ -1,6 +1,6 @@
 import { useMemo } from "react";
-import { useAppStore } from "@/components/state-provider";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
+import { useCachedWorkflows } from "@/hooks/use-workflow-cache";
 import {
   aggregateSidebarTasks,
   type AggregatedSidebarTasks,
@@ -15,29 +15,19 @@ export type WorkspaceSidebarTasksResult = AggregatedSidebarTasks & {
 /**
  * Shared data source for the desktop sidebar and the mobile task-switcher sheet.
  *
- * Fires `useAllWorkflowSnapshots` to populate `kanbanMulti.snapshots` for every
- * workflow in the workspace, then aggregates them (with a fallback to the
- * single active `kanban` slice for tasks that arrived via WS before their
- * snapshot resolved). Snapshots from other workspaces are filtered out so a
- * stale hydration doesn't leak across workspace switches.
+ * Fires `useAllWorkflowSnapshots` for every workflow in the workspace, then
+ * aggregates Query-owned snapshots. Snapshots from other workspaces are
+ * filtered out so stale hydration doesn't leak across workspace switches.
  */
 export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceSidebarTasksResult {
-  useAllWorkflowSnapshots(workspaceId);
+  const { snapshots, isLoading: snapshotsLoading } = useAllWorkflowSnapshots(workspaceId);
 
-  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
-  const isMultiLoading = useAppStore((state) => state.kanbanMulti.isLoading);
-  const workflows = useAppStore((state) => state.workflows.items);
-  const activeKanbanWorkflowId = useAppStore((state) => state.kanban.workflowId);
-  const activeKanbanTasks = useAppStore((state) => state.kanban.tasks);
-  const activeKanbanSteps = useAppStore((state) => state.kanban.steps);
+  const workflows = useCachedWorkflows(workspaceId);
 
   // While `workspaceId` is unresolved (initial SSR / pre-hydration), return an
   // empty scope rather than every workflow in the store — otherwise snapshots
   // from previously-active workspaces would briefly bleed into the sidebar.
-  const filteredWorkflows = useMemo(
-    () => (workspaceId ? workflows.filter((w) => w.workspaceId === workspaceId) : []),
-    [workflows, workspaceId],
-  );
+  const filteredWorkflows = useMemo(() => (workspaceId ? workflows : []), [workflows, workspaceId]);
   const workspaceWorkflowIds = useMemo(
     () => new Set(filteredWorkflows.map((w) => w.id)),
     [filteredWorkflows],
@@ -51,21 +41,7 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
     return result;
   }, [snapshots, workspaceWorkflowIds]);
 
-  const fallbackWorkflowId =
-    activeKanbanWorkflowId && workspaceWorkflowIds.has(activeKanbanWorkflowId)
-      ? activeKanbanWorkflowId
-      : null;
-
-  const aggregated = useMemo(
-    () =>
-      aggregateSidebarTasks(
-        scopedSnapshots,
-        fallbackWorkflowId,
-        activeKanbanTasks,
-        activeKanbanSteps,
-      ),
-    [scopedSnapshots, fallbackWorkflowId, activeKanbanTasks, activeKanbanSteps],
-  );
+  const aggregated = useMemo(() => aggregateSidebarTasks(scopedSnapshots), [scopedSnapshots]);
 
   const workspaceWorkflows = useMemo<TaskMoveWorkflow[]>(
     () => filteredWorkflows.map((w) => ({ id: w.id, name: w.name, hidden: w.hidden })),
@@ -74,7 +50,7 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
 
   // Only flash a skeleton on the very first fetch (no snapshots yet); refreshes
   // shouldn't blow away the existing list.
-  const isLoading = isMultiLoading && Object.keys(scopedSnapshots).length === 0;
+  const isLoading = snapshotsLoading && Object.keys(scopedSnapshots).length === 0;
 
   return {
     ...aggregated,

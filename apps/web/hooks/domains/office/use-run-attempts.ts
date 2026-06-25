@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
-import { getRunAttempts } from "@/lib/api/domains/office-runs-api";
+import { officeRunAttemptsQueryOptions } from "@/lib/query/query-options/office";
 import type { RouteAttempt } from "@/lib/state/slices/office/types";
+import { queryErrorMessage } from "./query-error";
 
 export type UseRunAttemptsResult = {
   attempts: RouteAttempt[];
@@ -19,29 +21,20 @@ export function useRunAttempts(runId: string | null): UseRunAttemptsResult {
     runId ? (s.office.runAttempts.byRunId[runId] ?? EMPTY_ATTEMPTS) : EMPTY_ATTEMPTS,
   );
   const setRunAttempts = useAppStore((s) => s.setRunAttempts);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [fetched, setFetched] = useState(false);
+  const query = useQuery(officeRunAttemptsQueryOptions(runId ?? ""));
 
   const refresh = useCallback(async () => {
     if (!runId) return;
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await getRunAttempts(runId);
-      setRunAttempts(runId, res.attempts ?? []);
-      setFetched(true);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load route attempts");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [runId, setRunAttempts]);
+    await query.refetch();
+  }, [query, runId]);
 
   useEffect(() => {
-    if (!runId || fetched) return;
-    void refresh();
-  }, [runId, fetched, refresh]);
+    if (!runId || !query.data) return;
+    setRunAttempts(runId, query.data.attempts ?? []);
+  }, [query.data, runId, setRunAttempts]);
 
-  return { attempts, isLoading, error, refresh };
+  const queryAttempts = query.data?.attempts ?? attempts;
+  const error = queryErrorMessage(query.error);
+
+  return { attempts: queryAttempts, isLoading: query.isPending, error, refresh };
 }

@@ -414,6 +414,9 @@ func (c *MockController) seedPRFeedback(ctx *gin.Context) {
 	c.mock.ReplaceCheckRuns(req.Owner, req.Repo, headSHA, req.Checks)
 	c.mock.ReplaceReviews(req.Owner, req.Repo, req.PRNumber, req.Reviews)
 	c.mock.ReplaceComments(req.Owner, req.Repo, req.PRNumber, req.Comments)
+	if c.service != nil {
+		c.service.ClearPRCaches()
+	}
 	ctx.JSON(http.StatusOK, gin.H{
 		"checks":   len(req.Checks),
 		"reviews":  len(req.Reviews),
@@ -446,6 +449,7 @@ func (c *MockController) reset(ctx *gin.Context) {
 	c.mock.Reset()
 	if c.service != nil {
 		c.service.ClearAccessibleReposCaches()
+		c.service.ClearPRCaches()
 	}
 	ctx.JSON(http.StatusOK, gin.H{"reset": true})
 }

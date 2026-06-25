@@ -11,12 +11,6 @@ const state = {
   workspaces: {
     items: [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }],
   },
-  settingsAgents: {
-    items: [],
-  },
-  executors: {
-    items: [],
-  },
 };
 
 vi.mock("@/components/state-provider", () => ({
@@ -25,6 +19,21 @@ vi.mock("@/components/state-provider", () => ({
 
 vi.mock("@/hooks/domains/settings/use-available-agents", () => ({
   useAvailableAgents: () => undefined,
+}));
+
+vi.mock("@/hooks/domains/settings/use-settings-data", () => ({
+  useSettingsData: () => ({
+    agentProfiles: [],
+    availableAgents: [],
+    availableTools: [],
+    executors: [],
+    settingsAgents: [],
+    settingsData: {
+      agentsLoaded: true,
+      capabilitiesLoaded: true,
+      executorsLoaded: true,
+    },
+  }),
 }));
 
 vi.mock("@kandev/ui/collapsible", async () => {
@@ -46,8 +55,6 @@ import { WorkspacesGroup } from "./workspaces-group";
 describe("SettingsTree rendering", () => {
   beforeEach(() => {
     state.workspaces.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
-    state.settingsAgents.items = [];
-    state.executors.items = [];
   });
 
   afterEach(() => cleanup());

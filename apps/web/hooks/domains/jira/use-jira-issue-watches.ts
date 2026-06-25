@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useCallback, useRef } from "react";
+import { useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  listJiraIssueWatches,
   createJiraIssueWatch,
   updateJiraIssueWatch,
   deleteJiraIssueWatch,
@@ -10,8 +10,13 @@ import {
   previewResetJiraIssueWatch,
   resetJiraIssueWatch,
 } from "@/lib/api/domains/jira-api";
-import { useAppStore } from "@/components/state-provider";
-import type { CreateJiraIssueWatchInput, UpdateJiraIssueWatchInput } from "@/lib/types/jira";
+import { qk } from "@/lib/query/keys";
+import { jiraIssueWatchesQueryOptions } from "@/lib/query/query-options/jira";
+import type {
+  CreateJiraIssueWatchInput,
+  JiraIssueWatch,
+  UpdateJiraIssueWatchInput,
+} from "@/lib/types/jira";
 
 // WORKSPACE_REQUIRED is thrown by per-row mutation callbacks when the
 // install-wide listing case forgets to forward the row's workspaceId
@@ -31,46 +36,17 @@ const WORKSPACE_REQUIRED = "workspaceId required";
  * workspace's stale rows during the swap.
  */
 export function useJiraIssueWatches(workspaceId?: string | null) {
-  const items = useAppStore((s) => s.jiraIssueWatches.items);
-  const loaded = useAppStore((s) => s.jiraIssueWatches.loaded);
-  const loading = useAppStore((s) => s.jiraIssueWatches.loading);
-  const setWatches = useAppStore((s) => s.setJiraIssueWatches);
-  const resetWatches = useAppStore((s) => s.resetJiraIssueWatches);
-  const setLoading = useAppStore((s) => s.setJiraIssueWatchesLoading);
-  const addWatch = useAppStore((s) => s.addJiraIssueWatch);
-  const updateWatch = useAppStore((s) => s.updateJiraIssueWatch);
-  const removeWatch = useAppStore((s) => s.removeJiraIssueWatch);
-
-  const lastScope = useRef<string | null | undefined>(undefined);
-  const scope: string | null = workspaceId ?? null;
-
-  useEffect(() => {
-    if (workspaceId === null) return;
-    // Scope changed (workspace switch or all↔scoped flip) — invalidate so the
-    // fetch effect re-runs. setWatches([]) would keep loaded=true; resetWatches
-    // clears loaded so the fetch isn't short-circuited by the stale guard.
-    if (lastScope.current !== undefined && lastScope.current !== scope) {
-      resetWatches();
-    }
-    lastScope.current = scope;
-  }, [workspaceId, scope, resetWatches]);
-
-  useEffect(() => {
-    if (workspaceId === null || loaded || loading) return;
-    setLoading(true);
-    listJiraIssueWatches(workspaceId ?? undefined, { cache: "no-store" })
-      .then((res) => setWatches(res ?? []))
-      .catch(() => setWatches([]))
-      .finally(() => setLoading(false));
-  }, [workspaceId, loaded, loading, setWatches, setLoading]);
+  const queryClient = useQueryClient();
+  const query = useQuery(jiraIssueWatchesQueryOptions(workspaceId));
+  const items = query.data ?? [];
 
   const create = useCallback(
     async (req: CreateJiraIssueWatchInput) => {
       const watch = await createJiraIssueWatch(req);
-      addWatch(watch);
+      patchJiraIssueWatchCaches(queryClient, workspaceId, watch);
       return watch;
     },
-    [addWatch],
+    [queryClient, workspaceId],
   );
 
   // Per-row mutations require the row's own workspace_id to satisfy the
@@ -81,10 +57,10 @@ export function useJiraIssueWatches(workspaceId?: string | null) {
       const ws = rowWorkspaceId ?? workspaceId;
       if (!ws) throw new Error(WORKSPACE_REQUIRED);
       const watch = await updateJiraIssueWatch(ws, id, req);
-      updateWatch(watch);
+      patchJiraIssueWatchCaches(queryClient, workspaceId, watch);
       return watch;
     },
-    [workspaceId, updateWatch],
+    [queryClient, workspaceId],
   );
 
   const remove = useCallback(
@@ -92,9 +68,9 @@ export function useJiraIssueWatches(workspaceId?: string | null) {
       const ws = rowWorkspaceId ?? workspaceId;
       if (!ws) throw new Error(WORKSPACE_REQUIRED);
       await deleteJiraIssueWatch(ws, id);
-      removeWatch(id);
+      removeJiraIssueWatchFromCaches(queryClient, workspaceId, id);
     },
-    [workspaceId, removeWatch],
+    [queryClient, workspaceId],
   );
 
   const trigger = useCallback(
@@ -123,13 +99,53 @@ export function useJiraIssueWatches(workspaceId?: string | null) {
       const ws = rowWorkspaceId ?? workspaceId;
       if (!ws) throw new Error(WORKSPACE_REQUIRED);
       const res = await resetJiraIssueWatch(ws, id);
-      // Wipe the dedup row cache so the next list/refresh doesn't surface
-      // stale state — the watch is now in "freshly created" mode.
-      resetWatches();
+      queryClient.invalidateQueries({ queryKey: qk.integrations.jira.issueWatches(workspaceId) });
+      queryClient.invalidateQueries({ queryKey: qk.integrations.jira.issueWatches(undefined) });
+      queryClient.invalidateQueries({ queryKey: qk.integrations.jira.issueWatches(ws) });
       return res;
     },
-    [workspaceId, resetWatches],
+    [queryClient, workspaceId],
   );
 
-  return { items, loaded, loading, create, update, remove, trigger, previewReset, reset };
+  return {
+    items,
+    loaded: query.isSuccess,
+    loading: query.isFetching && !query.isSuccess,
+    create,
+    update,
+    remove,
+    trigger,
+    previewReset,
+    reset,
+  };
+}
+
+function patchJiraIssueWatchCaches(
+  queryClient: ReturnType<typeof useQueryClient>,
+  workspaceId: string | null | undefined,
+  watch: JiraIssueWatch,
+) {
+  const patch = (prev: JiraIssueWatch[] | undefined) => upsertById(prev ?? [], watch);
+  queryClient.setQueryData(qk.integrations.jira.issueWatches(workspaceId), patch);
+  queryClient.setQueryData(qk.integrations.jira.issueWatches(undefined), patch);
+  queryClient.setQueryData(qk.integrations.jira.issueWatches(watch.workspaceId), patch);
+}
+
+function removeJiraIssueWatchFromCaches(
+  queryClient: ReturnType<typeof useQueryClient>,
+  workspaceId: string | null | undefined,
+  id: string,
+) {
+  const remove = (prev: JiraIssueWatch[] | undefined) =>
+    (prev ?? []).filter((watch) => watch.id !== id);
+  queryClient.setQueryData(qk.integrations.jira.issueWatches(workspaceId), remove);
+  queryClient.setQueryData(qk.integrations.jira.issueWatches(undefined), remove);
+}
+
+function upsertById<T extends { id: string }>(items: T[], next: T): T[] {
+  const index = items.findIndex((item) => item.id === next.id);
+  if (index === -1) return [...items, next];
+  const copy = [...items];
+  copy[index] = next;
+  return copy;
 }

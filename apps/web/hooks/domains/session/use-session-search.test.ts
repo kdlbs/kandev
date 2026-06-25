@@ -1,10 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, cleanup, renderHook } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { makeQueryClient } from "@/lib/query/client";
 import type { MessageSearchHit } from "@/lib/api/domains/session-api";
 
 const mockSearch = vi.fn();
 
 vi.mock("@/lib/api/domains/session-api", () => ({
+  fetchTaskSession: vi.fn(),
+  listSessionTurns: vi.fn(),
+  listTaskSessionMessages: vi.fn(),
+  listTaskSessions: vi.fn(),
   searchSessionMessages: (sessionId: string, query: string, limit: number) =>
     mockSearch(sessionId, query, limit),
 }));
@@ -27,6 +34,13 @@ async function flush() {
   await Promise.resolve();
 }
 
+function renderSessionSearch(sessionId: string | null, loadOlder?: () => Promise<number>) {
+  const client = makeQueryClient();
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client }, children);
+  return renderHook(() => useSessionSearch(sessionId, loadOlder), { wrapper });
+}
+
 describe("useSessionSearch", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -40,7 +54,7 @@ describe("useSessionSearch", () => {
 
   it("debounces rapid setQuery calls into a single search", async () => {
     mockSearch.mockResolvedValue({ hits: [makeHit("m1")], total: 1 });
-    const { result } = renderHook(() => useSessionSearch("sess-1"));
+    const { result } = renderSessionSearch("sess-1");
 
     act(() => {
       result.current.open();
@@ -67,7 +81,7 @@ describe("useSessionSearch", () => {
       .mockReturnValueOnce(first)
       .mockResolvedValueOnce({ hits: [makeHit("second")], total: 1 });
 
-    const { result } = renderHook(() => useSessionSearch("sess-1"));
+    const { result } = renderSessionSearch("sess-1");
     act(() => {
       result.current.open();
       result.current.setQuery("first");
@@ -96,7 +110,7 @@ describe("useSessionSearch", () => {
   });
 
   it("skips the request when sessionId is null", async () => {
-    const { result } = renderHook(() => useSessionSearch(null));
+    const { result } = renderSessionSearch(null);
     act(() => {
       result.current.open();
       result.current.setQuery("anything");
@@ -110,7 +124,7 @@ describe("useSessionSearch", () => {
 
   it("clears hits and query when closed", async () => {
     mockSearch.mockResolvedValue({ hits: [makeHit("m1")], total: 1 });
-    const { result } = renderHook(() => useSessionSearch("sess-1"));
+    const { result } = renderSessionSearch("sess-1");
     act(() => {
       result.current.open();
       result.current.setQuery("foo");

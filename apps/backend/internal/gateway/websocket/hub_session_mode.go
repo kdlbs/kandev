@@ -165,6 +165,9 @@ func (h *Hub) recomputeSessionMode(sessionID string) {
 	h.sessionMode.mu.Lock()
 	h.mu.RLock()
 	current := h.computeSessionModeLocked(sessionID)
+	if current == SessionModePaused {
+		h.deleteSessionSeqIfIdleLocked(sessionID)
+	}
 	h.mu.RUnlock()
 
 	prev, hadPrev := h.sessionMode.lastMode[sessionID]
@@ -240,6 +243,9 @@ func (h *Hub) fireDebouncedDownTransition(sessionID string) {
 
 	h.mu.RLock()
 	latest := h.computeSessionModeLocked(sessionID)
+	if latest == SessionModePaused {
+		h.deleteSessionSeqIfIdleLocked(sessionID)
+	}
 	h.mu.RUnlock()
 
 	prevAtFire, hadPrev := h.sessionMode.lastMode[sessionID]

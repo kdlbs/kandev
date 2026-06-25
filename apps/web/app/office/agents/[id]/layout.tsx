@@ -1,13 +1,13 @@
 "use client";
 
-import { use, useCallback, useEffect, type ReactNode } from "react";
+import { use, type ReactNode } from "react";
 import Link from "@/components/routing/app-link";
 import { usePathname } from "@/lib/routing/client-router";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { useOfficeRefetch } from "@/hooks/use-office-refetch";
-import { listAgentProfiles } from "@/lib/api/domains/office-api";
+import { useOfficeAgentsData } from "@/hooks/domains/office/use-office-data";
 import { cn } from "@/lib/utils";
 import { OfficeTopbarPortal } from "../../components/office-topbar-portal";
 import { AgentAvatar } from "../../components/agent-avatar";
@@ -42,27 +42,14 @@ const TABS: Array<{ slug: string; label: string }> = [
 export default function AgentDetailLayout({ children, params }: AgentDetailLayoutProps) {
   const { id } = use(params);
   const pathname = usePathname();
-  const agent = useAppStore((s) => s.office.agentProfiles.find((a) => a.id === id));
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const setOfficeAgentProfiles = useAppStore((s) => s.setOfficeAgentProfiles);
+  const agentStore = useAppStore((s) => s.office.agentProfiles.find((a) => a.id === id));
+  const agentsQuery = useOfficeAgentsData(workspaceId);
 
-  // Refetch the agents list on mount and on WS "agents" events so this
-  // layout recovers when SSR hydrated the store with a stale agent set
-  // (e.g. the agent was created after the SSR fetch fired).
-  const refetchAgents = useCallback(async () => {
-    if (!workspaceId) return;
-    const res = await listAgentProfiles(workspaceId).catch(() => ({ agents: [] }));
-    setOfficeAgentProfiles(res.agents ?? []);
-  }, [workspaceId, setOfficeAgentProfiles]);
-
-  // Fire once on mount to recover from stale SSR hydration.
-  useEffect(() => {
-    refetchAgents();
-  }, [refetchAgents]);
-
-  useOfficeRefetch("agents", refetchAgents);
+  useOfficeRefetch("agents", () => void agentsQuery.refetch());
 
   const activeSlug = activeSlugFromPath(pathname, id);
+  const agent = agentsQuery.data?.agents.find((item) => item.id === id) ?? agentStore;
 
   if (!agent) {
     return (

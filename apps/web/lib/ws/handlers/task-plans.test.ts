@@ -169,4 +169,10 @@ describe("task.plan.* handlers", () => {
     expect(store.getState().setTaskPlan).toHaveBeenCalledWith(TASK_ID, null);
     expect(store.getState().markTaskPlanSeen).toHaveBeenCalledWith(TASK_ID);
   });
+
+  it("does not register the legacy plan revision mirror handler", () => {
+    const handlers = registerTaskPlansHandlers(makeStore());
+
+    expect(handlers["task.plan.revision.created"]).toBeUndefined();
+  });
 });

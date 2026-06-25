@@ -23,23 +23,34 @@ import { Dialog } from "@kandev/ui/dialog";
 ## Data Flow Pattern (Critical)
 
 ```text
-Go Boot Payload -> Hydrate Store -> Components Read Store -> Hooks Subscribe
+Go Boot Payload -> Seed Query Cache + Hydrate UI Store -> Domain Hooks -> Components
+WebSocket Events -> Query Bridge -> Query Cache -> Mounted UI
 ```
 
-**Never fetch data directly in components.**
+**Never fetch server data directly in components.** Server-owned data should go
+through TanStack Query keys/options and domain hooks. Zustand is for
+client-only UI state, persisted user preferences, and explicitly documented
+temporary indexes during the TanStack migration.
 
 ## Store Structure (Domain Slices)
 
 ```text
+lib/query/
+├── client.ts                       # Browser QueryClient defaults
+├── keys.ts                         # Typed query-key factories
+├── provider.tsx                    # Query provider and e2e exposure
+├── query-options/                  # Domain query option factories
+└── bridge/                         # WS event -> query cache updates
+
 lib/state/
 ├── store.ts                        # Root composition
 ├── default-state.ts                # Default state + initial state merge
 ├── slices/                         # Domain slices
-│   ├── kanban/                    # boards, tasks, columns
+│   ├── kanban/                    # active workflow/task/session UI state
 │   ├── session/                   # sessions, messages, turns, worktrees
 │   ├── session-runtime/           # shell, processes, git, context
-│   ├── workspace/                 # workspaces, repos, branches
-│   ├── settings/                  # executors, agents, editors, prompts (incl. userSettings)
+│   ├── workspace/                 # workspace list and active workspace UI state
+│   ├── settings/                  # userSettings and local persisted preferences
 │   ├── comments/                  # code review diff comments
 │   ├── github/                    # GitHub PRs, reviews
 │   └── ui/                        # preview, connection, active state, sidebar views
@@ -55,22 +66,44 @@ lib/api/domains/                    # API clients
 
 **Key State Paths:**
 
-- `messages.bySession[sessionId]`, `shell.outputs[sessionId]`, `gitStatus.bySessionId[sessionId]`
-- `tasks.activeTaskId`, `tasks.activeSessionId`, `workspaces.activeId`
-- `repositories.byWorkspace`, `repositoryBranches.byRepository`
+- `tasks.activeTaskId`, `tasks.activeSessionId`, `workflows.activeId`, `workspaces.activeId`
+- `messages.bySession[sessionId]`, `turns.bySession[sessionId]`, and
+  `taskSessions.items[sessionId]` are retained live session indexes for stream
+  ordering, active-session chrome, missed-frame recovery, and editor/panel UI.
+- `shell.outputs[environmentId]`, `processes.*`, `gitStatus.byEnvironmentId`,
+  `sessionCommits.byEnvironmentId`, `contextWindow.bySessionId`,
+  `prepareProgress.bySessionId`, `sessionModels.bySessionId`, and
+  `userShells.byEnvironmentId` are retained runtime indexes for high-frequency
+  streams, environment-scoped cleanup, and terminal/session UI.
+- Workspace repositories, repository branches/scripts, workflow lists, workflow
+  snapshots, task details, settings catalogs, integrations, office data, and
+  system data are TanStack Query data.
 
-**Hydration:** Go injects `window.__KANDEV_BOOT_PAYLOAD__` into the SPA shell before React mounts. `lib/state/hydration/merge-strategies.ts` has `deepMerge()`, `mergeSessionMap()`, `mergeLoadingState()` to avoid overwriting live client state. Pass `activeSessionId` to protect active sessions.
+**Hydration:** Go injects `window.__KANDEV_BOOT_PAYLOAD__` into the SPA shell
+before React mounts. Boot and app-state payloads seed TanStack Query through
+`lib/query/seed.ts` before route hooks fetch. The Zustand hydrator still merges
+client-only UI state and persisted preferences; `lib/state/hydration/merge-strategies.ts`
+has `deepMerge()`, `mergeSessionMap()`, `mergeLoadingState()` to avoid
+overwriting live client state. Pass `activeSessionId` to protect active
+sessions.
 
 For rebasing or finishing PRs written against the old Next.js runtime, follow
 [`docs/nextjs-spa-migration.md`](../../docs/nextjs-spa-migration.md).
 
-**Hooks Pattern:** Hooks in `hooks/domains/` encapsulate WS subscription + store selection. WS client deduplicates subscriptions automatically.
+**Hooks Pattern:** Hooks in `hooks/domains/` encapsulate query selection,
+mutations, and WS subscription intent. WS client deduplicates subscriptions
+automatically.
 
 ## WebSockets
 
 **Format:** `{id, type, action, payload, timestamp}`.
 
 Use subscription hooks only; the WS client auto-deduplicates.
+
+Server-state WS handlers should live in `lib/query/bridge/` and write or
+invalidate the same query keys the mounted UI reads. Legacy `lib/ws/handlers/*`
+files are only for retained client effects, high-frequency streams, or
+documented temporary migration paths.
 
 ## Component conventions
 

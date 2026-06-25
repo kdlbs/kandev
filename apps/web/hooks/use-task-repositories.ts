@@ -1,12 +1,10 @@
-import { useAppStore } from "@/components/state-provider";
+import { useAllCachedRepositories } from "@/hooks/domains/workspace/use-repository-cache";
 import { useTask } from "@/hooks/use-task";
-import type { Repository } from "@/lib/types/http";
 
 export function useTaskRepositories(taskId: string | null) {
   const task = useTask(taskId);
-  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  const repositories = useAllCachedRepositories();
 
   if (!task?.repositoryId) return [];
-  const repositories = Object.values(repositoriesByWorkspace).flat() as Repository[];
-  return repositories.filter((repo: Repository) => repo.id === task.repositoryId);
+  return repositories.filter((repo) => repo.id === task.repositoryId);
 }

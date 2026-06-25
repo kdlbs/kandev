@@ -15,7 +15,8 @@ import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
 import { resolveActiveId } from "@/lib/ssr/resolve-active-id";
 import { readCookies } from "@/lib/server/cookies";
-import type { AppState } from "@/lib/state/store";
+import type { QuerySeedInitialState } from "@/lib/query/seed";
+import type { UserSettingsState } from "@/lib/state/slices";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
 
 // Root page loader: keeps the old route shape while SPA boot data owns hydration.
@@ -47,7 +48,7 @@ function mapWorkspaceItem(ws: WorkspaceItem) {
 function buildUserSettingsState(
   resp: UserSettingsResponse | null,
   workspaceId: string | null,
-): AppState["userSettings"] {
+): UserSettingsState {
   return { ...mapUserSettingsResponse(resp), workspaceId };
 }
 
@@ -63,7 +64,7 @@ function buildBaseState(
   workspaces: ListWorkspacesResponse,
   userSettingsResponse: UserSettingsResponse | null,
   activeWorkspaceId: string | null,
-): Partial<AppState> {
+): QuerySeedInitialState {
   return {
     workspaces: {
       items: workspaces.workspaces.map(mapWorkspaceItem),
@@ -77,7 +78,7 @@ async function loadSnapshotState(
   workflowId: string,
   taskId: string | undefined,
   sessionId: string | undefined,
-): Promise<Partial<AppState>> {
+): Promise<QuerySeedInitialState> {
   const [snapshot, messagesResponse] = await Promise.all([
     fetchWorkflowSnapshot(workflowId, { cache: "no-store" }),
     taskId && sessionId
@@ -88,7 +89,7 @@ async function loadSnapshotState(
         ).catch(() => null)
       : Promise.resolve(null),
   ]);
-  const state: Partial<AppState> = { ...snapshotToState(snapshot) };
+  const state: QuerySeedInitialState = { ...snapshotToState(snapshot) };
 
   if (sessionId && messagesResponse) {
     const messages = [...(messagesResponse.messages ?? [])].reverse();
@@ -179,22 +180,17 @@ export default async function Page({ searchParams }: PageProps) {
     initialState = {
       ...initialState,
       userSettings: {
-        ...(initialState.userSettings as AppState["userSettings"]),
+        ...buildUserSettingsState(userSettingsResponse, activeWorkspaceId),
         workflowId,
       },
       workflows: {
-        items: workflowList.workflows.map((w) => ({
-          id: w.id,
-          workspaceId: w.workspace_id,
-          name: w.name,
-          hidden: w.hidden,
-        })),
         activeId: workflowId,
+      },
+      workflowLists: {
+        itemsByWorkspaceId: { [activeWorkspaceId]: workflowList.workflows },
       },
       repositories: {
         itemsByWorkspaceId: { [activeWorkspaceId]: repositoriesResponse.repositories },
-        loadingByWorkspaceId: { [activeWorkspaceId]: false },
-        loadedByWorkspaceId: { [activeWorkspaceId]: true },
       },
       quickChat: {
         isOpen: false,

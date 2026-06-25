@@ -5,8 +5,8 @@ import type { UsePRInfoByURLResult } from "@/hooks/domains/github/use-pr-info-by
 import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
 import type {
   KanbanMultiState,
+  WorkflowItem,
   WorkflowSnapshotData,
-  WorkflowsState,
 } from "@/lib/state/slices/kanban/types";
 
 type Workspace = WorkspaceState["items"][number];
@@ -388,7 +388,7 @@ export type DialogFormBodyProps = {
   agentProfilesLoading: boolean;
   executorsLoading: boolean;
   isCreatingSession: boolean;
-  workflows: WorkflowsState["items"];
+  workflows: WorkflowItem[];
   snapshots: KanbanMultiState["snapshots"];
   effectiveWorkflowId: string | null;
   fs: DialogFormState;

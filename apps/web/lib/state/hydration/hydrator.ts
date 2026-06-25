@@ -2,7 +2,7 @@ import type { Draft } from "immer";
 import type { AppState } from "../store";
 import { migrateView } from "../slices/ui/ui-slice";
 import { getStoredQuickChatNames } from "@/lib/local-storage";
-import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
+import { deepMerge, mergeSessionMap } from "./merge-strategies";
 
 /**
  * Hydration options for controlling merge behavior
@@ -16,67 +16,17 @@ export type HydrationOptions = {
   forceMergeSessionId?: string | null;
 };
 
-/** Deep-merge a field with optional loading state preservation. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mergeWithLoading(draft: any, source: any | undefined): void {
-  if (!source) return;
-  deepMerge(draft, source);
-  mergeLoadingState(draft, source);
-}
-
-/** Merge kanban tasks by ID, keeping the version with the newer updatedAt timestamp. */
-function mergeKanbanTasks(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  draft: Draft<any>,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  source: any[] | undefined,
-): void {
-  if (!source || source.length === 0) return;
-  const draftTasks = draft.tasks as Array<{ id: string; updatedAt?: string }>;
-  const existingById = new Map(draftTasks.map((t) => [t.id, t]));
-
-  for (const incoming of source) {
-    const existing = existingById.get(incoming.id);
-    if (!existing) {
-      draftTasks.push(incoming);
-    } else {
-      const existingTime = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
-      const incomingTime = incoming.updatedAt ? new Date(incoming.updatedAt).getTime() : 0;
-      if (incomingTime >= existingTime) {
-        const idx = draftTasks.findIndex((t) => t.id === incoming.id);
-        if (idx >= 0) draftTasks[idx] = incoming;
-      }
-    }
+/** Hydrate navigation and workspace slices. */
+function hydrateNavigationAndWorkspace(draft: Draft<AppState>, state: Partial<AppState>): void {
+  if (state.workflows) {
+    draft.workflows.activeId = state.workflows.activeId ?? draft.workflows.activeId;
   }
-}
-
-/** Hydrate kanban and workspace slices. */
-function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: Partial<AppState>): void {
-  if (state.kanban) {
-    // Merge tasks by ID with timestamp comparison to avoid overwriting fresher WS data
-    const { tasks, ...kanbanRest } = state.kanban;
-    if (Object.keys(kanbanRest).length > 0) deepMerge(draft.kanban, kanbanRest);
-    mergeKanbanTasks(draft.kanban, tasks);
-  }
-  if (state.kanbanMulti) deepMerge(draft.kanbanMulti, state.kanbanMulti);
-  if (state.workflows) deepMerge(draft.workflows, state.workflows);
   if (state.tasks) deepMerge(draft.tasks, state.tasks);
   if (state.workspaces) deepMerge(draft.workspaces, state.workspaces);
-  if (state.repositories) deepMerge(draft.repositories, state.repositories);
-  if (state.repositoryBranches) deepMerge(draft.repositoryBranches, state.repositoryBranches);
 }
 
 /** Hydrate settings slices, preserving loading states. */
 function hydrateSettings(draft: Draft<AppState>, state: Partial<AppState>): void {
-  if (state.executors) deepMerge(draft.executors, state.executors);
-  if (state.settingsAgents) deepMerge(draft.settingsAgents, state.settingsAgents);
-  if (state.agentDiscovery) deepMerge(draft.agentDiscovery, state.agentDiscovery);
-  mergeWithLoading(draft.availableAgents, state.availableAgents);
-  if (state.agentProfiles) deepMerge(draft.agentProfiles, state.agentProfiles);
-  mergeWithLoading(draft.editors, state.editors);
-  mergeWithLoading(draft.prompts, state.prompts);
-  mergeWithLoading(draft.notificationProviders, state.notificationProviders);
-  if (state.settingsData) deepMerge(draft.settingsData, state.settingsData);
   if (state.userSettings && !draft.userSettings.loaded) {
     deepMerge(draft.userSettings, state.userSettings);
     bridgeSidebarViewsFromUserSettings(draft, state.userSettings);
@@ -166,7 +116,6 @@ function hydrateSession(
   if (state.worktrees) deepMerge(draft.worktrees, state.worktrees);
   if (state.sessionWorktreesBySessionId)
     deepMerge(draft.sessionWorktreesBySessionId, state.sessionWorktreesBySessionId);
-  if (state.pendingModel) deepMerge(draft.pendingModel, state.pendingModel);
   if (state.activeModel) deepMerge(draft.activeModel, state.activeModel);
 }
 
@@ -177,7 +126,6 @@ function hydrateSessionRuntime(
   activeSessionId: string | null,
   forceMergeSessionId: string | null,
 ): void {
-  if (state.terminal) deepMerge(draft.terminal, state.terminal);
   if (state.shell) {
     mergeSessionMap(
       draft.shell.outputs,
@@ -212,7 +160,6 @@ function hydrateSessionRuntime(
   if (state.environmentIdBySessionId) {
     Object.assign(draft.environmentIdBySessionId, state.environmentIdBySessionId);
   }
-  if (state.agents) deepMerge(draft.agents, state.agents);
   if (state.prepareProgress) {
     mergeSessionMap(
       draft.prepareProgress.bySessionId,
@@ -280,7 +227,7 @@ export function hydrateState(
     forceMergeSessionId = null,
   } = options;
 
-  hydrateKanbanAndWorkspace(draft, state);
+  hydrateNavigationAndWorkspace(draft, state);
   hydrateSettings(draft, state);
   hydrateSession(draft, state, activeSessionId, forceMergeSessionId);
 
@@ -305,8 +252,8 @@ export function hydrateState(
 
 /** Hydrate GitHub slices, preserving loading states. */
 function hydrateGitHub(draft: Draft<AppState>, state: Partial<AppState>): void {
-  if (state.githubStatus) mergeWithLoading(draft.githubStatus, state.githubStatus);
-  if (state.taskPRs) deepMerge(draft.taskPRs, state.taskPRs);
-  if (state.prWatches) mergeWithLoading(draft.prWatches, state.prWatches);
-  if (state.reviewWatches) mergeWithLoading(draft.reviewWatches, state.reviewWatches);
+  if (state.pendingPrUrlByTaskId) {
+    deepMerge(draft.pendingPrUrlByTaskId, state.pendingPrUrlByTaskId);
+  }
+  if (state.prFeedbackCache) deepMerge(draft.prFeedbackCache, state.prFeedbackCache);
 }

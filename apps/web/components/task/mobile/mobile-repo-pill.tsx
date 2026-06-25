@@ -3,6 +3,8 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { IconFolder } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskRepositories } from "@/hooks/domains/kanban/use-task-repositories";
+import { useCachedRepositories } from "@/hooks/domains/workspace/use-repository-cache";
 import { MobilePillButton } from "./mobile-pill-button";
 import { MobilePickerSheet } from "./mobile-picker-sheet";
 import { MobileReposSection, useTaskRepoCount } from "./mobile-repos-section";
@@ -23,24 +25,18 @@ function useIsCompactViewport(): boolean {
 }
 
 function useTaskActiveRepoName(taskId: string | null, workspaceId: string | null): string | null {
-  const workspaceRepos = useAppStore((s) =>
-    workspaceId ? (s.repositories.itemsByWorkspaceId[workspaceId] ?? []) : [],
-  );
+  const workspaceRepos = useCachedRepositories(workspaceId);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const activeRepoId = useAppStore((s) =>
     activeSessionId ? (s.taskSessions.items[activeSessionId]?.repository_id ?? null) : null,
   );
-  const taskRepos = useAppStore((s) => {
-    if (!taskId) return undefined;
-    const task = s.kanban.tasks.find((t: { id: string }) => t.id === taskId);
-    return task?.repositories;
-  });
+  const taskRepos = useTaskRepositories(taskId);
   return useMemo(() => {
     if (!activeRepoId) {
       // Fallback to the position-primary task repo when no session is active
       // yet. Match the picker's ordering (mobile-repos-section sorts by
       // position) so the pill label and the first sheet row agree.
-      const sorted = taskRepos ? [...taskRepos].sort((a, b) => a.position - b.position) : [];
+      const sorted = [...taskRepos].sort((a, b) => a.position - b.position);
       const fallback = sorted[0]?.repository_id;
       if (!fallback) return null;
       const repo = workspaceRepos.find((r) => r.id === fallback);

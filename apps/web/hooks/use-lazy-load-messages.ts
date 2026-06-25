@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef } from "react";
-import { listTaskSessionMessages } from "@/lib/api";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
 import { createDebugLogger } from "@/lib/debug/log";
+import { sessionMessagesQueryOptions } from "@/lib/query/query-options";
 
 const debug = createDebugLogger("messages:lazyload");
 
@@ -59,6 +60,7 @@ function logLoadMoreResponse(args: LoadMoreResponseLog) {
 }
 
 export function useLazyLoadMessages(sessionId: string | null) {
+  const queryClient = useQueryClient();
   // Use refs for values that should not trigger callback recreation
   const hasMore = useAppStore((state) =>
     sessionId ? (state.messages.metaBySession[sessionId]?.hasMore ?? false) : false,
@@ -99,10 +101,13 @@ export function useLazyLoadMessages(sessionId: string | null) {
     stateRef.current.isLoading = true;
     setMessagesMetadata(sessionId, { isLoading: true });
     try {
-      const response = await listTaskSessionMessages(sessionId, {
-        limit: 20,
-        before: oldestCursor,
-        sort: "desc",
+      const response = await queryClient.fetchQuery({
+        ...sessionMessagesQueryOptions(sessionId, {
+          limit: 20,
+          before: oldestCursor,
+          sort: "desc",
+        }),
+        staleTime: 0,
       });
       const orderedMessages = [...(response.messages ?? [])].reverse();
       // After reversing, orderedMessages[0] is the oldest message in this batch
@@ -133,7 +138,7 @@ export function useLazyLoadMessages(sessionId: string | null) {
       setMessagesMetadata(sessionId, { isLoading: false });
       return 0;
     }
-  }, [sessionId, prependMessages, setMessagesMetadata]);
+  }, [sessionId, prependMessages, queryClient, setMessagesMetadata]);
 
   return { loadMore, hasMore, isLoading };
 }

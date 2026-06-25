@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
-import { getRoutingPreview } from "@/lib/api/domains/office-extended-api";
+import { officeRoutingPreviewQueryOptions } from "@/lib/query/query-options/office";
 import type { AgentRoutePreview } from "@/lib/state/slices/office/types";
+import { queryErrorMessage } from "./query-error";
 
 export type UseRoutingPreviewResult = {
   agents: AgentRoutePreview[];
@@ -21,29 +23,20 @@ export function useRoutingPreview(workspaceName: string | null): UseRoutingPrevi
       : EMPTY_PREVIEW,
   );
   const setRoutingPreview = useAppStore((s) => s.setRoutingPreview);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [fetched, setFetched] = useState(false);
+  const query = useQuery(officeRoutingPreviewQueryOptions(workspaceName ?? ""));
 
   const refresh = useCallback(async () => {
     if (!workspaceName) return;
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await getRoutingPreview(workspaceName);
-      setRoutingPreview(workspaceName, res.agents ?? []);
-      setFetched(true);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load routing preview");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [workspaceName, setRoutingPreview]);
+    await query.refetch();
+  }, [query, workspaceName]);
 
   useEffect(() => {
-    if (!workspaceName || fetched) return;
-    void refresh();
-  }, [workspaceName, fetched, refresh]);
+    if (!workspaceName || !query.data) return;
+    setRoutingPreview(workspaceName, query.data.agents ?? []);
+  }, [query.data, setRoutingPreview, workspaceName]);
 
-  return { agents, isLoading, error, refresh };
+  const queryAgents = query.data?.agents ?? agents;
+  const error = queryErrorMessage(query.error);
+
+  return { agents: queryAgents, isLoading: query.isPending, error, refresh };
 }

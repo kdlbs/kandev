@@ -1,18 +1,21 @@
 import { useCallback, useEffect, useRef } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
-import { listTaskSessions } from "@/lib/api";
+import { taskSessionsQueryOptions } from "@/lib/query/query-options";
 import type { TaskSession } from "@/lib/types/http";
 
 const EMPTY_SESSIONS: TaskSession[] = [];
 
 export function useTaskSessions(taskId: string | null) {
-  const sessions = useAppStore((state) =>
+  const queryClient = useQueryClient();
+  const sessionsQuery = useQuery(taskSessionsQueryOptions(taskId ?? ""));
+  const storeSessions = useAppStore((state) =>
     taskId ? (state.taskSessionsByTask.itemsByTaskId[taskId] ?? EMPTY_SESSIONS) : EMPTY_SESSIONS,
   );
-  const isLoading = useAppStore((state) =>
+  const storeIsLoading = useAppStore((state) =>
     taskId ? (state.taskSessionsByTask.loadingByTaskId[taskId] ?? false) : false,
   );
-  const isLoaded = useAppStore((state) =>
+  const storeIsLoaded = useAppStore((state) =>
     taskId ? (state.taskSessionsByTask.loadedByTaskId[taskId] ?? false) : false,
   );
   const setTaskSessionsForTask = useAppStore((state) => state.setTaskSessionsForTask);
@@ -20,6 +23,19 @@ export function useTaskSessions(taskId: string | null) {
   const connectionStatus = useAppStore((state) => state.connection.status);
   const pendingForcedReloadRef = useRef(false);
   const pendingForcedReloadWaitersRef = useRef<Array<() => void>>([]);
+  const sessions = taskId ? (sessionsQuery.data?.sessions ?? storeSessions) : EMPTY_SESSIONS;
+  const isLoading = taskId ? sessionsQuery.isFetching || storeIsLoading : false;
+  const isLoaded = taskId ? sessionsQuery.isSuccess || storeIsLoaded : false;
+
+  useEffect(() => {
+    if (!taskId || !sessionsQuery.data) return;
+    setTaskSessionsForTask(taskId, sessionsQuery.data.sessions ?? []);
+  }, [sessionsQuery.data, setTaskSessionsForTask, taskId]);
+
+  useEffect(() => {
+    if (!taskId) return;
+    setTaskSessionsLoading(taskId, sessionsQuery.isFetching);
+  }, [sessionsQuery.isFetching, setTaskSessionsLoading, taskId]);
 
   const loadSessions = useCallback(
     async (force = false) => {
@@ -34,23 +50,19 @@ export function useTaskSessions(taskId: string | null) {
         return;
       }
       if (!force && isLoaded) return;
-      setTaskSessionsLoading(taskId, true);
       try {
-        const response = await listTaskSessions(taskId, { cache: "no-store" });
-        const sessions = response.sessions ?? [];
-        setTaskSessionsForTask(taskId, sessions);
+        await queryClient.fetchQuery({ ...taskSessionsQueryOptions(taskId), staleTime: 0 });
       } catch (error) {
         console.error("Failed to load task sessions:", error);
         if (!force) setTaskSessionsForTask(taskId, []);
       } finally {
-        setTaskSessionsLoading(taskId, false);
         if (force && !pendingForcedReloadRef.current) {
           const waiters = pendingForcedReloadWaitersRef.current.splice(0);
           waiters.forEach((resolve) => resolve());
         }
       }
     },
-    [isLoaded, isLoading, setTaskSessionsForTask, setTaskSessionsLoading, taskId],
+    [isLoaded, isLoading, queryClient, setTaskSessionsForTask, taskId],
   );
 
   useEffect(() => {

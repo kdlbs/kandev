@@ -14,13 +14,11 @@ type Listener = (state: AppState) => void;
 
 /**
  * Minimal in-memory store for the tasks WS handler tests.
- * The handler reads kanban tasks, kanbanMulti snapshots, and tasks.activeTaskId/activeSessionId,
- * and calls setActiveSession; everything else can stay default.
+ * The handler reads task/session UI state and performs client-local cleanup side effects;
+ * everything else can stay default.
  */
 function makeStore(initial: Partial<AppState> = {}) {
   let state = {
-    kanban: { workflowId: "wf1", steps: [], tasks: [] },
-    kanbanMulti: { snapshots: {}, isLoading: false },
     tasks: {
       activeTaskId: null,
       activeSessionId: null,
@@ -116,11 +114,6 @@ describe("task.updated primary-session focus follow", () => {
 
   it("follows focus to the new primary when the user is on the previous primary", () => {
     store = makeStore({
-      kanban: {
-        workflowId: "wf1",
-        steps: [],
-        tasks: [{ id: "t1", primarySessionId: "sess-old", workflowId: "wf1" }],
-      } as unknown as AppState["kanban"],
       tasks: {
         activeTaskId: "t1",
         activeSessionId: "sess-old",
@@ -140,11 +133,6 @@ describe("task.updated primary-session focus follow", () => {
   it("does NOT follow focus when the user is on a different session than the previous primary", () => {
     // User manually selected sess-other; primary swapping shouldn't yank them away.
     store = makeStore({
-      kanban: {
-        workflowId: "wf1",
-        steps: [],
-        tasks: [{ id: "t1", primarySessionId: "sess-old", workflowId: "wf1" }],
-      } as unknown as AppState["kanban"],
       tasks: {
         activeTaskId: "t1",
         activeSessionId: SESS_OTHER,
@@ -162,11 +150,6 @@ describe("task.updated primary-session focus follow", () => {
 
   it("does NOT follow focus when the user is viewing a different task", () => {
     store = makeStore({
-      kanban: {
-        workflowId: "wf1",
-        steps: [],
-        tasks: [{ id: "t1", primarySessionId: "sess-old", workflowId: "wf1" }],
-      } as unknown as AppState["kanban"],
       tasks: {
         activeTaskId: "t2",
         activeSessionId: "sess-old",
@@ -184,11 +167,6 @@ describe("task.updated primary-session focus follow", () => {
 
   it("does NOT call setActiveSessionAuto when the primary did not change", () => {
     store = makeStore({
-      kanban: {
-        workflowId: "wf1",
-        steps: [],
-        tasks: [{ id: "t1", primarySessionId: "sess-old", workflowId: "wf1" }],
-      } as unknown as AppState["kanban"],
       tasks: {
         activeTaskId: "t1",
         activeSessionId: "sess-old",
@@ -220,11 +198,6 @@ describe("task.updated primary-session focus follow (pinning)", () => {
 
   it("does NOT follow focus when the user has pinned the previous primary", () => {
     store = makeStore({
-      kanban: {
-        workflowId: "wf1",
-        steps: [],
-        tasks: [{ id: "t1", primarySessionId: "sess-old", workflowId: "wf1" }],
-      } as unknown as AppState["kanban"],
       tasks: {
         activeTaskId: "t1",
         activeSessionId: "sess-old",
@@ -241,23 +214,9 @@ describe("task.updated primary-session focus follow (pinning)", () => {
   });
 });
 
-describe("task.updated cross-workflow placement", () => {
-  it("removes the task from its old workflow snapshot before upserting into the new one", () => {
-    const task = { id: "t1", title: "Test", workflowId: "wf1", workflowStepId: "step1" };
-    const store = makeStore({
-      kanban: {
-        workflowId: "wf1",
-        steps: [],
-        tasks: [task],
-      } as unknown as AppState["kanban"],
-      kanbanMulti: {
-        isLoading: false,
-        snapshots: {
-          wf1: { workflow: { id: "wf1" }, steps: [], tasks: [task] },
-          wf2: { workflow: { id: "wf2" }, steps: [], tasks: [] },
-        },
-      } as unknown as AppState["kanbanMulti"],
-    });
+describe("task.updated Query-owned placement", () => {
+  it("does not expose legacy kanban mirrors when tasks move workflows", () => {
+    const store = makeStore();
 
     const handlers = registerTasksHandlers(store);
     handlers["task.updated"]!(
@@ -265,11 +224,8 @@ describe("task.updated cross-workflow placement", () => {
     );
 
     const state = store.getState();
-    expect(state.kanban.tasks).toHaveLength(0);
-    expect(state.kanbanMulti.snapshots.wf1.tasks).toHaveLength(0);
-    expect(state.kanbanMulti.snapshots.wf2.tasks).toHaveLength(1);
-    expect(state.kanbanMulti.snapshots.wf2.tasks[0]?.id).toBe("t1");
-    expect(state.kanbanMulti.snapshots.wf2.tasks[0]?.workflowStepId).toBe("step1");
+    expect("kanban" in state).toBe(false);
+    expect("kanbanMulti" in state).toBe(false);
   });
 });
 
@@ -405,11 +361,6 @@ describe("task.updated repository clearing", () => {
 describe("task.deleted cleanup", () => {
   it("removes the deleted task from recent task history", () => {
     const store = makeStore({
-      kanban: {
-        workflowId: "wf1",
-        steps: [],
-        tasks: [{ id: "t1", primarySessionId: "sess-old", workflowId: "wf1" }],
-      } as unknown as AppState["kanban"],
       environmentIdBySessionId: {},
     });
 
@@ -427,11 +378,6 @@ describe("task.deleted cleanup", () => {
 
   it("removes the deleted task from lastSessionByTaskId", () => {
     const store = makeStore({
-      kanban: {
-        workflowId: "wf1",
-        steps: [],
-        tasks: [{ id: "t1", primarySessionId: "sess-old", workflowId: "wf1" }],
-      } as unknown as AppState["kanban"],
       tasks: {
         activeTaskId: null,
         activeSessionId: null,
@@ -447,5 +393,18 @@ describe("task.deleted cleanup", () => {
     const state = store.getState();
     expect(state.tasks.lastSessionByTaskId).not.toHaveProperty("t1");
     expect(state.tasks.lastSessionByTaskId).toHaveProperty("t2", SESS_OTHER);
+  });
+
+  it("does not expose legacy kanban mirrors when deleting tasks", () => {
+    const store = makeStore({
+      environmentIdBySessionId: {},
+    });
+
+    const handlers = registerTasksHandlers(store);
+    handlers["task.deleted"]!(makeDeletedMessage({ task_id: "t1", workflow_id: "wf1" }));
+
+    const state = store.getState();
+    expect("kanban" in state).toBe(false);
+    expect("kanbanMulti" in state).toBe(false);
   });
 });

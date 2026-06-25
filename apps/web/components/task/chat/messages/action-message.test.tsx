@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { StateProvider } from "@/components/state-provider";
+import { makeQueryClient } from "@/lib/query/client";
 import { ActionMessage } from "./action-message";
 import {
   sessionId as toSessionId,
@@ -64,9 +66,12 @@ function renderAction(comment: Message, sessionState?: TaskSessionState) {
   const initialState: Partial<AppState> = sessionState
     ? { taskSessions: { items: { "sess-1": { state: sessionState } as TaskSession } } }
     : {};
+  const queryClient = makeQueryClient();
   return render(<ActionMessage comment={comment} />, {
     wrapper: ({ children }) => (
-      <StateProvider initialState={initialState}>{children}</StateProvider>
+      <QueryClientProvider client={queryClient}>
+        <StateProvider initialState={initialState}>{children}</StateProvider>
+      </QueryClientProvider>
     ),
   });
 }

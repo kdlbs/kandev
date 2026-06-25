@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const listWorkflowStepsMock = vi.fn();
 
@@ -13,9 +15,15 @@ beforeEach(() => {
   listWorkflowStepsMock.mockReset();
 });
 
+function createWrapper() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client }, children);
+}
+
 describe("useWorkflowSteps", () => {
   it("returns empty steps and skips fetching when workflowId is empty", async () => {
-    const { result } = renderHook(() => useWorkflowSteps(""));
+    const { result } = renderHook(() => useWorkflowSteps(""), { wrapper: createWrapper() });
     expect(result.current.steps).toEqual([]);
     expect(result.current.loading).toBe(false);
     // Give any (unwanted) fetch a chance to fire.
@@ -30,7 +38,9 @@ describe("useWorkflowSteps", () => {
         { id: "s1", name: "First", position: 1 },
       ],
     });
-    const { result } = renderHook(() => useWorkflowSteps("wf-1"));
+    const { result } = renderHook(() => useWorkflowSteps("wf-1"), {
+      wrapper: createWrapper(),
+    });
     // loading starts true on initial render with a truthy workflowId so the
     // dropdown can show "Loading steps…" before the fetch lands.
     expect(result.current.loading).toBe(true);
@@ -47,6 +57,7 @@ describe("useWorkflowSteps", () => {
     });
     const { result, rerender } = renderHook(({ id }: { id: string }) => useWorkflowSteps(id), {
       initialProps: { id: "wf-1" },
+      wrapper: createWrapper(),
     });
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.steps).toHaveLength(1);
@@ -71,7 +82,9 @@ describe("useWorkflowSteps", () => {
 
   it("clears steps and stops loading when the fetch rejects", async () => {
     listWorkflowStepsMock.mockRejectedValueOnce(new Error("network down"));
-    const { result } = renderHook(() => useWorkflowSteps("wf-err"));
+    const { result } = renderHook(() => useWorkflowSteps("wf-err"), {
+      wrapper: createWrapper(),
+    });
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.steps).toEqual([]);
   });

@@ -1,46 +1,34 @@
-import { useEffect, useRef } from "react";
-import { fetchWorkflowSnapshot } from "@/lib/api";
-import { snapshotToState } from "@/lib/ssr/mapper";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useEffect, useMemo, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useOptionalAppStore } from "@/components/state-provider";
+import { workflowSnapshotQueryOptions } from "@/lib/query/query-options";
+import { workflowSnapshotToKanbanState } from "@/lib/kanban/snapshot";
 
 export function useWorkflowSnapshot(workflowId: string | null) {
-  const store = useAppStoreApi();
-  const connectionStatus = useAppStore((state) => state.connection.status);
-  const skippedInitialHydratedRef = useRef(false);
+  const connectionStatus = useOptionalAppStore((state) => state.connection.status, "connected");
+  const lastConnectedRef = useRef(connectionStatus === "connected");
+
+  const query = useQuery({
+    ...workflowSnapshotQueryOptions(workflowId ?? ""),
+    enabled: Boolean(workflowId),
+  });
+
+  const snapshotState = useMemo(() => {
+    if (query.data) return workflowSnapshotToKanbanState(query.data);
+    return null;
+  }, [query.data]);
 
   useEffect(() => {
-    if (!workflowId) return;
-    let cancelled = false;
-    const existing = store.getState().kanban;
-    if (
-      !skippedInitialHydratedRef.current &&
-      existing.workflowId === workflowId &&
-      (existing.steps.length > 0 || existing.tasks.length > 0)
-    ) {
-      skippedInitialHydratedRef.current = true;
-      return;
-    }
-    const setLoading = store.getState().kanban.workflowId !== workflowId;
-    if (setLoading) {
-      store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: true } }));
-    }
-    fetchWorkflowSnapshot(workflowId, { cache: "no-store" })
-      .then((snapshot) => {
-        if (cancelled) return;
-        store.getState().hydrate(snapshotToState(snapshot));
-      })
-      .catch((error) => {
-        // Suppress superseded-fetch noise; retry happens on WS reconnect.
-        if (cancelled) return;
-        console.warn("[useWorkflowSnapshot] failed to load snapshot:", error);
-      })
-      .finally(() => {
-        // Only clear the flag this effect raised; skip when cancelled or when a concurrent caller owns it.
-        if (cancelled || !setLoading) return;
-        store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: false } }));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workflowId, store, connectionStatus]);
+    const wasConnected = lastConnectedRef.current;
+    const isConnected = connectionStatus === "connected";
+    lastConnectedRef.current = isConnected;
+    const becameConnected = !wasConnected && isConnected;
+    if (!workflowId || !becameConnected || !query.isFetched) return;
+    void query.refetch();
+    // query.refetch is stable for this observer; including the whole query
+    // object would make the reconnect guard run on unrelated query updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectionStatus, workflowId]);
+
+  return { ...query, snapshotState };
 }

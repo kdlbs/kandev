@@ -1,10 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   useDefaultSelectionsEffect,
   useGitHubUrlErrorEffect,
   useRepositoryAutoSelectEffect,
   useWorkflowAgentProfileEffect,
+  useWorkflowStepsEffect,
 } from "./task-create-dialog-effects";
 import type {
   DialogFormState,
@@ -14,6 +17,12 @@ import type {
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { Repository, Workspace } from "@/lib/types/http";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
+
+const listWorkflowStepsMock = vi.fn();
+
+vi.mock("@/lib/api/domains/workflow-api", () => ({
+  listWorkflowSteps: (...args: unknown[]) => listWorkflowStepsMock(...args),
+}));
 
 // Minimal fake of DialogFormState - the hook destructures only three fields,
 // so the rest can be undefined behind an `as` cast and never read.
@@ -42,6 +51,61 @@ function makeProfile(id: string): AgentProfileOption {
 
 beforeEach(() => {
   localStorage.clear();
+  listWorkflowStepsMock.mockReset();
+});
+
+function createQueryWrapper() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client }, children);
+}
+
+describe("useWorkflowStepsEffect", () => {
+  it("loads fetched steps through the workflow-step query", async () => {
+    listWorkflowStepsMock.mockResolvedValueOnce({
+      steps: [
+        { id: "step-2", name: "Second", position: 2, events: { on_entry: [] } },
+        { id: "step-1", name: "First", position: 1, events: { on_exit: [] } },
+      ],
+    });
+    const setFetchedSteps = vi.fn();
+    const fs = {
+      selectedWorkflowId: "workflow-2",
+      setFetchedSteps,
+    } as unknown as DialogFormState;
+
+    renderHook(() => useWorkflowStepsEffect(fs, "workflow-1"), {
+      wrapper: createQueryWrapper(),
+    });
+
+    await waitFor(() =>
+      expect(setFetchedSteps).toHaveBeenLastCalledWith([
+        { id: "step-1", title: "First", events: { on_exit: [] } },
+        { id: "step-2", title: "Second", events: { on_entry: [] } },
+      ]),
+    );
+    expect(listWorkflowStepsMock).toHaveBeenCalledWith(
+      "workflow-2",
+      expect.objectContaining({
+        init: expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      }),
+    );
+  });
+
+  it("clears fetched steps when the selected workflow is already current", () => {
+    const setFetchedSteps = vi.fn();
+    const fs = {
+      selectedWorkflowId: "workflow-1",
+      setFetchedSteps,
+    } as unknown as DialogFormState;
+
+    renderHook(() => useWorkflowStepsEffect(fs, "workflow-1"), {
+      wrapper: createQueryWrapper(),
+    });
+
+    expect(setFetchedSteps).toHaveBeenCalledWith(null);
+    expect(listWorkflowStepsMock).not.toHaveBeenCalled();
+  });
 });
 
 function makeRepository(id: string): Repository {

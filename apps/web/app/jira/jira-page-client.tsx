@@ -2,12 +2,14 @@
 
 import Link from "@/components/routing/app-link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { IconTicket } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { PageTopbar } from "@/components/page-topbar";
-import { getJiraConfig, listJiraProjects, searchJiraTickets } from "@/lib/api/domains/jira-api";
+import { listJiraProjects, searchJiraTickets } from "@/lib/api/domains/jira-api";
 import type { JiraProject, JiraTicket } from "@/lib/types/jira";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
+import { jiraConfigQueryOptions } from "@/lib/query/query-options";
 import { TicketRow } from "@/components/jira/my-jira/ticket-row";
 import { useJiraSearch } from "@/components/jira/my-jira/use-jira-search";
 import { JiraErrorMessage } from "@/components/jira/jira-ticket-common";
@@ -64,40 +66,39 @@ async function loadUserProjects(): Promise<JiraProject[]> {
 }
 
 function useJiraPageData(workspaceId?: string) {
-  const [loaded, setLoaded] = useState(false);
-  const [configured, setConfigured] = useState(false);
   const [projects, setProjects] = useState<JiraProject[]>([]);
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
+  const configQuery = useQuery({
+    ...jiraConfigQueryOptions(),
+    enabled: Boolean(workspaceId),
+  });
+  const configured = Boolean(configQuery.data?.hasSecret);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      if (!workspaceId) {
-        setLoaded(true);
+      if (!workspaceId || !configured) {
+        setProjects([]);
+        setProjectsLoaded(true);
         return;
       }
       try {
-        const cfg = await getJiraConfig();
-        if (cancelled) return;
-        const ok = !!cfg && cfg.hasSecret;
-        setConfigured(ok);
-        if (ok) {
-          try {
-            const list = await loadUserProjects();
-            if (!cancelled) setProjects(list);
-          } catch {
-            // Non-fatal: pill will just show empty list. Users can still filter by other dims.
-          }
-        }
+        setProjectsLoaded(false);
+        const list = await loadUserProjects();
+        if (!cancelled) setProjects(list);
+      } catch {
+        // Non-fatal: pill will just show empty list. Users can still filter by other dims.
       } finally {
-        if (!cancelled) setLoaded(true);
+        if (!cancelled) setProjectsLoaded(true);
       }
     }
     void load();
     return () => {
       cancelled = true;
     };
-  }, [workspaceId]);
+  }, [workspaceId, configured]);
 
+  const loaded = !workspaceId || (configQuery.isFetched && (!configured || projectsLoaded));
   return { loaded, configured, projects };
 }
 

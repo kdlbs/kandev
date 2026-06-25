@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { IconPlus, IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -8,7 +9,7 @@ import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Textarea } from "@kandev/ui/textarea";
 import { createSecret } from "@/lib/api/domains/secrets-api";
-import { useAppStore } from "@/components/state-provider";
+import { qk } from "@/lib/query/keys";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 
 const NONE_VALUE = "__none__";
@@ -81,7 +82,7 @@ function InlineCreateForm({
   onCreated: (item: SecretListItem) => void;
   onCancel: () => void;
 }) {
-  const addSecret = useAppStore((state) => state.addSecret);
+  const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
@@ -93,13 +94,16 @@ function InlineCreateForm({
     setError(null);
     try {
       const item = await createSecret({ name: name.trim(), value: value.trim() });
-      addSecret(item);
+      queryClient.setQueryData<SecretListItem[]>(qk.settings.secrets(), (prev) => [
+        ...(prev ?? []).filter((secret) => secret.id !== item.id),
+        item,
+      ]);
       onCreated(item);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create secret");
       setSaving(false);
     }
-  }, [name, value, addSecret, onCreated]);
+  }, [name, value, onCreated, queryClient]);
 
   return (
     <div className="rounded-md border p-3 space-y-3 bg-muted/30">

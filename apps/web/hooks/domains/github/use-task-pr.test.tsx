@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createElement, type ReactNode } from "react";
+import { createElement, type ReactNode, useState } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 
@@ -18,7 +19,14 @@ vi.mock("@/lib/api/domains/github-api", () => ({
 import { useTaskPR } from "./use-task-pr";
 
 function wrapper({ children }: { children: ReactNode }) {
-  return createElement(StateProvider, null, children);
+  const [queryClient] = useState(
+    () => new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+  );
+  return createElement(
+    QueryClientProvider,
+    { client: queryClient },
+    createElement(StateProvider, null, children),
+  );
 }
 
 beforeEach(() => {

@@ -647,6 +647,12 @@ export class ApiClient {
     sidebar_views?: unknown[];
     kanban_view_mode?: string;
     voice_mode?: VoiceModeSettings;
+    task_create_last_used?: {
+      repository_id?: string;
+      branch?: string;
+      agent_profile_id?: string;
+      executor_profile_id?: string;
+    };
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);
   }
@@ -741,6 +747,30 @@ export class ApiClient {
     profileId: string,
   ): Promise<{ profile_id: string; enabled: boolean; servers: Record<string, unknown> }> {
     return this.request("GET", `/api/v1/agent-profiles/${profileId}/mcp-config`);
+  }
+
+  async getWsSent(
+    connectionId: string,
+    sinceSeq?: number,
+    sessionId?: string,
+  ): Promise<{
+    connection_id: string;
+    session_id?: string;
+    events: Array<{
+      connection_seq: number;
+      session_seq?: number;
+      session_id?: string;
+      type: string;
+      action: string;
+      sent_at: string;
+    }>;
+    max_connection_seq?: number;
+    max_session_seq?: number;
+  }> {
+    const params = new URLSearchParams({ connection_id: connectionId });
+    if (sinceSeq !== undefined) params.set("since_seq", String(sinceSeq));
+    if (sessionId) params.set("session_id", sessionId);
+    return this.request("GET", `/api/v1/_test/ws-sent?${params.toString()}`);
   }
 
   // --- E2E Test Reset ---
@@ -1142,6 +1172,7 @@ export class ApiClient {
   async listSessionMessages(sessionId: string): Promise<{
     messages: Array<{
       id: string;
+      type: string;
       content: string;
       author_type: string;
       raw_content?: string;
@@ -1176,7 +1207,7 @@ export class ApiClient {
   }
 
   async setPrimarySession(sessionId: string): Promise<void> {
-    await this.request("POST", `/api/v1/task-sessions/${sessionId}/set-primary`);
+    await this.wsRequest("session.set_primary", { session_id: sessionId }, 15_000);
   }
 
   async deleteSession(sessionId: string): Promise<void> {

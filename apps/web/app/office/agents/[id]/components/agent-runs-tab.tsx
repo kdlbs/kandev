@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { IconClock, IconRun } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { useAppStore } from "@/components/state-provider";
 import { useOfficeRefetch } from "@/hooks/use-office-refetch";
-import { listRuns } from "@/lib/api/domains/office-api";
+import { officeRunsQueryOptions } from "@/lib/query/query-options";
 import type { AgentProfile, Run } from "@/lib/state/slices/office/types";
 import { timeAgo } from "@/lib/utils/time";
 
@@ -56,33 +57,19 @@ function CancelReasonBadge({ reason }: { reason: string }) {
 
 export function AgentRunsTab({ agent }: AgentRunsTabProps) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const [runs, setRuns] = useState<Run[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const fetchRuns = useCallback(async () => {
-    if (!workspaceId) return;
-    try {
-      const res = await listRuns(workspaceId);
-      const agentRuns = (res.runs ?? []).filter((w) => w.agent_profile_id === agent.id);
-      setRuns(agentRuns);
-    } catch {
-      // Silently handle - empty state will show
-    } finally {
-      setLoading(false);
-    }
-  }, [workspaceId, agent.id]);
-
-  useEffect(() => {
-    void fetchRuns();
-  }, [fetchRuns]);
+  const runsQuery = useQuery(officeRunsQueryOptions(workspaceId ?? ""));
+  const runs: Run[] = useMemo(
+    () => (runsQuery.data?.runs ?? []).filter((run) => run.agent_profile_id === agent.id),
+    [runsQuery.data, agent.id],
+  );
 
   // Refresh runs reactively when runs change. The office WS handler
   // triggers "runs" on office.run.queued and the agent-session
   // path triggers "agents" on session.state_changed.
-  useOfficeRefetch("runs", fetchRuns);
-  useOfficeRefetch("agents", fetchRuns);
+  useOfficeRefetch("runs", () => void runsQuery.refetch());
+  useOfficeRefetch("agents", () => void runsQuery.refetch());
 
-  if (loading) {
+  if (runsQuery.isPending) {
     return (
       <div className="flex items-center justify-center py-12">
         <p className="text-sm text-muted-foreground">Loading runs...</p>

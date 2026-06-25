@@ -1,4 +1,4 @@
-import type { Message, TaskSession, Turn, TaskPlan, TaskPlanRevision } from "@/lib/types/http";
+import type { Message, TaskSession, Turn, TaskPlan } from "@/lib/types/http";
 
 export type MessagesState = {
   bySession: Record<string, Message[]>;
@@ -54,10 +54,6 @@ export type SessionWorktreesState = {
   itemsBySessionId: Record<string, string[]>;
 };
 
-export type PendingModelState = {
-  bySessionId: Record<string, string>;
-};
-
 export type ActiveModelState = {
   bySessionId: Record<string, string>;
 };
@@ -71,10 +67,6 @@ export type TaskPlansState = {
   loadingByTaskId: Record<string, boolean>;
   loadedByTaskId: Record<string, boolean>;
   savingByTaskId: Record<string, boolean>;
-  revisionsByTaskId: Record<string, TaskPlanRevision[]>;
-  revisionsLoadingByTaskId: Record<string, boolean>;
-  revisionsLoadedByTaskId: Record<string, boolean>;
-  revisionContentCache: Record<string, string>; // revisionId -> content
   // Phase 6: preview + compare state
   previewRevisionIdByTaskId: Record<string, string | null>;
   comparePairByTaskId: Record<string, ComparePair>;
@@ -114,24 +106,10 @@ export type QueuedMessage = {
   queued_by?: string;
 };
 
-/** Capacity info kept alongside the entry list. */
-export type QueueMeta = {
-  count: number;
-  max: number;
-};
-
 export type QueueStatus = {
   entries: QueuedMessage[];
   count: number;
   max: number;
-};
-
-export type QueueState = {
-  /** Ordered list of pending entries per session (FIFO; head at index 0). */
-  bySessionId: Record<string, QueuedMessage[]>;
-  /** Per-session capacity snapshot from the latest server response. */
-  metaBySessionId: Record<string, QueueMeta>;
-  isLoading: Record<string, boolean>;
 };
 
 export type SessionSliceState = {
@@ -142,10 +120,8 @@ export type SessionSliceState = {
   sessionAgentctl: SessionAgentctlState;
   worktrees: WorktreesState;
   sessionWorktreesBySessionId: SessionWorktreesState;
-  pendingModel: PendingModelState;
   activeModel: ActiveModelState;
   taskPlans: TaskPlansState;
-  queue: QueueState;
 };
 
 export type SessionSliceActions = {
@@ -193,29 +169,16 @@ export type SessionSliceActions = {
   setSessionAgentctlStatus: (sessionId: string, status: SessionAgentctlStatus) => void;
   setWorktree: (worktree: Worktree) => void;
   setSessionWorktrees: (sessionId: string, worktreeIds: string[]) => void;
-  setPendingModel: (sessionId: string, modelId: string) => void;
-  clearPendingModel: (sessionId: string) => void;
   setActiveModel: (sessionId: string, modelId: string) => void;
   // Task plan actions
   setTaskPlan: (taskId: string, plan: TaskPlan | null) => void;
   setTaskPlanLoading: (taskId: string, loading: boolean) => void;
   setTaskPlanSaving: (taskId: string, saving: boolean) => void;
-  clearTaskPlan: (taskId: string) => void;
   markTaskPlanSeen: (taskId: string) => void;
-  // Revision actions
-  setPlanRevisions: (taskId: string, revisions: TaskPlanRevision[]) => void;
-  upsertPlanRevision: (taskId: string, revision: TaskPlanRevision) => void;
-  setPlanRevisionsLoading: (taskId: string, loading: boolean) => void;
-  cachePlanRevisionContent: (revisionId: string, content: string) => void;
   // Phase 6: preview + compare actions
   setPreviewRevision: (taskId: string, revisionId: string | null) => void;
   toggleComparePair: (taskId: string, revisionId: string) => void;
   clearComparePair: (taskId: string) => void;
-  // Queue actions
-  setQueueEntries: (sessionId: string, entries: QueuedMessage[], meta: QueueMeta) => void;
-  removeQueueEntry: (sessionId: string, entryId: string) => void;
-  setQueueLoading: (sessionId: string, loading: boolean) => void;
-  clearQueueStatus: (sessionId: string) => void;
 };
 
 export type SessionSlice = SessionSliceState & SessionSliceActions;

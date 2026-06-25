@@ -14,9 +14,13 @@ import {
 } from "@/lib/state/dockview-store";
 import { INTENT_PR_REVIEW } from "@/lib/state/layout-manager";
 import { replaceTaskUrl } from "@/lib/links";
+import { getBrowserQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
+import { fetchTaskSession } from "@/lib/api/domains/session-api";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import { sessionHasRoutingInfo } from "@/lib/session/task-session-navigation";
 
 const debug = createDebugLogger("dockview:task-select");
 let taskSelectionSequence = 0;
@@ -70,6 +74,33 @@ export function resolvePreferredSessionId(args: {
   const lastTaskId = taskSessionsById[last]?.task_id;
   if (lastTaskId && lastTaskId !== taskId) return primarySessionId;
   return last;
+}
+
+async function hydrateSessionRoutingInfo(
+  store: StoreApi<AppState>,
+  sessionId: string,
+  session: TaskSession | undefined,
+): Promise<void> {
+  if (sessionHasRoutingInfo(session)) return;
+  try {
+    const response = await fetchTaskSession(sessionId, { cache: "no-store" });
+    if (!response.session) return;
+    store.getState().setTaskSession(response.session);
+    getBrowserQueryClient().setQueryData(qk.taskSession.byId(sessionId), response.session);
+  } catch (error) {
+    console.warn("[task-select] failed to hydrate session routing info", error);
+  }
+}
+
+async function resolveLoadedSessionIdForSwitch(
+  store: StoreApi<AppState>,
+  sessions: TaskSession[],
+  preferredSessionId: string,
+): Promise<string> {
+  const sessionId = resolveLoadedSessionId(sessions, preferredSessionId);
+  const session = sessions.find((item) => item.id === sessionId);
+  await hydrateSessionRoutingInfo(store, sessionId, session);
+  return sessionId;
 }
 
 export function buildSwitchToSession(
@@ -150,7 +181,10 @@ export async function prepareAndSwitchTask(
       // switchEnvLayout would call saveOutgoingEnv(envA) a second time and
       // overwrite envA's correctly-persisted layout with the default.
       switchToSession(taskId, resp.session_id, null);
-      if ((store.getState().taskPRs.byTaskId[taskId]?.length ?? 0) > 0) {
+      const taskPRs = getBrowserQueryClient().getQueryData<unknown>(
+        qk.integrations.github.taskPr(taskId),
+      );
+      if (Array.isArray(taskPRs) && taskPRs.length > 0) {
         const { api, buildDefaultLayout } = useDockviewStore.getState();
         if (api) buildDefaultLayout(api, INTENT_PR_REVIEW);
       }
@@ -211,8 +245,9 @@ export function selectTaskWithLayout(params: {
       environmentIdBySessionId: state.environmentIdBySessionId,
       taskSessionsById: state.taskSessions.items,
     });
-    const hasEnvId = !!state.environmentIdBySessionId[targetSessionId];
-    if (hasEnvId) {
+    const hasEnvId = Boolean(state.environmentIdBySessionId[targetSessionId]);
+    const hasRoutingInfo = sessionHasRoutingInfo(state.taskSessions.items[targetSessionId]);
+    if (hasEnvId && hasRoutingInfo) {
       disposeSelectionGuard();
       switchToSession(taskId, targetSessionId, oldSessionId);
       loadTaskSessionsForTask(taskId);
@@ -220,9 +255,11 @@ export function selectTaskWithLayout(params: {
       return;
     }
     void loadTaskSessionsForTask(taskId)
-      .then((sessions) => {
+      .then(async (sessions) => {
         if (selectionWasSuperseded()) return;
-        switchToSession(taskId, resolveLoadedSessionId(sessions, targetSessionId), oldSessionId);
+        const sessionId = await resolveLoadedSessionIdForSwitch(store, sessions, targetSessionId);
+        if (selectionWasSuperseded()) return;
+        switchToSession(taskId, sessionId, oldSessionId);
         replaceTaskUrl(taskId);
       })
       .finally(disposeSelectionGuard)
@@ -237,6 +274,12 @@ export function selectTaskWithLayout(params: {
       const primary = sessions.find((s) => s.is_primary);
       const sessionId = primary?.id ?? sessions[0]?.id ?? null;
       if (sessionId) {
+        await hydrateSessionRoutingInfo(
+          store,
+          sessionId,
+          sessions.find((item) => item.id === sessionId),
+        );
+        if (selectionWasSuperseded()) return;
         switchToSession(taskId, sessionId, currentOldSessionId);
         replaceTaskUrl(taskId);
         return;

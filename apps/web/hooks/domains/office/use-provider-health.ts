@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
-import { getProviderHealth } from "@/lib/api/domains/office-extended-api";
+import { officeProviderHealthQueryOptions } from "@/lib/query/query-options/office";
 import type { ProviderHealth } from "@/lib/state/slices/office/types";
+import { queryErrorMessage } from "./query-error";
 
 export type UseProviderHealthResult = {
   health: ProviderHealth[];
@@ -21,29 +23,20 @@ export function useProviderHealth(workspaceName: string | null): UseProviderHeal
       : EMPTY_HEALTH,
   );
   const setProviderHealth = useAppStore((s) => s.setProviderHealth);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [fetched, setFetched] = useState(false);
+  const query = useQuery(officeProviderHealthQueryOptions(workspaceName ?? ""));
 
   const refresh = useCallback(async () => {
     if (!workspaceName) return;
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await getProviderHealth(workspaceName);
-      setProviderHealth(workspaceName, res.health ?? []);
-      setFetched(true);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load provider health");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [workspaceName, setProviderHealth]);
+    await query.refetch();
+  }, [query, workspaceName]);
 
   useEffect(() => {
-    if (!workspaceName || fetched) return;
-    void refresh();
-  }, [workspaceName, fetched, refresh]);
+    if (!workspaceName || !query.data) return;
+    setProviderHealth(workspaceName, query.data.health ?? []);
+  }, [query.data, setProviderHealth, workspaceName]);
 
-  return { health, isLoading, error, refresh };
+  const queryHealth = query.data?.health ?? health;
+  const error = queryErrorMessage(query.error);
+
+  return { health: queryHealth, isLoading: query.isPending, error, refresh };
 }

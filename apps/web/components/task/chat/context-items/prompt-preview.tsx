@@ -1,6 +1,6 @@
 "use client";
 
-import { useAppStore } from "@/components/state-provider";
+import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 
 type PromptPreviewProps = {
   content: string | null;
@@ -28,10 +28,8 @@ type PromptPreviewFromStoreProps = {
 };
 
 export function PromptPreviewFromStore({ promptId }: PromptPreviewFromStoreProps) {
-  const content = useAppStore((state) => {
-    const prompt = state.prompts.items.find((p) => p.id === promptId);
-    return prompt?.content ?? null;
-  });
+  const { prompts } = useCustomPrompts();
+  const content = prompts.find((p) => p.id === promptId)?.content ?? null;
 
   return <PromptPreview content={content} />;
 }

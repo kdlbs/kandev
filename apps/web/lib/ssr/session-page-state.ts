@@ -9,11 +9,11 @@ import {
   listTaskSessions,
   listWorkspaces,
 } from "@/lib/api";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import { listSessionTurns } from "@/lib/api/domains/session-api";
 import { fetchTerminals } from "@/lib/api/domains/user-shell-api";
 import type {
   ListMessagesResponse,
+  RepositoryScript,
   Task,
   TaskSession,
   UserSettingsResponse,
@@ -24,7 +24,13 @@ import { snapshotToState, taskToState } from "@/lib/ssr/mapper";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { prepareResultToSessionState } from "@/lib/state/slices/session-runtime/prepare-result";
 import type { SessionPrepareState } from "@/lib/state/slices/session-runtime/types";
-import type { AppState } from "@/lib/state/store";
+import type { QuerySeedInitialState } from "@/lib/query/seed";
+
+export type SessionPageInitialState = QuerySeedInitialState & {
+  repositoryScripts?: {
+    itemsByRepositoryId?: Record<string, RepositoryScript[]>;
+  };
+};
 
 function buildWorktreeState(allSessions: TaskSession[]) {
   const sessionsWithWorktrees = allSessions.filter((s) => s.worktree_id);
@@ -88,13 +94,12 @@ function buildSessionPageState(p: BuildSessionPageStateParams) {
     ...buildWorktreeState(allSessions),
     ...buildPrepareProgressState(allSessions),
     settingsAgents: { items: agents.agents },
-    settingsData: { agentsLoaded: true, executorsLoaded: false },
     userSettings: mapUserSettingsResponse(p.userSettingsResponse),
   };
 }
 
 function buildResourceState(p: BuildSessionPageStateParams) {
-  const { task, agents, repositories, workspaces, workflows } = p;
+  const { task, repositories, workspaces, workflows } = p;
   const repositoryId = task.repositories?.[0]?.repository_id;
   const repository = repositories.find((r) => r.id === repositoryId);
   const scripts = repository?.scripts ?? [];
@@ -113,34 +118,18 @@ function buildResourceState(p: BuildSessionPageStateParams) {
       })),
       activeId: task.workspace_id,
     },
-    // Don't write activeId — null means "All Workflows"; task context lives in kanban.workflowId.
-    workflows: {
-      items: workflows.map((w) => ({
-        id: w.id as string,
-        workspaceId: w.workspace_id as string,
-        name: w.name,
-        hidden: w.hidden,
-        style: w.style,
-      })),
-    } as Partial<AppState>["workflows"],
+    // Don't write activeId — null means "All Workflows"; task context lives in the seeded snapshot.
+    workflowLists: {
+      itemsByWorkspaceId: { [task.workspace_id]: workflows },
+    },
     repositories: {
       itemsByWorkspaceId: { [task.workspace_id]: repositories },
-      loadingByWorkspaceId: { [task.workspace_id]: false },
-      loadedByWorkspaceId: { [task.workspace_id]: true },
     },
     repositoryScripts: repositoryId
       ? {
           itemsByRepositoryId: { [repositoryId]: scripts },
-          loadingByRepositoryId: { [repositoryId]: false },
-          loadedByRepositoryId: { [repositoryId]: true },
         }
-      : { itemsByRepositoryId: {}, loadingByRepositoryId: {}, loadedByRepositoryId: {} },
-    agentProfiles: {
-      items: agents.agents.flatMap((agent) =>
-        agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
-      ),
-      version: 0,
-    },
+      : { itemsByRepositoryId: {} },
   };
 }
 
@@ -189,7 +178,7 @@ function buildPrepareProgressState(allSessions: TaskSession[]) {
 export type FetchedSessionData = {
   task: Task;
   sessionId: string | null;
-  initialState: ReturnType<typeof taskToState>;
+  initialState: SessionPageInitialState;
   initialTerminals: Terminal[];
 };
 

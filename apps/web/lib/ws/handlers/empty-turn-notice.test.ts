@@ -1,11 +1,14 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   parseSlashCommand,
   isKnownCommand,
   emptyTurnNoticeText,
   computeEmptyTurnNotice,
+  maybeEmitEmptyTurnNotice,
   type EmptyTurnNoticeInput,
 } from "./empty-turn-notice";
+import { getBrowserQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
 import type { AvailableCommand } from "@/lib/state/slices/session-runtime/types";
 import type { Message } from "@/lib/types/http";
 import { sessionId, taskId } from "@/lib/types/http";
@@ -178,5 +181,37 @@ describe("computeEmptyTurnNotice", () => {
       messages: [userMessage("turn-1", "spawn a subagent"), subagentMsg],
     });
     expect(computeEmptyTurnNotice(input)).toBeNull();
+  });
+});
+
+describe("maybeEmitEmptyTurnNotice", () => {
+  it("reads advertised slash commands from the TanStack Query cache", () => {
+    const queryClient = getBrowserQueryClient();
+    queryClient.clear();
+    queryClient.setQueryData(qk.sessionRuntime.availableCommands("sess-1"), [{ name: "pr-fixup" }]);
+    const addMessage = vi.fn();
+    const store = {
+      getState: () => ({
+        quickChat: { sessions: [] },
+        configChat: { sessions: [] },
+        messages: { bySession: { "sess-1": [userMessage("turn-1", "/pr-fixup")] } },
+        addMessage,
+      }),
+    };
+
+    maybeEmitEmptyTurnNotice(
+      store as never,
+      {
+        id: "turn-1",
+        session_id: "sess-1",
+        task_id: "task-1",
+        had_output: false,
+      } as never,
+      "2026-05-30T00:00:01Z",
+    );
+
+    expect(addMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("ran but produced no output") }),
+    );
   });
 });

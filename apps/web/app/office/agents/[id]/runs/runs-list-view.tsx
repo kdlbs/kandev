@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "@/components/routing/app-link";
 import {
   IconClock,
@@ -13,8 +14,9 @@ import {
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
+import { qk } from "@/lib/query/keys";
+import { officeAgentRunsInfiniteQueryOptions } from "@/lib/query/query-options/office";
 import {
-  listAgentRuns,
   type AgentRunsListPage,
   type AgentRunSummary,
 } from "@/lib/api/domains/office-extended-api";
@@ -54,34 +56,32 @@ function formatReason(reason: string): string {
  * preserved when a new page is appended.
  */
 export function RunsListView({ initial, agentId }: Props) {
-  const [pages, setPages] = useState<AgentRunsListPage[]>([initial]);
-  const [loading, setLoading] = useState(false);
+  const queryClient = useQueryClient();
+  const runsQuery = useInfiniteQuery(officeAgentRunsInfiniteQueryOptions(agentId, { limit: 25 }));
   const containerRef = useRef<HTMLDivElement | null>(null);
 
+  useEffect(() => {
+    queryClient.setQueryData(qk.office.agentRuns(agentId, { limit: 25 }), {
+      pages: [initial],
+      pageParams: [undefined],
+    });
+  }, [agentId, initial, queryClient]);
+
+  const pages = runsQuery.data?.pages ?? [initial];
   const lastPage = pages[pages.length - 1];
   const runs = pages.flatMap((p) => p.runs);
   const hasMore = Boolean(lastPage?.next_cursor);
 
   const loadMore = useCallback(async () => {
-    if (!hasMore || loading) return;
+    if (!hasMore || runsQuery.isFetchingNextPage) return;
     const scrollY = containerRef.current?.scrollTop ?? 0;
-    setLoading(true);
-    try {
-      const next = await listAgentRuns(agentId, {
-        cursor: lastPage.next_cursor,
-        cursorId: lastPage.next_id,
-        limit: 25,
-      });
-      setPages((prev) => [...prev, next]);
-      requestAnimationFrame(() => {
-        if (containerRef.current) {
-          containerRef.current.scrollTop = scrollY;
-        }
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [agentId, hasMore, lastPage, loading]);
+    await runsQuery.fetchNextPage();
+    requestAnimationFrame(() => {
+      if (containerRef.current) {
+        containerRef.current.scrollTop = scrollY;
+      }
+    });
+  }, [hasMore, runsQuery]);
 
   if (runs.length === 0) {
     return (
@@ -114,7 +114,11 @@ export function RunsListView({ initial, agentId }: Props) {
       {runs.map((run) => (
         <RunRow key={run.id} run={run} agentId={agentId} />
       ))}
-      <LoadMoreFooter hasMore={hasMore} loading={loading} onLoadMore={loadMore} />
+      <LoadMoreFooter
+        hasMore={hasMore}
+        loading={runsQuery.isFetchingNextPage}
+        onLoadMore={loadMore}
+      />
     </div>
   );
 }

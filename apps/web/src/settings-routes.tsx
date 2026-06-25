@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import AgentsSettingsPage from "@/app/settings/agents/page";
 import AgentSetupPage from "@/app/settings/agents/[agentId]/page";
@@ -65,11 +66,11 @@ import {
 } from "@/lib/api/domains/settings-api";
 import { listWorkflowTemplates } from "@/lib/api/domains/workflow-api";
 import { listRepositories, listWorkspaces } from "@/lib/api/domains/workspace-api";
+import { seedQueryClientFromInitialState, type QuerySeedInitialState } from "@/lib/query/seed";
 import { useRouter } from "@/lib/routing/client-router";
 import { mapWorkspaceItem } from "@/lib/routing/route-bootstrap";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type { AppState } from "@/lib/state/store";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type {
   ListWorkspacesResponse,
   Repository,
@@ -318,6 +319,7 @@ function SettingsRedirect({ to }: { to: string }) {
 
 function SettingsRouteBootstrap({ pathname }: { pathname: string }) {
   const store = useAppStoreApi();
+  const queryClient = useQueryClient();
   const bootstrappedRef = useRef(false);
 
   useEffect(() => {
@@ -328,7 +330,7 @@ function SettingsRouteBootstrap({ pathname }: { pathname: string }) {
     async function bootstrap() {
       const initialState = await loadSettingsInitialState(pathname);
       if (!cancelled && Object.keys(initialState).length > 0) {
-        store.getState().hydrate(initialState);
+        applySettingsInitialState(store, queryClient, initialState);
       }
     }
 
@@ -337,12 +339,21 @@ function SettingsRouteBootstrap({ pathname }: { pathname: string }) {
       cancelled = true;
       bootstrappedRef.current = false;
     };
-  }, [pathname, store]);
+  }, [pathname, queryClient, store]);
 
   return null;
 }
 
-async function loadSettingsInitialState(pathname: string): Promise<Partial<AppState>> {
+export function applySettingsInitialState(
+  store: { getState: () => { hydrate: AppState["hydrate"] } },
+  queryClient: QueryClient,
+  initialState: QuerySeedInitialState,
+) {
+  store.getState().hydrate(initialState as Partial<AppState>);
+  seedQueryClientFromInitialState(queryClient, initialState);
+}
+
+async function loadSettingsInitialState(pathname: string): Promise<QuerySeedInitialState> {
   const [workspaces, executors, agents, discovery, available, userSettingsResponse] =
     await Promise.all([
       listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
@@ -374,7 +385,7 @@ export function buildSettingsInitialStateForRoute({
   availableAgents,
   availableTools,
   userSettingsResponse,
-}: SettingsInitialStateData): Partial<AppState> {
+}: SettingsInitialStateData): QuerySeedInitialState {
   const workspaceItems = workspaces.map(mapWorkspaceItem);
   const activeWorkspaceId = resolveSettingsActiveWorkspaceId(
     workspaceItems,
@@ -386,12 +397,6 @@ export function buildSettingsInitialStateForRoute({
   return {
     workspaces: { items: workspaceItems, activeId: activeWorkspaceId },
     executors: { items: executors },
-    agentProfiles: {
-      items: agents.flatMap((agent) =>
-        agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
-      ),
-      version: 0,
-    },
     settingsAgents: { items: agents },
     agentDiscovery: { items: discoveryAgents, loading: false, loaded: true },
     availableAgents: {
@@ -400,7 +405,6 @@ export function buildSettingsInitialStateForRoute({
       loading: false,
       loaded: true,
     },
-    settingsData: { executorsLoaded: true, agentsLoaded: true },
     ...(mappedUserSettings.loaded
       ? {
           userSettings: {

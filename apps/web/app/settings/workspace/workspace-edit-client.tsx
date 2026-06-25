@@ -26,6 +26,7 @@ type Workspace = WorkspaceState["items"][number];
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
 
 type WorkspaceEditClientProps = {
@@ -412,8 +413,7 @@ function useWorkspaceEditForm(workspace: Workspace) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
-  const executors = useAppStore((state) => state.executors.items);
-  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
+  const { executors, agentProfiles } = useSettingsData(true);
   const workspaces = useAppStore((state) => state.workspaces.items);
   const setWorkspaces = useAppStore((state) => state.setWorkspaces);
 

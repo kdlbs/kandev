@@ -69,15 +69,14 @@ export function registerWorkspacesHandlers(store: StoreApi<AppState>): WsHandler
           state.workspaces.activeId === message.payload.id
             ? (items[0]?.id ?? null)
             : state.workspaces.activeId;
-        const clearBoards = state.workspaces.activeId === message.payload.id;
+        const clearActiveWorkflow = state.workspaces.activeId === message.payload.id;
         return {
           ...state,
           workspaces: {
             items,
             activeId,
           },
-          workflows: clearBoards ? { items: [], activeId: null } : state.workflows,
-          kanban: clearBoards ? { workflowId: null, steps: [], tasks: [] } : state.kanban,
+          workflows: clearActiveWorkflow ? { activeId: null } : state.workflows,
         };
       });
     },

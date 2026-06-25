@@ -1,6 +1,5 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
 import Link from "@/components/routing/app-link";
 import {
   IconRobot,
@@ -12,7 +11,10 @@ import {
 import { Card } from "@kandev/ui/card";
 import { useAppStore } from "@/components/state-provider";
 import { useOfficeRefetch } from "@/hooks/use-office-refetch";
-import * as officeApi from "@/lib/api/domains/office-api";
+import {
+  useOfficeAgentsData,
+  useOfficeDashboardData,
+} from "@/hooks/domains/office/use-office-data";
 import { normalizeActivityEntry } from "@/lib/api/domains/office-activity-normalize";
 import { StatusIcon } from "./tasks/status-icon";
 import type { DashboardData, AgentProfile, RecentTask } from "@/lib/state/slices/office/types";
@@ -212,62 +214,44 @@ function SubscriptionUsageCard({ agents }: { agents: AgentProfile[] }) {
   );
 }
 
+function subscriptionQuotaState(agents: AgentProfile[]) {
+  const topUtilization = maxUtilization(agents);
+  return {
+    label: topUtilization > 0 ? `${Math.round(topUtilization)}%` : "—",
+    visible: agents.some((a) => a.billingType === "subscription"),
+  };
+}
+
 export function OfficePageClient({ initialDashboard }: OfficePageClientProps) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const dashboard = useAppStore((s) => s.office.dashboard);
-  const agents = useAppStore((s) => s.office.agentProfiles);
-  const setDashboard = useAppStore((s) => s.setDashboard);
-  const dashboardWorkspaceIdRef = useRef<string | null>(
-    (dashboard || initialDashboard) && workspaceId ? workspaceId : null,
-  );
-
-  // Hydrate from SSR exactly once on first mount; subsequent updates flow
-  // through the WS-driven refetch below. Skipping the unconditional mount
-  // fetch removes a redundant round-trip when SSR data is already in the
-  // store (Stream G of office optimization).
-  useEffect(() => {
-    if (initialDashboard) {
-      setDashboard(initialDashboard);
-    }
-  }, [initialDashboard, setDashboard]);
-
-  const fetchDashboard = useCallback(async () => {
-    if (!workspaceId) return;
-    const data = await officeApi.getDashboard(workspaceId);
-    setDashboard(data);
-    dashboardWorkspaceIdRef.current = workspaceId;
-  }, [workspaceId, setDashboard]);
-
-  useEffect(() => {
-    if (!workspaceId || dashboardWorkspaceIdRef.current === workspaceId) return;
-    dashboardWorkspaceIdRef.current = workspaceId;
-    void fetchDashboard().catch(() => {
-      if (dashboardWorkspaceIdRef.current === workspaceId) {
-        dashboardWorkspaceIdRef.current = null;
-      }
-    });
-  }, [fetchDashboard, workspaceId]);
+  const dashboardStore = useAppStore((s) => s.office.dashboard);
+  const agentsStore = useAppStore((s) => s.office.agentProfiles);
+  const dashboardQuery = useOfficeDashboardData(workspaceId, initialDashboard);
+  const agentsQuery = useOfficeAgentsData(workspaceId);
 
   // Refetch dashboard on any office event that affects metrics. The
   // dashboard payload now includes per-agent summaries so a single fetch
   // refreshes both the metric cards and the agent cards panel.
-  useOfficeRefetch("dashboard", fetchDashboard);
-  useOfficeRefetch("agents", fetchDashboard);
+  useOfficeRefetch("dashboard", () => void dashboardQuery.refetch());
+  useOfficeRefetch("agents", () => {
+    void dashboardQuery.refetch();
+    void agentsQuery.refetch();
+  });
 
+  const dashboard = dashboardQuery.data ?? dashboardStore ?? initialDashboard ?? null;
+  const agents = agentsQuery.data?.agents ?? agentsStore;
   const metrics = extractMetrics(dashboard);
-  const topUtilization = maxUtilization(agents);
-  const quotaLabel = topUtilization > 0 ? `${Math.round(topUtilization)}%` : "—";
-  const hasSubscriptionAgents = agents.some((a) => a.billingType === "subscription");
+  const subscriptionQuota = subscriptionQuotaState(agents);
 
   return (
     <div className="space-y-4 p-6">
       <AgentCardsPanel summaries={dashboard?.agent_summaries ?? []} />
       <MetricsGrid m={metrics} />
-      {hasSubscriptionAgents && (
+      {subscriptionQuota.visible && (
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-2">
           <MetricCard
             icon={IconChartBar}
-            value={quotaLabel}
+            value={subscriptionQuota.label}
             label="Subscription Quota"
             description="Highest utilization across subscription agents"
           />

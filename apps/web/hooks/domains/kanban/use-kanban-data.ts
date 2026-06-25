@@ -7,6 +7,7 @@ import { useWorkflowSnapshot } from "@/hooks/use-workflow-snapshot";
 import { useUserDisplaySettings } from "@/hooks/use-user-display-settings";
 import { filterTasksByRepositories } from "@/lib/kanban/filters";
 import type { WorkflowStep } from "@/components/kanban-column";
+import type { KanbanState } from "@/lib/state/slices";
 
 type KanbanDataOptions = {
   onWorkspaceChange: (workspaceId: string | null) => void;
@@ -20,27 +21,40 @@ export function useKanbanData({
   searchQuery = "",
 }: KanbanDataOptions) {
   // Store selectors
-  const kanban = useAppStore((state) => state.kanban);
   const workspaceState = useAppStore((state) => state.workspaces);
-  const workflowsState = useAppStore((state) => state.workflows);
-  const enablePreviewOnClick = useAppStore((state) => state.userSettings.enablePreviewOnClick);
-  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  const storeWorkflowsState = useAppStore((state) => state.workflows);
 
   // Data fetching hooks
-  useWorkflows(workspaceState.activeId, true);
-  useWorkflowSnapshot(workflowsState.activeId);
+  const workflowsQuery = useWorkflows(workspaceState.activeId, true);
+  const snapshotQuery = useWorkflowSnapshot(storeWorkflowsState.activeId);
 
   // User settings hook
   const {
     settings: userSettings,
     commitSettings,
+    repositories,
     selectedRepositoryIds,
   } = useUserDisplaySettings({
     workspaceId: workspaceState.activeId,
-    workflowId: workflowsState.activeId,
+    workflowId: storeWorkflowsState.activeId,
     onWorkspaceChange,
     onWorkflowChange,
   });
+  const enablePreviewOnClick = userSettings.enablePreviewOnClick;
+  const boardState = useMemo<KanbanState>(
+    () =>
+      snapshotQuery.snapshotState ?? {
+        workflowId: storeWorkflowsState.activeId,
+        steps: [],
+        tasks: [],
+        isLoading: Boolean(storeWorkflowsState.activeId && snapshotQuery.isFetching),
+      },
+    [snapshotQuery.isFetching, snapshotQuery.snapshotState, storeWorkflowsState.activeId],
+  );
+  const workflowsState = useMemo(
+    () => ({ ...storeWorkflowsState, items: workflowsQuery.workflows }),
+    [storeWorkflowsState, workflowsQuery.workflows],
+  );
 
   // SSR safety check
   const isMounted = useSyncExternalStore(
@@ -52,7 +66,7 @@ export function useKanbanData({
   // Derived data
   const steps = useMemo<WorkflowStep[]>(
     () =>
-      [...kanban.steps]
+      [...boardState.steps]
         .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
         .map((step) => ({
           id: step.id,
@@ -60,7 +74,7 @@ export function useKanbanData({
           color: step.color || "bg-neutral-400",
           events: step.events,
         })),
-    [kanban.steps],
+    [boardState.steps],
   );
 
   // Memoized so a fresh array of card objects isn't produced on every store
@@ -69,7 +83,7 @@ export function useKanbanData({
   // pegging the CPU on large boards.
   const tasks = useMemo(
     () =>
-      kanban.tasks.map((task) => ({
+      boardState.tasks.map((task) => ({
         id: task.id,
         title: task.title,
         workflowStepId: task.workflowStepId,
@@ -80,10 +94,10 @@ export function useKanbanData({
         repositories: task.repositories,
         primarySessionId: task.primarySessionId,
       })),
-    [kanban.tasks],
+    [boardState.tasks],
   );
 
-  const activeSteps = kanban.workflowId ? steps : [];
+  const activeSteps = boardState.workflowId ? steps : [];
 
   const visibleTasks = useMemo(
     () => filterTasksByRepositories(tasks, selectedRepositoryIds),
@@ -95,10 +109,6 @@ export function useKanbanData({
     if (!searchQuery) return visibleTasks;
 
     // Get repositories for the current workspace for search filtering
-    const repositories = workspaceState.activeId
-      ? (repositoriesByWorkspace[workspaceState.activeId] ?? [])
-      : [];
-
     const query = searchQuery.toLowerCase();
     return visibleTasks.filter((task) => {
       // Match task title or description
@@ -114,11 +124,11 @@ export function useKanbanData({
 
       return false;
     });
-  }, [visibleTasks, searchQuery, workspaceState.activeId, repositoriesByWorkspace]);
+  }, [visibleTasks, searchQuery, repositories]);
 
   return {
     // State
-    kanban,
+    boardState,
     workspaceState,
     workflowsState,
     enablePreviewOnClick,

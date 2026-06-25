@@ -9,8 +9,6 @@ import {
   type TaskId,
   type TaskSessionState,
 } from "@/lib/types/http";
-import type { QueuedMessage } from "@/lib/state/slices/session/types";
-import type { KanbanState, WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 
 const debug = createDebugLogger("session:state");
 
@@ -165,79 +163,6 @@ function maybeFanOutOfficeRefetch(
   if (!setOfficeTrigger) return;
   setOfficeTrigger("dashboard");
   setOfficeTrigger("agents");
-}
-
-function patchTaskPrimarySessionState(
-  tasks: KanbanState["tasks"],
-  taskId: string,
-  sessionId: string,
-  newState: TaskSessionState,
-): KanbanState["tasks"] {
-  let changed = false;
-  const nextTasks = tasks.map((task) => {
-    if (task.id !== taskId || task.primarySessionId !== sessionId) return task;
-    if (task.primarySessionState === newState) return task;
-    changed = true;
-    return { ...task, primarySessionState: newState };
-  });
-  return changed ? nextTasks : tasks;
-}
-
-function patchSnapshotPrimarySessionState(
-  snapshot: WorkflowSnapshotData,
-  taskId: string,
-  sessionId: string,
-  newState: TaskSessionState,
-): WorkflowSnapshotData {
-  const tasks = patchTaskPrimarySessionState(snapshot.tasks, taskId, sessionId, newState);
-  return tasks === snapshot.tasks ? snapshot : { ...snapshot, tasks };
-}
-
-function syncKanbanPrimarySessionState(
-  store: StoreApi<AppState>,
-  taskId: TaskId,
-  sessionId: SessionId,
-  newState: TaskSessionState | undefined,
-): void {
-  if (!newState) return;
-
-  store.setState((state) => {
-    const nextKanbanTasks = patchTaskPrimarySessionState(
-      state.kanban.tasks,
-      taskId,
-      sessionId,
-      newState,
-    );
-    let snapshotsChanged = false;
-    const nextSnapshots = Object.fromEntries(
-      Object.entries(state.kanbanMulti.snapshots).map(([workflowId, snapshot]) => {
-        const nextSnapshot = patchSnapshotPrimarySessionState(
-          snapshot,
-          taskId,
-          sessionId,
-          newState,
-        );
-        if (nextSnapshot !== snapshot) snapshotsChanged = true;
-        return [workflowId, nextSnapshot];
-      }),
-    );
-
-    if (nextKanbanTasks === state.kanban.tasks && !snapshotsChanged) return state;
-
-    return {
-      ...state,
-      kanban:
-        nextKanbanTasks === state.kanban.tasks
-          ? state.kanban
-          : { ...state.kanban, tasks: nextKanbanTasks },
-      kanbanMulti: snapshotsChanged
-        ? {
-            ...state.kanbanMulti,
-            snapshots: nextSnapshots,
-          }
-        : state.kanbanMulti,
-    };
-  });
 }
 
 /** Extract context window data from payload metadata and store it. */
@@ -460,18 +385,6 @@ function maybeNotifySessionFailure(store: StoreApi<AppState>, ctx: SessionFailur
 
 export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
-    "message.queue.status_changed": (message) => {
-      const payload = message.payload;
-      if (!payload?.session_id) {
-        console.warn("[Queue] Missing session_id in queue status change event");
-        return;
-      }
-      const sessionId = payload.session_id;
-      const entries = (payload.entries as QueuedMessage[] | null | undefined) ?? [];
-      const count = typeof payload.count === "number" ? payload.count : entries.length;
-      const max = typeof payload.max === "number" ? payload.max : 0;
-      store.getState().setQueueEntries(sessionId, entries, { count, max });
-    },
     "session.state_changed": (message) => {
       const payload = message.payload;
       if (!payload?.task_id) return;
@@ -508,7 +421,6 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       });
 
       upsertTaskSessionList(store, taskId, sessionId, payload, sessionUpdate);
-      syncKanbanPrimarySessionState(store, taskId, sessionId, newState);
       extractContextWindow(store, sessionId, payload);
       maybePromoteAgentctlReady(store, sessionId, newState, message.timestamp);
 

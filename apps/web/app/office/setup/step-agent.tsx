@@ -6,10 +6,12 @@ import { Label } from "@kandev/ui/label";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
+import { useAgentsQuerySync } from "@/hooks/domains/settings/use-agents-query-sync";
 import { AgentSelector } from "@/components/task-create-dialog-selectors";
 import { useAgentProfileOptions } from "@/components/task-create-dialog-options";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import type { AgentProfile } from "@/lib/types/http";
 import { getCapabilityWarning } from "@/lib/capability-warning";
 import { CliProfileEditor } from "@/components/agent/cli-profile-editor";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
@@ -66,9 +68,7 @@ export function StepAgent({
 }: StepAgentProps) {
   const meta = useAppStore((s) => s.office.meta);
   const executorOptions = meta?.executorTypes ?? FALLBACK_EXECUTOR_OPTIONS;
-  const settingsAgents = useAppStore((s) => s.settingsAgents.items);
-  const setAgentProfiles = useAppStore((s) => s.setAgentProfiles);
-  const agentProfilesState = useAppStore((s) => s.agentProfiles.items);
+  const { settingsAgents, upsertProfile } = useAgentsQuerySync();
 
   const sortedProfiles = useMemo(() => sortProfiles(agentProfiles), [agentProfiles]);
   const baseOptions = useAgentProfileOptions(sortedProfiles);
@@ -124,10 +124,9 @@ export function StepAgent({
           {showCreate ? (
             <CreateProfilePanel
               settingsAgents={settingsAgents}
-              storeProfiles={agentProfilesState}
               wizardProfiles={agentProfiles}
               canCancel={profileOptions.length > 0}
-              setAgentProfiles={setAgentProfiles}
+              upsertProfile={upsertProfile}
               onAgentProfilesChange={onAgentProfilesChange}
               onChange={onChange}
               onClose={() => setShowCreate(false)}
@@ -200,19 +199,17 @@ function TierIndicator({
 
 function CreateProfilePanel({
   settingsAgents,
-  storeProfiles,
   wizardProfiles,
   canCancel,
-  setAgentProfiles,
+  upsertProfile,
   onAgentProfilesChange,
   onChange,
   onClose,
 }: {
   settingsAgents: { id: string; name: string }[];
-  storeProfiles: AgentProfileOption[];
   wizardProfiles: AgentProfileOption[];
   canCancel: boolean;
-  setAgentProfiles: (profiles: AgentProfileOption[]) => void;
+  upsertProfile: (profile: AgentProfile) => void;
   onAgentProfilesChange?: (profiles: AgentProfileOption[]) => void;
   onChange: StepAgentProps["onChange"];
   onClose: () => void;
@@ -230,7 +227,7 @@ function CreateProfilePanel({
             name: saved.agentId ?? "",
           };
           const option = toAgentProfileOption(agentForProfile, saved);
-          setAgentProfiles([...storeProfiles.filter((p) => p.id !== option.id), option]);
+          upsertProfile(saved);
           onAgentProfilesChange?.([...wizardProfiles.filter((p) => p.id !== option.id), option]);
           onChange({ agentProfileId: saved.id });
           onClose();

@@ -1,16 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { StateProvider } from "@/components/state-provider";
+import { makeQueryClient } from "@/lib/query/client";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 import { AgentRunsTab } from "./agent-runs-tab";
 
-// Hoisted mock so the listRuns import is replaced before the component
-// imports it. Tests configure the mock per-case.
 const listRunsMock = vi.hoisted(() => vi.fn());
 
-vi.mock("@/lib/api/domains/office-api", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/api/domains/office-api")>(
-    "@/lib/api/domains/office-api",
+vi.mock("@/lib/api/domains/office-runs-api", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/api/domains/office-runs-api")>(
+    "@/lib/api/domains/office-runs-api",
   );
   return {
     ...actual,
@@ -38,6 +38,17 @@ const ceo = {
   maxConcurrentSessions: 1,
 } as AgentProfile;
 
+function renderTab(agent = ceo) {
+  const queryClient = makeQueryClient();
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <StateProvider initialState={{ workspaces: { activeId: "ws-1", items: [] } }}>
+        <AgentRunsTab agent={agent} />
+      </StateProvider>
+    </QueryClientProvider>,
+  );
+}
+
 describe("AgentRunsTab", () => {
   // Pins the regression where the API returns snake_case but the
   // frontend filter read camelCase, so every run was filtered out and
@@ -64,11 +75,7 @@ describe("AgentRunsTab", () => {
       ],
     });
 
-    render(
-      <StateProvider initialState={{ workspaces: { activeId: "ws-1", items: [] } }}>
-        <AgentRunsTab agent={ceo} />
-      </StateProvider>,
-    );
+    renderTab();
 
     // The CEO's run should appear; the other agent's run should not.
     await waitFor(() => {
@@ -82,11 +89,7 @@ describe("AgentRunsTab", () => {
   it("renders the empty state when no runs match the agent", async () => {
     listRunsMock.mockResolvedValueOnce({ runs: [] });
 
-    render(
-      <StateProvider initialState={{ workspaces: { activeId: "ws-1", items: [] } }}>
-        <AgentRunsTab agent={ceo} />
-      </StateProvider>,
-    );
+    renderTab();
 
     await waitFor(() => {
       expect(screen.getByText(/no runs yet/i)).toBeTruthy();

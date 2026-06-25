@@ -1,46 +1,38 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
-import { listPRWatches, deletePRWatch } from "@/lib/api/domains/github-api";
-import { useAppStore } from "@/components/state-provider";
+import { useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { deletePRWatch } from "@/lib/api/domains/github-api";
+import { qk } from "@/lib/query/keys";
+import { prWatchesQueryOptions } from "@/lib/query/query-options/github";
 
 export function usePRWatches() {
-  const items = useAppStore((state) => state.prWatches.items);
-  const loaded = useAppStore((state) => state.prWatches.loaded);
-  const loading = useAppStore((state) => state.prWatches.loading);
-  const setPRWatches = useAppStore((state) => state.setPRWatches);
-  const setPRWatchesLoading = useAppStore((state) => state.setPRWatchesLoading);
-  const removePRWatch = useAppStore((state) => state.removePRWatch);
-
-  useEffect(() => {
-    if (loaded || loading) return;
-    setPRWatchesLoading(true);
-    listPRWatches({ cache: "no-store" })
-      .then((response) => {
-        setPRWatches(response?.watches ?? []);
-      })
-      .catch(() => {
-        setPRWatches([]);
-      })
-      .finally(() => {
-        setPRWatchesLoading(false);
-      });
-  }, [loaded, loading, setPRWatches, setPRWatchesLoading]);
+  const queryClient = useQueryClient();
+  const query = useQuery(prWatchesQueryOptions());
+  const items = query.data ?? [];
 
   const remove = useCallback(
     async (id: string) => {
       await deletePRWatch(id);
-      removePRWatch(id);
+      queryClient.setQueryData(qk.integrations.github.prWatches(), (prev: typeof items) =>
+        (prev ?? []).filter((watch) => watch.id !== id),
+      );
     },
-    [removePRWatch],
+    [items, queryClient],
   );
 
-  return { items, loaded, loading, remove };
+  return {
+    items,
+    loaded: query.isSuccess,
+    loading: query.isFetching && !query.isSuccess,
+    remove,
+  };
 }
 
 /** Get the PR watch for a specific session. */
 export function usePRWatchForSession(sessionId: string | null) {
-  const items = useAppStore((state) => state.prWatches.items);
+  const query = useQuery(prWatchesQueryOptions());
+  const items = query.data ?? [];
   const watch = sessionId ? (items.find((w) => w.session_id === sessionId) ?? null) : null;
   return watch;
 }

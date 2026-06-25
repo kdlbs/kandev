@@ -1,5 +1,3 @@
-import type { WorkflowsState } from "@/lib/state/slices";
-
 type WorkflowLike = { id: string; hidden?: boolean };
 
 /**
@@ -18,7 +16,7 @@ export function resolveDesiredWorkflowId({
 }: {
   activeWorkflowId?: string | null;
   settingsWorkflowId?: string | null;
-  workspaceWorkflows: WorkflowsState["items"] | WorkflowLike[];
+  workspaceWorkflows: WorkflowLike[];
 }): string | null {
   const visibleWorkflows = workspaceWorkflows.filter((workflow) => !workflow.hidden);
   if (activeWorkflowId && visibleWorkflows.some((workflow) => workflow.id === activeWorkflowId)) {

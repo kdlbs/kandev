@@ -198,13 +198,12 @@ function WorkspacePicker({
 // --- Hooks ---
 
 function useWatchFormData(workspaceId: string) {
-  useSettingsData(true);
-  useWorkflows(workspaceId, true);
+  const settingsCatalog = useSettingsData(true);
+  const { workflows: allWorkflows } = useWorkflows(workspaceId, true);
 
-  const allWorkflows = useAppStore((state) => state.workflows.items);
   const workflows = useMemo(() => allWorkflows.filter((w) => !w.hidden), [allWorkflows]);
-  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
-  const executors = useAppStore((state) => state.executors.items);
+  const agentProfiles = settingsCatalog.agentProfiles;
+  const executors = settingsCatalog.executors;
   const allExecutorProfiles = useMemo(
     () =>
       executors

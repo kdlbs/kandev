@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import Link from "@/components/routing/app-link";
 import { toast } from "sonner";
 import { Badge } from "@kandev/ui/badge";
@@ -8,7 +9,8 @@ import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
-import { listSkills, updateAgentProfile } from "@/lib/api/domains/office-api";
+import { updateAgentProfile } from "@/lib/api/domains/office-api";
+import { officeSkillsQueryOptions } from "@/lib/query/query-options";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 
 type AgentSkillsTabProps = {
@@ -19,29 +21,18 @@ type AgentSkillsTabProps = {
  * Hydrate the office skills store on mount. The workspace Skills page
  * populates it as a side effect of viewing, but a user landing
  * directly on /office/agents/<id>/skills wouldn't have run that path
- * yet. Hitting listSkills also triggers the backend's lazy per-
- * workspace system-skill sync, so a fresh workspace shows the
- * bundled set on first visit.
+ * yet. Reading the skills query also triggers the backend's lazy
+ * per-workspace system-skill sync, so a fresh workspace shows the bundled
+ * set on first visit.
  */
 function useHydrateSkills() {
   const setSkills = useAppStore((s) => s.setSkills);
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const skillsQuery = useQuery(officeSkillsQueryOptions(workspaceId ?? ""));
+
   useEffect(() => {
-    if (!workspaceId) return;
-    let cancelled = false;
-    listSkills(workspaceId)
-      .then((res) => {
-        if (!cancelled) setSkills(res.skills ?? []);
-      })
-      .catch(() => {
-        // Non-fatal: existing store contents (possibly empty) render
-        // the "No skills registered" CTA, which still lets the user
-        // pivot to the Skills page.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId, setSkills]);
+    if (skillsQuery.data) setSkills(skillsQuery.data.skills ?? []);
+  }, [skillsQuery.data, setSkills]);
 }
 
 export function AgentSkillsTab({ agent }: AgentSkillsTabProps) {

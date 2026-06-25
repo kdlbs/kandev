@@ -121,8 +121,8 @@ test.describe("PR watcher dockview layout stability", () => {
 
     // Configure auto-start so the review watcher immediately launches mock agents
     // for all 3 PR tasks. By the time the test reaches the sidebar navigation
-    // steps, tasks 2 and 3 already have a primarySessionId in kanbanMulti.snapshots
-    // → handleSelectTask takes the fast (synchronous) path instead of the slow
+    // steps, tasks 2 and 3 already have a primarySessionId in Query snapshots
+    // so handleSelectTask takes the fast (synchronous) path instead of the slow
     // HTTP + WS round-trip that times out in CI.
     await apiClient.updateWorkflowStep(reviewStep.id, {
       events: { on_enter: [{ type: "auto_start_agent" }] },
@@ -238,8 +238,8 @@ test.describe("PR watcher dockview layout stability", () => {
     // --- Switch to PR task 2 via sidebar ---
     await session.clickTaskInSidebar(prTask2Title);
     // With auto_start_agent configured, task 2 already has a primarySessionId in
-    // kanbanMulti.snapshots → handleSelectTask takes the synchronous fast path
-    // and setActiveSession is called immediately.
+    // Query snapshots, so handleSelectTask takes the synchronous fast path and
+    // setActiveSession is called immediately.
     await expect(
       testPage
         .getByRole("navigation", { name: "breadcrumb" })

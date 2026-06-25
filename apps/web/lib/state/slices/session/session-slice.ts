@@ -104,6 +104,7 @@ function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSes
     repository_id: incoming.repository_id ?? existing.repository_id,
     base_branch: incoming.base_branch ?? existing.base_branch,
     task_environment_id: incoming.task_environment_id ?? existing.task_environment_id,
+    is_passthrough: incoming.is_passthrough ?? existing.is_passthrough,
   };
 }
 
@@ -118,22 +119,16 @@ export const defaultSessionState: SessionSliceState = {
   sessionAgentctl: { itemsBySessionId: {} },
   worktrees: { items: {} },
   sessionWorktreesBySessionId: { itemsBySessionId: {} },
-  pendingModel: { bySessionId: {} },
   activeModel: { bySessionId: {} },
   taskPlans: {
     byTaskId: {},
     loadingByTaskId: {},
     loadedByTaskId: {},
     savingByTaskId: {},
-    revisionsByTaskId: {},
-    revisionsLoadingByTaskId: {},
-    revisionsLoadedByTaskId: {},
-    revisionContentCache: {},
     previewRevisionIdByTaskId: {},
     comparePairByTaskId: {},
     lastSeenUpdatedAtByTaskId: {},
   },
-  queue: { bySessionId: {}, metaBySessionId: {}, isLoading: {} },
 };
 
 type ImmerSet = Parameters<typeof createSessionSlice>[0];
@@ -254,29 +249,6 @@ function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
       set((draft) => {
         draft.taskPlans.savingByTaskId[taskId] = saving;
       }),
-    clearTaskPlan: (taskId: string) => {
-      setPlanLastSeen(taskId, null);
-      set((draft) => {
-        // revisionContentCache is keyed by revisionId, so pick the IDs for this
-        // task before deleting the revisions list and drop their cache entries.
-        const revs = draft.taskPlans.revisionsByTaskId[taskId];
-        if (revs) {
-          for (const r of revs) {
-            delete draft.taskPlans.revisionContentCache[r.id];
-          }
-        }
-        delete draft.taskPlans.byTaskId[taskId];
-        delete draft.taskPlans.loadingByTaskId[taskId];
-        delete draft.taskPlans.loadedByTaskId[taskId];
-        delete draft.taskPlans.savingByTaskId[taskId];
-        delete draft.taskPlans.revisionsByTaskId[taskId];
-        delete draft.taskPlans.revisionsLoadingByTaskId[taskId];
-        delete draft.taskPlans.revisionsLoadedByTaskId[taskId];
-        delete draft.taskPlans.previewRevisionIdByTaskId[taskId];
-        delete draft.taskPlans.comparePairByTaskId[taskId];
-        delete draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId];
-      });
-    },
     markTaskPlanSeen: (taskId: string) => {
       const plan = get().taskPlans.byTaskId[taskId];
       const lastSeen = plan?.updated_at ?? "";
@@ -285,44 +257,6 @@ function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
         draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId] = lastSeen;
       });
     },
-    setPlanRevisions: (
-      taskId: string,
-      revisions: Parameters<SessionSlice["setPlanRevisions"]>[1],
-    ) =>
-      set((draft) => {
-        draft.taskPlans.revisionsByTaskId[taskId] = [...revisions].sort(
-          (a, b) => b.revision_number - a.revision_number,
-        );
-        draft.taskPlans.revisionsLoadedByTaskId[taskId] = true;
-        draft.taskPlans.revisionsLoadingByTaskId[taskId] = false;
-      }),
-    upsertPlanRevision: (
-      taskId: string,
-      revision: Parameters<SessionSlice["upsertPlanRevision"]>[1],
-    ) =>
-      set((draft) => {
-        const list = draft.taskPlans.revisionsByTaskId[taskId] ?? [];
-        const idx = list.findIndex((r) => r.id === revision.id);
-        if (idx === -1) {
-          list.unshift(revision);
-        } else {
-          list[idx] = { ...list[idx], ...revision };
-          // Coalesced writes update an existing revision's content on the
-          // backend, but the WS payload carries metadata only — drop any
-          // cached content so the next preview refetches.
-          delete draft.taskPlans.revisionContentCache[revision.id];
-        }
-        list.sort((a, b) => b.revision_number - a.revision_number);
-        draft.taskPlans.revisionsByTaskId[taskId] = list;
-      }),
-    setPlanRevisionsLoading: (taskId: string, loading: boolean) =>
-      set((draft) => {
-        draft.taskPlans.revisionsLoadingByTaskId[taskId] = loading;
-      }),
-    cachePlanRevisionContent: (revisionId: string, content: string) =>
-      set((draft) => {
-        draft.taskPlans.revisionContentCache[revisionId] = content;
-      }),
     ...buildPreviewCompareActions(set),
   };
 }
@@ -486,42 +420,9 @@ export const createSessionSlice: StateCreator<
     set((draft) => {
       draft.sessionWorktreesBySessionId.itemsBySessionId[sessionId] = worktreeIds;
     }),
-  setPendingModel: (sessionId, modelId) =>
-    set((draft) => {
-      draft.pendingModel.bySessionId[sessionId] = modelId;
-    }),
-  clearPendingModel: (sessionId) =>
-    set((draft) => {
-      delete draft.pendingModel.bySessionId[sessionId];
-    }),
   setActiveModel: (sessionId, modelId) =>
     set((draft) => {
       draft.activeModel.bySessionId[sessionId] = modelId;
     }),
   ...buildTaskPlanActions(set, get),
-  setQueueEntries: (sessionId, entries, meta) =>
-    set((draft) => {
-      draft.queue.bySessionId[sessionId] = entries;
-      draft.queue.metaBySessionId[sessionId] = meta;
-    }),
-  removeQueueEntry: (sessionId, entryId) =>
-    set((draft) => {
-      const list = draft.queue.bySessionId[sessionId];
-      if (!list) return;
-      draft.queue.bySessionId[sessionId] = list.filter((entry) => entry.id !== entryId);
-      const meta = draft.queue.metaBySessionId[sessionId];
-      if (meta) {
-        meta.count = draft.queue.bySessionId[sessionId].length;
-      }
-    }),
-  setQueueLoading: (sessionId, loading) =>
-    set((draft) => {
-      draft.queue.isLoading[sessionId] = loading;
-    }),
-  clearQueueStatus: (sessionId) =>
-    set((draft) => {
-      delete draft.queue.bySessionId[sessionId];
-      delete draft.queue.metaBySessionId[sessionId];
-      delete draft.queue.isLoading[sessionId];
-    }),
 });

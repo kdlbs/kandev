@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useDockviewStore } from "@/lib/state/dockview-store";
-import { getTaskPlan } from "@/lib/api/domains/plan-api";
+import { taskPlanQueryOptions } from "@/lib/query/query-options";
 
 /**
  * Watches the active task's plan and opens the Plan panel quietly (without
@@ -17,6 +18,7 @@ import { getTaskPlan } from "@/lib/api/domains/plan-api";
  * orderings.
  */
 export function usePlanPanelAutoOpen() {
+  const queryClient = useQueryClient();
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
   const plan = useAppStore((s) => (activeTaskId ? s.taskPlans.byTaskId[activeTaskId] : null));
   const isLoaded = useAppStore((s) =>
@@ -38,6 +40,16 @@ export function usePlanPanelAutoOpen() {
   // doesn't put us in an infinite retry loop. Cleared on WS disconnect so a
   // reconnect can retry any failed or not-yet-attempted tasks.
   const attemptedRef = useRef<Set<string>>(new Set());
+  const prevConnectionStatusRef = useRef(connectionStatus);
+  const allowRetryAfterReconnectRef = useRef(false);
+  if (prevConnectionStatusRef.current !== connectionStatus) {
+    if (connectionStatus !== "connected") {
+      attemptedRef.current.clear();
+    } else if (prevConnectionStatusRef.current !== "connected") {
+      allowRetryAfterReconnectRef.current = true;
+    }
+    prevConnectionStatusRef.current = connectionStatus;
+  }
 
   // Whether *this* hook added the plan panel for the current task. Lets the
   // reload-heal branch below tell "panel restored from a saved layout" (heal)
@@ -52,13 +64,24 @@ export function usePlanPanelAutoOpen() {
   // agent before the browser's WS connected (fast auto-start path) would never
   // populate the store and the auto-open below would never fire.
   useEffect(() => {
-    if (!activeTaskId || connectionStatus !== "connected") return;
+    if (connectionStatus !== "connected") {
+      attemptedRef.current.clear();
+      return;
+    }
+    if (!activeTaskId) return;
     if (isLoaded) return;
-    if (attemptedRef.current.has(activeTaskId)) return;
+    if (attemptedRef.current.has(activeTaskId) && !allowRetryAfterReconnectRef.current) return;
+    const isReconnectRetry = allowRetryAfterReconnectRef.current;
+    allowRetryAfterReconnectRef.current = false;
     const taskId = activeTaskId;
+    const options = taskPlanQueryOptions(taskId);
+    if (isReconnectRetry) {
+      queryClient.removeQueries({ exact: true, queryKey: options.queryKey });
+    }
     attemptedRef.current.add(taskId);
     setTaskPlanLoading(taskId, true);
-    getTaskPlan(taskId)
+    queryClient
+      .fetchQuery({ ...options, staleTime: 0 })
       .then((fetched) => {
         // Race guard: if a WS event populated the store while our HTTP
         // request was in flight, don't overwrite a real plan with a
@@ -77,7 +100,15 @@ export function usePlanPanelAutoOpen() {
          * so a transient failure retries automatically after recovery. */
       })
       .finally(() => setTaskPlanLoading(taskId, false));
-  }, [activeTaskId, connectionStatus, isLoaded, setTaskPlan, setTaskPlanLoading, storeApi]);
+  }, [
+    activeTaskId,
+    connectionStatus,
+    isLoaded,
+    queryClient,
+    setTaskPlan,
+    setTaskPlanLoading,
+    storeApi,
+  ]);
 
   // Clear the attempt set on WS disconnect so that when the WS reconnects
   // the fetch effect can retry any tasks that previously failed or were pending.

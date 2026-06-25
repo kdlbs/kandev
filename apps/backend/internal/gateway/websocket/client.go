@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -43,6 +44,8 @@ type Client struct {
 	mu                      sync.RWMutex
 	closed                  bool
 	logger                  *logger.Logger
+	connectionSeq           atomic.Int64
+	sentLog                 *wsSentLog
 }
 
 // NewClient creates a new WebSocket client
@@ -58,6 +61,7 @@ func NewClient(id string, conn *websocket.Conn, hub *Hub, log *logger.Logger) *C
 		userSubscriptions:    make(map[string]bool),
 		runSubscriptions:     make(map[string]bool),
 		logger:               log.WithFields(zap.String("client_id", id)),
+		sentLog:              newWsSentLog(),
 	}
 }
 
@@ -311,7 +315,7 @@ func (c *Client) sendSessionData(sessionID string) {
 
 	// Send each piece of session data as a notification
 	for _, msg := range data {
-		c.sendMessage(msg)
+		c.sendMessageForSession(sessionID, msg)
 	}
 }
 
@@ -473,14 +477,85 @@ func (c *Client) handleSessionUnfocus(msg *ws.Message) {
 	c.sendMessage(resp)
 }
 
-// sendMessage sends a message to the client
-func (c *Client) sendMessage(msg *ws.Message) {
+// sendMessage stamps and sends a connection-wide message to the client.
+func (c *Client) sendMessage(msg *ws.Message) bool {
+	return c.sendMessageForSession("", msg)
+}
+
+func (c *Client) sendMessageForSession(sessionID string, msg *ws.Message) bool {
+	return c.sendMessageForSessionSeq(sessionID, 0, msg)
+}
+
+func (c *Client) sendMessageForSessionSeq(sessionID string, sessionSeq int64, msg *ws.Message) bool {
+	stamped, ok := c.stampAndMarshalForSession(sessionID, sessionSeq, msg)
+	if !ok {
+		return false
+	}
+	if !c.sendBytes(stamped.data) {
+		return false
+	}
+	if c.sentLog != nil {
+		c.sentLog.Append(
+			stamped.connectionSeq,
+			stamped.sessionSeq,
+			stamped.sessionID,
+			stamped.msgType,
+			stamped.action,
+			stamped.sentAt,
+		)
+	}
+	return true
+}
+
+func (c *Client) sendStampedCopyForSessionSeq(sessionID string, sessionSeq int64, msg *ws.Message) bool {
+	if msg == nil {
+		return false
+	}
+	clone := *msg
+	return c.sendMessageForSessionSeq(sessionID, sessionSeq, &clone)
+}
+
+type stampedMessage struct {
+	data          []byte
+	connectionSeq int64
+	sessionSeq    int64
+	sessionID     string
+	msgType       string
+	action        string
+	sentAt        time.Time
+}
+
+func (c *Client) stampAndMarshalForSession(
+	sessionID string,
+	sessionSeq int64,
+	msg *ws.Message,
+) (stampedMessage, bool) {
+	if msg == nil {
+		return stampedMessage{}, false
+	}
+	connectionSeq := c.connectionSeq.Add(1)
+	msg.ConnectionID = c.ID
+	msg.ConnectionSeq = connectionSeq
+	if sessionID != "" && c.hub != nil {
+		if sessionSeq <= 0 {
+			sessionSeq = c.hub.nextSessionSeq(sessionID)
+		}
+		msg.SessionSeq = sessionSeq
+	}
 	data, err := json.Marshal(msg)
 	if err != nil {
 		c.logger.Error("Failed to marshal message", zap.Error(err))
-		return
+		return stampedMessage{}, false
 	}
-	c.sendBytes(data)
+	return stampedMessage{
+		data:          data,
+		connectionSeq: connectionSeq,
+		sessionSeq:    sessionSeq,
+		sessionID:     sessionID,
+		msgType:       string(msg.Type),
+		action:        msg.Action,
+		sentAt:        time.Now().UTC(),
+	}, true
 }
 
 func (c *Client) sendBytes(data []byte) bool {

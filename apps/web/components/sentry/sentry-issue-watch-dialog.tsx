@@ -65,12 +65,11 @@ type Props = {
 };
 
 function useFormData(workspaceId: string) {
-  useSettingsData(true);
-  useWorkflows(workspaceId, true);
-  const allWorkflows = useAppStore((s) => s.workflows.items);
+  const settingsCatalog = useSettingsData(true);
+  const { workflows: allWorkflows } = useWorkflows(workspaceId, true);
   const workflows = useMemo(() => allWorkflows.filter((w) => !w.hidden), [allWorkflows]);
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items);
-  const executors = useAppStore((s) => s.executors.items);
+  const agentProfiles = settingsCatalog.agentProfiles;
+  const executors = settingsCatalog.executors;
   const allExecutorProfiles = useMemo(
     () =>
       executors

@@ -9,6 +9,16 @@ const mocks = vi.hoisted(() => ({
   openQuickChat: vi.fn(),
   dialogTaskSessionId: null as string | null,
   dialogWillNavigate: false,
+  lastRegularDialogProps: null as null | {
+    workflowId: string | null;
+    defaultStepId: string | null;
+    steps: Array<{ id: string; title: string }>;
+  },
+  workflowSnapshotWorkflowId: null as string | null,
+  workflowSnapshotState: {
+    steps: [{ id: "s1", title: "Todo" }],
+  } as { steps: Array<{ id: string; title: string }> } | null,
+  taskById: null as { id: string; title: string } | null,
 }));
 
 function renderItem(collapsed: boolean) {
@@ -21,11 +31,7 @@ function renderItem(collapsed: boolean) {
 
 const state = {
   workspaces: { activeId: "ws-1" as string | null },
-  kanban: {
-    workflowId: "wf-1" as string | null,
-    steps: [{ id: "s1", title: "Todo" }],
-    tasks: [{ id: "t-1", title: "Parent task" }] as Array<{ id: string; title: string }>,
-  },
+  workflows: { activeId: "wf-1" as string | null },
   tasks: { activeTaskId: null as string | null },
   setActiveTask: mocks.setActiveTask,
   setActiveSession: mocks.setActiveSession,
@@ -35,6 +41,15 @@ let pathname = "/";
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: typeof state) => unknown) => selector(state),
+}));
+vi.mock("@/hooks/use-workflow-snapshot", () => ({
+  useWorkflowSnapshot: (workflowId: string | null) => {
+    mocks.workflowSnapshotWorkflowId = workflowId;
+    return { snapshotState: mocks.workflowSnapshotState };
+  },
+}));
+vi.mock("@/hooks/domains/kanban/use-task-by-id", () => ({
+  useTaskById: () => mocks.taskById,
 }));
 vi.mock("@/hooks/use-quick-chat-launcher", () => ({
   useQuickChatLauncher: () => mocks.openQuickChat,
@@ -51,30 +66,41 @@ vi.mock("@/app/office/components/new-task-dialog", () => ({
 }));
 vi.mock("@/components/task-create-dialog", () => ({
   TaskCreateDialog: ({
+    workflowId,
+    defaultStepId,
+    steps,
     onSuccess,
   }: {
+    workflowId: string | null;
+    defaultStepId: string | null;
+    steps: Array<{ id: string; title: string }>;
     onSuccess?: (
       task: { id: string },
       mode: "create" | "edit",
       meta?: { taskSessionId?: string | null; willNavigate?: boolean },
     ) => void;
-  }) => (
-    <button
-      type="button"
-      data-testid="regular-task-create-dialog"
-      onClick={() =>
-        onSuccess?.({ id: "t-new" }, "create", {
-          taskSessionId: mocks.dialogTaskSessionId,
-          willNavigate: mocks.dialogWillNavigate,
-        })
-      }
-    >
-      regular dialog
-    </button>
-  ),
+  }) => {
+    mocks.lastRegularDialogProps = { workflowId, defaultStepId, steps };
+    return (
+      <button
+        type="button"
+        data-testid="regular-task-create-dialog"
+        onClick={() =>
+          onSuccess?.({ id: "t-new" }, "create", {
+            taskSessionId: mocks.dialogTaskSessionId,
+            willNavigate: mocks.dialogWillNavigate,
+          })
+        }
+      >
+        regular dialog
+      </button>
+    );
+  },
 }));
 vi.mock("@/components/task/new-subtask-dialog", () => ({
-  NewSubtaskDialog: () => <div data-testid="new-subtask-dialog" />,
+  NewSubtaskDialog: ({ parentTaskTitle }: { parentTaskTitle: string }) => (
+    <div data-testid="new-subtask-dialog" data-parent-title={parentTaskTitle} />
+  ),
 }));
 
 import { AppSidebarNewTaskItem } from "./app-sidebar-new-task-item";
@@ -85,9 +111,7 @@ const REGULAR_DIALOG_TESTID = "regular-task-create-dialog";
 
 function resetTestState() {
   state.workspaces.activeId = "ws-1";
-  state.kanban.workflowId = "wf-1";
-  state.kanban.steps = [{ id: "s1", title: "Todo" }];
-  state.kanban.tasks = [{ id: "t-1", title: "Parent task" }];
+  state.workflows.activeId = "wf-1";
   state.tasks.activeTaskId = null;
   mocks.routerPush.mockClear();
   mocks.setActiveTask.mockClear();
@@ -95,6 +119,10 @@ function resetTestState() {
   mocks.openQuickChat.mockClear();
   mocks.dialogTaskSessionId = null;
   mocks.dialogWillNavigate = false;
+  mocks.lastRegularDialogProps = null;
+  mocks.workflowSnapshotWorkflowId = null;
+  mocks.workflowSnapshotState = { steps: [{ id: "s1", title: "Todo" }] };
+  mocks.taskById = null;
   officeEnabled = false;
   pathname = "/";
 }
@@ -162,6 +190,15 @@ describe("AppSidebarNewTaskItem row actions", () => {
     expect(screen.getByTestId("new-subtask-dialog")).toBeTruthy();
   });
 
+  it("uses Query task detail for the subtask parent title", () => {
+    state.tasks.activeTaskId = "t-1";
+    mocks.taskById = { id: "t-1", title: "Query parent task" };
+
+    renderItem(false);
+
+    expect(screen.getByTestId("new-subtask-dialog").dataset.parentTitle).toBe("Query parent task");
+  });
+
   it("hides the subtask affordance when no task is active", () => {
     state.tasks.activeTaskId = null;
     renderItem(false);
@@ -188,6 +225,20 @@ describe("AppSidebarNewTaskItem row actions", () => {
 });
 
 describe("AppSidebarNewTaskItem creation success", () => {
+  it("uses the Query workflow snapshot for regular task-create defaults", () => {
+    state.workflows.activeId = "wf-query";
+    mocks.workflowSnapshotState = { steps: [{ id: "step-query", title: "Ready" }] };
+
+    renderItem(false);
+
+    expect(mocks.workflowSnapshotWorkflowId).toBe("wf-query");
+    expect(mocks.lastRegularDialogProps).toMatchObject({
+      workflowId: "wf-query",
+      defaultStepId: "step-query",
+      steps: [{ id: "step-query", title: "Ready" }],
+    });
+  });
+
   it("focuses the created task after regular sidebar task creation succeeds", () => {
     renderItem(false);
     screen.getByTestId(REGULAR_DIALOG_TESTID).click();

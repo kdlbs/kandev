@@ -2,16 +2,18 @@
 
 import Link from "@/components/routing/app-link";
 import { useCallback, useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
 import { IconAlertTriangle, IconStethoscope, IconCheck } from "@tabler/icons-react";
 
 import { useToast } from "@/components/toast-provider";
-import { useAppStore } from "@/components/state-provider";
 import { bootstrapImproveKandev } from "@/lib/api/domains/improve-kandev-api";
-import { listRepositories } from "@/lib/api/domains/workspace-api";
-import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
 import { fetchSystemHealth } from "@/lib/api/domains/health-api";
+import {
+  workflowStepsQueryOptions,
+  workspaceRepositoriesQueryOptions,
+} from "@/lib/query/query-options";
 import type { Task } from "@/lib/types/http";
 import { buildImproveKandevDescription } from "./improve-kandev-dialog-helpers";
 import { CreateModeView, type BootstrapState } from "./improve-kandev-dialog-create";
@@ -142,7 +144,7 @@ function useBootstrapKandev(
   setBootstrap: (s: BootstrapState) => void,
 ) {
   const { toast } = useToast();
-  const setRepositories = useAppStore((state) => state.setRepositories);
+  const queryClient = useQueryClient();
   useEffect(() => {
     if (mode !== "create" || !workspaceId) return;
     let cancelled = false;
@@ -165,15 +167,16 @@ function useBootstrapKandev(
           return;
         }
         // Refresh the workspace repository list so the newly-created kandev
-        // repo is in the store; otherwise the locked repo dropdown can't
-        // resolve a label for the bootstrapped repository_id.
-        const [stepsRes, reposRes] = await Promise.all([
-          listWorkflowSteps(data.workflow_id),
-          listRepositories(workspaceId, undefined, { cache: "no-store" }),
+        // repo is available to Query readers that resolve the locked repo label.
+        const [steps] = await Promise.all([
+          queryClient.fetchQuery({ ...workflowStepsQueryOptions(data.workflow_id), staleTime: 0 }),
+          queryClient.fetchQuery({
+            ...workspaceRepositoriesQueryOptions(workspaceId),
+            staleTime: 0,
+          }),
         ]);
         if (cancelled) return;
-        setRepositories(workspaceId, reposRes.repositories);
-        setBootstrap({ kind: "ready", data, steps: stepsRes.steps });
+        setBootstrap({ kind: "ready", data, steps });
       } catch (err) {
         if (cancelled) return;
         const message = err instanceof Error ? err.message : "Bootstrap failed";
@@ -188,7 +191,7 @@ function useBootstrapKandev(
     return () => {
       cancelled = true;
     };
-  }, [mode, workspaceId, setBootstrap, setRepositories, toast]);
+  }, [mode, workspaceId, queryClient, setBootstrap, toast]);
 }
 
 function IntroBody({

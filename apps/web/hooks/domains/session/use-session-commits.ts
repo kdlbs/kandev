@@ -1,6 +1,8 @@
 import { useEffect, useCallback, useRef } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
-import { getWebSocketClient } from "@/lib/ws/connection";
+import { qk } from "@/lib/query/keys";
+import { fetchSessionCommitsSnapshot, sessionCommitsQueryOptions } from "@/lib/query/query-options";
 import type { SessionCommit } from "@/lib/state/slices/session-runtime/types";
 
 // Sentinel ref value: forces the trigger-bumped path to fire on first mount if
@@ -12,74 +14,55 @@ const REFETCH_TRIGGER_INIT = 0;
 
 const NOT_READY_RETRY_MS = 2000;
 
+function useSessionCommitStoreState(sessionId: string | null) {
+  const envKey = useAppStore((state) =>
+    sessionId ? (state.environmentIdBySessionId[sessionId] ?? sessionId) : "",
+  );
+  const storeCommits = useAppStore((state) => {
+    if (!sessionId) return undefined;
+    const key = state.environmentIdBySessionId[sessionId] ?? sessionId;
+    return state.sessionCommits.byEnvironmentId[key];
+  });
+  const storeLoading = useAppStore((state) => {
+    if (!sessionId) return false;
+    const key = state.environmentIdBySessionId[sessionId] ?? sessionId;
+    return state.sessionCommits.loading[key] ?? false;
+  });
+  const refetchTrigger = useAppStore((state) => {
+    if (!sessionId) return 0;
+    const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
+    return state.sessionCommits.refetchTrigger[envKey] ?? 0;
+  });
+  return { envKey, storeCommits, storeLoading, refetchTrigger };
+}
+
 /**
  * Hook to fetch and manage commits for a session.
  * Commits are keyed by environmentId so sessions sharing the same environment
  * share the same commit list and don't duplicate fetches.
  */
 export function useSessionCommits(sessionId: string | null) {
-  const commits = useAppStore((state) => {
-    if (!sessionId) return undefined;
-    const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
-    return state.sessionCommits.byEnvironmentId[envKey];
+  const queryClient = useQueryClient();
+  const { envKey, storeCommits, storeLoading, refetchTrigger } =
+    useSessionCommitStoreState(sessionId);
+  const commitsQuery = useQuery({
+    ...sessionCommitsQueryOptions(envKey, sessionId ?? ""),
+    enabled: false,
   });
-  const loading = useAppStore((state) => {
-    if (!sessionId) return false;
-    const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
-    return state.sessionCommits.loading[envKey] ?? false;
-  });
-  // Stale-while-revalidate trigger: bumped by commits_reset / branch_switched
-  // WS events. We refetch on change without nulling the visible list, so the
-  // Changes panel keeps showing the previous commits until the new ones land.
-  const refetchTrigger = useAppStore((state) => {
-    if (!sessionId) return 0;
-    const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
-    return state.sessionCommits.refetchTrigger[envKey] ?? 0;
-  });
+  const commits = commitsQuery.data ?? storeCommits;
+  const loading = commitsQuery.isFetching || storeLoading;
   const setSessionCommits = useAppStore((state) => state.setSessionCommits);
   const setSessionCommitsLoading = useAppStore((state) => state.setSessionCommitsLoading);
   const connectionStatus = useAppStore((state) => state.connection.status);
 
-  // Track the last refetch trigger we acted on, so a bump triggers exactly one
-  // refetch rather than re-firing on every render. Initialise to a sentinel
-  // (not `refetchTrigger`) so a bump that arrived before this hook mounted
-  // still drives an initial refetch — otherwise prevRef would equal the live
-  // value and `triggerBumped` would silently be false on first render.
   const prevRefetchTriggerRef = useRef<number>(REFETCH_TRIGGER_INIT);
-  // Tracks which sessionId we've already run an authoritative snapshot fetch
-  // for. Without this, the initial-fetch gate fires only when `commits` is
-  // undefined — but commits can be populated by a live `commit_created`
-  // event that arrived before mount, and a replayed/raced event can carry
-  // zero stats. The bad stats then stick because the snapshot (which would
-  // overwrite with correct stats from `git log --shortstat`) never runs.
-  // Anchoring to sessionId guarantees a snapshot per session regardless of
-  // how `commits` got populated.
   const fetchedSessionRef = useRef<string | null>(null);
-  // Retry timer for the not-ready case — agentctl recovers asynchronously
-  // after a backend restart, so the first fetch may land before the workspace
-  // execution has been ensured. Without a retry the store would be stuck on
-  // an empty list and the COMMITS section would silently miss commits whose
-  // commit_created notifications were already fired (or pushed and so
-  // filtered out by the live watcher).
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Monotonic request version. Captured at fetch start; the response is only
-  // applied if the version still matches. Without this, two trigger bumps in
-  // quick succession (e.g. branch_switched → user reverts) could see the
-  // older in-flight response land after the newer one and clobber the panel
-  // with stale data. Mirrors the pattern in useCumulativeDiff.
   const requestVersionRef = useRef(0);
 
-  // `allowEmpty` is threaded into setSessionCommits's guard. Trigger-bump
-  // refetches (commits_reset / branch_switched) can legitimately return [] —
-  // e.g. a `git reset` stripped every commit back to base — and the store
-  // must accept that authoritatively. Initial fetches keep the default
-  // guard so a stale empty response can't race the addSessionCommit path.
   const fetchCommits = useCallback(
     async (opts?: { allowEmpty?: boolean }) => {
-      if (!sessionId) return;
-
-      const client = getWebSocketClient();
-      if (!client) return;
+      if (!sessionId || !envKey) return;
 
       if (retryTimerRef.current) {
         clearTimeout(retryTimerRef.current);
@@ -89,10 +72,7 @@ export function useSessionCommits(sessionId: string | null) {
       const version = ++requestVersionRef.current;
       setSessionCommitsLoading(sessionId, true);
       try {
-        const response = await client.request<{ commits?: SessionCommit[]; ready?: boolean }>(
-          "session.git.commits",
-          { session_id: sessionId },
-        );
+        const response = await fetchSessionCommitsSnapshot(sessionId);
 
         // Drop stale callbacks: another fetch (e.g. a later trigger bump)
         // already started, so this response is for an older state and must
@@ -109,7 +89,7 @@ export function useSessionCommits(sessionId: string | null) {
         // Schedule a retry so we eventually pick up the real list. Preserve
         // `opts` across retries so a trigger-bump fetch that gets ready:false
         // still applies its authoritative empty response when it succeeds.
-        if (response?.ready === false) {
+        if (response.ready === false) {
           retryTimerRef.current = setTimeout(() => {
             retryTimerRef.current = null;
             fetchCommits(opts);
@@ -117,9 +97,17 @@ export function useSessionCommits(sessionId: string | null) {
           return;
         }
 
-        if (response?.commits) {
-          setSessionCommits(sessionId, response.commits, opts);
-        }
+        const nextCommits = response.commits;
+        queryClient.setQueryData(qk.sessionRuntime.commits(envKey), (current: unknown) => {
+          const existing = Array.isArray(current)
+            ? (current as SessionCommit[])
+            : (storeCommits ?? []);
+          if (!opts?.allowEmpty && nextCommits.length === 0 && existing.length > 0) {
+            return existing;
+          }
+          return nextCommits;
+        });
+        setSessionCommits(sessionId, nextCommits, opts);
       } catch (error) {
         console.error("Failed to fetch session commits:", error);
       } finally {
@@ -130,7 +118,7 @@ export function useSessionCommits(sessionId: string | null) {
         }
       }
     },
-    [sessionId, setSessionCommits, setSessionCommitsLoading],
+    [envKey, queryClient, sessionId, setSessionCommits, setSessionCommitsLoading, storeCommits],
   );
 
   // Fetch commits when:
@@ -174,7 +162,7 @@ export function useSessionCommits(sessionId: string | null) {
 
   // Cancel any in-flight retry on unmount, when the session changes, or when
   // the WS disconnects — a retry firing against a disconnected client would
-  // either throw inside fetchCommits or hit getWebSocketClient()===null.
+  // just fail the snapshot request and leave loading stuck until the next run.
   useEffect(() => {
     return () => {
       if (retryTimerRef.current) {

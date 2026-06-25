@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { DiffComment } from "@/lib/diff/types";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
+import { taskPlanQueryOptions } from "@/lib/query/query-options";
+import type { TaskPlan } from "@/lib/types/http";
+import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import {
   buildContextFilesMeta,
   buildPassthroughFinalMessage,
@@ -13,7 +17,13 @@ import {
 const mockGetTaskPlan = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/api/domains/plan-api", () => ({
+  createTaskPlan: vi.fn(),
+  deleteTaskPlan: vi.fn(),
+  getPlanRevision: vi.fn(),
   getTaskPlan: mockGetTaskPlan,
+  listPlanRevisions: vi.fn(),
+  revertPlanRevision: vi.fn(),
+  updateTaskPlan: vi.fn(),
 }));
 
 const SESSION_ID = "session-1";
@@ -55,6 +65,31 @@ function panelState(overrides: Record<string, unknown> = {}) {
     addContextFile: vi.fn(),
     ...overrides,
   } as never;
+}
+
+function queryClientWithPlan(content: string) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const plan = {
+    id: "plan-1",
+    task_id: TASK_ID,
+    title: "Plan",
+    content,
+    created_by: "agent",
+    created_at: "2026-06-23T00:00:00Z",
+    updated_at: "2026-06-23T00:00:00Z",
+  } as TaskPlan;
+  queryClient.setQueryData<TaskPlan | null>(taskPlanQueryOptions(TASK_ID).queryKey, plan);
+  return queryClient;
+}
+
+function workflowSnapshot(overrides: Partial<WorkflowSnapshotData> = {}): WorkflowSnapshotData {
+  return {
+    workflowId: "workflow-1",
+    workflowName: "Main flow",
+    steps: [],
+    tasks: [],
+    ...overrides,
+  };
 }
 
 beforeEach(() => {
@@ -101,12 +136,11 @@ describe("passthrough chat composer metadata helpers", () => {
       }),
       inlineMentions: [file("src/inline.ts", "inline.ts"), file("prompt:prompt-1", "Review")],
       inlineTaskMentions: [inlineTask],
-      getState: () =>
-        ({
-          kanban: { steps: [{ id: "step-1", title: "Review" }] },
-          kanbanMulti: { snapshots: {} },
-          taskPlans: { byTaskId: {} },
-        }) as never,
+      workflowSnapshots: {
+        "workflow-1": workflowSnapshot({
+          steps: [{ id: "step-1", title: "Review", color: "", position: 0 }],
+        }),
+      },
     });
 
     expect(result.contextFilesMeta).toEqual([
@@ -124,23 +158,32 @@ describe("passthrough chat composer metadata helpers", () => {
 });
 
 describe("passthrough chat composer plan context", () => {
-  it("expands selected plan context and strips the literal @Plan mention", async () => {
+  it("expands selected plan context from the Query cache when the store has no plan", async () => {
+    const queryClient = queryClientWithPlan("## Query Plan\n\n1. Prefer cached query data");
+
     const result = await buildPassthroughFinalMessage({
       taskId: TASK_ID,
       content: "@Plan",
       pendingComments: [],
       panelState: panelState(),
       inlineMentions: [file(PLAN_CONTEXT_PATH, "Plan")],
-      getState: () =>
-        ({
-          kanban: { steps: [] },
-          kanbanMulti: { snapshots: {} },
-          taskPlans: {
-            byTaskId: {
-              [TASK_ID]: { content: "## Plan\n\n1. Ship passthrough fixes" },
-            },
-          },
-        }) as never,
+      queryClient,
+    });
+
+    expect(result.content).toContain("## Query Plan");
+    expect(result.content).toContain("Prefer cached query data");
+    expect(mockGetTaskPlan).not.toHaveBeenCalled();
+  });
+
+  it("expands selected plan context and strips the literal @Plan mention", async () => {
+    const queryClient = queryClientWithPlan("## Plan\n\n1. Ship passthrough fixes");
+    const result = await buildPassthroughFinalMessage({
+      taskId: TASK_ID,
+      content: "@Plan",
+      pendingComments: [],
+      panelState: panelState(),
+      inlineMentions: [file(PLAN_CONTEXT_PATH, "Plan")],
+      queryClient,
     });
 
     expect(result.content).toContain("<kandev-system>");
@@ -151,22 +194,14 @@ describe("passthrough chat composer plan context", () => {
   });
 
   it("strips a selected plan mention from the middle of a message without double spacing", async () => {
+    const queryClient = queryClientWithPlan("## Plan\n\n1. Ship passthrough fixes");
     const result = await buildPassthroughFinalMessage({
       taskId: TASK_ID,
       content: "Please use @Plan now",
       pendingComments: [],
       panelState: panelState(),
       inlineMentions: [file(PLAN_CONTEXT_PATH, "Plan")],
-      getState: () =>
-        ({
-          kanban: { steps: [] },
-          kanbanMulti: { snapshots: {} },
-          taskPlans: {
-            byTaskId: {
-              [TASK_ID]: { content: "## Plan\n\n1. Ship passthrough fixes" },
-            },
-          },
-        }) as never,
+      queryClient,
     });
 
     expect(result.content).toContain("Please use now");
@@ -184,12 +219,6 @@ describe("passthrough chat composer plan context", () => {
         pendingComments: [],
         panelState: panelState(),
         inlineMentions: [file(PLAN_CONTEXT_PATH, "Plan")],
-        getState: () =>
-          ({
-            kanban: { steps: [] },
-            kanbanMulti: { snapshots: {} },
-            taskPlans: { byTaskId: {} },
-          }) as never,
       }),
     ).rejects.toThrow("plan lookup failed");
   });

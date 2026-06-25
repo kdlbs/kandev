@@ -4,7 +4,7 @@ import { SwimlaneKanbanContent } from "@/components/kanban/swimlane-kanban-conte
 import { SwimlaneGraph2Content } from "@/components/kanban/swimlane-graph2-content";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
-import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
+import type { MoveTaskError } from "@/lib/kanban/move-task-error";
 
 export type ViewContentProps = {
   workflowId: string;
