@@ -164,3 +164,30 @@ func TestService_UpdateIssueWatch_RebindAndDeletedRepo(t *testing.T) {
 		t.Fatalf("expected prompt updated + binding preserved, got prompt=%q repo=%q branch=%q", edited.Prompt, edited.RepositoryID, edited.BaseBranch)
 	}
 }
+
+func TestService_IssueWatch_RejectsInvalidBaseBranch(t *testing.T) {
+	ctx := context.Background()
+	f := newSvcFixture(t)
+	f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-1", defaultBranch: "main", ok: true})
+	base := func() *CreateIssueWatchRequest {
+		return &CreateIssueWatchRequest{
+			WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+			JQL: "project = PROJ", RepositoryID: "repo-1",
+		}
+	}
+
+	bad := base()
+	bad.BaseBranch = "bad..ref"
+	if _, err := f.svc.CreateIssueWatch(ctx, bad); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("expected ErrInvalidConfig for invalid base branch on create, got %v", err)
+	}
+
+	w, err := f.svc.CreateIssueWatch(ctx, base())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	badRef := "bad..ref"
+	if _, err := f.svc.UpdateIssueWatch(ctx, w.ID, &UpdateIssueWatchRequest{BaseBranch: &badRef}); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("expected ErrInvalidConfig for invalid base branch on update, got %v", err)
+	}
+}

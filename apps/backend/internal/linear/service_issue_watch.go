@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/watchreset"
@@ -271,6 +272,12 @@ func (s *Service) resolveRepositoryBinding(ctx context.Context, workspaceID, rep
 	baseBranch = strings.TrimSpace(baseBranch)
 	if repositoryID == "" {
 		return "", "", nil
+	}
+	// Reject a non-empty base branch that isn't a safe git ref before it can be
+	// persisted and copied into watcher-created tasks (then fail at worktree
+	// launch). Empty defers to the repo's default branch below.
+	if baseBranch != "" && !securityutil.IsValidBaseBranchRef(baseBranch) {
+		return "", "", fmt.Errorf("%w: base branch %q is not a valid git ref", ErrInvalidConfig, baseBranch)
 	}
 	rl := s.getRepositoryLookup()
 	if rl == nil {
