@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { createElement, type ReactNode } from "react";
+import { makeQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
 import type { TaskPlan } from "@/lib/types/http";
 
+const mockHydrateTaskPlanLastSeen = vi.fn();
 const mockMarkTaskPlanSeen = vi.fn();
 
 let mockActiveTaskId: string | null = "task-1";
@@ -13,12 +18,12 @@ vi.mock("@/components/state-provider", () => ({
     selector({
       tasks: { activeTaskId: mockActiveTaskId },
       taskPlans: {
-        byTaskId: mockActiveTaskId && mockPlan ? { [mockActiveTaskId]: mockPlan } : {},
         lastSeenUpdatedAtByTaskId:
           mockActiveTaskId && mockLastSeen !== undefined
             ? { [mockActiveTaskId]: mockLastSeen }
             : {},
       },
+      hydrateTaskPlanLastSeen: mockHydrateTaskPlanLastSeen,
       markTaskPlanSeen: mockMarkTaskPlanSeen,
     }),
 }));
@@ -73,6 +78,23 @@ function makeApi(isActive: boolean): TabApi {
   };
 }
 
+function renderPlanTab(isActive: boolean) {
+  const client = makeQueryClient();
+  if (mockActiveTaskId) {
+    client.setQueryData(qk.taskPlan.detail(mockActiveTaskId), mockPlan);
+  }
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client }, children);
+  return {
+    client,
+    ...render(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      <PlanTab {...({ api: makeApi(isActive) } as any)} />,
+      { wrapper },
+    ),
+  };
+}
+
 describe("PlanTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -82,68 +104,52 @@ describe("PlanTab", () => {
   });
 
   it("renders the indicator when an agent-authored plan is unseen", () => {
-    const { container } = render(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      <PlanTab {...({ api: makeApi(false) } as any)} />,
-    );
+    const { container } = renderPlanTab(false);
     expect(container.querySelector('[data-testid="plan-tab-indicator"]')).toBeTruthy();
   });
 
   it("does not render the indicator when the plan is user-authored", () => {
     mockPlan = { ...agentPlan(), created_by: "user" };
-    const { container } = render(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      <PlanTab {...({ api: makeApi(false) } as any)} />,
-    );
+    const { container } = renderPlanTab(false);
     expect(container.querySelector('[data-testid="plan-tab-indicator"]')).toBeNull();
   });
 
   it("does not render the indicator when lastSeen matches plan.updated_at", () => {
     mockLastSeen = TS;
-    const { container } = render(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      <PlanTab {...({ api: makeApi(false) } as any)} />,
-    );
+    const { container } = renderPlanTab(false);
     expect(container.querySelector('[data-testid="plan-tab-indicator"]')).toBeNull();
   });
 
   it("marks seen on initial render when api.isActive is true", () => {
-    render(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      <PlanTab {...({ api: makeApi(true) } as any)} />,
-    );
-    expect(mockMarkTaskPlanSeen).toHaveBeenCalledWith("task-1");
+    renderPlanTab(true);
+    expect(mockMarkTaskPlanSeen).toHaveBeenCalledWith("task-1", TS);
   });
 
   it("marks seen synchronously when an update lands while the tab is already active", () => {
     // Initial render with the tab active and plan already seen
     mockLastSeen = TS;
-    const { rerender } = render(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      <PlanTab {...({ api: makeApi(true) } as any)} />,
-    );
+    const { client, rerender } = renderPlanTab(true);
     mockMarkTaskPlanSeen.mockClear();
 
     // Plan updates while the tab is still active — re-render with new updated_at.
     mockPlan = agentPlan(TS_LATER);
+    client.setQueryData(qk.taskPlan.detail("task-1"), mockPlan);
     rerender(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       <PlanTab {...({ api: makeApi(true) } as any)} />,
     );
 
     // useLayoutEffect must have fired markTaskPlanSeen — keeps the dot from flashing.
-    expect(mockMarkTaskPlanSeen).toHaveBeenCalledWith("task-1");
+    expect(mockMarkTaskPlanSeen).toHaveBeenCalledWith("task-1", TS_LATER);
   });
 
   it("does not mark seen on update when the tab is not active", () => {
     mockLastSeen = TS;
-    const { rerender } = render(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      <PlanTab {...({ api: makeApi(false) } as any)} />,
-    );
+    const { client, rerender } = renderPlanTab(false);
     mockMarkTaskPlanSeen.mockClear();
 
     mockPlan = agentPlan(TS_LATER);
+    client.setQueryData(qk.taskPlan.detail("task-1"), mockPlan);
     rerender(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       <PlanTab {...({ api: makeApi(false) } as any)} />,

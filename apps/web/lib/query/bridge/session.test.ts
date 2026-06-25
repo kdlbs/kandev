@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BackendMessageMap, BackendMessageType } from "@/lib/types/backend";
 import type { BackendMessage } from "@/lib/types/backend-message";
-import type { TaskSession } from "@/lib/types/http";
+import type { TaskPlan, TaskSession } from "@/lib/types/http";
 import { agentProfileId } from "@/lib/types/ids";
 import type { WebSocketClient } from "@/lib/ws/client";
 import { makeQueryClient } from "../client";
@@ -15,6 +15,7 @@ const TEST_STARTED_AT = "2026-06-24T00:00:00Z";
 const TEST_UPDATED_AT = "2026-06-24T00:00:05Z";
 const TEST_AGENT_NAME = "Codex";
 const TEST_AGENT_ERROR = "peer disconnected before response";
+const TEST_PLAN_ID = "plan-1";
 
 type AnyBackendMessage = BackendMessage<string, Record<string, unknown>>;
 type Handler = (message: AnyBackendMessage) => void;
@@ -52,6 +53,19 @@ function makeSession(overrides: Partial<TaskSession> = {}): TaskSession {
     updated_at: TEST_STARTED_AT,
     ...overrides,
   } as TaskSession;
+}
+
+function makeTaskPlan(overrides: Partial<TaskPlan> = {}): TaskPlan {
+  return {
+    id: TEST_PLAN_ID,
+    task_id: TEST_TASK_ID,
+    title: "Plan",
+    content: "# Plan",
+    created_by: "agent",
+    created_at: TEST_STARTED_AT,
+    updated_at: TEST_UPDATED_AT,
+    ...overrides,
+  };
 }
 
 describe("session query bridge state events — identity", () => {
@@ -202,6 +216,46 @@ describe("session query bridge state events — metadata", () => {
         },
       ],
     });
+
+    cleanup();
+  });
+});
+
+describe("session query bridge task-plan events", () => {
+  it("upserts task plans into the query cache", () => {
+    const { ws, queryClient, cleanup } = setupBridge();
+
+    ws.emit({
+      type: "notification",
+      action: "task.plan.created",
+      payload: makeTaskPlan({ content: "# Created" }) as unknown as Record<string, unknown>,
+    });
+    ws.emit({
+      type: "notification",
+      action: "task.plan.updated",
+      payload: makeTaskPlan({ content: "# Updated" }) as unknown as Record<string, unknown>,
+    });
+
+    expect(queryClient.getQueryData(qk.taskPlan.detail(TEST_TASK_ID))).toMatchObject({
+      id: TEST_PLAN_ID,
+      task_id: TEST_TASK_ID,
+      content: "# Updated",
+    });
+
+    cleanup();
+  });
+
+  it("stores deleted task plans as null", () => {
+    const { ws, queryClient, cleanup } = setupBridge();
+    queryClient.setQueryData(qk.taskPlan.detail(TEST_TASK_ID), makeTaskPlan());
+
+    ws.emit({
+      type: "notification",
+      action: "task.plan.deleted",
+      payload: { task_id: TEST_TASK_ID },
+    });
+
+    expect(queryClient.getQueryData(qk.taskPlan.detail(TEST_TASK_ID))).toBeNull();
 
     cleanup();
   });

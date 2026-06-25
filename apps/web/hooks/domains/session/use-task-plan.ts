@@ -28,53 +28,33 @@ export function useTaskPlan(taskId: string | null, options?: { visible?: boolean
   const prevVisibleRef = useRef(visible);
   const connectionStatus = useAppStore((state) => state.connection.status);
   const planQuery = useQuery(taskPlanQueryOptions(taskId ?? "", connectionStatus === "connected"));
-  const storePlan = useAppStore((state) => (taskId ? state.taskPlans.byTaskId[taskId] : undefined));
-  const storeIsLoading = useAppStore((state) =>
-    taskId ? (state.taskPlans.loadingByTaskId[taskId] ?? false) : false,
-  );
-  const storeIsLoaded = useAppStore((state) =>
-    taskId ? (state.taskPlans.loadedByTaskId[taskId] ?? false) : false,
-  );
-  const isSaving = useAppStore((state) =>
-    taskId ? (state.taskPlans.savingByTaskId[taskId] ?? false) : false,
-  );
-  const setTaskPlan = useAppStore((state) => state.setTaskPlan);
-  const setTaskPlanLoading = useAppStore((state) => state.setTaskPlanLoading);
-  const setTaskPlanSaving = useAppStore((state) => state.setTaskPlanSaving);
+  const hydrateTaskPlanLastSeen = useAppStore((state) => state.hydrateTaskPlanLastSeen);
   const markTaskPlanSeen = useAppStore((state) => state.markTaskPlanSeen);
-  const plan = planQuery.data !== undefined ? planQuery.data : storePlan;
-  const isLoading = planQuery.isFetching || storeIsLoading;
-  const isLoaded = planQuery.isSuccess || storeIsLoaded;
+  const plan = planQuery.data;
+  const isLoading = planQuery.isFetching;
+  const isLoaded = planQuery.isSuccess;
 
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!taskId || planQuery.data === undefined) return;
-    setTaskPlan(taskId, planQuery.data);
-  }, [planQuery.data, setTaskPlan, taskId]);
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (!taskId) return;
-    setTaskPlanLoading(taskId, planQuery.isFetching);
-  }, [planQuery.isFetching, setTaskPlanLoading, taskId]);
+    hydrateTaskPlanLastSeen(taskId);
+  }, [hydrateTaskPlanLastSeen, taskId]);
 
   const fetchPlan = useCallback(async () => {
     if (!taskId) return;
 
-    setTaskPlanLoading(taskId, true);
     setError(null);
     try {
       const fetchedPlan = await queryClient.fetchQuery(taskPlanQueryOptions(taskId));
-      setTaskPlan(taskId, fetchedPlan);
       // Initial fetch is not a notification — mark as seen so no indicator flashes.
-      markTaskPlanSeen(taskId);
+      markTaskPlanSeen(taskId, fetchedPlan?.updated_at);
     } catch (err) {
       console.error("Failed to fetch task plan:", err);
       setError(err instanceof Error ? err.message : "Failed to fetch plan");
-    } finally {
-      setTaskPlanLoading(taskId, false);
     }
-  }, [taskId, setTaskPlan, setTaskPlanLoading, markTaskPlanSeen, queryClient]);
+  }, [taskId, markTaskPlanSeen, queryClient]);
 
   // Fetch plan on mount or when taskId changes
   useEffect(() => {
@@ -99,13 +79,13 @@ export function useTaskPlan(taskId: string | null, options?: { visible?: boolean
   const { savePlan, removePlan } = useTaskPlanMutations({
     taskId,
     plan,
-    setTaskPlan,
-    setTaskPlanSaving,
+    setIsSaving,
     setError,
     queryClient,
+    markTaskPlanSeen,
   });
 
-  const revisionsBundle = useTaskPlanRevisions(taskId, setTaskPlanSaving, setError, queryClient);
+  const revisionsBundle = useTaskPlanRevisions(taskId, setIsSaving, setError, queryClient);
 
   return {
     plan: plan ?? null,
@@ -122,60 +102,60 @@ export function useTaskPlan(taskId: string | null, options?: { visible?: boolean
 type TaskPlanMutationArgs = {
   taskId: string | null;
   plan: TaskPlan | null | undefined;
-  setTaskPlan: (taskId: string, plan: TaskPlan | null) => void;
-  setTaskPlanSaving: (taskId: string, saving: boolean) => void;
+  setIsSaving: (saving: boolean) => void;
   setError: (error: string | null) => void;
   queryClient: QueryClient;
+  markTaskPlanSeen: (taskId: string, updatedAt?: string | null) => void;
 };
 
 function useTaskPlanMutations({
   taskId,
   plan,
-  setTaskPlan,
-  setTaskPlanSaving,
+  setIsSaving,
   setError,
   queryClient,
+  markTaskPlanSeen,
 }: TaskPlanMutationArgs) {
   const savePlan = useCallback(
     async (content: string, title?: string): Promise<TaskPlan | null> => {
       if (!taskId) return null;
-      setTaskPlanSaving(taskId, true);
+      setIsSaving(true);
       setError(null);
       try {
         const savedPlan = plan
           ? await updateTaskPlan(taskId, content, title)
           : await createTaskPlan(taskId, content, title);
         queryClient.setQueryData(taskPlanQueryOptions(taskId).queryKey, savedPlan);
-        setTaskPlan(taskId, savedPlan);
+        markTaskPlanSeen(taskId, savedPlan.updated_at);
         return savedPlan;
       } catch (err) {
         console.error("Failed to save task plan:", err);
         setError(err instanceof Error ? err.message : "Failed to save plan");
         return null;
       } finally {
-        setTaskPlanSaving(taskId, false);
+        setIsSaving(false);
       }
     },
-    [taskId, plan, setTaskPlan, setTaskPlanSaving, setError, queryClient],
+    [taskId, plan, setIsSaving, setError, queryClient, markTaskPlanSeen],
   );
 
   const removePlan = useCallback(async (): Promise<boolean> => {
     if (!taskId) return false;
-    setTaskPlanSaving(taskId, true);
+    setIsSaving(true);
     setError(null);
     try {
       await deleteTaskPlan(taskId);
       queryClient.setQueryData(taskPlanQueryOptions(taskId).queryKey, null);
-      setTaskPlan(taskId, null);
+      markTaskPlanSeen(taskId, null);
       return true;
     } catch (err) {
       console.error("Failed to delete task plan:", err);
       setError(err instanceof Error ? err.message : "Failed to delete plan");
       return false;
     } finally {
-      setTaskPlanSaving(taskId, false);
+      setIsSaving(false);
     }
-  }, [taskId, setTaskPlan, setTaskPlanSaving, setError, queryClient]);
+  }, [taskId, setIsSaving, setError, queryClient, markTaskPlanSeen]);
 
   return { savePlan, removePlan };
 }
@@ -187,7 +167,7 @@ const EMPTY_PAIR: readonly [string | null, string | null] = Object.freeze([
 
 function useTaskPlanRevisions(
   taskId: string | null,
-  setTaskPlanSaving: (taskId: string, saving: boolean) => void,
+  setIsSaving: (saving: boolean) => void,
   setError: (err: string | null) => void,
   queryClient: QueryClient,
 ) {
@@ -232,7 +212,7 @@ function useTaskPlanRevisions(
   const revertTo = useCallback(
     async (revisionId: string, authorName?: string): Promise<TaskPlanRevision | null> => {
       if (!taskId) return null;
-      setTaskPlanSaving(taskId, true);
+      setIsSaving(true);
       setError(null);
       try {
         const revision = await revertPlanRevision(taskId, revisionId, authorName);
@@ -250,10 +230,10 @@ function useTaskPlanRevisions(
         setError(err instanceof Error ? err.message : "Failed to revert plan");
         return null;
       } finally {
-        setTaskPlanSaving(taskId, false);
+        setIsSaving(false);
       }
     },
-    [taskId, setTaskPlanSaving, setError, queryClient],
+    [taskId, setIsSaving, setError, queryClient],
   );
 
   return {

@@ -3,12 +3,12 @@ import { renderHook } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { makeQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
 import type { TaskPlan } from "@/lib/types/http";
 
 const mockAddPlanPanel = vi.fn();
 const mockGetPanel = vi.fn();
-const mockSetTaskPlan = vi.fn();
-const mockSetTaskPlanLoading = vi.fn();
+const mockHydrateTaskPlanLastSeen = vi.fn();
 const mockMarkTaskPlanSeen = vi.fn();
 const mockGetTaskPlan = vi.fn();
 
@@ -32,21 +32,17 @@ function buildState() {
   return {
     tasks: { activeTaskId: mockActiveTaskId },
     taskPlans: {
-      byTaskId: mockActiveTaskId && mockPlan ? { [mockActiveTaskId]: mockPlan } : {},
-      loadedByTaskId: mockActiveTaskId ? { [mockActiveTaskId]: mockIsLoaded } : {},
       lastSeenUpdatedAtByTaskId:
         mockActiveTaskId && mockLastSeen !== undefined ? { [mockActiveTaskId]: mockLastSeen } : {},
     },
     connection: { status: mockConnectionStatus },
-    setTaskPlan: mockSetTaskPlan,
-    setTaskPlanLoading: mockSetTaskPlanLoading,
+    hydrateTaskPlanLastSeen: mockHydrateTaskPlanLastSeen,
     markTaskPlanSeen: mockMarkTaskPlanSeen,
   };
 }
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) => selector(buildState()),
-  useAppStoreApi: () => ({ getState: () => buildState() }),
 }));
 
 vi.mock("@/lib/state/dockview-store", () => ({
@@ -87,9 +83,12 @@ function agentPlan(updated_at = TS): TaskPlan {
 
 function renderPlanPanelAutoOpen() {
   const client = makeQueryClient();
+  if (mockActiveTaskId && mockIsLoaded) {
+    client.setQueryData(qk.taskPlan.detail(mockActiveTaskId), mockPlan);
+  }
   const wrapper = ({ children }: { children: ReactNode }) =>
     createElement(QueryClientProvider, { client }, children);
-  return renderHook(() => usePlanPanelAutoOpen(), { wrapper });
+  return { ...renderHook(() => usePlanPanelAutoOpen(), { wrapper }), client };
 }
 
 describe("usePlanPanelAutoOpen", () => {
@@ -176,7 +175,6 @@ describe("usePlanPanelAutoOpen — eager fetch", () => {
     mockPlan = null;
     renderPlanPanelAutoOpen();
     expect(mockGetTaskPlan).toHaveBeenCalledWith("task-1");
-    expect(mockSetTaskPlanLoading).toHaveBeenCalledWith("task-1", true);
   });
 
   it("does not fetch when WS is disconnected", () => {
@@ -192,7 +190,7 @@ describe("usePlanPanelAutoOpen — eager fetch", () => {
     mockApi = makeApi();
     mockLastSeen = undefined;
     renderPlanPanelAutoOpen();
-    expect(mockMarkTaskPlanSeen).toHaveBeenCalledWith("task-1");
+    expect(mockMarkTaskPlanSeen).toHaveBeenCalledWith("task-1", TS);
     expect(mockAddPlanPanel).not.toHaveBeenCalled();
   });
 
@@ -218,7 +216,7 @@ describe("usePlanPanelAutoOpen — eager fetch", () => {
   it("does not acknowledge a panel it just auto-opened when the eager fetch re-applies the plan", () => {
     // First render: panel doesn't exist yet, so we auto-open it.
     mockGetPanel.mockReturnValue(null);
-    const { rerender } = renderPlanPanelAutoOpen();
+    const { client, rerender } = renderPlanPanelAutoOpen();
     expect(mockAddPlanPanel).toHaveBeenCalledTimes(1);
 
     // The eager getTaskPlan self-heal resolves after the WS push and
@@ -228,6 +226,7 @@ describe("usePlanPanelAutoOpen — eager fetch", () => {
     // mark the plan seen — that would suppress the indicator the user expects.
     mockGetPanel.mockReturnValue({ id: "plan" });
     mockPlan = agentPlan();
+    client.setQueryData(qk.taskPlan.detail("task-1"), mockPlan);
     rerender();
 
     expect(mockMarkTaskPlanSeen).not.toHaveBeenCalled();
@@ -278,13 +277,15 @@ describe("usePlanPanelAutoOpen — race guards", () => {
           resolveFn = resolve;
         }),
     );
-    renderPlanPanelAutoOpen();
+    const { client } = renderPlanPanelAutoOpen();
     // WS delivers the latest plan while the HTTP fetch is in flight.
-    mockPlan = agentPlan(TS_LATER);
+    client.setQueryData(qk.taskPlan.detail("task-1"), agentPlan(TS_LATER));
     // HTTP resolves with an older snapshot of the same plan.
     resolveFn(agentPlan(TS));
     await new Promise((r) => setTimeout(r, 0));
-    expect(mockSetTaskPlan).not.toHaveBeenCalled();
+    expect(client.getQueryData(qk.taskPlan.detail("task-1"))).toMatchObject({
+      updated_at: TS_LATER,
+    });
   });
 
   it("does not overwrite a WS-delivered plan when the fetch resolves with null", async () => {
@@ -297,12 +298,14 @@ describe("usePlanPanelAutoOpen — race guards", () => {
           resolveFn = resolve;
         }),
     );
-    renderPlanPanelAutoOpen();
-    // Simulate a WS event populating the store while the HTTP fetch is in flight.
-    mockPlan = agentPlan();
+    const { client } = renderPlanPanelAutoOpen();
+    // Simulate a WS event populating the query cache while the HTTP fetch is in flight.
+    client.setQueryData(qk.taskPlan.detail("task-1"), agentPlan());
     resolveFn(null);
     await new Promise((r) => setTimeout(r, 0));
-    expect(mockSetTaskPlan).not.toHaveBeenCalled();
+    expect(client.getQueryData(qk.taskPlan.detail("task-1"))).toMatchObject({
+      updated_at: TS,
+    });
   });
 
   it("retries the eager fetch after WS reconnects following a failure", async () => {

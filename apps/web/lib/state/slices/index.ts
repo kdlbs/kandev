@@ -87,14 +87,12 @@ export type {
   PreviewDevicePreset,
   PreviewPanelState,
   RightPanelState,
-  DiffState,
   ConnectionState,
   MobileKanbanState,
   MobileSessionPanel,
   MobileSessionState,
   ActiveDocument,
   DocumentPanelState,
-  SystemHealthState,
 } from "./ui/types";
 export type {
   AgentProfile,

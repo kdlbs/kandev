@@ -6,11 +6,9 @@ import { registerSessionInfoHandlers } from "@/lib/ws/handlers/session-info";
 
 import { registerMessagesHandlers } from "@/lib/ws/handlers/messages";
 import { registerNotificationsHandlers } from "@/lib/ws/handlers/notifications";
-import { registerDiffsHandlers } from "@/lib/ws/handlers/diffs";
 import { registerExecutorPrepareHandlers } from "@/lib/ws/handlers/executor-prepare";
 import { registerGitStatusHandlers } from "@/lib/ws/handlers/git-status";
 import { registerTasksHandlers } from "@/lib/ws/handlers/tasks";
-import { registerTaskPlansHandlers } from "@/lib/ws/handlers/task-plans";
 import { registerTerminalsHandlers } from "@/lib/ws/handlers/terminals";
 import { registerTurnsHandlers } from "@/lib/ws/handlers/turns";
 import { registerUsersHandlers } from "@/lib/ws/handlers/users";
@@ -21,7 +19,6 @@ import { registerRunHandlers } from "@/lib/ws/handlers/run";
 export function registerWsHandlers(store: StoreApi<AppState>) {
   return {
     ...registerTasksHandlers(store),
-    ...registerTaskPlansHandlers(store),
 
     ...registerWorkspacesHandlers(store),
     ...registerExecutorPrepareHandlers(store),
@@ -30,7 +27,6 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerSessionInfoHandlers(store),
     ...registerUsersHandlers(store),
     ...registerTerminalsHandlers(store),
-    ...registerDiffsHandlers(store),
     ...registerMessagesHandlers(store),
     ...registerNotificationsHandlers(store),
     ...registerGitStatusHandlers(store),

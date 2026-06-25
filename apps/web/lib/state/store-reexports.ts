@@ -35,7 +35,6 @@ export type {
   PreviewDevicePreset,
   PreviewPanelState,
   RightPanelState,
-  DiffState,
   ConnectionState,
   MobileKanbanState,
   GitHubSlice,

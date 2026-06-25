@@ -121,10 +121,6 @@ export const defaultSessionState: SessionSliceState = {
   sessionWorktreesBySessionId: { itemsBySessionId: {} },
   activeModel: { bySessionId: {} },
   taskPlans: {
-    byTaskId: {},
-    loadingByTaskId: {},
-    loadedByTaskId: {},
-    savingByTaskId: {},
     previewRevisionIdByTaskId: {},
     comparePairByTaskId: {},
     lastSeenUpdatedAtByTaskId: {},
@@ -229,29 +225,16 @@ function buildMessageActions(set: ImmerSet) {
 
 function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
   return {
-    setTaskPlan: (taskId: string, plan: Parameters<SessionSlice["setTaskPlan"]>[1]) => {
-      const shouldHydrateLastSeen = get().taskPlans.lastSeenUpdatedAtByTaskId[taskId] === undefined;
-      const storedLastSeen = shouldHydrateLastSeen ? getPlanLastSeen(taskId) : null;
+    hydrateTaskPlanLastSeen: (taskId: string) => {
+      if (get().taskPlans.lastSeenUpdatedAtByTaskId[taskId] !== undefined) return;
+      const storedLastSeen = getPlanLastSeen(taskId);
+      if (storedLastSeen === null) return;
       set((draft) => {
-        draft.taskPlans.byTaskId[taskId] = plan;
-        draft.taskPlans.loadingByTaskId[taskId] = false;
-        draft.taskPlans.loadedByTaskId[taskId] = true;
-        if (shouldHydrateLastSeen && storedLastSeen !== null) {
-          draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId] = storedLastSeen;
-        }
+        draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId] = storedLastSeen;
       });
     },
-    setTaskPlanLoading: (taskId: string, loading: boolean) =>
-      set((draft) => {
-        draft.taskPlans.loadingByTaskId[taskId] = loading;
-      }),
-    setTaskPlanSaving: (taskId: string, saving: boolean) =>
-      set((draft) => {
-        draft.taskPlans.savingByTaskId[taskId] = saving;
-      }),
-    markTaskPlanSeen: (taskId: string) => {
-      const plan = get().taskPlans.byTaskId[taskId];
-      const lastSeen = plan?.updated_at ?? "";
+    markTaskPlanSeen: (taskId: string, updatedAt?: string | null) => {
+      const lastSeen = updatedAt ?? "";
       setPlanLastSeen(taskId, lastSeen);
       set((draft) => {
         draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId] = lastSeen;

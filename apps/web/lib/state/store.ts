@@ -2,7 +2,6 @@ import { createStore } from "zustand/vanilla";
 import { immer } from "zustand/middleware/immer";
 import { hydrateState, type HydrationOptions } from "./hydration/hydrator";
 import type { Message, Turn, TaskSession } from "@/lib/types/http";
-import type { SystemHealthResponse } from "@/lib/types/health";
 import type { UISliceActions as UIA } from "./slices/ui/types";
 import type * as UISliceTypes from "./slices/ui/types";
 import { mergeInitialState } from "./default-state";
@@ -122,13 +121,11 @@ export type AppState = {
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
   rightPanel: (typeof defaultUIState)["rightPanel"];
-  diffs: (typeof defaultUIState)["diffs"];
   connection: (typeof defaultUIState)["connection"];
   mobileKanban: (typeof defaultUIState)["mobileKanban"];
   mobileSession: (typeof defaultUIState)["mobileSession"];
   chatInput: (typeof defaultUIState)["chatInput"];
   documentPanel: (typeof defaultUIState)["documentPanel"];
-  systemHealth: (typeof defaultUIState)["systemHealth"];
   quickChat: (typeof defaultUIState)["quickChat"];
   configChat: (typeof defaultUIState)["configChat"];
   sessionFailureNotification: (typeof defaultUIState)["sessionFailureNotification"];
@@ -172,9 +169,6 @@ export type AppState = {
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
   setActiveDocument: (sessionId: string, doc: UISliceTypes.ActiveDocument | null) => void;
-  setSystemHealth: (response: SystemHealthResponse) => void;
-  setSystemHealthLoading: (loading: boolean) => void;
-  invalidateSystemHealth: () => void;
   openQuickChat: (sessionId: string, workspaceId: string, agentProfileId?: string) => void;
   closeQuickChat: () => void;
   closeQuickChatSession: (sessionId: string) => void;
@@ -249,10 +243,8 @@ export type AppState = {
   clearContextWindow: (sessionId: string) => void;
   setActiveModel: (sessionId: string, modelId: string) => void;
   // Task plan actions
-  setTaskPlan: (taskId: string, plan: import("@/lib/types/http").TaskPlan | null) => void;
-  setTaskPlanLoading: (taskId: string, loading: boolean) => void;
-  setTaskPlanSaving: (taskId: string, saving: boolean) => void;
-  markTaskPlanSeen: (taskId: string) => void;
+  hydrateTaskPlanLastSeen: (taskId: string) => void;
+  markTaskPlanSeen: (taskId: string, updatedAt?: string | null) => void;
   // Plan revision preview + compare actions
   setPreviewRevision: (taskId: string, revisionId: string | null) => void;
   toggleComparePair: (taskId: string, revisionId: string) => void;

@@ -1,13 +1,16 @@
 "use client";
 
 import { useState, useCallback, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
 import { useSessionChangesCount } from "@/hooks/domains/session/use-session-changes-count";
 import { getPlanLastSeen } from "@/lib/local-storage";
+import { taskPlanQueryOptions } from "@/lib/query/query-options";
 import { executeApprove } from "@/lib/services/session-approve";
 import type { OpenFileTab } from "@/lib/types/backend";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 import { isPassthroughSession } from "@/lib/session/is-passthrough-session";
+import type { TaskPlan } from "@/lib/types/http";
 
 export type SelectedDiff = {
   path: string;
@@ -55,6 +58,30 @@ function useOpenFileRequestState() {
   }, []);
 
   return { openFileRequest, handleOpenFile, handleFileOpenHandled };
+}
+
+function hasUnseenAgentPlanUpdate(
+  activeTaskId: string | null,
+  plan: TaskPlan | null,
+  currentMobilePanel: MobileSessionPanel,
+) {
+  if (!activeTaskId || !plan || currentMobilePanel === "plan") return false;
+  if (plan.created_by !== "agent") return false;
+  return plan.updated_at !== getPlanLastSeen(activeTaskId);
+}
+
+function usePlanBadgeState(activeTaskId: string | null, currentMobilePanel: MobileSessionPanel) {
+  const planQuery = useQuery({
+    ...taskPlanQueryOptions(activeTaskId ?? "", false),
+    enabled: false,
+  });
+  const plan = planQuery.data ?? null;
+
+  const hasUnseenPlanUpdate = useMemo(() => {
+    return hasUnseenAgentPlanUpdate(activeTaskId, plan, currentMobilePanel);
+  }, [activeTaskId, plan, currentMobilePanel]);
+
+  return { plan, hasUnseenPlanUpdate };
 }
 
 /**
@@ -114,17 +141,7 @@ export function useSessionLayoutState(options: UseSessionLayoutStateOptions = {}
     : "chat";
 
   // --- Plan badge ---
-  const plan = useAppStore((state) =>
-    activeTaskId ? state.taskPlans.byTaskId[activeTaskId] : null,
-  );
-
-  const hasUnseenPlanUpdate = useMemo(() => {
-    // Don't show badge if we're viewing the plan
-    if (!activeTaskId || !plan || currentMobilePanel === "plan") return false;
-    if (plan.created_by !== "agent") return false;
-    const lastSeen = getPlanLastSeen(activeTaskId);
-    return plan.updated_at !== lastSeen;
-  }, [activeTaskId, plan, currentMobilePanel]);
+  const { plan, hasUnseenPlanUpdate } = usePlanBadgeState(activeTaskId, currentMobilePanel);
 
   // --- Approve button logic ---
   const showApproveButton =

@@ -1,4 +1,4 @@
-import type { Message, TaskSession, Turn, TaskPlan } from "@/lib/types/http";
+import type { Message, TaskSession, Turn } from "@/lib/types/http";
 
 export type MessagesState = {
   bySession: Record<string, Message[]>;
@@ -63,10 +63,6 @@ export type ActiveModelState = {
 export type ComparePair = [string | null, string | null];
 
 export type TaskPlansState = {
-  byTaskId: Record<string, TaskPlan | null>;
-  loadingByTaskId: Record<string, boolean>;
-  loadedByTaskId: Record<string, boolean>;
-  savingByTaskId: Record<string, boolean>;
   // Phase 6: preview + compare state
   previewRevisionIdByTaskId: Record<string, string | null>;
   comparePairByTaskId: Record<string, ComparePair>;
@@ -170,11 +166,9 @@ export type SessionSliceActions = {
   setWorktree: (worktree: Worktree) => void;
   setSessionWorktrees: (sessionId: string, worktreeIds: string[]) => void;
   setActiveModel: (sessionId: string, modelId: string) => void;
-  // Task plan actions
-  setTaskPlan: (taskId: string, plan: TaskPlan | null) => void;
-  setTaskPlanLoading: (taskId: string, loading: boolean) => void;
-  setTaskPlanSaving: (taskId: string, saving: boolean) => void;
-  markTaskPlanSeen: (taskId: string) => void;
+  // Task plan UI actions. The plan DTO itself is TanStack Query-owned.
+  hydrateTaskPlanLastSeen: (taskId: string) => void;
+  markTaskPlanSeen: (taskId: string, updatedAt?: string | null) => void;
   // Phase 6: preview + compare actions
   setPreviewRevision: (taskId: string, revisionId: string | null) => void;
   toggleComparePair: (taskId: string, revisionId: string) => void;

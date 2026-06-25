@@ -3,7 +3,6 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createSessionSlice } from "./session-slice";
 import type { SessionSlice } from "./types";
-import type { TaskPlan } from "@/lib/types/http";
 
 const mockGetPlanLastSeen = vi.fn();
 const mockSetPlanLastSeen = vi.fn();
@@ -18,22 +17,7 @@ function makeStore() {
 }
 
 const TASK_ID = "task-1";
-const TS_EPOCH = "2026-04-20T00:00:00Z";
 const TS_LATER = "2026-04-20T01:00:00Z";
-const TS_LATEST = "2026-04-20T02:00:00Z";
-
-function makePlan(overrides: Partial<TaskPlan> = {}): TaskPlan {
-  return {
-    id: "plan-1",
-    task_id: TASK_ID,
-    title: "Plan",
-    content: "# Plan",
-    created_by: "agent",
-    created_at: TS_EPOCH,
-    updated_at: TS_EPOCH,
-    ...overrides,
-  };
-}
 
 describe("task plan slice", () => {
   beforeEach(() => {
@@ -41,11 +25,10 @@ describe("task plan slice", () => {
     mockGetPlanLastSeen.mockReturnValue(null);
   });
 
-  it("markTaskPlanSeen writes the current plan updated_at", () => {
+  it("markTaskPlanSeen writes the provided plan updated_at", () => {
     const store = makeStore();
-    store.getState().setTaskPlan(TASK_ID, makePlan({ updated_at: TS_LATER }));
 
-    store.getState().markTaskPlanSeen(TASK_ID);
+    store.getState().markTaskPlanSeen(TASK_ID, TS_LATER);
 
     expect(store.getState().taskPlans.lastSeenUpdatedAtByTaskId[TASK_ID]).toBe(TS_LATER);
     expect(mockSetPlanLastSeen).toHaveBeenCalledWith(TASK_ID, TS_LATER);
@@ -60,31 +43,37 @@ describe("task plan slice", () => {
     expect(mockSetPlanLastSeen).toHaveBeenCalledWith("task-missing", "");
   });
 
-  it("setTaskPlan hydrates stored lastSeenUpdatedAtByTaskId", () => {
+  it("hydrates stored lastSeenUpdatedAtByTaskId", () => {
     mockGetPlanLastSeen.mockReturnValue(TS_LATER);
     const store = makeStore();
 
-    store.getState().setTaskPlan(TASK_ID, makePlan({ updated_at: TS_LATER }));
+    store.getState().hydrateTaskPlanLastSeen(TASK_ID);
 
     expect(store.getState().taskPlans.lastSeenUpdatedAtByTaskId[TASK_ID]).toBe(TS_LATER);
   });
 
-  it("setTaskPlan does not change lastSeenUpdatedAtByTaskId", () => {
+  it("does not rehydrate over explicit lastSeenUpdatedAtByTaskId", () => {
     const store = makeStore();
-    store.getState().setTaskPlan(TASK_ID, makePlan({ updated_at: TS_EPOCH }));
-    store.getState().markTaskPlanSeen(TASK_ID);
+    store.getState().markTaskPlanSeen(TASK_ID, TS_LATER);
+    mockGetPlanLastSeen.mockReturnValue("2026-04-20T02:00:00Z");
 
-    // New update arrives — seen should NOT advance automatically
-    store.getState().setTaskPlan(TASK_ID, makePlan({ updated_at: TS_LATEST }));
+    store.getState().hydrateTaskPlanLastSeen(TASK_ID);
 
-    expect(store.getState().taskPlans.lastSeenUpdatedAtByTaskId[TASK_ID]).toBe(TS_EPOCH);
+    expect(store.getState().taskPlans.lastSeenUpdatedAtByTaskId[TASK_ID]).toBe(TS_LATER);
   });
 
-  it("does not expose plan revision server-state through the session slice", () => {
+  it("does not expose task-plan DTO server-state through the session slice", () => {
     const state = makeStore().getState() as unknown as {
       taskPlans: Record<string, unknown>;
     } & Record<string, unknown>;
 
+    expect("byTaskId" in state.taskPlans).toBe(false);
+    expect("loadingByTaskId" in state.taskPlans).toBe(false);
+    expect("loadedByTaskId" in state.taskPlans).toBe(false);
+    expect("savingByTaskId" in state.taskPlans).toBe(false);
+    expect("setTaskPlan" in state).toBe(false);
+    expect("setTaskPlanLoading" in state).toBe(false);
+    expect("setTaskPlanSaving" in state).toBe(false);
     expect("revisionsByTaskId" in state.taskPlans).toBe(false);
     expect("revisionsLoadingByTaskId" in state.taskPlans).toBe(false);
     expect("revisionsLoadedByTaskId" in state.taskPlans).toBe(false);
