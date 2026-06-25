@@ -18,14 +18,26 @@ type MermaidFitScaleInput = {
   defaultScale?: number;
 };
 
+function clampScale(scale: number): number {
+  return Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale));
+}
+
 export function calculateMermaidFitScale({
   viewportWidth,
   svgWidth,
   defaultScale = DEFAULT_SCALE,
 }: MermaidFitScaleInput): number {
-  if (viewportWidth <= 0 || svgWidth <= 0) return defaultScale;
-  const fitScale = Math.min(defaultScale, viewportWidth / svgWidth);
-  return Math.max(MIN_SCALE, Math.min(MAX_SCALE, fitScale));
+  const clampedDefault = clampScale(defaultScale);
+  if (viewportWidth <= 0 || svgWidth <= 0) return clampedDefault;
+  const fitScale = Math.min(clampedDefault, viewportWidth / svgWidth);
+  return clampScale(fitScale);
+}
+
+export function getElementContentWidth(element: HTMLElement): number {
+  const style = window.getComputedStyle(element);
+  const padding =
+    Number.parseFloat(style.paddingLeft || "0") + Number.parseFloat(style.paddingRight || "0");
+  return Math.max(0, element.clientWidth - padding);
 }
 
 export function emitMermaidRenderError(message: string): void {

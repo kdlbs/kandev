@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SCALE, calculateMermaidFitScale, sanitizeMermaidCode } from "./mermaid-utils";
+import {
+  DEFAULT_SCALE,
+  MAX_SCALE,
+  calculateMermaidFitScale,
+  getElementContentWidth,
+  sanitizeMermaidCode,
+} from "./mermaid-utils";
 
 describe("calculateMermaidFitScale", () => {
   it("keeps the default scale when the diagram already fits", () => {
@@ -17,6 +23,37 @@ describe("calculateMermaidFitScale", () => {
   it("uses the default scale until valid measurements are available", () => {
     expect(calculateMermaidFitScale({ viewportWidth: 0, svgWidth: 1200 })).toBe(DEFAULT_SCALE);
     expect(calculateMermaidFitScale({ viewportWidth: 600, svgWidth: 0 })).toBe(DEFAULT_SCALE);
+  });
+
+  it("honors an explicit default scale as the maximum fitted scale", () => {
+    expect(calculateMermaidFitScale({ viewportWidth: 900, svgWidth: 800, defaultScale: 1 })).toBe(
+      1,
+    );
+    expect(calculateMermaidFitScale({ viewportWidth: 600, svgWidth: 800, defaultScale: 1 })).toBe(
+      0.75,
+    );
+  });
+
+  it("clamps explicit default scales before using them", () => {
+    expect(calculateMermaidFitScale({ viewportWidth: 0, svgWidth: 1200, defaultScale: 99 })).toBe(
+      MAX_SCALE,
+    );
+  });
+});
+
+describe("getElementContentWidth", () => {
+  it("subtracts horizontal padding from the element client width", () => {
+    const el = document.createElement("div");
+    el.style.paddingLeft = "10px";
+    el.style.paddingRight = "5px";
+    Object.defineProperty(el, "clientWidth", { value: 100, configurable: true });
+
+    document.body.appendChild(el);
+    try {
+      expect(getElementContentWidth(el)).toBe(85);
+    } finally {
+      el.remove();
+    }
   });
 });
 

@@ -9,6 +9,7 @@ import {
   MIN_SCALE,
   MAX_SCALE,
   calculateMermaidFitScale,
+  getElementContentWidth,
   getSvgDimensions,
   sanitizeMermaidCode,
   cleanupMermaidOrphans,
@@ -42,11 +43,11 @@ type MermaidBlockProps = {
 
 type ToastFn = ReturnType<typeof useToast>["toast"];
 
-function getElementContentWidth(element: HTMLElement): number {
-  const style = window.getComputedStyle(element);
-  const padding =
-    Number.parseFloat(style.paddingLeft || "0") + Number.parseFloat(style.paddingRight || "0");
-  return Math.max(0, element.clientWidth - padding);
+function sameSvgSize(
+  a: { w: number; h: number } | null,
+  b: { w: number; h: number } | null,
+): boolean {
+  return a?.w === b?.w && a?.h === b?.h;
 }
 
 function useMermaidViewportWidth(scrollRegionRef: RefObject<HTMLElement | null>): number {
@@ -54,6 +55,7 @@ function useMermaidViewportWidth(scrollRegionRef: RefObject<HTMLElement | null>)
 
   const measureViewport = useCallback(() => {
     if (!scrollRegionRef.current) return;
+    if (window.getComputedStyle(scrollRegionRef.current).display === "none") return;
     setViewportWidth(getElementContentWidth(scrollRegionRef.current));
   }, [scrollRegionRef]);
 
@@ -82,7 +84,7 @@ function useMermaidScale(svgSize: { w: number; h: number } | null, viewportWidth
     ? calculateMermaidFitScale({ viewportWidth, svgWidth: svgSize.w })
     : DEFAULT_SCALE;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!manualScale) {
       setScale(fitScale);
     }
@@ -191,8 +193,12 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
   // render (svg state change).
   useLayoutEffect(() => {
     if (svg && containerRef.current) {
-      setSvgSize(getSvgDimensions(containerRef.current));
-      resetAutoScale();
+      const nextSize = getSvgDimensions(containerRef.current);
+      setSvgSize((prevSize) => {
+        if (sameSvgSize(prevSize, nextSize)) return prevSize;
+        resetAutoScale();
+        return nextSize;
+      });
       return;
     }
     // svg reset back to null — drop the stale footprint so the wrapper

@@ -52,7 +52,7 @@ export async function seedTaskWithWideMermaidMessage(
 }
 
 export async function expectMermaidDiagramFitsViewport(session: SessionPage): Promise<void> {
-  const block = session.chat.locator(".mermaid-block").last();
+  const block = session.activeChat().locator(".mermaid-block").last();
   await expect(block).toBeVisible({ timeout: 30_000 });
   await expect(block.locator(".mermaid-scroll-region svg")).toBeVisible({ timeout: 30_000 });
 
