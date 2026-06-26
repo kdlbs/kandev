@@ -6,60 +6,98 @@ import { qk } from "../keys";
 import { registerBridgeHandlers, type QueryBridgeRegistration } from "./registrar";
 
 type SessionStateChangedMessage = BackendMessageMap["session.state_changed"];
+type OfficeBridgeHandlers = Parameters<typeof registerBridgeHandlers>[2];
 
 export function registerOfficeBridge(
   ws: WebSocketClient,
   queryClient: QueryClient,
 ): QueryBridgeRegistration {
-  return registerBridgeHandlers(ws, queryClient, {
+  return registerBridgeHandlers(ws, queryClient, officeBridgeHandlers(queryClient));
+}
+
+function officeBridgeHandlers(queryClient: QueryClient): OfficeBridgeHandlers {
+  return {
+    ...taskBridgeHandlers(queryClient),
+    ...agentBridgeHandlers(queryClient),
+    ...miscBridgeHandlers(queryClient),
+    ...routingBridgeHandlers(queryClient),
+    "session.state_changed": (message) => {
+      invalidateSessionDrivenOfficeSurfaces(queryClient, message);
+    },
+  };
+}
+
+function taskBridgeHandlers(queryClient: QueryClient): OfficeBridgeHandlers {
+  return {
     "office.task.updated": (message) => {
       patchOfficeTask(queryClient, message.payload);
       invalidateTaskSurfaces(queryClient, message.payload);
+      invalidateTaskLinkedSurfaces(queryClient, message.payload);
       invalidateDashboard(queryClient, message.payload.workspace_id);
     },
     "office.task.created": (message) => {
       invalidateTaskSurfaces(queryClient, message.payload);
-      invalidateProjects(queryClient, message.payload.workspace_id);
+      invalidateTaskLinkedSurfaces(queryClient, message.payload);
       invalidateDashboard(queryClient, message.payload.workspace_id);
     },
     "office.task.moved": (message) => {
       patchOfficeTask(queryClient, message.payload);
       invalidateTaskSurfaces(queryClient, message.payload);
+      invalidateTaskLinkedSurfaces(queryClient, message.payload);
       invalidateActivity(queryClient, message.payload.workspace_id);
       invalidateDashboard(queryClient, message.payload.workspace_id);
     },
     "office.task.status_changed": (message) => {
       patchOfficeTask(queryClient, message.payload);
       invalidateTaskSurfaces(queryClient, message.payload);
+      invalidateTaskLinkedSurfaces(queryClient, message.payload);
       invalidateDashboard(queryClient, message.payload.workspace_id);
     },
     "office.comment.created": (message) => {
       invalidateTaskDetail(queryClient, message.payload);
       invalidateTaskComments(queryClient, message.payload);
+      invalidateTaskActivity(queryClient, message.payload);
       invalidateActivity(queryClient, message.payload.workspace_id);
     },
     "office.task.decision_recorded": (message) => {
       invalidateTaskDetail(queryClient, message.payload);
+      invalidateTaskActivity(queryClient, message.payload);
       invalidateInbox(queryClient, message.payload.workspace_id);
     },
     "office.task.review_requested": (message) => {
       invalidateTaskDetail(queryClient, message.payload);
+      invalidateTaskActivity(queryClient, message.payload);
       invalidateInbox(queryClient, message.payload.workspace_id);
     },
+  };
+}
+
+function agentBridgeHandlers(queryClient: QueryClient): OfficeBridgeHandlers {
+  return {
     "office.agent.completed": (message) => {
       patchAgentStatus(queryClient, message.payload, "idle");
       invalidateAgentsDashboardRuns(queryClient, message.payload.workspace_id);
+      invalidateAgentSummaries(queryClient, message.payload);
+      invalidateAgentRunSurfaces(queryClient, message.payload);
       invalidateActivity(queryClient, message.payload.workspace_id);
     },
     "office.agent.failed": (message) => {
       patchAgentStatus(queryClient, message.payload, "idle");
       invalidateAgentsDashboardRuns(queryClient, message.payload.workspace_id);
+      invalidateAgentSummaries(queryClient, message.payload);
+      invalidateAgentRunSurfaces(queryClient, message.payload);
       invalidateInbox(queryClient, message.payload.workspace_id);
     },
     "office.agent.updated": (message) => {
       invalidateAgents(queryClient, message.payload.workspace_id);
+      invalidateAgentSummaries(queryClient, message.payload);
       invalidateDashboard(queryClient, message.payload.workspace_id);
     },
+  };
+}
+
+function miscBridgeHandlers(queryClient: QueryClient): OfficeBridgeHandlers {
+  return {
     "office.approval.created": (message) => {
       invalidateInbox(queryClient, message.payload.workspace_id);
       invalidateDashboard(queryClient, message.payload.workspace_id);
@@ -67,9 +105,12 @@ export function registerOfficeBridge(
     "office.approval.resolved": (message) => {
       invalidateInbox(queryClient, message.payload.workspace_id);
       invalidateDashboard(queryClient, message.payload.workspace_id);
+      invalidateAgents(queryClient, message.payload.workspace_id);
+      invalidateAgentSummaries(queryClient, message.payload);
     },
     "office.cost.recorded": (message) => {
       invalidateCosts(queryClient, message.payload.workspace_id);
+      invalidateAgentSummaries(queryClient, message.payload);
       invalidateDashboard(queryClient, message.payload.workspace_id);
     },
     "office.run.queued": (message) => {
@@ -83,20 +124,24 @@ export function registerOfficeBridge(
       invalidateActivity(queryClient, message.payload.workspace_id);
       invalidateDashboard(queryClient, message.payload.workspace_id);
     },
+  };
+}
+
+function routingBridgeHandlers(queryClient: QueryClient): OfficeBridgeHandlers {
+  return {
     "office.provider.health_changed": (message) => {
       patchProviderHealth(queryClient, message.payload);
       invalidateRoutingSurfaces(queryClient, message.payload.workspace_id);
     },
     "office.route_attempt.appended": (message) => {
       patchRouteAttempt(queryClient, message.payload);
+      invalidateAgentRoutes(queryClient, message.payload);
     },
     "office.routing.settings_updated": (message) => {
       invalidateRoutingConfig(queryClient, message.payload.workspace_id);
+      invalidateAgentRoutes(queryClient);
     },
-    "session.state_changed": (message) => {
-      invalidateSessionDrivenOfficeSurfaces(queryClient, message);
-    },
-  });
+  };
 }
 
 function patchOfficeTask(queryClient: QueryClient, payload: OfficeEventPayload): void {
@@ -203,6 +248,38 @@ function invalidateTaskComments(queryClient: QueryClient, payload: OfficeEventPa
   queryClient.invalidateQueries({ exact: true, queryKey: qk.office.taskComments(taskId) });
 }
 
+function invalidateTaskActivity(queryClient: QueryClient, payload: OfficeEventPayload): void {
+  const taskId = readId(payload.task_id ?? payload.id);
+  if (!taskId) return;
+  if (payload.workspace_id) {
+    queryClient.invalidateQueries({
+      exact: true,
+      queryKey: qk.office.taskActivity(payload.workspace_id, taskId),
+    });
+    return;
+  }
+  queryClient.invalidateQueries({
+    predicate: (query) =>
+      query.queryKey[0] === "office" &&
+      query.queryKey[1] === "workspaces" &&
+      query.queryKey[3] === "tasks" &&
+      query.queryKey[4] === taskId &&
+      query.queryKey[5] === "activity",
+  });
+}
+
+function invalidateTaskLinkedSurfaces(queryClient: QueryClient, payload: OfficeEventPayload): void {
+  invalidateProjects(queryClient, payload.workspace_id);
+  invalidateProjectDetail(queryClient, payload);
+  invalidateAgentSummaries(queryClient, payload);
+}
+
+function invalidateProjectDetail(queryClient: QueryClient, payload: OfficeEventPayload): void {
+  const projectId = readId(payload.project_id ?? payload.projectId);
+  if (!projectId) return;
+  queryClient.invalidateQueries({ exact: true, queryKey: qk.office.project(projectId) });
+}
+
 function invalidateAgentsDashboardRuns(queryClient: QueryClient, workspaceId?: string): void {
   invalidateAgents(queryClient, workspaceId);
   invalidateDashboard(queryClient, workspaceId);
@@ -212,8 +289,39 @@ function invalidateAgentsDashboardRuns(queryClient: QueryClient, workspaceId?: s
 function invalidateRunsAndTask(queryClient: QueryClient, payload: OfficeEventPayload): void {
   invalidateWorkspaceFamily(queryClient, payload.workspace_id, "runs");
   invalidateAgents(queryClient, payload.workspace_id);
+  invalidateDashboard(queryClient, payload.workspace_id);
+  invalidateAgentSummaries(queryClient, payload);
+  invalidateAgentRunSurfaces(queryClient, payload);
   invalidateTaskDetail(queryClient, payload);
   invalidateTaskComments(queryClient, payload);
+  invalidateTaskActivity(queryClient, payload);
+}
+
+function invalidateAgentSummaries(queryClient: QueryClient, payload?: OfficeEventPayload): void {
+  const agentId = payload ? readAgentId(payload) : null;
+  if (agentId) {
+    queryClient.invalidateQueries({ queryKey: ["office", "agents", agentId, "summary"] });
+    return;
+  }
+  queryClient.invalidateQueries({ predicate: isAgentSummaryQuery });
+}
+
+function invalidateAgentRunSurfaces(queryClient: QueryClient, payload?: OfficeEventPayload): void {
+  const agentId = payload ? readAgentId(payload) : null;
+  if (agentId) {
+    queryClient.invalidateQueries({ queryKey: ["office", "agents", agentId, "runs"] });
+    return;
+  }
+  queryClient.invalidateQueries({ predicate: isAgentRunsQuery });
+}
+
+function invalidateAgentRoutes(queryClient: QueryClient, payload?: OfficeEventPayload): void {
+  const agentId = payload ? readAgentId(payload) : null;
+  if (agentId) {
+    queryClient.invalidateQueries({ exact: true, queryKey: qk.office.agentRoute(agentId) });
+    return;
+  }
+  queryClient.invalidateQueries({ predicate: isAgentRouteQuery });
 }
 
 function invalidateSessionDrivenOfficeSurfaces(
@@ -226,6 +334,8 @@ function invalidateSessionDrivenOfficeSurfaces(
     queryKey: ["office", "workspaces"],
     predicate: isDashboardOrAgentsQuery,
   });
+  invalidateAgentSummaries(queryClient);
+  invalidateAgentRunSurfaces(queryClient);
 }
 
 function invalidateDashboard(queryClient: QueryClient, workspaceId?: string): void {
@@ -262,6 +372,7 @@ function invalidateRoutines(queryClient: QueryClient, workspaceId?: string): voi
 function invalidateRoutingSurfaces(queryClient: QueryClient, workspaceId?: string): void {
   invalidateWorkspaceFamily(queryClient, workspaceId, "providerHealth");
   invalidateWorkspaceFamily(queryClient, workspaceId, "routingPreview");
+  invalidateAgentRoutes(queryClient);
   invalidateDashboard(queryClient, workspaceId);
 }
 
@@ -293,6 +404,37 @@ function isDashboardOrAgentsQuery(query: { queryKey: readonly unknown[] }): bool
   return (
     query.queryKey[0] === "office" &&
     (query.queryKey[3] === "dashboard" || query.queryKey[3] === "agents")
+  );
+}
+
+function isAgentSummaryQuery(query: { queryKey: readonly unknown[] }): boolean {
+  return (
+    query.queryKey[0] === "office" &&
+    query.queryKey[1] === "agents" &&
+    query.queryKey[3] === "summary"
+  );
+}
+
+function isAgentRunsQuery(query: { queryKey: readonly unknown[] }): boolean {
+  return (
+    query.queryKey[0] === "office" && query.queryKey[1] === "agents" && query.queryKey[3] === "runs"
+  );
+}
+
+function isAgentRouteQuery(query: { queryKey: readonly unknown[] }): boolean {
+  return (
+    query.queryKey[0] === "office" &&
+    query.queryKey[1] === "agents" &&
+    query.queryKey[3] === "route"
+  );
+}
+
+function readAgentId(payload: OfficeEventPayload): string | null {
+  return readId(
+    payload.agent_profile_id ??
+      payload.agent_id ??
+      payload.assignee_agent_profile_id ??
+      payload.assigneeAgentProfileId,
   );
 }
 

@@ -1301,6 +1301,16 @@ Task 10 partial verification completed locally:
     passed.
   - `rtk pnpm --dir apps/web e2e:docker tests/office/onboarding.spec.ts tests/office/task-filters.spec.ts tests/office/projects.spec.ts tests/office/agents.spec.ts tests/office/skills.spec.ts tests/office/routines.spec.ts tests/system/ws-event-accounting.spec.ts`
     passed 35 Docker tests / 1 skipped with strict WS accounting.
+- Office bridge parity cleanup:
+  - `rtk pnpm --dir apps/web test lib/query/bridge/index.test.ts`
+    passed 1 file / 21 tests.
+  - `rtk pnpm --dir apps/web typecheck` passed.
+  - `rtk pnpm --dir apps/web exec eslint --max-warnings 0 lib/query/bridge/office.ts lib/query/bridge/index.test.ts`
+    passed.
+  - `rtk pnpm --dir apps/web e2e:docker tests/office/comment-run-status.spec.ts tests/office/agent-dashboard.spec.ts tests/office/agent-run-detail.spec.ts tests/office/realtime-tasks.spec.ts tests/office/projects.spec.ts tests/office/approval-flow.spec.ts tests/system/ws-event-accounting.spec.ts`
+    passed 18 Docker tests / 1 skipped with strict WS accounting.
+  - `rtk apps/web/e2e/scripts/run-e2e.sh --docker --no-build --project routing -- e2e/tests/office/office-routing-disabled.spec.ts e2e/tests/office/office-routing-fallback.spec.ts e2e/tests/office/office-routing-agent-override.spec.ts e2e/tests/office/office-routing-recovery.spec.ts`
+    passed 6 Docker routing-project tests with strict WS accounting.
 
 Current next step: finish the reopened Office store/refetch cleanup before
 running Task 11 strict QA.

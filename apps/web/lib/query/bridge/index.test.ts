@@ -354,6 +354,198 @@ describe("query bridge audit", () => {
     }
   });
 
+  it("invalidates linked office task surfaces when task events arrive", () => {
+    const ws = new FakeWebSocketClient();
+    const queryClient = makeQueryClient();
+    queryClient.setQueryData(qk.office.projects("workspace-1"), { projects: [] });
+    queryClient.setQueryData(qk.office.project("project-1"), { project: { id: "project-1" } });
+    queryClient.setQueryData(qk.office.agentSummary("agent-1", 14), { summary: {} });
+
+    const cleanup = registerBridge(ws, queryClient);
+    ws.emit({
+      type: "notification",
+      action: "office.task.status_changed",
+      payload: {
+        workspace_id: "workspace-1",
+        task_id: "office-task-1",
+        project_id: "project-1",
+        assignee_agent_profile_id: "agent-1",
+        new_status: "done",
+      },
+    });
+
+    expect(queryClient.getQueryState(qk.office.projects("workspace-1"))?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(qk.office.project("project-1"))?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(qk.office.agentSummary("agent-1", 14))?.isInvalidated).toBe(
+      true,
+    );
+
+    cleanup();
+  });
+
+  it("invalidates office agent and task run surfaces when run lifecycle events arrive", () => {
+    const events: Array<"office.run.queued" | "office.run.processed"> = [
+      "office.run.queued",
+      "office.run.processed",
+    ];
+
+    for (const action of events) {
+      const ws = new FakeWebSocketClient();
+      const queryClient = makeQueryClient();
+      queryClient.setQueryData(qk.office.dashboard("workspace-1"), {});
+      queryClient.setQueryData(qk.office.agentSummary("agent-1", 14), { summary: {} });
+      queryClient.setQueryData(qk.office.agentRuns("agent-1", { limit: 25 }), { runs: [] });
+      queryClient.setQueryData(qk.office.runDetail("agent-1", "run-1"), { run: { id: "run-1" } });
+      queryClient.setQueryData(qk.office.taskActivity("workspace-1", "office-task-1"), {
+        activity: [],
+      });
+
+      const cleanup = registerBridge(ws, queryClient);
+      ws.emit({
+        type: "notification",
+        action,
+        payload: {
+          workspace_id: "workspace-1",
+          task_id: "office-task-1",
+          agent_profile_id: "agent-1",
+          run_id: "run-1",
+        },
+      });
+
+      expect(queryClient.getQueryState(qk.office.dashboard("workspace-1"))?.isInvalidated).toBe(
+        true,
+      );
+      expect(queryClient.getQueryState(qk.office.agentSummary("agent-1", 14))?.isInvalidated).toBe(
+        true,
+      );
+      expect(
+        queryClient.getQueryState(qk.office.agentRuns("agent-1", { limit: 25 }))?.isInvalidated,
+      ).toBe(true);
+      expect(
+        queryClient.getQueryState(qk.office.runDetail("agent-1", "run-1"))?.isInvalidated,
+      ).toBe(true);
+      expect(
+        queryClient.getQueryState(qk.office.taskActivity("workspace-1", "office-task-1"))
+          ?.isInvalidated,
+      ).toBe(true);
+
+      cleanup();
+    }
+  });
+
+  it("invalidates exact task activity for comment and review events", () => {
+    const events: Array<
+      "office.comment.created" | "office.task.decision_recorded" | "office.task.review_requested"
+    > = ["office.comment.created", "office.task.decision_recorded", "office.task.review_requested"];
+
+    for (const action of events) {
+      const ws = new FakeWebSocketClient();
+      const queryClient = makeQueryClient();
+      queryClient.setQueryData(qk.office.taskActivity("workspace-1", "office-task-1"), {
+        activity: [],
+      });
+
+      const cleanup = registerBridge(ws, queryClient);
+      ws.emit({
+        type: "notification",
+        action,
+        payload: {
+          workspace_id: "workspace-1",
+          task_id: "office-task-1",
+        },
+      });
+
+      expect(
+        queryClient.getQueryState(qk.office.taskActivity("workspace-1", "office-task-1"))
+          ?.isInvalidated,
+      ).toBe(true);
+
+      cleanup();
+    }
+  });
+
+  it("invalidates agent route queries for routing events", () => {
+    const ws = new FakeWebSocketClient();
+    const queryClient = makeQueryClient();
+    queryClient.setQueryData(qk.office.agentRoute("agent-1"), { route: null });
+    queryClient.setQueryData(qk.office.agentRoute("agent-2"), { route: null });
+
+    const cleanup = registerBridge(ws, queryClient);
+    ws.emit({
+      type: "notification",
+      action: "office.provider.health_changed",
+      payload: {
+        workspace_id: "workspace-1",
+        provider_id: "claude-acp",
+        state: "degraded",
+      },
+    });
+
+    expect(queryClient.getQueryState(qk.office.agentRoute("agent-1"))?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(qk.office.agentRoute("agent-2"))?.isInvalidated).toBe(true);
+
+    cleanup();
+  });
+
+  it("invalidates targeted agent route when route attempts carry an agent id", () => {
+    const ws = new FakeWebSocketClient();
+    const queryClient = makeQueryClient();
+    queryClient.setQueryData(qk.office.agentRoute("agent-1"), { route: null });
+    queryClient.setQueryData(qk.office.agentRoute("agent-2"), { route: null });
+
+    const cleanup = registerBridge(ws, queryClient);
+    ws.emit({
+      type: "notification",
+      action: "office.route_attempt.appended",
+      payload: {
+        run_id: "run-1",
+        agent_profile_id: "agent-1",
+        attempt: {
+          seq: 1,
+          provider_id: "codex",
+          tier: "balanced",
+          outcome: "launched",
+          started_at: "2026-06-23T00:00:00Z",
+        },
+      },
+    });
+
+    expect(queryClient.getQueryState(qk.office.agentRoute("agent-1"))?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(qk.office.agentRoute("agent-2"))?.isInvalidated).toBe(false);
+
+    cleanup();
+  });
+
+  it("invalidates agent summaries and runs when session state changes", () => {
+    const ws = new FakeWebSocketClient();
+    const queryClient = makeQueryClient();
+    queryClient.setQueryData(qk.office.agentSummary("agent-1", 14), { summary: {} });
+    queryClient.setQueryData(qk.office.agentRuns("agent-1", { limit: 25 }), { runs: [] });
+    queryClient.setQueryData(qk.office.dashboard("workspace-1"), {});
+
+    const cleanup = registerBridge(ws, queryClient);
+    ws.emit({
+      type: "notification",
+      action: "session.state_changed",
+      payload: {
+        session_id: "session-1",
+        task_id: "task-1",
+        old_state: "WAITING_FOR_INPUT",
+        new_state: "RUNNING",
+      },
+    });
+
+    expect(queryClient.getQueryState(qk.office.agentSummary("agent-1", 14))?.isInvalidated).toBe(
+      true,
+    );
+    expect(
+      queryClient.getQueryState(qk.office.agentRuns("agent-1", { limit: 25 }))?.isInvalidated,
+    ).toBe(true);
+    expect(queryClient.getQueryState(qk.office.dashboard("workspace-1"))?.isInvalidated).toBe(true);
+
+    cleanup();
+  });
+
   it("upserts session messages into the stable session message cache", () => {
     const ws = new FakeWebSocketClient();
     const queryClient = makeQueryClient();

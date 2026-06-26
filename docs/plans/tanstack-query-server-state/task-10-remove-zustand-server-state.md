@@ -51,6 +51,11 @@ Completed cleanup sub-waves:
   removed the unused `setMeta` Zustand action. The temporary `office.meta` field
   remains only as part of the broader Office state shape/query seed scaffold
   until the final Office slice removal wave.
+- **Office bridge parity cleanup:** filled Query bridge invalidation gaps for
+  task-linked project counts/details, task activity, agent summaries, agent run
+  lists/details, run-driven dashboard data, approval-driven agent data, and
+  agent route/routing updates. This unblocks later removal of page-level
+  `useOfficeRefetch` subscriptions that were covering those surfaces.
 
 Remaining cleanup:
 

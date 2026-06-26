@@ -81,6 +81,11 @@ out any mobile E2E coverage added or reused.
   routine/skill metadata readers to `qk.office.meta()` through
   `useOfficeMetaData`, seeds the query cache during Office route bootstrap, and
   removed the unused `setMeta` Zustand action.
+- The Office bridge parity sub-wave filled remaining invalidation gaps that
+  blocked removing old refetch triggers: task-linked project counts/details and
+  agent summaries, task activity for comments/reviews/decisions/runs, agent
+  summaries/runs/run details, run-driven dashboard data, approval-driven agent
+  data, and agent route queries for routing events.
 - Migrated office dashboard, tasks, task search, task detail comments/activity,
   agents, agent run/detail routes, projects/project tasks, inbox, activity,
   routines, routing, costs, budgets, and skills to TanStack Query readers.
