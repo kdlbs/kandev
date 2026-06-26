@@ -104,6 +104,25 @@ func TestDockerStopInstancePreservesContainerOnPlainStop(t *testing.T) {
 	}
 }
 
+func TestDockerStopInstanceStopsContainerWhenAgentStopFailed(t *testing.T) {
+	log := newTestDockerLogger()
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
+	exec.newClientFunc = failingClientFactory("docker required after agent stop failure")
+
+	err := exec.StopInstance(context.Background(), &ExecutorInstance{
+		InstanceID:      "inst-1",
+		ContainerID:     "container-1",
+		StopReason:      "stopped via API",
+		AgentStopFailed: true,
+	}, false)
+	if err == nil {
+		t.Fatal("StopInstance should attempt Docker cleanup after agentctl stop failure")
+	}
+	if !strings.Contains(err.Error(), "docker required after agent stop failure") {
+		t.Fatalf("StopInstance error = %v", err)
+	}
+}
+
 func TestDockerExecutor_EnsureClient_Success(t *testing.T) {
 	log := newTestDockerLogger()
 	exec := NewDockerExecutor(config.DockerConfig{}, "", log)

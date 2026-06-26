@@ -91,8 +91,13 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	if err := cmd.Start(); err != nil {
 		return &PromptResponse{Success: false, Error: fmt.Sprintf("start: %v", err)}, nil
 	}
+	lifecycle, err := installACPCommandLifecycle(cmd)
+	if err != nil {
+		e.logger.Warn("failed to install ACP command lifecycle; falling back to process-tree cleanup",
+			zap.Error(err))
+	}
 
-	defer cleanupACPCommand(ctx, cmd, e.logger)
+	defer cleanupACPCommand(ctx, cmd, lifecycle, e.logger)
 
 	// Execute ACP protocol
 	mcpServers, dropped := toACPMcpServers(req.MCPServers)
@@ -330,7 +335,12 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	if err := cmd.Start(); err != nil {
 		return &ProbeResponse{Success: false, Error: fmt.Sprintf("start: %v", err)}, nil
 	}
-	defer cleanupACPCommand(ctx, cmd, e.logger)
+	lifecycle, err := installACPCommandLifecycle(cmd)
+	if err != nil {
+		e.logger.Warn("failed to install ACP command lifecycle; falling back to process-tree cleanup",
+			zap.Error(err))
+	}
+	defer cleanupACPCommand(ctx, cmd, lifecycle, e.logger)
 
 	resp, err := e.probeACPSession(ctx, stdin, stdout, workDir)
 	if err != nil {

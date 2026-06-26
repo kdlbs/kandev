@@ -19,6 +19,14 @@ func setProcGroup(cmd *exec.Cmd) {
 	}
 }
 
+type processLifecycleHandle struct{}
+
+func installProcessLifecycle(_ *exec.Cmd) (processLifecycleHandle, error) {
+	return processLifecycleHandle{}, nil
+}
+
+func releaseProcessLifecycle(_ processLifecycleHandle) {}
+
 // killProcessGroup kills the entire process group for the given PID.
 // Returns nil if successful, or an error if the kill failed.
 func killProcessGroup(pid int) error {

@@ -33,8 +33,9 @@ func configureACPCommand(cmd *exec.Cmd, log *zap.Logger) {
 	}
 }
 
-func cleanupACPCommand(ctx context.Context, cmd *exec.Cmd, log *zap.Logger) {
+func cleanupACPCommand(ctx context.Context, cmd *exec.Cmd, lifecycle acpCommandLifecycleHandle, log *zap.Logger) {
 	log = acpCommandLogger(log)
+	defer releaseACPCommandLifecycle(lifecycle)
 	if cmd == nil {
 		log.Debug("ACP command cleanup skipped", zap.String("reason", "nil_command"))
 		return

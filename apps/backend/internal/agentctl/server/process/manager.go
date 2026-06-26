@@ -80,13 +80,14 @@ type Manager struct {
 	logger *logger.Logger
 
 	// Process state
-	cmd      *exec.Cmd
-	stdin    io.WriteCloser
-	stdout   io.ReadCloser
-	stderr   io.ReadCloser
-	status   atomic.Value // Status
-	exitCode atomic.Int32
-	exitErr  atomic.Value // error
+	cmd              *exec.Cmd
+	processLifecycle processLifecycleHandle
+	stdin            io.WriteCloser
+	stdout           io.ReadCloser
+	stderr           io.ReadCloser
+	status           atomic.Value // Status
+	exitCode         atomic.Int32
+	exitErr          atomic.Value // error
 
 	// Stderr buffering for error context
 	stderrBuffer []string
@@ -737,12 +738,23 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.status.Store(StatusError)
 		return formatAgentStartError(err, m.cfg.AgentEnv)
 	}
+	processLifecycle, err := installProcessLifecycle(m.cmd)
+	if err != nil {
+		m.logger.Warn("failed to install agent process lifecycle; falling back to process-tree cleanup",
+			zap.Error(err))
+	} else {
+		m.processLifecycle = processLifecycle
+	}
 
 	m.stopCh = make(chan struct{})
 	m.doneCh = make(chan struct{})
 
 	// Connect adapter to the process stdin/stdout pipes
 	if err := m.adapter.Connect(m.stdin, m.stdout); err != nil {
+		releaseProcessLifecycle(m.processLifecycle)
+		m.processLifecycle = processLifecycleHandle{}
+		_ = m.cmd.Process.Kill()
+		_ = m.cmd.Wait()
 		m.status.Store(StatusError)
 		return fmt.Errorf("failed to connect adapter: %w", err)
 	}
@@ -1589,6 +1601,8 @@ func (m *Manager) waitForExit() {
 
 	pid := m.agentPID()
 	err := m.cmd.Wait()
+	releaseProcessLifecycle(m.processLifecycle)
+	m.processLifecycle = processLifecycleHandle{}
 
 	if err != nil {
 		m.exitErr.Store(errorWrapper{err: err})

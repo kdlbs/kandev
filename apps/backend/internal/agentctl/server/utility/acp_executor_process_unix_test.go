@@ -116,7 +116,7 @@ func TestCleanupACPCommandWaitsAfterRequestContextCancellation(t *testing.T) {
 	cancel()
 	core, observed := observer.New(zapcore.DebugLevel)
 
-	cleanupACPCommand(ctx, cmd, zap.New(core))
+	cleanupACPCommand(ctx, cmd, acpCommandLifecycleHandle{}, zap.New(core))
 	waited = true
 
 	if !zapLogsContain(observed, "ACP command exited after SIGTERM") {

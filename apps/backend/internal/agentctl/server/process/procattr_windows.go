@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"os/exec"
 	"syscall"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 // setProcGroup configures the command to run in its own process group.
@@ -14,6 +17,63 @@ func setProcGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
 	}
+}
+
+type processLifecycleHandle struct {
+	handle windows.Handle
+}
+
+func installProcessLifecycle(cmd *exec.Cmd) (processLifecycleHandle, error) {
+	if cmd == nil || cmd.Process == nil {
+		return processLifecycleHandle{}, fmt.Errorf("process not started")
+	}
+	job, err := createKillOnCloseJob()
+	if err != nil {
+		return processLifecycleHandle{}, err
+	}
+	procHandle, err := windows.OpenProcess(
+		windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE,
+		false,
+		uint32(cmd.Process.Pid),
+	)
+	if err != nil {
+		_ = windows.CloseHandle(job)
+		return processLifecycleHandle{}, fmt.Errorf("OpenProcess(pid=%d): %w", cmd.Process.Pid, err)
+	}
+	defer windows.CloseHandle(procHandle)
+	if err := windows.AssignProcessToJobObject(job, procHandle); err != nil {
+		_ = windows.CloseHandle(job)
+		return processLifecycleHandle{}, fmt.Errorf("AssignProcessToJobObject: %w", err)
+	}
+	return processLifecycleHandle{handle: job}, nil
+}
+
+func releaseProcessLifecycle(lifecycle processLifecycleHandle) {
+	if lifecycle.handle != 0 {
+		_ = windows.CloseHandle(lifecycle.handle)
+	}
+}
+
+func createKillOnCloseJob() (windows.Handle, error) {
+	job, err := windows.CreateJobObject(nil, nil)
+	if err != nil {
+		return 0, fmt.Errorf("CreateJobObject: %w", err)
+	}
+	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{
+		BasicLimitInformation: windows.JOBOBJECT_BASIC_LIMIT_INFORMATION{
+			LimitFlags: windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+		},
+	}
+	if _, err := windows.SetInformationJobObject(
+		job,
+		windows.JobObjectExtendedLimitInformation,
+		uintptr(unsafe.Pointer(&info)),
+		uint32(unsafe.Sizeof(info)),
+	); err != nil {
+		_ = windows.CloseHandle(job)
+		return 0, fmt.Errorf("SetInformationJobObject: %w", err)
+	}
+	return job, nil
 }
 
 // killProcessGroup kills the entire process tree for the given PID.

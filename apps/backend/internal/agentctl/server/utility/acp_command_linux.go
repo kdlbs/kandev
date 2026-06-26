@@ -15,6 +15,14 @@ func setACPCommandProcAttr(cmd *exec.Cmd) {
 	}
 }
 
+type acpCommandLifecycleHandle struct{}
+
+func installACPCommandLifecycle(_ *exec.Cmd) (acpCommandLifecycleHandle, error) {
+	return acpCommandLifecycleHandle{}, nil
+}
+
+func releaseACPCommandLifecycle(_ acpCommandLifecycleHandle) {}
+
 func terminateACPProcessGroup(pid int) error {
 	return syscall.Kill(-pid, syscall.SIGTERM)
 }

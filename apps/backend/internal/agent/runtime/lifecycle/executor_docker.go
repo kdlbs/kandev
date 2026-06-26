@@ -604,10 +604,11 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 	}
 
 	// Plain "stop the agent" runs (e.g. user clicks Stop, then later wants to
-	// resume) must not stop the Docker container. The container holds the
-	// cloned workspace and agentctl process for fast resume; only destructive
-	// lifecycle events should tear it down.
-	if !force && !shouldRunExecutorCleanup(instance.StopReason) {
+	// resume) must not stop the Docker container after agentctl stopped cleanly.
+	// The container holds the cloned workspace and agentctl process for fast
+	// resume; destructive lifecycle events or failed agentctl stops should tear
+	// it down.
+	if !force && !instance.AgentStopFailed && !shouldRunExecutorCleanup(instance.StopReason) {
 		r.logger.Info("preserving docker container after agent stop",
 			zap.String("container_id", instance.ContainerID),
 			zap.String("instance_id", instance.InstanceID),
