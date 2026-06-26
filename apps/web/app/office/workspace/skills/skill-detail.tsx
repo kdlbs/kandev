@@ -18,7 +18,7 @@ import { Separator } from "@kandev/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useAppStore } from "@/components/state-provider";
-import { useOfficeMetaData } from "@/hooks/domains/office/use-office-data";
+import { useOfficeAgentsData, useOfficeMetaData } from "@/hooks/domains/office/use-office-data";
 import type { Skill, SkillSourceType } from "@/lib/state/slices/office/types";
 import { FileTree, type FileTreeNode } from "@/components/shared/file-tree";
 import { ScriptEditor } from "@/components/settings/profile-edit/script-editor";
@@ -69,7 +69,8 @@ export function SkillDetail({ skill, onSave, onDelete }: SkillDetailProps) {
   // local edits would just get overwritten. Lock both edit and delete
   // for them regardless of what the source meta says.
   const readOnly = sourceMeta.readOnly || !!skill.isSystem;
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const agents = useOfficeAgentsData(workspaceId).data?.agents ?? [];
   const usedByCount = useMemo(
     () => agents.filter((a) => a.desiredSkills?.includes(skill.id)).length,
     [agents, skill.id],
@@ -80,6 +81,8 @@ export function SkillDetail({ skill, onSave, onDelete }: SkillDetailProps) {
 
   const activeFilePath = selectedFile ?? "SKILL.md";
   const isDirty = !readOnly && draft !== (skill.content ?? "");
+  const readOnlyReason = getSkillReadOnlyReason(skill, sourceMeta.readOnlyReason);
+  const handleDelete = skill.isSystem ? undefined : () => onDelete(skill.id);
 
   // Reset the draft when the user navigates to a different skill (or
   // the skill row gets re-synced and the canonical content shifts).
@@ -101,59 +104,130 @@ export function SkillDetail({ skill, onSave, onDelete }: SkillDetailProps) {
       <SkillDetailHeader
         skill={skill}
         readOnly={readOnly}
-        readOnlyReason={
-          skill.isSystem
-            ? `Bundled with kandev${skill.systemVersion ? ` v${skill.systemVersion}` : ""}`
-            : sourceMeta.readOnlyReason
-        }
-        onDelete={!skill.isSystem ? () => onDelete(skill.id) : undefined}
+        readOnlyReason={readOnlyReason}
+        onDelete={handleDelete}
       />
       <Separator />
       <SkillMetadataRow skill={skill} readOnly={readOnly} usedByCount={usedByCount} />
 
-      {hasFiles && (
-        <div className="border border-border rounded-lg max-h-[200px] overflow-y-auto">
-          <FileTree
-            nodes={fileTree}
-            selectedPath={activeFilePath}
-            onSelectPath={setSelectedFile}
-            defaultExpanded
-          />
-        </div>
-      )}
+      <SkillFilesPanel
+        hasFiles={hasFiles}
+        fileTree={fileTree}
+        activeFilePath={activeFilePath}
+        onSelectFile={setSelectedFile}
+      />
 
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-mono text-muted-foreground">{activeFilePath}</span>
-          {!readOnly && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleSave}
-              disabled={!isDirty || isSaving}
-              className="cursor-pointer"
-            >
-              <IconDeviceFloppy className="h-4 w-4 mr-1" />
-              {isSaving ? "Saving…" : "Save"}
-            </Button>
-          )}
-        </div>
-        <div
-          className="border border-border rounded-lg overflow-hidden"
-          data-testid="skill-content-editor"
-          data-readonly={readOnly ? "true" : "false"}
-        >
-          {readOnly && <span data-testid="skill-content-readonly" hidden />}
-          <ScriptEditor
-            value={draft}
-            onChange={setDraft}
-            language="markdown"
-            height="520px"
-            readOnly={readOnly}
-          />
-        </div>
+      <SkillEditorPanel
+        activeFilePath={activeFilePath}
+        draft={draft}
+        readOnly={readOnly}
+        isDirty={isDirty}
+        isSaving={isSaving}
+        onDraftChange={setDraft}
+        onSave={handleSave}
+      />
+    </div>
+  );
+}
+
+function getSkillReadOnlyReason(skill: Skill, sourceReadOnlyReason: string | undefined) {
+  if (!skill.isSystem) return sourceReadOnlyReason;
+  return `Bundled with kandev${skill.systemVersion ? ` v${skill.systemVersion}` : ""}`;
+}
+
+function SkillFilesPanel({
+  hasFiles,
+  fileTree,
+  activeFilePath,
+  onSelectFile,
+}: {
+  hasFiles: boolean;
+  fileTree: FileTreeNode[];
+  activeFilePath: string;
+  onSelectFile: (path: string) => void;
+}) {
+  if (!hasFiles) return null;
+  return (
+    <div className="border border-border rounded-lg max-h-[200px] overflow-y-auto">
+      <FileTree
+        nodes={fileTree}
+        selectedPath={activeFilePath}
+        onSelectPath={onSelectFile}
+        defaultExpanded
+      />
+    </div>
+  );
+}
+
+function SkillEditorPanel({
+  activeFilePath,
+  draft,
+  readOnly,
+  isDirty,
+  isSaving,
+  onDraftChange,
+  onSave,
+}: {
+  activeFilePath: string;
+  draft: string;
+  readOnly: boolean;
+  isDirty: boolean;
+  isSaving: boolean;
+  onDraftChange: (value: string) => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-mono text-muted-foreground">{activeFilePath}</span>
+        <SkillSaveButton
+          readOnly={readOnly}
+          isDirty={isDirty}
+          isSaving={isSaving}
+          onSave={onSave}
+        />
+      </div>
+      <div
+        className="border border-border rounded-lg overflow-hidden"
+        data-testid="skill-content-editor"
+        data-readonly={readOnly ? "true" : "false"}
+      >
+        {readOnly && <span data-testid="skill-content-readonly" hidden />}
+        <ScriptEditor
+          value={draft}
+          onChange={onDraftChange}
+          language="markdown"
+          height="520px"
+          readOnly={readOnly}
+        />
       </div>
     </div>
+  );
+}
+
+function SkillSaveButton({
+  readOnly,
+  isDirty,
+  isSaving,
+  onSave,
+}: {
+  readOnly: boolean;
+  isDirty: boolean;
+  isSaving: boolean;
+  onSave: () => void;
+}) {
+  if (readOnly) return null;
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={onSave}
+      disabled={!isDirty || isSaving}
+      className="cursor-pointer"
+    >
+      <IconDeviceFloppy className="h-4 w-4 mr-1" />
+      {isSaving ? "Saving…" : "Save"}
+    </Button>
   );
 }
 

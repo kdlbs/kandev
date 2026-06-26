@@ -8,7 +8,6 @@ import { IconChevronRight, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { toast } from "sonner";
-import { useAppStore } from "@/components/state-provider";
 import { deleteProject } from "@/lib/api/domains/office-api";
 import { qk } from "@/lib/query/keys";
 import { officeProjectQueryOptions } from "@/lib/query/query-options";
@@ -27,10 +26,8 @@ export default function ProjectDetailPage({ params }: PageProps) {
   const { id } = use(params);
   const router = useRouter();
   const queryClient = useQueryClient();
-  const removeProject = useAppStore((s) => s.removeProject);
-  const storeProject = useAppStore((s) => s.office.projects.find((p) => p.id === id));
   const projectQuery = useQuery(officeProjectQueryOptions(id));
-  const project = storeProject ?? (projectQuery.data as Project | undefined) ?? null;
+  const project = projectQuery.data ?? null;
 
   useEffect(() => {
     if (!projectQuery.error) return;
@@ -43,9 +40,13 @@ export default function ProjectDetailPage({ params }: PageProps) {
     if (!project) return;
     try {
       await deleteProject(project.id);
-      removeProject(project.id);
       queryClient.removeQueries({ exact: true, queryKey: qk.office.project(project.id) });
-      queryClient.invalidateQueries({ queryKey: qk.office.projects(project.workspaceId) });
+      queryClient.setQueryData<{ projects: Project[] }>(
+        qk.office.projects(project.workspaceId),
+        (current) => ({
+          projects: (current?.projects ?? []).filter((item) => item.id !== project.id),
+        }),
+      );
       toast.success("Project deleted");
       router.push("/office/projects");
     } catch (err) {

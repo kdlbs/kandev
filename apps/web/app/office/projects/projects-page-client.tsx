@@ -4,7 +4,7 @@ import { useState } from "react";
 import { IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
-import { useOfficeProjectsData } from "@/hooks/domains/office/use-office-data";
+import { useOfficeAgentsData, useOfficeProjectsData } from "@/hooks/domains/office/use-office-data";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import type { Project } from "@/lib/state/slices/office/types";
 import { ProjectCard } from "./project-card";
@@ -16,13 +16,13 @@ type ProjectsPageClientProps = {
 };
 
 export function ProjectsPageClient({ initialProjects }: ProjectsPageClientProps) {
-  const projectsStore = useAppStore((s) => s.office.projects);
-  const agents = useAppStore((s) => s.office.agentProfiles);
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   const projectsQuery = useOfficeProjectsData(activeWorkspaceId, initialProjects);
+  const agentsQuery = useOfficeAgentsData(activeWorkspaceId);
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  const projects = projectsQuery.data?.projects ?? projectsStore;
+  const projects = projectsQuery.data?.projects ?? initialProjects;
+  const agents = agentsQuery.data?.agents ?? [];
   const agentNameMap = new Map(agents.map((a) => [a.id, a.name]));
 
   return (

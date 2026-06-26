@@ -5,8 +5,6 @@ import Link from "@/components/routing/app-link";
 import { usePathname } from "@/lib/routing/client-router";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useAppStore } from "@/components/state-provider";
-import { useOfficeAgentsData } from "@/hooks/domains/office/use-office-data";
 import { cn } from "@/lib/utils";
 import { OfficeTopbarPortal } from "../../components/office-topbar-portal";
 import { AgentAvatar } from "../../components/agent-avatar";
@@ -14,6 +12,7 @@ import { AgentStatusDot } from "../components/agent-status-dot";
 import { AgentRoleBadge } from "../components/agent-role-badge";
 import { BudgetGauge } from "../components/budget-gauge";
 import { AgentRouteStrip } from "./components/agent-route-strip";
+import { useActiveOfficeRoutines, useOfficeAgentProfile } from "./use-agent-detail-data";
 
 type AgentDetailLayoutProps = {
   children: ReactNode;
@@ -41,12 +40,9 @@ const TABS: Array<{ slug: string; label: string }> = [
 export default function AgentDetailLayout({ children, params }: AgentDetailLayoutProps) {
   const { id } = use(params);
   const pathname = usePathname();
-  const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const agentStore = useAppStore((s) => s.office.agentProfiles.find((a) => a.id === id));
-  const agentsQuery = useOfficeAgentsData(workspaceId);
 
   const activeSlug = activeSlugFromPath(pathname, id);
-  const agent = agentsQuery.data?.agents.find((item) => item.id === id) ?? agentStore;
+  const agent = useOfficeAgentProfile(id);
 
   if (!agent) {
     return (
@@ -129,7 +125,7 @@ function activeSlugFromPath(pathname: string | null, agentId: string): string {
  * don't get this hint since they only run on assignment, not schedule.
  */
 function CoordinatorRoutineHint({ agentId, agentRole }: { agentId: string; agentRole: string }) {
-  const routines = useAppStore((s) => s.office.routines);
+  const routines = useActiveOfficeRoutines();
   if (agentRole !== "ceo") return null;
   const hasActive = routines.some(
     (r) => r.assigneeAgentProfileId === agentId && r.status === "active",

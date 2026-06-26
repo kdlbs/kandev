@@ -8,6 +8,8 @@ import {
   officeInboxQueryOptions,
   officeMetaQueryOptions,
   officeProjectsQueryOptions,
+  officeRoutinesQueryOptions,
+  officeSkillsQueryOptions,
 } from "@/lib/query/query-options/office";
 import type {
   ActivityEntry,
@@ -16,6 +18,8 @@ import type {
   InboxItem,
   OfficeMeta,
   Project,
+  Routine,
+  Skill,
 } from "@/lib/state/slices/office/types";
 
 export function useOfficeMetaData(initialMeta?: OfficeMeta | null) {
@@ -71,6 +75,30 @@ export function useOfficeProjectsData(workspaceId: string | null, initialProject
     if (!workspaceId || initialProjects.length === 0) return;
     queryClient.setQueryData(qk.office.projects(workspaceId), { projects: initialProjects });
   }, [initialProjects, queryClient, workspaceId]);
+
+  return query;
+}
+
+export function useOfficeRoutinesData(workspaceId: string | null, initialRoutines: Routine[] = []) {
+  const queryClient = useQueryClient();
+  const query = useQuery(officeRoutinesQueryOptions(workspaceId ?? ""));
+
+  useEffect(() => {
+    if (!workspaceId || initialRoutines.length === 0) return;
+    queryClient.setQueryData(qk.office.routines(workspaceId), { routines: initialRoutines });
+  }, [initialRoutines, queryClient, workspaceId]);
+
+  return query;
+}
+
+export function useOfficeSkillsData(workspaceId: string | null, initialSkills: Skill[] = []) {
+  const queryClient = useQueryClient();
+  const query = useQuery(officeSkillsQueryOptions(workspaceId ?? ""));
+
+  useEffect(() => {
+    if (!workspaceId || initialSkills.length === 0) return;
+    queryClient.setQueryData(qk.office.skills(workspaceId), { skills: initialSkills });
+  }, [initialSkills, queryClient, workspaceId]);
 
   return query;
 }

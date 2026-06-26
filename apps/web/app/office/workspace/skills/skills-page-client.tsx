@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { IconBoxMultiple } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
+import { useOfficeSkillsData } from "@/hooks/domains/office/use-office-data";
 import * as officeApi from "@/lib/api/domains/office-api";
 import { qk } from "@/lib/query/keys";
-import { officeSkillsQueryOptions } from "@/lib/query/query-options/office";
 import type { Skill } from "@/lib/state/slices/office/types";
 import { SkillList } from "./skill-list";
 import { SkillDetail } from "./skill-detail";
@@ -27,16 +27,12 @@ function useSkillActions(
   skills: Skill[],
 ) {
   const queryClient = useQueryClient();
-  const addSkill = useAppStore((s) => s.addSkill);
-  const updateSkillInStore = useAppStore((s) => s.updateSkill);
-  const removeSkillFromStore = useAppStore((s) => s.removeSkill);
 
   const handleCreate = useCallback(
     async (data: Partial<Skill>) => {
       if (!activeWorkspaceId) return;
       try {
         const res = await officeApi.createSkill(activeWorkspaceId, data);
-        addSkill(res.skill);
         appendSkill(queryClient, activeWorkspaceId, res.skill);
         setSelectedId(res.skill.id);
         setViewMode("view");
@@ -49,33 +45,31 @@ function useSkillActions(
         }
       }
     },
-    [activeWorkspaceId, addSkill, queryClient, setSelectedId, setViewMode],
+    [activeWorkspaceId, queryClient, setSelectedId, setViewMode],
   );
 
   const handleSave = useCallback(
     async (id: string, patch: Partial<Skill>) => {
-      await officeApi.updateSkill(id, patch);
-      updateSkillInStore(id, patch);
+      const res = await officeApi.updateSkill(id, patch);
       if (activeWorkspaceId) {
-        patchSkill(queryClient, activeWorkspaceId, id, patch);
+        patchSkill(queryClient, activeWorkspaceId, id, res.skill);
       }
     },
-    [activeWorkspaceId, queryClient, updateSkillInStore],
+    [activeWorkspaceId, queryClient],
   );
 
   const handleDelete = useCallback(
     async (id: string) => {
       await officeApi.deleteSkill(id);
-      removeSkillFromStore(id);
       if (activeWorkspaceId) {
-        removeSkill(queryClient, activeWorkspaceId, id);
+        removeSkillFromCache(queryClient, activeWorkspaceId, id);
       }
       if (selectedId === id) {
         const remaining = skills.filter((s) => s.id !== id);
         setSelectedId(remaining[0]?.id ?? null);
       }
     },
-    [activeWorkspaceId, queryClient, removeSkillFromStore, selectedId, skills, setSelectedId],
+    [activeWorkspaceId, queryClient, selectedId, skills, setSelectedId],
   );
 
   const handleImport = useCallback(
@@ -83,7 +77,6 @@ function useSkillActions(
       if (!activeWorkspaceId) return;
       const res = await officeApi.importSkill(activeWorkspaceId, source);
       for (const skill of res.skills) {
-        addSkill(skill);
         appendSkill(queryClient, activeWorkspaceId, skill);
       }
       if (res.skills.length > 0) {
@@ -91,37 +84,20 @@ function useSkillActions(
         setViewMode("view");
       }
     },
-    [activeWorkspaceId, addSkill, queryClient, setSelectedId, setViewMode],
+    [activeWorkspaceId, queryClient, setSelectedId, setViewMode],
   );
 
   return { handleCreate, handleSave, handleDelete, handleImport };
 }
 
 export function SkillsPageClient({ initialSkills }: SkillsPageClientProps) {
-  const skillsStore = useAppStore((s) => s.office.skills);
-  const setSkills = useAppStore((s) => s.setSkills);
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
-  const queryClient = useQueryClient();
-  const skillsQuery = useQuery(officeSkillsQueryOptions(activeWorkspaceId ?? ""));
+  const skillsQuery = useOfficeSkillsData(activeWorkspaceId, initialSkills);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("view");
 
-  useEffect(() => {
-    if (initialSkills.length > 0) {
-      if (activeWorkspaceId) {
-        queryClient.setQueryData(qk.office.skills(activeWorkspaceId), { skills: initialSkills });
-      }
-      setSkills(initialSkills);
-    }
-  }, [activeWorkspaceId, initialSkills, queryClient, setSkills]);
-
-  useEffect(() => {
-    if (!skillsQuery.data) return;
-    setSkills(skillsQuery.data.skills ?? []);
-  }, [setSkills, skillsQuery.data]);
-
-  const skills = skillsQuery.data?.skills ?? skillsStore;
+  const skills = skillsQuery.data?.skills ?? initialSkills;
   const selectedSkill = skills.find((s) => s.id === selectedId) ?? null;
   const { handleCreate, handleSave, handleDelete, handleImport } = useSkillActions(
     activeWorkspaceId,
@@ -186,7 +162,7 @@ function patchSkill(
   }));
 }
 
-function removeSkill(
+function removeSkillFromCache(
   queryClient: ReturnType<typeof useQueryClient>,
   workspaceId: string,
   id: string,

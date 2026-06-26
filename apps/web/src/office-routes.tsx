@@ -59,7 +59,7 @@ const OFFICE_ROUTES: Record<string, RouteRenderer> = {
   "/office/routines": () => <RoutinesPageClient initialRoutines={[]} />,
   "/office/agents": () => <AgentsPageClient initialAgents={[]} />,
   "/office/workspace/activity": () => <ActivityPageClient initialActivity={[]} />,
-  "/office/workspace/costs": () => <CostsPageClient initialCostSummary={null} />,
+  "/office/workspace/costs": () => <CostsPageClient />,
   "/office/workspace/skills": () => <SkillsPageClient initialSkills={[]} />,
   "/office/workspace/routing": () => <ProviderRoutingPage />,
   "/office/workspace/settings": () => <SettingsPage />,
@@ -233,10 +233,16 @@ function useOfficeRouteBootstrap(
       ]);
       if (cancelled) return;
 
-      store.getState().setOfficeAgentProfiles(agentsResponse.agents);
-      store.getState().setProjects(projectsResponse.projects);
-      store.getState().setInboxItems(inboxResponse.items);
-      store.getState().setInboxCount(inboxResponse.total_count);
+      queryClient.setQueryData(qk.office.agents(activeWorkspaceId), {
+        agents: agentsResponse.agents,
+      });
+      queryClient.setQueryData(qk.office.projects(activeWorkspaceId), {
+        projects: projectsResponse.projects,
+      });
+      queryClient.setQueryData(qk.office.inbox(activeWorkspaceId), {
+        items: inboxResponse.items,
+        total_count: inboxResponse.total_count,
+      });
       setBootstrap({ complete: true, onboardingComplete });
     }
 

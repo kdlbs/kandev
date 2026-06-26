@@ -32,9 +32,31 @@ export function StateHydrator({ initialState, sessionId }: StateHydratorProps) {
 }
 
 function toStoreInitialState(initialState: QuerySeedInitialState): Partial<AppState> {
-  const { workspaces, ...rest } = initialState;
+  const { workspaces, office, ...rest } = initialState;
+  const storeOffice = toStoreOfficeInitialState(office);
   return {
     ...(rest as Partial<AppState>),
     ...(workspaces ? { workspaces: { activeId: workspaces.activeId ?? null } } : {}),
-  };
+    ...(storeOffice ? { office: storeOffice } : {}),
+  } as Partial<AppState>;
+}
+
+function toStoreOfficeInitialState(
+  office: QuerySeedInitialState["office"],
+): Partial<AppState["office"]> | undefined {
+  if (!office) return undefined;
+  const {
+    agents: _agents,
+    projects: _projects,
+    skills: _skills,
+    routines: _routines,
+    inboxItems: _inboxItems,
+    inboxCount: _inboxCount,
+    dashboard: _dashboard,
+    activity: _activity,
+    runs: _runs,
+    meta: _meta,
+    ...storeOffice
+  } = office;
+  return storeOffice as Partial<AppState["office"]>;
 }

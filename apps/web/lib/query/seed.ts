@@ -24,16 +24,44 @@ import type {
   SessionProcessesQueryData,
 } from "./query-options/session-runtime";
 import type { AvailableCommand } from "@/lib/state/slices/session-runtime/types";
+import type {
+  ActivityEntry,
+  AgentProfile,
+  DashboardData,
+  InboxItem,
+  OfficeMeta,
+  Project,
+  Routine,
+  Run,
+  Skill,
+} from "@/lib/state/slices/office/types";
 import { qk } from "./keys";
 
 type SeedOptions = {
   sessionId?: string;
 };
 
-export type QuerySeedInitialState = Omit<Partial<AppState>, "workflows" | "workspaces"> & {
+type OfficeQuerySeedState = Partial<AppState["office"]> & {
+  agents?: AgentProfile[];
+  projects?: Project[];
+  skills?: Skill[];
+  routines?: Routine[];
+  inboxItems?: InboxItem[];
+  inboxCount?: number;
+  dashboard?: DashboardData | null;
+  activity?: ActivityEntry[];
+  runs?: Run[];
+  meta?: OfficeMeta | null;
+};
+
+export type QuerySeedInitialState = Omit<
+  Partial<AppState>,
+  "workflows" | "workspaces" | "office"
+> & {
   workspaces?: Partial<AppState["workspaces"]> & {
     items?: Workspace[];
   };
+  office?: OfficeQuerySeedState;
   workflows?: Partial<AppState["workflows"]> & {
     items?: Array<Workflow | WorkflowItem>;
   };
@@ -182,17 +210,49 @@ function seedOfficeState(client: QueryClient, initialState: QuerySeedInitialStat
   const workspaceId = initialState.workspaces?.activeId ?? null;
   if (!workspaceId) return;
 
-  setIfDefined(client, qk.office.agents(workspaceId), { agents: office.agentProfiles });
-  setIfDefined(client, qk.office.projects(workspaceId), { projects: office.projects });
-  setIfDefined(client, qk.office.inbox(workspaceId), {
-    items: office.inboxItems,
-    total_count: office.inboxCount,
-  });
-  setIfDefined(client, qk.office.dashboard(workspaceId), office.dashboard ?? undefined);
-  setIfDefined(client, qk.office.activity(workspaceId), { activity: office.activity });
-  setIfDefined(client, qk.office.runs(workspaceId), { runs: office.runs });
+  seedOfficeEntityLists(client, workspaceId, office);
+  seedOfficeInbox(client, workspaceId, office);
+  seedOfficeDashboardAndActivity(client, workspaceId, office);
+}
+
+function seedOfficeEntityLists(
+  client: QueryClient,
+  workspaceId: string,
+  office: OfficeQuerySeedState,
+) {
+  if (office.agents) {
+    client.setQueryData(qk.office.agents(workspaceId), { agents: office.agents });
+  }
+  if (office.projects) {
+    client.setQueryData(qk.office.projects(workspaceId), { projects: office.projects });
+  }
   if (office.skills && office.skills.length > 0) {
     client.setQueryData(qk.office.skills(workspaceId), { skills: office.skills });
+  }
+  if (office.routines && office.routines.length > 0) {
+    client.setQueryData(qk.office.routines(workspaceId), { routines: office.routines });
+  }
+}
+
+function seedOfficeInbox(client: QueryClient, workspaceId: string, office: OfficeQuerySeedState) {
+  if (!office.inboxItems && office.inboxCount === undefined) return;
+  client.setQueryData(qk.office.inbox(workspaceId), {
+    items: office.inboxItems ?? [],
+    total_count: office.inboxCount ?? office.inboxItems?.length ?? 0,
+  });
+}
+
+function seedOfficeDashboardAndActivity(
+  client: QueryClient,
+  workspaceId: string,
+  office: OfficeQuerySeedState,
+) {
+  setIfDefined(client, qk.office.dashboard(workspaceId), office.dashboard ?? undefined);
+  if (office.activity) {
+    client.setQueryData(qk.office.activity(workspaceId), { activity: office.activity });
+  }
+  if (office.runs) {
+    client.setQueryData(qk.office.runs(workspaceId), { runs: office.runs });
   }
 }
 

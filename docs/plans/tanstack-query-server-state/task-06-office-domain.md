@@ -1,7 +1,7 @@
 ---
 id: "06-office-domain"
 title: "Office domain"
-status: in_progress
+status: done
 wave: 3
 depends_on: ["03-query-options-taxonomy", "04-query-bridge-audit"]
 plan: "plan.md"
@@ -104,6 +104,13 @@ out any mobile E2E coverage added or reused.
   session labels, assignee/project/reviewer/approver pickers, pending approval
   badges, and run-error labels from `office.agentProfiles`/`office.projects`
   store mirrors to active-workspace Office Query caches.
+- The final Office store cleanup moved agent detail/routes, project detail and
+  writes, create-agent/create-project flows, routines, workspace skills, org
+  chart, new-task reference selectors, Office route bootstrap, and costs boot
+  data to Office Query caches. Query seed/hydration now treats Office
+  agents/projects/skills/routines/inbox/dashboard/activity/runs/meta as
+  query-only boot data, and the Office Zustand slice retains only task UI
+  controls.
 - Migrated office dashboard, tasks, task search, task detail comments/activity,
   agents, agent run/detail routes, projects/project tasks, inbox, activity,
   routines, routing, costs, budgets, and skills to TanStack Query readers.
@@ -114,12 +121,16 @@ out any mobile E2E coverage added or reused.
 - Added an office WS query bridge that patches task pages/details and provider
   health/run attempts where possible, then invalidates the affected query
   families for sparse events.
+- Removed Office server-state mirrors/actions for `agentProfiles`, `projects`,
+  `skills`, `routines`, `approvals`, `activity`, `costSummary`,
+  `budgetPolicies`, `inboxItems`, `inboxCount`, `runs`, `dashboard`, `meta`,
+  `isLoading`, `routing`, `providerHealth`, `runAttempts`, and
+  `agentRouting`.
 - Retained `office.tasks.filters`, `viewMode`, `sortField`, `sortDir`, `groupBy`,
-  `nestingEnabled`, dialogs, and local edit state as client-only UI state.
+  `nestingEnabled`, and the corresponding task UI actions as client-only UI
+  state. Dialog and edit state remains local to the owning components.
 - Removed the legacy `useOfficeRefetch` hook definition, old Office WS fanout,
-  Office refetch trigger state, and unused Office task server-state mirror.
-  Remaining Office cleanup is now concentrated in agent/project/routine/skill
-  store mirrors and deeper Office page readers/writers.
+  Office refetch trigger state, and unused Office server-state mirrors.
 - Reused existing mobile coverage through `tests/office/mobile-onboarding.spec.ts`
   in Docker.
 
@@ -148,3 +159,13 @@ out any mobile E2E coverage added or reused.
   - `rtk pnpm --dir apps/web lint` passed.
   - `rtk pnpm --dir apps/web e2e:docker tests/office/property-pickers.spec.ts tests/office/comment-input.spec.ts tests/office/simple-advanced-toggle.spec.ts tests/office/regression-fixes.spec.ts tests/office/tasks.spec.ts tests/office/realtime-tasks.spec.ts tests/system/ws-event-accounting.spec.ts`
     passed 30 Docker tests with strict WS accounting.
+- Final Office store cleanup:
+  - `rtk pnpm --dir apps/web test hooks/domains/office/use-office-data.test.tsx app/office/agents/[id]/components/agent-configuration-tab.test.tsx app/office/agents/[id]/components/agent-runs-tab.test.tsx app/office/components/new-task-dialog.test.tsx app/office/workspace/org/org-tree-layout.test.ts app/office/page-client.test.tsx lib/query/seed.test.ts components/state-hydrator.test.tsx lib/query/bridge/index.test.ts components/task/simple/components/pending-approval-badge.test.tsx`
+    passed 10 files / 68 tests.
+  - `rtk pnpm --dir apps/web typecheck` passed.
+  - `rtk pnpm --dir apps/web lint` passed.
+  - Stale scans for removed Office store fields/actions returned no production
+    server-state readers/writers; remaining `office.tasks.*` matches are
+    client-only task filter/sort/view/grouping/nesting state.
+  - `rtk pnpm --dir apps/web e2e:docker tests/office/agents.spec.ts tests/office/agent-subroutes.spec.ts tests/office/agent-roles.spec.ts tests/office/agent-skills-ui.spec.ts tests/office/permissions.spec.ts tests/office/projects.spec.ts tests/office/project-repository-picker.spec.ts tests/office/routines.spec.ts tests/office/routines-ui.spec.ts tests/office/routine-fire.spec.ts tests/office/skills.spec.ts tests/office/system-skills.spec.ts tests/office/skills-readonly.spec.ts tests/office/org-chart.spec.ts tests/office/execution-stages.spec.ts tests/office/costs.spec.ts tests/system/ws-event-accounting.spec.ts`
+    passed 67 Docker tests / 5 skipped with strict WS accounting.

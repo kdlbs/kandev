@@ -3,9 +3,9 @@ import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { makeQueryClient } from "@/lib/query/client";
 import { qk } from "@/lib/query/keys";
-import type { AppState } from "@/lib/state/store";
 import { QueryProvider } from "@/lib/query/provider";
 import type { Message, Workspace } from "@/lib/types/http";
+import type { AgentProfile, InboxItem, OfficeMeta, Project } from "@/lib/state/slices/office/types";
 import { StateProvider } from "./state-provider";
 import { StateHydrator } from "./state-hydrator";
 
@@ -45,16 +45,16 @@ describe("StateHydrator", () => {
 
   it("seeds office server-state query keys from hydrated state", () => {
     const queryClient = makeQueryClient();
-    const agent = { id: "agent-1", name: "CEO" } as AppState["office"]["agentProfiles"][number];
+    const agent = { id: "agent-1", name: "CEO" } as AgentProfile;
     const project = {
       id: "project-1",
       name: "Launch",
-    } as AppState["office"]["projects"][number];
+    } as Project;
     const inboxItem = {
       id: "inbox-1",
       type: "approval",
       title: "Approve",
-    } as AppState["office"]["inboxItems"][number];
+    } as InboxItem;
 
     render(
       <QueryProvider client={queryClient}>
@@ -71,38 +71,11 @@ describe("StateHydrator", () => {
                 activeId: "workspace-1",
               },
               office: {
-                agentProfiles: [agent],
+                agents: [agent],
                 projects: [project],
                 inboxItems: [inboxItem],
                 inboxCount: 1,
-                meta: { statuses: [] } as unknown as AppState["office"]["meta"],
-                skills: [],
-                approvals: [],
-                activity: [],
-                costSummary: null,
-                budgetPolicies: [],
-                routines: [],
-                runs: [],
-                dashboard: null,
-                tasks: {
-                  filters: {
-                    statuses: [],
-                    priorities: [],
-                    assigneeIds: [],
-                    projectIds: [],
-                    search: "",
-                  },
-                  viewMode: "list",
-                  sortField: "updated",
-                  sortDir: "desc",
-                  groupBy: "none",
-                  nestingEnabled: true,
-                },
-                isLoading: false,
-                routing: { byWorkspace: {}, knownProviders: [], preview: { byWorkspace: {} } },
-                providerHealth: { byWorkspace: {} },
-                runAttempts: { byRunId: {} },
-                agentRouting: { byAgentId: {} },
+                meta: { statuses: [] } as unknown as OfficeMeta,
               },
             }}
           />

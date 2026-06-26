@@ -354,7 +354,7 @@ Wave 2 (cache taxonomy and bridge):
 Wave 3 (domain migrations, can run in parallel by area after Wave 2):
 
 - [x] [task-05-workspace-kanban-settings](task-05-workspace-kanban-settings.md)
-- [ ] [task-06-office-domain](task-06-office-domain.md) — reopened for remaining Office store/refetch cleanup
+- [x] [task-06-office-domain](task-06-office-domain.md)
 - [x] [task-07-session-domain](task-07-session-domain.md)
 - [x] [task-08-session-runtime-streams](task-08-session-runtime-streams.md)
 - [x] [task-09-integrations-automations-system](task-09-integrations-automations-system.md)
@@ -380,6 +380,16 @@ Task 06 verification completed locally:
   passed 6 mobile Docker tests.
 - `cd apps/web && e2e/scripts/run-e2e.sh --docker --no-build --project routing`
   passed 7 routing Docker tests.
+- Final reopened Office cleanup also passed:
+  - `rtk pnpm --dir apps/web test hooks/domains/office/use-office-data.test.tsx app/office/agents/[id]/components/agent-configuration-tab.test.tsx app/office/agents/[id]/components/agent-runs-tab.test.tsx app/office/components/new-task-dialog.test.tsx app/office/workspace/org/org-tree-layout.test.ts app/office/page-client.test.tsx lib/query/seed.test.ts components/state-hydrator.test.tsx lib/query/bridge/index.test.ts components/task/simple/components/pending-approval-badge.test.tsx`
+    passed 10 files / 68 tests.
+  - `rtk pnpm --dir apps/web typecheck` passed.
+  - `rtk pnpm --dir apps/web lint` passed.
+  - Stale scans for removed Office store fields/actions returned no production
+    server-state readers/writers; remaining `office.tasks.*` matches are
+    client-only task filter/sort/view/grouping/nesting state.
+  - `rtk pnpm --dir apps/web e2e:docker tests/office/agents.spec.ts tests/office/agent-subroutes.spec.ts tests/office/agent-roles.spec.ts tests/office/agent-skills-ui.spec.ts tests/office/permissions.spec.ts tests/office/projects.spec.ts tests/office/project-repository-picker.spec.ts tests/office/routines.spec.ts tests/office/routines-ui.spec.ts tests/office/routine-fire.spec.ts tests/office/skills.spec.ts tests/office/system-skills.spec.ts tests/office/skills-readonly.spec.ts tests/office/org-chart.spec.ts tests/office/execution-stages.spec.ts tests/office/costs.spec.ts tests/system/ws-event-accounting.spec.ts`
+    passed 67 Docker tests / 5 skipped with strict WS accounting.
 
 Task 07 verification completed locally:
 
@@ -483,6 +493,11 @@ Task 10 cleanup progress:
   session labels, assignee/project/reviewer/approver pickers, pending approval
   badges, and run-error labels from `office.agentProfiles`/`office.projects`
   store mirrors to active-workspace Office Query caches.
+- Final Office store cleanup moved agent detail/routes, project detail and
+  writes, create-agent/create-project flows, routines, workspace skills, org
+  chart, new-task reference selectors, Office route bootstrap, and costs boot
+  data to Office Query caches. The Office Zustand slice now retains only task
+  filter/sort/view/grouping/nesting UI state.
 - Queue mirror cleanup moved `useQueue` to read/write `qk.session.queue`
   directly, with Query-cache optimistic removal and mutation-local loading
   state. The old queue Zustand state/actions, default-state/root-store
@@ -1356,14 +1371,28 @@ Task 10 partial verification completed locally:
   - `rtk pnpm --dir apps/web lint` passed.
   - `rtk pnpm --dir apps/web e2e:docker tests/office/property-pickers.spec.ts tests/office/comment-input.spec.ts tests/office/simple-advanced-toggle.spec.ts tests/office/regression-fixes.spec.ts tests/office/tasks.spec.ts tests/office/realtime-tasks.spec.ts tests/system/ws-event-accounting.spec.ts`
     passed 30 Docker tests with strict WS accounting.
+- Final Office store cleanup:
+  - Moved agent detail/routes, project detail and writes, create-agent/create-project
+    flows, routines, workspace skills, org chart, new-task reference selectors,
+    Office route bootstrap, and costs boot data to Office Query caches.
+  - The Office Zustand slice now retains only task filter/sort/view/grouping/
+    nesting UI state.
+  - `rtk pnpm --dir apps/web test hooks/domains/office/use-office-data.test.tsx app/office/agents/[id]/components/agent-configuration-tab.test.tsx app/office/agents/[id]/components/agent-runs-tab.test.tsx app/office/components/new-task-dialog.test.tsx app/office/workspace/org/org-tree-layout.test.ts app/office/page-client.test.tsx lib/query/seed.test.ts components/state-hydrator.test.tsx lib/query/bridge/index.test.ts components/task/simple/components/pending-approval-badge.test.tsx`
+    passed 10 files / 68 tests.
+  - `rtk pnpm --dir apps/web typecheck` passed.
+  - `rtk pnpm --dir apps/web lint` passed.
+  - Stale scans for removed Office store fields/actions returned no production
+    server-state readers/writers; remaining `office.tasks.*` matches are
+    client-only task filter/sort/view/grouping/nesting state.
+  - `rtk pnpm --dir apps/web e2e:docker tests/office/agents.spec.ts tests/office/agent-subroutes.spec.ts tests/office/agent-roles.spec.ts tests/office/agent-skills-ui.spec.ts tests/office/permissions.spec.ts tests/office/projects.spec.ts tests/office/project-repository-picker.spec.ts tests/office/routines.spec.ts tests/office/routines-ui.spec.ts tests/office/routine-fire.spec.ts tests/office/skills.spec.ts tests/office/system-skills.spec.ts tests/office/skills-readonly.spec.ts tests/office/org-chart.spec.ts tests/office/execution-stages.spec.ts tests/office/costs.spec.ts tests/system/ws-event-accounting.spec.ts`
+    passed 67 Docker tests / 5 skipped with strict WS accounting.
 
-Current next step: finish the reopened Office store cleanup for
-agents/projects/routines/skills readers and writer actions before running Task
-11 strict QA.
+Current next step: run Task 10's final retained-Zustand audit, then run Task 11
+strict QA.
 
 Wave 4 (cleanup and full verification):
 
-- [ ] [task-10-remove-zustand-server-state](task-10-remove-zustand-server-state.md) — reopened for remaining Office store/refetch cleanup
+- [ ] [task-10-remove-zustand-server-state](task-10-remove-zustand-server-state.md) — final retained-Zustand audit pending
 - [ ] [task-11-e2e-strict-qa](task-11-e2e-strict-qa.md) — in progress
 
 ## Open Questions

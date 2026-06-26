@@ -8,11 +8,11 @@ import { Button } from "@kandev/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { IconRefresh } from "@tabler/icons-react";
 import { toast } from "sonner";
-import { useAppStore } from "@/components/state-provider";
 import { useOfficeMetaData } from "@/hooks/domains/office/use-office-data";
 import { updateAgentProfile, getAgentUtilization } from "@/lib/api/domains/office-api";
 import type { AgentProfile, AgentRole, ProviderUsage } from "@/lib/state/slices/office/types";
 import { UtilizationBars } from "@/app/office/components/utilization-bars";
+import { useOfficeAgentProfiles, usePatchOfficeAgentProfileCache } from "../use-agent-detail-data";
 
 type AgentOverviewTabProps = {
   agent: AgentProfile;
@@ -218,9 +218,9 @@ const FALLBACK_EXECUTOR_TYPES = [
 ];
 
 export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const agents = useOfficeAgentProfiles();
   const meta = useOfficeMetaData().data;
-  const updateStore = useAppStore((s) => s.updateOfficeAgentProfile);
+  const patchAgentCache = usePatchOfficeAgentProfileCache();
 
   const roles = meta?.roles.map((r) => ({ id: r.id, label: r.label })) ?? FALLBACK_ROLES;
   const executorTypes =
@@ -246,7 +246,7 @@ export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
         maxConcurrentSessions: maxConcurrent,
         executorPreference: executorType ? { type: executorType } : undefined,
       } as Partial<AgentProfile>);
-      updateStore(agent.id, {
+      patchAgentCache(agent.id, {
         name,
         role,
         budgetMonthlyCents: Math.round(budget * 100),
@@ -260,7 +260,7 @@ export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
     } finally {
       setSaving(false);
     }
-  }, [agent.id, name, role, budget, maxConcurrent, executorType, updateStore]);
+  }, [agent.id, name, role, budget, maxConcurrent, executorType, patchAgentCache]);
 
   const reportsToAgent = agents.find((a) => a.id === agent.reportsTo);
 

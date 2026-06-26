@@ -6,7 +6,6 @@ import { makeQueryClient } from "@/lib/query/client";
 import { qk } from "@/lib/query/keys";
 import type { AgentProfile, OfficeMeta } from "@/lib/state/slices/office/types";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
-import { defaultOfficeState } from "@/lib/state/slices/office/office-slice";
 import { AgentConfigurationTab } from "./agent-configuration-tab";
 
 // Mock toast so the act-like hooks don't error and we don't need the toast
@@ -84,6 +83,7 @@ function officeMeta(): OfficeMeta {
 function renderConfigurationTab(agent: AgentProfile) {
   const queryClient = makeQueryClient();
   queryClient.setQueryData(qk.office.meta(), officeMeta());
+  queryClient.setQueryData(qk.office.agents("ws-1"), { agents: [agent] });
   queryClient.setQueryData(qk.settings.agents(), {
     agents: [
       {
@@ -106,12 +106,7 @@ function renderConfigurationTab(agent: AgentProfile) {
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <StateProvider
-        initialState={{
-          workspaces: { activeId: "ws-1" },
-          office: { ...defaultOfficeState.office, agentProfiles: [agent] },
-        }}
-      >
+      <StateProvider initialState={{ workspaces: { activeId: "ws-1" } }}>
         <AgentConfigurationTab agent={agent} />
       </StateProvider>
     </QueryClientProvider>,

@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { Button } from "@kandev/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { IconPlus } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
+import { useOfficeAgentsData, useOfficeRoutinesData } from "@/hooks/domains/office/use-office-data";
 import {
   createRoutine,
   updateRoutine,
@@ -16,7 +17,6 @@ import {
 } from "@/lib/api/domains/office-api";
 import {
   officeRoutineRunsQueryOptions,
-  officeRoutinesQueryOptions,
   officeRoutineTriggersQueryOptions,
 } from "@/lib/query/query-options/office";
 import type {
@@ -119,13 +119,10 @@ function useRoutineActions(workspaceId: string | null, fetchRoutines: () => Prom
 // RoutinesContent component stays under the per-function ceiling. Each
 // fetcher is referentially stable (depends on workspaceId only) so the
 // effects don't re-fire on unrelated re-renders.
-function useRoutinesData(workspaceId: string | null) {
-  const storeRoutines = useAppStore((s) => s.office.routines);
-  const setRoutines = useAppStore((s) => s.setRoutines);
-
-  const routinesQuery = useQuery(officeRoutinesQueryOptions(workspaceId ?? ""));
+function useRoutinesData(workspaceId: string | null, initialRoutines: Routine[] = []) {
+  const routinesQuery = useOfficeRoutinesData(workspaceId, initialRoutines);
   const runsQuery = useQuery(officeRoutineRunsQueryOptions(workspaceId ?? ""));
-  const routines = routinesQuery.data?.routines ?? storeRoutines;
+  const routines = routinesQuery.data?.routines ?? initialRoutines;
   const triggerQueries = useQueries({
     queries: routines.map((routine) => officeRoutineTriggersQueryOptions(routine.id)),
   });
@@ -141,11 +138,6 @@ function useRoutinesData(workspaceId: string | null) {
     return res.data?.runs ?? [];
   }, [runsQuery, workspaceId]);
 
-  useEffect(() => {
-    if (!routinesQuery.data) return;
-    setRoutines(routinesQuery.data.routines ?? []);
-  }, [routinesQuery.data, setRoutines]);
-
   const triggersByRoutine: Record<string, RoutineTrigger[]> = {};
   routines.forEach((routine, index) => {
     triggersByRoutine[routine.id] = triggerQueries[index]?.data?.triggers ?? [];
@@ -160,12 +152,14 @@ function useRoutinesData(workspaceId: string | null) {
   };
 }
 
-export function RoutinesContent() {
+export function RoutinesContent({ initialRoutines = [] }: { initialRoutines?: Routine[] }) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const agents = useOfficeAgentsData(workspaceId).data?.agents ?? [];
   const [showCreate, setShowCreate] = useState(false);
-  const { routines, runs, triggersByRoutine, fetchRoutines, fetchRuns } =
-    useRoutinesData(workspaceId);
+  const { routines, runs, triggersByRoutine, fetchRoutines, fetchRuns } = useRoutinesData(
+    workspaceId,
+    initialRoutines,
+  );
 
   const { handleToggle, handleDelete, handleCreate } = useRoutineActions(
     workspaceId,

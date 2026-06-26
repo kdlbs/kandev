@@ -89,12 +89,24 @@ Completed cleanup sub-waves:
   `rtk pnpm --dir apps/web typecheck`, `rtk pnpm --dir apps/web lint`, and
   `rtk pnpm --dir apps/web e2e:docker tests/office/property-pickers.spec.ts tests/office/comment-input.spec.ts tests/office/simple-advanced-toggle.spec.ts tests/office/regression-fixes.spec.ts tests/office/tasks.spec.ts tests/office/realtime-tasks.spec.ts tests/system/ws-event-accounting.spec.ts`
   passing 30 Docker tests with strict WS accounting.
+- **Final Office store cleanup:** moved agent detail/routes, project detail and
+  writes, create-agent/create-project flows, routines, workspace skills, org
+  chart, new-task reference selectors, Office route bootstrap, and costs boot
+  data to Office Query caches. Removed Office server-state mirrors/actions for
+  agents, projects, skills, routines, inbox, dashboard, activity, runs, meta,
+  routing, provider health, run attempts, approvals, budgets, and costs; the
+  Office Zustand slice now retains only task filter/sort/view/grouping/nesting
+  UI state. Verified by
+  `rtk pnpm --dir apps/web test hooks/domains/office/use-office-data.test.tsx app/office/agents/[id]/components/agent-configuration-tab.test.tsx app/office/agents/[id]/components/agent-runs-tab.test.tsx app/office/components/new-task-dialog.test.tsx app/office/workspace/org/org-tree-layout.test.ts app/office/page-client.test.tsx lib/query/seed.test.ts components/state-hydrator.test.tsx lib/query/bridge/index.test.ts components/task/simple/components/pending-approval-badge.test.tsx`,
+  `rtk pnpm --dir apps/web typecheck`, `rtk pnpm --dir apps/web lint`,
+  stale scans for removed Office store fields/actions, and
+  `rtk pnpm --dir apps/web e2e:docker tests/office/agents.spec.ts tests/office/agent-subroutes.spec.ts tests/office/agent-roles.spec.ts tests/office/agent-skills-ui.spec.ts tests/office/permissions.spec.ts tests/office/projects.spec.ts tests/office/project-repository-picker.spec.ts tests/office/routines.spec.ts tests/office/routines-ui.spec.ts tests/office/routine-fire.spec.ts tests/office/skills.spec.ts tests/office/system-skills.spec.ts tests/office/skills-readonly.spec.ts tests/office/org-chart.spec.ts tests/office/execution-stages.spec.ts tests/office/costs.spec.ts tests/system/ws-event-accounting.spec.ts`
+  passing 67 Docker tests / 5 skipped with strict WS accounting.
 
 Remaining cleanup:
 
-- Office agent/project/routine/skill readers and writer actions still have
-  store mirrors in deeper Office pages. Task 10 stays `in_progress` until those
-  paths are removed or explicitly documented as client-only temporary indexes.
+- Task 10 stays `in_progress` until the final retained-Zustand audit confirms
+  no removed server-state paths remain and Task 11 strict QA completes.
 
 - **System:** removed the system Zustand slice and `system-events` WS handler.
   System hooks and topbar metrics now read Query caches/options directly. The
@@ -377,8 +389,10 @@ Retained Zustand inventory:
   `userShells`, and `environmentIdBySessionId` remain for high-frequency
   terminal/process/git/context/model updates and environment-scoped cleanup.
 - Local integration/client indexes: GitHub `pendingPrUrlByTaskId` and
-  `prFeedbackCache` remain local-only; office view/filter/sort/grouping state
-  remains local UI state.
+  `prFeedbackCache` remain local-only; `office.tasks.filters`,
+  `office.tasks.viewMode`, `office.tasks.sortField`, `office.tasks.sortDir`,
+  `office.tasks.groupBy`, and `office.tasks.nestingEnabled` remain local UI
+  state.
 
 No GitLab-specific Docker E2E specs exist in this checkout. The GitLab sub-wave
 used focused unit coverage plus the integration/settings/sidebar/strict-WS
