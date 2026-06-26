@@ -242,6 +242,7 @@ test.describe("Multi-session", () => {
     expect(
       fs.readdirSync(createdRoots[0]).filter((name) => name.includes("branch-5hn")).length,
     ).toBe(1);
+    const rootEntriesAfterFirst = fs.readdirSync(createdRoots[0]).sort();
 
     const launched = await apiClient.launchSession(
       {
@@ -265,5 +266,6 @@ test.describe("Multi-session", () => {
     const launchedSession = sessions.find((s) => s.id === launched.session_id);
     expect(launchedSession?.task_environment_id).toBe(envBefore!.id);
     expect(listTaskWorktreeRoots(backend.tmpDir)).toEqual(rootsAfterFirst);
+    expect(fs.readdirSync(createdRoots[0]).sort()).toEqual(rootEntriesAfterFirst);
   });
 });

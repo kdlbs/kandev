@@ -86,7 +86,9 @@ func (e *Executor) reuseExistingRepositoryWorktrees(ctx context.Context, req *La
 
 	worktreeIDs := e.environmentRepoWorktreeIDs(req, env)
 	for key, id := range e.latestSessionWorktreeIDsForEnvironment(ctx, req.TaskID, env.ID) {
-		worktreeIDs[key] = id
+		if _, exists := worktreeIDs[key]; !exists {
+			worktreeIDs[key] = id
+		}
 	}
 	if len(worktreeIDs) == 0 {
 		return
