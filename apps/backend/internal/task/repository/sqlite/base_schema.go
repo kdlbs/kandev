@@ -6,7 +6,6 @@ import (
 
 	"github.com/google/uuid"
 
-	dbutil "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 )
 
@@ -619,14 +618,8 @@ const sessionWorktreeSchemaDDL = `
 `
 
 func (r *Repository) initSessionWorktreeSchema() error {
-	if _, err := r.db.Exec(sessionWorktreeSchemaDDL); err != nil {
-		return err
-	}
-	_, err := r.db.Exec(`ALTER TABLE task_session_worktrees ADD COLUMN branch_slug TEXT NOT NULL DEFAULT ''`)
-	if err != nil && !dbutil.IsDuplicateColumnError(err) {
-		return err
-	}
-	return nil
+	_, err := r.db.Exec(sessionWorktreeSchemaDDL)
+	return err
 }
 
 func (r *Repository) initGitSchema() error {
