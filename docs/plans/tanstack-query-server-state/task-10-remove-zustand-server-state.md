@@ -40,13 +40,18 @@ Completed cleanup sub-waves:
   read `qk.office.dashboard`, `qk.office.inbox`, `qk.office.agents`, and
   `qk.office.projects`; active workspace/sidebar/session state remains in
   Zustand.
+- **Office inbox/activity bridge cleanup:** moved the Inbox page off
+  `office.inboxItems`, removed the Activity page's old `useOfficeRefetch`
+  subscription, and added Query bridge invalidation for task comments on
+  `office.run.queued` and `office.run.processed` so comment run-status badges
+  are covered without the legacy comments trigger.
 
 Remaining cleanup:
 
 - Office meta, routines, costs, skills, deeper agent/project/task helper
-  components, and old `useOfficeRefetch`/`registerOfficeHandlers` fanout still
-  have store readers or writers. Task 10 stays `in_progress` until those paths
-  are removed or explicitly documented as client-only temporary indexes.
+  components, and remaining `useOfficeRefetch`/`registerOfficeHandlers` fanout
+  still have store readers or writers. Task 10 stays `in_progress` until those
+  paths are removed or explicitly documented as client-only temporary indexes.
 
 - **System:** removed the system Zustand slice and `system-events` WS handler.
   System hooks and topbar metrics now read Query caches/options directly. The

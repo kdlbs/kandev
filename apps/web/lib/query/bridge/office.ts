@@ -213,6 +213,7 @@ function invalidateRunsAndTask(queryClient: QueryClient, payload: OfficeEventPay
   invalidateWorkspaceFamily(queryClient, payload.workspace_id, "runs");
   invalidateAgents(queryClient, payload.workspace_id);
   invalidateTaskDetail(queryClient, payload);
+  invalidateTaskComments(queryClient, payload);
 }
 
 function invalidateSessionDrivenOfficeSurfaces(

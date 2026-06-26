@@ -1285,6 +1285,14 @@ Task 10 partial verification completed locally:
     passed.
   - `rtk pnpm --dir apps/web e2e:docker tests/office/dashboard.spec.ts tests/office/agents.spec.ts tests/office/projects.spec.ts tests/office/sidebar-navigation.spec.ts tests/office/realtime-dashboard.spec.ts tests/system/ws-event-accounting.spec.ts`
     passed 30 desktop Docker tests / 1 skipped with strict WS accounting.
+- Office inbox/activity bridge cleanup:
+  - `rtk pnpm --dir apps/web test lib/query/bridge/index.test.ts app/office/inbox/inbox-page-client.test.tsx app/office/workspace/activity/activity-row.test.tsx`
+    passed 3 files / 19 tests.
+  - `rtk pnpm --dir apps/web typecheck` passed.
+  - `rtk pnpm --dir apps/web exec eslint --max-warnings 0 lib/query/bridge/office.ts lib/query/bridge/index.test.ts app/office/inbox/inbox-page-client.tsx app/office/inbox/inbox-page-client.test.tsx app/office/workspace/activity/activity-feed.tsx`
+    passed.
+  - `rtk pnpm --dir apps/web e2e:docker tests/office/inbox.spec.ts tests/office/realtime-inbox.spec.ts tests/office/approval-flow.spec.ts tests/office/activity-page.spec.ts tests/office/comment-run-status.spec.ts tests/system/ws-event-accounting.spec.ts`
+    passed 15 Docker tests with strict WS accounting.
 
 Current next step: finish the reopened Office store/refetch cleanup before
 running Task 11 strict QA.

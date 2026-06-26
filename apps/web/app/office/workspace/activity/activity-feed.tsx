@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
 import { useOfficeActivityData } from "@/hooks/domains/office/use-office-data";
 import type { ActivityEntry } from "@/lib/state/slices/office/types";
 import { ActivityRow } from "./activity-row";
@@ -29,8 +28,6 @@ export function ActivityFeed({
   const [filterType, setFilterType] = useState("all");
   const activityQuery = useOfficeActivityData(workspaceId, filterType, initialActivity);
   const entries = activityQuery.data?.activity ?? (filterType === "all" ? initialActivity : []);
-
-  useOfficeRefetch("activity", () => void activityQuery.refetch());
 
   return (
     <div className="space-y-4">

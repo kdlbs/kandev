@@ -71,6 +71,12 @@ out any mobile E2E coverage added or reused.
   page, app sidebar inbox badge, Office navigation counters, and sidebar
   agent/project lists to Query-owned Office caches. Deeper meta/routines/costs/
   skills/project/task helpers and old Office refetch fanout remain.
+- The Office inbox/activity bridge sub-wave moved the Inbox page off the
+  `office.inboxItems` store mirror, removed the Activity page's
+  `useOfficeRefetch("activity")` subscription, and made
+  `office.run.queued`/`office.run.processed` invalidate task comments so
+  comment run-status badges no longer depend on the legacy comments refetch
+  trigger.
 - Migrated office dashboard, tasks, task search, task detail comments/activity,
   agents, agent run/detail routes, projects/project tasks, inbox, activity,
   routines, routing, costs, budgets, and skills to TanStack Query readers.

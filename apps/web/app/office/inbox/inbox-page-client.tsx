@@ -6,7 +6,6 @@ import { Tabs, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { Input } from "@kandev/ui/input";
 import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
 import { useOfficeInboxData } from "@/hooks/domains/office/use-office-data";
 import { decideApproval } from "@/lib/api/domains/office-api";
 import type { InboxItem } from "@/lib/state/slices/office/types";
@@ -90,15 +89,13 @@ function InboxToolbar({
 
 export function InboxPageClient({ initialItems, initialCount }: InboxPageClientProps) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const inboxItems = useAppStore((s) => s.office.inboxItems);
   const [tab, setTab] = useState<TabValue>("mine");
   const [search, setSearch] = useState("");
 
   const inboxQuery = useOfficeInboxData(workspaceId, initialItems, initialCount);
   const fetchInbox = inboxQuery.refetchAll;
   const { handleApprove, handleReject } = useApprovalActions(fetchInbox);
-
-  useOfficeRefetch("inbox", () => void fetchInbox());
+  const inboxItems = inboxQuery.data?.items ?? initialItems;
 
   const filteredItems = useMemo(() => {
     let items: InboxItem[] = inboxItems;

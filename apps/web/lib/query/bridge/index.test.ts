@@ -324,6 +324,36 @@ describe("query bridge audit", () => {
     cleanup();
   });
 
+  it("invalidates office task comments when run lifecycle events arrive", () => {
+    const events: Array<"office.run.queued" | "office.run.processed"> = [
+      "office.run.queued",
+      "office.run.processed",
+    ];
+
+    for (const action of events) {
+      const ws = new FakeWebSocketClient();
+      const queryClient = makeQueryClient();
+      queryClient.setQueryData(qk.office.taskComments("office-task-1"), { comments: [] });
+
+      const cleanup = registerBridge(ws, queryClient);
+      ws.emit({
+        type: "notification",
+        action,
+        payload: {
+          workspace_id: "workspace-1",
+          task_id: "office-task-1",
+          run_id: "run-1",
+        },
+      });
+
+      expect(
+        queryClient.getQueryState(qk.office.taskComments("office-task-1"))?.isInvalidated,
+      ).toBe(true);
+
+      cleanup();
+    }
+  });
+
   it("upserts session messages into the stable session message cache", () => {
     const ws = new FakeWebSocketClient();
     const queryClient = makeQueryClient();
