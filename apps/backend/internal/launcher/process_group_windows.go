@@ -5,8 +5,9 @@ package launcher
 import (
 	"fmt"
 	"os/exec"
-	"strings"
 	"syscall"
+
+	"github.com/kandev/kandev/internal/agentctl/server/winproc"
 )
 
 func ignoreBrokenPipeSignal() {
@@ -27,26 +28,5 @@ func terminateManagedProcessGroup(pid int) error {
 }
 
 func runLauncherTaskkill(args ...string) error {
-	output, err := exec.Command("taskkill", args...).CombinedOutput()
-	if err == nil {
-		return nil
-	}
-	msg := strings.TrimSpace(string(output))
-	if isLauncherTaskkillMissing(msg) {
-		return syscall.ESRCH
-	}
-	if msg == "" {
-		return err
-	}
-	return fmt.Errorf("%w: %s", err, msg)
-}
-
-func isLauncherTaskkillMissing(msg string) bool {
-	if msg == "" {
-		return false
-	}
-	lower := strings.ToLower(msg)
-	return strings.Contains(lower, "not found") ||
-		strings.Contains(lower, "not be found") ||
-		strings.Contains(lower, "no running instance")
+	return winproc.RunTaskkill(args...)
 }
