@@ -17,7 +17,7 @@ import (
 // On Windows, we use CREATE_NEW_PROCESS_GROUP flag.
 func setProcGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED,
 	}
 }
 
@@ -29,23 +29,34 @@ func installProcessLifecycle(cmd *exec.Cmd) (processLifecycleHandle, error) {
 	if cmd == nil || cmd.Process == nil {
 		return processLifecycleHandle{}, fmt.Errorf("process not started")
 	}
+	pid := cmd.Process.Pid
 	job, err := createKillOnCloseJob()
 	if err != nil {
-		return processLifecycleHandle{}, err
+		return processLifecycleHandle{}, errors.Join(err, resumeSuspendedProcess(pid))
 	}
 	procHandle, err := windows.OpenProcess(
 		windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE,
 		false,
-		uint32(cmd.Process.Pid),
+		uint32(pid),
 	)
 	if err != nil {
 		_ = windows.CloseHandle(job)
-		return processLifecycleHandle{}, fmt.Errorf("OpenProcess(pid=%d): %w", cmd.Process.Pid, err)
+		return processLifecycleHandle{}, errors.Join(
+			fmt.Errorf("OpenProcess(pid=%d): %w", pid, err),
+			resumeSuspendedProcess(pid),
+		)
 	}
 	defer windows.CloseHandle(procHandle)
 	if err := windows.AssignProcessToJobObject(job, procHandle); err != nil {
 		_ = windows.CloseHandle(job)
-		return processLifecycleHandle{}, fmt.Errorf("AssignProcessToJobObject: %w", err)
+		return processLifecycleHandle{}, errors.Join(
+			fmt.Errorf("AssignProcessToJobObject: %w", err),
+			resumeSuspendedProcess(pid),
+		)
+	}
+	if err := resumeSuspendedProcess(pid); err != nil {
+		_ = windows.CloseHandle(job)
+		return processLifecycleHandle{}, err
 	}
 	return processLifecycleHandle{handle: job}, nil
 }
@@ -76,6 +87,45 @@ func createKillOnCloseJob() (windows.Handle, error) {
 		return 0, fmt.Errorf("SetInformationJobObject: %w", err)
 	}
 	return job, nil
+}
+
+func resumeSuspendedProcess(pid int) error {
+	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
+	if err != nil {
+		return fmt.Errorf("CreateToolhelp32Snapshot: %w", err)
+	}
+	defer windows.CloseHandle(snapshot)
+
+	entry := windows.ThreadEntry32{Size: uint32(unsafe.Sizeof(windows.ThreadEntry32{}))}
+	if err := windows.Thread32First(snapshot, &entry); err != nil {
+		return fmt.Errorf("Thread32First: %w", err)
+	}
+
+	resumed := 0
+	for {
+		if entry.OwnerProcessID == uint32(pid) {
+			thread, err := windows.OpenThread(windows.THREAD_SUSPEND_RESUME, false, entry.ThreadID)
+			if err != nil {
+				return fmt.Errorf("OpenThread(thread_id=%d): %w", entry.ThreadID, err)
+			}
+			if _, err := windows.ResumeThread(thread); err != nil {
+				_ = windows.CloseHandle(thread)
+				return fmt.Errorf("ResumeThread(thread_id=%d): %w", entry.ThreadID, err)
+			}
+			_ = windows.CloseHandle(thread)
+			resumed++
+		}
+		if err := windows.Thread32Next(snapshot, &entry); err != nil {
+			if errors.Is(err, windows.ERROR_NO_MORE_FILES) {
+				break
+			}
+			return fmt.Errorf("Thread32Next: %w", err)
+		}
+	}
+	if resumed == 0 {
+		return fmt.Errorf("no threads found for pid %d", pid)
+	}
+	return nil
 }
 
 // killProcessGroup kills the entire process tree for the given PID.
