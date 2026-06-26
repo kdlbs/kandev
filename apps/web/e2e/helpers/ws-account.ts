@@ -75,10 +75,10 @@ export async function readWsAccount(page: Page): Promise<WsAccountSnapshot | nul
 }
 
 async function readWsAccountAfterNavigationSettles(page: Page): Promise<WsAccountSnapshot | null> {
-  const snapshot = await readWsAccount(page);
+  const snapshot = await readWsAccountWithNavigationRetry(page);
   if (snapshot || !pageHasLoadedApp(page)) return snapshot;
   await waitForWsAccountHook(page);
-  return readWsAccount(page);
+  return readWsAccountWithNavigationRetry(page);
 }
 
 async function waitForWsAccountHook(page: Page): Promise<void> {
@@ -92,6 +92,30 @@ async function waitForWsAccountHook(page: Page): Promise<void> {
       { timeout: 1000 },
     )
     .catch(() => undefined);
+}
+
+async function readWsAccountWithNavigationRetry(page: Page): Promise<WsAccountSnapshot | null> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      return await readWsAccount(page);
+    } catch (error) {
+      if (!isNavigationEvaluationError(error)) throw error;
+      lastError = error;
+      await page.waitForLoadState("domcontentloaded", { timeout: 1000 }).catch(() => undefined);
+      await page.waitForTimeout(50);
+    }
+  }
+  throw lastError;
+}
+
+function isNavigationEvaluationError(error: unknown): boolean {
+  const message = String(error);
+  return (
+    message.includes("Execution context was destroyed") ||
+    message.includes("Cannot find context with specified id") ||
+    message.includes("Frame was detached")
+  );
 }
 
 export async function clearWsAccount(page: Page): Promise<void> {

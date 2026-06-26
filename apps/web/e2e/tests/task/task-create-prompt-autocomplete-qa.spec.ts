@@ -151,7 +151,9 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await textarea.click();
     await textarea.pressSequentially("@qa-mu");
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
-    await textarea.press("Enter");
+    const promptItem = testPage.getByRole("button", { name: /qa-multi/ });
+    await expect(promptItem).toBeVisible();
+    await promptItem.click();
 
     await expect(textarea).toHaveValue(lines);
 
