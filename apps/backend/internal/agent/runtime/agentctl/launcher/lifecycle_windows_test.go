@@ -21,26 +21,6 @@ func newTestLauncher(t *testing.T) *Launcher {
 	return &Launcher{logger: log}
 }
 
-func TestCreateKillOnCloseJob(t *testing.T) {
-	cmd := exec.Command("cmd.exe", "/c", "exit", "0")
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start child: %v", err)
-	}
-	job, err := winproc.InstallKillOnCloseJobForCommand(cmd)
-	if err != nil {
-		t.Fatalf("InstallKillOnCloseJobForCommand: %v", err)
-	}
-	if job.RawHandle() == 0 {
-		t.Fatal("got null job handle")
-	}
-	if err := cmd.Wait(); err != nil {
-		t.Fatalf("wait child: %v", err)
-	}
-	if err := job.Close(); err != nil {
-		t.Errorf("job.Close: %v", err)
-	}
-}
-
 func TestReleaseChildLifecycle_NoHandleIsNoop(t *testing.T) {
 	l := newTestLauncher(t)
 	// Must not panic when no handle has been installed.

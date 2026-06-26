@@ -36,3 +36,32 @@ func TestInstallKillOnCloseJobForSuspendedCommandRejectsNilCommand(t *testing.T)
 		t.Fatal("InstallKillOnCloseJobForSuspendedCommand(cmd without process) error = nil, want non-nil")
 	}
 }
+
+func TestInstallKillOnCloseJobForCommandRejectsNilCommand(t *testing.T) {
+	if _, err := InstallKillOnCloseJobForCommand(nil); err == nil {
+		t.Fatal("InstallKillOnCloseJobForCommand(nil) error = nil, want non-nil")
+	}
+	if _, err := InstallKillOnCloseJobForCommand(&exec.Cmd{}); err == nil {
+		t.Fatal("InstallKillOnCloseJobForCommand(cmd without process) error = nil, want non-nil")
+	}
+}
+
+func TestInstallKillOnCloseJobForCommandHappyPath(t *testing.T) {
+	cmd := exec.Command("cmd.exe", "/c", "exit", "0")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start child: %v", err)
+	}
+	job, err := InstallKillOnCloseJobForCommand(cmd)
+	if err != nil {
+		t.Fatalf("InstallKillOnCloseJobForCommand: %v", err)
+	}
+	if job.RawHandle() == 0 {
+		t.Fatal("got null job handle")
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("wait child: %v", err)
+	}
+	if err := job.Close(); err != nil {
+		t.Errorf("job.Close: %v", err)
+	}
+}
