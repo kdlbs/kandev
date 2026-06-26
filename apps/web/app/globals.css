@@ -202,17 +202,18 @@
   }
 }
 
-/* iOS Safari auto-zooms a focused form control whose computed font-size is
+/* iOS Safari auto-zooms a focused text field whose computed font-size is
    < 16px. Force 16px on coarse-pointer (touch) devices to stop focus-zoom.
-   !important because some controls are styled by more specific selectors
-   (e.g. `.tiptap pre .code-block-language` at 0.625rem) that would otherwise
-   win on specificity and keep the field under 16px. Only true editing hosts
-   are targeted — `[contenteditable="false"]` decorations (TipTap mention
-   chips, code-block views) are deliberately excluded. */
+   !important because some controls are styled by more specific selectors that
+   would otherwise win on specificity. Only true editing hosts are targeted:
+   `[contenteditable="false"]` decorations (TipTap mention chips, code-block
+   views) are excluded, and the decorative `.code-block-language` <select> is
+   left at its compact size — native selects open a picker rather than zooming
+   the viewport, so they don't need the 16px floor. */
 @media (pointer: coarse) {
   input,
   textarea,
-  select,
+  select:not(.code-block-language),
   [contenteditable="true"],
   [contenteditable="plaintext-only"] {
     font-size: 16px !important;
