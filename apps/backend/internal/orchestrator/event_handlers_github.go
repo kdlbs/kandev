@@ -197,7 +197,6 @@ func (s *Service) handleTaskCIOptionsUpdated(ctx context.Context, event *bus.Eve
 	if err != nil {
 		s.logger.Warn("failed to sync task PRs for CI automation options update", zap.String("task_id", options.TaskID), zap.Error(err))
 		s.recordTaskCIOptionsSyncError(detachedCtx, options.TaskID, err)
-		return nil
 	}
 	for _, pr := range prs {
 		s.startTaskPRCIAutomationWithoutRefresh(ctx, pr)

@@ -158,8 +158,15 @@ esac
 	if len(checks) != 2 {
 		t.Fatalf("checks = %d, want 2: %+v", len(checks), checks)
 	}
-	if checks[1].Name != "lint" || checks[1].Conclusion != "failure" {
-		t.Fatalf("expected failed lint check from paginated output, got %+v", checks[1])
+	var lint *CheckRun
+	for i := range checks {
+		if checks[i].Name == "lint" {
+			lint = &checks[i]
+			break
+		}
+	}
+	if lint == nil || lint.Conclusion != "failure" {
+		t.Fatalf("expected failed lint check from paginated output, got %+v", checks)
 	}
 	logged, err := os.ReadFile(logPath)
 	if err != nil {

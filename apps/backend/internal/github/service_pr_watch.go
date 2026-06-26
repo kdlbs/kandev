@@ -145,6 +145,9 @@ func prWatchFeedbackUpdatedSinceWatch(watch *PRWatch, status *PRStatus) bool {
 func prWatchFeedbackWatermark(watch *PRWatch, status *PRStatus) *time.Time {
 	if status != nil && status.PR != nil && !status.PR.UpdatedAt.IsZero() {
 		updatedAt := status.PR.UpdatedAt
+		if watch != nil && watch.LastCommentAt != nil && watch.LastCommentAt.After(updatedAt) {
+			return watch.LastCommentAt
+		}
 		return &updatedAt
 	}
 	if watch == nil {
@@ -775,7 +778,33 @@ func (s *Service) triggerPRSyncAllPerWatch(ctx context.Context, taskID string, w
 			results = append(results, tp)
 		}
 	}
-	return results, errors.Join(syncErrs...)
+	if len(syncErrs) == 0 {
+		return results, nil
+	}
+	err := errors.Join(syncErrs...)
+	if len(results) > 0 {
+		return results, &PartialPRSyncError{Err: err}
+	}
+	return results, err
+}
+
+// PartialPRSyncError reports that some PR watches failed while others synced.
+type PartialPRSyncError struct {
+	Err error
+}
+
+func (e *PartialPRSyncError) Error() string {
+	if e == nil || e.Err == nil {
+		return "partial PR sync failure"
+	}
+	return e.Err.Error()
+}
+
+func (e *PartialPRSyncError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
 }
 
 func (s *Service) triggerPRDetection(ctx context.Context, watch *PRWatch, taskID string) (*TaskPR, error) {

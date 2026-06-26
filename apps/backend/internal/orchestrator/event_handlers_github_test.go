@@ -108,11 +108,11 @@ func (m *mockGitHubService) ListTaskPRs(_ context.Context, taskIDs []string) (ma
 }
 func (m *mockGitHubService) TriggerPRSyncAll(ctx context.Context, taskID string) ([]*github.TaskPR, error) {
 	m.triggerPRSyncAllCalls++
+	if m.triggerPRSyncAllPRs != nil {
+		return m.triggerPRSyncAllPRs, m.triggerPRSyncAllErr
+	}
 	if m.triggerPRSyncAllErr != nil {
 		return nil, m.triggerPRSyncAllErr
-	}
-	if m.triggerPRSyncAllPRs != nil {
-		return m.triggerPRSyncAllPRs, nil
 	}
 	prsByTask, err := m.ListTaskPRs(ctx, []string{taskID})
 	if err != nil {

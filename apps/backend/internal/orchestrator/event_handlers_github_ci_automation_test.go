@@ -15,28 +15,6 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-func TestCIAutomationShouldAutoFix(t *testing.T) {
-	tests := []struct {
-		name string
-		pr   *github.TaskPR
-		want bool
-	}{
-		{name: "failed checks", pr: &github.TaskPR{ChecksState: "failure"}, want: true},
-		{name: "changes requested", pr: &github.TaskPR{ReviewState: "changes_requested"}, want: true},
-		{name: "unresolved threads", pr: &github.TaskPR{UnresolvedReviewThreads: 1}, want: true},
-		{name: "passing approved", pr: &github.TaskPR{ChecksState: "success", ReviewState: "approved"}, want: false},
-		{name: "closed ignored", pr: &github.TaskPR{State: "closed", ChecksState: "failure"}, want: false},
-		{name: "merged ignored", pr: &github.TaskPR{State: "merged", ReviewState: "changes_requested"}, want: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := ciAutomationShouldAutoFix(tt.pr); got != tt.want {
-				t.Fatalf("ciAutomationShouldAutoFix=%v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestCIAutomationReadyToMerge(t *testing.T) {
 	required := 1
 	ready := github.TaskPR{
@@ -162,6 +140,23 @@ func TestCIAutomationFeedbackDeltaIncludesEditedComments(t *testing.T) {
 	delta := ciAutomationBuildDelta(feedback, previous)
 	if len(delta.Comments) != 1 || delta.Comments[0].Body != "new body" {
 		t.Fatalf("expected edited comment in delta, got %+v", delta.Comments)
+	}
+}
+
+func TestCIAutomationFilterFeedbackForPRSkipsReviewCommentsWithoutUnresolvedThreads(t *testing.T) {
+	feedback := &github.PRFeedback{
+		Comments: []github.PRComment{
+			{ID: 1, Body: "resolved review comment", Path: "main.go", Line: 12},
+			{ID: 2, Body: "plain PR comment"},
+		},
+	}
+	filtered := ciAutomationFilterFeedbackForPR(&github.TaskPR{}, feedback)
+	if len(filtered.Comments) != 1 || filtered.Comments[0].ID != 2 {
+		t.Fatalf("expected only plain PR comment, got %+v", filtered.Comments)
+	}
+	withThreads := ciAutomationFilterFeedbackForPR(&github.TaskPR{UnresolvedReviewThreads: 1}, feedback)
+	if len(withThreads.Comments) != 2 {
+		t.Fatalf("expected unresolved review threads to keep review comments, got %+v", withThreads.Comments)
 	}
 }
 
@@ -352,6 +347,44 @@ func TestHandleTaskPRCIAutomationAutoFixUsesFreshSyncAndFullFeedback(t *testing.
 	}
 }
 
+func TestHandleTaskPRCIAutomationAutoFixSkipsClosedFetchedPR(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	now := time.Now().UTC()
+	pr := &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		Owner:        "acme",
+		Repo:         "widget",
+		PRNumber:     42,
+		State:        "open",
+		ChecksState:  "success",
+		LastSyncedAt: &now,
+	}
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			EffectiveAutoFixPrompt: "Fix the PR\n\n{{pr.feedback}}",
+		},
+		triggerPRSyncAllPRs: []*github.TaskPR{pr},
+		prFeedback: &github.PRFeedback{
+			PR:       &github.PR{State: "closed"},
+			Comments: []github.PRComment{{ID: 99, Body: "plain PR comment"}},
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle auto-fix: %v", err)
+	}
+	if status := svc.messageQueue.GetStatus(ctx, "session-1"); status.Count != 0 {
+		t.Fatalf("expected no prompt for closed fetched PR, got %+v", status)
+	}
+}
+
 func TestHandleTaskPRCIAutomationAutoMergeUsesFreshSync(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -390,6 +423,45 @@ func TestHandleTaskPRCIAutomationAutoMergeUsesFreshSync(t *testing.T) {
 	}
 	if ghSvc.mergeCalls != 1 {
 		t.Fatalf("expected merge from fresh synced PR state, got %d", ghSvc.mergeCalls)
+	}
+}
+
+func TestHandleTaskPRCIAutomationAutoMergeUsesPartialSyncMatch(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	now := time.Now().UTC()
+	pr := &github.TaskPR{
+		TaskID:         "task-1",
+		RepositoryID:   "repo-1",
+		Owner:          "acme",
+		Repo:           "widget",
+		PRNumber:       42,
+		State:          "open",
+		ChecksState:    "success",
+		ReviewState:    "approved",
+		MergeableState: "clean",
+		LastSyncedAt:   &now,
+	}
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:           "task-1",
+			AutoMergeEnabled: true,
+		},
+		triggerPRSyncAllPRs: []*github.TaskPR{pr},
+		triggerPRSyncAllErr: errors.New("sibling repo unavailable"),
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle auto-merge: %v", err)
+	}
+	if ghSvc.mergeCalls != 1 {
+		t.Fatalf("expected matching partial sync result to merge, got %d calls", ghSvc.mergeCalls)
+	}
+	if len(ghSvc.ciErrors) != 0 {
+		t.Fatalf("expected no CI error on matching partial result, got %+v", ghSvc.ciErrors)
 	}
 }
 
@@ -451,6 +523,24 @@ func TestCIAutomationHasFreshPRStatusAt(t *testing.T) {
 				t.Fatalf("ciAutomationHasFreshPRStatusAt=%v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCIAutomationDuplicateFixAttemptBlocksMergeAt(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	fresh := now.Add(-ciAutomationFixBlockWindow)
+	stale := fresh.Add(-time.Nanosecond)
+	if ciAutomationDuplicateFixAttemptBlocksMergeAt(nil, now) {
+		t.Fatal("nil state should not block")
+	}
+	if ciAutomationDuplicateFixAttemptBlocksMergeAt(&github.TaskCIPRAutomationState{}, now) {
+		t.Fatal("state without enqueue time should not block")
+	}
+	if !ciAutomationDuplicateFixAttemptBlocksMergeAt(&github.TaskCIPRAutomationState{LastFixEnqueuedAt: &fresh}, now) {
+		t.Fatal("fresh duplicate fix attempt should block")
+	}
+	if ciAutomationDuplicateFixAttemptBlocksMergeAt(&github.TaskCIPRAutomationState{LastFixEnqueuedAt: &stale}, now) {
+		t.Fatal("stale duplicate fix attempt should not block")
 	}
 }
 
@@ -968,6 +1058,51 @@ func TestHandleTaskCIOptionsUpdatedRecordsSyncFailureForLinkedPRs(t *testing.T) 
 	if len(ghSvc.ciErrors) != 1 || ghSvc.ciErrors[0].LastError == nil || !strings.Contains(*ghSvc.ciErrors[0].LastError, "sync PR status: gh unavailable") {
 		t.Fatalf("expected sync failure to be recorded on linked PR, got %+v", ghSvc.ciErrors)
 	}
+}
+
+func TestHandleTaskCIOptionsUpdatedStartsAutomationForPartialSyncResults(t *testing.T) {
+	ctx := context.Background()
+	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	started := make(chan struct{})
+	block := make(chan struct{})
+	ghSvc := &mockGitHubService{
+		taskPRs: []*github.TaskPR{{
+			TaskID:       "task-1",
+			RepositoryID: "repo-1",
+			Owner:        "acme",
+			Repo:         "widget",
+			PRNumber:     42,
+		}},
+		triggerPRSyncAllPRs: []*github.TaskPR{{
+			TaskID:       "task-1",
+			RepositoryID: "repo-1",
+			Owner:        "acme",
+			Repo:         "widget",
+			PRNumber:     42,
+		}},
+		triggerPRSyncAllErr: errors.New("sibling repo unavailable"),
+		ciOptionsResp:       &github.TaskCIOptionsResponse{TaskID: "task-1"},
+		ciOptionsStarted:    started,
+		ciOptionsBlock:      block,
+	}
+	svc.SetGitHubService(ghSvc)
+
+	err := svc.handleTaskCIOptionsUpdated(ctx, &bus.Event{Data: &github.TaskCIOptionsResponse{
+		TaskID:           "task-1",
+		AutoMergeEnabled: true,
+	}})
+	if err != nil {
+		t.Fatalf("handle CI options updated: %v", err)
+	}
+	<-started
+	if _, loaded := svc.ciAutomationInFlight.Load("task-1|repo-1|42"); !loaded {
+		t.Fatal("expected automation to run for partial sync result")
+	}
+	if len(ghSvc.ciErrors) != 1 || ghSvc.ciErrors[0].LastError == nil || !strings.Contains(*ghSvc.ciErrors[0].LastError, "sibling repo unavailable") {
+		t.Fatalf("expected partial sync error to be recorded, got %+v", ghSvc.ciErrors)
+	}
+	close(block)
+	waitForCIAutomationIdle(t, svc, "task-1|repo-1|42", 200*time.Millisecond)
 }
 
 func TestStartTaskPRCIAutomationSkipsDuplicateInFlightPR(t *testing.T) {
