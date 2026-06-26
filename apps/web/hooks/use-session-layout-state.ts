@@ -22,9 +22,14 @@ function resolveEffectiveSessionId(
   activeSessionId: string | null,
   activeTaskId: string | null,
   activeSessionTaskId: string | null | undefined,
+  lastSessionForActiveTask: string | null | undefined,
   fallbackSessionId: string | null,
 ) {
-  if (activeSessionId && activeSessionTaskId === activeTaskId) return activeSessionId;
+  if (!activeSessionId) return fallbackSessionId ?? null;
+  if (activeTaskId && activeSessionTaskId === activeTaskId) return activeSessionId;
+  if (activeSessionTaskId == null && lastSessionForActiveTask === activeSessionId) {
+    return activeSessionId;
+  }
   return fallbackSessionId ?? null;
 }
 
@@ -65,10 +70,14 @@ export function useSessionLayoutState(options: UseSessionLayoutStateOptions = {}
   const activeSessionData = useAppStore((state) =>
     activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null,
   );
+  const lastSessionForActiveTask = useAppStore((state) =>
+    activeTaskId ? state.tasks.lastSessionByTaskId[activeTaskId] : null,
+  );
   const effectiveSessionId = resolveEffectiveSessionId(
     activeSessionId,
     activeTaskId,
     activeSessionData?.task_id,
+    lastSessionForActiveTask,
     sessionId,
   );
   const sessionKey = effectiveSessionId ?? "";

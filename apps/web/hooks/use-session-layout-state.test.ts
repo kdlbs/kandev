@@ -10,6 +10,7 @@ type MockStoreState = {
   tasks: {
     activeTaskId: string | null;
     activeSessionId: string | null;
+    lastSessionByTaskId: Record<string, string>;
   };
   taskSessions: {
     items: Record<string, TaskSession>;
@@ -71,6 +72,7 @@ function setupStore(overrides: Partial<MockStoreState> = {}) {
     tasks: {
       activeTaskId: ACTIVE_TASK_ID,
       activeSessionId: null,
+      lastSessionByTaskId: {},
     },
     taskSessions: {
       items: {},
@@ -89,17 +91,18 @@ function setupStore(overrides: Partial<MockStoreState> = {}) {
   };
 }
 
-describe("useSessionLayoutState", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    setupStore();
-  });
+beforeEach(() => {
+  vi.clearAllMocks();
+  setupStore();
+});
 
+describe("useSessionLayoutState active session selection", () => {
   it("uses the active session when it belongs to the active task", () => {
     setupStore({
       tasks: {
         activeTaskId: ACTIVE_TASK_ID,
         activeSessionId: ACTIVE_SESSION_ID,
+        lastSessionByTaskId: {},
       },
       taskSessions: {
         items: {
@@ -118,6 +121,7 @@ describe("useSessionLayoutState", () => {
       tasks: {
         activeTaskId: ACTIVE_TASK_ID,
         activeSessionId: ACTIVE_SESSION_ID,
+        lastSessionByTaskId: {},
       },
       taskSessions: {
         items: {
@@ -136,6 +140,7 @@ describe("useSessionLayoutState", () => {
       tasks: {
         activeTaskId: ACTIVE_TASK_ID,
         activeSessionId: ACTIVE_SESSION_ID,
+        lastSessionByTaskId: {},
       },
       taskSessions: {
         items: {
@@ -147,5 +152,64 @@ describe("useSessionLayoutState", () => {
     const { result } = renderHook(() => useSessionLayoutState());
 
     expect(result.current.effectiveSessionId).toBeNull();
+  });
+});
+
+describe("useSessionLayoutState rowless active sessions", () => {
+  it("uses a rowless active session when it was selected for the active task", () => {
+    setupStore({
+      tasks: {
+        activeTaskId: ACTIVE_TASK_ID,
+        activeSessionId: ACTIVE_SESSION_ID,
+        lastSessionByTaskId: {
+          [ACTIVE_TASK_ID]: ACTIVE_SESSION_ID,
+        },
+      },
+      taskSessions: {
+        items: {},
+      },
+    });
+
+    const { result } = renderHook(() => useSessionLayoutState({ sessionId: ROUTE_SESSION_ID }));
+
+    expect(result.current.effectiveSessionId).toBe(ACTIVE_SESSION_ID);
+  });
+
+  it("does not expose a rowless active session without task ownership evidence", () => {
+    setupStore({
+      tasks: {
+        activeTaskId: ACTIVE_TASK_ID,
+        activeSessionId: ACTIVE_SESSION_ID,
+        lastSessionByTaskId: {
+          [OTHER_TASK_ID]: ACTIVE_SESSION_ID,
+        },
+      },
+      taskSessions: {
+        items: {},
+      },
+    });
+
+    const { result } = renderHook(() => useSessionLayoutState({ sessionId: ROUTE_SESSION_ID }));
+
+    expect(result.current.effectiveSessionId).toBe(ROUTE_SESSION_ID);
+  });
+
+  it("falls back when no task is active", () => {
+    setupStore({
+      tasks: {
+        activeTaskId: null,
+        activeSessionId: ACTIVE_SESSION_ID,
+        lastSessionByTaskId: {},
+      },
+      taskSessions: {
+        items: {
+          [ACTIVE_SESSION_ID]: makeSession(ACTIVE_SESSION_ID, ACTIVE_TASK_ID),
+        },
+      },
+    });
+
+    const { result } = renderHook(() => useSessionLayoutState({ sessionId: ROUTE_SESSION_ID }));
+
+    expect(result.current.effectiveSessionId).toBe(ROUTE_SESSION_ID);
   });
 });
