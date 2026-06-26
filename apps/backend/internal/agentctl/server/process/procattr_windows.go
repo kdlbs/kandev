@@ -3,8 +3,10 @@
 package process
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 	"syscall"
 	"unsafe"
 
@@ -79,20 +81,14 @@ func createKillOnCloseJob() (windows.Handle, error) {
 // killProcessGroup kills the entire process tree for the given PID.
 // On Windows, we use taskkill with /T flag to kill the process tree.
 func killProcessGroup(pid int) error {
-	// taskkill /F /T /PID <pid>
-	// /F = force kill
-	// /T = kill child processes (tree)
-	// /PID = process ID
-	kill := exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprintf("%d", pid))
-	return kill.Run()
+	return runProcessTaskkill("/F", "/T", "/PID", fmt.Sprintf("%d", pid))
 }
 
 // terminateProcessGroup sends a graceful shutdown signal to the process tree.
 // Without /F, taskkill sends WM_CLOSE to console and windowed apps, which is
 // the closest Windows equivalent of SIGTERM.
 func terminateProcessGroup(pid int) error {
-	kill := exec.Command("taskkill", "/T", "/PID", fmt.Sprintf("%d", pid))
-	return kill.Run()
+	return runProcessTaskkill("/T", "/PID", fmt.Sprintf("%d", pid))
 }
 
 func processGroupAlive(_ int) bool {
@@ -101,6 +97,31 @@ func processGroupAlive(_ int) bool {
 	return false
 }
 
-func isProcessGroupMissing(_ error) bool {
-	return false
+func isProcessGroupMissing(err error) bool {
+	return errors.Is(err, syscall.ESRCH)
+}
+
+func runProcessTaskkill(args ...string) error {
+	output, err := exec.Command("taskkill", args...).CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	msg := strings.TrimSpace(string(output))
+	if isProcessTaskkillMissing(msg) {
+		return syscall.ESRCH
+	}
+	if msg == "" {
+		return err
+	}
+	return fmt.Errorf("%w: %s", err, msg)
+}
+
+func isProcessTaskkillMissing(msg string) bool {
+	if msg == "" {
+		return false
+	}
+	lower := strings.ToLower(msg)
+	return strings.Contains(lower, "not found") ||
+		strings.Contains(lower, "not be found") ||
+		strings.Contains(lower, "no running instance")
 }

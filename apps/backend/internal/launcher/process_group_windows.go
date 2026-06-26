@@ -32,8 +32,21 @@ func runLauncherTaskkill(args ...string) error {
 		return nil
 	}
 	msg := strings.TrimSpace(string(output))
+	if isLauncherTaskkillMissing(msg) {
+		return syscall.ESRCH
+	}
 	if msg == "" {
 		return err
 	}
 	return fmt.Errorf("%w: %s", err, msg)
+}
+
+func isLauncherTaskkillMissing(msg string) bool {
+	if msg == "" {
+		return false
+	}
+	lower := strings.ToLower(msg)
+	return strings.Contains(lower, "not found") ||
+		strings.Contains(lower, "not be found") ||
+		strings.Contains(lower, "no running instance")
 }
