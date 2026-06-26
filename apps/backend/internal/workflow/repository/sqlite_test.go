@@ -236,8 +236,8 @@ func TestInitSchema_NormalizesDuplicateStartSteps(t *testing.T) {
 		INSERT INTO workflow_steps (
 			id, workflow_id, name, position, is_start_step, created_at, updated_at
 		) VALUES
-			('first-start', 'wf-test', 'First Start', 0, 1, datetime('now'), datetime('now')),
-			('latest-start', 'wf-test', 'Latest Start', 1, 1, datetime('now'), datetime('now'));
+			('latest-position-start', 'wf-test', 'Latest Position Start', 2, 1, datetime('2026-01-01T00:00:00Z'), datetime('2026-01-01T00:00:00Z')),
+			('latest-updated-start', 'wf-test', 'Latest Updated Start', 0, 1, datetime('2026-01-01T00:00:00Z'), datetime('2026-01-02T00:00:00Z'));
 	`)
 	if err != nil {
 		t.Fatalf("seed pre-repair database: %v", err)
@@ -258,7 +258,49 @@ func TestInitSchema_NormalizesDuplicateStartSteps(t *testing.T) {
 			starts = append(starts, step.Name)
 		}
 	}
-	if len(starts) != 1 || starts[0] != "Latest Start" {
-		t.Fatalf("expected only Latest Start to remain start, got %v", starts)
+	if len(starts) != 1 || starts[0] != "Latest Updated Start" {
+		t.Fatalf("expected only Latest Updated Start to remain start, got %v", starts)
+	}
+}
+
+func TestCreateStep_RollsBackStartDemotionWhenInsertFails(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	steps, err := repo.ListStepsByWorkflow(ctx, "wf-test")
+	if err != nil {
+		t.Fatalf("list seeded steps: %v", err)
+	}
+	var originalStartID, duplicateID string
+	for _, step := range steps {
+		if step.IsStartStep {
+			originalStartID = step.ID
+			continue
+		}
+		if duplicateID == "" {
+			duplicateID = step.ID
+		}
+	}
+	if originalStartID == "" || duplicateID == "" {
+		t.Fatalf("expected seeded workflow to have a start and non-start step, got start=%q duplicate=%q", originalStartID, duplicateID)
+	}
+
+	err = repo.CreateStep(ctx, &models.WorkflowStep{
+		ID:          duplicateID,
+		WorkflowID:  "wf-test",
+		Name:        "Duplicate ID Start",
+		Position:    99,
+		IsStartStep: true,
+	})
+	if err == nil {
+		t.Fatal("expected duplicate ID insert to fail")
+	}
+
+	start, err := repo.GetStartStep(ctx, "wf-test")
+	if err != nil {
+		t.Fatalf("get start step: %v", err)
+	}
+	if start == nil || start.ID != originalStartID {
+		t.Fatalf("expected original start step %q to remain after rollback, got %#v", originalStartID, start)
 	}
 }

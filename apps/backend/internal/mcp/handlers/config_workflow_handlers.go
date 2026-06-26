@@ -170,6 +170,7 @@ func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message
 		h.logger.Error("failed to create workflow step", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create workflow step", nil)
 	}
+	h.publishWorkflowStepEvents(ctx, events.WorkflowStepUpdated, resp.UpdatedSteps)
 	h.publishWorkflowStepEvent(ctx, events.WorkflowStepCreated, resp.Step)
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
@@ -210,6 +211,7 @@ func (h *Handlers) handleUpdateWorkflowStep(ctx context.Context, msg *ws.Message
 		h.logger.Error("failed to update workflow step", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update workflow step", nil)
 	}
+	h.publishWorkflowStepEvents(ctx, events.WorkflowStepUpdated, resp.UpdatedSteps)
 	h.publishWorkflowStepEvent(ctx, events.WorkflowStepUpdated, resp.Step)
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
@@ -286,5 +288,11 @@ func (h *Handlers) publishWorkflowStepEvent(ctx context.Context, eventType strin
 			zap.String("event_type", eventType),
 			zap.String("step_id", step.ID),
 			zap.Error(err))
+	}
+}
+
+func (h *Handlers) publishWorkflowStepEvents(ctx context.Context, eventType string, steps []*wfmodels.WorkflowStep) {
+	for _, step := range steps {
+		h.publishWorkflowStepEvent(ctx, eventType, step)
 	}
 }

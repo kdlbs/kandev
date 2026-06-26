@@ -159,7 +159,7 @@ func (r *Repository) normalizeDuplicateStartSteps() error {
 				id,
 				ROW_NUMBER() OVER (
 					PARTITION BY workflow_id
-					ORDER BY position DESC, updated_at DESC, id DESC
+					ORDER BY updated_at DESC, position DESC, id DESC
 				) AS start_rank
 			FROM workflow_steps
 			WHERE is_start_step = 1
@@ -575,6 +575,13 @@ func (r *Repository) GetSystemTemplates(ctx context.Context) ([]*models.Workflow
 
 // CreateStep creates a new workflow step.
 func (r *Repository) CreateStep(ctx context.Context, step *models.WorkflowStep) error {
+	_, err := r.CreateStepWithDemotedStartSteps(ctx, step)
+	return err
+}
+
+// CreateStepWithDemotedStartSteps creates a new workflow step and returns any
+// previously-start steps demoted as part of the same transaction.
+func (r *Repository) CreateStepWithDemotedStartSteps(ctx context.Context, step *models.WorkflowStep) ([]*models.WorkflowStep, error) {
 	if step.ID == "" {
 		step.ID = uuid.New().String()
 	}
@@ -584,10 +591,24 @@ func (r *Repository) CreateStep(ctx context.Context, step *models.WorkflowStep) 
 
 	eventsJSON, err := json.Marshal(step.Events)
 	if err != nil {
-		return fmt.Errorf("failed to marshal events: %w", err)
+		return nil, fmt.Errorf("failed to marshal events: %w", err)
 	}
 
-	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var demoted []*models.WorkflowStep
+	if step.IsStartStep {
+		demoted, err = r.demoteOtherStartSteps(ctx, tx, step.WorkflowID, step.ID, now)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	_, err = tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO workflow_steps (
 			id, workflow_id, name, position, color,
 			prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, agent_profile_id, stage_type, auto_advance_requires_signal, created_at, updated_at
@@ -595,8 +616,14 @@ func (r *Repository) CreateStep(ctx context.Context, step *models.WorkflowStep) 
 	`), step.ID, step.WorkflowID, step.Name, step.Position, step.Color,
 		step.Prompt, string(eventsJSON), dialect.BoolToInt(step.AllowManualMove),
 		dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, normalizeStageType(step.StageType), dialect.BoolToInt(step.AutoAdvanceRequiresSignal), step.CreatedAt, step.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
 
-	return err
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return demoted, nil
 }
 
 // normalizeStageType returns a string fit for the workflow_steps.stage_type
@@ -677,14 +704,35 @@ func (r *Repository) GetStep(ctx context.Context, id string) (*models.WorkflowSt
 
 // UpdateStep updates an existing workflow step.
 func (r *Repository) UpdateStep(ctx context.Context, step *models.WorkflowStep) error {
+	_, err := r.UpdateStepWithDemotedStartSteps(ctx, step)
+	return err
+}
+
+// UpdateStepWithDemotedStartSteps updates a workflow step and returns any
+// previously-start steps demoted as part of the same transaction.
+func (r *Repository) UpdateStepWithDemotedStartSteps(ctx context.Context, step *models.WorkflowStep) ([]*models.WorkflowStep, error) {
 	step.UpdatedAt = time.Now().UTC()
 
 	eventsJSON, err := json.Marshal(step.Events)
 	if err != nil {
-		return fmt.Errorf("failed to marshal events: %w", err)
+		return nil, fmt.Errorf("failed to marshal events: %w", err)
 	}
 
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var demoted []*models.WorkflowStep
+	if step.IsStartStep {
+		demoted, err = r.demoteOtherStartSteps(ctx, tx, step.WorkflowID, step.ID, step.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	result, err := tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE workflow_steps SET
 			name = ?, position = ?, color = ?,
 			prompt = ?, events = ?,
@@ -694,23 +742,56 @@ func (r *Repository) UpdateStep(ctx context.Context, step *models.WorkflowStep) 
 		step.Prompt, string(eventsJSON),
 		dialect.BoolToInt(step.AllowManualMove), dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, normalizeStageType(step.StageType), dialect.BoolToInt(step.AutoAdvanceRequiresSignal), step.UpdatedAt, step.ID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("workflow step not found: %s", step.ID)
+		return nil, fmt.Errorf("workflow step not found: %s", step.ID)
 	}
-	return nil
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return demoted, nil
 }
 
 // ClearStartStepFlag clears the is_start_step flag for all steps in a workflow except the given step.
 func (r *Repository) ClearStartStepFlag(ctx context.Context, workflowID, exceptStepID string) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE workflow_steps SET is_start_step = 0
-		WHERE workflow_id = ? AND id != ?
-	`), workflowID, exceptStepID)
+		UPDATE workflow_steps SET is_start_step = 0, updated_at = ?
+		WHERE workflow_id = ? AND id != ? AND is_start_step = 1
+	`), time.Now().UTC(), workflowID, exceptStepID)
 	return err
+}
+
+func (r *Repository) demoteOtherStartSteps(ctx context.Context, tx *sqlx.Tx, workflowID, exceptStepID string, updatedAt time.Time) ([]*models.WorkflowStep, error) {
+	rows, err := tx.QueryContext(ctx, tx.Rebind(`
+		SELECT `+stepSelectColumns+`
+		FROM workflow_steps
+		WHERE workflow_id = ? AND id != ? AND is_start_step = 1
+		ORDER BY position ASC, id ASC
+	`), workflowID, exceptStepID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	demoted, err := r.scanSteps(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		UPDATE workflow_steps SET is_start_step = 0, updated_at = ?
+		WHERE workflow_id = ? AND id != ? AND is_start_step = 1
+	`), updatedAt, workflowID, exceptStepID); err != nil {
+		return nil, err
+	}
+
+	for _, step := range demoted {
+		step.IsStartStep = false
+		step.UpdatedAt = updatedAt
+	}
+	return demoted, nil
 }
 
 // GetStartStep returns the step marked as is_start_step for a workflow.
