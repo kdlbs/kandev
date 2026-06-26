@@ -25,7 +25,6 @@ const (
 	ciAutomationCheckCompleted   = "completed"
 	ciAutomationChangesRequested = "changes_requested"
 	ciAutomationPRFeedbackToken  = "{{pr.feedback}}"
-	ciAutomationFreshSyncWindow  = 30 * time.Second
 )
 
 var ciAutomationSnapshotFieldReplacer = strings.NewReplacer("\r", " ", "\n", " ", "<", "", ">", "")
@@ -122,10 +121,14 @@ func ciAutomationFindMatchingPR(prs []*github.TaskPR, target *github.TaskPR) *gi
 }
 
 func ciAutomationHasFreshPRStatus(pr *github.TaskPR) bool {
+	return ciAutomationHasFreshPRStatusAt(pr, time.Now())
+}
+
+func ciAutomationHasFreshPRStatusAt(pr *github.TaskPR, now time.Time) bool {
 	if pr == nil || pr.LastSyncedAt == nil {
 		return false
 	}
-	return time.Since(*pr.LastSyncedAt) <= ciAutomationFreshSyncWindow
+	return now.Sub(*pr.LastSyncedAt) <= github.PRSyncFreshnessWindow
 }
 
 func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, options *github.TaskCIOptionsResponse) bool {

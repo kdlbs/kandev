@@ -412,6 +412,31 @@ func TestHandleTaskPRCIAutomationAutoMergeRequiresFreshSync(t *testing.T) {
 	}
 }
 
+func TestCIAutomationHasFreshPRStatusAt(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	exactEdge := now.Add(-github.PRSyncFreshnessWindow)
+	stale := exactEdge.Add(-time.Nanosecond)
+	fresh := now.Add(-github.PRSyncFreshnessWindow + time.Nanosecond)
+	tests := []struct {
+		name string
+		pr   *github.TaskPR
+		want bool
+	}{
+		{name: "nil PR", pr: nil, want: false},
+		{name: "nil last synced", pr: &github.TaskPR{}, want: false},
+		{name: "fresh within window", pr: &github.TaskPR{LastSyncedAt: &fresh}, want: true},
+		{name: "fresh at exact edge", pr: &github.TaskPR{LastSyncedAt: &exactEdge}, want: true},
+		{name: "stale older than edge", pr: &github.TaskPR{LastSyncedAt: &stale}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ciAutomationHasFreshPRStatusAt(tt.pr, now); got != tt.want {
+				t.Fatalf("ciAutomationHasFreshPRStatusAt=%v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestHandleTaskPRCIAutomationAutoFixBlocksSameCycleMerge(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

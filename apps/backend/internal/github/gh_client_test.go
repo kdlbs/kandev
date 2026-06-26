@@ -173,6 +173,46 @@ esac
 	}
 }
 
+func TestDecodeGHCheckRuns(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantNames []string
+		wantErr   bool
+	}{
+		{name: "empty", input: "", wantNames: nil},
+		{name: "single object", input: `{"name":"unit","status":"completed","conclusion":"success"}`, wantNames: []string{"unit"}},
+		{
+			name:      "multiple objects with whitespace",
+			input:     "\n  {\"name\":\"unit\",\"status\":\"completed\",\"conclusion\":\"success\"}\n{\"name\":\"lint\",\"status\":\"completed\",\"conclusion\":\"failure\"}\t",
+			wantNames: []string{"unit", "lint"},
+		},
+		{name: "invalid json", input: `{"name":"unit"`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := decodeGHCheckRuns(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("decodeGHCheckRuns: %v", err)
+			}
+			if len(got) != len(tt.wantNames) {
+				t.Fatalf("runs = %d, want %d: %+v", len(got), len(tt.wantNames), got)
+			}
+			for i, name := range tt.wantNames {
+				if got[i].Name != name {
+					t.Fatalf("run[%d].Name = %q, want %q", i, got[i].Name, name)
+				}
+			}
+		})
+	}
+}
+
 func TestParseRepoURL(t *testing.T) {
 	tests := []struct {
 		name      string

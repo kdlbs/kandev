@@ -33,8 +33,8 @@ const (
 // service's self-approval guard, and tests.
 const reviewEventApprove = "APPROVE"
 
-// prSyncFreshnessWindow is how long PR data is considered fresh (skip GitHub API).
-const prSyncFreshnessWindow = 30 * time.Second
+// PRSyncFreshnessWindow is how long PR data is considered fresh.
+const PRSyncFreshnessWindow = 30 * time.Second
 
 // cleanupFetchFailureThreshold is the number of consecutive GetPRFeedback /
 // GetIssueState errors a single dedup row may accumulate before the cleanup

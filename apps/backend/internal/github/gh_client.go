@@ -647,6 +647,8 @@ func (c *GHClient) ListCheckRuns(ctx context.Context, owner, repo, ref string) (
 	return mergeChecks(convertRawCheckRuns(checkRunsRaw), convertRawStatusContexts(statusRaw)), nil
 }
 
+// decodeGHCheckRuns decodes whitespace-separated JSON check-run objects
+// emitted by gh --paginate --jq '.check_runs[]'.
 func decodeGHCheckRuns(out string) ([]ghCheckRun, error) {
 	if strings.TrimSpace(out) == "" {
 		return nil, nil

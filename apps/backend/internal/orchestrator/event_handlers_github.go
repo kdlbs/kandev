@@ -208,7 +208,7 @@ func (s *Service) handleTaskCIOptionsUpdated(ctx context.Context, event *bus.Eve
 func (s *Service) recordTaskCIOptionsSyncError(ctx context.Context, taskID string, syncErr error) {
 	prsByTask, err := s.githubService.ListTaskPRs(ctx, []string{taskID})
 	if err != nil {
-		s.logger.Debug("failed to load task PRs after CI automation sync failure", zap.String("task_id", taskID), zap.Error(err))
+		s.logger.Warn("failed to load task PRs after CI automation sync failure", zap.String("task_id", taskID), zap.Error(err))
 		return
 	}
 	for _, pr := range prsByTask[taskID] {
