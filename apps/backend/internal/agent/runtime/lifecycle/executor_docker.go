@@ -640,6 +640,11 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 	return nil
 }
 
+// shouldTeardownDockerContainer extends terminal cleanup with stale execution
+// cleanup for Docker only. A stale Docker execution owns a local container and
+// per-instance session dir that become untracked before retry/resume launches a
+// replacement. Sprites intentionally keep stale sandboxes; see
+// shouldRunExecutorCleanup for that shared runtime policy.
 func shouldTeardownDockerContainer(reason string) bool {
 	if shouldRunExecutorCleanup(reason) {
 		return true

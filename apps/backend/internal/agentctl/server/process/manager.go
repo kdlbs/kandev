@@ -71,7 +71,13 @@ const defaultStderrBufferSize = 50
 const agentTempDirRoot = "kandev-agent"
 
 const processKillRequiredExitGrace = 250 * time.Millisecond
+
+// processDefaultExitGrace is the no-deadline upper bound for graceful adapters
+// after adapter/stdin close. It is intentionally longer than the kill-required
+// fast path so ACP-style agents can flush state, while still bounding callers
+// that pass context.Background().
 const processDefaultExitGrace = 5 * time.Second
+
 const processGroupTerminateGrace = 2 * time.Second
 const processGroupPollInterval = 50 * time.Millisecond
 
@@ -1429,6 +1435,11 @@ func (m *Manager) waitForProcessExit(ctx context.Context) {
 	m.forceKillProcessGroupAndWait(done, pid)
 }
 
+// processExitGrace returns the initial graceful wait before process-group
+// termination. Adapters that declare RequiresProcessKill are known not to exit
+// from stdin close, so they keep the short legacy wait. Normal adapters get the
+// caller's remaining deadline during backend shutdown, or processDefaultExitGrace
+// when the caller did not provide one.
 func (m *Manager) processExitGrace(ctx context.Context) time.Duration {
 	if m.adapter != nil && m.adapter.RequiresProcessKill() {
 		return processKillRequiredExitGrace

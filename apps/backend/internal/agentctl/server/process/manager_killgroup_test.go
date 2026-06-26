@@ -265,6 +265,14 @@ func TestProcessExitGraceUsesCallerDeadlineForGracefulAdapter(t *testing.T) {
 	require.LessOrEqual(t, grace, 2*time.Second)
 }
 
+func TestProcessExitGraceUsesDefaultForGracefulAdapterWithoutDeadline(t *testing.T) {
+	m := &Manager{
+		adapter: &stubAdapter{},
+	}
+
+	require.Equal(t, processDefaultExitGrace, m.processExitGrace(context.Background()))
+}
+
 func TestProcessExitGraceUsesShortGraceForKillRequiredAdapter(t *testing.T) {
 	m := &Manager{
 		adapter: &stubAdapter{requiresProcessKill: true},
