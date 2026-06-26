@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os/exec"
@@ -623,13 +624,14 @@ type ghCheckRun struct {
 
 func (c *GHClient) ListCheckRuns(ctx context.Context, owner, repo, ref string) ([]CheckRun, error) {
 	checkRunsOut, err := c.run(ctx, "api",
-		fmt.Sprintf("repos/%s/%s/commits/%s/check-runs", owner, repo, ref),
-		"--jq", ".check_runs")
+		"--paginate",
+		fmt.Sprintf("repos/%s/%s/commits/%s/check-runs?per_page=100", owner, repo, ref),
+		"--jq", ".check_runs[]")
 	if err != nil {
 		return nil, fmt.Errorf("list check runs: %w", err)
 	}
-	var checkRunsRaw []ghCheckRun
-	if err := json.Unmarshal([]byte(checkRunsOut), &checkRunsRaw); err != nil {
+	checkRunsRaw, err := decodeGHCheckRuns(checkRunsOut)
+	if err != nil {
 		return nil, fmt.Errorf("parse check runs: %w", err)
 	}
 	statusOut, err := c.run(ctx, "api",
@@ -643,6 +645,24 @@ func (c *GHClient) ListCheckRuns(ctx context.Context, owner, repo, ref string) (
 		return nil, fmt.Errorf("parse status contexts: %w", err)
 	}
 	return mergeChecks(convertRawCheckRuns(checkRunsRaw), convertRawStatusContexts(statusRaw)), nil
+}
+
+func decodeGHCheckRuns(out string) ([]ghCheckRun, error) {
+	if strings.TrimSpace(out) == "" {
+		return nil, nil
+	}
+	dec := json.NewDecoder(strings.NewReader(out))
+	var checkRuns []ghCheckRun
+	for {
+		var checkRun ghCheckRun
+		if err := dec.Decode(&checkRun); err != nil {
+			if errors.Is(err, io.EOF) {
+				return checkRuns, nil
+			}
+			return nil, err
+		}
+		checkRuns = append(checkRuns, checkRun)
+	}
 }
 
 func (c *GHClient) GetPRFeedback(ctx context.Context, owner, repo string, number int) (*PRFeedback, error) {

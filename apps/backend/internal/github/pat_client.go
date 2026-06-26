@@ -518,12 +518,18 @@ func (c *PATClient) ListPRComments(ctx context.Context, owner, repo string, numb
 }
 
 func (c *PATClient) ListCheckRuns(ctx context.Context, owner, repo, ref string) ([]CheckRun, error) {
-	var checkRunsResult struct {
-		CheckRuns []ghCheckRun `json:"check_runs"`
-	}
-	endpoint := fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs", owner, repo, ref)
-	if err := c.get(ctx, endpoint, &checkRunsResult); err != nil {
-		return nil, err
+	var checkRunsRaw []ghCheckRun
+	endpoint := fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs?per_page=100", owner, repo, ref)
+	for endpoint != "" {
+		var page struct {
+			CheckRuns []ghCheckRun `json:"check_runs"`
+		}
+		next, err := c.getPaginated(ctx, endpoint, &page)
+		if err != nil {
+			return nil, err
+		}
+		checkRunsRaw = append(checkRunsRaw, page.CheckRuns...)
+		endpoint = next
 	}
 	var statusResult struct {
 		Statuses []ghStatusContext `json:"statuses"`
@@ -533,7 +539,7 @@ func (c *PATClient) ListCheckRuns(ctx context.Context, owner, repo, ref string) 
 		return nil, err
 	}
 	return mergeChecks(
-		convertRawCheckRuns(checkRunsResult.CheckRuns),
+		convertRawCheckRuns(checkRunsRaw),
 		convertRawStatusContexts(statusResult.Statuses),
 	), nil
 }

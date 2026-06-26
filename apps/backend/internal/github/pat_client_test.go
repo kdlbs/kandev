@@ -108,6 +108,47 @@ func TestConvertPatPR_Merged(t *testing.T) {
 	}
 }
 
+func TestPATClient_ListCheckRunsPaginatesCheckRuns(t *testing.T) {
+	var requestedPages []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/acme/widget/commits/sha/status" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"statuses":[]}`))
+			return
+		}
+		if r.URL.Path != "/repos/acme/widget/commits/sha/check-runs" {
+			t.Errorf("unexpected path %q", r.URL.Path)
+			http.Error(w, "unexpected path", http.StatusInternalServerError)
+			return
+		}
+		requestedPages = append(requestedPages, r.URL.Query().Get("page"))
+		if r.URL.Query().Get("per_page") != "100" {
+			t.Errorf("per_page = %q, want 100", r.URL.Query().Get("per_page"))
+		}
+		if r.URL.Query().Get("page") == "2" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"check_runs":[{"name":"late failure","status":"completed","conclusion":"failure","html_url":"https://checks/fail"}]}`))
+			return
+		}
+		w.Header().Set("Link", `<https://api.github.com/repos/acme/widget/commits/sha/check-runs?per_page=100&page=2>; rel="next"`)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"check_runs":[{"name":"new success","status":"completed","conclusion":"success","html_url":"https://checks/ok"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newPATClientPointingAt(t, srv.URL)
+	checks, err := c.ListCheckRuns(context.Background(), "acme", "widget", "sha")
+	if err != nil {
+		t.Fatalf("ListCheckRuns: %v", err)
+	}
+	if len(requestedPages) != 2 {
+		t.Fatalf("requested pages = %v, want first page and page 2", requestedPages)
+	}
+	if got := computeOverallCheckStatus(checks); got != "failure" {
+		t.Fatalf("overall check status = %q, want failure; checks=%#v", got, checks)
+	}
+}
+
 func TestConvertPatPR_Mergeable(t *testing.T) {
 	mergeable := true
 	raw := &patPR{

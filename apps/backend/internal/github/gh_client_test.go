@@ -538,6 +538,20 @@ func TestGHClient_InspectRateStderr_RestEndpointMarksCore(t *testing.T) {
 	}
 }
 
+func TestDecodeGHCheckRunsReadsPaginatedJSONStream(t *testing.T) {
+	got, err := decodeGHCheckRuns(`{"name":"page one","status":"completed","conclusion":"success"}
+{"name":"page two","status":"completed","conclusion":"failure"}`)
+	if err != nil {
+		t.Fatalf("decodeGHCheckRuns: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("check runs = %d, want 2", len(got))
+	}
+	if got[1].Name != "page two" || got[1].Conclusion == nil || *got[1].Conclusion != "failure" {
+		t.Fatalf("second check run not decoded: %#v", got[1])
+	}
+}
+
 func TestBuildAccessibleReposGHArgs(t *testing.T) {
 	cases := []struct {
 		name     string
