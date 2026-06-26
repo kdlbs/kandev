@@ -196,6 +196,50 @@ func TestConvertPatPR_MergeableState(t *testing.T) {
 	}
 }
 
+func TestPATClient_ListCheckRuns_PaginatesCheckRuns(t *testing.T) {
+	var checkRunQueries []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/acme/widget/commits/sha/check-runs":
+			checkRunQueries = append(checkRunQueries, r.URL.RawQuery)
+			switch r.URL.Query().Get("page") {
+			case "", "1":
+				w.Header().Set("Link", `<`+githubAPIBase+`/repos/acme/widget/commits/sha/check-runs?per_page=100&page=2>; rel="next"`)
+				_, _ = w.Write([]byte(`{"check_runs":[{"name":"unit","status":"completed","conclusion":"success","html_url":"https://ci/unit"}]}`))
+			case "2":
+				_, _ = w.Write([]byte(`{"check_runs":[{"name":"lint","status":"completed","conclusion":"failure","html_url":"https://ci/lint"}]}`))
+			default:
+				t.Errorf("unexpected check-runs page %q", r.URL.Query().Get("page"))
+				http.Error(w, "unexpected page", http.StatusInternalServerError)
+			}
+		case "/repos/acme/widget/commits/sha/status":
+			_, _ = w.Write([]byte(`{"statuses":[]}`))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+			http.Error(w, "unexpected path", http.StatusInternalServerError)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newPATClientPointingAt(t, srv.URL)
+	checks, err := c.ListCheckRuns(context.Background(), "acme", "widget", "sha")
+	if err != nil {
+		t.Fatalf("ListCheckRuns: %v", err)
+	}
+	if len(checks) != 2 {
+		t.Fatalf("checks = %d, want 2: %+v", len(checks), checks)
+	}
+	if checks[1].Name != "lint" || checks[1].Conclusion != "failure" {
+		t.Fatalf("expected failed lint check from page 2, got %+v", checks[1])
+	}
+	if len(checkRunQueries) != 2 {
+		t.Fatalf("check-runs requests = %d, want 2 (%v)", len(checkRunQueries), checkRunQueries)
+	}
+	if !strings.Contains(checkRunQueries[0], "per_page=100") {
+		t.Fatalf("first check-runs request should request per_page=100, got %q", checkRunQueries[0])
+	}
+}
+
 func TestPATClient_FindPRByBranch_UsesGraphQLHeadRefName(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/graphql" {

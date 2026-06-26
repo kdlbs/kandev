@@ -1,7 +1,10 @@
 package github
 
 import (
+	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -121,6 +124,48 @@ func TestParseTimePtrValue(t *testing.T) {
 	expected := time.Date(2025, 6, 15, 14, 30, 0, 0, time.UTC)
 	if !got.Equal(expected) {
 		t.Errorf("got %v, want %v", *got, expected)
+	}
+}
+
+func TestGHClient_ListCheckRuns_PaginatesCheckRuns(t *testing.T) {
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "gh-args.log")
+	ghPath := filepath.Join(binDir, "gh")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> "$GH_ARGS_LOG"
+case "$*" in
+  *check-runs*)
+    case "$*" in
+      *--paginate*) printf '%s\n' '[{"name":"unit","status":"completed","conclusion":"success","html_url":"https://ci/unit"},{"name":"lint","status":"completed","conclusion":"failure","html_url":"https://ci/lint"}]' ;;
+      *) printf '%s\n' '[{"name":"unit","status":"completed","conclusion":"success","html_url":"https://ci/unit"}]' ;;
+    esac
+    ;;
+  *status*) printf '%s\n' '[]' ;;
+  *) printf '%s\n' '[]' ;;
+esac
+`
+	if err := os.WriteFile(ghPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GH_ARGS_LOG", logPath)
+
+	checks, err := NewGHClient().ListCheckRuns(context.Background(), "acme", "widget", "sha")
+	if err != nil {
+		t.Fatalf("ListCheckRuns: %v", err)
+	}
+	if len(checks) != 2 {
+		t.Fatalf("checks = %d, want 2: %+v", len(checks), checks)
+	}
+	if checks[1].Name != "lint" || checks[1].Conclusion != "failure" {
+		t.Fatalf("expected failed lint check from paginated output, got %+v", checks[1])
+	}
+	logged, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read gh args log: %v", err)
+	}
+	if !strings.Contains(string(logged), "--paginate") {
+		t.Fatalf("ListCheckRuns should call gh api with --paginate, got:\n%s", logged)
 	}
 }
 

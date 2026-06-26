@@ -28,7 +28,7 @@ Users can already see pull request CI/review status above the task chat input, b
 - The default `ci-auto-fix` prompt is editable from Settings > Prompts like other built-in prompts.
 - Emptying or resetting the task prompt override returns the task to the default `ci-auto-fix` prompt.
 - For tasks with multiple linked PRs, the controls are task-level and apply to every open linked PR. Dedupe, last-attempt, and error state are tracked per linked PR.
-- Kandev checks watched PRs through the existing lightweight PR watch poller, which runs once per minute. It fetches full PR feedback only when a watched PR is a candidate for auto-fix or when a user opens/refreshes PR feedback UI.
+- Kandev checks watched PRs through the existing lightweight PR watch poller, which runs once per minute. Automation wakeups sync the latest lightweight PR state before evaluating gates. When auto-fix is enabled, Kandev fetches full PR feedback so failing checks, requested changes, unresolved threads, and plain PR comments can trigger deduped prompts even when the persisted lightweight row was stale.
 - Saving CI automation options while `Auto-fix CI & address comments` or `Auto-merge when ready` is enabled immediately evaluates the task's current linked PRs instead of waiting for the next PR watch poll. This includes prompt edits made while automation is already enabled; unchanged feedback is still deduped by the per-PR checkpoint.
 - Every auto-fix attempt records the latest feedback snapshot it used, including non-actionable snapshots that were intentionally no-ops. Later fix rounds include only new or materially changed CI/review feedback since the last recorded round, with enough summary context for the agent to understand the PR.
 - Automation must not repeatedly prompt for the same failure/comment snapshot or repeatedly retry the same failed merge attempt on every poll.
@@ -134,8 +134,8 @@ Task CI automation options:
 
 Auto-fix cycle for one task/PR:
 
-1. Existing PR watch poll updates lightweight PR state.
-2. Kandev sees a candidate state: failed checks, requested changes, unresolved review threads, or new actionable review feedback.
+1. Existing PR watch poll, PR feedback event, or CI options save wakes automation.
+2. Kandev syncs the latest lightweight PR state for the task's linked PRs, including linked PR rows that do not currently have an active watch.
 3. Kandev fetches full PR feedback.
 4. Kandev compares the current feedback snapshot to `last_fix_checkpoint_json` and `last_fix_signature`.
 5. If there is no material change, the cycle ends without prompting.

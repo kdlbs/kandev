@@ -271,6 +271,92 @@ func TestHandleTaskPRCIAutomationQueuesFixDedupesAndMerges(t *testing.T) {
 	}
 }
 
+func TestHandleTaskPRCIAutomationAutoFixUsesFreshSyncAndFullFeedback(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	pr := &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		Owner:        "acme",
+		Repo:         "widget",
+		PRNumber:     42,
+		State:        "open",
+		ChecksState:  "success",
+	}
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			EffectiveAutoFixPrompt: "Fix the PR\n\n{{pr.feedback}}",
+		},
+		triggerPRSyncAllPRs: []*github.TaskPR{{
+			TaskID:       "task-1",
+			RepositoryID: "repo-1",
+			Owner:        "acme",
+			Repo:         "widget",
+			PRNumber:     42,
+			State:        "open",
+			ChecksState:  "success",
+		}},
+		prFeedback: &github.PRFeedback{
+			Comments: []github.PRComment{{ID: 99, Body: "plain PR comment should trigger auto-fix"}},
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle auto-fix: %v", err)
+	}
+	if ghSvc.triggerPRSyncAllCalls != 1 {
+		t.Fatalf("TriggerPRSyncAll calls = %d, want 1", ghSvc.triggerPRSyncAllCalls)
+	}
+	status := svc.messageQueue.GetStatus(ctx, "session-1")
+	if status.Count != 1 || !strings.Contains(status.Entries[0].Content, "plain PR comment should trigger auto-fix") {
+		t.Fatalf("expected queued auto-fix prompt from full feedback, got %+v", status)
+	}
+}
+
+func TestHandleTaskPRCIAutomationAutoMergeUsesFreshSync(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	stale := &github.TaskPR{
+		TaskID:         "task-1",
+		RepositoryID:   "repo-1",
+		Owner:          "acme",
+		Repo:           "widget",
+		PRNumber:       42,
+		State:          "open",
+		ChecksState:    "failure",
+		MergeableState: "dirty",
+	}
+	fresh := *stale
+	fresh.ChecksState = "success"
+	fresh.ReviewState = "approved"
+	fresh.MergeableState = "clean"
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:           "task-1",
+			AutoMergeEnabled: true,
+		},
+		triggerPRSyncAllPRs: []*github.TaskPR{&fresh},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomation(ctx, stale); err != nil {
+		t.Fatalf("handle auto-merge: %v", err)
+	}
+	if ghSvc.triggerPRSyncAllCalls != 1 {
+		t.Fatalf("TriggerPRSyncAll calls = %d, want 1", ghSvc.triggerPRSyncAllCalls)
+	}
+	if ghSvc.mergeCalls != 1 {
+		t.Fatalf("expected merge from fresh synced PR state, got %d", ghSvc.mergeCalls)
+	}
+}
+
 func TestDispatchCIAutomationPromptDoesNotRecordUserMessageWhenQueueFails(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

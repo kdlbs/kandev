@@ -57,11 +57,54 @@ func (s *Service) handleTaskPRCIAutomation(ctx context.Context, pr *github.TaskP
 		s.logger.Debug("load CI automation options failed", zap.String("task_id", pr.TaskID), zap.Error(err))
 		return nil
 	}
-	if options.AutoFixEnabled && ciAutomationShouldAutoFix(pr) {
+	if options.AutoFixEnabled || options.AutoMergeEnabled {
+		refreshed, syncErr := s.refreshTaskPRForCIAutomation(ctx, pr)
+		if syncErr != nil {
+			s.recordCIAutomationError(ctx, pr, fmt.Sprintf("sync PR status: %v", syncErr))
+			return nil
+		}
+		pr = refreshed
+	}
+	if options.AutoFixEnabled && ciAutomationCanAutoFixFromFeedback(pr) {
 		s.handleTaskPRCIAutoFix(ctx, pr, options)
 	}
 	if options.AutoMergeEnabled && ciAutomationReadyToMerge(pr) {
 		s.handleTaskPRCIAutoMerge(ctx, pr)
+	}
+	return nil
+}
+
+func (s *Service) refreshTaskPRForCIAutomation(ctx context.Context, pr *github.TaskPR) (*github.TaskPR, error) {
+	if pr == nil {
+		return nil, nil
+	}
+	prs, err := s.githubService.TriggerPRSyncAll(ctx, pr.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	if refreshed := ciAutomationFindMatchingPR(prs, pr); refreshed != nil {
+		return refreshed, nil
+	}
+	return pr, nil
+}
+
+func ciAutomationFindMatchingPR(prs []*github.TaskPR, target *github.TaskPR) *github.TaskPR {
+	if target == nil {
+		return nil
+	}
+	for _, pr := range prs {
+		if pr == nil || pr.TaskID != target.TaskID || pr.PRNumber != target.PRNumber {
+			continue
+		}
+		if target.RepositoryID != "" && pr.RepositoryID == target.RepositoryID {
+			return pr
+		}
+		if target.RepositoryID == "" && pr.Owner == target.Owner && pr.Repo == target.Repo {
+			return pr
+		}
+		if pr.Owner == target.Owner && pr.Repo == target.Repo {
+			return pr
+		}
 	}
 	return nil
 }
@@ -204,6 +247,13 @@ func ciAutomationChatPrompt(prompt string) string {
 }
 
 func (s *Service) recordCIAutomationError(ctx context.Context, pr *github.TaskPR, message string) {
+	s.logger.Warn("CI automation error",
+		zap.String("task_id", pr.TaskID),
+		zap.String("repository_id", pr.RepositoryID),
+		zap.String("owner", pr.Owner),
+		zap.String("repo", pr.Repo),
+		zap.Int("pr_number", pr.PRNumber),
+		zap.String("error", message))
 	if err := s.githubService.RecordTaskCIError(context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber, message); err != nil {
 		s.logger.Debug("record CI automation error failed", zap.String("task_id", pr.TaskID), zap.Error(err))
 	}
@@ -214,6 +264,10 @@ func ciAutomationShouldAutoFix(pr *github.TaskPR) bool {
 		return false
 	}
 	return pr.ChecksState == ciAutomationCheckFailure || pr.ReviewState == ciAutomationChangesRequested || pr.UnresolvedReviewThreads > 0
+}
+
+func ciAutomationCanAutoFixFromFeedback(pr *github.TaskPR) bool {
+	return pr != nil && pr.State != "closed" && pr.State != "merged"
 }
 
 func ciAutomationReadyToMerge(pr *github.TaskPR) bool {

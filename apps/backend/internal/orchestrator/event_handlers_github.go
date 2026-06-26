@@ -42,6 +42,7 @@ type GitHubService interface {
 	AssociatePRWithTask(ctx context.Context, taskID, repositoryID string, pr *github.PR) (*github.TaskPR, error)
 	GetTaskPR(ctx context.Context, taskID string) (*github.TaskPR, error)
 	ListTaskPRs(ctx context.Context, taskIDs []string) (map[string][]*github.TaskPR, error)
+	TriggerPRSyncAll(ctx context.Context, taskID string) ([]*github.TaskPR, error)
 	GetTaskPRByOwnerRepoNumber(ctx context.Context, taskID, owner, repo string, prNumber int) (*github.TaskPR, error)
 	GetTaskCIOptionsResponse(ctx context.Context, taskID string) (*github.TaskCIOptionsResponse, error)
 	GetTaskCIPRState(ctx context.Context, taskID, repositoryID string, prNumber int) (*github.TaskCIPRAutomationState, error)
@@ -192,12 +193,12 @@ func (s *Service) handleTaskCIOptionsUpdated(ctx context.Context, event *bus.Eve
 	}
 	detachedCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ciAutomationDetachedTimeout)
 	defer cancel()
-	prsByTask, err := s.githubService.ListTaskPRs(detachedCtx, []string{options.TaskID})
+	prs, err := s.githubService.TriggerPRSyncAll(detachedCtx, options.TaskID)
 	if err != nil {
-		s.logger.Debug("failed to load task PRs for CI automation options update", zap.String("task_id", options.TaskID), zap.Error(err))
+		s.logger.Debug("failed to sync task PRs for CI automation options update", zap.String("task_id", options.TaskID), zap.Error(err))
 		return nil
 	}
-	for _, pr := range prsByTask[options.TaskID] {
+	for _, pr := range prs {
 		s.startTaskPRCIAutomation(ctx, pr)
 	}
 	return nil
