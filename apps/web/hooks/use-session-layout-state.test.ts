@@ -153,6 +153,25 @@ describe("useSessionLayoutState active session selection", () => {
 
     expect(result.current.effectiveSessionId).toBeNull();
   });
+
+  it("does not expose an active session when no task is active", () => {
+    setupStore({
+      tasks: {
+        activeTaskId: null,
+        activeSessionId: ACTIVE_SESSION_ID,
+        lastSessionByTaskId: {},
+      },
+      taskSessions: {
+        items: {
+          [ACTIVE_SESSION_ID]: makeSession(ACTIVE_SESSION_ID, ACTIVE_TASK_ID),
+        },
+      },
+    });
+
+    const { result } = renderHook(() => useSessionLayoutState());
+
+    expect(result.current.effectiveSessionId).toBeNull();
+  });
 });
 
 describe("useSessionLayoutState rowless active sessions", () => {
@@ -211,5 +230,19 @@ describe("useSessionLayoutState rowless active sessions", () => {
     const { result } = renderHook(() => useSessionLayoutState({ sessionId: ROUTE_SESSION_ID }));
 
     expect(result.current.effectiveSessionId).toBe(ROUTE_SESSION_ID);
+  });
+});
+
+describe("useSessionLayoutState fallback sessions", () => {
+  it("uses the provided session when no active session exists", () => {
+    const { result } = renderHook(() => useSessionLayoutState({ sessionId: ROUTE_SESSION_ID }));
+
+    expect(result.current.effectiveSessionId).toBe(ROUTE_SESSION_ID);
+  });
+
+  it("returns null without an active or provided session", () => {
+    const { result } = renderHook(() => useSessionLayoutState());
+
+    expect(result.current.effectiveSessionId).toBeNull();
   });
 });
