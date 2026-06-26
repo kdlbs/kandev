@@ -385,7 +385,12 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
     separatorAfterIndex,
   } = state;
   const { handleOpenFileFromChat, handleFileChange, handleFileSave, handleFileDelete } = fileTabOps;
-  const chatSessionId = resolveCenterPanelSessionId(sessionId, activeSessionId);
+  const chatSessionId = resolveCenterPanelSessionId(
+    sessionId,
+    activeSessionId,
+    activeSession?.task_id,
+    activeTaskId,
+  );
 
   const approveContent = showApproveButton ? (
     <ApproveButtonGroup onApprove={handleApprove} onRequestChanges={handleRequestChanges} />
