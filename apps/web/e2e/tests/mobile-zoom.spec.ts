@@ -22,12 +22,12 @@ test.describe("Mobile zoom hardening", () => {
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
 
-    // Guard: the 16px rule is gated on `@media (pointer: coarse)`. The
+    // Guard: the 16px rule is gated on `@media (any-pointer: coarse)`. The
     // mobile-chrome project (Pixel 5) emulates touch, so the testPage context
-    // resolves to a coarse pointer. Assert it here so a future fixture change
-    // that drops touch emulation fails loudly instead of silently skipping the
-    // rule under test.
-    const coarse = await testPage.evaluate(() => matchMedia("(pointer: coarse)").matches);
+    // exposes a coarse pointer. Assert it here so a future fixture change that
+    // drops touch emulation fails loudly instead of silently skipping the rule
+    // under test.
+    const coarse = await testPage.evaluate(() => matchMedia("(any-pointer: coarse)").matches);
     expect(coarse).toBe(true);
 
     await mobile.openSearch();
