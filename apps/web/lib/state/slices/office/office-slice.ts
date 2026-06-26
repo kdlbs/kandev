@@ -24,7 +24,6 @@ export const defaultOfficeState: OfficeSliceState = {
     runs: [],
     dashboard: null,
     tasks: {
-      items: [],
       filters: {
         statuses: [],
         priorities: [],
@@ -37,11 +36,9 @@ export const defaultOfficeState: OfficeSliceState = {
       sortDir: "desc",
       groupBy: "none",
       nestingEnabled: true,
-      isLoading: false,
     },
     meta: null,
     isLoading: false,
-    refetchTrigger: null,
     routing: {
       byWorkspace: {},
       knownProviders: [],
@@ -127,29 +124,6 @@ function createProjectActions(set: SetFn) {
 
 function createTaskActions(set: SetFn) {
   return {
-    setTasks: (tasks: OfficeSlice["office"]["tasks"]["items"]) =>
-      set((draft) => {
-        draft.office.tasks.items = tasks;
-      }),
-    appendTasks: (tasks: OfficeSlice["office"]["tasks"]["items"]) =>
-      set((draft) => {
-        // De-dupe by id so refetch / load-more overlaps don't double-render.
-        const existing = new Set(draft.office.tasks.items.map((t) => t.id));
-        for (const t of tasks) {
-          if (!existing.has(t.id)) {
-            draft.office.tasks.items.push(t);
-            existing.add(t.id);
-          }
-        }
-      }),
-    patchTaskInStore: (
-      taskId: string,
-      patch: Partial<OfficeSlice["office"]["tasks"]["items"][number]>,
-    ) =>
-      set((draft) => {
-        const idx = draft.office.tasks.items.findIndex((t) => t.id === taskId);
-        if (idx >= 0) Object.assign(draft.office.tasks.items[idx], patch);
-      }),
     setTaskFilters: (filters: Partial<OfficeSlice["office"]["tasks"]["filters"]>) =>
       set((draft) => {
         Object.assign(draft.office.tasks.filters, filters);
@@ -173,10 +147,6 @@ function createTaskActions(set: SetFn) {
     toggleNesting: () =>
       set((draft) => {
         draft.office.tasks.nestingEnabled = !draft.office.tasks.nestingEnabled;
-      }),
-    setTasksLoading: (loading: boolean) =>
-      set((draft) => {
-        draft.office.tasks.isLoading = loading;
       }),
   };
 }
@@ -222,10 +192,6 @@ function createMiscActions(set: SetFn) {
     setOfficeLoading: (loading: boolean) =>
       set((draft) => {
         draft.office.isLoading = loading;
-      }),
-    setOfficeRefetchTrigger: (type: string) =>
-      set((draft) => {
-        draft.office.refetchTrigger = { type, timestamp: Date.now() };
       }),
   };
 }

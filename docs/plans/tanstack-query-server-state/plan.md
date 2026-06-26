@@ -474,6 +474,11 @@ Task 10 cleanup progress:
   SSR-to-store hydration, removed task detail's store fallback, and dropped the
   last production `useOfficeRefetch` callers. Task filter/sort/view/grouping/
   nesting state remains in Zustand as client-only UI state.
+- Office task helper/scaffold cleanup moved project task sections, agent run
+  linked task labels, and simple-pane parent/blocker task candidates to Query.
+  The unused `useOfficeRefetch` hook, legacy Office WS handler registration/test,
+  `office.refetchTrigger`, and the unused Office task server-state fields/actions
+  were removed.
 - Queue mirror cleanup moved `useQueue` to read/write `qk.session.queue`
   directly, with Query-cache optimistic removal and mutation-local loading
   state. The old queue Zustand state/actions, default-state/root-store
@@ -1331,11 +1336,17 @@ Task 10 partial verification completed locally:
   - `rtk pnpm --dir apps/web lint` passed.
   - `rtk pnpm --dir apps/web e2e:docker tests/office/tasks.spec.ts tests/office/realtime-tasks.spec.ts tests/office/task-filters.spec.ts tests/office/task-sorting.spec.ts tests/office/topbar-breadcrumb.spec.ts tests/office/comment-input.spec.ts tests/office/simple-advanced-toggle.spec.ts tests/office/regression-fixes.spec.ts tests/office/property-pickers.spec.ts`
     passed 36 Docker tests with strict WS accounting.
+- Office task helper/scaffold cleanup:
+  - `rtk pnpm --dir apps/web test components/task/simple/components/blockers-picker.test.tsx hooks/use-optimistic-task-mutation.test.tsx app/office/tasks/use-paginated-tasks.test.tsx lib/query/bridge/index.test.ts lib/ws/router.test.ts lib/ws/handlers/agent-session.test.ts components/state-hydrator.test.tsx`
+    passed 7 files / 52 tests.
+  - `rtk pnpm --dir apps/web typecheck` passed.
+  - `rtk pnpm --dir apps/web lint` passed.
+  - `rtk pnpm --dir apps/web e2e:docker tests/office/tasks.spec.ts tests/office/realtime-tasks.spec.ts tests/office/task-filters.spec.ts tests/office/task-sorting.spec.ts tests/office/topbar-breadcrumb.spec.ts tests/office/comment-input.spec.ts tests/office/simple-advanced-toggle.spec.ts tests/office/regression-fixes.spec.ts tests/office/property-pickers.spec.ts tests/office/projects.spec.ts tests/office/agent-run-detail.spec.ts tests/system/ws-event-accounting.spec.ts`
+    passed 43 Docker tests / 1 skipped with strict WS accounting.
 
-Current next step: finish the reopened Office store cleanup for project task
-sections, agent run/task labels, simple-pane task pickers, agents/projects/
-routines/skills readers, and then remove the unused Office refetch/WS scaffold
-before running Task 11 strict QA.
+Current next step: finish the reopened Office store cleanup for
+agents/projects/routines/skills readers and writer actions before running Task
+11 strict QA.
 
 Wave 4 (cleanup and full verification):
 

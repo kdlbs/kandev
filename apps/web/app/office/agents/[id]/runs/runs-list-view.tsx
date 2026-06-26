@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
-import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "@/components/routing/app-link";
 import {
   IconClock,
@@ -15,7 +15,11 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
 import { qk } from "@/lib/query/keys";
-import { officeAgentRunsInfiniteQueryOptions } from "@/lib/query/query-options/office";
+import {
+  officeAgentRunsInfiniteQueryOptions,
+  officeRoutinesQueryOptions,
+  officeTaskQueryOptions,
+} from "@/lib/query/query-options/office";
 import {
   type AgentRunsListPage,
   type AgentRunSummary,
@@ -160,56 +164,57 @@ function RunRow({ run, agentId }: { run: AgentRunSummary; agentId: string }) {
  * origin (legacy rows, scheduled wakeups without a task).
  */
 function LinkedEntity({ run }: { run: AgentRunSummary }) {
-  const task = useAppStore((s) =>
-    run.task_id ? s.office.tasks.items.find((t) => t.id === run.task_id) : undefined,
-  );
-  const routine = useAppStore((s) =>
-    run.routine_id ? s.office.routines.find((r) => r.id === run.routine_id) : undefined,
-  );
-
-  if (run.routine_id) {
-    const label = routine?.name ?? "Routine";
-    return (
-      <Link
-        href={`/office/routines/${run.routine_id}`}
-        className="flex items-center gap-1.5 text-xs hover:underline cursor-pointer min-w-0"
-        title={label}
-      >
-        <IconRepeat className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <span className="truncate">{label}</span>
-      </Link>
-    );
-  }
-
-  if (run.task_id && run.comment_id) {
-    const label = task ? `${task.identifier}: ${task.title}` : "Comment";
-    return (
-      <Link
-        href={`/office/tasks/${run.task_id}#comment-${run.comment_id}`}
-        className="flex items-center gap-1.5 text-xs hover:underline cursor-pointer min-w-0"
-        title={label}
-      >
-        <IconMessageCircle className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <span className="truncate">{label}</span>
-      </Link>
-    );
-  }
-
-  if (run.task_id) {
-    const label = task ? `${task.identifier}: ${task.title}` : "Task";
-    return (
-      <Link
-        href={`/office/tasks/${run.task_id}`}
-        className="flex items-center gap-1.5 text-xs hover:underline cursor-pointer min-w-0"
-        title={label}
-      >
-        <IconChecklist className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <span className="truncate">{label}</span>
-      </Link>
-    );
-  }
-
+  if (run.routine_id) return <RoutineLinkedEntity routineId={run.routine_id} />;
+  if (run.task_id) return <TaskLinkedEntity taskId={run.task_id} commentId={run.comment_id} />;
   return <span className="text-xs text-muted-foreground">—</span>;
+}
+
+function RoutineLinkedEntity({ routineId }: { routineId: string }) {
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const routinesQuery = useQuery({
+    ...officeRoutinesQueryOptions(workspaceId ?? ""),
+    enabled: Boolean(workspaceId),
+  });
+  const routine = routinesQuery.data?.routines.find((r) => r.id === routineId);
+  const label = routine?.name ?? "Routine";
+
+  return (
+    <Link
+      href={`/office/routines/${routineId}`}
+      className="flex items-center gap-1.5 text-xs hover:underline cursor-pointer min-w-0"
+      title={label}
+    >
+      <IconRepeat className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <span className="truncate">{label}</span>
+    </Link>
+  );
+}
+
+function TaskLinkedEntity({ taskId, commentId }: { taskId: string; commentId?: string }) {
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const taskQuery = useQuery({
+    ...officeTaskQueryOptions(workspaceId ?? "", taskId),
+    enabled: Boolean(workspaceId),
+  });
+  const task = taskQuery.data?.task;
+  const isComment = Boolean(commentId);
+  let label = isComment ? "Comment" : "Task";
+  if (task) label = `${task.identifier}: ${task.title}`;
+  const href = isComment
+    ? `/office/tasks/${taskId}#comment-${commentId}`
+    : `/office/tasks/${taskId}`;
+  const Icon = isComment ? IconMessageCircle : IconChecklist;
+
+  return (
+    <Link
+      href={href}
+      className="flex items-center gap-1.5 text-xs hover:underline cursor-pointer min-w-0"
+      title={label}
+    >
+      <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <span className="truncate">{label}</span>
+    </Link>
+  );
 }
 
 type LoadMoreFooterProps = {

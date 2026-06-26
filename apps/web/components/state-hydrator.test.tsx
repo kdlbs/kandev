@@ -85,7 +85,6 @@ describe("StateHydrator", () => {
                 runs: [],
                 dashboard: null,
                 tasks: {
-                  items: [],
                   filters: {
                     statuses: [],
                     priorities: [],
@@ -98,10 +97,8 @@ describe("StateHydrator", () => {
                   sortDir: "desc",
                   groupBy: "none",
                   nestingEnabled: true,
-                  isLoading: false,
                 },
                 isLoading: false,
-                refetchTrigger: null,
                 routing: { byWorkspace: {}, knownProviders: [], preview: { byWorkspace: {} } },
                 providerHealth: { byWorkspace: {} },
                 runAttempts: { byRunId: {} },

@@ -293,14 +293,12 @@ export type TaskGroupBy = "status" | "priority" | "assignee" | "project" | "pare
 export type TaskViewMode = "list" | "board";
 
 export type TasksState = {
-  items: OfficeTask[];
   filters: TaskFilterState;
   viewMode: TaskViewMode;
   sortField: TaskSortField;
   sortDir: TaskSortDir;
   groupBy: TaskGroupBy;
   nestingEnabled: boolean;
-  isLoading: boolean;
 };
 
 export type RunActivityDay = {
@@ -636,11 +634,6 @@ export type AgentRoutingSliceState = {
 
 // --- Slice state & actions ---
 
-export type OfficeRefetchTrigger = {
-  type: string;
-  timestamp: number;
-};
-
 export type OfficeSliceState = {
   office: {
     agentProfiles: AgentProfile[];
@@ -658,7 +651,6 @@ export type OfficeSliceState = {
     tasks: TasksState;
     meta: OfficeMeta | null;
     isLoading: boolean;
-    refetchTrigger: OfficeRefetchTrigger | null;
     routing: RoutingState;
     providerHealth: ProviderHealthSliceState;
     runAttempts: RunAttemptsState;
@@ -688,18 +680,13 @@ export type OfficeSliceActions = {
   setInboxCount: (count: number) => void;
   setRuns: (runs: Run[]) => void;
   setDashboard: (data: DashboardData | null) => void;
-  setTasks: (tasks: OfficeTask[]) => void;
-  appendTasks: (tasks: OfficeTask[]) => void;
-  patchTaskInStore: (taskId: string, patch: Partial<OfficeTask>) => void;
   setTaskFilters: (filters: Partial<TaskFilterState>) => void;
   setTaskViewMode: (mode: TaskViewMode) => void;
   setTaskSortField: (field: TaskSortField) => void;
   setTaskSortDir: (dir: TaskSortDir) => void;
   setTaskGroupBy: (groupBy: TaskGroupBy) => void;
   toggleNesting: () => void;
-  setTasksLoading: (loading: boolean) => void;
   setOfficeLoading: (loading: boolean) => void;
-  setOfficeRefetchTrigger: (type: string) => void;
   setWorkspaceRouting: (workspaceId: string, cfg: WorkspaceRouting | undefined) => void;
   setKnownProviders: (providers: string[]) => void;
   setRoutingPreview: (workspaceId: string, agents: AgentRoutePreview[]) => void;

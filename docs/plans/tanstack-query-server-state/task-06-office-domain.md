@@ -95,6 +95,11 @@ out any mobile E2E coverage added or reused.
   dropped the last production `useOfficeRefetch` callers. `usePaginatedTasks`
   now returns flattened infinite-query data directly, while task filters/sort/
   grouping/nesting remain in Zustand as client-only UI state.
+- The Office task helper/scaffold cleanup moved project task sections, agent run
+  linked task labels, and simple-pane parent/blocker pickers to Query-backed
+  task reads. It removed the unused `useOfficeRefetch` hook, legacy Office WS
+  handler registration/test, `office.refetchTrigger`, and the unused
+  `office.tasks.items`/loading server-state fields/actions.
 - Migrated office dashboard, tasks, task search, task detail comments/activity,
   agents, agent run/detail routes, projects/project tasks, inbox, activity,
   routines, routing, costs, budgets, and skills to TanStack Query readers.
@@ -106,11 +111,11 @@ out any mobile E2E coverage added or reused.
   health/run attempts where possible, then invalidates the affected query
   families for sparse events.
 - Retained `office.tasks.filters`, `viewMode`, `sortField`, `sortDir`, `groupBy`,
-  `nestingEnabled`, dialogs, local edit state, and the store server-state mirrors
-  as compatibility fields for sidebar/simple-pane readers.
-- Did not remove the `useOfficeRefetch` hook definition or old Office WS fanout
-  yet. Production callers are gone; the cleanup task still needs to remove the
-  unused hook/scaffold after the remaining Office store readers are migrated.
+  `nestingEnabled`, dialogs, and local edit state as client-only UI state.
+- Removed the legacy `useOfficeRefetch` hook definition, old Office WS fanout,
+  Office refetch trigger state, and unused Office task server-state mirror.
+  Remaining Office cleanup is now concentrated in agent/project/routine/skill
+  store mirrors and readers.
 - Reused existing mobile coverage through `tests/office/mobile-onboarding.spec.ts`
   in Docker.
 
@@ -123,3 +128,10 @@ out any mobile E2E coverage added or reused.
   - `rtk pnpm --dir apps/web lint` passed.
   - `rtk pnpm --dir apps/web e2e:docker tests/office/tasks.spec.ts tests/office/realtime-tasks.spec.ts tests/office/task-filters.spec.ts tests/office/task-sorting.spec.ts tests/office/topbar-breadcrumb.spec.ts tests/office/comment-input.spec.ts tests/office/simple-advanced-toggle.spec.ts tests/office/regression-fixes.spec.ts tests/office/property-pickers.spec.ts`
     passed 36 Docker tests with strict WS accounting.
+- Task helper/scaffold cleanup:
+  - `rtk pnpm --dir apps/web test components/task/simple/components/blockers-picker.test.tsx hooks/use-optimistic-task-mutation.test.tsx app/office/tasks/use-paginated-tasks.test.tsx lib/query/bridge/index.test.ts lib/ws/router.test.ts lib/ws/handlers/agent-session.test.ts components/state-hydrator.test.tsx`
+    passed 7 files / 52 tests.
+  - `rtk pnpm --dir apps/web typecheck` passed.
+  - `rtk pnpm --dir apps/web lint` passed.
+  - `rtk pnpm --dir apps/web e2e:docker tests/office/tasks.spec.ts tests/office/realtime-tasks.spec.ts tests/office/task-filters.spec.ts tests/office/task-sorting.spec.ts tests/office/topbar-breadcrumb.spec.ts tests/office/comment-input.spec.ts tests/office/simple-advanced-toggle.spec.ts tests/office/regression-fixes.spec.ts tests/office/property-pickers.spec.ts tests/office/projects.spec.ts tests/office/agent-run-detail.spec.ts tests/system/ws-event-accounting.spec.ts`
+    passed 43 Docker tests / 1 skipped with strict WS accounting.

@@ -23,8 +23,7 @@ export function AssigneePicker({ task }: AssigneePickerProps) {
 
   // The store is hydrated from /office/inbox and /office/agents pages but
   // not from individual task pages, so navigating directly to a task
-  // leaves agentProfiles empty. Lazy-fetch on mount when missing — same
-  // pattern the parent/blockers pickers use against searchTasks.
+  // leaves agentProfiles empty. Lazy-fetch on mount when missing.
   useEffect(() => {
     if (!workspaceId || agents.length > 0) return;
     let cancelled = false;

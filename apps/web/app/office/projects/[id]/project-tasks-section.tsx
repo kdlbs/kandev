@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
+import { useOfficeAgentsData } from "@/hooks/domains/office/use-office-data";
 import { officeTasksInfiniteQueryOptions } from "@/lib/query/query-options";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import { TaskRow } from "../../tasks/task-row";
@@ -13,14 +14,7 @@ type ProjectTasksSectionProps = {
 
 export function ProjectTasksSection({ projectId }: ProjectTasksSectionProps) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const appendTasks = useAppStore((s) => s.appendTasks);
-  // Select stable references; derive the filtered list and the agent-name
-  // lookup via useMemo. Returning a freshly `.filter()`'d array or a
-  // `new Map(...)` straight from the selector tripped React's
-  // getSnapshot caching guard because every render produced a new
-  // reference.
-  const allTasks = useAppStore((s) => s.office.tasks.items);
-  const agentProfiles = useAppStore((s) => s.office.agentProfiles);
+  const agentProfiles = useOfficeAgentsData(workspaceId).data?.agents ?? [];
   const projectTasksQuery = useInfiniteQuery(
     officeTasksInfiniteQueryOptions(workspaceId ?? "", {
       project: projectId,
@@ -35,18 +29,12 @@ export function ProjectTasksSection({ projectId }: ProjectTasksSectionProps) {
     [projectTasksQuery.data],
   );
 
-  // Mirror query-loaded tasks into the global store so existing consumers
-  // keep seeing the union of every task they've loaded.
-  useEffect(() => {
-    if (queriedTasks.length > 0) appendTasks(queriedTasks);
-  }, [queriedTasks, appendTasks]);
-
   const sorted = useMemo(
     () =>
-      allTasks
-        .filter((t) => t.projectId === projectId)
-        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
-    [allTasks, projectId],
+      [...queriedTasks].sort(
+        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+      ),
+    [queriedTasks],
   );
 
   const agentNameById = useMemo(

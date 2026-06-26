@@ -148,23 +148,6 @@ function upsertTaskSessionList(
   });
 }
 
-// Fan out the office refetch trigger only when the session's state
-// actually changed. The WS layer fires `session.state_changed` for
-// several adjacent reasons (agentctl status, context window, model
-// updates) where `new_state` is undefined or unchanged; without this
-// gate every one of those storms the dashboard-card re-render path.
-function maybeFanOutOfficeRefetch(
-  store: StoreApi<AppState>,
-  newState: TaskSessionState | undefined,
-  prevState: TaskSessionState | undefined,
-): void {
-  if (!newState || newState === prevState) return;
-  const setOfficeTrigger = store.getState().setOfficeRefetchTrigger;
-  if (!setOfficeTrigger) return;
-  setOfficeTrigger("dashboard");
-  setOfficeTrigger("agents");
-}
-
 /** Extract context window data from payload metadata and store it. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function extractContextWindow(store: StoreApi<AppState>, sessionId: string, payload: any): void {
@@ -433,8 +416,6 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         payload,
         previousState: existingSession?.state,
       });
-
-      maybeFanOutOfficeRefetch(store, newState, existingSession?.state);
     },
     "session.agentctl_starting": (message) => {
       const payload = message.payload;
