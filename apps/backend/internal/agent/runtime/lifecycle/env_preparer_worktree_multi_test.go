@@ -361,6 +361,48 @@ func TestWorktreePreparer_MultiRepo_RollbackKeepsReusedWorktrees(t *testing.T) {
 	}
 }
 
+func TestWorktreePreparer_MultiRepo_RollbackRemovesWorktreeCreatedForStaleReuseID(t *testing.T) {
+	repoNew := initBareGitRepo(t, "stale-new")
+	repoBad := t.TempDir()
+
+	preparer, mgr := newPreparerForTest(t)
+	req := &EnvPrepareRequest{
+		TaskID:       "task-stale-reuse-fail",
+		SessionID:    "sess-stale-reuse-fail",
+		TaskTitle:    "Stale Reuse Then Fail",
+		ExecutorType: executor.NameStandalone,
+		TaskDirName:  "stale-reuse-fail_ddd",
+		Repositories: []RepoPrepareSpec{
+			{
+				RepositoryID:   "repo-new",
+				RepositoryPath: repoNew,
+				RepoName:       "stale-new",
+				BaseBranch:     "main",
+				WorktreeID:     "wt-stale",
+			},
+			{RepositoryID: "repo-bad", RepositoryPath: repoBad, RepoName: "bad", BaseBranch: "main"},
+		},
+	}
+
+	res, err := preparer.Prepare(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("prepare returned hard error: %v", err)
+	}
+	if res.Success {
+		t.Fatal("expected failure when final repo is not a git repo")
+	}
+
+	all, err := mgr.GetAllByTaskID(context.Background(), "task-stale-reuse-fail")
+	if err != nil {
+		t.Fatalf("list worktrees: %v", err)
+	}
+	for _, wt := range all {
+		if wt.Status == worktree.StatusActive {
+			t.Fatalf("worktree %s should have been rolled back after stale reuse ID created it", wt.ID)
+		}
+	}
+}
+
 func TestWorktreePreparer_MultiRepo_RunsPerRepoSetupScript(t *testing.T) {
 	repoA := initBareGitRepo(t, "frontend")
 	repoB := initBareGitRepo(t, "backend")
