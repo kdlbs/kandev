@@ -136,7 +136,8 @@ printf '%s\n' "$*" >> "$GH_ARGS_LOG"
 case "$*" in
   *check-runs*)
     case "$*" in
-      *--paginate*) printf '%s\n' '[{"name":"unit","status":"completed","conclusion":"success","html_url":"https://ci/unit"},{"name":"lint","status":"completed","conclusion":"failure","html_url":"https://ci/lint"}]' ;;
+      *--slurp*) printf '%s\n' 'unsupported slurp' >&2; exit 1 ;;
+      *--paginate*) printf '%s\n' '{"name":"unit","status":"completed","conclusion":"success","html_url":"https://ci/unit"}' '{"name":"lint","status":"completed","conclusion":"failure","html_url":"https://ci/lint"}' ;;
       *) printf '%s\n' '[{"name":"unit","status":"completed","conclusion":"success","html_url":"https://ci/unit"}]' ;;
     esac
     ;;
@@ -166,6 +167,9 @@ esac
 	}
 	if !strings.Contains(string(logged), "--paginate") {
 		t.Fatalf("ListCheckRuns should call gh api with --paginate, got:\n%s", logged)
+	}
+	if strings.Contains(string(logged), "--slurp") {
+		t.Fatalf("ListCheckRuns should not combine gh api --slurp with --jq, got:\n%s", logged)
 	}
 }
 

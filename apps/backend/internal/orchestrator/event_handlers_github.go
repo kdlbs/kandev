@@ -195,13 +195,25 @@ func (s *Service) handleTaskCIOptionsUpdated(ctx context.Context, event *bus.Eve
 	defer cancel()
 	prs, err := s.githubService.TriggerPRSyncAll(detachedCtx, options.TaskID)
 	if err != nil {
-		s.logger.Debug("failed to sync task PRs for CI automation options update", zap.String("task_id", options.TaskID), zap.Error(err))
+		s.logger.Warn("failed to sync task PRs for CI automation options update", zap.String("task_id", options.TaskID), zap.Error(err))
+		s.recordTaskCIOptionsSyncError(detachedCtx, options.TaskID, err)
 		return nil
 	}
 	for _, pr := range prs {
 		s.startTaskPRCIAutomation(ctx, pr)
 	}
 	return nil
+}
+
+func (s *Service) recordTaskCIOptionsSyncError(ctx context.Context, taskID string, syncErr error) {
+	prsByTask, err := s.githubService.ListTaskPRs(ctx, []string{taskID})
+	if err != nil {
+		s.logger.Debug("failed to load task PRs after CI automation sync failure", zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	for _, pr := range prsByTask[taskID] {
+		s.recordCIAutomationError(ctx, pr, fmt.Sprintf("sync PR status: %v", syncErr))
+	}
 }
 
 func (s *Service) startTaskPRCIAutomation(ctx context.Context, pr *github.TaskPR) {

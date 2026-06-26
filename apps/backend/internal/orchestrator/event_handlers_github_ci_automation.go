@@ -25,6 +25,7 @@ const (
 	ciAutomationCheckCompleted   = "completed"
 	ciAutomationChangesRequested = "changes_requested"
 	ciAutomationPRFeedbackToken  = "{{pr.feedback}}"
+	ciAutomationFreshSyncWindow  = 30 * time.Second
 )
 
 var ciAutomationSnapshotFieldReplacer = strings.NewReplacer("\r", " ", "\n", " ", "<", "", ">", "")
@@ -57,35 +58,45 @@ func (s *Service) handleTaskPRCIAutomation(ctx context.Context, pr *github.TaskP
 		s.logger.Debug("load CI automation options failed", zap.String("task_id", pr.TaskID), zap.Error(err))
 		return nil
 	}
+	freshlySynced := false
 	if options.AutoFixEnabled || options.AutoMergeEnabled {
-		refreshed, syncErr := s.refreshTaskPRForCIAutomation(ctx, pr)
+		refreshed, synced, syncErr := s.refreshTaskPRForCIAutomation(ctx, pr)
 		if syncErr != nil {
 			s.recordCIAutomationError(ctx, pr, fmt.Sprintf("sync PR status: %v", syncErr))
 			return nil
 		}
 		pr = refreshed
+		freshlySynced = synced
 	}
+	autoFixBlockedMerge := false
 	if options.AutoFixEnabled && ciAutomationCanAutoFixFromFeedback(pr) {
-		s.handleTaskPRCIAutoFix(ctx, pr, options)
+		autoFixBlockedMerge = s.handleTaskPRCIAutoFix(ctx, pr, options)
+	}
+	if autoFixBlockedMerge {
+		return nil
 	}
 	if options.AutoMergeEnabled && ciAutomationReadyToMerge(pr) {
+		if !freshlySynced {
+			s.recordCIAutomationError(ctx, pr, "PR status is not freshly synced for auto-merge")
+			return nil
+		}
 		s.handleTaskPRCIAutoMerge(ctx, pr)
 	}
 	return nil
 }
 
-func (s *Service) refreshTaskPRForCIAutomation(ctx context.Context, pr *github.TaskPR) (*github.TaskPR, error) {
+func (s *Service) refreshTaskPRForCIAutomation(ctx context.Context, pr *github.TaskPR) (*github.TaskPR, bool, error) {
 	if pr == nil {
-		return nil, nil
+		return nil, false, nil
 	}
 	prs, err := s.githubService.TriggerPRSyncAll(ctx, pr.TaskID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if refreshed := ciAutomationFindMatchingPR(prs, pr); refreshed != nil {
-		return refreshed, nil
+		return refreshed, ciAutomationHasFreshPRStatus(refreshed), nil
 	}
-	return pr, nil
+	return pr, false, nil
 }
 
 func ciAutomationFindMatchingPR(prs []*github.TaskPR, target *github.TaskPR) *github.TaskPR {
@@ -106,16 +117,23 @@ func ciAutomationFindMatchingPR(prs []*github.TaskPR, target *github.TaskPR) *gi
 	return nil
 }
 
-func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, options *github.TaskCIOptionsResponse) {
+func ciAutomationHasFreshPRStatus(pr *github.TaskPR) bool {
+	if pr == nil || pr.LastSyncedAt == nil {
+		return false
+	}
+	return time.Since(*pr.LastSyncedAt) <= ciAutomationFreshSyncWindow
+}
+
+func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, options *github.TaskCIOptionsResponse) bool {
 	feedback, err := s.githubService.GetPRFeedback(ctx, pr.Owner, pr.Repo, pr.PRNumber)
 	if err != nil {
 		s.recordCIAutomationError(ctx, pr, fmt.Sprintf("fetch PR feedback: %v", err))
-		return
+		return true
 	}
 	state, err := s.githubService.GetTaskCIPRState(ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber)
 	if err != nil {
 		s.recordCIAutomationError(ctx, pr, fmt.Sprintf("load CI automation state: %v", err))
-		return
+		return true
 	}
 	previous := decodeCIAutomationCheckpoint(state)
 	delta := ciAutomationBuildDelta(feedback, previous)
@@ -127,21 +145,21 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 				s.logger.Debug("record CI auto-fix checkpoint refresh failed", zap.String("task_id", pr.TaskID), zap.Error(err))
 			}
 		}
-		return
+		return false
 	}
 	checkpointJSON, signature := encodeCIAutomationCheckpoint(checkpoint)
 	if state != nil && state.LastFixSignature == signature {
-		return
+		return false
 	}
 	prompt := ciAutomationRenderPrompt(options.EffectiveAutoFixPrompt, pr, delta)
 	session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, pr.TaskID)
 	if err != nil || session == nil {
 		s.recordCIAutomationError(ctx, pr, "no promptable task session for CI auto-fix")
-		return
+		return true
 	}
 	if err := s.dispatchCIAutomationPrompt(ctx, session, prompt); err != nil {
 		s.recordCIAutomationError(ctx, pr, err.Error())
-		return
+		return true
 	}
 	if err := s.githubService.RecordTaskCIFixAttempt(context.WithoutCancel(ctx), github.TaskCIFixAttempt{
 		TaskID:         pr.TaskID,
@@ -154,6 +172,7 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 	}); err != nil {
 		s.logger.Debug("record CI auto-fix attempt failed", zap.String("task_id", pr.TaskID), zap.Error(err))
 	}
+	return true
 }
 
 func (s *Service) handleTaskPRCIAutoMerge(ctx context.Context, pr *github.TaskPR) {
