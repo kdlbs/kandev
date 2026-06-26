@@ -16,6 +16,7 @@ import {
 } from "@kandev/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dialog-popover-container";
 
 export type ComboboxOption = {
   value: string;
@@ -159,6 +160,7 @@ export const Combobox = memo(function Combobox({
   loading = false,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
+  const portalContainer = useTaskCreateDialogPopoverContainer();
   // Track the highlighted item. Defaults to the selected value so the current
   // selection is highlighted when the popover opens (not the first item).
   const [highlighted, setHighlighted] = useState("");
@@ -204,6 +206,7 @@ export const Combobox = memo(function Combobox({
         side={popoverSide}
         align={popoverAlign}
         portal={popoverPortal}
+        portalContainer={portalContainer}
       >
         <Command
           value={highlighted}
