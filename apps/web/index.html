@@ -3,6 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="color-scheme" content="light dark" />
+    <!-- maximum-scale=1 intentionally blocks casual page pinch-zoom for an app-like
+         feel. This does NOT disable OS-level accessibility zoom (iOS triple-tap /
+         AssistiveTouch, Android magnification), which is independent of the page
+         viewport. Focus-zoom is handled separately by the 16px coarse-pointer rule
+         in globals.css, not by this attribute. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover" />
     <meta name="description" content="AI-powered workflow management for developers" />
     <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)" />

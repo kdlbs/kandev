@@ -204,15 +204,18 @@
 
 /* iOS Safari auto-zooms a focused form control whose computed font-size is
    < 16px. Force 16px on coarse-pointer (touch) devices to stop focus-zoom.
-   Kept unlayered on purpose so it overrides Tailwind's text-size utilities
-   (e.g. text-sm/text-xs) — moving it into @layer base would let those win
-   and silently break the fix. */
+   !important because some controls are styled by more specific selectors
+   (e.g. `.tiptap pre .code-block-language` at 0.625rem) that would otherwise
+   win on specificity and keep the field under 16px. Only true editing hosts
+   are targeted — `[contenteditable="false"]` decorations (TipTap mention
+   chips, code-block views) are deliberately excluded. */
 @media (pointer: coarse) {
   input,
   textarea,
   select,
-  [contenteditable] {
-    font-size: 16px;
+  [contenteditable="true"],
+  [contenteditable="plaintext-only"] {
+    font-size: 16px !important;
   }
 }
 
