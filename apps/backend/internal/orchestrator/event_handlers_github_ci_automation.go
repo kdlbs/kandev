@@ -102,9 +102,6 @@ func ciAutomationFindMatchingPR(prs []*github.TaskPR, target *github.TaskPR) *gi
 		if target.RepositoryID == "" && pr.Owner == target.Owner && pr.Repo == target.Repo {
 			return pr
 		}
-		if pr.Owner == target.Owner && pr.Repo == target.Repo {
-			return pr
-		}
 	}
 	return nil
 }

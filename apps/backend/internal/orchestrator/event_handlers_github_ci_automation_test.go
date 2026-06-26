@@ -357,6 +357,40 @@ func TestHandleTaskPRCIAutomationAutoMergeUsesFreshSync(t *testing.T) {
 	}
 }
 
+func TestCIAutomationFindMatchingPRRequiresRepositoryIDWhenPresent(t *testing.T) {
+	target := &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-back",
+		Owner:        "acme",
+		Repo:         "widget",
+		PRNumber:     42,
+	}
+	wrongRepo := &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-front",
+		Owner:        "acme",
+		Repo:         "widget",
+		PRNumber:     42,
+	}
+	matchingRepo := &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-back",
+		Owner:        "acme",
+		Repo:         "widget",
+		PRNumber:     42,
+	}
+
+	got := ciAutomationFindMatchingPR([]*github.TaskPR{wrongRepo, matchingRepo}, target)
+	if got != matchingRepo {
+		t.Fatalf("expected repository_id match, got %+v", got)
+	}
+
+	got = ciAutomationFindMatchingPR([]*github.TaskPR{wrongRepo}, target)
+	if got != nil {
+		t.Fatalf("expected no owner/repo fallback when target repository_id is set, got %+v", got)
+	}
+}
+
 func TestDispatchCIAutomationPromptDoesNotRecordUserMessageWhenQueueFails(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
