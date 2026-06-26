@@ -178,5 +178,6 @@ export interface LicenseEntry {
   license: string;
   repository?: string;
   license_text?: string;
+  stale?: boolean;
   ecosystem?: LicenseEcosystem;
 }

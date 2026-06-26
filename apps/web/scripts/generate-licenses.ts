@@ -17,7 +17,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 type Ecosystem = "npm" | "go";
 
@@ -27,6 +27,7 @@ interface LicenseEntry {
   license: string;
   repository?: string;
   license_text?: string;
+  stale?: boolean;
   ecosystem: Ecosystem;
 }
 
@@ -216,13 +217,96 @@ function collectGoEntries(): LicenseEntry[] {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(`[licenses] warning: go-licenses failed: ${message}\n`);
-    return [];
+    const recovery = recoverGoEntriesAfterReportFailure(execStdout(err), readExistingManifest());
+    if (recovery?.source === "go-licenses-stdout") {
+      process.stderr.write(
+        `[licenses] warning: recovered ${recovery.entries.length} Go entries from go-licenses stdout.\n`,
+      );
+      return recovery.entries;
+    }
+    if (recovery?.source === "existing-manifest") {
+      process.stderr.write(
+        `[licenses] warning: reusing ${recovery.entries.length} stale Go entries from the existing manifest.\n`,
+      );
+      return recovery.entries;
+    }
+    throw new Error("go-licenses failed and no existing Go entries are available");
   } finally {
     rmSync(tmplPath, { force: true });
   }
 
-  const rows = parseGoRows(raw);
-  return rows.filter(isThirdPartyGoRow).map(toGoEntry);
+  return goEntriesFromReport(raw);
+}
+
+type GoEntryRecoverySource = "go-licenses-stdout" | "existing-manifest";
+
+interface GoEntryRecovery {
+  entries: LicenseEntry[];
+  source: GoEntryRecoverySource;
+}
+
+export function recoverGoEntriesAfterReportFailure(
+  stdout: string,
+  existingManifestRaw?: string,
+): GoEntryRecovery | null {
+  const recoveredEntries = goEntriesFromReport(stdout);
+  if (recoveredEntries.length > 0) {
+    return { entries: recoveredEntries, source: "go-licenses-stdout" };
+  }
+  const existingEntries = existingManifestRaw
+    ? markStaleGoEntries(readGoEntriesFromManifest(existingManifestRaw))
+    : [];
+  if (existingEntries.length > 0) {
+    return { entries: existingEntries, source: "existing-manifest" };
+  }
+  return null;
+}
+
+function goEntriesFromReport(raw: string): LicenseEntry[] {
+  return parseGoRows(raw).filter(isThirdPartyGoRow).map(toGoEntry);
+}
+
+function execStdout(err: unknown): string {
+  const stdout = (err as { stdout?: Buffer | string }).stdout;
+  if (typeof stdout === "string") return stdout;
+  if (Buffer.isBuffer(stdout)) return stdout.toString("utf-8");
+  return "";
+}
+
+function readExistingManifest(): string | undefined {
+  try {
+    return readFileSync(OUTPUT_FILE, "utf-8");
+  } catch {
+    return undefined;
+  }
+}
+
+export function readGoEntriesFromManifest(raw: string): LicenseEntry[] {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isLicenseEntry).filter((entry) => entry.ecosystem === "go");
+  } catch {
+    return [];
+  }
+}
+
+function isLicenseEntry(value: unknown): value is LicenseEntry {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as Partial<Record<keyof LicenseEntry, unknown>>;
+  return (
+    typeof entry.name === "string" &&
+    typeof entry.version === "string" &&
+    typeof entry.license === "string" &&
+    (entry.ecosystem === "npm" || entry.ecosystem === "go") &&
+    (entry.repository === undefined || typeof entry.repository === "string") &&
+    (entry.license_text === undefined || typeof entry.license_text === "string") &&
+    (entry.stale === undefined || typeof entry.stale === "boolean")
+  );
+}
+
+function markStaleGoEntries(entries: LicenseEntry[]): LicenseEntry[] {
+  return entries.map((entry) => ({ ...entry, stale: true }));
 }
 
 function parseGoRows(raw: string): GoRow[] {
@@ -320,6 +404,7 @@ function mergeEntries(a: LicenseEntry, b: LicenseEntry): LicenseEntry {
     license: a.license !== UNKNOWN_LICENSE ? a.license : b.license,
     repository: a.repository ?? b.repository,
     license_text: a.license_text ?? b.license_text,
+    ...(a.stale || b.stale ? { stale: true } : {}),
     ecosystem: a.ecosystem,
   };
 }
@@ -357,4 +442,6 @@ function main(): void {
   process.stderr.write(`[licenses] wrote ${merged.length} entries -> ${OUTPUT_FILE}\n`);
 }
 
-main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
+}
