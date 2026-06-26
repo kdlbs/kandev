@@ -134,6 +134,15 @@ func (r *Repository) initSchema() error {
 		return fmt.Errorf("failed to seed default workflow steps: %w", err)
 	}
 
+	if err := r.normalizeDuplicateStartSteps(); err != nil {
+		return fmt.Errorf("failed to normalize duplicate start steps: %w", err)
+	}
+	r.migrate.Apply("idx_workflow_steps_single_start", `
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_steps_single_start
+		ON workflow_steps(workflow_id)
+		WHERE is_start_step = 1
+	`)
+
 	// Repair step_id references that were incorrectly saved as template aliases
 	// instead of UUIDs. This was caused by a frontend bug (fixed in PR #XXX).
 	if err := r.repairBrokenStepIDReferences(); err != nil {
@@ -141,6 +150,25 @@ func (r *Repository) initSchema() error {
 	}
 
 	return nil
+}
+
+func (r *Repository) normalizeDuplicateStartSteps() error {
+	_, err := r.db.Exec(`
+		WITH ranked AS (
+			SELECT
+				id,
+				ROW_NUMBER() OVER (
+					PARTITION BY workflow_id
+					ORDER BY position DESC, updated_at DESC, id DESC
+				) AS start_rank
+			FROM workflow_steps
+			WHERE is_start_step = 1
+		)
+		UPDATE workflow_steps
+		SET is_start_step = 0
+		WHERE id IN (SELECT id FROM ranked WHERE start_rank > 1)
+	`)
+	return err
 }
 
 // seedDefaultWorkflowSteps creates default workflow steps for workflows that don't have any.

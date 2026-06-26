@@ -222,6 +222,9 @@ func (s *Service) CreateStepsFromTemplate(ctx context.Context, workflowID, templ
 			StageType:             stepDef.StageType,
 		}
 
+		if err := s.ensureOnlyStartStep(ctx, step); err != nil {
+			return err
+		}
 		if err := s.repo.CreateStep(ctx, step); err != nil {
 			s.logger.Error("failed to create step from template",
 				zap.String("workflow_id", workflowID),
@@ -271,6 +274,9 @@ func (s *Service) ResolveFirstStep(ctx context.Context, workflowID string) (*mod
 // CreateStep creates a new workflow step.
 func (s *Service) CreateStep(ctx context.Context, step *models.WorkflowStep) error {
 	step.ID = uuid.New().String()
+	if err := s.ensureOnlyStartStep(ctx, step); err != nil {
+		return err
+	}
 	if err := s.repo.CreateStep(ctx, step); err != nil {
 		s.logger.Error("failed to create step", zap.String("workflow_id", step.WorkflowID), zap.Error(err))
 		return err
@@ -281,18 +287,28 @@ func (s *Service) CreateStep(ctx context.Context, step *models.WorkflowStep) err
 
 // UpdateStep updates an existing workflow step.
 func (s *Service) UpdateStep(ctx context.Context, step *models.WorkflowStep) error {
-	// If marking as start step, clear the flag on all other steps first
-	if step.IsStartStep {
-		if err := s.repo.ClearStartStepFlag(ctx, step.WorkflowID, step.ID); err != nil {
-			s.logger.Error("failed to clear start step flag", zap.String("workflow_id", step.WorkflowID), zap.Error(err))
-			return err
-		}
+	if err := s.ensureOnlyStartStep(ctx, step); err != nil {
+		return err
 	}
 	if err := s.repo.UpdateStep(ctx, step); err != nil {
 		s.logger.Error("failed to update step", zap.String("step_id", step.ID), zap.Error(err))
 		return err
 	}
 	s.logger.Info("updated workflow step", zap.String("step_id", step.ID))
+	return nil
+}
+
+func (s *Service) ensureOnlyStartStep(ctx context.Context, step *models.WorkflowStep) error {
+	if !step.IsStartStep {
+		return nil
+	}
+	if err := s.repo.ClearStartStepFlag(ctx, step.WorkflowID, step.ID); err != nil {
+		s.logger.Error("failed to clear start step flag",
+			zap.String("workflow_id", step.WorkflowID),
+			zap.String("step_id", step.ID),
+			zap.Error(err))
+		return err
+	}
 	return nil
 }
 
@@ -534,6 +550,9 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 		// Match step-level agent profile if present.
 		if sp.AgentProfile != nil && s.matchProfile != nil {
 			step.AgentProfileID = s.matchProfile(sp.AgentProfile.AgentName, sp.AgentProfile.Model, sp.AgentProfile.Mode)
+		}
+		if err := s.ensureOnlyStartStep(ctx, step); err != nil {
+			return err
 		}
 		if err := s.repo.CreateStep(ctx, step); err != nil {
 			return fmt.Errorf("create step %q: %w", sp.Name, err)

@@ -12,6 +12,11 @@ import (
 )
 
 func setupTestRepo(t *testing.T) *Repository {
+	repo, _ := setupTestRepoWithDB(t)
+	return repo
+}
+
+func setupTestRepoWithDB(t *testing.T) (*Repository, *sqlx.DB) {
 	t.Helper()
 	rawDB, err := sql.Open("sqlite3", ":memory:?_foreign_keys=on")
 	if err != nil {
@@ -54,7 +59,7 @@ func setupTestRepo(t *testing.T) *Repository {
 	if err != nil {
 		t.Fatalf("failed to create repo: %v", err)
 	}
-	return repo
+	return repo, sqlxDB
 }
 
 func TestStepAgentProfileID_CreateAndGet(t *testing.T) {
@@ -188,5 +193,72 @@ func TestStepAgentProfileID_EmptyByDefault(t *testing.T) {
 	}
 	if retrieved.AgentProfileID != "" {
 		t.Errorf("expected empty agent_profile_id by default, got %q", retrieved.AgentProfileID)
+	}
+}
+
+func TestInitSchema_NormalizesDuplicateStartSteps(t *testing.T) {
+	rawDB, err := sql.Open("sqlite3", ":memory:?_foreign_keys=on")
+	if err != nil {
+		t.Fatalf("failed to open sqlite: %v", err)
+	}
+	db := sqlx.NewDb(rawDB, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+	ctx := context.Background()
+
+	_, err = db.Exec(`
+		CREATE TABLE workflows (
+			id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT '',
+			workflow_template_id TEXT DEFAULT '', name TEXT NOT NULL,
+			description TEXT DEFAULT '', created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
+		);
+		CREATE TABLE task_sessions (id TEXT PRIMARY KEY);
+		CREATE TABLE workflow_steps (
+			id TEXT PRIMARY KEY,
+			workflow_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			position INTEGER NOT NULL,
+			color TEXT,
+			prompt TEXT,
+			events TEXT,
+			allow_manual_move INTEGER DEFAULT 1,
+			is_start_step INTEGER DEFAULT 0,
+			show_in_command_panel INTEGER DEFAULT 1,
+			auto_archive_after_hours INTEGER DEFAULT 0,
+			agent_profile_id TEXT DEFAULT '',
+			stage_type TEXT NOT NULL DEFAULT 'custom',
+			auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+		);
+		INSERT INTO workflows (id, workspace_id, name, created_at, updated_at)
+			VALUES ('wf-test', '', 'Test', datetime('now'), datetime('now'));
+		INSERT INTO workflow_steps (
+			id, workflow_id, name, position, is_start_step, created_at, updated_at
+		) VALUES
+			('first-start', 'wf-test', 'First Start', 0, 1, datetime('now'), datetime('now')),
+			('latest-start', 'wf-test', 'Latest Start', 1, 1, datetime('now'), datetime('now'));
+	`)
+	if err != nil {
+		t.Fatalf("seed pre-repair database: %v", err)
+	}
+
+	reopened, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("reopen repo: %v", err)
+	}
+	steps, err := reopened.ListStepsByWorkflow(ctx, "wf-test")
+	if err != nil {
+		t.Fatalf("list steps: %v", err)
+	}
+
+	var starts []string
+	for _, step := range steps {
+		if step.IsStartStep {
+			starts = append(starts, step.Name)
+		}
+	}
+	if len(starts) != 1 || starts[0] != "Latest Start" {
+		t.Fatalf("expected only Latest Start to remain start, got %v", starts)
 	}
 }
