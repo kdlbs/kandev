@@ -1,6 +1,9 @@
 import { cleanup, render, screen } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
 
 const mocks = vi.hoisted(() => ({
   openQuickChat: vi.fn(),
@@ -8,7 +11,6 @@ const mocks = vi.hoisted(() => ({
 
 const state = {
   workspaces: { activeId: "ws-1" as string | null },
-  office: { inboxCount: 0 },
 };
 let inOffice = false;
 let pathname = "/";
@@ -39,17 +41,21 @@ vi.mock("./app-sidebar-new-task-item", () => ({
 import { AppSidebarPrimaryNav } from "./app-sidebar-primary-nav";
 
 function renderNav(collapsed: boolean) {
+  const queryClient = makeQueryClient();
+  queryClient.setQueryData(qk.office.inbox("ws-1"), { items: [], total_count: 0 });
+
   return render(
-    <TooltipProvider>
-      <AppSidebarPrimaryNav collapsed={collapsed} />
-    </TooltipProvider>,
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <AppSidebarPrimaryNav collapsed={collapsed} />
+      </TooltipProvider>
+    </QueryClientProvider>,
   );
 }
 
 describe("AppSidebarPrimaryNav", () => {
   beforeEach(() => {
     state.workspaces.activeId = "ws-1";
-    state.office.inboxCount = 0;
     inOffice = false;
     pathname = "/";
     mocks.openQuickChat.mockClear();

@@ -8,31 +8,13 @@ import type { DashboardData } from "@/lib/state/slices/office/types";
 
 const getDashboardMock = vi.hoisted(() => vi.fn());
 const listAgentProfilesMock = vi.hoisted(() => vi.fn(async () => ({ agents: [] })));
-const setDashboardMock = vi.hoisted(() => vi.fn());
-const setOfficeAgentProfilesMock = vi.hoisted(() => vi.fn());
 
 const state = {
   workspaces: { activeId: "workspace-1" },
-  office: {
-    dashboard: null as DashboardData | null,
-    agentProfiles: [],
-    routing: {
-      byWorkspace: {},
-      knownProviders: [],
-      preview: { byWorkspace: {} },
-    },
-    providerHealth: { byWorkspace: {} },
-  },
-  setDashboard: setDashboardMock,
-  setOfficeAgentProfiles: setOfficeAgentProfilesMock,
 };
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: typeof state) => unknown) => selector(state),
-}));
-
-vi.mock("@/hooks/use-office-refetch", () => ({
-  useOfficeRefetch: vi.fn(),
 }));
 
 vi.mock("@/lib/api/domains/office-api", () => ({
@@ -73,13 +55,11 @@ describe("OfficePageClient boot hydration", () => {
     cleanup();
     vi.clearAllMocks();
     state.workspaces.activeId = "workspace-1";
-    state.office.dashboard = null;
   });
 
   it("does not fetch dashboard data when Go boot state already hydrated it", async () => {
     const queryClient = makeQueryClient();
     const data = dashboard();
-    state.office.dashboard = data;
     queryClient.setQueryData(qk.office.dashboard("workspace-1"), data);
 
     renderOfficePage(queryClient);
@@ -104,11 +84,11 @@ describe("OfficePageClient boot hydration", () => {
   });
 
   it("refetches dashboard data when the active workspace changes", async () => {
-    state.office.dashboard = dashboard();
+    const initialDashboard = dashboard();
     getDashboardMock.mockResolvedValue({ ...dashboard(), agent_count: 2 });
 
     const queryClient = makeQueryClient();
-    queryClient.setQueryData(qk.office.dashboard("workspace-1"), state.office.dashboard);
+    queryClient.setQueryData(qk.office.dashboard("workspace-1"), initialDashboard);
     const { rerender } = renderOfficePage(queryClient);
 
     expect(getDashboardMock).not.toHaveBeenCalled();

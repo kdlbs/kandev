@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import { IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
 import { useRoutingPreview } from "@/hooks/domains/office/use-routing-preview";
 import { useWorkspaceRouting } from "@/hooks/domains/office/use-workspace-routing";
 import { useOfficeAgentsData } from "@/hooks/domains/office/use-office-data";
@@ -20,15 +19,12 @@ type AgentsPageClientProps = {
 
 export function AgentsPageClient({ initialAgents }: AgentsPageClientProps) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const agentsStore = useAppStore((s) => s.office.agentProfiles);
   const agentsQuery = useOfficeAgentsData(workspaceId, initialAgents);
   const [showCreate, setShowCreate] = useState(false);
   const routing = useWorkspaceRouting(workspaceId);
   const routingPreview = useRoutingPreview(workspaceId);
 
-  useOfficeRefetch("agents", () => void agentsQuery.refetch());
-
-  const agents = agentsQuery.data?.agents ?? agentsStore;
+  const agents = agentsQuery.data?.agents ?? initialAgents;
   const previewsByAgentId = useMemo(
     () => new Map(routingPreview.agents.map((preview) => [preview.agent_id, preview])),
     [routingPreview.agents],

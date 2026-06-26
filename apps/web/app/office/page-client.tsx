@@ -10,7 +10,6 @@ import {
 } from "@tabler/icons-react";
 import { Card } from "@kandev/ui/card";
 import { useAppStore } from "@/components/state-provider";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
 import {
   useOfficeAgentsData,
   useOfficeDashboardData,
@@ -224,22 +223,11 @@ function subscriptionQuotaState(agents: AgentProfile[]) {
 
 export function OfficePageClient({ initialDashboard }: OfficePageClientProps) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const dashboardStore = useAppStore((s) => s.office.dashboard);
-  const agentsStore = useAppStore((s) => s.office.agentProfiles);
   const dashboardQuery = useOfficeDashboardData(workspaceId, initialDashboard);
   const agentsQuery = useOfficeAgentsData(workspaceId);
 
-  // Refetch dashboard on any office event that affects metrics. The
-  // dashboard payload now includes per-agent summaries so a single fetch
-  // refreshes both the metric cards and the agent cards panel.
-  useOfficeRefetch("dashboard", () => void dashboardQuery.refetch());
-  useOfficeRefetch("agents", () => {
-    void dashboardQuery.refetch();
-    void agentsQuery.refetch();
-  });
-
-  const dashboard = dashboardQuery.data ?? dashboardStore ?? initialDashboard ?? null;
-  const agents = agentsQuery.data?.agents ?? agentsStore;
+  const dashboard = dashboardQuery.data ?? initialDashboard ?? null;
+  const agents = agentsQuery.data?.agents ?? [];
   const metrics = extractMetrics(dashboard);
   const subscriptionQuota = subscriptionQuotaState(agents);
 

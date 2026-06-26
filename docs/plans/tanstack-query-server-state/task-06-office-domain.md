@@ -1,7 +1,7 @@
 ---
 id: "06-office-domain"
 title: "Office domain"
-status: done
+status: in_progress
 wave: 3
 depends_on: ["03-query-options-taxonomy", "04-query-bridge-audit"]
 plan: "plan.md"
@@ -62,6 +62,15 @@ out any mobile E2E coverage added or reused.
 
 ## Implementation Notes
 
+- Reopened on 2026-06-26 after a current-state audit found remaining Office
+  store readers/writers and `useOfficeRefetch` compatibility paths. The routing
+  sub-wave now reads Query directly, but dashboard, agents, projects, inbox,
+  meta, routines, costs, skills, and old Office WS fanout still need cleanup
+  before this task can return to `done`.
+- The Office shell/sidebar sub-wave moved the top-level dashboard page, agents
+  page, app sidebar inbox badge, Office navigation counters, and sidebar
+  agent/project lists to Query-owned Office caches. Deeper meta/routines/costs/
+  skills/project/task helpers and old Office refetch fanout remain.
 - Migrated office dashboard, tasks, task search, task detail comments/activity,
   agents, agent run/detail routes, projects/project tasks, inbox, activity,
   routines, routing, costs, budgets, and skills to TanStack Query readers.

@@ -1,7 +1,7 @@
 ---
 id: "10-remove-zustand-server-state"
 title: "Remove Zustand server state"
-status: done
+status: in_progress
 wave: 4
 depends_on:
   [
@@ -27,6 +27,26 @@ spec: "../../specs/ui/tanstack-query-server-state.md"
 ## Progress
 
 Completed cleanup sub-waves:
+
+- **Office routing cleanup:** moved provider health, routing preview,
+  workspace routing, agent route, and run attempts hook reads to TanStack Query
+  only. `AgentCard` now receives routing data from query-backed page hooks
+  instead of reading `office.routing.*` mirrors. Verified with focused hook
+  tests, typecheck/lint, full verify, and the Docker `routing` project gate.
+- **Office shell/sidebar cleanup:** moved the app sidebar primary inbox badge,
+  Office navigation counters, sidebar agent/project sections, Office dashboard
+  page, and Office agents page off `office.dashboard`, `office.inbox*`,
+  `office.agentProfiles`, and `office.projects` store mirrors. These paths now
+  read `qk.office.dashboard`, `qk.office.inbox`, `qk.office.agents`, and
+  `qk.office.projects`; active workspace/sidebar/session state remains in
+  Zustand.
+
+Remaining cleanup:
+
+- Office meta, routines, costs, skills, deeper agent/project/task helper
+  components, and old `useOfficeRefetch`/`registerOfficeHandlers` fanout still
+  have store readers or writers. Task 10 stays `in_progress` until those paths
+  are removed or explicitly documented as client-only temporary indexes.
 
 - **System:** removed the system Zustand slice and `system-events` WS handler.
   System hooks and topbar metrics now read Query caches/options directly. The

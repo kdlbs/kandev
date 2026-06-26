@@ -354,7 +354,7 @@ Wave 2 (cache taxonomy and bridge):
 Wave 3 (domain migrations, can run in parallel by area after Wave 2):
 
 - [x] [task-05-workspace-kanban-settings](task-05-workspace-kanban-settings.md)
-- [x] [task-06-office-domain](task-06-office-domain.md)
+- [ ] [task-06-office-domain](task-06-office-domain.md) — reopened for remaining Office store/refetch cleanup
 - [x] [task-07-session-domain](task-07-session-domain.md)
 - [x] [task-08-session-runtime-streams](task-08-session-runtime-streams.md)
 - [x] [task-09-integrations-automations-system](task-09-integrations-automations-system.md)
@@ -1265,12 +1265,33 @@ Task 10 partial verification completed locally:
   passed 20 desktop Docker tests after the final store compatibility cleanup.
 - `rtk pnpm --dir apps/web e2e:docker --project=mobile-chrome tests/kanban/mobile-kanban.spec.ts tests/task/mobile-sidebar-subtasks.spec.ts tests/session/mobile-handoff.spec.ts`
   passed 13 mobile Docker tests after the final store compatibility cleanup.
+- Office routing cleanup:
+  - `rtk pnpm --dir apps/web test hooks/domains/office/use-workspace-routing.test.tsx hooks/domains/office/use-routing-query-hooks.test.tsx`
+    passed 2 files / 7 tests.
+  - `rtk pnpm --dir apps/web typecheck` passed.
+  - `rtk pnpm --dir apps/web exec eslint --max-warnings 0 hooks/domains/office/use-workspace-routing.ts hooks/domains/office/use-provider-health.ts hooks/domains/office/use-routing-preview.ts hooks/domains/office/use-agent-route.ts hooks/domains/office/use-run-attempts.ts hooks/domains/office/use-workspace-routing.test.tsx hooks/domains/office/use-routing-query-hooks.test.tsx app/office/agents/agents-page-client.tsx app/office/agents/components/agent-card.tsx`
+    passed.
+  - `rtk apps/web/e2e/scripts/run-e2e.sh --docker --no-build --project routing -- e2e/tests/office/office-routing-disabled.spec.ts e2e/tests/office/office-routing-fallback.spec.ts e2e/tests/office/office-routing-agent-override.spec.ts e2e/tests/office/office-routing-recovery.spec.ts`
+    passed 6 Docker routing-project tests with strict WS accounting.
+  - Full verify passed before commit: `rtk make fmt`,
+    `rtk node apps/web/scripts/generate-release-notes.mjs`,
+    `rtk node apps/web/scripts/generate-changelog.mjs`, `rtk make typecheck`,
+    `rtk make test`, and `rtk make lint`.
+- Office shell/sidebar cleanup:
+  - `rtk pnpm --dir apps/web test app/office/page-client.test.tsx components/app-sidebar/app-sidebar-primary-nav.test.tsx components/app-sidebar/sections/office-navigation-section.test.tsx components/app-sidebar/sections/agents-section.test.tsx components/app-sidebar/sections/projects-section.test.tsx`
+    passed 5 files / 10 tests.
+  - `rtk pnpm --dir apps/web typecheck` passed.
+  - `rtk pnpm --dir apps/web exec eslint --max-warnings 0 app/office/page-client.tsx app/office/page-client.test.tsx app/office/agents/agents-page-client.tsx components/app-sidebar/app-sidebar-primary-nav.tsx components/app-sidebar/app-sidebar-primary-nav.test.tsx components/app-sidebar/sections/office-navigation-section.tsx components/app-sidebar/sections/office-navigation-section.test.tsx components/app-sidebar/sections/agents-section.tsx components/app-sidebar/sections/agents-section.test.tsx components/app-sidebar/sections/projects-section.tsx components/app-sidebar/sections/projects-section.test.tsx`
+    passed.
+  - `rtk pnpm --dir apps/web e2e:docker tests/office/dashboard.spec.ts tests/office/agents.spec.ts tests/office/projects.spec.ts tests/office/sidebar-navigation.spec.ts tests/office/realtime-dashboard.spec.ts tests/system/ws-event-accounting.spec.ts`
+    passed 30 desktop Docker tests / 1 skipped with strict WS accounting.
 
-Current next step: run Task 11 strict QA.
+Current next step: finish the reopened Office store/refetch cleanup before
+running Task 11 strict QA.
 
 Wave 4 (cleanup and full verification):
 
-- [x] [task-10-remove-zustand-server-state](task-10-remove-zustand-server-state.md) — done
+- [ ] [task-10-remove-zustand-server-state](task-10-remove-zustand-server-state.md) — reopened for remaining Office store/refetch cleanup
 - [ ] [task-11-e2e-strict-qa](task-11-e2e-strict-qa.md) — in progress
 
 ## Open Questions
