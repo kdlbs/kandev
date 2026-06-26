@@ -2,15 +2,24 @@ package hostutility
 
 import (
 	"context"
+	"encoding/json"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/registry"
+	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/usage"
+	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/agent"
 	"github.com/stretchr/testify/require"
@@ -87,6 +96,101 @@ func TestHostUtilityDeleteContextIgnoresParentCancellation(t *testing.T) {
 	}
 }
 
+func TestExecutePromptRecreatesStaleCachedInstance(t *testing.T) {
+	log := newTestLogger(t)
+	reg := registry.NewRegistry(log)
+	const agentType = "recreate-acp"
+	require.NoError(t, reg.Register(&installedInferenceAgent{id: agentType}))
+
+	var promptCalls atomic.Int32
+	instanceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			w.WriteHeader(http.StatusOK)
+		case "/api/v1/inference/prompt":
+			promptCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			err := json.NewEncoder(w).Encode(agentctlutil.PromptResponse{
+				Success:  true,
+				Response: "summary",
+				Model:    "test-model",
+			})
+			if err != nil {
+				t.Errorf("encode prompt response: %v", err)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer instanceServer.Close()
+	_, instancePort := serverHostPort(t, instanceServer)
+
+	var createCalls atomic.Int32
+	var deleteCalls atomic.Int32
+	controlServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/instances":
+			createCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			err := json.NewEncoder(w).Encode(agentctlclient.CreateInstanceResponse{
+				ID:   "fresh-instance",
+				Port: instancePort,
+			})
+			if err != nil {
+				t.Errorf("encode create instance response: %v", err)
+			}
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/v1/instances/"):
+			deleteCalls.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer controlServer.Close()
+	controlHost, controlPort := serverHostPort(t, controlServer)
+
+	mgr := NewManager(reg, controlHost, controlPort, agentctlclient.NewControlClient(controlHost, controlPort, log), log)
+	mgr.parentTmpDir = t.TempDir()
+
+	deadServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	deadHost, deadPort := serverHostPort(t, deadServer)
+	deadServer.Close()
+
+	staleWorkDir := filepath.Join(mgr.parentTmpDir, agentType)
+	require.NoError(t, os.MkdirAll(staleWorkDir, 0o755))
+	mgr.instances[agentType] = &instance{
+		agentType:  agentType,
+		instanceID: "stale-instance",
+		workDir:    staleWorkDir,
+		client:     agentctlclient.NewClient(deadHost, deadPort, log),
+	}
+
+	result, err := mgr.ExecutePrompt(context.Background(), agentType, "test-model", "", "Summarize this")
+	require.NoError(t, err)
+	require.Equal(t, "summary", result.Response)
+	require.Equal(t, int32(1), createCalls.Load())
+	require.Equal(t, int32(1), deleteCalls.Load())
+	require.Equal(t, int32(1), promptCalls.Load())
+
+	mgr.mu.RLock()
+	fresh := mgr.instances[agentType]
+	mgr.mu.RUnlock()
+	require.NotNil(t, fresh)
+	require.Equal(t, "fresh-instance", fresh.instanceID)
+}
+
+func serverHostPort(t *testing.T, server *httptest.Server) (string, int) {
+	t.Helper()
+	host, portText, err := net.SplitHostPort(server.Listener.Addr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portText)
+	require.NoError(t, err)
+	return host, port
+}
+
 func newTestLogger(t *testing.T) *logger.Logger {
 	t.Helper()
 	log, err := logger.NewLogger(logger.LoggingConfig{
@@ -97,6 +201,43 @@ func newTestLogger(t *testing.T) *logger.Logger {
 		t.Fatalf("failed to create logger: %v", err)
 	}
 	return log
+}
+
+type installedInferenceAgent struct {
+	id string
+}
+
+func (a *installedInferenceAgent) ID() string          { return a.id }
+func (a *installedInferenceAgent) Name() string        { return "Installed ACP" }
+func (a *installedInferenceAgent) DisplayName() string { return "Installed ACP" }
+func (a *installedInferenceAgent) Description() string { return "installed test agent" }
+func (a *installedInferenceAgent) Enabled() bool       { return true }
+func (a *installedInferenceAgent) DisplayOrder() int   { return 1 }
+func (a *installedInferenceAgent) Logo(agents.LogoVariant) []byte {
+	return nil
+}
+func (a *installedInferenceAgent) IsInstalled(context.Context) (*agents.DiscoveryResult, error) {
+	return &agents.DiscoveryResult{Available: true}, nil
+}
+func (a *installedInferenceAgent) BuildCommand(agents.CommandOptions) agents.Command {
+	return agents.NewCommand(a.id)
+}
+func (a *installedInferenceAgent) PermissionSettings() map[string]agents.PermissionSetting {
+	return nil
+}
+func (a *installedInferenceAgent) Runtime() *agents.RuntimeConfig {
+	return &agents.RuntimeConfig{Protocol: agent.ProtocolACP}
+}
+func (a *installedInferenceAgent) BillingType() usage.BillingType {
+	return usage.BillingTypeSubscription
+}
+func (a *installedInferenceAgent) RemoteAuth() *agents.RemoteAuth { return nil }
+func (a *installedInferenceAgent) InstallScript() string          { return "" }
+func (a *installedInferenceAgent) InferenceConfig() *agents.InferenceConfig {
+	return &agents.InferenceConfig{
+		Supported: true,
+		Command:   agents.NewCommand(a.id),
+	}
 }
 
 type blockingInferenceAgent struct {

@@ -422,7 +422,13 @@ func (m *Manager) getInstance(ctx context.Context, agentType string) (*instance,
 	parentTmpDir := m.parentTmpDir
 	m.mu.RUnlock()
 	if inst != nil {
-		return inst, ia, nil
+		if err := m.checkInstanceHealthy(ctx, inst); err == nil {
+			return inst, ia, nil
+		} else if ctx.Err() != nil {
+			return nil, nil, ctx.Err()
+		} else {
+			m.dropStaleInstance(ctx, agentType, inst, err)
+		}
 	}
 
 	if parentTmpDir == "" {
@@ -438,7 +444,13 @@ func (m *Manager) getInstance(ctx context.Context, agentType string) (*instance,
 		existing := m.instances[agentType]
 		m.mu.RUnlock()
 		if existing != nil {
-			return existing, nil
+			if err := m.checkInstanceHealthy(ctx, existing); err == nil {
+				return existing, nil
+			} else if ctx.Err() != nil {
+				return nil, ctx.Err()
+			} else {
+				m.dropStaleInstance(ctx, agentType, existing, err)
+			}
 		}
 		// Pre-check installation so Refresh surfaces `not_installed`
 		// instead of collapsing it into `failed` via createInstance errors.
@@ -465,6 +477,35 @@ func (m *Manager) getInstance(ctx context.Context, agentType string) (*instance,
 		return nil, nil, err
 	}
 	return v.(*instance), ia, nil
+}
+
+const instanceHealthCheckTimeout = time.Second
+
+func (m *Manager) checkInstanceHealthy(ctx context.Context, inst *instance) error {
+	if inst == nil || inst.client == nil {
+		return errors.New("host utility instance client missing")
+	}
+	healthCtx, cancel := context.WithTimeout(ctx, instanceHealthCheckTimeout)
+	defer cancel()
+	return inst.client.Health(healthCtx)
+}
+
+func (m *Manager) dropStaleInstance(ctx context.Context, agentType string, inst *instance, cause error) {
+	m.mu.Lock()
+	if current := m.instances[agentType]; current != inst {
+		m.mu.Unlock()
+		return
+	}
+	delete(m.instances, agentType)
+	m.mu.Unlock()
+
+	m.log.Warn("host utility instance unhealthy; recreating",
+		zap.String("agent_type", agentType),
+		zap.String("instance_id", inst.instanceID),
+		zap.Error(cause))
+	deleteCtx, cancel := hostUtilityDeleteContext(ctx)
+	m.deleteInstance(deleteCtx, inst)
+	cancel()
 }
 
 // probeTimeout caps each ACP probe so an agent that hangs (e.g. one that
