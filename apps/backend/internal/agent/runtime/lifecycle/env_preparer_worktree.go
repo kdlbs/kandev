@@ -262,6 +262,7 @@ func buildWorktreeCreateRequest(req *EnvPrepareRequest) worktree.CreateRequest {
 		TaskDirName:          req.TaskDirName,
 		RepoName:             req.RepoName,
 		BranchSlug:           req.BranchSlug,
+		BranchIdentitySlug:   req.BranchIdentitySlug,
 	}
 }
 
@@ -372,10 +373,12 @@ func (p *WorktreePreparer) prepareMultiRepo(
 				Duration:     time.Since(start),
 			}, nil
 		}
-		createdIDs = append(createdIDs, wt.ID)
+		if spec.WorktreeID == "" {
+			createdIDs = append(createdIDs, wt.ID)
+		}
 		worktrees = append(worktrees, RepoWorktreeResult{
 			RepositoryID:   spec.RepositoryID,
-			BranchSlug:     spec.BranchSlug,
+			BranchSlug:     repoBranchIdentitySlug(spec),
 			WorktreeID:     wt.ID,
 			WorktreeBranch: wt.Branch,
 			WorktreePath:   wt.Path,
@@ -452,6 +455,7 @@ func (p *WorktreePreparer) prepareOneRepo(
 	subReq.WorktreeBranchPrefix = spec.WorktreeBranchPrefix
 	subReq.PullBeforeWorktree = spec.PullBeforeWorktree
 	subReq.BranchSlug = spec.BranchSlug
+	subReq.BranchIdentitySlug = repoBranchIdentitySlug(spec)
 	// Strip the multi-repo list to avoid re-entering the multi-repo branch.
 	subReq.Repositories = nil
 
@@ -489,6 +493,13 @@ func (p *WorktreePreparer) prepareOneRepo(
 	// script to execute twice per repo and broke non-idempotent setups.
 
 	return wt, steps, stepIdx, nil
+}
+
+func repoBranchIdentitySlug(spec RepoPrepareSpec) string {
+	if spec.BranchIdentitySlug != "" {
+		return spec.BranchIdentitySlug
+	}
+	return spec.BranchSlug
 }
 
 // rollbackWorktrees removes any worktrees created during a failed multi-repo

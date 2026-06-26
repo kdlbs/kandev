@@ -670,6 +670,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				PullBeforeWorktree:   r.PullBeforeWorktree,
 				RepoSetupScript:      setup,
 				BranchSlug:           r.BranchSlug,
+				BranchIdentitySlug:   r.BranchIdentitySlug,
 			})
 		}
 		prepReq.Repositories = specs

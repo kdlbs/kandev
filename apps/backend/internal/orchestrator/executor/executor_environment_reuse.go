@@ -96,7 +96,7 @@ func (e *Executor) reuseExistingRepositoryWorktrees(ctx context.Context, req *La
 		spec := &req.Repositories[i]
 		key := repositoryWorktreeKey{
 			repositoryID: spec.RepositoryID,
-			branchSlug:   worktree.SanitizeBranchSlug(spec.BranchSlug),
+			branchSlug:   launchRepoBranchIdentitySlug(*spec),
 		}
 		if id := worktreeIDs[key]; id != "" {
 			spec.WorktreeID = id
@@ -105,6 +105,13 @@ func (e *Executor) reuseExistingRepositoryWorktrees(ctx context.Context, req *La
 	if req.Repositories[0].WorktreeID != "" {
 		req.WorktreeID = req.Repositories[0].WorktreeID
 	}
+}
+
+func launchRepoBranchIdentitySlug(spec RepoSpec) string {
+	if spec.BranchIdentitySlug != "" {
+		return worktree.SanitizeBranchSlug(spec.BranchIdentitySlug)
+	}
+	return worktree.SanitizeBranchSlug(spec.BranchSlug)
 }
 
 func (e *Executor) environmentRepoWorktreeIDs(req *LaunchAgentRequest, env *models.TaskEnvironment) map[repositoryWorktreeKey]string {

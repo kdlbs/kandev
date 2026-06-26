@@ -41,6 +41,10 @@ type RepoPrepareSpec struct {
 	// BranchSlug, when set, nests the worktree path under {RepoName}/{BranchSlug}/
 	// so two specs sharing a RepositoryID don't collide on disk.
 	BranchSlug string
+	// BranchIdentitySlug is the stable branch key used for worktree reuse and
+	// persisted environment metadata. It may be non-empty even when BranchSlug
+	// is empty so primary branches can keep the flat legacy path.
+	BranchIdentitySlug string
 }
 
 // EnvPrepareRequest contains the parameters for environment preparation.
@@ -69,6 +73,9 @@ type EnvPrepareRequest struct {
 	TaskDirName string // Per-task directory name within the workspace (e.g. "task-abc123")
 	RepoName    string // Repository slug used with TaskDirName to locate checkouts
 	BranchSlug  string // Optional branch subdir for multi-branch tasks (legacy single-repo path)
+	// BranchIdentitySlug is the stable branch key for worktree cache/persistence.
+	// Empty falls back to BranchSlug.
+	BranchIdentitySlug string
 
 	// Repositories carries one entry per repository when the request is
 	// multi-repo. When non-empty it is the source of truth; the legacy
@@ -104,6 +111,7 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 		PullBeforeWorktree:   r.PullBeforeWorktree,
 		RepoSetupScript:      r.RepoSetupScript,
 		BranchSlug:           r.BranchSlug,
+		BranchIdentitySlug:   r.BranchSlug,
 	}}
 }
 

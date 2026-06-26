@@ -294,7 +294,7 @@ func TestLaunchPreparedSession_MultiBranch_ReusesWorktreeIDsByBranchSlug(t *test
 			SessionID:      sourceSessionID,
 			RepositoryID:   "repo-kandev",
 			WorktreeID:     "wt-main",
-			BranchSlug:     "",
+			BranchSlug:     "main",
 			WorktreePath:   "/tasks/t/kandev",
 			WorktreeBranch: "feature/t",
 		},
@@ -336,14 +336,56 @@ func TestLaunchPreparedSession_MultiBranch_ReusesWorktreeIDsByBranchSlug(t *test
 	if captured.Repositories[0].WorktreeID != "wt-main" {
 		t.Errorf("main WorktreeID = %q, want wt-main", captured.Repositories[0].WorktreeID)
 	}
+	if captured.Repositories[0].BranchIdentitySlug != "main" {
+		t.Errorf("main BranchIdentitySlug = %q, want main", captured.Repositories[0].BranchIdentitySlug)
+	}
+	if captured.Repositories[0].BranchSlug != "" {
+		t.Errorf("main BranchSlug = %q, want empty flat-path slug", captured.Repositories[0].BranchSlug)
+	}
 	if captured.Repositories[1].BranchSlug != "branch-5hn" {
 		t.Errorf("branch spec BranchSlug = %q, want branch-5hn", captured.Repositories[1].BranchSlug)
+	}
+	if captured.Repositories[1].BranchIdentitySlug != "branch-5hn" {
+		t.Errorf("branch spec BranchIdentitySlug = %q, want branch-5hn", captured.Repositories[1].BranchIdentitySlug)
 	}
 	if captured.Repositories[1].WorktreeID != "wt-branch" {
 		t.Errorf("branch WorktreeID = %q, want wt-branch", captured.Repositories[1].WorktreeID)
 	}
 	if captured.WorktreeID != "wt-main" {
 		t.Errorf("top-level WorktreeID = %q, want wt-main", captured.WorktreeID)
+	}
+}
+
+func TestBuildRepoSpecs_MultiBranchIdentityStableAcrossReorder(t *testing.T) {
+	repo := &models.Repository{ID: "repo-kandev", Name: "kandev", DefaultBranch: "main"}
+	mainInfo := &repoInfo{
+		RepositoryID:   "repo-kandev",
+		RepositoryPath: "/repos/kandev",
+		BaseBranch:     "main",
+		Repository:     repo,
+	}
+	branchInfo := &repoInfo{
+		RepositoryID:   "repo-kandev",
+		RepositoryPath: "/repos/kandev",
+		BaseBranch:     "main",
+		CheckoutBranch: "branch-5hn",
+		Repository:     repo,
+	}
+
+	first := buildRepoSpecs([]*repoInfo{mainInfo, branchInfo})
+	second := buildRepoSpecs([]*repoInfo{branchInfo, mainInfo})
+
+	if first[0].BranchIdentitySlug != "main" || first[0].BranchSlug != "" {
+		t.Fatalf("first main plan = identity %q path %q, want main/empty", first[0].BranchIdentitySlug, first[0].BranchSlug)
+	}
+	if first[1].BranchIdentitySlug != "branch-5hn" || first[1].BranchSlug != "branch-5hn" {
+		t.Fatalf("first branch plan = identity %q path %q, want branch-5hn/branch-5hn", first[1].BranchIdentitySlug, first[1].BranchSlug)
+	}
+	if second[0].BranchIdentitySlug != "branch-5hn" || second[0].BranchSlug != "branch-5hn" {
+		t.Fatalf("reordered branch plan = identity %q path %q, want branch-5hn/branch-5hn", second[0].BranchIdentitySlug, second[0].BranchSlug)
+	}
+	if second[1].BranchIdentitySlug != "main" || second[1].BranchSlug != "" {
+		t.Fatalf("reordered main plan = identity %q path %q, want main/empty", second[1].BranchIdentitySlug, second[1].BranchSlug)
 	}
 }
 

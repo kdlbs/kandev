@@ -399,6 +399,9 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 }
 
 func (r *Repository) migrateTaskEnvironmentReposAllowMultiBranch() error {
+	if dialect.IsPostgres(r.db.DriverName()) {
+		return r.migrateTaskEnvironmentReposAllowMultiBranchPostgres()
+	}
 	return r.recreateTableNamed(
 		"task_environment_repos.recreate_allow_multi_branch",
 		"task_environment_repos",
@@ -430,6 +433,57 @@ func (r *Repository) migrateTaskEnvironmentReposAllowMultiBranch() error {
 			`CREATE INDEX IF NOT EXISTS idx_task_environment_repos_repository_id ON task_environment_repos(repository_id)`,
 		},
 	)
+}
+
+func (r *Repository) migrateTaskEnvironmentReposAllowMultiBranchPostgres() error {
+	if _, err := r.db.Exec(`ALTER TABLE task_environment_repos ADD COLUMN IF NOT EXISTS branch_slug TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("add task_environment_repos.branch_slug: %w", err)
+	}
+	if _, err := r.db.Exec(`
+DO $$
+DECLARE
+	old_constraint_name text;
+BEGIN
+	SELECT con.conname INTO old_constraint_name
+	FROM pg_constraint con
+	JOIN pg_class rel ON rel.oid = con.conrelid
+	JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+	WHERE rel.relname = 'task_environment_repos'
+		AND nsp.nspname = current_schema()
+		AND con.contype = 'u'
+		AND (
+			SELECT array_agg(attr.attname ORDER BY cols.ordinality)
+			FROM unnest(con.conkey) WITH ORDINALITY AS cols(attnum, ordinality)
+			JOIN pg_attribute attr ON attr.attrelid = con.conrelid AND attr.attnum = cols.attnum
+		) = ARRAY['task_environment_id', 'repository_id'];
+
+	IF old_constraint_name IS NOT NULL THEN
+		EXECUTE format('ALTER TABLE task_environment_repos DROP CONSTRAINT %I', old_constraint_name);
+	END IF;
+
+	IF NOT EXISTS (
+		SELECT 1
+		FROM pg_constraint con
+		JOIN pg_class rel ON rel.oid = con.conrelid
+		JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+		WHERE rel.relname = 'task_environment_repos'
+			AND nsp.nspname = current_schema()
+			AND con.contype = 'u'
+			AND (
+				SELECT array_agg(attr.attname ORDER BY cols.ordinality)
+				FROM unnest(con.conkey) WITH ORDINALITY AS cols(attnum, ordinality)
+				JOIN pg_attribute attr ON attr.attrelid = con.conrelid AND attr.attnum = cols.attnum
+			) = ARRAY['task_environment_id', 'repository_id', 'branch_slug']
+	) THEN
+		ALTER TABLE task_environment_repos
+			ADD CONSTRAINT task_environment_repos_env_repo_branch_key
+			UNIQUE (task_environment_id, repository_id, branch_slug);
+	END IF;
+END $$;
+	`); err != nil {
+		return fmt.Errorf("migrate task_environment_repos unique constraint: %w", err)
+	}
+	return nil
 }
 
 // migrateTaskRepositoriesAllowMultiBranch swaps the legacy

@@ -171,6 +171,12 @@ func initBareGitRepo(t *testing.T, name string) string {
 
 func newPreparerForTest(t *testing.T) (*WorktreePreparer, *worktree.Manager) {
 	t.Helper()
+	preparer, mgr, _ := newPreparerForTestWithStore(t)
+	return preparer, mgr
+}
+
+func newPreparerForTestWithStore(t *testing.T) (*WorktreePreparer, *worktree.Manager, *inMemoryWorktreeStore) {
+	t.Helper()
 	tmp := t.TempDir()
 	cfg := worktree.Config{
 		Enabled:       true,
@@ -183,7 +189,7 @@ func newPreparerForTest(t *testing.T) (*WorktreePreparer, *worktree.Manager) {
 	if err != nil {
 		t.Fatalf("worktree manager: %v", err)
 	}
-	return NewWorktreePreparer(mgr, log), mgr
+	return NewWorktreePreparer(mgr, log), mgr, store
 }
 
 func TestWorktreePreparer_MultiRepo_CreatesWorktreePerRepo(t *testing.T) {
@@ -276,6 +282,81 @@ func TestWorktreePreparer_MultiRepo_RollbackOnPartialFailure(t *testing.T) {
 	for _, wt := range all {
 		if wt.Status == worktree.StatusActive {
 			t.Errorf("expected no active worktrees after rollback; found %s in %s", wt.ID, wt.Path)
+		}
+	}
+}
+
+func TestWorktreePreparer_MultiRepo_RollbackKeepsReusedWorktrees(t *testing.T) {
+	repoExisting := initBareGitRepo(t, "existing")
+	repoNew := initBareGitRepo(t, "new")
+	repoBad := t.TempDir()
+
+	preparer, mgr, store := newPreparerForTestWithStore(t)
+	existingPath := filepath.Join(t.TempDir(), "existing-worktree")
+	if err := os.MkdirAll(existingPath, 0755); err != nil {
+		t.Fatalf("mkdir existing worktree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(existingPath, ".git"), []byte("gitdir: /tmp/existing.git\n"), 0644); err != nil {
+		t.Fatalf("write existing .git file: %v", err)
+	}
+	if err := store.CreateWorktree(context.Background(), &worktree.Worktree{
+		ID:           "wt-existing",
+		SessionID:    "source-session",
+		TaskID:       "task-reuse-fail",
+		RepositoryID: "repo-existing",
+		BranchSlug:   "main",
+		Path:         existingPath,
+		Status:       worktree.StatusActive,
+	}); err != nil {
+		t.Fatalf("seed existing worktree: %v", err)
+	}
+
+	req := &EnvPrepareRequest{
+		TaskID:       "task-reuse-fail",
+		SessionID:    "sess-reuse-fail",
+		TaskTitle:    "Reuse Then Fail",
+		ExecutorType: executor.NameStandalone,
+		TaskDirName:  "reuse-fail_ccc",
+		Repositories: []RepoPrepareSpec{
+			{
+				RepositoryID:       "repo-existing",
+				RepositoryPath:     repoExisting,
+				RepoName:           "existing",
+				BaseBranch:         "main",
+				WorktreeID:         "wt-existing",
+				BranchIdentitySlug: "main",
+			},
+			{RepositoryID: "repo-new", RepositoryPath: repoNew, RepoName: "new", BaseBranch: "main"},
+			{RepositoryID: "repo-bad", RepositoryPath: repoBad, RepoName: "bad", BaseBranch: "main"},
+		},
+	}
+
+	res, err := preparer.Prepare(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("prepare returned hard error: %v", err)
+	}
+	if res.Success {
+		t.Fatal("expected failure when final repo is not a git repo")
+	}
+
+	existing, err := store.GetWorktreeByID(context.Background(), "wt-existing")
+	if err != nil {
+		t.Fatalf("get existing worktree: %v", err)
+	}
+	if existing == nil || existing.Status != worktree.StatusActive {
+		t.Fatalf("reused worktree was rolled back: %+v", existing)
+	}
+	if !mgr.IsValid(existingPath) {
+		t.Fatalf("reused worktree path should remain valid: %s", existingPath)
+	}
+
+	all, err := mgr.GetAllByTaskID(context.Background(), "task-reuse-fail")
+	if err != nil {
+		t.Fatalf("list worktrees: %v", err)
+	}
+	for _, wt := range all {
+		if wt.ID != "wt-existing" && wt.Status == worktree.StatusActive {
+			t.Fatalf("new worktree %s should have been rolled back", wt.ID)
 		}
 	}
 }

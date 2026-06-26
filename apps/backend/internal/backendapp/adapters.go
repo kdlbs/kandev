@@ -155,6 +155,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 				RepoCleanupScript:    r.RepoCleanupScript,
 				CopyFiles:            r.CopyFiles,
 				BranchSlug:           r.BranchSlug,
+				BranchIdentitySlug:   r.BranchIdentitySlug,
 			})
 		}
 		launchReq.Repositories = specs

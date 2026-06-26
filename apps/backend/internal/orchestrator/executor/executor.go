@@ -349,6 +349,11 @@ type RepoSpec struct {
 	// orchestrator when buildRepoSpecs detects multiple rows sharing a
 	// RepositoryID; empty otherwise to preserve the single-branch layout.
 	BranchSlug string
+
+	// BranchIdentitySlug is the stable branch key used for worktree reuse and
+	// persisted environment metadata. It may be non-empty even when BranchSlug
+	// is empty so the primary branch can keep the legacy flat path.
+	BranchIdentitySlug string
 }
 
 // McpModeConfig activates config-mode MCP tools (workflow steps, agents, MCP

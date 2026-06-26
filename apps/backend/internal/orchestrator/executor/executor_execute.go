@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -706,20 +708,13 @@ func (e *Executor) applyContainerCredentials(ctx context.Context, req *LaunchAge
 
 // buildRepoSpecs converts resolved repoInfos into per-repo launch specs for
 // the lifecycle layer. Used only when the task has more than one repository.
-// When the same RepositoryID appears more than once, the FIRST occurrence
-// keeps the flat layout (<task>/<repo>/) and subsequent occurrences nest
-// under <task>/<repo>/<branch-slug>/. This preserves the legacy single-
-// branch path for any worktree that already exists on disk, so a task
-// upgraded from single-branch to multi-branch doesn't orphan its primary
-// worktree directory.
+// When the same RepositoryID appears more than once, each row gets a stable
+// BranchIdentitySlug for reuse while the primary/default branch keeps the flat
+// layout (<task>/<repo>/). Other branches nest under <task>/<repo>/<branch-slug>/.
+// This preserves the legacy single-branch path without making reuse depend on
+// task repository row order.
 func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
-	repoCounts := make(map[string]int, len(allRepos))
-	for _, info := range allRepos {
-		if info.RepositoryID != "" {
-			repoCounts[info.RepositoryID]++
-		}
-	}
-	seenCount := make(map[string]int, len(allRepos))
+	branchPlans := buildRepoBranchPlans(allRepos)
 	out := make([]RepoSpec, 0, len(allRepos))
 	for _, info := range allRepos {
 		spec := RepoSpec{
@@ -745,24 +740,123 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 				spec.RepositoryURL = u
 			}
 		}
-		if repoCounts[info.RepositoryID] > 1 && seenCount[info.RepositoryID] > 0 {
-			slug := worktree.SanitizeBranchSlug(info.CheckoutBranch)
-			if slug == "" {
-				slug = worktree.SanitizeBranchSlug(info.BaseBranch)
-			}
-			// Branches whose names sanitize to "" (or two duplicate rows
-			// without explicit branch names) would otherwise collapse onto
-			// the same on-disk path as the first row. Fall back to a
-			// position-derived slug so siblings get distinct directories.
-			if slug == "" {
-				slug = fmt.Sprintf("branch-%d", seenCount[info.RepositoryID]+1)
-			}
-			spec.BranchSlug = slug
+		if plan, ok := branchPlans[info]; ok {
+			spec.BranchIdentitySlug = plan.identitySlug
+			spec.BranchSlug = plan.pathSlug
 		}
-		seenCount[info.RepositoryID]++
 		out = append(out, spec)
 	}
 	return out
+}
+
+type repoBranchPlan struct {
+	identitySlug string
+	pathSlug     string
+}
+
+func buildRepoBranchPlans(allRepos []*repoInfo) map[*repoInfo]repoBranchPlan {
+	groups := make(map[string][]*repoInfo, len(allRepos))
+	for _, info := range allRepos {
+		if info == nil || info.RepositoryID == "" {
+			continue
+		}
+		groups[info.RepositoryID] = append(groups[info.RepositoryID], info)
+	}
+
+	plans := make(map[*repoInfo]repoBranchPlan, len(allRepos))
+	for repoID, group := range groups {
+		if len(group) < 2 {
+			continue
+		}
+		identities := branchIdentitySlugsForGroup(repoID, group)
+		flatIdentity := selectFlatBranchIdentity(group, identities)
+		for _, info := range group {
+			identity := identities[info]
+			pathSlug := identity
+			if identity == flatIdentity {
+				pathSlug = ""
+			}
+			plans[info] = repoBranchPlan{identitySlug: identity, pathSlug: pathSlug}
+		}
+	}
+	return plans
+}
+
+func branchIdentitySlugsForGroup(repoID string, group []*repoInfo) map[*repoInfo]string {
+	raw := make(map[*repoInfo]string, len(group))
+	counts := make(map[string]int, len(group))
+	for _, info := range group {
+		slug := preferredBranchIdentitySlug(info)
+		if slug == "" {
+			slug = "branch-" + branchIdentityHash(repoID, info)
+		}
+		raw[info] = slug
+		counts[slug]++
+	}
+
+	out := make(map[*repoInfo]string, len(group))
+	for _, info := range group {
+		slug := raw[info]
+		if counts[slug] > 1 {
+			slug += "-" + branchIdentityHash(repoID, info)
+		}
+		slug = worktree.SanitizeBranchSlug(slug)
+		if slug == "" {
+			slug = "branch-" + branchIdentityHash(repoID, info)
+		}
+		out[info] = slug
+	}
+	return out
+}
+
+func preferredBranchIdentitySlug(info *repoInfo) string {
+	branch := info.CheckoutBranch
+	if branch == "" {
+		branch = info.BaseBranch
+	}
+	if branch == "" && info.Repository != nil {
+		branch = info.Repository.DefaultBranch
+	}
+	return worktree.SanitizeBranchSlug(branch)
+}
+
+func branchIdentityHash(repoID string, info *repoInfo) string {
+	seed := strings.Join([]string{
+		repoID,
+		info.BaseBranch,
+		info.CheckoutBranch,
+		fmt.Sprintf("%d", info.PRNumber),
+	}, "\x00")
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(seed))
+	return fmt.Sprintf("%08x", h.Sum32())
+}
+
+func selectFlatBranchIdentity(group []*repoInfo, identities map[*repoInfo]string) string {
+	candidates := make([]*repoInfo, 0, len(group))
+	candidates = append(candidates, group...)
+	sort.SliceStable(candidates, func(i, j int) bool {
+		leftRank := flatBranchRank(candidates[i])
+		rightRank := flatBranchRank(candidates[j])
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
+		return identities[candidates[i]] < identities[candidates[j]]
+	})
+	return identities[candidates[0]]
+}
+
+func flatBranchRank(info *repoInfo) int {
+	if info.CheckoutBranch != "" {
+		return 3
+	}
+	if info.Repository != nil && info.Repository.DefaultBranch != "" && info.BaseBranch == info.Repository.DefaultBranch {
+		return 0
+	}
+	if info.BaseBranch == defaultBaseBranch {
+		return 1
+	}
+	return 2
 }
 
 // applyRepositoryConfig sets repository-related fields on the request and resolves clone URLs.

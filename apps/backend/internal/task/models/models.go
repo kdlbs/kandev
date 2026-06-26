@@ -1095,6 +1095,9 @@ func (r *TaskEnvironmentRepo) ToAPI() map[string]interface{} {
 	if r.WorktreeID != "" {
 		out["worktree_id"] = r.WorktreeID
 	}
+	if r.BranchSlug != "" {
+		out["branch_slug"] = r.BranchSlug
+	}
 	if r.WorktreePath != "" {
 		out["worktree_path"] = r.WorktreePath
 	}

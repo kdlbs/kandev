@@ -311,6 +311,10 @@ type RepoLaunchSpec struct {
 	// BranchSlug, when set, nests the worktree under {RepoName}/{BranchSlug}/
 	// so multi-branch tasks (same repo, multiple branches) don't collide.
 	BranchSlug string
+	// BranchIdentitySlug is the stable branch key used for worktree reuse and
+	// persisted environment metadata. It may differ from BranchSlug when a
+	// primary branch keeps the flat legacy path.
+	BranchIdentitySlug string
 }
 
 // RouteOverride carries a fully resolved provider profile for one
@@ -420,6 +424,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		PullBeforeWorktree:   r.PullBeforeWorktree,
 		CopyFiles:            r.CopyFiles,
 		BranchSlug:           r.BranchSlug,
+		BranchIdentitySlug:   r.BranchSlug,
 	}}
 }
 
