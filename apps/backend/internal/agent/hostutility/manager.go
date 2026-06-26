@@ -346,6 +346,7 @@ func (m *Manager) createInstance(ctx context.Context, agentType string) (*instan
 	}
 
 	client := agentctlclient.NewClient(m.controlHost, resp.Port, m.log,
+		agentctlclient.WithExecutionID(resp.ID),
 		agentctlclient.WithAuthToken(m.authToken))
 
 	// Wait a moment for the instance HTTP server to come up.
@@ -422,12 +423,10 @@ func (m *Manager) getInstance(ctx context.Context, agentType string) (*instance,
 	parentTmpDir := m.parentTmpDir
 	m.mu.RUnlock()
 	if inst != nil {
-		if err := m.checkInstanceHealthy(ctx, inst); err == nil {
+		if err := m.staleInstanceCause(ctx, inst); err == nil {
 			return inst, ia, nil
 		} else if ctx.Err() != nil {
 			return nil, nil, ctx.Err()
-		} else {
-			m.dropStaleInstance(ctx, agentType, inst, err)
 		}
 	}
 
@@ -444,7 +443,7 @@ func (m *Manager) getInstance(ctx context.Context, agentType string) (*instance,
 		existing := m.instances[agentType]
 		m.mu.RUnlock()
 		if existing != nil {
-			if err := m.checkInstanceHealthy(ctx, existing); err == nil {
+			if err := m.staleInstanceCause(ctx, existing); err == nil {
 				return existing, nil
 			} else if ctx.Err() != nil {
 				return nil, ctx.Err()
@@ -481,24 +480,23 @@ func (m *Manager) getInstance(ctx context.Context, agentType string) (*instance,
 
 const instanceHealthCheckTimeout = 500 * time.Millisecond
 
-func (m *Manager) checkInstanceHealthy(ctx context.Context, inst *instance) error {
+func (m *Manager) staleInstanceCause(ctx context.Context, inst *instance) error {
 	if inst == nil || inst.client == nil {
 		return errors.New("host utility instance client missing")
 	}
 	healthCtx, cancel := context.WithTimeout(ctx, instanceHealthCheckTimeout)
 	defer cancel()
-	return inst.client.Health(healthCtx)
+	err := inst.client.Health(healthCtx)
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
 }
 
 func (m *Manager) dropStaleInstance(ctx context.Context, agentType string, inst *instance, cause error) {
-	m.mu.Lock()
-	if current := m.instances[agentType]; current != inst {
-		m.mu.Unlock()
-		return
-	}
-	delete(m.instances, agentType)
-	m.mu.Unlock()
-
 	m.log.Warn("host utility instance unhealthy; recreating",
 		zap.String("agent_type", agentType),
 		zap.String("instance_id", inst.instanceID),
@@ -506,6 +504,12 @@ func (m *Manager) dropStaleInstance(ctx context.Context, agentType string, inst 
 	deleteCtx, cancel := hostUtilityDeleteContext(ctx)
 	m.deleteInstance(deleteCtx, inst)
 	cancel()
+
+	m.mu.Lock()
+	if current := m.instances[agentType]; current == inst {
+		delete(m.instances, agentType)
+	}
+	m.mu.Unlock()
 }
 
 // probeTimeout caps each ACP probe so an agent that hangs (e.g. one that

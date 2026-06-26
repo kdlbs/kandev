@@ -106,8 +106,16 @@ func TestExecutePromptRecreatesStaleCachedInstance(t *testing.T) {
 	instanceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/health":
+			if got := r.Header.Get("X-Instance-ID"); got != "fresh-instance" {
+				http.Error(w, "wrong instance id", http.StatusNotFound)
+				return
+			}
 			w.WriteHeader(http.StatusOK)
 		case "/api/v1/inference/prompt":
+			if got := r.Header.Get("X-Instance-ID"); got != "fresh-instance" {
+				http.Error(w, "wrong instance id", http.StatusNotFound)
+				return
+			}
 			promptCalls.Add(1)
 			w.Header().Set("Content-Type", "application/json")
 			err := json.NewEncoder(w).Encode(agentctlutil.PromptResponse{
@@ -123,7 +131,7 @@ func TestExecutePromptRecreatesStaleCachedInstance(t *testing.T) {
 		}
 	}))
 	defer instanceServer.Close()
-	_, instancePort := serverHostPort(t, instanceServer)
+	instanceHost, instancePort := serverHostPort(t, instanceServer)
 
 	var createCalls atomic.Int32
 	var deleteCalls atomic.Int32
@@ -153,19 +161,16 @@ func TestExecutePromptRecreatesStaleCachedInstance(t *testing.T) {
 	mgr := NewManager(reg, controlHost, controlPort, agentctlclient.NewControlClient(controlHost, controlPort, log), log)
 	mgr.parentTmpDir = t.TempDir()
 
-	deadServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	deadHost, deadPort := serverHostPort(t, deadServer)
-	deadServer.Close()
-
 	staleWorkDir := filepath.Join(mgr.parentTmpDir, agentType)
 	require.NoError(t, os.MkdirAll(staleWorkDir, 0o755))
+	staleMarker := filepath.Join(staleWorkDir, "stale-marker")
+	require.NoError(t, os.WriteFile(staleMarker, []byte("stale"), 0o644))
 	mgr.instances[agentType] = &instance{
 		agentType:  agentType,
 		instanceID: "stale-instance",
 		workDir:    staleWorkDir,
-		client:     agentctlclient.NewClient(deadHost, deadPort, log),
+		client: agentctlclient.NewClient(instanceHost, instancePort, log,
+			agentctlclient.WithExecutionID("stale-instance")),
 	}
 
 	result, err := mgr.ExecutePrompt(context.Background(), agentType, "test-model", "", "Summarize this")
@@ -180,6 +185,106 @@ func TestExecutePromptRecreatesStaleCachedInstance(t *testing.T) {
 	mgr.mu.RUnlock()
 	require.NotNil(t, fresh)
 	require.Equal(t, "fresh-instance", fresh.instanceID)
+
+	_, err = os.Stat(staleMarker)
+	require.ErrorIs(t, err, os.ErrNotExist)
+
+	mgr.Stop(context.Background())
+	require.Equal(t, int32(2), deleteCalls.Load())
+}
+
+func TestRefreshRecreatesStaleCachedInstance(t *testing.T) {
+	log := newTestLogger(t)
+	reg := registry.NewRegistry(log)
+	const agentType = "refresh-acp"
+	require.NoError(t, reg.Register(&installedInferenceAgent{id: agentType}))
+
+	var probeCalls atomic.Int32
+	instanceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			if got := r.Header.Get("X-Instance-ID"); got != "fresh-refresh-instance" {
+				http.Error(w, "wrong instance id", http.StatusNotFound)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		case "/api/v1/inference/probe":
+			if got := r.Header.Get("X-Instance-ID"); got != "fresh-refresh-instance" {
+				http.Error(w, "wrong instance id", http.StatusNotFound)
+				return
+			}
+			probeCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			err := json.NewEncoder(w).Encode(agentctlutil.ProbeResponse{
+				Success:        true,
+				AgentName:      "Refresh ACP",
+				AgentVersion:   "test",
+				CurrentModelID: "test-model",
+			})
+			if err != nil {
+				t.Errorf("encode probe response: %v", err)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer instanceServer.Close()
+	instanceHost, instancePort := serverHostPort(t, instanceServer)
+
+	var createCalls atomic.Int32
+	var deleteCalls atomic.Int32
+	controlServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/instances":
+			createCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			err := json.NewEncoder(w).Encode(agentctlclient.CreateInstanceResponse{
+				ID:   "fresh-refresh-instance",
+				Port: instancePort,
+			})
+			if err != nil {
+				t.Errorf("encode create instance response: %v", err)
+			}
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/v1/instances/"):
+			deleteCalls.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer controlServer.Close()
+	controlHost, controlPort := serverHostPort(t, controlServer)
+
+	mgr := NewManager(reg, controlHost, controlPort, agentctlclient.NewControlClient(controlHost, controlPort, log), log)
+	mgr.parentTmpDir = t.TempDir()
+
+	staleWorkDir := filepath.Join(mgr.parentTmpDir, agentType)
+	require.NoError(t, os.MkdirAll(staleWorkDir, 0o755))
+	mgr.instances[agentType] = &instance{
+		agentType:  agentType,
+		instanceID: "stale-refresh-instance",
+		workDir:    staleWorkDir,
+		client: agentctlclient.NewClient(instanceHost, instancePort, log,
+			agentctlclient.WithExecutionID("stale-refresh-instance")),
+	}
+
+	caps, err := mgr.Refresh(context.Background(), agentType)
+	require.NoError(t, err)
+	require.Equal(t, StatusOK, caps.Status)
+	require.Equal(t, "test-model", caps.CurrentModelID)
+	require.Equal(t, int32(1), createCalls.Load())
+	require.Equal(t, int32(1), deleteCalls.Load())
+	require.Equal(t, int32(1), probeCalls.Load())
+
+	mgr.mu.RLock()
+	fresh := mgr.instances[agentType]
+	mgr.mu.RUnlock()
+	require.NotNil(t, fresh)
+	require.Equal(t, "fresh-refresh-instance", fresh.instanceID)
+
+	mgr.Stop(context.Background())
+	require.Equal(t, int32(2), deleteCalls.Load())
 }
 
 func serverHostPort(t *testing.T, server *httptest.Server) (string, int) {
