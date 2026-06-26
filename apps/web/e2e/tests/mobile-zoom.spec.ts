@@ -12,7 +12,10 @@ test.describe("Mobile zoom hardening", () => {
     await mobile.goto();
 
     const content = await testPage.locator('meta[name="viewport"]').getAttribute("content");
-    expect(content).toContain("maximum-scale=1");
+    // Split into tokens so the assertion pins the exact value — a plain
+    // substring check would also pass for a typo like `maximum-scale=10`.
+    const tokens = content?.split(",").map((token) => token.trim()) ?? [];
+    expect(tokens).toContain("maximum-scale=1");
   });
 
   test("form fields render at >= 16px to prevent iOS focus-zoom", async ({ testPage }) => {
