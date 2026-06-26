@@ -35,6 +35,7 @@ import { useToast } from "@/components/toast-provider";
 import { useFileTabRestoration, useFileSaveDelete } from "./task-center-panel-restoration";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { PRDetailContent } from "@/components/github/pr-detail-panel";
+import { resolveCenterPanelSessionId } from "./task-center-panel-session";
 
 import type { SelectedDiff } from "./task-layout";
 
@@ -384,6 +385,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
     separatorAfterIndex,
   } = state;
   const { handleOpenFileFromChat, handleFileChange, handleFileSave, handleFileDelete } = fileTabOps;
+  const chatSessionId = resolveCenterPanelSessionId(sessionId, activeSessionId);
 
   const approveContent = showApproveButton ? (
     <ApproveButtonGroup onApprove={handleApprove} onRequestChanges={handleRequestChanges} />
@@ -409,7 +411,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
         <ChatTabContent
           activeTaskId={activeTaskId}
           isPassthroughMode={isPassthroughMode}
-          sessionId={sessionId}
+          sessionId={chatSessionId}
           showRequestChangesTooltip={showRequestChangesTooltip}
           onDismissTooltip={() => setShowRequestChangesTooltip(false)}
           onOpenFile={handleOpenFileFromChat}
