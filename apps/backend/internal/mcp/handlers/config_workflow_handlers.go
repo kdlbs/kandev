@@ -170,7 +170,7 @@ func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message
 		h.logger.Error("failed to create workflow step", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create workflow step", nil)
 	}
-	h.publishWorkflowStepEvents(ctx, events.WorkflowStepUpdated, resp.UpdatedSteps)
+	h.publishWorkflowStepEvents(ctx, events.WorkflowStepUpdated, resp.DemotedStartSteps)
 	h.publishWorkflowStepEvent(ctx, events.WorkflowStepCreated, resp.Step)
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
@@ -211,7 +211,7 @@ func (h *Handlers) handleUpdateWorkflowStep(ctx context.Context, msg *ws.Message
 		h.logger.Error("failed to update workflow step", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update workflow step", nil)
 	}
-	h.publishWorkflowStepEvents(ctx, events.WorkflowStepUpdated, resp.UpdatedSteps)
+	h.publishWorkflowStepEvents(ctx, events.WorkflowStepUpdated, resp.DemotedStartSteps)
 	h.publishWorkflowStepEvent(ctx, events.WorkflowStepUpdated, resp.Step)
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }

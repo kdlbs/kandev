@@ -264,29 +264,22 @@ func TestInitSchema_NormalizesDuplicateStartSteps(t *testing.T) {
 }
 
 func TestCreateStep_RollsBackStartDemotionWhenInsertFails(t *testing.T) {
-	repo := setupTestRepo(t)
+	repo, db := setupTestRepoWithDB(t)
 	ctx := context.Background()
 
-	steps, err := repo.ListStepsByWorkflow(ctx, "wf-test")
-	if err != nil {
-		t.Fatalf("list seeded steps: %v", err)
-	}
-	var originalStartID, duplicateID string
-	for _, step := range steps {
-		if step.IsStartStep {
-			originalStartID = step.ID
-			continue
-		}
-		if duplicateID == "" {
-			duplicateID = step.ID
-		}
-	}
-	if originalStartID == "" || duplicateID == "" {
-		t.Fatalf("expected seeded workflow to have a start and non-start step, got start=%q duplicate=%q", originalStartID, duplicateID)
+	if _, err := db.Exec(`
+		DELETE FROM workflow_steps WHERE workflow_id = 'wf-test';
+		INSERT INTO workflow_steps (
+			id, workflow_id, name, position, is_start_step, created_at, updated_at
+		) VALUES
+			('old-start', 'wf-test', 'Old Start', 0, 1, datetime('now'), datetime('now')),
+			('duplicate-target', 'wf-test', 'Duplicate Target', 1, 0, datetime('now'), datetime('now'));
+	`); err != nil {
+		t.Fatalf("seed rollback workflow steps: %v", err)
 	}
 
-	err = repo.CreateStep(ctx, &models.WorkflowStep{
-		ID:          duplicateID,
+	err := repo.CreateStep(ctx, &models.WorkflowStep{
+		ID:          "duplicate-target",
 		WorkflowID:  "wf-test",
 		Name:        "Duplicate ID Start",
 		Position:    99,
@@ -300,7 +293,7 @@ func TestCreateStep_RollsBackStartDemotionWhenInsertFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get start step: %v", err)
 	}
-	if start == nil || start.ID != originalStartID {
-		t.Fatalf("expected original start step %q to remain after rollback, got %#v", originalStartID, start)
+	if start == nil || start.ID != "old-start" {
+		t.Fatalf("expected original start step %q to remain after rollback, got %#v", "old-start", start)
 	}
 }

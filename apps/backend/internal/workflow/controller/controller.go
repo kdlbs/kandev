@@ -55,8 +55,8 @@ type ListStepsResponse struct {
 }
 
 type GetStepResponse struct {
-	Step         *models.WorkflowStep   `json:"step"`
-	UpdatedSteps []*models.WorkflowStep `json:"updated_steps,omitempty"`
+	Step              *models.WorkflowStep   `json:"step"`
+	DemotedStartSteps []*models.WorkflowStep `json:"demoted_start_steps,omitempty"`
 }
 
 type CreateStepsFromTemplateRequest struct {
@@ -131,11 +131,11 @@ func (c *Controller) CreateStep(ctx context.Context, req CreateStepRequest) (*Ge
 	if req.AutoAdvanceRequiresSignal != nil {
 		step.AutoAdvanceRequiresSignal = *req.AutoAdvanceRequiresSignal
 	}
-	updatedSteps, err := c.svc.CreateStepWithStartStepUpdates(ctx, step)
+	demotedStartSteps, err := c.svc.CreateStepWithStartStepUpdates(ctx, step)
 	if err != nil {
 		return nil, err
 	}
-	return &GetStepResponse{Step: step, UpdatedSteps: updatedSteps}, nil
+	return &GetStepResponse{Step: step, DemotedStartSteps: demotedStartSteps}, nil
 }
 
 // UpdateStepRequest is the request for updating a workflow step.
@@ -193,11 +193,11 @@ func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*Ge
 	if req.AutoAdvanceRequiresSignal != nil {
 		step.AutoAdvanceRequiresSignal = *req.AutoAdvanceRequiresSignal
 	}
-	updatedSteps, err := c.svc.UpdateStepWithStartStepUpdates(ctx, step)
+	demotedStartSteps, err := c.svc.UpdateStepWithStartStepUpdates(ctx, step)
 	if err != nil {
 		return nil, err
 	}
-	return &GetStepResponse{Step: step, UpdatedSteps: updatedSteps}, nil
+	return &GetStepResponse{Step: step, DemotedStartSteps: demotedStartSteps}, nil
 }
 
 // DeleteStep deletes a workflow step.

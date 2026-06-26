@@ -159,6 +159,8 @@ func (r *Repository) normalizeDuplicateStartSteps() error {
 				id,
 				ROW_NUMBER() OVER (
 					PARTITION BY workflow_id
+					-- Legacy repair follows last-writer-wins: keep the row
+					-- most recently marked/changed as the workflow start step.
 					ORDER BY updated_at DESC, position DESC, id DESC
 				) AS start_rank
 			FROM workflow_steps

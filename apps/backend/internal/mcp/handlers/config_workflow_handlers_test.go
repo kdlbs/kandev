@@ -106,6 +106,29 @@ func setupImportHandlers(t *testing.T) (*Handlers, *memWorkflowProvider, *reposi
 	return h, provider, repo
 }
 
+type publishedStepEvent struct {
+	subject string
+	step    map[string]interface{}
+}
+
+func collectWorkflowStepEvents(t *testing.T, eb *eventbus.MemoryEventBus, subjects ...string) *[]publishedStepEvent {
+	t.Helper()
+	var published []publishedStepEvent
+	for _, subject := range subjects {
+		subject := subject
+		_, err := eb.Subscribe(subject, func(_ context.Context, ev *eventbus.Event) error {
+			data, ok := ev.Data.(map[string]interface{})
+			require.True(t, ok)
+			step, ok := data["step"].(map[string]interface{})
+			require.True(t, ok)
+			published = append(published, publishedStepEvent{subject: subject, step: step})
+			return nil
+		})
+		require.NoError(t, err)
+	}
+	return &published
+}
+
 func TestHandleCreateWorkflowStep_PublishesDemotedStartStep(t *testing.T) {
 	h, _, repo := setupImportHandlers(t)
 	ctx := context.Background()
@@ -113,25 +136,7 @@ func TestHandleCreateWorkflowStep_PublishesDemotedStartStep(t *testing.T) {
 	eb := eventbus.NewMemoryEventBus(testLogger(t))
 	h.eventBus = eb
 
-	type publishedStepEvent struct {
-		subject string
-		step    map[string]interface{}
-	}
-	var published []publishedStepEvent
-	capture := func(subject string) func(context.Context, *eventbus.Event) error {
-		return func(_ context.Context, ev *eventbus.Event) error {
-			data, ok := ev.Data.(map[string]interface{})
-			require.True(t, ok)
-			step, ok := data["step"].(map[string]interface{})
-			require.True(t, ok)
-			published = append(published, publishedStepEvent{subject: subject, step: step})
-			return nil
-		}
-	}
-	_, err := eb.Subscribe(eventtypes.WorkflowStepUpdated, capture(eventtypes.WorkflowStepUpdated))
-	require.NoError(t, err)
-	_, err = eb.Subscribe(eventtypes.WorkflowStepCreated, capture(eventtypes.WorkflowStepCreated))
-	require.NoError(t, err)
+	published := collectWorkflowStepEvents(t, eb, eventtypes.WorkflowStepUpdated, eventtypes.WorkflowStepCreated)
 
 	require.NoError(t, repo.CreateStep(ctx, &wfmodels.WorkflowStep{
 		ID:                 "old-start",
@@ -152,13 +157,54 @@ func TestHandleCreateWorkflowStep_PublishesDemotedStartStep(t *testing.T) {
 	resp, err := h.handleCreateWorkflowStep(ctx, msg)
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)
-	require.Len(t, published, 2)
+	require.Len(t, *published, 2)
 
-	assert.Equal(t, eventtypes.WorkflowStepUpdated, published[0].subject)
-	assert.Equal(t, "old-start", published[0].step["id"])
-	assert.False(t, published[0].step["is_start_step"].(bool))
-	assert.Equal(t, eventtypes.WorkflowStepCreated, published[1].subject)
-	assert.True(t, published[1].step["is_start_step"].(bool))
+	assert.Equal(t, eventtypes.WorkflowStepUpdated, (*published)[0].subject)
+	assert.Equal(t, "old-start", (*published)[0].step["id"])
+	assert.False(t, (*published)[0].step["is_start_step"].(bool))
+	assert.Equal(t, eventtypes.WorkflowStepCreated, (*published)[1].subject)
+	assert.True(t, (*published)[1].step["is_start_step"].(bool))
+}
+
+func TestHandleUpdateWorkflowStep_PublishesDemotedStartStep(t *testing.T) {
+	h, _, repo := setupImportHandlers(t)
+	ctx := context.Background()
+	h.workflowCtrl = workflowctrl.NewController(h.workflowSvc)
+	eb := eventbus.NewMemoryEventBus(testLogger(t))
+	h.eventBus = eb
+
+	published := collectWorkflowStepEvents(t, eb, eventtypes.WorkflowStepUpdated)
+	require.NoError(t, repo.CreateStep(ctx, &wfmodels.WorkflowStep{
+		ID:                 "old-start",
+		WorkflowID:         "wf-test",
+		Name:               "Old Start",
+		Position:           0,
+		IsStartStep:        true,
+		ShowInCommandPanel: true,
+	}))
+	require.NoError(t, repo.CreateStep(ctx, &wfmodels.WorkflowStep{
+		ID:                 "new-start",
+		WorkflowID:         "wf-test",
+		Name:               "New Start",
+		Position:           1,
+		ShowInCommandPanel: true,
+	}))
+
+	isStart := true
+	msg := makeWSMessage(t, ws.ActionMCPUpdateWorkflowStep, map[string]interface{}{
+		"step_id":       "new-start",
+		"is_start_step": isStart,
+	})
+
+	resp, err := h.handleUpdateWorkflowStep(ctx, msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	require.Len(t, *published, 2)
+
+	assert.Equal(t, "old-start", (*published)[0].step["id"])
+	assert.False(t, (*published)[0].step["is_start_step"].(bool))
+	assert.Equal(t, "new-start", (*published)[1].step["id"])
+	assert.True(t, (*published)[1].step["is_start_step"].(bool))
 }
 
 func TestHandleImportWorkflow_PersistsWorkflow(t *testing.T) {
