@@ -108,6 +108,40 @@ func TestStopHTTPServerReturnsCloseError(t *testing.T) {
 	require.True(t, server.closed)
 }
 
+func TestStopInstanceReleasesPortWhenHTTPServerCloseFails(t *testing.T) {
+	log := newTestLogger(t)
+	mgr := NewManager(&config.Config{
+		Ports:    config.PortConfig{Base: 12345, Max: 12345},
+		Defaults: config.InstanceDefaults{Protocol: agent.ProtocolACP},
+	}, log)
+
+	port, err := mgr.portAlloc.Allocate("close-failure")
+	require.NoError(t, err)
+
+	closeErr := errors.New("listener close failed")
+	inst := &Instance{
+		ID:        "close-failure",
+		Port:      port,
+		Status:    "running",
+		CreatedAt: time.Now(),
+		server: &fakeHTTPServer{
+			shutdownErr: context.DeadlineExceeded,
+			closeErr:    closeErr,
+		},
+	}
+
+	mgr.mu.Lock()
+	mgr.instances[inst.ID] = inst
+	mgr.mu.Unlock()
+
+	err = mgr.StopInstance(context.Background(), inst.ID)
+	require.ErrorIs(t, err, closeErr)
+
+	reusedPort, err := mgr.portAlloc.Allocate("next-instance")
+	require.NoError(t, err)
+	require.Equal(t, port, reusedPort)
+}
+
 func TestStopHTTPServerTreatsCanceledShutdownAsStoppedAfterClose(t *testing.T) {
 	log := newTestLogger(t)
 	mgr := NewManager(&config.Config{

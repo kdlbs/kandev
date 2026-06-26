@@ -347,9 +347,10 @@ func (m *Manager) StopInstance(ctx context.Context, id string) error {
 		zap.String("instance_id", id),
 		zap.Int("port", inst.Port))
 
+	var stopErr error
 	if inst.server != nil {
 		if err := m.stopHTTPServer(ctx, id, inst.Port, inst.server); err != nil {
-			return err
+			stopErr = err
 		}
 	}
 
@@ -361,6 +362,10 @@ func (m *Manager) StopInstance(ctx context.Context, id string) error {
 	m.mu.Lock()
 	m.portAlloc.Release(inst.Port)
 	m.mu.Unlock()
+
+	if stopErr != nil {
+		return stopErr
+	}
 
 	m.logger.Info("StopInstance completed",
 		zap.String("instance_id", id),
