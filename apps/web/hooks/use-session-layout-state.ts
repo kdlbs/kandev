@@ -18,6 +18,16 @@ type UseSessionLayoutStateOptions = {
   sessionId?: string | null;
 };
 
+function resolveEffectiveSessionId(
+  activeSessionId: string | null,
+  activeTaskId: string | null,
+  activeSessionTaskId: string | null | undefined,
+  fallbackSessionId: string | null,
+) {
+  if (activeSessionId && activeSessionTaskId === activeTaskId) return activeSessionId;
+  return fallbackSessionId ?? null;
+}
+
 function useSelectedDiffState() {
   const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
   const handleSelectDiff = useCallback((path: string, content?: string) => {
@@ -52,7 +62,15 @@ export function useSessionLayoutState(options: UseSessionLayoutStateOptions = {}
   // --- Core session state ---
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const effectiveSessionId = activeSessionId ?? sessionId ?? null;
+  const activeSessionData = useAppStore((state) =>
+    activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null,
+  );
+  const effectiveSessionId = resolveEffectiveSessionId(
+    activeSessionId,
+    activeTaskId,
+    activeSessionData?.task_id,
+    sessionId,
+  );
   const sessionKey = effectiveSessionId ?? "";
 
   const activeSession = useAppStore((state) =>
