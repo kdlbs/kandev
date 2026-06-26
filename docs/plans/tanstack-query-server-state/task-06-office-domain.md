@@ -89,6 +89,12 @@ out any mobile E2E coverage added or reused.
 - The Office page refetch sub-wave removed `useOfficeRefetch` subscriptions from
   Query-backed projects, routines, agent dashboard, agent layout, and agent runs
   surfaces. Task list/detail remain for the task-store cleanup wave.
+- The Office task list/detail sub-wave moved the task list's fetched rows and
+  loading state out of `office.tasks.items`/`office.tasks.isLoading`, removed the
+  task page's SSR-to-store hydration, removed task detail's store fallback, and
+  dropped the last production `useOfficeRefetch` callers. `usePaginatedTasks`
+  now returns flattened infinite-query data directly, while task filters/sort/
+  grouping/nesting remain in Zustand as client-only UI state.
 - Migrated office dashboard, tasks, task search, task detail comments/activity,
   agents, agent run/detail routes, projects/project tasks, inbox, activity,
   routines, routing, costs, budgets, and skills to TanStack Query readers.
@@ -102,8 +108,18 @@ out any mobile E2E coverage added or reused.
 - Retained `office.tasks.filters`, `viewMode`, `sortField`, `sortDir`, `groupBy`,
   `nestingEnabled`, dialogs, local edit state, and the store server-state mirrors
   as compatibility fields for sidebar/simple-pane readers.
-- Did not remove `useOfficeRefetch` in this task. It now points at query
-  refetches in migrated readers and remains as a compatibility bridge until the
-  cleanup task removes old store fanout.
+- Did not remove the `useOfficeRefetch` hook definition or old Office WS fanout
+  yet. Production callers are gone; the cleanup task still needs to remove the
+  unused hook/scaffold after the remaining Office store readers are migrated.
 - Reused existing mobile coverage through `tests/office/mobile-onboarding.spec.ts`
   in Docker.
+
+## Reopened Wave Evidence
+
+- Task list/detail cleanup:
+  - `rtk pnpm --dir apps/web test app/office/tasks/use-paginated-tasks.test.tsx hooks/use-optimistic-task-mutation.test.tsx lib/query/bridge/index.test.ts`
+    passed 3 files / 26 tests.
+  - `rtk pnpm --dir apps/web typecheck` passed.
+  - `rtk pnpm --dir apps/web lint` passed.
+  - `rtk pnpm --dir apps/web e2e:docker tests/office/tasks.spec.ts tests/office/realtime-tasks.spec.ts tests/office/task-filters.spec.ts tests/office/task-sorting.spec.ts tests/office/topbar-breadcrumb.spec.ts tests/office/comment-input.spec.ts tests/office/simple-advanced-toggle.spec.ts tests/office/regression-fixes.spec.ts tests/office/property-pickers.spec.ts`
+    passed 36 Docker tests with strict WS accounting.

@@ -4,7 +4,6 @@ import { use, useState, useEffect, useCallback, useMemo, Suspense } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { useAppStore } from "@/components/state-provider";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
 import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutation";
 import { type TaskCommentResponse, type TaskDecisionDTO } from "@/lib/api/domains/office-api";
 import {
@@ -248,12 +247,9 @@ function resolveIssueError(
 function resolveTaskWorkspaceId(
   task: Task | null,
   queryTask: OfficeTask | undefined,
-  fallbackIssue: OfficeTask | undefined,
   fallbackWorkspaceId: string,
 ): string {
-  return (
-    task?.workspaceId ?? queryTask?.workspaceId ?? fallbackIssue?.workspaceId ?? fallbackWorkspaceId
-  );
+  return task?.workspaceId ?? queryTask?.workspaceId ?? fallbackWorkspaceId;
 }
 
 function mergeSessionStates(
@@ -273,21 +269,12 @@ function mergeSessionStates(
 function useIssueData(id: string) {
   const queryClient = useQueryClient();
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
-  const storeIssues = useAppStore((s) => s.office.tasks.items);
   const setTaskSessionsForTask = useAppStore((s) => s.setTaskSessionsForTask);
-  const fromStore = useMemo(() => storeIssues.find((i) => i.id === id), [storeIssues, id]);
-  const queryWorkspaceId = activeWorkspaceId ?? fromStore?.workspaceId ?? "";
+  const queryWorkspaceId = activeWorkspaceId ?? "";
 
   const taskQuery = useQuery(officeTaskQueryOptions(queryWorkspaceId, id));
-  const [task, setTask] = useState<Task | null>(() =>
-    fromStore ? mapOfficeTaskToTask(fromStore) : null,
-  );
+  const [task, setTask] = useState<Task | null>(null);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
-
-  useEffect(() => {
-    if (!fromStore || taskQuery.data?.task) return;
-    setTask(mapOfficeTaskToTask(fromStore));
-  }, [fromStore, taskQuery.data?.task]);
 
   useEffect(() => {
     if (!taskQuery.data?.task) return;
@@ -295,12 +282,7 @@ function useIssueData(id: string) {
     setTimeline(taskQuery.data.timeline ?? []);
   }, [taskQuery.data]);
 
-  const taskWorkspaceId = resolveTaskWorkspaceId(
-    task,
-    taskQuery.data?.task,
-    fromStore,
-    queryWorkspaceId,
-  );
+  const taskWorkspaceId = resolveTaskWorkspaceId(task, taskQuery.data?.task, queryWorkspaceId);
   const commentsQuery = useQuery(officeTaskCommentsQueryOptions(id));
   const activityQuery = useQuery(officeTaskActivityQueryOptions(taskWorkspaceId, id));
   const sessionsQuery = useQuery(taskSessionsQueryOptions(id));
@@ -350,12 +332,6 @@ function useIssueData(id: string) {
     () => mergeSessionStates(baseSessions, sessionStoreStates),
     [baseSessions, sessionStoreStates],
   );
-
-  // Refetch comments when a new comment is created via office WS event
-  useOfficeRefetch("comments", fetchComments);
-  useOfficeRefetch(`task:${id}`, () => {
-    void refetchTask();
-  });
 
   const { applyTaskPatch, restoreTask } = useTaskOptimisticHelpers(setTask);
   const loading = taskQuery.isPending && !task;

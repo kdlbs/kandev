@@ -61,11 +61,21 @@ Completed cleanup sub-waves:
   layout, and agent runs surfaces. Remaining trigger consumers are confined to
   the task list/detail path until the task-store wave removes those store
   mirrors.
+- **Office task list/detail cleanup:** moved task list rows/loading to the
+  `usePaginatedTasks` infinite-query result, removed the task page's SSR
+  `setTasks` hydration, removed task detail's `office.tasks.items` fallback,
+  and made optimistic task mutations local-only. The last production
+  `useOfficeRefetch` callers are gone; the hook and legacy WS fanout remain as
+  unused scaffold until the final Office cleanup wave removes them. Verified by
+  `rtk pnpm --dir apps/web test app/office/tasks/use-paginated-tasks.test.tsx hooks/use-optimistic-task-mutation.test.tsx lib/query/bridge/index.test.ts`,
+  `rtk pnpm --dir apps/web typecheck`, `rtk pnpm --dir apps/web lint`, and
+  `rtk pnpm --dir apps/web e2e:docker tests/office/tasks.spec.ts tests/office/realtime-tasks.spec.ts tests/office/task-filters.spec.ts tests/office/task-sorting.spec.ts tests/office/topbar-breadcrumb.spec.ts tests/office/comment-input.spec.ts tests/office/simple-advanced-toggle.spec.ts tests/office/regression-fixes.spec.ts tests/office/property-pickers.spec.ts`
+  passing 36 Docker tests with strict WS accounting.
 
 Remaining cleanup:
 
 - Office routines, costs, skills, deeper agent/project/task helper components,
-  and remaining `useOfficeRefetch`/`registerOfficeHandlers` fanout still have
+  and legacy `useOfficeRefetch`/`registerOfficeHandlers` scaffold still have
   store readers or writers. Task 10 stays `in_progress` until those paths are
   removed or explicitly documented as client-only temporary indexes.
 

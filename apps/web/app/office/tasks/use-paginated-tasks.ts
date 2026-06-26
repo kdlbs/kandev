@@ -74,10 +74,11 @@ function flattenPages(data: OfficeTasksInfiniteData | undefined): OfficeTask[] {
 }
 
 export type UsePaginatedTasksResult = {
+  tasks: OfficeTask[];
+  isLoading: boolean;
   loadMore: () => void;
   hasMore: boolean;
   isLoadingMore: boolean;
-  refetch: () => Promise<void>;
 };
 
 /**
@@ -85,15 +86,14 @@ export type UsePaginatedTasksResult = {
  * keyset pagination via the Stream-E `/workspaces/:wsId/tasks?...` endpoint.
  *
  * Resets the cursor and replaces the list whenever the workspace, filters
- * or sort change. Exposes loadMore() to fetch the next page (appending to
- * the store) and refetch() for WS-driven invalidations.
+ * or sort change. Exposes loadMore() to fetch the next page through the
+ * TanStack Query infinite cache; websocket invalidations are handled by
+ * the query bridge.
  */
 export function usePaginatedTasks(
   workspaceId: string | null,
   includeSystem: boolean,
 ): UsePaginatedTasksResult {
-  const setTasks = useAppStore((s) => s.setTasks);
-  const setTasksLoading = useAppStore((s) => s.setTasksLoading);
   const filters = useAppStore((s) => s.office.tasks.filters);
   const sortField = useAppStore((s) => s.office.tasks.sortField);
   const sortDir = useAppStore((s) => s.office.tasks.sortDir);
@@ -114,29 +114,16 @@ export function usePaginatedTasks(
 
   const queryTasks = useMemo(() => flattenPages(query.data), [query.data]);
 
-  useEffect(() => {
-    if (!query.data) return;
-    setTasks(queryTasks);
-  }, [query.data, queryTasks, setTasks]);
-
-  useEffect(() => {
-    setTasksLoading(Boolean(workspaceId) && query.isPending);
-  }, [query.isPending, setTasksLoading, workspaceId]);
-
   const loadMore = useCallback(() => {
     if (!workspaceId || !query.hasNextPage || query.isFetchingNextPage) return;
     void query.fetchNextPage();
   }, [query, workspaceId]);
 
-  const refetch = useCallback(async () => {
-    if (!workspaceId) return;
-    await query.refetch();
-  }, [query, workspaceId]);
-
   return {
+    tasks: queryTasks,
+    isLoading: Boolean(workspaceId) && query.isPending,
     loadMore,
     hasMore: query.hasNextPage,
     isLoadingMore: query.isFetchingNextPage,
-    refetch,
   };
 }

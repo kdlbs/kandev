@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { StateProvider, useAppStore } from "@/components/state-provider";
+import { StateProvider } from "@/components/state-provider";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
 import { listTasks as listOfficeTasks } from "@/lib/api/domains/office-tasks-api";
 import { listTasks as listOfficeTasksLegacy } from "@/lib/api/domains/office-extended-api";
@@ -57,14 +57,9 @@ function wrapperFor(queryClient: QueryClient) {
 }
 
 function renderPaginatedTasks(queryClient: QueryClient) {
-  return renderHook(
-    () => ({
-      pagination: usePaginatedTasks("workspace-1", false),
-      tasks: useAppStore((state) => state.office.tasks.items),
-      isLoading: useAppStore((state) => state.office.tasks.isLoading),
-    }),
-    { wrapper: wrapperFor(queryClient) },
-  );
+  return renderHook(() => usePaginatedTasks("workspace-1", false), {
+    wrapper: wrapperFor(queryClient),
+  });
 }
 
 describe("usePaginatedTasks", () => {
@@ -72,7 +67,7 @@ describe("usePaginatedTasks", () => {
     vi.clearAllMocks();
   });
 
-  it("mirrors infinite query pages into the legacy task list store", async () => {
+  it("returns flattened infinite query pages from the query cache", async () => {
     listTasksMock
       .mockResolvedValueOnce({
         tasks: [task("task-1")],
@@ -90,10 +85,10 @@ describe("usePaginatedTasks", () => {
       queryKey: ["office", "workspaces", "workspace-1", "tasks"],
     });
     expect(cacheEntries).toHaveLength(1);
-    expect(result.result.current.pagination.hasMore).toBe(true);
+    expect(result.result.current.hasMore).toBe(true);
 
     await act(async () => {
-      result.result.current.pagination.loadMore();
+      result.result.current.loadMore();
     });
 
     await waitFor(() =>
@@ -104,7 +99,7 @@ describe("usePaginatedTasks", () => {
       expect.objectContaining({ cursor: "cursor-2", cursor_id: "task-1" }),
       expect.anything(),
     );
-    expect(result.result.current.pagination.hasMore).toBe(false);
+    expect(result.result.current.hasMore).toBe(false);
     expect(result.result.current.isLoading).toBe(false);
   });
 });

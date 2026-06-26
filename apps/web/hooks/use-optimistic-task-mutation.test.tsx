@@ -1,13 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { StateProvider, useAppStoreApi } from "@/components/state-provider";
+import { StateProvider } from "@/components/state-provider";
 import {
   TaskOptimisticContextProvider,
   useOptimisticTaskMutation,
 } from "./use-optimistic-task-mutation";
 import type { Task } from "@/app/office/tasks/[id]/types";
-import type { OfficeTask } from "@/lib/state/slices/office/types";
 
 vi.mock("sonner", () => ({
   toast: {
@@ -44,18 +43,7 @@ const baseTask: Task = {
   updatedAt: TS,
 };
 
-const baseOfficeTask: OfficeTask = {
-  id: "t-1",
-  workspaceId: "ws-1",
-  identifier: "TASK-1",
-  title: "First task",
-  status: "todo",
-  priority: "medium",
-  createdAt: TS,
-  updatedAt: TS,
-};
-
-function makeHarness(initialTask: Task, initialOffice: OfficeTask | null) {
+function makeHarness(initialTask: Task) {
   const state = {
     task: initialTask,
     patches: [] as Partial<Task>[],
@@ -72,19 +60,10 @@ function makeHarness(initialTask: Task, initialOffice: OfficeTask | null) {
       state.task = snapshot;
     },
   };
-  function StoreSeed({ children }: { children: ReactNode }) {
-    const api = useAppStoreApi();
-    if (initialOffice) {
-      api.getState().setTasks([initialOffice]);
-    }
-    return <>{children}</>;
-  }
   function Wrapper({ children }: { children: ReactNode }) {
     return (
       <StateProvider>
-        <StoreSeed>
-          <TaskOptimisticContextProvider value={ctxValue}>{children}</TaskOptimisticContextProvider>
-        </StoreSeed>
+        <TaskOptimisticContextProvider value={ctxValue}>{children}</TaskOptimisticContextProvider>
       </StateProvider>
     );
   }
@@ -103,7 +82,7 @@ function HookProbe({
 
 describe("useOptimisticTaskMutation", () => {
   it("applies the patch and keeps it on success", async () => {
-    const { Wrapper, state } = makeHarness(baseTask, baseOfficeTask);
+    const { Wrapper, state } = makeHarness(baseTask);
     let mutate: ReturnType<typeof useOptimisticTaskMutation> | null = null;
     render(
       <Wrapper>
@@ -122,7 +101,7 @@ describe("useOptimisticTaskMutation", () => {
   });
 
   it("rolls back local state and toasts on api failure", async () => {
-    const { Wrapper, state } = makeHarness(baseTask, baseOfficeTask);
+    const { Wrapper, state } = makeHarness(baseTask);
     let mutate: ReturnType<typeof useOptimisticTaskMutation> | null = null;
     render(
       <Wrapper>
@@ -140,7 +119,7 @@ describe("useOptimisticTaskMutation", () => {
   });
 
   it("uses a generic error message when the rejection isn't an Error", async () => {
-    const { Wrapper } = makeHarness(baseTask, baseOfficeTask);
+    const { Wrapper } = makeHarness(baseTask);
     let mutate: ReturnType<typeof useOptimisticTaskMutation> | null = null;
     render(
       <Wrapper>
@@ -154,8 +133,8 @@ describe("useOptimisticTaskMutation", () => {
     expect(toast.error).toHaveBeenCalledWith("Update failed");
   });
 
-  it("works when the office store has no entry for the task", async () => {
-    const { Wrapper, state } = makeHarness(baseTask, null);
+  it("works with local task state only", async () => {
+    const { Wrapper, state } = makeHarness(baseTask);
     let mutate: ReturnType<typeof useOptimisticTaskMutation> | null = null;
     render(
       <Wrapper>

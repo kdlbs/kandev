@@ -54,7 +54,7 @@ type RouteRenderer = () => React.ReactNode;
 const OFFICE_ROUTES: Record<string, RouteRenderer> = {
   "/office": () => <OfficePageClient initialDashboard={null} />,
   "/office/inbox": () => <InboxPageClient initialItems={[]} initialCount={0} />,
-  "/office/tasks": () => <OfficeTasksPageClient initialIssues={[]} />,
+  "/office/tasks": () => <OfficeTasksPageClient />,
   "/office/projects": () => <ProjectsPageClient initialProjects={[]} />,
   "/office/routines": () => <RoutinesPageClient initialRoutines={[]} />,
   "/office/agents": () => <AgentsPageClient initialAgents={[]} />,
