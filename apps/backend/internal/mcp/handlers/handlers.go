@@ -691,19 +691,13 @@ func (h *Handlers) resolveMCPLaunchMetadata(ctx context.Context, task *models.Ta
 }
 
 func (h *Handlers) resolveMCPAutoStartConfigWithError(ctx context.Context, task *models.Task, agentProfileID, executorProfileID, sourceTaskID string) (mcpAutoStartConfig, error) {
-	executorID := h.inheritFromTaskSession(ctx, task.ParentID, &agentProfileID, &executorProfileID)
-	if metadataExecutorID := h.inheritFromTaskMetadata(ctx, task.ParentID, &agentProfileID, &executorProfileID); executorID == "" {
-		executorID = metadataExecutorID
-	}
+	executorID := h.inheritFromTask(ctx, task.ParentID, &agentProfileID, &executorProfileID)
 
 	// For top-level tasks, inherit from the source task (the calling agent's task).
 	if task.ParentID == "" && sourceTaskID != "" {
-		sourceExecutorID := h.inheritFromTaskSession(ctx, sourceTaskID, &agentProfileID, &executorProfileID)
+		sourceExecutorID := h.inheritFromTask(ctx, sourceTaskID, &agentProfileID, &executorProfileID)
 		if executorID == "" {
 			executorID = sourceExecutorID
-		}
-		if metadataExecutorID := h.inheritFromTaskMetadata(ctx, sourceTaskID, &agentProfileID, &executorProfileID); executorID == "" {
-			executorID = metadataExecutorID
 		}
 	}
 
@@ -858,58 +852,67 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 	}()
 }
 
-// inheritFromTaskSession fills agentProfileID and executorProfileID from another
-// task's primary session when not explicitly provided. It returns that session's ExecutorID
-// as a fallback for when the parent session has no executor profile (common for
-// UI-created sessions). If ExecutorProfileID is resolved, ExecutorID is redundant
-// since the profile already encodes the executor reference.
-func (h *Handlers) inheritFromTaskSession(ctx context.Context, parentID string, agentProfileID, executorProfileID *string) string {
-	if parentID == "" {
-		return ""
-	}
-	if h.taskSvc == nil {
-		return ""
-	}
-	parent, err := h.taskSvc.GetPrimarySession(ctx, parentID)
-	if err != nil || parent == nil {
-		return ""
-	}
-	if *agentProfileID == "" {
-		*agentProfileID = parent.AgentProfileID
-	}
-	if *executorProfileID == "" {
-		*executorProfileID = parent.ExecutorProfileID
-	}
-	// Only return ExecutorID as fallback when no profile was resolved.
-	// An executor profile already encodes its executor reference.
-	if *executorProfileID == "" {
-		return parent.ExecutorID
-	}
-	return ""
-}
-
-func (h *Handlers) inheritFromTaskMetadata(ctx context.Context, taskID string, agentProfileID, executorProfileID *string) string {
+// inheritFromTask fills agentProfileID and executorProfileID from another task's
+// primary session or durable metadata when not explicitly provided. It returns a
+// bare ExecutorID only when no executor profile was resolved, because an
+// executor profile already encodes its executor reference.
+func (h *Handlers) inheritFromTask(ctx context.Context, taskID string, agentProfileID, executorProfileID *string) string {
 	if taskID == "" || h.taskSvc == nil {
 		return ""
 	}
-	task, err := h.taskSvc.GetTask(ctx, taskID)
-	if err != nil || task == nil {
+
+	executorID := h.inheritFromPrimarySession(ctx, taskID, agentProfileID, executorProfileID)
+	needsMetadata := *agentProfileID == "" || *executorProfileID == "" || executorID != ""
+	if needsMetadata {
+		executorID = h.inheritFromTaskMetadata(ctx, taskID, agentProfileID, executorProfileID, executorID)
+	}
+
+	if *executorProfileID != "" {
+		return ""
+	}
+	return executorID
+}
+
+func (h *Handlers) inheritFromPrimarySession(ctx context.Context, taskID string, agentProfileID, executorProfileID *string) string {
+	session, err := h.taskSvc.GetPrimarySession(ctx, taskID)
+	if err != nil || session == nil {
 		return ""
 	}
 	if *agentProfileID == "" {
-		if v, ok := task.Metadata[models.MetaKeyAgentProfileID].(string); ok && v != "" {
-			*agentProfileID = v
-		}
+		*agentProfileID = session.AgentProfileID
 	}
 	if *executorProfileID == "" {
-		if v, ok := task.Metadata[models.MetaKeyExecutorProfileID].(string); ok && v != "" {
-			*executorProfileID = v
-		}
+		*executorProfileID = session.ExecutorProfileID
 	}
-	if *executorProfileID == "" {
-		if v, ok := task.Metadata[models.MetaKeyExecutorID].(string); ok && v != "" {
-			return v
-		}
+	if *executorProfileID != "" {
+		return ""
+	}
+	return session.ExecutorID
+}
+
+func (h *Handlers) inheritFromTaskMetadata(ctx context.Context, taskID string, agentProfileID, executorProfileID *string, executorID string) string {
+	task, err := h.taskSvc.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		return executorID
+	}
+	inheritMetadataValue(task.Metadata, models.MetaKeyAgentProfileID, agentProfileID)
+	inheritMetadataValue(task.Metadata, models.MetaKeyExecutorProfileID, executorProfileID)
+	if executorID == "" && *executorProfileID == "" {
+		executorID = metadataString(task.Metadata, models.MetaKeyExecutorID)
+	}
+	return executorID
+}
+
+func inheritMetadataValue(metadata map[string]interface{}, key string, target *string) {
+	if *target != "" {
+		return
+	}
+	*target = metadataString(metadata, key)
+}
+
+func metadataString(metadata map[string]interface{}, key string) string {
+	if v, ok := metadata[key].(string); ok && v != "" {
+		return v
 	}
 	return ""
 }

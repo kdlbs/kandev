@@ -531,6 +531,112 @@ func TestHandleCreateTask_InheritsDeferredSourceTaskMetadata(t *testing.T) {
 	assert.Equal(t, "metadata-executor", task.Metadata[models.MetaKeyExecutorID])
 }
 
+func TestHandleCreateTask_InheritsDeferredParentTaskMetadata(t *testing.T) {
+	svc, _ := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	require.Len(t, workflows, 1)
+
+	parent, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID,
+		WorkflowID:  workflows[0].ID,
+		Title:       "Deferred parent",
+		Metadata: map[string]interface{}{
+			models.MetaKeyAgentProfileID: "parent-profile",
+			models.MetaKeyExecutorID:     "parent-executor",
+		},
+	})
+	require.NoError(t, err)
+
+	h := &Handlers{
+		taskSvc: svc,
+		logger:  testLogger(t).WithFields(),
+	}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"parent_id":   parent.ID,
+		"title":       "Child from deferred parent",
+		"start_agent": false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+	require.NotEmpty(t, created.ID)
+
+	task, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	require.NotNil(t, task.Metadata)
+	assert.Equal(t, "parent-profile", task.Metadata[models.MetaKeyAgentProfileID])
+	assert.Equal(t, "parent-executor", task.Metadata[models.MetaKeyExecutorID])
+}
+
+func TestHandleCreateTask_MetadataExecutorProfileClearsSessionExecutorID(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	require.Len(t, workflows, 1)
+
+	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID,
+		WorkflowID:  workflows[0].ID,
+		Title:       "Source with mixed launch metadata",
+		Metadata: map[string]interface{}{
+			models.MetaKeyExecutorProfileID: "metadata-executor-profile",
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:             "mixed-source-session",
+		TaskID:         source.ID,
+		AgentProfileID: "source-profile",
+		ExecutorID:     "session-executor",
+		State:          models.TaskSessionStateWaitingForInput,
+		IsPrimary:      true,
+	}))
+
+	h := &Handlers{
+		taskSvc: svc,
+		logger:  testLogger(t).WithFields(),
+	}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"source_task_id": source.ID,
+		"workspace_id":   workspaces[0].ID,
+		"workflow_id":    workflows[0].ID,
+		"title":          "Child without mixed executor metadata",
+		"start_agent":    false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+	require.NotEmpty(t, created.ID)
+
+	task, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	require.NotNil(t, task.Metadata)
+	assert.Equal(t, "source-profile", task.Metadata[models.MetaKeyAgentProfileID])
+	assert.Equal(t, "metadata-executor-profile", task.Metadata[models.MetaKeyExecutorProfileID])
+	assert.Empty(t, task.Metadata[models.MetaKeyExecutorID])
+}
+
 func TestHandleCreateTask_InvalidWorkflowProfileLookupReturnsInternalError(t *testing.T) {
 	svc, _ := newTestTaskService(t)
 	ctx := context.Background()
