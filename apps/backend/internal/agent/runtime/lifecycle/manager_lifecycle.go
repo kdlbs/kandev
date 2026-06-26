@@ -223,6 +223,8 @@ func (m *Manager) StopAllAgents(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
+const stopReasonStaleExecutionCleanup = "stale execution cleanup"
+
 // cleanupExitedContainer handles cleanup for a single exited container.
 func (m *Manager) cleanupExitedContainer(ctx context.Context, containerID string) {
 	execution, tracked := m.executionStore.GetByContainerID(containerID)
@@ -313,7 +315,7 @@ func (m *Manager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionI
 	// goroutines. Without this, the old agentctl instance keeps running when a new
 	// execution is created for the same session, causing git polling on deleted worktrees.
 	// This is idempotent — returns success if the instance is already gone.
-	m.stopAgentViaBackend(ctx, execution.ID, execution, "stale execution cleanup", false, false)
+	m.stopAgentViaBackend(ctx, execution.ID, execution, stopReasonStaleExecutionCleanup, false, false)
 
 	// Close agentctl connection if it exists
 	if execution.agentctl != nil {

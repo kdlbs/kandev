@@ -20,8 +20,9 @@ import (
 
 // stubAdapter is a minimal AgentAdapter for testing the startup sequence.
 type stubAdapter struct {
-	connectCalled bool
-	updatesCh     chan adapter.AgentEvent
+	connectCalled       bool
+	requiresProcessKill bool
+	updatesCh           chan adapter.AgentEvent
 }
 
 func newStubAdapter() *stubAdapter {
@@ -50,7 +51,7 @@ func (s *stubAdapter) Close() error {
 	close(s.updatesCh)
 	return nil
 }
-func (s *stubAdapter) RequiresProcessKill() bool { return false }
+func (s *stubAdapter) RequiresProcessKill() bool { return s.requiresProcessKill }
 
 func TestStartProcessPipes_CreatesAllPipes(t *testing.T) {
 	m := &Manager{

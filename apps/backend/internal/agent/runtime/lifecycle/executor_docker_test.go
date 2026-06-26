@@ -123,6 +123,24 @@ func TestDockerStopInstanceStopsContainerWhenAgentStopFailed(t *testing.T) {
 	}
 }
 
+func TestDockerStopInstanceStopsContainerOnStaleCleanup(t *testing.T) {
+	log := newTestDockerLogger()
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
+	exec.newClientFunc = failingClientFactory("docker required for stale cleanup")
+
+	err := exec.StopInstance(context.Background(), &ExecutorInstance{
+		InstanceID:  "inst-1",
+		ContainerID: "container-1",
+		StopReason:  stopReasonStaleExecutionCleanup,
+	}, false)
+	if err == nil {
+		t.Fatal("StopInstance should attempt Docker cleanup for stale executions")
+	}
+	if !strings.Contains(err.Error(), "docker required for stale cleanup") {
+		t.Fatalf("StopInstance error = %v", err)
+	}
+}
+
 func TestDockerCleanupContextIgnoresCanceledParentAfterAgentStopFailed(t *testing.T) {
 	parent, parentCancel := context.WithCancel(context.Background())
 	parentCancel()

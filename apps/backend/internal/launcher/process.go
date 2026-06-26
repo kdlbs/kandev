@@ -14,7 +14,10 @@ import (
 )
 
 const capturedOutputLimit = 64 * 1024
-const managedProcessShutdownGrace = 40 * time.Second
+
+// Keep this above the backend's serial graceful-shutdown budgets so the
+// launcher does not preempt agent/session cleanup that is still in progress.
+const managedProcessShutdownGrace = 75 * time.Second
 const managedProcessForceKillWait = 2 * time.Second
 
 var launcherShutdownDebug atomic.Bool

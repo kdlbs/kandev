@@ -70,7 +70,8 @@ const defaultStderrBufferSize = 50
 
 const agentTempDirRoot = "kandev-agent"
 
-const processExitGrace = 250 * time.Millisecond
+const processKillRequiredExitGrace = 250 * time.Millisecond
+const processDefaultExitGrace = 5 * time.Second
 const processGroupTerminateGrace = 2 * time.Second
 const processGroupPollInterval = 50 * time.Millisecond
 
@@ -1386,7 +1387,8 @@ func (m *Manager) waitForProcessExit(ctx context.Context) {
 		pid = m.cmd.Process.Pid
 	}
 
-	if waitForManagerDone(ctx, done, processExitGrace) {
+	exitGrace := m.processExitGrace(ctx)
+	if waitForManagerDone(ctx, done, exitGrace) {
 		m.logger.Info("agent process stopped gracefully")
 		m.reapRemainingProcessGroup(ctx, pid)
 		return
@@ -1402,11 +1404,11 @@ func (m *Manager) waitForProcessExit(ctx context.Context) {
 
 	m.logger.Warn("agent process did not exit after graceful wait; terminating process group",
 		zap.Int("pgid", pid),
-		zap.Duration("grace", processExitGrace))
+		zap.Duration("grace", exitGrace))
 	m.logger.Debug("agent process group SIGTERM requested",
 		zap.Int("pgid", pid),
 		zap.String("reason", "graceful_wait_expired"),
-		zap.Duration("grace", processExitGrace))
+		zap.Duration("grace", exitGrace))
 	if err := terminateProcessGroup(pid); err != nil {
 		if !isProcessGroupMissing(err) {
 			m.logger.Warn("failed to terminate agent process group, force killing",
@@ -1425,6 +1427,19 @@ func (m *Manager) waitForProcessExit(ctx context.Context) {
 	m.logger.Warn("agent process did not stop after termination; force killing process group",
 		zap.Int("pgid", pid))
 	m.forceKillProcessGroupAndWait(done, pid)
+}
+
+func (m *Manager) processExitGrace(ctx context.Context) time.Duration {
+	if m.adapter != nil && m.adapter.RequiresProcessKill() {
+		return processKillRequiredExitGrace
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining > 0 {
+			return remaining
+		}
+		return 0
+	}
+	return processDefaultExitGrace
 }
 
 func waitForManagerDone(ctx context.Context, done <-chan struct{}, timeout time.Duration) bool {

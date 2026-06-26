@@ -597,7 +597,8 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 	// the kandev-managed per-container session dir so we don't leak GBs of
 	// agent state on disk. Plain stops preserve the dir so resume re-attaches
 	// to the same agent state, mirroring the Sprites preserve-on-stop rule.
-	if shouldRunExecutorCleanup(instance.StopReason) && r.kandevHomeDir != "" && instance.InstanceID != "" {
+	teardownContainer := shouldTeardownDockerContainer(instance.StopReason)
+	if teardownContainer && r.kandevHomeDir != "" && instance.InstanceID != "" {
 		CleanupAgentSessionDir(InstanceSessionRoot(r.kandevHomeDir, instance.InstanceID), r.logger)
 	}
 
@@ -610,7 +611,7 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 	// The container holds the cloned workspace and agentctl process for fast
 	// resume; destructive lifecycle events or failed agentctl stops should tear
 	// it down.
-	if !force && !instance.AgentStopFailed && !shouldRunExecutorCleanup(instance.StopReason) {
+	if !force && !instance.AgentStopFailed && !teardownContainer {
 		r.logger.Info("preserving docker container after agent stop",
 			zap.String("container_id", instance.ContainerID),
 			zap.String("instance_id", instance.InstanceID),
@@ -637,6 +638,13 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 	}
 
 	return nil
+}
+
+func shouldTeardownDockerContainer(reason string) bool {
+	if shouldRunExecutorCleanup(reason) {
+		return true
+	}
+	return strings.ToLower(strings.TrimSpace(reason)) == stopReasonStaleExecutionCleanup
 }
 
 func dockerCleanupContext(ctx context.Context, agentStopFailed bool) (context.Context, context.CancelFunc) {

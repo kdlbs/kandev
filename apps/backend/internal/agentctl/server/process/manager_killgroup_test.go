@@ -212,7 +212,8 @@ func TestWaitForProcessExit_TerminatesBeforeParentContextDeadline(t *testing.T) 
 	log, observed := newObservedTestLogger(t)
 
 	m := &Manager{
-		logger: log,
+		logger:  log,
+		adapter: &stubAdapter{requiresProcessKill: true},
 	}
 	m.cmd = fixtureCmd("sleep 30")
 	setProcGroup(m.cmd)
@@ -250,6 +251,28 @@ func TestWaitForProcessExit_TerminatesBeforeParentContextDeadline(t *testing.T) 
 		return !processAlive(parentPID)
 	}, 5*time.Second, 50*time.Millisecond,
 		"agent process %d should be killed after local graceful wait", parentPID)
+}
+
+func TestProcessExitGraceUsesCallerDeadlineForGracefulAdapter(t *testing.T) {
+	m := &Manager{
+		adapter: &stubAdapter{},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	grace := m.processExitGrace(ctx)
+	require.Greater(t, grace, 1500*time.Millisecond)
+	require.LessOrEqual(t, grace, 2*time.Second)
+}
+
+func TestProcessExitGraceUsesShortGraceForKillRequiredAdapter(t *testing.T) {
+	m := &Manager{
+		adapter: &stubAdapter{requiresProcessKill: true},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	require.Equal(t, processKillRequiredExitGrace, m.processExitGrace(ctx))
 }
 
 func TestStop_DoesNotReapStaleProcessGroupWhenStatusAlreadyStopped(t *testing.T) {
