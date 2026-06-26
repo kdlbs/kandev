@@ -301,6 +301,81 @@ func TestReuseExistingRepositoryWorktrees_EnvironmentRowsWinOverSessionRows(t *t
 	}
 }
 
+func TestReuseExistingRepositoryWorktrees_LegacyFlatEnvWorktreeFeedsFlatBranchSpec(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{
+		TaskID:       "task-legacy-flat",
+		RepositoryID: "repo-kandev",
+		UseWorktree:  true,
+		Repositories: []RepoSpec{
+			{
+				RepositoryID:       "repo-kandev",
+				BranchIdentitySlug: "release-1-2",
+				BranchSlug:         "",
+			},
+			{
+				RepositoryID:       "repo-kandev",
+				BranchIdentitySlug: "main",
+				BranchSlug:         "main",
+			},
+		},
+	}
+	env := &models.TaskEnvironment{
+		ID:           "env-legacy-flat",
+		RepositoryID: "repo-kandev",
+		WorktreeID:   "wt-legacy-flat",
+	}
+
+	exec.reuseExistingRepositoryWorktrees(context.Background(), req, env)
+
+	if req.Repositories[0].WorktreeID != "wt-legacy-flat" {
+		t.Fatalf("flat repo WorktreeID = %q, want legacy top-level wt-legacy-flat", req.Repositories[0].WorktreeID)
+	}
+	if req.Repositories[1].WorktreeID != "" {
+		t.Fatalf("nested repo WorktreeID = %q, want empty", req.Repositories[1].WorktreeID)
+	}
+	if req.WorktreeID != "wt-legacy-flat" {
+		t.Fatalf("top-level WorktreeID = %q, want wt-legacy-flat", req.WorktreeID)
+	}
+}
+
+func TestReuseExistingRepositoryWorktrees_LegacyEmptyBranchRowFeedsFlatBranchSpec(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{
+		TaskID:      "task-legacy-empty-row",
+		UseWorktree: true,
+		Repositories: []RepoSpec{
+			{
+				RepositoryID:       "repo-kandev",
+				BranchIdentitySlug: "main",
+				BranchSlug:         "",
+			},
+			{
+				RepositoryID:       "repo-kandev",
+				BranchIdentitySlug: "feature-x",
+				BranchSlug:         "feature-x",
+			},
+		},
+	}
+	env := &models.TaskEnvironment{
+		ID: "env-legacy-empty-row",
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-kandev", BranchSlug: "", WorktreeID: "wt-flat-row"},
+		},
+	}
+
+	exec.reuseExistingRepositoryWorktrees(context.Background(), req, env)
+
+	if req.Repositories[0].WorktreeID != "wt-flat-row" {
+		t.Fatalf("flat repo WorktreeID = %q, want legacy row wt-flat-row", req.Repositories[0].WorktreeID)
+	}
+	if req.Repositories[1].WorktreeID != "" {
+		t.Fatalf("nested repo WorktreeID = %q, want empty", req.Repositories[1].WorktreeID)
+	}
+}
+
 func TestLaunchPreparedSession_MultiBranch_ReusesWorktreeIDsByBranchSlug(t *testing.T) {
 	repo := newMockRepository()
 	taskID := "task-multi-branch-reuse"
@@ -417,6 +492,7 @@ func TestBuildRepoSpecs_MultiBranchIdentityStableAcrossReorder(t *testing.T) {
 		RepositoryID:   "repo-kandev",
 		RepositoryPath: "/repos/kandev",
 		BaseBranch:     "main",
+		Position:       0,
 		Repository:     repo,
 	}
 	branchInfo := &repoInfo{
@@ -424,6 +500,7 @@ func TestBuildRepoSpecs_MultiBranchIdentityStableAcrossReorder(t *testing.T) {
 		RepositoryPath: "/repos/kandev",
 		BaseBranch:     "main",
 		CheckoutBranch: "branch-5hn",
+		Position:       1,
 		Repository:     repo,
 	}
 
@@ -441,6 +518,105 @@ func TestBuildRepoSpecs_MultiBranchIdentityStableAcrossReorder(t *testing.T) {
 	}
 	if second[1].BranchIdentitySlug != "main" || second[1].BranchSlug != "" {
 		t.Fatalf("reordered main plan = identity %q path %q, want main/empty", second[1].BranchIdentitySlug, second[1].BranchSlug)
+	}
+}
+
+func TestBuildRepoSpecs_MultiBranchFlatPathFollowsLowestTaskRepoPosition(t *testing.T) {
+	repo := &models.Repository{ID: "repo-kandev", Name: "kandev", DefaultBranch: "main"}
+	releaseInfo := &repoInfo{
+		RepositoryID:   "repo-kandev",
+		RepositoryPath: "/repos/kandev",
+		BaseBranch:     "release/1.2",
+		Position:       0,
+		Repository:     repo,
+	}
+	mainInfo := &repoInfo{
+		RepositoryID:   "repo-kandev",
+		RepositoryPath: "/repos/kandev",
+		BaseBranch:     "main",
+		Position:       1,
+		Repository:     repo,
+	}
+
+	specs := buildRepoSpecs([]*repoInfo{mainInfo, releaseInfo})
+
+	if specs[0].BranchIdentitySlug != "main" || specs[0].BranchSlug != "main" {
+		t.Fatalf("main plan = identity %q path %q, want main/main", specs[0].BranchIdentitySlug, specs[0].BranchSlug)
+	}
+	if specs[1].BranchIdentitySlug != "release-1.2" || specs[1].BranchSlug != "" {
+		t.Fatalf("release plan = identity %q path %q, want release-1.2/empty", specs[1].BranchIdentitySlug, specs[1].BranchSlug)
+	}
+}
+
+func TestPersistTaskEnvironmentRepos_RefreshesExistingRows(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	repo.taskEnvironmentRepos["env-refresh"] = []*models.TaskEnvironmentRepo{
+		{
+			ID:                "env-refresh-repo-main",
+			TaskEnvironmentID: "env-refresh",
+			RepositoryID:      "repo-kandev",
+			BranchSlug:        "main",
+			WorktreeID:        "wt-stale",
+			WorktreePath:      "/old/path",
+			WorktreeBranch:    "old-branch",
+			Position:          5,
+			ErrorMessage:      "old error",
+		},
+	}
+
+	exec.persistTaskEnvironmentRepos(context.Background(), "env-refresh", []RepoWorktreeResult{
+		{
+			RepositoryID:   "repo-kandev",
+			BranchSlug:     "main",
+			WorktreeID:     "wt-repaired",
+			WorktreePath:   "/new/path",
+			WorktreeBranch: "new-branch",
+			ErrorMessage:   "",
+		},
+	})
+
+	rows := repo.taskEnvironmentRepos["env-refresh"]
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	row := rows[0]
+	if row.WorktreeID != "wt-repaired" || row.WorktreePath != "/new/path" || row.WorktreeBranch != "new-branch" || row.Position != 0 || row.ErrorMessage != "" {
+		t.Fatalf("row was not refreshed: %+v", row)
+	}
+}
+
+func TestPersistTaskEnvironmentRepos_MigratesLegacyFlatRowToBranchIdentity(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	repo.taskEnvironmentRepos["env-legacy"] = []*models.TaskEnvironmentRepo{
+		{
+			ID:                "env-legacy-repo-flat",
+			TaskEnvironmentID: "env-legacy",
+			RepositoryID:      "repo-kandev",
+			BranchSlug:        "",
+			WorktreeID:        "wt-flat",
+			WorktreePath:      "/old/flat",
+		},
+	}
+
+	exec.persistTaskEnvironmentRepos(context.Background(), "env-legacy", []RepoWorktreeResult{
+		{
+			RepositoryID:   "repo-kandev",
+			BranchSlug:     "release-1.2",
+			WorktreeID:     "wt-flat",
+			WorktreePath:   "/new/flat",
+			WorktreeBranch: "feature/task",
+		},
+	})
+
+	rows := repo.taskEnvironmentRepos["env-legacy"]
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	row := rows[0]
+	if row.BranchSlug != "release-1.2" || row.WorktreeID != "wt-flat" || row.WorktreePath != "/new/flat" || row.WorktreeBranch != "feature/task" {
+		t.Fatalf("legacy row was not migrated: %+v", row)
 	}
 }
 

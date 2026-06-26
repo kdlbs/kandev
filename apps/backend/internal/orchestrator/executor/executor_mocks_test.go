@@ -825,11 +825,26 @@ func (m *mockRepository) UpdateTaskEnvironment(_ context.Context, env *models.Ta
 	return nil
 }
 func (m *mockRepository) CreateTaskEnvironmentRepo(_ context.Context, repo *models.TaskEnvironmentRepo) error {
+	if repo.ID == "" {
+		repo.ID = repo.TaskEnvironmentID + "-repo-" + repo.RepositoryID
+	}
 	m.taskEnvironmentRepos[repo.TaskEnvironmentID] = append(m.taskEnvironmentRepos[repo.TaskEnvironmentID], repo)
 	return nil
 }
 func (m *mockRepository) ListTaskEnvironmentRepos(_ context.Context, envID string) ([]*models.TaskEnvironmentRepo, error) {
 	return m.taskEnvironmentRepos[envID], nil
+}
+func (m *mockRepository) UpdateTaskEnvironmentRepo(_ context.Context, repo *models.TaskEnvironmentRepo) error {
+	rows := m.taskEnvironmentRepos[repo.TaskEnvironmentID]
+	for i, row := range rows {
+		if row.ID == repo.ID || (row.ID == "" && row.RepositoryID == repo.RepositoryID && row.BranchSlug == repo.BranchSlug) {
+			rows[i] = repo
+			m.taskEnvironmentRepos[repo.TaskEnvironmentID] = rows
+			return nil
+		}
+	}
+	m.taskEnvironmentRepos[repo.TaskEnvironmentID] = append(rows, repo)
+	return nil
 }
 
 // Task Plan operations
