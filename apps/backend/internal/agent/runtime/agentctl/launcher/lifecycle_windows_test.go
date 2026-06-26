@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/server/winproc"
 	"github.com/kandev/kandev/internal/common/logger"
-	"golang.org/x/sys/windows"
 )
 
 func newTestLauncher(t *testing.T) *Launcher {
@@ -22,15 +22,22 @@ func newTestLauncher(t *testing.T) *Launcher {
 }
 
 func TestCreateKillOnCloseJob(t *testing.T) {
-	job, err := createKillOnCloseJob()
-	if err != nil {
-		t.Fatalf("createKillOnCloseJob: %v", err)
+	cmd := exec.Command("cmd.exe", "/c", "exit", "0")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start child: %v", err)
 	}
-	if job == 0 {
+	job, err := winproc.InstallKillOnCloseJobForCommand(cmd)
+	if err != nil {
+		t.Fatalf("InstallKillOnCloseJobForCommand: %v", err)
+	}
+	if job.RawHandle() == 0 {
 		t.Fatal("got null job handle")
 	}
-	if err := windows.CloseHandle(job); err != nil {
-		t.Errorf("CloseHandle: %v", err)
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("wait child: %v", err)
+	}
+	if err := job.Close(); err != nil {
+		t.Errorf("job.Close: %v", err)
 	}
 }
 
@@ -44,13 +51,20 @@ func TestReleaseChildLifecycle_NoHandleIsNoop(t *testing.T) {
 }
 
 func TestReleaseChildLifecycle_Idempotent(t *testing.T) {
-	job, err := createKillOnCloseJob()
+	cmd := exec.Command("cmd.exe", "/c", "exit", "0")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start child: %v", err)
+	}
+	job, err := winproc.InstallKillOnCloseJobForCommand(cmd)
 	if err != nil {
-		t.Fatalf("createKillOnCloseJob: %v", err)
+		t.Fatalf("InstallKillOnCloseJobForCommand: %v", err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("wait child: %v", err)
 	}
 
 	l := newTestLauncher(t)
-	atomic.StoreUintptr(&l.jobHandle, uintptr(job))
+	atomic.StoreUintptr(&l.jobHandle, job.RawHandle())
 
 	l.releaseChildLifecycle()
 	// Second call must not double-close the handle.

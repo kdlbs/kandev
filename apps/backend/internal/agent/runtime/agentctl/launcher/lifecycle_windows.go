@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os/exec"
 	"sync/atomic"
-	"unsafe"
 
+	"github.com/kandev/kandev/internal/agentctl/server/winproc"
 	"go.uber.org/zap"
 	"golang.org/x/sys/windows"
 )
@@ -29,25 +29,9 @@ func (l *Launcher) installChildLifecycle(cmd *exec.Cmd) error {
 		return fmt.Errorf("installChildLifecycle: process not started")
 	}
 
-	job, err := createKillOnCloseJob()
+	job, err := winproc.InstallKillOnCloseJobForCommand(cmd)
 	if err != nil {
 		return err
-	}
-
-	procHandle, err := windows.OpenProcess(
-		windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE,
-		false,
-		uint32(cmd.Process.Pid),
-	)
-	if err != nil {
-		_ = windows.CloseHandle(job)
-		return fmt.Errorf("OpenProcess(pid=%d): %w", cmd.Process.Pid, err)
-	}
-	defer windows.CloseHandle(procHandle)
-
-	if err := windows.AssignProcessToJobObject(job, procHandle); err != nil {
-		_ = windows.CloseHandle(job)
-		return fmt.Errorf("AssignProcessToJobObject: %w", err)
 	}
 
 	// Defensive: if a previous lifecycle was somehow installed without a
@@ -56,7 +40,7 @@ func (l *Launcher) installChildLifecycle(cmd *exec.Cmd) error {
 	// new job is assigned avoids killing the new agentctl before we've stored
 	// its handle — the new job has KILL_ON_JOB_CLOSE so we must hold a
 	// reference at all times.
-	previous := atomic.SwapUintptr(&l.jobHandle, uintptr(job))
+	previous := atomic.SwapUintptr(&l.jobHandle, job.RawHandle())
 	if previous != 0 {
 		if err := windows.CloseHandle(windows.Handle(previous)); err != nil {
 			l.logger.Warn("failed to close stale job object handle", zap.Error(err))
@@ -84,29 +68,4 @@ func (l *Launcher) releaseChildLifecycle() {
 	if err := windows.CloseHandle(windows.Handle(handle)); err != nil {
 		l.logger.Warn("failed to close job object handle", zap.Error(err))
 	}
-}
-
-// createKillOnCloseJob creates an unnamed Job Object whose handle, when the
-// last reference is closed by the OS, terminates every process assigned to it.
-func createKillOnCloseJob() (windows.Handle, error) {
-	job, err := windows.CreateJobObject(nil, nil)
-	if err != nil {
-		return 0, fmt.Errorf("CreateJobObject: %w", err)
-	}
-
-	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{
-		BasicLimitInformation: windows.JOBOBJECT_BASIC_LIMIT_INFORMATION{
-			LimitFlags: windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-		},
-	}
-	if _, err := windows.SetInformationJobObject(
-		job,
-		windows.JobObjectExtendedLimitInformation,
-		uintptr(unsafe.Pointer(&info)),
-		uint32(unsafe.Sizeof(info)),
-	); err != nil {
-		_ = windows.CloseHandle(job)
-		return 0, fmt.Errorf("SetInformationJobObject: %w", err)
-	}
-	return job, nil
 }

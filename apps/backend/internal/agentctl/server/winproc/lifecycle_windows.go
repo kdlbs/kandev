@@ -29,28 +29,37 @@ func InstallKillOnCloseJobForSuspendedCommand(cmd *exec.Cmd) (KillOnCloseJob, er
 	return InstallKillOnCloseJobForSuspendedProcess(cmd.Process.Pid)
 }
 
+// InstallKillOnCloseJobForCommand assigns an already-running child process to
+// a kill-on-close Job Object. Use the suspended variant when the child must not
+// execute before job assignment.
+func InstallKillOnCloseJobForCommand(cmd *exec.Cmd) (KillOnCloseJob, error) {
+	if cmd == nil || cmd.Process == nil {
+		return KillOnCloseJob{}, fmt.Errorf("process not started")
+	}
+	return InstallKillOnCloseJobForProcess(cmd.Process.Pid)
+}
+
+func InstallKillOnCloseJobForProcess(pid int) (KillOnCloseJob, error) {
+	job, err := createKillOnCloseJob()
+	if err != nil {
+		return KillOnCloseJob{}, err
+	}
+	if err := assignProcessToJob(job, pid); err != nil {
+		_ = windows.CloseHandle(job)
+		return KillOnCloseJob{}, err
+	}
+	return KillOnCloseJob{handle: job}, nil
+}
+
 func InstallKillOnCloseJobForSuspendedProcess(pid int) (KillOnCloseJob, error) {
 	job, err := createKillOnCloseJob()
 	if err != nil {
 		return KillOnCloseJob{}, errors.Join(err, ResumeSuspendedProcess(pid))
 	}
-	procHandle, err := windows.OpenProcess(
-		windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE,
-		false,
-		uint32(pid),
-	)
-	if err != nil {
+	if err := assignProcessToJob(job, pid); err != nil {
 		_ = windows.CloseHandle(job)
 		return KillOnCloseJob{}, errors.Join(
-			fmt.Errorf("OpenProcess(pid=%d): %w", pid, err),
-			ResumeSuspendedProcess(pid),
-		)
-	}
-	defer windows.CloseHandle(procHandle)
-	if err := windows.AssignProcessToJobObject(job, procHandle); err != nil {
-		_ = windows.CloseHandle(job)
-		return KillOnCloseJob{}, errors.Join(
-			fmt.Errorf("AssignProcessToJobObject: %w", err),
+			err,
 			ResumeSuspendedProcess(pid),
 		)
 	}
@@ -66,6 +75,10 @@ func (j KillOnCloseJob) Close() error {
 		return nil
 	}
 	return windows.CloseHandle(j.handle)
+}
+
+func (j KillOnCloseJob) RawHandle() uintptr {
+	return uintptr(j.handle)
 }
 
 func createKillOnCloseJob() (windows.Handle, error) {
@@ -88,6 +101,22 @@ func createKillOnCloseJob() (windows.Handle, error) {
 		return 0, fmt.Errorf("SetInformationJobObject: %w", err)
 	}
 	return job, nil
+}
+
+func assignProcessToJob(job windows.Handle, pid int) error {
+	procHandle, err := windows.OpenProcess(
+		windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE,
+		false,
+		uint32(pid),
+	)
+	if err != nil {
+		return fmt.Errorf("OpenProcess(pid=%d): %w", pid, err)
+	}
+	defer windows.CloseHandle(procHandle)
+	if err := windows.AssignProcessToJobObject(job, procHandle); err != nil {
+		return fmt.Errorf("AssignProcessToJobObject: %w", err)
+	}
+	return nil
 }
 
 func ResumeSuspendedProcess(pid int) error {
