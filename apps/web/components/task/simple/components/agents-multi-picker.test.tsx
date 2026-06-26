@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { useEffect } from "react";
@@ -7,6 +8,7 @@ import { StateProvider, useAppStore } from "@/components/state-provider";
 import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutation";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 import { agentProfileId as toAgentProfileId, workspaceId as toWorkspaceId } from "@/lib/types/ids";
+import { qk } from "@/lib/query/keys";
 import { ApproversPicker } from "./approvers-picker";
 import { buildDecisionLookup } from "./agents-multi-picker";
 import type { Task, TaskDecision } from "@/app/office/tasks/[id]/types";
@@ -45,9 +47,18 @@ function makeAgent(id: string, name: string): AgentProfile {
   };
 }
 
-function SeedAgents({ agents }: { agents: AgentProfile[] }) {
-  const setAgents = useAppStore((s) => s.setOfficeAgentProfiles);
-  useEffect(() => setAgents(agents), [setAgents, agents]);
+function createQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+}
+
+function SeedWorkspace() {
+  const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace);
+  useEffect(() => setActiveWorkspace("ws-1"), [setActiveWorkspace]);
   return null;
 }
 
@@ -61,13 +72,17 @@ function Wrapper({
   agents: AgentProfile[];
 }) {
   const ctx = { task, applyPatch: () => {}, restore: () => {} };
+  const queryClient = createQueryClient();
+  queryClient.setQueryData(qk.office.agents("ws-1"), { agents });
   return (
-    <StateProvider>
-      <TooltipProvider>
-        <SeedAgents agents={agents} />
-        <TaskOptimisticContextProvider value={ctx}>{children}</TaskOptimisticContextProvider>
-      </TooltipProvider>
-    </StateProvider>
+    <QueryClientProvider client={queryClient}>
+      <StateProvider>
+        <TooltipProvider>
+          <SeedWorkspace />
+          <TaskOptimisticContextProvider value={ctx}>{children}</TaskOptimisticContextProvider>
+        </TooltipProvider>
+      </StateProvider>
+    </QueryClientProvider>
   );
 }
 

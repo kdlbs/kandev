@@ -100,6 +100,10 @@ out any mobile E2E coverage added or reused.
   task reads. It removed the unused `useOfficeRefetch` hook, legacy Office WS
   handler registration/test, `office.refetchTrigger`, and the unused
   `office.tasks.items`/loading server-state fields/actions.
+- The Office simple-pane reference-data cleanup moved task detail chat/activity/
+  session labels, assignee/project/reviewer/approver pickers, pending approval
+  badges, and run-error labels from `office.agentProfiles`/`office.projects`
+  store mirrors to active-workspace Office Query caches.
 - Migrated office dashboard, tasks, task search, task detail comments/activity,
   agents, agent run/detail routes, projects/project tasks, inbox, activity,
   routines, routing, costs, budgets, and skills to TanStack Query readers.
@@ -115,7 +119,7 @@ out any mobile E2E coverage added or reused.
 - Removed the legacy `useOfficeRefetch` hook definition, old Office WS fanout,
   Office refetch trigger state, and unused Office task server-state mirror.
   Remaining Office cleanup is now concentrated in agent/project/routine/skill
-  store mirrors and readers.
+  store mirrors and deeper Office page readers/writers.
 - Reused existing mobile coverage through `tests/office/mobile-onboarding.spec.ts`
   in Docker.
 
@@ -135,3 +139,12 @@ out any mobile E2E coverage added or reused.
   - `rtk pnpm --dir apps/web lint` passed.
   - `rtk pnpm --dir apps/web e2e:docker tests/office/tasks.spec.ts tests/office/realtime-tasks.spec.ts tests/office/task-filters.spec.ts tests/office/task-sorting.spec.ts tests/office/topbar-breadcrumb.spec.ts tests/office/comment-input.spec.ts tests/office/simple-advanced-toggle.spec.ts tests/office/regression-fixes.spec.ts tests/office/property-pickers.spec.ts tests/office/projects.spec.ts tests/office/agent-run-detail.spec.ts tests/system/ws-event-accounting.spec.ts`
     passed 43 Docker tests / 1 skipped with strict WS accounting.
+- Simple-pane reference-data cleanup:
+  - `rtk pnpm --dir apps/web test components/task/simple/components/agents-multi-picker.test.tsx components/task/simple/components/blockers-picker.test.tsx components/task/simple/components/status-picker.test.tsx components/task/simple/components/priority-picker.test.tsx components/task/simple/components/approval-action-bar.test.tsx`
+    passed 5 files / 17 tests / 4 skipped.
+  - `rtk rg -n "office\\.agentProfiles|office\\.projects|office\\.routines|office\\.skills|setOfficeAgentProfiles|setProjects|setRoutines|setSkills" apps/web/components/task/simple --glob '!dist/**' --glob '!**/*.test.*'`
+    returned no matches.
+  - `rtk pnpm --dir apps/web typecheck` passed.
+  - `rtk pnpm --dir apps/web lint` passed.
+  - `rtk pnpm --dir apps/web e2e:docker tests/office/property-pickers.spec.ts tests/office/comment-input.spec.ts tests/office/simple-advanced-toggle.spec.ts tests/office/regression-fixes.spec.ts tests/office/tasks.spec.ts tests/office/realtime-tasks.spec.ts tests/system/ws-event-accounting.spec.ts`
+    passed 30 Docker tests with strict WS accounting.

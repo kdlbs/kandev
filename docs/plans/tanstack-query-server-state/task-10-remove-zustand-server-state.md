@@ -80,13 +80,21 @@ Completed cleanup sub-waves:
   `rtk pnpm --dir apps/web typecheck`, `rtk pnpm --dir apps/web lint`, and
   `rtk pnpm --dir apps/web e2e:docker tests/office/tasks.spec.ts tests/office/realtime-tasks.spec.ts tests/office/task-filters.spec.ts tests/office/task-sorting.spec.ts tests/office/topbar-breadcrumb.spec.ts tests/office/comment-input.spec.ts tests/office/simple-advanced-toggle.spec.ts tests/office/regression-fixes.spec.ts tests/office/property-pickers.spec.ts tests/office/projects.spec.ts tests/office/agent-run-detail.spec.ts tests/system/ws-event-accounting.spec.ts`
   passing 43 Docker tests / 1 skipped with strict WS accounting.
+- **Office simple-pane reference-data cleanup:** moved task detail chat/activity/
+  session labels, assignee/project/reviewer/approver pickers, pending approval
+  badges, and run-error labels from `office.agentProfiles`/`office.projects`
+  store mirrors to active-workspace Office Query caches. Verified by
+  `rtk pnpm --dir apps/web test components/task/simple/components/agents-multi-picker.test.tsx components/task/simple/components/blockers-picker.test.tsx components/task/simple/components/status-picker.test.tsx components/task/simple/components/priority-picker.test.tsx components/task/simple/components/approval-action-bar.test.tsx`,
+  `rtk rg -n "office\\.agentProfiles|office\\.projects|office\\.routines|office\\.skills|setOfficeAgentProfiles|setProjects|setRoutines|setSkills" apps/web/components/task/simple --glob '!dist/**' --glob '!**/*.test.*'`,
+  `rtk pnpm --dir apps/web typecheck`, `rtk pnpm --dir apps/web lint`, and
+  `rtk pnpm --dir apps/web e2e:docker tests/office/property-pickers.spec.ts tests/office/comment-input.spec.ts tests/office/simple-advanced-toggle.spec.ts tests/office/regression-fixes.spec.ts tests/office/tasks.spec.ts tests/office/realtime-tasks.spec.ts tests/system/ws-event-accounting.spec.ts`
+  passing 30 Docker tests with strict WS accounting.
 
 Remaining cleanup:
 
 - Office agent/project/routine/skill readers and writer actions still have
-  store mirrors in deeper Office pages and simple-pane components. Task 10 stays
-  `in_progress` until those paths are removed or explicitly documented as
-  client-only temporary indexes.
+  store mirrors in deeper Office pages. Task 10 stays `in_progress` until those
+  paths are removed or explicitly documented as client-only temporary indexes.
 
 - **System:** removed the system Zustand slice and `system-events` WS handler.
   System hooks and topbar metrics now read Query caches/options directly. The
