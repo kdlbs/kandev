@@ -642,7 +642,13 @@ func (m *mockRepository) GetLastAgentMessage(_ context.Context, _ string) (strin
 
 // Task Session Worktree operations
 func (m *mockRepository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error) {
-	return nil, nil
+	var out []*models.TaskSessionWorktree
+	for _, wt := range m.sessionWorktrees {
+		if wt.SessionID == sessionID {
+			out = append(out, wt)
+		}
+	}
+	return out, nil
 }
 func (m *mockRepository) ListWorktreesBySessionIDs(_ context.Context, _ []string) (map[string][]*models.TaskSessionWorktree, error) {
 	return make(map[string][]*models.TaskSessionWorktree), nil

@@ -6,6 +6,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	"go.uber.org/zap"
 )
 
@@ -45,6 +46,7 @@ func (e *Executor) reuseExistingEnvironment(ctx context.Context, req *LaunchAgen
 			zap.String("task_id", req.TaskID),
 			zap.String("worktree_id", env.WorktreeID))
 	}
+	e.reuseExistingRepositoryWorktrees(ctx, req, env)
 
 	if env.ContainerID != "" || env.SandboxID != "" {
 		metadata := ensureLaunchMetadata(req)
@@ -70,6 +72,106 @@ func (e *Executor) reuseExistingEnvironment(ctx context.Context, req *LaunchAgen
 	if running := e.latestExecutorRunningForEnvironment(ctx, req.TaskID, env); running != nil {
 		applyExecutorRunningMetadata(req, running)
 	}
+}
+
+type repositoryWorktreeKey struct {
+	repositoryID string
+	branchSlug   string
+}
+
+func (e *Executor) reuseExistingRepositoryWorktrees(ctx context.Context, req *LaunchAgentRequest, env *models.TaskEnvironment) {
+	if !req.UseWorktree || len(req.Repositories) == 0 {
+		return
+	}
+
+	worktreeIDs := e.environmentRepoWorktreeIDs(req, env)
+	for key, id := range e.latestSessionWorktreeIDsForEnvironment(ctx, req.TaskID, env.ID) {
+		worktreeIDs[key] = id
+	}
+	if len(worktreeIDs) == 0 {
+		return
+	}
+
+	for i := range req.Repositories {
+		spec := &req.Repositories[i]
+		key := repositoryWorktreeKey{
+			repositoryID: spec.RepositoryID,
+			branchSlug:   worktree.SanitizeBranchSlug(spec.BranchSlug),
+		}
+		if id := worktreeIDs[key]; id != "" {
+			spec.WorktreeID = id
+		}
+	}
+	if req.Repositories[0].WorktreeID != "" {
+		req.WorktreeID = req.Repositories[0].WorktreeID
+	}
+}
+
+func (e *Executor) environmentRepoWorktreeIDs(req *LaunchAgentRequest, env *models.TaskEnvironment) map[repositoryWorktreeKey]string {
+	result := make(map[repositoryWorktreeKey]string)
+	for _, repo := range env.Repos {
+		if repo.RepositoryID == "" || repo.WorktreeID == "" {
+			continue
+		}
+		result[repositoryWorktreeKey{
+			repositoryID: repo.RepositoryID,
+			branchSlug:   worktree.SanitizeBranchSlug(repo.BranchSlug),
+		}] = repo.WorktreeID
+	}
+	return result
+}
+
+func (e *Executor) latestSessionWorktreeIDsForEnvironment(ctx context.Context, taskID, envID string) map[repositoryWorktreeKey]string {
+	sessions, err := e.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		e.logger.Warn("failed to list sessions for per-repo worktree reuse",
+			zap.String("task_id", taskID),
+			zap.String("task_environment_id", envID),
+			zap.Error(err))
+		return nil
+	}
+	sort.SliceStable(sessions, func(i, j int) bool {
+		if !sessions[i].StartedAt.Equal(sessions[j].StartedAt) {
+			return sessions[i].StartedAt.After(sessions[j].StartedAt)
+		}
+		if !sessions[i].UpdatedAt.Equal(sessions[j].UpdatedAt) {
+			return sessions[i].UpdatedAt.After(sessions[j].UpdatedAt)
+		}
+		return sessions[i].ID > sessions[j].ID
+	})
+	for _, session := range sessions {
+		if envID != "" && session.TaskEnvironmentID != "" && session.TaskEnvironmentID != envID {
+			continue
+		}
+		worktrees, err := e.repo.ListTaskSessionWorktrees(ctx, session.ID)
+		if err != nil {
+			e.logger.Warn("failed to list session worktrees for reuse",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.Error(err))
+			continue
+		}
+		result := sessionWorktreeIDsByKey(worktrees)
+		if len(result) > 0 {
+			return result
+		}
+	}
+	return nil
+}
+
+func sessionWorktreeIDsByKey(worktrees []*models.TaskSessionWorktree) map[repositoryWorktreeKey]string {
+	result := make(map[repositoryWorktreeKey]string, len(worktrees))
+	for _, wt := range worktrees {
+		if wt.RepositoryID == "" || wt.WorktreeID == "" {
+			continue
+		}
+		key := repositoryWorktreeKey{
+			repositoryID: wt.RepositoryID,
+			branchSlug:   worktree.SanitizeBranchSlug(wt.BranchSlug),
+		}
+		result[key] = wt.WorktreeID
+	}
+	return result
 }
 
 func (e *Executor) latestExecutorRunningForEnvironment(ctx context.Context, taskID string, env *models.TaskEnvironment) *models.ExecutorRunning {

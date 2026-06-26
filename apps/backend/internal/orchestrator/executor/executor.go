@@ -40,6 +40,7 @@ type executorStore interface {
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	// Session worktree
 	CreateTaskSessionWorktree(ctx context.Context, sessionWorktree *models.TaskSessionWorktree) error
+	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error)
 	// Repository entity
 	GetRepository(ctx context.Context, id string) (*models.Repository, error)
 	// Executor
@@ -424,6 +425,7 @@ type LaunchAgentResponse struct {
 // API surface. One entry per repository prepared during a multi-repo launch.
 type RepoWorktreeResult struct {
 	RepositoryID   string
+	BranchSlug     string
 	WorktreeID     string
 	WorktreeBranch string
 	WorktreePath   string

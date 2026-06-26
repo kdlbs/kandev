@@ -125,6 +125,7 @@ type PrepareStep struct {
 // to one RepoPrepareSpec from the request.
 type RepoWorktreeResult struct {
 	RepositoryID   string `json:"repository_id"`
+	BranchSlug     string `json:"branch_slug,omitempty"`
 	WorktreeID     string `json:"worktree_id,omitempty"`
 	WorktreeBranch string `json:"worktree_branch,omitempty"`
 	WorktreePath   string `json:"worktree_path,omitempty"`

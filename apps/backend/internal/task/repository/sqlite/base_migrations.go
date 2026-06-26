@@ -82,6 +82,9 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateTaskEnvironmentsRemoveAgentExecutionID(); err != nil {
 		return err
 	}
+	if err := r.migrateTaskEnvironmentReposAllowMultiBranch(); err != nil {
+		return err
+	}
 	r.migrate.Apply("workflows.sort_order", `ALTER TABLE workflows ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("workflows.agent_profile_id", `ALTER TABLE workflows ADD COLUMN agent_profile_id TEXT DEFAULT ''`)
 	r.migrate.Apply("workflows.hidden", `ALTER TABLE workflows ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`)
@@ -392,6 +395,40 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 		// AFTER healDuplicateTaskEnvironments collapses any pre-existing duplicates.
 		// Creating it here would fail on databases that still have duplicate task_id rows.
 	})
+}
+
+func (r *Repository) migrateTaskEnvironmentReposAllowMultiBranch() error {
+	return r.recreateTableNamed(
+		"task_environment_repos.recreate_allow_multi_branch",
+		"task_environment_repos",
+		"UNIQUE(task_environment_id, repository_id)",
+		[]string{
+			`CREATE TABLE task_environment_repos_new (
+				id TEXT PRIMARY KEY,
+				task_environment_id TEXT NOT NULL,
+				repository_id TEXT NOT NULL,
+				branch_slug TEXT NOT NULL DEFAULT '',
+				worktree_id TEXT DEFAULT '',
+				worktree_path TEXT DEFAULT '',
+				worktree_branch TEXT DEFAULT '',
+				position INTEGER DEFAULT 0,
+				error_message TEXT DEFAULT '',
+				created_at TIMESTAMP NOT NULL,
+				updated_at TIMESTAMP NOT NULL,
+				FOREIGN KEY (task_environment_id) REFERENCES task_environments(id) ON DELETE CASCADE,
+				UNIQUE(task_environment_id, repository_id, branch_slug)
+			)`,
+			`INSERT INTO task_environment_repos_new SELECT
+				id, task_environment_id, repository_id, '',
+				worktree_id, worktree_path, worktree_branch,
+				position, error_message, created_at, updated_at
+			FROM task_environment_repos`,
+			`DROP TABLE task_environment_repos`,
+			`ALTER TABLE task_environment_repos_new RENAME TO task_environment_repos`,
+			`CREATE INDEX IF NOT EXISTS idx_task_environment_repos_env_id ON task_environment_repos(task_environment_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_task_environment_repos_repository_id ON task_environment_repos(repository_id)`,
+		},
+	)
 }
 
 // migrateTaskRepositoriesAllowMultiBranch swaps the legacy
@@ -851,10 +888,10 @@ func (r *Repository) backfillTaskEnvironmentRepos() error {
 	for _, row := range pending {
 		if _, err := tx.Exec(`
 			INSERT INTO task_environment_repos (
-				id, task_environment_id, repository_id,
+				id, task_environment_id, repository_id, branch_slug,
 				worktree_id, worktree_path, worktree_branch,
 				position, error_message, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, 0, '', ?, ?)
+			) VALUES (?, ?, ?, '', ?, ?, ?, 0, '', ?, ?)
 		`, uuid.New().String(), row.envID, row.repoID,
 			row.wtID, row.wtPath, row.wtBranch,
 			row.createdAt, row.createdAt); err != nil {

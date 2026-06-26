@@ -34,6 +34,15 @@ func seedMultiRepoTask(t *testing.T, repo *mockRepository, taskID string) {
 	}
 }
 
+func seedWorktreeExecutor(repo *mockRepository) {
+	repo.executors[models.ExecutorIDWorktree] = &models.Executor{
+		ID:        models.ExecutorIDWorktree,
+		Type:      models.ExecutorTypeWorktree,
+		Status:    models.ExecutorStatusActive,
+		Resumable: true,
+	}
+}
+
 func TestLaunchPreparedSession_MultiRepo_PopulatesRequestRepositories(t *testing.T) {
 	repo := newMockRepository()
 	taskID := "task-multi-1"
@@ -162,6 +171,179 @@ func TestLaunchPreparedSession_MultiRepo_PersistsPerRepoEnvironmentAndWorktreeRo
 	}
 	if !repoIDsSeen["repo-front"] || !repoIDsSeen["repo-back"] {
 		t.Errorf("expected both repo IDs persisted; got %v", repoIDsSeen)
+	}
+}
+
+func TestLaunchPreparedSession_MultiRepo_ReusesPerRepoWorktreeIDsFromEnvironment(t *testing.T) {
+	repo := newMockRepository()
+	taskID := "task-multi-reuse"
+	sessionID := "session-multi-reuse"
+	seedMultiRepoTask(t, repo, taskID)
+	seedWorktreeExecutor(repo)
+
+	repo.taskEnvironments["env-existing"] = &models.TaskEnvironment{
+		ID:           "env-existing",
+		TaskID:       taskID,
+		ExecutorType: string(models.ExecutorTypeWorktree),
+		Status:       models.TaskEnvironmentStatusReady,
+		WorktreeID:   "wt-front",
+		Repos: []*models.TaskEnvironmentRepo{
+			{
+				TaskEnvironmentID: "env-existing",
+				RepositoryID:      "repo-front",
+				WorktreeID:        "wt-front",
+				Position:          0,
+			},
+			{
+				TaskEnvironmentID: "env-existing",
+				RepositoryID:      "repo-back",
+				WorktreeID:        "wt-back",
+				Position:          1,
+			},
+		},
+	}
+	repo.taskEnvironmentRepos["env-existing"] = repo.taskEnvironments["env-existing"].Repos
+	repo.sessions[sessionID] = &models.TaskSession{
+		ID:             sessionID,
+		TaskID:         taskID,
+		AgentProfileID: "profile-123",
+		ExecutorID:     models.ExecutorIDWorktree,
+		State:          models.TaskSessionStateCreated,
+		StartedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+
+	var captured *LaunchAgentRequest
+	agentManager := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			captured = req
+			return &LaunchAgentResponse{AgentExecutionID: "exec-reuse"}, nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+
+	task := &v1.Task{ID: taskID, WorkspaceID: "ws-1", Title: "Multi"}
+	_, err := exec.LaunchPreparedSession(context.Background(), task, sessionID, LaunchOptions{
+		AgentProfileID: "profile-123",
+		ExecutorID:     models.ExecutorIDWorktree,
+		StartAgent:     false,
+	})
+	if err != nil {
+		t.Fatalf("LaunchPreparedSession: %v", err)
+	}
+
+	if captured == nil {
+		t.Fatal("expected launch request to be captured")
+	}
+	if len(captured.Repositories) != 2 {
+		t.Fatalf("expected 2 repo specs, got %d", len(captured.Repositories))
+	}
+	if captured.Repositories[0].WorktreeID != "wt-front" {
+		t.Errorf("front WorktreeID = %q, want wt-front", captured.Repositories[0].WorktreeID)
+	}
+	if captured.Repositories[1].WorktreeID != "wt-back" {
+		t.Errorf("back WorktreeID = %q, want wt-back", captured.Repositories[1].WorktreeID)
+	}
+}
+
+func TestLaunchPreparedSession_MultiBranch_ReusesWorktreeIDsByBranchSlug(t *testing.T) {
+	repo := newMockRepository()
+	taskID := "task-multi-branch-reuse"
+	sessionID := "session-multi-branch-reuse"
+	sourceSessionID := "session-source"
+	now := time.Now().UTC()
+	seedWorktreeExecutor(repo)
+
+	repo.repositories["repo-kandev"] = &models.Repository{
+		ID:                   "repo-kandev",
+		Name:                 "kandev",
+		LocalPath:            "/repos/kandev",
+		WorktreeBranchPrefix: "feature/",
+	}
+	repo.taskRepositories["tr-main"] = &models.TaskRepository{
+		ID: "tr-main", TaskID: taskID, RepositoryID: "repo-kandev", Position: 0, BaseBranch: "main",
+	}
+	repo.taskRepositories["tr-branch"] = &models.TaskRepository{
+		ID: "tr-branch", TaskID: taskID, RepositoryID: "repo-kandev", Position: 1, BaseBranch: "main", CheckoutBranch: "branch-5hn",
+	}
+	repo.taskEnvironments["env-existing"] = &models.TaskEnvironment{
+		ID:           "env-existing",
+		TaskID:       taskID,
+		ExecutorType: string(models.ExecutorTypeWorktree),
+		Status:       models.TaskEnvironmentStatusReady,
+		WorktreeID:   "wt-main",
+	}
+	repo.sessions[sourceSessionID] = &models.TaskSession{
+		ID:                sourceSessionID,
+		TaskID:            taskID,
+		TaskEnvironmentID: "env-existing",
+		StartedAt:         now.Add(-time.Minute),
+		UpdatedAt:         now.Add(-time.Minute),
+	}
+	repo.sessions[sessionID] = &models.TaskSession{
+		ID:             sessionID,
+		TaskID:         taskID,
+		AgentProfileID: "profile-123",
+		ExecutorID:     models.ExecutorIDWorktree,
+		State:          models.TaskSessionStateCreated,
+		StartedAt:      now,
+		UpdatedAt:      now,
+	}
+	repo.sessionWorktrees = append(repo.sessionWorktrees,
+		&models.TaskSessionWorktree{
+			SessionID:      sourceSessionID,
+			RepositoryID:   "repo-kandev",
+			WorktreeID:     "wt-main",
+			BranchSlug:     "",
+			WorktreePath:   "/tasks/t/kandev",
+			WorktreeBranch: "feature/t",
+		},
+		&models.TaskSessionWorktree{
+			SessionID:      sourceSessionID,
+			RepositoryID:   "repo-kandev",
+			WorktreeID:     "wt-branch",
+			BranchSlug:     "branch-5hn",
+			WorktreePath:   "/tasks/t/kandev-branch-5hn",
+			WorktreeBranch: "branch-5hn",
+		},
+	)
+
+	var captured *LaunchAgentRequest
+	agentManager := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			captured = req
+			return &LaunchAgentResponse{AgentExecutionID: "exec-reuse-branch"}, nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+
+	task := &v1.Task{ID: taskID, WorkspaceID: "ws-1", Title: "Multi Branch"}
+	_, err := exec.LaunchPreparedSession(context.Background(), task, sessionID, LaunchOptions{
+		AgentProfileID: "profile-123",
+		ExecutorID:     models.ExecutorIDWorktree,
+		StartAgent:     false,
+	})
+	if err != nil {
+		t.Fatalf("LaunchPreparedSession: %v", err)
+	}
+
+	if captured == nil {
+		t.Fatal("expected launch request to be captured")
+	}
+	if len(captured.Repositories) != 2 {
+		t.Fatalf("expected 2 repo specs, got %d", len(captured.Repositories))
+	}
+	if captured.Repositories[0].WorktreeID != "wt-main" {
+		t.Errorf("main WorktreeID = %q, want wt-main", captured.Repositories[0].WorktreeID)
+	}
+	if captured.Repositories[1].BranchSlug != "branch-5hn" {
+		t.Errorf("branch spec BranchSlug = %q, want branch-5hn", captured.Repositories[1].BranchSlug)
+	}
+	if captured.Repositories[1].WorktreeID != "wt-branch" {
+		t.Errorf("branch WorktreeID = %q, want wt-branch", captured.Repositories[1].WorktreeID)
+	}
+	if captured.WorktreeID != "wt-main" {
+		t.Errorf("top-level WorktreeID = %q, want wt-main", captured.WorktreeID)
 	}
 }
 

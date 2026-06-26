@@ -188,6 +188,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		for _, w := range execution.PrepareResult.Worktrees {
 			worktrees = append(worktrees, executor.RepoWorktreeResult{
 				RepositoryID:   w.RepositoryID,
+				BranchSlug:     w.BranchSlug,
 				WorktreeID:     w.WorktreeID,
 				WorktreeBranch: w.WorktreeBranch,
 				WorktreePath:   w.WorktreePath,

@@ -375,6 +375,7 @@ func (p *WorktreePreparer) prepareMultiRepo(
 		createdIDs = append(createdIDs, wt.ID)
 		worktrees = append(worktrees, RepoWorktreeResult{
 			RepositoryID:   spec.RepositoryID,
+			BranchSlug:     spec.BranchSlug,
 			WorktreeID:     wt.ID,
 			WorktreeBranch: wt.Branch,
 			WorktreePath:   wt.Path,

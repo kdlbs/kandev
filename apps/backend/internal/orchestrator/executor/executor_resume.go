@@ -276,6 +276,7 @@ func (e *Executor) persistWorktreeAssociation(ctx context.Context, taskID string
 				SessionID:      session.ID,
 				WorktreeID:     w.WorktreeID,
 				RepositoryID:   w.RepositoryID,
+				BranchSlug:     w.BranchSlug,
 				Position:       i,
 				WorktreePath:   w.WorktreePath,
 				WorktreeBranch: w.WorktreeBranch,

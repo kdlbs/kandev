@@ -1071,11 +1071,15 @@ func (r *Repository) CreateTaskSessionWorktree(ctx context.Context, sessionWorkt
 
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_session_worktrees (
-			id, session_id, worktree_id, repository_id, position,
+			id, session_id, worktree_id, repository_id, branch_slug, position,
 			worktree_path, worktree_branch, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id, worktree_id) DO UPDATE SET
 			repository_id = excluded.repository_id,
+			branch_slug = CASE
+				WHEN excluded.branch_slug != '' THEN excluded.branch_slug
+				ELSE task_session_worktrees.branch_slug
+			END,
 			position = excluded.position,
 			worktree_path = excluded.worktree_path,
 			worktree_branch = excluded.worktree_branch,
@@ -1085,6 +1089,7 @@ func (r *Repository) CreateTaskSessionWorktree(ctx context.Context, sessionWorkt
 		sessionWorktree.SessionID,
 		sessionWorktree.WorktreeID,
 		sessionWorktree.RepositoryID,
+		sessionWorktree.BranchSlug,
 		sessionWorktree.Position,
 		sessionWorktree.WorktreePath,
 		sessionWorktree.WorktreeBranch,
@@ -1110,7 +1115,8 @@ func (r *Repository) UpdateTaskSessionWorktreeBranch(ctx context.Context, sessio
 func (r *Repository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT
-			tsw.id, tsw.session_id, tsw.worktree_id, tsw.repository_id, tsw.position,
+			tsw.id, tsw.session_id, tsw.worktree_id, tsw.repository_id,
+			COALESCE(tsw.branch_slug, ''), tsw.position,
 			tsw.worktree_path, tsw.worktree_branch, tsw.created_at
 		FROM task_session_worktrees tsw
 		WHERE tsw.session_id = ?
@@ -1129,6 +1135,7 @@ func (r *Repository) ListTaskSessionWorktrees(ctx context.Context, sessionID str
 			&wt.SessionID,
 			&wt.WorktreeID,
 			&wt.RepositoryID,
+			&wt.BranchSlug,
 			&wt.Position,
 			&wt.WorktreePath,
 			&wt.WorktreeBranch,
@@ -1173,7 +1180,7 @@ func (r *Repository) appendWorktreesForSessionChunk(
 ) error {
 	placeholders, args := buildInPlaceholders(sessionIDs)
 	query := `SELECT tsw.id, tsw.session_id, tsw.worktree_id, tsw.repository_id, tsw.position,
-		tsw.worktree_path, tsw.worktree_branch, tsw.created_at
+		COALESCE(tsw.branch_slug, ''), tsw.worktree_path, tsw.worktree_branch, tsw.created_at
 		FROM task_session_worktrees tsw
 		WHERE tsw.session_id IN (` + placeholders + `)
 		ORDER BY tsw.position ASC, tsw.created_at ASC`
@@ -1187,7 +1194,7 @@ func (r *Repository) appendWorktreesForSessionChunk(
 	for rows.Next() {
 		var wt models.TaskSessionWorktree
 		if err := rows.Scan(&wt.ID, &wt.SessionID, &wt.WorktreeID, &wt.RepositoryID,
-			&wt.Position, &wt.WorktreePath, &wt.WorktreeBranch, &wt.CreatedAt); err != nil {
+			&wt.Position, &wt.BranchSlug, &wt.WorktreePath, &wt.WorktreeBranch, &wt.CreatedAt); err != nil {
 			return err
 		}
 		result[wt.SessionID] = append(result[wt.SessionID], &wt)

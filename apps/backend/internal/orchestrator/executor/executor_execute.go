@@ -1155,6 +1155,7 @@ func buildTaskEnvironmentRepos(worktrees []RepoWorktreeResult) []*models.TaskEnv
 	for i, w := range worktrees {
 		out = append(out, &models.TaskEnvironmentRepo{
 			RepositoryID:   w.RepositoryID,
+			BranchSlug:     w.BranchSlug,
 			WorktreeID:     w.WorktreeID,
 			WorktreePath:   w.WorktreePath,
 			WorktreeBranch: w.WorktreeBranch,
@@ -1181,15 +1182,17 @@ func (e *Executor) persistTaskEnvironmentRepos(ctx context.Context, envID string
 	}
 	have := make(map[string]bool, len(existing))
 	for _, row := range existing {
-		have[row.RepositoryID] = true
+		have[row.RepositoryID+"\x00"+row.BranchSlug] = true
 	}
 	for i, w := range worktrees {
-		if w.RepositoryID == "" || have[w.RepositoryID] {
+		key := w.RepositoryID + "\x00" + w.BranchSlug
+		if w.RepositoryID == "" || have[key] {
 			continue
 		}
 		row := &models.TaskEnvironmentRepo{
 			TaskEnvironmentID: envID,
 			RepositoryID:      w.RepositoryID,
+			BranchSlug:        w.BranchSlug,
 			WorktreeID:        w.WorktreeID,
 			WorktreePath:      w.WorktreePath,
 			WorktreeBranch:    w.WorktreeBranch,

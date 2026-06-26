@@ -38,6 +38,7 @@ Workarounds (sibling tasks, manually managing two worktrees) lost shared context
 - Single-branch tasks: `~/.kandev/tasks/<task-dir>/<repo>/` (unchanged).
 - Multi-branch tasks: first occurrence of each repo keeps `~/.kandev/tasks/<task-dir>/<repo>/`; additional occurrences sit as siblings at `~/.kandev/tasks/<task-dir>/<repo>-<branch-slug>/`. The slug is derived deterministically from `CheckoutBranch` (or `BaseBranch` when the checkout branch is empty) via `worktree.SanitizeBranchSlug`.
 - The orchestrator (`buildRepoSpecs`) detects same-repo duplicates and tags additional rows with a `BranchSlug`; the worktree manager applies the slug as a suffix at the task-root level. Sibling siting (rather than nesting inside the primary) keeps each worktree's git scope isolated.
+- Subsequent sessions on the same task, including handoffs and additional agents, reuse the task's existing worktree IDs for every `(repository, branch)` pair. They do not create a new task directory or sibling worktree set unless the task itself gains a new branch/repository pair.
 
 ### PRs
 
@@ -70,6 +71,7 @@ Workarounds (sibling tasks, manually managing two worktrees) lost shared context
 - `TestCreateTask_RejectsSameRepoSameBranch` — dedup guard still rejects exact duplicates.
 - `TestAddBranchToTask_HappyPath` — second branch appended after the fact lands as a new row.
 - `TestAddBranchToTask_RejectsDuplicate` — re-adding the same `(repo, branch)` errors.
+- `TestLaunchPreparedSession_MultiBranch_ReusesWorktreeIDsByBranchSlug` — a follow-on session for the same task reuses each existing branch worktree instead of preparing a new task directory.
 
 ## Open questions
 
