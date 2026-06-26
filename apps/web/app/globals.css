@@ -202,6 +202,20 @@
   }
 }
 
+/* iOS Safari auto-zooms a focused form control whose computed font-size is
+   < 16px. Force 16px on coarse-pointer (touch) devices to stop focus-zoom.
+   Kept unlayered on purpose so it overrides Tailwind's text-size utilities
+   (e.g. text-sm/text-xs) — moving it into @layer base would let those win
+   and silently break the fix. */
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select,
+  [contenteditable] {
+    font-size: 16px;
+  }
+}
+
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;
