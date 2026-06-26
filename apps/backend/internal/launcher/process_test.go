@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLimitedBufferKeepsOnlyTail(t *testing.T) {
@@ -123,6 +124,27 @@ func TestSupervisorShutdownRunsOnce(t *testing.T) {
 	}
 	if strings.Contains(got, "backend exit") {
 		t.Fatalf("second shutdown reason was logged; output:\n%s", got)
+	}
+}
+
+func TestWaitForManagedProcessKillDoneReturnsOnClose(t *testing.T) {
+	done := make(chan struct{})
+	close(done)
+
+	if !waitForManagedProcessKillDone(done, time.Second) {
+		t.Fatal("expected closed done channel to return true")
+	}
+}
+
+func TestWaitForManagedProcessKillDoneTimesOut(t *testing.T) {
+	done := make(chan struct{})
+	start := time.Now()
+
+	if waitForManagedProcessKillDone(done, 10*time.Millisecond) {
+		t.Fatal("expected open done channel to time out")
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("timeout wait took too long: %s", elapsed)
 	}
 }
 

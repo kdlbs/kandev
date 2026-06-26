@@ -344,9 +344,13 @@ func (p *managedProcess) kill() managedProcessShutdownResult {
 		_ = p.cmd.Process.Kill()
 		result.err = err
 	}
-	<-p.done
+	if waitForManagedProcessKillDone(p.done, managedProcessForceKillWait) {
+		shutdownDebugf("managed process killed after grace pid=%d", pid)
+	} else {
+		result.err = errors.Join(result.err, fmt.Errorf("timed out waiting for process %d after SIGKILL", pid))
+		shutdownDebugf("managed process kill wait timed out after SIGKILL pid=%d", pid)
+	}
 	result.duration = time.Since(start)
-	shutdownDebugf("managed process killed after grace pid=%d", pid)
 	return result
 }
 
@@ -383,16 +387,23 @@ func (p *managedProcess) forceKill(reason string) managedProcessShutdownResult {
 		_ = p.cmd.Process.Kill()
 		result.err = err
 	}
-	select {
-	case <-p.done:
+	if waitForManagedProcessKillDone(p.done, managedProcessForceKillWait) {
 		result.duration = time.Since(start)
 		shutdownDebugf("managed process force killed pid=%d", pid)
 		return result
-	case <-time.After(managedProcessForceKillWait):
-		result.duration = time.Since(start)
-		result.err = errors.Join(result.err, fmt.Errorf("timed out waiting for process %d after SIGKILL", pid))
-		shutdownDebugf("managed process force kill wait timed out pid=%d", pid)
-		return result
+	}
+	result.duration = time.Since(start)
+	result.err = errors.Join(result.err, fmt.Errorf("timed out waiting for process %d after SIGKILL", pid))
+	shutdownDebugf("managed process force kill wait timed out pid=%d", pid)
+	return result
+}
+
+func waitForManagedProcessKillDone(done <-chan struct{}, timeout time.Duration) bool {
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
 	}
 }
 
