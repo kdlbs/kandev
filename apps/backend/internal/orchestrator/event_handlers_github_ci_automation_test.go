@@ -183,6 +183,7 @@ func TestCIAutomationFeedbackDeltaIgnoresNeutralChecks(t *testing.T) {
 	feedback := &github.PRFeedback{
 		Checks: []github.CheckRun{
 			{Name: "optional", Status: "completed", Conclusion: "neutral", HTMLURL: "https://ci/optional"},
+			{Name: "future", Status: "completed", Conclusion: "stale", HTMLURL: "https://ci/future"},
 			{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit"},
 		},
 	}
@@ -190,6 +191,22 @@ func TestCIAutomationFeedbackDeltaIgnoresNeutralChecks(t *testing.T) {
 	delta := ciAutomationBuildDelta(feedback, ciAutomationCheckpoint{})
 	if len(delta.FailedChecks) != 1 || delta.FailedChecks[0].Name != "unit" {
 		t.Fatalf("expected only failing check in delta, got %+v", delta.FailedChecks)
+	}
+}
+
+func TestCIAutomationFeedbackDeltaIncludesKnownFailingConclusions(t *testing.T) {
+	feedback := &github.PRFeedback{
+		Checks: []github.CheckRun{
+			{Name: "failure", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/failure"},
+			{Name: "timed out", Status: "completed", Conclusion: "timed_out", HTMLURL: "https://ci/timed-out"},
+			{Name: "cancelled", Status: "completed", Conclusion: "cancelled", HTMLURL: "https://ci/cancelled"},
+			{Name: "action required", Status: "completed", Conclusion: "action_required", HTMLURL: "https://ci/action-required"},
+		},
+	}
+
+	delta := ciAutomationBuildDelta(feedback, ciAutomationCheckpoint{})
+	if len(delta.FailedChecks) != 4 {
+		t.Fatalf("failed checks = %d, want 4: %+v", len(delta.FailedChecks), delta.FailedChecks)
 	}
 }
 
@@ -478,6 +495,56 @@ func TestHandleTaskPRCIAutomationAutoFixBlocksSameCycleMerge(t *testing.T) {
 	}
 	if ghSvc.mergeCalls != 0 {
 		t.Fatalf("expected auto-merge to wait for a later cycle after auto-fix prompt, got %d merge calls", ghSvc.mergeCalls)
+	}
+}
+
+func TestHandleTaskPRCIAutomationDuplicateFixAttemptBlocksMerge(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	now := time.Now().UTC()
+	pr := &github.TaskPR{
+		TaskID:         "task-1",
+		RepositoryID:   "repo-1",
+		Owner:          "acme",
+		Repo:           "widget",
+		PRNumber:       42,
+		State:          "open",
+		ChecksState:    "success",
+		ReviewState:    "approved",
+		MergeableState: "clean",
+		LastSyncedAt:   &now,
+	}
+	feedback := &github.PRFeedback{
+		Comments: []github.PRComment{{ID: 100, Body: "please address before merge"}},
+	}
+	_, signature := encodeCIAutomationCheckpoint(ciAutomationCurrentCheckpoint(feedback))
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			AutoMergeEnabled:       true,
+			EffectiveAutoFixPrompt: "Fix the PR\n\n{{pr.feedback}}",
+		},
+		triggerPRSyncAllPRs: []*github.TaskPR{pr},
+		prFeedback:          feedback,
+		ciPRState: &github.TaskCIPRAutomationState{
+			LastFixSignature:      signature,
+			LastFixCheckpointJSON: `{"comments":[{"id":100,"body":"please address before merge"}]}`,
+			LastFixEnqueuedAt:     &now,
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle CI automation: %v", err)
+	}
+	if status := svc.messageQueue.GetStatus(ctx, "session-1"); status.Count != 0 {
+		t.Fatalf("expected duplicate fix signature not to queue another prompt, got %+v", status)
+	}
+	if ghSvc.mergeCalls != 0 {
+		t.Fatalf("expected duplicate pending fix attempt to block merge, got %d merge calls", ghSvc.mergeCalls)
 	}
 }
 

@@ -643,11 +643,10 @@ func TestTryBatchedPRWatchCheck_NumberedWatch_AppliesStatus(t *testing.T) {
 	}
 }
 
-func TestTryBatchedPRWatchCheck_PublishesOnPlainCommentChange(t *testing.T) {
+func TestTryBatchedPRWatchCheck_PublishesOnPRFeedbackWatermarkChange(t *testing.T) {
 	poller, _, gh, store := setupBatchedPollerTest(t)
 	ctx := context.Background()
-	oldCommentAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	newCommentAt := oldCommentAt.Add(time.Hour)
+	prUpdatedAt := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
 	gh.prResponses = []string{`{
 		"data": {
 			"repo0": {
@@ -664,12 +663,6 @@ func TestTryBatchedPRWatchCheck_PublishesOnPlainCommentChange(t *testing.T) {
 			}
 		}
 	}`}
-	gh.AddComments("o", "r", 42, []PRComment{{
-		ID:        100,
-		Body:      "plain comment",
-		CreatedAt: newCommentAt,
-		UpdatedAt: newCommentAt,
-	}})
 
 	gotEvent := make(chan *bus.Event, 1)
 	if _, err := poller.eventBus.Subscribe(events.GitHubPRFeedback, func(_ context.Context, event *bus.Event) error {
@@ -688,7 +681,6 @@ func TestTryBatchedPRWatchCheck_PublishesOnPlainCommentChange(t *testing.T) {
 		Branch:          "feat",
 		LastCheckStatus: "success",
 		LastReviewState: "",
-		LastCommentAt:   &oldCommentAt,
 	}
 	if err := store.CreatePRWatch(ctx, watch); err != nil {
 		t.Fatalf("create PR watch: %v", err)
@@ -713,14 +705,41 @@ func TestTryBatchedPRWatchCheck_PublishesOnPlainCommentChange(t *testing.T) {
 	select {
 	case <-gotEvent:
 	default:
-		t.Fatal("expected plain comment change to publish PR feedback event")
+		t.Fatal("expected PR feedback watermark change to publish PR feedback event")
 	}
 	updated, err := store.GetPRWatchBySession(ctx, "s1")
 	if err != nil || updated == nil {
 		t.Fatalf("get PR watch: err=%v, w=%v", err, updated)
 	}
-	if updated.LastCommentAt == nil || !updated.LastCommentAt.Equal(newCommentAt) {
-		t.Fatalf("LastCommentAt = %v, want %v", updated.LastCommentAt, newCommentAt)
+	if updated.LastCommentAt == nil || !updated.LastCommentAt.Equal(prUpdatedAt) {
+		t.Fatalf("LastCommentAt = %v, want %v", updated.LastCommentAt, prUpdatedAt)
+	}
+}
+
+func TestTriggerPRSyncAll_ReturnsPerWatchFallbackErrors(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	watch := &PRWatch{
+		SessionID: "s1",
+		TaskID:    "t1",
+		Owner:     "o",
+		Repo:      "r",
+		PRNumber:  42,
+		Branch:    "feat",
+	}
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create PR watch: %v", err)
+	}
+
+	prs, err := svc.TriggerPRSyncAll(ctx, "t1")
+	if err == nil {
+		t.Fatal("expected per-watch fallback error")
+	}
+	if len(prs) != 0 {
+		t.Fatalf("prs = %d, want 0: %+v", len(prs), prs)
+	}
+	if !strings.Contains(err.Error(), "o/r#42") {
+		t.Fatalf("expected aggregate error to identify failed PR, got %v", err)
 	}
 }
 

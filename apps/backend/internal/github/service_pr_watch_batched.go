@@ -237,8 +237,11 @@ func (s *Service) applyBatchedNumberedWatch(
 		_ = s.store.UpdatePRWatchTimestamps(ctx, w.ID, now, w.LastCommentAt, "", "")
 		return PRWatchSyncResult{Watch: w}
 	}
-	changed := status.ChecksState != w.LastCheckStatus || status.ReviewState != w.LastReviewState
-	if err := s.store.UpdatePRWatchTimestamps(ctx, w.ID, now, w.LastCommentAt, status.ChecksState, status.ReviewState); err != nil {
+	changed := status.ChecksState != w.LastCheckStatus ||
+		status.ReviewState != w.LastReviewState ||
+		prWatchFeedbackUpdatedSinceWatch(w, status)
+	commentAt := prWatchFeedbackWatermark(w, status)
+	if err := s.store.UpdatePRWatchTimestamps(ctx, w.ID, now, commentAt, status.ChecksState, status.ReviewState); err != nil {
 		s.logger.Error("failed to update PR watch timestamps", zap.String("id", w.ID), zap.Error(err))
 	}
 	// Gap-fill: a numbered watch can exist even when its exact task_pr row was

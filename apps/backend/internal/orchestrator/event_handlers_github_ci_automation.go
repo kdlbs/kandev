@@ -145,18 +145,20 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 	previous := decodeCIAutomationCheckpoint(state)
 	delta := ciAutomationBuildDelta(feedback, previous)
 	checkpoint := ciAutomationCurrentCheckpoint(feedback)
+	checkpointJSON, signature := encodeCIAutomationCheckpoint(checkpoint)
 	if len(delta.FailedChecks) == 0 && len(delta.Comments) == 0 {
+		if state != nil && state.LastFixSignature == signature && ciAutomationDuplicateFixAttemptBlocksMerge(state) {
+			return true
+		}
 		if state != nil && len(previous.FailedChecks)+len(previous.Comments) > 0 {
-			checkpointJSON, signature := encodeCIAutomationCheckpoint(checkpoint)
 			if err := s.githubService.RefreshTaskCIFixCheckpoint(context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber, signature, checkpointJSON); err != nil {
 				s.logger.Debug("record CI auto-fix checkpoint refresh failed", zap.String("task_id", pr.TaskID), zap.Error(err))
 			}
 		}
 		return false
 	}
-	checkpointJSON, signature := encodeCIAutomationCheckpoint(checkpoint)
 	if state != nil && state.LastFixSignature == signature {
-		return false
+		return ciAutomationDuplicateFixAttemptBlocksMerge(state)
 	}
 	prompt := ciAutomationRenderPrompt(options.EffectiveAutoFixPrompt, pr, delta)
 	session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, pr.TaskID)
@@ -323,7 +325,7 @@ func ciAutomationBuildDelta(feedback *github.PRFeedback, previous ciAutomationCh
 		return delta
 	}
 	for _, check := range feedback.Checks {
-		if check.Status != ciAutomationCheckCompleted || ciAutomationCheckConclusionDoesNotNeedFix(check.Conclusion) {
+		if check.Status != ciAutomationCheckCompleted || !ciAutomationCheckConclusionNeedsFix(check.Conclusion) {
 			continue
 		}
 		snap := ciAutomationCheckSnapshot{Name: check.Name, Conclusion: check.Conclusion, HTMLURL: check.HTMLURL, Output: check.Output}
@@ -343,10 +345,15 @@ func ciAutomationBuildDelta(feedback *github.PRFeedback, previous ciAutomationCh
 	return delta
 }
 
-func ciAutomationCheckConclusionDoesNotNeedFix(conclusion string) bool {
-	return conclusion == ciAutomationCheckSuccess ||
-		conclusion == ciAutomationCheckSkipped ||
-		conclusion == "neutral"
+func ciAutomationCheckConclusionNeedsFix(conclusion string) bool {
+	return conclusion == ciAutomationCheckFailure ||
+		conclusion == "timed_out" ||
+		conclusion == "cancelled" ||
+		conclusion == "action_required"
+}
+
+func ciAutomationDuplicateFixAttemptBlocksMerge(state *github.TaskCIPRAutomationState) bool {
+	return state != nil && (state.LastFixEnqueuedAt != nil || state.LastFixSessionID != nil)
 }
 
 func ciAutomationCheckKey(check ciAutomationCheckSnapshot) string {

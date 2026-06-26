@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -122,11 +123,8 @@ func (s *Service) CheckPRWatch(ctx context.Context, watch *PRWatch) (*PRStatus, 
 
 	// Check for check status or review state changes
 	hasNew := status.ChecksState != watch.LastCheckStatus || status.ReviewState != watch.LastReviewState
-	commentAt, commentsChanged, commentErr := s.latestPRWatchCommentTime(ctx, watch)
-	if commentErr != nil {
-		s.logger.Debug("failed to check PR watch comments", zap.String("id", watch.ID), zap.Error(commentErr))
-	}
-	hasNew = hasNew || commentsChanged
+	commentAt := prWatchFeedbackWatermark(watch, status)
+	hasNew = hasNew || prWatchFeedbackUpdatedSinceWatch(watch, status)
 
 	// Update watch timestamps
 	now := time.Now().UTC()
@@ -137,40 +135,22 @@ func (s *Service) CheckPRWatch(ctx context.Context, watch *PRWatch) (*PRStatus, 
 	return status, hasNew, nil
 }
 
-func (s *Service) RefreshPRWatchCommentTimestamp(ctx context.Context, watch *PRWatch) (bool, error) {
-	commentAt, changed, err := s.latestPRWatchCommentTime(ctx, watch)
-	if err != nil || timeEqual(commentAt, watch.LastCommentAt) {
-		return false, err
+func prWatchFeedbackUpdatedSinceWatch(watch *PRWatch, status *PRStatus) bool {
+	if watch == nil || status == nil || status.PR == nil || status.PR.UpdatedAt.IsZero() {
+		return false
 	}
-	if err := s.store.UpdatePRWatchCommentTimestamp(ctx, watch.ID, commentAt); err != nil {
-		return false, err
-	}
-	watch.LastCommentAt = commentAt
-	return changed, nil
+	return watch.LastCommentAt == nil || status.PR.UpdatedAt.After(*watch.LastCommentAt)
 }
 
-func (s *Service) latestPRWatchCommentTime(ctx context.Context, watch *PRWatch) (*time.Time, bool, error) {
-	if s.client == nil {
-		return watch.LastCommentAt, false, fmt.Errorf("github client not available")
+func prWatchFeedbackWatermark(watch *PRWatch, status *PRStatus) *time.Time {
+	if status != nil && status.PR != nil && !status.PR.UpdatedAt.IsZero() {
+		updatedAt := status.PR.UpdatedAt
+		return &updatedAt
 	}
-	if watch == nil || watch.PRNumber == 0 {
-		return nil, false, nil
+	if watch == nil {
+		return nil
 	}
-	comments, err := s.client.ListPRComments(ctx, watch.Owner, watch.Repo, watch.PRNumber, watch.LastCommentAt)
-	if err != nil {
-		return watch.LastCommentAt, false, err
-	}
-	latest := findLatestCommentTime(comments)
-	if latest == nil {
-		return watch.LastCommentAt, false, nil
-	}
-	if watch.LastCommentAt == nil {
-		return latest, false, nil
-	}
-	if latest.After(*watch.LastCommentAt) {
-		return latest, true, nil
-	}
-	return watch.LastCommentAt, false, nil
+	return watch.LastCommentAt
 }
 
 // EnsurePRWatch creates a PRWatch with pr_number=0 for a
@@ -767,6 +747,7 @@ func (s *Service) areAllWatchesPermanentlyMissing(watches []*PRWatch) bool {
 // single bad cycle doesn't leave the UI staring at stale data.
 func (s *Service) triggerPRSyncAllPerWatch(ctx context.Context, taskID string, watches []*PRWatch) ([]*TaskPR, error) {
 	results := make([]*TaskPR, 0, len(watches))
+	var syncErrs []error
 	for _, w := range watches {
 		var tp *TaskPR
 		var syncErr error
@@ -787,13 +768,14 @@ func (s *Service) triggerPRSyncAllPerWatch(ctx context.Context, taskID string, w
 				zap.String("repository_id", w.RepositoryID),
 				zap.Int("pr_number", w.PRNumber),
 				zap.Error(syncErr))
+			syncErrs = append(syncErrs, fmt.Errorf("%s/%s#%d: %w", w.Owner, w.Repo, w.PRNumber, syncErr))
 			continue
 		}
 		if tp != nil {
 			results = append(results, tp)
 		}
 	}
-	return results, nil
+	return results, errors.Join(syncErrs...)
 }
 
 func (s *Service) triggerPRDetection(ctx context.Context, watch *PRWatch, taskID string) (*TaskPR, error) {

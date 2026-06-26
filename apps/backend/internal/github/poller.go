@@ -221,24 +221,11 @@ func (p *Poller) tryBatchedPRWatchCheck(ctx context.Context, watches []*PRWatch)
 			p.publishPRStatusEvent(ctx, r.Watch, r.Status)
 			continue
 		}
-		commentsChanged := p.refreshPRWatchComments(ctx, r.Watch)
-		if r.Changed || commentsChanged {
+		if r.Changed {
 			p.publishPRStatusEvent(ctx, r.Watch, r.Status)
 		}
 	}
 	return true
-}
-
-func (p *Poller) refreshPRWatchComments(ctx context.Context, watch *PRWatch) bool {
-	if watch == nil || watch.PRNumber == 0 {
-		return false
-	}
-	changed, err := p.service.RefreshPRWatchCommentTimestamp(ctx, watch)
-	if err != nil {
-		p.logger.Debug("failed to refresh PR watch comments", zap.String("id", watch.ID), zap.Error(err))
-		return false
-	}
-	return changed
 }
 
 // splitPRWatches partitions watches into "we know the PR number" and "still
