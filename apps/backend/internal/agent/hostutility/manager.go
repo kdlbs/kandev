@@ -479,7 +479,7 @@ func (m *Manager) getInstance(ctx context.Context, agentType string) (*instance,
 	return v.(*instance), ia, nil
 }
 
-const instanceHealthCheckTimeout = time.Second
+const instanceHealthCheckTimeout = 500 * time.Millisecond
 
 func (m *Manager) checkInstanceHealthy(ctx context.Context, inst *instance) error {
 	if inst == nil || inst.client == nil {
