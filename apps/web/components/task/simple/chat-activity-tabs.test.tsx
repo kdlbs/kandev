@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, cleanup } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { StateProvider } from "@/components/state-provider";
@@ -33,8 +34,21 @@ const T_10 = "2026-05-01T10:00:00Z";
 const T_11 = "2026-05-01T11:00:00Z";
 const T_12 = "2026-05-01T12:00:00Z";
 
+function createQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+}
+
 function wrap(node: ReactNode) {
-  return <StateProvider>{node}</StateProvider>;
+  return (
+    <QueryClientProvider client={createQueryClient()}>
+      <StateProvider>{node}</StateProvider>
+    </QueryClientProvider>
+  );
 }
 
 function makeTask(partial: Partial<Task> = {}): Task {

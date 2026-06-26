@@ -688,13 +688,22 @@ Task 10 cleanup progress:
   snapshot hydration directly, SSR/boot seeds use
   `workflowSnapshots.itemsByWorkflowId`, and stale scans find no production
   references to the removed store API.
+- Feature flags and session worktrees cleanup moved feature flag reads and
+  session worktree indexes to Query. `useFeature` now reads `qk.features()`,
+  `useSessionWorktrees` reads `qk.sessionRuntime.worktrees(sessionId)`, boot
+  payload/query seed handles feature and worktree data, and
+  `session.agentctl_ready` patches the session worktree query cache through the
+  bridge. The old feature slice, `worktrees` /
+  `sessionWorktreesBySessionId` store fields/actions, unused `use-worktree`
+  hook, and legacy agent-session worktree store writer were removed.
 - Retained Zustand state is documented in `apps/web/AGENTS.md`: client
   navigation/UI state, live session indexes for stream ordering and
   missed-frame recovery, runtime indexes for high-frequency terminal/process/
-  git/context/model streams, and local-only GitHub/office UI indexes. Query
-  owns server snapshots for workspace repositories, repository branches/scripts,
-  workflow lists, workflow snapshots, task details, settings catalogs,
-  integrations, office data, and system data.
+  git/context/model streams, persisted `userSettings`, and local-only GitHub/
+  office UI indexes. Query owns server snapshots for workspace repositories,
+  repository branches/scripts, workflow lists, workflow snapshots, task details,
+  session worktrees, feature flags, settings catalogs, integrations, office
+  data, and system data.
 - No GitLab-specific Docker E2E specs exist in this checkout. The GitLab
   sub-wave used focused unit coverage plus the shared integration/settings,
   sidebar, and strict-WS Docker gate; add GitLab browser specs before treating
@@ -1294,6 +1303,23 @@ Task 10 partial verification completed locally:
   passed 20 desktop Docker tests after the final store compatibility cleanup.
 - `rtk pnpm --dir apps/web e2e:docker --project=mobile-chrome tests/kanban/mobile-kanban.spec.ts tests/task/mobile-sidebar-subtasks.spec.ts tests/session/mobile-handoff.spec.ts`
   passed 13 mobile Docker tests after the final store compatibility cleanup.
+- `rtk pnpm --dir apps/web test lib/query/seed.test.ts lib/query/bridge/index.test.ts components/task/new-session-dialog.test.tsx components/task/new-subtask-dialog.test.tsx lib/ws/handlers/agent-session.test.ts lib/state/slices/features/features-slice.test.ts components/app-sidebar/app-sidebar-workspace-picker.test.tsx src/boot-payload.test.ts`
+  passed 8 files / 73 tests after the feature flags and session worktrees
+  cleanup.
+- `rtk pnpm --dir apps/web typecheck` passed after the feature flags and session
+  worktrees cleanup.
+- Focused stale scans for removed feature/worktree store symbols, bridge audit
+  migration wording, removed Office store fields/actions, removed workspace/
+  kanban/repository/session-runtime store APIs, and deleted legacy WS handler
+  registrations returned no production server-state matches.
+- `rtk pnpm --dir apps/web test hooks/domains/session/use-queue.test.ts lib/query/bridge/index.test.ts`
+  passed 2 files / 23 tests after renaming the Query-only queue cache helper to
+  avoid stale removed-action audit matches.
+- `rtk pnpm --dir apps/web exec eslint --max-warnings 0 hooks/domains/session/use-queue.ts`
+  passed.
+- `rtk pnpm --dir apps/web e2e:docker tests/session/new-session-dialog.spec.ts tests/task/file-tree-lazy-load.spec.ts tests/chat/message-queue.spec.ts tests/office/sidebar-office-gating.spec.ts tests/system/ws-event-accounting.spec.ts`
+  passed 18 Docker tests with strict WS accounting for the final Task 10
+  cleanup gate.
 - Office routing cleanup:
   - `rtk pnpm --dir apps/web test hooks/domains/office/use-workspace-routing.test.tsx hooks/domains/office/use-routing-query-hooks.test.tsx`
     passed 2 files / 7 tests.
@@ -1387,12 +1413,11 @@ Task 10 partial verification completed locally:
   - `rtk pnpm --dir apps/web e2e:docker tests/office/agents.spec.ts tests/office/agent-subroutes.spec.ts tests/office/agent-roles.spec.ts tests/office/agent-skills-ui.spec.ts tests/office/permissions.spec.ts tests/office/projects.spec.ts tests/office/project-repository-picker.spec.ts tests/office/routines.spec.ts tests/office/routines-ui.spec.ts tests/office/routine-fire.spec.ts tests/office/skills.spec.ts tests/office/system-skills.spec.ts tests/office/skills-readonly.spec.ts tests/office/org-chart.spec.ts tests/office/execution-stages.spec.ts tests/office/costs.spec.ts tests/system/ws-event-accounting.spec.ts`
     passed 67 Docker tests / 5 skipped with strict WS accounting.
 
-Current next step: run Task 10's final retained-Zustand audit, then run Task 11
-strict QA.
+Current next step: run Task 11 strict QA.
 
 Wave 4 (cleanup and full verification):
 
-- [ ] [task-10-remove-zustand-server-state](task-10-remove-zustand-server-state.md) — final retained-Zustand audit pending
+- [x] [task-10-remove-zustand-server-state](task-10-remove-zustand-server-state.md) — done
 - [ ] [task-11-e2e-strict-qa](task-11-e2e-strict-qa.md) — in progress
 
 ## Open Questions

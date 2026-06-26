@@ -47,7 +47,7 @@ function useDrainNextAction(
   }, [sessionId, refetch, setQueueLoading]);
 }
 
-function setQueueStatus(queryClient: QueryClient, sessionId: string, status: QueueStatus) {
+function writeQueueStatus(queryClient: QueryClient, sessionId: string, status: QueueStatus) {
   queryClient.setQueryData(queueStatusQueryOptions(sessionId).queryKey, status);
 }
 
@@ -116,7 +116,7 @@ function useQueueActions({ sessionId, setQueueLoading, metaMax, queryClient }: Q
       // will replace it with the authoritative server value. Using the
       // pre-clear entry count as a fallback for `max` was wrong (it would
       // pretend the cap equals "however many were queued").
-      setQueueStatus(queryClient, sessionId, {
+      writeQueueStatus(queryClient, sessionId, {
         entries: [],
         count: 0,
         max: metaMax ?? 0,

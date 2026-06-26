@@ -1,7 +1,7 @@
 ---
 id: "10-remove-zustand-server-state"
 title: "Remove Zustand server state"
-status: in_progress
+status: done
 wave: 4
 depends_on:
   [
@@ -102,11 +102,6 @@ Completed cleanup sub-waves:
   stale scans for removed Office store fields/actions, and
   `rtk pnpm --dir apps/web e2e:docker tests/office/agents.spec.ts tests/office/agent-subroutes.spec.ts tests/office/agent-roles.spec.ts tests/office/agent-skills-ui.spec.ts tests/office/permissions.spec.ts tests/office/projects.spec.ts tests/office/project-repository-picker.spec.ts tests/office/routines.spec.ts tests/office/routines-ui.spec.ts tests/office/routine-fire.spec.ts tests/office/skills.spec.ts tests/office/system-skills.spec.ts tests/office/skills-readonly.spec.ts tests/office/org-chart.spec.ts tests/office/execution-stages.spec.ts tests/office/costs.spec.ts tests/system/ws-event-accounting.spec.ts`
   passing 67 Docker tests / 5 skipped with strict WS accounting.
-
-Remaining cleanup:
-
-- Task 10 stays `in_progress` until the final retained-Zustand audit confirms
-  no removed server-state paths remain and Task 11 strict QA completes.
 
 - **System:** removed the system Zustand slice and `system-events` WS handler.
   System hooks and topbar metrics now read Query caches/options directly. The
@@ -373,21 +368,41 @@ true })` through `workflowLists.itemsByWorkspaceId`, while
   `workflowSnapshots.itemsByWorkflowId`, `mergeInitialState` allowlists known
   store fields, and stale scans find no production references to the removed
   store API.
+- **Feature flags and session worktrees cleanup:** moved feature flag reads and
+  session worktree indexes to TanStack Query. `useFeature` now reads
+  `qk.features()`, `useSessionWorktrees` reads
+  `qk.sessionRuntime.worktrees(sessionId)`, boot/route payloads seed those query
+  keys, and `session.agentctl_ready` patches the worktree query cache through
+  the bridge. Removed the old feature slice, `worktrees` /
+  `sessionWorktreesBySessionId` store fields/actions, the unused
+  `use-worktree` hook, and the legacy agent-session worktree store writer.
+- **Final retained-state audit:** corrected `apps/web/AGENTS.md`, removed stale
+  bridge-audit wording, reclassified `run.event.appended` as component-local,
+  and confirmed final stale scans have no production matches for removed
+  feature/worktree, kanban/workspace/repository, office, settings/integration,
+  queue, plan revision, command, todo, prompt usage, capability, poll-mode, or
+  legacy handler store APIs. Remaining scan hits are documented retained state
+  or non-Zustand false positives such as route-local `state.repositories`, the
+  public `setSessionMode` API, retained `sessionModels`, and client-only
+  `kanbanPreviewedTaskId`.
 
 Retained Zustand inventory:
 
 - Client navigation/UI state: `tasks.activeTaskId`, `tasks.activeSessionId`,
   `workflows.activeId`, `workspaces.activeId`, preview/sidebar/mobile/dialog
-  state, user settings, and persisted local preferences.
+  state, persisted user settings, and local preferences.
 - Live session indexes: `messages`, `turns`, `taskSessions`,
-  `taskSessionsByTask`, `taskPlans`, and `sessionAgentctl` remain for stream
-  ordering, missed-frame recovery, plan editing/seen-state UI, active-session
-  chrome, and local panel behavior while Query owns server snapshots and
-  invalidation.
+  `taskSessionsByTask`, `taskPlans`, `sessionAgentctl`, and
+  `activeModel.bySessionId` remain for stream ordering, missed-frame recovery,
+  plan editing/seen-state UI, active-session chrome, model UI, and local panel
+  behavior while Query owns server snapshots and invalidation.
 - Runtime stream indexes: `shell`, `processes`, `gitStatus`,
   `sessionCommits`, `contextWindow`, `prepareProgress`, `sessionModels`,
   `userShells`, and `environmentIdBySessionId` remain for high-frequency
   terminal/process/git/context/model updates and environment-scoped cleanup.
+- Server-backed persisted preference state: `userSettings` remains in Zustand
+  for local preference persistence and UI merge behavior; server-state settings
+  consumers are seeded through `qk.settings.user()`.
 - Local integration/client indexes: GitHub `pendingPrUrlByTaskId` and
   `prFeedbackCache` remain local-only; `office.tasks.filters`,
   `office.tasks.viewMode`, `office.tasks.sortField`, `office.tasks.sortDir`,
@@ -1055,6 +1070,23 @@ Completed Wave 4 sub-wave verification:
   passed 20 desktop Docker tests after the final store compatibility cleanup.
 - `rtk pnpm --dir apps/web e2e:docker --project=mobile-chrome tests/kanban/mobile-kanban.spec.ts tests/task/mobile-sidebar-subtasks.spec.ts tests/session/mobile-handoff.spec.ts`
   passed 13 mobile Docker tests after the final store compatibility cleanup.
+- `rtk pnpm --dir apps/web test lib/query/seed.test.ts lib/query/bridge/index.test.ts components/task/new-session-dialog.test.tsx components/task/new-subtask-dialog.test.tsx lib/ws/handlers/agent-session.test.ts lib/state/slices/features/features-slice.test.ts components/app-sidebar/app-sidebar-workspace-picker.test.tsx src/boot-payload.test.ts`
+  passed 8 files / 73 tests after the feature flags and session worktrees
+  cleanup.
+- `rtk pnpm --dir apps/web typecheck` passed after the feature flags and
+  session worktrees cleanup.
+- Focused stale scans for removed feature/worktree store symbols, removed bridge
+  audit allowlist wording, removed Office store fields/actions, removed
+  workspace/kanban/repository/session-runtime store APIs, and deleted legacy WS
+  handler registrations returned no production server-state matches.
+- `rtk pnpm --dir apps/web test hooks/domains/session/use-queue.test.ts lib/query/bridge/index.test.ts`
+  passed 2 files / 23 tests after renaming the Query-only queue cache helper to
+  avoid stale removed-action audit matches.
+- `rtk pnpm --dir apps/web exec eslint --max-warnings 0 hooks/domains/session/use-queue.ts`
+  passed.
+- `rtk pnpm --dir apps/web e2e:docker tests/session/new-session-dialog.spec.ts tests/task/file-tree-lazy-load.spec.ts tests/chat/message-queue.spec.ts tests/office/sidebar-office-gating.spec.ts tests/system/ws-event-accounting.spec.ts`
+  passed 18 Docker tests with strict WS accounting for the final Task 10
+  cleanup gate.
 
 ## Files Likely Touched
 
