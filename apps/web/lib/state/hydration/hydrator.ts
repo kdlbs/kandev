@@ -115,9 +115,6 @@ function hydrateSession(
       forceMergeSessionId,
     );
   }
-  if (state.worktrees) deepMerge(draft.worktrees, state.worktrees);
-  if (state.sessionWorktreesBySessionId)
-    deepMerge(draft.sessionWorktreesBySessionId, state.sessionWorktreesBySessionId);
   if (state.activeModel) deepMerge(draft.activeModel, state.activeModel);
 }
 
@@ -242,12 +239,6 @@ export function hydrateState(
   // Office slice — shallow merge SSR-provided data into the store.
   if (state.office) {
     Object.assign(draft.office, state.office);
-  }
-
-  // Feature flags — overwrite whole map. SSR is authoritative; the backend
-  // is the only source of truth for what's enabled in this deployment.
-  if (state.features) {
-    Object.assign(draft.features, state.features);
   }
 }
 

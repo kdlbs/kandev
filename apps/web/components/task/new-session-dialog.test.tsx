@@ -10,8 +10,6 @@ type MockState = {
   kanban: { tasks: KanbanState["tasks"] };
   tasks: { activeSessionId: string | null };
   taskSessions: { items: Record<string, unknown> };
-  sessionWorktreesBySessionId: { itemsBySessionId: Record<string, string[]> };
-  worktrees: { items: Record<string, { branch?: string | null } | undefined> };
   messages: { bySession: Record<string, Array<{ author_type?: string; content?: string }>> };
   setActiveSession: ReturnType<typeof vi.fn>;
 };
@@ -156,8 +154,6 @@ describe("NewSessionDialog", () => {
       kanban: { tasks: [] },
       tasks: { activeSessionId: null },
       taskSessions: { items: {} },
-      sessionWorktreesBySessionId: { itemsBySessionId: {} },
-      worktrees: { items: {} },
       messages: { bySession: {} },
       setActiveSession: vi.fn(),
     };

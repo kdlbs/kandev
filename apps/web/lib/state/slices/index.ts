@@ -10,7 +10,7 @@ export {
 export { createUISlice, defaultUIState } from "./ui/ui-slice";
 export { createGitHubSlice, defaultGitHubState } from "./github/github-slice";
 export { createOfficeSlice, defaultOfficeState } from "./office/office-slice";
-export { createFeaturesSlice, defaultFeaturesState } from "./features/features-slice";
+export { defaultFeaturesState } from "./features/features-slice";
 
 // Export types
 export type { KanbanSlice, KanbanSliceState, KanbanSliceActions } from "./kanban/types";
@@ -25,13 +25,7 @@ export type {
 export type { UISlice, UISliceState, UISliceActions } from "./ui/types";
 export type { GitHubSlice, GitHubSliceState, GitHubSliceActions } from "./github/types";
 export type { OfficeSlice, OfficeSliceState, OfficeSliceActions } from "./office/types";
-export type {
-  FeaturesSlice,
-  FeaturesSliceState,
-  FeaturesSliceActions,
-  FeatureFlags,
-  FeatureName,
-} from "./features/types";
+export type { FeatureFlags, FeatureName } from "./features/types";
 
 // Re-export commonly used types from each domain
 export type {
@@ -52,8 +46,6 @@ export type {
   SessionAgentctlStatus,
   SessionAgentctlState,
   Worktree,
-  WorktreesState,
-  SessionWorktreesState,
   ActiveModelState,
   TaskPlansState,
   QueueStatus,

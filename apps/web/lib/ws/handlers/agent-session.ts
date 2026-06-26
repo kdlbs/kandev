@@ -269,28 +269,6 @@ function buildAgentctlReadySessionUpdate(
   return update;
 }
 
-/** Adds the materialized worktree to the worktrees map + the per-session list. */
-function recordAgentctlReadyWorktree(
-  store: StoreApi<AppState>,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  payload: any,
-  existingSession: { repository_id?: string; worktree_path?: string; worktree_branch?: string },
-): void {
-  if (!payload.worktree_id) return;
-  store.getState().setWorktree({
-    id: payload.worktree_id,
-    sessionId: payload.session_id,
-    repositoryId: existingSession.repository_id ?? undefined,
-    path: payload.worktree_path ?? existingSession.worktree_path ?? undefined,
-    branch: payload.worktree_branch ?? existingSession.worktree_branch ?? undefined,
-  });
-  const existing =
-    store.getState().sessionWorktreesBySessionId.itemsBySessionId[payload.session_id] ?? [];
-  if (!existing.includes(payload.worktree_id)) {
-    store.getState().setSessionWorktrees(payload.session_id, [...existing, payload.worktree_id]);
-  }
-}
-
 /** Handle the agentctl_ready event: update session worktree info.
  *
  *  Two shapes share this event:
@@ -319,8 +297,6 @@ function handleAgentctlReady(store: StoreApi<AppState>, payload: any): void {
   if (Object.keys(sessionUpdate).length > 0) {
     store.getState().setTaskSession({ ...existingSession, ...sessionUpdate });
   }
-
-  recordAgentctlReadyWorktree(store, payload, existingSession);
 
   if (isSibling) {
     // Drop the pre-multi-repo git-status snapshot — the backend just

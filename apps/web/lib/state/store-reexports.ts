@@ -17,8 +17,6 @@ export type {
   SessionAgentctlStatus,
   SessionAgentctlState,
   Worktree,
-  WorktreesState,
-  SessionWorktreesState,
   ActiveModelState,
   ShellState,
   ProcessStatusEntry,

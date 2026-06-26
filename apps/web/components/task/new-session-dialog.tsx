@@ -16,6 +16,7 @@ import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-specs";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useTaskExecutorProfile } from "@/hooks/domains/session/use-task-executor-profile";
+import { useSessionWorktrees } from "@/hooks/domains/session/use-session-worktrees";
 import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
 import type { AgentProfileOption } from "@/lib/state/slices";
@@ -55,15 +56,8 @@ function useNewSessionDialogState(taskId: string) {
   const currentSession = useAppStore((state) => {
     return activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null;
   });
-  const worktreeBranch = useAppStore((state) => {
-    if (!activeSessionId) return null;
-    const wtIds = state.sessionWorktreesBySessionId.itemsBySessionId[activeSessionId];
-    if (wtIds?.length) {
-      const wt = state.worktrees.items[wtIds[0]];
-      if (wt?.branch) return wt.branch;
-    }
-    return currentSession?.worktree_branch ?? null;
-  });
+  const worktrees = useSessionWorktrees(activeSessionId);
+  const worktreeBranch = worktrees[0]?.branch ?? currentSession?.worktree_branch ?? null;
   const initialPrompt = useAppStore((state) => {
     if (!activeSessionId) return null;
     const msgs = state.messages.bySession[activeSessionId];

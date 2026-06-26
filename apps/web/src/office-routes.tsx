@@ -34,7 +34,8 @@ import {
   listAgentProfiles,
   listProjects,
 } from "@/lib/api/domains/office-api";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStoreApi } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { mapWorkspaceItem, readActiveWorkspaceCookie } from "@/lib/routing/route-bootstrap";
@@ -69,7 +70,7 @@ const OFFICE_ROUTES: Record<string, RouteRenderer> = {
 
 export function OfficeRoutes({ pathname }: { pathname: string }) {
   const router = useRouter();
-  const officeEnabled = useAppStore((state) => state.features.office);
+  const officeEnabled = useFeature("office");
   const { items: workspaceItems, activeId: activeWorkspaceId } = useWorkspaces();
   const normalizedPathname = normalizeOfficePath(pathname);
   const routeWorkspaceId = useSearchParams().get("workspaceId");

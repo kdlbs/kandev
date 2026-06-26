@@ -48,14 +48,12 @@ const SPIED_CACHE_METHODS: readonly CacheMutationMethod[] = [
 // why a parsed envelope intentionally has no bridge cache mutation.
 const CONTROL_PLANE_REASON = "control-plane request/response handled outside the query cache";
 
-// These notifications still have Zustand-backed readers during the migration.
-// Remove entries as each domain wave moves both bridge writers and UI readers to
-// TanStack Query.
-const ZUSTAND_MIGRATION_REASON = "temporarily Zustand-backed until its domain query wave migrates";
-
 // Client-only notifications produce toasts, dialogs, browser notifications, or
 // imperative refreshes rather than durable server-state cache entries.
 const CLIENT_EFFECT_REASON = "client-only effect with no durable query cache entry";
+
+const COMPONENT_LOCAL_REASON =
+  "component-local live state with no durable shared query cache entry";
 
 // High-volume streams stay outside QueryClient to avoid per-chunk observer churn.
 const STREAM_REASON = "high-volume stream tracked outside TanStack Query";
@@ -121,8 +119,7 @@ export const BRIDGE_SKIPPED_ACTIONS = {
   "vscode.status": CONTROL_PLANE_REASON,
   "vscode.stop": CONTROL_PLANE_REASON,
 
-  "diff.update": ZUSTAND_MIGRATION_REASON,
-  "run.event.appended": ZUSTAND_MIGRATION_REASON,
+  "run.event.appended": COMPONENT_LOCAL_REASON,
 
   "input.requested": CLIENT_EFFECT_REASON,
   "permission.requested": CLIENT_EFFECT_REASON,

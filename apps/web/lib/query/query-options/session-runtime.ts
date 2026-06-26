@@ -1,5 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
-import type { SessionAgentctlStatus } from "@/lib/state/slices/session/types";
+import type { SessionAgentctlStatus, Worktree } from "@/lib/state/slices/session/types";
 import type {
   AgentCapabilitiesEntry,
   AvailableCommand,
@@ -129,6 +129,10 @@ export function sessionPollModeQueryOptions(sessionId: string) {
 
 export function sessionAgentctlQueryOptions(sessionId: string) {
   return passiveQueryOptions<SessionAgentctlStatus>(qk.sessionRuntime.agentctl(sessionId));
+}
+
+export function sessionWorktreesQueryOptions(sessionId: string) {
+  return passiveQueryOptions<Worktree[]>(qk.sessionRuntime.worktrees(sessionId));
 }
 
 export function sessionProcessesQueryOptions(sessionId: string) {

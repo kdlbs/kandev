@@ -46,14 +46,6 @@ export type Worktree = {
   branch?: string;
 };
 
-export type WorktreesState = {
-  items: Record<string, Worktree>;
-};
-
-export type SessionWorktreesState = {
-  itemsBySessionId: Record<string, string[]>;
-};
-
 export type ActiveModelState = {
   bySessionId: Record<string, string>;
 };
@@ -114,8 +106,6 @@ export type SessionSliceState = {
   taskSessions: TaskSessionsState;
   taskSessionsByTask: TaskSessionsByTaskState;
   sessionAgentctl: SessionAgentctlState;
-  worktrees: WorktreesState;
-  sessionWorktreesBySessionId: SessionWorktreesState;
   activeModel: ActiveModelState;
   taskPlans: TaskPlansState;
 };
@@ -163,8 +153,6 @@ export type SessionSliceActions = {
   upsertTaskSessionFromEvent: (taskId: string, session: TaskSession) => void;
   setTaskSessionsLoading: (taskId: string, loading: boolean) => void;
   setSessionAgentctlStatus: (sessionId: string, status: SessionAgentctlStatus) => void;
-  setWorktree: (worktree: Worktree) => void;
-  setSessionWorktrees: (sessionId: string, worktreeIds: string[]) => void;
   setActiveModel: (sessionId: string, modelId: string) => void;
   // Task plan UI actions. The plan DTO itself is TanStack Query-owned.
   hydrateTaskPlanLastSeen: (taskId: string) => void;

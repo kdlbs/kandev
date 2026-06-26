@@ -17,6 +17,8 @@ import type {
   WorkflowSnapshot,
 } from "@/lib/types/http";
 import type { WorkflowItem } from "@/lib/state/slices";
+import type { Worktree } from "@/lib/state/slices/session/types";
+import type { FeatureFlags } from "@/lib/state/slices/features/types";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { SpritesInstance, SpritesStatus } from "@/lib/types/http-sprites";
 import type {
@@ -98,6 +100,13 @@ export type QuerySeedInitialState = Omit<
   repositoryScripts?: {
     itemsByRepositoryId?: Record<string, RepositoryScript[]>;
   };
+  features?: FeatureFlags;
+  worktrees?: {
+    items?: Record<string, Worktree>;
+  };
+  sessionWorktreesBySessionId?: {
+    itemsBySessionId?: Record<string, string[]>;
+  };
   availableCommands?: {
     bySessionId?: Record<string, AvailableCommand[]>;
   };
@@ -127,6 +136,7 @@ export function seedQueryClientFromInitialState(
   seedTaskSessions(client, initialState);
   seedSessionMessages(client, initialState, options.sessionId);
   seedSessionTurns(client, initialState, options.sessionId);
+  seedSessionWorktrees(client, initialState);
   seedSessionRuntime(client, initialState);
 }
 
@@ -355,6 +365,34 @@ function seedSessionTurns(
       turns,
       activeTurnId: activeBySession[sessionId] ?? null,
     });
+  }
+}
+
+function seedSessionWorktrees(client: QueryClient, initialState: QuerySeedInitialState) {
+  const worktreesById = initialState.worktrees?.items ?? {};
+  const idsBySession = initialState.sessionWorktreesBySessionId?.itemsBySessionId ?? {};
+  const seenSessionIds = new Set<string>();
+
+  for (const [sessionId, worktreeIds] of Object.entries(idsBySession)) {
+    const worktrees = worktreeIds
+      .map((worktreeId) => worktreesById[worktreeId])
+      .filter((worktree): worktree is Worktree => Boolean(worktree));
+    if (worktrees.length === 0) continue;
+    client.setQueryData(qk.sessionRuntime.worktrees(sessionId), worktrees);
+    seenSessionIds.add(sessionId);
+  }
+
+  for (const session of Object.values(initialState.taskSessions?.items ?? {})) {
+    if (!session.worktree_id || seenSessionIds.has(session.id)) continue;
+    client.setQueryData(qk.sessionRuntime.worktrees(session.id), [
+      {
+        id: session.worktree_id,
+        sessionId: session.id,
+        repositoryId: session.repository_id ?? undefined,
+        path: session.worktree_path ?? undefined,
+        branch: session.worktree_branch ?? undefined,
+      },
+    ]);
   }
 }
 

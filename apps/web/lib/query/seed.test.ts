@@ -49,7 +49,14 @@ describe("seedQueryClientFromBootPayload", () => {
   it("seeds task detail route data into task, session, messages, and turns keys", () => {
     const client = makeQueryClient();
     const task = { id: "task-1", title: "Task", workspace_id: WORKSPACE_ID } as Task;
-    const session = { id: "session-1", task_id: "task-1" } as TaskSession;
+    const session = {
+      id: "session-1",
+      task_id: "task-1",
+      repository_id: "repo-1",
+      worktree_id: "worktree-1",
+      worktree_path: "/tmp/kandev/worktrees/worktree-1",
+      worktree_branch: "feature/session",
+    } as TaskSession;
     const message = { id: "message-1", session_id: "session-1", content: "hello" } as Message;
     const turn = {
       id: "turn-1",
@@ -100,6 +107,15 @@ describe("seedQueryClientFromBootPayload", () => {
       turns: [turn],
       activeTurnId: "turn-1",
     });
+    expect(client.getQueryData(qk.sessionRuntime.worktrees("session-1"))).toEqual([
+      {
+        id: "worktree-1",
+        sessionId: "session-1",
+        repositoryId: "repo-1",
+        path: "/tmp/kandev/worktrees/worktree-1",
+        branch: "feature/session",
+      },
+    ]);
   });
 });
 

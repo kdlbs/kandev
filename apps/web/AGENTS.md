@@ -47,12 +47,12 @@ lib/state/
 ├── default-state.ts                # Default state + initial state merge
 ├── slices/                         # Domain slices
 │   ├── kanban/                    # active workflow/task/session UI state
-│   ├── session/                   # sessions, messages, turns, worktrees
+│   ├── session/                   # live session/message/turn indexes
 │   ├── session-runtime/           # shell, processes, git, context
-│   ├── workspace/                 # workspace list and active workspace UI state
-│   ├── settings/                  # userSettings and local persisted preferences
+│   ├── workspace/                 # active workspace UI state
+│   ├── settings/                  # server-backed persisted userSettings/preferences
 │   ├── comments/                  # code review diff comments
-│   ├── github/                    # GitHub PRs, reviews
+│   ├── github/                    # local pending PR URL and feedback caches
 │   └── ui/                        # preview, connection, active state, sidebar views
 ├── hydration/                     # SSR merge strategies
 
@@ -67,17 +67,22 @@ lib/api/domains/                    # API clients
 **Key State Paths:**
 
 - `tasks.activeTaskId`, `tasks.activeSessionId`, `workflows.activeId`, `workspaces.activeId`
-- `messages.bySession[sessionId]`, `turns.bySession[sessionId]`, and
-  `taskSessions.items[sessionId]` are retained live session indexes for stream
-  ordering, active-session chrome, missed-frame recovery, and editor/panel UI.
+- `messages.bySession[sessionId]`, `turns.bySession[sessionId]`,
+  `taskSessions.items[sessionId]`, `taskSessionsByTask`, `sessionAgentctl`,
+  `taskPlans`, and `activeModel.bySessionId` are retained live session indexes
+  for stream ordering, active-session chrome, missed-frame recovery,
+  plan/model UI, and editor/panel behavior.
 - `shell.outputs[environmentId]`, `processes.*`, `gitStatus.byEnvironmentId`,
   `sessionCommits.byEnvironmentId`, `contextWindow.bySessionId`,
   `prepareProgress.bySessionId`, `sessionModels.bySessionId`, and
   `userShells.byEnvironmentId` are retained runtime indexes for high-frequency
   streams, environment-scoped cleanup, and terminal/session UI.
 - Workspace repositories, repository branches/scripts, workflow lists, workflow
-  snapshots, task details, settings catalogs, integrations, office data, and
-  system data are TanStack Query data.
+  snapshots, task details, session worktrees, feature flags, settings catalogs,
+  integrations, office data, and system data are TanStack Query data.
+- `userSettings` is the retained server-backed persisted preference object;
+  settings reads also seed `qk.settings.user()` so server-state consumers use
+  Query where migrated.
 
 **Hydration:** Go injects `window.__KANDEV_BOOT_PAYLOAD__` into the SPA shell
 before React mounts. Boot and app-state payloads seed TanStack Query through

@@ -117,8 +117,6 @@ export const defaultSessionState: SessionSliceState = {
   taskSessions: { items: {} },
   taskSessionsByTask: { itemsByTaskId: {}, loadingByTaskId: {}, loadedByTaskId: {} },
   sessionAgentctl: { itemsBySessionId: {} },
-  worktrees: { items: {} },
-  sessionWorktreesBySessionId: { itemsBySessionId: {} },
   activeModel: { bySessionId: {} },
   taskPlans: {
     previewRevisionIdByTaskId: {},
@@ -394,14 +392,6 @@ export const createSessionSlice: StateCreator<
   setSessionAgentctlStatus: (sessionId, status) =>
     set((draft) => {
       draft.sessionAgentctl.itemsBySessionId[sessionId] = status;
-    }),
-  setWorktree: (worktree) =>
-    set((draft) => {
-      draft.worktrees.items[worktree.id] = worktree;
-    }),
-  setSessionWorktrees: (sessionId, worktreeIds) =>
-    set((draft) => {
-      draft.sessionWorktreesBySessionId.itemsBySessionId[sessionId] = worktreeIds;
     }),
   setActiveModel: (sessionId, modelId) =>
     set((draft) => {

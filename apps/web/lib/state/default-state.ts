@@ -7,7 +7,6 @@ import {
   defaultUIState,
   defaultGitHubState,
   defaultOfficeState,
-  defaultFeaturesState,
 } from "./slices";
 
 export const defaultState = {
@@ -20,8 +19,6 @@ export const defaultState = {
   taskSessions: defaultSessionState.taskSessions,
   taskSessionsByTask: defaultSessionState.taskSessionsByTask,
   sessionAgentctl: defaultSessionState.sessionAgentctl,
-  worktrees: defaultSessionState.worktrees,
-  sessionWorktreesBySessionId: defaultSessionState.sessionWorktreesBySessionId,
   activeModel: defaultSessionState.activeModel,
   taskPlans: defaultSessionState.taskPlans,
   shell: defaultSessionRuntimeState.shell,
@@ -36,7 +33,6 @@ export const defaultState = {
   pendingPrUrlByTaskId: defaultGitHubState.pendingPrUrlByTaskId,
   prFeedbackCache: defaultGitHubState.prFeedbackCache,
   office: defaultOfficeState.office,
-  features: defaultFeaturesState.features,
   previewPanel: defaultUIState.previewPanel,
   rightPanel: defaultUIState.rightPanel,
   connection: defaultUIState.connection,
@@ -77,11 +73,6 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
     taskSessions: { ...defaultState.taskSessions, ...initialState.taskSessions },
     taskSessionsByTask: { ...defaultState.taskSessionsByTask, ...initialState.taskSessionsByTask },
     sessionAgentctl: { ...defaultState.sessionAgentctl, ...initialState.sessionAgentctl },
-    worktrees: { ...defaultState.worktrees, ...initialState.worktrees },
-    sessionWorktreesBySessionId: {
-      ...defaultState.sessionWorktreesBySessionId,
-      ...initialState.sessionWorktreesBySessionId,
-    },
     activeModel: { ...defaultState.activeModel, ...initialState.activeModel },
     taskPlans: { ...defaultState.taskPlans, ...initialState.taskPlans },
     shell: { ...defaultState.shell, ...initialState.shell },
@@ -98,7 +89,6 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
     },
     prFeedbackCache: { ...defaultState.prFeedbackCache, ...initialState.prFeedbackCache },
     office: { ...defaultState.office, ...initialState.office },
-    features: { ...defaultState.features, ...initialState.features },
     previewPanel: { ...defaultState.previewPanel, ...initialState.previewPanel },
     rightPanel: { ...defaultState.rightPanel, ...initialState.rightPanel },
     connection: { ...defaultState.connection, ...initialState.connection },

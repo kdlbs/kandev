@@ -172,6 +172,8 @@ export const qk = {
       ["sessionRuntime", "session", id(sessionId), "pollMode"] as const,
     agentctl: (sessionId: string) =>
       ["sessionRuntime", "session", id(sessionId), "agentctl"] as const,
+    worktrees: (sessionId: string) =>
+      ["sessionRuntime", "session", id(sessionId), "worktrees"] as const,
   },
   settings: {
     user: () => ["settings", "userSettings"] as const,

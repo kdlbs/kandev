@@ -810,6 +810,7 @@ describe("query bridge audit", () => {
       id: "session-1",
       task_id: "task-1",
       task_environment_id: "env-1",
+      repository_id: "repo-1",
     });
     queryClient.setQueryData(qk.sessionRuntime.gitStatus("env-1"), { byRepo: {} });
     queryClient.setQueryData(qk.sessionRuntime.commits("env-1"), []);
@@ -892,6 +893,9 @@ describe("query bridge audit", () => {
         session_id: "session-1",
         task_environment_id: "env-1",
         agent_execution_id: "exec-1",
+        worktree_id: "worktree-1",
+        worktree_path: "/tmp/kandev/worktrees/worktree-1",
+        worktree_branch: "feature/session",
       },
     });
     ws.emit({
@@ -925,6 +929,15 @@ describe("query bridge audit", () => {
       status: "ready",
       agentExecutionId: "exec-1",
     });
+    expect(queryClient.getQueryData(qk.sessionRuntime.worktrees("session-1"))).toEqual([
+      {
+        id: "worktree-1",
+        sessionId: "session-1",
+        repositoryId: "repo-1",
+        path: "/tmp/kandev/worktrees/worktree-1",
+        branch: "feature/session",
+      },
+    ]);
     expect(queryClient.getQueryData(qk.sessionRuntime.processes("session-1"))).toMatchObject({
       devProcessId: "process-1",
       processesById: { "process-1": { status: "running" } },

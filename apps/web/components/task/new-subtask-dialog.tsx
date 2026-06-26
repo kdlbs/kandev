@@ -16,6 +16,7 @@ import {
   useGitHubUrlErrorEffect,
 } from "@/components/task-create-dialog-effects";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { useSessionWorktrees } from "@/hooks/domains/session/use-session-worktrees";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { useSummarizeSession, type SummarizeSessionResult } from "@/hooks/use-summarize-session";
@@ -57,15 +58,8 @@ function useSubtaskDialogState(parentTaskId: string) {
     activeSessionId ? (s.taskSessions.items[activeSessionId] ?? null) : null,
   );
 
-  const worktreeBranch = useAppStore((s) => {
-    if (!activeSessionId) return null;
-    const wtIds = s.sessionWorktreesBySessionId.itemsBySessionId[activeSessionId];
-    if (wtIds?.length) {
-      const wt = s.worktrees.items[wtIds[0]];
-      if (wt?.branch) return wt.branch;
-    }
-    return currentSession?.worktree_branch ?? null;
-  });
+  const worktrees = useSessionWorktrees(activeSessionId);
+  const worktreeBranch = worktrees[0]?.branch ?? currentSession?.worktree_branch ?? null;
 
   const initialPrompt = useAppStore((s) => {
     if (!activeSessionId) return null;

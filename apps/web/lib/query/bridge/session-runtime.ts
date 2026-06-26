@@ -8,6 +8,7 @@ import type {
   SessionPollMode,
   SessionPrepareState,
 } from "@/lib/state/slices/session-runtime/types";
+import type { Worktree } from "@/lib/state/slices/session/types";
 import type { BackendMessageMap } from "@/lib/types/backend";
 import type {
   GitBranchSwitchedEvent,
@@ -232,6 +233,7 @@ function patchAgentctl(
     updatedAt: timestamp,
   });
   patchSessionEnvironment(queryClient, payload);
+  patchSessionWorktrees(queryClient, payload);
 }
 
 function patchSessionEnvironment(
@@ -251,6 +253,43 @@ function patchSessionEnvironment(
       worktree_branch: payload.worktree_branch ?? existing.worktree_branch,
     };
   });
+}
+
+function patchSessionWorktrees(
+  queryClient: QueryClient,
+  payload: BackendMessageMap["session.agentctl_ready"]["payload"],
+): void {
+  if (!payload.session_id || !payload.worktree_id) return;
+  const existingSession = queryClient.getQueryData<Record<string, unknown>>(
+    qk.taskSession.byId(payload.session_id),
+  );
+  const nextWorktree: Worktree = {
+    id: payload.worktree_id,
+    sessionId: payload.session_id,
+    repositoryId:
+      typeof existingSession?.repository_id === "string"
+        ? existingSession.repository_id
+        : undefined,
+    path:
+      payload.worktree_path ??
+      (typeof existingSession?.worktree_path === "string"
+        ? existingSession.worktree_path
+        : undefined),
+    branch:
+      payload.worktree_branch ??
+      (typeof existingSession?.worktree_branch === "string"
+        ? existingSession.worktree_branch
+        : undefined),
+  };
+  queryClient.setQueryData<Worktree[]>(
+    qk.sessionRuntime.worktrees(payload.session_id),
+    (current) => {
+      const existing = current ?? [];
+      return existing.some((worktree) => worktree.id === nextWorktree.id)
+        ? existing.map((worktree) => (worktree.id === nextWorktree.id ? nextWorktree : worktree))
+        : [...existing, nextWorktree];
+    },
+  );
 }
 
 function patchSessionMode(

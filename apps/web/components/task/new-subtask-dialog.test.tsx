@@ -11,8 +11,6 @@ type MockState = {
   workspaces: { activeId: string | null };
   tasks: { activeSessionId: string | null };
   taskSessions: { items: Record<string, { agent_profile_id?: string; repository_id?: string }> };
-  sessionWorktreesBySessionId: { itemsBySessionId: Record<string, string[]> };
-  worktrees: { items: Record<string, { branch?: string | null } | undefined> };
   messages: { bySession: Record<string, Array<{ author_type?: string; content?: string }>> };
 };
 
@@ -157,8 +155,6 @@ describe("NewSubtaskDialog", () => {
       workspaces: { activeId: "ws-active" },
       tasks: { activeSessionId: null },
       taskSessions: { items: {} },
-      sessionWorktreesBySessionId: { itemsBySessionId: {} },
-      worktrees: { items: {} },
       messages: { bySession: {} },
     };
   });

@@ -1,24 +1,36 @@
 import { useMemo } from "react";
-import { useAppStore } from "@/components/state-provider";
-import { useSession } from "@/hooks/domains/session/use-session";
+import { useQuery } from "@tanstack/react-query";
+import { sessionWorktreesQueryOptions, taskSessionQueryOptions } from "@/lib/query/query-options";
 
 export function useSessionWorktrees(sessionId: string | null) {
-  const { session } = useSession(sessionId);
-  const worktrees = useAppStore((state) => state.worktrees.items);
-  const sessionWorktreesBySessionId = useAppStore(
-    (state) => state.sessionWorktreesBySessionId.itemsBySessionId,
-  );
+  const sessionQuery = useQuery(taskSessionQueryOptions(sessionId ?? ""));
+  const session = sessionQuery.data;
+  const worktreesQuery = useQuery(sessionWorktreesQueryOptions(sessionId ?? ""));
 
   return useMemo(() => {
     if (!sessionId) return [];
-    const worktreeIds = sessionWorktreesBySessionId[sessionId];
-    if (worktreeIds?.length) {
-      return worktreeIds.map((id: string) => worktrees[id]).filter(Boolean);
+    if (worktreesQuery.data?.length) {
+      return worktreesQuery.data;
     }
     if (session?.worktree_id) {
-      const worktree = worktrees[session.worktree_id];
-      return worktree ? [worktree] : [];
+      return [
+        {
+          id: session.worktree_id,
+          sessionId: session.id,
+          repositoryId: session.repository_id ?? undefined,
+          path: session.worktree_path ?? undefined,
+          branch: session.worktree_branch ?? undefined,
+        },
+      ];
     }
     return [];
-  }, [session?.worktree_id, sessionId, sessionWorktreesBySessionId, worktrees]);
+  }, [
+    session?.id,
+    session?.repository_id,
+    session?.worktree_branch,
+    session?.worktree_id,
+    session?.worktree_path,
+    sessionId,
+    worktreesQuery.data,
+  ]);
 }

@@ -15,7 +15,6 @@ import {
   createUISlice,
   createGitHubSlice,
   createOfficeSlice,
-  createFeaturesSlice,
   defaultKanbanState,
   defaultWorkspaceState,
   defaultSettingsState,
@@ -24,10 +23,8 @@ import {
   defaultUIState,
   defaultGitHubState,
   defaultOfficeState,
-  defaultFeaturesState,
   type UserSettingsState,
   type ProcessStatusEntry,
-  type Worktree,
   type GitStatusEntry,
   type SessionCommit,
   type ContextWindowEntry,
@@ -36,7 +33,6 @@ import {
   type PreviewViewMode,
   type PreviewDevicePreset,
   type ConnectionState,
-  type FeaturesSliceActions,
   type GitHubSliceActions,
 } from "./slices";
 import type {
@@ -73,8 +69,6 @@ export type AppState = {
   taskSessions: (typeof defaultSessionState)["taskSessions"];
   taskSessionsByTask: (typeof defaultSessionState)["taskSessionsByTask"];
   sessionAgentctl: (typeof defaultSessionState)["sessionAgentctl"];
-  worktrees: (typeof defaultSessionState)["worktrees"];
-  sessionWorktreesBySessionId: (typeof defaultSessionState)["sessionWorktreesBySessionId"];
   activeModel: (typeof defaultSessionState)["activeModel"];
   taskPlans: (typeof defaultSessionState)["taskPlans"];
 
@@ -95,9 +89,6 @@ export type AppState = {
 
   // Office slice
   office: (typeof defaultOfficeState)["office"];
-
-  // Feature flags slice
-  features: (typeof defaultFeaturesState)["features"];
 
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
@@ -204,8 +195,6 @@ export type AppState = {
   upsertTaskSessionFromEvent: (taskId: string, session: TaskSession) => void;
   setTaskSessionsLoading: (taskId: string, loading: boolean) => void;
   setSessionAgentctlStatus: (sessionId: string, status: SessionAgentctlStatus) => void;
-  setWorktree: (worktree: Worktree) => void;
-  setSessionWorktrees: (sessionId: string, worktreeIds: string[]) => void;
   setGitStatus: (sessionId: string, gitStatus: GitStatusEntry) => boolean;
   clearGitStatus: (sessionId: string) => void;
   clearLegacyGitStatusEntry: (sessionId: string) => void;
@@ -280,8 +269,7 @@ export type AppState = {
   setTaskSortDir: (dir: TaskSortDir) => void;
   setTaskGroupBy: (groupBy: TaskGroupBy) => void;
   toggleNesting: () => void;
-} & GitHubSliceActions &
-  FeaturesSliceActions;
+} & GitHubSliceActions;
 
 export function createAppStore(initialState?: Partial<AppState>) {
   const merged = mergeInitialState(initialState);
@@ -303,8 +291,6 @@ export function createAppStore(initialState?: Partial<AppState>) {
       ...createGitHubSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createOfficeSlice(set as any, get as any, api as any),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createFeaturesSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createUISlice(set as any, get as any, api as any),
       // Re-assert merged initial state so caller-supplied values win over slice defaults.
