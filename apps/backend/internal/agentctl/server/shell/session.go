@@ -235,23 +235,30 @@ func (s *Session) Stop() error {
 	select {
 	case <-s.doneCh:
 		s.logger.Info("shell session stopped gracefully")
+		s.cleanupShellProcessGroup(pid, "leader_exited")
 	case <-time.After(shellStopGrace):
 		s.logger.Warn("shell session stop timeout, force killing",
 			zap.Int("pid", pid),
 			zap.Duration("grace", shellStopGrace))
-		if s.cmd != nil && s.cmd.Process != nil {
-			s.logger.Debug("shell session process group SIGKILL requested",
-				zap.Int("pid", pid),
-				zap.String("reason", "stop_timeout"))
-			if err := killShellProcessGroup(s.cmd.Process); err != nil {
-				s.logger.Debug("shell session process group SIGKILL failed",
-					zap.Int("pid", pid),
-					zap.Error(err))
-			}
-		}
+		s.cleanupShellProcessGroup(pid, "stop_timeout")
 	}
 
 	return nil
+}
+
+func (s *Session) cleanupShellProcessGroup(pid int, reason string) {
+	if s.cmd == nil || s.cmd.Process == nil {
+		return
+	}
+	s.logger.Debug("shell session process group cleanup requested",
+		zap.Int("pid", pid),
+		zap.String("reason", reason))
+	if err := killShellProcessGroup(s.cmd.Process); err != nil {
+		s.logger.Debug("shell session process group cleanup failed",
+			zap.Int("pid", pid),
+			zap.String("reason", reason),
+			zap.Error(err))
+	}
 }
 
 // Write sends input to the shell

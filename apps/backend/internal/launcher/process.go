@@ -165,12 +165,17 @@ func startProcess(command string, args []string, cwd string, env []string, quiet
 	}
 	cmd.Stdout = newProcessOutput(stdout, stdoutSink, os.Stderr, label+".stdout")
 	cmd.Stderr = newProcessOutput(nil, os.Stderr, nil, label+".stderr")
+	supervisor.mu.Lock()
 	if err := cmd.Start(); err != nil {
+		supervisor.mu.Unlock()
 		return nil, nil, err
 	}
-	shutdownDebugf("managed process started label=%q pid=%d command=%q args=%q cwd=%q", label, cmd.Process.Pid, command, args, cwd)
 	proc := &managedProcess{label: label, cmd: cmd, done: make(chan struct{})}
-	supervisor.add(proc)
+	supervisor.children = append(supervisor.children, proc)
+	childCount := len(supervisor.children)
+	supervisor.mu.Unlock()
+	shutdownDebugf("managed process started label=%q pid=%d command=%q args=%q cwd=%q", label, cmd.Process.Pid, command, args, cwd)
+	shutdownDebugf("supervisor add child pid=%d total_children=%d", proc.cmd.Process.Pid, childCount)
 	go func() {
 		err := cmd.Wait()
 		code := 0

@@ -13,12 +13,18 @@ import (
 )
 
 // setProcGroup configures the command to run in its own process group.
-// On Windows, we also start suspended so installProcessLifecycle can bind
-// the process to a kill-on-close Job Object before it can spawn descendants.
 func setProcGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED,
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
 	}
+}
+
+// setAgentProcGroup configures long-running agent processes for process-tree
+// cleanup. On Windows, agents start suspended so installProcessLifecycle can
+// bind them to a kill-on-close Job Object before they can spawn descendants.
+func setAgentProcGroup(cmd *exec.Cmd) {
+	setProcGroup(cmd)
+	cmd.SysProcAttr.CreationFlags |= windows.CREATE_SUSPENDED
 }
 
 type processLifecycleHandle struct {

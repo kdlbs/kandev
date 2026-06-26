@@ -16,6 +16,10 @@ func setProcGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 }
 
+func setAgentProcGroup(cmd *exec.Cmd) {
+	setProcGroup(cmd)
+}
+
 type processLifecycleHandle struct{}
 
 func installProcessLifecycle(_ *exec.Cmd) (processLifecycleHandle, error) {

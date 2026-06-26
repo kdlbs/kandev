@@ -22,6 +22,8 @@ import (
 )
 
 const dockerWorkspacePath = "/workspace"
+const dockerStopContainerTimeout = 30 * time.Second
+const dockerFallbackCleanupTimeout = dockerStopContainerTimeout + 5*time.Second
 
 // getMetadataString retrieves a string value from metadata map.
 func getMetadataString(metadata map[string]interface{}, key string) string {
@@ -621,10 +623,13 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 		return fmt.Errorf("docker unavailable: %w", err)
 	}
 
+	cleanupCtx, cancel := dockerCleanupContext(ctx, instance.AgentStopFailed)
+	defer cancel()
+
 	if force {
-		err = dockerClient.KillContainer(ctx, instance.ContainerID, "SIGKILL")
+		err = dockerClient.KillContainer(cleanupCtx, instance.ContainerID, "SIGKILL")
 	} else {
-		err = dockerClient.StopContainer(ctx, instance.ContainerID, 30*time.Second)
+		err = dockerClient.StopContainer(cleanupCtx, instance.ContainerID, dockerStopContainerTimeout)
 	}
 
 	if err != nil {
@@ -632,6 +637,13 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 	}
 
 	return nil
+}
+
+func dockerCleanupContext(ctx context.Context, agentStopFailed bool) (context.Context, context.CancelFunc) {
+	if agentStopFailed {
+		return context.WithTimeout(context.WithoutCancel(ctx), dockerFallbackCleanupTimeout)
+	}
+	return ctx, func() {}
 }
 
 func (r *DockerExecutor) RecoverInstances(_ context.Context) ([]*ExecutorInstance, error) {

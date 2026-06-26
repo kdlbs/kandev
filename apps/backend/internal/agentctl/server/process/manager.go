@@ -898,7 +898,7 @@ func (m *Manager) buildFinalCommand() error {
 	// Create a new process group so we can kill all child processes together.
 	// This is important for adapters like OpenCode that spawn child processes
 	// (npx -> sh -> node -> opencode binary).
-	setProcGroup(m.cmd)
+	setAgentProcGroup(m.cmd)
 
 	envBytes, largestEnv := summarizeEnvBytes(m.cfg.AgentEnv, 3)
 	m.logger.Info("agent command prepared",
@@ -1368,7 +1368,7 @@ func (m *Manager) killProcessGroupIfRequired() {
 //
 // On timeout the entire process group is killed (not just the leader) so that
 // child processes — most importantly MCP servers spawned by the agent — don't
-// re-parent to init and leak. setProcGroup at command-build time puts the
+// re-parent to init and leak. setAgentProcGroup at command-build time puts the
 // agent in its own pgid; here we deliver SIGKILL to that pgid. If the command
 // leader exits before its descendants do, we still terminate the remaining
 // process group before reporting shutdown complete. Falls back to a

@@ -9,16 +9,36 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/windows"
 )
+
+func TestWindowsSetProcGroupDoesNotSuspendSharedHelpers(t *testing.T) {
+	cmd := exec.Command("kandev")
+	setProcGroup(cmd)
+
+	require.NotNil(t, cmd.SysProcAttr)
+	require.Equal(t, uintptr(syscall.CREATE_NEW_PROCESS_GROUP), cmd.SysProcAttr.CreationFlags)
+	require.Zero(t, cmd.SysProcAttr.CreationFlags&windows.CREATE_SUSPENDED)
+}
+
+func TestWindowsSetAgentProcGroupStartsSuspended(t *testing.T) {
+	cmd := exec.Command("kandev")
+	setAgentProcGroup(cmd)
+
+	require.NotNil(t, cmd.SysProcAttr)
+	require.NotZero(t, cmd.SysProcAttr.CreationFlags&syscall.CREATE_NEW_PROCESS_GROUP)
+	require.NotZero(t, cmd.SysProcAttr.CreationFlags&windows.CREATE_SUSPENDED)
+}
 
 func TestWindowsProcessLifecycleJobKillsDescendants(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "child.pid")
 	cmd := fixtureCmd(fmt.Sprintf("delay-then-child %s 200 30", pidFile))
-	setProcGroup(cmd)
+	setAgentProcGroup(cmd)
 	require.NoError(t, cmd.Start())
 	parentPID := cmd.Process.Pid
 	waited := false

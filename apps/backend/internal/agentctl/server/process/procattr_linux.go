@@ -19,6 +19,10 @@ func setProcGroup(cmd *exec.Cmd) {
 	}
 }
 
+func setAgentProcGroup(cmd *exec.Cmd) {
+	setProcGroup(cmd)
+}
+
 type processLifecycleHandle struct{}
 
 func installProcessLifecycle(_ *exec.Cmd) (processLifecycleHandle, error) {

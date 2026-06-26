@@ -36,6 +36,26 @@ func TestStopKillsShellProcessGroupOnTimeout(t *testing.T) {
 	}, 5*time.Second, 50*time.Millisecond, "shell child process %d should be killed", childPID)
 }
 
+func TestStopKillsShellProcessGroupAfterLeaderExits(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	require.NoError(t, err)
+
+	pidFile := filepath.Join(t.TempDir(), "child.pid")
+	script := fmt.Sprintf("trap 'exit 0' HUP TERM; (trap '' HUP TERM; sleep 30) & echo $! > %s; wait", shellQuote(pidFile))
+	session, err := NewSession(Config{
+		WorkDir:      t.TempDir(),
+		ShellCommand: sh,
+		ShellArgs:    []string{"-c", script},
+	}, newTestLogger())
+	require.NoError(t, err)
+
+	childPID := waitForShellChildPID(t, pidFile)
+	require.NoError(t, session.Stop())
+	require.Eventually(t, func() bool {
+		return !shellProcessAlive(childPID)
+	}, 5*time.Second, 50*time.Millisecond, "shell child process %d should be killed after shell leader exits", childPID)
+}
+
 func waitForShellChildPID(t *testing.T, pidFile string) int {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

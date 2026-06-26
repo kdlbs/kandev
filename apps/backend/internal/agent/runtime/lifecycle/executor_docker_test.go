@@ -123,6 +123,33 @@ func TestDockerStopInstanceStopsContainerWhenAgentStopFailed(t *testing.T) {
 	}
 }
 
+func TestDockerCleanupContextIgnoresCanceledParentAfterAgentStopFailed(t *testing.T) {
+	parent, parentCancel := context.WithCancel(context.Background())
+	parentCancel()
+
+	cleanupCtx, cleanupCancel := dockerCleanupContext(parent, true)
+	defer cleanupCancel()
+
+	if err := cleanupCtx.Err(); err != nil {
+		t.Fatalf("cleanup context should remain usable after parent cancellation, got %v", err)
+	}
+	if _, ok := cleanupCtx.Deadline(); !ok {
+		t.Fatal("cleanup context should keep its own timeout")
+	}
+}
+
+func TestDockerCleanupContextKeepsParentCancellationForNormalStops(t *testing.T) {
+	parent, parentCancel := context.WithCancel(context.Background())
+	cleanupCtx, cleanupCancel := dockerCleanupContext(parent, false)
+	defer cleanupCancel()
+
+	parentCancel()
+
+	if err := cleanupCtx.Err(); err != context.Canceled {
+		t.Fatalf("cleanup context error = %v, want context.Canceled", err)
+	}
+}
+
 func TestDockerExecutor_EnsureClient_Success(t *testing.T) {
 	log := newTestDockerLogger()
 	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
