@@ -246,6 +246,61 @@ func TestLaunchPreparedSession_MultiRepo_ReusesPerRepoWorktreeIDsFromEnvironment
 	}
 }
 
+func TestReuseExistingRepositoryWorktrees_EnvironmentRowsWinOverSessionRows(t *testing.T) {
+	repo := newMockRepository()
+	taskID := "task-env-wins"
+	envID := "env-env-wins"
+	now := time.Now().UTC()
+	repo.sessions["session-prev"] = &models.TaskSession{
+		ID:                "session-prev",
+		TaskID:            taskID,
+		TaskEnvironmentID: envID,
+		StartedAt:         now.Add(-time.Minute),
+		UpdatedAt:         now.Add(-time.Minute),
+	}
+	repo.sessionWorktrees = append(repo.sessionWorktrees,
+		&models.TaskSessionWorktree{
+			SessionID:    "session-prev",
+			RepositoryID: "repo-a",
+			BranchSlug:   "main",
+			WorktreeID:   "wt-session-a",
+		},
+		&models.TaskSessionWorktree{
+			SessionID:    "session-prev",
+			RepositoryID: "repo-b",
+			BranchSlug:   "feature",
+			WorktreeID:   "wt-session-b",
+		},
+	)
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{
+		TaskID:      taskID,
+		UseWorktree: true,
+		Repositories: []RepoSpec{
+			{RepositoryID: "repo-a", BranchIdentitySlug: "main"},
+			{RepositoryID: "repo-b", BranchIdentitySlug: "feature"},
+		},
+	}
+	env := &models.TaskEnvironment{
+		ID: envID,
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-a", BranchSlug: "main", WorktreeID: "wt-env-a"},
+		},
+	}
+
+	exec.reuseExistingRepositoryWorktrees(context.Background(), req, env)
+
+	if req.Repositories[0].WorktreeID != "wt-env-a" {
+		t.Fatalf("repo-a WorktreeID = %q, want env row to win with wt-env-a", req.Repositories[0].WorktreeID)
+	}
+	if req.Repositories[1].WorktreeID != "wt-session-b" {
+		t.Fatalf("repo-b WorktreeID = %q, want session fallback wt-session-b", req.Repositories[1].WorktreeID)
+	}
+	if req.WorktreeID != "wt-env-a" {
+		t.Fatalf("top-level WorktreeID = %q, want first repo env worktree wt-env-a", req.WorktreeID)
+	}
+}
+
 func TestLaunchPreparedSession_MultiBranch_ReusesWorktreeIDsByBranchSlug(t *testing.T) {
 	repo := newMockRepository()
 	taskID := "task-multi-branch-reuse"
