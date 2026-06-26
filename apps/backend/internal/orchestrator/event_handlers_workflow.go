@@ -364,6 +364,7 @@ func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.Tas
 	if agentProfileID == "" {
 		agentProfileID, _ = task.Metadata[models.MetaKeyAgentProfileID].(string)
 	}
+	executorID, _ := task.Metadata[models.MetaKeyExecutorID].(string)
 	executorProfileID, _ := task.Metadata[models.MetaKeyExecutorProfileID].(string)
 	planMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
 
@@ -371,13 +372,14 @@ func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.Tas
 		zap.String("task_id", data.TaskID),
 		zap.String("to_step_id", data.ToStepID),
 		zap.String("agent_profile_id", agentProfileID),
+		zap.String("executor_id", executorID),
 		zap.String("executor_profile_id", executorProfileID),
 		zap.Bool("plan_mode", planMode))
 
 	// Async: event bus delivers synchronously; blocking here → HTTP timeout (see handleTaskMovedWithSession doc).
 	go func() {
 		asyncCtx := context.WithoutCancel(ctx)
-		_, err := s.StartTask(asyncCtx, task.ID, agentProfileID, "", executorProfileID, "", task.Description, data.ToStepID, planMode, true, nil)
+		_, err := s.StartTask(asyncCtx, task.ID, agentProfileID, executorID, executorProfileID, "", task.Description, data.ToStepID, planMode, true, nil)
 		if err != nil {
 			s.logger.Error("task.moved: failed to auto-start task",
 				zap.String("task_id", data.TaskID),

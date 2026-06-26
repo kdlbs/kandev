@@ -144,12 +144,17 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 
 	// Resolve agent/executor profile from task metadata if not explicitly provided
 	if agentProfileID == "" {
-		if v, ok := task.Metadata["agent_profile_id"].(string); ok && v != "" {
+		if v, ok := task.Metadata[models.MetaKeyAgentProfileID].(string); ok && v != "" {
 			agentProfileID = v
 		}
 	}
+	if executorID == "" {
+		if v, ok := task.Metadata[models.MetaKeyExecutorID].(string); ok && v != "" {
+			executorID = v
+		}
+	}
 	if executorProfileID == "" {
-		if v, ok := task.Metadata["executor_profile_id"].(string); ok && v != "" {
+		if v, ok := task.Metadata[models.MetaKeyExecutorProfileID].(string); ok && v != "" {
 			executorProfileID = v
 		}
 	}
@@ -581,6 +586,16 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			zap.String("task_id", taskID),
 			zap.Error(err))
 		return nil, err
+	}
+	if executorID == "" {
+		if v, ok := task.Metadata[models.MetaKeyExecutorID].(string); ok && v != "" {
+			executorID = v
+		}
+	}
+	if executorProfileID == "" {
+		if v, ok := task.Metadata[models.MetaKeyExecutorProfileID].(string); ok && v != "" {
+			executorProfileID = v
+		}
 	}
 
 	// Override priority if provided in the request

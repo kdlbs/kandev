@@ -424,6 +424,62 @@ func TestHandleCreateTask_StartAgentFalsePersistsInheritedAgentProfile(t *testin
 	assert.Equal(t, "source-executor-profile", task.Metadata[models.MetaKeyExecutorProfileID])
 }
 
+func TestHandleCreateTask_StartAgentFalsePersistsInheritedExecutorID(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	require.Len(t, workflows, 1)
+
+	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID,
+		WorkflowID:  workflows[0].ID,
+		Title:       "Source task",
+	})
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:             "source-session",
+		TaskID:         source.ID,
+		AgentProfileID: "source-profile",
+		ExecutorID:     "exec-special",
+		State:          models.TaskSessionStateWaitingForInput,
+		IsPrimary:      true,
+	}))
+
+	h := &Handlers{
+		taskSvc: svc,
+		logger:  testLogger(t).WithFields(),
+	}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"source_task_id": source.ID,
+		"workspace_id":   workspaces[0].ID,
+		"workflow_id":    workflows[0].ID,
+		"title":          "Deferred task with bare executor",
+		"description":    "This should open later with the inherited executor.",
+		"start_agent":    false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+	require.NotEmpty(t, created.ID)
+
+	task, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	require.NotNil(t, task.Metadata)
+	assert.Equal(t, "source-profile", task.Metadata[models.MetaKeyAgentProfileID])
+	assert.Equal(t, "exec-special", task.Metadata[models.MetaKeyExecutorID])
+	assert.Empty(t, task.Metadata[models.MetaKeyExecutorProfileID])
+}
+
 func TestHandleCreateTask_StartAgentUsesWorkspaceDefaultAgentProfile(t *testing.T) {
 	svc, _ := newTestTaskService(t)
 	ctx := context.Background()

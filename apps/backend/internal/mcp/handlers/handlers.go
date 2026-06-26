@@ -475,6 +475,9 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	metadata := map[string]interface{}{
 		models.MetaKeyAgentProfileID: launchConfig.AgentProfileID,
 	}
+	if launchConfig.ExecutorID != "" {
+		metadata[models.MetaKeyExecutorID] = launchConfig.ExecutorID
+	}
 	if launchConfig.ExecutorProfileID != "" {
 		metadata[models.MetaKeyExecutorProfileID] = launchConfig.ExecutorProfileID
 	}
