@@ -263,7 +263,7 @@ func wsSyncTaskPR(svc *Service, _ *logger.Logger) func(ctx context.Context, msg 
 		prs, permanent, err := svc.TriggerPRSyncAllPermanent(ctx, taskID)
 		if err != nil {
 			var partial *PartialPRSyncError
-			if !errors.As(err, &partial) || len(prs) == 0 {
+			if !permanent && (!errors.As(err, &partial) || len(prs) == 0) {
 				return nil, err
 			}
 		}

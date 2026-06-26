@@ -2,11 +2,14 @@ package github
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 // TestSyncWatchesBatched_NegativeCache_ShortCircuits is the regression
@@ -318,5 +321,47 @@ func TestService_TriggerPRSyncAllPermanent_FlagsDeadRepos(t *testing.T) {
 		if strings.Contains(q, w1.Owner) {
 			t.Errorf("dead repo leaked into branch query: %q", q)
 		}
+	}
+}
+
+func TestWSSyncTaskPR_ReturnsPermanentEnvelopeWhenSyncErrors(t *testing.T) {
+	_, svc, gh, store := setupBatchedPollerTest(t)
+	ctx := context.Background()
+
+	w := &PRWatch{SessionID: "s1", TaskID: "t1", Owner: "Dead", Repo: "Repo", PRNumber: 0, Branch: "x"}
+	if err := store.CreatePRWatch(ctx, w); err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+	gh.branchErr = &batchedMissingReposErr{
+		Repos: []repoRef{{Owner: w.Owner, Repo: w.Repo}},
+		Inner: errors.New("sibling repo unavailable"),
+	}
+
+	msg, err := ws.NewRequest("req-1", ws.ActionGitHubTaskPRSync, map[string]string{"task_id": "t1"})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	resp, err := wsSyncTaskPR(svc, nil)(ctx, msg)
+	if err != nil {
+		t.Fatalf("wsSyncTaskPR returned transport error: %v", err)
+	}
+	if resp.Type != ws.MessageTypeResponse {
+		t.Fatalf("response type = %q, want %q; payload=%s", resp.Type, ws.MessageTypeResponse, string(resp.Payload))
+	}
+	var payload struct {
+		PRs       []*TaskPR `json:"prs"`
+		Permanent bool      `json:"permanent"`
+	}
+	if err := resp.ParsePayload(&payload); err != nil {
+		t.Fatalf("ParsePayload: %v", err)
+	}
+	if !payload.Permanent {
+		t.Fatalf("permanent = false, want true")
+	}
+	if payload.PRs == nil {
+		t.Fatalf("prs = nil, want empty slice")
+	}
+	if len(payload.PRs) != 0 {
+		t.Fatalf("prs length = %d, want 0", len(payload.PRs))
 	}
 }

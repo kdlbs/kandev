@@ -450,7 +450,7 @@ func TestHandleTaskPRCIAutomationAutoMergeUsesPartialSyncMatch(t *testing.T) {
 			AutoMergeEnabled: true,
 		},
 		triggerPRSyncAllPRs: []*github.TaskPR{pr},
-		triggerPRSyncAllErr: errors.New("sibling repo unavailable"),
+		triggerPRSyncAllErr: &github.PartialPRSyncError{Err: errors.New("sibling repo unavailable")},
 	}
 	svc.SetGitHubService(ghSvc)
 
@@ -1080,7 +1080,7 @@ func TestHandleTaskCIOptionsUpdatedStartsAutomationForPartialSyncResults(t *test
 			Repo:         "widget",
 			PRNumber:     42,
 		}},
-		triggerPRSyncAllErr: errors.New("sibling repo unavailable"),
+		triggerPRSyncAllErr: &github.PartialPRSyncError{Err: errors.New("sibling repo unavailable")},
 		ciOptionsResp:       &github.TaskCIOptionsResponse{TaskID: "task-1"},
 		ciOptionsStarted:    started,
 		ciOptionsBlock:      block,
@@ -1094,7 +1094,11 @@ func TestHandleTaskCIOptionsUpdatedStartsAutomationForPartialSyncResults(t *test
 	if err != nil {
 		t.Fatalf("handle CI options updated: %v", err)
 	}
-	<-started
+	select {
+	case <-started:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for CI automation to start")
+	}
 	if _, loaded := svc.ciAutomationInFlight.Load("task-1|repo-1|42"); !loaded {
 		t.Fatal("expected automation to run for partial sync result")
 	}
