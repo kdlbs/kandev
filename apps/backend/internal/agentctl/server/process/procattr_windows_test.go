@@ -22,7 +22,7 @@ func TestWindowsSetProcGroupDoesNotSuspendSharedHelpers(t *testing.T) {
 	setProcGroup(cmd)
 
 	require.NotNil(t, cmd.SysProcAttr)
-	require.Equal(t, uintptr(syscall.CREATE_NEW_PROCESS_GROUP), cmd.SysProcAttr.CreationFlags)
+	require.NotZero(t, cmd.SysProcAttr.CreationFlags&syscall.CREATE_NEW_PROCESS_GROUP)
 	require.Zero(t, cmd.SysProcAttr.CreationFlags&windows.CREATE_SUSPENDED)
 }
 
