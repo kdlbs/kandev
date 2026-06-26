@@ -202,18 +202,19 @@
   }
 }
 
-/* iOS Safari auto-zooms a focused text field whose computed font-size is
-   < 16px. Force 16px on coarse-pointer (touch) devices to stop focus-zoom.
-   !important because some controls are styled by more specific selectors that
-   would otherwise win on specificity. Only true editing hosts are targeted:
-   `[contenteditable="false"]` decorations (TipTap mention chips, code-block
-   views) are excluded, and the decorative `.code-block-language` <select> is
-   left at its compact size — native selects open a picker rather than zooming
-   the viewport, so they don't need the 16px floor. */
+/* iOS Safari auto-zooms a focused form control whose computed font-size is
+   < 16px (native <select> included). Force 16px on coarse-pointer (touch)
+   devices to stop focus-zoom. !important because some controls are styled by
+   more specific selectors that would otherwise win on specificity — e.g. the
+   compact `.tiptap pre .code-block-language` picker (0.625rem). Bumping that
+   picker to 16px only happens on touch, where a larger tap target is an
+   improvement; desktop (fine pointer) keeps the compact size. Only true
+   editing hosts get the contenteditable rule — `[contenteditable="false"]`
+   decorations (mention chips, code-block views) are excluded. */
 @media (pointer: coarse) {
   input,
   textarea,
-  select:not(.code-block-language),
+  select,
   [contenteditable="true"],
   [contenteditable="plaintext-only"] {
     font-size: 16px !important;
