@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -113,13 +114,9 @@ func TestAttachSignalsSecondSignalForceKillsChildren(t *testing.T) {
 
 	waitForLauncherExitCode(t, exitCh, 1)
 	waitForManagedProcessDone(t, proc, 5*time.Second)
-	got := output.String()
-	if !strings.Contains(got, "forced shutdown after second signal") {
-		t.Fatalf("shutdown output missing forced shutdown start: %q", got)
-	}
-	if !strings.Contains(got, "forced shutdown complete") {
-		t.Fatalf("shutdown output missing forced shutdown completion: %q", got)
-	}
+	waitForOutputContains(t, output, "forced shutdown after second signal")
+	waitForOutputContains(t, output, "forced shutdown complete")
+	waitForOutputContains(t, output, "graceful shutdown complete")
 }
 
 func TestLauncherSignalHelper(t *testing.T) {
@@ -191,21 +188,21 @@ func startManagedSignalHelper(t *testing.T, termFile string, mode string) *manag
 	return proc
 }
 
-func captureLauncherExit(t *testing.T) (chan int, *bytes.Buffer) {
+func captureLauncherExit(t *testing.T) (chan int, *safeOutput) {
 	t.Helper()
 	exitCh := make(chan int, 1)
-	var output bytes.Buffer
+	output := &safeOutput{}
 	oldExit := launcherExit
 	oldStatusOutput := launcherStatusOutput
 	launcherExit = func(code int) {
 		exitCh <- code
 	}
-	launcherStatusOutput = &output
+	launcherStatusOutput = output
 	t.Cleanup(func() {
 		launcherExit = oldExit
 		launcherStatusOutput = oldStatusOutput
 	})
-	return exitCh, &output
+	return exitCh, output
 }
 
 func sendLauncherTestSignal(t *testing.T, sig os.Signal) {
@@ -238,6 +235,34 @@ func waitForManagedProcessDone(t *testing.T, proc *managedProcess, timeout time.
 	case <-time.After(timeout):
 		t.Fatalf("timed out waiting for managed process pid=%d", proc.cmd.Process.Pid)
 	}
+}
+
+func waitForOutputContains(t *testing.T, output *safeOutput, want string) {
+	t.Helper()
+	for range 500 {
+		if strings.Contains(output.String(), want) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("shutdown output missing %q: %q", want, output.String())
+}
+
+type safeOutput struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (o *safeOutput) Write(p []byte) (int, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.buf.Write(p)
+}
+
+func (o *safeOutput) String() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.buf.String()
 }
 
 func waitForFile(t *testing.T, path string) {
