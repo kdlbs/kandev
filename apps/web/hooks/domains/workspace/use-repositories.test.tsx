@@ -82,6 +82,38 @@ describe("useRepositories", () => {
       repositories,
     );
   });
+
+  it("force-refreshes a fresh list even when cached repositories exist", async () => {
+    const cached = [repo(REPO_ID, "cached")];
+    const fresh = [repo(OTHER_REPO_ID, "fresh")];
+    vi.mocked(listRepositories).mockResolvedValue({ repositories: fresh, total: 1 });
+    const queryClient = createQueryClient();
+    queryClient.setQueryData(qk.workspaces.repositories(WORKSPACE_ID), cached);
+
+    const { result } = renderHook(() => useRepositories(WORKSPACE_ID, true, true), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    expect(result.current.repositories).toEqual(cached);
+    await waitFor(() => expect(result.current.repositories).toEqual(fresh));
+
+    expect(listRepositories).toHaveBeenCalledWith(WORKSPACE_ID, undefined, expect.any(Object));
+  });
+
+  it("does not fetch when disabled or workspace is missing", async () => {
+    const queryClient = createQueryClient();
+
+    renderHook(() => useRepositories(null, true, true), {
+      wrapper: wrapperFor(queryClient),
+    });
+    renderHook(() => useRepositories(WORKSPACE_ID, false, true), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    await Promise.resolve();
+
+    expect(listRepositories).not.toHaveBeenCalled();
+  });
 });
 
 describe("useRepository", () => {

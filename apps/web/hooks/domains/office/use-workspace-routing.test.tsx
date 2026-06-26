@@ -1,7 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
+import { qk } from "@/lib/query/keys";
+import type { WorkspaceRouting } from "@/lib/state/slices/office/types";
 import { useWorkspaceRouting } from "./use-workspace-routing";
 
 const mocks = vi.hoisted(() => ({
@@ -19,25 +21,13 @@ vi.mock("@/lib/api/domains/office-routing-api", () => ({
   getWorkspaceRouting: mocks.getWorkspaceRouting,
 }));
 
-const setKnownProviders = vi.fn();
-const setWorkspaceRouting = vi.fn();
-
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (sel: (state: unknown) => unknown) =>
-    sel({
-      office: {
-        routing: { byWorkspace: {}, knownProviders: [] },
-      },
-      setKnownProviders,
-      setWorkspaceRouting,
-    }),
-}));
+const WORKSPACE_ID = "ws-1";
+const PROVIDER_ID = "claude-acp";
 
 describe("useWorkspaceRouting", () => {
   beforeEach(() => {
-    setKnownProviders.mockReset();
-    setWorkspaceRouting.mockReset();
     mocks.getWorkspaceRouting.mockReset();
+    mocks.updateWorkspaceRouting.mockReset();
     mocks.getWorkspaceRouting.mockResolvedValue({
       config: {
         enabled: false,
@@ -45,24 +35,47 @@ describe("useWorkspaceRouting", () => {
         default_tier: "balanced",
         provider_profiles: {},
       },
-      known_providers: ["claude-acp"],
+      known_providers: [PROVIDER_ID],
     });
   });
 
   it("fetches once on mount when there is no cached config", async () => {
-    const { unmount } = renderHook(() => useWorkspaceRouting("ws-1"), {
-      wrapper: createQueryWrapper(),
+    const { wrapper } = createQueryWrapper();
+    const { unmount } = renderHook(() => useWorkspaceRouting(WORKSPACE_ID), {
+      wrapper,
     });
     await waitFor(() => expect(mocks.getWorkspaceRouting).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(setKnownProviders).toHaveBeenCalled());
-    expect(setWorkspaceRouting).toHaveBeenCalled();
     unmount();
+  });
+
+  it("updates the routing query cache without a store mirror", async () => {
+    const { client, wrapper } = createQueryWrapper();
+    const nextConfig: WorkspaceRouting = {
+      enabled: true,
+      provider_order: [PROVIDER_ID],
+      default_tier: "balanced",
+      provider_profiles: {},
+    };
+
+    const { result } = renderHook(() => useWorkspaceRouting(WORKSPACE_ID), { wrapper });
+
+    await waitFor(() => expect(result.current.knownProviders).toEqual([PROVIDER_ID]));
+    await act(async () => {
+      await result.current.update(nextConfig);
+    });
+
+    expect(mocks.updateWorkspaceRouting).toHaveBeenCalledWith(WORKSPACE_ID, nextConfig);
+    expect(client.getQueryData(qk.office.routing(WORKSPACE_ID))).toEqual({
+      config: nextConfig,
+      known_providers: [PROVIDER_ID],
+    });
   });
 
   it("does not call setInterval (no polling)", () => {
     const spy = vi.spyOn(globalThis, "setInterval");
-    const { unmount } = renderHook(() => useWorkspaceRouting("ws-1"), {
-      wrapper: createQueryWrapper(),
+    const { wrapper } = createQueryWrapper();
+    const { unmount } = renderHook(() => useWorkspaceRouting(WORKSPACE_ID), {
+      wrapper,
     });
     expect(spy).not.toHaveBeenCalled();
     unmount();
@@ -77,7 +90,8 @@ function createQueryWrapper() {
       mutations: { retry: false },
     },
   });
-  return function Wrapper({ children }: PropsWithChildren) {
+  const wrapper = function Wrapper({ children }: PropsWithChildren) {
     return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
   };
+  return { client, wrapper };
 }

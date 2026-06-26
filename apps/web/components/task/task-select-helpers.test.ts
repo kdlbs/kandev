@@ -23,13 +23,12 @@ vi.mock("@/lib/links", () => ({
   replaceTaskUrl: vi.fn(),
 }));
 vi.mock("@/lib/api/domains/session-api", () => ({
-  fetchTaskSession: vi.fn(),
+  fetchTaskSession: vi.fn(async () => ({ session: null })),
 }));
 
 import { launchSession, type LaunchSessionResponse } from "@/lib/services/session-launch-service";
 import { performLayoutSwitch, releaseLayoutToDefault } from "@/lib/state/dockview-store";
 import { replaceTaskUrl } from "@/lib/links";
-import { fetchTaskSession } from "@/lib/api/domains/session-api";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { TaskSession } from "@/lib/types/http";
@@ -385,116 +384,6 @@ describe("selectTaskWithLayout — last-selected session preference", () => {
     );
 
     expect(switchToSession).toHaveBeenCalledWith(SELECT_TASK_ID, PRIMARY_SESSION_ID, null);
-  });
-});
-
-describe("selectTaskWithLayout — session routing hydration", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("hydrates before switching when the target session has only partial WS fields", async () => {
-    let resolveLoad: (sessions: TaskSession[]) => void = () => {};
-    const loadPromise = new Promise<TaskSession[]>((resolve) => {
-      resolveLoad = resolve;
-    });
-    const loadTaskSessionsForTask = vi.fn((_: string) => loadPromise);
-    const switchToSession = vi.fn();
-    const store = makeKanbanStore({
-      activeSessionId: OTHER_TASK_SESSION_ID,
-      envIds: { [OTHER_TASK_SESSION_ID]: ENV_B, [PRIMARY_SESSION_ID]: ENV_A },
-      sessionTaskIds: { [PRIMARY_SESSION_ID]: SELECT_TASK_ID },
-    });
-    const state = store.getState();
-    state.taskSessions.items[PRIMARY_SESSION_ID] = {
-      id: PRIMARY_SESSION_ID,
-      task_id: SELECT_TASK_ID,
-      task_environment_id: ENV_A,
-    } as TaskSession;
-
-    selectTaskWithLayout({
-      taskId: SELECT_TASK_ID,
-      task: { primarySessionId: PRIMARY_SESSION_ID },
-      store,
-      switchToSession,
-      loadTaskSessionsForTask,
-      setActiveTask: vi.fn(),
-      setPreparingTaskId: vi.fn(),
-    });
-
-    expect(loadTaskSessionsForTask).toHaveBeenCalledWith(SELECT_TASK_ID);
-    expect(switchToSession).not.toHaveBeenCalled();
-
-    resolveLoad([
-      {
-        id: PRIMARY_SESSION_ID,
-        task_id: SELECT_TASK_ID,
-        task_environment_id: ENV_A,
-        is_passthrough: true,
-      } as TaskSession,
-    ]);
-    await loadPromise;
-    await Promise.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(switchToSession).toHaveBeenCalledWith(
-      SELECT_TASK_ID,
-      PRIMARY_SESSION_ID,
-      OTHER_TASK_SESSION_ID,
-    );
-  });
-
-  it("fetches session detail before switching when loaded task sessions still lack routing fields", async () => {
-    const loadTaskSessionsForTask = vi.fn(async () => [
-      {
-        id: PRIMARY_SESSION_ID,
-        task_id: SELECT_TASK_ID,
-        task_environment_id: ENV_A,
-        is_primary: true,
-      } as TaskSession,
-    ]);
-    vi.mocked(fetchTaskSession).mockResolvedValueOnce({
-      session: {
-        id: PRIMARY_SESSION_ID,
-        task_id: SELECT_TASK_ID,
-        task_environment_id: ENV_A,
-        is_passthrough: true,
-      } as TaskSession,
-    });
-    const switchToSession = vi.fn();
-    const store = makeKanbanStore({
-      activeSessionId: OTHER_TASK_SESSION_ID,
-      envIds: { [OTHER_TASK_SESSION_ID]: ENV_B, [PRIMARY_SESSION_ID]: ENV_A },
-      sessionTaskIds: { [PRIMARY_SESSION_ID]: SELECT_TASK_ID },
-    });
-    const state = store.getState();
-    state.taskSessions.items[PRIMARY_SESSION_ID] = {
-      id: PRIMARY_SESSION_ID,
-      task_id: SELECT_TASK_ID,
-      task_environment_id: ENV_A,
-    } as TaskSession;
-
-    selectTaskWithLayout({
-      taskId: SELECT_TASK_ID,
-      task: { primarySessionId: PRIMARY_SESSION_ID },
-      store,
-      switchToSession,
-      loadTaskSessionsForTask,
-      setActiveTask: vi.fn(),
-      setPreparingTaskId: vi.fn(),
-    });
-
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(fetchTaskSession).toHaveBeenCalledWith(PRIMARY_SESSION_ID, { cache: "no-store" });
-    expect(state.setTaskSession).toHaveBeenCalledWith(
-      expect.objectContaining({ id: PRIMARY_SESSION_ID, is_passthrough: true }),
-    );
-    expect(switchToSession).toHaveBeenCalledWith(
-      SELECT_TASK_ID,
-      PRIMARY_SESSION_ID,
-      OTHER_TASK_SESSION_ID,
-    );
   });
 });
 

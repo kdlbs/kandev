@@ -1,8 +1,7 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useAppStore } from "@/components/state-provider";
 import { qk } from "@/lib/query/keys";
 import { officeRoutingQueryOptions } from "@/lib/query/query-options/office";
 import { retryProvider, updateWorkspaceRouting } from "@/lib/api/domains/office-extended-api";
@@ -21,19 +20,7 @@ export type UseWorkspaceRoutingResult = {
 
 export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceRoutingResult {
   const queryClient = useQueryClient();
-  const storeConfig = useAppStore((s) =>
-    workspaceName ? s.office.routing.byWorkspace[workspaceName] : undefined,
-  );
-  const storeKnownProviders = useAppStore((s) => s.office.routing.knownProviders);
-  const setWorkspaceRouting = useAppStore((s) => s.setWorkspaceRouting);
-  const setKnownProviders = useAppStore((s) => s.setKnownProviders);
   const query = useQuery(officeRoutingQueryOptions(workspaceName ?? ""));
-
-  useEffect(() => {
-    if (!workspaceName || !query.data) return;
-    if (query.data.config) setWorkspaceRouting(workspaceName, query.data.config);
-    if (Array.isArray(query.data.known_providers)) setKnownProviders(query.data.known_providers);
-  }, [query.data, setKnownProviders, setWorkspaceRouting, workspaceName]);
 
   const refresh = useCallback(async () => {
     if (!workspaceName) return;
@@ -46,11 +33,10 @@ export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceR
       await updateWorkspaceRouting(workspaceName, cfg);
       queryClient.setQueryData(qk.office.routing(workspaceName), {
         config: cfg,
-        known_providers: storeKnownProviders,
+        known_providers: query.data?.known_providers ?? [],
       });
-      setWorkspaceRouting(workspaceName, cfg);
     },
-    [queryClient, storeKnownProviders, workspaceName, setWorkspaceRouting],
+    [query.data?.known_providers, queryClient, workspaceName],
   );
 
   const retry = useCallback(
@@ -61,8 +47,8 @@ export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceR
     [workspaceName],
   );
 
-  const config = query.data?.config ?? storeConfig;
-  const knownProviders = query.data?.known_providers ?? storeKnownProviders;
+  const config = query.data?.config ?? undefined;
+  const knownProviders = query.data?.known_providers ?? [];
   const error = queryErrorMessage(query.error);
 
   return { config, knownProviders, isLoading: query.isPending, error, refresh, update, retry };

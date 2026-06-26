@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
@@ -23,14 +23,17 @@ export function AgentsPageClient({ initialAgents }: AgentsPageClientProps) {
   const agentsStore = useAppStore((s) => s.office.agentProfiles);
   const agentsQuery = useOfficeAgentsData(workspaceId, initialAgents);
   const [showCreate, setShowCreate] = useState(false);
-  // Mounting these hooks fetches workspace routing config + preview once;
-  // every agent card reads the resolved preview from the store.
-  useWorkspaceRouting(workspaceId);
-  useRoutingPreview(workspaceId);
+  const routing = useWorkspaceRouting(workspaceId);
+  const routingPreview = useRoutingPreview(workspaceId);
 
   useOfficeRefetch("agents", () => void agentsQuery.refetch());
 
   const agents = agentsQuery.data?.agents ?? agentsStore;
+  const previewsByAgentId = useMemo(
+    () => new Map(routingPreview.agents.map((preview) => [preview.agent_id, preview])),
+    [routingPreview.agents],
+  );
+
   return (
     <div className="p-6 space-y-4">
       <PageHeader
@@ -62,7 +65,12 @@ export function AgentsPageClient({ initialAgents }: AgentsPageClientProps) {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {agents.map((agent) => (
-            <AgentCard key={agent.id} agent={agent} />
+            <AgentCard
+              key={agent.id}
+              agent={agent}
+              routingEnabled={routing.config?.enabled ?? false}
+              routingPreview={previewsByAgentId.get(agent.id)}
+            />
           ))}
         </div>
       )}

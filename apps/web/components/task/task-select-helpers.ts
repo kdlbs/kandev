@@ -84,7 +84,7 @@ async function hydrateSessionRoutingInfo(
   if (sessionHasRoutingInfo(session)) return;
   try {
     const response = await fetchTaskSession(sessionId, { cache: "no-store" });
-    if (!response.session) return;
+    if (!response?.session) return;
     store.getState().setTaskSession(response.session);
     getBrowserQueryClient().setQueryData(qk.taskSession.byId(sessionId), response.session);
   } catch (error) {
@@ -148,6 +148,16 @@ function nextTaskSelectionToken(): number {
 
 function taskSelectionWasSuperseded(selectionToken: number): boolean {
   return selectionToken !== taskSelectionSequence;
+}
+
+function debugTaskSelectionEntry(args: {
+  taskId: string;
+  primarySessionId: string | null;
+  oldSessionId: string | null | undefined;
+  prevActiveTaskId: string | null;
+}) {
+  if (!isDebug()) return;
+  debug("selectTaskWithLayout: entry", args);
 }
 
 export async function prepareAndSwitchTask(
@@ -220,23 +230,19 @@ export function selectTaskWithLayout(params: {
       activeTaskChangedExternally = true;
     }
   });
-  const disposeSelectionGuard = () => {
-    if (typeof unsubscribeSelectionGuard === "function") unsubscribeSelectionGuard();
-  };
+  const disposeSelectionGuard = () => unsubscribeSelectionGuard?.();
   const selectionWasSuperseded = () => {
     if (taskSelectionWasSuperseded(selectionToken)) return true;
     if (activeTaskChangedExternally) return true;
     const activeTaskId = store.getState().tasks.activeTaskId ?? null;
     return activeTaskId !== startActiveTaskId && activeTaskId !== taskId;
   };
-  if (isDebug()) {
-    debug("selectTaskWithLayout: entry", {
-      taskId,
-      primarySessionId: task?.primarySessionId ?? null,
-      oldSessionId: oldSessionId ?? null,
-      prevActiveTaskId: state.tasks.activeTaskId ?? null,
-    });
-  }
+  debugTaskSelectionEntry({
+    taskId,
+    primarySessionId: task?.primarySessionId ?? null,
+    oldSessionId: oldSessionId ?? null,
+    prevActiveTaskId: state.tasks.activeTaskId ?? null,
+  });
   if (task?.primarySessionId) {
     const targetSessionId = resolvePreferredSessionId({
       taskId,
