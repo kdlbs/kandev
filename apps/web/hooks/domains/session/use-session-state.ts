@@ -12,7 +12,12 @@ function deriveSessionFlags(state: TaskSession["state"] | undefined, errorMessag
   return { isStarting, isWorking, isAgentBusy, isFailed, needsRecovery };
 }
 
-export function useSessionState(sessionId: string | null) {
+type UseSessionStateOptions = {
+  taskIdHint?: string | null;
+};
+
+export function useSessionState(sessionId: string | null, options: UseSessionStateOptions = {}) {
+  const { taskIdHint = null } = options;
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
 
@@ -29,12 +34,12 @@ export function useSessionState(sessionId: string | null) {
   const resolvedSessionId = sessionId ?? validatedActiveSessionId;
 
   const { session } = useSession(resolvedSessionId);
-  const task = useTask(session?.task_id ?? null);
+  const taskId = session?.task_id ?? taskIdHint ?? null;
+  const task = useTask(taskId);
   const prepareStatus = useAppStore((state) =>
     resolvedSessionId ? state.prepareProgress.bySessionId[resolvedSessionId]?.status : undefined,
   );
 
-  const taskId = session?.task_id ?? null;
   const taskDescription = task?.description ?? null;
   const flags = deriveSessionFlags(session?.state, session?.error_message);
   const isPreparingEnvironment = prepareStatus === "preparing";

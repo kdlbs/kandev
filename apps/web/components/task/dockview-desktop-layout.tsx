@@ -253,6 +253,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
   return (
     <TaskChatPanel
       sessionId={sessionId}
+      taskId={sessionId ? taskId : null}
       onOpenFile={openFile}
       onOpenFileAtLine={openFile}
       hideSessionsDropdown
