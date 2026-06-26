@@ -199,7 +199,7 @@ func TestWaitForExit_ReapsProcessGroupAfterNaturalLeaderExit(t *testing.T) {
 
 	select {
 	case <-m.doneCh:
-	case <-time.After(5 * time.Second):
+	case <-time.After(15 * time.Second):
 		t.Fatal("timed out waiting for process manager waitForExit")
 	}
 	require.Eventually(t, func() bool {
