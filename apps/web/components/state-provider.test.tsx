@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultSettingsState } from "@/lib/state/slices/settings/settings-slice";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
@@ -30,6 +31,13 @@ function EnableMetricsFromNestedProvider() {
       Enable metrics
     </button>
   );
+}
+
+function ObserveLastUsedCache({ onSeen }: { onSeen: (value: string | null) => void }) {
+  useEffect(() => {
+    onSeen(window.localStorage.getItem(STORAGE_KEYS.LAST_REPOSITORY_ID));
+  }, [onSeen]);
+  return null;
 }
 
 describe("StateProvider", () => {
@@ -113,5 +121,29 @@ describe("StateProvider", () => {
       expect(screen.getByRole("button", { name: "Toggle unrelated" })).toBeTruthy();
     });
     expect(setItemSpy).toHaveBeenCalledTimes(writesAfterInitialSync);
+  });
+
+  it("primes task-create last-used localStorage before child effects run", () => {
+    const onSeen = vi.fn();
+    render(
+      <StateProvider
+        initialState={{
+          userSettings: {
+            ...defaultSettingsState.userSettings,
+            loaded: true,
+            taskCreateLastUsed: {
+              repositoryId: "repo-1",
+              branch: "main",
+              agentProfileId: "agent-1",
+              executorProfileId: "exec-1",
+            },
+          },
+        }}
+      >
+        <ObserveLastUsedCache onSeen={onSeen} />
+      </StateProvider>,
+    );
+
+    expect(onSeen).toHaveBeenCalledWith(JSON.stringify("repo-1"));
   });
 });

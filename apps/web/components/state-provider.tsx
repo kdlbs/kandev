@@ -33,7 +33,7 @@ export function StateProvider({ children, initialState }: StoreProviderProps) {
     }
   }, [store]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     syncTaskCreateLastUsedCache(store.getState());
     return store.subscribe((state, prevState) => {
       if (
