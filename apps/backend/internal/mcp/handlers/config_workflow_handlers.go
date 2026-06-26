@@ -270,17 +270,22 @@ func (h *Handlers) publishWorkflowStepEvent(ctx context.Context, eventType strin
 	}
 	data := map[string]interface{}{
 		"step": map[string]interface{}{
-			"id":                       step.ID,
-			"workflow_id":              step.WorkflowID,
-			"name":                     step.Name,
-			"position":                 step.Position,
-			"color":                    step.Color,
-			"prompt":                   step.Prompt,
-			"events":                   step.Events,
-			"show_in_command_panel":    step.ShowInCommandPanel,
-			"allow_manual_move":        step.AllowManualMove,
-			"is_start_step":            step.IsStartStep,
-			"auto_archive_after_hours": step.AutoArchiveAfterHours,
+			"id":                           step.ID,
+			"workflow_id":                  step.WorkflowID,
+			"name":                         step.Name,
+			"position":                     step.Position,
+			"color":                        step.Color,
+			"prompt":                       step.Prompt,
+			"events":                       step.Events,
+			"show_in_command_panel":        step.ShowInCommandPanel,
+			"allow_manual_move":            step.AllowManualMove,
+			"is_start_step":                step.IsStartStep,
+			"auto_archive_after_hours":     step.AutoArchiveAfterHours,
+			"agent_profile_id":             step.AgentProfileID,
+			"stage_type":                   string(step.StageType),
+			"auto_advance_requires_signal": step.AutoAdvanceRequiresSignal,
+			"created_at":                   step.CreatedAt,
+			"updated_at":                   step.UpdatedAt,
 		},
 	}
 	if err := h.eventBus.Publish(ctx, eventType, bus.NewEvent(eventType, "mcp-handlers", data)); err != nil {

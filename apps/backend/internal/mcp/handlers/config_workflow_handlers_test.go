@@ -139,12 +139,15 @@ func TestHandleCreateWorkflowStep_PublishesDemotedStartStep(t *testing.T) {
 	published := collectWorkflowStepEvents(t, eb, eventtypes.WorkflowStepUpdated, eventtypes.WorkflowStepCreated)
 
 	require.NoError(t, repo.CreateStep(ctx, &wfmodels.WorkflowStep{
-		ID:                 "old-start",
-		WorkflowID:         "wf-test",
-		Name:               "Old Start",
-		Position:           0,
-		IsStartStep:        true,
-		ShowInCommandPanel: true,
+		ID:                        "old-start",
+		WorkflowID:                "wf-test",
+		Name:                      "Old Start",
+		Position:                  0,
+		IsStartStep:               true,
+		ShowInCommandPanel:        true,
+		AgentProfileID:            "agent-old",
+		StageType:                 wfmodels.StageTypeReview,
+		AutoAdvanceRequiresSignal: true,
 	}))
 	isStart := true
 	msg := makeWSMessage(t, ws.ActionMCPCreateWorkflowStep, map[string]interface{}{
@@ -162,6 +165,9 @@ func TestHandleCreateWorkflowStep_PublishesDemotedStartStep(t *testing.T) {
 	assert.Equal(t, eventtypes.WorkflowStepUpdated, (*published)[0].subject)
 	assert.Equal(t, "old-start", (*published)[0].step["id"])
 	assert.False(t, (*published)[0].step["is_start_step"].(bool))
+	assert.Equal(t, "agent-old", (*published)[0].step["agent_profile_id"])
+	assert.Equal(t, string(wfmodels.StageTypeReview), (*published)[0].step["stage_type"])
+	assert.True(t, (*published)[0].step["auto_advance_requires_signal"].(bool))
 	assert.Equal(t, eventtypes.WorkflowStepCreated, (*published)[1].subject)
 	assert.True(t, (*published)[1].step["is_start_step"].(bool))
 }
@@ -175,12 +181,15 @@ func TestHandleUpdateWorkflowStep_PublishesDemotedStartStep(t *testing.T) {
 
 	published := collectWorkflowStepEvents(t, eb, eventtypes.WorkflowStepUpdated)
 	require.NoError(t, repo.CreateStep(ctx, &wfmodels.WorkflowStep{
-		ID:                 "old-start",
-		WorkflowID:         "wf-test",
-		Name:               "Old Start",
-		Position:           0,
-		IsStartStep:        true,
-		ShowInCommandPanel: true,
+		ID:                        "old-start",
+		WorkflowID:                "wf-test",
+		Name:                      "Old Start",
+		Position:                  0,
+		IsStartStep:               true,
+		ShowInCommandPanel:        true,
+		AgentProfileID:            "agent-old",
+		StageType:                 wfmodels.StageTypeApproval,
+		AutoAdvanceRequiresSignal: true,
 	}))
 	require.NoError(t, repo.CreateStep(ctx, &wfmodels.WorkflowStep{
 		ID:                 "new-start",
@@ -203,6 +212,9 @@ func TestHandleUpdateWorkflowStep_PublishesDemotedStartStep(t *testing.T) {
 
 	assert.Equal(t, "old-start", (*published)[0].step["id"])
 	assert.False(t, (*published)[0].step["is_start_step"].(bool))
+	assert.Equal(t, "agent-old", (*published)[0].step["agent_profile_id"])
+	assert.Equal(t, string(wfmodels.StageTypeApproval), (*published)[0].step["stage_type"])
+	assert.True(t, (*published)[0].step["auto_advance_requires_signal"].(bool))
 	assert.Equal(t, "new-start", (*published)[1].step["id"])
 	assert.True(t, (*published)[1].step["is_start_step"].(bool))
 }
