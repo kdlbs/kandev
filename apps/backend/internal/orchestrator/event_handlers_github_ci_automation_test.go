@@ -1141,6 +1141,7 @@ func TestHandleTaskCIOptionsUpdatedRecordsPartialSyncFailureOnlyForUnsyncedPRs(t
 	if err != nil {
 		t.Fatalf("handle CI options updated: %v", err)
 	}
+	waitForCIAutomationIdle(t, svc, "task-1|repo-front|1", 200*time.Millisecond)
 	if len(ghSvc.ciErrors) != 1 {
 		t.Fatalf("expected one sync error for unsynced PR, got %+v", ghSvc.ciErrors)
 	}
