@@ -50,6 +50,10 @@ type ciAutomationCommentSnapshot struct {
 }
 
 func (s *Service) handleTaskPRCIAutomation(ctx context.Context, pr *github.TaskPR) error {
+	return s.handleTaskPRCIAutomationWithRefresh(ctx, pr, true)
+}
+
+func (s *Service) handleTaskPRCIAutomationWithRefresh(ctx context.Context, pr *github.TaskPR, refresh bool) error {
 	if s.githubService == nil || pr == nil {
 		return nil
 	}
@@ -58,8 +62,8 @@ func (s *Service) handleTaskPRCIAutomation(ctx context.Context, pr *github.TaskP
 		s.logger.Debug("load CI automation options failed", zap.String("task_id", pr.TaskID), zap.Error(err))
 		return nil
 	}
-	freshlySynced := false
-	if options.AutoFixEnabled || options.AutoMergeEnabled {
+	freshlySynced := ciAutomationHasFreshPRStatus(pr)
+	if refresh && (options.AutoFixEnabled || options.AutoMergeEnabled) {
 		refreshed, synced, syncErr := s.refreshTaskPRForCIAutomation(ctx, pr)
 		if syncErr != nil {
 			s.recordCIAutomationError(ctx, pr, fmt.Sprintf("sync PR status: %v", syncErr))
@@ -316,7 +320,7 @@ func ciAutomationBuildDelta(feedback *github.PRFeedback, previous ciAutomationCh
 		return delta
 	}
 	for _, check := range feedback.Checks {
-		if check.Status != ciAutomationCheckCompleted || check.Conclusion == ciAutomationCheckSuccess || check.Conclusion == ciAutomationCheckSkipped {
+		if check.Status != ciAutomationCheckCompleted || ciAutomationCheckConclusionDoesNotNeedFix(check.Conclusion) {
 			continue
 		}
 		snap := ciAutomationCheckSnapshot{Name: check.Name, Conclusion: check.Conclusion, HTMLURL: check.HTMLURL, Output: check.Output}
@@ -334,6 +338,12 @@ func ciAutomationBuildDelta(feedback *github.PRFeedback, previous ciAutomationCh
 		delta.Comments = append(delta.Comments, snap)
 	}
 	return delta
+}
+
+func ciAutomationCheckConclusionDoesNotNeedFix(conclusion string) bool {
+	return conclusion == ciAutomationCheckSuccess ||
+		conclusion == ciAutomationCheckSkipped ||
+		conclusion == "neutral"
 }
 
 func ciAutomationCheckKey(check ciAutomationCheckSnapshot) string {

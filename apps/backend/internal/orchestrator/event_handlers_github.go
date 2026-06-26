@@ -200,7 +200,7 @@ func (s *Service) handleTaskCIOptionsUpdated(ctx context.Context, event *bus.Eve
 		return nil
 	}
 	for _, pr := range prs {
-		s.startTaskPRCIAutomation(ctx, pr)
+		s.startTaskPRCIAutomationWithoutRefresh(ctx, pr)
 	}
 	return nil
 }
@@ -217,6 +217,14 @@ func (s *Service) recordTaskCIOptionsSyncError(ctx context.Context, taskID strin
 }
 
 func (s *Service) startTaskPRCIAutomation(ctx context.Context, pr *github.TaskPR) {
+	s.startTaskPRCIAutomationWithRefresh(ctx, pr, true)
+}
+
+func (s *Service) startTaskPRCIAutomationWithoutRefresh(ctx context.Context, pr *github.TaskPR) {
+	s.startTaskPRCIAutomationWithRefresh(ctx, pr, false)
+}
+
+func (s *Service) startTaskPRCIAutomationWithRefresh(ctx context.Context, pr *github.TaskPR, refresh bool) {
 	if pr == nil {
 		return
 	}
@@ -232,7 +240,7 @@ func (s *Service) startTaskPRCIAutomation(ctx context.Context, pr *github.TaskPR
 		defer s.ciAutomationInFlight.Delete(key)
 		automationCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ciAutomationDetachedTimeout)
 		defer cancel()
-		if err := s.handleTaskPRCIAutomation(automationCtx, pr); err != nil {
+		if err := s.handleTaskPRCIAutomationWithRefresh(automationCtx, pr, refresh); err != nil {
 			s.logger.Debug("CI automation handling failed", zap.String("task_id", pr.TaskID), zap.Error(err))
 		}
 	}()

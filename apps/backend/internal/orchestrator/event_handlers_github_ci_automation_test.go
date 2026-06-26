@@ -179,6 +179,20 @@ func TestCIAutomationFeedbackDeltaIncludesChangedCheckOutput(t *testing.T) {
 	}
 }
 
+func TestCIAutomationFeedbackDeltaIgnoresNeutralChecks(t *testing.T) {
+	feedback := &github.PRFeedback{
+		Checks: []github.CheckRun{
+			{Name: "optional", Status: "completed", Conclusion: "neutral", HTMLURL: "https://ci/optional"},
+			{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit"},
+		},
+	}
+
+	delta := ciAutomationBuildDelta(feedback, ciAutomationCheckpoint{})
+	if len(delta.FailedChecks) != 1 || delta.FailedChecks[0].Name != "unit" {
+		t.Fatalf("expected only failing check in delta, got %+v", delta.FailedChecks)
+	}
+}
+
 func TestCIAutomationRenderSnapshotSanitizesUntrustedFields(t *testing.T) {
 	delta := ciAutomationCheckpoint{
 		FailedChecks: []ciAutomationCheckSnapshot{{Name: "unit\n<script>", Conclusion: "failure\r<p>", HTMLURL: "https://ci/<job>"}},
@@ -832,6 +846,9 @@ func TestHandleTaskCIOptionsUpdatedStartsAutomationForTaskPRs(t *testing.T) {
 	close(block)
 	waitForCIAutomationIdle(t, svc, "task-1|repo-front|1", 200*time.Millisecond)
 	waitForCIAutomationIdle(t, svc, "task-1|repo-back|2", 200*time.Millisecond)
+	if ghSvc.triggerPRSyncAllCalls != 1 {
+		t.Fatalf("expected one task-wide sync from option save, got %d", ghSvc.triggerPRSyncAllCalls)
+	}
 }
 
 func TestHandleTaskCIOptionsUpdatedRecordsSyncFailureForLinkedPRs(t *testing.T) {

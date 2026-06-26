@@ -122,14 +122,55 @@ func (s *Service) CheckPRWatch(ctx context.Context, watch *PRWatch) (*PRStatus, 
 
 	// Check for check status or review state changes
 	hasNew := status.ChecksState != watch.LastCheckStatus || status.ReviewState != watch.LastReviewState
+	commentAt, commentsChanged, commentErr := s.latestPRWatchCommentTime(ctx, watch)
+	if commentErr != nil {
+		s.logger.Debug("failed to check PR watch comments", zap.String("id", watch.ID), zap.Error(commentErr))
+	}
+	hasNew = hasNew || commentsChanged
 
 	// Update watch timestamps
 	now := time.Now().UTC()
-	if err := s.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, nil, status.ChecksState, status.ReviewState); err != nil {
+	if err := s.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, commentAt, status.ChecksState, status.ReviewState); err != nil {
 		s.logger.Error("failed to update PR watch timestamps", zap.String("id", watch.ID), zap.Error(err))
 	}
 
 	return status, hasNew, nil
+}
+
+func (s *Service) RefreshPRWatchCommentTimestamp(ctx context.Context, watch *PRWatch) (bool, error) {
+	commentAt, changed, err := s.latestPRWatchCommentTime(ctx, watch)
+	if err != nil || timeEqual(commentAt, watch.LastCommentAt) {
+		return false, err
+	}
+	if err := s.store.UpdatePRWatchCommentTimestamp(ctx, watch.ID, commentAt); err != nil {
+		return false, err
+	}
+	watch.LastCommentAt = commentAt
+	return changed, nil
+}
+
+func (s *Service) latestPRWatchCommentTime(ctx context.Context, watch *PRWatch) (*time.Time, bool, error) {
+	if s.client == nil {
+		return watch.LastCommentAt, false, fmt.Errorf("github client not available")
+	}
+	if watch == nil || watch.PRNumber == 0 {
+		return nil, false, nil
+	}
+	comments, err := s.client.ListPRComments(ctx, watch.Owner, watch.Repo, watch.PRNumber, watch.LastCommentAt)
+	if err != nil {
+		return watch.LastCommentAt, false, err
+	}
+	latest := findLatestCommentTime(comments)
+	if latest == nil {
+		return watch.LastCommentAt, false, nil
+	}
+	if watch.LastCommentAt == nil {
+		return latest, false, nil
+	}
+	if latest.After(*watch.LastCommentAt) {
+		return latest, true, nil
+	}
+	return watch.LastCommentAt, false, nil
 }
 
 // EnsurePRWatch creates a PRWatch with pr_number=0 for a

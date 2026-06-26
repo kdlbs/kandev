@@ -14,6 +14,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 )
 
@@ -639,6 +640,87 @@ func TestTryBatchedPRWatchCheck_NumberedWatch_AppliesStatus(t *testing.T) {
 	}
 	if updated.ReviewState != "approved" {
 		t.Errorf("ReviewState = %q, want approved", updated.ReviewState)
+	}
+}
+
+func TestTryBatchedPRWatchCheck_PublishesOnPlainCommentChange(t *testing.T) {
+	poller, _, gh, store := setupBatchedPollerTest(t)
+	ctx := context.Background()
+	oldCommentAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	newCommentAt := oldCommentAt.Add(time.Hour)
+	gh.prResponses = []string{`{
+		"data": {
+			"repo0": {
+				"pr0": {
+					"state": "OPEN", "title": "Test PR", "url": "https://x/1",
+					"isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+					"headRefName": "feat", "baseRefName": "main", "headRefOid": "abc",
+					"author": {"login": "alice"},
+					"createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z",
+					"reviews": {"nodes": []},
+					"reviewRequests": {"totalCount": 0},
+					"commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]}
+				}
+			}
+		}
+	}`}
+	gh.AddComments("o", "r", 42, []PRComment{{
+		ID:        100,
+		Body:      "plain comment",
+		CreatedAt: newCommentAt,
+		UpdatedAt: newCommentAt,
+	}})
+
+	gotEvent := make(chan *bus.Event, 1)
+	if _, err := poller.eventBus.Subscribe(events.GitHubPRFeedback, func(_ context.Context, event *bus.Event) error {
+		gotEvent <- event
+		return nil
+	}); err != nil {
+		t.Fatalf("subscribe PR feedback: %v", err)
+	}
+
+	watch := &PRWatch{
+		SessionID:       "s1",
+		TaskID:          "t1",
+		Owner:           "o",
+		Repo:            "r",
+		PRNumber:        42,
+		Branch:          "feat",
+		LastCheckStatus: "success",
+		LastReviewState: "",
+		LastCommentAt:   &oldCommentAt,
+	}
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create PR watch: %v", err)
+	}
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID:     "t1",
+		Owner:      "o",
+		Repo:       "r",
+		PRNumber:   42,
+		PRURL:      "https://github.com/o/r/pull/42",
+		PRTitle:    "Test PR",
+		HeadBranch: "feat",
+		BaseBranch: "main",
+		State:      "open",
+	}); err != nil {
+		t.Fatalf("create task PR: %v", err)
+	}
+
+	if !poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch}) {
+		t.Fatalf("expected batched path to succeed")
+	}
+	select {
+	case <-gotEvent:
+	default:
+		t.Fatal("expected plain comment change to publish PR feedback event")
+	}
+	updated, err := store.GetPRWatchBySession(ctx, "s1")
+	if err != nil || updated == nil {
+		t.Fatalf("get PR watch: err=%v, w=%v", err, updated)
+	}
+	if updated.LastCommentAt == nil || !updated.LastCommentAt.Equal(newCommentAt) {
+		t.Fatalf("LastCommentAt = %v, want %v", updated.LastCommentAt, newCommentAt)
 	}
 }
 

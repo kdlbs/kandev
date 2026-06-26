@@ -672,6 +672,15 @@ func (s *Store) UpdatePRWatchTimestamps(ctx context.Context, id string, checkedA
 	return err
 }
 
+// UpdatePRWatchCommentTimestamp updates only the last observed PR comment time.
+func (s *Store) UpdatePRWatchCommentTimestamp(ctx context.Context, id string, commentAt *time.Time) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE github_pr_watches SET last_comment_at = ?, updated_at = ?
+		WHERE id = ?`,
+		commentAt, time.Now().UTC(), id)
+	return err
+}
+
 // DeletePRWatch deletes a PR watch by ID.
 func (s *Store) DeletePRWatch(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM github_pr_watches WHERE id = ?`, id)
