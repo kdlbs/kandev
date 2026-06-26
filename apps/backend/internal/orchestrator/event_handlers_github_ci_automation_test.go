@@ -1102,11 +1102,55 @@ func TestHandleTaskCIOptionsUpdatedStartsAutomationForPartialSyncResults(t *test
 	if _, loaded := svc.ciAutomationInFlight.Load("task-1|repo-1|42"); !loaded {
 		t.Fatal("expected automation to run for partial sync result")
 	}
-	if len(ghSvc.ciErrors) != 1 || ghSvc.ciErrors[0].LastError == nil || !strings.Contains(*ghSvc.ciErrors[0].LastError, "sibling repo unavailable") {
-		t.Fatalf("expected partial sync error to be recorded, got %+v", ghSvc.ciErrors)
+	if len(ghSvc.ciErrors) != 0 {
+		t.Fatalf("expected synced PR not to receive sibling sync error, got %+v", ghSvc.ciErrors)
 	}
 	close(block)
 	waitForCIAutomationIdle(t, svc, "task-1|repo-1|42", 200*time.Millisecond)
+}
+
+func TestHandleTaskCIOptionsUpdatedRecordsPartialSyncFailureOnlyForUnsyncedPRs(t *testing.T) {
+	ctx := context.Background()
+	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	synced := &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-front",
+		Owner:        "acme",
+		Repo:         "front",
+		PRNumber:     1,
+	}
+	unsynced := &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-back",
+		Owner:        "acme",
+		Repo:         "back",
+		PRNumber:     2,
+	}
+	ghSvc := &mockGitHubService{
+		taskPRs:             []*github.TaskPR{synced, unsynced},
+		triggerPRSyncAllPRs: []*github.TaskPR{synced},
+		triggerPRSyncAllErr: &github.PartialPRSyncError{Err: errors.New("back repo unavailable")},
+		ciOptionsResp:       &github.TaskCIOptionsResponse{TaskID: "task-1"},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	err := svc.handleTaskCIOptionsUpdated(ctx, &bus.Event{Data: &github.TaskCIOptionsResponse{
+		TaskID:           "task-1",
+		AutoMergeEnabled: true,
+	}})
+	if err != nil {
+		t.Fatalf("handle CI options updated: %v", err)
+	}
+	if len(ghSvc.ciErrors) != 1 {
+		t.Fatalf("expected one sync error for unsynced PR, got %+v", ghSvc.ciErrors)
+	}
+	got := ghSvc.ciErrors[0]
+	if got.RepositoryID != "repo-back" || got.PRNumber != 2 {
+		t.Fatalf("expected sync error on repo-back#2, got %+v", got)
+	}
+	if got.LastError == nil || !strings.Contains(*got.LastError, "back repo unavailable") {
+		t.Fatalf("expected sibling sync error message, got %+v", got.LastError)
+	}
 }
 
 func TestStartTaskPRCIAutomationSkipsDuplicateInFlightPR(t *testing.T) {

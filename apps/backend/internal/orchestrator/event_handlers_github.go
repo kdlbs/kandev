@@ -196,7 +196,7 @@ func (s *Service) handleTaskCIOptionsUpdated(ctx context.Context, event *bus.Eve
 	prs, err := s.githubService.TriggerPRSyncAll(detachedCtx, options.TaskID)
 	if err != nil {
 		s.logger.Warn("failed to sync task PRs for CI automation options update", zap.String("task_id", options.TaskID), zap.Error(err))
-		s.recordTaskCIOptionsSyncError(detachedCtx, options.TaskID, err)
+		s.recordTaskCIOptionsSyncError(detachedCtx, options.TaskID, prs, err)
 	}
 	for _, pr := range prs {
 		s.startTaskPRCIAutomationWithoutRefresh(ctx, pr)
@@ -204,14 +204,43 @@ func (s *Service) handleTaskCIOptionsUpdated(ctx context.Context, event *bus.Eve
 	return nil
 }
 
-func (s *Service) recordTaskCIOptionsSyncError(ctx context.Context, taskID string, syncErr error) {
+func (s *Service) recordTaskCIOptionsSyncError(ctx context.Context, taskID string, synced []*github.TaskPR, syncErr error) {
+	syncedKeys := make(map[ciAutomationTaskPRSyncKey]struct{}, len(synced))
+	for _, pr := range synced {
+		if pr == nil {
+			continue
+		}
+		syncedKeys[ciAutomationTaskPRSyncKeyFor(pr)] = struct{}{}
+	}
 	prsByTask, err := s.githubService.ListTaskPRs(ctx, []string{taskID})
 	if err != nil {
 		s.logger.Warn("failed to load task PRs after CI automation sync failure", zap.String("task_id", taskID), zap.Error(err))
 		return
 	}
 	for _, pr := range prsByTask[taskID] {
+		if _, ok := syncedKeys[ciAutomationTaskPRSyncKeyFor(pr)]; ok {
+			continue
+		}
 		s.recordCIAutomationError(ctx, pr, fmt.Sprintf("sync PR status: %v", syncErr))
+	}
+}
+
+type ciAutomationTaskPRSyncKey struct {
+	repositoryID string
+	owner        string
+	repo         string
+	prNumber     int
+}
+
+func ciAutomationTaskPRSyncKeyFor(pr *github.TaskPR) ciAutomationTaskPRSyncKey {
+	if pr == nil {
+		return ciAutomationTaskPRSyncKey{}
+	}
+	return ciAutomationTaskPRSyncKey{
+		repositoryID: pr.RepositoryID,
+		owner:        strings.ToLower(pr.Owner),
+		repo:         strings.ToLower(pr.Repo),
+		prNumber:     pr.PRNumber,
 	}
 }
 
