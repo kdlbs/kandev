@@ -9,6 +9,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
+import { useOfficeMetaData } from "@/hooks/domains/office/use-office-data";
 import { updateAgentProfile } from "@/lib/api/domains/office-api";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 
@@ -17,7 +18,7 @@ type AgentPermissionsTabProps = {
 };
 
 export function AgentPermissionsTab({ agent }: AgentPermissionsTabProps) {
-  const meta = useAppStore((s) => s.office.meta);
+  const meta = useOfficeMetaData().data;
   const updateStore = useAppStore((s) => s.updateOfficeAgentProfile);
 
   const permDefs = meta?.permissions ?? [];

@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { useAppStore } from "@/components/state-provider";
+import { useOfficeMetaData } from "@/hooks/domains/office/use-office-data";
 import type { AgentStatus } from "@/lib/state/slices/office/types";
 
 const FALLBACK_STYLES: Record<AgentStatus, string> = {
@@ -18,7 +18,7 @@ type AgentStatusDotProps = {
 };
 
 export function AgentStatusDot({ status, className }: AgentStatusDotProps) {
-  const meta = useAppStore((s) => s.office.meta);
+  const meta = useOfficeMetaData().data;
   const metaStatus = meta?.agentStatuses.find((s) => s.id === status);
   const colorClass = metaStatus?.color ?? FALLBACK_STYLES[status] ?? "";
   const label = metaStatus?.label ?? status;

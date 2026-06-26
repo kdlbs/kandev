@@ -5,7 +5,7 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import { useAppStore } from "@/components/state-provider";
+import { useOfficeMetaData } from "@/hooks/domains/office/use-office-data";
 import { useAgentsQuerySync } from "@/hooks/domains/settings/use-agents-query-sync";
 import { AgentSelector } from "@/components/task-create-dialog-selectors";
 import { useAgentProfileOptions } from "@/components/task-create-dialog-options";
@@ -66,7 +66,7 @@ export function StepAgent({
   onChange,
   onAgentProfilesChange,
 }: StepAgentProps) {
-  const meta = useAppStore((s) => s.office.meta);
+  const meta = useOfficeMetaData().data;
   const executorOptions = meta?.executorTypes ?? FALLBACK_EXECUTOR_OPTIONS;
   const { settingsAgents, upsertProfile } = useAgentsQuerySync();
 

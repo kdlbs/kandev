@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { IconRefresh } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
+import { useOfficeMetaData } from "@/hooks/domains/office/use-office-data";
 import { updateAgentProfile, getAgentUtilization } from "@/lib/api/domains/office-api";
 import type { AgentProfile, AgentRole, ProviderUsage } from "@/lib/state/slices/office/types";
 import { UtilizationBars } from "@/app/office/components/utilization-bars";
@@ -218,7 +219,7 @@ const FALLBACK_EXECUTOR_TYPES = [
 
 export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
   const agents = useAppStore((s) => s.office.agentProfiles);
-  const meta = useAppStore((s) => s.office.meta);
+  const meta = useOfficeMetaData().data;
   const updateStore = useAppStore((s) => s.updateOfficeAgentProfile);
 
   const roles = meta?.roles.map((r) => ({ id: r.id, label: r.label })) ?? FALLBACK_ROLES;

@@ -219,10 +219,6 @@ function createMiscActions(set: SetFn) {
       set((draft) => {
         draft.office.dashboard = data;
       }),
-    setMeta: (meta: OfficeSlice["office"]["meta"]) =>
-      set((draft) => {
-        draft.office.meta = meta;
-      }),
     setOfficeLoading: (loading: boolean) =>
       set((draft) => {
         draft.office.isLoading = loading;

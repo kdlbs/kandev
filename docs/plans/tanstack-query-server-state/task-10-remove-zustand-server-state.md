@@ -45,13 +45,19 @@ Completed cleanup sub-waves:
   subscription, and added Query bridge invalidation for task comments on
   `office.run.queued` and `office.run.processed` so comment run-status badges
   are covered without the legacy comments trigger.
+- **Office meta cleanup:** moved all status/priority/role/executor/project/
+  inbox/routine/skill metadata readers to `qk.office.meta()` through
+  `useOfficeMetaData`, seeded the meta query during Office route bootstrap, and
+  removed the unused `setMeta` Zustand action. The temporary `office.meta` field
+  remains only as part of the broader Office state shape/query seed scaffold
+  until the final Office slice removal wave.
 
 Remaining cleanup:
 
-- Office meta, routines, costs, skills, deeper agent/project/task helper
-  components, and remaining `useOfficeRefetch`/`registerOfficeHandlers` fanout
-  still have store readers or writers. Task 10 stays `in_progress` until those
-  paths are removed or explicitly documented as client-only temporary indexes.
+- Office routines, costs, skills, deeper agent/project/task helper components,
+  and remaining `useOfficeRefetch`/`registerOfficeHandlers` fanout still have
+  store readers or writers. Task 10 stays `in_progress` until those paths are
+  removed or explicitly documented as client-only temporary indexes.
 
 - **System:** removed the system Zustand slice and `system-events` WS handler.
   System hooks and topbar metrics now read Query caches/options directly. The

@@ -9,6 +9,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
+import { useOfficeMetaData } from "@/hooks/domains/office/use-office-data";
 import { updateAgentProfile } from "@/lib/api/domains/office-api";
 import type { AgentProfile, AgentRole } from "@/lib/state/slices/office/types";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
@@ -70,7 +71,7 @@ function initialForm(agent: AgentProfile): FormState {
 }
 
 export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
-  const meta = useAppStore((s) => s.office.meta);
+  const meta = useOfficeMetaData().data;
   const updateStore = useAppStore((s) => s.updateOfficeAgentProfile);
   const allOfficeAgents = useAppStore((s) => s.office.agentProfiles);
 

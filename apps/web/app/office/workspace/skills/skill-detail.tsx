@@ -18,6 +18,7 @@ import { Separator } from "@kandev/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useAppStore } from "@/components/state-provider";
+import { useOfficeMetaData } from "@/hooks/domains/office/use-office-data";
 import type { Skill, SkillSourceType } from "@/lib/state/slices/office/types";
 import { FileTree, type FileTreeNode } from "@/components/shared/file-tree";
 import { ScriptEditor } from "@/components/settings/profile-edit/script-editor";
@@ -50,7 +51,7 @@ function SourceIcon({ sourceType }: { sourceType: SkillSourceType }) {
 }
 
 function useSkillSourceMeta(sourceType: SkillSourceType) {
-  const meta = useAppStore((s) => s.office.meta);
+  const meta = useOfficeMetaData().data;
   const metaSource = meta?.skillSourceTypes.find((s) => s.id === sourceType);
   return {
     label: metaSource?.label ?? FALLBACK_SOURCE_LABELS[sourceType] ?? sourceType,

@@ -77,6 +77,10 @@ out any mobile E2E coverage added or reused.
   `office.run.queued`/`office.run.processed` invalidate task comments so
   comment run-status badges no longer depend on the legacy comments refetch
   trigger.
+- The Office meta sub-wave moved status/priority/role/executor/project/inbox/
+  routine/skill metadata readers to `qk.office.meta()` through
+  `useOfficeMetaData`, seeds the query cache during Office route bootstrap, and
+  removed the unused `setMeta` Zustand action.
 - Migrated office dashboard, tasks, task search, task detail comments/activity,
   agents, agent run/detail routes, projects/project tasks, inbox, activity,
   routines, routing, costs, budgets, and skills to TanStack Query readers.

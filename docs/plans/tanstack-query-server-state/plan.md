@@ -1293,6 +1293,14 @@ Task 10 partial verification completed locally:
     passed.
   - `rtk pnpm --dir apps/web e2e:docker tests/office/inbox.spec.ts tests/office/realtime-inbox.spec.ts tests/office/approval-flow.spec.ts tests/office/activity-page.spec.ts tests/office/comment-run-status.spec.ts tests/system/ws-event-accounting.spec.ts`
     passed 15 Docker tests with strict WS accounting.
+- Office meta cleanup:
+  - `rtk pnpm --dir apps/web test hooks/domains/office/use-office-data.test.tsx app/office/inbox/inbox-page-client.test.tsx app/office/agents/[id]/components/agent-configuration-tab.test.tsx`
+    passed 3 files / 7 tests.
+  - `rtk pnpm --dir apps/web typecheck` passed.
+  - `rtk pnpm --dir apps/web exec eslint --max-warnings 0 hooks/domains/office/use-office-data.ts hooks/domains/office/use-office-data.test.tsx src/office-routes.tsx app/office/setup/step-agent.tsx app/office/setup/step-review.tsx app/office/inbox/inbox-item-row.tsx app/office/inbox/inbox-page-client.test.tsx app/office/tasks/use-tasks-tree.ts app/office/tasks/task-board.tsx app/office/tasks/task-filters.tsx app/office/projects/create-project-dialog.tsx app/office/projects/project-card.tsx app/office/workspace/skills/skill-detail.tsx app/office/workspace/skills/create-skill-form.tsx app/office/agents/[id]/components/agent-configuration-tab.tsx app/office/agents/[id]/components/agent-configuration-tab.test.tsx app/office/agents/[id]/components/agent-permissions-tab.tsx app/office/agents/[id]/components/agent-overview-tab.tsx app/office/agents/components/agent-status-dot.tsx app/office/agents/components/agent-role-badge.tsx app/office/agents/components/create-agent-dialog.tsx app/office/routines/run-row.tsx app/office/components/new-task-bottom-bar.tsx lib/state/store.ts lib/state/slices/office/types.ts lib/state/slices/office/office-slice.ts`
+    passed.
+  - `rtk pnpm --dir apps/web e2e:docker tests/office/onboarding.spec.ts tests/office/task-filters.spec.ts tests/office/projects.spec.ts tests/office/agents.spec.ts tests/office/skills.spec.ts tests/office/routines.spec.ts tests/system/ws-event-accounting.spec.ts`
+    passed 35 Docker tests / 1 skipped with strict WS accounting.
 
 Current next step: finish the reopened Office store/refetch cleanup before
 running Task 11 strict QA.

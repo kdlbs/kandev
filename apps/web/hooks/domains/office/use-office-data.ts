@@ -6,6 +6,7 @@ import {
   officeAgentsQueryOptions,
   officeDashboardQueryOptions,
   officeInboxQueryOptions,
+  officeMetaQueryOptions,
   officeProjectsQueryOptions,
 } from "@/lib/query/query-options/office";
 import type {
@@ -13,8 +14,24 @@ import type {
   AgentProfile,
   DashboardData,
   InboxItem,
+  OfficeMeta,
   Project,
 } from "@/lib/state/slices/office/types";
+
+export function useOfficeMetaData(initialMeta?: OfficeMeta | null) {
+  const queryClient = useQueryClient();
+  const query = useQuery({
+    ...officeMetaQueryOptions(),
+    initialData: initialMeta ?? undefined,
+  });
+
+  useEffect(() => {
+    if (!initialMeta) return;
+    queryClient.setQueryData(qk.office.meta(), initialMeta);
+  }, [initialMeta, queryClient]);
+
+  return query;
+}
 
 export function useOfficeDashboardData(
   workspaceId: string | null,

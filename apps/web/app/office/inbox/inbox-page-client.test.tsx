@@ -4,9 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import { makeQueryClient } from "@/lib/query/client";
 import { qk } from "@/lib/query/keys";
-import type { InboxItem } from "@/lib/state/slices/office/types";
+import type { InboxItem, OfficeMeta } from "@/lib/state/slices/office/types";
 
 const getInboxMock = vi.hoisted(() => vi.fn());
+const getMetaMock = vi.hoisted(() => vi.fn());
 const listAgentProfilesMock = vi.hoisted(() => vi.fn(async () => ({ agents: [] })));
 const decideApprovalMock = vi.hoisted(() => vi.fn());
 
@@ -33,6 +34,7 @@ vi.mock("@/components/state-provider", () => ({
 vi.mock("@/lib/api/domains/office-api", () => ({
   decideApproval: decideApprovalMock,
   getInbox: getInboxMock,
+  getMeta: getMetaMock,
   listAgentProfiles: listAgentProfilesMock,
 }));
 
@@ -58,6 +60,22 @@ function inboxItem(overrides: Partial<InboxItem> = {}): InboxItem {
   };
 }
 
+function officeMeta(): OfficeMeta {
+  return {
+    statuses: [],
+    priorities: [],
+    roles: [],
+    executorTypes: [],
+    skillSourceTypes: [],
+    projectStatuses: [],
+    agentStatuses: [],
+    routineRunStatuses: [],
+    inboxItemTypes: [],
+    permissions: [],
+    permissionDefaults: {},
+  };
+}
+
 describe("InboxPageClient", () => {
   afterEach(() => {
     cleanup();
@@ -70,6 +88,7 @@ describe("InboxPageClient", () => {
       items: [inboxItem()],
       total_count: 1,
     });
+    queryClient.setQueryData(qk.office.meta(), officeMeta());
 
     render(
       <QueryClientProvider client={queryClient}>
@@ -80,5 +99,6 @@ describe("InboxPageClient", () => {
     expect(screen.getByText("Query approval")).toBeTruthy();
     expect(screen.queryByText("Store-only approval")).toBeNull();
     expect(getInboxMock).not.toHaveBeenCalled();
+    expect(getMetaMock).not.toHaveBeenCalled();
   });
 });

@@ -698,7 +698,6 @@ export type OfficeSliceActions = {
   setTaskGroupBy: (groupBy: TaskGroupBy) => void;
   toggleNesting: () => void;
   setTasksLoading: (loading: boolean) => void;
-  setMeta: (meta: OfficeMeta | null) => void;
   setOfficeLoading: (loading: boolean) => void;
   setOfficeRefetchTrigger: (type: string) => void;
   setWorkspaceRouting: (workspaceId: string, cfg: WorkspaceRouting | undefined) => void;

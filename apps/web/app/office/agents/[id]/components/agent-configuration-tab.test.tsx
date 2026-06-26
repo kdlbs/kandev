@@ -4,7 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { StateProvider } from "@/components/state-provider";
 import { makeQueryClient } from "@/lib/query/client";
 import { qk } from "@/lib/query/keys";
-import type { AgentProfile } from "@/lib/state/slices/office/types";
+import type { AgentProfile, OfficeMeta } from "@/lib/state/slices/office/types";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import { defaultOfficeState } from "@/lib/state/slices/office/office-slice";
 import { AgentConfigurationTab } from "./agent-configuration-tab";
@@ -59,8 +59,31 @@ const PROFILE_OPTION = {
   cli_passthrough: false,
 };
 
+function officeMeta(): OfficeMeta {
+  return {
+    statuses: [],
+    priorities: [],
+    roles: [
+      { id: "ceo", label: "CEO", description: "Coordinator", color: "bg-purple-100" },
+      { id: "worker", label: "Worker", description: "Worker", color: "bg-blue-100" },
+    ],
+    executorTypes: [{ id: "local_pc", label: "Local", description: "Local executor" }],
+    skillSourceTypes: [],
+    projectStatuses: [],
+    agentStatuses: [{ id: "idle", label: "Idle", color: "bg-neutral-400" }],
+    routineRunStatuses: [],
+    inboxItemTypes: [],
+    permissions: [],
+    permissionDefaults: {
+      ceo: { create_agent: true },
+      worker: { create_agent: false },
+    },
+  };
+}
+
 function renderConfigurationTab(agent: AgentProfile) {
   const queryClient = makeQueryClient();
+  queryClient.setQueryData(qk.office.meta(), officeMeta());
   queryClient.setQueryData(qk.settings.agents(), {
     agents: [
       {

@@ -216,7 +216,7 @@ function useOfficeRouteBootstrap(
           workspaceId: activeWorkspaceId,
         },
       });
-      store.getState().setMeta(metaResponse);
+      queryClient.setQueryData(qk.office.meta(), metaResponse);
 
       if (!activeWorkspaceId) {
         setBootstrap({ complete: true, onboardingComplete });

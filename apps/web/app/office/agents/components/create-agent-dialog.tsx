@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
+import { useOfficeMetaData } from "@/hooks/domains/office/use-office-data";
 import { createAgentProfile } from "@/lib/api/domains/office-api";
 import type { AgentRole, AgentProfile } from "@/lib/state/slices/office/types";
 
@@ -209,7 +210,7 @@ const FALLBACK_EXECUTOR_TYPES = [
 export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const agents = useAppStore((s) => s.office.agentProfiles);
-  const meta = useAppStore((s) => s.office.meta);
+  const meta = useOfficeMetaData().data;
   const addOfficeAgentProfile = useAppStore((s) => s.addOfficeAgentProfile);
 
   const roles = meta?.roles.map((r) => ({ id: r.id, label: r.label })) ?? FALLBACK_ROLES;
