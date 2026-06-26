@@ -313,11 +313,15 @@ func (p *managedProcess) kill() managedProcessShutdownResult {
 		shutdownDebugf("managed process group SIGTERM failed pid=%d err=%v; killing process", pid, err)
 		shutdownDebugf("managed process SIGKILL requested label=%q pid=%d reason=%q", p.label, pid, "sigterm_failed")
 		_ = p.cmd.Process.Kill()
-		<-p.done
-		result.duration = time.Since(start)
 		result.forceKilled = true
 		result.err = err
-		shutdownDebugf("managed process killed after SIGTERM failure pid=%d", pid)
+		if waitForManagedProcessKillDone(p.done, managedProcessForceKillWait) {
+			shutdownDebugf("managed process killed after SIGTERM failure pid=%d", pid)
+		} else {
+			result.err = errors.Join(result.err, fmt.Errorf("timed out waiting for process %d after SIGKILL", pid))
+			shutdownDebugf("managed process kill wait timed out after SIGTERM failure pid=%d", pid)
+		}
+		result.duration = time.Since(start)
 		return result
 	}
 	shutdownDebugf("managed process group SIGTERM sent pgid=%d", pid)
