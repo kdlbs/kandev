@@ -466,24 +466,13 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
 	}
-	launchConfig, err := h.resolveMCPAutoStartConfigWithError(ctx, pendingTask, req.AgentProfileID, req.ExecutorProfileID, req.SourceTaskID)
+	launchConfig, metadata, err := h.resolveMCPLaunchMetadata(ctx, pendingTask, req.AgentProfileID, req.ExecutorProfileID, req.SourceTaskID)
 	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
-			"failed to resolve launch profile: "+err.Error(), nil)
-	}
-	if launchConfig.AgentProfileID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
-			"agent_profile_id is required because no agent profile can be resolved from the parent task, source task, workflow, or workspace defaults",
-			nil)
-	}
-	metadata := map[string]interface{}{
-		models.MetaKeyAgentProfileID: launchConfig.AgentProfileID,
-	}
-	if launchConfig.ExecutorID != "" {
-		metadata[models.MetaKeyExecutorID] = launchConfig.ExecutorID
-	}
-	if launchConfig.ExecutorProfileID != "" {
-		metadata[models.MetaKeyExecutorProfileID] = launchConfig.ExecutorProfileID
+		code := ws.ErrorCodeInternalError
+		if errors.Is(err, errMCPAgentProfileRequired) {
+			code = ws.ErrorCodeValidation
+		}
+		return ws.NewError(msg.ID, msg.Action, code, err.Error(), nil)
 	}
 
 	task, err := h.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
@@ -659,6 +648,8 @@ type mcpAutoStartConfig struct {
 	ExecutorProfileID string
 }
 
+var errMCPAgentProfileRequired = errors.New("agent_profile_id is required because no agent profile can be resolved from the parent task, source task, workflow, or workspace defaults")
+
 // autoStartTask launches an agent session for a newly created task in the background.
 // It is kept as a small compatibility wrapper for direct tests; handleCreateTask
 // uses resolveMCPAutoStartConfig before persisting so invalid auto-start
@@ -677,6 +668,26 @@ func (h *Handlers) autoStartTask(task *models.Task, agentProfileID, executorProf
 func (h *Handlers) resolveMCPAutoStartConfig(ctx context.Context, task *models.Task, agentProfileID, executorProfileID, sourceTaskID string) mcpAutoStartConfig {
 	config, _ := h.resolveMCPAutoStartConfigWithError(ctx, task, agentProfileID, executorProfileID, sourceTaskID)
 	return config
+}
+
+func (h *Handlers) resolveMCPLaunchMetadata(ctx context.Context, task *models.Task, agentProfileID, executorProfileID, sourceTaskID string) (mcpAutoStartConfig, map[string]interface{}, error) {
+	launchConfig, err := h.resolveMCPAutoStartConfigWithError(ctx, task, agentProfileID, executorProfileID, sourceTaskID)
+	if err != nil {
+		return mcpAutoStartConfig{}, nil, fmt.Errorf("failed to resolve launch profile: %w", err)
+	}
+	if launchConfig.AgentProfileID == "" {
+		return mcpAutoStartConfig{}, nil, errMCPAgentProfileRequired
+	}
+	metadata := map[string]interface{}{
+		models.MetaKeyAgentProfileID: launchConfig.AgentProfileID,
+	}
+	if launchConfig.ExecutorID != "" {
+		metadata[models.MetaKeyExecutorID] = launchConfig.ExecutorID
+	}
+	if launchConfig.ExecutorProfileID != "" {
+		metadata[models.MetaKeyExecutorProfileID] = launchConfig.ExecutorProfileID
+	}
+	return launchConfig, metadata, nil
 }
 
 func (h *Handlers) resolveMCPAutoStartConfigWithError(ctx context.Context, task *models.Task, agentProfileID, executorProfileID, sourceTaskID string) (mcpAutoStartConfig, error) {
