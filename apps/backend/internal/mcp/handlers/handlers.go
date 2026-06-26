@@ -460,21 +460,23 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
 	}
 
-	var autoStartConfig *mcpAutoStartConfig
-	if startAgent && h.sessionLauncher != nil {
-		pendingTask := &models.Task{
-			ParentID:       req.ParentID,
-			WorkspaceID:    req.WorkspaceID,
-			WorkflowID:     req.WorkflowID,
-			WorkflowStepID: req.WorkflowStepID,
-		}
-		config := h.resolveMCPAutoStartConfig(ctx, pendingTask, req.AgentProfileID, req.ExecutorProfileID, req.SourceTaskID)
-		if config.AgentProfileID == "" {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
-				"agent_profile_id is required when start_agent is true and no agent profile can be resolved from the parent task, source task, workflow, or workspace defaults; pass agent_profile_id or set start_agent=false",
-				nil)
-		}
-		autoStartConfig = &config
+	pendingTask := &models.Task{
+		ParentID:       req.ParentID,
+		WorkspaceID:    req.WorkspaceID,
+		WorkflowID:     req.WorkflowID,
+		WorkflowStepID: req.WorkflowStepID,
+	}
+	launchConfig := h.resolveMCPAutoStartConfig(ctx, pendingTask, req.AgentProfileID, req.ExecutorProfileID, req.SourceTaskID)
+	if launchConfig.AgentProfileID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"agent_profile_id is required because no agent profile can be resolved from the parent task, source task, workflow, or workspace defaults",
+			nil)
+	}
+	metadata := map[string]interface{}{
+		models.MetaKeyAgentProfileID: launchConfig.AgentProfileID,
+	}
+	if launchConfig.ExecutorProfileID != "" {
+		metadata[models.MetaKeyExecutorProfileID] = launchConfig.ExecutorProfileID
 	}
 
 	task, err := h.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
@@ -487,6 +489,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Repositories:           repos,
 		BlockedBy:              req.BlockedBy,
 		AssigneeAgentProfileID: req.AssigneeAgentProfileID,
+		Metadata:               metadata,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
@@ -500,11 +503,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 
 	// Auto-start agent session asynchronously only if requested
 	if startAgent && h.sessionLauncher != nil {
-		if autoStartConfig == nil {
-			config := h.resolveMCPAutoStartConfig(ctx, task, req.AgentProfileID, req.ExecutorProfileID, req.SourceTaskID)
-			autoStartConfig = &config
-		}
-		h.launchAutoStartTask(ctx, task, *autoStartConfig)
+		h.launchAutoStartTask(ctx, task, launchConfig)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
