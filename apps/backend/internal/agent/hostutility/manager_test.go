@@ -287,6 +287,58 @@ func TestRefreshRecreatesStaleCachedInstance(t *testing.T) {
 	require.Equal(t, int32(2), deleteCalls.Load())
 }
 
+func TestExecutePromptDoesNotRecreateWhenParentContextCanceled(t *testing.T) {
+	log := newTestLogger(t)
+	reg := registry.NewRegistry(log)
+	const agentType = "canceled-acp"
+	require.NoError(t, reg.Register(&installedInferenceAgent{id: agentType}))
+
+	instanceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer instanceServer.Close()
+	instanceHost, instancePort := serverHostPort(t, instanceServer)
+
+	var createCalls atomic.Int32
+	var deleteCalls atomic.Int32
+	controlServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/instances":
+			createCalls.Add(1)
+			w.WriteHeader(http.StatusCreated)
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/v1/instances/"):
+			deleteCalls.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer controlServer.Close()
+	controlHost, controlPort := serverHostPort(t, controlServer)
+
+	mgr := NewManager(reg, controlHost, controlPort, agentctlclient.NewControlClient(controlHost, controlPort, log), log)
+	mgr.parentTmpDir = t.TempDir()
+	cached := &instance{
+		agentType:  agentType,
+		instanceID: "cached-instance",
+		workDir:    filepath.Join(mgr.parentTmpDir, agentType),
+		client:     agentctlclient.NewClient(instanceHost, instancePort, log),
+	}
+	mgr.instances[agentType] = cached
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := mgr.ExecutePrompt(ctx, agentType, "test-model", "", "Summarize this")
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, int32(0), createCalls.Load())
+	require.Equal(t, int32(0), deleteCalls.Load())
+
+	mgr.mu.RLock()
+	current := mgr.instances[agentType]
+	mgr.mu.RUnlock()
+	require.Same(t, cached, current)
+}
+
 func serverHostPort(t *testing.T, server *httptest.Server) (string, int) {
 	t.Helper()
 	host, portText, err := net.SplitHostPort(server.Listener.Addr().String())
