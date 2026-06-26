@@ -6,7 +6,6 @@ import { usePathname } from "@/lib/routing/client-router";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
 import { useOfficeAgentsData } from "@/hooks/domains/office/use-office-data";
 import { cn } from "@/lib/utils";
 import { OfficeTopbarPortal } from "../../components/office-topbar-portal";
@@ -45,8 +44,6 @@ export default function AgentDetailLayout({ children, params }: AgentDetailLayou
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const agentStore = useAppStore((s) => s.office.agentProfiles.find((a) => a.id === id));
   const agentsQuery = useOfficeAgentsData(workspaceId);
-
-  useOfficeRefetch("agents", () => void agentsQuery.refetch());
 
   const activeSlug = activeSlugFromPath(pathname, id);
   const agent = agentsQuery.data?.agents.find((item) => item.id === id) ?? agentStore;

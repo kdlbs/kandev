@@ -3,7 +3,6 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
 import { qk } from "@/lib/query/keys";
 import type { Routine } from "@/lib/state/slices/office/types";
 import { RoutinesContent } from "./routines-content";
@@ -25,12 +24,6 @@ export function RoutinesPageClient({ initialRoutines }: RoutinesPageClientProps)
       setRoutines(initialRoutines);
     }
   }, [initialRoutines, queryClient, setRoutines, workspaceId]);
-
-  useOfficeRefetch("routines", () => {
-    if (!workspaceId) return;
-    void queryClient.invalidateQueries({ queryKey: qk.office.routines(workspaceId) });
-    void queryClient.invalidateQueries({ queryKey: qk.office.routineRuns(workspaceId) });
-  });
 
   return <RoutinesContent />;
 }

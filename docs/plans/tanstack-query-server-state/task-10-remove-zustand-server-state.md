@@ -56,6 +56,11 @@ Completed cleanup sub-waves:
   lists/details, run-driven dashboard data, approval-driven agent data, and
   agent route/routing updates. This unblocks later removal of page-level
   `useOfficeRefetch` subscriptions that were covering those surfaces.
+- **Office page refetch cleanup:** removed old `useOfficeRefetch`
+  subscriptions from Query-backed projects, routines, agent dashboard, agent
+  layout, and agent runs surfaces. Remaining trigger consumers are confined to
+  the task list/detail path until the task-store wave removes those store
+  mirrors.
 
 Remaining cleanup:
 

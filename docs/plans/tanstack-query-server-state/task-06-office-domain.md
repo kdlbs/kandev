@@ -86,6 +86,9 @@ out any mobile E2E coverage added or reused.
   agent summaries, task activity for comments/reviews/decisions/runs, agent
   summaries/runs/run details, run-driven dashboard data, approval-driven agent
   data, and agent route queries for routing events.
+- The Office page refetch sub-wave removed `useOfficeRefetch` subscriptions from
+  Query-backed projects, routines, agent dashboard, agent layout, and agent runs
+  surfaces. Task list/detail remain for the task-store cleanup wave.
 - Migrated office dashboard, tasks, task search, task detail comments/activity,
   agents, agent run/detail routes, projects/project tasks, inbox, activity,
   routines, routing, costs, budgets, and skills to TanStack Query readers.

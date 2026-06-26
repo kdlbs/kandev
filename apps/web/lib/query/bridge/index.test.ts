@@ -521,6 +521,7 @@ describe("query bridge audit", () => {
     const queryClient = makeQueryClient();
     queryClient.setQueryData(qk.office.agentSummary("agent-1", 14), { summary: {} });
     queryClient.setQueryData(qk.office.agentRuns("agent-1", { limit: 25 }), { runs: [] });
+    queryClient.setQueryData(qk.office.runs("workspace-1"), { runs: [] });
     queryClient.setQueryData(qk.office.dashboard("workspace-1"), {});
 
     const cleanup = registerBridge(ws, queryClient);
@@ -541,6 +542,7 @@ describe("query bridge audit", () => {
     expect(
       queryClient.getQueryState(qk.office.agentRuns("agent-1", { limit: 25 }))?.isInvalidated,
     ).toBe(true);
+    expect(queryClient.getQueryState(qk.office.runs("workspace-1"))?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(qk.office.dashboard("workspace-1"))?.isInvalidated).toBe(true);
 
     cleanup();

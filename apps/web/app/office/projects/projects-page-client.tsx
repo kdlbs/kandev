@@ -4,7 +4,6 @@ import { useState } from "react";
 import { IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
 import { useOfficeProjectsData } from "@/hooks/domains/office/use-office-data";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import type { Project } from "@/lib/state/slices/office/types";
@@ -22,8 +21,6 @@ export function ProjectsPageClient({ initialProjects }: ProjectsPageClientProps)
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   const projectsQuery = useOfficeProjectsData(activeWorkspaceId, initialProjects);
   const [dialogOpen, setDialogOpen] = useState(false);
-
-  useOfficeRefetch("projects", () => void projectsQuery.refetch());
 
   const projects = projectsQuery.data?.projects ?? projectsStore;
   const agentNameMap = new Map(agents.map((a) => [a.id, a.name]));

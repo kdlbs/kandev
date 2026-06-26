@@ -5,7 +5,6 @@ import { useQuery } from "@tanstack/react-query";
 import { IconClock, IconRun } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { useAppStore } from "@/components/state-provider";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
 import { officeRunsQueryOptions } from "@/lib/query/query-options";
 import type { AgentProfile, Run } from "@/lib/state/slices/office/types";
 import { timeAgo } from "@/lib/utils/time";
@@ -62,12 +61,6 @@ export function AgentRunsTab({ agent }: AgentRunsTabProps) {
     () => (runsQuery.data?.runs ?? []).filter((run) => run.agent_profile_id === agent.id),
     [runsQuery.data, agent.id],
   );
-
-  // Refresh runs reactively when runs change. The office WS handler
-  // triggers "runs" on office.run.queued and the agent-session
-  // path triggers "agents" on session.state_changed.
-  useOfficeRefetch("runs", () => void runsQuery.refetch());
-  useOfficeRefetch("agents", () => void runsQuery.refetch());
 
   if (runsQuery.isPending) {
     return (

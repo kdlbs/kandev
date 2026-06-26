@@ -334,6 +334,7 @@ function invalidateSessionDrivenOfficeSurfaces(
     queryKey: ["office", "workspaces"],
     predicate: isDashboardOrAgentsQuery,
   });
+  invalidateWorkspaceFamily(queryClient, undefined, "runs");
   invalidateAgentSummaries(queryClient);
   invalidateAgentRunSurfaces(queryClient);
 }
