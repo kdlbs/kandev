@@ -44,7 +44,7 @@ export function useTaskSessions(taskId: string | null) {
         if (!force) setTaskSessionsForTask(taskId, []);
       } finally {
         setTaskSessionsLoading(taskId, false);
-        if (force) {
+        if (force && !pendingForcedReloadRef.current) {
           const waiters = pendingForcedReloadWaitersRef.current.splice(0);
           waiters.forEach((resolve) => resolve());
         }

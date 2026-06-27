@@ -60,6 +60,14 @@ function resetMockState() {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((innerResolve) => {
+    resolve = innerResolve;
+  });
+  return { promise, resolve };
+}
+
 describe("useTaskSessions", () => {
   beforeEach(() => {
     resetMockState();
@@ -178,6 +186,38 @@ describe("useTaskSessions refreshes", () => {
     await waitFor(() => expect(resolved).toBe(true));
     await queuedReload;
     expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, [
+      session("old", "COMPLETED"),
+    ]);
+  });
+
+  it("waits for the follow-up forced reload when another forced reload is running", async () => {
+    mockState.taskSessionsByTask.itemsByTaskId[TASK_ID] = [session("old", "RUNNING")];
+    mockState.taskSessionsByTask.loadedByTaskId[TASK_ID] = true;
+    mockState.setTaskSessionsLoading.mockImplementation((id: string, loading: boolean) => {
+      mockState.taskSessionsByTask.loadingByTaskId[id] = loading;
+    });
+    const firstResponse = deferred<{ sessions: TaskSession[] }>();
+    apiMock.listTaskSessions
+      .mockReturnValueOnce(firstResponse.promise)
+      .mockResolvedValueOnce({ sessions: [session("old", "COMPLETED")] });
+
+    const { result, rerender } = renderHook(() => useTaskSessions(TASK_ID));
+    const firstReload = result.current.loadSessions(true);
+    rerender();
+    let queuedResolved = false;
+    const queuedReload = result.current.loadSessions(true).then(() => {
+      queuedResolved = true;
+    });
+
+    firstResponse.resolve({ sessions: [session("old", "RUNNING")] });
+    await firstReload;
+    rerender();
+
+    expect(queuedResolved).toBe(false);
+    await waitFor(() => expect(queuedResolved).toBe(true));
+    await queuedReload;
+    expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(2);
+    expect(mockState.setTaskSessionsForTask).toHaveBeenLastCalledWith(TASK_ID, [
       session("old", "COMPLETED"),
     ]);
   });
