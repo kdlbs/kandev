@@ -16,9 +16,12 @@ export function buildStateOverrides(m: DefaultState) {
     taskSessionsByTask: m.taskSessionsByTask,
     sessionAgentctl: m.sessionAgentctl,
     activeModel: m.activeModel,
+    taskPlans: m.taskPlans,
     shell: m.shell,
     processes: m.processes,
     gitStatus: m.gitStatus,
+    environmentIdBySessionId: m.environmentIdBySessionId,
+    sessionCommits: m.sessionCommits,
     contextWindow: m.contextWindow,
     userShells: m.userShells,
     prepareProgress: m.prepareProgress,
@@ -36,5 +39,8 @@ export function buildStateOverrides(m: DefaultState) {
     quickChat: m.quickChat,
     sessionFailureNotification: m.sessionFailureNotification,
     bottomTerminal: m.bottomTerminal,
+    sidebarViews: m.sidebarViews,
+    kanbanPreviewedTaskId: m.kanbanPreviewedTaskId,
+    sidebarTaskPrefs: m.sidebarTaskPrefs,
   };
 }

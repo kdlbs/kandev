@@ -51,9 +51,9 @@ export function useUserShells(
     if (!environmentId) return false;
     return state.userShells.loaded[environmentId] ?? false;
   });
-  const shells = shellsQuery.data ?? storeShells;
+  const shells = storeLoaded ? storeShells : (shellsQuery.data ?? storeShells);
   const isLoading = shellsQuery.isFetching || storeLoading;
-  const isLoaded = Boolean(shellsQuery.data) || storeLoaded;
+  const isLoaded = storeLoaded || Boolean(shellsQuery.data);
 
   useEffect(() => {
     if (!environmentId || !shellsQuery.data) return;

@@ -1,7 +1,8 @@
 import { QueryClient } from "@tanstack/react-query";
-import { useAppStoreApi } from "@/components/state-provider";
+import type { useAppStoreApi } from "@/components/state-provider";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import {
+  type SessionMessagesLatestData,
   sessionMessagesLatestQueryOptions,
   sessionMessagesQueryOptions,
 } from "@/lib/query/query-options";
@@ -142,6 +143,23 @@ function logFetchSummary(
   }
 }
 
+function writeLatestMessagesCache(
+  queryClient: QueryClient,
+  sessionId: string,
+  limit: number,
+  messages: Message[],
+  response: Pick<SessionMessagesLatestData, "hasMore" | "oldestCursor">,
+): void {
+  queryClient.setQueryData<SessionMessagesLatestData>(
+    sessionMessagesLatestQueryOptions(sessionId, limit).queryKey,
+    {
+      messages,
+      hasMore: response.hasMore,
+      oldestCursor: messages[0]?.id ?? response.oldestCursor ?? null,
+    },
+  );
+}
+
 export async function fetchAndStoreMessages(
   sessionId: string,
   store: ReturnType<typeof useAppStoreApi>,
@@ -180,9 +198,12 @@ export async function fetchAndStoreMessages(
 
   if (!commitFetchSeq(sessionId, seq)) {
     debug("message.list stale fetch skipped", { sessionId, seq });
-    return store.getState().messages.bySession[sessionId] ?? merged;
+    const current = store.getState().messages.bySession[sessionId] ?? merged;
+    writeLatestMessagesCache(queryClient, sessionId, requestParams.limit, current, response);
+    return current;
   }
 
+  writeLatestMessagesCache(queryClient, sessionId, requestParams.limit, merged, response);
   store.getState().mergeMessages(sessionId, merged, {
     hasMore: response.hasMore,
     oldestCursor: merged[0]?.id ?? response.oldestCursor,

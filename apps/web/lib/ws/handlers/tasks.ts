@@ -1,8 +1,12 @@
+import type { QueryClient } from "@tanstack/react-query";
 import type { StoreApi } from "zustand";
 import { cleanupTaskStorage } from "@/lib/local-storage";
+import { getBrowserQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
 import { removeRecentTask } from "@/lib/recent-tasks";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import type { AppState } from "@/lib/state/store";
+import type { Task } from "@/lib/types/http";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 
 type TaskUpdatedPayload = {
@@ -15,10 +19,13 @@ type TaskDeletedPayload = {
   task_id: string;
 };
 
-export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
+export function registerTasksHandlers(
+  store: StoreApi<AppState>,
+  queryClient: QueryClient = getBrowserQueryClient(),
+): WsHandlers {
   return {
     "task.updated": (message) => {
-      maybeFollowPrimarySession(store, message.payload as TaskUpdatedPayload);
+      maybeFollowPrimarySession(store, queryClient, message.payload as TaskUpdatedPayload);
     },
     "task.deleted": (message) => {
       handleTaskDeleted(store, message.payload as TaskDeletedPayload);
@@ -26,14 +33,19 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
   };
 }
 
-function maybeFollowPrimarySession(store: StoreApi<AppState>, payload: TaskUpdatedPayload): void {
+function maybeFollowPrimarySession(
+  store: StoreApi<AppState>,
+  queryClient: QueryClient,
+  payload: TaskUpdatedPayload,
+): void {
   if (payload.is_ephemeral) return;
   const taskId = payload.task_id;
   const newPrimary = payload.primary_session_id ?? null;
   if (!taskId || !newPrimary) return;
 
   const state = store.getState();
-  const previousPrimary = state.tasks.activeSessionId ?? null;
+  const previousPrimary = cachedPrimarySessionId(queryClient, taskId);
+  if (previousPrimary === undefined) return;
   if (
     newPrimary !== previousPrimary &&
     state.tasks.activeTaskId === taskId &&
@@ -42,6 +54,19 @@ function maybeFollowPrimarySession(store: StoreApi<AppState>, payload: TaskUpdat
   ) {
     state.setActiveSessionAuto(taskId, newPrimary);
   }
+}
+
+function cachedPrimarySessionId(
+  queryClient: QueryClient,
+  taskId: string,
+): string | null | undefined {
+  const cached = queryClient.getQueryData<Pick<Task, "primary_session_id">>(
+    qk.tasks.detail(taskId),
+  );
+  if (!cached || !Object.prototype.hasOwnProperty.call(cached, "primary_session_id")) {
+    return undefined;
+  }
+  return cached.primary_session_id ?? null;
 }
 
 function handleTaskDeleted(store: StoreApi<AppState>, payload: TaskDeletedPayload): void {
