@@ -1,12 +1,20 @@
 "use client";
 
+import { useRef } from "react";
 import { useRouter } from "@/lib/routing/client-router";
+import Link from "@/components/routing/app-link";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
-import { IconAlertTriangle, IconLayoutKanban, IconList, IconTimeline } from "@tabler/icons-react";
+import {
+  IconAlertTriangle,
+  IconLayoutKanban,
+  IconList,
+  IconSettings,
+  IconTimeline,
+} from "@tabler/icons-react";
 import { TaskSearchInput } from "./task-search-input";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { linkToTasks } from "@/lib/links";
@@ -210,20 +218,26 @@ function MobileUtilityActions({
     onOpenHealthDialog();
   };
 
-  if (!showHealthIndicator) return null;
-
   return (
     <div className="mt-auto flex flex-col gap-3 pt-4 border-t border-border">
       <div className="text-sm font-medium">Utilities</div>
-      <Button
-        type="button"
-        variant="outline"
-        className="w-full cursor-pointer justify-start gap-2"
-        onClick={openHealth}
-      >
-        <IconAlertTriangle className="h-4 w-4 text-warning" />
-        Health issues
+      <Button asChild variant="outline" className="w-full cursor-pointer justify-start gap-2">
+        <Link href="/settings" onClick={closeSheet}>
+          <IconSettings className="h-4 w-4" />
+          Settings
+        </Link>
       </Button>
+      {showHealthIndicator && (
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full cursor-pointer justify-start gap-2"
+          onClick={openHealth}
+        >
+          <IconAlertTriangle className="h-4 w-4 text-warning" />
+          Health issues
+        </Button>
+      )}
     </div>
   );
 }
@@ -239,6 +253,7 @@ export function MobileMenuSheet({
   showHealthIndicator,
   onOpenHealthDialog,
 }: MobileMenuSheetProps) {
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
   const {
     workflows,
@@ -276,7 +291,16 @@ export function MobileMenuSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-sm overflow-y-auto">
+      <SheetContent
+        ref={contentRef}
+        side="right"
+        tabIndex={-1}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          contentRef.current?.focus({ preventScroll: true });
+        }}
+        className="w-full sm:max-w-sm overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      >
         <SheetHeader>
           <SheetTitle>Menu</SheetTitle>
         </SheetHeader>

@@ -119,7 +119,10 @@ describe("TopbarMetrics", () => {
   it("renders a compact metrics pill on mobile when enabled", () => {
     renderMetrics(initialState(true));
 
-    expect(screen.getByTestId("mobile-topbar-metrics")).toBeTruthy();
+    const metrics = screen.getByTestId("mobile-topbar-metrics");
+    expect(metrics).toBeTruthy();
+    expect(metrics.className.split(/\s+/)).not.toContain("border");
+    expect(metrics.className.split(/\s+/)).not.toContain("border-border");
     expect(screen.getByLabelText("CPU 42%")).toBeTruthy();
     expect(screen.getByLabelText("Memory 68%")).toBeTruthy();
     expect(screen.queryByLabelText("Disk 12%")).toBeNull();

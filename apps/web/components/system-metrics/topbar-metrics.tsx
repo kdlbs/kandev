@@ -32,7 +32,7 @@ export function TopbarMetrics({ activeSessionId }: TopbarMetricsProps) {
   const sources = selectSources(snapshot?.sources ?? [], activeSessionId);
   if (sources.length === 0) {
     return (
-      <div className="flex h-8 items-center gap-1 rounded border border-border px-2 text-xs text-muted-foreground md:h-7">
+      <div className="flex h-8 items-center gap-1 rounded px-2 text-xs text-muted-foreground md:h-7 md:border md:border-border">
         <IconActivity className="h-3.5 w-3.5" />
         <span className="hidden sm:inline">Metrics</span>
       </div>
@@ -107,7 +107,7 @@ function CompactSourceMetrics({
 
   return (
     <div
-      className="flex h-9 max-w-[34vw] items-center gap-1 overflow-hidden rounded border border-border px-1.5 text-xs"
+      className="flex h-9 max-w-[34vw] items-center gap-1 overflow-hidden rounded px-1.5 text-xs"
       data-testid="mobile-topbar-metrics"
     >
       <SourceBadge source={source} updatedAt={updatedAt} />
