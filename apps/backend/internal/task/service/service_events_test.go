@@ -25,7 +25,7 @@ func (r failingTaskRepoRepository) ListTaskRepositories(ctx context.Context, tas
 }
 
 // TestPublishTaskUpdated_FallbackRepositoryID exercises the DB fallback in
-// primaryRepositoryID: orchestrator-originated events load the task via the
+// taskRepositoriesForEvent: orchestrator-originated events load the task via the
 // raw repo.GetTask, which does not populate Repositories. The publisher must
 // still emit repository_id so the frontend doesn't lose the repo link on
 // workflow transitions or state changes.
