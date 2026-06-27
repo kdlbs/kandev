@@ -775,8 +775,7 @@ func isAgentReportedSessionLoadMissingErr(message string) bool {
 	}
 	return strings.Contains(lower, "failed to load session") ||
 		strings.Contains(lower, "session/load") ||
-		strings.Contains(lower, "load session") ||
-		strings.Contains(lower, "session id")
+		strings.Contains(lower, "load session")
 }
 
 func isAgentStreamNotConnectedErr(err error) bool {

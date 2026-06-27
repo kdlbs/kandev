@@ -6,9 +6,12 @@ import type { TaskSession } from "@/lib/types/http";
 
 const EMPTY_SESSIONS: TaskSession[] = [];
 
+function resolvePendingForcedReloadWaiters(waiters: Array<() => void>) {
+  waiters.splice(0).forEach((resolve) => resolve());
+}
+
 export function useTaskSessions(taskId: string | null) {
   const queryClient = useQueryClient();
-  const sessionsQuery = useQuery(taskSessionsQueryOptions(taskId ?? ""));
   const storeSessions = useAppStore((state) =>
     taskId ? (state.taskSessionsByTask.itemsByTaskId[taskId] ?? EMPTY_SESSIONS) : EMPTY_SESSIONS,
   );
@@ -21,6 +24,10 @@ export function useTaskSessions(taskId: string | null) {
   const setTaskSessionsForTask = useAppStore((state) => state.setTaskSessionsForTask);
   const setTaskSessionsLoading = useAppStore((state) => state.setTaskSessionsLoading);
   const connectionStatus = useAppStore((state) => state.connection.status);
+  const sessionsQuery = useQuery({
+    ...taskSessionsQueryOptions(taskId ?? ""),
+    enabled: Boolean(taskId && !storeIsLoaded && !storeIsLoading),
+  });
   const pendingForcedReloadRef = useRef(false);
   const pendingForcedReloadWaitersRef = useRef<Array<() => void>>([]);
   const sessions = taskId ? (sessionsQuery.data?.sessions ?? storeSessions) : EMPTY_SESSIONS;
@@ -28,13 +35,12 @@ export function useTaskSessions(taskId: string | null) {
   const isLoaded = taskId ? sessionsQuery.isSuccess || storeIsLoaded : false;
 
   useEffect(() => {
-    if (!taskId || !sessionsQuery.data) return;
-    setTaskSessionsForTask(taskId, sessionsQuery.data.sessions ?? []);
+    if (taskId && sessionsQuery.data)
+      setTaskSessionsForTask(taskId, sessionsQuery.data.sessions ?? []);
   }, [sessionsQuery.data, setTaskSessionsForTask, taskId]);
 
   useEffect(() => {
-    if (!taskId) return;
-    setTaskSessionsLoading(taskId, sessionsQuery.isFetching);
+    if (taskId) setTaskSessionsLoading(taskId, sessionsQuery.isFetching);
   }, [sessionsQuery.isFetching, setTaskSessionsLoading, taskId]);
 
   const loadSessions = useCallback(
@@ -51,18 +57,19 @@ export function useTaskSessions(taskId: string | null) {
       }
       if (!force && isLoaded) return;
       try {
+        setTaskSessionsLoading(taskId, true);
         await queryClient.fetchQuery({ ...taskSessionsQueryOptions(taskId), staleTime: 0 });
       } catch (error) {
         console.error("Failed to load task sessions:", error);
         if (!force) setTaskSessionsForTask(taskId, []);
       } finally {
+        setTaskSessionsLoading(taskId, false);
         if (force && !pendingForcedReloadRef.current) {
-          const waiters = pendingForcedReloadWaitersRef.current.splice(0);
-          waiters.forEach((resolve) => resolve());
+          resolvePendingForcedReloadWaiters(pendingForcedReloadWaitersRef.current);
         }
       }
     },
-    [isLoaded, isLoading, queryClient, setTaskSessionsForTask, taskId],
+    [isLoaded, isLoading, queryClient, setTaskSessionsForTask, setTaskSessionsLoading, taskId],
   );
 
   useEffect(() => {
@@ -73,8 +80,7 @@ export function useTaskSessions(taskId: string | null) {
 
   useEffect(() => {
     pendingForcedReloadRef.current = false;
-    const waiters = pendingForcedReloadWaitersRef.current.splice(0);
-    waiters.forEach((resolve) => resolve());
+    resolvePendingForcedReloadWaiters(pendingForcedReloadWaitersRef.current);
   }, [taskId]);
 
   useEffect(() => {

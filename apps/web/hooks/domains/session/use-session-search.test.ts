@@ -141,3 +141,43 @@ describe("useSessionSearch", () => {
     expect(result.current.query).toBe("");
   });
 });
+
+describe("useSessionSearch repeated queries", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockSearch.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    cleanup();
+  });
+
+  it("refetches repeated searches within the Query stale window", async () => {
+    mockSearch
+      .mockResolvedValueOnce({ hits: [makeHit("old")], total: 1 })
+      .mockResolvedValueOnce({ hits: [makeHit("new")], total: 1 });
+    const { result } = renderSessionSearch("sess-1");
+
+    act(() => {
+      result.current.open();
+      result.current.setQuery("repeat");
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+      await flush();
+    });
+    expect(result.current.hits[0]?.id).toBe("old");
+
+    act(() => {
+      result.current.setQuery("repeat");
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+      await flush();
+    });
+
+    expect(mockSearch).toHaveBeenCalledTimes(2);
+    expect(result.current.hits[0]?.id).toBe("new");
+  });
+});

@@ -100,6 +100,28 @@ describe("useRepositories", () => {
     expect(listRepositories).toHaveBeenCalledWith(WORKSPACE_ID, undefined, expect.any(Object));
   });
 
+  it("retries a forced refresh after a failed refetch result", async () => {
+    const cached = [repo(REPO_ID, "cached")];
+    const fresh = [repo(OTHER_REPO_ID, "fresh")];
+    vi.mocked(listRepositories)
+      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockResolvedValueOnce({ repositories: fresh, total: 1 });
+    const queryClient = createQueryClient();
+    queryClient.setQueryData(qk.workspaces.repositories(WORKSPACE_ID), cached);
+
+    const { result, rerender } = renderHook(() => useRepositories(WORKSPACE_ID, true, true), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    expect(result.current.repositories).toEqual(cached);
+    await waitFor(() => expect(listRepositories).toHaveBeenCalledTimes(1));
+
+    rerender();
+
+    await waitFor(() => expect(listRepositories).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.repositories).toEqual(fresh));
+  });
+
   it("does not fetch when disabled or workspace is missing", async () => {
     const queryClient = createQueryClient();
 

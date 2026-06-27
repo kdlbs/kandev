@@ -45,6 +45,7 @@ type SeedOptions = {
 
 type OfficeQuerySeedState = Partial<AppState["office"]> & {
   agents?: AgentProfile[];
+  agentProfiles?: AgentProfile[];
   projects?: Project[];
   skills?: Skill[];
   routines?: Routine[];
@@ -230,8 +231,9 @@ function seedOfficeEntityLists(
   workspaceId: string,
   office: OfficeQuerySeedState,
 ) {
-  if (office.agents) {
-    client.setQueryData(qk.office.agents(workspaceId), { agents: office.agents });
+  const agents = office.agents ?? office.agentProfiles;
+  if (agents) {
+    client.setQueryData(qk.office.agents(workspaceId), { agents });
   }
   if (office.projects) {
     client.setQueryData(qk.office.projects(workspaceId), { projects: office.projects });

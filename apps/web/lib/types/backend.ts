@@ -1,3 +1,4 @@
+/* eslint-disable max-lines */
 export type BackendMessageType =
   | "kanban.update"
   | "task.created"
@@ -29,6 +30,12 @@ export type BackendMessageType =
   | "workflow.step.created"
   | "workflow.step.updated"
   | "workflow.step.deleted"
+  | "repository.created"
+  | "repository.updated"
+  | "repository.deleted"
+  | "repository.script.created"
+  | "repository.script.updated"
+  | "repository.script.deleted"
   | "session.message.added"
   | "session.message.updated"
   | "session.state_changed"
@@ -219,6 +226,16 @@ export type WorkspacePayload = {
   default_config_agent_profile_id?: string | null;
   created_at?: string;
   updated_at?: string;
+};
+
+export type RepositoryPayload = Record<string, unknown> & {
+  id: string;
+  workspace_id?: string;
+};
+
+export type RepositoryScriptPayload = Record<string, unknown> & {
+  id: string;
+  repository_id?: string;
 };
 
 export type WorkflowPayload = {
@@ -560,6 +577,12 @@ export type BackendMessageMap = OfficeBackendMessageMap & {
   "workflow.step.created": BackendMessage<"workflow.step.created", WorkflowStepEventPayload>;
   "workflow.step.updated": BackendMessage<"workflow.step.updated", WorkflowStepEventPayload>;
   "workflow.step.deleted": BackendMessage<"workflow.step.deleted", WorkflowStepEventPayload>;
+  "repository.created": BackendMessage<"repository.created", RepositoryPayload>;
+  "repository.updated": BackendMessage<"repository.updated", RepositoryPayload>;
+  "repository.deleted": BackendMessage<"repository.deleted", RepositoryPayload>;
+  "repository.script.created": BackendMessage<"repository.script.created", RepositoryScriptPayload>;
+  "repository.script.updated": BackendMessage<"repository.script.updated", RepositoryScriptPayload>;
+  "repository.script.deleted": BackendMessage<"repository.script.deleted", RepositoryScriptPayload>;
   "session.message.added": BackendMessage<"session.message.added", MessageAddedPayload>;
   "session.message.updated": BackendMessage<"session.message.updated", MessageAddedPayload>;
   "session.state_changed": BackendMessage<"session.state_changed", TaskSessionStateChangedPayload>;

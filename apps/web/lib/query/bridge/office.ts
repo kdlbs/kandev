@@ -214,7 +214,8 @@ function patchRouteAttempt(queryClient: QueryClient, payload: OfficeEventPayload
   const attempt = isRecord(payload.attempt) ? payload.attempt : null;
   if (!runId || !attempt) return;
   queryClient.setQueryData(qk.office.runAttempts(runId), (current: unknown) => {
-    const attempts = isRecord(current) && Array.isArray(current.attempts) ? current.attempts : [];
+    if (!isRecord(current)) return current;
+    const attempts = Array.isArray(current.attempts) ? current.attempts : [];
     const next = [...attempts];
     const seq = attempt.seq;
     const index = next.findIndex((item) => isRecord(item) && item.seq === seq);

@@ -242,7 +242,8 @@ function patchSessionEnvironment(
 ): void {
   if (!payload.session_id) return;
   queryClient.setQueryData(qk.taskSession.byId(payload.session_id), (current: unknown) => {
-    const existing = isRecord(current) ? current : {};
+    if (!isRecord(current)) return current;
+    const existing = current;
     return {
       ...existing,
       id: payload.session_id,

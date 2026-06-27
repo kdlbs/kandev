@@ -1,7 +1,7 @@
 /* eslint-disable max-lines-per-function */
 import { describe, expect, it } from "vitest";
 import type { BootPayload } from "@/src/boot-payload";
-import type { Skill } from "@/lib/state/slices/office/types";
+import type { AgentProfile, Skill } from "@/lib/state/slices/office/types";
 import {
   repositoryId as toRepositoryId,
   sessionId as toSessionId,
@@ -297,6 +297,22 @@ describe("seedQueryClientFromInitialState", () => {
     } as unknown as QuerySeedInitialState);
 
     expect(client.getQueryData(qk.office.skills(WORKSPACE_ID))).toEqual({ skills: [skill] });
+  });
+
+  it("seeds office agents from the boot agentProfiles field", () => {
+    const client = makeQueryClient();
+    const profile = {
+      id: "agent-profile-1",
+      workspace_id: WORKSPACE_ID,
+      name: "Planner",
+    } as unknown as AgentProfile;
+
+    seedQueryClientFromInitialState(client, {
+      workspaces: { activeId: WORKSPACE_ID, items: [] },
+      office: { agentProfiles: [profile] },
+    } as unknown as QuerySeedInitialState);
+
+    expect(client.getQueryData(qk.office.agents(WORKSPACE_ID))).toEqual({ agents: [profile] });
   });
 
   it("seeds workflow snapshots into the workflow snapshot query cache", () => {

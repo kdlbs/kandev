@@ -21,11 +21,18 @@ export function useRepositories(workspaceId: string | null, enabled = true, forc
     if (!enabled || !forceRefresh || !workspaceId) return;
     if (forcedRef.current === workspaceId) return;
     forcedRef.current = workspaceId;
-    void query.refetch().catch(() => {
-      if (forcedRef.current === workspaceId) {
-        forcedRef.current = null;
-      }
-    });
+    void query
+      .refetch()
+      .then((result) => {
+        if (result.error && forcedRef.current === workspaceId) {
+          forcedRef.current = null;
+        }
+      })
+      .catch(() => {
+        if (forcedRef.current === workspaceId) {
+          forcedRef.current = null;
+        }
+      });
   }, [enabled, forceRefresh, query, workspaceId]);
 
   return { repositories, isLoading: query.isFetching && repositories.length === 0 };

@@ -43,9 +43,10 @@ function useDebouncedSearch(
       const myId = ++requestIdRef.current;
       setIsSearching(true);
       try {
-        const resp = await queryClient.fetchQuery(
-          sessionSearchQueryOptions(sessionId, trimmed, 50),
-        );
+        const resp = await queryClient.fetchQuery({
+          ...sessionSearchQueryOptions(sessionId, trimmed, 50),
+          staleTime: 0,
+        });
         if (requestIdRef.current !== myId) return;
         setHits(resp.hits ?? []);
       } catch (err) {

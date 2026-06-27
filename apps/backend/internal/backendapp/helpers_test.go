@@ -143,6 +143,30 @@ func TestAppendSessionStateMessage_IncludesRoutingMetadata(t *testing.T) {
 	}
 }
 
+func TestAppendSessionStateMessage_EmitsFalsePassthroughAndOmitsEmptyRoutingMetadata(t *testing.T) {
+	session := &models.TaskSession{
+		ID:     "sess-1",
+		TaskID: "task-1",
+		State:  models.TaskSessionStateRunning,
+	}
+
+	msgs := appendSessionStateMessage(session.ID, session, nil)
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+
+	payload := decodePayload(t, msgs[0].Payload)
+	got, present := payload["is_passthrough"]
+	if !present || got != false {
+		t.Fatalf("expected is_passthrough=false, got present=%v value=%#v", present, got)
+	}
+	for _, key := range []string{"agent_profile_id", "agent_profile_snapshot", "task_environment_id"} {
+		if _, present := payload[key]; present {
+			t.Fatalf("expected %s to be omitted, payload=%#v", key, payload)
+		}
+	}
+}
+
 func TestAppendAgentctlStatusMessage_IncludesWorkspacePathForReload(t *testing.T) {
 	log, err := logger.NewLogger(logger.LoggingConfig{
 		Level:      "error",

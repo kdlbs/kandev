@@ -402,6 +402,7 @@ func TestWaitForPromptDoneDoesNotWrapUnrelatedNotFoundAgentErrors(t *testing.T) 
 	tests := []string{
 		"permission denied: resource not found",
 		"tool failed: no such session",
+		"tool failed: session id abc: no such session in cache",
 		"session not found",
 	}
 	for _, message := range tests {

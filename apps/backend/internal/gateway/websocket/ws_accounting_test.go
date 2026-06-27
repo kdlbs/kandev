@@ -83,6 +83,56 @@ func TestClient_DroppedSendDoesNotRecordSentLog(t *testing.T) {
 	if len(events) != 0 || maxSeq != 0 {
 		t.Fatalf("sent log = max %d events %+v; want no logged sent events", maxSeq, events)
 	}
+	if got := c.connectionSeq.Load(); got != 0 {
+		t.Fatalf("connection seq after dropped send = %d; want 0", got)
+	}
+
+	for range cap(c.send) {
+		<-c.send
+	}
+	next, err := ws.NewNotification("task.updated", map[string]string{"task_id": "task-2"})
+	if err != nil {
+		t.Fatalf("next notification: %v", err)
+	}
+	if !c.sendMessage(next) {
+		t.Fatal("next send failed after draining buffer")
+	}
+	got := readStampedMessage(t, c)
+	if got.ConnectionSeq != 1 {
+		t.Fatalf("connection seq after dropped send = %d; want 1", got.ConnectionSeq)
+	}
+}
+
+func TestClient_MarshalFailureDoesNotAdvanceConnectionSequence(t *testing.T) {
+	h := newTestHub(t)
+	c := newTestClient("conn-marshal")
+	c.hub = h
+	registerTestClient(h, c)
+
+	bad := &ws.Message{
+		Type:      ws.MessageTypeNotification,
+		Action:    "task.updated",
+		Payload:   json.RawMessage(`{`),
+		Timestamp: time.Now(),
+	}
+	if c.sendMessage(bad) {
+		t.Fatal("send unexpectedly succeeded with invalid JSON payload")
+	}
+	if got := c.connectionSeq.Load(); got != 0 {
+		t.Fatalf("connection seq after marshal failure = %d; want 0", got)
+	}
+
+	good, err := ws.NewNotification("task.updated", map[string]string{"task_id": "task-1"})
+	if err != nil {
+		t.Fatalf("notification: %v", err)
+	}
+	if !c.sendMessage(good) {
+		t.Fatal("valid send failed after marshal failure")
+	}
+	got := readStampedMessage(t, c)
+	if got.ConnectionSeq != 1 {
+		t.Fatalf("connection seq after marshal failure = %d; want 1", got.ConnectionSeq)
+	}
 }
 
 func TestClient_SendSessionDataStampsConnectionOnly(t *testing.T) {

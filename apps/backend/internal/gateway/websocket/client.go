@@ -492,7 +492,7 @@ func (c *Client) sendMessageForSessionSeq(sessionID string, sessionSeq int64, ms
 	if !ok {
 		return false
 	}
-	if !c.sendBytes(stamped.data) {
+	if !c.sendStampedMessage(&stamped) {
 		return false
 	}
 	if c.sentLog != nil {
@@ -518,6 +518,7 @@ func (c *Client) sendStampedCopyForSessionSeq(sessionID string, sessionSeq int64
 
 type stampedMessage struct {
 	data          []byte
+	message       ws.Message
 	connectionSeq int64
 	sessionSeq    int64
 	sessionID     string
@@ -535,9 +536,8 @@ func (c *Client) stampAndMarshalForSession(
 		return stampedMessage{}, false
 	}
 	stampedMsg := *msg
-	connectionSeq := c.connectionSeq.Add(1)
 	stampedMsg.ConnectionID = c.ID
-	stampedMsg.ConnectionSeq = connectionSeq
+	stampedMsg.ConnectionSeq = 0
 	stampedMsg.SessionSeq = 0
 	if sessionID != "" && c.hub != nil {
 		if sessionSeq <= 0 {
@@ -551,14 +551,37 @@ func (c *Client) stampAndMarshalForSession(
 		return stampedMessage{}, false
 	}
 	return stampedMessage{
-		data:          data,
-		connectionSeq: connectionSeq,
-		sessionSeq:    stampedMsg.SessionSeq,
-		sessionID:     sessionID,
-		msgType:       string(stampedMsg.Type),
-		action:        stampedMsg.Action,
-		sentAt:        time.Now().UTC(),
+		data:       data,
+		message:    stampedMsg,
+		sessionSeq: stampedMsg.SessionSeq,
+		sessionID:  sessionID,
+		msgType:    string(stampedMsg.Type),
+		action:     stampedMsg.Action,
 	}, true
+}
+
+func (c *Client) sendStampedMessage(stamped *stampedMessage) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return false
+	}
+	if len(c.send) >= cap(c.send) {
+		c.logger.Warn("Client send buffer full")
+		return false
+	}
+	connectionSeq := c.connectionSeq.Add(1)
+	stamped.message.ConnectionSeq = connectionSeq
+	data, err := json.Marshal(&stamped.message)
+	if err != nil {
+		c.logger.Error("Failed to marshal message", zap.Error(err))
+		return false
+	}
+	c.send <- data
+	stamped.data = data
+	stamped.connectionSeq = connectionSeq
+	stamped.sentAt = time.Now().UTC()
+	return true
 }
 
 func (c *Client) sendBytes(data []byte) bool {

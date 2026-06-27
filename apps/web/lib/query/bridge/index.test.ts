@@ -232,6 +232,83 @@ describe("query bridge audit", () => {
     cleanup();
   });
 
+  it("handles repository events by invalidating workspace repository caches", () => {
+    const ws = new FakeWebSocketClient();
+    const queryClient = makeQueryClient();
+    queryClient.setQueryData(qk.workspaces.repositories("workspace-1"), [{ id: "repo-1" }]);
+    queryClient.setQueryData(qk.workspaces.repositories("workspace-1", { includeScripts: true }), [
+      { id: "repo-1", scripts: [] },
+    ]);
+    queryClient.setQueryData(qk.workspaces.repositoryScripts("repo-1"), []);
+
+    const cleanup = registerBridge(ws, queryClient);
+    ws.emit({
+      type: "notification",
+      action: "repository.updated",
+      payload: {
+        id: "repo-1",
+        workspace_id: "workspace-1",
+        name: "Updated repository",
+      },
+    });
+
+    expect(
+      queryClient.getQueryState(qk.workspaces.repositories("workspace-1"))?.isInvalidated,
+    ).toBe(true);
+    expect(
+      queryClient.getQueryState(qk.workspaces.repositories("workspace-1", { includeScripts: true }))
+        ?.isInvalidated,
+    ).toBe(true);
+    expect(
+      queryClient.getQueryState(qk.workspaces.repositoryScripts("repo-1"))?.isInvalidated,
+    ).toBe(true);
+    expect(getBridgeAuditRows()).toContainEqual(
+      expect.objectContaining({
+        action: "repository.updated",
+        status: "handled",
+      }),
+    );
+
+    cleanup();
+  });
+
+  it("handles repository script events by invalidating script and repository-list caches", () => {
+    const ws = new FakeWebSocketClient();
+    const queryClient = makeQueryClient();
+    queryClient.setQueryData(qk.workspaces.repositories("workspace-1"), [
+      { id: "repo-1", scripts: [] },
+    ]);
+    queryClient.setQueryData(qk.workspaces.repositoryScripts("repo-1"), [
+      { id: "script-1", repository_id: "repo-1" },
+    ]);
+
+    const cleanup = registerBridge(ws, queryClient);
+    ws.emit({
+      type: "notification",
+      action: "repository.script.updated",
+      payload: {
+        id: "script-1",
+        repository_id: "repo-1",
+        name: "Setup",
+      },
+    });
+
+    expect(
+      queryClient.getQueryState(qk.workspaces.repositories("workspace-1"))?.isInvalidated,
+    ).toBe(true);
+    expect(
+      queryClient.getQueryState(qk.workspaces.repositoryScripts("repo-1"))?.isInvalidated,
+    ).toBe(true);
+    expect(getBridgeAuditRows()).toContainEqual(
+      expect.objectContaining({
+        action: "repository.script.updated",
+        status: "handled",
+      }),
+    );
+
+    cleanup();
+  });
+
   it("patches office task query pages and records handled office audit rows", () => {
     const ws = new FakeWebSocketClient();
     const queryClient = makeQueryClient();
@@ -380,6 +457,31 @@ describe("query bridge audit", () => {
         }),
       ],
     });
+
+    cleanup();
+  });
+
+  it("does not seed full run-attempt caches from live route attempt events", () => {
+    const ws = new FakeWebSocketClient();
+    const queryClient = makeQueryClient();
+
+    const cleanup = registerBridge(ws, queryClient);
+    ws.emit({
+      type: "notification",
+      action: "office.route_attempt.appended",
+      payload: {
+        run_id: "run-1",
+        attempt: {
+          seq: 1,
+          provider_id: "codex",
+          tier: "balanced",
+          outcome: "launched",
+          started_at: "2026-06-23T00:00:00Z",
+        },
+      },
+    });
+
+    expect(queryClient.getQueryData(qk.office.runAttempts("run-1"))).toBeUndefined();
 
     cleanup();
   });
@@ -1030,6 +1132,44 @@ describe("query bridge audit", () => {
         status: "handled",
       }),
     );
+
+    cleanup();
+  });
+
+  it("does not create partial task session detail rows from agentctl events", () => {
+    const ws = new FakeWebSocketClient();
+    const queryClient = makeQueryClient();
+
+    const cleanup = registerBridge(ws, queryClient);
+    ws.emit({
+      type: "notification",
+      action: "session.agentctl_ready",
+      timestamp: "2026-06-23T00:00:03Z",
+      payload: {
+        task_id: "task-1",
+        session_id: "session-1",
+        task_environment_id: "env-1",
+        agent_execution_id: "exec-1",
+        worktree_id: "worktree-1",
+        worktree_path: "/tmp/kandev/worktrees/worktree-1",
+        worktree_branch: "feature/session",
+      },
+    });
+
+    expect(queryClient.getQueryData(qk.taskSession.byId("session-1"))).toBeUndefined();
+    expect(queryClient.getQueryData(qk.sessionRuntime.agentctl("session-1"))).toMatchObject({
+      status: "ready",
+      agentExecutionId: "exec-1",
+    });
+    expect(queryClient.getQueryData(qk.sessionRuntime.worktrees("session-1"))).toEqual([
+      {
+        id: "worktree-1",
+        sessionId: "session-1",
+        repositoryId: undefined,
+        path: "/tmp/kandev/worktrees/worktree-1",
+        branch: "feature/session",
+      },
+    ]);
 
     cleanup();
   });
