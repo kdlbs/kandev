@@ -112,32 +112,8 @@ func (e *Executor) reuseExistingRepositoryWorktrees(ctx context.Context, req *La
 	allowLegacyEmptyBranchFallback := !hasBranchScopedEnvironmentWorktrees(env)
 	for i := range repoSpecs {
 		spec := &repoSpecs[i]
-		branchIdentity := launchRepoBranchIdentitySlug(*spec)
-		key := repositoryWorktreeKey{
-			repositoryID: spec.RepositoryID,
-			branchSlug:   branchIdentity,
-		}
-		if id := envWorktreeIDs[key]; id != "" {
+		if id := reusableWorktreeIDForSpec(*spec, envWorktreeIDs, sessionWorktreeIDs, allowLegacyEmptyBranchFallback); id != "" {
 			spec.WorktreeID = id
-			continue
-		}
-		if id := sessionWorktreeIDs[key]; id != "" {
-			spec.WorktreeID = id
-			continue
-		}
-		if spec.BranchSlug == "" && allowLegacyEmptyBranchFallback {
-			legacyKey := repositoryWorktreeKey{
-				repositoryID: spec.RepositoryID,
-				branchSlug:   "",
-			}
-			if id := envWorktreeIDs[legacyKey]; id != "" {
-				spec.WorktreeID = id
-				continue
-			}
-			if branchIdentity == "" && sessionWorktreeIDs[legacyKey] != "" {
-				id := sessionWorktreeIDs[legacyKey]
-				spec.WorktreeID = id
-			}
 		}
 	}
 	if repoSpecs[0].WorktreeID == "" {
@@ -147,6 +123,41 @@ func (e *Executor) reuseExistingRepositoryWorktrees(ctx context.Context, req *La
 	if !usingTopLevelRepo {
 		req.Repositories = repoSpecs
 	}
+}
+
+func reusableWorktreeIDForSpec(
+	spec RepoSpec,
+	envWorktreeIDs map[repositoryWorktreeKey]string,
+	sessionWorktreeIDs map[repositoryWorktreeKey]string,
+	allowLegacyEmptyBranchFallback bool,
+) string {
+	branchIdentity := launchRepoBranchIdentitySlug(spec)
+	key := repositoryWorktreeKey{
+		repositoryID: spec.RepositoryID,
+		branchSlug:   branchIdentity,
+	}
+	if id := envWorktreeIDs[key]; id != "" {
+		return id
+	}
+	if id := sessionWorktreeIDs[key]; id != "" {
+		return id
+	}
+	if spec.BranchSlug != "" || !allowLegacyEmptyBranchFallback {
+		return ""
+	}
+	legacyKey := repositoryWorktreeKey{
+		repositoryID: spec.RepositoryID,
+		branchSlug:   "",
+	}
+	if id := envWorktreeIDs[legacyKey]; id != "" {
+		return id
+	}
+	if branchIdentity == "" {
+		if id := sessionWorktreeIDs[legacyKey]; id != "" {
+			return id
+		}
+	}
+	return ""
 }
 
 func topLevelLaunchRepoSpec(req *LaunchAgentRequest) (RepoSpec, bool) {
