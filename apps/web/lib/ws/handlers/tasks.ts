@@ -12,15 +12,16 @@ type KanbanTask = KanbanState["tasks"][number];
 
 function mergeTaskUpdate(existing: KanbanTask | undefined, nextTask: KanbanTask): KanbanTask {
   if (!existing) return nextTask;
+  const repositoriesProvided = nextTask.repositories !== undefined;
   const repositoryIdChanged =
     nextTask.repositoryId !== undefined && nextTask.repositoryId !== existing.repositoryId;
   return {
     ...nextTask,
-    repositoryId: nextTask.repositoryId ?? existing.repositoryId,
+    repositoryId: repositoriesProvided
+      ? nextTask.repositoryId
+      : (nextTask.repositoryId ?? existing.repositoryId),
     repositories:
-      nextTask.repositories !== undefined || repositoryIdChanged
-        ? nextTask.repositories
-        : existing.repositories,
+      repositoriesProvided || repositoryIdChanged ? nextTask.repositories : existing.repositories,
   };
 }
 

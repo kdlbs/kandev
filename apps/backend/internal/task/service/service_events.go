@@ -64,9 +64,9 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 	// preventing the frontend from collapsing multi-repo tasks down to the
 	// primary repo on WS updates.
 	repos := taskRepositoriesForEvent(ctx, s, task)
+	data["repositories"] = serializeTaskRepositories(repos)
 	if len(repos) > 0 {
 		data["repository_id"] = repos[0].RepositoryID
-		data["repositories"] = serializeTaskRepositories(repos)
 	}
 	if task.Metadata != nil {
 		data["metadata"] = task.Metadata

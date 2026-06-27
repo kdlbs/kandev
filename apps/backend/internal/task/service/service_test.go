@@ -1474,4 +1474,51 @@ func TestPublishTaskUpdated_FallbackRepositoryID(t *testing.T) {
 	if got != "repo-x" {
 		t.Fatalf("expected repository_id=repo-x via DB fallback, got %q", got)
 	}
+	repos, ok := data["repositories"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("repositories missing from payload or wrong type: %#v", data["repositories"])
+	}
+	if len(repos) != 1 || repos[0]["repository_id"] != "repo-x" {
+		t.Fatalf("expected repositories payload with repo-x, got %#v", repos)
+	}
+}
+
+func TestPublishTaskUpdated_EmitsEmptyRepositories(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	task := &models.Task{
+		ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+	}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	eventBus.ClearEvents()
+
+	svc.PublishTaskUpdated(ctx, task)
+
+	events := eventBus.GetPublishedEvents()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 published event, got %d", len(events))
+	}
+	data, ok := events[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event Data wrong type: %T", events[0].Data)
+	}
+	if _, ok := data["repository_id"]; ok {
+		t.Fatalf("repository_id should be absent for tasks with no repositories: %#v", data["repository_id"])
+	}
+	repos, ok := data["repositories"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("repositories missing from payload or wrong type: %#v", data["repositories"])
+	}
+	if len(repos) != 0 {
+		t.Fatalf("expected empty repositories payload, got %#v", repos)
+	}
 }

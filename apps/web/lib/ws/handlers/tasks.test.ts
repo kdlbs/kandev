@@ -363,6 +363,45 @@ describe("task.updated repository preservation", () => {
   });
 });
 
+describe("task.updated repository clearing", () => {
+  it("clears repository metadata when an update explicitly sends an empty repository list", () => {
+    const existingTask = {
+      id: "t1",
+      workflowStepId: "step1",
+      title: "Old title",
+      position: 0,
+      repositoryId: "repo-a",
+      repositories: [
+        {
+          id: "task-repo-1",
+          repository_id: "repo-a",
+          base_branch: "main",
+          position: 0,
+        },
+      ],
+    };
+    const store = makeStore({
+      kanban: {
+        workflowId: "wf1",
+        steps: [],
+        tasks: [existingTask],
+      } as unknown as AppState["kanban"],
+    });
+
+    const handlers = registerTasksHandlers(store);
+    handlers["task.updated"]!(
+      makeMessage({
+        ...makeTask("t1", null),
+        repositories: [],
+      }),
+    );
+
+    const task = store.getState().kanban.tasks.find((item) => item.id === "t1");
+    expect(task?.repositoryId).toBeUndefined();
+    expect(task?.repositories).toEqual([]);
+  });
+});
+
 describe("task.deleted cleanup", () => {
   it("removes the deleted task from recent task history", () => {
     const store = makeStore({

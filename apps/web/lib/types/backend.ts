@@ -144,6 +144,13 @@ export type TaskEventPayload = {
   priority?: number;
   position?: number;
   repository_id?: string;
+  repositories?: Array<{
+    id?: string;
+    repository_id: string;
+    base_branch?: string;
+    checkout_branch?: string;
+    position?: number;
+  }>;
   primary_session_id?: string | null;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
