@@ -1,6 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import type { BackendMessageMap } from "@/lib/types/backend";
-import type { Task, WorkflowSnapshot } from "@/lib/types/http";
+import { primaryTaskRepository, type Task, type WorkflowSnapshot } from "@/lib/types/http";
 import type { WebSocketClient } from "@/lib/ws/client";
 import { qk } from "../keys";
 import { registerBridgeHandlers, type QueryBridgeRegistration } from "./registrar";
@@ -142,7 +142,7 @@ function taskFromPayload(
     description: descriptionFromPayload(payload, existing),
     state: stateFromPayload(payload, existing),
     priority: priorityFromPayload(payload, existing),
-    repositories: repositoriesFromPayload(payload, existing),
+    repositories: repositoriesFromPayload(payload, existing?.repositories),
     primary_session_id: primarySessionIdFromPayload(payload, existing),
     session_count: sessionCountFromPayload(payload, existing),
     review_status: reviewStatusFromPayload(payload, existing),
@@ -189,20 +189,38 @@ function updatedAtFromPayload(payload: TaskEventMessage["payload"], existing: Ta
 
 function repositoriesFromPayload(
   payload: TaskEventMessage["payload"],
-  existing: Task | undefined,
+  existingRepositories: Task["repositories"] | undefined,
 ): Task["repositories"] {
-  if (existing?.repositories) return existing.repositories;
-  if (!payload.repository_id) return [];
-  return [
-    {
-      id: "",
-      repository_id: payload.repository_id,
-      base_branch: "",
-      position: 0,
-      created_at: "",
-      updated_at: "",
-    },
-  ] as Task["repositories"];
+  if (payload.repositories !== undefined) {
+    return payload.repositories as Task["repositories"];
+  }
+  const payloadRepositoryId = payload.repository_id;
+  const existingRepositoryId = primaryRepositoryId(existingRepositories);
+  if (payloadRepositoryId && payloadRepositoryId !== existingRepositoryId) {
+    return [fallbackTaskRepository(payload, payloadRepositoryId)];
+  }
+  if (existingRepositories) return existingRepositories;
+  if (!payloadRepositoryId) return [];
+  return [fallbackTaskRepository(payload, payloadRepositoryId)];
+}
+
+function primaryRepositoryId(repositories: Task["repositories"] | undefined): string | undefined {
+  return primaryTaskRepository(repositories)?.repository_id;
+}
+
+function fallbackTaskRepository(
+  payload: TaskEventMessage["payload"],
+  repositoryId: string,
+): NonNullable<Task["repositories"]>[number] {
+  return {
+    id: "",
+    task_id: payload.task_id,
+    repository_id: repositoryId,
+    base_branch: "",
+    position: 0,
+    created_at: payload.updated_at ?? "",
+    updated_at: payload.updated_at ?? "",
+  } as NonNullable<Task["repositories"]>[number];
 }
 
 function taskDetailFromPayload(
@@ -212,10 +230,17 @@ function taskDetailFromPayload(
   return {
     ...existing,
     ...payload,
+    repositories: repositoriesFromPayload(payload, cachedRepositories(existing)),
     ...taskDetailCoreFields(payload, existing),
     ...taskDetailSessionFields(payload, existing),
     ...taskDetailTimestampFields(payload, existing),
   };
+}
+
+function cachedRepositories(existing: CachedTask): Task["repositories"] | undefined {
+  return Array.isArray(existing.repositories)
+    ? (existing.repositories as Task["repositories"])
+    : undefined;
 }
 
 function taskDetailCoreFields(

@@ -92,7 +92,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [ci-pr-automation](ui/ci-pr-automation.md) | draft |
 | [comment-markdown](ui/comment-markdown.md) | shipped |
 | [empty-turn-notice](ui/empty-turn-notice.md) | shipped |
-| [tanstack-query-server-state](ui/tanstack-query-server-state.md) | draft |
+| [tanstack-query-server-state](ui/tanstack-query-server-state.md) | done |
 
 ## system-page/ — operational diagnostics & maintenance UI
 

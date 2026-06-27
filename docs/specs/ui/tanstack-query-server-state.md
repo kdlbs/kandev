@@ -54,7 +54,7 @@ state ownership.
 TanStack Query owns server-state cache entries in the browser. Keys are array
 tuples with stable domain prefixes:
 
-```ts
+```text
 ["features"]
 ["workspaces"]
 ["workspaces", workspaceId, "repos"]
@@ -274,6 +274,28 @@ Default query behavior is conservative for Kandev:
   production observability project.
 
 ## Verification
+
+Rebase follow-up completed locally on 2026-06-27 after rebasing the migration
+branch onto `origin/main` at `7728ddb3b`:
+
+- Migrated the upstream task repository WebSocket preservation fix into the
+  Query bridge and removed the legacy `task-repositories` WebSocket helper.
+- Migrated the new session layout active-session lookup to query-backed
+  `useSession`, keeping the upstream rowless-session fallback behavior.
+- Updated rebased tests to seed/query through TanStack Query instead of deleted
+  Zustand server-state slices.
+- `rtk make fmt` passed.
+- `rtk pnpm --dir apps/web typecheck` passed.
+- `rtk pnpm --dir apps/web lint` passed.
+- Focused web unit slice passed 16 files / 95 tests, covering Query bridge,
+  session state/layout, topbar metrics, mobile selectors, PR chip, and rebased
+  mobile/task components.
+- Docker E2E desktop focused slice passed 8 tests with strict WS accounting:
+  `rtk pnpm --dir apps/web e2e:docker tests/session/multi-session.spec.ts tests/system/ws-event-accounting.spec.ts tests/task/repository-selector-scroll.spec.ts`.
+- Docker E2E mobile focused slice passed 8 tests with strict WS accounting:
+  `rtk pnpm --dir apps/web e2e:docker --no-build --project mobile-chrome tests/chat/mobile-model-selector.spec.ts tests/cli-mode/mobile-passthrough-composer.spec.ts tests/pr/mobile-pr-ci-chip.spec.ts tests/mobile-zoom.spec.ts`.
+- Docker E2E multi-session UX slice passed 7 tests with strict WS accounting:
+  `rtk pnpm --dir apps/web e2e:docker --no-build tests/session/multi-session-ux.spec.ts`.
 
 Final strict QA completed locally:
 

@@ -3,6 +3,7 @@
 import { useState, useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
+import { useSession } from "@/hooks/domains/session/use-session";
 import { useSessionChangesCount } from "@/hooks/domains/session/use-session-changes-count";
 import { getPlanLastSeen } from "@/lib/local-storage";
 import { taskPlanQueryOptions } from "@/lib/query/query-options";
@@ -94,9 +95,7 @@ export function useSessionLayoutState(options: UseSessionLayoutStateOptions = {}
   // --- Core session state ---
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const activeSessionData = useAppStore((state) =>
-    activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null,
-  );
+  const { session: activeSessionData } = useSession(activeSessionId);
   const lastSessionForActiveTask = useAppStore((state) =>
     activeTaskId ? state.tasks.lastSessionByTaskId[activeTaskId] : null,
   );
@@ -109,9 +108,7 @@ export function useSessionLayoutState(options: UseSessionLayoutStateOptions = {}
   );
   const sessionKey = effectiveSessionId ?? "";
 
-  const activeSession = useAppStore((state) =>
-    effectiveSessionId ? (state.taskSessions.items[effectiveSessionId] ?? null) : null,
-  );
+  const { session: activeSession } = useSession(effectiveSessionId);
   const setTaskSession = useAppStore((state) => state.setTaskSession);
 
   // --- Agent state ---

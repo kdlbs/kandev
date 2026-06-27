@@ -1,5 +1,8 @@
 import { renderHook } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { createElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { makeQueryClient } from "@/lib/query/client";
 import { sessionId as toSessionId, taskId as toTaskId, type TaskSession } from "@/lib/types/http";
 
 const mockSetTaskSession = vi.fn();
@@ -37,6 +40,15 @@ vi.mock("@/hooks/domains/session/use-session-changes-count", () => ({
   useSessionChangesCount: () => 0,
 }));
 
+vi.mock("@/hooks/domains/session/use-session", () => ({
+  useSession: (sessionId: string | null) => ({
+    session: sessionId ? (mockStoreState.taskSessions.items[sessionId] ?? null) : null,
+    isActive: false,
+    isFailed: false,
+    errorMessage: undefined,
+  }),
+}));
+
 vi.mock("@/lib/local-storage", () => ({
   getPlanLastSeen: () => null,
 }));
@@ -50,6 +62,13 @@ vi.mock("@/lib/session/is-passthrough-session", () => ({
 }));
 
 import { useSessionLayoutState } from "./use-session-layout-state";
+
+function renderLayoutHook(options?: Parameters<typeof useSessionLayoutState>[0]) {
+  const queryClient = makeQueryClient();
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client: queryClient }, children);
+  return renderHook(() => useSessionLayoutState(options), { wrapper });
+}
 
 const ACTIVE_TASK_ID = "task-active";
 const OTHER_TASK_ID = "task-other";
@@ -111,7 +130,7 @@ describe("useSessionLayoutState active session selection", () => {
       },
     });
 
-    const { result } = renderHook(() => useSessionLayoutState({ sessionId: ROUTE_SESSION_ID }));
+    const { result } = renderLayoutHook({ sessionId: ROUTE_SESSION_ID });
 
     expect(result.current.effectiveSessionId).toBe(ACTIVE_SESSION_ID);
   });
@@ -130,7 +149,7 @@ describe("useSessionLayoutState active session selection", () => {
       },
     });
 
-    const { result } = renderHook(() => useSessionLayoutState({ sessionId: ROUTE_SESSION_ID }));
+    const { result } = renderLayoutHook({ sessionId: ROUTE_SESSION_ID });
 
     expect(result.current.effectiveSessionId).toBe(ROUTE_SESSION_ID);
   });
@@ -149,7 +168,7 @@ describe("useSessionLayoutState active session selection", () => {
       },
     });
 
-    const { result } = renderHook(() => useSessionLayoutState());
+    const { result } = renderLayoutHook();
 
     expect(result.current.effectiveSessionId).toBeNull();
   });
@@ -168,7 +187,7 @@ describe("useSessionLayoutState active session selection", () => {
       },
     });
 
-    const { result } = renderHook(() => useSessionLayoutState());
+    const { result } = renderLayoutHook();
 
     expect(result.current.effectiveSessionId).toBeNull();
   });
@@ -189,7 +208,7 @@ describe("useSessionLayoutState rowless active sessions", () => {
       },
     });
 
-    const { result } = renderHook(() => useSessionLayoutState({ sessionId: ROUTE_SESSION_ID }));
+    const { result } = renderLayoutHook({ sessionId: ROUTE_SESSION_ID });
 
     expect(result.current.effectiveSessionId).toBe(ACTIVE_SESSION_ID);
   });
@@ -208,7 +227,7 @@ describe("useSessionLayoutState rowless active sessions", () => {
       },
     });
 
-    const { result } = renderHook(() => useSessionLayoutState({ sessionId: ROUTE_SESSION_ID }));
+    const { result } = renderLayoutHook({ sessionId: ROUTE_SESSION_ID });
 
     expect(result.current.effectiveSessionId).toBe(ROUTE_SESSION_ID);
   });
@@ -227,7 +246,7 @@ describe("useSessionLayoutState rowless active sessions", () => {
       },
     });
 
-    const { result } = renderHook(() => useSessionLayoutState({ sessionId: ROUTE_SESSION_ID }));
+    const { result } = renderLayoutHook({ sessionId: ROUTE_SESSION_ID });
 
     expect(result.current.effectiveSessionId).toBe(ROUTE_SESSION_ID);
   });
@@ -235,13 +254,13 @@ describe("useSessionLayoutState rowless active sessions", () => {
 
 describe("useSessionLayoutState fallback sessions", () => {
   it("uses the provided session when no active session exists", () => {
-    const { result } = renderHook(() => useSessionLayoutState({ sessionId: ROUTE_SESSION_ID }));
+    const { result } = renderLayoutHook({ sessionId: ROUTE_SESSION_ID });
 
     expect(result.current.effectiveSessionId).toBe(ROUTE_SESSION_ID);
   });
 
   it("returns null without an active or provided session", () => {
-    const { result } = renderHook(() => useSessionLayoutState());
+    const { result } = renderLayoutHook();
 
     expect(result.current.effectiveSessionId).toBeNull();
   });
