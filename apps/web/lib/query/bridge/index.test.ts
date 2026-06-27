@@ -275,14 +275,17 @@ describe("query bridge audit", () => {
     cleanup();
   });
 
-  it("patches task PR rows and workspace PR aggregates", () => {
+  it("patches task PR rows and invalidates workspace PR aggregates without cross-workspace writes", () => {
     const ws = new FakeWebSocketClient();
     const queryClient = makeQueryClient();
     const oldPr = taskPr();
     const updatedPr = taskPr({ pr_title: "Updated title", checks_state: "success" });
     const workspacePrsKey = qk.integrations.github.prs("workspace-1");
+    const otherWorkspacePrsKey = qk.integrations.github.prs("workspace-2");
+    const otherWorkspacePr = taskPr({ id: "task-pr-2", task_id: "task-2", pr_number: 99 });
     queryClient.setQueryData(qk.integrations.github.taskPr("task-1"), [oldPr]);
     queryClient.setQueryData(workspacePrsKey, { task_prs: { "task-1": [oldPr] } });
+    queryClient.setQueryData(otherWorkspacePrsKey, { task_prs: { "task-2": [otherWorkspacePr] } });
 
     const cleanup = registerBridge(ws, queryClient);
     ws.emit({
@@ -299,15 +302,20 @@ describe("query bridge audit", () => {
     ]);
     expect(queryClient.getQueryData(workspacePrsKey)).toEqual({
       task_prs: {
-        "task-1": [
-          expect.objectContaining({
-            checks_state: "success",
-            pr_title: "Updated title",
-          }),
-        ],
+        "task-1": [oldPr],
       },
     });
-    expect(queryClient.getQueryState(workspacePrsKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryData(otherWorkspacePrsKey)).toEqual({
+      task_prs: {
+        "task-2": [otherWorkspacePr],
+      },
+    });
+    expect(
+      queryClient.getQueryData<{ task_prs: Record<string, TaskPR[]> }>(otherWorkspacePrsKey)
+        ?.task_prs["task-1"],
+    ).toBeUndefined();
+    expect(queryClient.getQueryState(workspacePrsKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherWorkspacePrsKey)?.isInvalidated).toBe(true);
 
     cleanup();
   });

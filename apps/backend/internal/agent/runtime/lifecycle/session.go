@@ -767,9 +767,16 @@ func isSessionUnknownErr(err error) bool {
 
 func isAgentReportedSessionLoadMissingErr(message string) bool {
 	lower := strings.ToLower(message)
-	return strings.Contains(lower, "session not found") ||
+	hasMissingSessionSignal := strings.Contains(lower, "session not found") ||
 		strings.Contains(lower, "no such session") ||
 		strings.Contains(lower, "resource not found")
+	if !hasMissingSessionSignal {
+		return false
+	}
+	return strings.Contains(lower, "failed to load session") ||
+		strings.Contains(lower, "session/load") ||
+		strings.Contains(lower, "load session") ||
+		strings.Contains(lower, "session id")
 }
 
 func isAgentStreamNotConnectedErr(err error) bool {

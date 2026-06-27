@@ -372,9 +372,8 @@ func containsAction(items []string, want string) bool {
 func TestWaitForPromptDoneWrapsMissingSessionLoadAsExecutionNotFound(t *testing.T) {
 	tests := []string{
 		"failed to load session: session not found",
-		"session not found",
-		"no such session",
-		"Resource not found",
+		"session/load failed: no such session",
+		"failed to load session id session-1: Resource not found",
 	}
 	for _, message := range tests {
 		t.Run(message, func(t *testing.T) {
@@ -394,6 +393,35 @@ func TestWaitForPromptDoneWrapsMissingSessionLoadAsExecutionNotFound(t *testing.
 			}
 			if !errors.Is(err, ErrExecutionNotFound) {
 				t.Fatalf("expected ErrExecutionNotFound, got %v", err)
+			}
+		})
+	}
+}
+
+func TestWaitForPromptDoneDoesNotWrapUnrelatedNotFoundAgentErrors(t *testing.T) {
+	tests := []string{
+		"permission denied: resource not found",
+		"tool failed: no such session",
+		"session not found",
+	}
+	for _, message := range tests {
+		t.Run(message, func(t *testing.T) {
+			sm := NewSessionManager(newSessionTestLogger(), newTestStopCh(t))
+			execution := &AgentExecution{
+				ID:           "exec-1",
+				promptDoneCh: make(chan PromptCompletionSignal, 1),
+			}
+			execution.promptDoneCh <- PromptCompletionSignal{
+				IsError: true,
+				Error:   message,
+			}
+
+			_, err := sm.waitForPromptDone(context.Background(), execution)
+			if !errors.Is(err, ErrAgentReported) {
+				t.Fatalf("expected ErrAgentReported, got %v", err)
+			}
+			if errors.Is(err, ErrExecutionNotFound) {
+				t.Fatalf("expected unrelated agent error, got ErrExecutionNotFound: %v", err)
 			}
 		})
 	}
