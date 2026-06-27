@@ -452,6 +452,47 @@ func TestReuseExistingEnvironment_SingleRepoDoesNotFallBackToWrongScopedEnvWorkt
 	}
 }
 
+func TestReuseExistingEnvironment_SingleRepoIgnoresEmptySessionBranchWhenEnvIsScoped(t *testing.T) {
+	repo := newMockRepository()
+	taskID := "task-single-empty-session-branch"
+	envID := "env-single-empty-session-branch"
+	now := time.Now().UTC()
+	repo.sessions["session-prev"] = &models.TaskSession{
+		ID:                "session-prev",
+		TaskID:            taskID,
+		TaskEnvironmentID: envID,
+		StartedAt:         now.Add(-time.Minute),
+		UpdatedAt:         now.Add(-time.Minute),
+	}
+	repo.sessionWorktrees = append(repo.sessionWorktrees, &models.TaskSessionWorktree{
+		SessionID:    "session-prev",
+		RepositoryID: "repo-kandev",
+		BranchSlug:   "",
+		WorktreeID:   "wt-stale-empty-branch",
+	})
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{
+		TaskID:       taskID,
+		RepositoryID: "repo-kandev",
+		BaseBranch:   "feature-x",
+		UseWorktree:  true,
+	}
+	env := &models.TaskEnvironment{
+		ID:           envID,
+		RepositoryID: "repo-kandev",
+		WorktreeID:   "wt-main",
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-kandev", BranchSlug: "main", WorktreeID: "wt-main"},
+		},
+	}
+
+	exec.reuseExistingEnvironment(context.Background(), req, env)
+
+	if req.WorktreeID != "" {
+		t.Fatalf("top-level WorktreeID = %q, want no empty-branch session fallback", req.WorktreeID)
+	}
+}
+
 func TestLaunchPreparedSession_MultiBranch_ReusesWorktreeIDsByBranchSlug(t *testing.T) {
 	repo := newMockRepository()
 	taskID := "task-multi-branch-reuse"

@@ -47,7 +47,7 @@ func (e *Executor) reuseExistingEnvironment(ctx context.Context, req *LaunchAgen
 	if req.UseWorktree {
 		e.reuseExistingRepositoryWorktrees(ctx, req, env)
 	}
-	if req.WorktreeID == "" && env.WorktreeID != "" && req.UseWorktree && !hasEnvironmentRepoWorktrees(env) {
+	if req.WorktreeID == "" && env.WorktreeID != "" && req.UseWorktree && !hasBranchScopedEnvironmentWorktrees(env) {
 		req.WorktreeID = env.WorktreeID
 		e.logger.Info("reusing existing task environment worktree",
 			zap.String("task_id", req.TaskID),
@@ -114,6 +114,7 @@ func (e *Executor) reuseExistingRepositoryWorktrees(ctx context.Context, req *La
 		return
 	}
 
+	allowLegacyEmptyBranchFallback := !hasBranchScopedEnvironmentWorktrees(env)
 	for i := range repoSpecs {
 		spec := &repoSpecs[i]
 		key := repositoryWorktreeKey{
@@ -124,7 +125,7 @@ func (e *Executor) reuseExistingRepositoryWorktrees(ctx context.Context, req *La
 			spec.WorktreeID = id
 			continue
 		}
-		if spec.BranchSlug == "" {
+		if spec.BranchSlug == "" && allowLegacyEmptyBranchFallback {
 			legacyKey := repositoryWorktreeKey{
 				repositoryID: spec.RepositoryID,
 				branchSlug:   "",
@@ -173,7 +174,7 @@ func launchRepoBranchIdentitySlug(spec RepoSpec) string {
 
 func (e *Executor) environmentRepoWorktreeIDs(req *LaunchAgentRequest, env *models.TaskEnvironment) map[repositoryWorktreeKey]string {
 	result := make(map[repositoryWorktreeKey]string)
-	if env.WorktreeID != "" && !hasEnvironmentRepoWorktrees(env) {
+	if env.WorktreeID != "" && !hasBranchScopedEnvironmentWorktrees(env) {
 		repoID := env.RepositoryID
 		if repoID == "" {
 			repoID = req.RepositoryID
@@ -197,9 +198,9 @@ func (e *Executor) environmentRepoWorktreeIDs(req *LaunchAgentRequest, env *mode
 	return result
 }
 
-func hasEnvironmentRepoWorktrees(env *models.TaskEnvironment) bool {
+func hasBranchScopedEnvironmentWorktrees(env *models.TaskEnvironment) bool {
 	for _, repo := range env.Repos {
-		if repo.RepositoryID != "" && repo.WorktreeID != "" {
+		if repo.RepositoryID != "" && repo.WorktreeID != "" && worktree.SanitizeBranchSlug(repo.BranchSlug) != "" {
 			return true
 		}
 	}
