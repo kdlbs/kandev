@@ -127,6 +127,33 @@ describe("useTaskSessions", () => {
     ]);
   });
 
+  it("runs a forced foreground refetch after an older request finishes", async () => {
+    mockState.taskSessionsByTask.itemsByTaskId[TASK_ID] = [session("old", "RUNNING")];
+    mockState.taskSessionsByTask.loadedByTaskId[TASK_ID] = true;
+    mockState.taskSessionsByTask.loadingByTaskId[TASK_ID] = true;
+    apiMock.listTaskSessions.mockResolvedValueOnce({ sessions: [session("old", "COMPLETED")] });
+
+    const { rerender } = renderHook(() => useTaskSessions(TASK_ID));
+    await act(async () => {});
+    document.dispatchEvent(new Event("visibilitychange"));
+    await act(async () => {});
+    expect(apiMock.listTaskSessions).not.toHaveBeenCalled();
+
+    mockState.taskSessionsByTask.loadingByTaskId[TASK_ID] = false;
+    await act(async () => {
+      rerender();
+    });
+
+    await waitFor(() =>
+      expect(apiMock.listTaskSessions).toHaveBeenCalledWith(TASK_ID, {
+        cache: "no-store",
+      }),
+    );
+    expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, [
+      session("old", "COMPLETED"),
+    ]);
+  });
+
   it("does not refetch a loaded session list on foreground visibility while disconnected", async () => {
     mockState.connection.status = "disconnected";
     mockState.taskSessionsByTask.itemsByTaskId[TASK_ID] = [session("old", "RUNNING")];
