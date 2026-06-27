@@ -40,6 +40,7 @@ type repoInfo struct {
 	BaseBranch           string
 	CheckoutBranch       string
 	PRNumber             int // GitHub PR number when CheckoutBranch is a PR head; sourced from task_repositories.metadata["pr_number"].
+	Position             int
 	WorktreeBranchPrefix string
 	PullBeforeWorktree   bool
 	Repository           *models.Repository
@@ -95,6 +96,7 @@ func (e *Executor) resolveTaskRepoInfo(ctx context.Context, tr *models.TaskRepos
 		BaseBranch:     tr.BaseBranch,
 		CheckoutBranch: tr.CheckoutBranch,
 		PRNumber:       prNumberFromMetadata(tr.Metadata),
+		Position:       tr.Position,
 	}
 	if info.RepositoryID == "" {
 		return info, nil
@@ -276,6 +278,7 @@ func (e *Executor) persistWorktreeAssociation(ctx context.Context, taskID string
 				SessionID:      session.ID,
 				WorktreeID:     w.WorktreeID,
 				RepositoryID:   w.RepositoryID,
+				BranchSlug:     w.BranchSlug,
 				Position:       i,
 				WorktreePath:   w.WorktreePath,
 				WorktreeBranch: w.WorktreeBranch,

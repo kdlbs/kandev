@@ -272,6 +272,26 @@ func TestTaskToAPIWithEmptyOptionalFields(t *testing.T) {
 	}
 }
 
+func TestTaskEnvironmentRepoToAPIIncludesBranchSlug(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &TaskEnvironmentRepo{
+		ID:                "ter-1",
+		TaskEnvironmentID: "env-1",
+		RepositoryID:      "repo-1",
+		BranchSlug:        "branch-5hn",
+		WorktreeID:        "wt-1",
+		Position:          1,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}
+
+	api := repo.ToAPI()
+
+	if api["branch_slug"] != "branch-5hn" {
+		t.Fatalf("branch_slug = %v, want branch-5hn", api["branch_slug"])
+	}
+}
+
 // TestTaskIsFromOfficeField verifies the IsFromOffice field round-trips
 // through the model. The actual office-vs-kanban predicate is computed in
 // SQL by isFromOfficeProjection (see repository/sqlite/task.go) so the

@@ -23,6 +23,49 @@ func TestCollectBaseBranches_MultiRepo(t *testing.T) {
 	}
 }
 
+func TestCollectBaseBranches_MultiBranchKeysUseWorktreeSubpath(t *testing.T) {
+	req := &LaunchRequest{
+		Repositories: []RepoLaunchSpec{
+			{RepoName: "kandev", BaseBranch: "main"},
+			{RepoName: "kandev", BranchSlug: "feature-x", BaseBranch: "feature/x"},
+		},
+	}
+	got := collectBaseBranches(req)
+	want := map[string]string{"kandev": "main", "kandev-feature-x": "feature/x"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("collectBaseBranches = %v, want %v", got, want)
+	}
+}
+
+func TestBaseBranchMetadataKey_FallsBackToRawRepoNameWhenSanitizedEmpty(t *testing.T) {
+	spec := RepoLaunchSpec{RepoName: "/", BaseBranch: "main"}
+	if got := baseBranchMetadataKey(spec); got != "/" {
+		t.Fatalf("baseBranchMetadataKey = %q, want raw repo name", got)
+	}
+	req := &LaunchRequest{
+		Repositories: []RepoLaunchSpec{spec},
+	}
+	got := collectBaseBranches(req)
+	want := map[string]string{"/": "main"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("collectBaseBranches = %v, want %v", got, want)
+	}
+}
+
+func TestCollectBaseBranches_SkipsMalformedEmptyRepoSpec(t *testing.T) {
+	req := &LaunchRequest{
+		BaseBranch: "legacy-main",
+		Repositories: []RepoLaunchSpec{
+			{BaseBranch: "malformed-main"},
+		},
+	}
+	got := collectBaseBranches(req)
+	want := map[string]string{"": "legacy-main"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("collectBaseBranches = %v, want %v", got, want)
+	}
+}
+
 // TestCollectBaseBranches_SingleRepoLegacyKey verifies the synthesized
 // single-repo path: when only top-level BaseBranch is set, it lands under the
 // empty key so the root WorkspaceTracker (repositoryName == "") finds it.

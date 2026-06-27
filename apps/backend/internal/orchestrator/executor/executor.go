@@ -40,6 +40,7 @@ type executorStore interface {
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	// Session worktree
 	CreateTaskSessionWorktree(ctx context.Context, sessionWorktree *models.TaskSessionWorktree) error
+	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error)
 	// Repository entity
 	GetRepository(ctx context.Context, id string) (*models.Repository, error)
 	// Executor
@@ -59,6 +60,7 @@ type executorStore interface {
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	CreateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error
 	ListTaskEnvironmentRepos(ctx context.Context, envID string) ([]*models.TaskEnvironmentRepo, error)
+	UpdateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error
 	// Session history + plan (for context handover)
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
@@ -311,6 +313,11 @@ type LaunchAgentRequest struct {
 	// Task directory mode: place worktree at ~/.kandev/tasks/{TaskDirName}/{RepoName}/
 	TaskDirName string // Semantic task directory name (e.g. "fix-bug_ab12")
 	RepoName    string // Repository name used as subdirectory inside the task directory
+	// BranchSlug, when non-empty, suffixes the top-level single-repo path.
+	BranchSlug string
+	// BranchIdentitySlug is the stable branch key for top-level single-repo
+	// reuse. It may be non-empty when BranchSlug is empty to preserve a flat path.
+	BranchIdentitySlug string
 
 	// Repositories carries one entry per repository when the launch is multi-repo.
 	// When non-empty it is the source of truth and the legacy single-repo
@@ -343,11 +350,16 @@ type RepoSpec struct {
 	RepoSetupScript      string
 	RepoCleanupScript    string
 	CopyFiles            string
-	// BranchSlug, when non-empty, nests the worktree under the repo dir so
-	// the same repo can host multiple branches within one task. Set by the
+	// BranchSlug, when non-empty, suffixes the repo dir so the same repo can
+	// host multiple branch worktrees as siblings within one task. Set by the
 	// orchestrator when buildRepoSpecs detects multiple rows sharing a
 	// RepositoryID; empty otherwise to preserve the single-branch layout.
 	BranchSlug string
+
+	// BranchIdentitySlug is the stable branch key used for worktree reuse and
+	// persisted environment metadata. It may be non-empty even when BranchSlug
+	// is empty so the primary branch can keep the legacy flat path.
+	BranchIdentitySlug string
 }
 
 // McpModeConfig activates config-mode MCP tools (workflow steps, agents, MCP
@@ -424,6 +436,7 @@ type LaunchAgentResponse struct {
 // API surface. One entry per repository prepared during a multi-repo launch.
 type RepoWorktreeResult struct {
 	RepositoryID   string
+	BranchSlug     string
 	WorktreeID     string
 	WorktreeBranch string
 	WorktreePath   string

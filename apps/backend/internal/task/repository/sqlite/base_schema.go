@@ -578,6 +578,7 @@ const sessionWorktreeSchemaDDL = `
 		id TEXT PRIMARY KEY,
 		task_environment_id TEXT NOT NULL,
 		repository_id TEXT NOT NULL,
+		branch_slug TEXT NOT NULL DEFAULT '',
 		worktree_id TEXT DEFAULT '',
 		worktree_path TEXT DEFAULT '',
 		worktree_branch TEXT DEFAULT '',
@@ -586,7 +587,7 @@ const sessionWorktreeSchemaDDL = `
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (task_environment_id) REFERENCES task_environments(id) ON DELETE CASCADE,
-		UNIQUE(task_environment_id, repository_id)
+		UNIQUE(task_environment_id, repository_id, branch_slug)
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_task_environment_repos_env_id ON task_environment_repos(task_environment_id);
@@ -597,6 +598,7 @@ const sessionWorktreeSchemaDDL = `
 		session_id TEXT NOT NULL,
 		worktree_id TEXT NOT NULL,
 		repository_id TEXT NOT NULL,
+		branch_slug TEXT NOT NULL DEFAULT '',
 		position INTEGER DEFAULT 0,
 		worktree_path TEXT DEFAULT '',
 		worktree_branch TEXT DEFAULT '',

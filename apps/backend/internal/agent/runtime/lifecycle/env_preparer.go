@@ -38,9 +38,14 @@ type RepoPrepareSpec struct {
 	WorktreeBranchPrefix string
 	PullBeforeWorktree   bool
 	RepoSetupScript      string
-	// BranchSlug, when set, nests the worktree path under {RepoName}/{BranchSlug}/
-	// so two specs sharing a RepositoryID don't collide on disk.
+	// BranchSlug, when set, suffixes the worktree path as
+	// {RepoName}-{BranchSlug} so two specs sharing a RepositoryID don't collide
+	// on disk.
 	BranchSlug string
+	// BranchIdentitySlug is the stable branch key used for worktree reuse and
+	// persisted environment metadata. It may be non-empty even when BranchSlug
+	// is empty so primary branches can keep the flat legacy path.
+	BranchIdentitySlug string
 }
 
 // EnvPrepareRequest contains the parameters for environment preparation.
@@ -68,7 +73,11 @@ type EnvPrepareRequest struct {
 
 	TaskDirName string // Per-task directory name within the workspace (e.g. "task-abc123")
 	RepoName    string // Repository slug used with TaskDirName to locate checkouts
-	BranchSlug  string // Optional branch subdir for multi-branch tasks (legacy single-repo path)
+	BranchSlug  string // Optional branch directory suffix for multi-branch tasks
+	// BranchIdentitySlug is the stable branch key for worktree cache/persistence.
+	// It may be non-empty when BranchSlug is empty to preserve a flat path.
+	// Empty leaves the synthesized spec identity empty; worktree code falls back.
+	BranchIdentitySlug string
 
 	// Repositories carries one entry per repository when the request is
 	// multi-repo. When non-empty it is the source of truth; the legacy
@@ -104,6 +113,7 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 		PullBeforeWorktree:   r.PullBeforeWorktree,
 		RepoSetupScript:      r.RepoSetupScript,
 		BranchSlug:           r.BranchSlug,
+		BranchIdentitySlug:   r.BranchIdentitySlug,
 	}}
 }
 
@@ -125,6 +135,7 @@ type PrepareStep struct {
 // to one RepoPrepareSpec from the request.
 type RepoWorktreeResult struct {
 	RepositoryID   string `json:"repository_id"`
+	BranchSlug     string `json:"branch_slug,omitempty"`
 	WorktreeID     string `json:"worktree_id,omitempty"`
 	WorktreeBranch string `json:"worktree_branch,omitempty"`
 	WorktreePath   string `json:"worktree_path,omitempty"`

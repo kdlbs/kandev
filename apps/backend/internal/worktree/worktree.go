@@ -185,6 +185,11 @@ type CreateRequest struct {
 	// derive a deterministic, filesystem-safe slug (see SanitizeBranchSlug).
 	BranchSlug string
 
+	// BranchIdentitySlug, when non-empty, is the stable branch key used for
+	// reuse lookup, cache keys, and persisted task_session_worktrees rows. It
+	// may differ from BranchSlug when the primary branch keeps the flat path.
+	BranchIdentitySlug string
+
 	// OnSyncProgress receives progress updates for pre-worktree branch sync.
 	OnSyncProgress SyncProgressCallback
 

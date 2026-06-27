@@ -642,6 +642,7 @@ type TaskSessionWorktree struct {
 	SessionID    string    `json:"session_id"`
 	WorktreeID   string    `json:"worktree_id"`
 	RepositoryID string    `json:"repository_id"`
+	BranchSlug   string    `json:"branch_slug,omitempty"`
 	Position     int       `json:"position"`
 	CreatedAt    time.Time `json:"created_at"`
 
@@ -1025,6 +1026,7 @@ type TaskEnvironmentRepo struct {
 	ID                string    `json:"id"`
 	TaskEnvironmentID string    `json:"task_environment_id"`
 	RepositoryID      string    `json:"repository_id"`
+	BranchSlug        string    `json:"branch_slug,omitempty"`
 	WorktreeID        string    `json:"worktree_id,omitempty"`
 	WorktreePath      string    `json:"worktree_path,omitempty"`
 	WorktreeBranch    string    `json:"worktree_branch,omitempty"`
@@ -1092,6 +1094,9 @@ func (r *TaskEnvironmentRepo) ToAPI() map[string]interface{} {
 	}
 	if r.WorktreeID != "" {
 		out["worktree_id"] = r.WorktreeID
+	}
+	if r.BranchSlug != "" {
+		out["branch_slug"] = r.BranchSlug
 	}
 	if r.WorktreePath != "" {
 		out["worktree_path"] = r.WorktreePath

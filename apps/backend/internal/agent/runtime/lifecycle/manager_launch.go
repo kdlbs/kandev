@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 // resolveAgentProfile resolves the agent profile and returns the agent type name and profile info.
@@ -155,7 +156,9 @@ func collectBaseBranches(req *LaunchRequest) map[string]string {
 		if spec.BaseBranch == "" {
 			continue
 		}
-		out[spec.RepoName] = spec.BaseBranch
+		if key := baseBranchMetadataKey(spec); key != "" {
+			out[key] = spec.BaseBranch
+		}
 	}
 	if req.BaseBranch != "" {
 		if _, ok := out[""]; !ok {
@@ -166,6 +169,18 @@ func collectBaseBranches(req *LaunchRequest) map[string]string {
 		return nil
 	}
 	return out
+}
+
+func baseBranchMetadataKey(spec RepoLaunchSpec) string {
+	repoName := worktree.SanitizeRepoDirName(spec.RepoName)
+	if repoName == "" {
+		repoName = spec.RepoName
+	}
+	branchSlug := worktree.SanitizeBranchSlug(spec.BranchSlug)
+	if branchSlug == "" {
+		return repoName
+	}
+	return repoName + "-" + branchSlug
 }
 
 // agentCommands holds the initial and continue command strings for an agent execution.
@@ -645,6 +660,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		TaskDirName:          req.TaskDirName,
 		RepoName:             req.RepoName,
 		BranchSlug:           req.BranchSlug,
+		BranchIdentitySlug:   req.BranchIdentitySlug,
 		Env:                  req.Env,
 	}
 	// Multi-repo: forward the repo list when the launch request carries one.
@@ -670,6 +686,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				PullBeforeWorktree:   r.PullBeforeWorktree,
 				RepoSetupScript:      setup,
 				BranchSlug:           r.BranchSlug,
+				BranchIdentitySlug:   r.BranchIdentitySlug,
 			})
 		}
 		prepReq.Repositories = specs

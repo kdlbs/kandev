@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -706,20 +708,14 @@ func (e *Executor) applyContainerCredentials(ctx context.Context, req *LaunchAge
 
 // buildRepoSpecs converts resolved repoInfos into per-repo launch specs for
 // the lifecycle layer. Used only when the task has more than one repository.
-// When the same RepositoryID appears more than once, the FIRST occurrence
-// keeps the flat layout (<task>/<repo>/) and subsequent occurrences nest
-// under <task>/<repo>/<branch-slug>/. This preserves the legacy single-
-// branch path for any worktree that already exists on disk, so a task
-// upgraded from single-branch to multi-branch doesn't orphan its primary
-// worktree directory.
+// When the same RepositoryID appears more than once, each row gets a stable
+// BranchIdentitySlug for reuse while the lowest-position branch keeps the flat
+// layout (<task>/<repo>/). Other branches use sibling directories like
+// <task>/<repo>-<branch-slug>/.
+// This preserves the legacy single-branch path when a task later gains another
+// branch of the same repository.
 func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
-	repoCounts := make(map[string]int, len(allRepos))
-	for _, info := range allRepos {
-		if info.RepositoryID != "" {
-			repoCounts[info.RepositoryID]++
-		}
-	}
-	seenCount := make(map[string]int, len(allRepos))
+	branchPlans := buildRepoBranchPlans(allRepos)
 	out := make([]RepoSpec, 0, len(allRepos))
 	for _, info := range allRepos {
 		spec := RepoSpec{
@@ -745,24 +741,129 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 				spec.RepositoryURL = u
 			}
 		}
-		if repoCounts[info.RepositoryID] > 1 && seenCount[info.RepositoryID] > 0 {
-			slug := worktree.SanitizeBranchSlug(info.CheckoutBranch)
-			if slug == "" {
-				slug = worktree.SanitizeBranchSlug(info.BaseBranch)
-			}
-			// Branches whose names sanitize to "" (or two duplicate rows
-			// without explicit branch names) would otherwise collapse onto
-			// the same on-disk path as the first row. Fall back to a
-			// position-derived slug so siblings get distinct directories.
-			if slug == "" {
-				slug = fmt.Sprintf("branch-%d", seenCount[info.RepositoryID]+1)
-			}
-			spec.BranchSlug = slug
+		if plan, ok := branchPlans[info]; ok {
+			spec.BranchIdentitySlug = plan.identitySlug
+			spec.BranchSlug = plan.pathSlug
 		}
-		seenCount[info.RepositoryID]++
 		out = append(out, spec)
 	}
 	return out
+}
+
+type repoBranchPlan struct {
+	identitySlug string
+	pathSlug     string
+}
+
+func buildRepoBranchPlans(allRepos []*repoInfo) map[*repoInfo]repoBranchPlan {
+	groups := make(map[string][]*repoInfo, len(allRepos))
+	for _, info := range allRepos {
+		if info == nil || info.RepositoryID == "" {
+			continue
+		}
+		groups[info.RepositoryID] = append(groups[info.RepositoryID], info)
+	}
+
+	plans := make(map[*repoInfo]repoBranchPlan, len(allRepos))
+	for repoID, group := range groups {
+		identities := branchIdentitySlugsForGroup(repoID, group)
+		if len(group) < 2 {
+			for _, info := range group {
+				plans[info] = repoBranchPlan{identitySlug: identities[info]}
+			}
+			continue
+		}
+		flatIdentity := selectFlatBranchIdentity(group, identities)
+		for _, info := range group {
+			identity := identities[info]
+			pathSlug := identity
+			if identity == flatIdentity {
+				pathSlug = ""
+			}
+			plans[info] = repoBranchPlan{identitySlug: identity, pathSlug: pathSlug}
+		}
+	}
+	return plans
+}
+
+func branchIdentitySlugsForGroup(repoID string, group []*repoInfo) map[*repoInfo]string {
+	raw := make(map[*repoInfo]string, len(group))
+	counts := make(map[string]int, len(group))
+	for _, info := range group {
+		slug := preferredBranchIdentitySlug(info)
+		if slug == "" {
+			slug = "branch-" + branchIdentityHash(repoID, info)
+		}
+		raw[info] = slug
+		counts[slug]++
+	}
+
+	out := make(map[*repoInfo]string, len(group))
+	for _, info := range group {
+		slug := raw[info]
+		if counts[slug] > 1 {
+			slug += "-" + branchIdentityHash(repoID, info)
+		}
+		slug = worktree.SanitizeBranchSlug(slug)
+		if slug == "" {
+			slug = "branch-" + branchIdentityHash(repoID, info)
+		}
+		out[info] = slug
+	}
+	return out
+}
+
+func preferredBranchIdentitySlug(info *repoInfo) string {
+	branch := info.CheckoutBranch
+	if branch == "" {
+		branch = info.BaseBranch
+	}
+	if branch == "" && info.Repository != nil {
+		branch = info.Repository.DefaultBranch
+	}
+	return worktree.SanitizeBranchSlug(branch)
+}
+
+func branchIdentityHash(repoID string, info *repoInfo) string {
+	seed := strings.Join([]string{
+		repoID,
+		info.BaseBranch,
+		info.CheckoutBranch,
+		fmt.Sprintf("%d", info.PRNumber),
+	}, "\x00")
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(seed))
+	return fmt.Sprintf("%08x", h.Sum32())
+}
+
+func selectFlatBranchIdentity(group []*repoInfo, identities map[*repoInfo]string) string {
+	candidates := make([]*repoInfo, 0, len(group))
+	candidates = append(candidates, group...)
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].Position != candidates[j].Position {
+			return candidates[i].Position < candidates[j].Position
+		}
+		leftRank := flatBranchRank(candidates[i])
+		rightRank := flatBranchRank(candidates[j])
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
+		return identities[candidates[i]] < identities[candidates[j]]
+	})
+	return identities[candidates[0]]
+}
+
+func flatBranchRank(info *repoInfo) int {
+	if info.CheckoutBranch != "" {
+		return 3
+	}
+	if info.Repository != nil && info.Repository.DefaultBranch != "" && info.BaseBranch == info.Repository.DefaultBranch {
+		return 0
+	}
+	if info.BaseBranch == defaultBaseBranch {
+		return 1
+	}
+	return 2
 }
 
 // applyRepositoryConfig sets repository-related fields on the request and resolves clone URLs.
@@ -1155,6 +1256,7 @@ func buildTaskEnvironmentRepos(worktrees []RepoWorktreeResult) []*models.TaskEnv
 	for i, w := range worktrees {
 		out = append(out, &models.TaskEnvironmentRepo{
 			RepositoryID:   w.RepositoryID,
+			BranchSlug:     w.BranchSlug,
 			WorktreeID:     w.WorktreeID,
 			WorktreePath:   w.WorktreePath,
 			WorktreeBranch: w.WorktreeBranch,
@@ -1165,9 +1267,10 @@ func buildTaskEnvironmentRepos(worktrees []RepoWorktreeResult) []*models.TaskEnv
 	return out
 }
 
-// persistTaskEnvironmentRepos inserts per-repo rows under an existing env id,
-// skipping any (env, repo) pair that already exists. Used when an existing
-// environment is reused (resume / re-launch on the same task).
+// persistTaskEnvironmentRepos upserts per-repo rows under an existing env id.
+// Used when an existing environment is reused (resume / re-launch on the same
+// task), including cases where stale or legacy rows need the successful launch
+// result written back for the next handoff.
 func (e *Executor) persistTaskEnvironmentRepos(ctx context.Context, envID string, worktrees []RepoWorktreeResult) {
 	if envID == "" || len(worktrees) == 0 {
 		return
@@ -1179,17 +1282,36 @@ func (e *Executor) persistTaskEnvironmentRepos(ctx context.Context, envID string
 			zap.Error(err))
 		return
 	}
-	have := make(map[string]bool, len(existing))
+	byKey := make(map[string]*models.TaskEnvironmentRepo, len(existing))
+	legacyFlatByRepo := make(map[string]*models.TaskEnvironmentRepo)
 	for _, row := range existing {
-		have[row.RepositoryID] = true
+		key := row.RepositoryID + "\x00" + row.BranchSlug
+		byKey[key] = row
+		if row.RepositoryID != "" && row.BranchSlug == "" {
+			legacyFlatByRepo[row.RepositoryID] = row
+		}
 	}
 	for i, w := range worktrees {
-		if w.RepositoryID == "" || have[w.RepositoryID] {
+		if w.RepositoryID == "" {
 			continue
+		}
+		key := w.RepositoryID + "\x00" + w.BranchSlug
+		if row := byKey[key]; row != nil {
+			e.refreshTaskEnvironmentRepo(ctx, row, w, i)
+			continue
+		}
+		if w.BranchSlug != "" {
+			if row := legacyFlatByRepo[w.RepositoryID]; row != nil {
+				e.refreshTaskEnvironmentRepo(ctx, row, w, i)
+				delete(legacyFlatByRepo, w.RepositoryID)
+				byKey[key] = row
+				continue
+			}
 		}
 		row := &models.TaskEnvironmentRepo{
 			TaskEnvironmentID: envID,
 			RepositoryID:      w.RepositoryID,
+			BranchSlug:        w.BranchSlug,
 			WorktreeID:        w.WorktreeID,
 			WorktreePath:      w.WorktreePath,
 			WorktreeBranch:    w.WorktreeBranch,
@@ -1203,6 +1325,34 @@ func (e *Executor) persistTaskEnvironmentRepos(ctx context.Context, envID string
 				zap.Error(createErr))
 		}
 	}
+}
+
+func (e *Executor) refreshTaskEnvironmentRepo(ctx context.Context, row *models.TaskEnvironmentRepo, w RepoWorktreeResult, position int) {
+	if !taskEnvironmentRepoNeedsRefresh(row, w, position) {
+		return
+	}
+	row.BranchSlug = w.BranchSlug
+	row.WorktreeID = w.WorktreeID
+	row.WorktreePath = w.WorktreePath
+	row.WorktreeBranch = w.WorktreeBranch
+	row.Position = position
+	row.ErrorMessage = w.ErrorMessage
+	if err := e.repo.UpdateTaskEnvironmentRepo(ctx, row); err != nil {
+		e.logger.Warn("failed to update task environment repo",
+			zap.String("env_id", row.TaskEnvironmentID),
+			zap.String("repository_id", row.RepositoryID),
+			zap.String("branch_slug", row.BranchSlug),
+			zap.Error(err))
+	}
+}
+
+func taskEnvironmentRepoNeedsRefresh(row *models.TaskEnvironmentRepo, w RepoWorktreeResult, position int) bool {
+	return row.BranchSlug != w.BranchSlug ||
+		row.WorktreeID != w.WorktreeID ||
+		row.WorktreePath != w.WorktreePath ||
+		row.WorktreeBranch != w.WorktreeBranch ||
+		row.Position != position ||
+		row.ErrorMessage != w.ErrorMessage
 }
 
 // extractSandboxID extracts the sandbox identifier from launch response metadata.
