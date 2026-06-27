@@ -7,14 +7,24 @@ import { removeRecentTask } from "@/lib/recent-tasks";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { toKanbanTask, type TaskLike } from "@/lib/kanban/map-task";
 import { sessionId as toSessionId } from "@/lib/types/http";
+import { mergeTaskRepositoryFields } from "@/lib/ws/handlers/task-repositories";
 
 type KanbanTask = KanbanState["tasks"][number];
 
+function mergeTaskUpdate(existing: KanbanTask | undefined, nextTask: KanbanTask): KanbanTask {
+  if (!existing) return nextTask;
+  return {
+    ...nextTask,
+    ...mergeTaskRepositoryFields(existing, nextTask),
+  };
+}
+
 function upsertTask(tasks: KanbanTask[], nextTask: KanbanTask): KanbanTask[] {
-  const exists = tasks.some((task) => task.id === nextTask.id);
-  return exists
-    ? tasks.map((task) => (task.id === nextTask.id ? nextTask : task))
-    : [...tasks, nextTask];
+  const existing = tasks.find((task) => task.id === nextTask.id);
+  const merged = mergeTaskUpdate(existing, nextTask);
+  return existing
+    ? tasks.map((task) => (task.id === nextTask.id ? merged : task))
+    : [...tasks, merged];
 }
 
 function upsertMultiTask(state: AppState, workflowId: string, task: KanbanTask): AppState {

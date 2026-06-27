@@ -63,10 +63,11 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 	// carries the full per-task repository list — matching the HTTP DTO and
 	// preventing the frontend from collapsing multi-repo tasks down to the
 	// primary repo on WS updates.
-	repos := taskRepositoriesForEvent(ctx, s, task)
-	if len(repos) > 0 {
-		data["repository_id"] = repos[0].RepositoryID
+	if repos, ok := taskRepositoriesForEvent(ctx, s, task); ok {
 		data["repositories"] = serializeTaskRepositories(repos)
+		if len(repos) > 0 {
+			data["repository_id"] = repos[0].RepositoryID
+		}
 	}
 	if task.Metadata != nil {
 		data["metadata"] = task.Metadata
@@ -135,15 +136,15 @@ func (s *Service) addTaskSessionEventFields(ctx context.Context, taskID string, 
 // position. Prefers Task.Repositories when already loaded; falls back to a
 // lookup so publishers that pass a task without eagerly loaded repositories
 // (e.g. the orchestrator's raw repo.GetTask) still emit per-repo data.
-func taskRepositoriesForEvent(ctx context.Context, s *Service, task *models.Task) []*models.TaskRepository {
+func taskRepositoriesForEvent(ctx context.Context, s *Service, task *models.Task) ([]*models.TaskRepository, bool) {
 	if len(task.Repositories) > 0 {
-		return task.Repositories
+		return task.Repositories, true
 	}
 	repos, err := s.taskRepos.ListTaskRepositories(ctx, task.ID)
 	if err != nil {
-		return nil
+		return nil, false
 	}
-	return repos
+	return repos, true
 }
 
 // serializeTaskRepositories returns the WS-shaped repositories array. Mirrors
