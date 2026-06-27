@@ -133,10 +133,12 @@ describe("useTaskSessions refreshes", () => {
   });
 
   it("preserves a loaded session list when a reconnect refetch fails", async () => {
+    const error = new Error("network down");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     mockState.connection.status = "disconnected";
     mockState.taskSessionsByTask.itemsByTaskId[TASK_ID] = [session("old", "RUNNING")];
     mockState.taskSessionsByTask.loadedByTaskId[TASK_ID] = true;
-    apiMock.listTaskSessions.mockRejectedValueOnce(new Error("network down"));
+    apiMock.listTaskSessions.mockRejectedValueOnce(error);
 
     const { rerender } = renderHook(() => useTaskSessions(TASK_ID));
     await act(async () => {});
@@ -150,6 +152,7 @@ describe("useTaskSessions refreshes", () => {
       }),
     );
     expect(mockState.setTaskSessionsForTask).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith("Failed to load task sessions:", error);
   });
 });
 
