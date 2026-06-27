@@ -72,7 +72,20 @@ describe("useTaskSessions", () => {
     vi.clearAllMocks();
   });
 
-  it("loads sessions on mount once connected", async () => {
+  it("loads sessions on mount", async () => {
+    renderHook(() => useTaskSessions(TASK_ID));
+
+    await waitFor(() =>
+      expect(apiMock.listTaskSessions).toHaveBeenCalledWith(TASK_ID, {
+        cache: "no-store",
+      }),
+    );
+    expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, [session("sess-1")]);
+  });
+
+  it("loads sessions on mount when the WebSocket is disconnected", async () => {
+    mockState.connection.status = "disconnected";
+
     renderHook(() => useTaskSessions(TASK_ID));
 
     await waitFor(() =>

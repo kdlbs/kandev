@@ -44,10 +44,9 @@ export function useTaskSessions(taskId: string | null) {
 
   useEffect(() => {
     if (!taskId) return;
-    if (connectionStatus !== "connected") return;
     if (isLoaded || isLoading) return;
     loadSessions();
-  }, [connectionStatus, isLoaded, isLoading, loadSessions, taskId]);
+  }, [isLoaded, isLoading, loadSessions, taskId]);
 
   useEffect(() => {
     pendingForcedReloadRef.current = false;
