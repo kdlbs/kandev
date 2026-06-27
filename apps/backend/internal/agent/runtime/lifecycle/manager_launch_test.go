@@ -48,6 +48,37 @@ func (a *resumeTestAgent) Runtime() *agents.RuntimeConfig {
 	}
 }
 
+func TestBuildEnvPrepareRequest_CarriesTopLevelBranchIdentity(t *testing.T) {
+	req := &LaunchRequest{
+		TaskID:             "task-1",
+		SessionID:          "session-1",
+		RepositoryID:       "repo-1",
+		RepositoryPath:     "/repos/repo-1",
+		RepoName:           "repo-1",
+		BaseBranch:         "feature/x",
+		BranchSlug:         "feature-x",
+		BranchIdentitySlug: "feature-x",
+		UseWorktree:        true,
+	}
+
+	prepReq := buildEnvPrepareRequest(req, "/workspace", executor.NameStandalone)
+
+	if prepReq.BranchSlug != "feature-x" {
+		t.Fatalf("BranchSlug = %q, want feature-x", prepReq.BranchSlug)
+	}
+	if prepReq.BranchIdentitySlug != "feature-x" {
+		t.Fatalf("BranchIdentitySlug = %q, want feature-x", prepReq.BranchIdentitySlug)
+	}
+	specs := prepReq.RepoSpecs()
+	if len(specs) != 1 {
+		t.Fatalf("RepoSpecs length = %d, want 1", len(specs))
+	}
+	if specs[0].BranchIdentitySlug != "feature-x" || specs[0].BranchSlug != "feature-x" {
+		t.Fatalf("repo spec branch fields = identity %q path %q, want feature-x/feature-x",
+			specs[0].BranchIdentitySlug, specs[0].BranchSlug)
+	}
+}
+
 func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 	mgr := newTestManager(t)
 	canRecoverTrue := true

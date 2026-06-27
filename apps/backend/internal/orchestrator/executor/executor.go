@@ -313,6 +313,11 @@ type LaunchAgentRequest struct {
 	// Task directory mode: place worktree at ~/.kandev/tasks/{TaskDirName}/{RepoName}/
 	TaskDirName string // Semantic task directory name (e.g. "fix-bug_ab12")
 	RepoName    string // Repository name used as subdirectory inside the task directory
+	// BranchSlug, when non-empty, suffixes the top-level single-repo path.
+	BranchSlug string
+	// BranchIdentitySlug is the stable branch key for top-level single-repo
+	// reuse. It may be non-empty when BranchSlug is empty to preserve a flat path.
+	BranchIdentitySlug string
 
 	// Repositories carries one entry per repository when the launch is multi-repo.
 	// When non-empty it is the source of truth and the legacy single-repo

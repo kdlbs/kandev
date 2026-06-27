@@ -179,6 +179,8 @@ func routeUnmatchedTopLevelRepoToScopedPath(
 	}
 	spec.BranchIdentitySlug = pathSlug
 	spec.BranchSlug = pathSlug
+	req.BranchIdentitySlug = pathSlug
+	req.BranchSlug = pathSlug
 	req.Repositories = []RepoSpec{spec}
 }
 
@@ -191,6 +193,7 @@ func routeMatchedTopLevelRepoToScopedIdentity(req *LaunchAgentRequest, spec Repo
 		return
 	}
 	spec.BranchIdentitySlug = identitySlug
+	req.BranchIdentitySlug = identitySlug
 	req.Repositories = []RepoSpec{spec}
 }
 

@@ -438,8 +438,14 @@ func TestReuseExistingEnvironment_SingleRepoBranchMatchKeepsScopedRepoSpec(t *te
 	if got.BranchIdentitySlug != "feature-x" {
 		t.Fatalf("spec BranchIdentitySlug = %q, want feature-x", got.BranchIdentitySlug)
 	}
+	if req.BranchIdentitySlug != "feature-x" {
+		t.Fatalf("top-level BranchIdentitySlug = %q, want feature-x", req.BranchIdentitySlug)
+	}
 	if got.BranchSlug != "" {
 		t.Fatalf("spec BranchSlug = %q, want empty to preserve the existing path", got.BranchSlug)
+	}
+	if req.BranchSlug != "" {
+		t.Fatalf("top-level BranchSlug = %q, want empty to preserve the existing path", req.BranchSlug)
 	}
 }
 
@@ -529,6 +535,12 @@ func TestReuseExistingEnvironment_SingleRepoUnmatchedScopedEnvUsesBranchPathSlug
 	}
 	if got.BranchIdentitySlug != "feature-new-path" {
 		t.Fatalf("BranchIdentitySlug = %q, want feature-new-path", got.BranchIdentitySlug)
+	}
+	if req.BranchSlug != "feature-new-path" {
+		t.Fatalf("top-level BranchSlug = %q, want feature-new-path", req.BranchSlug)
+	}
+	if req.BranchIdentitySlug != "feature-new-path" {
+		t.Fatalf("top-level BranchIdentitySlug = %q, want feature-new-path", req.BranchIdentitySlug)
 	}
 	if got.RepositoryPath != req.RepositoryPath || got.RepoName != req.RepoName {
 		t.Fatalf("repo fields not carried into scoped spec: %+v", got)

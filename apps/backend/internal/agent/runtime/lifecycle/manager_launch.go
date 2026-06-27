@@ -660,6 +660,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		TaskDirName:          req.TaskDirName,
 		RepoName:             req.RepoName,
 		BranchSlug:           req.BranchSlug,
+		BranchIdentitySlug:   req.BranchIdentitySlug,
 		Env:                  req.Env,
 	}
 	// Multi-repo: forward the repo list when the launch request carries one.

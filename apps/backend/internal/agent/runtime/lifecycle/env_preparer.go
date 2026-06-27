@@ -112,7 +112,7 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 		PullBeforeWorktree:   r.PullBeforeWorktree,
 		RepoSetupScript:      r.RepoSetupScript,
 		BranchSlug:           r.BranchSlug,
-		BranchIdentitySlug:   r.BranchSlug,
+		BranchIdentitySlug:   r.BranchIdentitySlug,
 	}}
 }
 

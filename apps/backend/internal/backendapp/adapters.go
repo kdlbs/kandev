@@ -120,8 +120,10 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
 		PullBeforeWorktree:   req.PullBeforeWorktree,
 		// Task directory mode
-		TaskDirName: req.TaskDirName,
-		RepoName:    req.RepoName,
+		TaskDirName:        req.TaskDirName,
+		RepoName:           req.RepoName,
+		BranchSlug:         req.BranchSlug,
+		BranchIdentitySlug: req.BranchIdentitySlug,
 	}
 
 	if req.RouteOverride != nil {
