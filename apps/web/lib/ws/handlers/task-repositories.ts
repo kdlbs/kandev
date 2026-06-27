@@ -9,13 +9,14 @@ export function mergeTaskRepositoryFields(
   next: TaskRepositoryFields,
 ): TaskRepositoryFields {
   const repositoriesProvided = next.repositories !== undefined;
+  const nextRepositoryId = next.repositoryId ?? next.repositories?.[0]?.repository_id;
   const repositoryIdChanged =
-    next.repositoryId !== undefined && next.repositoryId !== existing?.repositoryId;
+    nextRepositoryId !== undefined && nextRepositoryId !== existing?.repositoryId;
 
   return {
     repositoryId: repositoriesProvided
-      ? next.repositoryId
-      : (next.repositoryId ?? existing?.repositoryId),
+      ? nextRepositoryId
+      : (nextRepositoryId ?? existing?.repositoryId),
     repositories:
       repositoriesProvided || repositoryIdChanged ? next.repositories : existing?.repositories,
   };
