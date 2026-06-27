@@ -402,6 +402,47 @@ func TestReuseExistingEnvironment_SingleRepoUsesBranchScopedEnvRow(t *testing.T)
 	}
 }
 
+func TestReuseExistingEnvironment_SingleRepoBranchMatchKeepsScopedRepoSpec(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{
+		TaskID:         "task-single-branch-row",
+		RepositoryID:   "repo-kandev",
+		RepositoryPath: "/repos/kandev",
+		RepoName:       "kandev",
+		BaseBranch:     "feature-x",
+		UseWorktree:    true,
+	}
+	env := &models.TaskEnvironment{
+		ID:           "env-single-branch-row",
+		RepositoryID: "repo-kandev",
+		WorktreeID:   "wt-main",
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-kandev", BranchSlug: "main", WorktreeID: "wt-main"},
+			{RepositoryID: "repo-kandev", BranchSlug: "feature-x", WorktreeID: "wt-feature"},
+		},
+	}
+
+	exec.reuseExistingEnvironment(context.Background(), req, env)
+
+	if req.WorktreeID != "wt-feature" {
+		t.Fatalf("top-level WorktreeID = %q, want branch-scoped wt-feature", req.WorktreeID)
+	}
+	if len(req.Repositories) != 1 {
+		t.Fatalf("Repositories length = %d, want one branch-scoped reuse spec", len(req.Repositories))
+	}
+	got := req.Repositories[0]
+	if got.WorktreeID != "wt-feature" {
+		t.Fatalf("spec WorktreeID = %q, want wt-feature", got.WorktreeID)
+	}
+	if got.BranchIdentitySlug != "feature-x" {
+		t.Fatalf("spec BranchIdentitySlug = %q, want feature-x", got.BranchIdentitySlug)
+	}
+	if got.BranchSlug != "" {
+		t.Fatalf("spec BranchSlug = %q, want empty to preserve the existing path", got.BranchSlug)
+	}
+}
+
 func TestReuseExistingEnvironment_SingleRepoUsesDefaultBranchScopedEnvRow(t *testing.T) {
 	repo := newMockRepository()
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)
@@ -744,6 +785,32 @@ func TestBuildRepoSpecs_MultiBranchFlatPathFollowsLowestTaskRepoPosition(t *test
 	}
 	if specs[1].BranchIdentitySlug != "release-1.2" || specs[1].BranchSlug != "" {
 		t.Fatalf("release plan = identity %q path %q, want release-1.2/empty", specs[1].BranchIdentitySlug, specs[1].BranchSlug)
+	}
+}
+
+func TestBuildRepoSpecs_AssignsBranchIdentityForDistinctRepos(t *testing.T) {
+	frontendInfo := &repoInfo{
+		RepositoryID:   "repo-front",
+		RepositoryPath: "/repos/frontend",
+		BaseBranch:     "main",
+		Position:       0,
+		Repository:     &models.Repository{ID: "repo-front", Name: "frontend", DefaultBranch: "main"},
+	}
+	backendInfo := &repoInfo{
+		RepositoryID:   "repo-back",
+		RepositoryPath: "/repos/backend",
+		BaseBranch:     "release/1.2",
+		Position:       1,
+		Repository:     &models.Repository{ID: "repo-back", Name: "backend", DefaultBranch: "main"},
+	}
+
+	specs := buildRepoSpecs([]*repoInfo{frontendInfo, backendInfo})
+
+	if specs[0].BranchIdentitySlug != "main" || specs[0].BranchSlug != "" {
+		t.Fatalf("frontend plan = identity %q path %q, want main/empty", specs[0].BranchIdentitySlug, specs[0].BranchSlug)
+	}
+	if specs[1].BranchIdentitySlug != "release-1.2" || specs[1].BranchSlug != "" {
+		t.Fatalf("backend plan = identity %q path %q, want release-1.2/empty", specs[1].BranchIdentitySlug, specs[1].BranchSlug)
 	}
 }
 

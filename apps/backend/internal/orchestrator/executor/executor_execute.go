@@ -766,10 +766,13 @@ func buildRepoBranchPlans(allRepos []*repoInfo) map[*repoInfo]repoBranchPlan {
 
 	plans := make(map[*repoInfo]repoBranchPlan, len(allRepos))
 	for repoID, group := range groups {
+		identities := branchIdentitySlugsForGroup(repoID, group)
 		if len(group) < 2 {
+			for _, info := range group {
+				plans[info] = repoBranchPlan{identitySlug: identities[info]}
+			}
 			continue
 		}
-		identities := branchIdentitySlugsForGroup(repoID, group)
 		flatIdentity := selectFlatBranchIdentity(group, identities)
 		for _, info := range group {
 			identity := identities[info]

@@ -122,7 +122,9 @@ func (e *Executor) reuseExistingRepositoryWorktrees(ctx context.Context, req *La
 		return
 	}
 	req.WorktreeID = repoSpecs[0].WorktreeID
-	if !usingTopLevelRepo {
+	if usingTopLevelRepo {
+		routeMatchedTopLevelRepoToScopedIdentity(req, repoSpecs[0], hasScopedWorktrees)
+	} else {
 		req.Repositories = repoSpecs
 	}
 }
@@ -177,6 +179,18 @@ func routeUnmatchedTopLevelRepoToScopedPath(
 	}
 	spec.BranchIdentitySlug = pathSlug
 	spec.BranchSlug = pathSlug
+	req.Repositories = []RepoSpec{spec}
+}
+
+func routeMatchedTopLevelRepoToScopedIdentity(req *LaunchAgentRequest, spec RepoSpec, hasScopedWorktrees bool) {
+	if !hasScopedWorktrees {
+		return
+	}
+	identitySlug := launchRepoBranchIdentitySlug(spec)
+	if identitySlug == "" {
+		return
+	}
+	spec.BranchIdentitySlug = identitySlug
 	req.Repositories = []RepoSpec{spec}
 }
 
