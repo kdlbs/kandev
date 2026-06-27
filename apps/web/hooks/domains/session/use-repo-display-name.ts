@@ -2,10 +2,12 @@
 
 import { useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
+import { useRepositoriesByWorkspace } from "@/hooks/domains/workspace/use-repository-cache";
 
 /**
  * Resolves the workspace's primary single-repo name from the active task and
- * repositories slice. Returns undefined when:
+ * repository Query cache. Returns undefined when:
  * - the task hasn't loaded yet (Bug 5 loading-order concern: `tasks` and
  *   `reposByWorkspace` hydrate independently via SSR + WS, so the task can be
  *   missing on first render)
@@ -24,12 +26,10 @@ type TaskLike = {
 type RepoEntry = { id: string; name: string };
 
 function resolvePrimaryRepoName(
-  taskId: string | null,
-  tasks: TaskLike[],
+  task: TaskLike | null,
   reposByWorkspace: Record<string, RepoEntry[]>,
 ): string | undefined {
-  const task = taskId ? tasks.find((t) => t.id === taskId) : undefined;
-  if (task === undefined) return undefined;
+  if (!task) return undefined;
   const primaryRepoId = task.repositoryId ?? null;
   const taskHasMultipleRepos = (task.repositories?.length ?? 0) > 1;
   if (taskHasMultipleRepos || !primaryRepoId) return undefined;
@@ -56,16 +56,15 @@ function resolvePrimaryRepoName(
 export function useRepoDisplayName(sessionId: string | null | undefined) {
   const session = useAppStore((state) => (sessionId ? state.taskSessions.items[sessionId] : null));
   const taskId = session?.task_id ?? null;
-  const tasks = useAppStore((state) => state.kanban.tasks);
-  const reposByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  const task = useTaskById(taskId);
+  const reposByWorkspace = useRepositoriesByWorkspace();
   const primaryName = useMemo(
     () =>
       resolvePrimaryRepoName(
-        taskId,
-        tasks as unknown as TaskLike[],
+        task as TaskLike | null,
         reposByWorkspace as unknown as Record<string, RepoEntry[]>,
       ),
-    [taskId, tasks, reposByWorkspace],
+    [task, reposByWorkspace],
   );
   // Flattened, sorted list of known repo names — long names first so
   // `kandev-foo` matches `kandev-foo` before it matches `kandev`.

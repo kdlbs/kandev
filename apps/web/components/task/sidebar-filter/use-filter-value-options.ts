@@ -2,14 +2,17 @@
 
 import { useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
-import type { AppState } from "@/lib/state/store";
+import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
+import { useRepositoriesByWorkspace } from "@/hooks/domains/workspace/use-repository-cache";
+import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import type { FilterDimension } from "@/lib/state/slices/ui/sidebar-view-types";
 import { getExecutorLabel } from "@/lib/executor-icons";
 import { repositorySlug } from "@/lib/repository-slug";
+import type { Repository } from "@/lib/types/http";
 
 type Option = { value: string; label: string; color?: string; group?: string };
-type Snapshots = AppState["kanbanMulti"]["snapshots"];
-type ReposByWorkspace = AppState["repositories"]["itemsByWorkspaceId"];
+type Snapshots = Record<string, WorkflowSnapshotData>;
+type ReposByWorkspace = Record<string, Repository[]>;
 
 function workflowOptions(snapshots: Snapshots): Option[] {
   return Object.entries(snapshots).map(([id, snap]) => ({
@@ -55,8 +58,9 @@ export function repositoryOptions(repositoriesByWorkspace: ReposByWorkspace): Op
 }
 
 export function useFilterValueOptions(dimension: FilterDimension): Option[] {
-  const snapshots = useAppStore((s) => s.kanbanMulti.snapshots);
-  const repositoriesByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+  const { snapshots } = useAllWorkflowSnapshots(activeWorkspaceId);
+  const repositoriesByWorkspace = useRepositoriesByWorkspace();
 
   return useMemo(() => {
     if (dimension === "workflow") return workflowOptions(snapshots);

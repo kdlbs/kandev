@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { IconCheck, IconChevronDown } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -15,6 +16,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { setSessionMode } from "@/lib/api/domains/session-api";
+import { sessionModeQueryOptions } from "@/lib/query/query-options";
 import { cn } from "@/lib/utils";
 import type { Agent, AgentProfile, AvailableAgent } from "@/lib/types/http";
 
@@ -92,12 +94,11 @@ function buildModeState(
 }
 
 function useModeSelectorState(sessionId: string | null) {
-  useSettingsData(true);
+  const settingsCatalog = useSettingsData(true);
 
-  const liveModeState = useAppStore((state) =>
-    sessionId ? state.sessionMode.bySessionId[sessionId] : undefined,
-  );
-  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
+  const modeQuery = useQuery(sessionModeQueryOptions(sessionId ?? ""));
+  const liveModeState = modeQuery.data;
+  const settingsAgents = settingsCatalog.settingsAgents;
   const taskSessions = useAppStore((state) => state.taskSessions.items);
   const { items: availableAgents } = useAvailableAgents();
 

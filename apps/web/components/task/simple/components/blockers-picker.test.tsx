@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, type ReactNode } from "react";
 import { StateProvider, useAppStore } from "@/components/state-provider";
 import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutation";
@@ -11,7 +12,7 @@ import type { Task } from "@/app/office/tasks/[id]/types";
 // Hoisted mocks so the API module is replaced before the component imports it.
 const addBlockerMock = vi.hoisted(() => vi.fn());
 const removeBlockerMock = vi.hoisted(() => vi.fn());
-const searchTasksMock = vi.hoisted(() =>
+const listTasksMock = vi.hoisted(() =>
   vi.fn().mockResolvedValue({
     tasks: [{ id: "t-2", identifier: "TASK-2", title: "Beta", workspaceId: "ws-1" }],
   }),
@@ -26,9 +27,12 @@ vi.mock("@/lib/api/domains/office-extended-api", async () => {
     ...actual,
     addTaskBlocker: addBlockerMock,
     removeTaskBlocker: removeBlockerMock,
-    searchTasks: searchTasksMock,
   };
 });
+
+vi.mock("@/lib/api/domains/office-tasks-api", () => ({
+  listTasks: listTasksMock,
+}));
 
 vi.mock("sonner", async () => {
   const actual = await vi.importActual<typeof import("sonner")>("sonner");
@@ -62,13 +66,20 @@ const baseTask: Task = {
   updatedAt: "2026-05-01T00:00:00Z",
 };
 
-// SeedTasks pre-populates the office store so the picker has a candidate
-// without needing to hit the searchTasks fallback fetch.
-function SeedTasks({ tasks }: { tasks: OfficeTask[] }) {
-  const setTasks = useAppStore((s) => s.setTasks);
+function createQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+}
+
+function SeedWorkspace() {
+  const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace);
   useEffect(() => {
-    setTasks(tasks);
-  }, [setTasks, tasks]);
+    setActiveWorkspace("ws-1");
+  }, [setActiveWorkspace]);
   return null;
 }
 
@@ -84,11 +95,19 @@ function Wrapper({
   candidates: OfficeTask[];
 }) {
   const ctx = { task: baseTask, applyPatch, restore };
+  const queryClient = createQueryClient();
+  listTasksMock.mockResolvedValue({
+    tasks: candidates,
+    next_cursor: "",
+    next_id: "",
+  });
   return (
-    <StateProvider>
-      <SeedTasks tasks={candidates} />
-      <TaskOptimisticContextProvider value={ctx}>{children}</TaskOptimisticContextProvider>
-    </StateProvider>
+    <QueryClientProvider client={queryClient}>
+      <StateProvider>
+        <SeedWorkspace />
+        <TaskOptimisticContextProvider value={ctx}>{children}</TaskOptimisticContextProvider>
+      </StateProvider>
+    </QueryClientProvider>
   );
 }
 

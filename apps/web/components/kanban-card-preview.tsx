@@ -4,8 +4,7 @@ import { useMemo } from "react";
 import { Card, CardContent } from "@kandev/ui/card";
 import { KanbanCardBody } from "@/components/kanban-card-content";
 import { resolveTaskRepositoryNames, type Task } from "@/components/kanban-card";
-import { useAppStore } from "@/components/state-provider";
-import type { Repository } from "@/lib/types/http";
+import { useAllCachedRepositories } from "@/hooks/domains/workspace/use-repository-cache";
 
 function KanbanCardPreviewLayout({
   task,
@@ -27,14 +26,10 @@ function KanbanCardPreviewLayout({
 }
 
 export function KanbanCardPreview({ task }: { task: Task }) {
-  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  const repositories = useAllCachedRepositories();
   const repositoryNames = useMemo(
-    () =>
-      resolveTaskRepositoryNames(
-        task,
-        Object.values(repositoriesByWorkspace).flat() as Repository[],
-      ),
-    [repositoriesByWorkspace, task],
+    () => resolveTaskRepositoryNames(task, repositories),
+    [repositories, task],
   );
 
   return <KanbanCardPreviewLayout task={task} repositoryNames={repositoryNames} />;

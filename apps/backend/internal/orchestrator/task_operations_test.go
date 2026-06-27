@@ -1610,6 +1610,30 @@ func TestErrorClassificationFunctions(t *testing.T) {
 		}
 	})
 
+	t.Run("isLazyResumePromptRecoveryError", func(t *testing.T) {
+		tests := []struct {
+			name string
+			err  error
+			want bool
+		}{
+			{"nil error", nil, false},
+			{"unrelated error", errors.New("something else"), false},
+			{"executor execution not found", executor.ErrExecutionNotFound, true},
+			{"wrapped executor execution not found", fmt.Errorf("resume failed: %w", executor.ErrExecutionNotFound), true},
+			{"lifecycle execution not found", lifecycle.ErrExecutionNotFound, true},
+			{"wrapped lifecycle execution not found", fmt.Errorf("resume failed: %w", lifecycle.ErrExecutionNotFound), true},
+			{"untyped session not found string", errors.New("session not found"), false},
+			{"untyped execution not found string", errors.New("execution abc not found"), false},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				if got := isLazyResumePromptRecoveryError(tc.err); got != tc.want {
+					t.Errorf("isLazyResumePromptRecoveryError(%v) = %v, want %v", tc.err, got, tc.want)
+				}
+			})
+		}
+	})
+
 	t.Run("isTransientPromptError", func(t *testing.T) {
 		tests := []struct {
 			name string

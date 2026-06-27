@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "@/lib/routing/client-router";
 import { useCommands, useCommandPanelOpen } from "@/lib/commands/command-registry";
 import type { CommandPanelMode, CommandItem as CommandItemType } from "@/lib/commands/types";
@@ -8,13 +9,17 @@ import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { useAppStore } from "@/components/state-provider";
+import { useCachedRepositories } from "@/hooks/domains/workspace/use-repository-cache";
+import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 
-import { listTasksByWorkspace } from "@/lib/api";
 import { linkToTask } from "@/lib/links";
 import type { Task } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { useDebounce } from "@/hooks/use-debounce";
+import { workspaceTasksQueryOptions } from "@/lib/query/query-options";
+import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import {
   CommandPanelView,
   MODE_COMMANDS,
@@ -57,10 +62,8 @@ function useCommandPanelState() {
 }
 
 function useCommandPanelEffectRefs() {
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
   const fileDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  return { debounceRef, abortRef, fileDebounceRef };
+  return { fileDebounceRef };
 }
 
 type FileSearchEffectOptions = {
@@ -111,7 +114,15 @@ function useFileSearchEffect(opts: FileSearchEffectOptions) {
 
 const ARCHIVED_STATES = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
 
-function resolveVisibleStepIds(steps: { id: string; show_in_command_panel?: boolean }[]) {
+type CommandPanelStep = {
+  id: string;
+  title: string;
+  color: string;
+  position: number;
+  show_in_command_panel?: boolean;
+};
+
+function resolveVisibleStepIds(steps: CommandPanelStep[]) {
   if (steps.length === 0) return null; // no steps loaded yet — don't filter
   return new Set(steps.filter((s) => s.show_in_command_panel !== false).map((s) => s.id));
 }
@@ -121,12 +132,12 @@ type InlineTaskSearchOptions = {
   search: string;
   open: boolean;
   workspaceId: string | null;
-  steps: { id: string; position: number; show_in_command_panel?: boolean }[];
+  steps: CommandPanelStep[];
   setTaskResults: (tasks: Task[]) => void;
   setIsSearching: (searching: boolean) => void;
 };
 
-function useStepMaps(steps: InlineTaskSearchOptions["steps"]) {
+function useStepMaps(steps: CommandPanelStep[]) {
   const visibleStepIds = useMemo(() => resolveVisibleStepIds(steps), [steps]);
   const stepPositionMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -136,109 +147,103 @@ function useStepMaps(steps: InlineTaskSearchOptions["steps"]) {
   return { visibleStepIds, stepPositionMap };
 }
 
+export function getCommandPanelActiveTaskResults(
+  tasks: Task[],
+  visibleStepIds: ReadonlySet<string> | null,
+  stepPositionMap: ReadonlyMap<string, number>,
+) {
+  return tasks
+    .filter(
+      (task) =>
+        (!visibleStepIds || visibleStepIds.has(task.workflow_step_id)) &&
+        !ARCHIVED_STATES.has(task.state),
+    )
+    .sort(
+      (a, b) =>
+        (stepPositionMap.get(a.workflow_step_id) ?? 99) -
+        (stepPositionMap.get(b.workflow_step_id) ?? 99),
+    );
+}
+
+export function getCommandPanelSearchTaskResults(tasks: Task[]) {
+  return [...tasks].sort((a, b) => {
+    const aArchived = ARCHIVED_STATES.has(a.state) ? 1 : 0;
+    const bArchived = ARCHIVED_STATES.has(b.state) ? 1 : 0;
+    return aArchived - bArchived;
+  });
+}
+
 function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {
   const { mode, search, open, workspaceId, steps, setTaskResults, setIsSearching } = opts;
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
   const { visibleStepIds, stepPositionMap } = useStepMaps(steps);
+  const trimmedSearch = search.trim();
+  const debouncedSearch = useDebounce(trimmedSearch, 300);
+  const isBlankSearch = trimmedSearch.length === 0;
+  const isShortSearch = trimmedSearch.length > 0 && trimmedSearch.length < 2;
+  const isDebouncingSearch = trimmedSearch.length >= 2 && debouncedSearch !== trimmedSearch;
+  const queryFilters = isBlankSearch
+    ? { page: 1, pageSize: 20 }
+    : { query: debouncedSearch, page: 1, pageSize: 5, includeArchived: true };
+  const taskQuery = useQuery({
+    ...workspaceTasksQueryOptions(workspaceId ?? "", queryFilters),
+    enabled:
+      mode === MODE_COMMANDS &&
+      open &&
+      Boolean(workspaceId) &&
+      !isShortSearch &&
+      !isDebouncingSearch,
+    staleTime: 0,
+  });
 
   useEffect(() => {
-    if (mode !== MODE_COMMANDS) return;
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    abortRef.current?.abort();
-
-    // No search: load active tasks (excluding backlog + done steps)
-    if (!search.trim()) {
-      if (!open || !workspaceId) {
-        setTaskResults([]);
-        setIsSearching(false);
-        return;
-      }
-      setIsSearching(true);
-      const controller = new AbortController();
-      abortRef.current = controller;
-      listTasksByWorkspace(
-        workspaceId,
-        { page: 1, pageSize: 20 },
-        { init: { signal: controller.signal } },
-      )
-        .then((res) => {
-          if (controller.signal.aborted) return;
-          const tasks = (res.tasks ?? []).filter(
-            (t) =>
-              (!visibleStepIds || visibleStepIds.has(t.workflow_step_id)) &&
-              !ARCHIVED_STATES.has(t.state),
-          );
-          tasks.sort(
-            (a, b) =>
-              (stepPositionMap.get(a.workflow_step_id) ?? 99) -
-              (stepPositionMap.get(b.workflow_step_id) ?? 99),
-          );
-          setTaskResults(tasks);
-        })
-        .catch(() => {
-          if (!controller.signal.aborted) setTaskResults([]);
-        })
-        .finally(() => {
-          if (!controller.signal.aborted) setIsSearching(false);
-        });
-      return () => {
-        controller.abort();
-      };
+    if (mode !== MODE_COMMANDS) {
+      return;
     }
-
-    // Search with < 2 chars: clear results
-    if (search.trim().length < 2) {
+    if (!open || !workspaceId || isShortSearch) {
       setTaskResults([]);
       setIsSearching(false);
       return;
     }
-
-    // Search: query API including archived
-    setIsSearching(true);
-    debounceRef.current = setTimeout(async () => {
-      if (!workspaceId) {
-        setIsSearching(false);
-        return;
-      }
-      const controller = new AbortController();
-      abortRef.current = controller;
-      try {
-        const res = await listTasksByWorkspace(
-          workspaceId,
-          { query: search.trim(), page: 1, pageSize: 5, includeArchived: true },
-          { init: { signal: controller.signal } },
-        );
-        if (!controller.signal.aborted) {
-          const tasks = res.tasks ?? [];
-          tasks.sort((a, b) => {
-            const aArchived = ARCHIVED_STATES.has(a.state) ? 1 : 0;
-            const bArchived = ARCHIVED_STATES.has(b.state) ? 1 : 0;
-            return aArchived - bArchived;
-          });
-          setTaskResults(tasks);
-        }
-      } catch {
-        if (!controller.signal.aborted) setTaskResults([]);
-      } finally {
-        if (!controller.signal.aborted) setIsSearching(false);
-      }
-    }, 300);
-
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      abortRef.current?.abort();
-    };
+    if (isDebouncingSearch) {
+      setIsSearching(true);
+      return;
+    }
+    setIsSearching(taskQuery.isFetching);
   }, [
+    isDebouncingSearch,
+    isShortSearch,
     mode,
-    search,
     open,
-    workspaceId,
-    visibleStepIds,
-    stepPositionMap,
-    setTaskResults,
     setIsSearching,
+    setTaskResults,
+    taskQuery.isFetching,
+    workspaceId,
   ]);
+
+  useEffect(() => {
+    if (mode !== MODE_COMMANDS || !open || !workspaceId || !taskQuery.data) return;
+    const tasks = taskQuery.data.tasks ?? [];
+    setTaskResults(
+      isBlankSearch
+        ? getCommandPanelActiveTaskResults(tasks, visibleStepIds, stepPositionMap)
+        : getCommandPanelSearchTaskResults(tasks),
+    );
+  }, [
+    isBlankSearch,
+    mode,
+    open,
+    setTaskResults,
+    stepPositionMap,
+    taskQuery.data,
+    visibleStepIds,
+    workspaceId,
+  ]);
+
+  useEffect(() => {
+    if (!taskQuery.isError) return;
+    setTaskResults([]);
+    setIsSearching(false);
+  }, [setIsSearching, setTaskResults, taskQuery.isError]);
 }
 
 function useCommandPanelEffects(
@@ -246,7 +251,7 @@ function useCommandPanelEffects(
   state: ReturnType<typeof useCommandPanelState>,
   workspaceId: string | null,
   activeSessionId: string | null,
-  steps: { id: string; position: number; show_in_command_panel?: boolean }[],
+  steps: CommandPanelStep[],
 ) {
   const {
     mode,
@@ -326,7 +331,7 @@ function useCommandPanelHandlers(
   state: ReturnType<typeof useCommandPanelState>,
   setOpen: (open: boolean) => void,
   commands: CommandItemType[],
-  kanbanSteps: { id: string; title: string; color: string }[],
+  steps: CommandPanelStep[],
   repositories: Array<{ id: string; local_path: string }>,
 ) {
   const { mode, search, inputCommand, setMode, setSearch, setInputCommand } = state;
@@ -347,9 +352,9 @@ function useCommandPanelHandlers(
 
   const stepMap = useMemo(() => {
     const map = new Map<string, { name: string; color: string }>();
-    for (const step of kanbanSteps) map.set(step.id, { name: step.title, color: step.color });
+    for (const step of steps) map.set(step.id, { name: step.title, color: step.color });
     return map;
-  }, [kanbanSteps]);
+  }, [steps]);
 
   const repoMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -425,14 +430,55 @@ function useCommandPanelHandlers(
   };
 }
 
+export function getCommandPanelStepsFromSnapshots(
+  snapshots: Record<string, WorkflowSnapshotData>,
+): CommandPanelStep[] {
+  return Object.values(snapshots).flatMap((snapshot) =>
+    snapshot.steps.map((step) => ({
+      id: step.id,
+      title: step.title,
+      color: step.color,
+      position: step.position,
+      show_in_command_panel: step.show_in_command_panel,
+    })),
+  );
+}
+
+function getCommandPanelStepsSignature(snapshots: Record<string, WorkflowSnapshotData>): string {
+  return Object.values(snapshots)
+    .flatMap((snapshot) =>
+      snapshot.steps.map(
+        (step) =>
+          `${snapshot.workflowId}:${step.id}:${step.title}:${step.color}:${step.position}:${step.show_in_command_panel}`,
+      ),
+    )
+    .sort()
+    .join("|");
+}
+
+function useCommandPanelSteps(workspaceId: string | null): CommandPanelStep[] {
+  const { snapshots } = useAllWorkflowSnapshots(workspaceId);
+  const stableStepsRef = useRef<{ signature: string; steps: CommandPanelStep[] }>({
+    signature: "",
+    steps: [],
+  });
+  const signature = getCommandPanelStepsSignature(snapshots);
+  if (stableStepsRef.current.signature !== signature) {
+    stableStepsRef.current = {
+      signature,
+      steps: getCommandPanelStepsFromSnapshots(snapshots),
+    };
+  }
+  return stableStepsRef.current.steps;
+}
+
 export function CommandPanel() {
   const { open, setOpen } = useCommandPanelOpen();
   const commands = useCommands();
-  const kanbanSteps = useAppStore((state) => state.kanban.steps);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
-  const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
-  const repositories = workspaceId ? (reposByWorkspace[workspaceId] ?? []) : [];
+  const repositories = useCachedRepositories(workspaceId);
+  const steps = useCommandPanelSteps(workspaceId);
 
   const state = useCommandPanelState();
   const {
@@ -448,7 +494,7 @@ export function CommandPanel() {
     setSearch,
   } = state;
 
-  useCommandPanelEffects(open, state, workspaceId, activeSessionId, kanbanSteps);
+  useCommandPanelEffects(open, state, workspaceId, activeSessionId, steps);
   useFirstResultSelection(open, state);
 
   const openRef = useRef(open);
@@ -487,7 +533,7 @@ export function CommandPanel() {
     handleFileSelect,
     handleKeyDown,
     goBack,
-  } = useCommandPanelHandlers(state, setOpen, commands, kanbanSteps, repositories);
+  } = useCommandPanelHandlers(state, setOpen, commands, steps, repositories);
 
   return (
     <CommandPanelView

@@ -19,6 +19,10 @@ vi.mock("@/components/task/executor-settings-button", () => ({
   ExecutorSettingsButton: () => <button data-testid="executor-settings-button">executor</button>,
 }));
 
+vi.mock("@/components/system-metrics/topbar-metrics", () => ({
+  TopbarMetrics: () => null,
+}));
+
 vi.mock("@/components/task/port-forward-dialog", () => ({
   PortForwardButton: () => <button>ports</button>,
 }));

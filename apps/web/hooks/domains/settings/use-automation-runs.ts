@@ -1,50 +1,24 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
-import { listAutomationRuns } from "@/lib/api/domains/automation-api";
-import { useAppStore } from "@/components/state-provider";
+import { useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { automationRunsQueryOptions } from "@/lib/query/query-options/automations";
 import type { AutomationRun } from "@/lib/types/automation";
 
 const EMPTY_RUNS: AutomationRun[] = [];
 
 export function useAutomationRuns(automationId: string | null) {
-  const runs = useAppStore((state) =>
-    automationId ? (state.automationRuns.byAutomationId[automationId] ?? EMPTY_RUNS) : EMPTY_RUNS,
-  );
-  const loading = useAppStore((state) =>
-    automationId ? (state.automationRuns.loading[automationId] ?? false) : false,
-  );
-  const setRuns = useAppStore((state) => state.setAutomationRuns);
-  const setRunsLoading = useAppStore((state) => state.setAutomationRunsLoading);
-
-  useEffect(() => {
-    if (!automationId || loading) return;
-    setRunsLoading(automationId, true);
-    listAutomationRuns(automationId)
-      .then((result) => {
-        setRuns(automationId, result ?? []);
-      })
-      .catch(() => {
-        setRuns(automationId, []);
-      })
-      .finally(() => {
-        setRunsLoading(automationId, false);
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [automationId]);
+  const query = useQuery({
+    ...automationRunsQueryOptions(automationId ?? ""),
+    enabled: Boolean(automationId),
+  });
+  const runs = query.data ?? EMPTY_RUNS;
+  const refetch = query.refetch;
 
   const refresh = useCallback(() => {
     if (!automationId) return;
-    setRunsLoading(automationId, true);
-    listAutomationRuns(automationId)
-      .then((result) => {
-        setRuns(automationId, result ?? []);
-      })
-      .catch(() => {})
-      .finally(() => {
-        setRunsLoading(automationId, false);
-      });
-  }, [automationId, setRuns, setRunsLoading]);
+    void refetch();
+  }, [automationId, refetch]);
 
-  return { runs, loading, refresh };
+  return { runs, loading: query.isFetching && !query.isSuccess, refresh };
 }

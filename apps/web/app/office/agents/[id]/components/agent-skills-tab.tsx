@@ -1,53 +1,23 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import Link from "@/components/routing/app-link";
 import { toast } from "sonner";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useAppStore } from "@/components/state-provider";
-import { listSkills, updateAgentProfile } from "@/lib/api/domains/office-api";
+import { updateAgentProfile } from "@/lib/api/domains/office-api";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
+import { useActiveOfficeSkills, usePatchOfficeAgentProfileCache } from "../use-agent-detail-data";
 
 type AgentSkillsTabProps = {
   agent: AgentProfile;
 };
 
-/**
- * Hydrate the office skills store on mount. The workspace Skills page
- * populates it as a side effect of viewing, but a user landing
- * directly on /office/agents/<id>/skills wouldn't have run that path
- * yet. Hitting listSkills also triggers the backend's lazy per-
- * workspace system-skill sync, so a fresh workspace shows the
- * bundled set on first visit.
- */
-function useHydrateSkills() {
-  const setSkills = useAppStore((s) => s.setSkills);
-  const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  useEffect(() => {
-    if (!workspaceId) return;
-    let cancelled = false;
-    listSkills(workspaceId)
-      .then((res) => {
-        if (!cancelled) setSkills(res.skills ?? []);
-      })
-      .catch(() => {
-        // Non-fatal: existing store contents (possibly empty) render
-        // the "No skills registered" CTA, which still lets the user
-        // pivot to the Skills page.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId, setSkills]);
-}
-
 export function AgentSkillsTab({ agent }: AgentSkillsTabProps) {
-  useHydrateSkills();
-  const skills = useAppStore((s) => s.office.skills);
-  const updateStore = useAppStore((s) => s.updateOfficeAgentProfile);
+  const skills = useActiveOfficeSkills();
+  const patchAgentCache = usePatchOfficeAgentProfileCache();
   const [skillIds, setSkillIds] = useState<string[]>(agent.skillIds ?? []);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -64,7 +34,7 @@ export function AgentSkillsTab({ agent }: AgentSkillsTabProps) {
     setSaving(true);
     try {
       await updateAgentProfile(agent.id, { skillIds });
-      updateStore(agent.id, { skillIds });
+      patchAgentCache(agent.id, { skillIds });
       setDirty(false);
       toast.success("Skills updated");
     } catch (err) {
@@ -72,7 +42,7 @@ export function AgentSkillsTab({ agent }: AgentSkillsTabProps) {
     } finally {
       setSaving(false);
     }
-  }, [agent.id, skillIds, updateStore]);
+  }, [agent.id, skillIds, patchAgentCache]);
 
   if (skills.length === 0) {
     return (

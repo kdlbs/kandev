@@ -8,6 +8,7 @@ import { selectCommandCount } from "@/lib/state/slices/session/selectors";
 import { AdvancedChatPanel } from "@/app/office/tasks/[id]/advanced-panels/chat-panel";
 import { useActiveSessionRef } from "./active-session-ref-context";
 import type { TaskSession } from "@/app/office/tasks/[id]/types";
+import { useActiveOfficeAgents } from "../use-office-reference-data";
 
 const COLLAPSE_KEY_PREFIX = "office.session.collapsed.";
 
@@ -246,15 +247,14 @@ export const SessionTimelineEntry = forwardRef<HTMLDivElement, SessionTimelineEn
       for (const id of groupIds) total += selectCommandCount(s, id);
       return total;
     });
-    // Resolve the agent's current display name from the office store —
+    // Resolve the agent's current display name from the office query —
     // the per-session snapshot can be empty (then `agentName` defaults
     // to the raw profile id, which renders as a UUID in the header).
     const agentProfileId = session.agentProfileId;
-    const resolvedAgentName = useAppStore((s) =>
-      agentProfileId
-        ? s.office.agentProfiles.find((a) => a.id === agentProfileId)?.name
-        : undefined,
-    );
+    const agents = useActiveOfficeAgents();
+    const resolvedAgentName = agentProfileId
+      ? agents.find((a) => a.id === agentProfileId)?.name
+      : undefined;
     const displayAgentName =
       resolvedAgentName ||
       (session.agentName !== agentProfileId ? session.agentName : null) ||

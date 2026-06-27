@@ -1,17 +1,31 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import { PRTaskIcon } from "./pr-task-icon";
+import { qk } from "@/lib/query/keys";
 import type { AppState } from "@/lib/state/store";
 import type { TaskPR } from "@/lib/types/github";
 
-function renderWithStore(initialState: Partial<AppState> | undefined, ui: ReactNode) {
+type GitHubQueryTestState = Partial<AppState> & {
+  taskPRs?: { byTaskId: Record<string, TaskPR[] | unknown> };
+};
+
+function renderWithStore(initialState: GitHubQueryTestState | undefined, ui: ReactNode) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  for (const [taskId, prs] of Object.entries(initialState?.taskPRs?.byTaskId ?? {})) {
+    queryClient.setQueryData(qk.integrations.github.taskPr(taskId), prs);
+  }
+  const appState = { ...(initialState ?? {}) };
+  delete appState.taskPRs;
   return render(
-    <StateProvider initialState={initialState}>
-      <TooltipProvider>{ui}</TooltipProvider>
-    </StateProvider>,
+    <QueryClientProvider client={queryClient}>
+      <StateProvider initialState={appState}>
+        <TooltipProvider>{ui}</TooltipProvider>
+      </StateProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -57,8 +71,7 @@ describe("PRTaskIcon corrupted store entry", () => {
   // threw `prs is not iterable`. PRTaskIcon must bail rather than crash.
   it("renders nothing when byTaskId[taskId] is a non-array object", () => {
     const { container } = renderWithStore(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      { taskPRs: { byTaskId: { "task-1": {} as any } } } as Partial<AppState>,
+      { taskPRs: { byTaskId: { "task-1": {} } } },
       <PRTaskIcon taskId="task-1" />,
     );
     expect(container.firstChild).toBeNull();

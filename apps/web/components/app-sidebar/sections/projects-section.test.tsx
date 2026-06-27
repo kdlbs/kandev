@@ -1,5 +1,8 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { makeQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
 
 const routerMock = vi.hoisted(() => ({
   push: vi.fn(),
@@ -11,9 +14,7 @@ const state = {
       projects: false,
     } as Record<string, boolean>,
   },
-  office: {
-    projects: [],
-  },
+  workspaces: { activeId: "workspace-1" },
   toggleAppSidebarSection: vi.fn(),
   setAppSidebarCollapsed: vi.fn(),
 };
@@ -43,6 +44,17 @@ vi.mock("@kandev/ui/tooltip", () => ({
 
 import { ProjectsSection } from "./projects-section";
 
+function renderProjectsSection() {
+  const queryClient = makeQueryClient();
+  queryClient.setQueryData(qk.office.projects("workspace-1"), { projects: [] });
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <ProjectsSection collapsed={false} />
+    </QueryClientProvider>,
+  );
+}
+
 describe("ProjectsSection", () => {
   afterEach(() => {
     cleanup();
@@ -50,7 +62,7 @@ describe("ProjectsSection", () => {
   });
 
   it("keeps the add-project action visible when the section is collapsed", () => {
-    render(<ProjectsSection collapsed={false} />);
+    renderProjectsSection();
 
     const projectsHeader = screen
       .getByRole("button", { name: "Projects" })

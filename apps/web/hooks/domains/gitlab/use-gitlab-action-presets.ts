@@ -1,12 +1,10 @@
 "use client";
 
-import { useEffect, useCallback, useRef } from "react";
-import {
-  getActionPresets,
-  updateActionPresets,
-  resetActionPresets,
-} from "@/lib/api/domains/gitlab-api";
-import { useAppStore } from "@/components/state-provider";
+import { useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { updateActionPresets, resetActionPresets } from "@/lib/api/domains/gitlab-api";
+import { qk } from "@/lib/query/keys";
+import { gitlabActionPresetsQueryOptions } from "@/lib/query/query-options/gitlab";
 import type { GitLabActionPreset } from "@/lib/types/gitlab";
 
 /**
@@ -16,43 +14,38 @@ import type { GitLabActionPreset } from "@/lib/types/gitlab";
  * unreachable.
  */
 export function useGitLabActionPresets(workspaceId: string | null | undefined) {
-  const presets = useAppStore((state) =>
-    workspaceId ? state.gitlabActionPresets.byWorkspaceId[workspaceId] : null,
-  );
-  const loading = useAppStore((state) => state.gitlabActionPresets.loading);
-  const set = useAppStore((state) => state.setGitLabActionPresets);
-  const setLoading = useAppStore((state) => state.setGitLabActionPresetsLoading);
-  const attemptedRef = useRef<Set<string>>(new Set());
-
-  useEffect(() => {
-    if (!workspaceId || presets || loading) return;
-    if (attemptedRef.current.has(workspaceId)) return;
-    attemptedRef.current.add(workspaceId);
-    setLoading(true);
-    getActionPresets(workspaceId)
-      .then((res) => {
-        if (res) set(workspaceId, res);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [workspaceId, presets, loading, set, setLoading]);
+  const queryClient = useQueryClient();
+  const query = useQuery({
+    ...gitlabActionPresetsQueryOptions(workspaceId ?? ""),
+    enabled: Boolean(workspaceId),
+  });
+  const presets = query.data ?? null;
 
   const update = useCallback(
     async (body: { mr?: GitLabActionPreset[]; issue?: GitLabActionPreset[] }) => {
       if (!workspaceId) return null;
       const result = await updateActionPresets(workspaceId, body);
-      if (result) set(workspaceId, result);
+      if (result) {
+        queryClient.setQueryData(qk.integrations.gitlab.actionPresets(workspaceId), result);
+      }
       return result;
     },
-    [workspaceId, set],
+    [queryClient, workspaceId],
   );
 
   const reset = useCallback(async () => {
     if (!workspaceId) return null;
     const result = await resetActionPresets(workspaceId);
-    if (result) set(workspaceId, result);
+    if (result) {
+      queryClient.setQueryData(qk.integrations.gitlab.actionPresets(workspaceId), result);
+    }
     return result;
-  }, [workspaceId, set]);
+  }, [queryClient, workspaceId]);
 
-  return { presets, loading, update, reset };
+  return {
+    presets,
+    loading: query.isFetching && !query.isSuccess,
+    update,
+    reset,
+  };
 }

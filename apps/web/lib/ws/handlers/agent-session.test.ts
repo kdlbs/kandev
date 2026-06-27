@@ -590,9 +590,6 @@ describe("session.state_changed → agentctl ready fallback", () => {
       sessionAgentctl: { itemsBySessionId: {} },
       setSessionAgentctlStatus: vi.fn(),
       upsertTaskSessionFromEvent,
-      setWorktree: vi.fn(),
-      sessionWorktreesBySessionId: { itemsBySessionId: {} },
-      setSessionWorktrees: vi.fn(),
     });
     const handler = registerTaskSessionHandlers(store)["session.agentctl_ready"]!;
 

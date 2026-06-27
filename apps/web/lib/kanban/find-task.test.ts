@@ -19,20 +19,13 @@ describe("findTaskInSnapshots", () => {
     expect(findTaskInSnapshots("t2", snaps)?.id).toBe("t2");
   });
 
-  it("falls back to fallbackTasks when no snapshot matches", () => {
-    expect(findTaskInSnapshots("t-new", {}, [task("t-new")])?.id).toBe("t-new");
-  });
-
-  it("prefers a snapshot match over fallbackTasks", () => {
-    // If both exist, the snapshot version wins so the mobile sheet doesn't
-    // surface a stale active-kanban entry over a fresher multi-snapshot one.
+  it("returns the snapshot match when present", () => {
     const snap = { tasks: [{ ...task("t1"), title: "from-snapshot" }] };
-    const fallback = [{ ...task("t1"), title: "from-fallback" }];
-    expect(findTaskInSnapshots("t1", { wf: snap }, fallback)?.title).toBe("from-snapshot");
+    expect(findTaskInSnapshots("t1", { wf: snap })?.title).toBe("from-snapshot");
   });
 
-  it("returns null when the task is missing from snapshots and fallback", () => {
+  it("returns null when the task is missing from snapshots", () => {
     expect(findTaskInSnapshots("missing", { wf: { tasks: [task("t1")] } })).toBeNull();
-    expect(findTaskInSnapshots("missing", {}, [task("t1")])).toBeNull();
+    expect(findTaskInSnapshots("missing", {})).toBeNull();
   });
 });

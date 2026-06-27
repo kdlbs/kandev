@@ -94,4 +94,25 @@ describe("mergeMessages", () => {
     expect(meta.hasMore).toBe(true);
     expect(meta.oldestCursor).toBe("a");
   });
+
+  it("preserves local empty-turn notices across API refetch snapshots", () => {
+    const store = makeStore();
+    const notice = makeMessage({
+      id: "empty-turn-turn-1",
+      author_type: "agent",
+      content: "`/pr-fixup` ran but produced no output.",
+      type: "status",
+      metadata: { empty_turn: true },
+      created_at: "2024-01-01T00:00:02Z",
+    });
+    store.getState().mergeMessages(SESSION, [makeMessage({ id: "a", content: "/pr-fixup" })]);
+    store.getState().addMessage(notice);
+
+    store.getState().mergeMessages(SESSION, [makeMessage({ id: "a", content: "/pr-fixup" })]);
+
+    expect(store.getState().messages.bySession[SESSION].map((message) => message.id)).toEqual([
+      "a",
+      "empty-turn-turn-1",
+    ]);
+  });
 });

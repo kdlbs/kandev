@@ -3,12 +3,12 @@
 import { useMemo } from "react";
 import { IconCheck, IconCircleDashed, IconX } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useAppStore } from "@/components/state-provider";
 import { useOptimisticTaskMutation } from "@/hooks/use-optimistic-task-mutation";
 import { formatRelativeTime } from "@/lib/utils";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 import type { Task, TaskDecision } from "@/app/office/tasks/[id]/types";
 import { MultiSelectPopover, type MultiSelectItem } from "./multi-select-popover";
+import { useActiveOfficeAgents } from "../use-office-reference-data";
 
 type AgentItem = MultiSelectItem & { icon: string; name: string };
 
@@ -113,7 +113,7 @@ export function AgentsMultiPicker({
   apiRemove,
   decisionsByAgent,
 }: AgentsMultiPickerProps) {
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const agents = useActiveOfficeAgents();
   const mutate = useOptimisticTaskMutation();
   const items = useMemo(() => buildAgentItems(agents), [agents]);
 

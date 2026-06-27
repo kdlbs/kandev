@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
@@ -8,7 +9,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
+import { useOfficeAgentsData, useOfficeMetaData } from "@/hooks/domains/office/use-office-data";
 import { createAgentProfile } from "@/lib/api/domains/office-api";
+import { qk } from "@/lib/query/keys";
 import type { AgentRole, AgentProfile } from "@/lib/state/slices/office/types";
 
 type CreateAgentDialogProps = {
@@ -208,9 +211,9 @@ const FALLBACK_EXECUTOR_TYPES = [
 
 export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const agents = useAppStore((s) => s.office.agentProfiles);
-  const meta = useAppStore((s) => s.office.meta);
-  const addOfficeAgentProfile = useAppStore((s) => s.addOfficeAgentProfile);
+  const queryClient = useQueryClient();
+  const agents = useOfficeAgentsData(workspaceId).data?.agents ?? [];
+  const meta = useOfficeMetaData().data;
 
   const roles = meta?.roles.map((r) => ({ id: r.id, label: r.label })) ?? FALLBACK_ROLES;
   const executorTypes =
@@ -237,7 +240,7 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
         executorPreference: state.executorPref ? { type: state.executorPref } : undefined,
       } as Partial<AgentProfile>);
       if (result) {
-        addOfficeAgentProfile(result);
+        appendAgent(queryClient, workspaceId, result);
       }
       setState(INITIAL_STATE);
       onOpenChange(false);
@@ -249,7 +252,7 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
     } finally {
       setSubmitting(false);
     }
-  }, [state, workspaceId, addOfficeAgentProfile, onOpenChange]);
+  }, [state, workspaceId, queryClient, onOpenChange]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -292,4 +295,16 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
       </DialogContent>
     </Dialog>
   );
+}
+
+function appendAgent(
+  queryClient: ReturnType<typeof useQueryClient>,
+  workspaceId: string,
+  agent: AgentProfile,
+) {
+  queryClient.setQueryData<{ agents: AgentProfile[] }>(qk.office.agents(workspaceId), (current) => {
+    const agents = current?.agents ?? [];
+    if (agents.some((item) => item.id === agent.id)) return { agents };
+    return { agents: [...agents, agent] };
+  });
 }

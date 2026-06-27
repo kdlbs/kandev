@@ -27,6 +27,9 @@ vi.mock("@/hooks/use-global-view-mode", () => ({
 vi.mock("@/hooks/domains/comments/use-run-comment", () => ({
   useRunComment: () => ({ runComment: vi.fn() }),
 }));
+vi.mock("@/hooks/domains/session/use-base-branch-by-repo", () => ({
+  useBaseBranchByRepo: () => ({}),
+}));
 vi.mock("@/components/state-provider", () => ({
   useAppStore: () => null,
 }));

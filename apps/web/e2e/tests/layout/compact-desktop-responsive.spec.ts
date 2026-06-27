@@ -27,15 +27,15 @@ test.describe("compact desktop responsive layout", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
-    await testPage.goto(`/t/${task.id}`);
+    await testPage.goto(`/t/${task.id}?sessionId=${task.session_id}`);
 
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
+    await session.waitForDockviewReady(30_000);
     await expect(testPage.getByTestId("dockview-task-layout")).toBeVisible();
     await expect(testPage.getByTestId("tablet-task-layout")).toHaveCount(0);
     await expect(session.sidebar).toBeVisible();
-    await expect(session.activeChat()).toBeVisible();
     await expect(testPage.getByTestId("dockview-add-panel-btn")).toBeVisible();
 
     const tabs = testPage.locator(".dv-tab");

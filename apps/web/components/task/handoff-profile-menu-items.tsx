@@ -14,8 +14,8 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from "@kandev/ui/dropdown-menu";
-import { useAppStore } from "@/components/state-provider";
 import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-specs";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useTaskExecutorProfile } from "@/hooks/domains/session/use-task-executor-profile";
 import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
 import type { AgentProfileOption } from "@/lib/state/slices";
@@ -38,7 +38,7 @@ function profileDisplayLabel(profile: AgentProfileOption): { label: string; agen
 }
 
 export function useHandoffProfiles(taskId: string, enabled = true): HandoffProfile[] {
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items);
+  const { agentProfiles } = useSettingsData(enabled);
   const executorProfile = useTaskExecutorProfile(taskId, enabled);
   const { specs: authSpecs, loaded: authLoaded } = useRemoteAuthSpecs();
 

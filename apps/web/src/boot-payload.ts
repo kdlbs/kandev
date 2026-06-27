@@ -1,6 +1,8 @@
 import type { AppState } from "@/lib/state/store";
 import { getBackendConfig } from "@/lib/config";
 import type { FetchedSessionData } from "@/lib/ssr/session-page-state";
+import type { FeatureFlags } from "@/lib/state/slices/features/types";
+import type { Worktree } from "@/lib/state/slices/session/types";
 import type { Repository, Task, Workflow, WorkflowStep } from "@/lib/types/http";
 
 export type BootRoute = {
@@ -34,11 +36,21 @@ export type BootRouteData = {
   };
 };
 
+export type BootInitialState = Partial<AppState> & {
+  features?: FeatureFlags;
+  worktrees?: {
+    items?: Record<string, Worktree>;
+  };
+  sessionWorktreesBySessionId?: {
+    itemsBySessionId?: Record<string, string[]>;
+  };
+};
+
 export type BootPayload = {
   version?: number;
   route?: BootRoute;
   runtime?: BootRuntime;
-  initialState?: Partial<AppState>;
+  initialState?: BootInitialState;
   routeData?: BootRouteData;
 };
 
@@ -59,7 +71,7 @@ export function readBootPayload(win: Window = window): BootPayload {
     version: typeof payload.version === "number" ? payload.version : undefined,
     route: isRecord(payload.route) ? readRoute(payload.route) : undefined,
     runtime,
-    initialState: isRecord(payload.initialState) ? (payload.initialState as Partial<AppState>) : {},
+    initialState: isRecord(payload.initialState) ? (payload.initialState as BootInitialState) : {},
     routeData: isRecord(payload.routeData) ? (payload.routeData as BootRouteData) : undefined,
   };
 }

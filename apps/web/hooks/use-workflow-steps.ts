@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { workflowStepsQueryOptions } from "@/lib/query/query-options";
 
 export type WorkflowStepOption = { id: string; name: string };
 
@@ -19,45 +20,13 @@ export function useWorkflowSteps(workflowId: string): {
   steps: WorkflowStepOption[];
   loading: boolean;
 } {
-  const [steps, setSteps] = useState<WorkflowStepOption[]>([]);
-  // Initialize loading to match the effect's behaviour on first render: if
-  // workflowId is truthy at mount we'll fetch immediately, so the dropdown
-  // should show "Loading steps…" rather than "No steps in this workflow"
-  // before the fetch lands. Only the setState-during-render guard below ever
-  // toggles loading back on for subsequent workflowId changes.
-  const [loading, setLoading] = useState(!!workflowId);
-  const [prevWorkflowId, setPrevWorkflowId] = useState(workflowId);
+  const query = useQuery(workflowStepsQueryOptions(workflowId));
+  const steps = useMemo(
+    () => (query.data ?? []).map((step) => ({ id: step.id, name: step.name })),
+    [query.data],
+  );
 
-  // setState-during-render is the React-blessed way to derive state from a
-  // changing input without a useEffect race. React drops the in-progress
-  // render and re-renders with the new state immediately.
-  if (prevWorkflowId !== workflowId) {
-    setPrevWorkflowId(workflowId);
-    setSteps([]);
-    setLoading(!!workflowId);
-  }
-
-  useEffect(() => {
-    if (!workflowId) return;
-    let cancelled = false;
-    listWorkflowSteps(workflowId)
-      .then((res) => {
-        if (cancelled) return;
-        const sorted = [...res.steps].sort((a, b) => a.position - b.position);
-        setSteps(sorted.map((s) => ({ id: s.id, name: s.name })));
-      })
-      .catch(() => {
-        if (!cancelled) setSteps([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workflowId]);
-
-  return { steps, loading };
+  return { steps, loading: Boolean(workflowId) && query.isFetching && steps.length === 0 };
 }
 
 // stepPlaceholder picks the right empty-state text for the step Select based

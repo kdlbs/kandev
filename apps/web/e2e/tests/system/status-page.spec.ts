@@ -47,6 +47,7 @@ test.describe("System Status page", () => {
     const navigation = testPage.waitForLoadState("load");
     await resetButton.click();
     await navigation;
+    await expect(testPage.getByTestId("system-page-title")).toHaveText("Status");
 
     const stored = await testPage.evaluate(() =>
       window.localStorage.getItem("e2e-ui-state-sentinel"),

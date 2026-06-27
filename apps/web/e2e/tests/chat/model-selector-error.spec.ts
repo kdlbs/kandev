@@ -129,9 +129,10 @@ test.describe("Chat model selector — RPC failure", () => {
 
     await trigger.click();
     await testPage.getByRole("option", { name: /Mock Smart/ }).click();
-    // Re-open and pick again — second request will succeed. mock-agent only
-    // ships two models (Mock Fast / Mock Smart), so we go back to Mock Fast.
-    await trigger.click();
+    await expect(trigger).toContainText("Mock Smart", { timeout: 5_000 });
+    // The popover stays open because mock-agent also exposes extra config
+    // options. Pick again — second request will succeed. mock-agent only ships
+    // two models (Mock Fast / Mock Smart), so we go back to Mock Fast.
     await testPage.getByRole("option", { name: /Mock Fast/ }).click();
 
     // Now release the first (stale) request — its 500 rejection should be

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useCallback, useRef, useState } from "react";
+import { useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  listSentryIssueWatches,
   createSentryIssueWatch,
   updateSentryIssueWatch,
   deleteSentryIssueWatch,
@@ -10,6 +10,8 @@ import {
   previewResetSentryIssueWatch,
   resetSentryIssueWatch,
 } from "@/lib/api/domains/sentry-api";
+import { qk } from "@/lib/query/keys";
+import { sentryIssueWatchesQueryOptions } from "@/lib/query/query-options/sentry";
 import type {
   CreateSentryIssueWatchRequest,
   SentryIssueWatch,
@@ -27,80 +29,35 @@ import type {
  * cross-workspace mutations.
  */
 export function useSentryIssueWatches(workspaceId?: string | null) {
-  const [items, setItems] = useState<SentryIssueWatch[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const queryClient = useQueryClient();
+  const query = useQuery(sentryIssueWatchesQueryOptions(workspaceId));
+  const items = query.data ?? [];
 
-  // Track the raw workspaceId (not `?? null`) so the three scopes stay distinct:
-  // undefined = fetch all, null = don't fetch, string = one workspace. Collapsing
-  // undefined→null would hide an "all → none" transition and leave stale data.
-  const initialized = useRef(false);
-  const lastWorkspaceId = useRef<string | null | undefined>(undefined);
-
-  useEffect(() => {
-    if (initialized.current && lastWorkspaceId.current !== workspaceId) {
-      // Reset cached list on scope change (incl. → null). Also clear `loading`:
-      // a fetch from the old scope can no longer complete into the new one (its
-      // .finally is gated by `ignore`), and a → null scope starts no replacement
-      // fetch, so without this the hook would stay stuck at loading=true.
-      /* eslint-disable react-hooks/set-state-in-effect -- resetting cached state when scope changes */
-      setItems([]);
-      setLoaded(false);
-      setLoading(false);
-      /* eslint-enable react-hooks/set-state-in-effect */
-    }
-    initialized.current = true;
-    lastWorkspaceId.current = workspaceId;
-  }, [workspaceId]);
-
-  useEffect(() => {
-    if (workspaceId === null || loaded) return;
-    // `loading` is intentionally NOT a dependency: setLoading(true) below would
-    // otherwise re-run this effect, whose cleanup sets ignore=true on the
-    // in-flight request, so its .finally skips setLoading(false) and the hook
-    // sticks at loading=true forever. The `loaded` guard already prevents a
-    // duplicate fetch, and `ignore` handles a workspaceId change mid-flight.
-    let ignore = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- starting external fetch
-    setLoading(true);
-    listSentryIssueWatches(workspaceId ?? undefined, { cache: "no-store" })
-      .then((res) => {
-        if (ignore) return;
-        setItems(res ?? []);
-        setLoaded(true);
-      })
-      .catch(() => {
-        if (ignore) return;
-        setItems([]);
-        setLoaded(true);
-      })
-      .finally(() => {
-        if (!ignore) setLoading(false);
-      });
-    return () => {
-      ignore = true;
-    };
-  }, [workspaceId, loaded]);
-
-  const create = useCallback(async (req: CreateSentryIssueWatchRequest) => {
-    const watch = await createSentryIssueWatch(req);
-    setItems((prev) => [...prev, watch]);
-    return watch;
-  }, []);
+  const create = useCallback(
+    async (req: CreateSentryIssueWatchRequest) => {
+      const watch = await createSentryIssueWatch(req);
+      patchSentryIssueWatchCaches(queryClient, workspaceId, watch);
+      return watch;
+    },
+    [queryClient, workspaceId],
+  );
 
   const update = useCallback(
     async (id: string, watchWorkspaceId: string, req: UpdateSentryIssueWatchRequest) => {
       const watch = await updateSentryIssueWatch(id, watchWorkspaceId, req);
-      setItems((prev) => prev.map((w) => (w.id === watch.id ? watch : w)));
+      patchSentryIssueWatchCaches(queryClient, workspaceId, watch);
       return watch;
     },
-    [],
+    [queryClient, workspaceId],
   );
 
-  const remove = useCallback(async (id: string, watchWorkspaceId: string) => {
-    await deleteSentryIssueWatch(id, watchWorkspaceId);
-    setItems((prev) => prev.filter((w) => w.id !== id));
-  }, []);
+  const remove = useCallback(
+    async (id: string, watchWorkspaceId: string) => {
+      await deleteSentryIssueWatch(id, watchWorkspaceId);
+      removeSentryIssueWatchFromCaches(queryClient, workspaceId, id);
+    },
+    [queryClient, workspaceId],
+  );
 
   const trigger = useCallback(async (id: string, watchWorkspaceId: string) => {
     return triggerSentryIssueWatch(id, watchWorkspaceId);
@@ -110,13 +67,58 @@ export function useSentryIssueWatches(workspaceId?: string | null) {
     return previewResetSentryIssueWatch(id, watchWorkspaceId);
   }, []);
 
-  const reset = useCallback(async (id: string, watchWorkspaceId: string) => {
-    const res = await resetSentryIssueWatch(id, watchWorkspaceId);
-    // Force the next render to refetch so the now-empty dedup set / cleared
-    // last_polled_at land in the UI immediately.
-    setLoaded(false);
-    return res;
-  }, []);
+  const reset = useCallback(
+    async (id: string, watchWorkspaceId: string) => {
+      const res = await resetSentryIssueWatch(id, watchWorkspaceId);
+      queryClient.invalidateQueries({ queryKey: qk.integrations.sentry.issueWatches(workspaceId) });
+      queryClient.invalidateQueries({ queryKey: qk.integrations.sentry.issueWatches(undefined) });
+      queryClient.invalidateQueries({
+        queryKey: qk.integrations.sentry.issueWatches(watchWorkspaceId),
+      });
+      return res;
+    },
+    [queryClient, workspaceId],
+  );
 
-  return { items, loaded, loading, create, update, remove, trigger, previewReset, reset };
+  return {
+    items,
+    loaded: query.isSuccess,
+    loading: query.isFetching && !query.isSuccess,
+    create,
+    update,
+    remove,
+    trigger,
+    previewReset,
+    reset,
+  };
+}
+
+function patchSentryIssueWatchCaches(
+  queryClient: ReturnType<typeof useQueryClient>,
+  workspaceId: string | null | undefined,
+  watch: SentryIssueWatch,
+) {
+  const patch = (prev: SentryIssueWatch[] | undefined) => upsertById(prev ?? [], watch);
+  queryClient.setQueryData(qk.integrations.sentry.issueWatches(workspaceId), patch);
+  queryClient.setQueryData(qk.integrations.sentry.issueWatches(undefined), patch);
+  queryClient.setQueryData(qk.integrations.sentry.issueWatches(watch.workspaceId), patch);
+}
+
+function removeSentryIssueWatchFromCaches(
+  queryClient: ReturnType<typeof useQueryClient>,
+  workspaceId: string | null | undefined,
+  id: string,
+) {
+  const remove = (prev: SentryIssueWatch[] | undefined) =>
+    (prev ?? []).filter((watch) => watch.id !== id);
+  queryClient.setQueryData(qk.integrations.sentry.issueWatches(workspaceId), remove);
+  queryClient.setQueryData(qk.integrations.sentry.issueWatches(undefined), remove);
+}
+
+function upsertById<T extends { id: string }>(items: T[], next: T): T[] {
+  const index = items.findIndex((item) => item.id === next.id);
+  if (index === -1) return [...items, next];
+  const copy = [...items];
+  copy[index] = next;
+  return copy;
 }

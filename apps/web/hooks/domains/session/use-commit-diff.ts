@@ -1,9 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { requestCommitDiff } from "@/components/task/commit-diff-request";
+import { sessionAgentctlQueryOptions } from "@/lib/query/query-options";
 import type { FileInfo } from "@/lib/state/store";
 
 type UseCommitDiffResult = {
@@ -23,11 +25,13 @@ export function useCommitDiff(commitSha: string, repo?: string): UseCommitDiffRe
   const sessionTaskId = useAppStore((state) =>
     activeSessionId ? state.taskSessions.items[activeSessionId]?.task_id : undefined,
   );
-  const agentctlReady = useAppStore((state) =>
+  const agentctlQuery = useQuery(sessionAgentctlQueryOptions(activeSessionId ?? ""));
+  const storeAgentctlReady = useAppStore((state) =>
     activeSessionId
       ? state.sessionAgentctl.itemsBySessionId[activeSessionId]?.status === "ready"
       : false,
   );
+  const agentctlReady = agentctlQuery.data?.status === "ready" || storeAgentctlReady;
   const { toast } = useToast();
 
   const [files, setFiles] = useState<Record<string, FileInfo> | null>(null);

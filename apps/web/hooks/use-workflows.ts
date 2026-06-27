@@ -1,29 +1,17 @@
-import { useEffect } from "react";
-import { useAppStore } from "@/components/state-provider";
-import { listWorkflows } from "@/lib/api";
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { mapWorkflowItem } from "@/hooks/use-workflow-cache";
+import { workflowsQueryOptions } from "@/lib/query/query-options";
 
 export function useWorkflows(workspaceId: string | null, enabled = true) {
-  const workflows = useAppStore((state) => state.workflows.items);
-  const setWorkflows = useAppStore((state) => state.setWorkflows);
+  const query = useQuery({
+    ...workflowsQueryOptions(workspaceId ?? "", { includeHidden: true }),
+    enabled: enabled && Boolean(workspaceId),
+  });
+  const workflows = useMemo(
+    () => (query.data ? query.data.map(mapWorkflowItem) : []),
+    [query.data],
+  );
 
-  useEffect(() => {
-    if (!enabled || !workspaceId) return;
-    listWorkflows(workspaceId, { cache: "no-store", includeHidden: true })
-      .then((response) => {
-        const mapped = response.workflows.map((workflow) => ({
-          id: workflow.id,
-          workspaceId: workflow.workspace_id,
-          name: workflow.name,
-          description: workflow.description,
-          sortOrder: workflow.sort_order ?? 0,
-          agent_profile_id: workflow.agent_profile_id,
-          hidden: workflow.hidden,
-          style: workflow.style,
-        }));
-        setWorkflows(mapped);
-      })
-      .catch(() => setWorkflows([]));
-  }, [enabled, setWorkflows, workspaceId]);
-
-  return { workflows };
+  return { workflows, isLoading: query.isFetching && workflows.length === 0 };
 }

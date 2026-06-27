@@ -89,10 +89,10 @@ function useSessionAgentProfile(sessionId: string | null | undefined) {
   const profileId = useAppStore((state) =>
     sessionId ? (state.taskSessions.items[sessionId]?.agent_profile_id ?? null) : null,
   );
-  return useAppStore((state) =>
-    profileId
-      ? (state.agentProfiles.items.find((p: { id: string }) => p.id === profileId) ?? null)
-      : null,
+  const { agentProfiles } = useSettingsData(Boolean(profileId));
+  return useMemo(
+    () => (profileId ? (agentProfiles.find((profile) => profile.id === profileId) ?? null) : null),
+    [agentProfiles, profileId],
   );
 }
 

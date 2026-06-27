@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, renderHook } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => null,
@@ -12,6 +14,13 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 import { useSessionChangesCount } from "./use-session-changes-count";
+
+function createWrapper() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return createElement(QueryClientProvider, { client }, children);
+  };
+}
 
 type FileEntry = { path: string; status: "modified"; staged: boolean };
 type StatusEntry = {
@@ -68,12 +77,16 @@ describe("useSessionChangesCount", () => {
   });
 
   it("returns 0 when the session has no gitStatus and no commits yet", () => {
-    const { result } = renderHook(() => useSessionChangesCount("sess-new"));
+    const { result } = renderHook(() => useSessionChangesCount("sess-new"), {
+      wrapper: createWrapper(),
+    });
     expect(result.current).toBe(0);
   });
 
   it("returns 0 for null session id", () => {
-    const { result } = renderHook(() => useSessionChangesCount(null));
+    const { result } = renderHook(() => useSessionChangesCount(null), {
+      wrapper: createWrapper(),
+    });
     expect(result.current).toBe(0);
   });
 
@@ -82,7 +95,9 @@ describe("useSessionChangesCount", () => {
       envBySession: { "sess-1": "env-1" },
       byEnvironmentRepo: { "env-1": { "": status(["a.ts", "b.ts"]) } },
     });
-    const { result } = renderHook(() => useSessionChangesCount("sess-1"));
+    const { result } = renderHook(() => useSessionChangesCount("sess-1"), {
+      wrapper: createWrapper(),
+    });
     expect(result.current).toBe(2);
   });
 
@@ -99,7 +114,9 @@ describe("useSessionChangesCount", () => {
         },
       },
     });
-    const { result } = renderHook(() => useSessionChangesCount("sess-1"));
+    const { result } = renderHook(() => useSessionChangesCount("sess-1"), {
+      wrapper: createWrapper(),
+    });
     expect(result.current).toBe(3);
   });
 
@@ -109,7 +126,9 @@ describe("useSessionChangesCount", () => {
       byEnvironmentRepo: { "env-1": { "": status(["a.ts"]) } },
       commitsByEnvironmentId: { "env-1": [{ commit_sha: "x" }, { commit_sha: "y" }] },
     });
-    const { result } = renderHook(() => useSessionChangesCount("sess-1"));
+    const { result } = renderHook(() => useSessionChangesCount("sess-1"), {
+      wrapper: createWrapper(),
+    });
     expect(result.current).toBe(3);
   });
 
@@ -117,7 +136,9 @@ describe("useSessionChangesCount", () => {
     setStore({
       byEnvironmentRepo: { "sess-pending": { "": status(["only.ts"]) } },
     });
-    const { result } = renderHook(() => useSessionChangesCount("sess-pending"));
+    const { result } = renderHook(() => useSessionChangesCount("sess-pending"), {
+      wrapper: createWrapper(),
+    });
     expect(result.current).toBe(1);
   });
 
@@ -130,7 +151,9 @@ describe("useSessionChangesCount", () => {
       byEnvironmentRepo: { "env-old": { "": status(["leak.ts", "leak2.ts"]) } },
       commitsByEnvironmentId: { "env-old": [{ commit_sha: "old" }] },
     });
-    const { result } = renderHook(() => useSessionChangesCount("sess-new"));
+    const { result } = renderHook(() => useSessionChangesCount("sess-new"), {
+      wrapper: createWrapper(),
+    });
     expect(result.current).toBe(0);
   });
 });

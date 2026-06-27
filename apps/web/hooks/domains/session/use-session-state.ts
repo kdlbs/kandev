@@ -1,6 +1,8 @@
+import { useQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
 import { useSession } from "@/hooks/domains/session/use-session";
 import { useTask } from "@/hooks/use-task";
+import { prepareProgressQueryOptions } from "@/lib/query/query-options";
 import type { TaskSession } from "@/lib/types/http";
 
 function deriveSessionFlags(state: TaskSession["state"] | undefined, errorMessage?: string) {
@@ -16,29 +18,33 @@ type UseSessionStateOptions = {
   taskIdHint?: string | null;
 };
 
-export function useSessionState(sessionId: string | null, options: UseSessionStateOptions = {}) {
-  const { taskIdHint = null } = options;
+function useValidatedActiveSessionId() {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-
-  // Validate that active session belongs to the active task before using it.
-  // This prevents showing messages from an unrelated session when navigating
-  // to a task that has no sessions yet (activeSessionId may still hold the
-  // old session from the previous task).
   const activeSessionData = useAppStore((state) =>
     activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null,
   );
-  const validatedActiveSessionId =
-    activeSessionData && activeSessionData.task_id === activeTaskId ? activeSessionId : null;
 
+  return activeSessionData && activeSessionData.task_id === activeTaskId ? activeSessionId : null;
+}
+
+function usePrepareStatus(resolvedSessionId: string | null) {
+  const prepareQuery = useQuery(prepareProgressQueryOptions(resolvedSessionId ?? ""));
+  const storePrepareStatus = useAppStore((state) =>
+    resolvedSessionId ? state.prepareProgress.bySessionId[resolvedSessionId]?.status : undefined,
+  );
+  return prepareQuery.data?.status ?? storePrepareStatus;
+}
+
+export function useSessionState(sessionId: string | null, options: UseSessionStateOptions = {}) {
+  const { taskIdHint = null } = options;
+  const validatedActiveSessionId = useValidatedActiveSessionId();
   const resolvedSessionId = sessionId ?? validatedActiveSessionId;
 
   const { session } = useSession(resolvedSessionId);
   const taskId = session?.task_id ?? taskIdHint ?? null;
   const task = useTask(taskId);
-  const prepareStatus = useAppStore((state) =>
-    resolvedSessionId ? state.prepareProgress.bySessionId[resolvedSessionId]?.status : undefined,
-  );
+  const prepareStatus = usePrepareStatus(resolvedSessionId);
 
   const taskDescription = task?.description ?? null;
   const flags = deriveSessionFlags(session?.state, session?.error_message);

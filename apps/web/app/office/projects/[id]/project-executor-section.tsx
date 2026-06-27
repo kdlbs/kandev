@@ -8,8 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { IconDeviceFloppy } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { updateProject } from "@/lib/api/domains/office-api";
-import { useAppStore } from "@/components/state-provider";
 import type { Project } from "@/lib/state/slices/office/types";
+import { useSyncOfficeProjectCache } from "./project-query-cache";
 
 type ProjectExecutorSectionProps = {
   project: Project;
@@ -95,7 +95,7 @@ function ContainerFields({
 }
 
 export function ProjectExecutorSection({ project }: ProjectExecutorSectionProps) {
-  const updateProjectStore = useAppStore((s) => s.updateProject);
+  const syncProjectCache = useSyncOfficeProjectCache();
   const config = project.executorConfig ?? {};
 
   const [executorType, setExecutorType] = useState((config.type as string) ?? "");
@@ -123,8 +123,8 @@ export function ProjectExecutorSection({ project }: ProjectExecutorSectionProps)
         if (cpuCores) limits.cpu_cores = parseInt(cpuCores, 10);
         newConfig.resource_limits = limits;
       }
-      await updateProject(project.id, { executorConfig: newConfig });
-      updateProjectStore(project.id, { executorConfig: newConfig });
+      const updatedProject = await updateProject(project.id, { executorConfig: newConfig });
+      syncProjectCache(updatedProject);
       setDirty(false);
       toast.success("Executor configuration saved");
     } catch (err) {
@@ -132,7 +132,7 @@ export function ProjectExecutorSection({ project }: ProjectExecutorSectionProps)
     } finally {
       setSaving(false);
     }
-  }, [executorType, image, memoryMb, cpuCores, isContainer, project.id, updateProjectStore]);
+  }, [executorType, image, memoryMb, cpuCores, isContainer, project.id, syncProjectCache]);
 
   return (
     <div className="space-y-3">

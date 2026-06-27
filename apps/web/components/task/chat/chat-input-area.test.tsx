@@ -8,6 +8,9 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
+import { qk } from "@/lib/query/keys";
 
 const archiveAndSwitchMock = vi.fn();
 const toastMock = vi.fn();
@@ -66,6 +69,10 @@ vi.mock("@/hooks/domains/kanban/use-plan-actions", () => ({
   }),
 }));
 
+vi.mock("@/hooks/domains/kanban/use-all-workflow-snapshots", () => ({
+  useAllWorkflowSnapshots: () => ({ snapshots: {} }),
+}));
+
 vi.mock("@/hooks/domains/session/use-executor-environment-availability", () => ({
   useExecutorEnvironmentAvailability: () => ({
     unavailable: false,
@@ -74,7 +81,10 @@ vi.mock("@/hooks/domains/session/use-executor-environment-availability", () => (
 }));
 
 vi.mock("@/lib/ws/connection", () => ({
-  getWebSocketClient: () => ({ send: vi.fn() }),
+  getWebSocketClient: () => ({
+    request: vi.fn().mockResolvedValue({ prs: taskPRsByTaskId.value["task-1"] }),
+    send: vi.fn(),
+  }),
 }));
 
 vi.mock("@/lib/local-storage", async (importOriginal) => ({
@@ -86,6 +96,8 @@ vi.mock("@/lib/local-storage", async (importOriginal) => ({
 }));
 
 const mockState = {
+  clearPendingPrUrlForTaskPR: vi.fn(),
+  workspaces: { activeId: "workspace-1" },
   taskPRs: {
     get byTaskId() {
       return taskPRsByTaskId.value;
@@ -94,6 +106,23 @@ const mockState = {
 };
 
 import { PRMergedBanner, useSubmitHandler } from "./chat-input-area";
+
+function createTestQueryClient() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  queryClient.setQueryData(
+    qk.integrations.github.taskPr("task-1"),
+    taskPRsByTaskId.value["task-1"],
+  );
+  return queryClient;
+}
+
+function renderWithQuery(ui: ReactNode) {
+  return render(<QueryClientProvider client={createTestQueryClient()}>{ui}</QueryClientProvider>);
+}
+
+function queryWrapper({ children }: { children: ReactNode }) {
+  return <QueryClientProvider client={createTestQueryClient()}>{children}</QueryClientProvider>;
+}
 
 beforeEach(() => {
   archiveAndSwitchMock.mockResolvedValue(undefined);
@@ -111,7 +140,7 @@ afterEach(() => {
 
 describe("PRMergedBanner", () => {
   it("archives without showing a success toast", async () => {
-    render(<PRMergedBanner taskId="task-1" />);
+    renderWithQuery(<PRMergedBanner taskId="task-1" />);
 
     fireEvent.click(screen.getByTestId("pr-merged-archive-button"));
 
@@ -121,7 +150,7 @@ describe("PRMergedBanner", () => {
 
   it("keeps the failure toast when archive fails", async () => {
     archiveAndSwitchMock.mockRejectedValueOnce(new Error("archive failed"));
-    render(<PRMergedBanner taskId="task-1" />);
+    renderWithQuery(<PRMergedBanner taskId="task-1" />);
 
     fireEvent.click(screen.getByTestId("pr-merged-archive-button"));
 
@@ -160,7 +189,7 @@ describe("useSubmitHandler", () => {
   it("shows a toast when sending fails", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     handleSendMessageMock.mockRejectedValueOnce(new Error("WebSocket request timed out"));
-    const { result } = renderHook(() => useSubmitHandler(panelState()));
+    const { result } = renderHook(() => useSubmitHandler(panelState()), { wrapper: queryWrapper });
 
     await act(async () => {
       await result.current.handleSubmit("hello");

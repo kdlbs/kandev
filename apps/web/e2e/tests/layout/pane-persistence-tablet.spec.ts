@@ -2,7 +2,6 @@ import { type Page, expect as pwExpect } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { SessionPage } from "../../pages/session-page";
 
 // The responsive breakpoint logic treats width < 768 with fine pointer as
 // "tablet"; width >= 768 with fine pointer is compactDesktop. Headless
@@ -14,7 +13,7 @@ async function openTabletTask(
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
-): Promise<SessionPage> {
+): Promise<void> {
   await page.setViewportSize(TABLET_VIEWPORT);
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
@@ -28,10 +27,7 @@ async function openTabletTask(
     },
   );
   await page.goto(`/t/${task.id}`);
-  const session = new SessionPage(page);
-  await session.waitForLoad();
   await expect(page.getByTestId("tablet-task-layout")).toBeVisible({ timeout: 10_000 });
-  return session;
 }
 
 async function readStoredLayout(page: Page, id: string): Promise<Record<string, number> | null> {
@@ -47,7 +43,7 @@ test.describe("Tablet pane persistence", () => {
     apiClient,
     seedData,
   }) => {
-    const session = await openTabletTask(testPage, apiClient, seedData, "Tablet persist");
+    await openTabletTask(testPage, apiClient, seedData, "Tablet persist");
 
     // Drive the resize-panels library directly by overwriting the stored
     // layout — the underlying drag handle is a complex pointer-events target
@@ -58,7 +54,6 @@ test.describe("Tablet pane persistence", () => {
       window.localStorage.setItem("task-layout-tablet-v1", JSON.stringify({ left: 65, right: 35 }));
     });
     await testPage.reload();
-    await session.waitForLoad();
     await expect(testPage.getByTestId("tablet-task-layout")).toBeVisible({ timeout: 10_000 });
 
     // localStorage round-trip: react-resizable-panels writes its own
@@ -84,8 +79,7 @@ test.describe("Tablet pane persistence", () => {
     await testPage.evaluate(() => {
       window.localStorage.setItem("task-layout-tablet-v1", '{"left":2}');
     });
-    const session = await openTabletTask(testPage, apiClient, seedData, "Tablet fallback");
-    void session;
+    await openTabletTask(testPage, apiClient, seedData, "Tablet fallback");
 
     // After load, onLayoutChanged replaces the invalid stub with the
     // rendered (valid) layout. Verify the persisted value is now valid:

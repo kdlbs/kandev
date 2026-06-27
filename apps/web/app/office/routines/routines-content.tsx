@@ -1,21 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { Button } from "@kandev/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { IconPlus } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
+import { useOfficeAgentsData, useOfficeRoutinesData } from "@/hooks/domains/office/use-office-data";
 import {
-  listRoutines,
   createRoutine,
   updateRoutine,
   deleteRoutine,
   runRoutine,
-  listAllRoutineRuns,
   createRoutineTrigger,
-  listRoutineTriggers,
 } from "@/lib/api/domains/office-api";
+import {
+  officeRoutineRunsQueryOptions,
+  officeRoutineTriggersQueryOptions,
+} from "@/lib/query/query-options/office";
 import type {
   Routine,
   AgentProfile,
@@ -116,77 +119,47 @@ function useRoutineActions(workspaceId: string | null, fetchRoutines: () => Prom
 // RoutinesContent component stays under the per-function ceiling. Each
 // fetcher is referentially stable (depends on workspaceId only) so the
 // effects don't re-fire on unrelated re-renders.
-function useRoutinesData(workspaceId: string | null) {
-  const routines = useAppStore((s) => s.office.routines);
-  const setRoutines = useAppStore((s) => s.setRoutines);
-
-  const [runs, setRuns] = useState<RoutineRun[]>([]);
-  const [triggersByRoutine, setTriggersByRoutine] = useState<Record<string, RoutineTrigger[]>>({});
+function useRoutinesData(workspaceId: string | null, initialRoutines: Routine[] = []) {
+  const routinesQuery = useOfficeRoutinesData(workspaceId, initialRoutines);
+  const runsQuery = useQuery(officeRoutineRunsQueryOptions(workspaceId ?? ""));
+  const routines = routinesQuery.data?.routines ?? initialRoutines;
+  const triggerQueries = useQueries({
+    queries: routines.map((routine) => officeRoutineTriggersQueryOptions(routine.id)),
+  });
 
   const fetchRoutines = useCallback(async () => {
     if (!workspaceId) return;
-    const res = await listRoutines(workspaceId);
-    setRoutines(res.routines ?? []);
-  }, [workspaceId, setRoutines]);
+    await routinesQuery.refetch();
+  }, [routinesQuery, workspaceId]);
 
   const fetchRuns = useCallback(async () => {
     if (!workspaceId) return [] as RoutineRun[];
-    const res = await listAllRoutineRuns(workspaceId);
-    return res.runs ?? [];
-  }, [workspaceId]);
+    const res = await runsQuery.refetch();
+    return res.data?.runs ?? [];
+  }, [runsQuery, workspaceId]);
 
-  const fetchTriggers = useCallback(async (rs: Routine[]) => {
-    const entries = await Promise.all(
-      rs.map(async (r) => {
-        const res = await listRoutineTriggers(r.id).catch(() => ({
-          triggers: [] as RoutineTrigger[],
-        }));
-        return [r.id, res.triggers ?? []] as const;
-      }),
-    );
-    const out: Record<string, RoutineTrigger[]> = {};
-    for (const [id, triggers] of entries) out[id] = triggers;
-    return out;
-  }, []);
+  const triggersByRoutine: Record<string, RoutineTrigger[]> = {};
+  routines.forEach((routine, index) => {
+    triggersByRoutine[routine.id] = triggerQueries[index]?.data?.triggers ?? [];
+  });
 
-  useEffect(() => {
-    let cancelled = false;
-    void fetchRoutines();
-    fetchRuns().then((next) => {
-      if (!cancelled) setRuns(next);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [fetchRoutines, fetchRuns]);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (routines.length === 0) {
-      Promise.resolve().then(() => {
-        if (!cancelled) setTriggersByRoutine({});
-      });
-      return () => {
-        cancelled = true;
-      };
-    }
-    fetchTriggers(routines).then((map) => {
-      if (!cancelled) setTriggersByRoutine(map);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [routines, fetchTriggers]);
-
-  return { routines, runs, setRuns, triggersByRoutine, fetchRoutines, fetchRuns };
+  return {
+    routines,
+    runs: runsQuery.data?.runs ?? [],
+    triggersByRoutine,
+    fetchRoutines,
+    fetchRuns,
+  };
 }
 
-export function RoutinesContent() {
+export function RoutinesContent({ initialRoutines = [] }: { initialRoutines?: Routine[] }) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const agents = useOfficeAgentsData(workspaceId).data?.agents ?? [];
   const [showCreate, setShowCreate] = useState(false);
-  const { routines, runs, setRuns, triggersByRoutine, fetchRoutines, fetchRuns } =
-    useRoutinesData(workspaceId);
+  const { routines, runs, triggersByRoutine, fetchRoutines, fetchRuns } = useRoutinesData(
+    workspaceId,
+    initialRoutines,
+  );
 
   const { handleToggle, handleDelete, handleCreate } = useRoutineActions(
     workspaceId,
@@ -197,13 +170,13 @@ export function RoutinesContent() {
     async (id: string) => {
       try {
         await runRoutine(id);
-        setRuns(await fetchRuns());
+        await fetchRuns();
         toast.success("Routine started");
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Failed to run routine");
       }
     },
-    [fetchRuns, setRuns],
+    [fetchRuns],
   );
 
   return (

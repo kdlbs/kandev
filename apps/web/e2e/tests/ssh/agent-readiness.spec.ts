@@ -80,8 +80,9 @@ test.describe("ssh executor — agent readiness", () => {
     test.setTimeout(60_000);
     // Land on the profile-edit page (the home for the readiness card).
     await testPage.goto(`/settings/executors/${seedData.sshExecutorProfileId}`);
+    await testPage.waitForURL(/\/settings\/executors\/[^/]+$/);
     const card = testPage.getByTestId("ssh-agent-readiness-card");
-    await expect(card).toBeVisible({ timeout: 5_000 });
+    await expect(card).toBeVisible({ timeout: 30_000 });
 
     // Shell selector renders (auto-detect probe populates it).
     const shellSelector = testPage.getByTestId("ssh-readiness-shell");

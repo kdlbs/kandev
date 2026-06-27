@@ -10,17 +10,17 @@ const mocks = vi.hoisted(() => ({
 const state = {
   workspaces: {
     activeId: "kanban-1" as string | null,
-    items: [
-      { id: "kanban-1", name: "Kanban", office_workflow_id: "" },
-      { id: "office-1", name: "Office", office_workflow_id: "wf-office" },
-      { id: "office-2", name: "Office 2", office_workflow_id: "wf-office-2" },
-    ],
   },
   appSidebar: { settingsMode: false },
   toggleAppSidebarSettingsMode: mocks.toggleSettingsMode,
 };
 
 let officeEnabled = false;
+let workspaceItems = [
+  { id: "kanban-1", name: "Kanban", office_workflow_id: "" },
+  { id: "office-1", name: "Office", office_workflow_id: "wf-office" },
+  { id: "office-2", name: "Office 2", office_workflow_id: "wf-office-2" },
+];
 
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: mocks.routerPush }),
@@ -32,6 +32,14 @@ vi.mock("@/components/state-provider", () => ({
 
 vi.mock("@/hooks/domains/features/use-feature", () => ({
   useFeature: () => officeEnabled,
+}));
+
+vi.mock("@/hooks/domains/workspace/use-workspaces", () => ({
+  useWorkspaces: () => ({
+    items: workspaceItems,
+    activeId: state.workspaces.activeId,
+    activeWorkspace: workspaceItems.find((workspace) => workspace.id === state.workspaces.activeId),
+  }),
 }));
 
 vi.mock("@/hooks/use-release-notes", () => ({
@@ -73,7 +81,7 @@ describe("AppSidebarFooter", () => {
   beforeEach(() => {
     officeEnabled = false;
     state.workspaces.activeId = "kanban-1";
-    state.workspaces.items = [
+    workspaceItems = [
       { id: "kanban-1", name: "Kanban", office_workflow_id: "" },
       { id: "office-1", name: "Office", office_workflow_id: "wf-office" },
       { id: "office-2", name: "Office 2", office_workflow_id: "wf-office-2" },
@@ -129,7 +137,7 @@ describe("AppSidebarFooter", () => {
 
   it("navigates to office setup when no office workspace exists", () => {
     officeEnabled = true;
-    state.workspaces.items = [{ id: "kanban-1", name: "Kanban", office_workflow_id: "" }];
+    workspaceItems = [{ id: "kanban-1", name: "Kanban", office_workflow_id: "" }];
 
     renderFooter();
 

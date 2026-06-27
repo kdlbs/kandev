@@ -61,6 +61,19 @@ export function signatureOf(message: Message): string {
   return signature;
 }
 
+function isLocalEmptyTurnNotice(message: Message): boolean {
+  const metadata = message.metadata;
+  return (
+    message.type === "status" &&
+    message.id.startsWith("empty-turn-") &&
+    Boolean(metadata && typeof metadata === "object" && metadata.empty_turn === true)
+  );
+}
+
+function chronological(a: Message, b: Message): number {
+  return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+}
+
 /**
  * Reconcile a full snapshot against the previous array, preserving object
  * identity for messages whose signature is unchanged and returning the prev
@@ -73,11 +86,19 @@ export function reconcileMessages(prev: Message[] | undefined, next: Message[]):
   const prevById = new Map<string, Message>();
   for (const message of prev) prevById.set(message.id, message);
   let identical = prev.length === next.length;
+  const nextIds = new Set(next.map((message) => message.id));
   const result = next.map((message, i) => {
     const previous = prevById.get(message.id);
     const reused = previous && signatureOf(previous) === signatureOf(message) ? previous : message;
     if (reused !== prev[i]) identical = false;
     return reused;
   });
+  for (const message of prev) {
+    if (!nextIds.has(message.id) && isLocalEmptyTurnNotice(message)) {
+      result.push(message);
+      identical = false;
+    }
+  }
+  if (result.length !== next.length) result.sort(chronological);
   return identical ? prev : result;
 }

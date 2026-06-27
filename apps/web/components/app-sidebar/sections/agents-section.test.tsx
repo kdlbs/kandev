@@ -1,5 +1,8 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { makeQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
 
 const routerMock = vi.hoisted(() => ({
   push: vi.fn(),
@@ -11,14 +14,9 @@ const state = {
       agents: true,
     } as Record<string, boolean>,
   },
-  office: {
-    agentProfiles: [],
-    inboxItems: [],
-  },
   workspaces: {
     activeId: "workspace-1",
   },
-  setOfficeAgentProfiles: vi.fn(),
   toggleAppSidebarSection: vi.fn(),
   setAppSidebarCollapsed: vi.fn(),
   sessions: {
@@ -33,14 +31,6 @@ vi.mock("@/lib/routing/client-router", () => ({
 
 vi.mock("@/hooks/use-in-office", () => ({
   useInOffice: () => true,
-}));
-
-vi.mock("@/hooks/use-office-refetch", () => ({
-  useOfficeRefetch: vi.fn(),
-}));
-
-vi.mock("@/lib/api/domains/office-api", () => ({
-  listAgentProfiles: vi.fn(() => Promise.resolve({ agents: [] })),
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -60,6 +50,18 @@ vi.mock("@kandev/ui/tooltip", () => ({
 
 import { AgentsSection } from "./agents-section";
 
+function renderAgentsSection() {
+  const queryClient = makeQueryClient();
+  queryClient.setQueryData(qk.office.agents("workspace-1"), { agents: [] });
+  queryClient.setQueryData(qk.office.inbox("workspace-1"), { items: [], total_count: 0 });
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <AgentsSection collapsed={false} />
+    </QueryClientProvider>,
+  );
+}
+
 describe("AgentsSection", () => {
   afterEach(() => {
     cleanup();
@@ -67,7 +69,7 @@ describe("AgentsSection", () => {
   });
 
   it("renders Agent Topology as the header action before Add agent", () => {
-    render(<AgentsSection collapsed={false} />);
+    renderAgentsSection();
 
     const agentsHeader = screen.getByRole("button", { name: "Agents" }).closest(".group\\/section");
     expect(agentsHeader).toBeTruthy();

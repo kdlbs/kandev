@@ -9,8 +9,13 @@ import type {
 import { useBranchesByURL } from "@/hooks/domains/github/use-branches-by-url";
 import { usePRInfoByURL } from "@/hooks/domains/github/use-pr-info-by-url";
 import { useAppStore } from "@/components/state-provider";
+import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
+import { useAllCachedRepositories } from "@/hooks/domains/workspace/use-repository-cache";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { useWorkflows } from "@/hooks/use-workflows";
 import { getTaskCreateDraft, setTaskCreateDraft, removeTaskCreateDraft } from "@/lib/local-storage";
 import type {
   StepType,
@@ -538,19 +543,14 @@ export { useDialogComputed } from "@/components/task-create-dialog-computed";
 
 export function useSessionRepoName(isSessionMode: boolean) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const kanbanTasks = useAppStore((state) => state.kanban.tasks);
-  const reposByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  const activeTask = useTaskById(activeTaskId);
+  const repositories = useAllCachedRepositories();
   return useMemo(() => {
     if (!isSessionMode) return undefined;
-    const activeTask = activeTaskId ? kanbanTasks.find((t) => t.id === activeTaskId) : null;
     const repoId = activeTask?.repositoryId;
     if (!repoId) return undefined;
-    for (const repos of Object.values(reposByWorkspace)) {
-      const repo = repos.find((r) => r.id === repoId);
-      if (repo) return repo.name;
-    }
-    return undefined;
-  }, [isSessionMode, activeTaskId, kanbanTasks, reposByWorkspace]);
+    return repositories.find((repo) => repo.id === repoId)?.name;
+  }, [isSessionMode, activeTask?.repositoryId, repositories]);
 }
 
 export function useTaskCreateDialogData(
@@ -560,20 +560,15 @@ export function useTaskCreateDialogData(
   defaultStepId: string | null,
   fs: DialogFormState,
 ) {
-  const workflows = useAppStore((state) => state.workflows.items);
-  const workspaces = useAppStore((state) => state.workspaces.items);
-  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
-  const executors = useAppStore((state) => state.executors.items);
-  const settingsData = useAppStore((state) => state.settingsData);
+  const { workflows } = useWorkflows(workspaceId, open);
+  const { items: workspaces } = useWorkspaces();
   const taskCreateLastUsed = useAppStore((state) => state.userSettings.taskCreateLastUsed);
-  const availableAgentsLoaded = useAppStore((state) => state.availableAgents.loaded);
-  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const { snapshots } = useAllWorkflowSnapshots(workspaceId);
 
-  useSettingsData(open);
+  const settingsCatalog = useSettingsData(open);
   const { repositories, isLoading: repositoriesLoading } = useRepositories(workspaceId, open);
   // Per-repo branch loading lives in each chip now (RepoChipsRow). No
-  // global branch query is needed here — the chip uses useRepositoryBranches
-  // for its own row, and the store dedupes by repositoryId.
+  // global branch query is needed here; each row reads its own Query cache key.
   const branchesLoading = false;
   const computed = useDialogComputed({
     fs,
@@ -582,13 +577,13 @@ export function useTaskCreateDialogData(
     workflowId,
     defaultStepId,
     settingsData: {
-      agentsLoaded: settingsData.agentsLoaded,
-      executorsLoaded: settingsData.executorsLoaded,
-      capabilitiesLoaded: availableAgentsLoaded,
+      agentsLoaded: settingsCatalog.settingsData.agentsLoaded,
+      executorsLoaded: settingsCatalog.settingsData.executorsLoaded,
+      capabilitiesLoaded: settingsCatalog.settingsData.capabilitiesLoaded,
     },
-    agentProfiles,
+    agentProfiles: settingsCatalog.agentProfiles,
     workspaces,
-    executors,
+    executors: settingsCatalog.executors,
     repositories,
     workflows,
     snapshots,
@@ -596,8 +591,8 @@ export function useTaskCreateDialogData(
   return {
     workflows,
     workspaces,
-    agentProfiles,
-    executors,
+    agentProfiles: settingsCatalog.agentProfiles,
+    executors: settingsCatalog.executors,
     snapshots,
     repositories,
     repositoriesLoading,

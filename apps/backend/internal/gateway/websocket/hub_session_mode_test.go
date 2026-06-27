@@ -37,6 +37,7 @@ func newTestClient(id string) *Client {
 		userSubscriptions:    map[string]bool{},
 		runSubscriptions:     map[string]bool{},
 		logger:               log,
+		sentLog:              newWsSentLog(),
 	}
 }
 

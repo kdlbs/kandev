@@ -8,7 +8,7 @@ import { StateHydrator } from "@/components/state-hydrator";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { LinearPageClient } from "./linear-page-client";
 import type { Workflow, WorkflowStep, Workspace, UserSettingsResponse } from "@/lib/types/http";
-import type { AppState } from "@/lib/state/store";
+import type { QuerySeedInitialState } from "@/lib/query/seed";
 
 export default async function LinearPage() {
   let workspaces: Workspace[] = [];
@@ -40,19 +40,18 @@ export default async function LinearPage() {
 
   const mappedUserSettings = mapUserSettingsResponse(userSettingsResponse);
 
-  const initialState: Partial<AppState> = {
+  const initialState: QuerySeedInitialState = {
     workspaces: { items: workspaces, activeId: workspaceId ?? null },
     workflows: {
-      items: workflows.map((w) => ({
-        id: w.id,
-        workspaceId: w.workspace_id,
-        name: w.name,
-        description: w.description ?? null,
-        sortOrder: w.sort_order ?? 0,
-        ...(w.agent_profile_id ? { agent_profile_id: w.agent_profile_id } : {}),
-      })),
       activeId: workflows[0]?.id ?? null,
     },
+    ...(workspaceId
+      ? {
+          workflowLists: {
+            itemsByWorkspaceId: { [workspaceId]: workflows },
+          },
+        }
+      : {}),
     userSettings: { ...mappedUserSettings, workspaceId: workspaceId ?? null },
   };
 

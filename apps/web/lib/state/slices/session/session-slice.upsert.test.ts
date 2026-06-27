@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createSessionSlice } from "./session-slice";
 import { createSessionRuntimeSlice } from "../session-runtime/session-runtime-slice";
-import type { QueuedMessage, SessionSlice } from "./types";
+import type { SessionSlice } from "./types";
 import type { SessionRuntimeSlice } from "../session-runtime/types";
 import {
   agentProfileId as toAgentProfileId,
@@ -53,6 +53,14 @@ function makeSession(overrides: SessionOverrides = {}): TaskSession {
 }
 
 describe("upsertTaskSessionFromEvent", () => {
+  it("does not expose unused pending-model mirror state", () => {
+    const state = makeStore().getState() as unknown as Record<string, unknown>;
+
+    expect("pendingModel" in state).toBe(false);
+    expect("setPendingModel" in state).toBe(false);
+    expect("clearPendingModel" in state).toBe(false);
+  });
+
   it("does not flip loadedByTaskId so API hydration can still run", () => {
     const store = makeStore();
 
@@ -131,67 +139,31 @@ describe("setTaskSessionsForTask preserves WS-seeded fields", () => {
     expect(store.getState().environmentIdBySessionId[SESSION_ID]).toBe("env-1");
   });
 
+  it("merges routing fields from HTTP hydration over a WS-seeded row", () => {
+    const store = makeStore();
+
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(TASK_ID, makeSession({ task_environment_id: "env-1" }));
+
+    store.getState().setTaskSessionsForTask(TASK_ID, [
+      makeSession({
+        task_environment_id: "env-1",
+        is_passthrough: true,
+        agent_profile_snapshot: { cli_passthrough: true },
+      }),
+    ]);
+
+    const session = store.getState().taskSessions.items[SESSION_ID];
+    expect(session.is_passthrough).toBe(true);
+    expect(session.agent_profile_snapshot).toEqual({ cli_passthrough: true });
+  });
+
   it("flips loadedByTaskId to true (unlike upsertTaskSessionFromEvent)", () => {
     const store = makeStore();
 
     store.getState().setTaskSessionsForTask(TASK_ID, [makeSession()]);
 
     expect(store.getState().taskSessionsByTask.loadedByTaskId[TASK_ID]).toBe(true);
-  });
-});
-
-function makeEntry(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
-  return {
-    id: "entry-1",
-    session_id: SESSION_ID,
-    task_id: TASK_ID,
-    content: "hello",
-    plan_mode: false,
-    queued_at: TS,
-    queued_by: "user",
-    ...overrides,
-  };
-}
-
-describe("queue actions", () => {
-  it("setQueueEntries stores the ordered list and capacity meta", () => {
-    const store = makeStore();
-    const entries = [
-      makeEntry({ id: "e1", content: "first" }),
-      makeEntry({ id: "e2", content: "second" }),
-    ];
-
-    store.getState().setQueueEntries(SESSION_ID, entries, { count: 2, max: 10 });
-
-    expect(store.getState().queue.bySessionId[SESSION_ID]).toEqual(entries);
-    expect(store.getState().queue.metaBySessionId[SESSION_ID]).toEqual({ count: 2, max: 10 });
-  });
-
-  it("removeQueueEntry drops a single entry by id and refreshes meta.count", () => {
-    const store = makeStore();
-    const entries = [makeEntry({ id: "e1" }), makeEntry({ id: "e2" }), makeEntry({ id: "e3" })];
-    store.getState().setQueueEntries(SESSION_ID, entries, { count: 3, max: 10 });
-
-    store.getState().removeQueueEntry(SESSION_ID, "e2");
-
-    expect(store.getState().queue.bySessionId[SESSION_ID].map((e) => e.id)).toEqual(["e1", "e3"]);
-    expect(store.getState().queue.metaBySessionId[SESSION_ID].count).toBe(2);
-    expect(store.getState().queue.metaBySessionId[SESSION_ID].max).toBe(10);
-  });
-
-  it("removeQueueEntry is a no-op when the session has no entries", () => {
-    const store = makeStore();
-    store.getState().removeQueueEntry(SESSION_ID, "missing");
-    expect(store.getState().queue.bySessionId[SESSION_ID]).toBeUndefined();
-  });
-
-  it("clearQueueStatus removes both entries and meta", () => {
-    const store = makeStore();
-    store.getState().setQueueEntries(SESSION_ID, [makeEntry()], { count: 1, max: 10 });
-
-    store.getState().clearQueueStatus(SESSION_ID);
-
-    expect(store.getState().queue.bySessionId[SESSION_ID]).toBeUndefined();
-    expect(store.getState().queue.metaBySessionId[SESSION_ID]).toBeUndefined();
   });
 });

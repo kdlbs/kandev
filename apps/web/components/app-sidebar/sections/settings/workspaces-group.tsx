@@ -1,7 +1,7 @@
 "use client";
 
 import { IconArrowsShuffle, IconFolder, IconGitBranch } from "@tabler/icons-react";
-import { useAppStore } from "@/components/state-provider";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import { SettingsGroup, SettingsLeaf } from "./settings-nav-primitives";
 
 const ROOT_HREF = "/settings/workspace";
@@ -18,7 +18,7 @@ function isWorkspaceRoute(pathname: string, workspaceId: string): boolean {
 }
 
 export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGroupProps) {
-  const workspaces = useAppStore((s) => s.workspaces.items);
+  const { items: workspaces } = useWorkspaces();
   const activeWorkspaceId =
     workspaces.find((workspace) => isWorkspaceRoute(pathname, workspace.id))?.id ?? null;
   const routeExpansionKey = activeWorkspaceId ?? "all";

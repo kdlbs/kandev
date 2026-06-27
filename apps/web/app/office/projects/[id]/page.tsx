@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { use, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "@/components/routing/app-link";
 import { useRouter } from "@/lib/routing/client-router";
 import { IconChevronRight, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { toast } from "sonner";
-import { useAppStore } from "@/components/state-provider";
-import { getProject, deleteProject } from "@/lib/api/domains/office-api";
+import { deleteProject } from "@/lib/api/domains/office-api";
+import { qk } from "@/lib/query/keys";
+import { officeProjectQueryOptions } from "@/lib/query/query-options";
 import type { Project } from "@/lib/state/slices/office/types";
 import { OfficeTopbarPortal } from "../../components/office-topbar-portal";
 import { ProjectHeader } from "./project-header";
@@ -23,33 +25,28 @@ type PageProps = {
 export default function ProjectDetailPage({ params }: PageProps) {
   const { id } = use(params);
   const router = useRouter();
-  const removeProject = useAppStore((s) => s.removeProject);
-  const storeProject = useAppStore((s) => s.office.projects.find((p) => p.id === id));
-  const [fetchedProject, setFetchedProject] = useState<Project | null>(null);
-  const project = storeProject ?? fetchedProject;
+  const queryClient = useQueryClient();
+  const projectQuery = useQuery(officeProjectQueryOptions(id));
+  const project = projectQuery.data ?? null;
 
   useEffect(() => {
-    if (storeProject) return;
-    let cancelled = false;
-    getProject(id)
-      .then((res) => {
-        if (!cancelled && res) setFetchedProject(res as unknown as Project);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          toast.error(err instanceof Error ? err.message : "Failed to load project");
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [id, storeProject]);
+    if (!projectQuery.error) return;
+    toast.error(
+      projectQuery.error instanceof Error ? projectQuery.error.message : "Failed to load project",
+    );
+  }, [projectQuery.error]);
 
   const handleDelete = async () => {
     if (!project) return;
     try {
       await deleteProject(project.id);
-      removeProject(project.id);
+      queryClient.removeQueries({ exact: true, queryKey: qk.office.project(project.id) });
+      queryClient.setQueryData<{ projects: Project[] }>(
+        qk.office.projects(project.workspaceId),
+        (current) => ({
+          projects: (current?.projects ?? []).filter((item) => item.id !== project.id),
+        }),
+      );
       toast.success("Project deleted");
       router.push("/office/projects");
     } catch (err) {

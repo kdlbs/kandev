@@ -489,9 +489,8 @@ function useRepoChipData({
   }, [filteredRepos, discoveredRepositories, excludedRepoIds, row.localPath]);
 
   // One hook for both row sources (workspace repo by id OR on-machine path).
-  // Backend resolves either to an absolute path; the Zustand cache keys
-  // path-based entries with a synthetic key so workspace + discovered share
-  // one slice (and the same fetch dedupe).
+  // Query keys include the source shape so workspace + discovered rows dedupe
+  // independently without a Zustand server-state mirror.
   const branchSource = useMemo<BranchSource | null>(() => {
     if (!workspaceId) return null;
     if (row.repositoryId) {

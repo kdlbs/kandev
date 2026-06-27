@@ -191,6 +191,13 @@ func appendSessionStateMessage(sessionID string, session *models.TaskSession, re
 	if session.TaskEnvironmentID != "" {
 		payload["task_environment_id"] = session.TaskEnvironmentID
 	}
+	if session.AgentProfileID != "" {
+		payload["agent_profile_id"] = session.AgentProfileID
+	}
+	if session.AgentProfileSnapshot != nil {
+		payload["agent_profile_snapshot"] = session.AgentProfileSnapshot
+	}
+	payload["is_passthrough"] = session.IsPassthrough
 	notification, err := ws.NewNotification(ws.ActionSessionStateChanged, payload)
 	if err == nil {
 		result = append(result, notification)
@@ -936,6 +943,7 @@ func registerSecondaryRoutes(
 			p.eventBus,
 			p.log,
 		)
+		registerWsSentTestRoute(p.router, p.gateway.Hub, p.log)
 		p.log.Info("E2E mock routes enabled at /api/v1/_test/* — DO NOT enable in production")
 	}
 

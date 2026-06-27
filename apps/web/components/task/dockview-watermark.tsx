@@ -11,6 +11,7 @@ import { useEnvironmentId } from "@/hooks/use-environment-session-id";
 import { useUserShells } from "@/hooks/domains/session/use-user-shells";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { createUserShell } from "@/lib/api/domains/user-shell-api";
+import { isPassthroughSession } from "@/lib/session/is-passthrough-session";
 import { AddPanelMenuItems } from "./dockview-add-panel-items";
 import { NewSessionDialog } from "./new-session-dialog";
 import { useActiveSessionDevScript } from "./repository-scripts-menu";
@@ -89,7 +90,7 @@ function useWatermarkMenuState(
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const isPassthrough = useAppStore((s) => {
     if (!activeSessionId) return false;
-    return s.taskSessions.items[activeSessionId]?.is_passthrough === true;
+    return isPassthroughSession(s.taskSessions.items[activeSessionId]);
   });
   const { prs } = useTaskPR(taskID);
   return useMemo(

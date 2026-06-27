@@ -7,6 +7,14 @@ vi.mock("@/lib/api", () => ({
   listTaskSessionMessages: (...args: unknown[]) => mockListTaskSessionMessages(...args),
 }));
 
+vi.mock("@/lib/api/domains/session-api", () => ({
+  fetchTaskSession: vi.fn(),
+  listSessionTurns: vi.fn(),
+  listTaskSessionMessages: (...args: unknown[]) => mockListTaskSessionMessages(...args),
+  listTaskSessions: vi.fn(),
+  searchSessionMessages: vi.fn(),
+}));
+
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => null,
 }));

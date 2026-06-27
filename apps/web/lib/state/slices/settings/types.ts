@@ -1,16 +1,4 @@
-import type {
-  Agent,
-  AgentProfile,
-  AvailableAgent,
-  AgentDiscovery,
-  CapabilityStatus,
-  CustomPrompt,
-  EditorOption,
-  Executor,
-  NotificationProvider,
-  SavedLayout,
-  ToolStatus,
-} from "@/lib/types/http";
+import type { Agent, AgentProfile, CapabilityStatus, SavedLayout } from "@/lib/types/http";
 import type {
   VoiceInputActivationMode,
   VoiceInputEngine,
@@ -18,29 +6,6 @@ import type {
 } from "@/lib/types/http-voice";
 import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
 import type { SidebarTaskPrefsState } from "@/lib/state/slices/ui/types";
-import type { SecretListItem } from "@/lib/types/http-secrets";
-import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
-
-export type ExecutorsState = {
-  items: Executor[];
-};
-
-export type SettingsAgentsState = {
-  items: Agent[];
-};
-
-export type AgentDiscoveryState = {
-  items: AgentDiscovery[];
-  loading: boolean;
-  loaded: boolean;
-};
-
-export type AvailableAgentsState = {
-  items: AvailableAgent[];
-  tools: ToolStatus[];
-  loading: boolean;
-  loaded: boolean;
-};
 
 export type AgentProfileOption = {
   id: string;
@@ -72,71 +37,6 @@ export function toAgentProfileOption(
     capability_error: agent.capability_error,
   };
 }
-
-export type AgentProfilesState = {
-  items: AgentProfileOption[];
-  version: number;
-};
-
-export type InstallJobStatus = "queued" | "running" | "succeeded" | "failed";
-
-export type InstallJob = {
-  job_id: string;
-  agent_name: string;
-  status: InstallJobStatus;
-  output?: string;
-  error?: string;
-  exit_code?: number;
-  started_at: string;
-  finished_at?: string;
-};
-
-/**
- * Tracks active and recently-finished install jobs by agent_name. Rehydrated
- * on page mount from GET /agent-install/jobs and kept live via WS events
- * (agent.install.started/output/finished).
- */
-export type InstallJobsState = {
-  byAgent: Record<string, InstallJob>;
-};
-
-export type EditorsState = {
-  items: EditorOption[];
-  loaded: boolean;
-  loading: boolean;
-};
-
-export type PromptsState = {
-  items: CustomPrompt[];
-  loaded: boolean;
-  loading: boolean;
-};
-
-export type SecretsState = {
-  items: SecretListItem[];
-  loaded: boolean;
-  loading: boolean;
-};
-
-export type SpritesState = {
-  status: SpritesStatus | null;
-  instances: SpritesInstance[];
-  loaded: boolean;
-  loading: boolean;
-};
-
-export type NotificationProvidersState = {
-  items: NotificationProvider[];
-  events: string[];
-  appriseAvailable: boolean;
-  loaded: boolean;
-  loading: boolean;
-};
-
-export type SettingsDataState = {
-  executorsLoaded: boolean;
-  agentsLoaded: boolean;
-};
 
 export type UserSettingsState = {
   workspaceId: string | null;
@@ -203,54 +103,11 @@ export const DEFAULT_VOICE_MODE_STATE: VoiceModeState = {
 };
 
 export type SettingsSliceState = {
-  executors: ExecutorsState;
-  settingsAgents: SettingsAgentsState;
-  agentDiscovery: AgentDiscoveryState;
-  availableAgents: AvailableAgentsState;
-  agentProfiles: AgentProfilesState;
-  installJobs: InstallJobsState;
-  editors: EditorsState;
-  prompts: PromptsState;
-  secrets: SecretsState;
-  sprites: SpritesState;
-  notificationProviders: NotificationProvidersState;
-  settingsData: SettingsDataState;
   userSettings: UserSettingsState;
 };
 
 export type SettingsSliceActions = {
-  setExecutors: (executors: ExecutorsState["items"]) => void;
-  setSettingsAgents: (agents: SettingsAgentsState["items"]) => void;
-  setAgentDiscovery: (agents: AgentDiscoveryState["items"]) => void;
-  setAgentDiscoveryLoading: (loading: boolean) => void;
-  setAvailableAgents: (
-    agents: AvailableAgentsState["items"],
-    tools?: AvailableAgentsState["tools"],
-  ) => void;
-  setAvailableAgentsLoading: (loading: boolean) => void;
-  setAgentProfiles: (profiles: AgentProfilesState["items"]) => void;
-  setInstallJobs: (jobs: InstallJob[]) => void;
-  upsertInstallJob: (job: InstallJob) => void;
-  appendInstallOutput: (agentName: string, chunk: string) => void;
-  clearInstallJob: (agentName: string) => void;
-  setEditors: (editors: EditorsState["items"]) => void;
-  setEditorsLoading: (loading: boolean) => void;
-  setPrompts: (prompts: PromptsState["items"]) => void;
-  setPromptsLoading: (loading: boolean) => void;
-  setSecrets: (items: SecretsState["items"]) => void;
-  setSecretsLoading: (loading: boolean) => void;
-  addSecret: (item: SecretListItem) => void;
-  updateSecret: (item: SecretListItem) => void;
-  removeSecret: (id: string) => void;
-  setSpritesStatus: (status: SpritesStatus) => void;
-  setSpritesInstances: (instances: SpritesInstance[]) => void;
-  setSpritesLoading: (loading: boolean) => void;
-  removeSpritesInstance: (name: string) => void;
-  setNotificationProviders: (state: NotificationProvidersState) => void;
-  setNotificationProvidersLoading: (loading: boolean) => void;
-  setSettingsData: (next: Partial<SettingsDataState>) => void;
   setUserSettings: (settings: UserSettingsState) => void;
-  bumpAgentProfilesVersion: () => void;
 };
 
 export type SettingsSlice = SettingsSliceState & SettingsSliceActions;

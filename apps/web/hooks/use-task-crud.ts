@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { useAppStoreApi } from "@/components/state-provider";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTaskActions } from "@/hooks/use-task-actions";
 import type { Task } from "@/components/kanban-card";
-import type { KanbanState } from "@/lib/state/slices";
+import { removeTasksFromWorkflowSnapshotQueries } from "@/lib/query/workflow-snapshot-cache";
 
 /**
  * Custom hook that extracts task CRUD operations from the Kanban component.
@@ -18,7 +18,7 @@ export function useTaskCRUD() {
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [archivingTaskId, setArchivingTaskId] = useState<string | null>(null);
   const { deleteTaskById, archiveTaskById } = useTaskActions();
-  const store = useAppStoreApi();
+  const queryClient = useQueryClient();
 
   const handleCreate = useCallback(() => {
     setEditingTask(null);
@@ -35,21 +35,12 @@ export function useTaskCRUD() {
       setDeletingTaskId(task.id);
       try {
         await deleteTaskById(task.id, opts);
-
-        // Update UI AFTER successful delete
-        store.getState().hydrate({
-          kanban: {
-            ...store.getState().kanban,
-            tasks: store
-              .getState()
-              .kanban.tasks.filter((item: KanbanState["tasks"][number]) => item.id !== task.id),
-          },
-        });
+        removeTasksFromWorkflowSnapshotQueries(queryClient, new Set([task.id]));
       } finally {
         setDeletingTaskId(null);
       }
     },
-    [deleteTaskById, store],
+    [deleteTaskById, queryClient],
   );
 
   const handleArchive = useCallback(
@@ -57,21 +48,12 @@ export function useTaskCRUD() {
       setArchivingTaskId(task.id);
       try {
         await archiveTaskById(task.id, opts);
-
-        // Update UI AFTER successful archive - remove from kanban view
-        store.getState().hydrate({
-          kanban: {
-            ...store.getState().kanban,
-            tasks: store
-              .getState()
-              .kanban.tasks.filter((item: KanbanState["tasks"][number]) => item.id !== task.id),
-          },
-        });
+        removeTasksFromWorkflowSnapshotQueries(queryClient, new Set([task.id]));
       } finally {
         setArchivingTaskId(null);
       }
     },
-    [archiveTaskById, store],
+    [archiveTaskById, queryClient],
   );
 
   const handleDialogOpenChange = useCallback((open: boolean) => {

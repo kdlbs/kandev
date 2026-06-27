@@ -1,33 +1,27 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { useShallow } from "zustand/react/shallow";
-import { useAppStore } from "@/components/state-provider";
-import { fetchDiskUsage, refreshDiskUsage } from "@/lib/api/domains/system-api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { refreshDiskUsage } from "@/lib/api/domains/system-api";
+import { diskUsageQueryOptions, systemJobsQueryOptions } from "@/lib/query/query-options/system";
 
 /**
  * Fetch-on-mount hook for `/api/v1/system/disk-usage`. The backend serves the
  * cached value (or null while computing) and publishes a `system.job.update`
  * event with kind=disk-walk when the background walk finishes. That event is
- * already routed into the jobs map by registerSystemEventsHandlers — this hook
+ * already routed into the Query jobs map — this hook
  * watches for the transition (running → succeeded/failed) and refetches the
  * usage payload once so the cards swap in the fresh value without polling.
  */
 export function useDiskUsage() {
-  const diskUsage = useAppStore((s) => s.system.diskUsage);
-  const setSystemDiskUsage = useAppStore((s) => s.setSystemDiskUsage);
+  const query = useQuery(diskUsageQueryOptions());
+  const jobsQuery = useQuery(systemJobsQueryOptions());
   // Pick the last disk-walk job we have seen, regardless of id. There is at
   // most one in flight at a time.
-  // Wrapped in useShallow so the inline derivation doesn't create a fresh
-  // reference each render and trip "Maximum update depth exceeded" in
-  // consumers when there are no disk-walk jobs (the array reduces to the
-  // same null, but a missing memo would still re-run the equality check).
-  const diskWalkJob = useAppStore(
-    useShallow((s) => {
-      const jobs = Object.values(s.system.jobs).filter((j) => j.kind === "disk-walk");
-      return jobs.length > 0 ? jobs[jobs.length - 1] : null;
-    }),
-  );
+  const diskWalkJob = useMemo(() => {
+    const jobs = Object.values(jobsQuery.data ?? {}).filter((j) => j.kind === "disk-walk");
+    return jobs.at(-1) ?? null;
+  }, [jobsQuery.data]);
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,14 +30,13 @@ export function useDiskUsage() {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetchDiskUsage({ cache: "no-store" });
-      setSystemDiskUsage(res);
+      await query.refetch();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setIsLoading(false);
     }
-  }, [setSystemDiskUsage]);
+  }, [query]);
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -56,11 +49,10 @@ export function useDiskUsage() {
     }
   }, [reload]);
 
-  // Initial fetch.
   useEffect(() => {
-    if (diskUsage) return;
-    void reload();
-  }, [diskUsage, reload]);
+    if (!query.error) return;
+    setError(query.error instanceof Error ? query.error.message : String(query.error));
+  }, [query.error]);
 
   // Refetch when the disk-walk job reports a terminal state.
   useEffect(() => {
@@ -77,12 +69,18 @@ export function useDiskUsage() {
   // otherwise sit on "Calculating..." forever. Polling stops as soon as the
   // backend reports the cached value.
   useEffect(() => {
-    if (!diskUsage?.computing) return;
+    if (!query.data?.computing) return;
     const interval = setInterval(() => {
       void reload();
     }, 1500);
     return () => clearInterval(interval);
-  }, [diskUsage?.computing, reload]);
+  }, [query.data, reload]);
 
-  return { diskUsage, isLoading, error, reload, refresh };
+  return {
+    diskUsage: query.data ?? null,
+    isLoading: isLoading || (query.isFetching && !query.isSuccess),
+    error,
+    reload,
+    refresh,
+  };
 }

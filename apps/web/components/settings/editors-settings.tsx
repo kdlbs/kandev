@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import {
   IconEdit,
   IconTrash,
@@ -503,7 +503,6 @@ export function EditorsSettings() {
     setLspAutoInstallLanguages,
     setLspConfigStrings,
     setLspConfigErrors,
-    setEditors,
     editors,
   } = state;
   const applyEditors = useApplyEditors(state);
@@ -539,10 +538,6 @@ export function EditorsSettings() {
     () => buildDefaultEditorOptions(availableEditors, state.defaultEditorId),
     [availableEditors, state.defaultEditorId],
   );
-
-  useEffect(() => {
-    setEditors(editors);
-  }, [editors, setEditors]);
 
   return (
     <SettingsPageTemplate

@@ -1,11 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, renderHook } from "@testing-library/react";
+import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { makeQueryClient } from "@/lib/query/client";
 
-const mockRequest = vi.fn();
-const mockSetMessages = vi.fn();
+const mockListTaskSessionMessages = vi.fn();
+const mockMergeMessages = vi.fn();
 
-vi.mock("@/lib/ws/connection", () => ({
-  getWebSocketClient: () => ({ request: mockRequest }),
+vi.mock("@/lib/api/domains/session-api", () => ({
+  fetchTaskSession: vi.fn(),
+  listSessionTurns: vi.fn(),
+  listTaskSessionMessages: (...args: unknown[]) => mockListTaskSessionMessages(...args),
+  listTaskSessions: vi.fn(),
+  searchSessionMessages: vi.fn(),
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -13,7 +18,7 @@ vi.mock("@/components/state-provider", () => ({
   useAppStoreApi: () => ({
     getState: () => ({
       messages: { bySession: {} },
-      setMessages: mockSetMessages,
+      mergeMessages: mockMergeMessages,
     }),
   }),
 }));
@@ -30,9 +35,9 @@ describe("useVisibilityBackfill", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRequest.mockResolvedValue({ messages: [], has_more: false });
+    mockListTaskSessionMessages.mockResolvedValue({ messages: [], has_more: false });
     store = {
-      getState: () => ({ messages: { bySession: {} }, setMessages: mockSetMessages }),
+      getState: () => ({ messages: { bySession: {} }, mergeMessages: mockMergeMessages }),
     };
   });
 
@@ -40,54 +45,62 @@ describe("useVisibilityBackfill", () => {
     cleanup();
   });
 
-  it("fetches when the tab becomes visible", () => {
-    renderHook(() => useVisibilityBackfill("sess-1", store as never));
+  it("fetches when the tab becomes visible", async () => {
+    const queryClient = makeQueryClient();
+    renderHook(() => useVisibilityBackfill("sess-1", store as never, queryClient));
     setVisibility("visible");
-    expect(mockRequest).toHaveBeenCalledTimes(1);
-    expect(mockRequest).toHaveBeenCalledWith(
-      "message.list",
-      expect.objectContaining({ session_id: "sess-1" }),
-      expect.any(Number),
+    await waitFor(() => expect(mockListTaskSessionMessages).toHaveBeenCalledTimes(1));
+    expect(mockListTaskSessionMessages).toHaveBeenCalledWith(
+      "sess-1",
+      { limit: 100, sort: "desc" },
+      expect.any(Object),
     );
   });
 
   it("does not fetch when the tab becomes hidden", () => {
-    renderHook(() => useVisibilityBackfill("sess-1", store as never));
+    renderHook(() => useVisibilityBackfill("sess-1", store as never, makeQueryClient()));
     setVisibility("hidden");
-    expect(mockRequest).not.toHaveBeenCalled();
+    expect(mockListTaskSessionMessages).not.toHaveBeenCalled();
   });
 
   it("does nothing when sessionId is null", () => {
-    renderHook(() => useVisibilityBackfill(null, store as never));
+    renderHook(() => useVisibilityBackfill(null, store as never, makeQueryClient()));
     setVisibility("visible");
-    expect(mockRequest).not.toHaveBeenCalled();
+    expect(mockListTaskSessionMessages).not.toHaveBeenCalled();
   });
 
   it("removes the listener on unmount", () => {
-    const { unmount } = renderHook(() => useVisibilityBackfill("sess-1", store as never));
+    const { unmount } = renderHook(() =>
+      useVisibilityBackfill("sess-1", store as never, makeQueryClient()),
+    );
     unmount();
     setVisibility("visible");
-    expect(mockRequest).not.toHaveBeenCalled();
+    expect(mockListTaskSessionMessages).not.toHaveBeenCalled();
   });
 
-  it("re-registers when sessionId changes", () => {
+  it("re-registers when sessionId changes", async () => {
+    const queryClient = makeQueryClient();
     const { rerender } = renderHook(
-      ({ id }: { id: string | null }) => useVisibilityBackfill(id, store as never),
+      ({ id }: { id: string | null }) => useVisibilityBackfill(id, store as never, queryClient),
       { initialProps: { id: "sess-1" } },
     );
     setVisibility("visible");
-    expect(mockRequest).toHaveBeenLastCalledWith(
-      "message.list",
-      expect.objectContaining({ session_id: "sess-1" }),
-      expect.any(Number),
+    await waitFor(() =>
+      expect(mockListTaskSessionMessages).toHaveBeenLastCalledWith(
+        "sess-1",
+        { limit: 100, sort: "desc" },
+        expect.any(Object),
+      ),
     );
 
     rerender({ id: "sess-2" });
     setVisibility("visible");
-    expect(mockRequest).toHaveBeenLastCalledWith(
-      "message.list",
-      expect.objectContaining({ session_id: "sess-2" }),
-      expect.any(Number),
+    await waitFor(() =>
+      expect(mockListTaskSessionMessages).toHaveBeenLastCalledWith(
+        "sess-2",
+        { limit: 100, sort: "desc" },
+        expect.any(Object),
+      ),
     );
   });
 });

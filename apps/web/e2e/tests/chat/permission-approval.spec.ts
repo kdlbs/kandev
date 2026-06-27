@@ -10,6 +10,21 @@ import { SessionPage } from "../../pages/session-page";
 // changes.
 const MULTI_PERMISSION_COUNT = 3;
 
+async function waitForPendingPermission(apiClient: ApiClient, sessionId: string): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const { messages } = await apiClient.listSessionMessages(sessionId);
+        return messages.some(
+          (message) =>
+            message.type === "permission_request" && message.metadata?.status !== "approved",
+        );
+      },
+      { timeout: 30_000, message: "Waiting for pending permission request" },
+    )
+    .toBe(true);
+}
+
 /**
  * Seed a task that runs the multi-permission scenario, then navigate to it.
  * The mock agent will request three permissions in sequence and block on each.
@@ -36,6 +51,7 @@ async function seedMultiPermissionTask(
 
   if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
+  await waitForPendingPermission(apiClient, task.session_id);
   await testPage.goto(`/t/${task.id}`);
 
   const session = new SessionPage(testPage);
@@ -141,6 +157,7 @@ test.describe("Permission approval persistence", () => {
 
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
+    await waitForPendingPermission(apiClient, task.session_id);
     await testPage.goto(`/t/${task.id}`);
 
     const session = new SessionPage(testPage);

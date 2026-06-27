@@ -10,7 +10,8 @@ import { ShareButton, shareableSessionStateClient } from "@/components/task/shar
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { useMessageHandler, buildTaskMentionsContext } from "@/hooks/use-message-handler";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
+import { useAppStore } from "@/components/state-provider";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { type ContextFile } from "@/lib/state/context-files-store";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
@@ -28,6 +29,7 @@ import {
 } from "@/lib/state/slices/comments/format";
 import { usePlanActions } from "@/hooks/domains/kanban/use-plan-actions";
 import { useExecutorEnvironmentAvailability } from "@/hooks/domains/session/use-executor-environment-availability";
+import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useToast } from "@/components/toast-provider";
 import {
@@ -140,7 +142,8 @@ export function useSubmitHandler(
   onSend?: (message: string) => void,
 ) {
   const [isSending, setIsSending] = useState(false);
-  const storeApi = useAppStoreApi();
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+  const { snapshots } = useAllWorkflowSnapshots(activeWorkspaceId);
   const { toast } = useToast();
   const {
     resolvedSessionId,
@@ -176,7 +179,7 @@ export function useSubmitHandler(
         if (onSend) {
           // Expand task mentions because onSend bypasses useMessageHandler.buildFinalMessage.
           const taskCtx = inlineTaskMentions?.length
-            ? buildTaskMentionsContext(inlineTaskMentions, storeApi.getState())
+            ? buildTaskMentionsContext(inlineTaskMentions, snapshots)
             : "";
           await onSend(finalMessage + taskCtx);
         } else {
@@ -209,7 +212,7 @@ export function useSubmitHandler(
     [
       isSending,
       onSend,
-      storeApi,
+      snapshots,
       handleSendMessage,
       markCommentsSent,
       planComments,
@@ -329,7 +332,7 @@ function ArchiveDismissBanner({
 }
 
 export function PRMergedBanner({ taskId }: { taskId: string }) {
-  const taskPRs = useAppStore((state) => state.taskPRs.byTaskId[taskId]);
+  const { prs: taskPRs } = useTaskPR(taskId);
   const [dismissed, setDismissed] = useState(() => wasPRMergedBannerDismissed(taskId));
   const handleArchive = useArchiveTaskAction(taskId);
 
@@ -340,7 +343,7 @@ export function PRMergedBanner({ taskId }: { taskId: string }) {
 
   // Multi-repo: only show "ready to archive" once every PR is merged. A
   // single merged repo with others still open means the task isn't done yet.
-  const allMerged = !!taskPRs && taskPRs.length > 0 && taskPRs.every((pr) => pr.state === "merged");
+  const allMerged = taskPRs.length > 0 && taskPRs.every((pr) => pr.state === "merged");
   if (!allMerged || dismissed) return null;
 
   const bannerText =
@@ -363,7 +366,7 @@ export function PRMergedBanner({ taskId }: { taskId: string }) {
 }
 
 export function PRClosedBanner({ taskId }: { taskId: string }) {
-  const taskPRs = useAppStore((state) => state.taskPRs.byTaskId[taskId]);
+  const { prs: taskPRs } = useTaskPR(taskId);
   const [dismissed, setDismissed] = useState(() => wasPRClosedBannerDismissed(taskId));
   const handleArchive = useArchiveTaskAction(taskId);
 
@@ -374,7 +377,7 @@ export function PRClosedBanner({ taskId }: { taskId: string }) {
 
   // Mirror the merged banner's all-or-nothing rule: show only once every PR is
   // closed-without-merging. A mix of merged + closed shows neither banner.
-  const allClosed = !!taskPRs && taskPRs.length > 0 && taskPRs.every((pr) => pr.state === "closed");
+  const allClosed = taskPRs.length > 0 && taskPRs.every((pr) => pr.state === "closed");
   if (!allClosed || dismissed) return null;
 
   const bannerText =

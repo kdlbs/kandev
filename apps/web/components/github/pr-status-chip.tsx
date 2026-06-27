@@ -113,11 +113,10 @@ const CHIP_BUTTON_CLASS =
   "cursor-pointer inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-xs";
 
 /**
- * Radix HoverCard treats the trigger as outside the content's bounding box, so
- * a click on the chip would auto-close the popover. This guard filters out
- * trigger clicks so clicking the chip is a no-op while the popover stays open
- * via hover. Returns the trigger ref plus a memoised handler that reads the ref
- * lazily (inside the callback, never during render).
+ * Radix treats the trigger as outside the content's bounding box, so clicking
+ * the chip while the popover is already open would otherwise auto-close it.
+ * This guard filters out trigger clicks and keeps the trigger ref lookup lazy
+ * (inside the callback, never during render).
  */
 function useChipTriggerGuard() {
   const ref = useRef<HTMLButtonElement>(null);
@@ -274,7 +273,15 @@ function PRStatusChipHoverCard({ pr, automation }: { pr: TaskPR; automation: Aut
         onBlur={onTriggerLeave}
       >
         <PopoverAnchor asChild>
-          <button ref={ref} type="button" {...chipButtonAttrs(pr, status, automation)}>
+          <button
+            ref={ref}
+            type="button"
+            {...chipButtonAttrs(pr, status, automation)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenChange(true);
+            }}
+          >
             <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
             <ChipStatusGlyph status={status} />
             <AutomationFlagBadges automation={automation} />
@@ -378,7 +385,15 @@ function PRStatusChipMultiHoverCard({
         onBlur={onTriggerLeave}
       >
         <PopoverAnchor asChild>
-          <button ref={ref} type="button" {...multiChipButtonAttrs(prs, status, automation)}>
+          <button
+            ref={ref}
+            type="button"
+            {...multiChipButtonAttrs(prs, status, automation)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenChange(true);
+            }}
+          >
             <MultiChipGlyph prs={prs} status={status} automation={automation} />
           </button>
         </PopoverAnchor>

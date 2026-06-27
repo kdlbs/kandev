@@ -1,4 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useSummarizeSession } from "./use-summarize-session";
 
@@ -13,6 +15,13 @@ vi.mock("@/lib/api/domains/utility-api", () => ({
   executeUtilityPrompt: (...args: unknown[]) => mockExecuteUtilityPrompt(...args),
 }));
 
+function renderSummarizeSession() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client: queryClient }, children);
+  return renderHook(() => useSummarizeSession(), { wrapper });
+}
+
 describe("useSummarizeSession", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -23,7 +32,7 @@ describe("useSummarizeSession", () => {
       messages: [{ type: "message", author_type: "user", content: "hello" }],
     });
     mockExecuteUtilityPrompt.mockResolvedValue({ success: true, response: "summary" });
-    const { result } = renderHook(() => useSummarizeSession());
+    const { result } = renderSummarizeSession();
 
     let summary;
     await act(async () => {
@@ -38,7 +47,7 @@ describe("useSummarizeSession", () => {
       messages: [{ type: "message", author_type: "user", content: "hello" }],
     });
     mockExecuteUtilityPrompt.mockRejectedValue(new Error("connection refused"));
-    const { result } = renderHook(() => useSummarizeSession());
+    const { result } = renderSummarizeSession();
 
     let summary;
     await act(async () => {

@@ -22,6 +22,9 @@ vi.mock("@/lib/state/layout-manager", () => ({
 vi.mock("@/lib/links", () => ({
   replaceTaskUrl: vi.fn(),
 }));
+vi.mock("@/lib/api/domains/session-api", () => ({
+  fetchTaskSession: vi.fn(async () => ({ session: null })),
+}));
 
 import { launchSession, type LaunchSessionResponse } from "@/lib/services/session-launch-service";
 import { performLayoutSwitch, releaseLayoutToDefault } from "@/lib/state/dockview-store";
@@ -29,9 +32,65 @@ import { replaceTaskUrl } from "@/lib/links";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { TaskSession } from "@/lib/types/http";
+import { sessionId, taskId } from "@/lib/types/ids";
 
 const NEW_TASK_ID = "task-new";
 const OLD_SESSION_ID = "old-session";
+const SELECT_TASK_ID = "task-A";
+const PRIMARY_SESSION_ID = "sess-primary";
+const OTHER_TASK_SESSION_ID = "sess-other-task";
+const ENV_A = "env-A";
+const ENV_B = "env-B";
+
+function makeKanbanStore(args: {
+  activeTaskId?: string | null;
+  activeSessionId: string | null;
+  envIds: Record<string, string>;
+  lastSessionByTaskId?: Record<string, string>;
+  sessionTaskIds?: Record<string, string>;
+}): StoreApi<AppState> {
+  const items: Record<string, Partial<TaskSession> & Pick<TaskSession, "id" | "task_id">> = {};
+  for (const [sid, tid] of Object.entries(args.sessionTaskIds ?? {})) {
+    items[sid] = {
+      id: sessionId(sid),
+      task_id: taskId(tid),
+      task_environment_id: args.envIds[sid],
+      is_passthrough: false,
+    };
+  }
+  const state = {
+    tasks: {
+      activeTaskId: args.activeTaskId ?? null,
+      activeSessionId: args.activeSessionId,
+      lastSessionByTaskId: args.lastSessionByTaskId ?? {},
+    },
+    taskPRs: { byTaskId: {} as Record<string, unknown[]> },
+    environmentIdBySessionId: args.envIds,
+    taskSessions: { items },
+    setTaskSession: vi.fn((session: TaskSession) => {
+      items[session.id] = session;
+    }),
+  };
+  return {
+    getState: () => state as unknown as AppState,
+    setState: vi.fn(),
+    subscribe: vi.fn(),
+  } as unknown as StoreApi<AppState>;
+}
+
+function runSelect(store: StoreApi<AppState>) {
+  const switchToSession = vi.fn();
+  selectTaskWithLayout({
+    taskId: SELECT_TASK_ID,
+    task: { primarySessionId: PRIMARY_SESSION_ID },
+    store,
+    switchToSession,
+    loadTaskSessionsForTask: vi.fn(async () => []),
+    setActiveTask: vi.fn(),
+    setPreparingTaskId: vi.fn(),
+  });
+  return switchToSession;
+}
 
 function makeStore(activeSessionId: string | null): StoreApi<AppState> {
   const state = {
@@ -52,55 +111,11 @@ function makeEnvStore(envIds: Record<string, string>): StoreApi<AppState> {
   } as unknown as StoreApi<AppState>;
 }
 
-const TASK_ID = "task-A";
-const PRIMARY = "sess-primary";
 const ORIGINAL_TASK_ID = "task-original";
 const PENDING_TASK_ID = "task-pending";
 const ORIGINAL_SESSION_ID = "sess-original";
 const PENDING_SESSION_ID = "sess-pending";
 const ORIGINAL_ENV_ID = "env-original";
-
-function makeKanbanStore(args: {
-  activeTaskId?: string | null;
-  activeSessionId: string | null;
-  envIds: Record<string, string>;
-  lastSessionByTaskId?: Record<string, string>;
-  sessionTaskIds?: Record<string, string>;
-}): StoreApi<AppState> {
-  const items: Record<string, { id: string; task_id: string }> = {};
-  for (const [sid, tid] of Object.entries(args.sessionTaskIds ?? {})) {
-    items[sid] = { id: sid, task_id: tid };
-  }
-  const state = {
-    tasks: {
-      activeTaskId: args.activeTaskId ?? null,
-      activeSessionId: args.activeSessionId,
-      lastSessionByTaskId: args.lastSessionByTaskId ?? {},
-    },
-    taskPRs: { byTaskId: {} as Record<string, unknown[]> },
-    environmentIdBySessionId: args.envIds,
-    taskSessions: { items },
-  };
-  return {
-    getState: () => state as unknown as AppState,
-    setState: vi.fn(),
-    subscribe: vi.fn(),
-  } as unknown as StoreApi<AppState>;
-}
-
-function runSelect(store: StoreApi<AppState>) {
-  const switchToSession = vi.fn();
-  selectTaskWithLayout({
-    taskId: TASK_ID,
-    task: { primarySessionId: PRIMARY },
-    store,
-    switchToSession,
-    loadTaskSessionsForTask: vi.fn(async () => []),
-    setActiveTask: vi.fn(),
-    setPreparingTaskId: vi.fn(),
-  });
-  return switchToSession;
-}
 
 async function flushTaskSelection() {
   await Promise.resolve();
@@ -312,37 +327,40 @@ describe("selectTaskWithLayout — last-selected session preference", () => {
     const LAST = "sess-gpt";
     const switchToSession = runSelect(
       makeKanbanStore({
-        activeSessionId: "sess-other-task",
-        envIds: { "sess-other-task": "env-B", [PRIMARY]: "env-A", [LAST]: "env-A" },
-        lastSessionByTaskId: { [TASK_ID]: LAST },
+        activeSessionId: OTHER_TASK_SESSION_ID,
+        envIds: { [OTHER_TASK_SESSION_ID]: ENV_B, [PRIMARY_SESSION_ID]: ENV_A, [LAST]: ENV_A },
+        lastSessionByTaskId: { [SELECT_TASK_ID]: LAST },
+        sessionTaskIds: { [PRIMARY_SESSION_ID]: SELECT_TASK_ID, [LAST]: SELECT_TASK_ID },
       }),
     );
 
-    expect(switchToSession).toHaveBeenCalledWith(TASK_ID, LAST, "sess-other-task");
+    expect(switchToSession).toHaveBeenCalledWith(SELECT_TASK_ID, LAST, OTHER_TASK_SESSION_ID);
   });
 
   it("falls back to primarySessionId when the remembered session has no env mapping", () => {
     const switchToSession = runSelect(
       makeKanbanStore({
         activeSessionId: null,
-        envIds: { [PRIMARY]: "env-A" },
-        lastSessionByTaskId: { [TASK_ID]: "sess-stale" },
+        envIds: { [PRIMARY_SESSION_ID]: ENV_A },
+        lastSessionByTaskId: { [SELECT_TASK_ID]: "sess-stale" },
+        sessionTaskIds: { [PRIMARY_SESSION_ID]: SELECT_TASK_ID },
       }),
     );
 
-    expect(switchToSession).toHaveBeenCalledWith(TASK_ID, PRIMARY, null);
+    expect(switchToSession).toHaveBeenCalledWith(SELECT_TASK_ID, PRIMARY_SESSION_ID, null);
   });
 
   it("uses primarySessionId when no last-selected session is recorded for the task", () => {
     const switchToSession = runSelect(
       makeKanbanStore({
         activeSessionId: null,
-        envIds: { [PRIMARY]: "env-A" },
+        envIds: { [PRIMARY_SESSION_ID]: ENV_A },
         lastSessionByTaskId: {},
+        sessionTaskIds: { [PRIMARY_SESSION_ID]: SELECT_TASK_ID },
       }),
     );
 
-    expect(switchToSession).toHaveBeenCalledWith(TASK_ID, PRIMARY, null);
+    expect(switchToSession).toHaveBeenCalledWith(SELECT_TASK_ID, PRIMARY_SESSION_ID, null);
   });
 
   /**
@@ -359,13 +377,13 @@ describe("selectTaskWithLayout — last-selected session preference", () => {
     const switchToSession = runSelect(
       makeKanbanStore({
         activeSessionId: null,
-        envIds: { [PRIMARY]: "env-A", [POISONED]: "env-B" },
-        lastSessionByTaskId: { [TASK_ID]: POISONED },
-        sessionTaskIds: { [POISONED]: "task-B", [PRIMARY]: TASK_ID },
+        envIds: { [PRIMARY_SESSION_ID]: ENV_A, [POISONED]: ENV_B },
+        lastSessionByTaskId: { [SELECT_TASK_ID]: POISONED },
+        sessionTaskIds: { [POISONED]: "task-B", [PRIMARY_SESSION_ID]: SELECT_TASK_ID },
       }),
     );
 
-    expect(switchToSession).toHaveBeenCalledWith(TASK_ID, PRIMARY, null);
+    expect(switchToSession).toHaveBeenCalledWith(SELECT_TASK_ID, PRIMARY_SESSION_ID, null);
   });
 });
 

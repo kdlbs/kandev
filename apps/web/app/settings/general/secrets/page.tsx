@@ -1,5 +1,5 @@
 import { SecretsSettings } from "@/components/settings/secrets-settings";
-import { StateProvider } from "@/components/state-provider";
+import { StateHydrator } from "@/components/state-hydrator";
 import { listSecrets } from "@/lib/api/domains/secrets-api";
 
 export default async function GeneralSecretsPage() {
@@ -18,8 +18,9 @@ export default async function GeneralSecretsPage() {
   }
 
   return (
-    <StateProvider initialState={initialState}>
+    <>
+      <StateHydrator initialState={initialState} />
       <SecretsSettings />
-    </StateProvider>
+    </>
   );
 }

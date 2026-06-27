@@ -10,6 +10,7 @@ import {
   RIGHT_TOP_GROUP,
 } from "@/lib/state/layout-manager";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { wasPRPanelOffered, markPRPanelOffered } from "@/lib/local-storage";
 import { sessionId as toSessionId } from "@/lib/types/ids";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
@@ -235,10 +236,8 @@ export function resolvePRPanelTargetGroup(
 export function useAutoPRPanel() {
   const taskId = useAppStore((s) => s.tasks.activeTaskId);
   const sessionId = useAppStore((s) => s.tasks.activeSessionId);
-  const hasPR = useAppStore((s) => {
-    const tid = s.tasks.activeTaskId;
-    return tid ? (s.taskPRs.byTaskId[tid]?.length ?? 0) > 0 : false;
-  });
+  const { prs } = useTaskPR(taskId);
+  const hasPR = prs.length > 0;
   const hasApi = useDockviewStore((s) => !!s.api);
 
   useEffect(() => {

@@ -11,7 +11,7 @@ import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useAppStore } from "@/components/state-provider";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import type { SentryIssueWatch, SentrySearchFilter } from "@/lib/types/sentry";
 
 type SentryIssueWatchTableProps = {
@@ -156,7 +156,7 @@ export function SentryIssueWatchTable({
   onReset,
   onToggleEnabled,
 }: SentryIssueWatchTableProps) {
-  const workspaces = useAppStore((s) => s.workspaces.items);
+  const { items: workspaces } = useWorkspaces();
   const workspaceName = (id: string) => workspaces.find((w) => w.id === id)?.name ?? id;
 
   if (watches.length === 0) {

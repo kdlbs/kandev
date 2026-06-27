@@ -77,22 +77,25 @@ function buildContext(): RecentTaskBuildContext {
 
   return {
     activeTaskId: CURRENT_TASK_ID,
-    kanbanWorkflowId: WF_MAIN,
-    kanbanTasks: [
-      {
-        id: CURRENT_TASK_ID,
-        workflowStepId: "step-1",
-        title: "Current live title",
-        position: 0,
-        state: "IN_PROGRESS",
-        repositoryId: REPOSITORY_ID,
-        primarySessionId: `${CURRENT_TASK_ID}-session`,
-        createdAt: visitedAt,
-        updatedAt: visitedAt,
-      },
-    ],
-    kanbanSteps: [{ id: "step-1", title: "Working", color: "bg-blue-500", position: 0 }],
     snapshots: {
+      [WF_MAIN]: {
+        workflowId: WF_MAIN,
+        workflowName: "Main Flow",
+        steps: [{ id: "step-1", title: "Working", color: "bg-blue-500", position: 0 }],
+        tasks: [
+          {
+            id: CURRENT_TASK_ID,
+            workflowStepId: "step-1",
+            title: "Current live title",
+            position: 0,
+            state: "IN_PROGRESS",
+            repositoryId: REPOSITORY_ID,
+            primarySessionId: `${CURRENT_TASK_ID}-session`,
+            createdAt: visitedAt,
+            updatedAt: visitedAt,
+          },
+        ],
+      },
       [WF_REVIEW]: {
         workflowId: WF_REVIEW,
         workflowName: "Review Flow",
@@ -119,7 +122,7 @@ function buildContext(): RecentTaskBuildContext {
     sessionsByTaskId: { [CURRENT_TASK_ID]: [session(CURRENT_TASK_ID, "RUNNING")] },
     gitStatusByEnvId: {},
     environmentIdBySessionId: {},
-  };
+  } as RecentTaskBuildContext;
 }
 
 describe("recent task switcher model", () => {

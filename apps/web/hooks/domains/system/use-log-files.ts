@@ -1,34 +1,35 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useAppStore } from "@/components/state-provider";
-import { fetchLogFiles } from "@/lib/api/domains/system-api";
+import { useQuery } from "@tanstack/react-query";
+import { logFilesQueryOptions } from "@/lib/query/query-options/system";
 
 export function useLogFiles() {
-  const files = useAppStore((s) => s.system.logs.files);
-  const setSystemLogs = useAppStore((s) => s.setSystemLogs);
+  const query = useQuery(logFilesQueryOptions());
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [fetched, setFetched] = useState(false);
 
   const reload = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetchLogFiles({ cache: "no-store" });
-      setSystemLogs(res ?? []);
-      setFetched(true);
+      await query.refetch();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setIsLoading(false);
     }
-  }, [setSystemLogs]);
+  }, [query]);
 
   useEffect(() => {
-    if (fetched) return;
-    void reload();
-  }, [fetched, reload]);
+    if (!query.error) return;
+    setError(query.error instanceof Error ? query.error.message : String(query.error));
+  }, [query.error]);
 
-  return { files, isLoading, error, reload };
+  return {
+    files: query.data ?? [],
+    isLoading: isLoading || (query.isFetching && !query.isSuccess),
+    error,
+    reload,
+  };
 }
