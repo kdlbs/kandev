@@ -72,7 +72,10 @@ function hasUnseenAgentPlanUpdate(
 }
 
 function usePlanBadgeState(activeTaskId: string | null, currentMobilePanel: MobileSessionPanel) {
-  const planQuery = useQuery(taskPlanQueryOptions(activeTaskId ?? ""));
+  const connectionStatus = useAppStore((state) => state.connection.status);
+  const planQuery = useQuery(
+    taskPlanQueryOptions(activeTaskId ?? "", connectionStatus === "connected"),
+  );
   const plan = planQuery.data ?? null;
 
   const hasUnseenPlanUpdate = useMemo(() => {

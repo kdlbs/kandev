@@ -20,6 +20,9 @@ const planApiMocks = vi.hoisted(() => ({
 }));
 
 type MockStoreState = {
+  connection: {
+    status: "disconnected" | "connecting" | "connected" | "error" | "reconnecting";
+  };
   tasks: {
     activeTaskId: string | null;
     activeSessionId: string | null;
@@ -117,6 +120,9 @@ function makePlan(overrides: Partial<TaskPlan> = {}): TaskPlan {
 
 function setupStore(overrides: Partial<MockStoreState> = {}) {
   mockStoreState = {
+    connection: {
+      status: "connected",
+    },
     tasks: {
       activeTaskId: ACTIVE_TASK_ID,
       activeSessionId: null,
@@ -306,5 +312,18 @@ describe("useSessionLayoutState plan badge", () => {
     await waitFor(() => expect(result.current.plan).toEqual(plan));
     expect(planApiMocks.getTaskPlan).toHaveBeenCalledWith(ACTIVE_TASK_ID);
     expect(result.current.hasUnseenPlanUpdate).toBe(true);
+  });
+
+  it("does not fetch the plan while the websocket is disconnected", async () => {
+    setupStore({
+      connection: {
+        status: "disconnected",
+      },
+    });
+
+    renderLayoutHook();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(planApiMocks.getTaskPlan).not.toHaveBeenCalled();
   });
 });

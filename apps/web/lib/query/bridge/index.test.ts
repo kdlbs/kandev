@@ -275,7 +275,7 @@ describe("query bridge audit", () => {
     cleanup();
   });
 
-  it("patches task PR rows and invalidates workspace PR aggregates", () => {
+  it("patches task PR rows and workspace PR aggregates", () => {
     const ws = new FakeWebSocketClient();
     const queryClient = makeQueryClient();
     const oldPr = taskPr();
@@ -297,7 +297,17 @@ describe("query bridge audit", () => {
         pr_title: "Updated title",
       }),
     ]);
-    expect(queryClient.getQueryState(workspacePrsKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryData(workspacePrsKey)).toEqual({
+      task_prs: {
+        "task-1": [
+          expect.objectContaining({
+            checks_state: "success",
+            pr_title: "Updated title",
+          }),
+        ],
+      },
+    });
+    expect(queryClient.getQueryState(workspacePrsKey)?.isInvalidated).toBe(false);
 
     cleanup();
   });

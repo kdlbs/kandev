@@ -767,9 +767,6 @@ func isSessionUnknownErr(err error) bool {
 
 func isAgentReportedSessionLoadMissingErr(message string) bool {
 	lower := strings.ToLower(message)
-	if !strings.Contains(lower, "failed to load session") {
-		return false
-	}
 	return strings.Contains(lower, "session not found") ||
 		strings.Contains(lower, "no such session") ||
 		strings.Contains(lower, "resource not found")

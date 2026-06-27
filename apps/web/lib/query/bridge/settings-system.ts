@@ -10,6 +10,7 @@ import type {
   GitHubRateLimitUpdate,
   TaskCIAutomationOptions,
   TaskPR,
+  TaskPRsResponse,
 } from "@/lib/types/github";
 import type { ListAvailableAgentsResponse } from "@/lib/types/http";
 import type { SecretListItem } from "@/lib/types/http-secrets";
@@ -126,7 +127,23 @@ function patchTaskPr(queryClient: QueryClient, pr: TaskPR) {
   queryClient.setQueryData<TaskPR[]>(qk.integrations.github.taskPr(pr.task_id), (prev) =>
     upsertBy(prev ?? [], pr, (item) => `${item.repository_id ?? ""}:${item.pr_number}`),
   );
-  queryClient.invalidateQueries({ queryKey: ["integrations", "github", "prs"] });
+  queryClient.setQueriesData<TaskPRsResponse>(
+    { queryKey: ["integrations", "github", "prs"] },
+    (prev) =>
+      prev
+        ? {
+            ...prev,
+            task_prs: {
+              ...prev.task_prs,
+              [pr.task_id]: upsertBy(
+                prev.task_prs[pr.task_id] ?? [],
+                pr,
+                (item) => `${item.repository_id ?? ""}:${item.pr_number}`,
+              ),
+            },
+          }
+        : prev,
+  );
 }
 
 function patchTaskCiOptions(queryClient: QueryClient, options: TaskCIAutomationOptions) {
