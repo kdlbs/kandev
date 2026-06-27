@@ -118,7 +118,6 @@ test.describe("Session isolation", () => {
       timeout: 10_000,
     });
     await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 30_000 });
 
     // 7. The chat should NOT show messages from the first task's session
     // (the "simple-message" text should not appear for task B which uses "read-and-edit")

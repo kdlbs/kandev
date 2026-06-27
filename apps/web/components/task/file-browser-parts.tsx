@@ -161,6 +161,7 @@ export function TreeNodeItem(props: TreeNodeRowProps) {
       data-testid="file-tree-node"
       data-path={node.path}
       data-is-dir={node.is_dir ? "true" : "false"}
+      data-expanded={node.is_dir ? String(isExpanded) : undefined}
       data-selected={isSelected ? "true" : "false"}
       aria-selected={isSelected}
       role="treeitem"
@@ -231,7 +232,7 @@ export function SearchResultsList({
   }
 
   return (
-    <div className="pb-2">
+    <div data-testid="file-tree" className="pb-2">
       {searchResults.map((path) => {
         const name = path.split("/").pop() || path;
         const folder = path.includes("/") ? path.substring(0, path.lastIndexOf("/")) : "";
@@ -336,7 +337,7 @@ function FileTreeView(props: FileBrowserContentAreaProps) {
   const { tree, visibleRows, creatingInPath, onCreateFileSubmit, onCancelCreate } = props;
   if (!tree) return null;
   return (
-    <div className="pb-2">
+    <div data-testid="file-tree" className="pb-2">
       {creatingInPath === "" && (
         <InlineFileInput
           depth={0}

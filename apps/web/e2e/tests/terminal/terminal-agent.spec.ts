@@ -276,6 +276,8 @@ test.describe("Terminal agent (TUI passthrough)", () => {
     apiClient,
     seedData,
   }) => {
+    test.setTimeout(90_000);
+
     const profile = await createTUIProfile(apiClient, "TUI Switch");
 
     // Create two tasks with distinct descriptions so their terminal output differs

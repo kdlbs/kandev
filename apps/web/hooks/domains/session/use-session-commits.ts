@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef } from "react";
+import { useEffect, useCallback, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
 import { qk } from "@/lib/query/keys";
@@ -45,6 +45,7 @@ export function useSessionCommits(sessionId: string | null) {
   const queryClient = useQueryClient();
   const { envKey, storeCommits, storeLoading, refetchTrigger } =
     useSessionCommitStoreState(sessionId);
+  const snapshotKey = sessionId && envKey ? `${sessionId}:${envKey}:${refetchTrigger}` : null;
   const commitsQuery = useQuery({
     ...sessionCommitsQueryOptions(envKey, sessionId ?? ""),
     enabled: false,
@@ -59,10 +60,11 @@ export function useSessionCommits(sessionId: string | null) {
   const fetchedSessionRef = useRef<string | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestVersionRef = useRef(0);
+  const [loadedSnapshotKey, setLoadedSnapshotKey] = useState<string | null>(null);
 
   const fetchCommits = useCallback(
     async (opts?: { allowEmpty?: boolean }) => {
-      if (!sessionId || !envKey) return;
+      if (!sessionId || !envKey || !snapshotKey) return;
 
       if (retryTimerRef.current) {
         clearTimeout(retryTimerRef.current);
@@ -108,6 +110,7 @@ export function useSessionCommits(sessionId: string | null) {
           return nextCommits;
         });
         setSessionCommits(sessionId, nextCommits, opts);
+        setLoadedSnapshotKey(snapshotKey);
       } catch (error) {
         console.error("Failed to fetch session commits:", error);
       } finally {
@@ -118,7 +121,15 @@ export function useSessionCommits(sessionId: string | null) {
         }
       }
     },
-    [envKey, queryClient, sessionId, setSessionCommits, setSessionCommitsLoading, storeCommits],
+    [
+      envKey,
+      queryClient,
+      sessionId,
+      setSessionCommits,
+      setSessionCommitsLoading,
+      snapshotKey,
+      storeCommits,
+    ],
   );
 
   // Fetch commits when:
@@ -174,6 +185,7 @@ export function useSessionCommits(sessionId: string | null) {
 
   return {
     commits: commits ?? [],
+    loaded: loadedSnapshotKey === snapshotKey && commits !== undefined && !loading,
     loading,
     refetch: fetchCommits,
   };

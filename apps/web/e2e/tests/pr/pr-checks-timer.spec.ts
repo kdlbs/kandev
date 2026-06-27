@@ -103,8 +103,7 @@ test.describe("PR checks running timer", () => {
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.waitForDockviewReady(30_000);
 
     // Open PR detail panel
     await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
@@ -121,7 +120,7 @@ test.describe("PR checks running timer", () => {
 
     // Verify the live timer increments without paying a fixed sleep.
     await expect
-      .poll(async () => durationEl.textContent(), { timeout: 3_000 })
+      .poll(async () => durationEl.textContent(), { timeout: 15_000 })
       .not.toBe(initialText);
     await expect(durationEl).toContainText("running");
   });

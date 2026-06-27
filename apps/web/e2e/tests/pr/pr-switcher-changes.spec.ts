@@ -183,7 +183,7 @@ test.describe("PR switcher changes panel", () => {
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
+    await session.waitForDockviewReady(30_000);
 
     // --- Switch to the Changes tab (Files tab is active by default) ---
     await session.clickTab("Changes");

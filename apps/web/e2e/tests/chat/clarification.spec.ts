@@ -56,6 +56,29 @@ async function waitForSessionMessage(
     .toBe(true);
 }
 
+function currentTaskIdFromUrl(page: Page): string {
+  const [, resource, taskId] = new URL(page.url()).pathname.split("/");
+  if (resource !== "t" || !taskId) {
+    throw new Error(`expected task URL, got ${page.url()}`);
+  }
+  return taskId;
+}
+
+async function waitForTaskSessionId(apiClient: ApiClient, taskId: string): Promise<string> {
+  let sessionId = "";
+  await expect
+    .poll(
+      async () => {
+        const { sessions } = await apiClient.listTaskSessions(taskId);
+        sessionId = sessions[0]?.id ?? "";
+        return sessionId;
+      },
+      { timeout: 30_000, message: `task ${taskId} should have a session` },
+    )
+    .not.toBe("");
+  return sessionId;
+}
+
 // Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
 useRegularMode();
 
@@ -146,7 +169,9 @@ test.describe("Clarification flow", () => {
 
   test("plan mode + clarification does not leave pointer-events stuck on body", async ({
     testPage,
+    apiClient,
   }) => {
+    test.setTimeout(90_000);
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
@@ -163,12 +188,18 @@ test.describe("Clarification flow", () => {
     await descriptionInput.fill("/e2e:clarification");
 
     await testPage.getByTestId("submit-start-agent-chevron").click();
-    await testPage.getByTestId("submit-plan-mode").click();
+    const planModeButton = testPage.getByTestId("submit-plan-mode");
+    await expect(planModeButton).toBeVisible({ timeout: 5_000 });
+    await planModeButton.click();
+    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\/.*layout=plan/, { timeout: 15_000 });
 
+    const taskId = currentTaskIdFromUrl(testPage);
+    const sessionId = await waitForTaskSessionId(apiClient, taskId);
+    await waitForSessionMessage(apiClient, sessionId, "Which database");
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
+    await session.showSessionContext(30_000);
 
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
 

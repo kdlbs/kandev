@@ -142,7 +142,7 @@ async function openTaskAndWait(
   await kanban.taskCardInColumn(title, seed.doneStepId).click();
   await expect(testPage).toHaveURL(/\/[st]\//, { timeout: 15_000 });
   const session = new SessionPage(testPage);
-  await session.waitForLoad();
+  await session.waitForDockviewReady(30_000);
   await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
   return session;
 }

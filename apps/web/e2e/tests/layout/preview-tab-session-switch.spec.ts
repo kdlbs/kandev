@@ -5,7 +5,6 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
-import { KanbanPage } from "../../pages/kanban-page";
 
 const FILE_A = "alpha.ts";
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
@@ -13,23 +12,22 @@ const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 async function openFileInPreview(page: Page, session: SessionPage, filename: string) {
   await session.clickTab("Files");
   await expect(session.files).toBeVisible({ timeout: 10_000 });
-  const fileRow = session.files.getByText(filename);
+  const fileRow = page.locator(
+    `[data-testid="files-panel"]:visible [data-testid="file-tree-node"][data-path="${filename}"]`,
+  );
   await expect(fileRow).toBeVisible({ timeout: 15_000 });
-  await fileRow.click();
-  // Retry click if preview tab didn't appear (executor may need a moment)
   const previewTab = page.getByTestId("preview-tab-file-editor");
-  try {
-    await expect(previewTab).toBeVisible({ timeout: 5_000 });
-  } catch {
+  await expect(async () => {
     await fileRow.click();
-  }
+    await expect(previewTab).toBeVisible({ timeout: 5_000 });
+  }).toPass({ timeout: 20_000 });
 }
 
 async function seedFinishedTask(
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
-): Promise<{ id: string }> {
+): Promise<{ id: string; sessionId: string }> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     title,
@@ -41,6 +39,8 @@ async function seedFinishedTask(
       repository_ids: [seedData.repositoryId],
     },
   );
+  if (!task.session_id)
+    throw new Error(`createTaskWithAgent did not return a session_id for ${title}`);
   await expect
     .poll(
       async () => {
@@ -50,7 +50,12 @@ async function seedFinishedTask(
       { timeout: 30_000, message: `Waiting for ${title} session to finish` },
     )
     .toBe(true);
-  return task;
+  return { id: task.id, sessionId: task.session_id };
+}
+
+async function gotoTaskSession(page: Page, task: { id: string; sessionId: string }) {
+  await page.goto(`/t/${task.id}?sessionId=${task.sessionId}`);
+  await expect(page).toHaveURL((url) => url.pathname.includes(task.id), { timeout: 15_000 });
 }
 
 /** `.dv-tab` is the wrapper dockview toggles `dv-active-tab` on. */
@@ -88,6 +93,7 @@ test.describe("Preview tab survives session switch", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
+    if (!taskA.session_id) throw new Error("createTaskWithAgent did not return a session_id");
     await expect
       .poll(
         async () => {
@@ -110,6 +116,7 @@ test.describe("Preview tab survives session switch", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
+    if (!taskB.session_id) throw new Error("createTaskWithAgent did not return a session_id");
     await expect
       .poll(
         async () => {
@@ -120,14 +127,9 @@ test.describe("Preview tab survives session switch", () => {
       )
       .toBe(true);
 
-    // Navigate to Task A via kanban
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    await kanban.taskCardByTitle("Preview Switch Task A").click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    await gotoTaskSession(testPage, { id: taskA.id, sessionId: taskA.session_id });
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.waitForDockviewReady(30_000);
 
     // Open a file in preview mode
     await openFileInPreview(testPage, session, FILE_A);
@@ -139,7 +141,7 @@ test.describe("Preview tab survives session switch", () => {
     await expect(testPage).toHaveURL((url) => url.pathname.includes(taskB.id), {
       timeout: 15_000,
     });
-    await session.waitForLoad();
+    await session.waitForDockviewReady(30_000);
 
     // Preview tab should not be visible on Task B
     await expect(previewTab).not.toBeVisible({ timeout: 5_000 });
@@ -180,13 +182,9 @@ test.describe("Preview tab survives session switch", () => {
     const taskA = await seedFinishedTask(apiClient, seedData, "Promote Round-Trip A");
     const taskB = await seedFinishedTask(apiClient, seedData, "Promote Round-Trip B");
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    await kanban.taskCardByTitle("Promote Round-Trip A").click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    await gotoTaskSession(testPage, taskA);
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.waitForDockviewReady(30_000);
 
     // Open file in preview, then promote via double-click. The panel keeps id
     // `preview:file-editor` with `params.promoted=true` until another file is
@@ -200,7 +198,7 @@ test.describe("Preview tab survives session switch", () => {
     // Round-trip: switch to Task B, then back to Task A (forces fromJSON restore).
     await session.clickTaskInSidebar("Promote Round-Trip B");
     await expect(testPage).toHaveURL((url) => url.pathname.includes(taskB.id), { timeout: 15_000 });
-    await session.waitForLoad();
+    await session.waitForDockviewReady(30_000);
 
     await session.clickTaskInSidebar("Promote Round-Trip A");
     await expect(testPage).toHaveURL((url) => url.pathname.includes(taskA.id), { timeout: 15_000 });
@@ -234,13 +232,9 @@ test.describe("Preview tab survives session switch", () => {
     const taskA = await seedFinishedTask(apiClient, seedData, "Active Tab Round-Trip A");
     const taskB = await seedFinishedTask(apiClient, seedData, "Active Tab Round-Trip B");
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    await kanban.taskCardByTitle("Active Tab Round-Trip A").click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    await gotoTaskSession(testPage, taskA);
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.waitForDockviewReady(30_000);
 
     // Open file in preview — it auto-activates, but we click it explicitly to
     // make the intent clear and to be robust against any default-active changes.
@@ -252,7 +246,7 @@ test.describe("Preview tab survives session switch", () => {
     // Round-trip
     await session.clickTaskInSidebar("Active Tab Round-Trip B");
     await expect(testPage).toHaveURL((url) => url.pathname.includes(taskB.id), { timeout: 15_000 });
-    await session.waitForLoad();
+    await session.waitForDockviewReady(30_000);
 
     await session.clickTaskInSidebar("Active Tab Round-Trip A");
     await expect(testPage).toHaveURL((url) => url.pathname.includes(taskA.id), { timeout: 15_000 });
@@ -283,15 +277,11 @@ test.describe("Preview tab survives session switch", () => {
     git.stageAll();
     git.commit("seed refresh");
 
-    await seedFinishedTask(apiClient, seedData, "Refresh Active Tab Task");
+    const task = await seedFinishedTask(apiClient, seedData, "Refresh Active Tab Task");
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    await kanban.taskCardByTitle("Refresh Active Tab Task").click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    await gotoTaskSession(testPage, task);
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.waitForDockviewReady(30_000);
 
     // Open file in preview and ensure it's the active tab in the center group.
     await openFileInPreview(testPage, session, FILE_REFRESH);

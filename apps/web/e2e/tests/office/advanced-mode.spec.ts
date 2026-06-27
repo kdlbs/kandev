@@ -157,8 +157,11 @@ test.describe("Office advanced mode", () => {
     const filesPanel = testPage.getByTestId("files-panel");
     await expect(filesPanel).toBeVisible({ timeout: 15_000 });
 
-    // Quick-chat workspaces have a .gitkeep file — the tree should show it
-    await expect(filesPanel.getByText(".gitkeep")).toBeVisible({ timeout: 15_000 });
+    // The execution workspace may be empty, but the file tree should finish loading.
+    await expect(filesPanel.getByTestId("file-tree")).toBeVisible({ timeout: 30_000 });
+    await expect(filesPanel.getByText("Loading files...")).not.toBeVisible();
+    await expect(filesPanel.getByTestId("file-tree-waiting")).toHaveCount(0);
+    await expect(filesPanel.getByTestId("file-tree-manual")).toHaveCount(0);
   });
 
   test("terminal connects to agent execution workspace", async ({ testPage, advancedSeed }) => {

@@ -23,16 +23,16 @@ async function cleanupPrompts(
 }
 
 const ALL_QA_PROMPTS = [
-  "qa-alpha",
-  "qa-esc",
-  "qa-arr-1",
-  "qa-arr-2",
-  "qa-mouse",
-  "qa-multi",
-  "qa-space",
-  "qa-back",
-  "qa-arrow",
-  "qa-submit",
+  "zz-qa-bare-alpha",
+  "zz-qa-escape-only",
+  "zz-qa-select-1",
+  "zz-qa-select-2",
+  "zz-qa-mouse-only",
+  "zz-qa-multi-only",
+  "zz-qa-space-only",
+  "zz-qa-back-only",
+  "zz-qa-arrow-only",
+  "zz-qa-submit-only",
 ];
 
 test.describe("@-mention autocomplete: adversarial QA", () => {
@@ -42,7 +42,7 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
 
   test("bare @ opens menu with prompts visible", async ({ testPage, apiClient }) => {
     test.setTimeout(60_000);
-    await apiClient.createPrompt("qa-alpha", "alpha-content");
+    await apiClient.createPrompt("zz-qa-bare-alpha", "alpha-content");
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -54,12 +54,12 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await textarea.pressSequentially("@");
 
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
-    await expect(testPage.getByRole("button", { name: /qa-alpha/ })).toBeVisible();
+    await expect(testPage.getByRole("button", { name: /zz-qa-bare-alpha/ })).toBeVisible();
   });
 
   test("Escape closes the menu without inserting the prompt", async ({ testPage, apiClient }) => {
     test.setTimeout(60_000);
-    await apiClient.createPrompt("qa-esc", "ESC_CONTENT");
+    await apiClient.createPrompt("zz-qa-escape-only", "ESC_CONTENT");
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -68,24 +68,24 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
 
     const textarea = testPage.getByTestId("task-description-input");
     await textarea.click();
-    await textarea.pressSequentially("@qa-es");
+    await textarea.pressSequentially("@zz-qa-escape-o");
 
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
     await textarea.press("Escape");
     await expect(testPage.getByText(MENU_TITLE)).not.toBeVisible();
 
-    // The @query text is preserved (Esc just closes the menu, doesn't undo typing).
-    await expect(textarea).toHaveValue("@qa-es");
-
     // Dialog should still be open — Escape went to the menu, not the dialog.
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
+
+    // The @query text is preserved (Esc just closes the menu, doesn't undo typing).
+    await expect(textarea).toHaveValue("@zz-qa-escape-o");
   });
 
   test("ArrowDown + Enter selects the second prompt", async ({ testPage, apiClient }) => {
     test.setTimeout(60_000);
-    // Both prompts begin with "qa-arr" so the filter narrows to both.
-    await apiClient.createPrompt("qa-arr-1", "FIRST");
-    await apiClient.createPrompt("qa-arr-2", "SECOND");
+    // Both prompts share this prefix so the filter narrows to exactly these two.
+    await apiClient.createPrompt("zz-qa-select-1", "FIRST");
+    await apiClient.createPrompt("zz-qa-select-2", "SECOND");
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -94,19 +94,19 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
 
     const textarea = testPage.getByTestId("task-description-input");
     await textarea.click();
-    await textarea.pressSequentially("@qa-arr");
+    await textarea.pressSequentially("@zz-qa-select-");
 
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
     // Both should be visible.
-    await expect(testPage.getByRole("button", { name: /qa-arr-1/ })).toBeVisible();
-    await expect(testPage.getByRole("button", { name: /qa-arr-2/ })).toBeVisible();
+    await expect(testPage.getByRole("button", { name: /zz-qa-select-1/ })).toBeVisible();
+    await expect(testPage.getByRole("button", { name: /zz-qa-select-2/ })).toBeVisible();
 
     await textarea.press("ArrowDown");
     await textarea.press("Enter");
 
     const value = await textarea.inputValue();
-    // Equal filter scores → insertion order (stable sort): qa-arr-1 at index 0,
-    // qa-arr-2 at index 1. One ArrowDown moves from 0 → 1, so "SECOND" is selected.
+    // Equal filter scores use insertion order. One ArrowDown moves from 0 to 1,
+    // so "SECOND" is selected.
     expect(value).toBe("SECOND");
     await expect(testPage.getByText(MENU_TITLE)).not.toBeVisible();
   });
@@ -116,7 +116,7 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     apiClient,
   }) => {
     test.setTimeout(60_000);
-    await apiClient.createPrompt("qa-mouse", "MOUSE_CONTENT");
+    await apiClient.createPrompt("zz-qa-mouse-only", "MOUSE_CONTENT");
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -125,10 +125,10 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
 
     const textarea = testPage.getByTestId("task-description-input");
     await textarea.click();
-    await textarea.pressSequentially("@qa-mo");
+    await textarea.pressSequentially("@zz-qa-mouse");
 
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
-    await testPage.getByRole("button", { name: /qa-mouse/ }).click();
+    await testPage.getByRole("button", { name: /zz-qa-mouse-only/ }).click();
 
     await expect(textarea).toHaveValue("MOUSE_CONTENT");
     await expect(testPage.getByText(MENU_TITLE)).not.toBeVisible();
@@ -140,7 +140,7 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
   }) => {
     test.setTimeout(60_000);
     const lines = Array.from({ length: 8 }, (_, i) => `line ${i + 1}`).join("\n");
-    await apiClient.createPrompt("qa-multi", lines);
+    await apiClient.createPrompt("zz-qa-multi-only", lines);
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -149,9 +149,9 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
 
     const textarea = testPage.getByTestId("task-description-input");
     await textarea.click();
-    await textarea.pressSequentially("@qa-mu");
+    await textarea.pressSequentially("@zz-qa-multi");
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
-    const promptItem = testPage.getByRole("button", { name: /qa-multi/ });
+    const promptItem = testPage.getByRole("button", { name: /zz-qa-multi-only/ });
     await expect(promptItem).toBeVisible();
     await promptItem.click();
 
@@ -164,7 +164,7 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
 
   test("typing space after @ closes the menu", async ({ testPage, apiClient }) => {
     test.setTimeout(60_000);
-    await apiClient.createPrompt("qa-space", "x");
+    await apiClient.createPrompt("zz-qa-space-only", "x");
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -182,7 +182,7 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
 
   test("backspacing past the @ closes the menu", async ({ testPage, apiClient }) => {
     test.setTimeout(60_000);
-    await apiClient.createPrompt("qa-back", "x");
+    await apiClient.createPrompt("zz-qa-back-only", "x");
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -209,7 +209,7 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     // arrow-up does not change the textarea content/cursor in a way that
     // breaks the subsequent Enter selection.
     test.setTimeout(60_000);
-    await apiClient.createPrompt("qa-arrow", "ARROW_CONTENT");
+    await apiClient.createPrompt("zz-qa-arrow-only", "ARROW_CONTENT");
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -218,7 +218,7 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
 
     const textarea = testPage.getByTestId("task-description-input");
     await textarea.click();
-    await textarea.pressSequentially("@qa-arr");
+    await textarea.pressSequentially("@zz-qa-arrow");
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
 
     const before = await textarea.evaluate((el) => (el as HTMLTextAreaElement).selectionStart);
@@ -240,7 +240,7 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     // follow-up — it requires retrieving the created task by title after creation.
     test.setTimeout(60_000);
     const content = "INLINED_FROM_PROMPT_PAYLOAD";
-    await apiClient.createPrompt("qa-submit", content);
+    await apiClient.createPrompt("zz-qa-submit-only", content);
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -252,7 +252,7 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await testPage.getByTestId("task-title-input").fill("qa-submit-task");
     const textarea = testPage.getByTestId("task-description-input");
     await textarea.click();
-    await textarea.pressSequentially("@qa-su");
+    await textarea.pressSequentially("@zz-qa-submit");
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
     await textarea.press("Enter");
     await expect(textarea).toHaveValue(content);

@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/ui/tanstack-query-server-state.md
 created: 2026-06-23
-status: draft
+status: done
 ---
 
 # Implementation Plan: TanStack Query Server State
@@ -1413,12 +1413,33 @@ Task 10 partial verification completed locally:
   - `rtk pnpm --dir apps/web e2e:docker tests/office/agents.spec.ts tests/office/agent-subroutes.spec.ts tests/office/agent-roles.spec.ts tests/office/agent-skills-ui.spec.ts tests/office/permissions.spec.ts tests/office/projects.spec.ts tests/office/project-repository-picker.spec.ts tests/office/routines.spec.ts tests/office/routines-ui.spec.ts tests/office/routine-fire.spec.ts tests/office/skills.spec.ts tests/office/system-skills.spec.ts tests/office/skills-readonly.spec.ts tests/office/org-chart.spec.ts tests/office/execution-stages.spec.ts tests/office/costs.spec.ts tests/system/ws-event-accounting.spec.ts`
     passed 67 Docker tests / 5 skipped with strict WS accounting.
 
-Current next step: run Task 11 strict QA.
+Task 11 strict QA completed locally:
+
+- `rtk make fmt` passed.
+- `rtk make typecheck test lint` passed.
+- `rtk pnpm --dir apps/web e2e:docker --shards 3` passed with strict WS
+  accounting: shard 1 had 363 passed / 1 flaky retry, shard 2 had 370 passed,
+  and shard 3 had 369 passed.
+- `rtk pnpm --dir apps/web e2e:docker --project mobile-chrome` passed 78
+  mobile Docker tests with strict WS accounting.
+- `rtk pnpm --dir apps/web e2e:docker --project routing` passed 7 routing
+  Docker tests with strict WS accounting.
+- `rtk env KANDEV_E2E_CONTAINERS=1 pnpm --dir apps/web e2e --project=containers`
+  passed 99 container-backed Docker/SSH tests / 1 skipped after the Linux
+  `mock-agent` helper was built for the container runtime.
+- Focused PR popover regressions passed:
+  `rtk pnpm --dir apps/web e2e:docker e2e/tests/pr/pr-multi-popover.spec.ts`
+  passed 3 tests, and the broader PR detail/detection/popover sequence passed
+  13 tests.
+- The SSH metadata smoke test now polls the `ExecutorRunning` metadata row it
+  asserts, avoiding a false dependency on chat session completion; the focused
+  `recovery.spec.ts:97` containers check passed before the final full
+  containers project passed.
 
 Wave 4 (cleanup and full verification):
 
 - [x] [task-10-remove-zustand-server-state](task-10-remove-zustand-server-state.md) — done
-- [ ] [task-11-e2e-strict-qa](task-11-e2e-strict-qa.md) — in progress
+- [x] [task-11-e2e-strict-qa](task-11-e2e-strict-qa.md) — done
 
 ## Open Questions
 

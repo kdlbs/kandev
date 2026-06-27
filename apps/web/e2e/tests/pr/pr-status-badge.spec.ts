@@ -85,7 +85,7 @@ async function expectTopbarReadyState(
       // github.task_pr.updated WS event. If the event was missed during task
       // navigation, a reload rehydrates from the backend state asserted above.
       await page.reload();
-      await session.waitForLoad();
+      await session.waitForDockviewReady(30_000);
     });
 
   await expect(session.prTopbarButton()).toHaveAttribute("data-pr-ready-to-merge", expected, {
@@ -157,7 +157,7 @@ test.describe("PR status badge", () => {
     await kanban.taskCardInColumn("CI Skipped Task", doneStep.id).click();
     await expect(testPage).toHaveURL(/\/[st]\//, { timeout: 15_000 });
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
+    await session.waitForDockviewReady(30_000);
     await expectTopbarReadyState(testPage, session, "false");
   });
 
@@ -220,7 +220,7 @@ test.describe("PR status badge", () => {
     await kanban.taskCardInColumn("Ready To Merge Task", doneStep.id).click();
     await expect(testPage).toHaveURL(/\/[st]\//, { timeout: 15_000 });
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
+    await session.waitForDockviewReady(30_000);
     await expectTopbarReadyState(testPage, session, "true");
   });
 

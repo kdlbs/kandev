@@ -157,6 +157,7 @@ test.describe("Permission approval persistence", () => {
 
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
+    await waitForPendingPermission(apiClient, task.session_id);
     await testPage.goto(`/t/${task.id}`);
 
     const session = new SessionPage(testPage);

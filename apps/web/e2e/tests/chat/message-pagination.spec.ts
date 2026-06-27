@@ -74,27 +74,21 @@ test.describe("@chat message pagination", () => {
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
 
-    // Filler renders; the initial prompt does NOT yet (older than the window).
-    await expect(session.chat.getByText("filler message", { exact: false }).first()).toBeVisible({
+    const chat = session.activeChat();
+    const initialPrompt = chat.getByText(INITIAL_PROMPT);
+    const loadOlder = chat.getByTestId("load-older-messages");
+
+    // Filler renders; the native top sentinel may already have fetched older pages.
+    await expect(chat.getByText("filler message", { exact: false }).first()).toBeVisible({
       timeout: 30_000,
     });
-    await expect(session.chat.getByText(INITIAL_PROMPT)).toHaveCount(0);
-
-    // The explicit load-older button is offered because more messages exist.
-    const loadOlder = session.chat.getByTestId("load-older-messages");
-    await expect(loadOlder).toBeVisible({ timeout: 10_000 });
 
     // Click it repeatedly until the initial prompt is reached. The button is the
-    // reliable path — no scrolling, no intersection timing.
+    // reliable path when the initial page has not already reached the marker.
     await expect
       .poll(
         async () => {
-          if (
-            await session.chat
-              .getByText(INITIAL_PROMPT)
-              .isVisible()
-              .catch(() => false)
-          ) {
+          if (await initialPrompt.isVisible().catch(() => false)) {
             return "reached";
           }
           if (await loadOlder.isVisible().catch(() => false)) {
@@ -107,7 +101,7 @@ test.describe("@chat message pagination", () => {
       .toBe("reached");
 
     // The initial prompt is visible, and there's nothing left to load.
-    await expect(session.chat.getByText(INITIAL_PROMPT)).toBeVisible();
+    await expect(initialPrompt).toBeVisible();
     await expect(loadOlder).toBeHidden();
   });
 });

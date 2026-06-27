@@ -1,7 +1,7 @@
 ---
 id: "11-e2e-strict-qa"
 title: "E2E strict QA"
-status: in_progress
+status: done
 wave: 4
 depends_on: ["10-remove-zustand-server-state"]
 plan: "plan.md"
@@ -25,6 +25,39 @@ spec: "../../specs/ui/tanstack-query-server-state.md"
 - `cd apps/web && pnpm e2e:docker --project mobile-chrome`
 - `cd apps/web && pnpm e2e:docker --project routing`
 - `cd apps/web && KANDEV_E2E_CONTAINERS=1 pnpm e2e --project=containers`
+
+## Verification Completed
+
+- `rtk make fmt` passed.
+- `rtk make typecheck test lint` passed.
+- `rtk pnpm --dir apps/web e2e:docker --shards 3` passed with strict WS
+  accounting:
+  - shard 1: 363 passed / 1 flaky retry
+  - shard 2: 370 passed
+  - shard 3: 369 passed
+- `rtk pnpm --dir apps/web e2e:docker --project mobile-chrome` passed 78
+  mobile Docker tests with strict WS accounting.
+- `rtk pnpm --dir apps/web e2e:docker --project routing` passed 7 routing
+  Docker tests with strict WS accounting.
+- `rtk env KANDEV_E2E_CONTAINERS=1 pnpm --dir apps/web e2e --project=containers`
+  passed 99 container-backed tests / 1 skipped after building the Linux
+  `mock-agent` helper required by the Docker/SSH executor project.
+
+Focused regression checks run during final QA:
+
+- `rtk pnpm --dir apps/web e2e:docker e2e/tests/pr/pr-multi-popover.spec.ts`
+  passed 3 desktop Docker tests.
+- `rtk pnpm --dir apps/web e2e:docker e2e/tests/pr/pr-detail-auto-show.spec.ts e2e/tests/pr/pr-detail-dedup.spec.ts e2e/tests/pr/pr-detail-manual-open.spec.ts e2e/tests/pr/pr-detection.spec.ts e2e/tests/pr/pr-multi-popover.spec.ts`
+  passed 13 desktop Docker tests.
+- `rtk env KANDEV_E2E_CONTAINERS=1 pnpm --dir apps/web e2e --project=containers e2e/tests/ssh/recovery.spec.ts:97`
+  passed after the metadata smoke test was changed to wait for the SSH
+  `ExecutorRunning` row it asserts instead of waiting on unrelated chat-session
+  completion.
+
+Residual risks:
+
+- No unresolved Task 11 blockers. The containers project keeps one destructive
+  Docker recovery test skipped by design.
 
 ## Files Likely Touched
 

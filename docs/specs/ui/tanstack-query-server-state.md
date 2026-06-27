@@ -1,5 +1,5 @@
 ---
-status: draft
+status: done
 created: 2026-06-23
 owner: cfl
 ---
@@ -272,3 +272,18 @@ Default query behavior is conservative for Kandev:
 - Persisting TanStack Query cache to localStorage/sessionStorage.
 - Production WebSocket ack metrics; this spec requires E2E accounting, not a
   production observability project.
+
+## Verification
+
+Final strict QA completed locally:
+
+- `rtk make fmt` passed.
+- `rtk make typecheck test lint` passed.
+- `rtk pnpm --dir apps/web e2e:docker --shards 3` passed the full desktop
+  Docker suite with strict WS accounting.
+- `rtk pnpm --dir apps/web e2e:docker --project mobile-chrome` passed 78 mobile
+  Docker tests with strict WS accounting.
+- `rtk pnpm --dir apps/web e2e:docker --project routing` passed 7 routing
+  Docker tests with strict WS accounting.
+- `rtk env KANDEV_E2E_CONTAINERS=1 pnpm --dir apps/web e2e --project=containers`
+  passed 99 container-backed Docker/SSH executor tests / 1 skipped.

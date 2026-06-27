@@ -114,7 +114,7 @@ async function openTaskAndWait(
   await kanban.taskCardInColumn(title, seed.doneStepId).click();
   await expect(testPage).toHaveURL(/\/[st]\//, { timeout: 15_000 });
   const session = new SessionPage(testPage);
-  await session.waitForLoad();
+  await session.waitForDockviewReady(30_000);
   await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
   return session;
 }
@@ -170,15 +170,15 @@ test.describe("Multi-PR CI popover", () => {
     );
     await associateTwoPRs(apiClient, seed.taskId);
     const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    await session.showSessionContext(30_000);
 
     const chip = session.prStatusChip();
-    await expect(chip).toBeVisible();
+    await expect(chip).toBeVisible({ timeout: 15_000 });
     await expect(chip).toHaveAttribute("data-pr-count", "2");
     // web#42 is failing, so the aggregate (worst-of) status is failed.
     await expect(chip).toHaveAttribute("data-status", "failed");
 
-    await chip.hover();
-    await expect(session.prTopbarPopoverAggregate()).toBeVisible({ timeout: 10_000 });
+    await session.hoverPRMultiChip();
     await expect(session.prMultiPopoverTab("web", 42)).toHaveAttribute("data-active", "true");
   });
 

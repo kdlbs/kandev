@@ -95,6 +95,20 @@ func isTransientPromptError(err error) bool {
 		strings.Contains(msg, "use of closed network connection")
 }
 
+func isLazyResumePromptRecoveryError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, executor.ErrExecutionNotFound) || errors.Is(err, lifecycle.ErrExecutionNotFound) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "no such session") ||
+		strings.Contains(msg, "session not found") ||
+		strings.Contains(msg, "failed to load session") ||
+		(strings.Contains(msg, "execution") && strings.Contains(msg, "not found"))
+}
+
 func isAgentAlreadyRunningError(err error) bool {
 	return err != nil && errors.Is(err, lifecycle.ErrAgentAlreadyRunning)
 }
@@ -2168,7 +2182,7 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	promptCtx := context.WithoutCancel(ctx)
 	result, err := s.executor.Prompt(promptCtx, taskID, sessionID, effectivePrompt, attachments, dispatchOnly, session)
 	if err != nil {
-		if resumedForPrompt && errors.Is(err, executor.ErrExecutionNotFound) {
+		if resumedForPrompt && isLazyResumePromptRecoveryError(err) {
 			s.logger.Warn("prompt after lazy resume hit missing execution; falling back to fresh launch",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID))

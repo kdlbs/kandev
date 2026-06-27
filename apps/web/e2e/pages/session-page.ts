@@ -111,6 +111,10 @@ export class SessionPage {
     });
   }
 
+  private visibleChatDockTabs(): Locator {
+    return this.page.locator(".dv-default-tab:visible").filter({ hasText: /^Chat$/ });
+  }
+
   private currentRouteSessionId(): string | null {
     try {
       return new URL(this.page.url()).searchParams.get("sessionId");
@@ -135,6 +139,7 @@ export class SessionPage {
     const routeTrigger = this.currentRouteSessionTabTrigger();
     if (routeDockTab) candidates.push(routeDockTab);
     if (routeTrigger) candidates.push(routeTrigger);
+    candidates.push(this.visibleChatDockTabs().first());
     candidates.push(this.visibleSessionDockTabs().first());
     candidates.push(this.visibleSessionTabTriggers().first());
     return candidates;
@@ -173,8 +178,79 @@ export class SessionPage {
       }
     }
 
+    try {
+      await this.foregroundSessionChatWithDockviewApi(timeout);
+      return;
+    } catch (err) {
+      lastError = err;
+    }
+
     if (lastError instanceof Error) throw lastError;
     throw new Error("session chat did not become visible");
+  }
+
+  private async foregroundSessionChatWithDockviewApi(timeout = 15_000): Promise<void> {
+    const getPanelIds = async () =>
+      this.page.evaluate(() => {
+        type PanelApi = { setActive: () => void };
+        type Panel = { id: string; api: PanelApi };
+        type Api = {
+          activePanel?: Panel;
+          panels: Panel[];
+          getPanel: (id: string) => Panel | undefined;
+        };
+        const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+        if (!api) return [];
+
+        const seen = new Set<string>();
+        const ids: string[] = [];
+        const add = (id: string | null | undefined) => {
+          if (!id || seen.has(id) || !api.getPanel(id)) return;
+          seen.add(id);
+          ids.push(id);
+        };
+
+        const sessionId = new URL(window.location.href).searchParams.get("sessionId");
+        add(sessionId ? `session:${sessionId}` : undefined);
+        if (api.activePanel?.id.startsWith("session:")) add(api.activePanel.id);
+        for (const panel of api.panels) {
+          if (panel.id.startsWith("session:")) add(panel.id);
+        }
+        add("chat");
+
+        return ids;
+      });
+
+    await expect
+      .poll(async () => (await getPanelIds()).length, {
+        timeout,
+        message: "Finding session chat panel through dockview api",
+      })
+      .toBeGreaterThan(0);
+
+    let lastError: unknown;
+    for (const panelId of await getPanelIds()) {
+      try {
+        const activated = await this.page.evaluate((id) => {
+          type PanelApi = { setActive: () => void };
+          type Panel = { id: string; api: PanelApi };
+          type Api = { getPanel: (id: string) => Panel | undefined };
+          const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+          const panel = api?.getPanel(id);
+          if (!panel) return false;
+          panel.api.setActive();
+          return true;
+        }, panelId);
+        if (!activated) continue;
+        await this.activeChat().waitFor({ state: "visible", timeout: Math.min(timeout, 5_000) });
+        return;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    if (lastError instanceof Error) throw lastError;
+    throw new Error("session chat did not become visible through dockview api");
   }
 
   private async waitForEditableChatEditor(timeout = 15_000): Promise<Locator> {
@@ -207,6 +283,7 @@ export class SessionPage {
    * already foregrounded.
    */
   async showSessionContext(timeout = 15_000): Promise<void> {
+    await this.waitForDockviewReady(Math.min(timeout, 15_000)).catch(() => undefined);
     if (await this.activeChat().isVisible()) return;
 
     let lastError: unknown;
@@ -251,9 +328,16 @@ export class SessionPage {
     const idle = this.anyIdleInput();
     const start = Date.now();
     let reloaded = false;
+    const idleAndSettled = async () => {
+      if (!(await idle.isVisible())) return false;
+      return !(await this.activeChatAgentStatus()
+        .first()
+        .isVisible()
+        .catch(() => false));
+    };
 
     while (Date.now() - start < softTotalTimeout) {
-      if (await idle.isVisible()) return;
+      if (await idleAndSettled()) return;
 
       const resumeButton = this.recoveryResumeButton();
       if (await resumeButton.isVisible()) {
@@ -280,7 +364,7 @@ export class SessionPage {
         .catch(() => undefined);
     }
 
-    await idle.waitFor({ state: "visible", timeout: 1_000 });
+    await expect.poll(idleAndSettled, { timeout: 1_000 }).toBe(true);
   }
 
   /** Wait for the passthrough terminal to be visible (for TUI/passthrough sessions). */
@@ -399,7 +483,9 @@ export class SessionPage {
 
   /** Agent STARTING or RUNNING status indicator. */
   agentStatus(): Locator {
-    return this.page.getByRole("status", { name: /Agent is (starting|running)/ });
+    return this.page.getByRole("status", {
+      name: /^(Agent is starting|Agent is running|Starting .+)$/,
+    });
   }
 
   /** Divider that appears after the "New session started" status message is rendered. */
@@ -418,6 +504,13 @@ export class SessionPage {
       .locator('[data-placeholder="Continue working on the task..."]')
       .or(this.page.locator('[data-placeholder="Continue working on the plan..."]'))
       .or(this.page.locator('[data-placeholder="Continue working on the file..."]'));
+  }
+
+  /** Visible agent busy status inside the active chat panel. */
+  activeChatAgentStatus(): Locator {
+    return this.activeChat().getByRole("status", {
+      name: /^(Agent is starting|Agent is running|Starting .+)$/,
+    });
   }
 
   /** Chat input placeholder when agent is idle (plan mode). */
@@ -704,7 +797,7 @@ export class SessionPage {
 
   /** Multi-PR aggregate popover content (segmented tabs + selected PR's CI). */
   prTopbarPopoverAggregate(): Locator {
-    return this.page.getByTestId("pr-multi-popover");
+    return this.page.locator("[data-testid='pr-multi-popover']:visible").first();
   }
 
   /** A single PR tab inside the multi-PR aggregate popover, by repo + PR number. */
@@ -822,19 +915,57 @@ export class SessionPage {
    * Mirrors {@link hoverPRTopbar}: moves the real cursor onto the chip and
    * also dispatches the hover events so the open is reliable across browsers.
    */
-  async hoverPRChip(): Promise<void> {
+  private async hoverPRChipTrigger(): Promise<void> {
+    const chip = this.prStatusChip();
+    await chip.scrollIntoViewIfNeeded();
+    const box = await chip.boundingBox();
+    expect(box).not.toBeNull();
+    await chip.focus();
+    await this.page.mouse.move(0, 0);
+    await this.page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await chip.evaluate((element) => {
+      const targets = [element.parentElement, element].filter(Boolean) as Element[];
+      const mouseInit: MouseEventInit = { bubbles: true, cancelable: true, view: window };
+      const pointerInit: PointerEventInit = {
+        ...mouseInit,
+        pointerType: "mouse",
+        isPrimary: true,
+      };
+
+      for (const target of targets) {
+        if ("PointerEvent" in window) {
+          target.dispatchEvent(new PointerEvent("pointerover", pointerInit));
+          target.dispatchEvent(
+            new PointerEvent("pointerenter", { ...pointerInit, bubbles: false }),
+          );
+          target.dispatchEvent(new PointerEvent("pointermove", pointerInit));
+        }
+        target.dispatchEvent(new MouseEvent("mouseover", mouseInit));
+        target.dispatchEvent(new MouseEvent("mouseenter", { ...mouseInit, bubbles: false }));
+        target.dispatchEvent(new MouseEvent("mousemove", mouseInit));
+      }
+    });
+  }
+
+  private async hoverPRChipUntil(popover: Locator): Promise<void> {
     await expect(async () => {
-      const chip = this.prStatusChip();
-      await chip.scrollIntoViewIfNeeded();
-      const box = await chip.boundingBox();
-      expect(box).not.toBeNull();
-      await this.page.mouse.move(0, 0);
-      await this.page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
-      await chip.dispatchEvent("mouseover", { bubbles: true });
-      await chip.dispatchEvent("mouseenter", { bubbles: false });
-      await chip.dispatchEvent("mousemove", { bubbles: true });
-      await expect(this.prChipPopover()).toBeVisible({ timeout: 1_500 });
+      await this.hoverPRChipTrigger();
+      try {
+        await expect(popover).toBeVisible({ timeout: 1_500 });
+        return;
+      } catch {
+        await this.prStatusChip().click({ force: true });
+        await expect(popover).toBeVisible({ timeout: 2_000 });
+      }
     }).toPass({ timeout: 10_000 });
+  }
+
+  async hoverPRChip(): Promise<void> {
+    await this.hoverPRChipUntil(this.prChipPopover());
+  }
+
+  async hoverPRMultiChip(): Promise<void> {
+    await this.hoverPRChipUntil(this.prTopbarPopoverAggregate());
   }
 
   /**

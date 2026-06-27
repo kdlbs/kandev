@@ -1,7 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 
-const PROMPT_NAME = "e2e-bug-template";
+const PROMPT_NAME = "zz-autocomplete-e2e-bug-template";
 const PROMPT_CONTENT = "Reproduce, isolate, fix with a regression test.";
 const MENU_TITLE = /Mention tasks, files, prompts/i;
 
@@ -32,7 +32,7 @@ test.describe("Task creation: custom prompt autocomplete", () => {
 
     const textarea = testPage.getByTestId("task-description-input");
     await textarea.click();
-    await textarea.pressSequentially("@e2e-bu");
+    await textarea.pressSequentially("@zz-autocomplete-e2e-bu");
 
     const menu = testPage.getByText(MENU_TITLE);
     await expect(menu).toBeVisible({ timeout: 5_000 });
@@ -79,7 +79,7 @@ test.describe("Task creation: custom prompt autocomplete", () => {
     await testPage.getByTestId("task-title-input").fill("autocomplete-enter-test");
     const textarea = testPage.getByTestId("task-description-input");
     await textarea.click();
-    await textarea.pressSequentially("@e2e-bu");
+    await textarea.pressSequentially("@zz-autocomplete-e2e-bu");
 
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
     await textarea.press("Enter");
