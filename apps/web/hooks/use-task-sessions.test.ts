@@ -95,6 +95,19 @@ describe("useTaskSessions", () => {
     );
     expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, [session("sess-1")]);
   });
+});
+
+describe("useTaskSessions refreshes", () => {
+  beforeEach(() => {
+    resetMockState();
+    setDocumentVisibility("visible");
+    apiMock.listTaskSessions.mockResolvedValue({ sessions: [session("sess-1")] });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
 
   it("refetches a loaded session list when the WebSocket reconnects", async () => {
     mockState.connection.status = "disconnected";
@@ -117,6 +130,39 @@ describe("useTaskSessions", () => {
     expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, [
       session("old", "COMPLETED"),
     ]);
+  });
+
+  it("preserves a loaded session list when a reconnect refetch fails", async () => {
+    mockState.connection.status = "disconnected";
+    mockState.taskSessionsByTask.itemsByTaskId[TASK_ID] = [session("old", "RUNNING")];
+    mockState.taskSessionsByTask.loadedByTaskId[TASK_ID] = true;
+    apiMock.listTaskSessions.mockRejectedValueOnce(new Error("network down"));
+
+    const { rerender } = renderHook(() => useTaskSessions(TASK_ID));
+    await act(async () => {});
+
+    mockState.connection.status = "connected";
+    rerender();
+
+    await waitFor(() =>
+      expect(apiMock.listTaskSessions).toHaveBeenCalledWith(TASK_ID, {
+        cache: "no-store",
+      }),
+    );
+    expect(mockState.setTaskSessionsForTask).not.toHaveBeenCalled();
+  });
+});
+
+describe("useTaskSessions foreground refreshes", () => {
+  beforeEach(() => {
+    resetMockState();
+    setDocumentVisibility("visible");
+    apiMock.listTaskSessions.mockResolvedValue({ sessions: [session("sess-1")] });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
   });
 
   it("refetches a loaded session list when a suspended tab becomes visible again", async () => {
@@ -167,15 +213,23 @@ describe("useTaskSessions", () => {
     ]);
   });
 
-  it("does not refetch a loaded session list on foreground visibility while disconnected", async () => {
+  it("refetches a loaded session list on foreground visibility while disconnected", async () => {
     mockState.connection.status = "disconnected";
     mockState.taskSessionsByTask.itemsByTaskId[TASK_ID] = [session("old", "RUNNING")];
     mockState.taskSessionsByTask.loadedByTaskId[TASK_ID] = true;
+    apiMock.listTaskSessions.mockResolvedValueOnce({ sessions: [session("old", "COMPLETED")] });
 
     renderHook(() => useTaskSessions(TASK_ID));
     await act(async () => {});
     document.dispatchEvent(new Event("visibilitychange"));
 
-    expect(apiMock.listTaskSessions).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(apiMock.listTaskSessions).toHaveBeenCalledWith(TASK_ID, {
+        cache: "no-store",
+      }),
+    );
+    expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, [
+      session("old", "COMPLETED"),
+    ]);
   });
 });

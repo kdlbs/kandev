@@ -34,7 +34,7 @@ export function useTaskSessions(taskId: string | null) {
         const sessions = response.sessions ?? [];
         setTaskSessionsForTask(taskId, sessions);
       } catch {
-        setTaskSessionsForTask(taskId, []);
+        if (!force) setTaskSessionsForTask(taskId, []);
       } finally {
         setTaskSessionsLoading(taskId, false);
       }
@@ -53,11 +53,11 @@ export function useTaskSessions(taskId: string | null) {
   }, [taskId]);
 
   useEffect(() => {
-    if (!taskId || isLoading || connectionStatus !== "connected") return;
+    if (!taskId || isLoading) return;
     if (!pendingForcedReloadRef.current) return;
     pendingForcedReloadRef.current = false;
     void loadSessions(true);
-  }, [connectionStatus, isLoading, loadSessions, taskId]);
+  }, [isLoading, loadSessions, taskId]);
 
   const previousConnectionStatusRef = useRef(connectionStatus);
   useEffect(() => {
@@ -73,13 +73,12 @@ export function useTaskSessions(taskId: string | null) {
     if (!taskId) return;
     const refetchOnVisible = () => {
       if (document.visibilityState !== "visible") return;
-      if (connectionStatus !== "connected") return;
       if (!isLoaded) return;
       void loadSessions(true);
     };
     document.addEventListener("visibilitychange", refetchOnVisible);
     return () => document.removeEventListener("visibilitychange", refetchOnVisible);
-  }, [connectionStatus, isLoaded, isLoading, loadSessions, taskId]);
+  }, [isLoaded, isLoading, loadSessions, taskId]);
 
   return { sessions, isLoading, isLoaded, loadSessions };
 }
