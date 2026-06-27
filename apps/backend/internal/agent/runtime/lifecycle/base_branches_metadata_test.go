@@ -52,6 +52,20 @@ func TestBaseBranchMetadataKey_FallsBackToRawRepoNameWhenSanitizedEmpty(t *testi
 	}
 }
 
+func TestCollectBaseBranches_SkipsMalformedEmptyRepoSpec(t *testing.T) {
+	req := &LaunchRequest{
+		BaseBranch: "legacy-main",
+		Repositories: []RepoLaunchSpec{
+			{BaseBranch: "malformed-main"},
+		},
+	}
+	got := collectBaseBranches(req)
+	want := map[string]string{"": "legacy-main"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("collectBaseBranches = %v, want %v", got, want)
+	}
+}
+
 // TestCollectBaseBranches_SingleRepoLegacyKey verifies the synthesized
 // single-repo path: when only top-level BaseBranch is set, it lands under the
 // empty key so the root WorkspaceTracker (repositoryName == "") finds it.

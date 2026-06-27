@@ -156,7 +156,9 @@ func collectBaseBranches(req *LaunchRequest) map[string]string {
 		if spec.BaseBranch == "" {
 			continue
 		}
-		out[baseBranchMetadataKey(spec)] = spec.BaseBranch
+		if key := baseBranchMetadataKey(spec); key != "" {
+			out[key] = spec.BaseBranch
+		}
 	}
 	if req.BaseBranch != "" {
 		if _, ok := out[""]; !ok {

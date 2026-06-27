@@ -104,24 +104,24 @@ func (e *Executor) reuseExistingRepositoryWorktrees(ctx context.Context, req *La
 		return
 	}
 
-	worktreeIDs := e.environmentRepoWorktreeIDs(req, env)
-	for key, id := range e.latestSessionWorktreeIDsForEnvironment(ctx, req.TaskID, env.ID) {
-		if _, exists := worktreeIDs[key]; !exists {
-			worktreeIDs[key] = id
-		}
-	}
-	if len(worktreeIDs) == 0 {
+	envWorktreeIDs := e.environmentRepoWorktreeIDs(req, env)
+	sessionWorktreeIDs := e.latestSessionWorktreeIDsForEnvironment(ctx, req.TaskID, env.ID)
+	if len(envWorktreeIDs) == 0 && len(sessionWorktreeIDs) == 0 {
 		return
 	}
-
 	allowLegacyEmptyBranchFallback := !hasBranchScopedEnvironmentWorktrees(env)
 	for i := range repoSpecs {
 		spec := &repoSpecs[i]
+		branchIdentity := launchRepoBranchIdentitySlug(*spec)
 		key := repositoryWorktreeKey{
 			repositoryID: spec.RepositoryID,
-			branchSlug:   launchRepoBranchIdentitySlug(*spec),
+			branchSlug:   branchIdentity,
 		}
-		if id := worktreeIDs[key]; id != "" {
+		if id := envWorktreeIDs[key]; id != "" {
+			spec.WorktreeID = id
+			continue
+		}
+		if id := sessionWorktreeIDs[key]; id != "" {
 			spec.WorktreeID = id
 			continue
 		}
@@ -130,7 +130,12 @@ func (e *Executor) reuseExistingRepositoryWorktrees(ctx context.Context, req *La
 				repositoryID: spec.RepositoryID,
 				branchSlug:   "",
 			}
-			if id := worktreeIDs[legacyKey]; id != "" {
+			if id := envWorktreeIDs[legacyKey]; id != "" {
+				spec.WorktreeID = id
+				continue
+			}
+			if branchIdentity == "" && sessionWorktreeIDs[legacyKey] != "" {
+				id := sessionWorktreeIDs[legacyKey]
 				spec.WorktreeID = id
 			}
 		}
