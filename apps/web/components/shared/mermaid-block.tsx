@@ -3,15 +3,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
 import { useTheme } from "@/components/theme/app-theme";
 import { IconZoomIn, IconZoomOut, IconCode } from "@tabler/icons-react";
-import {
-  DEFAULT_SCALE,
-  SCALE_STEP,
-  MIN_SCALE,
-  MAX_SCALE,
-  getSvgDimensions,
-  sanitizeMermaidCode,
-  cleanupMermaidOrphans,
-} from "./mermaid-utils";
+import { getSvgDimensions, sanitizeMermaidCode, cleanupMermaidOrphans } from "./mermaid-utils";
+import { useMermaidScale, useMermaidViewportWidth } from "./mermaid-block-hooks";
 import { useToast } from "@/components/toast-provider";
 
 type MermaidAPI = typeof import("mermaid").default;
@@ -40,6 +33,13 @@ type MermaidBlockProps = {
 };
 
 type ToastFn = ReturnType<typeof useToast>["toast"];
+
+function sameSvgSize(
+  a: { w: number; h: number } | null,
+  b: { w: number; h: number } | null,
+): boolean {
+  return a?.w === b?.w && a?.h === b?.h;
+}
 
 /**
  * Debounced mermaid render. Owns the timer, the in-flight cancellation flag,
@@ -110,29 +110,41 @@ function useMermaidRender(code: string, resolvedTheme: string | undefined, toast
 
 export function MermaidBlock({ code }: MermaidBlockProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [scale, setScale] = useState(DEFAULT_SCALE);
+  const svgSizeRef = useRef<{ w: number; h: number } | null>(null);
   const [svgSize, setSvgSize] = useState<{ w: number; h: number } | null>(null);
+  const [scrollRegionElement, setScrollRegionElement] = useState<HTMLDivElement | null>(null);
   const [showCode, setShowCode] = useState(false);
   const { resolvedTheme } = useTheme();
   const { toast } = useToast();
   const { svg, error } = useMermaidRender(code, resolvedTheme, toast);
+  const viewportWidth = useMermaidViewportWidth(scrollRegionElement);
+  const { scale, zoomIn, zoomOut, zoomReset, resetAutoScale } = useMermaidScale(
+    svgSize,
+    viewportWidth,
+  );
 
   // Read intrinsic SVG dimensions once the rendered markup is in the DOM so
   // the zoom transform scales the correct box. Runs after every successful
   // render (svg state change).
   useLayoutEffect(() => {
     if (svg && containerRef.current) {
-      setSvgSize(getSvgDimensions(containerRef.current));
+      const nextSize = getSvgDimensions(containerRef.current);
+      if (!sameSvgSize(svgSizeRef.current, nextSize)) {
+        svgSizeRef.current = nextSize;
+        setSvgSize(nextSize);
+        resetAutoScale();
+      }
       return;
     }
     // svg reset back to null — drop the stale footprint so the wrapper
     // doesn't reserve space for a diagram that's no longer rendered.
-    setSvgSize(null);
-  }, [svg]);
+    if (svgSizeRef.current !== null) {
+      svgSizeRef.current = null;
+      setSvgSize(null);
+      resetAutoScale();
+    }
+  }, [svg, resetAutoScale]);
 
-  const zoomIn = useCallback(() => setScale((s) => Math.min(s + SCALE_STEP, MAX_SCALE)), []);
-  const zoomOut = useCallback(() => setScale((s) => Math.max(s - SCALE_STEP, MIN_SCALE)), []);
-  const zoomReset = useCallback(() => setScale(DEFAULT_SCALE), []);
   const toggleCode = useCallback(() => setShowCode((v) => !v), []);
 
   // Surface the error only when we have no previously-rendered svg to fall
@@ -161,6 +173,7 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
   return (
     <div className="mermaid-block group/mermaid relative my-3 block w-full max-w-full min-w-0 rounded-md border border-border/50 bg-muted/20">
       <div
+        ref={setScrollRegionElement}
         className="mermaid-scroll-region w-full overflow-x-auto overflow-y-hidden p-3"
         style={{ display: showCode ? "none" : undefined }}
       >

@@ -334,6 +334,9 @@ func (v *VscodeManager) Stop(ctx context.Context) error {
 		logChildProcesses(v.logger, pid)
 
 		// Phase 1: Graceful SIGTERM to the entire process group.
+		v.logger.Debug("code-server process group SIGTERM requested",
+			zap.Int("pgid", pid),
+			zap.String("reason", "stop_requested"))
 		if err := terminateProcessGroup(pid); err != nil {
 			v.logger.Warn("failed to send SIGTERM to code-server group",
 				zap.Int("pgid", pid), zap.Error(err))
@@ -353,6 +356,9 @@ func (v *VscodeManager) Stop(ctx context.Context) error {
 					zap.Int("pgid", pid))
 			}
 
+			v.logger.Debug("code-server process group SIGKILL requested",
+				zap.Int("pgid", pid),
+				zap.String("reason", "grace_expired_or_context_canceled"))
 			if err := killProcessGroup(pid); err != nil {
 				v.logger.Warn("failed to force kill code-server group",
 					zap.Int("pgid", pid), zap.Error(err))

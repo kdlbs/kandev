@@ -14,6 +14,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 )
 
@@ -639,6 +640,187 @@ func TestTryBatchedPRWatchCheck_NumberedWatch_AppliesStatus(t *testing.T) {
 	}
 	if updated.ReviewState != "approved" {
 		t.Errorf("ReviewState = %q, want approved", updated.ReviewState)
+	}
+}
+
+func TestTryBatchedPRWatchCheck_PublishesOnPRFeedbackWatermarkChange(t *testing.T) {
+	poller, _, gh, store := setupBatchedPollerTest(t)
+	ctx := context.Background()
+	prUpdatedAt := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	gh.prResponses = []string{`{
+		"data": {
+			"repo0": {
+				"pr0": {
+					"state": "OPEN", "title": "Test PR", "url": "https://x/1",
+					"isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+					"headRefName": "feat", "baseRefName": "main", "headRefOid": "abc",
+					"author": {"login": "alice"},
+					"createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z",
+					"reviews": {"nodes": []},
+					"reviewRequests": {"totalCount": 0},
+					"commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]}
+				}
+			}
+		}
+	}`}
+
+	gotEvent := make(chan *bus.Event, 1)
+	if _, err := poller.eventBus.Subscribe(events.GitHubPRFeedback, func(_ context.Context, event *bus.Event) error {
+		gotEvent <- event
+		return nil
+	}); err != nil {
+		t.Fatalf("subscribe PR feedback: %v", err)
+	}
+
+	watch := &PRWatch{
+		SessionID:       "s1",
+		TaskID:          "t1",
+		Owner:           "o",
+		Repo:            "r",
+		PRNumber:        42,
+		Branch:          "feat",
+		LastCheckStatus: "success",
+		LastReviewState: "",
+	}
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create PR watch: %v", err)
+	}
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID:     "t1",
+		Owner:      "o",
+		Repo:       "r",
+		PRNumber:   42,
+		PRURL:      "https://github.com/o/r/pull/42",
+		PRTitle:    "Test PR",
+		HeadBranch: "feat",
+		BaseBranch: "main",
+		State:      "open",
+	}); err != nil {
+		t.Fatalf("create task PR: %v", err)
+	}
+
+	if !poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch}) {
+		t.Fatalf("expected batched path to succeed")
+	}
+	select {
+	case <-gotEvent:
+	default:
+		t.Fatal("expected PR feedback watermark change to publish PR feedback event")
+	}
+	updated, err := store.GetPRWatchBySession(ctx, "s1")
+	if err != nil || updated == nil {
+		t.Fatalf("get PR watch: err=%v, w=%v", err, updated)
+	}
+	if updated.LastCommentAt == nil || !updated.LastCommentAt.Equal(prUpdatedAt) {
+		t.Fatalf("LastCommentAt = %v, want %v", updated.LastCommentAt, prUpdatedAt)
+	}
+}
+
+func TestPRWatchFeedbackHelpers(t *testing.T) {
+	now := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	older := now.Add(-time.Hour)
+	newer := now.Add(time.Hour)
+	status := &PRStatus{PR: &PR{UpdatedAt: now}}
+	if prWatchFeedbackUpdatedSinceWatch(nil, status) {
+		t.Fatal("nil watch should not report changed")
+	}
+	if prWatchFeedbackUpdatedSinceWatch(&PRWatch{}, nil) {
+		t.Fatal("nil status should not report changed")
+	}
+	if prWatchFeedbackUpdatedSinceWatch(&PRWatch{}, &PRStatus{PR: &PR{}}) {
+		t.Fatal("zero PR updated_at should not report changed")
+	}
+	if !prWatchFeedbackUpdatedSinceWatch(&PRWatch{}, status) {
+		t.Fatal("nil watermark should report changed for non-zero PR updated_at")
+	}
+	if !prWatchFeedbackUpdatedSinceWatch(&PRWatch{LastCommentAt: &older}, status) {
+		t.Fatal("newer PR updated_at should report changed")
+	}
+	if prWatchFeedbackUpdatedSinceWatch(&PRWatch{LastCommentAt: &newer}, status) {
+		t.Fatal("older PR updated_at should not report changed")
+	}
+	if got := prWatchFeedbackWatermark(&PRWatch{LastCommentAt: &newer}, status); got == nil || !got.Equal(newer) {
+		t.Fatalf("watermark should not move backward, got %v want %v", got, newer)
+	}
+	if got := prWatchFeedbackWatermark(&PRWatch{LastCommentAt: &older}, status); got == nil || !got.Equal(now) {
+		t.Fatalf("watermark should advance to PR updated_at, got %v want %v", got, now)
+	}
+	if got := prWatchFeedbackWatermark(&PRWatch{LastCommentAt: &older}, &PRStatus{}); got == nil || !got.Equal(older) {
+		t.Fatalf("watermark should preserve existing value without PR updated_at, got %v want %v", got, older)
+	}
+}
+
+func TestTriggerPRSyncAll_ReturnsPerWatchFallbackErrors(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	watch := &PRWatch{
+		SessionID: "s1",
+		TaskID:    "t1",
+		Owner:     "o",
+		Repo:      "r",
+		PRNumber:  42,
+		Branch:    "feat",
+	}
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create PR watch: %v", err)
+	}
+
+	prs, err := svc.TriggerPRSyncAll(ctx, "t1")
+	if err == nil {
+		t.Fatal("expected per-watch fallback error")
+	}
+	if len(prs) != 0 {
+		t.Fatalf("prs = %d, want 0: %+v", len(prs), prs)
+	}
+	if !strings.Contains(err.Error(), "o/r#42") {
+		t.Fatalf("expected aggregate error to identify failed PR, got %v", err)
+	}
+}
+
+func TestTriggerPRSyncAll_ReturnsPartialErrorWithSuccessfulPRs(t *testing.T) {
+	_, svc, mockClient, store := setupPollerTest(t)
+	ctx := context.Background()
+	mockClient.AddPR(&PR{
+		Number:     1,
+		Title:      "live",
+		State:      "open",
+		HeadSHA:    "sha-live",
+		HeadBranch: "feat-live",
+		BaseBranch: "main",
+		RepoOwner:  "o",
+		RepoName:   "r",
+		UpdatedAt:  time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
+	})
+	for _, watch := range []*PRWatch{
+		{SessionID: "s1", TaskID: "t1", RepositoryID: "repo-live", Owner: "o", Repo: "r", PRNumber: 1, Branch: "feat-live"},
+		{SessionID: "s2", TaskID: "t1", RepositoryID: "repo-dead", Owner: "o", Repo: "r", PRNumber: 2, Branch: "feat-dead"},
+	} {
+		if err := store.CreatePRWatch(ctx, watch); err != nil {
+			t.Fatalf("create PR watch: %v", err)
+		}
+	}
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID:       "t1",
+		RepositoryID: "repo-live",
+		Owner:        "o",
+		Repo:         "r",
+		PRNumber:     1,
+		PRURL:        "https://github.com/o/r/pull/1",
+		PRTitle:      "live",
+		HeadBranch:   "feat-live",
+		BaseBranch:   "main",
+		State:        "open",
+	}); err != nil {
+		t.Fatalf("create task PR: %v", err)
+	}
+
+	prs, err := svc.TriggerPRSyncAll(ctx, "t1")
+	var partial *PartialPRSyncError
+	if !errors.As(err, &partial) {
+		t.Fatalf("expected PartialPRSyncError, got %v", err)
+	}
+	if len(prs) != 1 || prs[0].RepositoryID != "repo-live" {
+		t.Fatalf("expected successful live PR result, got %+v", prs)
 	}
 }
 

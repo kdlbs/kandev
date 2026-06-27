@@ -8,9 +8,9 @@ import (
 // TestOpenCodeACPRuntime_RequiresProcessKill is the regression test for GH
 // issue #1247: opencode acp keeps its HTTP server + MCP child tree alive
 // when stdin closes, so its RuntimeConfig must signal that the process
-// group has to be killed on shutdown. Without this flag the ACP adapter
-// returns RequiresProcessKill=false and the process manager only closes
-// stdin — opencode never exits and MCP children leak.
+// group should be reaped immediately. Without this flag the ACP adapter
+// returns RequiresProcessKill=false and the process manager waits for the
+// graceful EOF path before it falls back to process-group cleanup.
 func TestOpenCodeACPRuntime_RequiresProcessKill(t *testing.T) {
 	rt := NewOpenCodeACP().Runtime()
 	if rt == nil {
@@ -23,9 +23,8 @@ func TestOpenCodeACPRuntime_RequiresProcessKill(t *testing.T) {
 
 // TestACPAgents_DefaultProcessKill confirms the rest of the ACP agents
 // stick with the default (false). They communicate over plain stdin/stdout
-// and exit on EOF, so the process manager's graceful-stdin-close path is
-// the correct shutdown signal — flipping this true would force-kill agents
-// that are perfectly capable of cleanup.
+// and should get a short graceful EOF path before the process manager reaps
+// any remaining process-group descendants.
 func TestACPAgents_DefaultProcessKill(t *testing.T) {
 	cases := []struct {
 		name  string

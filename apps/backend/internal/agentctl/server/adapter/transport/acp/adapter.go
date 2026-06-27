@@ -59,11 +59,11 @@ const wakeupPromptTimeout = 30 * time.Minute
 const notifQueueCapacity = 4096
 
 // acpNotifQueueDefault is the per-connection capacity passed to the SDK's
-// inbound notification queue. Larger than the SDK's own default (1024) so
-// long session/load replays (auggie 500+ exchanges, claude with heavy tool
-// use) don't overflow and tear the connection down. The SDK still bounds
-// memory to (capacity * avg notification size).
-const acpNotifQueueDefault = 16384
+// inbound notification queue. Long session/load replays can emit tens of
+// thousands of notifications before the response, so default to the configured
+// ceiling instead of requiring operators to know about KANDEV_ACP_NOTIF_QUEUE.
+// The SDK still bounds memory to (capacity * avg notification size).
+const acpNotifQueueDefault = 131072
 
 // acpNotifQueueMin / acpNotifQueueMax clamp KANDEV_ACP_NOTIF_QUEUE so a
 // misconfigured value can't either re-introduce the overflow (too low) or

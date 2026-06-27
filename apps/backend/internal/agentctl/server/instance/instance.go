@@ -4,7 +4,6 @@
 package instance
 
 import (
-	"net/http"
 	"sync/atomic"
 	"time"
 
@@ -39,7 +38,7 @@ type Instance struct {
 	manager *process.Manager
 
 	// server is the HTTP server for this instance's API (unexported)
-	server *http.Server
+	server instanceHTTPServer
 
 	// lastActivityNanos is the unix-nano timestamp of the most recently
 	// observed HTTP request on this instance's port. Used by the idle reaper

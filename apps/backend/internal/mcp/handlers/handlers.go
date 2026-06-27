@@ -460,21 +460,19 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
 	}
 
-	var autoStartConfig *mcpAutoStartConfig
-	if startAgent && h.sessionLauncher != nil {
-		pendingTask := &models.Task{
-			ParentID:       req.ParentID,
-			WorkspaceID:    req.WorkspaceID,
-			WorkflowID:     req.WorkflowID,
-			WorkflowStepID: req.WorkflowStepID,
+	pendingTask := &models.Task{
+		ParentID:       req.ParentID,
+		WorkspaceID:    req.WorkspaceID,
+		WorkflowID:     req.WorkflowID,
+		WorkflowStepID: req.WorkflowStepID,
+	}
+	launchConfig, metadata, err := h.resolveMCPLaunchMetadata(ctx, pendingTask, req.AgentProfileID, req.ExecutorProfileID, req.SourceTaskID)
+	if err != nil {
+		code := ws.ErrorCodeInternalError
+		if errors.Is(err, errMCPAgentProfileRequired) {
+			code = ws.ErrorCodeValidation
 		}
-		config := h.resolveMCPAutoStartConfig(ctx, pendingTask, req.AgentProfileID, req.ExecutorProfileID, req.SourceTaskID)
-		if config.AgentProfileID == "" {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
-				"agent_profile_id is required when start_agent is true and no agent profile can be resolved from the parent task, source task, workflow, or workspace defaults; pass agent_profile_id or set start_agent=false",
-				nil)
-		}
-		autoStartConfig = &config
+		return ws.NewError(msg.ID, msg.Action, code, err.Error(), nil)
 	}
 
 	task, err := h.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
@@ -487,6 +485,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Repositories:           repos,
 		BlockedBy:              req.BlockedBy,
 		AssigneeAgentProfileID: req.AssigneeAgentProfileID,
+		Metadata:               metadata,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
@@ -500,11 +499,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 
 	// Auto-start agent session asynchronously only if requested
 	if startAgent && h.sessionLauncher != nil {
-		if autoStartConfig == nil {
-			config := h.resolveMCPAutoStartConfig(ctx, task, req.AgentProfileID, req.ExecutorProfileID, req.SourceTaskID)
-			autoStartConfig = &config
-		}
-		h.launchAutoStartTask(ctx, task, *autoStartConfig)
+		h.launchAutoStartTask(ctx, task, launchConfig)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
@@ -653,6 +648,8 @@ type mcpAutoStartConfig struct {
 	ExecutorProfileID string
 }
 
+var errMCPAgentProfileRequired = errors.New("agent_profile_id is required because no agent profile can be resolved from the parent task, source task, workflow, or workspace defaults")
+
 // autoStartTask launches an agent session for a newly created task in the background.
 // It is kept as a small compatibility wrapper for direct tests; handleCreateTask
 // uses resolveMCPAutoStartConfig before persisting so invalid auto-start
@@ -669,22 +666,54 @@ func (h *Handlers) autoStartTask(task *models.Task, agentProfileID, executorProf
 // defaults used by task opening where this handler can see them (workflow step
 // when a workflow controller is wired, workflow default, workspace default).
 func (h *Handlers) resolveMCPAutoStartConfig(ctx context.Context, task *models.Task, agentProfileID, executorProfileID, sourceTaskID string) mcpAutoStartConfig {
-	executorID := h.inheritFromTaskSession(ctx, task.ParentID, &agentProfileID, &executorProfileID)
+	config, _ := h.resolveMCPAutoStartConfigWithError(ctx, task, agentProfileID, executorProfileID, sourceTaskID)
+	return config
+}
+
+func (h *Handlers) resolveMCPLaunchMetadata(ctx context.Context, task *models.Task, agentProfileID, executorProfileID, sourceTaskID string) (mcpAutoStartConfig, map[string]interface{}, error) {
+	launchConfig, err := h.resolveMCPAutoStartConfigWithError(ctx, task, agentProfileID, executorProfileID, sourceTaskID)
+	if err != nil {
+		return mcpAutoStartConfig{}, nil, fmt.Errorf("failed to resolve launch profile: %w", err)
+	}
+	if launchConfig.AgentProfileID == "" {
+		return mcpAutoStartConfig{}, nil, errMCPAgentProfileRequired
+	}
+	metadata := map[string]interface{}{
+		models.MetaKeyAgentProfileID: launchConfig.AgentProfileID,
+	}
+	if launchConfig.ExecutorID != "" {
+		metadata[models.MetaKeyExecutorID] = launchConfig.ExecutorID
+	}
+	if launchConfig.ExecutorProfileID != "" {
+		metadata[models.MetaKeyExecutorProfileID] = launchConfig.ExecutorProfileID
+	}
+	return launchConfig, metadata, nil
+}
+
+func (h *Handlers) resolveMCPAutoStartConfigWithError(ctx context.Context, task *models.Task, agentProfileID, executorProfileID, sourceTaskID string) (mcpAutoStartConfig, error) {
+	executorID := h.inheritFromTask(ctx, task.ParentID, &agentProfileID, &executorProfileID)
 
 	// For top-level tasks, inherit from the source task (the calling agent's task).
 	if task.ParentID == "" && sourceTaskID != "" {
-		sourceExecutorID := h.inheritFromTaskSession(ctx, sourceTaskID, &agentProfileID, &executorProfileID)
+		sourceExecutorID := h.inheritFromTask(ctx, sourceTaskID, &agentProfileID, &executorProfileID)
 		if executorID == "" {
 			executorID = sourceExecutorID
 		}
 	}
 
 	if agentProfileID == "" {
-		agentProfileID = h.resolveWorkflowAgentProfile(ctx, task.WorkflowStepID, task.WorkflowID)
+		var err error
+		agentProfileID, err = h.resolveWorkflowAgentProfileWithError(ctx, task.WorkflowStepID, task.WorkflowID)
+		if err != nil {
+			return mcpAutoStartConfig{}, fmt.Errorf("resolve workflow agent profile: %w", err)
+		}
 	}
 	if agentProfileID == "" && h.taskSvc != nil {
 		workspace, err := h.taskSvc.GetWorkspace(ctx, task.WorkspaceID)
-		if err == nil && workspace.DefaultAgentProfileID != nil {
+		if err != nil {
+			return mcpAutoStartConfig{}, fmt.Errorf("get workspace %s: %w", task.WorkspaceID, err)
+		}
+		if workspace != nil && workspace.DefaultAgentProfileID != nil {
 			agentProfileID = *workspace.DefaultAgentProfileID
 		}
 	}
@@ -696,18 +725,27 @@ func (h *Handlers) resolveMCPAutoStartConfig(ctx context.Context, task *models.T
 		AgentProfileID:    agentProfileID,
 		ExecutorID:        executorID,
 		ExecutorProfileID: executorProfileID,
-	}
+	}, nil
 }
 
 func (h *Handlers) resolveWorkflowAgentProfile(ctx context.Context, workflowStepID, workflowID string) string {
+	profileID, _ := h.resolveWorkflowAgentProfileWithError(ctx, workflowStepID, workflowID)
+	return profileID
+}
+
+func (h *Handlers) resolveWorkflowAgentProfileWithError(ctx context.Context, workflowStepID, workflowID string) (string, error) {
 	profileID, resolvedWorkflowID := h.resolveWorkflowControllerAgentProfile(ctx, workflowStepID, workflowID)
 	if profileID != "" {
-		return profileID
+		return profileID, nil
 	}
 	if workflowID == "" {
 		workflowID = resolvedWorkflowID
 	}
-	return h.workflowDefaultAgentProfile(ctx, workflowID)
+	profileID, err := h.workflowDefaultAgentProfileWithError(ctx, workflowID)
+	if err != nil {
+		return "", err
+	}
+	return profileID, nil
 }
 
 func (h *Handlers) resolveWorkflowControllerAgentProfile(ctx context.Context, workflowStepID, workflowID string) (string, string) {
@@ -743,14 +781,19 @@ func (h *Handlers) resolveWorkflowStartStepAgentProfile(ctx context.Context, wor
 }
 
 func (h *Handlers) workflowDefaultAgentProfile(ctx context.Context, workflowID string) string {
+	profileID, _ := h.workflowDefaultAgentProfileWithError(ctx, workflowID)
+	return profileID
+}
+
+func (h *Handlers) workflowDefaultAgentProfileWithError(ctx context.Context, workflowID string) (string, error) {
 	if workflowID == "" || h.taskSvc == nil {
-		return ""
+		return "", nil
 	}
 	workflow, err := h.taskSvc.GetWorkflow(ctx, workflowID)
 	if err != nil || workflow == nil {
-		return ""
+		return "", err
 	}
-	return workflow.AgentProfileID
+	return workflow.AgentProfileID, nil
 }
 
 func startStepAgentProfile(steps []*workflowmodels.WorkflowStep) string {
@@ -809,32 +852,67 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 	}()
 }
 
-// inheritFromTaskSession fills agentProfileID and executorProfileID from another
-// task's primary session when not explicitly provided. It returns that session's ExecutorID
-// as a fallback for when the parent session has no executor profile (common for
-// UI-created sessions). If ExecutorProfileID is resolved, ExecutorID is redundant
-// since the profile already encodes the executor reference.
-func (h *Handlers) inheritFromTaskSession(ctx context.Context, parentID string, agentProfileID, executorProfileID *string) string {
-	if parentID == "" {
+// inheritFromTask fills agentProfileID and executorProfileID from another task's
+// primary session or durable metadata when not explicitly provided. It returns a
+// bare ExecutorID only when no executor profile was resolved, because an
+// executor profile already encodes its executor reference.
+func (h *Handlers) inheritFromTask(ctx context.Context, taskID string, agentProfileID, executorProfileID *string) string {
+	if taskID == "" || h.taskSvc == nil {
 		return ""
 	}
-	if h.taskSvc == nil {
+
+	executorID := h.inheritFromPrimarySession(ctx, taskID, agentProfileID, executorProfileID)
+	needsMetadata := *agentProfileID == "" || *executorProfileID == "" || executorID != ""
+	if needsMetadata {
+		executorID = h.inheritFromTaskMetadata(ctx, taskID, agentProfileID, executorProfileID, executorID)
+	}
+
+	if *executorProfileID != "" {
 		return ""
 	}
-	parent, err := h.taskSvc.GetPrimarySession(ctx, parentID)
-	if err != nil || parent == nil {
+	return executorID
+}
+
+func (h *Handlers) inheritFromPrimarySession(ctx context.Context, taskID string, agentProfileID, executorProfileID *string) string {
+	session, err := h.taskSvc.GetPrimarySession(ctx, taskID)
+	if err != nil || session == nil {
 		return ""
 	}
 	if *agentProfileID == "" {
-		*agentProfileID = parent.AgentProfileID
+		*agentProfileID = session.AgentProfileID
 	}
 	if *executorProfileID == "" {
-		*executorProfileID = parent.ExecutorProfileID
+		*executorProfileID = session.ExecutorProfileID
 	}
-	// Only return ExecutorID as fallback when no profile was resolved.
-	// An executor profile already encodes its executor reference.
-	if *executorProfileID == "" {
-		return parent.ExecutorID
+	if *executorProfileID != "" {
+		return ""
+	}
+	return session.ExecutorID
+}
+
+func (h *Handlers) inheritFromTaskMetadata(ctx context.Context, taskID string, agentProfileID, executorProfileID *string, executorID string) string {
+	task, err := h.taskSvc.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		return executorID
+	}
+	inheritMetadataValue(task.Metadata, models.MetaKeyAgentProfileID, agentProfileID)
+	inheritMetadataValue(task.Metadata, models.MetaKeyExecutorProfileID, executorProfileID)
+	if executorID == "" && *executorProfileID == "" {
+		executorID = metadataString(task.Metadata, models.MetaKeyExecutorID)
+	}
+	return executorID
+}
+
+func inheritMetadataValue(metadata map[string]interface{}, key string, target *string) {
+	if *target != "" {
+		return
+	}
+	*target = metadataString(metadata, key)
+}
+
+func metadataString(metadata map[string]interface{}, key string) string {
+	if v, ok := metadata[key].(string); ok && v != "" {
+		return v
 	}
 	return ""
 }

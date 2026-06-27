@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -261,7 +262,10 @@ func wsSyncTaskPR(svc *Service, _ *logger.Logger) func(ctx context.Context, msg 
 	return wsWithField("task_id", func(ctx context.Context, taskID string) (interface{}, error) {
 		prs, permanent, err := svc.TriggerPRSyncAllPermanent(ctx, taskID)
 		if err != nil {
-			return nil, err
+			var partial *PartialPRSyncError
+			if !permanent && (!errors.As(err, &partial) || len(prs) == 0) {
+				return nil, err
+			}
 		}
 		// Return an envelope so the frontend always gets a deterministic
 		// shape even on empty results (`{prs: []}`); a bare `nil` slice

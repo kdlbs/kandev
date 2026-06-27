@@ -148,6 +148,11 @@ apps/backend/
 - Exposes workspace operations (shell, git, files)
 - Supports multiple concurrent instances on different ports
 
+Standalone agentctl is launched in its own process group so terminal Ctrl+C is
+handled by the backend lifecycle manager first. Do not make standalone agentctl
+share the backend's foreground process group; that bypasses supervised shutdown
+and can leak ACP subprocesses.
+
 **Executor Types** (database model):
 - `local_pc` - Standalone process on host
 - `local_docker` - Docker container on host

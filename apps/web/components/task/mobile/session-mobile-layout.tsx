@@ -74,7 +74,11 @@ function MobileChatPanelContent({
           />
         </div>
       ) : (
-        <TaskChatPanel sessionId={effectiveSessionId} onOpenFile={onOpenFile} />
+        <TaskChatPanel
+          sessionId={effectiveSessionId}
+          taskId={effectiveSessionId ? activeTaskId : null}
+          onOpenFile={onOpenFile}
+        />
       )}
     </div>
   );

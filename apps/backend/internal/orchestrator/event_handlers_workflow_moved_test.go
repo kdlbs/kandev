@@ -6,10 +6,12 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 func TestHandleTaskMoved(t *testing.T) {
@@ -151,6 +153,72 @@ func TestHandleTaskMovedNoSession(t *testing.T) {
 			FromStepID: "step1",
 			ToStepID:   "step2",
 		})
+	})
+
+	t.Run("auto-start uses executor_id from task metadata", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		now := time.Now().UTC()
+		requireNoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}))
+		requireNoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}))
+		metadata := map[string]interface{}{
+			models.MetaKeyAgentProfileID: "profile-1",
+			models.MetaKeyExecutorID:     "exec-special",
+		}
+		requireNoError(t, repo.CreateTask(ctx, &models.Task{
+			ID:             "t1",
+			WorkspaceID:    "ws1",
+			WorkflowID:     "wf1",
+			WorkflowStepID: "step1",
+			Title:          "Task",
+			Description:    "prompt",
+			State:          v1.TaskStateCreated,
+			Metadata:       metadata,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		}))
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Auto Start Step", Position: 1,
+			Events: wfmodels.StepEvents{
+				OnEnter: []wfmodels.OnEnterAction{
+					{Type: wfmodels.OnEnterAutoStartAgent},
+				},
+			},
+		}
+
+		taskRepo := newMockTaskRepo()
+		taskRepo.tasks["t1"] = &v1.Task{
+			ID:          "t1",
+			WorkspaceID: "ws1",
+			WorkflowID:  "wf1",
+			Description: "prompt",
+			State:       v1.TaskStateCreated,
+			Metadata:    metadata,
+		}
+		launched := make(chan string, 1)
+		agentMgr := &mockAgentManager{
+			launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+				executorID, _ := req.Metadata[models.MetaKeyExecutorID].(string)
+				launched <- executorID
+				return &executor.LaunchAgentResponse{AgentExecutionID: "exec-1"}, nil
+			},
+		}
+		svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+
+		svc.handleTaskMovedNoSession(ctx, watcher.TaskMovedEventData{
+			TaskID:   "t1",
+			ToStepID: "step2",
+		})
+
+		select {
+		case got := <-launched:
+			if got != "exec-special" {
+				t.Fatalf("ExecutorID = %q, want exec-special", got)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for auto-start launch")
+		}
 	})
 }
 

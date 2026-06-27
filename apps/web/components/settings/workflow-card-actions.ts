@@ -117,6 +117,19 @@ async function addRemoteStep(
   }
 }
 
+function applyWorkflowStepUpdates(
+  steps: WorkflowStep[],
+  stepId: string,
+  updates: Partial<WorkflowStep>,
+): WorkflowStep[] {
+  const isSettingStartStep = updates.is_start_step === true;
+  return steps.map((step) => {
+    if (step.id === stepId) return { ...step, ...updates };
+    if (isSettingStartStep) return { ...step, is_start_step: false };
+    return step;
+  });
+}
+
 export function useWorkflowStepActions({
   workflow,
   isNewWorkflow,
@@ -131,7 +144,7 @@ export function useWorkflowStepActions({
 }: WorkflowStepActionsParams) {
   const handleUpdateWorkflowStep = async (stepId: string, updates: Partial<WorkflowStep>) => {
     if (isNewWorkflow) {
-      setWorkflowSteps((prev) => prev.map((s) => (s.id === stepId ? { ...s, ...updates } : s)));
+      setWorkflowSteps((prev) => applyWorkflowStepUpdates(prev, stepId, updates));
       return;
     }
     try {

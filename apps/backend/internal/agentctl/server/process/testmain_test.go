@@ -42,6 +42,8 @@ func TestMain(m *testing.M) {
 //	echo <args...>                 — print args joined by spaces, plus newline
 //	cat                            — copy stdin to stdout until EOF
 //	echo-then-sleep <msg> <secs>   — print msg, then sleep <secs>
+//	delay-then-child <pidfile> <delay-ms> <secs>
+//	                               — wait, spawn a sleeping child, write its PID, then sleep
 //
 // New commands can be added here as tests need them; the goal is to keep the
 // surface tiny so the helper stays inspectable.
@@ -112,6 +114,61 @@ func runFixture(spec string) {
 			os.Exit(2)
 		}
 		time.Sleep(time.Duration(secs) * time.Second)
+	case "delay-then-child":
+		// Waits briefly before spawning the child so platform lifecycle hooks
+		// installed immediately after parent Start() can be applied before the
+		// child inherits them. Used by Windows Job Object tests.
+		if len(parts) != 4 {
+			fmt.Fprintln(os.Stderr, "fixture: delay-then-child takes 3 args")
+			os.Exit(2)
+		}
+		pidFile := parts[1]
+		delayMS, err := strconv.Atoi(parts[2])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fixture: delay-then-child: bad delay %q\n", parts[2])
+			os.Exit(2)
+		}
+		secs, err := strconv.Atoi(parts[3])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fixture: delay-then-child: bad seconds %q\n", parts[3])
+			os.Exit(2)
+		}
+		time.Sleep(time.Duration(delayMS) * time.Millisecond)
+		childCmd := exec.Command(os.Args[0])
+		childCmd.Env = append(os.Environ(), kandevTestFixtureEnv+"=sleep "+strconv.Itoa(secs))
+		if err := childCmd.Start(); err != nil {
+			fmt.Fprintf(os.Stderr, "fixture: delay-then-child: spawn child: %v\n", err)
+			os.Exit(2)
+		}
+		if err := os.WriteFile(pidFile, []byte(strconv.Itoa(childCmd.Process.Pid)), 0o600); err != nil {
+			fmt.Fprintf(os.Stderr, "fixture: delay-then-child: write pidfile: %v\n", err)
+			os.Exit(2)
+		}
+		time.Sleep(time.Duration(secs) * time.Second)
+	case "exit-with-child":
+		// Forks a sleeping child, writes its PID, then exits immediately.
+		// This models wrappers such as npx/node that can exit while a native
+		// descendant remains alive in the inherited process group.
+		if len(parts) != 3 {
+			fmt.Fprintln(os.Stderr, "fixture: exit-with-child takes 2 args")
+			os.Exit(2)
+		}
+		pidFile := parts[1]
+		secs, err := strconv.Atoi(parts[2])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fixture: exit-with-child: bad seconds %q\n", parts[2])
+			os.Exit(2)
+		}
+		childCmd := exec.Command(os.Args[0])
+		childCmd.Env = append(os.Environ(), kandevTestFixtureEnv+"=sleep "+strconv.Itoa(secs))
+		if err := childCmd.Start(); err != nil {
+			fmt.Fprintf(os.Stderr, "fixture: exit-with-child: spawn child: %v\n", err)
+			os.Exit(2)
+		}
+		if err := os.WriteFile(pidFile, []byte(strconv.Itoa(childCmd.Process.Pid)), 0o600); err != nil {
+			fmt.Fprintf(os.Stderr, "fixture: exit-with-child: write pidfile: %v\n", err)
+			os.Exit(2)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "fixture: unknown command %q\n", parts[0])
 		os.Exit(2)

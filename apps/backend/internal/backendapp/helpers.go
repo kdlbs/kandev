@@ -86,6 +86,9 @@ import (
 const (
 	desktopHealthTokenEnv    = "KANDEV_DESKTOP_HEALTH_TOKEN"
 	desktopHealthTokenHeader = "X-Kandev-Desktop-Health-Token"
+	agentShutdownTimeout     = 20 * time.Second
+	httpShutdownTimeout      = 10 * time.Second
+	tracingShutdownTimeout   = 5 * time.Second
 )
 
 // buildSessionDataProvider constructs the session data provider function used by the WebSocket hub
@@ -1152,46 +1155,66 @@ func runGracefulShutdown(
 	runCleanups func(),
 	log *logger.Logger,
 ) {
-	log.Info("Shutting down Kandev...")
+	start := time.Now()
+	var shutdownErrs []error
+	log.Info("Graceful shutdown started",
+		zap.Int("http_timeout_seconds", int(httpShutdownTimeout/time.Second)),
+		zap.Int("agent_timeout_seconds", int(agentShutdownTimeout/time.Second)),
+		zap.Int("tracing_timeout_seconds", int(tracingShutdownTimeout/time.Second)))
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), httpShutdownTimeout)
 	defer shutdownCancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
+		shutdownErrs = append(shutdownErrs, err)
 		log.Error("HTTP server shutdown error", zap.Error(err))
 	}
 
 	if err := orchestratorSvc.Stop(); err != nil {
+		shutdownErrs = append(shutdownErrs, err)
 		log.Error("Orchestrator stop error", zap.Error(err))
 	}
 
-	stopLifecycleManager(lifecycleMgr, log)
+	if err := stopLifecycleManager(lifecycleMgr, log); err != nil {
+		shutdownErrs = append(shutdownErrs, err)
+	}
 	runCleanups()
 
 	// Flush pending OTel spans before exit
-	traceCtx, traceCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	traceCtx, traceCancel := context.WithTimeout(context.Background(), tracingShutdownTimeout)
 	if err := tracing.Shutdown(traceCtx); err != nil {
+		shutdownErrs = append(shutdownErrs, err)
 		log.Error("Tracer shutdown error", zap.Error(err))
 	}
 	traceCancel()
 
-	log.Info("Kandev stopped")
+	log.Info("Graceful shutdown complete",
+		zap.Duration("duration", time.Since(start)),
+		zap.Int("error_count", len(shutdownErrs)))
 	_ = log.Sync()
 }
 
 // stopLifecycleManager gracefully stops all agents and the lifecycle manager.
-func stopLifecycleManager(lifecycleMgr *lifecycle.Manager, log *logger.Logger) {
+func stopLifecycleManager(lifecycleMgr *lifecycle.Manager, log *logger.Logger) error {
 	if lifecycleMgr == nil {
-		return
+		return nil
 	}
-	log.Info("Stopping agents gracefully...")
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	var shutdownErrs []error
+	log.Info("Stopping agents gracefully",
+		zap.Int("timeout_seconds", int(agentShutdownTimeout/time.Second)))
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), agentShutdownTimeout)
 	if err := lifecycleMgr.StopAllAgents(stopCtx); err != nil {
+		shutdownErrs = append(shutdownErrs, err)
 		log.Error("Graceful agent stop error", zap.Error(err))
 	}
 	stopCancel()
 
 	if err := lifecycleMgr.Stop(); err != nil {
+		shutdownErrs = append(shutdownErrs, err)
 		log.Error("Lifecycle manager stop error", zap.Error(err))
 	}
+	if len(shutdownErrs) == 0 {
+		log.Info("Agents stopped gracefully")
+	}
+	return errors.Join(shutdownErrs...)
 }

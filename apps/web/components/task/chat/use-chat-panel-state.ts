@@ -447,16 +447,18 @@ function useSessionTodoItems(
 
 export type UseChatPanelStateOptions = {
   sessionId: string | null;
+  taskId?: string | null;
   onOpenFile?: (path: string) => void;
   onOpenFileAtLine?: (filePath: string) => void;
 };
 
 export function useChatPanelState({
   sessionId,
+  taskId: taskIdHint = null,
   onOpenFile,
   onOpenFileAtLine,
 }: UseChatPanelStateOptions) {
-  const sessionState = useSessionState(sessionId);
+  const sessionState = useSessionState(sessionId, { taskIdHint });
   const { resolvedSessionId, taskId } = sessionState;
   const planMode = usePlanMode(resolvedSessionId, taskId);
   const { supportsMcp, mcpServers } = useSessionMcp(sessionState.session?.agent_profile_id);

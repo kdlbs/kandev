@@ -269,6 +269,22 @@ func TestGetPreviousStepByPosition(t *testing.T) {
 }
 
 func TestResolveStartStep(t *testing.T) {
+	t.Run("create step keeps only the latest explicit start step", func(t *testing.T) {
+		svc, db := setupTestService(t)
+		ctx := context.Background()
+
+		insertWorkflow(t, db, "wf-1", "Test Workflow")
+
+		createStep(t, svc, &models.WorkflowStep{WorkflowID: "wf-1", Name: "First Start", Position: 0, IsStartStep: true})
+		createStep(t, svc, &models.WorkflowStep{WorkflowID: "wf-1", Name: "Latest Start", Position: 1, IsStartStep: true})
+		createStep(t, svc, &models.WorkflowStep{WorkflowID: "wf-1", Name: "Done", Position: 2})
+
+		steps, err := svc.ListStepsByWorkflow(ctx, "wf-1")
+		require.NoError(t, err)
+
+		assert.Equal(t, []string{"Latest Start"}, startStepNames(steps))
+	})
+
 	t.Run("explicit is_start_step returns that step", func(t *testing.T) {
 		svc, db := setupTestService(t)
 		ctx := context.Background()
@@ -414,6 +430,30 @@ func TestCreateStepsFromTemplate_RemapsStepIDs(t *testing.T) {
 	assert.Equal(t, nameToID["In Progress"], done.Events.OnTurnStart[0].Config["step_id"])
 }
 
+func TestCreateStepsFromTemplate_NormalizesDuplicateStartSteps(t *testing.T) {
+	svc, db := setupTestService(t)
+	ctx := context.Background()
+
+	insertWorkflow(t, db, "wf-1", "Test Workflow")
+	err := svc.repo.CreateTemplate(ctx, &models.WorkflowTemplate{
+		ID:   "duplicate-starts",
+		Name: "Duplicate Starts",
+		Steps: []models.StepDefinition{
+			{ID: "first", Name: "First Start", Position: 0, Color: "gray", IsStartStep: true},
+			{ID: "second", Name: "Latest Start", Position: 1, Color: "blue", IsStartStep: true},
+			{ID: "done", Name: "Done", Position: 2, Color: "green"},
+		},
+	})
+	require.NoError(t, err)
+
+	err = svc.CreateStepsFromTemplate(ctx, "wf-1", "duplicate-starts")
+	require.NoError(t, err)
+
+	steps, err := svc.repo.ListStepsByWorkflow(ctx, "wf-1")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Latest Start"}, startStepNames(steps))
+}
+
 func findStepByName(steps []*models.WorkflowStep, name string) *models.WorkflowStep {
 	for _, s := range steps {
 		if s.Name == name {
@@ -421,6 +461,16 @@ func findStepByName(steps []*models.WorkflowStep, name string) *models.WorkflowS
 		}
 	}
 	return nil
+}
+
+func startStepNames(steps []*models.WorkflowStep) []string {
+	names := make([]string, 0)
+	for _, step := range steps {
+		if step.IsStartStep {
+			names = append(names, step.Name)
+		}
+	}
+	return names
 }
 
 func setupTestServiceWithProvider(t *testing.T) (*Service, *sqlx.DB, *mockWorkflowProvider) {
@@ -580,6 +630,34 @@ func TestImportWorkflows(t *testing.T) {
 		steps, err := svc.repo.ListStepsByWorkflow(ctx, "imported-Imported WF")
 		require.NoError(t, err)
 		assert.Len(t, steps, 2)
+	})
+
+	t.Run("normalizes duplicate start steps on import", func(t *testing.T) {
+		svc, _, _ := setupTestServiceWithProvider(t)
+		ctx := context.Background()
+
+		export := &models.WorkflowExport{
+			Version: models.ExportVersion,
+			Type:    models.ExportType,
+			Workflows: []models.WorkflowPortable{
+				{
+					Name: "Duplicate Starts",
+					Steps: []models.StepPortable{
+						{Name: "First Start", Position: 0, Color: "gray", IsStartStep: true},
+						{Name: "Latest Start", Position: 1, Color: "blue", IsStartStep: true},
+						{Name: "Done", Position: 2, Color: "green"},
+					},
+				},
+			},
+		}
+
+		result, err := svc.ImportWorkflows(ctx, "ws-1", export)
+		require.NoError(t, err)
+		require.Len(t, result.Created, 1)
+
+		steps, err := svc.repo.ListStepsByWorkflow(ctx, "imported-Duplicate Starts")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"Latest Start"}, startStepNames(steps))
 	})
 
 	t.Run("skips workflows that already exist by name", func(t *testing.T) {

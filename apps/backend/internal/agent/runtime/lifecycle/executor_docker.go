@@ -22,6 +22,8 @@ import (
 )
 
 const dockerWorkspacePath = "/workspace"
+const dockerStopContainerTimeout = 30 * time.Second
+const dockerFallbackCleanupTimeout = dockerStopContainerTimeout + 5*time.Second
 
 // getMetadataString retrieves a string value from metadata map.
 func getMetadataString(metadata map[string]interface{}, key string) string {
@@ -598,7 +600,8 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 	// the kandev-managed per-container session dir so we don't leak GBs of
 	// agent state on disk. Plain stops preserve the dir so resume re-attaches
 	// to the same agent state, mirroring the Sprites preserve-on-stop rule.
-	if shouldRunExecutorCleanup(instance.StopReason) && r.kandevHomeDir != "" && instance.InstanceID != "" {
+	teardownContainer := shouldTeardownDockerContainer(instance.StopReason)
+	if teardownContainer && r.kandevHomeDir != "" && instance.InstanceID != "" {
 		CleanupAgentSessionDir(InstanceSessionRoot(r.kandevHomeDir, instance.InstanceID), r.logger)
 	}
 
@@ -606,15 +609,31 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 		return nil // No container to stop
 	}
 
+	// Plain "stop the agent" runs (e.g. user clicks Stop, then later wants to
+	// resume) must not stop the Docker container after agentctl stopped cleanly.
+	// The container holds the cloned workspace and agentctl process for fast
+	// resume; destructive lifecycle events or failed agentctl stops should tear
+	// it down.
+	if !force && !instance.AgentStopFailed && !teardownContainer {
+		r.logger.Info("preserving docker container after agent stop",
+			zap.String("container_id", instance.ContainerID),
+			zap.String("instance_id", instance.InstanceID),
+			zap.String("stop_reason", instance.StopReason))
+		return nil
+	}
+
 	dockerClient, _, err := r.ensureClient()
 	if err != nil {
 		return fmt.Errorf("docker unavailable: %w", err)
 	}
 
+	cleanupCtx, cancel := dockerCleanupContext(ctx, instance.AgentStopFailed)
+	defer cancel()
+
 	if force {
-		err = dockerClient.KillContainer(ctx, instance.ContainerID, "SIGKILL")
+		err = dockerClient.KillContainer(cleanupCtx, instance.ContainerID, "SIGKILL")
 	} else {
-		err = dockerClient.StopContainer(ctx, instance.ContainerID, 30*time.Second)
+		err = dockerClient.StopContainer(cleanupCtx, instance.ContainerID, dockerStopContainerTimeout)
 	}
 
 	if err != nil {
@@ -622,6 +641,25 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 	}
 
 	return nil
+}
+
+// shouldTeardownDockerContainer extends terminal cleanup with stale execution
+// cleanup for Docker only. A stale Docker execution owns a local container and
+// per-instance session dir that become untracked before retry/resume launches a
+// replacement. Sprites intentionally keep stale sandboxes; see
+// shouldRunExecutorCleanup for that shared runtime policy.
+func shouldTeardownDockerContainer(reason string) bool {
+	if shouldRunExecutorCleanup(reason) {
+		return true
+	}
+	return strings.ToLower(strings.TrimSpace(reason)) == stopReasonStaleExecutionCleanup
+}
+
+func dockerCleanupContext(ctx context.Context, agentStopFailed bool) (context.Context, context.CancelFunc) {
+	if agentStopFailed {
+		return context.WithTimeout(context.WithoutCancel(ctx), dockerFallbackCleanupTimeout)
+	}
+	return ctx, func() {}
 }
 
 func (r *DockerExecutor) RecoverInstances(_ context.Context) ([]*ExecutorInstance, error) {

@@ -216,9 +216,9 @@ type InstanceConfig struct {
 	// Inherited from the parent Config at instance creation time.
 	AuthToken string
 
-	// RequiresProcessKill forces the agent's process group to be killed on
-	// shutdown instead of relying on stdin close. Required for agents whose
-	// runtime keeps child processes alive when stdin closes (opencode acp).
+	// RequiresProcessKill skips the graceful stdin-close wait and reaps the
+	// agent's process group immediately. Required for agents whose runtime
+	// keeps child processes alive when stdin closes (opencode acp).
 	RequiresProcessKill bool
 
 	// StripEnv lists environment variables to strip from the agent's child

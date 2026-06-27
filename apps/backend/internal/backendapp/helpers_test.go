@@ -12,7 +12,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
@@ -114,6 +116,40 @@ func TestAppendAgentctlStatusMessage_IncludesWorkspacePathForReload(t *testing.T
 	}
 }
 
+func TestStopLifecycleManagerAllowsAgentctlInstanceCleanupWindow(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{
+		Level:      "error",
+		Format:     "console",
+		OutputPath: "stdout",
+	})
+	if err != nil {
+		t.Fatalf("NewLogger: %v", err)
+	}
+
+	stopper := &shutdownDeadlineExecutor{}
+	execRegistry := lifecycle.NewExecutorRegistry(log)
+	execRegistry.Register(stopper)
+	mgr := lifecycle.NewManager(nil, nil, execRegistry, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), log)
+	if err := mgr.ExecutionStoreForTesting().Add(&lifecycle.AgentExecution{
+		ID:          "exec-1",
+		TaskID:      "task-1",
+		SessionID:   "sess-1",
+		RuntimeName: executor.NameStandalone,
+	}); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	startedAt := time.Now()
+	_ = stopLifecycleManager(mgr, log)
+
+	if stopper.deadline.IsZero() {
+		t.Fatal("StopInstance was not called with a deadline")
+	}
+	if got := stopper.deadline.Sub(startedAt); got < 15*time.Second {
+		t.Fatalf("agent shutdown timeout = %v, want at least 15s for agentctl instance cleanup", got)
+	}
+}
+
 func TestBootInitialStateIncludesFeatureFlags(t *testing.T) {
 	state := bootInitialState(
 		context.Background(),
@@ -136,6 +172,44 @@ func TestBootInitialStateIncludesFeatureFlags(t *testing.T) {
 		t.Fatal("features.office should hydrate true from the backend boot payload")
 	}
 }
+
+type shutdownDeadlineExecutor struct {
+	deadline time.Time
+}
+
+func (s *shutdownDeadlineExecutor) Name() executor.Name { return executor.NameStandalone }
+
+func (s *shutdownDeadlineExecutor) HealthCheck(context.Context) error { return nil }
+
+func (s *shutdownDeadlineExecutor) CreateInstance(
+	context.Context,
+	*lifecycle.ExecutorCreateRequest,
+) (*lifecycle.ExecutorInstance, error) {
+	return nil, nil
+}
+
+func (s *shutdownDeadlineExecutor) StopInstance(
+	ctx context.Context,
+	_ *lifecycle.ExecutorInstance,
+	_ bool,
+) error {
+	if deadline, ok := ctx.Deadline(); ok {
+		s.deadline = deadline
+	}
+	return nil
+}
+
+func (s *shutdownDeadlineExecutor) RecoverInstances(context.Context) ([]*lifecycle.ExecutorInstance, error) {
+	return nil, nil
+}
+
+func (s *shutdownDeadlineExecutor) GetInteractiveRunner() *process.InteractiveRunner { return nil }
+
+func (s *shutdownDeadlineExecutor) RequiresCloneURL() bool { return false }
+
+func (s *shutdownDeadlineExecutor) ShouldApplyPreferredShell() bool { return true }
+
+func (s *shutdownDeadlineExecutor) IsAlwaysResumable() bool { return false }
 
 func TestBootInitialStateHomeIncludesKanbanFirstPaintState(t *testing.T) {
 	taskSvc, workflowSvc := newBootStateTestServices(t)

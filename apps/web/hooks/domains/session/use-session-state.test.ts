@@ -109,6 +109,23 @@ describe("useSessionState", () => {
 
       expect(result.current.resolvedSessionId).toBeNull();
     });
+
+    it("uses taskIdHint while an explicit session row is hydrating", () => {
+      mockSession = null;
+
+      const { result } = renderHook(() => useSessionState("session-new", { taskIdHint: "task-1" }));
+
+      expect(result.current.resolvedSessionId).toBe("session-new");
+      expect(result.current.taskId).toBe("task-1");
+    });
+
+    it("prefers the hydrated session task over taskIdHint", () => {
+      mockSession = createMockSession("session-1", "task-2");
+
+      const { result } = renderHook(() => useSessionState("session-1", { taskIdHint: "task-1" }));
+
+      expect(result.current.taskId).toBe("task-2");
+    });
   });
 
   describe("session flags", () => {

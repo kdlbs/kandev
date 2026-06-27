@@ -202,6 +202,28 @@
   }
 }
 
+/* iOS Safari auto-zooms a focused form control whose computed font-size is
+   < 16px (native <select> included). Force 16px on coarse-pointer (touch)
+   devices to stop focus-zoom. !important because some controls are styled by
+   more specific selectors that would otherwise win on specificity — e.g. the
+   compact `.tiptap pre .code-block-language` picker (0.625rem). Bumping that
+   picker to 16px only happens on touch, where a larger tap target is an
+   improvement; desktop (fine pointer) keeps the compact size. Only true
+   editing hosts get the contenteditable rule — `[contenteditable="false"]`
+   decorations (mention chips, code-block views) are excluded.
+   `any-pointer` (not `pointer`) so the floor also applies on hybrid devices
+   whose primary pointer is fine (e.g. a touchscreen laptop with a mouse),
+   where a touch tap can still focus a field. */
+@media (any-pointer: coarse) {
+  input,
+  textarea,
+  select,
+  [contenteditable="true"],
+  [contenteditable="plaintext-only"] {
+    font-size: 16px !important;
+  }
+}
+
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;

@@ -5,11 +5,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
+import { Alert, AlertDescription } from "@kandev/ui/alert";
 import {
   IconScale,
   IconChevronDown,
   IconChevronRight,
   IconExternalLink,
+  IconAlertTriangle,
 } from "@tabler/icons-react";
 import type { LicenseEntry } from "@/lib/types/system";
 
@@ -100,6 +102,10 @@ function filterEntries(entries: LicenseEntry[], query: string): LicenseEntry[] {
 export function LicensesList({ entries }: Props) {
   const [query, setQuery] = useState("");
   const visible = useMemo(() => filterEntries(entries, query), [entries, query]);
+  const hasStaleGoEntries = useMemo(
+    () => entries.some((entry) => entry.ecosystem === "go" && entry.stale),
+    [entries],
+  );
 
   return (
     <Card data-testid="system-licenses-card">
@@ -109,6 +115,15 @@ export function LicensesList({ entries }: Props) {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        {hasStaleGoEntries && (
+          <Alert data-testid="system-licenses-stale-warning">
+            <IconAlertTriangle className="h-3.5 w-3.5" />
+            <AlertDescription>
+              Go license entries were reused from the committed manifest because generation failed.
+              Regenerate licenses when go-licenses is healthy to refresh Go dependency data.
+            </AlertDescription>
+          </Alert>
+        )}
         <div className="flex items-center justify-between gap-3">
           <Input
             placeholder="Filter by name, license, or ecosystem..."

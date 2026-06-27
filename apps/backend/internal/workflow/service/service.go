@@ -270,30 +270,41 @@ func (s *Service) ResolveFirstStep(ctx context.Context, workflowID string) (*mod
 
 // CreateStep creates a new workflow step.
 func (s *Service) CreateStep(ctx context.Context, step *models.WorkflowStep) error {
-	step.ID = uuid.New().String()
-	if err := s.repo.CreateStep(ctx, step); err != nil {
+	_, err := s.CreateStepWithStartStepUpdates(ctx, step)
+	return err
+}
+
+// CreateStepWithStartStepUpdates creates a new workflow step and returns any
+// other workflow steps whose start-step flag was cleared.
+func (s *Service) CreateStepWithStartStepUpdates(ctx context.Context, step *models.WorkflowStep) ([]*models.WorkflowStep, error) {
+	if step.ID == "" {
+		step.ID = uuid.New().String()
+	}
+	demoted, err := s.repo.CreateStepWithDemotedStartSteps(ctx, step)
+	if err != nil {
 		s.logger.Error("failed to create step", zap.String("workflow_id", step.WorkflowID), zap.Error(err))
-		return err
+		return nil, err
 	}
 	s.logger.Info("created workflow step", zap.String("step_id", step.ID), zap.String("workflow_id", step.WorkflowID))
-	return nil
+	return demoted, nil
 }
 
 // UpdateStep updates an existing workflow step.
 func (s *Service) UpdateStep(ctx context.Context, step *models.WorkflowStep) error {
-	// If marking as start step, clear the flag on all other steps first
-	if step.IsStartStep {
-		if err := s.repo.ClearStartStepFlag(ctx, step.WorkflowID, step.ID); err != nil {
-			s.logger.Error("failed to clear start step flag", zap.String("workflow_id", step.WorkflowID), zap.Error(err))
-			return err
-		}
-	}
-	if err := s.repo.UpdateStep(ctx, step); err != nil {
+	_, err := s.UpdateStepWithStartStepUpdates(ctx, step)
+	return err
+}
+
+// UpdateStepWithStartStepUpdates updates a workflow step and returns any other
+// workflow steps whose start-step flag was cleared.
+func (s *Service) UpdateStepWithStartStepUpdates(ctx context.Context, step *models.WorkflowStep) ([]*models.WorkflowStep, error) {
+	demoted, err := s.repo.UpdateStepWithDemotedStartSteps(ctx, step)
+	if err != nil {
 		s.logger.Error("failed to update step", zap.String("step_id", step.ID), zap.Error(err))
-		return err
+		return nil, err
 	}
 	s.logger.Info("updated workflow step", zap.String("step_id", step.ID))
-	return nil
+	return demoted, nil
 }
 
 // DeleteStep deletes a workflow step and clears any references to it from other steps.

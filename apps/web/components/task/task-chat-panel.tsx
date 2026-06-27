@@ -115,6 +115,7 @@ function useSessionAgentIdentity(sessionId: string | null | undefined): {
 type TaskChatPanelProps = {
   onSend?: (message: string) => void;
   sessionId?: string | null;
+  taskId?: string | null;
   onOpenFile?: (path: string) => void;
   showRequestChangesTooltip?: boolean;
   onRequestChangesTooltipDismiss?: () => void;
@@ -128,6 +129,7 @@ type TaskChatPanelProps = {
 export const TaskChatPanel = memo(function TaskChatPanel({
   onSend,
   sessionId = null,
+  taskId: taskIdHint = null,
   onOpenFile,
   showRequestChangesTooltip = false,
   onRequestChangesTooltipDismiss,
@@ -138,7 +140,12 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
 
   useSettingsData(true);
-  const panelState = useChatPanelState({ sessionId, onOpenFile, onOpenFileAtLine });
+  const panelState = useChatPanelState({
+    sessionId,
+    taskId: taskIdHint,
+    onOpenFile,
+    onOpenFileAtLine,
+  });
   const { isSending, handleSubmit } = useSubmitHandler(panelState, onSend);
   const {
     resolvedSessionId,

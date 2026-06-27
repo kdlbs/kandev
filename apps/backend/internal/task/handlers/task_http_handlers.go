@@ -1183,10 +1183,10 @@ func (body *httpStartQuickChatRequest) resolveParams(workspace *models.Workspace
 
 	metadata := make(map[string]interface{})
 	if agentProfileID != "" {
-		metadata["agent_profile_id"] = agentProfileID
+		metadata[models.MetaKeyAgentProfileID] = agentProfileID
 	}
 	if executorID != "" {
-		metadata["executor_id"] = executorID
+		metadata[models.MetaKeyExecutorID] = executorID
 	}
 
 	title := body.Title
@@ -1304,11 +1304,11 @@ func resolveConfigChatDefaults(body httpStartConfigChatRequest, ws *models.Works
 		executorID = *ws.DefaultExecutorID
 	}
 	metadata = map[string]interface{}{
-		"config_mode":      true,
-		"agent_profile_id": agentProfileID,
+		"config_mode":                true,
+		models.MetaKeyAgentProfileID: agentProfileID,
 	}
 	if executorID != "" {
-		metadata["executor_id"] = executorID
+		metadata[models.MetaKeyExecutorID] = executorID
 	}
 	return agentProfileID, executorID, metadata
 }

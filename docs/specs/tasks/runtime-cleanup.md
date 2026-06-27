@@ -29,8 +29,17 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
   preserved for retry/diagnosis.
 - Agent subprocess shutdown kills the whole agent process group when graceful
   shutdown does not finish within the configured stop timeout.
+- Agent subprocess shutdown does not treat the command leader exiting as
+  sufficient while descendants remain alive in the same process group.
 - Agentctl instance shutdown never leaves an agent subprocess group alive as a
   child of `init`/PID 1.
+- Standalone agentctl is isolated from terminal foreground interrupts so the
+  backend remains the owner of Ctrl+C shutdown sequencing.
+- Top-level launchers, including `make start-debug` through `kandev start`, send
+  the backend a graceful termination signal before any force kill so backend
+  shutdown can stop agents and agentctl instances.
+- Backend shutdown waits long enough for standalone agentctl's instance cleanup
+  window before reporting shutdown complete.
 - Backend startup reconciles stale runtime rows for archived/deleted/missing task
   state and attempts safe cleanup instead of treating the rows as live sessions.
 - Cleanup is idempotent: repeating archive/delete cleanup, startup reconciliation,
@@ -126,6 +135,12 @@ Allowed transitions:
   the resource-specific retry path.
 - If an agentctl process exits unexpectedly, its owned agent subprocess group is
   killed before agentctl shutdown completes.
+- If the user sends Ctrl+C to a standalone Kandev process tree, agentctl does
+  not receive the terminal interrupt directly; it is stopped through backend
+  lifecycle shutdown, parent liveness, or an explicit backend signal.
+- If the user sends Ctrl+C while running through `make start-debug`, the launcher
+  forwards a graceful stop to the backend and waits before escalating, rather
+  than immediately killing the backend process group.
 - If startup reconciliation finds rows for archived tasks, deleted tasks, missing
   sessions, or terminal sessions with no live runtime, it removes only rows that
   are positively confirmed safe to remove.
@@ -162,6 +177,17 @@ Allowed transitions:
 - **GIVEN** agentctl is stopped while an ACP child process ignores stdin EOF,
   **WHEN** the stop timeout expires, **THEN** the ACP process group is killed and
   no ACP child is reparented to PID 1.
+- **GIVEN** an ACP wrapper process exits after spawning a native child in the
+  same process group, **WHEN** agentctl completes shutdown, **THEN** the
+  remaining process-group descendants are terminated before shutdown is reported
+  complete.
+- **GIVEN** standalone Kandev owns an active agentctl instance, **WHEN** the user
+  stops Kandev with Ctrl+C, **THEN** backend shutdown supervises agentctl
+  cleanup and waits for the instance stop window instead of letting agentctl exit
+  directly from the terminal interrupt.
+- **GIVEN** Kandev is running under `make start-debug`, **WHEN** the user stops it
+  with Ctrl+C, **THEN** the launcher gives the backend a graceful shutdown window
+  before any force kill so active ACP process groups are reaped.
 - **GIVEN** the `executors_running` query fails during archive cleanup, **WHEN**
   cleanup evaluates destructive actions, **THEN** it logs the failure and does not
   delete runtime tracking rows based on incomplete information.

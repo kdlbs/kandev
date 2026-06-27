@@ -521,12 +521,13 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		zap.Stringer("runtime", execution.RuntimeName))
 
 	// Try to gracefully stop via agentctl first, then always close connections
+	agentStopFailed := false
 	if execution.agentctl != nil {
 		if !force {
 			if err := execution.agentctl.Stop(ctx); err != nil {
-				// During shutdown agentctl typically received the same
-				// terminal-wide SIGINT and is already gone, so a failed
-				// HTTP call here is expected, not noteworthy.
+				agentStopFailed = true
+				// During shutdown the instance may already be stopping through
+				// another lifecycle path, so a failed HTTP call is expected.
 				if m.IsShuttingDown() {
 					m.logger.Debug("failed to stop agent via agentctl",
 						zap.String("execution_id", executionID),
@@ -542,7 +543,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	}
 
 	// Stop the agent execution via the runtime that created it
-	m.stopAgentViaBackend(ctx, executionID, execution, reason, force)
+	m.stopAgentViaBackend(ctx, executionID, execution, reason, force, agentStopFailed)
 
 	// Update execution status and remove from tracking
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
@@ -1254,7 +1255,7 @@ func (m *Manager) RespondToPermissionBySessionID(sessionID, pendingID, optionID 
 }
 
 // stopAgentViaBackend stops the agent execution via the runtime that created it.
-func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, execution *AgentExecution, reason string, force bool) {
+func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, execution *AgentExecution, reason string, force bool, agentStopFailed bool) {
 	if execution.RuntimeName == "" || m.executorRegistry == nil {
 		return
 	}
@@ -1275,11 +1276,11 @@ func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, e
 		StandalonePort:       execution.standalonePort,
 		Metadata:             execution.Metadata,
 		StopReason:           reason,
+		AgentStopFailed:      agentStopFailed,
 	}
 	if err := rt.StopInstance(ctx, runtimeInstance, force); err != nil {
-		// During shutdown the runtime instance (e.g. a standalone agentctl)
-		// often already exited via the shared SIGINT, so StopInstance returns
-		// a benign 404. Only surface this at WARN outside shutdown.
+		// During shutdown the runtime instance may already be stopping or
+		// absent. Only surface this at WARN outside shutdown.
 		if m.IsShuttingDown() {
 			m.logger.Debug("failed to stop runtime instance, continuing with cleanup",
 				zap.String("execution_id", executionID),

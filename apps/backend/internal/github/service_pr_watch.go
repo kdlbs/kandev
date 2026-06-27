@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -122,14 +123,37 @@ func (s *Service) CheckPRWatch(ctx context.Context, watch *PRWatch) (*PRStatus, 
 
 	// Check for check status or review state changes
 	hasNew := status.ChecksState != watch.LastCheckStatus || status.ReviewState != watch.LastReviewState
+	commentAt := prWatchFeedbackWatermark(watch, status)
+	hasNew = hasNew || prWatchFeedbackUpdatedSinceWatch(watch, status)
 
 	// Update watch timestamps
 	now := time.Now().UTC()
-	if err := s.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, nil, status.ChecksState, status.ReviewState); err != nil {
+	if err := s.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, commentAt, status.ChecksState, status.ReviewState); err != nil {
 		s.logger.Error("failed to update PR watch timestamps", zap.String("id", watch.ID), zap.Error(err))
 	}
 
 	return status, hasNew, nil
+}
+
+func prWatchFeedbackUpdatedSinceWatch(watch *PRWatch, status *PRStatus) bool {
+	if watch == nil || status == nil || status.PR == nil || status.PR.UpdatedAt.IsZero() {
+		return false
+	}
+	return watch.LastCommentAt == nil || status.PR.UpdatedAt.After(*watch.LastCommentAt)
+}
+
+func prWatchFeedbackWatermark(watch *PRWatch, status *PRStatus) *time.Time {
+	if status != nil && status.PR != nil && !status.PR.UpdatedAt.IsZero() {
+		updatedAt := status.PR.UpdatedAt
+		if watch != nil && watch.LastCommentAt != nil && watch.LastCommentAt.After(updatedAt) {
+			return watch.LastCommentAt
+		}
+		return &updatedAt
+	}
+	if watch == nil {
+		return nil
+	}
+	return watch.LastCommentAt
 }
 
 // EnsurePRWatch creates a PRWatch with pr_number=0 for a
@@ -391,7 +415,7 @@ func (s *Service) ListWorkspaceTaskPRs(ctx context.Context, workspaceID string) 
 	staleTasks := make(map[string]struct{})
 	for taskID, prs := range result {
 		for _, tp := range prs {
-			if tp.LastSyncedAt == nil || time.Since(*tp.LastSyncedAt) >= prSyncFreshnessWindow {
+			if tp.LastSyncedAt == nil || time.Since(*tp.LastSyncedAt) >= PRSyncFreshnessWindow {
 				staleTasks[taskID] = struct{}{}
 				break
 			}
@@ -726,6 +750,7 @@ func (s *Service) areAllWatchesPermanentlyMissing(watches []*PRWatch) bool {
 // single bad cycle doesn't leave the UI staring at stale data.
 func (s *Service) triggerPRSyncAllPerWatch(ctx context.Context, taskID string, watches []*PRWatch) ([]*TaskPR, error) {
 	results := make([]*TaskPR, 0, len(watches))
+	var syncErrs []error
 	for _, w := range watches {
 		var tp *TaskPR
 		var syncErr error
@@ -746,13 +771,40 @@ func (s *Service) triggerPRSyncAllPerWatch(ctx context.Context, taskID string, w
 				zap.String("repository_id", w.RepositoryID),
 				zap.Int("pr_number", w.PRNumber),
 				zap.Error(syncErr))
+			syncErrs = append(syncErrs, fmt.Errorf("%s/%s#%d: %w", w.Owner, w.Repo, w.PRNumber, syncErr))
 			continue
 		}
 		if tp != nil {
 			results = append(results, tp)
 		}
 	}
-	return results, nil
+	if len(syncErrs) == 0 {
+		return results, nil
+	}
+	err := errors.Join(syncErrs...)
+	if len(results) > 0 {
+		return results, &PartialPRSyncError{Err: err}
+	}
+	return results, err
+}
+
+// PartialPRSyncError reports that some PR watches failed while others synced.
+type PartialPRSyncError struct {
+	Err error
+}
+
+func (e *PartialPRSyncError) Error() string {
+	if e == nil || e.Err == nil {
+		return "partial PR sync failure"
+	}
+	return e.Err.Error()
+}
+
+func (e *PartialPRSyncError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
 }
 
 func (s *Service) triggerPRDetection(ctx context.Context, watch *PRWatch, taskID string) (*TaskPR, error) {
@@ -796,7 +848,7 @@ func (s *Service) detectPRForWatchOnce(ctx context.Context, watch *PRWatch, task
 	// Without this, a branch whose PR never appears (e.g. an unresolvable repo)
 	// re-hits `gh` on every on-demand sync, and the frontend re-syncs every 5s
 	// while no PR is found — flooding the logs with identical failures.
-	if watch.LastCheckedAt != nil && time.Since(*watch.LastCheckedAt) < prSyncFreshnessWindow {
+	if watch.LastCheckedAt != nil && time.Since(*watch.LastCheckedAt) < PRSyncFreshnessWindow {
 		return s.store.GetTaskPRByRepository(ctx, taskID, watch.RepositoryID)
 	}
 
@@ -817,7 +869,7 @@ func (s *Service) detectPRForWatchOnce(ctx context.Context, watch *PRWatch, task
 	// flood this fixes IS the error path (an unresolvable repo makes `gh` exit
 	// non-zero), so stamping only on success would leave the bug unfixed. The
 	// tradeoff: a transient GitHub error throttles the next on-demand probe for
-	// prSyncFreshnessWindow, which is fine — it stops hammering a failing
+	// PRSyncFreshnessWindow, which is fine — it stops hammering a failing
 	// endpoint, and the 60s background poller still retries. This diverges
 	// intentionally from poller.detectPRForWatch, which stamps only on success.
 	// The empty-string check/review args clear last_check_status /
@@ -868,7 +920,7 @@ func (s *Service) triggerPRStatusSync(ctx context.Context, watch *PRWatch, taskI
 		return s.store.GetTaskPR(c, taskID)
 	}
 	if tp, _ := loadTaskPR(ctx); tp != nil && tp.LastSyncedAt != nil {
-		if time.Since(*tp.LastSyncedAt) < prSyncFreshnessWindow {
+		if time.Since(*tp.LastSyncedAt) < PRSyncFreshnessWindow {
 			return tp, nil
 		}
 	}

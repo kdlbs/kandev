@@ -1121,6 +1121,8 @@ func (s *Store) RefreshTaskCIFixCheckpoint(ctx context.Context, taskID, reposito
 		ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
 			last_fix_signature = excluded.last_fix_signature,
 			last_fix_checkpoint_json = excluded.last_fix_checkpoint_json,
+			last_fix_enqueued_at = NULL,
+			last_fix_session_id = NULL,
 			last_error = NULL,
 			updated_at = excluded.updated_at`,
 		taskID, repositoryID, prNumber, signature, checkpointJSON, now, now)
