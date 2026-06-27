@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"slices"
 	"testing"
 )
 
@@ -41,5 +42,17 @@ func TestResumeAt_EmptyFlag(t *testing.T) {
 	args := cmd.Args()
 	if len(args) != 1 || args[0] != "agent" {
 		t.Errorf("ResumeAt with empty flag should not modify args, got %v", args)
+	}
+}
+
+func TestStripEnvFor(t *testing.T) {
+	got := StripEnvFor(NewDevinACP())
+	if want := []string{"ACP_BACKEND"}; !slices.Equal(got, want) {
+		t.Fatalf("StripEnvFor(NewDevinACP()) = %v, want %v", got, want)
+	}
+
+	var ia InferenceAgent
+	if got := StripEnvFor(ia); got != nil {
+		t.Fatalf("StripEnvFor(nil) = %v, want nil", got)
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -13,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/pkg/agent"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,6 +31,16 @@ type stubAdapter struct {
 func newStubAdapter() *stubAdapter {
 	return &stubAdapter{updatesCh: make(chan adapter.AgentEvent, 10)}
 }
+
+type oneShotStubAdapter struct {
+	*stubAdapter
+}
+
+func newOneShotStubAdapter() *oneShotStubAdapter {
+	return &oneShotStubAdapter{stubAdapter: newStubAdapter()}
+}
+
+func (s *oneShotStubAdapter) IsOneShot() bool { return true }
 
 func (s *stubAdapter) PrepareEnvironment() (map[string]string, error) { return nil, nil }
 func (s *stubAdapter) PrepareCommandArgs() []string                   { return nil }
@@ -180,5 +193,77 @@ func TestFormatAgentStartError_E2BIGIncludesEnvDiagnostics(t *testing.T) {
 	}
 	if !errors.Is(err, syscall.E2BIG) {
 		t.Fatalf("formatted error must preserve E2BIG wrapping: %v", err)
+	}
+}
+
+func TestBuildAdapterConfig_StripEnvRemovesDeclaredVars(t *testing.T) {
+	log := newTestLogger(t)
+
+	m := &Manager{
+		cfg: &config.InstanceConfig{
+			AgentArgs: []string{"cat"},
+			WorkDir:   t.TempDir(),
+			AgentEnv: []string{
+				"ACP_BACKEND=windsurf",
+				"PATH=/usr/bin",
+				"HOME=/root",
+			},
+			StripEnv: []string{"ACP_BACKEND"},
+			Protocol: agent.ProtocolACP,
+		},
+		logger: log,
+	}
+
+	require.NoError(t, m.buildAdapterConfig())
+	t.Cleanup(func() { _ = m.adapter.Close() })
+
+	for _, e := range m.cfg.AgentEnv {
+		if strings.HasPrefix(e, "ACP_BACKEND=") {
+			t.Errorf("ACP_BACKEND not stripped from AgentEnv: %q", e)
+		}
+	}
+	if !slices.Contains(m.cfg.AgentEnv, "PATH=/usr/bin") {
+		t.Errorf("PATH was stripped but should have been kept")
+	}
+	if !slices.Contains(m.cfg.AgentEnv, "HOME=/root") {
+		t.Errorf("HOME was stripped but should have been kept")
+	}
+}
+
+func TestStartOneShotRestoresTempEnvAfterStrip(t *testing.T) {
+	log := newTestLogger(t)
+	workDir := t.TempDir()
+
+	m := &Manager{
+		cfg: &config.InstanceConfig{
+			SessionID: "session-1",
+			WorkDir:   workDir,
+			AgentEnv:  []string{"PATH=/usr/bin"},
+		},
+		logger:  log,
+		adapter: newOneShotStubAdapter(),
+		adapterCfg: &adapter.Config{
+			OneShotConfig: &adapter.OneShotConfig{
+				Env:     []string{"PATH=/usr/bin"},
+				WorkDir: workDir,
+			},
+		},
+		updatesCh:          make(chan adapter.AgentEvent, 100),
+		pendingPermissions: make(map[string]*PendingPermission),
+		workspaceTracker:   NewWorkspaceTracker(workDir, log),
+	}
+
+	require.NoError(t, m.startOneShot())
+	t.Cleanup(func() {
+		close(m.stopCh)
+		m.wg.Wait()
+		m.workspaceTracker.Stop()
+	})
+
+	wantDir := filepath.Join(os.TempDir(), agentTempDirRoot, agentTempDirName("session-1", 0))
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		if got := lookupEnvValue(m.adapterCfg.OneShotConfig.Env, key); got != wantDir {
+			t.Fatalf("OneShotConfig.Env %s = %q, want %q", key, got, wantDir)
+		}
 	}
 }
