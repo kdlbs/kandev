@@ -70,19 +70,47 @@ function makeRepoAutoSelectFs(
 
 describe("useRepositoryAutoSelectEffect", () => {
   it("fills an untouched placeholder row from store-backed settings when localStorage is not primed", async () => {
+    window.localStorage.removeItem(STORAGE_KEYS.LAST_REPOSITORY_ID);
     const setRepositories = vi.fn();
     const fs = makeRepoAutoSelectFs([{ key: "row-0", branch: "" }], setRepositories);
 
     renderHook(() =>
-      useRepositoryAutoSelectEffect(fs, true, "ws-1", [makeRepository("repo-1")], "repo-1"),
+      useRepositoryAutoSelectEffect(
+        fs,
+        true,
+        "ws-1",
+        [makeRepository("repo-1"), makeRepository("repo-2")],
+        "repo-2",
+      ),
     );
 
     await waitFor(() => expect(setRepositories).toHaveBeenCalled());
     const updater = setRepositories.mock.calls[0]![0] as (prev: TaskRepoRow[]) => TaskRepoRow[];
 
     expect(updater([{ key: "row-0", branch: "" }])).toEqual([
-      { key: "row-0", repositoryId: "repo-1", branch: "" },
+      { key: "row-0", repositoryId: "repo-2", branch: "" },
     ]);
+  });
+
+  it("fills an empty repo row list from store-backed settings when localStorage is not primed", async () => {
+    window.localStorage.removeItem(STORAGE_KEYS.LAST_REPOSITORY_ID);
+    const setRepositories = vi.fn();
+    const fs = makeRepoAutoSelectFs([], setRepositories);
+
+    renderHook(() =>
+      useRepositoryAutoSelectEffect(
+        fs,
+        true,
+        "ws-1",
+        [makeRepository("repo-1"), makeRepository("repo-2")],
+        "repo-1",
+      ),
+    );
+
+    await waitFor(() => expect(setRepositories).toHaveBeenCalled());
+    const updater = setRepositories.mock.calls[0]![0] as (prev: TaskRepoRow[]) => TaskRepoRow[];
+
+    expect(updater([])).toEqual([{ key: "row-0", repositoryId: "repo-1", branch: "" }]);
   });
 });
 
