@@ -164,6 +164,8 @@ export type TaskCreateEffectsArgs = {
   workspaceDefaults: Workspace | null | undefined;
   toast: ReturnType<typeof useToast>["toast"];
   workflows: Array<{ id: string; agent_profile_id?: string }>;
+  /** Store-backed last-used repository. Used when the localStorage mirror has not been primed yet. */
+  lastUsedRepositoryId?: string | null;
   /**
    * True when the currently-selected executor is the local-host one (no
    * worktree, no container). Drives the "reset row.branch on local switch"

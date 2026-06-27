@@ -3,11 +3,16 @@ import { renderHook, waitFor } from "@testing-library/react";
 import {
   useDefaultSelectionsEffect,
   useGitHubUrlErrorEffect,
+  useRepositoryAutoSelectEffect,
   useWorkflowAgentProfileEffect,
 } from "./task-create-dialog-effects";
-import type { DialogFormState, StoreSelections } from "@/components/task-create-dialog-types";
+import type {
+  DialogFormState,
+  StoreSelections,
+  TaskRepoRow,
+} from "@/components/task-create-dialog-types";
 import type { AgentProfileOption } from "@/lib/state/slices";
-import type { Workspace } from "@/lib/types/http";
+import type { Repository, Workspace } from "@/lib/types/http";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 
 // Minimal fake of DialogFormState - the hook destructures only three fields,
@@ -37,6 +42,48 @@ function makeProfile(id: string): AgentProfileOption {
 
 beforeEach(() => {
   localStorage.clear();
+});
+
+function makeRepository(id: string): Repository {
+  return {
+    id,
+    workspace_id: "ws-1",
+    name: "repo",
+    source_type: "local",
+    local_path: "/repo",
+    default_branch: "main",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  } as Repository;
+}
+
+function makeRepoAutoSelectFs(
+  rows: TaskRepoRow[],
+  setRepositories: DialogFormState["setRepositories"],
+): DialogFormState {
+  return {
+    repositories: rows,
+    useRemote: false,
+    setRepositories,
+  } as unknown as DialogFormState;
+}
+
+describe("useRepositoryAutoSelectEffect", () => {
+  it("fills an untouched placeholder row from store-backed settings when localStorage is not primed", async () => {
+    const setRepositories = vi.fn();
+    const fs = makeRepoAutoSelectFs([{ key: "row-0", branch: "" }], setRepositories);
+
+    renderHook(() =>
+      useRepositoryAutoSelectEffect(fs, true, "ws-1", [makeRepository("repo-1")], "repo-1"),
+    );
+
+    await waitFor(() => expect(setRepositories).toHaveBeenCalled());
+    const updater = setRepositories.mock.calls[0]![0] as (prev: TaskRepoRow[]) => TaskRepoRow[];
+
+    expect(updater([{ key: "row-0", branch: "" }])).toEqual([
+      { key: "row-0", repositoryId: "repo-1", branch: "" },
+    ]);
+  });
 });
 
 describe("useWorkflowAgentProfileEffect", () => {

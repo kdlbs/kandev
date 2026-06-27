@@ -565,6 +565,7 @@ export function useTaskCreateDialogData(
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
   const executors = useAppStore((state) => state.executors.items);
   const settingsData = useAppStore((state) => state.settingsData);
+  const taskCreateLastUsed = useAppStore((state) => state.userSettings.taskCreateLastUsed);
   const availableAgentsLoaded = useAppStore((state) => state.availableAgents.loaded);
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
 
@@ -601,6 +602,7 @@ export function useTaskCreateDialogData(
     repositories,
     repositoriesLoading,
     branchesLoading,
+    taskCreateLastUsed,
     computed,
   };
 }

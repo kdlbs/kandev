@@ -16,6 +16,7 @@ import type {
   DialogFormState,
   StoreSelections,
   TaskCreateEffectsArgs,
+  TaskRepoRow,
 } from "@/components/task-create-dialog-types";
 import {
   useAgentProfileAutopickEffect,
@@ -30,6 +31,15 @@ export { useWorkflowAgentProfileEffect };
 export { decideAgentProfileAutopick } from "@/components/task-create-dialog-autopick";
 
 const selectionDebug = createDebugLogger("task-create:selection");
+
+type RepositoryAutoPickDecision = {
+  pickId: string | null;
+  source: string;
+  localStorageRepoId: string | null;
+  localStorageValid: boolean;
+  settingsRepoId: string | null;
+  settingsValid: boolean;
+};
 
 export function useWorkflowStepsEffect(fs: DialogFormState, workflowId: string | null) {
   const { selectedWorkflowId, setFetchedSteps } = fs;
@@ -59,6 +69,7 @@ export function useRepositoryAutoSelectEffect(
   open: boolean,
   workspaceId: string | null,
   repositories: Repository[],
+  lastUsedRepositoryId?: string | null,
 ) {
   // On open, ensure there's always at least one chip rendered: prefer the
   // user's last-used repo (or the workspace's only repo) so the chip lands
@@ -68,29 +79,10 @@ export function useRepositoryAutoSelectEffect(
   const { repositories: rows, useRemote, setRepositories } = fs;
   useEffect(() => {
     if (!open || !workspaceId || useRemote) return;
-    if (rows.length > 0) return;
-    const lastUsedRepoId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_REPOSITORY_ID, null);
-    let pickId: string | null = null;
-    let source = "empty-row";
-    if (lastUsedRepoId && repositories.some((r: Repository) => r.id === lastUsedRepoId)) {
-      pickId = lastUsedRepoId;
-      source = "localStorage:lastRepositoryId";
-    } else if (repositories.length === 1) {
-      pickId = repositories[0].id;
-      source = "single-workspace-repo";
-    }
-    if (isDebug()) {
-      selectionDebug("repository-autopick", {
-        workspace_id: workspaceId,
-        local_storage_id: lastUsedRepoId ?? "-",
-        local_storage_valid: Boolean(
-          lastUsedRepoId && repositories.some((r: Repository) => r.id === lastUsedRepoId),
-        ),
-        repo_count: repositories.length,
-        source,
-        pick: pickId ?? "-",
-      });
-    }
+    const decision = decideRepositoryAutoPick(repositories, lastUsedRepositoryId);
+    const { pickId } = decision;
+    if (rows.length > 0 && !canReplaceEmptyRepositoryPlaceholder(rows, pickId)) return;
+    logRepositoryAutoPick(workspaceId, repositories.length, decision);
     // Use the functional setter so the deferred microtask sees fresh state.
     // Without this, a sibling effect (resetTaskForm / useLockedFieldSync) that
     // seeds rows from `initialValues.repositoryId` synchronously races with
@@ -99,6 +91,9 @@ export function useRepositoryAutoSelectEffect(
     void Promise.resolve().then(() => {
       setRepositories((prev) => {
         if (prev.length > 0) {
+          if (canReplaceEmptyRepositoryPlaceholder(prev, pickId)) {
+            return [buildRepositoryAutoPickRow(prev[0]?.key ?? "row-0", pickId!)];
+          }
           if (isDebug()) {
             selectionDebug("repository-autopick-skip", {
               reason: "rows-seeded-before-microtask",
@@ -108,13 +103,81 @@ export function useRepositoryAutoSelectEffect(
           return prev;
         }
         return [
-          pickId
-            ? { key: "row-0", repositoryId: pickId, branch: "" }
-            : { key: "row-0", branch: "" },
+          pickId ? buildRepositoryAutoPickRow("row-0", pickId) : { key: "row-0", branch: "" },
         ];
       });
     });
-  }, [open, repositories, rows, useRemote, workspaceId, setRepositories]);
+  }, [open, repositories, rows, useRemote, workspaceId, setRepositories, lastUsedRepositoryId]);
+}
+
+function decideRepositoryAutoPick(
+  repositories: Repository[],
+  lastUsedRepositoryId?: string | null,
+): RepositoryAutoPickDecision {
+  const localStorageRepoId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_REPOSITORY_ID, null);
+  const settingsRepoId = lastUsedRepositoryId ?? null;
+  const localStorageValid = isRepositoryIdValid(localStorageRepoId, repositories);
+  const settingsValid = isRepositoryIdValid(settingsRepoId, repositories);
+  if (localStorageRepoId && localStorageValid) {
+    return {
+      pickId: localStorageRepoId,
+      source: "localStorage:lastRepositoryId",
+      localStorageRepoId,
+      localStorageValid,
+      settingsRepoId,
+      settingsValid,
+    };
+  }
+  if (settingsRepoId && settingsValid) {
+    return {
+      pickId: settingsRepoId,
+      source: "settings:taskCreateLastUsed",
+      localStorageRepoId,
+      localStorageValid,
+      settingsRepoId,
+      settingsValid,
+    };
+  }
+  return {
+    pickId: repositories.length === 1 ? repositories[0].id : null,
+    source: repositories.length === 1 ? "single-workspace-repo" : "empty-row",
+    localStorageRepoId,
+    localStorageValid,
+    settingsRepoId,
+    settingsValid,
+  };
+}
+
+function isRepositoryIdValid(repositoryId: string | null, repositories: Repository[]): boolean {
+  return Boolean(repositoryId && repositories.some((r: Repository) => r.id === repositoryId));
+}
+
+function logRepositoryAutoPick(
+  workspaceId: string,
+  repoCount: number,
+  decision: RepositoryAutoPickDecision,
+) {
+  if (!isDebug()) return;
+  selectionDebug("repository-autopick", {
+    workspace_id: workspaceId,
+    local_storage_id: decision.localStorageRepoId ?? "-",
+    local_storage_valid: decision.localStorageValid,
+    settings_id: decision.settingsRepoId ?? "-",
+    settings_valid: decision.settingsValid,
+    repo_count: repoCount,
+    source: decision.source,
+    pick: decision.pickId ?? "-",
+  });
+}
+
+function buildRepositoryAutoPickRow(key: string, repositoryId: string): TaskRepoRow {
+  return { key, repositoryId, branch: "" };
+}
+
+function canReplaceEmptyRepositoryPlaceholder(rows: TaskRepoRow[], pickId: string | null): boolean {
+  if (!pickId || rows.length !== 1) return false;
+  const row = rows[0];
+  return Boolean(row && !row.repositoryId && !row.localPath && !row.branch);
 }
 
 export function useDiscoverReposEffect(
@@ -562,7 +625,7 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
   } = args;
   useWorkflowStepsEffect(fs, workflowId);
   useWorkflowAgentProfileEffect(fs, workflows, agentProfiles, compatibleAgentProfiles);
-  useRepositoryAutoSelectEffect(fs, open, workspaceId, repositories);
+  useRepositoryAutoSelectEffect(fs, open, workspaceId, repositories, args.lastUsedRepositoryId);
   useDiscoverReposEffect(fs, open, workspaceId, repositoriesLoading, toast);
   useCurrentLocalBranchEffect(fs, open, workspaceId, repositories);
   useResetBranchOnLocalSwitchEffect(fs, isLocalExecutor, args.preserveBranch);

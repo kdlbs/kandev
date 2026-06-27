@@ -226,6 +226,7 @@ export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     repositories,
     repositoriesLoading,
     branchesLoading,
+    taskCreateLastUsed,
     computed,
   } = useTaskCreateDialogData(open, workspaceId, workflowId, defaultStepId, fs);
   // Multi-repo: the "repo local path" used by the fresh-branch preflight is
@@ -255,6 +256,7 @@ export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     toast,
     workflows,
     isLocalExecutor: computed.isLocalExecutor,
+    lastUsedRepositoryId: taskCreateLastUsed.repositoryId,
   });
   useLockedFieldSync(open, workflowId, initialValues, fs);
   const handlers = useDialogHandlers(fs, repositories);
