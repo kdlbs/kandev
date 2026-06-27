@@ -10,6 +10,7 @@ const TIMESTAMP = "2026-06-24T00:00:00Z";
 const mockListTaskSessions = vi.fn();
 
 type MockState = {
+  connection: { status: string };
   taskSessionsByTask: {
     itemsByTaskId: Record<string, TaskSession[]>;
     loadingByTaskId: Record<string, boolean>;
@@ -58,6 +59,7 @@ describe("useTaskSessions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockState = {
+      connection: { status: "connected" },
       taskSessionsByTask: {
         itemsByTaskId: {},
         loadingByTaskId: {},
