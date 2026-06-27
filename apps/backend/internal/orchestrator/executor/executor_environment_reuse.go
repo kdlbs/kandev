@@ -109,7 +109,8 @@ func (e *Executor) reuseExistingRepositoryWorktrees(ctx context.Context, req *La
 	if len(envWorktreeIDs) == 0 && len(sessionWorktreeIDs) == 0 {
 		return
 	}
-	allowLegacyEmptyBranchFallback := !hasBranchScopedEnvironmentWorktrees(env)
+	hasScopedWorktrees := hasBranchScopedEnvironmentWorktrees(env)
+	allowLegacyEmptyBranchFallback := !hasScopedWorktrees
 	for i := range repoSpecs {
 		spec := &repoSpecs[i]
 		if id := reusableWorktreeIDForSpec(*spec, envWorktreeIDs, sessionWorktreeIDs, allowLegacyEmptyBranchFallback); id != "" {
@@ -117,6 +118,7 @@ func (e *Executor) reuseExistingRepositoryWorktrees(ctx context.Context, req *La
 		}
 	}
 	if repoSpecs[0].WorktreeID == "" {
+		routeUnmatchedTopLevelRepoToScopedPath(req, repoSpecs[0], usingTopLevelRepo, hasScopedWorktrees)
 		return
 	}
 	req.WorktreeID = repoSpecs[0].WorktreeID
@@ -160,13 +162,42 @@ func reusableWorktreeIDForSpec(
 	return ""
 }
 
+func routeUnmatchedTopLevelRepoToScopedPath(
+	req *LaunchAgentRequest,
+	spec RepoSpec,
+	usingTopLevelRepo bool,
+	hasScopedWorktrees bool,
+) {
+	if !usingTopLevelRepo || !hasScopedWorktrees {
+		return
+	}
+	pathSlug := launchRepoBranchIdentitySlug(spec)
+	if pathSlug == "" {
+		return
+	}
+	spec.BranchIdentitySlug = pathSlug
+	spec.BranchSlug = pathSlug
+	req.Repositories = []RepoSpec{spec}
+}
+
 func topLevelLaunchRepoSpec(req *LaunchAgentRequest) (RepoSpec, bool) {
 	if req.RepositoryID == "" {
 		return RepoSpec{}, false
 	}
 	return RepoSpec{
-		RepositoryID:       req.RepositoryID,
-		BranchIdentitySlug: topLevelBranchIdentitySlug(req),
+		RepositoryID:         req.RepositoryID,
+		RepositoryPath:       req.RepositoryPath,
+		RepositoryURL:        req.RepositoryURL,
+		RepoName:             req.RepoName,
+		BaseBranch:           req.BaseBranch,
+		DefaultBranch:        req.DefaultBranch,
+		CheckoutBranch:       req.CheckoutBranch,
+		PRNumber:             req.PRNumber,
+		WorktreeID:           req.WorktreeID,
+		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
+		PullBeforeWorktree:   req.PullBeforeWorktree,
+		CopyFiles:            req.CopyFiles,
+		BranchIdentitySlug:   topLevelBranchIdentitySlug(req),
 	}, true
 }
 

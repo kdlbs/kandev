@@ -452,6 +452,51 @@ func TestReuseExistingEnvironment_SingleRepoDoesNotFallBackToWrongScopedEnvWorkt
 	}
 }
 
+func TestReuseExistingEnvironment_SingleRepoUnmatchedScopedEnvUsesBranchPathSlug(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{
+		TaskID:               "task-single-new-scoped-branch",
+		RepositoryID:         "repo-kandev",
+		RepositoryPath:       "/repos/kandev",
+		RepoName:             "kandev",
+		BaseBranch:           "feature/new-path",
+		DefaultBranch:        "main",
+		WorktreeBranchPrefix: "task/",
+		UseWorktree:          true,
+	}
+	env := &models.TaskEnvironment{
+		ID:           "env-single-new-scoped-branch",
+		RepositoryID: "repo-kandev",
+		WorktreeID:   "wt-main",
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-kandev", BranchSlug: "main", WorktreeID: "wt-main"},
+		},
+	}
+
+	exec.reuseExistingEnvironment(context.Background(), req, env)
+
+	if req.WorktreeID != "" {
+		t.Fatalf("top-level WorktreeID = %q, want no stale env-level fallback", req.WorktreeID)
+	}
+	if len(req.Repositories) != 1 {
+		t.Fatalf("Repositories length = %d, want one branch-scoped prepare spec", len(req.Repositories))
+	}
+	got := req.Repositories[0]
+	if got.BranchSlug != "feature-new-path" {
+		t.Fatalf("BranchSlug = %q, want feature-new-path", got.BranchSlug)
+	}
+	if got.BranchIdentitySlug != "feature-new-path" {
+		t.Fatalf("BranchIdentitySlug = %q, want feature-new-path", got.BranchIdentitySlug)
+	}
+	if got.RepositoryPath != req.RepositoryPath || got.RepoName != req.RepoName {
+		t.Fatalf("repo fields not carried into scoped spec: %+v", got)
+	}
+	if got.WorktreeBranchPrefix != req.WorktreeBranchPrefix || got.DefaultBranch != req.DefaultBranch {
+		t.Fatalf("branch defaults not carried into scoped spec: %+v", got)
+	}
+}
+
 func TestReuseExistingEnvironment_SingleRepoIgnoresEmptySessionBranchWhenEnvIsScoped(t *testing.T) {
 	repo := newMockRepository()
 	taskID := "task-single-empty-session-branch"
