@@ -620,6 +620,52 @@ func TestPersistTaskEnvironmentRepos_MigratesLegacyFlatRowToBranchIdentity(t *te
 	}
 }
 
+func TestMockRepositoryTaskEnvironmentRepoUpdatesAreBranchScoped(t *testing.T) {
+	repo := newMockRepository()
+	ctx := context.Background()
+
+	if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		TaskEnvironmentID: "env-branches",
+		RepositoryID:      "repo-kandev",
+		BranchSlug:        "main",
+		WorktreeID:        "wt-main",
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironmentRepo(main): %v", err)
+	}
+	if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		TaskEnvironmentID: "env-branches",
+		RepositoryID:      "repo-kandev",
+		BranchSlug:        "feature",
+		WorktreeID:        "wt-feature",
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironmentRepo(feature): %v", err)
+	}
+	rows := repo.taskEnvironmentRepos["env-branches"]
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(rows))
+	}
+	if rows[0].ID == rows[1].ID {
+		t.Fatalf("branch-specific rows should have distinct IDs, both got %q", rows[0].ID)
+	}
+
+	if err := repo.UpdateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		TaskEnvironmentID: "env-branches",
+		RepositoryID:      "repo-kandev",
+		BranchSlug:        "feature",
+		WorktreeID:        "wt-feature-updated",
+	}); err != nil {
+		t.Fatalf("UpdateTaskEnvironmentRepo(feature): %v", err)
+	}
+
+	rows = repo.taskEnvironmentRepos["env-branches"]
+	if rows[0].WorktreeID != "wt-main" {
+		t.Fatalf("main WorktreeID = %q, want wt-main", rows[0].WorktreeID)
+	}
+	if rows[1].WorktreeID != "wt-feature-updated" {
+		t.Fatalf("feature WorktreeID = %q, want wt-feature-updated", rows[1].WorktreeID)
+	}
+}
+
 func TestLaunchPreparedSession_SingleRepo_DoesNotPopulateRequestRepositories(t *testing.T) {
 	repo := newMockRepository()
 	taskID := "task-single-1"

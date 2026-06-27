@@ -827,6 +827,9 @@ func (m *mockRepository) UpdateTaskEnvironment(_ context.Context, env *models.Ta
 func (m *mockRepository) CreateTaskEnvironmentRepo(_ context.Context, repo *models.TaskEnvironmentRepo) error {
 	if repo.ID == "" {
 		repo.ID = repo.TaskEnvironmentID + "-repo-" + repo.RepositoryID
+		if repo.BranchSlug != "" {
+			repo.ID += "-branch-" + repo.BranchSlug
+		}
 	}
 	m.taskEnvironmentRepos[repo.TaskEnvironmentID] = append(m.taskEnvironmentRepos[repo.TaskEnvironmentID], repo)
 	return nil
@@ -837,7 +840,9 @@ func (m *mockRepository) ListTaskEnvironmentRepos(_ context.Context, envID strin
 func (m *mockRepository) UpdateTaskEnvironmentRepo(_ context.Context, repo *models.TaskEnvironmentRepo) error {
 	rows := m.taskEnvironmentRepos[repo.TaskEnvironmentID]
 	for i, row := range rows {
-		if row.ID == repo.ID || (row.ID == "" && row.RepositoryID == repo.RepositoryID && row.BranchSlug == repo.BranchSlug) {
+		if row.TaskEnvironmentID == repo.TaskEnvironmentID &&
+			row.RepositoryID == repo.RepositoryID &&
+			row.BranchSlug == repo.BranchSlug {
 			rows[i] = repo
 			m.taskEnvironmentRepos[repo.TaskEnvironmentID] = rows
 			return nil

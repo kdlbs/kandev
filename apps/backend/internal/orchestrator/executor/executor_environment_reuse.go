@@ -40,6 +40,10 @@ func (e *Executor) reuseExistingEnvironment(ctx context.Context, req *LaunchAgen
 		return
 	}
 
+	if env.TaskDirName != "" && req.UseWorktree {
+		req.TaskDirName = env.TaskDirName
+	}
+
 	if env.WorktreeID != "" && req.UseWorktree {
 		req.WorktreeID = env.WorktreeID
 		e.logger.Info("reusing existing task environment worktree",

@@ -48,6 +48,39 @@ func TestReuseExistingEnvironment_WorktreeReuse(t *testing.T) {
 	}
 }
 
+func TestReuseExistingEnvironment_WorktreeReuseKeepsTaskDirName(t *testing.T) {
+	repo := newMockRepository()
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{
+		TaskID:      "task-1",
+		UseWorktree: true,
+		TaskDirName: "fresh-task-dir",
+		Repositories: []RepoSpec{
+			{RepositoryID: "repo-kandev", BranchIdentitySlug: "main"},
+			{RepositoryID: "repo-docs", BranchIdentitySlug: "main"},
+		},
+	}
+	env := &models.TaskEnvironment{
+		ID:          "env-existing",
+		TaskDirName: "persisted-task-dir",
+		Repos: []*models.TaskEnvironmentRepo{
+			{TaskEnvironmentID: "env-existing", RepositoryID: "repo-kandev", BranchSlug: "main", WorktreeID: "wt-kandev"},
+		},
+	}
+
+	e.reuseExistingEnvironment(context.Background(), req, env)
+
+	if req.TaskDirName != "persisted-task-dir" {
+		t.Fatalf("TaskDirName = %q, want persisted-task-dir", req.TaskDirName)
+	}
+	if req.Repositories[0].WorktreeID != "wt-kandev" {
+		t.Fatalf("first repo WorktreeID = %q, want wt-kandev", req.Repositories[0].WorktreeID)
+	}
+	if req.Repositories[1].WorktreeID != "" {
+		t.Fatalf("second repo WorktreeID = %q, want empty for new checkout", req.Repositories[1].WorktreeID)
+	}
+}
+
 func TestReuseExistingEnvironment_SkipsReuseOnExecutorTypeMismatch(t *testing.T) {
 	// Switching the task's executor profile to a different type must invalidate
 	// reuse: stale PreviousExecutionID/ContainerID/sprite_name from the old
