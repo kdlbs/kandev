@@ -75,7 +75,8 @@ type EnvPrepareRequest struct {
 	RepoName    string // Repository slug used with TaskDirName to locate checkouts
 	BranchSlug  string // Optional branch directory suffix for multi-branch tasks
 	// BranchIdentitySlug is the stable branch key for worktree cache/persistence.
-	// Empty falls back to BranchSlug.
+	// It may be non-empty when BranchSlug is empty to preserve a flat path.
+	// Empty leaves the synthesized spec identity empty; worktree code falls back.
 	BranchIdentitySlug string
 
 	// Repositories carries one entry per repository when the request is
