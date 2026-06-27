@@ -402,6 +402,31 @@ func TestReuseExistingEnvironment_SingleRepoUsesBranchScopedEnvRow(t *testing.T)
 	}
 }
 
+func TestReuseExistingEnvironment_SingleRepoUsesDefaultBranchScopedEnvRow(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{
+		TaskID:        "task-single-default-branch-row",
+		RepositoryID:  "repo-kandev",
+		DefaultBranch: "main",
+		UseWorktree:   true,
+	}
+	env := &models.TaskEnvironment{
+		ID:           "env-single-default-branch-row",
+		RepositoryID: "repo-kandev",
+		WorktreeID:   "wt-feature",
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-kandev", BranchSlug: "main", WorktreeID: "wt-main"},
+		},
+	}
+
+	exec.reuseExistingEnvironment(context.Background(), req, env)
+
+	if req.WorktreeID != "wt-main" {
+		t.Fatalf("top-level WorktreeID = %q, want default-branch wt-main", req.WorktreeID)
+	}
+}
+
 func TestReuseExistingEnvironment_SingleRepoDoesNotFallBackToWrongScopedEnvWorktree(t *testing.T) {
 	repo := newMockRepository()
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)

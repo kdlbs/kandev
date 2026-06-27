@@ -37,6 +37,21 @@ func TestCollectBaseBranches_MultiBranchKeysUseWorktreeSubpath(t *testing.T) {
 	}
 }
 
+func TestBaseBranchMetadataKey_FallsBackToRawRepoNameWhenSanitizedEmpty(t *testing.T) {
+	spec := RepoLaunchSpec{RepoName: "/", BaseBranch: "main"}
+	if got := baseBranchMetadataKey(spec); got != "/" {
+		t.Fatalf("baseBranchMetadataKey = %q, want raw repo name", got)
+	}
+	req := &LaunchRequest{
+		Repositories: []RepoLaunchSpec{spec},
+	}
+	got := collectBaseBranches(req)
+	want := map[string]string{"/": "main"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("collectBaseBranches = %v, want %v", got, want)
+	}
+}
+
 // TestCollectBaseBranches_SingleRepoLegacyKey verifies the synthesized
 // single-repo path: when only top-level BaseBranch is set, it lands under the
 // empty key so the root WorkspaceTracker (repositoryName == "") finds it.

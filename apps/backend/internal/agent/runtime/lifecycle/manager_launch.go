@@ -156,9 +156,7 @@ func collectBaseBranches(req *LaunchRequest) map[string]string {
 		if spec.BaseBranch == "" {
 			continue
 		}
-		if key := baseBranchMetadataKey(spec); key != "" {
-			out[key] = spec.BaseBranch
-		}
+		out[baseBranchMetadataKey(spec)] = spec.BaseBranch
 	}
 	if req.BaseBranch != "" {
 		if _, ok := out[""]; !ok {
@@ -174,7 +172,7 @@ func collectBaseBranches(req *LaunchRequest) map[string]string {
 func baseBranchMetadataKey(spec RepoLaunchSpec) string {
 	repoName := worktree.SanitizeRepoDirName(spec.RepoName)
 	if repoName == "" {
-		return ""
+		repoName = spec.RepoName
 	}
 	branchSlug := worktree.SanitizeBranchSlug(spec.BranchSlug)
 	if branchSlug == "" {
