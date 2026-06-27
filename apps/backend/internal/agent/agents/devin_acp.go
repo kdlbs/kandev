@@ -18,6 +18,12 @@ var devinACPLogoDark []byte
 
 const devinACPBin = "devin"
 
+const (
+	devinCredentialsDir     = ".local/share/devin"
+	devinCredentialsRelPath = devinCredentialsDir + "/credentials.toml"
+	devinDefaultAPIServer   = "https://server.self-serve.windsurf.com"
+)
+
 var (
 	_ Agent            = (*DevinACP)(nil)
 	_ PassthroughAgent = (*DevinACP)(nil)
@@ -111,10 +117,56 @@ func (a *DevinACP) Runtime() *RuntimeConfig {
 	}
 }
 
-func (a *DevinACP) RemoteAuth() *RemoteAuth { return nil }
+func (a *DevinACP) RemoteAuth() *RemoteAuth {
+	return &RemoteAuth{
+		Methods: []RemoteAuthMethod{
+			{
+				Type:  "files",
+				Label: "Copy Devin CLI credentials",
+				SourceFiles: map[string][]string{
+					"darwin": {devinCredentialsRelPath},
+					"linux":  {devinCredentialsRelPath},
+				},
+				TargetRelDir: devinCredentialsDir,
+			},
+			{
+				Type:      "env",
+				EnvVar:    "WINDSURF_API_KEY",
+				SetupHint: "Set WINDSURF_API_KEY to authenticate Devin CLI in remote or headless environments.",
+				SetupScript: `mkdir -p "${HOME}/.local/share/devin"
+escape_toml() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+api_key="$(escape_toml "${WINDSURF_API_KEY}")"
+api_server="$(escape_toml "${WINDSURF_API_SERVER_URL:-` + devinDefaultAPIServer + `}")"
+cat > "${HOME}/.local/share/devin/credentials.toml" <<CREDS
+windsurf_api_key = "${api_key}"
+api_server_url = "${api_server}"
+CREDS
+chmod 600 "${HOME}/.local/share/devin/credentials.toml"`,
+			},
+		},
+	}
+}
 
 func (a *DevinACP) InstallScript() string {
-	return "Install Devin CLI from https://devin.ai"
+	return `set -e
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
+curl -fsSL https://cli.devin.ai/install.sh -o "$tmp"
+if ! bash "$tmp" && [ ! -x "$HOME/.local/bin/devin" ]; then
+  exit 1
+fi
+export PATH="$HOME/.local/bin:$PATH"
+persist_devin_path() {
+  grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$1" 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$1"
+}
+persist_devin_path "$HOME/.profile"
+persist_devin_path "$HOME/.bash_profile"
+persist_devin_path "$HOME/.bashrc"
+persist_devin_path "$HOME/.zprofile"
+persist_devin_path "$HOME/.zshrc"
+devin --version >/dev/null`
 }
 
 func (a *DevinACP) PermissionSettings() map[string]PermissionSetting {
