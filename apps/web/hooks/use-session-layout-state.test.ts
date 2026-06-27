@@ -1,13 +1,23 @@
-import { renderHook } from "@testing-library/react";
+import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { makeQueryClient } from "@/lib/query/client";
-import { sessionId as toSessionId, taskId as toTaskId, type TaskSession } from "@/lib/types/http";
+import {
+  sessionId as toSessionId,
+  taskId as toTaskId,
+  type TaskPlan,
+  type TaskSession,
+} from "@/lib/types/http";
 
 const mockSetTaskSession = vi.fn();
 const mockSetMobileSessionPanel = vi.fn();
 const mockSetMobileSessionTaskSwitcherOpen = vi.fn();
+const planApiMocks = vi.hoisted(() => ({
+  getPlanRevision: vi.fn(),
+  getTaskPlan: vi.fn(),
+  listPlanRevisions: vi.fn(),
+}));
 
 type MockStoreState = {
   tasks: {
@@ -53,6 +63,12 @@ vi.mock("@/lib/local-storage", () => ({
   getPlanLastSeen: () => null,
 }));
 
+vi.mock("@/lib/api/domains/plan-api", () => ({
+  getPlanRevision: planApiMocks.getPlanRevision,
+  getTaskPlan: planApiMocks.getTaskPlan,
+  listPlanRevisions: planApiMocks.listPlanRevisions,
+}));
+
 vi.mock("@/lib/services/session-approve", () => ({
   executeApprove: vi.fn(),
 }));
@@ -86,6 +102,19 @@ function makeSession(id: string, taskId: string): TaskSession {
   } as TaskSession;
 }
 
+function makePlan(overrides: Partial<TaskPlan> = {}): TaskPlan {
+  return {
+    id: "plan-1",
+    task_id: ACTIVE_TASK_ID,
+    title: "Plan",
+    content: "Do the work",
+    created_by: "agent",
+    created_at: "2026-06-24T00:00:00Z",
+    updated_at: "2026-06-24T00:01:00Z",
+    ...overrides,
+  };
+}
+
 function setupStore(overrides: Partial<MockStoreState> = {}) {
   mockStoreState = {
     tasks: {
@@ -112,6 +141,7 @@ function setupStore(overrides: Partial<MockStoreState> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  planApiMocks.getTaskPlan.mockResolvedValue(null);
   setupStore();
 });
 
@@ -263,5 +293,18 @@ describe("useSessionLayoutState fallback sessions", () => {
     const { result } = renderLayoutHook();
 
     expect(result.current.effectiveSessionId).toBeNull();
+  });
+});
+
+describe("useSessionLayoutState plan badge", () => {
+  it("loads an existing plan before deriving the unseen mobile badge", async () => {
+    const plan = makePlan();
+    planApiMocks.getTaskPlan.mockResolvedValueOnce(plan);
+
+    const { result } = renderLayoutHook();
+
+    await waitFor(() => expect(result.current.plan).toEqual(plan));
+    expect(planApiMocks.getTaskPlan).toHaveBeenCalledWith(ACTIVE_TASK_ID);
+    expect(result.current.hasUnseenPlanUpdate).toBe(true);
   });
 });

@@ -313,9 +313,10 @@ func (c *Client) sendSessionData(sessionID string) {
 		zap.String("session_id", sessionID),
 		zap.Int("count", len(data)))
 
-	// Send each piece of session data as a notification
+	// Replay data is delivered only to this connection; live session broadcasts
+	// carry session_seq so multi-client subscribers share one logical sequence.
 	for _, msg := range data {
-		c.sendMessageForSession(sessionID, msg)
+		c.sendMessage(msg)
 	}
 }
 
@@ -533,16 +534,18 @@ func (c *Client) stampAndMarshalForSession(
 	if msg == nil {
 		return stampedMessage{}, false
 	}
+	stampedMsg := *msg
 	connectionSeq := c.connectionSeq.Add(1)
-	msg.ConnectionID = c.ID
-	msg.ConnectionSeq = connectionSeq
+	stampedMsg.ConnectionID = c.ID
+	stampedMsg.ConnectionSeq = connectionSeq
+	stampedMsg.SessionSeq = 0
 	if sessionID != "" && c.hub != nil {
 		if sessionSeq <= 0 {
 			sessionSeq = c.hub.nextSessionSeq(sessionID)
 		}
-		msg.SessionSeq = sessionSeq
+		stampedMsg.SessionSeq = sessionSeq
 	}
-	data, err := json.Marshal(msg)
+	data, err := json.Marshal(&stampedMsg)
 	if err != nil {
 		c.logger.Error("Failed to marshal message", zap.Error(err))
 		return stampedMessage{}, false
@@ -550,10 +553,10 @@ func (c *Client) stampAndMarshalForSession(
 	return stampedMessage{
 		data:          data,
 		connectionSeq: connectionSeq,
-		sessionSeq:    sessionSeq,
+		sessionSeq:    stampedMsg.SessionSeq,
 		sessionID:     sessionID,
-		msgType:       string(msg.Type),
-		action:        msg.Action,
+		msgType:       string(stampedMsg.Type),
+		action:        stampedMsg.Action,
 		sentAt:        time.Now().UTC(),
 	}, true
 }

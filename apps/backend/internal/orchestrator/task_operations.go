@@ -99,14 +99,7 @@ func isLazyResumePromptRecoveryError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, executor.ErrExecutionNotFound) || errors.Is(err, lifecycle.ErrExecutionNotFound) {
-		return true
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "no such session") ||
-		strings.Contains(msg, "session not found") ||
-		strings.Contains(msg, "failed to load session") ||
-		(strings.Contains(msg, "execution") && strings.Contains(msg, "not found"))
+	return errors.Is(err, executor.ErrExecutionNotFound) || errors.Is(err, lifecycle.ErrExecutionNotFound)
 }
 
 func isAgentAlreadyRunningError(err error) bool {

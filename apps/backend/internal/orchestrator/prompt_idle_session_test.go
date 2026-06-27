@@ -510,8 +510,9 @@ func TestPromptTask_LazyResumeMissingACPSessionFallsBackToFreshLaunch(t *testing
 	agentMgr := &mockAgentManager{
 		repoForExecutionLookup: repo,
 		promptErr: fmt.Errorf(
-			"agent reported prompt failure: failed to load session: session not found: %w",
+			"%w: failed to load session: session not found: %w",
 			lifecycle.ErrAgentReported,
+			lifecycle.ErrExecutionNotFound,
 		),
 		isAgentRunningFn: func(_ context.Context, _ string) bool {
 			return launchCalls.Load() > 0

@@ -3,6 +3,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { BackendMessageMap, BackendMessageType } from "@/lib/types/backend";
 import type { BackendMessage } from "@/lib/types/backend-message";
+import type { TaskPR } from "@/lib/types/github";
 import {
   sessionId as toSessionId,
   taskId as toTaskId,
@@ -116,6 +117,41 @@ function workflowSnapshot(tasks: Task[]): WorkflowSnapshot {
       },
     ],
     tasks,
+  };
+}
+
+function taskPr(overrides: Partial<TaskPR> = {}): TaskPR {
+  return {
+    id: "task-pr-1",
+    task_id: "task-1",
+    repository_id: "repo-1",
+    owner: "kdlbs",
+    repo: "kandev",
+    pr_number: 1512,
+    pr_url: "https://github.com/kdlbs/kandev/pull/1512",
+    pr_title: "Old title",
+    head_branch: "feature/tanstack-migration-801",
+    base_branch: "main",
+    author_login: "octocat",
+    state: "open",
+    review_state: "pending",
+    checks_state: "pending",
+    mergeable_state: "unknown",
+    review_count: 0,
+    pending_review_count: 0,
+    required_reviews: null,
+    comment_count: 0,
+    unresolved_review_threads: 0,
+    checks_total: 0,
+    checks_passing: 0,
+    additions: 0,
+    deletions: 0,
+    created_at: "2026-06-24T00:00:00Z",
+    merged_at: null,
+    closed_at: null,
+    last_synced_at: "2026-06-24T00:00:00Z",
+    updated_at: "2026-06-24T00:00:00Z",
+    ...overrides,
   };
 }
 
@@ -235,6 +271,33 @@ describe("query bridge audit", () => {
         taskId: "office-task-1",
       }),
     );
+
+    cleanup();
+  });
+
+  it("patches task PR rows and invalidates workspace PR aggregates", () => {
+    const ws = new FakeWebSocketClient();
+    const queryClient = makeQueryClient();
+    const oldPr = taskPr();
+    const updatedPr = taskPr({ pr_title: "Updated title", checks_state: "success" });
+    const workspacePrsKey = qk.integrations.github.prs("workspace-1");
+    queryClient.setQueryData(qk.integrations.github.taskPr("task-1"), [oldPr]);
+    queryClient.setQueryData(workspacePrsKey, { task_prs: { "task-1": [oldPr] } });
+
+    const cleanup = registerBridge(ws, queryClient);
+    ws.emit({
+      type: "notification",
+      action: "github.task_pr.updated",
+      payload: updatedPr,
+    });
+
+    expect(queryClient.getQueryData(qk.integrations.github.taskPr("task-1"))).toEqual([
+      expect.objectContaining({
+        checks_state: "success",
+        pr_title: "Updated title",
+      }),
+    ]);
+    expect(queryClient.getQueryState(workspacePrsKey)?.isInvalidated).toBe(true);
 
     cleanup();
   });

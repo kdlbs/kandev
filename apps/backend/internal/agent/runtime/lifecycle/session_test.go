@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -366,6 +367,26 @@ func containsAction(items []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestWaitForPromptDoneWrapsMissingSessionLoadAsExecutionNotFound(t *testing.T) {
+	sm := NewSessionManager(newSessionTestLogger(), newTestStopCh(t))
+	execution := &AgentExecution{
+		ID:           "exec-1",
+		promptDoneCh: make(chan PromptCompletionSignal, 1),
+	}
+	execution.promptDoneCh <- PromptCompletionSignal{
+		IsError: true,
+		Error:   "failed to load session: session not found",
+	}
+
+	_, err := sm.waitForPromptDone(context.Background(), execution)
+	if !errors.Is(err, ErrAgentReported) {
+		t.Fatalf("expected ErrAgentReported, got %v", err)
+	}
+	if !errors.Is(err, ErrExecutionNotFound) {
+		t.Fatalf("expected ErrExecutionNotFound, got %v", err)
+	}
 }
 
 func TestInitializeAndPrompt_StreamTimeout(t *testing.T) {

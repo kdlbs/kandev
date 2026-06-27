@@ -72,10 +72,7 @@ function hasUnseenAgentPlanUpdate(
 }
 
 function usePlanBadgeState(activeTaskId: string | null, currentMobilePanel: MobileSessionPanel) {
-  const planQuery = useQuery({
-    ...taskPlanQueryOptions(activeTaskId ?? "", false),
-    enabled: false,
-  });
+  const planQuery = useQuery(taskPlanQueryOptions(activeTaskId ?? ""));
   const plan = planQuery.data ?? null;
 
   const hasUnseenPlanUpdate = useMemo(() => {

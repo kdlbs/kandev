@@ -126,6 +126,7 @@ function patchTaskPr(queryClient: QueryClient, pr: TaskPR) {
   queryClient.setQueryData<TaskPR[]>(qk.integrations.github.taskPr(pr.task_id), (prev) =>
     upsertBy(prev ?? [], pr, (item) => `${item.repository_id ?? ""}:${item.pr_number}`),
   );
+  queryClient.invalidateQueries({ queryKey: ["integrations", "github", "prs"] });
 }
 
 function patchTaskCiOptions(queryClient: QueryClient, options: TaskCIAutomationOptions) {

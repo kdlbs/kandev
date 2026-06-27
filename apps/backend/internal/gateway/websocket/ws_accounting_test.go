@@ -85,7 +85,7 @@ func TestClient_DroppedSendDoesNotRecordSentLog(t *testing.T) {
 	}
 }
 
-func TestClient_SendSessionDataStampsSessionSequence(t *testing.T) {
+func TestClient_SendSessionDataStampsConnectionOnly(t *testing.T) {
 	h := newTestHub(t)
 	c := newTestClient("conn-data")
 	c.hub = h
@@ -105,19 +105,64 @@ func TestClient_SendSessionDataStampsSessionSequence(t *testing.T) {
 	c.sendSessionData("session-a")
 
 	got := readStampedMessage(t, c)
-	if got.ConnectionSeq != 1 || got.SessionSeq != 1 {
-		t.Fatalf("session data seqs = connection %d session %d; want 1/1", got.ConnectionSeq, got.SessionSeq)
+	if got.ConnectionSeq != 1 || got.SessionSeq != 0 {
+		t.Fatalf("session data seqs = connection %d session %d; want 1/0", got.ConnectionSeq, got.SessionSeq)
 	}
 	if got.ConnectionID != "conn-data" {
 		t.Fatalf("connection id = %q; want conn-data", got.ConnectionID)
 	}
 
-	events, maxSeq, ok := h.GetSentEventsForSession("conn-data", "session-a")
+	events, maxSeq, ok := h.GetSentEventsFor("conn-data", 0)
+	if !ok {
+		t.Fatal("connection sent log lookup failed")
+	}
+	if maxSeq != 1 || len(events) != 1 || events[0].SessionSeq != 0 || events[0].SessionID != "" {
+		t.Fatalf("connection sent log = max %d events %+v; want one connection-only event", maxSeq, events)
+	}
+
+	sessionEvents, sessionMaxSeq, ok := h.GetSentEventsForSession("conn-data", "session-a")
 	if !ok {
 		t.Fatal("session sent log lookup failed")
 	}
-	if maxSeq != 1 || len(events) != 1 || events[0].SessionSeq != 1 {
-		t.Fatalf("session sent log = max %d events %+v; want one session_seq=1", maxSeq, events)
+	if sessionMaxSeq != 0 || len(sessionEvents) != 0 {
+		t.Fatalf("session sent log = max %d events %+v; want no replay session events", sessionMaxSeq, sessionEvents)
+	}
+}
+
+func TestClient_SendMessageStampsCopyWithoutMutatingMessage(t *testing.T) {
+	h := newTestHub(t)
+	c := newTestClient("conn-copy")
+	c.hub = h
+	registerTestClient(h, c)
+
+	msg, err := ws.NewNotification("session.message.added", map[string]string{"session_id": "session-a"})
+	if err != nil {
+		t.Fatalf("notification: %v", err)
+	}
+	msg.ConnectionID = "caller-owned"
+	msg.ConnectionSeq = 41
+	msg.SessionSeq = 42
+
+	if !c.sendMessageForSession("session-a", msg) {
+		t.Fatal("session send failed")
+	}
+	gotSession := readStampedMessage(t, c)
+	if gotSession.ConnectionID != "conn-copy" || gotSession.ConnectionSeq != 1 || gotSession.SessionSeq != 1 {
+		t.Fatalf("session stamped message = %+v; want conn-copy seq 1 session seq 1", gotSession)
+	}
+	if msg.ConnectionID != "caller-owned" || msg.ConnectionSeq != 41 || msg.SessionSeq != 42 {
+		t.Fatalf("source message mutated after session send: %+v", msg)
+	}
+
+	if !c.sendMessage(msg) {
+		t.Fatal("connection send failed")
+	}
+	gotConnection := readStampedMessage(t, c)
+	if gotConnection.ConnectionID != "conn-copy" || gotConnection.ConnectionSeq != 2 || gotConnection.SessionSeq != 0 {
+		t.Fatalf("connection stamped message = %+v; want conn-copy seq 2 without session seq", gotConnection)
+	}
+	if msg.ConnectionID != "caller-owned" || msg.ConnectionSeq != 41 || msg.SessionSeq != 42 {
+		t.Fatalf("source message mutated after connection send: %+v", msg)
 	}
 }
 
