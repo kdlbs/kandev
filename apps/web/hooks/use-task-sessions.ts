@@ -89,7 +89,10 @@ export function useTaskSessions(taskId: string | null) {
     if (!taskId) return;
     const refetchOnVisible = () => {
       if (document.visibilityState !== "visible") return;
-      if (!isLoaded) return;
+      if (!isLoaded) {
+        if (isLoading) void loadSessions(true);
+        return;
+      }
       void loadSessions(true);
     };
     document.addEventListener("visibilitychange", refetchOnVisible);
