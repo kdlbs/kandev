@@ -273,6 +273,96 @@ describe("task.updated cross-workflow placement", () => {
   });
 });
 
+describe("task.updated repository preservation", () => {
+  it("preserves repository metadata when a rename update omits repo fields", () => {
+    const repo = {
+      id: "task-repo-1",
+      repository_id: "repo-a",
+      base_branch: "main",
+      checkout_branch: "feature/rename",
+      position: 0,
+    };
+    const existingTask = {
+      id: "t1",
+      workflowStepId: "step1",
+      title: "Old title",
+      position: 0,
+      repositoryId: "repo-a",
+      repositories: [repo],
+    };
+    const store = makeStore({
+      kanban: {
+        workflowId: "wf1",
+        steps: [],
+        tasks: [existingTask],
+      } as unknown as AppState["kanban"],
+      kanbanMulti: {
+        isLoading: false,
+        snapshots: {
+          wf1: { workflowId: "wf1", workflowName: "WF1", steps: [], tasks: [existingTask] },
+        },
+      } as unknown as AppState["kanbanMulti"],
+    });
+
+    const handlers = registerTasksHandlers(store);
+    handlers["task.updated"]!(
+      makeMessage({
+        ...makeTask("t1", null),
+        title: "Renamed task",
+        repository_id: undefined,
+        repositories: undefined,
+      }),
+    );
+
+    const state = store.getState();
+    const kanbanTask = state.kanban.tasks.find((task) => task.id === "t1");
+    const snapshotTask = state.kanbanMulti.snapshots.wf1.tasks.find((task) => task.id === "t1");
+    expect(kanbanTask?.title).toBe("Renamed task");
+    expect(kanbanTask?.repositoryId).toBe("repo-a");
+    expect(kanbanTask?.repositories).toEqual([repo]);
+    expect(snapshotTask?.repositoryId).toBe("repo-a");
+    expect(snapshotTask?.repositories).toEqual([repo]);
+  });
+
+  it("does not preserve stale repository rows when the primary repository changes", () => {
+    const existingTask = {
+      id: "t1",
+      workflowStepId: "step1",
+      title: "Old title",
+      position: 0,
+      repositoryId: "repo-a",
+      repositories: [
+        {
+          id: "task-repo-1",
+          repository_id: "repo-a",
+          base_branch: "main",
+          position: 0,
+        },
+      ],
+    };
+    const store = makeStore({
+      kanban: {
+        workflowId: "wf1",
+        steps: [],
+        tasks: [existingTask],
+      } as unknown as AppState["kanban"],
+    });
+
+    const handlers = registerTasksHandlers(store);
+    handlers["task.updated"]!(
+      makeMessage({
+        ...makeTask("t1", null),
+        repository_id: "repo-b",
+        repositories: undefined,
+      }),
+    );
+
+    const task = store.getState().kanban.tasks.find((item) => item.id === "t1");
+    expect(task?.repositoryId).toBe("repo-b");
+    expect(task?.repositories).toBeUndefined();
+  });
+});
+
 describe("task.deleted cleanup", () => {
   it("removes the deleted task from recent task history", () => {
     const store = makeStore({

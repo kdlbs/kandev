@@ -10,11 +10,26 @@ import { sessionId as toSessionId } from "@/lib/types/http";
 
 type KanbanTask = KanbanState["tasks"][number];
 
+function mergeTaskUpdate(existing: KanbanTask | undefined, nextTask: KanbanTask): KanbanTask {
+  if (!existing) return nextTask;
+  const repositoryIdChanged =
+    nextTask.repositoryId !== undefined && nextTask.repositoryId !== existing.repositoryId;
+  return {
+    ...nextTask,
+    repositoryId: nextTask.repositoryId ?? existing.repositoryId,
+    repositories:
+      nextTask.repositories !== undefined || repositoryIdChanged
+        ? nextTask.repositories
+        : existing.repositories,
+  };
+}
+
 function upsertTask(tasks: KanbanTask[], nextTask: KanbanTask): KanbanTask[] {
-  const exists = tasks.some((task) => task.id === nextTask.id);
-  return exists
-    ? tasks.map((task) => (task.id === nextTask.id ? nextTask : task))
-    : [...tasks, nextTask];
+  const existing = tasks.find((task) => task.id === nextTask.id);
+  const merged = mergeTaskUpdate(existing, nextTask);
+  return existing
+    ? tasks.map((task) => (task.id === nextTask.id ? merged : task))
+    : [...tasks, merged];
 }
 
 function upsertMultiTask(state: AppState, workflowId: string, task: KanbanTask): AppState {
