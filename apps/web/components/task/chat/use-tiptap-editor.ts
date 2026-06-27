@@ -40,6 +40,7 @@ export type TipTapInputHandle = {
 };
 
 const lowlightInstance = createLowlight(common);
+export const TIPTAP_EDITOR_TEXT_SIZE_CLASS = "text-base leading-relaxed lg:text-sm";
 
 /**
  * Custom Placeholder extension that reads the current placeholder from
@@ -224,7 +225,7 @@ function buildEditorProps(args: {
     attributes: {
       class: cn(
         "w-full h-full resize-none bg-transparent px-2 py-2 overflow-y-auto",
-        "text-sm leading-relaxed",
+        TIPTAP_EDITOR_TEXT_SIZE_CLASS,
         "placeholder:text-muted-foreground",
         "focus:outline-none",
         "disabled:cursor-not-allowed disabled:opacity-50",

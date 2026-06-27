@@ -23,7 +23,7 @@ import {
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useHoverPopover } from "@/hooks/domains/github/use-hover-popover";
-import { useIsMobile } from "@/hooks/use-mobile";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import {
   aggregatePRStatusColor,
   getPRStatusColor,
@@ -113,13 +113,13 @@ export const PRTopbarButton = memo(function PRTopbarButton() {
  * {@link useHoverPopover} hook so the chip and this button stay in sync.
  */
 function usePopoverInteractions() {
-  const isMobile = useIsMobile();
+  const usesTouchDrawer = useTouchDrawer();
   const hover = useHoverPopover({
     openDelayMs: POPOVER_OPEN_DELAY_MS,
     closeDelayMs: POPOVER_CLOSE_DELAY_MS,
-    disabled: isMobile,
+    disabled: usesTouchDrawer,
   });
-  return { isMobile, ...hover };
+  return { usesTouchDrawer, ...hover };
 }
 
 function PRSingleButton({ pr }: { pr: TaskPR }) {
@@ -127,7 +127,7 @@ function PRSingleButton({ pr }: { pr: TaskPR }) {
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const tooltip = `${pr.owner}/${pr.repo} #${pr.pr_number} — ${pr.pr_title}`;
   const {
-    isMobile,
+    usesTouchDrawer,
     open,
     onOpenChange,
     onTriggerEnter,
@@ -169,7 +169,7 @@ function PRSingleButton({ pr }: { pr: TaskPR }) {
     </Button>
   );
 
-  if (isMobile) {
+  if (usesTouchDrawer) {
     return (
       <Tooltip>
         <TooltipTrigger asChild>{button}</TooltipTrigger>
@@ -205,7 +205,7 @@ function PRMultiButton({ prs }: { prs: TaskPR[] }) {
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const {
-    isMobile,
+    usesTouchDrawer,
     open,
     onOpenChange,
     onTriggerEnter,
@@ -257,7 +257,7 @@ function PRMultiButton({ prs }: { prs: TaskPR[] }) {
     >
       <Tooltip>
         <TooltipTrigger asChild>
-          {isMobile ? triggerButton : <PopoverAnchor asChild>{triggerButton}</PopoverAnchor>}
+          {usesTouchDrawer ? triggerButton : <PopoverAnchor asChild>{triggerButton}</PopoverAnchor>}
         </TooltipTrigger>
         <TooltipContent>{prs.length} pull requests linked to this task — open one</TooltipContent>
       </Tooltip>
@@ -265,7 +265,7 @@ function PRMultiButton({ prs }: { prs: TaskPR[] }) {
     </DropdownMenu>
   );
 
-  if (isMobile) return dropdown;
+  if (usesTouchDrawer) return dropdown;
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>

@@ -130,9 +130,9 @@ function MetricsDisplayToggle({
   return (
     <div className="flex items-center justify-between gap-4">
       <div className="space-y-1">
-        <Label htmlFor="show-system-metrics">Show in desktop topbars</Label>
+        <Label htmlFor="show-system-metrics">Show in topbars</Label>
         <p className="text-xs text-muted-foreground">
-          Collection starts only while at least one desktop or tablet client displays metrics.
+          Collection starts only while at least one client displays metrics.
         </p>
       </div>
       <Switch id="show-system-metrics" checked={checked} onCheckedChange={onCheckedChange} />

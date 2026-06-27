@@ -3,7 +3,8 @@
 import { useCallback, useMemo } from "react";
 import {
   DndContext,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   closestCenter,
   type DragEndEvent,
   useSensor,
@@ -20,6 +21,20 @@ import { cn } from "@/lib/utils";
 import type { TaskSwitcherItem } from "./task-switcher";
 
 export const DRAG_ACTIVATION_DISTANCE = 8;
+export const TOUCH_DRAG_ACTIVATION_DELAY_MS = 250;
+export const TOUCH_DRAG_ACTIVATION_TOLERANCE_PX = 5;
+
+const TASK_SWITCHER_DRAG_ACTIVATION_CONSTRAINTS = {
+  pointer: { distance: DRAG_ACTIVATION_DISTANCE },
+  touch: {
+    delay: TOUCH_DRAG_ACTIVATION_DELAY_MS,
+    tolerance: TOUCH_DRAG_ACTIVATION_TOLERANCE_PX,
+  },
+};
+
+export function taskSwitcherDragActivationConstraints() {
+  return TASK_SWITCHER_DRAG_ACTIVATION_CONSTRAINTS;
+}
 
 // Skip layout/paint for rows outside the sidebar scrollport so long task lists
 // stay cheap to render and scroll. `auto 52px` seeds the height estimate before
@@ -65,8 +80,8 @@ function DraggableSortableTaskNode({
       <div
         {...sortableAttributes}
         {...listeners}
-        // Strip dnd-kit's default tabIndex={0}: only PointerSensor is wired,
-        // so keyboard tab stops here lead nowhere. If KeyboardSensor is
+        // Strip dnd-kit's default tabIndex={0}: only pointer-based sensors are
+        // wired, so keyboard tab stops here lead nowhere. If KeyboardSensor is
         // added later, drop this override.
         tabIndex={undefined}
         data-testid="sortable-task-handle"
@@ -129,7 +144,12 @@ export function SortableTaskNode({
  */
 function useLevelDnd(tasks: TaskSwitcherItem[], onReorder?: (orderedTaskIds: string[]) => void) {
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE } }),
+    useSensor(MouseSensor, {
+      activationConstraint: TASK_SWITCHER_DRAG_ACTIVATION_CONSTRAINTS.pointer,
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: TASK_SWITCHER_DRAG_ACTIVATION_CONSTRAINTS.touch,
+    }),
   );
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {

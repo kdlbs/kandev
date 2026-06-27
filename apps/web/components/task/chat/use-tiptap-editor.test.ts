@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { decideSubmitShortcut } from "./use-tiptap-editor";
+import { TIPTAP_EDITOR_TEXT_SIZE_CLASS, decideSubmitShortcut } from "./use-tiptap-editor";
 import { decideHistoryNav } from "./tiptap-editor-history";
+
+describe("TIPTAP_EDITOR_TEXT_SIZE_CLASS", () => {
+  it("keeps 16px text until the lg breakpoint", () => {
+    expect(TIPTAP_EDITOR_TEXT_SIZE_CLASS).toContain("text-base");
+    expect(TIPTAP_EDITOR_TEXT_SIZE_CLASS).toContain("lg:text-sm");
+    expect(TIPTAP_EDITOR_TEXT_SIZE_CLASS).not.toContain("md:text-sm");
+  });
+});
 
 describe("decideSubmitShortcut", () => {
   describe("submitKey=enter", () => {

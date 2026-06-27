@@ -1,37 +1,13 @@
 "use client";
 
-import { memo, useCallback, useRef, useState, type ReactNode } from "react";
-import {
-  IconArrowUp,
-  IconChevronsLeft,
-  IconDots,
-  IconFileTextSpark,
-  IconPlayerPauseFilled,
-  IconAt,
-  IconPlugConnected,
-  IconPlugConnectedX,
-  IconPaperclip,
-} from "@tabler/icons-react";
+import { memo } from "react";
 
-import { EnhancePromptButton } from "@/components/enhance-prompt-button";
-import { GridSpinner } from "@/components/grid-spinner";
-import { Button } from "@kandev/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { cn } from "@/lib/utils";
-import { useToolbarCollapsed } from "@/hooks/use-toolbar-collapsed";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
-import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
-import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
-import { formatShortcut } from "@/lib/keyboard/utils";
-import { useAppStore } from "@/components/state-provider";
-import { TokenUsageDisplay } from "@/components/task/chat/token-usage-display";
-import { SessionsDropdown } from "@/components/task/sessions-dropdown";
-import { ModelSelector } from "@/components/task/model-selector";
-import { ModeSelector } from "@/components/task/mode-selector";
-import { ContextPopover } from "./context-popover";
-import { ResetContextButton } from "./reset-context-button";
-import { ImplementPlanButton } from "./implement-plan-button";
-import { VoiceInputButton } from "./voice-input-button";
+import { DesktopChatInputToolbar } from "./chat-input-toolbar-desktop";
+import { MobileChatInputToolbar } from "./chat-input-toolbar-mobile";
+import { SubmitButton } from "./chat-input-toolbar-primitives";
+import { shouldUseCompactTaskChrome } from "@/hooks/use-compact-task-chrome";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { ContextFile } from "@/lib/state/context-files-store";
 
 export type ChatInputToolbarProps = {
@@ -83,392 +59,6 @@ export type ChatInputToolbarProps = {
   /** Hide the plan mode toggle button (for ephemeral/quick chat sessions) */
   hidePlanMode?: boolean;
 };
-
-type SubmitButtonProps = {
-  isAgentBusy: boolean;
-  hasContent: boolean;
-  isDisabled: boolean;
-  submitDisabledReason?: string;
-  isSending: boolean;
-  planModeEnabled: boolean;
-  onCancel: () => void | Promise<void>;
-  onSubmit: () => void;
-  submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
-};
-
-function submitTooltipDescription(
-  isAgentBusy: boolean,
-  planModeEnabled: boolean,
-  submitDisabledReason?: string,
-) {
-  if (submitDisabledReason) return submitDisabledReason;
-  if (isAgentBusy) return "Queue message";
-  if (planModeEnabled) return "Request plan changes";
-  return undefined;
-}
-
-function SubmitButton({
-  isAgentBusy,
-  hasContent,
-  isDisabled,
-  submitDisabledReason,
-  isSending,
-  planModeEnabled,
-  onCancel,
-  onSubmit,
-  submitShortcut,
-}: SubmitButtonProps) {
-  // When agent is busy and there's nothing to send, show only the cancel button.
-  // When there's content to queue, show both cancel and send buttons side-by-side.
-  const showSendButton = !isAgentBusy || hasContent;
-  // Track cancel-in-flight locally so impatient retries are blocked at the
-  // button itself: cancelling a long-running tool (e.g. Claude Monitor) can
-  // take several seconds, and without this the user clicks repeatedly and
-  // each click hits the backend.
-  const [isCancelling, setIsCancelling] = useState(false);
-  const tooltipDescription = submitTooltipDescription(
-    isAgentBusy,
-    planModeEnabled,
-    submitDisabledReason,
-  );
-  // Re-entrancy guard via ref: `disabled={isCancelling}` already blocks DOM
-  // clicks, but the ref makes the guard effective for any programmatic caller
-  // and keeps `isCancelling` out of the useCallback deps so the handler
-  // identity is stable across the false→true→false flips.
-  const cancellingRef = useRef(false);
-  const handleCancelClick = useCallback(async () => {
-    if (cancellingRef.current) return;
-    cancellingRef.current = true;
-    setIsCancelling(true);
-    try {
-      await onCancel();
-    } catch (error) {
-      // Parent handlers normally swallow errors, but a rejected onCancel
-      // must not propagate as an unhandled rejection — and the button must
-      // re-enable so the user can retry.
-      console.error("Failed to cancel agent turn:", error);
-    } finally {
-      cancellingRef.current = false;
-      setIsCancelling(false);
-    }
-  }, [onCancel]);
-  return (
-    <div className="flex items-center gap-1">
-      {isAgentBusy && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="secondary"
-              size="icon"
-              className="h-7 w-7 rounded-full cursor-pointer bg-destructive/10 text-destructive hover:bg-destructive/20 disabled:cursor-not-allowed disabled:opacity-70"
-              onClick={handleCancelClick}
-              disabled={isCancelling}
-              data-testid="cancel-agent-button"
-            >
-              {isCancelling ? (
-                <GridSpinner className="text-destructive" />
-              ) : (
-                <IconPlayerPauseFilled className="h-3.5 w-3.5" />
-              )}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{isCancelling ? "Cancelling..." : "Cancel agent"}</TooltipContent>
-        </Tooltip>
-      )}
-      {showSendButton && (
-        <KeyboardShortcutTooltip
-          shortcut={submitShortcut}
-          description={tooltipDescription}
-          enabled={!isDisabled || !!tooltipDescription}
-        >
-          <span className="inline-flex">
-            <Button
-              type="button"
-              variant="default"
-              size="icon"
-              className={cn(
-                "h-7 w-7 rounded-full cursor-pointer",
-                planModeEnabled && "bg-violet-600 hover:bg-violet-500",
-              )}
-              disabled={isDisabled}
-              onClick={onSubmit}
-              data-testid="submit-message-button"
-            >
-              {isSending && <GridSpinner className="text-primary-foreground" />}
-              {!isSending && planModeEnabled && <IconFileTextSpark className="h-4 w-4" />}
-              {!isSending && !planModeEnabled && <IconArrowUp className="h-4 w-4" />}
-            </Button>
-          </span>
-        </KeyboardShortcutTooltip>
-      )}
-    </div>
-  );
-}
-
-function PlanToggleButton({
-  planModeEnabled,
-  planModeAvailable,
-  onPlanModeChange,
-}: {
-  planModeEnabled: boolean;
-  planModeAvailable: boolean;
-  onPlanModeChange: (enabled: boolean) => void;
-}) {
-  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
-  const planModeShortcutLabel = formatShortcut(getShortcut("TOGGLE_PLAN_MODE", keyboardShortcuts));
-  const tooltip = planModeAvailable
-    ? `Toggle plan mode (${planModeShortcutLabel}) — Agent collaborates on the plan without implementing changes`
-    : `Toggle plan layout (${planModeShortcutLabel}) — View and edit the plan (agent cannot read/write it without MCP)`;
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          data-testid="plan-mode-toggle-button"
-          data-plan-available={planModeAvailable}
-          data-plan-enabled={planModeEnabled}
-          className={cn(
-            "h-7 gap-1.5 px-2 hover:bg-muted/40 cursor-pointer",
-            planModeEnabled && planModeAvailable && "bg-violet-500/15 text-violet-400",
-          )}
-          onClick={() => onPlanModeChange(!planModeEnabled)}
-        >
-          <IconFileTextSpark className="h-4 w-4" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent className="max-w-xs">{tooltip}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function McpIndicator({ mcpServers }: { mcpServers: string[] }) {
-  const hasMcp = mcpServers.length > 0;
-  const tooltipText = hasMcp
-    ? `MCP Servers: ${mcpServers.join(", ")}`
-    : "Agent does not support MCP";
-  const Icon = hasMcp ? IconPlugConnected : IconPlugConnectedX;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <div
-          className={cn(
-            "h-7 w-7 flex items-center justify-center rounded-md",
-            hasMcp ? "text-foreground" : "text-muted-foreground/40",
-          )}
-        >
-          <Icon className="h-4 w-4" />
-        </div>
-      </TooltipTrigger>
-      <TooltipContent>{tooltipText}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-type ToolbarItemConfig = {
-  id: string;
-  collapsible: boolean;
-  section: "left" | "right";
-  render: () => ReactNode;
-  visible?: boolean;
-};
-
-function ToolbarExpandToggle({
-  isExpanded,
-  onToggle,
-}: {
-  isExpanded: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label={isExpanded ? "Collapse toolbar" : "More toolbar actions"}
-          className="h-7 w-7 cursor-pointer hover:bg-muted/40"
-          data-testid="toolbar-overflow-menu"
-          onClick={onToggle}
-        >
-          {isExpanded ? <IconChevronsLeft className="h-4 w-4" /> : <IconDots className="h-4 w-4" />}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{isExpanded ? "Collapse" : "More actions"}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function ToolbarRightSection({
-  showCollapsed,
-  rightItems,
-  sessionId,
-  planModeEnabled,
-  isAgentBusy,
-  hasContent,
-  onImplementPlan,
-  isDisabled,
-  submitDisabledReason,
-  isSending,
-  onCancel,
-  onSubmit,
-  submitShortcut,
-  onVoiceTranscript,
-  onVoiceAutoSend,
-}: {
-  showCollapsed: boolean;
-  rightItems: ToolbarItemConfig[];
-  sessionId: string | null;
-  planModeEnabled: boolean;
-  isAgentBusy: boolean;
-  hasContent: boolean;
-  onImplementPlan?: (fresh: boolean) => void;
-  isDisabled: boolean;
-  submitDisabledReason?: string;
-  isSending: boolean;
-  onCancel: () => void;
-  onSubmit: () => void;
-  submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
-  onVoiceTranscript?: (text: string) => void;
-  onVoiceAutoSend?: () => void;
-}) {
-  return (
-    <div className="flex items-center gap-0.5 shrink-0">
-      {!showCollapsed && <CollapsibleItems items={rightItems} testIdPrefix="toolbar-item-" />}
-      <TokenUsageDisplay sessionId={sessionId} />
-      {planModeEnabled && !isAgentBusy && onImplementPlan && (
-        <ImplementPlanButton onClick={onImplementPlan} />
-      )}
-      <div className="ml-1 flex items-center gap-1">
-        {onVoiceTranscript && (
-          <VoiceInputButton
-            onTranscript={onVoiceTranscript}
-            onAutoSend={onVoiceAutoSend}
-            disabled={isDisabled}
-          />
-        )}
-        <SubmitButton
-          isAgentBusy={isAgentBusy}
-          hasContent={hasContent}
-          isDisabled={isDisabled}
-          submitDisabledReason={submitDisabledReason}
-          isSending={isSending}
-          planModeEnabled={planModeEnabled}
-          onCancel={onCancel}
-          onSubmit={onSubmit}
-          submitShortcut={submitShortcut}
-        />
-      </div>
-    </div>
-  );
-}
-
-function buildCollapsibleItems(props: {
-  mcpServers: string[];
-  sessionId: string | null;
-  taskId: string | null;
-  taskTitle?: string;
-  taskDescription: string;
-  hideSessionsDropdown?: boolean;
-  isAgentBusy: boolean;
-  onEnhancePrompt?: () => void;
-  isEnhancingPrompt: boolean;
-  isUtilityConfigured: boolean;
-  hideAgentControls?: boolean;
-}): ToolbarItemConfig[] {
-  if (props.hideAgentControls) return [];
-  return [
-    {
-      id: "mcp",
-      section: "left",
-      collapsible: true,
-      render: () => <McpIndicator mcpServers={props.mcpServers} />,
-    },
-    {
-      id: "mode",
-      section: "left",
-      collapsible: true,
-      render: () => <ModeSelector sessionId={props.sessionId} />,
-    },
-    {
-      id: "reset-context",
-      section: "right",
-      collapsible: true,
-      visible: !!props.sessionId && !props.isAgentBusy,
-      render: () => <ResetContextButton sessionId={props.sessionId!} />,
-    },
-    {
-      id: "sessions",
-      section: "right",
-      collapsible: true,
-      visible: !props.hideSessionsDropdown,
-      render: () => (
-        <SessionsDropdown
-          taskId={props.taskId}
-          activeSessionId={props.sessionId}
-          taskTitle={props.taskTitle}
-        />
-      ),
-    },
-    {
-      id: "model",
-      section: "right",
-      collapsible: true,
-      render: () => <ModelSelector sessionId={props.sessionId} />,
-    },
-    {
-      id: "enhance",
-      section: "right",
-      collapsible: true,
-      visible: !props.isAgentBusy,
-      render: () => (
-        <EnhancePromptButton
-          onClick={props.onEnhancePrompt ?? (() => {})}
-          isLoading={props.isEnhancingPrompt}
-          isConfigured={props.isUtilityConfigured}
-        />
-      ),
-    },
-  ];
-}
-
-function CollapsibleItems({
-  items,
-  testIdPrefix,
-}: {
-  items: ToolbarItemConfig[];
-  testIdPrefix: string;
-}) {
-  return items.map((i) => (
-    <div key={i.id} data-testid={`${testIdPrefix}${i.id}`}>
-      {i.render()}
-    </div>
-  ));
-}
-
-function AttachFilesButton({ onClick }: { onClick: () => void }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40"
-          onClick={onClick}
-          data-testid="chat-attachments-button"
-        >
-          <IconPaperclip className="h-4 w-4" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>Attach files</TooltipContent>
-    </Tooltip>
-  );
-}
 
 function MinimalToolbar({
   isAgentBusy,
@@ -525,10 +115,8 @@ const toolbarDefaults = {
 export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInputToolbarProps) {
   const props = { ...toolbarDefaults, ...rawProps };
   const submitShortcut = props.submitKey === "enter" ? SHORTCUTS.SUBMIT_ENTER : SHORTCUTS.SUBMIT;
-  const toolbarRef = useRef<HTMLDivElement>(null);
-  const isCollapsed = useToolbarCollapsed(toolbarRef);
-  const [isExpanded, setIsExpanded] = useState(false);
-  const showCollapsed = isCollapsed && !isExpanded;
+  const responsiveBreakpoint = useResponsiveBreakpoint();
+  const usesCompactTaskChrome = shouldUseCompactTaskChrome(responsiveBreakpoint);
 
   if (props.minimalToolbar) {
     return (
@@ -545,68 +133,34 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
     );
   }
 
-  const items = buildCollapsibleItems(props);
-  const leftItems = items.filter((i) => i.section === "left" && i.visible !== false);
-  const rightItems = items.filter((i) => i.section === "right" && i.visible !== false);
-
-  return (
-    <div
-      ref={toolbarRef}
-      data-testid="chat-input-toolbar"
-      className={cn(
-        "flex items-center gap-1 px-1 pt-0 pb-0.5 border-t border-border",
-        isCollapsed ? "overflow-x-auto scrollbar-hide" : "overflow-visible",
-      )}
-    >
-      <div className="flex items-center gap-0.5 shrink-0">
-        {!props.hidePlanMode && (
-          <PlanToggleButton
-            planModeEnabled={props.planModeEnabled}
-            planModeAvailable={props.planModeAvailable}
-            onPlanModeChange={props.onPlanModeChange}
-          />
-        )}
-        {!showCollapsed && <CollapsibleItems items={leftItems} testIdPrefix="toolbar-item-" />}
-        {props.onAttachFiles && <AttachFilesButton onClick={props.onAttachFiles} />}
-        <ContextPopover
-          open={props.contextPopoverOpen}
-          onOpenChange={props.onContextPopoverOpenChange ?? (() => {})}
-          trigger={
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 relative"
-              data-testid="chat-context-button"
-            >
-              <IconAt className="h-4 w-4" />
-              {props.contextCount > 0 && !isCollapsed && (
-                <span className="absolute -top-1 -right-1 h-4 min-w-4 rounded-full bg-muted-foreground/80 text-[10px] text-background flex items-center justify-center px-0.5 pointer-events-none">
-                  {props.contextCount}
-                </span>
-              )}
-            </Button>
-          }
-          sessionId={props.sessionId}
-          planContextEnabled={props.planContextEnabled}
-          contextFiles={props.contextFiles}
-          onToggleFile={props.onToggleFile ?? (() => {})}
-        />
-        {isCollapsed && (
-          <ToolbarExpandToggle isExpanded={isExpanded} onToggle={() => setIsExpanded((v) => !v)} />
-        )}
-      </div>
-
-      <div className="flex-1" />
-
-      <ToolbarRightSection
-        showCollapsed={showCollapsed}
-        rightItems={rightItems}
-        sessionId={props.sessionId}
+  if (usesCompactTaskChrome) {
+    return (
+      <MobileChatInputToolbar
         planModeEnabled={props.planModeEnabled}
+        planModeAvailable={props.planModeAvailable}
+        onPlanModeChange={props.onPlanModeChange}
+        hidePlanMode={props.hidePlanMode}
+        hideAgentControls={props.hideAgentControls}
+        hideSessionsDropdown={
+          (props.hideSessionsDropdown ?? false) || responsiveBreakpoint.isMobile
+        }
+        mcpServers={props.mcpServers}
+        sessionId={props.sessionId}
+        taskId={props.taskId}
+        taskTitle={props.taskTitle}
+        onAttachFiles={props.onAttachFiles}
+        contextPopoverOpen={props.contextPopoverOpen}
+        onContextPopoverOpenChange={props.onContextPopoverOpenChange ?? (() => {})}
+        contextCount={props.contextCount}
+        planContextEnabled={props.planContextEnabled}
+        contextFiles={props.contextFiles}
+        onToggleFile={props.onToggleFile ?? (() => {})}
         isAgentBusy={props.isAgentBusy}
         hasContent={props.hasContent ?? false}
         onImplementPlan={props.onImplementPlan}
+        onEnhancePrompt={props.onEnhancePrompt}
+        isEnhancingPrompt={props.isEnhancingPrompt}
+        isUtilityConfigured={props.isUtilityConfigured}
         isDisabled={props.isDisabled}
         submitDisabledReason={props.submitDisabledReason}
         isSending={props.isSending}
@@ -616,6 +170,9 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
         onVoiceTranscript={props.onVoiceTranscript}
         onVoiceAutoSend={props.onVoiceAutoSend}
       />
-    </div>
-  );
+    );
+  }
+
+  const { submitKey: _submitKey, ...desktopProps } = props;
+  return <DesktopChatInputToolbar {...desktopProps} submitShortcut={submitShortcut} />;
 });

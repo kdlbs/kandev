@@ -9,9 +9,23 @@ import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS } from "./pr-ci-popover";
 import type { AppState } from "@/lib/state/store";
 import type { TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
 
-const isMobileMock = vi.fn(() => false);
-vi.mock("@/hooks/use-mobile", () => ({
-  useIsMobile: () => isMobileMock(),
+const responsiveMock = vi.hoisted(() => ({
+  breakpoint: "desktop" as "mobile" | "tablet" | "compactDesktop" | "desktop",
+  isFinePointer: true,
+}));
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => ({
+    breakpoint: responsiveMock.breakpoint,
+    isMobile: responsiveMock.breakpoint === "mobile",
+    isTablet: responsiveMock.breakpoint === "tablet",
+    isDesktop:
+      responsiveMock.breakpoint === "compactDesktop" || responsiveMock.breakpoint === "desktop",
+    isCompactDesktop: responsiveMock.breakpoint === "compactDesktop",
+    isFullDesktop: responsiveMock.breakpoint === "desktop",
+    isFinePointer: responsiveMock.isFinePointer,
+    usesDesktopWorkbench:
+      responsiveMock.breakpoint === "compactDesktop" || responsiveMock.breakpoint === "desktop",
+  }),
 }));
 
 vi.mock("@/lib/api/domains/github-api", async (importOriginal) => {
@@ -95,12 +109,12 @@ function makeCIOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCI
 }
 
 beforeEach(() => {
-  isMobileMock.mockReturnValue(false);
+  responsiveMock.breakpoint = "desktop";
+  responsiveMock.isFinePointer = true;
 });
 
 afterEach(() => {
   cleanup();
-  isMobileMock.mockReset();
 });
 
 const CHIP_TESTID = "pr-status-chip";
@@ -156,7 +170,10 @@ describe("PRStatusChip", () => {
 });
 
 describe("PRStatusChip desktop branch", () => {
-  beforeEach(() => isMobileMock.mockReturnValue(false));
+  beforeEach(() => {
+    responsiveMock.breakpoint = "desktop";
+    responsiveMock.isFinePointer = true;
+  });
 
   it("renders the chip button without a Drawer", () => {
     renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
@@ -164,6 +181,18 @@ describe("PRStatusChip desktop branch", () => {
     expect(chip).toBeTruthy();
     // The chip's HoverCard popover is hover-only on desktop; clicking the
     // chip must not surface the mobile Drawer testid.
+    act(() => {
+      fireEvent.click(chip);
+    });
+    expect(document.querySelector(DRAWER_SELECTOR)).toBeNull();
+  });
+
+  it("keeps the hovercard path on fine-pointer tablets", () => {
+    responsiveMock.breakpoint = "tablet";
+    responsiveMock.isFinePointer = true;
+
+    renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
+    const chip = screen.getByTestId(CHIP_TESTID);
     act(() => {
       fireEvent.click(chip);
     });
@@ -208,7 +237,10 @@ describe("PRStatusChip desktop branch", () => {
 });
 
 describe("PRStatusChip mobile branch", () => {
-  beforeEach(() => isMobileMock.mockReturnValue(true));
+  beforeEach(() => {
+    responsiveMock.breakpoint = "mobile";
+    responsiveMock.isFinePointer = false;
+  });
 
   it("renders the chip closed and opens the drawer on click", () => {
     renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
@@ -298,6 +330,26 @@ describe("PRStatusChip mobile branch", () => {
   });
 });
 
+describe("PRStatusChip touch tablet branch", () => {
+  beforeEach(() => {
+    responsiveMock.breakpoint = "tablet";
+    responsiveMock.isFinePointer = false;
+  });
+
+  it("opens the drawer instead of the hovercard on coarse-pointer tablets", () => {
+    renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
+    expect(document.querySelector(DRAWER_SELECTOR)).toBeNull();
+
+    act(() => {
+      fireEvent.click(screen.getByTestId(CHIP_TESTID));
+    });
+
+    expect(document.querySelector(DRAWER_SELECTOR)).not.toBeNull();
+    expect(document.querySelector("[data-testid='pr-topbar-popover-inner']")).not.toBeNull();
+    expect(screen.getByTestId("pr-popover-title").textContent).toBe("#42 Test PR");
+  });
+});
+
 describe("PRStatusChip — mergeability", () => {
   it("is 'conflict' (not 'passed') for a dirty PR even with green checks + approval", () => {
     // Regression: the chip read mergeable_state-blind and showed the green
@@ -379,7 +431,10 @@ describe("PRStatusChip — mergeability", () => {
 });
 
 describe("PRStatusChip CI automation mobile parity", () => {
-  beforeEach(() => isMobileMock.mockReturnValue(true));
+  beforeEach(() => {
+    responsiveMock.breakpoint = "mobile";
+    responsiveMock.isFinePointer = false;
+  });
 
   it("renders controls and prompt editing inside the drawer", async () => {
     renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
@@ -477,7 +532,10 @@ describe("PRStatusChip — multiple PRs", () => {
   });
 
   describe("mobile drawer", () => {
-    beforeEach(() => isMobileMock.mockReturnValue(true));
+    beforeEach(() => {
+      responsiveMock.breakpoint = "mobile";
+      responsiveMock.isFinePointer = false;
+    });
 
     it("opens a drawer with the tabbed multi-PR popover", () => {
       renderWithStore(multiState(TWO_OPEN), <PRStatusChip taskId="task-1" />);

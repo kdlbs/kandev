@@ -118,7 +118,10 @@ test.describe("mobile CLI mode: passthrough composer", () => {
     const editor = composer.locator(".tiptap.ProseMirror");
     await expect(editor).toBeVisible({ timeout: 5_000 });
 
-    await testPage.getByTestId("chat-context-button").tap();
+    await composer
+      .getByTestId("mobile-chat-toolbar-left-actions")
+      .getByTestId("chat-context-button")
+      .tap();
     const searchInput = testPage.getByPlaceholder("Search files and prompts...");
     await expect(searchInput).toBeVisible({ timeout: 5_000 });
     await searchInput.fill(promptName);

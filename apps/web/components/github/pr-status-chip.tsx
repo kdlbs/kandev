@@ -34,7 +34,7 @@ import {
   isPRWaitingOnBranchProtection,
   pickDefaultPR,
 } from "@/components/github/pr-task-icon";
-import { useIsMobile } from "@/hooks/use-mobile";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type { TaskPR } from "@/lib/types/github";
 
 const HOVER_OPEN_DELAY_MS = 150;
@@ -248,8 +248,8 @@ function AutomationFlagBadges({ automation }: { automation: AutomationFlags }) {
 }
 
 function PRStatusChipInner({ pr, automation }: { pr: TaskPR; automation: AutomationFlags }) {
-  const isMobile = useIsMobile();
-  if (isMobile) return <PRStatusChipDrawer pr={pr} automation={automation} />;
+  const usesMobileDrawer = useTouchDrawer();
+  if (usesMobileDrawer) return <PRStatusChipDrawer pr={pr} automation={automation} />;
   return <PRStatusChipHoverCard pr={pr} automation={automation} />;
 }
 
@@ -305,8 +305,8 @@ function PRStatusChipMultiInner({
   prs: TaskPR[];
   automation: AutomationFlags;
 }) {
-  const isMobile = useIsMobile();
-  if (isMobile) return <PRStatusChipMultiDrawer prs={prs} automation={automation} />;
+  const usesMobileDrawer = useTouchDrawer();
+  if (usesMobileDrawer) return <PRStatusChipMultiDrawer prs={prs} automation={automation} />;
   return <PRStatusChipMultiHoverCard prs={prs} automation={automation} />;
 }
 
