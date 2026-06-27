@@ -7,21 +7,15 @@ import { removeRecentTask } from "@/lib/recent-tasks";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { toKanbanTask, type TaskLike } from "@/lib/kanban/map-task";
 import { sessionId as toSessionId } from "@/lib/types/http";
+import { mergeTaskRepositoryFields } from "@/lib/ws/handlers/task-repositories";
 
 type KanbanTask = KanbanState["tasks"][number];
 
 function mergeTaskUpdate(existing: KanbanTask | undefined, nextTask: KanbanTask): KanbanTask {
   if (!existing) return nextTask;
-  const repositoriesProvided = nextTask.repositories !== undefined;
-  const repositoryIdChanged =
-    nextTask.repositoryId !== undefined && nextTask.repositoryId !== existing.repositoryId;
   return {
     ...nextTask,
-    repositoryId: repositoriesProvided
-      ? nextTask.repositoryId
-      : (nextTask.repositoryId ?? existing.repositoryId),
-    repositories:
-      repositoriesProvided || repositoryIdChanged ? nextTask.repositories : existing.repositories,
+    ...mergeTaskRepositoryFields(existing, nextTask),
   };
 }
 

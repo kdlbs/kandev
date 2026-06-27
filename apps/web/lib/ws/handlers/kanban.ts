@@ -2,6 +2,7 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
+import { mergeTaskRepositoryFields } from "@/lib/ws/handlers/task-repositories";
 
 type KanbanTask = KanbanState["tasks"][number];
 type KanbanStep = KanbanState["steps"][number];
@@ -17,23 +18,6 @@ type KanbanUpdateTask = {
   repositories?: KanbanTask["repositories"];
   is_ephemeral?: boolean;
 };
-
-function resolveRepositories(
-  task: KanbanUpdateTask,
-  existing: KanbanTask | undefined,
-): KanbanTask["repositories"] {
-  if (task.repositories !== undefined) return task.repositories;
-  if (task.repository_id && task.repository_id !== existing?.repositoryId) return undefined;
-  return existing?.repositories;
-}
-
-function resolveRepositoryId(
-  task: KanbanUpdateTask,
-  repositories: KanbanTask["repositories"],
-  existing: KanbanTask | undefined,
-): string | undefined {
-  return task.repository_id ?? repositories?.[0]?.repository_id ?? existing?.repositoryId;
-}
 
 export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
@@ -60,7 +44,10 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
           .filter((task: KanbanUpdateTask) => !task.is_ephemeral)
           .map((task: KanbanUpdateTask) => {
             const existing = existingById.get(task.id);
-            const repositories = resolveRepositories(task, existing);
+            const repoFields = mergeTaskRepositoryFields(existing, {
+              repositoryId: task.repository_id,
+              repositories: task.repositories,
+            });
             return {
               id: task.id,
               workflowStepId: task.workflowStepId,
@@ -68,8 +55,7 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
               description: task.description,
               position: task.position ?? 0,
               state: task.state,
-              repositoryId: resolveRepositoryId(task, repositories, existing),
-              repositories,
+              ...repoFields,
               primarySessionId: existing?.primarySessionId,
               primarySessionState: existing?.primarySessionState,
             };
@@ -86,20 +72,14 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
           const existingMultiById = new Map(snapshot.tasks.map((t) => [t.id, t]));
           const multiTasks = tasks.map((t) => {
             const fallback = existingMultiById.get(t.id);
-            const repositoryId =
-              t.repositoryId === undefined ? fallback?.repositoryId : t.repositoryId;
-            const repositories =
-              t.repositories !== undefined || repositoryId !== fallback?.repositoryId
-                ? t.repositories
-                : fallback?.repositories;
+            const repoFields = mergeTaskRepositoryFields(fallback, t);
             // Fall back to the multi-snapshot's own value only when the main
             // kanban lookup returned `undefined` (task absent from kanban.tasks).
             // An explicit `null` means the primary was intentionally cleared
             // and must NOT be replaced by a stale snapshot value.
             return {
               ...t,
-              repositoryId,
-              repositories,
+              ...repoFields,
               primarySessionId:
                 t.primarySessionId === undefined ? fallback?.primarySessionId : t.primarySessionId,
               primarySessionState:
