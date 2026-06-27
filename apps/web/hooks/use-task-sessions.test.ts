@@ -77,6 +77,7 @@ describe("useTaskSessions", () => {
 
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     vi.clearAllMocks();
   });
 
@@ -114,6 +115,7 @@ describe("useTaskSessions refreshes", () => {
 
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     vi.clearAllMocks();
   });
 
@@ -189,6 +191,20 @@ describe("useTaskSessions refreshes", () => {
       session("old", "COMPLETED"),
     ]);
   });
+});
+
+describe("useTaskSessions queued refreshes", () => {
+  beforeEach(() => {
+    resetMockState();
+    setDocumentVisibility("visible");
+    apiMock.listTaskSessions.mockResolvedValue({ sessions: [session("sess-1")] });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
 
   it("waits for the follow-up forced reload when another forced reload is running", async () => {
     mockState.taskSessionsByTask.itemsByTaskId[TASK_ID] = [session("old", "RUNNING")];
@@ -232,6 +248,7 @@ describe("useTaskSessions foreground refreshes", () => {
 
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     vi.clearAllMocks();
   });
 
