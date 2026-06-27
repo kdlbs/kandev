@@ -154,6 +154,33 @@ describe("useTaskSessions refreshes", () => {
     expect(mockState.setTaskSessionsForTask).not.toHaveBeenCalled();
     expect(consoleError).toHaveBeenCalledWith("Failed to load task sessions:", error);
   });
+
+  it("resolves a queued forced reload after the deferred request finishes", async () => {
+    mockState.taskSessionsByTask.itemsByTaskId[TASK_ID] = [session("old", "RUNNING")];
+    mockState.taskSessionsByTask.loadedByTaskId[TASK_ID] = true;
+    mockState.taskSessionsByTask.loadingByTaskId[TASK_ID] = true;
+    apiMock.listTaskSessions.mockResolvedValueOnce({ sessions: [session("old", "COMPLETED")] });
+
+    const { result, rerender } = renderHook(() => useTaskSessions(TASK_ID));
+    let resolved = false;
+    const queuedReload = result.current.loadSessions(true).then(() => {
+      resolved = true;
+    });
+    await act(async () => {});
+    expect(resolved).toBe(false);
+    expect(apiMock.listTaskSessions).not.toHaveBeenCalled();
+
+    mockState.taskSessionsByTask.loadingByTaskId[TASK_ID] = false;
+    await act(async () => {
+      rerender();
+    });
+
+    await waitFor(() => expect(resolved).toBe(true));
+    await queuedReload;
+    expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, [
+      session("old", "COMPLETED"),
+    ]);
+  });
 });
 
 describe("useTaskSessions foreground refreshes", () => {

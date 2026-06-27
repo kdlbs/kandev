@@ -19,12 +19,18 @@ export function useTaskSessions(taskId: string | null) {
   const setTaskSessionsLoading = useAppStore((state) => state.setTaskSessionsLoading);
   const connectionStatus = useAppStore((state) => state.connection.status);
   const pendingForcedReloadRef = useRef(false);
+  const pendingForcedReloadWaitersRef = useRef<Array<() => void>>([]);
 
   const loadSessions = useCallback(
     async (force = false) => {
       if (!taskId) return;
       if (isLoading) {
-        if (force) pendingForcedReloadRef.current = true;
+        if (force) {
+          pendingForcedReloadRef.current = true;
+          return new Promise<void>((resolve) => {
+            pendingForcedReloadWaitersRef.current.push(resolve);
+          });
+        }
         return;
       }
       if (!force && isLoaded) return;
@@ -38,6 +44,10 @@ export function useTaskSessions(taskId: string | null) {
         if (!force) setTaskSessionsForTask(taskId, []);
       } finally {
         setTaskSessionsLoading(taskId, false);
+        if (force) {
+          const waiters = pendingForcedReloadWaitersRef.current.splice(0);
+          waiters.forEach((resolve) => resolve());
+        }
       }
     },
     [isLoaded, isLoading, setTaskSessionsForTask, setTaskSessionsLoading, taskId],
@@ -51,6 +61,8 @@ export function useTaskSessions(taskId: string | null) {
 
   useEffect(() => {
     pendingForcedReloadRef.current = false;
+    const waiters = pendingForcedReloadWaitersRef.current.splice(0);
+    waiters.forEach((resolve) => resolve());
   }, [taskId]);
 
   useEffect(() => {
