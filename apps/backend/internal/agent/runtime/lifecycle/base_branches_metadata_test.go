@@ -23,6 +23,20 @@ func TestCollectBaseBranches_MultiRepo(t *testing.T) {
 	}
 }
 
+func TestCollectBaseBranches_MultiBranchKeysUseWorktreeSubpath(t *testing.T) {
+	req := &LaunchRequest{
+		Repositories: []RepoLaunchSpec{
+			{RepoName: "kandev", BaseBranch: "main"},
+			{RepoName: "kandev", BranchSlug: "feature-x", BaseBranch: "feature/x"},
+		},
+	}
+	got := collectBaseBranches(req)
+	want := map[string]string{"kandev": "main", "kandev-feature-x": "feature/x"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("collectBaseBranches = %v, want %v", got, want)
+	}
+}
+
 // TestCollectBaseBranches_SingleRepoLegacyKey verifies the synthesized
 // single-repo path: when only top-level BaseBranch is set, it lands under the
 // empty key so the root WorkspaceTracker (repositoryName == "") finds it.

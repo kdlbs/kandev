@@ -38,8 +38,9 @@ type RepoPrepareSpec struct {
 	WorktreeBranchPrefix string
 	PullBeforeWorktree   bool
 	RepoSetupScript      string
-	// BranchSlug, when set, nests the worktree path under {RepoName}/{BranchSlug}/
-	// so two specs sharing a RepositoryID don't collide on disk.
+	// BranchSlug, when set, suffixes the worktree path as
+	// {RepoName}-{BranchSlug} so two specs sharing a RepositoryID don't collide
+	// on disk.
 	BranchSlug string
 	// BranchIdentitySlug is the stable branch key used for worktree reuse and
 	// persisted environment metadata. It may be non-empty even when BranchSlug
@@ -72,7 +73,7 @@ type EnvPrepareRequest struct {
 
 	TaskDirName string // Per-task directory name within the workspace (e.g. "task-abc123")
 	RepoName    string // Repository slug used with TaskDirName to locate checkouts
-	BranchSlug  string // Optional branch subdir for multi-branch tasks (legacy single-repo path)
+	BranchSlug  string // Optional branch directory suffix for multi-branch tasks
 	// BranchIdentitySlug is the stable branch key for worktree cache/persistence.
 	// Empty falls back to BranchSlug.
 	BranchIdentitySlug string

@@ -111,6 +111,71 @@ func TestTaskSessionNotFoundErrorsAreTyped(t *testing.T) {
 	}
 }
 
+func TestListTaskSessionWorktreesFiltersInactiveRows(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-worktrees", "session-worktrees", "turn-worktrees")
+	worktrees := []*models.TaskSessionWorktree{
+		{
+			ID:           "wt-active",
+			SessionID:    "session-worktrees",
+			WorktreeID:   "worktree-active",
+			RepositoryID: "repo-1",
+			BranchSlug:   "main",
+		},
+		{
+			ID:           "wt-status-deleted",
+			SessionID:    "session-worktrees",
+			WorktreeID:   "worktree-status-deleted",
+			RepositoryID: "repo-1",
+			BranchSlug:   "deleted-status",
+		},
+		{
+			ID:           "wt-timestamp-deleted",
+			SessionID:    "session-worktrees",
+			WorktreeID:   "worktree-timestamp-deleted",
+			RepositoryID: "repo-1",
+			BranchSlug:   "deleted-at",
+		},
+	}
+	for _, wt := range worktrees {
+		if err := repo.CreateTaskSessionWorktree(ctx, wt); err != nil {
+			t.Fatalf("CreateTaskSessionWorktree(%s): %v", wt.ID, err)
+		}
+	}
+	now := time.Now().UTC()
+	if _, err := repo.db.Exec(repo.db.Rebind(`
+		UPDATE task_session_worktrees
+		SET status = 'deleted', updated_at = ?
+		WHERE id = ?
+	`), now, "wt-status-deleted"); err != nil {
+		t.Fatalf("mark status deleted: %v", err)
+	}
+	if _, err := repo.db.Exec(repo.db.Rebind(`
+		UPDATE task_session_worktrees
+		SET deleted_at = ?, updated_at = ?
+		WHERE id = ?
+	`), now, now, "wt-timestamp-deleted"); err != nil {
+		t.Fatalf("mark timestamp deleted: %v", err)
+	}
+
+	listed, err := repo.ListTaskSessionWorktrees(ctx, "session-worktrees")
+	if err != nil {
+		t.Fatalf("ListTaskSessionWorktrees: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != "wt-active" {
+		t.Fatalf("ListTaskSessionWorktrees = %+v, want only wt-active", listed)
+	}
+	batched, err := repo.ListWorktreesBySessionIDs(ctx, []string{"session-worktrees"})
+	if err != nil {
+		t.Fatalf("ListWorktreesBySessionIDs: %v", err)
+	}
+	rows := batched["session-worktrees"]
+	if len(rows) != 1 || rows[0].ID != "wt-active" {
+		t.Fatalf("ListWorktreesBySessionIDs = %+v, want only wt-active", rows)
+	}
+}
+
 // TestGetLastAgentMessage_NoMessages verifies that a session with no messages
 // returns an empty string and sql.ErrNoRows.
 func TestGetLastAgentMessage_NoMessages(t *testing.T) {

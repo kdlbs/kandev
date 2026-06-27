@@ -376,6 +376,57 @@ func TestReuseExistingRepositoryWorktrees_LegacyEmptyBranchRowFeedsFlatBranchSpe
 	}
 }
 
+func TestReuseExistingEnvironment_SingleRepoUsesBranchScopedEnvRow(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{
+		TaskID:       "task-single-branch-row",
+		RepositoryID: "repo-kandev",
+		BaseBranch:   "feature-x",
+		UseWorktree:  true,
+	}
+	env := &models.TaskEnvironment{
+		ID:           "env-single-branch-row",
+		RepositoryID: "repo-kandev",
+		WorktreeID:   "wt-main",
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-kandev", BranchSlug: "main", WorktreeID: "wt-main"},
+			{RepositoryID: "repo-kandev", BranchSlug: "feature-x", WorktreeID: "wt-feature"},
+		},
+	}
+
+	exec.reuseExistingEnvironment(context.Background(), req, env)
+
+	if req.WorktreeID != "wt-feature" {
+		t.Fatalf("top-level WorktreeID = %q, want branch-scoped wt-feature", req.WorktreeID)
+	}
+}
+
+func TestReuseExistingEnvironment_SingleRepoDoesNotFallBackToWrongScopedEnvWorktree(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{
+		TaskID:       "task-single-no-match",
+		RepositoryID: "repo-kandev",
+		BaseBranch:   "feature-x",
+		UseWorktree:  true,
+	}
+	env := &models.TaskEnvironment{
+		ID:           "env-single-no-match",
+		RepositoryID: "repo-kandev",
+		WorktreeID:   "wt-main",
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-kandev", BranchSlug: "main", WorktreeID: "wt-main"},
+		},
+	}
+
+	exec.reuseExistingEnvironment(context.Background(), req, env)
+
+	if req.WorktreeID != "" {
+		t.Fatalf("top-level WorktreeID = %q, want no stale env-level fallback", req.WorktreeID)
+	}
+}
+
 func TestLaunchPreparedSession_MultiBranch_ReusesWorktreeIDsByBranchSlug(t *testing.T) {
 	repo := newMockRepository()
 	taskID := "task-multi-branch-reuse"
@@ -647,8 +698,10 @@ func TestMockRepositoryTaskEnvironmentRepoUpdatesAreBranchScoped(t *testing.T) {
 	if rows[0].ID == rows[1].ID {
 		t.Fatalf("branch-specific rows should have distinct IDs, both got %q", rows[0].ID)
 	}
+	featureRowID := rows[1].ID
 
 	if err := repo.UpdateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		ID:                featureRowID,
 		TaskEnvironmentID: "env-branches",
 		RepositoryID:      "repo-kandev",
 		BranchSlug:        "feature",

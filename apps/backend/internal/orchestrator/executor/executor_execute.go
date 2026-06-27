@@ -710,7 +710,8 @@ func (e *Executor) applyContainerCredentials(ctx context.Context, req *LaunchAge
 // the lifecycle layer. Used only when the task has more than one repository.
 // When the same RepositoryID appears more than once, each row gets a stable
 // BranchIdentitySlug for reuse while the lowest-position branch keeps the flat
-// layout (<task>/<repo>/). Other branches nest under <task>/<repo>/<branch-slug>/.
+// layout (<task>/<repo>/). Other branches use sibling directories like
+// <task>/<repo>-<branch-slug>/.
 // This preserves the legacy single-branch path when a task later gains another
 // branch of the same repository.
 func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {

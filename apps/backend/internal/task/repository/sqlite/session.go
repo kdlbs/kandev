@@ -1120,6 +1120,8 @@ func (r *Repository) ListTaskSessionWorktrees(ctx context.Context, sessionID str
 			tsw.worktree_path, tsw.worktree_branch, tsw.created_at
 		FROM task_session_worktrees tsw
 		WHERE tsw.session_id = ?
+		  AND tsw.deleted_at IS NULL
+		  AND tsw.status = 'active'
 		ORDER BY tsw.position ASC, tsw.created_at ASC
 	`), sessionID)
 	if err != nil {
@@ -1183,6 +1185,8 @@ func (r *Repository) appendWorktreesForSessionChunk(
 		COALESCE(tsw.branch_slug, ''), tsw.worktree_path, tsw.worktree_branch, tsw.created_at
 		FROM task_session_worktrees tsw
 		WHERE tsw.session_id IN (` + placeholders + `)
+		  AND tsw.deleted_at IS NULL
+		  AND tsw.status = 'active'
 		ORDER BY tsw.position ASC, tsw.created_at ASC`
 
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)

@@ -840,9 +840,7 @@ func (m *mockRepository) ListTaskEnvironmentRepos(_ context.Context, envID strin
 func (m *mockRepository) UpdateTaskEnvironmentRepo(_ context.Context, repo *models.TaskEnvironmentRepo) error {
 	rows := m.taskEnvironmentRepos[repo.TaskEnvironmentID]
 	for i, row := range rows {
-		if row.TaskEnvironmentID == repo.TaskEnvironmentID &&
-			row.RepositoryID == repo.RepositoryID &&
-			row.BranchSlug == repo.BranchSlug {
+		if row.ID == repo.ID {
 			rows[i] = repo
 			m.taskEnvironmentRepos[repo.TaskEnvironmentID] = rows
 			return nil
