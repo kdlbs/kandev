@@ -171,6 +171,9 @@ describe("release package manager version", () => {
     expect(dockerfile).toContain("/etc/apt/sources.list.d/azure-cli.sources");
     expect(dockerfile).not.toContain("InstallAzureCLIDeb");
     expect(dockerfile).not.toContain("        gnupg \\");
+    expect(dockerfile).toMatch(
+      /rm -f[\s\\]+\/etc\/apt\/sources\.list\.d\/nodesource\.list[\s\\]+\/etc\/apt\/sources\.list\.d\/azure-cli\.sources[\s\\]+\/usr\/share\/keyrings\/nodesource\.gpg[\s\\]+\/usr\/share\/keyrings\/microsoft\.gpg/,
+    );
     expect(dockerfile).toMatch(/\bnodejs\b/);
     expect(dockerfile).toMatch(/\bazure-cli\b/);
     if (dockerPnpmVersion !== undefined) {

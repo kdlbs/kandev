@@ -62,6 +62,11 @@ RUN apt-get update && \
         > /etc/apt/sources.list.d/azure-cli.sources && \
     apt-get update && \
     apt-get install -y --no-install-recommends nodejs azure-cli && \
+    rm -f \
+        /etc/apt/sources.list.d/nodesource.list \
+        /etc/apt/sources.list.d/azure-cli.sources \
+        /usr/share/keyrings/nodesource.gpg \
+        /usr/share/keyrings/microsoft.gpg && \
     rm -rf /var/lib/apt/lists/* && \
     PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install apprise
 
