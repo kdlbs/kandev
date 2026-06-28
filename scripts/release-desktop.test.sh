@@ -58,6 +58,24 @@ fi
 grep -q "Missing agentctl linux/amd64 helper" "$ERR_FILE" || fail "verify-desktop-runtime did not explain missing helper"
 pass "verify-desktop-runtime requires helper for linux-x64 runtime"
 
+nonexec_helper_runtime_dir="$TMP_DIR/nonexec-helper-runtime"
+write_runtime "$nonexec_helper_runtime_dir"
+chmod +x "$nonexec_helper_runtime_dir/bin/kandev" "$nonexec_helper_runtime_dir/bin/agentctl"
+if "$ROOT_DIR/scripts/release/verify-desktop-runtime.sh" --platform linux-x64 "$nonexec_helper_runtime_dir" >"$OUT_FILE" 2>"$ERR_FILE"; then
+  fail "verify-desktop-runtime should require executable helper on POSIX hosts"
+fi
+grep -q "agentctl linux/amd64 helper is not executable" "$ERR_FILE" || fail "verify-desktop-runtime did not explain non-executable helper"
+pass "verify-desktop-runtime requires executable helper on POSIX hosts"
+
+windows_runtime_dir="$TMP_DIR/windows-runtime"
+mkdir -p "$windows_runtime_dir/bin"
+printf 'stub\n' > "$windows_runtime_dir/bin/kandev.exe"
+printf 'stub\n' > "$windows_runtime_dir/bin/agentctl.exe"
+printf 'stub\n' > "$windows_runtime_dir/bin/agentctl-linux-amd64"
+OS=Windows_NT "$ROOT_DIR/scripts/release/verify-desktop-runtime.sh" --platform windows-x64 "$windows_runtime_dir" >"$OUT_FILE"
+grep -q "verified for windows-x64" "$OUT_FILE" || fail "verify-desktop-runtime did not accept Windows-host runtime"
+pass "verify-desktop-runtime accepts Windows-host helper without POSIX mode bits"
+
 linux_output_dir="$TMP_DIR/linux-output"
 "$ROOT_DIR/scripts/release/prepare-desktop-runtime.sh" \
   --bundle-dir "$runtime_dir" \

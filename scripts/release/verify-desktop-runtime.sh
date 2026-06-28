@@ -59,7 +59,12 @@ is_executable_file() {
     return 0
   fi
   # MSYS/Git Bash can report Windows executables differently from Unix mode bits.
-  [ "${OS:-}" = "Windows_NT" ] && [[ "$path" == *.exe ]]
+  if [ "${OS:-}" = "Windows_NT" ]; then
+    case "$(basename "$path")" in
+      *.exe|agentctl-linux-amd64) return 0 ;;
+    esac
+  fi
+  return 1
 }
 
 require_one() {
