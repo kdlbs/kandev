@@ -2,6 +2,12 @@
 
 All notable changes to Kandev.
 
+## 0.67.0 - 2026-06-28
+
+### Bug Fixes
+
+- unblock release desktop and universal builds ([#1522](https://github.com/kdlbs/kandev/pull/1522))
+
 ## 0.66.0 - 2026-06-28
 
 ### Features
