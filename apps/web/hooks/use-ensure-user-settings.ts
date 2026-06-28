@@ -2,20 +2,29 @@
 
 import { useEffect, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
-import { readPendingTaskCreateLastUsedState } from "@/components/task-create-dialog-handlers";
+import {
+  readPendingTaskCreateLastUsedState,
+  readSyncedTaskCreateLastUsedState,
+} from "@/components/task-create-dialog-handlers";
 import { fetchUserSettings } from "@/lib/api/domains/settings-api";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type { TaskCreateLastUsedState, UserSettingsState } from "@/lib/state/slices/settings/types";
 
-let userSettingsFetchPromise: Promise<UserSettingsState | null> | null = null;
+type LoadedUserSettings = {
+  settings: UserSettingsState;
+  startedPending: Partial<TaskCreateLastUsedState>;
+};
+
+let userSettingsFetchPromise: Promise<LoadedUserSettings | null> | null = null;
 
 function loadUserSettingsOnce() {
   if (!userSettingsFetchPromise) {
+    const startedPending = readPendingTaskCreateLastUsedState();
     userSettingsFetchPromise = fetchUserSettings({ cache: "no-store" })
       .then((response) => {
         if (!response?.settings) return null;
         const mapped = mapUserSettingsResponse(response);
-        return mapped.loaded ? mapped : null;
+        return mapped.loaded ? { settings: mapped, startedPending } : null;
       })
       .catch(() => null)
       .finally(() => {
@@ -25,11 +34,11 @@ function loadUserSettingsOnce() {
   return userSettingsFetchPromise;
 }
 
-function mergePendingTaskCreateLastUsed(settings: UserSettingsState): UserSettingsState {
-  const pending = readPendingTaskCreateLastUsedState();
-  const definedPending = Object.fromEntries(
-    Object.entries(pending).filter(([, value]) => value !== undefined),
-  ) as Partial<TaskCreateLastUsedState>;
+function mergeTaskCreateLastUsedOverlay(
+  settings: UserSettingsState,
+  pending: Partial<TaskCreateLastUsedState>,
+): UserSettingsState {
+  const definedPending = compactTaskCreateLastUsedOverlay(pending);
   if (Object.keys(definedPending).length === 0) return settings;
   return {
     ...settings,
@@ -38,6 +47,20 @@ function mergePendingTaskCreateLastUsed(settings: UserSettingsState): UserSettin
       ...definedPending,
     },
   };
+}
+
+function compactTaskCreateLastUsedOverlay(pending: Partial<TaskCreateLastUsedState>) {
+  return Object.fromEntries(
+    Object.entries(pending).filter(([, value]) => value !== undefined),
+  ) as Partial<TaskCreateLastUsedState>;
+}
+
+function mergeTaskCreateLastUsedForFetch(result: LoadedUserSettings): UserSettingsState {
+  return mergeTaskCreateLastUsedOverlay(result.settings, {
+    ...compactTaskCreateLastUsedOverlay(result.startedPending),
+    ...compactTaskCreateLastUsedOverlay(readSyncedTaskCreateLastUsedState()),
+    ...compactTaskCreateLastUsedOverlay(readPendingTaskCreateLastUsedState()),
+  });
 }
 
 export function __resetEnsureUserSettingsForTests() {
@@ -61,9 +84,9 @@ export function useEnsureUserSettings(enabled = true) {
     let cancelled = false;
     setFetchSettled(false);
     loadUserSettingsOnce()
-      .then((mapped) => {
-        if (cancelled || !mapped) return;
-        const next = mergePendingTaskCreateLastUsed(mapped);
+      .then((result) => {
+        if (cancelled || !result) return;
+        const next = mergeTaskCreateLastUsedForFetch(result);
         setUserSettings(next);
       })
       .finally(() => {

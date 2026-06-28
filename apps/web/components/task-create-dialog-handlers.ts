@@ -18,12 +18,14 @@ type TaskCreateLastUsedPatch = {
 
 let pendingLastUsed: TaskCreateLastUsedPatch = {};
 let lastUsedSync = Promise.resolve();
+let lastSyncedLastUsed: Partial<TaskCreateLastUsedState> = {};
 const PENDING_LAST_USED_SYNC_KEY = "kandev.taskCreateLastUsed.pendingSync";
 const LOCAL_STORAGE_WRITE_EVENT = "localStorage-write";
 const lastUsedDebug = createDebugLogger("task-create:last-used");
 
 export function resetTaskCreateLastUsedSync() {
   pendingLastUsed = {};
+  lastSyncedLastUsed = {};
   lastUsedDebug("pending-reset");
 }
 
@@ -55,6 +57,16 @@ function persistPendingLastUsedSync(patch: TaskCreateLastUsedPatch) {
 
 export function readPendingTaskCreateLastUsedState(): Partial<TaskCreateLastUsedState> {
   const pending = { ...readPendingLastUsedSync(), ...pendingLastUsed };
+  return mapTaskCreateLastUsedPatch(pending);
+}
+
+export function readSyncedTaskCreateLastUsedState(): Partial<TaskCreateLastUsedState> {
+  return lastSyncedLastUsed;
+}
+
+function mapTaskCreateLastUsedPatch(
+  pending: TaskCreateLastUsedPatch,
+): Partial<TaskCreateLastUsedState> {
   return {
     repositoryId: pending.repository_id,
     branch: pending.branch,
@@ -66,6 +78,7 @@ export function readPendingTaskCreateLastUsedState(): Partial<TaskCreateLastUsed
 export function syncTaskCreateLastUsed(patch: TaskCreateLastUsedPatch) {
   pendingLastUsed = { ...readPendingLastUsedSync(), ...pendingLastUsed, ...patch };
   const payload = { ...pendingLastUsed };
+  lastSyncedLastUsed = mapTaskCreateLastUsedPatch(payload);
   lastUsedDebug("sync-queued", { patch, payload });
   persistPendingLastUsedSync(payload);
   lastUsedSync = lastUsedSync

@@ -19,6 +19,12 @@ const mockReadPendingTaskCreateLastUsedState = vi.fn<[], PendingTaskCreateLastUs
   agentProfileId: undefined,
   executorProfileId: undefined,
 }));
+const mockReadSyncedTaskCreateLastUsedState = vi.fn<[], PendingTaskCreateLastUsed>(() => ({
+  repositoryId: undefined,
+  branch: undefined,
+  agentProfileId: undefined,
+  executorProfileId: undefined,
+}));
 
 type MockState = {
   userSettings: UserSettingsState;
@@ -37,6 +43,7 @@ vi.mock("@/lib/api/domains/settings-api", () => ({
 
 vi.mock("@/components/task-create-dialog-handlers", () => ({
   readPendingTaskCreateLastUsedState: () => mockReadPendingTaskCreateLastUsedState(),
+  readSyncedTaskCreateLastUsedState: () => mockReadSyncedTaskCreateLastUsedState(),
 }));
 
 import {
@@ -229,5 +236,38 @@ describe("useEnsureUserSettings", () => {
     await waitFor(() => expect(mockFetchUserSettings).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(mockSetUserSettings).toHaveBeenCalled());
     expect(mockSetUserSettings.mock.calls[0]![0].taskCreateLastUsed.repositoryId).toBe("repo-2");
+  });
+});
+
+describe("useEnsureUserSettings — stale settings fetches", () => {
+  it("keeps task-create edits made while a settings fetch is in flight", async () => {
+    let resolveFetch: (value: unknown) => void = () => undefined;
+    mockFetchUserSettings.mockReturnValue(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+
+    renderHook(() => useEnsureUserSettings(true));
+    await waitFor(() => expect(mockFetchUserSettings).toHaveBeenCalledTimes(1));
+
+    mockReadSyncedTaskCreateLastUsedState.mockReturnValue({
+      repositoryId: "repo-2",
+      branch: "feature",
+      agentProfileId: undefined,
+      executorProfileId: undefined,
+    });
+    resolveFetch(
+      userSettingsResponse({
+        repository_id: "repo-1",
+        branch: "main",
+      }),
+    );
+
+    await waitFor(() => expect(mockSetUserSettings).toHaveBeenCalled());
+    expect(mockSetUserSettings.mock.calls[0]![0].taskCreateLastUsed).toMatchObject({
+      repositoryId: "repo-2",
+      branch: "feature",
+    });
   });
 });

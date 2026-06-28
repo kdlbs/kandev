@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import {
-  shouldWaitForLastUsedExecutorProfile,
   useDefaultSelectionsEffect,
   useRepositoryAutoSelectEffect,
   useWorkflowAgentProfileEffect,
@@ -20,10 +19,17 @@ import { STORAGE_KEYS } from "@/lib/settings/constants";
 // so the rest can be undefined behind an `as` cast and never read.
 type Fake = Pick<
   DialogFormState,
-  "selectedWorkflowId" | "executorProfileId" | "setAgentProfileId" | "setWorkflowAgentProfileId"
+  | "agentProfileId"
+  | "workflowAgentProfileId"
+  | "selectedWorkflowId"
+  | "executorProfileId"
+  | "setAgentProfileId"
+  | "setWorkflowAgentProfileId"
 >;
 function makeFs(overrides: Partial<Fake> = {}): DialogFormState {
   return {
+    agentProfileId: "",
+    workflowAgentProfileId: "",
     selectedWorkflowId: null,
     executorProfileId: "profile-1",
     setAgentProfileId: vi.fn(),
@@ -556,30 +562,6 @@ describe("useDefaultSelectionsEffect — executor-aware agent restoration", () =
 });
 
 describe("useDefaultSelectionsEffect — executor profile restoration", () => {
-  it("waits while a valid last-used executor profile can restore", () => {
-    window.localStorage.removeItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID);
-    const worktreeExecutor = makeWorktreeExecutor();
-
-    expect(
-      shouldWaitForLastUsedExecutorProfile({
-        executors: [worktreeExecutor],
-        workspaceDefaults: null,
-        lastUsedExecutorProfileId: WORKTREE_PROFILE_B,
-        noRepository: false,
-        preferLocalExecutor: false,
-      }),
-    ).toBe(true);
-    expect(
-      shouldWaitForLastUsedExecutorProfile({
-        executors: [worktreeExecutor],
-        workspaceDefaults: null,
-        lastUsedExecutorProfileId: "missing-profile",
-        noRepository: false,
-        preferLocalExecutor: false,
-      }),
-    ).toBe(false);
-  });
-
   it("defers executor profile fallback until user settings have loaded or settled", async () => {
     window.localStorage.removeItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID);
     const fs = makeDefaultSelFs({ executorProfileId: "", executorId: "" });
@@ -637,7 +619,6 @@ describe("useDefaultSelectionsEffect — executor profile restoration", () => {
 
   it("does not pick a fallback executor id while a valid last-used profile is restoring", async () => {
     window.localStorage.removeItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID);
-    const fs = makeDefaultSelFs({ executorProfileId: "", executorId: "" });
     const localExecutor = makeLocalExecutor();
     const worktreeExecutor = makeWorktreeExecutor();
     const sel = makeSel({
@@ -647,10 +628,34 @@ describe("useDefaultSelectionsEffect — executor profile restoration", () => {
       userSettingsLoaded: true,
     } as Partial<StoreSelections>);
 
-    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
+    const setExecutorId = vi.fn();
+    const setExecutorProfileId = vi.fn();
+    const { rerender } = renderHook(
+      ({ formState }) => useDefaultSelectionsEffect(formState, true, sel, []),
+      {
+        initialProps: {
+          formState: makeDefaultSelFs({
+            executorProfileId: "",
+            executorId: "",
+            setExecutorId,
+            setExecutorProfileId,
+          }),
+        },
+      },
+    );
 
-    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(WORKTREE_PROFILE_B));
-    expect(fs.setExecutorId).not.toHaveBeenCalledWith(LOCAL_EXECUTOR_ID);
+    await waitFor(() => expect(setExecutorProfileId).toHaveBeenCalledWith(WORKTREE_PROFILE_B));
+    rerender({
+      formState: makeDefaultSelFs({
+        executorProfileId: WORKTREE_PROFILE_B,
+        executorId: "",
+        setExecutorId,
+        setExecutorProfileId,
+      }),
+    });
+
+    await waitFor(() => expect(setExecutorId).toHaveBeenCalledWith(WORKTREE_EXECUTOR_ID));
+    expect(setExecutorId).not.toHaveBeenCalledWith(LOCAL_EXECUTOR_ID);
   });
 });
 

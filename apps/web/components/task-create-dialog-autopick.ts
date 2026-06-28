@@ -144,8 +144,14 @@ export function useWorkflowAgentProfileEffect(
   options: { lastUsedAgentProfileId?: string | null; authLoaded?: boolean } = {},
 ) {
   const { lastUsedAgentProfileId, authLoaded = true } = options;
-  const { selectedWorkflowId, executorProfileId, setAgentProfileId, setWorkflowAgentProfileId } =
-    fs;
+  const {
+    agentProfileId,
+    workflowAgentProfileId,
+    selectedWorkflowId,
+    executorProfileId,
+    setAgentProfileId,
+    setWorkflowAgentProfileId,
+  } = fs;
   useEffect(() => {
     if (!selectedWorkflowId) {
       setWorkflowAgentProfileId("");
@@ -173,6 +179,13 @@ export function useWorkflowAgentProfileEffect(
       }
     } else {
       setWorkflowAgentProfileId("");
+      if (agentProfileId && !workflowAgentProfileId) {
+        workflowAutopickDebug("workflow-no-override-skip", {
+          reason: "already-set",
+          current: agentProfileId,
+        });
+        return;
+      }
       if (!executorProfileId) {
         setAgentProfileId("");
         workflowAutopickDebug("workflow-no-override-defer", {
@@ -206,6 +219,8 @@ export function useWorkflowAgentProfileEffect(
     }
   }, [
     selectedWorkflowId,
+    agentProfileId,
+    workflowAgentProfileId,
     executorProfileId,
     workflows,
     agentProfiles,
