@@ -50,6 +50,19 @@ describe("useSidebarMultiSelect", () => {
     expect(result.current.selectedIds.size).toBe(0);
   });
 
+  it("pruneToVisible drops selected ids that are no longer visible", () => {
+    const { result } = renderHook(() => useSidebarMultiSelect("ws1"));
+    act(() => result.current.toggleSelect("a"));
+    act(() => result.current.toggleSelect("b"));
+
+    act(() => result.current.pruneToVisible(["a"]));
+    expect(result.current.selectedIds).toEqual(new Set(["a"]));
+
+    // No-op when everything is still visible.
+    act(() => result.current.pruneToVisible(["a", "b"]));
+    expect(result.current.selectedIds).toEqual(new Set(["a"]));
+  });
+
   it("resets the selection when the workspace changes", () => {
     const { result, rerender } = renderHook(({ ws }) => useSidebarMultiSelect(ws), {
       initialProps: { ws: "ws1" },

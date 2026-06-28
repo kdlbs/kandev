@@ -50,6 +50,18 @@ export function useSidebarMultiSelect(workspaceId: string | null) {
 
   const clearSelection = useCallback(() => dispatch({ type: "set_selected", ids: new Set() }), []);
 
+  // Drop any selected ids that are no longer visible (collapsed group / filtered
+  // out) so `isSelecting` doesn't stay latched on hidden rows. No-ops (and avoids
+  // a render loop) when every selected id is still visible.
+  const pruneToVisible = useCallback(
+    (visibleIds: string[]) => {
+      const visible = new Set(visibleIds);
+      const next = new Set([...selectedIds].filter((id) => visible.has(id)));
+      if (next.size !== selectedIds.size) dispatch({ type: "set_selected", ids: next });
+    },
+    [selectedIds],
+  );
+
   const bulkArchive = useCallback(
     async (ids: string[], opts?: { cascade?: boolean }) => {
       if (ids.length === 0) return;
@@ -111,6 +123,7 @@ export function useSidebarMultiSelect(workspaceId: string | null) {
     toggleSelect,
     selectRange,
     clearSelection,
+    pruneToVisible,
     bulkArchive,
     bulkMove,
   };

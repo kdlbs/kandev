@@ -33,6 +33,7 @@ export function useSidebarSelection({
     clearSelection,
     selectRange,
     toggleSelect,
+    pruneToVisible,
     bulkArchive,
     bulkMove,
   } = multiSelect;
@@ -83,6 +84,12 @@ export function useSidebarSelection({
     return () => window.removeEventListener("keydown", onKey);
   }, [isSelecting, clearSelection]);
 
+  // Prune selections that scroll out of view (collapsed group / filter change)
+  // so plain clicks on visible rows stop behaving as selection-mode.
+  useEffect(() => {
+    pruneToVisible(visibleTaskIds);
+  }, [visibleTaskIds, pruneToVisible]);
+
   // Stable ref so TaskSwitcher's React.memo isn't defeated by a fresh closure
   // on every unrelated sidebar re-render.
   const onSelectTaskRange = useCallback(
@@ -90,12 +97,23 @@ export function useSidebarSelection({
     [selectRange, visibleTaskIds],
   );
 
+  // Bulk move in the rendered top-to-bottom order so a backward range selection
+  // (anchor after target) doesn't land scrambled at the destination.
+  const onBulkMove = useCallback(
+    (ids: string[], targetWorkflowId: string, targetStepId: string) => {
+      const order = new Map(visibleTaskIds.map((id, i) => [id, i]));
+      const sorted = [...ids].sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+      return bulkMove(sorted, targetWorkflowId, targetStepId);
+    },
+    [bulkMove, visibleTaskIds],
+  );
+
   const switcherProps = {
     selectedTaskIds: selectedIds,
     onToggleSelectTask: toggleSelect,
     onSelectTaskRange,
     onBulkArchive: handleBulkArchive,
-    onBulkMove: bulkMove,
+    onBulkMove,
     onClearSelection: clearSelection,
     isMixedWorkflowSelection,
   };
