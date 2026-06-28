@@ -66,6 +66,7 @@ type ContextMenuProps = {
   selectedTaskIds?: Set<string>;
   onBulkArchive?: (taskIds: string[]) => void;
   onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
+  onClearSelection?: () => void;
   /** True when the selection spans more than one workflow (disables bulk "Move to step"). */
   isMixedWorkflowSelection?: boolean;
 };
@@ -88,6 +89,7 @@ export function TaskItemWithContextMenu({
   selectedTaskIds,
   onBulkArchive,
   onBulkMove,
+  onClearSelection,
   isMixedWorkflowSelection,
 }: ContextMenuProps) {
   const [contextOpen, setContextOpen] = useState(false);
@@ -122,6 +124,7 @@ export function TaskItemWithContextMenu({
           selectedTaskIds={selectedTaskIds}
           onBulkArchive={onBulkArchive}
           onBulkMove={onBulkMove}
+          onClearSelection={onClearSelection}
           isMixedWorkflowSelection={isMixedWorkflowSelection}
           closeMenu={closeMenu}
           moveTasks={moveTasks}
@@ -153,6 +156,7 @@ function TaskContextMenuItems({
   selectedTaskIds,
   onBulkArchive,
   onBulkMove,
+  onClearSelection,
   isMixedWorkflowSelection,
   closeMenu,
   moveTasks,
@@ -162,6 +166,15 @@ function TaskContextMenuItems({
   // a non-selected row acts on just that task and leaves the selection intact.
   const actingOnSelection = !!selectedTaskIds?.has(task.id);
   const actingIds = actingOnSelection ? [...selectedTaskIds!] : [task.id];
+  // Delete has no bulk variant here, but deleting a selected row must drop it
+  // from the selection so later plain clicks navigate instead of toggling.
+  const onDelete =
+    actingOnSelection && onClearSelection
+      ? (id: string) => {
+          onClearSelection();
+          onDeleteTask?.(id);
+        }
+      : onDeleteTask;
   return (
     <>
       <TaskPinItem
@@ -203,7 +216,7 @@ function TaskContextMenuItems({
         closeMenu={closeMenu}
         moveTasks={moveTasks}
       />
-      <TaskDeleteItem taskId={task.id} isDeleting={isDeleting} onDeleteTask={onDeleteTask} />
+      <TaskDeleteItem taskId={task.id} isDeleting={isDeleting} onDeleteTask={onDelete} />
     </>
   );
 }

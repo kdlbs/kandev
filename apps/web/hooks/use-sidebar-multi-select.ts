@@ -94,8 +94,11 @@ export function useSidebarMultiSelect(workspaceId: string | null) {
       if (ids.length === 0) return;
       try {
         await moveTasks(ids, targetWorkflowId, targetStepId);
-      } finally {
         clearSelection();
+      } catch {
+        // useTaskWorkflowMove already toasts the failure; keep the rows selected
+        // for retry and swallow the rejection so it isn't unhandled at the
+        // fire-and-forget call site.
       }
     },
     [moveTasks, clearSelection],

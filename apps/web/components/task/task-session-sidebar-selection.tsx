@@ -96,6 +96,7 @@ export function useSidebarSelection({
     onSelectTaskRange,
     onBulkArchive: handleBulkArchive,
     onBulkMove: bulkMove,
+    onClearSelection: clearSelection,
     isMixedWorkflowSelection,
   };
 

@@ -210,8 +210,9 @@ function realignAnchor(state: MultiSelectState, ids: Set<string>): string | null
 /**
  * Union-select every id from the anchor to `taskId` (inclusive) within
  * `orderedIds`. When there is no valid anchor in `orderedIds` (first shift
- * click, or anchor lives in a different column), fall back to selecting just
- * `taskId` and making it the new anchor.
+ * click, or anchor lives in a different column), fall back to union-selecting
+ * just `taskId` — the previous selection is preserved — and make it the new
+ * anchor.
  */
 function applyRangeSelect(
   state: MultiSelectState,

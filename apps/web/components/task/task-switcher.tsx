@@ -76,6 +76,7 @@ type TaskSwitcherProps = {
   onSelectTaskRange?: (taskId: string) => void;
   onBulkArchive?: (taskIds: string[]) => void;
   onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
+  onClearSelection?: () => void;
   isMixedWorkflowSelection?: boolean;
 };
 
@@ -192,6 +193,7 @@ type TaskRowProps = {
   onSelectTaskRange?: (taskId: string) => void;
   onBulkArchive?: (taskIds: string[]) => void;
   onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
+  onClearSelection?: () => void;
   isMixedWorkflowSelection?: boolean;
 };
 
@@ -219,6 +221,7 @@ function TaskRow({
   onSelectTaskRange,
   onBulkArchive,
   onBulkMove,
+  onClearSelection,
   isMixedWorkflowSelection,
 }: TaskRowProps) {
   const isSelected = task.id === selectedTaskId || task.id === activeTaskId;
@@ -243,6 +246,7 @@ function TaskRow({
       selectedTaskIds={selectedTaskIds}
       onBulkArchive={onBulkArchive}
       onBulkMove={onBulkMove}
+      onClearSelection={onClearSelection}
       isMixedWorkflowSelection={isMixedWorkflowSelection}
     >
       <TaskItem
@@ -418,6 +422,7 @@ type GroupSectionProps = {
   onSelectTaskRange?: (taskId: string) => void;
   onBulkArchive?: (taskIds: string[]) => void;
   onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
+  onClearSelection?: () => void;
   isMixedWorkflowSelection?: boolean;
 };
 
@@ -450,6 +455,7 @@ function GroupSection({
   onSelectTaskRange,
   onBulkArchive,
   onBulkMove,
+  onClearSelection,
   isMixedWorkflowSelection,
 }: GroupSectionProps) {
   const totalCount = countGroupTasks(group.tasks, subTasksByParentId);
@@ -477,6 +483,7 @@ function GroupSection({
       onSelectTaskRange,
       onBulkArchive,
       onBulkMove,
+      onClearSelection,
       isMixedWorkflowSelection,
     },
     onReorderGroup,
@@ -530,6 +537,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   onSelectTaskRange,
   onBulkArchive,
   onBulkMove,
+  onClearSelection,
   isMixedWorkflowSelection,
 }: TaskSwitcherProps) {
   const pinnedSet = useMemo(() => new Set(pinnedTaskIds ?? []), [pinnedTaskIds]);
@@ -577,6 +585,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
           onSelectTaskRange={onSelectTaskRange}
           onBulkArchive={onBulkArchive}
           onBulkMove={onBulkMove}
+          onClearSelection={onClearSelection}
           isMixedWorkflowSelection={isMixedWorkflowSelection}
         />
       ))}
