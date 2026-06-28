@@ -173,6 +173,7 @@ export function useWorkflowAgentProfileEffect(
     } else {
       setWorkflowAgentProfileId("");
       if (!executorProfileId) {
+        setAgentProfileId("");
         workflowAutopickDebug("workflow-no-override-defer", {
           reason: "executor-not-selected",
         });

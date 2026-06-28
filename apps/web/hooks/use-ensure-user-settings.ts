@@ -5,14 +5,12 @@ import { useAppStore } from "@/components/state-provider";
 import { readPendingTaskCreateLastUsedState } from "@/components/task-create-dialog-handlers";
 import { fetchUserSettings } from "@/lib/api/domains/settings-api";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
-import type { UserSettingsState } from "@/lib/state/slices/settings/types";
+import type { TaskCreateLastUsedState, UserSettingsState } from "@/lib/state/slices/settings/types";
 
 let userSettingsFetchPromise: Promise<UserSettingsState | null> | null = null;
-let userSettingsLoadAttempted = false;
 
 function loadUserSettingsOnce() {
   if (!userSettingsFetchPromise) {
-    userSettingsLoadAttempted = true;
     userSettingsFetchPromise = fetchUserSettings({ cache: "no-store" })
       .then((response) => {
         if (!response?.settings) return null;
@@ -29,14 +27,21 @@ function loadUserSettingsOnce() {
 
 function mergePendingTaskCreateLastUsed(settings: UserSettingsState): UserSettingsState {
   const pending = readPendingTaskCreateLastUsedState();
-  if (Object.values(pending).every((value) => value === undefined)) return settings;
+  const definedPending = Object.fromEntries(
+    Object.entries(pending).filter(([, value]) => value !== undefined),
+  ) as Partial<TaskCreateLastUsedState>;
+  if (Object.keys(definedPending).length === 0) return settings;
   return {
     ...settings,
     taskCreateLastUsed: {
       ...settings.taskCreateLastUsed,
-      ...pending,
+      ...definedPending,
     },
   };
+}
+
+export function __resetEnsureUserSettingsForTests() {
+  userSettingsFetchPromise = null;
 }
 
 export function useEnsureUserSettings(
@@ -56,11 +61,6 @@ export function useEnsureUserSettings(
       setFetchSettled(true);
       return;
     }
-    if (userSettingsLoadAttempted && !userSettingsFetchPromise) {
-      setFetchSettled(true);
-      return;
-    }
-
     let cancelled = false;
     setFetchSettled(false);
     loadUserSettingsOnce()

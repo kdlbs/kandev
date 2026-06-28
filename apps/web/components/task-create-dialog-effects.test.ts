@@ -277,7 +277,7 @@ describe("useWorkflowAgentProfileEffect", () => {
 });
 
 describe("useWorkflowAgentProfileEffect — settings fallback readiness", () => {
-  it("defers workflow last-used restore until executor compatibility is ready", async () => {
+  it("clears stale workflow agents before deferring last-used restore", async () => {
     const claude = makeProfile("claude");
     const cursor = makeProfile("cursor");
     const workflows = [{ id: "wf-1" /* no agent_profile_id */ }];
@@ -290,7 +290,8 @@ describe("useWorkflowAgentProfileEffect — settings fallback readiness", () => 
     );
 
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(fsBefore.setAgentProfileId).not.toHaveBeenCalled();
+    expect(fsBefore.setAgentProfileId).toHaveBeenCalledWith("");
+    expect(fsBefore.setAgentProfileId).not.toHaveBeenCalledWith(claude.id);
 
     const fsAfter = makeFs({ selectedWorkflowId: "wf-1", executorProfileId: "profile-1" });
     rerender({ fs: fsAfter, compatible: [cursor] });
