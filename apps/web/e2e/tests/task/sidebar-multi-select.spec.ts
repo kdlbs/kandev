@@ -29,7 +29,8 @@ async function seedTasks(
 async function sidebarOrder(page: Page): Promise<string[]> {
   return page
     .getByTestId("task-sidebar")
-    .locator("[data-testid='sidebar-task-item']")
+    .first()
+    .locator("[data-testid='sortable-task-block']")
     .evaluateAll((els: Element[]) => els.map((e) => e.getAttribute("data-task-id") ?? ""));
 }
 

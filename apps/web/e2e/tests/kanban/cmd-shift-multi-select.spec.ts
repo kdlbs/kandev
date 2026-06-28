@@ -9,10 +9,15 @@ import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 
+// Scope DOM reads to the active board so a hidden/stale mounted layout can't
+// satisfy these selectors (dock/mobile layouts can coexist in the DOM).
+function activeColumn(page: Page, stepId: string) {
+  return page.getByTestId("kanban-board").getByTestId(`kanban-column-${stepId}`);
+}
+
 /** Rendered (display-order) task ids inside a column. */
 async function columnTaskIds(page: Page, stepId: string): Promise<string[]> {
-  return page
-    .getByTestId(`kanban-column-${stepId}`)
+  return activeColumn(page, stepId)
     .locator("[data-testid^='task-card-']:not([data-testid='task-card-title'])")
     .evaluateAll((els: Element[]) =>
       els.map((e) => (e.getAttribute("data-testid") ?? "").replace("task-card-", "")),
@@ -21,8 +26,7 @@ async function columnTaskIds(page: Page, stepId: string): Promise<string[]> {
 
 /** Task ids of the selected (primary-ring) cards in a column. */
 async function columnSelectedIds(page: Page, stepId: string): Promise<string[]> {
-  return page
-    .getByTestId(`kanban-column-${stepId}`)
+  return activeColumn(page, stepId)
     .locator("[data-testid^='task-card-']:not([data-testid='task-card-title'])")
     .evaluateAll((els: Element[]) =>
       els
@@ -134,7 +138,8 @@ test.describe("Kanban cmd/shift multi-select", () => {
     await expect(kanban.taskCard(b1.id)).toBeVisible({ timeout: 10_000 });
 
     // Anchor in column A, shift-click into column B. The anchor isn't in B's
-    // column order, so it falls back to selecting just the clicked card.
+    // column order, so the range falls back to union-with-previous and re-anchors
+    // to the clicked card — A stays selected, B is added, A's column isn't spanned.
     await kanban.cmdClickCard(a1.id);
     await kanban.shiftClickCard(b1.id);
 
@@ -176,15 +181,21 @@ test.describe("Kanban cmd/shift multi-select", () => {
     apiClient,
     seedData,
   }) => {
-    await apiClient.createTask(seedData.workspaceId, "Toggle Coexist", {
+    const task = await apiClient.createTask(seedData.workspaceId, "Toggle Coexist", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
     });
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await expect(kanban.taskCardByTitle("Toggle Coexist")).toBeVisible({ timeout: 10_000 });
+    await expect(kanban.taskCard(task.id)).toBeVisible({ timeout: 10_000 });
 
+    // Enter multi-select via the toggle button, then a Cmd-click must still
+    // select a card (the two entry paths coexist).
     await kanban.multiSelectToggle.first().click();
     await expect(testPage.locator('[data-multi-select-active="true"]').first()).toBeVisible();
+
+    await kanban.cmdClickCard(task.id);
+    await kanban.expectCardSelected(task.id, true);
+    await expect(kanban.multiSelectToolbar).toContainText("1 selected");
   });
 });

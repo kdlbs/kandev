@@ -8,11 +8,18 @@ export class SidebarTasksPage {
   readonly root: Locator;
 
   constructor(private readonly page: Page) {
-    this.root = page.getByTestId("task-sidebar");
+    // Anchor to a single active sidebar — dock/mobile layouts can mount more
+    // than one `task-sidebar` and a stale one must not satisfy these reads.
+    this.root = page.getByTestId("task-sidebar").first();
   }
 
   row(taskId: string): Locator {
-    return this.root.locator(`[data-testid='sidebar-task-item'][data-task-id='${taskId}']`);
+    // The per-task id lives on the sortable-task-block wrapper; the selection
+    // state (data-multiselected) lives on the sidebar-task-item row inside it.
+    return this.root
+      .locator(`[data-testid='sortable-task-block'][data-task-id='${taskId}']`)
+      .getByTestId("sidebar-task-item")
+      .first();
   }
 
   rows(): Locator {
