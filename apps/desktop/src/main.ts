@@ -24,6 +24,7 @@ const applyStatus = (status: DesktopStatus) => {
   if (detail) {
     detail.textContent = status.detail;
   }
+  shell?.setAttribute("aria-busy", status.failed === true ? "false" : "true");
   shell?.classList.toggle("is-failed", status.failed === true);
 };
 

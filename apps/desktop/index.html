@@ -3,13 +3,68 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <title>Kandev</title>
+    <style>
+      html,
+      body {
+        background: #f5f7f6;
+      }
+
+      body {
+        margin: 0;
+      }
+
+      .startup-shell {
+        align-items: center;
+        display: flex;
+        justify-content: center;
+        min-height: 100vh;
+      }
+
+      .status-spinner {
+        animation: startup-spin 960ms linear infinite;
+        border: 4px solid #d8dfdc;
+        border-radius: 999px;
+        border-top-color: #16875f;
+        height: 52px;
+        width: 52px;
+      }
+
+      .startup-copy {
+        display: none;
+      }
+
+      @keyframes startup-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @media (prefers-color-scheme: dark) {
+        html,
+        body {
+          background: #0f1413;
+        }
+
+        .status-spinner {
+          border-color: #27322e;
+          border-top-color: #2aa876;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .status-spinner {
+          animation: none;
+        }
+      }
+    </style>
     <script type="module" src="/src/main.ts"></script>
   </head>
   <body>
-    <main class="startup-shell" aria-live="polite">
+    <main class="startup-shell" aria-busy="true" aria-live="polite" aria-label="Kandev is starting">
       <section class="startup-panel">
-        <div class="status-mark" aria-hidden="true"></div>
+        <div class="status-spinner" aria-hidden="true"></div>
         <div class="startup-copy">
           <p class="eyebrow">Kandev</p>
           <h1 id="status-title">Starting backend</h1>

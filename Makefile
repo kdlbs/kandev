@@ -5,6 +5,8 @@
 BACKEND_DIR := apps/backend
 WEB_DIR := apps/web
 APPS_DIR := apps
+DESKTOP_DIR := apps/desktop
+DESKTOP_RUNTIME_DIR := $(DESKTOP_DIR)/src-tauri/resources/kandev
 EMBEDDED_WEB_DIR := $(BACKEND_DIR)/internal/webapp/embedded/generated
 
 # Tools
@@ -40,6 +42,7 @@ SERVICE_PORT_FLAG := $(if $(PORT),--port $(PORT),)
 SERVICE_HOME_DIR_FLAG := $(if $(HOME_DIR),--home-dir "$(HOME_DIR)",)
 SERVICE_NO_BOOT_START_FLAG := $(if $(filter 1 true yes,$(NO_BOOT_START)),--no-boot-start,)
 SERVICE_INSTALL_FLAGS := $(SERVICE_PORT_FLAG) $(SERVICE_HOME_DIR_FLAG) $(SERVICE_NO_BOOT_START_FLAG)
+DESKTOP_BUNDLES ?= dmg
 
 # Phase headers
 define phase
@@ -69,6 +72,7 @@ help:
 	@echo "  dev-prod-db      Run dev mode against the production db at ~/.kandev"
 	@echo "  dev-backend      Run backend in development mode (port 38429)"
 	@echo "  dev-web          Run web app in development mode (port 37429)"
+	@echo "  desktop-dev      Run macOS Tauri app in dev mode with bundled runtime"
 	@echo "  dev              Note: Uses local development launcher (auto ports)"
 	@echo "  doctor           Idempotently wire up pre-commit hooks (runs automatically before dev)"
 	@echo ""
@@ -95,6 +99,10 @@ help:
 	@echo "  build            Build backend and web app"
 	@echo "  build-backend    Build backend binary"
 	@echo "  build-web        Build web app for production"
+	@echo "  desktop-runtime  Build/copy runtime resources for the macOS desktop app"
+	@echo "  desktop-build    Build the macOS Tauri app bundle/DMG"
+	@echo "  desktop-open     Build and open the macOS app"
+	@echo "  desktop-launch   Alias for desktop-open"
 	@echo ""
 	@echo "Installation:"
 	@echo "  install          Install all dependencies (backend + web)"
@@ -189,6 +197,44 @@ dev-backend:
 dev-web:
 	@echo "Starting web app on http://localhost:37429"
 	@cd $(APPS_DIR) && PORT=37429 $(PNPM) --filter @kandev/web dev
+
+.PHONY: desktop-runtime
+desktop-runtime:
+	@test "$$(uname -s)" = "Darwin" || { echo "desktop-* targets require macOS."; exit 1; }
+	@$(MAKE) -s service-bundle
+	@platform="$(DESKTOP_PLATFORM)"; \
+	if [ -z "$$platform" ]; then \
+		case "$$(uname -m)" in \
+			arm64|aarch64) platform="macos-arm64" ;; \
+			x86_64|amd64) platform="macos-x64" ;; \
+			*) echo "Unsupported macOS architecture: $$(uname -m)" >&2; exit 1 ;; \
+		esac; \
+	fi; \
+	scripts/release/prepare-desktop-runtime.sh \
+		--bundle-dir "$(SERVICE_BUNDLE_DIR)" \
+		--platform "$$platform" \
+		--output-dir "$(DESKTOP_RUNTIME_DIR)"
+
+.PHONY: desktop-dev
+desktop-dev: desktop-runtime
+	@KANDEV_DESKTOP_RUNTIME_DIR="$(CURDIR)/$(DESKTOP_RUNTIME_DIR)" \
+		$(PNPM) -C $(APPS_DIR) --filter @kandev/desktop dev
+
+.PHONY: desktop-build
+desktop-build: desktop-runtime
+	@cd $(DESKTOP_DIR) && $(PNPM) tauri build --features desktop-runtime --bundles "$(DESKTOP_BUNDLES)"
+
+.PHONY: desktop-open
+desktop-open: desktop-build
+	@app_path="$$(find "$(DESKTOP_DIR)/src-tauri/target" -path '*/release/bundle/macos/Kandev.app' -print -quit)"; \
+	if [ -z "$$app_path" ]; then \
+		echo "Missing built app under $(DESKTOP_DIR)/src-tauri/target"; \
+		exit 1; \
+	fi; \
+	open "$$app_path"
+
+.PHONY: desktop-launch
+desktop-launch: desktop-open
 
 #
 # Build
