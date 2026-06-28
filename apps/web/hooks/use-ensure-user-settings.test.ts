@@ -163,7 +163,7 @@ describe("useEnsureUserSettings", () => {
       }),
     );
 
-    renderHook(() => useEnsureUserSettings(true, { preserveTaskCreatePending: true }));
+    renderHook(() => useEnsureUserSettings(true));
 
     await waitFor(() => expect(mockSetUserSettings).toHaveBeenCalled());
     expect(mockSetUserSettings.mock.calls[0]![0].taskCreateLastUsed).toEqual({
@@ -171,6 +171,38 @@ describe("useEnsureUserSettings", () => {
       branch: "main",
       agentProfileId: "agent-2",
       executorProfileId: "exec-profile-1",
+    });
+  });
+
+  it("preserves pending task-create fields when multiple callers join the same fetch", async () => {
+    let resolveFetch: (value: unknown) => void = () => undefined;
+    mockReadPendingTaskCreateLastUsedState.mockReturnValue({
+      repositoryId: undefined,
+      branch: "feature",
+      agentProfileId: undefined,
+      executorProfileId: undefined,
+    });
+    mockFetchUserSettings.mockReturnValue(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+
+    renderHook(() => useEnsureUserSettings(true));
+    renderHook(() => useEnsureUserSettings(true));
+    resolveFetch(
+      userSettingsResponse({
+        repository_id: "repo-1",
+        branch: "main",
+        agent_profile_id: "agent-1",
+      }),
+    );
+
+    await waitFor(() => expect(mockSetUserSettings).toHaveBeenCalledTimes(2));
+    expect(mockSetUserSettings.mock.calls.at(-1)![0].taskCreateLastUsed).toMatchObject({
+      repositoryId: "repo-1",
+      branch: "feature",
+      agentProfileId: "agent-1",
     });
   });
 

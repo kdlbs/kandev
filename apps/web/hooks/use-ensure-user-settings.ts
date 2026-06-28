@@ -44,10 +44,7 @@ export function __resetEnsureUserSettingsForTests() {
   userSettingsFetchPromise = null;
 }
 
-export function useEnsureUserSettings(
-  enabled = true,
-  options: { preserveTaskCreatePending?: boolean } = {},
-) {
+export function useEnsureUserSettings(enabled = true) {
   const userSettings = useAppStore((state) => state.userSettings);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const [fetchSettled, setFetchSettled] = useState(false);
@@ -66,9 +63,7 @@ export function useEnsureUserSettings(
     loadUserSettingsOnce()
       .then((mapped) => {
         if (cancelled || !mapped) return;
-        const next = options.preserveTaskCreatePending
-          ? mergePendingTaskCreateLastUsed(mapped)
-          : mapped;
+        const next = mergePendingTaskCreateLastUsed(mapped);
         setUserSettings(next);
       })
       .finally(() => {
@@ -78,7 +73,7 @@ export function useEnsureUserSettings(
     return () => {
       cancelled = true;
     };
-  }, [enabled, options.preserveTaskCreatePending, setUserSettings, userSettings.loaded]);
+  }, [enabled, setUserSettings, userSettings.loaded]);
 
   return {
     loaded: userSettings.loaded || fetchSettled,

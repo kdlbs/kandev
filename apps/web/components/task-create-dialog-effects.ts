@@ -21,6 +21,7 @@ import {
   useAgentProfileAutopickEffect,
   useWorkflowAgentProfileEffect,
 } from "@/components/task-create-dialog-autopick";
+import { useMultiRepoGuardEffect } from "@/components/task-create-dialog-multi-repo-guard";
 import { useRepositoryAutoSelectEffect } from "@/components/task-create-dialog-repository-autopick";
 import { computeSelectedRepoCount } from "@/components/task-create-dialog-computed";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
@@ -322,38 +323,6 @@ function logExecutorProfileAutopick(
   });
 }
 
-function useMultiRepoGuardEffect(
-  open: boolean,
-  executorProfileId: string,
-  setExecutorProfileId: (id: string) => void,
-  executors: Executor[],
-  selectedRepoCount: number,
-) {
-  // Multi-repo guard: when 2+ repos are selected, only worktree profiles can
-  // run the task (Docker / Sprites / standalone don't yet provision sibling
-  // repos under one task root). If the current profile is non-worktree, swap
-  // to a worktree profile — preferring the last-used worktree, otherwise the
-  // first one available. Single-repo selections leave the profile alone.
-  useEffect(() => {
-    if (!open || !executorProfileId || executors.length === 0) return;
-    if (selectedRepoCount <= 1) return;
-    const profileToType = new Map<string, string | undefined>();
-    const worktreeProfileIds: string[] = [];
-    for (const e of executors) {
-      for (const p of e.profiles ?? []) {
-        const type = p.executor_type ?? e.type;
-        profileToType.set(p.id, type);
-        if (type === "worktree") worktreeProfileIds.push(p.id);
-      }
-    }
-    if (worktreeProfileIds.length === 0) return;
-    if (profileToType.get(executorProfileId) === "worktree") return;
-    const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, null);
-    const pick = lastId && worktreeProfileIds.includes(lastId) ? lastId : worktreeProfileIds[0];
-    void Promise.resolve().then(() => setExecutorProfileId(pick));
-  }, [open, executorProfileId, executors, selectedRepoCount, setExecutorProfileId]);
-}
-
 function useExecutorIdAutopickEffect({
   open,
   executorId,
@@ -382,6 +351,9 @@ function useExecutorIdAutopickEffect({
       }
       return;
     }
+    if (shouldWaitForLastUsedExecutorProfile(context)) {
+      return;
+    }
     const pick = pickDefaultExecutorId(
       executors,
       workspaceDefaults,
@@ -398,6 +370,27 @@ function useExecutorIdAutopickEffect({
         prefer_local_executor: preferLocalExecutor,
       });
     }
+
+    function shouldWaitForLastUsedExecutorProfile(context: ExecutorAutopickContext) {
+      const { executors, workspaceDefaults, noRepository, preferLocalExecutor } = context;
+      const lastUsedProfile = getExecutorProfileLastUsedState(
+        context,
+        context.lastUsedExecutorProfileId ?? null,
+      );
+      if (!lastUsedProfile.localStorageValid && !lastUsedProfile.settingsValid) return false;
+      if (isDebug()) {
+        selectionDebug("executor-autopick", {
+          current: "-",
+          pick: "-",
+          executor_count: executors.length,
+          workspace_default: workspaceDefaults?.default_executor_id ?? "-",
+          no_repository: noRepository,
+          prefer_local_executor: preferLocalExecutor,
+          source: "executor-profile-last-used",
+        });
+      }
+      return true;
+    }
     if (pick) void Promise.resolve().then(() => setExecutorId(pick));
   }, [
     open,
@@ -408,6 +401,7 @@ function useExecutorIdAutopickEffect({
     noRepository,
     preferLocalExecutor,
     context.userSettingsLoaded,
+    context.lastUsedExecutorProfileId,
   ]);
 }
 
@@ -526,14 +520,6 @@ export function useDefaultSelectionsEffect(
     }
   }, [executorProfileId, executors, setExecutorId]);
 
-  // Count is mode-aware: Remote mode counts non-empty URL rows, workspace
-  // mode counts rows with a repo/path. Without this, 2 Remote rows + 0
-  // workspace rows would slip past the guard because the legacy check only
-  // inspected `fs.repositories` — `computeSelectedRepoCount` handles both.
-  // Depend on the count primitive, not the whole `fs` object. `fs` is a fresh
-  // literal every render, so listing it in the dep array would re-run this
-  // effect on every render. computeSelectedRepoCount only reads noRepository /
-  // useRemote / remoteRepos / repositories, so memoize over exactly those.
   const selectedRepoCount = useMemo(
     () =>
       computeSelectedRepoCount({
@@ -602,13 +588,10 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
     isLocalExecutor,
   } = args;
   useWorkflowStepsEffect(fs, workflowId);
-  useWorkflowAgentProfileEffect(
-    fs,
-    workflows,
-    agentProfiles,
-    compatibleAgentProfiles,
-    args.lastUsedAgentProfileId,
-  );
+  useWorkflowAgentProfileEffect(fs, workflows, agentProfiles, compatibleAgentProfiles, {
+    lastUsedAgentProfileId: args.lastUsedAgentProfileId,
+    authLoaded,
+  });
   useRepositoryAutoSelectEffect(fs, open, workspaceId, repositories, {
     lastUsedRepositoryId: args.lastUsedRepositoryId,
     userSettingsLoaded: args.userSettingsLoaded,

@@ -568,9 +568,7 @@ export function useTaskCreateDialogData(
   const settingsData = useAppStore((state) => state.settingsData);
   const availableAgentsLoaded = useAppStore((state) => state.availableAgents.loaded);
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
-  const taskCreateUserSettings = useEnsureUserSettings(open, {
-    preserveTaskCreatePending: true,
-  });
+  const taskCreateUserSettings = useEnsureUserSettings(open);
 
   useSettingsData(open);
   const { repositories, isLoading: repositoriesLoading } = useRepositories(workspaceId, open);

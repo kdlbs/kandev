@@ -141,8 +141,9 @@ export function useWorkflowAgentProfileEffect(
   workflows: Array<{ id: string; agent_profile_id?: string }>,
   agentProfiles: AgentProfileOption[],
   compatibleAgentProfiles: AgentProfileOption[],
-  lastUsedAgentProfileId?: string | null,
+  options: { lastUsedAgentProfileId?: string | null; authLoaded?: boolean } = {},
 ) {
+  const { lastUsedAgentProfileId, authLoaded = true } = options;
   const { selectedWorkflowId, executorProfileId, setAgentProfileId, setWorkflowAgentProfileId } =
     fs;
   useEffect(() => {
@@ -179,6 +180,13 @@ export function useWorkflowAgentProfileEffect(
         });
         return;
       }
+      if (!authLoaded) {
+        setAgentProfileId("");
+        workflowAutopickDebug("workflow-no-override-defer", {
+          reason: "auth-not-loaded",
+        });
+        return;
+      }
       // Restore the user's last-used agent profile when unlocking. Filter
       // against `compatibleAgentProfiles` (not the full `agentProfiles` list)
       // so an executor-incompatible id from a previous session - including
@@ -203,6 +211,7 @@ export function useWorkflowAgentProfileEffect(
     agentProfiles,
     compatibleAgentProfiles,
     lastUsedAgentProfileId,
+    authLoaded,
     setAgentProfileId,
     setWorkflowAgentProfileId,
   ]);
