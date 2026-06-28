@@ -61,7 +61,7 @@ pass "verify-desktop-runtime requires helper for linux-x64 runtime"
 nonexec_helper_runtime_dir="$TMP_DIR/nonexec-helper-runtime"
 write_runtime "$nonexec_helper_runtime_dir"
 chmod +x "$nonexec_helper_runtime_dir/bin/kandev" "$nonexec_helper_runtime_dir/bin/agentctl"
-if "$ROOT_DIR/scripts/release/verify-desktop-runtime.sh" --platform linux-x64 "$nonexec_helper_runtime_dir" >"$OUT_FILE" 2>"$ERR_FILE"; then
+if env -u OS "$ROOT_DIR/scripts/release/verify-desktop-runtime.sh" --platform linux-x64 "$nonexec_helper_runtime_dir" >"$OUT_FILE" 2>"$ERR_FILE"; then
   fail "verify-desktop-runtime should require executable helper on POSIX hosts"
 fi
 grep -q "agentctl linux/amd64 helper is not executable" "$ERR_FILE" || fail "verify-desktop-runtime did not explain non-executable helper"
