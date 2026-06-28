@@ -1,6 +1,6 @@
 [package]
 name = "kandev-desktop"
-version = "0.1.0"
+version = "0.66.0"
 description = "Kandev desktop shell"
 authors = ["Kandev"]
 license = "AGPL-3.0-only"

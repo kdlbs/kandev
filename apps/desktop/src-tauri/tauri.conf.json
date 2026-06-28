@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Kandev",
-  "version": "0.1.0",
+  "version": "0.66.0",
   "identifier": "dev.kandev.desktop",
   "build": {
     "beforeDevCommand": "pnpm dev:vite",
@@ -23,7 +23,9 @@
       }
     ],
     "security": {
-      "capabilities": ["default"],
+      "capabilities": [
+        "default"
+      ],
       "csp": "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*; frame-ancestors 'none'"
     }
   },
