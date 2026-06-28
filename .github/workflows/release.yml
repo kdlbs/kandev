@@ -47,7 +47,7 @@ on:
         type: boolean
         default: false
       allow_unsigned_desktop:
-        description: "Allow unsigned macOS/Windows desktop artifacts"
+        description: "Allow unsigned macOS/Windows desktop artifacts; still publishes unless validation-only is checked"
         type: boolean
         default: false
       desktop_validation_only:
@@ -1179,6 +1179,20 @@ jobs:
         env:
           OUTPUT: RELEASE_NOTES.md
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add unsigned desktop warning to release notes
+        if: ${{ inputs.allow_unsigned_desktop }}
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp)"
+          {
+            echo "> [!WARNING]"
+            echo "> macOS and Windows desktop installers in this release are unsigned."
+            echo "> They may require manual OS security bypasses and are not trusted downloads."
+            echo
+            cat RELEASE_NOTES.md
+          } > "$tmp"
+          mv "$tmp" RELEASE_NOTES.md
 
       - uses: actions/download-artifact@v5
         with:

@@ -266,8 +266,15 @@ describe("release desktop artifacts", () => {
     expect(workflow).toContain("No release PR, tag, GitHub release, public container tags");
     expect(workflow).toContain("if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}");
     expect(workflow).toContain('if [ "$DESKTOP_VALIDATION_ONLY" = "true" ]; then');
-    expect(workflow).not.toContain(
-      'if [ "$ALLOW_UNSIGNED_DESKTOP" = "true" ]; then\n            echo "ref=$CURRENT_REF"',
+    expect(workflow).toContain(
+      "Allow unsigned macOS/Windows desktop artifacts; still publishes unless validation-only is checked",
+    );
+    expect(workflow).toContain("Add unsigned desktop warning to release notes");
+    expect(workflow).toContain(
+      "macOS and Windows desktop installers in this release are unsigned.",
+    );
+    expect(workflow).not.toMatch(
+      /if \[ "\$ALLOW_UNSIGNED_DESKTOP" = "true" \]; then\r?\n\s*echo "ref=\$CURRENT_REF"/,
     );
     expect(workflow).toContain("docker-amd64:");
     expect(workflow).toContain("docker-universal-manifest:");
