@@ -30,14 +30,15 @@ export function isTerminalSessionState(state: TaskSessionState | undefined): boo
 }
 
 function findSessionForTask(state: AppState, taskId: string, sessionId: string) {
+  const byTask = state.taskSessionsByTask;
+  const sessionsForTask = byTask?.itemsByTaskId?.[taskId];
+  if (byTask?.loadedByTaskId?.[taskId]) {
+    return sessionsForTask?.find((session) => session.id === sessionId) ?? null;
+  }
   // Some task-update call sites use partial stores before taskSessions hydrates.
   const byId = state.taskSessions?.items?.[sessionId];
   if (byId) return byId.task_id === taskId ? byId : null;
-  return (
-    state.taskSessionsByTask?.itemsByTaskId?.[taskId]?.find(
-      (session) => session.id === sessionId,
-    ) ?? null
-  );
+  return sessionsForTask?.find((session) => session.id === sessionId) ?? null;
 }
 
 function isTaskSessionListHydrating(state: AppState, taskId: string): boolean {
