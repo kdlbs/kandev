@@ -35,12 +35,13 @@ if [ ! -d "$ASSETS_DIR" ]; then
 fi
 
 verify_checksum() {
-  local checksum_file="$1"
+  local assets_dir="$1"
+  local checksum_file="$2"
 
   if command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 -c "$checksum_file"
+    (cd "$assets_dir" && shasum -a 256 -c "$checksum_file")
   elif command -v sha256sum >/dev/null 2>&1; then
-    sha256sum -c "$checksum_file"
+    (cd "$assets_dir" && sha256sum -c "$checksum_file")
   else
     echo "Missing checksum tool: need shasum or sha256sum" >&2
     return 1
@@ -63,10 +64,7 @@ for platform in "${REQUIRED_PLATFORMS[@]}"; do
       echo "Missing desktop checksum: $checksum_file" >&2
       exit 1
     fi
-    (
-      cd "$ASSETS_DIR"
-      verify_checksum "$(basename "$checksum_file")" >/dev/null
-    ) || {
+    verify_checksum "$ASSETS_DIR" "$(basename "$checksum_file")" >/dev/null || {
       echo "Checksum verification failed for: $artifact" >&2
       exit 1
     }

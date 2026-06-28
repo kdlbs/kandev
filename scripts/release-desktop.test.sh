@@ -119,6 +119,20 @@ printf 'desktop artifact\n' > "$artifact"
 "$ROOT_DIR/scripts/release/verify-desktop-assets.sh" "$assets_dir" linux-x64 >/dev/null
 pass "verify-desktop-assets accepts matching checksums"
 
+fallback_tools_dir="$TMP_DIR/sha256sum-tools"
+fallback_assets_dir="$TMP_DIR/sha256sum-assets"
+mkdir -p "$fallback_tools_dir" "$fallback_assets_dir"
+for tool in bash basename dirname mkdir mv rm sha256sum; do
+  ln -s "$(command -v "$tool")" "$fallback_tools_dir/$tool"
+done
+fallback_artifact="$fallback_assets_dir/kandev-desktop-linux-x64-fallback.deb"
+printf 'desktop artifact\n' > "$fallback_artifact"
+PATH="$fallback_tools_dir" bash "$ROOT_DIR/scripts/release/write-sha256.sh" \
+  "$fallback_artifact" "$fallback_artifact.sha256"
+PATH="$fallback_tools_dir" bash "$ROOT_DIR/scripts/release/verify-desktop-assets.sh" \
+  "$fallback_assets_dir" linux-x64 >/dev/null
+pass "desktop asset checksums work without shasum"
+
 printf 'tampered artifact\n' > "$artifact"
 if "$ROOT_DIR/scripts/release/verify-desktop-assets.sh" "$assets_dir" linux-x64 >"$OUT_FILE" 2>"$ERR_FILE"; then
   fail "verify-desktop-assets should reject checksum mismatches"

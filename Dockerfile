@@ -14,9 +14,22 @@
 # Run:
 #   docker run -p 38429:38429 -v kandev-data:/data ghcr.io/kdlbs/kandev:latest
 
+FROM debian:bookworm-slim AS apt-keys
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg && \
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+        | gpg --dearmor -o /nodesource.gpg && \
+    curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+        | gpg --dearmor -o /microsoft.gpg && \
+    rm -rf /var/lib/apt/lists/*
+
 FROM debian:bookworm-slim
 
 ARG NODE_MAJOR=24
+
+COPY --from=apt-keys /nodesource.gpg /usr/share/keyrings/nodesource.gpg
+COPY --from=apt-keys /microsoft.gpg /usr/share/keyrings/microsoft.gpg
 
 # Install runtime dependencies. gh is included because the GitHub integration
 # (PR review, webhooks) shells out to it for auth fallback when GITHUB_TOKEN
@@ -26,9 +39,9 @@ ARG NODE_MAJOR=24
 # fan-out.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+        apt-transport-https \
         ca-certificates \
         curl \
-        gnupg \
         git \
         gh \
         gosu \
@@ -36,15 +49,19 @@ RUN apt-get update && \
         python3 \
         python3-venv \
         pipx && \
-    install -d -m 0755 /etc/apt/keyrings && \
-    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-        | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
-    chmod a+r /etc/apt/keyrings/nodesource.gpg && \
-    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" \
+    echo "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" \
         > /etc/apt/sources.list.d/nodesource.list && \
+    arch="$(dpkg --print-architecture)" && \
+    printf "%s\n" \
+        "Types: deb" \
+        "URIs: https://packages.microsoft.com/repos/azure-cli/" \
+        "Suites: bookworm" \
+        "Components: main" \
+        "Architectures: $arch" \
+        "Signed-by: /usr/share/keyrings/microsoft.gpg" \
+        > /etc/apt/sources.list.d/azure-cli.sources && \
     apt-get update && \
-    apt-get install -y --no-install-recommends nodejs && \
-    curl -sL https://aka.ms/InstallAzureCLIDeb | bash && \
+    apt-get install -y --no-install-recommends nodejs azure-cli && \
     rm -rf /var/lib/apt/lists/* && \
     PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install apprise
 

@@ -19,6 +19,10 @@ function extractDockerPnpmVersion(dockerfile: string): string | undefined {
   return dockerfile.match(/^ARG PNPM_VERSION=([0-9]+\.[0-9]+\.[0-9]+)$/m)?.[1];
 }
 
+function extractDockerNodeMajor(dockerfile: string): string | undefined {
+  return dockerfile.match(/^ARG NODE_MAJOR=([0-9]+)$/m)?.[1];
+}
+
 function extractPackageManagerPnpmVersion(packageJSON: string): string {
   const packageManager = (JSON.parse(packageJSON) as { packageManager?: string }).packageManager;
   const version = packageManager?.match(/^pnpm@([0-9]+\.[0-9]+\.[0-9]+)$/)?.[1];
@@ -152,11 +156,23 @@ describe("release package manager version", () => {
     const universalDockerfile = readRepoFile("Dockerfile.universal");
     const dockerPnpmVersion = extractDockerPnpmVersion(dockerfile);
     const universalDockerPnpmVersion = extractDockerPnpmVersion(universalDockerfile);
+    const dockerNodeMajor = extractDockerNodeMajor(dockerfile);
 
     expect(dockerfile).not.toContain("pnpm@latest");
-    expect(dockerfile).toContain("ARG NODE_MAJOR=24");
+    expect(dockerNodeMajor, "Dockerfile: NODE_MAJOR must be declared").toBeDefined();
+    expect(dockerfile).toContain("AS apt-keys");
+    expect(dockerfile).toContain(
+      "COPY --from=apt-keys /nodesource.gpg /usr/share/keyrings/nodesource.gpg",
+    );
+    expect(dockerfile).toContain(
+      "COPY --from=apt-keys /microsoft.gpg /usr/share/keyrings/microsoft.gpg",
+    );
     expect(dockerfile).toContain("https://deb.nodesource.com/node_${NODE_MAJOR}.x");
+    expect(dockerfile).toContain("/etc/apt/sources.list.d/azure-cli.sources");
+    expect(dockerfile).not.toContain("InstallAzureCLIDeb");
+    expect(dockerfile).not.toContain("        gnupg \\");
     expect(dockerfile).toMatch(/\bnodejs\b/);
+    expect(dockerfile).toMatch(/\bazure-cli\b/);
     if (dockerPnpmVersion !== undefined) {
       expect(dockerPnpmVersion, "Dockerfile: PNPM_VERSION must match apps/package.json").toBe(
         packagePnpmVersion,
