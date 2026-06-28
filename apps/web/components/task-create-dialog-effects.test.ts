@@ -6,6 +6,7 @@ import {
   useRepositoryAutoSelectEffect,
   useWorkflowAgentProfileEffect,
 } from "./task-create-dialog-effects";
+import { decideAgentProfileAutopick } from "./task-create-dialog-autopick";
 import type {
   DialogFormState,
   StoreSelections,
@@ -323,6 +324,58 @@ function makeSel(overrides: Partial<StoreSelections> = {}): StoreSelections {
   };
 }
 
+const WORKTREE_EXECUTOR_ID = "exec-worktree";
+
+function makeWorktreeExecutor(): StoreSelections["executors"][number] {
+  return {
+    id: WORKTREE_EXECUTOR_ID,
+    type: "worktree",
+    profiles: [
+      { id: "profile-a", executor_id: WORKTREE_EXECUTOR_ID, name: "A" },
+      { id: "profile-b", executor_id: WORKTREE_EXECUTOR_ID, name: "B" },
+    ],
+  } as unknown as StoreSelections["executors"][number];
+}
+
+describe("useDefaultSelectionsEffect — agent settings deferral", () => {
+  it("defers agent auto-pick until user settings have loaded or settled", () => {
+    const cursor = makeProfile("cursor");
+    const deferred = decideAgentProfileAutopick({
+      open: true,
+      agentProfileId: "",
+      workflowAgentProfileId: "",
+      workflowHasAgent: false,
+      agentProfiles: [cursor],
+      compatibleAgentProfiles: [cursor],
+      authLoaded: true,
+      executorProfileId: "",
+      hasExecutors: false,
+      lastAgentProfileId: null,
+      userSettingsLoaded: false,
+      defaultAgentProfileId: null,
+    });
+
+    expect(deferred).toEqual({ kind: "defer", reason: "user-settings-not-loaded" });
+
+    const picked = decideAgentProfileAutopick({
+      open: true,
+      agentProfileId: "",
+      workflowAgentProfileId: "",
+      workflowHasAgent: false,
+      agentProfiles: [cursor],
+      compatibleAgentProfiles: [cursor],
+      authLoaded: true,
+      executorProfileId: "",
+      hasExecutors: false,
+      lastAgentProfileId: null,
+      userSettingsLoaded: true,
+      defaultAgentProfileId: null,
+    });
+
+    expect(picked).toEqual({ kind: "pick", source: "first", id: cursor.id });
+  });
+});
+
 describe("useDefaultSelectionsEffect — executor-aware agent restoration", () => {
   it("restores lastId when it is compatible with the current executor", async () => {
     const claude = makeProfile("claude");
@@ -440,17 +493,35 @@ describe("useDefaultSelectionsEffect — executor-aware agent restoration", () =
 });
 
 describe("useDefaultSelectionsEffect — executor profile restoration", () => {
+  it("defers executor profile fallback until user settings have loaded or settled", async () => {
+    window.localStorage.removeItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID);
+    const fs = makeDefaultSelFs({ executorProfileId: "", executorId: "" });
+    const worktreeExecutor = makeWorktreeExecutor();
+    const selBefore = makeSel({
+      executors: [worktreeExecutor],
+      userSettingsLoaded: false,
+    } as Partial<StoreSelections>);
+
+    const { rerender } = renderHook(({ sel }) => useDefaultSelectionsEffect(fs, true, sel, []), {
+      initialProps: { sel: selBefore },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fs.setExecutorProfileId).not.toHaveBeenCalled();
+
+    const selAfter = makeSel({
+      executors: [worktreeExecutor],
+      userSettingsLoaded: true,
+    } as Partial<StoreSelections>);
+    rerender({ sel: selAfter });
+
+    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith("profile-a"));
+  });
+
   it("restores executor profile from store-backed settings when localStorage is not primed", async () => {
     window.localStorage.removeItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID);
     const fs = makeDefaultSelFs({ executorProfileId: "", executorId: "" });
-    const worktreeExecutor = {
-      id: "exec-worktree",
-      type: "worktree",
-      profiles: [
-        { id: "profile-a", executor_id: "exec-worktree", name: "A" },
-        { id: "profile-b", executor_id: "exec-worktree", name: "B" },
-      ],
-    } as unknown as StoreSelections["executors"][number];
+    const worktreeExecutor = makeWorktreeExecutor();
     const sel = makeSel({
       executors: [worktreeExecutor],
       lastUsedExecutorProfileId: "profile-b",

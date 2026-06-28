@@ -561,7 +561,10 @@ function useTaskCreateUserSettings(open: boolean) {
   const [fetchSettled, setFetchSettled] = useState(false);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setFetchSettled(false);
+      return;
+    }
     if (userSettings.loaded) {
       setFetchSettled(true);
       return;
