@@ -192,6 +192,37 @@ export class KanbanPage {
     await this.taskSelectCheckbox(taskId).click();
   }
 
+  /** Cmd/Ctrl-click a card body — toggles it into the selection without the toggle button. */
+  async cmdClickCard(taskId: string) {
+    const card = this.taskCard(taskId);
+    await card.waitFor({ state: "visible" });
+    await card.click({ modifiers: ["ControlOrMeta"] });
+  }
+
+  /** Shift-click a card body — range-selects within the column. */
+  async shiftClickCard(taskId: string) {
+    const card = this.taskCard(taskId);
+    await card.waitFor({ state: "visible" });
+    await card.click({ modifiers: ["Shift"] });
+  }
+
+  /** Plain click a card body (no modifier). */
+  async plainClickCard(taskId: string) {
+    const card = this.taskCard(taskId);
+    await card.waitFor({ state: "visible" });
+    await card.click();
+  }
+
+  /** A card is part of the selection when it renders the primary ring. */
+  async expectCardSelected(taskId: string, selected = true) {
+    const card = this.taskCard(taskId);
+    if (selected) {
+      await expect(card).toHaveClass(/ring-primary/, { timeout: 5_000 });
+    } else {
+      await expect(card).not.toHaveClass(/ring-primary/, { timeout: 5_000 });
+    }
+  }
+
   pipelineTask(taskId: string): Locator {
     return this.page.getByTestId(`pipeline-task-${taskId}`);
   }
