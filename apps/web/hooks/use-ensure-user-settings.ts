@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import {
   readPendingTaskCreateLastUsedState,
-  readSyncedTaskCreateLastUsedState,
+  readQueuedTaskCreateLastUsedState,
 } from "@/components/task-create-dialog-handlers";
 import { fetchUserSettings } from "@/lib/api/domains/settings-api";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
@@ -12,19 +12,17 @@ import type { TaskCreateLastUsedState, UserSettingsState } from "@/lib/state/sli
 
 type LoadedUserSettings = {
   settings: UserSettingsState;
-  startedPending: Partial<TaskCreateLastUsedState>;
 };
 
 let userSettingsFetchPromise: Promise<LoadedUserSettings | null> | null = null;
 
 function loadUserSettingsOnce() {
   if (!userSettingsFetchPromise) {
-    const startedPending = readPendingTaskCreateLastUsedState();
     userSettingsFetchPromise = fetchUserSettings({ cache: "no-store" })
       .then((response) => {
         if (!response?.settings) return null;
         const mapped = mapUserSettingsResponse(response);
-        return mapped.loaded ? { settings: mapped, startedPending } : null;
+        return mapped.loaded ? { settings: mapped } : null;
       })
       .catch(() => null)
       .finally(() => {
@@ -57,8 +55,7 @@ function compactTaskCreateLastUsedOverlay(pending: Partial<TaskCreateLastUsedSta
 
 function mergeTaskCreateLastUsedForFetch(result: LoadedUserSettings): UserSettingsState {
   return mergeTaskCreateLastUsedOverlay(result.settings, {
-    ...compactTaskCreateLastUsedOverlay(result.startedPending),
-    ...compactTaskCreateLastUsedOverlay(readSyncedTaskCreateLastUsedState()),
+    ...compactTaskCreateLastUsedOverlay(readQueuedTaskCreateLastUsedState()),
     ...compactTaskCreateLastUsedOverlay(readPendingTaskCreateLastUsedState()),
   });
 }

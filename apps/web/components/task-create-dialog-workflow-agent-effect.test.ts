@@ -57,8 +57,7 @@ describe("useWorkflowAgentProfileEffect - user selections", () => {
     );
 
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(fsBefore.setAgentProfileId).not.toHaveBeenCalledWith("");
-    expect(fsBefore.setAgentProfileId).not.toHaveBeenCalledWith(claude.id);
+    expect(fsBefore.setAgentProfileId).not.toHaveBeenCalled();
 
     const fsAfter = makeFs({
       agentProfileId: cursor.id,
@@ -68,7 +67,6 @@ describe("useWorkflowAgentProfileEffect - user selections", () => {
     rerender({ fs: fsAfter, authLoaded: true });
 
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(fsAfter.setAgentProfileId).not.toHaveBeenCalledWith("");
-    expect(fsAfter.setAgentProfileId).not.toHaveBeenCalledWith(claude.id);
+    expect(fsAfter.setAgentProfileId).not.toHaveBeenCalled();
   });
 });

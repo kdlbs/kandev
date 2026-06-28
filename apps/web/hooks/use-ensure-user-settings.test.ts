@@ -19,7 +19,7 @@ const mockReadPendingTaskCreateLastUsedState = vi.fn<[], PendingTaskCreateLastUs
   agentProfileId: undefined,
   executorProfileId: undefined,
 }));
-const mockReadSyncedTaskCreateLastUsedState = vi.fn<[], PendingTaskCreateLastUsed>(() => ({
+const mockReadQueuedTaskCreateLastUsedState = vi.fn<[], PendingTaskCreateLastUsed>(() => ({
   repositoryId: undefined,
   branch: undefined,
   agentProfileId: undefined,
@@ -43,7 +43,7 @@ vi.mock("@/lib/api/domains/settings-api", () => ({
 
 vi.mock("@/components/task-create-dialog-handlers", () => ({
   readPendingTaskCreateLastUsedState: () => mockReadPendingTaskCreateLastUsedState(),
-  readSyncedTaskCreateLastUsedState: () => mockReadSyncedTaskCreateLastUsedState(),
+  readQueuedTaskCreateLastUsedState: () => mockReadQueuedTaskCreateLastUsedState(),
 }));
 
 import {
@@ -251,7 +251,7 @@ describe("useEnsureUserSettings — stale settings fetches", () => {
     renderHook(() => useEnsureUserSettings(true));
     await waitFor(() => expect(mockFetchUserSettings).toHaveBeenCalledTimes(1));
 
-    mockReadSyncedTaskCreateLastUsedState.mockReturnValue({
+    mockReadQueuedTaskCreateLastUsedState.mockReturnValue({
       repositoryId: "repo-2",
       branch: "feature",
       agentProfileId: undefined,
