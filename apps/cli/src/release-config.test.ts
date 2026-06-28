@@ -149,8 +149,8 @@ function assertWorkflowPnpmVersions(file: string, expectedVersion: string): numb
   return versions.length;
 }
 
-describe("release package manager version", () => {
-  it("pins pnpm consistently for Docker and GitHub Actions", () => {
+describe("release runtime tooling configuration", () => {
+  it("pins runtime tooling consistently across Docker and GitHub Actions", () => {
     const packagePnpmVersion = extractPackageManagerPnpmVersion(readRepoFile("apps/package.json"));
     const dockerfile = readRepoFile("Dockerfile");
     const universalDockerfile = readRepoFile("Dockerfile.universal");
@@ -159,7 +159,7 @@ describe("release package manager version", () => {
     const dockerNodeMajor = extractDockerNodeMajor(dockerfile);
 
     expect(dockerfile).not.toContain("pnpm@latest");
-    expect(dockerNodeMajor, "Dockerfile: NODE_MAJOR must be declared").toBeDefined();
+    expect(dockerNodeMajor, "Dockerfile: NODE_MAJOR must stay on the release Node line").toBe("24");
     expect(dockerfile).toContain("AS apt-keys");
     expect(dockerfile).toContain(
       "COPY --from=apt-keys /nodesource.gpg /usr/share/keyrings/nodesource.gpg",
