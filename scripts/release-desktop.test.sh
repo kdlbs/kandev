@@ -115,7 +115,7 @@ assets_dir="$TMP_DIR/assets"
 mkdir -p "$assets_dir"
 artifact="$assets_dir/kandev-desktop-linux-x64-test.deb"
 printf 'desktop artifact\n' > "$artifact"
-(cd "$assets_dir" && shasum -a 256 "$(basename "$artifact")" > "$(basename "$artifact").sha256")
+"$ROOT_DIR/scripts/release/write-sha256.sh" "$artifact" "$artifact.sha256"
 "$ROOT_DIR/scripts/release/verify-desktop-assets.sh" "$assets_dir" linux-x64 >/dev/null
 pass "verify-desktop-assets accepts matching checksums"
 

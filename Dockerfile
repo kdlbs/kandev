@@ -16,22 +16,34 @@
 
 FROM debian:bookworm-slim
 
+ARG NODE_MAJOR=24
+
 # Install runtime dependencies. gh is included because the GitHub integration
 # (PR review, webhooks) shells out to it for auth fallback when GITHUB_TOKEN
-# is not set. Azure CLI + azure-devops extension support agentctl Azure Repos
-# PR creation (az repos pr create). apprise is installed via pipx for
-# notification fan-out.
+# is not set. Node/npm support agent CLI installs and the universal image's
+# pnpm layer. Azure CLI + azure-devops extension support agentctl Azure Repos PR
+# creation (az repos pr create). apprise is installed via pipx for notification
+# fan-out.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        git \
-        gh \
         ca-certificates \
         curl \
+        gnupg \
+        git \
+        gh \
         gosu \
         tini \
         python3 \
         python3-venv \
         pipx && \
+    install -d -m 0755 /etc/apt/keyrings && \
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+        | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
+    chmod a+r /etc/apt/keyrings/nodesource.gpg && \
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" \
+        > /etc/apt/sources.list.d/nodesource.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends nodejs && \
     curl -sL https://aka.ms/InstallAzureCLIDeb | bash && \
     rm -rf /var/lib/apt/lists/* && \
     PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install apprise

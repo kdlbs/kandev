@@ -788,7 +788,7 @@ jobs:
             base="$(basename "$artifact")"
             dest="$out_dir/kandev-desktop-${{ matrix.platform }}-$base"
             cp "$artifact" "$dest"
-            (cd "$out_dir" && shasum -a 256 "$(basename "$dest")" > "$(basename "$dest").sha256")
+            scripts/release/write-sha256.sh "$dest" "$dest.sha256"
             found=$((found + 1))
           done < <(find "$bundle_dir" -type f \( \
             -name '*.dmg' -o \

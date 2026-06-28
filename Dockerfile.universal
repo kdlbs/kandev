@@ -162,17 +162,17 @@ RUN set -eux; \
     rm /tmp/rustup-init /tmp/rustup-init.sha256; \
     chmod -R a+rX "$RUSTUP_HOME" "$CARGO_HOME"
 
-# pnpm via corepack - install system-wide so users don't need
-# `corepack enable` themselves. Drops shims into /usr/local/bin.
+# pnpm via npm - install system-wide so users don't need to bootstrap it
+# themselves. Drops shims into /usr/local/bin.
 #
-# No separate sha256 step: corepack downloads from registry.npmjs.org and
-# verifies the tarball against the registry's `integrity` field (SHA-512)
-# before activating. The other tools above pin upstream `.sha256` sidecars
-# because they're served from CDNs that don't expose package integrity at
-# the API level; npm does. Decision is deliberate, not an oversight.
+# No separate sha256 step: npm downloads from registry.npmjs.org and verifies
+# the tarball against the registry's `integrity` field (SHA-512) before
+# installing. The other tools above pin upstream `.sha256` sidecars because
+# they're served from CDNs that don't expose package integrity at the API level;
+# npm does. Decision is deliberate, not an oversight.
 RUN set -eux; \
-    corepack enable; \
-    corepack prepare "pnpm@${PNPM_VERSION}" --activate
+    npm install -g --prefix /usr/local "pnpm@${PNPM_VERSION}"; \
+    pnpm --version
 
 # fd is installed as `fdfind` on Debian to avoid clashing with the legacy
 # fd package - symlink so agents calling plain `fd` still work.

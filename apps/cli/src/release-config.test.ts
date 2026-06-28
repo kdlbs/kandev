@@ -149,14 +149,29 @@ describe("release package manager version", () => {
   it("pins pnpm consistently for Docker and GitHub Actions", () => {
     const packagePnpmVersion = extractPackageManagerPnpmVersion(readRepoFile("apps/package.json"));
     const dockerfile = readRepoFile("Dockerfile");
+    const universalDockerfile = readRepoFile("Dockerfile.universal");
     const dockerPnpmVersion = extractDockerPnpmVersion(dockerfile);
+    const universalDockerPnpmVersion = extractDockerPnpmVersion(universalDockerfile);
 
     expect(dockerfile).not.toContain("pnpm@latest");
+    expect(dockerfile).toContain("ARG NODE_MAJOR=24");
+    expect(dockerfile).toContain("https://deb.nodesource.com/node_${NODE_MAJOR}.x");
+    expect(dockerfile).toMatch(/\bnodejs\b/);
     if (dockerPnpmVersion !== undefined) {
       expect(dockerPnpmVersion, "Dockerfile: PNPM_VERSION must match apps/package.json").toBe(
         packagePnpmVersion,
       );
     }
+    expect(
+      universalDockerPnpmVersion,
+      "Dockerfile.universal: PNPM_VERSION must match apps/package.json",
+    ).toBe(packagePnpmVersion);
+    expect(universalDockerfile).not.toContain("pnpm@latest");
+    expect(universalDockerfile).not.toContain("corepack enable");
+    expect(universalDockerfile).not.toContain("corepack prepare");
+    expect(universalDockerfile).toContain(
+      'npm install -g --prefix /usr/local "pnpm@${PNPM_VERSION}"',
+    );
 
     const workflowSetupCount = workflowFiles().reduce(
       (count, file) => count + assertWorkflowPnpmVersions(file, packagePnpmVersion),
@@ -210,6 +225,8 @@ describe("release desktop artifacts", () => {
 
   it("publishes desktop artifacts while leaving npm and Homebrew tied to runtime tarballs", () => {
     const workflow = releaseWorkflow();
+    const checksumScript = readRepoFile("scripts/release/write-sha256.sh");
+    const verifyAssetsScript = readRepoFile("scripts/release/verify-desktop-assets.sh");
     const publishNpmScript = readRepoFile("scripts/release/publish-npm.sh");
     const homebrewScript = readRepoFile("scripts/release/update-homebrew-tap.sh");
 
@@ -219,7 +236,12 @@ describe("release desktop artifacts", () => {
     expect(workflow).toContain("pattern: desktop-*");
     expect(workflow).toContain("scripts/release/verify-desktop-assets.sh");
     expect(workflow).toContain("dist/release-assets/kandev-desktop-*");
-    expect(workflow).toContain('shasum -a 256 "$(basename "$dest")"');
+    expect(workflow).toContain('scripts/release/write-sha256.sh "$dest" "$dest.sha256"');
+    expect(workflow).not.toContain('shasum -a 256 "$(basename "$dest")"');
+    expect(checksumScript).toContain("command -v shasum");
+    expect(checksumScript).toContain("command -v sha256sum");
+    expect(verifyAssetsScript).toContain("command -v shasum");
+    expect(verifyAssetsScript).toContain("command -v sha256sum");
 
     expect(publishNpmScript).toContain('asset="kandev-${platform}.tar.gz"');
     expect(publishNpmScript).not.toContain("kandev-desktop-");
