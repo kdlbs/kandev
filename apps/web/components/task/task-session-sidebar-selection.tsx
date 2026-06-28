@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSidebarMultiSelect } from "@/hooks/use-sidebar-multi-select";
-import { flattenVisibleTaskIds, type GroupedSidebarList } from "@/lib/sidebar/apply-view";
+import {
+  flattenVisibleTaskIds,
+  sortIdsByVisibleOrder,
+  type GroupedSidebarList,
+} from "@/lib/sidebar/apply-view";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
 
 type BulkArchiveState = { ids: string[]; executorTypes: Array<string | null | undefined> };
@@ -100,11 +104,8 @@ export function useSidebarSelection({
   // Bulk move in the rendered top-to-bottom order so a backward range selection
   // (anchor after target) doesn't land scrambled at the destination.
   const onBulkMove = useCallback(
-    (ids: string[], targetWorkflowId: string, targetStepId: string) => {
-      const order = new Map(visibleTaskIds.map((id, i) => [id, i]));
-      const sorted = [...ids].sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
-      return bulkMove(sorted, targetWorkflowId, targetStepId);
-    },
+    (ids: string[], targetWorkflowId: string, targetStepId: string) =>
+      bulkMove(sortIdsByVisibleOrder(ids, visibleTaskIds), targetWorkflowId, targetStepId),
     [bulkMove, visibleTaskIds],
   );
 

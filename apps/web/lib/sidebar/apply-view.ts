@@ -484,6 +484,17 @@ export function flattenVisibleTaskIds(
   return out;
 }
 
+/**
+ * Order `ids` by their position in the rendered `visibleTaskIds` list. Used
+ * before bulk moves so a backward range selection (anchor after target, which
+ * leaves the selection Set in insertion rather than visible order) still lands
+ * top-to-bottom at the destination. Ids absent from the visible list sort first.
+ */
+export function sortIdsByVisibleOrder(ids: string[], visibleTaskIds: string[]): string[] {
+  const order = new Map(visibleTaskIds.map((id, i) => [id, i]));
+  return [...ids].sort((a, b) => (order.get(a) ?? -1) - (order.get(b) ?? -1));
+}
+
 export function applyView(
   tasks: TaskSwitcherItem[],
   view: SidebarView,

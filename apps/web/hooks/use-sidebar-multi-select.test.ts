@@ -63,6 +63,18 @@ describe("useSidebarMultiSelect", () => {
     expect(result.current.selectedIds).toEqual(new Set(["a"]));
   });
 
+  it("pruneToVisible realigns the anchor so a later range starts from a visible id", () => {
+    const { result } = renderHook(() => useSidebarMultiSelect("ws1"));
+    act(() => result.current.toggleSelect("a"));
+    act(() => result.current.toggleSelect("b")); // anchor is now "b"
+    act(() => result.current.pruneToVisible(["a"])); // drops "b", anchor must realign to "a"
+
+    // Range from the realigned anchor "a" to "c" includes the in-between "x".
+    // A stale "b" anchor (absent from orderedIds) would fall back to just {a, c}.
+    act(() => result.current.selectRange("c", ["a", "x", "c"]));
+    expect(result.current.selectedIds).toEqual(new Set(["a", "x", "c"]));
+  });
+
   it("resets the selection when the workspace changes", () => {
     const { result, rerender } = renderHook(({ ws }) => useSidebarMultiSelect(ws), {
       initialProps: { ws: "ws1" },
