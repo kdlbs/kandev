@@ -60,9 +60,6 @@ export const createKanbanSlice: StateCreator<
     set((draft) => {
       draft.tasks.activeTaskId = taskId;
       draft.tasks.activeSessionId = sessionId;
-      if (draft.tasks.pinnedSessionId !== sessionId) {
-        draft.tasks.pinnedSessionId = null;
-      }
       draft.tasks.lastSessionByTaskId[taskId] = sessionId;
     }),
   clearActiveSession: () =>

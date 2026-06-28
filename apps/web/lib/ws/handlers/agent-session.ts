@@ -30,6 +30,7 @@ export function isTerminalSessionState(state: TaskSessionState | undefined): boo
 }
 
 function findSessionForTask(state: AppState, taskId: string, sessionId: string) {
+  // Some task-update call sites use partial stores before taskSessions hydrates.
   const byId = state.taskSessions?.items?.[sessionId];
   if (byId) return byId.task_id === taskId ? byId : null;
   return (
@@ -66,6 +67,15 @@ export function shouldPreservePinnedSessionForTask(
     return true;
   }
   return !isTerminalSessionState(pinnedSession.state);
+}
+
+export function clearPinnedSessionIfOverridden(store: StoreApi<AppState>, sessionId: string): void {
+  const pinnedSessionId = store.getState().tasks.pinnedSessionId;
+  if (!pinnedSessionId || pinnedSessionId === sessionId) return;
+  store.setState((state) => ({
+    ...state,
+    tasks: { ...state.tasks, pinnedSessionId: null },
+  }));
 }
 
 /** Promote agentctl status to "ready" when the session enters a live state.
@@ -330,6 +340,7 @@ function maybeAdoptSessionOnTransition(
   if (!wasKnownToStore && shouldAdoptNewSession(state, taskId, newState)) {
     const oldSessionId = state.tasks.activeSessionId;
     if (oldSessionId) inheritAgentctlStatus(state, oldSessionId, sessionId);
+    clearPinnedSessionIfOverridden(store, sessionId);
     state.setActiveSessionAuto(taskId, sessionId);
     return;
   }
@@ -339,6 +350,7 @@ function maybeAdoptSessionOnTransition(
     const replacement = pickReplacementSessionId(state, taskId);
     if (replacement && replacement !== sessionId) {
       inheritAgentctlStatus(state, sessionId, replacement);
+      clearPinnedSessionIfOverridden(store, replacement);
       state.setActiveSessionAuto(taskId, replacement);
     }
   }

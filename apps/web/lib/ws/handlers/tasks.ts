@@ -8,7 +8,10 @@ import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { toKanbanTask, type TaskLike } from "@/lib/kanban/map-task";
 import { sessionId as toSessionId } from "@/lib/types/http";
 import { mergeTaskRepositoryFields } from "@/lib/ws/handlers/task-repositories";
-import { shouldPreservePinnedSessionForTask } from "@/lib/ws/handlers/agent-session";
+import {
+  clearPinnedSessionIfOverridden,
+  shouldPreservePinnedSessionForTask,
+} from "@/lib/ws/handlers/agent-session";
 
 type KanbanTask = KanbanState["tasks"][number];
 
@@ -166,6 +169,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
         afterState.tasks.activeSessionId === previousPrimary &&
         !shouldPreservePinnedSessionForTask(afterState, taskId)
       ) {
+        clearPinnedSessionIfOverridden(store, newPrimary);
         afterState.setActiveSessionAuto(taskId, newPrimary);
       }
     },

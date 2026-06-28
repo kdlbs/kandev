@@ -133,9 +133,9 @@ export type KanbanSliceActions = {
   reorderWorkflowItems: (workflowIds: string[]) => void;
   setActiveTask: (taskId: string) => void;
   setActiveSession: (taskId: string, sessionId: string) => void;
-  // setActiveSessionAuto updates the active session without creating a user
-  // pin. Used by WS handlers to follow workflow-driven session switches after
-  // they have checked that no non-terminal manual pin should be preserved.
+  // setActiveSessionAuto updates the active session without creating or
+  // clearing a user pin. Callers that intentionally override a pin must clear
+  // it explicitly after checking no non-terminal manual pin should be preserved.
   setActiveSessionAuto: (taskId: string, sessionId: string) => void;
   clearActiveSession: () => void;
   setWorkflowSnapshot: (workflowId: string, data: WorkflowSnapshotData) => void;
