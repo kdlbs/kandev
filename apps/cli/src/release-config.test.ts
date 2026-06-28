@@ -283,6 +283,8 @@ describe("release desktop artifacts", () => {
     expect(workflow).toContain("unset APPLE_ID");
     expect(workflow).toContain("unset WINDOWS_CERTIFICATE");
     expect(workflow).toContain("unset WINDOWS_CERTIFICATE_PASSWORD");
+    expect(workflow).toContain("unset WINDOWS_TIMESTAMP_URL");
+    expect(workflow).toContain("unset WINDOWS_SIGNTOOL_PATH");
 
     for (const key of [
       "APPLE_CERTIFICATE",
