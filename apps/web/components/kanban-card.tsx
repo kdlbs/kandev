@@ -82,6 +82,8 @@ interface KanbanCardProps {
   isSelected?: boolean;
   selectedIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
+  /** Shift-click range select within this card's column. */
+  onRangeSelect?: (taskId: string) => void;
   isMultiSelectMode?: boolean;
 }
 
@@ -251,6 +253,39 @@ function KanbanCardDialogs({
   );
 }
 
+/**
+ * Cmd/Ctrl-click toggles a single card; Shift-click range-selects within the
+ * column; either modifier enters multi-select mode without the toggle button.
+ * A plain click toggles while in multi-select mode, otherwise previews/opens.
+ */
+function dispatchKanbanCardClick(
+  e: React.MouseEvent,
+  taskId: string,
+  task: Task,
+  handlers: {
+    onToggleSelect?: (taskId: string) => void;
+    onRangeSelect?: (taskId: string) => void;
+    onClick?: (task: Task) => void;
+    isMultiSelectMode?: boolean;
+  },
+): void {
+  if (e.metaKey || e.ctrlKey) {
+    e.preventDefault();
+    handlers.onToggleSelect?.(taskId);
+    return;
+  }
+  if (e.shiftKey) {
+    e.preventDefault();
+    handlers.onRangeSelect?.(taskId);
+    return;
+  }
+  if (handlers.isMultiSelectMode) {
+    handlers.onToggleSelect?.(taskId);
+    return;
+  }
+  handlers.onClick?.(task);
+}
+
 function useActiveWorkspaceRepositories() {
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
   return useAppStore((state) =>
@@ -274,6 +309,7 @@ export function KanbanCard({
   isSelected,
   selectedIds,
   onToggleSelect,
+  onRangeSelect,
   isMultiSelectMode,
 }: KanbanCardProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -306,18 +342,13 @@ export function KanbanCard({
     onMove,
   });
 
-  const handleClick = () => {
-    if (isMultiSelectMode) {
-      onToggleSelect?.(task.id);
-      return;
-    }
-    onClick?.(task);
-  };
-
-  const handleCheckboxClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onToggleSelect?.(task.id);
-  };
+  const handleClick = (e: React.MouseEvent) =>
+    dispatchKanbanCardClick(e, task.id, task, {
+      onToggleSelect,
+      onRangeSelect,
+      onClick,
+      isMultiSelectMode,
+    });
 
   return (
     <>
@@ -338,7 +369,10 @@ export function KanbanCard({
           isArchiving={isArchiving}
           menuEntries={dropdownMenuEntries}
           onClick={handleClick}
-          onCheckboxClick={handleCheckboxClick}
+          onCheckboxClick={(e) => {
+            e.stopPropagation();
+            onToggleSelect?.(task.id);
+          }}
           onOpenFullPage={onOpenFullPage}
         />
       </KanbanCardContextMenu>
