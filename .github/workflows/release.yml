@@ -680,6 +680,10 @@ jobs:
             unset APPLE_API_ISSUER
             unset APPLE_API_KEY_PATH
             unset APPLE_SIGNING_IDENTITY
+            unset WINDOWS_CERTIFICATE
+            unset WINDOWS_CERTIFICATE_PASSWORD
+            unset WINDOWS_TIMESTAMP_URL
+            unset WINDOWS_SIGNTOOL_PATH
           fi
           pnpm -C apps --filter @kandev/desktop build:vite
           cd apps/desktop

@@ -281,6 +281,8 @@ describe("release desktop artifacts", () => {
     expect(workflow).toContain('if [ "$ALLOW_UNSIGNED_DESKTOP" = "true" ]; then');
     expect(workflow).toContain("unset APPLE_CERTIFICATE");
     expect(workflow).toContain("unset APPLE_ID");
+    expect(workflow).toContain("unset WINDOWS_CERTIFICATE");
+    expect(workflow).toContain("unset WINDOWS_CERTIFICATE_PASSWORD");
 
     for (const key of [
       "APPLE_CERTIFICATE",
