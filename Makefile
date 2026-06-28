@@ -73,7 +73,6 @@ help:
 	@echo "  dev-backend      Run backend in development mode (port 38429)"
 	@echo "  dev-web          Run web app in development mode (port 37429)"
 	@echo "  desktop-dev      Run macOS Tauri app in dev mode with bundled runtime"
-	@echo "  dev              Note: Uses local development launcher (auto ports)"
 	@echo "  doctor           Idempotently wire up pre-commit hooks (runs automatically before dev)"
 	@echo ""
 	@echo "Production Commands:"

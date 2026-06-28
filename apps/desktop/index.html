@@ -13,26 +13,48 @@
 
       body {
         margin: 0;
+        min-height: 100vh;
       }
 
       .startup-shell {
         align-items: center;
+        background: #f5f7f6;
+        display: flex;
+        min-height: 100vh;
+        padding: 32px;
+      }
+
+      .startup-panel {
+        align-items: center;
         display: flex;
         justify-content: center;
-        min-height: 100vh;
+        margin: 0 auto;
+        min-height: 88px;
+        min-width: 88px;
       }
 
       .status-spinner {
         animation: startup-spin 960ms linear infinite;
-        border: 4px solid #d8dfdc;
+        background:
+          linear-gradient(#f5f7f6, #f5f7f6) padding-box,
+          conic-gradient(from 0deg, #16875f, #c48a2a, #d8dfdc, #16875f) border-box;
+        border: 4px solid transparent;
         border-radius: 999px;
-        border-top-color: #16875f;
         height: 52px;
         width: 52px;
       }
 
       .startup-copy {
-        display: none;
+        border: 0;
+        clip: rect(0 0 0 0);
+        display: block;
+        height: 1px;
+        margin: -1px;
+        overflow: hidden;
+        padding: 0;
+        position: absolute;
+        white-space: nowrap;
+        width: 1px;
       }
 
       @keyframes startup-spin {
@@ -47,9 +69,14 @@
           background: #0f1413;
         }
 
+        .startup-shell {
+          background: #0f1413;
+        }
+
         .status-spinner {
-          border-color: #27322e;
-          border-top-color: #2aa876;
+          background:
+            linear-gradient(#0f1413, #0f1413) padding-box,
+            conic-gradient(from 0deg, #2aa876, #d6a348, #27322e, #2aa876) border-box;
         }
       }
 
@@ -62,7 +89,12 @@
     <script type="module" src="/src/main.ts"></script>
   </head>
   <body>
-    <main class="startup-shell" aria-busy="true" aria-live="polite" aria-label="Kandev is starting">
+    <main
+      class="startup-shell"
+      aria-busy="true"
+      aria-live="polite"
+      aria-label="Kandev startup status"
+    >
       <section class="startup-panel">
         <div class="status-spinner" aria-hidden="true"></div>
         <div class="startup-copy">
