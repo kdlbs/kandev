@@ -69,6 +69,36 @@ function makeRepoAutoSelectFs(
 }
 
 describe("useRepositoryAutoSelectEffect", () => {
+  it("waits for store-backed settings before falling back to an empty row", async () => {
+    window.localStorage.removeItem(STORAGE_KEYS.LAST_REPOSITORY_ID);
+    const setRepositories = vi.fn();
+    const fs = makeRepoAutoSelectFs([], setRepositories);
+
+    const { rerender } = renderHook(
+      ({ loaded, lastUsedRepositoryId }) =>
+        useRepositoryAutoSelectEffect(
+          fs,
+          true,
+          "ws-1",
+          [makeRepository("repo-1"), makeRepository("repo-2")],
+          {
+            lastUsedRepositoryId,
+            userSettingsLoaded: loaded,
+          },
+        ),
+      { initialProps: { loaded: false, lastUsedRepositoryId: null as string | null } },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(setRepositories).not.toHaveBeenCalled();
+
+    rerender({ loaded: true, lastUsedRepositoryId: "repo-2" });
+
+    await waitFor(() => expect(setRepositories).toHaveBeenCalled());
+    const updater = setRepositories.mock.calls[0]![0] as (prev: TaskRepoRow[]) => TaskRepoRow[];
+    expect(updater([])).toEqual([{ key: "row-0", repositoryId: "repo-2", branch: "" }]);
+  });
+
   it("fills an untouched placeholder row from store-backed settings when localStorage is not primed", async () => {
     window.localStorage.removeItem(STORAGE_KEYS.LAST_REPOSITORY_ID);
     const setRepositories = vi.fn();
@@ -80,7 +110,7 @@ describe("useRepositoryAutoSelectEffect", () => {
         true,
         "ws-1",
         [makeRepository("repo-1"), makeRepository("repo-2")],
-        "repo-2",
+        { lastUsedRepositoryId: "repo-2" },
       ),
     );
 
@@ -103,7 +133,7 @@ describe("useRepositoryAutoSelectEffect", () => {
         true,
         "ws-1",
         [makeRepository("repo-1"), makeRepository("repo-2")],
-        "repo-1",
+        { lastUsedRepositoryId: "repo-1" },
       ),
     );
 
@@ -406,6 +436,30 @@ describe("useDefaultSelectionsEffect — executor-aware agent restoration", () =
 
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(fs.setAgentProfileId).not.toHaveBeenCalled();
+  });
+});
+
+describe("useDefaultSelectionsEffect — executor profile restoration", () => {
+  it("restores executor profile from store-backed settings when localStorage is not primed", async () => {
+    window.localStorage.removeItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID);
+    const fs = makeDefaultSelFs({ executorProfileId: "", executorId: "" });
+    const worktreeExecutor = {
+      id: "exec-worktree",
+      type: "worktree",
+      profiles: [
+        { id: "profile-a", executor_id: "exec-worktree", name: "A" },
+        { id: "profile-b", executor_id: "exec-worktree", name: "B" },
+      ],
+    } as unknown as StoreSelections["executors"][number];
+    const sel = makeSel({
+      executors: [worktreeExecutor],
+      lastUsedExecutorProfileId: "profile-b",
+      userSettingsLoaded: true,
+    } as Partial<StoreSelections>);
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
+
+    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith("profile-b"));
   });
 });
 

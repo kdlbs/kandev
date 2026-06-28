@@ -11,6 +11,8 @@ import { usePRInfoByURL } from "@/hooks/domains/github/use-pr-info-by-url";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { fetchUserSettings } from "@/lib/api/domains/settings-api";
+import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { getTaskCreateDraft, setTaskCreateDraft, removeTaskCreateDraft } from "@/lib/local-storage";
 import type {
   StepType,
@@ -553,6 +555,42 @@ export function useSessionRepoName(isSessionMode: boolean) {
   }, [isSessionMode, activeTaskId, kanbanTasks, reposByWorkspace]);
 }
 
+function useTaskCreateUserSettings(open: boolean) {
+  const userSettings = useAppStore((state) => state.userSettings);
+  const setUserSettings = useAppStore((state) => state.setUserSettings);
+  const [fetchSettled, setFetchSettled] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    if (userSettings.loaded) {
+      setFetchSettled(true);
+      return;
+    }
+    let cancelled = false;
+    setFetchSettled(false);
+    fetchUserSettings({ cache: "no-store" })
+      .then((response) => {
+        if (cancelled || !response?.settings) return;
+        const mapped = mapUserSettingsResponse(response);
+        if (mapped.loaded) setUserSettings(mapped);
+      })
+      .catch(() => {
+        /* Allow normal fallbacks if settings cannot be loaded. */
+      })
+      .finally(() => {
+        if (!cancelled) setFetchSettled(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, setUserSettings, userSettings.loaded]);
+
+  return {
+    loaded: userSettings.loaded || fetchSettled,
+    taskCreateLastUsed: userSettings.taskCreateLastUsed,
+  };
+}
+
 export function useTaskCreateDialogData(
   open: boolean,
   workspaceId: string | null,
@@ -565,9 +603,9 @@ export function useTaskCreateDialogData(
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
   const executors = useAppStore((state) => state.executors.items);
   const settingsData = useAppStore((state) => state.settingsData);
-  const taskCreateLastUsed = useAppStore((state) => state.userSettings.taskCreateLastUsed);
   const availableAgentsLoaded = useAppStore((state) => state.availableAgents.loaded);
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const taskCreateUserSettings = useTaskCreateUserSettings(open);
 
   useSettingsData(open);
   const { repositories, isLoading: repositoriesLoading } = useRepositories(workspaceId, open);
@@ -602,7 +640,8 @@ export function useTaskCreateDialogData(
     repositories,
     repositoriesLoading,
     branchesLoading,
-    taskCreateLastUsed,
+    taskCreateLastUsed: taskCreateUserSettings.taskCreateLastUsed,
+    userSettingsLoaded: taskCreateUserSettings.loaded,
     computed,
   };
 }

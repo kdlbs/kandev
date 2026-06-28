@@ -100,6 +100,9 @@ export type StoreSelections = {
   authLoaded: boolean;
   executors: Executor[];
   workspaceDefaults: Workspace | null | undefined;
+  userSettingsLoaded?: boolean;
+  lastUsedAgentProfileId?: string | null;
+  lastUsedExecutorProfileId?: string | null;
 };
 
 export type DialogComputedValues = {
@@ -166,6 +169,12 @@ export type TaskCreateEffectsArgs = {
   workflows: Array<{ id: string; agent_profile_id?: string }>;
   /** Store-backed last-used repository. Used when the localStorage mirror has not been primed yet. */
   lastUsedRepositoryId?: string | null;
+  /** Whether DB-backed user settings are loaded, or a best-effort fetch has settled. */
+  userSettingsLoaded?: boolean;
+  /** Store-backed last-used agent profile. Used when the localStorage mirror has not been primed yet. */
+  lastUsedAgentProfileId?: string | null;
+  /** Store-backed last-used executor profile. Used when the localStorage mirror has not been primed yet. */
+  lastUsedExecutorProfileId?: string | null;
   /**
    * True when the currently-selected executor is the local-host one (no
    * worktree, no container). Drives the "reset row.branch on local switch"

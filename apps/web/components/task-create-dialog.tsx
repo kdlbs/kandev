@@ -391,6 +391,7 @@ export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     repositories,
     repositoriesLoading,
     taskCreateLastUsed,
+    userSettingsLoaded,
     computed,
   } = useTaskCreateDialogData(open, workspaceId, workflowId, defaultStepId, fs);
   const repositoryLocalPath = resolveSingleRowLocalPath(fs, repositories);
@@ -409,6 +410,9 @@ export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     workflows,
     isLocalExecutor: computed.isLocalExecutor,
     lastUsedRepositoryId: taskCreateLastUsed.repositoryId,
+    userSettingsLoaded,
+    lastUsedAgentProfileId: taskCreateLastUsed.agentProfileId,
+    lastUsedExecutorProfileId: taskCreateLastUsed.executorProfileId,
     preserveBranch: initialValues?.checkoutBranch || initialValues?.branch,
   });
   useLockedFieldSync(open, workflowId, initialValues, fs);
