@@ -40,6 +40,13 @@ function findSessionForTask(state: AppState, taskId: string, sessionId: string) 
   );
 }
 
+function isTaskSessionListHydrating(state: AppState, taskId: string): boolean {
+  const byTask = state.taskSessionsByTask;
+  if (!byTask) return true;
+  if (byTask.loadingByTaskId?.[taskId]) return true;
+  return !byTask.loadedByTaskId?.[taskId];
+}
+
 /**
  * Manual session selection pins a task-scoped session. Background WS events
  * may only override that pin once the pinned session is known terminal, or
@@ -62,9 +69,9 @@ export function shouldPreservePinnedSessionForTask(
 
   const pinnedSession = findSessionForTask(state, taskId, pinnedSessionId);
   if (!pinnedSession) {
-    // Manual pins are created for the active task. If hydration briefly drops
-    // the row, preserve the pin instead of treating the session as replaceable.
-    return true;
+    // Preserve missing rows only while the per-task list is still hydrating.
+    // Once loaded, absence means the pinned session was deleted or went stale.
+    return isTaskSessionListHydrating(state, taskId);
   }
   return !isTerminalSessionState(pinnedSession.state);
 }

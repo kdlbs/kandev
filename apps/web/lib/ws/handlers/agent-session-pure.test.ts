@@ -4,6 +4,7 @@ import {
   isStaleSessionStateEvent,
   pickReplacementSessionId,
   shouldAdoptNewSession,
+  shouldPreservePinnedSessionForTask,
 } from "./agent-session";
 import type { AppState } from "@/lib/state/store";
 import type { TaskSessionState } from "@/lib/types/http";
@@ -182,5 +183,43 @@ describe("pickReplacementSessionId", () => {
 
   it("returns null when the task has no sessions tracked", () => {
     expect(pickReplacementSessionId(makeAppState({}), "t-missing")).toBeNull();
+  });
+});
+
+describe("shouldPreservePinnedSessionForTask", () => {
+  it("preserves a missing pinned session while the per-task list is hydrating", () => {
+    const state = makeAppState({
+      tasks: {
+        activeTaskId: "t-1",
+        activeSessionId: "s-drifted",
+        pinnedSessionId: "s-pinned",
+        lastSessionByTaskId: {},
+      },
+      taskSessionsByTask: {
+        itemsByTaskId: { "t-1": [] },
+        loadedByTaskId: {},
+        loadingByTaskId: { "t-1": true },
+      } as unknown as AppState["taskSessionsByTask"],
+    });
+
+    expect(shouldPreservePinnedSessionForTask(state, "t-1")).toBe(true);
+  });
+
+  it("does not preserve a missing pinned session once the per-task list is loaded", () => {
+    const state = makeAppState({
+      tasks: {
+        activeTaskId: "t-1",
+        activeSessionId: "s-drifted",
+        pinnedSessionId: "s-pinned",
+        lastSessionByTaskId: {},
+      },
+      taskSessionsByTask: {
+        itemsByTaskId: { "t-1": [] },
+        loadedByTaskId: { "t-1": true },
+        loadingByTaskId: {},
+      } as unknown as AppState["taskSessionsByTask"],
+    });
+
+    expect(shouldPreservePinnedSessionForTask(state, "t-1")).toBe(false);
   });
 });
