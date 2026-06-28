@@ -621,9 +621,13 @@ describe("runAutoSessionTabEffect", () => {
       prevSessionIdRef: { current: "session-old" as string | null },
     };
 
+    const previousApi = useDockviewStore.getState().api;
     useDockviewStore.setState({ api });
-    runAutoSessionTabEffect("session-pending", appStore as never, refs as never);
-    useDockviewStore.setState({ api: null });
+    try {
+      runAutoSessionTabEffect("session-pending", appStore as never, refs as never);
+    } finally {
+      useDockviewStore.setState({ api: previousApi });
+    }
 
     expect(refs.prevTaskIdRef.current).toBe("task-A");
     expect(refs.prevSessionIdRef.current).toBe("session-pending");
