@@ -20,11 +20,12 @@ import { STORAGE_KEYS } from "@/lib/settings/constants";
 // so the rest can be undefined behind an `as` cast and never read.
 type Fake = Pick<
   DialogFormState,
-  "selectedWorkflowId" | "setAgentProfileId" | "setWorkflowAgentProfileId"
+  "selectedWorkflowId" | "executorProfileId" | "setAgentProfileId" | "setWorkflowAgentProfileId"
 >;
 function makeFs(overrides: Partial<Fake> = {}): DialogFormState {
   return {
     selectedWorkflowId: null,
+    executorProfileId: "profile-1",
     setAgentProfileId: vi.fn(),
     setWorkflowAgentProfileId: vi.fn(),
     ...overrides,
@@ -275,6 +276,30 @@ describe("useWorkflowAgentProfileEffect", () => {
   });
 });
 
+describe("useWorkflowAgentProfileEffect — settings fallback readiness", () => {
+  it("defers workflow last-used restore until executor compatibility is ready", async () => {
+    const claude = makeProfile("claude");
+    const cursor = makeProfile("cursor");
+    const workflows = [{ id: "wf-1" /* no agent_profile_id */ }];
+    const fsBefore = makeFs({ selectedWorkflowId: "wf-1", executorProfileId: "" });
+
+    const { rerender } = renderHook(
+      ({ fs, compatible }) =>
+        useWorkflowAgentProfileEffect(fs, workflows, [claude, cursor], compatible, claude.id),
+      { initialProps: { fs: fsBefore, compatible: [claude, cursor] } },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fsBefore.setAgentProfileId).not.toHaveBeenCalled();
+
+    const fsAfter = makeFs({ selectedWorkflowId: "wf-1", executorProfileId: "profile-1" });
+    rerender({ fs: fsAfter, compatible: [cursor] });
+
+    await waitFor(() => expect(fsAfter.setAgentProfileId).toHaveBeenCalledWith(""));
+    expect(fsAfter.setAgentProfileId).not.toHaveBeenCalledWith(claude.id);
+  });
+});
+
 type DefaultSelFake = Pick<
   DialogFormState,
   | "agentProfileId"
@@ -334,6 +359,14 @@ function makeWorktreeExecutor(): StoreSelections["executors"][number] {
       { id: "profile-a", executor_id: WORKTREE_EXECUTOR_ID, name: "A" },
       { id: "profile-b", executor_id: WORKTREE_EXECUTOR_ID, name: "B" },
     ],
+  } as unknown as StoreSelections["executors"][number];
+}
+
+function makeLocalExecutor(): StoreSelections["executors"][number] {
+  return {
+    id: "exec-local",
+    type: "local",
+    profiles: [{ id: "profile-local", executor_id: "exec-local", name: "Local" }],
   } as unknown as StoreSelections["executors"][number];
 }
 
@@ -516,6 +549,20 @@ describe("useDefaultSelectionsEffect — executor profile restoration", () => {
     rerender({ sel: selAfter });
 
     await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith("profile-a"));
+  });
+
+  it("keeps deferring when cached executor profile is ineligible for the source mode", async () => {
+    window.localStorage.setItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, JSON.stringify("profile-a"));
+    const fs = makeDefaultSelFs({ executorProfileId: "", executorId: "", noRepository: true });
+    const sel = makeSel({
+      executors: [makeWorktreeExecutor(), makeLocalExecutor()],
+      userSettingsLoaded: false,
+    } as Partial<StoreSelections>);
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fs.setExecutorProfileId).not.toHaveBeenCalled();
   });
 
   it("restores executor profile from store-backed settings when localStorage is not primed", async () => {

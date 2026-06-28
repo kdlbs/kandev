@@ -7,6 +7,7 @@ import { removeLocalStorage, setLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import { createDebugLogger } from "@/lib/debug/log";
+import type { TaskCreateLastUsedState } from "@/lib/state/slices/settings/types";
 
 type TaskCreateLastUsedPatch = {
   repository_id?: string;
@@ -50,6 +51,16 @@ function readPendingLastUsedSync(): TaskCreateLastUsedPatch {
 
 function persistPendingLastUsedSync(patch: TaskCreateLastUsedPatch) {
   setLocalStorage(PENDING_LAST_USED_SYNC_KEY, patch as Record<string, string>);
+}
+
+export function readPendingTaskCreateLastUsedState(): Partial<TaskCreateLastUsedState> {
+  const pending = { ...readPendingLastUsedSync(), ...pendingLastUsed };
+  return {
+    repositoryId: pending.repository_id,
+    branch: pending.branch,
+    agentProfileId: pending.agent_profile_id,
+    executorProfileId: pending.executor_profile_id,
+  };
 }
 
 export function syncTaskCreateLastUsed(patch: TaskCreateLastUsedPatch) {

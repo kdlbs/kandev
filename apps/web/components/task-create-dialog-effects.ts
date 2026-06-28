@@ -258,6 +258,7 @@ type ExecutorAutopickContext = {
 
 type ExecutorProfileLastUsedState = {
   allProfiles: ExecutorProfileCandidate[];
+  eligibleProfiles: ExecutorProfileCandidate[];
   localStorageId: string | null;
   localStorageValid: boolean;
   settingsId: string | null;
@@ -265,20 +266,28 @@ type ExecutorProfileLastUsedState = {
 };
 
 function getExecutorProfileLastUsedState(
-  executors: Executor[],
+  context: ExecutorAutopickContext,
   settingsId: string | null,
 ): ExecutorProfileLastUsedState {
+  const { executors, noRepository, preferLocalExecutor } = context;
   const allProfiles = flattenExecutorProfiles(executors);
+  const eligibleProfiles =
+    noRepository || preferLocalExecutor
+      ? allProfiles.filter((p) => !isWorktreeExecutorType(p._executorType))
+      : allProfiles;
   const localStorageId = getLocalStorage<string | null>(
     STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID,
     null,
   );
   return {
     allProfiles,
+    eligibleProfiles,
     localStorageId,
-    localStorageValid: Boolean(localStorageId && allProfiles.some((p) => p.id === localStorageId)),
+    localStorageValid: Boolean(
+      localStorageId && eligibleProfiles.some((p) => p.id === localStorageId),
+    ),
     settingsId,
-    settingsValid: Boolean(settingsId && allProfiles.some((p) => p.id === settingsId)),
+    settingsValid: Boolean(settingsId && eligibleProfiles.some((p) => p.id === settingsId)),
   };
 }
 
@@ -404,7 +413,7 @@ function useExecutorProfileAutopickEffect({
     // executor default → first eligible profile.
     if (!open || executorProfileId || executors.length === 0) return;
     const lastUsed = getExecutorProfileLastUsedState(
-      executors,
+      context,
       context.lastUsedExecutorProfileId ?? null,
     );
     if (shouldDeferExecutorProfileAutopick(context, lastUsed)) {
