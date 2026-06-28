@@ -69,7 +69,46 @@ type TaskSwitcherProps = {
   deletingTaskId?: string | null;
   isLoading?: boolean;
   totalTaskCount?: number;
+  // Multi-select (cmd/shift click). When the selection is non-empty, plain
+  // clicks toggle instead of navigating; the context menu acts on the selection.
+  selectedTaskIds?: Set<string>;
+  onToggleSelectTask?: (taskId: string) => void;
+  onSelectTaskRange?: (taskId: string) => void;
+  onBulkArchive?: (taskIds: string[]) => void;
+  isMixedWorkflowSelection?: boolean;
 };
+
+/**
+ * Modifier-aware sidebar row click: cmd/ctrl toggles one task, shift extends a
+ * range, a plain click toggles while a selection is active and otherwise
+ * navigates to the task.
+ */
+function dispatchSidebarRowClick(
+  e: React.MouseEvent,
+  taskId: string,
+  isSelecting: boolean,
+  handlers: {
+    onSelectTask: (taskId: string) => void;
+    onToggleSelectTask?: (taskId: string) => void;
+    onSelectTaskRange?: (taskId: string) => void;
+  },
+): void {
+  if (e.metaKey || e.ctrlKey) {
+    e.preventDefault();
+    handlers.onToggleSelectTask?.(taskId);
+    return;
+  }
+  if (e.shiftKey) {
+    e.preventDefault();
+    handlers.onSelectTaskRange?.(taskId);
+    return;
+  }
+  if (isSelecting && handlers.onToggleSelectTask) {
+    handlers.onToggleSelectTask(taskId);
+    return;
+  }
+  handlers.onSelectTask(taskId);
+}
 
 type SubtaskToggleInfo = {
   subtaskCount: number;
@@ -143,6 +182,11 @@ type TaskRowProps = {
   onTogglePin?: (taskId: string) => void;
   isPinned?: boolean;
   deletingTaskId?: string | null;
+  selectedTaskIds?: Set<string>;
+  onToggleSelectTask?: (taskId: string) => void;
+  onSelectTaskRange?: (taskId: string) => void;
+  onBulkArchive?: (taskIds: string[]) => void;
+  isMixedWorkflowSelection?: boolean;
 };
 
 function TaskRow({
@@ -164,8 +208,15 @@ function TaskRow({
   onTogglePin,
   isPinned,
   deletingTaskId,
+  selectedTaskIds,
+  onToggleSelectTask,
+  onSelectTaskRange,
+  onBulkArchive,
+  isMixedWorkflowSelection,
 }: TaskRowProps) {
   const isSelected = task.id === selectedTaskId || task.id === activeTaskId;
+  const isMultiSelected = selectedTaskIds?.has(task.id) ?? false;
+  const isSelecting = (selectedTaskIds?.size ?? 0) > 0;
   const taskSteps = task.workflowId ? stepsByWorkflowId?.[task.workflowId] : undefined;
   return (
     <TaskItemWithContextMenu
@@ -182,8 +233,19 @@ function TaskRow({
       onTogglePin={onTogglePin}
       isPinned={isPinned}
       isDeleting={deletingTaskId === task.id}
+      selectedTaskIds={selectedTaskIds}
+      onBulkArchive={onBulkArchive}
+      isMixedWorkflowSelection={isMixedWorkflowSelection}
     >
       <TaskItem
+        isMultiSelected={isMultiSelected}
+        onSelect={(e) =>
+          dispatchSidebarRowClick(e, task.id, isSelecting, {
+            onSelectTask,
+            onToggleSelectTask,
+            onSelectTaskRange,
+          })
+        }
         title={task.title}
         state={task.state}
         sessionState={task.sessionState}
@@ -343,6 +405,11 @@ type GroupSectionProps = {
   onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
   pinnedSet: Set<string>;
   deletingTaskId?: string | null;
+  selectedTaskIds?: Set<string>;
+  onToggleSelectTask?: (taskId: string) => void;
+  onSelectTaskRange?: (taskId: string) => void;
+  onBulkArchive?: (taskIds: string[]) => void;
+  isMixedWorkflowSelection?: boolean;
 };
 
 function GroupSection({
@@ -369,6 +436,11 @@ function GroupSection({
   onReorderSubtasks,
   pinnedSet,
   deletingTaskId,
+  selectedTaskIds,
+  onToggleSelectTask,
+  onSelectTaskRange,
+  onBulkArchive,
+  isMixedWorkflowSelection,
 }: GroupSectionProps) {
   const totalCount = countGroupTasks(group.tasks, subTasksByParentId);
   const ctx: TaskTreeContext = {
@@ -390,6 +462,11 @@ function GroupSection({
       onMoveToStep,
       onTogglePin,
       deletingTaskId,
+      selectedTaskIds,
+      onToggleSelectTask,
+      onSelectTaskRange,
+      onBulkArchive,
+      isMixedWorkflowSelection,
     },
     onReorderGroup,
     onReorderSubtasks,
@@ -437,6 +514,11 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   deletingTaskId,
   isLoading = false,
   totalTaskCount,
+  selectedTaskIds,
+  onToggleSelectTask,
+  onSelectTaskRange,
+  onBulkArchive,
+  isMixedWorkflowSelection,
 }: TaskSwitcherProps) {
   const pinnedSet = useMemo(() => new Set(pinnedTaskIds ?? []), [pinnedTaskIds]);
   if (isLoading) return <TaskSwitcherSkeleton />;
@@ -478,6 +560,11 @@ export const TaskSwitcher = memo(function TaskSwitcher({
           onReorderSubtasks={onReorderSubtasks}
           pinnedSet={pinnedSet}
           deletingTaskId={deletingTaskId}
+          selectedTaskIds={selectedTaskIds}
+          onToggleSelectTask={onToggleSelectTask}
+          onSelectTaskRange={onSelectTaskRange}
+          onBulkArchive={onBulkArchive}
+          isMixedWorkflowSelection={isMixedWorkflowSelection}
         />
       ))}
     </div>

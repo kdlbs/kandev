@@ -62,6 +62,11 @@ type ContextMenuProps = {
   onTogglePin?: (taskId: string) => void;
   isPinned?: boolean;
   isDeleting?: boolean;
+  /** Active multi-selection; when this task is part of it, actions apply to the whole set. */
+  selectedTaskIds?: Set<string>;
+  onBulkArchive?: (taskIds: string[]) => void;
+  /** True when the selection spans more than one workflow (disables bulk "Move to step"). */
+  isMixedWorkflowSelection?: boolean;
 };
 
 export function TaskItemWithContextMenu({
@@ -79,6 +84,9 @@ export function TaskItemWithContextMenu({
   onTogglePin,
   isPinned,
   isDeleting,
+  selectedTaskIds,
+  onBulkArchive,
+  isMixedWorkflowSelection,
 }: ContextMenuProps) {
   const [contextOpen, setContextOpen] = useState(false);
   const [menuKey, setMenuKey] = useState(0);
@@ -109,6 +117,9 @@ export function TaskItemWithContextMenu({
           onTogglePin={onTogglePin}
           isPinned={isPinned}
           isDeleting={isDeleting}
+          selectedTaskIds={selectedTaskIds}
+          onBulkArchive={onBulkArchive}
+          isMixedWorkflowSelection={isMixedWorkflowSelection}
           closeMenu={closeMenu}
           moveTasks={moveTasks}
         />
@@ -136,9 +147,18 @@ function TaskContextMenuItems({
   onTogglePin,
   isPinned,
   isDeleting,
+  selectedTaskIds,
+  onBulkArchive,
+  isMixedWorkflowSelection,
   closeMenu,
   moveTasks,
 }: TaskContextMenuItemsProps) {
+  // Right-clicking a task that's part of the active selection acts on the whole
+  // selection; right-clicking anything else acts on just that task.
+  const actingIds =
+    selectedTaskIds && selectedTaskIds.has(task.id) && selectedTaskIds.size > 1
+      ? [...selectedTaskIds]
+      : [task.id];
   return (
     <>
       <TaskPinItem
@@ -152,7 +172,13 @@ function TaskContextMenuItems({
         <IconCopy className="mr-2 h-4 w-4" />
         Duplicate
       </ContextMenuItem>
-      <TaskArchiveItem taskId={task.id} disabled={isDeleting} onArchiveTask={onArchiveTask} />
+      <TaskArchiveItem
+        taskId={task.id}
+        actingIds={actingIds}
+        disabled={isDeleting}
+        onArchiveTask={onArchiveTask}
+        onBulkArchive={onBulkArchive}
+      />
       <TaskColorMenu taskId={task.id} disabled={isDeleting} />
       <TaskLinkMenu
         disabled={isDeleting}
@@ -166,6 +192,8 @@ function TaskContextMenuItems({
         steps={steps}
         isDeleting={isDeleting}
         onMoveToStep={onMoveToStep}
+        actingIds={actingIds}
+        isMixedWorkflowSelection={isMixedWorkflowSelection}
         closeMenu={closeMenu}
         moveTasks={moveTasks}
       />
@@ -234,13 +262,27 @@ function TaskRenameItem({
 
 function TaskArchiveItem({
   taskId,
+  actingIds,
   disabled,
   onArchiveTask,
+  onBulkArchive,
 }: {
   taskId: string;
+  actingIds: string[];
   disabled?: boolean;
   onArchiveTask?: (taskId: string) => void;
+  onBulkArchive?: (taskIds: string[]) => void;
 }) {
+  const isBulk = actingIds.length > 1;
+  if (isBulk) {
+    if (!onBulkArchive) return null;
+    return (
+      <ContextMenuItem disabled={disabled} onSelect={() => onBulkArchive(actingIds)}>
+        <IconArchive className="mr-2 h-4 w-4" />
+        Archive {actingIds.length} tasks
+      </ContextMenuItem>
+    );
+  }
   if (!onArchiveTask) return null;
   return (
     <ContextMenuItem disabled={disabled} onSelect={() => onArchiveTask(taskId)}>
@@ -257,21 +299,48 @@ function TaskMoveItems({
   steps,
   isDeleting,
   onMoveToStep,
+  actingIds,
+  isMixedWorkflowSelection,
   closeMenu,
   moveTasks,
-}: Omit<TaskContextMenuItemsProps, "onRenameTask" | "onArchiveTask" | "onDeleteTask">) {
+}: Omit<TaskContextMenuItemsProps, "onRenameTask" | "onArchiveTask" | "onDeleteTask"> & {
+  actingIds: string[];
+}) {
   if (!task.workflowId) return null;
+  const workflowId = task.workflowId;
+  const isBulk = actingIds.length > 1;
+  const runBulkMove = (targetWorkflowId: string, stepId: string) => {
+    closeMenu();
+    void moveTasks(actingIds, targetWorkflowId, stepId).catch(() => {
+      // useTaskWorkflowMove already shows the failure toast.
+    });
+  };
+
+  // For a single task, keep the optimistic same-workflow move. For a bulk
+  // selection spanning workflows, "Move to step" of one workflow is ambiguous,
+  // so disable it (Send to workflow remains the explicit path).
+  let moveToStep: ((stepId: string) => void) | undefined;
+  if (isBulk) {
+    moveToStep = isMixedWorkflowSelection ? undefined : (stepId) => runBulkMove(workflowId, stepId);
+  } else {
+    moveToStep = selectMoveAction(task.id, workflowId, onMoveToStep, closeMenu);
+  }
+
   return (
     <TaskMoveContextMenuItems
-      currentWorkflowId={task.workflowId}
+      currentWorkflowId={workflowId}
       currentStepId={task.workflowStepId}
       workflows={workflows ?? []}
-      stepsByWorkflowId={stepsByWorkflowId ?? (steps ? { [task.workflowId]: steps } : {})}
+      stepsByWorkflowId={stepsByWorkflowId ?? (steps ? { [workflowId]: steps } : {})}
       disabled={isDeleting || task.isArchived}
-      onMoveToStep={selectMoveAction(task.id, task.workflowId, onMoveToStep, closeMenu)}
-      onSendToWorkflow={(workflowId, stepId) => {
+      onMoveToStep={moveToStep}
+      onSendToWorkflow={(targetWorkflowId, stepId) => {
+        if (isBulk) {
+          runBulkMove(targetWorkflowId, stepId);
+          return;
+        }
         closeMenu();
-        void moveTasks([task.id], workflowId, stepId).catch(() => {
+        void moveTasks([task.id], targetWorkflowId, stepId).catch(() => {
           // useTaskWorkflowMove already shows the failure toast.
         });
       }}

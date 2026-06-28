@@ -39,7 +39,15 @@ type TaskItemProps = {
   sessionState?: TaskSessionState;
   isArchived?: boolean;
   isSelected?: boolean;
+  /** Whether this row is part of an active multi-selection (distinct from the active-task highlight). */
+  isMultiSelected?: boolean;
   onClick?: () => void;
+  /**
+   * Modifier-aware mouse handler. When provided, the row delegates click to this
+   * (cmd/shift/plain dispatch lives in the parent); `onClick` remains the plain
+   * keyboard-activation path.
+   */
+  onSelect?: (e: React.MouseEvent) => void;
   diffStats?: DiffStats;
   isRemoteExecutor?: boolean;
   remoteExecutorType?: string;
@@ -106,6 +114,28 @@ function handleTaskItemKeyDown(e: React.KeyboardEvent<HTMLDivElement>, onClick?:
   if (e.key !== "Enter" && e.key !== " ") return;
   e.preventDefault();
   onClick?.();
+}
+
+function taskItemRowClassName(
+  isSelected: boolean,
+  isMultiSelected: boolean,
+  isRoot: boolean,
+): string {
+  return cn(
+    "group relative flex w-full items-start gap-2 py-2 pr-3 text-left text-sm outline-none cursor-pointer",
+    "transition-colors duration-75 hover:bg-foreground/[0.05]",
+    isSelected && "bg-primary/10",
+    isMultiSelected && "bg-primary/5 ring-1 ring-inset ring-primary/40",
+    isRoot && "pl-3",
+  );
+}
+
+/** Mouse uses the modifier-aware `onSelect`; falls back to the plain `onClick`. */
+function taskItemRowClick(
+  onSelect: ((e: React.MouseEvent) => void) | undefined,
+  onClick: (() => void) | undefined,
+): (e: React.MouseEvent) => void {
+  return (e) => (onSelect ? onSelect(e) : onClick?.());
 }
 
 function TaskStateIcon({
@@ -347,7 +377,9 @@ export const TaskItem = memo(function TaskItem({
   sessionState,
   isArchived,
   isSelected = false,
+  isMultiSelected = false,
   onClick,
+  onSelect,
   diffStats,
   isRemoteExecutor,
   remoteExecutorType,
@@ -382,17 +414,14 @@ export const TaskItem = memo(function TaskItem({
       role="button"
       tabIndex={0}
       data-testid="sidebar-task-item"
+      data-task-id={taskId}
       data-active={isSelected ? "true" : "false"}
+      data-multiselected={isMultiSelected ? "true" : undefined}
       aria-current={isSelected ? "true" : undefined}
-      onClick={onClick}
+      onClick={taskItemRowClick(onSelect, onClick)}
       onKeyDown={(e) => handleTaskItemKeyDown(e, onClick)}
       style={indent.depth > 0 ? { paddingLeft: indent.paddingLeftPx } : undefined}
-      className={cn(
-        "group relative flex w-full items-start gap-2 py-2 pr-3 text-left text-sm outline-none cursor-pointer",
-        "transition-colors duration-75 hover:bg-foreground/[0.05]",
-        isSelected && "bg-primary/10",
-        indent.depth === 0 && "pl-3",
-      )}
+      className={taskItemRowClassName(isSelected, isMultiSelected, indent.depth === 0)}
     >
       <SelectionBar isSelected={isSelected} color={taskColor} />
       <RowConnector depth={indent.depth} leftPx={indent.connectorLeftPx} />
