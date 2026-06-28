@@ -197,6 +197,17 @@ export const INITIAL_STATE: MultiSelectState = {
 };
 
 /**
+ * Pick a valid range anchor after the selection set is replaced wholesale: keep
+ * the existing anchor if it survived, otherwise fall back to any remaining id
+ * (or null when the selection is now empty).
+ */
+function realignAnchor(state: MultiSelectState, ids: Set<string>): string | null {
+  if (ids.size === 0) return null;
+  if (state.anchorId && ids.has(state.anchorId)) return state.anchorId;
+  return ids.values().next().value ?? null;
+}
+
+/**
  * Union-select every id from the anchor to `taskId` (inclusive) within
  * `orderedIds`. When there is no valid anchor in `orderedIds` (first shift
  * click, or anchor lives in a different column), fall back to selecting just
@@ -231,18 +242,26 @@ export function multiSelectReducer(
       return INITIAL_STATE;
     case "toggle_select": {
       const next = new Set(state.selectedIds);
-      if (next.has(action.taskId)) next.delete(action.taskId);
-      else next.add(action.taskId);
-      return { ...state, selectedIds: next, anchorId: action.taskId };
+      const added = !next.has(action.taskId);
+      if (added) next.add(action.taskId);
+      else next.delete(action.taskId);
+      // Adding anchors to the toggled task; removing realigns to a surviving id
+      // (or clears the anchor when the selection is now empty) so a later
+      // Shift+click can't range from a stale anchor.
+      return {
+        ...state,
+        selectedIds: next,
+        anchorId: added ? action.taskId : realignAnchor(state, next),
+      };
     }
     case "select_range":
       return applyRangeSelect(state, action.taskId, action.orderedIds);
     case "set_selected":
-      return {
-        ...state,
-        selectedIds: action.ids,
-        anchorId: action.ids.size ? state.anchorId : null,
-      };
+      // Keep the range anchor pointing at a still-selected task. After a partial
+      // bulk failure (selection replaced with the failed ids) the old anchor may
+      // be gone, so realign to a remaining id rather than stranding the next
+      // Shift+click on an invalid anchor.
+      return { ...state, selectedIds: action.ids, anchorId: realignAnchor(state, action.ids) };
     case "set_enabled":
       return { ...state, isMultiSelectEnabled: action.value };
     case "set_deleting":

@@ -6,8 +6,10 @@ import {
   multiSelectReducer,
   useTaskMultiSelectStore,
 } from "./use-task-multi-select";
-import { useTaskActions } from "./use-task-actions";
+import { useTaskActions, useArchiveAndSwitchTask } from "./use-task-actions";
 import { useTaskWorkflowMove } from "./use-task-workflow-move";
+import { useToast } from "@/components/toast-provider";
+import { useAppStoreApi } from "@/components/state-provider";
 
 /**
  * Sidebar task multi-select. Reuses the shared selection reducer (toggle +
@@ -28,9 +30,12 @@ export function useSidebarMultiSelect(workspaceId: string | null) {
     dispatch({ type: "reset" });
   }, [workspaceId]);
 
+  const store = useAppStoreApi();
   const { archiveTaskById } = useTaskActions();
+  const archiveAndSwitch = useArchiveAndSwitchTask({ useLayoutSwitch: true });
   const { removeTasksFromStore } = useTaskMultiSelectStore();
   const moveTasks = useTaskWorkflowMove();
+  const { toast } = useToast();
 
   const toggleSelect = useCallback(
     (taskId: string) => dispatch({ type: "toggle_select", taskId }),
@@ -48,17 +53,40 @@ export function useSidebarMultiSelect(workspaceId: string | null) {
   const bulkArchive = useCallback(
     async (ids: string[], opts?: { cascade?: boolean }) => {
       if (ids.length === 0) return;
+      // If the open task is in the set, archive it via the switch-aware path last
+      // so the URL/layout moves off it instead of showing stale content.
+      const activeId = store.getState().tasks.activeTaskId;
+      const activeInSet = activeId != null && ids.includes(activeId);
+      const restIds = activeInSet ? ids.filter((id) => id !== activeId) : ids;
       setIsArchiving(true);
       try {
-        const results = await Promise.allSettled(ids.map((id) => archiveTaskById(id, opts)));
-        const succeeded = new Set(ids.filter((_, i) => results[i].status === "fulfilled"));
-        removeTasksFromStore(succeeded);
+        const results = await Promise.allSettled(restIds.map((id) => archiveTaskById(id, opts)));
+        const failed = restIds.filter((_, i) => results[i].status === "rejected");
+        const succeeded = restIds.filter((_, i) => results[i].status === "fulfilled");
+        if (succeeded.length > 0) removeTasksFromStore(new Set(succeeded));
+        if (activeInSet) {
+          try {
+            await archiveAndSwitch(activeId!, opts);
+          } catch {
+            failed.push(activeId!);
+          }
+        }
+        if (failed.length > 0) {
+          // Mirror the kanban hook: keep the failed ids selected so the user can
+          // retry, and surface the failure instead of silently clearing.
+          dispatch({ type: "set_selected", ids: new Set(failed) });
+          toast({
+            title: `Failed to archive ${failed.length} task${failed.length === 1 ? "" : "s"}`,
+            variant: "error",
+          });
+          return;
+        }
+        clearSelection();
       } finally {
         setIsArchiving(false);
-        clearSelection();
       }
     },
-    [archiveTaskById, removeTasksFromStore, clearSelection],
+    [store, archiveTaskById, archiveAndSwitch, removeTasksFromStore, clearSelection, toast],
   );
 
   const bulkMove = useCallback(

@@ -65,6 +65,7 @@ type ContextMenuProps = {
   /** Active multi-selection; when this task is part of it, actions apply to the whole set. */
   selectedTaskIds?: Set<string>;
   onBulkArchive?: (taskIds: string[]) => void;
+  onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
   /** True when the selection spans more than one workflow (disables bulk "Move to step"). */
   isMixedWorkflowSelection?: boolean;
 };
@@ -86,6 +87,7 @@ export function TaskItemWithContextMenu({
   isDeleting,
   selectedTaskIds,
   onBulkArchive,
+  onBulkMove,
   isMixedWorkflowSelection,
 }: ContextMenuProps) {
   const [contextOpen, setContextOpen] = useState(false);
@@ -119,6 +121,7 @@ export function TaskItemWithContextMenu({
           isDeleting={isDeleting}
           selectedTaskIds={selectedTaskIds}
           onBulkArchive={onBulkArchive}
+          onBulkMove={onBulkMove}
           isMixedWorkflowSelection={isMixedWorkflowSelection}
           closeMenu={closeMenu}
           moveTasks={moveTasks}
@@ -149,16 +152,16 @@ function TaskContextMenuItems({
   isDeleting,
   selectedTaskIds,
   onBulkArchive,
+  onBulkMove,
   isMixedWorkflowSelection,
   closeMenu,
   moveTasks,
 }: TaskContextMenuItemsProps) {
-  // Right-clicking a task that's part of the active selection acts on the whole
-  // selection; right-clicking anything else acts on just that task.
-  const actingIds =
-    selectedTaskIds && selectedTaskIds.has(task.id) && selectedTaskIds.size > 1
-      ? [...selectedTaskIds]
-      : [task.id];
+  // Right-clicking any row that's part of the active selection acts on the whole
+  // selection (even a one-row selection, so the action clears it); right-clicking
+  // a non-selected row acts on just that task and leaves the selection intact.
+  const actingOnSelection = !!selectedTaskIds?.has(task.id);
+  const actingIds = actingOnSelection ? [...selectedTaskIds!] : [task.id];
   return (
     <>
       <TaskPinItem
@@ -175,6 +178,7 @@ function TaskContextMenuItems({
       <TaskArchiveItem
         taskId={task.id}
         actingIds={actingIds}
+        actingOnSelection={actingOnSelection}
         disabled={isDeleting}
         onArchiveTask={onArchiveTask}
         onBulkArchive={onBulkArchive}
@@ -193,6 +197,8 @@ function TaskContextMenuItems({
         isDeleting={isDeleting}
         onMoveToStep={onMoveToStep}
         actingIds={actingIds}
+        actingOnSelection={actingOnSelection}
+        onBulkMove={onBulkMove}
         isMixedWorkflowSelection={isMixedWorkflowSelection}
         closeMenu={closeMenu}
         moveTasks={moveTasks}
@@ -263,23 +269,26 @@ function TaskRenameItem({
 function TaskArchiveItem({
   taskId,
   actingIds,
+  actingOnSelection,
   disabled,
   onArchiveTask,
   onBulkArchive,
 }: {
   taskId: string;
   actingIds: string[];
+  actingOnSelection: boolean;
   disabled?: boolean;
   onArchiveTask?: (taskId: string) => void;
   onBulkArchive?: (taskIds: string[]) => void;
 }) {
-  const isBulk = actingIds.length > 1;
-  if (isBulk) {
-    if (!onBulkArchive) return null;
+  // Acting on the selection routes through the bulk path (which clears the
+  // selection afterwards) even for a single selected row.
+  if (actingOnSelection && onBulkArchive) {
+    const n = actingIds.length;
     return (
       <ContextMenuItem disabled={disabled} onSelect={() => onBulkArchive(actingIds)}>
         <IconArchive className="mr-2 h-4 w-4" />
-        Archive {actingIds.length} tasks
+        {n > 1 ? `Archive ${n} tasks` : "Archive"}
       </ContextMenuItem>
     );
   }
@@ -300,28 +309,39 @@ function TaskMoveItems({
   isDeleting,
   onMoveToStep,
   actingIds,
+  actingOnSelection,
+  onBulkMove,
   isMixedWorkflowSelection,
   closeMenu,
   moveTasks,
 }: Omit<TaskContextMenuItemsProps, "onRenameTask" | "onArchiveTask" | "onDeleteTask"> & {
   actingIds: string[];
+  actingOnSelection: boolean;
 }) {
   if (!task.workflowId) return null;
   const workflowId = task.workflowId;
-  const isBulk = actingIds.length > 1;
-  const runBulkMove = (targetWorkflowId: string, stepId: string) => {
+  // Moving a selection routes through the sidebar hook's bulkMove, which clears
+  // the selection afterwards. Fall back to a raw move when no bulk handler is
+  // wired (e.g. the kanban-less callers that don't manage a selection).
+  const runSelectionMove = (targetWorkflowId: string, stepId: string) => {
     closeMenu();
+    if (onBulkMove) {
+      onBulkMove(actingIds, targetWorkflowId, stepId);
+      return;
+    }
     void moveTasks(actingIds, targetWorkflowId, stepId).catch(() => {
       // useTaskWorkflowMove already shows the failure toast.
     });
   };
 
-  // For a single task, keep the optimistic same-workflow move. For a bulk
-  // selection spanning workflows, "Move to step" of one workflow is ambiguous,
-  // so disable it (Send to workflow remains the explicit path).
+  // Single-task right-click keeps the optimistic same-workflow move. A selection
+  // spanning workflows makes "Move to step" of one workflow ambiguous, so disable
+  // it there (Send to workflow remains the explicit path).
   let moveToStep: ((stepId: string) => void) | undefined;
-  if (isBulk) {
-    moveToStep = isMixedWorkflowSelection ? undefined : (stepId) => runBulkMove(workflowId, stepId);
+  if (actingOnSelection) {
+    moveToStep = isMixedWorkflowSelection
+      ? undefined
+      : (stepId) => runSelectionMove(workflowId, stepId);
   } else {
     moveToStep = selectMoveAction(task.id, workflowId, onMoveToStep, closeMenu);
   }
@@ -335,8 +355,8 @@ function TaskMoveItems({
       disabled={isDeleting || task.isArchived}
       onMoveToStep={moveToStep}
       onSendToWorkflow={(targetWorkflowId, stepId) => {
-        if (isBulk) {
-          runBulkMove(targetWorkflowId, stepId);
+        if (actingOnSelection) {
+          runSelectionMove(targetWorkflowId, stepId);
           return;
         }
         closeMenu();

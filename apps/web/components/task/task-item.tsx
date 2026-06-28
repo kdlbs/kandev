@@ -125,7 +125,10 @@ function taskItemRowClassName(
     "group relative flex w-full items-start gap-2 py-2 pr-3 text-left text-sm outline-none cursor-pointer",
     "transition-colors duration-75 hover:bg-foreground/[0.05]",
     isSelected && "bg-primary/10",
-    isMultiSelected && "bg-primary/5 ring-1 ring-inset ring-primary/40",
+    // When a row is both the active task and multi-selected, keep the stronger
+    // active background and just add the selection ring on top.
+    isMultiSelected && !isSelected && "bg-primary/5",
+    isMultiSelected && "ring-1 ring-inset ring-primary/40",
     isRoot && "pl-3",
   );
 }
@@ -414,7 +417,6 @@ export const TaskItem = memo(function TaskItem({
       role="button"
       tabIndex={0}
       data-testid="sidebar-task-item"
-      data-task-id={taskId}
       data-active={isSelected ? "true" : "false"}
       data-multiselected={isMultiSelected ? "true" : undefined}
       aria-current={isSelected ? "true" : undefined}

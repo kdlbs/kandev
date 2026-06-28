@@ -258,7 +258,8 @@ function KanbanCardDialogs({
  * column; either modifier enters multi-select mode without the toggle button.
  * A plain click toggles while in multi-select mode, otherwise previews/opens.
  */
-function dispatchKanbanCardClick(
+/** @internal Exported for unit testing the four-branch click dispatch. */
+export function dispatchKanbanCardClick(
   e: React.MouseEvent,
   taskId: string,
   task: Task,

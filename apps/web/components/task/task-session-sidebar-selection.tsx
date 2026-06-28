@@ -27,8 +27,15 @@ export function useSidebarSelection({
   displayTasks: Array<{ id: string; workflowId?: string; remoteExecutorType?: string | null }>;
 }) {
   const multiSelect = useSidebarMultiSelect(workspaceId);
-  const { selectedIds, isSelecting, clearSelection, selectRange, toggleSelect, bulkArchive } =
-    multiSelect;
+  const {
+    selectedIds,
+    isSelecting,
+    clearSelection,
+    selectRange,
+    toggleSelect,
+    bulkArchive,
+    bulkMove,
+  } = multiSelect;
   const [bulkArchiveState, setBulkArchiveState] = useState<BulkArchiveState | null>(null);
 
   const visibleTaskIds = useMemo(
@@ -76,11 +83,19 @@ export function useSidebarSelection({
     return () => window.removeEventListener("keydown", onKey);
   }, [isSelecting, clearSelection]);
 
+  // Stable ref so TaskSwitcher's React.memo isn't defeated by a fresh closure
+  // on every unrelated sidebar re-render.
+  const onSelectTaskRange = useCallback(
+    (taskId: string) => selectRange(taskId, visibleTaskIds),
+    [selectRange, visibleTaskIds],
+  );
+
   const switcherProps = {
     selectedTaskIds: selectedIds,
     onToggleSelectTask: toggleSelect,
-    onSelectTaskRange: (taskId: string) => selectRange(taskId, visibleTaskIds),
+    onSelectTaskRange,
     onBulkArchive: handleBulkArchive,
+    onBulkMove: bulkMove,
     isMixedWorkflowSelection,
   };
 

@@ -75,6 +75,7 @@ type TaskSwitcherProps = {
   onToggleSelectTask?: (taskId: string) => void;
   onSelectTaskRange?: (taskId: string) => void;
   onBulkArchive?: (taskIds: string[]) => void;
+  onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
   isMixedWorkflowSelection?: boolean;
 };
 
@@ -83,7 +84,8 @@ type TaskSwitcherProps = {
  * range, a plain click toggles while a selection is active and otherwise
  * navigates to the task.
  */
-function dispatchSidebarRowClick(
+/** @internal Exported for unit testing the modifier-aware click dispatch. */
+export function dispatchSidebarRowClick(
   e: React.MouseEvent,
   taskId: string,
   isSelecting: boolean,
@@ -93,14 +95,17 @@ function dispatchSidebarRowClick(
     onSelectTaskRange?: (taskId: string) => void;
   },
 ): void {
-  if (e.metaKey || e.ctrlKey) {
+  // Only intercept a modifier click when the matching handler is wired (the
+  // mobile switcher renders without selection handlers — there a Cmd/Shift click
+  // must still navigate rather than become a no-op).
+  if ((e.metaKey || e.ctrlKey) && handlers.onToggleSelectTask) {
     e.preventDefault();
-    handlers.onToggleSelectTask?.(taskId);
+    handlers.onToggleSelectTask(taskId);
     return;
   }
-  if (e.shiftKey) {
+  if (e.shiftKey && handlers.onSelectTaskRange) {
     e.preventDefault();
-    handlers.onSelectTaskRange?.(taskId);
+    handlers.onSelectTaskRange(taskId);
     return;
   }
   if (isSelecting && handlers.onToggleSelectTask) {
@@ -186,6 +191,7 @@ type TaskRowProps = {
   onToggleSelectTask?: (taskId: string) => void;
   onSelectTaskRange?: (taskId: string) => void;
   onBulkArchive?: (taskIds: string[]) => void;
+  onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
   isMixedWorkflowSelection?: boolean;
 };
 
@@ -212,6 +218,7 @@ function TaskRow({
   onToggleSelectTask,
   onSelectTaskRange,
   onBulkArchive,
+  onBulkMove,
   isMixedWorkflowSelection,
 }: TaskRowProps) {
   const isSelected = task.id === selectedTaskId || task.id === activeTaskId;
@@ -235,6 +242,7 @@ function TaskRow({
       isDeleting={deletingTaskId === task.id}
       selectedTaskIds={selectedTaskIds}
       onBulkArchive={onBulkArchive}
+      onBulkMove={onBulkMove}
       isMixedWorkflowSelection={isMixedWorkflowSelection}
     >
       <TaskItem
@@ -409,6 +417,7 @@ type GroupSectionProps = {
   onToggleSelectTask?: (taskId: string) => void;
   onSelectTaskRange?: (taskId: string) => void;
   onBulkArchive?: (taskIds: string[]) => void;
+  onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
   isMixedWorkflowSelection?: boolean;
 };
 
@@ -440,6 +449,7 @@ function GroupSection({
   onToggleSelectTask,
   onSelectTaskRange,
   onBulkArchive,
+  onBulkMove,
   isMixedWorkflowSelection,
 }: GroupSectionProps) {
   const totalCount = countGroupTasks(group.tasks, subTasksByParentId);
@@ -466,6 +476,7 @@ function GroupSection({
       onToggleSelectTask,
       onSelectTaskRange,
       onBulkArchive,
+      onBulkMove,
       isMixedWorkflowSelection,
     },
     onReorderGroup,
@@ -518,6 +529,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   onToggleSelectTask,
   onSelectTaskRange,
   onBulkArchive,
+  onBulkMove,
   isMixedWorkflowSelection,
 }: TaskSwitcherProps) {
   const pinnedSet = useMemo(() => new Set(pinnedTaskIds ?? []), [pinnedTaskIds]);
@@ -564,6 +576,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
           onToggleSelectTask={onToggleSelectTask}
           onSelectTaskRange={onSelectTaskRange}
           onBulkArchive={onBulkArchive}
+          onBulkMove={onBulkMove}
           isMixedWorkflowSelection={isMixedWorkflowSelection}
         />
       ))}
