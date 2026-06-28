@@ -5,7 +5,8 @@ import { useTaskActions } from "@/hooks/use-task-actions";
 import { useAppStoreApi } from "@/components/state-provider";
 import type { KanbanState } from "@/lib/state/slices";
 
-function useTaskMultiSelectStore() {
+/** @internal Exported for reuse by the sidebar multi-select hook. */
+export function useTaskMultiSelectStore() {
   const store = useAppStoreApi();
 
   const removeTasksFromStore = useCallback(
@@ -170,11 +171,17 @@ type MultiSelectState = {
   isMultiSelectEnabled: boolean;
   isDeleting: boolean;
   isArchiving: boolean;
+  /**
+   * The task that anchors a shift-click range selection — the last task the
+   * user toggled/range-selected. `null` when there is no active anchor.
+   */
+  anchorId: string | null;
 };
 
 type MultiSelectAction =
   | { type: "reset" }
   | { type: "toggle_select"; taskId: string }
+  | { type: "select_range"; taskId: string; orderedIds: string[] }
   | { type: "set_selected"; ids: Set<string> }
   | { type: "set_enabled"; value: boolean }
   | { type: "set_deleting"; value: boolean }
@@ -186,7 +193,33 @@ export const INITIAL_STATE: MultiSelectState = {
   isMultiSelectEnabled: false,
   isDeleting: false,
   isArchiving: false,
+  anchorId: null,
 };
+
+/**
+ * Union-select every id from the anchor to `taskId` (inclusive) within
+ * `orderedIds`. When there is no valid anchor in `orderedIds` (first shift
+ * click, or anchor lives in a different column), fall back to selecting just
+ * `taskId` and making it the new anchor.
+ */
+function applyRangeSelect(
+  state: MultiSelectState,
+  taskId: string,
+  orderedIds: string[],
+): MultiSelectState {
+  const anchor = state.anchorId;
+  const anchorIdx = anchor ? orderedIds.indexOf(anchor) : -1;
+  const targetIdx = orderedIds.indexOf(taskId);
+  if (anchorIdx === -1 || targetIdx === -1) {
+    const next = new Set(state.selectedIds);
+    next.add(taskId);
+    return { ...state, selectedIds: next, anchorId: taskId };
+  }
+  const [lo, hi] = anchorIdx < targetIdx ? [anchorIdx, targetIdx] : [targetIdx, anchorIdx];
+  const next = new Set(state.selectedIds);
+  for (let i = lo; i <= hi; i++) next.add(orderedIds[i]);
+  return { ...state, selectedIds: next };
+}
 
 /** @internal Exported for testing. */
 export function multiSelectReducer(
@@ -200,10 +233,16 @@ export function multiSelectReducer(
       const next = new Set(state.selectedIds);
       if (next.has(action.taskId)) next.delete(action.taskId);
       else next.add(action.taskId);
-      return { ...state, selectedIds: next };
+      return { ...state, selectedIds: next, anchorId: action.taskId };
     }
+    case "select_range":
+      return applyRangeSelect(state, action.taskId, action.orderedIds);
     case "set_selected":
-      return { ...state, selectedIds: action.ids };
+      return {
+        ...state,
+        selectedIds: action.ids,
+        anchorId: action.ids.size ? state.anchorId : null,
+      };
     case "set_enabled":
       return { ...state, isMultiSelectEnabled: action.value };
     case "set_deleting":
@@ -252,6 +291,12 @@ export function useTaskMultiSelect(workflowId: string | null) {
     [],
   );
 
+  const selectRange = useCallback(
+    (taskId: string, orderedIds: string[]) =>
+      dispatch({ type: "select_range", taskId, orderedIds }),
+    [],
+  );
+
   const enableMultiSelect = useCallback(
     () => setIsMultiSelectEnabled(true),
     [setIsMultiSelectEnabled],
@@ -293,6 +338,7 @@ export function useTaskMultiSelect(workflowId: string | null) {
     enableMultiSelect,
     toggleMultiSelect,
     toggleSelect,
+    selectRange,
     clearSelection,
     bulkDelete,
     bulkArchive,
