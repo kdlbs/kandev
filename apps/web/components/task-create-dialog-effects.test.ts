@@ -370,7 +370,7 @@ function makeLocalExecutor(): StoreSelections["executors"][number] {
   } as unknown as StoreSelections["executors"][number];
 }
 
-describe("useDefaultSelectionsEffect — agent settings deferral", () => {
+describe("decideAgentProfileAutopick — user settings deferral", () => {
   it("defers agent auto-pick until user settings have loaded or settled", () => {
     const cursor = makeProfile("cursor");
     const deferred = decideAgentProfileAutopick({
@@ -540,6 +540,7 @@ describe("useDefaultSelectionsEffect — executor profile restoration", () => {
     });
 
     await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fs.setExecutorId).not.toHaveBeenCalled();
     expect(fs.setExecutorProfileId).not.toHaveBeenCalled();
 
     const selAfter = makeSel({

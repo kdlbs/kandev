@@ -146,6 +146,8 @@ function CreateModeBody(props: DialogFormBodyProps) {
         freshBranchEnabled={fs.freshBranchEnabled}
         onToggleFreshBranch={onToggleFreshBranch}
         isLocalExecutor={isLocalExecutor}
+        lastUsedBranch={props.lastUsedBranch}
+        userSettingsLoaded={props.userSettingsLoaded}
         onToggleNoRepository={props.onToggleNoRepository}
         onWorkspacePathChange={props.onWorkspacePathChange}
       />
@@ -413,6 +415,7 @@ export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     userSettingsLoaded,
     lastUsedAgentProfileId: taskCreateLastUsed.agentProfileId,
     lastUsedExecutorProfileId: taskCreateLastUsed.executorProfileId,
+    lastUsedBranch: taskCreateLastUsed.branch,
     preserveBranch: initialValues?.checkoutBranch || initialValues?.branch,
   });
   useLockedFieldSync(open, workflowId, initialValues, fs);
@@ -455,6 +458,8 @@ export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     submitHandlers,
     handleKeyDown,
     freshBranchAvailable,
+    taskCreateLastUsed,
+    userSettingsLoaded,
     guardedHandleSubmit,
     enhance: useEnhanceForDialog(fs),
     handleJiraImport: useJiraImportHandler(fs),

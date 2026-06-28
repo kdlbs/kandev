@@ -368,6 +368,20 @@ function useExecutorIdAutopickEffect({
   const { executors, workspaceDefaults, noRepository, preferLocalExecutor } = context;
   useEffect(() => {
     if (!open || executorId || executors.length === 0) return;
+    if (context.userSettingsLoaded === false) {
+      if (isDebug()) {
+        selectionDebug("executor-autopick", {
+          current: "-",
+          pick: "-",
+          executor_count: executors.length,
+          workspace_default: workspaceDefaults?.default_executor_id ?? "-",
+          no_repository: noRepository,
+          prefer_local_executor: preferLocalExecutor,
+          source: "user-settings-loading",
+        });
+      }
+      return;
+    }
     const pick = pickDefaultExecutorId(
       executors,
       workspaceDefaults,
@@ -393,6 +407,7 @@ function useExecutorIdAutopickEffect({
     setExecutorId,
     noRepository,
     preferLocalExecutor,
+    context.userSettingsLoaded,
   ]);
 }
 

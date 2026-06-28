@@ -49,8 +49,13 @@ export function toMessageAttachments(
   );
 }
 
-export function autoSelectBranch(branchList: Branch[], setBranch: (value: string) => void): void {
-  const lastUsedBranch = getLocalStorage<string | null>(STORAGE_KEYS.LAST_BRANCH, null);
+export function autoSelectBranch(
+  branchList: Branch[],
+  setBranch: (value: string) => void,
+  options: { lastUsedBranch?: string | null; userSettingsLoaded?: boolean } = {},
+): void {
+  const localStorageBranch = getLocalStorage<string | null>(STORAGE_KEYS.LAST_BRANCH, null);
+  const lastUsedBranch = localStorageBranch ?? options.lastUsedBranch ?? null;
   const lastUsedValid = Boolean(
     lastUsedBranch &&
     branchList.some((b) => {
@@ -67,6 +72,16 @@ export function autoSelectBranch(branchList: Branch[], setBranch: (value: string
       branch_count: branchList.length,
     });
     setBranch(lastUsedBranch);
+    return;
+  }
+  if (!lastUsedBranch && options.userSettingsLoaded === false) {
+    selectionDebug("branch-autopick", {
+      source: "user-settings-loading",
+      pick: "-",
+      local_storage_value: "-",
+      local_storage_valid: false,
+      branch_count: branchList.length,
+    });
     return;
   }
   const preferredBranch = selectPreferredBranch(branchList);

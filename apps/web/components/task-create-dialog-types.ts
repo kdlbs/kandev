@@ -175,6 +175,8 @@ export type TaskCreateEffectsArgs = {
   lastUsedAgentProfileId?: string | null;
   /** Store-backed last-used executor profile. Used when the localStorage mirror has not been primed yet. */
   lastUsedExecutorProfileId?: string | null;
+  /** Store-backed last-used branch. Used when the localStorage mirror has not been primed yet. */
+  lastUsedBranch?: string | null;
   /**
    * True when the currently-selected executor is the local-host one (no
    * worktree, no container). Drives the "reset row.branch on local switch"
@@ -416,6 +418,8 @@ export type DialogFormBodyProps = {
   workflowAgentLocked: boolean;
   /** Workspace repositories — driven into the chip row for repo + branch picks. */
   repositories: Repository[];
+  lastUsedBranch?: string | null;
+  userSettingsLoaded?: boolean;
   /** Computed in the parent: single-row + local executor + not URL mode. */
   freshBranchAvailable: boolean;
   /**
