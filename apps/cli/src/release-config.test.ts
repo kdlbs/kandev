@@ -252,21 +252,28 @@ describe("release desktop artifacts", () => {
             tauri_bundles: deb,rpm`);
   });
 
-  it("fails public macOS and Windows desktop builds closed when signing secrets are absent", () => {
+  it("supports unsigned desktop releases separately from validation-only builds", () => {
     const workflow = releaseWorkflow();
     const signingDocs = readRepoFile("docs/desktop-tauri-signing.md");
     const tauriConfig = readRepoFile("apps/desktop/src-tauri/tauri.conf.json");
     const windowsSignScript = readRepoFile("apps/desktop/src-tauri/windows-sign.ps1");
 
     expect(workflow).toContain("allow_unsigned_desktop");
-    expect(workflow).toContain("Unsigned desktop artifacts are internal validation only");
+    expect(workflow).toContain("desktop_validation_only");
     expect(workflow).toContain("ref: ${{ needs.prepare.outputs.ref }}");
     expect(workflow).toContain("persist-credentials: false");
-    expect(workflow).toContain("Unsigned desktop validation summary");
+    expect(workflow).toContain("Desktop validation summary");
     expect(workflow).toContain("No release PR, tag, GitHub release, public container tags");
-    expect(workflow).toContain("if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}");
+    expect(workflow).toContain("if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}");
+    expect(workflow).toContain('if [ "$DESKTOP_VALIDATION_ONLY" = "true" ]; then');
+    expect(workflow).not.toContain(
+      'if [ "$ALLOW_UNSIGNED_DESKTOP" = "true" ]; then\n            echo "ref=$CURRENT_REF"',
+    );
     expect(workflow).toContain("docker-amd64:");
     expect(workflow).toContain("docker-universal-manifest:");
+    expect(workflow).toContain('if [ "$ALLOW_UNSIGNED_DESKTOP" = "true" ]; then');
+    expect(workflow).toContain("unset APPLE_CERTIFICATE");
+    expect(workflow).toContain("unset APPLE_ID");
 
     for (const key of [
       "APPLE_CERTIFICATE",
@@ -303,9 +310,12 @@ describe("release desktop artifacts", () => {
     expect(tauriConfig).toContain("windows-sign.ps1");
     expect(tauriConfig).not.toContain('"csp": null');
     expect(windowsSignScript).toContain('"https://timestamp.digicert.com"');
+    expect(windowsSignScript).toContain("Skipping Windows signing for unsigned desktop artifact");
     expect(windowsSignScript).toContain("Remove-Item -LiteralPath $certificatePath");
     expect(signingDocs).toContain("Public recommended desktop releases require signing");
     expect(signingDocs).toContain("allow_unsigned_desktop");
+    expect(signingDocs).toContain("desktop_validation_only");
+    expect(signingDocs).toContain("publishes the normal release outputs");
     expect(signingDocs).toContain("does not publish a GitHub release");
     expect(signingDocs).toContain("public container tags");
     expect(signingDocs).toContain("Ubuntu 22.04");

@@ -166,7 +166,7 @@ Add signing inputs/secrets behind conditional release steps:
 - Windows: certificate/key-vault or custom signing command wiring.
 - Linux: checksum required; GPG/AppImage signing optional.
 
-Unsigned desktop builds remain allowed for dry runs and internal validation, but public recommended artifacts should require signing success on macOS and Windows.
+Unsigned desktop builds remain allowed only through explicit workflow overrides, but public recommended artifacts should require signing success on macOS and Windows.
 
 ---
 

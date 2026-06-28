@@ -32,4 +32,4 @@ Use `scripts/release/prepare-desktop-runtime.sh` and `scripts/release/verify-des
 
 ## Release
 
-Desktop artifacts are built in `.github/workflows/release.yml` after the platform runtime bundles. Public macOS and Windows artifacts require signing unless `allow_unsigned_desktop=true` is explicitly selected for internal validation.
+Desktop artifacts are built in `.github/workflows/release.yml` after the platform runtime bundles. Public recommended macOS and Windows artifacts require signing unless `allow_unsigned_desktop=true` is explicitly selected. Use `desktop_validation_only=true` for artifact-only validation runs that skip the release PR, tag, publish jobs, and public container tags.

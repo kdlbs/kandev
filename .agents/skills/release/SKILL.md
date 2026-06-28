@@ -22,7 +22,7 @@ Kandev uses a **single SemVer** `X.Y.Z` shared across all distribution channels.
 
 Entirely in CI via `.github/workflows/release.yml`, triggered by a maintainer from the GitHub Actions UI:
 
-1. Maintainer clicks "Run workflow" → picks `bump` (patch/minor/major) → optional `dry_run`.
+1. Maintainer clicks "Run workflow" → picks `bump` (patch/minor/major) → optional `dry_run`, `allow_unsigned_desktop`, or `desktop_validation_only`.
 2. `prepare` job bumps version + regenerates CHANGELOG, opens release PR, squash-merges, tags `vX.Y.Z`.
 3. `build-web` + `build-cli` + `build-bundles` (5 platforms) build the release artifacts.
 4. `publish-release` creates the GitHub release with platform tarballs + sha256 + auto-generated notes.
@@ -30,6 +30,8 @@ Entirely in CI via `.github/workflows/release.yml`, triggered by a maintainer fr
 6. `update-homebrew-tap` pushes updated `Formula/kandev.rb` to `kdlbs/homebrew-kandev` via SSH deploy key.
 
 There is no local release script — the entire flow runs in GHA.
+
+`allow_unsigned_desktop=true` only disables macOS/Windows desktop signing enforcement. It still creates and publishes the normal release outputs unless `desktop_validation_only=true` is also selected. `desktop_validation_only=true` builds artifacts from the current workflow ref for maintainer inspection and skips the release PR, tag, GitHub release, npm publish, Homebrew update, and public container tags.
 
 ## Runtime resolution
 

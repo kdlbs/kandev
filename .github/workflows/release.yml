@@ -47,7 +47,11 @@ on:
         type: boolean
         default: false
       allow_unsigned_desktop:
-        description: "Allow unsigned macOS/Windows desktop artifacts for internal validation only"
+        description: "Allow unsigned macOS/Windows desktop artifacts"
+        type: boolean
+        default: false
+      desktop_validation_only:
+        description: "Build desktop artifacts only (no PR, tag, publish, npm, or tap update)"
         type: boolean
         default: false
 
@@ -108,7 +112,7 @@ jobs:
         id: compute
         env:
           BUMP: ${{ inputs.bump }}
-          ALLOW_UNSIGNED_DESKTOP: ${{ inputs.allow_unsigned_desktop }}
+          DESKTOP_VALIDATION_ONLY: ${{ inputs.desktop_validation_only }}
           CURRENT_REF: ${{ github.sha }}
         run: |
           set -euo pipefail
@@ -159,7 +163,7 @@ jobs:
           echo "Next tag:                     $TAG"
           echo "version=$NEXT" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          if [ "$ALLOW_UNSIGNED_DESKTOP" = "true" ]; then
+          if [ "$DESKTOP_VALIDATION_ONLY" = "true" ]; then
             echo "ref=$CURRENT_REF" >> "$GITHUB_OUTPUT"
           else
             echo "ref=$TAG" >> "$GITHUB_OUTPUT"
@@ -176,7 +180,7 @@ jobs:
           fi
 
       - name: Bump version + generate CHANGELOG (in working tree)
-        if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}
+        if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
         env:
           NEXT: ${{ steps.compute.outputs.version }}
           TAG: ${{ steps.compute.outputs.tag }}
@@ -214,7 +218,7 @@ jobs:
           git-cliff --tag "$TAG" -o CHANGELOG.md
 
       - name: Create release PR + squash-merge + tag
-        if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}
+        if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NEXT: ${{ steps.compute.outputs.version }}
@@ -269,14 +273,16 @@ jobs:
             }
           }
 
-      - name: Unsigned desktop validation summary
-        if: ${{ !inputs.dry_run && inputs.allow_unsigned_desktop }}
+      - name: Desktop validation summary
+        if: ${{ !inputs.dry_run && inputs.desktop_validation_only }}
         env:
           NEXT: ${{ steps.compute.outputs.version }}
           TAG: ${{ steps.compute.outputs.tag }}
           REF: ${{ steps.compute.outputs.ref }}
+          ALLOW_UNSIGNED_DESKTOP: ${{ inputs.allow_unsigned_desktop }}
         run: |
-          echo "Unsigned desktop validation for $TAG / $NEXT."
+          echo "Desktop validation for $TAG / $NEXT."
+          echo "Unsigned desktop artifacts allowed: $ALLOW_UNSIGNED_DESKTOP."
           echo "No release PR, tag, GitHub release, public container tags, npm publish, or Homebrew update will be created."
           echo "Build jobs will check out $REF."
 
@@ -544,6 +550,11 @@ jobs:
         run: |
           set -euo pipefail
 
+          if [ "$ALLOW_UNSIGNED_DESKTOP" = "true" ]; then
+            echo "::notice::Unsigned desktop artifacts requested; skipping macOS signing and notarization setup."
+            exit 0
+          fi
+
           missing=()
           for key in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD KEYCHAIN_PASSWORD; do
             if [ -z "${!key:-}" ]; then
@@ -566,10 +577,6 @@ jobs:
           fi
 
           if [ "${#missing[@]}" -gt 0 ]; then
-            if [ "$ALLOW_UNSIGNED_DESKTOP" = "true" ]; then
-              echo "::warning::Unsigned desktop artifacts are internal validation only; missing macOS signing inputs: ${missing[*]}"
-              exit 0
-            fi
             echo "::error::Public macOS desktop releases require signing and notarization inputs: ${missing[*]}" >&2
             exit 1
           fi
@@ -662,6 +669,18 @@ jobs:
           WINDOWS_SIGNTOOL_PATH: ${{ secrets.WINDOWS_SIGNTOOL_PATH }}
         run: |
           set -euo pipefail
+          if [ "$ALLOW_UNSIGNED_DESKTOP" = "true" ]; then
+            unset APPLE_CERTIFICATE
+            unset APPLE_CERTIFICATE_PASSWORD
+            unset APPLE_ID
+            unset APPLE_PASSWORD
+            unset APPLE_TEAM_ID
+            unset APPLE_PROVIDER_SHORT_NAME
+            unset APPLE_API_KEY
+            unset APPLE_API_ISSUER
+            unset APPLE_API_KEY_PATH
+            unset APPLE_SIGNING_IDENTITY
+          fi
           pnpm -C apps --filter @kandev/desktop build:vite
           cd apps/desktop
           pnpm tauri build \
@@ -670,10 +689,9 @@ jobs:
             --bundles "${{ matrix.tauri_bundles }}"
 
       - name: Sign Windows desktop artifacts
-        if: matrix.platform == 'windows-x64'
+        if: matrix.platform == 'windows-x64' && !inputs.allow_unsigned_desktop
         shell: pwsh
         env:
-          ALLOW_UNSIGNED_DESKTOP: ${{ inputs.allow_unsigned_desktop }}
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
           WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
@@ -684,10 +702,6 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) { $missing += "WINDOWS_CERTIFICATE_PASSWORD" }
 
           if ($missing.Count -gt 0) {
-            if ($env:ALLOW_UNSIGNED_DESKTOP -eq "true") {
-              Write-Warning "Unsigned desktop artifacts are internal validation only; missing Windows signing inputs: $($missing -join ', ')"
-              exit 0
-            }
             Write-Error "Public Windows desktop releases require signing inputs: $($missing -join ', ')"
             exit 1
           }
@@ -803,7 +817,7 @@ jobs:
   docker-amd64:
     name: Build & push container image (amd64)
     needs: [prepare, build-bundles]
-    if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}
+    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -874,7 +888,7 @@ jobs:
   docker-arm64:
     name: Build & push container image (arm64)
     needs: [prepare, build-bundles]
-    if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}
+    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -933,7 +947,7 @@ jobs:
   docker-manifest:
     name: Assemble multi-arch base manifest
     needs: [prepare, docker-amd64, docker-arm64]
-    if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}
+    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -987,7 +1001,7 @@ jobs:
   docker-universal-amd64:
     name: Build & push universal image (amd64)
     needs: [prepare, docker-manifest]
-    if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}
+    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1039,7 +1053,7 @@ jobs:
   docker-universal-arm64:
     name: Build & push universal image (arm64)
     needs: [prepare, docker-manifest]
-    if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}
+    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -1090,7 +1104,7 @@ jobs:
     # docker-universal-manifest is included in publish-release's `needs` so
     # its size gate (and any per-arch build failure) blocks the release.
     needs: [prepare, docker-universal-amd64, docker-universal-arm64]
-    if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}
+    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1147,7 +1161,7 @@ jobs:
   publish-release:
     name: Publish GitHub release
     needs: [prepare, build-bundles, build-desktop, docker-universal-manifest]
-    if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}
+    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-latest
     permissions:
       contents: write    # softprops/action-gh-release creates the release
@@ -1211,7 +1225,7 @@ jobs:
   publish-npm:
     name: Publish npm packages
     needs: [prepare, publish-release]
-    if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}
+    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write    # Required for OIDC trusted publishing
@@ -1246,7 +1260,7 @@ jobs:
   update-homebrew-tap:
     name: Update Homebrew tap
     needs: [prepare, publish-release]
-    if: ${{ !inputs.dry_run && !inputs.allow_unsigned_desktop }}
+    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

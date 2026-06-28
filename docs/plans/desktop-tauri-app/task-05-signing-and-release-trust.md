@@ -14,7 +14,7 @@ spec: "../../specs/desktop-tauri-app/spec.md"
 
 - macOS desktop release builds support Developer ID signing and notarization through GitHub Actions secrets.
 - Windows desktop release builds support code signing through the selected signing mechanism.
-- Unsigned desktop artifacts are clearly limited to dry runs/internal validation and are not treated as trusted public artifacts.
+- Unsigned desktop artifacts require an explicit workflow override and are not treated as trusted public artifacts.
 
 ## Verification
 

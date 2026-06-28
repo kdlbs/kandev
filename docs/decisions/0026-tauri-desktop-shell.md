@@ -14,7 +14,7 @@ Add a Tauri v2 desktop app as a thin native shell over the existing Kandev runti
 
 The installed desktop app will not include a Node.js runtime. Node.js and pnpm remain build-time tooling for Vite, TypeScript, Tauri CLI invocation, tests, and release automation.
 
-Desktop launches set the backend to a loopback-only bind address and an app-selected local port. Public desktop releases require macOS Developer ID signing/notarization and Windows code signing before the artifacts are presented as trusted downloads. The first desktop implementation does not include Tauri's in-app updater; updates continue through GitHub release downloads/manual reinstall until a separate updater spec is approved.
+Desktop launches set the backend to a loopback-only bind address and an app-selected local port. Public recommended desktop releases require macOS Developer ID signing/notarization and Windows code signing before the artifacts are presented as trusted downloads; unsigned desktop artifacts require an explicit release workflow override. The first desktop implementation does not include Tauri's in-app updater; updates continue through GitHub release downloads/manual reinstall until a separate updater spec is approved.
 
 ## Consequences
 

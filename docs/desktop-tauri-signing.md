@@ -2,7 +2,9 @@
 
 Public recommended desktop releases require signing on macOS and Windows. The release workflow fails closed by default when those secrets are missing.
 
-Use `allow_unsigned_desktop=true` only for internal validation builds. That mode may upload workflow artifacts for maintainer inspection, but it does not publish a GitHub release, npm packages, Homebrew updates, or public container tags. Unsigned desktop artifacts are internal validation only and must not be presented as trusted public downloads.
+Use `allow_unsigned_desktop=true` only when intentionally producing unsigned macOS/Windows desktop artifacts. Unless `desktop_validation_only=true` is also selected, that mode still publishes the normal release outputs: the release PR and tag, GitHub release, npm packages, Homebrew update, public container tags, and desktop artifacts. Unsigned desktop artifacts may require manual OS security bypasses and must not be presented as trusted downloads.
+
+Use `desktop_validation_only=true` for maintainer inspection builds. That mode uploads workflow artifacts but does not publish a GitHub release, npm packages, Homebrew updates, or public container tags.
 
 ## macOS
 

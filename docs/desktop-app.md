@@ -16,7 +16,7 @@ Supported desktop platforms:
 
 Public recommended macOS artifacts must be Developer ID signed and notarized. Public recommended Windows artifacts must be code signed. Linux artifacts are checksum-gated; package-manager signatures can be added later.
 
-Unsigned macOS or Windows desktop artifacts are for internal validation only. They may require manual OS security bypasses and should not be presented as trusted public downloads.
+Unsigned macOS or Windows desktop artifacts may be produced only through an explicit release workflow override. They may require manual OS security bypasses and should not be presented as trusted downloads.
 
 ## Runtime Requirements
 

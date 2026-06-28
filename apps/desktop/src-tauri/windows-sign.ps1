@@ -5,15 +5,16 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+if ($env:ALLOW_UNSIGNED_DESKTOP -eq "true") {
+  Write-Warning "Skipping Windows signing for unsigned desktop artifact."
+  exit 0
+}
+
 $missing = @()
 if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE)) { $missing += "WINDOWS_CERTIFICATE" }
 if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) { $missing += "WINDOWS_CERTIFICATE_PASSWORD" }
 
 if ($missing.Count -gt 0) {
-  if ($env:ALLOW_UNSIGNED_DESKTOP -eq "true") {
-    Write-Warning "Skipping Windows signing for internal unsigned desktop validation; missing: $($missing -join ', ')"
-    exit 0
-  }
   throw "Public Windows desktop releases require signing inputs: $($missing -join ', ')"
 }
 
