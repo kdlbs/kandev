@@ -75,10 +75,19 @@ function mapTaskCreateLastUsedPatch(
   };
 }
 
+function compactTaskCreateLastUsedState(state: Partial<TaskCreateLastUsedState>) {
+  return Object.fromEntries(
+    Object.entries(state).filter(([, value]) => value !== undefined),
+  ) as Partial<TaskCreateLastUsedState>;
+}
+
 export function syncTaskCreateLastUsed(patch: TaskCreateLastUsedPatch) {
   pendingLastUsed = { ...readPendingLastUsedSync(), ...pendingLastUsed, ...patch };
   const payload = { ...pendingLastUsed };
-  lastQueuedLastUsed = mapTaskCreateLastUsedPatch(payload);
+  lastQueuedLastUsed = {
+    ...lastQueuedLastUsed,
+    ...compactTaskCreateLastUsedState(mapTaskCreateLastUsedPatch(payload)),
+  };
   lastUsedDebug("sync-queued", { patch, payload });
   persistPendingLastUsedSync(payload);
   lastUsedSync = lastUsedSync

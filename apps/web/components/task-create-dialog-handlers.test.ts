@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "@testing-library/react";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
-import { resetTaskCreateLastUsedSync, syncTaskCreateLastUsed } from "./task-create-dialog-handlers";
+import {
+  readQueuedTaskCreateLastUsedState,
+  resetTaskCreateLastUsedSync,
+  syncTaskCreateLastUsed,
+} from "./task-create-dialog-handlers";
 
 const PENDING_LAST_USED_SYNC_KEY = "kandev.taskCreateLastUsed.pendingSync";
 
@@ -42,6 +46,29 @@ describe("syncTaskCreateLastUsed", () => {
         task_create_last_used: { branch: "feature" },
       });
       expect(window.localStorage.getItem(PENDING_LAST_USED_SYNC_KEY)).toBeNull();
+    });
+  });
+
+  it("retains prior queued fields after a successful sync clears pending state", async () => {
+    vi.mocked(updateUserSettings).mockResolvedValue({ settings: {} } as Awaited<
+      ReturnType<typeof updateUserSettings>
+    >);
+
+    syncTaskCreateLastUsed({ branch: "feature" });
+    await waitFor(() => {
+      expect(window.localStorage.getItem(PENDING_LAST_USED_SYNC_KEY)).toBeNull();
+    });
+
+    syncTaskCreateLastUsed({ agent_profile_id: "agent-2" });
+    await waitFor(() => {
+      expect(updateUserSettings).toHaveBeenLastCalledWith({
+        task_create_last_used: { agent_profile_id: "agent-2" },
+      });
+    });
+
+    expect(readQueuedTaskCreateLastUsedState()).toMatchObject({
+      branch: "feature",
+      agentProfileId: "agent-2",
     });
   });
 });
