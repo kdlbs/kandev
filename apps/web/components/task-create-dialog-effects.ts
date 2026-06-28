@@ -301,6 +301,26 @@ function shouldDeferExecutorProfileAutopick(
   );
 }
 
+export function shouldWaitForLastUsedExecutorProfile(context: ExecutorAutopickContext) {
+  const lastUsedProfile = getExecutorProfileLastUsedState(
+    context,
+    context.lastUsedExecutorProfileId ?? null,
+  );
+  if (!lastUsedProfile.localStorageValid && !lastUsedProfile.settingsValid) return false;
+  if (isDebug()) {
+    selectionDebug("executor-autopick", {
+      current: "-",
+      pick: "-",
+      executor_count: context.executors.length,
+      workspace_default: context.workspaceDefaults?.default_executor_id ?? "-",
+      no_repository: context.noRepository,
+      prefer_local_executor: context.preferLocalExecutor,
+      source: "executor-profile-last-used",
+    });
+  }
+  return true;
+}
+
 function logExecutorProfileAutopick(
   pick: string | null,
   context: ExecutorAutopickContext,
@@ -369,27 +389,6 @@ function useExecutorIdAutopickEffect({
         no_repository: noRepository,
         prefer_local_executor: preferLocalExecutor,
       });
-    }
-
-    function shouldWaitForLastUsedExecutorProfile(context: ExecutorAutopickContext) {
-      const { executors, workspaceDefaults, noRepository, preferLocalExecutor } = context;
-      const lastUsedProfile = getExecutorProfileLastUsedState(
-        context,
-        context.lastUsedExecutorProfileId ?? null,
-      );
-      if (!lastUsedProfile.localStorageValid && !lastUsedProfile.settingsValid) return false;
-      if (isDebug()) {
-        selectionDebug("executor-autopick", {
-          current: "-",
-          pick: "-",
-          executor_count: executors.length,
-          workspace_default: workspaceDefaults?.default_executor_id ?? "-",
-          no_repository: noRepository,
-          prefer_local_executor: preferLocalExecutor,
-          source: "executor-profile-last-used",
-        });
-      }
-      return true;
     }
     if (pick) void Promise.resolve().then(() => setExecutorId(pick));
   }, [
