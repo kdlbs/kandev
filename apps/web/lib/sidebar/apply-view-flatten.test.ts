@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 import type { TaskSwitcherItem } from "@/components/task/task-switcher";
-import { flattenVisibleTaskIds, type GroupedSidebarList } from "./apply-view";
+import {
+  flattenVisibleTaskIds,
+  sortIdsByVisibleOrder,
+  type GroupedSidebarList,
+} from "./apply-view";
 
 function task(id: string): TaskSwitcherItem {
   return { id, title: id };
@@ -40,5 +44,22 @@ describe("flattenVisibleTaskIds", () => {
   it("hides subtasks of a collapsed parent but keeps the parent", () => {
     const g = grouped([{ key: "g1", label: "G1", tasks: [task("a")] }], { a: [task("a1")] });
     expect(flattenVisibleTaskIds(g, [], ["a"])).toEqual(["a"]);
+  });
+});
+
+describe("sortIdsByVisibleOrder", () => {
+  const visible = ["a", "b", "c", "d"];
+
+  it("reorders a backward range selection into visible order", () => {
+    // Anchor 'd' then shift to 'b' leaves the Set as [d, b, c] (insertion order).
+    expect(sortIdsByVisibleOrder(["d", "b", "c"], visible)).toEqual(["b", "c", "d"]);
+  });
+
+  it("leaves an already-ordered list unchanged", () => {
+    expect(sortIdsByVisibleOrder(["a", "c"], visible)).toEqual(["a", "c"]);
+  });
+
+  it("sorts ids missing from the visible list to the front", () => {
+    expect(sortIdsByVisibleOrder(["c", "zzz", "a"], visible)).toEqual(["zzz", "a", "c"]);
   });
 });
