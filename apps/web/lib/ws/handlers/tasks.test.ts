@@ -239,6 +239,34 @@ describe("task.updated primary-session focus follow (pinning)", () => {
 
     expect(setActiveSessionAuto).not.toHaveBeenCalled();
   });
+
+  it("does NOT follow focus when active-session drift orphaned a non-terminal pin", () => {
+    store = makeStore({
+      kanban: {
+        workflowId: "wf1",
+        steps: [],
+        tasks: [{ id: "t1", primarySessionId: "sess-drifted", workflowId: "wf1" }],
+      } as unknown as AppState["kanban"],
+      tasks: {
+        activeTaskId: "t1",
+        activeSessionId: "sess-drifted",
+        pinnedSessionId: "sess-pinned",
+        lastSessionByTaskId: {},
+      },
+      taskSessions: {
+        items: {
+          "sess-pinned": { id: "sess-pinned", task_id: "t1", state: "RUNNING" },
+          "sess-drifted": { id: "sess-drifted", task_id: "t1", state: "COMPLETED" },
+        },
+      } as unknown as AppState["taskSessions"],
+      setActiveSessionAuto,
+    });
+
+    const handlers = registerTasksHandlers(store);
+    handlers["task.updated"]!(makeMessage(makeTask("t1", "sess-new")));
+
+    expect(setActiveSessionAuto).not.toHaveBeenCalled();
+  });
 });
 
 describe("task.updated cross-workflow placement", () => {

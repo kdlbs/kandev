@@ -8,6 +8,7 @@ import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { toKanbanTask, type TaskLike } from "@/lib/kanban/map-task";
 import { sessionId as toSessionId } from "@/lib/types/http";
 import { mergeTaskRepositoryFields } from "@/lib/ws/handlers/task-repositories";
+import { shouldPreservePinnedSessionForTask } from "@/lib/ws/handlers/agent-session";
 
 type KanbanTask = KanbanState["tasks"][number];
 
@@ -152,11 +153,10 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       // Follow focus to the new primary when:
       //  - the user is currently viewing this task,
       //  - the user was sitting on the previous primary,
-      //  - they did NOT explicitly pin that previous primary (a manual click
-      //    sets pinnedSessionId; pinned sessions must be left alone), and
+      //  - they do NOT have a non-terminal pinned session for this task, and
       //  - the primary actually changed.
       // This makes workflow profile switches transparent for unpinned users
-      // without yanking pinned ones off their deliberate selection.
+      // without yanking users off a live session they deliberately selected.
       const afterState = store.getState();
       const newPrimary = findTaskInState(afterState, taskId)?.primarySessionId ?? null;
       if (
@@ -164,7 +164,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
         newPrimary !== previousPrimary &&
         afterState.tasks.activeTaskId === taskId &&
         afterState.tasks.activeSessionId === previousPrimary &&
-        afterState.tasks.pinnedSessionId !== previousPrimary
+        !shouldPreservePinnedSessionForTask(afterState, taskId)
       ) {
         afterState.setActiveSessionAuto(taskId, newPrimary);
       }

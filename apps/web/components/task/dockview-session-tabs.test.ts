@@ -7,6 +7,7 @@ import {
   reconcileRemovedSessionPanels,
   resolveInitialPosition,
   resolveSessionTabSyncTarget,
+  runAutoSessionTabEffect,
   shouldActivateSessionPanel,
   shouldRebuildDefaultForPendingSession,
 } from "./dockview-session-tabs";
@@ -599,5 +600,32 @@ describe("shouldActivateSessionPanel", () => {
         currentActivePanelId: "preview:commit-detail",
       }),
     ).toBe(false);
+  });
+});
+
+describe("runAutoSessionTabEffect", () => {
+  it("updates previous refs when panel ensure is skipped for an unhydrated session", () => {
+    const api = {
+      panels: [{ id: "chat" }],
+      getPanel: (id: string) => (id === "chat" ? { id: "chat" } : null),
+    } as unknown as DockviewApi;
+    const appStore = {
+      getState: () => ({
+        tasks: { activeTaskId: "task-A" },
+        taskSessionsByTask: { itemsByTaskId: { "task-A": [] } },
+      }),
+    };
+    const refs = {
+      sessionTabCreatedRef: { current: new Set<string>() },
+      prevTaskIdRef: { current: "task-old" as string | null },
+      prevSessionIdRef: { current: "session-old" as string | null },
+    };
+
+    useDockviewStore.setState({ api });
+    runAutoSessionTabEffect("session-pending", appStore as never, refs as never);
+    useDockviewStore.setState({ api: null });
+
+    expect(refs.prevTaskIdRef.current).toBe("task-A");
+    expect(refs.prevSessionIdRef.current).toBe("session-pending");
   });
 });

@@ -29,6 +29,45 @@ export function isTerminalSessionState(state: TaskSessionState | undefined): boo
   return !!state && TERMINAL_SESSION_STATES.has(state);
 }
 
+function findSessionForTask(state: AppState, taskId: string, sessionId: string) {
+  const byId = state.taskSessions?.items?.[sessionId];
+  if (byId) return byId.task_id === taskId ? byId : null;
+  return (
+    state.taskSessionsByTask?.itemsByTaskId?.[taskId]?.find(
+      (session) => session.id === sessionId,
+    ) ?? null
+  );
+}
+
+/**
+ * Manual session selection pins a task-scoped session. Background WS events
+ * may only override that pin once the pinned session is known terminal, or
+ * when the terminal event is for the pinned session itself.
+ */
+export function shouldPreservePinnedSessionForTask(
+  state: AppState,
+  taskId: string,
+  incoming?: { sessionId: string; newState: TaskSessionState | undefined },
+): boolean {
+  const pinnedSessionId = state.tasks.pinnedSessionId;
+  if (!pinnedSessionId || state.tasks.activeTaskId !== taskId) return false;
+  if (
+    incoming?.sessionId === pinnedSessionId &&
+    incoming.newState &&
+    isTerminalSessionState(incoming.newState)
+  ) {
+    return false;
+  }
+
+  const pinnedSession = findSessionForTask(state, taskId, pinnedSessionId);
+  if (!pinnedSession) {
+    // Manual pins are created for the active task. If hydration briefly drops
+    // the row, preserve the pin instead of treating the session as replaceable.
+    return true;
+  }
+  return !isTerminalSessionState(pinnedSession.state);
+}
+
 /** Promote agentctl status to "ready" when the session enters a live state.
  *  Acts as a fallback for missed/late agentctl_ready WS events — the backend
  *  cannot reach RUNNING/WAITING_FOR_INPUT without a live agentctl. Never
@@ -281,17 +320,15 @@ function maybeAdoptSessionOnTransition(
   wasKnownToStore: boolean,
 ): void {
   const state = store.getState();
+  if (
+    state.tasks.pinnedSessionId !== sessionId &&
+    shouldPreservePinnedSessionForTask(state, taskId, { sessionId, newState })
+  ) {
+    return;
+  }
 
   if (!wasKnownToStore && shouldAdoptNewSession(state, taskId, newState)) {
     const oldSessionId = state.tasks.activeSessionId;
-    // Reverse-ordering guard: if the events arrive as old=COMPLETED then
-    // new=STARTING (instead of the typical new=STARTING then old=COMPLETED),
-    // shouldAdoptNewSession returns true on the second event because the old
-    // session is now terminal. But the user may have pinned the old session —
-    // in that case the symmetric guard below was skipped (no terminal event
-    // for the new session), and we'd auto-yank them off their pinned session
-    // here. Match the terminal-handoff path's pinning check.
-    if (oldSessionId && state.tasks.pinnedSessionId === oldSessionId) return;
     if (oldSessionId) inheritAgentctlStatus(state, oldSessionId, sessionId);
     state.setActiveSessionAuto(taskId, sessionId);
     return;
@@ -299,9 +336,6 @@ function maybeAdoptSessionOnTransition(
 
   const isActive = state.tasks.activeSessionId === sessionId;
   if (isActive && newState && isTerminalSessionState(newState)) {
-    // If the user explicitly pinned this session (manual click), don't yank
-    // them away just because the workflow moved it to a terminal state.
-    if (state.tasks.pinnedSessionId === sessionId) return;
     const replacement = pickReplacementSessionId(state, taskId);
     if (replacement && replacement !== sessionId) {
       inheritAgentctlStatus(state, sessionId, replacement);

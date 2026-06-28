@@ -662,11 +662,20 @@ function logAutoSessionTabEffectEntry(
   });
 }
 
+function updateAutoSessionTabRefs(
+  refs: AutoSessionTabRefs,
+  tid: string | null,
+  effectiveSessionId: string | null,
+): void {
+  refs.prevTaskIdRef.current = tid;
+  refs.prevSessionIdRef.current = effectiveSessionId;
+}
+
 /**
  * Core effect body for useAutoSessionTab — extracted to reduce complexity of
  * the hook itself.
  */
-function runAutoSessionTabEffect(
+export function runAutoSessionTabEffect(
   effectiveSessionId: string | null,
   appStore: ReturnType<typeof useAppStoreApi>,
   refs: AutoSessionTabRefs,
@@ -688,6 +697,7 @@ function runAutoSessionTabEffect(
       });
     }
     releaseLayoutToDefault(useDockviewStore.getState().currentLayoutEnvId);
+    updateAutoSessionTabRefs(refs, tid, effectiveSessionId);
     return;
   }
 
@@ -700,6 +710,7 @@ function runAutoSessionTabEffect(
 
   if (!effectiveSessionId) {
     if (isDebug()) debug("useAutoSessionTab: no effectiveSessionId, returning");
+    updateAutoSessionTabRefs(refs, tid, effectiveSessionId);
     return;
   }
 
@@ -711,6 +722,7 @@ function runAutoSessionTabEffect(
       refs.sessionTabCreatedRef.current,
     )
   ) {
+    updateAutoSessionTabRefs(refs, tid, effectiveSessionId);
     return;
   }
 
@@ -769,8 +781,7 @@ function runAutoSessionTabEffect(
     });
   }
 
-  refs.prevTaskIdRef.current = tid;
-  refs.prevSessionIdRef.current = effectiveSessionId;
+  updateAutoSessionTabRefs(refs, tid, effectiveSessionId);
 }
 
 /**

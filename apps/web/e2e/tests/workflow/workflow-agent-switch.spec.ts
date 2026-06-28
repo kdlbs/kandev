@@ -571,9 +571,9 @@ test.describe("Workflow agent profile switching", () => {
    * Verifies that an on_turn_complete cascade that switches agent profiles
    * promotes the new session to primary.
    *
-   * Note: Per PR #743 (pinnedSessionId), the user's pinned tab is preserved.
-   * The active dockview tab stays on the pinned session; this test asserts on
-   * the primary star marker.
+   * Note: pinned tabs are preserved while their session is non-terminal; this
+   * cascade can terminal-handoff to the replacement, so assert the durable
+   * primary star marker rather than active-tab timing.
    */
   test("on_turn_complete cascade promotes new agent session to primary", async ({
     testPage,
@@ -688,8 +688,8 @@ test.describe("Workflow agent profile switching", () => {
     await apiClient.moveTask(task.id, workflow.id, step2.id);
 
     // The Profile B tab should appear and own the primary star (no reload needed).
-    // Per PR #743, the active dockview tab stays pinned to Profile A — the star
-    // moving is what proves SetPrimarySession's WS broadcast landed.
+    // The non-terminal Profile A tab stays user-pinned, so the star moving is
+    // what proves SetPrimarySession's WS broadcast landed.
     const profileBTab = session.sessionTabByText("Profile B");
     await expect(profileBTab).toBeVisible({ timeout: 60_000 });
     await expect(session.primaryStarInTab("Profile B")).toBeVisible({ timeout: 60_000 });
