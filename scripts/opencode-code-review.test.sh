@@ -13,10 +13,17 @@ fail() {
   exit 1
 }
 
-count_occurrences() {
-  local pattern=$1
+count_matches() {
+  local mode=$1
+  local pattern=$2
   local output
-  output="$(rg --fixed-strings --count-matches -- "$pattern" "$WORKFLOW" || true)"
+  local rg_args=(--count-matches)
+  if [[ "$mode" == "fixed" ]]; then
+    rg_args=(--fixed-strings --count-matches)
+  elif [[ "$mode" != "regex" ]]; then
+    fail "Unsupported match mode: $mode"
+  fi
+  output="$(rg "${rg_args[@]}" -- "$pattern" "$WORKFLOW" || true)"
   if [[ -z "$output" ]]; then
     printf '0\n'
     return
@@ -28,19 +35,9 @@ count_occurrences() {
   awk -F: '{ print $2 }' <<<"$output"
 }
 
-count_regex_occurrences() {
+count_occurrences() {
   local pattern=$1
-  local output
-  output="$(rg --count-matches -- "$pattern" "$WORKFLOW" || true)"
-  if [[ -z "$output" ]]; then
-    printf '0\n'
-    return
-  fi
-  if [[ "$output" =~ ^[0-9]+$ ]]; then
-    printf '%s\n' "$output"
-    return
-  fi
-  awk -F: '{ print $2 }' <<<"$output"
+  count_matches fixed "$pattern"
 }
 
 tmp_review_reference_count="$(count_occurrences '/tmp/opencode-review')"
@@ -115,9 +112,9 @@ if [[ "$trusted_script_count" != "2" ]]; then
 fi
 pass "OpenCode review executes the parser script from the trusted base commit in both workflow paths"
 
-artifact_upload_count="$(count_regex_occurrences 'uses: actions/upload-artifact@(v4|[a-f0-9]{40} # v4)')"
+artifact_upload_count="$(count_matches regex 'uses: actions/upload-artifact@(v4|[a-f0-9]{40} # v4)')"
 if [[ "$artifact_upload_count" != "2" ]]; then
-  fail "OpenCode review artifacts are uploaded from both workflow paths"
+  fail "OpenCode review upload-artifact is pinned to v4 in both workflow paths"
 fi
 pass "OpenCode review artifacts are uploaded from both workflow paths"
 
