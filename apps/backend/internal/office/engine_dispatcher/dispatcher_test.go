@@ -64,7 +64,7 @@ type stubPrimary struct {
 	id string
 }
 
-func (s stubPrimary) PrimaryAgentProfileID(_ context.Context, _ string) (string, error) {
+func (s stubPrimary) PrimaryAgentProfileID(_ context.Context, _, _ string) (string, error) {
 	return s.id, nil
 }
 

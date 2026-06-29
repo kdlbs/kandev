@@ -112,7 +112,7 @@ if [[ "$trusted_script_count" != "2" ]]; then
 fi
 pass "OpenCode review executes the parser script from the trusted base commit in both workflow paths"
 
-artifact_upload_count="$(count_matches regex 'uses: actions/upload-artifact@(v4|[a-f0-9]{40} # v4)')"
+artifact_upload_count="$(count_matches regex 'uses: actions/upload-artifact@(v4([[:space:]]|$)|[a-f0-9]{40}[[:space:]]+# v4([[:space:]]|$))')"
 if [[ "$artifact_upload_count" != "2" ]]; then
   fail "OpenCode review upload-artifact is pinned to v4 in both workflow paths"
 fi

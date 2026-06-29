@@ -23,7 +23,7 @@ type fakePrimary struct {
 	err error
 }
 
-func (f fakePrimary) PrimaryAgentProfileID(_ context.Context, _ string) (string, error) {
+func (f fakePrimary) PrimaryAgentProfileID(_ context.Context, _, _ string) (string, error) {
 	return f.id, f.err
 }
 
@@ -144,6 +144,37 @@ func TestQueueRunCallback_TargetParticipantRole(t *testing.T) {
 		}
 		if q.calls[i].TaskID != "task-1" {
 			t.Fatalf("call %d task_id = %q, want task-1 (resolved from blank)", i, q.calls[i].TaskID)
+		}
+	}
+}
+
+func TestQueueRunCallback_OnCommentParticipantRoleKeepsPerAgentKeys(t *testing.T) {
+	q := &fakeRunQueue{}
+	parts := fakeParticipants{list: []ParticipantInfo{
+		{ID: "p1", Role: "reviewer", AgentProfileID: "rev-A"},
+		{ID: "p2", Role: "reviewer", AgentProfileID: "rev-B"},
+	}}
+	cb := QueueRunCallback{Adapter: q, Participants: parts}
+	in := newQueueRunInput("participant_role:reviewer", "")
+	in.OperationID = "task_comment:c-1"
+	in.Payload = OnCommentPayload{CommentID: "c-1", AuthorID: "user-1"}
+	in.Action.QueueRun.Payload = nil
+
+	if _, err := cb.Execute(context.Background(), in); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(q.calls) != 2 {
+		t.Fatalf("expected 2 queue run calls, got %d", len(q.calls))
+	}
+	if q.calls[0].IdempotencyKey == q.calls[1].IdempotencyKey {
+		t.Fatalf("fan-out idempotency keys must be per-agent: %#v", q.calls)
+	}
+	for i, call := range q.calls {
+		if call.IdempotencyKey == "task_comment:c-1" {
+			t.Fatalf("call %d idempotency_key dropped per-agent salt", i)
+		}
+		if call.Payload["comment_id"] != "c-1" || call.Payload["author_id"] != "user-1" {
+			t.Fatalf("call %d payload missing comment identity: %#v", i, call.Payload)
 		}
 	}
 }
@@ -275,6 +306,47 @@ func TestQueueRunForEachParticipantCallback_FansOut(t *testing.T) {
 		}
 		if q.calls[i].Reason != "review_started" {
 			t.Fatalf("call %d reason = %q", i, q.calls[i].Reason)
+		}
+	}
+}
+
+func TestQueueRunForEachParticipantCallback_OnCommentKeepsPerAgentKeys(t *testing.T) {
+	q := &fakeRunQueue{}
+	parts := fakeParticipants{list: []ParticipantInfo{
+		{ID: "p1", Role: "reviewer", AgentProfileID: "rev-A"},
+		{ID: "p2", Role: "reviewer", AgentProfileID: "rev-B"},
+	}}
+	cb := QueueRunForEachParticipantCallback{Adapter: q, Participants: parts}
+	in := ActionInput{
+		Trigger:     TriggerOnComment,
+		State:       MachineState{TaskID: "task-1"},
+		Step:        StepSpec{ID: "step-1"},
+		OperationID: "task_comment:c-1",
+		Payload:     OnCommentPayload{CommentID: "c-1", AuthorID: "user-1"},
+		Action: Action{
+			Kind: ActionQueueRunForEachParticipant,
+			QueueRunForEachParticipant: &QueueRunForEachParticipantAction{
+				Role:   "reviewer",
+				Reason: "task_comment",
+			},
+		},
+	}
+
+	if _, err := cb.Execute(context.Background(), in); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(q.calls) != 2 {
+		t.Fatalf("expected 2 fan-out calls, got %d", len(q.calls))
+	}
+	if q.calls[0].IdempotencyKey == q.calls[1].IdempotencyKey {
+		t.Fatalf("fan-out idempotency keys must be per-agent: %#v", q.calls)
+	}
+	for i, call := range q.calls {
+		if call.IdempotencyKey == "task_comment:c-1" {
+			t.Fatalf("call %d idempotency_key dropped per-agent salt", i)
+		}
+		if call.Payload["comment_id"] != "c-1" || call.Payload["author_id"] != "user-1" {
+			t.Fatalf("call %d payload missing comment identity: %#v", i, call.Payload)
 		}
 	}
 }

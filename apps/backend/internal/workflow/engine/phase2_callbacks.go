@@ -24,12 +24,13 @@ const (
 	defaultQueueReasonR = "queue_run"
 )
 
-// PrimaryAgentResolver resolves the step's "primary" agent profile id. The
-// engine asks via this interface when a queue_run target is "primary" — the
-// answer is just step.PrimaryAgentProfileID for kanban-style steps. The
-// indirection keeps the engine package free of model imports.
+// PrimaryAgentResolver resolves the task's "primary" agent profile id. The
+// engine asks via this interface when a queue_run target is "primary". The
+// answer is task-aware so office steps can prefer the task's current runner
+// participant while kanban-style steps still fall back to the step primary.
+// The indirection keeps the engine package free of model imports.
 type PrimaryAgentResolver interface {
-	PrimaryAgentProfileID(ctx context.Context, stepID string) (string, error)
+	PrimaryAgentProfileID(ctx context.Context, stepID, taskID string) (string, error)
 }
 
 // QueueRunCallback executes the queue_run action by resolving Target/TaskID
@@ -74,7 +75,7 @@ func (c QueueRunCallback) resolveTarget(ctx context.Context, in ActionInput) ([]
 	target := strings.TrimSpace(in.Action.QueueRun.Target)
 	switch {
 	case target == "" || target == TargetPrimary:
-		return c.resolvePrimary(ctx, in.Step.ID)
+		return c.resolvePrimary(ctx, in)
 	case strings.HasPrefix(target, TargetParticipant):
 		role := strings.TrimPrefix(target, TargetParticipant)
 		return c.resolveParticipantRole(ctx, in.Step.ID, in.State.TaskID, role)
@@ -91,16 +92,16 @@ func (c QueueRunCallback) resolveTarget(ctx context.Context, in ActionInput) ([]
 	}
 }
 
-func (c QueueRunCallback) resolvePrimary(ctx context.Context, stepID string) ([]string, error) {
+func (c QueueRunCallback) resolvePrimary(ctx context.Context, in ActionInput) ([]string, error) {
 	if c.Primary == nil {
 		return nil, fmt.Errorf("%w: queue_run target=primary requires PrimaryAgentResolver", ErrActionNotYetWired)
 	}
-	id, err := c.Primary.PrimaryAgentProfileID(ctx, stepID)
+	id, err := c.Primary.PrimaryAgentProfileID(ctx, in.Step.ID, in.State.TaskID)
 	if err != nil {
 		return nil, fmt.Errorf("queue_run resolve primary: %w", err)
 	}
 	if id == "" {
-		return nil, fmt.Errorf("queue_run: step %s has no primary agent profile", stepID)
+		return nil, fmt.Errorf("queue_run: step %s has no primary agent profile", in.Step.ID)
 	}
 	return []string{id}, nil
 }
@@ -163,16 +164,31 @@ func queueRunReason(in ActionInput) string {
 
 // idempotencyKey synthesises a deterministic key from the engine's
 // operation id (already idempotent across retries) plus action-specific
-// salt. When OperationID is empty, the adapter sees an empty key and is
-// expected to dedupe via its own mechanism (or accept the duplicate).
+// salt. The default primary task_comment wake keeps the exact
+// "task_comment:<comment_id>" key so comment status lookups can map the
+// single run back to the user comment. Multi-agent fan-out keeps the salt so
+// one comment can still wake every intended participant. When OperationID is
+// empty, the adapter sees an empty key and is expected to dedupe via its own
+// mechanism (or accept the duplicate).
 func idempotencyKey(in ActionInput, agentID, taskID string) string {
 	if in.OperationID == "" {
 		return ""
 	}
-	if in.Trigger == TriggerOnComment && strings.HasPrefix(in.OperationID, "task_comment:") {
+	if usesExactCommentKey(in) {
 		return in.OperationID
 	}
 	return fmt.Sprintf("%s:%s:%s:%s", in.OperationID, in.Step.ID, taskID, agentID)
+}
+
+func usesExactCommentKey(in ActionInput) bool {
+	if in.Trigger != TriggerOnComment || !strings.HasPrefix(in.OperationID, "task_comment:") {
+		return false
+	}
+	if in.Action.Kind != ActionQueueRun || in.Action.QueueRun == nil {
+		return false
+	}
+	target := strings.TrimSpace(in.Action.QueueRun.Target)
+	return target == "" || target == TargetPrimary
 }
 
 func queueRunPayload(in ActionInput, actionPayload map[string]any) map[string]any {

@@ -244,8 +244,12 @@ func (s *Service) resolveAgentInstance(ctx context.Context, req QueueRunRequest)
 	return "", nil
 }
 
+// runPayload starts from the caller-supplied payload, then overwrites the
+// standard envelope keys from typed request fields. That overwrite is
+// intentional: engine queue_run and legacy office QueueRun callers converge
+// on the same persisted JSON shape even when their input payloads differ.
 func runPayload(req QueueRunRequest, agentInstanceID string) map[string]any {
-	out := make(map[string]any, len(req.Payload)+3)
+	out := make(map[string]any, len(req.Payload))
 	for k, v := range req.Payload {
 		out[k] = v
 	}
