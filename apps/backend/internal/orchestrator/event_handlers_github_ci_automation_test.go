@@ -952,7 +952,18 @@ func TestHandleTaskPRCIAutomationAtRoundCapReplacesPendingAutoFixForWaitingSessi
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateWaitingForInput)
-	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo, promptDone: make(chan struct{})}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
+	session, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.AgentExecutionID = "exec-1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session execution: %v", err)
+	}
 	now := time.Now().UTC()
 	pr := &github.TaskPR{
 		TaskID:       "task-1",
@@ -963,7 +974,7 @@ func TestHandleTaskPRCIAutomationAtRoundCapReplacesPendingAutoFixForWaitingSessi
 		State:        "open",
 		LastSyncedAt: &now,
 	}
-	_, _, err := svc.messageQueue.QueueMessageWithCoalesceKey(ctx, "session-1", "task-1", "@ci-auto-fix\n\nold feedback", "", messagequeue.QueuedByWorkflow, false, nil, ciAutomationMessageMetadataForPR(pr, "old"), ciAutomationCoalesceKey(pr), true)
+	_, _, err = svc.messageQueue.QueueMessageWithCoalesceKey(ctx, "session-1", "task-1", "@ci-auto-fix\n\nold feedback", "", messagequeue.QueuedByWorkflow, false, nil, ciAutomationMessageMetadataForPR(pr, "old"), ciAutomationCoalesceKey(pr), true)
 	if err != nil {
 		t.Fatalf("seed pending auto-fix: %v", err)
 	}
@@ -999,9 +1010,17 @@ func TestHandleTaskPRCIAutomationAtRoundCapReplacesPendingAutoFixForWaitingSessi
 	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
 		t.Fatalf("handle capped waiting replacement: %v", err)
 	}
+	select {
+	case <-agentMgr.promptDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for replaced auto-fix prompt dispatch")
+	}
 	status := svc.messageQueue.GetStatus(ctx, "session-1")
-	if status.Count != 1 || !strings.Contains(status.Entries[0].Content, "lint") || strings.Contains(status.Entries[0].Content, "old feedback") {
-		t.Fatalf("expected pending auto-fix replacement with latest feedback, got %+v", status)
+	if status.Count != 0 {
+		t.Fatalf("expected replaced auto-fix prompt to drain immediately, got %+v", status)
+	}
+	if len(agentMgr.capturedPrompts) != 1 || !strings.Contains(agentMgr.capturedPrompts[0], "lint") || strings.Contains(agentMgr.capturedPrompts[0], "old feedback") {
+		t.Fatalf("expected latest replaced auto-fix prompt to dispatch, got %+v", agentMgr.capturedPrompts)
 	}
 	if len(ghSvc.fixAttempts) != 1 || ghSvc.fixAttempts[0].IncrementRound {
 		t.Fatalf("expected replacement checkpoint without another round, got %+v", ghSvc.fixAttempts)
@@ -1015,7 +1034,18 @@ func TestHandleTaskPRCIAutomationReplacesPendingAutoFixBeforeDirectPrompt(t *tes
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateWaitingForInput)
-	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo, promptDone: make(chan struct{})}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
+	session, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.AgentExecutionID = "exec-1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session execution: %v", err)
+	}
 	now := time.Now().UTC()
 	pr := &github.TaskPR{
 		TaskID:       "task-1",
@@ -1026,7 +1056,7 @@ func TestHandleTaskPRCIAutomationReplacesPendingAutoFixBeforeDirectPrompt(t *tes
 		State:        "open",
 		LastSyncedAt: &now,
 	}
-	_, _, err := svc.messageQueue.QueueMessageWithCoalesceKey(ctx, "session-1", "task-1", "@ci-auto-fix\n\nold feedback", "", messagequeue.QueuedByWorkflow, false, nil, ciAutomationMessageMetadataForPR(pr, "old"), ciAutomationCoalesceKey(pr), true)
+	_, _, err = svc.messageQueue.QueueMessageWithCoalesceKey(ctx, "session-1", "task-1", "@ci-auto-fix\n\nold feedback", "", messagequeue.QueuedByWorkflow, false, nil, ciAutomationMessageMetadataForPR(pr, "old"), ciAutomationCoalesceKey(pr), true)
 	if err != nil {
 		t.Fatalf("seed pending auto-fix: %v", err)
 	}
@@ -1062,9 +1092,17 @@ func TestHandleTaskPRCIAutomationReplacesPendingAutoFixBeforeDirectPrompt(t *tes
 	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
 		t.Fatalf("handle waiting replacement: %v", err)
 	}
+	select {
+	case <-agentMgr.promptDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for replaced auto-fix prompt dispatch")
+	}
 	status := svc.messageQueue.GetStatus(ctx, "session-1")
-	if status.Count != 1 || !strings.Contains(status.Entries[0].Content, "lint") || strings.Contains(status.Entries[0].Content, "old feedback") {
-		t.Fatalf("expected pending auto-fix replacement before direct prompt, got %+v", status)
+	if status.Count != 0 {
+		t.Fatalf("expected replaced auto-fix prompt to drain before direct prompt, got %+v", status)
+	}
+	if len(agentMgr.capturedPrompts) != 1 || !strings.Contains(agentMgr.capturedPrompts[0], "lint") || strings.Contains(agentMgr.capturedPrompts[0], "old feedback") {
+		t.Fatalf("expected latest replaced auto-fix prompt to dispatch, got %+v", agentMgr.capturedPrompts)
 	}
 	if len(ghSvc.fixAttempts) != 1 || ghSvc.fixAttempts[0].IncrementRound {
 		t.Fatalf("expected replacement checkpoint without consuming another round, got %+v", ghSvc.fixAttempts)
@@ -1332,6 +1370,52 @@ func TestHandleTaskPRCIAutomationRecordsErrorWhenNoPromptableSession(t *testing.
 	}
 	if len(ghSvc.ciErrors) != 1 || ghSvc.ciErrors[0].LastError == nil || *ghSvc.ciErrors[0].LastError != "no promptable task session for CI auto-fix" {
 		t.Fatalf("expected no-session CI automation error, got %+v", ghSvc.ciErrors)
+	}
+	if len(ghSvc.fixAttempts) != 0 {
+		t.Fatalf("expected no fix attempt without promptable session, got %+v", ghSvc.fixAttempts)
+	}
+}
+
+func TestHandleTaskPRCIAutomationMarksExhaustedWithoutPromptableSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateCompleted)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			EffectiveAutoFixPrompt: "Fix the PR",
+		},
+		prFeedback: &github.PRFeedback{
+			Checks: []github.CheckRun{{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit"}},
+		},
+		ciPRState: &github.TaskCIPRAutomationState{
+			TaskID:            "task-1",
+			RepositoryID:      "repo-1",
+			PRNumber:          42,
+			AutoFixRoundCount: ciAutomationMaxFixRounds,
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	err := svc.handleTaskPRCIAutomation(ctx, &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		Owner:        "acme",
+		Repo:         "widget",
+		PRNumber:     42,
+		State:        "open",
+		ChecksState:  "failure",
+	})
+	if err != nil {
+		t.Fatalf("handle auto-fix: %v", err)
+	}
+	if len(ghSvc.ciExhausted) != 1 {
+		t.Fatalf("expected exhausted CI state without promptable session, got %+v", ghSvc.ciExhausted)
+	}
+	if len(ghSvc.ciErrors) != 0 {
+		t.Fatalf("expected cap exhaustion instead of no-session error, got %+v", ghSvc.ciErrors)
 	}
 	if len(ghSvc.fixAttempts) != 0 {
 		t.Fatalf("expected no fix attempt without promptable session, got %+v", ghSvc.fixAttempts)

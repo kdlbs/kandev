@@ -82,20 +82,42 @@ func (s *Service) publishQueueStatusEvent(ctx context.Context, sessionID string)
 // Preserves the original Metadata (e.g. sender_task_id from message_task_kandev)
 // so attribution survives transient failures + retries.
 func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.QueuedMessage, queuedBy string) {
-	if queuedMsg.QueuedBy != "" && messageHasCoalesceKey(queuedMsg) {
+	coalesceKey := messageCoalesceKey(queuedMsg)
+	if queuedMsg.QueuedBy != "" && coalesceKey != "" {
 		queuedBy = queuedMsg.QueuedBy
 	}
-	requeuedMsg, queueErr := s.messageQueue.QueueMessageWithMetadata(
-		ctx,
-		queuedMsg.SessionID,
-		queuedMsg.TaskID,
-		queuedMsg.Content,
-		queuedMsg.Model,
-		queuedBy,
-		queuedMsg.PlanMode,
-		queuedMsg.Attachments,
-		queuedMsg.Metadata,
+	var (
+		requeuedMsg *messagequeue.QueuedMessage
+		replaced    bool
+		queueErr    error
 	)
+	if coalesceKey != "" {
+		requeuedMsg, replaced, queueErr = s.messageQueue.QueueMessageWithCoalesceKey(
+			ctx,
+			queuedMsg.SessionID,
+			queuedMsg.TaskID,
+			queuedMsg.Content,
+			queuedMsg.Model,
+			queuedBy,
+			queuedMsg.PlanMode,
+			queuedMsg.Attachments,
+			queuedMsg.Metadata,
+			coalesceKey,
+			true,
+		)
+	} else {
+		requeuedMsg, queueErr = s.messageQueue.QueueMessageWithMetadata(
+			ctx,
+			queuedMsg.SessionID,
+			queuedMsg.TaskID,
+			queuedMsg.Content,
+			queuedMsg.Model,
+			queuedBy,
+			queuedMsg.PlanMode,
+			queuedMsg.Attachments,
+			queuedMsg.Metadata,
+		)
+	}
 	if queueErr != nil {
 		s.logger.Error("failed to requeue message",
 			zap.String("session_id", queuedMsg.SessionID),
@@ -110,20 +132,25 @@ func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.Qu
 		zap.String("task_id", queuedMsg.TaskID),
 		zap.String("old_queue_id", queuedMsg.ID),
 		zap.String("new_queue_id", requeuedMsg.ID),
-		zap.String("queued_by", queuedBy))
+		zap.String("queued_by", queuedBy),
+		zap.String("coalesce_key", coalesceKey),
+		zap.Bool("replaced", replaced))
 	s.publishQueueStatusEvent(ctx, queuedMsg.SessionID)
 }
 
-func messageHasCoalesceKey(queuedMsg *messagequeue.QueuedMessage) bool {
+func messageCoalesceKey(queuedMsg *messagequeue.QueuedMessage) string {
 	if queuedMsg == nil || len(queuedMsg.Metadata) == 0 {
-		return false
+		return ""
 	}
 	value, ok := queuedMsg.Metadata[messagequeue.MetadataCoalesceKey]
 	if !ok {
-		return false
+		return ""
 	}
 	key, ok := value.(string)
-	return ok && key != ""
+	if !ok {
+		return ""
+	}
+	return key
 }
 
 // handleAgentBootReady handles the boot signal: an agent's ACP session has

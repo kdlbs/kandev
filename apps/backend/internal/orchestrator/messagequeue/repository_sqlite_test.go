@@ -187,6 +187,30 @@ func TestSQLiteRepository_UpdateContent(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_ReplaceCoalescedDetectsMissingRow(t *testing.T) {
+	repo := newTestSQLiteRepo(t).(*sqliteRepository)
+	ctx := context.Background()
+	tx, err := repo.db.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	_, err = repo.replaceCoalesced(ctx, tx,
+		&QueuedMessage{ID: "missing", SessionID: "s1", QueuedBy: QueuedByWorkflow},
+		&QueuedMessage{
+			SessionID: "s1",
+			TaskID:    "t1",
+			Content:   "new",
+			QueuedBy:  QueuedByWorkflow,
+			Metadata:  map[string]interface{}{MetadataCoalesceKey: "ci-key"},
+		},
+	)
+	if !errors.Is(err, ErrEntryNotFound) {
+		t.Fatalf("expected ErrEntryNotFound for vanished coalesced row, got %v", err)
+	}
+}
+
 func TestSQLiteRepository_DeleteByID(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()

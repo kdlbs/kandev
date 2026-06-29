@@ -183,13 +183,17 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 	if state != nil && state.LastFixSignature == signature {
 		return ciAutomationDuplicateFixAttemptBlocksMerge(state)
 	}
+	allowNewRound := !ciAutomationFixRoundsExhausted(state)
 	prompt := ciAutomationRenderPrompt(options.EffectiveAutoFixPrompt, pr, delta)
 	session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, pr.TaskID)
 	if err != nil || session == nil {
+		if !allowNewRound {
+			s.markCIAutoFixExhausted(ctx, pr)
+			return true
+		}
 		s.recordCIAutomationError(ctx, pr, "no promptable task session for CI auto-fix")
 		return true
 	}
-	allowNewRound := !ciAutomationFixRoundsExhausted(state)
 	result, err := s.dispatchCIAutomationPromptForPR(ctx, session, pr, prompt, signature, allowNewRound)
 	if errors.Is(err, errCIAutoFixRoundCapReached) {
 		s.markCIAutoFixExhausted(ctx, pr)
@@ -262,6 +266,9 @@ func (s *Service) dispatchCIAutomationPromptForPR(ctx context.Context, session *
 			return ciAutomationDispatchResult{}, err
 		}
 		if replaced {
+			if !s.drainQueuedMessageForPromptableSession(ctx, session.ID) {
+				return ciAutomationDispatchResult{}, fmt.Errorf("failed to dispatch replaced CI automation prompt")
+			}
 			return result, nil
 		}
 		if !allowNewRound {

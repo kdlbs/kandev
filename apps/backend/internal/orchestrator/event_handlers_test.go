@@ -859,12 +859,18 @@ func TestExecuteQueuedMessage_RequeuesCoalescedMessageWithOriginalSender(t *test
 		Metadata:  map[string]interface{}{messagequeue.MetadataCoalesceKey: "ci-key"},
 		QueuedBy:  messagequeue.QueuedByWorkflow,
 	}
+	if _, _, err := svc.messageQueue.QueueMessageWithCoalesceKey(ctx, "s1", "t1", "newer ci feedback", "", messagequeue.QueuedByWorkflow, false, nil, map[string]interface{}{messagequeue.MetadataCoalesceKey: "ci-key"}, "ci-key", true); err != nil {
+		t.Fatalf("seed newer coalesced message: %v", err)
+	}
 
 	svc.executeQueuedMessage("s1", queuedMsg)
 
 	status := svc.messageQueue.GetStatus(ctx, "s1")
 	if status.Count != 1 {
-		t.Fatalf("expected queued message to be requeued after transient failure, count=%d", status.Count)
+		t.Fatalf("expected coalesced retry to replace existing pending entry, count=%d", status.Count)
+	}
+	if status.Entries[0].Content != "hello" {
+		t.Fatalf("expected transient retry to remain coalesced, got %q", status.Entries[0].Content)
 	}
 	if status.Entries[0].QueuedBy != messagequeue.QueuedByWorkflow {
 		t.Fatalf("expected original queued_by to be preserved, got %q", status.Entries[0].QueuedBy)

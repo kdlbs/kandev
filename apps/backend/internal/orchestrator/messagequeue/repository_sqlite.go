@@ -229,7 +229,7 @@ func (r *sqliteRepository) replaceCoalesced(ctx context.Context, tx *sqlx.Tx, ex
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+	res, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE queued_messages
 		SET task_id = ?, content = ?, model = ?, plan_mode = ?,
 		    attachments_json = ?, metadata_json = ?, queued_at = ?
@@ -238,8 +238,16 @@ func (r *sqliteRepository) replaceCoalesced(ctx context.Context, tx *sqlx.Tx, ex
 		msg.TaskID, msg.Content, msg.Model, boolToInt(msg.PlanMode),
 		attachmentsJSON, metadataJSON, msg.QueuedAt,
 		existing.ID, msg.SessionID, msg.QueuedBy,
-	); err != nil {
+	)
+	if err != nil {
 		return nil, fmt.Errorf("replace coalesced queued: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("replace coalesced rows affected: %w", err)
+	}
+	if rows == 0 {
+		return nil, ErrEntryNotFound
 	}
 	existing.TaskID = msg.TaskID
 	existing.Content = msg.Content
