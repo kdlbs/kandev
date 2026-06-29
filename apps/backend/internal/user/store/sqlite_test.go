@@ -182,6 +182,32 @@ func TestBuildPostgresTaskCreateLastUsedUpdateUsesJSONB(t *testing.T) {
 	}
 }
 
+func TestBuildPostgresUserSettingsPreservingTaskCreateLastUsedUpdateUsesJSONB(t *testing.T) {
+	patch := models.TaskCreateLastUsed{
+		RepositoryID:      "repo-1",
+		Branch:            "feature",
+		AgentProfileID:    "agent-1",
+		ExecutorProfileID: "exec-1",
+	}
+	query, args := buildPostgresUserSettingsPreservingTaskCreateLastUsedUpdate(&patch)
+
+	if strings.Contains(query, "json(") || strings.Contains(query, "json_extract") {
+		t.Fatalf("postgres update must not use sqlite JSON functions: %s", query)
+	}
+	if !strings.Contains(query, "?::jsonb") || !strings.Contains(query, "jsonb_set") {
+		t.Fatalf("postgres update should merge payload with jsonb_set: %s", query)
+	}
+	if !strings.Contains(query, "{task_create_last_used,repository_id}") ||
+		!strings.Contains(query, "{task_create_last_used,branch}") ||
+		!strings.Contains(query, "{task_create_last_used,agent_profile_id}") ||
+		!strings.Contains(query, "{task_create_last_used,executor_profile_id}") {
+		t.Fatalf("postgres update missing task-create paths: %s", query)
+	}
+	if len(args) != 4 {
+		t.Fatalf("expected one arg per task-create field, got %d", len(args))
+	}
+}
+
 func TestPostgresRepositoryTaskCreateLastUsedRoundTrip(t *testing.T) {
 	conn := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	repo, err := newSQLiteRepositoryWithDB(conn, conn)
@@ -228,7 +254,7 @@ func TestPostgresRepositoryTaskCreateLastUsedRoundTrip(t *testing.T) {
 		RepositoryID: "repo-stale",
 		Branch:       "stale",
 	}
-	got, err = repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, staleSettings)
+	got, err = repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, staleSettings, nil)
 	if err != nil {
 		t.Fatalf("upsert preserving postgres task-create last-used: %v", err)
 	}
@@ -276,7 +302,7 @@ func TestSQLiteRepositoryUpsertSettingsPreservesCurrentTaskCreateLastUsed(t *tes
 	}
 
 	staleSettings.SidebarActiveViewID = "view-after"
-	got, err := repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, staleSettings)
+	got, err := repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, staleSettings, nil)
 	if err != nil {
 		t.Fatalf("upsert preserving task-create last-used: %v", err)
 	}
@@ -289,6 +315,70 @@ func TestSQLiteRepositoryUpsertSettingsPreservesCurrentTaskCreateLastUsed(t *tes
 	}
 	if got.TaskCreateLastUsed.Branch != "feature" {
 		t.Fatalf("expected current task-create branch to survive stale write, got %q", got.TaskCreateLastUsed.Branch)
+	}
+}
+
+func TestSQLiteRepositoryUpsertSettingsPreservingTaskCreateLastUsedAppliesPatch(t *testing.T) {
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	conn.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = conn.Close() })
+	repo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+
+	ctx := context.Background()
+	staleSettings, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get defaults: %v", err)
+	}
+	staleSettings.SidebarActiveViewID = "view-before"
+	staleSettings.TaskCreateLastUsed = models.TaskCreateLastUsed{
+		RepositoryID:      "repo-before",
+		Branch:            "main",
+		AgentProfileID:    "agent-before",
+		ExecutorProfileID: "exec-before",
+	}
+	if err := repo.UpsertUserSettings(ctx, staleSettings); err != nil {
+		t.Fatalf("upsert initial settings: %v", err)
+	}
+	if _, err := repo.UpdateTaskCreateLastUsed(ctx, DefaultUserID, models.TaskCreateLastUsed{
+		RepositoryID:      "repo-current",
+		Branch:            "current",
+		ExecutorProfileID: "exec-current",
+	}); err != nil {
+		t.Fatalf("update current task-create last-used: %v", err)
+	}
+
+	staleSettings.SidebarActiveViewID = "view-after"
+	staleSettings.TaskCreateLastUsed = models.TaskCreateLastUsed{
+		RepositoryID:   "repo-stale",
+		Branch:         "stale",
+		AgentProfileID: "agent-stale",
+	}
+	patch := models.TaskCreateLastUsed{AgentProfileID: "agent-after"}
+	got, err := repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, staleSettings, &patch)
+	if err != nil {
+		t.Fatalf("upsert preserving task-create last-used with patch: %v", err)
+	}
+
+	if got.SidebarActiveViewID != "view-after" {
+		t.Fatalf("expected unrelated setting to update, got %q", got.SidebarActiveViewID)
+	}
+	if got.TaskCreateLastUsed.RepositoryID != "repo-current" {
+		t.Fatalf("expected current repository to survive stale write, got %q", got.TaskCreateLastUsed.RepositoryID)
+	}
+	if got.TaskCreateLastUsed.Branch != "current" {
+		t.Fatalf("expected current branch to survive stale write, got %q", got.TaskCreateLastUsed.Branch)
+	}
+	if got.TaskCreateLastUsed.AgentProfileID != "agent-after" {
+		t.Fatalf("expected patch agent profile to apply, got %q", got.TaskCreateLastUsed.AgentProfileID)
+	}
+	if got.TaskCreateLastUsed.ExecutorProfileID != "exec-current" {
+		t.Fatalf("expected current executor profile to survive stale write, got %q", got.TaskCreateLastUsed.ExecutorProfileID)
 	}
 }
 

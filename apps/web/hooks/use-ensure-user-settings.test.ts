@@ -232,6 +232,37 @@ describe("useEnsureUserSettings", () => {
   });
 });
 
+describe("useEnsureUserSettings — loaded settings overlay", () => {
+  it("applies queued task-create fields when settings are already loaded", () => {
+    mockState.userSettings = {
+      ...makeUnloadedSettings(),
+      loaded: true,
+      taskCreateLastUsed: {
+        repositoryId: "repo-1",
+        branch: "main",
+        agentProfileId: "agent-1",
+        executorProfileId: "exec-1",
+      },
+    };
+    mockReadQueuedTaskCreateLastUsedState.mockReturnValue({
+      repositoryId: "repo-2",
+      branch: "feature",
+      agentProfileId: undefined,
+      executorProfileId: undefined,
+    });
+
+    const { result } = renderHook(() => useEnsureUserSettings(true));
+
+    expect(mockFetchUserSettings).not.toHaveBeenCalled();
+    expect(result.current.userSettings.taskCreateLastUsed).toEqual({
+      repositoryId: "repo-2",
+      branch: "feature",
+      agentProfileId: "agent-1",
+      executorProfileId: "exec-1",
+    });
+  });
+});
+
 describe("useEnsureUserSettings — stale settings fetches", () => {
   it("keeps task-create edits made while a settings fetch is in flight", async () => {
     let resolveFetch: (value: unknown) => void = () => undefined;

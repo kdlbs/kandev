@@ -144,15 +144,13 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
 	settings.UpdatedAt = time.Now().UTC()
-	settings, err = s.repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, settings)
+	var taskCreatePatch *models.TaskCreateLastUsed
+	if req.TaskCreateLastUsed != nil && !taskCreateLastUsedPatchEmpty(*req.TaskCreateLastUsed) {
+		taskCreatePatch = req.TaskCreateLastUsed
+	}
+	settings, err = s.repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, settings, taskCreatePatch)
 	if err != nil {
 		return nil, err
-	}
-	if req.TaskCreateLastUsed != nil {
-		settings, err = s.updateTaskCreateLastUsed(ctx, *req.TaskCreateLastUsed)
-		if err != nil {
-			return nil, err
-		}
 	}
 	s.publishUserSettingsEvent(ctx, settings)
 	return settings, nil
@@ -448,9 +446,6 @@ func applyUserPreferenceBlobs(settings *models.UserSettings, req *UpdateUserSett
 	if req.SidebarTaskPrefs != nil {
 		settings.SidebarTaskPrefs = *req.SidebarTaskPrefs
 	}
-	if req.TaskCreateLastUsed != nil {
-		mergeTaskCreateLastUsed(&settings.TaskCreateLastUsed, *req.TaskCreateLastUsed)
-	}
 	if err := applyUserPreferenceBlob("jira_saved_views", req.JiraSavedViews, &settings.JiraSavedViews); err != nil {
 		return err
 	}
@@ -497,21 +492,6 @@ func validateUserPreferenceBlob(field string, value json.RawMessage) error {
 		return nil
 	default:
 		return fmt.Errorf("%s: must be a JSON object, array, or null", field)
-	}
-}
-
-func mergeTaskCreateLastUsed(current *models.TaskCreateLastUsed, patch models.TaskCreateLastUsed) {
-	if patch.RepositoryID != "" {
-		current.RepositoryID = patch.RepositoryID
-	}
-	if patch.Branch != "" {
-		current.Branch = patch.Branch
-	}
-	if patch.AgentProfileID != "" {
-		current.AgentProfileID = patch.AgentProfileID
-	}
-	if patch.ExecutorProfileID != "" {
-		current.ExecutorProfileID = patch.ExecutorProfileID
 	}
 }
 
@@ -611,7 +591,8 @@ func (s *Service) ClearDefaultEditorID(ctx context.Context, editorID string) err
 	}
 	settings.DefaultEditorID = ""
 	settings.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpsertUserSettings(ctx, settings); err != nil {
+	settings, err = s.repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, settings, nil)
+	if err != nil {
 		return err
 	}
 	s.publishUserSettingsEvent(ctx, settings)

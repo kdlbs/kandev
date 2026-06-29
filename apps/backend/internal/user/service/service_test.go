@@ -561,11 +561,112 @@ func TestApplyUserPreferenceBlobs(t *testing.T) {
 	if settings.TaskCreateLastUsed.RepositoryID != "repo-1" {
 		t.Fatalf("expected repository id to be preserved, got %q", settings.TaskCreateLastUsed.RepositoryID)
 	}
-	if settings.TaskCreateLastUsed.Branch != "feature" {
-		t.Fatalf("expected branch to update, got %q", settings.TaskCreateLastUsed.Branch)
+	if settings.TaskCreateLastUsed.Branch != "main" {
+		t.Fatalf("expected task-create last-used to stay unchanged, got %q", settings.TaskCreateLastUsed.Branch)
 	}
 	if string(settings.GitHubSavedPresets) != `[{"id":"p1"}]` {
 		t.Fatalf("expected GitHub presets to apply, got %s", string(settings.GitHubSavedPresets))
+	}
+}
+
+func TestUpdateUserSettingsCombinesSettingsAndTaskCreatePatch(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	patch := models.TaskCreateLastUsed{
+		RepositoryID:   "repo-2",
+		Branch:         "feature",
+		AgentProfileID: "agent-2",
+	}
+	updatedSettings := &models.UserSettings{
+		UserID:           store.DefaultUserID,
+		TerminalFontSize: 16,
+		TaskCreateLastUsed: models.TaskCreateLastUsed{
+			RepositoryID:   "repo-2",
+			Branch:         "feature",
+			AgentProfileID: "agent-2",
+		},
+	}
+	repo := &recordingUserRepository{
+		getSettings:        &models.UserSettings{UserID: store.DefaultUserID},
+		preservingSettings: updatedSettings,
+		updateSettings:     updatedSettings,
+	}
+	eventBus := &recordingEventBus{}
+	svc := NewService(repo, eventBus, log)
+
+	settings, err := svc.UpdateUserSettings(context.Background(), &UpdateUserSettingsRequest{
+		TerminalFontSize:   ptr(16),
+		TaskCreateLastUsed: &patch,
+	})
+	if err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+
+	if settings != updatedSettings {
+		t.Fatalf("expected returned settings from preserving writer, got %+v", settings)
+	}
+	if repo.upsertUserSettingsPreservingLastUsedCalls != 1 {
+		t.Fatalf("expected one preserving settings write, got %d", repo.upsertUserSettingsPreservingLastUsedCalls)
+	}
+	if repo.updateCalls != 0 {
+		t.Fatalf("expected task-create patch to be folded into settings write, got %d separate update calls", repo.updateCalls)
+	}
+	if repo.preservingPatch == nil || *repo.preservingPatch != patch {
+		t.Fatalf("expected preserving write patch %+v, got %+v", patch, repo.preservingPatch)
+	}
+	if len(eventBus.publishedEvents) != 1 {
+		t.Fatalf("expected one settings event, got %d", len(eventBus.publishedEvents))
+	}
+}
+
+func TestClearDefaultEditorIDPreservesTaskCreateLastUsed(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	updatedSettings := &models.UserSettings{
+		UserID:          store.DefaultUserID,
+		DefaultEditorID: "",
+		TaskCreateLastUsed: models.TaskCreateLastUsed{
+			RepositoryID: "repo-2",
+			Branch:       "feature",
+		},
+	}
+	repo := &recordingUserRepository{
+		getSettings: &models.UserSettings{
+			UserID:          store.DefaultUserID,
+			DefaultEditorID: "editor-1",
+			TaskCreateLastUsed: models.TaskCreateLastUsed{
+				RepositoryID: "repo-1",
+				Branch:       "main",
+			},
+		},
+		preservingSettings: updatedSettings,
+	}
+	eventBus := &recordingEventBus{}
+	svc := NewService(repo, eventBus, log)
+
+	if err := svc.ClearDefaultEditorID(context.Background(), "editor-1"); err != nil {
+		t.Fatalf("ClearDefaultEditorID: %v", err)
+	}
+
+	if repo.upsertUserSettingsCalls != 0 {
+		t.Fatalf("expected plain settings upsert not to run, got %d calls", repo.upsertUserSettingsCalls)
+	}
+	if repo.upsertUserSettingsPreservingLastUsedCalls != 1 {
+		t.Fatalf("expected preserving settings upsert, got %d calls", repo.upsertUserSettingsPreservingLastUsedCalls)
+	}
+	if len(eventBus.publishedEvents) != 1 {
+		t.Fatalf("expected one settings event, got %d", len(eventBus.publishedEvents))
+	}
+	data, ok := eventBus.publishedEvents[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected event data map, got %T", eventBus.publishedEvents[0].Data)
+	}
+	if data["task_create_last_used"] != updatedSettings.TaskCreateLastUsed {
+		t.Fatalf("expected event to include preserved task-create state %+v, got %+v", updatedSettings.TaskCreateLastUsed, data["task_create_last_used"])
 	}
 }
 
@@ -718,6 +819,11 @@ type recordingUserRepository struct {
 	updatePatch                               models.TaskCreateLastUsed
 	updateSettings                            *models.UserSettings
 	updateErr                                 error
+	getSettings                               *models.UserSettings
+	getErr                                    error
+	preservingSettings                        *models.UserSettings
+	preservingPatch                           *models.TaskCreateLastUsed
+	preservingErr                             error
 	closeCalls                                int
 }
 
@@ -743,6 +849,12 @@ func (r *recordingUserRepository) GetDefaultUser(context.Context) (*models.User,
 
 func (r *recordingUserRepository) GetUserSettings(context.Context, string) (*models.UserSettings, error) {
 	r.getUserSettingsCalls++
+	if r.getErr != nil {
+		return nil, r.getErr
+	}
+	if r.getSettings != nil {
+		return r.getSettings, nil
+	}
 	return nil, errors.New("unexpected GetUserSettings call")
 }
 
@@ -752,10 +864,21 @@ func (r *recordingUserRepository) UpsertUserSettings(context.Context, *models.Us
 }
 
 func (r *recordingUserRepository) UpsertUserSettingsPreservingTaskCreateLastUsed(
-	context.Context,
-	*models.UserSettings,
+	_ context.Context,
+	_ *models.UserSettings,
+	patch *models.TaskCreateLastUsed,
 ) (*models.UserSettings, error) {
 	r.upsertUserSettingsPreservingLastUsedCalls++
+	if patch != nil {
+		patchCopy := *patch
+		r.preservingPatch = &patchCopy
+	}
+	if r.preservingErr != nil {
+		return nil, r.preservingErr
+	}
+	if r.preservingSettings != nil {
+		return r.preservingSettings, nil
+	}
 	return nil, errors.New("unexpected UpsertUserSettingsPreservingTaskCreateLastUsed call")
 }
 

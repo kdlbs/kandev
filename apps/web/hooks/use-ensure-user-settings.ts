@@ -56,6 +56,11 @@ function mergeTaskCreateLastUsedForFetch(result: LoadedUserSettings): UserSettin
   });
 }
 
+function mergeTaskCreateLastUsedForLoadedSettings(settings: UserSettingsState): UserSettingsState {
+  if (!settings.loaded) return settings;
+  return mergeTaskCreateLastUsedOverlay(settings, readQueuedTaskCreateLastUsedState());
+}
+
 export function __resetEnsureUserSettingsForTests() {
   userSettingsFetchPromise = null;
 }
@@ -91,8 +96,10 @@ export function useEnsureUserSettings(enabled = true) {
     };
   }, [enabled, setUserSettings, userSettings.loaded]);
 
+  const effectiveUserSettings = mergeTaskCreateLastUsedForLoadedSettings(userSettings);
+
   return {
-    loaded: userSettings.loaded || fetchSettled,
-    userSettings,
+    loaded: effectiveUserSettings.loaded || fetchSettled,
+    userSettings: effectiveUserSettings,
   };
 }
