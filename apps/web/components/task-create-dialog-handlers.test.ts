@@ -1,12 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-  readPendingTaskCreateLastUsedState,
   readQueuedTaskCreateLastUsedState,
   resetTaskCreateLastUsedSync,
   syncTaskCreateLastUsed,
 } from "./task-create-dialog-handlers";
-
-const PENDING_LAST_USED_SYNC_KEY = "kandev.taskCreateLastUsed.pendingSync";
 
 describe("syncTaskCreateLastUsed", () => {
   beforeEach(() => {
@@ -20,8 +17,6 @@ describe("syncTaskCreateLastUsed", () => {
     expect(readQueuedTaskCreateLastUsedState()).toMatchObject({
       branch: "feature",
     });
-    expect(readPendingTaskCreateLastUsedState()).toEqual({});
-    expect(window.localStorage.getItem(PENDING_LAST_USED_SYNC_KEY)).toBeNull();
   });
 
   it("retains prior queued fields after a later selector change", () => {
@@ -34,14 +29,11 @@ describe("syncTaskCreateLastUsed", () => {
     });
   });
 
-  it("keeps queued fields when dialog close resets transient state", () => {
+  it("clears queued fields when dialog close resets canceled selections", () => {
     syncTaskCreateLastUsed({ branch: "feature" });
 
-    resetTaskCreateLastUsedSync();
+    resetTaskCreateLastUsedSync({ clearQueued: true });
 
-    expect(readQueuedTaskCreateLastUsedState()).toMatchObject({
-      branch: "feature",
-    });
-    expect(readQueuedTaskCreateLastUsedState().agentProfileId).toBeUndefined();
+    expect(readQueuedTaskCreateLastUsedState()).toEqual({});
   });
 });

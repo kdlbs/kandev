@@ -29,10 +29,6 @@ export function resetTaskCreateLastUsedSync(options: { clearQueued?: boolean } =
   lastUsedDebug("overlay-reset");
 }
 
-export function readPendingTaskCreateLastUsedState(): Partial<TaskCreateLastUsedState> {
-  return {};
-}
-
 export function readQueuedTaskCreateLastUsedState(): Partial<TaskCreateLastUsedState> {
   return lastQueuedLastUsed;
 }

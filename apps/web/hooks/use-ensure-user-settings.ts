@@ -2,10 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
-import {
-  readPendingTaskCreateLastUsedState,
-  readQueuedTaskCreateLastUsedState,
-} from "@/components/task-create-dialog-handlers";
+import { readQueuedTaskCreateLastUsedState } from "@/components/task-create-dialog-handlers";
 import { fetchUserSettings } from "@/lib/api/domains/settings-api";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type { TaskCreateLastUsedState, UserSettingsState } from "@/lib/state/slices/settings/types";
@@ -56,7 +53,6 @@ function compactTaskCreateLastUsedOverlay(pending: Partial<TaskCreateLastUsedSta
 function mergeTaskCreateLastUsedForFetch(result: LoadedUserSettings): UserSettingsState {
   return mergeTaskCreateLastUsedOverlay(result.settings, {
     ...compactTaskCreateLastUsedOverlay(readQueuedTaskCreateLastUsedState()),
-    ...compactTaskCreateLastUsedOverlay(readPendingTaskCreateLastUsedState()),
   });
 }
 

@@ -496,7 +496,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
   const { guardedHandleSubmit } = setup;
   const [popoverContainer, setPopoverContainer] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
-    if (!props.open) resetTaskCreateLastUsedSync();
+    if (!props.open) resetTaskCreateLastUsedSync({ clearQueued: true });
   }, [props.open]);
   // Voice auto-send invokes the same submit handler as the in-form Submit
   // button. Every existing validation gate (missing title/repo/branch/agent,

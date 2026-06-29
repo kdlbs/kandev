@@ -10,6 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/kandev/kandev/internal/testutil"
 	"github.com/kandev/kandev/internal/user/models"
 )
 
@@ -178,6 +179,67 @@ func TestBuildPostgresTaskCreateLastUsedUpdateUsesJSONB(t *testing.T) {
 	}
 	if len(args) != 4 {
 		t.Fatalf("expected one arg per task-create field, got %d", len(args))
+	}
+}
+
+func TestPostgresRepositoryTaskCreateLastUsedRoundTrip(t *testing.T) {
+	conn := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("new postgres repo: %v", err)
+	}
+
+	ctx := context.Background()
+	staleSettings, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get defaults: %v", err)
+	}
+	staleSettings.SidebarActiveViewID = "view-before"
+	staleSettings.TaskCreateLastUsed = models.TaskCreateLastUsed{
+		RepositoryID:      "repo-before",
+		Branch:            "main",
+		AgentProfileID:    "agent-before",
+		ExecutorProfileID: "exec-before",
+	}
+	if err := repo.UpsertUserSettings(ctx, staleSettings); err != nil {
+		t.Fatalf("upsert initial postgres settings: %v", err)
+	}
+
+	got, err := repo.UpdateTaskCreateLastUsed(ctx, DefaultUserID, models.TaskCreateLastUsed{
+		RepositoryID:   "repo-after",
+		Branch:         "feature",
+		AgentProfileID: "agent-after",
+	})
+	if err != nil {
+		t.Fatalf("update postgres task-create last-used: %v", err)
+	}
+	if got.SidebarActiveViewID != "view-before" {
+		t.Fatalf("unrelated postgres setting should be preserved, got %q", got.SidebarActiveViewID)
+	}
+	if got.TaskCreateLastUsed.RepositoryID != "repo-after" ||
+		got.TaskCreateLastUsed.Branch != "feature" ||
+		got.TaskCreateLastUsed.AgentProfileID != "agent-after" ||
+		got.TaskCreateLastUsed.ExecutorProfileID != "exec-before" {
+		t.Fatalf("postgres task-create update mismatch: %+v", got.TaskCreateLastUsed)
+	}
+
+	staleSettings.SidebarActiveViewID = "view-after"
+	staleSettings.TaskCreateLastUsed = models.TaskCreateLastUsed{
+		RepositoryID: "repo-stale",
+		Branch:       "stale",
+	}
+	got, err = repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, staleSettings)
+	if err != nil {
+		t.Fatalf("upsert preserving postgres task-create last-used: %v", err)
+	}
+	if got.SidebarActiveViewID != "view-after" {
+		t.Fatalf("expected unrelated postgres setting to update, got %q", got.SidebarActiveViewID)
+	}
+	if got.TaskCreateLastUsed.RepositoryID != "repo-after" ||
+		got.TaskCreateLastUsed.Branch != "feature" ||
+		got.TaskCreateLastUsed.AgentProfileID != "agent-after" ||
+		got.TaskCreateLastUsed.ExecutorProfileID != "exec-before" {
+		t.Fatalf("postgres preserving upsert should keep current task-create values: %+v", got.TaskCreateLastUsed)
 	}
 }
 
