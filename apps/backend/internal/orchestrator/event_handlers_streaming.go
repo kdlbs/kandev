@@ -540,6 +540,8 @@ func isTerminalSessionState(s models.TaskSessionState) bool {
 		s == models.TaskSessionStateCancelled
 }
 
+const completedExecutionRetention = 10 * time.Minute
+
 func terminalExecutionKey(sessionID, executionID string) string {
 	return sessionID + "\x00" + executionID
 }
@@ -548,15 +550,36 @@ func (s *Service) markExecutionCompleted(sessionID, executionID string) {
 	if sessionID == "" || executionID == "" {
 		return
 	}
-	s.completedExecutions.Store(terminalExecutionKey(sessionID, executionID), struct{}{})
+	now := time.Now()
+	s.completedExecutions.Store(terminalExecutionKey(sessionID, executionID), now.Add(completedExecutionRetention))
+	s.pruneCompletedExecutions(now)
 }
 
 func (s *Service) isExecutionCompleted(sessionID, executionID string) bool {
 	if sessionID == "" || executionID == "" {
 		return false
 	}
-	_, ok := s.completedExecutions.Load(terminalExecutionKey(sessionID, executionID))
-	return ok
+	key := terminalExecutionKey(sessionID, executionID)
+	value, ok := s.completedExecutions.Load(key)
+	if !ok {
+		return false
+	}
+	expiresAt, ok := value.(time.Time)
+	if !ok || time.Now().After(expiresAt) {
+		s.completedExecutions.Delete(key)
+		return false
+	}
+	return true
+}
+
+func (s *Service) pruneCompletedExecutions(now time.Time) {
+	s.completedExecutions.Range(func(key, value interface{}) bool {
+		expiresAt, ok := value.(time.Time)
+		if !ok || now.After(expiresAt) {
+			s.completedExecutions.Delete(key)
+		}
+		return true
+	})
 }
 
 func (s *Service) setSessionStarting(ctx context.Context, taskID string, session *models.TaskSession) error {

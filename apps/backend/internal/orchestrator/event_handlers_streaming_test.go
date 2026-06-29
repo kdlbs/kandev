@@ -540,6 +540,24 @@ func TestToolUpdateFromCompletedExecutionDoesNotWakeWaitingSession(t *testing.T)
 		"late completed-execution tool event must not move the task back to IN_PROGRESS")
 }
 
+func TestCompletedExecutionMarkerExpiresAndPrunes(t *testing.T) {
+	svc := &Service{}
+	expiredKey := terminalExecutionKey("old-session", "old-exec")
+	svc.completedExecutions.Store(expiredKey, time.Now().Add(-time.Minute))
+
+	svc.markExecutionCompleted("s1", "exec-1")
+
+	require.True(t, svc.isExecutionCompleted("s1", "exec-1"))
+	_, ok := svc.completedExecutions.Load(expiredKey)
+	require.False(t, ok, "marking a completed execution should prune expired markers")
+
+	currentKey := terminalExecutionKey("s1", "exec-1")
+	svc.completedExecutions.Store(currentKey, time.Now().Add(-time.Minute))
+	require.False(t, svc.isExecutionCompleted("s1", "exec-1"))
+	_, ok = svc.completedExecutions.Load(currentKey)
+	require.False(t, ok, "expired marker should be deleted on lookup")
+}
+
 // TestSetSessionRunning_NoRedundantTaskWrites locks in the dedup: when the
 // session is already RUNNING, setSessionRunning must not re-write tasks.state.
 // Without the guard, every tool_call / tool_update fired UpdateTaskState
