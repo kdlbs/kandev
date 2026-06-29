@@ -17,6 +17,12 @@ export type ChangesMarker = {
   fingerprint: string;
 };
 
+type GitStatusFingerprintCacheEntry = {
+  repoName: string;
+  fileCount: number;
+  fingerprint: string;
+};
+
 export type ActivateChangesPanelResult =
   | "activated"
   | "blocked-agent-group"
@@ -45,8 +51,14 @@ export function autoActivateChangesPanel(): ActivateChangesPanelResult {
   return activateChangesPanel(useDockviewStore.getState().api);
 }
 
+const fileFingerprintCache = new WeakMap<FileInfo, string>();
+const gitStatusFingerprintCache = new WeakMap<GitStatusEntry, GitStatusFingerprintCacheEntry>();
+
 function fileFingerprint(file: FileInfo): string {
-  return [
+  const cached = fileFingerprintCache.get(file);
+  if (cached !== undefined) return cached;
+
+  const fingerprint = [
     file.path,
     file.status,
     file.staged ? "1" : "0",
@@ -57,20 +69,34 @@ function fileFingerprint(file: FileInfo): string {
     file.diff_skip_reason ?? "",
     file.repository_name ?? "",
   ].join(":");
+  fileFingerprintCache.set(file, fingerprint);
+  return fingerprint;
 }
 
-function gitStatusFingerprint(repoName: string, status: GitStatusEntry): string {
+function gitStatusFingerprint(
+  repoName: string,
+  status: GitStatusEntry,
+): GitStatusFingerprintCacheEntry {
+  const cached = gitStatusFingerprintCache.get(status);
+  if (cached?.repoName === repoName) return cached;
+
   const fileKeys = Object.keys(status.files ?? {}).sort();
   const files = fileKeys.map((path) => fileFingerprint(status.files[path])).join(",");
-  return [
+  const entry = {
     repoName,
-    status.branch ?? "",
-    status.remote_branch ?? "",
-    status.ahead,
-    status.behind,
-    status.repository_name ?? "",
-    files,
-  ].join("|");
+    fileCount: fileKeys.length,
+    fingerprint: [
+      repoName,
+      status.branch ?? "",
+      status.remote_branch ?? "",
+      status.ahead,
+      status.behind,
+      status.repository_name ?? "",
+      files,
+    ].join("|"),
+  };
+  gitStatusFingerprintCache.set(status, entry);
+  return entry;
 }
 
 export function selectChangesMarkerByEnvironment(
@@ -89,8 +115,9 @@ export function selectChangesMarkerByEnvironment(
     const repoFingerprint = Object.entries(repoStatuses)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([repoName, status]) => {
-        count += Object.keys(status.files ?? {}).length;
-        return gitStatusFingerprint(repoName, status);
+        const entry = gitStatusFingerprint(repoName, status);
+        count += entry.fileCount;
+        return entry.fingerprint;
       })
       .join(";");
     const commitFingerprint = commits.map((commit) => commit.commit_sha).join(",");

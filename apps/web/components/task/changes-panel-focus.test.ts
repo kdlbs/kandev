@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyChangesPanelAutoFocusState,
   markInactiveChangesIncreases,
@@ -6,11 +6,21 @@ import {
   selectChangesMarkerByEnvironment,
   shouldClearPendingChangesFocus,
 } from "./changes-panel-focus";
-import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
+import type { FileInfo, GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
+
+const hashDiffMock = vi.hoisted(() => vi.fn((diff: string) => `hash:${diff}`));
+
+vi.mock("@/lib/utils/hash", () => ({
+  djb2Hash: hashDiffMock,
+}));
 
 const TEST_TIMESTAMP = "2026-06-29T00:00:00Z";
 const INITIAL_FINGERPRINT = "repo:path:initial";
 const UPDATED_FINGERPRINT = "repo:path:updated";
+
+beforeEach(() => {
+  hashDiffMock.mockClear();
+});
 
 function gitStatus(files: string[], timestamp = TEST_TIMESTAMP, diff = ""): GitStatusEntry {
   return {
@@ -29,6 +39,51 @@ function gitStatus(files: string[], timestamp = TEST_TIMESTAMP, diff = ""): GitS
     timestamp,
   };
 }
+
+describe("selectChangesMarkerByEnvironment cache", () => {
+  it("reuses cached fingerprints for unchanged git status objects", () => {
+    const file: FileInfo = {
+      path: "one.ts",
+      status: "modified",
+      staged: false,
+      diff: "large diff body",
+    };
+    const status: GitStatusEntry = {
+      branch: "main",
+      remote_branch: null,
+      modified: ["one.ts"],
+      added: [],
+      deleted: [],
+      untracked: [],
+      renamed: [],
+      ahead: 0,
+      behind: 0,
+      files: { "one.ts": file },
+      timestamp: TEST_TIMESTAMP,
+    };
+    const state = {
+      gitStatus: {
+        byEnvironmentId: {},
+        byEnvironmentRepo: {
+          envA: {
+            repo1: status,
+          },
+        },
+      },
+      sessionCommits: {
+        loading: {},
+        refetchTrigger: {},
+        byEnvironmentId: {},
+      },
+    };
+
+    const baseMarker = selectChangesMarkerByEnvironment(state).envA;
+    const nextMarker = selectChangesMarkerByEnvironment(state).envA;
+
+    expect(nextMarker).toEqual(baseMarker);
+    expect(hashDiffMock).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("selectChangesMarkerByEnvironment", () => {
   it("ignores timestamp-only git refreshes", () => {
