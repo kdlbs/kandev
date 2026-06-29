@@ -142,17 +142,14 @@ func TestNormalizeSSHRemotePlatform(t *testing.T) {
 		{"linux amd64", "Linux", "x86_64", "linux", "amd64", true},
 		{"darwin arm64", "Darwin", "arm64", "darwin", "arm64", true},
 		{"darwin amd64", "Darwin", "x86_64", "darwin", "amd64", true},
-		{"linux arm64 currently unsupported", "Linux", "aarch64", "", "", false},
-		{"freebsd amd64 unsupported", "FreeBSD", "x86_64", "", "", false},
+		{"linux arm64 currently unsupported", "Linux", "aarch64", "linux", "arm64", false},
+		{"freebsd amd64 unsupported", "FreeBSD", "x86_64", "", "amd64", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got, ok := normalizeSSHRemotePlatform(tc.osName, tc.arch)
 			if ok != tc.wantOK {
 				t.Fatalf("normalizeSSHRemotePlatform(%q, %q) ok = %v, want %v", tc.osName, tc.arch, ok, tc.wantOK)
-			}
-			if !ok {
-				return
 			}
 			if got.GOOS != tc.wantOS || got.GOARCH != tc.wantArch {
 				t.Errorf("normalizeSSHRemotePlatform(%q, %q) = %s/%s, want %s/%s",

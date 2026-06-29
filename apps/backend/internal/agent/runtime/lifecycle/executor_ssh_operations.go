@@ -160,11 +160,8 @@ func detectRemoteInfo(ctx context.Context, client *ssh.Client) (*SSHRemoteInfo, 
 		return nil, fmt.Errorf("ssh: uname -s: %w", err)
 	}
 	info.OS = strings.TrimSpace(out)
-	if platform, ok := normalizeSSHRemotePlatform(info.OS, info.Arch); ok {
-		info.Platform = platform
-	} else {
-		info.Platform = SSHRemotePlatform{UnameOS: info.OS, UnameArch: info.Arch}
-	}
+	platform, _ := normalizeSSHRemotePlatform(info.OS, info.Arch)
+	info.Platform = platform
 
 	if out, _, err := runSSHCommand(ctx, client, "git --version"); err == nil {
 		info.GitVer = strings.TrimSpace(out)
@@ -177,7 +174,7 @@ func normalizeSSHRemotePlatform(osName, arch string) (SSHRemotePlatform, bool) {
 	goarch := normalizeSSHRemoteArch(arch)
 	platform := SSHRemotePlatform{GOOS: goos, GOARCH: goarch, UnameOS: osName, UnameArch: arch}
 	if err := requireSupportedRemotePlatform(platform); err != nil {
-		return SSHRemotePlatform{}, false
+		return platform, false
 	}
 	return platform, true
 }
