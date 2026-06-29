@@ -518,7 +518,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 		zap.String("session_state", string(session.State)),
 		zap.Bool("workflow_transitioned", transitioned))
 
-	if !transitioned {
+	if !transitioned && session.State != models.TaskSessionStateWaitingForInput {
 		s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID, session)
 	}
 

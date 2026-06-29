@@ -1122,6 +1122,13 @@ func TestHandleAgentCompleted_NoWorkflowStepLastSiblingMovesTaskToReview(t *test
 		t.Fatalf("first no-step completion must not move task to REVIEW while sibling runs, writes=%d state=%q",
 			got, taskRepo.updatedStates["t1"])
 	}
+	updatedFirst, err := repo.GetTaskSession(ctx, "s-first")
+	if err != nil {
+		t.Fatalf("failed to load first session: %v", err)
+	}
+	if updatedFirst.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("expected first session state %q, got %q", models.TaskSessionStateWaitingForInput, updatedFirst.State)
+	}
 
 	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
 		TaskID:           "t1",
@@ -1132,6 +1139,20 @@ func TestHandleAgentCompleted_NoWorkflowStepLastSiblingMovesTaskToReview(t *test
 	if got := taskRepo.stateWrites["t1"]; got != 1 {
 		t.Fatalf("last no-step sibling completion must move task to REVIEW once, writes=%d state=%q",
 			got, taskRepo.updatedStates["t1"])
+	}
+	updatedFirst, err = repo.GetTaskSession(ctx, "s-first")
+	if err != nil {
+		t.Fatalf("failed to reload first session: %v", err)
+	}
+	if updatedFirst.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("expected first session to remain %q, got %q", models.TaskSessionStateWaitingForInput, updatedFirst.State)
+	}
+	updatedLast, err := repo.GetTaskSession(ctx, "s-last")
+	if err != nil {
+		t.Fatalf("failed to load last session: %v", err)
+	}
+	if updatedLast.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("expected last session state %q, got %q", models.TaskSessionStateWaitingForInput, updatedLast.State)
 	}
 }
 
