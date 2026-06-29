@@ -251,33 +251,6 @@ func (s *Service) handleTaskPRCIAutoMerge(ctx context.Context, pr *github.TaskPR
 	_ = s.githubService.ClearTaskCIError(context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber)
 }
 
-func (s *Service) dispatchCIAutomationPrompt(ctx context.Context, session *models.TaskSession, prompt string) error {
-	chatPrompt := ciAutomationChatPrompt(prompt)
-	switch session.State {
-	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
-		if s.messageQueue == nil {
-			return fmt.Errorf("message queue is not configured")
-		}
-		metadata := ciAutomationMessageMetadata()
-		_, err := s.messageQueue.QueueMessageWithMetadata(ctx, session.ID, session.TaskID, chatPrompt, "", messagequeue.QueuedByWorkflow, false, nil, metadata)
-		if err != nil {
-			return err
-		}
-		s.publishQueueStatusEvent(ctx, session.ID)
-		return nil
-	case models.TaskSessionStateWaitingForInput, models.TaskSessionStateIdle:
-		if !s.recordCIAutomationUserMessage(ctx, session.TaskID, session.ID, chatPrompt) {
-			return fmt.Errorf("failed to record CI automation user message")
-		}
-		if _, err := s.PromptTask(ctx, session.TaskID, session.ID, chatPrompt, "", false, nil, true); err != nil {
-			return err
-		}
-		return nil
-	default:
-		return fmt.Errorf("session is not promptable: %s", session.State)
-	}
-}
-
 func (s *Service) dispatchCIAutomationPromptForPR(ctx context.Context, session *models.TaskSession, pr *github.TaskPR, prompt, signature string, allowNewRound bool) (ciAutomationDispatchResult, error) {
 	chatPrompt := ciAutomationChatPrompt(prompt)
 	switch session.State {

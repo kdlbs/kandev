@@ -936,7 +936,33 @@ func TestCIAutomationFindMatchingPRRequiresRepositoryIDWhenPresent(t *testing.T)
 	}
 }
 
-func TestDispatchCIAutomationPromptDoesNotRecordUserMessageWhenQueueFails(t *testing.T) {
+func TestDispatchCIAutomationPromptForPRRunningRoundCapUsesDedicatedError(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	session, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	pr := &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		Owner:        "acme",
+		Repo:         "widget",
+		PRNumber:     42,
+	}
+
+	_, err = svc.dispatchCIAutomationPromptForPR(ctx, session, pr, "Fix the PR", "signature", false)
+	if !errors.Is(err, errCIAutoFixRoundCapReached) {
+		t.Fatalf("expected auto-fix round cap error, got %v", err)
+	}
+	if errors.Is(err, messagequeue.ErrEntryNotFound) {
+		t.Fatalf("round cap should not expose queue entry-not-found sentinel")
+	}
+}
+
+func TestDispatchCIAutomationPromptForPRDoesNotRecordUserMessageWhenQueueFails(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
@@ -944,12 +970,13 @@ func TestDispatchCIAutomationPromptDoesNotRecordUserMessageWhenQueueFails(t *tes
 	svc.messageQueue = nil
 	messageCreator := &mockMessageCreator{}
 	svc.messageCreator = messageCreator
+	pr := &github.TaskPR{TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42}
 
-	err := svc.dispatchCIAutomationPrompt(ctx, &models.TaskSession{
+	_, err := svc.dispatchCIAutomationPromptForPR(ctx, &models.TaskSession{
 		ID:     "session-1",
 		TaskID: "task-1",
 		State:  models.TaskSessionStateRunning,
-	}, "Fix the PR")
+	}, pr, "Fix the PR", "signature", true)
 	if err == nil {
 		t.Fatal("expected queue failure")
 	}
@@ -958,7 +985,7 @@ func TestDispatchCIAutomationPromptDoesNotRecordUserMessageWhenQueueFails(t *tes
 	}
 }
 
-func TestDispatchCIAutomationPromptQueuesWhenRunningUserMessageCannotBeRecorded(t *testing.T) {
+func TestDispatchCIAutomationPromptForPRQueuesWhenRunningUserMessageCannotBeRecorded(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
@@ -970,10 +997,14 @@ func TestDispatchCIAutomationPromptQueuesWhenRunningUserMessageCannotBeRecorded(
 	if err != nil {
 		t.Fatalf("load session: %v", err)
 	}
+	pr := &github.TaskPR{TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42}
 
-	err = svc.dispatchCIAutomationPrompt(ctx, session, "Fix the PR")
+	result, err := svc.dispatchCIAutomationPromptForPR(ctx, session, pr, "Fix the PR", "signature", true)
 	if err != nil {
 		t.Fatalf("expected queued CI automation prompt, got %v", err)
+	}
+	if !result.consumesRound() {
+		t.Fatalf("expected new queued prompt to consume a round, got %+v", result)
 	}
 	status := svc.messageQueue.GetStatus(ctx, "session-1")
 	if status.Count != 1 {
@@ -984,7 +1015,7 @@ func TestDispatchCIAutomationPromptQueuesWhenRunningUserMessageCannotBeRecorded(
 	}
 }
 
-func TestDispatchCIAutomationPromptRecordsUserMessageBeforeDirectPrompt(t *testing.T) {
+func TestDispatchCIAutomationPromptForPRRecordsUserMessageBeforeDirectPrompt(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateWaitingForInput)
@@ -1003,9 +1034,14 @@ func TestDispatchCIAutomationPromptRecordsUserMessageBeforeDirectPrompt(t *testi
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("update session execution: %v", err)
 	}
+	pr := &github.TaskPR{TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42}
 
-	if err := svc.dispatchCIAutomationPrompt(ctx, session, "Fix the PR"); err != nil {
+	result, err := svc.dispatchCIAutomationPromptForPR(ctx, session, pr, "Fix the PR", "signature", true)
+	if err != nil {
 		t.Fatalf("dispatch direct prompt: %v", err)
+	}
+	if !result.consumesRound() {
+		t.Fatalf("expected direct prompt to consume a round, got %+v", result)
 	}
 	if len(messageCreator.userMessages) != 1 {
 		t.Fatalf("expected one visible CI automation user message, got %d", len(messageCreator.userMessages))
@@ -1021,7 +1057,7 @@ func TestDispatchCIAutomationPromptRecordsUserMessageBeforeDirectPrompt(t *testi
 	}
 }
 
-func TestDispatchCIAutomationPromptRecordsUserMessageBeforeDirectPromptFailure(t *testing.T) {
+func TestDispatchCIAutomationPromptForPRRecordsUserMessageBeforeDirectPromptFailure(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateWaitingForInput)
@@ -1044,8 +1080,9 @@ func TestDispatchCIAutomationPromptRecordsUserMessageBeforeDirectPromptFailure(t
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("update session execution: %v", err)
 	}
+	pr := &github.TaskPR{TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42}
 
-	err = svc.dispatchCIAutomationPrompt(ctx, session, "Fix the PR")
+	_, err = svc.dispatchCIAutomationPromptForPR(ctx, session, pr, "Fix the PR", "signature", true)
 	if err == nil || !strings.Contains(err.Error(), "agent rejected prompt") {
 		t.Fatalf("expected prompt failure, got %v", err)
 	}

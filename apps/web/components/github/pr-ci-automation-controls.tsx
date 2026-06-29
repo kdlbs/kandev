@@ -223,9 +223,9 @@ function CIAutoFixRoundExplanation({
     >
       Auto-fix has used {round.current} of {round.max} rounds for this PR. A round is counted when
       Kandev sends or queues a CI auto-fix message. Updating an already queued auto-fix message does
-      not use another round. When this reaches {round.max}/{round.max}, Kandev pauses auto-fix for
-      this PR so it cannot loop forever. Disable and re-enable auto-fix after manual review to start
-      over.
+      not use another round. When this is at {round.max}/{round.max} and there is no pending
+      auto-fix message left to update, Kandev pauses auto-fix for this PR so it cannot loop forever.
+      Disable and re-enable auto-fix after manual review to start over.
     </div>
   );
 }

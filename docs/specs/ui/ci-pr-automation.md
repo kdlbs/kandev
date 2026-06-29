@@ -34,8 +34,8 @@ Users can already see pull request CI/review status above the task chat input, b
 - Automation must not repeatedly prompt for the same failure/comment snapshot or repeatedly retry the same failed merge attempt on every poll.
 - When auto-fix is enabled and the task session is busy, Kandev keeps at most one pending CI auto-fix queue entry per task/repository/PR. Newer feedback replaces that pending entry instead of appending another queued `@ci-auto-fix` message.
 - Auto-fix is capped at 10 accepted rounds per task/repository/PR. A round is counted when Kandev sends a prompt directly or inserts a new queued auto-fix prompt. Replacing an already queued auto-fix prompt does not count as another round.
-- The auto-fix enabled chip above the chat input shows round progress as `Auto-fix N/10`; exhausted or capped PRs show `Auto-fix 10/10` with warning/paused styling.
-- Hovering the chip on desktop, or opening the same PR CI drawer on mobile, explains in plain language how many rounds have been used, what counts as a round, that queue replacement does not count again, and that Kandev pauses at 10/10 to prevent loops.
+- The auto-fix enabled chip above the chat input shows round progress as `Auto-fix N/10`; PRs paused by the backend after the cap is reached show `Auto-fix 10/10` with warning/paused styling.
+- Hovering the chip on desktop, or opening the same PR CI drawer on mobile, explains in plain language how many rounds have been used, what counts as a round, that queue replacement does not count again, and that Kandev pauses when 10/10 has no pending auto-fix message left to update.
 - Accepted round-count changes and exhausted-state changes are broadcast to open clients through the task CI options update event so the chip stays current without a reload.
 - Automation controls persist across Kandev restarts.
 

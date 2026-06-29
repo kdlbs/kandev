@@ -173,6 +173,14 @@ describe("PRStatusChip auto-fix round display", () => {
     expect(chip.getAttribute("data-auto-fix-exhausted")).toBe("true");
   });
 
+  it("does not mark 10/10 as exhausted until the backend pauses auto-fix", () => {
+    renderWithStore(stateWithAutoFix(10), <PRStatusChip taskId="task-1" />);
+
+    const chip = screen.getByTestId(AUTO_FIX_BADGE_TESTID);
+    expect(chip.textContent).toBe("Auto-fix 10/10");
+    expect(chip.getAttribute("data-auto-fix-exhausted")).toBe("false");
+  });
+
   it("uses the max round count returned by the backend", () => {
     renderWithStore(stateWithAutoFix(3, false, 12), <PRStatusChip taskId="task-1" />);
 

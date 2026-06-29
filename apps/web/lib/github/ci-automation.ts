@@ -27,7 +27,7 @@ export function autoFixRoundForState(
   return {
     current,
     max,
-    exhausted: Boolean(state?.auto_fix_exhausted_at) || current >= max,
+    exhausted: Boolean(state?.auto_fix_exhausted_at),
   };
 }
 
@@ -36,7 +36,7 @@ export function normalizeAutoFixMaxRounds(value: number | null | undefined) {
   return Math.max(1, Math.trunc(value));
 }
 
-function clampAutoFixRound(value: number | null | undefined, maxRounds: number) {
+export function clampAutoFixRound(value: number | null | undefined, maxRounds: number) {
   if (typeof value !== "number" || !Number.isFinite(value)) return 0;
   return Math.min(maxRounds, Math.max(0, Math.trunc(value)));
 }

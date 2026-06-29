@@ -275,10 +275,10 @@ function chipButtonAttrs(
 
 function AutomationFlagBadges({ automation }: { automation: AutomationFlags }) {
   if (!automation.autoFix && !automation.autoMerge) return null;
-  const autoFixRound = automation.autoFixRound ?? autoFixRoundForState(undefined, undefined);
+  const autoFixRound = automation.autoFixRound;
   return (
     <>
-      {automation.autoFix && (
+      {automation.autoFix && autoFixRound && (
         <span
           data-testid="pr-status-auto-fix-chip"
           data-auto-fix-round={`${autoFixRound.current}/${autoFixRound.max}`}
