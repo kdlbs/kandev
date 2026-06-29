@@ -1,0 +1,33 @@
+name: Lint Action Pinning
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - ".github/scripts/lint-action-pinning.py"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - ".github/scripts/lint-action-pinning.py"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least-privilege: only reads source.
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: All action refs are SHA-pinned
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Verify action refs
+        run: python3 .github/scripts/lint-action-pinning.py
