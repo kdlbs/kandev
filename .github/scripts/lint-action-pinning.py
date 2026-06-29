@@ -30,13 +30,20 @@ workflows_dir = Path(__file__).parent.parent / "workflows"
 
 violations: list[tuple[str, int, str]] = []
 
+
+def strip_balanced_quotes(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
 for path in sorted(p for ext in ("*.yml", "*.yaml") for p in workflows_dir.glob(ext)):
     for lineno, line in enumerate(path.read_text().splitlines(), start=1):
         m = USES_RE.match(line)
         if not m:
             continue
 
-        uses_value = m.group(1).strip()
+        uses_value = strip_balanced_quotes(m.group(1).strip())
 
         # Local actions and reusable workflows reference checked-out source, not
         # an external registry.

@@ -155,6 +155,25 @@ class LintActionPinningTest(unittest.TestCase):
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, output)
 
+    def test_allows_quoted_pinned_local_and_docker_uses_values(self) -> None:
+        digest = "b" * 64
+        result = self.run_lint(
+            f"""
+            name: test
+            on: push
+            jobs:
+              test:
+                runs-on: ubuntu-latest
+                steps:
+                  - uses: "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10" # v6
+                  - uses: './.github/actions/setup-fixture'
+                  - uses: "docker://alpine@sha256:{digest}"
+            """
+        )
+
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+
 
 if __name__ == "__main__":
     unittest.main()
