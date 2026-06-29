@@ -255,36 +255,13 @@ func (s *Service) dispatchCIAutomationPromptForPR(ctx context.Context, session *
 	chatPrompt := ciAutomationChatPrompt(prompt)
 	switch session.State {
 	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
-		if s.messageQueue == nil {
-			return ciAutomationDispatchResult{}, fmt.Errorf("message queue is not configured")
-		}
-		metadata := ciAutomationMessageMetadataForPR(pr, signature)
-		_, replaced, err := s.messageQueue.QueueMessageWithCoalesceKey(ctx, session.ID, session.TaskID, chatPrompt, "", messagequeue.QueuedByWorkflow, false, nil, metadata, ciAutomationCoalesceKey(pr), allowNewRound)
-		if err != nil {
-			if errors.Is(err, messagequeue.ErrEntryNotFound) && !allowNewRound {
-				return ciAutomationDispatchResult{}, errCIAutoFixRoundCapReached
-			}
-			return ciAutomationDispatchResult{}, err
-		}
-		s.publishQueueStatusEvent(ctx, session.ID)
-		if replaced {
-			return ciAutomationDispatchResult{kind: ciAutomationDispatchQueuedReplace}, nil
-		}
-		return ciAutomationDispatchResult{kind: ciAutomationDispatchQueuedInsert}, nil
+		return s.queueOrReplaceCIAutomationPromptForPR(ctx, session, pr, chatPrompt, signature, allowNewRound)
 	case models.TaskSessionStateWaitingForInput, models.TaskSessionStateIdle:
 		if !allowNewRound {
-			if s.messageQueue != nil {
-				metadata := ciAutomationMessageMetadataForPR(pr, signature)
-				_, replaced, err := s.messageQueue.QueueMessageWithCoalesceKey(ctx, session.ID, session.TaskID, chatPrompt, "", messagequeue.QueuedByWorkflow, false, nil, metadata, ciAutomationCoalesceKey(pr), false)
-				if err != nil && !errors.Is(err, messagequeue.ErrEntryNotFound) {
-					return ciAutomationDispatchResult{}, err
-				}
-				if replaced {
-					s.publishQueueStatusEvent(ctx, session.ID)
-					return ciAutomationDispatchResult{kind: ciAutomationDispatchQueuedReplace}, nil
-				}
+			if s.messageQueue == nil {
+				return ciAutomationDispatchResult{}, errCIAutoFixRoundCapReached
 			}
-			return ciAutomationDispatchResult{}, errCIAutoFixRoundCapReached
+			return s.queueOrReplaceCIAutomationPromptForPR(ctx, session, pr, chatPrompt, signature, false)
 		}
 		if !s.recordCIAutomationUserMessage(ctx, session.TaskID, session.ID, chatPrompt) {
 			return ciAutomationDispatchResult{}, fmt.Errorf("failed to record CI automation user message")
@@ -296,6 +273,25 @@ func (s *Service) dispatchCIAutomationPromptForPR(ctx context.Context, session *
 	default:
 		return ciAutomationDispatchResult{}, fmt.Errorf("session is not promptable: %s", session.State)
 	}
+}
+
+func (s *Service) queueOrReplaceCIAutomationPromptForPR(ctx context.Context, session *models.TaskSession, pr *github.TaskPR, chatPrompt, signature string, allowInsert bool) (ciAutomationDispatchResult, error) {
+	if s.messageQueue == nil {
+		return ciAutomationDispatchResult{}, fmt.Errorf("message queue is not configured")
+	}
+	metadata := ciAutomationMessageMetadataForPR(pr, signature)
+	_, replaced, err := s.messageQueue.QueueMessageWithCoalesceKey(ctx, session.ID, session.TaskID, chatPrompt, "", messagequeue.QueuedByWorkflow, false, nil, metadata, ciAutomationCoalesceKey(pr), allowInsert)
+	if err != nil {
+		if errors.Is(err, messagequeue.ErrEntryNotFound) && !allowInsert {
+			return ciAutomationDispatchResult{}, errCIAutoFixRoundCapReached
+		}
+		return ciAutomationDispatchResult{}, err
+	}
+	s.publishQueueStatusEvent(ctx, session.ID)
+	if replaced {
+		return ciAutomationDispatchResult{kind: ciAutomationDispatchQueuedReplace}, nil
+	}
+	return ciAutomationDispatchResult{kind: ciAutomationDispatchQueuedInsert}, nil
 }
 
 func (s *Service) recordCIAutomationUserMessage(ctx context.Context, taskID, sessionID, prompt string) bool {
