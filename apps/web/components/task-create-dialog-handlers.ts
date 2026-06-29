@@ -3,9 +3,8 @@
 import { useCallback } from "react";
 import type { Repository } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dialog-types";
-import { removeLocalStorage, setLocalStorage } from "@/lib/local-storage";
+import { setLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
-import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import { createDebugLogger } from "@/lib/debug/log";
 import type { TaskCreateLastUsedState } from "@/lib/state/slices/settings/types";
 
@@ -16,54 +15,22 @@ type TaskCreateLastUsedPatch = {
   executor_profile_id?: string;
 };
 
-let pendingLastUsed: TaskCreateLastUsedPatch = {};
-let lastUsedSync = Promise.resolve();
 let lastQueuedLastUsed: Partial<TaskCreateLastUsedState> = {};
-const PENDING_LAST_USED_SYNC_KEY = "kandev.taskCreateLastUsed.pendingSync";
 const LOCAL_STORAGE_WRITE_EVENT = "localStorage-write";
 const lastUsedDebug = createDebugLogger("task-create:last-used");
 
 /**
- * Clears pending in-flight last-used sync state while preserving its persisted
- * retry payload until the matching PATCH succeeds.
+ * Clears task-create last-used overlay state.
  * Pass `clearQueued` when test setup or teardown should also wipe the queued
  * overlay that protects settings fetches from stale server values.
  */
 export function resetTaskCreateLastUsedSync(options: { clearQueued?: boolean } = {}) {
-  pendingLastUsed = {};
   if (options.clearQueued) lastQueuedLastUsed = {};
-  lastUsedDebug("pending-reset");
-}
-
-function readPendingLastUsedSync(): TaskCreateLastUsedPatch {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = window.localStorage.getItem(PENDING_LAST_USED_SYNC_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object") return {};
-    const record = parsed as Record<string, unknown>;
-    return {
-      repository_id: typeof record.repository_id === "string" ? record.repository_id : undefined,
-      branch: typeof record.branch === "string" ? record.branch : undefined,
-      agent_profile_id:
-        typeof record.agent_profile_id === "string" ? record.agent_profile_id : undefined,
-      executor_profile_id:
-        typeof record.executor_profile_id === "string" ? record.executor_profile_id : undefined,
-    };
-  } catch {
-    lastUsedDebug("pending-read-failed");
-    return {};
-  }
-}
-
-function persistPendingLastUsedSync(patch: TaskCreateLastUsedPatch) {
-  setLocalStorage(PENDING_LAST_USED_SYNC_KEY, patch as Record<string, string>);
+  lastUsedDebug("overlay-reset");
 }
 
 export function readPendingTaskCreateLastUsedState(): Partial<TaskCreateLastUsedState> {
-  const pending = { ...readPendingLastUsedSync(), ...pendingLastUsed };
-  return mapTaskCreateLastUsedPatch(pending);
+  return {};
 }
 
 export function readQueuedTaskCreateLastUsedState(): Partial<TaskCreateLastUsedState> {
@@ -88,35 +55,11 @@ function compactTaskCreateLastUsedState(state: Partial<TaskCreateLastUsedState>)
 }
 
 export function syncTaskCreateLastUsed(patch: TaskCreateLastUsedPatch) {
-  pendingLastUsed = { ...readPendingLastUsedSync(), ...pendingLastUsed, ...patch };
-  const payload = { ...pendingLastUsed };
   lastQueuedLastUsed = {
     ...lastQueuedLastUsed,
-    ...compactTaskCreateLastUsedState(mapTaskCreateLastUsedPatch(payload)),
+    ...compactTaskCreateLastUsedState(mapTaskCreateLastUsedPatch(patch)),
   };
-  lastUsedDebug("sync-queued", { patch, payload });
-  persistPendingLastUsedSync(payload);
-  lastUsedSync = lastUsedSync
-    .catch(() => undefined)
-    .then(() =>
-      updateUserSettings({ task_create_last_used: payload })
-        .then(() => {
-          lastUsedDebug("sync-success", { payload });
-          const persistedPending = readPendingLastUsedSync();
-          if (JSON.stringify(pendingLastUsed) === JSON.stringify(payload)) {
-            pendingLastUsed = {};
-          }
-          if (JSON.stringify(persistedPending) === JSON.stringify(payload)) {
-            removeLocalStorage(PENDING_LAST_USED_SYNC_KEY);
-          }
-        })
-        .catch((error) => {
-          lastUsedDebug("sync-failed", {
-            payload,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }),
-    );
+  lastUsedDebug("overlay-updated", { patch, queued: lastQueuedLastUsed });
 }
 
 /**

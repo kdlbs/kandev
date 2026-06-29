@@ -18,10 +18,12 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
+	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 // captureOrchestrator records every LaunchSession request so tests can assert
@@ -267,6 +269,77 @@ func TestHTTPCreateTaskRecordsFinalLastUsedSelections(t *testing.T) {
 	h.httpCreateTask(c)
 
 	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	require.Equal(t, 1, recorder.calls)
+	assert.Equal(t, usermodels.TaskCreateLastUsed{
+		RepositoryID:      "repo-2",
+		Branch:            "feature/current",
+		AgentProfileID:    "agent-2",
+		ExecutorProfileID: "exec-profile-2",
+	}, recorder.got)
+}
+
+func TestBuildTaskCreateLastUsedPatchKeepsRepositoryAndBranchPaired(t *testing.T) {
+	patch := buildTaskCreateLastUsedPatch(httpCreateTaskRequest{
+		AgentProfileID:    "agent-2",
+		ExecutorProfileID: "exec-profile-2",
+	}, []dto.TaskRepositoryInput{
+		{RepositoryID: "repo-without-branch"},
+		{RepositoryID: "repo-with-branch", CheckoutBranch: "feature/current"},
+	})
+
+	assert.Equal(t, usermodels.TaskCreateLastUsed{
+		RepositoryID:      "repo-with-branch",
+		Branch:            "feature/current",
+		AgentProfileID:    "agent-2",
+		ExecutorProfileID: "exec-profile-2",
+	}, patch)
+}
+
+func TestBuildTaskCreateLastUsedPatchSkipsBranchWithoutWorkspaceRepository(t *testing.T) {
+	patch := buildTaskCreateLastUsedPatch(httpCreateTaskRequest{
+		AgentProfileID: "agent-2",
+	}, []dto.TaskRepositoryInput{
+		{LocalPath: "/tmp/repo", CheckoutBranch: "feature/local"},
+		{GitHubURL: "https://github.com/kdlbs/example", BaseBranch: "main"},
+	})
+
+	assert.Equal(t, usermodels.TaskCreateLastUsed{
+		AgentProfileID: "agent-2",
+	}, patch)
+}
+
+func TestWSCreateTaskRecordsFinalLastUsedSelections(t *testing.T) {
+	log := newTestLogger(t)
+
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	recorder := &captureTaskCreateLastUsedRecorder{}
+	h := &TaskHandlers{service: svc, taskCreateLastUsedRecorder: recorder, logger: log}
+
+	msg, err := ws.NewRequest("msg-1", ws.ActionTaskCreate, map[string]any{
+		"workspace_id":        "ws-1",
+		"workflow_id":         "wf-1",
+		"workflow_step_id":    "step-1",
+		"title":               "Use current selections",
+		"agent_profile_id":    "agent-2",
+		"executor_profile_id": "exec-profile-2",
+		"repositories": []map[string]any{{
+			"repository_id":   "repo-2",
+			"checkout_branch": "feature/current",
+		}},
+	})
+	require.NoError(t, err)
+
+	resp, err := h.wsCreateTask(context.Background(), msg)
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
 	require.Equal(t, 1, recorder.calls)
 	assert.Equal(t, usermodels.TaskCreateLastUsed{
 		RepositoryID:      "repo-2",

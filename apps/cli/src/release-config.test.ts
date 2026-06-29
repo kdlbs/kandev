@@ -94,7 +94,19 @@ function findPnpmSetupVersion(
 }
 
 function matchPnpmSetupUsesLine(line: string): RegExpMatchArray | null {
-  return line.match(/^(\s*)(?:-\s*)?uses:\s*["']?pnpm\/action-setup@[^\s"']+["']?\s*(?:#.*)?$/);
+  const match = line.match(
+    /^(\s*)(?:-\s*)?uses:\s*["']?pnpm\/action-setup@([^"'\s#]+)["']?\s*(#.*)?$/,
+  );
+  if (match === null) return null;
+  const ref = match[2];
+  const comment = match[3] ?? "";
+  const versionTag = /^v[0-9]+(?:\.[0-9]+\.[0-9]+)?$/.test(ref);
+  const shaPinned = /^[0-9a-f]{40}$/.test(ref) && /#\s*v[0-9]+/.test(comment);
+  expect(
+    versionTag || shaPinned,
+    "pnpm/action-setup must use a version tag or a 40-character SHA with the version tag in a comment",
+  ).toBe(true);
+  return match;
 }
 
 function findStepIndent(lines: string[], usesLineIndex: number, usesIndent: number): number {

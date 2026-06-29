@@ -6,7 +6,7 @@ import { useStore } from "zustand";
 import { isDebug, registerSessionTaskResolver } from "@/lib/debug/log";
 import type { AppState, StoreProviderProps } from "@/lib/state/store";
 import { createAppStore } from "@/lib/state/store";
-import { removeLocalStorage, setLocalStorage } from "@/lib/local-storage";
+import { setLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 
 const StoreContext = createContext<StoreApi<AppState> | null>(null);
@@ -68,23 +68,15 @@ function syncTaskCreateLastUsedCache(state: AppState) {
   if (!lastUsed) return;
   if (lastUsed.repositoryId) {
     setLocalStorage(STORAGE_KEYS.LAST_REPOSITORY_ID, lastUsed.repositoryId);
-  } else {
-    removeLocalStorage(STORAGE_KEYS.LAST_REPOSITORY_ID);
   }
   if (lastUsed.branch) {
     setLocalStorage(STORAGE_KEYS.LAST_BRANCH, lastUsed.branch);
-  } else {
-    removeLocalStorage(STORAGE_KEYS.LAST_BRANCH);
   }
   if (lastUsed.agentProfileId) {
     setLocalStorage(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, lastUsed.agentProfileId);
-  } else {
-    removeLocalStorage(STORAGE_KEYS.LAST_AGENT_PROFILE_ID);
   }
   if (lastUsed.executorProfileId) {
     setLocalStorage(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, lastUsed.executorProfileId);
-  } else {
-    removeLocalStorage(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID);
   }
 }
 

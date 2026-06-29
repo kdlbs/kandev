@@ -617,14 +617,17 @@ func buildTaskCreateLastUsedPatch(body httpCreateTaskRequest, repos []dto.TaskRe
 		ExecutorProfileID: body.ExecutorProfileID,
 	}
 	for _, repo := range repos {
-		if patch.RepositoryID == "" && repo.RepositoryID != "" {
+		if repo.RepositoryID == "" {
+			continue
+		}
+		branch := firstNonEmpty(repo.CheckoutBranch, repo.BaseBranch)
+		if branch != "" {
 			patch.RepositoryID = repo.RepositoryID
-		}
-		if patch.Branch == "" {
-			patch.Branch = firstNonEmpty(repo.CheckoutBranch, repo.BaseBranch)
-		}
-		if patch.RepositoryID != "" && patch.Branch != "" {
+			patch.Branch = branch
 			break
+		}
+		if patch.RepositoryID == "" {
+			patch.RepositoryID = repo.RepositoryID
 		}
 	}
 	return patch

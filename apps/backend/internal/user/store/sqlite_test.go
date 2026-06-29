@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -152,6 +153,31 @@ func TestSQLiteRepositoryUpdateTaskCreateLastUsedMergesOnlyProvidedFields(t *tes
 	}
 	if got.SidebarActiveViewID != "view-1" {
 		t.Fatalf("unrelated settings should be preserved, got active view %q", got.SidebarActiveViewID)
+	}
+}
+
+func TestBuildPostgresTaskCreateLastUsedUpdateUsesJSONB(t *testing.T) {
+	query, args := buildPostgresTaskCreateLastUsedUpdate(models.TaskCreateLastUsed{
+		RepositoryID:      "repo-1",
+		Branch:            "feature",
+		AgentProfileID:    "agent-1",
+		ExecutorProfileID: "exec-1",
+	})
+
+	if strings.Contains(query, "json(") || strings.Contains(query, "json_extract") {
+		t.Fatalf("postgres update must not use sqlite JSON functions: %s", query)
+	}
+	if !strings.Contains(query, "jsonb_set") {
+		t.Fatalf("postgres update should use jsonb_set: %s", query)
+	}
+	if !strings.Contains(query, "{task_create_last_used,repository_id}") ||
+		!strings.Contains(query, "{task_create_last_used,branch}") ||
+		!strings.Contains(query, "{task_create_last_used,agent_profile_id}") ||
+		!strings.Contains(query, "{task_create_last_used,executor_profile_id}") {
+		t.Fatalf("postgres update missing task-create paths: %s", query)
+	}
+	if len(args) != 4 {
+		t.Fatalf("expected one arg per task-create field, got %d", len(args))
 	}
 }
 

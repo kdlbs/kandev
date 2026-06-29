@@ -40,12 +40,12 @@ function ObserveLastUsedCache({ onSeen }: { onSeen: (value: string | null) => vo
   return null;
 }
 
-describe("StateProvider", () => {
-  beforeEach(() => {
-    window.localStorage.clear();
-    vi.restoreAllMocks();
-  });
+beforeEach(() => {
+  window.localStorage.clear();
+  vi.restoreAllMocks();
+});
 
+describe("StateProvider", () => {
   it("reuses the parent store for nested route providers", async () => {
     render(
       <StateProvider>
@@ -68,7 +68,9 @@ describe("StateProvider", () => {
     fireEvent.click(screen.getByRole("button", { name: "Enable metrics" }));
     expect(await screen.findByText("root:on")).toBeTruthy();
   });
+});
 
+describe("StateProvider task-create cache", () => {
   it("syncs task-create last-used settings to localStorage without redundant writes", async () => {
     function UpdateUnrelatedSetting() {
       const setUserSettings = useAppStore((state) => state.setUserSettings);
@@ -145,5 +147,32 @@ describe("StateProvider", () => {
     );
 
     expect(onSeen).toHaveBeenCalledWith(JSON.stringify("repo-1"));
+  });
+
+  it("preserves cached task-create choices when loaded settings have no replacement", () => {
+    window.localStorage.setItem(STORAGE_KEYS.LAST_REPOSITORY_ID, JSON.stringify("repo-cached"));
+
+    render(
+      <StateProvider
+        initialState={{
+          userSettings: {
+            ...defaultSettingsState.userSettings,
+            loaded: true,
+            taskCreateLastUsed: {
+              repositoryId: null,
+              branch: null,
+              agentProfileId: null,
+              executorProfileId: null,
+            },
+          },
+        }}
+      >
+        <div>ready</div>
+      </StateProvider>,
+    );
+
+    expect(window.localStorage.getItem(STORAGE_KEYS.LAST_REPOSITORY_ID)).toBe(
+      JSON.stringify("repo-cached"),
+    );
   });
 });
