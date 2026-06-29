@@ -778,6 +778,9 @@ func (s *Service) maybySwitchSessionForProfile(
 	}
 	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
 	if effectiveProfile == "" || effectiveProfile == session.AgentProfileID {
+		if effectiveProfile != "" {
+			s.tagSessionAsWorkflowSwitched(ctx, session.ID)
+		}
 		if !session.IsPrimary {
 			if err := s.SetPrimarySession(ctx, session.ID); err != nil {
 				s.logger.Warn("failed to preserve session as primary for workflow step",

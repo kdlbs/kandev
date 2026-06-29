@@ -609,6 +609,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 			AgentProfileID: "profile-a",
 			State:          models.TaskSessionStateRunning,
 			IsPrimary:      true,
+			Metadata:       map[string]interface{}{"existing": "preserved"},
 			StartedAt:      now,
 			UpdatedAt:      now,
 		}
@@ -633,6 +634,12 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 		}
 		if updatedSession.State == models.TaskSessionStateCompleted {
 			t.Error("session should not be completed when profile matches")
+		}
+		if got := updatedSession.Metadata[models.SessionMetaKeyCreatedBy]; got != models.SessionCreatedByWorkflowSwitch {
+			t.Errorf("matching workflow session created_by metadata = %v, want %q", got, models.SessionCreatedByWorkflowSwitch)
+		}
+		if got := updatedSession.Metadata["existing"]; got != "preserved" {
+			t.Errorf("matching workflow session existing metadata = %v, want preserved", got)
 		}
 
 		// No new sessions should be created
