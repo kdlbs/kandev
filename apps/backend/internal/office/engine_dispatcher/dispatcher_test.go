@@ -21,15 +21,16 @@ import (
 type fakeSessions struct {
 	activeSession *taskmodels.TaskSession
 	latestSession *taskmodels.TaskSession
-	err           error
+	activeErr     error
+	latestErr     error
 }
 
 func (f *fakeSessions) GetActiveTaskSessionByTaskID(_ context.Context, _ string) (*taskmodels.TaskSession, error) {
-	return f.activeSession, f.err
+	return f.activeSession, f.activeErr
 }
 
 func (f *fakeSessions) GetTaskSessionByTaskID(_ context.Context, _ string) (*taskmodels.TaskSession, error) {
-	return f.latestSession, f.err
+	return f.latestSession, f.latestErr
 }
 
 type fakeEngine struct {
@@ -166,6 +167,7 @@ func TestDispatcher_ResolvesSessionAndForwards(t *testing.T) {
 func TestDispatcher_UsesLatestSessionForCommentWhenActiveSessionMissing(t *testing.T) {
 	eng := &fakeEngine{}
 	sessions := &fakeSessions{
+		activeErr: taskmodels.ErrTaskSessionNotFound,
 		latestSession: &taskmodels.TaskSession{
 			ID:    "sess-completed",
 			State: taskmodels.TaskSessionStateCompleted,
@@ -195,6 +197,7 @@ func TestDispatcher_CompletedSessionCommentQueuesRun(t *testing.T) {
 		},
 	})
 	sessions := &fakeSessions{
+		activeErr: taskmodels.ErrTaskSessionNotFound,
 		latestSession: &taskmodels.TaskSession{
 			ID:    "sess-completed",
 			State: taskmodels.TaskSessionStateCompleted,
@@ -249,6 +252,7 @@ func TestDispatcher_CompletedSessionCommentQueuesRun(t *testing.T) {
 func TestDispatcher_DoesNotUseLatestSessionForNonCommentTriggers(t *testing.T) {
 	eng := &fakeEngine{}
 	sessions := &fakeSessions{
+		activeErr: taskmodels.ErrTaskSessionNotFound,
 		latestSession: &taskmodels.TaskSession{
 			ID:    "sess-completed",
 			State: taskmodels.TaskSessionStateCompleted,
@@ -281,15 +285,50 @@ func TestDispatcher_ReturnsErrNoSessionWhenSessionMissing(t *testing.T) {
 	}
 }
 
-func TestDispatcher_ReturnsErrNoSessionOnSessionLookupError(t *testing.T) {
+func TestDispatcher_PropagatesActiveSessionLookupError(t *testing.T) {
 	eng := &fakeEngine{}
-	sessions := &fakeSessions{err: errors.New("db down")}
+	dbErr := errors.New("db down")
+	sessions := &fakeSessions{
+		activeErr: dbErr,
+		latestSession: &taskmodels.TaskSession{
+			ID:    "sess-completed",
+			State: taskmodels.TaskSessionStateCompleted,
+		},
+	}
 	d := New(eng, sessions, logger.Default())
 
 	err := d.HandleTrigger(context.Background(), "task-1", engine.TriggerOnComment,
 		engine.OnCommentPayload{}, "op")
-	if !errors.Is(err, ErrNoSession) {
-		t.Fatalf("err = %v, want ErrNoSession", err)
+	if !errors.Is(err, dbErr) {
+		t.Fatalf("err = %v, want wrapped db error", err)
+	}
+	if errors.Is(err, ErrNoSession) {
+		t.Fatalf("err must not masquerade as ErrNoSession: %v", err)
+	}
+	if eng.called {
+		t.Error("engine should not be called when active session lookup fails")
+	}
+}
+
+func TestDispatcher_PropagatesLatestSessionLookupError(t *testing.T) {
+	eng := &fakeEngine{}
+	dbErr := errors.New("db down")
+	sessions := &fakeSessions{
+		activeErr: taskmodels.ErrTaskSessionNotFound,
+		latestErr: dbErr,
+	}
+	d := New(eng, sessions, logger.Default())
+
+	err := d.HandleTrigger(context.Background(), "task-1", engine.TriggerOnComment,
+		engine.OnCommentPayload{}, "op")
+	if !errors.Is(err, dbErr) {
+		t.Fatalf("err = %v, want wrapped db error", err)
+	}
+	if errors.Is(err, ErrNoSession) {
+		t.Fatalf("err must not masquerade as ErrNoSession: %v", err)
+	}
+	if eng.called {
+		t.Error("engine should not be called when latest session lookup fails")
 	}
 }
 

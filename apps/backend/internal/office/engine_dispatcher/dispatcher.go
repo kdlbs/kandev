@@ -10,6 +10,7 @@ package engine_dispatcher
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -73,7 +74,10 @@ func (d *Dispatcher) HandleTrigger(
 	if taskID == "" {
 		return fmt.Errorf("task_id is required")
 	}
-	session := d.resolveSession(ctx, taskID, trigger)
+	session, err := d.resolveSession(ctx, taskID, trigger)
+	if err != nil {
+		return fmt.Errorf("resolve session: %w", err)
+	}
 	if session == nil {
 		d.logger.Debug("engine trigger skipped: no active session",
 			zap.String("task_id", taskID),
@@ -95,17 +99,23 @@ func (d *Dispatcher) HandleTrigger(
 
 func (d *Dispatcher) resolveSession(
 	ctx context.Context, taskID string, trigger engine.Trigger,
-) *taskmodels.TaskSession {
+) (*taskmodels.TaskSession, error) {
 	session, err := d.sessions.GetActiveTaskSessionByTaskID(ctx, taskID)
 	if err == nil && session != nil {
-		return session
+		return session, nil
+	}
+	if err != nil && !errors.Is(err, taskmodels.ErrTaskSessionNotFound) {
+		return nil, fmt.Errorf("active session lookup: %w", err)
 	}
 	if trigger != engine.TriggerOnComment {
-		return nil
+		return nil, nil
 	}
 	session, err = d.sessions.GetTaskSessionByTaskID(ctx, taskID)
 	if err == nil && session != nil {
-		return session
+		return session, nil
 	}
-	return nil
+	if err != nil && !errors.Is(err, taskmodels.ErrTaskSessionNotFound) {
+		return nil, fmt.Errorf("latest session lookup: %w", err)
+	}
+	return nil, nil
 }
