@@ -352,7 +352,9 @@ describe("release desktop artifacts", () => {
     expect(workflow).toContain("$LASTEXITCODE -ne 0");
     expect(workflow).toContain("Sign macOS desktop runtime binaries");
     expect(workflow).toContain("resources/kandev/bin");
-    expect(workflow).toContain("for binary in kandev agentctl; do");
+    expect(workflow).toContain(
+      "for binary in kandev agentctl agentctl-darwin-arm64 agentctl-darwin-amd64; do",
+    );
     expect(workflow).toContain(
       'codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY"',
     );

@@ -65,8 +65,8 @@ func TestSSHShellForRemote(t *testing.T) {
 
 	t.Run("linux delegates to WrapLoginShell default", func(t *testing.T) {
 		got := sshShellForRemote(nil, SSHRemotePlatform{GOOS: sshRemoteGOOSLinux, GOARCH: sshRemoteGOARCHAMD64})
-		if got != "" {
-			t.Errorf("sshShellForRemote(linux) = %q, want empty default marker", got)
+		if got != "bash" {
+			t.Errorf("sshShellForRemote(linux) = %q, want bash", got)
 		}
 	})
 }

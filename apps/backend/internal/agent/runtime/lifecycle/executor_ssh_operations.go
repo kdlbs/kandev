@@ -365,6 +365,15 @@ func shellQuote(s string) string {
 // "agent isn't on PATH" diagnosis.
 const defaultLoginShell = "bash"
 
+// SSHDefaultShellForPlatform returns the login shell Kandev should prefer
+// when an SSH profile has no explicit shell saved.
+func SSHDefaultShellForPlatform(platform SSHRemotePlatform) string {
+	if platform.GOOS == sshRemoteGOOSDarwin {
+		return "zsh"
+	}
+	return defaultLoginShell
+}
+
 // WrapLoginShell wraps cmd in `${shell} -lc '<cmd>'` so commands run under
 // a login shell that has sourced the user's profile (~/.profile,
 // ~/.bash_profile, etc.). This is the canonical fix for "I have nvm

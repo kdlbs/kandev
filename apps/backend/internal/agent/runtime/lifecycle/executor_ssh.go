@@ -679,10 +679,7 @@ func sshShellForRemote(md map[string]interface{}, platform SSHRemotePlatform) st
 	if shell := sshShellFromMetadata(md); shell != "" {
 		return shell
 	}
-	if platform.GOOS == sshRemoteGOOSDarwin {
-		return "zsh"
-	}
-	return ""
+	return SSHDefaultShellForPlatform(platform)
 }
 
 // agentIdentity is the slice of agents.Agent that formatMissingAgentBinaryError

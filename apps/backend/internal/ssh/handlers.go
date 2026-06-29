@@ -217,7 +217,7 @@ type AgentReadinessResponse struct {
 
 // ProbeAgentsRequest is the optional body of POST /api/v1/ssh/executors/:id/probe-agents.
 // Shell, when set, names the login shell the probe runs under (e.g. "bash",
-// "zsh"). Empty falls back to bash — see lifecycle.WrapLoginShell.
+// "zsh"). Empty uses the platform default selected by lifecycle.
 type ProbeAgentsRequest struct {
 	Shell string `json:"shell,omitempty"`
 }
@@ -264,10 +264,12 @@ func (h *Handler) probeAgents(ctx context.Context, executorID, shell string) (*A
 	}
 	defer func() { _ = client.Close() }()
 
-	rows := h.probeAgentsOnClient(ctx, client, shell)
+	platform := h.probeRemotePlatform(ctx, client, "probe-agents")
+	effectiveShell := readinessShellForRequest(shell, platform)
+	rows := h.probeAgentsOnClient(ctx, client, effectiveShell)
 	return &AgentReadinessResponse{
 		Host:       target.Host,
-		Shell:      shell,
+		Shell:      effectiveShell,
 		DurationMs: time.Since(started).Milliseconds(),
 		Rows:       rows,
 	}, http.StatusOK, nil
@@ -316,9 +318,11 @@ var candidateShells = []string{"bash", "zsh", "sh", "fish", "dash"}
 
 // ProbeShellsResponse is the body of POST /api/v1/ssh/executors/:id/probe-shells.
 type ProbeShellsResponse struct {
-	Host       string   `json:"host"`
-	DurationMs int64    `json:"duration_ms"`
-	Available  []string `json:"available"`
+	Host         string   `json:"host"`
+	Platform     string   `json:"platform,omitempty"`
+	DefaultShell string   `json:"default_shell"`
+	DurationMs   int64    `json:"duration_ms"`
+	Available    []string `json:"available"`
 }
 
 // httpProbeShells SSHs to the host and reports which of a small set of
@@ -356,6 +360,7 @@ func (h *Handler) probeShells(ctx context.Context, executorID string) (*ProbeShe
 	}
 	defer func() { _ = client.Close() }()
 
+	platform := h.probeRemotePlatform(ctx, client, "probe-shells")
 	available := make([]string, 0, len(candidateShells))
 	for _, shell := range candidateShells {
 		// Probe without login-shell wrapping — we're checking whether the
@@ -373,10 +378,32 @@ func (h *Handler) probeShells(ctx context.Context, executorID string) (*ProbeShe
 		}
 	}
 	return &ProbeShellsResponse{
-		Host:       target.Host,
-		DurationMs: time.Since(started).Milliseconds(),
-		Available:  available,
+		Host:         target.Host,
+		Platform:     platform.String(),
+		DefaultShell: readinessShellForRequest("", platform),
+		DurationMs:   time.Since(started).Milliseconds(),
+		Available:    available,
 	}, http.StatusOK, nil
+}
+
+func (h *Handler) probeRemotePlatform(
+	ctx context.Context,
+	client *ssh.Client,
+	operation string,
+) lifecycle.SSHRemotePlatform {
+	info, err := lifecycle.SSHProbeRemote(ctx, client)
+	if err != nil {
+		h.logger.Warn(operation+": remote platform probe failed", zap.Error(err))
+		return lifecycle.SSHRemotePlatform{}
+	}
+	return info.Platform
+}
+
+func readinessShellForRequest(shell string, platform lifecycle.SSHRemotePlatform) string {
+	if trimmed := strings.TrimSpace(shell); trimmed != "" {
+		return trimmed
+	}
+	return lifecycle.SSHDefaultShellForPlatform(platform)
 }
 
 // resolveSSHTarget looks up the executor by id and projects its config

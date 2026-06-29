@@ -66,6 +66,8 @@ export interface SSHAgentReadinessResponse {
 
 export interface SSHProbeShellsResponse {
   host: string;
+  platform?: string;
+  default_shell: string;
   duration_ms: number;
   available: string[];
 }

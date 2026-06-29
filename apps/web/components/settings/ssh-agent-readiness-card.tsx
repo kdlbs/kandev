@@ -25,6 +25,15 @@ export interface SSHAgentReadinessCardProps {
 
 const DEFAULT_SHELL = "bash";
 
+export function readinessProbeBody(shell: string): { shell?: string } {
+  const trimmed = shell.trim();
+  return trimmed ? { shell: trimmed } : {};
+}
+
+export function readinessDisplayShell(shell: string, defaultShell: string): string {
+  return shell || defaultShell || DEFAULT_SHELL;
+}
+
 // useReadinessState owns the card's fetch + selection state so the component
 // renders a thin view layer. Pulled out to keep the component body under the
 // max-lines-per-function lint budget.
@@ -43,7 +52,8 @@ function useReadinessState({
   const [hasProbed, setHasProbed] = useState(false);
   const [shells, setShells] = useState<string[] | null>(null);
   const [shellsLoading, setShellsLoading] = useState(false);
-  const [shell, setShell] = useState(shellProp ?? DEFAULT_SHELL);
+  const [shell, setShell] = useState(shellProp ?? "");
+  const [defaultShell, setDefaultShell] = useState(DEFAULT_SHELL);
   // Drop stale responses if the user clicks Refresh again before the
   // previous request lands — same pattern as ssh-sessions-card.
   const seqRef = useRef(0);
@@ -53,8 +63,9 @@ function useReadinessState({
     setLoading(true);
     setError(null);
     try {
-      const resp = await probeSSHAgents(executorId, { shell });
+      const resp = await probeSSHAgents(executorId, readinessProbeBody(shell));
       if (seq !== seqRef.current) return;
+      if (!shell && resp.shell) setDefaultShell(resp.shell);
       setRows(resp.rows);
       setHasProbed(true);
     } catch (e) {
@@ -71,6 +82,7 @@ function useReadinessState({
     setShellsLoading(true);
     try {
       const resp = await probeSSHShells(executorId);
+      setDefaultShell(resp.default_shell || DEFAULT_SHELL);
       setShells(resp.available);
     } catch {
       // On failure the dropdown stays empty; user can type / save the shell
@@ -123,6 +135,7 @@ function useReadinessState({
     shells,
     shellsLoading,
     shell,
+    defaultShell,
     refresh,
     handleShellChange,
   };
@@ -150,9 +163,11 @@ export function SSHAgentReadinessCard({
     shells,
     shellsLoading,
     shell,
+    defaultShell,
     refresh,
     handleShellChange,
   } = state;
+  const displayShell = readinessDisplayShell(shell, defaultShell);
 
   return (
     <Card data-testid="ssh-agent-readiness-card">
@@ -178,9 +193,10 @@ export function SSHAgentReadinessCard({
           </Button>
         </div>
         <ShellSelector
-          shell={shell}
+          shell={displayShell}
           shells={shells}
           loading={shellsLoading}
+          defaultShell={defaultShell}
           onChange={handleShellChange}
         />
       </CardHeader>
@@ -195,11 +211,13 @@ function ShellSelector({
   shell,
   shells,
   loading,
+  defaultShell,
   onChange,
 }: {
   shell: string;
   shells: string[] | null;
   loading: boolean;
+  defaultShell: string;
   onChange: (s: string) => void | Promise<void>;
 }) {
   // While probing, show a placeholder option so the dropdown can't surface
@@ -218,7 +236,7 @@ function ShellSelector({
           data-testid="ssh-readiness-shell"
           className="h-7 w-32 text-xs"
         >
-          <SelectValue placeholder="bash" />
+          <SelectValue placeholder={defaultShell || DEFAULT_SHELL} />
         </SelectTrigger>
         <SelectContent>
           {options.map((s) => (
