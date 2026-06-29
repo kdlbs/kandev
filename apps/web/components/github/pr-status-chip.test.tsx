@@ -489,7 +489,7 @@ describe("PRStatusChip — mergeability", () => {
     expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("in_progress");
   });
 
-  it("does not show in-progress for skipped-only checks", () => {
+  it("shows in-progress while checks_state is pending even if aggregate counts are all passing", () => {
     renderWithStore(
       {
         taskPRs: {
@@ -500,7 +500,7 @@ describe("PRStatusChip — mergeability", () => {
       },
       <PRStatusChip taskId="task-1" />,
     );
-    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("neutral");
+    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("in_progress");
   });
 });
 

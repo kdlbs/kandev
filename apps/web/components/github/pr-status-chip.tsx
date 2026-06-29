@@ -29,6 +29,7 @@ import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS, PRCIPopover } from "@/components/gi
 import { useTaskCIAutomationOptions } from "@/hooks/domains/github/use-task-ci-options";
 import { MultiPRCIPopover } from "@/components/github/multi-pr-ci-popover";
 import {
+  hasPRChecksInProgressForDisplay,
   hasPRChecksPassedForDisplay,
   isPRAwaitingReview,
   isPRReadyToMerge,
@@ -57,17 +58,7 @@ type AutomationFlags = {
   autoMerge: boolean;
 };
 
-function hasUnknownOrInProgressChecks(pr: TaskPR): boolean {
-  return pr.checks_total <= 0 || pr.checks_passing < pr.checks_total;
-}
-
-function checkStatusFromCounts(pr: TaskPR): "passed" | "in_progress" | null {
-  if (pr.checks_state !== "" || pr.checks_total <= 0) return null;
-  return hasPRChecksPassedForDisplay(pr) ? "passed" : "in_progress";
-}
-
 function chipStatus(pr: TaskPR): ChipStatus {
-  const countStatus = checkStatusFromCounts(pr);
   if (pr.review_state === "changes_requested" || pr.checks_state === "failure") return "failed";
   // Merge conflicts / behind-base block the merge even when CI is green — the
   // chip must never read as a passed check in that case. Mirrors
@@ -79,11 +70,7 @@ function chipStatus(pr: TaskPR): ChipStatus {
   // in-progress, not passed. Without this order, the chip flips to green the
   // moment CI finishes and ignores the human gate. isPRAwaitingReview also
   // covers approved PRs where branch protection requires more reviewers.
-  if (
-    (pr.checks_state === "pending" && hasUnknownOrInProgressChecks(pr)) ||
-    countStatus === "in_progress" ||
-    pr.review_state === "pending"
-  ) {
+  if (hasPRChecksInProgressForDisplay(pr) || pr.review_state === "pending") {
     return "in_progress";
   }
   // Mirror getPRStatusColor priority: ready-to-merge beats awaiting-review so
