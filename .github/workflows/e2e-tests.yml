@@ -44,7 +44,7 @@ jobs:
     # Pre-baked image bundles Go, Node 24, pnpm 9.15.9 — see
     # .github/docker/ci-base/Dockerfile. Uses the `build` tag (with Go)
     # because this job compiles the backend.
-    container: ghcr.io/kdlbs/kandev-ci:build-latest@sha256:b8e564d204138ebb94d6ced0e7e72d7b8d071b8d6d26b0dfe6bd2ef749893af4
+    container: ghcr.io/kdlbs/kandev-ci:build-latest
     timeout-minutes: 10
     # Container jobs default to `sh`; pin to bash for the few shell steps below.
     defaults:
@@ -117,7 +117,7 @@ jobs:
     # pre-built backend artifact from the `build` job. ~600 MB smaller pull
     # than the build image, saves ~20s per shard at startup.
     container:
-      image: ghcr.io/kdlbs/kandev-ci:runtime-latest@sha256:4a25d7d9e899c67740ccc75deb617aa6e232f1446c05894cc6434d30f486367f
+      image: ghcr.io/kdlbs/kandev-ci:runtime-latest
       options: --ipc=host
     # 25 min (was 22) — leaves room for the worst-case "every shard hits a few
     # flake-retries" combination without blowing past the cap. Average shard
@@ -278,11 +278,11 @@ jobs:
       - name: Extract Playwright browsers from kandev-ci image
         run: |
           set -euo pipefail
-          docker pull ghcr.io/kdlbs/kandev-ci:runtime-latest@sha256:4a25d7d9e899c67740ccc75deb617aa6e232f1446c05894cc6434d30f486367f
+          docker pull ghcr.io/kdlbs/kandev-ci:runtime-latest
           mkdir -p /tmp/ms-playwright
           docker run --rm \
             -v /tmp/ms-playwright:/dest \
-            ghcr.io/kdlbs/kandev-ci:runtime-latest@sha256:4a25d7d9e899c67740ccc75deb617aa6e232f1446c05894cc6434d30f486367f \
+            ghcr.io/kdlbs/kandev-ci:runtime-latest \
             cp -a /ms-playwright/. /dest/
           echo "PLAYWRIGHT_BROWSERS_PATH=/tmp/ms-playwright" >> "$GITHUB_ENV"
 
@@ -430,7 +430,7 @@ jobs:
     runs-on: ubuntu-latest
     # Pre-baked image bundles Node 24, pnpm 9.15.9, and the Playwright CLI.
     # `runtime` tag — no Go needed for merging blob reports.
-    container: ghcr.io/kdlbs/kandev-ci:runtime-latest@sha256:4a25d7d9e899c67740ccc75deb617aa6e232f1446c05894cc6434d30f486367f
+    container: ghcr.io/kdlbs/kandev-ci:runtime-latest
     timeout-minutes: 5
     # Container jobs default to `sh`; pin to bash.
     defaults:

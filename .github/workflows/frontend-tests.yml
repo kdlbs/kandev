@@ -50,7 +50,7 @@ jobs:
     runs-on: ubuntu-latest
     # Pre-baked image bundles Node 24, pnpm 9.15.9, Go, and go-licenses —
     # see .github/docker/ci-base/Dockerfile.
-    container: ghcr.io/kdlbs/kandev-ci:build-latest@sha256:b8e564d204138ebb94d6ced0e7e72d7b8d071b8d6d26b0dfe6bd2ef749893af4
+    container: ghcr.io/kdlbs/kandev-ci:build-latest
     defaults:
       run:
         # Container jobs default to `sh` (dash); pin to bash for `set -euo
