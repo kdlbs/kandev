@@ -57,6 +57,7 @@ async function changesCountForSession(testPage: Page, sessionId: string): Promis
     const hasCommits = envKey in state.sessionCommits.byEnvironmentId;
     if (!hasRepoStatuses && !hasCommits) return null;
     const repoStatuses = state.gitStatus.byEnvironmentRepo[envKey] ?? {};
+    // Keep this count in sync with selectChangesMarkerByEnvironment.
     let count = state.sessionCommits.byEnvironmentId[envKey]?.length ?? 0;
     for (const status of Object.values(repoStatuses)) {
       count += Object.keys(status.files ?? {}).length;

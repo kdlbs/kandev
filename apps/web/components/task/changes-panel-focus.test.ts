@@ -12,7 +12,7 @@ const TEST_TIMESTAMP = "2026-06-29T00:00:00Z";
 const INITIAL_FINGERPRINT = "repo:path:initial";
 const UPDATED_FINGERPRINT = "repo:path:updated";
 
-function gitStatus(files: string[], timestamp = TEST_TIMESTAMP): GitStatusEntry {
+function gitStatus(files: string[], timestamp = TEST_TIMESTAMP, diff = ""): GitStatusEntry {
   return {
     branch: "main",
     remote_branch: null,
@@ -24,14 +24,14 @@ function gitStatus(files: string[], timestamp = TEST_TIMESTAMP): GitStatusEntry 
     ahead: 0,
     behind: 0,
     files: Object.fromEntries(
-      files.map((path) => [path, { path, status: "untracked", staged: false }]),
+      files.map((path) => [path, { path, status: "untracked", staged: false, diff }]),
     ),
     timestamp,
   };
 }
 
 describe("selectChangesMarkerByEnvironment", () => {
-  it("changes fingerprint for meaningful git updates with the same count", () => {
+  it("ignores timestamp-only git refreshes", () => {
     const baseState = {
       gitStatus: {
         byEnvironmentId: {},
@@ -54,6 +54,41 @@ describe("selectChangesMarkerByEnvironment", () => {
         byEnvironmentRepo: {
           envA: {
             repo1: gitStatus(["one.ts"], "2026-06-29T00:01:00Z"),
+          },
+        },
+      },
+    };
+
+    const baseMarker = selectChangesMarkerByEnvironment(baseState).envA;
+    const nextMarker = selectChangesMarkerByEnvironment(nextState).envA;
+
+    expect(nextMarker.count).toBe(baseMarker.count);
+    expect(nextMarker.fingerprint).toBe(baseMarker.fingerprint);
+  });
+
+  it("changes fingerprint for diff-only git updates with the same count", () => {
+    const baseState = {
+      gitStatus: {
+        byEnvironmentId: {},
+        byEnvironmentRepo: {
+          envA: {
+            repo1: gitStatus(["one.ts"], TEST_TIMESTAMP, "old diff"),
+          },
+        },
+      },
+      sessionCommits: {
+        loading: {},
+        refetchTrigger: {},
+        byEnvironmentId: {},
+      },
+    };
+    const nextState = {
+      ...baseState,
+      gitStatus: {
+        byEnvironmentId: {},
+        byEnvironmentRepo: {
+          envA: {
+            repo1: gitStatus(["one.ts"], TEST_TIMESTAMP, "new diff"),
           },
         },
       },

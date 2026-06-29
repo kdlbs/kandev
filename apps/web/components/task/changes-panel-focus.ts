@@ -7,6 +7,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { AppState } from "@/lib/state/store";
 import type { FileInfo, GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
+import { djb2Hash } from "@/lib/utils/hash";
 
 type DockviewPanel = NonNullable<ReturnType<DockviewApi["getPanel"]>>;
 type ChangesMarkerState = Pick<AppState, "gitStatus" | "sessionCommits">;
@@ -52,6 +53,7 @@ function fileFingerprint(file: FileInfo): string {
     file.additions ?? 0,
     file.deletions ?? 0,
     file.old_path ?? "",
+    djb2Hash(file.diff ?? ""),
     file.diff_skip_reason ?? "",
     file.repository_name ?? "",
   ].join(":");
@@ -66,7 +68,6 @@ function gitStatusFingerprint(repoName: string, status: GitStatusEntry): string 
     status.remote_branch ?? "",
     status.ahead,
     status.behind,
-    status.timestamp ?? "",
     status.repository_name ?? "",
     files,
   ].join("|");
