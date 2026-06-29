@@ -6,6 +6,8 @@ import {
   shouldMarkSessionTabUserActivationIntent,
 } from "./session-tab-activation-intent";
 
+const INACTIVE_SESSION_ID = "s-inactive";
+
 describe("session tab activation intent", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -65,6 +67,16 @@ describe("session tab activation intent", () => {
     ).toBe(false);
   });
 
+  it("does not mark intent without a session id", () => {
+    expect(
+      shouldMarkSessionTabUserActivationIntent({
+        sessionId: null,
+        isActive: false,
+        target: document.createElement("span"),
+      }),
+    ).toBe(false);
+  });
+
   it("does not mark intent from nested interactive controls", () => {
     const button = document.createElement("button");
     const label = document.createElement("span");
@@ -72,17 +84,42 @@ describe("session tab activation intent", () => {
 
     expect(
       shouldMarkSessionTabUserActivationIntent({
-        sessionId: "s-inactive",
+        sessionId: INACTIVE_SESSION_ID,
         isActive: false,
         target: label,
       }),
     ).toBe(false);
   });
 
+  it("does not mark intent from role-based nested interactive controls", () => {
+    const button = document.createElement("span");
+    button.setAttribute("role", "button");
+    const label = document.createElement("span");
+    button.append(label);
+
+    expect(
+      shouldMarkSessionTabUserActivationIntent({
+        sessionId: INACTIVE_SESSION_ID,
+        isActive: false,
+        target: label,
+      }),
+    ).toBe(false);
+  });
+
+  it("marks intent for non-element targets on inactive tabs", () => {
+    expect(
+      shouldMarkSessionTabUserActivationIntent({
+        sessionId: INACTIVE_SESSION_ID,
+        isActive: false,
+        target: null,
+      }),
+    ).toBe(true);
+  });
+
   it("marks intent for inactive tab activation surfaces", () => {
     expect(
       shouldMarkSessionTabUserActivationIntent({
-        sessionId: "s-inactive",
+        sessionId: INACTIVE_SESSION_ID,
         isActive: false,
         target: document.createElement("span"),
       }),
