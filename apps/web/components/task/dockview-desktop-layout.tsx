@@ -583,8 +583,10 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       useDockviewStore.setState({ currentLayoutEnvId: currentEnvId });
 
       readyDisposersRef.current.push(setupGroupTracking(api));
-      setupSessionTabSync(api, appStore);
-      setupChatPanelSafetyNet(api, appStore);
+      const sessionTabSyncDisposable = setupSessionTabSync(api, appStore);
+      readyDisposersRef.current.push(() => sessionTabSyncDisposable.dispose());
+      const chatPanelSafetyNetDisposable = setupChatPanelSafetyNet(api, appStore);
+      readyDisposersRef.current.push(() => chatPanelSafetyNetDisposable.dispose());
       readyDisposersRef.current.push(setupLayoutPersistence(api, saveTimerRef, envIdRef));
       setupPortalCleanup(api, appStore);
       readyDisposersRef.current.push(setupContainerResizeSync(api));
