@@ -853,18 +853,21 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 }
 
 // inheritFromTask fills agentProfileID and executorProfileID from another task's
-// primary session or durable metadata when not explicitly provided. It returns a
-// bare ExecutorID only when no executor profile was resolved, because an
-// executor profile already encodes its executor reference.
+// durable launch metadata or primary session when not explicitly provided. It
+// returns a bare ExecutorID only when no executor profile was resolved, because
+// an executor profile already encodes its executor reference.
 func (h *Handlers) inheritFromTask(ctx context.Context, taskID string, agentProfileID, executorProfileID *string) string {
 	if taskID == "" || h.taskSvc == nil {
 		return ""
 	}
 
-	executorID := h.inheritFromPrimarySession(ctx, taskID, agentProfileID, executorProfileID)
-	needsMetadata := *agentProfileID == "" || *executorProfileID == "" || executorID != ""
-	if needsMetadata {
-		executorID = h.inheritFromTaskMetadata(ctx, taskID, agentProfileID, executorProfileID, executorID)
+	executorID := h.inheritFromTaskMetadata(ctx, taskID, agentProfileID, executorProfileID, "")
+	needsSession := *agentProfileID == "" || (*executorProfileID == "" && executorID == "")
+	if needsSession {
+		sessionExecutorID := h.inheritFromPrimarySession(ctx, taskID, agentProfileID, executorProfileID, executorID == "")
+		if executorID == "" {
+			executorID = sessionExecutorID
+		}
 	}
 
 	if *executorProfileID != "" {
@@ -873,13 +876,16 @@ func (h *Handlers) inheritFromTask(ctx context.Context, taskID string, agentProf
 	return executorID
 }
 
-func (h *Handlers) inheritFromPrimarySession(ctx context.Context, taskID string, agentProfileID, executorProfileID *string) string {
+func (h *Handlers) inheritFromPrimarySession(ctx context.Context, taskID string, agentProfileID, executorProfileID *string, inheritExecutor bool) string {
 	session, err := h.taskSvc.GetPrimarySession(ctx, taskID)
 	if err != nil || session == nil {
 		return ""
 	}
 	if *agentProfileID == "" {
 		*agentProfileID = session.AgentProfileID
+	}
+	if !inheritExecutor {
+		return ""
 	}
 	if *executorProfileID == "" {
 		*executorProfileID = session.ExecutorProfileID

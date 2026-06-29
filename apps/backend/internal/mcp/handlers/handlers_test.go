@@ -531,6 +531,76 @@ func TestHandleCreateTask_InheritsDeferredSourceTaskMetadata(t *testing.T) {
 	assert.Equal(t, "metadata-executor", task.Metadata[models.MetaKeyExecutorID])
 }
 
+func TestHandleCreateTask_SourceTaskMetadataWinsOverSessionAndDefaults(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	require.Len(t, workflows, 1)
+
+	workspaceDefaultProfileID := "workspace-default-profile"
+	_, err = svc.UpdateWorkspace(ctx, workspaces[0].ID, &service.UpdateWorkspaceRequest{
+		DefaultAgentProfileID: &workspaceDefaultProfileID,
+	})
+	require.NoError(t, err)
+	workflowProfileID := "workflow-default-profile"
+	_, err = svc.UpdateWorkflow(ctx, workflows[0].ID, &service.UpdateWorkflowRequest{
+		AgentProfileID: &workflowProfileID,
+	})
+	require.NoError(t, err)
+
+	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID,
+		WorkflowID:  workflows[0].ID,
+		Title:       "Current task",
+		Metadata: map[string]interface{}{
+			models.MetaKeyAgentProfileID:    "source-metadata-profile",
+			models.MetaKeyExecutorProfileID: "source-metadata-executor",
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                "source-primary-session",
+		TaskID:            source.ID,
+		AgentProfileID:    workspaceDefaultProfileID,
+		ExecutorProfileID: "session-executor-profile",
+		State:             models.TaskSessionStateWaitingForInput,
+		IsPrimary:         true,
+	}))
+
+	h := &Handlers{
+		taskSvc: svc,
+		logger:  testLogger(t).WithFields(),
+	}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"source_task_id": source.ID,
+		"workspace_id":   workspaces[0].ID,
+		"workflow_id":    workflows[0].ID,
+		"title":          "Follow-up from current task",
+		"description":    "This should inherit the current task's configured profile.",
+		"start_agent":    false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+	require.NotEmpty(t, created.ID)
+
+	task, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	require.NotNil(t, task.Metadata)
+	assert.Equal(t, "source-metadata-profile", task.Metadata[models.MetaKeyAgentProfileID])
+	assert.Equal(t, "source-metadata-executor", task.Metadata[models.MetaKeyExecutorProfileID])
+}
+
 func TestHandleCreateTask_InheritsDeferredParentTaskMetadata(t *testing.T) {
 	svc, _ := newTestTaskService(t)
 	ctx := context.Background()
@@ -818,6 +888,35 @@ func TestResolveMCPAutoStartConfig_FallsBackToWorkflowAgentProfile(t *testing.T)
 	}, "", "", "")
 
 	assert.Equal(t, workflowProfileID, config.AgentProfileID)
+}
+
+func TestResolveMCPAutoStartConfig_ExplicitAgentProfileWinsOverSourceTask(t *testing.T) {
+	svc, _ := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	require.Len(t, workflows, 1)
+
+	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID,
+		WorkflowID:  workflows[0].ID,
+		Title:       "Current task",
+		Metadata: map[string]interface{}{
+			models.MetaKeyAgentProfileID: "source-profile",
+		},
+	})
+	require.NoError(t, err)
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+
+	config := h.resolveMCPAutoStartConfig(ctx, &models.Task{
+		WorkspaceID: workspaces[0].ID,
+		WorkflowID:  workflows[0].ID,
+	}, "explicit-profile", "", source.ID)
+
+	assert.Equal(t, "explicit-profile", config.AgentProfileID)
 }
 
 func defaultWorkspaceAndWorkflow(t *testing.T, ctx context.Context, svc *service.Service) (*models.Workspace, *models.Workflow) {
