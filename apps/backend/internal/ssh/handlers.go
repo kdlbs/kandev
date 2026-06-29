@@ -319,7 +319,6 @@ var candidateShells = []string{"bash", "zsh", "sh", "fish", "dash"}
 // ProbeShellsResponse is the body of POST /api/v1/ssh/executors/:id/probe-shells.
 type ProbeShellsResponse struct {
 	Host         string   `json:"host"`
-	Platform     string   `json:"platform,omitempty"`
 	DefaultShell string   `json:"default_shell"`
 	DurationMs   int64    `json:"duration_ms"`
 	Available    []string `json:"available"`
@@ -379,7 +378,6 @@ func (h *Handler) probeShells(ctx context.Context, executorID string) (*ProbeShe
 	}
 	return &ProbeShellsResponse{
 		Host:         target.Host,
-		Platform:     platform.String(),
 		DefaultShell: readinessShellForRequest("", platform),
 		DurationMs:   time.Since(started).Milliseconds(),
 		Available:    available,

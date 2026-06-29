@@ -103,6 +103,7 @@ function useReadinessState({
     setError(null);
     setHasProbed(false);
     setLoading(false);
+    setDefaultShell(DEFAULT_SHELL);
     void probeShells();
     return () => {
       seqRef.current = -1;
