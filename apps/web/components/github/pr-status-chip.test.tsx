@@ -351,6 +351,34 @@ describe("PRStatusChip touch tablet branch", () => {
 });
 
 describe("PRStatusChip — mergeability", () => {
+  it("treats aggregate all-green checks as passed when checks_state is empty", () => {
+    renderWithStore(
+      {
+        taskPRs: {
+          byTaskId: {
+            "task-1": [makePR({ checks_state: "", checks_total: 39, checks_passing: 39 })],
+          },
+        },
+      },
+      <PRStatusChip taskId="task-1" />,
+    );
+    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("passed");
+  });
+
+  it("treats aggregate incomplete checks as in-progress when checks_state is empty", () => {
+    renderWithStore(
+      {
+        taskPRs: {
+          byTaskId: {
+            "task-1": [makePR({ checks_state: "", checks_total: 15, checks_passing: 6 })],
+          },
+        },
+      },
+      <PRStatusChip taskId="task-1" />,
+    );
+    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("in_progress");
+  });
+
   it("is 'conflict' (not 'passed') for a dirty PR even with green checks + approval", () => {
     // Regression: the chip read mergeable_state-blind and showed the green
     // "passed" check on a PR that actually had merge conflicts.
