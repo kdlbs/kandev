@@ -87,6 +87,16 @@ class HarnessLinterTest(unittest.TestCase):
 
         self.assertEqual(linter.lint_path(path, "agent", {"agent-line-limit": {"limit": 0}}), [])
 
+    def test_config_line_limit_is_wired(self) -> None:
+        linter = load_linter()
+        path = self.write(".codex/config.toml", "model = \"gpt-5\"\n" * 301)
+
+        violations = linter.lint_path(path, "config", linter.DEFAULT_RULES_BY_KIND["config"])
+
+        self.assertEqual([violation.rule for violation in violations], ["config-line-limit"])
+        self.assertIn("file is 301 lines (limit 300, over by 1)", violations[0].msg)
+        self.assertIn("agent config files are read", violations[0].msg)
+
     def test_description_word_limit_supports_yaml_frontmatter(self) -> None:
         linter = load_linter()
         path = self.write(

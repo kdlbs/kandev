@@ -11,8 +11,15 @@ import os
 import re
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11
+    try:
+        import tomli as tomllib
+    except ModuleNotFoundError:
+        tomllib = None
 
 
 DEFAULT_RULES_BY_KIND = {
@@ -314,6 +321,12 @@ def line_limit_message(rule: str, count: int, limit: int) -> str:
             f"{prefix} why: Cursor rules are routing and style context that should stay concise. fix: move detailed "
             f"examples or long reference material into sibling files and link to them. {target}"
         )
+    if rule == "config-line-limit":
+        return (
+            f"{prefix} why: agent config files are read when spawning or routing agent runs, and bloated config obscures "
+            "the active model, permission, and tool choices. fix: keep config files to the settings the runtime needs; "
+            f"move rationale, examples, or setup notes into a referenced markdown file. {target}"
+        )
     return f"{prefix} {target}"
 
 
@@ -381,6 +394,8 @@ def strip_yaml_scalar(value: str) -> str:
 
 
 def extract_toml_description(text: str) -> str | None:
+    if tomllib is None:
+        return None
     try:
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError:
@@ -525,6 +540,8 @@ def check_toml_description_when(path: Path, text: str) -> list[Violation]:
 
 
 def has_routing_phrase(description: str) -> bool:
+    # Before enabling description-when by default, update artifacts that currently
+    # use looser phrasing like "Useful for ..." or incidental "... when ...".
     return re.search(r"\b(use when|use for|trigger on|trigger when)\b", description, re.IGNORECASE) is not None
 
 
