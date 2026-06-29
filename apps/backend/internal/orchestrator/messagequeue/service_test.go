@@ -153,6 +153,27 @@ func TestQueueMessageWithCoalesceKey(t *testing.T) {
 		assert.Equal(t, "tail", status.Entries[2].Content)
 	})
 
+	t.Run("does not mutate caller metadata or retag existing entries", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+		metadata := map[string]interface{}{"origin": "ci"}
+
+		first, replaced, err := svc.QueueMessageWithCoalesceKey(ctx, "s", "t", "first ci", "", QueuedByWorkflow, false, nil, metadata, "ci-key", true)
+		require.NoError(t, err)
+		require.False(t, replaced)
+		second, replaced, err := svc.QueueMessageWithCoalesceKey(ctx, "s", "t", "second ci", "", QueuedByWorkflow, false, nil, metadata, "other-key", true)
+		require.NoError(t, err)
+		require.False(t, replaced)
+
+		status := svc.GetStatus(ctx, "s")
+		require.Equal(t, 2, status.Count)
+		assert.Equal(t, first.ID, status.Entries[0].ID)
+		assert.Equal(t, second.ID, status.Entries[1].ID)
+		assert.Equal(t, "ci-key", status.Entries[0].Metadata[MetadataCoalesceKey])
+		assert.Equal(t, "other-key", status.Entries[1].Metadata[MetadataCoalesceKey])
+		assert.NotContains(t, metadata, MetadataCoalesceKey)
+	})
+
 	t.Run("returns entry not found when insert disabled and no match exists", func(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()

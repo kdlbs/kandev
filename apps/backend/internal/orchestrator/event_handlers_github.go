@@ -189,7 +189,7 @@ func (s *Service) handleTaskPRUpdated(ctx context.Context, event *bus.Event) err
 
 func (s *Service) handleTaskCIOptionsUpdated(ctx context.Context, event *bus.Event) error {
 	options, ok := event.Data.(*github.TaskCIOptionsResponse)
-	if !ok || options == nil || (!options.AutoFixEnabled && !options.AutoMergeEnabled) || s.githubService == nil {
+	if !ok || options == nil || event.Source == ciAutomationStateEventSource || (!options.AutoFixEnabled && !options.AutoMergeEnabled) || s.githubService == nil {
 		return nil
 	}
 	detachedCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ciAutomationDetachedTimeout)

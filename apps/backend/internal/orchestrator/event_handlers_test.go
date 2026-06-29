@@ -827,6 +827,53 @@ func TestExecuteQueuedMessage_RequeuesTransientPromptFailure(t *testing.T) {
 	}
 }
 
+func TestExecuteQueuedMessage_RequeuesCoalescedMessageWithOriginalSender(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("failed to get session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	session.AgentExecutionID = "exec-1"
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-1")
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{
+		isAgentRunning: true,
+		promptErr:      errors.New("agent stream disconnected: read tcp [::1]:56463->[::1]:10002: use of closed network connection"),
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	queuedMsg := &messagequeue.QueuedMessage{
+		ID:        "q1",
+		SessionID: "s1",
+		TaskID:    "t1",
+		Content:   "hello",
+		Metadata:  map[string]interface{}{messagequeue.MetadataCoalesceKey: "ci-key"},
+		QueuedBy:  messagequeue.QueuedByWorkflow,
+	}
+
+	svc.executeQueuedMessage("s1", queuedMsg)
+
+	status := svc.messageQueue.GetStatus(ctx, "s1")
+	if status.Count != 1 {
+		t.Fatalf("expected queued message to be requeued after transient failure, count=%d", status.Count)
+	}
+	if status.Entries[0].QueuedBy != messagequeue.QueuedByWorkflow {
+		t.Fatalf("expected original queued_by to be preserved, got %q", status.Entries[0].QueuedBy)
+	}
+	if status.Entries[0].Metadata[messagequeue.MetadataCoalesceKey] != "ci-key" {
+		t.Fatalf("expected coalesce metadata to be preserved, got %+v", status.Entries[0].Metadata)
+	}
+}
+
 func TestExecuteQueuedMessage_FiresOnTurnStart(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

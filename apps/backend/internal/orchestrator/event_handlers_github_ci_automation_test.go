@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -256,6 +257,15 @@ func TestHandleTaskPRCIAutomationQueuesFixDedupesAndMerges(t *testing.T) {
 		},
 	}
 	svc.SetGitHubService(ghSvc)
+	svc.eventBus = bus.NewMemoryEventBus(testLogger())
+	var ciOptionsEvents []*bus.Event
+	_, err := svc.eventBus.Subscribe(events.GitHubTaskCIOptionsUpdated, func(_ context.Context, event *bus.Event) error {
+		ciOptionsEvents = append(ciOptionsEvents, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("subscribe CI options events: %v", err)
+	}
 
 	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
 		t.Fatalf("handle auto-fix: %v", err)
@@ -272,6 +282,9 @@ func TestHandleTaskPRCIAutomationQueuesFixDedupesAndMerges(t *testing.T) {
 	}
 	if len(ghSvc.fixAttempts) != 1 {
 		t.Fatalf("expected one fix attempt, got %d", len(ghSvc.fixAttempts))
+	}
+	if len(ciOptionsEvents) != 1 || ciOptionsEvents[0].Source != ciAutomationStateEventSource {
+		t.Fatalf("expected one CI options state refresh event, got %+v", ciOptionsEvents)
 	}
 
 	_, signature := encodeCIAutomationCheckpoint(ciAutomationCurrentCheckpoint(ghSvc.prFeedback))
@@ -750,6 +763,54 @@ func TestHandleTaskPRCIAutomationStopsBeforeEleventhAutoFixRound(t *testing.T) {
 	}
 	if len(ghSvc.ciExhausted) != 1 || ghSvc.ciExhausted[0].LastError == nil || !strings.Contains(*ghSvc.ciExhausted[0].LastError, "10 rounds") {
 		t.Fatalf("expected exhausted CI state, got %+v", ghSvc.ciExhausted)
+	}
+}
+
+func TestHandleTaskPRCIAutomationSkipsAlreadyExhaustedPRBeforeFeedbackFetch(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	exhaustedAt := time.Now().UTC()
+	pr := &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		Owner:        "acme",
+		Repo:         "widget",
+		PRNumber:     42,
+		State:        "open",
+		ChecksState:  "failure",
+	}
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			EffectiveAutoFixPrompt: "Fix the PR\n\n{{pr.feedback}}",
+		},
+		ciPRState: &github.TaskCIPRAutomationState{
+			TaskID:             "task-1",
+			RepositoryID:       "repo-1",
+			PRNumber:           42,
+			AutoFixRoundCount:  ciAutomationMaxFixRounds,
+			AutoFixExhaustedAt: &exhaustedAt,
+		},
+		prFeedback: &github.PRFeedback{
+			Checks: []github.CheckRun{{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit"}},
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomationWithRefresh(ctx, pr, false); err != nil {
+		t.Fatalf("handle exhausted auto-fix: %v", err)
+	}
+	if ghSvc.prFeedbackCalls != 0 {
+		t.Fatalf("expected exhausted PR to skip full feedback fetch, got %d calls", ghSvc.prFeedbackCalls)
+	}
+	if len(ghSvc.ciExhausted) != 0 {
+		t.Fatalf("expected no repeated exhaustion write, got %+v", ghSvc.ciExhausted)
+	}
+	if status := svc.messageQueue.GetStatus(ctx, "session-1"); status.Count != 0 {
+		t.Fatalf("expected no queued prompt for exhausted PR, got %+v", status)
 	}
 }
 
@@ -1233,6 +1294,29 @@ func TestHandleTaskCIOptionsUpdatedStartsAutomationForTaskPRs(t *testing.T) {
 	waitForCIAutomationIdle(t, svc, "task-1|repo-back|2", 200*time.Millisecond)
 	if ghSvc.triggerPRSyncAllCalls != 1 {
 		t.Fatalf("expected one task-wide sync from option save, got %d", ghSvc.triggerPRSyncAllCalls)
+	}
+}
+
+func TestHandleTaskCIOptionsUpdatedIgnoresStateRefreshEvents(t *testing.T) {
+	ctx := context.Background()
+	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{TaskID: "task-1"},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	err := svc.handleTaskCIOptionsUpdated(ctx, &bus.Event{
+		Source: ciAutomationStateEventSource,
+		Data: &github.TaskCIOptionsResponse{
+			TaskID:         "task-1",
+			AutoFixEnabled: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("handle CI options state refresh: %v", err)
+	}
+	if ghSvc.triggerPRSyncAllCalls != 0 {
+		t.Fatalf("state refresh should not start automation sync, got %d calls", ghSvc.triggerPRSyncAllCalls)
 	}
 }
 

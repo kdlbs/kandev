@@ -12,6 +12,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/sysprompt"
@@ -28,6 +30,7 @@ const (
 	ciAutomationFixBlockWindow   = time.Hour
 	ciAutomationMaxFixRounds     = github.TaskCIAutoFixMaxRounds
 	ciAutomationKindAutoFix      = "ci_auto_fix"
+	ciAutomationStateEventSource = "ci_automation_state"
 )
 
 var ciAutomationSnapshotFieldReplacer = strings.NewReplacer("\r", " ", "\n", " ", "<", "", ">", "")
@@ -153,6 +156,14 @@ func ciAutomationHasFreshPRStatusAt(pr *github.TaskPR, now time.Time) bool {
 }
 
 func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, options *github.TaskCIOptionsResponse) bool {
+	state, err := s.githubService.GetTaskCIPRState(ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber)
+	if err != nil {
+		s.recordCIAutomationError(ctx, pr, fmt.Sprintf("load CI automation state: %v", err))
+		return true
+	}
+	if state != nil && state.AutoFixExhaustedAt != nil {
+		return true
+	}
 	feedback, err := s.githubService.GetPRFeedback(ctx, pr.Owner, pr.Repo, pr.PRNumber)
 	if err != nil {
 		s.recordCIAutomationError(ctx, pr, fmt.Sprintf("fetch PR feedback: %v", err))
@@ -162,11 +173,6 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 		return false
 	}
 	feedback = ciAutomationFilterFeedbackForPR(pr, feedback)
-	state, err := s.githubService.GetTaskCIPRState(ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber)
-	if err != nil {
-		s.recordCIAutomationError(ctx, pr, fmt.Sprintf("load CI automation state: %v", err))
-		return true
-	}
 	previous := decodeCIAutomationCheckpoint(state)
 	delta := ciAutomationBuildDelta(feedback, previous)
 	checkpoint := ciAutomationCurrentCheckpoint(feedback)
@@ -204,6 +210,8 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 		IncrementRound: result.consumesRound(),
 	}); err != nil {
 		s.logger.Debug("record CI auto-fix attempt failed", zap.String("task_id", pr.TaskID), zap.Error(err))
+	} else {
+		s.publishTaskCIOptionsState(ctx, pr.TaskID)
 	}
 	return true
 }
@@ -482,6 +490,23 @@ func (s *Service) markCIAutoFixExhausted(ctx context.Context, pr *github.TaskPR)
 		zap.Int("max_rounds", ciAutomationMaxFixRounds))
 	if err := s.githubService.MarkTaskCIAutoFixExhausted(context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber, message); err != nil {
 		s.logger.Debug("record CI auto-fix exhaustion failed", zap.String("task_id", pr.TaskID), zap.Error(err))
+		return
+	}
+	s.publishTaskCIOptionsState(ctx, pr.TaskID)
+}
+
+func (s *Service) publishTaskCIOptionsState(ctx context.Context, taskID string) {
+	if s.githubService == nil || s.eventBus == nil || taskID == "" {
+		return
+	}
+	resp, err := s.githubService.GetTaskCIOptionsResponse(context.WithoutCancel(ctx), taskID)
+	if err != nil {
+		s.logger.Debug("load task CI options for state publish failed", zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	event := bus.NewEvent(events.GitHubTaskCIOptionsUpdated, ciAutomationStateEventSource, resp)
+	if err := s.eventBus.Publish(context.WithoutCancel(ctx), events.GitHubTaskCIOptionsUpdated, event); err != nil {
+		s.logger.Debug("publish task CI options state failed", zap.String("task_id", taskID), zap.Error(err))
 	}
 }
 

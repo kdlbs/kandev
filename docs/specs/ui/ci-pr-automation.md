@@ -36,6 +36,7 @@ Users can already see pull request CI/review status above the task chat input, b
 - Auto-fix is capped at 10 accepted rounds per task/repository/PR. A round is counted when Kandev sends a prompt directly or inserts a new queued auto-fix prompt. Replacing an already queued auto-fix prompt does not count as another round.
 - The auto-fix enabled chip above the chat input shows round progress as `Auto-fix N/10`; exhausted or capped PRs show `Auto-fix 10/10` with warning/paused styling.
 - Hovering the chip on desktop, or opening the same PR CI drawer on mobile, explains in plain language how many rounds have been used, what counts as a round, that queue replacement does not count again, and that Kandev pauses at 10/10 to prevent loops.
+- Accepted round-count changes and exhausted-state changes are broadcast to open clients through the task CI options update event so the chip stays current without a reload.
 - Automation controls persist across Kandev restarts.
 
 ## Data model
@@ -186,7 +187,7 @@ Auto-merge cycle for one task/PR:
 | Task session is busy | Auto-fix queues the rendered prompt with workflow/automation metadata for later delivery; the visible `@ci-auto-fix` chat message, including PR snapshot details, is created when the queued prompt is delivered and before the agent's response for that turn. |
 | Task session is busy and a pending auto-fix already exists for that PR | Kandev replaces the pending queued prompt with the latest feedback snapshot; it does not append a second queued message or increment the round count. |
 | Same feedback snapshot repeats | Auto-fix does not send another prompt. |
-| Auto-fix reaches 10 rounds for a PR | Kandev pauses auto-fix for that task/repository/PR, records a visible error, and does not create an 11th round. |
+| Auto-fix reaches 10 rounds for a PR | Kandev pauses auto-fix for that task/repository/PR, records a visible error, and does not create an 11th round. Already exhausted PRs skip full feedback fetching on later watcher wakes. |
 | GitHub merge fails | Auto-merge records the error and does not retry until the readiness signature changes. |
 | Default prompt row is missing | Backend falls back to the embedded `ci-auto-fix.md` content. |
 | Kandev restarts while an automation prompt is queued | Queued message and automation options/checkpoints persist according to the existing message queue and new CI automation tables. |

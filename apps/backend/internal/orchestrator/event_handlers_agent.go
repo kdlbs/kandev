@@ -82,6 +82,9 @@ func (s *Service) publishQueueStatusEvent(ctx context.Context, sessionID string)
 // Preserves the original Metadata (e.g. sender_task_id from message_task_kandev)
 // so attribution survives transient failures + retries.
 func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.QueuedMessage, queuedBy string) {
+	if queuedMsg.QueuedBy != "" && messageHasCoalesceKey(queuedMsg) {
+		queuedBy = queuedMsg.QueuedBy
+	}
 	requeuedMsg, queueErr := s.messageQueue.QueueMessageWithMetadata(
 		ctx,
 		queuedMsg.SessionID,
@@ -109,6 +112,18 @@ func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.Qu
 		zap.String("new_queue_id", requeuedMsg.ID),
 		zap.String("queued_by", queuedBy))
 	s.publishQueueStatusEvent(ctx, queuedMsg.SessionID)
+}
+
+func messageHasCoalesceKey(queuedMsg *messagequeue.QueuedMessage) bool {
+	if queuedMsg == nil || len(queuedMsg.Metadata) == 0 {
+		return false
+	}
+	value, ok := queuedMsg.Metadata[messagequeue.MetadataCoalesceKey]
+	if !ok {
+		return false
+	}
+	key, ok := value.(string)
+	return ok && key != ""
 }
 
 // handleAgentBootReady handles the boot signal: an agent's ACP session has
