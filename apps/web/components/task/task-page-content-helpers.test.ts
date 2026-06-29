@@ -139,4 +139,14 @@ describe("hasResolvedTaskDetails", () => {
       }),
     ).toBe(false);
   });
+
+  it("returns false when there is no effective task", () => {
+    expect(
+      hasResolvedTaskDetails({
+        effectiveTaskId: null,
+        taskDetailsId: "task-1",
+        initialTaskId: "task-1",
+      }),
+    ).toBe(false);
+  });
 });
