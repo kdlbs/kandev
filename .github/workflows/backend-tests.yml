@@ -155,6 +155,9 @@ jobs:
   postgres-boot:
     name: Backend Postgres
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     timeout-minutes: 10
     container: ghcr.io/kdlbs/kandev-ci:build-latest
     services:
@@ -179,18 +182,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
-
-      - name: Run Postgres boot smoke test
-        run: |
-          set -euo pipefail
-
-          output_file="$(mktemp)"
-          go test -v -race -run '^TestPostgresBootInitializesRepositories$' ./internal/backendapp 2>&1 | tee "${output_file}"
-
-          if ! grep -q '^=== RUN   TestPostgresBootInitializesRepositories$' "${output_file}"; then
-            echo "::error::Postgres boot smoke test matched no tests"
-            exit 1
-          fi
+        with:
+          persist-credentials: false
 
       - name: Run env-gated Postgres tests
         run: |
@@ -210,7 +203,13 @@ jobs:
           printf 'Running Postgres tests in:\n'
           printf '  %s\n' "${postgres_packages[@]}"
 
-          go test -v -race "${postgres_packages[@]}"
+          output_file="$(mktemp)"
+          go test -v -race "${postgres_packages[@]}" 2>&1 | tee "${output_file}"
+
+          if ! grep -q '^=== RUN   TestPostgresBootInitializesRepositories$' "${output_file}"; then
+            echo "::error::Postgres boot smoke test matched no tests"
+            exit 1
+          fi
 
   test-windows:
     name: Backend (windows)
