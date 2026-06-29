@@ -1011,6 +1011,66 @@ func TestHandleTaskPRCIAutomationAtRoundCapReplacesPendingAutoFixForWaitingSessi
 	}
 }
 
+func TestHandleTaskPRCIAutomationReplacesPendingAutoFixBeforeDirectPrompt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateWaitingForInput)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	now := time.Now().UTC()
+	pr := &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		Owner:        "acme",
+		Repo:         "widget",
+		PRNumber:     42,
+		State:        "open",
+		LastSyncedAt: &now,
+	}
+	_, _, err := svc.messageQueue.QueueMessageWithCoalesceKey(ctx, "session-1", "task-1", "@ci-auto-fix\n\nold feedback", "", messagequeue.QueuedByWorkflow, false, nil, ciAutomationMessageMetadataForPR(pr, "old"), ciAutomationCoalesceKey(pr), true)
+	if err != nil {
+		t.Fatalf("seed pending auto-fix: %v", err)
+	}
+	previous := ciAutomationCurrentCheckpoint(&github.PRFeedback{
+		Checks: []github.CheckRun{{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit"}},
+	})
+	previousJSON, previousSignature := encodeCIAutomationCheckpoint(previous)
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			EffectiveAutoFixPrompt: "Fix the PR\n\n{{pr.feedback}}",
+		},
+		triggerPRSyncAllPRs: []*github.TaskPR{pr},
+		prFeedback: &github.PRFeedback{
+			Checks: []github.CheckRun{
+				{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit"},
+				{Name: "lint", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/lint"},
+			},
+		},
+		ciPRState: &github.TaskCIPRAutomationState{
+			TaskID:                "task-1",
+			RepositoryID:          "repo-1",
+			PRNumber:              42,
+			LastFixSignature:      previousSignature,
+			LastFixCheckpointJSON: previousJSON,
+			LastFixEnqueuedAt:     &now,
+			AutoFixRoundCount:     3,
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle waiting replacement: %v", err)
+	}
+	status := svc.messageQueue.GetStatus(ctx, "session-1")
+	if status.Count != 1 || !strings.Contains(status.Entries[0].Content, "lint") || strings.Contains(status.Entries[0].Content, "old feedback") {
+		t.Fatalf("expected pending auto-fix replacement before direct prompt, got %+v", status)
+	}
+	if len(ghSvc.fixAttempts) != 1 || ghSvc.fixAttempts[0].IncrementRound {
+		t.Fatalf("expected replacement checkpoint without consuming another round, got %+v", ghSvc.fixAttempts)
+	}
+}
+
 func TestCIAutomationFindMatchingPRRequiresRepositoryIDWhenPresent(t *testing.T) {
 	target := &github.TaskPR{
 		TaskID:       "task-1",

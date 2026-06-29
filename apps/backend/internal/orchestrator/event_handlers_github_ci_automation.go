@@ -257,11 +257,15 @@ func (s *Service) dispatchCIAutomationPromptForPR(ctx context.Context, session *
 	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
 		return s.queueOrReplaceCIAutomationPromptForPR(ctx, session, pr, chatPrompt, signature, allowNewRound)
 	case models.TaskSessionStateWaitingForInput, models.TaskSessionStateIdle:
+		result, replaced, err := s.replacePendingCIAutomationPromptForPR(ctx, session, pr, chatPrompt, signature)
+		if err != nil {
+			return ciAutomationDispatchResult{}, err
+		}
+		if replaced {
+			return result, nil
+		}
 		if !allowNewRound {
-			if s.messageQueue == nil {
-				return ciAutomationDispatchResult{}, errCIAutoFixRoundCapReached
-			}
-			return s.queueOrReplaceCIAutomationPromptForPR(ctx, session, pr, chatPrompt, signature, false)
+			return ciAutomationDispatchResult{}, errCIAutoFixRoundCapReached
 		}
 		if !s.recordCIAutomationUserMessage(ctx, session.TaskID, session.ID, chatPrompt) {
 			return ciAutomationDispatchResult{}, fmt.Errorf("failed to record CI automation user message")
@@ -273,6 +277,20 @@ func (s *Service) dispatchCIAutomationPromptForPR(ctx context.Context, session *
 	default:
 		return ciAutomationDispatchResult{}, fmt.Errorf("session is not promptable: %s", session.State)
 	}
+}
+
+func (s *Service) replacePendingCIAutomationPromptForPR(ctx context.Context, session *models.TaskSession, pr *github.TaskPR, chatPrompt, signature string) (ciAutomationDispatchResult, bool, error) {
+	if s.messageQueue == nil {
+		return ciAutomationDispatchResult{}, false, nil
+	}
+	result, err := s.queueOrReplaceCIAutomationPromptForPR(ctx, session, pr, chatPrompt, signature, false)
+	if err == nil {
+		return result, true, nil
+	}
+	if errors.Is(err, errCIAutoFixRoundCapReached) {
+		return ciAutomationDispatchResult{}, false, nil
+	}
+	return ciAutomationDispatchResult{}, false, err
 }
 
 func (s *Service) queueOrReplaceCIAutomationPromptForPR(ctx context.Context, session *models.TaskSession, pr *github.TaskPR, chatPrompt, signature string, allowInsert bool) (ciAutomationDispatchResult, error) {
