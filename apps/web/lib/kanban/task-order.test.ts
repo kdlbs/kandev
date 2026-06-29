@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareTasksByCreatedDesc } from "./task-order";
+import { compareTasksByCreatedDesc, sortIdsByCreatedDesc } from "./task-order";
 
 describe("compareTasksByCreatedDesc", () => {
   it("sorts newer created tasks first", () => {
@@ -51,5 +51,24 @@ describe("compareTasksByCreatedDesc", () => {
 
   it("returns 0 when both tasks are missing createdAt", () => {
     expect(compareTasksByCreatedDesc({}, {})).toBe(0);
+  });
+});
+
+describe("sortIdsByCreatedDesc", () => {
+  // d newest … a oldest → board order is d, c, b, a.
+  const taskById = new Map<string, { createdAt?: string }>([
+    ["a", { createdAt: "2026-01-01T00:00:00Z" }],
+    ["b", { createdAt: "2026-01-02T00:00:00Z" }],
+    ["c", { createdAt: "2026-01-03T00:00:00Z" }],
+    ["d", { createdAt: "2026-01-04T00:00:00Z" }],
+  ]);
+
+  it("reorders a backward range selection into board (created-desc) order", () => {
+    // Anchor on the oldest then shift up leaves the Set as [a, c, b] (insertion).
+    expect(sortIdsByCreatedDesc(["a", "c", "b"], taskById)).toEqual(["c", "b", "a"]);
+  });
+
+  it("keeps relative order for ids without a known task", () => {
+    expect(sortIdsByCreatedDesc(["zzz", "a"], taskById)).toEqual(["zzz", "a"]);
   });
 });

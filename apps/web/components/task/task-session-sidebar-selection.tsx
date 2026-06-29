@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSidebarMultiSelect } from "@/hooks/use-sidebar-multi-select";
 import {
+  computeMixedWorkflowSelection,
   flattenVisibleTaskIds,
   sortIdsByVisibleOrder,
   type GroupedSidebarList,
@@ -11,8 +12,11 @@ import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm
 
 type BulkArchiveState = { ids: string[]; executorTypes: Array<string | null | undefined> };
 
-/** Owns the bulk-archive confirm dialog state + the archive call. */
-function useBulkArchiveDialog(
+/**
+ * Owns the bulk-archive confirm dialog state + the archive call.
+ * @internal Exported for unit testing.
+ */
+export function useBulkArchiveDialog(
   displayTasks: Array<{ id: string; remoteExecutorType?: string | null }>,
   bulkArchive: (ids: string[], opts?: { cascade?: boolean }) => Promise<void>,
 ) {
@@ -83,24 +87,10 @@ export function useSidebarSelection({
   // A workflow-less selected row (e.g. the archived placeholder) can't be moved,
   // so treat its presence as a mixed selection (disables "Move to step") and
   // filter such ids out of the actual move below.
-  const { isMixedWorkflowSelection, movableSelectedIds } = useMemo(() => {
-    const wfIds = new Set<string>();
-    const movable = new Set<string>();
-    let hasWorkflowless = false;
-    for (const t of displayTasks) {
-      if (!selectedIds.has(t.id)) continue;
-      if (t.workflowId) {
-        wfIds.add(t.workflowId);
-        movable.add(t.id);
-      } else {
-        hasWorkflowless = true;
-      }
-    }
-    return {
-      isMixedWorkflowSelection: hasWorkflowless || wfIds.size > 1,
-      movableSelectedIds: movable,
-    };
-  }, [displayTasks, selectedIds]);
+  const { isMixedWorkflowSelection, movableSelectedIds } = useMemo(
+    () => computeMixedWorkflowSelection(displayTasks, selectedIds),
+    [displayTasks, selectedIds],
+  );
 
   // Escape clears an active selection.
   useEffect(() => {

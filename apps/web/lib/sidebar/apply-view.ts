@@ -488,11 +488,42 @@ export function flattenVisibleTaskIds(
  * Order `ids` by their position in the rendered `visibleTaskIds` list. Used
  * before bulk moves so a backward range selection (anchor after target, which
  * leaves the selection Set in insertion rather than visible order) still lands
- * top-to-bottom at the destination. Ids absent from the visible list sort first.
+ * top-to-bottom at the destination. Ids absent from the visible list sort last
+ * so they never displace the visible-ordered ones.
  */
 export function sortIdsByVisibleOrder(ids: string[], visibleTaskIds: string[]): string[] {
   const order = new Map(visibleTaskIds.map((id, i) => [id, i]));
-  return [...ids].sort((a, b) => (order.get(a) ?? -1) - (order.get(b) ?? -1));
+  return [...ids].sort(
+    (a, b) =>
+      (order.get(a) ?? Number.POSITIVE_INFINITY) - (order.get(b) ?? Number.POSITIVE_INFINITY),
+  );
+}
+
+/**
+ * Decide whether a selection can be bulk-moved to a single step. A selected row
+ * with no workflow (e.g. the archived placeholder) can't move, so flag the
+ * selection as "mixed" (disables "Move to step") and report the movable subset.
+ */
+export function computeMixedWorkflowSelection(
+  displayTasks: Array<{ id: string; workflowId?: string }>,
+  selectedIds: Set<string>,
+): { isMixedWorkflowSelection: boolean; movableSelectedIds: Set<string> } {
+  const wfIds = new Set<string>();
+  const movable = new Set<string>();
+  let hasWorkflowless = false;
+  for (const t of displayTasks) {
+    if (!selectedIds.has(t.id)) continue;
+    if (t.workflowId) {
+      wfIds.add(t.workflowId);
+      movable.add(t.id);
+    } else {
+      hasWorkflowless = true;
+    }
+  }
+  return {
+    isMixedWorkflowSelection: hasWorkflowless || wfIds.size > 1,
+    movableSelectedIds: movable,
+  };
 }
 
 export function applyView(

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { TaskSwitcherItem } from "@/components/task/task-switcher";
 import {
+  computeMixedWorkflowSelection,
   flattenVisibleTaskIds,
   sortIdsByVisibleOrder,
   type GroupedSidebarList,
@@ -59,7 +60,34 @@ describe("sortIdsByVisibleOrder", () => {
     expect(sortIdsByVisibleOrder(["a", "c"], visible)).toEqual(["a", "c"]);
   });
 
-  it("sorts ids missing from the visible list to the front", () => {
-    expect(sortIdsByVisibleOrder(["c", "zzz", "a"], visible)).toEqual(["zzz", "a", "c"]);
+  it("sorts ids missing from the visible list to the back", () => {
+    expect(sortIdsByVisibleOrder(["c", "zzz", "a"], visible)).toEqual(["a", "c", "zzz"]);
+  });
+});
+
+describe("computeMixedWorkflowSelection", () => {
+  const tasks = [
+    { id: "a", workflowId: "wf1" },
+    { id: "b", workflowId: "wf1" },
+    { id: "c", workflowId: "wf2" },
+    { id: "arch" }, // archived placeholder — no workflow
+  ];
+
+  it("treats a single-workflow selection as not mixed and all movable", () => {
+    const r = computeMixedWorkflowSelection(tasks, new Set(["a", "b"]));
+    expect(r.isMixedWorkflowSelection).toBe(false);
+    expect(r.movableSelectedIds).toEqual(new Set(["a", "b"]));
+  });
+
+  it("flags a selection spanning two workflows as mixed", () => {
+    const r = computeMixedWorkflowSelection(tasks, new Set(["a", "c"]));
+    expect(r.isMixedWorkflowSelection).toBe(true);
+    expect(r.movableSelectedIds).toEqual(new Set(["a", "c"]));
+  });
+
+  it("flags a workflow-less selected row as mixed and excludes it from movable", () => {
+    const r = computeMixedWorkflowSelection(tasks, new Set(["a", "arch"]));
+    expect(r.isMixedWorkflowSelection).toBe(true);
+    expect(r.movableSelectedIds).toEqual(new Set(["a"]));
   });
 });

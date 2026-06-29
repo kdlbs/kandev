@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, type RefOb
 import { useTaskActions } from "@/hooks/use-task-actions";
 import { useAppStoreApi } from "@/components/state-provider";
 import type { KanbanState } from "@/lib/state/slices";
-import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
+import { sortIdsByCreatedDesc } from "@/lib/kanban/task-order";
 
 /** @internal Exported for reuse by the sidebar multi-select hook. */
 export function useTaskMultiSelectStore() {
@@ -90,12 +90,7 @@ export function useTaskMultiSelectStore() {
         for (const t of snap.tasks) taskById.set(t.id, t);
       }
       for (const t of state.kanban.tasks) if (!taskById.has(t.id)) taskById.set(t.id, t);
-      return [...ids].sort((a, b) => {
-        const ta = taskById.get(a);
-        const tb = taskById.get(b);
-        if (!ta || !tb) return 0;
-        return compareTasksByCreatedDesc(ta, tb);
-      });
+      return sortIdsByCreatedDesc(ids, taskById);
     },
     [store],
   );
