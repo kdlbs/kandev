@@ -103,6 +103,9 @@ For a system service:
 
 ```bash
 sudo kandev service stop --system
+kandev --debug 2>&1 | tee ~/kandev-debug.log
+# reproduce the issue
+# press Ctrl-C
 sudo kandev service start --system
 ```
 
