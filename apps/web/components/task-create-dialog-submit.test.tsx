@@ -156,9 +156,13 @@ describe("useTaskSubmitHandlers — handleCreateSubmit (CLI-mode parity)", () =>
   });
 
   it("creates the task with the user's prompt when cli_passthrough=true and prompt is provided", async () => {
+    const preserveLastUsed = vi.fn();
+    const onOpenChange = vi.fn();
     const deps = makeDeps({
       isPassthroughProfile: true,
       descriptionInputRef: makeRef("run npm test"),
+      onOpenChange,
+      preserveTaskCreateLastUsedOnClose: preserveLastUsed,
     });
     const { result } = renderHook(() => useTaskSubmitHandlers(deps));
 
@@ -173,6 +177,11 @@ describe("useTaskSubmitHandlers — handleCreateSubmit (CLI-mode parity)", () =>
     };
     expect(payloadArg.withAgent).toBe(true);
     expect(payloadArg.trimmedDescription).toBe("run npm test");
+    expect(preserveLastUsed).toHaveBeenCalledTimes(1);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(preserveLastUsed.mock.invocationCallOrder[0]).toBeLessThan(
+      onOpenChange.mock.invocationCallOrder[0]!,
+    );
   });
 
   it("still creates the task in ACP mode when prompt is provided", async () => {

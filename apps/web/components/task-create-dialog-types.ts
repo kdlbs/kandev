@@ -338,6 +338,7 @@ export type SubmitHandlersDeps = {
   ) => void;
   onCreateSession?: (data: { prompt: string; agentProfileId: string; executorId: string }) => void;
   onOpenChange: (open: boolean) => void;
+  preserveTaskCreateLastUsedOnClose?: () => void;
   taskId: string | null;
   parentTaskId?: string;
   descriptionInputRef: React.RefObject<TaskFormInputsHandle | null>;

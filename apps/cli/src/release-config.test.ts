@@ -245,7 +245,7 @@ describe("release desktop artifacts", () => {
     expect(workflow).toContain(
       'rustup toolchain install stable --profile minimal --target "${{ matrix.rust_target }}"',
     );
-    expect(workflow).toMatch(/Swatinem\/rust-cache@(?:v2|[0-9a-f]{40}\s+# v2)/);
+    expect(workflow).toMatch(/Swatinem\/rust-cache@[0-9a-f]{40}\s+# v2/);
 
     for (const platform of desktopPlatforms) {
       expect(workflow, `release.yml must include desktop platform ${platform}`).toContain(

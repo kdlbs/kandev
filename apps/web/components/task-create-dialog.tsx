@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 import { Dialog, DialogContent, DialogHeader, DialogFooter } from "@kandev/ui/dialog";
@@ -301,6 +301,7 @@ type SubmitWiringArgs = {
   repositoryLocalPath: string;
   isSessionMode: boolean;
   isEditMode: boolean;
+  preserveQueuedLastUsedOnClose: () => void;
 };
 
 function useSubmitHandlersWiring({
@@ -311,6 +312,7 @@ function useSubmitHandlersWiring({
   repositoryLocalPath,
   isSessionMode,
   isEditMode,
+  preserveQueuedLastUsedOnClose,
 }: SubmitWiringArgs) {
   const { workspaceId, workflowId, editingTask, onSuccess, onCreateSession, onOpenChange } = props;
   const { parentTaskId } = props;
@@ -337,6 +339,7 @@ function useSubmitHandlersWiring({
     onSuccess,
     onCreateSession,
     onOpenChange,
+    preserveTaskCreateLastUsedOnClose: preserveQueuedLastUsedOnClose,
     taskId,
     parentTaskId,
     descriptionInputRef: fs.descriptionInputRef,
@@ -375,7 +378,10 @@ function resolveSingleRowLocalPath(fs: DialogFormState, repositories: Repository
   return "";
 }
 
-export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
+export function useTaskCreateDialogSetup(
+  props: TaskCreateDialogProps,
+  options: { preserveQueuedLastUsedOnClose?: () => void } = {},
+) {
   const { open, mode = "create", workspaceId, workflowId, defaultStepId } = props;
   const { editingTask, initialValues } = props;
   const isSessionMode = mode === "session";
@@ -428,6 +434,7 @@ export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     repositoryLocalPath,
     isSessionMode,
     isEditMode,
+    preserveQueuedLastUsedOnClose: options.preserveQueuedLastUsedOnClose ?? (() => undefined),
   });
   const guardedHandleSubmit = useGuardedSubmit(
     submitHandlers.handleSubmit,
@@ -492,11 +499,20 @@ function useGuardedSubmit(
 const VOICE_SUBMIT_EVENT = { preventDefault: () => {} } as unknown as FormEvent;
 
 export function TaskCreateDialog(props: TaskCreateDialogProps) {
-  const setup = useTaskCreateDialogSetup(props);
+  const preserveQueuedLastUsedOnCloseRef = useRef(false);
+  const preserveQueuedLastUsedOnClose = useCallback(() => {
+    preserveQueuedLastUsedOnCloseRef.current = true;
+  }, []);
+  const setup = useTaskCreateDialogSetup(props, { preserveQueuedLastUsedOnClose });
   const { guardedHandleSubmit } = setup;
   const [popoverContainer, setPopoverContainer] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
-    if (!props.open) resetTaskCreateLastUsedSync({ clearQueued: true });
+    if (props.open) {
+      preserveQueuedLastUsedOnCloseRef.current = false;
+      return;
+    }
+    resetTaskCreateLastUsedSync({ clearQueued: !preserveQueuedLastUsedOnCloseRef.current });
+    preserveQueuedLastUsedOnCloseRef.current = false;
   }, [props.open]);
   // Voice auto-send invokes the same submit handler as the in-form Submit
   // button. Every existing validation gate (missing title/repo/branch/agent,

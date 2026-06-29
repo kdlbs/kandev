@@ -36,4 +36,14 @@ describe("syncTaskCreateLastUsed", () => {
 
     expect(readQueuedTaskCreateLastUsedState()).toEqual({});
   });
+
+  it("keeps queued fields when create-time close preserves pending backend writes", () => {
+    syncTaskCreateLastUsed({ branch: "feature" });
+
+    resetTaskCreateLastUsedSync();
+
+    expect(readQueuedTaskCreateLastUsedState()).toMatchObject({
+      branch: "feature",
+    });
+  });
 });

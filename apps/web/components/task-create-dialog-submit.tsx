@@ -46,6 +46,7 @@ export function useTaskSubmitHandlers({
   onSuccess,
   onCreateSession,
   onOpenChange,
+  preserveTaskCreateLastUsedOnClose,
   taskId,
   parentTaskId,
   descriptionInputRef,
@@ -343,6 +344,7 @@ export function useTaskSubmitHandlers({
         (opts.withAgent && isPassthroughProfile) || !!(opts.planMode && newSessionId);
       onSuccess?.(taskResponse, "create", { taskSessionId: newSessionId, willNavigate });
       clearDraft();
+      preserveTaskCreateLastUsedOnClose?.();
       onOpenChange(false);
       if (opts.planMode && newSessionId) {
         activatePlanMode({
@@ -368,6 +370,7 @@ export function useTaskSubmitHandlers({
       workspacePath,
       onSuccess,
       onOpenChange,
+      preserveTaskCreateLastUsedOnClose,
       clearDraft,
       setActiveDocument,
       setPlanMode,
@@ -559,6 +562,7 @@ export function useTaskSubmitHandlers({
       if (!taskResponse) return;
       onSuccess?.(taskResponse, "create");
       clearDraft();
+      preserveTaskCreateLastUsedOnClose?.();
       onOpenChange(false);
     } catch (error) {
       toast({
@@ -586,6 +590,7 @@ export function useTaskSubmitHandlers({
     createTaskWithFreshBranchRetry,
     onSuccess,
     onOpenChange,
+    preserveTaskCreateLastUsedOnClose,
     clearDraft,
     toast,
     descriptionInputRef,
