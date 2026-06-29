@@ -363,7 +363,9 @@ describe("PRStatusChip — aggregate checks", () => {
       },
       <PRStatusChip taskId="task-1" />,
     );
-    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("passed");
+    const chip = screen.getByTestId(CHIP_TESTID);
+    expect(chip.getAttribute(ATTR_STATUS)).toBe("passed");
+    expect(chip.getAttribute(ATTR_READY_TO_MERGE)).toBe("false");
   });
 
   it("keeps aggregate all-green checks in-progress when required reviews are unmet", () => {

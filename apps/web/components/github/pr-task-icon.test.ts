@@ -149,6 +149,23 @@ describe("isPRReadyToMerge", () => {
   );
 });
 
+describe("isPRReadyToMerge — aggregate counts", () => {
+  it("does not treat aggregate all-green counts as merge-ready without success state", () => {
+    expect(
+      isPRReadyToMerge(
+        makePR({
+          state: "open",
+          review_state: "approved",
+          checks_state: "",
+          checks_total: 3,
+          checks_passing: 3,
+          mergeable_state: "clean",
+        }),
+      ),
+    ).toBe(false);
+  });
+});
+
 describe("isPRReadyToMerge — required_reviews gate", () => {
   it("is false when required_reviews is unmet even if mergeable_state is clean", () => {
     // GitHub's stored mergeable_state can lag branch-protection state (e.g.

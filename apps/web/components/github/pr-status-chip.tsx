@@ -29,7 +29,7 @@ import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS, PRCIPopover } from "@/components/gi
 import { useTaskCIAutomationOptions } from "@/hooks/domains/github/use-task-ci-options";
 import { MultiPRCIPopover } from "@/components/github/multi-pr-ci-popover";
 import {
-  hasPRChecksPassed,
+  hasPRChecksPassedForDisplay,
   isPRAwaitingReview,
   isPRReadyToMerge,
   isPRWaitingOnBranchProtection,
@@ -63,7 +63,7 @@ function hasUnknownOrInProgressChecks(pr: TaskPR): boolean {
 
 function checkStatusFromCounts(pr: TaskPR): "passed" | "in_progress" | null {
   if (pr.checks_state !== "" || pr.checks_total <= 0) return null;
-  return hasPRChecksPassed(pr) ? "passed" : "in_progress";
+  return hasPRChecksPassedForDisplay(pr) ? "passed" : "in_progress";
 }
 
 function chipStatus(pr: TaskPR): ChipStatus {
@@ -91,7 +91,7 @@ function chipStatus(pr: TaskPR): ChipStatus {
   if (isPRAwaitingReview(pr) && !isPRReadyToMerge(pr)) return "in_progress";
   if (isPRWaitingOnBranchProtection(pr)) return "waiting";
   if (pr.mergeable_state === "blocked") return "blocked";
-  if (hasPRChecksPassed(pr)) return "passed";
+  if (hasPRChecksPassedForDisplay(pr)) return "passed";
   return "neutral";
 }
 

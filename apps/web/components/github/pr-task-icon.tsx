@@ -20,24 +20,29 @@ const STATUS_RANK: Record<string, number> = {
   [MUTED_FOREGROUND]: 0,
 };
 
-export function hasPRChecksPassed(pr: TaskPR): boolean {
+function hasExplicitPRChecksPassed(pr: TaskPR): boolean {
+  return pr.checks_state === "success";
+}
+
+export function hasPRChecksPassedForDisplay(pr: TaskPR): boolean {
   if (pr.checks_state === "success") return true;
   if (pr.checks_state !== "" || pr.checks_total <= 0) return false;
   return pr.checks_passing >= pr.checks_total;
 }
 
-function hasPRChecksInProgress(pr: TaskPR): boolean {
+export function hasPRChecksInProgressForDisplay(pr: TaskPR): boolean {
   if (pr.checks_state === "pending") return true;
   return pr.checks_state === "" && pr.checks_total > 0 && pr.checks_passing < pr.checks_total;
 }
 
 // Requires a positive CI signal so repos with no CI configured won't trigger
-// ready-to-merge on mergeable_state=clean alone. Some task PR rows have
-// aggregate counts before the coarse checks_state is populated, so all-green
-// aggregate counts also count as passed.
+// ready-to-merge on mergeable_state=clean alone. Display surfaces may fall
+// back to aggregate counts, but merge actions require GitHub's explicit
+// success rollup because stored counts can be preserved across lightweight
+// syncs that do not populate check details.
 export function isPRReadyToMerge(pr: TaskPR): boolean {
   if (pr.state !== "open") return false;
-  if (!hasPRChecksPassed(pr)) return false;
+  if (!hasExplicitPRChecksPassed(pr)) return false;
   if (pr.mergeable_state !== "clean") return false;
   // Guard against stale mergeable_state: enforce required_reviews to match GitHub's gate.
   if (pr.required_reviews != null && pr.review_count < pr.required_reviews) {
@@ -57,7 +62,7 @@ export function isPRReadyToMerge(pr: TaskPR): boolean {
 // that branch protection's required count is met.
 export function isPRAwaitingReview(pr: TaskPR): boolean {
   if (pr.state !== "open") return false;
-  if (!hasPRChecksPassed(pr)) return false;
+  if (!hasPRChecksPassedForDisplay(pr)) return false;
   // Shortfall is "awaiting review" even when no reviewer is currently requested.
   if (pr.required_reviews != null && pr.review_count < pr.required_reviews) {
     return true;
@@ -69,7 +74,7 @@ export function isPRAwaitingReview(pr: TaskPR): boolean {
 export function isPRWaitingOnBranchProtection(pr: TaskPR): boolean {
   if (pr.state !== "open") return false;
   if (pr.mergeable_state !== "blocked") return false;
-  if (!hasPRChecksPassed(pr)) return false;
+  if (!hasPRChecksPassedForDisplay(pr)) return false;
   if (pr.review_state === "changes_requested") return false;
   return !isPRAwaitingReview(pr);
 }
@@ -107,10 +112,10 @@ export function getPRStatusColor(pr: TaskPR): string {
   if (isPRWaitingOnBranchProtection(pr)) {
     return MUTED_FOREGROUND;
   }
-  if (pr.review_state === "approved" && hasPRChecksPassed(pr)) {
+  if (pr.review_state === "approved" && hasPRChecksPassedForDisplay(pr)) {
     return "text-green-500";
   }
-  if (hasPRChecksInProgress(pr) || pr.review_state === "pending") {
+  if (hasPRChecksInProgressForDisplay(pr) || pr.review_state === "pending") {
     return "text-yellow-500";
   }
   return MUTED_FOREGROUND;
