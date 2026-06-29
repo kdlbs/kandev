@@ -421,6 +421,9 @@ jobs:
         run: |
           cd apps/backend
           GOOS=linux GOARCH=amd64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-linux-amd64 ./cmd/agentctl
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-linux-arm64 ./cmd/agentctl
+          # darwin/arm64 is ad-hoc-signed by the Go linker at link time, which is
+          # what Apple Silicon (AMFI) requires; bundle validation enforces it.
           GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-darwin-arm64 ./cmd/agentctl
           GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-darwin-amd64 ./cmd/agentctl
 
@@ -432,6 +435,7 @@ jobs:
           cp apps/backend/bin/kandev${EXT} dist/kandev/bin/
           cp apps/backend/bin/agentctl${EXT} dist/kandev/bin/
           cp apps/backend/bin/agentctl-linux-amd64 dist/kandev/bin/
+          cp apps/backend/bin/agentctl-linux-arm64 dist/kandev/bin/
           cp apps/backend/bin/agentctl-darwin-arm64 dist/kandev/bin/
           cp apps/backend/bin/agentctl-darwin-amd64 dist/kandev/bin/
           cd dist

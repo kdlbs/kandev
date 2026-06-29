@@ -12,6 +12,7 @@ runtime bundle. The input bundle must contain:
   bin/kandev[.exe]
   bin/agentctl[.exe]
   bin/agentctl-linux-amd64
+  bin/agentctl-linux-arm64
   bin/agentctl-darwin-arm64
   bin/agentctl-darwin-amd64
 
@@ -31,6 +32,7 @@ VERIFY_SCRIPT="${ROOT_DIR}/scripts/release/verify-desktop-runtime.sh"
 PLATFORM=""
 REMOTE_AGENTCTL_HELPERS=(
   agentctl-linux-amd64
+  agentctl-linux-arm64
   agentctl-darwin-arm64
   agentctl-darwin-amd64
 )

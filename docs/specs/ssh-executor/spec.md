@@ -81,8 +81,8 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
 ### agentctl binary upload with content-hash cache
 
 - On `CreateInstance`, detect the remote platform via `uname -s` and `uname -m`, normalize it to a Go `GOOS/GOARCH` tuple, and resolve the matching agentctl helper via `AgentctlResolver`.
-- Supported remote platforms are `linux/amd64`, `darwin/arm64`, and `darwin/amd64`. Unsupported platforms fail with a clear error: `unsupported remote platform "<platform>" — SSH executor supports linux/amd64, darwin/arm64, and darwin/amd64`.
-- Runtime bundles include `agentctl-linux-amd64`, `agentctl-darwin-arm64`, and `agentctl-darwin-amd64`; development builds produce them with `make -C apps/backend build-agentctl-remote`.
+- Supported remote platforms are `linux/amd64`, `linux/arm64`, `darwin/arm64`, and `darwin/amd64`. Unsupported platforms fail with a clear error: `unsupported remote platform "<platform>" — SSH executor supports linux/{amd64,arm64} and darwin/{amd64,arm64}`.
+- Runtime bundles include `agentctl-linux-amd64`, `agentctl-linux-arm64`, `agentctl-darwin-arm64`, and `agentctl-darwin-amd64`; development builds produce them with `make -C apps/backend build-agentctl-remote`. The darwin helpers are ad-hoc-signed (Go signs darwin/arm64 at link time; `make` re-signs both via `codesign`/`rcodesign`); bundle validation rejects an unsigned `agentctl-darwin-arm64` because Apple Silicon refuses to run it.
 - Compute SHA256 locally; check `~/.kandev/bin/agentctl.sha256` on the remote via `sha256sum`. Upload only if missing or mismatched.
 - Upload via SFTP to `~/.kandev/bin/agentctl` (chmod 755), then write the sha256 sidecar.
 - Binary is shared across all tasks and sessions on the host.

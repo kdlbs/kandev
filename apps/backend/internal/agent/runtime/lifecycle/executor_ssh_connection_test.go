@@ -142,7 +142,7 @@ func TestNormalizeSSHRemotePlatform(t *testing.T) {
 		{"linux amd64", "Linux", "x86_64", "linux", "amd64", true},
 		{"darwin arm64", "Darwin", "arm64", "darwin", "arm64", true},
 		{"darwin amd64", "Darwin", "x86_64", "darwin", "amd64", true},
-		{"linux arm64 currently unsupported", "Linux", "aarch64", "linux", "arm64", false},
+		{"linux arm64", "Linux", "aarch64", "linux", "arm64", true},
 		{"freebsd amd64 unsupported", "FreeBSD", "x86_64", "", "amd64", false},
 	}
 	for _, tc := range cases {
@@ -162,6 +162,7 @@ func TestNormalizeSSHRemotePlatform(t *testing.T) {
 func TestRequireSupportedRemotePlatform(t *testing.T) {
 	for _, platform := range []SSHRemotePlatform{
 		{GOOS: "linux", GOARCH: "amd64", UnameOS: "Linux", UnameArch: "x86_64"},
+		{GOOS: "linux", GOARCH: "arm64", UnameOS: "Linux", UnameArch: "aarch64"},
 		{GOOS: "darwin", GOARCH: "arm64", UnameOS: "Darwin", UnameArch: "arm64"},
 		{GOOS: "darwin", GOARCH: "amd64", UnameOS: "Darwin", UnameArch: "x86_64"},
 	} {
@@ -169,12 +170,12 @@ func TestRequireSupportedRemotePlatform(t *testing.T) {
 			t.Errorf("%s should be supported, got %v", platform.String(), err)
 		}
 	}
-	unsupported := SSHRemotePlatform{GOOS: "linux", GOARCH: "arm64", UnameOS: "Linux", UnameArch: "aarch64"}
+	unsupported := SSHRemotePlatform{GOOS: "", GOARCH: "amd64", UnameOS: "FreeBSD", UnameArch: "x86_64"}
 	err := requireSupportedRemotePlatform(unsupported)
 	if err == nil {
-		t.Fatal("linux/arm64 should not be supported yet")
+		t.Fatal("freebsd/amd64 should not be supported")
 	}
-	for _, want := range []string{"linux/arm64", "linux/amd64", "darwin/arm64", "darwin/amd64"} {
+	for _, want := range []string{"unsupported remote platform", "linux/{amd64,arm64}", "darwin/{amd64,arm64}", "FreeBSD"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q missing %q", err.Error(), want)
 		}

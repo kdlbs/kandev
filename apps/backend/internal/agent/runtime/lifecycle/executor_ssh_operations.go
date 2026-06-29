@@ -204,6 +204,7 @@ func normalizeSSHRemoteArch(arch string) string {
 func requireSupportedRemotePlatform(platform SSHRemotePlatform) error {
 	switch platform.String() {
 	case sshRemoteGOOSLinux + "/" + sshRemoteGOARCHAMD64,
+		sshRemoteGOOSLinux + "/" + sshRemoteGOARCHARM64,
 		sshRemoteGOOSDarwin + "/" + sshRemoteGOARCHARM64,
 		sshRemoteGOOSDarwin + "/" + sshRemoteGOARCHAMD64:
 		return nil
@@ -213,7 +214,7 @@ func requireSupportedRemotePlatform(platform SSHRemotePlatform) error {
 			reported = fmt.Sprintf("%s/%s", platform.UnameOS, platform.UnameArch)
 		}
 		return fmt.Errorf(
-			"unsupported remote platform %q — SSH executor supports linux/amd64, darwin/arm64, and darwin/amd64",
+			"unsupported remote platform %q — SSH executor supports linux/{amd64,arm64} and darwin/{amd64,arm64}",
 			reported,
 		)
 	}
