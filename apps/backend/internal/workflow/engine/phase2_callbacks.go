@@ -44,6 +44,13 @@ type TargetTaskPrimaryAgentResolver interface {
 	PrimaryAgentProfileIDForTask(ctx context.Context, taskID string) (string, error)
 }
 
+// TargetTaskStepResolver resolves a task's current workflow step for cross-task
+// queue_run actions. The engine only has the triggering task's StepSpec, so
+// adapters that read task storage provide this for target task lookups.
+type TargetTaskStepResolver interface {
+	WorkflowStepIDForTask(ctx context.Context, taskID string) (string, error)
+}
+
 // QueueRunCallback executes the queue_run action by resolving Target/TaskID
 // then enqueuing a run via RunQueueAdapter.
 type QueueRunCallback struct {
@@ -62,7 +69,7 @@ func (c QueueRunCallback) Execute(ctx context.Context, in ActionInput) (ActionRe
 		return ActionResult{}, fmt.Errorf("queue_run action missing QueueRun config")
 	}
 	taskID := resolveTaskID(in.Action.QueueRun.TaskID, in.State.TaskID)
-	agentIDs, err := c.resolveTarget(ctx, in, taskID)
+	agentIDs, workflowStepID, err := c.resolveTarget(ctx, in, taskID)
 	if err != nil {
 		return ActionResult{}, err
 	}
@@ -70,7 +77,7 @@ func (c QueueRunCallback) Execute(ctx context.Context, in ActionInput) (ActionRe
 		req := QueueRunRequest{
 			AgentProfileID: agentID,
 			TaskID:         taskID,
-			WorkflowStepID: in.Step.ID,
+			WorkflowStepID: workflowStepID,
 			Reason:         queueRunReason(in),
 			IdempotencyKey: idempotencyKey(in, agentID, taskID),
 			Payload:        queueRunPayload(in, in.Action.QueueRun.Payload),
@@ -84,25 +91,52 @@ func (c QueueRunCallback) Execute(ctx context.Context, in ActionInput) (ActionRe
 
 func (c QueueRunCallback) resolveTarget(
 	ctx context.Context, in ActionInput, taskID string,
-) ([]string, error) {
+) ([]string, string, error) {
 	target := strings.TrimSpace(in.Action.QueueRun.Target)
 	switch {
 	case target == "" || target == TargetPrimary:
-		return c.resolvePrimary(ctx, in, taskID)
+		agentIDs, err := c.resolvePrimary(ctx, in, taskID)
+		return agentIDs, in.Step.ID, err
 	case strings.HasPrefix(target, TargetParticipant):
 		role := strings.TrimPrefix(target, TargetParticipant)
-		return c.resolveParticipantRole(ctx, in.Step.ID, taskID, role)
+		stepID, err := c.resolveTargetStepID(ctx, in, taskID, c.Participants)
+		if err != nil {
+			return nil, "", err
+		}
+		agentIDs, err := c.resolveParticipantRole(ctx, stepID, taskID, role)
+		return agentIDs, stepID, err
 	case strings.HasPrefix(target, TargetAgentProfile):
 		id := strings.TrimPrefix(target, TargetAgentProfile)
 		if id == "" {
-			return nil, fmt.Errorf("queue_run agent_profile_id target is empty")
+			return nil, "", fmt.Errorf("queue_run agent_profile_id target is empty")
 		}
-		return []string{id}, nil
+		return []string{id}, in.Step.ID, nil
 	case target == TargetWorkspaceCEO:
-		return c.resolveCEO(ctx, taskID)
+		agentIDs, err := c.resolveCEO(ctx, taskID)
+		return agentIDs, in.Step.ID, err
 	default:
-		return nil, fmt.Errorf("queue_run: unsupported target %q", target)
+		return nil, "", fmt.Errorf("queue_run: unsupported target %q", target)
 	}
+}
+
+func (c QueueRunCallback) resolveTargetStepID(
+	ctx context.Context, in ActionInput, taskID string, resolver any,
+) (string, error) {
+	if taskID == in.State.TaskID {
+		return in.Step.ID, nil
+	}
+	targetResolver, ok := resolver.(TargetTaskStepResolver)
+	if !ok {
+		return "", fmt.Errorf("%w: queue_run cross-task target requires TargetTaskStepResolver", ErrActionNotYetWired)
+	}
+	stepID, err := targetResolver.WorkflowStepIDForTask(ctx, taskID)
+	if err != nil {
+		return "", fmt.Errorf("queue_run resolve target task step: %w", err)
+	}
+	if stepID == "" {
+		return "", fmt.Errorf("queue_run: task %s has no workflow step", taskID)
+	}
+	return stepID, nil
 }
 
 func (c QueueRunCallback) resolvePrimary(

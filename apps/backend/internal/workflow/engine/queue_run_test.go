@@ -47,12 +47,28 @@ func (f fakePrimary) PrimaryAgentProfileIDForTask(_ context.Context, taskID stri
 
 // fakeParticipants returns a static slice for any step.
 type fakeParticipants struct {
-	list []ParticipantInfo
-	err  error
+	list       []ParticipantInfo
+	err        error
+	taskStepID string
+	stepID     *string
+	taskID     *string
 }
 
-func (f fakeParticipants) ListStepParticipants(_ context.Context, _, _ string) ([]ParticipantInfo, error) {
+func (f fakeParticipants) ListStepParticipants(_ context.Context, stepID, taskID string) ([]ParticipantInfo, error) {
+	if f.stepID != nil {
+		*f.stepID = stepID
+	}
+	if f.taskID != nil {
+		*f.taskID = taskID
+	}
 	return f.list, f.err
+}
+
+func (f fakeParticipants) WorkflowStepIDForTask(_ context.Context, taskID string) (string, error) {
+	if f.taskID != nil {
+		*f.taskID = taskID
+	}
+	return f.taskStepID, f.err
 }
 
 // fakeCEO returns a fixed agent profile id (or empty / err).
@@ -264,6 +280,46 @@ func TestQueueRunCallback_TargetParticipantRole(t *testing.T) {
 		if q.calls[i].TaskID != "task-1" {
 			t.Fatalf("call %d task_id = %q, want task-1 (resolved from blank)", i, q.calls[i].TaskID)
 		}
+	}
+}
+
+func TestQueueRunCallback_ParticipantRoleUsesResolvedTargetStep(t *testing.T) {
+	q := &fakeRunQueue{}
+	var listedStepID string
+	var listedTaskID string
+	parts := fakeParticipants{
+		list: []ParticipantInfo{
+			{ID: "p-target", Role: "reviewer", AgentProfileID: "rev-target"},
+		},
+		taskStepID: "target-step",
+		stepID:     &listedStepID,
+		taskID:     &listedTaskID,
+	}
+	cb := QueueRunCallback{Adapter: q, Participants: parts}
+	in := newQueueRunInput("participant_role:reviewer", "target-task")
+	in.OperationID = "task_comment:c-1"
+
+	if _, err := cb.Execute(context.Background(), in); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(q.calls) != 1 {
+		t.Fatalf("expected 1 queue run call, got %d", len(q.calls))
+	}
+	if listedStepID != "target-step" {
+		t.Fatalf("participants listed for step %q, want target-step", listedStepID)
+	}
+	if listedTaskID != "target-task" {
+		t.Fatalf("participants listed for task %q, want target-task", listedTaskID)
+	}
+	got := q.calls[0]
+	if got.WorkflowStepID != "target-step" {
+		t.Fatalf("workflow_step_id = %q, want target-step", got.WorkflowStepID)
+	}
+	if got.TaskID != "target-task" {
+		t.Fatalf("task_id = %q, want target-task", got.TaskID)
+	}
+	if got.AgentProfileID != "rev-target" {
+		t.Fatalf("agent_profile_id = %q, want rev-target", got.AgentProfileID)
 	}
 }
 

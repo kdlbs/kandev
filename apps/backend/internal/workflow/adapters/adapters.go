@@ -66,6 +66,11 @@ func (a *ParticipantAdapter) ListStepParticipants(
 	return out, nil
 }
 
+// WorkflowStepIDForTask satisfies engine.TargetTaskStepResolver.
+func (a *ParticipantAdapter) WorkflowStepIDForTask(ctx context.Context, taskID string) (string, error) {
+	return a.Repo.GetTaskWorkflowStepID(ctx, taskID)
+}
+
 // DecisionAdapter implements engine.DecisionStore.
 type DecisionAdapter struct {
 	Repo WorkflowRepo
@@ -147,17 +152,24 @@ func (a *PrimaryAgentAdapter) PrimaryAgentProfileID(
 func (a *PrimaryAgentAdapter) PrimaryAgentProfileIDForTask(
 	ctx context.Context, taskID string,
 ) (string, error) {
-	stepID, err := a.Repo.GetTaskWorkflowStepID(ctx, taskID)
+	stepID, err := a.WorkflowStepIDForTask(ctx, taskID)
 	if err != nil {
 		return "", fmt.Errorf("resolve workflow step for task %s: %w", taskID, err)
 	}
 	return a.PrimaryAgentProfileID(ctx, stepID, taskID)
 }
 
+// WorkflowStepIDForTask satisfies engine.TargetTaskStepResolver.
+func (a *PrimaryAgentAdapter) WorkflowStepIDForTask(ctx context.Context, taskID string) (string, error) {
+	return a.Repo.GetTaskWorkflowStepID(ctx, taskID)
+}
+
 // Compile-time interface assertions.
 var (
 	_ engine.ParticipantStore               = (*ParticipantAdapter)(nil)
+	_ engine.TargetTaskStepResolver         = (*ParticipantAdapter)(nil)
 	_ engine.DecisionStore                  = (*DecisionAdapter)(nil)
 	_ engine.PrimaryAgentResolver           = (*PrimaryAgentAdapter)(nil)
 	_ engine.TargetTaskPrimaryAgentResolver = (*PrimaryAgentAdapter)(nil)
+	_ engine.TargetTaskStepResolver         = (*PrimaryAgentAdapter)(nil)
 )
