@@ -862,11 +862,22 @@ func (h *Handlers) inheritFromTask(ctx context.Context, taskID string, agentProf
 	}
 
 	agentProfileExplicit := *agentProfileID != ""
+	executorProfileExplicit := *executorProfileID != ""
 	executorID := h.inheritFromTaskMetadata(ctx, taskID, agentProfileID, executorProfileID, "")
 	session, err := h.taskSvc.GetPrimarySession(ctx, taskID)
 	if err == nil && session != nil {
-		if !agentProfileExplicit && isWorkflowSwitchedSession(session) && session.AgentProfileID != "" {
+		routedSession := !agentProfileExplicit && isWorkflowSwitchedSession(session) && session.AgentProfileID != ""
+		if routedSession {
 			*agentProfileID = session.AgentProfileID
+			if !executorProfileExplicit {
+				if session.ExecutorProfileID != "" {
+					*executorProfileID = session.ExecutorProfileID
+					executorID = ""
+				} else if session.ExecutorID != "" {
+					*executorProfileID = ""
+					executorID = session.ExecutorID
+				}
+			}
 		}
 		sessionExecutorID := inheritFromSession(session, agentProfileID, executorProfileID, executorID == "")
 		if executorID == "" {

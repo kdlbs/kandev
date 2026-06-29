@@ -179,7 +179,7 @@ func TestHandleTaskMovedNoSession(t *testing.T) {
 
 		stepGetter := newMockStepGetter()
 		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
-			ID: "step2", WorkflowID: "wf1", Name: "Auto Start Step", Position: 1,
+			ID: "step2", WorkflowID: "wf1", Name: "Auto Start Step", Position: 1, AgentProfileID: "profile-step",
 			Events: wfmodels.StepEvents{
 				OnEnter: []wfmodels.OnEnterAction{
 					{Type: wfmodels.OnEnterAutoStartAgent},
@@ -219,6 +219,21 @@ func TestHandleTaskMovedNoSession(t *testing.T) {
 		case <-time.After(2 * time.Second):
 			t.Fatal("timed out waiting for auto-start launch")
 		}
+
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			sessions, err := repo.ListTaskSessions(ctx, "t1")
+			if err != nil {
+				t.Fatalf("ListTaskSessions: %v", err)
+			}
+			for _, session := range sessions {
+				if session.Metadata[models.SessionMetaKeyCreatedBy] == models.SessionCreatedByWorkflowSwitch {
+					return
+				}
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatal("timed out waiting for workflow-routed session metadata")
 	})
 }
 

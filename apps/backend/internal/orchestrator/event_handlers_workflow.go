@@ -379,11 +379,15 @@ func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.Tas
 	// Async: event bus delivers synchronously; blocking here → HTTP timeout (see handleTaskMovedWithSession doc).
 	go func() {
 		asyncCtx := context.WithoutCancel(ctx)
-		_, err := s.StartTask(asyncCtx, task.ID, agentProfileID, executorID, executorProfileID, "", task.Description, data.ToStepID, planMode, true, nil)
+		execution, err := s.StartTask(asyncCtx, task.ID, agentProfileID, executorID, executorProfileID, "", task.Description, data.ToStepID, planMode, true, nil)
 		if err != nil {
 			s.logger.Error("task.moved: failed to auto-start task",
 				zap.String("task_id", data.TaskID),
 				zap.Error(err))
+			return
+		}
+		if agentProfileID != "" && execution != nil && execution.SessionID != "" {
+			s.tagSessionAsWorkflowSwitched(asyncCtx, execution.SessionID)
 		}
 	}()
 }

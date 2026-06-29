@@ -674,16 +674,18 @@ func TestHandleCreateTask_WorkflowSwitchedSessionProfileWinsOverStaleMetadata(t 
 		WorkflowID:  workflows[0].ID,
 		Title:       "Workflow-routed task",
 		Metadata: map[string]interface{}{
-			models.MetaKeyAgentProfileID: "stale-task-profile",
+			models.MetaKeyAgentProfileID:    "stale-task-profile",
+			models.MetaKeyExecutorProfileID: "stale-executor-profile",
 		},
 	})
 	require.NoError(t, err)
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID:             "workflow-switched-session",
-		TaskID:         source.ID,
-		AgentProfileID: "effective-step-profile",
-		State:          models.TaskSessionStateWaitingForInput,
-		IsPrimary:      true,
+		ID:                "workflow-switched-session",
+		TaskID:            source.ID,
+		AgentProfileID:    "effective-step-profile",
+		ExecutorProfileID: "effective-executor-profile",
+		State:             models.TaskSessionStateWaitingForInput,
+		IsPrimary:         true,
 		Metadata: map[string]interface{}{
 			models.SessionMetaKeyCreatedBy: models.SessionCreatedByWorkflowSwitch,
 		},
@@ -716,6 +718,7 @@ func TestHandleCreateTask_WorkflowSwitchedSessionProfileWinsOverStaleMetadata(t 
 	require.NoError(t, err)
 	require.NotNil(t, task.Metadata)
 	assert.Equal(t, "effective-step-profile", task.Metadata[models.MetaKeyAgentProfileID])
+	assert.Equal(t, "effective-executor-profile", task.Metadata[models.MetaKeyExecutorProfileID])
 }
 
 func TestHandleCreateTask_InheritsDeferredParentTaskMetadata(t *testing.T) {
