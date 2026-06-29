@@ -7,6 +7,14 @@ import (
 	"go.uber.org/zap"
 )
 
+// Machine-readable deletion reasons attached to the task.deleted event so the
+// frontend can explain why a focused auto-deleted task vanished. These mirror
+// the GitHub cleanup reasons and the frontend TaskDeletionReason union.
+const (
+	reasonMRMergedOrClosed = "pr_merged_or_closed"
+	reasonIssueClosed      = "issue_closed"
+)
+
 // CleanupAllReviewTasks deletes auto-created review tasks for merged/closed MRs,
 // respecting each watch's cleanup policy. Returns the count of tasks deleted.
 func (s *Service) CleanupAllReviewTasks(ctx context.Context) (int, error) {
@@ -110,7 +118,7 @@ func (s *Service) deleteReviewMRTaskIfTerminal(ctx context.Context, t *ReviewMRT
 			return false
 		}
 	}
-	if err := deleteTaskWithReason(ctx, deleter, t.TaskID, "pr_merged_or_closed"); err != nil {
+	if err := deleteTaskWithReason(ctx, deleter, t.TaskID, reasonMRMergedOrClosed); err != nil {
 		s.logger.Warn("delete review task during cleanup",
 			zap.String("task_id", t.TaskID), zap.Error(err))
 		return false
@@ -201,7 +209,7 @@ func (s *Service) deleteIssueWatchTaskIfTerminal(ctx context.Context, t *IssueWa
 			return false
 		}
 	}
-	if err := deleteTaskWithReason(ctx, deleter, t.TaskID, "issue_closed"); err != nil {
+	if err := deleteTaskWithReason(ctx, deleter, t.TaskID, reasonIssueClosed); err != nil {
 		s.logger.Warn("delete issue task during cleanup",
 			zap.String("task_id", t.TaskID), zap.Error(err))
 		return false
