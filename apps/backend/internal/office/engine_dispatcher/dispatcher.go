@@ -26,9 +26,10 @@ import (
 // one.
 var ErrNoSession = officeservice.ErrEngineNoSession
 
-// SessionResolver looks up a task's active session.
+// SessionResolver looks up a task's session state for workflow triggers.
 type SessionResolver interface {
 	GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*taskmodels.TaskSession, error)
+	GetTaskSessionByTaskID(ctx context.Context, taskID string) (*taskmodels.TaskSession, error)
 }
 
 // EngineHandle is the engine surface the dispatcher needs. Defined as a
@@ -58,9 +59,9 @@ func New(eng EngineHandle, sessions SessionResolver, log *logger.Logger) *Dispat
 
 // HandleTrigger satisfies office/service.WorkflowEngineDispatcher.
 //
-// Resolves the task's active session — returning ErrNoSession if none
-// exists — then invokes engine.HandleTrigger. Errors from the engine
-// (e.g. queue_run resolver failures) bubble up so the office event
+// Resolves the task's active session — or, for comment wakes, the latest
+// terminal session — then invokes engine.HandleTrigger. Errors from the
+// engine (e.g. queue_run resolver failures) bubble up so the office event
 // subscriber can log them.
 func (d *Dispatcher) HandleTrigger(
 	ctx context.Context,
@@ -72,10 +73,8 @@ func (d *Dispatcher) HandleTrigger(
 	if taskID == "" {
 		return fmt.Errorf("task_id is required")
 	}
-	session, err := d.sessions.GetActiveTaskSessionByTaskID(ctx, taskID)
-	if err != nil || session == nil {
-		// No active session — engine cannot LoadState. Caller falls
-		// back to the legacy QueueRun path.
+	session := d.resolveSession(ctx, taskID, trigger)
+	if session == nil {
 		d.logger.Debug("engine trigger skipped: no active session",
 			zap.String("task_id", taskID),
 			zap.String("trigger", string(trigger)))
@@ -90,6 +89,23 @@ func (d *Dispatcher) HandleTrigger(
 	}
 	if _, err := d.engine.HandleTrigger(ctx, in); err != nil {
 		return fmt.Errorf("engine handle %s: %w", trigger, err)
+	}
+	return nil
+}
+
+func (d *Dispatcher) resolveSession(
+	ctx context.Context, taskID string, trigger engine.Trigger,
+) *taskmodels.TaskSession {
+	session, err := d.sessions.GetActiveTaskSessionByTaskID(ctx, taskID)
+	if err == nil && session != nil {
+		return session
+	}
+	if trigger != engine.TriggerOnComment {
+		return nil
+	}
+	session, err = d.sessions.GetTaskSessionByTaskID(ctx, taskID)
+	if err == nil && session != nil {
+		return session
 	}
 	return nil
 }
