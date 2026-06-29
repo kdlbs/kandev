@@ -1,0 +1,26 @@
+# Temporary advisory ignores for cargo-audit.
+# Each entry must have a tracking note. Remove the entry once the fix lands.
+
+[advisories]
+ignore = [
+    # tauri 2.8.4 — IPC origin confusion on Windows (CVE-2026-42184, CVSS 8.8).
+    # Remote page in WebView can invoke local-only Tauri commands (incl. fs access).
+    # Fix: upgrade tauri to >= 2.11.1.
+    "GHSA-7gmj-67g7-phm9",
+
+    # time 0.3.41 — stack exhaustion via malformed RFC 2822 input (CVE-2026-25727, CVSS 6.9).
+    # Limited attack surface in a local desktop app; no known reachable path via Tauri shell.
+    # Fix: upgrade time to >= 0.3.47.
+    "RUSTSEC-2026-0009",
+
+    # rand 0.7.3 — memory unsoundness; UB only when all three hold simultaneously:
+    # `log` feature enabled + custom logger installed + rand::rng() called.
+    # That combination is not present in the kandev desktop shell.
+    # Fix: upgrade rand to >= 0.8.6 (semver-breaking; requires coordinating dependents).
+    "RUSTSEC-2026-0097",
+
+    # glib 0.18.5 — unsound VariantStrIter::impl_get, Linux-only via webkit2gtk chain.
+    # No known exploit in the wild; will resolve when Tauri migrates to webkit2gtk-4.1
+    # which pulls glib >= 0.20.0.
+    "RUSTSEC-2024-0429",
+]
