@@ -48,12 +48,8 @@ type RunQueueAdapter interface {
 //   - IdempotencyKey: when non-empty, the run is suppressed if a row
 //     with the same key landed in the last 24 hours.
 //   - Payload: structured JSON-encoded payload. Must be a non-nil map
-//     when set; serialised before insert.
-//
-// Phase 3 keeps the agent_profile_id resolution shape compatible with
-// today's office.QueueRun by carrying agent_profile_id inside Payload
-// (key "agent_profile_id"). Once the engine emits queue_run with a
-// real AgentProfileID, a separate resolver maps profile→instance.
+//     when set; serialised before insert. QueueRun adds the resolved
+//     task / workflow / agent envelope before persisting.
 type QueueRunRequest struct {
 	AgentProfileID string
 	TaskID         string
@@ -136,8 +132,8 @@ func New(
 func (s *Service) SubscribeSignal() <-chan struct{} { return s.signalCh }
 
 // QueueRun implements RunQueueAdapter. The flow is:
-//  1. Resolve agent_profile_id (today: from payload; future: from agent
-//     profile + task).
+//  1. Resolve agent_profile_id (from the request field, payload fallback,
+//     or a wired resolver).
 //  2. Idempotency check (24h) on req.IdempotencyKey if set.
 //  3. Coalescing (5s window for same agent + reason).
 //  4. Insert into runs table.
@@ -168,7 +164,8 @@ func (s *Service) QueueRun(ctx context.Context, req QueueRunRequest) error {
 		}
 	}
 
-	payload, err := encodePayload(req.Payload)
+	payloadMap := runPayload(req, agentInstanceID)
+	payload, err := encodePayload(payloadMap)
 	if err != nil {
 		return fmt.Errorf("encode payload: %w", err)
 	}
@@ -229,14 +226,15 @@ func (s *Service) insertRun(
 }
 
 // resolveAgentInstance picks the agent_profile_id for a request.
-// Phase 3 keeps the legacy "payload carries agent_profile_id" path:
-// office wakers stuff it in the payload before calling the runs
-// service. The engine's queue_run path (Phase 3.2) will pass an
-// agent profile id and rely on the resolver to look up the right
-// instance — until then the resolver is optional.
+// Engine queue_run sends AgentProfileID as a typed field. Legacy
+// office QueueRun callers still carry agent_profile_id inside Payload,
+// so the resolver-less path accepts both shapes.
 func (s *Service) resolveAgentInstance(ctx context.Context, req QueueRunRequest) (string, error) {
 	if s.resolver != nil {
 		return s.resolver.ResolveAgentInstance(ctx, req)
+	}
+	if req.AgentProfileID != "" {
+		return req.AgentProfileID, nil
 	}
 	if req.Payload != nil {
 		if v, ok := req.Payload["agent_profile_id"].(string); ok && v != "" {
@@ -244,6 +242,23 @@ func (s *Service) resolveAgentInstance(ctx context.Context, req QueueRunRequest)
 		}
 	}
 	return "", nil
+}
+
+func runPayload(req QueueRunRequest, agentInstanceID string) map[string]any {
+	out := make(map[string]any, len(req.Payload)+3)
+	for k, v := range req.Payload {
+		out[k] = v
+	}
+	if req.TaskID != "" {
+		out["task_id"] = req.TaskID
+	}
+	if req.WorkflowStepID != "" {
+		out["workflow_step_id"] = req.WorkflowStepID
+	}
+	if agentInstanceID != "" {
+		out["agent_profile_id"] = agentInstanceID
+	}
+	return out
 }
 
 // publishRunQueued emits the OfficeRunQueued bus event so the WS

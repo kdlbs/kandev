@@ -61,7 +61,7 @@ func (c QueueRunCallback) Execute(ctx context.Context, in ActionInput) (ActionRe
 			WorkflowStepID: in.Step.ID,
 			Reason:         queueRunReason(in),
 			IdempotencyKey: idempotencyKey(in, agentID, taskID),
-			Payload:        in.Action.QueueRun.Payload,
+			Payload:        queueRunPayload(in, in.Action.QueueRun.Payload),
 		}
 		if err := c.Adapter.QueueRun(ctx, req); err != nil {
 			return ActionResult{}, fmt.Errorf("queue_run for agent %s: %w", agentID, err)
@@ -169,7 +169,42 @@ func idempotencyKey(in ActionInput, agentID, taskID string) string {
 	if in.OperationID == "" {
 		return ""
 	}
+	if in.Trigger == TriggerOnComment && strings.HasPrefix(in.OperationID, "task_comment:") {
+		return in.OperationID
+	}
 	return fmt.Sprintf("%s:%s:%s:%s", in.OperationID, in.Step.ID, taskID, agentID)
+}
+
+func queueRunPayload(in ActionInput, actionPayload map[string]any) map[string]any {
+	out := make(map[string]any, len(actionPayload)+2)
+	for k, v := range actionPayload {
+		out[k] = v
+	}
+	comment, ok := commentPayload(in.Payload)
+	if ok {
+		if comment.CommentID != "" {
+			out["comment_id"] = comment.CommentID
+		}
+		if comment.AuthorID != "" {
+			out["author_id"] = comment.AuthorID
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func commentPayload(payload any) (OnCommentPayload, bool) {
+	switch p := payload.(type) {
+	case OnCommentPayload:
+		return p, true
+	case *OnCommentPayload:
+		if p != nil {
+			return *p, true
+		}
+	}
+	return OnCommentPayload{}, false
 }
 
 // ClearDecisionsCallback executes the clear_decisions action by deleting all
@@ -227,7 +262,7 @@ func (c QueueRunForEachParticipantCallback) Execute(ctx context.Context, in Acti
 			WorkflowStepID: in.Step.ID,
 			Reason:         reason,
 			IdempotencyKey: idempotencyKey(in, p.AgentProfileID, taskID),
-			Payload:        cfg.Payload,
+			Payload:        queueRunPayload(in, cfg.Payload),
 		}
 		if err := c.Adapter.QueueRun(ctx, req); err != nil {
 			return ActionResult{}, fmt.Errorf("queue_run for participant %s: %w", p.ID, err)

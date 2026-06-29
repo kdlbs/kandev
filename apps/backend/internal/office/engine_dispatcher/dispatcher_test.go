@@ -2,11 +2,18 @@ package engine_dispatcher
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 
+	"github.com/jmoiron/sqlx"
+	_ "github.com/mattn/go-sqlite3"
+
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events/bus"
+	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 )
@@ -37,13 +44,19 @@ func (f *fakeEngine) HandleTrigger(_ context.Context, in engine.HandleInput) (en
 	return engine.HandleResult{}, f.err
 }
 
-type fakeRunQueue struct {
-	calls []engine.QueueRunRequest
+type realRunsAdapter struct {
+	svc *runsservice.Service
 }
 
-func (f *fakeRunQueue) QueueRun(_ context.Context, req engine.QueueRunRequest) error {
-	f.calls = append(f.calls, req)
-	return nil
+func (a realRunsAdapter) QueueRun(ctx context.Context, req engine.QueueRunRequest) error {
+	return a.svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		AgentProfileID: req.AgentProfileID,
+		TaskID:         req.TaskID,
+		WorkflowStepID: req.WorkflowStepID,
+		Reason:         req.Reason,
+		IdempotencyKey: req.IdempotencyKey,
+		Payload:        req.Payload,
+	})
 }
 
 type stubPrimary struct {
@@ -108,6 +121,24 @@ func (commentWorkflowStore) MarkOperationApplied(context.Context, string) error 
 	return nil
 }
 
+func newDispatcherRunsService(t *testing.T) (*runsservice.Service, *runssqlite.Repository) {
+	t.Helper()
+	db, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	officeRepo, err := officesqlite.NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init office repo: %v", err)
+	}
+	log := logger.Default()
+	runsRepo := officeRepo.RunsRepository()
+	svc := runsservice.New(runsRepo, bus.NewMemoryEventBus(log), log, nil)
+	return svc, runsRepo
+}
+
 func TestDispatcher_ResolvesSessionAndForwards(t *testing.T) {
 	eng := &fakeEngine{}
 	sessions := &fakeSessions{activeSession: &taskmodels.TaskSession{ID: "sess-1"}}
@@ -156,10 +187,10 @@ func TestDispatcher_UsesLatestSessionForCommentWhenActiveSessionMissing(t *testi
 }
 
 func TestDispatcher_CompletedSessionCommentQueuesRun(t *testing.T) {
-	queue := &fakeRunQueue{}
+	runsSvc, runsRepo := newDispatcherRunsService(t)
 	eng := engine.New(commentWorkflowStore{}, engine.MapRegistry{
 		engine.ActionQueueRun: engine.QueueRunCallback{
-			Adapter: queue,
+			Adapter: realRunsAdapter{svc: runsSvc},
 			Primary: stubPrimary{id: "agent-primary"},
 		},
 	})
@@ -172,25 +203,46 @@ func TestDispatcher_CompletedSessionCommentQueuesRun(t *testing.T) {
 	d := New(eng, sessions, logger.Default())
 
 	err := d.HandleTrigger(context.Background(), "task-1", engine.TriggerOnComment,
-		engine.OnCommentPayload{CommentID: "c-1"}, "task_comment:c-1")
+		engine.OnCommentPayload{CommentID: "c-1", AuthorID: "user-1"}, "task_comment:c-1")
 	if err != nil {
 		t.Fatalf("handle: %v", err)
 	}
-	if len(queue.calls) != 1 {
-		t.Fatalf("queued runs = %d, want 1", len(queue.calls))
+
+	statuses, err := runsRepo.GetRunsByCommentIDs(context.Background(), []string{"c-1"})
+	if err != nil {
+		t.Fatalf("get comment runs: %v", err)
 	}
-	got := queue.calls[0]
+	status, ok := statuses["c-1"]
+	if !ok {
+		t.Fatalf("missing comment run for c-1: %+v", statuses)
+	}
+	got, err := runsRepo.GetRunByID(context.Background(), status.RunID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
 	if got.AgentProfileID != "agent-primary" {
 		t.Errorf("agent_profile_id = %q, want agent-primary", got.AgentProfileID)
-	}
-	if got.TaskID != "task-1" {
-		t.Errorf("task_id = %q, want task-1", got.TaskID)
 	}
 	if got.Reason != "task_comment" {
 		t.Errorf("reason = %q, want task_comment", got.Reason)
 	}
-	if !strings.HasPrefix(got.IdempotencyKey, "task_comment:c-1") {
-		t.Errorf("idempotency_key = %q, want task_comment:c-1 prefix", got.IdempotencyKey)
+	if got.IdempotencyKey == nil || *got.IdempotencyKey != "task_comment:c-1" {
+		t.Errorf("idempotency_key = %v, want task_comment:c-1", got.IdempotencyKey)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(got.Payload), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	for k, want := range map[string]string{
+		"agent_profile_id": "agent-primary",
+		"task_id":          "task-1",
+		"workflow_step_id": "work",
+		"comment_id":       "c-1",
+		"author_id":        "user-1",
+	} {
+		if got, _ := payload[k].(string); got != want {
+			t.Errorf("payload[%s] = %q, want %q (payload=%v)", k, got, want, payload)
+		}
 	}
 }
 

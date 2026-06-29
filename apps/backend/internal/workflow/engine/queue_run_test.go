@@ -95,6 +95,35 @@ func TestQueueRunCallback_TargetPrimary(t *testing.T) {
 	}
 }
 
+func TestQueueRunCallback_OnCommentUsesCommentPayloadAndStableKey(t *testing.T) {
+	q := &fakeRunQueue{}
+	cb := QueueRunCallback{Adapter: q, Primary: fakePrimary{id: "agent-primary"}}
+	in := newQueueRunInput("primary", "this")
+	in.OperationID = "task_comment:c-1"
+	in.Payload = OnCommentPayload{
+		CommentID: "c-1",
+		AuthorID:  "user-1",
+	}
+	in.Action.QueueRun.Payload = nil
+
+	if _, err := cb.Execute(context.Background(), in); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(q.calls) != 1 {
+		t.Fatalf("expected 1 queue run call, got %d", len(q.calls))
+	}
+	got := q.calls[0]
+	if got.IdempotencyKey != "task_comment:c-1" {
+		t.Fatalf("idempotency_key = %q, want task_comment:c-1", got.IdempotencyKey)
+	}
+	if got.Payload["comment_id"] != "c-1" {
+		t.Fatalf("payload comment_id = %v, want c-1 (payload=%#v)", got.Payload["comment_id"], got.Payload)
+	}
+	if got.Payload["author_id"] != "user-1" {
+		t.Fatalf("payload author_id = %v, want user-1 (payload=%#v)", got.Payload["author_id"], got.Payload)
+	}
+}
+
 func TestQueueRunCallback_TargetParticipantRole(t *testing.T) {
 	q := &fakeRunQueue{}
 	parts := fakeParticipants{list: []ParticipantInfo{

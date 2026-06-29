@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
@@ -21,6 +23,14 @@ import (
 // office repo is created here, not the runs repo directly, so the
 // schema migrations run.
 func newTestService(t *testing.T) (*runsservice.Service, bus.EventBus) {
+	t.Helper()
+	svc, eb, _ := newTestServiceWithRepo(t)
+	return svc, eb
+}
+
+func newTestServiceWithRepo(t *testing.T) (
+	*runsservice.Service, bus.EventBus, *runssqlite.Repository,
+) {
 	t.Helper()
 	db, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -37,7 +47,7 @@ func newTestService(t *testing.T) (*runsservice.Service, bus.EventBus) {
 	eb := bus.NewMemoryEventBus(log)
 
 	svc := runsservice.New(officeRepo.RunsRepository(), eb, log, nil)
-	return svc, eb
+	return svc, eb, officeRepo.RunsRepository()
 }
 
 // agentInPayload is the shape office.QueueRun packs into the runs
@@ -59,6 +69,60 @@ func TestQueueRun_InsertsRow(t *testing.T) {
 		Payload: agentInPayload("a1"),
 	}); err != nil {
 		t.Fatalf("queue: %v", err)
+	}
+}
+
+func TestQueueRun_UsesRequestAgentProfileIDAndAddsEnvelopePayload(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		AgentProfileID: "agent-primary",
+		TaskID:         "task-1",
+		WorkflowStepID: "work",
+		Reason:         "task_comment",
+		IdempotencyKey: "task_comment:comment-1",
+		Payload: map[string]any{
+			"comment_id": "comment-1",
+			"author_id":  "user-1",
+		},
+	}); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+
+	statuses, err := repo.GetRunsByCommentIDs(ctx, []string{"comment-1"})
+	if err != nil {
+		t.Fatalf("get comment runs: %v", err)
+	}
+	status, ok := statuses["comment-1"]
+	if !ok {
+		t.Fatalf("missing run status for comment-1: %+v", statuses)
+	}
+	run, err := repo.GetRunByID(ctx, status.RunID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if run.AgentProfileID != "agent-primary" {
+		t.Fatalf("agent_profile_id = %q, want agent-primary", run.AgentProfileID)
+	}
+	if run.IdempotencyKey == nil || *run.IdempotencyKey != "task_comment:comment-1" {
+		t.Fatalf("idempotency_key = %v, want task_comment:comment-1", run.IdempotencyKey)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(run.Payload), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	for k, want := range map[string]string{
+		"agent_profile_id": "agent-primary",
+		"task_id":          "task-1",
+		"workflow_step_id": "work",
+		"comment_id":       "comment-1",
+		"author_id":        "user-1",
+	} {
+		if got, _ := payload[k].(string); got != want {
+			t.Fatalf("payload[%s] = %q, want %q (payload=%v)", k, got, want, payload)
+		}
 	}
 }
 
