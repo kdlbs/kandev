@@ -150,13 +150,20 @@ function useSessionTabActions(
   return { handleSetPrimary, handleStop, handleResume, handleDelete, handleCloseOthers };
 }
 
-function useSessionTabUserActivationIntent(sessionId: string | undefined, isActive: boolean) {
+function useSessionTabUserActivationIntent(
+  sessionId: string | undefined,
+  activeSessionId: string | null,
+  isActive: boolean,
+) {
   const markUserActivationIntent = useCallback(
     (target: EventTarget | null) => {
-      if (!shouldMarkSessionTabUserActivationIntent({ sessionId, isActive, target })) return;
+      if (
+        !shouldMarkSessionTabUserActivationIntent({ sessionId, activeSessionId, isActive, target })
+      )
+        return;
       markSessionTabUserActivationIntent(sessionId);
     },
-    [isActive, sessionId],
+    [activeSessionId, isActive, sessionId],
   );
   const handlePointerDownCapture = useCallback(
     (event: ReactPointerEvent) => {
@@ -379,6 +386,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
   const [handoffOpen, setHandoffOpen] = useState(false);
   const [handoffPreset, setHandoffPreset] = useState<HandoffPreset | null>(null);
   const isActive = useDockviewTabActiveState(api);
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const canShare = !!taskId && !!sessionId && shareableSessionStateClient(sessionState);
   const handleHandoffProfile = useCallback(
     (profileId: string) => {
@@ -402,6 +410,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
   }, []);
   const { handlePointerDownCapture, handleKeyDownCapture } = useSessionTabUserActivationIntent(
     sessionId,
+    activeSessionId,
     isActive,
   );
 

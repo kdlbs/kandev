@@ -2,24 +2,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearSessionTabUserActivationIntentsForTest,
   consumeSessionTabUserActivationIntent,
+  markSessionPanelUserActivationIntent,
   markSessionTabUserActivationIntent,
   shouldMarkSessionTabUserActivationIntent,
 } from "./session-tab-activation-intent";
 
 const INACTIVE_SESSION_ID = "s-inactive";
 
-describe("session tab activation intent", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
-    clearSessionTabUserActivationIntentsForTest();
-  });
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+  clearSessionTabUserActivationIntentsForTest();
+});
 
-  afterEach(() => {
-    clearSessionTabUserActivationIntentsForTest();
-    vi.useRealTimers();
-  });
+afterEach(() => {
+  clearSessionTabUserActivationIntentsForTest();
+  vi.useRealTimers();
+});
 
+describe("session tab activation intent lifecycle", () => {
   it("ignores null and undefined session ids", () => {
     markSessionTabUserActivationIntent(null);
     markSessionTabUserActivationIntent(undefined);
@@ -57,11 +58,33 @@ describe("session tab activation intent", () => {
     expect(consumeSessionTabUserActivationIntent("s-second")).toBe(true);
   });
 
+  it("marks session intent from a session panel id", () => {
+    markSessionPanelUserActivationIntent("session:s-active");
+    markSessionPanelUserActivationIntent("files");
+
+    expect(consumeSessionTabUserActivationIntent("s-active")).toBe(true);
+    expect(consumeSessionTabUserActivationIntent("files")).toBe(false);
+  });
+});
+
+describe("session tab activation intent guard", () => {
   it("does not mark intent for already-active tabs", () => {
     expect(
       shouldMarkSessionTabUserActivationIntent({
         sessionId: "s-active",
+        activeSessionId: "s-other",
         isActive: true,
+        target: document.createElement("span"),
+      }),
+    ).toBe(false);
+  });
+
+  it("does not mark intent for the current active session when another panel is active", () => {
+    expect(
+      shouldMarkSessionTabUserActivationIntent({
+        sessionId: "s-active",
+        activeSessionId: "s-active",
+        isActive: false,
         target: document.createElement("span"),
       }),
     ).toBe(false);
@@ -71,6 +94,7 @@ describe("session tab activation intent", () => {
     expect(
       shouldMarkSessionTabUserActivationIntent({
         sessionId: null,
+        activeSessionId: "s-active",
         isActive: false,
         target: document.createElement("span"),
       }),
@@ -85,6 +109,7 @@ describe("session tab activation intent", () => {
     expect(
       shouldMarkSessionTabUserActivationIntent({
         sessionId: INACTIVE_SESSION_ID,
+        activeSessionId: "s-active",
         isActive: false,
         target: label,
       }),
@@ -100,6 +125,23 @@ describe("session tab activation intent", () => {
     expect(
       shouldMarkSessionTabUserActivationIntent({
         sessionId: INACTIVE_SESSION_ID,
+        activeSessionId: "s-active",
+        isActive: false,
+        target: label,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not mark intent from Dockview close actions", () => {
+    const closeAction = document.createElement("div");
+    closeAction.className = "dv-default-tab-action";
+    const label = document.createElement("span");
+    closeAction.append(label);
+
+    expect(
+      shouldMarkSessionTabUserActivationIntent({
+        sessionId: INACTIVE_SESSION_ID,
+        activeSessionId: "s-active",
         isActive: false,
         target: label,
       }),
@@ -110,6 +152,7 @@ describe("session tab activation intent", () => {
     expect(
       shouldMarkSessionTabUserActivationIntent({
         sessionId: INACTIVE_SESSION_ID,
+        activeSessionId: "s-active",
         isActive: false,
         target: null,
       }),
@@ -120,6 +163,7 @@ describe("session tab activation intent", () => {
     expect(
       shouldMarkSessionTabUserActivationIntent({
         sessionId: INACTIVE_SESSION_ID,
+        activeSessionId: "s-active",
         isActive: false,
         target: document.createElement("span"),
       }),
