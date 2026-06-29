@@ -18,6 +18,7 @@ import (
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -726,26 +727,14 @@ func (a *repositoryResolverAdapter) detectAndPersistDefaultBranch(
 }
 
 // detectGitDefaultBranch reads the default branch of a git repository.
-// It first checks refs/remotes/origin/HEAD (set by `git clone`), then
-// falls back to .git/HEAD. Returns empty string on any failure.
+// Returns empty string on any failure.
 func detectGitDefaultBranch(repoPath string) string {
-	// Prefer the remote default branch pointer set by `git clone`.
-	originHead := filepath.Join(repoPath, ".git", "refs", "remotes", "origin", "HEAD")
-	if content, err := os.ReadFile(originHead); err == nil {
-		trimmed := strings.TrimSpace(string(content))
-		if after, ok := strings.CutPrefix(trimmed, "ref: refs/remotes/origin/"); ok {
-			return after
-		}
-	}
-	// Fall back to the local HEAD (works for fresh clones that lack origin/HEAD).
-	headPath := filepath.Join(repoPath, ".git", "HEAD")
-	content, err := os.ReadFile(headPath)
+	branch, err := gitref.DefaultBranch(repoPath)
 	if err != nil {
 		return ""
 	}
-	trimmed := strings.TrimSpace(string(content))
-	if after, ok := strings.CutPrefix(trimmed, "ref: refs/heads/"); ok {
-		return after
+	if branch == "HEAD" {
+		return ""
 	}
-	return ""
+	return branch
 }

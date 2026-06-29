@@ -22,10 +22,10 @@ const headFile = "HEAD"
 // to the wrong ref.
 //
 // Resolution order:
-//  1. refs/remotes/origin/HEAD when set (the upstream's declared default)
-//  2. The first ref that exists from
-//     {origin/main, origin/master, main, master}
-//  3. The current HEAD as a last resort, so brand-new repos with only a
+//  1. main, preferring origin/main over a local main ref
+//  2. refs/remotes/origin/HEAD when set
+//  3. master, preferring origin/master over a local master ref
+//  4. The current HEAD as a last resort, so brand-new repos with only a
 //     feature branch still produce a value — callers that care about
 //     correctness can override.
 func DefaultBranch(repoPath string) (string, error) {
@@ -38,10 +38,13 @@ func DefaultBranch(repoPath string) (string, error) {
 		return "", err
 	}
 	commonDir := ResolveCommonGitDir(gitDir)
+	if branch := pickNamedBranch(commonDir, "main"); branch != "" {
+		return branch, nil
+	}
 	if branch := readOriginHEAD(commonDir); branch != "" {
 		return branch, nil
 	}
-	if branch := pickFirstExistingBranch(commonDir); branch != "" {
+	if branch := pickNamedBranch(commonDir, "master"); branch != "" {
 		return branch, nil
 	}
 	return readHEADBranchFallback(gitDir)
@@ -128,8 +131,8 @@ func readOriginHEAD(commonDir string) string {
 		// origin/HEAD only lives in packed-refs after a `git pack-refs --all`,
 		// and the on-disk symref format there is gnarly to parse correctly.
 		// We deliberately skip that case rather than maintain a broken parser:
-		// pickFirstExistingBranch's origin/main → origin/master → main →
-		// master fallbacks cover every realistic clone in practice.
+		// the named main/master fallbacks cover every realistic clone in
+		// practice.
 		return ""
 	}
 	return parseSymbolicRefToBranch(strings.TrimSpace(string(content)))
@@ -149,15 +152,13 @@ func parseSymbolicRefToBranch(line string) string {
 	return ""
 }
 
-func pickFirstExistingBranch(commonDir string) string {
-	for _, candidate := range []struct{ ref, branch string }{
-		{"refs/remotes/origin/main", "main"},
-		{"refs/remotes/origin/master", "master"},
-		{"refs/heads/main", "main"},
-		{"refs/heads/master", "master"},
+func pickNamedBranch(commonDir, name string) string {
+	for _, ref := range []string{
+		"refs/remotes/origin/" + name,
+		"refs/heads/" + name,
 	} {
-		if refExists(commonDir, candidate.ref) {
-			return candidate.branch
+		if refExists(commonDir, ref) {
+			return name
 		}
 	}
 	return ""

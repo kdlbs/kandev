@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -19,6 +21,34 @@ func newTestLogger() *logger.Logger {
 		Format: "json",
 	})
 	return log
+}
+
+func TestDetectGitDefaultBranchPrefersMainWhenOriginHeadPointsAtMaster(t *testing.T) {
+	repoPath := t.TempDir()
+	gitDir := filepath.Join(repoPath, ".git")
+	if err := os.MkdirAll(filepath.Join(gitDir, "refs", "remotes", "origin"), 0o755); err != nil {
+		t.Fatalf("mkdir origin refs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/feature/x\n"), 0o644); err != nil {
+		t.Fatalf("write HEAD: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(gitDir, "refs", "remotes", "origin", "HEAD"),
+		[]byte("ref: refs/remotes/origin/master\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write origin HEAD: %v", err)
+	}
+	for _, branch := range []string{"main", "master"} {
+		refPath := filepath.Join(gitDir, "refs", "remotes", "origin", branch)
+		if err := os.WriteFile(refPath, []byte("0000000\n"), 0o644); err != nil {
+			t.Fatalf("write %s ref: %v", branch, err)
+		}
+	}
+
+	if got := detectGitDefaultBranch(repoPath); got != "main" {
+		t.Fatalf("detectGitDefaultBranch = %q, want main", got)
+	}
 }
 
 func TestGetSessionModel_Caching(t *testing.T) {

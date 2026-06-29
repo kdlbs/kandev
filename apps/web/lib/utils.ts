@@ -142,15 +142,15 @@ export function selectPreferredBranch(branches: BranchSelectionCandidate[]): str
   const localMain = branches.find((branch) => branch.type === "local" && branch.name === "main");
   if (localMain) return "main";
 
-  const localMaster = branches.find(
-    (branch) => branch.type === "local" && branch.name === "master",
-  );
-  if (localMaster) return "master";
-
   const originMain = branches.find(
     (branch) => branch.type === "remote" && branch.remote === "origin" && branch.name === "main",
   );
   if (originMain) return "origin/main";
+
+  const localMaster = branches.find(
+    (branch) => branch.type === "local" && branch.name === "master",
+  );
+  if (localMaster) return "master";
 
   const originMaster = branches.find(
     (branch) => branch.type === "remote" && branch.remote === "origin" && branch.name === "master",
