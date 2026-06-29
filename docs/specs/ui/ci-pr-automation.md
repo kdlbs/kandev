@@ -92,6 +92,7 @@ Response:
   "auto_fix_enabled": false,
   "auto_merge_enabled": false,
   "auto_fix_prompt_override": null,
+  "auto_fix_max_rounds": 10,
   "effective_auto_fix_prompt": "Fix the PR feedback...",
   "using_default_prompt": true,
   "updated_at": "2026-06-18T00:00:00Z",

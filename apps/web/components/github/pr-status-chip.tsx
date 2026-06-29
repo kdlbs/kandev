@@ -37,11 +37,12 @@ import {
   pickDefaultPR,
 } from "@/components/github/pr-task-icon";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
-import type { TaskCIAutomationOptions, TaskCIPRAutomationState, TaskPR } from "@/lib/types/github";
+import { autoFixRoundForState, findCIAutomationStateForPR } from "@/lib/github/ci-automation";
+import type { AutoFixRoundInfo } from "@/lib/github/ci-automation";
+import type { TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
 
 const HOVER_OPEN_DELAY_MS = 150;
 const HOVER_CLOSE_DELAY_MS = 150;
-const AUTO_FIX_MAX_ROUNDS = 10;
 
 // Terminal states (merged / closed) never reach here — PRStatusChip returns
 // null for them before rendering — so the chip status union omits them.
@@ -58,12 +59,6 @@ type AutomationFlags = {
   autoFix: boolean;
   autoMerge: boolean;
   autoFixRound: AutoFixRoundInfo | null;
-};
-
-type AutoFixRoundInfo = {
-  current: number;
-  max: number;
-  exhausted: boolean;
 };
 
 function chipStatus(pr: TaskPR): ChipStatus {
@@ -206,7 +201,10 @@ function automationForPR(
     autoFix: Boolean(options?.auto_fix_enabled),
     autoMerge: Boolean(options?.auto_merge_enabled),
     autoFixRound: options?.auto_fix_enabled
-      ? autoFixRoundForState(findAutomationState(options, pr))
+      ? autoFixRoundForState(
+          findCIAutomationStateForPR(options.pr_states, pr),
+          options.auto_fix_max_rounds,
+        )
       : null,
   };
 }
@@ -216,31 +214,17 @@ function automationForPRs(
   prs: TaskPR[],
 ): AutomationFlags {
   const roundInfos = options?.auto_fix_enabled
-    ? prs.map((pr) => autoFixRoundForState(findAutomationState(options, pr)))
+    ? prs.map((pr) =>
+        autoFixRoundForState(
+          findCIAutomationStateForPR(options.pr_states, pr),
+          options.auto_fix_max_rounds,
+        ),
+      )
     : [];
   return {
     autoFix: Boolean(options?.auto_fix_enabled),
     autoMerge: Boolean(options?.auto_merge_enabled),
     autoFixRound: pickAttentionRound(roundInfos),
-  };
-}
-
-function findAutomationState(
-  options: TaskCIAutomationOptions | null | undefined,
-  pr: TaskPR,
-): TaskCIPRAutomationState | undefined {
-  const repositoryID = pr.repository_id ?? "";
-  return options?.pr_states.find(
-    (state) => state.pr_number === pr.pr_number && state.repository_id === repositoryID,
-  );
-}
-
-function autoFixRoundForState(state: TaskCIPRAutomationState | undefined): AutoFixRoundInfo {
-  const current = clampAutoFixRound(state?.auto_fix_round_count ?? 0);
-  return {
-    current,
-    max: AUTO_FIX_MAX_ROUNDS,
-    exhausted: Boolean(state?.auto_fix_exhausted_at) || current >= AUTO_FIX_MAX_ROUNDS,
   };
 }
 
@@ -251,11 +235,6 @@ function pickAttentionRound(roundInfos: AutoFixRoundInfo[]): AutoFixRoundInfo | 
     if (next.exhausted === best.exhausted && next.current > best.current) return next;
     return best;
   });
-}
-
-function clampAutoFixRound(value: number) {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(AUTO_FIX_MAX_ROUNDS, Math.max(0, Math.trunc(value)));
 }
 
 type ChipButtonAttrs = {
@@ -296,11 +275,7 @@ function chipButtonAttrs(
 
 function AutomationFlagBadges({ automation }: { automation: AutomationFlags }) {
   if (!automation.autoFix && !automation.autoMerge) return null;
-  const autoFixRound = automation.autoFixRound ?? {
-    current: 0,
-    max: AUTO_FIX_MAX_ROUNDS,
-    exhausted: false,
-  };
+  const autoFixRound = automation.autoFixRound ?? autoFixRoundForState(undefined, undefined);
   return (
     <>
       {automation.autoFix && (

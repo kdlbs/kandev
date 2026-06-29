@@ -4,6 +4,9 @@ package github
 
 import "time"
 
+// TaskCIAutoFixMaxRounds is the server-enforced CI auto-fix loop guard.
+const TaskCIAutoFixMaxRounds = 10
+
 // PR represents a GitHub Pull Request.
 type PR struct {
 	Number             int                 `json:"number"`
@@ -219,6 +222,7 @@ type TaskCIOptionsResponse struct {
 	AutoFixEnabled         bool                       `json:"auto_fix_enabled"`
 	AutoMergeEnabled       bool                       `json:"auto_merge_enabled"`
 	AutoFixPromptOverride  *string                    `json:"auto_fix_prompt_override"`
+	AutoFixMaxRounds       int                        `json:"auto_fix_max_rounds"`
 	EffectiveAutoFixPrompt string                     `json:"effective_auto_fix_prompt"`
 	UsingDefaultPrompt     bool                       `json:"using_default_prompt"`
 	UpdatedAt              time.Time                  `json:"updated_at"`

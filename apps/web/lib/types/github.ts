@@ -206,6 +206,7 @@ export type TaskCIAutomationOptions = {
   auto_fix_enabled: boolean;
   auto_merge_enabled: boolean;
   auto_fix_prompt_override: string | null;
+  auto_fix_max_rounds?: number;
   effective_auto_fix_prompt: string;
   using_default_prompt: boolean;
   updated_at: string;

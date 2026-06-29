@@ -26,11 +26,13 @@ const (
 	ciAutomationChangesRequested = "changes_requested"
 	ciAutomationPRFeedbackToken  = "{{pr.feedback}}"
 	ciAutomationFixBlockWindow   = time.Hour
-	ciAutomationMaxFixRounds     = 10
+	ciAutomationMaxFixRounds     = github.TaskCIAutoFixMaxRounds
 	ciAutomationKindAutoFix      = "ci_auto_fix"
 )
 
 var ciAutomationSnapshotFieldReplacer = strings.NewReplacer("\r", " ", "\n", " ", "<", "", ">", "")
+
+var errCIAutoFixRoundCapReached = errors.New("CI auto-fix round cap reached")
 
 type ciAutomationCheckpoint struct {
 	FailedChecks []ciAutomationCheckSnapshot   `json:"failed_checks"`
@@ -183,7 +185,7 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 	}
 	allowNewRound := !ciAutomationFixRoundsExhausted(state)
 	result, err := s.dispatchCIAutomationPromptForPR(ctx, session, pr, prompt, signature, allowNewRound)
-	if errors.Is(err, messagequeue.ErrEntryNotFound) && !allowNewRound {
+	if errors.Is(err, errCIAutoFixRoundCapReached) {
 		s.markCIAutoFixExhausted(ctx, pr)
 		return true
 	}
@@ -278,6 +280,9 @@ func (s *Service) dispatchCIAutomationPromptForPR(ctx context.Context, session *
 		metadata := ciAutomationMessageMetadataForPR(pr, signature)
 		_, replaced, err := s.messageQueue.QueueMessageWithCoalesceKey(ctx, session.ID, session.TaskID, chatPrompt, "", messagequeue.QueuedByWorkflow, false, nil, metadata, ciAutomationCoalesceKey(pr), allowNewRound)
 		if err != nil {
+			if errors.Is(err, messagequeue.ErrEntryNotFound) && !allowNewRound {
+				return ciAutomationDispatchResult{}, errCIAutoFixRoundCapReached
+			}
 			return ciAutomationDispatchResult{}, err
 		}
 		s.publishQueueStatusEvent(ctx, session.ID)
@@ -287,7 +292,7 @@ func (s *Service) dispatchCIAutomationPromptForPR(ctx context.Context, session *
 		return ciAutomationDispatchResult{kind: ciAutomationDispatchQueuedInsert}, nil
 	case models.TaskSessionStateWaitingForInput, models.TaskSessionStateIdle:
 		if !allowNewRound {
-			return ciAutomationDispatchResult{}, messagequeue.ErrEntryNotFound
+			return ciAutomationDispatchResult{}, errCIAutoFixRoundCapReached
 		}
 		if !s.recordCIAutomationUserMessage(ctx, session.TaskID, session.ID, chatPrompt) {
 			return ciAutomationDispatchResult{}, fmt.Errorf("failed to record CI automation user message")

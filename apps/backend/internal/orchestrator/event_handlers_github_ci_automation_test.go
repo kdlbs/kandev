@@ -753,6 +753,31 @@ func TestHandleTaskPRCIAutomationStopsBeforeEleventhAutoFixRound(t *testing.T) {
 	}
 }
 
+func TestDispatchCIAutomationPromptForPRIdleRoundCapUsesDedicatedError(t *testing.T) {
+	ctx := context.Background()
+	svc := &Service{}
+	session := &models.TaskSession{
+		ID:     "session-1",
+		TaskID: "task-1",
+		State:  models.TaskSessionStateIdle,
+	}
+	pr := &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		Owner:        "acme",
+		Repo:         "widget",
+		PRNumber:     42,
+	}
+
+	_, err := svc.dispatchCIAutomationPromptForPR(ctx, session, pr, "Fix the PR", "signature", false)
+	if !errors.Is(err, errCIAutoFixRoundCapReached) {
+		t.Fatalf("expected auto-fix round cap error, got %v", err)
+	}
+	if errors.Is(err, messagequeue.ErrEntryNotFound) {
+		t.Fatalf("round cap should not reuse queue entry-not-found sentinel")
+	}
+}
+
 func TestHandleTaskPRCIAutomationAtRoundCapReplacesPendingAutoFix(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

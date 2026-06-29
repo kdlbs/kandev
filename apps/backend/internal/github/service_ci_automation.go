@@ -99,6 +99,7 @@ func (s *Service) buildTaskCIOptionsResponse(ctx context.Context, opts *TaskCIOp
 		AutoFixEnabled:         opts.AutoFixEnabled,
 		AutoMergeEnabled:       opts.AutoMergeEnabled,
 		AutoFixPromptOverride:  opts.AutoFixPromptOverride,
+		AutoFixMaxRounds:       TaskCIAutoFixMaxRounds,
 		EffectiveAutoFixPrompt: effectivePrompt,
 		UsingDefaultPrompt:     usingDefault,
 		UpdatedAt:              opts.UpdatedAt,

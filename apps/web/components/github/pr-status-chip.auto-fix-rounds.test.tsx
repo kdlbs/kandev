@@ -102,6 +102,7 @@ function makeCIOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCI
     effective_auto_fix_prompt: testConstants.defaultCIFixPrompt,
     using_default_prompt: true,
     updated_at: "2026-06-18T10:00:00Z",
+    auto_fix_max_rounds: 10,
     pr_states: [],
     ...overrides,
   };
@@ -126,13 +127,18 @@ function makeCIPrState(roundCount: number, exhausted = false) {
   };
 }
 
-function stateWithAutoFix(roundCount: number, exhausted = false): Partial<AppState> {
+function stateWithAutoFix(
+  roundCount: number,
+  exhausted = false,
+  maxRounds = 10,
+): Partial<AppState> {
   return {
     taskPRs: { byTaskId: { "task-1": [makePR()] } },
     taskCIAutomation: {
       byTaskId: {
         "task-1": makeCIOptions({
           auto_fix_enabled: true,
+          auto_fix_max_rounds: maxRounds,
           pr_states: [makeCIPrState(roundCount, exhausted)],
         }),
       },
@@ -165,6 +171,12 @@ describe("PRStatusChip auto-fix round display", () => {
     const chip = screen.getByTestId(AUTO_FIX_BADGE_TESTID);
     expect(chip.textContent).toBe("Auto-fix 10/10");
     expect(chip.getAttribute("data-auto-fix-exhausted")).toBe("true");
+  });
+
+  it("uses the max round count returned by the backend", () => {
+    renderWithStore(stateWithAutoFix(3, false, 12), <PRStatusChip taskId="task-1" />);
+
+    expect(screen.getByTestId(AUTO_FIX_BADGE_TESTID).textContent).toBe("Auto-fix 3/12");
   });
 
   it("explains the auto-fix round count from the hover popover", async () => {
