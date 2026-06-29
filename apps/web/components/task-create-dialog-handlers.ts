@@ -23,9 +23,9 @@ const PENDING_LAST_USED_SYNC_KEY = "kandev.taskCreateLastUsed.pendingSync";
 const LOCAL_STORAGE_WRITE_EVENT = "localStorage-write";
 const lastUsedDebug = createDebugLogger("task-create:last-used");
 
-export function resetTaskCreateLastUsedSync() {
+export function resetTaskCreateLastUsedSync(options: { clearQueued?: boolean } = {}) {
   pendingLastUsed = {};
-  lastQueuedLastUsed = {};
+  if (options.clearQueued) lastQueuedLastUsed = {};
   lastUsedDebug("pending-reset");
 }
 

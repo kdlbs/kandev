@@ -16,7 +16,7 @@ vi.mock("@/lib/api/domains/settings-api", () => ({
 describe("syncTaskCreateLastUsed", () => {
   beforeEach(() => {
     window.localStorage.clear();
-    resetTaskCreateLastUsedSync();
+    resetTaskCreateLastUsedSync({ clearQueued: true });
     vi.mocked(updateUserSettings).mockReset();
   });
 
@@ -34,7 +34,7 @@ describe("syncTaskCreateLastUsed", () => {
       branch: "feature",
     });
 
-    resetTaskCreateLastUsedSync();
+    resetTaskCreateLastUsedSync({ clearQueued: true });
     vi.mocked(updateUserSettings).mockResolvedValueOnce({ settings: {} } as Awaited<
       ReturnType<typeof updateUserSettings>
     >);
@@ -70,5 +70,25 @@ describe("syncTaskCreateLastUsed", () => {
       branch: "feature",
       agentProfileId: "agent-2",
     });
+  });
+
+  it("keeps queued fields when dialog close resets pending sync state", async () => {
+    vi.mocked(updateUserSettings).mockResolvedValue({ settings: {} } as Awaited<
+      ReturnType<typeof updateUserSettings>
+    >);
+
+    syncTaskCreateLastUsed({ branch: "feature" });
+    await waitFor(() => {
+      expect(updateUserSettings).toHaveBeenCalledWith({
+        task_create_last_used: { branch: "feature" },
+      });
+    });
+
+    resetTaskCreateLastUsedSync();
+
+    expect(readQueuedTaskCreateLastUsedState()).toMatchObject({
+      branch: "feature",
+    });
+    expect(readQueuedTaskCreateLastUsedState().agentProfileId).toBeUndefined();
   });
 });
