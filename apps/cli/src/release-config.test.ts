@@ -300,7 +300,7 @@ describe("release desktop artifacts", () => {
     const windowsSignScript = readRepoFile("apps/desktop/src-tauri/windows-sign.ps1");
 
     expect(workflow).not.toContain("allow_unsigned_desktop");
-    expect(workflow).not.toContain("ALLOW_UNSIGNED_DESKTOP");
+    expect(workflow).not.toContain("inputs.allow_unsigned_desktop");
     expect(workflow).toContain("desktop_validation_only");
     expect(workflow).toContain("ref: ${{ needs.prepare.outputs.ref }}");
     expect(workflow).toContain("persist-credentials: false");
@@ -314,6 +314,8 @@ describe("release desktop artifacts", () => {
     expect(workflow).toContain("MACOS_SIGNING_ENABLED=true");
     expect(workflow).toContain("WINDOWS_SIGNING_ENABLED=false");
     expect(workflow).toContain("WINDOWS_SIGNING_ENABLED=true");
+    expect(workflow).toContain("ALLOW_UNSIGNED_DESKTOP=false");
+    expect(workflow).toContain("ALLOW_UNSIGNED_DESKTOP=true");
     expect(workflow).toContain(
       "macOS signing/notarization inputs are incomplete; building unsigned desktop artifact.",
     );

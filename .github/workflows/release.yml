@@ -613,8 +613,10 @@ jobs:
           set -euo pipefail
           if bash scripts/release/desktop-signing-ready.sh windows >/dev/null 2>&1; then
             echo "WINDOWS_SIGNING_ENABLED=true" >> "$GITHUB_ENV"
+            echo "ALLOW_UNSIGNED_DESKTOP=false" >> "$GITHUB_ENV"
           else
             echo "WINDOWS_SIGNING_ENABLED=false" >> "$GITHUB_ENV"
+            echo "ALLOW_UNSIGNED_DESKTOP=true" >> "$GITHUB_ENV"
             echo "::notice::Windows signing inputs are incomplete; building unsigned desktop artifact."
           fi
 
