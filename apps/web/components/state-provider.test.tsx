@@ -148,9 +148,17 @@ describe("StateProvider task-create cache", () => {
 
     expect(onSeen).toHaveBeenCalledWith(JSON.stringify("repo-1"));
   });
+});
 
-  it("preserves cached task-create choices when loaded settings have no replacement", () => {
+describe("StateProvider task-create cache clearing", () => {
+  it("clears cached task-create choices when loaded settings have no replacement", () => {
     window.localStorage.setItem(STORAGE_KEYS.LAST_REPOSITORY_ID, JSON.stringify("repo-cached"));
+    window.localStorage.setItem(STORAGE_KEYS.LAST_BRANCH, JSON.stringify("feature-cached"));
+    window.localStorage.setItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, JSON.stringify("agent-cached"));
+    window.localStorage.setItem(
+      STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID,
+      JSON.stringify("exec-cached"),
+    );
 
     render(
       <StateProvider
@@ -171,8 +179,9 @@ describe("StateProvider task-create cache", () => {
       </StateProvider>,
     );
 
-    expect(window.localStorage.getItem(STORAGE_KEYS.LAST_REPOSITORY_ID)).toBe(
-      JSON.stringify("repo-cached"),
-    );
+    expect(window.localStorage.getItem(STORAGE_KEYS.LAST_REPOSITORY_ID)).toBeNull();
+    expect(window.localStorage.getItem(STORAGE_KEYS.LAST_BRANCH)).toBeNull();
+    expect(window.localStorage.getItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID)).toBeNull();
+    expect(window.localStorage.getItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID)).toBeNull();
   });
 });
