@@ -59,53 +59,6 @@ export function resolveSessionTabSyncTarget(args: {
 }
 
 /**
- * Sync `activeSessionId` in the store when the user clicks a session tab.
- * Layouts are env-keyed, so switching between sessions of the same task is
- * a no-op at the layout level — the env switch action short-circuits when
- * old==new env. No manual skip flag needed.
- */
-export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: StoreApi<AppState>) {
-  return api.onDidActivePanelChange((panel) => {
-    if (!panel) return;
-    const isRestoring = useDockviewStore.getState().isRestoringLayout;
-    if (isDebug()) {
-      debug("setupSessionTabSync: onDidActivePanelChange", {
-        panelId: panel.id,
-        isRestoring,
-        currentActiveSessionId: appStore.getState().tasks.activeSessionId,
-        currentActiveTaskId: appStore.getState().tasks.activeTaskId,
-        livePanelIds: api.panels.map((p) => p.id),
-      });
-    }
-    if (isRestoring) return;
-    const state = appStore.getState();
-    const target = resolveSessionTabSyncTarget({
-      panelId: panel.id,
-      activeTaskId: state.tasks.activeTaskId,
-      activeSessionId: state.tasks.activeSessionId,
-      taskSessionsById: state.taskSessions.items,
-      environmentIdBySessionId: state.environmentIdBySessionId,
-    });
-    if (!target) {
-      if (isDebug() && panel.id.startsWith("session:")) {
-        debug("setupSessionTabSync: skip (stale or cross-task panel)", {
-          panelId: panel.id,
-          activeTaskId: state.tasks.activeTaskId,
-        });
-      }
-      return;
-    }
-    if (isDebug()) {
-      debug("setupSessionTabSync: setActiveSession", {
-        taskId: target.taskId,
-        newSessionId: target.sessionId,
-      });
-    }
-    state.setActiveSession(target.taskId, target.sessionId);
-  });
-}
-
-/**
  * Re-create a chat or session panel if the last one is removed.
  * Prevents the user from ending up with no chat panel at all.
  *

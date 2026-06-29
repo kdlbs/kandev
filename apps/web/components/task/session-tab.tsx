@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { DockviewDefaultTab, type IDockviewPanelHeaderProps } from "dockview-react";
 import { IconStar } from "@tabler/icons-react";
 import { AgentLogo } from "@/components/agent-logo";
@@ -35,6 +42,7 @@ import { HandoffContextMenuSub } from "@/components/task/handoff-profile-menu-it
 import { NewSessionDialog, type HandoffPreset } from "@/components/task/new-session-dialog";
 import { usableConfigOptions } from "@/components/model-config-selector";
 import type { TaskSessionState } from "@/lib/types/http";
+import { markSessionTabUserActivationIntent } from "./session-tab-activation-intent";
 import { isSessionActive } from "./session-sort";
 import { resolveSessionTabTitle } from "./session-tab-title";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
@@ -137,6 +145,25 @@ function useSessionTabActions(
     for (const panel of toClose) containerApi.removePanel(panel);
   }, [api, containerApi]);
   return { handleSetPrimary, handleStop, handleResume, handleDelete, handleCloseOthers };
+}
+
+function useSessionTabUserActivationIntent(sessionId: string | undefined) {
+  const markUserActivationIntent = useCallback(() => {
+    markSessionTabUserActivationIntent(sessionId);
+  }, [sessionId]);
+  const handlePointerDownCapture = useCallback(
+    (event: ReactPointerEvent) => {
+      if (event.button === 0) markUserActivationIntent();
+    },
+    [markUserActivationIntent],
+  );
+  const handleKeyDownCapture = useCallback(
+    (event: ReactKeyboardEvent) => {
+      if (event.key === "Enter" || event.key === " ") markUserActivationIntent();
+    },
+    [markUserActivationIntent],
+  );
+  return { handlePointerDownCapture, handleKeyDownCapture };
 }
 
 function DeleteSessionDialog({
@@ -362,6 +389,8 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
   const handleCloseTab = useCallback(() => {
     setConfirmDelete(true);
   }, []);
+  const { handlePointerDownCapture, handleKeyDownCapture } =
+    useSessionTabUserActivationIntent(sessionId);
 
   return (
     <>
@@ -369,6 +398,8 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
         <ContextMenuTrigger
           className="flex h-full items-center cursor-pointer select-none"
           data-testid={sessionId ? `session-tab-${sessionId}` : undefined}
+          onPointerDownCapture={handlePointerDownCapture}
+          onKeyDownCapture={handleKeyDownCapture}
           onDoubleClick={onDoubleClick}
         >
           <SessionTabTriggerContent

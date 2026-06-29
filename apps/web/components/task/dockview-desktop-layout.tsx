@@ -47,8 +47,8 @@ import { PreviewFileTab, PreviewDiffTab, PreviewCommitTab, PinnedDefaultTab } fr
 import { SessionTab } from "./session-tab";
 import { TerminalTab } from "./terminal-tab";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
+import { setupSessionTabSync } from "./dockview-session-tab-sync";
 import {
-  setupSessionTabSync,
   setupChatPanelSafetyNet,
   useAutoSessionTab,
   useAutoPRPanel,
