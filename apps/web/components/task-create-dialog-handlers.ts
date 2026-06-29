@@ -24,13 +24,13 @@ const LOCAL_STORAGE_WRITE_EVENT = "localStorage-write";
 const lastUsedDebug = createDebugLogger("task-create:last-used");
 
 /**
- * Clears pending in-flight last-used sync state and its persisted retry payload.
+ * Clears pending in-flight last-used sync state while preserving its persisted
+ * retry payload until the matching PATCH succeeds.
  * Pass `clearQueued` when test setup or teardown should also wipe the queued
  * overlay that protects settings fetches from stale server values.
  */
 export function resetTaskCreateLastUsedSync(options: { clearQueued?: boolean } = {}) {
   pendingLastUsed = {};
-  removeLocalStorage(PENDING_LAST_USED_SYNC_KEY);
   if (options.clearQueued) lastQueuedLastUsed = {};
   lastUsedDebug("pending-reset");
 }
@@ -102,8 +102,11 @@ export function syncTaskCreateLastUsed(patch: TaskCreateLastUsedPatch) {
       updateUserSettings({ task_create_last_used: payload })
         .then(() => {
           lastUsedDebug("sync-success", { payload });
+          const persistedPending = readPendingLastUsedSync();
           if (JSON.stringify(pendingLastUsed) === JSON.stringify(payload)) {
             pendingLastUsed = {};
+          }
+          if (JSON.stringify(persistedPending) === JSON.stringify(payload)) {
             removeLocalStorage(PENDING_LAST_USED_SYNC_KEY);
           }
         })

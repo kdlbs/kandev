@@ -91,7 +91,9 @@ describe("syncTaskCreateLastUsed", () => {
 
     resetTaskCreateLastUsedSync();
 
-    expect(window.localStorage.getItem(PENDING_LAST_USED_SYNC_KEY)).toBeNull();
+    expect(JSON.parse(window.localStorage.getItem(PENDING_LAST_USED_SYNC_KEY) ?? "null")).toEqual({
+      branch: "feature",
+    });
     expect(readQueuedTaskCreateLastUsedState()).toMatchObject({
       branch: "feature",
     });
