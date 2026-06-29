@@ -9,7 +9,7 @@ import { toKanbanTask, type TaskLike } from "@/lib/kanban/map-task";
 import { sessionId as toSessionId } from "@/lib/types/http";
 import { mergeTaskRepositoryFields } from "@/lib/ws/handlers/task-repositories";
 import { softNavigate } from "@/lib/routing/client-router";
-import { linkToTask } from "@/lib/links";
+import { isTaskDetailPath } from "@/lib/links";
 import {
   clearPinnedSessionIfOverridden,
   shouldPreservePinnedSessionForTask,
@@ -121,12 +121,13 @@ function removeTaskFromBothKanbans(state: AppState, wfId: string, taskId: string
 
 /**
  * Soft-redirect away from a deleted task's page. Only fires when the user is
- * currently parked on that task's route (`/t/<id>`), so a background deletion
- * of some other task never yanks the user elsewhere.
+ * currently parked on that task's route (`/t/<id>` or the compatibility
+ * `/tasks/<id>`), so a background deletion of some other task never yanks the
+ * user elsewhere.
  */
 function redirectAwayFromDeletedTask(deletedId: string): void {
   if (typeof window === "undefined") return;
-  if (window.location.pathname !== linkToTask(deletedId)) return;
+  if (!isTaskDetailPath(window.location.pathname, deletedId)) return;
   softNavigate("/", "replace");
 }
 
@@ -234,11 +235,11 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       });
 
       // Capture the route match before redirecting — the redirect mutates the
-      // pathname. This covers the case where the browser is parked on
-      // `/t/<deletedId>` but TaskPageContent hasn't hydrated `activeTaskId` yet,
-      // so `wasActive` is still false.
+      // pathname. This covers the case where the browser is parked on the task's
+      // route (`/t/<id>` or `/tasks/<id>`) but TaskPageContent hasn't hydrated
+      // `activeTaskId` yet, so `wasActive` is still false.
       const onDeletedRoute =
-        typeof window !== "undefined" && window.location.pathname === linkToTask(deletedId);
+        typeof window !== "undefined" && isTaskDetailPath(window.location.pathname, deletedId);
 
       // Move off the now-dead route instead of leaving the user on a failing
       // page. The helper is route-guarded, so it's a no-op unless we're actually
