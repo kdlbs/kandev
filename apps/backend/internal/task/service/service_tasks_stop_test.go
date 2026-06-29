@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 )
@@ -182,5 +183,86 @@ func TestStopTaskRuntimeTargets_NonTerminalStopFailureBlocksCleanup(t *testing.T
 	failed := svc.stopTaskRuntimeTargets(context.Background(), "task-b", targets, "archive", "stop failed")
 	if _, ok := failed["sess-running"]; !ok {
 		t.Error("non-terminal stop failure must add session to failedStops")
+	}
+}
+
+// --- CleanupTaskResources cascade regression tests ---
+//
+// These tests reproduce the archive cleanup regression: ArchiveTaskTree calls
+// cancelActiveRuns (sessions → CANCELLED) before CleanupTaskResources, leaving
+// executor_running rows whose StopExecution returns ErrExecutionNotFound. The
+// stop failure must not block environment teardown for terminal sessions.
+
+func seedCascadeFixtures(t *testing.T, repo interface {
+	CreateWorkspace(context.Context, *models.Workspace) error
+	CreateWorkflow(context.Context, *models.Workflow) error
+	CreateTask(context.Context, *models.Task) error
+	CreateTaskSession(context.Context, *models.TaskSession) error
+	UpsertExecutorRunning(context.Context, *models.ExecutorRunning) error
+}, wsID, wfID, taskID, sessID, execID string, state models.TaskSessionState) {
+	t.Helper()
+	ctx := context.Background()
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: wsID, Name: "WS"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: wfID, WorkspaceID: wsID, Name: "WF"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: wsID, WorkflowID: wfID, WorkflowStepID: "step-1", Title: "T", Priority: "medium"})
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:               sessID,
+		TaskID:           taskID,
+		State:            state,
+		AgentExecutionID: execID,
+	})
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:               sessID,
+		SessionID:        sessID,
+		TaskID:           taskID,
+		ExecutorID:       "executor-1",
+		AgentExecutionID: execID,
+		Runtime:          agentruntime.RuntimeStandalone,
+		Status:           models.ExecutorRunningStatusStarting,
+	}); err != nil {
+		t.Fatalf("seed executor_running: %v", err)
+	}
+}
+
+// TestCleanupTaskResources_TerminalSessionStopFailureDoesNotBlockCleanup is a
+// regression test for the archive cleanup bug: a CANCELLED session with a stale
+// executor_running row must have its row removed even when StopExecution fails.
+func TestCleanupTaskResources_TerminalSessionStopFailureDoesNotBlockCleanup(t *testing.T) {
+	svc, _, repo := createTestService(t)
+
+	stopper := newRecordingTaskExecutionStopper()
+	stopper.stopExecutionErr = errors.New("execution not found")
+	svc.SetExecutionStopper(stopper)
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+
+	seedCascadeFixtures(t, repo, "ws-c1", "wf-c1", "task-c1", "sess-cancelled", "exec-cancelled", models.TaskSessionStateCancelled)
+
+	svc.CleanupTaskResources(context.Background(), "task-c1", false)
+	waitForCleanupDone(t, svc)
+
+	_, err := repo.GetExecutorRunningBySessionID(context.Background(), "sess-cancelled")
+	if err == nil {
+		t.Error("executor_running row must be removed after cleanup of terminal (CANCELLED) session — stop failure must not block teardown")
+	}
+}
+
+// TestCleanupTaskResources_NonTerminalSessionStopFailureBlocksCleanup is the
+// companion case: a RUNNING session whose StopExecution fails must keep its
+// executor_running row so the runtime is not torn down unexpectedly.
+func TestCleanupTaskResources_NonTerminalSessionStopFailureBlocksCleanup(t *testing.T) {
+	svc, _, repo := createTestService(t)
+
+	stopper := newRecordingTaskExecutionStopper()
+	stopper.stopExecutionErr = errors.New("stop failed")
+	svc.SetExecutionStopper(stopper)
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+
+	seedCascadeFixtures(t, repo, "ws-c2", "wf-c2", "task-c2", "sess-running", "exec-running", models.TaskSessionStateRunning)
+
+	svc.CleanupTaskResources(context.Background(), "task-c2", false)
+	waitForCleanupDone(t, svc)
+
+	if _, err := repo.GetExecutorRunningBySessionID(context.Background(), "sess-running"); err != nil {
+		t.Error("executor_running row must be preserved when stop fails for a non-terminal (RUNNING) session")
 	}
 }
