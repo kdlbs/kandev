@@ -394,7 +394,7 @@ func cleanServicePathDirs(dirs []string) []string {
 	seen := make(map[string]struct{}, len(dirs))
 	out := make([]string, 0, len(dirs))
 	for _, dir := range dirs {
-		if dir == "" || strings.Contains(dir, ":") || strings.ContainsRune(dir, 0) {
+		if dir == "" || strings.ContainsAny(dir, ":\n\r") || strings.ContainsRune(dir, 0) {
 			continue
 		}
 		clean := filepath.Clean(dir)

@@ -353,7 +353,7 @@ func TestServicePathWithPrefixesPrependsValidUniqueDirs(t *testing.T) {
 	nodeBin := "/home/alice/.nvm/versions/node/v25.2.1/bin"
 	got := servicePathWithPrefixes(
 		"/usr/bin:/bin:%h/.local/bin",
-		[]string{nodeBin, "/usr/bin", "relative/bin", "/bad:dir", nodeBin},
+		[]string{nodeBin, "/usr/bin", "relative/bin", "/bad:dir", "/bad\nline", "/bad\rline", nodeBin},
 	)
 	want := nodeBin + ":/usr/bin:/bin:%h/.local/bin"
 	if got != want {
