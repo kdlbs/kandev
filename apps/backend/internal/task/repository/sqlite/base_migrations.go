@@ -452,7 +452,7 @@ BEGIN
 		AND nsp.nspname = current_schema()
 		AND con.contype = 'u'
 		AND (
-			SELECT array_agg(attr.attname ORDER BY cols.ordinality)
+			SELECT array_agg(attr.attname::text ORDER BY cols.ordinality)
 			FROM unnest(con.conkey) WITH ORDINALITY AS cols(attnum, ordinality)
 			JOIN pg_attribute attr ON attr.attrelid = con.conrelid AND attr.attnum = cols.attnum
 		) = ARRAY['task_environment_id', 'repository_id'];
@@ -470,7 +470,7 @@ BEGIN
 			AND nsp.nspname = current_schema()
 			AND con.contype = 'u'
 			AND (
-				SELECT array_agg(attr.attname ORDER BY cols.ordinality)
+				SELECT array_agg(attr.attname::text ORDER BY cols.ordinality)
 				FROM unnest(con.conkey) WITH ORDINALITY AS cols(attnum, ordinality)
 				JOIN pg_attribute attr ON attr.attrelid = con.conrelid AND attr.attnum = cols.attnum
 			) = ARRAY['task_environment_id', 'repository_id', 'branch_slug']
