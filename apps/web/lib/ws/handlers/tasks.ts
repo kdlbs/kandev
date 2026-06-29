@@ -234,23 +234,21 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
         return next;
       });
 
-      // Capture the route match before redirecting — the redirect mutates the
-      // pathname. This covers the case where the browser is parked on the task's
-      // route (`/t/<id>` or `/tasks/<id>`) but TaskPageContent hasn't hydrated
+      // Capture the route match before any redirect mutates the pathname. This
+      // covers a fresh load where the browser is parked on the task's route
+      // (`/t/<id>` or `/tasks/<id>`) but TaskPageContent hasn't hydrated
       // `activeTaskId` yet, so `wasActive` is still false.
       const onDeletedRoute =
         typeof window !== "undefined" && isTaskDetailPath(window.location.pathname, deletedId);
 
-      // Move off the now-dead route instead of leaving the user on a failing
-      // page. The helper is route-guarded, so it's a no-op unless we're actually
-      // parked on this task's URL.
-      redirectAwayFromDeletedTask(deletedId);
-
-      // Surface an explanatory toast only for genuine auto-deletions, which the
-      // backend tags with a reason (e.g. a review task whose PR was approved).
-      // User-initiated deletes carry no reason and need no "closed
-      // automatically" explanation.
+      // Only react to genuine auto-deletions, which the backend tags with a
+      // reason (e.g. a review task whose PR was approved). User-initiated deletes
+      // carry no reason: their local delete flow (useTaskRemoval) owns
+      // navigation by switching to the next task, so redirecting here would
+      // preempt it and strand the user on the home route. For auto-deletions we
+      // move off the now-dead route (helper is route-guarded) and explain why.
       if (message.payload.reason && (wasActive || onDeletedRoute)) {
+        redirectAwayFromDeletedTask(deletedId);
         store.getState().setTaskDeletedNotification({
           taskId: deletedId,
           title: message.payload.title,

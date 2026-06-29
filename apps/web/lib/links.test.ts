@@ -31,6 +31,11 @@ describe("isTaskDetailPath", () => {
     expect(isTaskDetailPath("/tasks/task-123", "task-123")).toBe(true);
   });
 
+  it("matches trailing-slash variants the SPA normalizes", () => {
+    expect(isTaskDetailPath("/t/task-123/", "task-123")).toBe(true);
+    expect(isTaskDetailPath("/tasks/task-123/", "task-123")).toBe(true);
+  });
+
   it("does not match a different task id", () => {
     expect(isTaskDetailPath("/t/other", "task-123")).toBe(false);
     expect(isTaskDetailPath("/tasks/other", "task-123")).toBe(false);

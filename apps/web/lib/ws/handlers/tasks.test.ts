@@ -622,8 +622,8 @@ describe("task.deleted live notification + redirect", () => {
     expect(store.getState().setTaskDeletedNotification).not.toHaveBeenCalled();
   });
 
-  it("does not notify for a user-initiated delete (no reason) of the focused task", () => {
-    window.history.replaceState({}, "", "/");
+  it("does not redirect or notify for a user-initiated delete (no reason) even on the task route", () => {
+    window.history.replaceState({}, "", "/t/t1");
     const store = makeActiveStore();
     const handlers = registerTasksHandlers(store);
 
@@ -631,6 +631,9 @@ describe("task.deleted live notification + redirect", () => {
       makeDeletedMessage({ task_id: "t1", workflow_id: "wf1", title: REVIEW_TITLE }),
     );
 
+    // The local delete flow owns navigation for user-initiated deletes; the WS
+    // handler must not preempt it by redirecting.
+    expect(window.location.pathname).toBe("/t/t1");
     expect(store.getState().setTaskDeletedNotification).not.toHaveBeenCalled();
   });
 
@@ -661,13 +664,18 @@ describe("task.deleted live notification + redirect", () => {
     },
   );
 
-  it("does not redirect when viewing a different route", () => {
+  it("does not redirect an auto-deletion when viewing a different route", () => {
     window.history.replaceState({}, "", "/t/other");
     const store = makeActiveStore();
     const handlers = registerTasksHandlers(store);
 
     handlers["task.deleted"]!(
-      makeDeletedMessage({ task_id: "t1", workflow_id: "wf1", title: REVIEW_TITLE }),
+      makeDeletedMessage({
+        task_id: "t1",
+        workflow_id: "wf1",
+        title: REVIEW_TITLE,
+        reason: "pr_approved_by_user",
+      }),
     );
 
     expect(window.location.pathname).toBe("/t/other");
