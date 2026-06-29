@@ -199,6 +199,12 @@ func TestHandleTaskMovedNoSession(t *testing.T) {
 		launched := make(chan string, 1)
 		agentMgr := &mockAgentManager{
 			launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+				session, err := repo.GetTaskSession(ctx, req.SessionID)
+				if err != nil {
+					t.Errorf("GetTaskSession(%q): %v", req.SessionID, err)
+				} else if session.Metadata[models.SessionMetaKeyCreatedBy] != models.SessionCreatedByWorkflowSwitch {
+					t.Errorf("created_by metadata before launch = %v, want %q", session.Metadata[models.SessionMetaKeyCreatedBy], models.SessionCreatedByWorkflowSwitch)
+				}
 				executorID, _ := req.Metadata[models.MetaKeyExecutorID].(string)
 				launched <- executorID
 				return &executor.LaunchAgentResponse{AgentExecutionID: "exec-1"}, nil

@@ -897,10 +897,12 @@ func inheritWorkflowRoutedSession(
 	executorID string,
 	agentProfileExplicit, executorProfileExplicit bool,
 ) string {
-	if agentProfileExplicit || !isWorkflowSwitchedSession(session) || session.AgentProfileID == "" {
+	if !isWorkflowSwitchedSession(session) {
 		return executorID
 	}
-	*agentProfileID = session.AgentProfileID
+	if !agentProfileExplicit && session.AgentProfileID != "" {
+		*agentProfileID = session.AgentProfileID
+	}
 	if executorProfileExplicit {
 		return executorID
 	}
