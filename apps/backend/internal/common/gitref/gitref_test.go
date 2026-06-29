@@ -97,3 +97,130 @@ func TestDefaultBranch_PrefersMainWhenOriginHeadPointsAtMaster(t *testing.T) {
 		t.Fatalf("DefaultBranch = %q, want main", branch)
 	}
 }
+
+func TestDefaultBranch_PreservesNonMainOriginHeadWhenMainExists(t *testing.T) {
+	repoPath := t.TempDir()
+	gitDir := filepath.Join(repoPath, ".git")
+	if err := os.MkdirAll(filepath.Join(gitDir, "refs", "remotes", "origin"), 0o755); err != nil {
+		t.Fatalf("mkdir origin refs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/feature/x\n"), 0o644); err != nil {
+		t.Fatalf("write HEAD: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(gitDir, "refs", "remotes", "origin", "HEAD"),
+		[]byte("ref: refs/remotes/origin/trunk\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write origin HEAD: %v", err)
+	}
+	for _, branch := range []string{"main", "trunk"} {
+		refPath := filepath.Join(gitDir, "refs", "remotes", "origin", branch)
+		if err := os.WriteFile(refPath, []byte("0000000\n"), 0o644); err != nil {
+			t.Fatalf("write %s ref: %v", branch, err)
+		}
+	}
+
+	branch, err := DefaultBranch(repoPath)
+	if err != nil {
+		t.Fatalf("DefaultBranch error: %v", err)
+	}
+	if branch != "trunk" {
+		t.Fatalf("DefaultBranch = %q, want trunk", branch)
+	}
+}
+
+func TestDefaultBranch_LocalMainDoesNotOverrideOriginHeadMaster(t *testing.T) {
+	repoPath := t.TempDir()
+	gitDir := filepath.Join(repoPath, ".git")
+	if err := os.MkdirAll(filepath.Join(gitDir, "refs", "remotes", "origin"), 0o755); err != nil {
+		t.Fatalf("mkdir origin refs: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(gitDir, "refs", "heads"), 0o755); err != nil {
+		t.Fatalf("mkdir local refs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/feature/x\n"), 0o644); err != nil {
+		t.Fatalf("write HEAD: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(gitDir, "refs", "remotes", "origin", "HEAD"),
+		[]byte("ref: refs/remotes/origin/master\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write origin HEAD: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "refs", "remotes", "origin", "master"), []byte("0000000\n"), 0o644); err != nil {
+		t.Fatalf("write origin master ref: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "refs", "heads", "main"), []byte("0000000\n"), 0o644); err != nil {
+		t.Fatalf("write local main ref: %v", err)
+	}
+
+	branch, err := DefaultBranch(repoPath)
+	if err != nil {
+		t.Fatalf("DefaultBranch error: %v", err)
+	}
+	if branch != "master" {
+		t.Fatalf("DefaultBranch = %q, want master", branch)
+	}
+}
+
+func TestDefaultBranch_RemoteMasterBeatsLocalMainWithoutOriginHead(t *testing.T) {
+	repoPath := t.TempDir()
+	gitDir := filepath.Join(repoPath, ".git")
+	if err := os.MkdirAll(filepath.Join(gitDir, "refs", "remotes", "origin"), 0o755); err != nil {
+		t.Fatalf("mkdir origin refs: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(gitDir, "refs", "heads"), 0o755); err != nil {
+		t.Fatalf("mkdir local refs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/feature/x\n"), 0o644); err != nil {
+		t.Fatalf("write HEAD: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "refs", "remotes", "origin", "master"), []byte("0000000\n"), 0o644); err != nil {
+		t.Fatalf("write origin master ref: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "refs", "heads", "main"), []byte("0000000\n"), 0o644); err != nil {
+		t.Fatalf("write local main ref: %v", err)
+	}
+
+	branch, err := DefaultBranch(repoPath)
+	if err != nil {
+		t.Fatalf("DefaultBranch error: %v", err)
+	}
+	if branch != "master" {
+		t.Fatalf("DefaultBranch = %q, want master", branch)
+	}
+}
+
+func TestDefaultBranch_MainNamespaceDoesNotOverrideOriginHeadMaster(t *testing.T) {
+	repoPath := t.TempDir()
+	gitDir := filepath.Join(repoPath, ".git")
+	if err := os.MkdirAll(filepath.Join(gitDir, "refs", "remotes", "origin", "main"), 0o755); err != nil {
+		t.Fatalf("mkdir origin main namespace: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/feature/x\n"), 0o644); err != nil {
+		t.Fatalf("write HEAD: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(gitDir, "refs", "remotes", "origin", "HEAD"),
+		[]byte("ref: refs/remotes/origin/master\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write origin HEAD: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "refs", "remotes", "origin", "main", "foo"), []byte("0000000\n"), 0o644); err != nil {
+		t.Fatalf("write origin main/foo ref: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "refs", "remotes", "origin", "master"), []byte("0000000\n"), 0o644); err != nil {
+		t.Fatalf("write origin master ref: %v", err)
+	}
+
+	branch, err := DefaultBranch(repoPath)
+	if err != nil {
+		t.Fatalf("DefaultBranch error: %v", err)
+	}
+	if branch != "master" {
+		t.Fatalf("DefaultBranch = %q, want master", branch)
+	}
+}

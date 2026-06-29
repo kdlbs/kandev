@@ -199,7 +199,7 @@ func (e *Executor) backfillRepoDefaultBranch(ctx context.Context, repo *models.R
 	if repo.DefaultBranch != "" || localPath == "" {
 		return
 	}
-	detected, err := gitref.DefaultBranch(localPath)
+	detected, err := gitref.DefaultBranchOrEmpty(localPath)
 	if err != nil || detected == "" {
 		e.logger.Debug("could not detect default branch from clone; leaving empty",
 			zap.String("repository_id", repo.ID),

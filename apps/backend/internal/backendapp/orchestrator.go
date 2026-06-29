@@ -38,6 +38,11 @@ import (
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
 
+const (
+	defaultMainBranch   = "main"
+	defaultMasterBranch = "master"
+)
+
 const defaultEventNamespace = "default"
 
 func provideOrchestrator(
@@ -662,13 +667,7 @@ func (a *repositoryResolverAdapter) ResolveForReview(
 		return "", "", fmt.Errorf("lookup repository by provider info: %w", err)
 	}
 	if existing != nil && existing.LocalPath != "" {
-		baseBranch := defaultBranch
-		if baseBranch == "" {
-			baseBranch = existing.DefaultBranch
-		}
-		if baseBranch == "" {
-			baseBranch = a.detectAndPersistDefaultBranch(ctx, existing, existing.LocalPath)
-		}
+		baseBranch := a.resolveReviewBaseBranch(ctx, existing, existing.LocalPath, defaultBranch)
 		return existing.ID, baseBranch, nil
 	}
 
@@ -694,16 +693,29 @@ func (a *repositoryResolverAdapter) ResolveForReview(
 		return "", "", fmt.Errorf("find/create repository: %w", err)
 	}
 
-	baseBranch := defaultBranch
-	if baseBranch == "" {
-		baseBranch = repo.DefaultBranch
-	}
-	// When no default branch is known (e.g. issue watch with no PR context),
-	// detect it from the cloned repo's HEAD.
-	if baseBranch == "" && localPath != "" {
-		baseBranch = a.detectAndPersistDefaultBranch(ctx, repo, localPath)
-	}
+	baseBranch := a.resolveReviewBaseBranch(ctx, repo, localPath, defaultBranch)
 	return repo.ID, baseBranch, nil
+}
+
+func (a *repositoryResolverAdapter) resolveReviewBaseBranch(
+	ctx context.Context,
+	repo *taskmodels.Repository,
+	localPath string,
+	requestedBranch string,
+) string {
+	if requestedBranch != "" {
+		return requestedBranch
+	}
+	stored := strings.TrimSpace(repo.DefaultBranch)
+	if stored == defaultMasterBranch && localPath != "" {
+		if detected := detectGitDefaultBranch(localPath); detected == defaultMainBranch {
+			return a.persistDetectedDefaultBranch(ctx, repo, detected)
+		}
+	}
+	if stored != "" {
+		return stored
+	}
+	return a.detectAndPersistDefaultBranch(ctx, repo, localPath)
 }
 
 // detectAndPersistDefaultBranch reads the default branch from the local clone
@@ -714,6 +726,17 @@ func (a *repositoryResolverAdapter) detectAndPersistDefaultBranch(
 	detected := detectGitDefaultBranch(localPath)
 	if detected == "" {
 		return ""
+	}
+	return a.persistDetectedDefaultBranch(ctx, repo, detected)
+}
+
+func (a *repositoryResolverAdapter) persistDetectedDefaultBranch(
+	ctx context.Context,
+	repo *taskmodels.Repository,
+	detected string,
+) string {
+	if strings.TrimSpace(repo.DefaultBranch) == detected {
+		return detected
 	}
 	if _, err := a.taskSvc.UpdateRepository(ctx, repo.ID, &taskservice.UpdateRepositoryRequest{
 		DefaultBranch: &detected,
@@ -729,11 +752,8 @@ func (a *repositoryResolverAdapter) detectAndPersistDefaultBranch(
 // detectGitDefaultBranch reads the default branch of a git repository.
 // Returns empty string on any failure.
 func detectGitDefaultBranch(repoPath string) string {
-	branch, err := gitref.DefaultBranch(repoPath)
+	branch, err := gitref.DefaultBranchOrEmpty(repoPath)
 	if err != nil {
-		return ""
-	}
-	if branch == "HEAD" {
 		return ""
 	}
 	return branch

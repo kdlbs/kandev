@@ -22,10 +22,13 @@ const headFile = "HEAD"
 // to the wrong ref.
 //
 // Resolution order:
-//  1. main, preferring origin/main over a local main ref
-//  2. refs/remotes/origin/HEAD when set
-//  3. master, preferring origin/master over a local master ref
-//  4. The current HEAD as a last resort, so brand-new repos with only a
+//  1. refs/remotes/origin/HEAD when set, except origin/HEAD=master yields to
+//     origin/main when it exists
+//  2. origin/main
+//  3. origin/master
+//  4. local main
+//  5. local master
+//  6. The current HEAD as a last resort, so brand-new repos with only a
 //     feature branch still produce a value — callers that care about
 //     correctness can override.
 func DefaultBranch(repoPath string) (string, error) {
@@ -38,16 +41,42 @@ func DefaultBranch(repoPath string) (string, error) {
 		return "", err
 	}
 	commonDir := ResolveCommonGitDir(gitDir)
-	if branch := pickNamedBranch(commonDir, "main"); branch != "" {
-		return branch, nil
+	commonDir, err = guardRepoPath(commonDir)
+	if err != nil {
+		return "", err
 	}
 	if branch := readOriginHEAD(commonDir); branch != "" {
+		if branch == "master" {
+			if refExists(commonDir, "refs/remotes/origin/main") {
+				return "main", nil
+			}
+		}
 		return branch, nil
 	}
-	if branch := pickNamedBranch(commonDir, "master"); branch != "" {
-		return branch, nil
+	for _, candidate := range []struct {
+		ref    string
+		branch string
+	}{
+		{"refs/remotes/origin/main", "main"},
+		{"refs/remotes/origin/master", "master"},
+		{"refs/heads/main", "main"},
+		{"refs/heads/master", "master"},
+	} {
+		if refExists(commonDir, candidate.ref) {
+			return candidate.branch, nil
+		}
 	}
 	return readHEADBranchFallback(gitDir)
+}
+
+// DefaultBranchOrEmpty returns DefaultBranch, but collapses detached HEAD's
+// literal "HEAD" sentinel to empty for callers that persist branch names.
+func DefaultBranchOrEmpty(repoPath string) (string, error) {
+	branch, err := DefaultBranch(repoPath)
+	if err != nil || branch == headFile {
+		return "", err
+	}
+	return branch, nil
 }
 
 // guardRepoPath rejects relative paths and any path containing `..` segments
@@ -152,21 +181,13 @@ func parseSymbolicRefToBranch(line string) string {
 	return ""
 }
 
-func pickNamedBranch(commonDir, name string) string {
-	for _, ref := range []string{
-		"refs/remotes/origin/" + name,
-		"refs/heads/" + name,
-	} {
-		if refExists(commonDir, ref) {
-			return name
-		}
-	}
-	return ""
-}
-
 func refExists(commonDir, ref string) bool {
-	if _, err := os.Stat(filepath.Join(commonDir, ref)); err == nil {
-		return true
+	refPath, ok := safeRefPath(commonDir, ref)
+	if !ok {
+		return false
+	}
+	if info, err := os.Stat(refPath); err == nil {
+		return !info.IsDir()
 	}
 	content, err := os.ReadFile(filepath.Join(commonDir, "packed-refs"))
 	if err != nil {
@@ -186,6 +207,26 @@ func refExists(commonDir, ref string) bool {
 		}
 	}
 	return false
+}
+
+func safeRefPath(commonDir, ref string) (string, bool) {
+	if ref == "" || filepath.IsAbs(ref) {
+		return "", false
+	}
+	for _, part := range strings.FieldsFunc(ref, func(r rune) bool {
+		return r == '/' || r == filepath.Separator
+	}) {
+		if part == "" || part == "." || part == ".." {
+			return "", false
+		}
+	}
+	cleanCommon := filepath.Clean(commonDir)
+	candidate := filepath.Join(cleanCommon, filepath.Clean(ref))
+	rel, err := filepath.Rel(cleanCommon, candidate)
+	if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+		return "", false
+	}
+	return candidate, true
 }
 
 func readHEADBranchFallback(gitDir string) (string, error) {

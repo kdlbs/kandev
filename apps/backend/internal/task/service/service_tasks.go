@@ -473,7 +473,7 @@ func (s *Service) resolveRepoInputLocal(
 			// and feeds into os.Stat/ReadFile inside gitref.DefaultBranch, so
 			// without this guard a caller could traverse the filesystem.
 			if safePath, pathErr := s.resolveAllowedLocalPath(repoInput.LocalPath); pathErr == nil {
-				if probed, err := gitref.DefaultBranch(safePath); err == nil && probed != "" && probed != "HEAD" {
+				if probed, err := gitref.DefaultBranchOrEmpty(safePath); err == nil && probed != "" {
 					defaultBranch = probed
 				}
 			}
