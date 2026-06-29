@@ -162,7 +162,7 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 		return true
 	}
 	if state != nil && state.AutoFixExhaustedAt != nil {
-		return true
+		return !ciAutomationReadyToMerge(pr)
 	}
 	feedback, err := s.githubService.GetPRFeedback(ctx, pr.Owner, pr.Repo, pr.PRNumber)
 	if err != nil {
@@ -273,6 +273,17 @@ func (s *Service) dispatchCIAutomationPromptForPR(ctx context.Context, session *
 		return ciAutomationDispatchResult{kind: ciAutomationDispatchQueuedInsert}, nil
 	case models.TaskSessionStateWaitingForInput, models.TaskSessionStateIdle:
 		if !allowNewRound {
+			if s.messageQueue != nil {
+				metadata := ciAutomationMessageMetadataForPR(pr, signature)
+				_, replaced, err := s.messageQueue.QueueMessageWithCoalesceKey(ctx, session.ID, session.TaskID, chatPrompt, "", messagequeue.QueuedByWorkflow, false, nil, metadata, ciAutomationCoalesceKey(pr), false)
+				if err != nil && !errors.Is(err, messagequeue.ErrEntryNotFound) {
+					return ciAutomationDispatchResult{}, err
+				}
+				if replaced {
+					s.publishQueueStatusEvent(ctx, session.ID)
+					return ciAutomationDispatchResult{kind: ciAutomationDispatchQueuedReplace}, nil
+				}
+			}
 			return ciAutomationDispatchResult{}, errCIAutoFixRoundCapReached
 		}
 		if !s.recordCIAutomationUserMessage(ctx, session.TaskID, session.ID, chatPrompt) {

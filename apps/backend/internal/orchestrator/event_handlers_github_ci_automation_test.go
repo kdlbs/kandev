@@ -814,6 +814,52 @@ func TestHandleTaskPRCIAutomationSkipsAlreadyExhaustedPRBeforeFeedbackFetch(t *t
 	}
 }
 
+func TestHandleTaskPRCIAutomationAutoMergeRunsAfterAutoFixExhaustion(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	now := time.Now().UTC()
+	exhaustedAt := now.Add(-time.Minute)
+	pr := &github.TaskPR{
+		TaskID:         "task-1",
+		RepositoryID:   "repo-1",
+		Owner:          "acme",
+		Repo:           "widget",
+		PRNumber:       42,
+		State:          "open",
+		ChecksState:    "success",
+		ReviewState:    "approved",
+		MergeableState: "clean",
+		LastSyncedAt:   &now,
+	}
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:           "task-1",
+			AutoFixEnabled:   true,
+			AutoMergeEnabled: true,
+		},
+		ciPRState: &github.TaskCIPRAutomationState{
+			TaskID:             "task-1",
+			RepositoryID:       "repo-1",
+			PRNumber:           42,
+			AutoFixRoundCount:  ciAutomationMaxFixRounds,
+			AutoFixExhaustedAt: &exhaustedAt,
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomationWithRefresh(ctx, pr, false); err != nil {
+		t.Fatalf("handle exhausted auto-merge: %v", err)
+	}
+	if ghSvc.prFeedbackCalls != 0 {
+		t.Fatalf("expected exhausted auto-fix to skip feedback fetch, got %d calls", ghSvc.prFeedbackCalls)
+	}
+	if ghSvc.mergeCalls != 1 {
+		t.Fatalf("expected auto-merge after exhausted auto-fix, got %d calls", ghSvc.mergeCalls)
+	}
+}
+
 func TestDispatchCIAutomationPromptForPRIdleRoundCapUsesDedicatedError(t *testing.T) {
 	ctx := context.Background()
 	svc := &Service{}
@@ -889,6 +935,69 @@ func TestHandleTaskPRCIAutomationAtRoundCapReplacesPendingAutoFix(t *testing.T) 
 
 	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
 		t.Fatalf("handle capped replacement: %v", err)
+	}
+	status := svc.messageQueue.GetStatus(ctx, "session-1")
+	if status.Count != 1 || !strings.Contains(status.Entries[0].Content, "lint") || strings.Contains(status.Entries[0].Content, "old feedback") {
+		t.Fatalf("expected pending auto-fix replacement with latest feedback, got %+v", status)
+	}
+	if len(ghSvc.fixAttempts) != 1 || ghSvc.fixAttempts[0].IncrementRound {
+		t.Fatalf("expected replacement checkpoint without another round, got %+v", ghSvc.fixAttempts)
+	}
+	if len(ghSvc.ciExhausted) != 0 {
+		t.Fatalf("expected pending round replacement not exhaustion, got %+v", ghSvc.ciExhausted)
+	}
+}
+
+func TestHandleTaskPRCIAutomationAtRoundCapReplacesPendingAutoFixForWaitingSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateWaitingForInput)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	now := time.Now().UTC()
+	pr := &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		Owner:        "acme",
+		Repo:         "widget",
+		PRNumber:     42,
+		State:        "open",
+		LastSyncedAt: &now,
+	}
+	_, _, err := svc.messageQueue.QueueMessageWithCoalesceKey(ctx, "session-1", "task-1", "@ci-auto-fix\n\nold feedback", "", messagequeue.QueuedByWorkflow, false, nil, ciAutomationMessageMetadataForPR(pr, "old"), ciAutomationCoalesceKey(pr), true)
+	if err != nil {
+		t.Fatalf("seed pending auto-fix: %v", err)
+	}
+	previous := ciAutomationCurrentCheckpoint(&github.PRFeedback{
+		Checks: []github.CheckRun{{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit"}},
+	})
+	previousJSON, previousSignature := encodeCIAutomationCheckpoint(previous)
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			EffectiveAutoFixPrompt: "Fix the PR\n\n{{pr.feedback}}",
+		},
+		triggerPRSyncAllPRs: []*github.TaskPR{pr},
+		prFeedback: &github.PRFeedback{
+			Checks: []github.CheckRun{
+				{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit"},
+				{Name: "lint", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/lint"},
+			},
+		},
+		ciPRState: &github.TaskCIPRAutomationState{
+			TaskID:                "task-1",
+			RepositoryID:          "repo-1",
+			PRNumber:              42,
+			LastFixSignature:      previousSignature,
+			LastFixCheckpointJSON: previousJSON,
+			LastFixEnqueuedAt:     &now,
+			AutoFixRoundCount:     ciAutomationMaxFixRounds,
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle capped waiting replacement: %v", err)
 	}
 	status := svc.messageQueue.GetStatus(ctx, "session-1")
 	if status.Count != 1 || !strings.Contains(status.Entries[0].Content, "lint") || strings.Contains(status.Entries[0].Content, "old feedback") {

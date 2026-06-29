@@ -190,6 +190,9 @@ func TestStoreTaskCIPRState_MarkExhaustedAndResetOnReenable(t *testing.T) {
 	if state.AutoFixRoundCount != 0 || state.AutoFixExhaustedAt != nil || state.LastError != nil {
 		t.Fatalf("expected auto-fix round state reset, got %+v", state)
 	}
+	if state.LastFixSignature != "" || state.LastFixCheckpointJSON != "" || state.LastFixEnqueuedAt != nil || state.LastFixSessionID != nil {
+		t.Fatalf("expected auto-fix checkpoint state reset, got %+v", state)
+	}
 }
 
 func TestStoreTaskCIPRState_RefreshCheckpointClearsPromptDispatchMetadata(t *testing.T) {

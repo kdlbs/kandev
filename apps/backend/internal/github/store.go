@@ -1082,6 +1082,10 @@ func (s *Store) UpdateTaskCIOptions(ctx context.Context, taskID string, patch Ta
 		if _, err := tx.ExecContext(writeCtx, `
 			UPDATE github_task_ci_pr_state
 			SET auto_fix_round_count = 0,
+			    last_fix_signature = '',
+			    last_fix_checkpoint_json = '',
+			    last_fix_enqueued_at = NULL,
+			    last_fix_session_id = NULL,
 			    last_error = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN NULL ELSE last_error END,
 			    auto_fix_exhausted_at = NULL,
 			    updated_at = ?
