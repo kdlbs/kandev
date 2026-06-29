@@ -3,19 +3,24 @@
 import { useEffect, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
+import type { TaskDeletionReason } from "@/lib/types/http";
 
-/** Maps a backend deletion reason to a human-readable explanation. */
+// Exhaustive over TaskDeletionReason: adding or renaming a reason is a compile
+// error here until a matching message is provided.
+const REASON_MESSAGES: Record<TaskDeletionReason, string> = {
+  pr_approved_by_user:
+    "Its pull request was approved, so this review task was closed automatically.",
+  pr_merged_or_closed:
+    "Its pull request was merged or closed, so this review task was closed automatically.",
+  issue_closed: "Its issue was closed, so this task was closed automatically.",
+};
+
+/** Maps a backend deletion reason (an untyped wire string) to an explanation. */
 function describeReason(reason: string | undefined): string {
-  switch (reason) {
-    case "pr_approved_by_user":
-      return "Its pull request was approved, so this review task was closed automatically.";
-    case "pr_merged_or_closed":
-      return "Its pull request was merged or closed, so this review task was closed automatically.";
-    case "issue_closed":
-      return "Its issue was closed, so this task was closed automatically.";
-    default:
-      return "This task was closed automatically.";
-  }
+  return (
+    (reason && REASON_MESSAGES[reason as TaskDeletionReason]) ??
+    "This task was closed automatically."
+  );
 }
 
 /**
