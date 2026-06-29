@@ -100,7 +100,7 @@ if [[ "$trusted_script_count" != "2" ]]; then
 fi
 pass "OpenCode review executes the parser script from the trusted base commit in both workflow paths"
 
-artifact_upload_count="$(count_occurrences 'uses: actions/upload-artifact@v4')"
+artifact_upload_count="$(count_occurrences 'uses: actions/upload-artifact@')"
 if [[ "$artifact_upload_count" != "2" ]]; then
   fail "OpenCode review artifacts are uploaded from both workflow paths"
 fi

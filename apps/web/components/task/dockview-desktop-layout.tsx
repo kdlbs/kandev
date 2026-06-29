@@ -536,6 +536,32 @@ type DockviewDesktopLayoutProps = {
   compact?: boolean;
 };
 
+function ReviewDialogSlot({
+  sessionId,
+  review,
+}: {
+  sessionId: string | null;
+  review: ReturnType<typeof useReviewDialog>;
+}) {
+  if (!sessionId) {
+    return null;
+  }
+
+  return (
+    <ReviewDialog
+      open={review.reviewDialogOpen}
+      onOpenChange={review.setReviewDialogOpen}
+      sessionId={sessionId}
+      baseBranch={review.baseBranch}
+      onSendComments={review.handleReviewSendComments}
+      onOpenFile={review.reviewOpenFile}
+      gitStatusFiles={review.reviewGitStatusFiles}
+      cumulativeDiff={review.reviewCumulativeDiff}
+      prDiffFiles={review.reviewPRDiffFiles}
+    />
+  );
+}
+
 export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   sessionId,
   repository,
@@ -643,19 +669,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       </div>
       <BottomTerminalPanel />
       <PanelPortalHost renderPanel={renderPanel} />
-      {effectiveSessionId && (
-        <ReviewDialog
-          open={review.reviewDialogOpen}
-          onOpenChange={review.setReviewDialogOpen}
-          sessionId={effectiveSessionId}
-          baseBranch={review.baseBranch}
-          onSendComments={review.handleReviewSendComments}
-          onOpenFile={review.reviewOpenFile}
-          gitStatusFiles={review.reviewGitStatusFiles}
-          cumulativeDiff={review.reviewCumulativeDiff}
-          prDiffFiles={review.reviewPRDiffFiles}
-        />
-      )}
+      <ReviewDialogSlot sessionId={effectiveSessionId} review={review} />
     </div>
   );
 });
