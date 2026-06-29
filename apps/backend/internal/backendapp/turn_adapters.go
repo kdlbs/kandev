@@ -98,7 +98,18 @@ type taskDeleterAdapter struct {
 }
 
 func (a *taskDeleterAdapter) DeleteTask(ctx context.Context, taskID string) error {
-	err := a.svc.DeleteTask(ctx, taskID)
+	return a.translateDeleteErr(a.svc.DeleteTask(ctx, taskID))
+}
+
+// DeleteTaskWithReason satisfies github.TaskDeleterWithReason so the review/issue
+// cleanup paths can attach a deletion reason to the task.deleted event.
+func (a *taskDeleterAdapter) DeleteTaskWithReason(ctx context.Context, taskID, reason string) error {
+	return a.translateDeleteErr(a.svc.DeleteTaskWithReason(ctx, taskID, reason))
+}
+
+// translateDeleteErr maps the task repository's ErrTaskNotFound sentinel to
+// github.ErrTaskNotFound so cleanup can classify the "already gone" case.
+func (a *taskDeleterAdapter) translateDeleteErr(err error) error {
 	if err == nil {
 		return nil
 	}

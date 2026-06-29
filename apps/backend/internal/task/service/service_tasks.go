@@ -837,6 +837,17 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 // For fast UI response, the DB delete and event publish happen synchronously,
 // while agent stopping and worktree cleanup happen asynchronously.
 func (s *Service) DeleteTask(ctx context.Context, id string) error {
+	return s.deleteTaskWithReason(ctx, id, "")
+}
+
+// DeleteTaskWithReason behaves like DeleteTask but attaches a machine-readable
+// reason (e.g. "pr_approved_by_user") to the task.deleted event so the frontend
+// can explain why a focused task vanished.
+func (s *Service) DeleteTaskWithReason(ctx context.Context, id, reason string) error {
+	return s.deleteTaskWithReason(ctx, id, reason)
+}
+
+func (s *Service) deleteTaskWithReason(ctx context.Context, id, reason string) error {
 	start := time.Now()
 
 	// 1. Get task (sync, fast)
@@ -879,7 +890,11 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 	}
 
 	// 5. Publish event (sync, fast) - frontend removes task immediately
-	s.publishTaskEvent(ctx, events.TaskDeleted, task, nil)
+	var extra map[string]interface{}
+	if reason != "" {
+		extra = map[string]interface{}{"reason": reason}
+	}
+	s.publishTaskEventWithExtra(ctx, events.TaskDeleted, task, nil, extra)
 	s.logger.Info("task deleted",
 		zap.String("task_id", id),
 		zap.Duration("duration", time.Since(start)))

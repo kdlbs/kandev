@@ -31,6 +31,12 @@ func (s *Service) PublishTaskDeleted(ctx context.Context, task *models.Task) {
 
 // publishTaskEvent publishes task events to the event bus
 func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *models.Task, oldState *v1.TaskState, oldWorkflowIDs ...string) {
+	s.publishTaskEventWithExtra(ctx, eventType, task, oldState, nil, oldWorkflowIDs...)
+}
+
+// publishTaskEventWithExtra is publishTaskEvent with caller-supplied extra
+// fields merged into the payload (e.g. a deletion reason on task.deleted).
+func (s *Service) publishTaskEventWithExtra(ctx context.Context, eventType string, task *models.Task, oldState *v1.TaskState, extra map[string]interface{}, oldWorkflowIDs ...string) {
 	if s.eventBus == nil {
 		return
 	}
@@ -78,6 +84,9 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 	}
 	if len(oldWorkflowIDs) > 0 && oldWorkflowIDs[0] != "" && oldWorkflowIDs[0] != task.WorkflowID {
 		data["old_workflow_id"] = oldWorkflowIDs[0]
+	}
+	for k, v := range extra {
+		data[k] = v
 	}
 
 	event := bus.NewEvent(eventType, "task-service", data)

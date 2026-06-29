@@ -55,6 +55,7 @@ function makeStore(initial: Partial<AppState> = {}) {
       };
     }),
     removeTaskFromSidebarPrefs: vi.fn(),
+    setTaskDeletedNotification: vi.fn(),
     ...initial,
   } as unknown as AppState;
 
@@ -551,5 +552,78 @@ describe("task.deleted cleanup", () => {
     const state = store.getState();
     expect(state.tasks.lastSessionByTaskId).not.toHaveProperty("t1");
     expect(state.tasks.lastSessionByTaskId).toHaveProperty("t2", SESS_OTHER);
+  });
+});
+
+describe("task.deleted live notification + redirect", () => {
+  function makeActiveStore() {
+    return makeStore({
+      kanban: { workflowId: "wf1", steps: [], tasks: [{ id: "t1", workflowId: "wf1" }] },
+      tasks: {
+        activeTaskId: "t1",
+        activeSessionId: null,
+        pinnedSessionId: null,
+        lastSessionByTaskId: {},
+      },
+      environmentIdBySessionId: {},
+    } as unknown as Partial<AppState>);
+  }
+
+  it("sets a task-deleted notification (with title + reason) when the focused task is deleted", () => {
+    const store = makeActiveStore();
+    const handlers = registerTasksHandlers(store);
+
+    handlers["task.deleted"]!(
+      makeDeletedMessage({
+        task_id: "t1",
+        workflow_id: "wf1",
+        title: "Review PR #11259",
+        reason: "pr_approved_by_user",
+      }),
+    );
+
+    expect(store.getState().setTaskDeletedNotification).toHaveBeenCalledWith({
+      taskId: "t1",
+      title: "Review PR #11259",
+      reason: "pr_approved_by_user",
+    });
+  });
+
+  it("does not notify when a non-focused task is deleted", () => {
+    const store = makeStore({
+      kanban: { workflowId: "wf1", steps: [], tasks: [{ id: "t1", workflowId: "wf1" }] },
+      tasks: {
+        activeTaskId: "t2",
+        activeSessionId: null,
+        pinnedSessionId: null,
+        lastSessionByTaskId: {},
+      },
+      environmentIdBySessionId: {},
+    } as unknown as Partial<AppState>);
+    const handlers = registerTasksHandlers(store);
+
+    handlers["task.deleted"]!(makeDeletedMessage({ task_id: "t1", workflow_id: "wf1" }));
+
+    expect(store.getState().setTaskDeletedNotification).not.toHaveBeenCalled();
+  });
+
+  it("soft-redirects home when parked on the deleted task's route", () => {
+    window.history.replaceState({}, "", "/t/t1");
+    const store = makeActiveStore();
+    const handlers = registerTasksHandlers(store);
+
+    handlers["task.deleted"]!(makeDeletedMessage({ task_id: "t1", workflow_id: "wf1" }));
+
+    expect(window.location.pathname).toBe("/");
+  });
+
+  it("does not redirect when viewing a different route", () => {
+    window.history.replaceState({}, "", "/t/other");
+    const store = makeActiveStore();
+    const handlers = registerTasksHandlers(store);
+
+    handlers["task.deleted"]!(makeDeletedMessage({ task_id: "t1", workflow_id: "wf1" }));
+
+    expect(window.location.pathname).toBe("/t/other");
   });
 });

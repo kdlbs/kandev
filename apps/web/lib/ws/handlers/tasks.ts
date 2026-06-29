@@ -8,6 +8,8 @@ import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { toKanbanTask, type TaskLike } from "@/lib/kanban/map-task";
 import { sessionId as toSessionId } from "@/lib/types/http";
 import { mergeTaskRepositoryFields } from "@/lib/ws/handlers/task-repositories";
+import { softNavigate } from "@/lib/routing/client-router";
+import { linkToTask } from "@/lib/links";
 import {
   clearPinnedSessionIfOverridden,
   shouldPreservePinnedSessionForTask,
@@ -117,6 +119,17 @@ function removeTaskFromBothKanbans(state: AppState, wfId: string, taskId: string
   return next;
 }
 
+/**
+ * Soft-redirect away from a deleted task's page. Only fires when the user is
+ * currently parked on that task's route (`/t/<id>`), so a background deletion
+ * of some other task never yanks the user elsewhere.
+ */
+function redirectAwayFromDeletedTask(deletedId: string): void {
+  if (typeof window === "undefined") return;
+  if (window.location.pathname !== linkToTask(deletedId)) return;
+  softNavigate("/", "replace");
+}
+
 export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "task.created": (message) => {
@@ -205,6 +218,8 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
         useContextFilesStore.getState().clearSession(sid);
       }
 
+      const wasActive = currentState.tasks.activeTaskId === deletedId;
+
       store.setState((state) => {
         const isActive = state.tasks.activeTaskId === deletedId;
         let next = removeTaskFromBothKanbans(state, wfId, deletedId);
@@ -217,6 +232,18 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
         }
         return next;
       });
+
+      // The focused task was deleted out from under the user (e.g. a review
+      // task whose PR was approved). Surface a toast explaining why and move
+      // off the now-dead route instead of leaving them on a failing page.
+      if (wasActive) {
+        store.getState().setTaskDeletedNotification({
+          taskId: deletedId,
+          title: message.payload.title,
+          reason: message.payload.reason,
+        });
+        redirectAwayFromDeletedTask(deletedId);
+      }
     },
     "task.state_changed": (message) => {
       // Skip ephemeral tasks (e.g., quick chat) - they shouldn't appear on the Kanban board

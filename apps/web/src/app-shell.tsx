@@ -7,6 +7,7 @@ import { LogBufferBridge } from "@/components/log-buffer-bridge";
 import { QuickChatProvider } from "@/components/quick-chat/quick-chat-provider";
 import { RecentTaskSwitcher } from "@/components/task/recent-task-switcher";
 import { SessionFailureToastBridge } from "@/components/session-failure-toast-bridge";
+import { TaskDeletedToastBridge } from "@/components/task-deleted-toast-bridge";
 import { SidebarViewsSyncBridge } from "@/components/sidebar-views-sync-bridge";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ToastProvider } from "@/components/toast-provider";
@@ -27,6 +28,7 @@ export function AppShell({ children }: AppShellProps) {
           <ToastProvider>
             <SonnerToaster richColors position="top-right" />
             <SessionFailureToastBridge />
+            <TaskDeletedToastBridge />
             <SidebarViewsSyncBridge />
             <LogBufferBridge />
             <CommandRegistryProvider>

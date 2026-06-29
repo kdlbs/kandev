@@ -98,6 +98,14 @@ export type SessionFailureNotification = {
   message: string;
 };
 
+export type TaskDeletedNotification = {
+  taskId: string;
+  /** Task title, when known, so the toast can name it. */
+  title?: string;
+  /** Backend deletion reason (e.g. "pr_approved_by_user"), when known. */
+  reason?: string;
+};
+
 export type BottomTerminalState = {
   isOpen: boolean;
   pendingCommand: string | null;
@@ -146,6 +154,8 @@ export type UISliceState = {
   quickChat: QuickChatState;
   configChat: ConfigChatState;
   sessionFailureNotification: SessionFailureNotification | null;
+  /** Set when the focused task is deleted live, so a toast can explain why. */
+  taskDeletedNotification: TaskDeletedNotification | null;
   bottomTerminal: BottomTerminalState;
   sidebarViews: SidebarSliceState;
   /** Parent task IDs whose subtasks are collapsed in the sidebar. Tab-scoped (sessionStorage). */
@@ -196,6 +206,7 @@ export type UISliceActions = {
   setActiveConfigChatSession: (sessionId: string) => void;
   renameConfigChatSession: (sessionId: string, name: string) => void;
   setSessionFailureNotification: (n: SessionFailureNotification | null) => void;
+  setTaskDeletedNotification: (n: TaskDeletedNotification | null) => void;
   toggleBottomTerminal: () => void;
   openBottomTerminalWithCommand: (command: string) => void;
   clearBottomTerminalCommand: () => void;

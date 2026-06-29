@@ -228,6 +228,7 @@ export type AppState = {
   quickChat: (typeof defaultUIState)["quickChat"];
   configChat: (typeof defaultUIState)["configChat"];
   sessionFailureNotification: (typeof defaultUIState)["sessionFailureNotification"];
+  taskDeletedNotification: (typeof defaultUIState)["taskDeletedNotification"];
   bottomTerminal: (typeof defaultUIState)["bottomTerminal"];
   sidebarViews: (typeof defaultUIState)["sidebarViews"];
   collapsedSubtaskParents: (typeof defaultUIState)["collapsedSubtaskParents"];
@@ -380,6 +381,7 @@ export type AppState = {
   setActiveConfigChatSession: (sessionId: string) => void;
   renameConfigChatSession: (sessionId: string, name: string) => void;
   setSessionFailureNotification: (n: UISliceTypes.SessionFailureNotification | null) => void;
+  setTaskDeletedNotification: (n: UISliceTypes.TaskDeletedNotification | null) => void;
   toggleBottomTerminal: () => void;
   openBottomTerminalWithCommand: (command: string) => void;
   clearBottomTerminalCommand: () => void;
