@@ -167,6 +167,9 @@ func (s *Service) deleteConfirmedWorkspaceCascade(ctx context.Context, workspace
 	if err != nil {
 		return err
 	}
+	// Runtime cleanup needs task rows that exist before the cascade. The
+	// repository still returns every child row deleted by the transaction for
+	// event publication, including rows created after this cleanup snapshot.
 	cleanups, err := s.prepareWorkspaceDeleteTaskCleanups(ctx, tasks)
 	if err != nil {
 		return err

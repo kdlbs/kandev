@@ -145,7 +145,7 @@ func (r *Repository) DeleteWorkspaceCascadeWithName(
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := r.lockWorkspaceForCascadeDelete(ctx, tx, id, name); err != nil {
+	if err := r.confirmWorkspaceNameForCascadeDelete(ctx, tx, id, name); err != nil {
 		return nil, nil, err
 	}
 	tasks, err := r.listWorkspaceCascadeDeleteTasks(ctx, tx, id)
@@ -157,6 +157,8 @@ func (r *Repository) DeleteWorkspaceCascadeWithName(
 		return nil, nil, err
 	}
 
+	// Keep the name predicate on the delete itself so a rename racing after the
+	// read-only confirmation cannot delete the newly renamed workspace.
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM workspaces
 		WHERE id = ? AND name = ?
@@ -187,20 +189,20 @@ func (r *Repository) DeleteWorkspaceCascadeWithName(
 	return tasks, workflows, nil
 }
 
-func (r *Repository) lockWorkspaceForCascadeDelete(ctx context.Context, tx *sqlx.Tx, id, name string) error {
-	result, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE workspaces
-		SET updated_at = ?
+func (r *Repository) confirmWorkspaceNameForCascadeDelete(ctx context.Context, tx *sqlx.Tx, id, name string) error {
+	var matched int
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT 1
+		FROM workspaces
 		WHERE id = ? AND name = ?
-	`), time.Now().UTC(), id, name)
-	if err != nil {
-		return err
-	}
-	rows, _ := result.RowsAffected()
-	if rows > 0 {
+	`), id, name).Scan(&matched)
+	if err == nil {
 		return nil
 	}
-	return r.confirmedWorkspaceDeleteMismatch(ctx, tx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return r.confirmedWorkspaceDeleteMismatch(ctx, tx, id)
+	}
+	return err
 }
 
 func (r *Repository) confirmedWorkspaceDeleteMismatch(ctx context.Context, tx *sqlx.Tx, id string) error {
@@ -243,8 +245,7 @@ func (r *Repository) listWorkspaceCascadeDeleteWorkflows(
 	workspaceID string,
 ) ([]*models.Workflow, error) {
 	rows, err := tx.QueryContext(ctx, r.db.Rebind(`
-		SELECT id, workspace_id, name, description, agent_profile_id,
-			workflow_template_id, sort_order, hidden, style, created_at, updated_at
+		SELECT `+workflowSelectColumns+`
 		FROM workflows
 		WHERE workspace_id = ?
 		ORDER BY sort_order ASC, created_at ASC
@@ -254,30 +255,7 @@ func (r *Repository) listWorkspaceCascadeDeleteWorkflows(
 	}
 	defer func() { _ = rows.Close() }()
 
-	var result []*models.Workflow
-	for rows.Next() {
-		workflow := &models.Workflow{}
-		var agentProfileID, workflowTemplateID, style sql.NullString
-		err := rows.Scan(&workflow.ID, &workflow.WorkspaceID, &workflow.Name, &workflow.Description,
-			&agentProfileID, &workflowTemplateID, &workflow.SortOrder, &workflow.Hidden, &style,
-			&workflow.CreatedAt, &workflow.UpdatedAt)
-		if err != nil {
-			return nil, err
-		}
-		if agentProfileID.Valid {
-			workflow.AgentProfileID = agentProfileID.String
-		}
-		if workflowTemplateID.Valid {
-			workflow.WorkflowTemplateID = &workflowTemplateID.String
-		}
-		if style.Valid && style.String != "" {
-			workflow.Style = style.String
-		} else {
-			workflow.Style = models.WorkflowStyleKanban
-		}
-		result = append(result, workflow)
-	}
-	return result, rows.Err()
+	return scanWorkflowRows(rows)
 }
 
 // ListWorkspaces returns all workspaces

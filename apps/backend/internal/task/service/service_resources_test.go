@@ -303,7 +303,7 @@ func TestService_DeleteWorkspaceWithConfirmNamePublishesChildEventsAndCleansReso
 	}
 }
 
-func TestService_DeleteWorkspaceWithConfirmNamePublishesTransactionSnapshotEvents(t *testing.T) {
+func TestService_DeleteWorkspaceWithConfirmNamePublishesEventsForAllCascadeDeletedChildren(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
 
@@ -329,6 +329,9 @@ func TestService_DeleteWorkspaceWithConfirmNamePublishesTransactionSnapshotEvent
 		t.Fatalf("DeleteWorkspaceWithConfirmName: %v", err)
 	}
 
+	// This covers event publication from the repository cascade return value.
+	// Runtime cleanup is prepared before the cascade snapshot, so late-created
+	// children are not expected to have live runtime cleanup in this race.
 	eventCounts := make(map[string]int)
 	for _, event := range eventBus.GetPublishedEvents() {
 		eventCounts[event.Type]++
