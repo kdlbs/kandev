@@ -370,6 +370,12 @@ type Service struct {
 	// clobber the task back to REVIEW while work is active.
 	taskRuntimeStateMu sync.Mutex
 
+	// completedExecutions records execution IDs that have reached
+	// agent.completed. Buffered stream/tool events for these executions must not
+	// wake their session back to RUNNING after the completion path makes it
+	// promptable again.
+	completedExecutions sync.Map
+
 	// Session reset flags: sessionID -> true while resetAgentContext is restarting process.
 	// Used to suppress stale ready events and avoid draining queued prompts mid-reset.
 	resetInProgressSessions sync.Map
@@ -484,6 +490,9 @@ func NewService(
 	exec.SetOnSessionStateChange(func(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error {
 		s.updateTaskSessionState(ctx, taskID, sessionID, state, errorMessage, true)
 		return nil
+	})
+	exec.SetOnSessionStarting(func(ctx context.Context, taskID string, session *models.TaskSession) error {
+		return s.setSessionStarting(ctx, taskID, session)
 	})
 	exec.SetOnLaunchFailed(s.handleSessionLaunchFailed)
 	exec.SetOnAgentStartFailed(s.handleAgentStartFailed)

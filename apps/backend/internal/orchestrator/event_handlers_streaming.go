@@ -229,7 +229,7 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 		// flipped to IN_PROGRESS in lockstep — otherwise an out-of-turn tool
 		// event (e.g. a Monitor watcher firing after on_turn_complete moved
 		// the task to REVIEW) leaves session=RUNNING with task=REVIEW.
-		s.setSessionRunning(ctx, payload.TaskID, payload.SessionID)
+		s.setSessionRunningForExecution(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID)
 	}
 }
 
@@ -369,7 +369,7 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 		// see comment in handleToolCallEvent for the REVIEW/RUNNING split bug.
 		if payload.Data.ToolStatus == agentEventComplete || payload.Data.ToolStatus == agentEventCompleted ||
 			payload.Data.ToolStatus == "success" || payload.Data.ToolStatus == agentEventError || payload.Data.ToolStatus == agentEventFailed {
-			s.setSessionRunning(ctx, payload.TaskID, payload.SessionID)
+			s.setSessionRunningForExecution(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID)
 		}
 	}
 }
@@ -540,6 +540,61 @@ func isTerminalSessionState(s models.TaskSessionState) bool {
 		s == models.TaskSessionStateCancelled
 }
 
+func terminalExecutionKey(sessionID, executionID string) string {
+	return sessionID + "\x00" + executionID
+}
+
+func (s *Service) markExecutionCompleted(sessionID, executionID string) {
+	if sessionID == "" || executionID == "" {
+		return
+	}
+	s.completedExecutions.Store(terminalExecutionKey(sessionID, executionID), struct{}{})
+}
+
+func (s *Service) isExecutionCompleted(sessionID, executionID string) bool {
+	if sessionID == "" || executionID == "" {
+		return false
+	}
+	_, ok := s.completedExecutions.Load(terminalExecutionKey(sessionID, executionID))
+	return ok
+}
+
+func (s *Service) setSessionStarting(ctx context.Context, taskID string, session *models.TaskSession) error {
+	if session == nil {
+		return nil
+	}
+
+	s.taskRuntimeStateMu.Lock()
+	defer s.taskRuntimeStateMu.Unlock()
+
+	current, err := s.repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		return err
+	}
+	if isTerminalSessionState(current.State) {
+		return nil
+	}
+
+	oldState := current.State
+	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+		return err
+	}
+
+	if oldState != session.State {
+		if refreshed, err := s.repo.GetTaskSession(ctx, session.ID); err == nil && refreshed != nil {
+			var stateUpdatedAt *time.Time
+			if !refreshed.UpdatedAt.IsZero() {
+				t := refreshed.UpdatedAt.UTC()
+				stateUpdatedAt = &t
+			}
+			s.publishTaskSessionStateChanged(ctx, taskID, session.ID, oldState, session.State, session.ErrorMessage, stateUpdatedAt, refreshed)
+		}
+	}
+
+	s.writeTaskInProgressForRuntime(ctx, taskID)
+	return nil
+}
+
 func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, sessionID string, preloadedSession ...*models.TaskSession) {
 	// Resolve session up front so we can skip the redundant task-state write
 	// when the session was already WAITING_FOR_INPUT. Without this guard, every
@@ -673,6 +728,10 @@ func (s *Service) writeTaskReviewStateOnCancel(ctx context.Context, taskID, sess
 }
 
 func (s *Service) setSessionRunning(ctx context.Context, taskID, sessionID string, preloadedSession ...*models.TaskSession) {
+	s.setSessionRunningForExecution(ctx, taskID, sessionID, "", preloadedSession...)
+}
+
+func (s *Service) setSessionRunningForExecution(ctx context.Context, taskID, sessionID, executionID string, preloadedSession ...*models.TaskSession) {
 	s.taskRuntimeStateMu.Lock()
 	defer s.taskRuntimeStateMu.Unlock()
 
@@ -693,6 +752,13 @@ func (s *Service) setSessionRunning(ctx context.Context, taskID, sessionID strin
 	if isTerminalSessionState(session.State) {
 		return
 	}
+	if session.State == models.TaskSessionStateWaitingForInput && s.isExecutionCompleted(sessionID, executionID) {
+		s.logger.Debug("ignoring stream event for completed execution",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", executionID))
+		return
+	}
 
 	// Skip the redundant task-state write when the session is already RUNNING.
 	// Tool calls fire many events per turn and each was triggering an
@@ -710,6 +776,10 @@ func (s *Service) setSessionRunning(ctx context.Context, taskID, sessionID strin
 		return
 	}
 
+	s.writeTaskInProgressForRuntime(ctx, taskID)
+}
+
+func (s *Service) writeTaskInProgressForRuntime(ctx context.Context, taskID string) {
 	// Office tasks do NOT transition to IN_PROGRESS when their agent's
 	// session enters RUNNING. The user-facing task status (todo /
 	// in_review / done / blocked) reflects workflow position, not the

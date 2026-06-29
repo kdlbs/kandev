@@ -494,6 +494,11 @@ type TaskStateChangeFunc func(ctx context.Context, taskID string, state v1.TaskS
 // publish events (e.g. WebSocket notifications) alongside the DB update.
 type SessionStateChangeFunc func(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error
 
+// SessionStartingFunc is called when the executor has prepared/resumed an
+// execution and needs to mark the session STARTING while preserving other
+// session-row updates such as metadata.
+type SessionStartingFunc func(ctx context.Context, taskID string, session *models.TaskSession) error
+
 // AgentStartFailedFunc is called when the agent process fails to start.
 // It receives the task/session/execution IDs and the error. fromResume is true
 // when the failure occurred during a background session resume (rather than a
@@ -540,6 +545,11 @@ type Executor struct {
 	// Set by the orchestrator to route through updateTaskSessionState which
 	// updates the DB and publishes WebSocket events.
 	onSessionStateChange SessionStateChangeFunc
+
+	// Callback for STARTING writes that carry full session-row changes. Set by
+	// the orchestrator so launch/resume/model-switch transitions serialize with
+	// runtime task-state reconciliation.
+	onSessionStarting SessionStartingFunc
 
 	// Callback for agent process start failures. When set, the executor
 	// delegates failure handling to this callback, allowing the orchestrator
@@ -631,6 +641,11 @@ func (e *Executor) SetOnTaskStateChange(fn TaskStateChangeFunc) {
 // which updates the DB and publishes WebSocket events to the frontend.
 func (e *Executor) SetOnSessionStateChange(fn SessionStateChangeFunc) {
 	e.onSessionStateChange = fn
+}
+
+// SetOnSessionStarting sets a callback for full session-row STARTING updates.
+func (e *Executor) SetOnSessionStarting(fn SessionStartingFunc) {
+	e.onSessionStarting = fn
 }
 
 // SetRepoCloner sets the cloner used to clone provider-backed repositories on launch.

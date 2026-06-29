@@ -1135,6 +1135,43 @@ func TestHandleAgentCompleted_NoWorkflowStepLastSiblingMovesTaskToReview(t *test
 	}
 }
 
+func TestHandleAgentCompleted_ExitOnlyCompletesActiveTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "")
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.turnService = &repoTurnService{repo: repo}
+
+	if _, err := svc.turnService.StartTurn(ctx, "session1"); err != nil {
+		t.Fatalf("failed to seed active turn: %v", err)
+	}
+	if open := openTurnCount(t, repo, "session1"); open != 1 {
+		t.Fatalf("expected 1 open turn before completion, got %d", open)
+	}
+
+	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+		TaskID:           "task1",
+		SessionID:        "session1",
+		AgentExecutionID: "exec-1",
+	})
+	waitForStopCall(t, agentMgr)
+
+	if open := openTurnCount(t, repo, "session1"); open != 0 {
+		t.Fatalf("expected agent.completed to close the active turn, got %d open turns", open)
+	}
+	updated, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	if updated.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("expected session state %q, got %q", models.TaskSessionStateWaitingForInput, updated.State)
+	}
+}
+
 func TestHandleAgentFailedWithoutSession_DoesNotMoveTaskToReviewWhileSessionRuns(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

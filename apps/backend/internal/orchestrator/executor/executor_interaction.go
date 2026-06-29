@@ -525,7 +525,7 @@ func (e *Executor) persistModelSwitchState(ctx context.Context, taskID, sessionI
 	}
 	session.AgentProfileSnapshot["model"] = newModel
 
-	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+	if err := e.updateSessionStarting(ctx, taskID, session); err != nil {
 		e.logger.Error("failed to update session after model switch",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),

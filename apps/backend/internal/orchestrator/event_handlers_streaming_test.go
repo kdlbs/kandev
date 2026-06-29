@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -499,6 +500,46 @@ func TestToolEventsWakeSessionAndTaskTogether(t *testing.T) {
 	}
 }
 
+func TestToolUpdateFromCompletedExecutionDoesNotWakeWaitingSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.messageCreator = &mockMessageCreator{}
+
+	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s1",
+		AgentExecutionID: "exec-1",
+	})
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, updated.State)
+	require.Equal(t, v1.TaskStateReview, taskRepo.updatedStates["t1"])
+
+	svc.handleToolUpdateEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t1",
+		SessionID:   "s1",
+		ExecutionID: "exec-1",
+		Data: &lifecycle.AgentStreamEventData{
+			ToolCallID: "tc1",
+			ToolStatus: agentEventComplete,
+		},
+	})
+
+	updated, err = repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, updated.State,
+		"late tool events from the completed execution must not revive the session")
+	require.Equal(t, 1, taskRepo.stateWrites["t1"],
+		"late completed-execution tool event must not move the task back to IN_PROGRESS")
+}
+
 // TestSetSessionRunning_NoRedundantTaskWrites locks in the dedup: when the
 // session is already RUNNING, setSessionRunning must not re-write tasks.state.
 // Without the guard, every tool_call / tool_update fired UpdateTaskState
@@ -569,6 +610,29 @@ func TestSetSessionRunning_WritesOnTransition(t *testing.T) {
 
 	require.Equal(t, 1, taskRepo.stateWrites["t1"],
 		"setSessionRunning must write tasks.state on actual transition")
+	require.Equal(t, v1.TaskStateInProgress, taskRepo.updatedStates["t1"])
+}
+
+func TestSetSessionStartingWritesTaskInProgress(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateStarting
+	session.ErrorMessage = ""
+	session.UpdatedAt = time.Now().UTC()
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	require.NoError(t, svc.setSessionStarting(ctx, "t1", session))
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateStarting, updated.State)
+	require.Equal(t, 1, taskRepo.stateWrites["t1"])
 	require.Equal(t, v1.TaskStateInProgress, taskRepo.updatedStates["t1"])
 }
 

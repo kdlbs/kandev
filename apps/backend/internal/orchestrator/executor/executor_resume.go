@@ -247,11 +247,17 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 		session.Metadata["prepare_result"] = buildPrepareResultMetadata(resp.PrepareResult)
 	}
 
-	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+	var updateErr error
+	if startAgent {
+		updateErr = e.updateSessionStarting(ctx, taskID, session)
+	} else {
+		updateErr = e.repo.UpdateTaskSession(ctx, session)
+	}
+	if updateErr != nil {
 		e.logger.Error("failed to update agent session after launch",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
-			zap.Error(err))
+			zap.Error(updateErr))
 	}
 }
 
@@ -834,11 +840,17 @@ func (e *Executor) persistResumeState(ctx context.Context, taskID string, sessio
 		session.CompletedAt = nil
 	}
 
-	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+	var updateErr error
+	if startAgent {
+		updateErr = e.updateSessionStarting(ctx, taskID, session)
+	} else {
+		updateErr = e.repo.UpdateTaskSession(ctx, session)
+	}
+	if updateErr != nil {
 		e.logger.Error("failed to update task session for resume",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
-			zap.Error(err))
+			zap.Error(updateErr))
 	}
 }
 

@@ -124,6 +124,16 @@ func (e *Executor) updateSessionState(ctx context.Context, taskID, sessionID str
 	return e.repo.UpdateTaskSessionState(ctx, sessionID, state, errorMessage)
 }
 
+// updateSessionStarting persists a full session-row STARTING transition, using
+// the orchestrator callback when present so task/session runtime state stays
+// serialized with guarded REVIEW reconciliation.
+func (e *Executor) updateSessionStarting(ctx context.Context, taskID string, session *models.TaskSession) error {
+	if e.onSessionStarting != nil {
+		return e.onSessionStarting(ctx, taskID, session)
+	}
+	return e.repo.UpdateTaskSession(ctx, session)
+}
+
 // shouldUseWorktree returns true if the given executor type should use Git worktrees.
 func shouldUseWorktree(executorType string) bool {
 	return models.ExecutorType(executorType) == models.ExecutorTypeWorktree
@@ -991,7 +1001,7 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 	session.State = models.TaskSessionStateStarting
 	session.ErrorMessage = ""
 	session.UpdatedAt = now
-	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+	if err := e.updateSessionStarting(ctx, task.ID, session); err != nil {
 		e.logger.Error("failed to update session state for agent start",
 			zap.String("session_id", session.ID),
 			zap.Error(err))
