@@ -221,6 +221,60 @@ func TestInstallSystemdIncludesActiveNodeBinInPath(t *testing.T) {
 	}
 }
 
+func TestInstallLaunchdIncludesActiveNodeBinInPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("launchd service PATH rendering is POSIX-only")
+	}
+	originalExecutablePath := executablePath
+	originalExecuteServiceCommand := executeServiceCommand
+	originalServicePrintln := servicePrintln
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		executeServiceCommand = originalExecuteServiceCommand
+		servicePrintln = originalServicePrintln
+	})
+
+	tmp := t.TempDir()
+	nodeBin := filepath.Join(tmp, "Users", "alice", ".nvm", "versions", "node", "v25.2.1", "bin")
+	if err := os.MkdirAll(nodeBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"node", "npm", "npx"} {
+		if err := os.WriteFile(filepath.Join(nodeBin, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", nodeBin+string(os.PathListSeparator)+"/usr/bin:/bin")
+	t.Setenv("npm_node_execpath", filepath.Join(nodeBin, "node"))
+
+	executablePath = func() (string, error) {
+		return filepath.Join(tmp, ".npm", "_npx", "abc", "node_modules", "@kdlbs", "runtime-darwin-arm64", "bin", "kandev"), nil
+	}
+	executeServiceCommand = func(string, ...string) error { return nil }
+	servicePrintln = func(string) {}
+
+	plistPath := filepath.Join(tmp, "com.kdlbs.kandev.plist")
+	code := installLaunchd(
+		serviceArgs{Action: actionInstall, HomeDir: filepath.Join(tmp, "kandev-home")},
+		BuildInfo{Version: "test"},
+		plistPath,
+		"gui/501/com.kdlbs.kandev",
+		"gui/501",
+	)
+	if code != 0 {
+		t.Fatalf("installLaunchd() = %d, want 0", code)
+	}
+
+	plist, err := os.ReadFile(plistPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPath := "<key>PATH</key>\n      <string>" + nodeBin + ":"
+	if !strings.Contains(string(plist), wantPath) {
+		t.Fatalf("plist PATH does not include active node bin %q:\n%s", nodeBin, plist)
+	}
+}
+
 func TestInstallLaunchdMessagesDistinguishBootStart(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -353,11 +407,43 @@ func TestServicePathWithPrefixesPrependsValidUniqueDirs(t *testing.T) {
 	nodeBin := "/home/alice/.nvm/versions/node/v25.2.1/bin"
 	got := servicePathWithPrefixes(
 		"/usr/bin:/bin:%h/.local/bin",
-		[]string{nodeBin, "/usr/bin", "relative/bin", "/bad:dir", "/bad\nline", "/bad\rline", nodeBin},
+		[]string{nodeBin, "/usr/bin", "relative/bin", "/bad:dir", "/bad%dir", "/bad\nline", "/bad\rline", nodeBin},
 	)
 	want := nodeBin + ":/usr/bin:/bin:%h/.local/bin"
 	if got != want {
 		t.Fatalf("servicePathWithPrefixes() = %q, want %q", got, want)
+	}
+}
+
+func TestServiceNodeToolBinDirsSkipsTransientNpxSandbox(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("service PATH rendering is POSIX-only")
+	}
+	tmp := t.TempDir()
+	nodeBin := filepath.Join(tmp, "home", "alice", ".nvm", "versions", "node", "v25.2.1", "bin")
+	npxBin := filepath.Join(tmp, "home", "alice", ".npm", "_npx", "abc", "node_modules", ".bin")
+	for _, dir := range []string{nodeBin, npxBin} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"node", "npm"} {
+		if err := os.WriteFile(filepath.Join(nodeBin, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(npxBin, "npx"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", npxBin+string(os.PathListSeparator)+nodeBin)
+	t.Setenv("npm_node_execpath", filepath.Join(nodeBin, "node"))
+
+	got := serviceNodeToolBinDirs()
+	if !slices.Contains(got, nodeBin) {
+		t.Fatalf("serviceNodeToolBinDirs() = %v, want stable node bin %q", got, nodeBin)
+	}
+	if slices.Contains(got, npxBin) {
+		t.Fatalf("serviceNodeToolBinDirs() included transient npx bin %q: %v", npxBin, got)
 	}
 }
 

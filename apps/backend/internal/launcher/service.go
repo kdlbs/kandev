@@ -361,7 +361,11 @@ func serviceNodeToolBinDirs() []string {
 		if value == "" {
 			return
 		}
-		dirs = append(dirs, filepath.Dir(value))
+		dir := filepath.Dir(value)
+		if transientNodeToolDir(dir) {
+			return
+		}
+		dirs = append(dirs, dir)
 	}
 	addPath(os.Getenv("npm_node_execpath"))
 	for _, name := range []string{"node", "npm", "npx"} {
@@ -370,6 +374,13 @@ func serviceNodeToolBinDirs() []string {
 		}
 	}
 	return cleanServicePathDirs(dirs)
+}
+
+func transientNodeToolDir(dir string) bool {
+	clean := filepath.Clean(dir)
+	separator := string(filepath.Separator)
+	return strings.Contains(clean, separator+".npm"+separator+"_npx"+separator) ||
+		strings.Contains(clean, separator+"node_modules"+separator+".bin")
 }
 
 func servicePathWithPrefixes(base string, prefixes []string) string {
@@ -394,7 +405,7 @@ func cleanServicePathDirs(dirs []string) []string {
 	seen := make(map[string]struct{}, len(dirs))
 	out := make([]string, 0, len(dirs))
 	for _, dir := range dirs {
-		if dir == "" || strings.ContainsAny(dir, ":\n\r") || strings.ContainsRune(dir, 0) {
+		if dir == "" || strings.ContainsAny(dir, ":%\n\r") || strings.ContainsRune(dir, 0) {
 			continue
 		}
 		clean := filepath.Clean(dir)
