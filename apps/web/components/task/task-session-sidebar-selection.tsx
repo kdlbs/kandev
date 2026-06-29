@@ -34,6 +34,9 @@ export function useBulkArchiveDialog(
     async ({ cascade }: { cascade: boolean }) => {
       if (!state) return;
       try {
+        // `bulkArchive` already surfaces failures itself (it keeps failed ids
+        // selected and toasts), so this catch is defensive only; `finally`
+        // guarantees the dialog closes regardless.
         await bulkArchive(state.ids, { cascade });
       } catch (error) {
         console.error("Failed to archive tasks:", error);
