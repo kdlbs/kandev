@@ -147,7 +147,25 @@ func (h *WorkspaceHandlers) httpUpdateWorkspace(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.FromWorkspace(workspace))
 }
 
+type httpDeleteWorkspaceRequest struct {
+	ConfirmName string `json:"confirm_name"`
+}
+
 func (h *WorkspaceHandlers) httpDeleteWorkspace(c *gin.Context) {
+	var body httpDeleteWorkspaceRequest
+	if err := c.ShouldBindJSON(&body); err != nil || body.ConfirmName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "confirm_name is required"})
+		return
+	}
+	workspace, err := h.service.GetWorkspace(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		handleNotFound(c, h.logger, err, "workspace not deleted")
+		return
+	}
+	if body.ConfirmName != workspace.Name {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "confirm_name does not match workspace name"})
+		return
+	}
 	if err := h.service.DeleteWorkspace(c.Request.Context(), c.Param("id")); err != nil {
 		handleNotFound(c, h.logger, err, "workspace not deleted")
 		return
