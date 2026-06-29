@@ -26,6 +26,7 @@ import type { Layout } from "react-resizable-panels";
 import {
   deriveIsAgentWorking,
   buildArchivedValue,
+  hasResolvedTaskDetails,
   resolveTaskContentState,
 } from "@/components/task/task-page-content-helpers";
 import { TaskPageInner } from "@/components/task/task-page-inner";
@@ -253,6 +254,11 @@ function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
     () => resolveEffectiveTask(taskDetails, initialTask, kanbanTask, effectiveTaskId),
     [taskDetails, initialTask, kanbanTask, effectiveTaskId],
   );
+  const hasTaskDetails = hasResolvedTaskDetails({
+    effectiveTaskId,
+    taskDetailsId: taskDetails?.id ?? null,
+    initialTaskId: initialTask?.id ?? null,
+  });
   useTasks(task?.workflow_id ?? null);
 
   useEffect(() => {
@@ -285,7 +291,7 @@ function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
     setTaskDetails,
   ]);
 
-  return { task, kanbanTask, taskLoadError: task ? null : taskLoadError };
+  return { task, kanbanTask, taskLoadError: hasTaskDetails ? null : taskLoadError };
 }
 
 function useTaskPageData(

@@ -110,9 +110,21 @@ export function resolveTaskContentState(params: {
   hasTaskLoadError: boolean;
 }) {
   if (!params.isMounted) return "loading";
-  if (params.hasTask) return "ready";
   if (params.hasTaskLoadError) return "error";
+  if (params.hasTask) return "ready";
   return "loading";
+}
+
+export function hasResolvedTaskDetails(params: {
+  effectiveTaskId: string | null;
+  taskDetailsId?: string | null;
+  initialTaskId?: string | null;
+}) {
+  if (!params.effectiveTaskId) return false;
+  return (
+    params.taskDetailsId === params.effectiveTaskId ||
+    params.initialTaskId === params.effectiveTaskId
+  );
 }
 
 export function resolveTaskIds(task: Task | null) {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Task } from "@/lib/types/http";
 import {
   buildDebugEntries,
+  hasResolvedTaskDetails,
   resolveTaskContentState,
   resolveTaskProps,
 } from "./task-page-content-helpers";
@@ -87,13 +88,55 @@ describe("resolveTaskContentState", () => {
     ).toBe("error");
   });
 
-  it("treats a resolved task as ready", () => {
+  it("surfaces task load failures even when a placeholder task exists", () => {
     expect(
       resolveTaskContentState({
         isMounted: true,
         hasTask: true,
         hasTaskLoadError: true,
       }),
+    ).toBe("error");
+  });
+
+  it("treats a resolved task as ready", () => {
+    expect(
+      resolveTaskContentState({
+        isMounted: true,
+        hasTask: true,
+        hasTaskLoadError: false,
+      }),
     ).toBe("ready");
+  });
+});
+
+describe("hasResolvedTaskDetails", () => {
+  it("returns true when fetched details match the effective task", () => {
+    expect(
+      hasResolvedTaskDetails({
+        effectiveTaskId: "task-1",
+        taskDetailsId: "task-1",
+        initialTaskId: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("returns true when SSR task details match the effective task", () => {
+    expect(
+      hasResolvedTaskDetails({
+        effectiveTaskId: "task-1",
+        taskDetailsId: null,
+        initialTaskId: "task-1",
+      }),
+    ).toBe(true);
+  });
+
+  it("returns false for kanban-only placeholder tasks", () => {
+    expect(
+      hasResolvedTaskDetails({
+        effectiveTaskId: "task-1",
+        taskDetailsId: "task-2",
+        initialTaskId: null,
+      }),
+    ).toBe(false);
   });
 });
