@@ -25,7 +25,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	sessionID := payload.SessionID
 	eventType := payload.Data.Type
 
-	if s.shouldDropCompletedExecutionStreamEvent(payload) {
+	if eventType != agentEventComplete && s.shouldDropCompletedExecutionStreamEvent(payload) {
 		return
 	}
 
@@ -623,7 +623,7 @@ func (s *Service) setSessionStarting(ctx context.Context, taskID string, session
 	if err != nil {
 		return err
 	}
-	if isTerminalSessionState(current.State) {
+	if isTerminalSessionState(current.State) && (promoteTask || session.State != models.TaskSessionStateStarting) {
 		return fmt.Errorf("session %s is %s; cannot mark STARTING", session.ID, current.State)
 	}
 

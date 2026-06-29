@@ -80,6 +80,8 @@ func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, 
 						zap.String("task_id", taskID),
 						zap.Error(updateErr))
 				}
+			} else {
+				e.writeTaskReviewStateIfNoWorkingSessions(updateCtx, taskID, sessionID)
 			}
 			// Clean up the execution environment (e.g., destroy remote Sprites instance).
 			// Use force=true since the agent process never fully started.
@@ -118,6 +120,41 @@ func (e *Executor) stopUnstartedExecution(ctx context.Context, sessionID, agentE
 			zap.String("agent_execution_id", agentExecutionID),
 			zap.Error(stopErr))
 	}
+}
+
+func (e *Executor) writeTaskReviewStateIfNoWorkingSessions(ctx context.Context, taskID, failedSessionID string) {
+	sessions, err := e.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		e.logger.Warn("failed to list task sessions before failed-start REVIEW state reconcile",
+			zap.String("task_id", taskID),
+			zap.String("session_id", failedSessionID),
+			zap.Error(err))
+		return
+	}
+	for _, session := range sessions {
+		if session == nil {
+			continue
+		}
+		if failedSessionID != "" && session.ID == failedSessionID {
+			continue
+		}
+		if isRuntimeWorkingSessionState(session.State) {
+			e.logger.Debug("skipping failed-start task REVIEW state while another session is working",
+				zap.String("task_id", taskID),
+				zap.String("failed_session_id", failedSessionID),
+				zap.String("blocking_session_id", session.ID))
+			return
+		}
+	}
+	if updateErr := e.updateTaskState(ctx, taskID, v1.TaskStateReview); updateErr != nil {
+		e.logger.Warn("failed to update task state to REVIEW after start error",
+			zap.String("task_id", taskID),
+			zap.Error(updateErr))
+	}
+}
+
+func isRuntimeWorkingSessionState(state models.TaskSessionState) bool {
+	return state == models.TaskSessionStateRunning || state == models.TaskSessionStateStarting
 }
 
 // updateTaskState updates a task's state, using the callback if set for event publishing,

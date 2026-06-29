@@ -1116,6 +1116,7 @@ verified:
 // other recorded fields, removing the need for atomicity or polling.
 type runAgentProcessAsyncFailureFixture struct {
 	exec              *Executor
+	repo              *mockRepository
 	taskStateUpdates  []string
 	sessionFailedSeen bool
 	startFailedCalls  int
@@ -1129,7 +1130,7 @@ func newRunAgentProcessAsyncFailureFixture(t *testing.T) *runAgentProcessAsyncFa
 	repo.sessions["session-123"] = &models.TaskSession{
 		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
 	}
-	f := &runAgentProcessAsyncFailureFixture{stopCh: make(chan struct{})}
+	f := &runAgentProcessAsyncFailureFixture{repo: repo, stopCh: make(chan struct{})}
 	agentManager := &mockAgentManager{
 		startAgentProcessFunc: func(ctx context.Context, agentExecutionID string) error {
 			return fmt.Errorf("ACP initialize handshake failed: context deadline exceeded")
@@ -1179,14 +1180,33 @@ func TestRunAgentProcessAsync_ResumeDoesNotEscalateTaskState(t *testing.T) {
 	if !f.sessionFailedSeen {
 		t.Error("expected session state FAILED")
 	}
-	if len(f.taskStateUpdates) != 0 {
-		t.Errorf("expected no task state updates on resume failure, got %v", f.taskStateUpdates)
+	if len(f.taskStateUpdates) != 1 || f.taskStateUpdates[0] != string(v1.TaskStateReview) {
+		t.Errorf("expected resume failure to reconcile task state to REVIEW, got %v", f.taskStateUpdates)
 	}
 	if f.startFailedCalls != 1 {
 		t.Errorf("expected onAgentStartFailed called once, got %d", f.startFailedCalls)
 	}
 	if !f.lastFromResume {
 		t.Error("expected fromResume=true to be propagated to onAgentStartFailed")
+	}
+}
+
+func TestRunAgentProcessAsync_ResumeFailureDoesNotReviewWhileSiblingWorks(t *testing.T) {
+	f := newRunAgentProcessAsyncFailureFixture(t)
+	f.repo.sessions["session-456"] = &models.TaskSession{
+		ID: "session-456", TaskID: "task-123", State: models.TaskSessionStateRunning,
+	}
+
+	f.exec.runAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456",
+		func(ctx context.Context) { t.Error("onSuccess should not run on failure") },
+		false, true)
+	f.awaitStop(t)
+
+	if !f.sessionFailedSeen {
+		t.Error("expected session state FAILED")
+	}
+	if len(f.taskStateUpdates) != 0 {
+		t.Errorf("expected working sibling to block REVIEW reconcile, got %v", f.taskStateUpdates)
 	}
 }
 

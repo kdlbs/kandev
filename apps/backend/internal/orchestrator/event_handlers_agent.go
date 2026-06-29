@@ -553,6 +553,8 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 		return
 	}
 
+	s.markExecutionCompleted(data.SessionID, data.AgentExecutionID)
+
 	// Terminal from here. Finalize run-mode automation runs — every branch
 	// below returns early (resume failure, session-backed recoverable failure,
 	// no-session retry), and run-mode automations need their AutomationRun
