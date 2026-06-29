@@ -108,7 +108,7 @@ pass "OpenCode review artifacts are uploaded from both workflow paths"
 
 invalid_artifact_upload_refs="$(
   rg --line-number 'uses: actions/upload-artifact@' "$WORKFLOW" |
-    rg --invert-match 'uses: actions/upload-artifact@([0-9a-f]{40} # v[0-9]+|v[0-9]+)$' || true
+    rg --invert-match 'uses: actions/upload-artifact@[0-9a-f]{40} # v[0-9]+(?:\.[0-9]+\.[0-9]+)?$' || true
 )"
 if [[ -n "$invalid_artifact_upload_refs" ]]; then
   fail "OpenCode review artifact uploads use immutable action refs"

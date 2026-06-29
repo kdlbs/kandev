@@ -203,24 +203,24 @@ func (r *sqliteRepository) upsertUserSettingsPreservingTaskCreateLastUsedPostgre
 }
 
 func (r *sqliteRepository) UpdateTaskCreateLastUsed(ctx context.Context, userID string, patch models.TaskCreateLastUsed) (*models.UserSettings, error) {
-	args := makeTaskCreateLastUsedJSONSetArgs(patch)
-	if len(args) == 0 {
-		return r.getUserSettings(ctx, r.db, userID)
-	}
 	if dialect.IsPostgres(r.db.DriverName()) {
 		return r.updateTaskCreateLastUsedPostgres(ctx, userID, patch)
 	}
-	placeholders := strings.TrimSuffix(strings.Repeat("?, ?, ", len(args)/2), ", ")
-	query := fmt.Sprintf(`
+	payload, err := json.Marshal(patch)
+	if err != nil {
+		return nil, err
+	}
+	query := `
 		UPDATE users
 		SET settings = json_set(
 			CASE WHEN settings IS NULL OR settings = 'null' OR settings = '' THEN '{}' ELSE settings END,
-			%s
+			'$.task_create_last_used',
+			json(?)
 		), updated_at = ?
 		WHERE id = ?
-	`, placeholders)
+	`
 	now := time.Now().UTC()
-	args = append(args, now, userID)
+	args := []any{string(payload), now, userID}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return nil, err
@@ -263,10 +263,10 @@ func makeTaskCreateLastUsedJSONSetArgs(patch models.TaskCreateLastUsed) []any {
 }
 
 func buildPostgresTaskCreateLastUsedUpdate(patch models.TaskCreateLastUsed) (string, []any) {
+	payload, _ := json.Marshal(patch)
 	base := "(CASE WHEN settings IS NULL OR settings = 'null' OR settings = '' THEN '{}'::jsonb ELSE settings::jsonb END)"
-	expr := fmt.Sprintf("jsonb_set(%s, '{task_create_last_used}', COALESCE(%s->'task_create_last_used', '{}'::jsonb), true)", base, base)
-	args := []any{}
-	expr, args = applyPostgresTaskCreateLastUsedPatch(expr, patch, args)
+	expr := fmt.Sprintf("jsonb_set(%s, '{task_create_last_used}', ?::jsonb, true)", base)
+	args := []any{string(payload)}
 	query := fmt.Sprintf(`
 		UPDATE users
 		SET settings = %s::text, updated_at = ?

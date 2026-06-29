@@ -603,9 +603,6 @@ func (h *TaskHandlers) recordTaskCreateLastUsed(ctx context.Context, body httpCr
 		return
 	}
 	patch := buildTaskCreateLastUsedPatch(body, repos)
-	if taskCreateLastUsedPatchEmpty(patch) {
-		return
-	}
 	if err := h.taskCreateLastUsedRecorder.RecordTaskCreateLastUsed(ctx, patch); err != nil {
 		h.logger.Warn("failed to record task-create last-used settings", zap.Error(err))
 	}
@@ -621,11 +618,9 @@ func buildTaskCreateLastUsedPatch(body httpCreateTaskRequest, repos []dto.TaskRe
 			continue
 		}
 		branch := taskCreateLastUsedBranch(body, i, repo)
-		if branch != "" {
-			patch.RepositoryID = repo.RepositoryID
-			patch.Branch = branch
-			break
-		}
+		patch.RepositoryID = repo.RepositoryID
+		patch.Branch = branch
+		break
 	}
 	return patch
 }
@@ -637,7 +632,7 @@ func taskCreateLastUsedBranch(
 ) string {
 	if index < len(body.Repositories) && body.Repositories[index].FreshBranch {
 		raw := body.Repositories[index]
-		return firstNonEmpty(raw.CheckoutBranch, raw.BaseBranch)
+		return firstNonEmpty(raw.BaseBranch, raw.CheckoutBranch)
 	}
 	return firstNonEmpty(repo.CheckoutBranch, repo.BaseBranch)
 }
@@ -649,13 +644,6 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func taskCreateLastUsedPatchEmpty(patch usermodels.TaskCreateLastUsed) bool {
-	return patch.RepositoryID == "" &&
-		patch.Branch == "" &&
-		patch.AgentProfileID == "" &&
-		patch.ExecutorProfileID == ""
 }
 
 // commitFreshBranch wraps the post-CreateTask fresh-branch sequence: run the

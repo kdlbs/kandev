@@ -100,8 +100,10 @@ function matchPnpmSetupUsesLine(line: string): RegExpMatchArray | null {
   if (match === null) return null;
   const ref = match[2];
   const comment = match[3] ?? "";
-  const versionTag = /^v[0-9]+(?:\.[0-9]+\.[0-9]+)?$/.test(ref);
-  const shaPinned = /^[0-9a-f]{40}$/.test(ref) && /#\s*v[0-9]+/.test(comment);
+  const versionTagPattern = /^v[0-9]+(?:\.[0-9]+\.[0-9]+)?$/;
+  const versionTag = versionTagPattern.test(ref);
+  const shaPinned =
+    /^[0-9a-f]{40}$/.test(ref) && /^#\s*v[0-9]+(?:\.[0-9]+\.[0-9]+)?$/.test(comment);
   expect(
     versionTag || shaPinned,
     "pnpm/action-setup must use a version tag or a 40-character SHA with the version tag in a comment",
@@ -162,6 +164,14 @@ function assertWorkflowPnpmVersions(file: string, expectedVersion: string): numb
 }
 
 describe("release runtime tooling configuration", () => {
+  it("rejects malformed SHA version comments for pnpm/action-setup", () => {
+    expect(() =>
+      matchPnpmSetupUsesLine(
+        "uses: pnpm/action-setup@0123456789abcdef0123456789abcdef01234567 # v4-old",
+      ),
+    ).toThrow(/40-character SHA with the version tag/);
+  });
+
   it("pins runtime tooling consistently across Docker and GitHub Actions", () => {
     const packagePnpmVersion = extractPackageManagerPnpmVersion(readRepoFile("apps/package.json"));
     const dockerfile = readRepoFile("Dockerfile");

@@ -278,7 +278,7 @@ func TestHTTPCreateTaskRecordsFinalLastUsedSelections(t *testing.T) {
 	}, recorder.got)
 }
 
-func TestBuildTaskCreateLastUsedPatchKeepsRepositoryAndBranchPaired(t *testing.T) {
+func TestBuildTaskCreateLastUsedPatchRecordsFirstWorkspaceRepository(t *testing.T) {
 	patch := buildTaskCreateLastUsedPatch(httpCreateTaskRequest{
 		AgentProfileID:    "agent-2",
 		ExecutorProfileID: "exec-profile-2",
@@ -288,8 +288,7 @@ func TestBuildTaskCreateLastUsedPatchKeepsRepositoryAndBranchPaired(t *testing.T
 	})
 
 	assert.Equal(t, usermodels.TaskCreateLastUsed{
-		RepositoryID:      "repo-with-branch",
-		Branch:            "feature/current",
+		RepositoryID:      "repo-without-branch",
 		AgentProfileID:    "agent-2",
 		ExecutorProfileID: "exec-profile-2",
 	}, patch)
@@ -298,9 +297,10 @@ func TestBuildTaskCreateLastUsedPatchKeepsRepositoryAndBranchPaired(t *testing.T
 func TestBuildTaskCreateLastUsedPatchUsesFreshBranchRequestBase(t *testing.T) {
 	patch := buildTaskCreateLastUsedPatch(httpCreateTaskRequest{
 		Repositories: []httpTaskRepositoryInput{{
-			RepositoryID: "repo-2",
-			BaseBranch:   "main",
-			FreshBranch:  true,
+			RepositoryID:   "repo-2",
+			BaseBranch:     "main",
+			CheckoutBranch: "task/use-current-selections",
+			FreshBranch:    true,
 		}},
 	}, []dto.TaskRepositoryInput{{
 		RepositoryID: "repo-2",
@@ -313,7 +313,7 @@ func TestBuildTaskCreateLastUsedPatchUsesFreshBranchRequestBase(t *testing.T) {
 	}, patch)
 }
 
-func TestBuildTaskCreateLastUsedPatchSkipsRepositoryWithoutBranch(t *testing.T) {
+func TestBuildTaskCreateLastUsedPatchRecordsRepositoryWithoutBranch(t *testing.T) {
 	patch := buildTaskCreateLastUsedPatch(httpCreateTaskRequest{
 		AgentProfileID: "agent-2",
 	}, []dto.TaskRepositoryInput{
@@ -321,6 +321,7 @@ func TestBuildTaskCreateLastUsedPatchSkipsRepositoryWithoutBranch(t *testing.T) 
 	})
 
 	assert.Equal(t, usermodels.TaskCreateLastUsed{
+		RepositoryID:   "repo-without-branch",
 		AgentProfileID: "agent-2",
 	}, patch)
 }

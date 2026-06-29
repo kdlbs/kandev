@@ -104,7 +104,7 @@ func TestSQLiteRepositorySystemMetricsDisplayRoundTrip(t *testing.T) {
 	}
 }
 
-func TestSQLiteRepositoryUpdateTaskCreateLastUsedMergesOnlyProvidedFields(t *testing.T) {
+func TestSQLiteRepositoryUpdateTaskCreateLastUsedReplacesAllFields(t *testing.T) {
 	conn, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -140,8 +140,8 @@ func TestSQLiteRepositoryUpdateTaskCreateLastUsedMergesOnlyProvidedFields(t *tes
 		t.Fatalf("update task-create last-used: %v", err)
 	}
 
-	if got.TaskCreateLastUsed.RepositoryID != "repo-1" {
-		t.Fatalf("repository id should be preserved, got %q", got.TaskCreateLastUsed.RepositoryID)
+	if got.TaskCreateLastUsed.RepositoryID != "" {
+		t.Fatalf("repository id should update to explicit empty, got %q", got.TaskCreateLastUsed.RepositoryID)
 	}
 	if got.TaskCreateLastUsed.Branch != "feature" {
 		t.Fatalf("branch should update, got %q", got.TaskCreateLastUsed.Branch)
@@ -149,8 +149,8 @@ func TestSQLiteRepositoryUpdateTaskCreateLastUsedMergesOnlyProvidedFields(t *tes
 	if got.TaskCreateLastUsed.AgentProfileID != "agent-2" {
 		t.Fatalf("agent profile should update, got %q", got.TaskCreateLastUsed.AgentProfileID)
 	}
-	if got.TaskCreateLastUsed.ExecutorProfileID != "exec-1" {
-		t.Fatalf("executor profile should be preserved, got %q", got.TaskCreateLastUsed.ExecutorProfileID)
+	if got.TaskCreateLastUsed.ExecutorProfileID != "" {
+		t.Fatalf("executor profile should update to explicit empty, got %q", got.TaskCreateLastUsed.ExecutorProfileID)
 	}
 	if got.SidebarActiveViewID != "view-1" {
 		t.Fatalf("unrelated settings should be preserved, got active view %q", got.SidebarActiveViewID)
@@ -171,14 +171,14 @@ func TestBuildPostgresTaskCreateLastUsedUpdateUsesJSONB(t *testing.T) {
 	if !strings.Contains(query, "jsonb_set") {
 		t.Fatalf("postgres update should use jsonb_set: %s", query)
 	}
-	if !strings.Contains(query, "{task_create_last_used,repository_id}") ||
-		!strings.Contains(query, "{task_create_last_used,branch}") ||
-		!strings.Contains(query, "{task_create_last_used,agent_profile_id}") ||
-		!strings.Contains(query, "{task_create_last_used,executor_profile_id}") {
-		t.Fatalf("postgres update missing task-create paths: %s", query)
+	if !strings.Contains(query, "{task_create_last_used}") {
+		t.Fatalf("postgres update should replace task-create object: %s", query)
 	}
-	if len(args) != 4 {
-		t.Fatalf("expected one arg per task-create field, got %d", len(args))
+	if len(args) != 1 {
+		t.Fatalf("expected one replacement payload arg, got %d", len(args))
+	}
+	if !strings.Contains(args[0].(string), `"repository_id":"repo-1"`) {
+		t.Fatalf("expected replacement payload to contain task-create fields, got %s", args[0])
 	}
 }
 
@@ -245,7 +245,7 @@ func TestPostgresRepositoryTaskCreateLastUsedRoundTrip(t *testing.T) {
 	if got.TaskCreateLastUsed.RepositoryID != "repo-after" ||
 		got.TaskCreateLastUsed.Branch != "feature" ||
 		got.TaskCreateLastUsed.AgentProfileID != "agent-after" ||
-		got.TaskCreateLastUsed.ExecutorProfileID != "exec-before" {
+		got.TaskCreateLastUsed.ExecutorProfileID != "" {
 		t.Fatalf("postgres task-create update mismatch: %+v", got.TaskCreateLastUsed)
 	}
 
@@ -264,7 +264,7 @@ func TestPostgresRepositoryTaskCreateLastUsedRoundTrip(t *testing.T) {
 	if got.TaskCreateLastUsed.RepositoryID != "repo-after" ||
 		got.TaskCreateLastUsed.Branch != "feature" ||
 		got.TaskCreateLastUsed.AgentProfileID != "agent-after" ||
-		got.TaskCreateLastUsed.ExecutorProfileID != "exec-before" {
+		got.TaskCreateLastUsed.ExecutorProfileID != "" {
 		t.Fatalf("postgres preserving upsert should keep current task-create values: %+v", got.TaskCreateLastUsed)
 	}
 }

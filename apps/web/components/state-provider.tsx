@@ -81,7 +81,17 @@ function syncTaskCreateLastUsedCacheField(key: string, value: string | null | un
     setLocalStorage(key, value);
     return;
   }
-  removeLocalStorage(key);
+  deferRemoveTaskCreateLastUsedCacheField(key);
+}
+
+function deferRemoveTaskCreateLastUsedCacheField(key: string) {
+  const cachedValue = window.localStorage.getItem(key);
+  if (cachedValue === null) return;
+  window.setTimeout(() => {
+    if (window.localStorage.getItem(key) === cachedValue) {
+      removeLocalStorage(key);
+    }
+  }, 0);
 }
 
 function taskCreateLastUsedEqual(

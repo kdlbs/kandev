@@ -3,16 +3,16 @@
 import { useCallback } from "react";
 import type { Repository } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dialog-types";
-import { setLocalStorage } from "@/lib/local-storage";
+import { removeLocalStorage, setLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { createDebugLogger } from "@/lib/debug/log";
 import type { TaskCreateLastUsedState } from "@/lib/state/slices/settings/types";
 
 type TaskCreateLastUsedPatch = {
-  repository_id?: string;
-  branch?: string;
-  agent_profile_id?: string;
-  executor_profile_id?: string;
+  repository_id?: string | null;
+  branch?: string | null;
+  agent_profile_id?: string | null;
+  executor_profile_id?: string | null;
 };
 
 let lastQueuedLastUsed: Partial<TaskCreateLastUsedState> = {};
@@ -127,12 +127,17 @@ function useRepositoryHandlers(fs: DialogFormState, repositories: Repository[]) 
       fs.updateRepository(key, patch);
       if (isWorkspaceRepo) {
         setLocalStorage(STORAGE_KEYS.LAST_REPOSITORY_ID, value);
-        syncTaskCreateLastUsed({ repository_id: value });
+        removeLocalStorage(STORAGE_KEYS.LAST_BRANCH);
+        syncTaskCreateLastUsed({ repository_id: value, branch: null });
         lastUsedDebug(LOCAL_STORAGE_WRITE_EVENT, {
           key: "lastRepositoryId",
           value,
           row_key: key,
         });
+      } else {
+        removeLocalStorage(STORAGE_KEYS.LAST_REPOSITORY_ID);
+        removeLocalStorage(STORAGE_KEYS.LAST_BRANCH);
+        syncTaskCreateLastUsed({ repository_id: null, branch: null });
       }
       // Switching the repo invalidates whatever local-status the fresh-branch
       // panel had cached.
@@ -209,7 +214,12 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
     // toggle Remote on) and the submit gate's mode-aware checks would produce
     // confusing results. Mirror the no-repo handler which already clears
     // useRemote when flipping the other way.
-    if (next) fs.setNoRepository(false);
+    if (next) {
+      fs.setNoRepository(false);
+      removeLocalStorage(STORAGE_KEYS.LAST_REPOSITORY_ID);
+      removeLocalStorage(STORAGE_KEYS.LAST_BRANCH);
+      syncTaskCreateLastUsed({ repository_id: null, branch: null });
+    }
     clearFreshBranch(fs);
   }, [fs]);
 
@@ -237,6 +247,12 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
       // non-worktree default (worktree is unworkable in no-repo mode).
       fs.setExecutorId("");
       fs.setExecutorProfileId("");
+      removeLocalStorage(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID);
+      syncTaskCreateLastUsed({
+        repository_id: null,
+        branch: null,
+        executor_profile_id: null,
+      });
     } else {
       fs.setWorkspacePath("");
     }

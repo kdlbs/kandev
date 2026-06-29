@@ -157,7 +157,8 @@ describe("StateProvider task-create cache", () => {
 });
 
 describe("StateProvider task-create cache clearing", () => {
-  it("clears cached task-create choices when loaded settings have no replacement", () => {
+  it("lets children read cached task-create choices before clearing missing backend values", async () => {
+    const onSeen = vi.fn();
     window.localStorage.setItem(STORAGE_KEYS.LAST_REPOSITORY_ID, JSON.stringify("repo-cached"));
     window.localStorage.setItem(STORAGE_KEYS.LAST_BRANCH, JSON.stringify("feature-cached"));
     window.localStorage.setItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, JSON.stringify("agent-cached"));
@@ -181,14 +182,17 @@ describe("StateProvider task-create cache clearing", () => {
           },
         }}
       >
-        <div>ready</div>
+        <ObserveLastUsedCache onSeen={onSeen} />
       </StateProvider>,
     );
 
-    expect(window.localStorage.getItem(STORAGE_KEYS.LAST_REPOSITORY_ID)).toBeNull();
-    expect(window.localStorage.getItem(STORAGE_KEYS.LAST_BRANCH)).toBeNull();
-    expect(window.localStorage.getItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID)).toBeNull();
-    expect(window.localStorage.getItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID)).toBeNull();
+    expect(onSeen).toHaveBeenCalledWith(JSON.stringify("repo-cached"));
+    await waitFor(() => {
+      expect(window.localStorage.getItem(STORAGE_KEYS.LAST_REPOSITORY_ID)).toBeNull();
+      expect(window.localStorage.getItem(STORAGE_KEYS.LAST_BRANCH)).toBeNull();
+      expect(window.localStorage.getItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID)).toBeNull();
+      expect(window.localStorage.getItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID)).toBeNull();
+    });
   });
 });
 

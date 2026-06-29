@@ -679,19 +679,25 @@ func TestRecordTaskCreateLastUsed(t *testing.T) {
 		return NewService(repo, eventBus, log)
 	}
 
-	t.Run("empty patch does not touch repo or publish", func(t *testing.T) {
-		repo := &recordingUserRepository{}
+	t.Run("empty patch clears recorded selections and publishes", func(t *testing.T) {
+		updatedSettings := &models.UserSettings{
+			UserID: store.DefaultUserID,
+		}
+		repo := &recordingUserRepository{updateSettings: updatedSettings}
 		eventBus := &recordingEventBus{}
 		svc := newTestService(repo, eventBus)
 
 		if err := svc.RecordTaskCreateLastUsed(context.Background(), models.TaskCreateLastUsed{}); err != nil {
 			t.Fatalf("RecordTaskCreateLastUsed: %v", err)
 		}
-		if repo.touches() != 0 {
-			t.Fatalf("expected no repo calls, got %d", repo.touches())
+		if repo.updateCalls != 1 {
+			t.Fatalf("expected one repo update, got %d", repo.updateCalls)
 		}
-		if len(eventBus.publishedEvents) != 0 {
-			t.Fatalf("expected no events, got %d", len(eventBus.publishedEvents))
+		if repo.updatePatch != (models.TaskCreateLastUsed{}) {
+			t.Fatalf("expected empty replacement patch, got %+v", repo.updatePatch)
+		}
+		if len(eventBus.publishedEvents) != 1 {
+			t.Fatalf("expected one settings event, got %d", len(eventBus.publishedEvents))
 		}
 	})
 

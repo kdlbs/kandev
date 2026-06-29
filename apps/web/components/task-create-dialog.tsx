@@ -505,24 +505,34 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
   const preserveQueuedLastUsedOnCloseRef = useRef<{
     syncedSettings: TaskCreateLastUsedState | null | undefined;
   } | null>(null);
+  const queuedLastUsedResetHandledRef = useRef(false);
   const preserveQueuedLastUsedOnClose = useCallback(() => {
     preserveQueuedLastUsedOnCloseRef.current = { syncedSettings: syncedTaskCreateLastUsed };
   }, [syncedTaskCreateLastUsed]);
-  const setup = useTaskCreateDialogSetup(props, { preserveQueuedLastUsedOnClose });
-  const { guardedHandleSubmit } = setup;
-  const [popoverContainer, setPopoverContainer] = useState<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (props.open) {
-      preserveQueuedLastUsedOnCloseRef.current = null;
-      return;
-    }
+  const resetQueuedLastUsedOnClose = useCallback(() => {
     const preserveQueued = preserveQueuedLastUsedOnCloseRef.current;
     resetTaskCreateLastUsedSync({
       clearQueued: !preserveQueued,
       syncedSettings: preserveQueued?.syncedSettings,
     });
     preserveQueuedLastUsedOnCloseRef.current = null;
-  }, [props.open]);
+    queuedLastUsedResetHandledRef.current = true;
+  }, []);
+  const setup = useTaskCreateDialogSetup(props, { preserveQueuedLastUsedOnClose });
+  const { guardedHandleSubmit } = setup;
+  const [popoverContainer, setPopoverContainer] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (props.open) {
+      preserveQueuedLastUsedOnCloseRef.current = null;
+      queuedLastUsedResetHandledRef.current = false;
+      return resetQueuedLastUsedOnClose;
+    }
+    if (queuedLastUsedResetHandledRef.current) {
+      queuedLastUsedResetHandledRef.current = false;
+      return;
+    }
+    resetQueuedLastUsedOnClose();
+  }, [props.open, resetQueuedLastUsedOnClose]);
   // Voice auto-send invokes the same submit handler as the in-form Submit
   // button. Every existing validation gate (missing title/repo/branch/agent,
   // `submitBlockedReason`, in-flight create) still applies because they live

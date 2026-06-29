@@ -29,6 +29,17 @@ describe("syncTaskCreateLastUsed", () => {
     });
   });
 
+  it("clears dependent queued fields with explicit null values", () => {
+    syncTaskCreateLastUsed({ repository_id: "repo-1", branch: "feature" });
+
+    syncTaskCreateLastUsed({ repository_id: "repo-2", branch: null });
+
+    expect(readQueuedTaskCreateLastUsedState()).toMatchObject({
+      repositoryId: "repo-2",
+      branch: null,
+    });
+  });
+
   it("clears queued fields when dialog close resets canceled selections", () => {
     syncTaskCreateLastUsed({ branch: "feature" });
 
