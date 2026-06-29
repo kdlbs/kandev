@@ -149,6 +149,7 @@ func (h *WorkspaceHandlers) httpUpdateWorkspace(c *gin.Context) {
 }
 
 type httpDeleteWorkspaceRequest struct {
+	ID          string `json:"id,omitempty"`
 	ConfirmName string `json:"confirm_name"`
 }
 
@@ -277,11 +278,22 @@ func (h *WorkspaceHandlers) wsUpdateWorkspace(ctx context.Context, msg *ws.Messa
 }
 
 func (h *WorkspaceHandlers) wsDeleteWorkspace(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	return wsHandleIDRequest(ctx, msg, h.logger, "failed to delete workspace",
-		func(ctx context.Context, id string) (any, error) {
-			if err := h.service.DeleteWorkspace(ctx, id); err != nil {
-				return nil, err
-			}
-			return dto.SuccessResponse{Success: true}, nil
-		})
+	var req httpDeleteWorkspaceRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.ID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
+	}
+	if req.ConfirmName == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "confirm_name is required", nil)
+	}
+	if err := h.service.DeleteWorkspaceWithConfirmName(ctx, req.ID, req.ConfirmName); err != nil {
+		if errors.Is(err, service.ErrWorkspaceConfirmNameMismatch) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
+		h.logger.Error("failed to delete workspace", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to delete workspace", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
 }

@@ -18,7 +18,6 @@ type WorkspaceRepository interface {
 	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
 	UpdateWorkspace(ctx context.Context, workspace *models.Workspace) error
 	DeleteWorkspace(ctx context.Context, id string) error
-	DeleteWorkspaceWithName(ctx context.Context, id, name string) error
 	DeleteWorkspaceCascadeWithName(ctx context.Context, id, name string) error
 	ListWorkspaces(ctx context.Context) ([]*models.Workspace, error)
 }

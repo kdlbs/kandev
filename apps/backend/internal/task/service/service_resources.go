@@ -23,6 +23,14 @@ const (
 
 var ErrWorkspaceConfirmNameMismatch = errors.New("confirm_name does not match workspace name")
 
+type workspaceDeleteTaskCleanup struct {
+	task        *models.Task
+	sessions    []*models.TaskSession
+	worktrees   []*worktree.Worktree
+	stopTargets []taskStopTarget
+	taskEnv     *models.TaskEnvironment
+}
+
 // Workspace operations
 
 // CreateWorkspace creates a new workspace
@@ -155,12 +163,101 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 }
 
 func (s *Service) deleteConfirmedWorkspaceCascade(ctx context.Context, workspace *models.Workspace, confirmedName string) error {
+	tasks, err := s.listAllTasksForWorkspaceDelete(ctx, workspace.ID)
+	if err != nil {
+		return err
+	}
+	workflows, err := s.workflows.ListWorkflows(ctx, workspace.ID, true)
+	if err != nil {
+		return fmt.Errorf("list workspace workflows: %w", err)
+	}
+	cleanups, err := s.prepareWorkspaceDeleteTaskCleanups(ctx, tasks)
+	if err != nil {
+		return err
+	}
 	if err := s.workspaces.DeleteWorkspaceCascadeWithName(ctx, workspace.ID, confirmedName); err != nil {
 		return s.mapWorkspaceDeleteError(workspace.ID, err)
 	}
+	s.publishWorkspaceDeleteChildEvents(ctx, tasks, workflows)
+	s.runWorkspaceDeleteTaskCleanups(cleanups)
 	s.publishWorkspaceEvent(ctx, events.WorkspaceDeleted, workspace)
 	s.logger.Info("workspace deleted", zap.String("workspace_id", workspace.ID))
 	return nil
+}
+
+func (s *Service) prepareWorkspaceDeleteTaskCleanups(ctx context.Context, tasks []*models.Task) ([]workspaceDeleteTaskCleanup, error) {
+	cleanups := make([]workspaceDeleteTaskCleanup, 0, len(tasks))
+	for _, task := range tasks {
+		if task == nil || task.ID == "" {
+			continue
+		}
+		cleanup, err := s.prepareWorkspaceDeleteTaskCleanup(ctx, task)
+		if err != nil {
+			return nil, err
+		}
+		cleanups = append(cleanups, cleanup)
+	}
+	return cleanups, nil
+}
+
+func (s *Service) prepareWorkspaceDeleteTaskCleanup(ctx context.Context, task *models.Task) (workspaceDeleteTaskCleanup, error) {
+	cleanup := workspaceDeleteTaskCleanup{
+		task:      task,
+		worktrees: s.gatherWorktreesForDelete(ctx, task.ID),
+		taskEnv:   s.gatherTaskEnvironmentForCleanup(ctx, task.ID),
+	}
+	var err error
+	cleanup.sessions, err = s.sessions.ListTaskSessions(ctx, task.ID)
+	if err != nil {
+		s.logger.Warn("failed to list task sessions for workspace delete",
+			zap.String("task_id", task.ID),
+			zap.Error(err))
+	}
+	if s.executionStopper == nil {
+		return cleanup, nil
+	}
+	activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, task.ID)
+	if err != nil {
+		s.logger.Warn("failed to list active task sessions for workspace delete",
+			zap.String("task_id", task.ID),
+			zap.Error(err))
+	}
+	cleanup.stopTargets, err = s.buildStopTargets(ctx, task.ID, activeSessions)
+	if err != nil {
+		return workspaceDeleteTaskCleanup{}, fmt.Errorf("list runtime cleanup inventory: %w", err)
+	}
+	return cleanup, nil
+}
+
+func (s *Service) publishWorkspaceDeleteChildEvents(ctx context.Context, tasks []*models.Task, workflows []*models.Workflow) {
+	for _, task := range tasks {
+		if task == nil || task.ID == "" {
+			continue
+		}
+		s.publishTaskEvent(ctx, events.TaskDeleted, task, nil)
+	}
+	for _, workflow := range workflows {
+		if workflow == nil || workflow.ID == "" {
+			continue
+		}
+		s.publishWorkflowEvent(ctx, events.WorkflowDeleted, workflow)
+	}
+}
+
+func (s *Service) runWorkspaceDeleteTaskCleanups(cleanups []workspaceDeleteTaskCleanup) {
+	for _, cleanup := range cleanups {
+		if cleanup.task == nil {
+			continue
+		}
+		envCleanup := taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false}
+		hasCleanup := len(cleanup.stopTargets) > 0 || s.worktreeCleanup != nil ||
+			len(cleanup.sessions) > 0 || cleanup.task.IsEphemeral || cleanup.taskEnv != nil
+		if !hasCleanup {
+			continue
+		}
+		s.runAsyncTaskCleanup(cleanup.task.ID, cleanup.sessions, cleanup.worktrees, cleanup.stopTargets, envCleanup,
+			"task deleted", "failed to stop session on task delete", "task cleanup completed")
+	}
 }
 
 func (s *Service) deleteWorkspaceRow(ctx context.Context, id string) error {

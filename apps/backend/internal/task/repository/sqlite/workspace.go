@@ -132,37 +132,7 @@ func (r *Repository) DeleteWorkspace(ctx context.Context, id string) error {
 	return nil
 }
 
-// DeleteWorkspaceWithName deletes a workspace only if the current row name matches name.
-func (r *Repository) DeleteWorkspaceWithName(ctx context.Context, id, name string) error {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		DELETE FROM workspaces
-		WHERE id = ? AND name = ?
-	`), id, name)
-	if err != nil {
-		return err
-	}
-
-	rows, _ := result.RowsAffected()
-	if rows > 0 {
-		return nil
-	}
-
-	var currentName string
-	err = r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT name
-		FROM workspaces
-		WHERE id = ?
-	`), id).Scan(&currentName)
-	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("workspace not found: %s", id)
-	}
-	if err != nil {
-		return err
-	}
-	return repoerrors.ErrWorkspaceNameMismatch
-}
-
-// DeleteWorkspaceCascadeWithName deletes a workspace and its non-FK child rows
+// DeleteWorkspaceCascadeWithName deletes a workspace and its task/workflow rows
 // in one transaction, only if the current workspace name matches name.
 func (r *Repository) DeleteWorkspaceCascadeWithName(ctx context.Context, id, name string) error {
 	tx, err := r.db.BeginTxx(ctx, nil)

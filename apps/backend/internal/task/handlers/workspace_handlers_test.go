@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
+	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 type workspaceDeleteRepo struct {
@@ -36,12 +37,8 @@ func (r *workspaceDeleteRepo) DeleteWorkspace(_ context.Context, _ string) error
 	return nil
 }
 
-func (r *workspaceDeleteRepo) DeleteWorkspaceWithName(ctx context.Context, id, _ string) error {
-	return r.DeleteWorkspace(ctx, id)
-}
-
 func (r *workspaceDeleteRepo) DeleteWorkspaceCascadeWithName(ctx context.Context, id, name string) error {
-	return r.DeleteWorkspaceWithName(ctx, id, name)
+	return r.DeleteWorkspace(ctx, id)
 }
 
 func TestHTTPDeleteWorkspaceRequiresMatchingConfirmName(t *testing.T) {
@@ -190,6 +187,72 @@ func TestHTTPDeleteWorkspaceDeletesWhenConfirmNameMatches(t *testing.T) {
 	h.httpDeleteWorkspace(c)
 
 	require.Equal(t, http.StatusOK, rec.Code)
+	require.True(t, repo.deleteCalled, "handler must delete when confirm_name matches")
+	require.Equal(t, 1, repo.getCalls, "confirmed delete should fetch the workspace once")
+}
+
+func TestWSDeleteWorkspaceRequiresConfirmName(t *testing.T) {
+	repo := &workspaceDeleteRepo{}
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	svc := service.NewService(service.Repos{
+		Workspaces:       repo,
+		Tasks:            repo,
+		TaskRepos:        repo,
+		Workflows:        repo,
+		Messages:         repo,
+		Turns:            repo,
+		Sessions:         repo,
+		GitSnapshots:     repo,
+		RepoEntities:     repo,
+		Executors:        repo,
+		Environments:     repo,
+		TaskEnvironments: repo,
+		Reviews:          repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+
+	h := NewWorkspaceHandlers(svc, log)
+	req, err := ws.NewRequest("req-1", ws.ActionWorkspaceDelete, map[string]string{"id": "ws-1"})
+	require.NoError(t, err)
+
+	resp, err := h.wsDeleteWorkspace(context.Background(), req)
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, resp.Type)
+	require.Contains(t, string(resp.Payload), "confirm_name is required")
+	require.Equal(t, 0, repo.getCalls, "missing confirm_name must not look up the workspace")
+	require.False(t, repo.deleteCalled, "missing confirm_name must not delete")
+}
+
+func TestWSDeleteWorkspaceDeletesWhenConfirmNameMatches(t *testing.T) {
+	repo := &workspaceDeleteRepo{}
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	svc := service.NewService(service.Repos{
+		Workspaces:       repo,
+		Tasks:            repo,
+		TaskRepos:        repo,
+		Workflows:        repo,
+		Messages:         repo,
+		Turns:            repo,
+		Sessions:         repo,
+		GitSnapshots:     repo,
+		RepoEntities:     repo,
+		Executors:        repo,
+		Environments:     repo,
+		TaskEnvironments: repo,
+		Reviews:          repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+
+	h := NewWorkspaceHandlers(svc, log)
+	req, err := ws.NewRequest("req-1", ws.ActionWorkspaceDelete, map[string]string{
+		"id":           "ws-1",
+		"confirm_name": "Delete Me",
+	})
+	require.NoError(t, err)
+
+	resp, err := h.wsDeleteWorkspace(context.Background(), req)
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
 	require.True(t, repo.deleteCalled, "handler must delete when confirm_name matches")
 	require.Equal(t, 1, repo.getCalls, "confirmed delete should fetch the workspace once")
 }

@@ -6,8 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 // errWorkspaceRepo is a WorkspaceRepository that always returns an error from
@@ -33,9 +35,6 @@ func (WorkspaceRepositoryStub) UpdateWorkspace(_ context.Context, _ *models.Work
 func (WorkspaceRepositoryStub) DeleteWorkspace(_ context.Context, _ string) error {
 	panic("not implemented")
 }
-func (WorkspaceRepositoryStub) DeleteWorkspaceWithName(_ context.Context, _, _ string) error {
-	panic("not implemented")
-}
 func (WorkspaceRepositoryStub) DeleteWorkspaceCascadeWithName(_ context.Context, _, _ string) error {
 	panic("not implemented")
 }
@@ -45,18 +44,6 @@ func (WorkspaceRepositoryStub) ListWorkspaces(_ context.Context) ([]*models.Work
 
 type renameBeforeConfirmedDeleteRepo struct {
 	repository.WorkspaceRepository
-}
-
-func (r renameBeforeConfirmedDeleteRepo) DeleteWorkspaceWithName(ctx context.Context, id, name string) error {
-	workspace, err := r.GetWorkspace(ctx, id)
-	if err != nil {
-		return err
-	}
-	workspace.Name = "Renamed"
-	if err := r.UpdateWorkspace(ctx, workspace); err != nil {
-		return err
-	}
-	return r.WorkspaceRepository.DeleteWorkspaceWithName(ctx, id, name)
 }
 
 func (r renameBeforeConfirmedDeleteRepo) DeleteWorkspaceCascadeWithName(ctx context.Context, id, name string) error {
@@ -236,6 +223,51 @@ func TestService_DeleteWorkspaceWithConfirmNameDeletesWhenNameMatches(t *testing
 	}
 	if len(workflows) != 0 {
 		t.Fatalf("workspace workflows should be deleted, got %d", len(workflows))
+	}
+}
+
+func TestService_DeleteWorkspaceWithConfirmNamePublishesChildEventsAndCleansResources(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+	cleanup := &recordingWorktreeCleanup{
+		worktrees: []*worktree.Worktree{{ID: "wt-delete", TaskID: "task-delete"}},
+	}
+	svc.SetWorktreeCleanup(cleanup)
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-delete", Name: "Delete Me"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-delete", WorkspaceID: "ws-delete", Name: "Doomed"})
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:             "task-delete",
+		WorkspaceID:    "ws-delete",
+		WorkflowID:     "wf-delete",
+		WorkflowStepID: "step-delete",
+		Title:          "Delete task",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	eventBus.ClearEvents()
+
+	if err := svc.DeleteWorkspaceWithConfirmName(ctx, "ws-delete", "Delete Me"); err != nil {
+		t.Fatalf("DeleteWorkspaceWithConfirmName: %v", err)
+	}
+	waitForCleanupDone(t, svc)
+
+	eventCounts := make(map[string]int)
+	for _, event := range eventBus.GetPublishedEvents() {
+		eventCounts[event.Type]++
+	}
+	if eventCounts[events.TaskDeleted] != 1 {
+		t.Fatalf("task deleted events = %d, want 1", eventCounts[events.TaskDeleted])
+	}
+	if eventCounts[events.WorkflowDeleted] != 1 {
+		t.Fatalf("workflow deleted events = %d, want 1", eventCounts[events.WorkflowDeleted])
+	}
+	if eventCounts[events.WorkspaceDeleted] != 1 {
+		t.Fatalf("workspace deleted events = %d, want 1", eventCounts[events.WorkspaceDeleted])
+	}
+	if len(cleanup.cleaned) != 1 || cleanup.cleaned[0].ID != "wt-delete" {
+		t.Fatalf("cleaned worktrees = %#v, want wt-delete", cleanup.cleaned)
 	}
 }
 
