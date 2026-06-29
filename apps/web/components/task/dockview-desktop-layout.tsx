@@ -554,6 +554,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   const effectiveEnvId = useAppStore((state) =>
     effectiveSessionId ? (state.environmentIdBySessionId[effectiveSessionId] ?? null) : null,
   );
+  const changesFocusKey = effectiveEnvId ?? effectiveSessionId;
   const envIdRef = useRef<string | null>(effectiveEnvId);
   const hasDevScript = Boolean(repository?.dev_script?.trim());
 
@@ -602,7 +603,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
   // Auto-create a session tab when a session becomes active
   useAutoSessionTab(effectiveSessionId);
-  useChangesPanelAutoFocus(effectiveEnvId);
+  useChangesPanelAutoFocus(changesFocusKey);
 
   // Auto-show PR detail panel when the task has an associated PR
   useAutoPRPanel();
