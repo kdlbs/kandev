@@ -368,6 +368,7 @@ describe("release desktop artifacts", () => {
     expect(tauriConfig).toContain("windows-sign.ps1");
     expect(tauriConfig).not.toContain('"csp": null');
     expect(windowsSignScript).toContain('"https://timestamp.digicert.com"');
+    expect(windowsSignScript).toContain('WINDOWS_SIGNING_ENABLED -eq "false"');
     expect(windowsSignScript).toContain("Skipping Windows signing for unsigned desktop artifact");
     expect(windowsSignScript).toContain("Remove-Item -LiteralPath $certificatePath");
     expect(signingDocs).toContain("signs desktop artifacts opportunistically");
