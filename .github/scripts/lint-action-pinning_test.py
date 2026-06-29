@@ -84,6 +84,40 @@ class LintActionPinningTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, output)
         self.assertIn("docker://alpine@sha256:abc123", output)
 
+    def test_rejects_docker_action_pinned_to_non_digest_ref(self) -> None:
+        result = self.run_lint(
+            """
+            name: test
+            on: push
+            jobs:
+              test:
+                runs-on: ubuntu-latest
+                steps:
+                  - uses: docker://alpine@v1.0
+            """
+        )
+
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("docker://alpine@v1.0", output)
+
+    def test_rejects_unpinned_action_without_at_sign(self) -> None:
+        result = self.run_lint(
+            """
+            name: test
+            on: push
+            jobs:
+              test:
+                runs-on: ubuntu-latest
+                steps:
+                  - uses: actions/checkout
+            """
+        )
+
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("uses: actions/checkout", output)
+
     def test_allows_pinned_action_local_action_and_docker_digest(self) -> None:
         digest = "a" * 64
         result = self.run_lint(

@@ -94,9 +94,7 @@ function findPnpmSetupVersion(
 }
 
 function matchPnpmSetupUsesLine(line: string): RegExpMatchArray | null {
-  return line.match(
-    /^(\s*)(?:-\s*)?uses:\s*["']?pnpm\/action-setup@[0-9a-f]{40}["']?\s*(?:#\s*v\d+)?$/,
-  );
+  return line.match(/^(\s*)(?:-\s*)?uses:\s*["']?pnpm\/action-setup@[0-9a-f]{40}["']?\s*(?:#.*)?$/);
 }
 
 function findStepIndent(lines: string[], usesLineIndex: number, usesIndent: number): number {
