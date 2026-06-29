@@ -598,8 +598,7 @@ func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, curren
 		s.reviveReusedSession(ctx, existing)
 	}
 
-	// Note: do not stamp created_by here. Reused sessions keep whatever
-	// provenance tag they had when first created.
+	s.tagSessionAsWorkflowSwitched(ctx, existing.ID)
 
 	if err := s.SetPrimarySession(ctx, existing.ID); err != nil {
 		s.logger.Warn("failed to set reused session as primary",
