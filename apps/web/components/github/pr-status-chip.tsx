@@ -61,13 +61,13 @@ function hasUnknownOrInProgressChecks(pr: TaskPR): boolean {
   return pr.checks_total <= 0 || pr.checks_passing < pr.checks_total;
 }
 
-function aggregateCheckStatus(pr: TaskPR): "passed" | "in_progress" | null {
+function checkStatusFromCounts(pr: TaskPR): "passed" | "in_progress" | null {
   if (pr.checks_state !== "" || pr.checks_total <= 0) return null;
   return hasPRChecksPassed(pr) ? "passed" : "in_progress";
 }
 
 function chipStatus(pr: TaskPR): ChipStatus {
-  const aggregateStatus = aggregateCheckStatus(pr);
+  const countStatus = checkStatusFromCounts(pr);
   if (pr.review_state === "changes_requested" || pr.checks_state === "failure") return "failed";
   // Merge conflicts / behind-base block the merge even when CI is green — the
   // chip must never read as a passed check in that case. Mirrors
@@ -81,7 +81,7 @@ function chipStatus(pr: TaskPR): ChipStatus {
   // covers approved PRs where branch protection requires more reviewers.
   if (
     (pr.checks_state === "pending" && hasUnknownOrInProgressChecks(pr)) ||
-    aggregateStatus === "in_progress" ||
+    countStatus === "in_progress" ||
     pr.review_state === "pending"
   ) {
     return "in_progress";

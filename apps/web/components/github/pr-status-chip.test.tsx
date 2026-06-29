@@ -404,6 +404,20 @@ describe("PRStatusChip — aggregate checks", () => {
     );
     expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("in_progress");
   });
+
+  it("treats aggregate zero passing checks as in-progress when checks_state is empty", () => {
+    renderWithStore(
+      {
+        taskPRs: {
+          byTaskId: {
+            "task-1": [makePR({ checks_state: "", checks_total: 3, checks_passing: 0 })],
+          },
+        },
+      },
+      <PRStatusChip taskId="task-1" />,
+    );
+    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("in_progress");
+  });
 });
 
 describe("PRStatusChip — mergeability", () => {
