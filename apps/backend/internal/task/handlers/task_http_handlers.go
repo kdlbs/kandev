@@ -616,11 +616,11 @@ func buildTaskCreateLastUsedPatch(body httpCreateTaskRequest, repos []dto.TaskRe
 		AgentProfileID:    body.AgentProfileID,
 		ExecutorProfileID: body.ExecutorProfileID,
 	}
-	for _, repo := range repos {
+	for i, repo := range repos {
 		if repo.RepositoryID == "" {
 			continue
 		}
-		branch := firstNonEmpty(repo.CheckoutBranch, repo.BaseBranch)
+		branch := taskCreateLastUsedBranch(body, i, repo)
 		if branch != "" {
 			patch.RepositoryID = repo.RepositoryID
 			patch.Branch = branch
@@ -631,6 +631,18 @@ func buildTaskCreateLastUsedPatch(body httpCreateTaskRequest, repos []dto.TaskRe
 		}
 	}
 	return patch
+}
+
+func taskCreateLastUsedBranch(
+	body httpCreateTaskRequest,
+	index int,
+	repo dto.TaskRepositoryInput,
+) string {
+	if index < len(body.Repositories) && body.Repositories[index].FreshBranch {
+		raw := body.Repositories[index]
+		return firstNonEmpty(raw.CheckoutBranch, raw.BaseBranch)
+	}
+	return firstNonEmpty(repo.CheckoutBranch, repo.BaseBranch)
 }
 
 func firstNonEmpty(values ...string) string {
