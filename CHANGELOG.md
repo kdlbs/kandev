@@ -2,6 +2,12 @@
 
 All notable changes to Kandev.
 
+## 0.69.0 - 2026-06-29
+
+### Bug Fixes
+
+- repair postgres schema migration coverage ([#1529](https://github.com/kdlbs/kandev/pull/1529))
+
 ## 0.68.0 - 2026-06-29
 
 ### Bug Fixes
