@@ -16,8 +16,6 @@ export type ChangesMarker = {
   fingerprint: string;
 };
 
-type ChangesSignalState = Pick<AppState, "gitStatus" | "sessionCommits">;
-
 export type ActivateChangesPanelResult =
   | "activated"
   | "blocked-agent-group"
@@ -104,14 +102,9 @@ export function selectChangesMarkerByEnvironment(
   return markers;
 }
 
-export function selectChangesCountByEnvironment(state: ChangesMarkerState): Record<string, number> {
-  const markers = selectChangesMarkerByEnvironment(state);
-  return Object.fromEntries(
-    Object.entries(markers).map(([envKey, marker]) => [envKey, marker.count]),
-  );
-}
-
 function markerToSignal(marker: ChangesMarker): string {
+  // Zustand shallow comparison is stable for primitive values; count always
+  // lives left of the first NUL and the full fingerprint lives to the right.
   return `${marker.count}\u0000${marker.fingerprint}`;
 }
 
@@ -130,7 +123,7 @@ function signalsToMarkers(signalsByEnv: Record<string, string>): Record<string, 
 }
 
 export function selectChangesSignalByEnvironment(
-  state: ChangesSignalState,
+  state: ChangesMarkerState,
 ): Record<string, string> {
   const markers = selectChangesMarkerByEnvironment(state);
   return Object.fromEntries(
@@ -201,6 +194,49 @@ export function shouldClearPendingChangesFocus(result: ActivateChangesPanelResul
   return result === "activated" || result === "no-panel";
 }
 
+export function applyChangesPanelAutoFocusState(args: {
+  signalsByEnv: Record<string, string>;
+  activeEnvKey: string | null;
+  previousActiveEnvKey: string | null;
+  environmentIdBySessionId: Record<string, string>;
+  previousMarkers: Record<string, ChangesMarker>;
+  pendingEnvKeys: Set<string>;
+  isRestoringLayout: boolean;
+  activate: () => ActivateChangesPanelResult;
+}): string | null {
+  const {
+    signalsByEnv,
+    activeEnvKey,
+    previousActiveEnvKey,
+    environmentIdBySessionId,
+    previousMarkers,
+    pendingEnvKeys,
+    isRestoringLayout,
+    activate,
+  } = args;
+
+  migrateEnvironmentKeys({
+    environmentIdBySessionId,
+    previousMarkers,
+    pendingEnvKeys,
+  });
+
+  markInactiveChangesIncreases({
+    markersByEnv: signalsToMarkers(signalsByEnv),
+    activeEnvKey,
+    previousActiveEnvKey,
+    previousMarkers,
+    pendingEnvKeys,
+  });
+
+  if (activeEnvKey && !isRestoringLayout && pendingEnvKeys.has(activeEnvKey)) {
+    const result = activate();
+    if (shouldClearPendingChangesFocus(result)) pendingEnvKeys.delete(activeEnvKey);
+  }
+
+  return activeEnvKey;
+}
+
 export function useChangesPanelAutoFocus(activeEnvKey: string | null) {
   const api = useDockviewStore((s) => s.api);
   const isRestoringLayout = useDockviewStore((s) => s.isRestoringLayout);
@@ -211,25 +247,15 @@ export function useChangesPanelAutoFocus(activeEnvKey: string | null) {
   const previousActiveEnvKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    migrateEnvironmentKeys({
+    previousActiveEnvKeyRef.current = applyChangesPanelAutoFocusState({
+      signalsByEnv,
+      activeEnvKey,
+      previousActiveEnvKey: previousActiveEnvKeyRef.current,
       environmentIdBySessionId,
       previousMarkers: previousMarkersRef.current,
       pendingEnvKeys: pendingEnvKeysRef.current,
+      isRestoringLayout,
+      activate: () => activateChangesPanel(api),
     });
-
-    markInactiveChangesIncreases({
-      markersByEnv: signalsToMarkers(signalsByEnv),
-      activeEnvKey,
-      previousActiveEnvKey: previousActiveEnvKeyRef.current,
-      previousMarkers: previousMarkersRef.current,
-      pendingEnvKeys: pendingEnvKeysRef.current,
-    });
-
-    if (activeEnvKey && !isRestoringLayout && pendingEnvKeysRef.current.has(activeEnvKey)) {
-      const result = activateChangesPanel(api);
-      if (shouldClearPendingChangesFocus(result)) pendingEnvKeysRef.current.delete(activeEnvKey);
-    }
-
-    previousActiveEnvKeyRef.current = activeEnvKey;
   }, [signalsByEnv, activeEnvKey, api, isRestoringLayout, environmentIdBySessionId]);
 }

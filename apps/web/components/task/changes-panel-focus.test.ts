@@ -1,14 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyChangesPanelAutoFocusState,
   markInactiveChangesIncreases,
   migrateEnvironmentKeys,
-  selectChangesCountByEnvironment,
   selectChangesMarkerByEnvironment,
   shouldClearPendingChangesFocus,
 } from "./changes-panel-focus";
-import type { GitStatusEntry, SessionCommit } from "@/lib/state/slices/session-runtime/types";
+import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
 
 const TEST_TIMESTAMP = "2026-06-29T00:00:00Z";
+const UPDATED_FINGERPRINT = "repo:path:updated";
 
 function gitStatus(files: string[], timestamp = TEST_TIMESTAMP): GitStatusEntry {
   return {
@@ -27,56 +28,6 @@ function gitStatus(files: string[], timestamp = TEST_TIMESTAMP): GitStatusEntry 
     timestamp,
   };
 }
-
-function commit(sha: string): SessionCommit {
-  return {
-    id: `commit-${sha}`,
-    session_id: "sess-1",
-    commit_sha: sha,
-    parent_sha: `parent-${sha}`,
-    author_name: "Test User",
-    author_email: "test@example.com",
-    commit_message: `Commit ${sha}`,
-    committed_at: TEST_TIMESTAMP,
-    files_changed: 1,
-    insertions: 1,
-    deletions: 0,
-    created_at: TEST_TIMESTAMP,
-  };
-}
-
-describe("selectChangesCountByEnvironment", () => {
-  it("counts git files and commits per environment", () => {
-    const state = {
-      gitStatus: {
-        byEnvironmentId: {},
-        byEnvironmentRepo: {
-          envA: {
-            repo1: gitStatus(["one.ts", "two.ts"]),
-          },
-          envB: {
-            repo1: gitStatus([]),
-            repo2: gitStatus(["three.ts"]),
-          },
-        },
-      },
-      sessionCommits: {
-        loading: {},
-        refetchTrigger: {},
-        byEnvironmentId: {
-          envA: [commit("commit-1"), commit("commit-2")],
-          envC: [commit("commit-3")],
-        },
-      },
-    };
-
-    expect(selectChangesCountByEnvironment(state)).toEqual({
-      envA: 4,
-      envB: 1,
-      envC: 1,
-    });
-  });
-});
 
 describe("selectChangesMarkerByEnvironment", () => {
   it("changes fingerprint for meaningful git updates with the same count", () => {
@@ -112,6 +63,97 @@ describe("selectChangesMarkerByEnvironment", () => {
 
     expect(nextMarker.count).toBe(baseMarker.count);
     expect(nextMarker.fingerprint).not.toBe(baseMarker.fingerprint);
+  });
+});
+
+function signal(count: number, fingerprint: string): string {
+  return `${count}\u0000${fingerprint}`;
+}
+
+describe("applyChangesPanelAutoFocusState", () => {
+  it("migrates keys before queuing, defers during restore, and clears after activation", () => {
+    const previousMarkers = {};
+    const pendingEnvKeys = new Set<string>();
+    let previousActiveEnvKey: string | null = "envA";
+    let activateCalls = 0;
+
+    previousActiveEnvKey = applyChangesPanelAutoFocusState({
+      signalsByEnv: {
+        "session-B": signal(1, "repo:path:initial"),
+      },
+      activeEnvKey: "envA",
+      previousActiveEnvKey,
+      environmentIdBySessionId: {},
+      previousMarkers,
+      pendingEnvKeys,
+      isRestoringLayout: false,
+      activate: () => {
+        activateCalls += 1;
+        return "activated";
+      },
+    });
+
+    expect(pendingEnvKeys.size).toBe(0);
+
+    previousActiveEnvKey = applyChangesPanelAutoFocusState({
+      signalsByEnv: {
+        envB: signal(12, UPDATED_FINGERPRINT),
+      },
+      activeEnvKey: "envA",
+      previousActiveEnvKey,
+      environmentIdBySessionId: { "session-B": "envB" },
+      previousMarkers,
+      pendingEnvKeys,
+      isRestoringLayout: false,
+      activate: () => {
+        activateCalls += 1;
+        return "activated";
+      },
+    });
+
+    expect([...pendingEnvKeys]).toEqual(["envB"]);
+    expect(previousMarkers).toEqual({
+      envB: { count: 12, fingerprint: UPDATED_FINGERPRINT },
+    });
+
+    previousActiveEnvKey = applyChangesPanelAutoFocusState({
+      signalsByEnv: {
+        envB: signal(12, UPDATED_FINGERPRINT),
+      },
+      activeEnvKey: "envB",
+      previousActiveEnvKey,
+      environmentIdBySessionId: { "session-B": "envB" },
+      previousMarkers,
+      pendingEnvKeys,
+      isRestoringLayout: true,
+      activate: () => {
+        activateCalls += 1;
+        return "activated";
+      },
+    });
+
+    expect(activateCalls).toBe(0);
+    expect([...pendingEnvKeys]).toEqual(["envB"]);
+
+    previousActiveEnvKey = applyChangesPanelAutoFocusState({
+      signalsByEnv: {
+        envB: signal(12, UPDATED_FINGERPRINT),
+      },
+      activeEnvKey: "envB",
+      previousActiveEnvKey,
+      environmentIdBySessionId: { "session-B": "envB" },
+      previousMarkers,
+      pendingEnvKeys,
+      isRestoringLayout: false,
+      activate: () => {
+        activateCalls += 1;
+        return "activated";
+      },
+    });
+
+    expect(previousActiveEnvKey).toBe("envB");
+    expect(activateCalls).toBe(1);
+    expect(pendingEnvKeys.size).toBe(0);
   });
 });
 
