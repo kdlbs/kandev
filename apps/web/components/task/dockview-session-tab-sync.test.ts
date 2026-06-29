@@ -183,7 +183,7 @@ describe("setupSessionTabSync", () => {
     expect(harness.otherPanelSetActive).not.toHaveBeenCalled();
   });
 
-  it("ignores stale session panels without an environment mapping", () => {
+  it("restores active panel for stale session panels without an environment mapping", () => {
     const harness = makeDefaultSessionTabSyncHarness({ includeOtherEnv: false });
 
     startSessionTabSync(harness);
@@ -191,6 +191,6 @@ describe("setupSessionTabSync", () => {
     harness.fireActivePanelChange(OTHER_SESSION_PANEL_ID);
 
     expect(harness.setActiveSession).not.toHaveBeenCalled();
-    expect(harness.activePanelSetActive).not.toHaveBeenCalled();
+    expect(harness.activePanelSetActive).toHaveBeenCalledTimes(1);
   });
 });

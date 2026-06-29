@@ -42,7 +42,10 @@ import { HandoffContextMenuSub } from "@/components/task/handoff-profile-menu-it
 import { NewSessionDialog, type HandoffPreset } from "@/components/task/new-session-dialog";
 import { usableConfigOptions } from "@/components/model-config-selector";
 import type { TaskSessionState } from "@/lib/types/http";
-import { markSessionTabUserActivationIntent } from "./session-tab-activation-intent";
+import {
+  markSessionTabUserActivationIntent,
+  shouldMarkSessionTabUserActivationIntent,
+} from "./session-tab-activation-intent";
 import { isSessionActive } from "./session-sort";
 import { resolveSessionTabTitle } from "./session-tab-title";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
@@ -147,23 +150,36 @@ function useSessionTabActions(
   return { handleSetPrimary, handleStop, handleResume, handleDelete, handleCloseOthers };
 }
 
-function useSessionTabUserActivationIntent(sessionId: string | undefined) {
-  const markUserActivationIntent = useCallback(() => {
-    markSessionTabUserActivationIntent(sessionId);
-  }, [sessionId]);
+function useSessionTabUserActivationIntent(sessionId: string | undefined, isActive: boolean) {
+  const markUserActivationIntent = useCallback(
+    (target: EventTarget | null) => {
+      if (!shouldMarkSessionTabUserActivationIntent({ sessionId, isActive, target })) return;
+      markSessionTabUserActivationIntent(sessionId);
+    },
+    [isActive, sessionId],
+  );
   const handlePointerDownCapture = useCallback(
     (event: ReactPointerEvent) => {
-      if (event.button === 0) markUserActivationIntent();
+      if (event.button === 0) markUserActivationIntent(event.target);
     },
     [markUserActivationIntent],
   );
   const handleKeyDownCapture = useCallback(
     (event: ReactKeyboardEvent) => {
-      if (event.key === "Enter" || event.key === " ") markUserActivationIntent();
+      if (event.key === "Enter" || event.key === " ") markUserActivationIntent(event.target);
     },
     [markUserActivationIntent],
   );
   return { handlePointerDownCapture, handleKeyDownCapture };
+}
+
+function useDockviewTabActiveState(api: IDockviewPanelHeaderProps["api"]) {
+  const [isActive, setIsActive] = useState(api.isActive);
+  useEffect(() => {
+    const disposable = api.onDidActiveChange((e) => setIsActive(e.isActive));
+    return () => disposable.dispose();
+  }, [api]);
+  return isActive;
 }
 
 function DeleteSessionDialog({
@@ -362,7 +378,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
   const [shareOpen, setShareOpen] = useState(false);
   const [handoffOpen, setHandoffOpen] = useState(false);
   const [handoffPreset, setHandoffPreset] = useState<HandoffPreset | null>(null);
-  const [isActive, setIsActive] = useState(api.isActive);
+  const isActive = useDockviewTabActiveState(api);
   const canShare = !!taskId && !!sessionId && shareableSessionStateClient(sessionState);
   const handleHandoffProfile = useCallback(
     (profileId: string) => {
@@ -372,11 +388,6 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
     },
     [sessionId],
   );
-
-  useEffect(() => {
-    const disposable = api.onDidActiveChange((e) => setIsActive(e.isActive));
-    return () => disposable.dispose();
-  }, [api]);
 
   useEffect(() => {
     if (tabTitle && api.title !== tabTitle) api.setTitle(tabTitle);
@@ -389,8 +400,10 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
   const handleCloseTab = useCallback(() => {
     setConfirmDelete(true);
   }, []);
-  const { handlePointerDownCapture, handleKeyDownCapture } =
-    useSessionTabUserActivationIntent(sessionId);
+  const { handlePointerDownCapture, handleKeyDownCapture } = useSessionTabUserActivationIntent(
+    sessionId,
+    isActive,
+  );
 
   return (
     <>

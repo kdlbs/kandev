@@ -3,6 +3,7 @@ import {
   clearSessionTabUserActivationIntentsForTest,
   consumeSessionTabUserActivationIntent,
   markSessionTabUserActivationIntent,
+  shouldMarkSessionTabUserActivationIntent,
 } from "./session-tab-activation-intent";
 
 describe("session tab activation intent", () => {
@@ -52,5 +53,39 @@ describe("session tab activation intent", () => {
 
     expect(consumeSessionTabUserActivationIntent("s-first")).toBe(true);
     expect(consumeSessionTabUserActivationIntent("s-second")).toBe(true);
+  });
+
+  it("does not mark intent for already-active tabs", () => {
+    expect(
+      shouldMarkSessionTabUserActivationIntent({
+        sessionId: "s-active",
+        isActive: true,
+        target: document.createElement("span"),
+      }),
+    ).toBe(false);
+  });
+
+  it("does not mark intent from nested interactive controls", () => {
+    const button = document.createElement("button");
+    const label = document.createElement("span");
+    button.append(label);
+
+    expect(
+      shouldMarkSessionTabUserActivationIntent({
+        sessionId: "s-inactive",
+        isActive: false,
+        target: label,
+      }),
+    ).toBe(false);
+  });
+
+  it("marks intent for inactive tab activation surfaces", () => {
+    expect(
+      shouldMarkSessionTabUserActivationIntent({
+        sessionId: "s-inactive",
+        isActive: false,
+        target: document.createElement("span"),
+      }),
+    ).toBe(true);
   });
 });

@@ -16,6 +16,10 @@ function restoreActiveSessionPanel(
   api.getPanel(`session:${activeSessionId}`)?.api.setActive();
 }
 
+function isDifferentSessionPanel(panelId: string, activeSessionId: string | null): boolean {
+  return panelId.startsWith("session:") && panelId !== `session:${activeSessionId}`;
+}
+
 /**
  * Sync `activeSessionId` in the store when the user explicitly activates a
  * session tab. Dockview can also activate panels internally while restoring
@@ -45,12 +49,17 @@ export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: St
       environmentIdBySessionId: state.environmentIdBySessionId,
     });
     if (!target) {
+      const shouldRestoreActiveSession = isDifferentSessionPanel(
+        panel.id,
+        state.tasks.activeSessionId,
+      );
       if (isDebug() && panel.id.startsWith("session:")) {
         debug("setupSessionTabSync: skip (stale or cross-task panel)", {
           panelId: panel.id,
           activeTaskId: state.tasks.activeTaskId,
         });
       }
+      if (shouldRestoreActiveSession) restoreActiveSessionPanel(api, state.tasks.activeSessionId);
       return;
     }
     if (!consumeSessionTabUserActivationIntent(target.sessionId)) {

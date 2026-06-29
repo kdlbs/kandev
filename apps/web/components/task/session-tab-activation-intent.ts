@@ -1,10 +1,22 @@
 const SESSION_TAB_USER_ACTIVATION_TTL_MS = 1500;
+const NESTED_INTERACTIVE_SELECTOR =
+  "button, a, input, select, textarea, [role='button'], [role='menuitem']";
 
 type SessionTabActivationIntent = {
   expiresAt: number;
 };
 
 const sessionTabActivationIntents = new Map<string, SessionTabActivationIntent>();
+
+export function shouldMarkSessionTabUserActivationIntent(args: {
+  sessionId: string | null | undefined;
+  isActive: boolean;
+  target: EventTarget | null;
+}): boolean {
+  if (!args.sessionId || args.isActive) return false;
+  if (typeof Element === "undefined" || !(args.target instanceof Element)) return true;
+  return !args.target.closest(NESTED_INTERACTIVE_SELECTOR);
+}
 
 export function markSessionTabUserActivationIntent(sessionId: string | null | undefined): void {
   if (!sessionId) return;
