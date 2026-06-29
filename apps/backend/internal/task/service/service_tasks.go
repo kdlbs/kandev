@@ -1020,10 +1020,13 @@ func (s *Service) runAsyncTaskCleanup(
 	}()
 }
 
-// isTerminalSessionState reports whether a session is already in a terminal state.
-// Terminal sessions have no running agent process; stop failures are expected and
-// must not block cleanup.
-func isTerminalSessionState(state models.TaskSessionState) bool {
+// isCleanableSessionState reports whether a session has no running agent process
+// and stop failures are therefore expected. Unlike the orchestrator's
+// isTerminalSessionState (which excludes IDLE), this helper is used only during
+// task cleanup to decide whether a stop failure should block environment teardown.
+// IDLE is included because an idle session has already released its execution slot
+// and will return ErrExecutionNotFound just like CANCELLED/COMPLETED/FAILED.
+func isCleanableSessionState(state models.TaskSessionState) bool {
 	switch state {
 	case models.TaskSessionStateCancelled,
 		models.TaskSessionStateCompleted,
@@ -1056,7 +1059,7 @@ func (s *Service) buildStopTargets(ctx context.Context, taskID string, activeSes
 			target := taskStopTarget{
 				sessionID:   running.SessionID,
 				executionID: strings.TrimSpace(running.AgentExecutionID),
-				terminal:    isTerminalSessionState(sessionStates[running.SessionID]),
+				terminal:    isCleanableSessionState(sessionStates[running.SessionID]),
 			}
 			targets = append(targets, target)
 			seen[target.sessionID] = struct{}{}
@@ -1071,7 +1074,7 @@ func (s *Service) buildStopTargets(ctx context.Context, taskID string, activeSes
 		}
 		// Sessions without an executor_running row that are already in a terminal
 		// state have no running process; skip creating a stop target.
-		if isTerminalSessionState(sess.State) {
+		if isCleanableSessionState(sess.State) {
 			continue
 		}
 		target := taskStopTarget{
