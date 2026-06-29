@@ -51,7 +51,7 @@ func (c QueueRunCallback) Execute(ctx context.Context, in ActionInput) (ActionRe
 		return ActionResult{}, fmt.Errorf("queue_run action missing QueueRun config")
 	}
 	taskID := resolveTaskID(in.Action.QueueRun.TaskID, in.State.TaskID)
-	agentIDs, err := c.resolveTarget(ctx, in)
+	agentIDs, err := c.resolveTarget(ctx, in, taskID)
 	if err != nil {
 		return ActionResult{}, err
 	}
@@ -71,14 +71,16 @@ func (c QueueRunCallback) Execute(ctx context.Context, in ActionInput) (ActionRe
 	return ActionResult{}, nil
 }
 
-func (c QueueRunCallback) resolveTarget(ctx context.Context, in ActionInput) ([]string, error) {
+func (c QueueRunCallback) resolveTarget(
+	ctx context.Context, in ActionInput, targetTaskID string,
+) ([]string, error) {
 	target := strings.TrimSpace(in.Action.QueueRun.Target)
 	switch {
 	case target == "" || target == TargetPrimary:
-		return c.resolvePrimary(ctx, in)
+		return c.resolvePrimary(ctx, in, targetTaskID)
 	case strings.HasPrefix(target, TargetParticipant):
 		role := strings.TrimPrefix(target, TargetParticipant)
-		return c.resolveParticipantRole(ctx, in.Step.ID, in.State.TaskID, role)
+		return c.resolveParticipantRole(ctx, in.Step.ID, targetTaskID, role)
 	case strings.HasPrefix(target, TargetAgentProfile):
 		id := strings.TrimPrefix(target, TargetAgentProfile)
 		if id == "" {
@@ -86,17 +88,19 @@ func (c QueueRunCallback) resolveTarget(ctx context.Context, in ActionInput) ([]
 		}
 		return []string{id}, nil
 	case target == TargetWorkspaceCEO:
-		return c.resolveCEO(ctx, in.State.TaskID)
+		return c.resolveCEO(ctx, targetTaskID)
 	default:
 		return nil, fmt.Errorf("queue_run: unsupported target %q", target)
 	}
 }
 
-func (c QueueRunCallback) resolvePrimary(ctx context.Context, in ActionInput) ([]string, error) {
+func (c QueueRunCallback) resolvePrimary(
+	ctx context.Context, in ActionInput, targetTaskID string,
+) ([]string, error) {
 	if c.Primary == nil {
 		return nil, fmt.Errorf("%w: queue_run target=primary requires PrimaryAgentResolver", ErrActionNotYetWired)
 	}
-	id, err := c.Primary.PrimaryAgentProfileID(ctx, in.Step.ID, in.State.TaskID)
+	id, err := c.Primary.PrimaryAgentProfileID(ctx, in.Step.ID, targetTaskID)
 	if err != nil {
 		return nil, fmt.Errorf("queue_run resolve primary: %w", err)
 	}
@@ -164,12 +168,12 @@ func queueRunReason(in ActionInput) string {
 
 // idempotencyKey synthesises a deterministic key from the engine's
 // operation id (already idempotent across retries) plus action-specific
-// salt. The default primary task_comment wake keeps the exact
+// salt. The default same-task primary task_comment wake keeps the exact
 // "task_comment:<comment_id>" key so comment status lookups can map the
-// single run back to the user comment. Multi-agent fan-out keeps the salt so
-// one comment can still wake every intended participant. When OperationID is
-// empty, the adapter sees an empty key and is expected to dedupe via its own
-// mechanism (or accept the duplicate).
+// single run back to the user comment. Cross-task actions and multi-agent
+// fan-out keep the salt so one comment can still wake every intended target.
+// When OperationID is empty, the adapter sees an empty key and is expected to
+// dedupe via its own mechanism (or accept the duplicate).
 func idempotencyKey(in ActionInput, agentID, taskID string) string {
 	if in.OperationID == "" {
 		return ""
@@ -188,7 +192,8 @@ func usesExactCommentKey(in ActionInput) bool {
 		return false
 	}
 	target := strings.TrimSpace(in.Action.QueueRun.Target)
-	return target == "" || target == TargetPrimary
+	taskID := strings.TrimSpace(in.Action.QueueRun.TaskID)
+	return (target == "" || target == TargetPrimary) && (taskID == "" || taskID == TaskIDThis)
 }
 
 func queueRunPayload(in ActionInput, actionPayload map[string]any) map[string]any {

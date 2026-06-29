@@ -19,11 +19,19 @@ func (f *fakeRunQueue) QueueRun(_ context.Context, req QueueRunRequest) error {
 
 // fakePrimary returns a fixed agent profile id for any step.
 type fakePrimary struct {
-	id  string
-	err error
+	id     string
+	err    error
+	stepID *string
+	taskID *string
 }
 
-func (f fakePrimary) PrimaryAgentProfileID(_ context.Context, _, _ string) (string, error) {
+func (f fakePrimary) PrimaryAgentProfileID(_ context.Context, stepID, taskID string) (string, error) {
+	if f.stepID != nil {
+		*f.stepID = stepID
+	}
+	if f.taskID != nil {
+		*f.taskID = taskID
+	}
 	return f.id, f.err
 }
 
@@ -121,6 +129,40 @@ func TestQueueRunCallback_OnCommentUsesCommentPayloadAndStableKey(t *testing.T) 
 	}
 	if got.Payload["author_id"] != "user-1" {
 		t.Fatalf("payload author_id = %v, want user-1 (payload=%#v)", got.Payload["author_id"], got.Payload)
+	}
+}
+
+func TestQueueRunCallback_PrimaryUsesResolvedTargetTask(t *testing.T) {
+	q := &fakeRunQueue{}
+	var resolvedTaskID string
+	cb := QueueRunCallback{
+		Adapter: q,
+		Primary: fakePrimary{
+			id:     "agent-for-target-task",
+			taskID: &resolvedTaskID,
+		},
+	}
+	in := newQueueRunInput("primary", "target-task")
+	in.OperationID = "task_comment:c-1"
+
+	if _, err := cb.Execute(context.Background(), in); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(q.calls) != 1 {
+		t.Fatalf("expected 1 queue run call, got %d", len(q.calls))
+	}
+	if resolvedTaskID != "target-task" {
+		t.Fatalf("primary resolved against task %q, want target-task", resolvedTaskID)
+	}
+	got := q.calls[0]
+	if got.TaskID != "target-task" {
+		t.Fatalf("queued task_id = %q, want target-task", got.TaskID)
+	}
+	if got.AgentProfileID != "agent-for-target-task" {
+		t.Fatalf("agent_profile_id = %q, want agent-for-target-task", got.AgentProfileID)
+	}
+	if got.IdempotencyKey == "task_comment:c-1" {
+		t.Fatalf("literal-task primary comment wake must keep action/task/agent salt")
 	}
 }
 

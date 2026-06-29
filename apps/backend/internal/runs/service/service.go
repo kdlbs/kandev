@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -75,6 +76,10 @@ const IdempotencyWindowHours = 24
 // signals are tolerated; the channel only needs to carry "wake up,
 // there's at least one new row" and a small buffer is plenty.
 const signalBuffer = 64
+
+const runPayloadEnvelopeKeys = 3
+
+const maxInt = int(^uint(0) >> 1)
 
 // AgentResolver turns a queue request into the concrete agent instance
 // id the row needs. Today's office paths pass agent_profile_id
@@ -170,18 +175,20 @@ func (s *Service) QueueRun(ctx context.Context, req QueueRunRequest) error {
 		return fmt.Errorf("encode payload: %w", err)
 	}
 
-	coalesced, err := s.repo.CoalesceRun(ctx, agentInstanceID, req.Reason, CoalesceWindowSeconds, payload)
-	if err != nil {
-		return fmt.Errorf("coalesce check: %w", err)
-	}
-	if coalesced {
-		s.log.Debug("run coalesced",
-			zap.String("agent", agentInstanceID),
-			zap.String("reason", req.Reason))
-		// Coalesced rows are merged into an existing queued row, so
-		// no new signal is needed — the scheduler already saw the
-		// original insert.
-		return nil
+	if shouldCoalesceRun(req) {
+		coalesced, err := s.repo.CoalesceRun(ctx, agentInstanceID, req.Reason, CoalesceWindowSeconds, payload)
+		if err != nil {
+			return fmt.Errorf("coalesce check: %w", err)
+		}
+		if coalesced {
+			s.log.Debug("run coalesced",
+				zap.String("agent", agentInstanceID),
+				zap.String("reason", req.Reason))
+			// Coalesced rows are merged into an existing queued row, so
+			// no new signal is needed — the scheduler already saw the
+			// original insert.
+			return nil
+		}
 	}
 
 	row, err := s.insertRun(ctx, agentInstanceID, req, payload)
@@ -249,7 +256,7 @@ func (s *Service) resolveAgentInstance(ctx context.Context, req QueueRunRequest)
 // intentional: engine queue_run and legacy office QueueRun callers converge
 // on the same persisted JSON shape even when their input payloads differ.
 func runPayload(req QueueRunRequest, agentInstanceID string) map[string]any {
-	out := make(map[string]any, len(req.Payload))
+	out := make(map[string]any, runPayloadCapacity(len(req.Payload)))
 	for k, v := range req.Payload {
 		out[k] = v
 	}
@@ -263,6 +270,17 @@ func runPayload(req QueueRunRequest, agentInstanceID string) map[string]any {
 		out["agent_profile_id"] = agentInstanceID
 	}
 	return out
+}
+
+func runPayloadCapacity(payloadLen int) int {
+	if payloadLen > maxInt-runPayloadEnvelopeKeys {
+		return payloadLen
+	}
+	return payloadLen + runPayloadEnvelopeKeys
+}
+
+func shouldCoalesceRun(req QueueRunRequest) bool {
+	return req.Reason != "task_comment" || !strings.HasPrefix(req.IdempotencyKey, "task_comment:")
 }
 
 // publishRunQueued emits the OfficeRunQueued bus event so the WS

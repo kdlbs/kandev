@@ -126,6 +126,37 @@ func TestQueueRun_UsesRequestAgentProfileIDAndAddsEnvelopePayload(t *testing.T) 
 	}
 }
 
+func TestQueueRun_DoesNotCoalesceDistinctTaskComments(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	for _, commentID := range []string{"comment-1", "comment-2"} {
+		if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+			AgentProfileID: "agent-primary",
+			TaskID:         "task-1",
+			WorkflowStepID: "work",
+			Reason:         "task_comment",
+			IdempotencyKey: "task_comment:" + commentID,
+			Payload: map[string]any{
+				"comment_id": commentID,
+			},
+		}); err != nil {
+			t.Fatalf("queue %s: %v", commentID, err)
+		}
+	}
+
+	statuses, err := repo.GetRunsByCommentIDs(ctx, []string{"comment-1", "comment-2"})
+	if err != nil {
+		t.Fatalf("get comment runs: %v", err)
+	}
+	if len(statuses) != 2 {
+		t.Fatalf("statuses = %+v, want one run per distinct comment", statuses)
+	}
+	if statuses["comment-1"].RunID == statuses["comment-2"].RunID {
+		t.Fatalf("distinct comments must not point at the same coalesced run: %+v", statuses)
+	}
+}
+
 // TestQueueRun_RejectsWithoutAgent pins that the service refuses to
 // insert when no agent can be resolved from the payload (the
 // resolver-less path is what office.QueueRun uses today).
