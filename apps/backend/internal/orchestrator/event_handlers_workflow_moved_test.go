@@ -202,7 +202,7 @@ func TestHandleTaskMovedNoSession(t *testing.T) {
 				session, err := repo.GetTaskSession(ctx, req.SessionID)
 				if err != nil {
 					t.Errorf("GetTaskSession(%q): %v", req.SessionID, err)
-				} else if session.Metadata[models.SessionMetaKeyCreatedBy] != models.SessionCreatedByWorkflowSwitch {
+				} else if session.Metadata == nil || session.Metadata[models.SessionMetaKeyCreatedBy] != models.SessionCreatedByWorkflowSwitch {
 					t.Errorf("created_by metadata before launch = %v, want %q", session.Metadata[models.SessionMetaKeyCreatedBy], models.SessionCreatedByWorkflowSwitch)
 				}
 				executorID, _ := req.Metadata[models.MetaKeyExecutorID].(string)
@@ -224,26 +224,6 @@ func TestHandleTaskMovedNoSession(t *testing.T) {
 			}
 		case <-time.After(2 * time.Second):
 			t.Fatal("timed out waiting for auto-start launch")
-		}
-
-		ticker := time.NewTicker(10 * time.Millisecond)
-		defer ticker.Stop()
-		timeout := time.After(2 * time.Second)
-		for {
-			sessions, err := repo.ListTaskSessions(ctx, "t1")
-			if err != nil {
-				t.Fatalf("ListTaskSessions: %v", err)
-			}
-			for _, session := range sessions {
-				if session.Metadata[models.SessionMetaKeyCreatedBy] == models.SessionCreatedByWorkflowSwitch {
-					return
-				}
-			}
-			select {
-			case <-ticker.C:
-			case <-timeout:
-				t.Fatal("timed out waiting for workflow-routed session metadata")
-			}
 		}
 	})
 }
