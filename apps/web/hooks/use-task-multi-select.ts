@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, type RefOb
 import { useTaskActions } from "@/hooks/use-task-actions";
 import { useAppStoreApi } from "@/components/state-provider";
 import type { KanbanState } from "@/lib/state/slices";
+import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
 
 /** @internal Exported for reuse by the sidebar multi-select hook. */
 export function useTaskMultiSelectStore() {
@@ -78,7 +79,28 @@ export function useTaskMultiSelectStore() {
     [store],
   );
 
-  return { removeTasksFromStore, applyMoveInStore, getWorkflowIdForTask };
+  // Sort ids into the board's visible (created-desc) order. A backward range
+  // selection leaves `selectedIds` in anchor-first Set order, which would land
+  // scrambled when the move assigns sequential positions.
+  const sortByDisplayOrder = useCallback(
+    (ids: string[]): string[] => {
+      const state = store.getState();
+      const taskById = new Map<string, { createdAt?: string }>();
+      for (const snap of Object.values(state.kanbanMulti.snapshots)) {
+        for (const t of snap.tasks) taskById.set(t.id, t);
+      }
+      for (const t of state.kanban.tasks) if (!taskById.has(t.id)) taskById.set(t.id, t);
+      return [...ids].sort((a, b) => {
+        const ta = taskById.get(a);
+        const tb = taskById.get(b);
+        if (!ta || !tb) return 0;
+        return compareTasksByCreatedDesc(ta, tb);
+      });
+    },
+    [store],
+  );
+
+  return { removeTasksFromStore, applyMoveInStore, getWorkflowIdForTask, sortByDisplayOrder };
 }
 
 function useBulkOperations({
@@ -94,6 +116,7 @@ function useBulkOperations({
   removeTasksFromStore,
   applyMoveInStore,
   getWorkflowIdForTask,
+  sortByDisplayOrder,
 }: {
   workflowId: string | null;
   selectedIdsRef: RefObject<Set<string>>;
@@ -107,6 +130,7 @@ function useBulkOperations({
   removeTasksFromStore: (ids: Set<string>) => void;
   applyMoveInStore: (ids: Set<string>, stepId: string) => void;
   getWorkflowIdForTask: (id: string) => string | null;
+  sortByDisplayOrder: (ids: string[]) => string[];
 }) {
   const runBulk = useCallback(
     async (
@@ -144,7 +168,9 @@ function useBulkOperations({
 
   const bulkMove = useCallback(
     async (targetStepId: string) => {
-      const idList = [...(selectedIdsRef.current ?? [])];
+      // Move in board order so a backward range selection isn't reordered when
+      // sequential positions are assigned below.
+      const idList = sortByDisplayOrder([...(selectedIdsRef.current ?? [])]);
       if (idList.length === 0) return;
       const results = await Promise.allSettled(
         idList.map((id, i) => {
@@ -160,7 +186,14 @@ function useBulkOperations({
       const succeeded = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
       applyMoveInStore(succeeded, targetStepId);
     },
-    [workflowId, moveTaskById, applyMoveInStore, getWorkflowIdForTask, selectedIdsRef],
+    [
+      workflowId,
+      moveTaskById,
+      applyMoveInStore,
+      getWorkflowIdForTask,
+      sortByDisplayOrder,
+      selectedIdsRef,
+    ],
   );
 
   return { bulkDelete, bulkArchive, bulkMove };
@@ -303,7 +336,7 @@ export function useTaskMultiSelect(workflowId: string | null) {
   }, [workflowId]);
 
   const { moveTaskById, deleteTaskById, archiveTaskById } = useTaskActions();
-  const { removeTasksFromStore, applyMoveInStore, getWorkflowIdForTask } =
+  const { removeTasksFromStore, applyMoveInStore, getWorkflowIdForTask, sortByDisplayOrder } =
     useTaskMultiSelectStore();
 
   const toggleSelect = useCallback(
@@ -349,6 +382,7 @@ export function useTaskMultiSelect(workflowId: string | null) {
     removeTasksFromStore,
     applyMoveInStore,
     getWorkflowIdForTask,
+    sortByDisplayOrder,
   });
 
   return {
