@@ -162,6 +162,54 @@ func (r *Repository) DeleteWorkspaceWithName(ctx context.Context, id, name strin
 	return repoerrors.ErrWorkspaceNameMismatch
 }
 
+// DeleteWorkspaceCascadeWithName deletes a workspace and its non-FK child rows
+// in one transaction, only if the current workspace name matches name.
+func (r *Repository) DeleteWorkspaceCascadeWithName(ctx context.Context, id, name string) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM workspaces
+		WHERE id = ? AND name = ?
+	`), id, name)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		var currentName string
+		err = tx.QueryRowContext(ctx, r.db.Rebind(`
+			SELECT name
+			FROM workspaces
+			WHERE id = ?
+		`), id).Scan(&currentName)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("workspace not found: %s", id)
+		}
+		if err != nil {
+			return err
+		}
+		return repoerrors.ErrWorkspaceNameMismatch
+	}
+
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM tasks
+		WHERE workspace_id = ?
+	`), id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM workflows
+		WHERE workspace_id = ?
+	`), id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // ListWorkspaces returns all workspaces
 func (r *Repository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
 	rows, err := r.ro.QueryContext(ctx, `

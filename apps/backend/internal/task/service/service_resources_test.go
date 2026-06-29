@@ -36,6 +36,9 @@ func (WorkspaceRepositoryStub) DeleteWorkspace(_ context.Context, _ string) erro
 func (WorkspaceRepositoryStub) DeleteWorkspaceWithName(_ context.Context, _, _ string) error {
 	panic("not implemented")
 }
+func (WorkspaceRepositoryStub) DeleteWorkspaceCascadeWithName(_ context.Context, _, _ string) error {
+	panic("not implemented")
+}
 func (WorkspaceRepositoryStub) ListWorkspaces(_ context.Context) ([]*models.Workspace, error) {
 	panic("not implemented")
 }
@@ -54,6 +57,18 @@ func (r renameBeforeConfirmedDeleteRepo) DeleteWorkspaceWithName(ctx context.Con
 		return err
 	}
 	return r.WorkspaceRepository.DeleteWorkspaceWithName(ctx, id, name)
+}
+
+func (r renameBeforeConfirmedDeleteRepo) DeleteWorkspaceCascadeWithName(ctx context.Context, id, name string) error {
+	workspace, err := r.GetWorkspace(ctx, id)
+	if err != nil {
+		return err
+	}
+	workspace.Name = "Renamed"
+	if err := r.UpdateWorkspace(ctx, workspace); err != nil {
+		return err
+	}
+	return r.WorkspaceRepository.DeleteWorkspaceCascadeWithName(ctx, id, name)
 }
 
 func (e errWorkspaceRepo) ListWorkspaces(_ context.Context) ([]*models.Workspace, error) {

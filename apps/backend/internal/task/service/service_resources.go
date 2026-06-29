@@ -114,6 +114,10 @@ func (s *Service) DeleteWorkspaceWithConfirmName(ctx context.Context, id, confir
 
 func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspace, confirmedName *string) error {
 	id := workspace.ID
+	if confirmedName != nil {
+		return s.deleteConfirmedWorkspaceCascade(ctx, workspace, *confirmedName)
+	}
+
 	tasks, err := s.listAllTasksForWorkspaceDelete(ctx, id)
 	if err != nil {
 		return err
@@ -122,14 +126,9 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 	if err != nil {
 		return fmt.Errorf("list workspace workflows: %w", err)
 	}
-	if confirmedName != nil {
-		if err := s.deleteWorkspaceRow(ctx, id, confirmedName); err != nil {
-			return err
-		}
-	}
-	// Confirmed deletes perform the final name guard before explicit child-row
-	// deletion so concurrent renames fail before tasks or workflows are touched.
-	// Tasks and workflows have no workspace_id FK, so these loops remain required.
+	// Tasks and workflows have no workspace_id FK, so the unconfirmed websocket
+	// delete path still needs to remove those rows explicitly before the
+	// workspace row.
 	for _, task := range tasks {
 		if task == nil || task.ID == "" {
 			continue
@@ -147,23 +146,28 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 		}
 	}
 
-	if confirmedName == nil {
-		if err := s.deleteWorkspaceRow(ctx, id, nil); err != nil {
-			return err
-		}
+	if err := s.deleteWorkspaceRow(ctx, id); err != nil {
+		return err
 	}
 	s.publishWorkspaceEvent(ctx, events.WorkspaceDeleted, workspace)
 	s.logger.Info("workspace deleted", zap.String("workspace_id", id))
 	return nil
 }
 
-func (s *Service) deleteWorkspaceRow(ctx context.Context, id string, confirmedName *string) error {
-	var err error
-	if confirmedName == nil {
-		err = s.workspaces.DeleteWorkspace(ctx, id)
-	} else {
-		err = s.workspaces.DeleteWorkspaceWithName(ctx, id, *confirmedName)
+func (s *Service) deleteConfirmedWorkspaceCascade(ctx context.Context, workspace *models.Workspace, confirmedName string) error {
+	if err := s.workspaces.DeleteWorkspaceCascadeWithName(ctx, workspace.ID, confirmedName); err != nil {
+		return s.mapWorkspaceDeleteError(workspace.ID, err)
 	}
+	s.publishWorkspaceEvent(ctx, events.WorkspaceDeleted, workspace)
+	s.logger.Info("workspace deleted", zap.String("workspace_id", workspace.ID))
+	return nil
+}
+
+func (s *Service) deleteWorkspaceRow(ctx context.Context, id string) error {
+	return s.mapWorkspaceDeleteError(id, s.workspaces.DeleteWorkspace(ctx, id))
+}
+
+func (s *Service) mapWorkspaceDeleteError(id string, err error) error {
 	if err == nil {
 		return nil
 	}

@@ -47,6 +47,9 @@ func (m *mockRepository) DeleteWorkspace(ctx context.Context, id string) error {
 func (m *mockRepository) DeleteWorkspaceWithName(ctx context.Context, id, name string) error {
 	return m.DeleteWorkspace(ctx, id)
 }
+func (m *mockRepository) DeleteWorkspaceCascadeWithName(ctx context.Context, id, name string) error {
+	return m.DeleteWorkspaceWithName(ctx, id, name)
+}
 func (m *mockRepository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
 	return nil, nil
 }
