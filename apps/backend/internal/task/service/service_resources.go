@@ -123,16 +123,13 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 		return fmt.Errorf("list workspace workflows: %w", err)
 	}
 	if confirmedName != nil {
-		if err := s.workspaces.DeleteWorkspaceWithName(ctx, id, *confirmedName); err != nil {
-			if errors.Is(err, taskrepo.ErrWorkspaceNameMismatch) {
-				return ErrWorkspaceConfirmNameMismatch
-			}
-			s.logger.Error("failed to delete workspace", zap.String("workspace_id", id), zap.Error(err))
+		if err := s.deleteWorkspaceRow(ctx, id, confirmedName); err != nil {
 			return err
 		}
 	}
-	// Workspace deletion hard-deletes tasks. Do this before workflow deletion so
-	// DeleteWorkflow does not archive children that are being removed anyway.
+	// Confirmed deletes perform the final name guard before explicit child-row
+	// deletion so concurrent renames fail before tasks or workflows are touched.
+	// Tasks and workflows have no workspace_id FK, so these loops remain required.
 	for _, task := range tasks {
 		if task == nil || task.ID == "" {
 			continue
@@ -151,14 +148,30 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 	}
 
 	if confirmedName == nil {
-		if err := s.workspaces.DeleteWorkspace(ctx, id); err != nil {
-			s.logger.Error("failed to delete workspace", zap.String("workspace_id", id), zap.Error(err))
+		if err := s.deleteWorkspaceRow(ctx, id, nil); err != nil {
 			return err
 		}
 	}
 	s.publishWorkspaceEvent(ctx, events.WorkspaceDeleted, workspace)
 	s.logger.Info("workspace deleted", zap.String("workspace_id", id))
 	return nil
+}
+
+func (s *Service) deleteWorkspaceRow(ctx context.Context, id string, confirmedName *string) error {
+	var err error
+	if confirmedName == nil {
+		err = s.workspaces.DeleteWorkspace(ctx, id)
+	} else {
+		err = s.workspaces.DeleteWorkspaceWithName(ctx, id, *confirmedName)
+	}
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, taskrepo.ErrWorkspaceNameMismatch) {
+		return ErrWorkspaceConfirmNameMismatch
+	}
+	s.logger.Error("failed to delete workspace", zap.String("workspace_id", id), zap.Error(err))
+	return err
 }
 
 func (s *Service) listAllTasksForWorkspaceDelete(ctx context.Context, workspaceID string) ([]*models.Task, error) {
