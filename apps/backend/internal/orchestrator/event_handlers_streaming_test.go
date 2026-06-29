@@ -540,6 +540,31 @@ func TestToolUpdateFromCompletedExecutionDoesNotWakeWaitingSession(t *testing.T)
 		"late completed-execution tool event must not move the task back to IN_PROGRESS")
 }
 
+func TestToolUpdateFromCompletedExecutionDoesNotCreateMessage(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	svc.markExecutionCompleted("s1", "exec-1")
+
+	svc.handleToolUpdateEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t1",
+		SessionID:   "s1",
+		ExecutionID: "exec-1",
+		Data: &lifecycle.AgentStreamEventData{
+			ToolCallID: "tc1",
+			ToolStatus: agentEventComplete,
+		},
+	})
+
+	require.Zero(t, messages.toolUpdateWrites,
+		"stale completed-execution tool updates must be dropped before message side effects")
+}
+
 func TestCompletedExecutionMarkerExpiresAndDeletes(t *testing.T) {
 	svc := &Service{}
 
@@ -1017,6 +1042,25 @@ func TestSetSessionWaitingForInput_DoesNotMoveTaskToReviewWhileSiblingRuns(t *te
 	require.Equal(t, models.TaskSessionStateWaitingForInput, updatedFinishing.State)
 	require.Equal(t, 0, taskRepo.stateWrites["t1"],
 		"finishing one session must not move the task to REVIEW while another session is running")
+}
+
+func TestWriteTaskReviewState_DoesNotMoveTaskToReviewWhenSameSessionRestarted(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateRunning
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	svc.writeTaskReviewState(ctx, "t1", "s1")
+
+	require.Empty(t, taskRepo.updatedStates,
+		"the just-completed session may have restarted before REVIEW reconciliation")
 }
 
 func TestSessionStateString(t *testing.T) {

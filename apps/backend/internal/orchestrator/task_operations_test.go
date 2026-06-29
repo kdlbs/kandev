@@ -813,9 +813,11 @@ func TestStartCreatedSession_EmptyProfileFallsBackToWorkflowDefault(t *testing.T
 // mockMessageCreator implements MessageCreator for testing.
 // Only CreateUserMessage is tracked; all other methods are no-op stubs.
 type mockMessageCreator struct {
-	userMessages    []mockUserMessage
-	sessionMessages []mockSessionMessage
-	userMessageErr  error
+	userMessages     []mockUserMessage
+	sessionMessages  []mockSessionMessage
+	toolCallWrites   int
+	toolUpdateWrites int
+	userMessageErr   error
 }
 
 type mockUserMessage struct {
@@ -842,10 +844,12 @@ func (m *mockMessageCreator) CreateAgentMessage(context.Context, string, string,
 }
 
 func (m *mockMessageCreator) CreateToolCallMessage(context.Context, string, string, string, string, string, string, string, *streams.NormalizedPayload) error {
+	m.toolCallWrites++
 	return nil
 }
 
 func (m *mockMessageCreator) UpdateToolCallMessage(context.Context, string, string, string, string, string, string, string, string, string, *streams.NormalizedPayload) error {
+	m.toolUpdateWrites++
 	return nil
 }
 

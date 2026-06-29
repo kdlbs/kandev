@@ -43,6 +43,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		s.handleThinkingStreamingEvent(ctx, payload)
 
 	case agentEventToolCall:
+		if s.shouldDropCompletedExecutionStreamEvent(payload) {
+			return
+		}
 		s.saveAgentTextIfPresent(ctx, payload)
 		s.handleToolCallEvent(ctx, payload)
 
@@ -202,6 +205,9 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 			zap.String("tool_call_id", payload.Data.ToolCallID))
 		return
 	}
+	if s.shouldDropCompletedExecutionStreamEvent(payload) {
+		return
+	}
 
 	if s.messageCreator != nil {
 		if err := s.messageCreator.CreateToolCallMessage(
@@ -335,6 +341,9 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 			zap.String("tool_call_id", payload.Data.ToolCallID))
 		return
 	}
+	if s.shouldDropCompletedExecutionStreamEvent(payload) {
+		return
+	}
 
 	if s.messageCreator == nil {
 		return
@@ -373,6 +382,20 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 			s.setSessionRunningForExecution(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID)
 		}
 	}
+}
+
+func (s *Service) shouldDropCompletedExecutionStreamEvent(payload *lifecycle.AgentStreamEventPayload) bool {
+	if payload == nil || payload.ExecutionID == "" || payload.SessionID == "" {
+		return false
+	}
+	if !s.isExecutionCompleted(payload.SessionID, payload.ExecutionID) {
+		return false
+	}
+	s.logger.Debug("ignoring stream event from completed execution",
+		zap.String("task_id", payload.TaskID),
+		zap.String("session_id", payload.SessionID),
+		zap.String("agent_execution_id", payload.ExecutionID))
+	return true
 }
 
 // updateTaskSessionState transitions a session to nextState with guard checks.
@@ -666,6 +689,16 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSes
 	s.taskRuntimeStateMu.Lock()
 	defer s.taskRuntimeStateMu.Unlock()
 
+	if completedSessionID != "" {
+		if session, err := s.repo.GetTaskSession(ctx, completedSessionID); err == nil && session != nil && isWorkingSessionState(session.State) {
+			s.logger.Debug("skipping task REVIEW state because completed session is active again",
+				zap.String("task_id", taskID),
+				zap.String("session_id", completedSessionID),
+				zap.String("session_state", string(session.State)))
+			return
+		}
+	}
+
 	if blockingSessionID := s.otherWorkingSessionID(ctx, taskID, completedSessionID); blockingSessionID != "" {
 		s.logger.Debug("skipping task REVIEW state while another session is working",
 			zap.String("task_id", taskID),
@@ -681,6 +714,10 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSes
 	}
 	s.logger.Info("task moved to REVIEW state",
 		zap.String("task_id", taskID))
+}
+
+func isWorkingSessionState(state models.TaskSessionState) bool {
+	return state == models.TaskSessionStateRunning || state == models.TaskSessionStateStarting
 }
 
 func (s *Service) otherWorkingSessionID(ctx context.Context, taskID, currentSessionID string) string {
@@ -699,7 +736,7 @@ func (s *Service) otherWorkingSessionID(ctx context.Context, taskID, currentSess
 		if currentSessionID != "" && session.ID == currentSessionID {
 			continue
 		}
-		if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
+		if isWorkingSessionState(session.State) {
 			return session.ID
 		}
 	}

@@ -993,6 +993,27 @@ func TestHandleAgentCompleted_CleansUpExecution(t *testing.T) {
 	}
 }
 
+func TestHandleAgentCompleted_MarksRotatedExecutionCompleted(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-live")
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s1",
+		AgentExecutionID: "exec-old",
+	})
+
+	if !svc.isExecutionCompleted("s1", "exec-old") {
+		t.Fatal("rotated agent.completed events must still block late tool events from the old execution")
+	}
+}
+
 func TestHandleAgentCompleted_DoesNotMoveTaskToReviewWhileSiblingRuns(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
