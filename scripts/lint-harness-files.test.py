@@ -66,6 +66,7 @@ class HarnessLinterTest(unittest.TestCase):
             ".claude/agents/qa.md": "role-agent",
             ".codex/agents/qa.toml": "role-agent",
             ".codex/config.toml": "config",
+            ".claude/settings.json": "config",
             ".claude/commands/pr-fixup.md": "command",
             ".cursor/rules/kandev-harness.mdc": "cursor-rule",
             "README.md": "unknown",

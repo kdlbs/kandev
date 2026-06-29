@@ -216,6 +216,8 @@ def classify_path(path: Path) -> str:
         return "role-agent"
     if has_subpath(parts, [".codex"]) and name == "config.toml":
         return "config"
+    if has_subpath(parts, [".claude"]) and name == "settings.json":
+        return "config"
     if has_subpath(parts, [".claude", "commands"]) and name.endswith(".md"):
         return "command"
     if has_subpath(parts, [".cursor", "rules"]) and name.endswith(".mdc"):
