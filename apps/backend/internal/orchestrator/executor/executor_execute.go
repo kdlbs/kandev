@@ -110,7 +110,8 @@ func (e *Executor) stopUnstartedExecution(ctx context.Context, sessionID, agentE
 	if agentExecutionID == "" {
 		return
 	}
-	stopCtx := context.WithoutCancel(ctx)
+	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
 	if stopErr := e.agentManager.StopAgent(stopCtx, agentExecutionID, true); stopErr != nil {
 		e.logger.Warn("failed to stop unstarted agent execution",
 			zap.String("session_id", sessionID),

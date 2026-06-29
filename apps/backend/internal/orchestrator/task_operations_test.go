@@ -816,6 +816,8 @@ type mockMessageCreator struct {
 	userMessages       []mockUserMessage
 	sessionMessages    []mockSessionMessage
 	agentMessageWrites int
+	agentStreamWrites  int
+	thinkingWrites     int
 	toolCallWrites     int
 	toolUpdateWrites   int
 	userMessageErr     error
@@ -877,18 +879,22 @@ func (m *mockMessageCreator) UpdatePermissionMessage(context.Context, string, st
 }
 
 func (m *mockMessageCreator) CreateAgentMessageStreaming(context.Context, string, string, string, string, string) error {
+	m.agentStreamWrites++
 	return nil
 }
 
 func (m *mockMessageCreator) AppendAgentMessage(context.Context, string, string) error {
+	m.agentStreamWrites++
 	return nil
 }
 
 func (m *mockMessageCreator) CreateThinkingMessageStreaming(context.Context, string, string, string, string, string) error {
+	m.thinkingWrites++
 	return nil
 }
 
 func (m *mockMessageCreator) AppendThinkingMessage(context.Context, string, string) error {
+	m.thinkingWrites++
 	return nil
 }
 func (m *mockMessageCreator) InvalidateModelCache(string) {}

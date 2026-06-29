@@ -895,7 +895,7 @@ func prNumberFromMetadata(metadata map[string]interface{}) int {
 // just logs successful process start.
 func (e *Executor) startAgentProcessOnResume(ctx context.Context, taskID string, session *models.TaskSession, agentExecutionID string) {
 	e.runAgentProcessAsync(ctx, taskID, session.ID, agentExecutionID, func(updCtx context.Context) {
-		if updateErr := e.updateTaskState(updCtx, taskID, v1.TaskStateInProgress); updateErr != nil {
+		if updateErr := e.writeTaskInProgressForRuntime(updCtx, taskID); updateErr != nil {
 			e.logger.Warn("failed to update task state to IN_PROGRESS after resume start",
 				zap.String("task_id", taskID),
 				zap.String("session_id", session.ID),
@@ -906,4 +906,13 @@ func (e *Executor) startAgentProcessOnResume(ctx context.Context, taskID string,
 			zap.String("session_id", session.ID),
 			zap.String("session_state", string(session.State)))
 	}, false, true)
+}
+
+func (e *Executor) writeTaskInProgressForRuntime(ctx context.Context, taskID string) error {
+	if task, err := e.repo.GetTask(ctx, taskID); err == nil && task != nil && task.AssigneeAgentProfileID != "" {
+		e.logger.Debug("skipping IN_PROGRESS transition for office task",
+			zap.String("task_id", taskID))
+		return nil
+	}
+	return e.updateTaskState(ctx, taskID, v1.TaskStateInProgress)
 }

@@ -25,6 +25,10 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	sessionID := payload.SessionID
 	eventType := payload.Data.Type
 
+	if s.shouldDropCompletedExecutionStreamEvent(payload) {
+		return
+	}
+
 	// Any agent stream activity means the agent resumed after clarification.
 	// Cancel primary-path clarification watchdogs for this session.
 	s.cancelClarificationWatchdogsForSession(sessionID, eventType)
@@ -43,9 +47,6 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		s.handleThinkingStreamingEvent(ctx, payload)
 
 	case agentEventToolCall:
-		if s.shouldDropCompletedExecutionStreamEvent(payload) {
-			return
-		}
 		s.saveAgentTextIfPresent(ctx, payload)
 		s.handleToolCallEvent(ctx, payload)
 
@@ -699,7 +700,9 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSes
 		}
 	}
 
-	if blockingSessionID := s.otherWorkingSessionID(ctx, taskID, completedSessionID); blockingSessionID != "" {
+	if blockingSessionID, ok := s.otherWorkingSessionID(ctx, taskID, completedSessionID); !ok {
+		return
+	} else if blockingSessionID != "" {
 		s.logger.Debug("skipping task REVIEW state while another session is working",
 			zap.String("task_id", taskID),
 			zap.String("completed_session_id", completedSessionID),
@@ -720,14 +723,14 @@ func isWorkingSessionState(state models.TaskSessionState) bool {
 	return state == models.TaskSessionStateRunning || state == models.TaskSessionStateStarting
 }
 
-func (s *Service) otherWorkingSessionID(ctx context.Context, taskID, currentSessionID string) string {
+func (s *Service) otherWorkingSessionID(ctx context.Context, taskID, currentSessionID string) (string, bool) {
 	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
 	if err != nil {
 		s.logger.Warn("failed to list task sessions before REVIEW state reconcile",
 			zap.String("task_id", taskID),
 			zap.String("session_id", currentSessionID),
 			zap.Error(err))
-		return ""
+		return "", false
 	}
 	for _, session := range sessions {
 		if session == nil {
@@ -737,10 +740,10 @@ func (s *Service) otherWorkingSessionID(ctx context.Context, taskID, currentSess
 			continue
 		}
 		if isWorkingSessionState(session.State) {
-			return session.ID
+			return session.ID, true
 		}
 	}
-	return ""
+	return "", true
 }
 
 // writeTaskReviewStateOnCancel clears the kanban "actively working" task
@@ -767,7 +770,19 @@ func (s *Service) writeTaskReviewStateOnCancel(ctx context.Context, taskID, sess
 	s.taskRuntimeStateMu.Lock()
 	defer s.taskRuntimeStateMu.Unlock()
 
-	if blockingSessionID := s.otherWorkingSessionID(ctx, taskID, sessionID); blockingSessionID != "" {
+	if sessionID != "" {
+		if session, err := s.repo.GetTaskSession(ctx, sessionID); err == nil && session != nil && isWorkingSessionState(session.State) {
+			s.logger.Debug("skipping task REVIEW state after cancel because session is active again",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("session_state", string(session.State)))
+			return
+		}
+	}
+
+	if blockingSessionID, ok := s.otherWorkingSessionID(ctx, taskID, sessionID); !ok {
+		return
+	} else if blockingSessionID != "" {
 		s.logger.Debug("skipping task REVIEW state after cancel while another session is working",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),

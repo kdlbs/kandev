@@ -29,6 +29,14 @@ type recordedEvent struct {
 	event   *bus.Event
 }
 
+type listTaskSessionsErrorRepo struct {
+	sessionExecutorStore
+}
+
+func (r listTaskSessionsErrorRepo) ListTaskSessions(context.Context, string) ([]*models.TaskSession, error) {
+	return nil, errors.New("list task sessions failed")
+}
+
 type failSetSessionMetadataRepo struct {
 	repoStore
 }
@@ -617,6 +625,128 @@ func TestToolCallStreamFromCompletedExecutionDoesNotSaveAgentText(t *testing.T) 
 		"top-level tool_call guard must run before saveAgentTextIfPresent")
 	require.Zero(t, messages.toolCallWrites,
 		"top-level tool_call guard must not fall through to handleToolCallEvent")
+}
+
+func TestMessageStreamFromCompletedExecutionDoesNotCreateTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+	svc.turnService = &repoTurnService{repo: repo}
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	svc.markExecutionCompleted("s1", "exec-1")
+
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t1",
+		SessionID:   "s1",
+		ExecutionID: "exec-1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:      "message_streaming",
+			MessageID: "msg-1",
+			Text:      "stale text from completed execution",
+		},
+	})
+
+	require.Zero(t, messages.agentStreamWrites,
+		"stale completed-execution message streams must be dropped before message side effects")
+	turn, err := svc.turnService.GetActiveTurn(ctx, "s1")
+	require.NoError(t, err)
+	require.Nil(t, turn, "stale stream events must not lazily create a new turn")
+}
+
+func TestCompletedExecutionStreamDoesNotCancelClarificationWatchdog(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	watchCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc.clarificationWatchdogs.Store(
+		svc.clarificationWatchdogKey("s1", "pending-1"),
+		&clarificationWatchdogEntry{cancel: cancel},
+	)
+	svc.markExecutionCompleted("s1", "exec-1")
+
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t1",
+		SessionID:   "s1",
+		ExecutionID: "exec-1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:       "tool_update",
+			ToolCallID: "tc1",
+			ToolStatus: agentEventComplete,
+		},
+	})
+
+	require.Equal(t, 1, countClarificationWatchdogs(svc),
+		"stale completed-execution streams must be dropped before watchdog cancellation")
+	select {
+	case <-watchCtx.Done():
+		t.Fatal("stale completed-execution stream cancelled clarification watchdog")
+	default:
+	}
+}
+
+func TestWriteTaskReviewStateSkipsWhenSessionListFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateWaitingForInput
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+	svc.repo = listTaskSessionsErrorRepo{sessionExecutorStore: svc.repo}
+
+	svc.writeTaskReviewState(ctx, "t1", "s1")
+
+	require.Zero(t, taskRepo.stateWrites["t1"],
+		"REVIEW writes must fail closed when sibling session reconciliation fails")
+}
+
+func TestWriteTaskReviewStateOnCancelSkipsWhenSessionActiveAgain(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateRunning
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", State: v1.TaskStateInProgress}
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	svc.writeTaskReviewStateOnCancel(ctx, "t1", "s1")
+
+	require.Zero(t, taskRepo.stateWrites["t1"],
+		"cancel reconcile must not move a restarted same session back to REVIEW")
+}
+
+func TestWriteTaskReviewStateOnCancelSkipsWhenSessionListFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateWaitingForInput
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", State: v1.TaskStateInProgress}
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+	svc.repo = listTaskSessionsErrorRepo{sessionExecutorStore: svc.repo}
+
+	svc.writeTaskReviewStateOnCancel(ctx, "t1", "s1")
+
+	require.Zero(t, taskRepo.stateWrites["t1"],
+		"cancel REVIEW writes must fail closed when sibling session reconciliation fails")
 }
 
 func TestCompletedExecutionMarkerExpiresAndDeletes(t *testing.T) {

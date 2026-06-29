@@ -1216,6 +1216,42 @@ func TestStartAgentProcessOnResumePromotesTaskAfterSuccess(t *testing.T) {
 	}
 }
 
+func TestStartAgentProcessOnResumeSkipsOfficeTaskPromotion(t *testing.T) {
+	repo := newMockRepository()
+	repo.tasks["task-123"] = &models.Task{ID: "task-123", AssigneeAgentProfileID: "agent-profile-123"}
+	session := &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	repo.sessions[session.ID] = session
+
+	startedCh := make(chan struct{})
+	agentManager := &mockAgentManager{
+		startAgentProcessFunc: func(ctx context.Context, agentExecutionID string) error {
+			close(startedCh)
+			return nil
+		},
+	}
+	taskStateCh := make(chan v1.TaskState, 1)
+	exec := newTestExecutor(t, agentManager, repo)
+	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
+		taskStateCh <- state
+		return nil
+	})
+
+	exec.startAgentProcessOnResume(context.Background(), "task-123", session, "exec-456")
+
+	select {
+	case <-startedCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected resume process start")
+	}
+	select {
+	case state := <-taskStateCh:
+		t.Fatalf("office resume promoted task state to %q", state)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 func TestRunAgentProcessAsync_FreshStartEscalatesTaskState(t *testing.T) {
 	f := newRunAgentProcessAsyncFailureFixture(t)
 	f.exec.runAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456",
@@ -1385,6 +1421,9 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 			gotPromoteTask = &promoteTask
 			return repo.UpdateTaskSession(ctx, session)
 		})
+		t.Cleanup(func() {
+			executor.SetOnSessionStarting(nil)
+		})
 
 		if err := executor.persistResumeState(context.Background(), "task-1", session, true); err != nil {
 			t.Fatalf("persistResumeState: %v", err)
@@ -1396,7 +1435,6 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 		if *gotPromoteTask {
 			t.Fatal("resume STARTING persistence must defer task promotion until process start succeeds")
 		}
-		executor.SetOnSessionStarting(nil)
 	})
 
 	t.Run("does not change state when startAgent is false", func(t *testing.T) {
