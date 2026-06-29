@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -456,24 +457,43 @@ func TestService_DeleteAllRuns_TaskNotFound_StillClearsRuns(t *testing.T) {
 }
 
 // TestDeleteAllRuns_AutomationSurvives is a regression guard: deleting all run
-// rows (including their associated tasks) must never delete the parent
-// automation row itself. The test creates an automation with runs that have
-// task IDs, calls DeleteAllRuns, then asserts GetAutomation still returns it.
+// rows — including issuing real DELETE SQL against task rows in the shared
+// in-memory DB — must never delete the parent automation row. A real DB-level
+// deleter catches SQL trigger / ON DELETE CASCADE regressions. Note: event
+// handler side-effects are not covered here (no orchestrator runs in this test).
 func TestDeleteAllRuns_AutomationSurvives(t *testing.T) {
-	svc := newTestService(t)
-	deleter := &fakeTaskDeleter{} // succeeds for all task IDs
-	svc.SetTaskDeleter(deleter)
+	store := setupTestStore(t)
 	ctx := context.Background()
 
+	// Create a minimal tasks table in the same in-memory DB so the
+	// real-deleter can insert and then DELETE task rows.
+	if _, err := store.db.ExecContext(ctx,
+		`CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, title TEXT, state TEXT)`); err != nil {
+		t.Fatal("create tasks table:", err)
+	}
+
+	// sqliteTaskDeleter deletes from the real tasks table in the same DB —
+	// any SQL cascade or trigger that touched automations would fire here.
+	realDeleter := &sqliteTaskDeleter{db: store.db}
+
+	log, _ := logger.NewFromZap(zap.NewNop())
+	eb := bus.NewMemoryEventBus(log)
+	svc := NewService(store, eb, log)
+	svc.SetTaskDeleter(realDeleter)
+
 	a := &Automation{WorkspaceID: "ws-1", Name: "Survives", WorkflowID: "wf-1", WorkflowStepID: "s-1", Enabled: true}
-	if err := svc.store.CreateAutomation(ctx, a); err != nil {
+	if err := store.CreateAutomation(ctx, a); err != nil {
 		t.Fatal(err)
 	}
 
-	// Create runs with task IDs — simulates the production scenario.
+	// Insert real task rows and create runs referencing them.
 	taskIDs := []string{"task-a", "task-b", "task-c"}
 	for _, tid := range taskIDs {
-		if err := svc.store.CreateRun(ctx, &AutomationRun{
+		if _, err := store.db.ExecContext(ctx,
+			`INSERT INTO tasks (id, title, state) VALUES (?, 'Test task', 'running')`, tid); err != nil {
+			t.Fatal("insert task:", err)
+		}
+		if err := store.CreateRun(ctx, &AutomationRun{
 			AutomationID: a.ID,
 			TriggerType:  TriggerTypeScheduled,
 			Status:       RunStatusTaskCreated,
@@ -483,13 +503,11 @@ func TestDeleteAllRuns_AutomationSurvives(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Also a few skipped runs without task IDs.
+	// Skipped runs without task IDs.
 	for range 3 {
-		if err := svc.store.CreateRun(ctx, &AutomationRun{
-			AutomationID: a.ID,
-			TriggerType:  TriggerTypeScheduled,
-			Status:       RunStatusSkipped,
-			TriggerData:  json.RawMessage(`{}`),
+		if err := store.CreateRun(ctx, &AutomationRun{
+			AutomationID: a.ID, TriggerType: TriggerTypeScheduled,
+			Status: RunStatusSkipped, TriggerData: json.RawMessage(`{}`),
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -499,8 +517,8 @@ func TestDeleteAllRuns_AutomationSurvives(t *testing.T) {
 		t.Fatalf("DeleteAllRuns: %v", err)
 	}
 
-	// Automation row must still exist.
-	got, err := svc.store.GetAutomation(ctx, a.ID)
+	// Automation row must still exist after real task DELETEs fired.
+	got, err := store.GetAutomation(ctx, a.ID)
 	if err != nil {
 		t.Fatalf("GetAutomation after DeleteAllRuns: %v", err)
 	}
@@ -509,17 +527,29 @@ func TestDeleteAllRuns_AutomationSurvives(t *testing.T) {
 		return
 	}
 	if got.Name != "Survives" {
-		t.Errorf("unexpected automation name %q after DeleteAllRuns", got.Name)
+		t.Errorf("unexpected automation name %q", got.Name)
 	}
 
 	// Runs must be gone.
-	runs, _ := svc.store.ListRuns(ctx, a.ID, 50)
+	runs, _ := store.ListRuns(ctx, a.ID, 50)
 	if len(runs) != 0 {
 		t.Errorf("expected 0 runs, got %d", len(runs))
 	}
-
-	// All three task IDs must have been handed to the deleter.
-	if len(deleter.deleted) != 3 {
-		t.Errorf("expected 3 task deletions, got %d: %v", len(deleter.deleted), deleter.deleted)
+	// Task rows should have been deleted.
+	if len(realDeleter.deleted) != 3 {
+		t.Errorf("expected 3 task deletions, got %d: %v", len(realDeleter.deleted), realDeleter.deleted)
 	}
+}
+
+// sqliteTaskDeleter deletes from the real tasks table in the same in-memory
+// DB, so any SQL trigger or ON DELETE CASCADE that touches automations fires.
+type sqliteTaskDeleter struct {
+	db      *sqlx.DB
+	deleted []string
+}
+
+func (d *sqliteTaskDeleter) DeleteTask(ctx context.Context, id string) error {
+	d.deleted = append(d.deleted, id)
+	_, err := d.db.ExecContext(ctx, `DELETE FROM tasks WHERE id = ?`, id)
+	return err
 }
