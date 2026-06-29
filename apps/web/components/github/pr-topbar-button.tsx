@@ -27,6 +27,8 @@ import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import {
   aggregatePRStatusColor,
   getPRStatusColor,
+  hasPRChecksInProgressForDisplay,
+  hasPRChecksPassedWithoutReviewWaitForDisplay,
   isPRAwaitingReview,
   isPRReadyToMerge,
   isPRWaitingOnBranchProtection,
@@ -80,10 +82,10 @@ function PRStatusIcon({ pr }: { pr: TaskPR }) {
   if (isPRWaitingOnBranchProtection(pr)) {
     return <IconClock className="h-3 w-3 text-muted-foreground" />;
   }
-  if (pr.checks_state === "success" && pr.review_state === "approved") {
+  if (hasPRChecksPassedWithoutReviewWaitForDisplay(pr)) {
     return <IconCheck className="h-3 w-3 text-green-500" />;
   }
-  if (pr.checks_state === "pending" || pr.review_state === "pending") {
+  if (hasPRChecksInProgressForDisplay(pr) || pr.review_state === "pending") {
     return <IconClock className="h-3 w-3 text-yellow-500" />;
   }
   return null;

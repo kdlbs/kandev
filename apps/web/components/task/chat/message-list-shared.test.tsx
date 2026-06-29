@@ -61,7 +61,7 @@ vi.mock("@/lib/api/domains/session-api", () => ({
   dismissLastAgentError: vi.fn(),
 }));
 
-import { MessageItem } from "./message-list-shared";
+import { MessageItem, MessageListStatus, getConversationLoadingState } from "./message-list-shared";
 
 const item: RenderItem = { type: "message", message: { id: "m1" } as Message };
 const noop = () => {};
@@ -141,5 +141,78 @@ describe("MessageItem agent error notice", () => {
 
     expect(screen.getByTestId("last-agent-error-notice").getAttribute("role")).toBe("alert");
     expect(screen.queryByText("agent process exited")).not.toBeNull();
+  });
+});
+
+describe("getConversationLoadingState", () => {
+  it("shows loading while conversation history is still fetching with initial content rendered", () => {
+    expect(
+      getConversationLoadingState({
+        messagesLoading: true,
+        messagesCount: 1,
+        isWorking: false,
+        sessionState: "COMPLETED",
+      }),
+    ).toEqual({ isInitialLoading: false, showLoadingState: true });
+  });
+
+  it("shows an initial loading state when no messages are rendered yet", () => {
+    expect(
+      getConversationLoadingState({
+        messagesLoading: true,
+        messagesCount: 0,
+        isWorking: false,
+        sessionState: "RUNNING",
+      }),
+    ).toEqual({ isInitialLoading: true, showLoadingState: true });
+  });
+
+  it("does not compete with the active agent status while the session is working", () => {
+    expect(
+      getConversationLoadingState({
+        messagesLoading: true,
+        messagesCount: 1,
+        isWorking: true,
+        sessionState: "RUNNING",
+      }),
+    ).toEqual({ isInitialLoading: false, showLoadingState: false });
+  });
+
+  it("suppresses loading for empty sessions that cannot load conversation history", () => {
+    expect(
+      getConversationLoadingState({
+        messagesLoading: true,
+        messagesCount: 0,
+        isWorking: false,
+        sessionState: "FAILED",
+      }),
+    ).toEqual({ isInitialLoading: true, showLoadingState: false });
+
+    expect(
+      getConversationLoadingState({
+        messagesLoading: true,
+        messagesCount: 0,
+        isWorking: false,
+        sessionState: null,
+      }),
+    ).toEqual({ isInitialLoading: true, showLoadingState: false });
+  });
+});
+
+describe("MessageListStatus", () => {
+  it("renders a conversation loading indicator while existing content remains visible", () => {
+    render(
+      <MessageListStatus
+        isLoadingMore={false}
+        hasMore={false}
+        showLoadingState
+        messagesLoading
+        isInitialLoading={false}
+        messagesCount={1}
+      />,
+    );
+
+    expect(screen.queryByTestId("conversation-loading-state")).not.toBeNull();
+    expect(screen.queryByText("Loading conversation...")).not.toBeNull();
   });
 });

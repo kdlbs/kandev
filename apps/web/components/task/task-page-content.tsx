@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { IconAlertTriangle } from "@tabler/icons-react";
 import {
   taskId as toTaskId,
   workflowId as toWorkflowId,
@@ -25,8 +26,11 @@ import type { Layout } from "react-resizable-panels";
 import {
   deriveIsAgentWorking,
   buildArchivedValue,
+  hasResolvedTaskDetails,
+  resolveTaskContentState,
 } from "@/components/task/task-page-content-helpers";
 import { TaskPageInner } from "@/components/task/task-page-inner";
+import { GridSpinner } from "@/components/grid-spinner";
 
 type TaskPageContentProps = {
   task: Task | null;
@@ -202,8 +206,42 @@ function syncActiveTaskSession(params: {
   else params.setActiveTask(taskId);
 }
 
+function TaskLoadingState() {
+  return (
+    <div
+      className="flex h-screen w-full items-center justify-center bg-background px-4"
+      data-testid="task-loading-state"
+    >
+      <div className="flex min-h-24 min-w-0 flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
+        <GridSpinner className="text-primary" />
+        <span>Loading task...</span>
+      </div>
+    </div>
+  );
+}
+
+function TaskLoadErrorState() {
+  return (
+    <div
+      className="flex h-screen w-full items-center justify-center bg-background px-4"
+      data-testid="task-load-error-state"
+    >
+      <div className="flex min-h-24 max-w-sm min-w-0 flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
+        <IconAlertTriangle className="h-5 w-5 text-destructive" aria-hidden="true" />
+        <div className="space-y-1">
+          <div className="font-medium text-foreground">Task unavailable</div>
+          <div>
+            We could not load this task. It may have been deleted or you may not have access.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
   const [taskDetails, setTaskDetails] = useState<Task | null>(initialTask);
+  const [taskLoadError, setTaskLoadError] = useState<unknown | null>(null);
   const kanbanTask = useAppStore((state) =>
     activeTaskId
       ? (state.kanban.tasks.find(
@@ -216,13 +254,34 @@ function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
     () => resolveEffectiveTask(taskDetails, initialTask, kanbanTask, effectiveTaskId),
     [taskDetails, initialTask, kanbanTask, effectiveTaskId],
   );
+  const hasTaskDetails = hasResolvedTaskDetails({
+    effectiveTaskId,
+    taskDetailsId: taskDetails?.id ?? null,
+    initialTaskId: initialTask?.id ?? null,
+  });
   useTasks(task?.workflow_id ?? null);
 
   useEffect(() => {
-    if (!activeTaskId || taskDetails?.id === activeTaskId) return;
+    if (!activeTaskId || taskDetails?.id === activeTaskId) {
+      setTaskLoadError(null);
+      return;
+    }
+    let cancelled = false;
+    setTaskLoadError(null);
     fetchTask(activeTaskId, { cache: "no-store" })
-      .then((response) => setTaskDetails(response))
-      .catch((error) => console.error("[TaskPageContent] Failed to load task details:", error));
+      .then((response) => {
+        if (cancelled) return;
+        setTaskDetails(response);
+        setTaskLoadError(null);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error("[TaskPageContent] Failed to load task details:", error);
+        setTaskLoadError(error);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [
     activeTaskId,
     taskDetails?.id,
@@ -232,7 +291,7 @@ function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
     setTaskDetails,
   ]);
 
-  return { task, kanbanTask };
+  return { task, kanbanTask, taskLoadError: hasTaskDetails ? null : taskLoadError };
 }
 
 function useTaskPageData(
@@ -254,7 +313,7 @@ function useTaskPageData(
     return session?.task_id === activeTaskId ? sid : null;
   });
 
-  const { task } = useTaskDetails(activeTaskId, initialTask);
+  const { task, taskLoadError } = useTaskDetails(activeTaskId, initialTask);
 
   const agent = useSessionAgent(task);
   const ensureSession = useEnsureTaskSession(task);
@@ -281,7 +340,7 @@ function useTaskPageData(
     [effectiveRepositories, task?.repositories],
   );
 
-  return { task, agent, effectiveSessionId, repository, ensureSession };
+  return { task, taskLoadError, agent, effectiveSessionId, repository, ensureSession };
 }
 
 export function TaskPageContent({
@@ -300,12 +359,8 @@ export function TaskPageContent({
   const { isMobile } = useResponsiveBreakpoint();
   const connectionStatus = useAppStore((state) => state.connection.status);
 
-  const { task, agent, effectiveSessionId, repository, ensureSession } = useTaskPageData(
-    initialTask,
-    initialTaskId,
-    sessionId,
-    initialRepositories,
-  );
+  const { task, taskLoadError, agent, effectiveSessionId, repository, ensureSession } =
+    useTaskPageData(initialTask, initialTaskId, sessionId, initialRepositories);
 
   const workflowSteps = useWorkflowStepsMapped();
   const sessionPanel = useSessionPanelState(effectiveSessionId);
@@ -321,7 +376,15 @@ export function TaskPageContent({
     queueMicrotask(() => setIsMounted(true));
   }, []);
 
-  if (!isMounted || !task) return <div className="h-screen w-full bg-background" />;
+  const contentState = resolveTaskContentState({
+    isMounted,
+    hasTask: Boolean(task),
+    hasTaskLoadError: Boolean(taskLoadError),
+  });
+
+  if (contentState === "loading") return <TaskLoadingState />;
+  if (contentState === "error") return <TaskLoadErrorState />;
+  if (!task) return <TaskLoadErrorState />;
 
   return (
     <TaskPageInner

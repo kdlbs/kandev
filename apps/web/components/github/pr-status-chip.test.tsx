@@ -120,6 +120,7 @@ afterEach(() => {
 const CHIP_TESTID = "pr-status-chip";
 const ATTR_PR_NUMBER = "data-pr-number";
 const ATTR_STATUS = "data-status";
+const ATTR_READY_TO_MERGE = "data-pr-ready-to-merge";
 const DRAWER_SELECTOR = "[data-testid='pr-status-chip-drawer']";
 const seededState: Partial<AppState> = {
   taskPRs: { byTaskId: { "task-1": [makePR()] } },
@@ -210,7 +211,7 @@ describe("PRStatusChip desktop branch", () => {
     expect(chip.getAttribute(ATTR_PR_NUMBER)).toBe("42");
     expect(chip.getAttribute("data-pr-state")).toBe("open");
     expect(chip.getAttribute(ATTR_STATUS)).toBe("passed");
-    expect(chip.getAttribute("data-pr-ready-to-merge")).toBe("true");
+    expect(chip.getAttribute(ATTR_READY_TO_MERGE)).toBe("true");
   });
 
   it("shows automation badges when auto-fix or auto-merge are enabled", () => {
@@ -268,7 +269,7 @@ describe("PRStatusChip mobile branch", () => {
     expect(chip.getAttribute(ATTR_PR_NUMBER)).toBe("42");
     expect(chip.getAttribute("data-pr-state")).toBe("open");
     expect(chip.getAttribute(ATTR_STATUS)).toBe("passed");
-    expect(chip.getAttribute("data-pr-ready-to-merge")).toBe("true");
+    expect(chip.getAttribute(ATTR_READY_TO_MERGE)).toBe("true");
   });
 
   it("reflects a failed PR with data-status='failed'", () => {
@@ -350,6 +351,77 @@ describe("PRStatusChip touch tablet branch", () => {
   });
 });
 
+describe("PRStatusChip — aggregate checks", () => {
+  it("treats aggregate all-green checks as passed when checks_state is empty", () => {
+    renderWithStore(
+      {
+        taskPRs: {
+          byTaskId: {
+            "task-1": [makePR({ checks_state: "", checks_total: 39, checks_passing: 39 })],
+          },
+        },
+      },
+      <PRStatusChip taskId="task-1" />,
+    );
+    const chip = screen.getByTestId(CHIP_TESTID);
+    expect(chip.getAttribute(ATTR_STATUS)).toBe("passed");
+    expect(chip.getAttribute(ATTR_READY_TO_MERGE)).toBe("false");
+  });
+
+  it("keeps aggregate all-green checks in-progress when required reviews are unmet", () => {
+    renderWithStore(
+      {
+        taskPRs: {
+          byTaskId: {
+            "task-1": [
+              makePR({
+                checks_state: "",
+                checks_total: 10,
+                checks_passing: 10,
+                required_reviews: 2,
+                review_count: 1,
+                pending_review_count: 1,
+              }),
+            ],
+          },
+        },
+      },
+      <PRStatusChip taskId="task-1" />,
+    );
+    const chip = screen.getByTestId(CHIP_TESTID);
+    expect(chip.getAttribute(ATTR_STATUS)).toBe("in_progress");
+    expect(chip.getAttribute(ATTR_READY_TO_MERGE)).toBe("false");
+  });
+
+  it("treats aggregate incomplete checks as in-progress when checks_state is empty", () => {
+    renderWithStore(
+      {
+        taskPRs: {
+          byTaskId: {
+            "task-1": [makePR({ checks_state: "", checks_total: 15, checks_passing: 6 })],
+          },
+        },
+      },
+      <PRStatusChip taskId="task-1" />,
+    );
+    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("in_progress");
+  });
+
+  it("treats aggregate zero passing checks as in-progress when checks_state is empty", () => {
+    renderWithStore(
+      {
+        taskPRs: {
+          byTaskId: {
+            "task-1": [makePR({ checks_state: "", checks_total: 3, checks_passing: 0 })],
+          },
+        },
+      },
+      <PRStatusChip taskId="task-1" />,
+    );
+    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("in_progress");
+  });
+});
+
 describe("PRStatusChip — mergeability", () => {
   it("is 'conflict' (not 'passed') for a dirty PR even with green checks + approval", () => {
     // Regression: the chip read mergeable_state-blind and showed the green
@@ -360,7 +432,7 @@ describe("PRStatusChip — mergeability", () => {
     );
     const chip = screen.getByTestId(CHIP_TESTID);
     expect(chip.getAttribute(ATTR_STATUS)).toBe("conflict");
-    expect(chip.getAttribute("data-pr-ready-to-merge")).toBe("false");
+    expect(chip.getAttribute(ATTR_READY_TO_MERGE)).toBe("false");
   });
 
   it("is 'behind' for a behind-base PR that is otherwise green", () => {
@@ -380,6 +452,8 @@ describe("PRStatusChip — mergeability", () => {
               makePR({
                 mergeable_state: "blocked",
                 checks_state: "",
+                checks_total: 0,
+                checks_passing: 0,
               }),
             ],
           },
@@ -415,7 +489,7 @@ describe("PRStatusChip — mergeability", () => {
     expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("in_progress");
   });
 
-  it("does not show in-progress for skipped-only checks", () => {
+  it("shows in-progress while checks_state is pending even if aggregate counts are all passing", () => {
     renderWithStore(
       {
         taskPRs: {
@@ -426,7 +500,7 @@ describe("PRStatusChip — mergeability", () => {
       },
       <PRStatusChip taskId="task-1" />,
     );
-    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("neutral");
+    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("in_progress");
   });
 });
 

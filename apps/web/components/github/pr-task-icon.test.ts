@@ -149,6 +149,39 @@ describe("isPRReadyToMerge", () => {
   );
 });
 
+describe("isPRReadyToMerge — aggregate counts", () => {
+  it("does not treat aggregate all-green counts as merge-ready without success state", () => {
+    expect(
+      isPRReadyToMerge(
+        makePR({
+          state: "open",
+          review_state: "approved",
+          checks_state: "",
+          checks_total: 3,
+          checks_passing: 3,
+          mergeable_state: "clean",
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("does not treat no-review aggregate all-green counts as merge-ready without success state", () => {
+    expect(
+      isPRReadyToMerge(
+        makePR({
+          state: "open",
+          review_state: "",
+          pending_review_count: 0,
+          checks_state: "",
+          checks_total: 3,
+          checks_passing: 3,
+          mergeable_state: "clean",
+        }),
+      ),
+    ).toBe(false);
+  });
+});
+
 describe("isPRReadyToMerge — required_reviews gate", () => {
   it("is false when required_reviews is unmet even if mergeable_state is clean", () => {
     // GitHub's stored mergeable_state can lag branch-protection state (e.g.
@@ -313,6 +346,33 @@ describe("getPRStatusColor", () => {
 
   it("returns purple for merged", () => {
     expect(getPRStatusColor(makePR({ state: "merged" }))).toBe("text-purple-500");
+  });
+});
+
+describe("getPRStatusColor — aggregate checks", () => {
+  it("treats aggregate all-green counts as passed for an approved PR", () => {
+    const pr = makePR({
+      state: "open",
+      review_state: "approved",
+      checks_state: "",
+      checks_total: 5,
+      checks_passing: 5,
+      mergeable_state: "",
+    });
+    expect(getPRStatusColor(pr)).toBe("text-green-500");
+  });
+
+  it("treats aggregate all-green counts as passed when no reviews are required", () => {
+    const pr = makePR({
+      state: "open",
+      review_state: "",
+      pending_review_count: 0,
+      checks_state: "",
+      checks_total: 5,
+      checks_passing: 5,
+      mergeable_state: "",
+    });
+    expect(getPRStatusColor(pr)).toBe("text-green-500");
   });
 });
 

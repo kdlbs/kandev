@@ -104,6 +104,29 @@ export function buildArchivedValue(task: Task | null, repository: Repository | n
   };
 }
 
+export function resolveTaskContentState(params: {
+  isMounted: boolean;
+  hasTask: boolean;
+  hasTaskLoadError: boolean;
+}) {
+  if (!params.isMounted) return "loading";
+  if (params.hasTaskLoadError) return "error";
+  if (params.hasTask) return "ready";
+  return "loading";
+}
+
+export function hasResolvedTaskDetails(params: {
+  effectiveTaskId: string | null;
+  taskDetailsId?: string | null;
+  initialTaskId?: string | null;
+}) {
+  if (!params.effectiveTaskId) return false;
+  return (
+    params.taskDetailsId === params.effectiveTaskId ||
+    params.initialTaskId === params.effectiveTaskId
+  );
+}
+
 export function resolveTaskIds(task: Task | null) {
   return {
     taskId: task?.id ?? null,
