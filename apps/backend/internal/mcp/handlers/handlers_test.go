@@ -721,6 +721,22 @@ func TestHandleCreateTask_WorkflowSwitchedSessionProfileWinsOverStaleMetadata(t 
 	assert.Equal(t, "effective-executor-profile", task.Metadata[models.MetaKeyExecutorProfileID])
 }
 
+func TestInheritFromTask_PrimarySessionLookupErrorFailsClosed(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+
+	h := &Handlers{
+		taskSvc: svc,
+		logger:  testLogger(t).WithFields(),
+	}
+	require.NoError(t, repo.DB().Close())
+
+	agentProfileID := ""
+	executorProfileID := ""
+	_, err := h.inheritFromTask(ctx, "source-task", &agentProfileID, &executorProfileID)
+	require.Error(t, err)
+}
+
 func TestHandleCreateTask_InheritsDeferredParentTaskMetadata(t *testing.T) {
 	svc, _ := newTestTaskService(t)
 	ctx := context.Background()

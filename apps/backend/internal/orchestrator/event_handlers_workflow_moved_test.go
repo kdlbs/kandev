@@ -220,8 +220,10 @@ func TestHandleTaskMovedNoSession(t *testing.T) {
 			t.Fatal("timed out waiting for auto-start launch")
 		}
 
-		deadline := time.Now().Add(2 * time.Second)
-		for time.Now().Before(deadline) {
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		timeout := time.After(2 * time.Second)
+		for {
 			sessions, err := repo.ListTaskSessions(ctx, "t1")
 			if err != nil {
 				t.Fatalf("ListTaskSessions: %v", err)
@@ -231,9 +233,12 @@ func TestHandleTaskMovedNoSession(t *testing.T) {
 					return
 				}
 			}
-			time.Sleep(10 * time.Millisecond)
+			select {
+			case <-ticker.C:
+			case <-timeout:
+				t.Fatal("timed out waiting for workflow-routed session metadata")
+			}
 		}
-		t.Fatal("timed out waiting for workflow-routed session metadata")
 	})
 }
 
