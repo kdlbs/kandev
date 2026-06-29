@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -157,16 +158,15 @@ func (h *WorkspaceHandlers) httpDeleteWorkspace(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "confirm_name is required"})
 		return
 	}
-	workspace, err := h.service.GetWorkspace(c.Request.Context(), c.Param("id"))
-	if err != nil {
-		handleNotFound(c, h.logger, err, "workspace not deleted")
-		return
-	}
-	if body.ConfirmName != workspace.Name {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "confirm_name does not match workspace name"})
-		return
-	}
-	if err := h.service.DeleteWorkspace(c.Request.Context(), c.Param("id")); err != nil {
+	if err := h.service.DeleteWorkspaceWithConfirmName(
+		c.Request.Context(),
+		c.Param("id"),
+		body.ConfirmName,
+	); err != nil {
+		if errors.Is(err, service.ErrWorkspaceConfirmNameMismatch) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		handleNotFound(c, h.logger, err, "workspace not deleted")
 		return
 	}

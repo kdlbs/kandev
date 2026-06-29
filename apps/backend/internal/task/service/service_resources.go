@@ -20,6 +20,8 @@ const (
 	workspaceDeletePageSize = 500
 )
 
+var ErrWorkspaceConfirmNameMismatch = errors.New("confirm_name does not match workspace name")
+
 // Workspace operations
 
 // CreateWorkspace creates a new workspace
@@ -93,6 +95,24 @@ func (s *Service) DeleteWorkspace(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	return s.deleteWorkspace(ctx, workspace)
+}
+
+// DeleteWorkspaceWithConfirmName deletes a workspace only when confirmName
+// matches the workspace name read for the delete cascade.
+func (s *Service) DeleteWorkspaceWithConfirmName(ctx context.Context, id, confirmName string) error {
+	workspace, err := s.workspaces.GetWorkspace(ctx, id)
+	if err != nil {
+		return err
+	}
+	if confirmName != workspace.Name {
+		return ErrWorkspaceConfirmNameMismatch
+	}
+	return s.deleteWorkspace(ctx, workspace)
+}
+
+func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspace) error {
+	id := workspace.ID
 	tasks, err := s.listAllTasksForWorkspaceDelete(ctx, id)
 	if err != nil {
 		return err
