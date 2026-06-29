@@ -454,3 +454,72 @@ func TestService_DeleteAllRuns_TaskNotFound_StillClearsRuns(t *testing.T) {
 		t.Errorf("expected 0 runs after delete-all, got %d", len(runs))
 	}
 }
+
+// TestDeleteAllRuns_AutomationSurvives is a regression guard: deleting all run
+// rows (including their associated tasks) must never delete the parent
+// automation row itself. The test creates an automation with runs that have
+// task IDs, calls DeleteAllRuns, then asserts GetAutomation still returns it.
+func TestDeleteAllRuns_AutomationSurvives(t *testing.T) {
+	svc := newTestService(t)
+	deleter := &fakeTaskDeleter{} // succeeds for all task IDs
+	svc.SetTaskDeleter(deleter)
+	ctx := context.Background()
+
+	a := &Automation{WorkspaceID: "ws-1", Name: "Survives", WorkflowID: "wf-1", WorkflowStepID: "s-1", Enabled: true}
+	if err := svc.store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create runs with task IDs — simulates the production scenario.
+	taskIDs := []string{"task-a", "task-b", "task-c"}
+	for _, tid := range taskIDs {
+		if err := svc.store.CreateRun(ctx, &AutomationRun{
+			AutomationID: a.ID,
+			TriggerType:  TriggerTypeScheduled,
+			Status:       RunStatusTaskCreated,
+			TaskID:       tid,
+			TriggerData:  json.RawMessage(`{}`),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Also a few skipped runs without task IDs.
+	for range 3 {
+		if err := svc.store.CreateRun(ctx, &AutomationRun{
+			AutomationID: a.ID,
+			TriggerType:  TriggerTypeScheduled,
+			Status:       RunStatusSkipped,
+			TriggerData:  json.RawMessage(`{}`),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := svc.DeleteAllRuns(ctx, a.ID); err != nil {
+		t.Fatalf("DeleteAllRuns: %v", err)
+	}
+
+	// Automation row must still exist.
+	got, err := svc.store.GetAutomation(ctx, a.ID)
+	if err != nil {
+		t.Fatalf("GetAutomation after DeleteAllRuns: %v", err)
+	}
+	if got == nil {
+		t.Error("automation was deleted by DeleteAllRuns — regression")
+		return
+	}
+	if got.Name != "Survives" {
+		t.Errorf("unexpected automation name %q after DeleteAllRuns", got.Name)
+	}
+
+	// Runs must be gone.
+	runs, _ := svc.store.ListRuns(ctx, a.ID, 50)
+	if len(runs) != 0 {
+		t.Errorf("expected 0 runs, got %d", len(runs))
+	}
+
+	// All three task IDs must have been handed to the deleter.
+	if len(deleter.deleted) != 3 {
+		t.Errorf("expected 3 task deletions, got %d: %v", len(deleter.deleted), deleter.deleted)
+	}
+}

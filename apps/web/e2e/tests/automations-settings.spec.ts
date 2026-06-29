@@ -332,8 +332,9 @@ test.describe("Automations settings page", () => {
     // One run removed — table should now have 1 row.
     await expect(tbody.locator("tr")).toHaveCount(1, { timeout: 5_000 });
 
-    // Delete all remaining runs.
+    // Delete all remaining runs — click trigger, then confirm in the dialog.
     await deleteAllBtn.click();
+    await testPage.getByTestId("delete-all-runs-confirm").click();
 
     // Table should show the empty state.
     await expect(testPage.getByText("No runs yet")).toBeVisible({ timeout: 5_000 });
