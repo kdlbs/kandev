@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -95,11 +96,11 @@ func (s *Service) DeleteWorkspace(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	return s.deleteWorkspace(ctx, workspace)
+	return s.deleteWorkspace(ctx, workspace, nil)
 }
 
 // DeleteWorkspaceWithConfirmName deletes a workspace only when confirmName
-// matches the workspace name read for the delete cascade.
+// matches the workspace name read for the cascade and final row delete.
 func (s *Service) DeleteWorkspaceWithConfirmName(ctx context.Context, id, confirmName string) error {
 	workspace, err := s.workspaces.GetWorkspace(ctx, id)
 	if err != nil {
@@ -108,15 +109,17 @@ func (s *Service) DeleteWorkspaceWithConfirmName(ctx context.Context, id, confir
 	if confirmName != workspace.Name {
 		return ErrWorkspaceConfirmNameMismatch
 	}
-	return s.deleteWorkspace(ctx, workspace)
+	return s.deleteWorkspace(ctx, workspace, &confirmName)
 }
 
-func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspace) error {
+func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspace, confirmedName *string) error {
 	id := workspace.ID
 	tasks, err := s.listAllTasksForWorkspaceDelete(ctx, id)
 	if err != nil {
 		return err
 	}
+	// Workspace deletion hard-deletes tasks. Do this before workflow deletion so
+	// DeleteWorkflow does not archive children that are being removed anyway.
 	for _, task := range tasks {
 		if task == nil || task.ID == "" {
 			continue
@@ -137,9 +140,19 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 			return fmt.Errorf("delete workflow %s: %w", workflow.ID, err)
 		}
 	}
-	if err := s.workspaces.DeleteWorkspace(ctx, id); err != nil {
-		s.logger.Error("failed to delete workspace", zap.String("workspace_id", id), zap.Error(err))
-		return err
+
+	var deleteErr error
+	if confirmedName == nil {
+		deleteErr = s.workspaces.DeleteWorkspace(ctx, id)
+	} else {
+		deleteErr = s.workspaces.DeleteWorkspaceWithName(ctx, id, *confirmedName)
+		if errors.Is(deleteErr, taskrepo.ErrWorkspaceNameMismatch) {
+			return ErrWorkspaceConfirmNameMismatch
+		}
+	}
+	if deleteErr != nil {
+		s.logger.Error("failed to delete workspace", zap.String("workspace_id", id), zap.Error(deleteErr))
+		return deleteErr
 	}
 	s.publishWorkspaceEvent(ctx, events.WorkspaceDeleted, workspace)
 	s.logger.Info("workspace deleted", zap.String("workspace_id", id))

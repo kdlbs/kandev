@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -32,8 +33,27 @@ func (WorkspaceRepositoryStub) UpdateWorkspace(_ context.Context, _ *models.Work
 func (WorkspaceRepositoryStub) DeleteWorkspace(_ context.Context, _ string) error {
 	panic("not implemented")
 }
+func (WorkspaceRepositoryStub) DeleteWorkspaceWithName(_ context.Context, _, _ string) error {
+	panic("not implemented")
+}
 func (WorkspaceRepositoryStub) ListWorkspaces(_ context.Context) ([]*models.Workspace, error) {
 	panic("not implemented")
+}
+
+type renameBeforeConfirmedDeleteRepo struct {
+	repository.WorkspaceRepository
+}
+
+func (r renameBeforeConfirmedDeleteRepo) DeleteWorkspaceWithName(ctx context.Context, id, name string) error {
+	workspace, err := r.GetWorkspace(ctx, id)
+	if err != nil {
+		return err
+	}
+	workspace.Name = "Renamed"
+	if err := r.UpdateWorkspace(ctx, workspace); err != nil {
+		return err
+	}
+	return r.WorkspaceRepository.DeleteWorkspaceWithName(ctx, id, name)
 }
 
 func (e errWorkspaceRepo) ListWorkspaces(_ context.Context) ([]*models.Workspace, error) {
@@ -166,6 +186,109 @@ func TestService_DeleteWorkspaceDeletesWorkspaceOwnedTasksAndWorkflows(t *testin
 	}
 	if _, err := repo.GetWorkflow(ctx, "wf-keep"); err != nil {
 		t.Fatalf("unrelated workflow should remain: %v", err)
+	}
+}
+
+func TestService_DeleteWorkspaceWithConfirmNameDeletesWhenNameMatches(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-delete", Name: "Delete Me"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-delete", WorkspaceID: "ws-delete", Name: "Doomed"})
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:             "task-delete",
+		WorkspaceID:    "ws-delete",
+		WorkflowID:     "wf-delete",
+		WorkflowStepID: "step-delete",
+		Title:          "Delete task",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	if err := svc.DeleteWorkspaceWithConfirmName(ctx, "ws-delete", "Delete Me"); err != nil {
+		t.Fatalf("DeleteWorkspaceWithConfirmName: %v", err)
+	}
+
+	if _, err := repo.GetWorkspace(ctx, "ws-delete"); err == nil {
+		t.Fatalf("workspace should be deleted")
+	}
+	if _, err := repo.GetTask(ctx, "task-delete"); err == nil {
+		t.Fatalf("workspace task should be deleted")
+	}
+	workflows, err := repo.ListWorkflows(ctx, "ws-delete", true)
+	if err != nil {
+		t.Fatalf("ListWorkflows: %v", err)
+	}
+	if len(workflows) != 0 {
+		t.Fatalf("workspace workflows should be deleted, got %d", len(workflows))
+	}
+}
+
+func TestService_DeleteWorkspaceWithConfirmNameRejectsMismatchedName(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-delete", Name: "Delete Me"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-delete", WorkspaceID: "ws-delete", Name: "Doomed"})
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:             "task-delete",
+		WorkspaceID:    "ws-delete",
+		WorkflowID:     "wf-delete",
+		WorkflowStepID: "step-delete",
+		Title:          "Delete task",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	err := svc.DeleteWorkspaceWithConfirmName(ctx, "ws-delete", "Wrong")
+	if !errors.Is(err, ErrWorkspaceConfirmNameMismatch) {
+		t.Fatalf("expected ErrWorkspaceConfirmNameMismatch, got %v", err)
+	}
+
+	if _, err := repo.GetWorkspace(ctx, "ws-delete"); err != nil {
+		t.Fatalf("workspace should remain: %v", err)
+	}
+	if _, err := repo.GetTask(ctx, "task-delete"); err != nil {
+		t.Fatalf("workspace task should remain: %v", err)
+	}
+	if _, err := repo.GetWorkflow(ctx, "wf-delete"); err != nil {
+		t.Fatalf("workspace workflow should remain: %v", err)
+	}
+}
+
+func TestService_DeleteWorkspaceWithConfirmNameReturnsMissingWorkspaceError(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	ctx := context.Background()
+
+	err := svc.DeleteWorkspaceWithConfirmName(ctx, "ws-missing", "Missing")
+	if err == nil {
+		t.Fatalf("expected missing workspace error")
+	}
+	if errors.Is(err, ErrWorkspaceConfirmNameMismatch) {
+		t.Fatalf("expected missing workspace error, got confirm-name mismatch")
+	}
+	if !strings.Contains(err.Error(), "workspace not found") {
+		t.Fatalf("expected workspace not found error, got %v", err)
+	}
+}
+
+func TestService_DeleteWorkspaceWithConfirmNameRejectsFinalNameMismatch(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-delete", Name: "Delete Me"})
+	svc.workspaces = renameBeforeConfirmedDeleteRepo{WorkspaceRepository: repo}
+
+	err := svc.DeleteWorkspaceWithConfirmName(ctx, "ws-delete", "Delete Me")
+	if !errors.Is(err, ErrWorkspaceConfirmNameMismatch) {
+		t.Fatalf("expected ErrWorkspaceConfirmNameMismatch, got %v", err)
+	}
+	workspace, err := repo.GetWorkspace(ctx, "ws-delete")
+	if err != nil {
+		t.Fatalf("workspace should remain: %v", err)
+	}
+	if workspace.Name != "Renamed" {
+		t.Fatalf("workspace should keep concurrent rename, got %q", workspace.Name)
 	}
 }
 

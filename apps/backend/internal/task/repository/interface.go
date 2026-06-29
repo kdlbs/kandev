@@ -6,8 +6,11 @@ import (
 
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+var ErrWorkspaceNameMismatch = repoerrors.ErrWorkspaceNameMismatch
 
 // WorkspaceRepository handles workspace CRUD.
 type WorkspaceRepository interface {
@@ -15,6 +18,7 @@ type WorkspaceRepository interface {
 	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
 	UpdateWorkspace(ctx context.Context, workspace *models.Workspace) error
 	DeleteWorkspace(ctx context.Context, id string) error
+	DeleteWorkspaceWithName(ctx context.Context, id, name string) error
 	ListWorkspaces(ctx context.Context) ([]*models.Workspace, error)
 }
 

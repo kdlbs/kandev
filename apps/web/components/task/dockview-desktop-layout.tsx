@@ -254,49 +254,52 @@ type DockviewDesktopLayoutProps = {
   compact?: boolean;
 };
 
-type ReadyDockviewSetup = {
-  api: DockviewReadyEvent["api"];
-  appStore: ReturnType<typeof useAppStoreApi>;
+type ReadyDockviewLayoutSetup = {
   buildDefaultLayout: (api: DockviewReadyEvent["api"], intentName?: string) => void;
   compact: boolean;
-  envIdRef: React.MutableRefObject<string | null>;
   initialLayout?: string | null;
+};
+
+type ReadyDockviewRefs = {
+  envIdRef: React.MutableRefObject<string | null>;
   readyDisposersRef: React.MutableRefObject<Array<() => void>>;
   saveTimerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>;
   setApi: (api: DockviewReadyEvent["api"] | null) => void;
 };
 
-function setupReadyDockview({
-  api,
-  appStore,
-  buildDefaultLayout,
-  compact,
-  envIdRef,
-  initialLayout,
-  readyDisposersRef,
-  saveTimerRef,
-  setApi,
-}: ReadyDockviewSetup): void {
-  setApi(api);
+type ReadyDockviewSetup = {
+  api: DockviewReadyEvent["api"];
+  appStore: ReturnType<typeof useAppStoreApi>;
+  layout: ReadyDockviewLayoutSetup;
+  refs: ReadyDockviewRefs;
+};
 
-  const currentEnvId = envIdRef.current;
+function setupReadyDockview({ api, appStore, layout, refs }: ReadyDockviewSetup): void {
+  refs.setApi(api);
+
+  const currentEnvId = refs.envIdRef.current;
   const restored =
-    !initialLayout && restoreEnvLayout(api, currentEnvId, appStore, VALID_COMPONENTS);
+    !layout.initialLayout && restoreEnvLayout(api, currentEnvId, appStore, VALID_COMPONENTS);
   if (!restored) {
-    buildDefaultLayout(api, initialLayout ?? (compact ? "compact" : undefined));
+    layout.buildDefaultLayout(
+      api,
+      layout.initialLayout ?? (layout.compact ? "compact" : undefined),
+    );
   }
 
   useDockviewStore.setState({ currentLayoutEnvId: currentEnvId });
 
-  readyDisposersRef.current.push(setupGroupTracking(api));
+  refs.readyDisposersRef.current.push(setupGroupTracking(api));
   const sessionTabSyncDisposable = setupSessionTabSync(api, appStore);
-  readyDisposersRef.current.push(() => sessionTabSyncDisposable.dispose());
+  refs.readyDisposersRef.current.push(() => sessionTabSyncDisposable.dispose());
   const chatPanelSafetyNetDisposable = setupChatPanelSafetyNet(api, appStore);
-  readyDisposersRef.current.push(() => chatPanelSafetyNetDisposable.dispose());
-  readyDisposersRef.current.push(setupLayoutPersistence(api, saveTimerRef, envIdRef));
+  refs.readyDisposersRef.current.push(() => chatPanelSafetyNetDisposable.dispose());
+  refs.readyDisposersRef.current.push(
+    setupLayoutPersistence(api, refs.saveTimerRef, refs.envIdRef),
+  );
   setupPortalCleanup(api, appStore);
-  readyDisposersRef.current.push(setupContainerResizeSync(api));
-  readyDisposersRef.current.push(setupSashDragCapToggle(api));
+  refs.readyDisposersRef.current.push(setupContainerResizeSync(api));
+  refs.readyDisposersRef.current.push(setupSashDragCapToggle(api));
 }
 
 export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
@@ -338,13 +341,8 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       setupReadyDockview({
         api: event.api,
         appStore,
-        buildDefaultLayout,
-        compact,
-        envIdRef,
-        initialLayout,
-        readyDisposersRef,
-        saveTimerRef,
-        setApi,
+        layout: { buildDefaultLayout, compact, initialLayout },
+        refs: { envIdRef, readyDisposersRef, saveTimerRef, setApi },
       });
     },
     [setApi, buildDefaultLayout, initialLayout, compact, appStore],

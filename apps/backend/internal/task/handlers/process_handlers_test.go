@@ -44,6 +44,9 @@ func (m *mockRepository) UpdateWorkspace(ctx context.Context, workspace *models.
 func (m *mockRepository) DeleteWorkspace(ctx context.Context, id string) error {
 	return nil
 }
+func (m *mockRepository) DeleteWorkspaceWithName(ctx context.Context, id, name string) error {
+	return m.DeleteWorkspace(ctx, id)
+}
 func (m *mockRepository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
 	return nil, nil
 }

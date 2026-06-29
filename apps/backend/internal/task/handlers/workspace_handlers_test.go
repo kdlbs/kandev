@@ -36,6 +36,10 @@ func (r *workspaceDeleteRepo) DeleteWorkspace(_ context.Context, _ string) error
 	return nil
 }
 
+func (r *workspaceDeleteRepo) DeleteWorkspaceWithName(ctx context.Context, id, _ string) error {
+	return r.DeleteWorkspace(ctx, id)
+}
+
 func TestHTTPDeleteWorkspaceRequiresMatchingConfirmName(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &workspaceDeleteRepo{}
