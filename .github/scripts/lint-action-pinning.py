@@ -26,7 +26,7 @@ workflows_dir = Path(__file__).parent.parent / "workflows"
 
 violations: list[str] = []
 
-for path in sorted(workflows_dir.glob("*.yml")):
+for path in sorted(p for ext in ("*.yml", "*.yaml") for p in workflows_dir.glob(ext)):
     for lineno, line in enumerate(path.read_text().splitlines(), start=1):
         m = USES_RE.match(line)
         if not m:
@@ -56,4 +56,4 @@ if violations:
     )
     sys.exit(1)
 
-print(f"✓ All {sum(1 for _ in workflows_dir.glob('*.yml'))} workflow file(s) use SHA-pinned action refs.")
+print(f"✓ All {sum(1 for ext in ('*.yml', '*.yaml') for _ in workflows_dir.glob(ext))} workflow file(s) use SHA-pinned action refs.")
