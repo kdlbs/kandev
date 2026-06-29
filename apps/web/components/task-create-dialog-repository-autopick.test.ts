@@ -4,9 +4,14 @@ import { useRepositoryAutoSelectEffect } from "./task-create-dialog-repository-a
 import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dialog-types";
 import type { Repository } from "@/lib/types/http";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
+import {
+  readQueuedTaskCreateLastUsedState,
+  resetTaskCreateLastUsedSync,
+} from "./task-create-dialog-handlers";
 
 beforeEach(() => {
   localStorage.clear();
+  resetTaskCreateLastUsedSync({ clearQueued: true });
 });
 
 function makeRepository(id: string): Repository {
@@ -33,7 +38,7 @@ function makeRepoAutoSelectFs(
   } as unknown as DialogFormState;
 }
 
-describe("useRepositoryAutoSelectEffect", () => {
+describe("useRepositoryAutoSelectEffect loading gates", () => {
   it("waits for store-backed settings before falling back to an empty row", async () => {
     window.localStorage.removeItem(STORAGE_KEYS.LAST_REPOSITORY_ID);
     const setRepositories = vi.fn();
@@ -84,6 +89,37 @@ describe("useRepositoryAutoSelectEffect", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(setRepositories).not.toHaveBeenCalled();
+    expect(readQueuedTaskCreateLastUsedState()).toEqual({});
+  });
+});
+
+describe("useRepositoryAutoSelectEffect defaults", () => {
+  it("queues a consumed cached repository id until backend settings catch up", async () => {
+    window.localStorage.setItem(STORAGE_KEYS.LAST_REPOSITORY_ID, JSON.stringify("repo-1"));
+    const setRepositories = vi.fn();
+    const fs = makeRepoAutoSelectFs([], setRepositories);
+
+    renderHook(() =>
+      useRepositoryAutoSelectEffect(
+        fs,
+        true,
+        "ws-1",
+        [makeRepository("repo-1"), makeRepository("repo-2")],
+        {
+          lastUsedRepositoryId: null,
+          userSettingsLoaded: true,
+        },
+      ),
+    );
+
+    await waitFor(() => expect(setRepositories).toHaveBeenCalled());
+    const updater = setRepositories.mock.calls[0]![0] as (prev: TaskRepoRow[]) => TaskRepoRow[];
+
+    expect(updater([])).toEqual([{ key: "row-0", repositoryId: "repo-1", branch: "" }]);
+    expect(readQueuedTaskCreateLastUsedState()).toMatchObject({
+      repositoryId: "repo-1",
+      branch: null,
+    });
   });
 
   it("fills an untouched placeholder row from store-backed settings when localStorage is not primed", async () => {
