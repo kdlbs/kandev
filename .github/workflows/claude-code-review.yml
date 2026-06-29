@@ -41,13 +41,13 @@ jobs:
 
     steps:
       - name: Checkout PR head
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 1
 
       - name: Run Claude Code Review (App token, inline comments)
         id: claude-review
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@78a7209fd893bd50d1b2b784da9b6f240a66373a # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # No github_token: the action performs the OIDC -> installation-token
@@ -90,7 +90,7 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - uses: actions/github-script@v7
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             try {
@@ -131,7 +131,7 @@ jobs:
 
     steps:
       - name: Checkout PR head
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           # pull_request_target defaults to the base ref; explicitly check out
           # the PR head through the base repository's pull ref. Keeping origin
@@ -144,7 +144,7 @@ jobs:
 
       - name: Run Claude Code Review (GITHUB_TOKEN fallback)
         id: claude-review
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@78a7209fd893bd50d1b2b784da9b6f240a66373a # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Skip the Claude GitHub App's OIDC -> installation-token exchange,

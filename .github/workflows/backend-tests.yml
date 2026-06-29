@@ -39,7 +39,7 @@ jobs:
     # Pre-baked image bundles Go, golangci-lint, go-licenses, Docker CLI, Node,
     # pnpm, and the Playwright base — see .github/docker/ci-base/Dockerfile.
     # Skips the per-run setup-go / golangci-lint download steps below.
-    container: ghcr.io/kdlbs/kandev-ci:build-latest
+    container: ghcr.io/kdlbs/kandev-ci:build-latest@sha256:b8e564d204138ebb94d6ced0e7e72d7b8d071b8d6d26b0dfe6bd2ef749893af4
     defaults:
       run:
         # Container jobs default to `sh` (dash); pin to bash so `set -o pipefail`
@@ -49,7 +49,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
 
@@ -68,7 +68,7 @@ jobs:
         # so this condition is dormant). If homelab is reactivated, split this
         # job into a matrix where the homelab variant omits `container:`.
         if: ${{ contains(runner.name, 'homelab') }}
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/go/pkg/mod
@@ -137,13 +137,13 @@ jobs:
           go test -v -race -coverprofile=coverage.out -covermode=atomic -json ./... 2>&1 | tee test-results.json
 
       - name: Generate test report
-        uses: robherley/go-test-action@v0
+        uses: robherley/go-test-action@3856e4e57831b3b6d6d8d89f91747e5200c533f7 # v0
         if: always()
         with:
           fromJSONFile: apps/backend/test-results.json
 
       - name: Upload test artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         if: always()
         with:
           name: test-results
@@ -159,10 +159,10 @@ jobs:
       contents: read
       packages: read
     timeout-minutes: 10
-    container: ghcr.io/kdlbs/kandev-ci:build-latest
+    container: ghcr.io/kdlbs/kandev-ci:build-latest@sha256:b8e564d204138ebb94d6ced0e7e72d7b8d071b8d6d26b0dfe6bd2ef749893af4
     services:
       postgres:
-        image: postgres:16
+        image: postgres:16@sha256:fe03a7605299a34ddf5e4f285dff78c3d7190a576b3c6b46f2fcff69f4bffd54
         env:
           POSTGRES_USER: kandev
           POSTGRES_PASSWORD: kandev
@@ -181,7 +181,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           persist-credentials: false
 
@@ -226,10 +226,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: apps/backend/go.mod
           cache-dependency-path: apps/backend/go.sum

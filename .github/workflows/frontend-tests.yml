@@ -50,7 +50,7 @@ jobs:
     runs-on: ubuntu-latest
     # Pre-baked image bundles Node 24, pnpm 9.15.9, Go, and go-licenses —
     # see .github/docker/ci-base/Dockerfile.
-    container: ghcr.io/kdlbs/kandev-ci:build-latest
+    container: ghcr.io/kdlbs/kandev-ci:build-latest@sha256:b8e564d204138ebb94d6ced0e7e72d7b8d071b8d6d26b0dfe6bd2ef749893af4
     defaults:
       run:
         # Container jobs default to `sh` (dash); pin to bash for `set -euo
@@ -60,7 +60,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
 
@@ -70,7 +70,7 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Cache pnpm store
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.local/share/pnpm/store
           key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
