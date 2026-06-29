@@ -126,7 +126,7 @@ sudo kandev service config --system
 Then start debug mode with the same values shown in the service config:
 
 ```bash
-KANDEV_HOME_DIR=/path/from/service/config kandev --debug --port 38429 2>&1 | tee ~/kandev-debug.log
+KANDEV_HOME_DIR=/path/from/service/config kandev --debug --port <port from service config> 2>&1 | tee ~/kandev-debug.log
 ```
 
 For a custom system service, run the same command with `sudo`.
