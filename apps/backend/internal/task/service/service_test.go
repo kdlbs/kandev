@@ -479,6 +479,61 @@ func TestService_DeleteTask(t *testing.T) {
 	}
 }
 
+func TestService_DeleteTaskWithReason_PublishesReason(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test", Priority: "medium"})
+	eventBus.ClearEvents()
+
+	if err := svc.DeleteTaskWithReason(ctx, "task-123", "pr_approved_by_user"); err != nil {
+		t.Fatalf("DeleteTaskWithReason: %v", err)
+	}
+
+	events := eventBus.GetPublishedEvents()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Type != "task.deleted" {
+		t.Fatalf("expected event type 'task.deleted', got %s", events[0].Type)
+	}
+	data, ok := events[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data is not map[string]interface{}, got %T", events[0].Data)
+	}
+	if got := data["reason"]; got != "pr_approved_by_user" {
+		t.Errorf("expected reason 'pr_approved_by_user' in payload, got %v", got)
+	}
+}
+
+func TestService_DeleteTask_OmitsReasonWhenUnset(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test", Priority: "medium"})
+	eventBus.ClearEvents()
+
+	if err := svc.DeleteTask(ctx, "task-123"); err != nil {
+		t.Fatalf("DeleteTask: %v", err)
+	}
+
+	events := eventBus.GetPublishedEvents()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	data, ok := events[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data is not map[string]interface{}, got %T", events[0].Data)
+	}
+	if _, present := data["reason"]; present {
+		t.Errorf("expected no reason key when deleting without a reason, got %v", data["reason"])
+	}
+}
+
 func TestService_DeleteTaskStopsExecutorRunningForTerminalSession(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

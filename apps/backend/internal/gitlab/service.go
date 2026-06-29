@@ -43,6 +43,14 @@ type TaskDeleter interface {
 	DeleteTask(ctx context.Context, taskID string) error
 }
 
+// TaskDeleterWithReason is an optional extension of TaskDeleter that lets the
+// cleanup path attach a machine-readable deletion reason (e.g.
+// "pr_merged_or_closed") to the published task.deleted event. When the wired
+// deleter does not implement this, cleanup falls back to plain DeleteTask.
+type TaskDeleterWithReason interface {
+	DeleteTaskWithReason(ctx context.Context, taskID, reason string) error
+}
+
 // TaskSessionChecker checks whether the user genuinely engaged with a task.
 type TaskSessionChecker interface {
 	HasUserAuthoredMessage(ctx context.Context, taskID string) (bool, error)

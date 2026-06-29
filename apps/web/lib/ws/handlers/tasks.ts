@@ -8,6 +8,8 @@ import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { toKanbanTask, type TaskLike } from "@/lib/kanban/map-task";
 import { sessionId as toSessionId } from "@/lib/types/http";
 import { mergeTaskRepositoryFields } from "@/lib/ws/handlers/task-repositories";
+import { softNavigate } from "@/lib/routing/client-router";
+import { isTaskDetailPath } from "@/lib/links";
 import {
   clearPinnedSessionIfOverridden,
   shouldPreservePinnedSessionForTask,
@@ -117,6 +119,18 @@ function removeTaskFromBothKanbans(state: AppState, wfId: string, taskId: string
   return next;
 }
 
+/**
+ * Soft-redirect away from a deleted task's page. Only fires when the user is
+ * currently parked on that task's route (`/t/<id>` or the compatibility
+ * `/tasks/<id>`), so a background deletion of some other task never yanks the
+ * user elsewhere.
+ */
+function redirectAwayFromDeletedTask(deletedId: string): void {
+  if (typeof window === "undefined") return;
+  if (!isTaskDetailPath(window.location.pathname, deletedId)) return;
+  softNavigate("/", "replace");
+}
+
 export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "task.created": (message) => {
@@ -205,6 +219,8 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
         useContextFilesStore.getState().clearSession(sid);
       }
 
+      const wasActive = currentState.tasks.activeTaskId === deletedId;
+
       store.setState((state) => {
         const isActive = state.tasks.activeTaskId === deletedId;
         let next = removeTaskFromBothKanbans(state, wfId, deletedId);
@@ -217,6 +233,28 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
         }
         return next;
       });
+
+      // Capture the route match before any redirect mutates the pathname. This
+      // covers a fresh load where the browser is parked on the task's route
+      // (`/t/<id>` or `/tasks/<id>`) but TaskPageContent hasn't hydrated
+      // `activeTaskId` yet, so `wasActive` is still false.
+      const onDeletedRoute =
+        typeof window !== "undefined" && isTaskDetailPath(window.location.pathname, deletedId);
+
+      // Only react to genuine auto-deletions, which the backend tags with a
+      // reason (e.g. a review task whose PR was approved). User-initiated deletes
+      // carry no reason: their local delete flow (useTaskRemoval) owns
+      // navigation by switching to the next task, so redirecting here would
+      // preempt it and strand the user on the home route. For auto-deletions we
+      // move off the now-dead route (helper is route-guarded) and explain why.
+      if (message.payload.reason && (wasActive || onDeletedRoute)) {
+        redirectAwayFromDeletedTask(deletedId);
+        store.getState().setTaskDeletedNotification({
+          taskId: deletedId,
+          title: message.payload.title,
+          reason: message.payload.reason,
+        });
+      }
     },
     "task.state_changed": (message) => {
       // Skip ephemeral tasks (e.g., quick chat) - they shouldn't appear on the Kanban board

@@ -123,6 +123,16 @@ func (s *Service) buildReviewWatchCaches(ctx context.Context, prTasks []*ReviewP
 	return policy, enabled, unknown
 }
 
+// deleteTaskWithReason deletes a task, threading the cleanup reason through to
+// the task.deleted event when the wired deleter supports it (see
+// TaskDeleterWithReason). Falls back to plain DeleteTask otherwise.
+func (s *Service) deleteTaskWithReason(ctx context.Context, taskID, reason string) error {
+	if d, ok := s.taskDeleter.(TaskDeleterWithReason); ok {
+		return d.DeleteTaskWithReason(ctx, taskID, reason)
+	}
+	return s.taskDeleter.DeleteTask(ctx, taskID)
+}
+
 // cleanupReviewPRTaskBatch runs the deletion gate over a slice of dedup rows.
 // resolvePolicy returns the effective cleanup policy for each row; callers
 // supply it so per-watch and global-sweep paths can share this body.
@@ -154,7 +164,7 @@ func (s *Service) cleanupReviewPRTaskBatch(ctx context.Context, prTasks []*Revie
 		if !shouldDelete {
 			continue
 		}
-		if err := s.taskDeleter.DeleteTask(ctx, rpt.TaskID); err != nil {
+		if err := s.deleteTaskWithReason(ctx, rpt.TaskID, reason); err != nil {
 			if isTaskNotFound(err) {
 				// Task already deleted; clean up the orphaned dedup record.
 				if err := s.store.DeleteReviewPRTask(ctx, rpt.ID); err != nil {
@@ -393,7 +403,7 @@ func (s *Service) cleanupIssueTaskBatch(ctx context.Context, issueTasks []*Issue
 		if !shouldDelete {
 			continue
 		}
-		if err := s.taskDeleter.DeleteTask(ctx, it.TaskID); err != nil {
+		if err := s.deleteTaskWithReason(ctx, it.TaskID, reason); err != nil {
 			if isTaskNotFound(err) {
 				if err := s.store.DeleteIssueWatchTask(ctx, it.ID); err != nil {
 					s.logger.Warn("failed to delete orphan dedup row after task-not-found",

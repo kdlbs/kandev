@@ -51,6 +51,9 @@ export type TaskState =
 // Workflow Review Status
 export type WorkflowReviewStatus = "pending" | "approved" | "changes_requested" | "rejected";
 
+// Reasons the backend tags on an auto-deleted task.deleted event.
+export type TaskDeletionReason = "pr_approved_by_user" | "pr_merged_or_closed" | "issue_closed";
+
 // Workflow Template - pre-defined workflow configurations
 export type WorkflowTemplate = {
   id: string;

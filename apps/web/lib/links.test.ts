@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { linkToTask, linkToTasks, replaceTaskUrl } from "./links";
+import { isTaskDetailPath, linkToTask, linkToTasks, replaceTaskUrl } from "./links";
 
 describe("task links", () => {
   afterEach(() => {
@@ -22,5 +22,28 @@ describe("task links", () => {
     replaceTaskUrl("task-123");
 
     expect(replaceState).toHaveBeenCalledWith({}, "", "/t/task-123");
+  });
+});
+
+describe("isTaskDetailPath", () => {
+  it("matches the canonical and compatibility detail routes", () => {
+    expect(isTaskDetailPath("/t/task-123", "task-123")).toBe(true);
+    expect(isTaskDetailPath("/tasks/task-123", "task-123")).toBe(true);
+  });
+
+  it("matches trailing-slash variants the SPA normalizes", () => {
+    expect(isTaskDetailPath("/t/task-123/", "task-123")).toBe(true);
+    expect(isTaskDetailPath("/tasks/task-123/", "task-123")).toBe(true);
+  });
+
+  it("does not match a different task id", () => {
+    expect(isTaskDetailPath("/t/other", "task-123")).toBe(false);
+    expect(isTaskDetailPath("/tasks/other", "task-123")).toBe(false);
+  });
+
+  it("does not match the task list route or unrelated paths", () => {
+    expect(isTaskDetailPath("/tasks", "task-123")).toBe(false);
+    expect(isTaskDetailPath("/", "task-123")).toBe(false);
+    expect(isTaskDetailPath("/t/task-123/extra", "task-123")).toBe(false);
   });
 });
