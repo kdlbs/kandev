@@ -14,6 +14,7 @@ import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-d
 import { TaskGitHubIssueDialog } from "@/components/task/task-github-issue-dialog";
 import { TaskGitHubPRDialog } from "@/components/task/task-github-pr-dialog";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
+import { useTaskMultiSelectStore } from "@/hooks/use-task-multi-select";
 import { getRepositoryDisplayName } from "@/lib/utils";
 import { repositoryId as toRepositoryId, type Repository, type TaskState } from "@/lib/types/http";
 
@@ -107,6 +108,7 @@ function useKanbanCardMenus({
 >) {
   const moveTargets = useKanbanCardMoveTargets(task.id, steps);
   const moveTasks = useTaskWorkflowMove();
+  const { sortByDisplayOrder } = useTaskMultiSelectStore();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
   const [showPRDialog, setShowPRDialog] = useState(false);
@@ -129,7 +131,11 @@ function useKanbanCardMenus({
     }
   };
 
-  const selectedTaskIds = isSelected && selectedIds?.size ? [...selectedIds] : [task.id];
+  // Sort into board order so a backward range selection isn't scrambled when the
+  // bulk move assigns sequential positions in request order.
+  const selectedTaskIds = sortByDisplayOrder(
+    isSelected && selectedIds?.size ? [...selectedIds] : [task.id],
+  );
   const moveSelectedToStep = (stepId: string) => {
     if (selectedTaskIds.length === 1 && selectedTaskIds[0] === task.id && onMove) {
       onMove(task, stepId);
