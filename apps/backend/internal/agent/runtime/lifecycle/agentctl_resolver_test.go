@@ -80,6 +80,28 @@ func TestAgentctlResolverLinuxAMD64PrefersPrimaryEnvOverride(t *testing.T) {
 	}
 }
 
+func TestAgentctlResolverLinuxAMD64BadPrimaryEnvDoesNotUseLegacyFallback(t *testing.T) {
+	tmp := t.TempDir()
+	primary := filepath.Join(tmp, "missing-agentctl")
+	legacy := filepath.Join(tmp, "agentctl-linux-amd64-legacy")
+	if err := os.WriteFile(legacy, []byte("stub"), 0o755); err != nil {
+		t.Fatalf("write legacy helper: %v", err)
+	}
+	t.Setenv("KANDEV_AGENTCTL_LINUX_AMD64_BINARY", primary)
+	t.Setenv("KANDEV_AGENTCTL_LINUX_BINARY", legacy)
+
+	resolver := NewAgentctlResolver(newResolverTestLogger(t))
+	got, err := resolver.ResolveRemoteBinary(SSHRemotePlatform{GOOS: "linux", GOARCH: "amd64"})
+	if err == nil {
+		t.Fatalf("ResolveRemoteBinary = %q, want error", got)
+	}
+	for _, want := range []string{"KANDEV_AGENTCTL_LINUX_AMD64_BINARY", primary} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want substring %q", err.Error(), want)
+		}
+	}
+}
+
 func TestAgentctlResolverRemoteBinaryNotFoundErrorNamesPlatformAndEnv(t *testing.T) {
 	t.Setenv("KANDEV_AGENTCTL_DARWIN_AMD64_BINARY", "")
 

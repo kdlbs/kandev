@@ -88,21 +88,28 @@ RUN mkdir -p /app/apps/backend/bin /data/worktrees
 # bundle tarball):
 #   bundle/bin/kandev                  - native Go backend (per-arch)
 #   bundle/bin/agentctl                - native agentctl (per-arch)
-#   bundle/bin/agentctl-linux-amd64    - amd64 agentctl helper (always amd64)
+#   bundle/bin/agentctl-linux-amd64    - linux/amd64 agentctl helper
+#   bundle/bin/agentctl-darwin-arm64   - darwin/arm64 agentctl helper
+#   bundle/bin/agentctl-darwin-amd64   - darwin/amd64 agentctl helper
 #
-# The bundle's `bin/agentctl-linux-amd64` variant is bind-mounted into
-# Docker-executor sandboxes by the lifecycle manager; ship it next to kandev
-# so the AgentctlResolver finds it without manual configuration.
-COPY bundle/bin/kandev               /app/apps/backend/bin/kandev
-COPY bundle/bin/agentctl-linux-amd64 /app/apps/backend/bin/agentctl-linux-amd64
-COPY bundle/bin/agentctl             /usr/local/bin/agentctl
-COPY docker-entrypoint.sh            /usr/local/bin/docker-entrypoint.sh
+# The bundle's platform-specific agentctl helpers are uploaded into remote
+# SSH hosts and bind-mounted into Docker-executor sandboxes by the lifecycle
+# manager; ship them next to kandev so the AgentctlResolver finds them without
+# manual configuration.
+COPY bundle/bin/kandev                 /app/apps/backend/bin/kandev
+COPY bundle/bin/agentctl-linux-amd64   /app/apps/backend/bin/agentctl-linux-amd64
+COPY bundle/bin/agentctl-darwin-arm64  /app/apps/backend/bin/agentctl-darwin-arm64
+COPY bundle/bin/agentctl-darwin-amd64  /app/apps/backend/bin/agentctl-darwin-amd64
+COPY bundle/bin/agentctl               /usr/local/bin/agentctl
+COPY docker-entrypoint.sh              /usr/local/bin/docker-entrypoint.sh
 
 # Re-apply executable bits stripped by tar/COPY edge cases, then link the native
 # launcher onto PATH.
 RUN chmod +x \
         /app/apps/backend/bin/kandev \
         /app/apps/backend/bin/agentctl-linux-amd64 \
+        /app/apps/backend/bin/agentctl-darwin-arm64 \
+        /app/apps/backend/bin/agentctl-darwin-amd64 \
         /usr/local/bin/agentctl \
         /usr/local/bin/docker-entrypoint.sh && \
     ln -s /app/apps/backend/bin/kandev /usr/local/bin/kandev && \

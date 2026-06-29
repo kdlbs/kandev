@@ -101,10 +101,10 @@ func agentctlBinaryCandidates(exeDir string, platform SSHRemotePlatform) []strin
 		filepath.Join(exeDir, "..", "build", name),
 		filepath.Join(exeDir, "..", "bin", name),
 	}
+	// Same-platform remotes can use the native binary in development even
+	// when the suffixed helper has not been built yet. Released bundles are
+	// still validated separately and must include every supported helper.
 	if platform.GOOS == runtime.GOOS && platform.GOARCH == runtime.GOARCH {
-		// Same-platform remotes can use the native binary in development even
-		// when the suffixed helper has not been built yet. Released bundles are
-		// still validated separately and must include every supported helper.
 		candidates = append(candidates,
 			filepath.Join(exeDir, "agentctl"),
 			filepath.Join(exeDir, "..", "build", "agentctl"),

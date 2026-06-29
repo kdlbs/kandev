@@ -47,6 +47,30 @@ func TestWrapLoginShell(t *testing.T) {
 	})
 }
 
+func TestSSHShellForRemote(t *testing.T) {
+	t.Run("explicit metadata wins", func(t *testing.T) {
+		md := map[string]interface{}{MetadataKeySSHShell: "fish"}
+		got := sshShellForRemote(md, SSHRemotePlatform{GOOS: sshRemoteGOOSDarwin, GOARCH: sshRemoteGOARCHARM64})
+		if got != "fish" {
+			t.Errorf("sshShellForRemote() = %q, want fish", got)
+		}
+	})
+
+	t.Run("darwin defaults to zsh", func(t *testing.T) {
+		got := sshShellForRemote(nil, SSHRemotePlatform{GOOS: sshRemoteGOOSDarwin, GOARCH: sshRemoteGOARCHARM64})
+		if got != "zsh" {
+			t.Errorf("sshShellForRemote(darwin) = %q, want zsh", got)
+		}
+	})
+
+	t.Run("linux delegates to WrapLoginShell default", func(t *testing.T) {
+		got := sshShellForRemote(nil, SSHRemotePlatform{GOOS: sshRemoteGOOSLinux, GOARCH: sshRemoteGOARCHAMD64})
+		if got != "" {
+			t.Errorf("sshShellForRemote(linux) = %q, want empty default marker", got)
+		}
+	})
+}
+
 func TestParentDir(t *testing.T) {
 	cases := []struct {
 		in   string
