@@ -135,6 +135,23 @@ class LintActionPinningTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, output)
         self.assertIn("uses: actions/checkout", output)
 
+    def test_rejects_quoted_unpinned_action(self) -> None:
+        result = self.run_lint(
+            """
+            name: test
+            on: push
+            jobs:
+              test:
+                runs-on: ubuntu-latest
+                steps:
+                  - uses: "actions/checkout@v1"
+            """
+        )
+
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn('"actions/checkout@v1"', output)
+
     def test_allows_pinned_action_local_action_and_docker_digest(self) -> None:
         digest = "a" * 64
         result = self.run_lint(
