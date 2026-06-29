@@ -1027,6 +1027,61 @@ func TestHandleAgentCompleted_DoesNotMoveTaskToReviewWhileSiblingRuns(t *testing
 	}
 }
 
+func TestHandleAgentCompleted_MovesTaskToReviewWhenLastSiblingFinishes(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s-first", "step1")
+	seedExecutorRunning(t, repo, "s-first", "t1", "exec-first")
+
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:        "s-last",
+		TaskID:    "t1",
+		State:     models.TaskSessionStateRunning,
+		StartedAt: now.Add(time.Second),
+		UpdatedAt: now.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("failed to create running sibling session: %v", err)
+	}
+	seedExecutorRunning(t, repo, "s-last", "t1", "exec-last")
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID:         "step1",
+		WorkflowID: "wf1",
+		Name:       "Step 1",
+		Position:   0,
+	}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+
+	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s-first",
+		AgentExecutionID: "exec-first",
+	})
+
+	if got := taskRepo.stateWrites["t1"]; got != 0 {
+		t.Fatalf("first completion must not move task to REVIEW while sibling runs, writes=%d state=%q",
+			got, taskRepo.updatedStates["t1"])
+	}
+
+	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s-last",
+		AgentExecutionID: "exec-last",
+	})
+
+	if got := taskRepo.stateWrites["t1"]; got != 1 {
+		t.Fatalf("last sibling completion must move task to REVIEW once, writes=%d state=%q",
+			got, taskRepo.updatedStates["t1"])
+	}
+	if state := taskRepo.updatedStates["t1"]; state != v1.TaskStateReview {
+		t.Fatalf("expected task state %q, got %q", v1.TaskStateReview, state)
+	}
+}
+
 func TestHandleAgentFailedWithoutSession_DoesNotMoveTaskToReviewWhileSessionRuns(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

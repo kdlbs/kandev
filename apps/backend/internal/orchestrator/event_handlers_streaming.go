@@ -578,9 +578,11 @@ func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, session
 }
 
 func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSessionID string) {
-	if s.hasOtherWorkingSession(ctx, taskID, completedSessionID) {
+	if blockingSessionID := s.otherWorkingSessionID(ctx, taskID, completedSessionID); blockingSessionID != "" {
 		s.logger.Debug("skipping task REVIEW state while another session is working",
-			zap.String("task_id", taskID))
+			zap.String("task_id", taskID),
+			zap.String("completed_session_id", completedSessionID),
+			zap.String("blocking_session_id", blockingSessionID))
 		return
 	}
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
@@ -593,14 +595,14 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSes
 		zap.String("task_id", taskID))
 }
 
-func (s *Service) hasOtherWorkingSession(ctx context.Context, taskID, currentSessionID string) bool {
+func (s *Service) otherWorkingSessionID(ctx context.Context, taskID, currentSessionID string) string {
 	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
 	if err != nil {
 		s.logger.Warn("failed to list task sessions before REVIEW state reconcile",
 			zap.String("task_id", taskID),
 			zap.String("session_id", currentSessionID),
 			zap.Error(err))
-		return false
+		return ""
 	}
 	for _, session := range sessions {
 		if session == nil {
@@ -610,10 +612,10 @@ func (s *Service) hasOtherWorkingSession(ctx context.Context, taskID, currentSes
 			continue
 		}
 		if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
-			return true
+			return session.ID
 		}
 	}
-	return false
+	return ""
 }
 
 // writeTaskReviewStateOnCancel clears the kanban "actively working" task
@@ -636,10 +638,11 @@ func (s *Service) writeTaskReviewStateOnCancel(ctx context.Context, taskID, sess
 	if dbTask.AssigneeAgentProfileID != "" {
 		return
 	}
-	if s.hasOtherWorkingSession(ctx, taskID, sessionID) {
+	if blockingSessionID := s.otherWorkingSessionID(ctx, taskID, sessionID); blockingSessionID != "" {
 		s.logger.Debug("skipping task REVIEW state after cancel while another session is working",
 			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID))
+			zap.String("session_id", sessionID),
+			zap.String("blocking_session_id", blockingSessionID))
 		return
 	}
 

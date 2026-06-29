@@ -520,7 +520,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 		zap.Bool("workflow_transitioned", transitioned))
 
 	// If no workflow transition occurred, move task to REVIEW state for user review
-	if !transitioned {
+	if !transitioned && session.State != models.TaskSessionStateWaitingForInput {
 		s.writeTaskReviewState(ctx, data.TaskID, data.SessionID)
 	}
 
