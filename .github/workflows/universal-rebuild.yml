@@ -73,8 +73,10 @@ jobs:
           push: true
           pull: true
           platforms: linux/amd64,linux/arm64
+          # BASE_IMAGE is intentionally unpinned: the whole point of this
+          # weekly job is to pick up the current :latest on each run.
           build-args: |
-            BASE_IMAGE=ghcr.io/kdlbs/kandev:latest  # intentionally unpinned: picked up fresh each weekly run
+            BASE_IMAGE=ghcr.io/kdlbs/kandev:latest
           tags: ${{ env.STAGING_IMAGE }}
           cache-from: type=gha,scope=universal
           cache-to: type=gha,mode=max,scope=universal

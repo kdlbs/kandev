@@ -15,12 +15,13 @@ from pathlib import Path
 # A valid pinned ref is exactly 40 lowercase hex characters.
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
-# Matches a `uses:` step line, capturing the action name and the ref after @.
-#   group(1) = action name (before @), e.g. "actions/checkout"
-#   group(2) = ref (after @), e.g. "v6" or "df4cb1c..."
-# Only matches lines that contain @; local (`./`) and bare docker refs without
-# @ are unmatched and silently skipped.
-USES_RE = re.compile(r"^\s*-?\s*uses:\s+(\S+?)@(\S+?)\s*(?:#.*)?$")
+# Matches a `uses:` step line, capturing everything after `uses:` up to an
+# optional trailing YAML comment. The outer group is intentionally lazy so
+# trailing `# tag` comments are consumed by the optional group rather than
+# included in the captured value. Expression-based refs like
+# `${{ inputs.ref }}` contain spaces and are captured in full because
+# the lazy match expands until the optional comment group can anchor at `$`.
+USES_RE = re.compile(r"^\s*-?\s*uses:\s+(.+?)(?:\s+#.*)?$")
 
 workflows_dir = Path(__file__).parent.parent / "workflows"
 
@@ -31,15 +32,25 @@ for path in sorted(p for ext in ("*.yml", "*.yaml") for p in workflows_dir.glob(
         m = USES_RE.match(line)
         if not m:
             continue
-        action, ref = m.group(1), m.group(2)
-        # Local reusable workflows: uses: ./.github/workflows/foo.yml@...
-        # These are relative paths with no registry ref requirement.
+
+        # Split on the last `@` to separate the action name from its ref.
+        # rpartition returns ("", "", value) when `@` is absent.
+        uses_value = m.group(1).strip()
+        action, sep, ref = uses_value.rpartition("@")
+        if not sep:
+            # No `@` — local action (`./...`) without a pin; skip.
+            continue
+
+        # Local reusable workflows: uses: ./.github/workflows/foo.yml@ref
+        # These reference local content with no external registry.
         if action.startswith("./"):
             continue
-        # Docker container actions: uses: docker://image@sha256:...
-        # The ref is a registry digest, not a commit SHA.
+
+        # Docker container actions: uses: docker://image@sha256:digest
+        # The ref after `@` is a registry digest, not a commit SHA.
         if action.startswith("docker://"):
             continue
+
         if not SHA_RE.match(ref):
             rel = path.relative_to(Path(__file__).parent.parent.parent)
             violations.append((str(rel), lineno, line.strip()))
