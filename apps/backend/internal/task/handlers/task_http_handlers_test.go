@@ -313,6 +313,18 @@ func TestBuildTaskCreateLastUsedPatchUsesFreshBranchRequestBase(t *testing.T) {
 	}, patch)
 }
 
+func TestBuildTaskCreateLastUsedPatchSkipsRepositoryWithoutBranch(t *testing.T) {
+	patch := buildTaskCreateLastUsedPatch(httpCreateTaskRequest{
+		AgentProfileID: "agent-2",
+	}, []dto.TaskRepositoryInput{
+		{RepositoryID: "repo-without-branch"},
+	})
+
+	assert.Equal(t, usermodels.TaskCreateLastUsed{
+		AgentProfileID: "agent-2",
+	}, patch)
+}
+
 func TestBuildTaskCreateLastUsedPatchSkipsBranchWithoutWorkspaceRepository(t *testing.T) {
 	patch := buildTaskCreateLastUsedPatch(httpCreateTaskRequest{
 		AgentProfileID: "agent-2",

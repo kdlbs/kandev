@@ -626,9 +626,6 @@ func buildTaskCreateLastUsedPatch(body httpCreateTaskRequest, repos []dto.TaskRe
 			patch.Branch = branch
 			break
 		}
-		if patch.RepositoryID == "" {
-			patch.RepositoryID = repo.RepositoryID
-		}
 	}
 	return patch
 }
