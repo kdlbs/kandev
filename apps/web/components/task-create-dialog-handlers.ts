@@ -23,8 +23,14 @@ const PENDING_LAST_USED_SYNC_KEY = "kandev.taskCreateLastUsed.pendingSync";
 const LOCAL_STORAGE_WRITE_EVENT = "localStorage-write";
 const lastUsedDebug = createDebugLogger("task-create:last-used");
 
+/**
+ * Clears pending in-flight last-used sync state and its persisted retry payload.
+ * Pass `clearQueued` when test setup or teardown should also wipe the queued
+ * overlay that protects settings fetches from stale server values.
+ */
 export function resetTaskCreateLastUsedSync(options: { clearQueued?: boolean } = {}) {
   pendingLastUsed = {};
+  removeLocalStorage(PENDING_LAST_USED_SYNC_KEY);
   if (options.clearQueued) lastQueuedLastUsed = {};
   lastUsedDebug("pending-reset");
 }

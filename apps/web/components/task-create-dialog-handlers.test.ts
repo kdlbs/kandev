@@ -20,7 +20,7 @@ describe("syncTaskCreateLastUsed", () => {
     vi.mocked(updateUserSettings).mockReset();
   });
 
-  it("persists failed last-used patches and retries them after an in-memory reset", async () => {
+  it("persists failed last-used patches and retries them on the next sync", async () => {
     vi.mocked(updateUserSettings).mockRejectedValueOnce(new Error("network"));
 
     syncTaskCreateLastUsed({ branch: "feature" });
@@ -34,7 +34,6 @@ describe("syncTaskCreateLastUsed", () => {
       branch: "feature",
     });
 
-    resetTaskCreateLastUsedSync({ clearQueued: true });
     vi.mocked(updateUserSettings).mockResolvedValueOnce({ settings: {} } as Awaited<
       ReturnType<typeof updateUserSettings>
     >);
@@ -73,9 +72,12 @@ describe("syncTaskCreateLastUsed", () => {
   });
 
   it("keeps queued fields when dialog close resets pending sync state", async () => {
-    vi.mocked(updateUserSettings).mockResolvedValue({ settings: {} } as Awaited<
-      ReturnType<typeof updateUserSettings>
-    >);
+    let resolveSync!: (response: Awaited<ReturnType<typeof updateUserSettings>>) => void;
+    vi.mocked(updateUserSettings).mockReturnValue(
+      new Promise((resolve) => {
+        resolveSync = resolve;
+      }),
+    );
 
     syncTaskCreateLastUsed({ branch: "feature" });
     await waitFor(() => {
@@ -83,12 +85,21 @@ describe("syncTaskCreateLastUsed", () => {
         task_create_last_used: { branch: "feature" },
       });
     });
+    expect(JSON.parse(window.localStorage.getItem(PENDING_LAST_USED_SYNC_KEY) ?? "null")).toEqual({
+      branch: "feature",
+    });
 
     resetTaskCreateLastUsedSync();
 
+    expect(window.localStorage.getItem(PENDING_LAST_USED_SYNC_KEY)).toBeNull();
     expect(readQueuedTaskCreateLastUsedState()).toMatchObject({
       branch: "feature",
     });
     expect(readQueuedTaskCreateLastUsedState().agentProfileId).toBeUndefined();
+
+    resolveSync({ settings: {} } as Awaited<ReturnType<typeof updateUserSettings>>);
+    await waitFor(() => {
+      expect(window.localStorage.getItem(PENDING_LAST_USED_SYNC_KEY)).toBeNull();
+    });
   });
 });
