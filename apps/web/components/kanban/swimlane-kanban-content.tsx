@@ -41,6 +41,7 @@ export type SwimlaneKanbanContentProps = {
   showMaximizeButton?: boolean;
   selectedIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
+  onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
 };
 
@@ -185,6 +186,7 @@ function MobileKanbanLayout({
   archivingTaskId,
   selectedIds,
   onToggleSelect,
+  onSelectRange,
   isMultiSelectMode,
 }: {
   steps: WorkflowStep[];
@@ -203,6 +205,7 @@ function MobileKanbanLayout({
   archivingTaskId?: string | null;
   selectedIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
+  onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
 }) {
   const taskCounts = useMemo(() => {
@@ -239,6 +242,7 @@ function MobileKanbanLayout({
         archivingTaskId={archivingTaskId}
         selectedIds={selectedIds}
         onToggleSelect={onToggleSelect}
+        onSelectRange={onSelectRange}
         isMultiSelectMode={isMultiSelectMode}
       />
       <MobileDropTargets steps={steps} currentStepId={currentStepId} isDragging={!!activeTask} />
@@ -260,6 +264,7 @@ function TabletKanbanLayout({
   archivingTaskId,
   selectedIds,
   onToggleSelect,
+  onSelectRange,
   isMultiSelectMode,
 }: {
   steps: WorkflowStep[];
@@ -275,6 +280,7 @@ function TabletKanbanLayout({
   archivingTaskId?: string | null;
   selectedIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
+  onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
 }) {
   const getTasksForStep = useTasksByStep(tasks);
@@ -301,6 +307,7 @@ function TabletKanbanLayout({
             archivingTaskId={archivingTaskId}
             selectedIds={selectedIds}
             onToggleSelect={onToggleSelect}
+            onSelectRange={onSelectRange}
             isMultiSelectMode={isMultiSelectMode}
           />
         </div>
@@ -323,6 +330,7 @@ function DesktopKanbanLayout({
   archivingTaskId,
   selectedIds,
   onToggleSelect,
+  onSelectRange,
   isMultiSelectMode,
   isCompactDesktop,
 }: {
@@ -339,6 +347,7 @@ function DesktopKanbanLayout({
   archivingTaskId?: string | null;
   selectedIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
+  onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
   isCompactDesktop: boolean;
 }) {
@@ -369,6 +378,7 @@ function DesktopKanbanLayout({
           showMaximizeButton={showMaximizeButton}
           selectedIds={selectedIds}
           onToggleSelect={onToggleSelect}
+          onSelectRange={onSelectRange}
           isMultiSelectMode={isMultiSelectMode}
         />
       ))}
@@ -391,6 +401,7 @@ export function SwimlaneKanbanContent({
   showMaximizeButton,
   selectedIds,
   onToggleSelect,
+  onSelectRange,
   isMultiSelectMode,
 }: SwimlaneKanbanContentProps) {
   const { isMobile, isTablet, isCompactDesktop } = useResponsiveBreakpoint();
@@ -416,6 +427,7 @@ export function SwimlaneKanbanContent({
       archivingTaskId,
       selectedIds,
       onToggleSelect,
+      onSelectRange,
       isMultiSelectMode,
     }),
     [
@@ -432,6 +444,7 @@ export function SwimlaneKanbanContent({
       archivingTaskId,
       selectedIds,
       onToggleSelect,
+      onSelectRange,
       isMultiSelectMode,
     ],
   );

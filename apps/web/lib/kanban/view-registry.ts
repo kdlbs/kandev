@@ -21,6 +21,7 @@ export type ViewContentProps = {
   showMaximizeButton?: boolean;
   selectedIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
+  onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
 };
 

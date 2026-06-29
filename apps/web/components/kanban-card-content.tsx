@@ -55,7 +55,7 @@ export type KanbanCardShellProps = KanbanCardActionProps &
     isSelected?: boolean;
     isMultiSelectMode?: boolean;
     isPreviewed: boolean;
-    onClick: () => void;
+    onClick: (e: React.MouseEvent) => void;
     onCheckboxClick: (e: React.MouseEvent) => void;
   };
 

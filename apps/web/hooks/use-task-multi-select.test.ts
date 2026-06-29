@@ -8,6 +8,7 @@ describe("multiSelectReducer", () => {
       isMultiSelectEnabled: true,
       isDeleting: true,
       isArchiving: false,
+      anchorId: "a",
     };
     expect(multiSelectReducer(dirty, { type: "reset" })).toBe(INITIAL_STATE);
   });
