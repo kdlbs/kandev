@@ -601,6 +601,65 @@ func TestHandleCreateTask_SourceTaskMetadataWinsOverSessionAndDefaults(t *testin
 	assert.Equal(t, "source-metadata-executor", task.Metadata[models.MetaKeyExecutorProfileID])
 }
 
+func TestHandleCreateTask_WorkflowSwitchedSessionProfileWinsOverStaleMetadata(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	require.Len(t, workflows, 1)
+
+	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID,
+		WorkflowID:  workflows[0].ID,
+		Title:       "Workflow-routed task",
+		Metadata: map[string]interface{}{
+			models.MetaKeyAgentProfileID: "stale-task-profile",
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:             "workflow-switched-session",
+		TaskID:         source.ID,
+		AgentProfileID: "effective-step-profile",
+		State:          models.TaskSessionStateWaitingForInput,
+		IsPrimary:      true,
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyCreatedBy: models.SessionCreatedByWorkflowSwitch,
+		},
+	}))
+
+	h := &Handlers{
+		taskSvc: svc,
+		logger:  testLogger(t).WithFields(),
+	}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"source_task_id": source.ID,
+		"workspace_id":   workspaces[0].ID,
+		"workflow_id":    workflows[0].ID,
+		"title":          "Follow-up from workflow-routed task",
+		"description":    "This should inherit the effective step profile.",
+		"start_agent":    false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+	require.NotEmpty(t, created.ID)
+
+	task, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	require.NotNil(t, task.Metadata)
+	assert.Equal(t, "effective-step-profile", task.Metadata[models.MetaKeyAgentProfileID])
+}
+
 func TestHandleCreateTask_InheritsDeferredParentTaskMetadata(t *testing.T) {
 	svc, _ := newTestTaskService(t)
 	ctx := context.Background()
