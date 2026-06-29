@@ -234,6 +234,8 @@ type TaskCIPRAutomationState struct {
 	LastFixCheckpointJSON string     `json:"last_fix_checkpoint_json" db:"last_fix_checkpoint_json"`
 	LastFixEnqueuedAt     *time.Time `json:"last_fix_enqueued_at,omitempty" db:"last_fix_enqueued_at"`
 	LastFixSessionID      *string    `json:"last_fix_session_id,omitempty" db:"last_fix_session_id"`
+	AutoFixRoundCount     int        `json:"auto_fix_round_count" db:"auto_fix_round_count"`
+	AutoFixExhaustedAt    *time.Time `json:"auto_fix_exhausted_at" db:"auto_fix_exhausted_at"`
 	LastMergeSignature    string     `json:"last_merge_signature" db:"last_merge_signature"`
 	LastMergeAttemptAt    *time.Time `json:"last_merge_attempt_at,omitempty" db:"last_merge_attempt_at"`
 	LastError             *string    `json:"last_error,omitempty" db:"last_error"`
@@ -250,6 +252,7 @@ type TaskCIFixAttempt struct {
 	CheckpointJSON string
 	SessionID      string
 	EnqueuedAt     time.Time
+	IncrementRound bool
 }
 
 // TaskCIMergeAttempt records an auto-merge attempt for a task PR.

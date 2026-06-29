@@ -15,6 +15,12 @@ type Repository interface {
 	// or inserted (false). Honors maxPerSession when inserting.
 	AppendOrInsertTail(ctx context.Context, sessionID, taskID, content, model, queuedBy string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, maxPerSession int) (*QueuedMessage, bool, error)
 
+	// InsertOrReplaceByCoalesceKey replaces an existing queued entry with the
+	// same session, queued_by, and metadata coalesce key. If no matching entry
+	// exists, it inserts a new tail entry when allowInsert is true. Returns
+	// ErrEntryNotFound when allowInsert is false and no matching entry exists.
+	InsertOrReplaceByCoalesceKey(ctx context.Context, msg *QueuedMessage, coalesceKey string, maxPerSession int, allowInsert bool) (*QueuedMessage, bool, error)
+
 	// ListBySession returns all entries for a session ordered by position ascending.
 	ListBySession(ctx context.Context, sessionID string) ([]QueuedMessage, error)
 

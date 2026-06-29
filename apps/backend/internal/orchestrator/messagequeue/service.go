@@ -81,6 +81,45 @@ func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskI
 	return msg, nil
 }
 
+// QueueMessageWithCoalesceKey replaces an existing pending entry with the same
+// coalesce key, session, and queued_by value. When no matching entry exists it
+// inserts a new tail entry if allowInsert is true; otherwise ErrEntryNotFound is
+// returned. The returned bool is true when an existing entry was replaced.
+func (s *Service) QueueMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert bool) (*QueuedMessage, bool, error) {
+	if metadata == nil {
+		metadata = map[string]interface{}{}
+	}
+	metadata[MetadataCoalesceKey] = coalesceKey
+	msg := &QueuedMessage{
+		SessionID:   sessionID,
+		TaskID:      taskID,
+		Content:     content,
+		Model:       model,
+		PlanMode:    planMode,
+		Attachments: attachments,
+		Metadata:    metadata,
+		QueuedBy:    userID,
+	}
+	queued, replaced, err := s.repo.InsertOrReplaceByCoalesceKey(ctx, msg, coalesceKey, s.maxPerSession, allowInsert)
+	if err != nil {
+		if errors.Is(err, ErrQueueFull) {
+			s.logger.Info("queue full",
+				zap.String("session_id", sessionID),
+				zap.Int("max", s.maxPerSession))
+		}
+		return nil, false, err
+	}
+	s.logger.Info("message queued with coalesce key",
+		zap.String("session_id", sessionID),
+		zap.String("task_id", taskID),
+		zap.String("entry_id", queued.ID),
+		zap.String("coalesce_key", coalesceKey),
+		zap.Bool("replaced", replaced),
+		zap.Int64("position", queued.Position),
+		zap.Int("content_length", len(content)))
+	return queued, replaced, nil
+}
+
 // AppendContent appends content onto the session's tail entry when the tail's
 // queued_by matches userID. Otherwise inserts a new entry. Returns
 // ErrQueueFull when an insert would exceed the cap.

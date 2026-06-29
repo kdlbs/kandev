@@ -72,6 +72,14 @@ func (s *Service) RecordTaskCIError(ctx context.Context, taskID, repositoryID st
 	return s.store.RecordTaskCIError(ctx, taskID, repositoryID, prNumber, message)
 }
 
+// MarkTaskCIAutoFixExhausted records that auto-fix reached its per-PR round cap.
+func (s *Service) MarkTaskCIAutoFixExhausted(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error {
+	if s.store == nil {
+		return errStoreUnavailable
+	}
+	return s.store.MarkTaskCIAutoFixExhausted(ctx, taskID, repositoryID, prNumber, message)
+}
+
 // ClearTaskCIError clears a CI automation error.
 func (s *Service) ClearTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int) error {
 	if s.store == nil {

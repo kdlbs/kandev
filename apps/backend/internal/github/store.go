@@ -179,6 +179,8 @@ const createTablesSQL = `
 		last_fix_checkpoint_json TEXT NOT NULL DEFAULT '',
 		last_fix_enqueued_at DATETIME,
 		last_fix_session_id TEXT,
+		auto_fix_round_count INTEGER NOT NULL DEFAULT 0,
+		auto_fix_exhausted_at DATETIME,
 		last_merge_signature TEXT NOT NULL DEFAULT '',
 		last_merge_attempt_at DATETIME,
 		last_error TEXT,
@@ -221,6 +223,9 @@ func (s *Store) initSchema() error {
 	// clear boot error. Use the same fail-loud column-precheck idiom the
 	// sibling jira/linear stores already use.
 	if err := s.addWatchSelfHealColumns(); err != nil {
+		return err
+	}
+	if err := s.addTaskCIRoundColumns(); err != nil {
 		return err
 	}
 	if err := s.migratePRTablesForMultiRepo(); err != nil {
@@ -376,6 +381,24 @@ func (s *Store) addWatchSelfHealColumns() error {
 			if _, err := s.db.Exec("ALTER TABLE " + table + " ADD COLUMN last_error_at DATETIME"); err != nil {
 				return fmt.Errorf("add %s.last_error_at: %w", table, err)
 			}
+		}
+	}
+	return nil
+}
+
+func (s *Store) addTaskCIRoundColumns() error {
+	cols, err := s.tableColumns("github_task_ci_pr_state")
+	if err != nil {
+		return fmt.Errorf("read github_task_ci_pr_state columns: %w", err)
+	}
+	if _, ok := cols["auto_fix_round_count"]; !ok {
+		if _, err := s.db.Exec("ALTER TABLE github_task_ci_pr_state ADD COLUMN auto_fix_round_count INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return fmt.Errorf("add github_task_ci_pr_state.auto_fix_round_count: %w", err)
+		}
+	}
+	if _, ok := cols["auto_fix_exhausted_at"]; !ok {
+		if _, err := s.db.Exec("ALTER TABLE github_task_ci_pr_state ADD COLUMN auto_fix_exhausted_at DATETIME"); err != nil {
+			return fmt.Errorf("add github_task_ci_pr_state.auto_fix_exhausted_at: %w", err)
 		}
 	}
 	return nil
@@ -1031,6 +1054,10 @@ func (s *Store) UpdateTaskCIOptions(ctx context.Context, taskID string, patch Ta
 		taskID, now, now); err != nil {
 		return nil, err
 	}
+	var previous TaskCIOptions
+	if err := tx.GetContext(writeCtx, &previous, `SELECT * FROM github_task_ci_options WHERE task_id = ?`, taskID); err != nil {
+		return nil, err
+	}
 	autoFixSet, autoFixValue := boolPatchValue(patch.AutoFixEnabled)
 	autoMergeSet, autoMergeValue := boolPatchValue(patch.AutoMergeEnabled)
 	promptSet := patch.AutoFixPromptOverride != nil
@@ -1050,6 +1077,17 @@ func (s *Store) UpdateTaskCIOptions(ctx context.Context, taskID string, patch Ta
 		WHERE task_id = ?`,
 		autoFixSet, autoFixValue, autoMergeSet, autoMergeValue, promptSet, promptValue, now, taskID); err != nil {
 		return nil, err
+	}
+	if autoFixSet && autoFixValue && !previous.AutoFixEnabled {
+		if _, err := tx.ExecContext(writeCtx, `
+			UPDATE github_task_ci_pr_state
+			SET auto_fix_round_count = 0,
+			    last_error = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN NULL ELSE last_error END,
+			    auto_fix_exhausted_at = NULL,
+			    updated_at = ?
+			WHERE task_id = ?`, now, taskID); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -1093,20 +1131,26 @@ func (s *Store) RecordTaskCIFixAttempt(ctx context.Context, attempt TaskCIFixAtt
 		when = time.Now().UTC()
 	}
 	now := time.Now().UTC()
+	roundCount := 0
+	if attempt.IncrementRound {
+		roundCount = 1
+	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO github_task_ci_pr_state (
 			task_id, repository_id, pr_number, last_fix_signature, last_fix_checkpoint_json,
-			last_fix_enqueued_at, last_fix_session_id, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			last_fix_enqueued_at, last_fix_session_id, auto_fix_round_count, auto_fix_exhausted_at,
+			created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
 		ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
 			last_fix_signature = excluded.last_fix_signature,
 			last_fix_checkpoint_json = excluded.last_fix_checkpoint_json,
 			last_fix_enqueued_at = excluded.last_fix_enqueued_at,
 			last_fix_session_id = excluded.last_fix_session_id,
+			auto_fix_round_count = github_task_ci_pr_state.auto_fix_round_count + excluded.auto_fix_round_count,
 			last_error = NULL,
 			updated_at = excluded.updated_at`,
 		attempt.TaskID, attempt.RepositoryID, attempt.PRNumber, attempt.Signature,
-		attempt.CheckpointJSON, when, nullableString(attempt.SessionID), now, now)
+		attempt.CheckpointJSON, when, nullableString(attempt.SessionID), roundCount, now, now)
 	return err
 }
 
@@ -1162,6 +1206,22 @@ func (s *Store) RecordTaskCIError(ctx context.Context, taskID, repositoryID stri
 			last_error = excluded.last_error,
 			updated_at = excluded.updated_at`,
 		taskID, repositoryID, prNumber, strings.TrimSpace(message), now, now)
+	return err
+}
+
+// MarkTaskCIAutoFixExhausted records that auto-fix reached its per-PR round cap.
+func (s *Store) MarkTaskCIAutoFixExhausted(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error {
+	ctx = context.WithoutCancel(ctx)
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO github_task_ci_pr_state (
+			task_id, repository_id, pr_number, auto_fix_exhausted_at, last_error, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
+			auto_fix_exhausted_at = excluded.auto_fix_exhausted_at,
+			last_error = excluded.last_error,
+			updated_at = excluded.updated_at`,
+		taskID, repositoryID, prNumber, now, strings.TrimSpace(message), now, now)
 	return err
 }
 

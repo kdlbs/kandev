@@ -82,6 +82,7 @@ type mockGitHubService struct {
 	mergeCalls           int
 	mergeErr             error
 	ciErrors             []github.TaskCIPRAutomationState
+	ciExhausted          []github.TaskCIPRAutomationState
 }
 
 func (m *mockGitHubService) Client() github.Client { return m.client }
@@ -178,6 +179,17 @@ func (m *mockGitHubService) RecordTaskCIError(_ context.Context, taskID, reposit
 		RepositoryID: repositoryID,
 		PRNumber:     prNumber,
 		LastError:    &message,
+	})
+	return nil
+}
+func (m *mockGitHubService) MarkTaskCIAutoFixExhausted(_ context.Context, taskID, repositoryID string, prNumber int, message string) error {
+	now := time.Now().UTC()
+	m.ciExhausted = append(m.ciExhausted, github.TaskCIPRAutomationState{
+		TaskID:             taskID,
+		RepositoryID:       repositoryID,
+		PRNumber:           prNumber,
+		AutoFixExhaustedAt: &now,
+		LastError:          &message,
 	})
 	return nil
 }

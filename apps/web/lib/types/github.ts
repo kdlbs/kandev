@@ -192,6 +192,8 @@ export type TaskCIPRAutomationState = {
   last_fix_checkpoint_json: string;
   last_fix_enqueued_at: string | null;
   last_fix_session_id: string | null;
+  auto_fix_round_count: number;
+  auto_fix_exhausted_at: string | null;
   last_merge_signature: string;
   last_merge_attempt_at: string | null;
   last_error: string | null;

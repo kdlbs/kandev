@@ -126,6 +126,43 @@ func TestAppendContent(t *testing.T) {
 	})
 }
 
+func TestQueueMessageWithCoalesceKey(t *testing.T) {
+	t.Run("replaces matching entry without changing FIFO position", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		first, err := svc.QueueMessage(ctx, "s", "t", "first", "", "user", false, nil)
+		require.NoError(t, err)
+		ci, replaced, err := svc.QueueMessageWithCoalesceKey(ctx, "s", "t", "old ci", "", QueuedByWorkflow, false, nil, map[string]interface{}{"origin": "ci"}, "ci-key", true)
+		require.NoError(t, err)
+		require.False(t, replaced)
+		_, err = svc.QueueMessage(ctx, "s", "t", "tail", "", "user", false, nil)
+		require.NoError(t, err)
+
+		updated, replaced, err := svc.QueueMessageWithCoalesceKey(ctx, "s", "t", "new ci", "", QueuedByWorkflow, false, nil, map[string]interface{}{"origin": "ci-new"}, "ci-key", true)
+		require.NoError(t, err)
+		require.True(t, replaced)
+		require.Equal(t, ci.ID, updated.ID)
+
+		status := svc.GetStatus(ctx, "s")
+		require.Equal(t, 3, status.Count)
+		assert.Equal(t, first.ID, status.Entries[0].ID)
+		assert.Equal(t, ci.ID, status.Entries[1].ID)
+		assert.Equal(t, "new ci", status.Entries[1].Content)
+		assert.Equal(t, "ci-new", status.Entries[1].Metadata["origin"])
+		assert.Equal(t, "tail", status.Entries[2].Content)
+	})
+
+	t.Run("returns entry not found when insert disabled and no match exists", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		_, _, err := svc.QueueMessageWithCoalesceKey(ctx, "s", "t", "ci", "", QueuedByWorkflow, false, nil, nil, "ci-key", false)
+		assert.ErrorIs(t, err, ErrEntryNotFound)
+		assert.Equal(t, 0, svc.GetStatus(ctx, "s").Count)
+	})
+}
+
 func TestTakeQueued(t *testing.T) {
 	t.Run("returns entries in FIFO order", func(t *testing.T) {
 		svc := setupService(t)

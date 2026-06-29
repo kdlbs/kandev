@@ -17,9 +17,10 @@ import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useToast } from "@/components/toast-provider";
 import { useTaskCIAutomationOptions } from "@/hooks/domains/github/use-task-ci-options";
-import type { TaskCIAutomationPatch, TaskPR } from "@/lib/types/github";
+import type { TaskCIAutomationPatch, TaskCIPRAutomationState, TaskPR } from "@/lib/types/github";
 
 const PR_FEEDBACK_PLACEHOLDER = "{{pr.feedback}}";
+const AUTO_FIX_MAX_ROUNDS = 10;
 
 function CIAutomationInfoButton() {
   return (
@@ -207,12 +208,44 @@ function CIAutomationErrorRow({
   );
 }
 
+function findAutomationState(
+  states: TaskCIPRAutomationState[] | undefined,
+  pr: TaskPR,
+): TaskCIPRAutomationState | undefined {
+  const repositoryID = pr.repository_id ?? "";
+  return states?.find(
+    (state) => state.pr_number === pr.pr_number && state.repository_id === repositoryID,
+  );
+}
+
+function clampRoundCount(value: number | undefined) {
+  if (value === undefined || !Number.isFinite(value)) return 0;
+  return Math.min(AUTO_FIX_MAX_ROUNDS, Math.max(0, Math.trunc(value)));
+}
+
+function CIAutoFixRoundExplanation({ state }: { state: TaskCIPRAutomationState | undefined }) {
+  const current = clampRoundCount(state?.auto_fix_round_count);
+  return (
+    <div
+      data-testid="ci-auto-fix-round-explanation"
+      className="rounded-md border border-border/70 bg-muted/30 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground"
+    >
+      Auto-fix has used {current} of {AUTO_FIX_MAX_ROUNDS} rounds for this PR. A round is counted
+      when Kandev sends or queues a CI auto-fix message. Updating an already queued auto-fix message
+      does not use another round. When this reaches {AUTO_FIX_MAX_ROUNDS}/{AUTO_FIX_MAX_ROUNDS},
+      Kandev pauses auto-fix for this PR so it cannot loop forever. Disable and re-enable auto-fix
+      after manual review to start over.
+    </div>
+  );
+}
+
 export function PRCIAutomationControls({ pr }: { pr: TaskPR }) {
   const { options, loading, saving, error, refresh, update, resetPrompt } =
     useTaskCIAutomationOptions(pr.task_id);
   const { toast } = useToast();
   const [promptOpen, setPromptOpen] = useState(false);
   const [promptDraft, setPromptDraft] = useState("");
+  const automationState = findAutomationState(options?.pr_states, pr);
 
   const openPromptEditor = useCallback(() => {
     setPromptDraft(options?.auto_fix_prompt_override ?? options?.effective_auto_fix_prompt ?? "");
@@ -281,6 +314,7 @@ export function PRCIAutomationControls({ pr }: { pr: TaskPR }) {
         disabled={disabled}
         onCheckedChange={(checked) => patchOption({ auto_fix_enabled: checked })}
       />
+      {options?.auto_fix_enabled && <CIAutoFixRoundExplanation state={automationState} />}
       <CIAutomationRow
         id={`task-ci-auto-merge-${pr.task_id}`}
         label="Auto-merge when ready"

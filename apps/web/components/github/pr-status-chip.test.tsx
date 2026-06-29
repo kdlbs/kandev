@@ -9,6 +9,12 @@ import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS } from "./pr-ci-popover";
 import type { AppState } from "@/lib/state/store";
 import type { TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
 
+const AUTO_FIX_BADGE_TESTID = "pr-status-auto-fix-chip";
+
+const testConstants = vi.hoisted(() => ({
+  defaultCIFixPrompt: "Default CI fix prompt",
+}));
+
 const responsiveMock = vi.hoisted(() => ({
   breakpoint: "desktop" as "mobile" | "tablet" | "compactDesktop" | "desktop",
   isFinePointer: true,
@@ -38,7 +44,7 @@ vi.mock("@/lib/api/domains/github-api", async (importOriginal) => {
       auto_fix_enabled: false,
       auto_merge_enabled: false,
       auto_fix_prompt_override: null,
-      effective_auto_fix_prompt: "Default CI fix prompt",
+      effective_auto_fix_prompt: testConstants.defaultCIFixPrompt,
       using_default_prompt: true,
       updated_at: "2026-06-18T10:00:00Z",
       pr_states: [],
@@ -100,7 +106,7 @@ function makeCIOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCI
     auto_fix_enabled: false,
     auto_merge_enabled: false,
     auto_fix_prompt_override: null,
-    effective_auto_fix_prompt: "Default CI fix prompt",
+    effective_auto_fix_prompt: testConstants.defaultCIFixPrompt,
     using_default_prompt: true,
     updated_at: "2026-06-18T10:00:00Z",
     pr_states: [],
@@ -229,10 +235,10 @@ describe("PRStatusChip desktop branch", () => {
       },
       <PRStatusChip taskId="task-1" />,
     );
-    expect(screen.getByTestId("pr-status-auto-fix-chip").textContent).toBe("Auto-fix");
+    expect(screen.getByTestId(AUTO_FIX_BADGE_TESTID).textContent).toBe("Auto-fix 0/10");
     expect(screen.getByTestId("pr-status-auto-merge-chip").textContent).toBe("Auto-merge");
     expect(screen.getByTestId(CHIP_TESTID).getAttribute("aria-label")).toBe(
-      "Pull request #42 CI status, auto-fix enabled, auto-merge enabled",
+      "Pull request #42 CI status, auto-fix enabled 0 of 10 rounds used, auto-merge enabled",
     );
   });
 });
@@ -293,10 +299,10 @@ describe("PRStatusChip mobile branch", () => {
       },
       <PRStatusChip taskId="task-1" />,
     );
-    expect(screen.getByTestId("pr-status-auto-fix-chip").textContent).toBe("Auto-fix");
+    expect(screen.getByTestId(AUTO_FIX_BADGE_TESTID).textContent).toBe("Auto-fix 0/10");
     expect(screen.queryByTestId("pr-status-auto-merge-chip")).toBeNull();
     expect(screen.getByTestId(CHIP_TESTID).getAttribute("aria-label")).toBe(
-      "Pull request #42 CI status, auto-fix enabled",
+      "Pull request #42 CI status, auto-fix enabled 0 of 10 rounds used",
     );
   });
 
