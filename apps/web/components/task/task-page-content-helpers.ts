@@ -104,6 +104,17 @@ export function buildArchivedValue(task: Task | null, repository: Repository | n
   };
 }
 
+export function resolveTaskContentState(params: {
+  isMounted: boolean;
+  hasTask: boolean;
+  hasTaskLoadError: boolean;
+}) {
+  if (!params.isMounted) return "loading";
+  if (params.hasTask) return "ready";
+  if (params.hasTaskLoadError) return "error";
+  return "loading";
+}
+
 export function resolveTaskIds(task: Task | null) {
   return {
     taskId: task?.id ?? null,

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Task } from "@/lib/types/http";
-import { buildDebugEntries, resolveTaskProps } from "./task-page-content-helpers";
+import {
+  buildDebugEntries,
+  resolveTaskContentState,
+  resolveTaskProps,
+} from "./task-page-content-helpers";
 
 function baseParams(overrides: Partial<Parameters<typeof buildDebugEntries>[0]> = {}) {
   return {
@@ -59,5 +63,37 @@ describe("resolveTaskProps", () => {
 
     expect(props.issueUrl).toBe("https://github.com/kdlbs/kandev/issues/1470");
     expect(props.issueNumber).toBe(1470);
+  });
+});
+
+describe("resolveTaskContentState", () => {
+  it("keeps showing the loading state until the component mounts", () => {
+    expect(
+      resolveTaskContentState({
+        isMounted: false,
+        hasTask: false,
+        hasTaskLoadError: true,
+      }),
+    ).toBe("loading");
+  });
+
+  it("surfaces task load failures after mount", () => {
+    expect(
+      resolveTaskContentState({
+        isMounted: true,
+        hasTask: false,
+        hasTaskLoadError: true,
+      }),
+    ).toBe("error");
+  });
+
+  it("treats a resolved task as ready", () => {
+    expect(
+      resolveTaskContentState({
+        isMounted: true,
+        hasTask: true,
+        hasTaskLoadError: true,
+      }),
+    ).toBe("ready");
   });
 });

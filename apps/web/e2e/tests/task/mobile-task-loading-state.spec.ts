@@ -1,28 +1,19 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import { openBlockedTaskLoadingState } from "./task-loading-state-helpers";
 
-type E2EStoreWindow = Window & {
-  __KANDEV_E2E_STORE__?: {
-    getState: () => {
-      tasks: { activeTaskId: string | null };
-      setActiveTask: (taskId: string) => void;
-    };
-  };
-};
+async function expectLoadingStateFitsViewport(testPage: Page) {
+  const loadingState = testPage.getByTestId("task-loading-state");
+  const box = await loadingState.boundingBox();
+  const viewport = testPage.viewportSize();
 
-async function waitForActiveTask(testPage: Page, taskId: string) {
-  await testPage.waitForFunction((expectedTaskId) => {
-    const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
-    return store?.getState().tasks.activeTaskId === expectedTaskId;
-  }, taskId);
-}
+  expect(box).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  if (!box || !viewport) return;
 
-async function switchToUnresolvedTask(testPage: Page, taskId: string) {
-  await testPage.evaluate((unresolvedTaskId) => {
-    const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
-    if (!store) throw new Error("E2E store bridge missing");
-    store.getState().setActiveTask(unresolvedTaskId);
-  }, taskId);
+  await expect(loadingState).toBeInViewport();
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.width).toBeLessThanOrEqual(viewport.width + 1);
 }
 
 test.describe("Mobile task loading state", () => {
@@ -31,18 +22,20 @@ test.describe("Mobile task loading state", () => {
     apiClient,
     seedData,
   }) => {
-    const title = "Mobile Task Loading State Anchor";
-    const task = await apiClient.createTask(seedData.workspaceId, title, {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
+    const unblockTaskDetailRequest = await openBlockedTaskLoadingState({
+      testPage,
+      apiClient,
+      seedData,
+      title: "Mobile Task Loading State Anchor",
+      unresolvedTaskId: "unresolved-task-detail-mobile",
     });
 
-    await testPage.goto(`/t/${task.id}`);
-    await waitForActiveTask(testPage, task.id);
-    await switchToUnresolvedTask(testPage, "unresolved-task-detail-mobile");
-
-    await expect(testPage.getByTestId("task-loading-state")).toBeVisible({ timeout: 10_000 });
-    await expect(testPage.getByText("Loading task...")).toBeVisible();
+    try {
+      await expect(testPage.getByTestId("task-loading-state")).toBeVisible({ timeout: 10_000 });
+      await expect(testPage.getByText("Loading task...")).toBeVisible();
+      await expectLoadingStateFitsViewport(testPage);
+    } finally {
+      await unblockTaskDetailRequest();
+    }
   });
 });

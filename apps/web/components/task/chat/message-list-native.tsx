@@ -191,6 +191,7 @@ export const NativeMessageList = memo(function NativeMessageList({
     messagesLoading,
     messagesCount: messages.length,
     isWorking,
+    sessionState,
   });
   const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(sessionId);
   const isRunning = getSessionRunningState(sessionState);

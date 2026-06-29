@@ -151,6 +151,7 @@ describe("getConversationLoadingState", () => {
         messagesLoading: true,
         messagesCount: 1,
         isWorking: false,
+        sessionState: "COMPLETED",
       }),
     ).toEqual({ isInitialLoading: false, showLoadingState: true });
   });
@@ -161,6 +162,7 @@ describe("getConversationLoadingState", () => {
         messagesLoading: true,
         messagesCount: 0,
         isWorking: false,
+        sessionState: "RUNNING",
       }),
     ).toEqual({ isInitialLoading: true, showLoadingState: true });
   });
@@ -171,8 +173,29 @@ describe("getConversationLoadingState", () => {
         messagesLoading: true,
         messagesCount: 1,
         isWorking: true,
+        sessionState: "RUNNING",
       }),
     ).toEqual({ isInitialLoading: false, showLoadingState: false });
+  });
+
+  it("suppresses loading for empty sessions that cannot load conversation history", () => {
+    expect(
+      getConversationLoadingState({
+        messagesLoading: true,
+        messagesCount: 0,
+        isWorking: false,
+        sessionState: "FAILED",
+      }),
+    ).toEqual({ isInitialLoading: true, showLoadingState: false });
+
+    expect(
+      getConversationLoadingState({
+        messagesLoading: true,
+        messagesCount: 0,
+        isWorking: false,
+        sessionState: null,
+      }),
+    ).toEqual({ isInitialLoading: true, showLoadingState: false });
   });
 });
 

@@ -59,11 +59,21 @@ export function getConversationLoadingState(params: {
   messagesLoading: boolean;
   messagesCount: number;
   isWorking: boolean;
+  sessionState?: TaskSessionState | null;
 }) {
   const isInitialLoading = params.messagesLoading && params.messagesCount === 0;
+  const isNonLoadableSession =
+    !params.sessionState ||
+    params.sessionState === "CREATED" ||
+    params.sessionState === "FAILED" ||
+    params.sessionState === "COMPLETED" ||
+    params.sessionState === "CANCELLED";
   return {
     isInitialLoading,
-    showLoadingState: params.messagesLoading && !params.isWorking,
+    showLoadingState:
+      params.messagesLoading &&
+      !params.isWorking &&
+      (params.messagesCount > 0 || !isNonLoadableSession),
   };
 }
 

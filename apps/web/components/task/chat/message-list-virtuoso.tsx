@@ -448,6 +448,7 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
     messagesLoading,
     messagesCount: messages.length,
     isWorking,
+    sessionState,
   });
   const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(sessionId);
   const isRunning = getSessionRunningState(sessionState);
