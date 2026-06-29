@@ -37,8 +37,8 @@ func (r *workspaceDeleteRepo) DeleteWorkspace(_ context.Context, _ string) error
 	return nil
 }
 
-func (r *workspaceDeleteRepo) DeleteWorkspaceCascadeWithName(ctx context.Context, id, name string) error {
-	return r.DeleteWorkspace(ctx, id)
+func (r *workspaceDeleteRepo) DeleteWorkspaceCascadeWithName(ctx context.Context, id, name string) ([]*models.Task, []*models.Workflow, error) {
+	return nil, nil, r.DeleteWorkspace(ctx, id)
 }
 
 func TestHTTPDeleteWorkspaceRequiresMatchingConfirmName(t *testing.T) {

@@ -167,19 +167,16 @@ func (s *Service) deleteConfirmedWorkspaceCascade(ctx context.Context, workspace
 	if err != nil {
 		return err
 	}
-	workflows, err := s.workflows.ListWorkflows(ctx, workspace.ID, true)
-	if err != nil {
-		return fmt.Errorf("list workspace workflows: %w", err)
-	}
 	cleanups, err := s.prepareWorkspaceDeleteTaskCleanups(ctx, tasks)
 	if err != nil {
 		return err
 	}
-	if err := s.workspaces.DeleteWorkspaceCascadeWithName(ctx, workspace.ID, confirmedName); err != nil {
+	deletedTasks, deletedWorkflows, err := s.workspaces.DeleteWorkspaceCascadeWithName(ctx, workspace.ID, confirmedName)
+	if err != nil {
 		return s.mapWorkspaceDeleteError(workspace.ID, err)
 	}
-	s.publishWorkspaceDeleteChildEvents(ctx, tasks, workflows)
-	s.runWorkspaceDeleteTaskCleanups(cleanups)
+	s.publishWorkspaceDeleteChildEvents(ctx, deletedTasks, deletedWorkflows)
+	s.runWorkspaceDeleteTaskCleanups(cleanups, deletedTasks)
 	s.publishWorkspaceEvent(ctx, events.WorkspaceDeleted, workspace)
 	s.logger.Info("workspace deleted", zap.String("workspace_id", workspace.ID))
 	return nil
@@ -244,9 +241,18 @@ func (s *Service) publishWorkspaceDeleteChildEvents(ctx context.Context, tasks [
 	}
 }
 
-func (s *Service) runWorkspaceDeleteTaskCleanups(cleanups []workspaceDeleteTaskCleanup) {
+func (s *Service) runWorkspaceDeleteTaskCleanups(cleanups []workspaceDeleteTaskCleanup, deletedTasks []*models.Task) {
+	deletedTaskIDs := make(map[string]struct{}, len(deletedTasks))
+	for _, task := range deletedTasks {
+		if task != nil && task.ID != "" {
+			deletedTaskIDs[task.ID] = struct{}{}
+		}
+	}
 	for _, cleanup := range cleanups {
 		if cleanup.task == nil {
+			continue
+		}
+		if _, ok := deletedTaskIDs[cleanup.task.ID]; !ok {
 			continue
 		}
 		envCleanup := taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false}

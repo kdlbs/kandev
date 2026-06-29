@@ -393,8 +393,8 @@ func (m *mockRepository) UpdateWorkspace(ctx context.Context, workspace *models.
 	return nil
 }
 func (m *mockRepository) DeleteWorkspace(ctx context.Context, id string) error { return nil }
-func (m *mockRepository) DeleteWorkspaceCascadeWithName(ctx context.Context, id, name string) error {
-	return m.DeleteWorkspace(ctx, id)
+func (m *mockRepository) DeleteWorkspaceCascadeWithName(ctx context.Context, id, name string) ([]*models.Task, []*models.Workflow, error) {
+	return nil, nil, m.DeleteWorkspace(ctx, id)
 }
 func (m *mockRepository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
 	return nil, nil
