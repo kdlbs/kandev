@@ -132,6 +132,68 @@ func TestQueueRunCallback_OnCommentUsesCommentPayloadAndStableKey(t *testing.T) 
 	}
 }
 
+func TestQueueRunCallback_OnCommentCustomReasonsKeepActionSalt(t *testing.T) {
+	q := &fakeRunQueue{}
+	cb := QueueRunCallback{Adapter: q, Primary: fakePrimary{id: "agent-primary"}}
+
+	first := newQueueRunInput("primary", "this")
+	first.OperationID = "task_comment:c-1"
+	first.Action.QueueRun.Payload = nil
+	first.Action.QueueRun.Reason = "follow_up"
+	second := newQueueRunInput("primary", "this")
+	second.OperationID = "task_comment:c-1"
+	second.Action.QueueRun.Payload = nil
+	second.Action.QueueRun.Reason = "notify_observer"
+
+	if _, err := cb.Execute(context.Background(), first); err != nil {
+		t.Fatalf("first queue_run: %v", err)
+	}
+	if _, err := cb.Execute(context.Background(), second); err != nil {
+		t.Fatalf("second queue_run: %v", err)
+	}
+	if len(q.calls) != 2 {
+		t.Fatalf("expected 2 queue run calls, got %d", len(q.calls))
+	}
+	for i, call := range q.calls {
+		if call.IdempotencyKey == "task_comment:c-1" {
+			t.Fatalf("call %d idempotency_key dropped action salt", i)
+		}
+	}
+	if q.calls[0].IdempotencyKey == q.calls[1].IdempotencyKey {
+		t.Fatalf("custom reason actions must not share idempotency keys: %#v", q.calls)
+	}
+}
+
+func TestQueueRunCallback_OnCommentCustomPayloadsKeepActionSalt(t *testing.T) {
+	q := &fakeRunQueue{}
+	cb := QueueRunCallback{Adapter: q, Primary: fakePrimary{id: "agent-primary"}}
+
+	first := newQueueRunInput("primary", "this")
+	first.OperationID = "task_comment:c-1"
+	first.Action.QueueRun.Payload = map[string]any{"source": "first"}
+	second := newQueueRunInput("primary", "this")
+	second.OperationID = "task_comment:c-1"
+	second.Action.QueueRun.Payload = map[string]any{"source": "second"}
+
+	if _, err := cb.Execute(context.Background(), first); err != nil {
+		t.Fatalf("first queue_run: %v", err)
+	}
+	if _, err := cb.Execute(context.Background(), second); err != nil {
+		t.Fatalf("second queue_run: %v", err)
+	}
+	if len(q.calls) != 2 {
+		t.Fatalf("expected 2 queue run calls, got %d", len(q.calls))
+	}
+	for i, call := range q.calls {
+		if call.IdempotencyKey == "task_comment:c-1" {
+			t.Fatalf("call %d idempotency_key dropped action payload salt", i)
+		}
+	}
+	if q.calls[0].IdempotencyKey == q.calls[1].IdempotencyKey {
+		t.Fatalf("custom payload actions must not share idempotency keys: %#v", q.calls)
+	}
+}
+
 func TestQueueRunCallback_PrimaryUsesResolvedTargetTask(t *testing.T) {
 	q := &fakeRunQueue{}
 	var resolvedTaskID string

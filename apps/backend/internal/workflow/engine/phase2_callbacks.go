@@ -2,6 +2,9 @@ package engine
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -168,10 +171,11 @@ func queueRunReason(in ActionInput) string {
 
 // idempotencyKey synthesises a deterministic key from the engine's
 // operation id (already idempotent across retries) plus action-specific
-// salt. The default same-task primary task_comment wake keeps the exact
+// salt. The canonical same-task primary task_comment wake keeps the exact
 // "task_comment:<comment_id>" key so comment status lookups can map the
-// single run back to the user comment. Cross-task actions and multi-agent
-// fan-out keep the salt so one comment can still wake every intended target.
+// single run back to the user comment. Custom reasons, payloads, cross-task
+// actions, and multi-agent fan-out keep the salt so one comment can still wake
+// every intended target.
 // When OperationID is empty, the adapter sees an empty key and is expected to
 // dedupe via its own mechanism (or accept the duplicate).
 func idempotencyKey(in ActionInput, agentID, taskID string) string {
@@ -181,7 +185,8 @@ func idempotencyKey(in ActionInput, agentID, taskID string) string {
 	if usesExactCommentKey(in) {
 		return in.OperationID
 	}
-	return fmt.Sprintf("%s:%s:%s:%s", in.OperationID, in.Step.ID, taskID, agentID)
+	return fmt.Sprintf("%s:%s:%s:%s:%s",
+		in.OperationID, in.Step.ID, taskID, agentID, queueRunActionDigest(in))
 }
 
 func usesExactCommentKey(in ActionInput) bool {
@@ -193,7 +198,33 @@ func usesExactCommentKey(in ActionInput) bool {
 	}
 	target := strings.TrimSpace(in.Action.QueueRun.Target)
 	taskID := strings.TrimSpace(in.Action.QueueRun.TaskID)
-	return (target == "" || target == TargetPrimary) && (taskID == "" || taskID == TaskIDThis)
+	return (target == "" || target == TargetPrimary) &&
+		(taskID == "" || taskID == TaskIDThis) &&
+		queueRunReason(in) == "task_comment" &&
+		len(in.Action.QueueRun.Payload) == 0
+}
+
+func queueRunActionDigest(in ActionInput) string {
+	if in.Action.QueueRun == nil {
+		return ""
+	}
+	key := struct {
+		Target  string         `json:"target"`
+		TaskID  string         `json:"task_id"`
+		Reason  string         `json:"reason"`
+		Payload map[string]any `json:"payload,omitempty"`
+	}{
+		Target:  strings.TrimSpace(in.Action.QueueRun.Target),
+		TaskID:  strings.TrimSpace(in.Action.QueueRun.TaskID),
+		Reason:  queueRunReason(in),
+		Payload: in.Action.QueueRun.Payload,
+	}
+	b, err := json.Marshal(key)
+	if err != nil {
+		b = []byte(key.Target + "\x00" + key.TaskID + "\x00" + key.Reason)
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:8])
 }
 
 func queueRunPayload(in ActionInput, actionPayload map[string]any) map[string]any {
