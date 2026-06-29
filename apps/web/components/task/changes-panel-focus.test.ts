@@ -9,6 +9,7 @@ import {
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
 
 const TEST_TIMESTAMP = "2026-06-29T00:00:00Z";
+const INITIAL_FINGERPRINT = "repo:path:initial";
 const UPDATED_FINGERPRINT = "repo:path:updated";
 
 function gitStatus(files: string[], timestamp = TEST_TIMESTAMP): GitStatusEntry {
@@ -70,6 +71,68 @@ function signal(count: number, fingerprint: string): string {
   return `${count}\u0000${fingerprint}`;
 }
 
+describe("applyChangesPanelAutoFocusState fallback session keys", () => {
+  it("activates pending fallback session keys before the env id mapping arrives", () => {
+    const previousMarkers = {
+      "session-B": { count: 1, fingerprint: INITIAL_FINGERPRINT },
+    };
+    const pendingEnvKeys = new Set(["session-B"]);
+    let activateCalls = 0;
+
+    const previousActiveEnvKey = applyChangesPanelAutoFocusState({
+      signalsByEnv: {
+        "session-B": signal(1, INITIAL_FINGERPRINT),
+      },
+      activeEnvKey: "session-B",
+      previousActiveEnvKey: "envA",
+      environmentIdBySessionId: {},
+      previousMarkers,
+      pendingEnvKeys,
+      isRestoringLayout: false,
+      activate: () => {
+        activateCalls += 1;
+        return "activated";
+      },
+    });
+
+    expect(previousActiveEnvKey).toBe("session-B");
+    expect(activateCalls).toBe(1);
+    expect(pendingEnvKeys.size).toBe(0);
+  });
+
+  it("does not queue updates for the active fallback session key", () => {
+    const previousMarkers = {
+      "session-A": { count: 1, fingerprint: INITIAL_FINGERPRINT },
+    };
+    const pendingEnvKeys = new Set<string>();
+    let activateCalls = 0;
+
+    const previousActiveEnvKey = applyChangesPanelAutoFocusState({
+      signalsByEnv: {
+        "session-A": signal(2, UPDATED_FINGERPRINT),
+      },
+      activeEnvKey: "session-A",
+      previousActiveEnvKey: "session-A",
+      environmentIdBySessionId: {},
+      previousMarkers,
+      pendingEnvKeys,
+      isRestoringLayout: false,
+      activate: () => {
+        activateCalls += 1;
+        return "activated";
+      },
+    });
+
+    expect(previousActiveEnvKey).toBe("session-A");
+    expect(activateCalls).toBe(0);
+    expect(pendingEnvKeys.size).toBe(0);
+    expect(previousMarkers["session-A"]).toEqual({
+      count: 2,
+      fingerprint: UPDATED_FINGERPRINT,
+    });
+  });
+});
+
 describe("applyChangesPanelAutoFocusState", () => {
   it("migrates keys before queuing, defers during restore, and clears after activation", () => {
     const previousMarkers = {};
@@ -79,7 +142,7 @@ describe("applyChangesPanelAutoFocusState", () => {
 
     previousActiveEnvKey = applyChangesPanelAutoFocusState({
       signalsByEnv: {
-        "session-B": signal(1, "repo:path:initial"),
+        "session-B": signal(1, INITIAL_FINGERPRINT),
       },
       activeEnvKey: "envA",
       previousActiveEnvKey,
