@@ -376,6 +376,28 @@ func (r *Repository) ResolveCurrentRunner(
 	return "", nil
 }
 
+// GetTaskWorkflowStepID returns the task's current workflow step. Cross-task
+// queue_run primary resolution uses this before resolving the target task's
+// current runner.
+func (r *Repository) GetTaskWorkflowStepID(ctx context.Context, taskID string) (string, error) {
+	if taskID == "" {
+		return "", errors.New("task_id is required")
+	}
+	var stepID string
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT COALESCE(workflow_step_id, '')
+		FROM tasks
+		WHERE id = ?
+	`), taskID).Scan(&stepID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("lookup task workflow step: %w", err)
+	}
+	return stepID, nil
+}
+
 // SetTaskRunner writes (or replaces) the runner participant for
 // (step_id, task_id). Idempotent: if a runner participant already
 // exists for that pair the existing row is updated to point at the new

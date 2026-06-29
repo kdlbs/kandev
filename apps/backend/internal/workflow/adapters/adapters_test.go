@@ -16,16 +16,19 @@ type fakeRepo struct {
 	participants []*models.WorkflowStepParticipant
 	decisions    []*models.WorkflowStepDecision
 	runner       string
+	taskStepID   string
 
 	listErr   error
 	recordErr error
 	clearErr  error
 	runnerErr error
+	stepErr   error
 
 	recorded       *models.WorkflowStepDecision
 	cleared        bool
 	resolvedStepID string
 	resolvedTaskID string
+	lookedUpTaskID string
 }
 
 func (f *fakeRepo) ListStepParticipantsForTask(_ context.Context, _, _ string) ([]*models.WorkflowStepParticipant, error) {
@@ -52,6 +55,10 @@ func (f *fakeRepo) ResolveCurrentRunner(_ context.Context, stepID, taskID string
 	f.resolvedStepID = stepID
 	f.resolvedTaskID = taskID
 	return f.runner, f.runnerErr
+}
+func (f *fakeRepo) GetTaskWorkflowStepID(_ context.Context, taskID string) (string, error) {
+	f.lookedUpTaskID = taskID
+	return f.taskStepID, f.stepErr
 }
 
 func TestParticipantAdapter_TranslatesModelToEngineInfo(t *testing.T) {
@@ -149,6 +156,24 @@ func TestPrimaryAgentAdapter_ReturnsCurrentRunner(t *testing.T) {
 		t.Errorf("primary = %q, want ap-runner", got)
 	}
 	if repo.resolvedStepID != "s-1" || repo.resolvedTaskID != "task-1" {
+		t.Errorf("ResolveCurrentRunner called with step=%q task=%q", repo.resolvedStepID, repo.resolvedTaskID)
+	}
+}
+
+func TestPrimaryAgentAdapter_ForTaskResolvesTargetStep(t *testing.T) {
+	repo := &fakeRepo{runner: "ap-target-runner", taskStepID: "target-step"}
+	a := NewPrimaryAgentAdapter(repo)
+	got, err := a.PrimaryAgentProfileIDForTask(context.Background(), "target-task")
+	if err != nil {
+		t.Fatalf("primary for task: %v", err)
+	}
+	if got != "ap-target-runner" {
+		t.Errorf("primary = %q, want ap-target-runner", got)
+	}
+	if repo.lookedUpTaskID != "target-task" {
+		t.Errorf("GetTaskWorkflowStepID called with task=%q", repo.lookedUpTaskID)
+	}
+	if repo.resolvedStepID != "target-step" || repo.resolvedTaskID != "target-task" {
 		t.Errorf("ResolveCurrentRunner called with step=%q task=%q", repo.resolvedStepID, repo.resolvedTaskID)
 	}
 }

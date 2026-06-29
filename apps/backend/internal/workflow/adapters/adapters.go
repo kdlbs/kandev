@@ -25,6 +25,7 @@ type WorkflowRepo interface {
 	RecordStepDecision(ctx context.Context, d *models.WorkflowStepDecision) error
 	ClearStepDecisions(ctx context.Context, taskID, stepID string) (int64, error)
 	ResolveCurrentRunner(ctx context.Context, stepID, taskID string) (string, error)
+	GetTaskWorkflowStepID(ctx context.Context, taskID string) (string, error)
 }
 
 // Compile-time check that *repository.Repository satisfies WorkflowRepo.
@@ -142,9 +143,21 @@ func (a *PrimaryAgentAdapter) PrimaryAgentProfileID(
 	return agentID, nil
 }
 
+// PrimaryAgentProfileIDForTask satisfies engine.TargetTaskPrimaryAgentResolver.
+func (a *PrimaryAgentAdapter) PrimaryAgentProfileIDForTask(
+	ctx context.Context, taskID string,
+) (string, error) {
+	stepID, err := a.Repo.GetTaskWorkflowStepID(ctx, taskID)
+	if err != nil {
+		return "", fmt.Errorf("resolve workflow step for task %s: %w", taskID, err)
+	}
+	return a.PrimaryAgentProfileID(ctx, stepID, taskID)
+}
+
 // Compile-time interface assertions.
 var (
-	_ engine.ParticipantStore     = (*ParticipantAdapter)(nil)
-	_ engine.DecisionStore        = (*DecisionAdapter)(nil)
-	_ engine.PrimaryAgentResolver = (*PrimaryAgentAdapter)(nil)
+	_ engine.ParticipantStore               = (*ParticipantAdapter)(nil)
+	_ engine.DecisionStore                  = (*DecisionAdapter)(nil)
+	_ engine.PrimaryAgentResolver           = (*PrimaryAgentAdapter)(nil)
+	_ engine.TargetTaskPrimaryAgentResolver = (*PrimaryAgentAdapter)(nil)
 )

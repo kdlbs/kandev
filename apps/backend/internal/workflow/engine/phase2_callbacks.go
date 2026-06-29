@@ -36,6 +36,14 @@ type PrimaryAgentResolver interface {
 	PrimaryAgentProfileID(ctx context.Context, stepID, taskID string) (string, error)
 }
 
+// TargetTaskPrimaryAgentResolver resolves "primary" using the target task's
+// current workflow step. PrimaryAgentResolver is step-aware for same-task
+// triggers where the engine already has the current StepSpec; cross-task
+// queue_run actions need the adapter to look up the target task's step.
+type TargetTaskPrimaryAgentResolver interface {
+	PrimaryAgentProfileIDForTask(ctx context.Context, taskID string) (string, error)
+}
+
 // QueueRunCallback executes the queue_run action by resolving Target/TaskID
 // then enqueuing a run via RunQueueAdapter.
 type QueueRunCallback struct {
@@ -102,6 +110,20 @@ func (c QueueRunCallback) resolvePrimary(
 ) ([]string, error) {
 	if c.Primary == nil {
 		return nil, fmt.Errorf("%w: queue_run target=primary requires PrimaryAgentResolver", ErrActionNotYetWired)
+	}
+	if taskID != in.State.TaskID {
+		targetResolver, ok := c.Primary.(TargetTaskPrimaryAgentResolver)
+		if !ok {
+			return nil, fmt.Errorf("%w: queue_run cross-task target=primary requires TargetTaskPrimaryAgentResolver", ErrActionNotYetWired)
+		}
+		id, err := targetResolver.PrimaryAgentProfileIDForTask(ctx, taskID)
+		if err != nil {
+			return nil, fmt.Errorf("queue_run resolve target task primary: %w", err)
+		}
+		if id == "" {
+			return nil, fmt.Errorf("queue_run: task %s has no primary agent profile", taskID)
+		}
+		return []string{id}, nil
 	}
 	id, err := c.Primary.PrimaryAgentProfileID(ctx, in.Step.ID, taskID)
 	if err != nil {

@@ -35,6 +35,16 @@ func (f fakePrimary) PrimaryAgentProfileID(_ context.Context, stepID, taskID str
 	return f.id, f.err
 }
 
+func (f fakePrimary) PrimaryAgentProfileIDForTask(_ context.Context, taskID string) (string, error) {
+	if f.stepID != nil {
+		*f.stepID = ""
+	}
+	if f.taskID != nil {
+		*f.taskID = taskID
+	}
+	return f.id, f.err
+}
+
 // fakeParticipants returns a static slice for any step.
 type fakeParticipants struct {
 	list []ParticipantInfo
@@ -196,11 +206,13 @@ func TestQueueRunCallback_OnCommentCustomPayloadsKeepActionSalt(t *testing.T) {
 
 func TestQueueRunCallback_PrimaryUsesResolvedTargetTask(t *testing.T) {
 	q := &fakeRunQueue{}
+	var resolvedStepID string
 	var resolvedTaskID string
 	cb := QueueRunCallback{
 		Adapter: q,
 		Primary: fakePrimary{
 			id:     "agent-for-target-task",
+			stepID: &resolvedStepID,
 			taskID: &resolvedTaskID,
 		},
 	}
@@ -215,6 +227,9 @@ func TestQueueRunCallback_PrimaryUsesResolvedTargetTask(t *testing.T) {
 	}
 	if resolvedTaskID != "target-task" {
 		t.Fatalf("primary resolved against task %q, want target-task", resolvedTaskID)
+	}
+	if resolvedStepID != "" {
+		t.Fatalf("cross-task primary should use target-task resolver, got step %q", resolvedStepID)
 	}
 	got := q.calls[0]
 	if got.TaskID != "target-task" {
