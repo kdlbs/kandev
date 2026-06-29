@@ -208,14 +208,15 @@ func installSystemd(args serviceArgs, build BuildInfo, unitPath string) int {
 		return 1
 	}
 	unit := renderSystemdUnit(nativeServiceUnitInput{
-		Executable: self,
-		HomeDir:    homeDir,
-		LogDir:     logDir,
-		Port:       args.Port,
-		System:     args.System,
-		SystemUser: serviceUser(args.System),
-		BundleDir:  serviceBundleDir(self),
-		Version:    serviceVersion(build.Version),
+		Executable:   self,
+		HomeDir:      homeDir,
+		LogDir:       logDir,
+		Port:         args.Port,
+		System:       args.System,
+		SystemUser:   serviceUser(args.System),
+		BundleDir:    serviceBundleDir(self),
+		Version:      serviceVersion(build.Version),
+		PathPrefixes: serviceNodeToolBinDirs(),
 	})
 	if err := backupUnmanagedServiceFile(unitPath); err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
@@ -301,15 +302,16 @@ func installLaunchd(args serviceArgs, build BuildInfo, plistPath, target, domain
 		return 1
 	}
 	plist := renderLaunchdPlist(nativeServiceUnitInput{
-		Executable:  self,
-		HomeDir:     homeDir,
-		LogDir:      logDir,
-		Port:        args.Port,
-		System:      args.System,
-		SystemUser:  serviceUser(args.System),
-		NoBootStart: args.NoBootStart,
-		BundleDir:   serviceBundleDir(self),
-		Version:     serviceVersion(build.Version),
+		Executable:   self,
+		HomeDir:      homeDir,
+		LogDir:       logDir,
+		Port:         args.Port,
+		System:       args.System,
+		SystemUser:   serviceUser(args.System),
+		NoBootStart:  args.NoBootStart,
+		BundleDir:    serviceBundleDir(self),
+		Version:      serviceVersion(build.Version),
+		PathPrefixes: serviceNodeToolBinDirs(),
 	})
 	if err := backupUnmanagedServiceFile(plistPath); err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
@@ -336,22 +338,84 @@ func installLaunchd(args serviceArgs, build BuildInfo, plistPath, target, domain
 }
 
 type nativeServiceUnitInput struct {
-	Executable  string
-	HomeDir     string
-	LogDir      string
-	Port        int
-	System      bool
-	SystemUser  string
-	NoBootStart bool
-	BundleDir   string
-	Version     string
+	Executable   string
+	HomeDir      string
+	LogDir       string
+	Port         int
+	System       bool
+	SystemUser   string
+	NoBootStart  bool
+	BundleDir    string
+	Version      string
+	PathPrefixes []string
+}
+
+const (
+	systemdServicePath = "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin:%h/.local/bin:%h/.bun/bin:%h/.opencode/bin"
+	launchdServicePath = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+)
+
+func serviceNodeToolBinDirs() []string {
+	var dirs []string
+	addPath := func(value string) {
+		if value == "" {
+			return
+		}
+		dirs = append(dirs, filepath.Dir(value))
+	}
+	addPath(os.Getenv("npm_node_execpath"))
+	for _, name := range []string{"node", "npm", "npx"} {
+		if resolved, err := exec.LookPath(name); err == nil {
+			addPath(resolved)
+		}
+	}
+	return cleanServicePathDirs(dirs)
+}
+
+func servicePathWithPrefixes(base string, prefixes []string) string {
+	baseParts := strings.Split(base, ":")
+	seen := make(map[string]struct{}, len(baseParts)+len(prefixes))
+	for _, part := range baseParts {
+		seen[part] = struct{}{}
+	}
+	out := make([]string, 0, len(prefixes)+len(baseParts))
+	for _, dir := range cleanServicePathDirs(prefixes) {
+		if _, ok := seen[dir]; ok {
+			continue
+		}
+		seen[dir] = struct{}{}
+		out = append(out, dir)
+	}
+	out = append(out, baseParts...)
+	return strings.Join(out, ":")
+}
+
+func cleanServicePathDirs(dirs []string) []string {
+	seen := make(map[string]struct{}, len(dirs))
+	out := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		if dir == "" || strings.Contains(dir, ":") || strings.ContainsRune(dir, 0) {
+			continue
+		}
+		clean := filepath.Clean(dir)
+		if !filepath.IsAbs(clean) {
+			continue
+		}
+		if _, ok := seen[clean]; ok {
+			continue
+		}
+		seen[clean] = struct{}{}
+		out = append(out, clean)
+	}
+	return out
 }
 
 func renderSystemdUnit(input nativeServiceUnitInput) string {
+	pathValue := servicePathWithPrefixes(systemdServicePath, input.PathPrefixes)
 	env := []string{
 		serviceEnvLine("KANDEV_HOME_DIR", input.HomeDir),
 		serviceEnvLine("KANDEV_LOG_LEVEL", "info"),
-		serviceEnvLineAllowSpecifiers("PATH", "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin:%h/.local/bin:%h/.bun/bin:%h/.opencode/bin"),
+		serviceEnvLineAllowSpecifiers("PATH", pathValue),
 	}
 	if input.Port != 0 {
 		env = append(env, serviceEnvLine("KANDEV_SERVER_PORT", fmt.Sprint(input.Port)))
@@ -378,7 +442,8 @@ func renderSystemdUnit(input nativeServiceUnitInput) string {
 }
 
 func renderLaunchdPlist(input nativeServiceUnitInput) string {
-	envEntries := [][2]string{{"KANDEV_HOME_DIR", input.HomeDir}, {"KANDEV_LOG_LEVEL", "info"}, {"PATH", "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"}}
+	pathValue := servicePathWithPrefixes(launchdServicePath, input.PathPrefixes)
+	envEntries := [][2]string{{"KANDEV_HOME_DIR", input.HomeDir}, {"KANDEV_LOG_LEVEL", "info"}, {"PATH", pathValue}}
 	if input.Port != 0 {
 		envEntries = append(envEntries, [2]string{"KANDEV_SERVER_PORT", fmt.Sprint(input.Port)})
 	}

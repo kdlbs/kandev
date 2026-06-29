@@ -22,6 +22,7 @@ Users start Kandev from the terminal through `kandev`, but the current launcher 
 - npm/npx continues to expose the `kandev` command through the `kandev` npm package. The npm package may use a minimal JavaScript shim, but that shim only resolves the platform runtime package and execs its native `bin/kandev`.
 - `make start` launches through the native `apps/backend/bin/kandev start` path after building local artifacts.
 - Existing service installs continue to be managed by `kandev service ...`; newly generated service units execute the public `kandev` launcher path.
+- Service units preserve install-time Node/npm/npx bin directories when they are discoverable, so agents can still invoke npm-managed CLIs under service managers that do not source shell profiles.
 - Startup output continues to show the URL users should open, the MCP URL, database path when applicable, and log level when applicable.
 - Production `run` and `start` do not execute a Node.js web runtime; the Go backend serves the embedded Vite SPA assets.
 
@@ -140,7 +141,9 @@ Transitions:
 - **GIVEN** the backend has requested a restart through the restart adapter, **WHEN** the launcher receives the restart request, **THEN** only the `kandev __backend` child process is replaced.
 - **GIVEN** the user presses Ctrl-C while Kandev is running, **WHEN** the launcher handles the signal, **THEN** it terminates the backend child process before exiting.
 - **GIVEN** a new service install on Linux or macOS, **WHEN** the user runs `kandev service install`, **THEN** the generated service unit executes the public `kandev` launcher path.
+- **GIVEN** Node is managed by nvm/fnm/asdf/volta/mise and `node`, `npm`, or `npx` resolve from that manager at install time, **WHEN** the user runs `kandev service install`, **THEN** the generated service environment includes the detected Node tool bin directory in `PATH`.
 - **GIVEN** a user runs `npx kandev@latest --help`, **WHEN** npm has installed the platform runtime package, **THEN** the npm shim execs the runtime package's native `bin/kandev` and the user sees the same public help output.
+
 ## Out of scope
 
 - Making `npx` itself Node-free.

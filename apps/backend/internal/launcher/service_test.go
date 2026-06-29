@@ -3,6 +3,7 @@ package launcher
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -164,6 +165,62 @@ func TestInstallSystemdMessagesDistinguishBootStart(t *testing.T) {
 	}
 }
 
+func TestInstallSystemdIncludesActiveNodeBinInPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("systemd service PATH rendering is POSIX-only")
+	}
+	originalExecutablePath := executablePath
+	originalExecuteServiceCommand := executeServiceCommand
+	originalServicePrintln := servicePrintln
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		executeServiceCommand = originalExecuteServiceCommand
+		servicePrintln = originalServicePrintln
+	})
+
+	tmp := t.TempDir()
+	nodeBin := filepath.Join(tmp, "home", "alice", ".nvm", "versions", "node", "v25.2.1", "bin")
+	if err := os.MkdirAll(nodeBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"node", "npm", "npx"} {
+		if err := os.WriteFile(filepath.Join(nodeBin, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", nodeBin+string(os.PathListSeparator)+"/usr/bin:/bin")
+	t.Setenv("npm_node_execpath", filepath.Join(nodeBin, "node"))
+
+	executablePath = func() (string, error) {
+		return filepath.Join(tmp, ".npm", "_npx", "abc", "node_modules", "@kdlbs", "runtime-linux-x64", "bin", "kandev"), nil
+	}
+	executeServiceCommand = func(string, ...string) error { return nil }
+	servicePrintln = func(string) {}
+
+	unitPath := filepath.Join(tmp, "kandev.service")
+	code := installSystemd(
+		serviceArgs{
+			Action:      actionInstall,
+			HomeDir:     filepath.Join(tmp, "kandev-home"),
+			NoBootStart: true,
+		},
+		BuildInfo{Version: "test"},
+		unitPath,
+	)
+	if code != 0 {
+		t.Fatalf("installSystemd() = %d, want 0", code)
+	}
+
+	unit, err := os.ReadFile(unitPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPrefix := "Environment=PATH=" + nodeBin + ":"
+	if !strings.Contains(string(unit), wantPrefix) {
+		t.Fatalf("unit PATH does not include active node bin %q:\n%s", nodeBin, unit)
+	}
+}
+
 func TestInstallLaunchdMessagesDistinguishBootStart(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -286,6 +343,21 @@ func TestServiceEnvLineAllowSpecifiersPreservesSystemdSpecifiers(t *testing.T) {
 	want := `Environment="PATH=%h/.local/bin:$$PATH"`
 	if got != want {
 		t.Fatalf("serviceEnvLineAllowSpecifiers() = %q, want %q", got, want)
+	}
+}
+
+func TestServicePathWithPrefixesPrependsValidUniqueDirs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("service PATH rendering is POSIX-only")
+	}
+	nodeBin := "/home/alice/.nvm/versions/node/v25.2.1/bin"
+	got := servicePathWithPrefixes(
+		"/usr/bin:/bin:%h/.local/bin",
+		[]string{nodeBin, "/usr/bin", "relative/bin", "/bad:dir", nodeBin},
+	)
+	want := nodeBin + ":/usr/bin:/bin:%h/.local/bin"
+	if got != want {
+		t.Fatalf("servicePathWithPrefixes() = %q, want %q", got, want)
 	}
 }
 
