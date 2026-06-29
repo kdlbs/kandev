@@ -550,9 +550,12 @@ func (s *Service) markExecutionCompleted(sessionID, executionID string) {
 	if sessionID == "" || executionID == "" {
 		return
 	}
-	now := time.Now()
-	s.completedExecutions.Store(terminalExecutionKey(sessionID, executionID), now.Add(completedExecutionRetention))
-	s.pruneCompletedExecutions(now)
+	key := terminalExecutionKey(sessionID, executionID)
+	expiresAt := time.Now().Add(completedExecutionRetention)
+	s.completedExecutions.Store(key, expiresAt)
+	time.AfterFunc(completedExecutionRetention, func() {
+		s.deleteCompletedExecutionIfExpired(key, expiresAt)
+	})
 }
 
 func (s *Service) isExecutionCompleted(sessionID, executionID string) bool {
@@ -566,20 +569,21 @@ func (s *Service) isExecutionCompleted(sessionID, executionID string) bool {
 	}
 	expiresAt, ok := value.(time.Time)
 	if !ok || time.Now().After(expiresAt) {
-		s.completedExecutions.Delete(key)
+		s.deleteCompletedExecutionIfExpired(key, expiresAt)
 		return false
 	}
 	return true
 }
 
-func (s *Service) pruneCompletedExecutions(now time.Time) {
-	s.completedExecutions.Range(func(key, value interface{}) bool {
-		expiresAt, ok := value.(time.Time)
-		if !ok || now.After(expiresAt) {
-			s.completedExecutions.Delete(key)
-		}
-		return true
-	})
+func (s *Service) deleteCompletedExecutionIfExpired(key string, expiresAt time.Time) {
+	value, ok := s.completedExecutions.Load(key)
+	if !ok {
+		return
+	}
+	currentExpiry, ok := value.(time.Time)
+	if !ok || !currentExpiry.After(expiresAt) {
+		s.completedExecutions.Delete(key)
+	}
 }
 
 func (s *Service) setSessionStarting(ctx context.Context, taskID string, session *models.TaskSession) error {

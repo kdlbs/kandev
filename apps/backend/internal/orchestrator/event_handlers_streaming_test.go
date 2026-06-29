@@ -540,22 +540,28 @@ func TestToolUpdateFromCompletedExecutionDoesNotWakeWaitingSession(t *testing.T)
 		"late completed-execution tool event must not move the task back to IN_PROGRESS")
 }
 
-func TestCompletedExecutionMarkerExpiresAndPrunes(t *testing.T) {
+func TestCompletedExecutionMarkerExpiresAndDeletes(t *testing.T) {
 	svc := &Service{}
-	expiredKey := terminalExecutionKey("old-session", "old-exec")
-	svc.completedExecutions.Store(expiredKey, time.Now().Add(-time.Minute))
 
 	svc.markExecutionCompleted("s1", "exec-1")
-
 	require.True(t, svc.isExecutionCompleted("s1", "exec-1"))
-	_, ok := svc.completedExecutions.Load(expiredKey)
-	require.False(t, ok, "marking a completed execution should prune expired markers")
 
 	currentKey := terminalExecutionKey("s1", "exec-1")
-	svc.completedExecutions.Store(currentKey, time.Now().Add(-time.Minute))
+	expiredAt := time.Now().Add(-time.Minute)
+	svc.completedExecutions.Store(currentKey, expiredAt)
 	require.False(t, svc.isExecutionCompleted("s1", "exec-1"))
-	_, ok = svc.completedExecutions.Load(currentKey)
+	_, ok := svc.completedExecutions.Load(currentKey)
 	require.False(t, ok, "expired marker should be deleted on lookup")
+
+	laterExpiry := time.Now().Add(time.Hour)
+	svc.completedExecutions.Store(currentKey, laterExpiry)
+	svc.deleteCompletedExecutionIfExpired(currentKey, time.Now())
+	_, ok = svc.completedExecutions.Load(currentKey)
+	require.True(t, ok, "old expiry callback must not delete a refreshed marker")
+
+	svc.deleteCompletedExecutionIfExpired(currentKey, laterExpiry)
+	_, ok = svc.completedExecutions.Load(currentKey)
+	require.False(t, ok, "matching expiry callback should delete the marker")
 }
 
 // TestSetSessionRunning_NoRedundantTaskWrites locks in the dedup: when the
