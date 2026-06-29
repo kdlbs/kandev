@@ -2,6 +2,14 @@
 
 All notable changes to Kandev.
 
+## 0.68.0 - 2026-06-29
+
+### Bug Fixes
+
+- wait for task create last-used settings ([#1524](https://github.com/kdlbs/kandev/pull/1524))
+- preserve nvm node path in service installs ([#1527](https://github.com/kdlbs/kandev/pull/1527))
+- improve macos desktop startup ([#1525](https://github.com/kdlbs/kandev/pull/1525))
+
 ## 0.67.0 - 2026-06-28
 
 ### Bug Fixes
