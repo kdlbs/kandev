@@ -67,6 +67,23 @@ class LintActionPinningTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, output)
         self.assertIn("${{ inputs.action }}", output)
 
+    def test_rejects_dynamic_action_source_pinned_to_sha(self) -> None:
+        result = self.run_lint(
+            """
+            name: test
+            on: push
+            jobs:
+              test:
+                runs-on: ubuntu-latest
+                steps:
+                  - uses: ${{ inputs.action }}@df4cb1c069e1874edd31b4311f1884172cec0e10
+            """
+        )
+
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("${{ inputs.action }}@df4cb1c069e1874edd31b4311f1884172cec0e10", output)
+
     def test_rejects_docker_action_with_short_digest(self) -> None:
         result = self.run_lint(
             """

@@ -43,6 +43,11 @@ for path in sorted(p for ext in ("*.yml", "*.yaml") for p in workflows_dir.glob(
         if uses_value.startswith("./"):
             continue
 
+        if "${{" in uses_value:
+            rel = path.relative_to(Path(__file__).parent.parent.parent)
+            violations.append((str(rel), lineno, line.strip()))
+            continue
+
         # Split on the last `@` to separate the action name from its ref.
         # rpartition returns ("", "", value) when `@` is absent.
         action, sep, ref = uses_value.rpartition("@")
