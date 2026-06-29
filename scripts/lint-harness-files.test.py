@@ -56,14 +56,16 @@ class HarnessLinterTest(unittest.TestCase):
             "nested/.cursorrules": "agent",
             ".agents/skills/fix/SKILL.md": "skill",
             ".augment/skills/fix/SKILL.md": "skill",
+            ".claude/skills/fix/SKILL.md": "skill",
             "apps/backend/internal/office/configloader/skills/memory/SKILL.md": "skill",
             ".agents/skills/fix/references/troubleshooting.md": "reference",
+            ".claude/skills/fix/references/troubleshooting.md": "reference",
             "apps/backend/internal/office/configloader/skills/memory/REFERENCE.md": "reference",
             ".agents/agents/qa.md": "role-agent",
             ".opencode/agents/qa.md": "role-agent",
             ".claude/agents/qa.md": "role-agent",
             ".codex/agents/qa.toml": "role-agent",
-            ".codex/config.toml": "role-agent",
+            ".codex/config.toml": "config",
             ".claude/commands/pr-fixup.md": "command",
             ".cursor/rules/kandev-harness.mdc": "cursor-rule",
             "README.md": "unknown",
@@ -136,14 +138,14 @@ class HarnessLinterTest(unittest.TestCase):
         path = self.write(
             ".codex/agents/qa.toml",
             'name = "qa"\n'
-            'description = "Use when testing integrated changes before PRs."\n',
+            'description = "Use when the user says \\"test it\\" before PRs."\n',
         )
 
         violations = linter.lint_path(path, "role-agent", {"description-word-limit": {"limit": 5}})
 
         self.assertEqual(len(violations), 1)
         self.assertEqual(violations[0].rule, "description-word-limit")
-        self.assertIn("description is 7 words", violations[0].msg)
+        self.assertIn("description is 9 words", violations[0].msg)
 
     def test_opt_in_line_scanners_report_expected_columns(self) -> None:
         linter = load_linter()
@@ -152,7 +154,7 @@ class HarnessLinterTest(unittest.TestCase):
             "ok\n"
             "bad \U0001f600 marker\n"
             "plain \u2014 dash\n"
-            "see @./SKILL.md\n",
+            "\u8def see @./SKILL.md\n",
         )
         config = {
             "no-emoji": {},
@@ -166,7 +168,7 @@ class HarnessLinterTest(unittest.TestCase):
         self.assertIn('emoji "', violations[0].msg)
         self.assertIn("column 5", violations[0].msg)
         self.assertIn("column 7", violations[1].msg)
-        self.assertIn("byte offset 5", violations[2].msg)
+        self.assertIn("column 7", violations[2].msg)
 
     def test_description_when_supports_yaml_frontmatter_failures(self) -> None:
         linter = load_linter()
@@ -210,20 +212,47 @@ class HarnessLinterTest(unittest.TestCase):
 
         violations = linter.lint_path(empty, "skill", {"description-when": {}})
         self.assertEqual(len(violations), 1)
-        self.assertIn("has no `description:` field", violations[0].msg)
+        self.assertIn("empty `description:` field", violations[0].msg)
 
     def test_description_when_supports_toml_failures(self) -> None:
         linter = load_linter()
         missing = self.write(".codex/agents/missing.toml", 'name = "missing"\n')
         weak = self.write(".codex/agents/weak.toml", 'description = "General helper."\n')
+        quoted = self.write(".codex/agents/quoted.toml", 'description = "Use when the user says \\"fix it\\"."\n')
 
         missing_violations = linter.lint_path(missing, "role-agent", {"description-when": {}})
         weak_violations = linter.lint_path(weak, "role-agent", {"description-when": {}})
+        quoted_violations = linter.lint_path(quoted, "role-agent", {"description-when": {}})
 
         self.assertEqual(len(missing_violations), 1)
         self.assertIn('has no `description = "..."` field', missing_violations[0].msg)
         self.assertEqual(len(weak_violations), 1)
         self.assertIn("lacks a routing phrase", weak_violations[0].msg)
+        self.assertEqual(quoted_violations, [])
+
+    def test_description_when_uses_explicit_routing_phrases(self) -> None:
+        linter = load_linter()
+        weak = self.write(
+            ".agents/skills/trigger/SKILL.md",
+            "---\n"
+            "description: This skill dispatches a trigger event to the runtime.\n"
+            "---\n",
+        )
+        strong = self.write(
+            ".agents/skills/trigger-on/SKILL.md",
+            "---\n"
+            "description: Trigger on task review requests. Do review setup.\n"
+            "---\n",
+        )
+
+        self.assertEqual(len(linter.lint_path(weak, "skill", {"description-when": {}})), 1)
+        self.assertEqual(linter.lint_path(strong, "skill", {"description-when": {}}), [])
+
+    def test_codex_config_skips_description_when(self) -> None:
+        linter = load_linter()
+        config = self.write(".codex/config.toml", 'model = "gpt-5"\n')
+
+        self.assertEqual(linter.lint_path(config, "config", {"description-when": {}}), [])
 
     def test_cli_all_uses_tracked_files_and_skips_untracked(self) -> None:
         self.write("AGENTS.md", "ok\n")

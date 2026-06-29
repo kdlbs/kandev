@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 
@@ -37,6 +38,9 @@ DEFAULT_RULES_BY_KIND = {
         "cursor-rule-line-limit": {"limit": 300},
         "description-word-limit": {"limit": 600},
     },
+    "config": {
+        "config-line-limit": {"limit": 300},
+    },
 }
 
 LINE_LIMIT_RULES = {
@@ -46,6 +50,7 @@ LINE_LIMIT_RULES = {
     "role-agent-line-limit",
     "command-line-limit",
     "cursor-rule-line-limit",
+    "config-line-limit",
 }
 
 OPT_IN_RULES = {
@@ -178,7 +183,11 @@ def classify_path(path: Path) -> str:
         return "agent"
 
     parts = normalized_parts(path)
-    if has_subpath(parts, [".agents", "skills"]) or has_subpath(parts, [".augment", "skills"]):
+    if (
+        has_subpath(parts, [".agents", "skills"])
+        or has_subpath(parts, [".augment", "skills"])
+        or has_subpath(parts, [".claude", "skills"])
+    ):
         if name == "SKILL.md":
             return "skill"
         if name.endswith(".md"):
@@ -199,7 +208,7 @@ def classify_path(path: Path) -> str:
     if has_subpath(parts, [".codex", "agents"]) and name.endswith(".toml"):
         return "role-agent"
     if has_subpath(parts, [".codex"]) and name == "config.toml":
-        return "role-agent"
+        return "config"
     if has_subpath(parts, [".claude", "commands"]) and name.endswith(".md"):
         return "command"
     if has_subpath(parts, [".cursor", "rules"]) and name.endswith(".mdc"):
@@ -238,6 +247,8 @@ def lint_path(
     violations = []
     for rule, options in rules.items():
         if rule in disabled:
+            continue
+        if rule in OPT_IN_RULES_BY_KIND and kind not in OPT_IN_RULES_BY_KIND[rule]:
             continue
         if rule in LINE_LIMIT_RULES:
             violations.extend(check_line_limit(path, rule, lines, int(options.get("limit", 0))))
@@ -358,7 +369,7 @@ def extract_yaml_description(lines: list[str]) -> tuple[str, str | None]:
             stripped = continuation.strip()
             if stripped:
                 chunks.append(strip_yaml_scalar(stripped))
-        return "ok", " ".join(chunks).strip()
+        return ("empty" if not chunks else "ok"), " ".join(chunks).strip()
     return "ok", None
 
 
@@ -369,14 +380,15 @@ def strip_yaml_scalar(value: str) -> str:
     return value
 
 
-TOML_DESCRIPTION_RE = re.compile(r"^\s*description\s*=\s*([\"'])(.*?)\1\s*(?:#.*)?$", re.MULTILINE)
-
-
 def extract_toml_description(text: str) -> str | None:
-    match = TOML_DESCRIPTION_RE.search(text)
-    if not match:
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
         return None
-    return match.group(2).strip()
+    description = data.get("description")
+    if not isinstance(description, str):
+        return None
+    return description.strip()
 
 
 def check_no_emoji(path: Path, lines: list[str]) -> list[Violation]:
@@ -422,9 +434,9 @@ def check_no_at_dot_slash(path: Path, lines: list[str]) -> list[Violation]:
         index = line.find("@./")
         if index == -1:
             continue
-        byte_offset = len(line[:index].encode("utf-8")) + 1
+        column = index + 1
         message = (
-            f"`@./` reference at byte offset {byte_offset}. why: non-standard import/path pattern that confuses "
+            f"`@./` reference at column {column}. why: non-standard import/path pattern that confuses "
             "harness loaders and is not documented behaviour. fix: drop the `@./` prefix. example: `@./SKILL.md` "
             "becomes `./SKILL.md` or `SKILL.md`; `@./examples/foo.sh` becomes `examples/foo.sh`."
         )
@@ -465,6 +477,18 @@ def check_yaml_description_when(path: Path, text: str) -> list[Violation]:
                 "(no leading whitespace) after the last frontmatter field to close the block.",
             )
         ]
+    if status == "empty":
+        return [
+            Violation(
+                "description-when",
+                path,
+                1,
+                "file frontmatter has an empty `description:` field. why: the description is the primary signal the "
+                "router uses to decide whether this artifact applies to the user's request. fix: fill in "
+                "`description: Use when <concrete trigger>. <one-line outcome>.` between the opening and closing "
+                "--- fences.",
+            )
+        ]
     if not description:
         return [
             Violation(
@@ -501,8 +525,7 @@ def check_toml_description_when(path: Path, text: str) -> list[Violation]:
 
 
 def has_routing_phrase(description: str) -> bool:
-    lowered = f" {description.lower()} "
-    return "use " in lowered or "trigger" in lowered or " when " in lowered
+    return re.search(r"\b(use when|use for|trigger on|trigger when)\b", description, re.IGNORECASE) is not None
 
 
 def description_routing_violation(path: Path) -> Violation:

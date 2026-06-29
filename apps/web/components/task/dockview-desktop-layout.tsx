@@ -57,8 +57,6 @@ import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import { PanelPortalHost, usePortalSlot } from "@/lib/layout/panel-portal-host";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "@/lib/state/dockview-env-scoped-components";
 
-export { CHAT_PANEL_FALLBACK_LABEL, resolveChatPanelTitle } from "./dockview-panel-content";
-
 // ---------------------------------------------------------------------------
 // PORTAL SLOT — generic dockview component that adopts a persistent portal
 // ---------------------------------------------------------------------------
