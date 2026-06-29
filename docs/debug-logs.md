@@ -105,7 +105,7 @@ For a system service:
 
 ```bash
 sudo kandev service stop --system
-kandev --debug 2>&1 | tee ~/kandev-debug.log
+sudo KANDEV_HOME_DIR=/var/lib/kandev kandev --debug 2>&1 | tee ~/kandev-debug.log
 # reproduce the issue
 # press Ctrl-C
 sudo kandev service start --system
@@ -128,6 +128,8 @@ Then start debug mode with the same values shown in the service config:
 ```bash
 KANDEV_HOME_DIR=/path/from/service/config kandev --debug --port 38429 2>&1 | tee ~/kandev-debug.log
 ```
+
+For a custom system service, run the same command with `sudo`.
 
 If you should not stop the service, collect the existing service logs instead:
 
