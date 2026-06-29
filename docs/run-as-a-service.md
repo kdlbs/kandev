@@ -127,7 +127,7 @@ If you'd rather not deal with linger and you're already comfortable with sudo, i
 
 ## What's Inside the Unit File
 
-The unit hard-codes absolute paths so it works in the empty `PATH` that systemd/launchd give a fresh service. When Node tooling is installed through a per-user manager such as nvm, fnm, asdf, Volta, or mise, `kandev service install` also bakes the detected `node`/`npm`/`npx` bin directory into `PATH`; re-run the install command after changing the active Node version. For `--system` installs, some `sudo` configurations reset `PATH` with `secure_path`; run the install command from an environment where `node`, `npm`, and `npx` still resolve, or put stable symlinks in the run-as user's `~/.local/bin`.
+The unit hard-codes absolute paths so it works in the empty `PATH` that systemd/launchd give a fresh service. When Node tooling is installed through a per-user manager such as nvm, fnm, asdf, Volta, or mise, `kandev service install` also bakes the detected `node`/`npm`/`npx` bin directory into `PATH`; re-run the install command after changing the active Node version. For fnm, the installer resolves multishell symlinks when possible so the unit records the stable Node installation path instead of the temporary multishell directory. If the service file still points at a stale fnm multishell path, re-run `kandev service install` from a shell where `node`, `npm`, and `npx` resolve through valid symlinks. For `--system` installs, some `sudo` configurations reset `PATH` with `secure_path`; run the install command from an environment where `node`, `npm`, and `npx` still resolve, or put stable symlinks in the run-as user's `~/.local/bin`.
 
 A typical Linux user unit looks like:
 

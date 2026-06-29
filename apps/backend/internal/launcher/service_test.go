@@ -447,6 +447,39 @@ func TestServiceNodeToolBinDirsSkipsTransientNpxSandbox(t *testing.T) {
 	}
 }
 
+func TestServiceNodeToolBinDirsResolvesFnmMultishellSymlinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("service PATH rendering is POSIX-only")
+	}
+	tmp := t.TempDir()
+	stableBin := filepath.Join(tmp, "home", "alice", ".local", "share", "fnm", "node-versions", "v25.2.1", "installation", "bin")
+	multishellBin := filepath.Join(tmp, "run", "user", "1000", "fnm_multishells", "12345_67890", "bin")
+	for _, dir := range []string{stableBin, multishellBin} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"node", "npm", "npx"} {
+		stablePath := filepath.Join(stableBin, name)
+		if err := os.WriteFile(stablePath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(stablePath, filepath.Join(multishellBin, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", multishellBin)
+	t.Setenv("npm_node_execpath", filepath.Join(multishellBin, "node"))
+
+	got := serviceNodeToolBinDirs()
+	if !slices.Contains(got, stableBin) {
+		t.Fatalf("serviceNodeToolBinDirs() = %v, want stable fnm node bin %q", got, stableBin)
+	}
+	if slices.Contains(got, multishellBin) {
+		t.Fatalf("serviceNodeToolBinDirs() included transient fnm multishell bin %q: %v", multishellBin, got)
+	}
+}
+
 func TestBackupUnmanagedServiceFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kandev.service")
 	original := "custom unit"

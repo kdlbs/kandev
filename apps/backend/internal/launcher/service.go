@@ -358,11 +358,8 @@ const (
 func serviceNodeToolBinDirs() []string {
 	var dirs []string
 	addPath := func(value string) {
-		if value == "" {
-			return
-		}
-		dir := filepath.Dir(value)
-		if transientNodeToolDir(dir) {
+		dir, ok := serviceNodeToolBinDir(value)
+		if !ok {
 			return
 		}
 		dirs = append(dirs, dir)
@@ -376,11 +373,35 @@ func serviceNodeToolBinDirs() []string {
 	return cleanServicePathDirs(dirs)
 }
 
+func serviceNodeToolBinDir(value string) (string, bool) {
+	if value == "" {
+		return "", false
+	}
+	dir := filepath.Dir(value)
+	if fnmMultishellToolDir(dir) {
+		target, err := filepath.EvalSymlinks(value)
+		if err != nil {
+			return "", false
+		}
+		dir = filepath.Dir(target)
+	}
+	if transientNodeToolDir(dir) {
+		return "", false
+	}
+	return dir, true
+}
+
 func transientNodeToolDir(dir string) bool {
 	clean := filepath.Clean(dir)
 	separator := string(filepath.Separator)
 	return strings.Contains(clean, separator+".npm"+separator+"_npx"+separator) ||
+		fnmMultishellToolDir(clean) ||
 		strings.Contains(clean, separator+"node_modules"+separator+".bin")
+}
+
+func fnmMultishellToolDir(dir string) bool {
+	separator := string(filepath.Separator)
+	return strings.Contains(filepath.Clean(dir), separator+"fnm_multishells"+separator)
 }
 
 func servicePathWithPrefixes(base string, prefixes []string) string {
