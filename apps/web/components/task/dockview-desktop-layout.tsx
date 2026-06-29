@@ -602,7 +602,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
   // Auto-create a session tab when a session becomes active
   useAutoSessionTab(effectiveSessionId);
-  useChangesPanelAutoFocus();
+  useChangesPanelAutoFocus(effectiveEnvId);
 
   // Auto-show PR detail panel when the task has an associated PR
   useAutoPRPanel();

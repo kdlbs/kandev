@@ -31,8 +31,8 @@ class GitHelper {
 }
 
 function changesTab(testPage: Page) {
-  return testPage.locator(".dv-tab", {
-    has: testPage.locator(".dv-default-tab").filter({ hasText: /^Changes/ }),
+  return testPage.locator(".dv-tab:visible", {
+    has: testPage.locator(".dv-default-tab:visible").filter({ hasText: /^Changes/ }),
   });
 }
 
@@ -53,8 +53,10 @@ async function changesCountForSession(testPage: Page, sessionId: string): Promis
     if (!store) throw new Error("E2E store bridge missing");
     const state = store.getState();
     const envKey = state.environmentIdBySessionId[sid] ?? sid;
-    const repoStatuses = state.gitStatus.byEnvironmentRepo[envKey];
-    if (!repoStatuses) return null;
+    const hasRepoStatuses = envKey in state.gitStatus.byEnvironmentRepo;
+    const hasCommits = envKey in state.sessionCommits.byEnvironmentId;
+    if (!hasRepoStatuses && !hasCommits) return null;
+    const repoStatuses = state.gitStatus.byEnvironmentRepo[envKey] ?? {};
     let count = state.sessionCommits.byEnvironmentId[envKey]?.length ?? 0;
     for (const status of Object.values(repoStatuses)) {
       count += Object.keys(status.files ?? {}).length;
@@ -374,6 +376,8 @@ test.describe("Changes panel focus behavior", () => {
     await expect
       .poll(() => changesCountForSession(testPage, taskB.session_id!), { timeout: 15_000 })
       .toBe(1);
+    await expect(session.activeChat()).toBeVisible();
+    await expect(changesTab(testPage)).not.toHaveClass(/dv-active-tab/);
 
     await session.taskInSidebar("Inactive Changes Focus B").click();
 

@@ -6,9 +6,17 @@ import { useShallow } from "zustand/react/shallow";
 import { useAppStore } from "@/components/state-provider";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { AppState } from "@/lib/state/store";
+import type { FileInfo, GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
 
 type DockviewPanel = NonNullable<ReturnType<DockviewApi["getPanel"]>>;
-type ChangesCountState = Pick<AppState, "gitStatus" | "sessionCommits">;
+type ChangesMarkerState = Pick<AppState, "gitStatus" | "sessionCommits">;
+
+export type ChangesMarker = {
+  count: number;
+  fingerprint: string;
+};
+
+type ChangesSignalState = Pick<AppState, "gitStatus" | "sessionCommits">;
 
 export type ActivateChangesPanelResult =
   | "activated"
@@ -38,72 +46,190 @@ export function autoActivateChangesPanel(): ActivateChangesPanelResult {
   return activateChangesPanel(useDockviewStore.getState().api);
 }
 
-export function selectChangesCountByEnvironment(state: ChangesCountState): Record<string, number> {
+function fileFingerprint(file: FileInfo): string {
+  return [
+    file.path,
+    file.status,
+    file.staged ? "1" : "0",
+    file.additions ?? 0,
+    file.deletions ?? 0,
+    file.old_path ?? "",
+    file.diff_skip_reason ?? "",
+    file.repository_name ?? "",
+  ].join(":");
+}
+
+function gitStatusFingerprint(repoName: string, status: GitStatusEntry): string {
+  const fileKeys = Object.keys(status.files ?? {}).sort();
+  const files = fileKeys.map((path) => fileFingerprint(status.files[path])).join(",");
+  return [
+    repoName,
+    status.branch ?? "",
+    status.remote_branch ?? "",
+    status.ahead,
+    status.behind,
+    status.timestamp ?? "",
+    status.repository_name ?? "",
+    files,
+  ].join("|");
+}
+
+export function selectChangesMarkerByEnvironment(
+  state: ChangesMarkerState,
+): Record<string, ChangesMarker> {
   const envKeys = new Set([
     ...Object.keys(state.gitStatus.byEnvironmentRepo),
     ...Object.keys(state.sessionCommits.byEnvironmentId),
   ]);
-  const counts: Record<string, number> = {};
+  const markers: Record<string, ChangesMarker> = {};
 
   for (const envKey of envKeys) {
-    let count = state.sessionCommits.byEnvironmentId[envKey]?.length ?? 0;
+    const commits = state.sessionCommits.byEnvironmentId[envKey] ?? [];
+    let count = commits.length;
     const repoStatuses = state.gitStatus.byEnvironmentRepo[envKey] ?? {};
-    for (const status of Object.values(repoStatuses)) {
-      count += Object.keys(status.files ?? {}).length;
-    }
-    counts[envKey] = count;
+    const repoFingerprint = Object.entries(repoStatuses)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([repoName, status]) => {
+        count += Object.keys(status.files ?? {}).length;
+        return gitStatusFingerprint(repoName, status);
+      })
+      .join(";");
+    const commitFingerprint = commits.map((commit) => commit.commit_sha).join(",");
+    markers[envKey] = {
+      count,
+      fingerprint: `${repoFingerprint}#${commitFingerprint}`,
+    };
   }
 
-  return counts;
+  return markers;
 }
 
-export function markInactiveChangesCountIncreases(args: {
-  countsByEnv: Record<string, number>;
+export function selectChangesCountByEnvironment(state: ChangesMarkerState): Record<string, number> {
+  const markers = selectChangesMarkerByEnvironment(state);
+  return Object.fromEntries(
+    Object.entries(markers).map(([envKey, marker]) => [envKey, marker.count]),
+  );
+}
+
+function markerToSignal(marker: ChangesMarker): string {
+  return `${marker.count}\u0000${marker.fingerprint}`;
+}
+
+function signalToMarker(signal: string): ChangesMarker {
+  const separatorIndex = signal.indexOf("\u0000");
+  return {
+    count: Number(signal.slice(0, separatorIndex)),
+    fingerprint: signal.slice(separatorIndex + 1),
+  };
+}
+
+function signalsToMarkers(signalsByEnv: Record<string, string>): Record<string, ChangesMarker> {
+  return Object.fromEntries(
+    Object.entries(signalsByEnv).map(([envKey, signal]) => [envKey, signalToMarker(signal)]),
+  );
+}
+
+export function selectChangesSignalByEnvironment(
+  state: ChangesSignalState,
+): Record<string, string> {
+  const markers = selectChangesMarkerByEnvironment(state);
+  return Object.fromEntries(
+    Object.entries(markers).map(([envKey, marker]) => [envKey, markerToSignal(marker)]),
+  );
+}
+
+function shouldQueueInactiveFocus(args: {
+  envKey: string;
   activeEnvKey: string | null;
-  previousCounts: Record<string, number>;
+  previousActiveEnvKey: string | null;
+  previous: ChangesMarker;
+  next: ChangesMarker;
+}): boolean {
+  const { envKey, activeEnvKey, previousActiveEnvKey, previous, next } = args;
+  const changed =
+    next.count > previous.count || (next.count > 0 && next.fingerprint !== previous.fingerprint);
+  if (!changed) return false;
+  return (
+    envKey !== activeEnvKey || (previousActiveEnvKey !== null && envKey !== previousActiveEnvKey)
+  );
+}
+
+export function migrateEnvironmentKeys(args: {
+  environmentIdBySessionId: Record<string, string>;
+  previousMarkers: Record<string, ChangesMarker>;
   pendingEnvKeys: Set<string>;
 }): void {
-  const { countsByEnv, activeEnvKey, previousCounts, pendingEnvKeys } = args;
-  for (const [envKey, count] of Object.entries(countsByEnv)) {
-    const previous = previousCounts[envKey];
-    previousCounts[envKey] = count;
-    if (previous === undefined) continue;
-    if (envKey !== activeEnvKey && count > previous) pendingEnvKeys.add(envKey);
+  const { environmentIdBySessionId, previousMarkers, pendingEnvKeys } = args;
+  for (const [sessionId, envKey] of Object.entries(environmentIdBySessionId)) {
+    if (sessionId === envKey) continue;
+    if (pendingEnvKeys.delete(sessionId)) pendingEnvKeys.add(envKey);
+    if (previousMarkers[sessionId] && !previousMarkers[envKey]) {
+      previousMarkers[envKey] = previousMarkers[sessionId];
+    }
+    delete previousMarkers[sessionId];
   }
 }
 
-function useActiveEnvironmentKey(): string | null {
-  return useAppStore((state) => {
-    const sessionId = state.tasks.activeSessionId;
-    if (!sessionId) return null;
-    return state.environmentIdBySessionId[sessionId] ?? sessionId;
-  });
+export function markInactiveChangesIncreases(args: {
+  markersByEnv: Record<string, ChangesMarker>;
+  activeEnvKey: string | null;
+  previousActiveEnvKey: string | null;
+  previousMarkers: Record<string, ChangesMarker>;
+  pendingEnvKeys: Set<string>;
+}): void {
+  const { markersByEnv, activeEnvKey, previousActiveEnvKey, previousMarkers, pendingEnvKeys } =
+    args;
+  for (const [envKey, marker] of Object.entries(markersByEnv)) {
+    const previous = previousMarkers[envKey];
+    previousMarkers[envKey] = marker;
+    if (previous === undefined) continue;
+    if (
+      shouldQueueInactiveFocus({
+        envKey,
+        activeEnvKey,
+        previousActiveEnvKey,
+        previous,
+        next: marker,
+      })
+    ) {
+      pendingEnvKeys.add(envKey);
+    }
+  }
 }
 
-/**
- * Queue a Changes-panel focus request when a background task/env receives new
- * changes, then consume it after the user switches into that environment.
- */
-export function useChangesPanelAutoFocus() {
+export function shouldClearPendingChangesFocus(result: ActivateChangesPanelResult): boolean {
+  return result === "activated" || result === "no-panel";
+}
+
+export function useChangesPanelAutoFocus(activeEnvKey: string | null) {
   const api = useDockviewStore((s) => s.api);
   const isRestoringLayout = useDockviewStore((s) => s.isRestoringLayout);
-  const activeEnvKey = useActiveEnvironmentKey();
-  const countsByEnv = useAppStore(useShallow(selectChangesCountByEnvironment));
-  const previousCountsRef = useRef<Record<string, number>>({});
+  const signalsByEnv = useAppStore(useShallow(selectChangesSignalByEnvironment));
+  const environmentIdBySessionId = useAppStore((state) => state.environmentIdBySessionId);
+  const previousMarkersRef = useRef<Record<string, ChangesMarker>>({});
   const pendingEnvKeysRef = useRef<Set<string>>(new Set());
+  const previousActiveEnvKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    markInactiveChangesCountIncreases({
-      countsByEnv,
-      activeEnvKey,
-      previousCounts: previousCountsRef.current,
+    migrateEnvironmentKeys({
+      environmentIdBySessionId,
+      previousMarkers: previousMarkersRef.current,
       pendingEnvKeys: pendingEnvKeysRef.current,
     });
 
-    if (!activeEnvKey || isRestoringLayout) return;
-    if (!pendingEnvKeysRef.current.has(activeEnvKey)) return;
+    markInactiveChangesIncreases({
+      markersByEnv: signalsToMarkers(signalsByEnv),
+      activeEnvKey,
+      previousActiveEnvKey: previousActiveEnvKeyRef.current,
+      previousMarkers: previousMarkersRef.current,
+      pendingEnvKeys: pendingEnvKeysRef.current,
+    });
 
-    const result = activateChangesPanel(api);
-    if (result !== "no-api") pendingEnvKeysRef.current.delete(activeEnvKey);
-  }, [countsByEnv, activeEnvKey, api, isRestoringLayout]);
+    if (activeEnvKey && !isRestoringLayout && pendingEnvKeysRef.current.has(activeEnvKey)) {
+      const result = activateChangesPanel(api);
+      if (shouldClearPendingChangesFocus(result)) pendingEnvKeysRef.current.delete(activeEnvKey);
+    }
+
+    previousActiveEnvKeyRef.current = activeEnvKey;
+  }, [signalsByEnv, activeEnvKey, api, isRestoringLayout, environmentIdBySessionId]);
 }
