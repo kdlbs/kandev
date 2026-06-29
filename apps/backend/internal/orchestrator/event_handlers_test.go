@@ -993,6 +993,60 @@ func TestHandleAgentCompleted_CleansUpExecution(t *testing.T) {
 	}
 }
 
+func TestHandleAgentCompleted_DoesNotMoveTaskToReviewWhileSiblingRuns(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s-finishing", "")
+	seedExecutorRunning(t, repo, "s-finishing", "t1", "exec-finishing")
+
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:        "s-running",
+		TaskID:    "t1",
+		State:     models.TaskSessionStateRunning,
+		StartedAt: now.Add(time.Second),
+		UpdatedAt: now.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("failed to create running sibling session: %v", err)
+	}
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s-finishing",
+		AgentExecutionID: "exec-finishing",
+	})
+	waitForStopCall(t, agentMgr)
+
+	if got := taskRepo.stateWrites["t1"]; got != 0 {
+		t.Fatalf("agent completion must not move the task to REVIEW while another session is running, writes=%d state=%q",
+			got, taskRepo.updatedStates["t1"])
+	}
+}
+
+func TestHandleAgentFailedWithoutSession_DoesNotMoveTaskToReviewWhileSessionRuns(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s-running", "")
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+	svc.handleAgentFailed(ctx, watcher.AgentEventData{
+		TaskID:       "t1",
+		ErrorMessage: "agent failed before session binding",
+	})
+
+	if got := taskRepo.stateWrites["t1"]; got != 0 {
+		t.Fatalf("sessionless failure must not move the task to REVIEW while a session is running, writes=%d state=%q",
+			got, taskRepo.updatedStates["t1"])
+	}
+}
+
 func TestHandleAgentFailed_CleansUpExecution(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

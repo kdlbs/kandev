@@ -857,6 +857,32 @@ func TestSetSessionWaitingForInput_WritesOnTransition(t *testing.T) {
 	require.Equal(t, v1.TaskStateReview, taskRepo.updatedStates["t1"])
 }
 
+func TestSetSessionWaitingForInput_DoesNotMoveTaskToReviewWhileSiblingRuns(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s-finishing", "step1")
+
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:        "s-running",
+		TaskID:    "t1",
+		State:     models.TaskSessionStateRunning,
+		StartedAt: now.Add(time.Second),
+		UpdatedAt: now.Add(time.Second),
+	}))
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	svc.setSessionWaitingForInput(ctx, "t1", "s-finishing")
+
+	updatedFinishing, err := repo.GetTaskSession(ctx, "s-finishing")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, updatedFinishing.State)
+	require.Equal(t, 0, taskRepo.stateWrites["t1"],
+		"finishing one session must not move the task to REVIEW while another session is running")
+}
+
 func TestSessionStateString(t *testing.T) {
 	require.Equal(t, "", sessionStateString(nil),
 		"nil session must render as empty so trace logs stay clean")

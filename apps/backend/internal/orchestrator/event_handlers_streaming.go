@@ -558,7 +558,7 @@ func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, session
 			// write so a transient lookup failure doesn't drop a needed
 			// REVIEW transition.
 			s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false)
-			s.writeTaskReviewState(ctx, taskID)
+			s.writeTaskReviewState(ctx, taskID, sessionID)
 			return
 		}
 	}
@@ -574,10 +574,15 @@ func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, session
 		return
 	}
 
-	s.writeTaskReviewState(ctx, taskID)
+	s.writeTaskReviewState(ctx, taskID, sessionID)
 }
 
-func (s *Service) writeTaskReviewState(ctx context.Context, taskID string) {
+func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSessionID string) {
+	if s.hasOtherWorkingSession(ctx, taskID, completedSessionID) {
+		s.logger.Debug("skipping task REVIEW state while another session is working",
+			zap.String("task_id", taskID))
+		return
+	}
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
 		s.logger.Error("failed to update task state to REVIEW",
 			zap.String("task_id", taskID),
@@ -588,6 +593,29 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID string) {
 		zap.String("task_id", taskID))
 }
 
+func (s *Service) hasOtherWorkingSession(ctx context.Context, taskID, currentSessionID string) bool {
+	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("failed to list task sessions before REVIEW state reconcile",
+			zap.String("task_id", taskID),
+			zap.String("session_id", currentSessionID),
+			zap.Error(err))
+		return false
+	}
+	for _, session := range sessions {
+		if session == nil {
+			continue
+		}
+		if currentSessionID != "" && session.ID == currentSessionID {
+			continue
+		}
+		if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
+			return true
+		}
+	}
+	return false
+}
+
 // writeTaskReviewStateOnCancel clears the kanban "actively working" task
 // states when the user cancels a turn mid-flight by landing the task in
 // REVIEW — the same bucket a normal turn completion uses, so the sidebar
@@ -595,7 +623,7 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID string) {
 // Office task status reflects workflow position, not runtime cancel, so those
 // tasks are left alone. Only actively-working tasks are reconciled; tasks
 // already past IN_PROGRESS / SCHEDULING keep their state.
-func (s *Service) writeTaskReviewStateOnCancel(ctx context.Context, taskID string) {
+func (s *Service) writeTaskReviewStateOnCancel(ctx context.Context, taskID, sessionID string) {
 	dbTask, err := s.repo.GetTask(ctx, taskID)
 	if err != nil || dbTask == nil {
 		if err != nil {
@@ -606,6 +634,12 @@ func (s *Service) writeTaskReviewStateOnCancel(ctx context.Context, taskID strin
 		return
 	}
 	if dbTask.AssigneeAgentProfileID != "" {
+		return
+	}
+	if s.hasOtherWorkingSession(ctx, taskID, sessionID) {
+		s.logger.Debug("skipping task REVIEW state after cancel while another session is working",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
 		return
 	}
 

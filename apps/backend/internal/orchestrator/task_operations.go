@@ -2252,7 +2252,7 @@ func (s *Service) handlePromptError(ctx context.Context, taskID, sessionID strin
 	// in progress while it retries — so don't flap it to REVIEW here.
 	if !isTransientPromptError(err) && !errors.Is(err, lifecycle.ErrCancelEscalated) &&
 		!routingerr.IsTransientProviderError(err.Error()) {
-		_ = s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview)
+		s.writeTaskReviewState(ctx, taskID, sessionID)
 	}
 	s.completeTurnForSession(ctx, sessionID)
 	return err
@@ -2450,7 +2450,7 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	// cancelled turn is treated as finished work the user may want to review.
 	if session != nil {
 		s.updateTaskSessionState(ctx, session.TaskID, sessionID, models.TaskSessionStateWaitingForInput, "", true, session)
-		s.writeTaskReviewStateOnCancel(ctx, session.TaskID)
+		s.writeTaskReviewStateOnCancel(ctx, session.TaskID, sessionID)
 	}
 
 	// Record cancellation in the message history

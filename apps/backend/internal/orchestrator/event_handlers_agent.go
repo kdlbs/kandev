@@ -521,14 +521,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 
 	// If no workflow transition occurred, move task to REVIEW state for user review
 	if !transitioned {
-		if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateReview); err != nil {
-			s.logger.Error("failed to update task state to REVIEW",
-				zap.String("task_id", data.TaskID),
-				zap.Error(err))
-		} else {
-			s.logger.Info("task moved to REVIEW state after agent completion",
-				zap.String("task_id", data.TaskID))
-		}
+		s.writeTaskReviewState(ctx, data.TaskID, data.SessionID)
 	}
 
 	// Capture a git status snapshot before cleanup so it can be served
@@ -589,15 +582,11 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 		return
 	}
 
-	// No session — fall back to scheduler retry + task to REVIEW.
+	// No session — fall back to scheduler retry + task to REVIEW unless another
+	// session is still working.
 	s.scheduler.HandleTaskCompleted(data.TaskID, false)
 	s.scheduler.RetryTask(data.TaskID)
-
-	if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateReview); err != nil {
-		s.logger.Error("failed to update task state to REVIEW after failure",
-			zap.String("task_id", data.TaskID),
-			zap.Error(err))
-	}
+	s.writeTaskReviewState(ctx, data.TaskID, data.SessionID)
 
 	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
 }
@@ -670,12 +659,8 @@ func (s *Service) handleResumeFailure(ctx context.Context, data watcher.AgentEve
 	// 3. Set session to WAITING_FOR_INPUT (not FAILED) so the user can interact.
 	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, models.TaskSessionStateWaitingForInput, "", false)
 
-	// 4. Ensure task is in REVIEW state.
-	if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateReview); err != nil {
-		s.logger.Warn("failed to set task to REVIEW after resume failure",
-			zap.String("task_id", data.TaskID),
-			zap.Error(err))
-	}
+	// 4. Ensure task is in REVIEW state unless another session is still working.
+	s.writeTaskReviewState(ctx, data.TaskID, data.SessionID)
 
 	return true
 }
@@ -715,12 +700,8 @@ func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.Age
 	}
 	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, nextState, data.ErrorMessage, false)
 
-	// Ensure task is in REVIEW state.
-	if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateReview); err != nil {
-		s.logger.Warn("failed to set task to REVIEW after recoverable failure",
-			zap.String("task_id", data.TaskID),
-			zap.Error(err))
-	}
+	// Ensure task is in REVIEW state unless another session is still working.
+	s.writeTaskReviewState(ctx, data.TaskID, data.SessionID)
 
 	// Clean up the agent execution.
 	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)

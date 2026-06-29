@@ -2159,12 +2159,13 @@ func (s *Service) applyEngineTransition(
 	// IN_PROGRESS, leaving the spinner spinning in the new column even though
 	// the agent has paused. If the target step's on_enter starts another agent,
 	// setSessionRunning will flip tasks.state back to IN_PROGRESS — the
-	// REVIEW write is a safe intermediate that any active-running follow-up
-	// will overwrite.
+	// REVIEW write is a safe intermediate when no sibling session is already
+	// working; otherwise the task should remain IN_PROGRESS until all active
+	// agent work has paused.
 	if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
 		s.updateTaskSessionState(ctx, taskID, session.ID, models.TaskSessionStateWaitingForInput, "", false, session)
 		session.State = models.TaskSessionStateWaitingForInput
-		s.writeTaskReviewState(ctx, taskID)
+		s.writeTaskReviewState(ctx, taskID, session.ID)
 	}
 
 	// Launch processOnEnter asynchronously to avoid blocking the stream reader goroutine.

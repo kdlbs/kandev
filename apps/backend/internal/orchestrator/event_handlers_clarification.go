@@ -14,7 +14,6 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
-	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // subscribeClarificationEvents subscribes to clarification-related events.
@@ -80,11 +79,7 @@ func (s *Service) handleClarificationStaleDismissed(ctx context.Context, event *
 	s.finalizeAutomationRunIfEphemeral(writeCtx, data.TaskID, data.SessionID, true, "")
 	transitioned := s.processOnTurnCompleteViaEngine(writeCtx, data.TaskID, session)
 	if !transitioned {
-		if err := s.taskRepo.UpdateTaskState(writeCtx, data.TaskID, v1.TaskStateReview); err != nil {
-			s.logger.Error("failed to update task state to REVIEW after stale-dismiss",
-				zap.String("task_id", data.TaskID),
-				zap.Error(err))
-		}
+		s.writeTaskReviewState(writeCtx, data.TaskID, data.SessionID)
 	}
 	return nil
 }
