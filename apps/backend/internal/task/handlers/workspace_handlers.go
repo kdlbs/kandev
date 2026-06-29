@@ -154,7 +154,11 @@ type httpDeleteWorkspaceRequest struct {
 
 func (h *WorkspaceHandlers) httpDeleteWorkspace(c *gin.Context) {
 	var body httpDeleteWorkspaceRequest
-	if err := c.ShouldBindJSON(&body); err != nil || body.ConfirmName == "" {
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if body.ConfirmName == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "confirm_name is required"})
 		return
 	}
@@ -167,7 +171,7 @@ func (h *WorkspaceHandlers) httpDeleteWorkspace(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		handleNotFound(c, h.logger, err, "workspace not deleted")
+		handleNotFound(c, h.logger, err, "workspace not found")
 		return
 	}
 	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
