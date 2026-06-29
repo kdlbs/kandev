@@ -118,6 +118,19 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 	if err != nil {
 		return err
 	}
+	workflows, err := s.workflows.ListWorkflows(ctx, id, true)
+	if err != nil {
+		return fmt.Errorf("list workspace workflows: %w", err)
+	}
+	if confirmedName != nil {
+		if err := s.workspaces.DeleteWorkspaceWithName(ctx, id, *confirmedName); err != nil {
+			if errors.Is(err, taskrepo.ErrWorkspaceNameMismatch) {
+				return ErrWorkspaceConfirmNameMismatch
+			}
+			s.logger.Error("failed to delete workspace", zap.String("workspace_id", id), zap.Error(err))
+			return err
+		}
+	}
 	// Workspace deletion hard-deletes tasks. Do this before workflow deletion so
 	// DeleteWorkflow does not archive children that are being removed anyway.
 	for _, task := range tasks {
@@ -128,10 +141,6 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 			return fmt.Errorf("delete task %s: %w", task.ID, err)
 		}
 	}
-	workflows, err := s.workflows.ListWorkflows(ctx, id, true)
-	if err != nil {
-		return fmt.Errorf("list workspace workflows: %w", err)
-	}
 	for _, workflow := range workflows {
 		if workflow == nil || workflow.ID == "" {
 			continue
@@ -141,18 +150,11 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 		}
 	}
 
-	var deleteErr error
 	if confirmedName == nil {
-		deleteErr = s.workspaces.DeleteWorkspace(ctx, id)
-	} else {
-		deleteErr = s.workspaces.DeleteWorkspaceWithName(ctx, id, *confirmedName)
-		if errors.Is(deleteErr, taskrepo.ErrWorkspaceNameMismatch) {
-			return ErrWorkspaceConfirmNameMismatch
+		if err := s.workspaces.DeleteWorkspace(ctx, id); err != nil {
+			s.logger.Error("failed to delete workspace", zap.String("workspace_id", id), zap.Error(err))
+			return err
 		}
-	}
-	if deleteErr != nil {
-		s.logger.Error("failed to delete workspace", zap.String("workspace_id", id), zap.Error(deleteErr))
-		return deleteErr
 	}
 	s.publishWorkspaceEvent(ctx, events.WorkspaceDeleted, workspace)
 	s.logger.Info("workspace deleted", zap.String("workspace_id", id))

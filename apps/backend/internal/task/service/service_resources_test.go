@@ -277,6 +277,16 @@ func TestService_DeleteWorkspaceWithConfirmNameRejectsFinalNameMismatch(t *testi
 	ctx := context.Background()
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-delete", Name: "Delete Me"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-delete", WorkspaceID: "ws-delete", Name: "Doomed"})
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:             "task-delete",
+		WorkspaceID:    "ws-delete",
+		WorkflowID:     "wf-delete",
+		WorkflowStepID: "step-delete",
+		Title:          "Delete task",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
 	svc.workspaces = renameBeforeConfirmedDeleteRepo{WorkspaceRepository: repo}
 
 	err := svc.DeleteWorkspaceWithConfirmName(ctx, "ws-delete", "Delete Me")
@@ -289,6 +299,12 @@ func TestService_DeleteWorkspaceWithConfirmNameRejectsFinalNameMismatch(t *testi
 	}
 	if workspace.Name != "Renamed" {
 		t.Fatalf("workspace should keep concurrent rename, got %q", workspace.Name)
+	}
+	if _, err := repo.GetTask(ctx, "task-delete"); err != nil {
+		t.Fatalf("workspace task should remain: %v", err)
+	}
+	if _, err := repo.GetWorkflow(ctx, "wf-delete"); err != nil {
+		t.Fatalf("workspace workflow should remain: %v", err)
 	}
 }
 
