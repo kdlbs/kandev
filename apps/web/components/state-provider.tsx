@@ -8,6 +8,7 @@ import type { AppState, StoreProviderProps } from "@/lib/state/store";
 import { createAppStore } from "@/lib/state/store";
 import { removeLocalStorage, setLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
+import { clearQueuedTaskCreateLastUsedIfSynced } from "./task-create-dialog-handlers";
 
 const StoreContext = createContext<StoreApi<AppState> | null>(null);
 
@@ -72,6 +73,7 @@ function syncTaskCreateLastUsedCache(state: AppState) {
     STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID,
     lastUsed?.executorProfileId,
   );
+  clearQueuedTaskCreateLastUsedIfSynced(lastUsed);
 }
 
 function syncTaskCreateLastUsedCacheField(key: string, value: string | null | undefined) {

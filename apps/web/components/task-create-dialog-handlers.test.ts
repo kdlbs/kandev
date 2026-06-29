@@ -46,4 +46,36 @@ describe("syncTaskCreateLastUsed", () => {
       branch: "feature",
     });
   });
+
+  it("keeps queued fields when preserved settings have not caught up", () => {
+    syncTaskCreateLastUsed({ branch: "feature" });
+
+    resetTaskCreateLastUsedSync({
+      syncedSettings: {
+        repositoryId: null,
+        branch: "main",
+        agentProfileId: null,
+        executorProfileId: null,
+      },
+    });
+
+    expect(readQueuedTaskCreateLastUsedState()).toMatchObject({
+      branch: "feature",
+    });
+  });
+
+  it("clears queued fields when preserved settings already match", () => {
+    syncTaskCreateLastUsed({ branch: "feature" });
+
+    resetTaskCreateLastUsedSync({
+      syncedSettings: {
+        repositoryId: null,
+        branch: "feature",
+        agentProfileId: null,
+        executorProfileId: null,
+      },
+    });
+
+    expect(readQueuedTaskCreateLastUsedState()).toEqual({});
+  });
 });

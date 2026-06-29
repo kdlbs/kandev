@@ -5,6 +5,7 @@ import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 import { Dialog, DialogContent, DialogHeader, DialogFooter } from "@kandev/ui/dialog";
 import type { Task, Repository } from "@/lib/types/http";
+import type { TaskCreateLastUsedState } from "@/lib/state/slices/settings/types";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { useKeyboardShortcutHandler } from "@/hooks/use-keyboard-shortcut";
@@ -43,6 +44,7 @@ import {
   buildDialogFormBodyProps,
 } from "@/components/task-create-dialog-prop-builders";
 import { resetTaskCreateLastUsedSync } from "@/components/task-create-dialog-handlers";
+import { useAppStore } from "@/components/state-provider";
 import { TaskCreateDialogPopoverContainerProvider } from "@/hooks/use-task-create-dialog-popover-container";
 
 export interface TaskCreateDialogProps {
@@ -499,20 +501,27 @@ function useGuardedSubmit(
 const VOICE_SUBMIT_EVENT = { preventDefault: () => {} } as unknown as FormEvent;
 
 export function TaskCreateDialog(props: TaskCreateDialogProps) {
-  const preserveQueuedLastUsedOnCloseRef = useRef(false);
+  const syncedTaskCreateLastUsed = useAppStore((state) => state.userSettings.taskCreateLastUsed);
+  const preserveQueuedLastUsedOnCloseRef = useRef<{
+    syncedSettings: TaskCreateLastUsedState | null | undefined;
+  } | null>(null);
   const preserveQueuedLastUsedOnClose = useCallback(() => {
-    preserveQueuedLastUsedOnCloseRef.current = true;
-  }, []);
+    preserveQueuedLastUsedOnCloseRef.current = { syncedSettings: syncedTaskCreateLastUsed };
+  }, [syncedTaskCreateLastUsed]);
   const setup = useTaskCreateDialogSetup(props, { preserveQueuedLastUsedOnClose });
   const { guardedHandleSubmit } = setup;
   const [popoverContainer, setPopoverContainer] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     if (props.open) {
-      preserveQueuedLastUsedOnCloseRef.current = false;
+      preserveQueuedLastUsedOnCloseRef.current = null;
       return;
     }
-    resetTaskCreateLastUsedSync({ clearQueued: !preserveQueuedLastUsedOnCloseRef.current });
-    preserveQueuedLastUsedOnCloseRef.current = false;
+    const preserveQueued = preserveQueuedLastUsedOnCloseRef.current;
+    resetTaskCreateLastUsedSync({
+      clearQueued: !preserveQueued,
+      syncedSettings: preserveQueued?.syncedSettings,
+    });
+    preserveQueuedLastUsedOnCloseRef.current = null;
   }, [props.open]);
   // Voice auto-send invokes the same submit handler as the in-form Submit
   // button. Every existing validation gate (missing title/repo/branch/agent,

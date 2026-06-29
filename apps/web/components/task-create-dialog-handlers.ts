@@ -24,13 +24,44 @@ const lastUsedDebug = createDebugLogger("task-create:last-used");
  * Pass `clearQueued` when test setup or teardown should also wipe the queued
  * overlay that protects settings fetches from stale server values.
  */
-export function resetTaskCreateLastUsedSync(options: { clearQueued?: boolean } = {}) {
-  if (options.clearQueued) lastQueuedLastUsed = {};
+export function resetTaskCreateLastUsedSync(
+  options: {
+    clearQueued?: boolean;
+    syncedSettings?: TaskCreateLastUsedState | null | undefined;
+  } = {},
+) {
+  if (options.clearQueued) {
+    lastQueuedLastUsed = {};
+  } else if (taskCreateLastUsedSettingsMatchQueue(options.syncedSettings)) {
+    lastQueuedLastUsed = {};
+  }
   lastUsedDebug("overlay-reset");
 }
 
 export function readQueuedTaskCreateLastUsedState(): Partial<TaskCreateLastUsedState> {
   return lastQueuedLastUsed;
+}
+
+export function clearQueuedTaskCreateLastUsedIfSynced(
+  settings: TaskCreateLastUsedState | null | undefined,
+) {
+  if (!hasQueuedTaskCreateLastUsed()) return;
+  if (!taskCreateLastUsedSettingsMatchQueue(settings)) return;
+  lastQueuedLastUsed = {};
+  lastUsedDebug("overlay-cleared-after-settings-sync");
+}
+
+function hasQueuedTaskCreateLastUsed() {
+  return Object.values(lastQueuedLastUsed).some((value) => value !== undefined);
+}
+
+function taskCreateLastUsedSettingsMatchQueue(
+  settings: TaskCreateLastUsedState | null | undefined,
+) {
+  return Object.entries(lastQueuedLastUsed).every(([key, value]) => {
+    if (value === undefined) return true;
+    return settings?.[key as keyof TaskCreateLastUsedState] === value;
+  });
 }
 
 function mapTaskCreateLastUsedPatch(
