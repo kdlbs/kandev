@@ -15,6 +15,9 @@ from pathlib import Path
 # A valid pinned ref is exactly 40 lowercase hex characters.
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
+# Docker container actions are pinned by immutable registry digest.
+DOCKER_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+
 # Matches a `uses:` step line, capturing everything after `uses:` up to an
 # optional trailing YAML comment. The outer group is intentionally lazy so
 # trailing `# tag` comments are consumed by the optional group rather than
@@ -25,7 +28,7 @@ USES_RE = re.compile(r"^\s*-?\s*uses:\s+(.+?)(?:\s+#.*)?$")
 
 workflows_dir = Path(__file__).parent.parent / "workflows"
 
-violations: list[str] = []
+violations: list[tuple[str, int, str]] = []
 
 for path in sorted(p for ext in ("*.yml", "*.yaml") for p in workflows_dir.glob(ext)):
     for lineno, line in enumerate(path.read_text().splitlines(), start=1):
@@ -33,35 +36,39 @@ for path in sorted(p for ext in ("*.yml", "*.yaml") for p in workflows_dir.glob(
         if not m:
             continue
 
+        uses_value = m.group(1).strip()
+
+        # Local actions and reusable workflows reference checked-out source, not
+        # an external registry.
+        if uses_value.startswith("./"):
+            continue
+
         # Split on the last `@` to separate the action name from its ref.
         # rpartition returns ("", "", value) when `@` is absent.
-        uses_value = m.group(1).strip()
         action, sep, ref = uses_value.rpartition("@")
-        if not sep:
-            # No `@` — local action (`./...`) without a pin; skip.
-            continue
 
-        # Local reusable workflows: uses: ./.github/workflows/foo.yml@ref
-        # These reference local content with no external registry.
-        if action.startswith("./"):
-            continue
-
-        # Docker container actions: uses: docker://image@sha256:digest
-        # The ref after `@` is a registry digest, not a commit SHA.
         if action.startswith("docker://"):
+            if sep and DOCKER_DIGEST_RE.match(ref):
+                continue
+            rel = path.relative_to(Path(__file__).parent.parent.parent)
+            violations.append((str(rel), lineno, line.strip()))
             continue
 
-        if not SHA_RE.match(ref):
+        if not sep or not SHA_RE.match(ref):
             rel = path.relative_to(Path(__file__).parent.parent.parent)
             violations.append((str(rel), lineno, line.strip()))
 
 if violations:
     for file, lineno, text in violations:
         # GitHub Actions annotation — shown inline on the PR diff.
-        print(f"::error file={file},line={lineno}::Unpinned action ref (use a 40-char commit SHA): {text}")
+        print(
+            f"::error file={file},line={lineno}::Unpinned action ref "
+            f"(use a 40-char commit SHA, or @sha256:<digest> for docker://): {text}"
+        )
     print(
         f"\n{len(violations)} unpinned ref(s) found. "
-        "Pin each `uses:` to a commit SHA and keep the version tag as a comment:\n"
+        "Pin each GitHub action `uses:` to a commit SHA, and each docker:// action to a digest. "
+        "Keep the version tag as a comment:\n"
         "  uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6",
         file=sys.stderr,
     )
