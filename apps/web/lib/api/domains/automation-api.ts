@@ -95,3 +95,13 @@ export async function deleteTrigger(id: string): Promise<{ deleted: boolean }> {
 export async function listTriggerTypes(): Promise<TriggerTypeInfo[]> {
   return requireClient().request<TriggerTypeInfo[]>("automation.trigger_types", {});
 }
+
+export async function deleteAutomationRun(runId: string): Promise<{ deleted: boolean }> {
+  return requireClient().request<{ deleted: boolean }>("automation.run.delete", { run_id: runId });
+}
+
+export async function deleteAllAutomationRuns(automationId: string): Promise<{ deleted: boolean }> {
+  return requireClient().request<{ deleted: boolean }>("automation.runs.delete_all", {
+    automation_id: automationId,
+  });
+}

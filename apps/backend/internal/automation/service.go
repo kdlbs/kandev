@@ -3,6 +3,7 @@ package automation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,13 +12,21 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
+
+// TaskDeleter deletes a task and cleans up its resources.
+// Satisfied by *taskservice.Service; injected to avoid a cyclic import.
+type TaskDeleter interface {
+	DeleteTask(ctx context.Context, id string) error
+}
 
 // Service coordinates automation operations.
 type Service struct {
-	store    *Store
-	eventBus bus.EventBus
-	logger   *logger.Logger
+	store       *Store
+	eventBus    bus.EventBus
+	logger      *logger.Logger
+	taskDeleter TaskDeleter // optional; nil-safe
 }
 
 // NewService creates a new automation service.
@@ -32,6 +41,12 @@ func NewService(store *Store, eventBus bus.EventBus, log *logger.Logger) *Servic
 // Store returns the underlying store (for scheduler/poller access).
 func (s *Service) Store() *Store {
 	return s.store
+}
+
+// SetTaskDeleter wires the task deletion handler for run cleanup.
+// Optional: when nil, run deletion skips task teardown.
+func (s *Service) SetTaskDeleter(d TaskDeleter) {
+	s.taskDeleter = d
 }
 
 // --- Automation CRUD ---
@@ -172,6 +187,49 @@ func (s *Service) DeleteTrigger(ctx context.Context, id string) error {
 // ListRuns returns recent runs for an automation.
 func (s *Service) ListRuns(ctx context.Context, automationID string, limit int) ([]*AutomationRun, error) {
 	return s.store.ListRuns(ctx, automationID, limit)
+}
+
+// DeleteRun removes a single run and its associated task (if any).
+// Task deletion is best-effort: a not-found error is silently ignored so
+// stale/orphaned run rows are always removable by the user.
+func (s *Service) DeleteRun(ctx context.Context, runID string) error {
+	run, err := s.store.GetRun(ctx, runID)
+	if err != nil {
+		return fmt.Errorf("get run: %w", err)
+	}
+	if run != nil && run.TaskID != "" && s.taskDeleter != nil {
+		if delErr := s.taskDeleter.DeleteTask(ctx, run.TaskID); delErr != nil {
+			if !errors.Is(delErr, taskrepo.ErrTaskNotFound) {
+				return fmt.Errorf("delete task: %w", delErr)
+			}
+			s.logger.Debug("run task already gone, continuing delete",
+				zap.String("run_id", runID),
+				zap.String("task_id", run.TaskID))
+		}
+	}
+	return s.store.DeleteRun(ctx, runID)
+}
+
+// DeleteAllRuns removes every run for an automation, deleting each associated
+// task first. Task deletion is best-effort: not-found errors are ignored.
+func (s *Service) DeleteAllRuns(ctx context.Context, automationID string) error {
+	if s.taskDeleter != nil {
+		taskIDs, err := s.store.ListRunTaskIDs(ctx, automationID)
+		if err != nil {
+			return fmt.Errorf("list run task ids: %w", err)
+		}
+		for _, taskID := range taskIDs {
+			if delErr := s.taskDeleter.DeleteTask(ctx, taskID); delErr != nil {
+				if !errors.Is(delErr, taskrepo.ErrTaskNotFound) {
+					return fmt.Errorf("delete task %s: %w", taskID, delErr)
+				}
+				s.logger.Debug("run task already gone, skipping",
+					zap.String("automation_id", automationID),
+					zap.String("task_id", taskID))
+			}
+		}
+	}
+	return s.store.DeleteAllRuns(ctx, automationID)
 }
 
 // --- Trigger firing ---

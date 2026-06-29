@@ -50,7 +50,10 @@ function createAutomationsActions(
 
 function createRunsActions(
   set: ImmerSet,
-): Pick<AutomationsSlice, "setAutomationRuns" | "setAutomationRunsLoading"> {
+): Pick<
+  AutomationsSlice,
+  "setAutomationRuns" | "setAutomationRunsLoading" | "removeAutomationRun" | "clearAutomationRuns"
+> {
   return {
     setAutomationRuns: (automationId, runs) =>
       set((draft) => {
@@ -59,6 +62,17 @@ function createRunsActions(
     setAutomationRunsLoading: (automationId, loading) =>
       set((draft) => {
         draft.automationRuns.loading[automationId] = loading;
+      }),
+    removeAutomationRun: (automationId, runId) =>
+      set((draft) => {
+        const runs = draft.automationRuns.byAutomationId[automationId];
+        if (runs) {
+          draft.automationRuns.byAutomationId[automationId] = runs.filter((r) => r.id !== runId);
+        }
+      }),
+    clearAutomationRuns: (automationId) =>
+      set((draft) => {
+        draft.automationRuns.byAutomationId[automationId] = [];
       }),
   };
 }

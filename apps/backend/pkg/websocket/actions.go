@@ -553,6 +553,8 @@ const (
 	ActionAutomationTriggerDelete       = "automation.trigger.delete"
 	ActionAutomationTriggerTypes        = "automation.trigger_types"
 	ActionAutomationWebhookRevealSecret = "automation.webhook.reveal_secret"
+	ActionAutomationRunDelete           = "automation.run.delete"
+	ActionAutomationRunsDeleteAll       = "automation.runs.delete_all"
 )
 
 // Error codes

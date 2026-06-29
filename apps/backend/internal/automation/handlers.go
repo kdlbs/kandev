@@ -31,6 +31,8 @@ func registerWSHandlers(dispatcher *ws.Dispatcher, svc *Service, log *logger.Log
 	dispatcher.RegisterFunc(ws.ActionAutomationTriggerDelete, wsDeleteTrigger(svc, log))
 	dispatcher.RegisterFunc(ws.ActionAutomationTriggerTypes, wsTriggerTypes())
 	dispatcher.RegisterFunc(ws.ActionAutomationWebhookRevealSecret, wsRevealWebhookSecret(svc, log))
+	dispatcher.RegisterFunc(ws.ActionAutomationRunDelete, wsDeleteRun(svc, log))
+	dispatcher.RegisterFunc(ws.ActionAutomationRunsDeleteAll, wsDeleteAllRuns(svc, log))
 }
 
 func registerHTTPRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
@@ -288,5 +290,33 @@ func wsRevealWebhookSecret(svc *Service, _ *logger.Logger) func(ctx context.Cont
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "automation not found", nil)
 		}
 		return ws.NewResponse(msg.ID, msg.Action, &RevealWebhookSecretResponse{WebhookSecret: a.WebhookSecret})
+	}
+}
+
+func wsDeleteRun(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		payload, _ := parseMap(msg)
+		runID, _ := payload["run_id"].(string)
+		if runID == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "run_id required", nil)
+		}
+		if err := svc.DeleteRun(ctx, runID); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, map[string]bool{"deleted": true})
+	}
+}
+
+func wsDeleteAllRuns(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		payload, _ := parseMap(msg)
+		automationID, _ := payload["automation_id"].(string)
+		if automationID == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "automation_id required", nil)
+		}
+		if err := svc.DeleteAllRuns(ctx, automationID); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, map[string]bool{"deleted": true})
 	}
 }
