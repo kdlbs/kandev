@@ -164,6 +164,22 @@ describe("isPRReadyToMerge — aggregate counts", () => {
       ),
     ).toBe(false);
   });
+
+  it("does not treat no-review aggregate all-green counts as merge-ready without success state", () => {
+    expect(
+      isPRReadyToMerge(
+        makePR({
+          state: "open",
+          review_state: "",
+          pending_review_count: 0,
+          checks_state: "",
+          checks_total: 3,
+          checks_passing: 3,
+          mergeable_state: "clean",
+        }),
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("isPRReadyToMerge — required_reviews gate", () => {
@@ -338,6 +354,19 @@ describe("getPRStatusColor — aggregate checks", () => {
     const pr = makePR({
       state: "open",
       review_state: "approved",
+      checks_state: "",
+      checks_total: 5,
+      checks_passing: 5,
+      mergeable_state: "",
+    });
+    expect(getPRStatusColor(pr)).toBe("text-green-500");
+  });
+
+  it("treats aggregate all-green counts as passed when no reviews are required", () => {
+    const pr = makePR({
+      state: "open",
+      review_state: "",
+      pending_review_count: 0,
       checks_state: "",
       checks_total: 5,
       checks_passing: 5,

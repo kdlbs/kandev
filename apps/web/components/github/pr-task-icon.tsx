@@ -35,6 +35,13 @@ export function hasPRChecksInProgressForDisplay(pr: TaskPR): boolean {
   return pr.checks_state === "" && pr.checks_total > 0 && pr.checks_passing < pr.checks_total;
 }
 
+export function hasPRChecksPassedWithoutReviewWaitForDisplay(pr: TaskPR): boolean {
+  if (!hasPRChecksPassedForDisplay(pr)) return false;
+  if (pr.required_reviews != null && pr.review_count < pr.required_reviews) return false;
+  if (pr.pending_review_count > 0) return false;
+  return pr.review_state === "approved" || pr.review_state === "";
+}
+
 // Requires a positive CI signal so repos with no CI configured won't trigger
 // ready-to-merge on mergeable_state=clean alone. Display surfaces may fall
 // back to aggregate counts, but merge actions require GitHub's explicit
@@ -112,7 +119,7 @@ export function getPRStatusColor(pr: TaskPR): string {
   if (isPRWaitingOnBranchProtection(pr)) {
     return MUTED_FOREGROUND;
   }
-  if (pr.review_state === "approved" && hasPRChecksPassedForDisplay(pr)) {
+  if (hasPRChecksPassedWithoutReviewWaitForDisplay(pr)) {
     return "text-green-500";
   }
   if (hasPRChecksInProgressForDisplay(pr) || pr.review_state === "pending") {

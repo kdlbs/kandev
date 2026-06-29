@@ -28,7 +28,7 @@ import {
   aggregatePRStatusColor,
   getPRStatusColor,
   hasPRChecksInProgressForDisplay,
-  hasPRChecksPassedForDisplay,
+  hasPRChecksPassedWithoutReviewWaitForDisplay,
   isPRAwaitingReview,
   isPRReadyToMerge,
   isPRWaitingOnBranchProtection,
@@ -82,7 +82,7 @@ function PRStatusIcon({ pr }: { pr: TaskPR }) {
   if (isPRWaitingOnBranchProtection(pr)) {
     return <IconClock className="h-3 w-3 text-muted-foreground" />;
   }
-  if (hasPRChecksPassedForDisplay(pr) && pr.review_state === "approved") {
+  if (hasPRChecksPassedWithoutReviewWaitForDisplay(pr)) {
     return <IconCheck className="h-3 w-3 text-green-500" />;
   }
   if (hasPRChecksInProgressForDisplay(pr) || pr.review_state === "pending") {
