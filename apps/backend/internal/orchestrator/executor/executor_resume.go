@@ -230,7 +230,7 @@ func (e *Executor) backfillRepoDefaultBranch(ctx context.Context, repo *models.R
 // What remains here: state transitions (e.g., STARTING) and prepare-result
 // metadata merge, both of which are session-row concerns the lifecycle manager
 // doesn't know about.
-func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, resp *LaunchAgentResponse, startAgent bool, now time.Time) {
+func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, resp *LaunchAgentResponse, startAgent bool, now time.Time) error {
 	if startAgent {
 		session.State = models.TaskSessionStateStarting
 	}
@@ -249,7 +249,7 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 
 	var updateErr error
 	if startAgent {
-		updateErr = e.updateSessionStarting(ctx, taskID, session)
+		updateErr = e.updateSessionStarting(ctx, taskID, session, true)
 	} else {
 		updateErr = e.repo.UpdateTaskSession(ctx, session)
 	}
@@ -258,7 +258,9 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(updateErr))
+		return updateErr
 	}
+	return nil
 }
 
 // buildPrepareResultMetadata serializes a prepare result for storage in session metadata.
@@ -395,7 +397,10 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		return nil, err
 	}
 
-	e.persistResumeState(ctx, task.ID, session, startAgent)
+	if err := e.persistResumeState(ctx, task.ID, session, startAgent); err != nil {
+		e.stopUnstartedExecution(ctx, session.ID, resp.AgentExecutionID)
+		return nil, err
+	}
 	e.persistWorktreeAssociation(ctx, task.ID, session, repositoryID, resp)
 	// Refresh task_environments after a successful resume so the row reflects
 	// the new worktree, container, and ready status. Without this, sessions
@@ -833,7 +838,7 @@ func resolveResumeTaskDirName(existingEnv *models.TaskEnvironment, task *v1.Task
 // and not touched here — see lifecycle.persistExecutorRunning. The
 // orchestrator's only remaining responsibility is the session-row state
 // machine (STARTING / CompletedAt-clear).
-func (e *Executor) persistResumeState(ctx context.Context, taskID string, session *models.TaskSession, startAgent bool) {
+func (e *Executor) persistResumeState(ctx context.Context, taskID string, session *models.TaskSession, startAgent bool) error {
 	session.ErrorMessage = ""
 	if startAgent {
 		session.State = models.TaskSessionStateStarting
@@ -842,7 +847,7 @@ func (e *Executor) persistResumeState(ctx context.Context, taskID string, sessio
 
 	var updateErr error
 	if startAgent {
-		updateErr = e.updateSessionStarting(ctx, taskID, session)
+		updateErr = e.updateSessionStarting(ctx, taskID, session, false)
 	} else {
 		updateErr = e.repo.UpdateTaskSession(ctx, session)
 	}
@@ -851,7 +856,9 @@ func (e *Executor) persistResumeState(ctx context.Context, taskID string, sessio
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
 			zap.Error(updateErr))
+		return updateErr
 	}
+	return nil
 }
 
 // prNumberFromMetadata extracts a GitHub PR number from a task_repository's
@@ -888,6 +895,12 @@ func prNumberFromMetadata(metadata map[string]interface{}) int {
 // just logs successful process start.
 func (e *Executor) startAgentProcessOnResume(ctx context.Context, taskID string, session *models.TaskSession, agentExecutionID string) {
 	e.runAgentProcessAsync(ctx, taskID, session.ID, agentExecutionID, func(updCtx context.Context) {
+		if updateErr := e.updateTaskState(updCtx, taskID, v1.TaskStateInProgress); updateErr != nil {
+			e.logger.Warn("failed to update task state to IN_PROGRESS after resume start",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.Error(updateErr))
+		}
 		e.logger.Debug("agent resumed successfully",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),

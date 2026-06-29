@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -586,7 +587,7 @@ func (s *Service) deleteCompletedExecutionIfExpired(key string, expiresAt time.T
 	}
 }
 
-func (s *Service) setSessionStarting(ctx context.Context, taskID string, session *models.TaskSession) error {
+func (s *Service) setSessionStarting(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error {
 	if session == nil {
 		return nil
 	}
@@ -599,7 +600,7 @@ func (s *Service) setSessionStarting(ctx context.Context, taskID string, session
 		return err
 	}
 	if isTerminalSessionState(current.State) {
-		return nil
+		return fmt.Errorf("session %s is %s; cannot mark STARTING", session.ID, current.State)
 	}
 
 	oldState := current.State
@@ -618,7 +619,9 @@ func (s *Service) setSessionStarting(ctx context.Context, taskID string, session
 		}
 	}
 
-	s.writeTaskInProgressForRuntime(ctx, taskID)
+	if promoteTask {
+		s.writeTaskInProgressForRuntime(ctx, taskID)
+	}
 	return nil
 }
 

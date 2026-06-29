@@ -106,6 +106,19 @@ func (e *Executor) startAgentProcessAsync(ctx context.Context, taskID, sessionID
 	}, true, false)
 }
 
+func (e *Executor) stopUnstartedExecution(ctx context.Context, sessionID, agentExecutionID string) {
+	if agentExecutionID == "" {
+		return
+	}
+	stopCtx := context.WithoutCancel(ctx)
+	if stopErr := e.agentManager.StopAgent(stopCtx, agentExecutionID, true); stopErr != nil {
+		e.logger.Warn("failed to stop unstarted agent execution",
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", agentExecutionID),
+			zap.Error(stopErr))
+	}
+}
+
 // updateTaskState updates a task's state, using the callback if set for event publishing,
 // or falling back to the raw repository.
 func (e *Executor) updateTaskState(ctx context.Context, taskID string, state v1.TaskState) error {
@@ -127,9 +140,9 @@ func (e *Executor) updateSessionState(ctx context.Context, taskID, sessionID str
 // updateSessionStarting persists a full session-row STARTING transition, using
 // the orchestrator callback when present so task/session runtime state stays
 // serialized with guarded REVIEW reconciliation.
-func (e *Executor) updateSessionStarting(ctx context.Context, taskID string, session *models.TaskSession) error {
+func (e *Executor) updateSessionStarting(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error {
 	if e.onSessionStarting != nil {
-		return e.onSessionStarting(ctx, taskID, session)
+		return e.onSessionStarting(ctx, taskID, session, promoteTask)
 	}
 	return e.repo.UpdateTaskSession(ctx, session)
 }
@@ -560,7 +573,10 @@ func (e *Executor) handleLaunchFailure(ctx context.Context, taskID, sessionID st
 // finalizeLaunch persists launch state and returns the resulting TaskExecution.
 func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *models.TaskSession, agentProfileID, sessionID string, repoInfo *repoInfo, resp *LaunchAgentResponse, startAgent bool, execCfg executorConfig) (*TaskExecution, error) {
 	now := time.Now().UTC()
-	e.persistLaunchState(ctx, task.ID, sessionID, session, resp, startAgent, now)
+	if err := e.persistLaunchState(ctx, task.ID, sessionID, session, resp, startAgent, now); err != nil {
+		e.stopUnstartedExecution(ctx, sessionID, resp.AgentExecutionID)
+		return nil, err
+	}
 	e.persistWorktreeAssociation(ctx, task.ID, session, repoInfo.RepositoryID, resp)
 
 	sessionState := v1.TaskSessionStateCreated
@@ -1001,10 +1017,11 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 	session.State = models.TaskSessionStateStarting
 	session.ErrorMessage = ""
 	session.UpdatedAt = now
-	if err := e.updateSessionStarting(ctx, task.ID, session); err != nil {
+	if err := e.updateSessionStarting(ctx, task.ID, session, true); err != nil {
 		e.logger.Error("failed to update session state for agent start",
 			zap.String("session_id", session.ID),
 			zap.Error(err))
+		return nil, err
 	}
 
 	execution := &TaskExecution{

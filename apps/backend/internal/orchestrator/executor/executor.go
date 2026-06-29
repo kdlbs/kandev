@@ -496,8 +496,9 @@ type SessionStateChangeFunc func(ctx context.Context, taskID, sessionID string, 
 
 // SessionStartingFunc is called when the executor has prepared/resumed an
 // execution and needs to mark the session STARTING while preserving other
-// session-row updates such as metadata.
-type SessionStartingFunc func(ctx context.Context, taskID string, session *models.TaskSession) error
+// session-row updates such as metadata. promoteTask controls whether the
+// callback should also move the parent task to IN_PROGRESS immediately.
+type SessionStartingFunc func(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error
 
 // AgentStartFailedFunc is called when the agent process fails to start.
 // It receives the task/session/execution IDs and the error. fromResume is true

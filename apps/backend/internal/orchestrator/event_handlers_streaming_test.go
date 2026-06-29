@@ -651,13 +651,61 @@ func TestSetSessionStartingWritesTaskInProgress(t *testing.T) {
 	taskRepo := newMockTaskRepo()
 	svc := createTestService(repo, newMockStepGetter(), taskRepo)
 
-	require.NoError(t, svc.setSessionStarting(ctx, "t1", session))
+	require.NoError(t, svc.setSessionStarting(ctx, "t1", session, true))
 
 	updated, err := repo.GetTaskSession(ctx, "s1")
 	require.NoError(t, err)
 	require.Equal(t, models.TaskSessionStateStarting, updated.State)
 	require.Equal(t, 1, taskRepo.stateWrites["t1"])
 	require.Equal(t, v1.TaskStateInProgress, taskRepo.updatedStates["t1"])
+}
+
+func TestSetSessionStartingCanDeferTaskInProgress(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateStarting
+	session.ErrorMessage = ""
+	session.UpdatedAt = time.Now().UTC()
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	require.NoError(t, svc.setSessionStarting(ctx, "t1", session, false))
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateStarting, updated.State)
+	require.Empty(t, taskRepo.stateWrites)
+}
+
+func TestSetSessionStartingRejectsTerminalSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	current, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	current.State = models.TaskSessionStateCancelled
+	require.NoError(t, repo.UpdateTaskSession(ctx, current))
+
+	next := *current
+	next.State = models.TaskSessionStateStarting
+	next.ErrorMessage = ""
+	next.UpdatedAt = time.Now().UTC()
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	require.Error(t, svc.setSessionStarting(ctx, "t1", &next, true))
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateCancelled, updated.State)
+	require.Empty(t, taskRepo.stateWrites)
 }
 
 // Pins the call-site wiring: cancelled office turn must NOT leave the session at IDLE.

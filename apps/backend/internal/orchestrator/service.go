@@ -492,8 +492,8 @@ func NewService(
 		s.updateTaskSessionState(ctx, taskID, sessionID, state, errorMessage, true)
 		return nil
 	})
-	exec.SetOnSessionStarting(func(ctx context.Context, taskID string, session *models.TaskSession) error {
-		return s.setSessionStarting(ctx, taskID, session)
+	exec.SetOnSessionStarting(func(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error {
+		return s.setSessionStarting(ctx, taskID, session, promoteTask)
 	})
 	exec.SetOnLaunchFailed(s.handleSessionLaunchFailed)
 	exec.SetOnAgentStartFailed(s.handleAgentStartFailed)
