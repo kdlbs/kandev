@@ -546,7 +546,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          if ! bash scripts/release/desktop-signing-ready.sh macos; then
+          if ! bash scripts/release/desktop-signing-ready.sh macos >/dev/null 2>&1; then
             echo "MACOS_SIGNING_ENABLED=false" >> "$GITHUB_ENV"
             echo "::notice::macOS signing/notarization inputs are incomplete; building unsigned desktop artifact."
             exit 0
@@ -611,7 +611,7 @@ jobs:
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
           set -euo pipefail
-          if bash scripts/release/desktop-signing-ready.sh windows; then
+          if bash scripts/release/desktop-signing-ready.sh windows >/dev/null 2>&1; then
             echo "WINDOWS_SIGNING_ENABLED=true" >> "$GITHUB_ENV"
           else
             echo "WINDOWS_SIGNING_ENABLED=false" >> "$GITHUB_ENV"
@@ -688,15 +688,6 @@ jobs:
           WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
           WINDOWS_SIGNTOOL_PATH: ${{ secrets.WINDOWS_SIGNTOOL_PATH }}
         run: |
-          $missing = @()
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE)) { $missing += "WINDOWS_CERTIFICATE" }
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) { $missing += "WINDOWS_CERTIFICATE_PASSWORD" }
-
-          if ($missing.Count -gt 0) {
-            Write-Error "Windows signing step requires complete inputs: $($missing -join ', ')"
-            exit 1
-          }
-
           $certificatePath = Join-Path $env:RUNNER_TEMP "kandev-code-signing.pfx"
           [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
 
