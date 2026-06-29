@@ -28,6 +28,16 @@ func (s *Service) CleanupAllReviewTasks(ctx context.Context) (int, error) {
 	return s.sweepReviewMRTasks(ctx, tasks, deleter, checker), nil
 }
 
+// deleteTaskWithReason deletes a task, threading the cleanup reason through to
+// the task.deleted event when the wired deleter supports it (see
+// TaskDeleterWithReason). Falls back to plain DeleteTask otherwise.
+func deleteTaskWithReason(ctx context.Context, deleter TaskDeleter, taskID, reason string) error {
+	if d, ok := deleter.(TaskDeleterWithReason); ok {
+		return d.DeleteTaskWithReason(ctx, taskID, reason)
+	}
+	return deleter.DeleteTask(ctx, taskID)
+}
+
 func (s *Service) sweepReviewMRTasks(ctx context.Context, tasks []*ReviewMRTask, deleter TaskDeleter, checker TaskSessionChecker) int {
 	client := s.Client()
 	if client == nil {
@@ -100,7 +110,7 @@ func (s *Service) deleteReviewMRTaskIfTerminal(ctx context.Context, t *ReviewMRT
 			return false
 		}
 	}
-	if err := deleter.DeleteTask(ctx, t.TaskID); err != nil {
+	if err := deleteTaskWithReason(ctx, deleter, t.TaskID, "pr_merged_or_closed"); err != nil {
 		s.logger.Warn("delete review task during cleanup",
 			zap.String("task_id", t.TaskID), zap.Error(err))
 		return false
@@ -191,7 +201,7 @@ func (s *Service) deleteIssueWatchTaskIfTerminal(ctx context.Context, t *IssueWa
 			return false
 		}
 	}
-	if err := deleter.DeleteTask(ctx, t.TaskID); err != nil {
+	if err := deleteTaskWithReason(ctx, deleter, t.TaskID, "issue_closed"); err != nil {
 		s.logger.Warn("delete issue task during cleanup",
 			zap.String("task_id", t.TaskID), zap.Error(err))
 		return false
