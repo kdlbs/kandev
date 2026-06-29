@@ -57,9 +57,13 @@ class HarnessLinterTest(unittest.TestCase):
             ".agents/skills/fix/SKILL.md": "skill",
             ".augment/skills/fix/SKILL.md": "skill",
             ".claude/skills/fix/SKILL.md": "skill",
+            ".cursor/skills/fix/SKILL.md": "skill",
+            ".opencode/skills/fix/SKILL.md": "skill",
             "apps/backend/internal/office/configloader/skills/memory/SKILL.md": "skill",
             ".agents/skills/fix/references/troubleshooting.md": "reference",
             ".claude/skills/fix/references/troubleshooting.md": "reference",
+            ".cursor/skills/fix/references/troubleshooting.md": "reference",
+            ".opencode/skills/fix/references/troubleshooting.md": "reference",
             "apps/backend/internal/office/configloader/skills/memory/REFERENCE.md": "reference",
             ".agents/agents/qa.md": "role-agent",
             ".opencode/agents/qa.md": "role-agent",
@@ -240,6 +244,17 @@ class HarnessLinterTest(unittest.TestCase):
         self.assertEqual(len(weak_violations), 1)
         self.assertIn("lacks a routing phrase", weak_violations[0].msg)
         self.assertEqual(quoted_violations, [])
+
+    def test_toml_description_requires_parser(self) -> None:
+        linter = load_linter()
+        path = self.write(".codex/agents/qa.toml", 'description = "Use when testing."\n')
+        original = linter.tomllib
+        linter.tomllib = None
+        try:
+            with self.assertRaisesRegex(RuntimeError, "Python 3.11\\+ or the 'tomli' package"):
+                linter.lint_path(path, "role-agent", {"description-word-limit": {"limit": 600}})
+        finally:
+            linter.tomllib = original
 
     def test_description_when_uses_explicit_routing_phrases(self) -> None:
         linter = load_linter()

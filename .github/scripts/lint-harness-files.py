@@ -121,17 +121,21 @@ def main() -> int:
     violations = []
     linted = 0
 
-    for path in paths:
-        kind = classify_path(path)
-        if kind == "unknown":
-            continue
-        linted += 1
-        rules = dict(DEFAULT_RULES_BY_KIND.get(kind, {}))
-        for rule in enabled:
-            if kind not in OPT_IN_RULES_BY_KIND[rule]:
+    try:
+        for path in paths:
+            kind = classify_path(path)
+            if kind == "unknown":
                 continue
-            rules.setdefault(rule, {})
-        violations.extend(lint_path(path, kind, rules=rules, disabled=disabled))
+            linted += 1
+            rules = dict(DEFAULT_RULES_BY_KIND.get(kind, {}))
+            for rule in enabled:
+                if kind not in OPT_IN_RULES_BY_KIND[rule]:
+                    continue
+                rules.setdefault(rule, {})
+            violations.extend(lint_path(path, kind, rules=rules, disabled=disabled))
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
 
     for violation in violations:
         print(format_violation(violation, cwd))
@@ -194,6 +198,8 @@ def classify_path(path: Path) -> str:
         has_subpath(parts, [".agents", "skills"])
         or has_subpath(parts, [".augment", "skills"])
         or has_subpath(parts, [".claude", "skills"])
+        or has_subpath(parts, [".cursor", "skills"])
+        or has_subpath(parts, [".opencode", "skills"])
     ):
         if name == "SKILL.md":
             return "skill"
@@ -397,7 +403,10 @@ def strip_yaml_scalar(value: str) -> str:
 
 def extract_toml_description(text: str) -> str | None:
     if tomllib is None:
-        return None
+        raise RuntimeError(
+            "TOML harness files require Python 3.11+ or the 'tomli' package. "
+            "Install tomli or run this linter with Python 3.11+."
+        )
     try:
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError:
