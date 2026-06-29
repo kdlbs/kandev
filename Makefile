@@ -423,6 +423,7 @@ test-scripts:
 	@bash scripts/pr-state.test.sh
 	@bash scripts/opencode-code-review.test.sh
 	@python3 scripts/opencode-code-review.test.py
+	@python3 scripts/lint-harness-files.test.py
 	@bash scripts/release-desktop.test.sh
 
 .PHONY: test-e2e
@@ -467,7 +468,7 @@ test-e2e-ci:
 #
 
 .PHONY: lint
-lint: lint-backend lint-web
+lint: lint-backend lint-web lint-harness
 	@printf "\n$(GREEN)$(BOLD)✓ Linting complete!$(RESET)\n"
 
 .PHONY: lint-backend
@@ -479,6 +480,11 @@ lint-backend:
 lint-web:
 	@printf "$(CYAN)Linting web app...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web lint
+
+.PHONY: lint-harness
+lint-harness:
+	@printf "$(CYAN)Linting harness files...$(RESET)\n"
+	@python3 .github/scripts/lint-harness-files.py --all
 
 .PHONY: lint-format
 lint-format:

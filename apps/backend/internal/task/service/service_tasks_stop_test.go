@@ -51,10 +51,10 @@ func TestIsCleanableSessionState_IdleIncluded(t *testing.T) {
 // stubExecutors is a minimal repository.ExecutorRepository implementation for tests.
 type stubExecutors struct {
 	repository.ExecutorRepository
-	runningByTaskID   []*models.ExecutorRunning
-	runningByTaskErr  error
-	runningBySession  *models.ExecutorRunning
-	runningBySessErr  error
+	runningByTaskID  []*models.ExecutorRunning
+	runningByTaskErr error
+	runningBySession *models.ExecutorRunning
+	runningBySessErr error
 }
 
 func (s *stubExecutors) ListExecutorsRunningByTaskID(_ context.Context, _ string) ([]*models.ExecutorRunning, error) {
@@ -150,7 +150,7 @@ type stubStopper struct {
 	stopSessionErr error
 }
 
-func (s *stubStopper) StopTask(_ context.Context, _, _ string, _ bool) error   { return nil }
+func (s *stubStopper) StopTask(_ context.Context, _, _ string, _ bool) error      { return nil }
 func (s *stubStopper) StopExecution(_ context.Context, _, _ string, _ bool) error { return nil }
 func (s *stubStopper) StopSession(_ context.Context, _, _ string, _ bool) error {
 	return s.stopSessionErr
