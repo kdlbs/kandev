@@ -186,6 +186,30 @@ class HarnessLinterTest(unittest.TestCase):
                 self.assertEqual(len(violations), 1)
                 self.assertIn(expected, violations[0].msg)
 
+    def test_description_when_supports_yaml_block_scalar_descriptions(self) -> None:
+        linter = load_linter()
+        valid = self.write(
+            ".agents/skills/block/SKILL.md",
+            "---\n"
+            "name: block\n"
+            "description: >\n"
+            "  Use when testing. Do this.\n"
+            "---\n",
+        )
+        empty = self.write(
+            ".agents/skills/empty/SKILL.md",
+            "---\n"
+            "name: empty\n"
+            "description: >\n"
+            "---\n",
+        )
+
+        self.assertEqual(linter.lint_path(valid, "skill", {"description-when": {}}), [])
+
+        violations = linter.lint_path(empty, "skill", {"description-when": {}})
+        self.assertEqual(len(violations), 1)
+        self.assertIn("has no `description:` field", violations[0].msg)
+
     def test_description_when_supports_toml_failures(self) -> None:
         linter = load_linter()
         missing = self.write(".codex/agents/missing.toml", 'name = "missing"\n')

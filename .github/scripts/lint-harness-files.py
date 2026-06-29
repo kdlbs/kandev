@@ -55,6 +55,13 @@ OPT_IN_RULES = {
     "no-em-dash",
 }
 
+OPT_IN_RULES_BY_KIND = {
+    "description-when": {"skill", "role-agent", "command", "cursor-rule"},
+    "no-at-dot-slash": set(DEFAULT_RULES_BY_KIND),
+    "no-emoji": set(DEFAULT_RULES_BY_KIND),
+    "no-em-dash": set(DEFAULT_RULES_BY_KIND),
+}
+
 YAML_BLOCK_SCALAR_MARKERS = {">", "|", ">-", "|-", ">+", "|+"}
 
 EMOJI_RANGES = (
@@ -109,6 +116,8 @@ def main() -> int:
         linted += 1
         rules = dict(DEFAULT_RULES_BY_KIND.get(kind, {}))
         for rule in enabled:
+            if kind not in OPT_IN_RULES_BY_KIND[rule]:
+                continue
             rules.setdefault(rule, {})
         violations.extend(lint_path(path, kind, rules=rules, disabled=disabled))
 
@@ -433,9 +442,9 @@ def check_yaml_description_when(path: Path, text: str) -> list[Violation]:
                 "description-when",
                 path,
                 1,
-                "SKILL.md missing YAML frontmatter (`--- ... ---` block). why: skills are discovered via their "
-                "frontmatter `name` and `description` fields; without a frontmatter block the router cannot trigger "
-                "the skill. fix: add a YAML block at the very top of the file: `---` on its own line, then "
+                "file is missing YAML frontmatter (`--- ... ---` block). why: harness artifacts are discovered via "
+                "their frontmatter `name` and `description` fields; without a frontmatter block the router cannot "
+                "trigger the artifact. fix: add a YAML block at the very top of the file: `---` on its own line, then "
                 "`name: <kebab-case-skill-name>`, then `description: Use when <concrete trigger>. <one-line outcome>.`, "
                 "then a closing `---` line.",
             )
@@ -446,8 +455,8 @@ def check_yaml_description_when(path: Path, text: str) -> list[Violation]:
                 "description-when",
                 path,
                 1,
-                "SKILL.md frontmatter opens with `---` but never closes. why: a malformed frontmatter block is "
-                "unparseable and the skill becomes invisible to the router. fix: add a `---` line on its own "
+                "file frontmatter opens with `---` but never closes. why: a malformed frontmatter block is "
+                "unparseable and the artifact becomes invisible to the router. fix: add a `---` line on its own "
                 "(no leading whitespace) after the last frontmatter field to close the block.",
             )
         ]
@@ -457,8 +466,8 @@ def check_yaml_description_when(path: Path, text: str) -> list[Violation]:
                 "description-when",
                 path,
                 1,
-                "SKILL.md frontmatter has no `description:` field. why: the description is the only signal the "
-                "router uses to decide whether this skill applies to the user's request. fix: add `description: "
+                "file frontmatter has no `description:` field. why: the description is the primary signal the "
+                "router uses to decide whether this artifact applies to the user's request. fix: add `description: "
                 "Use when <concrete trigger>. <one-line outcome>.` between the opening and closing `---` fences. "
                 "example: `description: Use when the user says 'create a branch' or references a CLIP-XXX ticket.`",
             )
