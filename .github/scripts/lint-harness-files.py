@@ -184,12 +184,17 @@ def classify_path(path: Path) -> str:
         if name.endswith(".md"):
             return "reference"
 
-    if has_subpath(parts, ["apps", "backend", "internal", "office", "configloader", "skills"]) and name == "SKILL.md":
-        return "skill"
+    if has_subpath(parts, ["apps", "backend", "internal", "office", "configloader", "skills"]):
+        if name == "SKILL.md":
+            return "skill"
+        if name.endswith(".md"):
+            return "reference"
 
     if has_subpath(parts, [".agents", "agents"]) and name.endswith(".md"):
         return "role-agent"
     if has_subpath(parts, [".opencode", "agents"]) and name.endswith(".md"):
+        return "role-agent"
+    if has_subpath(parts, [".claude", "agents"]) and name.endswith(".md"):
         return "role-agent"
     if has_subpath(parts, [".codex", "agents"]) and name.endswith(".toml"):
         return "role-agent"
