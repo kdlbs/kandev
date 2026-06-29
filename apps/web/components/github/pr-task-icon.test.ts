@@ -333,6 +333,20 @@ describe("getPRStatusColor", () => {
   });
 });
 
+describe("getPRStatusColor — aggregate checks", () => {
+  it("treats aggregate all-green counts as passed for an approved PR", () => {
+    const pr = makePR({
+      state: "open",
+      review_state: "approved",
+      checks_state: "",
+      checks_total: 5,
+      checks_passing: 5,
+      mergeable_state: "",
+    });
+    expect(getPRStatusColor(pr)).toBe("text-green-500");
+  });
+});
+
 describe("getPRStatusColor — mergeability", () => {
   it("returns red for a dirty (merge-conflict) PR even when approved + checks pass", () => {
     // Regression: before the mergeability branch, an approved+success but
