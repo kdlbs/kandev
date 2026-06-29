@@ -77,8 +77,6 @@ const IdempotencyWindowHours = 24
 // there's at least one new row" and a small buffer is plenty.
 const signalBuffer = 64
 
-const runPayloadEnvelopeKeys = 3
-
 // AgentResolver turns a queue request into the concrete agent instance
 // id the row needs. Today's office paths pass agent_profile_id
 // directly via the payload; the engine's queue_run will eventually
@@ -254,7 +252,7 @@ func (s *Service) resolveAgentInstance(ctx context.Context, req QueueRunRequest)
 // intentional: engine queue_run and legacy office QueueRun callers converge
 // on the same persisted JSON shape even when their input payloads differ.
 func runPayload(req QueueRunRequest, agentInstanceID string) map[string]any {
-	out := make(map[string]any, len(req.Payload)+runPayloadEnvelopeKeys)
+	out := make(map[string]any, len(req.Payload))
 	for k, v := range req.Payload {
 		out[k] = v
 	}
