@@ -596,7 +596,7 @@ jobs:
         run: |
           set -euo pipefail
           runtime_bin="apps/desktop/src-tauri/resources/kandev/bin"
-          for binary in kandev agentctl; do
+          for binary in kandev agentctl agentctl-darwin-arm64 agentctl-darwin-amd64; do
             path="$runtime_bin/$binary"
             if [ ! -f "$path" ]; then
               echo "::error::Missing macOS runtime binary at $path" >&2
