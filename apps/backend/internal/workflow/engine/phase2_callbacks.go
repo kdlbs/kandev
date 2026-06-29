@@ -75,15 +75,15 @@ func (c QueueRunCallback) Execute(ctx context.Context, in ActionInput) (ActionRe
 }
 
 func (c QueueRunCallback) resolveTarget(
-	ctx context.Context, in ActionInput, targetTaskID string,
+	ctx context.Context, in ActionInput, taskID string,
 ) ([]string, error) {
 	target := strings.TrimSpace(in.Action.QueueRun.Target)
 	switch {
 	case target == "" || target == TargetPrimary:
-		return c.resolvePrimary(ctx, in, targetTaskID)
+		return c.resolvePrimary(ctx, in, taskID)
 	case strings.HasPrefix(target, TargetParticipant):
 		role := strings.TrimPrefix(target, TargetParticipant)
-		return c.resolveParticipantRole(ctx, in.Step.ID, targetTaskID, role)
+		return c.resolveParticipantRole(ctx, in.Step.ID, taskID, role)
 	case strings.HasPrefix(target, TargetAgentProfile):
 		id := strings.TrimPrefix(target, TargetAgentProfile)
 		if id == "" {
@@ -91,19 +91,19 @@ func (c QueueRunCallback) resolveTarget(
 		}
 		return []string{id}, nil
 	case target == TargetWorkspaceCEO:
-		return c.resolveCEO(ctx, targetTaskID)
+		return c.resolveCEO(ctx, taskID)
 	default:
 		return nil, fmt.Errorf("queue_run: unsupported target %q", target)
 	}
 }
 
 func (c QueueRunCallback) resolvePrimary(
-	ctx context.Context, in ActionInput, targetTaskID string,
+	ctx context.Context, in ActionInput, taskID string,
 ) ([]string, error) {
 	if c.Primary == nil {
 		return nil, fmt.Errorf("%w: queue_run target=primary requires PrimaryAgentResolver", ErrActionNotYetWired)
 	}
-	id, err := c.Primary.PrimaryAgentProfileID(ctx, in.Step.ID, targetTaskID)
+	id, err := c.Primary.PrimaryAgentProfileID(ctx, in.Step.ID, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("queue_run resolve primary: %w", err)
 	}
