@@ -48,6 +48,15 @@ LINE_LIMIT_RULES = {
     "cursor-rule-line-limit",
 }
 
+OPT_IN_RULES = {
+    "description-when",
+    "no-at-dot-slash",
+    "no-emoji",
+    "no-em-dash",
+}
+
+YAML_BLOCK_SCALAR_MARKERS = {">", "|", ">-", "|-", ">+", "|+"}
+
 EMOJI_RANGES = (
     (0x2600, 0x27BF),
     (0x1F000, 0x1FAFF),
@@ -70,6 +79,7 @@ def main() -> int:
     parser.add_argument("targets", nargs="*", help="Files or directories to lint")
     parser.add_argument("--all", action="store_true", help="Lint every tracked harness file")
     parser.add_argument("--disable", action="append", default=[], help="Disable one rule by id")
+    parser.add_argument("--enable", action="append", default=[], help="Enable one opt-in rule by id")
     args = parser.parse_args()
 
     if not args.all and not args.targets:
@@ -84,6 +94,11 @@ def main() -> int:
         return 2
 
     disabled = set(args.disable)
+    enabled = set(args.enable)
+    unknown_enabled = sorted(enabled - OPT_IN_RULES)
+    if unknown_enabled:
+        print(f"unknown opt-in rule(s): {', '.join(unknown_enabled)}", file=sys.stderr)
+        return 2
     violations = []
     linted = 0
 
@@ -92,7 +107,10 @@ def main() -> int:
         if kind == "unknown":
             continue
         linted += 1
-        violations.extend(lint_path(path, kind, disabled=disabled))
+        rules = dict(DEFAULT_RULES_BY_KIND.get(kind, {}))
+        for rule in enabled:
+            rules.setdefault(rule, {})
+        violations.extend(lint_path(path, kind, rules=rules, disabled=disabled))
 
     for violation in violations:
         print(format_violation(violation, cwd))
@@ -165,6 +183,8 @@ def classify_path(path: Path) -> str:
     if has_subpath(parts, [".opencode", "agents"]) and name.endswith(".md"):
         return "role-agent"
     if has_subpath(parts, [".codex", "agents"]) and name.endswith(".toml"):
+        return "role-agent"
+    if has_subpath(parts, [".codex"]) and name == "config.toml":
         return "role-agent"
     if has_subpath(parts, [".claude", "commands"]) and name.endswith(".md"):
         return "command"
@@ -317,7 +337,7 @@ def extract_yaml_description(lines: list[str]) -> tuple[str, str | None]:
         if not line.startswith("description:"):
             continue
         value = line[len("description:") :].strip()
-        chunks = [strip_yaml_scalar(value)] if value else []
+        chunks = [strip_yaml_scalar(value)] if value and value not in YAML_BLOCK_SCALAR_MARKERS else []
         for continuation in frontmatter[index + 1 :]:
             if not continuation.startswith((" ", "\t")):
                 break

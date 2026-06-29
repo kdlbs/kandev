@@ -61,6 +61,7 @@ class HarnessLinterTest(unittest.TestCase):
             ".agents/agents/qa.md": "role-agent",
             ".opencode/agents/qa.md": "role-agent",
             ".codex/agents/qa.toml": "role-agent",
+            ".codex/config.toml": "role-agent",
             ".claude/commands/pr-fixup.md": "command",
             ".cursor/rules/kandev-harness.mdc": "cursor-rule",
             "README.md": "unknown",
@@ -100,6 +101,22 @@ class HarnessLinterTest(unittest.TestCase):
         self.assertEqual(len(violations), 1)
         self.assertEqual(violations[0].rule, "description-word-limit")
         self.assertEqual(violations[0].line, 1)
+        self.assertIn("description is 4 words", violations[0].msg)
+
+    def test_description_word_limit_ignores_yaml_block_scalar_markers(self) -> None:
+        linter = load_linter()
+        path = self.write(
+            ".agents/skills/demo/SKILL.md",
+            "---\n"
+            "name: demo\n"
+            "description: >\n"
+            "  one two three four\n"
+            "---\n",
+        )
+
+        violations = linter.lint_path(path, "skill", {"description-word-limit": {"limit": 3}})
+
+        self.assertEqual(len(violations), 1)
         self.assertIn("description is 4 words", violations[0].msg)
 
     def test_description_word_limit_is_silent_when_metadata_missing_or_disabled(self) -> None:
@@ -210,6 +227,19 @@ class HarnessLinterTest(unittest.TestCase):
         self.assertEqual(recursive.returncode, 1)
         if link_dir is not None:
             self.assertNotIn("mirror/AGENTS.md", recursive.stdout)
+
+    def test_cli_explicit_targets_can_enable_opt_in_rules(self) -> None:
+        self.write("AGENTS.md", "plain \u2014 dash\n")
+
+        default = self.run_cli("AGENTS.md")
+        enabled = self.run_cli("--enable", "no-em-dash", "AGENTS.md")
+        unknown = self.run_cli("--enable", "not-a-rule", "AGENTS.md")
+
+        self.assertEqual(default.returncode, 0, default.stdout + default.stderr)
+        self.assertEqual(enabled.returncode, 1)
+        self.assertIn("no-em-dash", enabled.stdout)
+        self.assertEqual(unknown.returncode, 2)
+        self.assertIn("unknown opt-in rule", unknown.stderr)
 
     def test_cli_reports_github_annotations(self) -> None:
         self.write("AGENTS.md", "line\n" * 301)
