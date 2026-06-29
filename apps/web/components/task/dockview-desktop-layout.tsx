@@ -536,7 +536,7 @@ type DockviewDesktopLayoutProps = {
   compact?: boolean;
 };
 
-function ReviewDialogSlot({
+function DockviewReviewDialog({
   sessionId,
   review,
 }: {
@@ -669,7 +669,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       </div>
       <BottomTerminalPanel />
       <PanelPortalHost renderPanel={renderPanel} />
-      <ReviewDialogSlot sessionId={effectiveSessionId} review={review} />
+      <DockviewReviewDialog sessionId={effectiveSessionId} review={review} />
     </div>
   );
 });

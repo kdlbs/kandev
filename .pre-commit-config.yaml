@@ -9,6 +9,16 @@ repos:
         stages: [commit-msg]
         always_run: true
 
+  # Harness guidance hooks
+  - repo: local
+    hooks:
+      - id: harness-lint
+        name: Harness file lint
+        entry: python3 .github/scripts/lint-harness-files.py
+        language: system
+        files: (^|/)(AGENTS\.md|CLAUDE\.md|\.cursorrules)$|^\.agents/skills/.*\.md$|^\.augment/skills/.*\.md$|^apps/backend/internal/office/configloader/skills/.*\.md$|^\.agents/agents/.*\.md$|^\.opencode/agents/.*\.md$|^\.codex/agents/.*\.toml$|^\.codex/config\.toml$|^\.cursor/rules/.*\.mdc$|^\.claude/commands/.*\.md$
+        pass_filenames: true
+
   # Backend (Go) hooks
   - repo: local
     hooks:
