@@ -76,6 +76,7 @@ async function writeFakeRuntime(runtimeDir, stateDir) {
   const agentctl = join(runtimeDir, "bin", process.platform === "win32" ? "agentctl.cmd" : "agentctl");
   const remoteHelpers = [
     ["agentctl-linux-amd64", "linux/amd64"],
+    ["agentctl-linux-arm64", "linux/arm64"],
     ["agentctl-darwin-arm64", "darwin/arm64"],
     ["agentctl-darwin-amd64", "darwin/amd64"],
   ];
