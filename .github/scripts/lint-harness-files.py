@@ -226,6 +226,8 @@ def classify_path(path: Path) -> str:
         return "config"
     if has_subpath(parts, [".claude", "commands"]) and name.endswith(".md"):
         return "command"
+    if has_subpath(parts, [".claude", "rules"]) and name.endswith(".md"):
+        return "cursor-rule"
     if has_subpath(parts, [".cursor", "rules"]) and name.endswith(".mdc"):
         return "cursor-rule"
 
@@ -409,8 +411,8 @@ def extract_toml_description(text: str) -> str | None:
         )
     try:
         data = tomllib.loads(text)
-    except tomllib.TOMLDecodeError:
-        return None
+    except tomllib.TOMLDecodeError as exc:
+        raise RuntimeError(f"invalid TOML in harness file: {exc}") from exc
     description = data.get("description")
     if not isinstance(description, str):
         return None

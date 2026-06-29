@@ -25,6 +25,7 @@ on:
       - ".codex/agents/**/*.toml"
       - ".codex/config.toml"
       - ".claude/settings.json"
+      - ".claude/rules/**/*.md"
       - ".cursor/rules/**/*.mdc"
       - ".claude/commands/**/*.md"
   pull_request:
@@ -51,6 +52,7 @@ on:
       - ".codex/agents/**/*.toml"
       - ".codex/config.toml"
       - ".claude/settings.json"
+      - ".claude/rules/**/*.md"
       - ".cursor/rules/**/*.mdc"
       - ".claude/commands/**/*.md"
 

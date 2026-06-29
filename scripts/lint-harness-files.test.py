@@ -72,6 +72,7 @@ class HarnessLinterTest(unittest.TestCase):
             ".codex/config.toml": "config",
             ".claude/settings.json": "config",
             ".claude/commands/pr-fixup.md": "command",
+            ".claude/rules/review.md": "cursor-rule",
             ".cursor/rules/kandev-harness.mdc": "cursor-rule",
             "README.md": "unknown",
         }
@@ -255,6 +256,13 @@ class HarnessLinterTest(unittest.TestCase):
                 linter.lint_path(path, "role-agent", {"description-word-limit": {"limit": 600}})
         finally:
             linter.tomllib = original
+
+    def test_toml_description_rejects_malformed_toml(self) -> None:
+        linter = load_linter()
+        path = self.write(".codex/agents/broken.toml", 'description = "Use when broken.\n')
+
+        with self.assertRaisesRegex(RuntimeError, "invalid TOML in harness file"):
+            linter.lint_path(path, "role-agent", {"description-word-limit": {"limit": 600}})
 
     def test_description_when_uses_explicit_routing_phrases(self) -> None:
         linter = load_linter()
