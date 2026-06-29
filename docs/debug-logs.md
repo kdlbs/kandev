@@ -16,6 +16,8 @@ If the maintainer asks for frontend logs only, you do not need to send `~/kandev
 
 ## Quick Steps
 
+Use these steps for a normal Homebrew, npm, or npx install. If you run Kandev as a service or container, use the matching section below so the logs come from the same data directory, port, and deployment that has the issue.
+
 1. Stop the Kandev server you are already using.
    - If it is running in a terminal, press `Ctrl-C`.
    - If it is running as a user service, run `kandev service stop`.
@@ -109,6 +111,24 @@ kandev --debug 2>&1 | tee ~/kandev-debug.log
 sudo kandev service start --system
 ```
 
+If the service was installed with a custom home directory or port, first run:
+
+```bash
+kandev service config
+```
+
+For a system service:
+
+```bash
+sudo kandev service config --system
+```
+
+Then start debug mode with the same values shown in the service config:
+
+```bash
+KANDEV_HOME_DIR=/path/from/service/config kandev --debug --port 38429 2>&1 | tee ~/kandev-debug.log
+```
+
 If you should not stop the service, collect the existing service logs instead:
 
 ```bash
@@ -128,6 +148,38 @@ kandev service logs -f | tee ~/kandev-service.log
 ```bash
 sudo kandev service logs -f --system | tee ~/kandev-service.log
 ```
+
+## Container Installs
+
+For Docker or Kubernetes installs, collect logs from the running container or pod. Do not start `kandev --debug` on the host unless a maintainer asks you to, because that starts a separate local instance.
+
+For Docker:
+
+```bash
+docker logs kandev > ~/kandev-container.log
+docker logs -f kandev | tee ~/kandev-container-live.log
+```
+
+If you need to recreate the container with debug logging, keep the same image, published port, and `/data` volume, then add `KANDEV_LOG_LEVEL=debug`:
+
+```bash
+docker stop kandev
+docker rm kandev
+docker run -p 38429:38429 \
+  -v kandev-data:/data \
+  -e KANDEV_LOG_LEVEL=debug \
+  --name kandev \
+  ghcr.io/kdlbs/kandev:latest
+```
+
+For Kubernetes:
+
+```bash
+kubectl logs deploy/kandev > ~/kandev-container.log
+kubectl logs -f deploy/kandev | tee ~/kandev-container-live.log
+```
+
+If the maintainer asks for debug-level Kubernetes logs, set `KANDEV_LOG_LEVEL=debug` on the existing workload and keep the same volume claim and service port.
 
 ## Improve Kandev Log Bundle
 
