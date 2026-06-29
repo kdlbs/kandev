@@ -144,11 +144,41 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
 	settings.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpsertUserSettings(ctx, settings); err != nil {
+	settings, err = s.repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, settings)
+	if err != nil {
 		return nil, err
+	}
+	if req.TaskCreateLastUsed != nil {
+		settings, err = s.updateTaskCreateLastUsed(ctx, *req.TaskCreateLastUsed)
+		if err != nil {
+			return nil, err
+		}
 	}
 	s.publishUserSettingsEvent(ctx, settings)
 	return settings, nil
+}
+
+func (s *Service) RecordTaskCreateLastUsed(ctx context.Context, patch models.TaskCreateLastUsed) error {
+	if taskCreateLastUsedPatchEmpty(patch) {
+		return nil
+	}
+	settings, err := s.updateTaskCreateLastUsed(ctx, patch)
+	if err != nil {
+		return err
+	}
+	s.publishUserSettingsEvent(ctx, settings)
+	return nil
+}
+
+func (s *Service) updateTaskCreateLastUsed(ctx context.Context, patch models.TaskCreateLastUsed) (*models.UserSettings, error) {
+	return s.repo.UpdateTaskCreateLastUsed(ctx, s.defaultUser, patch)
+}
+
+func taskCreateLastUsedPatchEmpty(patch models.TaskCreateLastUsed) bool {
+	return patch.RepositoryID == "" &&
+		patch.Branch == "" &&
+		patch.AgentProfileID == "" &&
+		patch.ExecutorProfileID == ""
 }
 
 // applyBasicSettings copies simple (non-validated) fields from req to settings.

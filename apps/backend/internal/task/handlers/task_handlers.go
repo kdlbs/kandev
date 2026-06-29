@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
+	usermodels "github.com/kandev/kandev/internal/user/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -28,13 +29,18 @@ type handlerRepo interface {
 }
 
 type TaskHandlers struct {
-	service             *service.Service
-	orchestrator        OrchestratorStarter
-	repo                handlerRepo
-	planService         *service.PlanService
-	handoffSvc          *service.HandoffService
-	onTaskCreatedWithPR func(ctx context.Context, taskID, sessionID, prURL, branch string)
-	logger              *logger.Logger
+	service                    *service.Service
+	orchestrator               OrchestratorStarter
+	repo                       handlerRepo
+	planService                *service.PlanService
+	handoffSvc                 *service.HandoffService
+	taskCreateLastUsedRecorder taskCreateLastUsedRecorder
+	onTaskCreatedWithPR        func(ctx context.Context, taskID, sessionID, prURL, branch string)
+	logger                     *logger.Logger
+}
+
+type taskCreateLastUsedRecorder interface {
+	RecordTaskCreateLastUsed(ctx context.Context, patch usermodels.TaskCreateLastUsed) error
 }
 
 // SetHandoffService wires the office task-handoffs service used by the
@@ -43,6 +49,10 @@ type TaskHandlers struct {
 // post-create attachment, matching the pre-handoffs behaviour.
 func (h *TaskHandlers) SetHandoffService(svc *service.HandoffService) {
 	h.handoffSvc = svc
+}
+
+func (h *TaskHandlers) SetTaskCreateLastUsedRecorder(recorder taskCreateLastUsedRecorder) {
+	h.taskCreateLastUsedRecorder = recorder
 }
 
 // SetOnTaskCreatedWithPR sets a callback invoked when a task is created with a PR URL

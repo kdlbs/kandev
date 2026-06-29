@@ -230,13 +230,13 @@ function pickDefaultExecutorProfileId(
   if (eligibleProfiles.length === 0) return null;
 
   const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, null);
-  if (lastId && eligibleProfiles.some((p) => p.id === lastId)) return lastId;
   if (
     lastUsedExecutorProfileId &&
     eligibleProfiles.some((p) => p.id === lastUsedExecutorProfileId)
   ) {
     return lastUsedExecutorProfileId;
   }
+  if (lastId && eligibleProfiles.some((p) => p.id === lastId)) return lastId;
 
   const executorId = pickDefaultExecutorId(
     executors,
@@ -294,11 +294,9 @@ function getExecutorProfileLastUsedState(
 
 function shouldDeferExecutorProfileAutopick(
   context: ExecutorAutopickContext,
-  lastUsed: ExecutorProfileLastUsedState,
+  _lastUsed: ExecutorProfileLastUsedState,
 ) {
-  return (
-    context.userSettingsLoaded === false && !lastUsed.localStorageValid && !lastUsed.settingsValid
-  );
+  return context.userSettingsLoaded === false;
 }
 
 export function shouldWaitForLastUsedExecutorProfile(context: ExecutorAutopickContext) {
@@ -590,6 +588,7 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
   useWorkflowAgentProfileEffect(fs, workflows, agentProfiles, compatibleAgentProfiles, {
     lastUsedAgentProfileId: args.lastUsedAgentProfileId,
     authLoaded,
+    userSettingsLoaded: args.userSettingsLoaded,
   });
   useRepositoryAutoSelectEffect(fs, open, workspaceId, repositories, {
     lastUsedRepositoryId: args.lastUsedRepositoryId,

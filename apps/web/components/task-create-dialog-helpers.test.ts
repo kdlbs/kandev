@@ -12,13 +12,13 @@ describe("autoSelectBranch", () => {
     { name: "feature", type: "local" as const },
   ];
 
-  it("prefers a valid localStorage branch over a store-backed branch", () => {
+  it("prefers a store-backed branch over a divergent localStorage branch", () => {
     const setBranch = vi.fn();
     localStorage.setItem(STORAGE_KEYS.LAST_BRANCH, JSON.stringify("feature"));
 
     autoSelectBranch(branches, setBranch, { lastUsedBranch: "main" });
 
-    expect(setBranch).toHaveBeenCalledWith("feature");
+    expect(setBranch).toHaveBeenCalledWith("main");
   });
 
   it("uses store-backed last-used branch when localStorage is not primed", () => {
@@ -55,6 +55,15 @@ describe("autoSelectBranch", () => {
   it("defers when localStorage branch is stale and user settings are still loading", () => {
     const setBranch = vi.fn();
     localStorage.setItem(STORAGE_KEYS.LAST_BRANCH, JSON.stringify("deleted"));
+
+    autoSelectBranch(branches, setBranch, { userSettingsLoaded: false });
+
+    expect(setBranch).not.toHaveBeenCalled();
+  });
+
+  it("defers when localStorage branch is valid but user settings are still loading", () => {
+    const setBranch = vi.fn();
+    localStorage.setItem(STORAGE_KEYS.LAST_BRANCH, JSON.stringify("feature"));
 
     autoSelectBranch(branches, setBranch, { userSettingsLoaded: false });
 

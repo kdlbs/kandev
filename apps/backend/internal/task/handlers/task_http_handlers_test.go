@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
+	usermodels "github.com/kandev/kandev/internal/user/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -148,8 +149,26 @@ type captureCreateTaskRepo struct {
 	updateStateErr error
 }
 
+type captureTaskCreateLastUsedRecorder struct {
+	calls int
+	got   usermodels.TaskCreateLastUsed
+}
+
+func (m *captureTaskCreateLastUsedRecorder) RecordTaskCreateLastUsed(_ context.Context, patch usermodels.TaskCreateLastUsed) error {
+	m.calls++
+	m.got = patch
+	return nil
+}
+
 func (m *captureCreateTaskRepo) GetWorkspaceTaskPrefix(_ context.Context, _ string) (string, string, error) {
 	return "KAN", "wf-office", nil
+}
+
+func (m *captureCreateTaskRepo) GetRepository(_ context.Context, id string) (*models.Repository, error) {
+	if id == "repo-2" {
+		return &models.Repository{ID: id, WorkspaceID: "ws-1", DefaultBranch: "main"}, nil
+	}
+	return nil, errors.New("repository not found")
 }
 
 func (m *captureCreateTaskRepo) CreateTask(_ context.Context, task *models.Task) error {
@@ -211,6 +230,50 @@ func TestHTTPCreateTask_ProjectIDReachesOfficePath(t *testing.T) {
 	require.NotNil(t, repo.captured, "service.CreateTask was not called")
 	assert.Equal(t, "proj-1", repo.captured.ProjectID)
 	assert.Equal(t, "wf-office", repo.captured.WorkflowID, "office workflow should be auto-resolved")
+}
+
+func TestHTTPCreateTaskRecordsFinalLastUsedSelections(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	recorder := &captureTaskCreateLastUsedRecorder{}
+	h := &TaskHandlers{service: svc, taskCreateLastUsedRecorder: recorder, logger: log}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(`{
+		"workspace_id": "ws-1",
+		"workflow_id": "wf-1",
+		"workflow_step_id": "step-1",
+		"title": "Use current selections",
+		"repositories": [{
+			"repository_id": "repo-2",
+			"base_branch": "main",
+			"checkout_branch": "feature/current"
+		}],
+		"agent_profile_id": "agent-2",
+		"executor_profile_id": "exec-profile-2"
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpCreateTask(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	require.Equal(t, 1, recorder.calls)
+	assert.Equal(t, usermodels.TaskCreateLastUsed{
+		RepositoryID:      "repo-2",
+		Branch:            "feature/current",
+		AgentProfileID:    "agent-2",
+		ExecutorProfileID: "exec-profile-2",
+	}, recorder.got)
 }
 
 func TestHTTPCreateTask_StartAgentReturnsSchedulingTask(t *testing.T) {

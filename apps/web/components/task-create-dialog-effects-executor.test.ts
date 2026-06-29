@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { useDefaultSelectionsEffect } from "./task-create-dialog-effects";
 import type { DialogFormState, StoreSelections } from "@/components/task-create-dialog-types";
+import { STORAGE_KEYS } from "@/lib/settings/constants";
 
 beforeEach(() => {
   localStorage.clear();
@@ -10,6 +11,7 @@ beforeEach(() => {
 const PROFILE_DOCKER = "profile-docker";
 const PROFILE_LOCAL = "profile-local";
 const PROFILE_WORKTREE = "profile-worktree";
+const PROFILE_WORKTREE_B = "profile-worktree-b";
 
 type DefaultSelFake = Pick<
   DialogFormState,
@@ -76,7 +78,10 @@ function worktreeExecutor(): StoreSelections["executors"][number] {
   return {
     id: "exec-worktree",
     type: "worktree",
-    profiles: [{ id: PROFILE_WORKTREE, executor_type: "worktree" }],
+    profiles: [
+      { id: PROFILE_WORKTREE, executor_type: "worktree" },
+      { id: PROFILE_WORKTREE_B, executor_type: "worktree" },
+    ],
   } as unknown as StoreSelections["executors"][number];
 }
 
@@ -158,6 +163,127 @@ describe("useDefaultSelectionsEffect - executor profile defaults", () => {
 
     await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_DOCKER));
     expect(fs.setExecutorProfileId).not.toHaveBeenCalledWith(PROFILE_WORKTREE);
+  });
+});
+
+describe("useDefaultSelectionsEffect - executor profile restoration", () => {
+  it("defers executor profile fallback until user settings have loaded or settled", async () => {
+    window.localStorage.removeItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID);
+    const fs = makeDefaultSelFs({ executorProfileId: "", executorId: "" });
+    const worktree = worktreeExecutor();
+    const selBefore = makeSel({
+      executors: [worktree],
+      userSettingsLoaded: false,
+    });
+
+    const { rerender } = renderHook(({ sel }) => useDefaultSelectionsEffect(fs, true, sel, []), {
+      initialProps: { sel: selBefore },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fs.setExecutorId).not.toHaveBeenCalled();
+    expect(fs.setExecutorProfileId).not.toHaveBeenCalled();
+
+    const selAfter = makeSel({
+      executors: [worktree],
+      userSettingsLoaded: true,
+    });
+    rerender({ sel: selAfter });
+
+    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_WORKTREE));
+  });
+
+  it("keeps deferring when a valid cached executor profile exists but settings are loading", async () => {
+    window.localStorage.setItem(
+      STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID,
+      JSON.stringify(PROFILE_WORKTREE),
+    );
+    const fs = makeDefaultSelFs({ executorProfileId: "", executorId: "" });
+    const sel = makeSel({
+      executors: [worktreeExecutor()],
+      userSettingsLoaded: false,
+    });
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fs.setExecutorId).not.toHaveBeenCalled();
+    expect(fs.setExecutorProfileId).not.toHaveBeenCalled();
+  });
+
+  it("keeps deferring when cached executor profile is ineligible for the source mode", async () => {
+    window.localStorage.setItem(
+      STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID,
+      JSON.stringify(PROFILE_WORKTREE),
+    );
+    const fs = makeDefaultSelFs({ executorProfileId: "", executorId: "", noRepository: true });
+    const sel = makeSel({
+      executors: [worktreeExecutor(), localExecutor()],
+      userSettingsLoaded: false,
+    });
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fs.setExecutorProfileId).not.toHaveBeenCalled();
+  });
+});
+
+describe("useDefaultSelectionsEffect - executor profile settings restoration", () => {
+  it("restores executor profile from store-backed settings when localStorage is not primed", async () => {
+    window.localStorage.removeItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID);
+    const fs = makeDefaultSelFs({ executorProfileId: "", executorId: "" });
+    const worktree = worktreeExecutor();
+    const sel = makeSel({
+      executors: [worktree],
+      lastUsedExecutorProfileId: PROFILE_WORKTREE_B,
+      userSettingsLoaded: true,
+    });
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
+
+    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_WORKTREE_B));
+  });
+
+  it("does not pick a fallback executor id while a valid last-used profile is restoring", async () => {
+    window.localStorage.removeItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID);
+    const local = localExecutor();
+    const worktree = worktreeExecutor();
+    const sel = makeSel({
+      executors: [local, worktree],
+      workspaceDefaults: { default_executor_id: local.id } as StoreSelections["workspaceDefaults"],
+      lastUsedExecutorProfileId: PROFILE_WORKTREE_B,
+      userSettingsLoaded: true,
+    });
+
+    const setExecutorId = vi.fn();
+    const setExecutorProfileId = vi.fn();
+    const { rerender } = renderHook(
+      ({ formState }) => useDefaultSelectionsEffect(formState, true, sel, []),
+      {
+        initialProps: {
+          formState: makeDefaultSelFs({
+            executorProfileId: "",
+            executorId: "",
+            setExecutorId,
+            setExecutorProfileId,
+          }),
+        },
+      },
+    );
+
+    await waitFor(() => expect(setExecutorProfileId).toHaveBeenCalledWith(PROFILE_WORKTREE_B));
+    rerender({
+      formState: makeDefaultSelFs({
+        executorProfileId: PROFILE_WORKTREE_B,
+        executorId: "",
+        setExecutorId,
+        setExecutorProfileId,
+      }),
+    });
+
+    await waitFor(() => expect(setExecutorId).toHaveBeenCalledWith(worktree.id));
+    expect(setExecutorId).not.toHaveBeenCalledWith(local.id);
   });
 });
 

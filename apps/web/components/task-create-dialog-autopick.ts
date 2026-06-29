@@ -66,7 +66,7 @@ function getAgentAutopickGate(input: AgentProfileAutopickInput): AutopickDecisio
     return { kind: "defer", reason: "executor-not-selected" };
   }
   if (input.compatibleAgentProfiles.length === 0) return { kind: "skip", reason: "no-compatible" };
-  if (!input.lastAgentProfileId && input.userSettingsLoaded === false) {
+  if (input.userSettingsLoaded === false) {
     return { kind: "defer", reason: "user-settings-not-loaded" };
   }
   return null;
@@ -126,13 +126,13 @@ function resolveLastUsedAgentProfileId(
   settingsAgentProfileId?: string | null,
 ) {
   const localId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, null);
-  if (localId && compatibleAgentProfiles.some((p) => p.id === localId)) return localId;
   if (
     settingsAgentProfileId &&
     compatibleAgentProfiles.some((p) => p.id === settingsAgentProfileId)
   ) {
     return settingsAgentProfileId;
   }
+  if (localId && compatibleAgentProfiles.some((p) => p.id === localId)) return localId;
   return null;
 }
 
@@ -141,7 +141,11 @@ export function useWorkflowAgentProfileEffect(
   workflows: Array<{ id: string; agent_profile_id?: string }>,
   agentProfiles: AgentProfileOption[],
   compatibleAgentProfiles: AgentProfileOption[],
-  options: { lastUsedAgentProfileId?: string | null; authLoaded?: boolean } = {},
+  options: {
+    lastUsedAgentProfileId?: string | null;
+    authLoaded?: boolean;
+    userSettingsLoaded?: boolean;
+  } = {},
 ) {
   const { lastUsedAgentProfileId, authLoaded = true } = options;
   const {
@@ -200,6 +204,13 @@ export function useWorkflowAgentProfileEffect(
         });
         return;
       }
+      if (options.userSettingsLoaded === false) {
+        setAgentProfileId("");
+        workflowAutopickDebug("workflow-no-override-defer", {
+          reason: "user-settings-not-loaded",
+        });
+        return;
+      }
       // Restore the user's last-used agent profile when unlocking. Filter
       // against `compatibleAgentProfiles` (not the full `agentProfiles` list)
       // so an executor-incompatible id from a previous session - including
@@ -227,6 +238,7 @@ export function useWorkflowAgentProfileEffect(
     compatibleAgentProfiles,
     lastUsedAgentProfileId,
     authLoaded,
+    options.userSettingsLoaded,
     setAgentProfileId,
     setWorkflowAgentProfileId,
   ]);

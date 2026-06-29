@@ -91,14 +91,6 @@ function decideRepositoryAutoPick(
   const settingsRepoId = lastUsedRepositoryId ?? null;
   const localStorageValid = isRepositoryIdValid(localStorageRepoId, repositories);
   const settingsValid = isRepositoryIdValid(settingsRepoId, repositories);
-  if (localStorageRepoId && localStorageValid) {
-    return buildRepositoryAutoPickDecision("localStorage:lastRepositoryId", localStorageRepoId, {
-      localStorageRepoId,
-      localStorageValid,
-      settingsRepoId,
-      settingsValid,
-    });
-  }
   if (settingsRepoId && settingsValid) {
     return buildRepositoryAutoPickDecision("settings:taskCreateLastUsed", settingsRepoId, {
       localStorageRepoId,
@@ -107,9 +99,17 @@ function decideRepositoryAutoPick(
       settingsValid,
     });
   }
-  if (!userSettingsLoaded && repositories.length !== 1) {
+  if (!userSettingsLoaded) {
     return buildRepositoryAutoPickDecision("user-settings-loading", null, {
       defer: true,
+      localStorageRepoId,
+      localStorageValid,
+      settingsRepoId,
+      settingsValid,
+    });
+  }
+  if (localStorageRepoId && localStorageValid) {
+    return buildRepositoryAutoPickDecision("localStorage:lastRepositoryId", localStorageRepoId, {
       localStorageRepoId,
       localStorageValid,
       settingsRepoId,

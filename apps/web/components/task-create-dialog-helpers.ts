@@ -59,17 +59,6 @@ export function autoSelectBranch(
   const settingsBranch = options.lastUsedBranch ?? null;
   const localStorageValid = isBranchSelectable(branchList, localStorageBranch);
   const settingsValid = isBranchSelectable(branchList, settingsBranch);
-  if (localStorageBranch && localStorageValid) {
-    selectionDebug(BRANCH_AUTOPICK_DEBUG, {
-      source: "localStorage:lastBranch",
-      pick: localStorageBranch,
-      local_storage_value: localStorageBranch,
-      local_storage_valid: true,
-      branch_count: branchList.length,
-    });
-    setBranch(localStorageBranch);
-    return;
-  }
   if (settingsBranch && settingsValid) {
     selectionDebug(BRANCH_AUTOPICK_DEBUG, {
       source: "settings:taskCreateLastUsed",
@@ -89,6 +78,17 @@ export function autoSelectBranch(
       local_storage_valid: localStorageValid,
       branch_count: branchList.length,
     });
+    return;
+  }
+  if (localStorageBranch && localStorageValid) {
+    selectionDebug(BRANCH_AUTOPICK_DEBUG, {
+      source: "localStorage:lastBranch",
+      pick: localStorageBranch,
+      local_storage_value: localStorageBranch,
+      local_storage_valid: true,
+      branch_count: branchList.length,
+    });
+    setBranch(localStorageBranch);
     return;
   }
   const preferredBranch = selectPreferredBranch(branchList);

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -97,7 +98,11 @@ func (r *sqliteRepository) GetDefaultUser(ctx context.Context) (*models.User, er
 }
 
 func (r *sqliteRepository) GetUserSettings(ctx context.Context, userID string) (*models.UserSettings, error) {
-	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+	return r.getUserSettings(ctx, r.ro, userID)
+}
+
+func (r *sqliteRepository) getUserSettings(ctx context.Context, conn *sqlx.DB, userID string) (*models.UserSettings, error) {
+	row := conn.QueryRowContext(ctx, conn.Rebind(`
 		SELECT settings, updated_at
 		FROM users WHERE id = ?
 	`), userID)
@@ -113,6 +118,95 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 	if settings.CreatedAt.IsZero() {
 		settings.CreatedAt = settings.UpdatedAt
 	}
+	settingsPayload, err := marshalUserSettingsPayload(settings)
+	if err != nil {
+		return err
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE users
+		SET settings = ?, updated_at = ?
+		WHERE id = ?
+	`), string(settingsPayload), settings.UpdatedAt, settings.UserID)
+	if err != nil {
+		return err
+	}
+	return checkUserSettingsRowsAffected(result, settings.UserID)
+}
+
+func (r *sqliteRepository) UpsertUserSettingsPreservingTaskCreateLastUsed(ctx context.Context, settings *models.UserSettings) (*models.UserSettings, error) {
+	settings.UpdatedAt = time.Now().UTC()
+	if settings.CreatedAt.IsZero() {
+		settings.CreatedAt = settings.UpdatedAt
+	}
+	settingsPayload, err := marshalUserSettingsPayload(settings)
+	if err != nil {
+		return nil, err
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE users
+		SET settings = json_set(
+			json(?),
+			'$.task_create_last_used',
+			json(COALESCE(json_extract(
+				CASE WHEN settings IS NULL OR settings = 'null' OR settings = '' THEN '{}' ELSE settings END,
+				'$.task_create_last_used'
+			), '{}'))
+		), updated_at = ?
+		WHERE id = ?
+	`), string(settingsPayload), settings.UpdatedAt, settings.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkUserSettingsRowsAffected(result, settings.UserID); err != nil {
+		return nil, err
+	}
+	return r.getUserSettings(ctx, r.db, settings.UserID)
+}
+
+func (r *sqliteRepository) UpdateTaskCreateLastUsed(ctx context.Context, userID string, patch models.TaskCreateLastUsed) (*models.UserSettings, error) {
+	args := makeTaskCreateLastUsedJSONSetArgs(patch)
+	if len(args) == 0 {
+		return r.getUserSettings(ctx, r.db, userID)
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?, ?, ", len(args)/2), ", ")
+	query := fmt.Sprintf(`
+		UPDATE users
+		SET settings = json_set(
+			CASE WHEN settings IS NULL OR settings = 'null' OR settings = '' THEN '{}' ELSE settings END,
+			%s
+		), updated_at = ?
+		WHERE id = ?
+	`, placeholders)
+	now := time.Now().UTC()
+	args = append(args, now, userID)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkUserSettingsRowsAffected(result, userID); err != nil {
+		return nil, err
+	}
+	return r.getUserSettings(ctx, r.db, userID)
+}
+
+func makeTaskCreateLastUsedJSONSetArgs(patch models.TaskCreateLastUsed) []any {
+	args := []any{}
+	if patch.RepositoryID != "" {
+		args = append(args, "$.task_create_last_used.repository_id", patch.RepositoryID)
+	}
+	if patch.Branch != "" {
+		args = append(args, "$.task_create_last_used.branch", patch.Branch)
+	}
+	if patch.AgentProfileID != "" {
+		args = append(args, "$.task_create_last_used.agent_profile_id", patch.AgentProfileID)
+	}
+	if patch.ExecutorProfileID != "" {
+		args = append(args, "$.task_create_last_used.executor_profile_id", patch.ExecutorProfileID)
+	}
+	return args
+}
+
+func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 	lspAutoStart := settings.LspAutoStartLanguages
 	if lspAutoStart == nil {
 		lspAutoStart = []string{}
@@ -138,7 +232,7 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 	if keyboardShortcuts == nil {
 		keyboardShortcuts = map[string]interface{}{}
 	}
-	settingsPayload, err := json.Marshal(map[string]interface{}{
+	return json.Marshal(map[string]interface{}{
 		"workspace_id":                    settings.WorkspaceID,
 		"kanban_view_mode":                settings.KanbanViewMode,
 		"workflow_filter_id":              settings.WorkflowFilterID,
@@ -175,25 +269,21 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 		"system_metrics_display":          settings.SystemMetricsDisplay,
 		"voice_mode":                      settings.VoiceMode,
 	})
-	if err != nil {
-		return err
-	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE users
-		SET settings = ?, updated_at = ?
-		WHERE id = ?
-	`), string(settingsPayload), settings.UpdatedAt, settings.UserID)
-	if err != nil {
-		return err
-	}
+}
+
+func checkUserSettingsRowsAffected(result sqlResult, userID string) error {
 	rows, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("failed to check rows affected: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("user not found: %s", settings.UserID)
+		return fmt.Errorf("user not found: %s", userID)
 	}
 	return nil
+}
+
+type sqlResult interface {
+	RowsAffected() (int64, error)
 }
 
 func scanUser(scanner interface{ Scan(dest ...any) error }) (*models.User, error) {

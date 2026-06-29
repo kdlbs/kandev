@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
+	usermodels "github.com/kandev/kandev/internal/user/models"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -589,11 +590,60 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	// Use the backend-resolved workflow step ID (from the created task) instead of the request's
 	resolvedStepID := taskDTO.WorkflowStepID
 	h.handlePostCreateTaskSession(c, &response, taskDTO.ID, taskDTO.Description, body, resolvedStepID)
+	h.recordTaskCreateLastUsed(c.Request.Context(), body, repos)
 
 	// Associate PR with task if any repository input contains a PR URL
 	h.associatePRFromRepoInputs(taskDTO.ID, response.TaskSessionID, body.Repositories)
 
 	c.JSON(http.StatusOK, response)
+}
+
+func (h *TaskHandlers) recordTaskCreateLastUsed(ctx context.Context, body httpCreateTaskRequest, repos []dto.TaskRepositoryInput) {
+	if h.taskCreateLastUsedRecorder == nil {
+		return
+	}
+	patch := buildTaskCreateLastUsedPatch(body, repos)
+	if taskCreateLastUsedPatchEmpty(patch) {
+		return
+	}
+	if err := h.taskCreateLastUsedRecorder.RecordTaskCreateLastUsed(ctx, patch); err != nil {
+		h.logger.Warn("failed to record task-create last-used settings", zap.Error(err))
+	}
+}
+
+func buildTaskCreateLastUsedPatch(body httpCreateTaskRequest, repos []dto.TaskRepositoryInput) usermodels.TaskCreateLastUsed {
+	patch := usermodels.TaskCreateLastUsed{
+		AgentProfileID:    body.AgentProfileID,
+		ExecutorProfileID: body.ExecutorProfileID,
+	}
+	for _, repo := range repos {
+		if patch.RepositoryID == "" && repo.RepositoryID != "" {
+			patch.RepositoryID = repo.RepositoryID
+		}
+		if patch.Branch == "" {
+			patch.Branch = firstNonEmpty(repo.CheckoutBranch, repo.BaseBranch)
+		}
+		if patch.RepositoryID != "" && patch.Branch != "" {
+			break
+		}
+	}
+	return patch
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func taskCreateLastUsedPatchEmpty(patch usermodels.TaskCreateLastUsed) bool {
+	return patch.RepositoryID == "" &&
+		patch.Branch == "" &&
+		patch.AgentProfileID == "" &&
+		patch.ExecutorProfileID == ""
 }
 
 // commitFreshBranch wraps the post-CreateTask fresh-branch sequence: run the

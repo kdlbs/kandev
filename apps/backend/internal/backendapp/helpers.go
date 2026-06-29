@@ -748,6 +748,9 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	taskhandlers.RegisterWorkspaceRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterWorkflowRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.services.Workflow, p.log)
 	taskH := taskhandlers.RegisterTaskRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.orchestratorSvc, p.taskRepo, planService, p.log)
+	if p.services != nil && p.services.User != nil {
+		taskH.SetTaskCreateLastUsedRecorder(p.services.User)
+	}
 	if handoffSvc != nil {
 		taskH.SetHandoffService(handoffSvc)
 	}
