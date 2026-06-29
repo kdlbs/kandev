@@ -565,6 +565,60 @@ func TestToolUpdateFromCompletedExecutionDoesNotCreateMessage(t *testing.T) {
 		"stale completed-execution tool updates must be dropped before message side effects")
 }
 
+func TestToolCallFromCompletedExecutionDoesNotCreateMessage(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	svc.markExecutionCompleted("s1", "exec-1")
+
+	svc.handleToolCallEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t1",
+		SessionID:   "s1",
+		ExecutionID: "exec-1",
+		Data: &lifecycle.AgentStreamEventData{
+			ToolCallID: "tc1",
+			ToolStatus: "running",
+		},
+	})
+
+	require.Zero(t, messages.toolCallWrites,
+		"stale completed-execution tool calls must be dropped before message side effects")
+}
+
+func TestToolCallStreamFromCompletedExecutionDoesNotSaveAgentText(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	svc.markExecutionCompleted("s1", "exec-1")
+
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t1",
+		SessionID:   "s1",
+		ExecutionID: "exec-1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:       agentEventToolCall,
+			Text:       "stale text from completed execution",
+			ToolCallID: "tc1",
+			ToolStatus: "running",
+		},
+	})
+
+	require.Zero(t, messages.agentMessageWrites,
+		"top-level tool_call guard must run before saveAgentTextIfPresent")
+	require.Zero(t, messages.toolCallWrites,
+		"top-level tool_call guard must not fall through to handleToolCallEvent")
+}
+
 func TestCompletedExecutionMarkerExpiresAndDeletes(t *testing.T) {
 	svc := &Service{}
 

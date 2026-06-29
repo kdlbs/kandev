@@ -1008,6 +1008,7 @@ func TestHandleAgentCompleted_MarksRotatedExecutionCompleted(t *testing.T) {
 		SessionID:        "s1",
 		AgentExecutionID: "exec-old",
 	})
+	waitForStopCall(t, agentMgr)
 
 	if !svc.isExecutionCompleted("s1", "exec-old") {
 		t.Fatal("rotated agent.completed events must still block late tool events from the old execution")
