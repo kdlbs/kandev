@@ -293,13 +293,14 @@ describe("release desktop artifacts", () => {
             tauri_bundles: deb,rpm`);
   });
 
-  it("supports unsigned desktop releases separately from validation-only builds", () => {
+  it("builds unsigned desktop releases when signing inputs are incomplete", () => {
     const workflow = releaseWorkflow();
     const signingDocs = readRepoFile("docs/desktop-tauri-signing.md");
     const tauriConfig = readRepoFile("apps/desktop/src-tauri/tauri.conf.json");
     const windowsSignScript = readRepoFile("apps/desktop/src-tauri/windows-sign.ps1");
 
-    expect(workflow).toContain("allow_unsigned_desktop");
+    expect(workflow).not.toContain("allow_unsigned_desktop");
+    expect(workflow).not.toContain("ALLOW_UNSIGNED_DESKTOP");
     expect(workflow).toContain("desktop_validation_only");
     expect(workflow).toContain("ref: ${{ needs.prepare.outputs.ref }}");
     expect(workflow).toContain("persist-credentials: false");
@@ -307,19 +308,24 @@ describe("release desktop artifacts", () => {
     expect(workflow).toContain("No release PR, tag, GitHub release, public container tags");
     expect(workflow).toContain("if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}");
     expect(workflow).toContain('if [ "$DESKTOP_VALIDATION_ONLY" = "true" ]; then');
+    expect(workflow).toContain("scripts/release/desktop-signing-ready.sh macos");
+    expect(workflow).toContain("scripts/release/desktop-signing-ready.sh windows");
+    expect(workflow).toContain("MACOS_SIGNING_ENABLED=false");
+    expect(workflow).toContain("MACOS_SIGNING_ENABLED=true");
+    expect(workflow).toContain("WINDOWS_SIGNING_ENABLED=false");
+    expect(workflow).toContain("WINDOWS_SIGNING_ENABLED=true");
     expect(workflow).toContain(
-      "Allow unsigned macOS/Windows desktop artifacts; still publishes unless validation-only is checked",
+      "macOS signing/notarization inputs are incomplete; building unsigned desktop artifact.",
+    );
+    expect(workflow).toContain(
+      "Windows signing inputs are incomplete; building unsigned desktop artifact.",
     );
     expect(workflow).toContain("Add unsigned desktop warning to release notes");
     expect(workflow).toContain(
-      "macOS and Windows desktop installers in this release are unsigned.",
-    );
-    expect(workflow).not.toMatch(
-      /if \[ "\$ALLOW_UNSIGNED_DESKTOP" = "true" \]; then\r?\n\s*echo "ref=\$CURRENT_REF"/,
+      "desktop installers in this release are unsigned development builds.",
     );
     expect(workflow).toContain("docker-amd64:");
     expect(workflow).toContain("docker-universal-manifest:");
-    expect(workflow).toContain('if [ "$ALLOW_UNSIGNED_DESKTOP" = "true" ]; then');
     expect(workflow).toContain("unset APPLE_CERTIFICATE");
     expect(workflow).toContain("unset APPLE_ID");
     expect(workflow).toContain("unset WINDOWS_CERTIFICATE");
@@ -364,10 +370,10 @@ describe("release desktop artifacts", () => {
     expect(windowsSignScript).toContain('"https://timestamp.digicert.com"');
     expect(windowsSignScript).toContain("Skipping Windows signing for unsigned desktop artifact");
     expect(windowsSignScript).toContain("Remove-Item -LiteralPath $certificatePath");
-    expect(signingDocs).toContain("Public recommended desktop releases require signing");
-    expect(signingDocs).toContain("allow_unsigned_desktop");
+    expect(signingDocs).toContain("signs desktop artifacts opportunistically");
+    expect(signingDocs).toContain("Missing or incomplete inputs do not block the release");
+    expect(signingDocs).not.toContain("allow_unsigned_desktop");
     expect(signingDocs).toContain("desktop_validation_only");
-    expect(signingDocs).toContain("publishes the normal release outputs");
     expect(signingDocs).toContain("does not publish a GitHub release");
     expect(signingDocs).toContain("public container tags");
     expect(signingDocs).toContain("Ubuntu 22.04");

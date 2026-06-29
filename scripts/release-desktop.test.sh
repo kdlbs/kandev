@@ -6,6 +6,19 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 OUT_FILE="$TMP_DIR/out"
 ERR_FILE="$TMP_DIR/err"
+SIGNING_SECRET_ENV=(
+  -u APPLE_CERTIFICATE
+  -u APPLE_CERTIFICATE_PASSWORD
+  -u KEYCHAIN_PASSWORD
+  -u APPLE_ID
+  -u APPLE_PASSWORD
+  -u APPLE_TEAM_ID
+  -u APPLE_API_KEY
+  -u APPLE_API_ISSUER
+  -u APPLE_API_KEY_P8
+  -u WINDOWS_CERTIFICATE
+  -u WINDOWS_CERTIFICATE_PASSWORD
+)
 
 fail() {
   echo "FAIL: $*" >&2
@@ -14,6 +27,10 @@ fail() {
 
 pass() {
   echo "PASS: $*"
+}
+
+signing_secret_env() {
+  env "${SIGNING_SECRET_ENV[@]}" "$@"
 }
 
 write_runtime() {
@@ -118,6 +135,48 @@ printf 'desktop artifact\n' > "$artifact"
 "$ROOT_DIR/scripts/release/write-sha256.sh" "$artifact" "$artifact.sha256"
 "$ROOT_DIR/scripts/release/verify-desktop-assets.sh" "$assets_dir" linux-x64 >/dev/null
 pass "verify-desktop-assets accepts matching checksums"
+
+if signing_secret_env "$ROOT_DIR/scripts/release/desktop-signing-ready.sh" macos >"$OUT_FILE" 2>"$ERR_FILE"; then
+  fail "desktop-signing-ready should report macOS signing not ready without secrets"
+fi
+grep -q "APPLE_CERTIFICATE" "$ERR_FILE" || fail "desktop-signing-ready did not report missing Apple certificate"
+grep -q "APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID" "$ERR_FILE" || fail "desktop-signing-ready did not report missing notarization inputs"
+pass "desktop-signing-ready reports incomplete macOS inputs"
+
+signing_secret_env \
+  APPLE_CERTIFICATE=cert \
+  APPLE_CERTIFICATE_PASSWORD=cert-password \
+  KEYCHAIN_PASSWORD=keychain-password \
+  APPLE_ID=apple@example.test \
+  APPLE_PASSWORD=apple-password \
+  APPLE_TEAM_ID=TEAMID123 \
+  "$ROOT_DIR/scripts/release/desktop-signing-ready.sh" macos >"$OUT_FILE"
+grep -q "complete for macos" "$OUT_FILE" || fail "desktop-signing-ready rejected Apple ID notarization inputs"
+pass "desktop-signing-ready accepts Apple ID notarization inputs"
+
+signing_secret_env \
+  APPLE_CERTIFICATE=cert \
+  APPLE_CERTIFICATE_PASSWORD=cert-password \
+  KEYCHAIN_PASSWORD=keychain-password \
+  APPLE_API_KEY=api-key \
+  APPLE_API_ISSUER=api-issuer \
+  APPLE_API_KEY_P8=api-key-p8 \
+  "$ROOT_DIR/scripts/release/desktop-signing-ready.sh" macos >"$OUT_FILE"
+grep -q "complete for macos" "$OUT_FILE" || fail "desktop-signing-ready rejected App Store Connect API notarization inputs"
+pass "desktop-signing-ready accepts API key notarization inputs"
+
+if signing_secret_env "$ROOT_DIR/scripts/release/desktop-signing-ready.sh" windows >"$OUT_FILE" 2>"$ERR_FILE"; then
+  fail "desktop-signing-ready should report Windows signing not ready without secrets"
+fi
+grep -q "WINDOWS_CERTIFICATE" "$ERR_FILE" || fail "desktop-signing-ready did not report missing Windows certificate"
+pass "desktop-signing-ready reports incomplete Windows inputs"
+
+signing_secret_env \
+  WINDOWS_CERTIFICATE=windows-cert \
+  WINDOWS_CERTIFICATE_PASSWORD=windows-password \
+  "$ROOT_DIR/scripts/release/desktop-signing-ready.sh" windows >"$OUT_FILE"
+grep -q "complete for windows" "$OUT_FILE" || fail "desktop-signing-ready rejected Windows signing inputs"
+pass "desktop-signing-ready accepts Windows signing inputs"
 
 fallback_tools_dir="$TMP_DIR/sha256sum-tools"
 fallback_assets_dir="$TMP_DIR/sha256sum-assets"
