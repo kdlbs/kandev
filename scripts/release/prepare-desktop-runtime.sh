@@ -114,8 +114,7 @@ copy_one() {
 copy_one "Kandev launcher binary" "$BUNDLE_DIR/bin/kandev" "$BUNDLE_DIR/bin/kandev.exe"
 copy_one "agentctl binary" "$BUNDLE_DIR/bin/agentctl" "$BUNDLE_DIR/bin/agentctl.exe"
 for helper in "${REMOTE_AGENTCTL_HELPERS[@]}"; do
-  cp "$BUNDLE_DIR/bin/$helper" "$OUTPUT_DIR/bin/$helper"
-  chmod +x "$OUTPUT_DIR/bin/$helper" 2>/dev/null || true
+  copy_one "remote agentctl helper $helper" "$BUNDLE_DIR/bin/$helper"
 done
 
 "$VERIFY_SCRIPT" "${VERIFY_ARGS[@]}" "$OUTPUT_DIR" >/dev/null

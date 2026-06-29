@@ -13,6 +13,7 @@ describe("ssh agent readiness shell selection", () => {
 
   it("displays the detected default when no explicit shell is saved", () => {
     expect(readinessDisplayShell("", "zsh")).toBe("zsh");
+    expect(readinessDisplayShell("   ", "zsh")).toBe("zsh");
     expect(readinessDisplayShell("", "")).toBe("bash");
   });
 

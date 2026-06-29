@@ -25,13 +25,17 @@ export interface SSHAgentReadinessCardProps {
 
 const DEFAULT_SHELL = "bash";
 
+function normalizeShell(shell: string): string {
+  return shell.trim();
+}
+
 export function readinessProbeBody(shell: string): { shell?: string } {
-  const trimmed = shell.trim();
+  const trimmed = normalizeShell(shell);
   return trimmed ? { shell: trimmed } : {};
 }
 
 export function readinessDisplayShell(shell: string, defaultShell: string): string {
-  return shell || defaultShell || DEFAULT_SHELL;
+  return normalizeShell(shell) || defaultShell || DEFAULT_SHELL;
 }
 
 // useReadinessState owns the card's fetch + selection state so the component
@@ -63,9 +67,10 @@ function useReadinessState({
     setLoading(true);
     setError(null);
     try {
-      const resp = await probeSSHAgents(executorId, readinessProbeBody(shell));
+      const probeBody = readinessProbeBody(shell);
+      const resp = await probeSSHAgents(executorId, probeBody);
       if (seq !== seqRef.current) return;
-      if (!shell && resp.shell) setDefaultShell(resp.shell);
+      if (!probeBody.shell && resp.shell) setDefaultShell(resp.shell);
       setRows(resp.rows);
       setHasProbed(true);
     } catch (e) {
