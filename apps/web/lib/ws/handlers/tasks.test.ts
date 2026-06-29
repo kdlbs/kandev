@@ -108,6 +108,34 @@ function makeDeletedMessage(payload: Record<string, unknown>) {
   } as Parameters<NonNullable<ReturnType<typeof registerTasksHandlers>["task.deleted"]>>[0];
 }
 
+const REVIEW_TITLE = "Review PR #11259";
+
+function makeActiveStore() {
+  return makeStore({
+    kanban: { workflowId: "wf1", steps: [], tasks: [{ id: "t1", workflowId: "wf1" }] },
+    tasks: {
+      activeTaskId: "t1",
+      activeSessionId: null,
+      pinnedSessionId: null,
+      lastSessionByTaskId: {},
+    },
+    environmentIdBySessionId: {},
+  } as unknown as Partial<AppState>);
+}
+
+function makeInactiveStore() {
+  return makeStore({
+    kanban: { workflowId: "wf1", steps: [], tasks: [{ id: "t1", workflowId: "wf1" }] },
+    tasks: {
+      activeTaskId: null,
+      activeSessionId: null,
+      pinnedSessionId: null,
+      lastSessionByTaskId: {},
+    },
+    environmentIdBySessionId: {},
+  } as unknown as Partial<AppState>);
+}
+
 describe("task.updated primary-session focus follow", () => {
   let store: ReturnType<typeof makeStore>;
   let setActiveSessionAuto: ReturnType<typeof vi.fn>;
@@ -556,19 +584,6 @@ describe("task.deleted cleanup", () => {
 });
 
 describe("task.deleted live notification + redirect", () => {
-  function makeActiveStore() {
-    return makeStore({
-      kanban: { workflowId: "wf1", steps: [], tasks: [{ id: "t1", workflowId: "wf1" }] },
-      tasks: {
-        activeTaskId: "t1",
-        activeSessionId: null,
-        pinnedSessionId: null,
-        lastSessionByTaskId: {},
-      },
-      environmentIdBySessionId: {},
-    } as unknown as Partial<AppState>);
-  }
-
   it("sets a task-deleted notification (with title + reason) when the focused task is deleted", () => {
     const store = makeActiveStore();
     const handlers = registerTasksHandlers(store);
@@ -577,14 +592,14 @@ describe("task.deleted live notification + redirect", () => {
       makeDeletedMessage({
         task_id: "t1",
         workflow_id: "wf1",
-        title: "Review PR #11259",
+        title: REVIEW_TITLE,
         reason: "pr_approved_by_user",
       }),
     );
 
     expect(store.getState().setTaskDeletedNotification).toHaveBeenCalledWith({
       taskId: "t1",
-      title: "Review PR #11259",
+      title: REVIEW_TITLE,
       reason: "pr_approved_by_user",
     });
   });
@@ -607,12 +622,48 @@ describe("task.deleted live notification + redirect", () => {
     expect(store.getState().setTaskDeletedNotification).not.toHaveBeenCalled();
   });
 
+  it("does not notify for a user-initiated delete (no reason) of the focused task", () => {
+    window.history.replaceState({}, "", "/");
+    const store = makeActiveStore();
+    const handlers = registerTasksHandlers(store);
+
+    handlers["task.deleted"]!(
+      makeDeletedMessage({ task_id: "t1", workflow_id: "wf1", title: REVIEW_TITLE }),
+    );
+
+    expect(store.getState().setTaskDeletedNotification).not.toHaveBeenCalled();
+  });
+
+  it("notifies when parked on the deleted route even before activeTaskId hydrates", () => {
+    window.history.replaceState({}, "", "/t/t1");
+    const store = makeInactiveStore();
+    const handlers = registerTasksHandlers(store);
+
+    handlers["task.deleted"]!(
+      makeDeletedMessage({
+        task_id: "t1",
+        workflow_id: "wf1",
+        title: REVIEW_TITLE,
+        reason: "pr_approved_by_user",
+      }),
+    );
+
+    expect(store.getState().setTaskDeletedNotification).toHaveBeenCalledWith({
+      taskId: "t1",
+      title: REVIEW_TITLE,
+      reason: "pr_approved_by_user",
+    });
+    expect(window.location.pathname).toBe("/");
+  });
+
   it("soft-redirects home when parked on the deleted task's route", () => {
     window.history.replaceState({}, "", "/t/t1");
     const store = makeActiveStore();
     const handlers = registerTasksHandlers(store);
 
-    handlers["task.deleted"]!(makeDeletedMessage({ task_id: "t1", workflow_id: "wf1" }));
+    handlers["task.deleted"]!(
+      makeDeletedMessage({ task_id: "t1", workflow_id: "wf1", title: REVIEW_TITLE }),
+    );
 
     expect(window.location.pathname).toBe("/");
   });
@@ -622,7 +673,9 @@ describe("task.deleted live notification + redirect", () => {
     const store = makeActiveStore();
     const handlers = registerTasksHandlers(store);
 
-    handlers["task.deleted"]!(makeDeletedMessage({ task_id: "t1", workflow_id: "wf1" }));
+    handlers["task.deleted"]!(
+      makeDeletedMessage({ task_id: "t1", workflow_id: "wf1", title: REVIEW_TITLE }),
+    );
 
     expect(window.location.pathname).toBe("/t/other");
   });

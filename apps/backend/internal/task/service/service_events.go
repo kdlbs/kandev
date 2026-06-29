@@ -36,6 +36,8 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 
 // publishTaskEventWithExtra is publishTaskEvent with caller-supplied extra
 // fields merged into the payload (e.g. a deletion reason on task.deleted).
+// Caller-supplied keys must not shadow the standard task fields written below
+// (task_id, title, workflow_id, etc.); colliding keys silently overwrite them.
 func (s *Service) publishTaskEventWithExtra(ctx context.Context, eventType string, task *models.Task, oldState *v1.TaskState, extra map[string]interface{}, oldWorkflowIDs ...string) {
 	if s.eventBus == nil {
 		return
