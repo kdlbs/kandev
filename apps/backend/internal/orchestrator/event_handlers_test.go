@@ -1025,6 +1025,14 @@ func TestHandleAgentCompleted_DoesNotMoveTaskToReviewWhileSiblingRuns(t *testing
 		t.Fatalf("agent completion must not move the task to REVIEW while another session is running, writes=%d state=%q",
 			got, taskRepo.updatedStates["t1"])
 	}
+
+	updatedFinishing, err := repo.GetTaskSession(ctx, "s-finishing")
+	if err != nil {
+		t.Fatalf("failed to load finishing session: %v", err)
+	}
+	if updatedFinishing.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("expected finishing session to leave RUNNING, got %q", updatedFinishing.State)
+	}
 }
 
 func TestHandleAgentCompleted_MovesTaskToReviewWhenLastSiblingFinishes(t *testing.T) {
@@ -1079,6 +1087,51 @@ func TestHandleAgentCompleted_MovesTaskToReviewWhenLastSiblingFinishes(t *testin
 	}
 	if state := taskRepo.updatedStates["t1"]; state != v1.TaskStateReview {
 		t.Fatalf("expected task state %q, got %q", v1.TaskStateReview, state)
+	}
+}
+
+func TestHandleAgentCompleted_NoWorkflowStepLastSiblingMovesTaskToReview(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s-first", "")
+	seedExecutorRunning(t, repo, "s-first", "t1", "exec-first")
+
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:        "s-last",
+		TaskID:    "t1",
+		State:     models.TaskSessionStateRunning,
+		StartedAt: now.Add(time.Second),
+		UpdatedAt: now.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("failed to create running sibling session: %v", err)
+	}
+	seedExecutorRunning(t, repo, "s-last", "t1", "exec-last")
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s-first",
+		AgentExecutionID: "exec-first",
+	})
+
+	if got := taskRepo.stateWrites["t1"]; got != 0 {
+		t.Fatalf("first no-step completion must not move task to REVIEW while sibling runs, writes=%d state=%q",
+			got, taskRepo.updatedStates["t1"])
+	}
+
+	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s-last",
+		AgentExecutionID: "exec-last",
+	})
+
+	if got := taskRepo.stateWrites["t1"]; got != 1 {
+		t.Fatalf("last no-step sibling completion must move task to REVIEW once, writes=%d state=%q",
+			got, taskRepo.updatedStates["t1"])
 	}
 }
 

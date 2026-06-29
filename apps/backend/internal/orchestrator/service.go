@@ -364,6 +364,12 @@ type Service struct {
 	// Active turns map: sessionID -> turnID
 	activeTurns sync.Map
 
+	// taskRuntimeStateMu serializes task-state flips derived from session
+	// runtime state. Without it, a completion/cancel path can check for active
+	// sibling sessions just before another handler marks one RUNNING, then
+	// clobber the task back to REVIEW while work is active.
+	taskRuntimeStateMu sync.Mutex
+
 	// Session reset flags: sessionID -> true while resetAgentContext is restarting process.
 	// Used to suppress stale ready events and avoid draining queued prompts mid-reset.
 	resetInProgressSessions sync.Map

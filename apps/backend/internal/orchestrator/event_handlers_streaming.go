@@ -578,6 +578,9 @@ func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, session
 }
 
 func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSessionID string) {
+	s.taskRuntimeStateMu.Lock()
+	defer s.taskRuntimeStateMu.Unlock()
+
 	if blockingSessionID := s.otherWorkingSessionID(ctx, taskID, completedSessionID); blockingSessionID != "" {
 		s.logger.Debug("skipping task REVIEW state while another session is working",
 			zap.String("task_id", taskID),
@@ -638,6 +641,10 @@ func (s *Service) writeTaskReviewStateOnCancel(ctx context.Context, taskID, sess
 	if dbTask.AssigneeAgentProfileID != "" {
 		return
 	}
+
+	s.taskRuntimeStateMu.Lock()
+	defer s.taskRuntimeStateMu.Unlock()
+
 	if blockingSessionID := s.otherWorkingSessionID(ctx, taskID, sessionID); blockingSessionID != "" {
 		s.logger.Debug("skipping task REVIEW state after cancel while another session is working",
 			zap.String("task_id", taskID),
@@ -666,6 +673,9 @@ func (s *Service) writeTaskReviewStateOnCancel(ctx context.Context, taskID, sess
 }
 
 func (s *Service) setSessionRunning(ctx context.Context, taskID, sessionID string, preloadedSession ...*models.TaskSession) {
+	s.taskRuntimeStateMu.Lock()
+	defer s.taskRuntimeStateMu.Unlock()
+
 	// Resolve session up front so we can guard the task write against terminal
 	// states. updateTaskSessionState silently no-ops for terminal sessions, so
 	// without this guard a buffered tool event arriving after a CANCELLED /
