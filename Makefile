@@ -147,31 +147,14 @@ bootstrap:
 bootstrap-e2e:
 	@scripts/bootstrap-dev-env --with-e2e
 
-# Build the linux/amd64 agentctl on every host except Linux/x86_64 (where the
-# host build IS already linux/amd64). Computed up here, OS-conditionally, so
-# the recipe doesn't shell out to `uname` — that fails on Windows under cmd
-# and produces spurious "CreateProcess(NULL, uname -s, ...) failed" warnings
-# on every Make invocation.
-ifeq ($(OS),Windows_NT)
-  HOST_IS_LINUX_AMD64 := 0
-else
-  ifeq ($(shell uname -s)/$(shell uname -m),Linux/x86_64)
-    HOST_IS_LINUX_AMD64 := 1
-  else
-    HOST_IS_LINUX_AMD64 := 0
-  endif
-endif
-
 .PHONY: doctor
 doctor:
 	@scripts/doctor
 
 .PHONY: dev
 dev: doctor
-ifneq ($(HOST_IS_LINUX_AMD64),1)
-	@echo "Building Linux agentctl for remote executors..."
-	@$(MAKE) -C $(BACKEND_DIR) build-agentctl-linux
-endif
+	@echo "Building remote agentctl helpers..."
+	@$(MAKE) -C $(BACKEND_DIR) build-agentctl-remote
 ifeq ($(OS),Windows_NT)
 	@echo "Building winjob (Ctrl-C-safe wrapper for Windows)..."
 	@$(MAKE) -C $(BACKEND_DIR) build-winjob
@@ -278,10 +261,14 @@ service-bundle: install build
 	$(call phase,Packaging Service Bundle)
 	@test -n "$(SERVICE_BUNDLE_DIR)" || { echo "SERVICE_BUNDLE_DIR is empty; aborting."; exit 1; }
 	@test "$(SERVICE_BUNDLE_DIR)" != "/" || { echo "SERVICE_BUNDLE_DIR must not be /; aborting."; exit 1; }
-	@test -f "$(BACKEND_DIR)/bin/agentctl-linux-amd64" || $(MAKE) -C $(BACKEND_DIR) build-agentctl-linux
+	@$(MAKE) -C $(BACKEND_DIR) build-agentctl-remote
 	@$(RMDIR) "$(SERVICE_BUNDLE_DIR)/bin"
 	@mkdir -p "$(SERVICE_BUNDLE_DIR)/bin"
-	@cp "$(BACKEND_DIR)/bin/kandev" "$(BACKEND_DIR)/bin/agentctl" "$(BACKEND_DIR)/bin/agentctl-linux-amd64" "$(SERVICE_BUNDLE_DIR)/bin/"
+	@cp "$(BACKEND_DIR)/bin/kandev" "$(BACKEND_DIR)/bin/agentctl" \
+		"$(BACKEND_DIR)/bin/agentctl-linux-amd64" \
+		"$(BACKEND_DIR)/bin/agentctl-darwin-arm64" \
+		"$(BACKEND_DIR)/bin/agentctl-darwin-amd64" \
+		"$(SERVICE_BUNDLE_DIR)/bin/"
 	@scripts/release/package-bundle.sh
 	$(call success,Service bundle packaged at $(SERVICE_BUNDLE_DIR))
 
@@ -327,10 +314,12 @@ build-backend:
 	@printf "$(CYAN)Building backend...$(RESET)\n"
 	@$(MAKE) -C $(BACKEND_DIR) build
 
-.PHONY: build-backend-linux-helpers
-build-backend-linux-helpers:
-	@printf "$(CYAN)Building linux/amd64 helper binaries (agentctl + mock-agent) for Docker E2E...$(RESET)\n"
-	@$(MAKE) -C $(BACKEND_DIR) build-agentctl-linux build-mock-agent-linux
+.PHONY: build-backend-remote-helpers build-backend-linux-helpers
+build-backend-remote-helpers:
+	@printf "$(CYAN)Building remote helper binaries (agentctl helpers + mock-agent) for executor E2E...$(RESET)\n"
+	@$(MAKE) -C $(BACKEND_DIR) build-agentctl-remote build-mock-agent-linux
+
+build-backend-linux-helpers: build-backend-remote-helpers
 
 .PHONY: acpdbg
 acpdbg:

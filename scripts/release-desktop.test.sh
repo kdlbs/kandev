@@ -19,6 +19,11 @@ SIGNING_SECRET_ENV=(
   -u WINDOWS_CERTIFICATE
   -u WINDOWS_CERTIFICATE_PASSWORD
 )
+REMOTE_AGENTCTL_HELPERS=(
+  agentctl-linux-amd64
+  agentctl-darwin-arm64
+  agentctl-darwin-amd64
+)
 
 fail() {
   echo "FAIL: $*" >&2
@@ -40,16 +45,20 @@ write_runtime() {
   printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/bin/kandev"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/bin/agentctl"
   if [ "$helper" = "with-helper" ]; then
-    printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/bin/agentctl-linux-amd64"
+    for remote_helper in "${REMOTE_AGENTCTL_HELPERS[@]}"; do
+      printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/bin/$remote_helper"
+    done
   fi
 }
 
 chmod_runtime() {
   local dir="$1"
   chmod +x "$dir/bin/kandev" "$dir/bin/agentctl"
-  if [ -f "$dir/bin/agentctl-linux-amd64" ]; then
-    chmod +x "$dir/bin/agentctl-linux-amd64"
-  fi
+  for remote_helper in "${REMOTE_AGENTCTL_HELPERS[@]}"; do
+    if [ -f "$dir/bin/$remote_helper" ]; then
+      chmod +x "$dir/bin/$remote_helper"
+    fi
+  done
 }
 
 runtime_dir="$TMP_DIR/runtime"
@@ -75,6 +84,16 @@ fi
 grep -q "Missing agentctl linux/amd64 helper" "$ERR_FILE" || fail "verify-desktop-runtime did not explain missing helper"
 pass "verify-desktop-runtime requires helper for linux-x64 runtime"
 
+missing_darwin_helper_runtime_dir="$TMP_DIR/missing-darwin-helper-runtime"
+write_runtime "$missing_darwin_helper_runtime_dir"
+rm "$missing_darwin_helper_runtime_dir/bin/agentctl-darwin-arm64"
+chmod_runtime "$missing_darwin_helper_runtime_dir"
+if "$ROOT_DIR/scripts/release/verify-desktop-runtime.sh" --platform macos-arm64 "$missing_darwin_helper_runtime_dir" >"$OUT_FILE" 2>"$ERR_FILE"; then
+  fail "verify-desktop-runtime should require darwin helper"
+fi
+grep -q "Missing agentctl darwin/arm64 helper" "$ERR_FILE" || fail "verify-desktop-runtime did not explain missing darwin helper"
+pass "verify-desktop-runtime requires darwin helper"
+
 nonexec_helper_runtime_dir="$TMP_DIR/nonexec-helper-runtime"
 write_runtime "$nonexec_helper_runtime_dir"
 chmod +x "$nonexec_helper_runtime_dir/bin/kandev" "$nonexec_helper_runtime_dir/bin/agentctl"
@@ -88,7 +107,9 @@ windows_runtime_dir="$TMP_DIR/windows-runtime"
 mkdir -p "$windows_runtime_dir/bin"
 printf 'stub\n' > "$windows_runtime_dir/bin/kandev.exe"
 printf 'stub\n' > "$windows_runtime_dir/bin/agentctl.exe"
-printf 'stub\n' > "$windows_runtime_dir/bin/agentctl-linux-amd64"
+for remote_helper in "${REMOTE_AGENTCTL_HELPERS[@]}"; do
+  printf 'stub\n' > "$windows_runtime_dir/bin/$remote_helper"
+done
 OS=Windows_NT "$ROOT_DIR/scripts/release/verify-desktop-runtime.sh" --platform windows-x64 "$windows_runtime_dir" >"$OUT_FILE"
 grep -q "verified for windows-x64" "$OUT_FILE" || fail "verify-desktop-runtime did not accept Windows-host runtime"
 pass "verify-desktop-runtime accepts Windows-host helper without POSIX mode bits"
@@ -99,20 +120,24 @@ linux_output_dir="$TMP_DIR/linux-output"
   --platform linux-x64 \
   --output-dir "$linux_output_dir" >"$OUT_FILE"
 grep -q "prepared for linux-x64" "$OUT_FILE" || fail "prepare-desktop-runtime did not include platform output"
-if [ ! -x "$linux_output_dir/bin/agentctl-linux-amd64" ]; then
-  fail "prepare-desktop-runtime should copy executable helper for linux-x64"
-fi
-pass "prepare-desktop-runtime copies helper for linux-x64"
+for remote_helper in "${REMOTE_AGENTCTL_HELPERS[@]}"; do
+  if [ ! -x "$linux_output_dir/bin/$remote_helper" ]; then
+    fail "prepare-desktop-runtime should copy executable $remote_helper for linux-x64"
+  fi
+done
+pass "prepare-desktop-runtime copies helpers for linux-x64"
 
 macos_output_dir="$TMP_DIR/macos-output"
 "$ROOT_DIR/scripts/release/prepare-desktop-runtime.sh" \
   --bundle-dir "$runtime_dir" \
   --platform macos-arm64 \
   --output-dir "$macos_output_dir" >/dev/null
-if [ ! -x "$macos_output_dir/bin/agentctl-linux-amd64" ]; then
-  fail "prepare-desktop-runtime should copy executable helper for macos-arm64"
-fi
-pass "prepare-desktop-runtime copies helper for non-linux-x64"
+for remote_helper in "${REMOTE_AGENTCTL_HELPERS[@]}"; do
+  if [ ! -x "$macos_output_dir/bin/$remote_helper" ]; then
+    fail "prepare-desktop-runtime should copy executable $remote_helper for macos-arm64"
+  fi
+done
+pass "prepare-desktop-runtime copies helpers for non-linux-x64"
 
 if "$ROOT_DIR/scripts/release/prepare-desktop-runtime.sh" --bundle-dir "$runtime_dir" --output-dir / >"$OUT_FILE" 2>"$ERR_FILE"; then
   fail "prepare-desktop-runtime should reject root output directory"

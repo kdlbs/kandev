@@ -4,6 +4,7 @@ import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
+import { IconShieldLock } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import {
@@ -508,11 +509,25 @@ function ProfileEditSections({
 }
 
 function ProfileEditForm({ executor, profile }: { executor: Executor; profile: ExecutorProfile }) {
+  const router = useRouter();
   const { items: secrets } = useSecrets();
   const persistence = useProfilePersistence(executor, profile);
   const form = useProfileFormState(executor, profile);
   const relatedContainers = useDockerProfileContainers(profile.id, form.isDocker);
   const spritesTokenMissing = form.isSprites && !form.spritesSecretId;
+  const headerActions =
+    executor.type === "ssh" ? (
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => router.push(`/settings/executors/ssh/${executor.id}`)}
+        className="w-full cursor-pointer sm:w-auto"
+        data-testid="ssh-connection-settings-link"
+      >
+        <IconShieldLock className="mr-1.5 h-4 w-4" />
+        Connection Settings
+      </Button>
+    ) : undefined;
 
   const handleSave = () => {
     if (!form.name.trim() || form.mcpPolicyError || spritesTokenMissing) return;
@@ -566,6 +581,7 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
         executor={executor}
         profileName={profile.name}
         description={getExecutorDescription(executor.type)}
+        actions={headerActions}
       />
       <ProfileEditSections
         executor={executor}
@@ -606,5 +622,6 @@ function getExecutorDescription(type: ExecutorType): string {
   if (type === "local_docker") return "Runs Docker containers on this machine.";
   if (type === "remote_docker") return "Connects to a remote Docker host.";
   if (type === "sprites") return "Runs agents in Sprites.dev cloud sandboxes.";
+  if (type === "ssh") return "Runs agents on a trusted Linux amd64 or macOS host over SSH.";
   return "Custom executor.";
 }

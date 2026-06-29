@@ -42,15 +42,15 @@ The GitHub release bundle and the npm runtime package are **different shapes** b
 ```
 # GitHub release bundle (used by Homebrew + manual installs)
 kandev/
-└── bin/{kandev,agentctl,agentctl-linux-amd64}
+└── bin/{kandev,agentctl,agentctl-linux-amd64,agentctl-darwin-arm64,agentctl-darwin-amd64}
 
 # npm runtime package (@kdlbs/runtime-{platform})
 @kdlbs/runtime-{platform}/
-└── bin/{kandev,agentctl,agentctl-linux-amd64}
+└── bin/{kandev,agentctl,agentctl-linux-amd64,agentctl-darwin-arm64,agentctl-darwin-amd64}
 
 # Tauri desktop resource directory
 apps/desktop/src-tauri/resources/kandev/
-└── bin/{kandev[.exe],agentctl[.exe],agentctl-linux-amd64}
+└── bin/{kandev[.exe],agentctl[.exe],agentctl-linux-amd64,agentctl-darwin-arm64,agentctl-darwin-amd64}
 ```
 
 For npm installs, the main `kandev` package provides only a tiny Node bin shim that execs `bin/kandev` from the platform runtime package.

@@ -229,7 +229,7 @@ export function SSHConnectionCard(props: SSHConnectionCardProps) {
               Connection
             </CardTitle>
             <CardDescription>
-              Run an agent on any Linux box you can reach over SSH. linux/amd64 hosts only.
+              Run an agent on Linux amd64 or macOS hosts you can reach over SSH.
             </CardDescription>
           </div>
           <ConnectionBadge fingerprint={c.form.host_fingerprint} />

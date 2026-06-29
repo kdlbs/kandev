@@ -70,7 +70,9 @@ Release bundles expose this layout:
 kandev/
 ├── bin/kandev
 ├── bin/agentctl
-└── bin/agentctl-linux-amd64
+├── bin/agentctl-linux-amd64
+├── bin/agentctl-darwin-arm64
+└── bin/agentctl-darwin-amd64
 ```
 
 `bin/kandev` is both the public launcher and the hidden backend-mode executable.

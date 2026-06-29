@@ -23,7 +23,9 @@ export interface SSHTestResult {
   success: boolean;
   fingerprint?: string;
   uname_all?: string;
+  os?: string;
   arch?: string;
+  platform?: string;
   git_version?: string;
   agentctl_action?: "cached" | "needs_upload" | "skipped";
   steps: SSHTestStep[];

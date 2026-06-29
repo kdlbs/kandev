@@ -78,14 +78,14 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
 - On subsequent sessions for the same task on the same host: detect the existing task dir, skip clone, attach a new agentctl to it.
 - On `StopInstance` of the *last* session in a task: leave the task dir intact (so a later resume keeps history); only remove it on explicit task-level cleanup (out of scope for v1 — see below).
 
-### agentctl binary upload with content-hash cache (amd64 only in v1)
+### agentctl binary upload with content-hash cache
 
-- On `CreateInstance`, resolve the local `agentctl-linux-amd64` binary via the existing `AgentctlResolver`.
-- Detect remote architecture via `uname -m` over SSH. **If the remote is not `x86_64`, fail with a clear error**: "SSH executor v1 supports linux/amd64 only; this host reports `<arch>`". Matches the current Docker executor's reality — the Makefile only produces `agentctl-linux-amd64`.
+- On `CreateInstance`, detect the remote platform via `uname -s` and `uname -m`, normalize it to a Go `GOOS/GOARCH` tuple, and resolve the matching agentctl helper via `AgentctlResolver`.
+- Supported remote platforms are `linux/amd64`, `darwin/arm64`, and `darwin/amd64`. Unsupported platforms fail with a clear error: `unsupported remote platform "<platform>" — SSH executor supports linux/amd64, darwin/arm64, and darwin/amd64`.
+- Runtime bundles include `agentctl-linux-amd64`, `agentctl-darwin-arm64`, and `agentctl-darwin-amd64`; development builds produce them with `make -C apps/backend build-agentctl-remote`.
 - Compute SHA256 locally; check `~/.kandev/bin/agentctl.sha256` on the remote via `sha256sum`. Upload only if missing or mismatched.
 - Upload via SFTP to `~/.kandev/bin/agentctl` (chmod 755), then write the sha256 sidecar.
 - Binary is shared across all tasks and sessions on the host.
-- **arm64 is a separate follow-up** that needs a new `build-agentctl-linux-arm64` Makefile target and an arch-aware resolver — benefits Docker too.
 
 ### Credential push reuses the existing `FileUploader` seam
 
@@ -104,6 +104,7 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
   - **`SSHConnectionCard`** — the form + "Test connection" gate. Fields: name, `host` (or `host_alias` from `~/.ssh/config`), `port`, `user`, identity source (`agent` | `file`), optional `identity_file`, optional `proxy_jump`. Save disabled until a successful test produced a fingerprint and the "Trust this host" checkbox is ticked.
   - **`SSHSessionsCard`** — mirrors `SpritesInstancesCard` and `DockerContainersCard`. Table columns: task ID, session ID, host (`user@host`), remote agentctl port, local forward port, uptime, status badge. Data sourced from `GET /api/v1/ssh/executors/{id}/sessions`. Refreshes every 90 seconds.
 - Per-profile settings: `workdir_root` stored on `ExecutorProfile.Config` (so the same host can serve different profiles into different roots).
+- SSH profile pages include a direct "Connection Settings" action back to the host-level SSH connection page so users can find Test connection / re-trust without knowing the dedicated executor URL.
 
 ### Edit-with-live-sessions UX
 
@@ -113,7 +114,7 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
 ### Telemetry & errors
 
 - Same step-progress callback used by Sprites (`OnProgress`) reports the per-step status: "Connecting → Detecting remote OS → Uploading agent controller → Preparing task directory → Starting agent controller → Connecting to agent controller".
-- Connection errors surface verbatim (host unreachable, auth failed, host key mismatch, arm64 unsupported) — no swallowing into generic "executor failed".
+- Connection errors surface verbatim (host unreachable, auth failed, host key mismatch, unsupported platform) — no swallowing into generic "executor failed".
 
 ## Scenarios
 
@@ -129,6 +130,8 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
 
 - **GIVEN** the user opens the SSH executor's settings page, **WHEN** they scroll to "Active sessions", **THEN** they see each running session on this host (task, session ID, user@host, remote port, local fwd port, uptime, status) — same shape as the Docker containers table and Sprites instances table.
 
+- **GIVEN** a user is editing an SSH executor profile, **WHEN** they need to re-test or re-trust the host, **THEN** the profile page exposes a direct Connection Settings action that opens the SSH connection page with the Test connection button.
+
 - **GIVEN** a user edits the SSH executor's `host` field while two sessions are running, **WHEN** they click Save, **THEN** a confirm modal warns them the running sessions will keep going on the old host and only new sessions will use the new host. On confirm, the executor row updates and the live sessions are unaffected.
 
 - **GIVEN** a host is reachable only via a bastion, **WHEN** the user's `~/.ssh/config` has `ProxyJump bastion.example.com` for that host alias, **THEN** kandev parses the config, dials through the bastion, and the rest of the flow is unchanged.
@@ -137,8 +140,8 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
 
 ## Out of scope (v1)
 
-- **Remote macOS / Windows.** Linux remote only; agentctl is built for Linux. macOS via SSH is a plausible v2.
-- **Remote arm64.** Matches the current state of Docker. Lands when a new `build-agentctl-linux-arm64` Makefile target + arch-aware resolver are added (cross-cutting change benefiting Docker too); not part of this spec.
+- **Remote Windows.** SSH transport to Windows is out of scope.
+- **Remote Linux arm64.** Lands when a new `agentctl-linux-arm64` helper is built, packaged, and covered by CI.
 - **Password / keyboard-interactive auth.** Keys + agent only.
 - **Passphrase-protected keys handled inside kandev.** User must load the key into `ssh-agent`.
 - **Chained ProxyJump.** Single bastion only; multi-hop deferred.
@@ -156,7 +159,6 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
 - **Auto-provision mode**: kandev runs a one-shot install script on the remote (apt/yum/brew) to set up node/docker/etc. before the first task — turns a bare Hetzner box into a ready-to-use kandev host.
 - **Multi-user-per-host** with per-task Linux user impersonation (`sudo -u worker-N`) for genuine isolation on shared boxes.
 - **Chained ProxyJump** and `ProxyCommand` support for esoteric setups.
-- **macOS remote** once an `agentctl-darwin` binary exists.
 - **"Push working tree" mode** for users who want to test uncommitted changes against a remote (rsync the worktree instead of cloning).
 - **Pooled host capacity**: configure 3 SSH hosts as a pool, kandev round-robins / load-balances tasks across them.
 - **SSH-tunneled MCP servers**: expose a user's local MCP servers to a remote-running agent via reverse forward.

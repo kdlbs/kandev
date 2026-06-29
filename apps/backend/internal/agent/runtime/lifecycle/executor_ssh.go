@@ -140,7 +140,7 @@ func (r *SSHExecutor) targetFromMetadata(md map[string]interface{}) (*SSHTarget,
 		PinnedFingerprint: getMetadataString(md, MetadataKeySSHHostFingerprint),
 	}
 	if cfg.PinnedFingerprint == "" {
-		return nil, errors.New("ssh executor: host_fingerprint is required — re-run Test Connection in settings to trust the host")
+		return nil, errors.New("ssh executor: host_fingerprint is required — open the SSH executor connection settings, run Test connection, and trust the host")
 	}
 	return ResolveSSHTarget(cfg)
 }
@@ -230,13 +230,13 @@ func (r *SSHExecutor) prepareRemoteHost(ctx context.Context, client *ssh.Client,
 		r.report(req.OnProgress, "Detecting remote OS", PrepareStepFailed, err.Error())
 		return "", fmt.Errorf("ssh: detect remote: %w", err)
 	}
-	if err := requireSupportedArch(info.Arch); err != nil {
+	if err := requireSupportedRemotePlatform(info.Platform); err != nil {
 		r.report(req.OnProgress, "Detecting remote OS", PrepareStepFailed, err.Error())
 		return "", err
 	}
 	r.report(req.OnProgress, "Detecting remote OS", PrepareStepCompleted, info.UnameAll)
 
-	agentctlBin, err := ensureAgentctlOnHost(ctx, client, r.agentctlResolver, r.logger)
+	agentctlBin, err := ensureAgentctlOnHost(ctx, client, r.agentctlResolver, info.Platform, r.logger)
 	if err != nil {
 		r.report(req.OnProgress, "Uploading agent controller", PrepareStepFailed, err.Error())
 		return "", err

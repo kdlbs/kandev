@@ -115,9 +115,10 @@ All locators use `data-testid` attributes added to `ssh-settings.tsx` in the sam
 
 These are intentionally out of scope for this PR. Each one names what unblocks it.
 
-- **arm64 remote host (O1, O2)** — needs `agentctl-linux-arm64` in the build pipeline and `qemu-user-static` available in CI to run an arm64 sshd container. Revisit when the arm64 follow-up lands (see spec.md "Future scope: Linux arm64 agentctl"). Until then, the `requireSupportedArch` gate is covered indirectly by H1 succeeding only when the host is amd64.
+- **Linux arm64 remote host (O1, O2)** — needs `agentctl-linux-arm64` in the build pipeline and `qemu-user-static` available in CI to run an arm64 sshd container. Revisit when the Linux arm64 follow-up lands. Until then, the unsupported-platform gate is covered by backend unit tests.
 - **Chained ProxyJump beyond first hop** — v1 spec says single bastion only. N3 just verifies we *fail* on a chained config rather than silently misroute. A future "chained ProxyJump" feature would add positive cases.
-- **macOS / Windows remote** — needs `agentctl-darwin-*` / `agentctl-windows-*` binaries.
+- **macOS remote E2E** — supported by the runtime, but needs macOS SSH host coverage in CI or a manual runner.
+- **Windows remote** — needs `agentctl-windows-*` binaries and a Windows SSH host harness.
 - **Reverse-forward of local MCP servers to the remote agent** — not in v1 spec; would need its own test plan when that feature lands.
 
 ## Phasing (within this PR)

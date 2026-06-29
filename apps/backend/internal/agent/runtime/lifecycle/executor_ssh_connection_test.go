@@ -112,16 +112,75 @@ func TestExpandHome(t *testing.T) {
 	}
 }
 
-func TestRequireSupportedArch(t *testing.T) {
-	if err := requireSupportedArch("x86_64"); err != nil {
-		t.Errorf("x86_64 should be supported, got %v", err)
-	}
-	err := requireSupportedArch("aarch64")
+func TestSSHExecutorTargetFromMetadataMissingFingerprintNamesConnectionSettings(t *testing.T) {
+	exec := &SSHExecutor{}
+	_, err := exec.targetFromMetadata(map[string]interface{}{
+		MetadataKeySSHHost:           "example.com",
+		MetadataKeySSHUser:           "alice",
+		MetadataKeySSHIdentitySource: string(SSHIdentitySourceAgent),
+	})
 	if err == nil {
-		t.Fatal("aarch64 should not be supported")
+		t.Fatal("expected missing host_fingerprint error")
 	}
-	if !strings.Contains(err.Error(), "aarch64") || !strings.Contains(err.Error(), "linux/amd64") {
-		t.Errorf("error should name the arch and the supported one: %v", err)
+	msg := err.Error()
+	for _, want := range []string{"host_fingerprint is required", "SSH executor connection settings", "Test connection", "trust the host"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error message %q missing %q", msg, want)
+		}
+	}
+}
+
+func TestNormalizeSSHRemotePlatform(t *testing.T) {
+	cases := []struct {
+		name     string
+		osName   string
+		arch     string
+		wantOS   string
+		wantArch string
+		wantOK   bool
+	}{
+		{"linux amd64", "Linux", "x86_64", "linux", "amd64", true},
+		{"darwin arm64", "Darwin", "arm64", "darwin", "arm64", true},
+		{"darwin amd64", "Darwin", "x86_64", "darwin", "amd64", true},
+		{"linux arm64 currently unsupported", "Linux", "aarch64", "", "", false},
+		{"freebsd amd64 unsupported", "FreeBSD", "x86_64", "", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := normalizeSSHRemotePlatform(tc.osName, tc.arch)
+			if ok != tc.wantOK {
+				t.Fatalf("normalizeSSHRemotePlatform(%q, %q) ok = %v, want %v", tc.osName, tc.arch, ok, tc.wantOK)
+			}
+			if !ok {
+				return
+			}
+			if got.GOOS != tc.wantOS || got.GOARCH != tc.wantArch {
+				t.Errorf("normalizeSSHRemotePlatform(%q, %q) = %s/%s, want %s/%s",
+					tc.osName, tc.arch, got.GOOS, got.GOARCH, tc.wantOS, tc.wantArch)
+			}
+		})
+	}
+}
+
+func TestRequireSupportedRemotePlatform(t *testing.T) {
+	for _, platform := range []SSHRemotePlatform{
+		{GOOS: "linux", GOARCH: "amd64", UnameOS: "Linux", UnameArch: "x86_64"},
+		{GOOS: "darwin", GOARCH: "arm64", UnameOS: "Darwin", UnameArch: "arm64"},
+		{GOOS: "darwin", GOARCH: "amd64", UnameOS: "Darwin", UnameArch: "x86_64"},
+	} {
+		if err := requireSupportedRemotePlatform(platform); err != nil {
+			t.Errorf("%s should be supported, got %v", platform.String(), err)
+		}
+	}
+	unsupported := SSHRemotePlatform{GOOS: "linux", GOARCH: "arm64", UnameOS: "Linux", UnameArch: "aarch64"}
+	err := requireSupportedRemotePlatform(unsupported)
+	if err == nil {
+		t.Fatal("linux/arm64 should not be supported yet")
+	}
+	for _, want := range []string{"linux/arm64", "linux/amd64", "darwin/arm64", "darwin/amd64"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err.Error(), want)
+		}
 	}
 }
 

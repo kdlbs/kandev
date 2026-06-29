@@ -413,16 +413,16 @@ jobs:
           go build -tags fts5 -ldflags "${LDFLAGS}" -o bin/kandev${EXT} ./cmd/kandev
           go build -ldflags "${LDFLAGS}" -o bin/agentctl${EXT} ./cmd/agentctl
 
-      # Cross-compile a linux/amd64 agentctl regardless of the host platform.
-      # Remote executors (local Docker, remote Docker, Sprites) bind-mount this
-      # binary into the container — without it, Docker sessions fail with
-      # "agentctl linux binary not found" on Mac/Windows installs and even on
-      # Linux installs (the resolver looks for the -linux-amd64 suffix).
-      # CGO is off so this works from any host without extra toolchain setup.
-      - name: Build linux/amd64 agentctl helper
+      # Cross-compile remote agentctl helpers regardless of the host platform.
+      # Remote executors upload or bind-mount these sidecars into Linux and
+      # macOS SSH hosts. CGO is off so this works from any host without extra
+      # toolchain setup.
+      - name: Build remote agentctl helpers
         run: |
           cd apps/backend
           GOOS=linux GOARCH=amd64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-linux-amd64 ./cmd/agentctl
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-darwin-arm64 ./cmd/agentctl
+          GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-darwin-amd64 ./cmd/agentctl
 
       - name: Package bundle
         run: |
@@ -432,6 +432,8 @@ jobs:
           cp apps/backend/bin/kandev${EXT} dist/kandev/bin/
           cp apps/backend/bin/agentctl${EXT} dist/kandev/bin/
           cp apps/backend/bin/agentctl-linux-amd64 dist/kandev/bin/
+          cp apps/backend/bin/agentctl-darwin-arm64 dist/kandev/bin/
+          cp apps/backend/bin/agentctl-darwin-amd64 dist/kandev/bin/
           cd dist
           tar -czf "kandev-${{ matrix.platform }}.tar.gz" kandev
           shasum -a 256 "kandev-${{ matrix.platform }}.tar.gz" > "kandev-${{ matrix.platform }}.tar.gz.sha256"

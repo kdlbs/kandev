@@ -92,7 +92,9 @@ apps/desktop/src-tauri/resources/kandev/
 └── bin/
     ├── kandev[.exe]
     ├── agentctl[.exe]
-    └── agentctl-linux-amd64
+    ├── agentctl-linux-amd64
+    ├── agentctl-darwin-arm64
+    └── agentctl-darwin-amd64
 ```
 
 The helper validates the exact binaries required by `internal/launcher/bundle.go` so the desktop app and existing runtime tarballs cannot drift.

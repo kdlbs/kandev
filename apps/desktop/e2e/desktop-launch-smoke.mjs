@@ -74,7 +74,11 @@ async function runSmoke() {
 async function writeFakeRuntime(runtimeDir, stateDir) {
   const fakeRuntime = join(runtimeDir, "bin", process.platform === "win32" ? "kandev.cmd" : "kandev");
   const agentctl = join(runtimeDir, "bin", process.platform === "win32" ? "agentctl.cmd" : "agentctl");
-  const linuxHelper = join(runtimeDir, "bin", "agentctl-linux-amd64");
+  const remoteHelpers = [
+    ["agentctl-linux-amd64", "linux/amd64"],
+    ["agentctl-darwin-arm64", "darwin/arm64"],
+    ["agentctl-darwin-amd64", "darwin/amd64"],
+  ];
 
   if (process.platform === "win32") {
     await writeFile(
@@ -92,9 +96,12 @@ async function writeFakeRuntime(runtimeDir, stateDir) {
     await chmod(agentctl, 0o755);
   }
 
-  await writeFile(linuxHelper, "#!/usr/bin/env bash\necho fake agentctl linux helper\n");
-  if (process.platform !== "win32") {
-    await chmod(linuxHelper, 0o755);
+  for (const [name, platform] of remoteHelpers) {
+    const helper = join(runtimeDir, "bin", name);
+    await writeFile(helper, `#!/usr/bin/env bash\necho fake agentctl ${platform} helper\n`);
+    if (process.platform !== "win32") {
+      await chmod(helper, 0o755);
+    }
   }
 }
 
