@@ -43,11 +43,11 @@ type TaskItemProps = {
   isMultiSelected?: boolean;
   onClick?: () => void;
   /**
-   * Modifier-aware mouse handler. When provided, the row delegates click to this
-   * (cmd/shift/plain dispatch lives in the parent); `onClick` remains the plain
-   * keyboard-activation path.
+   * Modifier-aware activation handler. When provided, both mouse clicks and
+   * keyboard Enter/Space delegate here (cmd/shift/plain dispatch lives in the
+   * parent); `onClick` is the fallback when no selection handler is wired.
    */
-  onSelect?: (e: React.MouseEvent) => void;
+  onSelect?: (e: React.MouseEvent | React.KeyboardEvent) => void;
   diffStats?: DiffStats;
   isRemoteExecutor?: boolean;
   remoteExecutorType?: string;
@@ -110,10 +110,17 @@ function computeIsPreparing(state?: TaskState, sessionState?: TaskSessionState):
   return sessionState === "STARTING" && classifyTask(sessionState, state) !== "review";
 }
 
-function handleTaskItemKeyDown(e: React.KeyboardEvent<HTMLDivElement>, onClick?: () => void): void {
+function handleTaskItemKeyDown(
+  e: React.KeyboardEvent<HTMLDivElement>,
+  onSelect: ((e: React.KeyboardEvent) => void) | undefined,
+  onClick: (() => void) | undefined,
+): void {
   if (e.key !== "Enter" && e.key !== " ") return;
   e.preventDefault();
-  onClick?.();
+  // Keyboard activation mirrors mouse: when a selection-aware handler is wired,
+  // Enter/Space toggles/extends the selection just like a click would.
+  if (onSelect) onSelect(e);
+  else onClick?.();
 }
 
 function taskItemRowClassName(
@@ -135,7 +142,7 @@ function taskItemRowClassName(
 
 /** Mouse uses the modifier-aware `onSelect`; falls back to the plain `onClick`. */
 function taskItemRowClick(
-  onSelect: ((e: React.MouseEvent) => void) | undefined,
+  onSelect: ((e: React.MouseEvent | React.KeyboardEvent) => void) | undefined,
   onClick: (() => void) | undefined,
 ): (e: React.MouseEvent) => void {
   return (e) => (onSelect ? onSelect(e) : onClick?.());
@@ -421,7 +428,7 @@ export const TaskItem = memo(function TaskItem({
       data-multiselected={isMultiSelected ? "true" : undefined}
       aria-current={isSelected ? "true" : undefined}
       onClick={taskItemRowClick(onSelect, onClick)}
-      onKeyDown={(e) => handleTaskItemKeyDown(e, onClick)}
+      onKeyDown={(e) => handleTaskItemKeyDown(e, onSelect, onClick)}
       style={indent.depth > 0 ? { paddingLeft: indent.paddingLeftPx } : undefined}
       className={taskItemRowClassName(isSelected, isMultiSelected, indent.depth === 0)}
     >

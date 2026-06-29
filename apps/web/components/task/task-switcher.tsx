@@ -87,7 +87,7 @@ type TaskSwitcherProps = {
  */
 /** @internal Exported for unit testing the modifier-aware click dispatch. */
 export function dispatchSidebarRowClick(
-  e: React.MouseEvent,
+  e: React.MouseEvent | React.KeyboardEvent,
   taskId: string,
   isSelecting: boolean,
   handlers: {

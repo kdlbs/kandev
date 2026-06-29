@@ -11,6 +11,38 @@ import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm
 
 type BulkArchiveState = { ids: string[]; executorTypes: Array<string | null | undefined> };
 
+/** Owns the bulk-archive confirm dialog state + the archive call. */
+function useBulkArchiveDialog(
+  displayTasks: Array<{ id: string; remoteExecutorType?: string | null }>,
+  bulkArchive: (ids: string[], opts?: { cascade?: boolean }) => Promise<void>,
+) {
+  const [state, setState] = useState<BulkArchiveState | null>(null);
+
+  const open = useCallback(
+    (ids: string[]) => {
+      const byId = new Map(displayTasks.map((t) => [t.id, t.remoteExecutorType]));
+      setState({ ids, executorTypes: ids.map((id) => byId.get(id) ?? null) });
+    },
+    [displayTasks],
+  );
+
+  const confirm = useCallback(
+    async ({ cascade }: { cascade: boolean }) => {
+      if (!state) return;
+      try {
+        await bulkArchive(state.ids, { cascade });
+      } catch (error) {
+        console.error("Failed to archive tasks:", error);
+      } finally {
+        setState(null);
+      }
+    },
+    [state, bulkArchive],
+  );
+
+  return { state, setState, open, confirm };
+}
+
 /**
  * Sidebar multi-select wiring: selection state, the visible-order list shift
  * range-select walks, mixed-workflow detection (gates bulk "Move to step"), and
@@ -41,42 +73,34 @@ export function useSidebarSelection({
     bulkArchive,
     bulkMove,
   } = multiSelect;
-  const [bulkArchiveState, setBulkArchiveState] = useState<BulkArchiveState | null>(null);
+  const archiveDialog = useBulkArchiveDialog(displayTasks, bulkArchive);
 
   const visibleTaskIds = useMemo(
     () => flattenVisibleTaskIds(grouped, collapsedGroups, collapsedSubtaskParents),
     [grouped, collapsedGroups, collapsedSubtaskParents],
   );
 
-  const isMixedWorkflowSelection = useMemo(() => {
+  // A workflow-less selected row (e.g. the archived placeholder) can't be moved,
+  // so treat its presence as a mixed selection (disables "Move to step") and
+  // filter such ids out of the actual move below.
+  const { isMixedWorkflowSelection, movableSelectedIds } = useMemo(() => {
     const wfIds = new Set<string>();
+    const movable = new Set<string>();
+    let hasWorkflowless = false;
     for (const t of displayTasks) {
-      if (selectedIds.has(t.id) && t.workflowId) wfIds.add(t.workflowId);
-    }
-    return wfIds.size > 1;
-  }, [displayTasks, selectedIds]);
-
-  const handleBulkArchive = useCallback(
-    (ids: string[]) => {
-      const byId = new Map(displayTasks.map((t) => [t.id, t.remoteExecutorType]));
-      setBulkArchiveState({ ids, executorTypes: ids.map((id) => byId.get(id) ?? null) });
-    },
-    [displayTasks],
-  );
-
-  const handleBulkArchiveConfirm = useCallback(
-    async ({ cascade }: { cascade: boolean }) => {
-      if (!bulkArchiveState) return;
-      try {
-        await bulkArchive(bulkArchiveState.ids, { cascade });
-      } catch (error) {
-        console.error("Failed to archive tasks:", error);
-      } finally {
-        setBulkArchiveState(null);
+      if (!selectedIds.has(t.id)) continue;
+      if (t.workflowId) {
+        wfIds.add(t.workflowId);
+        movable.add(t.id);
+      } else {
+        hasWorkflowless = true;
       }
-    },
-    [bulkArchiveState, bulkArchive],
-  );
+    }
+    return {
+      isMixedWorkflowSelection: hasWorkflowless || wfIds.size > 1,
+      movableSelectedIds: movable,
+    };
+  }, [displayTasks, selectedIds]);
 
   // Escape clears an active selection.
   useEffect(() => {
@@ -104,16 +128,22 @@ export function useSidebarSelection({
   // Bulk move in the rendered top-to-bottom order so a backward range selection
   // (anchor after target) doesn't land scrambled at the destination.
   const onBulkMove = useCallback(
-    (ids: string[], targetWorkflowId: string, targetStepId: string) =>
-      bulkMove(sortIdsByVisibleOrder(ids, visibleTaskIds), targetWorkflowId, targetStepId),
-    [bulkMove, visibleTaskIds],
+    (ids: string[], targetWorkflowId: string, targetStepId: string) => {
+      const movable = ids.filter((id) => movableSelectedIds.has(id));
+      return bulkMove(
+        sortIdsByVisibleOrder(movable, visibleTaskIds),
+        targetWorkflowId,
+        targetStepId,
+      );
+    },
+    [bulkMove, visibleTaskIds, movableSelectedIds],
   );
 
   const switcherProps = {
     selectedTaskIds: selectedIds,
     onToggleSelectTask: toggleSelect,
     onSelectTaskRange,
-    onBulkArchive: handleBulkArchive,
+    onBulkArchive: archiveDialog.open,
     onBulkMove,
     onClearSelection: clearSelection,
     isMixedWorkflowSelection,
@@ -121,9 +151,9 @@ export function useSidebarSelection({
 
   return {
     switcherProps,
-    bulkArchiveState,
-    setBulkArchiveState,
-    handleBulkArchiveConfirm,
+    bulkArchiveState: archiveDialog.state,
+    setBulkArchiveState: archiveDialog.setState,
+    handleBulkArchiveConfirm: archiveDialog.confirm,
     isArchiving: multiSelect.isArchiving,
   };
 }

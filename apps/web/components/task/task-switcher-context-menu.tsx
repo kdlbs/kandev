@@ -362,7 +362,10 @@ function TaskMoveItems({
   return (
     <TaskMoveContextMenuItems
       currentWorkflowId={workflowId}
-      currentStepId={task.workflowStepId}
+      // For a selection spanning several steps, don't disable the clicked row's
+      // step — the backend bulk move skips tasks already there, and the other
+      // selected rows still need it as a target.
+      currentStepId={actingOnSelection ? undefined : task.workflowStepId}
       workflows={workflows ?? []}
       stepsByWorkflowId={stepsByWorkflowId ?? (steps ? { [workflowId]: steps } : {})}
       disabled={isDeleting || task.isArchived}
