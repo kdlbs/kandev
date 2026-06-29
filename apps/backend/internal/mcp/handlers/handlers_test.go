@@ -601,6 +601,64 @@ func TestHandleCreateTask_SourceTaskMetadataWinsOverSessionAndDefaults(t *testin
 	assert.Equal(t, "source-metadata-executor", task.Metadata[models.MetaKeyExecutorProfileID])
 }
 
+func TestHandleCreateTask_InheritsSourceTaskProfileAndSessionExecutor(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	require.Len(t, workflows, 1)
+
+	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID,
+		WorkflowID:  workflows[0].ID,
+		Title:       "Current task",
+		Metadata: map[string]interface{}{
+			models.MetaKeyAgentProfileID: "source-metadata-profile",
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                "source-session-executor",
+		TaskID:            source.ID,
+		AgentProfileID:    "session-profile",
+		ExecutorProfileID: "session-executor-profile",
+		State:             models.TaskSessionStateWaitingForInput,
+		IsPrimary:         true,
+	}))
+
+	h := &Handlers{
+		taskSvc: svc,
+		logger:  testLogger(t).WithFields(),
+	}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"source_task_id": source.ID,
+		"workspace_id":   workspaces[0].ID,
+		"workflow_id":    workflows[0].ID,
+		"title":          "Follow-up from mixed launch config",
+		"description":    "This should inherit profile from metadata and executor from session.",
+		"start_agent":    false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+	require.NotEmpty(t, created.ID)
+
+	task, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	require.NotNil(t, task.Metadata)
+	assert.Equal(t, "source-metadata-profile", task.Metadata[models.MetaKeyAgentProfileID])
+	assert.Equal(t, "session-executor-profile", task.Metadata[models.MetaKeyExecutorProfileID])
+}
+
 func TestHandleCreateTask_WorkflowSwitchedSessionProfileWinsOverStaleMetadata(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
