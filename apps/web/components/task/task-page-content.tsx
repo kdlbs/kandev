@@ -27,6 +27,7 @@ import {
   buildArchivedValue,
 } from "@/components/task/task-page-content-helpers";
 import { TaskPageInner } from "@/components/task/task-page-inner";
+import { GridSpinner } from "@/components/grid-spinner";
 
 type TaskPageContentProps = {
   task: Task | null;
@@ -321,7 +322,19 @@ export function TaskPageContent({
     queueMicrotask(() => setIsMounted(true));
   }, []);
 
-  if (!isMounted || !task) return <div className="h-screen w-full bg-background" />;
+  if (!isMounted || !task) {
+    return (
+      <div
+        className="flex h-screen w-full items-center justify-center bg-background px-4"
+        data-testid="task-loading-state"
+      >
+        <div className="flex min-h-24 min-w-0 flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
+          <GridSpinner className="text-primary" />
+          <span>Loading task...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <TaskPageInner
