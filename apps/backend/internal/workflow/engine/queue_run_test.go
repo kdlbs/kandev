@@ -455,6 +455,56 @@ func TestQueueRunForEachParticipantCallback_OnCommentKeepsPerAgentKeys(t *testin
 	}
 }
 
+func TestQueueRunForEachParticipantCallback_DifferentActionsKeepActionSalt(t *testing.T) {
+	q := &fakeRunQueue{}
+	parts := fakeParticipants{list: []ParticipantInfo{
+		{ID: "p1", Role: "reviewer", AgentProfileID: "same-agent"},
+		{ID: "p2", Role: "observer", AgentProfileID: "same-agent"},
+	}}
+	cb := QueueRunForEachParticipantCallback{Adapter: q, Participants: parts}
+	base := ActionInput{
+		Trigger:     TriggerOnComment,
+		State:       MachineState{TaskID: "task-1"},
+		Step:        StepSpec{ID: "step-1"},
+		OperationID: "task_comment:c-1",
+		Payload:     OnCommentPayload{CommentID: "c-1", AuthorID: "user-1"},
+	}
+	first := base
+	first.Action = Action{
+		Kind: ActionQueueRunForEachParticipant,
+		QueueRunForEachParticipant: &QueueRunForEachParticipantAction{
+			Role:    "reviewer",
+			Reason:  "follow_up",
+			Payload: map[string]any{"source": "reviewer"},
+		},
+	}
+	second := base
+	second.Action = Action{
+		Kind: ActionQueueRunForEachParticipant,
+		QueueRunForEachParticipant: &QueueRunForEachParticipantAction{
+			Role:    "observer",
+			Reason:  "follow_up",
+			Payload: map[string]any{"source": "observer"},
+		},
+	}
+
+	if _, err := cb.Execute(context.Background(), first); err != nil {
+		t.Fatalf("first queue_run_for_each_participant: %v", err)
+	}
+	if _, err := cb.Execute(context.Background(), second); err != nil {
+		t.Fatalf("second queue_run_for_each_participant: %v", err)
+	}
+	if len(q.calls) != 2 {
+		t.Fatalf("expected 2 fan-out calls, got %d", len(q.calls))
+	}
+	if q.calls[0].AgentProfileID != "same-agent" || q.calls[1].AgentProfileID != "same-agent" {
+		t.Fatalf("test setup expected both actions to target same agent: %#v", q.calls)
+	}
+	if q.calls[0].IdempotencyKey == q.calls[1].IdempotencyKey {
+		t.Fatalf("different for-each action configs must not share idempotency keys: %#v", q.calls)
+	}
+}
+
 func TestQueueRunForEachParticipantCallback_NoMatchingRole_NoCalls(t *testing.T) {
 	q := &fakeRunQueue{}
 	parts := fakeParticipants{list: []ParticipantInfo{

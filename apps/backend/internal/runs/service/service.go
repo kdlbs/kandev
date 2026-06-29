@@ -269,7 +269,7 @@ func runPayload(req QueueRunRequest, agentInstanceID string) map[string]any {
 }
 
 func shouldCoalesceRun(req QueueRunRequest) bool {
-	return req.Reason != "task_comment" || !strings.HasPrefix(req.IdempotencyKey, "task_comment:")
+	return !strings.HasPrefix(req.IdempotencyKey, "task_comment:")
 }
 
 // publishRunQueued emits the OfficeRunQueued bus event so the WS

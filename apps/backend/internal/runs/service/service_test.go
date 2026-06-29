@@ -157,6 +157,42 @@ func TestQueueRun_DoesNotCoalesceDistinctTaskComments(t *testing.T) {
 	}
 }
 
+func TestQueueRun_DoesNotCoalesceTaskCommentPrefixWithCustomReason(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	commentIDs := []string{"comment-1", "comment-2"}
+	keys := []string{
+		"task_comment:comment-1:work:task-1:agent-primary:follow-up",
+		"task_comment:comment-2:work:task-1:agent-primary:follow-up",
+	}
+	for i, key := range keys {
+		commentID := commentIDs[i]
+		if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+			AgentProfileID: "agent-primary",
+			TaskID:         "task-1",
+			WorkflowStepID: "work",
+			Reason:         "follow_up",
+			IdempotencyKey: key,
+			Payload: map[string]any{
+				"comment_id": commentID,
+			},
+		}); err != nil {
+			t.Fatalf("queue %s: %v", commentID, err)
+		}
+	}
+
+	for _, key := range keys {
+		exists, err := repo.CheckIdempotencyKey(ctx, key, runsservice.IdempotencyWindowHours)
+		if err != nil {
+			t.Fatalf("check idempotency key %s: %v", key, err)
+		}
+		if !exists {
+			t.Fatalf("missing inserted run for idempotency key %s", key)
+		}
+	}
+}
+
 // TestQueueRun_RejectsWithoutAgent pins that the service refuses to
 // insert when no agent can be resolved from the payload (the
 // resolver-less path is what office.QueueRun uses today).

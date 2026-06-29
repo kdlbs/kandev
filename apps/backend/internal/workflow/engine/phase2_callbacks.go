@@ -186,7 +186,7 @@ func idempotencyKey(in ActionInput, agentID, taskID string) string {
 		return in.OperationID
 	}
 	return fmt.Sprintf("%s:%s:%s:%s:%s",
-		in.OperationID, in.Step.ID, taskID, agentID, queueRunActionDigest(in))
+		in.OperationID, in.Step.ID, taskID, agentID, queueActionDigest(in))
 }
 
 func usesExactCommentKey(in ActionInput) bool {
@@ -204,24 +204,37 @@ func usesExactCommentKey(in ActionInput) bool {
 		len(in.Action.QueueRun.Payload) == 0
 }
 
-func queueRunActionDigest(in ActionInput) string {
-	if in.Action.QueueRun == nil {
-		return ""
-	}
+func queueActionDigest(in ActionInput) string {
 	key := struct {
-		Target  string         `json:"target"`
-		TaskID  string         `json:"task_id"`
+		Kind    ActionKind     `json:"kind"`
+		Target  string         `json:"target,omitempty"`
+		TaskID  string         `json:"task_id,omitempty"`
+		Role    string         `json:"role,omitempty"`
 		Reason  string         `json:"reason"`
 		Payload map[string]any `json:"payload,omitempty"`
 	}{
-		Target:  strings.TrimSpace(in.Action.QueueRun.Target),
-		TaskID:  strings.TrimSpace(in.Action.QueueRun.TaskID),
-		Reason:  queueRunReason(in),
-		Payload: in.Action.QueueRun.Payload,
+		Kind: in.Action.Kind,
+	}
+	switch in.Action.Kind {
+	case ActionQueueRun:
+		if in.Action.QueueRun != nil {
+			key.Target = strings.TrimSpace(in.Action.QueueRun.Target)
+			key.TaskID = strings.TrimSpace(in.Action.QueueRun.TaskID)
+			key.Reason = queueRunReason(in)
+			key.Payload = in.Action.QueueRun.Payload
+		}
+	case ActionQueueRunForEachParticipant:
+		if in.Action.QueueRunForEachParticipant != nil {
+			cfg := in.Action.QueueRunForEachParticipant
+			key.Role = strings.TrimSpace(cfg.Role)
+			key.Reason = queueRunForEachParticipantReason(in)
+			key.Payload = cfg.Payload
+		}
 	}
 	b, err := json.Marshal(key)
 	if err != nil {
-		b = []byte(key.Target + "\x00" + key.TaskID + "\x00" + key.Reason)
+		b = []byte(string(key.Kind) + "\x00" + key.Target + "\x00" +
+			key.TaskID + "\x00" + key.Role + "\x00" + key.Reason)
 	}
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:8])
@@ -300,10 +313,7 @@ func (c QueueRunForEachParticipantCallback) Execute(ctx context.Context, in Acti
 	if err != nil {
 		return ActionResult{}, fmt.Errorf("queue_run_for_each_participant list participants: %w", err)
 	}
-	reason := cfg.Reason
-	if reason == "" {
-		reason = string(in.Trigger)
-	}
+	reason := queueRunForEachParticipantReason(in)
 	for _, p := range all {
 		if p.Role != cfg.Role {
 			continue
@@ -321,6 +331,13 @@ func (c QueueRunForEachParticipantCallback) Execute(ctx context.Context, in Acti
 		}
 	}
 	return ActionResult{}, nil
+}
+
+func queueRunForEachParticipantReason(in ActionInput) string {
+	if in.Action.QueueRunForEachParticipant != nil && in.Action.QueueRunForEachParticipant.Reason != "" {
+		return in.Action.QueueRunForEachParticipant.Reason
+	}
+	return string(in.Trigger)
 }
 
 // PlaceholderQueueRunCallback is preserved as a typed alias for backward
