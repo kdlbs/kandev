@@ -385,6 +385,82 @@ describe("markInactiveChangesIncreases", () => {
   });
 });
 
+describe("markInactiveChangesIncreases pending cleanup", () => {
+  it("queues first observed inactive changes after bootstrap", () => {
+    const previousMarkers = {
+      envA: { count: 0, fingerprint: "a0" },
+    };
+    const pendingEnvKeys = new Set<string>();
+
+    markInactiveChangesIncreases({
+      markersByEnv: {
+        envA: { count: 0, fingerprint: "a0" },
+        envB: { count: 1, fingerprint: "b1" },
+      },
+      activeEnvKey: "envA",
+      previousActiveEnvKey: "envA",
+      previousMarkers,
+      pendingEnvKeys,
+      queueFirstObservedInactiveChanges: true,
+    });
+
+    expect([...pendingEnvKeys]).toEqual(["envB"]);
+  });
+
+  it("clears pending focus when changes disappear or the environment disappears", () => {
+    const previousMarkers = {
+      envB: { count: 1, fingerprint: "b1" },
+      envC: { count: 1, fingerprint: "c1" },
+    };
+    const pendingEnvKeys = new Set(["envB", "envC"]);
+
+    markInactiveChangesIncreases({
+      markersByEnv: {
+        envB: { count: 0, fingerprint: "b0" },
+      },
+      activeEnvKey: "envA",
+      previousActiveEnvKey: "envA",
+      previousMarkers,
+      pendingEnvKeys,
+      queueFirstObservedInactiveChanges: true,
+    });
+
+    expect(pendingEnvKeys.size).toBe(0);
+    expect(previousMarkers).toEqual({
+      envB: { count: 0, fingerprint: "b0" },
+    });
+  });
+});
+
+describe("applyChangesPanelAutoFocusState restore races", () => {
+  it("keeps pending focus when a stale restore flag produces no panel", () => {
+    const previousMarkers = {
+      envB: { count: 1, fingerprint: "b1" },
+    };
+    const pendingEnvKeys = new Set(["envB"]);
+    let restoring = false;
+
+    applyChangesPanelAutoFocusState({
+      signalsByEnv: {
+        envB: signal(1, "b1"),
+      },
+      activeEnvKey: "envB",
+      previousActiveEnvKey: "envA",
+      environmentIdBySessionId: {},
+      previousMarkers,
+      pendingEnvKeys,
+      isRestoringLayout: false,
+      getIsRestoringLayout: () => restoring,
+      activate: () => {
+        restoring = true;
+        return "no-panel";
+      },
+    });
+
+    expect([...pendingEnvKeys]).toEqual(["envB"]);
+  });
+});
+
 describe("migrateEnvironmentKeys", () => {
   it("migrates pending and previous fallback session keys to environment keys", () => {
     const previousMarkers = {

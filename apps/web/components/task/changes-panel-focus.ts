@@ -197,13 +197,34 @@ export function markInactiveChangesIncreases(args: {
   previousActiveEnvKey: string | null;
   previousMarkers: Record<string, ChangesMarker>;
   pendingEnvKeys: Set<string>;
+  queueFirstObservedInactiveChanges?: boolean;
 }): void {
-  const { markersByEnv, activeEnvKey, previousActiveEnvKey, previousMarkers, pendingEnvKeys } =
-    args;
+  const {
+    markersByEnv,
+    activeEnvKey,
+    previousActiveEnvKey,
+    previousMarkers,
+    pendingEnvKeys,
+    queueFirstObservedInactiveChanges = false,
+  } = args;
+  for (const envKey of Object.keys(previousMarkers)) {
+    if (markersByEnv[envKey] !== undefined) continue;
+    delete previousMarkers[envKey];
+    pendingEnvKeys.delete(envKey);
+  }
   for (const [envKey, marker] of Object.entries(markersByEnv)) {
     const previous = previousMarkers[envKey];
     previousMarkers[envKey] = marker;
-    if (previous === undefined) continue;
+    if (marker.count === 0) {
+      pendingEnvKeys.delete(envKey);
+      continue;
+    }
+    if (previous === undefined) {
+      if (queueFirstObservedInactiveChanges && envKey !== activeEnvKey) {
+        pendingEnvKeys.add(envKey);
+      }
+      continue;
+    }
     if (
       shouldQueueInactiveFocus({
         envKey,
@@ -230,6 +251,7 @@ export function applyChangesPanelAutoFocusState(args: {
   previousMarkers: Record<string, ChangesMarker>;
   pendingEnvKeys: Set<string>;
   isRestoringLayout: boolean;
+  getIsRestoringLayout?: () => boolean;
   activate: () => ActivateChangesPanelResult;
 }): string | null {
   const {
@@ -240,6 +262,7 @@ export function applyChangesPanelAutoFocusState(args: {
     previousMarkers,
     pendingEnvKeys,
     isRestoringLayout,
+    getIsRestoringLayout,
     activate,
   } = args;
 
@@ -249,17 +272,28 @@ export function applyChangesPanelAutoFocusState(args: {
     pendingEnvKeys,
   });
 
+  const markersByEnv = signalsToMarkers(signalsByEnv);
+  const hasPreviousMarkers = Object.keys(previousMarkers).length > 0;
+
   markInactiveChangesIncreases({
-    markersByEnv: signalsToMarkers(signalsByEnv),
+    markersByEnv,
     activeEnvKey,
     previousActiveEnvKey,
     previousMarkers,
     pendingEnvKeys,
+    queueFirstObservedInactiveChanges: hasPreviousMarkers,
   });
 
-  if (activeEnvKey && !isRestoringLayout && pendingEnvKeys.has(activeEnvKey)) {
+  const isCurrentlyRestoringLayout = () => isRestoringLayout || getIsRestoringLayout?.() === true;
+
+  if (activeEnvKey && !isCurrentlyRestoringLayout() && pendingEnvKeys.has(activeEnvKey)) {
     const result = activate();
-    if (shouldClearPendingChangesFocus(result)) pendingEnvKeys.delete(activeEnvKey);
+    if (
+      shouldClearPendingChangesFocus(result) &&
+      !(result === "no-panel" && isCurrentlyRestoringLayout())
+    ) {
+      pendingEnvKeys.delete(activeEnvKey);
+    }
   }
 
   return activeEnvKey;
@@ -283,6 +317,7 @@ export function useChangesPanelAutoFocus(activeEnvKey: string | null) {
       previousMarkers: previousMarkersRef.current,
       pendingEnvKeys: pendingEnvKeysRef.current,
       isRestoringLayout,
+      getIsRestoringLayout: () => useDockviewStore.getState().isRestoringLayout,
       activate: () => activateChangesPanel(api),
     });
   }, [signalsByEnv, activeEnvKey, api, isRestoringLayout, environmentIdBySessionId]);
