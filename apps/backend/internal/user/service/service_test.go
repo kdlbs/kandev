@@ -652,9 +652,6 @@ func TestClearDefaultEditorIDPreservesTaskCreateLastUsed(t *testing.T) {
 		t.Fatalf("ClearDefaultEditorID: %v", err)
 	}
 
-	if repo.upsertUserSettingsCalls != 0 {
-		t.Fatalf("expected plain settings upsert not to run, got %d calls", repo.upsertUserSettingsCalls)
-	}
 	if repo.upsertUserSettingsPreservingLastUsedCalls != 1 {
 		t.Fatalf("expected preserving settings upsert, got %d calls", repo.upsertUserSettingsPreservingLastUsedCalls)
 	}
@@ -679,25 +676,19 @@ func TestRecordTaskCreateLastUsed(t *testing.T) {
 		return NewService(repo, eventBus, log)
 	}
 
-	t.Run("empty patch clears recorded selections and publishes", func(t *testing.T) {
-		updatedSettings := &models.UserSettings{
-			UserID: store.DefaultUserID,
-		}
-		repo := &recordingUserRepository{updateSettings: updatedSettings}
+	t.Run("empty patch skips repo update and publish", func(t *testing.T) {
+		repo := &recordingUserRepository{}
 		eventBus := &recordingEventBus{}
 		svc := newTestService(repo, eventBus)
 
 		if err := svc.RecordTaskCreateLastUsed(context.Background(), models.TaskCreateLastUsed{}); err != nil {
 			t.Fatalf("RecordTaskCreateLastUsed: %v", err)
 		}
-		if repo.updateCalls != 1 {
-			t.Fatalf("expected one repo update, got %d", repo.updateCalls)
+		if repo.updateCalls != 0 {
+			t.Fatalf("expected no repo update, got %d", repo.updateCalls)
 		}
-		if repo.updatePatch != (models.TaskCreateLastUsed{}) {
-			t.Fatalf("expected empty replacement patch, got %+v", repo.updatePatch)
-		}
-		if len(eventBus.publishedEvents) != 1 {
-			t.Fatalf("expected one settings event, got %d", len(eventBus.publishedEvents))
+		if len(eventBus.publishedEvents) != 0 {
+			t.Fatalf("expected no settings event, got %d", len(eventBus.publishedEvents))
 		}
 	})
 
@@ -818,7 +809,6 @@ type recordingUserRepository struct {
 	getUserCalls                              int
 	getDefaultUserCalls                       int
 	getUserSettingsCalls                      int
-	upsertUserSettingsCalls                   int
 	upsertUserSettingsPreservingLastUsedCalls int
 	updateCalls                               int
 	updateUserID                              string
@@ -837,7 +827,6 @@ func (r *recordingUserRepository) touches() int {
 	return r.getUserCalls +
 		r.getDefaultUserCalls +
 		r.getUserSettingsCalls +
-		r.upsertUserSettingsCalls +
 		r.upsertUserSettingsPreservingLastUsedCalls +
 		r.updateCalls +
 		r.closeCalls
@@ -862,11 +851,6 @@ func (r *recordingUserRepository) GetUserSettings(context.Context, string) (*mod
 		return r.getSettings, nil
 	}
 	return nil, errors.New("unexpected GetUserSettings call")
-}
-
-func (r *recordingUserRepository) UpsertUserSettings(context.Context, *models.UserSettings) error {
-	r.upsertUserSettingsCalls++
-	return errors.New("unexpected UpsertUserSettings call")
 }
 
 func (r *recordingUserRepository) UpsertUserSettingsPreservingTaskCreateLastUsed(

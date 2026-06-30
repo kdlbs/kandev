@@ -278,6 +278,45 @@ func TestHTTPCreateTaskRecordsFinalLastUsedSelections(t *testing.T) {
 	}, recorder.got)
 }
 
+func TestHTTPCreateTaskRecordsRepositoryWithoutProfileIDs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	recorder := &captureTaskCreateLastUsedRecorder{}
+	h := &TaskHandlers{service: svc, taskCreateLastUsedRecorder: recorder, logger: log}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(`{
+		"workspace_id": "ws-1",
+		"workflow_id": "wf-1",
+		"workflow_step_id": "step-1",
+		"title": "Passive API task",
+		"repositories": [{
+			"repository_id": "repo-2",
+			"base_branch": "main"
+		}]
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpCreateTask(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	require.Equal(t, 1, recorder.calls)
+	assert.Equal(t, usermodels.TaskCreateLastUsed{
+		RepositoryID: "repo-2",
+		Branch:       "main",
+	}, recorder.got)
+}
+
 func TestBuildTaskCreateLastUsedPatchRecordsFirstWorkspaceRepository(t *testing.T) {
 	patch := buildTaskCreateLastUsedPatch(httpCreateTaskRequest{
 		AgentProfileID:    "agent-2",
@@ -377,6 +416,45 @@ func TestWSCreateTaskRecordsFinalLastUsedSelections(t *testing.T) {
 		Branch:            "feature/current",
 		AgentProfileID:    "agent-2",
 		ExecutorProfileID: "exec-profile-2",
+	}, recorder.got)
+}
+
+func TestWSCreateTaskRecordsFreshBranchRequestBase(t *testing.T) {
+	log := newTestLogger(t)
+
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	recorder := &captureTaskCreateLastUsedRecorder{}
+	h := &TaskHandlers{service: svc, taskCreateLastUsedRecorder: recorder, logger: log}
+
+	msg, err := ws.NewRequest("msg-1", ws.ActionTaskCreate, map[string]any{
+		"workspace_id":     "ws-1",
+		"workflow_id":      "wf-1",
+		"workflow_step_id": "step-1",
+		"title":            "Use fresh branch",
+		"repositories": []map[string]any{{
+			"repository_id":   "repo-2",
+			"base_branch":     "main",
+			"checkout_branch": "task/use-current-selections",
+			"fresh_branch":    true,
+		}},
+	})
+	require.NoError(t, err)
+
+	resp, err := h.wsCreateTask(context.Background(), msg)
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	require.Equal(t, 1, recorder.calls)
+	assert.Equal(t, usermodels.TaskCreateLastUsed{
+		RepositoryID: "repo-2",
+		Branch:       "main",
 	}, recorder.got)
 }
 

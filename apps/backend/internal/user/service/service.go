@@ -157,6 +157,9 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 }
 
 func (s *Service) RecordTaskCreateLastUsed(ctx context.Context, patch models.TaskCreateLastUsed) error {
+	if taskCreateLastUsedPatchEmpty(patch) {
+		return nil
+	}
 	settings, err := s.updateTaskCreateLastUsed(ctx, patch)
 	if err != nil {
 		return err
