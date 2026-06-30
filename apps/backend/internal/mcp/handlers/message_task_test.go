@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -375,6 +376,11 @@ func TestHandleMessageTask_WaitingForInput_UsesSessionSelectedByTurnStart(t *tes
 	require.NotNil(t, resp)
 	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
 
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "sent", payload["status"])
+	assert.Equal(t, replacement.ID, payload["session_id"])
+
 	require.Len(t, orch.promptCalls, 1)
 	assert.Equal(t, replacement.ID, orch.promptCalls[0].sessionID)
 
@@ -385,6 +391,86 @@ func TestHandleMessageTask_WaitingForInput_UsesSessionSelectedByTurnStart(t *tes
 	require.NoError(t, err)
 	require.Len(t, newMessages, 1)
 	assert.Contains(t, newMessages[0].Content, "handoff after switch")
+}
+
+func TestHandleMessageTask_CreatedSessionStartsAfterTurnStartChangesState(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCreated)
+
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.onTurnStart = func(ctx context.Context, _, sessionID string) error {
+		require.Equal(t, sess.ID, sessionID)
+		return repo.UpdateTaskSessionState(ctx, sess.ID, models.TaskSessionStateWaitingForInput, "")
+	}
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "start after trigger", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "started", payload["status"])
+	assert.Equal(t, sess.ID, payload["session_id"])
+
+	require.Len(t, orch.startCreatedCalls, 1)
+	assert.Equal(t, sess.ID, orch.startCreatedCalls[0].sessionID)
+	assert.Empty(t, orch.promptCalls)
+}
+
+func TestHandleMessageTask_TurnStartErrorRejectsAndRestoresReview(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+
+	task, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	task.State = v1.TaskStateReview
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.onTurnStart = func(context.Context, string, string) error {
+		return errors.New("turn start failed")
+	}
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "cannot send", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+
+	updatedTask, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, v1.TaskStateReview, updatedTask.State)
+	assert.Empty(t, orch.promptCalls)
+	messages, err := svc.ListMessages(ctx, sess.ID)
+	require.NoError(t, err)
+	assert.Empty(t, messages)
+}
+
+func TestHandleMessageTask_DispatchErrorRestoresReview(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+
+	task, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	task.State = v1.TaskStateReview
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.promptErrFirst = errors.New("send failed")
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "fails during dispatch", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+
+	updatedTask, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, v1.TaskStateReview, updatedTask.State)
+	require.Len(t, orch.promptCalls, 1)
 }
 
 func TestHandleMessageTask_PromptFailsWithExecutionNotFound_AutoResumes(t *testing.T) {

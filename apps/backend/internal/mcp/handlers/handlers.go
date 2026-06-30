@@ -1426,7 +1426,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 
 	wrappedPrompt, senderMeta := wrapAgentMessage(req.Prompt, senderTask, req.SenderSessionID)
 
-	status, err := h.dispatchTaskMessage(ctx, req.TaskID, session, wrappedPrompt, senderMeta)
+	result, err := h.dispatchTaskMessage(ctx, req.TaskID, session, wrappedPrompt, senderMeta)
 	if err != nil {
 		var qfErr *queueFullDispatchError
 		if errors.As(err, &qfErr) {
@@ -1439,8 +1439,8 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"task_id":    req.TaskID,
-		"session_id": session.ID,
-		"status":     status,
+		"session_id": result.sessionID,
+		"status":     result.status,
 	})
 }
 
@@ -1626,6 +1626,11 @@ const (
 	keyPosition         = "position"
 )
 
+type taskMessageDispatchResult struct {
+	status    string
+	sessionID string
+}
+
 // dispatchTaskMessage routes a message to the right delivery path based on session state.
 // Returns the action taken: "queued", "sent", or "started".
 //
@@ -1633,113 +1638,152 @@ const (
 // row (sender_task_id, sender_task_title, sender_session_id when called from
 // handleMessageTask). It is propagated to all three delivery paths so the
 // receiving task's chat displays the sender badge consistently.
-func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string, metadata map[string]interface{}) (string, error) {
+func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string, metadata map[string]interface{}) (taskMessageDispatchResult, error) {
 	if h.sessionLauncher == nil {
-		return "", errors.New("orchestrator not available")
+		return taskMessageDispatchResult{}, errors.New("orchestrator not available")
 	}
 
 	switch session.State {
 	case models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
-		return "", fmt.Errorf("session is %s — cannot send message", session.State)
+		return taskMessageDispatchResult{}, fmt.Errorf("session is %s — cannot send message", session.State)
 
 	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
 		return h.queueTaskMessage(ctx, taskID, session, prompt, metadata)
 
 	default:
+		originalState := session.State
+		reviewStateChanged, err := h.ensureTaskInProgressForTaskMessage(ctx, taskID)
+		if err != nil {
+			return taskMessageDispatchResult{}, err
+		}
 		session, err := h.prepareSessionForTaskMessage(ctx, taskID, session)
 		if err != nil {
-			return "", err
+			if reviewStateChanged {
+				h.restoreTaskReviewForTaskMessage(ctx, taskID)
+			}
+			return taskMessageDispatchResult{}, err
 		}
-		switch session.State {
-		case models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
-			return "", fmt.Errorf("session is %s — cannot send message", session.State)
-		case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
-			return h.queueTaskMessage(ctx, taskID, session, prompt, metadata)
-		case models.TaskSessionStateCreated:
+		result, err := h.dispatchPreparedTaskMessage(ctx, taskID, session, originalState, prompt, metadata)
+		if err != nil && reviewStateChanged {
+			h.restoreTaskReviewForTaskMessage(ctx, taskID)
+		}
+		return result, err
+	}
+}
+
+func (h *Handlers) dispatchPreparedTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, originalState models.TaskSessionState, prompt string, metadata map[string]interface{}) (taskMessageDispatchResult, error) {
+	switch session.State {
+	case models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
+		return taskMessageDispatchResult{}, fmt.Errorf("session is %s — cannot send message", session.State)
+	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
+		return h.queueTaskMessage(ctx, taskID, session, prompt, metadata)
+	default:
+		if shouldStartTaskMessageSession(originalState, session) {
 			// Start first, then record the user message ourselves with sender
 			// metadata. This avoids leaving an orphaned attributed chat row when
 			// StartCreatedSession fails (the previous order wrote the row up-front
 			// regardless of launch outcome). skipMessageRecord=true keeps
 			// postLaunchCreated from writing its own duplicate row.
 			if _, err := h.sessionLauncher.StartCreatedSession(ctx, taskID, session.ID, session.AgentProfileID, prompt, true, false, true, nil); err != nil {
-				return "", fmt.Errorf("failed to start session: %w", err)
+				return taskMessageDispatchResult{}, fmt.Errorf("failed to start session: %w", err)
 			}
 			h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
-			return "started", nil
-		default: // WAITING_FOR_INPUT, COMPLETED, IDLE, or any other promptable state
-			h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
-			return h.promptWithAutoResume(ctx, taskID, session.ID, prompt)
+			return taskMessageDispatchResult{status: "started", sessionID: session.ID}, nil
 		}
+		h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
+		status, err := h.promptWithAutoResume(ctx, taskID, session.ID, prompt)
+		if err != nil {
+			return taskMessageDispatchResult{}, err
+		}
+		return taskMessageDispatchResult{status: status, sessionID: session.ID}, nil
 	}
 }
 
-func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string, metadata map[string]interface{}) (string, error) {
+func shouldStartTaskMessageSession(originalState models.TaskSessionState, session *models.TaskSession) bool {
+	if session.State == models.TaskSessionStateCreated {
+		return true
+	}
+	return originalState == models.TaskSessionStateCreated &&
+		session.State == models.TaskSessionStateWaitingForInput &&
+		session.AgentExecutionID == ""
+}
+
+func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string, metadata map[string]interface{}) (taskMessageDispatchResult, error) {
 	queue := h.sessionLauncher.GetMessageQueue()
 	if queue == nil {
-		return "", errors.New("message queue not available")
+		return taskMessageDispatchResult{}, errors.New("message queue not available")
 	}
 	if _, err := queue.QueueMessageWithMetadata(ctx, session.ID, taskID, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata); err != nil {
 		if errors.Is(err, messagequeue.ErrQueueFull) {
 			status := queue.GetStatus(ctx, session.ID)
-			return "", &queueFullDispatchError{
+			return taskMessageDispatchResult{}, &queueFullDispatchError{
 				sessionID: session.ID,
 				queueSize: status.Count,
 				max:       status.Max,
 				entries:   status.Entries,
 			}
 		}
-		return "", fmt.Errorf("failed to queue message: %w", err)
+		return taskMessageDispatchResult{}, fmt.Errorf("failed to queue message: %w", err)
 	}
 	h.publishQueueStatusEvent(ctx, session.ID, queue)
-	return "queued", nil
+	return taskMessageDispatchResult{status: "queued", sessionID: session.ID}, nil
 }
 
 func (h *Handlers) prepareSessionForTaskMessage(ctx context.Context, taskID string, session *models.TaskSession) (*models.TaskSession, error) {
-	if err := h.ensureTaskInProgressForTaskMessage(ctx, taskID); err != nil {
+	if err := h.sessionLauncher.ProcessOnTurnStart(ctx, taskID, session.ID); err != nil {
+		return nil, fmt.Errorf("failed to process on_turn_start for task message: %w", err)
+	}
+	resolved, err := h.resolveSessionAfterTaskMessageTurnStart(ctx, taskID, session)
+	if err != nil {
 		return nil, err
 	}
-	if err := h.sessionLauncher.ProcessOnTurnStart(ctx, taskID, session.ID); err != nil {
-		h.logger.Warn("failed to process on_turn_start for task message",
-			zap.String("task_id", taskID),
-			zap.String("session_id", session.ID),
-			zap.Error(err))
-	}
-	return h.resolveSessionAfterTaskMessageTurnStart(ctx, taskID, session)
+	return resolved, nil
 }
 
-func (h *Handlers) ensureTaskInProgressForTaskMessage(ctx context.Context, taskID string) error {
+func (h *Handlers) ensureTaskInProgressForTaskMessage(ctx context.Context, taskID string) (bool, error) {
 	if h.taskSvc == nil {
-		return nil
+		return false, errors.New("task service not available")
 	}
 	task, err := h.taskSvc.GetTask(ctx, taskID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if task.State != v1.TaskStateReview {
-		return nil
+		return false, nil
 	}
 	if _, err := h.taskSvc.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
-		h.logger.Error("failed to transition task from REVIEW to IN_PROGRESS for task message",
+		return false, fmt.Errorf("failed to transition task from REVIEW to IN_PROGRESS for task message: %w", err)
+	}
+	h.logger.Info("task transitioned from REVIEW to IN_PROGRESS for task message",
+		zap.String("task_id", taskID))
+	return true, nil
+}
+
+func (h *Handlers) restoreTaskReviewForTaskMessage(ctx context.Context, taskID string) {
+	if _, err := h.taskSvc.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
+		h.logger.Warn("failed to restore task to REVIEW after task message dispatch failure",
 			zap.String("task_id", taskID),
 			zap.Error(err))
-	} else {
-		h.logger.Info("task transitioned from REVIEW to IN_PROGRESS for task message",
-			zap.String("task_id", taskID))
 	}
-	return nil
 }
 
 func (h *Handlers) resolveSessionAfterTaskMessageTurnStart(ctx context.Context, taskID string, submitted *models.TaskSession) (*models.TaskSession, error) {
+	if h.taskSvc == nil {
+		return nil, errors.New("task service not available")
+	}
 	reloaded, err := h.taskSvc.GetTaskSession(ctx, submitted.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload session after on_turn_start: %w", err)
 	}
-	if reloaded.State != models.TaskSessionStateCompleted || submitted.State == models.TaskSessionStateCompleted {
+	if reloaded.State != models.TaskSessionStateCompleted {
 		return reloaded, nil
 	}
 	primary, err := h.taskSvc.GetPrimarySession(ctx, taskID)
-	if err != nil || primary == nil {
+	if err != nil {
 		return nil, fmt.Errorf("session was switched but no active session found: %w", err)
+	}
+	if primary == nil {
+		return nil, errors.New("session was switched but no active session found")
 	}
 	if primary.ID == submitted.ID {
 		return nil, errors.New("session was switched but submitted session remains primary")
