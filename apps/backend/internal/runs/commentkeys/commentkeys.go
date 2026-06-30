@@ -13,6 +13,9 @@ const (
 	TaskCommentPrefix = "task_comment:"
 	// TaskCommentReason is the run reason used for comment-triggered runs.
 	TaskCommentReason = "task_comment"
+	// EngineDispatchedValue marks comment events whose synchronous publisher
+	// path already routed the trigger through the workflow engine.
+	EngineDispatchedValue = "true"
 )
 
 // TaskComment builds the canonical same-task comment idempotency key.

@@ -248,7 +248,7 @@ type Service struct {
 	// engine. There is no legacy fallback path — if the engine cannot
 	// evaluate the trigger (no session yet) the trigger is dropped with
 	// a debug log.
-	engineDispatcher WorkflowEngineDispatcher
+	engineDispatcher shared.WorkflowEngineDispatcher
 
 	// pricingLookup resolves per-model pricing for the cost subscriber's
 	// Layer B fallback (models.dev). Optional — nil means Layer B always

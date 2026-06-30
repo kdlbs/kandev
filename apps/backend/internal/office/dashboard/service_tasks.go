@@ -11,7 +11,6 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	officeruntime "github.com/kandev/kandev/internal/office/runtime"
-	officeservice "github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
 	"github.com/kandev/kandev/internal/workflow/engine"
@@ -83,7 +82,6 @@ func (s *DashboardService) UpdateTaskParentID(ctx context.Context, taskID, paren
 // blocker mutation. Used in two callsites (add/remove); pulled out as a
 // constant per CLAUDE.md ≥3-occurrence rule.
 const fieldBlockers = "blockers"
-const engineDispatchedValue = "true"
 
 // blockerCycleWalkLimit caps the BFS in detectBlockerCycle as a safety
 // bound. Real workspaces are nowhere near this; if we hit it we have
@@ -821,7 +819,7 @@ func (s *DashboardService) dispatchCommentEngineTrigger(ctx context.Context, com
 	if err == nil {
 		return true
 	}
-	if errors.Is(err, officeservice.ErrEngineNoSession) {
+	if errors.Is(err, shared.ErrEngineNoSession) {
 		return false
 	}
 	s.logger.Warn("engine comment trigger failed",
@@ -850,7 +848,7 @@ func (s *DashboardService) publishCommentCreated(ctx context.Context, comment *m
 		"author_id":   comment.AuthorID,
 	}
 	if engineHandled {
-		data["engine_dispatched"] = engineDispatchedValue
+		data["engine_dispatched"] = commentkeys.EngineDispatchedValue
 	}
 	event := bus.NewEvent(events.OfficeCommentCreated, "office-dashboard", data)
 	if err := s.eb.Publish(ctx, events.OfficeCommentCreated, event); err != nil {

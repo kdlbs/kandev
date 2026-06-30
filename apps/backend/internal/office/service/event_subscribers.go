@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/office/costs"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
 	"github.com/kandev/kandev/internal/workflow/engine"
 )
@@ -37,7 +38,7 @@ func (s *Service) dispatchEngineTrigger(
 		return nil
 	}
 	if err := s.engineDispatcher.HandleTrigger(ctx, taskID, trigger, payload, opID); err != nil {
-		if errors.Is(err, ErrEngineNoSession) {
+		if errors.Is(err, shared.ErrEngineNoSession) {
 			s.logger.Debug("engine trigger skipped: no active session",
 				zap.String("task_id", taskID),
 				zap.String("trigger", string(trigger)))
@@ -78,8 +79,6 @@ type CommentPostedData struct {
 	AssigneeAgentProfileID string `json:"assignee_agent_profile_id"`
 	EngineDispatched       string `json:"engine_dispatched"`
 }
-
-const engineDispatchedValue = "true"
 
 // ApprovalResolvedData represents an approval resolved event payload.
 type ApprovalResolvedData struct {
@@ -864,7 +863,7 @@ func (s *Service) queueCommentRun(ctx context.Context, data CommentPostedData) e
 	if data.TaskID == "" || data.CommentID == "" {
 		return nil
 	}
-	if data.EngineDispatched == engineDispatchedValue {
+	if data.EngineDispatched == commentkeys.EngineDispatchedValue {
 		return nil
 	}
 	// Self-comment short-circuit: if the agent that wrote the comment is

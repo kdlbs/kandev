@@ -1,5 +1,5 @@
 // Package engine_dispatcher provides the production implementation of
-// office/service.WorkflowEngineDispatcher. It bridges the office service's
+// office/shared.WorkflowEngineDispatcher. It bridges the office service's
 // typed event subscribers to the workflow engine's HandleInput envelope
 // by resolving the task's active session id and invoking
 // engine.HandleTrigger.
@@ -14,18 +14,18 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/common/logger"
-	officeservice "github.com/kandev/kandev/internal/office/service"
+	"github.com/kandev/kandev/internal/office/shared"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	"go.uber.org/zap"
 )
 
-// ErrNoSession is re-exported from office/service so callers can compare
+// ErrNoSession is re-exported from office/shared so callers can compare
 // via errors.Is without importing this package directly. Returned when a
 // trigger arrives for a task with no active session — engine state is
 // keyed on (taskID, sessionID), so the dispatcher cannot proceed without
 // one.
-var ErrNoSession = officeservice.ErrEngineNoSession
+var ErrNoSession = shared.ErrEngineNoSession
 
 // SessionResolver looks up a task's session state for workflow triggers.
 type SessionResolver interface {
@@ -40,7 +40,7 @@ type EngineHandle interface {
 }
 
 // Dispatcher resolves a task's active session and invokes the workflow
-// engine. It implements office/service.WorkflowEngineDispatcher.
+// engine. It implements shared.WorkflowEngineDispatcher.
 type Dispatcher struct {
 	engine   EngineHandle
 	sessions SessionResolver
@@ -58,7 +58,7 @@ func New(eng EngineHandle, sessions SessionResolver, log *logger.Logger) *Dispat
 	}
 }
 
-// HandleTrigger satisfies office/service.WorkflowEngineDispatcher.
+// HandleTrigger satisfies shared.WorkflowEngineDispatcher.
 //
 // Resolves the task's active session — or, for comment wakes, the latest
 // reusable completed/idle session — then invokes engine.HandleTrigger. Errors from the

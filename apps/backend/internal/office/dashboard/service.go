@@ -12,7 +12,6 @@ import (
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routing"
 	"github.com/kandev/kandev/internal/office/shared"
-	"github.com/kandev/kandev/internal/workflow/engine"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 
 	"go.uber.org/zap"
@@ -244,18 +243,6 @@ type ReactivityApplier interface {
 	) (*TaskReactivityResult, error)
 }
 
-// WorkflowEngineDispatcher routes typed dashboard comment events through
-// the workflow engine without waiting for the event bus subscriber.
-type WorkflowEngineDispatcher interface {
-	HandleTrigger(
-		ctx context.Context,
-		taskID string,
-		trigger engine.Trigger,
-		payload any,
-		operationID string,
-	) error
-}
-
 // ApprovalRun describes a single run the approval-flow service
 // wants to queue for an agent. Dashboard ships these to the scheduler
 // via the ApprovalReactivityQueuer adapter so the dashboard package
@@ -337,24 +324,24 @@ type DashboardService struct {
 	activity         shared.ActivityLogger
 	agents           shared.AgentReader
 	costs            shared.CostChecker
-	permissions      shared.PermissionLister  // optional; nil means no permission items in inbox
-	settingsProvider SettingsProvider         // optional; nil means settings endpoints are unavailable
-	governanceStore  GovernanceSettingsStore  // optional; nil means governance settings are unavailable
-	eb               bus.EventBus             // optional; nil means no events are published
-	retryCanceller   RetryCanceller           // optional; nil means retries are not cancelled on reassign
-	taskCanceller    TaskCanceller            // optional; used to hard-cancel sessions on status→cancelled
-	sessionTerm      SessionTerminator        // optional; flips office session rows to COMPLETED on participation removal
-	reactivity       ReactivityApplier        // optional; runs the office reactivity pipeline on mutations
-	engineDispatcher WorkflowEngineDispatcher // optional; synchronously routes comment triggers through the engine
-	approvalQueuer   ApprovalReactivityQueuer // optional; queues approval-flow runs
-	skillLister      SkillLister              // optional; nil means skill_count is always 0
-	routineLister    RoutineLister            // optional; nil means routine_count is always 0
-	failureNotifier  FailureNotifier          // optional; nil means assignee changes don't auto-dismiss inbox entries
-	failureInbox     FailureInboxSource       // optional; nil disables the new agent_run_failed / agent_paused_after_failures inbox sources
-	markFixed        MarkFixedHandler         // optional; nil disables the dismiss endpoint
-	decisions        DecisionStore            // workflow-domain decisions store (ADR 0005 Wave E); nil disables decision endpoints
-	routingProvider  RoutingProvider          // optional; nil disables /routing endpoints (503)
-	attemptLister    RouteAttemptLister       // optional; nil disables attempt embedding on run-detail responses
+	permissions      shared.PermissionLister         // optional; nil means no permission items in inbox
+	settingsProvider SettingsProvider                // optional; nil means settings endpoints are unavailable
+	governanceStore  GovernanceSettingsStore         // optional; nil means governance settings are unavailable
+	eb               bus.EventBus                    // optional; nil means no events are published
+	retryCanceller   RetryCanceller                  // optional; nil means retries are not cancelled on reassign
+	taskCanceller    TaskCanceller                   // optional; used to hard-cancel sessions on status→cancelled
+	sessionTerm      SessionTerminator               // optional; flips office session rows to COMPLETED on participation removal
+	reactivity       ReactivityApplier               // optional; runs the office reactivity pipeline on mutations
+	engineDispatcher shared.WorkflowEngineDispatcher // optional; synchronously routes comment triggers through the engine
+	approvalQueuer   ApprovalReactivityQueuer        // optional; queues approval-flow runs
+	skillLister      SkillLister                     // optional; nil means skill_count is always 0
+	routineLister    RoutineLister                   // optional; nil means routine_count is always 0
+	failureNotifier  FailureNotifier                 // optional; nil means assignee changes don't auto-dismiss inbox entries
+	failureInbox     FailureInboxSource              // optional; nil disables the new agent_run_failed / agent_paused_after_failures inbox sources
+	markFixed        MarkFixedHandler                // optional; nil disables the dismiss endpoint
+	decisions        DecisionStore                   // workflow-domain decisions store (ADR 0005 Wave E); nil disables decision endpoints
+	routingProvider  RoutingProvider                 // optional; nil disables /routing endpoints (503)
+	attemptLister    RouteAttemptLister              // optional; nil disables attempt embedding on run-detail responses
 }
 
 // SetRoutingProvider wires the provider-routing seam used by the
@@ -477,7 +464,7 @@ func (s *DashboardService) SetReactivityApplier(r ReactivityApplier) {
 
 // SetWorkflowEngineDispatcher wires the synchronous workflow-engine
 // dispatcher used for dashboard-created comments.
-func (s *DashboardService) SetWorkflowEngineDispatcher(d WorkflowEngineDispatcher) {
+func (s *DashboardService) SetWorkflowEngineDispatcher(d shared.WorkflowEngineDispatcher) {
 	s.engineDispatcher = d
 }
 

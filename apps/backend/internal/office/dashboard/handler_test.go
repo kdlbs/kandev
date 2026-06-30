@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
+	"github.com/kandev/kandev/internal/runs/commentkeys"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 )
@@ -318,8 +319,21 @@ func TestCreateComment_SuppressesLegacyAssigneeWakeAfterEngineDispatch(t *testin
 
 	rt := &recordingReactivity{result: &dashboard.TaskReactivityResult{}}
 	disp := &recordingEngineDispatcher{}
+	eb := bus.NewMemoryEventBus(logger.Default())
+	var eventData map[string]string
+	if _, err := eb.Subscribe(events.OfficeCommentCreated, func(_ context.Context, event *bus.Event) error {
+		raw, ok := event.Data.(map[string]string)
+		if !ok {
+			t.Fatalf("event data type = %T, want map[string]string", event.Data)
+		}
+		eventData = raw
+		return nil
+	}); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
 	deps.svc.SetReactivityApplier(rt)
 	deps.svc.SetWorkflowEngineDispatcher(disp)
+	deps.svc.SetEventBus(eb)
 	comment := &models.TaskComment{
 		ID:         "comment-existing",
 		TaskID:     "task-comment-run",
@@ -340,6 +354,9 @@ func TestCreateComment_SuppressesLegacyAssigneeWakeAfterEngineDispatch(t *testin
 	}
 	if disp.calls[0].opID != "task_comment:comment-existing" {
 		t.Fatalf("operation id = %q, want task_comment:comment-existing", disp.calls[0].opID)
+	}
+	if eventData["engine_dispatched"] != commentkeys.EngineDispatchedValue {
+		t.Fatalf("engine_dispatched = %q, want %q", eventData["engine_dispatched"], commentkeys.EngineDispatchedValue)
 	}
 	if len(rt.calls) != 1 {
 		t.Fatalf("reactivity calls = %d, want 1", len(rt.calls))

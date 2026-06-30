@@ -8,7 +8,8 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
-	"github.com/kandev/kandev/internal/office/service"
+	"github.com/kandev/kandev/internal/office/shared"
+	"github.com/kandev/kandev/internal/runs/commentkeys"
 	"github.com/kandev/kandev/internal/workflow/engine"
 )
 
@@ -137,7 +138,7 @@ func TestEngineDispatcher_SkipsAlreadyDispatchedCommentEvent(t *testing.T) {
 		"comment_id":        "comment-1",
 		"author_type":       "user",
 		"author_id":         "user-x",
-		"engine_dispatched": "true",
+		"engine_dispatched": commentkeys.EngineDispatchedValue,
 	})
 	if err := eb.Publish(ctx, events.OfficeCommentCreated, event); err != nil {
 		t.Fatalf("publish comment event: %v", err)
@@ -153,7 +154,7 @@ func TestEngineDispatcher_SkipsAlreadyDispatchedCommentEvent(t *testing.T) {
 func TestEngineDispatcher_NoSession_DropsTrigger(t *testing.T) {
 	svc, _ := newTestServiceWithBus(t)
 
-	disp := &fakeDispatcher{nextErr: service.ErrEngineNoSession}
+	disp := &fakeDispatcher{nextErr: shared.ErrEngineNoSession}
 	svc.SetWorkflowEngineDispatcher(disp)
 
 	ctx := context.Background()
