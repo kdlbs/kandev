@@ -1634,6 +1634,41 @@ type taskMessageDispatchResult struct {
 type taskMessageReviewRollback struct {
 	changed        bool
 	workflowStepID string
+	session        taskMessageSessionRollback
+}
+
+type taskMessageSessionRollback struct {
+	captured    bool
+	sessionID   string
+	state       models.TaskSessionState
+	error       string
+	completedAt *time.Time
+	isPrimary   bool
+}
+
+type taskMessageSessionRollbackRepository interface {
+	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
+	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
+	SetSessionPrimary(ctx context.Context, sessionID string) error
+}
+
+func (r *taskMessageReviewRollback) captureSession(session *models.TaskSession) {
+	if !r.changed || session == nil {
+		return
+	}
+	var completedAt *time.Time
+	if session.CompletedAt != nil {
+		copy := *session.CompletedAt
+		completedAt = &copy
+	}
+	r.session = taskMessageSessionRollback{
+		captured:    true,
+		sessionID:   session.ID,
+		state:       session.State,
+		error:       session.ErrorMessage,
+		completedAt: completedAt,
+		isPrimary:   session.IsPrimary,
+	}
 }
 
 // dispatchTaskMessage routes a message to the right delivery path based on session state.
@@ -1656,17 +1691,17 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 		return h.queueTaskMessage(ctx, taskID, session, prompt, metadata)
 
 	default:
-		originalState := session.State
 		reviewRollback, err := h.ensureTaskInProgressForTaskMessage(ctx, taskID)
 		if err != nil {
 			return taskMessageDispatchResult{}, err
 		}
+		reviewRollback.captureSession(session)
 		session, err := h.prepareSessionForTaskMessage(ctx, taskID, session)
 		if err != nil {
 			h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
 			return taskMessageDispatchResult{}, err
 		}
-		result, err := h.dispatchPreparedTaskMessage(ctx, taskID, session, originalState, prompt, metadata)
+		result, err := h.dispatchPreparedTaskMessage(ctx, taskID, session, prompt, metadata)
 		if err != nil {
 			h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
 		}
@@ -1674,14 +1709,14 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 	}
 }
 
-func (h *Handlers) dispatchPreparedTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, originalState models.TaskSessionState, prompt string, metadata map[string]interface{}) (taskMessageDispatchResult, error) {
+func (h *Handlers) dispatchPreparedTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string, metadata map[string]interface{}) (taskMessageDispatchResult, error) {
 	switch session.State {
 	case models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
 		return taskMessageDispatchResult{}, fmt.Errorf("session is %s — cannot send message", session.State)
 	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
 		return h.queueTaskMessage(ctx, taskID, session, prompt, metadata)
 	default:
-		if shouldStartTaskMessageSession(originalState, session) {
+		if shouldStartTaskMessageSession(session) {
 			// Start first, then record the user message ourselves with sender
 			// metadata. This avoids leaving an orphaned attributed chat row when
 			// StartCreatedSession fails (the previous order wrote the row up-front
@@ -1702,16 +1737,15 @@ func (h *Handlers) dispatchPreparedTaskMessage(ctx context.Context, taskID strin
 	}
 }
 
-func shouldStartTaskMessageSession(originalState models.TaskSessionState, session *models.TaskSession) bool {
+func shouldStartTaskMessageSession(session *models.TaskSession) bool {
 	if session.State == models.TaskSessionStateCreated {
 		return true
 	}
 	// on_turn_start may mark a never-launched CREATED session as
-	// WAITING_FOR_INPUT before an executor row exists. In that case the first
-	// message still needs the launch path; already-bound waiting sessions use
-	// the normal prompt/resume path.
-	return originalState == models.TaskSessionStateCreated &&
-		session.State == models.TaskSessionStateWaitingForInput &&
+	// WAITING_FOR_INPUT before an executor row exists. It may also switch to a
+	// fresh waiting primary session. In both cases the first message still needs
+	// the launch path; already-bound waiting sessions use prompt/resume.
+	return session.State == models.TaskSessionStateWaitingForInput &&
 		session.AgentExecutionID == ""
 }
 
@@ -1770,6 +1804,11 @@ func (h *Handlers) restoreTaskReviewForTaskMessage(ctx context.Context, taskID s
 	if !rollback.changed {
 		return
 	}
+	if err := h.restoreTaskMessageSession(ctx, rollback.session); err != nil {
+		h.logger.Warn("failed to restore task session after task message dispatch failure",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
 	reviewState := v1.TaskStateReview
 	if _, err := h.taskSvc.UpdateTask(ctx, taskID, &service.UpdateTaskRequest{
 		State:          &reviewState,
@@ -1779,6 +1818,33 @@ func (h *Handlers) restoreTaskReviewForTaskMessage(ctx context.Context, taskID s
 			zap.String("task_id", taskID),
 			zap.Error(err))
 	}
+}
+
+func (h *Handlers) restoreTaskMessageSession(ctx context.Context, rollback taskMessageSessionRollback) error {
+	if !rollback.captured {
+		return nil
+	}
+	repo, ok := h.sessionRepo.(taskMessageSessionRollbackRepository)
+	if !ok {
+		return errors.New("session rollback repository not available")
+	}
+	session, err := repo.GetTaskSession(ctx, rollback.sessionID)
+	if err != nil {
+		return err
+	}
+	session.State = rollback.state
+	session.ErrorMessage = rollback.error
+	session.CompletedAt = rollback.completedAt
+	session.IsPrimary = rollback.isPrimary
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		return err
+	}
+	if rollback.isPrimary {
+		if err := repo.SetSessionPrimary(ctx, rollback.sessionID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (h *Handlers) resolveSessionAfterTaskMessageTurnStart(ctx context.Context, taskID string, submitted *models.TaskSession) (*models.TaskSession, error) {

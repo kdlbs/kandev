@@ -37,7 +37,8 @@ type fakeOrchestrator struct {
 
 	// Configurable: error returned by PromptTask. Cleared after first call so
 	// the retry-after-resume path can succeed on the second call.
-	promptErrFirst error
+	promptErrFirst  error
+	startCreatedErr error
 }
 
 type promptCall struct {
@@ -78,6 +79,9 @@ func (f *fakeOrchestrator) StartCreatedSession(_ context.Context, taskID, sessio
 		prompt:            prompt,
 		skipMessageRecord: skipMessageRecord,
 	})
+	if f.startCreatedErr != nil {
+		return nil, f.startCreatedErr
+	}
 	return &executor.TaskExecution{SessionID: sessionID}, nil
 }
 
@@ -115,6 +119,9 @@ func newMessageTaskHandler(t *testing.T, svc *service.Service, taskRepo ...TaskR
 		sessionLauncher: orch,
 		logger:          log.WithFields(),
 	}
+	if sessionRepo, ok := repo.(SessionRepository); ok {
+		h.sessionRepo = sessionRepo
+	}
 	return h, orch
 }
 
@@ -149,6 +156,7 @@ type seedRepo interface {
 	CreateWorkflow(context.Context, *models.Workflow) error
 	CreateTaskSession(context.Context, *models.TaskSession) error
 	UpdateTaskSessionState(context.Context, string, models.TaskSessionState, string) error
+	UpsertExecutorRunning(context.Context, *models.ExecutorRunning) error
 }
 
 // seedTaskWithSession creates a workspace, workflow, target task with a primary
@@ -183,6 +191,16 @@ func seedTaskWithSession(t *testing.T, svc *service.Service, repo seedRepo, stat
 	require.NoError(t, repo.CreateTaskSession(ctx, sess))
 	if state != models.TaskSessionStateCreated {
 		require.NoError(t, repo.UpdateTaskSessionState(ctx, sess.ID, state, ""))
+	}
+	if state == models.TaskSessionStateWaitingForInput {
+		require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID:               "exec-row-" + sess.ID,
+			SessionID:        sess.ID,
+			TaskID:           target.ID,
+			Status:           "running",
+			Resumable:        true,
+			AgentExecutionID: "exec-" + sess.ID,
+		}))
 	}
 	loaded, err := svc.GetTaskSession(ctx, sess.ID)
 	require.NoError(t, err)
@@ -411,11 +429,12 @@ func TestHandleMessageTask_WaitingForInput_UsesSessionSelectedByTurnStart(t *tes
 
 	var payload map[string]interface{}
 	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
-	assert.Equal(t, "sent", payload["status"])
+	assert.Equal(t, "started", payload["status"])
 	assert.Equal(t, replacement.ID, payload["session_id"])
 
-	require.Len(t, orch.promptCalls, 1)
-	assert.Equal(t, replacement.ID, orch.promptCalls[0].sessionID)
+	require.Len(t, orch.startCreatedCalls, 1)
+	assert.Equal(t, replacement.ID, orch.startCreatedCalls[0].sessionID)
+	assert.Empty(t, orch.promptCalls)
 
 	oldMessages, err := svc.ListMessages(ctx, sess.ID)
 	require.NoError(t, err)
@@ -486,11 +505,12 @@ func TestHandleMessageTask_CompletedSession_UsesSessionSelectedByTurnStart(t *te
 
 	var payload map[string]interface{}
 	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
-	assert.Equal(t, "sent", payload["status"])
+	assert.Equal(t, "started", payload["status"])
 	assert.Equal(t, replacement.ID, payload["session_id"])
 
-	require.Len(t, orch.promptCalls, 1)
-	assert.Equal(t, replacement.ID, orch.promptCalls[0].sessionID)
+	require.Len(t, orch.startCreatedCalls, 1)
+	assert.Equal(t, replacement.ID, orch.startCreatedCalls[0].sessionID)
+	assert.Empty(t, orch.promptCalls)
 
 	oldMessages, err := svc.ListMessages(ctx, sess.ID)
 	require.NoError(t, err)
@@ -624,6 +644,73 @@ func TestHandleMessageTask_DispatchErrorRestoresReview(t *testing.T) {
 	assert.Equal(t, "step-review", updatedTask.WorkflowStepID)
 	assertTaskStateChangedEvent(t, stateEvents, target.ID, v1.TaskStateReview, "step-review")
 	require.Len(t, orch.promptCalls, 1)
+}
+
+func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, eventBus := newTestTaskServiceWithEventBus(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	stateEvents := subscribeTaskStateChanged(t, eventBus)
+
+	task, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	task.State = v1.TaskStateReview
+	task.WorkflowStepID = "step-review"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	replacement := &models.TaskSession{
+		ID:             "sess-2",
+		TaskID:         target.ID,
+		AgentProfileID: "agent-profile-2",
+		State:          models.TaskSessionStateWaitingForInput,
+		IsPrimary:      false,
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, replacement))
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	orch.onTurnStart = func(ctx context.Context, taskID, _ string) error {
+		updatedTask, err := svc.GetTask(ctx, taskID)
+		require.NoError(t, err)
+		updatedTask.WorkflowStepID = "step-in-progress"
+		require.NoError(t, repo.UpdateTask(ctx, updatedTask))
+
+		oldSession, err := svc.GetTaskSession(ctx, sess.ID)
+		require.NoError(t, err)
+		oldSession.State = models.TaskSessionStateCompleted
+		oldSession.IsPrimary = false
+		require.NoError(t, repo.UpdateTaskSession(ctx, oldSession))
+		require.NoError(t, repo.SetSessionPrimary(ctx, replacement.ID))
+		return nil
+	}
+	orch.startCreatedErr = errors.New("start failed")
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "fails after switch", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+
+	updatedTask, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, v1.TaskStateReview, updatedTask.State)
+	assert.Equal(t, "step-review", updatedTask.WorkflowStepID)
+	assertTaskStateChangedEvent(t, stateEvents, target.ID, v1.TaskStateReview, "step-review")
+
+	primary, err := svc.GetPrimarySession(ctx, target.ID)
+	require.NoError(t, err)
+	require.NotNil(t, primary)
+	assert.Equal(t, sess.ID, primary.ID)
+	assert.Equal(t, models.TaskSessionStateWaitingForInput, primary.State)
+	assert.True(t, primary.IsPrimary)
+
+	switched, err := svc.GetTaskSession(ctx, replacement.ID)
+	require.NoError(t, err)
+	assert.False(t, switched.IsPrimary)
+
+	assert.Empty(t, orch.promptCalls)
+	require.Len(t, orch.startCreatedCalls, 1)
+	messages, err := svc.ListMessages(ctx, replacement.ID)
+	require.NoError(t, err)
+	assert.Empty(t, messages)
 }
 
 func TestHandleMessageTask_PromptFailsWithExecutionNotFound_AutoResumes(t *testing.T) {
