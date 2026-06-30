@@ -13,7 +13,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/runs/commentkeys"
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
 
@@ -269,7 +269,7 @@ func runPayload(req QueueRunRequest, agentInstanceID string) map[string]any {
 }
 
 func shouldCoalesceRun(req QueueRunRequest) bool {
-	return !strings.HasPrefix(req.IdempotencyKey, "task_comment:")
+	return !commentkeys.HasTaskCommentPrefix(req.IdempotencyKey)
 }
 
 // publishRunQueued emits the OfficeRunQueued bus event so the WS
@@ -321,9 +321,10 @@ func encodePayload(p map[string]any) (string, error) {
 	return string(b), nil
 }
 
-// extractIdentityFromPayload pulls task_id and comment_id out of a
-// JSON payload string. Used by publishRunQueued so the WS gateway can
-// route per-task without re-parsing on the client.
+// extractIdentityFromPayload pulls task_id and comment_id out of a JSON payload
+// string. When a cross-task comment wake stores source_task_id, route the
+// OfficeRunQueued event back to the source task so its comment gets a status
+// update even though the run executes on the target task.
 func extractIdentityFromPayload(payload string) (taskID, commentID string) {
 	if payload == "" {
 		return "", ""
@@ -333,6 +334,9 @@ func extractIdentityFromPayload(payload string) (taskID, commentID string) {
 		return "", ""
 	}
 	if v, ok := raw["task_id"].(string); ok {
+		taskID = v
+	}
+	if v, ok := raw["source_task_id"].(string); ok && v != "" {
 		taskID = v
 	}
 	if v, ok := raw["comment_id"].(string); ok {

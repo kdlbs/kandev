@@ -310,6 +310,31 @@ func TestDispatcher_PropagatesActiveSessionLookupError(t *testing.T) {
 	}
 }
 
+func TestDispatcher_PropagatesActiveSessionLookupErrorForNonCommentTrigger(t *testing.T) {
+	eng := &fakeEngine{}
+	dbErr := errors.New("db down")
+	sessions := &fakeSessions{
+		activeErr: dbErr,
+		latestSession: &taskmodels.TaskSession{
+			ID:    "sess-completed",
+			State: taskmodels.TaskSessionStateCompleted,
+		},
+	}
+	d := New(eng, sessions, logger.Default())
+
+	err := d.HandleTrigger(context.Background(), "task-1", engine.TriggerOnBlockerResolved,
+		engine.OnBlockerResolvedPayload{ResolvedBlockerIDs: []string{"blocker-1"}}, "op")
+	if !errors.Is(err, dbErr) {
+		t.Fatalf("err = %v, want wrapped db error", err)
+	}
+	if errors.Is(err, ErrNoSession) {
+		t.Fatalf("err must not masquerade as ErrNoSession: %v", err)
+	}
+	if eng.called {
+		t.Error("engine should not be called when active session lookup fails")
+	}
+}
+
 func TestDispatcher_PropagatesLatestSessionLookupError(t *testing.T) {
 	eng := &fakeEngine{}
 	dbErr := errors.New("db down")

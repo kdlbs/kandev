@@ -193,6 +193,48 @@ func TestQueueRun_DoesNotCoalesceTaskCommentPrefixWithCustomReason(t *testing.T)
 	}
 }
 
+func TestQueueRun_PublishesSourceTaskForCrossTaskComment(t *testing.T) {
+	svc, eb := newTestService(t)
+	ctx := context.Background()
+
+	eventsCh := make(chan map[string]interface{}, 1)
+	_, err := eb.Subscribe(events.OfficeRunQueued, func(_ context.Context, e *bus.Event) error {
+		if data, ok := e.Data.(map[string]interface{}); ok {
+			eventsCh <- data
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+
+	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		AgentProfileID: "agent-primary",
+		TaskID:         "target-task",
+		WorkflowStepID: "target-step",
+		Reason:         "task_comment",
+		IdempotencyKey: "task_comment:comment-1:work:target-task:agent-primary:abcd1234",
+		Payload: map[string]any{
+			"comment_id":     "comment-1",
+			"source_task_id": "source-task",
+		},
+	}); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+
+	select {
+	case data := <-eventsCh:
+		if data["task_id"] != "source-task" {
+			t.Fatalf("event task_id = %v, want source-task", data["task_id"])
+		}
+		if data["comment_id"] != "comment-1" {
+			t.Fatalf("event comment_id = %v, want comment-1", data["comment_id"])
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for OfficeRunQueued event")
+	}
+}
+
 // TestQueueRun_RejectsWithoutAgent pins that the service refuses to
 // insert when no agent can be resolved from the payload (the
 // resolver-less path is what office.QueueRun uses today).

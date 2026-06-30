@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/office/costs"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/runs/commentkeys"
 	"github.com/kandev/kandev/internal/workflow/engine"
 )
 
@@ -870,7 +871,7 @@ func (s *Service) queueCommentRun(ctx context.Context, data CommentPostedData) e
 		data.AuthorType == participantTypeAgent && fields.AssigneeAgentProfileID == data.AuthorID {
 		return nil
 	}
-	key := fmt.Sprintf("task_comment:%s", data.CommentID)
+	key := commentkeys.TaskComment(data.CommentID)
 	return s.dispatchEngineTrigger(ctx, data.TaskID, engine.TriggerOnComment,
 		engine.OnCommentPayload{
 			CommentID: data.CommentID,

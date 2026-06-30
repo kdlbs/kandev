@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/kandev/kandev/internal/runs/commentkeys"
 )
 
 // ErrActionNotYetWired is the sentinel returned by Phase 2 callbacks when a
@@ -80,7 +82,7 @@ func (c QueueRunCallback) Execute(ctx context.Context, in ActionInput) (ActionRe
 			WorkflowStepID: workflowStepID,
 			Reason:         queueRunReason(in),
 			IdempotencyKey: idempotencyKey(in, agentID, taskID),
-			Payload:        queueRunPayload(in, in.Action.QueueRun.Payload),
+			Payload:        queueRunPayload(in, in.Action.QueueRun.Payload, taskID),
 		}
 		if err := c.Adapter.QueueRun(ctx, req); err != nil {
 			return ActionResult{}, fmt.Errorf("queue_run for agent %s: %w", agentID, err)
@@ -246,7 +248,7 @@ func idempotencyKey(in ActionInput, agentID, taskID string) string {
 }
 
 func usesExactCommentKey(in ActionInput) bool {
-	if in.Trigger != TriggerOnComment || !strings.HasPrefix(in.OperationID, "task_comment:") {
+	if in.Trigger != TriggerOnComment || !commentkeys.HasTaskCommentPrefix(in.OperationID) {
 		return false
 	}
 	if in.Action.Kind != ActionQueueRun || in.Action.QueueRun == nil {
@@ -256,7 +258,7 @@ func usesExactCommentKey(in ActionInput) bool {
 	taskID := strings.TrimSpace(in.Action.QueueRun.TaskID)
 	return (target == "" || target == TargetPrimary) &&
 		(taskID == "" || taskID == TaskIDThis) &&
-		queueRunReason(in) == "task_comment" &&
+		queueRunReason(in) == commentkeys.TaskCommentReason &&
 		len(in.Action.QueueRun.Payload) == 0
 }
 
@@ -296,8 +298,8 @@ func queueActionDigest(in ActionInput) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-func queueRunPayload(in ActionInput, actionPayload map[string]any) map[string]any {
-	out := make(map[string]any, len(actionPayload)+2)
+func queueRunPayload(in ActionInput, actionPayload map[string]any, targetTaskID string) map[string]any {
+	out := make(map[string]any, len(actionPayload)+3)
 	for k, v := range actionPayload {
 		out[k] = v
 	}
@@ -309,6 +311,12 @@ func queueRunPayload(in ActionInput, actionPayload map[string]any) map[string]an
 		if comment.AuthorID != "" {
 			out["author_id"] = comment.AuthorID
 		}
+	}
+	if targetTaskID != "" &&
+		in.State.TaskID != "" &&
+		targetTaskID != in.State.TaskID &&
+		(ok || commentkeys.HasTaskCommentPrefix(in.OperationID)) {
+		out["source_task_id"] = in.State.TaskID
 	}
 	if len(out) == 0 {
 		return nil
@@ -380,7 +388,7 @@ func (c QueueRunForEachParticipantCallback) Execute(ctx context.Context, in Acti
 			WorkflowStepID: in.Step.ID,
 			Reason:         reason,
 			IdempotencyKey: idempotencyKey(in, p.AgentProfileID, taskID),
-			Payload:        queueRunPayload(in, cfg.Payload),
+			Payload:        queueRunPayload(in, cfg.Payload, taskID),
 		}
 		if err := c.Adapter.QueueRun(ctx, req); err != nil {
 			return ActionResult{}, fmt.Errorf("queue_run for participant %s: %w", p.ID, err)

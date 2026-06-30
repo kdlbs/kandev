@@ -149,11 +149,15 @@ func (s *Service) publishRunQueued(ctx context.Context, req *models.Run, idempot
 		return
 	}
 	parsed := ParseRunPayload(req.Payload)
+	taskID := parsed["task_id"]
+	if sourceTaskID := parsed["source_task_id"]; sourceTaskID != "" {
+		taskID = sourceTaskID
+	}
 	data := map[string]interface{}{
 		"run_id":           req.ID,
 		"agent_profile_id": req.AgentProfileID,
 		"reason":           req.Reason,
-		"task_id":          parsed["task_id"],
+		"task_id":          taskID,
 		"comment_id":       parsed["comment_id"],
 		"idempotency_key":  idempotencyKey,
 	}

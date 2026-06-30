@@ -324,6 +324,10 @@ func (s stubPrimary) PrimaryAgentProfileID(_ context.Context, _, _ string) (stri
 	return s.id, nil
 }
 
+func (s stubPrimary) PrimaryAgentProfileIDForTask(_ context.Context, _ string) (string, error) {
+	return s.id, nil
+}
+
 type stubCEO struct{ id string }
 
 func (s stubCEO) ResolveCEOAgentProfileID(_ context.Context, _ string) (string, error) {

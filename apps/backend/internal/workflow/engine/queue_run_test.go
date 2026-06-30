@@ -257,6 +257,12 @@ func TestQueueRunCallback_PrimaryUsesResolvedTargetTask(t *testing.T) {
 	if got.IdempotencyKey == "task_comment:c-1" {
 		t.Fatalf("literal-task primary comment wake must keep action/task/agent salt")
 	}
+	if got.Payload["comment_id"] != "c-1" {
+		t.Fatalf("payload comment_id = %v, want c-1", got.Payload["comment_id"])
+	}
+	if got.Payload["source_task_id"] != "task-1" {
+		t.Fatalf("payload source_task_id = %v, want task-1", got.Payload["source_task_id"])
+	}
 }
 
 func TestQueueRunCallback_TargetParticipantRole(t *testing.T) {
