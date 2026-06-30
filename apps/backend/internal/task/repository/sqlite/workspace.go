@@ -133,11 +133,27 @@ func (r *Repository) DeleteWorkspace(ctx context.Context, id string) error {
 	return nil
 }
 
+// DeleteWorkspaceCascade deletes a workspace and its task/workflow rows in one transaction.
+func (r *Repository) DeleteWorkspaceCascade(
+	ctx context.Context,
+	id string,
+) ([]*models.Task, []*models.Workflow, error) {
+	return r.deleteWorkspaceCascade(ctx, id, nil)
+}
+
 // DeleteWorkspaceCascadeWithName deletes a workspace and its task/workflow rows
 // in one transaction, only if the current workspace name matches name.
 func (r *Repository) DeleteWorkspaceCascadeWithName(
 	ctx context.Context,
 	id, name string,
+) ([]*models.Task, []*models.Workflow, error) {
+	return r.deleteWorkspaceCascade(ctx, id, &name)
+}
+
+func (r *Repository) deleteWorkspaceCascade(
+	ctx context.Context,
+	id string,
+	expectedName *string,
 ) ([]*models.Task, []*models.Workflow, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -145,8 +161,10 @@ func (r *Repository) DeleteWorkspaceCascadeWithName(
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := r.confirmWorkspaceNameForCascadeDelete(ctx, tx, id, name); err != nil {
-		return nil, nil, err
+	if expectedName != nil {
+		if err := r.confirmWorkspaceNameForCascadeDelete(ctx, tx, id, *expectedName); err != nil {
+			return nil, nil, err
+		}
 	}
 	tasks, err := r.listWorkspaceCascadeDeleteTasks(ctx, tx, id)
 	if err != nil {
@@ -157,18 +175,15 @@ func (r *Repository) DeleteWorkspaceCascadeWithName(
 		return nil, nil, err
 	}
 
-	// Keep the name predicate on the delete itself so a rename racing after the
-	// read-only confirmation cannot delete the newly renamed workspace.
-	result, err := tx.ExecContext(ctx, r.db.Rebind(`
-		DELETE FROM workspaces
-		WHERE id = ? AND name = ?
-	`), id, name)
+	rows, err := r.deleteWorkspaceCascadeRow(ctx, tx, id, expectedName)
 	if err != nil {
 		return nil, nil, err
 	}
-	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return nil, nil, r.confirmedWorkspaceDeleteMismatch(ctx, tx, id)
+		if expectedName != nil {
+			return nil, nil, r.confirmedWorkspaceDeleteMismatch(ctx, tx, id)
+		}
+		return nil, nil, fmt.Errorf("workspace not found: %s", id)
 	}
 
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -189,23 +204,46 @@ func (r *Repository) DeleteWorkspaceCascadeWithName(
 	return tasks, workflows, nil
 }
 
-func (r *Repository) confirmWorkspaceNameForCascadeDelete(ctx context.Context, tx *sqlx.Tx, id, name string) error {
-	var matched int
-	err := tx.QueryRowContext(ctx, r.db.Rebind(`
-		SELECT 1
-		FROM workspaces
-		WHERE id = ? AND name = ?
-	`), id, name).Scan(&matched)
-	if err == nil {
-		return nil
+func (r *Repository) deleteWorkspaceCascadeRow(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	id string,
+	expectedName *string,
+) (int64, error) {
+	var result sql.Result
+	var err error
+	if expectedName == nil {
+		result, err = tx.ExecContext(ctx, r.db.Rebind(`
+			DELETE FROM workspaces
+			WHERE id = ?
+		`), id)
+	} else {
+		// Keep the name predicate on the delete itself so a rename racing after
+		// the confirmation cannot delete the newly renamed workspace.
+		result, err = tx.ExecContext(ctx, r.db.Rebind(`
+			DELETE FROM workspaces
+			WHERE id = ? AND name = ?
+		`), id, *expectedName)
 	}
-	if errors.Is(err, sql.ErrNoRows) {
-		return r.confirmedWorkspaceDeleteMismatch(ctx, tx, id)
+	if err != nil {
+		return 0, err
 	}
-	return err
+	rows, _ := result.RowsAffected()
+	return rows, nil
 }
 
-func (r *Repository) confirmedWorkspaceDeleteMismatch(ctx context.Context, tx *sqlx.Tx, id string) error {
+func (r *Repository) confirmWorkspaceNameForCascadeDelete(ctx context.Context, tx *sqlx.Tx, id, name string) error {
+	currentName, err := r.workspaceNameForCascadeDelete(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	if currentName != name {
+		return repoerrors.ErrWorkspaceNameMismatch
+	}
+	return nil
+}
+
+func (r *Repository) workspaceNameForCascadeDelete(ctx context.Context, tx *sqlx.Tx, id string) (string, error) {
 	var currentName string
 	err := tx.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT name
@@ -213,9 +251,13 @@ func (r *Repository) confirmedWorkspaceDeleteMismatch(ctx context.Context, tx *s
 		WHERE id = ?
 	`), id).Scan(&currentName)
 	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("workspace not found: %s", id)
+		return "", fmt.Errorf("workspace not found: %s", id)
 	}
-	if err != nil {
+	return currentName, err
+}
+
+func (r *Repository) confirmedWorkspaceDeleteMismatch(ctx context.Context, tx *sqlx.Tx, id string) error {
+	if _, err := r.workspaceNameForCascadeDelete(ctx, tx, id); err != nil {
 		return err
 	}
 	return repoerrors.ErrWorkspaceNameMismatch

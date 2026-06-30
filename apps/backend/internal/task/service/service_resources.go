@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,8 +18,9 @@ import (
 )
 
 const (
-	spritesTokenEnvKey      = "SPRITES_API_TOKEN"
-	workspaceDeletePageSize = 500
+	spritesTokenEnvKey                = "SPRITES_API_TOKEN"
+	workspaceDeletePageSize           = 500
+	workspaceDeleteCleanupConcurrency = 8
 )
 
 var ErrWorkspaceConfirmNameMismatch = errors.New("confirm_name does not match workspace name")
@@ -121,63 +123,25 @@ func (s *Service) DeleteWorkspaceWithConfirmName(ctx context.Context, id, confir
 }
 
 func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspace, confirmedName *string) error {
-	id := workspace.ID
-	if confirmedName != nil {
-		return s.deleteConfirmedWorkspaceCascade(ctx, workspace, *confirmedName)
-	}
-
-	tasks, err := s.listAllTasksForWorkspaceDelete(ctx, id)
-	if err != nil {
-		return err
-	}
-	workflows, err := s.workflows.ListWorkflows(ctx, id, true)
-	if err != nil {
-		return fmt.Errorf("list workspace workflows: %w", err)
-	}
-	// Tasks and workflows have no workspace_id FK, so the unconfirmed
-	// office-service delete path still needs to remove those rows explicitly
-	// before the workspace row.
-	for _, task := range tasks {
-		if task == nil || task.ID == "" {
-			continue
-		}
-		if err := s.DeleteTask(ctx, task.ID); err != nil {
-			return fmt.Errorf("delete task %s: %w", task.ID, err)
-		}
-	}
-	for _, workflow := range workflows {
-		if workflow == nil || workflow.ID == "" {
-			continue
-		}
-		if err := s.DeleteWorkflow(ctx, workflow.ID); err != nil {
-			return fmt.Errorf("delete workflow %s: %w", workflow.ID, err)
-		}
-	}
-
-	if err := s.workspaces.DeleteWorkspace(ctx, id); err != nil {
-		s.logger.Error("failed to delete workspace", zap.String("workspace_id", id), zap.Error(err))
-		return err
-	}
-	s.publishWorkspaceEvent(ctx, events.WorkspaceDeleted, workspace)
-	s.logger.Info("workspace deleted", zap.String("workspace_id", id))
-	return nil
-}
-
-func (s *Service) deleteConfirmedWorkspaceCascade(ctx context.Context, workspace *models.Workspace, confirmedName string) error {
 	tasks, err := s.listAllTasksForWorkspaceDelete(ctx, workspace.ID)
 	if err != nil {
 		return err
 	}
-	// Runtime cleanup needs task rows that exist before the cascade. The
-	// repository still returns every child row deleted by the transaction for
-	// event publication, including rows created after this cleanup snapshot.
+	// Runtime cleanup needs task rows before the cascade removes them.
 	cleanups, err := s.prepareWorkspaceDeleteTaskCleanups(ctx, tasks)
 	if err != nil {
 		return err
 	}
-	deletedTasks, deletedWorkflows, err := s.workspaces.DeleteWorkspaceCascadeWithName(ctx, workspace.ID, confirmedName)
+
+	var deletedTasks []*models.Task
+	var deletedWorkflows []*models.Workflow
+	if confirmedName == nil {
+		deletedTasks, deletedWorkflows, err = s.workspaces.DeleteWorkspaceCascade(ctx, workspace.ID)
+	} else {
+		deletedTasks, deletedWorkflows, err = s.workspaces.DeleteWorkspaceCascadeWithName(ctx, workspace.ID, *confirmedName)
+	}
 	if err != nil {
-		return s.mapConfirmedWorkspaceDeleteError(workspace.ID, err)
+		return s.mapWorkspaceDeleteError(workspace.ID, err)
 	}
 	s.publishWorkspaceDeleteChildEvents(ctx, deletedTasks, deletedWorkflows)
 	s.runWorkspaceDeleteTaskCleanups(cleanups, deletedTasks)
@@ -246,12 +210,24 @@ func (s *Service) publishWorkspaceDeleteChildEvents(ctx context.Context, tasks [
 }
 
 func (s *Service) runWorkspaceDeleteTaskCleanups(cleanups []workspaceDeleteTaskCleanup, deletedTasks []*models.Task) {
+	jobs := s.workspaceDeleteTaskCleanupJobs(cleanups, deletedTasks)
+	if len(jobs) == 0 {
+		return
+	}
+	go s.runWorkspaceDeleteTaskCleanupJobs(jobs)
+}
+
+func (s *Service) workspaceDeleteTaskCleanupJobs(
+	cleanups []workspaceDeleteTaskCleanup,
+	deletedTasks []*models.Task,
+) []workspaceDeleteTaskCleanup {
 	deletedTaskIDs := make(map[string]struct{}, len(deletedTasks))
 	for _, task := range deletedTasks {
 		if task != nil && task.ID != "" {
 			deletedTaskIDs[task.ID] = struct{}{}
 		}
 	}
+	jobs := make([]workspaceDeleteTaskCleanup, 0, len(cleanups))
 	for _, cleanup := range cleanups {
 		if cleanup.task == nil {
 			continue
@@ -259,18 +235,46 @@ func (s *Service) runWorkspaceDeleteTaskCleanups(cleanups []workspaceDeleteTaskC
 		if _, ok := deletedTaskIDs[cleanup.task.ID]; !ok {
 			continue
 		}
-		envCleanup := taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false}
 		hasCleanup := len(cleanup.stopTargets) > 0 || s.worktreeCleanup != nil ||
 			len(cleanup.sessions) > 0 || cleanup.task.IsEphemeral || cleanup.taskEnv != nil
 		if !hasCleanup {
 			continue
 		}
-		s.runAsyncTaskCleanup(cleanup.task.ID, cleanup.sessions, cleanup.worktrees, cleanup.stopTargets, envCleanup,
-			"task deleted", "failed to stop session on task delete", "task cleanup completed")
+		jobs = append(jobs, cleanup)
 	}
+	return jobs
 }
 
-func (s *Service) mapConfirmedWorkspaceDeleteError(id string, err error) error {
+func (s *Service) runWorkspaceDeleteTaskCleanupJobs(jobs []workspaceDeleteTaskCleanup) {
+	workers := workspaceDeleteCleanupConcurrency
+	if len(jobs) < workers {
+		workers = len(jobs)
+	}
+	jobCh := make(chan workspaceDeleteTaskCleanup)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			for cleanup := range jobCh {
+				s.runWorkspaceDeleteTaskCleanup(cleanup)
+			}
+		}()
+	}
+	for _, job := range jobs {
+		jobCh <- job
+	}
+	close(jobCh)
+	wg.Wait()
+}
+
+func (s *Service) runWorkspaceDeleteTaskCleanup(cleanup workspaceDeleteTaskCleanup) {
+	envCleanup := taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false}
+	s.runTaskCleanup(cleanup.task.ID, cleanup.sessions, cleanup.worktrees, cleanup.stopTargets, envCleanup,
+		"task deleted", "failed to stop session on task delete", "task cleanup completed")
+}
+
+func (s *Service) mapWorkspaceDeleteError(id string, err error) error {
 	if err == nil {
 		return nil
 	}

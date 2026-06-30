@@ -41,6 +41,38 @@ func TestDeleteWorkspaceCascadeWithNameDeletesWorkspaceChildren(t *testing.T) {
 	assertNoWorkspaceCascadeDependents(t, repo)
 }
 
+func TestDeleteWorkspaceCascadeDeletesWorkspaceChildren(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForHealTests(t)
+
+	seedWorkspaceCascadeRows(t, repo, "ws-delete")
+
+	tasks, workflows, err := repo.DeleteWorkspaceCascade(ctx, "ws-delete")
+	if err != nil {
+		t.Fatalf("DeleteWorkspaceCascade: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].ID != "task-delete" {
+		t.Fatalf("deleted tasks = %#v, want task-delete", tasks)
+	}
+	if len(workflows) != 1 || workflows[0].ID != "wf-delete" {
+		t.Fatalf("deleted workflows = %#v, want wf-delete", workflows)
+	}
+	if _, err := repo.GetWorkspace(ctx, "ws-delete"); err == nil {
+		t.Fatalf("workspace should be deleted")
+	}
+	if _, err := repo.GetTask(ctx, "task-delete"); err == nil {
+		t.Fatalf("workspace task should be deleted")
+	}
+	workflows, err = repo.ListWorkflows(ctx, "ws-delete", true)
+	if err != nil {
+		t.Fatalf("ListWorkflows: %v", err)
+	}
+	if len(workflows) != 0 {
+		t.Fatalf("workspace workflows should be deleted, got %d", len(workflows))
+	}
+	assertNoWorkspaceCascadeDependents(t, repo)
+}
+
 func TestDeleteWorkspaceCascadeWithNameRejectsMismatchedName(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepoForHealTests(t)

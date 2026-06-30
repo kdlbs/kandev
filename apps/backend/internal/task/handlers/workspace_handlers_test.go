@@ -43,6 +43,16 @@ func (r *workspaceDeleteRepo) DeleteWorkspace(_ context.Context, _ string) error
 	return nil
 }
 
+func (r *workspaceDeleteRepo) DeleteWorkspaceCascade(_ context.Context, id string) ([]*models.Task, []*models.Workflow, error) {
+	r.cascadeCalled = true
+	r.cascadeID = id
+	r.cascadeName = ""
+	if r.cascadeErr != nil {
+		return nil, nil, r.cascadeErr
+	}
+	return r.cascadeTasks, r.cascadeWorkflows, nil
+}
+
 func (r *workspaceDeleteRepo) DeleteWorkspaceCascadeWithName(_ context.Context, id, name string) ([]*models.Task, []*models.Workflow, error) {
 	r.cascadeCalled = true
 	r.cascadeID = id

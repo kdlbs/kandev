@@ -3,8 +3,11 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
@@ -17,6 +20,59 @@ import (
 type errWorkspaceRepo struct {
 	// embed the real repo for all methods except ListWorkspaces.
 	WorkspaceRepositoryStub
+}
+
+type blockingWorktreeCleanup struct {
+	release   chan struct{}
+	active    atomic.Int32
+	maxActive atomic.Int32
+}
+
+func (c *blockingWorktreeCleanup) OnTaskDeleted(context.Context, string) error {
+	return nil
+}
+
+func (c *blockingWorktreeCleanup) GetAllByTaskID(context.Context, string) ([]*worktree.Worktree, error) {
+	return nil, nil
+}
+
+func (c *blockingWorktreeCleanup) CleanupWorktrees(ctx context.Context, _ []*worktree.Worktree) error {
+	active := c.active.Add(1)
+	updateMaxActive(&c.maxActive, active)
+	defer c.active.Add(-1)
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.release:
+		return nil
+	}
+}
+
+func updateMaxActive(maxActive *atomic.Int32, value int32) {
+	for {
+		current := maxActive.Load()
+		if value <= current || maxActive.CompareAndSwap(current, value) {
+			return
+		}
+	}
+}
+
+func waitForActiveCleanups(t *testing.T, cleanup *blockingWorktreeCleanup, want int32) {
+	t.Helper()
+	deadline := time.After(500 * time.Millisecond)
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if cleanup.active.Load() >= want {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("active cleanups = %d, want at least %d", cleanup.active.Load(), want)
+		case <-ticker.C:
+		}
+	}
 }
 
 // WorkspaceRepositoryStub satisfies the full WorkspaceRepository interface
@@ -33,6 +89,9 @@ func (WorkspaceRepositoryStub) UpdateWorkspace(_ context.Context, _ *models.Work
 	panic("not implemented")
 }
 func (WorkspaceRepositoryStub) DeleteWorkspace(_ context.Context, _ string) error {
+	panic("not implemented")
+}
+func (WorkspaceRepositoryStub) DeleteWorkspaceCascade(_ context.Context, _ string) ([]*models.Task, []*models.Workflow, error) {
 	panic("not implemented")
 }
 func (WorkspaceRepositoryStub) DeleteWorkspaceCascadeWithName(_ context.Context, _, _ string) ([]*models.Task, []*models.Workflow, error) {
@@ -220,6 +279,82 @@ func TestService_DeleteWorkspaceDeletesWorkspaceOwnedTasksAndWorkflows(t *testin
 	}
 	if _, err := repo.GetWorkflow(ctx, "wf-keep"); err != nil {
 		t.Fatalf("unrelated workflow should remain: %v", err)
+	}
+}
+
+func TestService_DeleteWorkspacePublishesChildEventsAndCleansResources(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+	cleanup := &recordingWorktreeCleanup{
+		worktrees: []*worktree.Worktree{{ID: "wt-delete", TaskID: "task-delete"}},
+	}
+	svc.SetWorktreeCleanup(cleanup)
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-delete", Name: "Delete Me"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-delete", WorkspaceID: "ws-delete", Name: "Doomed"})
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:             "task-delete",
+		WorkspaceID:    "ws-delete",
+		WorkflowID:     "wf-delete",
+		WorkflowStepID: "step-delete",
+		Title:          "Delete task",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	eventBus.ClearEvents()
+
+	if err := svc.DeleteWorkspace(ctx, "ws-delete"); err != nil {
+		t.Fatalf("DeleteWorkspace: %v", err)
+	}
+	waitForCleanupDone(t, svc)
+
+	eventCounts := make(map[string]int)
+	for _, event := range eventBus.GetPublishedEvents() {
+		eventCounts[event.Type]++
+	}
+	if eventCounts[events.TaskDeleted] != 1 {
+		t.Fatalf("task deleted events = %d, want 1", eventCounts[events.TaskDeleted])
+	}
+	if eventCounts[events.WorkflowDeleted] != 1 {
+		t.Fatalf("workflow deleted events = %d, want 1", eventCounts[events.WorkflowDeleted])
+	}
+	if eventCounts[events.WorkspaceDeleted] != 1 {
+		t.Fatalf("workspace deleted events = %d, want 1", eventCounts[events.WorkspaceDeleted])
+	}
+	if len(cleanup.cleaned) != 1 || cleanup.cleaned[0].ID != "wt-delete" {
+		t.Fatalf("cleaned worktrees = %#v, want wt-delete", cleanup.cleaned)
+	}
+}
+
+func TestService_RunWorkspaceDeleteTaskCleanupsCapsConcurrency(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	taskCount := workspaceDeleteCleanupConcurrency + 3
+	svc.setCleanupDoneForTestHook(make(chan struct{}, taskCount))
+	cleanup := &blockingWorktreeCleanup{release: make(chan struct{})}
+	svc.SetWorktreeCleanup(cleanup)
+
+	cleanups := make([]workspaceDeleteTaskCleanup, 0, taskCount)
+	deletedTasks := make([]*models.Task, 0, taskCount)
+	for i := 0; i < taskCount; i++ {
+		taskID := fmt.Sprintf("task-%02d", i)
+		task := &models.Task{ID: taskID}
+		cleanups = append(cleanups, workspaceDeleteTaskCleanup{
+			task:      task,
+			worktrees: []*worktree.Worktree{{ID: "wt-" + taskID, TaskID: taskID}},
+		})
+		deletedTasks = append(deletedTasks, task)
+	}
+
+	svc.runWorkspaceDeleteTaskCleanups(cleanups, deletedTasks)
+	waitForActiveCleanups(t, cleanup, workspaceDeleteCleanupConcurrency)
+	close(cleanup.release)
+	for i := 0; i < taskCount; i++ {
+		waitForCleanupDone(t, svc)
+	}
+
+	if got := cleanup.maxActive.Load(); got > workspaceDeleteCleanupConcurrency {
+		t.Fatalf("max active cleanups = %d, want <= %d", got, workspaceDeleteCleanupConcurrency)
 	}
 }
 

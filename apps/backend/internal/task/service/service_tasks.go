@@ -1012,27 +1012,36 @@ func (s *Service) runAsyncTaskCleanup(
 	envCleanup taskEnvironmentCleanup,
 	stopReason, stopFailMsg, cleanupMsg string,
 ) {
-	go func() {
-		cleanupStart := time.Now()
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
+	go s.runTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup, stopReason, stopFailMsg, cleanupMsg)
+}
 
-		failedStops := s.stopTaskRuntimeTargets(cleanupCtx, id, stopTargets, stopReason, stopFailMsg)
+func (s *Service) runTaskCleanup(
+	id string,
+	sessions []*models.TaskSession,
+	worktrees []*worktree.Worktree,
+	stopTargets []taskStopTarget,
+	envCleanup taskEnvironmentCleanup,
+	stopReason, stopFailMsg, cleanupMsg string,
+) {
+	cleanupStart := time.Now()
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 
-		cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, stopTargets, envCleanup, failedStops)
+	failedStops := s.stopTaskRuntimeTargets(cleanupCtx, id, stopTargets, stopReason, stopFailMsg)
 
-		if len(cleanupErrors) > 0 {
-			s.logger.Warn(cleanupMsg+" with errors",
-				zap.String("task_id", id),
-				zap.Int("error_count", len(cleanupErrors)),
-				zap.Duration("duration", time.Since(cleanupStart)))
-		} else {
-			s.logger.Info(cleanupMsg,
-				zap.String("task_id", id),
-				zap.Duration("duration", time.Since(cleanupStart)))
-		}
-		s.signalCleanupDoneForTest()
-	}()
+	cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, stopTargets, envCleanup, failedStops)
+
+	if len(cleanupErrors) > 0 {
+		s.logger.Warn(cleanupMsg+" with errors",
+			zap.String("task_id", id),
+			zap.Int("error_count", len(cleanupErrors)),
+			zap.Duration("duration", time.Since(cleanupStart)))
+	} else {
+		s.logger.Info(cleanupMsg,
+			zap.String("task_id", id),
+			zap.Duration("duration", time.Since(cleanupStart)))
+	}
+	s.signalCleanupDoneForTest()
 }
 
 // isCleanableSessionState reports whether a session has no running agent process
