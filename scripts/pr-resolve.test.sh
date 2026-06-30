@@ -54,3 +54,14 @@ if grep -q "non-review-thread ID in the thread_id position" "$TMP_DIR/stderr"; t
 else
   fail "non-thread id in thread position has clear error"
 fi
+
+empty_file="$TMP_DIR/empty.txt"
+: >"$empty_file"
+if run_invalid_reply 456 PRRT_xyz --body-file "$empty_file"; then
+  fail "empty body file fails"
+fi
+if grep -q "body file is empty" "$TMP_DIR/stderr"; then
+  pass "empty body file has clear error"
+else
+  fail "empty body file has clear error"
+fi

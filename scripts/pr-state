@@ -425,7 +425,7 @@ fetch_review_threads_nodes_json() {
       --slurpfile page <(printf '%s\n' "$page_nodes") \
       '$prev[0] + $page[0]' >"$next_nodes_file"; then
       add_error "review_threads" "failed to merge paginated review threads"
-      rm -f "$next_nodes_file"
+      rm -f "$next_nodes_file" "$nodes_file"
       return 1
     fi
     mv "$next_nodes_file" "$nodes_file"

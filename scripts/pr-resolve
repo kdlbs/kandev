@@ -47,6 +47,11 @@ if [[ "$cmd" == "reply" && ( $# -eq 4 || $# -eq 5 ) ]]; then
     echo "reply expects thread_id after comment_id; got a non-review-thread ID in the thread_id position" >&2
     exit 1
   fi
+  if [[ $# -eq 5 ]]; then
+    [[ "$4" == "--body-file" ]] || usage
+    [[ -f "$5" ]] || { echo "body file not found: $5" >&2; exit 1; }
+    [[ -s "$5" ]] || { echo "body file is empty: $5" >&2; exit 1; }
+  fi
 fi
 
 read -r OWNER REPO < <(gh repo view --json owner,name --jq '"\(.owner.login) \(.name)"')
@@ -154,10 +159,7 @@ case "$cmd" in
     [[ $# -eq 4 || $# -eq 5 ]] || usage
     PR=$1; COMMENT_ID=$2; THREAD_ID=$3
     if [[ $# -eq 5 ]]; then
-      [[ "$4" == "--body-file" ]] || usage
-      [[ -f "$5" ]] || { echo "body file not found: $5" >&2; exit 1; }
       BODY=$(<"$5")
-      [[ -n "$BODY" ]] || { echo "body file is empty: $5" >&2; exit 1; }
     else
       BODY=$4
     fi
