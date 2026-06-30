@@ -42,6 +42,7 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 		Prompt:              req.Prompt,
 		PollIntervalSeconds: req.PollIntervalSeconds,
 		MaxInflightTasks:    req.MaxInflightTasks,
+		SortBy:              req.SortBy,
 		Enabled:             true,
 	}
 	if req.Enabled != nil {
@@ -96,6 +97,9 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 		return nil, err
 	}
 	if err := validateMaxInflightTasks(w.MaxInflightTasks); err != nil {
+		return nil, err
+	}
+	if err := validateSortBy(w.SortBy); err != nil {
 		return nil, err
 	}
 	if err := s.store.UpdateIssueWatch(ctx, w); err != nil {
@@ -185,6 +189,11 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*Linear
 		}
 		out = append(out, &issue)
 	}
+	// Order dispatch so the most important issues win the in-flight slots.
+	// ponytail: only the first issueWatchSearchPageSize unseen issues (by
+	// Linear's updatedAt asc) are fetched, so this sorts within that page —
+	// fetch-all-then-sort if a watch's backlog routinely exceeds the page.
+	sortIssues(out, w.SortBy)
 	return out, nil
 }
 
@@ -260,7 +269,21 @@ func validateIssueWatchCreate(req *CreateIssueWatchRequest) error {
 	if err := validateMaxInflightTasks(req.MaxInflightTasks); err != nil {
 		return err
 	}
+	if err := validateSortBy(req.SortBy); err != nil {
+		return err
+	}
 	return nil
+}
+
+// validateSortBy rejects sort keys outside the known wire set. The empty value
+// (Linear default order) is allowed.
+func validateSortBy(v IssueSortBy) error {
+	switch v {
+	case SortByDefault, SortByPriorityDesc, SortByPriorityAsc,
+		SortByCreatedDesc, SortByCreatedAsc, SortByUpdatedDesc, SortByUpdatedAsc:
+		return nil
+	}
+	return fmt.Errorf("%w: invalid sortBy %q", ErrInvalidConfig, v)
 }
 
 // validateMaxInflightTasks rejects non-positive caps. A nil pointer is
@@ -394,5 +417,8 @@ func applyIssueWatchPatch(w *IssueWatch, req *UpdateIssueWatchRequest) {
 	// leaves the cap intact. Present+null clears the cap; present+int sets it.
 	if req.MaxInflightTasks.Present {
 		w.MaxInflightTasks = req.MaxInflightTasks.Value
+	}
+	if req.SortBy != nil {
+		w.SortBy = *req.SortBy
 	}
 }

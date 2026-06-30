@@ -2,12 +2,14 @@ import { describe, it, expect } from "vitest";
 
 import {
   buildWatchPayload,
+  formStateFromWatch,
   isWatchFormReady,
   makeEmptyForm,
   maxInflightTasksString,
   parseMaxInflightTasks,
   type FormState,
 } from "./linear-issue-watch-form";
+import type { LinearIssueWatch } from "@/lib/types/linear";
 
 describe("parseMaxInflightTasks", () => {
   it("treats blank / whitespace as uncapped (null)", () => {
@@ -55,6 +57,26 @@ function readyForm(overrides: Partial<FormState> = {}): FormState {
   };
 }
 
+// Builds a FormState from a minimal watch so we can assert how stored fields
+// (here, sortBy) round-trip through formStateFromWatch.
+function watchForm(overrides: Partial<LinearIssueWatch>): FormState {
+  return formStateFromWatch({
+    id: "w-1",
+    workspaceId: "ws-1",
+    workflowId: "wf-1",
+    workflowStepId: "step-1",
+    filter: {},
+    agentProfileId: "",
+    executorProfileId: "",
+    prompt: "do the thing",
+    enabled: true,
+    pollIntervalSeconds: 300,
+    createdAt: "",
+    updatedAt: "",
+    ...overrides,
+  });
+}
+
 describe("isWatchFormReady", () => {
   it("is true for a complete form with a valid cap", () => {
     expect(isWatchFormReady(readyForm({ maxInflightTasks: "5" }))).toBe(true);
@@ -87,5 +109,24 @@ describe("buildWatchPayload", () => {
 
   it("returns null when the cap is invalid", () => {
     expect(buildWatchPayload(readyForm({ maxInflightTasks: "-1" }))).toBeNull();
+  });
+
+  it("carries the form's sortBy through to the payload", () => {
+    const payload = buildWatchPayload(readyForm({ sortBy: "created_desc" }));
+    expect(payload?.sortBy).toBe("created_desc");
+  });
+});
+
+describe("sortBy form mapping", () => {
+  it("defaults new watches to most-important-first", () => {
+    expect(makeEmptyForm("ws-1").sortBy).toBe("priority");
+  });
+
+  it("maps a stored sortBy through from the watch", () => {
+    expect(watchForm({ sortBy: "updated_asc" }).sortBy).toBe("updated_asc");
+  });
+
+  it("falls back to the empty default for a legacy watch with no sortBy", () => {
+    expect(watchForm({}).sortBy).toBe("");
   });
 });

@@ -84,9 +84,25 @@ type LinearIssue struct {
 	CreatorName   string                `json:"creatorName,omitempty"`
 	CreatorIcon   string                `json:"creatorIcon,omitempty"`
 	Updated       string                `json:"updated,omitempty"`
+	Created       string                `json:"created,omitempty"` // createdAt timestamp from Linear
 	URL           string                `json:"url"`
 	States        []LinearWorkflowState `json:"states"`
 }
+
+// IssueSortBy selects the order in which a watch's matched issues are published
+// (and therefore dispatched) under the per-watch in-flight cap. The empty value
+// preserves Linear's API order (updatedAt asc).
+type IssueSortBy string
+
+const (
+	SortByDefault      IssueSortBy = ""             // preserve Linear API order (updatedAt asc)
+	SortByPriorityDesc IssueSortBy = "priority"     // most important first: urgent>high>medium>low>none
+	SortByPriorityAsc  IssueSortBy = "priority_asc" // least important first
+	SortByCreatedDesc  IssueSortBy = "created_desc" // newest created first
+	SortByCreatedAsc   IssueSortBy = "created_asc"  // oldest created first
+	SortByUpdatedDesc  IssueSortBy = "updated_desc" // most recently updated first
+	SortByUpdatedAsc   IssueSortBy = "updated_asc"  // least recently updated first
+)
 
 // LinearWorkflowState is one of the team workflow states an issue can be
 // transitioned into. Unlike Jira transitions (which are edges), Linear states
@@ -201,8 +217,10 @@ type IssueWatch struct {
 	// MaxInflightTasks caps how many open watcher-created tasks this watch can
 	// hold at once. nil = uncapped. Values <= 0 are rejected at the API layer.
 	// See docs/specs/throttle-watcher-fanout/spec.md for the open-task definition.
-	MaxInflightTasks *int       `json:"maxInflightTasks,omitempty" db:"max_inflight_tasks"`
-	LastPolledAt     *time.Time `json:"lastPolledAt,omitempty" db:"last_polled_at"`
+	MaxInflightTasks *int `json:"maxInflightTasks,omitempty" db:"max_inflight_tasks"`
+	// SortBy sets the dispatch order for matched issues; empty = Linear default order.
+	SortBy       IssueSortBy `json:"sortBy,omitempty" db:"sort_by"`
+	LastPolledAt *time.Time  `json:"lastPolledAt,omitempty" db:"last_polled_at"`
 	// LastError / LastErrorAt are stamped when the dispatch pipeline self-
 	// heals the watcher (e.g. the bound agent profile was soft-deleted).
 	// Empty for a healthy watcher.
@@ -255,6 +273,7 @@ type CreateIssueWatchRequest struct {
 	Prompt              string       `json:"prompt"`
 	PollIntervalSeconds int          `json:"pollIntervalSeconds"`
 	MaxInflightTasks    *int         `json:"maxInflightTasks,omitempty"`
+	SortBy              IssueSortBy  `json:"sortBy,omitempty"`
 	Enabled             *bool        `json:"enabled,omitempty"`
 }
 
@@ -275,4 +294,7 @@ type UpdateIssueWatchRequest struct {
 	// leaves the cap unchanged (a plain *int can't tell "omitted" from
 	// "null"). Absent = unchanged, null = uncapped, positive int = cap.
 	MaxInflightTasks optional.Int `json:"maxInflightTasks"`
+	// SortBy is a pointer for tri-state PATCH semantics: nil means "omitted,
+	// leave unchanged"; a non-nil pointer (including "") sets the value.
+	SortBy *IssueSortBy `json:"sortBy,omitempty"`
 }

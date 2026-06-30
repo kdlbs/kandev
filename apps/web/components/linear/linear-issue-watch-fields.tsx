@@ -1,14 +1,22 @@
 "use client";
 
+import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { Badge } from "@kandev/ui/badge";
+import { Label } from "@kandev/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import {
   listLinearLabels,
   listLinearStates,
   listLinearTeams,
   listLinearUsers,
 } from "@/lib/api/domains/linear-api";
-import { PRIORITY_OPTIONS, type LinearPriority } from "./linear-issue-watch-form";
+import {
+  PRIORITY_OPTIONS,
+  SORT_BY_OPTIONS,
+  type FormState,
+  type LinearPriority,
+} from "./linear-issue-watch-form";
 import type { LinearLabel, LinearTeam, LinearUser, LinearWorkflowState } from "@/lib/types/linear";
 
 // useTeamsAndStates loads the team list once Linear is configured, plus the
@@ -216,6 +224,49 @@ export function LabelMultiSelect({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+// Radix SelectItem rejects an empty-string value, so the "Default (Linear
+// order)" option uses a sentinel in the dropdown that we translate back to ""
+// (FormState's empty default) at the Select boundary.
+const SORT_BY_DEFAULT_SENTINEL = "__default__";
+
+export function SortByField({
+  form,
+  setForm,
+}: {
+  form: FormState;
+  setForm: React.Dispatch<React.SetStateAction<FormState>>;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label>Dispatch order</Label>
+      <p className="text-xs text-muted-foreground">
+        When the in-flight cap is reached, issues are dispatched in this order so the most important
+        ones run first.
+      </p>
+      <Select
+        value={form.sortBy || SORT_BY_DEFAULT_SENTINEL}
+        onValueChange={(v) =>
+          setForm((p) => ({
+            ...p,
+            sortBy: (v === SORT_BY_DEFAULT_SENTINEL ? "" : v) as FormState["sortBy"],
+          }))
+        }
+      >
+        <SelectTrigger className="cursor-pointer">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {SORT_BY_OPTIONS.map((o) => (
+            <SelectItem key={o.value || SORT_BY_DEFAULT_SENTINEL} value={o.value || SORT_BY_DEFAULT_SENTINEL}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }

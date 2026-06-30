@@ -67,6 +67,9 @@ const createTablesSQL = `
 		-- NULL = uncapped. Positive integer = cap. Values <= 0 are rejected at
 		-- the API layer. See docs/specs/throttle-watcher-fanout/.
 		max_inflight_tasks INTEGER DEFAULT 5,
+		-- Dispatch order for matched issues under the in-flight cap.
+		-- '' = Linear default order (updatedAt asc). See linear/issue_sort.go.
+		sort_by TEXT NOT NULL DEFAULT '',
 		last_polled_at DATETIME,
 		last_error TEXT NOT NULL DEFAULT '',
 		last_error_at DATETIME,
@@ -101,6 +104,9 @@ func (s *Store) initSchema() error {
 	if err := s.addMaxInflightTasksColumn(); err != nil {
 		return err
 	}
+	if err := s.addIssueWatchSortByColumn(); err != nil {
+		return err
+	}
 	if err := s.addIssueWatchLastErrorColumns(); err != nil {
 		return err
 	}
@@ -124,6 +130,27 @@ func (s *Store) addMaxInflightTasksColumn() error {
 	}
 	if _, err := s.db.Exec(`ALTER TABLE linear_issue_watches ADD COLUMN max_inflight_tasks INTEGER DEFAULT 5`); err != nil {
 		return fmt.Errorf("add max_inflight_tasks column: %w", err)
+	}
+	return nil
+}
+
+// addIssueWatchSortByColumn brings older databases up to the current schema by
+// adding the sort_by column to linear_issue_watches when missing. Existing
+// rows backfill to ” (Linear default order). Fresh installs hit the
+// column-already-present branch since createTablesSQL declares it.
+func (s *Store) addIssueWatchSortByColumn() error {
+	cols, err := s.tableColumns("linear_issue_watches")
+	if err != nil {
+		return err
+	}
+	if len(cols) == 0 {
+		return nil
+	}
+	if _, ok := cols["sort_by"]; ok {
+		return nil
+	}
+	if _, err := s.db.Exec(`ALTER TABLE linear_issue_watches ADD COLUMN sort_by TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("add sort_by column: %w", err)
 	}
 	return nil
 }

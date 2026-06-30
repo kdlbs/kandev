@@ -29,6 +29,7 @@ import {
 import {
   LabelMultiSelect,
   PriorityMultiSelect,
+  SortByField,
   StateMultiSelect,
   useTeamsAndStates,
 } from "./linear-issue-watch-fields";
@@ -515,6 +516,7 @@ function SettingsFields({
         />
       </div>
       <MaxInflightTasksField form={form} setForm={setForm} />
+      <SortByField form={form} setForm={setForm} />
       <div className="flex items-center justify-between">
         <div>
           <Label>Enabled</Label>

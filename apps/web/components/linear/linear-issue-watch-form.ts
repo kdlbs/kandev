@@ -1,4 +1,9 @@
-import type { LinearIssueWatch, LinearSearchFilter, LinearUser } from "@/lib/types/linear";
+import type {
+  LinearIssueSortBy,
+  LinearIssueWatch,
+  LinearSearchFilter,
+  LinearUser,
+} from "@/lib/types/linear";
 import { DEFAULT_LINEAR_ISSUE_WATCH_PROMPT } from "./linear-issue-watch-placeholders";
 
 export const ASSIGNED_ANY = "__any__";
@@ -14,6 +19,19 @@ export const PRIORITY_OPTIONS: { value: LinearPriority; label: string }[] = [
   { value: 3, label: "Medium" },
   { value: 4, label: "Low" },
   { value: 0, label: "No priority" },
+];
+
+// Dispatch order applied when the in-flight cap limits how many matched issues
+// run at once. Order matters — most useful first; the empty value is Linear's
+// natural (recently-updated) order.
+export const SORT_BY_OPTIONS: { value: LinearIssueSortBy; label: string }[] = [
+  { value: "priority", label: "Priority (high → low)" },
+  { value: "priority_asc", label: "Priority (low → high)" },
+  { value: "created_desc", label: "Created (newest first)" },
+  { value: "created_asc", label: "Created (oldest first)" },
+  { value: "updated_desc", label: "Updated (recently updated first)" },
+  { value: "updated_asc", label: "Updated (least recently updated first)" },
+  { value: "", label: "Default (Linear order)" },
 ];
 
 export interface FormState {
@@ -41,6 +59,8 @@ export interface FormState {
    * back to a number.
    */
   maxInflightTasks: string;
+  /** Dispatch order under the in-flight cap; empty = Linear's natural order. */
+  sortBy: LinearIssueSortBy;
 }
 
 export function makeEmptyForm(workspaceId: string): FormState {
@@ -63,6 +83,7 @@ export function makeEmptyForm(workspaceId: string): FormState {
     enabled: true,
     pollInterval: 300,
     maxInflightTasks: "5",
+    sortBy: "priority",
   };
 }
 
@@ -91,6 +112,7 @@ export function formStateFromWatch(w: LinearIssueWatch): FormState {
     enabled: w.enabled,
     pollInterval: w.pollIntervalSeconds,
     maxInflightTasks: maxInflightTasksString(w.maxInflightTasks),
+    sortBy: w.sortBy ?? "",
   };
 }
 
@@ -153,6 +175,7 @@ export function buildWatchPayload(form: FormState): {
   enabled: boolean;
   pollIntervalSeconds: number;
   maxInflightTasks: number | null;
+  sortBy: LinearIssueSortBy;
 } | null {
   const maxInflight = parseMaxInflightTasks(form.maxInflightTasks);
   if (maxInflight === "invalid") return null;
@@ -166,6 +189,7 @@ export function buildWatchPayload(form: FormState): {
     enabled: form.enabled,
     pollIntervalSeconds: form.pollInterval,
     maxInflightTasks: maxInflight,
+    sortBy: form.sortBy,
   };
 }
 

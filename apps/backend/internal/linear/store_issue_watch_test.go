@@ -22,6 +22,7 @@ func TestStore_IssueWatch_CreateGet(t *testing.T) {
 	ctx := context.Background()
 
 	w := newTestIssueWatch("ws-1")
+	w.SortBy = SortByPriorityDesc
 	if err := store.CreateIssueWatch(ctx, w); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -48,6 +49,9 @@ func TestStore_IssueWatch_CreateGet(t *testing.T) {
 	// Filter survives the JSON round-trip.
 	if got.Filter.TeamKey != "ENG" || len(got.Filter.StateIDs) != 1 || got.Filter.StateIDs[0] != "state-started" {
 		t.Errorf("filter round-trip failed: %+v", got.Filter)
+	}
+	if got.SortBy != SortByPriorityDesc {
+		t.Errorf("sort_by round-trip failed: %q", got.SortBy)
 	}
 }
 

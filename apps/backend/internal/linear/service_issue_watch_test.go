@@ -222,6 +222,51 @@ func TestService_IssueWatch_MaxInflightTasks(t *testing.T) {
 	}
 }
 
+func TestValidateSortBy(t *testing.T) {
+	for _, ok := range []IssueSortBy{
+		SortByDefault, SortByPriorityDesc, SortByPriorityAsc,
+		SortByCreatedDesc, SortByCreatedAsc, SortByUpdatedDesc, SortByUpdatedAsc,
+	} {
+		if err := validateSortBy(ok); err != nil {
+			t.Errorf("validateSortBy(%q) rejected a known value: %v", ok, err)
+		}
+	}
+	if err := validateSortBy(IssueSortBy("bogus")); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("expected ErrInvalidConfig for unknown sortBy, got %v", err)
+	}
+}
+
+func TestService_IssueWatch_SortByRoundTrips(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+
+	created, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		Filter: SearchFilter{TeamKey: "ENG"}, SortBy: SortByPriorityDesc,
+	})
+	if err != nil {
+		t.Fatalf("create with sortBy: %v", err)
+	}
+	if created.SortBy != SortByPriorityDesc {
+		t.Fatalf("sortBy not set on create: %q", created.SortBy)
+	}
+	got, err := f.svc.GetIssueWatch(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.SortBy != SortByPriorityDesc {
+		t.Fatalf("sortBy did not round-trip: %q", got.SortBy)
+	}
+
+	// Create with an unknown sortBy is rejected.
+	if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		Filter: SearchFilter{TeamKey: "ENG"}, SortBy: IssueSortBy("bogus"),
+	}); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("expected ErrInvalidConfig for unknown sortBy on create, got %v", err)
+	}
+}
+
 func TestValidateFilterBounds_RejectsNonFiniteAndNegativeEstimates(t *testing.T) {
 	nan := math.NaN()
 	posInf := math.Inf(1)
