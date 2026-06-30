@@ -19,11 +19,12 @@ func (f *fakeRunQueue) QueueRun(_ context.Context, req QueueRunRequest) error {
 
 // fakePrimary returns a fixed agent profile id for any step.
 type fakePrimary struct {
-	id         string
-	err        error
-	taskStepID string
-	stepID     *string
-	taskID     *string
+	id            string
+	err           error
+	taskStepID    string
+	stepID        *string
+	taskID        *string
+	resolveTaskID *string
 }
 
 func (f fakePrimary) PrimaryAgentProfileID(_ context.Context, stepID, taskID string) (string, error) {
@@ -47,19 +48,20 @@ func (f fakePrimary) PrimaryAgentProfileIDForTask(_ context.Context, taskID stri
 }
 
 func (f fakePrimary) WorkflowStepIDForTask(_ context.Context, taskID string) (string, error) {
-	if f.taskID != nil {
-		*f.taskID = taskID
+	if f.resolveTaskID != nil {
+		*f.resolveTaskID = taskID
 	}
 	return f.taskStepID, f.err
 }
 
 // fakeParticipants returns a static slice for any step.
 type fakeParticipants struct {
-	list       []ParticipantInfo
-	err        error
-	taskStepID string
-	stepID     *string
-	taskID     *string
+	list          []ParticipantInfo
+	err           error
+	taskStepID    string
+	stepID        *string
+	taskID        *string
+	resolveTaskID *string
 }
 
 func (f fakeParticipants) ListStepParticipants(_ context.Context, stepID, taskID string) ([]ParticipantInfo, error) {
@@ -73,8 +75,8 @@ func (f fakeParticipants) ListStepParticipants(_ context.Context, stepID, taskID
 }
 
 func (f fakeParticipants) WorkflowStepIDForTask(_ context.Context, taskID string) (string, error) {
-	if f.taskID != nil {
-		*f.taskID = taskID
+	if f.resolveTaskID != nil {
+		*f.resolveTaskID = taskID
 	}
 	return f.taskStepID, f.err
 }
@@ -244,14 +246,16 @@ func TestQueueRunCallback_OnCommentCustomPayloadsKeepActionSalt(t *testing.T) {
 func TestQueueRunCallback_PrimaryUsesResolvedTargetTask(t *testing.T) {
 	q := &fakeRunQueue{}
 	var resolvedStepID string
-	var resolvedTaskID string
+	var lookupTaskID string
+	var stepResolverTaskID string
 	cb := QueueRunCallback{
 		Adapter: q,
 		Primary: fakePrimary{
-			id:         "agent-for-target-task",
-			taskStepID: "target-step",
-			stepID:     &resolvedStepID,
-			taskID:     &resolvedTaskID,
+			id:            "agent-for-target-task",
+			taskStepID:    "target-step",
+			stepID:        &resolvedStepID,
+			taskID:        &lookupTaskID,
+			resolveTaskID: &stepResolverTaskID,
 		},
 	}
 	in := newQueueRunInput("primary", "target-task")
@@ -263,8 +267,11 @@ func TestQueueRunCallback_PrimaryUsesResolvedTargetTask(t *testing.T) {
 	if len(q.calls) != 1 {
 		t.Fatalf("expected 1 queue run call, got %d", len(q.calls))
 	}
-	if resolvedTaskID != "target-task" {
-		t.Fatalf("primary resolved against task %q, want target-task", resolvedTaskID)
+	if stepResolverTaskID != "target-task" {
+		t.Fatalf("target step resolved against task %q, want target-task", stepResolverTaskID)
+	}
+	if lookupTaskID != "target-task" {
+		t.Fatalf("primary resolved against task %q, want target-task", lookupTaskID)
 	}
 	if resolvedStepID != "" {
 		t.Fatalf("cross-task primary should use target-task resolver, got step %q", resolvedStepID)
@@ -318,13 +325,15 @@ func TestQueueRunCallback_ParticipantRoleUsesResolvedTargetStep(t *testing.T) {
 	q := &fakeRunQueue{}
 	var listedStepID string
 	var listedTaskID string
+	var stepResolverTaskID string
 	parts := fakeParticipants{
 		list: []ParticipantInfo{
 			{ID: "p-target", Role: "reviewer", AgentProfileID: "rev-target"},
 		},
-		taskStepID: "target-step",
-		stepID:     &listedStepID,
-		taskID:     &listedTaskID,
+		taskStepID:    "target-step",
+		stepID:        &listedStepID,
+		taskID:        &listedTaskID,
+		resolveTaskID: &stepResolverTaskID,
 	}
 	cb := QueueRunCallback{Adapter: q, Participants: parts}
 	in := newQueueRunInput("participant_role:reviewer", "target-task")
@@ -335,6 +344,9 @@ func TestQueueRunCallback_ParticipantRoleUsesResolvedTargetStep(t *testing.T) {
 	}
 	if len(q.calls) != 1 {
 		t.Fatalf("expected 1 queue run call, got %d", len(q.calls))
+	}
+	if stepResolverTaskID != "target-task" {
+		t.Fatalf("target step resolved against task %q, want target-task", stepResolverTaskID)
 	}
 	if listedStepID != "target-step" {
 		t.Fatalf("participants listed for step %q, want target-step", listedStepID)

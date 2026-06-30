@@ -318,7 +318,7 @@ func queueActionDigest(in ActionInput) string {
 }
 
 func queueRunPayload(in ActionInput, actionPayload map[string]any, targetTaskID string) map[string]any {
-	out := make(map[string]any, len(actionPayload)+3)
+	out := make(map[string]any, len(actionPayload))
 	for k, v := range actionPayload {
 		out[k] = v
 	}
