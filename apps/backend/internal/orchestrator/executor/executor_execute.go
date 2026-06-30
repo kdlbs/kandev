@@ -129,44 +129,70 @@ func (e *Executor) writeTaskReviewStateIfNoWorkingSessions(ctx context.Context, 
 		return
 	}
 
-	if task, err := e.repo.GetTask(ctx, taskID); err == nil && task != nil && task.AssigneeAgentProfileID != "" {
-		e.logger.Debug("skipping failed-start task REVIEW state for office task",
-			zap.String("task_id", taskID),
-			zap.String("session_id", failedSessionID))
+	if e.shouldSkipFailedStartReviewForTask(ctx, taskID, failedSessionID) {
 		return
-	} else if err != nil {
+	}
+	if e.failedSessionStillWorkingOrUnknown(ctx, taskID, failedSessionID) {
+		return
+	}
+	if e.hasOtherWorkingSessions(ctx, taskID, failedSessionID) {
+		return
+	}
+	if updateErr := e.updateTaskState(ctx, taskID, v1.TaskStateReview); updateErr != nil {
+		e.logger.Warn("failed to update task state to REVIEW after start error",
+			zap.String("task_id", taskID),
+			zap.Error(updateErr))
+	}
+}
+
+func (e *Executor) shouldSkipFailedStartReviewForTask(ctx context.Context, taskID, failedSessionID string) bool {
+	task, err := e.repo.GetTask(ctx, taskID)
+	if err != nil {
 		e.logger.Warn("failed to load task before failed-start REVIEW state reconcile",
 			zap.String("task_id", taskID),
 			zap.String("session_id", failedSessionID),
 			zap.Error(err))
-		return
+		return true
 	}
-
-	if failedSessionID != "" {
-		session, err := e.repo.GetTaskSession(ctx, failedSessionID)
-		if err != nil {
-			e.logger.Warn("failed to load failed session before failed-start REVIEW state reconcile",
-				zap.String("task_id", taskID),
-				zap.String("session_id", failedSessionID),
-				zap.Error(err))
-			return
-		}
-		if session != nil && isRuntimeWorkingSessionState(session.State) {
-			e.logger.Debug("skipping failed-start task REVIEW state because failed session is active again",
-				zap.String("task_id", taskID),
-				zap.String("session_id", failedSessionID),
-				zap.String("session_state", string(session.State)))
-			return
-		}
+	if task != nil && task.AssigneeAgentProfileID != "" {
+		e.logger.Debug("skipping failed-start task REVIEW state for office task",
+			zap.String("task_id", taskID),
+			zap.String("session_id", failedSessionID))
+		return true
 	}
+	return false
+}
 
+func (e *Executor) failedSessionStillWorkingOrUnknown(ctx context.Context, taskID, failedSessionID string) bool {
+	if failedSessionID == "" {
+		return false
+	}
+	session, err := e.repo.GetTaskSession(ctx, failedSessionID)
+	if err != nil {
+		e.logger.Warn("failed to load failed session before failed-start REVIEW state reconcile",
+			zap.String("task_id", taskID),
+			zap.String("session_id", failedSessionID),
+			zap.Error(err))
+		return true
+	}
+	if session != nil && isRuntimeWorkingSessionState(session.State) {
+		e.logger.Debug("skipping failed-start task REVIEW state because failed session is active again",
+			zap.String("task_id", taskID),
+			zap.String("session_id", failedSessionID),
+			zap.String("session_state", string(session.State)))
+		return true
+	}
+	return false
+}
+
+func (e *Executor) hasOtherWorkingSessions(ctx context.Context, taskID, failedSessionID string) bool {
 	sessions, err := e.repo.ListTaskSessions(ctx, taskID)
 	if err != nil {
 		e.logger.Warn("failed to list task sessions before failed-start REVIEW state reconcile",
 			zap.String("task_id", taskID),
 			zap.String("session_id", failedSessionID),
 			zap.Error(err))
-		return
+		return true
 	}
 	for _, session := range sessions {
 		if session == nil {
@@ -180,14 +206,10 @@ func (e *Executor) writeTaskReviewStateIfNoWorkingSessions(ctx context.Context, 
 				zap.String("task_id", taskID),
 				zap.String("failed_session_id", failedSessionID),
 				zap.String("blocking_session_id", session.ID))
-			return
+			return true
 		}
 	}
-	if updateErr := e.updateTaskState(ctx, taskID, v1.TaskStateReview); updateErr != nil {
-		e.logger.Warn("failed to update task state to REVIEW after start error",
-			zap.String("task_id", taskID),
-			zap.Error(updateErr))
-	}
+	return false
 }
 
 func isRuntimeWorkingSessionState(state models.TaskSessionState) bool {
