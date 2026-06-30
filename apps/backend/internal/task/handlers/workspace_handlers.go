@@ -167,14 +167,22 @@ func (h *WorkspaceHandlers) httpDeleteWorkspace(c *gin.Context) {
 		c.Param("id"),
 		body.ConfirmName,
 	); err != nil {
-		if errors.Is(err, service.ErrWorkspaceConfirmNameMismatch) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		handleNotFound(c, h.logger, err, "workspace not found")
+		h.handleHTTPDeleteWorkspaceError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
+}
+
+func (h *WorkspaceHandlers) handleHTTPDeleteWorkspaceError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, service.ErrWorkspaceConfirmNameMismatch):
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	case isNotFound(err):
+		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+	default:
+		h.logger.Error("failed to delete workspace", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "workspace not deleted"})
+	}
 }
 
 // WS handlers
@@ -293,11 +301,19 @@ func (h *WorkspaceHandlers) wsDeleteWorkspace(ctx context.Context, msg *ws.Messa
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "confirm_name is required", nil)
 	}
 	if err := h.service.DeleteWorkspaceWithConfirmName(ctx, req.ID, req.ConfirmName); err != nil {
-		if errors.Is(err, service.ErrWorkspaceConfirmNameMismatch) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
-		}
+		return h.wsDeleteWorkspaceError(msg, err)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
+}
+
+func (h *WorkspaceHandlers) wsDeleteWorkspaceError(msg *ws.Message, err error) (*ws.Message, error) {
+	switch {
+	case errors.Is(err, service.ErrWorkspaceConfirmNameMismatch):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	case isNotFound(err):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Workspace not found", nil)
+	default:
 		h.logger.Error("failed to delete workspace", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to delete workspace", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
 }

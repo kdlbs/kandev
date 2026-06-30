@@ -134,9 +134,9 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 	if err != nil {
 		return fmt.Errorf("list workspace workflows: %w", err)
 	}
-	// Tasks and workflows have no workspace_id FK, so the unconfirmed websocket
-	// delete path still needs to remove those rows explicitly before the
-	// workspace row.
+	// Tasks and workflows have no workspace_id FK, so the unconfirmed
+	// office-service delete path still needs to remove those rows explicitly
+	// before the workspace row.
 	for _, task := range tasks {
 		if task == nil || task.ID == "" {
 			continue

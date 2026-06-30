@@ -25,6 +25,7 @@ type workspaceDeleteRepo struct {
 	cascadeName      string
 	cascadeTasks     []*models.Task
 	cascadeWorkflows []*models.Workflow
+	cascadeErr       error
 	getCalls         int
 	getErr           error
 }
@@ -46,6 +47,9 @@ func (r *workspaceDeleteRepo) DeleteWorkspaceCascadeWithName(_ context.Context, 
 	r.cascadeCalled = true
 	r.cascadeID = id
 	r.cascadeName = name
+	if r.cascadeErr != nil {
+		return nil, nil, r.cascadeErr
+	}
 	return r.cascadeTasks, r.cascadeWorkflows, nil
 }
 
@@ -205,6 +209,45 @@ func TestHTTPDeleteWorkspaceDeletesWhenConfirmNameMatches(t *testing.T) {
 	require.Equal(t, 1, repo.getCalls, "confirmed delete should fetch the workspace once")
 }
 
+func TestHTTPDeleteWorkspaceReturnsDeleteFailureWhenCascadeFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &workspaceDeleteRepo{cascadeErr: errors.New("cleanup failed")}
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	svc := service.NewService(service.Repos{
+		Workspaces:       repo,
+		Tasks:            repo,
+		TaskRepos:        repo,
+		Workflows:        repo,
+		Messages:         repo,
+		Turns:            repo,
+		Sessions:         repo,
+		GitSnapshots:     repo,
+		RepoEntities:     repo,
+		Executors:        repo,
+		Environments:     repo,
+		TaskEnvironments: repo,
+		Reviews:          repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+
+	h := NewWorkspaceHandlers(svc, log)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(
+		http.MethodDelete,
+		"/api/v1/workspaces/ws-1",
+		strings.NewReader(`{"confirm_name":"Delete Me"}`),
+	)
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Params = gin.Params{{Key: "id", Value: "ws-1"}}
+
+	h.httpDeleteWorkspace(c)
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+	require.JSONEq(t, `{"error":"workspace not deleted"}`, rec.Body.String())
+	require.True(t, repo.cascadeCalled, "handler should surface cascade failures separately")
+	require.Equal(t, 1, repo.getCalls, "confirmed delete should fetch the workspace once")
+}
+
 func TestWSDeleteWorkspaceRequiresConfirmName(t *testing.T) {
 	repo := &workspaceDeleteRepo{}
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
@@ -236,6 +279,42 @@ func TestWSDeleteWorkspaceRequiresConfirmName(t *testing.T) {
 	require.Equal(t, 0, repo.getCalls, "missing confirm_name must not look up the workspace")
 	require.False(t, repo.deleteCalled, "missing confirm_name must not delete")
 	require.False(t, repo.cascadeCalled, "missing confirm_name must not cascade")
+}
+
+func TestWSDeleteWorkspaceReturnsNotFoundWhenWorkspaceMissing(t *testing.T) {
+	repo := &workspaceDeleteRepo{getErr: errors.New("workspace not found")}
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	svc := service.NewService(service.Repos{
+		Workspaces:       repo,
+		Tasks:            repo,
+		TaskRepos:        repo,
+		Workflows:        repo,
+		Messages:         repo,
+		Turns:            repo,
+		Sessions:         repo,
+		GitSnapshots:     repo,
+		RepoEntities:     repo,
+		Executors:        repo,
+		Environments:     repo,
+		TaskEnvironments: repo,
+		Reviews:          repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+
+	h := NewWorkspaceHandlers(svc, log)
+	req, err := ws.NewRequest("req-1", ws.ActionWorkspaceDelete, map[string]string{
+		"id":           "ws-missing",
+		"confirm_name": "Delete Me",
+	})
+	require.NoError(t, err)
+
+	resp, err := h.wsDeleteWorkspace(context.Background(), req)
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, resp.Type)
+	require.Contains(t, string(resp.Payload), string(ws.ErrorCodeNotFound))
+	require.Contains(t, string(resp.Payload), "Workspace not found")
+	require.Equal(t, 1, repo.getCalls, "handler should let service resolve the workspace")
+	require.False(t, repo.cascadeCalled, "missing workspace must not cascade")
 }
 
 func TestWSDeleteWorkspaceDeletesWhenConfirmNameMatches(t *testing.T) {
