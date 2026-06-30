@@ -50,6 +50,18 @@ type InnerFenceScan = {
   nestedFenceCount: number;
 };
 
+type NestedFenceStep = {
+  failed: boolean;
+  nextIndex: number;
+};
+
+type NestedFenceContext = {
+  closeIndex: number;
+  lines: string[];
+  scan: InnerFenceScan;
+  wrapperOpenCount: number;
+};
+
 function matchingCloseLength(line: string, openCount: number): number | null {
   return pureCloseLength(line, openCount) ?? gluedCloseLength(line, openCount);
 }
@@ -108,6 +120,62 @@ function taggedNestedFenceClose(
   return taggedClose;
 }
 
+function bareNestedFenceClose(
+  lines: string[],
+  startIndex: number,
+  closeIndex: number,
+  bareOpenCount: number,
+  wrapperOpenCount: number,
+) {
+  const bareClose = findBareNestedClose(
+    lines,
+    startIndex,
+    closeIndex,
+    bareOpenCount,
+    wrapperOpenCount,
+  );
+  if (bareOpenCount < wrapperOpenCount && (bareClose?.closeCount ?? 0) < wrapperOpenCount) {
+    return null;
+  }
+  return bareClose;
+}
+
+function scanTaggedNestedFence(
+  context: NestedFenceContext,
+  index: number,
+  taggedOpenCount: number,
+): NestedFenceStep {
+  const taggedClose = taggedNestedFenceClose(
+    context.lines,
+    index,
+    context.closeIndex,
+    taggedOpenCount,
+    context.wrapperOpenCount,
+  );
+  if (!taggedClose) {
+    return { failed: taggedOpenCount >= context.wrapperOpenCount, nextIndex: index };
+  }
+  noteNestedFence(context.scan, taggedOpenCount, taggedClose.closeCount);
+  return { failed: false, nextIndex: taggedClose.closeIndex };
+}
+
+function scanBareNestedFence(
+  context: NestedFenceContext,
+  index: number,
+  bareOpenCount: number,
+): NestedFenceStep {
+  const bareClose = bareNestedFenceClose(
+    context.lines,
+    index,
+    context.closeIndex,
+    bareOpenCount,
+    context.wrapperOpenCount,
+  );
+  if (!bareClose) return { failed: bareOpenCount >= context.wrapperOpenCount, nextIndex: index };
+  noteNestedFence(context.scan, bareOpenCount, bareClose.closeCount);
+  return { failed: false, nextIndex: bareClose.closeIndex };
+}
+
 function markdownWrapperInnerFenceInfo(
   lines: string[],
   openIndex: number,
@@ -118,32 +186,29 @@ function markdownWrapperInnerFenceInfo(
     maxInnerPureFence: 0,
     nestedFenceCount: 0,
   };
+  const context: NestedFenceContext = {
+    closeIndex,
+    lines,
+    scan,
+    wrapperOpenCount: openCount,
+  };
 
   for (let index = openIndex + 1; index < closeIndex; index++) {
     const taggedOpener = FENCE_OPENER_LINE_RE.exec(lines[index]);
     const taggedOpenCount = taggedOpener?.[1]?.length;
     if (taggedOpenCount) {
-      const taggedClose = taggedNestedFenceClose(
-        lines,
-        index,
-        closeIndex,
-        taggedOpenCount,
-        openCount,
-      );
-      if (!taggedClose && taggedOpenCount >= openCount) return null;
-      if (!taggedClose) continue;
-      noteNestedFence(scan, taggedOpenCount, taggedClose.closeCount);
-      index = taggedClose.closeIndex;
+      const step = scanTaggedNestedFence(context, index, taggedOpenCount);
+      if (step.failed) return null;
+      index = step.nextIndex;
       continue;
     }
 
     const bareOpener = PURE_FENCE_LINE_RE.exec(lines[index]);
     const bareOpenCount = bareOpener?.[2]?.length;
-    if (bareOpenCount && bareOpenCount >= openCount) {
-      const bareClose = findBareNestedClose(lines, index, closeIndex, bareOpenCount, openCount);
-      if (!bareClose) return null;
-      noteNestedFence(scan, bareOpenCount, bareClose.closeCount);
-      index = bareClose.closeIndex;
+    if (bareOpenCount) {
+      const step = scanBareNestedFence(context, index, bareOpenCount);
+      if (step.failed) return null;
+      index = step.nextIndex;
     }
   }
 
