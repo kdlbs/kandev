@@ -15,6 +15,17 @@ type TaskCreateLastUsedPatch = {
   executor_profile_id?: string | null;
 };
 
+type TaskCreateLastUsedPayload = {
+  repositories?: Array<{
+    repository_id?: string;
+    base_branch?: string;
+    checkout_branch?: string;
+    fresh_branch?: boolean;
+  }>;
+  agent_profile_id?: string;
+  executor_profile_id?: string;
+};
+
 let lastQueuedLastUsed: Partial<TaskCreateLastUsedState> = {};
 const LOCAL_STORAGE_WRITE_EVENT = "localStorage-write";
 const lastUsedDebug = createDebugLogger("task-create:last-used");
@@ -87,6 +98,35 @@ export function syncTaskCreateLastUsed(patch: TaskCreateLastUsedPatch) {
     ...compactTaskCreateLastUsedState(mapTaskCreateLastUsedPatch(patch)),
   };
   lastUsedDebug("overlay-updated", { patch, queued: lastQueuedLastUsed });
+}
+
+export function replaceQueuedTaskCreateLastUsed(patch: TaskCreateLastUsedPatch) {
+  lastQueuedLastUsed = compactTaskCreateLastUsedState(mapTaskCreateLastUsedPatch(patch));
+  lastUsedDebug("overlay-replaced", { patch, queued: lastQueuedLastUsed });
+}
+
+export function queueTaskCreateLastUsedFromPayload(
+  payload: TaskCreateLastUsedPayload | null | undefined,
+) {
+  if (!payload) return;
+  const firstWorkspaceRepo = payload.repositories?.find((repo) => repo.repository_id);
+  replaceQueuedTaskCreateLastUsed({
+    repository_id: firstWorkspaceRepo?.repository_id,
+    branch: firstWorkspaceRepo ? taskCreateLastUsedPayloadBranch(firstWorkspaceRepo) : undefined,
+    agent_profile_id: payload.agent_profile_id,
+    executor_profile_id: payload.executor_profile_id,
+  });
+}
+
+function taskCreateLastUsedPayloadBranch(
+  repo: NonNullable<TaskCreateLastUsedPayload["repositories"]>[number],
+) {
+  if (repo.fresh_branch) return firstNonEmpty(repo.base_branch, repo.checkout_branch);
+  return firstNonEmpty(repo.checkout_branch, repo.base_branch);
+}
+
+function firstNonEmpty(...values: Array<string | undefined>) {
+  return values.find((value) => value) ?? undefined;
 }
 
 /**

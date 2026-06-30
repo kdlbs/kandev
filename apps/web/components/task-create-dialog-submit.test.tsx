@@ -35,13 +35,31 @@ vi.mock("@/lib/services/session-launch-helpers", () => ({
   buildStartRequest: () => ({ request: { taskId: "t", agentProfileId: "a" } }),
 }));
 
-const buildCreateTaskPayloadMock = vi.fn((..._args: unknown[]) => ({
+type BuildCreateTaskPayloadCall = {
+  repositoriesPayload?: Array<{
+    repository_id?: string;
+    base_branch?: string;
+    checkout_branch?: string;
+    fresh_branch?: boolean;
+  }>;
+  agentProfileId: string;
+  executorId: string;
+  executorProfileId: string;
+  withAgent: boolean;
+  trimmedDescription: string;
+};
+
+const buildCreateTaskPayloadMock = vi.fn((args: BuildCreateTaskPayloadCall) => ({
   workflow_step_id: "step-1",
+  repositories: args.repositoriesPayload,
+  agent_profile_id: args.agentProfileId || undefined,
+  executor_id: args.executorId || undefined,
+  executor_profile_id: args.executorProfileId || undefined,
 }));
 const validateCreateInputsMock = vi.fn((..._args: unknown[]) => true);
 vi.mock("@/components/task-create-dialog-helpers", () => ({
   activatePlanMode: vi.fn(),
-  buildCreateTaskPayload: (...args: unknown[]) => buildCreateTaskPayloadMock(...args),
+  buildCreateTaskPayload: (args: BuildCreateTaskPayloadCall) => buildCreateTaskPayloadMock(args),
   buildRepositoriesPayload: () => [],
   findDuplicateRemoteRepo: () => null,
   validateCreateInputs: (...args: unknown[]) => validateCreateInputsMock(...args),
@@ -64,6 +82,11 @@ vi.mock("@/components/task-create-dialog-fresh-branch-consent", () => ({
 }));
 
 import { useTaskSubmitHandlers } from "./task-create-dialog-submit";
+import {
+  readQueuedTaskCreateLastUsedState,
+  resetTaskCreateLastUsedSync,
+  syncTaskCreateLastUsed,
+} from "./task-create-dialog-handlers";
 import type { SubmitHandlersDeps, TaskFormInputsHandle } from "./task-create-dialog-types";
 
 function makeRef(value: string): React.RefObject<TaskFormInputsHandle | null> {
@@ -127,6 +150,7 @@ function makeDeps(overrides: Partial<SubmitHandlersDeps>): SubmitHandlersDeps {
 }
 
 beforeEach(() => {
+  resetTaskCreateLastUsedSync({ clearQueued: true });
   buildCreateTaskPayloadMock.mockClear();
   validateCreateInputsMock.mockClear();
   createTaskRetryMock.mockClear();
@@ -201,5 +225,30 @@ describe("useTaskSubmitHandlers — handleCreateSubmit (CLI-mode parity)", () =>
     };
     expect(payloadArg.withAgent).toBe(true);
     expect(payloadArg.trimmedDescription).toBe("refactor module");
+  });
+
+  it("replaces the queued last-used overlay with the final create payload", async () => {
+    syncTaskCreateLastUsed({
+      repository_id: null,
+      branch: null,
+      agent_profile_id: "agent-before-workflow",
+      executor_profile_id: null,
+    });
+    const deps = makeDeps({
+      agentProfileId: "agent-from-workflow",
+      executorProfileId: "execp-autopick",
+      descriptionInputRef: makeRef("run tests"),
+      noRepository: true,
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+    await act(async () => {
+      await result.current.handleSubmit({ preventDefault: () => {} } as never);
+    });
+
+    expect(readQueuedTaskCreateLastUsedState()).toEqual({
+      agentProfileId: "agent-from-workflow",
+      executorProfileId: "execp-autopick",
+    });
   });
 });
