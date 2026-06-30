@@ -177,19 +177,33 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*Linear
 			zap.String("watch_id", w.ID), zap.Error(err))
 		seen = nil
 	}
-	// Page through matches (bounded by issueWatchMaxPages) so the sort below
-	// ranks the whole unseen backlog. Linear only orders by created/updated,
-	// so priority ordering must be done here over the full fetched set.
+	// Page through matches (bounded by maxPages) so the sort below ranks the
+	// whole unseen backlog. Linear only orders by created/updated, so priority
+	// ordering must be done here over the full fetched set. Default order is a
+	// no-op for sortIssues, so paginating a default watch buys nothing but
+	// extra Linear calls and larger dispatch bursts — keep it on the legacy
+	// single-page fetch.
+	maxPages := issueWatchMaxPages
+	if w.SortBy == SortByDefault {
+		maxPages = 1
+	}
 	out := make([]*LinearIssue, 0, issueWatchSearchPageSize)
 	pageToken := ""
-	for page := 0; page < issueWatchMaxPages; page++ {
+	for page := 0; page < maxPages; page++ {
 		res, err := client.SearchIssues(ctx, w.Filter, pageToken, issueWatchSearchPageSize)
 		if err != nil {
 			if page == 0 {
 				return nil, err
 			}
-			// A later page failing is non-fatal: rank/dispatch what we have;
-			// the next poll retries from the top.
+			// A canceled/expired context means the poll is being torn down.
+			// Abort instead of publishing issues from an incomplete fetch —
+			// dispatch detaches the context, so partial results would still
+			// create tasks during shutdown or a canceled manual trigger.
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
+			}
+			// Any other later-page error is non-fatal: rank/dispatch what we
+			// have; the next poll retries from the top.
 			s.log.Debug("linear: issue watch pagination stopped early",
 				zap.String("watch_id", w.ID), zap.Int("page", page), zap.Error(err))
 			break

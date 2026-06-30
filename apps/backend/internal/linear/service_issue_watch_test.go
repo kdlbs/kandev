@@ -503,9 +503,10 @@ func TestService_CheckIssueWatch_BoundsPages(t *testing.T) {
 		}, IsLast: false, NextPageToken: "next"}, nil
 	}
 
+	// A non-default sort is required for the watch to paginate at all.
 	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
 		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
-		Filter: SearchFilter{TeamKey: "ENG"},
+		Filter: SearchFilter{TeamKey: "ENG"}, SortBy: SortByPriorityDesc,
 	})
 	if err != nil {
 		t.Fatalf("create watch: %v", err)
@@ -520,6 +521,88 @@ func TestService_CheckIssueWatch_BoundsPages(t *testing.T) {
 	}
 	if len(got) != issueWatchMaxPages {
 		t.Errorf("expected %d accumulated issues, got %d", issueWatchMaxPages, len(got))
+	}
+}
+
+// TestService_CheckIssueWatch_DefaultSortFetchesSinglePage pins that a
+// default-order watch keeps the legacy single-page fetch: paginating it would
+// burn Linear rate limit and enlarge dispatch bursts for no ordering benefit.
+func TestService_CheckIssueWatch_DefaultSortFetchesSinglePage(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
+		AuthMethod: AuthMethodAPIKey, Secret: "lin_api",
+	}); err != nil {
+		t.Fatalf("set config: %v", err)
+	}
+
+	// Mock always offers another page; a paginating watch would loop to the cap.
+	calls := 0
+	f.client.searchIssuesFn = func(_ SearchFilter, _ string, _ int) (*SearchResult, error) {
+		calls++
+		return &SearchResult{Issues: []LinearIssue{
+			{Identifier: fmt.Sprintf("ENG-%d", calls), URL: "https://linear.app/x/issue"},
+		}, IsLast: false, NextPageToken: "next"}, nil
+	}
+
+	// No SortBy => SortByDefault.
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		Filter: SearchFilter{TeamKey: "ENG"},
+	})
+	if err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+
+	got, err := f.svc.CheckIssueWatch(ctx, w)
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("default watch must fetch a single page, got %d SearchIssues calls", calls)
+	}
+	if len(got) != 1 {
+		t.Errorf("expected 1 issue from the single page, got %d", len(got))
+	}
+}
+
+// TestService_CheckIssueWatch_CancelStopsPagination pins that a context
+// cancellation on a later page aborts with the error rather than publishing the
+// partial set — dispatch detaches the context, so partial results would still
+// create tasks during shutdown.
+func TestService_CheckIssueWatch_CancelStopsPagination(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
+		AuthMethod: AuthMethodAPIKey, Secret: "lin_api",
+	}); err != nil {
+		t.Fatalf("set config: %v", err)
+	}
+
+	// Page 1 succeeds; page 2 reports a canceled context.
+	f.client.searchIssuesFn = func(_ SearchFilter, pageToken string, _ int) (*SearchResult, error) {
+		if pageToken == "" {
+			return &SearchResult{Issues: []LinearIssue{
+				{Identifier: "ENG-1", Priority: 4, URL: "https://linear.app/x/issue/ENG-1"},
+			}, IsLast: false, NextPageToken: "p2"}, nil
+		}
+		return nil, context.Canceled
+	}
+
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		Filter: SearchFilter{TeamKey: "ENG"}, SortBy: SortByPriorityDesc,
+	})
+	if err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+
+	got, err := f.svc.CheckIssueWatch(ctx, w)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got err=%v got=%v", err, identifiers(got))
+	}
+	if got != nil {
+		t.Errorf("expected no issues on cancellation, got %v", identifiers(got))
 	}
 }
 
