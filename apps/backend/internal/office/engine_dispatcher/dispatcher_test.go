@@ -229,34 +229,40 @@ func TestDispatcher_ResolvesSessionAndForwards(t *testing.T) {
 }
 
 func TestDispatcher_UsesLatestSessionForCommentWhenActiveSessionMissing(t *testing.T) {
-	eng := &fakeEngine{}
-	sessions := &fakeSessions{
-		activeErr: taskmodels.ErrTaskSessionNotFound,
-		latestSession: &taskmodels.TaskSession{
-			ID:    "sess-completed",
-			State: taskmodels.TaskSessionStateCompleted,
-		},
-	}
-	d := New(eng, sessions, logger.Default())
+	for _, state := range []taskmodels.TaskSessionState{
+		taskmodels.TaskSessionStateCompleted,
+		taskmodels.TaskSessionStateIdle,
+	} {
+		t.Run(string(state), func(t *testing.T) {
+			eng := &fakeEngine{}
+			sessions := &fakeSessions{
+				activeErr: taskmodels.ErrTaskSessionNotFound,
+				latestSession: &taskmodels.TaskSession{
+					ID:    "sess-reusable",
+					State: state,
+				},
+			}
+			d := New(eng, sessions, logger.Default())
 
-	err := d.HandleTrigger(context.Background(), "task-1", engine.TriggerOnComment,
-		engine.OnCommentPayload{CommentID: "c-1"}, "task_comment:c-1")
-	if err != nil {
-		t.Fatalf("handle: %v", err)
-	}
-	if !eng.called {
-		t.Fatal("engine not invoked")
-	}
-	if eng.captured.SessionID != "sess-completed" {
-		t.Errorf("session id = %q, want sess-completed", eng.captured.SessionID)
+			err := d.HandleTrigger(context.Background(), "task-1", engine.TriggerOnComment,
+				engine.OnCommentPayload{CommentID: "c-1"}, "task_comment:c-1")
+			if err != nil {
+				t.Fatalf("handle: %v", err)
+			}
+			if !eng.called {
+				t.Fatal("engine not invoked")
+			}
+			if eng.captured.SessionID != "sess-reusable" {
+				t.Errorf("session id = %q, want sess-reusable", eng.captured.SessionID)
+			}
+		})
 	}
 }
 
-func TestDispatcher_SkipsLatestSessionForCommentWhenNotCompleted(t *testing.T) {
+func TestDispatcher_SkipsLatestSessionForCommentWhenNotReusable(t *testing.T) {
 	for _, state := range []taskmodels.TaskSessionState{
 		taskmodels.TaskSessionStateFailed,
 		taskmodels.TaskSessionStateCancelled,
-		taskmodels.TaskSessionStateIdle,
 	} {
 		t.Run(string(state), func(t *testing.T) {
 			eng := &fakeEngine{}

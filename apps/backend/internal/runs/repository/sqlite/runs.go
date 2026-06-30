@@ -268,17 +268,16 @@ func (r *Repository) GetRunsByCommentIDs(
 }
 
 func commentIDFromRun(idempotencyKey, payload string, wanted map[string]struct{}) string {
-	if commentkeys.IsSaltedTaskCommentKey(idempotencyKey) {
-		if id := commentIDFromPayload(payload, wanted); id != "" {
-			return id
-		}
+	payloadID := commentIDFromPayload(payload, wanted)
+	if commentkeys.IsSaltedTaskCommentKey(idempotencyKey) && payloadID != "" {
+		return payloadID
 	}
 	if id := commentkeys.CommentIDFromKey(idempotencyKey); id != "" {
 		if _, found := wanted[id]; found {
 			return id
 		}
 	}
-	return commentIDFromPayload(payload, wanted)
+	return payloadID
 }
 
 func commentIDFromPayload(payload string, wanted map[string]struct{}) string {

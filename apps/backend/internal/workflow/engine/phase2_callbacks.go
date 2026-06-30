@@ -102,7 +102,7 @@ func (c QueueRunCallback) resolveTarget(
 		if err != nil {
 			return nil, "", err
 		}
-		agentIDs, err := c.resolvePrimary(ctx, in, taskID)
+		agentIDs, err := c.resolvePrimary(ctx, taskID, stepID)
 		return agentIDs, stepID, err
 	case strings.HasPrefix(target, TargetParticipant):
 		role := strings.TrimPrefix(target, TargetParticipant)
@@ -160,32 +160,16 @@ func pickStepResolver(v any, fallback TargetTaskStepResolver) TargetTaskStepReso
 	return fallback
 }
 
-func (c QueueRunCallback) resolvePrimary(
-	ctx context.Context, in ActionInput, taskID string,
-) ([]string, error) {
+func (c QueueRunCallback) resolvePrimary(ctx context.Context, taskID, stepID string) ([]string, error) {
 	if c.Primary == nil {
 		return nil, fmt.Errorf("%w: queue_run target=primary requires PrimaryAgentResolver", ErrActionNotYetWired)
 	}
-	if taskID != in.State.TaskID {
-		targetResolver, ok := c.Primary.(TargetTaskPrimaryAgentResolver)
-		if !ok {
-			return nil, fmt.Errorf("%w: queue_run cross-task target=primary requires TargetTaskPrimaryAgentResolver", ErrActionNotYetWired)
-		}
-		id, err := targetResolver.PrimaryAgentProfileIDForTask(ctx, taskID)
-		if err != nil {
-			return nil, fmt.Errorf("queue_run resolve target task primary: %w", err)
-		}
-		if id == "" {
-			return nil, fmt.Errorf("queue_run: task %s has no primary agent profile", taskID)
-		}
-		return []string{id}, nil
-	}
-	id, err := c.Primary.PrimaryAgentProfileID(ctx, in.Step.ID, taskID)
+	id, err := c.Primary.PrimaryAgentProfileID(ctx, stepID, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("queue_run resolve primary: %w", err)
 	}
 	if id == "" {
-		return nil, fmt.Errorf("queue_run: step %s has no primary agent profile", in.Step.ID)
+		return nil, fmt.Errorf("queue_run: step %s has no primary agent profile", stepID)
 	}
 	return []string{id}, nil
 }

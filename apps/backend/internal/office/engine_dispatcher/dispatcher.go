@@ -61,7 +61,7 @@ func New(eng EngineHandle, sessions SessionResolver, log *logger.Logger) *Dispat
 // HandleTrigger satisfies office/service.WorkflowEngineDispatcher.
 //
 // Resolves the task's active session — or, for comment wakes, the latest
-// terminal session — then invokes engine.HandleTrigger. Errors from the
+// reusable completed/idle session — then invokes engine.HandleTrigger. Errors from the
 // engine (e.g. queue_run resolver failures) bubble up so the office event
 // subscriber can log them.
 func (d *Dispatcher) HandleTrigger(
@@ -111,12 +111,13 @@ func (d *Dispatcher) resolveSession(
 		return nil, nil
 	}
 	// Comment wakes are allowed after an office task's agent session has
-	// completed. The workflow engine state is keyed by (taskID, sessionID), so
-	// a post-completion comment intentionally resumes the latest session's
-	// persisted machine state instead of starting a fresh state machine here.
+	// completed or returned to reusable IDLE state. The workflow engine state is
+	// keyed by (taskID, sessionID), so a post-completion comment intentionally
+	// resumes the latest reusable session's persisted machine state instead of
+	// starting a fresh state machine here.
 	session, err = d.sessions.GetTaskSessionByTaskID(ctx, taskID)
 	if err == nil && session != nil {
-		if session.State != taskmodels.TaskSessionStateCompleted {
+		if !isReusableCommentSession(session.State) {
 			return nil, nil
 		}
 		return session, nil
@@ -125,4 +126,8 @@ func (d *Dispatcher) resolveSession(
 		return nil, fmt.Errorf("latest session lookup: %w", err)
 	}
 	return nil, nil
+}
+
+func isReusableCommentSession(state taskmodels.TaskSessionState) bool {
+	return state == taskmodels.TaskSessionStateCompleted || state == taskmodels.TaskSessionStateIdle
 }

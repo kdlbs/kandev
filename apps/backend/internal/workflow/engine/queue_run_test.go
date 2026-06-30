@@ -352,8 +352,8 @@ func TestQueueRunCallback_PrimaryUsesResolvedTargetTask(t *testing.T) {
 	if lookupTaskID != "target-task" {
 		t.Fatalf("primary resolved against task %q, want target-task", lookupTaskID)
 	}
-	if resolvedStepID != "" {
-		t.Fatalf("cross-task primary should use target-task resolver, got step %q", resolvedStepID)
+	if resolvedStepID != "target-step" {
+		t.Fatalf("primary resolved against step %q, want target-step", resolvedStepID)
 	}
 	got := q.calls[0]
 	if got.TaskID != "target-task" {
