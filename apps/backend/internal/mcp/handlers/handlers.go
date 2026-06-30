@@ -64,7 +64,6 @@ type SessionRepository interface {
 // TaskRepository interface for updating task state.
 type TaskRepository interface {
 	UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error
-	UpdateTask(ctx context.Context, task *models.Task) error
 }
 
 // EventBus interface for publishing events.
@@ -1771,24 +1770,11 @@ func (h *Handlers) restoreTaskReviewForTaskMessage(ctx context.Context, taskID s
 	if !rollback.changed {
 		return
 	}
-	if h.taskRepo != nil {
-		task, err := h.taskSvc.GetTask(ctx, taskID)
-		if err == nil {
-			task.State = v1.TaskStateReview
-			task.WorkflowStepID = rollback.workflowStepID
-			if err := h.taskRepo.UpdateTask(ctx, task); err == nil {
-				return
-			}
-			h.logger.Warn("failed to restore task row after task message dispatch failure",
-				zap.String("task_id", taskID),
-				zap.Error(err))
-		} else {
-			h.logger.Warn("failed to load task for REVIEW rollback after task message dispatch failure",
-				zap.String("task_id", taskID),
-				zap.Error(err))
-		}
-	}
-	if _, err := h.taskSvc.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
+	reviewState := v1.TaskStateReview
+	if _, err := h.taskSvc.UpdateTask(ctx, taskID, &service.UpdateTaskRequest{
+		State:          &reviewState,
+		WorkflowStepID: &rollback.workflowStepID,
+	}); err != nil {
 		h.logger.Warn("failed to restore task to REVIEW after task message dispatch failure",
 			zap.String("task_id", taskID),
 			zap.Error(err))

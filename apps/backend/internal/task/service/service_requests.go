@@ -56,13 +56,14 @@ type CreateTaskRequest struct {
 
 // UpdateTaskRequest contains the data for updating a task
 type UpdateTaskRequest struct {
-	Title        *string                `json:"title,omitempty"`
-	Description  *string                `json:"description,omitempty"`
-	Priority     *string                `json:"priority,omitempty"`
-	State        *v1.TaskState          `json:"state,omitempty"`
-	Repositories []TaskRepositoryInput  `json:"repositories,omitempty"`
-	Position     *int                   `json:"position,omitempty"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	Title          *string                `json:"title,omitempty"`
+	Description    *string                `json:"description,omitempty"`
+	Priority       *string                `json:"priority,omitempty"`
+	State          *v1.TaskState          `json:"state,omitempty"`
+	WorkflowStepID *string                `json:"workflow_step_id,omitempty"`
+	Repositories   []TaskRepositoryInput  `json:"repositories,omitempty"`
+	Position       *int                   `json:"position,omitempty"`
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // CreateWorkflowRequest contains the data for creating a new workflow

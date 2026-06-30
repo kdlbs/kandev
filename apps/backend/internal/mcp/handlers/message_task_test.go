@@ -8,6 +8,8 @@ import (
 	"testing"
 	"testing/synctest"
 
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -114,6 +116,32 @@ func newMessageTaskHandler(t *testing.T, svc *service.Service, taskRepo ...TaskR
 		logger:          log.WithFields(),
 	}
 	return h, orch
+}
+
+func subscribeTaskStateChanged(t *testing.T, eventBus *bus.MemoryEventBus) <-chan *bus.Event {
+	t.Helper()
+	ch := make(chan *bus.Event, 10)
+	sub, err := eventBus.Subscribe(events.TaskStateChanged, func(_ context.Context, event *bus.Event) error {
+		ch <- event
+		return nil
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+	return ch
+}
+
+func assertTaskStateChangedEvent(t *testing.T, ch <-chan *bus.Event, taskID string, state v1.TaskState, workflowStepID string) {
+	t.Helper()
+	for len(ch) > 0 {
+		event := <-ch
+		data, ok := event.Data.(map[string]interface{})
+		require.True(t, ok)
+		if data["task_id"] == taskID && data["state"] == string(state) {
+			assert.Equal(t, workflowStepID, data["workflow_step_id"])
+			return
+		}
+	}
+	t.Fatalf("expected task.state_changed event for task %s state %s", taskID, state)
 }
 
 type seedRepo interface {
@@ -529,8 +557,9 @@ func TestHandleMessageTask_CreatedSessionStartsAfterTurnStartChangesState(t *tes
 
 func TestHandleMessageTask_TurnStartErrorRejectsAndRestoresReview(t *testing.T) {
 	ctx := context.Background()
-	svc, repo := newTestTaskService(t)
+	svc, repo, eventBus := newTestTaskServiceWithEventBus(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	stateEvents := subscribeTaskStateChanged(t, eventBus)
 
 	task, err := svc.GetTask(ctx, target.ID)
 	require.NoError(t, err)
@@ -556,6 +585,7 @@ func TestHandleMessageTask_TurnStartErrorRejectsAndRestoresReview(t *testing.T) 
 	require.NoError(t, err)
 	assert.Equal(t, v1.TaskStateReview, updatedTask.State)
 	assert.Equal(t, "step-review", updatedTask.WorkflowStepID)
+	assertTaskStateChangedEvent(t, stateEvents, target.ID, v1.TaskStateReview, "step-review")
 	assert.Empty(t, orch.promptCalls)
 	messages, err := svc.ListMessages(ctx, sess.ID)
 	require.NoError(t, err)
@@ -564,8 +594,9 @@ func TestHandleMessageTask_TurnStartErrorRejectsAndRestoresReview(t *testing.T) 
 
 func TestHandleMessageTask_DispatchErrorRestoresReview(t *testing.T) {
 	ctx := context.Background()
-	svc, repo := newTestTaskService(t)
+	svc, repo, eventBus := newTestTaskServiceWithEventBus(t)
 	sender, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	stateEvents := subscribeTaskStateChanged(t, eventBus)
 
 	task, err := svc.GetTask(ctx, target.ID)
 	require.NoError(t, err)
@@ -591,6 +622,7 @@ func TestHandleMessageTask_DispatchErrorRestoresReview(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, v1.TaskStateReview, updatedTask.State)
 	assert.Equal(t, "step-review", updatedTask.WorkflowStepID)
+	assertTaskStateChangedEvent(t, stateEvents, target.ID, v1.TaskStateReview, "step-review")
 	require.Len(t, orch.promptCalls, 1)
 }
 

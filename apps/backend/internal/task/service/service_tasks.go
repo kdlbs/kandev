@@ -690,6 +690,9 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		task.State = *req.State
 		stateChanged = true
 	}
+	if req.WorkflowStepID != nil {
+		task.WorkflowStepID = *req.WorkflowStepID
+	}
 	if req.Position != nil {
 		task.Position = *req.Position
 	}
