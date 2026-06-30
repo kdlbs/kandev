@@ -823,15 +823,6 @@ type recordingUserRepository struct {
 	closeCalls                                int
 }
 
-func (r *recordingUserRepository) touches() int {
-	return r.getUserCalls +
-		r.getDefaultUserCalls +
-		r.getUserSettingsCalls +
-		r.upsertUserSettingsPreservingLastUsedCalls +
-		r.updateCalls +
-		r.closeCalls
-}
-
 func (r *recordingUserRepository) GetUser(context.Context, string) (*models.User, error) {
 	r.getUserCalls++
 	return nil, errors.New("unexpected GetUser call")
