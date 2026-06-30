@@ -57,6 +57,10 @@ type Repository interface {
 	// SetPendingMove upserts the deferred workflow move for a session.
 	SetPendingMove(ctx context.Context, sessionID string, move *PendingMove) error
 
+	// GetPendingMove returns the deferred move for a session without removing it.
+	// Returns nil, nil if absent.
+	GetPendingMove(ctx context.Context, sessionID string) (*PendingMove, error)
+
 	// TakePendingMove returns and removes the deferred move for a session.
 	// Returns nil, nil if absent.
 	TakePendingMove(ctx context.Context, sessionID string) (*PendingMove, error)

@@ -257,6 +257,17 @@ func (r *memoryRepository) SetPendingMove(_ context.Context, sessionID string, m
 	return nil
 }
 
+func (r *memoryRepository) GetPendingMove(_ context.Context, sessionID string) (*PendingMove, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	move, ok := r.pendingMoves[sessionID]
+	if !ok {
+		return nil, nil
+	}
+	clone := *move
+	return &clone, nil
+}
+
 func (r *memoryRepository) TakePendingMove(_ context.Context, sessionID string) (*PendingMove, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

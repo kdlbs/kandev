@@ -1639,16 +1639,22 @@ type taskMessageReviewRollback struct {
 	sessions       []taskMessageSessionRollback
 	sessionIDs     map[string]struct{}
 	selectedID     string
+	queues         map[string]taskMessageQueueRollback
 }
 
 type taskMessageSessionRollback struct {
-	sessionID      string
-	state          models.TaskSessionState
-	error          string
-	completedAt    *time.Time
-	isPrimary      bool
-	hadPendingStep bool
-	pendingStep    interface{}
+	sessionID   string
+	state       models.TaskSessionState
+	error       string
+	completedAt *time.Time
+	isPrimary   bool
+	metadata    map[string]interface{}
+}
+
+type taskMessageQueueRollback struct {
+	entries        []messagequeue.QueuedMessage
+	hadPendingMove bool
+	pendingMove    *messagequeue.PendingMove
 }
 
 type taskMessageSessionRollbackRepository interface {
@@ -1657,7 +1663,7 @@ type taskMessageSessionRollbackRepository interface {
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	SetSessionPrimary(ctx context.Context, sessionID string) error
 	DeleteTaskSession(ctx context.Context, id string) error
-	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
+	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
 }
 
 type taskMessageExecutorReader interface {
@@ -1690,6 +1696,24 @@ func (r *taskMessageReviewRollback) captureSessions(ctx context.Context, repo Se
 	return nil
 }
 
+func (r *taskMessageReviewRollback) captureQueues(ctx context.Context, queue *messagequeue.Service) {
+	if !r.changed || queue == nil || len(r.sessions) == 0 {
+		return
+	}
+	r.queues = make(map[string]taskMessageQueueRollback, len(r.sessions))
+	for _, session := range r.sessions {
+		status := queue.GetStatus(ctx, session.sessionID)
+		snapshot := taskMessageQueueRollback{
+			entries: cloneTaskMessageQueuedMessages(status.Entries),
+		}
+		if move, ok := queue.GetPendingMove(ctx, session.sessionID); ok {
+			snapshot.hadPendingMove = true
+			snapshot.pendingMove = cloneTaskMessagePendingMove(move)
+		}
+		r.queues[session.sessionID] = snapshot
+	}
+}
+
 func (r *taskMessageReviewRollback) captureSelectedSession(session *models.TaskSession) {
 	if !r.changed || session == nil {
 		return
@@ -1711,12 +1735,20 @@ func captureTaskMessageSession(session *models.TaskSession) taskMessageSessionRo
 		isPrimary:   session.IsPrimary,
 	}
 	if session.Metadata != nil {
-		if pendingStep, ok := session.Metadata[models.SessionMetaKeyPendingStepCompletion]; ok {
-			snapshot.hadPendingStep = true
-			snapshot.pendingStep = cloneTaskMessageMetadataValue(pendingStep)
-		}
+		snapshot.metadata = cloneTaskMessageMetadataMap(session.Metadata)
 	}
 	return snapshot
+}
+
+func cloneTaskMessageMetadataMap(metadata map[string]interface{}) map[string]interface{} {
+	if metadata == nil {
+		return nil
+	}
+	cloned := make(map[string]interface{}, len(metadata))
+	for key, value := range metadata {
+		cloned[key] = cloneTaskMessageMetadataValue(value)
+	}
+	return cloned
 }
 
 func cloneTaskMessageMetadataValue(value interface{}) interface{} {
@@ -1729,6 +1761,28 @@ func cloneTaskMessageMetadataValue(value interface{}) interface{} {
 		return value
 	}
 	return cloned
+}
+
+func cloneTaskMessageQueuedMessages(entries []messagequeue.QueuedMessage) []messagequeue.QueuedMessage {
+	if len(entries) == 0 {
+		return nil
+	}
+	cloned := make([]messagequeue.QueuedMessage, 0, len(entries))
+	for _, entry := range entries {
+		copy := entry
+		copy.Metadata = cloneTaskMessageMetadataMap(entry.Metadata)
+		copy.Attachments = append([]messagequeue.MessageAttachment(nil), entry.Attachments...)
+		cloned = append(cloned, copy)
+	}
+	return cloned
+}
+
+func cloneTaskMessagePendingMove(move *messagequeue.PendingMove) *messagequeue.PendingMove {
+	if move == nil {
+		return nil
+	}
+	copy := *move
+	return &copy
 }
 
 // dispatchTaskMessage routes a message to the right delivery path based on session state.
@@ -1759,6 +1813,7 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 			h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
 			return taskMessageDispatchResult{}, err
 		}
+		reviewRollback.captureQueues(ctx, h.sessionLauncher.GetMessageQueue())
 		session, err := h.prepareSessionForTaskMessage(ctx, taskID, session)
 		if err != nil {
 			h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
@@ -1923,6 +1978,9 @@ func (h *Handlers) restoreTaskMessageSessions(ctx context.Context, rollback task
 			return err
 		}
 	}
+	if err := h.restoreTaskMessageQueues(ctx, rollback); err != nil {
+		return err
+	}
 	return h.restoreSelectedTaskMessageSession(ctx, repo, rollback)
 }
 
@@ -1931,15 +1989,11 @@ func (h *Handlers) restoreSelectedTaskMessageSession(ctx context.Context, repo t
 		return nil
 	}
 	primaryID := rollback.primarySessionID()
-	if primaryID != "" && rollback.selectedID != primaryID {
-		if queue := h.sessionLauncher.GetMessageQueue(); queue != nil {
-			if err := queue.TransferSession(ctx, rollback.selectedID, primaryID); err != nil {
-				return err
-			}
-		}
-	}
 	if _, ok := rollback.sessionIDs[rollback.selectedID]; ok {
 		return nil
+	}
+	if primaryID != "" && rollback.selectedID != primaryID {
+		h.clearTaskMessageQueue(ctx, rollback.selectedID)
 	}
 	return repo.DeleteTaskSession(ctx, rollback.selectedID)
 }
@@ -1951,6 +2005,61 @@ func (r taskMessageReviewRollback) primarySessionID() string {
 		}
 	}
 	return ""
+}
+
+func (h *Handlers) restoreTaskMessageQueues(ctx context.Context, rollback taskMessageReviewRollback) error {
+	if len(rollback.queues) == 0 {
+		return nil
+	}
+	queue := h.sessionLauncher.GetMessageQueue()
+	if queue == nil {
+		return nil
+	}
+	for sessionID, snapshot := range rollback.queues {
+		if err := h.restoreTaskMessageQueue(ctx, queue, sessionID, snapshot); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (h *Handlers) restoreTaskMessageQueue(ctx context.Context, queue *messagequeue.Service, sessionID string, snapshot taskMessageQueueRollback) error {
+	if _, err := queue.CancelAll(ctx, sessionID); err != nil {
+		return err
+	}
+	_, _ = queue.TakePendingMove(ctx, sessionID)
+	for _, entry := range snapshot.entries {
+		if _, err := queue.QueueMessageWithMetadata(
+			ctx,
+			sessionID,
+			entry.TaskID,
+			entry.Content,
+			entry.Model,
+			entry.QueuedBy,
+			entry.PlanMode,
+			entry.Attachments,
+			entry.Metadata,
+		); err != nil {
+			return err
+		}
+	}
+	if snapshot.hadPendingMove {
+		queue.SetPendingMove(ctx, sessionID, cloneTaskMessagePendingMove(snapshot.pendingMove))
+	}
+	return nil
+}
+
+func (h *Handlers) clearTaskMessageQueue(ctx context.Context, sessionID string) {
+	queue := h.sessionLauncher.GetMessageQueue()
+	if queue == nil {
+		return
+	}
+	if _, err := queue.CancelAll(ctx, sessionID); err != nil {
+		h.logger.Warn("failed to clear task message queue during rollback",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+	_, _ = queue.TakePendingMove(ctx, sessionID)
 }
 
 func restoreTaskMessageSessionSnapshot(ctx context.Context, repo taskMessageSessionRollbackRepository, rollback taskMessageSessionRollback) error {
@@ -1970,11 +2079,7 @@ func restoreTaskMessageSessionSnapshot(ctx context.Context, repo taskMessageSess
 			return err
 		}
 	}
-	pendingStep := interface{}(nil)
-	if rollback.hadPendingStep {
-		pendingStep = rollback.pendingStep
-	}
-	if err := repo.SetSessionMetadataKey(ctx, rollback.sessionID, models.SessionMetaKeyPendingStepCompletion, pendingStep); err != nil {
+	if err := repo.UpdateSessionMetadata(ctx, rollback.sessionID, cloneTaskMessageMetadataMap(rollback.metadata)); err != nil {
 		return err
 	}
 	return nil

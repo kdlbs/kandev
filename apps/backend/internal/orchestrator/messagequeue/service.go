@@ -258,6 +258,21 @@ func (s *Service) SetPendingMove(ctx context.Context, sessionID string, move *Pe
 		zap.String("workflow_step_id", move.WorkflowStepID))
 }
 
+// GetPendingMove retrieves the pending move for a session without removing it.
+func (s *Service) GetPendingMove(ctx context.Context, sessionID string) (*PendingMove, bool) {
+	move, err := s.repo.GetPendingMove(ctx, sessionID)
+	if err != nil {
+		s.logger.Error("get pending move failed",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return nil, false
+	}
+	if move == nil {
+		return nil, false
+	}
+	return move, true
+}
+
 // TakePendingMove retrieves and removes the pending move for a session.
 func (s *Service) TakePendingMove(ctx context.Context, sessionID string) (*PendingMove, bool) {
 	move, err := s.repo.TakePendingMove(ctx, sessionID)

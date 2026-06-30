@@ -496,6 +496,30 @@ func (r *sqliteRepository) SetPendingMove(ctx context.Context, sessionID string,
 	return nil
 }
 
+func (r *sqliteRepository) GetPendingMove(ctx context.Context, sessionID string) (*PendingMove, error) {
+	var (
+		taskID, workflowID, workflowStepID string
+		position                           int
+		queuedAt                           time.Time
+	)
+	if err := r.ro.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT task_id, workflow_id, workflow_step_id, step_position, queued_at
+		FROM pending_moves WHERE session_id = ?
+	`), sessionID).Scan(&taskID, &workflowID, &workflowStepID, &position, &queuedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read pending move: %w", err)
+	}
+	return &PendingMove{
+		TaskID:         taskID,
+		WorkflowID:     workflowID,
+		WorkflowStepID: workflowStepID,
+		Position:       position,
+		QueuedAt:       queuedAt,
+	}, nil
+}
+
 func (r *sqliteRepository) TakePendingMove(ctx context.Context, sessionID string) (*PendingMove, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {

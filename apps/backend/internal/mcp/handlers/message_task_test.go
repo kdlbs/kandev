@@ -741,10 +741,17 @@ func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(
 		SignaledAt: time.Now().UTC(),
 	}
 	require.NoError(t, repo.SetSessionMetadataKey(ctx, sess.ID, models.SessionMetaKeyPendingStepCompletion, pendingSignal))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, sess.ID, "plan_mode", true))
 
 	h, orch := newMessageTaskHandler(t, svc, repo)
 	_, err = orch.queue.QueueMessageWithMetadata(ctx, sess.ID, target.ID, "queued before switch", "", "agent", false, nil, nil)
 	require.NoError(t, err)
+	orch.queue.SetPendingMove(ctx, sess.ID, &messagequeue.PendingMove{
+		TaskID:         target.ID,
+		WorkflowID:     "workflow-1",
+		WorkflowStepID: "step-review",
+		Position:       2,
+	})
 	replacementID := "sess-2"
 	orch.onTurnStart = func(ctx context.Context, taskID, _ string) error {
 		updatedTask, err := svc.GetTask(ctx, taskID)
@@ -766,6 +773,7 @@ func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(
 		}
 		require.NoError(t, repo.CreateTaskSession(ctx, replacement))
 		require.NoError(t, repo.SetSessionMetadataKey(ctx, sess.ID, models.SessionMetaKeyPendingStepCompletion, nil))
+		require.NoError(t, repo.SetSessionMetadataKey(ctx, sess.ID, "plan_mode", nil))
 		require.NoError(t, orch.queue.TransferSession(ctx, sess.ID, replacementID))
 		require.NoError(t, repo.SetSessionPrimary(ctx, replacementID))
 		return nil
@@ -791,6 +799,7 @@ func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(
 	assert.True(t, primary.IsPrimary)
 	_, ok := models.LoadPendingStepSignal(primary.Metadata)
 	require.True(t, ok)
+	assert.Equal(t, true, primary.Metadata["plan_mode"])
 
 	_, err = svc.GetTaskSession(ctx, replacementID)
 	assert.ErrorIs(t, err, models.ErrTaskSessionNotFound)
@@ -803,6 +812,76 @@ func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(
 	status := orch.queue.GetStatus(ctx, sess.ID)
 	require.Equal(t, 1, status.Count)
 	assert.Equal(t, "queued before switch", status.Entries[0].Content)
+	move, ok := orch.queue.TakePendingMove(ctx, sess.ID)
+	require.True(t, ok)
+	assert.Equal(t, "step-review", move.WorkflowStepID)
+	assert.Equal(t, 2, move.Position)
+	replacementStatus := orch.queue.GetStatus(ctx, replacementID)
+	assert.Zero(t, replacementStatus.Count)
+	_, ok = orch.queue.TakePendingMove(ctx, replacementID)
+	assert.False(t, ok)
+}
+
+func TestHandleMessageTask_DispatchErrorAfterExistingSessionSwitchRestoresQueues(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, _ := newTestTaskServiceWithEventBus(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+
+	task, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	task.State = v1.TaskStateReview
+	task.WorkflowStepID = "step-review"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	replacementID := "sess-2"
+	replacement := &models.TaskSession{
+		ID:             replacementID,
+		TaskID:         target.ID,
+		AgentProfileID: "agent-profile-2",
+		State:          models.TaskSessionStateWaitingForInput,
+		IsPrimary:      false,
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, replacement))
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	_, err = orch.queue.QueueMessageWithMetadata(ctx, sess.ID, target.ID, "original queued", "", "agent", false, nil, nil)
+	require.NoError(t, err)
+	_, err = orch.queue.QueueMessageWithMetadata(ctx, replacementID, target.ID, "replacement queued", "", "user", false, nil, nil)
+	require.NoError(t, err)
+	orch.queue.SetPendingMove(ctx, replacementID, &messagequeue.PendingMove{
+		TaskID:         target.ID,
+		WorkflowID:     "workflow-1",
+		WorkflowStepID: "replacement-step",
+		Position:       5,
+	})
+
+	orch.onTurnStart = func(ctx context.Context, _, _ string) error {
+		oldSession, err := svc.GetTaskSession(ctx, sess.ID)
+		require.NoError(t, err)
+		oldSession.State = models.TaskSessionStateCompleted
+		oldSession.IsPrimary = false
+		require.NoError(t, repo.UpdateTaskSession(ctx, oldSession))
+		require.NoError(t, orch.queue.TransferSession(ctx, sess.ID, replacementID))
+		require.NoError(t, repo.SetSessionPrimary(ctx, replacementID))
+		return nil
+	}
+	orch.startCreatedErr = errors.New("start failed")
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "fails after switch", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+
+	primaryStatus := orch.queue.GetStatus(ctx, sess.ID)
+	require.Equal(t, 1, primaryStatus.Count)
+	assert.Equal(t, "original queued", primaryStatus.Entries[0].Content)
+
+	replacementStatus := orch.queue.GetStatus(ctx, replacementID)
+	require.Equal(t, 1, replacementStatus.Count)
+	assert.Equal(t, "replacement queued", replacementStatus.Entries[0].Content)
+	move, ok := orch.queue.TakePendingMove(ctx, replacementID)
+	require.True(t, ok)
+	assert.Equal(t, "replacement-step", move.WorkflowStepID)
 }
 
 func TestHandleMessageTask_OfficeReviewDoesNotTransitionTaskState(t *testing.T) {
