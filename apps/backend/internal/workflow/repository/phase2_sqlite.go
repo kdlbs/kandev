@@ -39,6 +39,7 @@ func (r *Repository) initPhase2Schema() error {
 	CREATE INDEX IF NOT EXISTS idx_workflow_step_participants_step ON workflow_step_participants(step_id);
 	CREATE INDEX IF NOT EXISTS idx_workflow_step_participants_role ON workflow_step_participants(step_id, role);
 	CREATE INDEX IF NOT EXISTS idx_workflow_step_participants_task ON workflow_step_participants(task_id) WHERE task_id != '';
+	CREATE INDEX IF NOT EXISTS idx_workflow_step_participants_task_role ON workflow_step_participants(task_id, role) WHERE task_id != '';
 	`
 	if _, err := r.db.Exec(participantsSchema); err != nil {
 		return fmt.Errorf("failed to create workflow_step_participants table: %w", err)

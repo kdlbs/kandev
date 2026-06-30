@@ -184,6 +184,43 @@ func TestEngineDispatcher_SkipsDoneStepSelfComment(t *testing.T) {
 	}
 }
 
+func TestEngineDispatcher_DispatchesOlderDoneStepRunnerComment(t *testing.T) {
+	svc, _ := newTestServiceWithBus(t)
+
+	disp := &fakeDispatcher{}
+	svc.SetWorkflowEngineDispatcher(disp)
+
+	ctx := context.Background()
+	createTestAgent(t, svc, "ws-1", "runner-on-work")
+	createTestAgent(t, svc, "ws-1", "runner-on-review")
+	insertTestTask(t, svc, "task-done", "ws-1")
+	svc.ExecSQL(t, `
+		INSERT INTO workflow_steps (id, agent_profile_id)
+		VALUES ('step-work', ''), ('step-review', ''), ('step-done', '')
+	`)
+	svc.ExecSQL(t, `UPDATE tasks SET workflow_step_id = 'step-done' WHERE id = 'task-done'`)
+	svc.ExecSQL(t, `
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position)
+		VALUES
+			('p-work', 'step-work', 'task-done', 'runner', 'runner-on-work', 0, 0),
+			('p-review', 'step-review', 'task-done', 'runner', 'runner-on-review', 0, 0)
+	`)
+
+	comment := &models.TaskComment{
+		TaskID:     "task-done",
+		AuthorType: "agent",
+		AuthorID:   "runner-on-work",
+		Body:       "Older runner reply",
+	}
+	if err := svc.CreateComment(ctx, comment); err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+	if calls := disp.Calls(); len(calls) != 1 {
+		t.Fatalf("dispatcher calls = %d, want 1", len(calls))
+	}
+}
+
 // TestEngineDispatcher_NoSession_DropsTrigger pins that when the
 // dispatcher returns ErrEngineNoSession the subscriber drops the
 // trigger silently — there is no legacy fallback after Phase 4.
