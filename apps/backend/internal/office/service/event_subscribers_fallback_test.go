@@ -15,7 +15,8 @@ import (
 // stubTaskWorkspace is a minimal implementation of service.TaskWorkspaceService
 // that returns a fixed message from GetLastAgentMessage.
 type stubTaskWorkspace struct {
-	lastMsg string
+	lastMsg       string
+	lastMsgByTurn map[string]string
 }
 
 func (s *stubTaskWorkspace) GetWorkspace(_ context.Context, _ string) (*taskmodels.Workspace, error) {
@@ -35,6 +36,9 @@ func (s *stubTaskWorkspace) ListTasksByWorkspace(
 func (s *stubTaskWorkspace) DeleteTask(_ context.Context, _ string) error { return nil }
 func (s *stubTaskWorkspace) GetLastAgentMessage(_ context.Context, _ string) (string, error) {
 	return s.lastMsg, nil
+}
+func (s *stubTaskWorkspace) GetLastAgentMessageForTurn(_ context.Context, turnID string) (string, error) {
+	return s.lastMsgByTurn[turnID], nil
 }
 
 // newTestServiceWithTaskWorkspace creates a service+bus like newTestServiceWithBus
@@ -85,4 +89,41 @@ func TestAutoPostAgentComment_FallbackPath(t *testing.T) {
 		}
 	}
 	t.Fatalf("expected session comment with body from GetLastAgentMessage, got %+v", comments)
+}
+
+func TestAutoPostAgentComment_TurnScopedFallbackPath(t *testing.T) {
+	stub := &stubTaskWorkspace{
+		lastMsg: "newer active turn reply",
+		lastMsgByTurn: map[string]string{
+			"turn-terminal": "terminal turn reply",
+		},
+	}
+	svc, eb := newTestServiceWithTaskWorkspace(t, stub)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "agent-turn-fallback")
+	taskID := createOfficeTask(t, svc, "ws-1", "agent-turn-fallback")
+
+	event := bus.NewEvent(events.AgentTurnMessageSaved, "orchestrator", map[string]string{
+		"task_id":    taskID,
+		"session_id": "sess-fallback",
+		"turn_id":    "turn-terminal",
+		"agent_text": "",
+		"agent_id":   "agent-turn-fallback",
+	})
+	if err := eb.Publish(ctx, events.AgentTurnMessageSaved, event); err != nil {
+		t.Fatalf("publish event: %v", err)
+	}
+
+	comments, err := svc.ListComments(ctx, taskID)
+	if err != nil {
+		t.Fatalf("list comments: %v", err)
+	}
+
+	for _, c := range comments {
+		if c.Source == "session" && c.AuthorType == "agent" && c.Body == "terminal turn reply" {
+			return
+		}
+	}
+	t.Fatalf("expected session comment with body from turn-scoped fallback, got %+v", comments)
 }

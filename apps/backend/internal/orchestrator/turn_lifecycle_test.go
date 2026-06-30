@@ -41,6 +41,10 @@ func (a *repoTurnService) CompleteTurn(ctx context.Context, turnID string) error
 	return a.repo.CompleteTurn(ctx, turnID)
 }
 
+func (a *repoTurnService) GetTurn(ctx context.Context, turnID string) (*models.Turn, error) {
+	return a.repo.GetTurn(ctx, turnID)
+}
+
 func (a *repoTurnService) GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
 	turn, err := a.repo.GetActiveTurnBySessionID(ctx, sessionID)
 	if errors.Is(err, sql.ErrNoRows) {

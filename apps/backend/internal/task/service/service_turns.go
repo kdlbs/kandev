@@ -54,6 +54,11 @@ func (s *Service) StartTurn(ctx context.Context, sessionID string) (*models.Turn
 	return turn, nil
 }
 
+// GetTurn returns a turn by ID.
+func (s *Service) GetTurn(ctx context.Context, turnID string) (*models.Turn, error) {
+	return s.turns.GetTurn(ctx, turnID)
+}
+
 // CompleteTurn marks a turn as completed and publishes the turn.completed event.
 func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 	if turnID == "" {

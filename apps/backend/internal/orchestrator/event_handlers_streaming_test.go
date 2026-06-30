@@ -29,6 +29,15 @@ type recordedEvent struct {
 	event   *bus.Event
 }
 
+type recordingClarificationCanceller struct {
+	sessions []string
+}
+
+func (c *recordingClarificationCanceller) DetachSessionAndNotify(_ context.Context, sessionID string) int {
+	c.sessions = append(c.sessions, sessionID)
+	return 1
+}
+
 type listTaskSessionsErrorRepo struct {
 	sessionExecutorStore
 }
@@ -667,6 +676,86 @@ func TestCompleteStreamFromCompletedExecutionFlushesAgentText(t *testing.T) {
 		"final complete streams from terminal executions must not re-run task state reconciliation")
 }
 
+func TestCompleteStreamFromCompletedExecutionPersistsTerminalTurnMetadata(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+	svc.turnService = &repoTurnService{repo: repo}
+	firstTurn, err := svc.turnService.StartTurn(ctx, "s1")
+	require.NoError(t, err)
+	svc.markExecutionCompleted("s1", "exec-1")
+	svc.completeTurnForSession(ctx, "s1")
+	nextTurn, err := svc.turnService.StartTurn(ctx, "s1")
+	require.NoError(t, err)
+
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t1",
+		SessionID:   "s1",
+		ExecutionID: "exec-1",
+		AgentID:     "agent-1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:           agentEventComplete,
+			CurrentModelID: "gpt-5.5",
+			Usage: &streams.PromptUsage{
+				InputTokens:                  10,
+				OutputTokens:                 20,
+				TotalTokens:                  42,
+				ProviderReportedCostSubcents: 123,
+			},
+		},
+	})
+
+	terminalTurn, err := repo.GetTurn(ctx, firstTurn.ID)
+	require.NoError(t, err)
+	require.Equal(t, "gpt-5.5", terminalTurn.Metadata["model"])
+	require.Equal(t, "agent-1", terminalTurn.Metadata["agent_id"])
+	usage, ok := terminalTurn.Metadata["prompt_usage"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, float64(42), usage["total_tokens"])
+	require.Equal(t, float64(123), usage["provider_reported_cost_subcents"])
+
+	activeTurn, err := repo.GetTurn(ctx, nextTurn.ID)
+	require.NoError(t, err)
+	require.NotContains(t, activeTurn.Metadata, "prompt_usage",
+		"late terminal complete metadata must not be written to a newer active turn")
+}
+
+func TestCompleteStreamFromCompletedExecutionPublishesTerminalTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+
+	eb := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eb
+	svc.turnService = &repoTurnService{repo: repo}
+	firstTurn, err := svc.turnService.StartTurn(ctx, "s1")
+	require.NoError(t, err)
+	svc.markExecutionCompleted("s1", "exec-1")
+	svc.completeTurnForSession(ctx, "s1")
+	_, err = svc.turnService.StartTurn(ctx, "s1")
+	require.NoError(t, err)
+
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t1",
+		SessionID:   "s1",
+		ExecutionID: "exec-1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type: agentEventComplete,
+		},
+	})
+
+	require.Len(t, eb.events, 1)
+	require.Equal(t, events.AgentTurnMessageSaved, eb.events[0].subject)
+	data, ok := eb.events[0].event.Data.(map[string]string)
+	require.True(t, ok)
+	require.Equal(t, firstTurn.ID, data["turn_id"],
+		"late terminal complete publish must identify the completed turn")
+}
+
 func TestCompleteStreamFromCompletedExecutionSkipsDuplicateOfficeTeardown(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -830,6 +919,41 @@ func TestTerminalCompleteStreamDoesNotCancelClarificationWatchdog(t *testing.T) 
 	}
 }
 
+func TestTerminalCompleteStreamDetachesClarificationWaitersWithoutCancellingWatchdog(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	canceller := &recordingClarificationCanceller{}
+	svc.clarificationCanceller = canceller
+	watchCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc.clarificationWatchdogs.Store(
+		svc.clarificationWatchdogKey("s1", "pending-1"),
+		&clarificationWatchdogEntry{cancel: cancel},
+	)
+	svc.markExecutionCompleted("s1", "exec-1")
+
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t1",
+		SessionID:   "s1",
+		ExecutionID: "exec-1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type: agentEventComplete,
+		},
+	})
+
+	require.Equal(t, []string{"s1"}, canceller.sessions)
+	require.Equal(t, 1, countClarificationWatchdogs(svc),
+		"late terminal complete should detach waiters without cancelling watchdog fallback entries")
+	select {
+	case <-watchCtx.Done():
+		t.Fatal("late terminal complete cancelled clarification watchdog")
+	default:
+	}
+}
+
 func TestWriteTaskReviewStateSkipsWhenSessionListFails(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -866,6 +990,21 @@ func TestWriteTaskReviewStateSkipsTerminalTaskState(t *testing.T) {
 
 	require.Zero(t, taskRepo.stateWrites["t1"],
 		"REVIEW reconcile must not rewind terminal task states")
+}
+
+func TestWriteTaskInProgressForRuntimeSkipsArchivedTask(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+	require.NoError(t, repo.ArchiveTask(ctx, "t1"))
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	svc.writeTaskInProgressForRuntime(ctx, "t1", "s1")
+
+	require.Zero(t, taskRepo.stateWrites["t1"],
+		"runtime reconciliation must not promote archived tasks to IN_PROGRESS")
 }
 
 func TestWriteTaskReviewStateOnCancelSkipsWhenSessionActiveAgain(t *testing.T) {

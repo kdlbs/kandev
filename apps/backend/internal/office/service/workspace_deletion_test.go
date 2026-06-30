@@ -148,6 +148,10 @@ func (f *fakeWorkspaceTaskService) GetLastAgentMessage(context.Context, string) 
 	return "", nil
 }
 
+func (f *fakeWorkspaceTaskService) GetLastAgentMessageForTurn(context.Context, string) (string, error) {
+	return "", nil
+}
+
 type fakeWorkspaceGroupCleaner struct {
 	svc                       *service.Service
 	groupID                   string

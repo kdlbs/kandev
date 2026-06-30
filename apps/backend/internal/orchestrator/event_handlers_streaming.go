@@ -28,15 +28,15 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	terminalCompleteStream := false
 
 	if eventType == agentEventComplete {
-		if s.isExecutionCompleted(sessionID, payload.ExecutionID) {
-			_, terminalCompleteStream = s.terminalCompleteStreamMarker(sessionID, payload.ExecutionID)
-		}
-		if s.isExecutionCompleted(sessionID, payload.ExecutionID) && !terminalCompleteStream {
-			s.logger.Debug("ignoring complete stream event from terminal failed execution",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.String("agent_execution_id", payload.ExecutionID))
-			return
+		if marker, ok := s.terminalExecutionMarker(sessionID, payload.ExecutionID); ok {
+			if !marker.allowCompleteStream {
+				s.logger.Debug("ignoring complete stream event from terminal failed execution",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID),
+					zap.String("agent_execution_id", payload.ExecutionID))
+				return
+			}
+			terminalCompleteStream = true
 		}
 	} else if s.shouldDropCompletedExecutionStreamEvent(payload) {
 		return
@@ -297,6 +297,10 @@ func (s *Service) saveAgentTextForTurn(ctx context.Context, payload *lifecycle.A
 // The subscriber (office comment bridge) uses the task/session IDs to look up
 // the agent's last message and auto-post it as a task comment.
 func (s *Service) publishAgentTurnComplete(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	s.publishAgentTurnCompleteForTurn(ctx, payload, "")
+}
+
+func (s *Service) publishAgentTurnCompleteForTurn(ctx context.Context, payload *lifecycle.AgentStreamEventPayload, turnID string) {
 	if s.eventBus == nil || payload.TaskID == "" || payload.SessionID == "" {
 		return
 	}
@@ -309,6 +313,7 @@ func (s *Service) publishAgentTurnComplete(ctx context.Context, payload *lifecyc
 		"session_id": payload.SessionID,
 		"agent_text": payload.Data.Text,
 		"agent_id":   payload.AgentID,
+		"turn_id":    turnID,
 	}
 	event := bus.NewEvent(events.AgentTurnMessageSaved, "orchestrator", data)
 	if err := s.eventBus.Publish(ctx, events.AgentTurnMessageSaved, event); err != nil {
@@ -727,7 +732,7 @@ func (s *Service) setSessionStarting(ctx context.Context, taskID string, session
 	}
 
 	if promoteTask {
-		s.writeTaskInProgressForRuntime(ctx, taskID)
+		s.writeTaskInProgressForRuntime(ctx, taskID, session.ID)
 	}
 	s.taskRuntimeStateMu.Unlock()
 
@@ -966,10 +971,22 @@ func (s *Service) setSessionRunningForExecution(ctx context.Context, taskID, ses
 		return
 	}
 
-	s.writeTaskInProgressForRuntime(ctx, taskID)
+	s.writeTaskInProgressForRuntime(ctx, taskID, sessionID)
 }
 
-func (s *Service) writeTaskInProgressForRuntime(ctx context.Context, taskID string) {
+func (s *Service) writeTaskInProgressForRuntime(ctx context.Context, taskID, sessionID string) {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("skipping IN_PROGRESS transition because task lookup failed",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	if task != nil && task.ArchivedAt != nil {
+		s.logger.Debug("skipping IN_PROGRESS transition for archived task",
+			zap.String("task_id", taskID))
+		return
+	}
 	// Office tasks do NOT transition to IN_PROGRESS when their agent's
 	// session enters RUNNING. The user-facing task status (todo /
 	// in_review / done / blocked) reflects workflow position, not the
@@ -977,10 +994,31 @@ func (s *Service) writeTaskInProgressForRuntime(ctx context.Context, taskID stri
 	// spinner and the inline session timeline entry instead. Skipping
 	// the transition prevents the REVIEW → IN_PROGRESS → REVIEW flicker
 	// across follow-up comment turns.
-	if dbTask, err := s.repo.GetTask(ctx, taskID); err == nil && dbTask != nil && dbTask.AssigneeAgentProfileID != "" {
+	if task != nil && task.AssigneeAgentProfileID != "" {
 		s.logger.Debug("skipping IN_PROGRESS transition for office task",
 			zap.String("task_id", taskID))
 		return
+	}
+	if sessionID != "" {
+		session, sessionErr := s.repo.GetTaskSession(ctx, sessionID)
+		if sessionErr != nil {
+			s.logger.Warn("skipping IN_PROGRESS transition because session lookup failed",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(sessionErr))
+			return
+		}
+		if session == nil || !sessionstate.IsWorking(session.State) {
+			state := ""
+			if session != nil {
+				state = string(session.State)
+			}
+			s.logger.Debug("skipping IN_PROGRESS transition because session is no longer active",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("session_state", state))
+			return
+		}
 	}
 
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
@@ -1030,9 +1068,11 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	if terminalCompleteStream {
 		s.saveAgentTextForTurn(ctx, payload, terminalMarker.turnID)
 		s.publishAgentPlanForTurn(ctx, payload, terminalMarker.turnID, false)
+		s.persistTurnPromptMetadataForTurn(ctx, payload, session, terminalMarker.turnID)
 		if terminalMarker.turnID != "" {
-			s.publishAgentTurnComplete(ctx, payload)
+			s.publishAgentTurnCompleteForTurn(ctx, payload, terminalMarker.turnID)
 		}
+		s.detachClarificationWaiters(ctx, payload.SessionID)
 		s.logger.Debug("complete stream from terminal execution flushed final data; skipping active turn and runtime reconciliation",
 			zap.String("task_id", payload.TaskID),
 			zap.String("session_id", payload.SessionID),
@@ -1055,13 +1095,7 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 
 	// Detach any pending clarifications so WaitForResponse unblocks while the
 	// overlay stays interactive for a deferred answer via the event fallback path.
-	if s.clarificationCanceller != nil && payload.SessionID != "" {
-		if n := s.clarificationCanceller.DetachSessionAndNotify(ctx, payload.SessionID); n > 0 {
-			s.logger.Info("detached pending clarifications on turn complete",
-				zap.String("session_id", payload.SessionID),
-				zap.Int("count", n))
-		}
-	}
+	s.detachClarificationWaiters(ctx, payload.SessionID)
 
 	// Capture a fresh git status snapshot on every turn completion so the sidebar
 	// diff badge stays current even when the agent remains running (the
@@ -1124,6 +1158,17 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 		zap.String("session_id", payload.SessionID),
 		zap.String("prev_state", sessionStateString(session)))
 	s.setSessionWaitingForInput(ctx, payload.TaskID, payload.SessionID, session)
+}
+
+func (s *Service) detachClarificationWaiters(ctx context.Context, sessionID string) {
+	if s.clarificationCanceller == nil || sessionID == "" {
+		return
+	}
+	if n := s.clarificationCanceller.DetachSessionAndNotify(ctx, sessionID); n > 0 {
+		s.logger.Info("detached pending clarifications on turn complete",
+			zap.String("session_id", sessionID),
+			zap.Int("count", n))
+	}
 }
 
 // sessionStateString renders a session's state for logging, returning "" when
@@ -1354,6 +1399,38 @@ func (s *Service) persistTurnPromptMetadata(
 	if turn == nil {
 		return
 	}
+	s.persistPromptMetadataOnTurn(ctx, payload, session, turn)
+}
+
+func (s *Service) persistTurnPromptMetadataForTurn(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+	session *models.TaskSession,
+	turnID string,
+) {
+	if payload == nil || payload.Data == nil || payload.SessionID == "" || payload.Data.Usage == nil || s.turnService == nil || turnID == "" {
+		return
+	}
+	turn, err := s.turnService.GetTurn(ctx, turnID)
+	if err != nil {
+		s.logger.Warn("failed to get terminal turn for prompt usage metadata",
+			zap.String("turn_id", turnID),
+			zap.String("session_id", payload.SessionID),
+			zap.Error(err))
+		return
+	}
+	if turn == nil {
+		return
+	}
+	s.persistPromptMetadataOnTurn(ctx, payload, session, turn)
+}
+
+func (s *Service) persistPromptMetadataOnTurn(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+	session *models.TaskSession,
+	turn *models.Turn,
+) {
 	model, agentType := resolvePromptUsageLabels(payload, session)
 	metadata := turn.Metadata
 	if metadata == nil {

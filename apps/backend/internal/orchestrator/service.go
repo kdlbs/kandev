@@ -92,6 +92,7 @@ type MessageCreator interface {
 type TurnService interface {
 	StartTurn(ctx context.Context, sessionID string) (*models.Turn, error)
 	CompleteTurn(ctx context.Context, turnID string) error
+	GetTurn(ctx context.Context, turnID string) (*models.Turn, error)
 	GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error)
 	UpdateTurn(ctx context.Context, turn *models.Turn) error
 	// AbandonOpenTurns buries any open turns for a session by setting

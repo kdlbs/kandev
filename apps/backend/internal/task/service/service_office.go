@@ -42,6 +42,27 @@ func (s *Service) GetLastAgentMessage(ctx context.Context, sessionID string) (st
 	return s.sessions.GetLastAgentMessage(ctx, sessionID)
 }
 
+// GetLastAgentMessageForTurn returns the most recent text agent message for a
+// single turn. Used by the office comment bridge when a late terminal complete
+// refers to a historical turn while a newer turn may already be active.
+func (s *Service) GetLastAgentMessageForTurn(ctx context.Context, turnID string) (string, error) {
+	messages, err := s.messages.ListMessagesByTurnID(ctx, turnID)
+	if err != nil {
+		return "", err
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		message := messages[i]
+		if message == nil ||
+			message.AuthorType != models.MessageAuthorAgent ||
+			message.Type != models.MessageTypeMessage ||
+			message.Content == "" {
+			continue
+		}
+		return message.Content, nil
+	}
+	return "", nil
+}
+
 // ListTaskTree returns a flat list of non-archived tasks for tree building.
 func (s *Service) ListTaskTree(ctx context.Context, workspaceID string, filters models.TaskTreeFilters) ([]*models.Task, error) {
 	tasks, err := s.tasks.ListTaskTree(ctx, workspaceID, filters)

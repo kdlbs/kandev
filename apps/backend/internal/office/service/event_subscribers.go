@@ -190,6 +190,7 @@ func (s *Service) RegisterEventSubscribers(eb bus.EventBus) error {
 type AgentTurnMessageData struct {
 	TaskID    string `json:"task_id"`
 	SessionID string `json:"session_id"`
+	TurnID    string `json:"turn_id"`
 	AgentText string `json:"agent_text"`
 	AgentID   string `json:"agent_id"`
 }
@@ -214,6 +215,11 @@ func (s *Service) handleAgentTurnMessageSaved(ctx context.Context, event *bus.Ev
 	// For streaming agents, Data.Text is empty because chunks were already
 	// drained. Fall back to the last agent message saved in session messages.
 	agentText := data.AgentText
+	if agentText == "" && data.TurnID != "" && s.taskWorkspace != nil {
+		if lastMsg, msgErr := s.taskWorkspace.GetLastAgentMessageForTurn(ctx, data.TurnID); msgErr == nil && lastMsg != "" {
+			agentText = lastMsg
+		}
+	}
 	if agentText == "" && data.SessionID != "" && s.taskWorkspace != nil {
 		if lastMsg, msgErr := s.taskWorkspace.GetLastAgentMessage(ctx, data.SessionID); msgErr == nil && lastMsg != "" {
 			agentText = lastMsg
