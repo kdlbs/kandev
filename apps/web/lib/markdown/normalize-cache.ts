@@ -86,19 +86,30 @@ function findBareNestedClose(
   openCount: number,
   wrapperOpenCount: number,
 ) {
-  if (openCount === wrapperOpenCount && lines[startIndex - 1]?.trim() !== "") return null;
-
   for (let index = startIndex + 1; index < closeIndex; index++) {
     const closeCount = matchingCloseLength(lines[index], openCount);
     if (closeCount !== null) {
+      if (openCount === wrapperOpenCount && isLikelyMarkdownSampleClose(lines, startIndex)) {
+        return null;
+      }
       if (lines[startIndex + 1]?.trim() === "" && lines[index - 1]?.trim() === "") return null;
       return { closeCount, closeIndex: index };
     }
-    const taggedOpener = FENCE_OPENER_LINE_RE.exec(lines[index]);
-    const taggedOpenCount = taggedOpener?.[1]?.length ?? 0;
-    if (taggedOpenCount >= openCount) return null;
   }
   return null;
+}
+
+function isLikelyMarkdownSampleClose(lines: string[], closeIndex: number): boolean {
+  const previousLine = lines[closeIndex - 1]?.trim() ?? "";
+  if (previousLine.startsWith("#")) return true;
+  if (previousLine !== "") return false;
+
+  for (let index = closeIndex - 2; index >= 0; index--) {
+    const line = lines[index].trim();
+    if (line === "") continue;
+    return line.startsWith("#");
+  }
+  return false;
 }
 
 function noteNestedFence(state: InnerFenceScan, openCount: number, closeCount: number): void {

@@ -147,7 +147,7 @@ describe("normalizeMarkdown untagged wrapper edge cases", () => {
     expect(normalizeMarkdown(input)).toBe(input);
   });
 
-  it("preserves same-length untagged fences after nonblank markdown sample content", () => {
+  it("strengthens same-length untagged fences after prose inside wrappers", () => {
     const input = [
       MARKDOWN_FENCE,
       INTRO_TEXT,
@@ -158,12 +158,53 @@ describe("normalizeMarkdown untagged wrapper edge cases", () => {
       AFTER_NESTED_PROMPT,
       "```",
     ].join("\n");
+    const expected = [
+      STRENGTHENED_MARKDOWN_FENCE,
+      INTRO_TEXT,
+      "```",
+      "",
+      INNER_PROMPT_TEXT,
+      "```",
+      AFTER_NESTED_PROMPT,
+      "````",
+    ].join("\n");
 
-    expect(normalizeMarkdown(input)).toBe(input);
+    expect(normalizeMarkdown(input)).toBe(expected);
   });
 });
 
 describe("normalizeMarkdown advanced untagged wrapper edge cases", () => {
+  it("preserves markdown samples whose close follows a blank line", () => {
+    const input = [MARKDOWN_FENCE, "# Title", "", "```", "prose", "```", "code", "```"].join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(input);
+  });
+
+  it("strengthens bare fences that contain tagged-looking content", () => {
+    const input = [
+      MARKDOWN_FENCE,
+      INTRO_TEXT,
+      "```",
+      "````text",
+      INNER_PROMPT_TEXT,
+      "```",
+      AFTER_NESTED_PROMPT,
+      "```",
+    ].join("\n");
+    const expected = [
+      STRENGTHENED_MARKDOWN_FENCE,
+      INTRO_TEXT,
+      "```",
+      "````text",
+      INNER_PROMPT_TEXT,
+      "```",
+      AFTER_NESTED_PROMPT,
+      "````",
+    ].join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(expected);
+  });
+
   it("strengthens a longer wrapper when shorter tagged fences use longer closes", () => {
     const input = [
       STRENGTHENED_MARKDOWN_FENCE,
@@ -209,7 +250,9 @@ describe("normalizeMarkdown advanced untagged wrapper edge cases", () => {
 
     expect(normalizeMarkdown(input)).toBe(expected);
   });
+});
 
+describe("normalizeMarkdown long untagged wrapper edge cases", () => {
   it("strengthens a markdown wrapper when longer untagged fences contain shorter examples", () => {
     const input = [
       MARKDOWN_FENCE,
