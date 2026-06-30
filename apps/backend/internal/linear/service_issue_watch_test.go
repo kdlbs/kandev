@@ -3,6 +3,7 @@ package linear
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"testing"
 
@@ -433,6 +434,92 @@ func TestService_CheckIssueWatch_AppliesSort(t *testing.T) {
 		if got[i].Identifier != id {
 			t.Errorf("position %d: got %s, want %s (full: %v)", i, got[i].Identifier, id, identifiers(got))
 		}
+	}
+}
+
+func TestService_CheckIssueWatch_PaginatesBacklog(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
+		AuthMethod: AuthMethodAPIKey, Secret: "lin_api",
+	}); err != nil {
+		t.Fatalf("set config: %v", err)
+	}
+
+	// Two pages: the URGENT issue is on page 2. Sorting only page 1 would never
+	// surface it first — this pins cross-page accumulation + sort (CodeRabbit).
+	f.client.searchIssuesFn = func(_ SearchFilter, pageToken string, _ int) (*SearchResult, error) {
+		if pageToken == "" {
+			return &SearchResult{Issues: []LinearIssue{
+				{Identifier: "LOW", Priority: 4, URL: "https://linear.app/x/issue/LOW"},
+				{Identifier: "MED", Priority: 3, URL: "https://linear.app/x/issue/MED"},
+			}, IsLast: false, NextPageToken: "p2"}, nil
+		}
+		return &SearchResult{Issues: []LinearIssue{
+			{Identifier: "URGENT", Priority: 1, URL: "https://linear.app/x/issue/URGENT"},
+			{Identifier: "HIGH", Priority: 2, URL: "https://linear.app/x/issue/HIGH"},
+		}, IsLast: true}, nil
+	}
+
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		Filter: SearchFilter{TeamKey: "ENG"}, SortBy: SortByPriorityDesc,
+	})
+	if err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+
+	got, err := f.svc.CheckIssueWatch(ctx, w)
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	want := []string{"URGENT", "HIGH", "MED", "LOW"}
+	if len(got) != len(want) {
+		t.Fatalf("expected issues from both pages (%d), got %d: %v", len(want), len(got), identifiers(got))
+	}
+	for i, id := range want {
+		if got[i].Identifier != id {
+			t.Errorf("position %d: got %s, want %s (full: %v)", i, got[i].Identifier, id, identifiers(got))
+		}
+	}
+}
+
+func TestService_CheckIssueWatch_BoundsPages(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
+		AuthMethod: AuthMethodAPIKey, Secret: "lin_api",
+	}); err != nil {
+		t.Fatalf("set config: %v", err)
+	}
+
+	// Mock never reports IsLast and always hands back a fresh cursor + a fresh
+	// identifier — without the issueWatchMaxPages cap this loops forever.
+	calls := 0
+	f.client.searchIssuesFn = func(_ SearchFilter, _ string, _ int) (*SearchResult, error) {
+		calls++
+		return &SearchResult{Issues: []LinearIssue{
+			{Identifier: fmt.Sprintf("ENG-%d", calls), URL: "https://linear.app/x/issue"},
+		}, IsLast: false, NextPageToken: "next"}, nil
+	}
+
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		Filter: SearchFilter{TeamKey: "ENG"},
+	})
+	if err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+
+	got, err := f.svc.CheckIssueWatch(ctx, w)
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if calls != issueWatchMaxPages {
+		t.Errorf("expected SearchIssues called %d times (page cap), got %d", issueWatchMaxPages, calls)
+	}
+	if len(got) != issueWatchMaxPages {
+		t.Errorf("expected %d accumulated issues, got %d", issueWatchMaxPages, len(got))
 	}
 }
 

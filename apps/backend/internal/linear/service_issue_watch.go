@@ -171,28 +171,42 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*Linear
 	if err != nil {
 		return nil, err
 	}
-	res, err := client.SearchIssues(ctx, w.Filter, "", issueWatchSearchPageSize)
-	if err != nil {
-		return nil, err
-	}
 	seen, err := s.store.ListSeenIssueIdentifiers(ctx, w.ID)
 	if err != nil {
 		s.log.Warn("linear: dedup set fetch failed",
 			zap.String("watch_id", w.ID), zap.Error(err))
 		seen = nil
 	}
-	out := make([]*LinearIssue, 0, len(res.Issues))
-	for i := range res.Issues {
-		issue := res.Issues[i]
-		if _, ok := seen[issue.Identifier]; ok {
-			continue
+	// Page through matches (bounded by issueWatchMaxPages) so the sort below
+	// ranks the whole unseen backlog. Linear only orders by created/updated,
+	// so priority ordering must be done here over the full fetched set.
+	out := make([]*LinearIssue, 0, issueWatchSearchPageSize)
+	pageToken := ""
+	for page := 0; page < issueWatchMaxPages; page++ {
+		res, err := client.SearchIssues(ctx, w.Filter, pageToken, issueWatchSearchPageSize)
+		if err != nil {
+			if page == 0 {
+				return nil, err
+			}
+			// A later page failing is non-fatal: rank/dispatch what we have;
+			// the next poll retries from the top.
+			s.log.Debug("linear: issue watch pagination stopped early",
+				zap.String("watch_id", w.ID), zap.Int("page", page), zap.Error(err))
+			break
 		}
-		out = append(out, &issue)
+		for i := range res.Issues {
+			issue := res.Issues[i]
+			if _, ok := seen[issue.Identifier]; ok {
+				continue
+			}
+			out = append(out, &issue)
+		}
+		if res.IsLast || res.NextPageToken == "" {
+			break
+		}
+		pageToken = res.NextPageToken
 	}
 	// Order dispatch so the most important issues win the in-flight slots.
-	// ponytail: only the first issueWatchSearchPageSize unseen issues (by
-	// Linear's updatedAt asc) are fetched, so this sorts within that page —
-	// fetch-all-then-sort if a watch's backlog routinely exceeds the page.
 	sortIssues(out, w.SortBy)
 	return out, nil
 }
@@ -240,6 +254,13 @@ func (s *Service) publishNewLinearIssueEvent(ctx context.Context, w *IssueWatch,
 // pulls from Linear. Mirrors the Jira watcher's limit so per-tick cost stays
 // bounded for very broad filters.
 const issueWatchSearchPageSize = 50
+
+// issueWatchMaxPages bounds how many pages CheckIssueWatch scans per poll.
+// Combined with issueWatchSearchPageSize this caps per-tick cost at
+// issueWatchMaxPages*issueWatchSearchPageSize issues while letting the sort
+// rank enough of the backlog that high-priority issues on later pages can
+// still win the in-flight slots. A caught-up watch fetches a single page.
+const issueWatchMaxPages = 5
 
 // MinIssueWatchPollInterval / MaxIssueWatchPollInterval bound the per-watch
 // search re-run cadence.
