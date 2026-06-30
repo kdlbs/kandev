@@ -95,26 +95,46 @@ function findTaskInState(state: AppState, taskId: string): KanbanTask | undefine
 }
 
 /** Remove a task from both single-kanban and multi-kanban snapshots. */
-function removeTaskFromBothKanbans(state: AppState, wfId: string, taskId: string): AppState {
+function removeTaskFromBothKanbans(state: AppState, taskId: string): AppState {
   let next = state;
-  if (state.kanban.workflowId === wfId) {
+  if (state.kanban.tasks.some((t) => t.id === taskId)) {
     next = {
       ...next,
       kanban: { ...next.kanban, tasks: next.kanban.tasks.filter((t) => t.id !== taskId) },
     };
   }
-  const snapshot = state.kanbanMulti.snapshots[wfId];
-  if (snapshot) {
+
+  const snapshots = Object.entries(next.kanbanMulti.snapshots);
+  const changedSnapshots = snapshots.filter(([, snapshot]) =>
+    snapshot.tasks.some((t) => t.id === taskId),
+  );
+  if (changedSnapshots.length > 0) {
+    const nextSnapshots = { ...next.kanbanMulti.snapshots };
+    for (const [workflowId, snapshot] of changedSnapshots) {
+      nextSnapshots[workflowId] = {
+        ...snapshot,
+        tasks: snapshot.tasks.filter((t) => t.id !== taskId),
+      };
+    }
     next = {
       ...next,
       kanbanMulti: {
         ...next.kanbanMulti,
-        snapshots: {
-          ...next.kanbanMulti.snapshots,
-          [wfId]: { ...snapshot, tasks: snapshot.tasks.filter((t) => t.id !== taskId) },
-        },
+        snapshots: nextSnapshots,
       },
     };
+  }
+  return next;
+}
+
+function clearRemovedTaskSelection(state: AppState, taskId: string): AppState {
+  let next = state;
+  if (next.tasks.activeTaskId === taskId) {
+    next = { ...next, tasks: { ...next.tasks, activeTaskId: null, activeSessionId: null } };
+  }
+  if (next.tasks.lastSessionByTaskId[taskId]) {
+    const { [taskId]: _, ...rest } = next.tasks.lastSessionByTaskId;
+    next = { ...next, tasks: { ...next.tasks, lastSessionByTaskId: rest } };
   }
   return next;
 }
@@ -131,6 +151,63 @@ function redirectAwayFromDeletedTask(deletedId: string): void {
   softNavigate("/", "replace");
 }
 
+type TaskUpdatedMessage = Parameters<NonNullable<WsHandlers["task.updated"]>>[0];
+
+function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessage): void {
+  // Skip ephemeral tasks (e.g., quick chat) - they shouldn't appear on the Kanban board
+  if (message.payload.is_ephemeral) return;
+
+  // Capture the previous primary session id BEFORE the upsert so we can
+  // detect a primary-session swap (e.g. workflow profile switch reusing a
+  // different session) and follow focus to the new primary.
+  const beforeState = store.getState();
+  const taskId = message.payload.task_id;
+  const previousPrimary = findTaskInState(beforeState, taskId)?.primarySessionId ?? null;
+  const archivedAt = message.payload.archived_at;
+
+  if (archivedAt) {
+    removeRecentTask(taskId);
+    store.getState().removeTaskFromSidebarPrefs(taskId);
+  }
+
+  store.setState((state) => {
+    const wfId = message.payload.workflow_id;
+    const oldWfId = message.payload.old_workflow_id;
+    let next = state;
+
+    if (oldWfId && oldWfId !== wfId) {
+      next = removeTaskFromBothKanbans(next, taskId);
+    }
+
+    if (archivedAt) {
+      next = removeTaskFromBothKanbans(next, taskId);
+      return clearRemovedTaskSelection(next, taskId);
+    }
+
+    return upsertTaskInBothKanbans(next, wfId, message.payload);
+  });
+
+  // Follow focus to the new primary when:
+  //  - the user is currently viewing this task,
+  //  - the user was sitting on the previous primary,
+  //  - they do NOT have a non-terminal pinned session for this task, and
+  //  - the primary actually changed.
+  // This makes workflow profile switches transparent for unpinned users
+  // without yanking users off a live session they deliberately selected.
+  const afterState = store.getState();
+  const newPrimary = findTaskInState(afterState, taskId)?.primarySessionId ?? null;
+  if (
+    newPrimary &&
+    newPrimary !== previousPrimary &&
+    afterState.tasks.activeTaskId === taskId &&
+    afterState.tasks.activeSessionId === previousPrimary &&
+    !shouldPreservePinnedSessionForTask(afterState, taskId)
+  ) {
+    clearPinnedSessionIfOverridden(store, newPrimary);
+    afterState.setActiveSessionAuto(taskId, newPrimary);
+  }
+}
+
 export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "task.created": (message) => {
@@ -140,56 +217,9 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
         upsertTaskInBothKanbans(state, message.payload.workflow_id, message.payload),
       );
     },
-    "task.updated": (message) => {
-      // Skip ephemeral tasks (e.g., quick chat) - they shouldn't appear on the Kanban board
-      if (message.payload.is_ephemeral) return;
-
-      // Capture the previous primary session id BEFORE the upsert so we can
-      // detect a primary-session swap (e.g. workflow profile switch reusing a
-      // different session) and follow focus to the new primary.
-      const beforeState = store.getState();
-      const taskId = message.payload.task_id;
-      const previousPrimary = findTaskInState(beforeState, taskId)?.primarySessionId ?? null;
-
-      store.setState((state) => {
-        const wfId = message.payload.workflow_id;
-        const oldWfId = message.payload.old_workflow_id;
-        let next = state;
-
-        if (oldWfId && oldWfId !== wfId) {
-          next = removeTaskFromBothKanbans(next, oldWfId, taskId);
-        }
-
-        if (message.payload.archived_at) {
-          return removeTaskFromBothKanbans(next, wfId, taskId);
-        }
-
-        return upsertTaskInBothKanbans(next, wfId, message.payload);
-      });
-
-      // Follow focus to the new primary when:
-      //  - the user is currently viewing this task,
-      //  - the user was sitting on the previous primary,
-      //  - they do NOT have a non-terminal pinned session for this task, and
-      //  - the primary actually changed.
-      // This makes workflow profile switches transparent for unpinned users
-      // without yanking users off a live session they deliberately selected.
-      const afterState = store.getState();
-      const newPrimary = findTaskInState(afterState, taskId)?.primarySessionId ?? null;
-      if (
-        newPrimary &&
-        newPrimary !== previousPrimary &&
-        afterState.tasks.activeTaskId === taskId &&
-        afterState.tasks.activeSessionId === previousPrimary &&
-        !shouldPreservePinnedSessionForTask(afterState, taskId)
-      ) {
-        clearPinnedSessionIfOverridden(store, newPrimary);
-        afterState.setActiveSessionAuto(taskId, newPrimary);
-      }
-    },
+    "task.updated": (message) => handleTaskUpdated(store, message),
     "task.deleted": (message) => {
       const deletedId = message.payload.task_id;
-      const wfId = message.payload.workflow_id;
       removeRecentTask(deletedId);
 
       const currentState = store.getState();
@@ -223,7 +253,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
 
       store.setState((state) => {
         const isActive = state.tasks.activeTaskId === deletedId;
-        let next = removeTaskFromBothKanbans(state, wfId, deletedId);
+        let next = removeTaskFromBothKanbans(state, deletedId);
         if (isActive) {
           next = { ...next, tasks: { ...next.tasks, activeTaskId: null, activeSessionId: null } };
         }

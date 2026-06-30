@@ -536,6 +536,10 @@ describe("task.updated repository clearing", () => {
 });
 
 describe("task.deleted cleanup", () => {
+  beforeEach(() => {
+    vi.mocked(removeRecentTask).mockClear();
+  });
+
   it("removes the deleted task from recent task history", () => {
     const store = makeStore({
       kanban: {
