@@ -468,6 +468,8 @@ func ciAutomationChecksSettledForAutoFix(pr *github.TaskPR, feedback *github.PRF
 }
 
 func ciAutomationChecksRollupSettled(state string) bool {
+	// GitHub GraphQL rollups can expose values like EXPECTED before concrete
+	// check runs exist. Keep the whitelist narrow so unknown rollup states wait.
 	switch strings.TrimSpace(strings.ToLower(state)) {
 	case "", ciAutomationCheckSuccess, ciAutomationCheckFailure, ciAutomationCheckError:
 		return true
