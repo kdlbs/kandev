@@ -144,7 +144,14 @@ func (e *Executor) writeTaskReviewStateIfNoWorkingSessions(ctx context.Context, 
 
 	if failedSessionID != "" {
 		session, err := e.repo.GetTaskSession(ctx, failedSessionID)
-		if err == nil && session != nil && isRuntimeWorkingSessionState(session.State) {
+		if err != nil {
+			e.logger.Warn("failed to load failed session before failed-start REVIEW state reconcile",
+				zap.String("task_id", taskID),
+				zap.String("session_id", failedSessionID),
+				zap.Error(err))
+			return
+		}
+		if session != nil && isRuntimeWorkingSessionState(session.State) {
 			e.logger.Debug("skipping failed-start task REVIEW state because failed session is active again",
 				zap.String("task_id", taskID),
 				zap.String("session_id", failedSessionID),

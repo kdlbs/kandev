@@ -127,3 +127,33 @@ func TestAutoPostAgentComment_TurnScopedFallbackPath(t *testing.T) {
 	}
 	t.Fatalf("expected session comment with body from turn-scoped fallback, got %+v", comments)
 }
+
+func TestAutoPostAgentComment_TurnScopedFallbackMissDoesNotUseSessionMessage(t *testing.T) {
+	stub := &stubTaskWorkspace{lastMsg: "newer active turn reply"}
+	svc, eb := newTestServiceWithTaskWorkspace(t, stub)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "agent-turn-miss")
+	taskID := createOfficeTask(t, svc, "ws-1", "agent-turn-miss")
+
+	event := bus.NewEvent(events.AgentTurnMessageSaved, "orchestrator", map[string]string{
+		"task_id":    taskID,
+		"session_id": "sess-fallback",
+		"turn_id":    "turn-terminal",
+		"agent_text": "",
+		"agent_id":   "agent-turn-miss",
+	})
+	if err := eb.Publish(ctx, events.AgentTurnMessageSaved, event); err != nil {
+		t.Fatalf("publish event: %v", err)
+	}
+
+	comments, err := svc.ListComments(ctx, taskID)
+	if err != nil {
+		t.Fatalf("list comments: %v", err)
+	}
+	for _, c := range comments {
+		if c.Source == "session" {
+			t.Fatalf("expected no session comment from session fallback when turn lookup misses, got %+v", comments)
+		}
+	}
+}

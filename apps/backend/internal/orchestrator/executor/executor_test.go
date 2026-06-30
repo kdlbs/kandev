@@ -1249,6 +1249,26 @@ func TestWriteTaskReviewStateIfNoWorkingSessionsSkipsSameSessionActiveAgain(t *t
 	}
 }
 
+func TestWriteTaskReviewStateIfNoWorkingSessionsSkipsOnFailedSessionReadError(t *testing.T) {
+	repo := newMockRepository()
+	repo.tasks["task-123"] = &models.Task{ID: "task-123"}
+	repo.getTaskSessionFunc = func(context.Context, string) (*models.TaskSession, error) {
+		return nil, errors.New("temporary session read failure")
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	var taskStateUpdates []v1.TaskState
+	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
+		taskStateUpdates = append(taskStateUpdates, state)
+		return nil
+	})
+
+	exec.writeTaskReviewStateIfNoWorkingSessions(context.Background(), "task-123", "session-123")
+
+	if len(taskStateUpdates) != 0 {
+		t.Errorf("expected failed session read to block REVIEW reconcile, got %v", taskStateUpdates)
+	}
+}
+
 func TestWriteTaskReviewStateIfNoWorkingSessionsSkipsOfficeTask(t *testing.T) {
 	repo := newMockRepository()
 	repo.tasks["task-123"] = &models.Task{

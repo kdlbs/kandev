@@ -220,7 +220,7 @@ func (s *Service) handleAgentTurnMessageSaved(ctx context.Context, event *bus.Ev
 			agentText = lastMsg
 		}
 	}
-	if agentText == "" && data.SessionID != "" && s.taskWorkspace != nil {
+	if agentText == "" && data.TurnID == "" && data.SessionID != "" && s.taskWorkspace != nil {
 		if lastMsg, msgErr := s.taskWorkspace.GetLastAgentMessage(ctx, data.SessionID); msgErr == nil && lastMsg != "" {
 			agentText = lastMsg
 		}
