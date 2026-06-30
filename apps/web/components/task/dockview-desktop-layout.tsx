@@ -302,6 +302,32 @@ function setupReadyDockview({ api, appStore, layout, refs }: ReadyDockviewSetup)
   refs.readyDisposersRef.current.push(setupSashDragCapToggle(api));
 }
 
+type DockviewMainAreaProps = {
+  effectiveSessionId: string | null;
+  hasDevScript: boolean;
+  onReady: (event: DockviewReadyEvent) => void;
+};
+
+function DockviewMainArea({ effectiveSessionId, hasDevScript, onReady }: DockviewMainAreaProps) {
+  return (
+    <div className="min-h-0 min-w-0 overflow-hidden flex flex-col">
+      <PreviewController sessionId={effectiveSessionId} hasDevScript={hasDevScript} />
+      <DockviewReact
+        theme={themeKandev}
+        components={components}
+        tabComponents={tabComponents}
+        defaultTabComponent={ContextMenuTab}
+        leftHeaderActionsComponent={LeftHeaderActions}
+        rightHeaderActionsComponent={RightHeaderActions}
+        watermarkComponent={DockviewWatermark}
+        onReady={onReady}
+        defaultRenderer="always"
+        className="flex-1 min-h-0"
+      />
+    </div>
+  );
+}
+
 export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   sessionId,
   repository,
@@ -354,11 +380,9 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   // panel could leak into the old session's persisted layout.
   useEnvSwitchCleanup(effectiveSessionId, effectiveEnvId, activeTaskId);
 
-  // Auto-create a session tab when a session becomes active
   useAutoSessionTab(effectiveSessionId);
   useChangesPanelAutoFocus(changesFocusKey);
 
-  // Auto-show PR detail panel when the task has an associated PR
   useAutoPRPanel();
   useDockviewUnmountCleanup(saveTimerRef, readyDisposersRef);
 
@@ -377,21 +401,11 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
         transition: isRestoringLayout ? "none" : "opacity 60ms ease-out",
       }}
     >
-      <div className="min-h-0 min-w-0 overflow-hidden flex flex-col">
-        <PreviewController sessionId={effectiveSessionId} hasDevScript={hasDevScript} />
-        <DockviewReact
-          theme={themeKandev}
-          components={components}
-          tabComponents={tabComponents}
-          defaultTabComponent={ContextMenuTab}
-          leftHeaderActionsComponent={LeftHeaderActions}
-          rightHeaderActionsComponent={RightHeaderActions}
-          watermarkComponent={DockviewWatermark}
-          onReady={onReady}
-          defaultRenderer="always"
-          className="flex-1 min-h-0"
-        />
-      </div>
+      <DockviewMainArea
+        effectiveSessionId={effectiveSessionId}
+        hasDevScript={hasDevScript}
+        onReady={onReady}
+      />
       <BottomTerminalPanel />
       <PanelPortalHost renderPanel={renderPanel} />
       <DockviewReviewDialog sessionId={effectiveSessionId} review={review} />

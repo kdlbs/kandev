@@ -512,6 +512,52 @@ func TestGetRunsByCommentIDs_MapsLatestRunPerComment(t *testing.T) {
 	}
 }
 
+func TestGetRunsByCommentIDs_MapsSaltedCommentKeysByPayload(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	run := &models.Run{
+		AgentProfileID: "a1",
+		Reason:         "task_comment",
+		Payload:        `{"task_id":"target-task","source_task_id":"source-task","comment_id":"cm-X"}`,
+		Status:         "queued",
+		CoalescedCount: 1,
+		IdempotencyKey: strPtr("task_comment:cm-X:work:target-task:a1:abcd1234"),
+	}
+	if err := repo.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	nilKeyRun := &models.Run{
+		AgentProfileID: "a1",
+		Reason:         "task_comment",
+		Payload:        `{"task_id":"target-task","comment_id":"cm-nil-key"}`,
+		Status:         "queued",
+		CoalescedCount: 1,
+	}
+	if err := repo.CreateRun(ctx, nilKeyRun); err != nil {
+		t.Fatalf("create nil-key run: %v", err)
+	}
+
+	got, err := repo.GetRunsByCommentIDs(ctx, []string{"cm-X", "cm-nil-key"})
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	status, ok := got["cm-X"]
+	if !ok {
+		t.Fatalf("missing cm-X status: %+v", got)
+	}
+	if status.RunID != run.ID || status.Status != "queued" {
+		t.Fatalf("cm-X = %+v, want run %s queued", status, run.ID)
+	}
+	nilKeyStatus, ok := got["cm-nil-key"]
+	if !ok {
+		t.Fatalf("missing cm-nil-key status: %+v", got)
+	}
+	if nilKeyStatus.RunID != nilKeyRun.ID || nilKeyStatus.Status != "queued" {
+		t.Fatalf("cm-nil-key = %+v, want run %s queued", nilKeyStatus, nilKeyRun.ID)
+	}
+}
+
 // TestGetRunsByCommentIDs_EmptyInput_ReturnsEmptyMap pins the
 // degenerate case so callers can hand the result straight into a
 // range loop without nil-checking.

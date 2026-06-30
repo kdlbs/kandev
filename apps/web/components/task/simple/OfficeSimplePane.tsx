@@ -24,8 +24,6 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@kandev/ui/breadcrumb";
-import { useAppStore } from "@/components/state-provider";
-import { selectLiveSessionForTask } from "@/lib/state/slices/session/selectors";
 import { TaskProperties } from "./task-properties";
 import { ChatActivityTabs } from "./chat-activity-tabs";
 import { ExecutionIndicator } from "@/app/office/components/execution-indicator";
@@ -59,6 +57,15 @@ import type {
 } from "@/app/office/tasks/[id]/types";
 import { toast } from "sonner";
 
+const COMMENTABLE_DONE_SESSION_STATES = new Set<TaskSession["state"]>([
+  "CREATED",
+  "STARTING",
+  "RUNNING",
+  "IDLE",
+  "WAITING_FOR_INPUT",
+  "COMPLETED",
+]);
+
 type OfficeSimplePaneProps = {
   task: Task;
   comments: TaskComment[];
@@ -68,6 +75,26 @@ type OfficeSimplePaneProps = {
   onToggleAdvanced?: () => void;
   onCommentsChanged?: () => void;
 };
+
+function sessionSortTime(session: TaskSession): number {
+  const value = session.updatedAt ?? session.completedAt ?? session.startedAt ?? "";
+  const time = Date.parse(value);
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function latestSession(sessions: TaskSession[]): TaskSession | undefined {
+  return sessions.reduce<TaskSession | undefined>((latest, session) => {
+    if (!latest) return session;
+    return sessionSortTime(session) >= sessionSortTime(latest) ? session : latest;
+  }, undefined);
+}
+
+function commentsReadOnly(task: Task, sessions: TaskSession[]): boolean {
+  if (task.status === "cancelled") return true;
+  if (task.status !== "done") return false;
+  const session = latestSession(sessions);
+  return !session || !COMMENTABLE_DONE_SESSION_STATES.has(session.state);
+}
 
 function TaskBreadcrumb({ task }: { task: Task }) {
   return (
@@ -411,38 +438,6 @@ function useTaskTreePreview(taskId: string) {
   return { treePreview, activeHold, refreshTreePreview };
 }
 
-// useChatReadOnly returns true when the chat input should be hidden.
-//
-// Office tasks always accept comments — a user comment is the canonical
-// way to wake the agent again (the reactivity pipeline fires
-// task_comment runs). So even after the assignee's session has gone
-// IDLE / COMPLETED, the input must stay so the user can ask a follow-up.
-//
-// Kanban / quick-chat keeps the legacy "finished tasks are read-only"
-// behaviour: once the last session terminates the input goes away.
-function useChatReadOnly(task: Task, sessions: TaskSession[]): boolean {
-  const liveSession = useAppStore((s) => selectLiveSessionForTask(s, task.id));
-  if (isOfficeTask(task)) return false;
-  if (liveSession) return false;
-  if (sessions.length === 0) return false;
-  const lastSession = [...sessions].sort((a, b) =>
-    (b.startedAt ?? "").localeCompare(a.startedAt ?? ""),
-  )[0];
-  if (!lastSession) return false;
-  return (
-    lastSession.state === "COMPLETED" ||
-    lastSession.state === "FAILED" ||
-    lastSession.state === "CANCELLED"
-  );
-}
-
-// isOfficeTask mirrors the backend's IsOfficeTask: any task that has a
-// project_id, or was created via the agent / routine origin paths.
-function isOfficeTask(task: Task): boolean {
-  if (task.projectId) return true;
-  return false;
-}
-
 export function OfficeSimplePane({
   task,
   comments,
@@ -455,7 +450,6 @@ export function OfficeSimplePane({
   const [subIssueOpen, setSubIssueOpen] = useState(false);
   const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null);
   const { treePreview, activeHold, refreshTreePreview } = useTaskTreePreview(task.id);
-  const isReadOnly = useChatReadOnly(task, sessions);
 
   return (
     <ActiveSessionRefProvider>
@@ -518,7 +512,7 @@ export function OfficeSimplePane({
             activity={activity}
             sessions={sessions}
             scrollParent={scrollParent}
-            readOnly={isReadOnly}
+            readOnly={commentsReadOnly(task, sessions)}
             onCommentsChanged={onCommentsChanged}
           />
           {hasBlockerChain(task.children) ? (

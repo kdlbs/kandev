@@ -39,6 +39,7 @@ func (r *Repository) initPhase2Schema() error {
 	CREATE INDEX IF NOT EXISTS idx_workflow_step_participants_step ON workflow_step_participants(step_id);
 	CREATE INDEX IF NOT EXISTS idx_workflow_step_participants_role ON workflow_step_participants(step_id, role);
 	CREATE INDEX IF NOT EXISTS idx_workflow_step_participants_task ON workflow_step_participants(task_id) WHERE task_id != '';
+	CREATE INDEX IF NOT EXISTS idx_workflow_step_participants_task_role ON workflow_step_participants(task_id, role) WHERE task_id != '';
 	`
 	if _, err := r.db.Exec(participantsSchema); err != nil {
 		return fmt.Errorf("failed to create workflow_step_participants table: %w", err)
@@ -333,6 +334,10 @@ func (r *Repository) GetStepParticipant(ctx context.Context, id string) (*models
 //     wins; multiple rows fall back to the lowest-position id-tiebroken
 //     pick (ambiguity, but deterministic).
 //  2. The step's `agent_profile_id` (the workflow's primary).
+//  3. The most recently assigned runner participant for the task. This
+//     preserves the task's effective runner after terminal transitions
+//     to steps that do not carry their own participant rows, such as the
+//     default Done step.
 //
 // Returns "" without error when neither exists. Empty step_id or
 // task_id is an error — callers must supply both.
@@ -371,9 +376,48 @@ func (r *Repository) ResolveCurrentRunner(
 		return "", fmt.Errorf("lookup step primary: %w", err)
 	}
 	if primary.Valid {
-		return primary.String, nil
+		if primary.String != "" {
+			return primary.String, nil
+		}
 	}
-	return "", nil
+	err = r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT agent_profile_id FROM workflow_step_participants
+		WHERE task_id = ? AND role = 'runner'
+		ORDER BY rowid DESC
+		LIMIT 1
+	`), taskID).Scan(&agentID)
+	if err == nil {
+		if agentID != "" {
+			return agentID, nil
+		}
+		return "", nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return "", fmt.Errorf("lookup task runner participant: %w", err)
+}
+
+// GetTaskWorkflowStepID returns the task's current workflow step. Cross-task
+// queue_run primary resolution uses this before resolving the target task's
+// current runner.
+func (r *Repository) GetTaskWorkflowStepID(ctx context.Context, taskID string) (string, error) {
+	if taskID == "" {
+		return "", errors.New("task_id is required")
+	}
+	var stepID string
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT COALESCE(workflow_step_id, '')
+		FROM tasks
+		WHERE id = ?
+	`), taskID).Scan(&stepID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("lookup task workflow step: %w", err)
+	}
+	return stepID, nil
 }
 
 // SetTaskRunner writes (or replaces) the runner participant for

@@ -15,6 +15,8 @@ import (
 	"github.com/kandev/kandev/internal/office/costs"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/shared"
+	"github.com/kandev/kandev/internal/runs/commentkeys"
 	"github.com/kandev/kandev/internal/workflow/engine"
 )
 
@@ -36,7 +38,7 @@ func (s *Service) dispatchEngineTrigger(
 		return nil
 	}
 	if err := s.engineDispatcher.HandleTrigger(ctx, taskID, trigger, payload, opID); err != nil {
-		if errors.Is(err, ErrEngineNoSession) {
+		if errors.Is(err, shared.ErrEngineNoSession) {
 			s.logger.Debug("engine trigger skipped: no active session",
 				zap.String("task_id", taskID),
 				zap.String("trigger", string(trigger)))
@@ -75,6 +77,7 @@ type CommentPostedData struct {
 	AuthorID               string `json:"author_id"`
 	AuthorType             string `json:"author_type"`
 	AssigneeAgentProfileID string `json:"assignee_agent_profile_id"`
+	EngineDispatched       string `json:"engine_dispatched"`
 }
 
 // ApprovalResolvedData represents an approval resolved event payload.
@@ -860,6 +863,9 @@ func (s *Service) queueCommentRun(ctx context.Context, data CommentPostedData) e
 	if data.TaskID == "" || data.CommentID == "" {
 		return nil
 	}
+	if data.EngineDispatched == commentkeys.EngineDispatchedValue {
+		return nil
+	}
 	// Self-comment short-circuit: if the agent that wrote the comment is
 	// also the task's primary participant we don't want to queue a run.
 	// The engine's queue_run resolver enforces the same rule, but
@@ -870,7 +876,7 @@ func (s *Service) queueCommentRun(ctx context.Context, data CommentPostedData) e
 		data.AuthorType == participantTypeAgent && fields.AssigneeAgentProfileID == data.AuthorID {
 		return nil
 	}
-	key := fmt.Sprintf("task_comment:%s", data.CommentID)
+	key := commentkeys.TaskComment(data.CommentID)
 	return s.dispatchEngineTrigger(ctx, data.TaskID, engine.TriggerOnComment,
 		engine.OnCommentPayload{
 			CommentID: data.CommentID,
