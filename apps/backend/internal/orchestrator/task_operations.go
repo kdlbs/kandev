@@ -560,6 +560,11 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		zap.Bool("auto_start", autoStart),
 		zap.Int("attachments", len(attachments)))
 
+	isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine office task status: %w", err)
+	}
+
 	// Office tasks do NOT transition through SCHEDULING / IN_PROGRESS on
 	// every run. Their lifecycle status (todo / in_review / done /
 	// blocked / cancelled) reflects the *user-meaningful workflow*, not
@@ -569,7 +574,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// transition here avoids gratuitous flicker (REVIEW → SCHEDULING →
 	// IN_PROGRESS → REVIEW for a single comment-reply cycle) and matches
 	// the user's mental model.
-	if s.isOfficeTask(ctx, taskID) {
+	if isOfficeTask {
 		s.logger.Debug("skipping SCHEDULING transition for office task",
 			zap.String("task_id", taskID))
 	} else if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
@@ -672,7 +677,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// task, etc.) are excluded because office agents call those via the
 	// kandev CLI ($KANDEV_CLI). See docs/specs/office-agent-cli/spec.md.
 	mcpMode := ""
-	if s.isOfficeTask(ctx, taskID) {
+	if isOfficeTask {
 		mcpMode = executor.McpModeOffice
 	}
 
