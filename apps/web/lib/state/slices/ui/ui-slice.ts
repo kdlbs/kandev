@@ -103,6 +103,7 @@ export const defaultUIState: UISliceState = {
     width: APP_SIDEBAR_EXPANDED_WIDTH,
     settingsMode: false,
   },
+  acknowledgedAgentErrors: {},
   dismissedAgentErrors: {},
 };
 

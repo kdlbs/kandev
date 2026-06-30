@@ -172,6 +172,12 @@ export type UISliceState = {
    * hides the icon. Persisted to localStorage.
    */
   dismissedAgentErrors: Record<string, string>;
+  /**
+   * Most recently acknowledged sidebar `last_agent_error` stamp per sessionId.
+   * This suppresses task-row badges after the sidebar can prove an error is
+   * stale, without hiding the chat banner.
+   */
+  acknowledgedAgentErrors: Record<string, string>;
 };
 
 export type UISliceActions = {
@@ -243,6 +249,8 @@ export type UISliceActions = {
   toggleAppSidebarSection: (sectionId: string, defaultExpanded?: boolean) => void;
   setAppSidebarWidth: (width: number) => void;
   toggleAppSidebarSettingsMode: () => void;
+  /** Record that `stamp` has been acknowledged for sidebar badge purposes. */
+  acknowledgeAgentError: (sessionId: string, stamp: string) => void;
   /** Record that `stamp` has been dismissed for `sessionId`. */
   dismissAgentError: (sessionId: string, stamp: string) => void;
 };

@@ -15,10 +15,16 @@ export type LastAgentError = {
 // ever had an error.
 
 const DISMISSED_AGENT_ERRORS_KEY = "kandev.dismissedAgentErrors";
+const ACKNOWLEDGED_AGENT_ERRORS_KEY = "kandev.acknowledgedAgentErrors";
 
 export function getStoredDismissedAgentErrors(): Record<string, string> {
   return getLocalStorage<Record<string, string>>(DISMISSED_AGENT_ERRORS_KEY, {});
 }
+
+export function getStoredAcknowledgedAgentErrors(): Record<string, string> {
+  return getLocalStorage<Record<string, string>>(ACKNOWLEDGED_AGENT_ERRORS_KEY, {});
+}
+
 /**
  * Merge `map` into whatever is currently in localStorage so concurrent writes
  * from other tabs (or older versions of this tab's state) are not clobbered.
@@ -27,6 +33,11 @@ export function getStoredDismissedAgentErrors(): Record<string, string> {
 export function setStoredDismissedAgentErrors(map: Record<string, string>): void {
   const current = getStoredDismissedAgentErrors();
   setLocalStorage(DISMISSED_AGENT_ERRORS_KEY, { ...current, ...map });
+}
+
+export function setStoredAcknowledgedAgentErrors(map: Record<string, string>): void {
+  const current = getStoredAcknowledgedAgentErrors();
+  setLocalStorage(ACKNOWLEDGED_AGENT_ERRORS_KEY, { ...current, ...map });
 }
 
 export function readLastAgentError(metadata: Record<string, unknown> | null | undefined) {

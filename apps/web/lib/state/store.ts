@@ -235,6 +235,7 @@ export type AppState = {
   kanbanPreviewedTaskId: (typeof defaultUIState)["kanbanPreviewedTaskId"];
   sidebarTaskPrefs: (typeof defaultUIState)["sidebarTaskPrefs"];
   appSidebar: (typeof defaultUIState)["appSidebar"];
+  acknowledgedAgentErrors: (typeof defaultUIState)["acknowledgedAgentErrors"];
   dismissedAgentErrors: (typeof defaultUIState)["dismissedAgentErrors"];
 
   // GitLab actions
@@ -532,6 +533,7 @@ export type AppState = {
   toggleAppSidebarSection: UIA["toggleAppSidebarSection"];
   setAppSidebarWidth: UIA["setAppSidebarWidth"];
   toggleAppSidebarSettingsMode: UIA["toggleAppSidebarSettingsMode"];
+  acknowledgeAgentError: UIA["acknowledgeAgentError"];
   dismissAgentError: UIA["dismissAgentError"];
   // Office actions
   setOfficeAgentProfiles: (agents: AgentProfile[]) => void;

@@ -29,6 +29,7 @@ import { useGroupedSidebarView } from "./task-session-sidebar-grouped-view";
 import { useSidebarLinkActions } from "./task-session-sidebar-link-actions";
 import { useShallow } from "zustand/react/shallow";
 import { type AgentErrorOptions, agentErrorMessageForTask } from "@/lib/task-agent-error";
+import { usePersistResolvedAgentErrorAcknowledgements } from "./use-agent-error-acknowledgements";
 
 /**
  * Stabilize a derived array of primary session IDs so the reference only
@@ -215,7 +216,15 @@ function useSidebarData(workspaceId: string | null) {
   const taskPRsByTaskId = useAppStore((state) => state.taskPRs.byTaskId);
   const messagesBySession = useAppStore((state) => state.messages.bySession);
   const dismissedAgentErrors = useAppStore((state) => state.dismissedAgentErrors);
+  const acknowledgedAgentErrors = useAppStore((state) => state.acknowledgedAgentErrors);
   const archivedState = useArchivedTaskState();
+
+  usePersistResolvedAgentErrorAcknowledgements({
+    sessionsById,
+    messagesBySession,
+    dismissedAgentErrors,
+    acknowledgedAgentErrors,
+  });
 
   const selectedTaskId = useMemo(() => {
     if (activeSessionId) return sessionsById[activeSessionId]?.task_id ?? activeTaskId;
@@ -258,6 +267,7 @@ function useSidebarData(workspaceId: string | null) {
       workflowNameById,
       stepTitleById,
       dismissedAgentErrors,
+      acknowledgedAgentErrors,
       messagesBySession,
     };
     const items: SidebarItem[] = allTasks.map((task) => toSidebarItem(task, mapCtx));
@@ -282,6 +292,7 @@ function useSidebarData(workspaceId: string | null) {
     taskPRsByTaskId,
     pendingFlags,
     dismissedAgentErrors,
+    acknowledgedAgentErrors,
     messagesBySession,
     archivedState,
   ]);
