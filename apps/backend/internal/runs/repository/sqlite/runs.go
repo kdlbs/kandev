@@ -202,7 +202,7 @@ func (r *Repository) GetRunsByCommentIDs(
 	if len(commentIDs) == 0 {
 		return out, nil
 	}
-	args := make([]interface{}, 0, len(commentIDs)*3)
+	args := make([]interface{}, 0)
 	keyPlaceholders := make([]string, len(commentIDs))
 	commentPlaceholders := make([]string, len(commentIDs))
 	wanted := make(map[string]struct{}, len(commentIDs))
@@ -267,6 +267,26 @@ func (r *Repository) GetRunsByCommentIDs(
 		}
 	}
 	return out, rows.Err()
+}
+
+// HasActiveEngineRunForCommentID returns true when a non-terminal
+// engine-originated task_comment run already exists for commentID.
+func (r *Repository) HasActiveEngineRunForCommentID(ctx context.Context, commentID string) (bool, error) {
+	commentIDExpr := dialect.JSONExtract(r.ro.DriverName(), "payload", "comment_id")
+	workflowStepIDExpr := dialect.JSONExtract(r.ro.DriverName(), "payload", "workflow_step_id")
+	var count int
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(fmt.Sprintf(`
+		SELECT COUNT(*)
+		FROM runs
+		WHERE reason = ?
+		  AND status IN ('queued', 'claimed')
+		  AND %s = ?
+		  AND COALESCE(%s, '') != ''
+	`, commentIDExpr, workflowStepIDExpr)), commentkeys.TaskCommentReason, commentID).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func commentIDFromRun(idempotencyKey, payload string, wanted map[string]struct{}) string {

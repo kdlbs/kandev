@@ -166,12 +166,12 @@ func (s *Service) QueueRun(ctx context.Context, req QueueRunRequest) error {
 	}
 
 	payloadMap := runPayload(req, agentInstanceID)
+	if s.shouldSkipLegacyCommentWake(ctx, req, payloadMap) {
+		return nil
+	}
 	payload, err := encodePayload(payloadMap)
 	if err != nil {
 		return fmt.Errorf("encode payload: %w", err)
-	}
-	if s.shouldSkipLegacyCommentWake(ctx, req, payloadMap) {
-		return nil
 	}
 
 	if shouldCoalesceRun(req) {
@@ -285,25 +285,21 @@ func (s *Service) shouldSkipLegacyCommentWake(
 	if !ok || commentID == "" {
 		return false
 	}
-	statuses, err := s.repo.GetRunsByCommentIDs(ctx, []string{commentID})
+	exists, err := s.repo.HasActiveEngineRunForCommentID(ctx, commentID)
 	if err != nil {
 		s.log.Debug("legacy comment wake dedupe lookup failed",
 			zap.String("comment_id", commentID),
 			zap.Error(err))
 		return false
 	}
-	if _, exists := statuses[commentID]; !exists {
+	if !exists {
 		return false
 	}
+	agent, _ := payload["agent_profile_id"].(string)
 	s.log.Debug("legacy comment wake skipped (engine run already queued)",
 		zap.String("comment_id", commentID),
-		zap.String("agent", payloadString(payload, "agent_profile_id")))
+		zap.String("agent", agent))
 	return true
-}
-
-func payloadString(payload map[string]any, key string) string {
-	value, _ := payload[key].(string)
-	return value
 }
 
 // publishRunQueued emits the OfficeRunQueued bus event so the WS

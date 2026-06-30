@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
@@ -244,6 +245,28 @@ func TestQueueRun_LegacyCommentWakeDoesNotOverwriteCanonicalCommentRun(t *testin
 		t.Fatalf("engine payload was overwritten by legacy coalesce: %#v", payload)
 	}
 
+}
+
+// TestQueueRun_LegacyCommentWakeSkippedWhenEngineRunQueued pins that
+// legacy task-comment wakes do not enqueue a duplicate row after the
+// workflow engine has already queued the comment run.
+func TestQueueRun_LegacyCommentWakeSkippedWhenEngineRunQueued(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		AgentProfileID: "agent-primary",
+		TaskID:         "target-task",
+		WorkflowStepID: "work",
+		Reason:         "task_comment",
+		IdempotencyKey: "task_comment:comment-engine:work:target-task:agent-primary:abcd1234",
+		Payload: map[string]any{
+			"comment_id": "comment-engine",
+		},
+	}); err != nil {
+		t.Fatalf("queue engine run: %v", err)
+	}
+
 	legacyKey := "task_comment:source-task:agent-primary"
 	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
@@ -262,6 +285,54 @@ func TestQueueRun_LegacyCommentWakeDoesNotOverwriteCanonicalCommentRun(t *testin
 	}
 	if exists {
 		t.Fatalf("duplicate legacy wake was inserted with key %s", legacyKey)
+	}
+}
+
+// TestQueueRun_LegacyCommentWakeRetriesAfterFailedEngineRun pins that
+// a failed engine comment run does not suppress a later legacy retry.
+func TestQueueRun_LegacyCommentWakeRetriesAfterFailedEngineRun(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		AgentProfileID: "agent-primary",
+		TaskID:         "target-task",
+		WorkflowStepID: "work",
+		Reason:         "task_comment",
+		IdempotencyKey: "task_comment:comment-engine:work:target-task:agent-primary:abcd1234",
+		Payload: map[string]any{
+			"comment_id": "comment-engine",
+		},
+	}); err != nil {
+		t.Fatalf("queue engine run: %v", err)
+	}
+	statuses, err := repo.GetRunsByCommentIDs(ctx, []string{"comment-engine"})
+	if err != nil {
+		t.Fatalf("get comment run: %v", err)
+	}
+	finishedAt := time.Now().UTC()
+	if err := repo.SetRunStatusForTest(ctx, statuses["comment-engine"].RunID, "failed", nil, &finishedAt); err != nil {
+		t.Fatalf("mark engine run failed: %v", err)
+	}
+
+	legacyKey := "task_comment:source-task:agent-primary"
+	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		AgentProfileID: "agent-primary",
+		TaskID:         "source-task",
+		Reason:         "task_comment",
+		IdempotencyKey: legacyKey,
+		Payload: map[string]any{
+			"comment_id": "comment-engine",
+		},
+	}); err != nil {
+		t.Fatalf("queue legacy retry: %v", err)
+	}
+	exists, err := repo.CheckIdempotencyKey(ctx, legacyKey, runsservice.IdempotencyWindowHours)
+	if err != nil {
+		t.Fatalf("check legacy key: %v", err)
+	}
+	if !exists {
+		t.Fatalf("legacy retry was not inserted with key %s", legacyKey)
 	}
 }
 
@@ -294,6 +365,9 @@ func TestQueueRun_SaltedKeyUsesPayloadCommentID(t *testing.T) {
 	}
 }
 
+// TestQueueRun_CommentStatusIgnoresMentionRuns pins that
+// task_mentioned runs carrying the same payload comment_id do not
+// replace the task_comment run shown on the comment.
 func TestQueueRun_CommentStatusIgnoresMentionRuns(t *testing.T) {
 	svc, _, repo := newTestServiceWithRepo(t)
 	ctx := context.Background()
@@ -309,17 +383,18 @@ func TestQueueRun_CommentStatusIgnoresMentionRuns(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("queue task_comment: %v", err)
 	}
-	time.Sleep(10 * time.Millisecond)
-	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+	if err := repo.CreateRun(ctx, &models.Run{
+		ID:             "mention-run",
 		AgentProfileID: "mentioned-agent",
-		TaskID:         "task-1",
 		Reason:         "task_mentioned",
-		IdempotencyKey: "task_mentioned:task-1:mentioned-agent",
-		Payload: map[string]any{
-			"comment_id": "comment-1",
-		},
+		Payload:        `{"comment_id":"comment-1","task_id":"task-1"}`,
+		Status:         "queued",
+		CoalescedCount: 1,
 	}); err != nil {
-		t.Fatalf("queue mention: %v", err)
+		t.Fatalf("create mention run: %v", err)
+	}
+	if err := repo.SetRunRequestedAtForTest(ctx, "mention-run", time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatalf("move mention run later: %v", err)
 	}
 
 	statuses, err := repo.GetRunsByCommentIDs(ctx, []string{"comment-1"})
