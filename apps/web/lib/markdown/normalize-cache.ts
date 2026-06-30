@@ -95,7 +95,6 @@ function findBareNestedClose(
       ) {
         return null;
       }
-      if (lines[startIndex + 1]?.trim() === "" && lines[index - 1]?.trim() === "") return null;
       return { closeCount, closeIndex: index };
     }
   }
@@ -131,7 +130,8 @@ function isSameLengthBareMarkdownSampleClose(
 ): boolean {
   if (hasTaggedLookingBareContent(lines, startIndex, closeIndex, openCount)) return false;
   if (lines[closeIndex + 1]?.trim() === "") return false;
-  return nearestNonBlankBefore(lines, startIndex).startsWith("#");
+  const previousContent = nearestNonBlankBefore(lines, startIndex);
+  return previousContent.startsWith("#") || !previousContent.endsWith(":");
 }
 
 function noteNestedFence(state: InnerFenceScan, openCount: number, closeCount: number): void {
@@ -186,7 +186,10 @@ function scanTaggedNestedFence(
     context.wrapperOpenCount,
   );
   if (!taggedClose) {
-    return { failed: taggedOpenCount >= context.wrapperOpenCount, nextIndex: index };
+    return {
+      failed: taggedOpenCount >= context.wrapperOpenCount && context.scan.nestedFenceCount === 0,
+      nextIndex: index,
+    };
   }
   noteNestedFence(context.scan, taggedOpenCount, taggedClose.closeCount);
   return { failed: false, nextIndex: taggedClose.closeIndex };

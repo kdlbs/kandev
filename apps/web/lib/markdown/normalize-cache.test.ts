@@ -180,6 +180,41 @@ describe("normalizeMarkdown advanced untagged wrapper edge cases", () => {
     expect(normalizeMarkdown(input)).toBe(input);
   });
 
+  it("preserves non-heading markdown samples before separate untagged blocks", () => {
+    const input = [MARKDOWN_FENCE, "plain text", "```", "prose", "```", "code", "```"].join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(input);
+  });
+});
+
+describe("normalizeMarkdown blank-padded untagged wrapper edge cases", () => {
+  it("strengthens blank-padded bare nested fences", () => {
+    const input = [
+      MARKDOWN_FENCE,
+      INTRO_TEXT,
+      "```",
+      "",
+      "code",
+      "",
+      "```",
+      AFTER_NESTED_PROMPT,
+      "```",
+    ].join("\n");
+    const expected = [
+      STRENGTHENED_MARKDOWN_FENCE,
+      INTRO_TEXT,
+      "```",
+      "",
+      "code",
+      "",
+      "```",
+      AFTER_NESTED_PROMPT,
+      "````",
+    ].join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(expected);
+  });
+
   it("strengthens heading samples inside spaced untagged nested fences", () => {
     const input = [
       MARKDOWN_FENCE,
@@ -208,7 +243,9 @@ describe("normalizeMarkdown advanced untagged wrapper edge cases", () => {
 
     expect(normalizeMarkdown(input)).toBe(expected);
   });
+});
 
+describe("normalizeMarkdown tagged-looking untagged wrapper edge cases", () => {
   it("strengthens bare fences that contain tagged-looking content", () => {
     const input = [
       MARKDOWN_FENCE,
@@ -234,6 +271,37 @@ describe("normalizeMarkdown advanced untagged wrapper edge cases", () => {
     expect(normalizeMarkdown(input)).toBe(expected);
   });
 
+  it("keeps scanning unmatched tagged-looking content after a nested pair", () => {
+    const input = [
+      MARKDOWN_FENCE,
+      INTRO_TEXT,
+      "",
+      "```text",
+      INNER_PROMPT_TEXT,
+      "```",
+      "",
+      "```not-a-block",
+      AFTER_NESTED_PROMPT,
+      "```",
+    ].join("\n");
+    const expected = [
+      STRENGTHENED_MARKDOWN_FENCE,
+      INTRO_TEXT,
+      "",
+      "```text",
+      INNER_PROMPT_TEXT,
+      "```",
+      "",
+      "```not-a-block",
+      AFTER_NESTED_PROMPT,
+      "````",
+    ].join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(expected);
+  });
+});
+
+describe("normalizeMarkdown longer-close wrapper edge cases", () => {
   it("strengthens a longer wrapper when shorter tagged fences use longer closes", () => {
     const input = [
       STRENGTHENED_MARKDOWN_FENCE,
