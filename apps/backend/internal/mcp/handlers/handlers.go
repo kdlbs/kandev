@@ -1923,22 +1923,25 @@ func (h *Handlers) restoreTaskMessageSessions(ctx context.Context, rollback task
 			return err
 		}
 	}
-	if rollback.selectedID != "" {
-		primaryID := rollback.primarySessionID()
-		if primaryID != "" && rollback.selectedID != primaryID {
-			if queue := h.sessionLauncher.GetMessageQueue(); queue != nil {
-				if err := queue.TransferSession(ctx, rollback.selectedID, primaryID); err != nil {
-					return err
-				}
-			}
-		}
-		if _, ok := rollback.sessionIDs[rollback.selectedID]; !ok {
-			if err := repo.DeleteTaskSession(ctx, rollback.selectedID); err != nil {
+	return h.restoreSelectedTaskMessageSession(ctx, repo, rollback)
+}
+
+func (h *Handlers) restoreSelectedTaskMessageSession(ctx context.Context, repo taskMessageSessionRollbackRepository, rollback taskMessageReviewRollback) error {
+	if rollback.selectedID == "" {
+		return nil
+	}
+	primaryID := rollback.primarySessionID()
+	if primaryID != "" && rollback.selectedID != primaryID {
+		if queue := h.sessionLauncher.GetMessageQueue(); queue != nil {
+			if err := queue.TransferSession(ctx, rollback.selectedID, primaryID); err != nil {
 				return err
 			}
 		}
 	}
-	return nil
+	if _, ok := rollback.sessionIDs[rollback.selectedID]; ok {
+		return nil
+	}
+	return repo.DeleteTaskSession(ctx, rollback.selectedID)
 }
 
 func (r taskMessageReviewRollback) primarySessionID() string {
