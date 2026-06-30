@@ -1785,10 +1785,13 @@ func (h *Handlers) resolveSessionAfterTaskMessageTurnStart(ctx context.Context, 
 	if primary == nil {
 		return nil, errors.New("session was switched but no active session found")
 	}
-	if primary.ID == submitted.ID {
-		return nil, errors.New("session was switched but submitted session remains primary")
+	if primary.ID != submitted.ID {
+		return primary, nil
 	}
-	return primary, nil
+	if submitted.State == models.TaskSessionStateCompleted {
+		return reloaded, nil
+	}
+	return nil, errors.New("session was switched but submitted session remains primary")
 }
 
 // recordUserMessage writes the prompt to the task's chat as a user message so it

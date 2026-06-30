@@ -393,6 +393,67 @@ func TestHandleMessageTask_WaitingForInput_UsesSessionSelectedByTurnStart(t *tes
 	assert.Contains(t, newMessages[0].Content, "handoff after switch")
 }
 
+func TestHandleMessageTask_CompletedSessionWithoutSwitch_PromptsSameSession(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCompleted)
+
+	h, orch := newMessageTaskHandler(t, svc)
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "follow up completed", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "sent", payload["status"])
+	assert.Equal(t, sess.ID, payload["session_id"])
+
+	require.Len(t, orch.promptCalls, 1)
+	assert.Equal(t, sess.ID, orch.promptCalls[0].sessionID)
+}
+
+func TestHandleMessageTask_CompletedSession_UsesSessionSelectedByTurnStart(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCompleted)
+
+	replacement := &models.TaskSession{
+		ID:             "sess-2",
+		TaskID:         target.ID,
+		AgentProfileID: "agent-profile-2",
+		State:          models.TaskSessionStateWaitingForInput,
+		IsPrimary:      false,
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, replacement))
+
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.onTurnStart = func(ctx context.Context, _, _ string) error {
+		oldSession, err := svc.GetTaskSession(ctx, sess.ID)
+		require.NoError(t, err)
+		oldSession.IsPrimary = false
+		require.NoError(t, repo.UpdateTaskSession(ctx, oldSession))
+		require.NoError(t, repo.SetSessionPrimary(ctx, replacement.ID))
+		return nil
+	}
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "handoff from completed", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "sent", payload["status"])
+	assert.Equal(t, replacement.ID, payload["session_id"])
+
+	require.Len(t, orch.promptCalls, 1)
+	assert.Equal(t, replacement.ID, orch.promptCalls[0].sessionID)
+}
+
 func TestHandleMessageTask_CreatedSessionStartsAfterTurnStartChangesState(t *testing.T) {
 	ctx := context.Background()
 	svc, repo := newTestTaskService(t)
