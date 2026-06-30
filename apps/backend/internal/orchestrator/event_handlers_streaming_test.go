@@ -650,6 +650,74 @@ func TestCompleteStreamFromCompletedExecutionFlushesAgentText(t *testing.T) {
 
 	require.Equal(t, 1, messages.agentMessageWrites,
 		"final complete streams must flush text even if agent.completed arrived first")
+	require.Zero(t, taskRepo.stateWrites["t1"],
+		"final complete streams from terminal executions must not re-run task state reconciliation")
+}
+
+func TestCompleteStreamFromCompletedExecutionSkipsDuplicateOfficeTeardown(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedOfficeSession(t, repo, "t-office-terminal", "s-office-terminal", "exec-office-terminal")
+
+	taskRepo := newMockTaskRepo()
+	mgr := &mockAgentManager{}
+	mgr.stopAgentArgs = append(mgr.stopAgentArgs, stopAgentCall{ExecutionID: "exec-office-terminal"})
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, mgr)
+	svc.markExecutionCompleted("s-office-terminal", "exec-office-terminal")
+
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t-office-terminal",
+		SessionID:   "s-office-terminal",
+		ExecutionID: "exec-office-terminal",
+		Data: &lifecycle.AgentStreamEventData{
+			Type: agentEventComplete,
+			Data: map[string]interface{}{
+				"stop_reason": "end_turn",
+			},
+		},
+	})
+
+	mgr.mu.Lock()
+	stopCalls := append([]stopAgentCall(nil), mgr.stopAgentArgs...)
+	mgr.mu.Unlock()
+	require.Equal(t, []stopAgentCall{{ExecutionID: "exec-office-terminal"}}, stopCalls,
+		"terminal complete streams must not re-run office StopAgent teardown")
+	require.Zero(t, taskRepo.stateWrites["t-office-terminal"],
+		"terminal complete streams must not re-run task state reconciliation")
+}
+
+func TestCompleteStreamFromCompletedExecutionSkipsDuplicateAutomationFinalize(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedRunModeAutomationSession(t, repo, "t-auto-terminal", "s-auto-terminal", "exec-auto-terminal")
+
+	taskRepo := newMockTaskRepo()
+	mgr := &mockAgentManager{}
+	automationSvc := &mockAutomationRunService{succeededTaskIDs: []string{"t-auto-terminal"}}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, mgr)
+	svc.SetAutomationService(automationSvc)
+	svc.markExecutionCompleted("s-auto-terminal", "exec-auto-terminal")
+
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t-auto-terminal",
+		SessionID:   "s-auto-terminal",
+		ExecutionID: "exec-auto-terminal",
+		Data: &lifecycle.AgentStreamEventData{
+			Type: agentEventComplete,
+			Data: map[string]interface{}{
+				"stop_reason": "end_turn",
+			},
+		},
+	})
+
+	require.Equal(t, []string{"t-auto-terminal"}, automationSvc.succeededTaskIDs,
+		"terminal complete streams must not re-run automation success finalization")
+	require.Empty(t, automationSvc.failedTaskIDs)
+	mgr.mu.Lock()
+	stopCalls := append([]stopAgentCall(nil), mgr.stopAgentArgs...)
+	mgr.mu.Unlock()
+	require.Empty(t, stopCalls,
+		"terminal complete streams must not re-run automation StopAgent teardown")
 }
 
 func TestMessageStreamFromCompletedExecutionDoesNotCreateTurn(t *testing.T) {
@@ -813,13 +881,19 @@ func TestCompletedExecutionMarkerExpiresAndDeletes(t *testing.T) {
 
 	currentKey := terminalExecutionKey("s1", "exec-1")
 	expiredAt := time.Now().Add(-time.Minute)
-	svc.completedExecutions.Store(currentKey, expiredAt)
+	svc.completedExecutions.Store(currentKey, terminalExecutionMarker{
+		expiresAt:           expiredAt,
+		allowCompleteStream: true,
+	})
 	require.False(t, svc.isExecutionCompleted("s1", "exec-1"))
 	_, ok := svc.completedExecutions.Load(currentKey)
 	require.False(t, ok, "expired marker should be deleted on lookup")
 
 	laterExpiry := time.Now().Add(time.Hour)
-	svc.completedExecutions.Store(currentKey, laterExpiry)
+	svc.completedExecutions.Store(currentKey, terminalExecutionMarker{
+		expiresAt:           laterExpiry,
+		allowCompleteStream: true,
+	})
 	svc.deleteCompletedExecutionIfExpired(currentKey, time.Now())
 	_, ok = svc.completedExecutions.Load(currentKey)
 	require.True(t, ok, "old expiry callback must not delete a refreshed marker")

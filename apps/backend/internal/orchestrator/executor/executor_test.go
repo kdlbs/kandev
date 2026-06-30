@@ -1210,6 +1210,25 @@ func TestRunAgentProcessAsync_ResumeFailureDoesNotReviewWhileSiblingWorks(t *tes
 	}
 }
 
+func TestWriteTaskReviewStateIfNoWorkingSessionsSkipsSameSessionActiveAgain(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateRunning,
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	var taskStateUpdates []v1.TaskState
+	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
+		taskStateUpdates = append(taskStateUpdates, state)
+		return nil
+	})
+
+	exec.writeTaskReviewStateIfNoWorkingSessions(context.Background(), "task-123", "session-123")
+
+	if len(taskStateUpdates) != 0 {
+		t.Errorf("expected same active session to block REVIEW reconcile, got %v", taskStateUpdates)
+	}
+}
+
 func TestStartAgentProcessOnResumePromotesTaskAfterSuccess(t *testing.T) {
 	repo := newMockRepository()
 	session := &models.TaskSession{

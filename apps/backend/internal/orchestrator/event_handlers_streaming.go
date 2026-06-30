@@ -25,7 +25,15 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	sessionID := payload.SessionID
 	eventType := payload.Data.Type
 
-	if eventType != agentEventComplete && s.shouldDropCompletedExecutionStreamEvent(payload) {
+	if eventType == agentEventComplete {
+		if s.isExecutionCompleted(sessionID, payload.ExecutionID) && !s.shouldAllowTerminalCompleteStream(sessionID, payload.ExecutionID) {
+			s.logger.Debug("ignoring complete stream event from terminal failed execution",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("agent_execution_id", payload.ExecutionID))
+			return
+		}
+	} else if s.shouldDropCompletedExecutionStreamEvent(payload) {
 		return
 	}
 
@@ -567,37 +575,63 @@ func isTerminalSessionState(s models.TaskSessionState) bool {
 
 const completedExecutionRetention = 10 * time.Minute
 
+type terminalExecutionMarker struct {
+	expiresAt           time.Time
+	allowCompleteStream bool
+}
+
 func terminalExecutionKey(sessionID, executionID string) string {
 	return sessionID + "\x00" + executionID
 }
 
 func (s *Service) markExecutionCompleted(sessionID, executionID string) {
+	s.markTerminalExecution(sessionID, executionID, true)
+}
+
+func (s *Service) markExecutionFailed(sessionID, executionID string) {
+	s.markTerminalExecution(sessionID, executionID, false)
+}
+
+func (s *Service) markTerminalExecution(sessionID, executionID string, allowCompleteStream bool) {
 	if sessionID == "" || executionID == "" {
 		return
 	}
 	key := terminalExecutionKey(sessionID, executionID)
 	expiresAt := time.Now().Add(completedExecutionRetention)
-	s.completedExecutions.Store(key, expiresAt)
+	s.completedExecutions.Store(key, terminalExecutionMarker{
+		expiresAt:           expiresAt,
+		allowCompleteStream: allowCompleteStream,
+	})
 	time.AfterFunc(completedExecutionRetention, func() {
 		s.deleteCompletedExecutionIfExpired(key, expiresAt)
 	})
 }
 
 func (s *Service) isExecutionCompleted(sessionID, executionID string) bool {
+	_, ok := s.terminalExecutionMarker(sessionID, executionID)
+	return ok
+}
+
+func (s *Service) shouldAllowTerminalCompleteStream(sessionID, executionID string) bool {
+	marker, ok := s.terminalExecutionMarker(sessionID, executionID)
+	return ok && marker.allowCompleteStream
+}
+
+func (s *Service) terminalExecutionMarker(sessionID, executionID string) (terminalExecutionMarker, bool) {
 	if sessionID == "" || executionID == "" {
-		return false
+		return terminalExecutionMarker{}, false
 	}
 	key := terminalExecutionKey(sessionID, executionID)
 	value, ok := s.completedExecutions.Load(key)
 	if !ok {
-		return false
+		return terminalExecutionMarker{}, false
 	}
-	expiresAt, ok := value.(time.Time)
-	if !ok || time.Now().After(expiresAt) {
-		s.deleteCompletedExecutionIfExpired(key, expiresAt)
-		return false
+	marker, ok := value.(terminalExecutionMarker)
+	if !ok || time.Now().After(marker.expiresAt) {
+		s.deleteCompletedExecutionIfExpired(key, marker.expiresAt)
+		return terminalExecutionMarker{}, false
 	}
-	return true
+	return marker, true
 }
 
 func (s *Service) deleteCompletedExecutionIfExpired(key string, expiresAt time.Time) {
@@ -605,8 +639,8 @@ func (s *Service) deleteCompletedExecutionIfExpired(key string, expiresAt time.T
 	if !ok {
 		return
 	}
-	currentExpiry, ok := value.(time.Time)
-	if !ok || !currentExpiry.After(expiresAt) {
+	current, ok := value.(terminalExecutionMarker)
+	if !ok || !current.expiresAt.After(expiresAt) {
 		s.completedExecutions.Delete(key)
 	}
 }
@@ -890,6 +924,7 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	s.logger.Debug("handling complete stream event",
 		zap.String("task_id", payload.TaskID),
 		zap.String("session_id", payload.SessionID))
+	terminalCompleteStream := s.shouldAllowTerminalCompleteStream(payload.SessionID, payload.ExecutionID)
 
 	// Load session once up front — used by storeResumeToken, state check, and setSessionWaitingForInput.
 	var session *models.TaskSession
@@ -959,6 +994,14 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	// contention between concurrent worktrees.
 	if payload.SessionID != "" {
 		s.captureGitStatusSnapshotWithRetry(ctx, payload.SessionID)
+	}
+
+	if terminalCompleteStream {
+		s.logger.Debug("complete stream from terminal execution flushed final data; skipping runtime reconciliation",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", payload.SessionID),
+			zap.String("agent_execution_id", payload.ExecutionID))
+		return
 	}
 
 	// Office sessions park at IDLE between scheduler runs; cancelled turns skip that path so the session stays promptable.

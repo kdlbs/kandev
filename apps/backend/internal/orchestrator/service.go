@@ -370,11 +370,11 @@ type Service struct {
 	// clobber the task back to REVIEW while work is active.
 	taskRuntimeStateMu sync.Mutex
 
-	// completedExecutions records execution IDs that have reached
-	// agent.completed. Buffered stream/tool events for these executions must not
-	// wake their session back to RUNNING after the completion path makes it
-	// promptable again. Entries expire after a short grace window so the guard
-	// does not grow without bound in long-running backend processes.
+	// completedExecutions records execution IDs that have reached a terminal
+	// agent lifecycle event. Buffered stream/tool events for these executions
+	// must not wake their session back to RUNNING after the terminal path makes
+	// it promptable again. Entries expire after a short grace window so the
+	// guard does not grow without bound in long-running backend processes.
 	completedExecutions sync.Map
 
 	// Session reset flags: sessionID -> true while resetAgentContext is restarting process.

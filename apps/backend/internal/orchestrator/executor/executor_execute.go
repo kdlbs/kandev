@@ -123,6 +123,17 @@ func (e *Executor) stopUnstartedExecution(ctx context.Context, sessionID, agentE
 }
 
 func (e *Executor) writeTaskReviewStateIfNoWorkingSessions(ctx context.Context, taskID, failedSessionID string) {
+	if failedSessionID != "" {
+		session, err := e.repo.GetTaskSession(ctx, failedSessionID)
+		if err == nil && session != nil && isRuntimeWorkingSessionState(session.State) {
+			e.logger.Debug("skipping failed-start task REVIEW state because failed session is active again",
+				zap.String("task_id", taskID),
+				zap.String("session_id", failedSessionID),
+				zap.String("session_state", string(session.State)))
+			return
+		}
+	}
+
 	sessions, err := e.repo.ListTaskSessions(ctx, taskID)
 	if err != nil {
 		e.logger.Warn("failed to list task sessions before failed-start REVIEW state reconcile",
@@ -153,6 +164,7 @@ func (e *Executor) writeTaskReviewStateIfNoWorkingSessions(ctx context.Context, 
 	}
 }
 
+// Keep in sync with orchestrator.isWorkingSessionState.
 func isRuntimeWorkingSessionState(state models.TaskSessionState) bool {
 	return state == models.TaskSessionStateRunning || state == models.TaskSessionStateStarting
 }

@@ -448,7 +448,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 	// Update scheduler and remove from queue
 	s.scheduler.HandleTaskCompleted(data.TaskID, true)
 	s.scheduler.RemoveTask(data.TaskID)
-	s.markExecutionCompleted(data.SessionID, data.AgentExecutionID)
+	s.markExecutionFailed(data.SessionID, data.AgentExecutionID)
 
 	// Check for workflow transition based on session's current step.
 	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
