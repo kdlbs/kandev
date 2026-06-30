@@ -160,39 +160,6 @@ func TestPrimaryAgentAdapter_ReturnsCurrentRunner(t *testing.T) {
 	}
 }
 
-func TestPrimaryAgentAdapter_ForTaskResolvesTargetStep(t *testing.T) {
-	repo := &fakeRepo{runner: "ap-target-runner", taskStepID: "target-step"}
-	a := NewPrimaryAgentAdapter(repo)
-	got, err := a.PrimaryAgentProfileIDForTask(context.Background(), "target-task")
-	if err != nil {
-		t.Fatalf("primary for task: %v", err)
-	}
-	if got != "ap-target-runner" {
-		t.Errorf("primary = %q, want ap-target-runner", got)
-	}
-	if repo.lookedUpTaskID != "target-task" {
-		t.Errorf("GetTaskWorkflowStepID called with task=%q", repo.lookedUpTaskID)
-	}
-	if repo.resolvedStepID != "target-step" || repo.resolvedTaskID != "target-task" {
-		t.Errorf("ResolveCurrentRunner called with step=%q task=%q", repo.resolvedStepID, repo.resolvedTaskID)
-	}
-}
-
-func TestPrimaryAgentAdapter_ForTaskReturnsNoStepBoundError(t *testing.T) {
-	repo := &fakeRepo{}
-	a := NewPrimaryAgentAdapter(repo)
-	_, err := a.PrimaryAgentProfileIDForTask(context.Background(), "target-task")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !errors.Is(err, ErrNoWorkflowStepBound) {
-		t.Fatalf("err = %v, want ErrNoWorkflowStepBound", err)
-	}
-	if repo.resolvedTaskID != "" {
-		t.Fatalf("ResolveCurrentRunner should not be called, got task %q", repo.resolvedTaskID)
-	}
-}
-
 func TestPrimaryAgentAdapter_PropagatesResolveCurrentRunnerError(t *testing.T) {
 	repo := &fakeRepo{runnerErr: errors.New("missing")}
 	a := NewPrimaryAgentAdapter(repo)

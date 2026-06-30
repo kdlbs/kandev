@@ -38,14 +38,6 @@ type PrimaryAgentResolver interface {
 	PrimaryAgentProfileID(ctx context.Context, stepID, taskID string) (string, error)
 }
 
-// TargetTaskPrimaryAgentResolver resolves "primary" using the target task's
-// current workflow step. PrimaryAgentResolver is step-aware for same-task
-// triggers where the engine already has the current StepSpec; cross-task
-// queue_run actions need the adapter to look up the target task's step.
-type TargetTaskPrimaryAgentResolver interface {
-	PrimaryAgentProfileIDForTask(ctx context.Context, taskID string) (string, error)
-}
-
 // TargetTaskStepResolver resolves a task's current workflow step for cross-task
 // queue_run actions. The engine only has the triggering task's StepSpec, so
 // adapters that read task storage provide this for target task lookups.

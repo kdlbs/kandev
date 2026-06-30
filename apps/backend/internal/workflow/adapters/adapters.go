@@ -10,7 +10,6 @@ package adapters
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/workflow/engine"
@@ -31,10 +30,6 @@ type WorkflowRepo interface {
 
 // Compile-time check that *repository.Repository satisfies WorkflowRepo.
 var _ WorkflowRepo = (*repository.Repository)(nil)
-
-// ErrNoWorkflowStepBound is returned when a target task has no workflow step
-// assignment, so cross-task queue_run actions cannot resolve a target step.
-var ErrNoWorkflowStepBound = errors.New("workflow step not bound")
 
 // ParticipantAdapter implements engine.ParticipantStore.
 type ParticipantAdapter struct {
@@ -153,20 +148,6 @@ func (a *PrimaryAgentAdapter) PrimaryAgentProfileID(
 	return agentID, nil
 }
 
-// PrimaryAgentProfileIDForTask satisfies engine.TargetTaskPrimaryAgentResolver.
-func (a *PrimaryAgentAdapter) PrimaryAgentProfileIDForTask(
-	ctx context.Context, taskID string,
-) (string, error) {
-	stepID, err := a.WorkflowStepIDForTask(ctx, taskID)
-	if err != nil {
-		return "", fmt.Errorf("resolve workflow step for task %s: %w", taskID, err)
-	}
-	if stepID == "" {
-		return "", fmt.Errorf("task %s: %w", taskID, ErrNoWorkflowStepBound)
-	}
-	return a.PrimaryAgentProfileID(ctx, stepID, taskID)
-}
-
 // WorkflowStepIDForTask satisfies engine.TargetTaskStepResolver.
 func (a *PrimaryAgentAdapter) WorkflowStepIDForTask(ctx context.Context, taskID string) (string, error) {
 	return a.Repo.GetTaskWorkflowStepID(ctx, taskID)
@@ -174,10 +155,9 @@ func (a *PrimaryAgentAdapter) WorkflowStepIDForTask(ctx context.Context, taskID 
 
 // Compile-time interface assertions.
 var (
-	_ engine.ParticipantStore               = (*ParticipantAdapter)(nil)
-	_ engine.TargetTaskStepResolver         = (*ParticipantAdapter)(nil)
-	_ engine.DecisionStore                  = (*DecisionAdapter)(nil)
-	_ engine.PrimaryAgentResolver           = (*PrimaryAgentAdapter)(nil)
-	_ engine.TargetTaskPrimaryAgentResolver = (*PrimaryAgentAdapter)(nil)
-	_ engine.TargetTaskStepResolver         = (*PrimaryAgentAdapter)(nil)
+	_ engine.ParticipantStore       = (*ParticipantAdapter)(nil)
+	_ engine.TargetTaskStepResolver = (*ParticipantAdapter)(nil)
+	_ engine.DecisionStore          = (*DecisionAdapter)(nil)
+	_ engine.PrimaryAgentResolver   = (*PrimaryAgentAdapter)(nil)
+	_ engine.TargetTaskStepResolver = (*PrimaryAgentAdapter)(nil)
 )

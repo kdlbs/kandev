@@ -38,16 +38,6 @@ func (f fakePrimary) PrimaryAgentProfileID(_ context.Context, stepID, taskID str
 	return f.id, f.err
 }
 
-func (f fakePrimary) PrimaryAgentProfileIDForTask(_ context.Context, taskID string) (string, error) {
-	if f.stepID != nil {
-		*f.stepID = ""
-	}
-	if f.taskID != nil {
-		*f.taskID = taskID
-	}
-	return f.id, f.err
-}
-
 func (f fakePrimary) WorkflowStepIDForTask(_ context.Context, taskID string) (string, error) {
 	if f.resolveTaskID != nil {
 		*f.resolveTaskID = taskID
@@ -67,10 +57,6 @@ func (s *sequencePrimary) PrimaryAgentProfileID(_ context.Context, _, _ string) 
 	id := s.ids[s.i]
 	s.i++
 	return id, nil
-}
-
-func (s *sequencePrimary) PrimaryAgentProfileIDForTask(_ context.Context, _ string) (string, error) {
-	return s.PrimaryAgentProfileID(context.Background(), "", "")
 }
 
 func (s *sequencePrimary) WorkflowStepIDForTask(_ context.Context, _ string) (string, error) {
