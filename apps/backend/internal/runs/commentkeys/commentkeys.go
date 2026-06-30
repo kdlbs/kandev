@@ -44,6 +44,15 @@ func CommentIDFromKey(key string) string {
 	return id
 }
 
+// IsSaltedTaskCommentKey reports whether a task_comment key carries extra
+// salt after the leading comment id.
+func IsSaltedTaskCommentKey(key string) bool {
+	if !HasTaskCommentPrefix(key) {
+		return false
+	}
+	return strings.Contains(TrimTaskCommentPrefix(key), ":")
+}
+
 // IdentityFromPayload extracts the task/comment pair used to link a run back
 // to a comment. Cross-task wakes execute on task_id but the UI badge/comment
 // anchor belongs to source_task_id, so source_task_id wins when present.

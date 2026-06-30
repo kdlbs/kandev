@@ -116,6 +116,9 @@ func (d *Dispatcher) resolveSession(
 	// persisted machine state instead of starting a fresh state machine here.
 	session, err = d.sessions.GetTaskSessionByTaskID(ctx, taskID)
 	if err == nil && session != nil {
+		if session.State != taskmodels.TaskSessionStateCompleted {
+			return nil, nil
+		}
 		return session, nil
 	}
 	if err != nil && !errors.Is(err, taskmodels.ErrTaskSessionNotFound) {

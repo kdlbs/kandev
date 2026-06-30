@@ -309,6 +309,8 @@ func queueRunPayload(in ActionInput, actionPayload map[string]any, targetTaskID 
 			out["author_id"] = comment.AuthorID
 		}
 	}
+	// Workflow-authored payload fields are explicit overrides. The trigger's
+	// comment_id/author_id only provide defaults for ordinary comment wakes.
 	for k, v := range actionPayload {
 		out[k] = v
 	}

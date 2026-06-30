@@ -245,6 +245,35 @@ func TestQueueRun_LegacyCommentWakeDoesNotOverwriteCanonicalCommentRun(t *testin
 	}
 }
 
+func TestQueueRun_SaltedKeyUsesPayloadCommentID(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		AgentProfileID: "agent-primary",
+		TaskID:         "task-1",
+		WorkflowStepID: "work",
+		Reason:         "task_comment",
+		IdempotencyKey: "task_comment:trigger-comment:work:task-1:agent-primary:abcd1234",
+		Payload: map[string]any{
+			"comment_id": "action-comment",
+		},
+	}); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+
+	statuses, err := repo.GetRunsByCommentIDs(ctx, []string{"trigger-comment", "action-comment"})
+	if err != nil {
+		t.Fatalf("get comment runs: %v", err)
+	}
+	if _, ok := statuses["trigger-comment"]; ok {
+		t.Fatalf("salted run attached to trigger comment instead of payload comment: %+v", statuses)
+	}
+	if _, ok := statuses["action-comment"]; !ok {
+		t.Fatalf("missing payload comment status: %+v", statuses)
+	}
+}
+
 func TestQueueRun_PublishesSourceTaskForCrossTaskComment(t *testing.T) {
 	svc, eb := newTestService(t)
 	ctx := context.Background()

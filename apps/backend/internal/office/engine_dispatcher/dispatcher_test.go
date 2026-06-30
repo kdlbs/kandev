@@ -252,6 +252,35 @@ func TestDispatcher_UsesLatestSessionForCommentWhenActiveSessionMissing(t *testi
 	}
 }
 
+func TestDispatcher_SkipsLatestSessionForCommentWhenNotCompleted(t *testing.T) {
+	for _, state := range []taskmodels.TaskSessionState{
+		taskmodels.TaskSessionStateFailed,
+		taskmodels.TaskSessionStateCancelled,
+		taskmodels.TaskSessionStateIdle,
+	} {
+		t.Run(string(state), func(t *testing.T) {
+			eng := &fakeEngine{}
+			sessions := &fakeSessions{
+				activeErr: taskmodels.ErrTaskSessionNotFound,
+				latestSession: &taskmodels.TaskSession{
+					ID:    "sess-latest",
+					State: state,
+				},
+			}
+			d := New(eng, sessions, logger.Default())
+
+			err := d.HandleTrigger(context.Background(), "task-1", engine.TriggerOnComment,
+				engine.OnCommentPayload{CommentID: "c-1"}, "task_comment:c-1")
+			if !errors.Is(err, ErrNoSession) {
+				t.Fatalf("err = %v, want ErrNoSession", err)
+			}
+			if eng.called {
+				t.Fatal("engine should not be invoked for non-completed latest session")
+			}
+		})
+	}
+}
+
 func TestDispatcher_CompletedSessionCommentQueuesRun(t *testing.T) {
 	runsSvc, runsRepo := newDispatcherRunsService(t)
 	eng := engine.New(commentWorkflowStore{}, engine.MapRegistry{

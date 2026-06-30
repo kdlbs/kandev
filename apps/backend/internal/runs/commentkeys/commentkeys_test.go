@@ -63,3 +63,19 @@ func TestCommentIDFromKey(t *testing.T) {
 		}
 	}
 }
+
+func TestIsSaltedTaskCommentKey(t *testing.T) {
+	tests := []struct {
+		key  string
+		want bool
+	}{
+		{key: "task_comment:cm-1", want: false},
+		{key: "task_comment:cm-1:step-1:task-1:agent-1:abcd", want: true},
+		{key: "other:cm-1:step-1", want: false},
+	}
+	for _, tt := range tests {
+		if got := IsSaltedTaskCommentKey(tt.key); got != tt.want {
+			t.Fatalf("IsSaltedTaskCommentKey(%q) = %v, want %v", tt.key, got, tt.want)
+		}
+	}
+}

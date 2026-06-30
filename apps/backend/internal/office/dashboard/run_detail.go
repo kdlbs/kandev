@@ -95,7 +95,8 @@ func taskIDFromPayload(payload string) string {
 
 // runSummaryTaskIDFromPayload returns the task id used by the run list row.
 // Cross-task wakes execute on payload.task_id but UI links/status badges belong
-// to payload.source_task_id, so source_task_id wins when present.
+// to payload.source_task_id, so source_task_id wins when present. This is
+// intentionally the link identity, not a raw mirror of the executing task_id.
 func runSummaryTaskIDFromPayload(payload string) string {
 	taskID, _ := commentkeys.IdentityFromPayload(payload)
 	return taskID
