@@ -243,6 +243,26 @@ func TestQueueRun_LegacyCommentWakeDoesNotOverwriteCanonicalCommentRun(t *testin
 	if payload["task_id"] != "target-task" || payload["source_task_id"] != "source-task" {
 		t.Fatalf("engine payload was overwritten by legacy coalesce: %#v", payload)
 	}
+
+	legacyKey := "task_comment:source-task:agent-primary"
+	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		AgentProfileID: "agent-primary",
+		TaskID:         "source-task",
+		Reason:         "task_comment",
+		IdempotencyKey: legacyKey,
+		Payload: map[string]any{
+			"comment_id": "comment-engine",
+		},
+	}); err != nil {
+		t.Fatalf("queue duplicate legacy wake: %v", err)
+	}
+	exists, err := repo.CheckIdempotencyKey(ctx, legacyKey, runsservice.IdempotencyWindowHours)
+	if err != nil {
+		t.Fatalf("check legacy key: %v", err)
+	}
+	if exists {
+		t.Fatalf("duplicate legacy wake was inserted with key %s", legacyKey)
+	}
 }
 
 func TestQueueRun_SaltedKeyUsesPayloadCommentID(t *testing.T) {
@@ -271,6 +291,51 @@ func TestQueueRun_SaltedKeyUsesPayloadCommentID(t *testing.T) {
 	}
 	if _, ok := statuses["action-comment"]; !ok {
 		t.Fatalf("missing payload comment status: %+v", statuses)
+	}
+}
+
+func TestQueueRun_CommentStatusIgnoresMentionRuns(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		AgentProfileID: "agent-primary",
+		TaskID:         "task-1",
+		Reason:         "task_comment",
+		IdempotencyKey: "task_comment:comment-1:work:task-1:agent-primary:abcd1234",
+		Payload: map[string]any{
+			"comment_id": "comment-1",
+		},
+	}); err != nil {
+		t.Fatalf("queue task_comment: %v", err)
+	}
+	time.Sleep(10 * time.Millisecond)
+	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		AgentProfileID: "mentioned-agent",
+		TaskID:         "task-1",
+		Reason:         "task_mentioned",
+		IdempotencyKey: "task_mentioned:task-1:mentioned-agent",
+		Payload: map[string]any{
+			"comment_id": "comment-1",
+		},
+	}); err != nil {
+		t.Fatalf("queue mention: %v", err)
+	}
+
+	statuses, err := repo.GetRunsByCommentIDs(ctx, []string{"comment-1"})
+	if err != nil {
+		t.Fatalf("get comment runs: %v", err)
+	}
+	status, ok := statuses["comment-1"]
+	if !ok {
+		t.Fatalf("missing comment status: %+v", statuses)
+	}
+	run, err := repo.GetRunByID(ctx, status.RunID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if run.Reason != "task_comment" {
+		t.Fatalf("comment status attached to reason %q, want task_comment", run.Reason)
 	}
 }
 

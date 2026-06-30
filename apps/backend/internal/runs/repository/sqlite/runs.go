@@ -214,6 +214,7 @@ func (r *Repository) GetRunsByCommentIDs(
 	for _, id := range commentIDs {
 		args = append(args, commentkeys.TaskComment(id))
 	}
+	args = append(args, commentkeys.TaskCommentPrefix+"%", commentkeys.TaskCommentReason)
 	for i, id := range commentIDs {
 		args = append(args, id)
 		commentPlaceholders[i] = "?"
@@ -227,6 +228,7 @@ func (r *Repository) GetRunsByCommentIDs(
 		SELECT id, idempotency_key, status, error_message, requested_at, payload
 		FROM runs
 		WHERE (idempotency_key IS NULL OR idempotency_key NOT IN (%s))
+		  AND (idempotency_key LIKE ? OR reason = ?)
 		  AND %s IN (%s)
 		ORDER BY requested_at DESC
 	`,
