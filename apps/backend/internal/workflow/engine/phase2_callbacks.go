@@ -60,6 +60,7 @@ type QueueRunCallback struct {
 	Participants ParticipantStore
 	CEOResolver  CEOAgentResolver
 	Primary      PrimaryAgentResolver
+	TaskSteps    TargetTaskStepResolver
 }
 
 // Execute satisfies ActionCallback.
@@ -97,11 +98,15 @@ func (c QueueRunCallback) resolveTarget(
 	target := strings.TrimSpace(in.Action.QueueRun.Target)
 	switch {
 	case target == "" || target == TargetPrimary:
+		stepID, err := c.resolveTargetStepID(ctx, in, taskID, c.primaryStepResolver())
+		if err != nil {
+			return nil, "", err
+		}
 		agentIDs, err := c.resolvePrimary(ctx, in, taskID)
-		return agentIDs, in.Step.ID, err
+		return agentIDs, stepID, err
 	case strings.HasPrefix(target, TargetParticipant):
 		role := strings.TrimPrefix(target, TargetParticipant)
-		stepID, err := c.resolveTargetStepID(ctx, in, taskID, c.Participants)
+		stepID, err := c.resolveTargetStepID(ctx, in, taskID, c.participantStepResolver())
 		if err != nil {
 			return nil, "", err
 		}
@@ -112,26 +117,33 @@ func (c QueueRunCallback) resolveTarget(
 		if id == "" {
 			return nil, "", fmt.Errorf("queue_run agent_profile_id target is empty")
 		}
-		return []string{id}, in.Step.ID, nil
+		stepID, err := c.resolveTargetStepID(ctx, in, taskID, c.TaskSteps)
+		if err != nil {
+			return nil, "", err
+		}
+		return []string{id}, stepID, nil
 	case target == TargetWorkspaceCEO:
+		stepID, err := c.resolveTargetStepID(ctx, in, taskID, c.TaskSteps)
+		if err != nil {
+			return nil, "", err
+		}
 		agentIDs, err := c.resolveCEO(ctx, taskID)
-		return agentIDs, in.Step.ID, err
+		return agentIDs, stepID, err
 	default:
 		return nil, "", fmt.Errorf("queue_run: unsupported target %q", target)
 	}
 }
 
 func (c QueueRunCallback) resolveTargetStepID(
-	ctx context.Context, in ActionInput, taskID string, resolver any,
+	ctx context.Context, in ActionInput, taskID string, resolver TargetTaskStepResolver,
 ) (string, error) {
 	if taskID == in.State.TaskID {
 		return in.Step.ID, nil
 	}
-	targetResolver, ok := resolver.(TargetTaskStepResolver)
-	if !ok {
+	if resolver == nil {
 		return "", fmt.Errorf("%w: queue_run cross-task target requires TargetTaskStepResolver", ErrActionNotYetWired)
 	}
-	stepID, err := targetResolver.WorkflowStepIDForTask(ctx, taskID)
+	stepID, err := resolver.WorkflowStepIDForTask(ctx, taskID)
 	if err != nil {
 		return "", fmt.Errorf("queue_run resolve target task step: %w", err)
 	}
@@ -139,6 +151,20 @@ func (c QueueRunCallback) resolveTargetStepID(
 		return "", fmt.Errorf("queue_run: task %s has no workflow step", taskID)
 	}
 	return stepID, nil
+}
+
+func (c QueueRunCallback) primaryStepResolver() TargetTaskStepResolver {
+	if resolver, ok := c.Primary.(TargetTaskStepResolver); ok {
+		return resolver
+	}
+	return c.TaskSteps
+}
+
+func (c QueueRunCallback) participantStepResolver() TargetTaskStepResolver {
+	if resolver, ok := c.Participants.(TargetTaskStepResolver); ok {
+		return resolver
+	}
+	return c.TaskSteps
 }
 
 func (c QueueRunCallback) resolvePrimary(

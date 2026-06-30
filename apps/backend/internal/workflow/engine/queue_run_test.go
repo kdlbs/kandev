@@ -19,10 +19,11 @@ func (f *fakeRunQueue) QueueRun(_ context.Context, req QueueRunRequest) error {
 
 // fakePrimary returns a fixed agent profile id for any step.
 type fakePrimary struct {
-	id     string
-	err    error
-	stepID *string
-	taskID *string
+	id         string
+	err        error
+	taskStepID string
+	stepID     *string
+	taskID     *string
 }
 
 func (f fakePrimary) PrimaryAgentProfileID(_ context.Context, stepID, taskID string) (string, error) {
@@ -43,6 +44,13 @@ func (f fakePrimary) PrimaryAgentProfileIDForTask(_ context.Context, taskID stri
 		*f.taskID = taskID
 	}
 	return f.id, f.err
+}
+
+func (f fakePrimary) WorkflowStepIDForTask(_ context.Context, taskID string) (string, error) {
+	if f.taskID != nil {
+		*f.taskID = taskID
+	}
+	return f.taskStepID, f.err
 }
 
 // fakeParticipants returns a static slice for any step.
@@ -78,6 +86,19 @@ type fakeCEO struct {
 }
 
 func (f fakeCEO) ResolveCEOAgentProfileID(_ context.Context, _ string) (string, error) {
+	return f.id, f.err
+}
+
+type fakeTaskSteps struct {
+	id     string
+	err    error
+	taskID *string
+}
+
+func (f fakeTaskSteps) WorkflowStepIDForTask(_ context.Context, taskID string) (string, error) {
+	if f.taskID != nil {
+		*f.taskID = taskID
+	}
 	return f.id, f.err
 }
 
@@ -227,9 +248,10 @@ func TestQueueRunCallback_PrimaryUsesResolvedTargetTask(t *testing.T) {
 	cb := QueueRunCallback{
 		Adapter: q,
 		Primary: fakePrimary{
-			id:     "agent-for-target-task",
-			stepID: &resolvedStepID,
-			taskID: &resolvedTaskID,
+			id:         "agent-for-target-task",
+			taskStepID: "target-step",
+			stepID:     &resolvedStepID,
+			taskID:     &resolvedTaskID,
 		},
 	}
 	in := newQueueRunInput("primary", "target-task")
@@ -250,6 +272,9 @@ func TestQueueRunCallback_PrimaryUsesResolvedTargetTask(t *testing.T) {
 	got := q.calls[0]
 	if got.TaskID != "target-task" {
 		t.Fatalf("queued task_id = %q, want target-task", got.TaskID)
+	}
+	if got.WorkflowStepID != "target-step" {
+		t.Fatalf("workflow_step_id = %q, want target-step", got.WorkflowStepID)
 	}
 	if got.AgentProfileID != "agent-for-target-task" {
 		t.Fatalf("agent_profile_id = %q, want agent-for-target-task", got.AgentProfileID)
@@ -362,7 +387,7 @@ func TestQueueRunCallback_OnCommentParticipantRoleKeepsPerAgentKeys(t *testing.T
 
 func TestQueueRunCallback_TargetSpecificAgent(t *testing.T) {
 	q := &fakeRunQueue{}
-	cb := QueueRunCallback{Adapter: q}
+	cb := QueueRunCallback{Adapter: q, TaskSteps: fakeTaskSteps{id: "target-step"}}
 	if _, err := cb.Execute(context.Background(), newQueueRunInput("agent_profile_id:some-agent", "task-2")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -374,6 +399,9 @@ func TestQueueRunCallback_TargetSpecificAgent(t *testing.T) {
 	}
 	if q.calls[0].TaskID != "task-2" {
 		t.Fatalf("task_id = %q, want task-2 (literal)", q.calls[0].TaskID)
+	}
+	if q.calls[0].WorkflowStepID != "target-step" {
+		t.Fatalf("workflow_step_id = %q, want target-step", q.calls[0].WorkflowStepID)
 	}
 }
 
@@ -388,6 +416,37 @@ func TestQueueRunCallback_TargetWorkspaceCEO(t *testing.T) {
 	}
 	if q.calls[0].AgentProfileID != "ceo-agent" {
 		t.Fatalf("agent_profile_id = %q, want ceo-agent", q.calls[0].AgentProfileID)
+	}
+}
+
+func TestQueueRunCallback_TargetWorkspaceCEOUsesResolvedTargetStep(t *testing.T) {
+	q := &fakeRunQueue{}
+	var resolvedTaskID string
+	cb := QueueRunCallback{
+		Adapter:     q,
+		CEOResolver: fakeCEO{id: "ceo-agent"},
+		TaskSteps:   fakeTaskSteps{id: "target-step", taskID: &resolvedTaskID},
+	}
+	in := newQueueRunInput("workspace.ceo_agent", "target-task")
+
+	if _, err := cb.Execute(context.Background(), in); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(q.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(q.calls))
+	}
+	if resolvedTaskID != "target-task" {
+		t.Fatalf("target step resolved for task %q, want target-task", resolvedTaskID)
+	}
+	got := q.calls[0]
+	if got.TaskID != "target-task" {
+		t.Fatalf("task_id = %q, want target-task", got.TaskID)
+	}
+	if got.WorkflowStepID != "target-step" {
+		t.Fatalf("workflow_step_id = %q, want target-step", got.WorkflowStepID)
+	}
+	if got.AgentProfileID != "ceo-agent" {
+		t.Fatalf("agent_profile_id = %q, want ceo-agent", got.AgentProfileID)
 	}
 }
 
@@ -443,7 +502,7 @@ func TestQueueRunCallback_TaskIDResolution(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.input, func(t *testing.T) {
 			q := &fakeRunQueue{}
-			cb := QueueRunCallback{Adapter: q, Primary: fakePrimary{id: "p"}}
+			cb := QueueRunCallback{Adapter: q, Primary: fakePrimary{id: "p", taskStepID: "target-step"}}
 			if _, err := cb.Execute(context.Background(), newQueueRunInput("primary", tc.input)); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

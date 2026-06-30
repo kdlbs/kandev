@@ -32,6 +32,7 @@ func buildWorkflowCallbacks(svc *Service) engine.MapRegistry {
 			Participants: svc.engineParticipants,
 			CEOResolver:  svc.engineCEOResolver,
 			Primary:      svc.enginePrimary,
+			TaskSteps:    workflowTargetStepResolver(svc.enginePrimary, svc.engineParticipants),
 		}
 		if svc.engineParticipants != nil {
 			r[engine.ActionQueueRunForEachParticipant] = engine.QueueRunForEachParticipantCallback{
@@ -53,6 +54,19 @@ func buildWorkflowCallbacks(svc *Service) engine.MapRegistry {
 		}
 	}
 	return r
+}
+
+func workflowTargetStepResolver(
+	primary engine.PrimaryAgentResolver,
+	participants engine.ParticipantStore,
+) engine.TargetTaskStepResolver {
+	if resolver, ok := primary.(engine.TargetTaskStepResolver); ok {
+		return resolver
+	}
+	if resolver, ok := participants.(engine.TargetTaskStepResolver); ok {
+		return resolver
+	}
+	return nil
 }
 
 // switchWorkflowDispatcher returns the closure SwitchWorkflowCallback uses
