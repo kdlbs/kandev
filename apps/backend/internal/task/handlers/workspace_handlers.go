@@ -180,7 +180,6 @@ func (h *WorkspaceHandlers) handleHTTPDeleteWorkspaceError(c *gin.Context, err e
 	case isNotFound(err):
 		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
 	default:
-		h.logger.Error("failed to delete workspace", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "workspace not deleted"})
 	}
 }
@@ -313,7 +312,6 @@ func (h *WorkspaceHandlers) wsDeleteWorkspaceError(msg *ws.Message, err error) (
 	case isNotFound(err):
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Workspace not found", nil)
 	default:
-		h.logger.Error("failed to delete workspace", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to delete workspace", nil)
 	}
 }

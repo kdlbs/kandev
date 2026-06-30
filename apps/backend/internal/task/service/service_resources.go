@@ -141,7 +141,7 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 		deletedTasks, deletedWorkflows, err = s.workspaces.DeleteWorkspaceCascadeWithName(ctx, workspace.ID, *confirmedName)
 	}
 	if err != nil {
-		return s.mapWorkspaceDeleteError(err)
+		return s.mapWorkspaceDeleteError(workspace.ID, err)
 	}
 	cleanups = s.appendWorkspaceDeleteMissingTaskCleanups(ctx, cleanups, deletedTasks)
 	s.publishWorkspaceDeleteChildEvents(ctx, deletedTasks, deletedWorkflows)
@@ -186,7 +186,7 @@ func (s *Service) appendWorkspaceDeleteMissingTaskCleanups(
 		}
 		cleanup, err := s.prepareWorkspaceDeleteTaskCleanup(ctx, task)
 		if err != nil {
-			s.logger.Warn("failed to prepare late workspace task cleanup",
+			s.logger.Error("failed to prepare late workspace task cleanup",
 				zap.String("task_id", task.ID),
 				zap.Error(err))
 			continue
@@ -306,13 +306,14 @@ func (s *Service) runWorkspaceDeleteTaskCleanup(cleanup workspaceDeleteTaskClean
 		"task deleted", "failed to stop session on task delete", "task cleanup completed")
 }
 
-func (s *Service) mapWorkspaceDeleteError(err error) error {
+func (s *Service) mapWorkspaceDeleteError(id string, err error) error {
 	if err == nil {
 		return nil
 	}
 	if errors.Is(err, taskrepo.ErrWorkspaceNameMismatch) {
 		return ErrWorkspaceConfirmNameMismatch
 	}
+	s.logger.Error("failed to delete workspace", zap.String("workspace_id", id), zap.Error(err))
 	return err
 }
 
