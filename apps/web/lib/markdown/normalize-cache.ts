@@ -72,7 +72,10 @@ function findBareNestedClose(
   startIndex: number,
   closeIndex: number,
   openCount: number,
+  wrapperOpenCount: number,
 ) {
+  if (openCount === wrapperOpenCount && lines[startIndex - 1]?.trim() !== "") return null;
+
   for (let index = startIndex + 1; index < closeIndex; index++) {
     const closeCount = matchingCloseLength(lines[index], openCount);
     if (closeCount !== null) {
@@ -116,7 +119,7 @@ function markdownWrapperInnerFenceInfo(
     const bareOpener = PURE_FENCE_LINE_RE.exec(lines[index]);
     const bareOpenCount = bareOpener?.[2]?.length;
     if (bareOpenCount && bareOpenCount >= openCount) {
-      const bareClose = findBareNestedClose(lines, index, closeIndex, bareOpenCount);
+      const bareClose = findBareNestedClose(lines, index, closeIndex, bareOpenCount, openCount);
       if (!bareClose) return null;
       noteNestedFence(scan, bareOpenCount, bareClose.closeCount);
       index = bareClose.closeIndex;

@@ -141,30 +141,13 @@ describe("normalizeMarkdown untagged wrapper edge cases", () => {
     expect(normalizeMarkdown(input)).toBe(expected);
   });
 
-  it("strengthens a markdown wrapper that contains untagged fences without blank separators", () => {
-    const input = [
-      MARKDOWN_FENCE,
-      INTRO_TEXT,
-      "```",
-      INNER_PROMPT_TEXT,
-      "```",
-      AFTER_NESTED_PROMPT,
-      "```",
-    ].join("\n");
-    const expected = [
-      STRENGTHENED_MARKDOWN_FENCE,
-      INTRO_TEXT,
-      "```",
-      INNER_PROMPT_TEXT,
-      "```",
-      AFTER_NESTED_PROMPT,
-      "````",
-    ].join("\n");
+  it("preserves adjacent untagged blocks after a markdown sample", () => {
+    const input = [MARKDOWN_FENCE, "# Title", "```", "prose", "```", "code", "```"].join("\n");
 
-    expect(normalizeMarkdown(input)).toBe(expected);
+    expect(normalizeMarkdown(input)).toBe(input);
   });
 
-  it("strengthens a markdown wrapper when untagged nested content starts blank", () => {
+  it("preserves same-length untagged fences after nonblank markdown sample content", () => {
     const input = [
       MARKDOWN_FENCE,
       INTRO_TEXT,
@@ -175,18 +158,8 @@ describe("normalizeMarkdown untagged wrapper edge cases", () => {
       AFTER_NESTED_PROMPT,
       "```",
     ].join("\n");
-    const expected = [
-      STRENGTHENED_MARKDOWN_FENCE,
-      INTRO_TEXT,
-      "```",
-      "",
-      INNER_PROMPT_TEXT,
-      "```",
-      AFTER_NESTED_PROMPT,
-      "````",
-    ].join("\n");
 
-    expect(normalizeMarkdown(input)).toBe(expected);
+    expect(normalizeMarkdown(input)).toBe(input);
   });
 });
 
