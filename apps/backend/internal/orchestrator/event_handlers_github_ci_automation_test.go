@@ -159,8 +159,18 @@ func TestCIAutomationFilterFeedbackForPRSkipsReviewCommentsWithoutUnresolvedThre
 		t.Fatalf("expected only human plain PR comment, got %+v", filtered.Comments)
 	}
 	withThreads := ciAutomationFilterFeedbackForPR(&github.TaskPR{UnresolvedReviewThreads: 1}, feedback)
-	if len(withThreads.Comments) != 2 || withThreads.Comments[0].ID != 1 || withThreads.Comments[1].ID != 2 {
-		t.Fatalf("expected unresolved review threads to keep review comments without bot status comments, got %+v", withThreads.Comments)
+	if len(withThreads.Comments) != 3 || withThreads.Comments[0].ID != 1 || withThreads.Comments[1].ID != 2 || withThreads.Comments[2].ID != 3 {
+		t.Fatalf("expected unresolved review threads to keep review comments and bot context, got %+v", withThreads.Comments)
+	}
+	withFailedCheck := ciAutomationFilterFeedbackForPR(&github.TaskPR{}, &github.PRFeedback{
+		Checks: []github.CheckRun{{Name: "unit", Status: "completed", Conclusion: "failure"}},
+		Comments: []github.PRComment{
+			{ID: 1, Body: "human summary"},
+			{ID: 2, Body: "bot failure details", AuthorIsBot: true},
+		},
+	})
+	if len(withFailedCheck.Comments) != 2 || withFailedCheck.Comments[0].ID != 1 || withFailedCheck.Comments[1].ID != 2 {
+		t.Fatalf("expected failed checks to keep bot PR comment context, got %+v", withFailedCheck.Comments)
 	}
 }
 
@@ -454,6 +464,48 @@ func TestHandleTaskPRCIAutomationAutoFixWaitsForPendingChecks(t *testing.T) {
 	}
 	if len(ghSvc.fixAttempts) != 0 {
 		t.Fatalf("expected no fix round while checks are pending, got %+v", ghSvc.fixAttempts)
+	}
+}
+
+func TestHandleTaskPRCIAutomationAutoFixWaitsForExpectedChecks(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	pr := &github.TaskPR{
+		TaskID:                  "task-1",
+		RepositoryID:            "repo-1",
+		Owner:                   "acme",
+		Repo:                    "widget",
+		PRNumber:                42,
+		State:                   "open",
+		ChecksState:             "expected",
+		UnresolvedReviewThreads: 1,
+	}
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			EffectiveAutoFixPrompt: "Fix the PR\n\n{{pr.feedback}}",
+		},
+		triggerPRSyncAllPRs: []*github.TaskPR{pr},
+		prFeedback: &github.PRFeedback{
+			Comments: []github.PRComment{{ID: 100, Body: "please address this", Path: "main.go", Line: 12}},
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle auto-fix: %v", err)
+	}
+	if ghSvc.prFeedbackCalls != 1 {
+		t.Fatalf("expected one feedback fetch, got %d", ghSvc.prFeedbackCalls)
+	}
+	if status := svc.messageQueue.GetStatus(ctx, "session-1"); status.Count != 0 {
+		t.Fatalf("expected no queued auto-fix prompt while checks are expected, got %+v", status)
+	}
+	if len(ghSvc.fixAttempts) != 0 {
+		t.Fatalf("expected no fix round while checks are expected, got %+v", ghSvc.fixAttempts)
 	}
 }
 

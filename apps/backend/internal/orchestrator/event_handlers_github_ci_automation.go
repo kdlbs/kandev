@@ -24,6 +24,7 @@ const (
 	ciAutomationOrigin           = "ci_automation"
 	ciAutomationCheckSuccess     = "success"
 	ciAutomationCheckFailure     = "failure"
+	ciAutomationCheckError       = "error"
 	ciAutomationCheckCompleted   = "completed"
 	ciAutomationCheckPending     = "pending"
 	ciAutomationChangesRequested = "changes_requested"
@@ -451,7 +452,7 @@ func ciAutomationCanAutoFixFromFeedbackPR(feedback *github.PRFeedback) bool {
 }
 
 func ciAutomationChecksSettledForAutoFix(pr *github.TaskPR, feedback *github.PRFeedback) bool {
-	if pr != nil && pr.ChecksState == ciAutomationCheckPending {
+	if pr != nil && !ciAutomationChecksRollupSettled(pr.ChecksState) {
 		return false
 	}
 	if feedback == nil {
@@ -465,23 +466,45 @@ func ciAutomationChecksSettledForAutoFix(pr *github.TaskPR, feedback *github.PRF
 	return true
 }
 
+func ciAutomationChecksRollupSettled(state string) bool {
+	switch strings.TrimSpace(strings.ToLower(state)) {
+	case "", ciAutomationCheckSuccess, ciAutomationCheckFailure, ciAutomationCheckError:
+		return true
+	default:
+		return false
+	}
+}
+
 func ciAutomationFilterFeedbackForPR(pr *github.TaskPR, feedback *github.PRFeedback) *github.PRFeedback {
 	if feedback == nil || pr == nil {
 		return feedback
 	}
 	filtered := *feedback
 	filtered.Comments = make([]github.PRComment, 0, len(feedback.Comments))
+	includeBotPRComments := ciAutomationFeedbackHasActionableSignal(pr, feedback)
 	for _, comment := range feedback.Comments {
-		if ciAutomationShouldIncludeFeedbackComment(pr, comment) {
+		if ciAutomationShouldIncludeFeedbackComment(pr, comment, includeBotPRComments) {
 			filtered.Comments = append(filtered.Comments, comment)
 		}
 	}
 	return &filtered
 }
 
-func ciAutomationShouldIncludeFeedbackComment(pr *github.TaskPR, comment github.PRComment) bool {
+func ciAutomationFeedbackHasActionableSignal(pr *github.TaskPR, feedback *github.PRFeedback) bool {
+	if pr.UnresolvedReviewThreads > 0 {
+		return true
+	}
+	for _, check := range feedback.Checks {
+		if check.Status == ciAutomationCheckCompleted && ciAutomationCheckConclusionNeedsFix(check.Conclusion) {
+			return true
+		}
+	}
+	return false
+}
+
+func ciAutomationShouldIncludeFeedbackComment(pr *github.TaskPR, comment github.PRComment, includeBotPRComments bool) bool {
 	if comment.Path == "" && comment.Line == 0 {
-		return !comment.AuthorIsBot
+		return !comment.AuthorIsBot || includeBotPRComments
 	}
 	return pr.UnresolvedReviewThreads > 0
 }
