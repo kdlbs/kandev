@@ -211,7 +211,7 @@ describe("PRStatusChip auto-fix round display", () => {
     );
   });
 
-  it("shows the auto-fix round help icon in the mobile drawer", () => {
+  it("opens the auto-fix round explanation from the mobile drawer help icon", async () => {
     responsiveMock.breakpoint = "mobile";
     responsiveMock.isFinePointer = false;
     renderWithStore(stateWithAutoFix(2), <PRStatusChip taskId="task-1" />);
@@ -220,7 +220,13 @@ describe("PRStatusChip auto-fix round display", () => {
       fireEvent.click(screen.getByTestId(CHIP_TESTID));
     });
 
-    expect(screen.getByTestId(ROUND_HELP_TESTID)).toBeTruthy();
     expect(screen.queryByTestId(ROUND_EXPLANATION_TESTID)).toBeNull();
+
+    fireEvent.click(screen.getByTestId(ROUND_HELP_TESTID));
+    const explanation = await screen.findByTestId(ROUND_EXPLANATION_TESTID);
+    expect(explanation.textContent).toContain("Auto-fix has used 2 of 10 rounds");
+    expect(explanation.textContent).toContain(
+      "Kandev waits for all PR checks to finish before starting a new CI auto-fix turn",
+    );
   });
 });

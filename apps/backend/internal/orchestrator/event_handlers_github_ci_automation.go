@@ -233,21 +233,40 @@ func (s *Service) resolveCIAutoFixSession(ctx context.Context, taskID string, st
 		if session.TaskID != taskID {
 			return nil, fmt.Errorf("previous CI auto-fix session belongs to task %s", session.TaskID)
 		}
-		return session, nil
+		if ciAutomationSessionCanReceivePrompt(session) {
+			return session, nil
+		}
 	}
 	sessions, err := s.repo.ListActiveTaskSessionsByTaskID(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
 	for _, session := range sessions {
-		if session != nil && session.IsPrimary {
+		if ciAutomationSessionCanReceivePrompt(session) && session.IsPrimary {
 			return session, nil
 		}
 	}
-	if len(sessions) > 0 {
-		return sessions[0], nil
+	for _, session := range sessions {
+		if ciAutomationSessionCanReceivePrompt(session) {
+			return session, nil
+		}
 	}
 	return nil, fmt.Errorf("no active agent session for task: %s", taskID)
+}
+
+func ciAutomationSessionCanReceivePrompt(session *models.TaskSession) bool {
+	if session == nil {
+		return false
+	}
+	switch session.State {
+	case models.TaskSessionStateStarting,
+		models.TaskSessionStateRunning,
+		models.TaskSessionStateWaitingForInput,
+		models.TaskSessionStateIdle:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Service) handleTaskPRCIAutoFixEmptyDelta(ctx context.Context, pr *github.TaskPR, state *github.TaskCIPRAutomationState, previous ciAutomationCheckpoint, signature, checkpointJSON string) bool {

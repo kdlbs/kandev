@@ -941,6 +941,76 @@ func TestHandleTaskPRCIAutomationKeepsAutoFixOnPreviousSession(t *testing.T) {
 	}
 }
 
+func TestHandleTaskPRCIAutomationFallsBackWhenPreviousSessionInactive(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateCompleted)
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:        "session-2",
+		TaskID:    "task-1",
+		State:     models.TaskSessionStateRunning,
+		StartedAt: now.Add(time.Minute),
+		UpdatedAt: now.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("create active fallback session: %v", err)
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	pr := &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		Owner:        "acme",
+		Repo:         "widget",
+		PRNumber:     42,
+		State:        "open",
+		LastSyncedAt: &now,
+	}
+	previousCheckpoint := ciAutomationCheckpoint{
+		FailedChecks: []ciAutomationCheckSnapshot{
+			{Name: "unit", Conclusion: "failure", HTMLURL: "https://ci/unit"},
+		},
+	}
+	previousJSON, previousSignature := encodeCIAutomationCheckpoint(previousCheckpoint)
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			EffectiveAutoFixPrompt: "Fix the PR\n\n{{pr.feedback}}",
+		},
+		triggerPRSyncAllPRs: []*github.TaskPR{pr},
+		prFeedback: &github.PRFeedback{
+			Checks: []github.CheckRun{
+				{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit"},
+				{Name: "lint", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/lint"},
+			},
+		},
+		ciPRState: &github.TaskCIPRAutomationState{
+			TaskID:                "task-1",
+			RepositoryID:          "repo-1",
+			PRNumber:              42,
+			LastFixSignature:      previousSignature,
+			LastFixCheckpointJSON: previousJSON,
+			LastFixSessionID:      ptrString("session-1"),
+			AutoFixRoundCount:     1,
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle auto-fix: %v", err)
+	}
+	if status := svc.messageQueue.GetStatus(ctx, "session-1"); status.Count != 0 {
+		t.Fatalf("expected inactive previous session not to receive auto-fix, got %+v", status)
+	}
+	status := svc.messageQueue.GetStatus(ctx, "session-2")
+	if status.Count != 1 || !strings.Contains(status.Entries[0].Content, "lint") {
+		t.Fatalf("expected active fallback session to receive auto-fix, got %+v", status)
+	}
+	if len(ghSvc.fixAttempts) != 1 || ghSvc.fixAttempts[0].SessionID != "session-2" {
+		t.Fatalf("expected fix attempt to use fallback session-2, got %+v", ghSvc.fixAttempts)
+	}
+}
+
 func TestHandleTaskPRCIAutomationStopsBeforeEleventhAutoFixRound(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
