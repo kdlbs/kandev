@@ -99,12 +99,17 @@ func (f *fakeOrchestrator) ProcessOnTurnStart(ctx context.Context, taskID, sessi
 
 func (f *fakeOrchestrator) GetMessageQueue() *messagequeue.Service { return f.queue }
 
-func newMessageTaskHandler(t *testing.T, svc *service.Service) (*Handlers, *fakeOrchestrator) {
+func newMessageTaskHandler(t *testing.T, svc *service.Service, taskRepo ...TaskRepository) (*Handlers, *fakeOrchestrator) {
 	t.Helper()
 	log := testLogger(t)
 	orch := &fakeOrchestrator{queue: messagequeue.NewServiceMemory(log)}
+	var repo TaskRepository
+	if len(taskRepo) > 0 {
+		repo = taskRepo[0]
+	}
 	h := &Handlers{
 		taskSvc:         svc,
+		taskRepo:        repo,
 		sessionLauncher: orch,
 		logger:          log.WithFields(),
 	}
@@ -489,10 +494,15 @@ func TestHandleMessageTask_TurnStartErrorRejectsAndRestoresReview(t *testing.T) 
 	task, err := svc.GetTask(ctx, target.ID)
 	require.NoError(t, err)
 	task.State = v1.TaskStateReview
+	task.WorkflowStepID = "step-review"
 	require.NoError(t, repo.UpdateTask(ctx, task))
 
-	h, orch := newMessageTaskHandler(t, svc)
-	orch.onTurnStart = func(context.Context, string, string) error {
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	orch.onTurnStart = func(ctx context.Context, taskID, _ string) error {
+		updatedTask, err := svc.GetTask(ctx, taskID)
+		require.NoError(t, err)
+		updatedTask.WorkflowStepID = "step-in-progress"
+		require.NoError(t, repo.UpdateTask(ctx, updatedTask))
 		return errors.New("turn start failed")
 	}
 
@@ -504,6 +514,7 @@ func TestHandleMessageTask_TurnStartErrorRejectsAndRestoresReview(t *testing.T) 
 	updatedTask, err := svc.GetTask(ctx, target.ID)
 	require.NoError(t, err)
 	assert.Equal(t, v1.TaskStateReview, updatedTask.State)
+	assert.Equal(t, "step-review", updatedTask.WorkflowStepID)
 	assert.Empty(t, orch.promptCalls)
 	messages, err := svc.ListMessages(ctx, sess.ID)
 	require.NoError(t, err)
@@ -518,9 +529,16 @@ func TestHandleMessageTask_DispatchErrorRestoresReview(t *testing.T) {
 	task, err := svc.GetTask(ctx, target.ID)
 	require.NoError(t, err)
 	task.State = v1.TaskStateReview
+	task.WorkflowStepID = "step-review"
 	require.NoError(t, repo.UpdateTask(ctx, task))
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	orch.onTurnStart = func(ctx context.Context, taskID, _ string) error {
+		updatedTask, err := svc.GetTask(ctx, taskID)
+		require.NoError(t, err)
+		updatedTask.WorkflowStepID = "step-in-progress"
+		return repo.UpdateTask(ctx, updatedTask)
+	}
 	orch.promptErrFirst = errors.New("send failed")
 
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "fails during dispatch", sender.ID))
@@ -531,6 +549,7 @@ func TestHandleMessageTask_DispatchErrorRestoresReview(t *testing.T) {
 	updatedTask, err := svc.GetTask(ctx, target.ID)
 	require.NoError(t, err)
 	assert.Equal(t, v1.TaskStateReview, updatedTask.State)
+	assert.Equal(t, "step-review", updatedTask.WorkflowStepID)
 	require.Len(t, orch.promptCalls, 1)
 }
 

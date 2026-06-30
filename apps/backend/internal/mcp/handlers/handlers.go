@@ -64,6 +64,7 @@ type SessionRepository interface {
 // TaskRepository interface for updating task state.
 type TaskRepository interface {
 	UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error
+	UpdateTask(ctx context.Context, task *models.Task) error
 }
 
 // EventBus interface for publishing events.
@@ -1631,6 +1632,11 @@ type taskMessageDispatchResult struct {
 	sessionID string
 }
 
+type taskMessageReviewRollback struct {
+	changed        bool
+	workflowStepID string
+}
+
 // dispatchTaskMessage routes a message to the right delivery path based on session state.
 // Returns the action taken: "queued", "sent", or "started".
 //
@@ -1652,20 +1658,18 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 
 	default:
 		originalState := session.State
-		reviewStateChanged, err := h.ensureTaskInProgressForTaskMessage(ctx, taskID)
+		reviewRollback, err := h.ensureTaskInProgressForTaskMessage(ctx, taskID)
 		if err != nil {
 			return taskMessageDispatchResult{}, err
 		}
 		session, err := h.prepareSessionForTaskMessage(ctx, taskID, session)
 		if err != nil {
-			if reviewStateChanged {
-				h.restoreTaskReviewForTaskMessage(ctx, taskID)
-			}
+			h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
 			return taskMessageDispatchResult{}, err
 		}
 		result, err := h.dispatchPreparedTaskMessage(ctx, taskID, session, originalState, prompt, metadata)
-		if err != nil && reviewStateChanged {
-			h.restoreTaskReviewForTaskMessage(ctx, taskID)
+		if err != nil {
+			h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
 		}
 		return result, err
 	}
@@ -1703,6 +1707,10 @@ func shouldStartTaskMessageSession(originalState models.TaskSessionState, sessio
 	if session.State == models.TaskSessionStateCreated {
 		return true
 	}
+	// on_turn_start may mark a never-launched CREATED session as
+	// WAITING_FOR_INPUT before an executor row exists. In that case the first
+	// message still needs the launch path; already-bound waiting sessions use
+	// the normal prompt/resume path.
 	return originalState == models.TaskSessionStateCreated &&
 		session.State == models.TaskSessionStateWaitingForInput &&
 		session.AgentExecutionID == ""
@@ -1740,26 +1748,46 @@ func (h *Handlers) prepareSessionForTaskMessage(ctx context.Context, taskID stri
 	return resolved, nil
 }
 
-func (h *Handlers) ensureTaskInProgressForTaskMessage(ctx context.Context, taskID string) (bool, error) {
+func (h *Handlers) ensureTaskInProgressForTaskMessage(ctx context.Context, taskID string) (taskMessageReviewRollback, error) {
 	if h.taskSvc == nil {
-		return false, errors.New("task service not available")
+		return taskMessageReviewRollback{}, errors.New("task service not available")
 	}
 	task, err := h.taskSvc.GetTask(ctx, taskID)
 	if err != nil {
-		return false, err
+		return taskMessageReviewRollback{}, err
 	}
 	if task.State != v1.TaskStateReview {
-		return false, nil
+		return taskMessageReviewRollback{}, nil
 	}
 	if _, err := h.taskSvc.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
-		return false, fmt.Errorf("failed to transition task from REVIEW to IN_PROGRESS for task message: %w", err)
+		return taskMessageReviewRollback{}, fmt.Errorf("failed to transition task from REVIEW to IN_PROGRESS for task message: %w", err)
 	}
 	h.logger.Info("task transitioned from REVIEW to IN_PROGRESS for task message",
 		zap.String("task_id", taskID))
-	return true, nil
+	return taskMessageReviewRollback{changed: true, workflowStepID: task.WorkflowStepID}, nil
 }
 
-func (h *Handlers) restoreTaskReviewForTaskMessage(ctx context.Context, taskID string) {
+func (h *Handlers) restoreTaskReviewForTaskMessage(ctx context.Context, taskID string, rollback taskMessageReviewRollback) {
+	if !rollback.changed {
+		return
+	}
+	if h.taskRepo != nil {
+		task, err := h.taskSvc.GetTask(ctx, taskID)
+		if err == nil {
+			task.State = v1.TaskStateReview
+			task.WorkflowStepID = rollback.workflowStepID
+			if err := h.taskRepo.UpdateTask(ctx, task); err == nil {
+				return
+			}
+			h.logger.Warn("failed to restore task row after task message dispatch failure",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+		} else {
+			h.logger.Warn("failed to load task for REVIEW rollback after task message dispatch failure",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+		}
+	}
 	if _, err := h.taskSvc.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
 		h.logger.Warn("failed to restore task to REVIEW after task message dispatch failure",
 			zap.String("task_id", taskID),
