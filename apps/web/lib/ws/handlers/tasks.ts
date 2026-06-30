@@ -130,7 +130,15 @@ function removeTaskFromBothKanbans(state: AppState, taskId: string): AppState {
 function clearRemovedTaskSelection(state: AppState, taskId: string): AppState {
   let next = state;
   if (next.tasks.activeTaskId === taskId) {
-    next = { ...next, tasks: { ...next.tasks, activeTaskId: null, activeSessionId: null } };
+    next = {
+      ...next,
+      tasks: {
+        ...next.tasks,
+        activeTaskId: null,
+        activeSessionId: null,
+        pinnedSessionId: null,
+      },
+    };
   }
   if (next.tasks.lastSessionByTaskId[taskId]) {
     const { [taskId]: _, ...rest } = next.tasks.lastSessionByTaskId;
@@ -140,14 +148,14 @@ function clearRemovedTaskSelection(state: AppState, taskId: string): AppState {
 }
 
 /**
- * Soft-redirect away from a deleted task's page. Only fires when the user is
+ * Soft-redirect away from a removed task's page. Only fires when the user is
  * currently parked on that task's route (`/t/<id>` or the compatibility
- * `/tasks/<id>`), so a background deletion of some other task never yanks the
+ * `/tasks/<id>`), so a background removal of some other task never yanks the
  * user elsewhere.
  */
-function redirectAwayFromDeletedTask(deletedId: string): void {
+function redirectAwayFromRemovedTask(taskId: string): void {
   if (typeof window === "undefined") return;
-  if (!isTaskDetailPath(window.location.pathname, deletedId)) return;
+  if (!isTaskDetailPath(window.location.pathname, taskId)) return;
   softNavigate("/", "replace");
 }
 
@@ -175,17 +183,21 @@ function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessag
     const oldWfId = message.payload.old_workflow_id;
     let next = state;
 
-    if (oldWfId && oldWfId !== wfId) {
+    if (archivedAt || (oldWfId && oldWfId !== wfId)) {
       next = removeTaskFromBothKanbans(next, taskId);
     }
 
     if (archivedAt) {
-      next = removeTaskFromBothKanbans(next, taskId);
       return clearRemovedTaskSelection(next, taskId);
     }
 
     return upsertTaskInBothKanbans(next, wfId, message.payload);
   });
+
+  if (archivedAt) {
+    redirectAwayFromRemovedTask(taskId);
+    return;
+  }
 
   // Follow focus to the new primary when:
   //  - the user is currently viewing this task,
@@ -251,18 +263,9 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
 
       const wasActive = currentState.tasks.activeTaskId === deletedId;
 
-      store.setState((state) => {
-        const isActive = state.tasks.activeTaskId === deletedId;
-        let next = removeTaskFromBothKanbans(state, deletedId);
-        if (isActive) {
-          next = { ...next, tasks: { ...next.tasks, activeTaskId: null, activeSessionId: null } };
-        }
-        if (next.tasks.lastSessionByTaskId[deletedId]) {
-          const { [deletedId]: _, ...rest } = next.tasks.lastSessionByTaskId;
-          next = { ...next, tasks: { ...next.tasks, lastSessionByTaskId: rest } };
-        }
-        return next;
-      });
+      store.setState((state) =>
+        clearRemovedTaskSelection(removeTaskFromBothKanbans(state, deletedId), deletedId),
+      );
 
       // Capture the route match before any redirect mutates the pathname. This
       // covers a fresh load where the browser is parked on the task's route
@@ -278,7 +281,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       // preempt it and strand the user on the home route. For auto-deletions we
       // move off the now-dead route (helper is route-guarded) and explain why.
       if (message.payload.reason && (wasActive || onDeletedRoute)) {
-        redirectAwayFromDeletedTask(deletedId);
+        redirectAwayFromRemovedTask(deletedId);
         store.getState().setTaskDeletedNotification({
           taskId: deletedId,
           title: message.payload.title,

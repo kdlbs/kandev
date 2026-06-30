@@ -10,6 +10,9 @@ vi.mock("@/lib/recent-tasks", () => ({
 
 type Listener = (state: AppState) => void;
 type KanbanTask = { id: string; title: string; workflowId: string; workflowStepId: string };
+const TASK_ID = "t1";
+const SESSION_ID = "sess-old";
+const ARCHIVED_AT = "2026-06-30T12:00:00Z";
 
 function makeStore(initial: Partial<AppState> = {}) {
   let state = {
@@ -66,9 +69,31 @@ function taskPayload(id: string, workflowId = "wf1") {
   };
 }
 
+function archiveTask(store: StoreApi<AppState>, taskId = TASK_ID) {
+  const handlers = registerTasksHandlers(store);
+  handlers["task.updated"]!(
+    makeUpdatedMessage({
+      ...taskPayload(taskId),
+      archived_at: ARCHIVED_AT,
+    }),
+  );
+}
+
+function makeStoreWithTask(initial: Partial<AppState> = {}) {
+  return makeStore({
+    kanban: {
+      workflowId: "wf1",
+      steps: [],
+      tasks: [{ id: TASK_ID, primarySessionId: SESSION_ID, workflowId: "wf1" }],
+    } as unknown as AppState["kanban"],
+    ...initial,
+  });
+}
+
 describe("task.updated archive cleanup", () => {
   beforeEach(() => {
     vi.mocked(removeRecentTask).mockClear();
+    window.history.replaceState({}, "", "/");
   });
 
   it("removes archived tasks from the active kanban cache even when workflow focus changed", () => {
@@ -95,8 +120,8 @@ describe("task.updated archive cleanup", () => {
     const handlers = registerTasksHandlers(store);
     handlers["task.updated"]!(
       makeUpdatedMessage({
-        ...taskPayload("t1", "wf1"),
-        archived_at: "2026-06-30T12:00:00Z",
+        ...taskPayload(TASK_ID, "wf1"),
+        archived_at: ARCHIVED_AT,
       }),
     );
 
@@ -105,36 +130,52 @@ describe("task.updated archive cleanup", () => {
     expect(state.kanbanMulti.snapshots.wf1.tasks).toEqual([]);
   });
 
-  it("clears active task state, recent history, and sidebar prefs for archived task events", () => {
-    const store = makeStore({
-      kanban: {
-        workflowId: "wf1",
-        steps: [],
-        tasks: [{ id: "t1", primarySessionId: "sess-old", workflowId: "wf1" }],
-      } as unknown as AppState["kanban"],
+  it("clears active task state, pin, recent history, and sidebar prefs for archived task events", () => {
+    const store = makeStoreWithTask({
       tasks: {
-        activeTaskId: "t1",
-        activeSessionId: "sess-old",
-        pinnedSessionId: null,
-        lastSessionByTaskId: { t1: "sess-old", t2: "sess-other" },
+        activeTaskId: TASK_ID,
+        activeSessionId: SESSION_ID,
+        pinnedSessionId: SESSION_ID,
+        lastSessionByTaskId: { [TASK_ID]: SESSION_ID, t2: "sess-other" },
       },
       environmentIdBySessionId: {},
     } as unknown as Partial<AppState>);
 
-    const handlers = registerTasksHandlers(store);
-    handlers["task.updated"]!(
-      makeUpdatedMessage({
-        ...taskPayload("t1"),
-        archived_at: "2026-06-30T12:00:00Z",
-      }),
-    );
+    archiveTask(store);
 
     const state = store.getState();
     expect(state.tasks.activeTaskId).toBeNull();
     expect(state.tasks.activeSessionId).toBeNull();
-    expect(state.tasks.lastSessionByTaskId).not.toHaveProperty("t1");
+    expect(state.tasks.pinnedSessionId).toBeNull();
+    expect(state.tasks.lastSessionByTaskId).not.toHaveProperty(TASK_ID);
     expect(state.tasks.lastSessionByTaskId).toHaveProperty("t2", "sess-other");
-    expect(removeRecentTask).toHaveBeenCalledWith("t1");
-    expect(state.removeTaskFromSidebarPrefs).toHaveBeenCalledWith("t1");
+    expect(removeRecentTask).toHaveBeenCalledWith(TASK_ID);
+    expect(state.removeTaskFromSidebarPrefs).toHaveBeenCalledWith(TASK_ID);
+  });
+
+  it.each(["/t/t1", "/tasks/t1"])("redirects away when archived on %s", (path) => {
+    window.history.replaceState({}, "", path);
+    const store = makeStoreWithTask({
+      tasks: {
+        activeTaskId: TASK_ID,
+        activeSessionId: SESSION_ID,
+        pinnedSessionId: null,
+        lastSessionByTaskId: {},
+      },
+      environmentIdBySessionId: {},
+    } as unknown as Partial<AppState>);
+
+    archiveTask(store);
+
+    expect(window.location.pathname).toBe("/");
+  });
+
+  it("does not redirect when a different task is archived", () => {
+    window.history.replaceState({}, "", "/t/other");
+    const store = makeStoreWithTask();
+
+    archiveTask(store);
+
+    expect(window.location.pathname).toBe("/t/other");
   });
 });
