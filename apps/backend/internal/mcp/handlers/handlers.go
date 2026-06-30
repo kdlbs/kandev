@@ -1819,7 +1819,7 @@ func (h *Handlers) resolveSessionAfterTaskMessageTurnStart(ctx context.Context, 
 	if submitted.State == models.TaskSessionStateCompleted {
 		return reloaded, nil
 	}
-	return nil, errors.New("session was switched but submitted session remains primary")
+	return nil, errors.New("session was marked completed by on_turn_start but primary was not switched")
 }
 
 // recordUserMessage writes the prompt to the task's chat as a user message so it

@@ -418,6 +418,12 @@ func TestHandleMessageTask_CompletedSessionWithoutSwitch_PromptsSameSession(t *t
 
 	require.Len(t, orch.promptCalls, 1)
 	assert.Equal(t, sess.ID, orch.promptCalls[0].sessionID)
+
+	messages, err := svc.ListMessages(ctx, sess.ID)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	assert.Contains(t, messages[0].Content, "follow up completed")
+	assert.Equal(t, sender.ID, messages[0].Metadata["sender_task_id"])
 }
 
 func TestHandleMessageTask_CompletedSession_UsesSessionSelectedByTurnStart(t *testing.T) {
@@ -457,6 +463,41 @@ func TestHandleMessageTask_CompletedSession_UsesSessionSelectedByTurnStart(t *te
 
 	require.Len(t, orch.promptCalls, 1)
 	assert.Equal(t, replacement.ID, orch.promptCalls[0].sessionID)
+
+	oldMessages, err := svc.ListMessages(ctx, sess.ID)
+	require.NoError(t, err)
+	assert.Empty(t, oldMessages)
+	newMessages, err := svc.ListMessages(ctx, replacement.ID)
+	require.NoError(t, err)
+	require.Len(t, newMessages, 1)
+	assert.Contains(t, newMessages[0].Content, "handoff from completed")
+	assert.Equal(t, sender.ID, newMessages[0].Metadata["sender_task_id"])
+}
+
+func TestHandleMessageTask_WaitingForInputCompletedWithoutPrimarySwitchRejects(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.onTurnStart = func(ctx context.Context, _, _ string) error {
+		oldSession, err := svc.GetTaskSession(ctx, sess.ID)
+		require.NoError(t, err)
+		oldSession.State = models.TaskSessionStateCompleted
+		oldSession.IsPrimary = true
+		return repo.UpdateTaskSession(ctx, oldSession)
+	}
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "no handoff", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+	assert.Contains(t, string(resp.Payload), "marked completed")
+
+	assert.Empty(t, orch.promptCalls)
+	messages, err := svc.ListMessages(ctx, sess.ID)
+	require.NoError(t, err)
+	assert.Empty(t, messages)
 }
 
 func TestHandleMessageTask_CreatedSessionStartsAfterTurnStartChangesState(t *testing.T) {
