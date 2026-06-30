@@ -1,3 +1,4 @@
+/* eslint-disable max-lines */
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   __MAX_CACHE_ENTRIES,
@@ -185,9 +186,40 @@ describe("normalizeMarkdown advanced untagged wrapper edge cases", () => {
 
     expect(normalizeMarkdown(input)).toBe(input);
   });
+
+  it("preserves separate untagged blocks that start blank", () => {
+    const input = [MARKDOWN_FENCE, "plain text", "```", "prose", "```", "", "code", "```"].join(
+      "\n",
+    );
+
+    expect(normalizeMarkdown(input)).toBe(input);
+  });
 });
 
 describe("normalizeMarkdown blank-padded untagged wrapper edge cases", () => {
+  it("strengthens same-length bare fences after non-colon prose inside wrappers", () => {
+    const input = [
+      MARKDOWN_FENCE,
+      "Here is an example",
+      "```",
+      "code",
+      "```",
+      AFTER_NESTED_PROMPT,
+      "```",
+    ].join("\n");
+    const expected = [
+      STRENGTHENED_MARKDOWN_FENCE,
+      "Here is an example",
+      "```",
+      "code",
+      "```",
+      AFTER_NESTED_PROMPT,
+      "````",
+    ].join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(expected);
+  });
+
   it("strengthens blank-padded bare nested fences", () => {
     const input = [
       MARKDOWN_FENCE,
@@ -293,6 +325,35 @@ describe("normalizeMarkdown tagged-looking untagged wrapper edge cases", () => {
       "```",
       "",
       "```not-a-block",
+      AFTER_NESTED_PROMPT,
+      "````",
+    ].join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(expected);
+  });
+
+  it("keeps scanning unmatched bare fence content after a nested pair", () => {
+    const input = [
+      MARKDOWN_FENCE,
+      INTRO_TEXT,
+      "",
+      "```text",
+      INNER_PROMPT_TEXT,
+      "```",
+      "",
+      "```",
+      AFTER_NESTED_PROMPT,
+      "```",
+    ].join("\n");
+    const expected = [
+      STRENGTHENED_MARKDOWN_FENCE,
+      INTRO_TEXT,
+      "",
+      "```text",
+      INNER_PROMPT_TEXT,
+      "```",
+      "",
+      "```",
       AFTER_NESTED_PROMPT,
       "````",
     ].join("\n");

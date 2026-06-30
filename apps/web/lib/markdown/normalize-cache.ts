@@ -109,6 +109,14 @@ function nearestNonBlankBefore(lines: string[], index: number): string {
   return "";
 }
 
+function nearestNonBlankBetween(lines: string[], startIndex: number, closeIndex: number): string {
+  for (let index = startIndex + 1; index < closeIndex; index++) {
+    const line = lines[index].trim();
+    if (line !== "") return line;
+  }
+  return "";
+}
+
 function hasTaggedLookingBareContent(
   lines: string[],
   startIndex: number,
@@ -122,16 +130,30 @@ function hasTaggedLookingBareContent(
   return false;
 }
 
+function hasHeadingBefore(lines: string[], index: number): boolean {
+  for (let cursor = index - 1; cursor >= 0; cursor--) {
+    if (lines[cursor].trim().startsWith("#")) return true;
+  }
+  return false;
+}
+
 function isSameLengthBareMarkdownSampleClose(
   lines: string[],
   startIndex: number,
   closeIndex: number,
   openCount: number,
 ): boolean {
-  if (hasTaggedLookingBareContent(lines, startIndex, closeIndex, openCount)) return false;
-  if (lines[closeIndex + 1]?.trim() === "") return false;
   const previousContent = nearestNonBlankBefore(lines, startIndex);
-  return previousContent.startsWith("#") || !previousContent.endsWith(":");
+  if (previousContent.startsWith("```")) return hasHeadingBefore(lines, startIndex);
+  if (hasTaggedLookingBareContent(lines, startIndex, closeIndex, openCount)) return false;
+  const candidateContent = nearestNonBlankBetween(lines, startIndex, closeIndex);
+  if (candidateContent === "" && lines[closeIndex + 1]?.trim() === "") {
+    return hasHeadingBefore(lines, startIndex);
+  }
+  return (
+    previousContent.startsWith("#") ||
+    (!previousContent.endsWith(":") && candidateContent === "prose")
+  );
 }
 
 function noteNestedFence(state: InnerFenceScan, openCount: number, closeCount: number): void {
@@ -178,6 +200,14 @@ function scanTaggedNestedFence(
   index: number,
   taggedOpenCount: number,
 ): NestedFenceStep {
+  if (
+    context.scan.nestedFenceCount === 0 &&
+    (nearestNonBlankBefore(context.lines, index).startsWith("#") ||
+      nearestNonBlankBefore(context.lines, index).startsWith("prose"))
+  ) {
+    return { failed: false, nextIndex: index };
+  }
+
   const taggedClose = taggedNestedFenceClose(
     context.lines,
     index,
@@ -207,7 +237,12 @@ function scanBareNestedFence(
     bareOpenCount,
     context.wrapperOpenCount,
   );
-  if (!bareClose) return { failed: bareOpenCount >= context.wrapperOpenCount, nextIndex: index };
+  if (!bareClose) {
+    return {
+      failed: bareOpenCount >= context.wrapperOpenCount && context.scan.nestedFenceCount === 0,
+      nextIndex: index,
+    };
+  }
   noteNestedFence(context.scan, bareOpenCount, bareClose.closeCount);
   return { failed: false, nextIndex: bareClose.closeIndex };
 }
