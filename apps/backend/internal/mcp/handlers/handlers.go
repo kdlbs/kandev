@@ -1633,42 +1633,97 @@ type taskMessageDispatchResult struct {
 
 type taskMessageReviewRollback struct {
 	changed        bool
+	restoreTask    bool
 	workflowStepID string
-	session        taskMessageSessionRollback
+	sessions       []taskMessageSessionRollback
+	sessionIDs     map[string]struct{}
+	selectedID     string
 }
 
 type taskMessageSessionRollback struct {
-	captured    bool
-	sessionID   string
-	state       models.TaskSessionState
-	error       string
-	completedAt *time.Time
-	isPrimary   bool
+	sessionID      string
+	state          models.TaskSessionState
+	error          string
+	completedAt    *time.Time
+	isPrimary      bool
+	hadPendingStep bool
+	pendingStep    interface{}
 }
 
 type taskMessageSessionRollbackRepository interface {
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
+	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	SetSessionPrimary(ctx context.Context, sessionID string) error
+	DeleteTaskSession(ctx context.Context, id string) error
+	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
 }
 
-func (r *taskMessageReviewRollback) captureSession(session *models.TaskSession) {
+func (r *taskMessageReviewRollback) captureSessions(ctx context.Context, repo SessionRepository, taskID string, fallback *models.TaskSession) error {
+	if !r.changed || fallback == nil {
+		return nil
+	}
+	sessions := []*models.TaskSession{fallback}
+	if snapshotRepo, ok := repo.(interface {
+		ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+	}); ok {
+		listed, err := snapshotRepo.ListTaskSessions(ctx, taskID)
+		if err != nil {
+			return err
+		}
+		sessions = listed
+	}
+	r.sessionIDs = make(map[string]struct{}, len(sessions))
+	r.sessions = make([]taskMessageSessionRollback, 0, len(sessions))
+	for _, session := range sessions {
+		if session == nil {
+			continue
+		}
+		r.sessionIDs[session.ID] = struct{}{}
+		r.sessions = append(r.sessions, captureTaskMessageSession(session))
+	}
+	return nil
+}
+
+func (r *taskMessageReviewRollback) captureSelectedSession(session *models.TaskSession) {
 	if !r.changed || session == nil {
 		return
 	}
+	r.selectedID = session.ID
+}
+
+func captureTaskMessageSession(session *models.TaskSession) taskMessageSessionRollback {
 	var completedAt *time.Time
 	if session.CompletedAt != nil {
 		copy := *session.CompletedAt
 		completedAt = &copy
 	}
-	r.session = taskMessageSessionRollback{
-		captured:    true,
+	snapshot := taskMessageSessionRollback{
 		sessionID:   session.ID,
 		state:       session.State,
 		error:       session.ErrorMessage,
 		completedAt: completedAt,
 		isPrimary:   session.IsPrimary,
 	}
+	if session.Metadata != nil {
+		if pendingStep, ok := session.Metadata[models.SessionMetaKeyPendingStepCompletion]; ok {
+			snapshot.hadPendingStep = true
+			snapshot.pendingStep = cloneTaskMessageMetadataValue(pendingStep)
+		}
+	}
+	return snapshot
+}
+
+func cloneTaskMessageMetadataValue(value interface{}) interface{} {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return value
+	}
+	var cloned interface{}
+	if err := json.Unmarshal(data, &cloned); err != nil {
+		return value
+	}
+	return cloned
 }
 
 // dispatchTaskMessage routes a message to the right delivery path based on session state.
@@ -1695,12 +1750,15 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 		if err != nil {
 			return taskMessageDispatchResult{}, err
 		}
-		reviewRollback.captureSession(session)
+		if err := reviewRollback.captureSessions(ctx, h.sessionRepo, taskID, session); err != nil {
+			return taskMessageDispatchResult{}, err
+		}
 		session, err := h.prepareSessionForTaskMessage(ctx, taskID, session)
 		if err != nil {
 			h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
 			return taskMessageDispatchResult{}, err
 		}
+		reviewRollback.captureSelectedSession(session)
 		result, err := h.dispatchPreparedTaskMessage(ctx, taskID, session, prompt, metadata)
 		if err != nil {
 			h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
@@ -1728,13 +1786,15 @@ func (h *Handlers) dispatchPreparedTaskMessage(ctx context.Context, taskID strin
 			h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
 			return taskMessageDispatchResult{status: "started", sessionID: session.ID}, nil
 		}
-		// Record only after the prompt is accepted; otherwise a failed dispatch
-		// leaves a REVIEW rollback with a user message the agent never saw.
+		// Record before prompting so the message is tied to the turn that
+		// PromptTask dispatches. If dispatch fails, delete the row below so a
+		// REVIEW rollback does not keep a prompt the agent never saw.
+		recorded := h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
 		status, err := h.promptWithAutoResume(ctx, taskID, session.ID, prompt)
 		if err != nil {
+			h.deleteRecordedUserMessage(ctx, recorded)
 			return taskMessageDispatchResult{}, err
 		}
-		h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
 		return taskMessageDispatchResult{status: status, sessionID: session.ID}, nil
 	}
 }
@@ -1794,22 +1854,31 @@ func (h *Handlers) ensureTaskInProgressForTaskMessage(ctx context.Context, taskI
 	if task.State != v1.TaskStateReview {
 		return taskMessageReviewRollback{}, nil
 	}
+	if task.AssigneeAgentProfileID != "" {
+		return taskMessageReviewRollback{
+			changed:        true,
+			workflowStepID: task.WorkflowStepID,
+		}, nil
+	}
 	if _, err := h.taskSvc.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
 		return taskMessageReviewRollback{}, fmt.Errorf("failed to transition task from REVIEW to IN_PROGRESS for task message: %w", err)
 	}
 	h.logger.Info("task transitioned from REVIEW to IN_PROGRESS for task message",
 		zap.String("task_id", taskID))
-	return taskMessageReviewRollback{changed: true, workflowStepID: task.WorkflowStepID}, nil
+	return taskMessageReviewRollback{changed: true, restoreTask: true, workflowStepID: task.WorkflowStepID}, nil
 }
 
 func (h *Handlers) restoreTaskReviewForTaskMessage(ctx context.Context, taskID string, rollback taskMessageReviewRollback) {
 	if !rollback.changed {
 		return
 	}
-	if err := h.restoreTaskMessageSession(ctx, rollback.session); err != nil {
+	if err := h.restoreTaskMessageSessions(ctx, rollback); err != nil {
 		h.logger.Warn("failed to restore task session after task message dispatch failure",
 			zap.String("task_id", taskID),
 			zap.Error(err))
+	}
+	if !rollback.restoreTask {
+		return
 	}
 	reviewState := v1.TaskStateReview
 	if _, err := h.taskSvc.UpdateTask(ctx, taskID, &service.UpdateTaskRequest{
@@ -1822,14 +1891,30 @@ func (h *Handlers) restoreTaskReviewForTaskMessage(ctx context.Context, taskID s
 	}
 }
 
-func (h *Handlers) restoreTaskMessageSession(ctx context.Context, rollback taskMessageSessionRollback) error {
-	if !rollback.captured {
+func (h *Handlers) restoreTaskMessageSessions(ctx context.Context, rollback taskMessageReviewRollback) error {
+	if len(rollback.sessions) == 0 {
 		return nil
 	}
 	repo, ok := h.sessionRepo.(taskMessageSessionRollbackRepository)
 	if !ok {
 		return errors.New("session rollback repository not available")
 	}
+	for _, snapshot := range rollback.sessions {
+		if err := restoreTaskMessageSessionSnapshot(ctx, repo, snapshot); err != nil {
+			return err
+		}
+	}
+	if rollback.selectedID != "" {
+		if _, ok := rollback.sessionIDs[rollback.selectedID]; !ok {
+			if err := repo.DeleteTaskSession(ctx, rollback.selectedID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func restoreTaskMessageSessionSnapshot(ctx context.Context, repo taskMessageSessionRollbackRepository, rollback taskMessageSessionRollback) error {
 	session, err := repo.GetTaskSession(ctx, rollback.sessionID)
 	if err != nil {
 		return err
@@ -1845,6 +1930,13 @@ func (h *Handlers) restoreTaskMessageSession(ctx context.Context, rollback taskM
 		if err := repo.SetSessionPrimary(ctx, rollback.sessionID); err != nil {
 			return err
 		}
+	}
+	pendingStep := interface{}(nil)
+	if rollback.hadPendingStep {
+		pendingStep = rollback.pendingStep
+	}
+	if err := repo.SetSessionMetadataKey(ctx, rollback.sessionID, models.SessionMetaKeyPendingStepCompletion, pendingStep); err != nil {
+		return err
 	}
 	return nil
 }
@@ -1880,20 +1972,36 @@ func (h *Handlers) resolveSessionAfterTaskMessageTurnStart(ctx context.Context, 
 // is visible in the conversation. Mirrors the message.add path used by the UI.
 // metadata is attached to the resulting Message row (used for sender_task_id /
 // sender_task_title / sender_session_id when called from handleMessageTask).
-func (h *Handlers) recordUserMessage(ctx context.Context, taskID, sessionID, prompt string, metadata map[string]interface{}) {
+func (h *Handlers) recordUserMessage(ctx context.Context, taskID, sessionID, prompt string, metadata map[string]interface{}) *models.Message {
 	if h.taskSvc == nil {
-		return
+		return nil
 	}
-	if _, err := h.taskSvc.CreateMessage(ctx, &service.CreateMessageRequest{
+	message, err := h.taskSvc.CreateMessage(ctx, &service.CreateMessageRequest{
 		TaskSessionID: sessionID,
 		TaskID:        taskID,
 		Content:       prompt,
 		AuthorType:    "user",
 		Metadata:      metadata,
-	}); err != nil {
+	})
+	if err != nil {
 		h.logger.Warn("failed to record user message for message_task",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return nil
+	}
+	return message
+}
+
+func (h *Handlers) deleteRecordedUserMessage(ctx context.Context, message *models.Message) {
+	if h.taskSvc == nil || message == nil {
+		return
+	}
+	if err := h.taskSvc.DeleteMessage(ctx, message.ID); err != nil {
+		h.logger.Warn("failed to delete rejected user message for message_task",
+			zap.String("message_id", message.ID),
+			zap.String("task_id", message.TaskID),
+			zap.String("session_id", message.TaskSessionID),
 			zap.Error(err))
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -661,16 +662,16 @@ func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(
 	task.WorkflowStepID = "step-review"
 	require.NoError(t, repo.UpdateTask(ctx, task))
 
-	replacement := &models.TaskSession{
-		ID:             "sess-2",
-		TaskID:         target.ID,
-		AgentProfileID: "agent-profile-2",
-		State:          models.TaskSessionStateWaitingForInput,
-		IsPrimary:      false,
+	pendingSignal := models.PendingStepCompletionSignal{
+		StepID:     "step-review",
+		Source:     models.StepCompletionSourceAgent,
+		Summary:    "ready",
+		SignaledAt: time.Now().UTC(),
 	}
-	require.NoError(t, repo.CreateTaskSession(ctx, replacement))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, sess.ID, models.SessionMetaKeyPendingStepCompletion, pendingSignal))
 
 	h, orch := newMessageTaskHandler(t, svc, repo)
+	replacementID := "sess-2"
 	orch.onTurnStart = func(ctx context.Context, taskID, _ string) error {
 		updatedTask, err := svc.GetTask(ctx, taskID)
 		require.NoError(t, err)
@@ -682,7 +683,16 @@ func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(
 		oldSession.State = models.TaskSessionStateCompleted
 		oldSession.IsPrimary = false
 		require.NoError(t, repo.UpdateTaskSession(ctx, oldSession))
-		require.NoError(t, repo.SetSessionPrimary(ctx, replacement.ID))
+		replacement := &models.TaskSession{
+			ID:             replacementID,
+			TaskID:         target.ID,
+			AgentProfileID: "agent-profile-2",
+			State:          models.TaskSessionStateWaitingForInput,
+			IsPrimary:      false,
+		}
+		require.NoError(t, repo.CreateTaskSession(ctx, replacement))
+		require.NoError(t, repo.SetSessionMetadataKey(ctx, sess.ID, models.SessionMetaKeyPendingStepCompletion, nil))
+		require.NoError(t, repo.SetSessionPrimary(ctx, replacementID))
 		return nil
 	}
 	orch.startCreatedErr = errors.New("start failed")
@@ -704,16 +714,46 @@ func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(
 	assert.Equal(t, sess.ID, primary.ID)
 	assert.Equal(t, models.TaskSessionStateWaitingForInput, primary.State)
 	assert.True(t, primary.IsPrimary)
+	_, ok := models.LoadPendingStepSignal(primary.Metadata)
+	require.True(t, ok)
 
-	switched, err := svc.GetTaskSession(ctx, replacement.ID)
-	require.NoError(t, err)
-	assert.False(t, switched.IsPrimary)
+	_, err = svc.GetTaskSession(ctx, replacementID)
+	assert.ErrorIs(t, err, models.ErrTaskSessionNotFound)
 
 	assert.Empty(t, orch.promptCalls)
 	require.Len(t, orch.startCreatedCalls, 1)
-	messages, err := svc.ListMessages(ctx, replacement.ID)
+	messages, err := svc.ListMessages(ctx, replacementID)
 	require.NoError(t, err)
 	assert.Empty(t, messages)
+}
+
+func TestHandleMessageTask_OfficeReviewDoesNotTransitionTaskState(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+
+	task, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	task.State = v1.TaskStateReview
+	task.WorkflowStepID = "step-review"
+	task.AssigneeAgentProfileID = "agent-profile-1"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "office review follow-up", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	updatedTask, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, v1.TaskStateReview, updatedTask.State)
+	assert.Equal(t, "step-review", updatedTask.WorkflowStepID)
+
+	require.Len(t, orch.promptCalls, 1)
+	assert.Equal(t, sess.ID, orch.promptCalls[0].sessionID)
 }
 
 func TestHandleMessageTask_PromptFailsWithExecutionNotFound_AutoResumes(t *testing.T) {
