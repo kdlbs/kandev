@@ -10,8 +10,9 @@
  */
 
 const FENCE_OPEN_RE = /^ {0,3}(`{3,})/;
-const MARKDOWN_WRAPPER_OPEN_RE = /^( {0,3})(`{3,})([ \t]*(?:markdown|mdx?)(?:[ \t].*)?[ \t]*)$/i;
-const PURE_FENCE_LINE_RE = /^( {0,3})(`{3,})[ \t]*$/;
+const MARKDOWN_WRAPPER_OPEN_RE = /^( {0,3})(`{3,})(\s*(?:markdown|mdx?)(?:[ \t].*)?\s*)$/i;
+const FENCE_OPENER_LINE_RE = /^ {0,3}(`{3,})\S/;
+const PURE_FENCE_LINE_RE = /^( {0,3})(`{3,})\s*$/;
 const TRAILING_FENCE_RE = /(`{3,})\s*$/;
 
 function pureCloseLength(line: string, openCount: number): number | null {
@@ -37,6 +38,31 @@ function lastNonBlankLineIndex(lines: string[]): number {
   return -1;
 }
 
+function markdownWrapperInnerFenceInfo(lines: string[], closeIndex: number, openCount: number) {
+  let firstPureCloseIndex: number | null = null;
+  let hasNestedOpenerBeforeFirstClose = false;
+  let maxInnerPureFence = 0;
+
+  for (let index = 1; index < closeIndex; index++) {
+    const opener = FENCE_OPENER_LINE_RE.exec(lines[index]);
+    const openerRun = opener?.[1];
+    if (openerRun && openerRun.length >= openCount) {
+      if (firstPureCloseIndex !== null) return null;
+      hasNestedOpenerBeforeFirstClose = true;
+    }
+
+    const innerFence = PURE_FENCE_LINE_RE.exec(lines[index]);
+    if (!innerFence) continue;
+    const innerCount = innerFence[2].length;
+    if (innerCount < openCount) continue;
+    maxInnerPureFence = Math.max(maxInnerPureFence, innerCount);
+    firstPureCloseIndex ??= index;
+  }
+
+  if (!hasNestedOpenerBeforeFirstClose || maxInnerPureFence === 0) return null;
+  return { maxInnerPureFence };
+}
+
 function strengthenMarkdownWrapperFence(lines: string[]): string[] {
   const opener = MARKDOWN_WRAPPER_OPEN_RE.exec(lines[0] ?? "");
   if (!opener || lines.length < 3) return lines;
@@ -51,16 +77,10 @@ function strengthenMarkdownWrapperFence(lines: string[]): string[] {
   const closeCount = closer[2].length;
   if (closeCount < openCount) return lines;
 
-  let maxInnerPureFence = 0;
-  for (let index = 1; index < closeIndex; index++) {
-    const innerFence = PURE_FENCE_LINE_RE.exec(lines[index]);
-    if (!innerFence) continue;
-    const innerCount = innerFence[2].length;
-    if (innerCount >= openCount) maxInnerPureFence = Math.max(maxInnerPureFence, innerCount);
-  }
-  if (maxInnerPureFence === 0) return lines;
+  const innerInfo = markdownWrapperInnerFenceInfo(lines, closeIndex, openCount);
+  if (!innerInfo) return lines;
 
-  const targetCount = Math.max(openCount + 1, closeCount, maxInnerPureFence + 1);
+  const targetCount = Math.max(openCount + 1, closeCount, innerInfo.maxInnerPureFence + 1);
   const strengthened = lines.slice();
   strengthened[0] = `${opener[1]}${"`".repeat(targetCount)}${opener[3]}`;
   strengthened[closeIndex] = `${closer[1]}${"`".repeat(targetCount)}`;

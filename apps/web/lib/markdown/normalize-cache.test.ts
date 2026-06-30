@@ -8,23 +8,27 @@ import {
   normalizeMarkdown,
 } from "./normalize-cache";
 
+const MARKDOWN_FENCE = "```markdown";
+const INNER_PROMPT_TEXT = "nested prompt";
+const AFTER_NESTED_PROMPT = "After nested prompt.";
+
 describe("normalizeMarkdown", () => {
   it("leaves a markdown wrapper without nested fences unchanged", () => {
-    const input = ["```markdown", "# Title", "```"].join("\n");
+    const input = [MARKDOWN_FENCE, "# Title", "```"].join("\n");
 
     expect(normalizeMarkdown(input)).toBe(input);
   });
 
   it("strengthens a markdown wrapper that contains nested code fences", () => {
     const input = [
-      "```markdown",
+      MARKDOWN_FENCE,
       "Intro:",
       "",
       "```text",
-      "nested prompt",
+      INNER_PROMPT_TEXT,
       "```",
       "",
-      "After nested prompt.",
+      AFTER_NESTED_PROMPT,
       "```",
     ].join("\n");
     const expected = [
@@ -32,14 +36,73 @@ describe("normalizeMarkdown", () => {
       "Intro:",
       "",
       "```text",
-      "nested prompt",
+      INNER_PROMPT_TEXT,
       "```",
       "",
-      "After nested prompt.",
+      AFTER_NESTED_PROMPT,
       "````",
     ].join("\n");
 
     expect(normalizeMarkdown(input)).toBe(expected);
+  });
+
+  it("strengthens CRLF markdown wrappers that contain nested code fences", () => {
+    const input = [
+      MARKDOWN_FENCE,
+      "Intro:",
+      "",
+      "```text",
+      INNER_PROMPT_TEXT,
+      "```",
+      "",
+      AFTER_NESTED_PROMPT,
+      "```",
+    ].join("\r\n");
+    const expected = [
+      "````markdown\r",
+      "Intro:\r",
+      "\r",
+      "```text\r",
+      `${INNER_PROMPT_TEXT}\r`,
+      "```\r",
+      "\r",
+      `${AFTER_NESTED_PROMPT}\r`,
+      "````",
+    ].join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(expected);
+  });
+
+  it("leaves a valid markdown sample followed by another fenced block unchanged", () => {
+    const input = [
+      MARKDOWN_FENCE,
+      "# Title",
+      "```",
+      "",
+      "prose between blocks",
+      "",
+      "```js",
+      "const value = 1;",
+      "```",
+    ].join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(input);
+  });
+
+  it("leaves markdown wrappers with trailing prose outside the wrapper unchanged", () => {
+    const input = [
+      MARKDOWN_FENCE,
+      "Intro:",
+      "",
+      "```text",
+      INNER_PROMPT_TEXT,
+      "```",
+      "```",
+      "",
+      "Trailing prose outside the wrapper.",
+    ].join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(input);
   });
 });
 
