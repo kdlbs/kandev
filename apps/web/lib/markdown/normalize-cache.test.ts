@@ -111,6 +111,33 @@ describe("normalizeMarkdown wrapper edge cases", () => {
 
     expect(normalizeMarkdown(input)).toBe(expected);
   });
+
+  it("strengthens a markdown wrapper that contains untagged nested code fences", () => {
+    const input = [
+      MARKDOWN_FENCE,
+      INTRO_TEXT,
+      "",
+      "```",
+      INNER_PROMPT_TEXT,
+      "```",
+      "",
+      AFTER_NESTED_PROMPT,
+      "```",
+    ].join("\n");
+    const expected = [
+      STRENGTHENED_MARKDOWN_FENCE,
+      INTRO_TEXT,
+      "",
+      "```",
+      INNER_PROMPT_TEXT,
+      "```",
+      "",
+      AFTER_NESTED_PROMPT,
+      "````",
+    ].join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(expected);
+  });
 });
 
 describe("normalizeMarkdown wrapper boundaries", () => {

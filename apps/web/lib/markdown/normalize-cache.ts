@@ -42,6 +42,7 @@ function markdownWrapperInnerFenceInfo(lines: string[], closeIndex: number, open
   let firstPureCloseIndex: number | null = null;
   let hasNestedOpenerBeforeFirstClose = false;
   let maxInnerPureFence = 0;
+  let pureFenceCount = 0;
 
   for (let index = 1; index < closeIndex; index++) {
     const opener = FENCE_OPENER_LINE_RE.exec(lines[index]);
@@ -54,11 +55,15 @@ function markdownWrapperInnerFenceInfo(lines: string[], closeIndex: number, open
     if (!innerFence) continue;
     const innerCount = innerFence[2].length;
     if (innerCount < openCount) continue;
+    pureFenceCount += 1;
     maxInnerPureFence = Math.max(maxInnerPureFence, innerCount);
     firstPureCloseIndex ??= index;
   }
 
-  if (!hasNestedOpenerBeforeFirstClose || maxInnerPureFence === 0) return null;
+  const hasBareNestedPair = pureFenceCount >= 2;
+  if ((!hasNestedOpenerBeforeFirstClose && !hasBareNestedPair) || maxInnerPureFence === 0) {
+    return null;
+  }
   return { maxInnerPureFence };
 }
 
