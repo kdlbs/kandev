@@ -136,7 +136,7 @@ func (s *Store) addMaxInflightTasksColumn() error {
 
 // addIssueWatchSortByColumn brings older databases up to the current schema by
 // adding the sort_by column to linear_issue_watches when missing. Existing
-// rows backfill to ” (Linear default order). Fresh installs hit the
+// rows backfill to an empty string (Linear default order). Fresh installs hit the
 // column-already-present branch since createTablesSQL declares it.
 func (s *Store) addIssueWatchSortByColumn() error {
 	cols, err := s.tableColumns("linear_issue_watches")

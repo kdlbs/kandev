@@ -115,4 +115,12 @@ func TestParseLinearTime(t *testing.T) {
 	if !got.Equal(want) {
 		t.Errorf("parseLinearTime = %v, want %v", got, want)
 	}
+	// Linear's real wire format carries milliseconds; time.RFC3339 accepts the
+	// fractional second even though the layout omits it. Pins that a stricter
+	// layout swap would break.
+	gotMs := parseLinearTime("2026-01-02T03:04:05.123Z")
+	wantMs := time.Date(2026, 1, 2, 3, 4, 5, 123_000_000, time.UTC)
+	if !gotMs.Equal(wantMs) {
+		t.Errorf("parseLinearTime(ms) = %v, want %v", gotMs, wantMs)
+	}
 }
