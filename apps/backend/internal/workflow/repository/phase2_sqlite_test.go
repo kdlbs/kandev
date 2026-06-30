@@ -468,6 +468,29 @@ func TestResolveCurrentRunner_FallsBackToTaskRunnerOnOtherStep(t *testing.T) {
 	}
 }
 
+func TestResolveCurrentRunner_TreatsEmptyTaskRunnerAsMissing(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	work := newPhase2TestStep(t, repo, "Work")
+	done := newPhase2TestStep(t, repo, "Done")
+
+	_, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position)
+		VALUES (?, ?, ?, 'runner', '', 0, 0)
+	`), "empty-runner", work.ID, "task-done")
+	if err != nil {
+		t.Fatalf("insert empty runner: %v", err)
+	}
+	got, err := repo.ResolveCurrentRunner(ctx, done.ID, "task-done")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("expected no runner, got %q", got)
+	}
+}
+
 func TestResolveCurrentRunner_PrefersStepPrimaryOverOtherStepRunner(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()
