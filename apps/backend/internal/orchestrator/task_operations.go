@@ -324,8 +324,12 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 		}
 	}
 
-	// Transition task state: CREATED → SCHEDULING → (IN_PROGRESS via executor)
-	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
+	// Transition task state: CREATED → SCHEDULING → (IN_PROGRESS via executor).
+	// Office tasks keep their workflow-owned status across run launches.
+	if s.isOfficeTask(ctx, taskID) {
+		s.logger.Debug("skipping SCHEDULING transition for office task",
+			zap.String("task_id", taskID))
+	} else if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
 		s.logger.Warn("failed to update task state to SCHEDULING",
 			zap.String("task_id", taskID),
 			zap.Error(err))

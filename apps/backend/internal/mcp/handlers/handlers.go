@@ -1643,12 +1643,15 @@ type taskMessageReviewRollback struct {
 }
 
 type taskMessageSessionRollback struct {
-	sessionID   string
-	state       models.TaskSessionState
-	error       string
-	completedAt *time.Time
-	isPrimary   bool
-	metadata    map[string]interface{}
+	sessionID            string
+	state                models.TaskSessionState
+	error                string
+	completedAt          *time.Time
+	isPrimary            bool
+	agentProfileID       string
+	executorProfileID    string
+	agentProfileSnapshot map[string]interface{}
+	metadata             map[string]interface{}
 }
 
 type taskMessageQueueRollback struct {
@@ -1728,11 +1731,14 @@ func captureTaskMessageSession(session *models.TaskSession) taskMessageSessionRo
 		completedAt = &copy
 	}
 	snapshot := taskMessageSessionRollback{
-		sessionID:   session.ID,
-		state:       session.State,
-		error:       session.ErrorMessage,
-		completedAt: completedAt,
-		isPrimary:   session.IsPrimary,
+		sessionID:            session.ID,
+		state:                session.State,
+		error:                session.ErrorMessage,
+		completedAt:          completedAt,
+		isPrimary:            session.IsPrimary,
+		agentProfileID:       session.AgentProfileID,
+		executorProfileID:    session.ExecutorProfileID,
+		agentProfileSnapshot: cloneTaskMessageMetadataMap(session.AgentProfileSnapshot),
 	}
 	if session.Metadata != nil {
 		snapshot.metadata = cloneTaskMessageMetadataMap(session.Metadata)
@@ -1920,23 +1926,24 @@ func (h *Handlers) ensureTaskInProgressForTaskMessage(ctx context.Context, taskI
 	if err != nil {
 		return taskMessageReviewRollback{}, err
 	}
+	rollback := taskMessageReviewRollback{
+		changed:        true,
+		restoreTask:    true,
+		taskState:      task.State,
+		workflowStepID: task.WorkflowStepID,
+	}
 	if task.State != v1.TaskStateReview {
-		return taskMessageReviewRollback{}, nil
+		return rollback, nil
 	}
 	if task.AssigneeAgentProfileID != "" {
-		return taskMessageReviewRollback{
-			changed:        true,
-			restoreTask:    true,
-			taskState:      task.State,
-			workflowStepID: task.WorkflowStepID,
-		}, nil
+		return rollback, nil
 	}
 	if _, err := h.taskSvc.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
 		return taskMessageReviewRollback{}, fmt.Errorf("failed to transition task from REVIEW to IN_PROGRESS for task message: %w", err)
 	}
 	h.logger.Info("task transitioned from REVIEW to IN_PROGRESS for task message",
 		zap.String("task_id", taskID))
-	return taskMessageReviewRollback{changed: true, restoreTask: true, taskState: task.State, workflowStepID: task.WorkflowStepID}, nil
+	return rollback, nil
 }
 
 func (h *Handlers) restoreTaskReviewForTaskMessage(ctx context.Context, taskID string, rollback taskMessageReviewRollback) {
@@ -2071,6 +2078,9 @@ func restoreTaskMessageSessionSnapshot(ctx context.Context, repo taskMessageSess
 	session.ErrorMessage = rollback.error
 	session.CompletedAt = rollback.completedAt
 	session.IsPrimary = rollback.isPrimary
+	session.AgentProfileID = rollback.agentProfileID
+	session.ExecutorProfileID = rollback.executorProfileID
+	session.AgentProfileSnapshot = cloneTaskMessageMetadataMap(rollback.agentProfileSnapshot)
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		return err
 	}
