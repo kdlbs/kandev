@@ -9,6 +9,8 @@ import {
 } from "./normalize-cache";
 
 const MARKDOWN_FENCE = "```markdown";
+const STRENGTHENED_MARKDOWN_FENCE = "````markdown";
+const INTRO_TEXT = "Intro:";
 const INNER_PROMPT_TEXT = "nested prompt";
 const AFTER_NESTED_PROMPT = "After nested prompt.";
 
@@ -22,7 +24,7 @@ describe("normalizeMarkdown", () => {
   it("strengthens a markdown wrapper that contains nested code fences", () => {
     const input = [
       MARKDOWN_FENCE,
-      "Intro:",
+      INTRO_TEXT,
       "",
       "```text",
       INNER_PROMPT_TEXT,
@@ -32,8 +34,8 @@ describe("normalizeMarkdown", () => {
       "```",
     ].join("\n");
     const expected = [
-      "````markdown",
-      "Intro:",
+      STRENGTHENED_MARKDOWN_FENCE,
+      INTRO_TEXT,
       "",
       "```text",
       INNER_PROMPT_TEXT,
@@ -45,11 +47,77 @@ describe("normalizeMarkdown", () => {
 
     expect(normalizeMarkdown(input)).toBe(expected);
   });
+});
 
+describe("normalizeMarkdown wrapper edge cases", () => {
+  it("strengthens a markdown wrapper that contains multiple nested code fences", () => {
+    const input = [
+      MARKDOWN_FENCE,
+      INTRO_TEXT,
+      "",
+      "```text",
+      INNER_PROMPT_TEXT,
+      "```",
+      "",
+      "```json",
+      '{"ok": true}',
+      "```",
+      "",
+      AFTER_NESTED_PROMPT,
+      "```",
+    ].join("\n");
+    const expected = [
+      STRENGTHENED_MARKDOWN_FENCE,
+      INTRO_TEXT,
+      "",
+      "```text",
+      INNER_PROMPT_TEXT,
+      "```",
+      "",
+      "```json",
+      '{"ok": true}',
+      "```",
+      "",
+      AFTER_NESTED_PROMPT,
+      "````",
+    ].join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(expected);
+  });
+
+  it("strengthens a markdown wrapper that contains spaced nested info strings", () => {
+    const input = [
+      MARKDOWN_FENCE,
+      INTRO_TEXT,
+      "",
+      "``` text",
+      INNER_PROMPT_TEXT,
+      "```",
+      "",
+      AFTER_NESTED_PROMPT,
+      "```",
+    ].join("\n");
+    const expected = [
+      STRENGTHENED_MARKDOWN_FENCE,
+      INTRO_TEXT,
+      "",
+      "``` text",
+      INNER_PROMPT_TEXT,
+      "```",
+      "",
+      AFTER_NESTED_PROMPT,
+      "````",
+    ].join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(expected);
+  });
+});
+
+describe("normalizeMarkdown wrapper boundaries", () => {
   it("strengthens CRLF markdown wrappers that contain nested code fences", () => {
     const input = [
       MARKDOWN_FENCE,
-      "Intro:",
+      INTRO_TEXT,
       "",
       "```text",
       INNER_PROMPT_TEXT,
@@ -60,7 +128,7 @@ describe("normalizeMarkdown", () => {
     ].join("\r\n");
     const expected = [
       "````markdown\r",
-      "Intro:\r",
+      `${INTRO_TEXT}\r`,
       "\r",
       "```text\r",
       `${INNER_PROMPT_TEXT}\r`,
@@ -92,7 +160,7 @@ describe("normalizeMarkdown", () => {
   it("leaves markdown wrappers with trailing prose outside the wrapper unchanged", () => {
     const input = [
       MARKDOWN_FENCE,
-      "Intro:",
+      INTRO_TEXT,
       "",
       "```text",
       INNER_PROMPT_TEXT,

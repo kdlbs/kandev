@@ -11,7 +11,7 @@
 
 const FENCE_OPEN_RE = /^ {0,3}(`{3,})/;
 const MARKDOWN_WRAPPER_OPEN_RE = /^( {0,3})(`{3,})(\s*(?:markdown|mdx?)(?:[ \t].*)?\s*)$/i;
-const FENCE_OPENER_LINE_RE = /^ {0,3}(`{3,})\S/;
+const FENCE_OPENER_LINE_RE = /^ {0,3}(`{3,})(?:[ \t]+\S|\S)/;
 const PURE_FENCE_LINE_RE = /^( {0,3})(`{3,})\s*$/;
 const TRAILING_FENCE_RE = /(`{3,})\s*$/;
 
@@ -46,8 +46,7 @@ function markdownWrapperInnerFenceInfo(lines: string[], closeIndex: number, open
   for (let index = 1; index < closeIndex; index++) {
     const opener = FENCE_OPENER_LINE_RE.exec(lines[index]);
     const openerRun = opener?.[1];
-    if (openerRun && openerRun.length >= openCount) {
-      if (firstPureCloseIndex !== null) return null;
+    if (openerRun && openerRun.length >= openCount && firstPureCloseIndex === null) {
       hasNestedOpenerBeforeFirstClose = true;
     }
 
