@@ -10,6 +10,7 @@ import type { TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
 
 const AUTO_FIX_BADGE_TESTID = "pr-status-auto-fix-chip";
 const CHIP_TESTID = "pr-status-chip";
+const ROUND_HELP_TESTID = "ci-auto-fix-round-help";
 const ROUND_EXPLANATION_TESTID = "ci-auto-fix-round-explanation";
 
 const testConstants = vi.hoisted(() => ({
@@ -187,12 +188,21 @@ describe("PRStatusChip auto-fix round display", () => {
     expect(screen.getByTestId(AUTO_FIX_BADGE_TESTID).textContent).toBe("Auto-fix 3/12");
   });
 
-  it("explains the auto-fix round count from the hover popover", async () => {
+  it("explains the auto-fix round count only after hovering the round help icon", async () => {
     renderWithStore(stateWithAutoFix(1), <PRStatusChip taskId="task-1" />);
 
     fireEvent.mouseEnter(screen.getByTestId(CHIP_TESTID));
-    const explanation = await screen.findByTestId(ROUND_EXPLANATION_TESTID);
+    expect(screen.queryByTestId(ROUND_EXPLANATION_TESTID)).toBeNull();
+
+    const roundHelp = await screen.findByTestId(ROUND_HELP_TESTID);
+    fireEvent.pointerMove(roundHelp, { pointerType: "mouse" });
+    fireEvent.pointerEnter(roundHelp, { pointerType: "mouse" });
+    fireEvent.mouseMove(roundHelp);
+    const [explanation] = await screen.findAllByTestId(ROUND_EXPLANATION_TESTID);
     expect(explanation.textContent).toContain("Auto-fix has used 1 of 10 rounds");
+    expect(explanation.textContent).toContain(
+      "Kandev waits for all PR checks to finish before starting a new CI auto-fix turn",
+    );
     expect(explanation.textContent).toContain(
       "Updating an already queued auto-fix message does not use another round",
     );
@@ -201,7 +211,7 @@ describe("PRStatusChip auto-fix round display", () => {
     );
   });
 
-  it("shows the auto-fix round explanation in the mobile drawer", () => {
+  it("shows the auto-fix round help icon in the mobile drawer", () => {
     responsiveMock.breakpoint = "mobile";
     responsiveMock.isFinePointer = false;
     renderWithStore(stateWithAutoFix(2), <PRStatusChip taskId="task-1" />);
@@ -210,7 +220,7 @@ describe("PRStatusChip auto-fix round display", () => {
       fireEvent.click(screen.getByTestId(CHIP_TESTID));
     });
 
-    const explanation = screen.getByTestId(ROUND_EXPLANATION_TESTID);
-    expect(explanation.textContent).toContain("Auto-fix has used 2 of 10 rounds");
+    expect(screen.getByTestId(ROUND_HELP_TESTID)).toBeTruthy();
+    expect(screen.queryByTestId(ROUND_EXPLANATION_TESTID)).toBeNull();
   });
 });

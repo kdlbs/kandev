@@ -25,6 +25,7 @@ const (
 	ciAutomationCheckSuccess     = "success"
 	ciAutomationCheckFailure     = "failure"
 	ciAutomationCheckCompleted   = "completed"
+	ciAutomationCheckPending     = "pending"
 	ciAutomationChangesRequested = "changes_requested"
 	ciAutomationPRFeedbackToken  = "{{pr.feedback}}"
 	ciAutomationFixBlockWindow   = time.Hour
@@ -172,6 +173,9 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 	if !ciAutomationCanAutoFixFromFeedbackPR(feedback) {
 		return false
 	}
+	if !ciAutomationChecksSettledForAutoFix(pr, feedback) {
+		return false
+	}
 	feedback = ciAutomationFilterFeedbackForPR(pr, feedback)
 	previous := decodeCIAutomationCheckpoint(state)
 	delta := ciAutomationBuildDelta(feedback, previous)
@@ -185,7 +189,7 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 	}
 	allowNewRound := !ciAutomationFixRoundsExhausted(state)
 	prompt := ciAutomationRenderPrompt(options.EffectiveAutoFixPrompt, pr, delta)
-	session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, pr.TaskID)
+	session, err := s.resolveCIAutoFixSession(ctx, pr.TaskID, state)
 	if err != nil || session == nil {
 		if !allowNewRound {
 			s.markCIAutoFixExhausted(ctx, pr)
@@ -218,6 +222,32 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 		s.publishTaskCIOptionsState(ctx, pr.TaskID)
 	}
 	return true
+}
+
+func (s *Service) resolveCIAutoFixSession(ctx context.Context, taskID string, state *github.TaskCIPRAutomationState) (*models.TaskSession, error) {
+	if state != nil && state.LastFixSessionID != nil && strings.TrimSpace(*state.LastFixSessionID) != "" {
+		session, err := s.repo.GetTaskSession(ctx, *state.LastFixSessionID)
+		if err != nil {
+			return nil, err
+		}
+		if session.TaskID != taskID {
+			return nil, fmt.Errorf("previous CI auto-fix session belongs to task %s", session.TaskID)
+		}
+		return session, nil
+	}
+	sessions, err := s.repo.ListActiveTaskSessionsByTaskID(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	for _, session := range sessions {
+		if session != nil && session.IsPrimary {
+			return session, nil
+		}
+	}
+	if len(sessions) > 0 {
+		return sessions[0], nil
+	}
+	return nil, fmt.Errorf("no active agent session for task: %s", taskID)
 }
 
 func (s *Service) handleTaskPRCIAutoFixEmptyDelta(ctx context.Context, pr *github.TaskPR, state *github.TaskCIPRAutomationState, previous ciAutomationCheckpoint, signature, checkpointJSON string) bool {
@@ -401,18 +431,40 @@ func ciAutomationCanAutoFixFromFeedbackPR(feedback *github.PRFeedback) bool {
 	return feedback.PR.State != "closed" && feedback.PR.State != "merged"
 }
 
+func ciAutomationChecksSettledForAutoFix(pr *github.TaskPR, feedback *github.PRFeedback) bool {
+	if pr != nil && pr.ChecksState == ciAutomationCheckPending {
+		return false
+	}
+	if feedback == nil {
+		return true
+	}
+	for _, check := range feedback.Checks {
+		if check.Status != ciAutomationCheckCompleted {
+			return false
+		}
+	}
+	return true
+}
+
 func ciAutomationFilterFeedbackForPR(pr *github.TaskPR, feedback *github.PRFeedback) *github.PRFeedback {
-	if feedback == nil || pr == nil || pr.UnresolvedReviewThreads > 0 {
+	if feedback == nil || pr == nil {
 		return feedback
 	}
 	filtered := *feedback
 	filtered.Comments = make([]github.PRComment, 0, len(feedback.Comments))
 	for _, comment := range feedback.Comments {
-		if comment.Path == "" && comment.Line == 0 {
+		if ciAutomationShouldIncludeFeedbackComment(pr, comment) {
 			filtered.Comments = append(filtered.Comments, comment)
 		}
 	}
 	return &filtered
+}
+
+func ciAutomationShouldIncludeFeedbackComment(pr *github.TaskPR, comment github.PRComment) bool {
+	if comment.Path == "" && comment.Line == 0 {
+		return !comment.AuthorIsBot
+	}
+	return pr.UnresolvedReviewThreads > 0
 }
 
 func ciAutomationReadyToMerge(pr *github.TaskPR) bool {
