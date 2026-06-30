@@ -94,6 +94,20 @@ function noteNestedFence(state: InnerFenceScan, openCount: number, closeCount: n
   state.maxInnerPureFence = Math.max(state.maxInnerPureFence, openCount, closeCount);
 }
 
+function taggedNestedFenceClose(
+  lines: string[],
+  startIndex: number,
+  closeIndex: number,
+  taggedOpenCount: number,
+  wrapperOpenCount: number,
+) {
+  const taggedClose = findTaggedNestedClose(lines, startIndex, closeIndex, taggedOpenCount);
+  if (taggedOpenCount < wrapperOpenCount && (taggedClose?.closeCount ?? 0) < wrapperOpenCount) {
+    return null;
+  }
+  return taggedClose;
+}
+
 function markdownWrapperInnerFenceInfo(
   lines: string[],
   openIndex: number,
@@ -108,9 +122,16 @@ function markdownWrapperInnerFenceInfo(
   for (let index = openIndex + 1; index < closeIndex; index++) {
     const taggedOpener = FENCE_OPENER_LINE_RE.exec(lines[index]);
     const taggedOpenCount = taggedOpener?.[1]?.length;
-    if (taggedOpenCount && taggedOpenCount >= openCount) {
-      const taggedClose = findTaggedNestedClose(lines, index, closeIndex, taggedOpenCount);
-      if (!taggedClose) return null;
+    if (taggedOpenCount) {
+      const taggedClose = taggedNestedFenceClose(
+        lines,
+        index,
+        closeIndex,
+        taggedOpenCount,
+        openCount,
+      );
+      if (!taggedClose && taggedOpenCount >= openCount) return null;
+      if (!taggedClose) continue;
       noteNestedFence(scan, taggedOpenCount, taggedClose.closeCount);
       index = taggedClose.closeIndex;
       continue;

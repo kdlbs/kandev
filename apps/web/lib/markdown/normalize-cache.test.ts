@@ -164,6 +164,29 @@ describe("normalizeMarkdown untagged wrapper edge cases", () => {
 });
 
 describe("normalizeMarkdown advanced untagged wrapper edge cases", () => {
+  it("strengthens a longer wrapper when shorter tagged fences use longer closes", () => {
+    const input = [
+      "````markdown",
+      INTRO_TEXT,
+      "```text",
+      INNER_PROMPT_TEXT,
+      "````",
+      AFTER_NESTED_PROMPT,
+      "````",
+    ].join("\n");
+    const expected = [
+      "`````markdown",
+      INTRO_TEXT,
+      "```text",
+      INNER_PROMPT_TEXT,
+      "````",
+      AFTER_NESTED_PROMPT,
+      "`````",
+    ].join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(expected);
+  });
+
   it("strengthens a markdown wrapper when longer untagged fences contain shorter examples", () => {
     const input = [
       MARKDOWN_FENCE,
