@@ -47,6 +47,10 @@ if [[ "$cmd" == "reply" && ( $# -eq 4 || $# -eq 5 ) ]]; then
     echo "reply expects thread_id after comment_id; got a non-review-thread ID in the thread_id position" >&2
     exit 1
   fi
+  if [[ $# -eq 4 && "$4" == "--body-file" ]]; then
+    echo "reply --body-file requires a path" >&2
+    exit 1
+  fi
   if [[ $# -eq 5 ]]; then
     [[ "$4" == "--body-file" ]] || usage
     [[ -f "$5" ]] || { echo "body file not found: $5" >&2; exit 1; }

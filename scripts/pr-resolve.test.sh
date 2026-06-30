@@ -65,3 +65,12 @@ if grep -q "body file is empty" "$TMP_DIR/stderr"; then
 else
   fail "empty body file has clear error"
 fi
+
+if run_invalid_reply 456 PRRT_xyz --body-file; then
+  fail "missing body file path fails"
+fi
+if grep -q "requires a path" "$TMP_DIR/stderr"; then
+  pass "missing body file path has clear error"
+else
+  fail "missing body file path has clear error"
+fi
