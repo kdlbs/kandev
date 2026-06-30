@@ -562,18 +562,18 @@ describe("task.deleted cleanup", () => {
     expect(removeRecentTask).toHaveBeenCalledWith("t1");
   });
 
-  it("removes the deleted task from lastSessionByTaskId", () => {
+  it("clears deleted task session state", () => {
     const store = makeStore({
       kanban: {
         workflowId: "wf1",
         steps: [],
-        tasks: [{ id: "t1", primarySessionId: "sess-old", workflowId: "wf1" }],
+        tasks: [{ id: "t1", primarySessionId: SESS_PINNED, workflowId: "wf1" }],
       } as unknown as AppState["kanban"],
       tasks: {
-        activeTaskId: null,
-        activeSessionId: null,
-        pinnedSessionId: null,
-        lastSessionByTaskId: { t1: "sess-old", t2: SESS_OTHER },
+        activeTaskId: "t1",
+        activeSessionId: SESS_PINNED,
+        pinnedSessionId: SESS_PINNED,
+        lastSessionByTaskId: { t1: SESS_PINNED, t2: SESS_OTHER },
       },
       environmentIdBySessionId: {},
     });
@@ -582,6 +582,7 @@ describe("task.deleted cleanup", () => {
     handlers["task.deleted"]!(makeDeletedMessage({ task_id: "t1", workflow_id: "wf1" }));
 
     const state = store.getState();
+    expect(state.tasks.pinnedSessionId).toBeNull();
     expect(state.tasks.lastSessionByTaskId).not.toHaveProperty("t1");
     expect(state.tasks.lastSessionByTaskId).toHaveProperty("t2", SESS_OTHER);
   });

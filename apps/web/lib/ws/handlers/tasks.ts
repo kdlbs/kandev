@@ -147,16 +147,23 @@ function clearRemovedTaskSelection(state: AppState, taskId: string): AppState {
   return next;
 }
 
+function removedTaskRedirectHref(pathname: string, taskId: string): string | null {
+  if (isTaskDetailPath(pathname, taskId)) return "/";
+  const normalized =
+    pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+  return normalized === `/office/tasks/${taskId}` ? "/office/tasks" : null;
+}
+
 /**
  * Soft-redirect away from a removed task's page. Only fires when the user is
- * currently parked on that task's route (`/t/<id>` or the compatibility
- * `/tasks/<id>`), so a background removal of some other task never yanks the
- * user elsewhere.
+ * currently parked on that task's route, so a background removal of some other
+ * task never yanks the user elsewhere.
  */
 function redirectAwayFromRemovedTask(taskId: string): void {
   if (typeof window === "undefined") return;
-  if (!isTaskDetailPath(window.location.pathname, taskId)) return;
-  softNavigate("/", "replace");
+  const href = removedTaskRedirectHref(window.location.pathname, taskId);
+  if (!href) return;
+  softNavigate(href, "replace");
 }
 
 type TaskUpdatedMessage = Parameters<NonNullable<WsHandlers["task.updated"]>>[0];
