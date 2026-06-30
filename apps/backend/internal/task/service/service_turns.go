@@ -476,6 +476,17 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 				zap.Error(err))
 		} else if exec != nil {
 			info.ExecutorType = string(exec.Type)
+			// Project the executor record's connection config (e.g. ssh_host,
+			// ssh_host_fingerprint, ssh_user) into the workspace metadata as a
+			// fallback. The agent-launch path gets these via the orchestrator's
+			// executor-config merge, but the workspace-restore / terminal path
+			// only carries them forward from a live ExecutorRunning record. When
+			// no running record exists — terminal-state sessions (completed /
+			// failed / cancelled), post-restart, or after agentctl cleanup — the
+			// SSH executor would otherwise fail with "host (or host_alias) is
+			// required in executor config" when opening a terminal or restoring
+			// the workspace. Existing values (from the running record) win.
+			mergeExecutorConfigMetadata(info, exec.Config)
 		}
 	}
 
@@ -582,6 +593,33 @@ func ensureWorkspaceMetadata(info *lifecycle.WorkspaceInfo) map[string]interface
 		info.Metadata = make(map[string]interface{})
 	}
 	return info.Metadata
+}
+
+// mergeExecutorConfigMetadata projects an executor record's persistent config
+// keys (e.g. ssh_host, ssh_host_fingerprint, ssh_user) into the workspace
+// metadata WITHOUT overwriting values already present — a live ExecutorRunning
+// record carries authoritative per-session values (remote dirs/ports) and must
+// win. This is the fallback that lets terminal-state SSH sessions open a
+// terminal / restore the workspace when no running record exists.
+func mergeExecutorConfigMetadata(info *lifecycle.WorkspaceInfo, config map[string]string) {
+	if len(config) == 0 {
+		return
+	}
+	asAny := make(map[string]interface{}, len(config))
+	for k, v := range config {
+		asAny[k] = v
+	}
+	filtered := lifecycle.FilterPersistentMetadata(asAny)
+	if filtered == nil {
+		return
+	}
+	dst := ensureWorkspaceMetadata(info)
+	for k, v := range filtered {
+		if _, exists := dst[k]; exists {
+			continue
+		}
+		dst[k] = v
+	}
 }
 
 // GetWorkspaceInfoForEnvironment returns workspace information for a task environment.
