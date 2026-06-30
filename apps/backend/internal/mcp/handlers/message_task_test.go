@@ -615,7 +615,7 @@ func TestHandleMessageTask_TurnStartErrorRejectsAndRestoresReview(t *testing.T) 
 func TestHandleMessageTask_DispatchErrorRestoresReview(t *testing.T) {
 	ctx := context.Background()
 	svc, repo, eventBus := newTestTaskServiceWithEventBus(t)
-	sender, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
 	stateEvents := subscribeTaskStateChanged(t, eventBus)
 
 	task, err := svc.GetTask(ctx, target.ID)
@@ -644,6 +644,9 @@ func TestHandleMessageTask_DispatchErrorRestoresReview(t *testing.T) {
 	assert.Equal(t, "step-review", updatedTask.WorkflowStepID)
 	assertTaskStateChangedEvent(t, stateEvents, target.ID, v1.TaskStateReview, "step-review")
 	require.Len(t, orch.promptCalls, 1)
+	messages, err := svc.ListMessages(ctx, sess.ID)
+	require.NoError(t, err)
+	assert.Empty(t, messages)
 }
 
 func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(t *testing.T) {

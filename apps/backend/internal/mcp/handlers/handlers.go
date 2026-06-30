@@ -1728,11 +1728,11 @@ func (h *Handlers) dispatchPreparedTaskMessage(ctx context.Context, taskID strin
 			h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
 			return taskMessageDispatchResult{status: "started", sessionID: session.ID}, nil
 		}
-		h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
 		status, err := h.promptWithAutoResume(ctx, taskID, session.ID, prompt)
 		if err != nil {
 			return taskMessageDispatchResult{}, err
 		}
+		h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
 		return taskMessageDispatchResult{status: status, sessionID: session.ID}, nil
 	}
 }
