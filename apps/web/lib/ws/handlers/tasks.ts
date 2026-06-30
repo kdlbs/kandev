@@ -181,7 +181,9 @@ function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessag
 
   if (archivedAt) {
     removeRecentTask(taskId);
-    store.getState().removeTaskFromSidebarPrefs(taskId);
+    const state = store.getState();
+    state.removeTaskFromSidebarPrefs(taskId);
+    state.setOfficeRefetchTrigger("tasks");
   }
 
   store.setState((state) => {
@@ -275,10 +277,11 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
 
       // Capture the route match before any redirect mutates the pathname. This
       // covers a fresh load where the browser is parked on the task's route
-      // (`/t/<id>` or `/tasks/<id>`) but TaskPageContent hasn't hydrated
-      // `activeTaskId` yet, so `wasActive` is still false.
+      // but TaskPageContent hasn't hydrated `activeTaskId` yet, so `wasActive`
+      // is still false.
       const onDeletedRoute =
-        typeof window !== "undefined" && isTaskDetailPath(window.location.pathname, deletedId);
+        typeof window !== "undefined" &&
+        removedTaskRedirectHref(window.location.pathname, deletedId) !== null;
 
       // Only react to genuine auto-deletions, which the backend tags with a
       // reason (e.g. a review task whose PR was approved). User-initiated deletes

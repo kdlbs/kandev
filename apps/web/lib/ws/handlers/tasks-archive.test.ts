@@ -28,6 +28,8 @@ function makeStore(initial: Partial<AppState> = {}) {
     environmentIdBySessionId: {},
     setActiveSessionAuto: vi.fn(),
     removeTaskFromSidebarPrefs: vi.fn(),
+    setTaskDeletedNotification: vi.fn(),
+    setOfficeRefetchTrigger: vi.fn(),
     ...initial,
   } as unknown as AppState;
 
@@ -56,6 +58,15 @@ function makeUpdatedMessage(payload: Record<string, unknown>) {
     action: "task.updated" as const,
     payload,
   } as Parameters<NonNullable<ReturnType<typeof registerTasksHandlers>["task.updated"]>>[0];
+}
+
+function makeDeletedMessage(payload: Record<string, unknown>) {
+  return {
+    id: "msg-1",
+    type: "notification" as const,
+    action: "task.deleted" as const,
+    payload,
+  } as Parameters<NonNullable<ReturnType<typeof registerTasksHandlers>["task.deleted"]>>[0];
 }
 
 function taskPayload(id: string, workflowId = "wf1") {
@@ -151,6 +162,7 @@ describe("task.updated archive cleanup", () => {
     expect(state.tasks.lastSessionByTaskId).toHaveProperty("t2", "sess-other");
     expect(removeRecentTask).toHaveBeenCalledWith(TASK_ID);
     expect(state.removeTaskFromSidebarPrefs).toHaveBeenCalledWith(TASK_ID);
+    expect(state.setOfficeRefetchTrigger).toHaveBeenCalledWith("tasks");
   });
 
   it.each(["/t/t1", "/tasks/t1"])("redirects away when archived on %s", (path) => {
@@ -178,6 +190,13 @@ describe("task.updated archive cleanup", () => {
 
     expect(window.location.pathname).toBe("/t/other");
   });
+});
+
+describe("office task removal routes", () => {
+  beforeEach(() => {
+    vi.mocked(removeRecentTask).mockClear();
+    window.history.replaceState({}, "", "/");
+  });
 
   it.each(["/office/tasks/t1", "/office/tasks/t1/"])(
     "redirects office task detail route %s to the office task list when archived",
@@ -190,4 +209,26 @@ describe("task.updated archive cleanup", () => {
       expect(window.location.pathname).toBe("/office/tasks");
     },
   );
+
+  it("redirects office task detail routes to the office task list when auto-deleted", () => {
+    window.history.replaceState({}, "", "/office/tasks/t1");
+    const store = makeStoreWithTask();
+    const handlers = registerTasksHandlers(store);
+
+    handlers["task.deleted"]!(
+      makeDeletedMessage({
+        task_id: TASK_ID,
+        workflow_id: "wf1",
+        title: "Deleted task",
+        reason: "pr_approved_by_user",
+      }),
+    );
+
+    expect(window.location.pathname).toBe("/office/tasks");
+    expect(store.getState().setTaskDeletedNotification).toHaveBeenCalledWith({
+      taskId: TASK_ID,
+      title: "Deleted task",
+      reason: "pr_approved_by_user",
+    });
+  });
 });
