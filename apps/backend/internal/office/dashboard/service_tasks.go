@@ -811,13 +811,9 @@ func (s *DashboardService) dispatchCommentEngineTrigger(ctx context.Context, com
 	if s.isSelfComment(ctx, comment) {
 		return false
 	}
-	err := s.engineDispatcher.HandleTrigger(ctx, comment.TaskID, engine.TriggerOnComment,
-		engine.OnCommentPayload{
-			CommentID: comment.ID,
-			AuthorID:  comment.AuthorID,
-		}, commentkeys.TaskComment(comment.ID))
+	handled, err := s.dispatchCommentEngineTriggerOnce(ctx, comment)
 	if err == nil {
-		return true
+		return handled
 	}
 	if errors.Is(err, shared.ErrEngineNoSession) {
 		return false
@@ -827,6 +823,24 @@ func (s *DashboardService) dispatchCommentEngineTrigger(ctx context.Context, com
 		zap.String("comment_id", comment.ID),
 		zap.Error(err))
 	return false
+}
+
+type handledWorkflowEngineDispatcher interface {
+	HandleTriggerHandled(ctx context.Context, taskID string, trigger engine.Trigger, payload any, operationID string) (bool, error)
+}
+
+func (s *DashboardService) dispatchCommentEngineTriggerOnce(ctx context.Context, comment *models.TaskComment) (bool, error) {
+	payload := engine.OnCommentPayload{
+		CommentID: comment.ID,
+		AuthorID:  comment.AuthorID,
+	}
+	opID := commentkeys.TaskComment(comment.ID)
+	if dispatcher, ok := s.engineDispatcher.(handledWorkflowEngineDispatcher); ok {
+		return dispatcher.HandleTriggerHandled(ctx, comment.TaskID, engine.TriggerOnComment, payload, opID)
+	}
+	err := s.engineDispatcher.HandleTrigger(ctx, comment.TaskID, engine.TriggerOnComment,
+		payload, opID)
+	return err == nil, err
 }
 
 func (s *DashboardService) isSelfComment(ctx context.Context, comment *models.TaskComment) bool {

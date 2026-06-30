@@ -114,6 +114,14 @@ const completedSession: TaskSession = {
   updatedAt: "2026-05-01T10:05:00Z",
 };
 
+const failedSession: TaskSession = {
+  ...completedSession,
+  id: "session-failed",
+  state: "FAILED",
+  completedAt: "2026-05-01T10:06:00Z",
+  updatedAt: "2026-05-01T10:06:00Z",
+};
+
 function renderPane(task: Task, sessions: TaskSession[]) {
   return render(
     <StateProvider>
@@ -124,19 +132,21 @@ function renderPane(task: Task, sessions: TaskSession[]) {
 
 describe("OfficeSimplePane comment composer", () => {
   it("keeps projectless office tasks editable after a completed session loads", () => {
-    const view = renderPane(baseTask, []);
+    const task = { ...baseTask, status: "done" as const };
+    const view = renderPane(task, []);
 
     view.rerender(
       <StateProvider>
-        <OfficeSimplePane
-          task={baseTask}
-          comments={[]}
-          activity={[]}
-          sessions={[completedSession]}
-        />
+        <OfficeSimplePane task={task} comments={[]} activity={[]} sessions={[completedSession]} />
       </StateProvider>,
     );
 
     expect(screen.getByTestId("chat-readonly").textContent).toBe("editable");
+  });
+
+  it("keeps closed tasks read-only when the latest session cannot be reused", () => {
+    renderPane({ ...baseTask, status: "done" }, [completedSession, failedSession]);
+
+    expect(screen.getByTestId("chat-readonly").textContent).toBe("readonly");
   });
 });

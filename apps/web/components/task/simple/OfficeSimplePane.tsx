@@ -57,6 +57,9 @@ import type {
 } from "@/app/office/tasks/[id]/types";
 import { toast } from "sonner";
 
+const CLOSED_TASK_STATUSES = new Set<Task["status"]>(["done", "cancelled"]);
+const REUSABLE_COMMENT_SESSION_STATES = new Set<TaskSession["state"]>(["COMPLETED", "IDLE"]);
+
 type OfficeSimplePaneProps = {
   task: Task;
   comments: TaskComment[];
@@ -66,6 +69,25 @@ type OfficeSimplePaneProps = {
   onToggleAdvanced?: () => void;
   onCommentsChanged?: () => void;
 };
+
+function sessionSortTime(session: TaskSession): number {
+  const value = session.updatedAt ?? session.completedAt ?? session.startedAt ?? "";
+  const time = Date.parse(value);
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function latestSession(sessions: TaskSession[]): TaskSession | undefined {
+  return sessions.reduce<TaskSession | undefined>((latest, session) => {
+    if (!latest) return session;
+    return sessionSortTime(session) >= sessionSortTime(latest) ? session : latest;
+  }, undefined);
+}
+
+function commentsReadOnly(task: Task, sessions: TaskSession[]): boolean {
+  if (!CLOSED_TASK_STATUSES.has(task.status)) return false;
+  const session = latestSession(sessions);
+  return !session || !REUSABLE_COMMENT_SESSION_STATES.has(session.state);
+}
 
 function TaskBreadcrumb({ task }: { task: Task }) {
   return (
@@ -483,8 +505,7 @@ export function OfficeSimplePane({
             activity={activity}
             sessions={sessions}
             scrollParent={scrollParent}
-            // Office comments are the follow-up path that can wake a completed agent again.
-            readOnly={false}
+            readOnly={commentsReadOnly(task, sessions)}
             onCommentsChanged={onCommentsChanged}
           />
           {hasBlockerChain(task.children) ? (

@@ -71,18 +71,32 @@ func (d *Dispatcher) HandleTrigger(
 	payload any,
 	operationID string,
 ) error {
+	_, err := d.HandleTriggerHandled(ctx, taskID, trigger, payload, operationID)
+	return err
+}
+
+// HandleTriggerHandled reports whether the workflow engine found actions for
+// the trigger. A no-action step is a successful no-op, but callers such as the
+// dashboard still need to keep their legacy fallback wake path.
+func (d *Dispatcher) HandleTriggerHandled(
+	ctx context.Context,
+	taskID string,
+	trigger engine.Trigger,
+	payload any,
+	operationID string,
+) (bool, error) {
 	if taskID == "" {
-		return fmt.Errorf("task_id is required")
+		return false, fmt.Errorf("task_id is required")
 	}
 	session, err := d.resolveSession(ctx, taskID, trigger)
 	if err != nil {
-		return fmt.Errorf("resolve session: %w", err)
+		return false, fmt.Errorf("resolve session: %w", err)
 	}
 	if session == nil {
 		d.logger.Debug("engine trigger skipped: no active session",
 			zap.String("task_id", taskID),
 			zap.String("trigger", string(trigger)))
-		return ErrNoSession
+		return false, ErrNoSession
 	}
 	in := engine.HandleInput{
 		TaskID:      taskID,
@@ -91,10 +105,11 @@ func (d *Dispatcher) HandleTrigger(
 		OperationID: operationID,
 		Payload:     payload,
 	}
-	if _, err := d.engine.HandleTrigger(ctx, in); err != nil {
-		return fmt.Errorf("engine handle %s: %w", trigger, err)
+	result, err := d.engine.HandleTrigger(ctx, in)
+	if err != nil {
+		return false, fmt.Errorf("engine handle %s: %w", trigger, err)
 	}
-	return nil
+	return result.Idempotent || result.ActionCount > 0, nil
 }
 
 func (d *Dispatcher) resolveSession(

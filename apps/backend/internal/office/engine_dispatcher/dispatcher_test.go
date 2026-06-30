@@ -38,12 +38,13 @@ type fakeEngine struct {
 	captured engine.HandleInput
 	called   bool
 	err      error
+	result   engine.HandleResult
 }
 
 func (f *fakeEngine) HandleTrigger(_ context.Context, in engine.HandleInput) (engine.HandleResult, error) {
 	f.called = true
 	f.captured = in
-	return engine.HandleResult{}, f.err
+	return f.result, f.err
 }
 
 type realRunsAdapter struct {
@@ -225,6 +226,21 @@ func TestDispatcher_ResolvesSessionAndForwards(t *testing.T) {
 	}
 	if eng.captured.Trigger != engine.TriggerOnComment {
 		t.Errorf("trigger = %q", eng.captured.Trigger)
+	}
+}
+
+func TestDispatcher_HandleTriggerHandledReportsNoop(t *testing.T) {
+	eng := &fakeEngine{result: engine.HandleResult{}}
+	sessions := &fakeSessions{activeSession: &taskmodels.TaskSession{ID: "sess-1"}}
+	d := New(eng, sessions, logger.Default())
+
+	handled, err := d.HandleTriggerHandled(context.Background(), "task-1", engine.TriggerOnComment,
+		engine.OnCommentPayload{CommentID: "c-1"}, "task_comment:c-1")
+	if err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if handled {
+		t.Fatal("handled = true, want false for no-action engine result")
 	}
 }
 
