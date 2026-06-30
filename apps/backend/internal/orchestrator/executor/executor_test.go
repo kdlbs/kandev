@@ -1210,6 +1210,26 @@ func TestRunAgentProcessAsync_ResumeFailureDoesNotReviewWhileSiblingWorks(t *tes
 	}
 }
 
+func TestRunAgentProcessAsync_ResumeFailureUsesReviewReconcileCallback(t *testing.T) {
+	f := newRunAgentProcessAsyncFailureFixture(t)
+	var reviewCalls []string
+	f.exec.SetOnTaskReviewStateReconcile(func(ctx context.Context, taskID, completedSessionID string) {
+		reviewCalls = append(reviewCalls, taskID+"/"+completedSessionID)
+	})
+
+	f.exec.runAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456",
+		func(ctx context.Context) { t.Error("onSuccess should not run on failure") },
+		false, true)
+	f.awaitStop(t)
+
+	if len(reviewCalls) != 1 || reviewCalls[0] != "task-123/session-123" {
+		t.Fatalf("expected guarded review reconcile callback once, got %v", reviewCalls)
+	}
+	if len(f.taskStateUpdates) != 0 {
+		t.Fatalf("expected callback to replace direct task REVIEW writes, got %v", f.taskStateUpdates)
+	}
+}
+
 func TestWriteTaskReviewStateIfNoWorkingSessionsSkipsSameSessionActiveAgain(t *testing.T) {
 	repo := newMockRepository()
 	repo.sessions["session-123"] = &models.TaskSession{
@@ -1287,6 +1307,81 @@ func TestStartAgentProcessOnResumeSkipsOfficeTaskPromotion(t *testing.T) {
 	select {
 	case state := <-taskStateCh:
 		t.Fatalf("office resume promoted task state to %q", state)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestStartAgentProcessOnResumeSkipsCancelledSessionPromotion(t *testing.T) {
+	repo := newMockRepository()
+	session := &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	repo.sessions[session.ID] = session
+
+	startedCh := make(chan struct{})
+	agentManager := &mockAgentManager{
+		startAgentProcessFunc: func(ctx context.Context, agentExecutionID string) error {
+			if err := repo.UpdateTaskSessionState(ctx, session.ID, models.TaskSessionStateCancelled, "stopped"); err != nil {
+				return err
+			}
+			close(startedCh)
+			return nil
+		},
+	}
+	taskStateCh := make(chan v1.TaskState, 1)
+	exec := newTestExecutor(t, agentManager, repo)
+	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
+		taskStateCh <- state
+		return nil
+	})
+
+	exec.startAgentProcessOnResume(context.Background(), "task-123", session, "exec-456")
+
+	select {
+	case <-startedCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected resume process start")
+	}
+	select {
+	case state := <-taskStateCh:
+		t.Fatalf("cancelled resume promoted task state to %q", state)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestStartAgentProcessOnResumeSkipsArchivedTaskPromotion(t *testing.T) {
+	repo := newMockRepository()
+	archivedAt := time.Now()
+	repo.tasks["task-123"] = &models.Task{ID: "task-123", ArchivedAt: &archivedAt}
+	session := &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	repo.sessions[session.ID] = session
+
+	startedCh := make(chan struct{})
+	agentManager := &mockAgentManager{
+		startAgentProcessFunc: func(ctx context.Context, agentExecutionID string) error {
+			close(startedCh)
+			return nil
+		},
+	}
+	taskStateCh := make(chan v1.TaskState, 1)
+	exec := newTestExecutor(t, agentManager, repo)
+	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
+		taskStateCh <- state
+		return nil
+	})
+
+	exec.startAgentProcessOnResume(context.Background(), "task-123", session, "exec-456")
+
+	select {
+	case <-startedCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected resume process start")
+	}
+	select {
+	case state := <-taskStateCh:
+		t.Fatalf("archived resume promoted task state to %q", state)
 	case <-time.After(100 * time.Millisecond):
 	}
 }

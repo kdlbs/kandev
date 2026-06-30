@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -75,6 +76,33 @@ func TestHandleTransientFailure_SchedulesRetryAndEmitsWarning(t *testing.T) {
 	actions, ok := msg.metadata["actions"].([]map[string]interface{})
 	if !ok || actionByTestID(actions, recoveryCancelRetryButtonTestID) == nil {
 		t.Errorf("expected a cancel action with test_id %q, got %v", recoveryCancelRetryButtonTestID, msg.metadata["actions"])
+	}
+}
+
+func TestTransientFailedExecutionToolUpdateDoesNotCreateMessage(t *testing.T) {
+	svc, mc := newTransientTestService(t)
+	t.Cleanup(svc.cancelAllTransientRetries)
+
+	svc.handleAgentFailed(context.Background(), watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s1",
+		AgentExecutionID: "exec-1",
+		ErrorMessage:     overloaded529,
+	})
+
+	svc.handleAgentStreamEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t1",
+		SessionID:   "s1",
+		ExecutionID: "exec-1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:       "tool_update",
+			ToolCallID: "tc1",
+			ToolStatus: agentEventComplete,
+		},
+	})
+
+	if mc.toolUpdateWrites != 0 {
+		t.Fatalf("expected stale transient-failure tool update to be dropped, got %d writes", mc.toolUpdateWrites)
 	}
 }
 

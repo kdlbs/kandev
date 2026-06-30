@@ -495,6 +495,9 @@ func NewService(
 	exec.SetOnSessionStarting(func(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error {
 		return s.setSessionStarting(ctx, taskID, session, promoteTask)
 	})
+	exec.SetOnTaskReviewStateReconcile(func(ctx context.Context, taskID, completedSessionID string) {
+		s.writeTaskReviewState(ctx, taskID, completedSessionID)
+	})
 	exec.SetOnLaunchFailed(s.handleSessionLaunchFailed)
 	exec.SetOnAgentStartFailed(s.handleAgentStartFailed)
 	if caps, ok := agentManager.(executor.ExecutorTypeCapabilities); ok {

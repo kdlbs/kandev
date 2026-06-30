@@ -123,6 +123,11 @@ func (e *Executor) stopUnstartedExecution(ctx context.Context, sessionID, agentE
 }
 
 func (e *Executor) writeTaskReviewStateIfNoWorkingSessions(ctx context.Context, taskID, failedSessionID string) {
+	if e.onTaskReviewStateReconcile != nil {
+		e.onTaskReviewStateReconcile(ctx, taskID, failedSessionID)
+		return
+	}
+
 	if failedSessionID != "" {
 		session, err := e.repo.GetTaskSession(ctx, failedSessionID)
 		if err == nil && session != nil && isRuntimeWorkingSessionState(session.State) {

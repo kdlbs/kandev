@@ -24,9 +24,13 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
 	eventType := payload.Data.Type
+	terminalCompleteStream := false
 
 	if eventType == agentEventComplete {
-		if s.isExecutionCompleted(sessionID, payload.ExecutionID) && !s.shouldAllowTerminalCompleteStream(sessionID, payload.ExecutionID) {
+		if s.isExecutionCompleted(sessionID, payload.ExecutionID) {
+			_, terminalCompleteStream = s.terminalCompleteStreamMarker(sessionID, payload.ExecutionID)
+		}
+		if s.isExecutionCompleted(sessionID, payload.ExecutionID) && !terminalCompleteStream {
 			s.logger.Debug("ignoring complete stream event from terminal failed execution",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
@@ -37,9 +41,12 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		return
 	}
 
-	// Any agent stream activity means the agent resumed after clarification.
-	// Cancel primary-path clarification watchdogs for this session.
-	s.cancelClarificationWatchdogsForSession(sessionID, eventType)
+	if !terminalCompleteStream {
+		// Any live agent stream activity means the agent resumed after clarification.
+		// Cancel primary-path clarification watchdogs for this session. Late terminal
+		// completes are excluded because they belong to an already-finished execution.
+		s.cancelClarificationWatchdogsForSession(sessionID, eventType)
+	}
 
 	s.logger.Debug("handling agent stream event",
 		zap.String("task_id", taskID),
@@ -256,9 +263,23 @@ func (s *Service) saveAgentTextIfPresent(ctx context.Context, payload *lifecycle
 	if payload.Data.Text == "" || payload.SessionID == "" {
 		return
 	}
+	s.saveAgentTextForTurn(ctx, payload, s.getActiveTurnID(payload.SessionID))
+}
+
+func (s *Service) saveAgentTextForTurn(ctx context.Context, payload *lifecycle.AgentStreamEventPayload, turnID string) {
+	if payload.Data.Text == "" || payload.SessionID == "" {
+		return
+	}
+	if turnID == "" {
+		s.logger.Debug("skipping agent text without a target turn",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", payload.SessionID),
+			zap.String("agent_execution_id", payload.ExecutionID))
+		return
+	}
 
 	if s.messageCreator != nil {
-		if err := s.messageCreator.CreateAgentMessage(ctx, payload.TaskID, payload.Data.Text, payload.SessionID, s.getActiveTurnID(payload.SessionID)); err != nil {
+		if err := s.messageCreator.CreateAgentMessage(ctx, payload.TaskID, payload.Data.Text, payload.SessionID, turnID); err != nil {
 			s.logger.Error("failed to create agent message",
 				zap.String("task_id", payload.TaskID),
 				zap.Error(err))
@@ -578,6 +599,7 @@ const completedExecutionRetention = 10 * time.Minute
 type terminalExecutionMarker struct {
 	expiresAt           time.Time
 	allowCompleteStream bool
+	turnID              string
 }
 
 func terminalExecutionKey(sessionID, executionID string) string {
@@ -601,6 +623,7 @@ func (s *Service) markTerminalExecution(sessionID, executionID string, allowComp
 	s.completedExecutions.Store(key, terminalExecutionMarker{
 		expiresAt:           expiresAt,
 		allowCompleteStream: allowCompleteStream,
+		turnID:              s.currentTurnIDForSession(context.Background(), sessionID),
 	})
 	time.AfterFunc(completedExecutionRetention, func() {
 		s.deleteCompletedExecutionIfExpired(key, expiresAt)
@@ -612,9 +635,9 @@ func (s *Service) isExecutionCompleted(sessionID, executionID string) bool {
 	return ok
 }
 
-func (s *Service) shouldAllowTerminalCompleteStream(sessionID, executionID string) bool {
+func (s *Service) terminalCompleteStreamMarker(sessionID, executionID string) (terminalExecutionMarker, bool) {
 	marker, ok := s.terminalExecutionMarker(sessionID, executionID)
-	return ok && marker.allowCompleteStream
+	return marker, ok && marker.allowCompleteStream
 }
 
 func (s *Service) terminalExecutionMarker(sessionID, executionID string) (terminalExecutionMarker, bool) {
@@ -632,6 +655,25 @@ func (s *Service) terminalExecutionMarker(sessionID, executionID string) (termin
 		return terminalExecutionMarker{}, false
 	}
 	return marker, true
+}
+
+func (s *Service) currentTurnIDForSession(ctx context.Context, sessionID string) string {
+	if sessionID == "" {
+		return ""
+	}
+	if turnIDVal, ok := s.activeTurns.Load(sessionID); ok {
+		if turnID, ok := turnIDVal.(string); ok && turnID != "" {
+			return turnID
+		}
+	}
+	if s.turnService == nil {
+		return ""
+	}
+	turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil || turn == nil {
+		return ""
+	}
+	return turn.ID
 }
 
 func (s *Service) deleteCompletedExecutionIfExpired(key string, expiresAt time.Time) {
@@ -924,7 +966,7 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	s.logger.Debug("handling complete stream event",
 		zap.String("task_id", payload.TaskID),
 		zap.String("session_id", payload.SessionID))
-	terminalCompleteStream := s.shouldAllowTerminalCompleteStream(payload.SessionID, payload.ExecutionID)
+	terminalMarker, terminalCompleteStream := s.terminalCompleteStreamMarker(payload.SessionID, payload.ExecutionID)
 
 	// Load session once up front — used by storeResumeToken, state check, and setSessionWaitingForInput.
 	var session *models.TaskSession
@@ -951,10 +993,25 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 		s.storeResumeToken(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID)
 	}
 
+	s.publishPromptUsage(ctx, payload, session)
+
+	if terminalCompleteStream {
+		s.saveAgentTextForTurn(ctx, payload, terminalMarker.turnID)
+		s.publishAgentPlanForTurn(ctx, payload, terminalMarker.turnID, false)
+		if terminalMarker.turnID != "" {
+			s.publishAgentTurnComplete(ctx, payload)
+		}
+		s.logger.Debug("complete stream from terminal execution flushed final data; skipping active turn and runtime reconciliation",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", payload.SessionID),
+			zap.String("agent_execution_id", payload.ExecutionID),
+			zap.String("turn_id", terminalMarker.turnID))
+		return
+	}
+
 	s.saveAgentTextIfPresent(ctx, payload)
 	s.publishAgentPlanIfPresent(ctx, payload)
 	s.persistTurnPromptMetadata(ctx, payload, session)
-	s.publishPromptUsage(ctx, payload, session)
 	s.completeTurnForSession(ctx, payload.SessionID)
 
 	// Publish agent turn message event so the office comment bridge can
@@ -994,14 +1051,6 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	// contention between concurrent worktrees.
 	if payload.SessionID != "" {
 		s.captureGitStatusSnapshotWithRetry(ctx, payload.SessionID)
-	}
-
-	if terminalCompleteStream {
-		s.logger.Debug("complete stream from terminal execution flushed final data; skipping runtime reconciliation",
-			zap.String("task_id", payload.TaskID),
-			zap.String("session_id", payload.SessionID),
-			zap.String("agent_execution_id", payload.ExecutionID))
-		return
 	}
 
 	// Office sessions park at IDLE between scheduler runs; cancelled turns skip that path so the session stays promptable.
@@ -1169,6 +1218,10 @@ func (s *Service) handleAgentPlanEvent(ctx context.Context, payload *lifecycle.A
 // publishAgentPlanIfPresent extracts plan_content from a complete event and creates
 // a dedicated agent_plan message in the session.
 func (s *Service) publishAgentPlanIfPresent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	s.publishAgentPlanForTurn(ctx, payload, "", true)
+}
+
+func (s *Service) publishAgentPlanForTurn(ctx context.Context, payload *lifecycle.AgentStreamEventPayload, turnID string, allowLazyTurn bool) {
 	if payload.SessionID == "" || payload.Data.Data == nil || s.messageCreator == nil {
 		return
 	}
@@ -1182,9 +1235,15 @@ func (s *Service) publishAgentPlanIfPresent(ctx context.Context, payload *lifecy
 	}
 
 	sessionID := payload.SessionID
+	if turnID == "" && allowLazyTurn {
+		turnID = s.getActiveTurnID(sessionID)
+	}
+	if turnID == "" {
+		return
+	}
 	if err := s.messageCreator.CreateSessionMessage(
 		ctx, payload.TaskID, planContent, sessionID,
-		string(models.MessageTypeAgentPlan), s.getActiveTurnID(sessionID), nil, false,
+		string(models.MessageTypeAgentPlan), turnID, nil, false,
 	); err != nil {
 		s.logger.Error("failed to create agent plan message",
 			zap.String("task_id", payload.TaskID),

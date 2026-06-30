@@ -448,7 +448,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 	// Update scheduler and remove from queue
 	s.scheduler.HandleTaskCompleted(data.TaskID, true)
 	s.scheduler.RemoveTask(data.TaskID)
-	s.markExecutionFailed(data.SessionID, data.AgentExecutionID)
+	s.markExecutionCompleted(data.SessionID, data.AgentExecutionID)
 
 	// Check for workflow transition based on session's current step.
 	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
@@ -542,6 +542,8 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 		zap.String("agent_execution_id", data.AgentExecutionID),
 		zap.String("error_message", data.ErrorMessage))
 
+	s.markExecutionFailed(data.SessionID, data.AgentExecutionID)
+
 	// Transient provider errors (529 Overloaded) get a paced, visible
 	// retry-with-backoff before any red banner. This is the ONLY non-terminal
 	// failure path, so it runs before automation finalization below — otherwise
@@ -552,8 +554,6 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 	if data.SessionID != "" && s.handleTransientFailure(ctx, data) {
 		return
 	}
-
-	s.markExecutionCompleted(data.SessionID, data.AgentExecutionID)
 
 	// Terminal from here. Finalize run-mode automation runs — every branch
 	// below returns early (resume failure, session-backed recoverable failure,

@@ -815,6 +815,7 @@ func TestStartCreatedSession_EmptyProfileFallsBackToWorkflowDefault(t *testing.T
 type mockMessageCreator struct {
 	userMessages       []mockUserMessage
 	sessionMessages    []mockSessionMessage
+	agentMessages      []mockAgentMessage
 	agentMessageWrites int
 	agentStreamWrites  int
 	thinkingWrites     int
@@ -834,6 +835,10 @@ type mockSessionMessage struct {
 	requestsInput                                   bool
 }
 
+type mockAgentMessage struct {
+	taskID, content, sessionID, turnID string
+}
+
 func (m *mockMessageCreator) CreateUserMessage(_ context.Context, taskID, content, sessionID, turnID string, metadata map[string]interface{}) error {
 	if m.userMessageErr != nil {
 		return m.userMessageErr
@@ -842,7 +847,8 @@ func (m *mockMessageCreator) CreateUserMessage(_ context.Context, taskID, conten
 	return nil
 }
 
-func (m *mockMessageCreator) CreateAgentMessage(context.Context, string, string, string, string) error {
+func (m *mockMessageCreator) CreateAgentMessage(_ context.Context, taskID, content, sessionID, turnID string) error {
+	m.agentMessages = append(m.agentMessages, mockAgentMessage{taskID, content, sessionID, turnID})
 	m.agentMessageWrites++
 	return nil
 }

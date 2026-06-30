@@ -634,9 +634,15 @@ func TestCompleteStreamFromCompletedExecutionFlushesAgentText(t *testing.T) {
 
 	taskRepo := newMockTaskRepo()
 	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+	svc.turnService = &repoTurnService{repo: repo}
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
+	firstTurn, err := svc.turnService.StartTurn(ctx, "s1")
+	require.NoError(t, err)
 	svc.markExecutionCompleted("s1", "exec-1")
+	svc.completeTurnForSession(ctx, "s1")
+	nextTurn, err := svc.turnService.StartTurn(ctx, "s1")
+	require.NoError(t, err)
 
 	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
 		TaskID:      "t1",
@@ -650,6 +656,13 @@ func TestCompleteStreamFromCompletedExecutionFlushesAgentText(t *testing.T) {
 
 	require.Equal(t, 1, messages.agentMessageWrites,
 		"final complete streams must flush text even if agent.completed arrived first")
+	require.Equal(t, firstTurn.ID, messages.agentMessages[0].turnID,
+		"late terminal complete must write to the turn that belonged to the terminal execution")
+	activeTurn, err := svc.turnService.GetActiveTurn(ctx, "s1")
+	require.NoError(t, err)
+	require.NotNil(t, activeTurn)
+	require.Equal(t, nextTurn.ID, activeTurn.ID,
+		"late terminal complete must not close a newer active turn")
 	require.Zero(t, taskRepo.stateWrites["t1"],
 		"final complete streams from terminal executions must not re-run task state reconciliation")
 }
@@ -780,6 +793,39 @@ func TestCompletedExecutionStreamDoesNotCancelClarificationWatchdog(t *testing.T
 	select {
 	case <-watchCtx.Done():
 		t.Fatal("stale completed-execution stream cancelled clarification watchdog")
+	default:
+	}
+}
+
+func TestTerminalCompleteStreamDoesNotCancelClarificationWatchdog(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	watchCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc.clarificationWatchdogs.Store(
+		svc.clarificationWatchdogKey("s1", "pending-1"),
+		&clarificationWatchdogEntry{cancel: cancel},
+	)
+	svc.markExecutionCompleted("s1", "exec-1")
+
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t1",
+		SessionID:   "s1",
+		ExecutionID: "exec-1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type: agentEventComplete,
+			Text: "late complete",
+		},
+	})
+
+	require.Equal(t, 1, countClarificationWatchdogs(svc),
+		"late terminal complete streams must not cancel clarification watchdogs")
+	select {
+	case <-watchCtx.Done():
+		t.Fatal("late terminal complete cancelled clarification watchdog")
 	default:
 	}
 }
