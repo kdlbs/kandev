@@ -326,7 +326,11 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 
 	// Transition task state: CREATED → SCHEDULING → (IN_PROGRESS via executor).
 	// Office tasks keep their workflow-owned status across run launches.
-	if s.isOfficeTask(ctx, taskID) {
+	isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine office task status: %w", err)
+	}
+	if isOfficeTask {
 		s.logger.Debug("skipping SCHEDULING transition for office task",
 			zap.String("task_id", taskID))
 	} else if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
@@ -702,8 +706,16 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 // isOfficeTask returns true when the task has an assignee agent profile, which
 // identifies it as an office-managed task (as opposed to a kanban / quick-chat task).
 func (s *Service) isOfficeTask(ctx context.Context, taskID string) bool {
+	isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
+	return err == nil && isOfficeTask
+}
+
+func (s *Service) lookupOfficeTask(ctx context.Context, taskID string) (bool, error) {
 	dbTask, err := s.repo.GetTask(ctx, taskID)
-	return err == nil && dbTask != nil && dbTask.AssigneeAgentProfileID != ""
+	if err != nil {
+		return false, err
+	}
+	return dbTask != nil && dbTask.AssigneeAgentProfileID != "", nil
 }
 
 // prepareSessionForStart creates the session for a launch and propagates any

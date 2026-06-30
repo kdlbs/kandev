@@ -304,6 +304,58 @@ func TestSQLiteRepository_TransferSession(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_ReplaceSessionPreservesQueuedIdentity(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+
+	original := &QueuedMessage{
+		SessionID: "s1",
+		TaskID:    "t1",
+		Content:   "original",
+		Model:     "model-a",
+		PlanMode:  true,
+		Metadata:  map[string]interface{}{"sender": "task-a"},
+		QueuedBy:  "agent",
+	}
+	if err := repo.Insert(ctx, original, 0); err != nil {
+		t.Fatalf("insert original: %v", err)
+	}
+	if err := repo.SetPendingMove(ctx, "s1", &PendingMove{TaskID: "t1", WorkflowStepID: "step-a"}); err != nil {
+		t.Fatalf("set pending move: %v", err)
+	}
+	if err := repo.Insert(ctx, &QueuedMessage{SessionID: "s1", TaskID: "t1", Content: "mutated", QueuedBy: "user"}, 0); err != nil {
+		t.Fatalf("insert mutated: %v", err)
+	}
+
+	if err := repo.ReplaceSession(ctx, "s1", []QueuedMessage{*original}, &PendingMove{
+		TaskID:         "t1",
+		WorkflowStepID: "step-a",
+		QueuedAt:       original.QueuedAt,
+	}); err != nil {
+		t.Fatalf("replace session: %v", err)
+	}
+
+	entries, err := repo.ListBySession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 restored entry, got %d", len(entries))
+	}
+	restored := entries[0]
+	if restored.ID != original.ID || restored.Position != original.Position || !restored.QueuedAt.Equal(original.QueuedAt) {
+		t.Fatalf("identity changed: got id=%s pos=%d queued_at=%s want id=%s pos=%d queued_at=%s",
+			restored.ID, restored.Position, restored.QueuedAt, original.ID, original.Position, original.QueuedAt)
+	}
+	move, err := repo.TakePendingMove(ctx, "s1")
+	if err != nil {
+		t.Fatalf("take pending move: %v", err)
+	}
+	if move == nil || move.WorkflowStepID != "step-a" {
+		t.Fatalf("pending move = %#v, want step-a", move)
+	}
+}
+
 func TestSQLiteRepository_PendingMove(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()

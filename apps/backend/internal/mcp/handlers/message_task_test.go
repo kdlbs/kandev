@@ -753,7 +753,7 @@ func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(
 	}))
 
 	h, orch := newMessageTaskHandler(t, svc, repo)
-	_, err = orch.queue.QueueMessageWithMetadata(ctx, sess.ID, target.ID, "queued before switch", "", "agent", false, nil, nil)
+	queuedBeforeSwitch, err := orch.queue.QueueMessageWithMetadata(ctx, sess.ID, target.ID, "queued before switch", "", "agent", false, nil, nil)
 	require.NoError(t, err)
 	orch.queue.SetPendingMove(ctx, sess.ID, &messagequeue.PendingMove{
 		TaskID:         target.ID,
@@ -827,6 +827,9 @@ func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(
 	status := orch.queue.GetStatus(ctx, sess.ID)
 	require.Equal(t, 1, status.Count)
 	assert.Equal(t, "queued before switch", status.Entries[0].Content)
+	assert.Equal(t, queuedBeforeSwitch.ID, status.Entries[0].ID)
+	assert.Equal(t, queuedBeforeSwitch.Position, status.Entries[0].Position)
+	assert.Equal(t, queuedBeforeSwitch.QueuedAt, status.Entries[0].QueuedAt)
 	move, ok := orch.queue.TakePendingMove(ctx, sess.ID)
 	require.True(t, ok)
 	assert.Equal(t, "step-review", move.WorkflowStepID)

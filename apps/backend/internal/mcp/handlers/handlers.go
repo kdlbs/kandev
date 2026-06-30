@@ -2031,29 +2031,11 @@ func (h *Handlers) restoreTaskMessageQueues(ctx context.Context, rollback taskMe
 }
 
 func (h *Handlers) restoreTaskMessageQueue(ctx context.Context, queue *messagequeue.Service, sessionID string, snapshot taskMessageQueueRollback) error {
-	if _, err := queue.CancelAll(ctx, sessionID); err != nil {
-		return err
-	}
-	_, _ = queue.TakePendingMove(ctx, sessionID)
-	for _, entry := range snapshot.entries {
-		if _, err := queue.QueueMessageWithMetadata(
-			ctx,
-			sessionID,
-			entry.TaskID,
-			entry.Content,
-			entry.Model,
-			entry.QueuedBy,
-			entry.PlanMode,
-			entry.Attachments,
-			entry.Metadata,
-		); err != nil {
-			return err
-		}
-	}
+	var pendingMove *messagequeue.PendingMove
 	if snapshot.hadPendingMove {
-		queue.SetPendingMove(ctx, sessionID, cloneTaskMessagePendingMove(snapshot.pendingMove))
+		pendingMove = cloneTaskMessagePendingMove(snapshot.pendingMove)
 	}
-	return nil
+	return queue.RestoreSession(ctx, sessionID, cloneTaskMessageQueuedMessages(snapshot.entries), pendingMove)
 }
 
 func (h *Handlers) clearTaskMessageQueue(ctx context.Context, sessionID string) {
@@ -2104,14 +2086,14 @@ func (h *Handlers) resolveSessionAfterTaskMessageTurnStart(ctx context.Context, 
 		return nil, fmt.Errorf("failed to reload session after on_turn_start: %w", err)
 	}
 	primary, err := h.taskSvc.GetPrimarySession(ctx, taskID)
-	if err == nil && primary != nil && primary.ID != submitted.ID {
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve primary session after on_turn_start: %w", err)
+	}
+	if primary != nil && primary.ID != submitted.ID {
 		return primary, nil
 	}
 	if reloaded.State != models.TaskSessionStateCompleted {
 		return reloaded, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("session was switched but no active session found: %w", err)
 	}
 	if primary == nil {
 		return nil, errors.New("session was switched but no active session found")

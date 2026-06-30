@@ -387,6 +387,39 @@ func TestTransferSession(t *testing.T) {
 	})
 }
 
+func TestRestoreSession(t *testing.T) {
+	svc := setupService(t)
+	ctx := context.Background()
+
+	original, err := svc.QueueMessageWithMetadata(ctx, "s", "task-1", "original", "model-a", "agent", true, []MessageAttachment{
+		{Type: "image", Data: "abc", MimeType: "image/png"},
+	}, map[string]interface{}{"sender": "task-a"})
+	require.NoError(t, err)
+	svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-a"})
+
+	_, err = svc.QueueMessage(ctx, "s", "task-1", "mutated", "", "user", false, nil)
+	require.NoError(t, err)
+	svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-b"})
+
+	require.NoError(t, svc.RestoreSession(ctx, "s", []QueuedMessage{*original}, &PendingMove{
+		TaskID:         "task-1",
+		WorkflowStepID: "step-a",
+		QueuedAt:       original.QueuedAt,
+	}))
+
+	status := svc.GetStatus(ctx, "s")
+	require.Equal(t, 1, status.Count)
+	restored := status.Entries[0]
+	assert.Equal(t, original.ID, restored.ID)
+	assert.Equal(t, original.Position, restored.Position)
+	assert.Equal(t, original.QueuedAt, restored.QueuedAt)
+	assert.Equal(t, original.Content, restored.Content)
+	assert.Equal(t, original.Metadata, restored.Metadata)
+	move, ok := svc.TakePendingMove(ctx, "s")
+	require.True(t, ok)
+	assert.Equal(t, "step-a", move.WorkflowStepID)
+}
+
 func TestPendingMove(t *testing.T) {
 	t.Run("set then take returns and clears", func(t *testing.T) {
 		svc := setupService(t)

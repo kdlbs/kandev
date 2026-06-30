@@ -474,6 +474,62 @@ func (r *sqliteRepository) TransferSession(ctx context.Context, oldSessionID, ne
 	return tx.Commit()
 }
 
+func (r *sqliteRepository) ReplaceSession(ctx context.Context, sessionID string, entries []QueuedMessage, pendingMove *PendingMove) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin replace session tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE session_id = ?`), sessionID); err != nil {
+		return fmt.Errorf("clear queued messages: %w", err)
+	}
+	for _, entry := range entries {
+		attachmentsJSON, err := marshalAttachments(entry.Attachments)
+		if err != nil {
+			return err
+		}
+		metadataJSON, err := marshalMetadata(entry.Metadata)
+		if err != nil {
+			return err
+		}
+		queuedAt := entry.QueuedAt
+		if queuedAt.IsZero() {
+			queuedAt = time.Now().UTC()
+		}
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+			INSERT INTO queued_messages
+				(id, session_id, task_id, position, content, model, plan_mode, attachments_json, metadata_json, queued_at, queued_by)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`),
+			entry.ID, sessionID, entry.TaskID, entry.Position, entry.Content, entry.Model,
+			boolToInt(entry.PlanMode), attachmentsJSON, metadataJSON, queuedAt, entry.QueuedBy,
+		); err != nil {
+			return fmt.Errorf("restore queued message: %w", err)
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM pending_moves WHERE session_id = ?`), sessionID); err != nil {
+		return fmt.Errorf("clear pending move: %w", err)
+	}
+	if pendingMove != nil {
+		queuedAt := pendingMove.QueuedAt
+		if queuedAt.IsZero() {
+			queuedAt = time.Now().UTC()
+		}
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+			INSERT INTO pending_moves (id, session_id, task_id, workflow_id, workflow_step_id, step_position, queued_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+		`),
+			uuid.New().String(), sessionID, pendingMove.TaskID, pendingMove.WorkflowID,
+			pendingMove.WorkflowStepID, pendingMove.Position, queuedAt,
+		); err != nil {
+			return fmt.Errorf("restore pending move: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
 func (r *sqliteRepository) SetPendingMove(ctx context.Context, sessionID string, move *PendingMove) error {
 	if move.QueuedAt.IsZero() {
 		move.QueuedAt = time.Now().UTC()

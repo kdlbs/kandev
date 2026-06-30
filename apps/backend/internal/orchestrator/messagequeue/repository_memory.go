@@ -246,6 +246,35 @@ func (r *memoryRepository) TransferSession(_ context.Context, oldSessionID, newS
 	return nil
 }
 
+func (r *memoryRepository) ReplaceSession(_ context.Context, sessionID string, entries []QueuedMessage, pendingMove *PendingMove) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(entries) == 0 {
+		delete(r.entries, sessionID)
+		delete(r.nextPosition, sessionID)
+	} else {
+		replaced := make([]*QueuedMessage, 0, len(entries))
+		var maxPos int64
+		for _, entry := range entries {
+			clone := entry
+			clone.SessionID = sessionID
+			if clone.Position > maxPos {
+				maxPos = clone.Position
+			}
+			replaced = append(replaced, &clone)
+		}
+		r.entries[sessionID] = replaced
+		r.nextPosition[sessionID] = maxPos
+	}
+	if pendingMove == nil {
+		delete(r.pendingMoves, sessionID)
+		return nil
+	}
+	clone := *pendingMove
+	r.pendingMoves[sessionID] = &clone
+	return nil
+}
+
 func (r *memoryRepository) SetPendingMove(_ context.Context, sessionID string, move *PendingMove) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
