@@ -704,8 +704,9 @@ func TestService_DeleteTaskCleansSuccessfulSessionResourcesOnPartialStopFailure(
 	if _, err := os.Stat(filepath.Join(quickChatDir, "session-failed")); err != nil {
 		t.Fatalf("failed session quick-chat directory should remain: %v", err)
 	}
-	if len(cleanup.cleaned) != 1 || cleanup.cleaned[0].ID != "wt-ok" {
-		t.Fatalf("expected only successful session worktree cleanup, got %#v", cleanup.cleaned)
+	cleanedIDs := cleanup.cleanedIDs()
+	if len(cleanedIDs) != 1 || cleanedIDs[0] != "wt-ok" {
+		t.Fatalf("expected only successful session worktree cleanup, got %#v", cleanedIDs)
 	}
 	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session-failed"); err != nil {
 		t.Fatalf("failed session executor row should remain retryable: %v", err)
@@ -897,8 +898,8 @@ func TestService_CleanupTaskResourcesFailsClosedWhenRuntimeInventoryFails(t *tes
 	if _, err := os.Stat(sessionDir); err != nil {
 		t.Fatalf("quick-chat directory should remain when runtime inventory fails: %v", err)
 	}
-	if len(cleanup.cleaned) != 0 {
-		t.Fatalf("worktrees should not be cleaned when runtime inventory fails, got %#v", cleanup.cleaned)
+	if cleanedIDs := cleanup.cleanedIDs(); len(cleanedIDs) != 0 {
+		t.Fatalf("worktrees should not be cleaned when runtime inventory fails, got %#v", cleanedIDs)
 	}
 }
 
@@ -975,21 +976,40 @@ func (r failingExecutorRepository) ListExecutorsRunningByTaskID(context.Context,
 }
 
 type recordingWorktreeCleanup struct {
-	worktrees []*worktree.Worktree
-	cleaned   []*worktree.Worktree
+	mu                sync.Mutex
+	worktrees         []*worktree.Worktree
+	worktreesByTaskID map[string][]*worktree.Worktree
+	cleaned           []*worktree.Worktree
 }
 
 func (c *recordingWorktreeCleanup) OnTaskDeleted(context.Context, string) error {
 	return nil
 }
 
-func (c *recordingWorktreeCleanup) GetAllByTaskID(context.Context, string) ([]*worktree.Worktree, error) {
+func (c *recordingWorktreeCleanup) GetAllByTaskID(_ context.Context, taskID string) ([]*worktree.Worktree, error) {
+	if c.worktreesByTaskID != nil {
+		return c.worktreesByTaskID[taskID], nil
+	}
 	return c.worktrees, nil
 }
 
 func (c *recordingWorktreeCleanup) CleanupWorktrees(_ context.Context, worktrees []*worktree.Worktree) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.cleaned = append(c.cleaned, worktrees...)
 	return nil
+}
+
+func (c *recordingWorktreeCleanup) cleanedIDs() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ids := make([]string, 0, len(c.cleaned))
+	for _, wt := range c.cleaned {
+		if wt != nil {
+			ids = append(ids, wt.ID)
+		}
+	}
+	return ids
 }
 
 func waitForCleanupDone(t *testing.T, svc *Service) {

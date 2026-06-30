@@ -88,7 +88,7 @@ func (r *Repository) GetWorkspace(ctx context.Context, id string) (*models.Works
 	}
 
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("workspace not found: %s", id)
+		return nil, workspaceNotFoundError(id)
 	}
 	return workspace, err
 }
@@ -114,7 +114,7 @@ func (r *Repository) UpdateWorkspace(ctx context.Context, workspace *models.Work
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("workspace not found: %s", workspace.ID)
+		return workspaceNotFoundError(workspace.ID)
 	}
 	return nil
 }
@@ -128,7 +128,7 @@ func (r *Repository) DeleteWorkspace(ctx context.Context, id string) error {
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("workspace not found: %s", id)
+		return workspaceNotFoundError(id)
 	}
 	return nil
 }
@@ -183,7 +183,7 @@ func (r *Repository) deleteWorkspaceCascade(
 		if expectedName != nil {
 			return nil, nil, r.confirmedWorkspaceDeleteMismatch(ctx, tx, id)
 		}
-		return nil, nil, fmt.Errorf("workspace not found: %s", id)
+		return nil, nil, workspaceNotFoundError(id)
 	}
 
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -251,9 +251,13 @@ func (r *Repository) workspaceNameForCascadeDelete(ctx context.Context, tx *sqlx
 		WHERE id = ?
 	`), id).Scan(&currentName)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", fmt.Errorf("workspace not found: %s", id)
+		return "", workspaceNotFoundError(id)
 	}
 	return currentName, err
+}
+
+func workspaceNotFoundError(id string) error {
+	return fmt.Errorf("%w: %s", repoerrors.ErrWorkspaceNotFound, id)
 }
 
 func (r *Repository) confirmedWorkspaceDeleteMismatch(ctx context.Context, tx *sqlx.Tx, id string) error {

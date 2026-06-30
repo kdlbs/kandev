@@ -141,8 +141,9 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 		deletedTasks, deletedWorkflows, err = s.workspaces.DeleteWorkspaceCascadeWithName(ctx, workspace.ID, *confirmedName)
 	}
 	if err != nil {
-		return s.mapWorkspaceDeleteError(workspace.ID, err)
+		return s.mapWorkspaceDeleteError(err)
 	}
+	cleanups = s.appendWorkspaceDeleteMissingTaskCleanups(ctx, cleanups, deletedTasks)
 	s.publishWorkspaceDeleteChildEvents(ctx, deletedTasks, deletedWorkflows)
 	s.runWorkspaceDeleteTaskCleanups(cleanups, deletedTasks)
 	s.publishWorkspaceEvent(ctx, events.WorkspaceDeleted, workspace)
@@ -163,6 +164,37 @@ func (s *Service) prepareWorkspaceDeleteTaskCleanups(ctx context.Context, tasks 
 		cleanups = append(cleanups, cleanup)
 	}
 	return cleanups, nil
+}
+
+func (s *Service) appendWorkspaceDeleteMissingTaskCleanups(
+	ctx context.Context,
+	cleanups []workspaceDeleteTaskCleanup,
+	deletedTasks []*models.Task,
+) []workspaceDeleteTaskCleanup {
+	prepared := make(map[string]struct{}, len(cleanups))
+	for _, cleanup := range cleanups {
+		if cleanup.task != nil && cleanup.task.ID != "" {
+			prepared[cleanup.task.ID] = struct{}{}
+		}
+	}
+	for _, task := range deletedTasks {
+		if task == nil || task.ID == "" {
+			continue
+		}
+		if _, ok := prepared[task.ID]; ok {
+			continue
+		}
+		cleanup, err := s.prepareWorkspaceDeleteTaskCleanup(ctx, task)
+		if err != nil {
+			s.logger.Warn("failed to prepare late workspace task cleanup",
+				zap.String("task_id", task.ID),
+				zap.Error(err))
+			continue
+		}
+		cleanups = append(cleanups, cleanup)
+		prepared[task.ID] = struct{}{}
+	}
+	return cleanups
 }
 
 func (s *Service) prepareWorkspaceDeleteTaskCleanup(ctx context.Context, task *models.Task) (workspaceDeleteTaskCleanup, error) {
@@ -274,14 +306,13 @@ func (s *Service) runWorkspaceDeleteTaskCleanup(cleanup workspaceDeleteTaskClean
 		"task deleted", "failed to stop session on task delete", "task cleanup completed")
 }
 
-func (s *Service) mapWorkspaceDeleteError(id string, err error) error {
+func (s *Service) mapWorkspaceDeleteError(err error) error {
 	if err == nil {
 		return nil
 	}
 	if errors.Is(err, taskrepo.ErrWorkspaceNameMismatch) {
 		return ErrWorkspaceConfirmNameMismatch
 	}
-	s.logger.Error("failed to delete workspace", zap.String("workspace_id", id), zap.Error(err))
 	return err
 }
 

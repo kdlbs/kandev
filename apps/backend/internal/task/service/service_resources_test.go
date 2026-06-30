@@ -322,8 +322,9 @@ func TestService_DeleteWorkspacePublishesChildEventsAndCleansResources(t *testin
 	if eventCounts[events.WorkspaceDeleted] != 1 {
 		t.Fatalf("workspace deleted events = %d, want 1", eventCounts[events.WorkspaceDeleted])
 	}
-	if len(cleanup.cleaned) != 1 || cleanup.cleaned[0].ID != "wt-delete" {
-		t.Fatalf("cleaned worktrees = %#v, want wt-delete", cleanup.cleaned)
+	cleanedIDs := cleanup.cleanedIDs()
+	if len(cleanedIDs) != 1 || cleanedIDs[0] != "wt-delete" {
+		t.Fatalf("cleaned worktrees = %#v, want wt-delete", cleanedIDs)
 	}
 }
 
@@ -433,14 +434,23 @@ func TestService_DeleteWorkspaceWithConfirmNamePublishesChildEventsAndCleansReso
 	if eventCounts[events.WorkspaceDeleted] != 1 {
 		t.Fatalf("workspace deleted events = %d, want 1", eventCounts[events.WorkspaceDeleted])
 	}
-	if len(cleanup.cleaned) != 1 || cleanup.cleaned[0].ID != "wt-delete" {
-		t.Fatalf("cleaned worktrees = %#v, want wt-delete", cleanup.cleaned)
+	cleanedIDs := cleanup.cleanedIDs()
+	if len(cleanedIDs) != 1 || cleanedIDs[0] != "wt-delete" {
+		t.Fatalf("cleaned worktrees = %#v, want wt-delete", cleanedIDs)
 	}
 }
 
 func TestService_DeleteWorkspaceWithConfirmNamePublishesEventsForAllCascadeDeletedChildren(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 2))
+	cleanup := &recordingWorktreeCleanup{
+		worktreesByTaskID: map[string][]*worktree.Worktree{
+			"task-delete": {{ID: "wt-delete", TaskID: "task-delete"}},
+			"task-raced":  {{ID: "wt-raced", TaskID: "task-raced"}},
+		},
+	}
+	svc.SetWorktreeCleanup(cleanup)
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-delete", Name: "Delete Me"})
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-delete", WorkspaceID: "ws-delete", Name: "Doomed"})
@@ -463,10 +473,12 @@ func TestService_DeleteWorkspaceWithConfirmNamePublishesEventsForAllCascadeDelet
 	if err := svc.DeleteWorkspaceWithConfirmName(ctx, "ws-delete", "Delete Me"); err != nil {
 		t.Fatalf("DeleteWorkspaceWithConfirmName: %v", err)
 	}
+	waitForCleanupDone(t, svc)
+	waitForCleanupDone(t, svc)
 
 	// This covers event publication from the repository cascade return value.
-	// Runtime cleanup is prepared before the cascade snapshot, so late-created
-	// children are not expected to have live runtime cleanup in this race.
+	// Runtime cleanup is prepared before the cascade and topped up from the
+	// cascade return value for children that appear after that first snapshot.
 	eventCounts := make(map[string]int)
 	for _, event := range eventBus.GetPublishedEvents() {
 		eventCounts[event.Type]++
@@ -482,6 +494,13 @@ func TestService_DeleteWorkspaceWithConfirmNamePublishesEventsForAllCascadeDelet
 	}
 	if _, err := repo.GetWorkflow(ctx, "wf-raced"); err == nil {
 		t.Fatalf("late-created workflow should be deleted")
+	}
+	cleaned := make(map[string]bool)
+	for _, id := range cleanup.cleanedIDs() {
+		cleaned[id] = true
+	}
+	if len(cleaned) != 2 || !cleaned["wt-delete"] || !cleaned["wt-raced"] {
+		t.Fatalf("cleaned worktrees = %#v, want wt-delete and wt-raced", cleaned)
 	}
 }
 
@@ -527,6 +546,9 @@ func TestService_DeleteWorkspaceWithConfirmNameReturnsMissingWorkspaceError(t *t
 	}
 	if errors.Is(err, ErrWorkspaceConfirmNameMismatch) {
 		t.Fatalf("expected missing workspace error, got confirm-name mismatch")
+	}
+	if !errors.Is(err, repository.ErrWorkspaceNotFound) {
+		t.Fatalf("expected ErrWorkspaceNotFound, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "workspace not found") {
 		t.Fatalf("expected workspace not found error, got %v", err)
