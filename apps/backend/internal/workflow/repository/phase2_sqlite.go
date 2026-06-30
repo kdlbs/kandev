@@ -384,7 +384,7 @@ func (r *Repository) ResolveCurrentRunner(
 		ORDER BY position ASC, id ASC
 		LIMIT 1
 	`), taskID).Scan(&agentID)
-	if err == nil {
+	if err == nil && agentID != "" {
 		return agentID, nil
 	}
 	if errors.Is(err, sql.ErrNoRows) {

@@ -468,6 +468,35 @@ func TestResolveCurrentRunner_FallsBackToTaskRunnerOnOtherStep(t *testing.T) {
 	}
 }
 
+func TestResolveCurrentRunner_PrefersStepPrimaryOverOtherStepRunner(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	work := &models.WorkflowStep{
+		WorkflowID: "wf-test", Name: "Work", Position: 0,
+		AgentProfileID: "primary-on-work",
+	}
+	done := &models.WorkflowStep{
+		WorkflowID: "wf-test", Name: "Done", Position: 1,
+		AgentProfileID: "primary-on-done",
+	}
+	if err := repo.CreateStep(ctx, work); err != nil {
+		t.Fatalf("create work step: %v", err)
+	}
+	if err := repo.CreateStep(ctx, done); err != nil {
+		t.Fatalf("create done step: %v", err)
+	}
+	if err := repo.SetTaskRunner(ctx, work.ID, "task-done", "runner-on-work"); err != nil {
+		t.Fatalf("set runner: %v", err)
+	}
+	got, err := repo.ResolveCurrentRunner(ctx, done.ID, "task-done")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got != "primary-on-done" {
+		t.Fatalf("expected primary-on-done, got %q", got)
+	}
+}
+
 // TestSetTaskRunner_Idempotent verifies SetTaskRunner replaces an
 // existing runner participant rather than creating a second row.
 func TestSetTaskRunner_Idempotent(t *testing.T) {
