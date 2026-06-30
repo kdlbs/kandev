@@ -156,6 +156,9 @@ func (a *PrimaryAgentAdapter) PrimaryAgentProfileIDForTask(
 	if err != nil {
 		return "", fmt.Errorf("resolve workflow step for task %s: %w", taskID, err)
 	}
+	if stepID == "" {
+		return "", fmt.Errorf("task %s has no workflow step bound", taskID)
+	}
 	return a.PrimaryAgentProfileID(ctx, stepID, taskID)
 }
 

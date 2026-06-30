@@ -124,7 +124,18 @@ function renderPane(task: Task, sessions: TaskSession[]) {
 
 describe("OfficeSimplePane comment composer", () => {
   it("keeps projectless office tasks editable after a completed session loads", () => {
-    renderPane(baseTask, [completedSession]);
+    const view = renderPane(baseTask, []);
+
+    view.rerender(
+      <StateProvider>
+        <OfficeSimplePane
+          task={baseTask}
+          comments={[]}
+          activity={[]}
+          sessions={[completedSession]}
+        />
+      </StateProvider>,
+    );
 
     expect(screen.getByTestId("chat-readonly").textContent).toBe("editable");
   });

@@ -405,6 +405,14 @@ func TestQueueRunCallback_TargetSpecificAgent(t *testing.T) {
 	}
 }
 
+func TestQueueRunCallback_TargetSpecificAgentCrossTaskNoStepResolverErrors(t *testing.T) {
+	cb := QueueRunCallback{Adapter: &fakeRunQueue{}}
+	_, err := cb.Execute(context.Background(), newQueueRunInput("agent_profile_id:some-agent", "task-2"))
+	if err == nil || !errors.Is(err, ErrActionNotYetWired) {
+		t.Fatalf("expected ErrActionNotYetWired, got %v", err)
+	}
+}
+
 func TestQueueRunCallback_TargetWorkspaceCEO(t *testing.T) {
 	q := &fakeRunQueue{}
 	cb := QueueRunCallback{Adapter: q, CEOResolver: fakeCEO{id: "ceo-agent"}}
@@ -416,6 +424,14 @@ func TestQueueRunCallback_TargetWorkspaceCEO(t *testing.T) {
 	}
 	if q.calls[0].AgentProfileID != "ceo-agent" {
 		t.Fatalf("agent_profile_id = %q, want ceo-agent", q.calls[0].AgentProfileID)
+	}
+}
+
+func TestQueueRunCallback_TargetWorkspaceCEOCrossTaskNoStepResolverErrors(t *testing.T) {
+	cb := QueueRunCallback{Adapter: &fakeRunQueue{}, CEOResolver: fakeCEO{id: "ceo-agent"}}
+	_, err := cb.Execute(context.Background(), newQueueRunInput("workspace.ceo_agent", "target-task"))
+	if err == nil || !errors.Is(err, ErrActionNotYetWired) {
+		t.Fatalf("expected ErrActionNotYetWired, got %v", err)
 	}
 }
 

@@ -178,6 +178,21 @@ func TestPrimaryAgentAdapter_ForTaskResolvesTargetStep(t *testing.T) {
 	}
 }
 
+func TestPrimaryAgentAdapter_ForTaskReturnsNoStepBoundError(t *testing.T) {
+	repo := &fakeRepo{}
+	a := NewPrimaryAgentAdapter(repo)
+	_, err := a.PrimaryAgentProfileIDForTask(context.Background(), "target-task")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if err.Error() != "task target-task has no workflow step bound" {
+		t.Fatalf("err = %v, want no workflow step bound", err)
+	}
+	if repo.resolvedTaskID != "" {
+		t.Fatalf("ResolveCurrentRunner should not be called, got task %q", repo.resolvedTaskID)
+	}
+}
+
 func TestPrimaryAgentAdapter_PropagatesResolveCurrentRunnerError(t *testing.T) {
 	repo := &fakeRepo{runnerErr: errors.New("missing")}
 	a := NewPrimaryAgentAdapter(repo)

@@ -98,7 +98,7 @@ func (c QueueRunCallback) resolveTarget(
 	target := strings.TrimSpace(in.Action.QueueRun.Target)
 	switch {
 	case target == "" || target == TargetPrimary:
-		stepID, err := c.resolveTargetStepID(ctx, in, taskID, c.primaryStepResolver())
+		stepID, err := c.resolveTargetStepID(ctx, in, taskID, pickStepResolver(c.Primary, c.TaskSteps))
 		if err != nil {
 			return nil, "", err
 		}
@@ -106,7 +106,7 @@ func (c QueueRunCallback) resolveTarget(
 		return agentIDs, stepID, err
 	case strings.HasPrefix(target, TargetParticipant):
 		role := strings.TrimPrefix(target, TargetParticipant)
-		stepID, err := c.resolveTargetStepID(ctx, in, taskID, c.participantStepResolver())
+		stepID, err := c.resolveTargetStepID(ctx, in, taskID, pickStepResolver(c.Participants, c.TaskSteps))
 		if err != nil {
 			return nil, "", err
 		}
@@ -153,18 +153,11 @@ func (c QueueRunCallback) resolveTargetStepID(
 	return stepID, nil
 }
 
-func (c QueueRunCallback) primaryStepResolver() TargetTaskStepResolver {
-	if resolver, ok := c.Primary.(TargetTaskStepResolver); ok {
+func pickStepResolver(v any, fallback TargetTaskStepResolver) TargetTaskStepResolver {
+	if resolver, ok := v.(TargetTaskStepResolver); ok {
 		return resolver
 	}
-	return c.TaskSteps
-}
-
-func (c QueueRunCallback) participantStepResolver() TargetTaskStepResolver {
-	if resolver, ok := c.Participants.(TargetTaskStepResolver); ok {
-		return resolver
-	}
-	return c.TaskSteps
+	return fallback
 }
 
 func (c QueueRunCallback) resolvePrimary(

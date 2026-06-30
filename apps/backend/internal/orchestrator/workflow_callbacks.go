@@ -56,6 +56,9 @@ func buildWorkflowCallbacks(svc *Service) engine.MapRegistry {
 	return r
 }
 
+// workflowTargetStepResolver picks the primary adapter first because it is the
+// queue_run primary resolver, then falls back to participants. Nil means
+// cross-task queue_run targets will surface ErrActionNotYetWired.
 func workflowTargetStepResolver(
 	primary engine.PrimaryAgentResolver,
 	participants engine.ParticipantStore,
