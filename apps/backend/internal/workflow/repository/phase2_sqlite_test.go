@@ -450,6 +450,24 @@ func TestResolveCurrentRunner_PrefersRunnerParticipant(t *testing.T) {
 	}
 }
 
+func TestResolveCurrentRunner_FallsBackToTaskRunnerOnOtherStep(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	work := newPhase2TestStep(t, repo, "Work")
+	done := newPhase2TestStep(t, repo, "Done")
+
+	if err := repo.SetTaskRunner(ctx, work.ID, "task-done", "runner-agent"); err != nil {
+		t.Fatalf("set runner: %v", err)
+	}
+	got, err := repo.ResolveCurrentRunner(ctx, done.ID, "task-done")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got != "runner-agent" {
+		t.Fatalf("expected runner-agent, got %q", got)
+	}
+}
+
 // TestSetTaskRunner_Idempotent verifies SetTaskRunner replaces an
 // existing runner participant rather than creating a second row.
 func TestSetTaskRunner_Idempotent(t *testing.T) {

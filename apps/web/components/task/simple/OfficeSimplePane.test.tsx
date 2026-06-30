@@ -149,4 +149,10 @@ describe("OfficeSimplePane comment composer", () => {
 
     expect(screen.getByTestId("chat-readonly").textContent).toBe("readonly");
   });
+
+  it("keeps cancelled tasks read-only even with a reusable latest session", () => {
+    renderPane({ ...baseTask, status: "cancelled" }, [completedSession]);
+
+    expect(screen.getByTestId("chat-readonly").textContent).toBe("readonly");
+  });
 });

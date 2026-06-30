@@ -57,7 +57,6 @@ import type {
 } from "@/app/office/tasks/[id]/types";
 import { toast } from "sonner";
 
-const CLOSED_TASK_STATUSES = new Set<Task["status"]>(["done", "cancelled"]);
 const REUSABLE_COMMENT_SESSION_STATES = new Set<TaskSession["state"]>(["COMPLETED", "IDLE"]);
 
 type OfficeSimplePaneProps = {
@@ -84,7 +83,8 @@ function latestSession(sessions: TaskSession[]): TaskSession | undefined {
 }
 
 function commentsReadOnly(task: Task, sessions: TaskSession[]): boolean {
-  if (!CLOSED_TASK_STATUSES.has(task.status)) return false;
+  if (task.status === "cancelled") return true;
+  if (task.status !== "done") return false;
   const session = latestSession(sessions);
   return !session || !REUSABLE_COMMENT_SESSION_STATES.has(session.state);
 }
