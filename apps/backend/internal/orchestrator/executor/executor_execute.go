@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -128,6 +129,19 @@ func (e *Executor) writeTaskReviewStateIfNoWorkingSessions(ctx context.Context, 
 		return
 	}
 
+	if task, err := e.repo.GetTask(ctx, taskID); err == nil && task != nil && task.AssigneeAgentProfileID != "" {
+		e.logger.Debug("skipping failed-start task REVIEW state for office task",
+			zap.String("task_id", taskID),
+			zap.String("session_id", failedSessionID))
+		return
+	} else if err != nil {
+		e.logger.Warn("failed to load task before failed-start REVIEW state reconcile",
+			zap.String("task_id", taskID),
+			zap.String("session_id", failedSessionID),
+			zap.Error(err))
+		return
+	}
+
 	if failedSessionID != "" {
 		session, err := e.repo.GetTaskSession(ctx, failedSessionID)
 		if err == nil && session != nil && isRuntimeWorkingSessionState(session.State) {
@@ -169,9 +183,8 @@ func (e *Executor) writeTaskReviewStateIfNoWorkingSessions(ctx context.Context, 
 	}
 }
 
-// Keep in sync with orchestrator.isWorkingSessionState.
 func isRuntimeWorkingSessionState(state models.TaskSessionState) bool {
-	return state == models.TaskSessionStateRunning || state == models.TaskSessionStateStarting
+	return sessionstate.IsWorking(state)
 }
 
 // updateTaskState updates a task's state, using the callback if set for event publishing,

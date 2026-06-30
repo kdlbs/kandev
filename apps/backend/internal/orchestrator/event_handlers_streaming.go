@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -693,34 +694,45 @@ func (s *Service) setSessionStarting(ctx context.Context, taskID string, session
 	}
 
 	s.taskRuntimeStateMu.Lock()
-	defer s.taskRuntimeStateMu.Unlock()
 
 	current, err := s.repo.GetTaskSession(ctx, session.ID)
 	if err != nil {
+		s.taskRuntimeStateMu.Unlock()
 		return err
 	}
-	if isTerminalSessionState(current.State) && (promoteTask || session.State != models.TaskSessionStateStarting) {
+	allowedTerminalRecovery := !promoteTask &&
+		session.State == models.TaskSessionStateStarting &&
+		current.State == models.TaskSessionStateFailed
+	if isTerminalSessionState(current.State) && !allowedTerminalRecovery {
+		s.taskRuntimeStateMu.Unlock()
 		return fmt.Errorf("session %s is %s; cannot mark STARTING", session.ID, current.State)
 	}
 
 	oldState := current.State
 	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+		s.taskRuntimeStateMu.Unlock()
 		return err
 	}
 
+	var publishSession *models.TaskSession
+	var stateUpdatedAt *time.Time
 	if oldState != session.State {
 		if refreshed, err := s.repo.GetTaskSession(ctx, session.ID); err == nil && refreshed != nil {
-			var stateUpdatedAt *time.Time
 			if !refreshed.UpdatedAt.IsZero() {
 				t := refreshed.UpdatedAt.UTC()
 				stateUpdatedAt = &t
 			}
-			s.publishTaskSessionStateChanged(ctx, taskID, session.ID, oldState, session.State, session.ErrorMessage, stateUpdatedAt, refreshed)
+			publishSession = refreshed
 		}
 	}
 
 	if promoteTask {
 		s.writeTaskInProgressForRuntime(ctx, taskID)
+	}
+	s.taskRuntimeStateMu.Unlock()
+
+	if publishSession != nil {
+		s.publishTaskSessionStateChanged(ctx, taskID, session.ID, oldState, session.State, session.ErrorMessage, stateUpdatedAt, publishSession)
 	}
 	return nil
 }
@@ -763,6 +775,17 @@ func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, session
 }
 
 func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSessionID string) {
+	if dbTask, err := s.repo.GetTask(ctx, taskID); err != nil {
+		s.logger.Warn("failed to load task before REVIEW state reconcile",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	} else if dbTask != nil && dbTask.AssigneeAgentProfileID != "" {
+		s.logger.Debug("skipping REVIEW transition for office task",
+			zap.String("task_id", taskID))
+		return
+	}
+
 	s.taskRuntimeStateMu.Lock()
 	defer s.taskRuntimeStateMu.Unlock()
 
@@ -785,10 +808,19 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSes
 			zap.String("blocking_session_id", blockingSessionID))
 		return
 	}
-	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
+	updated, err := s.taskRepo.UpdateTaskStateIfCurrentIn(
+		ctx,
+		taskID,
+		v1.TaskStateReview,
+		[]v1.TaskState{v1.TaskStateInProgress, v1.TaskStateScheduling},
+	)
+	if err != nil {
 		s.logger.Error("failed to update task state to REVIEW",
 			zap.String("task_id", taskID),
 			zap.Error(err))
+		return
+	}
+	if !updated {
 		return
 	}
 	s.logger.Info("task moved to REVIEW state",
@@ -796,7 +828,7 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSes
 }
 
 func isWorkingSessionState(state models.TaskSessionState) bool {
-	return state == models.TaskSessionStateRunning || state == models.TaskSessionStateStarting
+	return sessionstate.IsWorking(state)
 }
 
 func (s *Service) otherWorkingSessionID(ctx context.Context, taskID, currentSessionID string) (string, bool) {

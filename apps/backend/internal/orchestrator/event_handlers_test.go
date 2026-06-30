@@ -128,7 +128,11 @@ func (m *mockTaskRepo) UpdateTaskStateIfCurrentIn(
 	defer m.mu.Unlock()
 	t, ok := m.tasks[taskID]
 	if !ok {
-		return false, fmt.Errorf("%w: %s", sqliterepo.ErrTaskNotFound, taskID)
+		t = &v1.Task{ID: taskID}
+		if len(allowed) > 0 {
+			t.State = allowed[0]
+		}
+		m.tasks[taskID] = t
 	}
 	for _, candidate := range allowed {
 		if t.State != candidate {

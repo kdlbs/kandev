@@ -849,6 +849,25 @@ func TestWriteTaskReviewStateSkipsWhenSessionListFails(t *testing.T) {
 		"REVIEW writes must fail closed when sibling session reconciliation fails")
 }
 
+func TestWriteTaskReviewStateSkipsTerminalTaskState(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateWaitingForInput
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", State: v1.TaskStateCompleted}
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	svc.writeTaskReviewState(ctx, "t1", "s1")
+
+	require.Zero(t, taskRepo.stateWrites["t1"],
+		"REVIEW reconcile must not rewind terminal task states")
+}
+
 func TestWriteTaskReviewStateOnCancelSkipsWhenSessionActiveAgain(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -1086,6 +1105,32 @@ func TestSetSessionStartingRejectsTerminalSession(t *testing.T) {
 	svc := createTestService(repo, newMockStepGetter(), taskRepo)
 
 	require.Error(t, svc.setSessionStarting(ctx, "t1", &next, true))
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateCancelled, updated.State)
+	require.Empty(t, taskRepo.stateWrites)
+}
+
+func TestSetSessionStartingRejectsCancelledTerminalResumeWithoutPromotion(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	current, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	current.State = models.TaskSessionStateCancelled
+	require.NoError(t, repo.UpdateTaskSession(ctx, current))
+
+	next := *current
+	next.State = models.TaskSessionStateStarting
+	next.ErrorMessage = ""
+	next.UpdatedAt = time.Now().UTC()
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	require.Error(t, svc.setSessionStarting(ctx, "t1", &next, false))
 
 	updated, err := repo.GetTaskSession(ctx, "s1")
 	require.NoError(t, err)
