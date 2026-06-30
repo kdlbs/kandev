@@ -72,12 +72,13 @@ type EventBus interface {
 }
 
 // SessionLauncher provides session launch and prompt-dispatch capabilities.
-// Both methods are implemented by *orchestrator.Service.
+// Implemented by *orchestrator.Service.
 type SessionLauncher interface {
 	LaunchSession(ctx context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error)
 	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error)
 	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment) (*executor.TaskExecution, error)
 	ResumeTaskSession(ctx context.Context, taskID, sessionID string) (*executor.TaskExecution, error)
+	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error
 	GetMessageQueue() *messagequeue.Service
 }
 
@@ -1642,41 +1643,108 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 		return "", fmt.Errorf("session is %s — cannot send message", session.State)
 
 	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
-		queue := h.sessionLauncher.GetMessageQueue()
-		if queue == nil {
-			return "", errors.New("message queue not available")
+		return h.queueTaskMessage(ctx, taskID, session, prompt, metadata)
+
+	default:
+		session, err := h.prepareSessionForTaskMessage(ctx, taskID, session)
+		if err != nil {
+			return "", err
 		}
-		if _, err := queue.QueueMessageWithMetadata(ctx, session.ID, taskID, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata); err != nil {
-			if errors.Is(err, messagequeue.ErrQueueFull) {
-				status := queue.GetStatus(ctx, session.ID)
-				return "", &queueFullDispatchError{
-					sessionID: session.ID,
-					queueSize: status.Count,
-					max:       status.Max,
-					entries:   status.Entries,
-				}
+		switch session.State {
+		case models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
+			return "", fmt.Errorf("session is %s — cannot send message", session.State)
+		case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
+			return h.queueTaskMessage(ctx, taskID, session, prompt, metadata)
+		case models.TaskSessionStateCreated:
+			// Start first, then record the user message ourselves with sender
+			// metadata. This avoids leaving an orphaned attributed chat row when
+			// StartCreatedSession fails (the previous order wrote the row up-front
+			// regardless of launch outcome). skipMessageRecord=true keeps
+			// postLaunchCreated from writing its own duplicate row.
+			if _, err := h.sessionLauncher.StartCreatedSession(ctx, taskID, session.ID, session.AgentProfileID, prompt, true, false, true, nil); err != nil {
+				return "", fmt.Errorf("failed to start session: %w", err)
 			}
-			return "", fmt.Errorf("failed to queue message: %w", err)
+			h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
+			return "started", nil
+		default: // WAITING_FOR_INPUT, COMPLETED, IDLE, or any other promptable state
+			h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
+			return h.promptWithAutoResume(ctx, taskID, session.ID, prompt)
 		}
-		h.publishQueueStatusEvent(ctx, session.ID, queue)
-		return "queued", nil
-
-	case models.TaskSessionStateCreated:
-		// Start first, then record the user message ourselves with sender
-		// metadata. This avoids leaving an orphaned attributed chat row when
-		// StartCreatedSession fails (the previous order wrote the row up-front
-		// regardless of launch outcome). skipMessageRecord=true keeps
-		// postLaunchCreated from writing its own duplicate row.
-		if _, err := h.sessionLauncher.StartCreatedSession(ctx, taskID, session.ID, session.AgentProfileID, prompt, true, false, true, nil); err != nil {
-			return "", fmt.Errorf("failed to start session: %w", err)
-		}
-		h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
-		return "started", nil
-
-	default: // WAITING_FOR_INPUT, COMPLETED, or any other promptable state
-		h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
-		return h.promptWithAutoResume(ctx, taskID, session.ID, prompt)
 	}
+}
+
+func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string, metadata map[string]interface{}) (string, error) {
+	queue := h.sessionLauncher.GetMessageQueue()
+	if queue == nil {
+		return "", errors.New("message queue not available")
+	}
+	if _, err := queue.QueueMessageWithMetadata(ctx, session.ID, taskID, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata); err != nil {
+		if errors.Is(err, messagequeue.ErrQueueFull) {
+			status := queue.GetStatus(ctx, session.ID)
+			return "", &queueFullDispatchError{
+				sessionID: session.ID,
+				queueSize: status.Count,
+				max:       status.Max,
+				entries:   status.Entries,
+			}
+		}
+		return "", fmt.Errorf("failed to queue message: %w", err)
+	}
+	h.publishQueueStatusEvent(ctx, session.ID, queue)
+	return "queued", nil
+}
+
+func (h *Handlers) prepareSessionForTaskMessage(ctx context.Context, taskID string, session *models.TaskSession) (*models.TaskSession, error) {
+	if err := h.ensureTaskInProgressForTaskMessage(ctx, taskID); err != nil {
+		return nil, err
+	}
+	if err := h.sessionLauncher.ProcessOnTurnStart(ctx, taskID, session.ID); err != nil {
+		h.logger.Warn("failed to process on_turn_start for task message",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+	}
+	return h.resolveSessionAfterTaskMessageTurnStart(ctx, taskID, session)
+}
+
+func (h *Handlers) ensureTaskInProgressForTaskMessage(ctx context.Context, taskID string) error {
+	if h.taskSvc == nil {
+		return nil
+	}
+	task, err := h.taskSvc.GetTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if task.State != v1.TaskStateReview {
+		return nil
+	}
+	if _, err := h.taskSvc.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
+		h.logger.Error("failed to transition task from REVIEW to IN_PROGRESS for task message",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	} else {
+		h.logger.Info("task transitioned from REVIEW to IN_PROGRESS for task message",
+			zap.String("task_id", taskID))
+	}
+	return nil
+}
+
+func (h *Handlers) resolveSessionAfterTaskMessageTurnStart(ctx context.Context, taskID string, submitted *models.TaskSession) (*models.TaskSession, error) {
+	reloaded, err := h.taskSvc.GetTaskSession(ctx, submitted.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reload session after on_turn_start: %w", err)
+	}
+	if reloaded.State != models.TaskSessionStateCompleted || submitted.State == models.TaskSessionStateCompleted {
+		return reloaded, nil
+	}
+	primary, err := h.taskSvc.GetPrimarySession(ctx, taskID)
+	if err != nil || primary == nil {
+		return nil, fmt.Errorf("session was switched but no active session found: %w", err)
+	}
+	if primary.ID == submitted.ID {
+		return nil, errors.New("session was switched but submitted session remains primary")
+	}
+	return primary, nil
 }
 
 // recordUserMessage writes the prompt to the task's chat as a user message so it

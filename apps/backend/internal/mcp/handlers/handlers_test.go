@@ -1182,6 +1182,9 @@ func (m *mockSessionLauncher) StartCreatedSession(context.Context, string, strin
 func (m *mockSessionLauncher) ResumeTaskSession(context.Context, string, string) (*executor.TaskExecution, error) {
 	return nil, nil
 }
+func (m *mockSessionLauncher) ProcessOnTurnStart(context.Context, string, string) error {
+	return nil
+}
 func (m *mockSessionLauncher) GetMessageQueue() *messagequeue.Service { return nil }
 
 func TestAutoStartTask_DefaultsToWorktreeExecutor(t *testing.T) {
