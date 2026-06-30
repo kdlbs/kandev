@@ -420,10 +420,14 @@ fetch_review_threads_nodes_json() {
     page_nodes="$(jq -c '.data.repository.pullRequest.reviewThreads.nodes // []' <<<"$page_json")"
     local next_nodes_file
     next_nodes_file="$(mktemp)"
-    jq -cn \
+    if ! jq -cn \
       --slurpfile prev "$nodes_file" \
       --slurpfile page <(printf '%s\n' "$page_nodes") \
-      '$prev[0] + $page[0]' >"$next_nodes_file"
+      '$prev[0] + $page[0]' >"$next_nodes_file"; then
+      add_error "review_threads" "failed to merge paginated review threads"
+      rm -f "$next_nodes_file"
+      return 1
+    fi
     mv "$next_nodes_file" "$nodes_file"
 
     local has_next

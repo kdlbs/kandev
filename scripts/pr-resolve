@@ -157,6 +157,7 @@ case "$cmd" in
       [[ "$4" == "--body-file" ]] || usage
       [[ -f "$5" ]] || { echo "body file not found: $5" >&2; exit 1; }
       BODY=$(<"$5")
+      [[ -n "$BODY" ]] || { echo "body file is empty: $5" >&2; exit 1; }
     else
       BODY=$4
     fi
