@@ -428,6 +428,26 @@ describe("agent error sidebar acknowledgements", () => {
     expect(store.getState().acknowledgedAgentErrors).toEqual({ "session-1": "stamp-1" });
     expect(getStoredAcknowledgedAgentErrors()).toEqual({ "session-1": "stamp-1" });
   });
+
+  it("records and persists acknowledged sidebar error stamps in one batch", () => {
+    const store = makeStore();
+
+    store.getState().acknowledgeAgentErrors({
+      "session-1": "stamp-1",
+      "session-2": "stamp-2",
+      "": "ignored",
+      "session-3": "",
+    });
+
+    expect(store.getState().acknowledgedAgentErrors).toEqual({
+      "session-1": "stamp-1",
+      "session-2": "stamp-2",
+    });
+    expect(getStoredAcknowledgedAgentErrors()).toEqual({
+      "session-1": "stamp-1",
+      "session-2": "stamp-2",
+    });
+  });
 });
 
 describe("reorderSidebarViews", () => {

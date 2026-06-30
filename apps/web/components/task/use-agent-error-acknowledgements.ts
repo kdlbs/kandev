@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
   type AgentErrorOptions,
   resolvedAgentErrorAcknowledgementStamp,
@@ -10,33 +10,40 @@ import type { TaskSession } from "@/lib/types/http";
 
 type UseAgentErrorAcknowledgementsParams = {
   sessionsById: Record<string, TaskSession>;
+  sessionIds: readonly string[];
   messagesBySession: AgentErrorOptions["messagesBySession"];
   dismissedAgentErrors: Record<string, string>;
-  acknowledgedAgentErrors: Record<string, string>;
 };
 
 export function usePersistResolvedAgentErrorAcknowledgements({
   sessionsById,
+  sessionIds,
   messagesBySession,
   dismissedAgentErrors,
-  acknowledgedAgentErrors,
 }: UseAgentErrorAcknowledgementsParams) {
-  const acknowledgeAgentError = useAppStore((state) => state.acknowledgeAgentError);
+  const store = useAppStoreApi();
+  const acknowledgeAgentErrors = useAppStore((state) => state.acknowledgeAgentErrors);
 
   useEffect(() => {
-    for (const [sessionId, session] of Object.entries(sessionsById)) {
+    const acknowledgedAgentErrors = store.getState().acknowledgedAgentErrors;
+    const stamps: Record<string, string> = {};
+    for (const sessionId of sessionIds) {
+      const session = sessionsById[sessionId];
+      if (!session) continue;
       const stamp = resolvedAgentErrorAcknowledgementStamp(sessionId, session, {
         messagesBySession,
         dismissedAgentErrors,
         acknowledgedAgentErrors,
       });
-      if (stamp) acknowledgeAgentError(sessionId, stamp);
+      if (stamp) stamps[sessionId] = stamp;
     }
+    acknowledgeAgentErrors(stamps);
   }, [
-    acknowledgeAgentError,
-    acknowledgedAgentErrors,
+    acknowledgeAgentErrors,
     dismissedAgentErrors,
     messagesBySession,
+    sessionIds,
     sessionsById,
+    store,
   ]);
 }

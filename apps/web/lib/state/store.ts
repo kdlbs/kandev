@@ -534,6 +534,7 @@ export type AppState = {
   setAppSidebarWidth: UIA["setAppSidebarWidth"];
   toggleAppSidebarSettingsMode: UIA["toggleAppSidebarSettingsMode"];
   acknowledgeAgentError: UIA["acknowledgeAgentError"];
+  acknowledgeAgentErrors: UIA["acknowledgeAgentErrors"];
   dismissAgentError: UIA["dismissAgentError"];
   // Office actions
   setOfficeAgentProfiles: (agents: AgentProfile[]) => void;

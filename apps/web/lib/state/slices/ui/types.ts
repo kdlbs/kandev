@@ -251,6 +251,8 @@ export type UISliceActions = {
   toggleAppSidebarSettingsMode: () => void;
   /** Record that `stamp` has been acknowledged for sidebar badge purposes. */
   acknowledgeAgentError: (sessionId: string, stamp: string) => void;
+  /** Record multiple sidebar badge acknowledgements with one localStorage merge. */
+  acknowledgeAgentErrors: (stamps: Record<string, string>) => void;
   /** Record that `stamp` has been dismissed for `sessionId`. */
   dismissAgentError: (sessionId: string, stamp: string) => void;
 };

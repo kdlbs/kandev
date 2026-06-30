@@ -219,13 +219,6 @@ function useSidebarData(workspaceId: string | null) {
   const acknowledgedAgentErrors = useAppStore((state) => state.acknowledgedAgentErrors);
   const archivedState = useArchivedTaskState();
 
-  usePersistResolvedAgentErrorAcknowledgements({
-    sessionsById,
-    messagesBySession,
-    dismissedAgentErrors,
-    acknowledgedAgentErrors,
-  });
-
   const selectedTaskId = useMemo(() => {
     if (activeSessionId) return sessionsById[activeSessionId]?.task_id ?? activeTaskId;
     return activeTaskId;
@@ -243,6 +236,12 @@ function useSidebarData(workspaceId: string | null) {
   // narrow pending-flag selector below. Derived from kanban tasks (always
   // available) rather than sessionsByTaskId (loaded on-demand).
   const primarySessionIds = useStablePrimarySessionIds(allTasks);
+  usePersistResolvedAgentErrorAcknowledgements({
+    sessionsById,
+    sessionIds: primarySessionIds,
+    messagesBySession,
+    dismissedAgentErrors,
+  });
   const pendingFlags = useAppStore(
     useShallow((state) => buildPendingFlags(state.messages.bySession, primarySessionIds)),
   );

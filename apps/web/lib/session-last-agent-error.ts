@@ -7,12 +7,12 @@ export type LastAgentError = {
   dismissedAt?: string;
 };
 
-// --- Dismissed agent errors (localStorage, global) ---
+// --- Agent error visibility state (localStorage, global) ---
 //
-// Tracks the most recent dismissed `last_agent_error` stamp per session so the
-// red error icon in the sidebar and the chat banner can share dismissal state
-// across components and reloads. Bounded growth: one entry per session that
-// ever had an error.
+// `dismissedAgentErrors` tracks explicit chat-banner dismissals and hides both
+// the banner and task-row badge. `acknowledgedAgentErrors` tracks sidebar-only
+// stale-error acknowledgements and hides task-row badges without hiding chat.
+// Bounded growth: one entry per session that ever had an error.
 
 const DISMISSED_AGENT_ERRORS_KEY = "kandev.dismissedAgentErrors";
 const ACKNOWLEDGED_AGENT_ERRORS_KEY = "kandev.acknowledgedAgentErrors";

@@ -14,10 +14,10 @@ export function buildDismissedAgentErrors(set: ImmerSet) {
     dismissedAgentErrors: getStoredDismissedAgentErrors(),
     acknowledgeAgentError: (sessionId: string, stamp: string) => {
       if (!sessionId || !stamp) return;
-      set((draft) => {
-        draft.acknowledgedAgentErrors[sessionId] = stamp;
-      });
-      setStoredAcknowledgedAgentErrors({ [sessionId]: stamp });
+      setAcknowledgedAgentErrors(set, { [sessionId]: stamp });
+    },
+    acknowledgeAgentErrors: (stamps: Record<string, string>) => {
+      setAcknowledgedAgentErrors(set, stamps);
     },
     dismissAgentError: (sessionId: string, stamp: string) => {
       if (!sessionId || !stamp) return;
@@ -31,4 +31,16 @@ export function buildDismissedAgentErrors(set: ImmerSet) {
       setStoredDismissedAgentErrors({ [sessionId]: stamp });
     },
   };
+}
+
+function setAcknowledgedAgentErrors(set: ImmerSet, stamps: Record<string, string>) {
+  const entries = Object.entries(stamps).filter(([sessionId, stamp]) => sessionId && stamp);
+  if (entries.length === 0) return;
+  const next = Object.fromEntries(entries);
+  set((draft) => {
+    for (const [sessionId, stamp] of entries) {
+      draft.acknowledgedAgentErrors[sessionId] = stamp;
+    }
+  });
+  setStoredAcknowledgedAgentErrors(next);
 }

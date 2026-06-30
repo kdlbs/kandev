@@ -163,17 +163,24 @@ export function useSheetData(workspaceId: string | null) {
   const workspaces = useAppStore((state) => state.workspaces.items);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
 
-  usePersistResolvedAgentErrorAcknowledgements({
-    sessionsById,
-    messagesBySession,
-    dismissedAgentErrors,
-    acknowledgedAgentErrors,
-  });
-
   const selectedTaskId = useMemo(() => {
     if (activeSessionId) return sessionsById[activeSessionId]?.task_id ?? activeTaskId;
     return activeTaskId;
   }, [activeSessionId, activeTaskId, sessionsById]);
+
+  const primarySessionIds = useMemo(
+    () =>
+      allTasks
+        .map((task) => task.primarySessionId)
+        .filter((sessionId): sessionId is string => Boolean(sessionId)),
+    [allTasks],
+  );
+  usePersistResolvedAgentErrorAcknowledgements({
+    sessionsById,
+    sessionIds: primarySessionIds,
+    messagesBySession,
+    dismissedAgentErrors,
+  });
 
   const tasksWithRepositories = useMemo(() => {
     const repositories = workspaceId ? (repositoriesByWorkspace[workspaceId] ?? []) : [];
