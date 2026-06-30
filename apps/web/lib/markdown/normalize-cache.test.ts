@@ -111,7 +111,9 @@ describe("normalizeMarkdown wrapper edge cases", () => {
 
     expect(normalizeMarkdown(input)).toBe(expected);
   });
+});
 
+describe("normalizeMarkdown untagged wrapper edge cases", () => {
   it("strengthens a markdown wrapper that contains untagged nested code fences", () => {
     const input = [
       MARKDOWN_FENCE,
@@ -138,9 +140,86 @@ describe("normalizeMarkdown wrapper edge cases", () => {
 
     expect(normalizeMarkdown(input)).toBe(expected);
   });
+
+  it("strengthens a markdown wrapper that contains untagged fences without blank separators", () => {
+    const input = [
+      MARKDOWN_FENCE,
+      INTRO_TEXT,
+      "```",
+      INNER_PROMPT_TEXT,
+      "```",
+      AFTER_NESTED_PROMPT,
+      "```",
+    ].join("\n");
+    const expected = [
+      STRENGTHENED_MARKDOWN_FENCE,
+      INTRO_TEXT,
+      "```",
+      INNER_PROMPT_TEXT,
+      "```",
+      AFTER_NESTED_PROMPT,
+      "````",
+    ].join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(expected);
+  });
+
+  it("strengthens a markdown wrapper when nested fences use glued closes", () => {
+    const input = [
+      MARKDOWN_FENCE,
+      INTRO_TEXT,
+      "",
+      "```text",
+      `${INNER_PROMPT_TEXT}\`\`\``,
+      "",
+      AFTER_NESTED_PROMPT,
+      "```",
+    ].join("\n");
+    const expected = [
+      STRENGTHENED_MARKDOWN_FENCE,
+      INTRO_TEXT,
+      "",
+      "```text",
+      `${INNER_PROMPT_TEXT}\`\`\``,
+      "",
+      AFTER_NESTED_PROMPT,
+      "````",
+    ].join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(expected);
+  });
 });
 
 describe("normalizeMarkdown wrapper boundaries", () => {
+  it("strengthens markdown wrappers after leading blank lines", () => {
+    const input = [
+      "",
+      MARKDOWN_FENCE,
+      INTRO_TEXT,
+      "",
+      "```text",
+      INNER_PROMPT_TEXT,
+      "```",
+      "",
+      AFTER_NESTED_PROMPT,
+      "```",
+    ].join("\n");
+    const expected = [
+      "",
+      STRENGTHENED_MARKDOWN_FENCE,
+      INTRO_TEXT,
+      "",
+      "```text",
+      INNER_PROMPT_TEXT,
+      "```",
+      "",
+      AFTER_NESTED_PROMPT,
+      "````",
+    ].join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(expected);
+  });
+
   it("strengthens CRLF markdown wrappers that contain nested code fences", () => {
     const input = [
       MARKDOWN_FENCE,

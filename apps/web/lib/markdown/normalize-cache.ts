@@ -38,46 +38,93 @@ function lastNonBlankLineIndex(lines: string[]): number {
   return -1;
 }
 
-function markdownWrapperInnerFenceInfo(lines: string[], closeIndex: number, openCount: number) {
-  let firstPureCloseIndex: number | null = null;
-  let hasNestedOpenerBeforeFirstClose = false;
-  let hasBareNestedPair = false;
-  let maxInnerPureFence = 0;
-  let pendingBareNestedOpener = false;
+function firstNonBlankLineIndex(lines: string[]): number {
+  for (let index = 0; index < lines.length; index++) {
+    if (lines[index].trim() !== "") return index;
+  }
+  return -1;
+}
 
-  for (let index = 1; index < closeIndex; index++) {
-    const opener = FENCE_OPENER_LINE_RE.exec(lines[index]);
-    const openerRun = opener?.[1];
-    if (openerRun && openerRun.length >= openCount && firstPureCloseIndex === null) {
-      hasNestedOpenerBeforeFirstClose = true;
-    }
+type InnerFenceScan = {
+  firstPureCloseIndex: number | null;
+  hasBareNestedPair: boolean;
+  hasNestedOpenerBeforeFirstClose: boolean;
+  maxInnerPureFence: number;
+  pendingBareNestedOpener: boolean;
+};
 
-    const innerFence = PURE_FENCE_LINE_RE.exec(lines[index]);
-    if (!innerFence) continue;
-    const innerCount = innerFence[2].length;
-    if (innerCount < openCount) continue;
-    if (pendingBareNestedOpener) {
-      hasBareNestedPair = true;
-      pendingBareNestedOpener = false;
-    } else if (lines[index - 1]?.trim() === "") {
-      pendingBareNestedOpener = true;
-    }
-    maxInnerPureFence = Math.max(maxInnerPureFence, innerCount);
-    firstPureCloseIndex ??= index;
+function noteTaggedNestedOpener(state: InnerFenceScan, line: string, openCount: number): void {
+  const opener = FENCE_OPENER_LINE_RE.exec(line);
+  const openerRun = opener?.[1];
+  if (!openerRun || openerRun.length < openCount || state.firstPureCloseIndex !== null) return;
+  state.hasNestedOpenerBeforeFirstClose = true;
+  state.maxInnerPureFence = Math.max(state.maxInnerPureFence, openerRun.length);
+}
+
+function noteMatchingInnerFence(
+  state: InnerFenceScan,
+  lines: string[],
+  index: number,
+  openCount: number,
+): void {
+  const innerFence = PURE_FENCE_LINE_RE.exec(lines[index]);
+  const innerCount = innerFence?.[2]?.length ?? gluedCloseLength(lines[index], openCount);
+  if (innerCount === null || innerCount < openCount) return;
+
+  if (!innerFence) {
+    if (state.pendingBareNestedOpener) state.hasBareNestedPair = true;
+    state.maxInnerPureFence = Math.max(state.maxInnerPureFence, innerCount);
+    return;
   }
 
-  if ((!hasNestedOpenerBeforeFirstClose && !hasBareNestedPair) || maxInnerPureFence === 0) {
+  // A bare fence followed by content can be a nested opener; a bare fence
+  // followed by a blank is more likely the wrapper's own close.
+  if (state.pendingBareNestedOpener) {
+    state.hasBareNestedPair = true;
+    state.pendingBareNestedOpener = false;
+  } else if ((lines[index + 1]?.trim() ?? "") !== "") {
+    state.pendingBareNestedOpener = true;
+  }
+  state.maxInnerPureFence = Math.max(state.maxInnerPureFence, innerCount);
+  state.firstPureCloseIndex ??= index;
+}
+
+function markdownWrapperInnerFenceInfo(
+  lines: string[],
+  openIndex: number,
+  closeIndex: number,
+  openCount: number,
+) {
+  const scan: InnerFenceScan = {
+    firstPureCloseIndex: null,
+    hasBareNestedPair: false,
+    hasNestedOpenerBeforeFirstClose: false,
+    maxInnerPureFence: 0,
+    pendingBareNestedOpener: false,
+  };
+  for (let index = openIndex + 1; index < closeIndex; index++) {
+    noteTaggedNestedOpener(scan, lines[index], openCount);
+    noteMatchingInnerFence(scan, lines, index, openCount);
+  }
+
+  if (
+    (!scan.hasNestedOpenerBeforeFirstClose && !scan.hasBareNestedPair) ||
+    scan.maxInnerPureFence === 0
+  ) {
     return null;
   }
-  return { maxInnerPureFence };
+  return { maxInnerPureFence: scan.maxInnerPureFence };
 }
 
 function strengthenMarkdownWrapperFence(lines: string[]): string[] {
-  const opener = MARKDOWN_WRAPPER_OPEN_RE.exec(lines[0] ?? "");
+  const openIndex = firstNonBlankLineIndex(lines);
+  if (openIndex < 0) return lines;
+
+  const opener = MARKDOWN_WRAPPER_OPEN_RE.exec(lines[openIndex] ?? "");
   if (!opener || lines.length < 3) return lines;
 
   const closeIndex = lastNonBlankLineIndex(lines);
-  if (closeIndex <= 1) return lines;
+  if (closeIndex <= openIndex + 1) return lines;
 
   const closer = PURE_FENCE_LINE_RE.exec(lines[closeIndex]);
   if (!closer) return lines;
@@ -86,12 +133,12 @@ function strengthenMarkdownWrapperFence(lines: string[]): string[] {
   const closeCount = closer[2].length;
   if (closeCount < openCount) return lines;
 
-  const innerInfo = markdownWrapperInnerFenceInfo(lines, closeIndex, openCount);
+  const innerInfo = markdownWrapperInnerFenceInfo(lines, openIndex, closeIndex, openCount);
   if (!innerInfo) return lines;
 
   const targetCount = Math.max(openCount + 1, closeCount, innerInfo.maxInnerPureFence + 1);
   const strengthened = lines.slice();
-  strengthened[0] = `${opener[1]}${"`".repeat(targetCount)}${opener[3]}`;
+  strengthened[openIndex] = `${opener[1]}${"`".repeat(targetCount)}${opener[3]}`;
   strengthened[closeIndex] = `${closer[1]}${"`".repeat(targetCount)}`;
   return strengthened;
 }
