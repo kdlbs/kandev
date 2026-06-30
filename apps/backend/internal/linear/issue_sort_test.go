@@ -51,6 +51,17 @@ func TestSortIssues(t *testing.T) {
 			{Identifier: "C", Created: t3, Updated: t3},
 		}
 	}
+	// Mix of valid + invalid timestamps: EMPTY has no timestamp, GARBAGE is
+	// unparseable. Both must sort LAST in every date mode (never grab the
+	// earliest dispatch slots), keeping their relative input order.
+	badTimeIssues := func() []*LinearIssue {
+		return []*LinearIssue{
+			{Identifier: "EMPTY", Created: "", Updated: ""},
+			{Identifier: "A", Created: t1, Updated: t1},
+			{Identifier: "GARBAGE", Created: "nope", Updated: "nope"},
+			{Identifier: "C", Created: t3, Updated: t3},
+		}
+	}
 
 	cases := []struct {
 		name  string
@@ -68,6 +79,12 @@ func TestSortIssues(t *testing.T) {
 		{"default unchanged", timeIssues(), SortByDefault, []string{"B", "A", "C"}},
 		// Unknown key is treated like default: no reordering.
 		{"unknown unchanged", timeIssues(), IssueSortBy("bogus"), []string{"B", "A", "C"}},
+		// Invalid/empty timestamps sort LAST in every date mode, keeping their
+		// input order (EMPTY before GARBAGE).
+		{"created asc bad-last", badTimeIssues(), SortByCreatedAsc, []string{"A", "C", "EMPTY", "GARBAGE"}},
+		{"created desc bad-last", badTimeIssues(), SortByCreatedDesc, []string{"C", "A", "EMPTY", "GARBAGE"}},
+		{"updated asc bad-last", badTimeIssues(), SortByUpdatedAsc, []string{"A", "C", "EMPTY", "GARBAGE"}},
+		{"updated desc bad-last", badTimeIssues(), SortByUpdatedDesc, []string{"C", "A", "EMPTY", "GARBAGE"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

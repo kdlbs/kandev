@@ -393,6 +393,49 @@ func TestService_CheckIssueWatch_FiltersAlreadySeen(t *testing.T) {
 	}
 }
 
+func TestService_CheckIssueWatch_AppliesSort(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+
+	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
+		AuthMethod: AuthMethodAPIKey, Secret: "lin_api",
+	}); err != nil {
+		t.Fatalf("set config: %v", err)
+	}
+
+	// Mixed priorities in scrambled order; the watch's SortByPriorityDesc must
+	// reorder the returned slice urgent→high→med→low→none. Pins the
+	// sortIssues(out, w.SortBy) call in CheckIssueWatch.
+	f.client.withSearchResults([]LinearIssue{
+		{Identifier: "LOW", Priority: 4, URL: "https://linear.app/x/issue/LOW"},
+		{Identifier: "URGENT", Priority: 1, URL: "https://linear.app/x/issue/URGENT"},
+		{Identifier: "NONE", Priority: 0, URL: "https://linear.app/x/issue/NONE"},
+		{Identifier: "HIGH", Priority: 2, URL: "https://linear.app/x/issue/HIGH"},
+	})
+
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		Filter: SearchFilter{TeamKey: "ENG"}, SortBy: SortByPriorityDesc,
+	})
+	if err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+
+	got, err := f.svc.CheckIssueWatch(ctx, w)
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	want := []string{"URGENT", "HIGH", "LOW", "NONE"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d issues, got %d", len(want), len(got))
+	}
+	for i, id := range want {
+		if got[i].Identifier != id {
+			t.Errorf("position %d: got %s, want %s (full: %v)", i, got[i].Identifier, id, identifiers(got))
+		}
+	}
+}
+
 func TestService_CheckIssueWatch_StampsLastPolledOnError(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
