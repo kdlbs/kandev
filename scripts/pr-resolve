@@ -11,6 +11,7 @@
 #       and URL. Use before deciding how to answer a preview from list.
 #
 #   scripts/pr-resolve reply <PR> <comment_id> <thread_id> <body>
+#   scripts/pr-resolve reply <PR> <comment_id> <thread_id> --body-file <path>
 #       Reply to the thread starter, resolve the thread, and add a +1
 #       reaction in one call. Use this for both "fixed" replies and
 #       pushback replies — the reply body conveys whether you agreed
@@ -37,7 +38,7 @@ case "$cmd" in
     ;;
 esac
 
-if [[ "$cmd" == "reply" && $# -eq 4 ]]; then
+if [[ "$cmd" == "reply" && ( $# -eq 4 || $# -eq 5 ) ]]; then
   if [[ "$2" == PRRT_* ]]; then
     echo "reply expects comment_id before thread_id; got a review thread ID in the comment_id position" >&2
     exit 1
@@ -150,8 +151,15 @@ case "$cmd" in
     ;;
 
   reply)
-    [ $# -eq 4 ] || usage
-    PR=$1; COMMENT_ID=$2; THREAD_ID=$3; BODY=$4
+    [[ $# -eq 4 || $# -eq 5 ]] || usage
+    PR=$1; COMMENT_ID=$2; THREAD_ID=$3
+    if [[ $# -eq 5 ]]; then
+      [[ "$4" == "--body-file" ]] || usage
+      [[ -f "$5" ]] || { echo "body file not found: $5" >&2; exit 1; }
+      BODY=$(<"$5")
+    else
+      BODY=$4
+    fi
     gh api -X POST "repos/$OWNER/$REPO/pulls/$PR/comments/$COMMENT_ID/replies" \
       -f body="$BODY" --silent
     gh api graphql -f query='mutation($t: ID!) { resolveReviewThread(input: {threadId: $t}) { thread { isResolved } } }' \

@@ -110,7 +110,7 @@ grep_for_tag() {
     gh-run|ci|gh-run-view)
       # GitHub Actions log lines: "JOB\tSTEP\t...". Pull anything that
       # mentions error/failed/FAIL, plus the surrounding job context line.
-      grep -nE '^\S+\s+\S+\s+.*(error|failed|FAIL|Error:|exit code)' "$PLAIN"
+      grep -nE '^\S+\s+\S+\s+.*(error|failed|FAIL|Error:|exit code|golangci-lint run|[A-Za-z0-9_./-]+\.go:[0-9]+:[0-9]+:|[0-9]+ issues?:|unused: [0-9]+|apps/backend/test-results\.json|Process completed with exit code 1)' "$PLAIN"
       ;;
     *)
       grep -nE '(error|Error|FAIL|panic:|Failed|✘|✗)' "$PLAIN"

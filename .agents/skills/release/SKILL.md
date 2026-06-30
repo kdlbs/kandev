@@ -40,3 +40,22 @@ In `apps/cli/src/runtime.ts`, the CLI locates its bundled runtime via:
 1. `KANDEV_BUNDLE_DIR` env var (set by Homebrew wrapper, used by tests).
 2. Installed `@kdlbs/runtime-{platform}` npm package via `require.resolve()`.
 3. `--runtime-version <tag>` cache fallback (debug only — downloads from GitHub).
+
+## Runtime helper binary checklist
+
+When adding, renaming, or removing bundled helper binaries such as `agentctl-<goos>-<goarch>`, update every packaging surface in the same PR:
+
+- backend build targets and scripts
+- Docker/runtime image copy steps
+- `.github/workflows/release.yml` bundle, macOS signing, and notarization loops
+- `scripts/release/prepare-desktop-runtime.sh`
+- `scripts/release/verify-desktop-runtime.sh`
+- `scripts/release-desktop.test.sh`
+- `apps/desktop/AGENTS.md` runtime resource list
+
+Verify with the helper build plus release-runtime tests, for example:
+
+```bash
+make -C apps/backend build-agentctl-remote
+bash scripts/release-desktop.test.sh
+```

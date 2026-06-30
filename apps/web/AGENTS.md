@@ -72,6 +72,14 @@ For rebasing or finishing PRs written against the old Next.js runtime, follow
 
 Use subscription hooks only; the WS client auto-deduplicates.
 
+When changing task lifecycle WS handlers (`task.updated`, `task.deleted`,
+`task.state_changed`), check both kanban and Office surfaces. Archive/delete
+events may need to update kanban caches, `tasks.activeTaskId` / session pin
+state, recent/sidebar prefs, Office refetch triggers such as
+`setOfficeRefetchTrigger("tasks")`, and route redirects for `/t/:id`,
+`/tasks/:id`, and `/office/tasks/:id`. Add focused tests for every affected
+surface.
+
 ## Component conventions
 
 - **Framework adapters during Next removal:** Client components should import
@@ -102,6 +110,30 @@ Use subscription hooks only; the WS client auto-deduplicates.
   and Playwright's `getByTestId` only matches one attribute name — the
   `data-legacy-testid` alias lets existing specs keep selecting the element
   while the migration is in flight.
+- **Dockview session panel activation:** session chat panels can become active
+  through tab pointer/keyboard events, global tab-cycling shortcuts,
+  reopen/menu actions, and Dockview close controls. When changing
+  `tasks.activeSessionId` or active-session sync, audit all of those paths. Use
+  store state in addition to Dockview `api.isActive`; the current session's chat
+  tab may be Dockview-inactive while Files/Changes is active. Same-session
+  clicks must not leave stale activation intent, and Dockview
+  `.dv-default-tab-action` close controls should be treated as close/delete
+  actions rather than session-switch intent.
+- **GitHub PR status UI:** visual PR/CI status surfaces should use the shared
+  helpers in `apps/web/components/github/pr-task-icon.tsx`
+  (`hasPRChecksPassedForDisplay`, `hasPRChecksInProgressForDisplay`, and
+  `hasPRChecksPassedWithoutReviewWaitForDisplay`) instead of re-deriving status
+  from `checks_state`, `checks_total`, or `checks_passing` locally. Aggregate
+  check counts are a display-only fallback when `checks_state` is empty; they may
+  make chips or task icons render passed/in-progress, but must not enable merge
+  actions. Merge readiness must use `isPRReadyToMerge`, which requires GitHub's
+  explicit `checks_state === "success"` rollup. When changing PR status behavior,
+  update both `pr-task-icon.test.ts` and `pr-status-chip.test.tsx`.
+- **Task repository labels:** user-facing task/card repo chips should display a
+  stable repo slug or name (`owner/repo` when known, otherwise the repo name),
+  not a local filesystem path. Local clone paths or folder paths belong in
+  hover/title/tooltip metadata. Tasks with no repository, or only a non-repo
+  local folder, should not render a repo chip.
 
 ## Code-quality limits
 

@@ -159,6 +159,8 @@ and can leak ACP subprocesses.
 - `sprites` - Sprites cloud environment
 - `remote_docker`, `remote_vps`, `k8s` - Planned
 
+**Remote SSH executor platforms:** Treat supported remote OS/arch values as an end-to-end contract. Platform probe/normalization, lifecycle support checks, agentctl helper resolution, platform default shell, SSH readiness endpoints, frontend response types, and tests must stay aligned. Preserve raw unsupported platform details in user-facing errors, but use normalized values for supported-platform matching. Keep shell defaults platform-aware: Darwin defaults to `zsh`, Linux defaults to `bash`, unless an explicit shell is saved.
+
 ## Execution Flow
 
 ```text

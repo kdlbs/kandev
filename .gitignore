@@ -19,6 +19,10 @@ go.work
 # Dependency directories
 vendor/
 
+# Python helper caches
+__pycache__/
+*.py[cod]
+
 # IDE and editor files
 .idea/
 *.swp
