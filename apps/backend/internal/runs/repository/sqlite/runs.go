@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -200,7 +201,7 @@ func (r *Repository) GetRunsByCommentIDs(
 	if len(commentIDs) == 0 {
 		return out, nil
 	}
-	args := make([]interface{}, 0, len(commentIDs)*2)
+	args := make([]interface{}, 0, len(commentIDs)*3)
 	keyPlaceholders := make([]string, len(commentIDs))
 	commentPlaceholders := make([]string, len(commentIDs))
 	wanted := make(map[string]struct{}, len(commentIDs))
@@ -208,6 +209,9 @@ func (r *Repository) GetRunsByCommentIDs(
 		args = append(args, commentkeys.TaskComment(id))
 		keyPlaceholders[i] = "?"
 		wanted[id] = struct{}{}
+	}
+	for _, id := range commentIDs {
+		args = append(args, commentkeys.TaskComment(id))
 	}
 	for i, id := range commentIDs {
 		args = append(args, id)
@@ -217,9 +221,13 @@ func (r *Repository) GetRunsByCommentIDs(
 		SELECT id, idempotency_key, status, error_message, requested_at, payload
 		FROM runs
 		WHERE idempotency_key IN (%s)
-		   OR json_extract(payload, '$.comment_id') IN (%s)
+		UNION ALL
+		SELECT id, idempotency_key, status, error_message, requested_at, payload
+		FROM runs
+		WHERE (idempotency_key IS NULL OR idempotency_key NOT IN (%s))
+		  AND json_extract(payload, '$.comment_id') IN (%s)
 		ORDER BY requested_at DESC
-	`, strings.Join(keyPlaceholders, ","), strings.Join(commentPlaceholders, ","))
+	`, strings.Join(keyPlaceholders, ","), strings.Join(keyPlaceholders, ","), strings.Join(commentPlaceholders, ","))
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, err
@@ -227,13 +235,14 @@ func (r *Repository) GetRunsByCommentIDs(
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var (
-			id, idemKey, status, errMsg, payload string
-			requestedAt                          time.Time
+			id, status, errMsg, payload string
+			idemKey                     sql.NullString
+			requestedAt                 time.Time
 		)
 		if err := rows.Scan(&id, &idemKey, &status, &errMsg, &requestedAt, &payload); err != nil {
 			return nil, err
 		}
-		commentID := commentIDFromRun(idemKey, payload, wanted)
+		commentID := commentIDFromRun(idemKey.String, payload, wanted)
 		if commentID == "" {
 			continue
 		}
