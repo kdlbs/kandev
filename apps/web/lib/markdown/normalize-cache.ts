@@ -11,7 +11,7 @@
 
 const FENCE_OPEN_RE = /^ {0,3}(`{3,})/;
 const MARKDOWN_WRAPPER_OPEN_RE = /^( {0,3})(`{3,})(\s*(?:markdown|mdx?)(?:[ \t].*)?\s*)$/i;
-const FENCE_OPENER_LINE_RE = /^ {0,3}(`{3,})(?:[ \t]+\S|\S)/;
+const FENCE_OPENER_LINE_RE = /^ {0,3}(`{3,})(?!`)(?:[ \t]+\S|\S)/;
 const PURE_FENCE_LINE_RE = /^( {0,3})(`{3,})\s*$/;
 const TRAILING_FENCE_RE = /(`{3,})\s*$/;
 
@@ -74,12 +74,14 @@ function findBareNestedClose(
   openCount: number,
 ) {
   for (let index = startIndex + 1; index < closeIndex; index++) {
-    if (FENCE_OPENER_LINE_RE.test(lines[index])) return null;
     const closeCount = matchingCloseLength(lines[index], openCount);
     if (closeCount !== null) {
       if (lines[startIndex + 1]?.trim() === "" && lines[index - 1]?.trim() === "") return null;
       return { closeCount, closeIndex: index };
     }
+    const taggedOpener = FENCE_OPENER_LINE_RE.exec(lines[index]);
+    const taggedOpenCount = taggedOpener?.[1]?.length ?? 0;
+    if (taggedOpenCount >= openCount) return null;
   }
   return null;
 }
