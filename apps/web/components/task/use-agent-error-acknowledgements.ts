@@ -16,6 +16,12 @@ type UseAgentErrorAcknowledgementsParams = {
   dismissedAgentErrors: Record<string, string>;
 };
 
+/**
+ * Mirrors the sessions `agentErrorMessageForTask` can inspect for visible task
+ * rows. Primary sessions are included directly; fallback sessions are included
+ * only while non-terminal because terminal sessions will not produce a later
+ * agent message that can make their error acknowledgement stale.
+ */
 export function agentErrorAcknowledgementSessionIds(
   tasks: Array<{ id: string; primarySessionId?: string | null }>,
   sessionsByTaskId: Record<string, TaskSession[] | undefined>,
@@ -30,6 +36,11 @@ export function agentErrorAcknowledgementSessionIds(
   return [...sessionIds];
 }
 
+/**
+ * Builds a stable content key for primary session IDs so derived arrays only
+ * change when their contents change. The NUL separator avoids collisions with
+ * commas or newlines in IDs, preventing avoidable bulk WS re-subscriptions.
+ */
 export function stablePrimarySessionIdsKey(
   tasks: Array<{ primarySessionId?: string | null }>,
 ): string {

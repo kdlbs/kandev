@@ -11,6 +11,7 @@ import {
 import { sessionId, taskId, type Message, type TaskSession } from "@/lib/types/http";
 import {
   agentErrorAcknowledgementSessionIds,
+  stablePrimarySessionIdsKey,
   usePersistResolvedAgentErrorAcknowledgements,
 } from "./use-agent-error-acknowledgements";
 
@@ -159,5 +160,17 @@ describe("agentErrorAcknowledgementSessionIds", () => {
         },
       ),
     ).toEqual(["primary", "fallback-1", "fallback-2"]);
+  });
+});
+
+describe("stablePrimarySessionIdsKey", () => {
+  it("uses a NUL separator so comma-containing IDs do not collide", () => {
+    expect(
+      stablePrimarySessionIdsKey([{ primarySessionId: "x,y" }, { primarySessionId: "x,y" }]),
+    ).toBe("x,y\0x,y");
+  });
+
+  it("drops nullish primary session IDs", () => {
+    expect(stablePrimarySessionIdsKey([{ primarySessionId: null }, {}])).toBe("");
   });
 });
