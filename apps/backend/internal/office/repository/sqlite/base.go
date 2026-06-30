@@ -23,7 +23,8 @@ func newParticipantUUID() string { return uuid.New().String() }
 
 // RunnerProjection returns the correlated subquery that resolves the
 // effective per-task runner from workflow_step_participants, falling
-// back to the step's primary agent_profile_id (ADR 0005 Wave F).
+// back to the step's primary agent_profile_id and then the task's most
+// recently assigned runner (ADR 0005 Wave F).
 // Inlined into SELECT clauses where the legacy
 // tasks.assignee_agent_profile_id column would have been read.
 //
@@ -35,12 +36,16 @@ func RunnerProjection(alias string) string {
 		alias = "tasks"
 	}
 	return `COALESCE(
-		(SELECT wsp.agent_profile_id FROM workflow_step_participants wsp
+		NULLIF((SELECT wsp.agent_profile_id FROM workflow_step_participants wsp
 		 WHERE wsp.step_id = ` + alias + `.workflow_step_id
 		   AND wsp.task_id = ` + alias + `.id
 		   AND wsp.role = 'runner'
-		 ORDER BY wsp.position ASC, wsp.id ASC LIMIT 1),
-		(SELECT ws.agent_profile_id FROM workflow_steps ws WHERE ws.id = ` + alias + `.workflow_step_id),
+		 ORDER BY wsp.position ASC, wsp.id ASC LIMIT 1), ''),
+		NULLIF((SELECT ws.agent_profile_id FROM workflow_steps ws WHERE ws.id = ` + alias + `.workflow_step_id), ''),
+		NULLIF((SELECT wsp.agent_profile_id FROM workflow_step_participants wsp
+		 WHERE wsp.task_id = ` + alias + `.id
+		   AND wsp.role = 'runner'
+		 ORDER BY wsp.rowid DESC LIMIT 1), ''),
 		''
 	)`
 }

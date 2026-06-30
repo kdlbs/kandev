@@ -4,6 +4,12 @@ import type { ReactNode } from "react";
 import { StateProvider } from "@/components/state-provider";
 import type { Task, TaskSession } from "@/app/office/tasks/[id]/types";
 
+const { CHAT_EDITABLE, CHAT_READONLY, CHAT_READONLY_TEST_ID } = vi.hoisted(() => ({
+  CHAT_EDITABLE: "editable",
+  CHAT_READONLY: "readonly",
+  CHAT_READONLY_TEST_ID: "chat-readonly",
+}));
+
 vi.mock("@/components/routing/app-link", () => ({
   default: ({ href, children, ...props }: { href: string; children: ReactNode }) => (
     <a href={href} {...props}>
@@ -74,7 +80,7 @@ vi.mock("@/lib/api/domains/tree-api", () => ({
 
 vi.mock("./chat-activity-tabs", () => ({
   ChatActivityTabs: ({ readOnly }: { readOnly: boolean }) => (
-    <div data-testid="chat-readonly">{readOnly ? "readonly" : "editable"}</div>
+    <div data-testid={CHAT_READONLY_TEST_ID}>{readOnly ? CHAT_READONLY : CHAT_EDITABLE}</div>
   ),
 }));
 
@@ -122,6 +128,14 @@ const failedSession: TaskSession = {
   updatedAt: "2026-05-01T10:06:00Z",
 };
 
+const runningSession: TaskSession = {
+  ...completedSession,
+  id: "session-running",
+  state: "RUNNING",
+  completedAt: null,
+  updatedAt: "2026-05-01T10:07:00Z",
+};
+
 function renderPane(task: Task, sessions: TaskSession[]) {
   return render(
     <StateProvider>
@@ -141,18 +155,24 @@ describe("OfficeSimplePane comment composer", () => {
       </StateProvider>,
     );
 
-    expect(screen.getByTestId("chat-readonly").textContent).toBe("editable");
+    expect(screen.getByTestId(CHAT_READONLY_TEST_ID).textContent).toBe(CHAT_EDITABLE);
   });
 
   it("keeps closed tasks read-only when the latest session cannot be reused", () => {
     renderPane({ ...baseTask, status: "done" }, [completedSession, failedSession]);
 
-    expect(screen.getByTestId("chat-readonly").textContent).toBe("readonly");
+    expect(screen.getByTestId(CHAT_READONLY_TEST_ID).textContent).toBe(CHAT_READONLY);
+  });
+
+  it("keeps completed tasks editable while a follow-up session is active", () => {
+    renderPane({ ...baseTask, status: "done" }, [completedSession, runningSession]);
+
+    expect(screen.getByTestId(CHAT_READONLY_TEST_ID).textContent).toBe(CHAT_EDITABLE);
   });
 
   it("keeps cancelled tasks read-only even with a reusable latest session", () => {
     renderPane({ ...baseTask, status: "cancelled" }, [completedSession]);
 
-    expect(screen.getByTestId("chat-readonly").textContent).toBe("readonly");
+    expect(screen.getByTestId(CHAT_READONLY_TEST_ID).textContent).toBe(CHAT_READONLY);
   });
 });

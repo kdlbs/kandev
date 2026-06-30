@@ -468,6 +468,28 @@ func TestResolveCurrentRunner_FallsBackToTaskRunnerOnOtherStep(t *testing.T) {
 	}
 }
 
+func TestResolveCurrentRunner_FallsBackToLatestTaskRunner(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	work := newPhase2TestStep(t, repo, "Work")
+	review := newPhase2TestStep(t, repo, "Review")
+	done := newPhase2TestStep(t, repo, "Done")
+
+	if err := repo.SetTaskRunner(ctx, work.ID, "task-done", "runner-on-work"); err != nil {
+		t.Fatalf("set work runner: %v", err)
+	}
+	if err := repo.SetTaskRunner(ctx, review.ID, "task-done", "runner-on-review"); err != nil {
+		t.Fatalf("set review runner: %v", err)
+	}
+	got, err := repo.ResolveCurrentRunner(ctx, done.ID, "task-done")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got != "runner-on-review" {
+		t.Fatalf("expected runner-on-review, got %q", got)
+	}
+}
+
 func TestResolveCurrentRunner_TreatsEmptyTaskRunnerAsMissing(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()

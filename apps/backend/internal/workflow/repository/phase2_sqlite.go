@@ -333,9 +333,10 @@ func (r *Repository) GetStepParticipant(ctx context.Context, id string) (*models
 //     wins; multiple rows fall back to the lowest-position id-tiebroken
 //     pick (ambiguity, but deterministic).
 //  2. The step's `agent_profile_id` (the workflow's primary).
-//  3. Any runner participant for the task. This preserves the task's
-//     effective runner after terminal transitions to steps that do not
-//     carry their own participant rows, such as the default Done step.
+//  3. The most recently assigned runner participant for the task. This
+//     preserves the task's effective runner after terminal transitions
+//     to steps that do not carry their own participant rows, such as the
+//     default Done step.
 //
 // Returns "" without error when neither exists. Empty step_id or
 // task_id is an error — callers must supply both.
@@ -381,7 +382,7 @@ func (r *Repository) ResolveCurrentRunner(
 	err = r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT agent_profile_id FROM workflow_step_participants
 		WHERE task_id = ? AND role = 'runner'
-		ORDER BY position ASC, id ASC
+		ORDER BY rowid DESC
 		LIMIT 1
 	`), taskID).Scan(&agentID)
 	if err == nil {

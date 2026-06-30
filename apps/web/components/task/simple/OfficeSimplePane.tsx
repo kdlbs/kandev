@@ -57,7 +57,14 @@ import type {
 } from "@/app/office/tasks/[id]/types";
 import { toast } from "sonner";
 
-const REUSABLE_COMMENT_SESSION_STATES = new Set<TaskSession["state"]>(["COMPLETED", "IDLE"]);
+const COMMENTABLE_DONE_SESSION_STATES = new Set<TaskSession["state"]>([
+  "CREATED",
+  "STARTING",
+  "RUNNING",
+  "IDLE",
+  "WAITING_FOR_INPUT",
+  "COMPLETED",
+]);
 
 type OfficeSimplePaneProps = {
   task: Task;
@@ -86,7 +93,7 @@ function commentsReadOnly(task: Task, sessions: TaskSession[]): boolean {
   if (task.status === "cancelled") return true;
   if (task.status !== "done") return false;
   const session = latestSession(sessions);
-  return !session || !REUSABLE_COMMENT_SESSION_STATES.has(session.state);
+  return !session || !COMMENTABLE_DONE_SESSION_STATES.has(session.state);
 }
 
 function TaskBreadcrumb({ task }: { task: Task }) {
