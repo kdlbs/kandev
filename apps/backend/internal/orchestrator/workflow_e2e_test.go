@@ -434,6 +434,7 @@ func TestProcessOnTurnCompleteViaEngine_WritesTaskStateReview(t *testing.T) {
 
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
 	svc := createEngineService(t, repo, sg, agentMgr)
 	svc.taskRepo = taskRepo
 

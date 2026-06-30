@@ -524,6 +524,7 @@ func TestToolUpdateFromCompletedExecutionDoesNotWakeWaitingSession(t *testing.T)
 	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
 
 	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.messageCreator = &mockMessageCreator{}
@@ -613,6 +614,7 @@ func TestToolCallStreamFromCompletedExecutionDoesNotSaveAgentText(t *testing.T) 
 	seedSession(t, repo, "t1", "s1", "")
 
 	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", State: v1.TaskStateInProgress}
 	svc := createTestService(repo, newMockStepGetter(), taskRepo)
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
@@ -642,6 +644,7 @@ func TestCompleteStreamFromCompletedExecutionFlushesAgentText(t *testing.T) {
 	seedSession(t, repo, "t1", "s1", "")
 
 	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
 	svc := createTestService(repo, newMockStepGetter(), taskRepo)
 	svc.turnService = &repoTurnService{repo: repo}
 	messages := &mockMessageCreator{}
@@ -981,6 +984,10 @@ func TestWriteTaskReviewStateSkipsTerminalTaskState(t *testing.T) {
 	require.NoError(t, err)
 	session.State = models.TaskSessionStateWaitingForInput
 	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	task, err := repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	task.State = v1.TaskStateCompleted
+	require.NoError(t, repo.UpdateTask(ctx, task))
 
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", State: v1.TaskStateCompleted}
@@ -1584,6 +1591,7 @@ func TestSetSessionWaitingForInput_WritesOnTransition(t *testing.T) {
 	require.NoError(t, repo.UpdateTaskSession(ctx, session))
 
 	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
 	svc := createTestService(repo, newMockStepGetter(), taskRepo)
 
 	svc.setSessionWaitingForInput(ctx, "t1", "s1")

@@ -98,6 +98,10 @@ func newMockTaskRepo() *mockTaskRepo {
 	}
 }
 
+func seedMockTaskState(repo *mockTaskRepo, taskID string, state v1.TaskState) {
+	repo.tasks[taskID] = &v1.Task{ID: taskID, State: state}
+}
+
 func (m *mockTaskRepo) GetTask(_ context.Context, taskID string) (*v1.Task, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -128,11 +132,7 @@ func (m *mockTaskRepo) UpdateTaskStateIfCurrentIn(
 	defer m.mu.Unlock()
 	t, ok := m.tasks[taskID]
 	if !ok {
-		t = &v1.Task{ID: taskID}
-		if len(allowed) > 0 {
-			t.State = allowed[0]
-		}
-		m.tasks[taskID] = t
+		return false, fmt.Errorf("%w: %s", sqliterepo.ErrTaskNotFound, taskID)
 	}
 	for _, candidate := range allowed {
 		if t.State != candidate {
@@ -726,6 +726,7 @@ func TestHandleAgentReadyGuards(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
 		taskRepo := newMockTaskRepo()
+		seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
 
 		// Register the workflow step so processOnTurnComplete can resolve it.
 		stepGetter := newMockStepGetter()
@@ -1080,6 +1081,7 @@ func TestHandleAgentCompleted_MovesTaskToReviewWhenLastSiblingFinishes(t *testin
 	seedExecutorRunning(t, repo, "s-last", "t1", "exec-last")
 
 	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	stepGetter := newMockStepGetter()
 	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
@@ -1135,6 +1137,7 @@ func TestHandleAgentCompleted_NoWorkflowStepLastSiblingMovesTaskToReview(t *test
 	seedExecutorRunning(t, repo, "s-last", "t1", "exec-last")
 
 	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
 
@@ -1689,6 +1692,7 @@ func TestHandleRecoverableFailure(t *testing.T) {
 		seedSession(t, repo, "t1", "s1", "step1")
 
 		taskRepo := newMockTaskRepo()
+		seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
 		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
 
@@ -1796,6 +1800,7 @@ func TestHandleResumeFailure(t *testing.T) {
 		})
 
 		taskRepo := newMockTaskRepo()
+		seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
 		svc := createTestService(repo, newMockStepGetter(), taskRepo)
 
 		result := svc.handleResumeFailure(ctx, watcher.AgentEventData{

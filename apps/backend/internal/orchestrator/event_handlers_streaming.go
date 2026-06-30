@@ -698,43 +698,46 @@ func (s *Service) setSessionStarting(ctx context.Context, taskID string, session
 		return nil
 	}
 
-	s.taskRuntimeStateMu.Lock()
-
-	current, err := s.repo.GetTaskSession(ctx, session.ID)
-	if err != nil {
-		s.taskRuntimeStateMu.Unlock()
-		return err
-	}
-	allowedTerminalRecovery := !promoteTask &&
-		session.State == models.TaskSessionStateStarting &&
-		current.State == models.TaskSessionStateFailed
-	if isTerminalSessionState(current.State) && !allowedTerminalRecovery {
-		s.taskRuntimeStateMu.Unlock()
-		return fmt.Errorf("session %s is %s; cannot mark STARTING", session.ID, current.State)
-	}
-
-	oldState := current.State
-	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
-		s.taskRuntimeStateMu.Unlock()
-		return err
-	}
-
 	var publishSession *models.TaskSession
 	var stateUpdatedAt *time.Time
-	if oldState != session.State {
-		if refreshed, err := s.repo.GetTaskSession(ctx, session.ID); err == nil && refreshed != nil {
-			if !refreshed.UpdatedAt.IsZero() {
-				t := refreshed.UpdatedAt.UTC()
-				stateUpdatedAt = &t
-			}
-			publishSession = refreshed
-		}
-	}
+	var oldState models.TaskSessionState
+	if err := func() error {
+		s.taskRuntimeStateMu.Lock()
+		defer s.taskRuntimeStateMu.Unlock()
 
-	if promoteTask {
-		s.writeTaskInProgressForRuntime(ctx, taskID, session.ID)
+		current, err := s.repo.GetTaskSession(ctx, session.ID)
+		if err != nil {
+			return err
+		}
+		allowedTerminalRecovery := !promoteTask &&
+			session.State == models.TaskSessionStateStarting &&
+			current.State == models.TaskSessionStateFailed
+		if isTerminalSessionState(current.State) && !allowedTerminalRecovery {
+			return fmt.Errorf("session %s is %s; cannot mark STARTING", session.ID, current.State)
+		}
+
+		oldState = current.State
+		if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+			return err
+		}
+
+		if oldState != session.State {
+			if refreshed, err := s.repo.GetTaskSession(ctx, session.ID); err == nil && refreshed != nil {
+				if !refreshed.UpdatedAt.IsZero() {
+					t := refreshed.UpdatedAt.UTC()
+					stateUpdatedAt = &t
+				}
+				publishSession = refreshed
+			}
+		}
+
+		if promoteTask {
+			s.writeTaskInProgressForRuntime(ctx, taskID, session.ID)
+		}
+		return nil
+	}(); err != nil {
+		return err
 	}
-	s.taskRuntimeStateMu.Unlock()
 
 	if publishSession != nil {
 		s.publishTaskSessionStateChanged(ctx, taskID, session.ID, oldState, session.State, session.ErrorMessage, stateUpdatedAt, publishSession)
@@ -780,6 +783,8 @@ func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, session
 }
 
 func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSessionID string) {
+	// Task lookup errors fail closed so office/archived guards cannot be bypassed
+	// by a transient repository failure.
 	if dbTask, err := s.repo.GetTask(ctx, taskID); err != nil {
 		s.logger.Warn("failed to load task before REVIEW state reconcile",
 			zap.String("task_id", taskID),
@@ -975,6 +980,8 @@ func (s *Service) setSessionRunningForExecution(ctx context.Context, taskID, ses
 }
 
 func (s *Service) writeTaskInProgressForRuntime(ctx context.Context, taskID, sessionID string) {
+	// Task lookup errors fail closed so office/archived guards cannot be bypassed
+	// by a transient repository failure.
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		s.logger.Warn("skipping IN_PROGRESS transition because task lookup failed",
