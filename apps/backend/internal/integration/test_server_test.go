@@ -219,6 +219,10 @@ func (a *testTurnServiceAdapter) CompleteTurn(ctx context.Context, turnID string
 	return a.svc.CompleteTurn(ctx, turnID)
 }
 
+func (a *testTurnServiceAdapter) GetTurn(ctx context.Context, turnID string) (*models.Turn, error) {
+	return a.svc.GetTurn(ctx, turnID)
+}
+
 func (a *testTurnServiceAdapter) GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
 	return a.svc.GetActiveTurn(ctx, sessionID)
 }

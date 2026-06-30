@@ -49,6 +49,7 @@ export type ChatInputEditorAreaProps = {
   contextPopoverOpen: boolean;
   setContextPopoverOpen: (open: boolean) => void;
   contextFiles: ContextFile[];
+  editorClassName?: string;
   onImplementPlan?: (fresh: boolean) => void;
   onEnhancePrompt?: () => void;
   isEnhancingPrompt?: boolean;
@@ -62,10 +63,12 @@ export type ChatInputEditorAreaProps = {
 function EditorWithTooltip({
   showTooltip,
   isEnhancingPrompt,
+  className,
   children,
 }: {
   showTooltip: boolean;
   isEnhancingPrompt?: boolean;
+  className?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -75,6 +78,7 @@ function EditorWithTooltip({
           className={cn(
             "flex-1 min-h-0 transition-opacity",
             isEnhancingPrompt && "opacity-50 pointer-events-none",
+            className,
           )}
         >
           {children}
@@ -142,6 +146,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
       <EditorWithTooltip
         showTooltip={showRequestChangesTooltip}
         isEnhancingPrompt={isEnhancingPrompt}
+        className={p.editorClassName}
       >
         <TipTapInput
           ref={inputRef}
@@ -337,9 +342,13 @@ export function ChatInputBody({
         <div
           ref={containerRef}
           style={{ height }}
+          data-testid="chat-input-editor-shell"
           className="flex flex-col min-h-0 overflow-hidden"
         >
-          <ChatInputEditorArea {...editorAreaProps} />
+          <ChatInputEditorArea
+            {...editorAreaProps}
+            editorClassName={cn(editorAreaProps.editorClassName, showFocusHint && "pr-28")}
+          />
         </div>
       </div>
     </div>

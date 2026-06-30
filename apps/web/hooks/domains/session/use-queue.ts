@@ -178,6 +178,7 @@ function useQueueActions({
 export function useQueue(sessionId: string | null) {
   const state = useQueueState(sessionId);
   const { entries, meta, isLoading } = state;
+  const connectionStatus = useAppStore((appState) => appState.connection.status);
   const { refetch, queue, clearAll, drainNext, editEntry, removeEntry } = useQueueActions({
     sessionId,
     setQueueEntries: state.setQueueEntries,
@@ -188,10 +189,24 @@ export function useQueue(sessionId: string | null) {
 
   useEffect(() => {
     if (!sessionId) return;
+    if (connectionStatus !== "connected") return;
     void refetch(sessionId).catch((err) => {
       console.error("Failed to fetch queue status:", err);
     });
-  }, [sessionId, refetch]);
+  }, [sessionId, connectionStatus, refetch]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    const refetchOnVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (connectionStatus !== "connected") return;
+      void refetch(sessionId).catch((err) => {
+        console.error("Failed to fetch queue status after visibility change:", err);
+      });
+    };
+    document.addEventListener("visibilitychange", refetchOnVisible);
+    return () => document.removeEventListener("visibilitychange", refetchOnVisible);
+  }, [sessionId, connectionStatus, refetch]);
 
   const refetchBound = useCallback(
     () => (sessionId ? refetch(sessionId) : Promise.resolve()),

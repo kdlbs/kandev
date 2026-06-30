@@ -33,6 +33,8 @@ func TestLaunchRequest_RepoSpecs_SynthesizesFromLegacyFields(t *testing.T) {
 		WorktreeBranchPrefix: "feat/",
 		PullBeforeWorktree:   true,
 		RepoName:             "x",
+		BranchSlug:           "feature-y",
+		BranchIdentitySlug:   "feature-y",
 	}
 	specs := req.RepoSpecs()
 	if len(specs) != 1 {
@@ -42,7 +44,8 @@ func TestLaunchRequest_RepoSpecs_SynthesizesFromLegacyFields(t *testing.T) {
 	if got.RepositoryID != "repo-x" || got.RepositoryPath != "/x" ||
 		got.BaseBranch != "main" || got.CheckoutBranch != "feature/y" ||
 		got.WorktreeID != "wt-1" || got.WorktreeBranchPrefix != "feat/" ||
-		!got.PullBeforeWorktree || got.RepoName != "x" {
+		!got.PullBeforeWorktree || got.RepoName != "x" ||
+		got.BranchSlug != "feature-y" || got.BranchIdentitySlug != "feature-y" {
 		t.Errorf("synthesized spec mismatch: %+v", got)
 	}
 }
@@ -70,10 +73,12 @@ func TestEnvPrepareRequest_RepoSpecs_ExplicitWins(t *testing.T) {
 
 func TestEnvPrepareRequest_RepoSpecs_SynthesizedCarriesRepoSetupScript(t *testing.T) {
 	req := &EnvPrepareRequest{
-		RepositoryID:    "r1",
-		RepositoryPath:  "/r1",
-		BaseBranch:      "main",
-		RepoSetupScript: "make install",
+		RepositoryID:       "r1",
+		RepositoryPath:     "/r1",
+		BaseBranch:         "main",
+		RepoSetupScript:    "make install",
+		BranchSlug:         "feature-y",
+		BranchIdentitySlug: "feature-y",
 	}
 	specs := req.RepoSpecs()
 	if len(specs) != 1 {
@@ -81,6 +86,9 @@ func TestEnvPrepareRequest_RepoSpecs_SynthesizedCarriesRepoSetupScript(t *testin
 	}
 	if specs[0].RepoSetupScript != "make install" {
 		t.Errorf("repo setup script not propagated: %+v", specs[0])
+	}
+	if specs[0].BranchSlug != "feature-y" || specs[0].BranchIdentitySlug != "feature-y" {
+		t.Errorf("branch identity not propagated: %+v", specs[0])
 	}
 }
 

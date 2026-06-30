@@ -6,6 +6,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	"go.uber.org/zap"
 )
 
@@ -39,7 +40,14 @@ func (e *Executor) reuseExistingEnvironment(ctx context.Context, req *LaunchAgen
 		return
 	}
 
-	if env.WorktreeID != "" && req.UseWorktree {
+	if env.TaskDirName != "" && req.UseWorktree {
+		req.TaskDirName = env.TaskDirName
+	}
+
+	if req.UseWorktree {
+		e.reuseExistingRepositoryWorktrees(ctx, req, env)
+	}
+	if req.WorktreeID == "" && env.WorktreeID != "" && req.UseWorktree && !hasBranchScopedEnvironmentWorktrees(env) {
 		req.WorktreeID = env.WorktreeID
 		e.logger.Info("reusing existing task environment worktree",
 			zap.String("task_id", req.TaskID),
@@ -70,6 +78,250 @@ func (e *Executor) reuseExistingEnvironment(ctx context.Context, req *LaunchAgen
 	if running := e.latestExecutorRunningForEnvironment(ctx, req.TaskID, env); running != nil {
 		applyExecutorRunningMetadata(req, running)
 	}
+}
+
+type repositoryWorktreeKey struct {
+	repositoryID string
+	branchSlug   string
+}
+
+func (e *Executor) reuseExistingRepositoryWorktrees(ctx context.Context, req *LaunchAgentRequest, env *models.TaskEnvironment) {
+	if !req.UseWorktree {
+		return
+	}
+	repoSpecs := req.Repositories
+	usingTopLevelRepo := false
+	if len(repoSpecs) == 0 {
+		spec, ok := topLevelLaunchRepoSpec(req)
+		if !ok {
+			return
+		}
+		repoSpecs = []RepoSpec{spec}
+		usingTopLevelRepo = true
+	}
+
+	if len(repoSpecs) == 0 {
+		return
+	}
+
+	envWorktreeIDs := e.environmentRepoWorktreeIDs(req, env)
+	sessionWorktreeIDs := e.latestSessionWorktreeIDsForEnvironment(ctx, req.TaskID, env.ID)
+	if len(envWorktreeIDs) == 0 && len(sessionWorktreeIDs) == 0 {
+		return
+	}
+	hasScopedWorktrees := hasBranchScopedEnvironmentWorktrees(env)
+	allowLegacyEmptyBranchFallback := !hasScopedWorktrees
+	for i := range repoSpecs {
+		spec := &repoSpecs[i]
+		if id := reusableWorktreeIDForSpec(*spec, envWorktreeIDs, sessionWorktreeIDs, allowLegacyEmptyBranchFallback); id != "" {
+			spec.WorktreeID = id
+		}
+	}
+	if repoSpecs[0].WorktreeID == "" {
+		routeUnmatchedTopLevelRepoToScopedPath(req, repoSpecs[0], usingTopLevelRepo, hasScopedWorktrees)
+		return
+	}
+	req.WorktreeID = repoSpecs[0].WorktreeID
+	if usingTopLevelRepo {
+		routeMatchedTopLevelRepoToScopedIdentity(req, repoSpecs[0], hasScopedWorktrees)
+	} else {
+		req.Repositories = repoSpecs
+	}
+}
+
+func reusableWorktreeIDForSpec(
+	spec RepoSpec,
+	envWorktreeIDs map[repositoryWorktreeKey]string,
+	sessionWorktreeIDs map[repositoryWorktreeKey]string,
+	allowLegacyEmptyBranchFallback bool,
+) string {
+	branchIdentity := launchRepoBranchIdentitySlug(spec)
+	key := repositoryWorktreeKey{
+		repositoryID: spec.RepositoryID,
+		branchSlug:   branchIdentity,
+	}
+	if id := envWorktreeIDs[key]; id != "" {
+		return id
+	}
+	if id := sessionWorktreeIDs[key]; id != "" {
+		return id
+	}
+	if spec.BranchSlug != "" || !allowLegacyEmptyBranchFallback {
+		return ""
+	}
+	legacyKey := repositoryWorktreeKey{
+		repositoryID: spec.RepositoryID,
+		branchSlug:   "",
+	}
+	if id := envWorktreeIDs[legacyKey]; id != "" {
+		return id
+	}
+	if branchIdentity == "" {
+		if id := sessionWorktreeIDs[legacyKey]; id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
+func routeUnmatchedTopLevelRepoToScopedPath(
+	req *LaunchAgentRequest,
+	spec RepoSpec,
+	usingTopLevelRepo bool,
+	hasScopedWorktrees bool,
+) {
+	if !usingTopLevelRepo || !hasScopedWorktrees {
+		return
+	}
+	pathSlug := launchRepoBranchIdentitySlug(spec)
+	if pathSlug == "" {
+		return
+	}
+	spec.BranchIdentitySlug = pathSlug
+	spec.BranchSlug = pathSlug
+	req.BranchIdentitySlug = pathSlug
+	req.BranchSlug = pathSlug
+	req.Repositories = []RepoSpec{spec}
+}
+
+func routeMatchedTopLevelRepoToScopedIdentity(req *LaunchAgentRequest, spec RepoSpec, hasScopedWorktrees bool) {
+	if !hasScopedWorktrees {
+		return
+	}
+	identitySlug := launchRepoBranchIdentitySlug(spec)
+	if identitySlug == "" {
+		return
+	}
+	spec.BranchIdentitySlug = identitySlug
+	req.BranchIdentitySlug = identitySlug
+	req.Repositories = []RepoSpec{spec}
+}
+
+func topLevelLaunchRepoSpec(req *LaunchAgentRequest) (RepoSpec, bool) {
+	if req.RepositoryID == "" {
+		return RepoSpec{}, false
+	}
+	return RepoSpec{
+		RepositoryID:         req.RepositoryID,
+		RepositoryPath:       req.RepositoryPath,
+		RepositoryURL:        req.RepositoryURL,
+		RepoName:             req.RepoName,
+		BaseBranch:           req.BaseBranch,
+		DefaultBranch:        req.DefaultBranch,
+		CheckoutBranch:       req.CheckoutBranch,
+		PRNumber:             req.PRNumber,
+		WorktreeID:           req.WorktreeID,
+		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
+		PullBeforeWorktree:   req.PullBeforeWorktree,
+		CopyFiles:            req.CopyFiles,
+		BranchIdentitySlug:   topLevelBranchIdentitySlug(req),
+	}, true
+}
+
+func topLevelBranchIdentitySlug(req *LaunchAgentRequest) string {
+	branch := req.CheckoutBranch
+	if branch == "" {
+		branch = req.BaseBranch
+	}
+	if branch == "" {
+		branch = req.DefaultBranch
+	}
+	return worktree.SanitizeBranchSlug(branch)
+}
+
+func launchRepoBranchIdentitySlug(spec RepoSpec) string {
+	if spec.BranchIdentitySlug != "" {
+		return worktree.SanitizeBranchSlug(spec.BranchIdentitySlug)
+	}
+	return worktree.SanitizeBranchSlug(spec.BranchSlug)
+}
+
+func (e *Executor) environmentRepoWorktreeIDs(req *LaunchAgentRequest, env *models.TaskEnvironment) map[repositoryWorktreeKey]string {
+	result := make(map[repositoryWorktreeKey]string)
+	if env.WorktreeID != "" && !hasBranchScopedEnvironmentWorktrees(env) {
+		repoID := env.RepositoryID
+		if repoID == "" {
+			repoID = req.RepositoryID
+		}
+		if repoID != "" {
+			result[repositoryWorktreeKey{
+				repositoryID: repoID,
+				branchSlug:   "",
+			}] = env.WorktreeID
+		}
+	}
+	for _, repo := range env.Repos {
+		if repo.RepositoryID == "" || repo.WorktreeID == "" {
+			continue
+		}
+		result[repositoryWorktreeKey{
+			repositoryID: repo.RepositoryID,
+			branchSlug:   worktree.SanitizeBranchSlug(repo.BranchSlug),
+		}] = repo.WorktreeID
+	}
+	return result
+}
+
+func hasBranchScopedEnvironmentWorktrees(env *models.TaskEnvironment) bool {
+	for _, repo := range env.Repos {
+		if repo.RepositoryID != "" && repo.WorktreeID != "" && worktree.SanitizeBranchSlug(repo.BranchSlug) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *Executor) latestSessionWorktreeIDsForEnvironment(ctx context.Context, taskID, envID string) map[repositoryWorktreeKey]string {
+	sessions, err := e.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		e.logger.Warn("failed to list sessions for per-repo worktree reuse",
+			zap.String("task_id", taskID),
+			zap.String("task_environment_id", envID),
+			zap.Error(err))
+		return nil
+	}
+	sort.SliceStable(sessions, func(i, j int) bool {
+		if !sessions[i].StartedAt.Equal(sessions[j].StartedAt) {
+			return sessions[i].StartedAt.After(sessions[j].StartedAt)
+		}
+		if !sessions[i].UpdatedAt.Equal(sessions[j].UpdatedAt) {
+			return sessions[i].UpdatedAt.After(sessions[j].UpdatedAt)
+		}
+		return sessions[i].ID > sessions[j].ID
+	})
+	for _, session := range sessions {
+		if envID != "" && session.TaskEnvironmentID != "" && session.TaskEnvironmentID != envID {
+			continue
+		}
+		worktrees, err := e.repo.ListTaskSessionWorktrees(ctx, session.ID)
+		if err != nil {
+			e.logger.Warn("failed to list session worktrees for reuse",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.Error(err))
+			continue
+		}
+		result := sessionWorktreeIDsByKey(worktrees)
+		if len(result) > 0 {
+			return result
+		}
+	}
+	return nil
+}
+
+func sessionWorktreeIDsByKey(worktrees []*models.TaskSessionWorktree) map[repositoryWorktreeKey]string {
+	result := make(map[repositoryWorktreeKey]string, len(worktrees))
+	for _, wt := range worktrees {
+		if wt.RepositoryID == "" || wt.WorktreeID == "" {
+			continue
+		}
+		key := repositoryWorktreeKey{
+			repositoryID: wt.RepositoryID,
+			branchSlug:   worktree.SanitizeBranchSlug(wt.BranchSlug),
+		}
+		result[key] = wt.WorktreeID
+	}
+	return result
 }
 
 func (e *Executor) latestExecutorRunningForEnvironment(ctx context.Context, taskID string, env *models.TaskEnvironment) *models.ExecutorRunning {

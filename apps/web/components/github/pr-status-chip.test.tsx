@@ -9,9 +9,29 @@ import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS } from "./pr-ci-popover";
 import type { AppState } from "@/lib/state/store";
 import type { TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
 
-const isMobileMock = vi.fn(() => false);
-vi.mock("@/hooks/use-mobile", () => ({
-  useIsMobile: () => isMobileMock(),
+const AUTO_FIX_BADGE_TESTID = "pr-status-auto-fix-chip";
+
+const testConstants = vi.hoisted(() => ({
+  defaultCIFixPrompt: "Default CI fix prompt",
+}));
+
+const responsiveMock = vi.hoisted(() => ({
+  breakpoint: "desktop" as "mobile" | "tablet" | "compactDesktop" | "desktop",
+  isFinePointer: true,
+}));
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => ({
+    breakpoint: responsiveMock.breakpoint,
+    isMobile: responsiveMock.breakpoint === "mobile",
+    isTablet: responsiveMock.breakpoint === "tablet",
+    isDesktop:
+      responsiveMock.breakpoint === "compactDesktop" || responsiveMock.breakpoint === "desktop",
+    isCompactDesktop: responsiveMock.breakpoint === "compactDesktop",
+    isFullDesktop: responsiveMock.breakpoint === "desktop",
+    isFinePointer: responsiveMock.isFinePointer,
+    usesDesktopWorkbench:
+      responsiveMock.breakpoint === "compactDesktop" || responsiveMock.breakpoint === "desktop",
+  }),
 }));
 
 vi.mock("@/lib/api/domains/github-api", async (importOriginal) => {
@@ -24,7 +44,7 @@ vi.mock("@/lib/api/domains/github-api", async (importOriginal) => {
       auto_fix_enabled: false,
       auto_merge_enabled: false,
       auto_fix_prompt_override: null,
-      effective_auto_fix_prompt: "Default CI fix prompt",
+      effective_auto_fix_prompt: testConstants.defaultCIFixPrompt,
       using_default_prompt: true,
       updated_at: "2026-06-18T10:00:00Z",
       pr_states: [],
@@ -86,7 +106,7 @@ function makeCIOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCI
     auto_fix_enabled: false,
     auto_merge_enabled: false,
     auto_fix_prompt_override: null,
-    effective_auto_fix_prompt: "Default CI fix prompt",
+    effective_auto_fix_prompt: testConstants.defaultCIFixPrompt,
     using_default_prompt: true,
     updated_at: "2026-06-18T10:00:00Z",
     pr_states: [],
@@ -95,17 +115,18 @@ function makeCIOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCI
 }
 
 beforeEach(() => {
-  isMobileMock.mockReturnValue(false);
+  responsiveMock.breakpoint = "desktop";
+  responsiveMock.isFinePointer = true;
 });
 
 afterEach(() => {
   cleanup();
-  isMobileMock.mockReset();
 });
 
 const CHIP_TESTID = "pr-status-chip";
 const ATTR_PR_NUMBER = "data-pr-number";
 const ATTR_STATUS = "data-status";
+const ATTR_READY_TO_MERGE = "data-pr-ready-to-merge";
 const DRAWER_SELECTOR = "[data-testid='pr-status-chip-drawer']";
 const seededState: Partial<AppState> = {
   taskPRs: { byTaskId: { "task-1": [makePR()] } },
@@ -156,7 +177,10 @@ describe("PRStatusChip", () => {
 });
 
 describe("PRStatusChip desktop branch", () => {
-  beforeEach(() => isMobileMock.mockReturnValue(false));
+  beforeEach(() => {
+    responsiveMock.breakpoint = "desktop";
+    responsiveMock.isFinePointer = true;
+  });
 
   it("renders the chip button without a Drawer", () => {
     renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
@@ -164,6 +188,18 @@ describe("PRStatusChip desktop branch", () => {
     expect(chip).toBeTruthy();
     // The chip's HoverCard popover is hover-only on desktop; clicking the
     // chip must not surface the mobile Drawer testid.
+    act(() => {
+      fireEvent.click(chip);
+    });
+    expect(document.querySelector(DRAWER_SELECTOR)).toBeNull();
+  });
+
+  it("keeps the hovercard path on fine-pointer tablets", () => {
+    responsiveMock.breakpoint = "tablet";
+    responsiveMock.isFinePointer = true;
+
+    renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
+    const chip = screen.getByTestId(CHIP_TESTID);
     act(() => {
       fireEvent.click(chip);
     });
@@ -181,7 +217,7 @@ describe("PRStatusChip desktop branch", () => {
     expect(chip.getAttribute(ATTR_PR_NUMBER)).toBe("42");
     expect(chip.getAttribute("data-pr-state")).toBe("open");
     expect(chip.getAttribute(ATTR_STATUS)).toBe("passed");
-    expect(chip.getAttribute("data-pr-ready-to-merge")).toBe("true");
+    expect(chip.getAttribute(ATTR_READY_TO_MERGE)).toBe("true");
   });
 
   it("shows automation badges when auto-fix or auto-merge are enabled", () => {
@@ -199,16 +235,19 @@ describe("PRStatusChip desktop branch", () => {
       },
       <PRStatusChip taskId="task-1" />,
     );
-    expect(screen.getByTestId("pr-status-auto-fix-chip").textContent).toBe("Auto-fix");
+    expect(screen.getByTestId(AUTO_FIX_BADGE_TESTID).textContent).toBe("Auto-fix 0/10");
     expect(screen.getByTestId("pr-status-auto-merge-chip").textContent).toBe("Auto-merge");
     expect(screen.getByTestId(CHIP_TESTID).getAttribute("aria-label")).toBe(
-      "Pull request #42 CI status, auto-fix enabled, auto-merge enabled",
+      "Pull request #42 CI status, auto-fix enabled 0 of 10 rounds used, auto-merge enabled",
     );
   });
 });
 
 describe("PRStatusChip mobile branch", () => {
-  beforeEach(() => isMobileMock.mockReturnValue(true));
+  beforeEach(() => {
+    responsiveMock.breakpoint = "mobile";
+    responsiveMock.isFinePointer = false;
+  });
 
   it("renders the chip closed and opens the drawer on click", () => {
     renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
@@ -236,7 +275,7 @@ describe("PRStatusChip mobile branch", () => {
     expect(chip.getAttribute(ATTR_PR_NUMBER)).toBe("42");
     expect(chip.getAttribute("data-pr-state")).toBe("open");
     expect(chip.getAttribute(ATTR_STATUS)).toBe("passed");
-    expect(chip.getAttribute("data-pr-ready-to-merge")).toBe("true");
+    expect(chip.getAttribute(ATTR_READY_TO_MERGE)).toBe("true");
   });
 
   it("reflects a failed PR with data-status='failed'", () => {
@@ -260,10 +299,10 @@ describe("PRStatusChip mobile branch", () => {
       },
       <PRStatusChip taskId="task-1" />,
     );
-    expect(screen.getByTestId("pr-status-auto-fix-chip").textContent).toBe("Auto-fix");
+    expect(screen.getByTestId(AUTO_FIX_BADGE_TESTID).textContent).toBe("Auto-fix 0/10");
     expect(screen.queryByTestId("pr-status-auto-merge-chip")).toBeNull();
     expect(screen.getByTestId(CHIP_TESTID).getAttribute("aria-label")).toBe(
-      "Pull request #42 CI status, auto-fix enabled",
+      "Pull request #42 CI status, auto-fix enabled 0 of 10 rounds used",
     );
   });
 
@@ -298,6 +337,97 @@ describe("PRStatusChip mobile branch", () => {
   });
 });
 
+describe("PRStatusChip touch tablet branch", () => {
+  beforeEach(() => {
+    responsiveMock.breakpoint = "tablet";
+    responsiveMock.isFinePointer = false;
+  });
+
+  it("opens the drawer instead of the hovercard on coarse-pointer tablets", () => {
+    renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
+    expect(document.querySelector(DRAWER_SELECTOR)).toBeNull();
+
+    act(() => {
+      fireEvent.click(screen.getByTestId(CHIP_TESTID));
+    });
+
+    expect(document.querySelector(DRAWER_SELECTOR)).not.toBeNull();
+    expect(document.querySelector("[data-testid='pr-topbar-popover-inner']")).not.toBeNull();
+    expect(screen.getByTestId("pr-popover-title").textContent).toBe("#42 Test PR");
+  });
+});
+
+describe("PRStatusChip — aggregate checks", () => {
+  it("treats aggregate all-green checks as passed when checks_state is empty", () => {
+    renderWithStore(
+      {
+        taskPRs: {
+          byTaskId: {
+            "task-1": [makePR({ checks_state: "", checks_total: 39, checks_passing: 39 })],
+          },
+        },
+      },
+      <PRStatusChip taskId="task-1" />,
+    );
+    const chip = screen.getByTestId(CHIP_TESTID);
+    expect(chip.getAttribute(ATTR_STATUS)).toBe("passed");
+    expect(chip.getAttribute(ATTR_READY_TO_MERGE)).toBe("false");
+  });
+
+  it("keeps aggregate all-green checks in-progress when required reviews are unmet", () => {
+    renderWithStore(
+      {
+        taskPRs: {
+          byTaskId: {
+            "task-1": [
+              makePR({
+                checks_state: "",
+                checks_total: 10,
+                checks_passing: 10,
+                required_reviews: 2,
+                review_count: 1,
+                pending_review_count: 1,
+              }),
+            ],
+          },
+        },
+      },
+      <PRStatusChip taskId="task-1" />,
+    );
+    const chip = screen.getByTestId(CHIP_TESTID);
+    expect(chip.getAttribute(ATTR_STATUS)).toBe("in_progress");
+    expect(chip.getAttribute(ATTR_READY_TO_MERGE)).toBe("false");
+  });
+
+  it("treats aggregate incomplete checks as in-progress when checks_state is empty", () => {
+    renderWithStore(
+      {
+        taskPRs: {
+          byTaskId: {
+            "task-1": [makePR({ checks_state: "", checks_total: 15, checks_passing: 6 })],
+          },
+        },
+      },
+      <PRStatusChip taskId="task-1" />,
+    );
+    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("in_progress");
+  });
+
+  it("treats aggregate zero passing checks as in-progress when checks_state is empty", () => {
+    renderWithStore(
+      {
+        taskPRs: {
+          byTaskId: {
+            "task-1": [makePR({ checks_state: "", checks_total: 3, checks_passing: 0 })],
+          },
+        },
+      },
+      <PRStatusChip taskId="task-1" />,
+    );
+    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("in_progress");
+  });
+});
+
 describe("PRStatusChip — mergeability", () => {
   it("is 'conflict' (not 'passed') for a dirty PR even with green checks + approval", () => {
     // Regression: the chip read mergeable_state-blind and showed the green
@@ -308,7 +438,7 @@ describe("PRStatusChip — mergeability", () => {
     );
     const chip = screen.getByTestId(CHIP_TESTID);
     expect(chip.getAttribute(ATTR_STATUS)).toBe("conflict");
-    expect(chip.getAttribute("data-pr-ready-to-merge")).toBe("false");
+    expect(chip.getAttribute(ATTR_READY_TO_MERGE)).toBe("false");
   });
 
   it("is 'behind' for a behind-base PR that is otherwise green", () => {
@@ -328,6 +458,8 @@ describe("PRStatusChip — mergeability", () => {
               makePR({
                 mergeable_state: "blocked",
                 checks_state: "",
+                checks_total: 0,
+                checks_passing: 0,
               }),
             ],
           },
@@ -363,7 +495,7 @@ describe("PRStatusChip — mergeability", () => {
     expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("in_progress");
   });
 
-  it("does not show in-progress for skipped-only checks", () => {
+  it("shows in-progress while checks_state is pending even if aggregate counts are all passing", () => {
     renderWithStore(
       {
         taskPRs: {
@@ -374,12 +506,15 @@ describe("PRStatusChip — mergeability", () => {
       },
       <PRStatusChip taskId="task-1" />,
     );
-    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("neutral");
+    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("in_progress");
   });
 });
 
 describe("PRStatusChip CI automation mobile parity", () => {
-  beforeEach(() => isMobileMock.mockReturnValue(true));
+  beforeEach(() => {
+    responsiveMock.breakpoint = "mobile";
+    responsiveMock.isFinePointer = false;
+  });
 
   it("renders controls and prompt editing inside the drawer", async () => {
     renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
@@ -477,7 +612,10 @@ describe("PRStatusChip — multiple PRs", () => {
   });
 
   describe("mobile drawer", () => {
-    beforeEach(() => isMobileMock.mockReturnValue(true));
+    beforeEach(() => {
+      responsiveMock.breakpoint = "mobile";
+      responsiveMock.isFinePointer = false;
+    });
 
     it("opens a drawer with the tabbed multi-PR popover", () => {
       renderWithStore(multiState(TWO_OPEN), <PRStatusChip taskId="task-1" />);

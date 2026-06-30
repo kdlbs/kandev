@@ -43,7 +43,7 @@ type sshSessionState struct {
 	remoteDir string
 }
 
-// SSHExecutor implements ExecutorBackend for SSH-reachable Linux hosts.
+// SSHExecutor implements ExecutorBackend for SSH-reachable Linux and macOS hosts.
 //
 // Each session owns its own *ssh.Client (no shared pool). One SSH connection
 // per session keeps teardown simple — closing the executor instance closes
@@ -140,7 +140,7 @@ func (r *SSHExecutor) targetFromMetadata(md map[string]interface{}) (*SSHTarget,
 		PinnedFingerprint: getMetadataString(md, MetadataKeySSHHostFingerprint),
 	}
 	if cfg.PinnedFingerprint == "" {
-		return nil, errors.New("ssh executor: host_fingerprint is required — re-run Test Connection in settings to trust the host")
+		return nil, errors.New("ssh executor: host_fingerprint is required — open the SSH executor connection settings, run Test connection, and trust the host")
 	}
 	return ResolveSSHTarget(cfg)
 }
@@ -186,12 +186,12 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	}()
 	r.report(req.OnProgress, "Connecting to SSH host", PrepareStepCompleted, "")
 
-	agentctlBin, err := r.prepareRemoteHost(ctx, client, req)
+	agentctlBin, platform, err := r.prepareRemoteHost(ctx, client, req)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := r.preflightAgentBinary(ctx, client, req); err != nil {
+	if err := r.preflightAgentBinary(ctx, client, req, platform); err != nil {
 		return nil, err
 	}
 
@@ -200,9 +200,9 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	if err != nil {
 		return nil, err
 	}
-	r.maybeUploadCredentials(ctx, client, req)
+	r.maybeUploadCredentials(ctx, client, req, platform)
 
-	port, pid, fwd, err := r.startAndForwardAgentctl(ctx, client, agentctlBin, taskDir, sessionDir, req)
+	port, pid, fwd, err := r.startAndForwardAgentctl(ctx, client, agentctlBin, taskDir, sessionDir, req, platform)
 	if err != nil {
 		return nil, err
 	}
@@ -224,25 +224,29 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 // prepareRemoteHost runs the steps that are independent of any particular
 // task: detect remote OS/arch and ensure the agentctl binary is on the host.
 // Returns the resolved remote agentctl path.
-func (r *SSHExecutor) prepareRemoteHost(ctx context.Context, client *ssh.Client, req *ExecutorCreateRequest) (string, error) {
+func (r *SSHExecutor) prepareRemoteHost(
+	ctx context.Context,
+	client *ssh.Client,
+	req *ExecutorCreateRequest,
+) (string, SSHRemotePlatform, error) {
 	info, err := detectRemoteInfo(ctx, client)
 	if err != nil {
 		r.report(req.OnProgress, "Detecting remote OS", PrepareStepFailed, err.Error())
-		return "", fmt.Errorf("ssh: detect remote: %w", err)
+		return "", SSHRemotePlatform{}, fmt.Errorf("ssh: detect remote: %w", err)
 	}
-	if err := requireSupportedArch(info.Arch); err != nil {
+	if err := requireSupportedRemotePlatform(info.Platform); err != nil {
 		r.report(req.OnProgress, "Detecting remote OS", PrepareStepFailed, err.Error())
-		return "", err
+		return "", info.Platform, err
 	}
 	r.report(req.OnProgress, "Detecting remote OS", PrepareStepCompleted, info.UnameAll)
 
-	agentctlBin, err := ensureAgentctlOnHost(ctx, client, r.agentctlResolver, r.logger)
+	agentctlBin, err := ensureAgentctlOnHost(ctx, client, r.agentctlResolver, info.Platform, r.logger)
 	if err != nil {
 		r.report(req.OnProgress, "Uploading agent controller", PrepareStepFailed, err.Error())
-		return "", err
+		return "", info.Platform, err
 	}
 	r.report(req.OnProgress, "Uploading agent controller", PrepareStepCompleted, "")
-	return agentctlBin, nil
+	return agentctlBin, info.Platform, nil
 }
 
 // prepareRemoteDirs makes <workdir>/tasks/<taskDir> and <taskDir>/.kandev/sessions/<sid>.
@@ -274,9 +278,13 @@ func (r *SSHExecutor) prepareRemoteDirs(ctx context.Context, client *ssh.Client,
 //  3. The SSH executor's clients (agent stream, workspace, etc.) all talk to
 //     that sub-server, so the local port forward points there.
 func (r *SSHExecutor) startAndForwardAgentctl(
-	ctx context.Context, client *ssh.Client, agentctlBin, taskDir, sessionDir string, req *ExecutorCreateRequest,
+	ctx context.Context,
+	client *ssh.Client,
+	agentctlBin, taskDir, sessionDir string,
+	req *ExecutorCreateRequest,
+	platform SSHRemotePlatform,
 ) (int, int, *SSHPortForwarder, error) {
-	shell := sshShellFromMetadata(req.Metadata)
+	shell := sshShellForRemote(req.Metadata, platform)
 	controlPort, pid, err := startRemoteAgentctl(ctx, client, shell, agentctlBin, taskDir, sessionDir, r.logger)
 	if err != nil {
 		r.report(req.OnProgress, "Starting agent controller", PrepareStepFailed, err.Error())
@@ -551,8 +559,13 @@ func (r *SSHExecutor) IsAlwaysResumable() bool         { return true }
 // one remote-credentials method (or remote_auth_secrets / setup-script env
 // vars). A failure here doesn't abort the launch — credentials are
 // best-effort and missing ones surface later as the agent's own auth error.
-func (r *SSHExecutor) maybeUploadCredentials(ctx context.Context, client *ssh.Client, req *ExecutorCreateRequest) {
-	if err := r.uploadCredentials(ctx, client, req); err != nil {
+func (r *SSHExecutor) maybeUploadCredentials(
+	ctx context.Context,
+	client *ssh.Client,
+	req *ExecutorCreateRequest,
+	platform SSHRemotePlatform,
+) {
+	if err := r.uploadCredentials(ctx, client, req, platform); err != nil {
 		r.logger.Warn(
 			"ssh executor: credential upload failed; launch will proceed but agent may not authenticate",
 			zap.String("task_id", req.TaskID),
@@ -574,12 +587,17 @@ func (r *SSHExecutor) maybeUploadCredentials(ctx context.Context, client *ssh.Cl
 // The first token is the binary; we shell out to POSIX `command -v` on the
 // remote and treat empty stdout as "missing". On miss we surface the
 // agent's name + InstallScript() so the error is actionable in the UI.
-func (r *SSHExecutor) preflightAgentBinary(ctx context.Context, client *ssh.Client, req *ExecutorCreateRequest) error {
+func (r *SSHExecutor) preflightAgentBinary(
+	ctx context.Context,
+	client *ssh.Client,
+	req *ExecutorCreateRequest,
+	platform SSHRemotePlatform,
+) error {
 	if req.AgentConfig == nil {
 		return nil
 	}
 	stepName := "Verifying agent binary"
-	shell := sshShellFromMetadata(req.Metadata)
+	shell := sshShellForRemote(req.Metadata, platform)
 
 	// Prefer the agent's standalone CLI when present on the remote: running it
 	// directly skips the per-launch `npx` registry round-trip. A hit is recorded
@@ -655,6 +673,13 @@ func (r *SSHExecutor) probeNativeBinary(ctx context.Context, client *ssh.Client,
 // one place.
 func sshShellFromMetadata(md map[string]interface{}) string {
 	return strings.TrimSpace(getMetadataString(md, MetadataKeySSHShell))
+}
+
+func sshShellForRemote(md map[string]interface{}, platform SSHRemotePlatform) string {
+	if shell := sshShellFromMetadata(md); shell != "" {
+		return shell
+	}
+	return SSHDefaultShellForPlatform(platform)
 }
 
 // agentIdentity is the slice of agents.Agent that formatMissingAgentBinaryError

@@ -153,6 +153,9 @@ func applyServiceOverrides(opts *service.ServiceOptions, o service.ServiceOption
 	if o.TaskWorkspace != nil {
 		opts.TaskWorkspace = o.TaskWorkspace
 	}
+	if o.WorkspaceGroupCleaner != nil {
+		opts.WorkspaceGroupCleaner = o.WorkspaceGroupCleaner
+	}
 	if o.TaskCreator != nil {
 		opts.TaskCreator = o.TaskCreator
 	}

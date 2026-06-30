@@ -813,9 +813,15 @@ func TestStartCreatedSession_EmptyProfileFallsBackToWorkflowDefault(t *testing.T
 // mockMessageCreator implements MessageCreator for testing.
 // Only CreateUserMessage is tracked; all other methods are no-op stubs.
 type mockMessageCreator struct {
-	userMessages    []mockUserMessage
-	sessionMessages []mockSessionMessage
-	userMessageErr  error
+	userMessages       []mockUserMessage
+	sessionMessages    []mockSessionMessage
+	agentMessages      []mockAgentMessage
+	agentMessageWrites int
+	agentStreamWrites  int
+	thinkingWrites     int
+	toolCallWrites     int
+	toolUpdateWrites   int
+	userMessageErr     error
 }
 
 type mockUserMessage struct {
@@ -829,6 +835,10 @@ type mockSessionMessage struct {
 	requestsInput                                   bool
 }
 
+type mockAgentMessage struct {
+	taskID, content, sessionID, turnID string
+}
+
 func (m *mockMessageCreator) CreateUserMessage(_ context.Context, taskID, content, sessionID, turnID string, metadata map[string]interface{}) error {
 	if m.userMessageErr != nil {
 		return m.userMessageErr
@@ -837,15 +847,19 @@ func (m *mockMessageCreator) CreateUserMessage(_ context.Context, taskID, conten
 	return nil
 }
 
-func (m *mockMessageCreator) CreateAgentMessage(context.Context, string, string, string, string) error {
+func (m *mockMessageCreator) CreateAgentMessage(_ context.Context, taskID, content, sessionID, turnID string) error {
+	m.agentMessages = append(m.agentMessages, mockAgentMessage{taskID, content, sessionID, turnID})
+	m.agentMessageWrites++
 	return nil
 }
 
 func (m *mockMessageCreator) CreateToolCallMessage(context.Context, string, string, string, string, string, string, string, *streams.NormalizedPayload) error {
+	m.toolCallWrites++
 	return nil
 }
 
 func (m *mockMessageCreator) UpdateToolCallMessage(context.Context, string, string, string, string, string, string, string, string, string, *streams.NormalizedPayload) error {
+	m.toolUpdateWrites++
 	return nil
 }
 
@@ -871,18 +885,22 @@ func (m *mockMessageCreator) UpdatePermissionMessage(context.Context, string, st
 }
 
 func (m *mockMessageCreator) CreateAgentMessageStreaming(context.Context, string, string, string, string, string) error {
+	m.agentStreamWrites++
 	return nil
 }
 
 func (m *mockMessageCreator) AppendAgentMessage(context.Context, string, string) error {
+	m.agentStreamWrites++
 	return nil
 }
 
 func (m *mockMessageCreator) CreateThinkingMessageStreaming(context.Context, string, string, string, string, string) error {
+	m.thinkingWrites++
 	return nil
 }
 
 func (m *mockMessageCreator) AppendThinkingMessage(context.Context, string, string) error {
+	m.thinkingWrites++
 	return nil
 }
 func (m *mockMessageCreator) InvalidateModelCache(string) {}

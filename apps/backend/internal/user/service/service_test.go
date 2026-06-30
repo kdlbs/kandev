@@ -1,12 +1,20 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/user/models"
+	"github.com/kandev/kandev/internal/user/store"
+	"go.uber.org/zap"
 )
 
 func ptr[T any](v T) *T { return &v }
@@ -553,12 +561,204 @@ func TestApplyUserPreferenceBlobs(t *testing.T) {
 	if settings.TaskCreateLastUsed.RepositoryID != "repo-1" {
 		t.Fatalf("expected repository id to be preserved, got %q", settings.TaskCreateLastUsed.RepositoryID)
 	}
-	if settings.TaskCreateLastUsed.Branch != "feature" {
-		t.Fatalf("expected branch to update, got %q", settings.TaskCreateLastUsed.Branch)
+	if settings.TaskCreateLastUsed.Branch != "main" {
+		t.Fatalf("expected task-create last-used to stay unchanged, got %q", settings.TaskCreateLastUsed.Branch)
 	}
 	if string(settings.GitHubSavedPresets) != `[{"id":"p1"}]` {
 		t.Fatalf("expected GitHub presets to apply, got %s", string(settings.GitHubSavedPresets))
 	}
+}
+
+func TestUpdateUserSettingsCombinesSettingsAndTaskCreatePatch(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	patch := models.TaskCreateLastUsed{
+		RepositoryID:   "repo-2",
+		Branch:         "feature",
+		AgentProfileID: "agent-2",
+	}
+	updatedSettings := &models.UserSettings{
+		UserID:           store.DefaultUserID,
+		TerminalFontSize: 16,
+		TaskCreateLastUsed: models.TaskCreateLastUsed{
+			RepositoryID:   "repo-2",
+			Branch:         "feature",
+			AgentProfileID: "agent-2",
+		},
+	}
+	repo := &recordingUserRepository{
+		getSettings:        &models.UserSettings{UserID: store.DefaultUserID},
+		preservingSettings: updatedSettings,
+		updateSettings:     updatedSettings,
+	}
+	eventBus := &recordingEventBus{}
+	svc := NewService(repo, eventBus, log)
+
+	settings, err := svc.UpdateUserSettings(context.Background(), &UpdateUserSettingsRequest{
+		TerminalFontSize:   ptr(16),
+		TaskCreateLastUsed: &patch,
+	})
+	if err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+
+	if settings != updatedSettings {
+		t.Fatalf("expected returned settings from preserving writer, got %+v", settings)
+	}
+	if repo.upsertUserSettingsPreservingLastUsedCalls != 1 {
+		t.Fatalf("expected one preserving settings write, got %d", repo.upsertUserSettingsPreservingLastUsedCalls)
+	}
+	if repo.updateCalls != 0 {
+		t.Fatalf("expected task-create patch to be folded into settings write, got %d separate update calls", repo.updateCalls)
+	}
+	if repo.preservingPatch == nil || *repo.preservingPatch != patch {
+		t.Fatalf("expected preserving write patch %+v, got %+v", patch, repo.preservingPatch)
+	}
+	if len(eventBus.publishedEvents) != 1 {
+		t.Fatalf("expected one settings event, got %d", len(eventBus.publishedEvents))
+	}
+}
+
+func TestClearDefaultEditorIDPreservesTaskCreateLastUsed(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	updatedSettings := &models.UserSettings{
+		UserID:          store.DefaultUserID,
+		DefaultEditorID: "",
+		TaskCreateLastUsed: models.TaskCreateLastUsed{
+			RepositoryID: "repo-2",
+			Branch:       "feature",
+		},
+	}
+	repo := &recordingUserRepository{
+		getSettings: &models.UserSettings{
+			UserID:          store.DefaultUserID,
+			DefaultEditorID: "editor-1",
+			TaskCreateLastUsed: models.TaskCreateLastUsed{
+				RepositoryID: "repo-1",
+				Branch:       "main",
+			},
+		},
+		preservingSettings: updatedSettings,
+	}
+	eventBus := &recordingEventBus{}
+	svc := NewService(repo, eventBus, log)
+
+	if err := svc.ClearDefaultEditorID(context.Background(), "editor-1"); err != nil {
+		t.Fatalf("ClearDefaultEditorID: %v", err)
+	}
+
+	if repo.upsertUserSettingsPreservingLastUsedCalls != 1 {
+		t.Fatalf("expected preserving settings upsert, got %d calls", repo.upsertUserSettingsPreservingLastUsedCalls)
+	}
+	if len(eventBus.publishedEvents) != 1 {
+		t.Fatalf("expected one settings event, got %d", len(eventBus.publishedEvents))
+	}
+	data, ok := eventBus.publishedEvents[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected event data map, got %T", eventBus.publishedEvents[0].Data)
+	}
+	if data["task_create_last_used"] != updatedSettings.TaskCreateLastUsed {
+		t.Fatalf("expected event to include preserved task-create state %+v, got %+v", updatedSettings.TaskCreateLastUsed, data["task_create_last_used"])
+	}
+}
+
+func TestRecordTaskCreateLastUsed(t *testing.T) {
+	newTestService := func(repo *recordingUserRepository, eventBus *recordingEventBus) *Service {
+		log, err := logger.NewFromZap(zap.NewNop())
+		if err != nil {
+			t.Fatalf("logger.NewFromZap: %v", err)
+		}
+		return NewService(repo, eventBus, log)
+	}
+
+	t.Run("empty patch skips repo update and publish", func(t *testing.T) {
+		repo := &recordingUserRepository{}
+		eventBus := &recordingEventBus{}
+		svc := newTestService(repo, eventBus)
+
+		if err := svc.RecordTaskCreateLastUsed(context.Background(), models.TaskCreateLastUsed{}); err != nil {
+			t.Fatalf("RecordTaskCreateLastUsed: %v", err)
+		}
+		if repo.updateCalls != 0 {
+			t.Fatalf("expected no repo update, got %d", repo.updateCalls)
+		}
+		if len(eventBus.publishedEvents) != 0 {
+			t.Fatalf("expected no settings event, got %d", len(eventBus.publishedEvents))
+		}
+	})
+
+	t.Run("non-empty patch updates repo and publishes settings event", func(t *testing.T) {
+		patch := models.TaskCreateLastUsed{
+			RepositoryID:      "repo-1",
+			Branch:            "feature",
+			AgentProfileID:    "agent-1",
+			ExecutorProfileID: "exec-1",
+		}
+		updatedSettings := &models.UserSettings{
+			UserID:    store.DefaultUserID,
+			UpdatedAt: time.Unix(123, 0).UTC(),
+			TaskCreateLastUsed: models.TaskCreateLastUsed{
+				RepositoryID: "repo-1",
+				Branch:       "feature",
+			},
+		}
+		repo := &recordingUserRepository{updateSettings: updatedSettings}
+		eventBus := &recordingEventBus{}
+		svc := newTestService(repo, eventBus)
+
+		if err := svc.RecordTaskCreateLastUsed(context.Background(), patch); err != nil {
+			t.Fatalf("RecordTaskCreateLastUsed: %v", err)
+		}
+		if repo.updateCalls != 1 {
+			t.Fatalf("expected one update call, got %d", repo.updateCalls)
+		}
+		if repo.updateUserID != store.DefaultUserID {
+			t.Fatalf("expected update user id %q, got %q", store.DefaultUserID, repo.updateUserID)
+		}
+		if repo.updatePatch != patch {
+			t.Fatalf("expected patch %+v, got %+v", patch, repo.updatePatch)
+		}
+		if len(eventBus.publishedEvents) != 1 {
+			t.Fatalf("expected one published event, got %d", len(eventBus.publishedEvents))
+		}
+		if eventBus.publishedSubjects[0] != events.UserSettingsUpdated {
+			t.Fatalf("expected subject %q, got %q", events.UserSettingsUpdated, eventBus.publishedSubjects[0])
+		}
+		published := eventBus.publishedEvents[0]
+		if published.Type != events.UserSettingsUpdated {
+			t.Fatalf("expected event type %q, got %q", events.UserSettingsUpdated, published.Type)
+		}
+		data, ok := published.Data.(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected event data map, got %T", published.Data)
+		}
+		if data["task_create_last_used"] != updatedSettings.TaskCreateLastUsed {
+			t.Fatalf("expected event task-create state %+v, got %+v", updatedSettings.TaskCreateLastUsed, data["task_create_last_used"])
+		}
+	})
+
+	t.Run("repo error is propagated without publishing", func(t *testing.T) {
+		repoErr := errors.New("update failed")
+		repo := &recordingUserRepository{updateErr: repoErr}
+		eventBus := &recordingEventBus{}
+		svc := newTestService(repo, eventBus)
+
+		err := svc.RecordTaskCreateLastUsed(context.Background(), models.TaskCreateLastUsed{Branch: "feature"})
+		if !errors.Is(err, repoErr) {
+			t.Fatalf("expected repo error, got %v", err)
+		}
+		if repo.updateCalls != 1 {
+			t.Fatalf("expected one update call, got %d", repo.updateCalls)
+		}
+		if len(eventBus.publishedEvents) != 0 {
+			t.Fatalf("expected no events, got %d", len(eventBus.publishedEvents))
+		}
+	})
 }
 
 func TestApplyUserPreferenceBlobsValidation(t *testing.T) {
@@ -603,6 +803,112 @@ func TestApplyUserPreferenceBlobsValidation(t *testing.T) {
 			t.Fatalf("expected explicit null to clear blob, got %s", string(settings.JiraSavedViews))
 		}
 	})
+}
+
+type recordingUserRepository struct {
+	getUserCalls                              int
+	getDefaultUserCalls                       int
+	getUserSettingsCalls                      int
+	upsertUserSettingsPreservingLastUsedCalls int
+	updateCalls                               int
+	updateUserID                              string
+	updatePatch                               models.TaskCreateLastUsed
+	updateSettings                            *models.UserSettings
+	updateErr                                 error
+	getSettings                               *models.UserSettings
+	getErr                                    error
+	preservingSettings                        *models.UserSettings
+	preservingPatch                           *models.TaskCreateLastUsed
+	preservingErr                             error
+	closeCalls                                int
+}
+
+func (r *recordingUserRepository) GetUser(context.Context, string) (*models.User, error) {
+	r.getUserCalls++
+	return nil, errors.New("unexpected GetUser call")
+}
+
+func (r *recordingUserRepository) GetDefaultUser(context.Context) (*models.User, error) {
+	r.getDefaultUserCalls++
+	return nil, errors.New("unexpected GetDefaultUser call")
+}
+
+func (r *recordingUserRepository) GetUserSettings(context.Context, string) (*models.UserSettings, error) {
+	r.getUserSettingsCalls++
+	if r.getErr != nil {
+		return nil, r.getErr
+	}
+	if r.getSettings != nil {
+		return r.getSettings, nil
+	}
+	return nil, errors.New("unexpected GetUserSettings call")
+}
+
+func (r *recordingUserRepository) UpsertUserSettingsPreservingTaskCreateLastUsed(
+	_ context.Context,
+	_ *models.UserSettings,
+	patch *models.TaskCreateLastUsed,
+) (*models.UserSettings, error) {
+	r.upsertUserSettingsPreservingLastUsedCalls++
+	if patch != nil {
+		patchCopy := *patch
+		r.preservingPatch = &patchCopy
+	}
+	if r.preservingErr != nil {
+		return nil, r.preservingErr
+	}
+	if r.preservingSettings != nil {
+		return r.preservingSettings, nil
+	}
+	return nil, errors.New("unexpected UpsertUserSettingsPreservingTaskCreateLastUsed call")
+}
+
+func (r *recordingUserRepository) UpdateTaskCreateLastUsed(
+	_ context.Context,
+	userID string,
+	patch models.TaskCreateLastUsed,
+) (*models.UserSettings, error) {
+	r.updateCalls++
+	r.updateUserID = userID
+	r.updatePatch = patch
+	if r.updateErr != nil {
+		return nil, r.updateErr
+	}
+	return r.updateSettings, nil
+}
+
+func (r *recordingUserRepository) Close() error {
+	r.closeCalls++
+	return nil
+}
+
+type recordingEventBus struct {
+	publishedSubjects []string
+	publishedEvents   []*bus.Event
+}
+
+func (b *recordingEventBus) Publish(_ context.Context, subject string, event *bus.Event) error {
+	b.publishedSubjects = append(b.publishedSubjects, subject)
+	b.publishedEvents = append(b.publishedEvents, event)
+	return nil
+}
+
+func (b *recordingEventBus) Subscribe(string, bus.EventHandler) (bus.Subscription, error) {
+	return nil, errors.New("unexpected Subscribe call")
+}
+
+func (b *recordingEventBus) QueueSubscribe(string, string, bus.EventHandler) (bus.Subscription, error) {
+	return nil, errors.New("unexpected QueueSubscribe call")
+}
+
+func (b *recordingEventBus) Request(context.Context, string, *bus.Event, time.Duration) (*bus.Event, error) {
+	return nil, errors.New("unexpected Request call")
+}
+
+func (b *recordingEventBus) Close() {}
+
+func (b *recordingEventBus) IsConnected() bool {
+	return true
 }
 
 func TestApplyVoiceMode(t *testing.T) {

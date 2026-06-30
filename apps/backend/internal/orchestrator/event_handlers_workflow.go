@@ -360,10 +360,12 @@ func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.Tas
 		return
 	}
 
-	agentProfileID := s.resolveStepAgentProfile(ctx, step)
+	workflowAgentProfileID := s.resolveStepAgentProfile(ctx, step)
+	agentProfileID := workflowAgentProfileID
 	if agentProfileID == "" {
 		agentProfileID, _ = task.Metadata[models.MetaKeyAgentProfileID].(string)
 	}
+	executorID, _ := task.Metadata[models.MetaKeyExecutorID].(string)
 	executorProfileID, _ := task.Metadata[models.MetaKeyExecutorProfileID].(string)
 	planMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
 
@@ -371,13 +373,18 @@ func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.Tas
 		zap.String("task_id", data.TaskID),
 		zap.String("to_step_id", data.ToStepID),
 		zap.String("agent_profile_id", agentProfileID),
+		zap.String("executor_id", executorID),
 		zap.String("executor_profile_id", executorProfileID),
 		zap.Bool("plan_mode", planMode))
 
 	// Async: event bus delivers synchronously; blocking here → HTTP timeout (see handleTaskMovedWithSession doc).
 	go func() {
 		asyncCtx := context.WithoutCancel(ctx)
-		_, err := s.StartTask(asyncCtx, task.ID, agentProfileID, "", executorProfileID, "", task.Description, data.ToStepID, planMode, true, nil)
+		startAgentProfileID := agentProfileID
+		if workflowAgentProfileID != "" {
+			startAgentProfileID = ""
+		}
+		_, err := s.StartTask(asyncCtx, task.ID, startAgentProfileID, executorID, executorProfileID, "", task.Description, data.ToStepID, planMode, true, nil)
 		if err != nil {
 			s.logger.Error("task.moved: failed to auto-start task",
 				zap.String("task_id", data.TaskID),
@@ -596,8 +603,7 @@ func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, curren
 		s.reviveReusedSession(ctx, existing)
 	}
 
-	// Note: do not stamp created_by here. Reused sessions keep whatever
-	// provenance tag they had when first created.
+	s.tagSessionAsWorkflowSwitched(ctx, existing.ID)
 
 	if err := s.SetPrimarySession(ctx, existing.ID); err != nil {
 		s.logger.Warn("failed to set reused session as primary",
@@ -777,6 +783,9 @@ func (s *Service) maybySwitchSessionForProfile(
 	}
 	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
 	if effectiveProfile == "" || effectiveProfile == session.AgentProfileID {
+		if effectiveProfile != "" {
+			s.tagSessionAsWorkflowSwitched(ctx, session.ID)
+		}
 		if !session.IsPrimary {
 			if err := s.SetPrimarySession(ctx, session.ID); err != nil {
 				s.logger.Warn("failed to preserve session as primary for workflow step",
@@ -2150,12 +2159,13 @@ func (s *Service) applyEngineTransition(
 	// IN_PROGRESS, leaving the spinner spinning in the new column even though
 	// the agent has paused. If the target step's on_enter starts another agent,
 	// setSessionRunning will flip tasks.state back to IN_PROGRESS — the
-	// REVIEW write is a safe intermediate that any active-running follow-up
-	// will overwrite.
+	// REVIEW write is a safe intermediate when no sibling session is already
+	// working; otherwise the task should remain IN_PROGRESS until all active
+	// agent work has paused.
 	if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
 		s.updateTaskSessionState(ctx, taskID, session.ID, models.TaskSessionStateWaitingForInput, "", false, session)
 		session.State = models.TaskSessionStateWaitingForInput
-		s.writeTaskReviewState(ctx, taskID)
+		s.writeTaskReviewState(ctx, taskID, session.ID)
 	}
 
 	// Launch processOnEnter asynchronously to avoid blocking the stream reader goroutine.

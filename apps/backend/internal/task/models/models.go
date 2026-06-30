@@ -59,6 +59,7 @@ type SearchMessagesOptions struct {
 // Task metadata keys used for deferred agent start (e.g., task.moved → handleTaskMovedNoSession).
 const (
 	MetaKeyAgentProfileID    = "agent_profile_id"
+	MetaKeyExecutorID        = "executor_id"
 	MetaKeyExecutorProfileID = "executor_profile_id"
 	// MetaKeyWorkspacePath is the optional host folder for repo-less tasks
 	// (set by CreateTask, read by the orchestrator when building a session).
@@ -641,6 +642,7 @@ type TaskSessionWorktree struct {
 	SessionID    string    `json:"session_id"`
 	WorktreeID   string    `json:"worktree_id"`
 	RepositoryID string    `json:"repository_id"`
+	BranchSlug   string    `json:"branch_slug,omitempty"`
 	Position     int       `json:"position"`
 	CreatedAt    time.Time `json:"created_at"`
 
@@ -1024,6 +1026,7 @@ type TaskEnvironmentRepo struct {
 	ID                string    `json:"id"`
 	TaskEnvironmentID string    `json:"task_environment_id"`
 	RepositoryID      string    `json:"repository_id"`
+	BranchSlug        string    `json:"branch_slug,omitempty"`
 	WorktreeID        string    `json:"worktree_id,omitempty"`
 	WorktreePath      string    `json:"worktree_path,omitempty"`
 	WorktreeBranch    string    `json:"worktree_branch,omitempty"`
@@ -1091,6 +1094,9 @@ func (r *TaskEnvironmentRepo) ToAPI() map[string]interface{} {
 	}
 	if r.WorktreeID != "" {
 		out["worktree_id"] = r.WorktreeID
+	}
+	if r.BranchSlug != "" {
+		out["branch_slug"] = r.BranchSlug
 	}
 	if r.WorktreePath != "" {
 		out["worktree_path"] = r.WorktreePath

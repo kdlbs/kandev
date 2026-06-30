@@ -74,7 +74,7 @@ export class SessionPage {
     return this.activeChat().getByTestId("chat-status-bar").getByTestId("pr-status-chip");
   }
   todoIndicator() {
-    return this.page.getByTestId("todo-indicator");
+    return this.activeChat().getByTestId("todo-indicator");
   }
   /** Span wrapper around the resume button — used to trigger tooltip on disabled state. */
   failedSessionResumeWrapper(): Locator {

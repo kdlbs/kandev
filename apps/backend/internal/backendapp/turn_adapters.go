@@ -24,6 +24,10 @@ func (a *turnServiceAdapter) CompleteTurn(ctx context.Context, turnID string) er
 	return a.svc.CompleteTurn(ctx, turnID)
 }
 
+func (a *turnServiceAdapter) GetTurn(ctx context.Context, turnID string) (*models.Turn, error) {
+	return a.svc.GetTurn(ctx, turnID)
+}
+
 func (a *turnServiceAdapter) GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
 	return a.svc.GetActiveTurn(ctx, sessionID)
 }
@@ -98,7 +102,18 @@ type taskDeleterAdapter struct {
 }
 
 func (a *taskDeleterAdapter) DeleteTask(ctx context.Context, taskID string) error {
-	err := a.svc.DeleteTask(ctx, taskID)
+	return a.translateDeleteErr(a.svc.DeleteTask(ctx, taskID))
+}
+
+// DeleteTaskWithReason satisfies github.TaskDeleterWithReason so the review/issue
+// cleanup paths can attach a deletion reason to the task.deleted event.
+func (a *taskDeleterAdapter) DeleteTaskWithReason(ctx context.Context, taskID, reason string) error {
+	return a.translateDeleteErr(a.svc.DeleteTaskWithReason(ctx, taskID, reason))
+}
+
+// translateDeleteErr maps the task repository's ErrTaskNotFound sentinel to
+// github.ErrTaskNotFound so cleanup can classify the "already gone" case.
+func (a *taskDeleterAdapter) translateDeleteErr(err error) error {
 	if err == nil {
 		return nil
 	}
@@ -106,4 +121,39 @@ func (a *taskDeleterAdapter) DeleteTask(ctx context.Context, taskID string) erro
 		return fmt.Errorf("%w: %w", github.ErrTaskNotFound, err)
 	}
 	return err
+}
+
+// repositoryLookupAdapter satisfies the linear/jira/sentry RepositoryLookup
+// interface over the task service. It is the validation seam for a watcher's
+// optional repository binding. The task service's GetRepository filters
+// soft-deleted rows and errors on a miss, so a missing or deleted repository
+// maps to ok=false and watcher create/update rejects the binding.
+type repositoryLookupAdapter struct {
+	svc *taskservice.Service
+}
+
+func (a *repositoryLookupAdapter) GetRepository(ctx context.Context, id string) (string, string, bool) {
+	repo, err := a.svc.GetRepository(ctx, id)
+	if err != nil || repo == nil {
+		return "", "", false
+	}
+	return repo.WorkspaceID, repo.DefaultBranch, true
+}
+
+// RepositoryExists satisfies orchestrator.RepositoryChecker. It uses the
+// workspace listing (which excludes soft-deleted repos) so a definitive
+// "absent" is distinguishable from a transient error: a non-nil err lets the
+// dispatch pre-flight fail open, while (false, nil) means the bound repository
+// was removed and the watcher should self-heal.
+func (a *repositoryLookupAdapter) RepositoryExists(ctx context.Context, workspaceID, repositoryID string) (bool, error) {
+	repos, err := a.svc.ListRepositories(ctx, workspaceID)
+	if err != nil {
+		return false, err
+	}
+	for _, repo := range repos {
+		if repo.ID == repositoryID {
+			return true, nil
+		}
+	}
+	return false, nil
 }

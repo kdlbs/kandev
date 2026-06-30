@@ -10,6 +10,7 @@ type LicenseEntry = {
   license: string;
   repository?: string;
   license_text?: string;
+  stale?: boolean;
   ecosystem: "npm" | "go";
 };
 
@@ -56,6 +57,9 @@ describe("generated/licenses.json", () => {
       }
       if (entry.license_text !== undefined) {
         expect(typeof entry.license_text).toBe("string");
+      }
+      if (entry.stale !== undefined) {
+        expect(typeof entry.stale).toBe("boolean");
       }
     }
   });

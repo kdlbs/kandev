@@ -58,6 +58,9 @@ type MutationComment struct {
 	Body       string
 	AuthorType string // "user" | "agent"
 	AuthorID   string
+	// SkipAssigneeWake suppresses only the assignee task_comment wake.
+	// Mention fan-out still runs.
+	SkipAssigneeWake bool
 }
 
 // ApplyTaskMutationResult summarises the pipeline's side-effects.
@@ -253,7 +256,7 @@ func (ss *SchedulerService) reactToComment(
 	selfComment := comment.AuthorType == "agent" && comment.AuthorID == task.AssigneeAgentProfileID
 
 	// Assignee wake — skip if self-comment or task is closed.
-	if !selfComment && !closed {
+	if !comment.SkipAssigneeWake && !selfComment && !closed {
 		queue(task.AssigneeAgentProfileID, RunContext{
 			Reason:      RunReasonTaskComment,
 			TaskID:      task.ID,

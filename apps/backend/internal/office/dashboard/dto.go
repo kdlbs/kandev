@@ -414,10 +414,10 @@ type CommentDTO struct {
 	Source     string `json:"source"`
 	CreatedAt  string `json:"createdAt"`
 	// Per-comment run lifecycle. Only populated for user comments
-	// whose comment_created subscriber queued a task_comment run
-	// (idempotency_key = "task_comment:<comment_id>"). The frontend
-	// reads these to render a Queued / Working / Failed badge on the
-	// triggering comment.
+	// whose comment_created subscriber queued a task_comment run. Exact
+	// same-task wakes map by idempotency key; salted fan-out wakes map by
+	// payload.comment_id. The frontend reads these to render a Queued /
+	// Working / Failed badge on the triggering comment.
 	RunID     string `json:"runId,omitempty"`
 	RunStatus string `json:"runStatus,omitempty"`
 	RunError  string `json:"runError,omitempty"`

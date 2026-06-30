@@ -374,6 +374,50 @@ func TestCreateTaskEnvironment_AllowsNonWorktreeWithEmptyWorkspace(t *testing.T)
 	}
 }
 
+func TestCreateTaskEnvironment_AllowsSameRepoMultiBranchRows(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	insertTask(t, repo.db, "task-H2")
+
+	err := repo.CreateTaskEnvironment(context.Background(), &models.TaskEnvironment{
+		ID:            "env-H2",
+		TaskID:        "task-H2",
+		ExecutorType:  string(models.ExecutorTypeWorktree),
+		WorktreePath:  "/workspace/main",
+		WorkspacePath: "/workspace",
+		Repos: []*models.TaskEnvironmentRepo{
+			{
+				RepositoryID:   "repo-shared",
+				WorktreeID:     "wt-main",
+				WorktreePath:   "/workspace/repo",
+				WorktreeBranch: "feature/main",
+				Position:       0,
+			},
+			{
+				RepositoryID:   "repo-shared",
+				BranchSlug:     "branch-5hn",
+				WorktreeID:     "wt-branch",
+				WorktreePath:   "/workspace/repo/branch-5hn",
+				WorktreeBranch: "feature/branch",
+				Position:       1,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	rows, err := repo.ListTaskEnvironmentRepos(context.Background(), "env-H2")
+	if err != nil {
+		t.Fatalf("list repos: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 environment repo rows, got %d", len(rows))
+	}
+	if rows[0].BranchSlug != "" || rows[1].BranchSlug != "branch-5hn" {
+		t.Fatalf("unexpected branch slugs: %+v", rows)
+	}
+}
+
 // TestUpdateTaskEnvironment_RejectsClearingWorkspaceForWorktree — symmetric
 // guard: a writer must not be able to clear a previously-populated
 // workspace_path on a worktree env.

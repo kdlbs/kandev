@@ -57,6 +57,16 @@ function navigate(mode: "push" | "replace", href: string, options?: NavigateOpti
   dispatchLocationChange();
 }
 
+/**
+ * Imperative soft navigation usable outside React (e.g. WebSocket handlers).
+ * Mirrors what `useRouter().push/replace` does so a redirect triggered from a
+ * store mutation re-renders the SPA without a full reload.
+ */
+export function softNavigate(href: string, mode: "push" | "replace" = "push"): void {
+  if (typeof window === "undefined") return;
+  navigate(mode, href);
+}
+
 function useLocationKey(): string {
   return useSyncExternalStore(subscribeLocation, getLocationKey, getServerLocationKey);
 }

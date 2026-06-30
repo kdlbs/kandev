@@ -156,14 +156,24 @@ const DefaultIssueWatchPollInterval = 300
 // the JQL on a schedule and emits a NewJiraIssueEvent for each matching ticket
 // the orchestrator hasn't already turned into a Kandev task.
 //
-// Unlike the GitHub equivalent, JIRA issues have no repository affinity — the
-// target workflow step's defaults determine where the resulting task runs, so
-// there's no `repos` column.
+// A watch may optionally bind a single repository (RepositoryID + BaseBranch);
+// when set, watcher-created tasks launch in an isolated worktree of that repo.
+// Empty = unbound, in which case the target workflow step's defaults determine
+// where the resulting task runs (the historical repo-less behaviour).
 type IssueWatch struct {
-	ID                  string `json:"id" db:"id"`
-	WorkspaceID         string `json:"workspaceId" db:"workspace_id"`
-	WorkflowID          string `json:"workflowId" db:"workflow_id"`
-	WorkflowStepID      string `json:"workflowStepId" db:"workflow_step_id"`
+	ID             string `json:"id" db:"id"`
+	WorkspaceID    string `json:"workspaceId" db:"workspace_id"`
+	WorkflowID     string `json:"workflowId" db:"workflow_id"`
+	WorkflowStepID string `json:"workflowStepId" db:"workflow_step_id"`
+	// RepositoryID optionally binds watcher-created tasks to a repository so the
+	// agent launches in an isolated worktree instead of a blank scratch checkout.
+	// Empty = unbound. When set, the resulting task carries a single
+	// (repository_id, base_branch) pair.
+	RepositoryID string `json:"repositoryId" db:"repository_id"`
+	// BaseBranch is the branch the per-task worktree is cut from. Empty defaults
+	// to the repository's default branch (resolved at create/update time).
+	// Meaningful only when RepositoryID is set.
+	BaseBranch          string `json:"baseBranch" db:"base_branch"`
 	JQL                 string `json:"jql" db:"jql"`
 	AgentProfileID      string `json:"agentProfileId" db:"agent_profile_id"`
 	ExecutorProfileID   string `json:"executorProfileId" db:"executor_profile_id"`
@@ -200,10 +210,15 @@ type IssueWatchTask struct {
 // ticket matching a watch that has no existing dedup row. The orchestrator
 // consumes this to create (and optionally auto-start) a Kandev task.
 type NewJiraIssueEvent struct {
-	IssueWatchID      string `json:"issueWatchId"`
-	WorkspaceID       string `json:"workspaceId"`
-	WorkflowID        string `json:"workflowId"`
-	WorkflowStepID    string `json:"workflowStepId"`
+	IssueWatchID   string `json:"issueWatchId"`
+	WorkspaceID    string `json:"workspaceId"`
+	WorkflowID     string `json:"workflowId"`
+	WorkflowStepID string `json:"workflowStepId"`
+	// RepositoryID / BaseBranch carry the watch's optional repository binding so
+	// the orchestrator source can populate IssueTaskRequest.Repositories without
+	// reloading the watch row. Empty RepositoryID = unbound (repo-less task).
+	RepositoryID      string `json:"repositoryId,omitempty"`
+	BaseBranch        string `json:"baseBranch,omitempty"`
 	AgentProfileID    string `json:"agentProfileId"`
 	ExecutorProfileID string `json:"executorProfileId"`
 	Prompt            string `json:"prompt"`
@@ -219,6 +234,8 @@ type CreateIssueWatchRequest struct {
 	WorkspaceID         string `json:"workspaceId"`
 	WorkflowID          string `json:"workflowId"`
 	WorkflowStepID      string `json:"workflowStepId"`
+	RepositoryID        string `json:"repositoryId"`
+	BaseBranch          string `json:"baseBranch"`
 	JQL                 string `json:"jql"`
 	AgentProfileID      string `json:"agentProfileId"`
 	ExecutorProfileID   string `json:"executorProfileId"`
@@ -235,6 +252,8 @@ type CreateIssueWatchRequest struct {
 type UpdateIssueWatchRequest struct {
 	WorkflowID          *string `json:"workflowId,omitempty"`
 	WorkflowStepID      *string `json:"workflowStepId,omitempty"`
+	RepositoryID        *string `json:"repositoryId,omitempty"`
+	BaseBranch          *string `json:"baseBranch,omitempty"`
 	JQL                 *string `json:"jql,omitempty"`
 	AgentProfileID      *string `json:"agentProfileId,omitempty"`
 	ExecutorProfileID   *string `json:"executorProfileId,omitempty"`

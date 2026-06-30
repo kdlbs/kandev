@@ -129,7 +129,6 @@ type SidebarTaskPrefs struct {
 }
 
 type TaskCreateLastUsed struct {
-	// Empty fields are treated as "no change" when used as an update patch.
 	RepositoryID      string `json:"repository_id"`
 	Branch            string `json:"branch"`
 	AgentProfileID    string `json:"agent_profile_id"`

@@ -92,8 +92,13 @@ function useWatchActions(workspaceId?: string | null) {
 
   const handleTrigger = useCallback(
     async (id: string) => {
+      const watch = watches.find((item) => item.id === id);
+      if (!watch) {
+        toast({ description: "Review watch not found", variant: "error" });
+        return;
+      }
       try {
-        const result = await trigger(id);
+        const result = await trigger(id, watch.workspace_id);
         const count = result?.new_prs_found ?? 0;
         if (count > 0) {
           toast({
@@ -107,7 +112,7 @@ function useWatchActions(workspaceId?: string | null) {
         toast({ description: "Failed to check for PRs", variant: "error" });
       }
     },
-    [trigger, toast],
+    [trigger, toast, watches],
   );
 
   const handleToggleEnabled = useCallback(

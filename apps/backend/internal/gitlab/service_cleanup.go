@@ -7,6 +7,14 @@ import (
 	"go.uber.org/zap"
 )
 
+// Machine-readable deletion reasons attached to the task.deleted event so the
+// frontend can explain why a focused auto-deleted task vanished. These mirror
+// the GitHub cleanup reasons and the frontend TaskDeletionReason union.
+const (
+	reasonMRMergedOrClosed = "pr_merged_or_closed"
+	reasonIssueClosed      = "issue_closed"
+)
+
 // CleanupAllReviewTasks deletes auto-created review tasks for merged/closed MRs,
 // respecting each watch's cleanup policy. Returns the count of tasks deleted.
 func (s *Service) CleanupAllReviewTasks(ctx context.Context) (int, error) {
@@ -26,6 +34,16 @@ func (s *Service) CleanupAllReviewTasks(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	return s.sweepReviewMRTasks(ctx, tasks, deleter, checker), nil
+}
+
+// deleteTaskWithReason deletes a task, threading the cleanup reason through to
+// the task.deleted event when the wired deleter supports it (see
+// TaskDeleterWithReason). Falls back to plain DeleteTask otherwise.
+func deleteTaskWithReason(ctx context.Context, deleter TaskDeleter, taskID, reason string) error {
+	if d, ok := deleter.(TaskDeleterWithReason); ok {
+		return d.DeleteTaskWithReason(ctx, taskID, reason)
+	}
+	return deleter.DeleteTask(ctx, taskID)
 }
 
 func (s *Service) sweepReviewMRTasks(ctx context.Context, tasks []*ReviewMRTask, deleter TaskDeleter, checker TaskSessionChecker) int {
@@ -100,7 +118,7 @@ func (s *Service) deleteReviewMRTaskIfTerminal(ctx context.Context, t *ReviewMRT
 			return false
 		}
 	}
-	if err := deleter.DeleteTask(ctx, t.TaskID); err != nil {
+	if err := deleteTaskWithReason(ctx, deleter, t.TaskID, reasonMRMergedOrClosed); err != nil {
 		s.logger.Warn("delete review task during cleanup",
 			zap.String("task_id", t.TaskID), zap.Error(err))
 		return false
@@ -191,7 +209,7 @@ func (s *Service) deleteIssueWatchTaskIfTerminal(ctx context.Context, t *IssueWa
 			return false
 		}
 	}
-	if err := deleter.DeleteTask(ctx, t.TaskID); err != nil {
+	if err := deleteTaskWithReason(ctx, deleter, t.TaskID, reasonIssueClosed); err != nil {
 		s.logger.Warn("delete issue task during cleanup",
 			zap.String("task_id", t.TaskID), zap.Error(err))
 		return false

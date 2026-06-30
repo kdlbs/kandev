@@ -208,11 +208,11 @@ type RuntimeConfig struct {
 	// agents whose ACP adapter does not wire session/new mcpServers through to
 	// the underlying CLI.
 	ProjectMCPStrategy mcpconfig.PassthroughMCPStrategy
-	// RequiresProcessKill is true for agents whose subprocess does not exit
-	// when stdin is closed (e.g. OpenCode's ACP runtime, which keeps its HTTP
-	// server and MCP child tree alive). When true, the agentctl process
-	// manager kills the whole process group on shutdown so MCP children
-	// don't leak.
+	// RequiresProcessKill is true for agents whose subprocess should skip the
+	// graceful stdin-close wait because it is known not to exit on EOF (e.g.
+	// OpenCode's ACP runtime, which keeps its HTTP server and MCP child tree
+	// alive). Agentctl still reaps the process group for every agent after
+	// graceful shutdown or timeout; this flag only makes that reap immediate.
 	RequiresProcessKill bool
 }
 

@@ -31,9 +31,97 @@ class GitHelper {
 }
 
 function changesTab(testPage: Page) {
-  return testPage.locator(".dv-tab", {
-    has: testPage.locator(".dv-default-tab").filter({ hasText: /^Changes/ }),
+  return testPage.locator(".dv-tab:visible", {
+    has: testPage.locator(".dv-default-tab:visible").filter({ hasText: /^Changes/ }),
   });
+}
+
+async function changesCountForSession(testPage: Page, sessionId: string): Promise<number | null> {
+  return testPage.evaluate((sid) => {
+    type StoreWindow = Window & {
+      __KANDEV_E2E_STORE__?: {
+        getState: () => {
+          environmentIdBySessionId: Record<string, string>;
+          gitStatus: {
+            byEnvironmentRepo: Record<string, Record<string, { files?: Record<string, unknown> }>>;
+          };
+          sessionCommits: { byEnvironmentId: Record<string, unknown[]> };
+        };
+      };
+    };
+    const store = (window as StoreWindow).__KANDEV_E2E_STORE__;
+    if (!store) throw new Error("E2E store bridge missing");
+    const state = store.getState();
+    const envKey = state.environmentIdBySessionId[sid] ?? sid;
+    const hasRepoStatuses = envKey in state.gitStatus.byEnvironmentRepo;
+    const hasCommits = envKey in state.sessionCommits.byEnvironmentId;
+    if (!hasRepoStatuses && !hasCommits) return null;
+    const repoStatuses = state.gitStatus.byEnvironmentRepo[envKey] ?? {};
+    // Keep this count in sync with selectChangesMarkerByEnvironment.
+    let count = state.sessionCommits.byEnvironmentId[envKey]?.length ?? 0;
+    for (const status of Object.values(repoStatuses)) {
+      count += Object.keys(status.files ?? {}).length;
+    }
+    return count;
+  }, sessionId);
+}
+
+async function setGitStatusForSession(testPage: Page, sessionId: string, changedFiles: string[]) {
+  await testPage.evaluate(
+    ({ sid, files }) => {
+      type FileInfo = {
+        path: string;
+        status: "modified" | "added" | "deleted" | "untracked" | "renamed";
+        staged: boolean;
+        additions?: number;
+        deletions?: number;
+      };
+      type StoreWindow = Window & {
+        __KANDEV_E2E_STORE__?: {
+          getState: () => {
+            setGitStatus: (
+              sessionId: string,
+              status: {
+                branch: string;
+                remote_branch: string | null;
+                modified: string[];
+                added: string[];
+                deleted: string[];
+                untracked: string[];
+                renamed: string[];
+                ahead: number;
+                behind: number;
+                files: Record<string, FileInfo>;
+                timestamp: string;
+              },
+            ) => boolean;
+          };
+        };
+      };
+      const store = (window as StoreWindow).__KANDEV_E2E_STORE__;
+      if (!store) throw new Error("E2E store bridge missing");
+      const fileMap = Object.fromEntries(
+        files.map((path): [string, FileInfo] => [
+          path,
+          { path, status: "untracked", staged: false, additions: 1, deletions: 0 },
+        ]),
+      );
+      store.getState().setGitStatus(sid, {
+        branch: "main",
+        remote_branch: null,
+        modified: [],
+        added: [],
+        deleted: [],
+        untracked: files,
+        renamed: [],
+        ahead: 0,
+        behind: 0,
+        files: fileMap,
+        timestamp: new Date().toISOString(),
+      });
+    },
+    { sid: sessionId, files: changedFiles },
+  );
 }
 
 async function moveChangesToTerminalGroupAndFocusTerminal(testPage: Page) {
@@ -240,5 +328,60 @@ test.describe("Changes panel focus behavior", () => {
 
     await expect(changesTab(testPage)).toHaveClass(/dv-active-tab/, { timeout: 5_000 });
     await expect(session.changesFileRow("second-change.txt")).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("new git updates focus changes after switching to an inactive task", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const taskA = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Inactive Changes Focus A",
+      seedData.agentProfileId,
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    const taskB = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Inactive Changes Focus B",
+      seedData.agentProfileId,
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!taskB.session_id) throw new Error("Task B did not start a session");
+
+    await testPage.goto(`/t/${taskA.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.waitForDockviewReady();
+
+    await expect(session.taskInSidebar("Inactive Changes Focus B")).toBeVisible({
+      timeout: 15_000,
+    });
+    await setGitStatusForSession(testPage, taskB.session_id, []);
+    await expect
+      .poll(() => changesCountForSession(testPage, taskB.session_id!), { timeout: 15_000 })
+      .toBe(0);
+
+    await setGitStatusForSession(testPage, taskB.session_id, ["background-change.txt"]);
+    await expect
+      .poll(() => changesCountForSession(testPage, taskB.session_id!), { timeout: 15_000 })
+      .toBe(1);
+    await expect(session.activeChat()).toBeVisible();
+    await expect(changesTab(testPage)).not.toHaveClass(/dv-active-tab/);
+
+    await session.taskInSidebar("Inactive Changes Focus B").click();
+
+    await expect(changesTab(testPage)).toHaveClass(/dv-active-tab/, { timeout: 5_000 });
   });
 });

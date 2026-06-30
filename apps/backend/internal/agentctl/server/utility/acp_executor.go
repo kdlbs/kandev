@@ -23,6 +23,10 @@ import (
 const (
 	openCodeCommand       = "opencode"
 	openCodeACPSubcommand = "acp"
+
+	acpCommandTerminateGrace = 250 * time.Millisecond
+	acpCommandForceKillGrace = 500 * time.Millisecond
+	acpCommandPollInterval   = 25 * time.Millisecond
 )
 
 // ACPInferenceExecutor executes one-shot prompts using the ACP protocol.
@@ -72,6 +76,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	//nolint:gosec // resolvedCmd is from a hard-coded allow-list; args[1:] are CLI flags
 	cmd := exec.CommandContext(ctx, resolvedCmd, args[1:]...)
 	cmd.Dir = workDir
+	configureACPCommand(cmd, e.logger)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -86,12 +91,13 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	if err := cmd.Start(); err != nil {
 		return &PromptResponse{Success: false, Error: fmt.Sprintf("start: %v", err)}, nil
 	}
+	lifecycle, err := installACPCommandLifecycle(cmd)
+	if err != nil {
+		e.logger.Warn("failed to install ACP command lifecycle; falling back to process-tree cleanup",
+			zap.Error(err))
+	}
 
-	// Ensure process cleanup
-	defer func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	}()
+	defer cleanupACPCommand(ctx, cmd, lifecycle, e.logger)
 
 	// Execute ACP protocol
 	mcpServers, dropped := toACPMcpServers(req.MCPServers)
@@ -316,6 +322,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	//nolint:gosec // resolvedCmd is from a hard-coded allow-list; args[1:] are CLI flags
 	cmd := exec.CommandContext(ctx, resolvedCmd, args[1:]...)
 	cmd.Dir = workDir
+	configureACPCommand(cmd, e.logger)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -328,10 +335,12 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	if err := cmd.Start(); err != nil {
 		return &ProbeResponse{Success: false, Error: fmt.Sprintf("start: %v", err)}, nil
 	}
-	defer func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	}()
+	lifecycle, err := installACPCommandLifecycle(cmd)
+	if err != nil {
+		e.logger.Warn("failed to install ACP command lifecycle; falling back to process-tree cleanup",
+			zap.Error(err))
+	}
+	defer cleanupACPCommand(ctx, cmd, lifecycle, e.logger)
 
 	resp, err := e.probeACPSession(ctx, stdin, stdout, workDir)
 	if err != nil {

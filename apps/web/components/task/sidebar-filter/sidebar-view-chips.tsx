@@ -3,7 +3,8 @@
 import { useCallback, useRef, type PointerEvent } from "react";
 import {
   DndContext,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   closestCenter,
   type DragEndEvent,
   useSensor,
@@ -16,14 +17,25 @@ import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import { cn } from "@/lib/utils";
 
 const DRAG_ACTIVATION_DISTANCE = 8;
+const TOUCH_DRAG_DELAY_MS = 250;
+const TOUCH_DRAG_TOLERANCE = 5;
 
 export function SidebarViewChips() {
   const views = useAppStore((s) => s.sidebarViews.views);
   const activeViewId = useAppStore((s) => s.sidebarViews.activeViewId);
   const setActive = useAppStore((s) => s.setSidebarActiveView);
   const reorderViews = useAppStore((s) => s.reorderSidebarViews);
+  // Use MouseSensor (not PointerSensor) deliberately: this chip row lives in an
+  // overflow-x-auto container, and PointerSensor also captures touch via
+  // pointer events, where its 8px distance activates before TouchSensor's delay
+  // and hijacks swipe-scroll. MouseSensor + TouchSensor keep the input streams
+  // separate so a quick touch swipe scrolls natively while a press-and-hold
+  // starts a drag. Trade-off: pen/stylus drag falls back to tap-to-select.
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE } }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: TOUCH_DRAG_DELAY_MS, tolerance: TOUCH_DRAG_TOLERANCE },
+    }),
   );
 
   const handleDragEnd = useCallback(

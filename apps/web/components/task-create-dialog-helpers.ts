@@ -12,6 +12,7 @@ import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import { selectPreferredBranch } from "@/lib/utils";
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
+import { createDebugLogger } from "@/lib/debug/log";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { linkToTask } from "@/lib/links";
 import { INTENT_PLAN } from "@/lib/state/layout-manager";
@@ -20,6 +21,8 @@ import type { FileAttachment } from "@/components/task/chat/file-attachment";
 import type { MessageAttachment } from "@/lib/services/session-launch-service";
 
 type CreateTaskParams = Parameters<typeof createTask>[0];
+const selectionDebug = createDebugLogger("task-create:selection");
+const BRANCH_AUTOPICK_DEBUG = "branch-autopick";
 
 export type { CreateTaskParams };
 
@@ -47,20 +50,66 @@ export function toMessageAttachments(
   );
 }
 
-export function autoSelectBranch(branchList: Branch[], setBranch: (value: string) => void): void {
-  const lastUsedBranch = getLocalStorage<string | null>(STORAGE_KEYS.LAST_BRANCH, null);
-  if (
-    lastUsedBranch &&
-    branchList.some((b) => {
-      const displayName = b.type === "remote" && b.remote ? `${b.remote}/${b.name}` : b.name;
-      return displayName === lastUsedBranch;
-    })
-  ) {
-    setBranch(lastUsedBranch);
+export function autoSelectBranch(
+  branchList: Branch[],
+  setBranch: (value: string) => void,
+  options: { lastUsedBranch?: string | null; userSettingsLoaded?: boolean } = {},
+): void {
+  const localStorageBranch = getLocalStorage<string | null>(STORAGE_KEYS.LAST_BRANCH, null);
+  const settingsBranch = options.lastUsedBranch ?? null;
+  const localStorageValid = isBranchSelectable(branchList, localStorageBranch);
+  const settingsValid = isBranchSelectable(branchList, settingsBranch);
+  if (settingsBranch && settingsValid) {
+    selectionDebug(BRANCH_AUTOPICK_DEBUG, {
+      source: "settings:taskCreateLastUsed",
+      pick: settingsBranch,
+      local_storage_value: localStorageBranch ?? "-",
+      local_storage_valid: localStorageValid,
+      branch_count: branchList.length,
+    });
+    setBranch(settingsBranch);
+    return;
+  }
+  if (options.userSettingsLoaded === false) {
+    selectionDebug(BRANCH_AUTOPICK_DEBUG, {
+      source: "user-settings-loading",
+      pick: "-",
+      local_storage_value: localStorageBranch ?? "-",
+      local_storage_valid: localStorageValid,
+      branch_count: branchList.length,
+    });
+    return;
+  }
+  if (localStorageBranch && localStorageValid) {
+    selectionDebug(BRANCH_AUTOPICK_DEBUG, {
+      source: "localStorage:lastBranch",
+      pick: localStorageBranch,
+      local_storage_value: localStorageBranch,
+      local_storage_valid: true,
+      branch_count: branchList.length,
+    });
+    setBranch(localStorageBranch);
     return;
   }
   const preferredBranch = selectPreferredBranch(branchList);
+  selectionDebug(BRANCH_AUTOPICK_DEBUG, {
+    source: preferredBranch ? "preferred" : "none",
+    pick: preferredBranch ?? "-",
+    local_storage_value: localStorageBranch ?? "-",
+    local_storage_valid: localStorageValid,
+    branch_count: branchList.length,
+  });
   if (preferredBranch) setBranch(preferredBranch);
+}
+
+function isBranchSelectable(branchList: Branch[], value: string | null | undefined) {
+  return Boolean(value && branchList.some((branch) => branchDisplayName(branch) === value));
+}
+
+function branchDisplayName(branch: Branch) {
+  return branch.type === "remote" && branch.remote
+    ? `${branch.remote}/${branch.name}`
+    : branch.name;
 }
 
 export function computePassthroughProfile(

@@ -57,6 +57,7 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_sessions.base_commit_sha", `ALTER TABLE task_sessions ADD COLUMN base_commit_sha TEXT DEFAULT ''`)
 	r.migrate.Apply("workspaces.default_config_agent_profile_id", `ALTER TABLE workspaces ADD COLUMN default_config_agent_profile_id TEXT DEFAULT ''`)
 	r.migrate.Apply("task_sessions.task_environment_id", `ALTER TABLE task_sessions ADD COLUMN task_environment_id TEXT DEFAULT ''`)
+	r.migrate.Apply("task_session_worktrees.branch_slug", `ALTER TABLE task_session_worktrees ADD COLUMN branch_slug TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("tasks.parent_id", `ALTER TABLE tasks ADD COLUMN parent_id TEXT DEFAULT ''`)
 	// Remove FK constraint on workflow_id to allow ephemeral tasks without workflows
 	if err := r.migrateTasksRemoveWorkflowFK(); err != nil {
@@ -80,6 +81,9 @@ func (r *Repository) runMigrations() error {
 	// Must run BEFORE migrateTaskEnvironmentsRemoveAgentExecutionID, which copies task_dir_name into the recreated table.
 	r.migrate.Apply("task_environments.task_dir_name", `ALTER TABLE task_environments ADD COLUMN task_dir_name TEXT DEFAULT ''`)
 	if err := r.migrateTaskEnvironmentsRemoveAgentExecutionID(); err != nil {
+		return err
+	}
+	if err := r.migrateTaskEnvironmentReposAllowMultiBranch(); err != nil {
 		return err
 	}
 	r.migrate.Apply("workflows.sort_order", `ALTER TABLE workflows ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
@@ -392,6 +396,94 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 		// AFTER healDuplicateTaskEnvironments collapses any pre-existing duplicates.
 		// Creating it here would fail on databases that still have duplicate task_id rows.
 	})
+}
+
+func (r *Repository) migrateTaskEnvironmentReposAllowMultiBranch() error {
+	if dialect.IsPostgres(r.db.DriverName()) {
+		return r.migrateTaskEnvironmentReposAllowMultiBranchPostgres()
+	}
+	return r.recreateTableNamed(
+		"task_environment_repos.recreate_allow_multi_branch",
+		"task_environment_repos",
+		"UNIQUE(task_environment_id, repository_id)",
+		[]string{
+			`CREATE TABLE task_environment_repos_new (
+				id TEXT PRIMARY KEY,
+				task_environment_id TEXT NOT NULL,
+				repository_id TEXT NOT NULL,
+				branch_slug TEXT NOT NULL DEFAULT '',
+				worktree_id TEXT DEFAULT '',
+				worktree_path TEXT DEFAULT '',
+				worktree_branch TEXT DEFAULT '',
+				position INTEGER DEFAULT 0,
+				error_message TEXT DEFAULT '',
+				created_at TIMESTAMP NOT NULL,
+				updated_at TIMESTAMP NOT NULL,
+				FOREIGN KEY (task_environment_id) REFERENCES task_environments(id) ON DELETE CASCADE,
+				UNIQUE(task_environment_id, repository_id, branch_slug)
+			)`,
+			`INSERT INTO task_environment_repos_new SELECT
+				id, task_environment_id, repository_id, '',
+				worktree_id, worktree_path, worktree_branch,
+				position, error_message, created_at, updated_at
+			FROM task_environment_repos`,
+			`DROP TABLE task_environment_repos`,
+			`ALTER TABLE task_environment_repos_new RENAME TO task_environment_repos`,
+			`CREATE INDEX IF NOT EXISTS idx_task_environment_repos_env_id ON task_environment_repos(task_environment_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_task_environment_repos_repository_id ON task_environment_repos(repository_id)`,
+		},
+	)
+}
+
+func (r *Repository) migrateTaskEnvironmentReposAllowMultiBranchPostgres() error {
+	if _, err := r.db.Exec(`ALTER TABLE task_environment_repos ADD COLUMN IF NOT EXISTS branch_slug TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("add task_environment_repos.branch_slug: %w", err)
+	}
+	if _, err := r.db.Exec(`
+DO $$
+DECLARE
+	old_constraint_name text;
+BEGIN
+	SELECT con.conname INTO old_constraint_name
+	FROM pg_constraint con
+	JOIN pg_class rel ON rel.oid = con.conrelid
+	JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+	WHERE rel.relname = 'task_environment_repos'
+		AND nsp.nspname = current_schema()
+		AND con.contype = 'u'
+		AND (
+			SELECT array_agg(attr.attname::text ORDER BY cols.ordinality)
+			FROM unnest(con.conkey) WITH ORDINALITY AS cols(attnum, ordinality)
+			JOIN pg_attribute attr ON attr.attrelid = con.conrelid AND attr.attnum = cols.attnum
+		) = ARRAY['task_environment_id', 'repository_id'];
+
+	IF old_constraint_name IS NOT NULL THEN
+		EXECUTE format('ALTER TABLE task_environment_repos DROP CONSTRAINT %I', old_constraint_name);
+	END IF;
+
+	IF NOT EXISTS (
+		SELECT 1
+		FROM pg_constraint con
+		JOIN pg_class rel ON rel.oid = con.conrelid
+		JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+		WHERE rel.relname = 'task_environment_repos'
+			AND nsp.nspname = current_schema()
+			AND con.contype = 'u'
+			AND (
+				SELECT array_agg(attr.attname::text ORDER BY cols.ordinality)
+				FROM unnest(con.conkey) WITH ORDINALITY AS cols(attnum, ordinality)
+				JOIN pg_attribute attr ON attr.attrelid = con.conrelid AND attr.attnum = cols.attnum
+			) = ARRAY['task_environment_id', 'repository_id', 'branch_slug']
+	) THEN
+		ALTER TABLE task_environment_repos
+			ADD CONSTRAINT task_environment_repos_env_repo_branch_key
+			UNIQUE (task_environment_id, repository_id, branch_slug);
+	END IF;
+END $$;
+	`); err != nil {
+		return fmt.Errorf("migrate task_environment_repos unique constraint: %w", err)
+	}
+	return nil
 }
 
 // migrateTaskRepositoriesAllowMultiBranch swaps the legacy
@@ -851,10 +943,10 @@ func (r *Repository) backfillTaskEnvironmentRepos() error {
 	for _, row := range pending {
 		if _, err := tx.Exec(`
 			INSERT INTO task_environment_repos (
-				id, task_environment_id, repository_id,
+				id, task_environment_id, repository_id, branch_slug,
 				worktree_id, worktree_path, worktree_branch,
 				position, error_message, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, 0, '', ?, ?)
+			) VALUES (?, ?, ?, '', ?, ?, ?, 0, '', ?, ?)
 		`, uuid.New().String(), row.envID, row.repoID,
 			row.wtID, row.wtPath, row.wtBranch,
 			row.createdAt, row.createdAt); err != nil {

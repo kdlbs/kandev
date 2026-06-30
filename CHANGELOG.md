@@ -2,6 +2,105 @@
 
 All notable changes to Kandev.
 
+## 0.69.0 - 2026-06-29
+
+### Bug Fixes
+
+- repair postgres schema migration coverage ([#1529](https://github.com/kdlbs/kandev/pull/1529))
+
+## 0.68.0 - 2026-06-29
+
+### Bug Fixes
+
+- wait for task create last-used settings ([#1524](https://github.com/kdlbs/kandev/pull/1524))
+- preserve nvm node path in service installs ([#1527](https://github.com/kdlbs/kandev/pull/1527))
+- improve macos desktop startup ([#1525](https://github.com/kdlbs/kandev/pull/1525))
+
+## 0.67.0 - 2026-06-28
+
+### Bug Fixes
+
+- unblock release desktop and universal builds ([#1522](https://github.com/kdlbs/kandev/pull/1522))
+
+## 0.66.0 - 2026-06-28
+
+### Features
+
+- bind repository to Linear/Jira/Sentry issue watchers ([#1491](https://github.com/kdlbs/kandev/pull/1491)) by @nlenepveu
+- add sidebar view system to mobile task switcher ([#1466](https://github.com/kdlbs/kandev/pull/1466))
+- add tauri desktop app ([#1478](https://github.com/kdlbs/kandev/pull/1478))
+- link tasks to github references ([#1471](https://github.com/kdlbs/kandev/pull/1471))
+- add github repo filter search ([#1476](https://github.com/kdlbs/kandev/pull/1476))
+- add subtask completion trigger ([#1473](https://github.com/kdlbs/kandev/pull/1473))
+- improve ci auto-fix prompt control ([#1474](https://github.com/kdlbs/kandev/pull/1474))
+- add native kandev launcher ([#1391](https://github.com/kdlbs/kandev/pull/1391))
+- add CI PR automation controls ([#1446](https://github.com/kdlbs/kandev/pull/1446))
+- surface PR merge-conflict & mergeability state in the CI popover ([#1448](https://github.com/kdlbs/kandev/pull/1448))
+- sync task preferences across devices ([#1440](https://github.com/kdlbs/kandev/pull/1440))
+- remove nextjs production runtime ([#1389](https://github.com/kdlbs/kandev/pull/1389))
+
+### Bug Fixes
+
+- support unsigned desktop releases ([#1520](https://github.com/kdlbs/kandev/pull/1520))
+- handle windows desktop runtime helper mode ([#1519](https://github.com/kdlbs/kandev/pull/1519))
+- preserve pinned task sessions ([#1517](https://github.com/kdlbs/kandev/pull/1517))
+- resync queued state on mobile resume ([#1514](https://github.com/kdlbs/kandev/pull/1514))
+- improve mobile kanban controls ([#1515](https://github.com/kdlbs/kandev/pull/1515))
+- restore task create repo from settings ([#1513](https://github.com/kdlbs/kandev/pull/1513))
+- improve mobile chat input controls ([#1477](https://github.com/kdlbs/kandev/pull/1477))
+- reuse worktrees for same-task handoffs ([#1510](https://github.com/kdlbs/kandev/pull/1510))
+- preserve task repo on rename updates ([#1511](https://github.com/kdlbs/kandev/pull/1511))
+- prime task create last-used cache before dialog effects ([#1509](https://github.com/kdlbs/kandev/pull/1509))
+- improve pr ci automation reliability ([#1508](https://github.com/kdlbs/kandev/pull/1508))
+- stop iOS focus-zoom on mobile text fields ([#1501](https://github.com/kdlbs/kandev/pull/1501))
+- restore create task selector scrolling ([#1502](https://github.com/kdlbs/kandev/pull/1502))
+- persist profiles for deferred MCP tasks ([#1503](https://github.com/kdlbs/kandev/pull/1503))
+- recreate stale host utility instances ([#1500](https://github.com/kdlbs/kandev/pull/1500)) ([#1504](https://github.com/kdlbs/kandev/pull/1504))
+- target active passthrough session in composer ([#1505](https://github.com/kdlbs/kandev/pull/1505))
+- paginate github check run fetching ([#1506](https://github.com/kdlbs/kandev/pull/1506))
+- enforce single workflow start step ([#1507](https://github.com/kdlbs/kandev/pull/1507))
+- prevent leaked agent processes on shutdown ([#1498](https://github.com/kdlbs/kandev/pull/1498))
+- update ACP SDK large frame handling ([#1496](https://github.com/kdlbs/kandev/pull/1496))
+- auto-fit wide mermaid diagrams ([#1495](https://github.com/kdlbs/kandev/pull/1495))
+- prevent invalid MCP task sessions ([#1494](https://github.com/kdlbs/kandev/pull/1494))
+- debug task dialog selection restore ([#1493](https://github.com/kdlbs/kandev/pull/1493))
+- recreate github review tasks after reset ([#1492](https://github.com/kdlbs/kandev/pull/1492))
+- clean office workspace data on delete ([#1486](https://github.com/kdlbs/kandev/pull/1486))
+- make schema migrations replayable ([#1489](https://github.com/kdlbs/kandev/pull/1489))
+- persist self-managed gitlab host ([#1488](https://github.com/kdlbs/kandev/pull/1488))
+- preserve github workspace context ([#1487](https://github.com/kdlbs/kandev/pull/1487))
+- dispatch Sentry issues for watches filtering on multiple levels ([#1475](https://github.com/kdlbs/kandev/pull/1475)) by @nlenepveu
+- show purple merged icon for recently merged PRs ([#1483](https://github.com/kdlbs/kandev/pull/1483))
+- polish task dialog popovers and CI block icons ([#1472](https://github.com/kdlbs/kandev/pull/1472))
+- expand ~ home links and report missing file paths cleanly ([#1468](https://github.com/kdlbs/kandev/pull/1468)) by @ClemDNL
+- stop task runtimes from leaking ([#1465](https://github.com/kdlbs/kandev/pull/1465))
+- avoid invalid opencode inline comments ([#1464](https://github.com/kdlbs/kandev/pull/1464))
+- show pointer cursor on hover over enabled switches ([#1467](https://github.com/kdlbs/kandev/pull/1467))
+- show queued CI auto-fix prompts in order ([#1463](https://github.com/kdlbs/kandev/pull/1463))
+- support issue links in remote task dialog ([#1462](https://github.com/kdlbs/kandev/pull/1462))
+- keep CI popover open when cursor moves onto it ([#1461](https://github.com/kdlbs/kandev/pull/1461))
+- expose session mcp to cursor acp ([#1460](https://github.com/kdlbs/kandev/pull/1460))
+- stop run-mode automation agents ([#1459](https://github.com/kdlbs/kandev/pull/1459))
+- inherit workflow default agent profile when auto-starting a profile-less session ([#1450](https://github.com/kdlbs/kandev/pull/1450)) by @nlenepveu
+- load feature toggles on mount ([#1454](https://github.com/kdlbs/kandev/pull/1454))
+- stop CI auto-fix on non-actionable feedback ([#1452](https://github.com/kdlbs/kandev/pull/1452))
+- preserve kanban card runtime state ([#1443](https://github.com/kdlbs/kandev/pull/1443))
+- keep start-agent tasks scheduling ([#1445](https://github.com/kdlbs/kandev/pull/1445))
+- constrain dialog text inputs ([#1437](https://github.com/kdlbs/kandev/pull/1437))
+- restore debug flag in Vite shell ([#1442](https://github.com/kdlbs/kandev/pull/1442))
+- constrain ci checks popover height ([#1441](https://github.com/kdlbs/kandev/pull/1441))
+- focus changes panel on git updates ([#1436](https://github.com/kdlbs/kandev/pull/1436))
+- restore SPA favicon assets ([#1438](https://github.com/kdlbs/kandev/pull/1438))
+- suppress kanban spinner for TODO tasks ([#1399](https://github.com/kdlbs/kandev/pull/1399))
+
+### Performance
+
+- tame browser-grinding cumulative diffs during large rebases ([#1430](https://github.com/kdlbs/kandev/pull/1430))
+
+### Documentation
+
+- refresh harness guidance ([#1458](https://github.com/kdlbs/kandev/pull/1458))
+
 ## 0.65.0 - 2026-06-18
 
 ### Bug Fixes

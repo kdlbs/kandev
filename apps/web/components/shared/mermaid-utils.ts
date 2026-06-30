@@ -12,6 +12,31 @@ export function cleanupMermaidOrphans(id: string): void {
   document.getElementById(`d${id}`)?.remove();
 }
 
+type MermaidFitScaleInput = {
+  viewportWidth: number;
+  svgWidth: number;
+};
+
+function clampScale(scale: number): number {
+  return Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale));
+}
+
+export function calculateMermaidFitScale({
+  viewportWidth,
+  svgWidth,
+}: MermaidFitScaleInput): number {
+  if (viewportWidth <= 0 || svgWidth <= 0) return DEFAULT_SCALE;
+  const fitScale = Math.min(DEFAULT_SCALE, viewportWidth / svgWidth);
+  return clampScale(fitScale);
+}
+
+export function getElementContentWidth(element: HTMLElement): number {
+  const style = window.getComputedStyle(element);
+  const padding =
+    Number.parseFloat(style.paddingLeft || "0") + Number.parseFloat(style.paddingRight || "0");
+  return Math.max(0, element.clientWidth - padding);
+}
+
 export function emitMermaidRenderError(message: string): void {
   document.dispatchEvent(new CustomEvent(MERMAID_ERROR_EVENT, { detail: { message } }));
 }

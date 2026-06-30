@@ -40,6 +40,7 @@ type executorStore interface {
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	// Session worktree
 	CreateTaskSessionWorktree(ctx context.Context, sessionWorktree *models.TaskSessionWorktree) error
+	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error)
 	// Repository entity
 	GetRepository(ctx context.Context, id string) (*models.Repository, error)
 	// Executor
@@ -59,6 +60,7 @@ type executorStore interface {
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	CreateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error
 	ListTaskEnvironmentRepos(ctx context.Context, envID string) ([]*models.TaskEnvironmentRepo, error)
+	UpdateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error
 	// Session history + plan (for context handover)
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
@@ -311,6 +313,11 @@ type LaunchAgentRequest struct {
 	// Task directory mode: place worktree at ~/.kandev/tasks/{TaskDirName}/{RepoName}/
 	TaskDirName string // Semantic task directory name (e.g. "fix-bug_ab12")
 	RepoName    string // Repository name used as subdirectory inside the task directory
+	// BranchSlug, when non-empty, suffixes the top-level single-repo path.
+	BranchSlug string
+	// BranchIdentitySlug is the stable branch key for top-level single-repo
+	// reuse. It may be non-empty when BranchSlug is empty to preserve a flat path.
+	BranchIdentitySlug string
 
 	// Repositories carries one entry per repository when the launch is multi-repo.
 	// When non-empty it is the source of truth and the legacy single-repo
@@ -343,11 +350,16 @@ type RepoSpec struct {
 	RepoSetupScript      string
 	RepoCleanupScript    string
 	CopyFiles            string
-	// BranchSlug, when non-empty, nests the worktree under the repo dir so
-	// the same repo can host multiple branches within one task. Set by the
+	// BranchSlug, when non-empty, suffixes the repo dir so the same repo can
+	// host multiple branch worktrees as siblings within one task. Set by the
 	// orchestrator when buildRepoSpecs detects multiple rows sharing a
 	// RepositoryID; empty otherwise to preserve the single-branch layout.
 	BranchSlug string
+
+	// BranchIdentitySlug is the stable branch key used for worktree reuse and
+	// persisted environment metadata. It may be non-empty even when BranchSlug
+	// is empty so the primary branch can keep the legacy flat path.
+	BranchIdentitySlug string
 }
 
 // McpModeConfig activates config-mode MCP tools (workflow steps, agents, MCP
@@ -424,6 +436,7 @@ type LaunchAgentResponse struct {
 // API surface. One entry per repository prepared during a multi-repo launch.
 type RepoWorktreeResult struct {
 	RepositoryID   string
+	BranchSlug     string
 	WorktreeID     string
 	WorktreeBranch string
 	WorktreePath   string
@@ -481,6 +494,16 @@ type TaskStateChangeFunc func(ctx context.Context, taskID string, state v1.TaskS
 // publish events (e.g. WebSocket notifications) alongside the DB update.
 type SessionStateChangeFunc func(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error
 
+// SessionStartingFunc is called when the executor has prepared/resumed an
+// execution and needs to mark the session STARTING while preserving other
+// session-row updates such as metadata. promoteTask controls whether the
+// callback should also move the parent task to IN_PROGRESS immediately.
+type SessionStartingFunc func(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error
+
+// TaskReviewStateReconcileFunc is called when runtime work stopped and the
+// parent task should move to REVIEW only if no session is still STARTING/RUNNING.
+type TaskReviewStateReconcileFunc func(ctx context.Context, taskID, completedSessionID string)
+
 // AgentStartFailedFunc is called when the agent process fails to start.
 // It receives the task/session/execution IDs and the error. fromResume is true
 // when the failure occurred during a background session resume (rather than a
@@ -527,6 +550,16 @@ type Executor struct {
 	// Set by the orchestrator to route through updateTaskSessionState which
 	// updates the DB and publishes WebSocket events.
 	onSessionStateChange SessionStateChangeFunc
+
+	// Callback for STARTING writes that carry full session-row changes. Set by
+	// the orchestrator so launch/resume/model-switch transitions serialize with
+	// runtime task-state reconciliation.
+	onSessionStarting SessionStartingFunc
+
+	// Callback for REVIEW reconciliation after runtime start failures. Set by the
+	// orchestrator so failed-start writes share the same serialized guard as
+	// normal turn completion.
+	onTaskReviewStateReconcile TaskReviewStateReconcileFunc
 
 	// Callback for agent process start failures. When set, the executor
 	// delegates failure handling to this callback, allowing the orchestrator
@@ -618,6 +651,17 @@ func (e *Executor) SetOnTaskStateChange(fn TaskStateChangeFunc) {
 // which updates the DB and publishes WebSocket events to the frontend.
 func (e *Executor) SetOnSessionStateChange(fn SessionStateChangeFunc) {
 	e.onSessionStateChange = fn
+}
+
+// SetOnSessionStarting sets a callback for full session-row STARTING updates.
+func (e *Executor) SetOnSessionStarting(fn SessionStartingFunc) {
+	e.onSessionStarting = fn
+}
+
+// SetOnTaskReviewStateReconcile sets the guarded task REVIEW reconciliation
+// callback used after resume/start failures.
+func (e *Executor) SetOnTaskReviewStateReconcile(fn TaskReviewStateReconcileFunc) {
+	e.onTaskReviewStateReconcile = fn
 }
 
 // SetRepoCloner sets the cloner used to clone provider-backed repositories on launch.

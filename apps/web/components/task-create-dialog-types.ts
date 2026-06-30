@@ -100,6 +100,9 @@ export type StoreSelections = {
   authLoaded: boolean;
   executors: Executor[];
   workspaceDefaults: Workspace | null | undefined;
+  userSettingsLoaded?: boolean;
+  lastUsedAgentProfileId?: string | null;
+  lastUsedExecutorProfileId?: string | null;
 };
 
 export type DialogComputedValues = {
@@ -164,6 +167,16 @@ export type TaskCreateEffectsArgs = {
   workspaceDefaults: Workspace | null | undefined;
   toast: ReturnType<typeof useToast>["toast"];
   workflows: Array<{ id: string; agent_profile_id?: string }>;
+  /** Store-backed last-used repository. Used when the localStorage mirror has not been primed yet. */
+  lastUsedRepositoryId?: string | null;
+  /** Whether DB-backed user settings are loaded, or a best-effort fetch has settled. */
+  userSettingsLoaded?: boolean;
+  /** Store-backed last-used agent profile. Used when the localStorage mirror has not been primed yet. */
+  lastUsedAgentProfileId?: string | null;
+  /** Store-backed last-used executor profile. Used when the localStorage mirror has not been primed yet. */
+  lastUsedExecutorProfileId?: string | null;
+  /** Store-backed last-used branch. Used when the localStorage mirror has not been primed yet. */
+  lastUsedBranch?: string | null;
   /**
    * True when the currently-selected executor is the local-host one (no
    * worktree, no container). Drives the "reset row.branch on local switch"
@@ -325,6 +338,7 @@ export type SubmitHandlersDeps = {
   ) => void;
   onCreateSession?: (data: { prompt: string; agentProfileId: string; executorId: string }) => void;
   onOpenChange: (open: boolean) => void;
+  preserveTaskCreateLastUsedOnClose?: () => void;
   taskId: string | null;
   parentTaskId?: string;
   descriptionInputRef: React.RefObject<TaskFormInputsHandle | null>;
@@ -405,6 +419,8 @@ export type DialogFormBodyProps = {
   workflowAgentLocked: boolean;
   /** Workspace repositories — driven into the chip row for repo + branch picks. */
   repositories: Repository[];
+  lastUsedBranch?: string | null;
+  userSettingsLoaded?: boolean;
   /** Computed in the parent: single-row + local executor + not URL mode. */
   freshBranchAvailable: boolean;
   /**

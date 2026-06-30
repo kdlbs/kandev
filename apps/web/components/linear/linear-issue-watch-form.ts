@@ -47,6 +47,10 @@ export interface FormState {
   estimateMax: string;
   workflowId: string;
   workflowStepId: string;
+  /** Optional repository binding; "" = unbound (repo-less task). */
+  repositoryId: string;
+  /** Base branch for the worktree; "" = the repository's default branch. */
+  baseBranch: string;
   agentProfileId: string;
   executorProfileId: string;
   prompt: string;
@@ -77,6 +81,8 @@ export function makeEmptyForm(workspaceId: string): FormState {
     estimateMax: "",
     workflowId: "",
     workflowStepId: "",
+    repositoryId: "",
+    baseBranch: "",
     agentProfileId: "",
     executorProfileId: "",
     prompt: DEFAULT_LINEAR_ISSUE_WATCH_PROMPT,
@@ -106,6 +112,8 @@ export function formStateFromWatch(w: LinearIssueWatch): FormState {
     estimateMax: estimateString(f.estimateMax),
     workflowId: w.workflowId,
     workflowStepId: w.workflowStepId,
+    repositoryId: w.repositoryId ?? "",
+    baseBranch: w.baseBranch ?? "",
     agentProfileId: w.agentProfileId,
     executorProfileId: w.executorProfileId,
     prompt: w.prompt || DEFAULT_LINEAR_ISSUE_WATCH_PROMPT,
@@ -169,6 +177,8 @@ export function buildWatchPayload(form: FormState): {
   filter: LinearSearchFilter;
   workflowId: string;
   workflowStepId: string;
+  repositoryId: string;
+  baseBranch: string;
   agentProfileId: string;
   executorProfileId: string;
   prompt: string;
@@ -183,6 +193,10 @@ export function buildWatchPayload(form: FormState): {
     filter: buildFilterPayload(form),
     workflowId: form.workflowId,
     workflowStepId: form.workflowStepId,
+    // An empty repositoryId clears the binding; the empty base branch is sent
+    // verbatim so the backend fills it with the repo's default at save time.
+    repositoryId: form.repositoryId,
+    baseBranch: form.repositoryId ? form.baseBranch : "",
     agentProfileId: form.agentProfileId,
     executorProfileId: form.executorProfileId,
     prompt: form.prompt,

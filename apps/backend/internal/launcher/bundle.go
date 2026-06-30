@@ -4,13 +4,23 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 )
 
 type runtimeBundle struct {
 	Dir      string
 	Launcher string
 	Source   string
+}
+
+type agentctlRemoteHelper struct {
+	Name  string
+	Label string
+}
+
+var requiredAgentctlRemoteHelpers = []agentctlRemoteHelper{
+	{Name: "agentctl-linux-amd64", Label: "agentctl linux/amd64 helper"},
+	{Name: "agentctl-darwin-arm64", Label: "agentctl darwin/arm64 helper"},
+	{Name: "agentctl-darwin-amd64", Label: "agentctl darwin/amd64 helper"},
 }
 
 func resolveRuntimeBundle() (runtimeBundle, error) {
@@ -30,15 +40,13 @@ func validateRuntimeBundle(dir, source string) (runtimeBundle, error) {
 	if !exists(agentctl) {
 		return runtimeBundle{}, fmt.Errorf("agentctl binary not found in bundle at %s", agentctl)
 	}
-	agentctlLinuxAMD64 := filepath.Join(dir, "bin", "agentctl-linux-amd64")
-	if requiresAgentctlLinuxAMD64(runtime.GOOS, runtime.GOARCH) && !exists(agentctlLinuxAMD64) {
-		return runtimeBundle{}, fmt.Errorf("agentctl linux/amd64 helper not found in bundle at %s", agentctlLinuxAMD64)
+	for _, helper := range requiredAgentctlRemoteHelpers {
+		path := filepath.Join(dir, "bin", helper.Name)
+		if !exists(path) {
+			return runtimeBundle{}, fmt.Errorf("%s not found in bundle at %s", helper.Label, path)
+		}
 	}
 	return runtimeBundle{Dir: dir, Launcher: launcher, Source: source}, nil
-}
-
-func requiresAgentctlLinuxAMD64(goos, goarch string) bool {
-	return goos != "linux" || goarch != "amd64"
 }
 
 func executableName(name string) string {

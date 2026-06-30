@@ -228,17 +228,20 @@ func (s *Service) applyBatchedNumberedWatch(
 	// Bump last_checked_at to suppress retry storms and surface SyncFailed
 	// so the WS handler can flag the result as permanent for the frontend.
 	if s.isRepoCachedAsMissing(w.Owner, w.Repo) {
-		_ = s.store.UpdatePRWatchTimestamps(ctx, w.ID, now, nil, "", "")
+		_ = s.store.UpdatePRWatchTimestamps(ctx, w.ID, now, w.LastCommentAt, "", "")
 		return PRWatchSyncResult{Watch: w, SyncFailed: true}
 	}
 	status, ok := statusByKey[prStatusCacheKey(w.Owner, w.Repo, w.PRNumber)]
 	if !ok || status == nil {
 		// Alias missing — best-effort liveness bump so we don't immediately re-probe.
-		_ = s.store.UpdatePRWatchTimestamps(ctx, w.ID, now, nil, "", "")
+		_ = s.store.UpdatePRWatchTimestamps(ctx, w.ID, now, w.LastCommentAt, "", "")
 		return PRWatchSyncResult{Watch: w}
 	}
-	changed := status.ChecksState != w.LastCheckStatus || status.ReviewState != w.LastReviewState
-	if err := s.store.UpdatePRWatchTimestamps(ctx, w.ID, now, nil, status.ChecksState, status.ReviewState); err != nil {
+	changed := status.ChecksState != w.LastCheckStatus ||
+		status.ReviewState != w.LastReviewState ||
+		prWatchFeedbackUpdatedSinceWatch(w, status)
+	commentAt := prWatchFeedbackWatermark(w, status)
+	if err := s.store.UpdatePRWatchTimestamps(ctx, w.ID, now, commentAt, status.ChecksState, status.ReviewState); err != nil {
 		s.logger.Error("failed to update PR watch timestamps", zap.String("id", w.ID), zap.Error(err))
 	}
 	// Gap-fill: a numbered watch can exist even when its exact task_pr row was

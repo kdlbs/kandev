@@ -82,17 +82,42 @@ func (s *Service) publishQueueStatusEvent(ctx context.Context, sessionID string)
 // Preserves the original Metadata (e.g. sender_task_id from message_task_kandev)
 // so attribution survives transient failures + retries.
 func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.QueuedMessage, queuedBy string) {
-	requeuedMsg, queueErr := s.messageQueue.QueueMessageWithMetadata(
-		ctx,
-		queuedMsg.SessionID,
-		queuedMsg.TaskID,
-		queuedMsg.Content,
-		queuedMsg.Model,
-		queuedBy,
-		queuedMsg.PlanMode,
-		queuedMsg.Attachments,
-		queuedMsg.Metadata,
+	coalesceKey := messageCoalesceKey(queuedMsg)
+	if queuedMsg.QueuedBy != "" && coalesceKey != "" {
+		queuedBy = queuedMsg.QueuedBy
+	}
+	var (
+		requeuedMsg *messagequeue.QueuedMessage
+		replaced    bool
+		queueErr    error
 	)
+	if coalesceKey != "" {
+		requeuedMsg, replaced, queueErr = s.messageQueue.QueueMessageWithCoalesceKey(
+			ctx,
+			queuedMsg.SessionID,
+			queuedMsg.TaskID,
+			queuedMsg.Content,
+			queuedMsg.Model,
+			queuedBy,
+			queuedMsg.PlanMode,
+			queuedMsg.Attachments,
+			queuedMsg.Metadata,
+			coalesceKey,
+			true,
+		)
+	} else {
+		requeuedMsg, queueErr = s.messageQueue.QueueMessageWithMetadata(
+			ctx,
+			queuedMsg.SessionID,
+			queuedMsg.TaskID,
+			queuedMsg.Content,
+			queuedMsg.Model,
+			queuedBy,
+			queuedMsg.PlanMode,
+			queuedMsg.Attachments,
+			queuedMsg.Metadata,
+		)
+	}
 	if queueErr != nil {
 		s.logger.Error("failed to requeue message",
 			zap.String("session_id", queuedMsg.SessionID),
@@ -107,8 +132,25 @@ func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.Qu
 		zap.String("task_id", queuedMsg.TaskID),
 		zap.String("old_queue_id", queuedMsg.ID),
 		zap.String("new_queue_id", requeuedMsg.ID),
-		zap.String("queued_by", queuedBy))
+		zap.String("queued_by", queuedBy),
+		zap.String("coalesce_key", coalesceKey),
+		zap.Bool("replaced", replaced))
 	s.publishQueueStatusEvent(ctx, queuedMsg.SessionID)
+}
+
+func messageCoalesceKey(queuedMsg *messagequeue.QueuedMessage) string {
+	if queuedMsg == nil || len(queuedMsg.Metadata) == 0 {
+		return ""
+	}
+	value, ok := queuedMsg.Metadata[messagequeue.MetadataCoalesceKey]
+	if !ok {
+		return ""
+	}
+	key, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return key
 }
 
 // handleAgentBootReady handles the boot signal: an agent's ACP session has
@@ -448,6 +490,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 	// Update scheduler and remove from queue
 	s.scheduler.HandleTaskCompleted(data.TaskID, true)
 	s.scheduler.RemoveTask(data.TaskID)
+	s.markExecutionCompleted(data.SessionID, data.AgentExecutionID)
 
 	// Check for workflow transition based on session's current step.
 	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
@@ -491,8 +534,9 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 		return
 	}
 
+	s.completeTurnForSession(context.WithoutCancel(ctx), data.SessionID)
+
 	if s.sessionHasPendingClarification(ctx, data.SessionID) {
-		s.completeTurnForSession(context.WithoutCancel(ctx), data.SessionID)
 		s.logger.Info("deferring on_turn_complete on agent.completed while clarification is pending",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID))
@@ -506,29 +550,18 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 
 	transitioned := s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session)
 
-	// Agent-exit path: unlike the streaming complete event, this path does NOT
-	// itself complete the open turn or clear the session's RUNNING state — it
-	// relies entirely on the workflow engine's on_turn_complete transition.
-	// workflow_transitioned=false means no transition fired, so the session may
-	// still be RUNNING (only the task row moves to REVIEW below) and the chat UI
-	// keeps showing the agent as working. Pairs with the frontend [session:state]
-	// / [session:turns] trace — filter both by the same task_id.
-	s.logger.Debug("agent.completed turn-complete decision (session state not cleared by this path)",
+	// Agent-exit path: processOnTurnCompleteViaEngine handles normal
+	// on_turn_complete transitions. If it did not transition, ensure the
+	// completed session leaves RUNNING and let setSessionWaitingForInput perform
+	// the guarded task REVIEW reconciliation when needed.
+	s.logger.Debug("agent.completed turn-complete decision",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
 		zap.String("session_state", string(session.State)),
 		zap.Bool("workflow_transitioned", transitioned))
 
-	// If no workflow transition occurred, move task to REVIEW state for user review
-	if !transitioned {
-		if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateReview); err != nil {
-			s.logger.Error("failed to update task state to REVIEW",
-				zap.String("task_id", data.TaskID),
-				zap.Error(err))
-		} else {
-			s.logger.Info("task moved to REVIEW state after agent completion",
-				zap.String("task_id", data.TaskID))
-		}
+	if !transitioned && session.State != models.TaskSessionStateWaitingForInput {
+		s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID, session)
 	}
 
 	// Capture a git status snapshot before cleanup so it can be served
@@ -550,6 +583,8 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 		zap.String("session_id", data.SessionID),
 		zap.String("agent_execution_id", data.AgentExecutionID),
 		zap.String("error_message", data.ErrorMessage))
+
+	s.markExecutionFailed(data.SessionID, data.AgentExecutionID)
 
 	// Transient provider errors (529 Overloaded) get a paced, visible
 	// retry-with-backoff before any red banner. This is the ONLY non-terminal
@@ -589,15 +624,11 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 		return
 	}
 
-	// No session — fall back to scheduler retry + task to REVIEW.
+	// No session — fall back to scheduler retry + task to REVIEW unless another
+	// session is still working.
 	s.scheduler.HandleTaskCompleted(data.TaskID, false)
 	s.scheduler.RetryTask(data.TaskID)
-
-	if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateReview); err != nil {
-		s.logger.Error("failed to update task state to REVIEW after failure",
-			zap.String("task_id", data.TaskID),
-			zap.Error(err))
-	}
+	s.writeTaskReviewState(ctx, data.TaskID, data.SessionID)
 
 	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
 }
@@ -670,12 +701,8 @@ func (s *Service) handleResumeFailure(ctx context.Context, data watcher.AgentEve
 	// 3. Set session to WAITING_FOR_INPUT (not FAILED) so the user can interact.
 	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, models.TaskSessionStateWaitingForInput, "", false)
 
-	// 4. Ensure task is in REVIEW state.
-	if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateReview); err != nil {
-		s.logger.Warn("failed to set task to REVIEW after resume failure",
-			zap.String("task_id", data.TaskID),
-			zap.Error(err))
-	}
+	// 4. Ensure task is in REVIEW state unless another session is still working.
+	s.writeTaskReviewState(ctx, data.TaskID, data.SessionID)
 
 	return true
 }
@@ -715,12 +742,8 @@ func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.Age
 	}
 	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, nextState, data.ErrorMessage, false)
 
-	// Ensure task is in REVIEW state.
-	if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateReview); err != nil {
-		s.logger.Warn("failed to set task to REVIEW after recoverable failure",
-			zap.String("task_id", data.TaskID),
-			zap.Error(err))
-	}
+	// Ensure task is in REVIEW state unless another session is still working.
+	s.writeTaskReviewState(ctx, data.TaskID, data.SessionID)
 
 	// Clean up the agent execution.
 	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)

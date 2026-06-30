@@ -108,6 +108,47 @@ func TestConvertPatPR_Merged(t *testing.T) {
 	}
 }
 
+func TestPATClient_ListCheckRunsPaginatesCheckRuns(t *testing.T) {
+	var requestedPages []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/acme/widget/commits/sha/status" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"statuses":[]}`))
+			return
+		}
+		if r.URL.Path != "/repos/acme/widget/commits/sha/check-runs" {
+			t.Errorf("unexpected path %q", r.URL.Path)
+			http.Error(w, "unexpected path", http.StatusInternalServerError)
+			return
+		}
+		requestedPages = append(requestedPages, r.URL.Query().Get("page"))
+		if r.URL.Query().Get("per_page") != "100" {
+			t.Errorf("per_page = %q, want 100", r.URL.Query().Get("per_page"))
+		}
+		if r.URL.Query().Get("page") == "2" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"check_runs":[{"name":"late failure","status":"completed","conclusion":"failure","html_url":"https://checks/fail"}]}`))
+			return
+		}
+		w.Header().Set("Link", `<https://api.github.com/repos/acme/widget/commits/sha/check-runs?per_page=100&page=2>; rel="next"`)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"check_runs":[{"name":"new success","status":"completed","conclusion":"success","html_url":"https://checks/ok"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newPATClientPointingAt(t, srv.URL)
+	checks, err := c.ListCheckRuns(context.Background(), "acme", "widget", "sha")
+	if err != nil {
+		t.Fatalf("ListCheckRuns: %v", err)
+	}
+	if len(requestedPages) != 2 {
+		t.Fatalf("requested pages = %v, want first page and page 2", requestedPages)
+	}
+	if got := computeOverallCheckStatus(checks); got != "failure" {
+		t.Fatalf("overall check status = %q, want failure; checks=%#v", got, checks)
+	}
+}
+
 func TestConvertPatPR_Mergeable(t *testing.T) {
 	mergeable := true
 	raw := &patPR{
@@ -152,6 +193,50 @@ func TestConvertPatPR_MergeableState(t *testing.T) {
 	pr := convertPatPR(raw, "o", "r")
 	if pr.MergeableState != "clean" {
 		t.Errorf("expected normalized mergeable_state=clean, got %q", pr.MergeableState)
+	}
+}
+
+func TestPATClient_ListCheckRuns_PaginatesCheckRuns(t *testing.T) {
+	var checkRunQueries []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/acme/widget/commits/sha/check-runs":
+			checkRunQueries = append(checkRunQueries, r.URL.RawQuery)
+			switch r.URL.Query().Get("page") {
+			case "", "1":
+				w.Header().Set("Link", `<`+githubAPIBase+`/repos/acme/widget/commits/sha/check-runs?per_page=100&page=2>; rel="next"`)
+				_, _ = w.Write([]byte(`{"check_runs":[{"name":"unit","status":"completed","conclusion":"success","html_url":"https://ci/unit"}]}`))
+			case "2":
+				_, _ = w.Write([]byte(`{"check_runs":[{"name":"lint","status":"completed","conclusion":"failure","html_url":"https://ci/lint"}]}`))
+			default:
+				t.Errorf("unexpected check-runs page %q", r.URL.Query().Get("page"))
+				http.Error(w, "unexpected page", http.StatusInternalServerError)
+			}
+		case "/repos/acme/widget/commits/sha/status":
+			_, _ = w.Write([]byte(`{"statuses":[]}`))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+			http.Error(w, "unexpected path", http.StatusInternalServerError)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newPATClientPointingAt(t, srv.URL)
+	checks, err := c.ListCheckRuns(context.Background(), "acme", "widget", "sha")
+	if err != nil {
+		t.Fatalf("ListCheckRuns: %v", err)
+	}
+	if len(checks) != 2 {
+		t.Fatalf("checks = %d, want 2: %+v", len(checks), checks)
+	}
+	if checks[1].Name != "lint" || checks[1].Conclusion != "failure" {
+		t.Fatalf("expected failed lint check from page 2, got %+v", checks[1])
+	}
+	if len(checkRunQueries) != 2 {
+		t.Fatalf("check-runs requests = %d, want 2 (%v)", len(checkRunQueries), checkRunQueries)
+	}
+	if !strings.Contains(checkRunQueries[0], "per_page=100") {
+		t.Fatalf("first check-runs request should request per_page=100, got %q", checkRunQueries[0])
 	}
 }
 

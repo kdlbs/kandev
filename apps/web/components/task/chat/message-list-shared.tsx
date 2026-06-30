@@ -55,6 +55,28 @@ export function getLastTurnGroupId(items: RenderItem[]) {
   return null;
 }
 
+export function getConversationLoadingState(params: {
+  messagesLoading: boolean;
+  messagesCount: number;
+  isWorking: boolean;
+  sessionState?: TaskSessionState | null;
+}) {
+  const isInitialLoading = params.messagesLoading && params.messagesCount === 0;
+  const isNonLoadableSession =
+    !params.sessionState ||
+    params.sessionState === "CREATED" ||
+    params.sessionState === "FAILED" ||
+    params.sessionState === "COMPLETED" ||
+    params.sessionState === "CANCELLED";
+  return {
+    isInitialLoading,
+    showLoadingState:
+      params.messagesLoading &&
+      !params.isWorking &&
+      (params.messagesCount > 0 || !isNonLoadableSession),
+  };
+}
+
 // The chat banner stays visible until the user explicitly dismisses it, even
 // after the agent resumes — so the user can read the full error message at
 // their own pace. The sidebar icon, by contrast, also auto-hides once the
@@ -163,9 +185,12 @@ export function MessageListStatus({
         </div>
       )}
       {showLoadingState && (
-        <div className="flex items-center justify-center py-8 text-muted-foreground">
+        <div
+          className="flex items-center justify-center py-8 text-muted-foreground"
+          data-testid="conversation-loading-state"
+        >
           <GridSpinner className="text-primary mr-2" />
-          <span>Loading messages...</span>
+          <span>Loading conversation...</span>
         </div>
       )}
       {!messagesLoading && !isInitialLoading && messagesCount === 0 && (

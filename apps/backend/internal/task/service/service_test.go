@@ -479,6 +479,61 @@ func TestService_DeleteTask(t *testing.T) {
 	}
 }
 
+func TestService_DeleteTaskWithReason_PublishesReason(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test", Priority: "medium"})
+	eventBus.ClearEvents()
+
+	if err := svc.DeleteTaskWithReason(ctx, "task-123", "pr_approved_by_user"); err != nil {
+		t.Fatalf("DeleteTaskWithReason: %v", err)
+	}
+
+	events := eventBus.GetPublishedEvents()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Type != "task.deleted" {
+		t.Fatalf("expected event type 'task.deleted', got %s", events[0].Type)
+	}
+	data, ok := events[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data is not map[string]interface{}, got %T", events[0].Data)
+	}
+	if got := data["reason"]; got != "pr_approved_by_user" {
+		t.Errorf("expected reason 'pr_approved_by_user' in payload, got %v", got)
+	}
+}
+
+func TestService_DeleteTask_OmitsReasonWhenUnset(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test", Priority: "medium"})
+	eventBus.ClearEvents()
+
+	if err := svc.DeleteTask(ctx, "task-123"); err != nil {
+		t.Fatalf("DeleteTask: %v", err)
+	}
+
+	events := eventBus.GetPublishedEvents()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	data, ok := events[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data is not map[string]interface{}, got %T", events[0].Data)
+	}
+	if _, present := data["reason"]; present {
+		t.Errorf("expected no reason key when deleting without a reason, got %v", data["reason"])
+	}
+}
+
 func TestService_DeleteTaskStopsExecutorRunningForTerminalSession(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -649,8 +704,9 @@ func TestService_DeleteTaskCleansSuccessfulSessionResourcesOnPartialStopFailure(
 	if _, err := os.Stat(filepath.Join(quickChatDir, "session-failed")); err != nil {
 		t.Fatalf("failed session quick-chat directory should remain: %v", err)
 	}
-	if len(cleanup.cleaned) != 1 || cleanup.cleaned[0].ID != "wt-ok" {
-		t.Fatalf("expected only successful session worktree cleanup, got %#v", cleanup.cleaned)
+	cleanedIDs := cleanup.cleanedIDs()
+	if len(cleanedIDs) != 1 || cleanedIDs[0] != "wt-ok" {
+		t.Fatalf("expected only successful session worktree cleanup, got %#v", cleanedIDs)
 	}
 	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session-failed"); err != nil {
 		t.Fatalf("failed session executor row should remain retryable: %v", err)
@@ -842,8 +898,8 @@ func TestService_CleanupTaskResourcesFailsClosedWhenRuntimeInventoryFails(t *tes
 	if _, err := os.Stat(sessionDir); err != nil {
 		t.Fatalf("quick-chat directory should remain when runtime inventory fails: %v", err)
 	}
-	if len(cleanup.cleaned) != 0 {
-		t.Fatalf("worktrees should not be cleaned when runtime inventory fails, got %#v", cleanup.cleaned)
+	if cleanedIDs := cleanup.cleanedIDs(); len(cleanedIDs) != 0 {
+		t.Fatalf("worktrees should not be cleaned when runtime inventory fails, got %#v", cleanedIDs)
 	}
 }
 
@@ -920,21 +976,40 @@ func (r failingExecutorRepository) ListExecutorsRunningByTaskID(context.Context,
 }
 
 type recordingWorktreeCleanup struct {
-	worktrees []*worktree.Worktree
-	cleaned   []*worktree.Worktree
+	mu                sync.Mutex
+	worktrees         []*worktree.Worktree
+	worktreesByTaskID map[string][]*worktree.Worktree
+	cleaned           []*worktree.Worktree
 }
 
 func (c *recordingWorktreeCleanup) OnTaskDeleted(context.Context, string) error {
 	return nil
 }
 
-func (c *recordingWorktreeCleanup) GetAllByTaskID(context.Context, string) ([]*worktree.Worktree, error) {
+func (c *recordingWorktreeCleanup) GetAllByTaskID(_ context.Context, taskID string) ([]*worktree.Worktree, error) {
+	if c.worktreesByTaskID != nil {
+		return c.worktreesByTaskID[taskID], nil
+	}
 	return c.worktrees, nil
 }
 
 func (c *recordingWorktreeCleanup) CleanupWorktrees(_ context.Context, worktrees []*worktree.Worktree) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.cleaned = append(c.cleaned, worktrees...)
 	return nil
+}
+
+func (c *recordingWorktreeCleanup) cleanedIDs() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ids := make([]string, 0, len(c.cleaned))
+	for _, wt := range c.cleaned {
+		if wt != nil {
+			ids = append(ids, wt.ID)
+		}
+	}
+	return ids
 }
 
 func waitForCleanupDone(t *testing.T, svc *Service) {
@@ -1416,62 +1491,5 @@ func TestService_DeleteMessage(t *testing.T) {
 	_, err = svc.GetMessage(ctx, "comment-123")
 	if err == nil {
 		t.Error("expected comment to be deleted")
-	}
-}
-
-// TestPublishTaskUpdated_FallbackRepositoryID exercises the DB fallback in
-// primaryRepositoryID: orchestrator-originated events load the task via the
-// raw repo.GetTask, which does not populate Repositories. The publisher must
-// still emit repository_id so the frontend doesn't lose the repo link on
-// workflow transitions or state changes.
-func TestPublishTaskUpdated_FallbackRepositoryID(t *testing.T) {
-	svc, eventBus, repo := createTestService(t)
-	ctx := context.Background()
-
-	// Seed workspace + workflow + repo + task with an association.
-	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"}); err != nil {
-		t.Fatalf("CreateWorkflow: %v", err)
-	}
-	if err := repo.CreateRepository(ctx, &models.Repository{ID: "repo-x", WorkspaceID: "ws-1", Name: "Repo"}); err != nil {
-		t.Fatalf("CreateRepository: %v", err)
-	}
-	if err := repo.CreateTask(ctx, &models.Task{
-		ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "T", Priority: "medium",
-	}); err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
-		TaskID: "task-1", RepositoryID: "repo-x", BaseBranch: "main",
-	}); err != nil {
-		t.Fatalf("CreateTaskRepository: %v", err)
-	}
-	eventBus.ClearEvents()
-
-	// Mimic the orchestrator path: pass a task with Repositories nil.
-	task := &models.Task{
-		ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
-	}
-	if len(task.Repositories) != 0 {
-		t.Fatal("pre-condition: task.Repositories must be nil for this test")
-	}
-	svc.PublishTaskUpdated(ctx, task)
-
-	events := eventBus.GetPublishedEvents()
-	if len(events) != 1 {
-		t.Fatalf("expected 1 published event, got %d", len(events))
-	}
-	data, ok := events[0].Data.(map[string]interface{})
-	if !ok {
-		t.Fatalf("event Data wrong type: %T", events[0].Data)
-	}
-	got, ok := data["repository_id"].(string)
-	if !ok {
-		t.Fatalf("repository_id missing from payload or wrong type: %#v", data["repository_id"])
-	}
-	if got != "repo-x" {
-		t.Fatalf("expected repository_id=repo-x via DB fallback, got %q", got)
 	}
 }

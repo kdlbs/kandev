@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	githubsvc "github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/repoclone"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
@@ -19,6 +22,268 @@ func newTestLogger() *logger.Logger {
 		Format: "json",
 	})
 	return log
+}
+
+func TestDetectGitDefaultBranchDetachedHEADReturnsEmpty(t *testing.T) {
+	repoPath := t.TempDir()
+	gitDir := filepath.Join(repoPath, ".git")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatalf("mkdir git dir: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(gitDir, "HEAD"),
+		[]byte("3a3f2d3b00000000000000000000000000000000\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write detached HEAD: %v", err)
+	}
+
+	if got := detectGitDefaultBranch(repoPath); got != "" {
+		t.Fatalf("detectGitDefaultBranch = %q, want empty", got)
+	}
+}
+
+func TestResolveReviewBaseBranchRedetectsStoredMasterWhenMainExists(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	workspace, err := harness.taskSvc.CreateWorkspace(ctx, &taskservice.CreateWorkspaceRequest{
+		Name: "Workspace",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	repoPath := t.TempDir()
+	gitDir := filepath.Join(repoPath, ".git")
+	if err := os.MkdirAll(filepath.Join(gitDir, "refs", "remotes", "origin"), 0o755); err != nil {
+		t.Fatalf("mkdir origin refs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/feature/x\n"), 0o644); err != nil {
+		t.Fatalf("write HEAD: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(gitDir, "refs", "remotes", "origin", "HEAD"),
+		[]byte("ref: refs/remotes/origin/master\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write origin HEAD: %v", err)
+	}
+	for _, branch := range []string{"main", "master"} {
+		refPath := filepath.Join(gitDir, "refs", "remotes", "origin", branch)
+		if err := os.WriteFile(refPath, []byte("0000000\n"), 0o644); err != nil {
+			t.Fatalf("write %s ref: %v", branch, err)
+		}
+	}
+	repo, err := harness.taskSvc.CreateRepository(ctx, &taskservice.CreateRepositoryRequest{
+		WorkspaceID:   workspace.ID,
+		Name:          "owner/repo",
+		SourceType:    "provider",
+		LocalPath:     repoPath,
+		Provider:      "github",
+		ProviderOwner: "owner",
+		ProviderName:  "repo",
+		DefaultBranch: "master",
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+
+	adapter := &repositoryResolverAdapter{
+		taskSvc: harness.taskSvc,
+		logger:  newTestLogger(),
+	}
+	if got := adapter.resolveReviewBaseBranch(ctx, repo, repoPath, ""); got != "main" {
+		t.Fatalf("resolveReviewBaseBranch = %q, want main", got)
+	}
+
+	stored, err := harness.taskSvc.GetRepository(ctx, repo.ID)
+	if err != nil {
+		t.Fatalf("GetRepository: %v", err)
+	}
+	if stored.DefaultBranch != "main" {
+		t.Fatalf("stored default_branch = %q, want main", stored.DefaultBranch)
+	}
+}
+
+func TestResolveReviewBaseBranchSkipsNoopPersistForStoredMaster(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	workspace, err := harness.taskSvc.CreateWorkspace(ctx, &taskservice.CreateWorkspaceRequest{
+		Name: "Workspace",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	repoPath := t.TempDir()
+	gitDir := filepath.Join(repoPath, ".git")
+	if err := os.MkdirAll(filepath.Join(gitDir, "refs", "remotes", "origin"), 0o755); err != nil {
+		t.Fatalf("mkdir origin refs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/feature/x\n"), 0o644); err != nil {
+		t.Fatalf("write HEAD: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(gitDir, "refs", "remotes", "origin", "HEAD"),
+		[]byte("ref: refs/remotes/origin/master\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write origin HEAD: %v", err)
+	}
+	refPath := filepath.Join(gitDir, "refs", "remotes", "origin", "master")
+	if err := os.WriteFile(refPath, []byte("0000000\n"), 0o644); err != nil {
+		t.Fatalf("write master ref: %v", err)
+	}
+	repo, err := harness.taskSvc.CreateRepository(ctx, &taskservice.CreateRepositoryRequest{
+		WorkspaceID:   workspace.ID,
+		Name:          "owner/repo",
+		SourceType:    "provider",
+		LocalPath:     repoPath,
+		Provider:      "github",
+		ProviderOwner: "owner",
+		ProviderName:  "repo",
+		DefaultBranch: "master",
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+
+	adapter := &repositoryResolverAdapter{
+		taskSvc: harness.taskSvc,
+		logger:  newTestLogger(),
+	}
+	if got := adapter.resolveReviewBaseBranch(ctx, repo, repoPath, ""); got != "master" {
+		t.Fatalf("resolveReviewBaseBranch = %q, want master", got)
+	}
+
+	stored, err := harness.taskSvc.GetRepository(ctx, repo.ID)
+	if err != nil {
+		t.Fatalf("GetRepository: %v", err)
+	}
+	if !stored.UpdatedAt.Equal(repo.UpdatedAt) {
+		t.Fatalf("stored updated_at = %v, want unchanged %v", stored.UpdatedAt, repo.UpdatedAt)
+	}
+}
+
+func TestResolveReviewBaseBranchKeepsStoredMasterOnHeadFallback(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	workspace, err := harness.taskSvc.CreateWorkspace(ctx, &taskservice.CreateWorkspaceRequest{
+		Name: "Workspace",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	repoPath := t.TempDir()
+	gitDir := filepath.Join(repoPath, ".git")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatalf("mkdir git dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/feature/x\n"), 0o644); err != nil {
+		t.Fatalf("write HEAD: %v", err)
+	}
+	repo, err := harness.taskSvc.CreateRepository(ctx, &taskservice.CreateRepositoryRequest{
+		WorkspaceID:   workspace.ID,
+		Name:          "owner/repo",
+		SourceType:    "provider",
+		LocalPath:     repoPath,
+		Provider:      "github",
+		ProviderOwner: "owner",
+		ProviderName:  "repo",
+		DefaultBranch: "master",
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+
+	adapter := &repositoryResolverAdapter{
+		taskSvc: harness.taskSvc,
+		logger:  newTestLogger(),
+	}
+	if got := adapter.resolveReviewBaseBranch(ctx, repo, repoPath, ""); got != "master" {
+		t.Fatalf("resolveReviewBaseBranch = %q, want master", got)
+	}
+
+	stored, err := harness.taskSvc.GetRepository(ctx, repo.ID)
+	if err != nil {
+		t.Fatalf("GetRepository: %v", err)
+	}
+	if stored.DefaultBranch != "master" {
+		t.Fatalf("stored default_branch = %q, want master", stored.DefaultBranch)
+	}
+	if !stored.UpdatedAt.Equal(repo.UpdatedAt) {
+		t.Fatalf("stored updated_at = %v, want unchanged %v", stored.UpdatedAt, repo.UpdatedAt)
+	}
+}
+
+func TestResolveForReviewRedetectsStoredMasterAfterClonePath(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	workspace, err := harness.taskSvc.CreateWorkspace(ctx, &taskservice.CreateWorkspaceRequest{
+		Name: "Workspace",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	basePath := t.TempDir()
+	repoPath := filepath.Join(basePath, "owner", "repo")
+	gitDir := filepath.Join(repoPath, ".git")
+	if err := os.MkdirAll(filepath.Join(gitDir, "refs", "remotes", "origin"), 0o755); err != nil {
+		t.Fatalf("mkdir origin refs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/feature/x\n"), 0o644); err != nil {
+		t.Fatalf("write HEAD: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(gitDir, "refs", "remotes", "origin", "HEAD"),
+		[]byte("ref: refs/remotes/origin/master\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write origin HEAD: %v", err)
+	}
+	for _, branch := range []string{"main", "master"} {
+		refPath := filepath.Join(gitDir, "refs", "remotes", "origin", branch)
+		if err := os.WriteFile(refPath, []byte("0000000\n"), 0o644); err != nil {
+			t.Fatalf("write %s ref: %v", branch, err)
+		}
+	}
+	repo, err := harness.taskSvc.CreateRepository(ctx, &taskservice.CreateRepositoryRequest{
+		WorkspaceID:   workspace.ID,
+		Name:          "owner/repo",
+		SourceType:    "provider",
+		Provider:      "github",
+		ProviderOwner: "owner",
+		ProviderName:  "repo",
+		DefaultBranch: "master",
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+
+	adapter := &repositoryResolverAdapter{
+		cloner:  repoclone.NewCloner(repoclone.Config{BasePath: basePath}, repoclone.ProtocolHTTPS, "", newTestLogger()),
+		taskSvc: harness.taskSvc,
+		logger:  newTestLogger(),
+	}
+	repoID, baseBranch, err := adapter.ResolveForReview(ctx, workspace.ID, "github", "owner", "repo", "")
+	if err != nil {
+		t.Fatalf("ResolveForReview: %v", err)
+	}
+	if repoID != repo.ID {
+		t.Fatalf("repository ID = %q, want %q", repoID, repo.ID)
+	}
+	if baseBranch != "main" {
+		t.Fatalf("base branch = %q, want main", baseBranch)
+	}
+
+	stored, err := harness.taskSvc.GetRepository(ctx, repo.ID)
+	if err != nil {
+		t.Fatalf("GetRepository: %v", err)
+	}
+	if stored.LocalPath != repoPath {
+		t.Fatalf("stored local_path = %q, want %q", stored.LocalPath, repoPath)
+	}
+	if stored.DefaultBranch != "main" {
+		t.Fatalf("stored default_branch = %q, want main", stored.DefaultBranch)
+	}
 }
 
 func TestGetSessionModel_Caching(t *testing.T) {

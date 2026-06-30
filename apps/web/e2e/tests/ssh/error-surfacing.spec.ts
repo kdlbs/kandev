@@ -62,17 +62,15 @@ test.describe("ssh error surfacing", () => {
     expect(handshake?.error).toMatch(/bastion|proxy|connection refused/i);
   });
 
-  test("unsupported arm64 host surfaces the linux/amd64-only guidance", async ({
+  test("supported platform check surfaces normalized platform output", async ({
     apiClient,
     seedData,
   }) => {
-    // We can't trivially spin up arm64 sshd, but we can assert the message
-    // shape via the existing Verify arch step on the running container.
-    // When the host is the expected x86_64, this step succeeds — that's a
-    // negative control. The arm64 message itself is unit-tested in
-    // executor_ssh_connection_test.go (TestRequireSupportedArch).
+    // We can't trivially spin up every OS/arch SSH target in CI, but we can
+    // assert the successful platform step shape on the running Linux container.
+    // Unsupported platform guidance is unit-tested in executor_ssh_connection_test.go.
     const result = await apiClient.testSSHConnection({
-      name: "Q-arch-control",
+      name: "Q-platform-control",
       host: seedData.sshTarget.host,
       port: seedData.sshTarget.port,
       user: seedData.sshTarget.user,
@@ -80,9 +78,9 @@ test.describe("ssh error surfacing", () => {
       identity_file: seedData.sshTarget.identityFile,
     });
     expect(result.success).toBe(true);
-    const arch = result.steps.find((s) => s.name === "Verify arch");
-    expect(arch?.success).toBe(true);
-    expect(arch?.output).toBe("x86_64");
+    const platform = result.steps.find((s) => s.name === "Verify platform");
+    expect(platform?.success).toBe(true);
+    expect(platform?.output).toBe("linux/amd64");
   });
 
   test("missing agent binary on remote — launch fails with install hint, not raw exec error", async ({

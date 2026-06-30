@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -261,7 +262,10 @@ func wsSyncTaskPR(svc *Service, _ *logger.Logger) func(ctx context.Context, msg 
 	return wsWithField("task_id", func(ctx context.Context, taskID string) (interface{}, error) {
 		prs, permanent, err := svc.TriggerPRSyncAllPermanent(ctx, taskID)
 		if err != nil {
-			return nil, err
+			var partial *PartialPRSyncError
+			if !permanent && (!errors.As(err, &partial) || len(prs) == 0) {
+				return nil, err
+			}
 		}
 		// Return an envelope so the frontend always gets a deterministic
 		// shape even on empty results (`{prs: []}`); a bare `nil` slice
@@ -336,18 +340,26 @@ func wsTriggerReviewWatch(svc *Service, _ *logger.Logger) func(ctx context.Conte
 		if id == "" {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, errMsgIDRequired, nil)
 		}
+		workspaceID, _ := payload["workspace_id"].(string)
+		if workspaceID == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "workspace_id is required", nil)
+		}
 		watch, err := svc.GetReviewWatch(ctx, id)
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
-		if watch == nil {
+		if watch == nil || watch.WorkspaceID != workspaceID {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "review watch not found", nil)
 		}
-		newPRs, err := svc.CheckReviewWatch(ctx, watch)
+		newPRs, err := svc.TriggerReviewWatch(ctx, watch)
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
-		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"new_prs": len(newPRs), "prs": newPRs})
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+			"new_prs":       len(newPRs),
+			"new_prs_found": len(newPRs),
+			"prs":           newPRs,
+		})
 	}
 }
 

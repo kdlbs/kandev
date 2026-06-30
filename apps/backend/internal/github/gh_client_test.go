@@ -1,7 +1,10 @@
 package github
 
 import (
+	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -121,6 +124,99 @@ func TestParseTimePtrValue(t *testing.T) {
 	expected := time.Date(2025, 6, 15, 14, 30, 0, 0, time.UTC)
 	if !got.Equal(expected) {
 		t.Errorf("got %v, want %v", *got, expected)
+	}
+}
+
+func TestGHClient_ListCheckRuns_PaginatesCheckRuns(t *testing.T) {
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "gh-args.log")
+	ghPath := filepath.Join(binDir, "gh")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> "$GH_ARGS_LOG"
+case "$*" in
+  *check-runs*)
+    case "$*" in
+      *--slurp*) printf '%s\n' 'unsupported slurp' >&2; exit 1 ;;
+      *--paginate*) printf '%s\n' '{"name":"unit","status":"completed","conclusion":"success","html_url":"https://ci/unit"}' '{"name":"lint","status":"completed","conclusion":"failure","html_url":"https://ci/lint"}' ;;
+      *) printf '%s\n' '[{"name":"unit","status":"completed","conclusion":"success","html_url":"https://ci/unit"}]' ;;
+    esac
+    ;;
+  *status*) printf '%s\n' '[]' ;;
+  *) printf '%s\n' '[]' ;;
+esac
+`
+	if err := os.WriteFile(ghPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GH_ARGS_LOG", logPath)
+
+	checks, err := NewGHClient().ListCheckRuns(context.Background(), "acme", "widget", "sha")
+	if err != nil {
+		t.Fatalf("ListCheckRuns: %v", err)
+	}
+	if len(checks) != 2 {
+		t.Fatalf("checks = %d, want 2: %+v", len(checks), checks)
+	}
+	var lint *CheckRun
+	for i := range checks {
+		if checks[i].Name == "lint" {
+			lint = &checks[i]
+			break
+		}
+	}
+	if lint == nil || lint.Conclusion != "failure" {
+		t.Fatalf("expected failed lint check from paginated output, got %+v", checks)
+	}
+	logged, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read gh args log: %v", err)
+	}
+	if !strings.Contains(string(logged), "--paginate") {
+		t.Fatalf("ListCheckRuns should call gh api with --paginate, got:\n%s", logged)
+	}
+	if strings.Contains(string(logged), "--slurp") {
+		t.Fatalf("ListCheckRuns should not combine gh api --slurp with --jq, got:\n%s", logged)
+	}
+}
+
+func TestDecodeGHCheckRuns(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantNames []string
+		wantErr   bool
+	}{
+		{name: "empty", input: "", wantNames: nil},
+		{name: "single object", input: `{"name":"unit","status":"completed","conclusion":"success"}`, wantNames: []string{"unit"}},
+		{
+			name:      "multiple objects with whitespace",
+			input:     "\n  {\"name\":\"unit\",\"status\":\"completed\",\"conclusion\":\"success\"}\n{\"name\":\"lint\",\"status\":\"completed\",\"conclusion\":\"failure\"}\t",
+			wantNames: []string{"unit", "lint"},
+		},
+		{name: "invalid json", input: `{"name":"unit"`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := decodeGHCheckRuns(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("decodeGHCheckRuns: %v", err)
+			}
+			if len(got) != len(tt.wantNames) {
+				t.Fatalf("runs = %d, want %d: %+v", len(got), len(tt.wantNames), got)
+			}
+			for i, name := range tt.wantNames {
+				if got[i].Name != name {
+					t.Fatalf("run[%d].Name = %q, want %q", i, got[i].Name, name)
+				}
+			}
+		})
 	}
 }
 
@@ -535,6 +631,20 @@ func TestGHClient_InspectRateStderr_RestEndpointMarksCore(t *testing.T) {
 	}
 	if tracker.IsExhausted(ResourceGraphQL) {
 		t.Errorf("REST 429 must not pause graphql bucket")
+	}
+}
+
+func TestDecodeGHCheckRunsReadsPaginatedJSONStream(t *testing.T) {
+	got, err := decodeGHCheckRuns(`{"name":"page one","status":"completed","conclusion":"success"}
+{"name":"page two","status":"completed","conclusion":"failure"}`)
+	if err != nil {
+		t.Fatalf("decodeGHCheckRuns: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("check runs = %d, want 2", len(got))
+	}
+	if got[1].Name != "page two" || got[1].Conclusion == nil || *got[1].Conclusion != "failure" {
+		t.Fatalf("second check run not decoded: %#v", got[1])
 	}
 }
 

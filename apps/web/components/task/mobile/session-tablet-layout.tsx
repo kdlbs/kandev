@@ -62,6 +62,7 @@ function TabletLeftPanel({
       openFileRequest={openFileRequest}
       onDiffHandled={handleClearSelectedDiff}
       onFileOpenHandled={handleFileOpenHandled}
+      sessionId={sessionId}
     />
   );
   if (layoutStatePreview) {
@@ -166,7 +167,7 @@ export const SessionTabletLayout = memo(function SessionTabletLayout({
             openFileRequest={openFileRequest}
             handleClearSelectedDiff={handleClearSelectedDiff}
             handleFileOpenHandled={handleFileOpenHandled}
-            sessionId={sessionId}
+            sessionId={sessionForPreview}
           />
         </Panel>
 

@@ -4,6 +4,9 @@ package github
 
 import "time"
 
+// TaskCIAutoFixMaxRounds is the server-enforced CI auto-fix loop guard.
+const TaskCIAutoFixMaxRounds = 10
+
 // PR represents a GitHub Pull Request.
 type PR struct {
 	Number             int                 `json:"number"`
@@ -219,6 +222,7 @@ type TaskCIOptionsResponse struct {
 	AutoFixEnabled         bool                       `json:"auto_fix_enabled"`
 	AutoMergeEnabled       bool                       `json:"auto_merge_enabled"`
 	AutoFixPromptOverride  *string                    `json:"auto_fix_prompt_override"`
+	AutoFixMaxRounds       int                        `json:"auto_fix_max_rounds"`
 	EffectiveAutoFixPrompt string                     `json:"effective_auto_fix_prompt"`
 	UsingDefaultPrompt     bool                       `json:"using_default_prompt"`
 	UpdatedAt              time.Time                  `json:"updated_at"`
@@ -234,6 +238,8 @@ type TaskCIPRAutomationState struct {
 	LastFixCheckpointJSON string     `json:"last_fix_checkpoint_json" db:"last_fix_checkpoint_json"`
 	LastFixEnqueuedAt     *time.Time `json:"last_fix_enqueued_at,omitempty" db:"last_fix_enqueued_at"`
 	LastFixSessionID      *string    `json:"last_fix_session_id,omitempty" db:"last_fix_session_id"`
+	AutoFixRoundCount     int        `json:"auto_fix_round_count" db:"auto_fix_round_count"`
+	AutoFixExhaustedAt    *time.Time `json:"auto_fix_exhausted_at" db:"auto_fix_exhausted_at"`
 	LastMergeSignature    string     `json:"last_merge_signature" db:"last_merge_signature"`
 	LastMergeAttemptAt    *time.Time `json:"last_merge_attempt_at,omitempty" db:"last_merge_attempt_at"`
 	LastError             *string    `json:"last_error,omitempty" db:"last_error"`
@@ -250,6 +256,7 @@ type TaskCIFixAttempt struct {
 	CheckpointJSON string
 	SessionID      string
 	EnqueuedAt     time.Time
+	IncrementRound bool
 }
 
 // TaskCIMergeAttempt records an auto-merge attempt for a task PR.

@@ -244,6 +244,7 @@ func TestHandleClarificationStaleDismissed(t *testing.T) {
 			ID: "step1", WorkflowID: "wf1", Name: "Plan", Position: 0,
 		}
 		taskRepo := newMockTaskRepo()
+		seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
 		svc := createEngineService(t, repo, stepGetter, &mockAgentManager{})
 		svc.taskRepo = taskRepo
 

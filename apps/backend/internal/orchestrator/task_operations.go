@@ -144,12 +144,17 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 
 	// Resolve agent/executor profile from task metadata if not explicitly provided
 	if agentProfileID == "" {
-		if v, ok := task.Metadata["agent_profile_id"].(string); ok && v != "" {
+		if v, ok := task.Metadata[models.MetaKeyAgentProfileID].(string); ok && v != "" {
 			agentProfileID = v
 		}
 	}
+	if executorID == "" {
+		if v, ok := task.Metadata[models.MetaKeyExecutorID].(string); ok && v != "" {
+			executorID = v
+		}
+	}
 	if executorProfileID == "" {
-		if v, ok := task.Metadata["executor_profile_id"].(string); ok && v != "" {
+		if v, ok := task.Metadata[models.MetaKeyExecutorProfileID].(string); ok && v != "" {
 			executorProfileID = v
 		}
 	}
@@ -581,6 +586,16 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			zap.String("task_id", taskID),
 			zap.Error(err))
 		return nil, err
+	}
+	if executorID == "" {
+		if v, ok := task.Metadata[models.MetaKeyExecutorID].(string); ok && v != "" {
+			executorID = v
+		}
+	}
+	if executorProfileID == "" {
+		if v, ok := task.Metadata[models.MetaKeyExecutorProfileID].(string); ok && v != "" {
+			executorProfileID = v
+		}
 	}
 
 	// Override priority if provided in the request
@@ -2237,7 +2252,7 @@ func (s *Service) handlePromptError(ctx context.Context, taskID, sessionID strin
 	// in progress while it retries — so don't flap it to REVIEW here.
 	if !isTransientPromptError(err) && !errors.Is(err, lifecycle.ErrCancelEscalated) &&
 		!routingerr.IsTransientProviderError(err.Error()) {
-		_ = s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview)
+		s.writeTaskReviewState(ctx, taskID, sessionID)
 	}
 	s.completeTurnForSession(ctx, sessionID)
 	return err
@@ -2435,7 +2450,7 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	// cancelled turn is treated as finished work the user may want to review.
 	if session != nil {
 		s.updateTaskSessionState(ctx, session.TaskID, sessionID, models.TaskSessionStateWaitingForInput, "", true, session)
-		s.writeTaskReviewStateOnCancel(ctx, session.TaskID)
+		s.writeTaskReviewStateOnCancel(ctx, session.TaskID, sessionID)
 	}
 
 	// Record cancellation in the message history

@@ -7,6 +7,7 @@ import {
   reconcileRemovedSessionPanels,
   resolveInitialPosition,
   resolveSessionTabSyncTarget,
+  runAutoSessionTabEffect,
   shouldActivateSessionPanel,
   shouldRebuildDefaultForPendingSession,
 } from "./dockview-session-tabs";
@@ -37,6 +38,8 @@ const PENDING_SESSION_ID = "session-new";
 const TEST_GROUP_CENTER = "group-center";
 const CENTER_POSITION = "center";
 const SIBLING_PANEL = "session:sibling";
+const AUTO_TASK_ID = "task-A";
+const PENDING_EFFECT_SESSION_ID = "session-pending";
 
 /**
  * Builds a fake DockviewApi where `panel.api.close()` mutates the underlying
@@ -63,6 +66,48 @@ function makeApi(panelIds: string[]): { api: DockviewApi; panels: FakePanel[] } 
     getPanel: (id: string) => panels.find((p) => p.id === id) ?? null,
   } as unknown as DockviewApi;
   return { api, panels };
+}
+
+function makeAutoSessionAppStore(taskId: string | null, sessionIds: string[]) {
+  const itemsByTaskId = taskId ? { [taskId]: sessionIds.map((id) => ({ id })) } : {};
+  return {
+    getState: () => ({
+      tasks: { activeTaskId: taskId },
+      taskSessionsByTask: { itemsByTaskId },
+    }),
+  };
+}
+
+function makeAutoSessionRefs(
+  prevTaskId = "task-old",
+  prevSessionId: string | null = "session-old",
+) {
+  return {
+    sessionTabCreatedRef: { current: new Set<string>() },
+    prevTaskIdRef: { current: prevTaskId as string | null },
+    prevSessionIdRef: { current: prevSessionId },
+  };
+}
+
+function withDockviewState<T>(
+  updates: Partial<ReturnType<typeof useDockviewStore.getState>>,
+  callback: () => T,
+): T {
+  const previous = useDockviewStore.getState();
+  useDockviewStore.setState(updates);
+  try {
+    return callback();
+  } finally {
+    useDockviewStore.setState({
+      api: previous.api,
+      buildDefaultLayout: previous.buildDefaultLayout,
+      currentLayoutEnvId: previous.currentLayoutEnvId,
+      preMaximizeLayout: previous.preMaximizeLayout,
+      pinnedWidths: previous.pinnedWidths,
+      maximizedGroupId: previous.maximizedGroupId,
+      isRestoringLayout: previous.isRestoringLayout,
+    });
+  }
 }
 
 function makePositionApi(args: {
@@ -599,5 +644,68 @@ describe("shouldActivateSessionPanel", () => {
         currentActivePanelId: "preview:commit-detail",
       }),
     ).toBe(false);
+  });
+});
+
+describe("runAutoSessionTabEffect", () => {
+  it("updates previous refs when panel ensure is skipped for an unhydrated session", () => {
+    const api = {
+      panels: [{ id: "chat" }],
+      getPanel: (id: string) => (id === "chat" ? { id: "chat" } : null),
+    } as unknown as DockviewApi;
+    const appStore = makeAutoSessionAppStore(AUTO_TASK_ID, []);
+    const refs = makeAutoSessionRefs();
+
+    withDockviewState({ api }, () => {
+      runAutoSessionTabEffect(PENDING_EFFECT_SESSION_ID, appStore as never, refs as never);
+    });
+
+    expect(refs.prevTaskIdRef.current).toBe(AUTO_TASK_ID);
+    expect(refs.prevSessionIdRef.current).toBe(PENDING_EFFECT_SESSION_ID);
+  });
+
+  it("updates previous refs when releasing default layout for a pending session", () => {
+    const api = {
+      panels: [],
+      getPanel: () => null,
+    } as unknown as DockviewApi;
+    const buildDefaultLayout = vi.fn();
+    const appStore = makeAutoSessionAppStore(AUTO_TASK_ID, []);
+    const refs = makeAutoSessionRefs();
+
+    withDockviewState(
+      {
+        api,
+        buildDefaultLayout,
+        currentLayoutEnvId: null,
+        preMaximizeLayout: null,
+        pinnedWidths: new Map(),
+        maximizedGroupId: null,
+        isRestoringLayout: false,
+      },
+      () => {
+        runAutoSessionTabEffect(PENDING_EFFECT_SESSION_ID, appStore as never, refs as never);
+      },
+    );
+
+    expect(buildDefaultLayout).toHaveBeenCalledWith(api);
+    expect(refs.prevTaskIdRef.current).toBe(AUTO_TASK_ID);
+    expect(refs.prevSessionIdRef.current).toBe(PENDING_EFFECT_SESSION_ID);
+  });
+
+  it("updates previous refs when there is no effective session", () => {
+    const api = {
+      panels: [],
+      getPanel: () => null,
+    } as unknown as DockviewApi;
+    const appStore = makeAutoSessionAppStore(AUTO_TASK_ID, []);
+    const refs = makeAutoSessionRefs();
+
+    withDockviewState({ api }, () => {
+      runAutoSessionTabEffect(null, appStore as never, refs as never);
+    });
+
+    expect(refs.prevTaskIdRef.current).toBe(AUTO_TASK_ID);
+    expect(refs.prevSessionIdRef.current).toBeNull();
   });
 });

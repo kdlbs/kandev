@@ -147,11 +147,11 @@ func seedBareGitDir(t *testing.T, repoPath, headContent string) string {
 	return gitDir
 }
 
-// TestReadGitDefaultBranch_PrefersOriginHEAD — the upstream's declared
-// default beats every other heuristic. Regression for the bug where the
-// repo's stored default_branch latched onto whatever feature branch the user
-// happened to be on at task-creation time.
-func TestReadGitDefaultBranch_PrefersOriginHEAD(t *testing.T) {
+// TestReadGitDefaultBranch_UsesOriginHEADWhenMainRefAbsent — origin/HEAD still
+// beats the checked-out branch when no main ref exists. Regression for the bug
+// where the repo's stored default_branch latched onto whatever feature branch
+// the user happened to be on at task-creation time.
+func TestReadGitDefaultBranch_UsesOriginHEADWhenMainRefAbsent(t *testing.T) {
 	repoPath := t.TempDir()
 	gitDir := seedBareGitDir(t, repoPath, "ref: refs/heads/feature/x\n")
 	if err := os.MkdirAll(filepath.Join(gitDir, "refs", "remotes", "origin"), 0o755); err != nil {

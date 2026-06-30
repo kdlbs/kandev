@@ -29,6 +29,7 @@ type SessionModelsEntry = {
 
 type ModelSelectorProps = {
   sessionId: string | null;
+  triggerClassName?: string;
 };
 
 function resolveSnapshotModel(snapshot: unknown): string | null {
@@ -276,7 +277,10 @@ function useModelSelectorState(sessionId: string | null) {
   return { currentModel, modelOptions, configOptions, handleModelChange, handleConfigChange };
 }
 
-export const ModelSelector = memo(function ModelSelector({ sessionId }: ModelSelectorProps) {
+export const ModelSelector = memo(function ModelSelector({
+  sessionId,
+  triggerClassName,
+}: ModelSelectorProps) {
   const { currentModel, modelOptions, configOptions, handleModelChange, handleConfigChange } =
     useModelSelectorState(sessionId);
   const modelConfig = configOptions.find(isModelConfigOption);
@@ -310,6 +314,7 @@ export const ModelSelector = memo(function ModelSelector({ sessionId }: ModelSel
       ariaLabel="Session model settings"
       variant="compact"
       popoverSide="top"
+      triggerClassName={triggerClassName}
     />
   );
 });

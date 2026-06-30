@@ -118,7 +118,7 @@ func TestTriggerPRSync_NoWatch(t *testing.T) {
 // last_checked_at. The frontend re-syncs every 5s while no PR is found, so
 // each repeated sync hit `gh` again and logged a warning. After the fix the
 // first sync probes once and stamps the watch; the immediate second sync is
-// throttled within prSyncFreshnessWindow and must NOT probe again.
+// throttled within PRSyncFreshnessWindow and must NOT probe again.
 func TestTriggerPRSyncAll_ThrottlesDetectionProbe(t *testing.T) {
 	_, svc, mockClient, store := setupPollerTest(t)
 	ctx := context.Background()
@@ -144,7 +144,7 @@ func TestTriggerPRSyncAll_ThrottlesDetectionProbe(t *testing.T) {
 		t.Fatalf("expected exactly 1 detection probe on first sync, got %d", got)
 	}
 
-	// Second sync immediately after — well within prSyncFreshnessWindow.
+	// Second sync immediately after — well within PRSyncFreshnessWindow.
 	if _, err := svc.TriggerPRSyncAll(ctx, "t1"); err != nil {
 		t.Fatalf("second TriggerPRSyncAll: %v", err)
 	}

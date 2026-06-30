@@ -88,6 +88,29 @@ test.describe("Mobile kanban view", () => {
     await expect(testPage.getByText("Display Options")).toBeVisible();
   });
 
+  test("mobile menu exposes settings navigation", async ({ testPage }) => {
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+
+    await mobile.mobileMenuButton.click();
+    await testPage.getByRole("link", { name: "Settings" }).click();
+
+    await expect(testPage).toHaveURL(/\/settings(?:\/general)?$/);
+    await expect(testPage.getByRole("link", { name: /Appearance/ })).toBeVisible();
+  });
+
+  test("opening mobile menu does not focus task search", async ({ testPage }) => {
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+
+    await mobile.mobileMenuButton.click();
+    const dialog = testPage.getByRole("dialog", { name: "Menu" });
+    const searchInput = dialog.getByPlaceholder("Search tasks...");
+
+    await expect(searchInput).toBeVisible();
+    await expect(searchInput).not.toBeFocused();
+  });
+
   test("opens missing git health issue from mobile menu", async ({ testPage, backend }) => {
     await testPage.route(`${backend.baseUrl}/api/v1/system/health`, (route) =>
       route.fulfill({

@@ -1,11 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  DockviewDefaultTab,
-  type DockviewApi,
-  type IDockviewPanelHeaderProps,
-} from "dockview-react";
+import { DockviewDefaultTab, type IDockviewPanelHeaderProps } from "dockview-react";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -15,25 +11,9 @@ import {
 import { useAppStore } from "@/components/state-provider";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionChangesCount } from "@/hooks/domains/session/use-session-changes-count";
-import { useDockviewStore } from "@/lib/state/dockview-store";
 import { cn } from "@kandev/ui/lib/utils";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
-
-type DockviewPanel = NonNullable<ReturnType<DockviewApi["getPanel"]>>;
-
-function groupContainsAgentSessionPanel(panel: DockviewPanel): boolean {
-  return panel.group.panels.some((p) => p.id === "chat" || p.id.startsWith("session:"));
-}
-
-/** Auto-activate the changes panel unless it shares a group with agent sessions. */
-function autoActivateChangesPanel(): void {
-  const { api } = useDockviewStore.getState();
-  if (!api) return;
-
-  const panel = api.getPanel("changes");
-  if (!panel || groupContainsAgentSessionPanel(panel)) return;
-  panel.api.setActive();
-}
+import { autoActivateChangesPanel } from "./changes-panel-focus";
 
 /**
  * Custom tab component for the Changes panel.

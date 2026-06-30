@@ -83,6 +83,14 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
+const (
+	desktopHealthTokenEnv    = "KANDEV_DESKTOP_HEALTH_TOKEN"
+	desktopHealthTokenHeader = "X-Kandev-Desktop-Health-Token"
+	agentShutdownTimeout     = 20 * time.Second
+	httpShutdownTimeout      = 10 * time.Second
+	tracingShutdownTimeout   = 5 * time.Second
+)
+
 // buildSessionDataProvider constructs the session data provider function used by the WebSocket hub
 // to send initial data (git status, context window, available commands) when a client subscribes.
 func buildSessionDataProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, log *logger.Logger) func(context.Context, string) ([]*ws.Message, error) {
@@ -503,6 +511,9 @@ func registerRoutes(p routeParams) {
 	// the kanban board doesn't react to subtree archive/delete until a
 	// full reload.
 	handoffSvc.SetTaskEventPublisher(p.taskSvc)
+	if p.services.Office != nil {
+		p.services.Office.SetWorkspaceGroupCleaner(handoffSvc)
+	}
 	// Cascade archive/delete must tear down runtime resources
 	// (container, sandbox, worktree, executor_running rows) for every
 	// task in the tree. Without this wiring the agent gets stopped via
@@ -516,14 +527,22 @@ func registerRoutes(p routeParams) {
 	if p.services.GitHub != nil {
 		p.services.GitHub.SetCascadeTaskDeleter(handoffSvc)
 	}
+	// repoLookup validates a watcher's optional repository binding (workspace
+	// ownership + default-branch fill) on create/update. Shared across the three
+	// repo-less watchers; one concrete adapter satisfies each package's
+	// structurally-identical RepositoryLookup interface.
+	repoLookup := &repositoryLookupAdapter{svc: p.taskSvc}
 	if p.services.Jira != nil {
 		p.services.Jira.SetTaskDeleter(handoffSvc)
+		p.services.Jira.SetRepositoryLookup(repoLookup)
 	}
 	if p.services.Linear != nil {
 		p.services.Linear.SetTaskDeleter(handoffSvc)
+		p.services.Linear.SetRepositoryLookup(repoLookup)
 	}
 	if p.services.Sentry != nil {
 		p.services.Sentry.SetTaskDeleter(handoffSvc)
+		p.services.Sentry.SetRepositoryLookup(repoLookup)
 	}
 	p.orchestratorSvc.SetWorkspaceMaterializer(handoffSvc)
 	// Phase 8 prompt enrichment — wire the office scheduler's
@@ -550,6 +569,9 @@ func registerRoutes(p routeParams) {
 		if !ready.Load() {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "starting", "service": "kandev"})
 			return
+		}
+		if token := desktopHealthToken(); token != "" {
+			c.Header(desktopHealthTokenHeader, token)
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "kandev", "mode": "websocket+http"})
 	})
@@ -612,6 +634,10 @@ func registerRoutes(p routeParams) {
 			p.log.Info("Web dev handler enabled", zap.String("target", p.webInternalURL))
 		}
 	}
+}
+
+func desktopHealthToken() string {
+	return strings.TrimSpace(os.Getenv(desktopHealthTokenEnv))
 }
 
 func newWebAppHandler(p routeParams) (*webapp.Handler, string, bool) {
@@ -722,6 +748,9 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	taskhandlers.RegisterWorkspaceRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterWorkflowRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.services.Workflow, p.log)
 	taskH := taskhandlers.RegisterTaskRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.orchestratorSvc, p.taskRepo, planService, p.log)
+	if p.services != nil && p.services.User != nil {
+		taskH.SetTaskCreateLastUsedRecorder(p.services.User)
+	}
 	if handoffSvc != nil {
 		taskH.SetHandoffService(handoffSvc)
 	}
@@ -1129,46 +1158,66 @@ func runGracefulShutdown(
 	runCleanups func(),
 	log *logger.Logger,
 ) {
-	log.Info("Shutting down Kandev...")
+	start := time.Now()
+	var shutdownErrs []error
+	log.Info("Graceful shutdown started",
+		zap.Int("http_timeout_seconds", int(httpShutdownTimeout/time.Second)),
+		zap.Int("agent_timeout_seconds", int(agentShutdownTimeout/time.Second)),
+		zap.Int("tracing_timeout_seconds", int(tracingShutdownTimeout/time.Second)))
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), httpShutdownTimeout)
 	defer shutdownCancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
+		shutdownErrs = append(shutdownErrs, err)
 		log.Error("HTTP server shutdown error", zap.Error(err))
 	}
 
 	if err := orchestratorSvc.Stop(); err != nil {
+		shutdownErrs = append(shutdownErrs, err)
 		log.Error("Orchestrator stop error", zap.Error(err))
 	}
 
-	stopLifecycleManager(lifecycleMgr, log)
+	if err := stopLifecycleManager(lifecycleMgr, log); err != nil {
+		shutdownErrs = append(shutdownErrs, err)
+	}
 	runCleanups()
 
 	// Flush pending OTel spans before exit
-	traceCtx, traceCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	traceCtx, traceCancel := context.WithTimeout(context.Background(), tracingShutdownTimeout)
 	if err := tracing.Shutdown(traceCtx); err != nil {
+		shutdownErrs = append(shutdownErrs, err)
 		log.Error("Tracer shutdown error", zap.Error(err))
 	}
 	traceCancel()
 
-	log.Info("Kandev stopped")
+	log.Info("Graceful shutdown complete",
+		zap.Duration("duration", time.Since(start)),
+		zap.Int("error_count", len(shutdownErrs)))
 	_ = log.Sync()
 }
 
 // stopLifecycleManager gracefully stops all agents and the lifecycle manager.
-func stopLifecycleManager(lifecycleMgr *lifecycle.Manager, log *logger.Logger) {
+func stopLifecycleManager(lifecycleMgr *lifecycle.Manager, log *logger.Logger) error {
 	if lifecycleMgr == nil {
-		return
+		return nil
 	}
-	log.Info("Stopping agents gracefully...")
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	var shutdownErrs []error
+	log.Info("Stopping agents gracefully",
+		zap.Int("timeout_seconds", int(agentShutdownTimeout/time.Second)))
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), agentShutdownTimeout)
 	if err := lifecycleMgr.StopAllAgents(stopCtx); err != nil {
+		shutdownErrs = append(shutdownErrs, err)
 		log.Error("Graceful agent stop error", zap.Error(err))
 	}
 	stopCancel()
 
 	if err := lifecycleMgr.Stop(); err != nil {
+		shutdownErrs = append(shutdownErrs, err)
 		log.Error("Lifecycle manager stop error", zap.Error(err))
 	}
+	if len(shutdownErrs) == 0 {
+		log.Info("Agents stopped gracefully")
+	}
+	return errors.Join(shutdownErrs...)
 }

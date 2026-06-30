@@ -65,6 +65,8 @@ function watchForm(overrides: Partial<LinearIssueWatch>): FormState {
     workspaceId: "ws-1",
     workflowId: "wf-1",
     workflowStepId: "step-1",
+    repositoryId: "",
+    baseBranch: "",
     filter: {},
     agentProfileId: "",
     executorProfileId: "",

@@ -43,6 +43,17 @@ export function useEnsureTaskSession(
   // Latch keyed by `${taskId}:${retryToken}` so a re-mount on the same task
   // doesn't refire, but switching tasks or calling retry() does.
   const launchedKeyRef = useRef<string | null>(null);
+  const previousTaskIdRef = useRef<string | null>(taskId);
+
+  /* eslint-disable react-hooks/set-state-in-effect -- task changes must clear stale ensure-session errors before early returns */
+  useEffect(() => {
+    if (previousTaskIdRef.current === taskId) return;
+    previousTaskIdRef.current = taskId;
+    launchedKeyRef.current = null;
+    setStatus("idle");
+    setError(null);
+  }, [taskId]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   /* eslint-disable react-hooks/set-state-in-effect -- ensuring a session is a side effect; status mirrors that external work */
   useEffect(() => {

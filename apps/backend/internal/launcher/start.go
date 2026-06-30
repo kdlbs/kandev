@@ -9,8 +9,14 @@ import (
 )
 
 var (
-	executablePath = os.Executable
-	launchManaged  = runManagedApp
+	executablePath  = os.Executable
+	launchManaged   = runManagedApp
+	newSupervisorFn = newSupervisor
+	launchBackendFn = launchRestartableBackend
+	waitForHealthFn = waitForHealth
+	attachSignalsFn = func(supervisor *processSupervisor) {
+		supervisor.attachSignals()
+	}
 )
 
 func runStart(opts Options) int {
@@ -72,18 +78,23 @@ func resolveLogLevel(opts Options) string {
 }
 
 func runManagedApp(cfg managedAppConfig) int {
+	ignoreBrokenPipeSignal()
 	logStartup(cfg.Header, cfg.Ports, resolveDatabasePath(), cfg.LogLevel)
+	setLauncherShutdownDebug(cfg.Opts.Debug || os.Getenv("KANDEV_SHUTDOWN_DEBUG") == "1")
+	shutdownDebugf("runManagedApp start mode=%q backend=%q backend_cwd=%q debug=%t", cfg.Mode, cfg.Backend, cfg.BackendCWD, cfg.Opts.Debug)
 
-	supervisor := newSupervisor()
-	supervisor.attachSignals()
+	supervisor := newSupervisorFn()
+	attachSignalsFn(supervisor)
+	shutdownDebugf("runManagedApp signal handler attached")
 	showOutput := cfg.Opts.Verbose || cfg.Opts.Debug
-	backend, dumpLogs, err := launchRestartableBackend(cfg.Backend, []string{"__backend"}, cfg.BackendCWD, backendEnv(cfg.Ports, cfg.LogLevel, cfg.Opts.Debug), !showOutput, cfg.Ports, cfg.Mode, supervisor)
+	backend, dumpLogs, err := launchBackendFn(cfg.Backend, []string{"__backend"}, cfg.BackendCWD, backendEnv(cfg.Ports, cfg.LogLevel, cfg.Opts.Debug), !showOutput, cfg.Ports, cfg.Mode, supervisor)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
+	shutdownDebugf("runManagedApp backend launched")
 	fmt.Println("[kandev] starting backend...")
-	if err := waitForHealth(cfg.Ports.BackendURL, backend, healthTimeout(healthTimeoutReleaseMS), dumpLogs); err != nil {
+	if err := waitForHealthFn(cfg.Ports.BackendURL, backend, healthTimeout(healthTimeoutReleaseMS), dumpLogs); err != nil {
 		supervisor.shutdown("backend health failure")
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1

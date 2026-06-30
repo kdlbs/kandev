@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useAppStoreApi } from "@/components/state-provider";
+import { markSessionPanelUserActivationIntent } from "@/components/task/session-tab-activation-intent";
 import { createUserShell } from "@/lib/api/domains/user-shell-api";
 import { matchesShortcut } from "@/lib/keyboard/utils";
 import { getShortcut, type StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
@@ -23,7 +24,9 @@ function handleTabNavigation(e: KeyboardEvent, api: DockviewApi) {
 
   const direction = e.code === "BracketLeft" ? -1 : 1;
   const nextIndex = (currentIndex + direction + panels.length) % panels.length;
-  panels[nextIndex].api.setActive();
+  const nextPanel = panels[nextIndex];
+  markSessionPanelUserActivationIntent(nextPanel.id);
+  nextPanel.api.setActive();
 }
 
 function handleTerminalToggle(

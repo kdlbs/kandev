@@ -393,6 +393,9 @@ func (m *mockRepository) UpdateWorkspace(ctx context.Context, workspace *models.
 	return nil
 }
 func (m *mockRepository) DeleteWorkspace(ctx context.Context, id string) error { return nil }
+func (m *mockRepository) DeleteWorkspaceCascadeWithName(ctx context.Context, id, name string) ([]*models.Task, []*models.Workflow, error) {
+	return nil, nil, m.DeleteWorkspace(ctx, id)
+}
 func (m *mockRepository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
 	return nil, nil
 }
@@ -642,7 +645,13 @@ func (m *mockRepository) GetLastAgentMessage(_ context.Context, _ string) (strin
 
 // Task Session Worktree operations
 func (m *mockRepository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error) {
-	return nil, nil
+	var out []*models.TaskSessionWorktree
+	for _, wt := range m.sessionWorktrees {
+		if wt.SessionID == sessionID {
+			out = append(out, wt)
+		}
+	}
+	return out, nil
 }
 func (m *mockRepository) ListWorktreesBySessionIDs(_ context.Context, _ []string) (map[string][]*models.TaskSessionWorktree, error) {
 	return make(map[string][]*models.TaskSessionWorktree), nil
@@ -819,11 +828,29 @@ func (m *mockRepository) UpdateTaskEnvironment(_ context.Context, env *models.Ta
 	return nil
 }
 func (m *mockRepository) CreateTaskEnvironmentRepo(_ context.Context, repo *models.TaskEnvironmentRepo) error {
+	if repo.ID == "" {
+		repo.ID = repo.TaskEnvironmentID + "-repo-" + repo.RepositoryID
+		if repo.BranchSlug != "" {
+			repo.ID += "-branch-" + repo.BranchSlug
+		}
+	}
 	m.taskEnvironmentRepos[repo.TaskEnvironmentID] = append(m.taskEnvironmentRepos[repo.TaskEnvironmentID], repo)
 	return nil
 }
 func (m *mockRepository) ListTaskEnvironmentRepos(_ context.Context, envID string) ([]*models.TaskEnvironmentRepo, error) {
 	return m.taskEnvironmentRepos[envID], nil
+}
+func (m *mockRepository) UpdateTaskEnvironmentRepo(_ context.Context, repo *models.TaskEnvironmentRepo) error {
+	rows := m.taskEnvironmentRepos[repo.TaskEnvironmentID]
+	for i, row := range rows {
+		if row.ID == repo.ID {
+			rows[i] = repo
+			m.taskEnvironmentRepos[repo.TaskEnvironmentID] = rows
+			return nil
+		}
+	}
+	m.taskEnvironmentRepos[repo.TaskEnvironmentID] = append(rows, repo)
+	return nil
 }
 
 // Task Plan operations

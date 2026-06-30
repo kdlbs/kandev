@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/user/models"
 )
 
@@ -97,7 +99,11 @@ func (r *sqliteRepository) GetDefaultUser(ctx context.Context) (*models.User, er
 }
 
 func (r *sqliteRepository) GetUserSettings(ctx context.Context, userID string) (*models.UserSettings, error) {
-	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+	return r.getUserSettings(ctx, r.ro, userID)
+}
+
+func (r *sqliteRepository) getUserSettings(ctx context.Context, conn *sqlx.DB, userID string) (*models.UserSettings, error) {
+	row := conn.QueryRowContext(ctx, conn.Rebind(`
 		SELECT settings, updated_at
 		FROM users WHERE id = ?
 	`), userID)
@@ -108,11 +114,191 @@ func (r *sqliteRepository) GetUserSettings(ctx context.Context, userID string) (
 	return settings, nil
 }
 
-func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *models.UserSettings) error {
+func (r *sqliteRepository) UpsertUserSettingsPreservingTaskCreateLastUsed(
+	ctx context.Context,
+	settings *models.UserSettings,
+	patch *models.TaskCreateLastUsed,
+) (*models.UserSettings, error) {
 	settings.UpdatedAt = time.Now().UTC()
 	if settings.CreatedAt.IsZero() {
 		settings.CreatedAt = settings.UpdatedAt
 	}
+	settingsPayload, err := marshalUserSettingsPayload(settings)
+	if err != nil {
+		return nil, err
+	}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		return r.upsertUserSettingsPreservingTaskCreateLastUsedPostgres(ctx, settings, settingsPayload, patch)
+	}
+	settingsExpr := `json_set(
+		json(?),
+		'$.task_create_last_used',
+		json(COALESCE(json_extract(
+			CASE WHEN settings IS NULL OR settings = 'null' OR settings = '' THEN '{}' ELSE settings END,
+			'$.task_create_last_used'
+		), '{}'))
+	)`
+	args := []any{string(settingsPayload)}
+	if patch != nil {
+		patchArgs := makeTaskCreateLastUsedJSONSetArgs(*patch)
+		if len(patchArgs) > 0 {
+			placeholders := strings.TrimSuffix(strings.Repeat("?, ?, ", len(patchArgs)/2), ", ")
+			settingsExpr = fmt.Sprintf("json_set(%s, %s)", settingsExpr, placeholders)
+			args = append(args, patchArgs...)
+		}
+	}
+	query := fmt.Sprintf(`
+		UPDATE users
+		SET settings = %s, updated_at = ?
+		WHERE id = ?
+	`, settingsExpr)
+	args = append(args, settings.UpdatedAt, settings.UserID)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkUserSettingsRowsAffected(result, settings.UserID); err != nil {
+		return nil, err
+	}
+	return r.getUserSettings(ctx, r.db, settings.UserID)
+}
+
+func (r *sqliteRepository) upsertUserSettingsPreservingTaskCreateLastUsedPostgres(
+	ctx context.Context,
+	settings *models.UserSettings,
+	settingsPayload []byte,
+	patch *models.TaskCreateLastUsed,
+) (*models.UserSettings, error) {
+	query, patchArgs := buildPostgresUserSettingsPreservingTaskCreateLastUsedUpdate(patch)
+	args := append([]any{string(settingsPayload)}, patchArgs...)
+	args = append(args, settings.UpdatedAt, settings.UserID)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkUserSettingsRowsAffected(result, settings.UserID); err != nil {
+		return nil, err
+	}
+	return r.getUserSettings(ctx, r.db, settings.UserID)
+}
+
+func (r *sqliteRepository) UpdateTaskCreateLastUsed(ctx context.Context, userID string, patch models.TaskCreateLastUsed) (*models.UserSettings, error) {
+	if dialect.IsPostgres(r.db.DriverName()) {
+		return r.updateTaskCreateLastUsedPostgres(ctx, userID, patch)
+	}
+	patchArgs := makeTaskCreateLastUsedJSONSetArgs(patch)
+	if len(patchArgs) == 0 {
+		return r.getUserSettings(ctx, r.db, userID)
+	}
+	base := "CASE WHEN settings IS NULL OR settings = 'null' OR settings = '' THEN '{}' ELSE settings END"
+	settingsExpr := fmt.Sprintf(
+		"json_set(%s, '$.task_create_last_used', json(COALESCE(json_extract(%s, '$.task_create_last_used'), '{}')))",
+		base,
+		base,
+	)
+	placeholders := strings.TrimSuffix(strings.Repeat("?, ?, ", len(patchArgs)/2), ", ")
+	settingsExpr = fmt.Sprintf("json_set(%s, %s)", settingsExpr, placeholders)
+	query := `
+		UPDATE users
+		SET settings = %s, updated_at = ?
+		WHERE id = ?
+	`
+	now := time.Now().UTC()
+	args := append([]any{}, patchArgs...)
+	args = append(args, now, userID)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(fmt.Sprintf(query, settingsExpr)), args...)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkUserSettingsRowsAffected(result, userID); err != nil {
+		return nil, err
+	}
+	return r.getUserSettings(ctx, r.db, userID)
+}
+
+func (r *sqliteRepository) updateTaskCreateLastUsedPostgres(ctx context.Context, userID string, patch models.TaskCreateLastUsed) (*models.UserSettings, error) {
+	query, args := buildPostgresTaskCreateLastUsedUpdate(patch)
+	if len(args) == 0 {
+		return r.getUserSettings(ctx, r.db, userID)
+	}
+	now := time.Now().UTC()
+	args = append(args, now, userID)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkUserSettingsRowsAffected(result, userID); err != nil {
+		return nil, err
+	}
+	return r.getUserSettings(ctx, r.db, userID)
+}
+
+func makeTaskCreateLastUsedJSONSetArgs(patch models.TaskCreateLastUsed) []any {
+	args := []any{}
+	if patch.RepositoryID != "" {
+		args = append(args, "$.task_create_last_used.repository_id", patch.RepositoryID)
+	}
+	if patch.Branch != "" || patch.RepositoryID != "" {
+		args = append(args, "$.task_create_last_used.branch", patch.Branch)
+	}
+	if patch.AgentProfileID != "" {
+		args = append(args, "$.task_create_last_used.agent_profile_id", patch.AgentProfileID)
+	}
+	if patch.ExecutorProfileID != "" {
+		args = append(args, "$.task_create_last_used.executor_profile_id", patch.ExecutorProfileID)
+	}
+	return args
+}
+
+func buildPostgresTaskCreateLastUsedUpdate(patch models.TaskCreateLastUsed) (string, []any) {
+	base := "(CASE WHEN settings IS NULL OR settings = 'null' OR settings = '' THEN '{}'::jsonb ELSE settings::jsonb END)"
+	expr := fmt.Sprintf("jsonb_set(%s, '{task_create_last_used}', COALESCE(%s->'task_create_last_used', '{}'::jsonb), true)", base, base)
+	args := []any{}
+	expr, args = applyPostgresTaskCreateLastUsedPatch(expr, patch, args)
+	query := fmt.Sprintf(`
+		UPDATE users
+		SET settings = %s::text, updated_at = ?
+		WHERE id = ?
+	`, expr)
+	return query, args
+}
+
+func buildPostgresUserSettingsPreservingTaskCreateLastUsedUpdate(patch *models.TaskCreateLastUsed) (string, []any) {
+	base := "(CASE WHEN settings IS NULL OR settings = 'null' OR settings = '' THEN '{}'::jsonb ELSE settings::jsonb END)"
+	expr := fmt.Sprintf("jsonb_set(?::jsonb, '{task_create_last_used}', COALESCE(%s->'task_create_last_used', '{}'::jsonb), true)", base)
+	args := []any{}
+	if patch != nil {
+		expr, args = applyPostgresTaskCreateLastUsedPatch(expr, *patch, args)
+	}
+	query := fmt.Sprintf(`
+		UPDATE users
+		SET settings = %s::text, updated_at = ?
+		WHERE id = ?
+	`, expr)
+	return query, args
+}
+
+func applyPostgresTaskCreateLastUsedPatch(expr string, patch models.TaskCreateLastUsed, args []any) (string, []any) {
+	if patch.RepositoryID != "" {
+		expr = fmt.Sprintf("jsonb_set(%s, '{task_create_last_used,repository_id}', to_jsonb(?::text), true)", expr)
+		args = append(args, patch.RepositoryID)
+	}
+	if patch.Branch != "" || patch.RepositoryID != "" {
+		expr = fmt.Sprintf("jsonb_set(%s, '{task_create_last_used,branch}', to_jsonb(?::text), true)", expr)
+		args = append(args, patch.Branch)
+	}
+	if patch.AgentProfileID != "" {
+		expr = fmt.Sprintf("jsonb_set(%s, '{task_create_last_used,agent_profile_id}', to_jsonb(?::text), true)", expr)
+		args = append(args, patch.AgentProfileID)
+	}
+	if patch.ExecutorProfileID != "" {
+		expr = fmt.Sprintf("jsonb_set(%s, '{task_create_last_used,executor_profile_id}', to_jsonb(?::text), true)", expr)
+		args = append(args, patch.ExecutorProfileID)
+	}
+	return expr, args
+}
+
+func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 	lspAutoStart := settings.LspAutoStartLanguages
 	if lspAutoStart == nil {
 		lspAutoStart = []string{}
@@ -138,7 +324,7 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 	if keyboardShortcuts == nil {
 		keyboardShortcuts = map[string]interface{}{}
 	}
-	settingsPayload, err := json.Marshal(map[string]interface{}{
+	return json.Marshal(map[string]interface{}{
 		"workspace_id":                    settings.WorkspaceID,
 		"kanban_view_mode":                settings.KanbanViewMode,
 		"workflow_filter_id":              settings.WorkflowFilterID,
@@ -175,25 +361,21 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 		"system_metrics_display":          settings.SystemMetricsDisplay,
 		"voice_mode":                      settings.VoiceMode,
 	})
-	if err != nil {
-		return err
-	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE users
-		SET settings = ?, updated_at = ?
-		WHERE id = ?
-	`), string(settingsPayload), settings.UpdatedAt, settings.UserID)
-	if err != nil {
-		return err
-	}
+}
+
+func checkUserSettingsRowsAffected(result sqlResult, userID string) error {
 	rows, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("failed to check rows affected: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("user not found: %s", settings.UserID)
+		return fmt.Errorf("user not found: %s", userID)
 	}
 	return nil
+}
+
+type sqlResult interface {
+	RowsAffected() (int64, error)
 }
 
 func scanUser(scanner interface{ Scan(dest ...any) error }) (*models.User, error) {

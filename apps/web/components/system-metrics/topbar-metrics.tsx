@@ -24,18 +24,26 @@ type TopbarMetricsProps = {
 export function TopbarMetrics({ activeSessionId }: TopbarMetricsProps) {
   const enabled = useAppStore((s) => s.userSettings.systemMetricsDisplay.showInTopbar);
   const snapshot = useAppStore((s) => s.system.metrics);
-  const { isMobile } = useResponsiveBreakpoint();
-  const shouldRender = enabled && !isMobile;
+  const { usesDesktopWorkbench } = useResponsiveBreakpoint();
+  const shouldRender = enabled;
   useSystemMetricsSubscription(shouldRender);
 
   if (!shouldRender) return null;
   const sources = selectSources(snapshot?.sources ?? [], activeSessionId);
   if (sources.length === 0) {
     return (
-      <div className="hidden md:flex h-7 items-center gap-1 rounded border border-border px-2 text-xs text-muted-foreground">
+      <div className="flex h-8 items-center gap-1 rounded px-2 text-xs text-muted-foreground md:h-7 md:border md:border-border">
         <IconActivity className="h-3.5 w-3.5" />
-        <span>Metrics</span>
+        <span className="hidden sm:inline">Metrics</span>
       </div>
+    );
+  }
+  if (!usesDesktopWorkbench) {
+    return (
+      <CompactSourceMetrics
+        source={selectCompactSource(sources, activeSessionId)}
+        updatedAt={snapshot?.timestamp}
+      />
     );
   }
   return (
@@ -59,6 +67,10 @@ function selectSources(sources: SystemMetricsSource[], activeSessionId?: string 
   return [backend, execution].filter(Boolean) as SystemMetricsSource[];
 }
 
+function selectCompactSource(sources: SystemMetricsSource[], activeSessionId?: string | null) {
+  return sources.find((source) => source.session_id === activeSessionId) ?? sources[0];
+}
+
 function SourceMetrics({
   source,
   updatedAt,
@@ -73,6 +85,32 @@ function SourceMetrics({
   return (
     <div className="flex h-7 max-w-[220px] items-center gap-1 overflow-hidden rounded border border-border px-1.5 text-xs">
       {showSource ? <SourceBadge source={source} updatedAt={updatedAt} /> : null}
+      {metrics.length > 0 ? (
+        metrics.map((metric) => (
+          <MetricChip key={metric.id} metric={metric} source={source} updatedAt={updatedAt} />
+        ))
+      ) : (
+        <span className="px-1 text-muted-foreground">-</span>
+      )}
+    </div>
+  );
+}
+
+function CompactSourceMetrics({
+  source,
+  updatedAt,
+}: {
+  source: SystemMetricsSource;
+  updatedAt?: string;
+}) {
+  const metrics = source.metrics.slice(0, 2);
+
+  return (
+    <div
+      className="flex h-9 max-w-[34vw] items-center gap-1 overflow-hidden rounded px-1.5 text-xs"
+      data-testid="mobile-topbar-metrics"
+    >
+      <SourceBadge source={source} updatedAt={updatedAt} />
       {metrics.length > 0 ? (
         metrics.map((metric) => (
           <MetricChip key={metric.id} metric={metric} source={source} updatedAt={updatedAt} />

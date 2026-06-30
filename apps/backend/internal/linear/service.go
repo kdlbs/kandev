@@ -22,6 +22,15 @@ type SecretStore interface {
 	Exists(ctx context.Context, id string) (bool, error)
 }
 
+// RepositoryLookup is the subset of the task service used to validate a watch's
+// optional repository binding (workspace ownership + default-branch fill).
+// Wired post-construction via SetRepositoryLookup to avoid an import cycle with
+// the task service. ok is false when the repository does not exist or has been
+// soft-deleted.
+type RepositoryLookup interface {
+	GetRepository(ctx context.Context, id string) (workspaceID, defaultBranch string, ok bool)
+}
+
 // Service orchestrates Linear config storage, the cached client, and the
 // fetch/transition operations used by the WebSocket + HTTP handlers.
 type Service struct {
@@ -37,6 +46,10 @@ type Service struct {
 	// Wired post-construction via SetTaskDeleter to avoid an import cycle
 	// with the task service.
 	taskDeleter watchreset.TaskDeleter
+	// repoLookup validates an optional repository binding on create/update.
+	// Wired post-construction via SetRepositoryLookup. When nil (e.g. unit
+	// tests), the binding is accepted as-is and default-branch fill is skipped.
+	repoLookup RepositoryLookup
 	// mockClient is non-nil only when Provide built the service with a MockClient
 	// (KANDEV_MOCK_LINEAR=true). Exposed via MockClient() so the e2e control
 	// routes can drive the same instance the clientFn returns.
@@ -50,6 +63,21 @@ func (s *Service) SetTaskDeleter(td watchreset.TaskDeleter) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.taskDeleter = td
+}
+
+// SetRepositoryLookup wires the repository validator used by CreateIssueWatch /
+// UpdateIssueWatch. Optional — when unset, a repository binding is persisted
+// as-is without workspace/default-branch resolution.
+func (s *Service) SetRepositoryLookup(rl RepositoryLookup) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.repoLookup = rl
+}
+
+func (s *Service) getRepositoryLookup() RepositoryLookup {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.repoLookup
 }
 
 // MockClient returns the shared mock client when the service was built in mock

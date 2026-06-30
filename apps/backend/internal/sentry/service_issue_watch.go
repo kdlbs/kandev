@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/watchreset"
@@ -31,10 +32,16 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 	if err := validateIssueWatchCreate(req); err != nil {
 		return nil, err
 	}
+	repositoryID, baseBranch, err := s.resolveRepositoryBinding(ctx, req.WorkspaceID, req.RepositoryID, req.BaseBranch)
+	if err != nil {
+		return nil, err
+	}
 	w := &IssueWatch{
 		WorkspaceID:         req.WorkspaceID,
 		WorkflowID:          req.WorkflowID,
 		WorkflowStepID:      req.WorkflowStepID,
+		RepositoryID:        repositoryID,
+		BaseBranch:          baseBranch,
 		Filter:              normalizeFilter(req.Filter),
 		AgentProfileID:      req.AgentProfileID,
 		ExecutorProfileID:   req.ExecutorProfileID,
@@ -81,9 +88,18 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 	if err != nil {
 		return nil, err
 	}
+	prevRepositoryID, prevBaseBranch := w.RepositoryID, w.BaseBranch
 	applyIssueWatchPatch(w, req)
 	if err := validateFilter(w.Filter); err != nil {
 		return nil, err
+	}
+	// Only enforce the single-status rule when the caller actually changed the
+	// filter. A partial update that leaves the filter untouched (e.g. the
+	// enable/disable toggle) must not fail on a legacy multi-status watch.
+	if req.Filter != nil {
+		if err := validateFilterStatuses(w.Filter); err != nil {
+			return nil, err
+		}
 	}
 	if w.WorkflowID == "" || w.WorkflowStepID == "" {
 		return nil, fmt.Errorf("%w: workflowId and workflowStepId cannot be empty", ErrInvalidConfig)
@@ -93,6 +109,18 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 	}
 	if err := validatePollInterval(w.PollIntervalSeconds); err != nil {
 		return nil, err
+	}
+	// Only validate/resolve the binding when its value actually changed. The
+	// dialog re-sends repositoryId/baseBranch on every PATCH, and an unchanged
+	// binding whose repo was since soft-deleted must not block edits to other
+	// fields (prompt, filter, …).
+	if w.RepositoryID != prevRepositoryID || w.BaseBranch != prevBaseBranch {
+		repositoryID, baseBranch, err := s.resolveRepositoryBinding(ctx, w.WorkspaceID, w.RepositoryID, w.BaseBranch)
+		if err != nil {
+			return nil, err
+		}
+		w.RepositoryID = repositoryID
+		w.BaseBranch = baseBranch
 	}
 	if err := s.store.UpdateIssueWatch(ctx, w); err != nil {
 		return nil, err
@@ -229,6 +257,8 @@ func (s *Service) publishNewSentryIssueEvent(ctx context.Context, w *IssueWatch,
 		WorkspaceID:       w.WorkspaceID,
 		WorkflowID:        w.WorkflowID,
 		WorkflowStepID:    w.WorkflowStepID,
+		RepositoryID:      w.RepositoryID,
+		BaseBranch:        w.BaseBranch,
 		AgentProfileID:    w.AgentProfileID,
 		ExecutorProfileID: w.ExecutorProfileID,
 		Prompt:            w.Prompt,
@@ -241,6 +271,41 @@ func (s *Service) publishNewSentryIssueEvent(ctx context.Context, w *IssueWatch,
 	}
 }
 
+// resolveRepositoryBinding validates the watch's optional repository binding
+// against its workspace and fills an empty base branch with the repository's
+// default branch. An empty repositoryID clears the binding (and forces an empty
+// base branch), preserving the historical repo-less behaviour. When no
+// RepositoryLookup is wired (unit tests, early boot), the binding is accepted
+// as-is and the default-branch fill is skipped.
+func (s *Service) resolveRepositoryBinding(ctx context.Context, workspaceID, repositoryID, baseBranch string) (string, string, error) {
+	repositoryID = strings.TrimSpace(repositoryID)
+	baseBranch = strings.TrimSpace(baseBranch)
+	if repositoryID == "" {
+		return "", "", nil
+	}
+	// Reject a non-empty base branch that isn't a safe git ref before it can be
+	// persisted and copied into watcher-created tasks (then fail at worktree
+	// launch). Empty defers to the repo's default branch below.
+	if baseBranch != "" && !securityutil.IsValidBaseBranchRef(baseBranch) {
+		return "", "", fmt.Errorf("%w: base branch %q is not a valid git ref", ErrInvalidConfig, baseBranch)
+	}
+	rl := s.getRepositoryLookup()
+	if rl == nil {
+		return repositoryID, baseBranch, nil
+	}
+	repoWorkspace, defaultBranch, ok := rl.GetRepository(ctx, repositoryID)
+	if !ok {
+		return "", "", fmt.Errorf("%w: repository %q not found", ErrInvalidConfig, repositoryID)
+	}
+	if repoWorkspace != workspaceID {
+		return "", "", fmt.Errorf("%w: repository %q does not belong to this workspace", ErrInvalidConfig, repositoryID)
+	}
+	if baseBranch == "" {
+		baseBranch = defaultBranch
+	}
+	return repositoryID, baseBranch, nil
+}
+
 func validateIssueWatchCreate(req *CreateIssueWatchRequest) error {
 	if req.WorkspaceID == "" {
 		return fmt.Errorf("%w: workspaceId required", ErrInvalidConfig)
@@ -248,7 +313,11 @@ func validateIssueWatchCreate(req *CreateIssueWatchRequest) error {
 	if req.WorkflowID == "" || req.WorkflowStepID == "" {
 		return fmt.Errorf("%w: workflowId and workflowStepId required", ErrInvalidConfig)
 	}
-	if err := validateFilter(normalizeFilter(req.Filter)); err != nil {
+	nf := normalizeFilter(req.Filter)
+	if err := validateFilter(nf); err != nil {
+		return err
+	}
+	if err := validateFilterStatuses(nf); err != nil {
 		return err
 	}
 	if err := validateMaxInflightTasks(req.MaxInflightTasks); err != nil {
@@ -283,6 +352,19 @@ func validateFilter(f SearchFilter) error {
 	}
 	if f.ProjectSlug == "" {
 		return fmt.Errorf("%w: filter.projectSlug is required", ErrInvalidConfig)
+	}
+	return nil
+}
+
+// validateFilterStatuses rejects a filter that carries more than one status.
+// Sentry has no OR form for the `is:` keyword (unlike levels, which use the
+// `level:[...]` bracket syntax), so two `is:` tokens would AND-combine into a
+// query that silently matches nothing. Applied when a filter is created or
+// changed — never against an unchanged stored filter, so a legacy multi-status
+// watch can still be paused/resumed without first being edited.
+func validateFilterStatuses(f SearchFilter) error {
+	if len(f.Statuses) > 1 {
+		return fmt.Errorf("%w: filter.statuses must contain at most one status because Sentry has no OR form for the is keyword", ErrInvalidConfig)
 	}
 	return nil
 }
@@ -327,6 +409,20 @@ func applyIssueWatchPatch(w *IssueWatch, req *UpdateIssueWatchRequest) {
 	}
 	if req.WorkflowStepID != nil {
 		w.WorkflowStepID = *req.WorkflowStepID
+	}
+	// RepositoryID / BaseBranch are applied here; UpdateIssueWatch then runs them
+	// through resolveRepositoryBinding (workspace check + default-branch fill, or
+	// clear when empty). An empty RepositoryID unbinds the watch. Switching to a
+	// different repository without an explicit base branch resets the branch so
+	// the new repo's default is used instead of carrying the old repo's branch.
+	if req.RepositoryID != nil {
+		if *req.RepositoryID != w.RepositoryID && req.BaseBranch == nil {
+			w.BaseBranch = ""
+		}
+		w.RepositoryID = *req.RepositoryID
+	}
+	if req.BaseBranch != nil {
+		w.BaseBranch = *req.BaseBranch
 	}
 	if req.Filter != nil {
 		w.Filter = normalizeFilter(*req.Filter)

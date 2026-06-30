@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func newTestLogger(t *testing.T) *logger.Logger {
@@ -18,6 +21,25 @@ func newTestLogger(t *testing.T) *logger.Logger {
 		t.Fatalf("failed to create logger: %v", err)
 	}
 	return log
+}
+
+func newObservedTestLogger(t *testing.T) (*logger.Logger, *observer.ObservedLogs) {
+	t.Helper()
+	core, observed := observer.New(zapcore.DebugLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("failed to create observed logger: %v", err)
+	}
+	return log, observed
+}
+
+func observedLogsContain(logs *observer.ObservedLogs, message string) bool {
+	for _, entry := range logs.All() {
+		if entry.Message == message {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRingBufferTrimsOldest(t *testing.T) {
@@ -77,6 +99,55 @@ func TestProcessRunnerCapturesOutput(t *testing.T) {
 		time.Sleep(25 * time.Millisecond)
 	}
 	t.Fatal("process output not captured in time")
+}
+
+func TestProcessRunnerStopLogsSignalAttempts(t *testing.T) {
+	log, observed := newObservedTestLogger(t)
+	runner := NewProcessRunner(nil, log, 2*1024*1024)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd, env := fixtureShellExec("sleep 30")
+	info, err := runner.Start(ctx, StartProcessRequest{
+		SessionID:  "session-1",
+		Kind:       "dev",
+		Command:    cmd,
+		Env:        env,
+		WorkingDir: "",
+	})
+	if err != nil {
+		t.Fatalf("failed to start process: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_ = runner.Stop(cleanupCtx, StopProcessRequest{ProcessID: info.ID})
+	})
+
+	stopCtx, stopCancel := context.WithCancel(context.Background())
+	stopCancel()
+	if err := runner.Stop(stopCtx, StopProcessRequest{ProcessID: info.ID}); err != nil {
+		t.Fatalf("failed to stop process: %v", err)
+	}
+
+	for _, message := range []string{
+		"workspace process stop requested",
+		"workspace process interrupt requested",
+		"workspace process group SIGKILL requested",
+	} {
+		if !observedLogsContain(observed, message) {
+			t.Fatalf("expected debug log %q, got %#v", message, observed.All())
+		}
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok := runner.Get(info.ID, false); !ok {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("process was not removed after stop")
 }
 
 func TestStripANSI(t *testing.T) {

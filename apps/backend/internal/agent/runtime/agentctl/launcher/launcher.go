@@ -184,9 +184,7 @@ func (l *Launcher) Start(ctx context.Context) error {
 	l.mu.Unlock()
 
 	if err := l.waitForHealthy(ctx); err != nil {
-		if killErr := l.cmd.Process.Kill(); killErr != nil {
-			l.logger.Warn("failed to kill agentctl process after failed health check", zap.Error(killErr))
-		}
+		l.forceKill(l.cmd.Process.Pid)
 		l.closeParentPipe()
 		l.releaseChildLifecycle()
 		return fmt.Errorf("agentctl failed to become healthy: %w", err)
@@ -266,9 +264,7 @@ func (l *Launcher) performHandshake(ctx context.Context, nonce string) (string, 
 	ctl := agentctlclient.NewControlClient(l.host, l.port, l.logger)
 	token, err := ctl.Handshake(ctx, nonce)
 	if err != nil {
-		if killErr := l.cmd.Process.Kill(); killErr != nil {
-			l.logger.Warn("failed to kill agentctl after handshake failure", zap.Error(killErr))
-		}
+		l.forceKill(l.cmd.Process.Pid)
 		l.closeParentPipe()
 		l.releaseChildLifecycle()
 		return "", fmt.Errorf("agentctl handshake failed: %w", err)
@@ -299,6 +295,7 @@ func (l *Launcher) Stop(ctx context.Context) error {
 	l.mu.Unlock()
 
 	l.logger.Info("stopping agentctl subprocess", zap.Int("pid", pid))
+	l.logger.Debug("agentctl subprocess stop requested", zap.Int("pid", pid))
 
 	// Close the liveness pipe first — this signals agentctl that the parent
 	// is shutting down, complementing the SIGTERM that follows.

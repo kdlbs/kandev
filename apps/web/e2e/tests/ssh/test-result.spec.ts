@@ -31,7 +31,7 @@ test.describe("ssh test-result UI", () => {
     await page.expectStepSuccess("resolve-target");
     await page.expectStepSuccess("ssh-handshake");
     await page.expectStepSuccess("probe-remote");
-    await page.expectStepSuccess("verify-arch");
+    await page.expectStepSuccess("verify-platform");
     await page.expectStepSuccess("verify-agentctl-cache");
 
     await expect(page.observedFingerprint()).toHaveText(seedData.sshTarget.hostFingerprint);
@@ -104,7 +104,7 @@ test.describe("ssh test-result UI", () => {
     await page.waitForTestResult();
     // alpine ships busybox; uname -a includes "Linux".
     await expect(page.step("probe-remote")).toContainText(/Linux/);
-    // arch step output is the raw arch string.
-    await expect(page.step("verify-arch")).toContainText("x86_64");
+    // platform step output is the normalized goos/goarch tuple.
+    await expect(page.step("verify-platform")).toContainText("linux/amd64");
   });
 });

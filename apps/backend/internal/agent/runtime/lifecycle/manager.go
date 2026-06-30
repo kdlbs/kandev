@@ -92,8 +92,7 @@ type Manager struct {
 	// shuttingDown is flipped true when graceful shutdown begins (see
 	// StopAllAgents) so handlers running in detached goroutines can
 	// short-circuit work that would otherwise race the teardown and log
-	// confusing errors against children that already died from the same
-	// terminal-wide SIGINT.
+	// confusing errors against children already being stopped.
 	shuttingDown atomic.Bool
 
 	// pollAggregator routes hub session-mode events to agentctl. See

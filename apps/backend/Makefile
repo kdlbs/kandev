@@ -18,7 +18,7 @@ LDFLAGS := -s -w
 #
 # Install GNU Make on Windows with `winget install ezwinports.make` (or via
 # scoop/chocolatey). Targets that rely on Unix builtins (run, dev,
-# start-debug, build-cross, build-agentctl-linux) remain Unix-only.
+# start-debug, build-cross) remain Unix-only.
 ifeq ($(OS),Windows_NT)
   RM = cmd /c del /s /q
   RMDIR = cmd /c rmdir /s /q
@@ -27,10 +27,12 @@ ifeq ($(OS),Windows_NT)
   # "already exists" failure is tolerated; on Unix the prefix is a no-op.
   MKDIR = cmd /c mkdir
   CGO_PREFIX = set CGO_ENABLED=1&
-  # Cross-compile prefix for the linux/amd64 agentctl bundled with the host
-  # build (used by remote-Sprites executors). cmd has no Unix env-var-prefix
-  # syntax; `set X=Y&` chains `set` and the next command in the same shell.
+  # Cross-compile prefixes for agentctl helpers bundled with the host build.
+  # cmd has no Unix env-var-prefix syntax; `set X=Y&` chains `set` and the next
+  # command in the same shell.
   GO_LINUX_AMD64 = set CGO_ENABLED=0& set GOOS=linux& set GOARCH=amd64&
+  GO_DARWIN_ARM64 = set CGO_ENABLED=0& set GOOS=darwin& set GOARCH=arm64&
+  GO_DARWIN_AMD64 = set CGO_ENABLED=0& set GOOS=darwin& set GOARCH=amd64&
   EXE = .exe
 else
   RM = rm -f
@@ -38,6 +40,8 @@ else
   MKDIR = mkdir -p
   CGO_PREFIX = CGO_ENABLED=1
   GO_LINUX_AMD64 = CGO_ENABLED=0 GOOS=linux GOARCH=amd64
+  GO_DARWIN_ARM64 = CGO_ENABLED=0 GOOS=darwin GOARCH=arm64
+  GO_DARWIN_AMD64 = CGO_ENABLED=0 GOOS=darwin GOARCH=amd64
   EXE =
 endif
 
@@ -48,7 +52,7 @@ BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || powershell -c
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
-.PHONY: all build build-all build-agentctl build-agentctl-linux build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint fmt vet help
+.PHONY: all build build-all build-agentctl build-agentctl-remote build-agentctl-linux build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint fmt vet help
 
 ## Default target
 all: build
@@ -84,11 +88,10 @@ build-acpdbg:
 	-@$(MKDIR) $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/acpdbg$(EXE) ./cmd/acpdbg
 
-## Build the unified kandev binary. Always includes the linux/amd64 agentctl
-## variant because remote executors (local Docker, remote Docker, Sprites)
-## bind-mount it into containers — without it, the first Docker session on a
-## non-Linux host fails with "agentctl linux binary not found".
-build: build-agentctl build-agentctl-linux build-mock-agent build-acpdbg build-winjob
+## Build the unified kandev binary. Always includes remote agentctl helpers
+## because SSH/Docker/Sprites executors upload or bind-mount platform-specific
+## sidecars into remote environments.
+build: build-agentctl build-agentctl-remote build-mock-agent build-acpdbg build-winjob
 	@echo "Building $(BINARY_NAME)..."
 	-@$(MKDIR) $(BUILD_DIR)
 	$(CGO_PREFIX) $(GO) build $(GOFLAGS) -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)$(EXE) ./cmd/kandev
@@ -104,11 +107,26 @@ build-agentctl:
 	-@$(MKDIR) $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl$(EXE) ./cmd/agentctl
 
-## Build agentctl for linux/amd64 (used by Sprites remote executor)
+## Build all remote agentctl helpers used by SSH/Docker/Sprites executors.
+build-agentctl-remote: build-agentctl-linux build-agentctl-darwin-arm64 build-agentctl-darwin-amd64
+
+## Build agentctl for linux/amd64 (used by Docker/Sprites and Linux SSH hosts)
 build-agentctl-linux:
 	@echo "Building agentctl for linux/amd64..."
 	-@$(MKDIR) $(BUILD_DIR)
 	$(GO_LINUX_AMD64) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-linux-amd64 ./cmd/agentctl
+
+## Build agentctl for darwin/arm64 (used by Apple Silicon SSH hosts)
+build-agentctl-darwin-arm64:
+	@echo "Building agentctl for darwin/arm64..."
+	-@$(MKDIR) $(BUILD_DIR)
+	$(GO_DARWIN_ARM64) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-darwin-arm64 ./cmd/agentctl
+
+## Build agentctl for darwin/amd64 (used by Intel Mac SSH hosts)
+build-agentctl-darwin-amd64:
+	@echo "Building agentctl for darwin/amd64..."
+	-@$(MKDIR) $(BUILD_DIR)
+	$(GO_DARWIN_AMD64) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-darwin-amd64 ./cmd/agentctl
 
 ## Build mock-agent for linux/amd64 (used by Docker E2E tests)
 build-mock-agent-linux:

@@ -17,7 +17,8 @@ import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useToast } from "@/components/toast-provider";
 import { useTaskCIAutomationOptions } from "@/hooks/domains/github/use-task-ci-options";
-import type { TaskCIAutomationPatch, TaskPR } from "@/lib/types/github";
+import { autoFixRoundForState, findCIAutomationStateForPR } from "@/lib/github/ci-automation";
+import type { TaskCIAutomationPatch, TaskCIPRAutomationState, TaskPR } from "@/lib/types/github";
 
 const PR_FEEDBACK_PLACEHOLDER = "{{pr.feedback}}";
 
@@ -207,12 +208,35 @@ function CIAutomationErrorRow({
   );
 }
 
+function CIAutoFixRoundExplanation({
+  state,
+  maxRounds,
+}: {
+  state: TaskCIPRAutomationState | undefined;
+  maxRounds: number | null | undefined;
+}) {
+  const round = autoFixRoundForState(state, maxRounds);
+  return (
+    <div
+      data-testid="ci-auto-fix-round-explanation"
+      className="rounded-md border border-border/70 bg-muted/30 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground"
+    >
+      Auto-fix has used {round.current} of {round.max} rounds for this PR. A round is counted when
+      Kandev sends or queues a CI auto-fix message. Updating an already queued auto-fix message does
+      not use another round. When this is at {round.max}/{round.max} and there is no pending
+      auto-fix message left to update, Kandev pauses auto-fix for this PR so it cannot loop forever.
+      Disable and re-enable auto-fix after manual review to start over.
+    </div>
+  );
+}
+
 export function PRCIAutomationControls({ pr }: { pr: TaskPR }) {
   const { options, loading, saving, error, refresh, update, resetPrompt } =
     useTaskCIAutomationOptions(pr.task_id);
   const { toast } = useToast();
   const [promptOpen, setPromptOpen] = useState(false);
   const [promptDraft, setPromptDraft] = useState("");
+  const automationState = findCIAutomationStateForPR(options?.pr_states, pr);
 
   const openPromptEditor = useCallback(() => {
     setPromptDraft(options?.auto_fix_prompt_override ?? options?.effective_auto_fix_prompt ?? "");
@@ -281,6 +305,12 @@ export function PRCIAutomationControls({ pr }: { pr: TaskPR }) {
         disabled={disabled}
         onCheckedChange={(checked) => patchOption({ auto_fix_enabled: checked })}
       />
+      {options?.auto_fix_enabled && (
+        <CIAutoFixRoundExplanation
+          state={automationState}
+          maxRounds={options.auto_fix_max_rounds}
+        />
+      )}
       <CIAutomationRow
         id={`task-ci-auto-merge-${pr.task_id}`}
         label="Auto-merge when ready"

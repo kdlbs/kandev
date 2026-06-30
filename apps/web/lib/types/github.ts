@@ -192,6 +192,8 @@ export type TaskCIPRAutomationState = {
   last_fix_checkpoint_json: string;
   last_fix_enqueued_at: string | null;
   last_fix_session_id: string | null;
+  auto_fix_round_count: number;
+  auto_fix_exhausted_at: string | null;
   last_merge_signature: string;
   last_merge_attempt_at: string | null;
   last_error: string | null;
@@ -204,6 +206,7 @@ export type TaskCIAutomationOptions = {
   auto_fix_enabled: boolean;
   auto_merge_enabled: boolean;
   auto_fix_prompt_override: string | null;
+  auto_fix_max_rounds?: number;
   effective_auto_fix_prompt: string;
   using_default_prompt: boolean;
   updated_at: string;

@@ -42,6 +42,7 @@ type GitHubService interface {
 	AssociatePRWithTask(ctx context.Context, taskID, repositoryID string, pr *github.PR) (*github.TaskPR, error)
 	GetTaskPR(ctx context.Context, taskID string) (*github.TaskPR, error)
 	ListTaskPRs(ctx context.Context, taskIDs []string) (map[string][]*github.TaskPR, error)
+	TriggerPRSyncAll(ctx context.Context, taskID string) ([]*github.TaskPR, error)
 	GetTaskPRByOwnerRepoNumber(ctx context.Context, taskID, owner, repo string, prNumber int) (*github.TaskPR, error)
 	GetTaskCIOptionsResponse(ctx context.Context, taskID string) (*github.TaskCIOptionsResponse, error)
 	GetTaskCIPRState(ctx context.Context, taskID, repositoryID string, prNumber int) (*github.TaskCIPRAutomationState, error)
@@ -49,6 +50,7 @@ type GitHubService interface {
 	RefreshTaskCIFixCheckpoint(ctx context.Context, taskID, repositoryID string, prNumber int, signature, checkpointJSON string) error
 	RecordTaskCIMergeAttempt(ctx context.Context, attempt github.TaskCIMergeAttempt) error
 	RecordTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error
+	MarkTaskCIAutoFixExhausted(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error
 	ClearTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int) error
 	GetPRFeedback(ctx context.Context, owner, repo string, number int) (*github.PRFeedback, error)
 	MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error
@@ -187,23 +189,71 @@ func (s *Service) handleTaskPRUpdated(ctx context.Context, event *bus.Event) err
 
 func (s *Service) handleTaskCIOptionsUpdated(ctx context.Context, event *bus.Event) error {
 	options, ok := event.Data.(*github.TaskCIOptionsResponse)
-	if !ok || options == nil || (!options.AutoFixEnabled && !options.AutoMergeEnabled) || s.githubService == nil {
+	if !ok || options == nil || event.Source == ciAutomationStateEventSource || (!options.AutoFixEnabled && !options.AutoMergeEnabled) || s.githubService == nil {
 		return nil
 	}
 	detachedCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ciAutomationDetachedTimeout)
 	defer cancel()
-	prsByTask, err := s.githubService.ListTaskPRs(detachedCtx, []string{options.TaskID})
+	prs, err := s.githubService.TriggerPRSyncAll(detachedCtx, options.TaskID)
 	if err != nil {
-		s.logger.Debug("failed to load task PRs for CI automation options update", zap.String("task_id", options.TaskID), zap.Error(err))
-		return nil
+		s.logger.Warn("failed to sync task PRs for CI automation options update", zap.String("task_id", options.TaskID), zap.Error(err))
+		s.recordTaskCIOptionsSyncError(detachedCtx, options.TaskID, prs, err)
 	}
-	for _, pr := range prsByTask[options.TaskID] {
-		s.startTaskPRCIAutomation(ctx, pr)
+	for _, pr := range prs {
+		s.startTaskPRCIAutomationWithoutRefresh(ctx, pr)
 	}
 	return nil
 }
 
+func (s *Service) recordTaskCIOptionsSyncError(ctx context.Context, taskID string, synced []*github.TaskPR, syncErr error) {
+	syncedKeys := make(map[ciAutomationTaskPRSyncKey]struct{}, len(synced))
+	for _, pr := range synced {
+		if pr == nil {
+			continue
+		}
+		syncedKeys[ciAutomationTaskPRSyncKeyFor(pr)] = struct{}{}
+	}
+	prsByTask, err := s.githubService.ListTaskPRs(ctx, []string{taskID})
+	if err != nil {
+		s.logger.Warn("failed to load task PRs after CI automation sync failure", zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	for _, pr := range prsByTask[taskID] {
+		if _, ok := syncedKeys[ciAutomationTaskPRSyncKeyFor(pr)]; ok {
+			continue
+		}
+		s.recordCIAutomationError(ctx, pr, fmt.Sprintf("sync PR status: %v", syncErr))
+	}
+}
+
+type ciAutomationTaskPRSyncKey struct {
+	repositoryID string
+	owner        string
+	repo         string
+	prNumber     int
+}
+
+func ciAutomationTaskPRSyncKeyFor(pr *github.TaskPR) ciAutomationTaskPRSyncKey {
+	if pr == nil {
+		return ciAutomationTaskPRSyncKey{}
+	}
+	return ciAutomationTaskPRSyncKey{
+		repositoryID: pr.RepositoryID,
+		owner:        strings.ToLower(pr.Owner),
+		repo:         strings.ToLower(pr.Repo),
+		prNumber:     pr.PRNumber,
+	}
+}
+
 func (s *Service) startTaskPRCIAutomation(ctx context.Context, pr *github.TaskPR) {
+	s.startTaskPRCIAutomationWithRefresh(ctx, pr, true)
+}
+
+func (s *Service) startTaskPRCIAutomationWithoutRefresh(ctx context.Context, pr *github.TaskPR) {
+	s.startTaskPRCIAutomationWithRefresh(ctx, pr, false)
+}
+
+func (s *Service) startTaskPRCIAutomationWithRefresh(ctx context.Context, pr *github.TaskPR, refresh bool) {
 	if pr == nil {
 		return
 	}
@@ -219,7 +269,7 @@ func (s *Service) startTaskPRCIAutomation(ctx context.Context, pr *github.TaskPR
 		defer s.ciAutomationInFlight.Delete(key)
 		automationCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ciAutomationDetachedTimeout)
 		defer cancel()
-		if err := s.handleTaskPRCIAutomation(automationCtx, pr); err != nil {
+		if err := s.handleTaskPRCIAutomationWithRefresh(automationCtx, pr, refresh); err != nil {
 			s.logger.Debug("CI automation handling failed", zap.String("task_id", pr.TaskID), zap.Error(err))
 		}
 	}()

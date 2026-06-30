@@ -8,6 +8,7 @@
 apps/
 ├── backend/          # Go backend (orchestrator, lifecycle, agentctl, WS gateway)
 ├── web/              # Vite/React SPA frontend (Go boot payload + WS + Zustand)
+├── desktop/          # Tauri desktop shell around the native runtime
 ├── cli/              # CLI tool (TypeScript)
 ├── landing/          # Landing page
 └── packages/         # Shared packages/types
@@ -18,6 +19,7 @@ apps/
 - **Package manager**: `pnpm` workspace (run from `apps/`, not repo root)
 - **Backend**: Go with Make (`make -C apps/backend test|lint|build`)
 - **Frontend**: Vite/React SPA (`cd apps && pnpm --filter @kandev/web dev|build:vite|lint|typecheck`)
+- **Desktop**: Tauri shell (`cd apps && pnpm --filter @kandev/desktop build|e2e`; Rust tests from `apps/desktop/src-tauri`)
 - **UI**: Shadcn components via `@kandev/ui`
 - **E2E**: Playwright (`cd apps/web && pnpm e2e`). The `containers` project (gated on `KANDEV_E2E_CONTAINERS=1`, formerly `docker`) covers both the Docker executor and the SSH executor — anything that needs a real Docker daemon on the host lives there. See `apps/web/e2e/README.md`.
 - **GitHub repo**: `https://github.com/kdlbs/kandev`
@@ -37,6 +39,7 @@ Architecture notes and per-area conventions live alongside the code they describ
 - `apps/backend/internal/agentctl/AGENTS.md` — agentctl HTTP server: route groups, adapter model, ACP protocol.
 - `apps/backend/internal/agentctl/server/api/AGENTS.md` — reverse-proxy body rewriting (`Accept-Encoding`), iframe-blocking header stripping.
 - `apps/backend/internal/integrations/AGENTS.md` — adding a new third-party integration (Jira/Linear pattern, both backend and frontend halves). The `/add-integration` skill mirrors this for scaffolding new integrations.
+- `apps/desktop/AGENTS.md` — Tauri desktop app: runtime resources, Rust process lifecycle, packaging, signing, and smoke tests.
 - `apps/web/AGENTS.md` — Vite/React SPA frontend: shadcn imports, Go boot-payload hydration, store slice structure (incl. `office`), WS format, component conventions, TS lint limits.
 
 ---
@@ -114,4 +117,4 @@ For developing in ephemeral cloud VMs (Cursor Cloud, Codex, GitHub Codespaces, e
 
 ---
 
-**Last Updated**: 2026-05-24
+**Last Updated**: 2026-06-23

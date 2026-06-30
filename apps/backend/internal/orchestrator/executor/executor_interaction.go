@@ -409,7 +409,10 @@ func (e *Executor) launchModelSwitchAgent(ctx context.Context, taskID, sessionID
 		return fmt.Errorf("failed to launch agent with new model: %w", err)
 	}
 
-	e.persistModelSwitchState(ctx, taskID, sessionID, session, newModel)
+	if err := e.persistModelSwitchState(ctx, taskID, sessionID, session, newModel); err != nil {
+		e.stopUnstartedExecution(ctx, sessionID, resp.AgentExecutionID)
+		return err
+	}
 
 	if err := e.agentManager.StartAgentProcess(ctx, resp.AgentExecutionID); err != nil {
 		e.logger.Error("failed to start agent process after model switch",
@@ -516,7 +519,7 @@ func (e *Executor) applyWorktreeToSwitchRequest(req *LaunchAgentRequest, session
 // after a model switch launch. The executors_running row's agent_execution_id /
 // container_id / status are written by the lifecycle manager during the launch
 // itself (lifecycle.persistExecutorRunning) and not touched here.
-func (e *Executor) persistModelSwitchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, newModel string) {
+func (e *Executor) persistModelSwitchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, newModel string) error {
 	session.State = models.TaskSessionStateStarting
 	session.UpdatedAt = time.Now().UTC()
 
@@ -525,14 +528,15 @@ func (e *Executor) persistModelSwitchState(ctx context.Context, taskID, sessionI
 	}
 	session.AgentProfileSnapshot["model"] = newModel
 
-	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+	if err := e.updateSessionStarting(ctx, taskID, session, true); err != nil {
 		e.logger.Error("failed to update session after model switch",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return
+		return err
 	}
 	e.persistRuntimeModelMetadata(ctx, sessionID, session, newModel)
+	return nil
 }
 
 // persistInPlaceModelSwitch updates the session snapshot model after a successful

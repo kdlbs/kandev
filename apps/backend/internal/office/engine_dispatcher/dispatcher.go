@@ -1,5 +1,5 @@
 // Package engine_dispatcher provides the production implementation of
-// office/service.WorkflowEngineDispatcher. It bridges the office service's
+// office/shared.WorkflowEngineDispatcher. It bridges the office service's
 // typed event subscribers to the workflow engine's HandleInput envelope
 // by resolving the task's active session id and invoking
 // engine.HandleTrigger.
@@ -10,25 +10,27 @@ package engine_dispatcher
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/common/logger"
-	officeservice "github.com/kandev/kandev/internal/office/service"
+	"github.com/kandev/kandev/internal/office/shared"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	"go.uber.org/zap"
 )
 
-// ErrNoSession is re-exported from office/service so callers can compare
+// ErrNoSession is re-exported from office/shared so callers can compare
 // via errors.Is without importing this package directly. Returned when a
 // trigger arrives for a task with no active session — engine state is
 // keyed on (taskID, sessionID), so the dispatcher cannot proceed without
 // one.
-var ErrNoSession = officeservice.ErrEngineNoSession
+var ErrNoSession = shared.ErrEngineNoSession
 
-// SessionResolver looks up a task's active session.
+// SessionResolver looks up a task's session state for workflow triggers.
 type SessionResolver interface {
 	GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*taskmodels.TaskSession, error)
+	GetTaskSessionByTaskID(ctx context.Context, taskID string) (*taskmodels.TaskSession, error)
 }
 
 // EngineHandle is the engine surface the dispatcher needs. Defined as a
@@ -38,7 +40,7 @@ type EngineHandle interface {
 }
 
 // Dispatcher resolves a task's active session and invokes the workflow
-// engine. It implements office/service.WorkflowEngineDispatcher.
+// engine. It implements shared.WorkflowEngineDispatcher.
 type Dispatcher struct {
 	engine   EngineHandle
 	sessions SessionResolver
@@ -56,11 +58,11 @@ func New(eng EngineHandle, sessions SessionResolver, log *logger.Logger) *Dispat
 	}
 }
 
-// HandleTrigger satisfies office/service.WorkflowEngineDispatcher.
+// HandleTrigger satisfies shared.WorkflowEngineDispatcher.
 //
-// Resolves the task's active session — returning ErrNoSession if none
-// exists — then invokes engine.HandleTrigger. Errors from the engine
-// (e.g. queue_run resolver failures) bubble up so the office event
+// Resolves the task's active session — or, for comment wakes, the latest
+// reusable completed/idle session — then invokes engine.HandleTrigger. Errors from the
+// engine (e.g. queue_run resolver failures) bubble up so the office event
 // subscriber can log them.
 func (d *Dispatcher) HandleTrigger(
 	ctx context.Context,
@@ -69,17 +71,32 @@ func (d *Dispatcher) HandleTrigger(
 	payload any,
 	operationID string,
 ) error {
+	_, err := d.HandleTriggerHandled(ctx, taskID, trigger, payload, operationID)
+	return err
+}
+
+// HandleTriggerHandled reports whether the workflow engine found actions for
+// the trigger. A no-action step is a successful no-op, but callers such as the
+// dashboard still need to keep their legacy fallback wake path.
+func (d *Dispatcher) HandleTriggerHandled(
+	ctx context.Context,
+	taskID string,
+	trigger engine.Trigger,
+	payload any,
+	operationID string,
+) (bool, error) {
 	if taskID == "" {
-		return fmt.Errorf("task_id is required")
+		return false, fmt.Errorf("task_id is required")
 	}
-	session, err := d.sessions.GetActiveTaskSessionByTaskID(ctx, taskID)
-	if err != nil || session == nil {
-		// No active session — engine cannot LoadState. Caller falls
-		// back to the legacy QueueRun path.
+	session, err := d.resolveSession(ctx, taskID, trigger)
+	if err != nil {
+		return false, fmt.Errorf("resolve session: %w", err)
+	}
+	if session == nil {
 		d.logger.Debug("engine trigger skipped: no active session",
 			zap.String("task_id", taskID),
 			zap.String("trigger", string(trigger)))
-		return ErrNoSession
+		return false, ErrNoSession
 	}
 	in := engine.HandleInput{
 		TaskID:      taskID,
@@ -88,8 +105,44 @@ func (d *Dispatcher) HandleTrigger(
 		OperationID: operationID,
 		Payload:     payload,
 	}
-	if _, err := d.engine.HandleTrigger(ctx, in); err != nil {
-		return fmt.Errorf("engine handle %s: %w", trigger, err)
+	result, err := d.engine.HandleTrigger(ctx, in)
+	if err != nil {
+		return false, fmt.Errorf("engine handle %s: %w", trigger, err)
 	}
-	return nil
+	return result.Idempotent || result.ActionCount > 0, nil
+}
+
+func (d *Dispatcher) resolveSession(
+	ctx context.Context, taskID string, trigger engine.Trigger,
+) (*taskmodels.TaskSession, error) {
+	session, err := d.sessions.GetActiveTaskSessionByTaskID(ctx, taskID)
+	if err == nil && session != nil {
+		return session, nil
+	}
+	if err != nil && !errors.Is(err, taskmodels.ErrTaskSessionNotFound) {
+		return nil, fmt.Errorf("active session lookup: %w", err)
+	}
+	if trigger != engine.TriggerOnComment {
+		return nil, nil
+	}
+	// Comment wakes are allowed after an office task's agent session has
+	// completed or returned to reusable IDLE state. The workflow engine state is
+	// keyed by (taskID, sessionID), so a post-completion comment intentionally
+	// resumes the latest reusable session's persisted machine state instead of
+	// starting a fresh state machine here.
+	session, err = d.sessions.GetTaskSessionByTaskID(ctx, taskID)
+	if err == nil && session != nil {
+		if !isReusableCommentSession(session.State) {
+			return nil, nil
+		}
+		return session, nil
+	}
+	if err != nil && !errors.Is(err, taskmodels.ErrTaskSessionNotFound) {
+		return nil, fmt.Errorf("latest session lookup: %w", err)
+	}
+	return nil, nil
+}
+
+func isReusableCommentSession(state taskmodels.TaskSessionState) bool {
+	return state == taskmodels.TaskSessionStateCompleted || state == taskmodels.TaskSessionStateIdle
 }

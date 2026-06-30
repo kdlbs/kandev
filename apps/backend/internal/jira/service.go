@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/watchreset"
@@ -23,6 +24,15 @@ type SecretStore interface {
 	Set(ctx context.Context, id, name, value string) error
 	Delete(ctx context.Context, id string) error
 	Exists(ctx context.Context, id string) (bool, error)
+}
+
+// RepositoryLookup is the subset of the task service used to validate a watch's
+// optional repository binding (workspace ownership + default-branch fill).
+// Wired post-construction via SetRepositoryLookup to avoid an import cycle with
+// the task service. ok is false when the repository does not exist or has been
+// soft-deleted.
+type RepositoryLookup interface {
+	GetRepository(ctx context.Context, id string) (workspaceID, defaultBranch string, ok bool)
 }
 
 // Service orchestrates Jira config storage, the cached client, and the
@@ -41,6 +51,10 @@ type Service struct {
 	// the import cycle that would result from passing the concrete
 	// *task.HandoffService into NewService.
 	taskDeleter watchreset.TaskDeleter
+	// repoLookup validates an optional repository binding on create/update.
+	// Wired post-construction via SetRepositoryLookup. When nil (e.g. unit
+	// tests), the binding is accepted as-is and default-branch fill is skipped.
+	repoLookup RepositoryLookup
 	// mockClient is non-nil only when Provide built the service with a MockClient
 	// (KANDEV_MOCK_JIRA=true). Exposed via MockClient() so the e2e control routes
 	// can drive the same instance the clientFn returns.
@@ -54,6 +68,21 @@ func (s *Service) SetTaskDeleter(td watchreset.TaskDeleter) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.taskDeleter = td
+}
+
+// SetRepositoryLookup wires the repository validator used by CreateIssueWatch /
+// UpdateIssueWatch. Optional — when unset, a repository binding is persisted
+// as-is without workspace/default-branch resolution.
+func (s *Service) SetRepositoryLookup(rl RepositoryLookup) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.repoLookup = rl
+}
+
+func (s *Service) getRepositoryLookup() RepositoryLookup {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.repoLookup
 }
 
 // MockClient returns the shared mock client when the service was built in mock
@@ -517,10 +546,16 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 	if err := validateIssueWatchCreate(req); err != nil {
 		return nil, err
 	}
+	repositoryID, baseBranch, err := s.resolveRepositoryBinding(ctx, req.WorkspaceID, req.RepositoryID, req.BaseBranch)
+	if err != nil {
+		return nil, err
+	}
 	w := &IssueWatch{
 		WorkspaceID:         req.WorkspaceID,
 		WorkflowID:          req.WorkflowID,
 		WorkflowStepID:      req.WorkflowStepID,
+		RepositoryID:        repositoryID,
+		BaseBranch:          baseBranch,
 		JQL:                 strings.TrimSpace(req.JQL),
 		AgentProfileID:      req.AgentProfileID,
 		ExecutorProfileID:   req.ExecutorProfileID,
@@ -567,6 +602,7 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 	if err != nil {
 		return nil, err
 	}
+	prevRepositoryID, prevBaseBranch := w.RepositoryID, w.BaseBranch
 	applyIssueWatchPatch(w, req)
 	// Empty-string PATCH writes (`{"workflowId": ""}` etc.) bypass the nil
 	// guard in applyIssueWatchPatch — Go's JSON decoder returns a non-nil
@@ -583,6 +619,18 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 	}
 	if err := validateMaxInflightTasks(w.MaxInflightTasks); err != nil {
 		return nil, err
+	}
+	// Only validate/resolve the binding when its value actually changed. The
+	// dialog re-sends repositoryId/baseBranch on every PATCH, and an unchanged
+	// binding whose repo was since soft-deleted must not block edits to other
+	// fields (prompt, JQL, …).
+	if w.RepositoryID != prevRepositoryID || w.BaseBranch != prevBaseBranch {
+		repositoryID, baseBranch, err := s.resolveRepositoryBinding(ctx, w.WorkspaceID, w.RepositoryID, w.BaseBranch)
+		if err != nil {
+			return nil, err
+		}
+		w.RepositoryID = repositoryID
+		w.BaseBranch = baseBranch
 	}
 	if err := s.store.UpdateIssueWatch(ctx, w); err != nil {
 		return nil, err
@@ -700,6 +748,8 @@ func (s *Service) publishNewJiraIssueEvent(ctx context.Context, w *IssueWatch, t
 		WorkspaceID:       w.WorkspaceID,
 		WorkflowID:        w.WorkflowID,
 		WorkflowStepID:    w.WorkflowStepID,
+		RepositoryID:      w.RepositoryID,
+		BaseBranch:        w.BaseBranch,
 		AgentProfileID:    w.AgentProfileID,
 		ExecutorProfileID: w.ExecutorProfileID,
 		Prompt:            w.Prompt,
@@ -725,6 +775,41 @@ const (
 	MinIssueWatchPollInterval = 60
 	MaxIssueWatchPollInterval = 3600
 )
+
+// resolveRepositoryBinding validates the watch's optional repository binding
+// against its workspace and fills an empty base branch with the repository's
+// default branch. An empty repositoryID clears the binding (and forces an empty
+// base branch), preserving the historical repo-less behaviour. When no
+// RepositoryLookup is wired (unit tests, early boot), the binding is accepted
+// as-is and the default-branch fill is skipped.
+func (s *Service) resolveRepositoryBinding(ctx context.Context, workspaceID, repositoryID, baseBranch string) (string, string, error) {
+	repositoryID = strings.TrimSpace(repositoryID)
+	baseBranch = strings.TrimSpace(baseBranch)
+	if repositoryID == "" {
+		return "", "", nil
+	}
+	// Reject a non-empty base branch that isn't a safe git ref before it can be
+	// persisted and copied into watcher-created tasks (then fail at worktree
+	// launch). Empty defers to the repo's default branch below.
+	if baseBranch != "" && !securityutil.IsValidBaseBranchRef(baseBranch) {
+		return "", "", fmt.Errorf("%w: base branch %q is not a valid git ref", ErrInvalidConfig, baseBranch)
+	}
+	rl := s.getRepositoryLookup()
+	if rl == nil {
+		return repositoryID, baseBranch, nil
+	}
+	repoWorkspace, defaultBranch, ok := rl.GetRepository(ctx, repositoryID)
+	if !ok {
+		return "", "", fmt.Errorf("%w: repository %q not found", ErrInvalidConfig, repositoryID)
+	}
+	if repoWorkspace != workspaceID {
+		return "", "", fmt.Errorf("%w: repository %q does not belong to this workspace", ErrInvalidConfig, repositoryID)
+	}
+	if baseBranch == "" {
+		baseBranch = defaultBranch
+	}
+	return repositoryID, baseBranch, nil
+}
 
 func validateIssueWatchCreate(req *CreateIssueWatchRequest) error {
 	if req.WorkspaceID == "" {
@@ -775,6 +860,20 @@ func applyIssueWatchPatch(w *IssueWatch, req *UpdateIssueWatchRequest) {
 	}
 	if req.WorkflowStepID != nil {
 		w.WorkflowStepID = *req.WorkflowStepID
+	}
+	// RepositoryID / BaseBranch are applied here; UpdateIssueWatch then runs them
+	// through resolveRepositoryBinding (workspace check + default-branch fill, or
+	// clear when empty). An empty RepositoryID unbinds the watch. Switching to a
+	// different repository without an explicit base branch resets the branch so
+	// the new repo's default is used instead of carrying the old repo's branch.
+	if req.RepositoryID != nil {
+		if *req.RepositoryID != w.RepositoryID && req.BaseBranch == nil {
+			w.BaseBranch = ""
+		}
+		w.RepositoryID = *req.RepositoryID
+	}
+	if req.BaseBranch != nil {
+		w.BaseBranch = *req.BaseBranch
 	}
 	if req.JQL != nil {
 		w.JQL = strings.TrimSpace(*req.JQL)

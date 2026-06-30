@@ -177,6 +177,11 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		response.TaskSessionID = launchResp.SessionID
 		response.AgentExecutionID = launchResp.AgentExecutionID
 	}
+	h.recordTaskCreateLastUsed(ctx, httpCreateTaskRequest{
+		AgentProfileID:    req.AgentProfileID,
+		ExecutorProfileID: req.ExecutorProfileID,
+		Repositories:      req.Repositories,
+	}, repos)
 	return ws.NewResponse(msg.ID, msg.Action, response)
 }
 

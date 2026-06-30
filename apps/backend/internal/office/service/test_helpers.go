@@ -58,6 +58,11 @@ func (s *Service) ExecSQL(t *testing.T, query string, args ...interface{}) {
 	}
 }
 
+// GetWorkspaceGroupForTest exposes workspace-group rows for deletion-order tests.
+func (s *Service) GetWorkspaceGroupForTest(ctx context.Context, id string) (*models.WorkspaceGroup, error) {
+	return s.repo.GetWorkspaceGroup(ctx, id)
+}
+
 // GetTaskExecutionFieldsForTest exposes task execution fields for service package tests.
 func (s *Service) GetTaskExecutionFieldsForTest(
 	ctx context.Context,

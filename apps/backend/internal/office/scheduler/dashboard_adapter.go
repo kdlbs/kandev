@@ -84,10 +84,11 @@ func convertChangeToMutation(c dashboard.TaskReactivityChange) TaskMutation {
 	}
 	if c.Comment != nil {
 		out.Comment = &MutationComment{
-			ID:         c.Comment.ID,
-			Body:       c.Comment.Body,
-			AuthorType: c.Comment.AuthorType,
-			AuthorID:   c.Comment.AuthorID,
+			ID:               c.Comment.ID,
+			Body:             c.Comment.Body,
+			AuthorType:       c.Comment.AuthorType,
+			AuthorID:         c.Comment.AuthorID,
+			SkipAssigneeWake: c.SkipAssigneeCommentWake,
 		}
 	}
 	return out

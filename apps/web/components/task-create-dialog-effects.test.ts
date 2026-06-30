@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import {
   useDefaultSelectionsEffect,
-  useGitHubUrlErrorEffect,
   useWorkflowAgentProfileEffect,
 } from "./task-create-dialog-effects";
+import { decideAgentProfileAutopick } from "./task-create-dialog-autopick";
 import type { DialogFormState, StoreSelections } from "@/components/task-create-dialog-types";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { Workspace } from "@/lib/types/http";
@@ -14,11 +14,19 @@ import { STORAGE_KEYS } from "@/lib/settings/constants";
 // so the rest can be undefined behind an `as` cast and never read.
 type Fake = Pick<
   DialogFormState,
-  "selectedWorkflowId" | "setAgentProfileId" | "setWorkflowAgentProfileId"
+  | "agentProfileId"
+  | "workflowAgentProfileId"
+  | "selectedWorkflowId"
+  | "executorProfileId"
+  | "setAgentProfileId"
+  | "setWorkflowAgentProfileId"
 >;
 function makeFs(overrides: Partial<Fake> = {}): DialogFormState {
   return {
+    agentProfileId: "",
+    workflowAgentProfileId: "",
     selectedWorkflowId: null,
+    executorProfileId: "profile-1",
     setAgentProfileId: vi.fn(),
     setWorkflowAgentProfileId: vi.fn(),
     ...overrides,
@@ -169,6 +177,57 @@ describe("useWorkflowAgentProfileEffect", () => {
   });
 });
 
+describe("useWorkflowAgentProfileEffect — settings fallback readiness", () => {
+  it("clears stale workflow agents before deferring last-used restore", async () => {
+    const claude = makeProfile("claude");
+    const cursor = makeProfile("cursor");
+    const workflows = [{ id: "wf-1" /* no agent_profile_id */ }];
+    const fsBefore = makeFs({ selectedWorkflowId: "wf-1", executorProfileId: "" });
+
+    const { rerender } = renderHook(
+      ({ fs, compatible }) =>
+        useWorkflowAgentProfileEffect(fs, workflows, [claude, cursor], compatible, {
+          lastUsedAgentProfileId: claude.id,
+        }),
+      { initialProps: { fs: fsBefore, compatible: [claude, cursor] } },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fsBefore.setAgentProfileId).toHaveBeenCalledWith("");
+    expect(fsBefore.setAgentProfileId).not.toHaveBeenCalledWith(claude.id);
+
+    const fsAfter = makeFs({ selectedWorkflowId: "wf-1", executorProfileId: "profile-1" });
+    rerender({ fs: fsAfter, compatible: [cursor] });
+
+    await waitFor(() => expect(fsAfter.setAgentProfileId).toHaveBeenCalledWith(""));
+    expect(fsAfter.setAgentProfileId).not.toHaveBeenCalledWith(claude.id);
+  });
+
+  it("defers workflow last-used restore until auth compatibility is ready", async () => {
+    const claude = makeProfile("claude");
+    const workflows = [{ id: "wf-1" /* no agent_profile_id */ }];
+    const fsBefore = makeFs({ selectedWorkflowId: "wf-1", executorProfileId: "profile-1" });
+
+    const { rerender } = renderHook(
+      ({ fs, authLoaded }) =>
+        useWorkflowAgentProfileEffect(fs, workflows, [claude], [claude], {
+          lastUsedAgentProfileId: claude.id,
+          authLoaded,
+        }),
+      { initialProps: { fs: fsBefore, authLoaded: false } },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fsBefore.setAgentProfileId).toHaveBeenCalledWith("");
+    expect(fsBefore.setAgentProfileId).not.toHaveBeenCalledWith(claude.id);
+
+    const fsAfter = makeFs({ selectedWorkflowId: "wf-1", executorProfileId: "profile-1" });
+    rerender({ fs: fsAfter, authLoaded: true });
+
+    await waitFor(() => expect(fsAfter.setAgentProfileId).toHaveBeenCalledWith(claude.id));
+  });
+});
+
 type DefaultSelFake = Pick<
   DialogFormState,
   | "agentProfileId"
@@ -217,6 +276,67 @@ function makeSel(overrides: Partial<StoreSelections> = {}): StoreSelections {
     ...overrides,
   };
 }
+
+describe("decideAgentProfileAutopick — user settings deferral", () => {
+  it("defers agent auto-pick until user settings have loaded or settled", () => {
+    const cursor = makeProfile("cursor");
+    const deferred = decideAgentProfileAutopick({
+      open: true,
+      agentProfileId: "",
+      workflowAgentProfileId: "",
+      workflowHasAgent: false,
+      agentProfiles: [cursor],
+      compatibleAgentProfiles: [cursor],
+      authLoaded: true,
+      executorProfileId: "",
+      hasExecutors: false,
+      lastAgentProfileId: null,
+      userSettingsLoaded: false,
+      defaultAgentProfileId: null,
+    });
+
+    expect(deferred).toEqual({ kind: "defer", reason: "user-settings-not-loaded" });
+
+    const picked = decideAgentProfileAutopick({
+      open: true,
+      agentProfileId: "",
+      workflowAgentProfileId: "",
+      workflowHasAgent: false,
+      agentProfiles: [cursor],
+      compatibleAgentProfiles: [cursor],
+      authLoaded: true,
+      executorProfileId: "",
+      hasExecutors: false,
+      lastAgentProfileId: null,
+      userSettingsLoaded: true,
+      defaultAgentProfileId: null,
+    });
+
+    expect(picked).toEqual({ kind: "pick", source: "first", id: cursor.id });
+  });
+
+  it("defers auto-pick while user settings load even when localStorage has a valid profile", () => {
+    const cursor = makeProfile("cursor");
+    localStorage.setItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, JSON.stringify(cursor.id));
+
+    const deferred = decideAgentProfileAutopick({
+      open: true,
+      agentProfileId: "",
+      workflowAgentProfileId: "",
+      workflowHasAgent: false,
+      agentProfiles: [cursor],
+      compatibleAgentProfiles: [cursor],
+      authLoaded: true,
+      executorProfileId: "",
+      hasExecutors: false,
+      lastAgentProfileId: cursor.id,
+      userSettingsLoaded: false,
+      defaultAgentProfileId: null,
+    });
+
+    expect(deferred).toEqual({ kind: "defer", reason: "user-settings-not-loaded" });
+  });
+});
 
 describe("useDefaultSelectionsEffect — executor-aware agent restoration", () => {
   it("restores lastId when it is compatible with the current executor", async () => {
@@ -415,68 +535,5 @@ describe("useDefaultSelectionsEffect — auth-spec load race", () => {
     rerender({ sel: selAfter });
     await waitFor(() => expect(fs.setAgentProfileId).toHaveBeenCalledWith(cursor.id));
     expect(fs.setAgentProfileId).not.toHaveBeenCalledWith(claude.id);
-  });
-});
-type UrlErrorFake = {
-  useRemote?: boolean;
-  remoteRepos?: Array<{ key: string; url: string; branch: string; source: "paste" | "picker" }>;
-  setGitHubUrlError?: ReturnType<typeof vi.fn>;
-};
-function makeUrlErrorFs(overrides: UrlErrorFake = {}): DialogFormState {
-  const remoteRepos = overrides.remoteRepos ?? [
-    { key: "remote-0", url: "", branch: "", source: "paste" as const },
-  ];
-  return {
-    useRemote: overrides.useRemote ?? true,
-    setGitHubUrlError: overrides.setGitHubUrlError ?? vi.fn(),
-    remoteRepos,
-  } as unknown as DialogFormState;
-}
-
-describe("useGitHubUrlErrorEffect", () => {
-  it("surfaces 'Invalid GitHub URL' for an unparseable first-row URL", () => {
-    const setGitHubUrlError = vi.fn();
-    const fs = makeUrlErrorFs({
-      remoteRepos: [{ key: "remote-0", url: "not a url", branch: "", source: "paste" }],
-      setGitHubUrlError,
-    });
-    renderHook(() => useGitHubUrlErrorEffect(fs, true));
-    expect(setGitHubUrlError).toHaveBeenCalledWith(expect.stringContaining("Invalid GitHub URL"));
-  });
-
-  it("clears the error for a valid repo URL", () => {
-    const setGitHubUrlError = vi.fn();
-    const fs = makeUrlErrorFs({
-      remoteRepos: [
-        { key: "remote-0", url: "https://github.com/acme/site", branch: "", source: "paste" },
-      ],
-      setGitHubUrlError,
-    });
-    renderHook(() => useGitHubUrlErrorEffect(fs, true));
-    expect(setGitHubUrlError).toHaveBeenLastCalledWith(null);
-  });
-
-  it("clears the error for an empty URL (rows the user hasn't completed)", () => {
-    const setGitHubUrlError = vi.fn();
-    const fs = makeUrlErrorFs({
-      remoteRepos: [{ key: "remote-0", url: "", branch: "", source: "paste" }],
-      setGitHubUrlError,
-    });
-    renderHook(() => useGitHubUrlErrorEffect(fs, true));
-    expect(setGitHubUrlError).toHaveBeenCalledWith(null);
-  });
-
-  it("clears the error when useRemote is false (stale error from a prior Remote-mode pass)", () => {
-    // Regression: the early return on !useRemote used to skip clearing the
-    // error, so a banner produced while the user was in Remote mode would
-    // stick around after they switched back to workspace mode.
-    const setGitHubUrlError = vi.fn();
-    const fs = makeUrlErrorFs({
-      useRemote: false,
-      remoteRepos: [{ key: "remote-0", url: "not a url", branch: "", source: "paste" }],
-      setGitHubUrlError,
-    });
-    renderHook(() => useGitHubUrlErrorEffect(fs, true));
-    expect(setGitHubUrlError).toHaveBeenCalledWith(null);
   });
 });

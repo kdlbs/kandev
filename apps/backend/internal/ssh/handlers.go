@@ -139,7 +139,9 @@ type TestResult struct {
 	Success         bool       `json:"success"`
 	Fingerprint     string     `json:"fingerprint,omitempty"`
 	UnameAll        string     `json:"uname_all,omitempty"`
+	OS              string     `json:"os,omitempty"`
 	Arch            string     `json:"arch,omitempty"`
+	Platform        string     `json:"platform,omitempty"`
 	GitVersion      string     `json:"git_version,omitempty"`
 	AgentctlAction  string     `json:"agentctl_action,omitempty"` // "cached" | "needs_upload" | "skipped"
 	Steps           []TestStep `json:"steps"`
@@ -215,7 +217,7 @@ type AgentReadinessResponse struct {
 
 // ProbeAgentsRequest is the optional body of POST /api/v1/ssh/executors/:id/probe-agents.
 // Shell, when set, names the login shell the probe runs under (e.g. "bash",
-// "zsh"). Empty falls back to bash — see lifecycle.WrapLoginShell.
+// "zsh"). Empty uses the platform default selected by lifecycle.
 type ProbeAgentsRequest struct {
 	Shell string `json:"shell,omitempty"`
 }
@@ -262,10 +264,12 @@ func (h *Handler) probeAgents(ctx context.Context, executorID, shell string) (*A
 	}
 	defer func() { _ = client.Close() }()
 
-	rows := h.probeAgentsOnClient(ctx, client, shell)
+	platform := h.probeRemotePlatform(ctx, client, "probe-agents")
+	effectiveShell := readinessShellForRequest(shell, platform)
+	rows := h.probeAgentsOnClient(ctx, client, effectiveShell)
 	return &AgentReadinessResponse{
 		Host:       target.Host,
-		Shell:      shell,
+		Shell:      effectiveShell,
 		DurationMs: time.Since(started).Milliseconds(),
 		Rows:       rows,
 	}, http.StatusOK, nil
@@ -314,9 +318,10 @@ var candidateShells = []string{"bash", "zsh", "sh", "fish", "dash"}
 
 // ProbeShellsResponse is the body of POST /api/v1/ssh/executors/:id/probe-shells.
 type ProbeShellsResponse struct {
-	Host       string   `json:"host"`
-	DurationMs int64    `json:"duration_ms"`
-	Available  []string `json:"available"`
+	Host         string   `json:"host"`
+	DefaultShell string   `json:"default_shell"`
+	DurationMs   int64    `json:"duration_ms"`
+	Available    []string `json:"available"`
 }
 
 // httpProbeShells SSHs to the host and reports which of a small set of
@@ -354,6 +359,7 @@ func (h *Handler) probeShells(ctx context.Context, executorID string) (*ProbeShe
 	}
 	defer func() { _ = client.Close() }()
 
+	platform := h.probeRemotePlatform(ctx, client, "probe-shells")
 	available := make([]string, 0, len(candidateShells))
 	for _, shell := range candidateShells {
 		// Probe without login-shell wrapping — we're checking whether the
@@ -371,10 +377,31 @@ func (h *Handler) probeShells(ctx context.Context, executorID string) (*ProbeShe
 		}
 	}
 	return &ProbeShellsResponse{
-		Host:       target.Host,
-		DurationMs: time.Since(started).Milliseconds(),
-		Available:  available,
+		Host:         target.Host,
+		DefaultShell: readinessShellForRequest("", platform),
+		DurationMs:   time.Since(started).Milliseconds(),
+		Available:    available,
 	}, http.StatusOK, nil
+}
+
+func (h *Handler) probeRemotePlatform(
+	ctx context.Context,
+	client *ssh.Client,
+	operation string,
+) lifecycle.SSHRemotePlatform {
+	info, err := lifecycle.SSHProbeRemote(ctx, client)
+	if err != nil {
+		h.logger.Warn(operation+": remote platform probe failed", zap.Error(err))
+		return lifecycle.SSHRemotePlatform{}
+	}
+	return info.Platform
+}
+
+func readinessShellForRequest(shell string, platform lifecycle.SSHRemotePlatform) string {
+	if trimmed := strings.TrimSpace(shell); trimmed != "" {
+		return trimmed
+	}
+	return lifecycle.SSHDefaultShellForPlatform(platform)
 }
 
 // resolveSSHTarget looks up the executor by id and projects its config
@@ -483,10 +510,11 @@ func (h *Handler) runTest(ctx context.Context, req TestRequest) *TestResult {
 	infoCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	if err := h.testProbeAndArch(infoCtx, client, result); err != nil {
+	platform, err := h.testProbeAndPlatform(infoCtx, client, result)
+	if err != nil {
 		return finalize()
 	}
-	h.testAgentctlCache(infoCtx, client, result)
+	h.testAgentctlCache(infoCtx, client, result, platform)
 
 	result.Success = true
 	return finalize()
@@ -536,25 +564,27 @@ func (h *Handler) testHandshake(
 	return client, nil
 }
 
-func (h *Handler) testProbeAndArch(ctx context.Context, client *ssh.Client, result *TestResult) error {
+func (h *Handler) testProbeAndPlatform(ctx context.Context, client *ssh.Client, result *TestResult) (lifecycle.SSHRemotePlatform, error) {
 	info, err := lifecycle.SSHProbeRemote(ctx, client)
 	if err != nil {
 		result.Steps = append(result.Steps, TestStep{Name: "Probe remote", Success: false, Error: err.Error()})
 		result.Error = err.Error()
-		return err
+		return lifecycle.SSHRemotePlatform{}, err
 	}
 	result.UnameAll = info.UnameAll
+	result.OS = info.OS
 	result.Arch = info.Arch
+	result.Platform = info.Platform.String()
 	result.GitVersion = info.GitVer
 	result.Steps = append(result.Steps, TestStep{Name: "Probe remote", Success: true, Output: info.UnameAll})
 
-	if err := lifecycle.SSHRequireSupportedArch(info.Arch); err != nil {
-		result.Steps = append(result.Steps, TestStep{Name: "Verify arch", Success: false, Error: err.Error()})
+	if err := lifecycle.SSHRequireSupportedRemotePlatform(info.Platform); err != nil {
+		result.Steps = append(result.Steps, TestStep{Name: "Verify platform", Success: false, Error: err.Error()})
 		result.Error = err.Error()
-		return err
+		return lifecycle.SSHRemotePlatform{}, err
 	}
-	result.Steps = append(result.Steps, TestStep{Name: "Verify arch", Success: true, Output: info.Arch})
-	return nil
+	result.Steps = append(result.Steps, TestStep{Name: "Verify platform", Success: true, Output: info.Platform.String()})
+	return info.Platform, nil
 }
 
 // populateSessionMetadata copies SSH-specific keys from an ExecutorRunning row
@@ -594,9 +624,14 @@ func intFromMetadata(md map[string]interface{}, key string) int {
 	}
 }
 
-func (h *Handler) testAgentctlCache(ctx context.Context, client *ssh.Client, result *TestResult) {
+func (h *Handler) testAgentctlCache(
+	ctx context.Context,
+	client *ssh.Client,
+	result *TestResult,
+	platform lifecycle.SSHRemotePlatform,
+) {
 	upStepStart := time.Now()
-	cached, err := lifecycle.SSHCheckAgentctlCached(ctx, client, h.resolver)
+	cached, err := lifecycle.SSHCheckAgentctlCached(ctx, client, h.resolver, platform)
 	upStep := TestStep{Name: "Verify agentctl cache", DurationMs: time.Since(upStepStart).Milliseconds()}
 	if err != nil {
 		upStep.Success = false

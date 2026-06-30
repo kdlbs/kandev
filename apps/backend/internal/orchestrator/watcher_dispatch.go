@@ -38,7 +38,38 @@ type WatcherDispatchCoordinator struct {
 	// row. nil means "skip the check" — production wires this in; tests can
 	// leave it unset.
 	profileLookup ProfileLookup
-	logger        *logger.Logger
+	// repoChecker pre-flight checks the watcher's bound repository (when the
+	// built request carries one). A repository soft-deleted after the watch was
+	// bound would otherwise let CreateTask insert the task row before repository
+	// association fails — leaving an orphan row and a reservation that a later
+	// poll repeats. When the repo is gone the coordinator self-heals the watch
+	// and skips. nil means "skip the check".
+	repoChecker RepositoryChecker
+	logger      *logger.Logger
+}
+
+// RepositoryChecker answers "does this repository still exist in the workspace?"
+// — used by the watcher dispatch self-heal flow to detect a binding whose
+// repository was soft-deleted after the watch was configured. Membership-based
+// (a workspace listing) so a definitive "absent" is distinguishable from a
+// transient error: (false, nil) = gone → self-heal; a non-nil err = "couldn't
+// tell" → fail open (the existing pipeline runs).
+type RepositoryChecker interface {
+	RepositoryExists(ctx context.Context, workspaceID, repositoryID string) (bool, error)
+}
+
+// SetRepositoryChecker wires the repository pre-flight check. nil-ok; the
+// check becomes a no-op until a real checker is provided.
+func (c *WatcherDispatchCoordinator) SetRepositoryChecker(r RepositoryChecker) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.repoChecker = r
+}
+
+func (c *WatcherDispatchCoordinator) getRepositoryChecker() RepositoryChecker {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.repoChecker
 }
 
 // ProfileLookup answers "is this agent profile still live, and what was its
@@ -205,6 +236,50 @@ func (c *WatcherDispatchCoordinator) preflightDeletedProfile(ctx context.Context
 	return true
 }
 
+// preflightDeletedRepository checks the bound repository of an already-built
+// request. When the repo was soft-deleted after binding, it self-heals the
+// watch (so a later poll doesn't repeat) and returns true so the caller skips
+// task creation — avoiding an orphan task row from CreateTask's non-atomic
+// task-then-repository insert. A lookup error fails open (returns false).
+func (c *WatcherDispatchCoordinator) preflightDeletedRepository(ctx context.Context, src WatcherSource, evt any, req *IssueTaskRequest) bool {
+	checker := c.getRepositoryChecker()
+	if checker == nil || req == nil {
+		return false
+	}
+	for _, r := range req.Repositories {
+		if r.RepositoryID == "" {
+			continue
+		}
+		exists, err := checker.RepositoryExists(ctx, req.WorkspaceID, r.RepositoryID)
+		if err != nil {
+			if c.logger != nil {
+				c.logger.Warn("watcher dispatch: repository check failed, falling through",
+					zap.String("source", src.Name()),
+					zap.String("repository_id", r.RepositoryID),
+					zap.Error(err))
+			}
+			return false
+		}
+		if exists {
+			continue
+		}
+		cause := "bound repository " + r.RepositoryID + " was removed"
+		if c.logger != nil {
+			c.logger.Warn("watcher dispatch: bound repository removed, self-healing",
+				zap.String("source", src.Name()),
+				zap.String("repository_id", r.RepositoryID))
+		}
+		if err := src.SelfHeal(ctx, evt, cause); err != nil && c.logger != nil {
+			c.logger.Error("watcher dispatch: self-heal failed",
+				zap.String("source", src.Name()),
+				zap.String("repository_id", r.RepositoryID),
+				zap.Error(err))
+		}
+		return true
+	}
+	return false
+}
+
 // formatDeletedProfileCause renders the human-readable string stamped onto
 // the watcher's last_error column. Centralised so every integration uses
 // the same phrasing.
@@ -261,6 +336,14 @@ func (c *WatcherDispatchCoordinator) Dispatch(ctx context.Context, src WatcherSo
 	if err != nil {
 		c.logger.Error("watcher dispatch: build task request failed",
 			zap.String("source", src.Name()), zap.Error(err))
+		src.Release(ctx, evt)
+		return
+	}
+
+	// A bound repository deleted after the watch was configured would let
+	// CreateTask insert a task row before repository association fails. Self-heal
+	// and release the reservation instead of creating an orphan task.
+	if c.preflightDeletedRepository(ctx, src, evt, req) {
 		src.Release(ctx, evt)
 		return
 	}

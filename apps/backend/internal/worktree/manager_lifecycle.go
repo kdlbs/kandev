@@ -25,11 +25,13 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 		return nil, err
 	}
 
-	// Reject an invalid explicit slug up-front. If req.BranchSlug is non-empty
-	// but normalizes to "", the reuse lookup downstream would silently match
-	// the bare-slug worktree (or none) and createInTaskDir would later fail
-	// with a less obvious error.
+	// Reject invalid explicit slugs up-front. If either slug is non-empty but
+	// normalizes to "", reuse/path lookup would silently target the wrong
+	// worktree or fail later with a less obvious error.
 	if req.BranchSlug != "" && SanitizeBranchSlug(req.BranchSlug) == "" {
+		return nil, ErrInvalidBranchSlug
+	}
+	if req.BranchIdentitySlug != "" && SanitizeBranchSlug(req.BranchIdentitySlug) == "" {
 		return nil, ErrInvalidBranchSlug
 	}
 
@@ -83,7 +85,7 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	// lookup by RepositoryID AND BranchSlug — otherwise the second branch's
 	// Create would return the first branch's worktree, silently collapsing
 	// two distinct worktrees into one on-disk directory.
-	reuseSlug := SanitizeBranchSlug(req.BranchSlug)
+	reuseSlug := requestBranchIdentitySlug(req)
 	if req.SessionID != "" {
 		existing, err := m.GetBySessionAndRepo(ctx, req.SessionID, req.RepositoryID, reuseSlug)
 		if err == nil && existing != nil {
@@ -133,6 +135,13 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	}
 
 	return nil, false, nil
+}
+
+func requestBranchIdentitySlug(req CreateRequest) string {
+	if req.BranchIdentitySlug != "" {
+		return SanitizeBranchSlug(req.BranchIdentitySlug)
+	}
+	return SanitizeBranchSlug(req.BranchSlug)
 }
 
 // resolveBaseRefWithFallback resolves the base ref for a new worktree, optionally

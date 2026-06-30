@@ -19,6 +19,8 @@ type issueWatchRow struct {
 	WorkspaceID         string        `db:"workspace_id"`
 	WorkflowID          string        `db:"workflow_id"`
 	WorkflowStepID      string        `db:"workflow_step_id"`
+	RepositoryID        string        `db:"repository_id"`
+	BaseBranch          string        `db:"base_branch"`
 	FilterJSON          string        `db:"filter_json"`
 	AgentProfileID      string        `db:"agent_profile_id"`
 	ExecutorProfileID   string        `db:"executor_profile_id"`
@@ -50,6 +52,8 @@ func (r *issueWatchRow) toIssueWatch() (*IssueWatch, error) {
 		WorkspaceID:         r.WorkspaceID,
 		WorkflowID:          r.WorkflowID,
 		WorkflowStepID:      r.WorkflowStepID,
+		RepositoryID:        r.RepositoryID,
+		BaseBranch:          r.BaseBranch,
 		Filter:              filter,
 		AgentProfileID:      r.AgentProfileID,
 		ExecutorProfileID:   r.ExecutorProfileID,
@@ -87,13 +91,15 @@ func encodeFilter(f SearchFilter) (string, error) {
 // SELECTs use issueWatchSelectColumns which wraps the nullable last_error in
 // COALESCE so older databases (pre-self-heal migration) read back as empty
 // strings rather than NULL.
-const issueWatchInsertColumns = `id, workspace_id, workflow_id, workflow_step_id, filter_json,
+const issueWatchInsertColumns = `id, workspace_id, workflow_id, workflow_step_id,
+	repository_id, base_branch, filter_json,
 	agent_profile_id, executor_profile_id, prompt, enabled,
 	poll_interval_seconds, max_inflight_tasks, last_polled_at,
 	last_error, last_error_at,
 	created_at, updated_at`
 
-const issueWatchSelectColumns = `id, workspace_id, workflow_id, workflow_step_id, filter_json,
+const issueWatchSelectColumns = `id, workspace_id, workflow_id, workflow_step_id,
+	COALESCE(repository_id, '') AS repository_id, COALESCE(base_branch, '') AS base_branch, filter_json,
 	agent_profile_id, executor_profile_id, prompt, enabled,
 	poll_interval_seconds, max_inflight_tasks, last_polled_at,
 	COALESCE(last_error, '') AS last_error, last_error_at,
@@ -117,8 +123,9 @@ func (s *Store) CreateIssueWatch(ctx context.Context, w *IssueWatch) error {
 	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO sentry_issue_watches (`+issueWatchInsertColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		w.ID, w.WorkspaceID, w.WorkflowID, w.WorkflowStepID, filterJSON,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		w.ID, w.WorkspaceID, w.WorkflowID, w.WorkflowStepID,
+		w.RepositoryID, w.BaseBranch, filterJSON,
 		w.AgentProfileID, w.ExecutorProfileID, w.Prompt, w.Enabled,
 		w.PollIntervalSeconds, nullableInt(w.MaxInflightTasks), w.LastPolledAt,
 		w.LastError, w.LastErrorAt,
@@ -203,11 +210,13 @@ func (s *Store) UpdateIssueWatch(ctx context.Context, w *IssueWatch) error {
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `
-		UPDATE sentry_issue_watches SET workflow_id = ?, workflow_step_id = ?, filter_json = ?,
+		UPDATE sentry_issue_watches SET workflow_id = ?, workflow_step_id = ?,
+			repository_id = ?, base_branch = ?, filter_json = ?,
 			agent_profile_id = ?, executor_profile_id = ?, prompt = ?,
 			enabled = ?, poll_interval_seconds = ?, max_inflight_tasks = ?, updated_at = ?
 		WHERE id = ?`,
-		w.WorkflowID, w.WorkflowStepID, filterJSON,
+		w.WorkflowID, w.WorkflowStepID,
+		w.RepositoryID, w.BaseBranch, filterJSON,
 		w.AgentProfileID, w.ExecutorProfileID, w.Prompt,
 		w.Enabled, w.PollIntervalSeconds, nullableInt(w.MaxInflightTasks), w.UpdatedAt, w.ID)
 	return err

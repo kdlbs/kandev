@@ -48,6 +48,18 @@ func (f *fakeWSGroupRepo) GetWorkspaceGroup(_ context.Context, id string) (*orch
 	return f.groups[id], nil
 }
 
+func (f *fakeWSGroupRepo) ListWorkspaceGroupsByWorkspace(_ context.Context, workspaceID string) ([]*orchmodels.WorkspaceGroup, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := []*orchmodels.WorkspaceGroup{}
+	for _, g := range f.groups {
+		if g.WorkspaceID == workspaceID {
+			out = append(out, g)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeWSGroupRepo) GetWorkspaceGroupForTask(_ context.Context, taskID string) (*orchmodels.WorkspaceGroup, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

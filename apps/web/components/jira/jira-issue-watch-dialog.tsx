@@ -32,6 +32,8 @@ import {
   DEFAULT_JIRA_ISSUE_WATCH_PROMPT,
 } from "@/components/jira/jira-issue-watch-placeholders";
 import { STEP_DEFAULT, STEP_DEFAULT_LABEL, resolveProfileId } from "@/lib/watcher-profile-default";
+import { WatcherRepositoryFields } from "@/components/watcher-repository-fields";
+import { clearWorkspaceScopedForm } from "@/lib/watcher-repository-default";
 import type {
   CreateJiraIssueWatchInput,
   JiraIssueWatch,
@@ -56,6 +58,10 @@ type FormState = {
   jql: string;
   workflowId: string;
   workflowStepId: string;
+  /** Optional repository binding; "" = unbound (repo-less task). */
+  repositoryId: string;
+  /** Base branch for the worktree; "" = the repository's default branch. */
+  baseBranch: string;
   agentProfileId: string;
   executorProfileId: string;
   prompt: string;
@@ -90,6 +96,8 @@ function makeEmptyForm(workspaceId: string): FormState {
     jql: DEFAULT_JQL,
     workflowId: "",
     workflowStepId: "",
+    repositoryId: "",
+    baseBranch: "",
     agentProfileId: "",
     executorProfileId: "",
     prompt: DEFAULT_JIRA_ISSUE_WATCH_PROMPT,
@@ -105,6 +113,8 @@ function formStateFromWatch(w: JiraIssueWatch): FormState {
     jql: w.jql,
     workflowId: w.workflowId,
     workflowStepId: w.workflowStepId,
+    repositoryId: w.repositoryId ?? "",
+    baseBranch: w.baseBranch ?? "",
     agentProfileId: w.agentProfileId,
     executorProfileId: w.executorProfileId,
     prompt: w.prompt.trim() ? w.prompt : DEFAULT_JIRA_ISSUE_WATCH_PROMPT,
@@ -323,6 +333,15 @@ function AutomationFields({
           disabled={!form.workflowId || stepsLoading || steps.length === 0}
         />
       </div>
+      <WatcherRepositoryFields
+        workspaceId={form.workspaceId}
+        repositoryId={form.repositoryId}
+        baseBranch={form.baseBranch}
+        onRepositoryChange={(repositoryId) =>
+          setForm((p) => ({ ...p, repositoryId, baseBranch: "" }))
+        }
+        onBaseBranchChange={(baseBranch) => setForm((p) => ({ ...p, baseBranch }))}
+      />
       <div className="grid grid-cols-2 gap-4">
         <SelectField
           label="Agent Profile"
@@ -479,6 +498,10 @@ export function JiraIssueWatchDialog({
         jql: form.jql,
         workflowId: form.workflowId,
         workflowStepId: form.workflowStepId,
+        // Empty repositoryId clears the binding; empty base branch is sent
+        // verbatim so the backend fills the repo's default at save time.
+        repositoryId: form.repositoryId,
+        baseBranch: form.repositoryId ? form.baseBranch : "",
         agentProfileId: form.agentProfileId,
         executorProfileId: form.executorProfileId,
         prompt: form.prompt,
@@ -505,17 +528,15 @@ export function JiraIssueWatchDialog({
         <DialogHeader>
           <DialogTitle>{watch ? "Edit JIRA Watcher" : "Create JIRA Watcher"}</DialogTitle>
           <DialogDescription>
-            Poll a JQL query and auto-create a Kandev task for each newly-matching ticket. Tickets
-            are not bound to a repository — the workflow step&apos;s defaults decide where the task
-            runs.
+            Poll a JQL query and auto-create a Kandev task for each newly-matching ticket.
+            Optionally bind a repository so each task runs against that codebase, or leave it unset
+            to run with no repository.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-5">
           <WorkspacePicker
             value={form.workspaceId}
-            onChange={(v) =>
-              setForm((p) => ({ ...p, workspaceId: v, workflowId: "", workflowStepId: "" }))
-            }
+            onChange={(v) => setForm((p) => clearWorkspaceScopedForm(p, v))}
             disabled={workspaceLocked}
           />
           <JQLField jql={form.jql} onChange={(v) => setForm((p) => ({ ...p, jql: v }))} />

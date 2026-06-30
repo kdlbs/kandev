@@ -18,6 +18,8 @@ function watch(id: string, overrides: Partial<JiraIssueWatch> = {}): JiraIssueWa
     workspaceId: "ws-1",
     workflowId: "wf-1",
     workflowStepId: "step-1",
+    repositoryId: "",
+    baseBranch: "",
     jql: "project = PROJ",
     agentProfileId: "",
     executorProfileId: "",

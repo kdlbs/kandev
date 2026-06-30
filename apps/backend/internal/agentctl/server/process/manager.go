@@ -70,19 +70,31 @@ const defaultStderrBufferSize = 50
 
 const agentTempDirRoot = "kandev-agent"
 
+const processKillRequiredExitGrace = 250 * time.Millisecond
+
+// processDefaultExitGrace is the no-deadline upper bound for graceful adapters
+// after adapter/stdin close. It is intentionally longer than the kill-required
+// fast path so ACP-style agents can flush state, while still bounding callers
+// that pass context.Background().
+const processDefaultExitGrace = 5 * time.Second
+
+const processGroupTerminateGrace = 2 * time.Second
+const processGroupPollInterval = 50 * time.Millisecond
+
 // Manager manages the agent subprocess
 type Manager struct {
 	cfg    *config.InstanceConfig
 	logger *logger.Logger
 
 	// Process state
-	cmd      *exec.Cmd
-	stdin    io.WriteCloser
-	stdout   io.ReadCloser
-	stderr   io.ReadCloser
-	status   atomic.Value // Status
-	exitCode atomic.Int32
-	exitErr  atomic.Value // error
+	cmd              *exec.Cmd
+	processLifecycle processLifecycleHandle
+	stdin            io.WriteCloser
+	stdout           io.ReadCloser
+	stderr           io.ReadCloser
+	status           atomic.Value // Status
+	exitCode         atomic.Int32
+	exitErr          atomic.Value // error
 
 	// Stderr buffering for error context
 	stderrBuffer []string
@@ -733,12 +745,23 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.status.Store(StatusError)
 		return formatAgentStartError(err, m.cfg.AgentEnv)
 	}
+	processLifecycle, err := installProcessLifecycle(m.cmd)
+	if err != nil {
+		m.logger.Warn("failed to install agent process lifecycle; falling back to process-tree cleanup",
+			zap.Error(err))
+	} else {
+		m.processLifecycle = processLifecycle
+	}
 
 	m.stopCh = make(chan struct{})
 	m.doneCh = make(chan struct{})
 
 	// Connect adapter to the process stdin/stdout pipes
 	if err := m.adapter.Connect(m.stdin, m.stdout); err != nil {
+		releaseProcessLifecycle(m.processLifecycle)
+		m.processLifecycle = processLifecycleHandle{}
+		_ = m.cmd.Process.Kill()
+		_ = m.cmd.Wait()
 		m.status.Store(StatusError)
 		return fmt.Errorf("failed to connect adapter: %w", err)
 	}
@@ -882,7 +905,7 @@ func (m *Manager) buildFinalCommand() error {
 	// Create a new process group so we can kill all child processes together.
 	// This is important for adapters like OpenCode that spawn child processes
 	// (npx -> sh -> node -> opencode binary).
-	setProcGroup(m.cmd)
+	setAgentProcGroup(m.cmd)
 
 	envBytes, largestEnv := summarizeEnvBytes(m.cfg.AgentEnv, 3)
 	m.logger.Info("agent command prepared",
@@ -1214,16 +1237,28 @@ func (m *Manager) Stop(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Stop intentionally serializes the full teardown under m.mu. The shutdown
+	// path closes adapters, stdin, shell sessions, and process groups as one
+	// lifecycle transition; concurrent readers may briefly block while process
+	// group reaping finishes.
+
 	// Stop trackers before the status guard: passthrough never calls Start() so the early return below would otherwise leak them.
 	m.stopWorkspaceTrackers()
 
 	status := m.Status()
 	if status == StatusStopped || status == StatusStopping {
-		m.logger.Info("Stop called but already stopped/stopping", zap.String("status", string(status)))
+		m.logger.Info("Stop called but already stopped/stopping",
+			zap.String("status", string(status)),
+			zap.Int("pid", m.agentPID()))
 		return nil
 	}
 
-	m.logger.Info("stopping agent process - START")
+	m.logger.Info("stopping agent process - START",
+		zap.Int("pid", m.agentPID()),
+		zap.String("protocol", m.agentProtocol()))
+	m.logger.Debug("agent process stop requested",
+		zap.Int("pid", m.agentPID()),
+		zap.String("protocol", m.agentProtocol()))
 	m.status.Store(StatusStopping)
 
 	m.stopShellAndProcesses(ctx)
@@ -1234,6 +1269,20 @@ func (m *Manager) Stop(ctx context.Context) error {
 	m.status.Store(StatusStopped)
 	m.logger.Info("stopping agent process - COMPLETE")
 	return nil
+}
+
+func (m *Manager) agentPID() int {
+	if m.cmd == nil || m.cmd.Process == nil {
+		return 0
+	}
+	return m.cmd.Process.Pid
+}
+
+func (m *Manager) agentProtocol() string {
+	if m.cfg == nil {
+		return ""
+	}
+	return string(m.cfg.Protocol)
 }
 
 // stopShellAndProcesses stops the shell session, VS Code, and workspace processes.
@@ -1294,8 +1343,10 @@ func (m *Manager) closeAdapterAndStdin() {
 	m.logger.Debug("stdin closed")
 }
 
-// killProcessGroupIfRequired kills the entire process group for adapters (such as
-// OpenCode) that run as HTTP servers and do not exit when stdin is closed.
+// killProcessGroupIfRequired immediately kills the entire process group for
+// adapters (such as OpenCode) that are known not to exit when stdin is closed.
+// Other adapters still get process-group cleanup in waitForProcessExit after
+// their graceful stdin-close path has had a chance to finish.
 func (m *Manager) killProcessGroupIfRequired() {
 	if m.adapter == nil || !m.adapter.RequiresProcessKill() {
 		return
@@ -1306,9 +1357,14 @@ func (m *Manager) killProcessGroupIfRequired() {
 	// We kill the process group to ensure all child processes are killed too.
 	// This is important because OpenCode spawns: npx -> sh -> node -> opencode binary
 	pid := m.cmd.Process.Pid
-	m.logger.Debug("killing process group", zap.Int("pgid", pid))
+	m.logger.Debug("agent process group SIGKILL requested",
+		zap.Int("pgid", pid),
+		zap.String("reason", "adapter_requires_process_kill"))
 	if err := killProcessGroup(pid); err != nil {
 		m.logger.Debug("failed to kill process group, trying single process", zap.Error(err))
+		m.logger.Debug("agent process SIGKILL requested",
+			zap.Int("pid", pid),
+			zap.String("reason", "process_group_kill_failed"))
 		if err := m.cmd.Process.Kill(); err != nil {
 			m.logger.Warn("failed to kill process", zap.Error(err))
 		}
@@ -1319,9 +1375,11 @@ func (m *Manager) killProcessGroupIfRequired() {
 //
 // On timeout the entire process group is killed (not just the leader) so that
 // child processes — most importantly MCP servers spawned by the agent — don't
-// re-parent to init and leak. setProcGroup at command-build time puts the
-// agent in its own pgid; here we deliver SIGKILL to that pgid. Falls back to
-// a single-process kill only if the process-group call fails.
+// re-parent to init and leak. setAgentProcGroup at command-build time puts the
+// agent in its own pgid; here we deliver SIGKILL to that pgid. If the command
+// leader exits before its descendants do, we still terminate the remaining
+// process group before reporting shutdown complete. Falls back to a
+// single-process kill only if the process-group call fails.
 func (m *Manager) waitForProcessExit(ctx context.Context) {
 	m.logger.Debug("waiting for process to exit")
 	done := make(chan struct{})
@@ -1330,20 +1388,175 @@ func (m *Manager) waitForProcessExit(ctx context.Context) {
 		close(done)
 	}()
 
+	pid := 0
+	if m.cmd != nil && m.cmd.Process != nil {
+		pid = m.cmd.Process.Pid
+	}
+
+	exitGrace := m.processExitGrace(ctx)
+	if waitForManagerDone(ctx, done, exitGrace) {
+		m.logger.Info("agent process stopped gracefully")
+		m.reapRemainingProcessGroup(ctx, pid)
+		return
+	}
+	if pid == 0 {
+		return
+	}
+	if ctx.Err() != nil {
+		m.logger.Warn("force killing agent process group", zap.Int("pgid", pid))
+		m.forceKillProcessGroupAndWait(done, pid)
+		return
+	}
+
+	m.logger.Warn("agent process did not exit after graceful wait; terminating process group",
+		zap.Int("pgid", pid),
+		zap.Duration("grace", exitGrace))
+	m.logger.Debug("agent process group SIGTERM requested",
+		zap.Int("pgid", pid),
+		zap.String("reason", "graceful_wait_expired"),
+		zap.Duration("grace", exitGrace))
+	if err := terminateProcessGroup(pid); err != nil {
+		if !isProcessGroupMissing(err) {
+			m.logger.Warn("failed to terminate agent process group, force killing",
+				zap.Int("pgid", pid),
+				zap.Error(err))
+			m.forceKillProcessGroupAndWait(done, pid)
+		}
+		return
+	}
+	if waitForManagerDone(ctx, done, processGroupTerminateGrace) {
+		m.logger.Info("agent process stopped after process group termination",
+			zap.Int("pgid", pid))
+		m.reapRemainingProcessGroup(ctx, pid)
+		return
+	}
+	m.logger.Warn("agent process did not stop after termination; force killing process group",
+		zap.Int("pgid", pid))
+	m.forceKillProcessGroupAndWait(done, pid)
+}
+
+// processExitGrace returns the initial graceful wait before process-group
+// termination. Adapters that declare RequiresProcessKill are known not to exit
+// from stdin close, so they keep the short legacy wait. Normal adapters get the
+// caller's remaining deadline during backend shutdown, or processDefaultExitGrace
+// when the caller did not provide one.
+func (m *Manager) processExitGrace(ctx context.Context) time.Duration {
+	if m.adapter != nil && m.adapter.RequiresProcessKill() {
+		return processKillRequiredExitGrace
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining > 0 {
+			return remaining
+		}
+		return 0
+	}
+	return processDefaultExitGrace
+}
+
+func waitForManagerDone(ctx context.Context, done <-chan struct{}, timeout time.Duration) bool {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case <-done:
-		m.logger.Info("agent process stopped gracefully")
+		return true
 	case <-ctx.Done():
-		if m.cmd == nil || m.cmd.Process == nil {
+		return false
+	case <-timer.C:
+		return false
+	}
+}
+
+func (m *Manager) reapRemainingProcessGroup(ctx context.Context, pid int) {
+	if pid == 0 || !processGroupAlive(pid) {
+		return
+	}
+
+	m.logger.Warn("agent process group still alive after leader exit; terminating",
+		zap.Int("pgid", pid))
+	m.logger.Debug("agent process group SIGTERM requested",
+		zap.Int("pgid", pid),
+		zap.String("reason", "leader_exited_with_live_descendants"))
+	if err := terminateProcessGroup(pid); err != nil {
+		if isProcessGroupMissing(err) {
 			return
 		}
-		pid := m.cmd.Process.Pid
-		m.logger.Warn("force killing agent process group", zap.Int("pgid", pid))
-		if err := killProcessGroup(pid); err != nil {
+		m.logger.Warn("failed to terminate agent process group, force killing",
+			zap.Int("pgid", pid),
+			zap.Error(err))
+		m.forceKillProcessGroupAndWait(nil, pid)
+		return
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, processGroupTerminateGrace)
+	defer cancel()
+	if waitForProcessGroupExit(waitCtx, pid) {
+		m.logger.Info("agent process group stopped after termination",
+			zap.Int("pgid", pid))
+		return
+	}
+
+	m.logger.Warn("agent process group did not stop after termination; force killing",
+		zap.Int("pgid", pid))
+	m.forceKillProcessGroupAndWait(nil, pid)
+}
+
+func (m *Manager) forceKillProcessGroup(pid int) {
+	m.logger.Debug("agent process group SIGKILL requested",
+		zap.Int("pgid", pid),
+		zap.String("reason", "force_kill"))
+	if err := killProcessGroup(pid); err != nil {
+		if isProcessGroupMissing(err) {
+			return
+		}
+		if m.cmd != nil && m.cmd.Process != nil {
 			m.logger.Warn("failed to kill agent process group, falling back to single-process kill",
 				zap.Error(err))
+			m.logger.Debug("agent process SIGKILL requested",
+				zap.Int("pid", m.cmd.Process.Pid),
+				zap.String("reason", "process_group_kill_failed"))
 			if err := m.cmd.Process.Kill(); err != nil {
 				m.logger.Warn("failed to kill agent process", zap.Error(err))
+			}
+			return
+		}
+		m.logger.Warn("failed to kill agent process group", zap.Error(err))
+	}
+}
+
+func (m *Manager) forceKillProcessGroupAndWait(done <-chan struct{}, pid int) {
+	m.forceKillProcessGroup(pid)
+
+	waitCtx, cancel := context.WithTimeout(context.Background(), processGroupTerminateGrace)
+	defer cancel()
+	if done != nil && waitForManagerDone(waitCtx, done, processGroupTerminateGrace) {
+		m.logger.Info("agent process stopped after force kill",
+			zap.Int("pgid", pid))
+		m.reapRemainingProcessGroup(context.Background(), pid)
+		return
+	}
+	if waitForProcessGroupExit(waitCtx, pid) {
+		m.logger.Info("agent process group stopped after force kill",
+			zap.Int("pgid", pid))
+		return
+	}
+	m.logger.Warn("agent process group still alive after force kill wait",
+		zap.Int("pgid", pid),
+		zap.Duration("grace", processGroupTerminateGrace))
+}
+
+func waitForProcessGroupExit(ctx context.Context, pid int) bool {
+	if !processGroupAlive(pid) {
+		return true
+	}
+	ticker := time.NewTicker(processGroupPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return !processGroupAlive(pid)
+		case <-ticker.C:
+			if !processGroupAlive(pid) {
+				return true
 			}
 		}
 	}
@@ -1412,7 +1625,10 @@ func (m *Manager) waitForExit() {
 	defer m.wg.Done()
 	defer close(m.doneCh)
 
+	pid := m.agentPID()
 	err := m.cmd.Wait()
+	releaseProcessLifecycle(m.processLifecycle)
+	m.processLifecycle = processLifecycleHandle{}
 
 	if err != nil {
 		m.exitErr.Store(errorWrapper{err: err})
@@ -1450,6 +1666,9 @@ func (m *Manager) waitForExit() {
 		m.logger.Info("agent process exited successfully")
 	}
 
+	if m.Status() != StatusStopping {
+		m.reapRemainingProcessGroup(context.Background(), pid)
+	}
 	m.status.Store(StatusStopped)
 }
 

@@ -673,17 +673,24 @@ func TestFindLatestCommentTime(t *testing.T) {
 	}
 }
 
-// --- mockEventBus for SyncTaskPR tests ---
+// --- mockEventBus shared by SyncTaskPR and review-watch tests ---
 
 type mockEventBus struct {
-	mu     sync.Mutex
-	events []*bus.Event
+	mu          sync.Mutex
+	events      []*bus.Event
+	publishedCh chan struct{}
 }
 
 func (m *mockEventBus) Publish(_ context.Context, _ string, event *bus.Event) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.events = append(m.events, event)
+	m.mu.Unlock()
+	if m.publishedCh != nil {
+		select {
+		case m.publishedCh <- struct{}{}:
+		default:
+		}
+	}
 	return nil
 }
 

@@ -15,6 +15,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { setSessionMode } from "@/lib/api/domains/session-api";
+import { cn } from "@/lib/utils";
 import type { Agent, AgentProfile, AvailableAgent } from "@/lib/types/http";
 
 type ModeOption = {
@@ -25,6 +26,7 @@ type ModeOption = {
 
 type ModeSelectorProps = {
   sessionId: string | null;
+  triggerClassName?: string;
 };
 
 function resolveSnapshotMode(snapshot: unknown): string | null {
@@ -121,7 +123,10 @@ function useModeSelectorState(sessionId: string | null) {
   );
 }
 
-export const ModeSelector = memo(function ModeSelector({ sessionId }: ModeSelectorProps) {
+export const ModeSelector = memo(function ModeSelector({
+  sessionId,
+  triggerClassName,
+}: ModeSelectorProps) {
   const modeState = useModeSelectorState(sessionId);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [tooltipOpen, setTooltipOpen] = useState(false);
@@ -174,9 +179,12 @@ export const ModeSelector = memo(function ModeSelector({ sessionId }: ModeSelect
               variant="ghost"
               size="sm"
               data-testid="session-mode-selector"
-              className="h-7 gap-1 px-2 cursor-pointer hover:bg-muted/40 whitespace-nowrap"
+              className={cn(
+                "h-7 min-w-0 gap-1 overflow-hidden px-2 cursor-pointer hover:bg-muted/40 whitespace-nowrap",
+                triggerClassName,
+              )}
             >
-              <span className="text-xs">{displayName}</span>
+              <span className="truncate text-xs">{displayName}</span>
               <IconChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
             </Button>
           </DropdownMenuTrigger>

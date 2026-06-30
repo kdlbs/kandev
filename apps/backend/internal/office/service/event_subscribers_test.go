@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
+	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/workflow/engine"
 )
 
@@ -31,7 +32,7 @@ func (d *queueRunDispatcher) HandleTrigger(
 ) error {
 	assignee, err := d.svc.GetTaskAssigneeForTest(ctx, taskID)
 	if err != nil || assignee == "" {
-		return service.ErrEngineNoSession
+		return shared.ErrEngineNoSession
 	}
 	switch trigger {
 	case engine.TriggerOnComment:

@@ -19,6 +19,10 @@ function extractDockerPnpmVersion(dockerfile: string): string | undefined {
   return dockerfile.match(/^ARG PNPM_VERSION=([0-9]+\.[0-9]+\.[0-9]+)$/m)?.[1];
 }
 
+function extractDockerNodeMajor(dockerfile: string): string | undefined {
+  return dockerfile.match(/^ARG NODE_MAJOR=([0-9]+)$/m)?.[1];
+}
+
 function extractPackageManagerPnpmVersion(packageJSON: string): string {
   const packageManager = (JSON.parse(packageJSON) as { packageManager?: string }).packageManager;
   const version = packageManager?.match(/^pnpm@([0-9]+\.[0-9]+\.[0-9]+)$/)?.[1];
@@ -90,7 +94,21 @@ function findPnpmSetupVersion(
 }
 
 function matchPnpmSetupUsesLine(line: string): RegExpMatchArray | null {
-  return line.match(/^(\s*)(?:-\s*)?uses:\s*["']?pnpm\/action-setup@v\d+["']?\s*(?:#.*)?$/);
+  const match = line.match(
+    /^(\s*)(?:-\s*)?uses:\s*["']?pnpm\/action-setup@([^"'\s#]+)["']?\s*(#.*)?$/,
+  );
+  if (match === null) return null;
+  const ref = match[2];
+  const comment = match[3] ?? "";
+  const versionTagPattern = /^v[0-9]+(?:\.[0-9]+\.[0-9]+)?$/;
+  const versionTag = versionTagPattern.test(ref);
+  const shaPinned =
+    /^[0-9a-f]{40}$/.test(ref) && /^#\s*v[0-9]+(?:\.[0-9]+\.[0-9]+)?$/.test(comment);
+  expect(
+    versionTag || shaPinned,
+    "pnpm/action-setup must use a version tag or a 40-character SHA with the version tag in a comment",
+  ).toBe(true);
+  return match;
 }
 
 function findStepIndent(lines: string[], usesLineIndex: number, usesIndent: number): number {
@@ -145,18 +163,56 @@ function assertWorkflowPnpmVersions(file: string, expectedVersion: string): numb
   return versions.length;
 }
 
-describe("release package manager version", () => {
-  it("pins pnpm consistently for Docker and GitHub Actions", () => {
+describe("release runtime tooling configuration", () => {
+  it("rejects malformed SHA version comments for pnpm/action-setup", () => {
+    expect(() =>
+      matchPnpmSetupUsesLine(
+        "uses: pnpm/action-setup@0123456789abcdef0123456789abcdef01234567 # v4-old",
+      ),
+    ).toThrow(/40-character SHA with the version tag/);
+  });
+
+  it("pins runtime tooling consistently across Docker and GitHub Actions", () => {
     const packagePnpmVersion = extractPackageManagerPnpmVersion(readRepoFile("apps/package.json"));
     const dockerfile = readRepoFile("Dockerfile");
+    const universalDockerfile = readRepoFile("Dockerfile.universal");
     const dockerPnpmVersion = extractDockerPnpmVersion(dockerfile);
+    const universalDockerPnpmVersion = extractDockerPnpmVersion(universalDockerfile);
+    const dockerNodeMajor = extractDockerNodeMajor(dockerfile);
 
     expect(dockerfile).not.toContain("pnpm@latest");
+    expect(dockerNodeMajor, "Dockerfile: NODE_MAJOR must stay on the release Node line").toBe("24");
+    expect(dockerfile).toContain("AS apt-keys");
+    expect(dockerfile).toContain(
+      "COPY --from=apt-keys /nodesource.gpg /usr/share/keyrings/nodesource.gpg",
+    );
+    expect(dockerfile).toContain(
+      "COPY --from=apt-keys /microsoft.gpg /usr/share/keyrings/microsoft.gpg",
+    );
+    expect(dockerfile).toContain("https://deb.nodesource.com/node_${NODE_MAJOR}.x");
+    expect(dockerfile).toContain("/etc/apt/sources.list.d/azure-cli.sources");
+    expect(dockerfile).not.toContain("InstallAzureCLIDeb");
+    expect(dockerfile).not.toContain("        gnupg \\");
+    expect(dockerfile).toMatch(
+      /rm -f[\s\\]+\/etc\/apt\/sources\.list\.d\/nodesource\.list[\s\\]+\/etc\/apt\/sources\.list\.d\/azure-cli\.sources[\s\\]+\/usr\/share\/keyrings\/nodesource\.gpg[\s\\]+\/usr\/share\/keyrings\/microsoft\.gpg/,
+    );
+    expect(dockerfile).toMatch(/\bnodejs\b/);
+    expect(dockerfile).toMatch(/\bazure-cli\b/);
     if (dockerPnpmVersion !== undefined) {
       expect(dockerPnpmVersion, "Dockerfile: PNPM_VERSION must match apps/package.json").toBe(
         packagePnpmVersion,
       );
     }
+    expect(
+      universalDockerPnpmVersion,
+      "Dockerfile.universal: PNPM_VERSION must match apps/package.json",
+    ).toBe(packagePnpmVersion);
+    expect(universalDockerfile).not.toContain("pnpm@latest");
+    expect(universalDockerfile).not.toContain("corepack enable");
+    expect(universalDockerfile).not.toContain("corepack prepare");
+    expect(universalDockerfile).toContain(
+      'npm install -g --prefix /usr/local "pnpm@${PNPM_VERSION}"',
+    );
 
     const workflowSetupCount = workflowFiles().reduce(
       (count, file) => count + assertWorkflowPnpmVersions(file, packagePnpmVersion),
@@ -179,5 +235,173 @@ describe("release npm publishing", () => {
     );
     expect(script).toContain("EPUBLISHCONFLICT");
     expect(script).toContain("treated as idempotent success");
+  });
+});
+
+describe("release desktop artifacts", () => {
+  const desktopPlatforms = ["macos-arm64", "macos-x64", "linux-x64", "linux-arm64", "windows-x64"];
+
+  function releaseWorkflow(): string {
+    return readRepoFile(".github/workflows/release.yml");
+  }
+
+  it("builds desktop artifacts for every supported runtime platform", () => {
+    const workflow = releaseWorkflow();
+
+    expect(workflow).toMatch(/\n  build-desktop:\n/);
+    expect(workflow).toContain("needs: [prepare, build-bundles]");
+    expect(workflow).toContain("scripts/release/prepare-desktop-runtime.sh");
+    expect(workflow).toContain('--platform "${{ matrix.platform }}"');
+    expect(workflow).toContain(
+      'rustup toolchain install stable --profile minimal --target "${{ matrix.rust_target }}"',
+    );
+    expect(workflow).toMatch(/Swatinem\/rust-cache@[0-9a-f]{40}\s+# v2/);
+
+    for (const platform of desktopPlatforms) {
+      expect(workflow, `release.yml must include desktop platform ${platform}`).toContain(
+        `platform: ${platform}`,
+      );
+    }
+  });
+
+  it("publishes desktop artifacts while leaving npm and Homebrew tied to runtime tarballs", () => {
+    const workflow = releaseWorkflow();
+    const checksumScript = readRepoFile("scripts/release/write-sha256.sh");
+    const verifyAssetsScript = readRepoFile("scripts/release/verify-desktop-assets.sh");
+    const publishNpmScript = readRepoFile("scripts/release/publish-npm.sh");
+    const homebrewScript = readRepoFile("scripts/release/update-homebrew-tap.sh");
+
+    expect(workflow).toContain(
+      "needs: [prepare, build-bundles, build-desktop, docker-universal-manifest]",
+    );
+    expect(workflow).toContain("pattern: desktop-*");
+    expect(workflow).toContain("scripts/release/verify-desktop-assets.sh");
+    expect(workflow).toContain("dist/release-assets/kandev-desktop-*");
+    expect(workflow).toContain('scripts/release/write-sha256.sh "$dest" "$dest.sha256"');
+    expect(workflow).not.toContain('shasum -a 256 "$(basename "$dest")"');
+    expect(checksumScript).toContain("command -v shasum");
+    expect(checksumScript).toContain("command -v sha256sum");
+    expect(verifyAssetsScript).toContain("command -v shasum");
+    expect(verifyAssetsScript).toContain("command -v sha256sum");
+
+    expect(publishNpmScript).toContain('asset="kandev-${platform}.tar.gz"');
+    expect(publishNpmScript).not.toContain("kandev-desktop-");
+    expect(homebrewScript).toContain('local sha_file="kandev-${platform}.tar.gz.sha256"');
+    expect(homebrewScript).not.toContain("kandev-desktop-");
+  });
+
+  it("bumps desktop package and Tauri versions during release preparation", () => {
+    const workflow = releaseWorkflow();
+
+    expect(workflow).toContain('(cd apps/desktop && npm version --no-git-tag-version "$NEXT")');
+    expect(workflow).toContain("tauriConfig.version = next");
+    expect(workflow).toContain('cargoToml.replace(/^version = ".*"$/m, `version = "${next}"`)');
+    expect(workflow).toContain('name = "kandev-desktop"');
+    expect(workflow).toContain("apps/desktop/src-tauri/tauri.conf.json");
+    expect(workflow).toContain("apps/desktop/src-tauri/Cargo.toml");
+    expect(workflow).toContain("apps/desktop/src-tauri/Cargo.lock");
+  });
+
+  it("pins linux x64 desktop release builds to Ubuntu 22.04", () => {
+    const workflow = releaseWorkflow();
+
+    expect(workflow).toContain(`- os: ubuntu-22.04
+            platform: linux-x64
+            goos: linux
+            goarch: amd64`);
+    expect(workflow).toContain(`- platform: linux-x64
+            os: ubuntu-22.04
+            rust_target: x86_64-unknown-linux-gnu
+            tauri_bundles: deb,rpm`);
+  });
+
+  it("builds unsigned desktop releases when signing inputs are incomplete", () => {
+    const workflow = releaseWorkflow();
+    const signingDocs = readRepoFile("docs/desktop-tauri-signing.md");
+    const tauriConfig = readRepoFile("apps/desktop/src-tauri/tauri.conf.json");
+    const windowsSignScript = readRepoFile("apps/desktop/src-tauri/windows-sign.ps1");
+
+    expect(workflow).not.toContain("allow_unsigned_desktop");
+    expect(workflow).not.toContain("ALLOW_UNSIGNED_DESKTOP");
+    expect(workflow).toContain("desktop_validation_only");
+    expect(workflow).toContain("ref: ${{ needs.prepare.outputs.ref }}");
+    expect(workflow).toContain("persist-credentials: false");
+    expect(workflow).toContain("Desktop validation summary");
+    expect(workflow).toContain("No release PR, tag, GitHub release, public container tags");
+    expect(workflow).toContain("if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}");
+    expect(workflow).toContain('if [ "$DESKTOP_VALIDATION_ONLY" = "true" ]; then');
+    expect(workflow).toContain("scripts/release/desktop-signing-ready.sh macos");
+    expect(workflow).toContain("scripts/release/desktop-signing-ready.sh windows");
+    expect(workflow).toContain("MACOS_SIGNING_ENABLED=false");
+    expect(workflow).toContain("MACOS_SIGNING_ENABLED=true");
+    expect(workflow).toContain("WINDOWS_SIGNING_ENABLED=false");
+    expect(workflow).toContain("WINDOWS_SIGNING_ENABLED=true");
+    expect(workflow).toContain(
+      "macOS signing/notarization inputs are incomplete; building unsigned desktop artifact.",
+    );
+    expect(workflow).toContain(
+      "Windows signing inputs are incomplete; building unsigned desktop artifact.",
+    );
+    expect(workflow).toContain("Add unsigned desktop warning to release notes");
+    expect(workflow).toContain(
+      "desktop installers in this release are unsigned development builds.",
+    );
+    expect(workflow).toContain("docker-amd64:");
+    expect(workflow).toContain("docker-universal-manifest:");
+    expect(workflow).toContain("unset APPLE_CERTIFICATE");
+    expect(workflow).toContain("unset APPLE_ID");
+    expect(workflow).toContain("unset WINDOWS_CERTIFICATE");
+    expect(workflow).toContain("unset WINDOWS_CERTIFICATE_PASSWORD");
+    expect(workflow).toContain("unset WINDOWS_TIMESTAMP_URL");
+    expect(workflow).toContain("unset WINDOWS_SIGNTOOL_PATH");
+
+    for (const key of [
+      "APPLE_CERTIFICATE",
+      "APPLE_CERTIFICATE_PASSWORD",
+      "KEYCHAIN_PASSWORD",
+      "APPLE_SIGNING_IDENTITY",
+      "APPLE_API_KEY_P8",
+      "APPLE_API_KEY_PATH",
+      "APPLE_TEAM_ID",
+    ]) {
+      expect(workflow, `release.yml must wire ${key}`).toContain(key);
+    }
+
+    for (const key of ["WINDOWS_CERTIFICATE", "WINDOWS_CERTIFICATE_PASSWORD", "signtool sign"]) {
+      expect(workflow, `release.yml must wire ${key}`).toContain(key);
+    }
+    expect(workflow).toContain("Invoke-SignTool");
+    expect(workflow).toContain("$LASTEXITCODE -ne 0");
+    expect(workflow).toContain("Sign macOS desktop runtime binaries");
+    expect(workflow).toContain("resources/kandev/bin");
+    expect(workflow).toContain(
+      "for binary in kandev agentctl agentctl-darwin-arm64 agentctl-darwin-amd64; do",
+    );
+    expect(workflow).toContain(
+      'codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY"',
+    );
+    expect(workflow).toContain("codesign --verify --strict");
+    expect(workflow).toContain("Sign Windows desktop runtime binaries");
+    expect(workflow).toContain('foreach ($binary in @("kandev.exe", "agentctl.exe"))');
+    expect(workflow).toContain("Remove-Item -LiteralPath $certificatePath");
+
+    expect(tauriConfig).toContain('"publisher": "Kandev"');
+    expect(tauriConfig).toContain('"timestampUrl"');
+    expect(tauriConfig).toContain('"timestampUrl": "https://timestamp.digicert.com"');
+    expect(tauriConfig).toContain('"signCommand"');
+    expect(tauriConfig).toContain("windows-sign.ps1");
+    expect(tauriConfig).not.toContain('"csp": null');
+    expect(windowsSignScript).toContain('"https://timestamp.digicert.com"');
+    expect(windowsSignScript).toContain('WINDOWS_SIGNING_ENABLED -eq "false"');
+    expect(windowsSignScript).not.toContain("ALLOW_UNSIGNED_DESKTOP");
+    expect(windowsSignScript).toContain("Skipping Windows signing for unsigned desktop artifact");
+    expect(windowsSignScript).toContain("Remove-Item -LiteralPath $certificatePath");
+    expect(signingDocs).toContain("signs desktop artifacts opportunistically");
+    expect(signingDocs).toContain("Missing or incomplete inputs do not block the release");
+    expect(signingDocs).not.toContain("allow_unsigned_desktop");
+    expect(signingDocs).toContain("desktop_validation_only");
+    expect(signingDocs).toContain("does not publish a GitHub release");
+    expect(signingDocs).toContain("public container tags");
+    expect(signingDocs).toContain("Ubuntu 22.04");
   });
 });

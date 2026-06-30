@@ -29,13 +29,17 @@ import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS, PRCIPopover } from "@/components/gi
 import { useTaskCIAutomationOptions } from "@/hooks/domains/github/use-task-ci-options";
 import { MultiPRCIPopover } from "@/components/github/multi-pr-ci-popover";
 import {
+  hasPRChecksInProgressForDisplay,
+  hasPRChecksPassedForDisplay,
   isPRAwaitingReview,
   isPRReadyToMerge,
   isPRWaitingOnBranchProtection,
   pickDefaultPR,
 } from "@/components/github/pr-task-icon";
-import { useIsMobile } from "@/hooks/use-mobile";
-import type { TaskPR } from "@/lib/types/github";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { autoFixRoundForState, findCIAutomationStateForPR } from "@/lib/github/ci-automation";
+import type { AutoFixRoundInfo } from "@/lib/github/ci-automation";
+import type { TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
 
 const HOVER_OPEN_DELAY_MS = 150;
 const HOVER_CLOSE_DELAY_MS = 150;
@@ -54,11 +58,8 @@ type ChipStatus =
 type AutomationFlags = {
   autoFix: boolean;
   autoMerge: boolean;
+  autoFixRound: AutoFixRoundInfo | null;
 };
-
-function hasUnknownOrInProgressChecks(pr: TaskPR): boolean {
-  return pr.checks_total <= 0 || pr.checks_passing < pr.checks_total;
-}
 
 function chipStatus(pr: TaskPR): ChipStatus {
   if (pr.review_state === "changes_requested" || pr.checks_state === "failure") return "failed";
@@ -72,10 +73,7 @@ function chipStatus(pr: TaskPR): ChipStatus {
   // in-progress, not passed. Without this order, the chip flips to green the
   // moment CI finishes and ignores the human gate. isPRAwaitingReview also
   // covers approved PRs where branch protection requires more reviewers.
-  if (
-    (pr.checks_state === "pending" && hasUnknownOrInProgressChecks(pr)) ||
-    pr.review_state === "pending"
-  ) {
+  if (hasPRChecksInProgressForDisplay(pr) || pr.review_state === "pending") {
     return "in_progress";
   }
   // Mirror getPRStatusColor priority: ready-to-merge beats awaiting-review so
@@ -83,7 +81,7 @@ function chipStatus(pr: TaskPR): ChipStatus {
   if (isPRAwaitingReview(pr) && !isPRReadyToMerge(pr)) return "in_progress";
   if (isPRWaitingOnBranchProtection(pr)) return "waiting";
   if (pr.mergeable_state === "blocked") return "blocked";
-  if (pr.checks_state === "success") return "passed";
+  if (hasPRChecksPassedForDisplay(pr)) return "passed";
   return "neutral";
 }
 
@@ -165,10 +163,6 @@ function useChipPopoverInteractions() {
 export function PRStatusChip({ taskId }: { taskId: string | null }) {
   const { prs } = useTaskPR(taskId);
   const { options: automationOptions } = useTaskCIAutomationOptions(taskId);
-  const automationFlags: AutomationFlags = {
-    autoFix: Boolean(automationOptions?.auto_fix_enabled),
-    autoMerge: Boolean(automationOptions?.auto_merge_enabled),
-  };
   // Defensive Array.isArray: a partial hydration can briefly seed the store
   // with a non-array value (same guard as PRTaskIcon).
   // Only open PRs are worth a CI chip — terminal PRs (merged/closed) are
@@ -185,8 +179,62 @@ export function PRStatusChip({ taskId }: { taskId: string | null }) {
   usePRFeedbackBackgroundSync(pickDefaultPR(openPRs));
   if (openPRs.length === 0) return null;
   if (openPRs.length === 1)
-    return <PRStatusChipInner pr={openPRs[0]} automation={automationFlags} />;
-  return <PRStatusChipMultiInner prs={openPRs} automation={automationFlags} />;
+    return (
+      <PRStatusChipInner
+        pr={openPRs[0]}
+        automation={automationForPR(automationOptions, openPRs[0])}
+      />
+    );
+  return (
+    <PRStatusChipMultiInner
+      prs={openPRs}
+      automation={automationForPRs(automationOptions, openPRs)}
+    />
+  );
+}
+
+function automationForPR(
+  options: TaskCIAutomationOptions | null | undefined,
+  pr: TaskPR,
+): AutomationFlags {
+  return {
+    autoFix: Boolean(options?.auto_fix_enabled),
+    autoMerge: Boolean(options?.auto_merge_enabled),
+    autoFixRound: options?.auto_fix_enabled
+      ? autoFixRoundForState(
+          findCIAutomationStateForPR(options.pr_states, pr),
+          options.auto_fix_max_rounds,
+        )
+      : null,
+  };
+}
+
+function automationForPRs(
+  options: TaskCIAutomationOptions | null | undefined,
+  prs: TaskPR[],
+): AutomationFlags {
+  const roundInfos = options?.auto_fix_enabled
+    ? prs.map((pr) =>
+        autoFixRoundForState(
+          findCIAutomationStateForPR(options.pr_states, pr),
+          options.auto_fix_max_rounds,
+        ),
+      )
+    : [];
+  return {
+    autoFix: Boolean(options?.auto_fix_enabled),
+    autoMerge: Boolean(options?.auto_merge_enabled),
+    autoFixRound: pickAttentionRound(roundInfos),
+  };
+}
+
+function pickAttentionRound(roundInfos: AutoFixRoundInfo[]): AutoFixRoundInfo | null {
+  if (roundInfos.length === 0) return null;
+  return roundInfos.reduce((best, next) => {
+    if (next.exhausted && !best.exhausted) return next;
+    if (next.exhausted === best.exhausted && next.current > best.current) return next;
+    return best;
+  });
 }
 
 type ChipButtonAttrs = {
@@ -201,7 +249,9 @@ type ChipButtonAttrs = {
 
 function automationAriaSuffix(automation: AutomationFlags): string {
   const flags = [
-    automation.autoFix ? "auto-fix enabled" : null,
+    automation.autoFix
+      ? `auto-fix enabled${automation.autoFixRound ? ` ${automation.autoFixRound.current} of ${automation.autoFixRound.max} rounds used` : ""}`
+      : null,
     automation.autoMerge ? "auto-merge enabled" : null,
   ].filter(Boolean);
   return flags.length > 0 ? `, ${flags.join(", ")}` : "";
@@ -225,14 +275,21 @@ function chipButtonAttrs(
 
 function AutomationFlagBadges({ automation }: { automation: AutomationFlags }) {
   if (!automation.autoFix && !automation.autoMerge) return null;
+  const autoFixRound = automation.autoFixRound;
   return (
     <>
-      {automation.autoFix && (
+      {automation.autoFix && autoFixRound && (
         <span
           data-testid="pr-status-auto-fix-chip"
-          className="rounded-sm bg-emerald-500/15 px-1 py-0.5 text-[9px] font-medium leading-none text-emerald-500"
+          data-auto-fix-round={`${autoFixRound.current}/${autoFixRound.max}`}
+          data-auto-fix-exhausted={autoFixRound.exhausted ? "true" : "false"}
+          className={`rounded-sm px-1 py-0.5 text-[9px] font-medium leading-none ${
+            autoFixRound.exhausted
+              ? "bg-yellow-500/15 text-yellow-500"
+              : "bg-emerald-500/15 text-emerald-500"
+          }`}
         >
-          Auto-fix
+          Auto-fix {autoFixRound.current}/{autoFixRound.max}
         </span>
       )}
       {automation.autoMerge && (
@@ -248,8 +305,8 @@ function AutomationFlagBadges({ automation }: { automation: AutomationFlags }) {
 }
 
 function PRStatusChipInner({ pr, automation }: { pr: TaskPR; automation: AutomationFlags }) {
-  const isMobile = useIsMobile();
-  if (isMobile) return <PRStatusChipDrawer pr={pr} automation={automation} />;
+  const usesMobileDrawer = useTouchDrawer();
+  if (usesMobileDrawer) return <PRStatusChipDrawer pr={pr} automation={automation} />;
   return <PRStatusChipHoverCard pr={pr} automation={automation} />;
 }
 
@@ -305,8 +362,8 @@ function PRStatusChipMultiInner({
   prs: TaskPR[];
   automation: AutomationFlags;
 }) {
-  const isMobile = useIsMobile();
-  if (isMobile) return <PRStatusChipMultiDrawer prs={prs} automation={automation} />;
+  const usesMobileDrawer = useTouchDrawer();
+  if (usesMobileDrawer) return <PRStatusChipMultiDrawer prs={prs} automation={automation} />;
   return <PRStatusChipMultiHoverCard prs={prs} automation={automation} />;
 }
 

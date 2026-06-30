@@ -128,6 +128,28 @@ func TestLinearSource_BuildTaskRequest(t *testing.T) {
 	if req.Metadata["agent_profile_id"] != "agent-1" {
 		t.Errorf("missing agent_profile_id metadata")
 	}
+	// Unbound event (no RepositoryID) must leave Repositories nil so the launch
+	// path keeps the historical repo-less behaviour.
+	if req.Repositories != nil {
+		t.Errorf("unbound event should yield nil Repositories, got %+v", req.Repositories)
+	}
+}
+
+func TestLinearSource_BuildTaskRequest_RepositoryBinding(t *testing.T) {
+	src := &LinearWatcherSource{}
+	evt := sampleLinearEvent()
+	evt.RepositoryID = "repo-9"
+	evt.BaseBranch = "develop"
+	req, err := src.BuildTaskRequest(evt)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(req.Repositories) != 1 {
+		t.Fatalf("expected one repository, got %d", len(req.Repositories))
+	}
+	if req.Repositories[0].RepositoryID != "repo-9" || req.Repositories[0].BaseBranch != "develop" {
+		t.Errorf("repository binding wrong: %+v", req.Repositories[0])
+	}
 }
 
 func TestLinearSource_BuildTaskRequest_WrongType(t *testing.T) {

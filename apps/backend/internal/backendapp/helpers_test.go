@@ -12,7 +12,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
@@ -114,6 +116,40 @@ func TestAppendAgentctlStatusMessage_IncludesWorkspacePathForReload(t *testing.T
 	}
 }
 
+func TestStopLifecycleManagerAllowsAgentctlInstanceCleanupWindow(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{
+		Level:      "error",
+		Format:     "console",
+		OutputPath: "stdout",
+	})
+	if err != nil {
+		t.Fatalf("NewLogger: %v", err)
+	}
+
+	stopper := &shutdownDeadlineExecutor{}
+	execRegistry := lifecycle.NewExecutorRegistry(log)
+	execRegistry.Register(stopper)
+	mgr := lifecycle.NewManager(nil, nil, execRegistry, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), log)
+	if err := mgr.ExecutionStoreForTesting().Add(&lifecycle.AgentExecution{
+		ID:          "exec-1",
+		TaskID:      "task-1",
+		SessionID:   "sess-1",
+		RuntimeName: executor.NameStandalone,
+	}); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	startedAt := time.Now()
+	_ = stopLifecycleManager(mgr, log)
+
+	if stopper.deadline.IsZero() {
+		t.Fatal("StopInstance was not called with a deadline")
+	}
+	if got := stopper.deadline.Sub(startedAt); got < 15*time.Second {
+		t.Fatalf("agent shutdown timeout = %v, want at least 15s for agentctl instance cleanup", got)
+	}
+}
+
 func TestBootInitialStateIncludesFeatureFlags(t *testing.T) {
 	state := bootInitialState(
 		context.Background(),
@@ -136,6 +172,44 @@ func TestBootInitialStateIncludesFeatureFlags(t *testing.T) {
 		t.Fatal("features.office should hydrate true from the backend boot payload")
 	}
 }
+
+type shutdownDeadlineExecutor struct {
+	deadline time.Time
+}
+
+func (s *shutdownDeadlineExecutor) Name() executor.Name { return executor.NameStandalone }
+
+func (s *shutdownDeadlineExecutor) HealthCheck(context.Context) error { return nil }
+
+func (s *shutdownDeadlineExecutor) CreateInstance(
+	context.Context,
+	*lifecycle.ExecutorCreateRequest,
+) (*lifecycle.ExecutorInstance, error) {
+	return nil, nil
+}
+
+func (s *shutdownDeadlineExecutor) StopInstance(
+	ctx context.Context,
+	_ *lifecycle.ExecutorInstance,
+	_ bool,
+) error {
+	if deadline, ok := ctx.Deadline(); ok {
+		s.deadline = deadline
+	}
+	return nil
+}
+
+func (s *shutdownDeadlineExecutor) RecoverInstances(context.Context) ([]*lifecycle.ExecutorInstance, error) {
+	return nil, nil
+}
+
+func (s *shutdownDeadlineExecutor) GetInteractiveRunner() *process.InteractiveRunner { return nil }
+
+func (s *shutdownDeadlineExecutor) RequiresCloneURL() bool { return false }
+
+func (s *shutdownDeadlineExecutor) ShouldApplyPreferredShell() bool { return true }
+
+func (s *shutdownDeadlineExecutor) IsAlwaysResumable() bool { return false }
 
 func TestBootInitialStateHomeIncludesKanbanFirstPaintState(t *testing.T) {
 	taskSvc, workflowSvc := newBootStateTestServices(t)
@@ -630,6 +704,78 @@ func TestBootRouteDataIntegrationRouteUsesActiveWorkspaceCookie(t *testing.T) {
 	}
 	if decoded.RouteData.RouteContext.ActiveWorkspaceID != workspace.ID {
 		t.Fatalf("route active workspace = %q, want %q", decoded.RouteData.RouteContext.ActiveWorkspaceID, workspace.ID)
+	}
+}
+
+func TestBootRouteDataIntegrationRouteCookieWinsOverSettingsWorkspace(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	workspaces, err := harness.taskSvc.ListWorkspaces(ctx)
+	if err != nil {
+		t.Fatalf("ListWorkspaces: %v", err)
+	}
+	if len(workspaces) == 0 {
+		t.Fatal("expected seeded default workspace")
+	}
+	settingsWorkspaceID := workspaces[0].ID
+	cookieWorkspace, err := harness.taskSvc.CreateWorkspace(ctx, &taskservice.CreateWorkspaceRequest{
+		Name: "Cookie Workspace",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if _, err := harness.taskSvc.CreateWorkflow(ctx, &taskservice.CreateWorkflowRequest{
+		WorkspaceID: cookieWorkspace.ID,
+		Name:        "Cookie Workflow",
+	}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if _, err := harness.userSvc.UpdateUserSettings(ctx, &userservice.UpdateUserSettingsRequest{
+		WorkspaceID: &settingsWorkspaceID,
+	}); err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/app-state?path=%2Fgithub", nil)
+	req.AddCookie(&http.Cookie{Name: "kandev-active-workspace", Value: cookieWorkspace.ID})
+	payload := bootPayload(ctx, req, routeParams{
+		taskSvc:  harness.taskSvc,
+		userCtrl: harness.userCtrl,
+		services: &Services{
+			Workflow: harness.workflowSvc,
+		},
+	}, webapp.ClassifyRoute("/github"))
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("Marshal payload: %v", err)
+	}
+	var decoded struct {
+		InitialState struct {
+			Workspaces struct {
+				ActiveID string `json:"activeId"`
+			} `json:"workspaces"`
+			UserSettings struct {
+				WorkspaceID string `json:"workspaceId"`
+			} `json:"userSettings"`
+		} `json:"initialState"`
+		RouteData struct {
+			RouteContext struct {
+				ActiveWorkspaceID string `json:"activeWorkspaceId"`
+			} `json:"routeContext"`
+		} `json:"routeData"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("Unmarshal payload: %v", err)
+	}
+	if decoded.InitialState.Workspaces.ActiveID != cookieWorkspace.ID {
+		t.Fatalf("initial active workspace = %q, want %q", decoded.InitialState.Workspaces.ActiveID, cookieWorkspace.ID)
+	}
+	if decoded.InitialState.UserSettings.WorkspaceID != cookieWorkspace.ID {
+		t.Fatalf("user settings workspace = %q, want %q", decoded.InitialState.UserSettings.WorkspaceID, cookieWorkspace.ID)
+	}
+	if decoded.RouteData.RouteContext.ActiveWorkspaceID != cookieWorkspace.ID {
+		t.Fatalf("route active workspace = %q, want %q", decoded.RouteData.RouteContext.ActiveWorkspaceID, cookieWorkspace.ID)
 	}
 }
 

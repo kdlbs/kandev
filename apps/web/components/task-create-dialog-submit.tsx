@@ -10,6 +10,7 @@ import { useToast } from "@/components/toast-provider";
 import { linkToTask } from "@/lib/links";
 import type { SubmitHandlersDeps } from "@/components/task-create-dialog-types";
 import { useFreshBranchConsent } from "@/components/task-create-dialog-fresh-branch-consent";
+import { queueTaskCreateLastUsedFromPayload } from "@/components/task-create-dialog-handlers";
 
 import {
   activatePlanMode,
@@ -46,6 +47,7 @@ export function useTaskSubmitHandlers({
   onSuccess,
   onCreateSession,
   onOpenChange,
+  preserveTaskCreateLastUsedOnClose,
   taskId,
   parentTaskId,
   descriptionInputRef,
@@ -316,8 +318,9 @@ export function useTaskSubmitHandlers({
       attachments?: ReturnType<typeof toMessageAttachments>;
     }) => {
       if (!workspaceId || !effectiveWorkflowId) return;
-      const buildPayload = (c: string[]) =>
-        buildCreateTaskPayload({
+      let submittedPayload: ReturnType<typeof buildCreateTaskPayload> | null = null;
+      const buildPayload = (c: string[]) => {
+        const payload = buildCreateTaskPayload({
           workspaceId,
           effectiveWorkflowId,
           trimmedTitle: opts.trimmedTitle,
@@ -336,6 +339,9 @@ export function useTaskSubmitHandlers({
           // "empty path string" on the wire.
           workspacePath: noRepository ? workspacePath.trim() || undefined : undefined,
         });
+        submittedPayload = payload;
+        return payload;
+      };
       const taskResponse = await createTaskWithFreshBranchRetry(buildPayload, opts.consented);
       if (!taskResponse) return;
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
@@ -343,6 +349,8 @@ export function useTaskSubmitHandlers({
         (opts.withAgent && isPassthroughProfile) || !!(opts.planMode && newSessionId);
       onSuccess?.(taskResponse, "create", { taskSessionId: newSessionId, willNavigate });
       clearDraft();
+      queueTaskCreateLastUsedFromPayload(submittedPayload);
+      preserveTaskCreateLastUsedOnClose?.();
       onOpenChange(false);
       if (opts.planMode && newSessionId) {
         activatePlanMode({
@@ -368,6 +376,7 @@ export function useTaskSubmitHandlers({
       workspacePath,
       onSuccess,
       onOpenChange,
+      preserveTaskCreateLastUsedOnClose,
       clearDraft,
       setActiveDocument,
       setPlanMode,
@@ -539,6 +548,7 @@ export function useTaskSubmitHandlers({
     if (consent === null) return;
     setIsCreatingTask(true);
     try {
+      let submittedPayload: ReturnType<typeof buildCreateTaskPayload> | null = null;
       const buildPayload = (c: string[]) => {
         const p = buildCreateTaskPayload({
           workspaceId,
@@ -553,12 +563,15 @@ export function useTaskSubmitHandlers({
           workspacePath: noRepository ? workspacePath.trim() || undefined : undefined,
         });
         p.workflow_step_id = effectiveDefaultStepId;
+        submittedPayload = p;
         return p;
       };
       const taskResponse = await createTaskWithFreshBranchRetry(buildPayload, consent);
       if (!taskResponse) return;
       onSuccess?.(taskResponse, "create");
       clearDraft();
+      queueTaskCreateLastUsedFromPayload(submittedPayload);
+      preserveTaskCreateLastUsedOnClose?.();
       onOpenChange(false);
     } catch (error) {
       toast({
@@ -586,6 +599,7 @@ export function useTaskSubmitHandlers({
     createTaskWithFreshBranchRetry,
     onSuccess,
     onOpenChange,
+    preserveTaskCreateLastUsedOnClose,
     clearDraft,
     toast,
     descriptionInputRef,

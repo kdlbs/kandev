@@ -127,6 +127,28 @@ func (r *Repository) GetWorkspaceGroup(ctx context.Context, id string) (*models.
 	return &g, nil
 }
 
+// ListWorkspaceGroupsByWorkspace returns all workspace-group rows owned by a workspace.
+func (r *Repository) ListWorkspaceGroupsByWorkspace(ctx context.Context, workspaceID string) ([]*models.WorkspaceGroup, error) {
+	var groups []*models.WorkspaceGroup
+	err := r.ro.SelectContext(ctx, &groups, r.ro.Rebind(`
+		SELECT id, workspace_id, owner_task_id, materialized_path,
+			materialized_environment_id, materialized_kind, owned_by_kandev,
+			cleanup_policy, cleanup_status, cleaned_at, cleanup_error,
+			restore_status, restore_error, restore_config_json,
+			created_at, updated_at
+		FROM task_workspace_groups
+		WHERE workspace_id = ?
+		ORDER BY created_at, id
+	`), workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if groups == nil {
+		groups = []*models.WorkspaceGroup{}
+	}
+	return groups, nil
+}
+
 // MarkWorkspaceMaterialized records the materialized path/environment AND
 // flips the ownership fields atomically. It is the ONLY supported path
 // for setting owned_by_kandev=true: callers must pass m.OwnedByKandev=true

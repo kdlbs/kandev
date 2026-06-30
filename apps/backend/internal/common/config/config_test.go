@@ -187,6 +187,18 @@ func TestFeatures_OfficeEnabledByEnv(t *testing.T) {
 	}
 }
 
+func TestServerHostFromEnv(t *testing.T) {
+	t.Setenv("KANDEV_SERVER_HOST", "127.0.0.1")
+
+	cfg, err := LoadWithPath(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if cfg.Server.Host != "127.0.0.1" {
+		t.Fatalf("Server.Host = %q, want 127.0.0.1", cfg.Server.Host)
+	}
+}
+
 // TestFeaturesConfig_JSONShape pins the wire format of GET /api/v1/features.
 // The handler in helpers.go serializes FeaturesConfig directly so new
 // fields flow through without an extra edit; this test guarantees the

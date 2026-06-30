@@ -10,7 +10,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const workspaceDeletionPageSize = 500
+const (
+	workspaceDeletionPageSize     = 500
+	workspaceDeletionPhaseTimeout = 60 * time.Second
+)
 
 // WorkspaceDeletionSummary describes the permanent-delete impact for a workspace.
 type WorkspaceDeletionSummary struct {
@@ -61,22 +64,33 @@ func (s *Service) DeleteWorkspace(ctx context.Context, workspaceID string) error
 		return err
 	}
 
-	cleanupCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-	s.cancelWorkspaceTasks(cleanupCtx, tasks)
+	cleanupBaseCtx := context.WithoutCancel(ctx)
+	taskCancelCtx, cancelTaskCancel := workspaceDeletionPhaseContext(cleanupBaseCtx)
+	s.cancelWorkspaceTasks(taskCancelCtx, tasks)
+	cancelTaskCancel()
 
-	if err := s.repo.DeleteWorkspaceData(ctx, workspaceID); err != nil {
+	if s.workspaceGroupCleaner != nil {
+		groupCleanupCtx, cancelGroupCleanup := workspaceDeletionPhaseContext(cleanupBaseCtx)
+		if err := s.workspaceGroupCleaner.CleanupWorkspaceGroups(groupCleanupCtx, workspaceID); err != nil {
+			cancelGroupCleanup()
+			return fmt.Errorf("clean workspace groups: %w", err)
+		}
+		cancelGroupCleanup()
+	}
+	dataDeleteCtx, cancelDataDelete := workspaceDeletionPhaseContext(cleanupBaseCtx)
+	defer cancelDataDelete()
+	if err := s.repo.DeleteWorkspaceData(dataDeleteCtx, workspaceID); err != nil {
 		return fmt.Errorf("delete office workspace data: %w", err)
 	}
 	for _, task := range tasks {
 		if task == nil || task.ID == "" {
 			continue
 		}
-		if err := s.taskWorkspace.DeleteTask(cleanupCtx, task.ID); err != nil {
+		if err := s.taskWorkspace.DeleteTask(dataDeleteCtx, task.ID); err != nil {
 			return fmt.Errorf("delete task %s: %w", task.ID, err)
 		}
 	}
-	if err := s.taskWorkspace.DeleteWorkspace(cleanupCtx, workspaceID); err != nil {
+	if err := s.taskWorkspace.DeleteWorkspace(dataDeleteCtx, workspaceID); err != nil {
 		return fmt.Errorf("delete workspace row: %w", err)
 	}
 	if s.cfgWriter != nil {
@@ -89,6 +103,10 @@ func (s *Service) DeleteWorkspace(ctx context.Context, workspaceID string) error
 		zap.String("workspace_name", workspace.Name),
 		zap.Int("tasks", len(tasks)))
 	return nil
+}
+
+func workspaceDeletionPhaseContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, workspaceDeletionPhaseTimeout)
 }
 
 func (s *Service) listAllWorkspaceTasks(ctx context.Context, workspaceID string) ([]*taskmodels.Task, error) {

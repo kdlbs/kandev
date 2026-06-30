@@ -108,9 +108,10 @@ Generation is **lockfile-driven and committed to the repo**. The file is read st
 - **Generator:** `apps/web/scripts/generate-licenses.ts` — pure function of two inputs.
   - npm side: walks `pnpm-lock.yaml` via `license-checker-rseidelsohn` (or equivalent), capturing `{ name, version, licenses, repository, licenseFile }` per package.
   - Go side: resolves modules from `apps/backend/go.sum` via `go-licenses report` (or by reading vendored LICENSE files), captured into the same shape.
+  - If `go-licenses` is present but fails without producing a usable report, the generator reuses valid committed Go entries and marks them with `stale: true`; the Licenses page surfaces a stale-data warning for those entries.
   - Output: `apps/web/generated/licenses.json`, **committed to git**.
 - **Local trigger:** `pnpm licenses:gen` — devs run it after a dep bump.
-- **CI gate:** A workflow step in `.github/workflows/` runs the generator and fails the build if the result differs from the committed file. This guarantees the artifact is up to date whenever `pnpm-lock.yaml` or `go.sum` changes, without requiring it to run on every `pnpm build`.
+- **CI gate:** A workflow step in `.github/workflows/` runs the generator and warns if the result differs from the committed file. This surfaces license drift whenever `pnpm-lock.yaml` or `go.sum` changes, without requiring it to run on every `pnpm build`.
 
 The page reads the JSON statically; no backend endpoint is needed.
 

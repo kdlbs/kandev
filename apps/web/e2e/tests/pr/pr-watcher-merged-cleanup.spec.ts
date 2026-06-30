@@ -59,7 +59,7 @@ test.describe("PR watcher merged cleanup", () => {
     // because the atomic dedup reservation means whichever poll runs first
     // claims the PR, and the subsequent trigger correctly returns 0 "new".
     // The real check is the task-exists poll below.
-    await apiClient.triggerReviewWatch(watch.id);
+    await apiClient.triggerReviewWatch(watch.id, watch.workspace_id);
 
     // Task creation is async (goroutine), poll until it appears
     let prTask: { id: string; title: string } | undefined;
@@ -96,7 +96,7 @@ test.describe("PR watcher merged cleanup", () => {
     ]);
 
     // --- Trigger watch again → should detect merged PR and delete the task ---
-    await apiClient.triggerReviewWatch(watch.id);
+    await apiClient.triggerReviewWatch(watch.id, watch.workspace_id);
 
     // Verify task was deleted
     await expect(kanban.taskCardByTitle("PR #101: Feature to review")).not.toBeVisible({
@@ -183,7 +183,7 @@ test.describe("PR watcher merged cleanup", () => {
     );
 
     // Trigger → task created in Inbox
-    await apiClient.triggerReviewWatch(watch.id);
+    await apiClient.triggerReviewWatch(watch.id, watch.workspace_id);
 
     let prTask: { id: string; title: string } | undefined;
     await expect
@@ -233,7 +233,7 @@ test.describe("PR watcher merged cleanup", () => {
     ]);
 
     // Trigger watch → should NOT delete task (user already worked on it)
-    await apiClient.triggerReviewWatch(watch.id);
+    await apiClient.triggerReviewWatch(watch.id, watch.workspace_id);
 
     // Task should still be visible
     await expect(kanban.taskCardByTitle("PR #202: Reviewed feature")).toBeVisible({
@@ -285,7 +285,7 @@ test.describe("PR watcher merged cleanup", () => {
     );
 
     // Trigger → task created
-    await apiClient.triggerReviewWatch(watch.id);
+    await apiClient.triggerReviewWatch(watch.id, watch.workspace_id);
 
     await expect
       .poll(
@@ -316,7 +316,7 @@ test.describe("PR watcher merged cleanup", () => {
     ]);
 
     // Trigger watch → should detect approved PR and delete the task
-    await apiClient.triggerReviewWatch(watch.id);
+    await apiClient.triggerReviewWatch(watch.id, watch.workspace_id);
 
     // Verify task was deleted
     await expect(kanban.taskCardByTitle("PR #303: Quick fix to approve")).not.toBeVisible({

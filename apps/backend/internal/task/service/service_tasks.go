@@ -39,6 +39,10 @@ var ErrTaskAlreadyArchived = errors.New("task is already archived")
 type taskStopTarget struct {
 	sessionID   string
 	executionID string
+	// terminal indicates the session is already in a terminal state (CANCELLED,
+	// COMPLETED, FAILED, IDLE). Stop failures for terminal sessions are expected
+	// and must not block environment cleanup — the agent is already gone.
+	terminal bool
 }
 
 type taskEnvironmentCleanup struct {
@@ -473,7 +477,7 @@ func (s *Service) resolveRepoInputLocal(
 			// and feeds into os.Stat/ReadFile inside gitref.DefaultBranch, so
 			// without this guard a caller could traverse the filesystem.
 			if safePath, pathErr := s.resolveAllowedLocalPath(repoInput.LocalPath); pathErr == nil {
-				if probed, err := gitref.DefaultBranch(safePath); err == nil && probed != "" && probed != "HEAD" {
+				if probed, err := gitref.DefaultBranchOrEmpty(safePath); err == nil && probed != "" {
 					defaultBranch = probed
 				}
 			}
@@ -837,6 +841,17 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 // For fast UI response, the DB delete and event publish happen synchronously,
 // while agent stopping and worktree cleanup happen asynchronously.
 func (s *Service) DeleteTask(ctx context.Context, id string) error {
+	return s.deleteTaskWithReason(ctx, id, "")
+}
+
+// DeleteTaskWithReason behaves like DeleteTask but attaches a machine-readable
+// reason (e.g. "pr_approved_by_user") to the task.deleted event so the frontend
+// can explain why a focused task vanished.
+func (s *Service) DeleteTaskWithReason(ctx context.Context, id, reason string) error {
+	return s.deleteTaskWithReason(ctx, id, reason)
+}
+
+func (s *Service) deleteTaskWithReason(ctx context.Context, id, reason string) error {
 	start := time.Now()
 
 	// 1. Get task (sync, fast)
@@ -879,7 +894,11 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 	}
 
 	// 5. Publish event (sync, fast) - frontend removes task immediately
-	s.publishTaskEvent(ctx, events.TaskDeleted, task, nil)
+	var extra map[string]interface{}
+	if reason != "" {
+		extra = map[string]interface{}{"reason": reason}
+	}
+	s.publishTaskEventWithExtra(ctx, events.TaskDeleted, task, nil, extra)
 	s.logger.Info("task deleted",
 		zap.String("task_id", id),
 		zap.Duration("duration", time.Since(start)))
@@ -993,32 +1012,65 @@ func (s *Service) runAsyncTaskCleanup(
 	envCleanup taskEnvironmentCleanup,
 	stopReason, stopFailMsg, cleanupMsg string,
 ) {
-	go func() {
-		cleanupStart := time.Now()
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
+	go s.runTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup, stopReason, stopFailMsg, cleanupMsg)
+}
 
-		failedStops := s.stopTaskRuntimeTargets(cleanupCtx, id, stopTargets, stopReason, stopFailMsg)
+func (s *Service) runTaskCleanup(
+	id string,
+	sessions []*models.TaskSession,
+	worktrees []*worktree.Worktree,
+	stopTargets []taskStopTarget,
+	envCleanup taskEnvironmentCleanup,
+	stopReason, stopFailMsg, cleanupMsg string,
+) {
+	cleanupStart := time.Now()
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 
-		cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, stopTargets, envCleanup, failedStops)
+	failedStops := s.stopTaskRuntimeTargets(cleanupCtx, id, stopTargets, stopReason, stopFailMsg)
 
-		if len(cleanupErrors) > 0 {
-			s.logger.Warn(cleanupMsg+" with errors",
-				zap.String("task_id", id),
-				zap.Int("error_count", len(cleanupErrors)),
-				zap.Duration("duration", time.Since(cleanupStart)))
-		} else {
-			s.logger.Info(cleanupMsg,
-				zap.String("task_id", id),
-				zap.Duration("duration", time.Since(cleanupStart)))
-		}
-		s.signalCleanupDoneForTest()
-	}()
+	cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, stopTargets, envCleanup, failedStops)
+
+	if len(cleanupErrors) > 0 {
+		s.logger.Warn(cleanupMsg+" with errors",
+			zap.String("task_id", id),
+			zap.Int("error_count", len(cleanupErrors)),
+			zap.Duration("duration", time.Since(cleanupStart)))
+	} else {
+		s.logger.Info(cleanupMsg,
+			zap.String("task_id", id),
+			zap.Duration("duration", time.Since(cleanupStart)))
+	}
+	s.signalCleanupDoneForTest()
+}
+
+// isCleanableSessionState reports whether a session has no running agent process
+// and stop failures are therefore expected. Unlike the orchestrator's
+// isTerminalSessionState (which excludes IDLE), this helper is used only during
+// task cleanup to decide whether a stop failure should block environment teardown.
+// IDLE is included because an idle session has already released its execution slot
+// and will return ErrExecutionNotFound just like CANCELLED/COMPLETED/FAILED.
+func isCleanableSessionState(state models.TaskSessionState) bool {
+	switch state {
+	case models.TaskSessionStateCancelled,
+		models.TaskSessionStateCompleted,
+		models.TaskSessionStateFailed,
+		models.TaskSessionStateIdle:
+		return true
+	}
+	return false
 }
 
 func (s *Service) buildStopTargets(ctx context.Context, taskID string, activeSessions []*models.TaskSession) ([]taskStopTarget, error) {
 	targets := make([]taskStopTarget, 0, len(activeSessions))
 	seen := make(map[string]struct{})
+	// Index session states so executor_running rows can be marked terminal.
+	sessionStates := make(map[string]models.TaskSessionState, len(activeSessions))
+	for _, sess := range activeSessions {
+		if sess != nil {
+			sessionStates[sess.ID] = sess.State
+		}
+	}
 	if s.executors != nil {
 		runningRows, err := s.executors.ListExecutorsRunningByTaskID(ctx, taskID)
 		if err != nil {
@@ -1031,6 +1083,7 @@ func (s *Service) buildStopTargets(ctx context.Context, taskID string, activeSes
 			target := taskStopTarget{
 				sessionID:   running.SessionID,
 				executionID: strings.TrimSpace(running.AgentExecutionID),
+				terminal:    isCleanableSessionState(sessionStates[running.SessionID]),
 			}
 			targets = append(targets, target)
 			seen[target.sessionID] = struct{}{}
@@ -1041,6 +1094,11 @@ func (s *Service) buildStopTargets(ctx context.Context, taskID string, activeSes
 			continue
 		}
 		if _, ok := seen[sess.ID]; ok {
+			continue
+		}
+		// Sessions without an executor_running row that are already in a terminal
+		// state have no running process; skip creating a stop target.
+		if isCleanableSessionState(sess.State) {
 			continue
 		}
 		target := taskStopTarget{
@@ -1069,6 +1127,13 @@ func (s *Service) stopTaskRuntimeTargets(ctx context.Context, taskID string, sto
 	for _, target := range stopTargets {
 		if target.executionID != "" {
 			if err := s.executionStopper.StopExecution(ctx, target.executionID, stopReason, true); err != nil {
+				if target.terminal {
+					s.logger.Debug("stop failed for terminal session execution (expected), proceeding with cleanup",
+						zap.String("task_id", taskID),
+						zap.String("session_id", target.sessionID),
+						zap.Error(err))
+					continue
+				}
 				failedStops[target.sessionID] = struct{}{}
 				s.logger.Warn(stopFailMsg,
 					zap.String("task_id", taskID),
@@ -1079,6 +1144,13 @@ func (s *Service) stopTaskRuntimeTargets(ctx context.Context, taskID string, sto
 			continue
 		}
 		if err := s.executionStopper.StopSession(ctx, target.sessionID, stopReason, true); err != nil {
+			if target.terminal {
+				s.logger.Debug("stop failed for terminal session (expected), proceeding with cleanup",
+					zap.String("task_id", taskID),
+					zap.String("session_id", target.sessionID),
+					zap.Error(err))
+				continue
+			}
 			failedStops[target.sessionID] = struct{}{}
 			s.logger.Warn(stopFailMsg,
 				zap.String("task_id", taskID),

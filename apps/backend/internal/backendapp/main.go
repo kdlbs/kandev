@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -476,6 +477,9 @@ func startAgentInfrastructure(
 	// reconciler when its agent type left the registry) self-heal on the
 	// next poll instead of looping on "profile not found" forever.
 	orchestratorSvc.SetProfileLookup(&profileLookupAdapter{store: repos.AgentSettings})
+	// Watcher dispatch self-heals a binding whose repository was soft-deleted
+	// after the watch was configured, instead of creating an orphan task row.
+	orchestratorSvc.SetRepositoryChecker(&repositoryLookupAdapter{svc: services.Task})
 
 	// Wire the watcher-dependency enumerator into the agent settings
 	// controller so the profile-delete UI can surface "this will also
@@ -740,27 +744,51 @@ func startGatewayAndServe(
 	// after we bind the socket above; probe the local listener with a short
 	// retry loop — once a single connect succeeds, the kernel queue is up and
 	// any subsequent /health call will land on a wired route.
-	go waitListenerThenMarkReady(port, log)
+	go waitListenerThenMarkReady(server.Addr, log)
 
 	awaitShutdown(server, orchestratorSvc, lifecycleMgr, runCleanups, log)
 	return true
 }
 
 func startHTTPServer(server *http.Server, port int, log *logger.Logger) bool {
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	addr := strings.TrimSpace(server.Addr)
+	if addr == "" {
+		addr = serverListenAddr("", port)
+	}
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		log.Error("Server listen error", zap.Error(err))
 		return false
 	}
 
 	go func() {
-		log.Info("WebSocket server listening", zap.Int("port", port))
+		log.Info("WebSocket server listening", zap.String("addr", ln.Addr().String()), zap.Int("port", port))
 		if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
 			log.Error("Server serve error", zap.Error(err))
 		}
 	}()
 
 	return true
+}
+
+func serverListenAddr(host string, port int) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return fmt.Sprintf(":%d", port)
+	}
+	return net.JoinHostPort(host, fmt.Sprint(port))
+}
+
+func serverProbeAddr(listenAddr string) string {
+	host, port, err := net.SplitHostPort(listenAddr)
+	if err != nil {
+		return listenAddr
+	}
+	switch host {
+	case "", "0.0.0.0", "::":
+		host = "127.0.0.1"
+	}
+	return net.JoinHostPort(host, port)
 }
 
 // waitListenerThenMarkReady probes the local HTTP listener until a
@@ -773,8 +801,8 @@ func startHTTPServer(server *http.Server, port int, log *logger.Logger) bool {
 // of seconds. If the budget expires the flag still flips, so the
 // backend doesn't permanently advertise "not ready" if probing fails
 // for some unrelated reason (e.g. an iptables hiccup on a dev box).
-func waitListenerThenMarkReady(port int, log *logger.Logger) {
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
+func waitListenerThenMarkReady(listenAddr string, log *logger.Logger) {
+	addr := serverProbeAddr(listenAddr)
 	deadline := time.Now().Add(30 * time.Second)
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
@@ -784,12 +812,12 @@ func waitListenerThenMarkReady(port int, log *logger.Logger) {
 			_ = conn.Close()
 			// A successful TCP dial proves the listener is bound.
 			ready.Store(true)
-			log.Info("backend ready", zap.Int("port", port))
+			log.Info("backend ready", zap.String("addr", addr))
 			return
 		}
 		if time.Now().After(deadline) {
 			log.Warn("backend readiness probe never connected; flipping ready anyway",
-				zap.Int("port", port))
+				zap.String("addr", addr))
 			ready.Store(true)
 			return
 		}
@@ -1083,6 +1111,9 @@ func startOfficeSchedulersAndGC(
 	engineDispatcher := wireWorkflowEngineForOffice(
 		orchestratorSvc, services.Office, services.Task, services.Workflow, repos, runsSvc, log,
 	)
+	if services.OfficeSvcs != nil {
+		services.OfficeSvcs.Dashboard.SetWorkflowEngineDispatcher(engineDispatcher)
+	}
 	// Start the runs scheduler (tick + signal listener). It drives
 	// orchScheduler.Tick on both periodic ticks and event-driven signals.
 	runScheduler := runsscheduler.New(
@@ -1121,7 +1152,7 @@ func startOfficeSchedulersAndGC(
 //   - RunQueueAdapter        — runs service (Phase 3.1)
 //   - ParticipantStore       — workflow_step_participants
 //   - DecisionStore          — workflow_step_decisions
-//   - PrimaryAgentResolver   — workflow_steps.agent_profile_id
+//   - PrimaryAgentResolver   — current task runner / workflow_steps.agent_profile_id
 //   - CEOAgentResolver       — agent_profiles WHERE role='ceo' AND workspace_id != ”
 //
 // The orchestrator's engine is rebuilt with these options applied, then
@@ -1630,7 +1661,7 @@ func buildHTTPServer(
 	})
 
 	return &http.Server{
-		Addr:         fmt.Sprintf(":%d", port),
+		Addr:         serverListenAddr(cfg.Server.Host, port),
 		Handler:      router,
 		ReadTimeout:  cfg.Server.ReadTimeoutDuration(),
 		WriteTimeout: cfg.Server.WriteTimeoutDuration(),
@@ -1650,6 +1681,9 @@ func awaitShutdown(
 	// ============================================
 	quit := make(chan os.Signal, 2)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	log.Debug("shutdown signal handler armed",
+		zap.Int("pid", os.Getpid()),
+		zap.Int("ppid", os.Getppid()))
 	sig := <-quit
 
 	// If we get a second signal, exit immediately.
@@ -1660,6 +1694,8 @@ func awaitShutdown(
 		os.Exit(1)
 	}()
 
-	log.Info("Received shutdown signal", zap.String("signal", sig.String()))
+	log.Info("Received shutdown signal",
+		zap.String("signal", sig.String()),
+		zap.Int("pid", os.Getpid()))
 	runGracefulShutdown(server, orchestratorSvc, lifecycleMgr, runCleanups, log)
 }

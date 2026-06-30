@@ -13,10 +13,17 @@ fail() {
   exit 1
 }
 
-count_occurrences() {
-  local pattern=$1
+count_matches() {
+  local mode=$1
+  local pattern=$2
   local output
-  output="$(rg --fixed-strings --count-matches -- "$pattern" "$WORKFLOW" || true)"
+  local rg_args=(--count-matches)
+  if [[ "$mode" == "fixed" ]]; then
+    rg_args=(--fixed-strings --count-matches)
+  elif [[ "$mode" != "regex" ]]; then
+    fail "Unsupported match mode: $mode"
+  fi
+  output="$(rg "${rg_args[@]}" -- "$pattern" "$WORKFLOW" || true)"
   if [[ -z "$output" ]]; then
     printf '0\n'
     return
@@ -26,6 +33,11 @@ count_occurrences() {
     return
   fi
   awk -F: '{ print $2 }' <<<"$output"
+}
+
+count_occurrences() {
+  local pattern=$1
+  count_matches fixed "$pattern"
 }
 
 tmp_review_reference_count="$(count_occurrences '/tmp/opencode-review')"
@@ -100,8 +112,17 @@ if [[ "$trusted_script_count" != "2" ]]; then
 fi
 pass "OpenCode review executes the parser script from the trusted base commit in both workflow paths"
 
-artifact_upload_count="$(count_occurrences 'uses: actions/upload-artifact@v4')"
+artifact_upload_count="$(count_matches regex 'uses: actions/upload-artifact@(v4([[:space:]]|$)|[a-f0-9]{40}[[:space:]]+# v4([[:space:]]|$))')"
 if [[ "$artifact_upload_count" != "2" ]]; then
-  fail "OpenCode review artifacts are uploaded from both workflow paths"
+  fail "OpenCode review upload-artifact is pinned to v4 in both workflow paths"
 fi
 pass "OpenCode review artifacts are uploaded from both workflow paths"
+
+invalid_artifact_upload_refs="$(
+  rg --line-number 'uses: actions/upload-artifact@' "$WORKFLOW" |
+    rg --invert-match 'uses: actions/upload-artifact@[0-9a-f]{40} # v[0-9]+(?:\.[0-9]+\.[0-9]+)?$' || true
+)"
+if [[ -n "$invalid_artifact_upload_refs" ]]; then
+  fail "OpenCode review artifact uploads use immutable action refs"
+fi
+pass "OpenCode review artifact uploads use immutable action refs"

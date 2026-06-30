@@ -274,8 +274,13 @@ export async function deleteReviewWatch(id: string, options?: ApiRequestOptions)
   });
 }
 
-export async function triggerReviewWatch(id: string, options?: ApiRequestOptions) {
-  return fetchJson<TriggerReviewResponse>(`/api/v1/github/watches/review/${id}/trigger`, {
+export async function triggerReviewWatch(
+  id: string,
+  workspaceId: string,
+  options?: ApiRequestOptions,
+) {
+  const params = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<TriggerReviewResponse>(`/api/v1/github/watches/review/${id}/trigger?${params}`, {
     ...options,
     init: { method: "POST", ...(options?.init ?? {}) },
   });
@@ -298,8 +303,8 @@ export async function previewResetReviewWatch(
 }
 
 // resetReviewWatch deletes every task previously created by the review
-// watch (including archived), wipes its dedup table, and nulls
-// last_polled_at so the next poll re-imports every currently-matching PR.
+// watch (including archived), wipes its dedup table, and schedules the
+// watch to re-run so currently-matching PRs are queued for task creation.
 export async function resetReviewWatch(
   id: string,
   workspaceId: string,

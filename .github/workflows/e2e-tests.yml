@@ -5,18 +5,22 @@ on:
     branches: [main]
     paths:
       - "apps/backend/**"
+      - "apps/desktop/**"
       - "apps/web/**"
       - "apps/packages/**"
       - "apps/pnpm-lock.yaml"
+      - "apps/pnpm-workspace.yaml"
       - ".github/workflows/e2e-tests.yml"
       - "!**/*.md"
   pull_request:
     branches: [main]
     paths:
       - "apps/backend/**"
+      - "apps/desktop/**"
       - "apps/web/**"
       - "apps/packages/**"
       - "apps/pnpm-lock.yaml"
+      - "apps/pnpm-workspace.yaml"
       - ".github/workflows/e2e-tests.yml"
       - "!**/*.md"
   # Manual trigger for verifying CI on draft PRs and ad-hoc reruns. The
@@ -49,7 +53,9 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
 
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -58,7 +64,7 @@ jobs:
       # /root/.local/share/pnpm/store. actions/cache resolves `~` against $HOME
       # so the same path string works for both the host and container variants.
       - name: Cache pnpm store
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.local/share/pnpm/store
           key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
@@ -78,7 +84,7 @@ jobs:
         run: make build-backend-linux-helpers
 
       - name: Upload backend build
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: e2e-backend-build
           path: apps/backend/bin/
@@ -89,7 +95,7 @@ jobs:
         run: tar -cf apps/web/web-dist.tar -C apps/web dist
 
       - name: Upload web build
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: e2e-web-build
           path: apps/web/web-dist.tar
@@ -132,13 +138,15 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
 
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Cache pnpm store
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.local/share/pnpm/store
           key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
@@ -149,7 +157,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Download backend build
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: e2e-backend-build
           path: apps/backend/bin/
@@ -158,7 +166,7 @@ jobs:
         run: chmod +x apps/backend/bin/*
 
       - name: Download web build
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: e2e-web-build
           path: apps/web/
@@ -178,7 +186,7 @@ jobs:
 
       - name: Upload blob report
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: blob-report-${{ matrix.shard }}
           path: apps/web/e2e/blob-report/
@@ -186,7 +194,7 @@ jobs:
 
       - name: Upload test results
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: test-results-${{ matrix.shard }}
           path: apps/web/e2e/test-results/
@@ -222,23 +230,25 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
 
       - name: Verify Docker is available
         run: docker info
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v5
+        uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
         with:
           version: "9.15.9"
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: "24"
 
       - name: Cache pnpm store
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.local/share/pnpm/store
           key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
@@ -253,7 +263,7 @@ jobs:
       # need this because GitHub's `container:` integration handles auth
       # implicitly using GITHUB_TOKEN.
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -310,7 +320,7 @@ jobs:
           smoke_test
 
       - name: Download backend build
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: e2e-backend-build
           path: apps/backend/bin/
@@ -319,7 +329,7 @@ jobs:
         run: chmod +x apps/backend/bin/*
 
       - name: Download web build
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: e2e-web-build
           path: apps/web/
@@ -343,7 +353,7 @@ jobs:
       # the sharded chromium/mobile-chrome runs.
       - name: Upload containers blob report
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: blob-report-containers-${{ matrix.shard }}
           path: apps/web/e2e/blob-report/
@@ -351,15 +361,71 @@ jobs:
 
       - name: Upload containers E2E results
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: containers-e2e-test-results-${{ matrix.shard }}
           path: apps/web/e2e/test-results/
           retention-days: 7
 
+  desktop-e2e:
+    name: Desktop E2E Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
+        with:
+          version: "9.15.9"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: apps/pnpm-lock.yaml
+
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          key: desktop-e2e
+
+      - name: Install desktop system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libglib2.0-dev \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            xvfb
+
+      - name: Install dependencies
+        working-directory: apps
+        run: pnpm install --frozen-lockfile
+
+      - name: Run desktop smoke
+        working-directory: apps
+        run: pnpm --filter @kandev/desktop e2e
+
   e2e-report:
     name: Merge E2E Reports
-    needs: [e2e, e2e-containers]
+    needs: [e2e, e2e-containers, desktop-e2e]
     if: always()
     runs-on: ubuntu-latest
     # Pre-baked image bundles Node 24, pnpm 9.15.9, and the Playwright CLI.
@@ -373,13 +439,15 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
 
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Cache pnpm store
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.local/share/pnpm/store
           key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
@@ -390,7 +458,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Download blob reports
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           path: apps/web/e2e/blob-reports
           pattern: blob-report-*
@@ -408,8 +476,29 @@ jobs:
         run: npx playwright merge-reports --config e2e/playwright.config.ts --reporter=html ./e2e/blob-reports
 
       - name: Upload merged report
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: playwright-report
           path: apps/web/playwright-report/
           retention-days: 14
+
+      - name: Verify required E2E jobs passed
+        if: always()
+        env:
+          E2E_RESULT: ${{ needs.e2e.result }}
+          E2E_CONTAINERS_RESULT: ${{ needs['e2e-containers'].result }}
+          DESKTOP_E2E_RESULT: ${{ needs['desktop-e2e'].result }}
+        run: |
+          set -euo pipefail
+          if [ "$E2E_RESULT" != "success" ]; then
+            echo "e2e finished with result: $E2E_RESULT" >&2
+            exit 1
+          fi
+          if [ "$E2E_CONTAINERS_RESULT" != "success" ]; then
+            echo "e2e-containers finished with result: $E2E_CONTAINERS_RESULT" >&2
+            exit 1
+          fi
+          if [ "$DESKTOP_E2E_RESULT" != "success" ]; then
+            echo "desktop-e2e finished with result: $DESKTOP_E2E_RESULT" >&2
+            exit 1
+          fi

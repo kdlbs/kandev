@@ -3,7 +3,7 @@ package launcher
 import (
 	"os"
 	"path/filepath"
-	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -11,9 +11,7 @@ func TestValidateRuntimeBundleAcceptsSingleBinaryLayout(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "bin", "kandev"))
 	writeFile(t, filepath.Join(dir, "bin", "agentctl"))
-	if requiresAgentctlLinuxAMD64(runtime.GOOS, runtime.GOARCH) {
-		writeFile(t, filepath.Join(dir, "bin", "agentctl-linux-amd64"))
-	}
+	writeRemoteAgentctlHelpers(t, dir)
 
 	bundle, err := validateRuntimeBundle(dir, "test")
 	if err != nil {
@@ -33,15 +31,46 @@ func TestValidateRuntimeBundleRejectsMissingLauncher(t *testing.T) {
 	}
 }
 
-func TestRequiresAgentctlLinuxAMD64(t *testing.T) {
-	if requiresAgentctlLinuxAMD64("linux", "amd64") {
-		t.Fatal("linux/amd64 should use the native agentctl binary")
+func TestValidateRuntimeBundleRejectsMissingRemoteHelper(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "bin", "kandev"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl-linux-amd64"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl-darwin-amd64"))
+
+	_, err := validateRuntimeBundle(dir, "test")
+	if err == nil {
+		t.Fatal("expected error")
 	}
-	if !requiresAgentctlLinuxAMD64("linux", "arm64") {
-		t.Fatal("linux/arm64 should require the linux/amd64 helper")
+	if got, want := err.Error(), "agentctl darwin/arm64 helper not found"; !strings.Contains(got, want) {
+		t.Fatalf("error = %q, want substring %q", got, want)
 	}
-	if !requiresAgentctlLinuxAMD64("darwin", "arm64") {
-		t.Fatal("non-linux hosts should require the linux/amd64 helper")
+}
+
+func TestRequiredAgentctlRemoteHelpers(t *testing.T) {
+	got := make([]string, 0, len(requiredAgentctlRemoteHelpers))
+	for _, helper := range requiredAgentctlRemoteHelpers {
+		got = append(got, helper.Name)
+	}
+	want := []string{
+		"agentctl-linux-amd64",
+		"agentctl-darwin-arm64",
+		"agentctl-darwin-amd64",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("helpers = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("helpers = %v, want %v", got, want)
+		}
+	}
+}
+
+func writeRemoteAgentctlHelpers(t *testing.T, dir string) {
+	t.Helper()
+	for _, helper := range requiredAgentctlRemoteHelpers {
+		writeFile(t, filepath.Join(dir, "bin", helper.Name))
 	}
 }
 

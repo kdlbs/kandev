@@ -39,6 +39,11 @@ type stubWatcherSource struct {
 	selfHealCalls  int
 	selfHealCause  string
 	buildCalls     int
+	releaseCalls   int
+	// repositories, when set, is returned in the built IssueTaskRequest so the
+	// repository pre-flight can be exercised.
+	repositories []IssueTaskRepository
+	workspaceID  string
 }
 
 func (s *stubWatcherSource) Name() string { return s.name }
@@ -50,11 +55,11 @@ func (s *stubWatcherSource) Reserve(_ context.Context, _ any) (bool, error) {
 	return true, nil
 }
 
-func (s *stubWatcherSource) Release(_ context.Context, _ any) {}
+func (s *stubWatcherSource) Release(_ context.Context, _ any) { s.releaseCalls++ }
 
 func (s *stubWatcherSource) BuildTaskRequest(_ any) (*IssueTaskRequest, error) {
 	s.buildCalls++
-	return &IssueTaskRequest{}, nil
+	return &IssueTaskRequest{WorkspaceID: s.workspaceID, Repositories: s.repositories}, nil
 }
 
 func (s *stubWatcherSource) AttachTaskID(_ context.Context, _ any, _ string) error { return nil }

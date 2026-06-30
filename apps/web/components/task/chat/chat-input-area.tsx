@@ -441,7 +441,7 @@ function ChatStatusBar({
       {taskId && <PRMergedBanner key={`${taskId}-merged`} taskId={taskId} />}
       {taskId && <PRClosedBanner key={`${taskId}-closed`} taskId={taskId} />}
       {canShare && taskId && sessionId && (
-        <div className="ml-auto">
+        <div className="ml-auto shrink-0">
           <ShareButton taskId={taskId} sessionId={sessionId} iconOnly />
         </div>
       )}

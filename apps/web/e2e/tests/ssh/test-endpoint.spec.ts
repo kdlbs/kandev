@@ -4,14 +4,14 @@ import { execInContainer } from "../../helpers/ssh";
 /**
  * HTTP contract for POST /api/v1/ssh/test. The endpoint dials the host with a
  * permissive host-key callback (records the fingerprint but does not pin it),
- * runs uname / arch / git probes, and reports whether agentctl is already
+ * runs uname / platform / git probes, and reports whether agentctl is already
  * cached on the remote. Drives the "Test Connection" UI flow.
  *
  * Covers e2e-plan.md group F (F1–F6).
  */
 test.describe("ssh test-endpoint contract", () => {
   // F2 — happy-path step ordering against a reachable sshd container.
-  test("returns step ordering Resolve target -> SSH handshake -> Probe remote -> Verify arch -> Verify agentctl cache", async ({
+  test("returns step ordering Resolve target -> SSH handshake -> Probe remote -> Verify platform -> Verify agentctl cache", async ({
     apiClient,
     seedData,
   }) => {
@@ -26,14 +26,16 @@ test.describe("ssh test-endpoint contract", () => {
 
     expect(result.success).toBe(true);
     expect(result.fingerprint).toBe(seedData.sshTarget.hostFingerprint);
+    expect(result.os).toBe("Linux");
     expect(result.arch).toBe("x86_64");
+    expect(result.platform).toBe("linux/amd64");
 
     const stepNames = result.steps.map((s) => s.name);
     expect(stepNames).toEqual([
       "Resolve target",
       "SSH handshake",
       "Probe remote",
-      "Verify arch",
+      "Verify platform",
       "Verify agentctl cache",
     ]);
     for (const step of result.steps) {
@@ -81,7 +83,7 @@ test.describe("ssh test-endpoint contract", () => {
     expect(stepNames).toContain("Resolve target");
     expect(stepNames).toContain("SSH handshake");
     expect(stepNames).not.toContain("Probe remote");
-    expect(stepNames).not.toContain("Verify arch");
+    expect(stepNames).not.toContain("Verify platform");
     const handshake = result.steps.find((s) => s.name === "SSH handshake");
     expect(handshake?.success).toBe(false);
     expect(handshake?.error).toMatch(/tcp dial|connection refused|handshake/i);

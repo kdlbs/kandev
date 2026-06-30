@@ -203,6 +203,53 @@ func TestAcquireEnsureLock_AllowsConcurrencyAcrossTaskIDs(t *testing.T) {
 	}
 }
 
+func TestPrepareTaskSession_UsesExecutorIDFromTaskMetadata(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+
+	now := time.Now().UTC()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "Test Workflow", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("seed workflow: %v", err)
+	}
+	metadata := map[string]interface{}{
+		models.MetaKeyAgentProfileID: "profile1",
+		models.MetaKeyExecutorID:     "exec-special",
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:          "task1",
+		WorkflowID:  "wf1",
+		WorkspaceID: "ws1",
+		Title:       "T",
+		Metadata:    metadata,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID:          "task1",
+		WorkspaceID: "ws1",
+		Metadata:    metadata,
+	}
+
+	sessionID, err := svc.PrepareTaskSession(ctx, "task1", "", "", "", "", false)
+	if err != nil {
+		t.Fatalf("PrepareTaskSession: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.ExecutorID != "exec-special" {
+		t.Fatalf("ExecutorID = %q, want exec-special", session.ExecutorID)
+	}
+}
+
 // Service-level companion to the lock primitive tests: with no pre-existing
 // session, N concurrent EnsureSession calls must converge on exactly one
 // created session. This catches regressions in findExistingSession or

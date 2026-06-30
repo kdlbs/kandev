@@ -14,6 +14,7 @@ import {
   MessageListStatus,
   MessageItem,
   getItemKey,
+  getConversationLoadingState,
   getSessionRunningState,
   getLastTurnGroupId,
 } from "./message-list-shared";
@@ -443,11 +444,12 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
     sessionState,
   } = props;
   const { scrollParent, setScrollRef } = useVisibleScrollParent();
-  const isInitialLoading = messagesLoading && messages.length === 0;
-  const isNonLoadableSession =
-    !sessionState || ["CREATED", "FAILED", "COMPLETED", "CANCELLED"].includes(sessionState);
-  const showLoadingState =
-    (messagesLoading || isInitialLoading) && !isWorking && !isNonLoadableSession;
+  const { isInitialLoading, showLoadingState } = getConversationLoadingState({
+    messagesLoading,
+    messagesCount: messages.length,
+    isWorking,
+    sessionState,
+  });
   const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(sessionId);
   const isRunning = getSessionRunningState(sessionState);
   const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);

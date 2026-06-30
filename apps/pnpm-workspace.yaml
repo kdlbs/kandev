@@ -1,4 +1,5 @@
 packages:
   - 'cli'
+  - 'desktop'
   - 'web'
   - 'packages/*'

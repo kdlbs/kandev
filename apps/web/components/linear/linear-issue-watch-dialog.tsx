@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
-import { Switch } from "@kandev/ui/switch";
 import { Label } from "@kandev/ui/label";
 import { Input } from "@kandev/ui/input";
 import {
@@ -29,12 +28,14 @@ import {
 import {
   LabelMultiSelect,
   PriorityMultiSelect,
-  SortByField,
+  SettingsFields,
   StateMultiSelect,
   useTeamsAndStates,
 } from "./linear-issue-watch-fields";
 import { LINEAR_ISSUE_WATCH_PLACEHOLDERS } from "./linear-issue-watch-placeholders";
 import { STEP_DEFAULT, STEP_DEFAULT_LABEL, resolveProfileId } from "@/lib/watcher-profile-default";
+import { WatcherRepositoryFields } from "@/components/watcher-repository-fields";
+import { clearWorkspaceScopedForm } from "@/lib/watcher-repository-default";
 import {
   ASSIGNED_ANY,
   CREATOR_ANY,
@@ -45,7 +46,6 @@ import {
   formStateFromWatch,
   isWatchFormReady,
   makeEmptyForm,
-  parseMaxInflightTasks,
   userOptionLabel,
 } from "./linear-issue-watch-form";
 import type {
@@ -429,6 +429,15 @@ function AutomationFields({
           disabled={!form.workflowId || stepsLoading || steps.length === 0}
         />
       </div>
+      <WatcherRepositoryFields
+        workspaceId={form.workspaceId}
+        repositoryId={form.repositoryId}
+        baseBranch={form.baseBranch}
+        onRepositoryChange={(repositoryId) =>
+          setForm((p) => ({ ...p, repositoryId, baseBranch: "" }))
+        }
+        onBaseBranchChange={(baseBranch) => setForm((p) => ({ ...p, baseBranch }))}
+      />
       <div className="grid grid-cols-2 gap-4">
         <SelectField
           label="Agent Profile"
@@ -455,77 +464,6 @@ function AutomationFields({
             { id: STEP_DEFAULT, label: STEP_DEFAULT_LABEL },
             ...allExecutorProfiles.map((p) => ({ id: p.id, label: p.name })),
           ]}
-        />
-      </div>
-    </>
-  );
-}
-
-function MaxInflightTasksField({
-  form,
-  setForm,
-}: {
-  form: FormState;
-  setForm: React.Dispatch<React.SetStateAction<FormState>>;
-}) {
-  const parsed = parseMaxInflightTasks(form.maxInflightTasks);
-  const invalid = parsed === "invalid";
-  return (
-    <div className="space-y-1.5">
-      <Label>Max in-flight tasks</Label>
-      <p className="text-xs text-muted-foreground">
-        Cap on open tasks created by this watcher. Leave blank for no cap. New matches are deferred
-        to the next poll when the cap is reached.
-      </p>
-      <Input
-        type="number"
-        value={form.maxInflightTasks}
-        onChange={(e) => setForm((p) => ({ ...p, maxInflightTasks: e.target.value }))}
-        min={1}
-        step={1}
-        placeholder="(no cap)"
-        aria-invalid={invalid}
-      />
-      {invalid && (
-        <p className="text-xs text-destructive">Enter a positive integer or leave blank.</p>
-      )}
-    </div>
-  );
-}
-
-function SettingsFields({
-  form,
-  setForm,
-}: {
-  form: FormState;
-  setForm: React.Dispatch<React.SetStateAction<FormState>>;
-}) {
-  return (
-    <>
-      <div className="space-y-1.5">
-        <Label>Poll Interval (seconds)</Label>
-        <p className="text-xs text-muted-foreground">
-          How often to re-run the search. Minimum 60s, maximum 3600s.
-        </p>
-        <Input
-          type="number"
-          value={form.pollInterval}
-          onChange={(e) => setForm((p) => ({ ...p, pollInterval: Number(e.target.value) }))}
-          min={60}
-          max={3600}
-        />
-      </div>
-      <MaxInflightTasksField form={form} setForm={setForm} />
-      <SortByField form={form} setForm={setForm} />
-      <div className="flex items-center justify-between">
-        <div>
-          <Label>Enabled</Label>
-          <p className="text-xs text-muted-foreground">Pause or resume polling.</p>
-        </div>
-        <Switch
-          checked={form.enabled}
-          onCheckedChange={(v) => setForm((p) => ({ ...p, enabled: v }))}
-          className="cursor-pointer"
         />
       </div>
     </>
@@ -585,16 +523,14 @@ export function LinearIssueWatchDialog({
           <DialogTitle>{watch ? "Edit Linear Watcher" : "Create Linear Watcher"}</DialogTitle>
           <DialogDescription>
             Poll Linear with a structured filter and auto-create a Kandev task for each
-            newly-matching issue. Issues are not bound to a repository — the workflow step&apos;s
-            defaults decide where the task runs.
+            newly-matching issue. Optionally bind a repository so each task runs against that
+            codebase, or leave it unset to run with no repository.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-5">
           <WorkspacePicker
             value={form.workspaceId}
-            onChange={(v) =>
-              setForm((p) => ({ ...p, workspaceId: v, workflowId: "", workflowStepId: "" }))
-            }
+            onChange={(v) => setForm((p) => clearWorkspaceScopedForm(p, v))}
             disabled={workspaceLocked}
           />
           {/* Hairlines separate the five conceptual blocks (Destination /

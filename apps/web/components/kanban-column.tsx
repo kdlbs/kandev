@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useDroppable } from "@dnd-kit/core";
-import { KanbanCard, resolveTaskRepositoryNames, Task } from "./kanban-card";
+import { KanbanCard, resolveTaskRepositoryChips, Task } from "./kanban-card";
 import { Badge } from "@kandev/ui/badge";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
@@ -95,7 +95,7 @@ export function KanbanColumn({
           <KanbanCard
             key={task.id}
             task={task}
-            repositoryNames={resolveTaskRepositoryNames(task, repositories)}
+            repositoryChips={resolveTaskRepositoryChips(task, repositories)}
             onClick={onPreviewTask}
             onOpenFullPage={onOpenTask}
             onEdit={onEditTask}

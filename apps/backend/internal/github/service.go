@@ -33,8 +33,8 @@ const (
 // service's self-approval guard, and tests.
 const reviewEventApprove = "APPROVE"
 
-// prSyncFreshnessWindow is how long PR data is considered fresh (skip GitHub API).
-const prSyncFreshnessWindow = 30 * time.Second
+// PRSyncFreshnessWindow is how long PR data is considered fresh.
+const PRSyncFreshnessWindow = 30 * time.Second
 
 // cleanupFetchFailureThreshold is the number of consecutive GetPRFeedback /
 // GetIssueState errors a single dedup row may accumulate before the cleanup
@@ -48,6 +48,14 @@ const cleanupFetchFailureThreshold = 5
 // task is already gone.
 type TaskDeleter interface {
 	DeleteTask(ctx context.Context, taskID string) error
+}
+
+// TaskDeleterWithReason is an optional extension of TaskDeleter that lets the
+// cleanup path attach a machine-readable deletion reason (e.g.
+// "pr_approved_by_user") to the published task.deleted event. When the wired
+// deleter does not implement this, cleanup falls back to plain DeleteTask.
+type TaskDeleterWithReason interface {
+	DeleteTaskWithReason(ctx context.Context, taskID, reason string) error
 }
 
 // isTaskNotFound reports whether an error from TaskDeleter signals the task

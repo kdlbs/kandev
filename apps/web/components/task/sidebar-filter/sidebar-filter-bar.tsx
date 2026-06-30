@@ -43,7 +43,11 @@ export function SidebarFilterBar() {
   return (
     <div
       data-testid="sidebar-filter-bar"
-      className="flex h-[30px] shrink-0 items-center gap-1 border-b border-border bg-card px-2"
+      // Transparent so the bar inherits whatever surface hosts it — bg-card in
+      // the dockview sidebar, bg-background in the mobile sheet — instead of
+      // painting a clashing strip. px-3 aligns the chip row's left edge with the
+      // 12px content inset of the group headers and task rows below.
+      className="flex h-[30px] shrink-0 items-center gap-1 border-b border-border/60 bg-transparent px-3"
     >
       <SidebarViewChips />
       <SidebarFilterPopover

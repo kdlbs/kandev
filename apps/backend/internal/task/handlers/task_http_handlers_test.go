@@ -18,9 +18,12 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
+	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
+	usermodels "github.com/kandev/kandev/internal/user/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 // captureOrchestrator records every LaunchSession request so tests can assert
@@ -148,8 +151,26 @@ type captureCreateTaskRepo struct {
 	updateStateErr error
 }
 
+type captureTaskCreateLastUsedRecorder struct {
+	calls int
+	got   usermodels.TaskCreateLastUsed
+}
+
+func (m *captureTaskCreateLastUsedRecorder) RecordTaskCreateLastUsed(_ context.Context, patch usermodels.TaskCreateLastUsed) error {
+	m.calls++
+	m.got = patch
+	return nil
+}
+
 func (m *captureCreateTaskRepo) GetWorkspaceTaskPrefix(_ context.Context, _ string) (string, string, error) {
 	return "KAN", "wf-office", nil
+}
+
+func (m *captureCreateTaskRepo) GetRepository(_ context.Context, id string) (*models.Repository, error) {
+	if id == "repo-2" {
+		return &models.Repository{ID: id, WorkspaceID: "ws-1", DefaultBranch: "main"}, nil
+	}
+	return nil, errors.New("repository not found")
 }
 
 func (m *captureCreateTaskRepo) CreateTask(_ context.Context, task *models.Task) error {
@@ -211,6 +232,230 @@ func TestHTTPCreateTask_ProjectIDReachesOfficePath(t *testing.T) {
 	require.NotNil(t, repo.captured, "service.CreateTask was not called")
 	assert.Equal(t, "proj-1", repo.captured.ProjectID)
 	assert.Equal(t, "wf-office", repo.captured.WorkflowID, "office workflow should be auto-resolved")
+}
+
+func TestHTTPCreateTaskRecordsFinalLastUsedSelections(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	recorder := &captureTaskCreateLastUsedRecorder{}
+	h := &TaskHandlers{service: svc, taskCreateLastUsedRecorder: recorder, logger: log}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(`{
+		"workspace_id": "ws-1",
+		"workflow_id": "wf-1",
+		"workflow_step_id": "step-1",
+		"title": "Use current selections",
+		"repositories": [{
+			"repository_id": "repo-2",
+			"base_branch": "main",
+			"checkout_branch": "feature/current"
+		}],
+		"agent_profile_id": "agent-2",
+		"executor_profile_id": "exec-profile-2"
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpCreateTask(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	require.Equal(t, 1, recorder.calls)
+	assert.Equal(t, usermodels.TaskCreateLastUsed{
+		RepositoryID:      "repo-2",
+		Branch:            "feature/current",
+		AgentProfileID:    "agent-2",
+		ExecutorProfileID: "exec-profile-2",
+	}, recorder.got)
+}
+
+func TestHTTPCreateTaskRecordsRepositoryWithoutProfileIDs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	recorder := &captureTaskCreateLastUsedRecorder{}
+	h := &TaskHandlers{service: svc, taskCreateLastUsedRecorder: recorder, logger: log}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(`{
+		"workspace_id": "ws-1",
+		"workflow_id": "wf-1",
+		"workflow_step_id": "step-1",
+		"title": "Passive API task",
+		"repositories": [{
+			"repository_id": "repo-2",
+			"base_branch": "main"
+		}]
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpCreateTask(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	require.Equal(t, 1, recorder.calls)
+	assert.Equal(t, usermodels.TaskCreateLastUsed{
+		RepositoryID: "repo-2",
+		Branch:       "main",
+	}, recorder.got)
+}
+
+func TestBuildTaskCreateLastUsedPatchRecordsFirstWorkspaceRepository(t *testing.T) {
+	patch := buildTaskCreateLastUsedPatch(httpCreateTaskRequest{
+		AgentProfileID:    "agent-2",
+		ExecutorProfileID: "exec-profile-2",
+	}, []dto.TaskRepositoryInput{
+		{RepositoryID: "repo-without-branch"},
+		{RepositoryID: "repo-with-branch", CheckoutBranch: "feature/current"},
+	})
+
+	assert.Equal(t, usermodels.TaskCreateLastUsed{
+		RepositoryID:      "repo-without-branch",
+		AgentProfileID:    "agent-2",
+		ExecutorProfileID: "exec-profile-2",
+	}, patch)
+}
+
+func TestBuildTaskCreateLastUsedPatchUsesFreshBranchRequestBase(t *testing.T) {
+	patch := buildTaskCreateLastUsedPatch(httpCreateTaskRequest{
+		Repositories: []httpTaskRepositoryInput{{
+			RepositoryID:   "repo-2",
+			BaseBranch:     "main",
+			CheckoutBranch: "task/use-current-selections",
+			FreshBranch:    true,
+		}},
+	}, []dto.TaskRepositoryInput{{
+		RepositoryID: "repo-2",
+		BaseBranch:   "task/use-current-selections",
+	}})
+
+	assert.Equal(t, usermodels.TaskCreateLastUsed{
+		RepositoryID: "repo-2",
+		Branch:       "main",
+	}, patch)
+}
+
+func TestBuildTaskCreateLastUsedPatchRecordsRepositoryWithoutBranch(t *testing.T) {
+	patch := buildTaskCreateLastUsedPatch(httpCreateTaskRequest{
+		AgentProfileID: "agent-2",
+	}, []dto.TaskRepositoryInput{
+		{RepositoryID: "repo-without-branch"},
+	})
+
+	assert.Equal(t, usermodels.TaskCreateLastUsed{
+		RepositoryID:   "repo-without-branch",
+		AgentProfileID: "agent-2",
+	}, patch)
+}
+
+func TestBuildTaskCreateLastUsedPatchSkipsBranchWithoutWorkspaceRepository(t *testing.T) {
+	patch := buildTaskCreateLastUsedPatch(httpCreateTaskRequest{
+		AgentProfileID: "agent-2",
+	}, []dto.TaskRepositoryInput{
+		{LocalPath: "/tmp/repo", CheckoutBranch: "feature/local"},
+		{GitHubURL: "https://github.com/kdlbs/example", BaseBranch: "main"},
+	})
+
+	assert.Equal(t, usermodels.TaskCreateLastUsed{
+		AgentProfileID: "agent-2",
+	}, patch)
+}
+
+func TestWSCreateTaskRecordsFinalLastUsedSelections(t *testing.T) {
+	log := newTestLogger(t)
+
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	recorder := &captureTaskCreateLastUsedRecorder{}
+	h := &TaskHandlers{service: svc, taskCreateLastUsedRecorder: recorder, logger: log}
+
+	msg, err := ws.NewRequest("msg-1", ws.ActionTaskCreate, map[string]any{
+		"workspace_id":        "ws-1",
+		"workflow_id":         "wf-1",
+		"workflow_step_id":    "step-1",
+		"title":               "Use current selections",
+		"agent_profile_id":    "agent-2",
+		"executor_profile_id": "exec-profile-2",
+		"repositories": []map[string]any{{
+			"repository_id":   "repo-2",
+			"checkout_branch": "feature/current",
+		}},
+	})
+	require.NoError(t, err)
+
+	resp, err := h.wsCreateTask(context.Background(), msg)
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	require.Equal(t, 1, recorder.calls)
+	assert.Equal(t, usermodels.TaskCreateLastUsed{
+		RepositoryID:      "repo-2",
+		Branch:            "feature/current",
+		AgentProfileID:    "agent-2",
+		ExecutorProfileID: "exec-profile-2",
+	}, recorder.got)
+}
+
+func TestWSCreateTaskRecordsFreshBranchRequestBase(t *testing.T) {
+	log := newTestLogger(t)
+
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	recorder := &captureTaskCreateLastUsedRecorder{}
+	h := &TaskHandlers{service: svc, taskCreateLastUsedRecorder: recorder, logger: log}
+
+	msg, err := ws.NewRequest("msg-1", ws.ActionTaskCreate, map[string]any{
+		"workspace_id":     "ws-1",
+		"workflow_id":      "wf-1",
+		"workflow_step_id": "step-1",
+		"title":            "Use fresh branch",
+		"repositories": []map[string]any{{
+			"repository_id":   "repo-2",
+			"base_branch":     "main",
+			"checkout_branch": "task/use-current-selections",
+			"fresh_branch":    true,
+		}},
+	})
+	require.NoError(t, err)
+
+	resp, err := h.wsCreateTask(context.Background(), msg)
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	require.Equal(t, 1, recorder.calls)
+	assert.Equal(t, usermodels.TaskCreateLastUsed{
+		RepositoryID: "repo-2",
+		Branch:       "main",
+	}, recorder.got)
 }
 
 func TestHTTPCreateTask_StartAgentReturnsSchedulingTask(t *testing.T) {

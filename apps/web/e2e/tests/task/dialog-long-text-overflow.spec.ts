@@ -1,5 +1,9 @@
 import { test, expect } from "../../fixtures/test-base";
-import { assertNoDescendantOverflowsRight } from "../../helpers/layout-assertions";
+import type { Locator } from "@playwright/test";
+import {
+  assertLocatorWithinViewportX,
+  assertNoDescendantOverflowsRight,
+} from "../../helpers/layout-assertions";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
@@ -8,6 +12,26 @@ import { SessionPage } from "../../pages/session-page";
 useRegularMode();
 
 const LONG_UNBROKEN_TEXT = `review-${"x".repeat(240)}-https://github.com/example/repo/commit/${"a".repeat(80)}`;
+
+async function assertProfileDropdownFits(trigger: Locator, dropdownLabel: string) {
+  await trigger.click();
+  const dropdown = trigger
+    .page()
+    .locator('[data-slot="popover-content"]')
+    .filter({ hasText: dropdownLabel })
+    .last();
+  await expect(dropdown).toBeVisible();
+  await assertLocatorWithinViewportX(dropdown, dropdownLabel);
+  const searchInput = dropdown.getByPlaceholder(/Search (agents|profiles)/);
+  if ((await searchInput.count()) > 0) {
+    await searchInput.click();
+    await expect(searchInput).toBeFocused();
+  }
+  const option = dropdown.getByRole("option").first();
+  await expect(option).toBeVisible();
+  await option.click();
+  await expect(dropdown).not.toBeVisible();
+}
 
 test.describe("Dialog long text layout", () => {
   test("agent, task, and subtask dialogs stay within their modal bounds", async ({
@@ -24,7 +48,15 @@ test.describe("Dialog long text layout", () => {
     await testPage.getByTestId("task-title-input").fill(LONG_UNBROKEN_TEXT);
     await testPage.getByTestId("task-description-input").fill(LONG_UNBROKEN_TEXT);
     await assertNoDescendantOverflowsRight(createDialog, "create task dialog");
-    await testPage.keyboard.press("Escape");
+    await assertProfileDropdownFits(
+      testPage.getByTestId("agent-profile-selector"),
+      "Agent Profile",
+    );
+    await assertProfileDropdownFits(
+      testPage.getByTestId("executor-profile-selector"),
+      "Executor Profile",
+    );
+    await createDialog.getByRole("button", { name: "Cancel" }).click();
     await expect(createDialog).not.toBeVisible();
 
     const task = await apiClient.createTaskWithAgent(
@@ -48,7 +80,13 @@ test.describe("Dialog long text layout", () => {
     await expect(newSessionDialog).toBeVisible();
     await session.newSessionPromptInput().fill(LONG_UNBROKEN_TEXT);
     await assertNoDescendantOverflowsRight(newSessionDialog, "new agent dialog");
-    await testPage.keyboard.press("Escape");
+    if ((await testPage.getByTestId("agent-profile-selector").count()) > 0) {
+      await assertProfileDropdownFits(
+        testPage.getByTestId("agent-profile-selector"),
+        "Agent Profile",
+      );
+    }
+    await newSessionDialog.getByRole("button", { name: "Cancel" }).click();
     await expect(newSessionDialog).not.toBeVisible();
 
     await testPage.getByTestId("sidebar-new-subtask").click();
@@ -57,5 +95,15 @@ test.describe("Dialog long text layout", () => {
     await testPage.getByTestId("subtask-title-input").fill(LONG_UNBROKEN_TEXT);
     await testPage.getByTestId("subtask-prompt-input").fill(LONG_UNBROKEN_TEXT);
     await assertNoDescendantOverflowsRight(subtaskDialog, "new subtask dialog");
+    await assertProfileDropdownFits(
+      testPage.getByTestId("agent-profile-selector"),
+      "Agent Profile",
+    );
+    if ((await testPage.getByTestId("executor-profile-selector").count()) > 0) {
+      await assertProfileDropdownFits(
+        testPage.getByTestId("executor-profile-selector"),
+        "Executor Profile",
+      );
+    }
   });
 });

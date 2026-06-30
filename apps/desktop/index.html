@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Kandev</title>
+    <style>
+      html,
+      body {
+        background: #f5f7f6;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+      }
+
+      .startup-shell {
+        align-items: center;
+        background: #f5f7f6;
+        display: flex;
+        min-height: 100vh;
+        padding: 32px;
+      }
+
+      .startup-panel {
+        align-items: center;
+        display: flex;
+        justify-content: center;
+        margin: 0 auto;
+        min-height: 88px;
+        min-width: 88px;
+      }
+
+      .status-spinner {
+        animation: startup-spin 960ms linear infinite;
+        background:
+          linear-gradient(#f5f7f6, #f5f7f6) padding-box,
+          conic-gradient(from 0deg, #16875f, #c48a2a, #d8dfdc, #16875f) border-box;
+        border: 4px solid transparent;
+        border-radius: 999px;
+        height: 52px;
+        width: 52px;
+      }
+
+      .startup-copy {
+        border: 0;
+        clip: rect(0 0 0 0);
+        display: block;
+        height: 1px;
+        margin: -1px;
+        overflow: hidden;
+        padding: 0;
+        position: absolute;
+        white-space: nowrap;
+        width: 1px;
+      }
+
+      @keyframes startup-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @media (prefers-color-scheme: dark) {
+        html,
+        body {
+          background: #0f1413;
+        }
+
+        .startup-shell {
+          background: #0f1413;
+        }
+
+        .status-spinner {
+          background:
+            linear-gradient(#0f1413, #0f1413) padding-box,
+            conic-gradient(from 0deg, #2aa876, #d6a348, #27322e, #2aa876) border-box;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .status-spinner {
+          animation: none;
+        }
+      }
+    </style>
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <main
+      class="startup-shell"
+      aria-busy="true"
+      aria-live="polite"
+      aria-label="Kandev startup status"
+    >
+      <section class="startup-panel">
+        <div class="status-spinner" aria-hidden="true"></div>
+        <div class="startup-copy">
+          <p class="eyebrow">Kandev</p>
+          <h1 id="status-title">Starting backend</h1>
+          <p id="status-detail">Preparing the local runtime and opening your workspace.</p>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

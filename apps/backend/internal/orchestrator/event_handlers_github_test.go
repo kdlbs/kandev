@@ -16,25 +16,28 @@ import (
 type mockGitHubService struct {
 	mu sync.Mutex
 
-	client              github.Client
-	taskPR              *github.TaskPR
-	taskPRs             []*github.TaskPR
-	taskPRErr           error
-	getTaskPRCalls      int
-	exactTaskPRCalls    int
-	lastExactPRLookup   github.PRFeedbackEvent
-	prWatch             *github.PRWatch // returned by GetPRWatchBySession (nil = no watch)
-	ensureWatchCalls    int
-	createWatchCalls    int
-	associateCalls      int
-	updateBranchCalls   int
-	updatePRNumberCalls int
-	resetWatchCalls     int
-	resetWatchBranch    string
-	ensureWatchBranch   string
-	createWatchBranch   string
-	updatedBranch       string
-	updatedPRNumber     int
+	client                github.Client
+	taskPR                *github.TaskPR
+	taskPRs               []*github.TaskPR
+	taskPRErr             error
+	triggerPRSyncAllPRs   []*github.TaskPR
+	triggerPRSyncAllErr   error
+	triggerPRSyncAllCalls int
+	getTaskPRCalls        int
+	exactTaskPRCalls      int
+	lastExactPRLookup     github.PRFeedbackEvent
+	prWatch               *github.PRWatch // returned by GetPRWatchBySession (nil = no watch)
+	ensureWatchCalls      int
+	createWatchCalls      int
+	associateCalls        int
+	updateBranchCalls     int
+	updatePRNumberCalls   int
+	resetWatchCalls       int
+	resetWatchBranch      string
+	ensureWatchBranch     string
+	createWatchBranch     string
+	updatedBranch         string
+	updatedPRNumber       int
 	// repository_id captured by the most recent CreatePRWatch /
 	// AssociatePRWithTask call. Used by the multi-repo push tests to assert
 	// the per-repo scoping (an empty value indicates the legacy single-repo
@@ -73,12 +76,14 @@ type mockGitHubService struct {
 	ciPRState            *github.TaskCIPRAutomationState
 	ciPRStateErr         error
 	prFeedback           *github.PRFeedback
+	prFeedbackCalls      int
 	fixAttempts          []github.TaskCIFixAttempt
 	fixCheckpointRefresh []github.TaskCIFixAttempt
 	mergeAttempts        []github.TaskCIMergeAttempt
 	mergeCalls           int
 	mergeErr             error
 	ciErrors             []github.TaskCIPRAutomationState
+	ciExhausted          []github.TaskCIPRAutomationState
 }
 
 func (m *mockGitHubService) Client() github.Client { return m.client }
@@ -102,6 +107,20 @@ func (m *mockGitHubService) ListTaskPRs(_ context.Context, taskIDs []string) (ma
 		}
 	}
 	return result, nil
+}
+func (m *mockGitHubService) TriggerPRSyncAll(ctx context.Context, taskID string) ([]*github.TaskPR, error) {
+	m.triggerPRSyncAllCalls++
+	if m.triggerPRSyncAllPRs != nil {
+		return m.triggerPRSyncAllPRs, m.triggerPRSyncAllErr
+	}
+	if m.triggerPRSyncAllErr != nil {
+		return nil, m.triggerPRSyncAllErr
+	}
+	prsByTask, err := m.ListTaskPRs(ctx, []string{taskID})
+	if err != nil {
+		return nil, err
+	}
+	return prsByTask[taskID], nil
 }
 func (m *mockGitHubService) GetTaskPRByOwnerRepoNumber(_ context.Context, taskID, owner, repo string, prNumber int) (*github.TaskPR, error) {
 	m.exactTaskPRCalls++
@@ -164,10 +183,22 @@ func (m *mockGitHubService) RecordTaskCIError(_ context.Context, taskID, reposit
 	})
 	return nil
 }
+func (m *mockGitHubService) MarkTaskCIAutoFixExhausted(_ context.Context, taskID, repositoryID string, prNumber int, message string) error {
+	now := time.Now().UTC()
+	m.ciExhausted = append(m.ciExhausted, github.TaskCIPRAutomationState{
+		TaskID:             taskID,
+		RepositoryID:       repositoryID,
+		PRNumber:           prNumber,
+		AutoFixExhaustedAt: &now,
+		LastError:          &message,
+	})
+	return nil
+}
 func (m *mockGitHubService) ClearTaskCIError(context.Context, string, string, int) error {
 	return nil
 }
 func (m *mockGitHubService) GetPRFeedback(context.Context, string, string, int) (*github.PRFeedback, error) {
+	m.prFeedbackCalls++
 	if m.prFeedback != nil {
 		return m.prFeedback, nil
 	}

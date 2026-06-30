@@ -170,6 +170,7 @@ func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message
 		h.logger.Error("failed to create workflow step", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create workflow step", nil)
 	}
+	h.publishWorkflowStepEvents(ctx, events.WorkflowStepUpdated, resp.DemotedStartSteps)
 	h.publishWorkflowStepEvent(ctx, events.WorkflowStepCreated, resp.Step)
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
@@ -210,6 +211,7 @@ func (h *Handlers) handleUpdateWorkflowStep(ctx context.Context, msg *ws.Message
 		h.logger.Error("failed to update workflow step", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update workflow step", nil)
 	}
+	h.publishWorkflowStepEvents(ctx, events.WorkflowStepUpdated, resp.DemotedStartSteps)
 	h.publishWorkflowStepEvent(ctx, events.WorkflowStepUpdated, resp.Step)
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
@@ -268,17 +270,22 @@ func (h *Handlers) publishWorkflowStepEvent(ctx context.Context, eventType strin
 	}
 	data := map[string]interface{}{
 		"step": map[string]interface{}{
-			"id":                       step.ID,
-			"workflow_id":              step.WorkflowID,
-			"name":                     step.Name,
-			"position":                 step.Position,
-			"color":                    step.Color,
-			"prompt":                   step.Prompt,
-			"events":                   step.Events,
-			"show_in_command_panel":    step.ShowInCommandPanel,
-			"allow_manual_move":        step.AllowManualMove,
-			"is_start_step":            step.IsStartStep,
-			"auto_archive_after_hours": step.AutoArchiveAfterHours,
+			"id":                           step.ID,
+			"workflow_id":                  step.WorkflowID,
+			"name":                         step.Name,
+			"position":                     step.Position,
+			"color":                        step.Color,
+			"prompt":                       step.Prompt,
+			"events":                       step.Events,
+			"show_in_command_panel":        step.ShowInCommandPanel,
+			"allow_manual_move":            step.AllowManualMove,
+			"is_start_step":                step.IsStartStep,
+			"auto_archive_after_hours":     step.AutoArchiveAfterHours,
+			"agent_profile_id":             step.AgentProfileID,
+			"stage_type":                   string(step.StageType),
+			"auto_advance_requires_signal": step.AutoAdvanceRequiresSignal,
+			"created_at":                   step.CreatedAt,
+			"updated_at":                   step.UpdatedAt,
 		},
 	}
 	if err := h.eventBus.Publish(ctx, eventType, bus.NewEvent(eventType, "mcp-handlers", data)); err != nil {
@@ -286,5 +293,11 @@ func (h *Handlers) publishWorkflowStepEvent(ctx context.Context, eventType strin
 			zap.String("event_type", eventType),
 			zap.String("step_id", step.ID),
 			zap.Error(err))
+	}
+}
+
+func (h *Handlers) publishWorkflowStepEvents(ctx context.Context, eventType string, steps []*wfmodels.WorkflowStep) {
+	for _, step := range steps {
+		h.publishWorkflowStepEvent(ctx, eventType, step)
 	}
 }

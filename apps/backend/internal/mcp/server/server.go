@@ -525,6 +525,9 @@ WHEN TO OMIT parent_id (top-level task):
 
 IMPORTANT:
 - Subtasks inherit workspace, workflow, agent profile, and executor from the parent
+- Agent profile precedence is explicit agent_profile_id > current/source task or parent task > workflow defaults > workspace default
+- When launched from a current task, omitting parent_id still uses the current task as the source for profile inheritance before workflow/workspace defaults. Do not rely on workspace defaults for follow-up work from an active task.
+- Every created task must have a resolvable agent profile. start_agent=false still records the profile for a later manual start.
 - Subtasks inherit the parent's repository unless you supply repository_url, repository_id, or local_path — in which case the subtask targets that repo instead (must live in the parent's workspace)
 - base_branch behaviour:
   - Same repo as parent (no repo args): subtask inherits the parent's base_branch (sibling branches off the same starting point — useful for PR stacks)
@@ -532,9 +535,10 @@ IMPORTANT:
   - Pass base_branch explicitly to override either default. Use list_repositories_kandev to see each repo's default_branch.
 - Top-level tasks need a repository via repository_url, repository_id, or local_path
 - 'description' is the sub-agent's initial prompt — be specific and detailed
-- start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the description. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later, or creating a tracking task with no immediate work). When in doubt, leave it true.
+- start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the description. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later, or creating a tracking task with no immediate work), and still pass agent_profile_id unless it can be inherited. When in doubt, leave it true.
 - Kanban subtasks cannot have their own subtasks (max nesting depth is 1). To break work down further, create a sibling under the same parent. (Office task trees are exempt.)`
 	parentDesc := "Parent task ID for subtasks. Use 'self' to create a subtask of your current task (RECOMMENDED for plan phases, delegated work). Omit only for unrelated top-level tasks."
+	agentProfileDesc := "Agent profile ID to use. Precedence: explicit value > current/source task or parent task > workflow defaults > workspace default. Required unless one of those inheritance sources can resolve it. start_agent=false still needs a profile for later manual start."
 
 	if s.mode == ModeExternal {
 		toolDesc = `Create a new top-level task and auto-start an agent on it.
@@ -542,10 +546,13 @@ IMPORTANT:
 IMPORTANT:
 - Provide a repository via repository_url, repository_id, or local_path
 - workspace_id and workflow_id are auto-resolved if only one exists; provide explicitly if ambiguous
+- Agent profile precedence is explicit agent_profile_id > parent task > workflow defaults > workspace default. External mode has no current/source task.
+- Every created task must have a resolvable agent profile. start_agent=false still records the profile for a later manual start.
 - 'description' is the agent's initial prompt — be specific and detailed
-- start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the description. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later). When in doubt, leave it true.
+- start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the description. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later), and still pass agent_profile_id unless a default exists. When in doubt, leave it true.
 - Use parent_id only when delegating to a known existing task by its ID`
 		parentDesc = "Optional parent task ID. Omit for top-level tasks; provide an existing task ID only to create a subtask of that task."
+		agentProfileDesc = "Agent profile ID to use. Precedence: explicit value > parent task > workflow defaults > workspace default. External mode has no current/source task. Required unless one of those inheritance sources can resolve it. start_agent=false still needs a profile for later manual start."
 	}
 
 	s.mcpServer.AddTool(
@@ -557,7 +564,7 @@ IMPORTANT:
 			mcp.WithString("workflow_step_id", mcp.Description("The workflow step ID (optional, auto-resolved if omitted)")),
 			mcp.WithString("title", mcp.Required(), mcp.Description("The task title")),
 			mcp.WithString("description", mcp.Description("The initial prompt for the sub-agent. This is the ONLY context the agent receives when it starts — treat it as the agent's first user message. REQUIRED for subtasks: without a description the sub-agent starts with no context and cannot do useful work. Be specific and detailed.")),
-			mcp.WithString("agent_profile_id", mcp.Description("Agent profile ID to use. For subtasks, inherited from the parent session. For top-level tasks, ask the user which agent profile they want (e.g. Claude Code, OpenCode) if not already known.")),
+			mcp.WithString("agent_profile_id", mcp.Description(agentProfileDesc)),
 			mcp.WithString("executor_profile_id", mcp.Description("Executor profile ID to use (determines the runtime environment: local, worktree, docker, etc.). For subtasks, inherited from the parent session. For top-level tasks, ask the user which executor profile they want if not already known.")),
 			mcp.WithBoolean("start_agent", mcp.Description("Whether to auto-start an agent on the created task. Default: true — leave it true unless you specifically want a placeholder task with no agent running. Setting false leaves the task waiting for the user to click 'Start agent' in the UI; the description is preserved but no work happens automatically.")),
 			mcp.WithString("repository_id", mcp.Description("Repository ID. Required for top-level tasks unless local_path or repository_url is provided. For subtasks: optional — supply only when the subtask should target a different repo than the parent.")),

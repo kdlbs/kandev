@@ -298,9 +298,10 @@ type ExecutorInstance struct {
 	StandalonePort       int    // Standalone
 
 	// Common fields
-	WorkspacePath string
-	Metadata      map[string]interface{}
-	StopReason    string
+	WorkspacePath   string
+	Metadata        map[string]interface{}
+	StopReason      string
+	AgentStopFailed bool
 
 	// AuthToken is the agentctl auth token retrieved via handshake.
 	// Populated by Docker executor for encrypted storage in SecretStore.

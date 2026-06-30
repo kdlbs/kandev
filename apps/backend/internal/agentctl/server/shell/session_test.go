@@ -206,6 +206,26 @@ func TestSessionStop(t *testing.T) {
 	}
 }
 
+func TestSessionStopTimeoutIsShortForShutdown(t *testing.T) {
+	log := newTestLogger()
+	session := &Session{
+		logger:  log,
+		running: true,
+		stopCh:  make(chan struct{}),
+		doneCh:  make(chan struct{}),
+	}
+
+	start := time.Now()
+	if err := session.Stop(); err != nil {
+		t.Errorf("Stop failed: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	if elapsed > 700*time.Millisecond {
+		t.Fatalf("Stop took %s, want less than 700ms for shutdown fallback", elapsed)
+	}
+}
+
 // TestSessionWrite tests writing to the shell
 func TestSessionWrite(t *testing.T) {
 	if runtime.GOOS == "windows" {

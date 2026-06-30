@@ -410,6 +410,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
           activeTaskId={activeTaskId}
           isPassthroughMode={isPassthroughMode}
           sessionId={sessionId}
+          taskId={sessionId ? activeTaskId : null}
           showRequestChangesTooltip={showRequestChangesTooltip}
           onDismissTooltip={() => setShowRequestChangesTooltip(false)}
           onOpenFile={handleOpenFileFromChat}
@@ -489,6 +490,7 @@ function ChatTabContent({
   activeTaskId,
   isPassthroughMode,
   sessionId,
+  taskId,
   showRequestChangesTooltip,
   onDismissTooltip,
   onOpenFile,
@@ -496,6 +498,7 @@ function ChatTabContent({
   activeTaskId: string | null;
   isPassthroughMode: boolean;
   sessionId: string | null | undefined;
+  taskId: string | null;
   showRequestChangesTooltip: boolean;
   onDismissTooltip: () => void;
   onOpenFile: (filePath: string) => void;
@@ -534,6 +537,7 @@ function ChatTabContent({
     >
       <TaskChatPanel
         sessionId={sessionId}
+        taskId={taskId}
         onOpenFile={onOpenFile}
         showRequestChangesTooltip={showRequestChangesTooltip}
         onRequestChangesTooltipDismiss={onDismissTooltip}

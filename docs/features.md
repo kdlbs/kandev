@@ -25,6 +25,7 @@ This page expands the short feature list in the README without turning the READM
 
 ## Executors And Runtime
 
+- **Desktop app:** install Kandev as a Tauri desktop app that starts the local backend and shows the existing Kandev UI without requiring Node.js at runtime. See [desktop-app.md](desktop-app.md).
 - **Executor types:** run agents as local host processes, git worktrees, Docker containers, remote SSH sessions, or Sprites cloud environments.
 - **Executor profiles:** save per-runtime configuration, including prepare scripts, environment variables, credentials, and profile-specific settings.
 - **Worktree isolation:** concurrent agents work in isolated git worktrees so their changes do not collide.

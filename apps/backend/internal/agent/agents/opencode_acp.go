@@ -98,8 +98,8 @@ func (a *OpenCodeACP) Runtime() *RuntimeConfig {
 		ProjectSkillDir: ".agents/skills",
 		UserSkillDir:    ".config/opencode/skills",
 		// opencode acp runs its HTTP server + MCP child tree alongside the
-		// ACP stdin/stdout. Closing stdin doesn't terminate the process —
-		// we have to kill its process group to reap the MCP children.
+		// ACP stdin/stdout. Closing stdin doesn't terminate the process, so
+		// skip the graceful wait and reap its process group immediately.
 		// See GH issue #1247.
 		RequiresProcessKill: true,
 		SessionConfig: SessionConfig{

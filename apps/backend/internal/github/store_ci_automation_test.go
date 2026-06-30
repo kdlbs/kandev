@@ -75,8 +75,21 @@ func TestStoreTaskCIPRState_RecordAttemptsAndError(t *testing.T) {
 		CheckpointJSON: `{"checks":["test"]}`,
 		SessionID:      "session-1",
 		EnqueuedAt:     at,
+		IncrementRound: true,
 	}); err != nil {
 		t.Fatalf("record fix attempt: %v", err)
+	}
+	if err := store.RecordTaskCIFixAttempt(ctx, TaskCIFixAttempt{
+		TaskID:         "task-1",
+		RepositoryID:   "repo-1",
+		PRNumber:       42,
+		Signature:      "fix-sig-2",
+		CheckpointJSON: `{"checks":["test","lint"]}`,
+		SessionID:      "session-1",
+		EnqueuedAt:     at.Add(30 * time.Second),
+		IncrementRound: false,
+	}); err != nil {
+		t.Fatalf("record replacement fix attempt: %v", err)
 	}
 	if err := store.RecordTaskCIMergeAttempt(ctx, TaskCIMergeAttempt{
 		TaskID:       "task-1",
@@ -98,8 +111,11 @@ func TestStoreTaskCIPRState_RecordAttemptsAndError(t *testing.T) {
 	if state == nil {
 		t.Fatal("expected state row")
 	}
-	if state.LastFixSignature != "fix-sig" || state.LastFixCheckpointJSON != `{"checks":["test"]}` {
+	if state.LastFixSignature != "fix-sig-2" || state.LastFixCheckpointJSON != `{"checks":["test","lint"]}` {
 		t.Fatalf("unexpected fix state: %+v", state)
+	}
+	if state.AutoFixRoundCount != 1 {
+		t.Fatalf("AutoFixRoundCount=%d, want 1", state.AutoFixRoundCount)
 	}
 	if state.LastFixSessionID == nil || *state.LastFixSessionID != "session-1" {
 		t.Fatalf("LastFixSessionID=%v, want session-1", state.LastFixSessionID)
@@ -131,7 +147,55 @@ func TestStoreTaskCIPRState_RecordAttemptsAndError(t *testing.T) {
 	}
 }
 
-func TestStoreTaskCIPRState_RefreshCheckpointPreservesPromptDispatchMetadata(t *testing.T) {
+func TestStoreTaskCIPRState_MarkExhaustedAndResetOnReenable(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	at := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+
+	if err := store.RecordTaskCIFixAttempt(ctx, TaskCIFixAttempt{
+		TaskID:         "task-1",
+		RepositoryID:   "repo-1",
+		PRNumber:       42,
+		Signature:      "fix-sig",
+		CheckpointJSON: `{}`,
+		SessionID:      "session-1",
+		EnqueuedAt:     at,
+		IncrementRound: true,
+	}); err != nil {
+		t.Fatalf("record fix attempt: %v", err)
+	}
+	if err := store.MarkTaskCIAutoFixExhausted(ctx, "task-1", "repo-1", 42, "CI auto-fix paused after 10 rounds for this PR"); err != nil {
+		t.Fatalf("mark exhausted: %v", err)
+	}
+	state, err := store.GetTaskCIPRState(ctx, "task-1", "repo-1", 42)
+	if err != nil {
+		t.Fatalf("get exhausted state: %v", err)
+	}
+	if state.AutoFixExhaustedAt == nil || state.LastError == nil {
+		t.Fatalf("expected exhausted timestamp and error, got %+v", state)
+	}
+
+	disabled := false
+	if _, err := store.UpdateTaskCIOptions(ctx, "task-1", TaskCIOptionsPatch{AutoFixEnabled: &disabled}); err != nil {
+		t.Fatalf("disable auto-fix: %v", err)
+	}
+	enabled := true
+	if _, err := store.UpdateTaskCIOptions(ctx, "task-1", TaskCIOptionsPatch{AutoFixEnabled: &enabled}); err != nil {
+		t.Fatalf("re-enable auto-fix: %v", err)
+	}
+	state, err = store.GetTaskCIPRState(ctx, "task-1", "repo-1", 42)
+	if err != nil {
+		t.Fatalf("get reset state: %v", err)
+	}
+	if state.AutoFixRoundCount != 0 || state.AutoFixExhaustedAt != nil || state.LastError != nil {
+		t.Fatalf("expected auto-fix round state reset, got %+v", state)
+	}
+	if state.LastFixSignature != "" || state.LastFixCheckpointJSON != "" || state.LastFixEnqueuedAt != nil || state.LastFixSessionID != nil {
+		t.Fatalf("expected auto-fix checkpoint state reset, got %+v", state)
+	}
+}
+
+func TestStoreTaskCIPRState_RefreshCheckpointClearsPromptDispatchMetadata(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 	enqueuedAt := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
@@ -158,11 +222,11 @@ func TestStoreTaskCIPRState_RefreshCheckpointPreservesPromptDispatchMetadata(t *
 	if state.LastFixSignature != "after" || state.LastFixCheckpointJSON != `{"failed_checks":[]}` {
 		t.Fatalf("checkpoint was not refreshed: %+v", state)
 	}
-	if state.LastFixSessionID == nil || *state.LastFixSessionID != "session-1" {
-		t.Fatalf("LastFixSessionID=%v, want session-1", state.LastFixSessionID)
+	if state.LastFixSessionID != nil {
+		t.Fatalf("LastFixSessionID=%v, want nil", state.LastFixSessionID)
 	}
-	if state.LastFixEnqueuedAt == nil || !state.LastFixEnqueuedAt.Equal(enqueuedAt) {
-		t.Fatalf("LastFixEnqueuedAt=%v, want %v", state.LastFixEnqueuedAt, enqueuedAt)
+	if state.LastFixEnqueuedAt != nil {
+		t.Fatalf("LastFixEnqueuedAt=%v, want nil", state.LastFixEnqueuedAt)
 	}
 }
 

@@ -61,6 +61,11 @@ const createTablesSQL = `
 		workspace_id TEXT NOT NULL,
 		workflow_id TEXT NOT NULL,
 		workflow_step_id TEXT NOT NULL,
+		-- Optional repository binding. Empty = unbound (repo-less task, the
+		-- historical behaviour). When set, watcher-created tasks launch in an
+		-- isolated worktree of this repo cut from base_branch.
+		repository_id TEXT NOT NULL DEFAULT '',
+		base_branch TEXT NOT NULL DEFAULT '',
 		jql TEXT NOT NULL,
 		agent_profile_id TEXT NOT NULL DEFAULT '',
 		executor_profile_id TEXT NOT NULL DEFAULT '',
@@ -112,6 +117,35 @@ func (s *Store) initSchema() error {
 	}
 	if err := s.addIssueWatchLastErrorColumns(); err != nil {
 		return err
+	}
+	if err := s.addIssueWatchRepositoryColumns(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// addIssueWatchRepositoryColumns brings older databases up to the current
+// schema by appending repository_id / base_branch to jira_issue_watches when
+// missing. Both backfill to ” (unbound), so existing repo-less watches keep
+// their behaviour. Idempotent — column lookup before each ALTER avoids the
+// "duplicate column name" error on fresh installs that already have them.
+func (s *Store) addIssueWatchRepositoryColumns() error {
+	cols, err := s.tableColumns("jira_issue_watches")
+	if err != nil {
+		return err
+	}
+	if len(cols) == 0 {
+		return nil
+	}
+	if _, ok := cols["repository_id"]; !ok {
+		if _, err := s.db.Exec(`ALTER TABLE jira_issue_watches ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add repository_id column: %w", err)
+		}
+	}
+	if _, ok := cols["base_branch"]; !ok {
+		if _, err := s.db.Exec(`ALTER TABLE jira_issue_watches ADD COLUMN base_branch TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add base_branch column: %w", err)
+		}
 	}
 	return nil
 }
@@ -397,7 +431,8 @@ func (s *Store) UpdateAuthHealth(ctx context.Context, ok bool, errMsg string, ch
 // issueWatchInsertColumns / issueWatchSelectColumns split insert vs read so
 // the SELECT path can wrap nullable last_error in COALESCE (older databases
 // pre-self-heal migration may return NULL).
-const issueWatchInsertColumns = `id, workspace_id, workflow_id, workflow_step_id, jql,
+const issueWatchInsertColumns = `id, workspace_id, workflow_id, workflow_step_id,
+	repository_id, base_branch, jql,
 	agent_profile_id, executor_profile_id, prompt, enabled,
 	poll_interval_seconds, max_inflight_tasks, last_polled_at,
 	last_error, last_error_at,
@@ -413,7 +448,8 @@ func nullableInt(v *int) interface{} {
 	return *v
 }
 
-const issueWatchSelectColumns = `id, workspace_id, workflow_id, workflow_step_id, jql,
+const issueWatchSelectColumns = `id, workspace_id, workflow_id, workflow_step_id,
+	COALESCE(repository_id, '') AS repository_id, COALESCE(base_branch, '') AS base_branch, jql,
 	agent_profile_id, executor_profile_id, prompt, enabled,
 	poll_interval_seconds, max_inflight_tasks, last_polled_at,
 	COALESCE(last_error, '') AS last_error, last_error_at,
@@ -433,8 +469,9 @@ func (s *Store) CreateIssueWatch(ctx context.Context, w *IssueWatch) error {
 	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO jira_issue_watches (`+issueWatchInsertColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		w.ID, w.WorkspaceID, w.WorkflowID, w.WorkflowStepID, w.JQL,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		w.ID, w.WorkspaceID, w.WorkflowID, w.WorkflowStepID,
+		w.RepositoryID, w.BaseBranch, w.JQL,
 		w.AgentProfileID, w.ExecutorProfileID, w.Prompt, w.Enabled,
 		w.PollIntervalSeconds, nullableInt(w.MaxInflightTasks), w.LastPolledAt,
 		w.LastError, w.LastErrorAt,
@@ -505,12 +542,14 @@ func (s *Store) UpdateIssueWatch(ctx context.Context, w *IssueWatch) error {
 		w.PollIntervalSeconds = DefaultIssueWatchPollInterval
 	}
 	_, err := s.db.ExecContext(ctx, `
-		UPDATE jira_issue_watches SET workflow_id = ?, workflow_step_id = ?, jql = ?,
+		UPDATE jira_issue_watches SET workflow_id = ?, workflow_step_id = ?,
+			repository_id = ?, base_branch = ?, jql = ?,
 			agent_profile_id = ?, executor_profile_id = ?, prompt = ?,
 			enabled = ?, poll_interval_seconds = ?, max_inflight_tasks = ?,
 			last_polled_at = ?, updated_at = ?
 		WHERE id = ?`,
-		w.WorkflowID, w.WorkflowStepID, w.JQL,
+		w.WorkflowID, w.WorkflowStepID,
+		w.RepositoryID, w.BaseBranch, w.JQL,
 		w.AgentProfileID, w.ExecutorProfileID, w.Prompt,
 		w.Enabled, w.PollIntervalSeconds, nullableInt(w.MaxInflightTasks),
 		w.LastPolledAt, w.UpdatedAt, w.ID)

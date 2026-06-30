@@ -144,12 +144,21 @@ export type TaskEventPayload = {
   priority?: number;
   position?: number;
   repository_id?: string;
+  repositories?: Array<{
+    id?: string;
+    repository_id: string;
+    base_branch?: string;
+    checkout_branch?: string;
+    position?: number;
+  }>;
   primary_session_id?: string | null;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   archived_at?: string | null;
   updated_at?: string;
   is_ephemeral: boolean;
+  /** Deletion reason on task.deleted (e.g. "pr_approved_by_user"). Absent otherwise. */
+  reason?: string;
 };
 
 export type AgentUpdatePayload = {

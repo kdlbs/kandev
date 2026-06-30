@@ -215,7 +215,9 @@ Changes:
 kandev/
 ├── bin/kandev
 ├── bin/agentctl
-└── bin/agentctl-linux-amd64
+├── bin/agentctl-linux-amd64
+├── bin/agentctl-darwin-arm64
+└── bin/agentctl-darwin-amd64
 ```
 
 - Stop requiring `dist/kandev/cli` for Homebrew; platform bundles contain native `bin/` artifacts with web assets embedded in `bin/kandev`.

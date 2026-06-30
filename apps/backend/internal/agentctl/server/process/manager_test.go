@@ -20,8 +20,9 @@ import (
 
 // stubAdapter is a minimal AgentAdapter for testing the startup sequence.
 type stubAdapter struct {
-	connectCalled bool
-	updatesCh     chan adapter.AgentEvent
+	connectCalled       bool
+	requiresProcessKill bool
+	updatesCh           chan adapter.AgentEvent
 }
 
 func newStubAdapter() *stubAdapter {
@@ -50,7 +51,7 @@ func (s *stubAdapter) Close() error {
 	close(s.updatesCh)
 	return nil
 }
-func (s *stubAdapter) RequiresProcessKill() bool { return false }
+func (s *stubAdapter) RequiresProcessKill() bool { return s.requiresProcessKill }
 
 func TestStartProcessPipes_CreatesAllPipes(t *testing.T) {
 	m := &Manager{
@@ -134,7 +135,20 @@ func TestManager_Start_PipesCreatedBeforeProcessStart(t *testing.T) {
 	// Now start the process — this is the fix: Start() happens after pipes.
 	err = m.cmd.Start()
 	require.NoError(t, err)
+	waited := false
+	t.Cleanup(func() {
+		if waited || m.cmd == nil || m.cmd.Process == nil {
+			return
+		}
+		_ = killProcessGroup(m.cmd.Process.Pid)
+		_ = m.cmd.Process.Kill()
+		_ = m.cmd.Wait()
+	})
 	assert.NotNil(t, m.cmd.Process, "process should be running")
+
+	processLifecycle, err := installProcessLifecycle(m.cmd)
+	require.NoError(t, err)
+	defer releaseProcessLifecycle(processLifecycle)
 
 	// Adapter connects after process starts.
 	err = stub.Connect(m.stdin, m.stdout)
@@ -144,6 +158,7 @@ func TestManager_Start_PipesCreatedBeforeProcessStart(t *testing.T) {
 	// Clean up: close stdin so cat exits, then wait.
 	_ = m.stdin.Close()
 	_ = m.cmd.Wait()
+	waited = true
 }
 
 func TestFormatAgentStartError_E2BIGIncludesEnvDiagnostics(t *testing.T) {

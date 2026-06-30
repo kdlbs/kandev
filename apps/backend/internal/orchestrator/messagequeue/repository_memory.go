@@ -86,6 +86,39 @@ func (r *memoryRepository) AppendOrInsertTail(_ context.Context, sessionID, task
 	return msg, false, nil
 }
 
+func (r *memoryRepository) InsertOrReplaceByCoalesceKey(_ context.Context, msg *QueuedMessage, coalesceKey string, maxPerSession int, allowInsert bool) (*QueuedMessage, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for _, existing := range r.entries[msg.SessionID] {
+		if existing.QueuedBy != msg.QueuedBy {
+			continue
+		}
+		if metadataString(existing.Metadata, MetadataCoalesceKey) != coalesceKey {
+			continue
+		}
+		if msg.QueuedAt.IsZero() {
+			msg.QueuedAt = time.Now().UTC()
+		}
+		existing.TaskID = msg.TaskID
+		existing.Content = msg.Content
+		existing.Model = msg.Model
+		existing.PlanMode = msg.PlanMode
+		existing.Attachments = msg.Attachments
+		existing.Metadata = msg.Metadata
+		existing.QueuedAt = msg.QueuedAt
+		out := *existing
+		return &out, true, nil
+	}
+	if !allowInsert {
+		return nil, false, ErrEntryNotFound
+	}
+	if err := r.insertLocked(msg, maxPerSession); err != nil {
+		return nil, false, err
+	}
+	return msg, false, nil
+}
+
 func (r *memoryRepository) ListBySession(_ context.Context, sessionID string) ([]QueuedMessage, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
