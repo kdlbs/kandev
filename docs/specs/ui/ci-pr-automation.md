@@ -57,8 +57,8 @@ Users can already see pull request CI/review status above the task chat input, b
 - `task_id` string. References the Kandev task.
 - `repository_id` string. Identifies which linked repository/branch row produced the PR.
 - `pr_number` integer.
-- `last_fix_signature` string nullable. Deterministic hash of the latest feedback snapshot that produced an auto-fix prompt, or a later prompt-free checkpoint refresh that pruned resolved feedback.
-- `last_fix_checkpoint_json` string nullable. JSON snapshot of feedback used in the last fix round or prompt-free checkpoint refresh.
+- `last_fix_signature` string, default `""`. Deterministic hash of the latest feedback snapshot that produced an auto-fix prompt, or a later prompt-free checkpoint refresh that pruned resolved feedback.
+- `last_fix_checkpoint_json` string, default `""`. JSON snapshot of feedback used in the last fix round or prompt-free checkpoint refresh.
 - `last_fix_enqueued_at` timestamp nullable.
 - `last_fix_session_id` string nullable. Pins later auto-fix rounds for this task/repository/PR to the same task session.
 - `auto_fix_round_count` integer, default `0`. Counts accepted auto-fix rounds for this task/repository/PR.

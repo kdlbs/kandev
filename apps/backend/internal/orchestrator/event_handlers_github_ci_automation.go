@@ -228,10 +228,10 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 func (s *Service) resolveCIAutoFixSession(ctx context.Context, taskID string, state *github.TaskCIPRAutomationState) (*models.TaskSession, error) {
 	if state != nil && state.LastFixSessionID != nil && strings.TrimSpace(*state.LastFixSessionID) != "" {
 		session, err := s.repo.GetTaskSession(ctx, *state.LastFixSessionID)
-		if err != nil {
+		if err != nil && !errors.Is(err, models.ErrTaskSessionNotFound) {
 			return nil, err
 		}
-		if session.TaskID != taskID {
+		if session != nil && session.TaskID != taskID {
 			return nil, fmt.Errorf("previous CI auto-fix session belongs to task %s", session.TaskID)
 		}
 		if ciAutomationSessionCanReceivePrompt(session) {
@@ -260,7 +260,8 @@ func ciAutomationSessionCanReceivePrompt(session *models.TaskSession) bool {
 		return false
 	}
 	switch session.State {
-	case models.TaskSessionStateStarting,
+	case models.TaskSessionStateCreated,
+		models.TaskSessionStateStarting,
 		models.TaskSessionStateRunning,
 		models.TaskSessionStateWaitingForInput,
 		models.TaskSessionStateIdle:
@@ -308,7 +309,7 @@ func (s *Service) handleTaskPRCIAutoMerge(ctx context.Context, pr *github.TaskPR
 func (s *Service) dispatchCIAutomationPromptForPR(ctx context.Context, session *models.TaskSession, pr *github.TaskPR, prompt, signature string, allowNewRound bool) (ciAutomationDispatchResult, error) {
 	chatPrompt := ciAutomationChatPrompt(prompt)
 	switch session.State {
-	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
+	case models.TaskSessionStateCreated, models.TaskSessionStateRunning, models.TaskSessionStateStarting:
 		return s.queueOrReplaceCIAutomationPromptForPR(ctx, session, pr, chatPrompt, signature, allowNewRound)
 	case models.TaskSessionStateWaitingForInput, models.TaskSessionStateIdle:
 		result, replaced, err := s.replacePendingCIAutomationPromptForPR(ctx, session, pr, chatPrompt, signature)
