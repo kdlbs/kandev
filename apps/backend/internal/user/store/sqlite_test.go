@@ -164,6 +164,52 @@ func TestSQLiteRepositoryUpdateTaskCreateLastUsedPatchesNonEmptyFields(t *testin
 	}
 }
 
+func TestSQLiteRepositoryUpdateTaskCreateLastUsedClearsBranchOnRepositoryChange(t *testing.T) {
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	conn.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = conn.Close() })
+	repo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+
+	ctx := context.Background()
+	settings, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get defaults: %v", err)
+	}
+	settings.TaskCreateLastUsed = models.TaskCreateLastUsed{
+		RepositoryID:      "repo-before",
+		Branch:            "main",
+		AgentProfileID:    "agent-1",
+		ExecutorProfileID: "exec-1",
+	}
+	upsertUserSettingsForTest(t, repo, ctx, settings)
+
+	got, err := repo.UpdateTaskCreateLastUsed(ctx, DefaultUserID, models.TaskCreateLastUsed{
+		RepositoryID: "repo-after",
+	})
+	if err != nil {
+		t.Fatalf("update task-create last-used: %v", err)
+	}
+
+	if got.TaskCreateLastUsed.RepositoryID != "repo-after" {
+		t.Fatalf("repository id should update, got %q", got.TaskCreateLastUsed.RepositoryID)
+	}
+	if got.TaskCreateLastUsed.Branch != "" {
+		t.Fatalf("branch should clear on repository change, got %q", got.TaskCreateLastUsed.Branch)
+	}
+	if got.TaskCreateLastUsed.AgentProfileID != "agent-1" {
+		t.Fatalf("agent profile should be preserved, got %q", got.TaskCreateLastUsed.AgentProfileID)
+	}
+	if got.TaskCreateLastUsed.ExecutorProfileID != "exec-1" {
+		t.Fatalf("executor profile should be preserved, got %q", got.TaskCreateLastUsed.ExecutorProfileID)
+	}
+}
+
 func TestBuildPostgresTaskCreateLastUsedUpdatePatchesNonEmptyFields(t *testing.T) {
 	query, args := buildPostgresTaskCreateLastUsedUpdate(models.TaskCreateLastUsed{
 		RepositoryID:      "repo-1",
@@ -186,6 +232,27 @@ func TestBuildPostgresTaskCreateLastUsedUpdatePatchesNonEmptyFields(t *testing.T
 	}
 	if len(args) != 4 {
 		t.Fatalf("expected one arg per task-create field, got %d", len(args))
+	}
+}
+
+func TestBuildPostgresTaskCreateLastUsedUpdateClearsBranchOnRepositoryChange(t *testing.T) {
+	query, args := buildPostgresTaskCreateLastUsedUpdate(models.TaskCreateLastUsed{
+		RepositoryID: "repo-after",
+	})
+
+	if !strings.Contains(query, "{task_create_last_used,repository_id}") ||
+		!strings.Contains(query, "{task_create_last_used,branch}") {
+		t.Fatalf("postgres update should patch repository and clear branch: %s", query)
+	}
+	if strings.Contains(query, "{task_create_last_used,agent_profile_id}") ||
+		strings.Contains(query, "{task_create_last_used,executor_profile_id}") {
+		t.Fatalf("postgres update should not patch profile fields: %s", query)
+	}
+	if len(args) != 2 {
+		t.Fatalf("expected repository and empty branch args, got %d", len(args))
+	}
+	if args[0] != "repo-after" || args[1] != "" {
+		t.Fatalf("expected repo-after and empty branch args, got %#v", args)
 	}
 }
 

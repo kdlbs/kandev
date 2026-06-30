@@ -238,7 +238,7 @@ func makeTaskCreateLastUsedJSONSetArgs(patch models.TaskCreateLastUsed) []any {
 	if patch.RepositoryID != "" {
 		args = append(args, "$.task_create_last_used.repository_id", patch.RepositoryID)
 	}
-	if patch.Branch != "" {
+	if patch.Branch != "" || patch.RepositoryID != "" {
 		args = append(args, "$.task_create_last_used.branch", patch.Branch)
 	}
 	if patch.AgentProfileID != "" {
@@ -283,7 +283,7 @@ func applyPostgresTaskCreateLastUsedPatch(expr string, patch models.TaskCreateLa
 		expr = fmt.Sprintf("jsonb_set(%s, '{task_create_last_used,repository_id}', to_jsonb(?::text), true)", expr)
 		args = append(args, patch.RepositoryID)
 	}
-	if patch.Branch != "" {
+	if patch.Branch != "" || patch.RepositoryID != "" {
 		expr = fmt.Sprintf("jsonb_set(%s, '{task_create_last_used,branch}', to_jsonb(?::text), true)", expr)
 		args = append(args, patch.Branch)
 	}
