@@ -8,6 +8,41 @@ import {
   normalizeMarkdown,
 } from "./normalize-cache";
 
+describe("normalizeMarkdown", () => {
+  it("leaves a markdown wrapper without nested fences unchanged", () => {
+    const input = ["```markdown", "# Title", "```"].join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(input);
+  });
+
+  it("strengthens a markdown wrapper that contains nested code fences", () => {
+    const input = [
+      "```markdown",
+      "Intro:",
+      "",
+      "```text",
+      "nested prompt",
+      "```",
+      "",
+      "After nested prompt.",
+      "```",
+    ].join("\n");
+    const expected = [
+      "````markdown",
+      "Intro:",
+      "",
+      "```text",
+      "nested prompt",
+      "```",
+      "",
+      "After nested prompt.",
+      "````",
+    ].join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(expected);
+  });
+});
+
 describe("normalizeCached", () => {
   beforeEach(() => {
     __resetMarkdownCounters();

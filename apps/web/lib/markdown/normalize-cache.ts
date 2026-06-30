@@ -10,12 +10,14 @@
  */
 
 const FENCE_OPEN_RE = /^ {0,3}(`{3,})/;
+const MARKDOWN_WRAPPER_OPEN_RE = /^( {0,3})(`{3,})([ \t]*(?:markdown|mdx?)(?:[ \t].*)?[ \t]*)$/i;
+const PURE_FENCE_LINE_RE = /^( {0,3})(`{3,})[ \t]*$/;
 const TRAILING_FENCE_RE = /(`{3,})\s*$/;
 
 function pureCloseLength(line: string, openCount: number): number | null {
-  const match = /^ {0,3}(`{3,})\s*$/.exec(line);
-  if (!match || match[1].length < openCount) return null;
-  return match[1].length;
+  const match = PURE_FENCE_LINE_RE.exec(line);
+  if (!match || match[2].length < openCount) return null;
+  return match[2].length;
 }
 
 function gluedCloseLength(line: string, openCount: number): number | null {
@@ -28,12 +30,52 @@ function gluedCloseLength(line: string, openCount: number): number | null {
   return match[1].length;
 }
 
+function lastNonBlankLineIndex(lines: string[]): number {
+  for (let index = lines.length - 1; index >= 0; index--) {
+    if (lines[index].trim() !== "") return index;
+  }
+  return -1;
+}
+
+function strengthenMarkdownWrapperFence(lines: string[]): string[] {
+  const opener = MARKDOWN_WRAPPER_OPEN_RE.exec(lines[0] ?? "");
+  if (!opener || lines.length < 3) return lines;
+
+  const closeIndex = lastNonBlankLineIndex(lines);
+  if (closeIndex <= 1) return lines;
+
+  const closer = PURE_FENCE_LINE_RE.exec(lines[closeIndex]);
+  if (!closer) return lines;
+
+  const openCount = opener[2].length;
+  const closeCount = closer[2].length;
+  if (closeCount < openCount) return lines;
+
+  let maxInnerPureFence = 0;
+  for (let index = 1; index < closeIndex; index++) {
+    const innerFence = PURE_FENCE_LINE_RE.exec(lines[index]);
+    if (!innerFence) continue;
+    const innerCount = innerFence[2].length;
+    if (innerCount >= openCount) maxInnerPureFence = Math.max(maxInnerPureFence, innerCount);
+  }
+  if (maxInnerPureFence === 0) return lines;
+
+  const targetCount = Math.max(openCount + 1, closeCount, maxInnerPureFence + 1);
+  const strengthened = lines.slice();
+  strengthened[0] = `${opener[1]}${"`".repeat(targetCount)}${opener[3]}`;
+  strengthened[closeIndex] = `${closer[1]}${"`".repeat(targetCount)}`;
+  return strengthened;
+}
+
 /**
- * Pre-process a markdown string to repair fenced code blocks that have their
- * closing fence glued to the last code line (`...}\`\`\`\n`prose`). Without
- * this, CommonMark/GFM treats the glued backticks as code content, so the
- * fence never closes and following prose gets swallowed into one huge code
- * node. We split such lines into `<content>\n<backticks>` only when we're
+ * Pre-process a markdown string to repair common malformed LLM fence output:
+ * - whole-message `markdown` wrappers that contain nested fenced blocks using
+ *   the same backtick run length;
+ * - closing fences glued to the last code line (`...}\`\`\`\n`prose`).
+ *
+ * For glued fences, CommonMark/GFM treats the glued backticks as code content,
+ * so the fence never closes and following prose gets swallowed into one huge
+ * code node. We split such lines into `<content>\n<backticks>` only when we're
  * inside an open fence whose opener run length is ≤ the trailing run length.
  *
  * Pure string preprocessing, intentionally not a remark plugin.
@@ -41,7 +83,7 @@ function gluedCloseLength(line: string, openCount: number): number | null {
 export function normalizeMarkdown(input: string): string {
   if (!input || input.length === 0) return input;
   const hadTrailingNewline = input.endsWith("\n");
-  const lines = input.split("\n");
+  const lines = strengthenMarkdownWrapperFence(input.split("\n"));
   const out: string[] = [];
   let openCount: number | null = null;
 

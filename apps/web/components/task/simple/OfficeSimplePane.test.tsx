@@ -132,7 +132,7 @@ const runningSession: TaskSession = {
   ...completedSession,
   id: "session-running",
   state: "RUNNING",
-  completedAt: null,
+  completedAt: undefined,
   updatedAt: "2026-05-01T10:07:00Z",
 };
 
