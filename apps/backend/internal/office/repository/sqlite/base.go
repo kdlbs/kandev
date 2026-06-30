@@ -336,6 +336,7 @@ func (r *Repository) createRunTables() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_run_status_requested ON runs(status, requested_at);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_run_idempotency ON runs(idempotency_key) WHERE idempotency_key IS NOT NULL;
+	CREATE INDEX IF NOT EXISTS idx_run_payload_comment_id ON runs(json_extract(payload, '$.comment_id'));
 
 	CREATE TABLE IF NOT EXISTS office_run_skills (
 		run_id TEXT NOT NULL,
