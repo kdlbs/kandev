@@ -259,7 +259,10 @@ export function SortByField({ form, setForm }: { form: FormState; setForm: FormS
         </SelectTrigger>
         <SelectContent>
           {SORT_BY_OPTIONS.map((o) => (
-            <SelectItem key={o.value || SORT_BY_DEFAULT_SENTINEL} value={o.value || SORT_BY_DEFAULT_SENTINEL}>
+            <SelectItem
+              key={o.value || SORT_BY_DEFAULT_SENTINEL}
+              value={o.value || SORT_BY_DEFAULT_SENTINEL}
+            >
               {o.label}
             </SelectItem>
           ))}
