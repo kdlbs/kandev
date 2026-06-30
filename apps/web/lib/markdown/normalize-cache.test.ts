@@ -184,6 +184,22 @@ describe("normalizeMarkdown wrapper boundaries", () => {
     expect(normalizeMarkdown(input)).toBe(input);
   });
 
+  it("leaves a valid markdown sample followed by an untagged fenced block unchanged", () => {
+    const input = [
+      MARKDOWN_FENCE,
+      "# Title",
+      "```",
+      "",
+      "prose between blocks",
+      "",
+      "```",
+      "const value = 1;",
+      "```",
+    ].join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(input);
+  });
+
   it("leaves markdown wrappers with trailing prose outside the wrapper unchanged", () => {
     const input = [
       MARKDOWN_FENCE,
