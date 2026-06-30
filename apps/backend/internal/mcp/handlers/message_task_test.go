@@ -576,6 +576,36 @@ func TestHandleMessageTask_CreatedSessionStartsAfterTurnStartChangesState(t *tes
 	assert.Empty(t, orch.promptCalls)
 }
 
+func TestHandleMessageTask_PreparedWaitingSessionStartsAgent(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCreated)
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, sess.ID, models.TaskSessionStateWaitingForInput, ""))
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:               "exec-row-" + sess.ID,
+		SessionID:        sess.ID,
+		TaskID:           target.ID,
+		Status:           models.ExecutorRunningStatusPrepared,
+		Resumable:        true,
+		AgentExecutionID: "exec-" + sess.ID,
+	}))
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "start prepared", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "started", payload["status"])
+	assert.Equal(t, sess.ID, payload["session_id"])
+	require.Len(t, orch.startCreatedCalls, 1)
+	assert.Empty(t, orch.promptCalls)
+}
+
 func TestHandleMessageTask_TurnStartErrorRejectsAndRestoresReview(t *testing.T) {
 	ctx := context.Background()
 	svc, repo, eventBus := newTestTaskServiceWithEventBus(t)
@@ -671,6 +701,8 @@ func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(
 	require.NoError(t, repo.SetSessionMetadataKey(ctx, sess.ID, models.SessionMetaKeyPendingStepCompletion, pendingSignal))
 
 	h, orch := newMessageTaskHandler(t, svc, repo)
+	_, err = orch.queue.QueueMessageWithMetadata(ctx, sess.ID, target.ID, "queued before switch", "", "agent", false, nil, nil)
+	require.NoError(t, err)
 	replacementID := "sess-2"
 	orch.onTurnStart = func(ctx context.Context, taskID, _ string) error {
 		updatedTask, err := svc.GetTask(ctx, taskID)
@@ -692,6 +724,7 @@ func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(
 		}
 		require.NoError(t, repo.CreateTaskSession(ctx, replacement))
 		require.NoError(t, repo.SetSessionMetadataKey(ctx, sess.ID, models.SessionMetaKeyPendingStepCompletion, nil))
+		require.NoError(t, orch.queue.TransferSession(ctx, sess.ID, replacementID))
 		require.NoError(t, repo.SetSessionPrimary(ctx, replacementID))
 		return nil
 	}
@@ -725,6 +758,9 @@ func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(
 	messages, err := svc.ListMessages(ctx, replacementID)
 	require.NoError(t, err)
 	assert.Empty(t, messages)
+	status := orch.queue.GetStatus(ctx, sess.ID)
+	require.Equal(t, 1, status.Count)
+	assert.Equal(t, "queued before switch", status.Entries[0].Content)
 }
 
 func TestHandleMessageTask_OfficeReviewDoesNotTransitionTaskState(t *testing.T) {
@@ -754,6 +790,38 @@ func TestHandleMessageTask_OfficeReviewDoesNotTransitionTaskState(t *testing.T) 
 
 	require.Len(t, orch.promptCalls, 1)
 	assert.Equal(t, sess.ID, orch.promptCalls[0].sessionID)
+}
+
+func TestHandleMessageTask_OfficeDispatchErrorRestoresWorkflowStep(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+
+	task, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	task.State = v1.TaskStateReview
+	task.WorkflowStepID = "step-review"
+	task.AssigneeAgentProfileID = "agent-profile-1"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	orch.onTurnStart = func(ctx context.Context, taskID, _ string) error {
+		updatedTask, err := svc.GetTask(ctx, taskID)
+		require.NoError(t, err)
+		updatedTask.WorkflowStepID = "step-in-progress"
+		return repo.UpdateTask(ctx, updatedTask)
+	}
+	orch.promptErrFirst = errors.New("send failed")
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "office failure", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+
+	updatedTask, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, v1.TaskStateReview, updatedTask.State)
+	assert.Equal(t, "step-review", updatedTask.WorkflowStepID)
 }
 
 func TestHandleMessageTask_PromptFailsWithExecutionNotFound_AutoResumes(t *testing.T) {

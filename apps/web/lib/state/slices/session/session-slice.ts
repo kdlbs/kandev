@@ -49,6 +49,10 @@ function mergeMessageFields(target: Record<string, unknown>, source: Record<stri
   }
 }
 
+function removeMessageByID(messages: Message[], messageId: string) {
+  return messages.filter((message) => message.id !== messageId);
+}
+
 /** Eagerly populate session→environment mapping and migrate any data stored under the fallback key.
  *  `draft` must be the combined store state (SessionSlice + SessionRuntimeSlice). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -182,6 +186,15 @@ function buildMessageActions(set: ImmerSet) {
           message as unknown as Record<string, unknown>,
         );
         messages[index] = merged;
+      }),
+    removeMessage: (
+      sessionId: Parameters<SessionSlice["removeMessage"]>[0],
+      messageId: Parameters<SessionSlice["removeMessage"]>[1],
+    ) =>
+      set((draft) => {
+        const messages = draft.messages.bySession[sessionId];
+        if (!messages) return;
+        draft.messages.bySession[sessionId] = removeMessageByID(messages, messageId);
       }),
     mergeMessages: (
       sessionId: string,

@@ -66,6 +66,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.TaskSessionStateChanged, ws.ActionSessionStateChanged)
 	b.subscribe(eventBus, events.MessageAdded, ws.ActionSessionMessageAdded)
 	b.subscribe(eventBus, events.MessageUpdated, ws.ActionSessionMessageUpdated)
+	b.subscribe(eventBus, events.MessageDeleted, ws.ActionSessionMessageDeleted)
 	b.subscribe(eventBus, events.AgentctlStarting, ws.ActionSessionAgentctlStarting)
 	b.subscribe(eventBus, events.AgentctlReady, ws.ActionSessionAgentctlReady)
 	b.subscribe(eventBus, events.AgentctlError, ws.ActionSessionAgentctlError)
@@ -131,7 +132,7 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 			// session state changes for all tasks, not just the active one.
 			b.hub.Broadcast(msg)
 			return nil
-		case ws.ActionSessionMessageAdded, ws.ActionSessionMessageUpdated:
+		case ws.ActionSessionMessageAdded, ws.ActionSessionMessageUpdated, ws.ActionSessionMessageDeleted:
 			if sessionID != "" {
 				b.hub.BroadcastToSession(sessionID, msg)
 				return nil

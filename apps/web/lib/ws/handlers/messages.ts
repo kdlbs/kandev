@@ -47,5 +47,12 @@ export function registerMessagesHandlers(store: StoreApi<AppState>): WsHandlers 
         updated_at: payload.updated_at,
       });
     },
+    "session.message.deleted": (message) => {
+      const payload = message.payload;
+      if (!payload.session_id) {
+        return;
+      }
+      store.getState().removeMessage(sessionId(payload.session_id), payload.message_id);
+    },
   };
 }

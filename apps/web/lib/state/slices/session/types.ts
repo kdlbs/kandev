@@ -156,6 +156,7 @@ export type SessionSliceActions = {
   ) => void;
   addMessage: (message: Message) => void;
   updateMessage: (message: Message) => void;
+  removeMessage: (sessionId: string, messageId: string) => void;
   /**
    * Idempotent full-snapshot merge: reconciles `messages` against the current
    * stored array, preserving object identity for unchanged messages and the

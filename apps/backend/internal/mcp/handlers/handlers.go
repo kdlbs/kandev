@@ -1659,6 +1659,10 @@ type taskMessageSessionRollbackRepository interface {
 	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
 }
 
+type taskMessageExecutorReader interface {
+	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
+}
+
 func (r *taskMessageReviewRollback) captureSessions(ctx context.Context, repo SessionRepository, taskID string, fallback *models.TaskSession) error {
 	if !r.changed || fallback == nil {
 		return nil
@@ -1774,16 +1778,14 @@ func (h *Handlers) dispatchPreparedTaskMessage(ctx context.Context, taskID strin
 	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
 		return h.queueTaskMessage(ctx, taskID, session, prompt, metadata)
 	default:
-		if shouldStartTaskMessageSession(session) {
-			// Start first, then record the user message ourselves with sender
-			// metadata. This avoids leaving an orphaned attributed chat row when
-			// StartCreatedSession fails (the previous order wrote the row up-front
-			// regardless of launch outcome). skipMessageRecord=true keeps
-			// postLaunchCreated from writing its own duplicate row.
+		if h.shouldStartTaskMessageSession(ctx, session) {
+			// Record before starting so the message is tied to the turn produced
+			// by launch. If launch fails, delete the row below.
+			recorded := h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
 			if _, err := h.sessionLauncher.StartCreatedSession(ctx, taskID, session.ID, session.AgentProfileID, prompt, true, false, true, nil); err != nil {
+				h.deleteRecordedUserMessage(ctx, recorded)
 				return taskMessageDispatchResult{}, fmt.Errorf("failed to start session: %w", err)
 			}
-			h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
 			return taskMessageDispatchResult{status: "started", sessionID: session.ID}, nil
 		}
 		// Record before prompting so the message is tied to the turn that
@@ -1799,7 +1801,7 @@ func (h *Handlers) dispatchPreparedTaskMessage(ctx context.Context, taskID strin
 	}
 }
 
-func shouldStartTaskMessageSession(session *models.TaskSession) bool {
+func (h *Handlers) shouldStartTaskMessageSession(ctx context.Context, session *models.TaskSession) bool {
 	if session.State == models.TaskSessionStateCreated {
 		return true
 	}
@@ -1807,8 +1809,18 @@ func shouldStartTaskMessageSession(session *models.TaskSession) bool {
 	// WAITING_FOR_INPUT before an executor row exists. It may also switch to a
 	// fresh waiting primary session. In both cases the first message still needs
 	// the launch path; already-bound waiting sessions use prompt/resume.
-	return session.State == models.TaskSessionStateWaitingForInput &&
-		session.AgentExecutionID == ""
+	if session.State != models.TaskSessionStateWaitingForInput {
+		return false
+	}
+	if session.AgentExecutionID == "" {
+		return true
+	}
+	reader, ok := h.sessionRepo.(taskMessageExecutorReader)
+	if !ok {
+		return false
+	}
+	running, err := reader.GetExecutorRunningBySessionID(ctx, session.ID)
+	return err == nil && running != nil && running.Status == models.ExecutorRunningStatusPrepared
 }
 
 func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string, metadata map[string]interface{}) (taskMessageDispatchResult, error) {
@@ -1878,6 +1890,13 @@ func (h *Handlers) restoreTaskReviewForTaskMessage(ctx context.Context, taskID s
 			zap.Error(err))
 	}
 	if !rollback.restoreTask {
+		if _, err := h.taskSvc.UpdateTask(ctx, taskID, &service.UpdateTaskRequest{
+			WorkflowStepID: &rollback.workflowStepID,
+		}); err != nil {
+			h.logger.Warn("failed to restore task workflow step after task message dispatch failure",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+		}
 		return
 	}
 	reviewState := v1.TaskStateReview
@@ -1906,12 +1925,28 @@ func (h *Handlers) restoreTaskMessageSessions(ctx context.Context, rollback task
 	}
 	if rollback.selectedID != "" {
 		if _, ok := rollback.sessionIDs[rollback.selectedID]; !ok {
+			if primaryID := rollback.primarySessionID(); primaryID != "" {
+				if queue := h.sessionLauncher.GetMessageQueue(); queue != nil {
+					if err := queue.TransferSession(ctx, rollback.selectedID, primaryID); err != nil {
+						return err
+					}
+				}
+			}
 			if err := repo.DeleteTaskSession(ctx, rollback.selectedID); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+func (r taskMessageReviewRollback) primarySessionID() string {
+	for _, session := range r.sessions {
+		if session.isPrimary {
+			return session.sessionID
+		}
+	}
+	return ""
 }
 
 func restoreTaskMessageSessionSnapshot(ctx context.Context, repo taskMessageSessionRollbackRepository, rollback taskMessageSessionRollback) error {

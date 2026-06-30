@@ -405,6 +405,7 @@ export type AppState = {
   ) => void;
   setActiveTurn: (sessionId: string, turnId: string | null) => void;
   updateMessage: (message: Message) => void;
+  removeMessage: (sessionId: string, messageId: string) => void;
   prependMessages: (
     sessionId: string,
     messages: Message[],

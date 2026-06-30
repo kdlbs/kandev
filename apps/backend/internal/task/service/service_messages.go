@@ -295,11 +295,15 @@ func (s *Service) SearchMessages(ctx context.Context, sessionID, query string, l
 
 // DeleteMessage deletes a message
 func (s *Service) DeleteMessage(ctx context.Context, id string) error {
+	message, getErr := s.messages.GetMessage(ctx, id)
 	if err := s.messages.DeleteMessage(ctx, id); err != nil {
 		s.logger.Error("failed to delete message", zap.String("message_id", id), zap.Error(err))
 		return err
 	}
 
+	if getErr == nil && message != nil {
+		s.publishMessageEvent(ctx, events.MessageDeleted, message)
+	}
 	s.logger.Info("message deleted", zap.String("message_id", id))
 	return nil
 }

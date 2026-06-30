@@ -47,6 +47,7 @@ const (
 const (
 	MessageAdded   = "message.added"
 	MessageUpdated = "message.updated"
+	MessageDeleted = "message.deleted"
 )
 
 // Event types for message queue

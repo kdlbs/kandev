@@ -181,6 +181,7 @@ const (
 	ActionWorkflowStepDeleted      = "workflow.step.deleted"
 	ActionSessionMessageAdded      = "session.message.added"
 	ActionSessionMessageUpdated    = "session.message.updated"
+	ActionSessionMessageDeleted    = "session.message.deleted"
 	ActionSessionStateChanged      = "session.state_changed"
 	ActionSessionWaitingForInput   = "session.waiting_for_input"
 	ActionSessionAgentctlStarting  = "session.agentctl_starting"

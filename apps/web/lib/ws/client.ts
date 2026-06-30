@@ -11,6 +11,7 @@ const debugDispatch = createDebugLogger("ws:dispatch");
 const DISPATCH_LOG_DENYLIST = new Set<string>([
   "session.message.added",
   "session.message.updated",
+  "session.message.deleted",
   "session.shell.output",
   "session.process.output",
 ]);
