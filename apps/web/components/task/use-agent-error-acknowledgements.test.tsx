@@ -9,7 +9,10 @@ import {
   setStoredAcknowledgedAgentErrors,
 } from "@/lib/session-last-agent-error";
 import { sessionId, taskId, type Message, type TaskSession } from "@/lib/types/http";
-import { usePersistResolvedAgentErrorAcknowledgements } from "./use-agent-error-acknowledgements";
+import {
+  agentErrorAcknowledgementSessionIds,
+  usePersistResolvedAgentErrorAcknowledgements,
+} from "./use-agent-error-acknowledgements";
 
 const ERROR_OCCURRED_AT = "2026-06-14T10:00:00Z";
 const AGENT_MESSAGE_AFTER_ERROR_AT = "2026-06-14T10:00:01Z";
@@ -139,5 +142,22 @@ describe("usePersistResolvedAgentErrorAcknowledgements", () => {
     await waitFor(() => {
       expect(getStoredAcknowledgedAgentErrors()).toEqual({});
     });
+  });
+});
+
+describe("agentErrorAcknowledgementSessionIds", () => {
+  it("includes primary and non-terminal fallback sessions for rendered tasks", () => {
+    expect(
+      agentErrorAcknowledgementSessionIds(
+        [
+          { id: "task-1", primarySessionId: "primary" },
+          { id: "task-2", primarySessionId: null },
+        ],
+        {
+          "task-1": [session("fallback-1", {}), { ...session("done", {}), state: "COMPLETED" }],
+          "task-2": [session("fallback-2", {})],
+        },
+      ),
+    ).toEqual(["primary", "fallback-1", "fallback-2"]);
   });
 });

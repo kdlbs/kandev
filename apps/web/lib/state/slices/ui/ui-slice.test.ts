@@ -420,15 +420,6 @@ describe("agent error sidebar acknowledgements", () => {
     expect(store.getState().acknowledgedAgentErrors).toEqual({ "session-1": "stamp-1" });
   });
 
-  it("records and persists an acknowledged sidebar error stamp", () => {
-    const store = makeStore();
-
-    store.getState().acknowledgeAgentError("session-1", "stamp-1");
-
-    expect(store.getState().acknowledgedAgentErrors).toEqual({ "session-1": "stamp-1" });
-    expect(getStoredAcknowledgedAgentErrors()).toEqual({ "session-1": "stamp-1" });
-  });
-
   it("records and persists acknowledged sidebar error stamps in one batch", () => {
     const store = makeStore();
 

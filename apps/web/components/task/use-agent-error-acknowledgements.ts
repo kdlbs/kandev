@@ -7,6 +7,7 @@ import {
   resolvedAgentErrorAcknowledgementStamp,
 } from "@/lib/task-agent-error";
 import type { TaskSession } from "@/lib/types/http";
+import { isTerminalSessionState } from "@/lib/ws/handlers/agent-session";
 
 type UseAgentErrorAcknowledgementsParams = {
   sessionsById: Record<string, TaskSession>;
@@ -14,6 +15,29 @@ type UseAgentErrorAcknowledgementsParams = {
   messagesBySession: AgentErrorOptions["messagesBySession"];
   dismissedAgentErrors: Record<string, string>;
 };
+
+export function agentErrorAcknowledgementSessionIds(
+  tasks: Array<{ id: string; primarySessionId?: string | null }>,
+  sessionsByTaskId: Record<string, TaskSession[] | undefined>,
+): string[] {
+  const sessionIds = new Set<string>();
+  for (const task of tasks) {
+    if (task.primarySessionId) sessionIds.add(task.primarySessionId);
+    for (const session of sessionsByTaskId[task.id] ?? []) {
+      if (!isTerminalSessionState(session.state)) sessionIds.add(session.id);
+    }
+  }
+  return [...sessionIds];
+}
+
+export function stablePrimarySessionIdsKey(
+  tasks: Array<{ primarySessionId?: string | null }>,
+): string {
+  return tasks
+    .map((task) => task.primarySessionId)
+    .filter((sessionId): sessionId is string => sessionId != null)
+    .join("\0");
+}
 
 export function usePersistResolvedAgentErrorAcknowledgements({
   sessionsById,

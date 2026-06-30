@@ -28,7 +28,10 @@ import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { repositorySlug } from "@/lib/repository-slug";
 import { resolvePreferredSessionId } from "../task-select-helpers";
 import { agentErrorMessageForTask } from "@/lib/task-agent-error";
-import { usePersistResolvedAgentErrorAcknowledgements } from "../use-agent-error-acknowledgements";
+import {
+  agentErrorAcknowledgementSessionIds,
+  usePersistResolvedAgentErrorAcknowledgements,
+} from "../use-agent-error-acknowledgements";
 
 // Map workflow snapshot to kanban state on workspace switch.
 function mapSnapshotToKanban(snapshot: WorkflowSnapshot, newWorkflowId: string) {
@@ -168,16 +171,13 @@ export function useSheetData(workspaceId: string | null) {
     return activeTaskId;
   }, [activeSessionId, activeTaskId, sessionsById]);
 
-  const primarySessionIds = useMemo(
-    () =>
-      allTasks
-        .map((task) => task.primarySessionId)
-        .filter((sessionId): sessionId is string => Boolean(sessionId)),
-    [allTasks],
+  const acknowledgementSessionIds = useMemo(
+    () => agentErrorAcknowledgementSessionIds(allTasks, sessionsByTaskId),
+    [allTasks, sessionsByTaskId],
   );
   usePersistResolvedAgentErrorAcknowledgements({
     sessionsById,
-    sessionIds: primarySessionIds,
+    sessionIds: acknowledgementSessionIds,
     messagesBySession,
     dismissedAgentErrors,
   });

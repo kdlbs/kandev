@@ -29,25 +29,14 @@ import { useGroupedSidebarView } from "./task-session-sidebar-grouped-view";
 import { useSidebarLinkActions } from "./task-session-sidebar-link-actions";
 import { useShallow } from "zustand/react/shallow";
 import { type AgentErrorOptions, agentErrorMessageForTask } from "@/lib/task-agent-error";
-import { usePersistResolvedAgentErrorAcknowledgements } from "./use-agent-error-acknowledgements";
+import {
+  agentErrorAcknowledgementSessionIds,
+  stablePrimarySessionIdsKey,
+  usePersistResolvedAgentErrorAcknowledgements,
+} from "./use-agent-error-acknowledgements";
 
-/**
- * Stabilize a derived array of primary session IDs so the reference only
- * changes when the actual contents change. This prevents the bulk-subscribe
- * effect from tearing down and recreating all subscriptions on every kanban
- * snapshot update.
- */
-function useStablePrimarySessionIds(
-  allTasks: Array<{ primarySessionId?: string | null }>,
-): string[] {
-  const key = useMemo(
-    () =>
-      allTasks
-        .map((t) => t.primarySessionId)
-        .filter((id): id is string => id != null)
-        .join("\0"),
-    [allTasks],
-  );
+function useStablePrimarySessionIds(allTasks: Array<{ primarySessionId?: string | null }>) {
+  const key = useMemo(() => stablePrimarySessionIdsKey(allTasks), [allTasks]);
   return useMemo(() => (key ? key.split("\0") : []), [key]);
 }
 
@@ -236,9 +225,13 @@ function useSidebarData(workspaceId: string | null) {
   // narrow pending-flag selector below. Derived from kanban tasks (always
   // available) rather than sessionsByTaskId (loaded on-demand).
   const primarySessionIds = useStablePrimarySessionIds(allTasks);
+  const acknowledgementSessionIds = useMemo(
+    () => agentErrorAcknowledgementSessionIds(allTasks, sessionsByTaskId),
+    [allTasks, sessionsByTaskId],
+  );
   usePersistResolvedAgentErrorAcknowledgements({
     sessionsById,
-    sessionIds: primarySessionIds,
+    sessionIds: acknowledgementSessionIds,
     messagesBySession,
     dismissedAgentErrors,
   });

@@ -12,10 +12,6 @@ export function buildDismissedAgentErrors(set: ImmerSet) {
   return {
     acknowledgedAgentErrors: getStoredAcknowledgedAgentErrors(),
     dismissedAgentErrors: getStoredDismissedAgentErrors(),
-    acknowledgeAgentError: (sessionId: string, stamp: string) => {
-      if (!sessionId || !stamp) return;
-      setAcknowledgedAgentErrors(set, { [sessionId]: stamp });
-    },
     acknowledgeAgentErrors: (stamps: Record<string, string>) => {
       setAcknowledgedAgentErrors(set, stamps);
     },
