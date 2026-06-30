@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/events"
@@ -10,7 +11,10 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	officeruntime "github.com/kandev/kandev/internal/office/runtime"
+	officeservice "github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/office/shared"
+	"github.com/kandev/kandev/internal/runs/commentkeys"
+	"github.com/kandev/kandev/internal/workflow/engine"
 
 	"go.uber.org/zap"
 )
@@ -79,6 +83,7 @@ func (s *DashboardService) UpdateTaskParentID(ctx context.Context, taskID, paren
 // blocker mutation. Used in two callsites (add/remove); pulled out as a
 // constant per CLAUDE.md ≥3-occurrence rule.
 const fieldBlockers = "blockers"
+const engineDispatchedValue = "true"
 
 // blockerCycleWalkLimit caps the BFS in detectBlockerCycle as a safety
 // bound. Real workspaces are nowhere near this; if we hit it we have
@@ -779,7 +784,7 @@ func (s *DashboardService) publishTaskStatusChanged(ctx context.Context, req Tas
 // comment is a self-comment or the task is closed; resolves @mentions.
 // Best-effort.
 func (s *DashboardService) runReactivityForComment(
-	ctx context.Context, comment *models.TaskComment,
+	ctx context.Context, comment *models.TaskComment, engineHandled bool,
 ) {
 	if s.reactivity == nil || comment == nil || comment.ID == "" {
 		return
@@ -793,7 +798,7 @@ func (s *DashboardService) runReactivityForComment(
 			AuthorType: comment.AuthorType,
 			AuthorID:   comment.AuthorID,
 		},
-		SkipAssigneeCommentWake: s.commentAlreadyHasRun(ctx, comment.ID),
+		SkipAssigneeCommentWake: engineHandled,
 	}
 	if _, err := s.reactivity.ApplyTaskMutation(ctx, comment.TaskID, "", change); err != nil {
 		s.logger.Warn("reactivity pipeline failed (comment)",
@@ -801,21 +806,40 @@ func (s *DashboardService) runReactivityForComment(
 	}
 }
 
-func (s *DashboardService) commentAlreadyHasRun(ctx context.Context, commentID string) bool {
-	if commentID == "" {
+func (s *DashboardService) dispatchCommentEngineTrigger(ctx context.Context, comment *models.TaskComment) bool {
+	if s.engineDispatcher == nil || comment == nil || comment.TaskID == "" || comment.ID == "" {
 		return false
 	}
-	runs, err := s.repo.GetRunsByCommentIDs(ctx, []string{commentID})
-	if err != nil {
-		s.logger.Warn("comment run lookup failed",
-			zap.String("comment_id", commentID), zap.Error(err))
+	if s.isSelfComment(ctx, comment) {
 		return false
 	}
-	_, ok := runs[commentID]
-	return ok
+	err := s.engineDispatcher.HandleTrigger(ctx, comment.TaskID, engine.TriggerOnComment,
+		engine.OnCommentPayload{
+			CommentID: comment.ID,
+			AuthorID:  comment.AuthorID,
+		}, commentkeys.TaskComment(comment.ID))
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, officeservice.ErrEngineNoSession) {
+		return false
+	}
+	s.logger.Warn("engine comment trigger failed",
+		zap.String("task_id", comment.TaskID),
+		zap.String("comment_id", comment.ID),
+		zap.Error(err))
+	return false
 }
 
-func (s *DashboardService) publishCommentCreated(ctx context.Context, comment *models.TaskComment) {
+func (s *DashboardService) isSelfComment(ctx context.Context, comment *models.TaskComment) bool {
+	if comment.AuthorType != "agent" || comment.AuthorID == "" {
+		return false
+	}
+	fields, err := s.repo.GetTaskExecutionFields(ctx, comment.TaskID)
+	return err == nil && fields != nil && fields.AssigneeAgentProfileID == comment.AuthorID
+}
+
+func (s *DashboardService) publishCommentCreated(ctx context.Context, comment *models.TaskComment, engineHandled bool) {
 	if s.eb == nil {
 		return
 	}
@@ -824,6 +848,9 @@ func (s *DashboardService) publishCommentCreated(ctx context.Context, comment *m
 		"comment_id":  comment.ID,
 		"author_type": comment.AuthorType,
 		"author_id":   comment.AuthorID,
+	}
+	if engineHandled {
+		data["engine_dispatched"] = engineDispatchedValue
 	}
 	event := bus.NewEvent(events.OfficeCommentCreated, "office-dashboard", data)
 	if err := s.eb.Publish(ctx, events.OfficeCommentCreated, event); err != nil {

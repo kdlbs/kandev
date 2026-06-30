@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
+	"github.com/kandev/kandev/internal/workflow/engine"
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 )
 
@@ -53,6 +54,27 @@ func (s *stubSettingsProvider) UpdatePermissionHandlingMode(_ string, mode strin
 
 func (s *stubSettingsProvider) UpdateRecoveryLookbackHours(_ string, _ int) error {
 	return nil
+}
+
+type recordingEngineDispatcher struct {
+	calls []recordedEngineDispatch
+	err   error
+}
+
+type recordedEngineDispatch struct {
+	taskID  string
+	trigger engine.Trigger
+	payload any
+	opID    string
+}
+
+func (r *recordingEngineDispatcher) HandleTrigger(
+	_ context.Context, taskID string, trigger engine.Trigger, payload any, opID string,
+) error {
+	r.calls = append(r.calls, recordedEngineDispatch{
+		taskID: taskID, trigger: trigger, payload: payload, opID: opID,
+	})
+	return r.err
 }
 
 // testDeps wires a real in-memory dashboard service for testing.
@@ -290,25 +312,14 @@ func TestCreateComment_PublishesOfficeCommentCreated(t *testing.T) {
 	}
 }
 
-func TestCreateComment_SuppressesLegacyAssigneeWakeWhenRunExists(t *testing.T) {
+func TestCreateComment_SuppressesLegacyAssigneeWakeAfterEngineDispatch(t *testing.T) {
 	deps := newTestDeps(t)
 	insertTestTask(t, deps.db, "task-comment-run", "ws-1", "Comment Run", "todo", 1)
 
 	rt := &recordingReactivity{result: &dashboard.TaskReactivityResult{}}
+	disp := &recordingEngineDispatcher{}
 	deps.svc.SetReactivityApplier(rt)
-	key := "task_comment:comment-existing:work:task-comment-run:agent-primary:abcd1234"
-	if err := deps.repo.CreateRun(context.Background(), &models.Run{
-		ID:             "engine-comment-run",
-		AgentProfileID: "agent-primary",
-		Reason:         "task_comment",
-		Payload:        `{"comment_id":"comment-existing","task_id":"task-comment-run","workflow_step_id":"work"}`,
-		Status:         "queued",
-		CoalescedCount: 1,
-		IdempotencyKey: &key,
-		RequestedAt:    time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("seed engine run: %v", err)
-	}
+	deps.svc.SetWorkflowEngineDispatcher(disp)
 	comment := &models.TaskComment{
 		ID:         "comment-existing",
 		TaskID:     "task-comment-run",
@@ -321,6 +332,15 @@ func TestCreateComment_SuppressesLegacyAssigneeWakeWhenRunExists(t *testing.T) {
 	if err := deps.svc.CreateComment(context.Background(), comment); err != nil {
 		t.Fatalf("create comment: %v", err)
 	}
+	if len(disp.calls) != 1 {
+		t.Fatalf("dispatcher calls = %d, want 1", len(disp.calls))
+	}
+	if disp.calls[0].trigger != engine.TriggerOnComment {
+		t.Fatalf("trigger = %q, want on_comment", disp.calls[0].trigger)
+	}
+	if disp.calls[0].opID != "task_comment:comment-existing" {
+		t.Fatalf("operation id = %q, want task_comment:comment-existing", disp.calls[0].opID)
+	}
 	if len(rt.calls) != 1 {
 		t.Fatalf("reactivity calls = %d, want 1", len(rt.calls))
 	}
@@ -329,7 +349,7 @@ func TestCreateComment_SuppressesLegacyAssigneeWakeWhenRunExists(t *testing.T) {
 		t.Fatalf("reactivity comment = %+v, want comment-existing", got.Comment)
 	}
 	if !got.SkipAssigneeCommentWake {
-		t.Fatal("SkipAssigneeCommentWake = false, want true for existing engine run")
+		t.Fatal("SkipAssigneeCommentWake = false, want true after synchronous engine dispatch")
 	}
 }
 

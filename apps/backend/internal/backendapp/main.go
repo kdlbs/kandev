@@ -1111,6 +1111,9 @@ func startOfficeSchedulersAndGC(
 	engineDispatcher := wireWorkflowEngineForOffice(
 		orchestratorSvc, services.Office, services.Task, services.Workflow, repos, runsSvc, log,
 	)
+	if services.OfficeSvcs != nil {
+		services.OfficeSvcs.Dashboard.SetWorkflowEngineDispatcher(engineDispatcher)
+	}
 	// Start the runs scheduler (tick + signal listener). It drives
 	// orchScheduler.Tick on both periodic ticks and event-driven signals.
 	runScheduler := runsscheduler.New(

@@ -122,3 +122,10 @@ steps:
     stage_type: custom
     allow_manual_move: true
     show_in_command_panel: true
+    events:
+      on_comment:
+        - type: queue_run
+          config:
+            target: primary
+            task_id: this
+            reason: task_comment

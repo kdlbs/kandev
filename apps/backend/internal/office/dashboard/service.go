@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routing"
 	"github.com/kandev/kandev/internal/office/shared"
+	"github.com/kandev/kandev/internal/workflow/engine"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 
 	"go.uber.org/zap"
@@ -243,6 +244,18 @@ type ReactivityApplier interface {
 	) (*TaskReactivityResult, error)
 }
 
+// WorkflowEngineDispatcher routes typed dashboard comment events through
+// the workflow engine without waiting for the event bus subscriber.
+type WorkflowEngineDispatcher interface {
+	HandleTrigger(
+		ctx context.Context,
+		taskID string,
+		trigger engine.Trigger,
+		payload any,
+		operationID string,
+	) error
+}
+
 // ApprovalRun describes a single run the approval-flow service
 // wants to queue for an agent. Dashboard ships these to the scheduler
 // via the ApprovalReactivityQueuer adapter so the dashboard package
@@ -332,6 +345,7 @@ type DashboardService struct {
 	taskCanceller    TaskCanceller            // optional; used to hard-cancel sessions on status→cancelled
 	sessionTerm      SessionTerminator        // optional; flips office session rows to COMPLETED on participation removal
 	reactivity       ReactivityApplier        // optional; runs the office reactivity pipeline on mutations
+	engineDispatcher WorkflowEngineDispatcher // optional; synchronously routes comment triggers through the engine
 	approvalQueuer   ApprovalReactivityQueuer // optional; queues approval-flow runs
 	skillLister      SkillLister              // optional; nil means skill_count is always 0
 	routineLister    RoutineLister            // optional; nil means routine_count is always 0
@@ -459,6 +473,12 @@ func (s *DashboardService) SetSessionTerminator(t SessionTerminator) {
 // (blockers resolved, children completed, comments, mentions, etc.).
 func (s *DashboardService) SetReactivityApplier(r ReactivityApplier) {
 	s.reactivity = r
+}
+
+// SetWorkflowEngineDispatcher wires the synchronous workflow-engine
+// dispatcher used for dashboard-created comments.
+func (s *DashboardService) SetWorkflowEngineDispatcher(d WorkflowEngineDispatcher) {
+	s.engineDispatcher = d
 }
 
 // SetApprovalReactivityQueuer sets the queuer used to fire approval-flow
@@ -648,8 +668,9 @@ func (s *DashboardService) CreateComment(ctx context.Context, comment *models.Ta
 	if err := s.repo.CreateTaskComment(ctx, comment); err != nil {
 		return err
 	}
-	s.publishCommentCreated(ctx, comment)
-	s.runReactivityForComment(ctx, comment)
+	engineHandled := s.dispatchCommentEngineTrigger(ctx, comment)
+	s.publishCommentCreated(ctx, comment, engineHandled)
+	s.runReactivityForComment(ctx, comment, engineHandled)
 	return nil
 }
 

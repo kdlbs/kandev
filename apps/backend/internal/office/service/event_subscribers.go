@@ -76,7 +76,10 @@ type CommentPostedData struct {
 	AuthorID               string `json:"author_id"`
 	AuthorType             string `json:"author_type"`
 	AssigneeAgentProfileID string `json:"assignee_agent_profile_id"`
+	EngineDispatched       string `json:"engine_dispatched"`
 }
+
+const engineDispatchedValue = "true"
 
 // ApprovalResolvedData represents an approval resolved event payload.
 type ApprovalResolvedData struct {
@@ -859,6 +862,9 @@ func (s *Service) handleCommentCreated(ctx context.Context, event *bus.Event) er
 
 func (s *Service) queueCommentRun(ctx context.Context, data CommentPostedData) error {
 	if data.TaskID == "" || data.CommentID == "" {
+		return nil
+	}
+	if data.EngineDispatched == engineDispatchedValue {
 		return nil
 	}
 	// Self-comment short-circuit: if the agent that wrote the comment is

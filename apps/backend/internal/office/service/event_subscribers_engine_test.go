@@ -5,6 +5,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
@@ -116,6 +118,32 @@ func TestEngineDispatcher_RoutesToDispatcher(t *testing.T) {
 	wantOp := "task_comment:" + comment.ID
 	if got.opID != wantOp {
 		t.Errorf("operationID = %q, want %q", got.opID, wantOp)
+	}
+}
+
+func TestEngineDispatcher_SkipsAlreadyDispatchedCommentEvent(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+
+	disp := &fakeDispatcher{}
+	svc.SetWorkflowEngineDispatcher(disp)
+
+	ctx := context.Background()
+	createTestAgent(t, svc, "ws-1", "agent-1")
+	insertTestTask(t, svc, "task-1", "ws-1")
+	setTestTaskAssignee(t, svc, "task-1", "agent-1")
+
+	event := bus.NewEvent(events.OfficeCommentCreated, "test", map[string]string{
+		"task_id":           "task-1",
+		"comment_id":        "comment-1",
+		"author_type":       "user",
+		"author_id":         "user-x",
+		"engine_dispatched": "true",
+	})
+	if err := eb.Publish(ctx, events.OfficeCommentCreated, event); err != nil {
+		t.Fatalf("publish comment event: %v", err)
+	}
+	if calls := disp.Calls(); len(calls) != 0 {
+		t.Fatalf("dispatcher calls = %d, want 0", len(calls))
 	}
 }
 
