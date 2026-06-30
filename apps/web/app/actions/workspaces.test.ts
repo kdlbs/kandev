@@ -63,7 +63,7 @@ describe("deleteWorkspaceAction", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("http://backend.test/api/v1/workspaces/ws-1");
+    expect(url).toBe("http://backend.test/api/v1/office/workspaces/ws-1");
     expect(init.method).toBe("DELETE");
     expect(JSON.parse(init.body as string)).toEqual({ confirm_name: "My Workspace" });
   });

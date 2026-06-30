@@ -19,9 +19,14 @@ import (
 
 type workspaceDeleteRepo struct {
 	mockRepository
-	deleteCalled bool
-	getCalls     int
-	getErr       error
+	deleteCalled     bool
+	cascadeCalled    bool
+	cascadeID        string
+	cascadeName      string
+	cascadeTasks     []*models.Task
+	cascadeWorkflows []*models.Workflow
+	getCalls         int
+	getErr           error
 }
 
 func (r *workspaceDeleteRepo) GetWorkspace(_ context.Context, id string) (*models.Workspace, error) {
@@ -37,8 +42,11 @@ func (r *workspaceDeleteRepo) DeleteWorkspace(_ context.Context, _ string) error
 	return nil
 }
 
-func (r *workspaceDeleteRepo) DeleteWorkspaceCascadeWithName(ctx context.Context, id, name string) ([]*models.Task, []*models.Workflow, error) {
-	return nil, nil, r.DeleteWorkspace(ctx, id)
+func (r *workspaceDeleteRepo) DeleteWorkspaceCascadeWithName(_ context.Context, id, name string) ([]*models.Task, []*models.Workflow, error) {
+	r.cascadeCalled = true
+	r.cascadeID = id
+	r.cascadeName = name
+	return r.cascadeTasks, r.cascadeWorkflows, nil
 }
 
 func TestHTTPDeleteWorkspaceRequiresMatchingConfirmName(t *testing.T) {
@@ -76,6 +84,7 @@ func TestHTTPDeleteWorkspaceRequiresMatchingConfirmName(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.False(t, repo.deleteCalled, "handler must not delete when confirm_name does not match")
+	require.False(t, repo.cascadeCalled, "handler must not cascade when confirm_name does not match")
 	require.Equal(t, 1, repo.getCalls, "handler should leave confirmation lookup to the service")
 }
 
@@ -112,6 +121,7 @@ func TestHTTPDeleteWorkspaceRejectsInvalidPayload(t *testing.T) {
 	require.JSONEq(t, `{"error":"invalid payload"}`, rec.Body.String())
 	require.Equal(t, 0, repo.getCalls, "invalid payload must not look up the workspace")
 	require.False(t, repo.deleteCalled, "invalid payload must not delete")
+	require.False(t, repo.cascadeCalled, "invalid payload must not cascade")
 }
 
 func TestHTTPDeleteWorkspaceReturnsNotFoundWhenWorkspaceMissing(t *testing.T) {
@@ -151,6 +161,7 @@ func TestHTTPDeleteWorkspaceReturnsNotFoundWhenWorkspaceMissing(t *testing.T) {
 	require.JSONEq(t, `{"error":"workspace not found"}`, rec.Body.String())
 	require.Equal(t, 1, repo.getCalls, "handler should let service resolve the workspace")
 	require.False(t, repo.deleteCalled, "missing workspace must not delete")
+	require.False(t, repo.cascadeCalled, "missing workspace must not cascade")
 }
 
 func TestHTTPDeleteWorkspaceDeletesWhenConfirmNameMatches(t *testing.T) {
@@ -187,7 +198,10 @@ func TestHTTPDeleteWorkspaceDeletesWhenConfirmNameMatches(t *testing.T) {
 	h.httpDeleteWorkspace(c)
 
 	require.Equal(t, http.StatusOK, rec.Code)
-	require.True(t, repo.deleteCalled, "handler must delete when confirm_name matches")
+	require.False(t, repo.deleteCalled, "handler must use the confirmed cascade path")
+	require.True(t, repo.cascadeCalled, "handler must cascade when confirm_name matches")
+	require.Equal(t, "ws-1", repo.cascadeID)
+	require.Equal(t, "Delete Me", repo.cascadeName)
 	require.Equal(t, 1, repo.getCalls, "confirmed delete should fetch the workspace once")
 }
 
@@ -221,6 +235,7 @@ func TestWSDeleteWorkspaceRequiresConfirmName(t *testing.T) {
 	require.Contains(t, string(resp.Payload), "confirm_name is required")
 	require.Equal(t, 0, repo.getCalls, "missing confirm_name must not look up the workspace")
 	require.False(t, repo.deleteCalled, "missing confirm_name must not delete")
+	require.False(t, repo.cascadeCalled, "missing confirm_name must not cascade")
 }
 
 func TestWSDeleteWorkspaceDeletesWhenConfirmNameMatches(t *testing.T) {
@@ -253,6 +268,9 @@ func TestWSDeleteWorkspaceDeletesWhenConfirmNameMatches(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)
-	require.True(t, repo.deleteCalled, "handler must delete when confirm_name matches")
+	require.False(t, repo.deleteCalled, "handler must use the confirmed cascade path")
+	require.True(t, repo.cascadeCalled, "handler must cascade when confirm_name matches")
+	require.Equal(t, "ws-1", repo.cascadeID)
+	require.Equal(t, "Delete Me", repo.cascadeName)
 	require.Equal(t, 1, repo.getCalls, "confirmed delete should fetch the workspace once")
 }

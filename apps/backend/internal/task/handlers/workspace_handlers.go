@@ -149,7 +149,6 @@ func (h *WorkspaceHandlers) httpUpdateWorkspace(c *gin.Context) {
 }
 
 type httpDeleteWorkspaceRequest struct {
-	ID          string `json:"id,omitempty"`
 	ConfirmName string `json:"confirm_name"`
 }
 
@@ -277,8 +276,13 @@ func (h *WorkspaceHandlers) wsUpdateWorkspace(ctx context.Context, msg *ws.Messa
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromWorkspace(workspace))
 }
 
+type wsDeleteWorkspaceRequest struct {
+	ID          string `json:"id"`
+	ConfirmName string `json:"confirm_name"`
+}
+
 func (h *WorkspaceHandlers) wsDeleteWorkspace(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req httpDeleteWorkspaceRequest
+	var req wsDeleteWorkspaceRequest
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}

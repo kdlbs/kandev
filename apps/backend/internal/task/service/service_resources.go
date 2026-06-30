@@ -154,7 +154,8 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 		}
 	}
 
-	if err := s.deleteWorkspaceRow(ctx, id); err != nil {
+	if err := s.workspaces.DeleteWorkspace(ctx, id); err != nil {
+		s.logger.Error("failed to delete workspace", zap.String("workspace_id", id), zap.Error(err))
 		return err
 	}
 	s.publishWorkspaceEvent(ctx, events.WorkspaceDeleted, workspace)
@@ -176,7 +177,7 @@ func (s *Service) deleteConfirmedWorkspaceCascade(ctx context.Context, workspace
 	}
 	deletedTasks, deletedWorkflows, err := s.workspaces.DeleteWorkspaceCascadeWithName(ctx, workspace.ID, confirmedName)
 	if err != nil {
-		return s.mapWorkspaceDeleteError(workspace.ID, err)
+		return s.mapConfirmedWorkspaceDeleteError(workspace.ID, err)
 	}
 	s.publishWorkspaceDeleteChildEvents(ctx, deletedTasks, deletedWorkflows)
 	s.runWorkspaceDeleteTaskCleanups(cleanups, deletedTasks)
@@ -269,11 +270,7 @@ func (s *Service) runWorkspaceDeleteTaskCleanups(cleanups []workspaceDeleteTaskC
 	}
 }
 
-func (s *Service) deleteWorkspaceRow(ctx context.Context, id string) error {
-	return s.mapWorkspaceDeleteError(id, s.workspaces.DeleteWorkspace(ctx, id))
-}
-
-func (s *Service) mapWorkspaceDeleteError(id string, err error) error {
+func (s *Service) mapConfirmedWorkspaceDeleteError(id string, err error) error {
 	if err == nil {
 		return nil
 	}
