@@ -14,6 +14,7 @@ const STRENGTHENED_MARKDOWN_FENCE = "````markdown";
 const INTRO_TEXT = "Intro:";
 const INNER_PROMPT_TEXT = "nested prompt";
 const AFTER_NESTED_PROMPT = "After nested prompt.";
+const SAMPLE_PROSE_TEXT = "some explanation";
 
 describe("normalizeMarkdown", () => {
   it("leaves a markdown wrapper without nested fences unchanged", () => {
@@ -143,7 +144,9 @@ describe("normalizeMarkdown untagged wrapper edge cases", () => {
   });
 
   it("preserves adjacent untagged blocks after a markdown sample", () => {
-    const input = [MARKDOWN_FENCE, "# Title", "```", "prose", "```", "code", "```"].join("\n");
+    const input = [MARKDOWN_FENCE, "# Title", "```", SAMPLE_PROSE_TEXT, "```", "code", "```"].join(
+      "\n",
+    );
 
     expect(normalizeMarkdown(input)).toBe(input);
   });
@@ -176,27 +179,88 @@ describe("normalizeMarkdown untagged wrapper edge cases", () => {
 
 describe("normalizeMarkdown advanced untagged wrapper edge cases", () => {
   it("preserves markdown samples whose close follows a blank line", () => {
-    const input = [MARKDOWN_FENCE, "# Title", "", "```", "prose", "```", "code", "```"].join("\n");
+    const input = [
+      MARKDOWN_FENCE,
+      "# Title",
+      "",
+      "```",
+      SAMPLE_PROSE_TEXT,
+      "```",
+      "code",
+      "```",
+    ].join("\n");
 
     expect(normalizeMarkdown(input)).toBe(input);
   });
 
   it("preserves non-heading markdown samples before separate untagged blocks", () => {
-    const input = [MARKDOWN_FENCE, "plain text", "```", "prose", "```", "code", "```"].join("\n");
+    const input = [
+      MARKDOWN_FENCE,
+      "plain text",
+      "```",
+      SAMPLE_PROSE_TEXT,
+      "```",
+      "code",
+      "```",
+    ].join("\n");
 
     expect(normalizeMarkdown(input)).toBe(input);
   });
 
   it("preserves separate untagged blocks that start blank", () => {
-    const input = [MARKDOWN_FENCE, "plain text", "```", "prose", "```", "", "code", "```"].join(
-      "\n",
-    );
+    const input = [
+      MARKDOWN_FENCE,
+      "plain text",
+      "```",
+      SAMPLE_PROSE_TEXT,
+      "```",
+      "",
+      "code",
+      "```",
+    ].join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(input);
+  });
+
+  it("preserves markdown samples before separate tagged blocks", () => {
+    const input = [
+      MARKDOWN_FENCE,
+      "plain text",
+      "```",
+      SAMPLE_PROSE_TEXT,
+      "```js",
+      "code",
+      "```",
+    ].join("\n");
 
     expect(normalizeMarkdown(input)).toBe(input);
   });
 });
 
 describe("normalizeMarkdown blank-padded untagged wrapper edge cases", () => {
+  it("strengthens same-length bare fences after headings inside wrappers", () => {
+    const input = [
+      MARKDOWN_FENCE,
+      "# Prompt",
+      "```",
+      "code",
+      "```",
+      AFTER_NESTED_PROMPT,
+      "```",
+    ].join("\n");
+    const expected = [
+      STRENGTHENED_MARKDOWN_FENCE,
+      "# Prompt",
+      "```",
+      "code",
+      "```",
+      AFTER_NESTED_PROMPT,
+      "````",
+    ].join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(expected);
+  });
+
   it("strengthens same-length bare fences after non-colon prose inside wrappers", () => {
     const input = [
       MARKDOWN_FENCE,
@@ -278,6 +342,29 @@ describe("normalizeMarkdown blank-padded untagged wrapper edge cases", () => {
 });
 
 describe("normalizeMarkdown tagged-looking untagged wrapper edge cases", () => {
+  it("strengthens tagged nested fences after headings inside wrappers", () => {
+    const input = [
+      MARKDOWN_FENCE,
+      "# Prompt",
+      "```text",
+      INNER_PROMPT_TEXT,
+      "```",
+      AFTER_NESTED_PROMPT,
+      "```",
+    ].join("\n");
+    const expected = [
+      STRENGTHENED_MARKDOWN_FENCE,
+      "# Prompt",
+      "```text",
+      INNER_PROMPT_TEXT,
+      "```",
+      AFTER_NESTED_PROMPT,
+      "````",
+    ].join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(expected);
+  });
+
   it("strengthens bare fences that contain tagged-looking content", () => {
     const input = [
       MARKDOWN_FENCE,
