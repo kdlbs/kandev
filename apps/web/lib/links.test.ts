@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { isTaskDetailPath, linkToTask, linkToTasks, replaceTaskUrl } from "./links";
+import {
+  isTaskDetailPath,
+  linkToTask,
+  linkToTasks,
+  normalizePathname,
+  replaceTaskUrl,
+} from "./links";
 
 describe("task links", () => {
   afterEach(() => {
@@ -45,5 +51,13 @@ describe("isTaskDetailPath", () => {
     expect(isTaskDetailPath("/tasks", "task-123")).toBe(false);
     expect(isTaskDetailPath("/", "task-123")).toBe(false);
     expect(isTaskDetailPath("/t/task-123/extra", "task-123")).toBe(false);
+  });
+});
+
+describe("normalizePathname", () => {
+  it("removes one trailing slash except from the root path", () => {
+    expect(normalizePathname("/")).toBe("/");
+    expect(normalizePathname("/office/tasks/task-123/")).toBe("/office/tasks/task-123");
+    expect(normalizePathname("/office/tasks/task-123")).toBe("/office/tasks/task-123");
   });
 });

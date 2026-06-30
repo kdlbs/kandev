@@ -6,13 +6,16 @@ export function linkToTask(taskId: string, layout?: string): string {
 /** Task-detail route prefixes the SPA serves: canonical and compatibility. */
 const TASK_DETAIL_PREFIXES = ["/t/", "/tasks/"];
 
+export function normalizePathname(pathname: string): string {
+  return pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+}
+
 /**
  * True when `pathname` is a task-detail route for `taskId`. Matches both the
  * canonical `/t/:id` and the compatibility `/tasks/:id` paths.
  */
 export function isTaskDetailPath(pathname: string, taskId: string): boolean {
-  const normalized =
-    pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+  const normalized = normalizePathname(pathname);
   return TASK_DETAIL_PREFIXES.some((prefix) => normalized === `${prefix}${taskId}`);
 }
 

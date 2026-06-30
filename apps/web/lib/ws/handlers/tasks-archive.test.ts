@@ -179,12 +179,15 @@ describe("task.updated archive cleanup", () => {
     expect(window.location.pathname).toBe("/t/other");
   });
 
-  it("redirects office task detail routes to the office task list when archived", () => {
-    window.history.replaceState({}, "", "/office/tasks/t1");
-    const store = makeStoreWithTask();
+  it.each(["/office/tasks/t1", "/office/tasks/t1/"])(
+    "redirects office task detail route %s to the office task list when archived",
+    (path) => {
+      window.history.replaceState({}, "", path);
+      const store = makeStoreWithTask();
 
-    archiveTask(store);
+      archiveTask(store);
 
-    expect(window.location.pathname).toBe("/office/tasks");
-  });
+      expect(window.location.pathname).toBe("/office/tasks");
+    },
+  );
 });
