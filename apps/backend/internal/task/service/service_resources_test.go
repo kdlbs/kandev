@@ -149,6 +149,15 @@ func (r createDuringConfirmedDeleteRepo) DeleteWorkspaceCascadeWithName(
 	return r.WorkspaceRepository.DeleteWorkspaceCascadeWithName(ctx, id, name)
 }
 
+type failingListTaskSessionsRepo struct {
+	repository.SessionRepository
+	err error
+}
+
+func (r failingListTaskSessionsRepo) ListTaskSessions(context.Context, string) ([]*models.TaskSession, error) {
+	return nil, r.err
+}
+
 func (e errWorkspaceRepo) ListWorkspaces(_ context.Context) ([]*models.Workspace, error) {
 	return nil, errors.New("db unavailable")
 }
@@ -325,6 +334,39 @@ func TestService_DeleteWorkspacePublishesChildEventsAndCleansResources(t *testin
 	cleanedIDs := cleanup.cleanedIDs()
 	if len(cleanedIDs) != 1 || cleanedIDs[0] != "wt-delete" {
 		t.Fatalf("cleaned worktrees = %#v, want wt-delete", cleanedIDs)
+	}
+}
+
+func TestService_DeleteWorkspaceStopsBeforeCascadeWhenSessionInventoryFails(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-delete", Name: "Delete Me"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-delete", WorkspaceID: "ws-delete", Name: "Doomed"})
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:             "task-delete",
+		WorkspaceID:    "ws-delete",
+		WorkflowID:     "wf-delete",
+		WorkflowStepID: "step-delete",
+		Title:          "Delete task",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	listErr := errors.New("session inventory unavailable")
+	svc.sessions = failingListTaskSessionsRepo{SessionRepository: repo, err: listErr}
+
+	err := svc.DeleteWorkspace(ctx, "ws-delete")
+	if !errors.Is(err, listErr) {
+		t.Fatalf("expected session inventory error, got %v", err)
+	}
+	if _, err := repo.GetWorkspace(ctx, "ws-delete"); err != nil {
+		t.Fatalf("workspace should remain: %v", err)
+	}
+	if _, err := repo.GetTask(ctx, "task-delete"); err != nil {
+		t.Fatalf("workspace task should remain: %v", err)
+	}
+	if _, err := repo.GetWorkflow(ctx, "wf-delete"); err != nil {
+		t.Fatalf("workspace workflow should remain: %v", err)
 	}
 }
 

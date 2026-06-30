@@ -206,9 +206,7 @@ func (s *Service) prepareWorkspaceDeleteTaskCleanup(ctx context.Context, task *m
 	var err error
 	cleanup.sessions, err = s.sessions.ListTaskSessions(ctx, task.ID)
 	if err != nil {
-		s.logger.Warn("failed to list task sessions for workspace delete",
-			zap.String("task_id", task.ID),
-			zap.Error(err))
+		return workspaceDeleteTaskCleanup{}, fmt.Errorf("list task sessions for workspace delete task %q: %w", task.ID, err)
 	}
 	if s.executionStopper == nil {
 		return cleanup, nil
