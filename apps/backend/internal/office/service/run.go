@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/runs/commentkeys"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
@@ -148,17 +149,13 @@ func (s *Service) publishRunQueued(ctx context.Context, req *models.Run, idempot
 	if s.eb == nil {
 		return
 	}
-	parsed := ParseRunPayload(req.Payload)
-	taskID := parsed["task_id"]
-	if sourceTaskID := parsed["source_task_id"]; sourceTaskID != "" {
-		taskID = sourceTaskID
-	}
+	taskID, commentID := commentkeys.IdentityFromPayload(req.Payload)
 	data := map[string]interface{}{
 		"run_id":           req.ID,
 		"agent_profile_id": req.AgentProfileID,
 		"reason":           req.Reason,
 		"task_id":          taskID,
-		"comment_id":       parsed["comment_id"],
+		"comment_id":       commentID,
 		"idempotency_key":  idempotencyKey,
 	}
 	event := bus.NewEvent(events.OfficeRunQueued, "office-service", data)

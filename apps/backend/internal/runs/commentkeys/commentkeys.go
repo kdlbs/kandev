@@ -2,7 +2,10 @@
 // office comments to queued runs.
 package commentkeys
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 const (
 	// TaskCommentPrefix prefixes run idempotency keys that originate from an
@@ -25,4 +28,41 @@ func HasTaskCommentPrefix(key string) bool {
 // TrimTaskCommentPrefix removes the comment idempotency prefix when present.
 func TrimTaskCommentPrefix(key string) string {
 	return strings.TrimPrefix(key, TaskCommentPrefix)
+}
+
+// CommentIDFromKey extracts the leading comment id from canonical and salted
+// task_comment keys. Salted keys append extra colon-separated fields after the
+// comment id.
+func CommentIDFromKey(key string) string {
+	if !HasTaskCommentPrefix(key) {
+		return ""
+	}
+	id := TrimTaskCommentPrefix(key)
+	if before, _, found := strings.Cut(id, ":"); found {
+		return before
+	}
+	return id
+}
+
+// IdentityFromPayload extracts the task/comment pair used to link a run back
+// to a comment. Cross-task wakes execute on task_id but the UI badge/comment
+// anchor belongs to source_task_id, so source_task_id wins when present.
+func IdentityFromPayload(payloadJSON string) (taskID, commentID string) {
+	if payloadJSON == "" {
+		return "", ""
+	}
+	var p struct {
+		TaskID       string `json:"task_id"`
+		SourceTaskID string `json:"source_task_id"`
+		CommentID    string `json:"comment_id"`
+	}
+	if err := json.Unmarshal([]byte(payloadJSON), &p); err != nil {
+		return "", ""
+	}
+	if p.SourceTaskID != "" {
+		taskID = p.SourceTaskID
+	} else {
+		taskID = p.TaskID
+	}
+	return taskID, p.CommentID
 }

@@ -248,37 +248,18 @@ func queueRunReason(in ActionInput) string {
 
 // idempotencyKey synthesises a deterministic key from the engine's
 // operation id (already idempotent across retries) plus action-specific
-// salt. The canonical same-task primary task_comment wake keeps the exact
-// "task_comment:<comment_id>" key so comment status lookups can map the
-// single run back to the user comment. Custom reasons, payloads, cross-task
-// actions, and multi-agent fan-out keep the salt so one comment can still wake
-// every intended target.
+// salt. Comment status lookups map runs back through payload.comment_id, so
+// even same-task primary comment wakes keep agent/task/action salt. That lets
+// a later wake for the same comment reach a newly resolved runner instead of
+// being suppressed by a bare task_comment:<comment_id> key.
 // When OperationID is empty, the adapter sees an empty key and is expected to
 // dedupe via its own mechanism (or accept the duplicate).
 func idempotencyKey(in ActionInput, agentID, taskID string) string {
 	if in.OperationID == "" {
 		return ""
 	}
-	if usesExactCommentKey(in) {
-		return in.OperationID
-	}
 	return fmt.Sprintf("%s:%s:%s:%s:%s",
 		in.OperationID, in.Step.ID, taskID, agentID, queueActionDigest(in))
-}
-
-func usesExactCommentKey(in ActionInput) bool {
-	if in.Trigger != TriggerOnComment || !commentkeys.HasTaskCommentPrefix(in.OperationID) {
-		return false
-	}
-	if in.Action.Kind != ActionQueueRun || in.Action.QueueRun == nil {
-		return false
-	}
-	target := strings.TrimSpace(in.Action.QueueRun.Target)
-	taskID := strings.TrimSpace(in.Action.QueueRun.TaskID)
-	return (target == "" || target == TargetPrimary) &&
-		(taskID == "" || taskID == TaskIDThis) &&
-		queueRunReason(in) == commentkeys.TaskCommentReason &&
-		len(in.Action.QueueRun.Payload) == 0
 }
 
 func queueActionDigest(in ActionInput) string {
@@ -319,9 +300,6 @@ func queueActionDigest(in ActionInput) string {
 
 func queueRunPayload(in ActionInput, actionPayload map[string]any, targetTaskID string) map[string]any {
 	out := make(map[string]any, len(actionPayload))
-	for k, v := range actionPayload {
-		out[k] = v
-	}
 	comment, ok := commentPayload(in.Payload)
 	if ok {
 		if comment.CommentID != "" {
@@ -330,6 +308,9 @@ func queueRunPayload(in ActionInput, actionPayload map[string]any, targetTaskID 
 		if comment.AuthorID != "" {
 			out["author_id"] = comment.AuthorID
 		}
+	}
+	for k, v := range actionPayload {
+		out[k] = v
 	}
 	if targetTaskID != "" &&
 		in.State.TaskID != "" &&

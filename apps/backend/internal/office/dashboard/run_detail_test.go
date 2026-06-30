@@ -189,6 +189,35 @@ func TestListAgentRunsPaged_UsesSourceTaskForCommentLinks(t *testing.T) {
 	}
 }
 
+func TestListAgentRunsPaged_UsesSourceTaskWithoutCommentID(t *testing.T) {
+	deps := newRunDetailDeps(t)
+	ctx := context.Background()
+	run := &officemodels.Run{
+		AgentProfileID: "agent-1",
+		Reason:         "approval_resolved",
+		Payload:        `{"task_id":"target-task","source_task_id":"source-task"}`,
+		Status:         "finished",
+		CoalescedCount: 1,
+	}
+	if err := deps.repo.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	resp, err := dashboard.ListAgentRunsPaged(ctx, deps.repo, "agent-1", "", "", 25)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(resp.Runs) != 1 {
+		t.Fatalf("want 1 run, got %d", len(resp.Runs))
+	}
+	if resp.Runs[0].TaskID != "source-task" {
+		t.Fatalf("summary task_id = %q, want source-task", resp.Runs[0].TaskID)
+	}
+	if resp.Runs[0].CommentID != "" {
+		t.Fatalf("summary comment_id = %q, want empty", resp.Runs[0].CommentID)
+	}
+}
+
 func TestListAgentRunsPaged_TieBreakOnID(t *testing.T) {
 	deps := newRunDetailDeps(t)
 	// Two runs with identical requested_at — must still be strictly

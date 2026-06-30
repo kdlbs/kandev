@@ -193,6 +193,58 @@ func TestQueueRun_DoesNotCoalesceTaskCommentPrefixWithCustomReason(t *testing.T)
 	}
 }
 
+func TestQueueRun_LegacyCommentWakeDoesNotOverwriteCanonicalCommentRun(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		AgentProfileID: "agent-primary",
+		TaskID:         "target-task",
+		WorkflowStepID: "work",
+		Reason:         "task_comment",
+		IdempotencyKey: "task_comment:comment-engine:work:target-task:agent-primary:abcd1234",
+		Payload: map[string]any{
+			"comment_id":     "comment-engine",
+			"source_task_id": "source-task",
+		},
+	}); err != nil {
+		t.Fatalf("queue engine run: %v", err)
+	}
+
+	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		AgentProfileID: "agent-primary",
+		TaskID:         "source-task",
+		Reason:         "task_comment",
+		Payload: map[string]any{
+			"comment_id": "comment-legacy",
+		},
+	}); err != nil {
+		t.Fatalf("queue legacy run: %v", err)
+	}
+
+	statuses, err := repo.GetRunsByCommentIDs(ctx, []string{"comment-engine", "comment-legacy"})
+	if err != nil {
+		t.Fatalf("get comment runs: %v", err)
+	}
+	if len(statuses) != 2 {
+		t.Fatalf("statuses = %+v, want both comment runs", statuses)
+	}
+	if statuses["comment-engine"].RunID == statuses["comment-legacy"].RunID {
+		t.Fatalf("legacy run coalesced into canonical comment run: %+v", statuses)
+	}
+	engineRun, err := repo.GetRunByID(ctx, statuses["comment-engine"].RunID)
+	if err != nil {
+		t.Fatalf("get engine run: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(engineRun.Payload), &payload); err != nil {
+		t.Fatalf("decode engine payload: %v", err)
+	}
+	if payload["task_id"] != "target-task" || payload["source_task_id"] != "source-task" {
+		t.Fatalf("engine payload was overwritten by legacy coalesce: %#v", payload)
+	}
+}
+
 func TestQueueRun_PublishesSourceTaskForCrossTaskComment(t *testing.T) {
 	svc, eb := newTestService(t)
 	ctx := context.Background()

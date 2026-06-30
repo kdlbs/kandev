@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/runs/commentkeys"
 )
 
 // RunDetailRepo is the subset of repo functions GetRunDetail needs.
@@ -93,24 +94,11 @@ func taskIDFromPayload(payload string) string {
 }
 
 // runSummaryTaskIDFromPayload returns the task id used by the run list row.
-// Cross-task comment wakes execute on payload.task_id but the comment anchor
-// belongs to payload.source_task_id, so summaries route comment links there.
+// Cross-task wakes execute on payload.task_id but UI links/status badges belong
+// to payload.source_task_id, so source_task_id wins when present.
 func runSummaryTaskIDFromPayload(payload string) string {
-	if payload == "" {
-		return ""
-	}
-	var p struct {
-		TaskID       string `json:"task_id"`
-		SourceTaskID string `json:"source_task_id"`
-		CommentID    string `json:"comment_id"`
-	}
-	if err := json.Unmarshal([]byte(payload), &p); err != nil {
-		return ""
-	}
-	if p.CommentID != "" && p.SourceTaskID != "" {
-		return p.SourceTaskID
-	}
-	return p.TaskID
+	taskID, _ := commentkeys.IdentityFromPayload(payload)
+	return taskID
 }
 
 // runLinkIDsFromPayload extracts comment_id and routine_id from the

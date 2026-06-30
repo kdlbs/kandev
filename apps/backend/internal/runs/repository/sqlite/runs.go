@@ -268,8 +268,7 @@ func (r *Repository) GetRunsByCommentIDs(
 }
 
 func commentIDFromRun(idempotencyKey, payload string, wanted map[string]struct{}) string {
-	if commentkeys.HasTaskCommentPrefix(idempotencyKey) {
-		id := commentkeys.TrimTaskCommentPrefix(idempotencyKey)
+	if id := commentkeys.CommentIDFromKey(idempotencyKey); id != "" {
 		if _, found := wanted[id]; found {
 			return id
 		}
@@ -362,10 +361,11 @@ func (r *Repository) CoalesceRun(
 			SELECT id FROM runs
 			WHERE agent_profile_id = ? AND reason = ? AND status = 'queued'
 			  AND requested_at > ?
+			  AND (idempotency_key IS NULL OR idempotency_key NOT LIKE ?)
 			ORDER BY requested_at DESC
 			LIMIT 1
 		)
-	`), payload, agentInstanceID, reason, cutoff)
+	`), payload, agentInstanceID, reason, cutoff, commentkeys.TaskCommentPrefix+"%")
 	if err != nil {
 		return false, err
 	}

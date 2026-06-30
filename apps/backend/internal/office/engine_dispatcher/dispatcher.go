@@ -110,6 +110,10 @@ func (d *Dispatcher) resolveSession(
 	if trigger != engine.TriggerOnComment {
 		return nil, nil
 	}
+	// Comment wakes are allowed after an office task's agent session has
+	// completed. The workflow engine state is keyed by (taskID, sessionID), so
+	// a post-completion comment intentionally resumes the latest session's
+	// persisted machine state instead of starting a fresh state machine here.
 	session, err = d.sessions.GetTaskSessionByTaskID(ctx, taskID)
 	if err == nil && session != nil {
 		return session, nil

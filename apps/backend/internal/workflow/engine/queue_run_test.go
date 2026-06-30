@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -52,6 +53,28 @@ func (f fakePrimary) WorkflowStepIDForTask(_ context.Context, taskID string) (st
 		*f.resolveTaskID = taskID
 	}
 	return f.taskStepID, f.err
+}
+
+type sequencePrimary struct {
+	ids []string
+	i   int
+}
+
+func (s *sequencePrimary) PrimaryAgentProfileID(_ context.Context, _, _ string) (string, error) {
+	if s.i >= len(s.ids) {
+		return "", nil
+	}
+	id := s.ids[s.i]
+	s.i++
+	return id, nil
+}
+
+func (s *sequencePrimary) PrimaryAgentProfileIDForTask(_ context.Context, _ string) (string, error) {
+	return s.PrimaryAgentProfileID(context.Background(), "", "")
+}
+
+func (s *sequencePrimary) WorkflowStepIDForTask(_ context.Context, _ string) (string, error) {
+	return "step-1", nil
 }
 
 // fakeParticipants returns a static slice for any step.
@@ -170,14 +193,70 @@ func TestQueueRunCallback_OnCommentUsesCommentPayloadAndStableKey(t *testing.T) 
 		t.Fatalf("expected 1 queue run call, got %d", len(q.calls))
 	}
 	got := q.calls[0]
-	if got.IdempotencyKey != "task_comment:c-1" {
-		t.Fatalf("idempotency_key = %q, want task_comment:c-1", got.IdempotencyKey)
+	if got.IdempotencyKey == "task_comment:c-1" {
+		t.Fatalf("idempotency_key dropped agent/action salt")
+	}
+	if !strings.HasPrefix(got.IdempotencyKey, "task_comment:c-1:step-1:task-1:agent-primary:") {
+		t.Fatalf("idempotency_key = %q, want salted task_comment key", got.IdempotencyKey)
 	}
 	if got.Payload["comment_id"] != "c-1" {
 		t.Fatalf("payload comment_id = %v, want c-1 (payload=%#v)", got.Payload["comment_id"], got.Payload)
 	}
 	if got.Payload["author_id"] != "user-1" {
 		t.Fatalf("payload author_id = %v, want user-1 (payload=%#v)", got.Payload["author_id"], got.Payload)
+	}
+}
+
+func TestQueueRunCallback_OnCommentPrimaryKeysIncludeResolvedAgent(t *testing.T) {
+	q := &fakeRunQueue{}
+	primary := &sequencePrimary{ids: []string{"agent-a", "agent-b"}}
+	cb := QueueRunCallback{Adapter: q, Primary: primary}
+	in := newQueueRunInput("primary", "this")
+	in.OperationID = "task_comment:c-1"
+	in.Payload = OnCommentPayload{CommentID: "c-1"}
+	in.Action.QueueRun.Payload = nil
+
+	if _, err := cb.Execute(context.Background(), in); err != nil {
+		t.Fatalf("first queue_run: %v", err)
+	}
+	if _, err := cb.Execute(context.Background(), in); err != nil {
+		t.Fatalf("second queue_run: %v", err)
+	}
+	if len(q.calls) != 2 {
+		t.Fatalf("expected 2 queue run calls, got %d", len(q.calls))
+	}
+	if q.calls[0].IdempotencyKey == q.calls[1].IdempotencyKey {
+		t.Fatalf("resolved agent must salt comment idempotency keys: %#v", q.calls)
+	}
+	if !strings.Contains(q.calls[0].IdempotencyKey, ":agent-a:") ||
+		!strings.Contains(q.calls[1].IdempotencyKey, ":agent-b:") {
+		t.Fatalf("idempotency keys missing resolved agents: %#v", q.calls)
+	}
+}
+
+func TestQueueRunCallback_ActionPayloadOverridesTriggerCommentIdentity(t *testing.T) {
+	q := &fakeRunQueue{}
+	cb := QueueRunCallback{Adapter: q, Primary: fakePrimary{id: "agent-primary"}}
+	in := newQueueRunInput("primary", "this")
+	in.OperationID = "task_comment:c-trigger"
+	in.Payload = OnCommentPayload{
+		CommentID: "c-trigger",
+		AuthorID:  "user-trigger",
+	}
+	in.Action.QueueRun.Payload = map[string]any{
+		"comment_id": "c-action",
+		"author_id":  "user-action",
+	}
+
+	if _, err := cb.Execute(context.Background(), in); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(q.calls) != 1 {
+		t.Fatalf("expected 1 queue run call, got %d", len(q.calls))
+	}
+	got := q.calls[0].Payload
+	if got["comment_id"] != "c-action" || got["author_id"] != "user-action" {
+		t.Fatalf("action payload should override trigger comment identity: %#v", got)
 	}
 }
 

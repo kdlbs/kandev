@@ -280,7 +280,7 @@ func (s *Service) publishRunQueued(ctx context.Context, row *models.Run, idempot
 	if s.eb == nil {
 		return
 	}
-	taskID, commentID := extractIdentityFromPayload(row.Payload)
+	taskID, commentID := commentkeys.IdentityFromPayload(row.Payload)
 	data := map[string]interface{}{
 		"run_id":           row.ID,
 		"agent_profile_id": row.AgentProfileID,
@@ -319,28 +319,4 @@ func encodePayload(p map[string]any) (string, error) {
 		return "", err
 	}
 	return string(b), nil
-}
-
-// extractIdentityFromPayload pulls task_id and comment_id out of a JSON payload
-// string. When a cross-task comment wake stores source_task_id, route the
-// OfficeRunQueued event back to the source task so its comment gets a status
-// update even though the run executes on the target task.
-func extractIdentityFromPayload(payload string) (taskID, commentID string) {
-	if payload == "" {
-		return "", ""
-	}
-	var raw map[string]any
-	if err := json.Unmarshal([]byte(payload), &raw); err != nil {
-		return "", ""
-	}
-	if v, ok := raw["task_id"].(string); ok {
-		taskID = v
-	}
-	if v, ok := raw["source_task_id"].(string); ok && v != "" {
-		taskID = v
-	}
-	if v, ok := raw["comment_id"].(string); ok {
-		commentID = v
-	}
-	return taskID, commentID
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -122,6 +123,69 @@ func (commentWorkflowStore) MarkOperationApplied(context.Context, string) error 
 	return nil
 }
 
+type transitionWorkflowStore struct {
+	appliedTaskID    string
+	appliedSessionID string
+	appliedFrom      string
+	appliedTo        string
+	appliedTrigger   engine.Trigger
+}
+
+func (s *transitionWorkflowStore) LoadState(_ context.Context, taskID, sessionID string) (engine.MachineState, error) {
+	return engine.MachineState{
+		TaskID:        taskID,
+		SessionID:     sessionID,
+		WorkflowID:    "workflow-1",
+		CurrentStepID: "review",
+	}, nil
+}
+
+func (s *transitionWorkflowStore) LoadStep(_ context.Context, _, stepID string) (engine.StepSpec, error) {
+	return engine.StepSpec{
+		ID:         stepID,
+		WorkflowID: "workflow-1",
+		Events: map[engine.Trigger][]engine.Action{
+			engine.TriggerOnComment: {
+				{
+					Kind:       engine.ActionMoveToStep,
+					MoveToStep: &engine.MoveToStepAction{StepID: "follow-up"},
+				},
+			},
+		},
+	}, nil
+}
+
+func (s *transitionWorkflowStore) LoadNextStep(context.Context, string, int) (engine.StepSpec, error) {
+	return engine.StepSpec{}, errors.New("unexpected next-step lookup")
+}
+
+func (s *transitionWorkflowStore) LoadPreviousStep(context.Context, string, int) (engine.StepSpec, error) {
+	return engine.StepSpec{}, errors.New("unexpected previous-step lookup")
+}
+
+func (s *transitionWorkflowStore) ApplyTransition(
+	_ context.Context, taskID, sessionID, fromStepID, toStepID string, trigger engine.Trigger,
+) error {
+	s.appliedTaskID = taskID
+	s.appliedSessionID = sessionID
+	s.appliedFrom = fromStepID
+	s.appliedTo = toStepID
+	s.appliedTrigger = trigger
+	return nil
+}
+
+func (s *transitionWorkflowStore) PersistData(context.Context, string, map[string]any) error {
+	return nil
+}
+
+func (s *transitionWorkflowStore) IsOperationApplied(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+func (s *transitionWorkflowStore) MarkOperationApplied(context.Context, string) error {
+	return nil
+}
+
 func newDispatcherRunsService(t *testing.T) (*runsservice.Service, *runssqlite.Repository) {
 	t.Helper()
 	db, err := sqlx.Open("sqlite3", ":memory:")
@@ -229,8 +293,9 @@ func TestDispatcher_CompletedSessionCommentQueuesRun(t *testing.T) {
 	if got.Reason != "task_comment" {
 		t.Errorf("reason = %q, want task_comment", got.Reason)
 	}
-	if got.IdempotencyKey == nil || *got.IdempotencyKey != "task_comment:c-1" {
-		t.Errorf("idempotency_key = %v, want task_comment:c-1", got.IdempotencyKey)
+	if got.IdempotencyKey == nil ||
+		!strings.HasPrefix(*got.IdempotencyKey, "task_comment:c-1:work:task-1:agent-primary:") {
+		t.Errorf("idempotency_key = %v, want salted task_comment key", got.IdempotencyKey)
 	}
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(got.Payload), &payload); err != nil {
@@ -246,6 +311,38 @@ func TestDispatcher_CompletedSessionCommentQueuesRun(t *testing.T) {
 		if got, _ := payload[k].(string); got != want {
 			t.Errorf("payload[%s] = %q, want %q (payload=%v)", k, got, want, payload)
 		}
+	}
+}
+
+func TestDispatcher_CompletedSessionCommentCanApplyTransition(t *testing.T) {
+	store := &transitionWorkflowStore{}
+	eng := engine.New(store, engine.MapRegistry{})
+	sessions := &fakeSessions{
+		activeErr: taskmodels.ErrTaskSessionNotFound,
+		latestSession: &taskmodels.TaskSession{
+			ID:    "sess-completed",
+			State: taskmodels.TaskSessionStateCompleted,
+		},
+	}
+	d := New(eng, sessions, logger.Default())
+
+	err := d.HandleTrigger(context.Background(), "task-1", engine.TriggerOnComment,
+		engine.OnCommentPayload{CommentID: "c-1"}, "task_comment:c-1")
+	if err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if store.appliedTaskID != "task-1" {
+		t.Fatalf("transition task_id = %q, want task-1", store.appliedTaskID)
+	}
+	if store.appliedSessionID != "sess-completed" {
+		t.Fatalf("transition session_id = %q, want sess-completed", store.appliedSessionID)
+	}
+	if store.appliedFrom != "review" || store.appliedTo != "follow-up" {
+		t.Fatalf("transition = %q -> %q, want review -> follow-up",
+			store.appliedFrom, store.appliedTo)
+	}
+	if store.appliedTrigger != engine.TriggerOnComment {
+		t.Fatalf("transition trigger = %q, want on_comment", store.appliedTrigger)
 	}
 }
 
