@@ -89,7 +89,10 @@ function findBareNestedClose(
   for (let index = startIndex + 1; index < closeIndex; index++) {
     const closeCount = matchingCloseLength(lines[index], openCount);
     if (closeCount !== null) {
-      if (openCount === wrapperOpenCount && isLikelyMarkdownSampleClose(lines, startIndex)) {
+      if (
+        openCount === wrapperOpenCount &&
+        isSameLengthBareMarkdownSampleClose(lines, startIndex, index, openCount)
+      ) {
         return null;
       }
       if (lines[startIndex + 1]?.trim() === "" && lines[index - 1]?.trim() === "") return null;
@@ -99,17 +102,36 @@ function findBareNestedClose(
   return null;
 }
 
-function isLikelyMarkdownSampleClose(lines: string[], closeIndex: number): boolean {
-  const previousLine = lines[closeIndex - 1]?.trim() ?? "";
-  if (previousLine.startsWith("#")) return true;
-  if (previousLine !== "") return false;
+function nearestNonBlankBefore(lines: string[], index: number): string {
+  for (let cursor = index - 1; cursor >= 0; cursor--) {
+    const line = lines[cursor].trim();
+    if (line !== "") return line;
+  }
+  return "";
+}
 
-  for (let index = closeIndex - 2; index >= 0; index--) {
-    const line = lines[index].trim();
-    if (line === "") continue;
-    return line.startsWith("#");
+function hasTaggedLookingBareContent(
+  lines: string[],
+  startIndex: number,
+  closeIndex: number,
+  openCount: number,
+): boolean {
+  for (let index = startIndex + 1; index < closeIndex; index++) {
+    const taggedOpener = FENCE_OPENER_LINE_RE.exec(lines[index]);
+    if ((taggedOpener?.[1]?.length ?? 0) >= openCount) return true;
   }
   return false;
+}
+
+function isSameLengthBareMarkdownSampleClose(
+  lines: string[],
+  startIndex: number,
+  closeIndex: number,
+  openCount: number,
+): boolean {
+  if (hasTaggedLookingBareContent(lines, startIndex, closeIndex, openCount)) return false;
+  if (lines[closeIndex + 1]?.trim() === "") return false;
+  return nearestNonBlankBefore(lines, startIndex).startsWith("#");
 }
 
 function noteNestedFence(state: InnerFenceScan, openCount: number, closeCount: number): void {

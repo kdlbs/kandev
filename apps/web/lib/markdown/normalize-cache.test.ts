@@ -180,6 +180,35 @@ describe("normalizeMarkdown advanced untagged wrapper edge cases", () => {
     expect(normalizeMarkdown(input)).toBe(input);
   });
 
+  it("strengthens heading samples inside spaced untagged nested fences", () => {
+    const input = [
+      MARKDOWN_FENCE,
+      INTRO_TEXT,
+      "",
+      "```",
+      "# Title",
+      "",
+      "```",
+      "",
+      AFTER_NESTED_PROMPT,
+      "```",
+    ].join("\n");
+    const expected = [
+      STRENGTHENED_MARKDOWN_FENCE,
+      INTRO_TEXT,
+      "",
+      "```",
+      "# Title",
+      "",
+      "```",
+      "",
+      AFTER_NESTED_PROMPT,
+      "````",
+    ].join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(expected);
+  });
+
   it("strengthens bare fences that contain tagged-looking content", () => {
     const input = [
       MARKDOWN_FENCE,
