@@ -1756,6 +1756,7 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 			return taskMessageDispatchResult{}, err
 		}
 		if err := reviewRollback.captureSessions(ctx, h.sessionRepo, taskID, session); err != nil {
+			h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
 			return taskMessageDispatchResult{}, err
 		}
 		session, err := h.prepareSessionForTaskMessage(ctx, taskID, session)
