@@ -209,8 +209,12 @@ type TaskReactivityChange struct {
 	Comment        *TaskReactivityComment
 	ReopenIntent   bool
 	ResumeIntent   bool
-	ActorID        string
-	ActorType      string
+	// SkipAssigneeCommentWake suppresses only the legacy assignee
+	// task_comment wake. Mention fan-out still runs so @mentions on
+	// the same comment remain additive.
+	SkipAssigneeCommentWake bool
+	ActorID                 string
+	ActorType               string
 }
 
 // TaskReactivityComment is the slim view of a comment for the reactivity pipeline.

@@ -793,11 +793,26 @@ func (s *DashboardService) runReactivityForComment(
 			AuthorType: comment.AuthorType,
 			AuthorID:   comment.AuthorID,
 		},
+		SkipAssigneeCommentWake: s.commentAlreadyHasRun(ctx, comment.ID),
 	}
 	if _, err := s.reactivity.ApplyTaskMutation(ctx, comment.TaskID, "", change); err != nil {
 		s.logger.Warn("reactivity pipeline failed (comment)",
 			zap.String("task_id", comment.TaskID), zap.Error(err))
 	}
+}
+
+func (s *DashboardService) commentAlreadyHasRun(ctx context.Context, commentID string) bool {
+	if commentID == "" {
+		return false
+	}
+	runs, err := s.repo.GetRunsByCommentIDs(ctx, []string{commentID})
+	if err != nil {
+		s.logger.Warn("comment run lookup failed",
+			zap.String("comment_id", commentID), zap.Error(err))
+		return false
+	}
+	_, ok := runs[commentID]
+	return ok
 }
 
 func (s *DashboardService) publishCommentCreated(ctx context.Context, comment *models.TaskComment) {

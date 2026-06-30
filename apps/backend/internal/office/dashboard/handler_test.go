@@ -290,6 +290,49 @@ func TestCreateComment_PublishesOfficeCommentCreated(t *testing.T) {
 	}
 }
 
+func TestCreateComment_SuppressesLegacyAssigneeWakeWhenRunExists(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTask(t, deps.db, "task-comment-run", "ws-1", "Comment Run", "todo", 1)
+
+	rt := &recordingReactivity{result: &dashboard.TaskReactivityResult{}}
+	deps.svc.SetReactivityApplier(rt)
+	key := "task_comment:comment-existing:work:task-comment-run:agent-primary:abcd1234"
+	if err := deps.repo.CreateRun(context.Background(), &models.Run{
+		ID:             "engine-comment-run",
+		AgentProfileID: "agent-primary",
+		Reason:         "task_comment",
+		Payload:        `{"comment_id":"comment-existing","task_id":"task-comment-run","workflow_step_id":"work"}`,
+		Status:         "queued",
+		CoalescedCount: 1,
+		IdempotencyKey: &key,
+		RequestedAt:    time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed engine run: %v", err)
+	}
+	comment := &models.TaskComment{
+		ID:         "comment-existing",
+		TaskID:     "task-comment-run",
+		AuthorType: "user",
+		AuthorID:   "user-1",
+		Body:       "Please take a look",
+		CreatedAt:  time.Now().UTC(),
+	}
+
+	if err := deps.svc.CreateComment(context.Background(), comment); err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+	if len(rt.calls) != 1 {
+		t.Fatalf("reactivity calls = %d, want 1", len(rt.calls))
+	}
+	got := rt.calls[0]
+	if got.Comment == nil || got.Comment.ID != "comment-existing" {
+		t.Fatalf("reactivity comment = %+v, want comment-existing", got.Comment)
+	}
+	if !got.SkipAssigneeCommentWake {
+		t.Fatal("SkipAssigneeCommentWake = false, want true for existing engine run")
+	}
+}
+
 func insertTestChildTask(
 	t *testing.T,
 	db *sqlx.DB,
