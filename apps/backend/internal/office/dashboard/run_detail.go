@@ -92,6 +92,27 @@ func taskIDFromPayload(payload string) string {
 	return p.TaskID
 }
 
+// runSummaryTaskIDFromPayload returns the task id used by the run list row.
+// Cross-task comment wakes execute on payload.task_id but the comment anchor
+// belongs to payload.source_task_id, so summaries route comment links there.
+func runSummaryTaskIDFromPayload(payload string) string {
+	if payload == "" {
+		return ""
+	}
+	var p struct {
+		TaskID       string `json:"task_id"`
+		SourceTaskID string `json:"source_task_id"`
+		CommentID    string `json:"comment_id"`
+	}
+	if err := json.Unmarshal([]byte(payload), &p); err != nil {
+		return ""
+	}
+	if p.CommentID != "" && p.SourceTaskID != "" {
+		return p.SourceTaskID
+	}
+	return p.TaskID
+}
+
 // runLinkIDsFromPayload extracts comment_id and routine_id from the
 // run payload — both optional and present per wakeup source (comment
 // payloads carry the comment, routine payloads carry the routine).
@@ -137,7 +158,7 @@ func buildRunSummaryDTO(run *models.Run) AgentRunSummaryDTO {
 		Reason:       run.Reason,
 		Status:       string(run.Status),
 		ErrorMessage: run.ErrorMessage,
-		TaskID:       taskIDFromPayload(run.Payload),
+		TaskID:       runSummaryTaskIDFromPayload(run.Payload),
 		CommentID:    commentID,
 		RoutineID:    routineID,
 		RequestedAt:  run.RequestedAt.UTC().Format(time.RFC3339),

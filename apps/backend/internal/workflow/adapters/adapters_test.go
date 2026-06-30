@@ -185,8 +185,8 @@ func TestPrimaryAgentAdapter_ForTaskReturnsNoStepBoundError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if err.Error() != "task target-task has no workflow step bound" {
-		t.Fatalf("err = %v, want no workflow step bound", err)
+	if !errors.Is(err, ErrNoWorkflowStepBound) {
+		t.Fatalf("err = %v, want ErrNoWorkflowStepBound", err)
 	}
 	if repo.resolvedTaskID != "" {
 		t.Fatalf("ResolveCurrentRunner should not be called, got task %q", repo.resolvedTaskID)

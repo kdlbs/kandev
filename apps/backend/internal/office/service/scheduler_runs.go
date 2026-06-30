@@ -80,7 +80,11 @@ func (s *Service) publishRunProcessed(
 		parsed := ParseRunPayload(run.Payload)
 		data["agent_profile_id"] = run.AgentProfileID
 		data["reason"] = run.Reason
-		data["task_id"] = parsed["task_id"]
+		taskID := parsed["task_id"]
+		if parsed["source_task_id"] != "" {
+			taskID = parsed["source_task_id"]
+		}
+		data["task_id"] = taskID
 		data["comment_id"] = parsed["comment_id"]
 		if run.ErrorMessage != "" {
 			data["error_message"] = run.ErrorMessage

@@ -10,6 +10,7 @@ package adapters
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/workflow/engine"
@@ -30,6 +31,10 @@ type WorkflowRepo interface {
 
 // Compile-time check that *repository.Repository satisfies WorkflowRepo.
 var _ WorkflowRepo = (*repository.Repository)(nil)
+
+// ErrNoWorkflowStepBound is returned when a target task has no workflow step
+// assignment, so cross-task queue_run actions cannot resolve a target step.
+var ErrNoWorkflowStepBound = errors.New("workflow step not bound")
 
 // ParticipantAdapter implements engine.ParticipantStore.
 type ParticipantAdapter struct {
@@ -157,7 +162,7 @@ func (a *PrimaryAgentAdapter) PrimaryAgentProfileIDForTask(
 		return "", fmt.Errorf("resolve workflow step for task %s: %w", taskID, err)
 	}
 	if stepID == "" {
-		return "", fmt.Errorf("task %s has no workflow step bound", taskID)
+		return "", fmt.Errorf("task %s: %w", taskID, ErrNoWorkflowStepBound)
 	}
 	return a.PrimaryAgentProfileID(ctx, stepID, taskID)
 }
