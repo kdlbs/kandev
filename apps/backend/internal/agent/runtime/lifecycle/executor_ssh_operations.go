@@ -561,6 +561,7 @@ func createRemoteAgentInstance(
 		McpMode:             req.McpMode,
 		RequiresProcessKill: requiresProcessKillFromReq(req),
 		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		Env:                 sshRemoteAgentEnv(req),
 	})
 	if err != nil {
 		return 0, fmt.Errorf("ssh: marshal create-instance: %w", err)
@@ -612,6 +613,48 @@ func createRemoteAgentInstance(
 		zap.Int("instance_port", resp.Port),
 		zap.String("instance_id", resp.ID))
 	return resp.Port, nil
+}
+
+// sshRemoteAgentCredentialEnvKeys are the agent-authentication environment
+// variables forwarded to the remote agent instance. Unlike containerized
+// executors (Docker/Sprites) the SSH executor's CreateInstanceRequest never
+// carried Env, so env-authenticated agents — notably claude-acp, which reads
+// CLAUDE_CODE_OAUTH_TOKEN, not a credentials file — failed with "Authentication
+// required" on every SSH remote. We forward ONLY this credential allowlist (not
+// the control plane's HOME/PATH/etc., which would break a different remote).
+var sshRemoteAgentCredentialEnvKeys = []string{
+	"CLAUDE_CODE_OAUTH_TOKEN",
+	"ANTHROPIC_API_KEY",
+	"OPENAI_API_KEY",
+	"GEMINI_API_KEY",
+	"GOOGLE_API_KEY",
+	"GITHUB_TOKEN",
+	"GH_TOKEN",
+}
+
+// sshRemoteAgentEnv builds the env map sent to the remote agent instance. Each
+// credential key is taken from the resolved request env first (profile-forwarded
+// credentials), falling back to the control plane's own environment so an
+// operator-provided token still reaches the remote agent. Empty values are
+// skipped so we never clobber a remote-side value with a blank.
+func sshRemoteAgentEnv(req *ExecutorCreateRequest) map[string]string {
+	env := make(map[string]string)
+	for _, key := range sshRemoteAgentCredentialEnvKeys {
+		val := ""
+		if req != nil && req.Env != nil {
+			val = req.Env[key]
+		}
+		if val == "" {
+			val = os.Getenv(key)
+		}
+		if val != "" {
+			env[key] = val
+		}
+	}
+	if len(env) == 0 {
+		return nil
+	}
+	return env
 }
 
 // sshAgentTypeFromReq returns the agent type ID for the create-instance call,
