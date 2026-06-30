@@ -1634,6 +1634,7 @@ type taskMessageDispatchResult struct {
 type taskMessageReviewRollback struct {
 	changed        bool
 	restoreTask    bool
+	taskState      v1.TaskState
 	workflowStepID string
 	sessions       []taskMessageSessionRollback
 	sessionIDs     map[string]struct{}
@@ -1869,6 +1870,8 @@ func (h *Handlers) ensureTaskInProgressForTaskMessage(ctx context.Context, taskI
 	if task.AssigneeAgentProfileID != "" {
 		return taskMessageReviewRollback{
 			changed:        true,
+			restoreTask:    true,
+			taskState:      task.State,
 			workflowStepID: task.WorkflowStepID,
 		}, nil
 	}
@@ -1877,7 +1880,7 @@ func (h *Handlers) ensureTaskInProgressForTaskMessage(ctx context.Context, taskI
 	}
 	h.logger.Info("task transitioned from REVIEW to IN_PROGRESS for task message",
 		zap.String("task_id", taskID))
-	return taskMessageReviewRollback{changed: true, restoreTask: true, workflowStepID: task.WorkflowStepID}, nil
+	return taskMessageReviewRollback{changed: true, restoreTask: true, taskState: task.State, workflowStepID: task.WorkflowStepID}, nil
 }
 
 func (h *Handlers) restoreTaskReviewForTaskMessage(ctx context.Context, taskID string, rollback taskMessageReviewRollback) {
@@ -1890,18 +1893,14 @@ func (h *Handlers) restoreTaskReviewForTaskMessage(ctx context.Context, taskID s
 			zap.Error(err))
 	}
 	if !rollback.restoreTask {
-		if _, err := h.taskSvc.UpdateTask(ctx, taskID, &service.UpdateTaskRequest{
-			WorkflowStepID: &rollback.workflowStepID,
-		}); err != nil {
-			h.logger.Warn("failed to restore task workflow step after task message dispatch failure",
-				zap.String("task_id", taskID),
-				zap.Error(err))
-		}
 		return
 	}
-	reviewState := v1.TaskStateReview
+	taskState := rollback.taskState
+	if taskState == "" {
+		taskState = v1.TaskStateReview
+	}
 	if _, err := h.taskSvc.UpdateTask(ctx, taskID, &service.UpdateTaskRequest{
-		State:          &reviewState,
+		State:          &taskState,
 		WorkflowStepID: &rollback.workflowStepID,
 	}); err != nil {
 		h.logger.Warn("failed to restore task to REVIEW after task message dispatch failure",
@@ -1924,14 +1923,15 @@ func (h *Handlers) restoreTaskMessageSessions(ctx context.Context, rollback task
 		}
 	}
 	if rollback.selectedID != "" {
-		if _, ok := rollback.sessionIDs[rollback.selectedID]; !ok {
-			if primaryID := rollback.primarySessionID(); primaryID != "" {
-				if queue := h.sessionLauncher.GetMessageQueue(); queue != nil {
-					if err := queue.TransferSession(ctx, rollback.selectedID, primaryID); err != nil {
-						return err
-					}
+		primaryID := rollback.primarySessionID()
+		if primaryID != "" && rollback.selectedID != primaryID {
+			if queue := h.sessionLauncher.GetMessageQueue(); queue != nil {
+				if err := queue.TransferSession(ctx, rollback.selectedID, primaryID); err != nil {
+					return err
 				}
 			}
+		}
+		if _, ok := rollback.sessionIDs[rollback.selectedID]; !ok {
 			if err := repo.DeleteTaskSession(ctx, rollback.selectedID); err != nil {
 				return err
 			}
@@ -1984,10 +1984,13 @@ func (h *Handlers) resolveSessionAfterTaskMessageTurnStart(ctx context.Context, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload session after on_turn_start: %w", err)
 	}
+	primary, err := h.taskSvc.GetPrimarySession(ctx, taskID)
+	if err == nil && primary != nil && primary.ID != submitted.ID {
+		return primary, nil
+	}
 	if reloaded.State != models.TaskSessionStateCompleted {
 		return reloaded, nil
 	}
-	primary, err := h.taskSvc.GetPrimarySession(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("session was switched but no active session found: %w", err)
 	}
@@ -2034,6 +2037,13 @@ func (h *Handlers) deleteRecordedUserMessage(ctx context.Context, message *model
 	}
 	if err := h.taskSvc.DeleteMessage(ctx, message.ID); err != nil {
 		h.logger.Warn("failed to delete rejected user message for message_task",
+			zap.String("message_id", message.ID),
+			zap.String("task_id", message.TaskID),
+			zap.String("session_id", message.TaskSessionID),
+			zap.Error(err))
+	}
+	if err := h.taskSvc.AbandonOpenTurns(ctx, message.TaskSessionID); err != nil {
+		h.logger.Warn("failed to abandon rejected user message turn for message_task",
 			zap.String("message_id", message.ID),
 			zap.String("task_id", message.TaskID),
 			zap.String("session_id", message.TaskSessionID),

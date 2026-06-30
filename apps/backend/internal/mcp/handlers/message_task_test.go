@@ -446,6 +446,44 @@ func TestHandleMessageTask_WaitingForInput_UsesSessionSelectedByTurnStart(t *tes
 	assert.Contains(t, newMessages[0].Content, "handoff after switch")
 }
 
+func TestHandleMessageTask_WaitingForInput_UsesPrimarySwitchWithoutCompletion(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+
+	replacement := &models.TaskSession{
+		ID:             "sess-2",
+		TaskID:         target.ID,
+		AgentProfileID: "agent-profile-2",
+		State:          models.TaskSessionStateWaitingForInput,
+		IsPrimary:      false,
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, replacement))
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	orch.onTurnStart = func(ctx context.Context, _, _ string) error {
+		oldSession, err := svc.GetTaskSession(ctx, sess.ID)
+		require.NoError(t, err)
+		oldSession.IsPrimary = false
+		require.NoError(t, repo.UpdateTaskSession(ctx, oldSession))
+		require.NoError(t, repo.SetSessionPrimary(ctx, replacement.ID))
+		return nil
+	}
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "primary moved", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "started", payload["status"])
+	assert.Equal(t, replacement.ID, payload["session_id"])
+	require.Len(t, orch.startCreatedCalls, 1)
+	assert.Equal(t, replacement.ID, orch.startCreatedCalls[0].sessionID)
+}
+
 func TestHandleMessageTask_CompletedSessionWithoutSwitch_PromptsSameSession(t *testing.T) {
 	ctx := context.Background()
 	svc, repo := newTestTaskService(t)
@@ -547,6 +585,9 @@ func TestHandleMessageTask_WaitingForInputCompletedWithoutPrimarySwitchRejects(t
 	messages, err := svc.ListMessages(ctx, sess.ID)
 	require.NoError(t, err)
 	assert.Empty(t, messages)
+	activeTurn, err := svc.GetActiveTurn(ctx, sess.ID)
+	require.NoError(t, err)
+	assert.Nil(t, activeTurn)
 }
 
 func TestHandleMessageTask_CreatedSessionStartsAfterTurnStartChangesState(t *testing.T) {
@@ -659,6 +700,7 @@ func TestHandleMessageTask_DispatchErrorRestoresReview(t *testing.T) {
 	orch.onTurnStart = func(ctx context.Context, taskID, _ string) error {
 		updatedTask, err := svc.GetTask(ctx, taskID)
 		require.NoError(t, err)
+		updatedTask.State = v1.TaskStateFailed
 		updatedTask.WorkflowStepID = "step-in-progress"
 		return repo.UpdateTask(ctx, updatedTask)
 	}
@@ -808,6 +850,7 @@ func TestHandleMessageTask_OfficeDispatchErrorRestoresWorkflowStep(t *testing.T)
 	orch.onTurnStart = func(ctx context.Context, taskID, _ string) error {
 		updatedTask, err := svc.GetTask(ctx, taskID)
 		require.NoError(t, err)
+		updatedTask.State = v1.TaskStateFailed
 		updatedTask.WorkflowStepID = "step-in-progress"
 		return repo.UpdateTask(ctx, updatedTask)
 	}
