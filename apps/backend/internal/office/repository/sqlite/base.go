@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
 
@@ -336,7 +337,6 @@ func (r *Repository) createRunTables() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_run_status_requested ON runs(status, requested_at);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_run_idempotency ON runs(idempotency_key) WHERE idempotency_key IS NOT NULL;
-	CREATE INDEX IF NOT EXISTS idx_run_payload_comment_id ON runs(json_extract(payload, '$.comment_id'));
 
 	CREATE TABLE IF NOT EXISTS office_run_skills (
 		run_id TEXT NOT NULL,
@@ -347,7 +347,18 @@ func (r *Repository) createRunTables() error {
 		PRIMARY KEY (run_id, skill_id)
 	);
 	`)
+	if err != nil {
+		return err
+	}
+	_, err = r.db.Exec(runPayloadCommentIDIndexSQL(r.db.DriverName()))
 	return err
+}
+
+func runPayloadCommentIDIndexSQL(driver string) string {
+	return fmt.Sprintf(
+		`CREATE INDEX IF NOT EXISTS idx_run_payload_comment_id ON runs((%s))`,
+		dialect.JSONExtract(driver, "payload", "comment_id"),
+	)
 }
 
 func (r *Repository) createRoutineTables() error {

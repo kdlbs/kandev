@@ -43,7 +43,7 @@ func (r *Repository) runMigrations() {
 func (r *Repository) migrateRunPayloadIndexes() {
 	r.migrate.Apply(
 		"runs.idx_run_payload_comment_id",
-		`CREATE INDEX IF NOT EXISTS idx_run_payload_comment_id ON runs(json_extract(payload, '$.comment_id'))`,
+		runPayloadCommentIDIndexSQL(r.db.DriverName()),
 	)
 }
 

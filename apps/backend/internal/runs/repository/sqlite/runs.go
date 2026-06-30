@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
 )
@@ -217,6 +218,7 @@ func (r *Repository) GetRunsByCommentIDs(
 		args = append(args, id)
 		commentPlaceholders[i] = "?"
 	}
+	commentIDExpr := dialect.JSONExtract(r.ro.DriverName(), "payload", "comment_id")
 	query := fmt.Sprintf(`
 		SELECT id, idempotency_key, status, error_message, requested_at, payload
 		FROM runs
@@ -225,9 +227,14 @@ func (r *Repository) GetRunsByCommentIDs(
 		SELECT id, idempotency_key, status, error_message, requested_at, payload
 		FROM runs
 		WHERE (idempotency_key IS NULL OR idempotency_key NOT IN (%s))
-		  AND json_extract(payload, '$.comment_id') IN (%s)
+		  AND %s IN (%s)
 		ORDER BY requested_at DESC
-	`, strings.Join(keyPlaceholders, ","), strings.Join(keyPlaceholders, ","), strings.Join(commentPlaceholders, ","))
+	`,
+		strings.Join(keyPlaceholders, ","),
+		strings.Join(keyPlaceholders, ","),
+		commentIDExpr,
+		strings.Join(commentPlaceholders, ","),
+	)
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, err
