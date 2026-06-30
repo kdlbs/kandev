@@ -1728,6 +1728,8 @@ func (h *Handlers) dispatchPreparedTaskMessage(ctx context.Context, taskID strin
 			h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
 			return taskMessageDispatchResult{status: "started", sessionID: session.ID}, nil
 		}
+		// Record only after the prompt is accepted; otherwise a failed dispatch
+		// leaves a REVIEW rollback with a user message the agent never saw.
 		status, err := h.promptWithAutoResume(ctx, taskID, session.ID, prompt)
 		if err != nil {
 			return taskMessageDispatchResult{}, err
