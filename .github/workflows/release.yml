@@ -167,6 +167,10 @@ jobs:
                   best_tag = tag
           print(best_tag)
           ")"
+            if [ -z "$LATEST_RELEASE_TAG" ]; then
+              echo "backfill_tag cannot be used: no existing release tags found." >&2
+              exit 1
+            fi
             if [ "$LATEST_RELEASE_TAG" != "$BACKFILL_TAG" ]; then
               echo "backfill_tag must be the latest release tag ($LATEST_RELEASE_TAG) because backfill publishes mutable channels." >&2
               exit 1
@@ -191,7 +195,7 @@ jobs:
 
             for (const [path, version] of versions) {
               if (version !== next) {
-                console.error(`backfill_tag version mismatch: ${tag} points to ${path} version ${version ?? "<missing>"}.`);
+                console.error(`backfill_tag version mismatch: ${tag} points to ${path} version ${version ?? "<missing>"} (expected ${next}).`);
                 process.exit(1);
               }
             }
@@ -574,6 +578,33 @@ jobs:
           ref: ${{ needs.prepare.outputs.ref }}
           persist-credentials: false
 
+      - name: Prepare macOS desktop diagnostics helper
+        if: startsWith(matrix.platform, 'macos-')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          helper="$RUNNER_TEMP/collect-macos-desktop-diagnostics.sh"
+          mkdir -p "$(dirname "$helper")"
+          if [ -f "$GITHUB_WORKSPACE/.github/scripts/collect-macos-desktop-diagnostics.sh" ]; then
+            cp "$GITHUB_WORKSPACE/.github/scripts/collect-macos-desktop-diagnostics.sh" "$helper"
+          else
+            encoded_helper="$RUNNER_TEMP/collect-macos-desktop-diagnostics.sh.b64"
+            gh api \
+              "repos/${{ github.repository }}/contents/.github/scripts/collect-macos-desktop-diagnostics.sh?ref=${{ github.workflow_sha }}" \
+              --jq .content > "$encoded_helper"
+            HELPER="$helper" ENCODED_HELPER="$encoded_helper" python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          encoded = Path(os.environ["ENCODED_HELPER"]).read_text()
+          Path(os.environ["HELPER"]).write_bytes(base64.b64decode(encoded))
+          PY
+          fi
+          chmod +x "$helper"
+          echo "DESKTOP_DIAGNOSTICS_SCRIPT=$helper" >> "$GITHUB_ENV"
+
       - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
         with:
           version: "9.15.9"
@@ -780,7 +811,7 @@ jobs:
               return 0
             fi
 
-            bash "$GITHUB_WORKSPACE/.github/scripts/collect-macos-desktop-diagnostics.sh" "$label" || true
+            bash "${DESKTOP_DIAGNOSTICS_SCRIPT:-$GITHUB_WORKSPACE/.github/scripts/collect-macos-desktop-diagnostics.sh}" "$label" || true
           }
 
           terminate_process_tree() {
@@ -862,7 +893,7 @@ jobs:
           DESKTOP_DIAGNOSTICS_RUST_TARGET: ${{ matrix.rust_target }}
         run: |
           set -euo pipefail
-          bash "$GITHUB_WORKSPACE/.github/scripts/collect-macos-desktop-diagnostics.sh" failure || true
+          bash "${DESKTOP_DIAGNOSTICS_SCRIPT:-$GITHUB_WORKSPACE/.github/scripts/collect-macos-desktop-diagnostics.sh}" failure || true
 
       - name: Upload macOS desktop diagnostics
         if: failure() && startsWith(matrix.platform, 'macos-')

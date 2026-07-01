@@ -39,7 +39,9 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("BACKFILL_TAG: ${{ inputs.backfill_tag }}", WORKFLOW)
         self.assertIn("Backfill existing release tag:", step_block("Compute next version"))
         self.assertIn("backfill_tag is set; the 'bump' input", WORKFLOW)
+        self.assertIn("backfill_tag cannot be used: no existing release tags found.", WORKFLOW)
         self.assertIn("must be the latest release tag", WORKFLOW)
+        self.assertIn("(expected ${next})", WORKFLOW)
 
         for path in (
             "apps/cli/package.json",
@@ -61,6 +63,12 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             "build-web",
             "build-bundles",
             "build-desktop",
+            "docker-amd64",
+            "docker-arm64",
+            "docker-manifest",
+            "docker-universal-amd64",
+            "docker-universal-arm64",
+            "docker-universal-manifest",
             "publish-release",
             "publish-npm",
             "update-homebrew-tap",
@@ -75,14 +83,18 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("TAURI_BUNDLE_ATTEMPTS:", build)
         self.assertIn("run_with_timeout", build)
         self.assertIn("collect_macos_desktop_diagnostics", build)
-        self.assertIn('collect-macos-desktop-diagnostics.sh" "$label" || true', build)
+        self.assertIn("DESKTOP_DIAGNOSTICS_SCRIPT", build)
         self.assertIn("terminate_process_tree_with_signal", build)
         self.assertIn("else\n              status=$?", build)
         self.assertIn("for attempt in", build)
 
+        helper = step_block("Prepare macOS desktop diagnostics helper")
+        self.assertIn("github.workflow_sha", helper)
+        self.assertIn("DESKTOP_DIAGNOSTICS_SCRIPT=$helper", helper)
+
         collect = step_block("Collect macOS desktop diagnostics")
         self.assertIn("if: failure() && startsWith(matrix.platform, 'macos-')", collect)
-        self.assertIn("collect-macos-desktop-diagnostics.sh\" failure || true", collect)
+        self.assertIn("DESKTOP_DIAGNOSTICS_SCRIPT", collect)
 
         upload = step_block("Upload macOS desktop diagnostics")
         self.assertIn("if: failure() && startsWith(matrix.platform, 'macos-')", upload)
