@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { useBulkArchiveDialog } from "./task-session-sidebar-selection";
+import { useBulkConfirmDialog } from "./task-session-sidebar-selection";
 
 const tasks = [
   { id: "a", remoteExecutorType: "docker" },
@@ -8,10 +8,10 @@ const tasks = [
   { id: "c", remoteExecutorType: "sprites" },
 ];
 
-describe("useBulkArchiveDialog", () => {
+describe("useBulkConfirmDialog", () => {
   it("open() captures the ids and their executor types", () => {
     const bulkArchive = vi.fn().mockResolvedValue(undefined);
-    const { result } = renderHook(() => useBulkArchiveDialog(tasks, bulkArchive));
+    const { result } = renderHook(() => useBulkConfirmDialog(tasks, bulkArchive));
 
     act(() => result.current.open(["a", "c"]));
     expect(result.current.state).toEqual({ ids: ["a", "c"], executorTypes: ["docker", "sprites"] });
@@ -19,7 +19,7 @@ describe("useBulkArchiveDialog", () => {
 
   it("confirm() archives the captured ids and clears the dialog", async () => {
     const bulkArchive = vi.fn().mockResolvedValue(undefined);
-    const { result } = renderHook(() => useBulkArchiveDialog(tasks, bulkArchive));
+    const { result } = renderHook(() => useBulkConfirmDialog(tasks, bulkArchive));
 
     act(() => result.current.open(["a", "b"]));
     await act(async () => {
@@ -31,7 +31,7 @@ describe("useBulkArchiveDialog", () => {
 
   it("confirm() is a no-op when no dialog is open", async () => {
     const bulkArchive = vi.fn().mockResolvedValue(undefined);
-    const { result } = renderHook(() => useBulkArchiveDialog(tasks, bulkArchive));
+    const { result } = renderHook(() => useBulkConfirmDialog(tasks, bulkArchive));
 
     await act(async () => {
       await result.current.confirm({ cascade: false });
@@ -42,7 +42,7 @@ describe("useBulkArchiveDialog", () => {
   it("clears the dialog even when archiving rejects", async () => {
     const bulkArchive = vi.fn().mockRejectedValue(new Error("boom"));
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const { result } = renderHook(() => useBulkArchiveDialog(tasks, bulkArchive));
+    const { result } = renderHook(() => useBulkConfirmDialog(tasks, bulkArchive));
 
     act(() => result.current.open(["a"]));
     await act(async () => {

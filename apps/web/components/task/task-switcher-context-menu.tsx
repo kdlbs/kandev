@@ -65,6 +65,8 @@ type ContextMenuProps = {
   /** Active multi-selection; when this task is part of it, actions apply to the whole set. */
   selectedTaskIds?: Set<string>;
   onBulkArchive?: (taskIds: string[]) => void;
+  onBulkDelete?: (taskIds: string[]) => void;
+  onBulkPin?: (taskIds: string[]) => void;
   onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
   onClearSelection?: () => void;
   /** True when the selection spans more than one workflow (disables bulk "Move to step"). */
@@ -88,6 +90,8 @@ export function TaskItemWithContextMenu({
   isDeleting,
   selectedTaskIds,
   onBulkArchive,
+  onBulkDelete,
+  onBulkPin,
   onBulkMove,
   onClearSelection,
   isMixedWorkflowSelection,
@@ -123,6 +127,8 @@ export function TaskItemWithContextMenu({
           isDeleting={isDeleting}
           selectedTaskIds={selectedTaskIds}
           onBulkArchive={onBulkArchive}
+          onBulkDelete={onBulkDelete}
+          onBulkPin={onBulkPin}
           onBulkMove={onBulkMove}
           onClearSelection={onClearSelection}
           isMixedWorkflowSelection={isMixedWorkflowSelection}
@@ -155,6 +161,8 @@ function TaskContextMenuItems({
   isDeleting,
   selectedTaskIds,
   onBulkArchive,
+  onBulkDelete,
+  onBulkPin,
   onBulkMove,
   onClearSelection,
   isMixedWorkflowSelection,
@@ -166,8 +174,31 @@ function TaskContextMenuItems({
   // a non-selected row acts on just that task and leaves the selection intact.
   const actingOnSelection = !!selectedTaskIds?.has(task.id);
   const actingIds = actingOnSelection ? [...selectedTaskIds!] : [task.id];
-  // Delete has no bulk variant here, but deleting a selected row must drop it
-  // from the selection so later plain clicks navigate instead of toggling.
+
+  // With several tasks selected, only actions that make sense for all of them
+  // are offered (Pin / Move / Archive / Delete) — the single-task actions
+  // (Rename, Color, Link, Duplicate) are hidden.
+  if (actingOnSelection && actingIds.length > 1) {
+    return (
+      <BulkSelectionMenuItems
+        task={task}
+        actingIds={actingIds}
+        workflows={workflows}
+        stepsByWorkflowId={stepsByWorkflowId}
+        steps={steps}
+        isMixedWorkflowSelection={isMixedWorkflowSelection}
+        onBulkPin={onBulkPin}
+        onBulkArchive={onBulkArchive}
+        onBulkDelete={onBulkDelete}
+        onBulkMove={onBulkMove}
+        closeMenu={closeMenu}
+        moveTasks={moveTasks}
+      />
+    );
+  }
+
+  // Delete of a lone selected row must drop it from the selection so later plain
+  // clicks navigate instead of toggling.
   const onDelete =
     actingOnSelection && onClearSelection
       ? (id: string) => {
@@ -217,6 +248,76 @@ function TaskContextMenuItems({
         moveTasks={moveTasks}
       />
       <TaskDeleteItem taskId={task.id} isDeleting={isDeleting} onDeleteTask={onDelete} />
+    </>
+  );
+}
+
+/** Reduced menu shown when 2+ tasks are selected — only bulk-valid actions. */
+function BulkSelectionMenuItems({
+  task,
+  actingIds,
+  workflows,
+  stepsByWorkflowId,
+  steps,
+  isMixedWorkflowSelection,
+  onBulkPin,
+  onBulkArchive,
+  onBulkDelete,
+  onBulkMove,
+  closeMenu,
+  moveTasks,
+}: {
+  task: TaskSwitcherItem;
+  actingIds: string[];
+  workflows?: TaskMoveWorkflow[];
+  stepsByWorkflowId?: Record<string, StepDef[]>;
+  steps?: StepDef[];
+  isMixedWorkflowSelection?: boolean;
+  onBulkPin?: (taskIds: string[]) => void;
+  onBulkArchive?: (taskIds: string[]) => void;
+  onBulkDelete?: (taskIds: string[]) => void;
+  onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
+  closeMenu: () => void;
+  moveTasks: ReturnType<typeof useTaskWorkflowMove>;
+}) {
+  const n = actingIds.length;
+  return (
+    <>
+      {onBulkPin && (
+        <ContextMenuItem onSelect={() => onBulkPin(actingIds)}>
+          <IconPin className="mr-2 h-4 w-4" />
+          Pin {n} tasks
+        </ContextMenuItem>
+      )}
+      <TaskArchiveItem
+        taskId={task.id}
+        actingIds={actingIds}
+        actingOnSelection
+        onArchiveTask={undefined}
+        onBulkArchive={onBulkArchive}
+      />
+      <TaskMoveItems
+        task={task}
+        workflows={workflows}
+        stepsByWorkflowId={stepsByWorkflowId}
+        steps={steps}
+        onMoveToStep={undefined}
+        actingIds={actingIds}
+        actingOnSelection
+        onBulkMove={onBulkMove}
+        isMixedWorkflowSelection={isMixedWorkflowSelection}
+        closeMenu={closeMenu}
+        moveTasks={moveTasks}
+      />
+      {onBulkDelete && (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuItem variant="destructive" onSelect={() => onBulkDelete(actingIds)}>
+            <IconTrash className="mr-2 h-4 w-4" />
+            Delete {n} tasks
+          </ContextMenuItem>
+        </>
+      )}
     </>
   );
 }

@@ -2,20 +2,25 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const archiveTaskById = vi.fn();
+const deleteTaskById = vi.fn();
 const archiveAndSwitch = vi.fn();
+const removeTaskFromBoard = vi.fn();
 const removeTasksFromStore = vi.fn();
 const moveTasks = vi.fn();
 const toast = vi.fn();
 let activeTaskId: string | null = null;
 
 vi.mock("./use-task-actions", () => ({
-  useTaskActions: () => ({ archiveTaskById }),
+  useTaskActions: () => ({ archiveTaskById, deleteTaskById }),
   useArchiveAndSwitchTask: () => archiveAndSwitch,
 }));
+vi.mock("./use-task-removal", () => ({ useTaskRemoval: () => ({ removeTaskFromBoard }) }));
 vi.mock("./use-task-workflow-move", () => ({ useTaskWorkflowMove: () => moveTasks }));
 vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast }) }));
 vi.mock("@/components/state-provider", () => ({
-  useAppStoreApi: () => ({ getState: () => ({ tasks: { activeTaskId } }) }),
+  useAppStoreApi: () => ({
+    getState: () => ({ tasks: { activeTaskId, activeSessionId: null } }),
+  }),
 }));
 vi.mock("./use-task-multi-select", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./use-task-multi-select")>();
@@ -27,7 +32,9 @@ import { useSidebarMultiSelect } from "./use-sidebar-multi-select";
 beforeEach(() => {
   activeTaskId = null;
   archiveTaskById.mockReset().mockResolvedValue(undefined);
+  deleteTaskById.mockReset().mockResolvedValue(undefined);
   archiveAndSwitch.mockReset().mockResolvedValue(undefined);
+  removeTaskFromBoard.mockReset().mockResolvedValue(undefined);
   removeTasksFromStore.mockReset();
   moveTasks.mockReset().mockResolvedValue(undefined);
   toast.mockReset();
@@ -85,7 +92,9 @@ describe("useSidebarMultiSelect", () => {
     rerender({ ws: "ws2" });
     expect(result.current.selectedIds.size).toBe(0);
   });
+});
 
+describe("useSidebarMultiSelect — bulk actions", () => {
   it("bulkArchive removes all on full success and clears the selection", async () => {
     const { result } = renderHook(() => useSidebarMultiSelect("ws1"));
     await act(async () => {
@@ -128,6 +137,44 @@ describe("useSidebarMultiSelect", () => {
       await result.current.bulkArchive([]);
     });
     expect(archiveTaskById).not.toHaveBeenCalled();
+  });
+
+  it("bulkDelete removes all on full success and clears the selection", async () => {
+    const { result } = renderHook(() => useSidebarMultiSelect("ws1"));
+    await act(async () => {
+      await result.current.bulkDelete(["a", "b"]);
+    });
+    expect(deleteTaskById).toHaveBeenCalledTimes(2);
+    expect(removeTasksFromStore).toHaveBeenCalledWith(new Set(["a", "b"]));
+    expect(result.current.selectedIds.size).toBe(0);
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it("bulkDelete keeps failed ids selected and toasts on partial failure", async () => {
+    deleteTaskById.mockImplementation((id: string) =>
+      id === "b" ? Promise.reject(new Error("nope")) : Promise.resolve(),
+    );
+    const { result } = renderHook(() => useSidebarMultiSelect("ws1"));
+    await act(async () => {
+      await result.current.bulkDelete(["a", "b"]);
+    });
+    expect(result.current.selectedIds).toEqual(new Set(["b"]));
+    expect(toast).toHaveBeenCalledWith(expect.objectContaining({ variant: "error" }));
+  });
+
+  it("bulkDelete routes the active task through the switch-aware removal", async () => {
+    activeTaskId = "a";
+    const { result } = renderHook(() => useSidebarMultiSelect("ws1"));
+    await act(async () => {
+      await result.current.bulkDelete(["a", "b"]);
+    });
+    // 'b' deleted directly; 'a' (active) deleted then removed-from-board to switch.
+    expect(deleteTaskById).toHaveBeenCalledWith("b", undefined);
+    expect(deleteTaskById).toHaveBeenCalledWith("a", undefined);
+    expect(removeTaskFromBoard).toHaveBeenCalledWith(
+      "a",
+      expect.objectContaining({ wasActiveTaskId: "a" }),
+    );
   });
 
   it("bulkMove clears the selection on success", async () => {

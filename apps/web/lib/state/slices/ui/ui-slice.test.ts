@@ -117,6 +117,20 @@ describe("sidebar task prefs (pin + manual order)", () => {
     expect(JSON.parse(window.localStorage.getItem(PINNED_KEY) ?? "null")).toEqual(["t2"]);
   });
 
+  it("pinTasks pins all given ids without unpinning existing ones", () => {
+    const store = makeStore();
+    store.getState().togglePinnedTask("t1");
+
+    store.getState().pinTasks(["t1", "t2", "t3"]);
+    // t1 already pinned stays pinned; t2/t3 added.
+    expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["t1", "t2", "t3"]);
+    expect(JSON.parse(window.localStorage.getItem(PINNED_KEY) ?? "null")).toEqual([
+      "t1",
+      "t2",
+      "t3",
+    ]);
+  });
+
   it("setSidebarTaskOrder replaces and persists", () => {
     const store = makeStore();
     store.getState().setSidebarTaskOrder(["a", "b", "c"]);

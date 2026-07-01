@@ -63,6 +63,24 @@ export function buildSidebarTaskPrefsActions(set: ImmerSet, get: () => UISlice) 
       });
       syncSidebarTaskPrefs(get().sidebarTaskPrefs, set);
     },
+    // Pin every id that isn't already pinned (bulk "Pin", not a per-id toggle).
+    pinTasks: (taskIds: string[]) => {
+      let changed = false;
+      set((draft) => {
+        const list = draft.sidebarTaskPrefs.pinnedTaskIds;
+        for (const id of taskIds) {
+          if (!list.includes(id)) {
+            list.push(id);
+            changed = true;
+          }
+        }
+        if (changed) {
+          draft.sidebarTaskPrefs.syncPending = true;
+          setStoredPinnedTaskIds(list);
+        }
+      });
+      if (changed) syncSidebarTaskPrefs(get().sidebarTaskPrefs, set);
+    },
     setSidebarTaskOrder: (orderedTaskIds: string[]) => {
       set((draft) => {
         draft.sidebarTaskPrefs.syncPending = true;

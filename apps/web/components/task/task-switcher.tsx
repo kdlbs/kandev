@@ -75,6 +75,8 @@ type TaskSwitcherProps = {
   onToggleSelectTask?: (taskId: string) => void;
   onSelectTaskRange?: (taskId: string) => void;
   onBulkArchive?: (taskIds: string[]) => void;
+  onBulkDelete?: (taskIds: string[]) => void;
+  onBulkPin?: (taskIds: string[]) => void;
   onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
   onClearSelection?: () => void;
   isMixedWorkflowSelection?: boolean;
@@ -192,6 +194,8 @@ type TaskRowProps = {
   onToggleSelectTask?: (taskId: string) => void;
   onSelectTaskRange?: (taskId: string) => void;
   onBulkArchive?: (taskIds: string[]) => void;
+  onBulkDelete?: (taskIds: string[]) => void;
+  onBulkPin?: (taskIds: string[]) => void;
   onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
   onClearSelection?: () => void;
   isMixedWorkflowSelection?: boolean;
@@ -220,6 +224,8 @@ function TaskRow({
   onToggleSelectTask,
   onSelectTaskRange,
   onBulkArchive,
+  onBulkDelete,
+  onBulkPin,
   onBulkMove,
   onClearSelection,
   isMixedWorkflowSelection,
@@ -245,6 +251,8 @@ function TaskRow({
       isDeleting={deletingTaskId === task.id}
       selectedTaskIds={selectedTaskIds}
       onBulkArchive={onBulkArchive}
+      onBulkDelete={onBulkDelete}
+      onBulkPin={onBulkPin}
       onBulkMove={onBulkMove}
       onClearSelection={onClearSelection}
       isMixedWorkflowSelection={isMixedWorkflowSelection}
@@ -421,6 +429,8 @@ type GroupSectionProps = {
   onToggleSelectTask?: (taskId: string) => void;
   onSelectTaskRange?: (taskId: string) => void;
   onBulkArchive?: (taskIds: string[]) => void;
+  onBulkDelete?: (taskIds: string[]) => void;
+  onBulkPin?: (taskIds: string[]) => void;
   onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
   onClearSelection?: () => void;
   isMixedWorkflowSelection?: boolean;
@@ -454,6 +464,8 @@ function GroupSection({
   onToggleSelectTask,
   onSelectTaskRange,
   onBulkArchive,
+  onBulkDelete,
+  onBulkPin,
   onBulkMove,
   onClearSelection,
   isMixedWorkflowSelection,
@@ -482,6 +494,8 @@ function GroupSection({
       onToggleSelectTask,
       onSelectTaskRange,
       onBulkArchive,
+      onBulkDelete,
+      onBulkPin,
       onBulkMove,
       onClearSelection,
       isMixedWorkflowSelection,
@@ -536,6 +550,8 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   onToggleSelectTask,
   onSelectTaskRange,
   onBulkArchive,
+  onBulkDelete,
+  onBulkPin,
   onBulkMove,
   onClearSelection,
   isMixedWorkflowSelection,
@@ -584,6 +600,8 @@ export const TaskSwitcher = memo(function TaskSwitcher({
           onToggleSelectTask={onToggleSelectTask}
           onSelectTaskRange={onSelectTaskRange}
           onBulkArchive={onBulkArchive}
+          onBulkDelete={onBulkDelete}
+          onBulkPin={onBulkPin}
           onBulkMove={onBulkMove}
           onClearSelection={onClearSelection}
           isMixedWorkflowSelection={isMixedWorkflowSelection}

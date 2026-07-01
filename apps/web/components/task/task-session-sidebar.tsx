@@ -15,7 +15,7 @@ import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useWorkspaceSidebarTasks } from "@/hooks/domains/kanban/use-workspace-sidebar-tasks";
 import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
-import { useSidebarSelection, SidebarBulkArchiveDialog } from "./task-session-sidebar-selection";
+import { useSidebarSelection, SidebarBulkDialogs } from "./task-session-sidebar-selection";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { repositorySlug } from "@/lib/repository-slug";
@@ -673,7 +673,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
         />
       </PanelBody>
       <SidebarDialogs actions={sidebarActions} repositories={repositories} />
-      <SidebarBulkArchiveDialog selection={selection} />
+      <SidebarBulkDialogs selection={selection} />
     </PanelRoot>
   );
 });

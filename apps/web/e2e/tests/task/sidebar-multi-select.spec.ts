@@ -164,6 +164,81 @@ test.describe("Sidebar selection-aware context menu", () => {
     await expect(sidebar.row(b.id)).not.toBeVisible({ timeout: 5_000 });
   });
 
+  test("multi-selection menu offers only bulk-valid actions", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const [nav, a, b] = await seedTasks(apiClient, seedData, [
+      "SB Menu Nav",
+      "SB Menu A",
+      "SB Menu B",
+    ]);
+    const sidebar = await openSidebarOn(testPage, nav.id);
+
+    await sidebar.cmdClick(a.id);
+    await sidebar.cmdClick(b.id);
+    await sidebar.rightClick(a.id);
+
+    // Bulk-valid actions are present…
+    await expect(sidebar.bulkPinMenuItem(2)).toBeVisible({ timeout: 5_000 });
+    await expect(sidebar.bulkArchiveMenuItem(2)).toBeVisible();
+    await expect(sidebar.bulkDeleteMenuItem(2)).toBeVisible();
+    // …and the single-task-only actions are hidden.
+    await expect(sidebar.menuItem("Rename")).not.toBeVisible();
+    await expect(sidebar.menuItem("Duplicate")).not.toBeVisible();
+    await testPage.keyboard.press("Escape");
+  });
+
+  test("bulk Delete prompts for the selection and removes the rows", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const [nav, a, b] = await seedTasks(apiClient, seedData, [
+      "SB Del Nav",
+      "SB Del A",
+      "SB Del B",
+    ]);
+    const sidebar = await openSidebarOn(testPage, nav.id);
+
+    await sidebar.cmdClick(a.id);
+    await sidebar.cmdClick(b.id);
+    await sidebar.rightClick(a.id);
+
+    const del = sidebar.bulkDeleteMenuItem(2);
+    await expect(del).toBeVisible({ timeout: 5_000 });
+    await del.click();
+
+    const confirm = sidebar.bulkDeleteConfirm();
+    await expect(confirm).toBeVisible({ timeout: 5_000 });
+    await confirm.click();
+
+    await expect(sidebar.row(a.id)).not.toBeVisible({ timeout: 10_000 });
+    await expect(sidebar.row(b.id)).not.toBeVisible({ timeout: 5_000 });
+  });
+
+  test("bulk Pin pins all selected rows", async ({ testPage, apiClient, seedData }) => {
+    const [nav, a, b] = await seedTasks(apiClient, seedData, [
+      "SB Pin Nav",
+      "SB Pin A",
+      "SB Pin B",
+    ]);
+    const sidebar = await openSidebarOn(testPage, nav.id);
+
+    await sidebar.cmdClick(a.id);
+    await sidebar.cmdClick(b.id);
+    await sidebar.rightClick(a.id);
+
+    const pin = sidebar.bulkPinMenuItem(2);
+    await expect(pin).toBeVisible({ timeout: 5_000 });
+    await pin.click();
+
+    // Both rows now render the pinned icon.
+    await expect(sidebar.row(a.id).getByTestId("task-pinned-icon")).toBeVisible({ timeout: 5_000 });
+    await expect(sidebar.row(b.id).getByTestId("task-pinned-icon")).toBeVisible({ timeout: 5_000 });
+  });
+
   test("right-clicking an unselected row acts on that row only", async ({
     testPage,
     apiClient,

@@ -69,4 +69,20 @@ export class SidebarTasksPage {
   bulkArchiveConfirm(): Locator {
     return this.page.getByTestId("sidebar-bulk-archive-confirm");
   }
+
+  bulkPinMenuItem(count: number): Locator {
+    return this.page.getByRole("menuitem", { name: `Pin ${count} tasks` });
+  }
+
+  bulkDeleteMenuItem(count: number): Locator {
+    return this.page.getByRole("menuitem", { name: `Delete ${count} tasks` });
+  }
+
+  bulkDeleteConfirm(): Locator {
+    return this.page.getByTestId("sidebar-bulk-delete-confirm");
+  }
+
+  menuItem(name: string): Locator {
+    return this.page.getByRole("menuitem", { name, exact: true });
+  }
 }
