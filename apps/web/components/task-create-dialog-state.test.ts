@@ -187,6 +187,43 @@ describe("useDialogFormState — remoteRepos mode", () => {
       source: "paste",
     });
   });
+
+  it("clears seeded PR metadata when a remote repo URL changes", () => {
+    const initialValues = {
+      title: "",
+      githubUrl: PR_URL_42,
+      branch: "feature/x",
+      checkoutBranch: "feature/x",
+      prNumber: 42,
+      prBaseBranch: "main",
+    };
+    const { result, rerender } = renderHook(
+      ({ open }: { open: boolean }) => useDialogFormState(open, "ws-1", null, initialValues),
+      { initialProps: { open: false } },
+    );
+
+    rerender({ open: true });
+    const key = result.current.remoteRepos[0]?.key;
+    expect(result.current.remoteRepos[0]).toMatchObject({
+      url: PR_URL_42,
+      branch: "feature/x",
+      prNumber: 42,
+      prBaseBranch: "main",
+      prHeadBranch: "feature/x",
+    });
+
+    act(() => {
+      result.current.updateRemoteRepo(key!, { url: "https://github.com/acme/site/pull/99" });
+    });
+
+    expect(result.current.remoteRepos[0]).toMatchObject({
+      url: "https://github.com/acme/site/pull/99",
+      branch: "feature/x",
+    });
+    expect(result.current.remoteRepos[0]?.prNumber).toBeUndefined();
+    expect(result.current.remoteRepos[0]?.prBaseBranch).toBeUndefined();
+    expect(result.current.remoteRepos[0]?.prHeadBranch).toBeUndefined();
+  });
 });
 
 describe("useDialogFormState — remoteRepos key allocation", () => {

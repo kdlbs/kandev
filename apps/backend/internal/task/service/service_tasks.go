@@ -517,7 +517,7 @@ func (s *Service) findSafeProviderRepository(ctx context.Context, workspaceID st
 		if candidate == nil || candidate.ID == repo.ID {
 			continue
 		}
-		if candidate.SourceType == sourceTypeLocal || !sameProviderIdentity(repo, candidate) {
+		if !sameProviderIdentity(repo, candidate) {
 			continue
 		}
 		if s.isKandevTaskWorktreeRepository(candidate) {

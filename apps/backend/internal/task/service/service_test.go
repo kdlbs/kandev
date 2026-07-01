@@ -395,6 +395,70 @@ func TestService_CreateTask_RewritesTaskWorktreeRepositoryIDToProviderRepository
 	}
 }
 
+func TestService_CreateTask_RewritesTaskWorktreeRepositoryIDToSafeLocalRepository(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	const (
+		workspaceID  = "ws-1"
+		workflowID   = "wf-1"
+		badRepoID    = "repo-task-worktree"
+		localRepoID  = "repo-local-source"
+		prHeadBranch = "feature/adding-a-download-ot-5sl"
+	)
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: workflowID, WorkspaceID: workspaceID, Name: "WF"})
+	_ = repo.CreateRepository(ctx, &models.Repository{
+		ID:            badRepoID,
+		WorkspaceID:   workspaceID,
+		Name:          "kdlbs/kandev task worktree",
+		SourceType:    sourceTypeLocal,
+		LocalPath:     "/root/.kandev/tasks/pr-1541-fix-skip-cle_3bm/kdlbs-kandev",
+		Provider:      "github",
+		ProviderOwner: "kdlbs",
+		ProviderName:  "kandev",
+		DefaultBranch: "main",
+	})
+	_ = repo.CreateRepository(ctx, &models.Repository{
+		ID:            localRepoID,
+		WorkspaceID:   workspaceID,
+		Name:          "kdlbs/kandev",
+		SourceType:    sourceTypeLocal,
+		LocalPath:     "/workspaces/kandev",
+		Provider:      "github",
+		ProviderOwner: "kdlbs",
+		ProviderName:  "kandev",
+		DefaultBranch: "main",
+	})
+
+	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID:    workspaceID,
+		WorkflowID:     workflowID,
+		WorkflowStepID: "step-1",
+		Title:          "PR review",
+		Repositories: []TaskRepositoryInput{
+			{RepositoryID: badRepoID, BaseBranch: prHeadBranch},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if len(task.Repositories) != 1 {
+		t.Fatalf("expected 1 task repository, got %d", len(task.Repositories))
+	}
+	if task.Repositories[0].RepositoryID != localRepoID {
+		t.Fatalf("expected safe local repository %q, got %q", localRepoID, task.Repositories[0].RepositoryID)
+	}
+	repos, listErr := repo.ListRepositories(ctx, workspaceID)
+	if listErr != nil {
+		t.Fatalf("ListRepositories: %v", listErr)
+	}
+	if len(repos) != 2 {
+		t.Fatalf("expected no provider repository to be created, got %d repositories", len(repos))
+	}
+}
+
 func TestService_CreateTask_CreatesProviderRepositoryForTaskWorktreeRepositoryID(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
