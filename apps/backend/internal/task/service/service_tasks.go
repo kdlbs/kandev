@@ -25,7 +25,7 @@ import (
 // Used when a caller omits priority so the DB CHECK constraint is satisfied.
 const defaultPriority = "medium"
 
-const kandevTaskWorktreePathSegment = "/.kandev/tasks/"
+const defaultKandevTaskWorktreePathSegment = "/.kandev/tasks/"
 
 // ErrSubtaskDepthExceeded is returned when a caller tries to create a
 // subtask of a kanban subtask (nesting depth > 1). Office task trees are
@@ -461,7 +461,7 @@ func (s *Service) resolveRepoInputID(ctx context.Context, workspaceID, repositor
 }
 
 func (s *Service) safeRepositoryIDForTaskWorktree(ctx context.Context, workspaceID string, repo *models.Repository) (string, bool, error) {
-	if !isKandevTaskWorktreeRepository(repo) {
+	if !s.isKandevTaskWorktreeRepository(repo) {
 		return "", false, nil
 	}
 	if repo.Provider == "" || repo.ProviderOwner == "" || repo.ProviderName == "" {
@@ -520,7 +520,7 @@ func (s *Service) findSafeProviderRepository(ctx context.Context, workspaceID st
 		if candidate.SourceType == sourceTypeLocal || !sameProviderIdentity(repo, candidate) {
 			continue
 		}
-		if isKandevTaskWorktreeRepository(candidate) {
+		if s.isKandevTaskWorktreeRepository(candidate) {
 			continue
 		}
 		return candidate, nil
@@ -534,14 +534,40 @@ func sameProviderIdentity(left, right *models.Repository) bool {
 		left.ProviderName == right.ProviderName
 }
 
-func isKandevTaskWorktreeRepository(repo *models.Repository) bool {
-	return repo != nil && isKandevTaskWorktreePath(repo.LocalPath)
+func (s *Service) isKandevTaskWorktreeRepository(repo *models.Repository) bool {
+	return repo != nil && isKandevTaskWorktreePath(repo.LocalPath, s.discoveryConfig.TaskWorktreeRoots)
 }
 
-func isKandevTaskWorktreePath(path string) bool {
+func isKandevTaskWorktreePath(path string, taskWorktreeRoots []string) bool {
+	normalized := normalizeTaskWorktreePath(path)
+	if normalized == "" {
+		return false
+	}
+	for _, root := range taskWorktreeRoots {
+		if pathAtOrInsideRoot(normalized, normalizeTaskWorktreePath(root)) {
+			return true
+		}
+	}
+	return strings.Contains(normalized, defaultKandevTaskWorktreePathSegment) ||
+		strings.HasSuffix(normalized, strings.TrimSuffix(defaultKandevTaskWorktreePathSegment, "/"))
+}
+
+func normalizeTaskWorktreePath(path string) string {
 	normalized := filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
-	return strings.Contains(normalized, kandevTaskWorktreePathSegment) ||
-		strings.HasSuffix(normalized, strings.TrimSuffix(kandevTaskWorktreePathSegment, "/"))
+	if normalized == "." || normalized == "" {
+		return ""
+	}
+	return normalized
+}
+
+func pathAtOrInsideRoot(path, root string) bool {
+	if path == "" || root == "" {
+		return false
+	}
+	if root != "/" {
+		root = strings.TrimRight(root, "/")
+	}
+	return path == root || strings.HasPrefix(path, root+"/")
 }
 
 // resolveRepoInputLocal handles the LocalPath branch of resolveRepoInput.

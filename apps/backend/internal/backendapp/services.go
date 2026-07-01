@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"go.uber.org/zap"
 
@@ -70,8 +71,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		eventBus,
 		log,
 		taskservice.RepositoryDiscoveryConfig{
-			Roots:    cfg.RepositoryDiscovery.Roots,
-			MaxDepth: cfg.RepositoryDiscovery.MaxDepth,
+			Roots:             cfg.RepositoryDiscovery.Roots,
+			MaxDepth:          cfg.RepositoryDiscovery.MaxDepth,
+			TaskWorktreeRoots: []string{filepath.Join(cfg.ResolvedHomeDir(), "tasks")},
 		},
 	)
 

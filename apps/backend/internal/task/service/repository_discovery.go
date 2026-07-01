@@ -15,8 +15,9 @@ import (
 )
 
 type RepositoryDiscoveryConfig struct {
-	Roots    []string
-	MaxDepth int
+	Roots             []string
+	MaxDepth          int
+	TaskWorktreeRoots []string
 }
 
 // LocalRepoStatus reports the current branch and dirty file paths for a

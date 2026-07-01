@@ -1,7 +1,7 @@
 import { render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Icon } from "@tabler/icons-react";
-import type { GitHubPR } from "@/lib/types/github";
+import type { GitHubIssue, GitHubPR } from "@/lib/types/github";
 import {
   repositoryId,
   workspaceId,
@@ -15,8 +15,10 @@ const NOW = "2026-07-01T00:00:00Z";
 const WORKSPACE_ID = "workspace-1";
 const WORKFLOW_ID = "workflow-1";
 const PR_HEAD_BRANCH = "feature/adding-a-download-ot-5sl";
+const TASK_WORKTREE_ROOT = "/root/.kandev/tasks";
 const TASK_WORKTREE_PATH = "/root/.kandev/tasks/pr-1541-fix-skip-cle_3bm/kdlbs-kandev";
 const REPO_URL = "https://github.com/kdlbs/kandev/pull/1567";
+const ISSUE_URL = "https://github.com/kdlbs/kandev/issues/1567";
 
 const mocks = vi.hoisted(() => ({
   dialogProps: undefined as { initialValues?: Record<string, unknown> } | undefined,
@@ -90,6 +92,26 @@ function pr(overrides: Partial<GitHubPR> = {}): GitHubPR {
   };
 }
 
+function issue(overrides: Partial<GitHubIssue> = {}): GitHubIssue {
+  return {
+    number: 1567,
+    title: "add Download option",
+    body: "",
+    url: ISSUE_URL,
+    html_url: ISSUE_URL,
+    state: "open",
+    author_login: "contributor",
+    repo_owner: "kdlbs",
+    repo_name: "kandev",
+    labels: [],
+    assignees: [],
+    created_at: NOW,
+    updated_at: NOW,
+    closed_at: null,
+    ...overrides,
+  };
+}
+
 type RepoOverrides = Omit<Partial<Repository>, "id" | "workspace_id"> & { id: string };
 
 function repo(overrides: RepoOverrides): Repository {
@@ -132,6 +154,24 @@ function renderLauncher(repositories: Repository[], prOverrides: Partial<GitHubP
   return mocks.dialogProps?.initialValues;
 }
 
+function renderIssueLauncher(
+  repositories: Repository[],
+  issueOverrides: Partial<GitHubIssue> = {},
+) {
+  const payload: LaunchPayload = { kind: "issue", issue: issue(issueOverrides), preset };
+  render(
+    <QuickTaskLauncher
+      workspaceId={WORKSPACE_ID}
+      workflows={[workflow]}
+      steps={[step]}
+      repositories={repositories}
+      payload={payload}
+      onClose={vi.fn()}
+    />,
+  );
+  return mocks.dialogProps?.initialValues;
+}
+
 afterEach(() => {
   mocks.dialogProps = undefined;
   mocks.push.mockClear();
@@ -148,11 +188,13 @@ describe("QuickTaskLauncher repository defaults", () => {
       githubUrl: REPO_URL,
       branch: PR_HEAD_BRANCH,
       checkoutBranch: PR_HEAD_BRANCH,
+      prNumber: 1567,
+      prBaseBranch: "main",
     });
     expect(initialValues?.repositoryId).toBeUndefined();
   });
 
-  it("prefers a provider-backed GitHub repo over a matching task worktree path", () => {
+  it("opens PR launches in Remote mode even when a provider-backed repo exists", () => {
     const initialValues = renderLauncher([
       repo({ id: "task-worktree", local_path: TASK_WORKTREE_PATH }),
       repo({
@@ -163,22 +205,35 @@ describe("QuickTaskLauncher repository defaults", () => {
     ]);
 
     expect(initialValues).toMatchObject({
-      repositoryId: "provider-repo",
+      githubUrl: REPO_URL,
       branch: PR_HEAD_BRANCH,
       checkoutBranch: PR_HEAD_BRANCH,
+      prNumber: 1567,
+      prBaseBranch: "main",
+    });
+    expect(initialValues?.repositoryId).toBeUndefined();
+  });
+
+  it("still preselects an ordinary matching local GitHub repo for issues", () => {
+    const initialValues = renderIssueLauncher([
+      repo({ id: "local-repo", local_path: "/work/kandev" }),
+    ]);
+
+    expect(initialValues).toMatchObject({
+      repositoryId: "local-repo",
     });
     expect(initialValues?.githubUrl).toBeUndefined();
   });
 
-  it("still preselects an ordinary matching local GitHub repo", () => {
-    const initialValues = renderLauncher([repo({ id: "local-repo", local_path: "/work/kandev" })]);
+  it("rejects task worktree roots without a trailing slash", () => {
+    const initialValues = renderIssueLauncher([
+      repo({ id: "task-worktree-root", local_path: TASK_WORKTREE_ROOT }),
+    ]);
 
     expect(initialValues).toMatchObject({
-      repositoryId: "local-repo",
-      branch: PR_HEAD_BRANCH,
-      checkoutBranch: PR_HEAD_BRANCH,
+      githubUrl: "github.com/kdlbs/kandev",
     });
-    expect(initialValues?.githubUrl).toBeUndefined();
+    expect(initialValues?.repositoryId).toBeUndefined();
   });
 
   it("derives a PR URL when the GitHub payload omits URL fields", () => {
@@ -191,6 +246,8 @@ describe("QuickTaskLauncher repository defaults", () => {
       githubUrl: REPO_URL,
       branch: PR_HEAD_BRANCH,
       checkoutBranch: PR_HEAD_BRANCH,
+      prNumber: 1567,
+      prBaseBranch: "main",
     });
     expect(initialValues?.repositoryId).toBeUndefined();
   });

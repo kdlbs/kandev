@@ -21,6 +21,12 @@ import type { FileAttachment } from "@/components/task/chat/file-attachment";
 import type { MessageAttachment } from "@/lib/services/session-launch-service";
 
 type CreateTaskParams = Parameters<typeof createTask>[0];
+type CreateTaskRepositoryPayload = NonNullable<CreateTaskParams["repositories"]>[number];
+type RemoteRepoPRMetadata = {
+  headBranch?: string;
+  baseBranch?: string;
+  number?: number;
+};
 const selectionDebug = createDebugLogger("task-create:selection");
 const BRANCH_AUTOPICK_DEBUG = "branch-autopick";
 
@@ -361,32 +367,64 @@ function buildRemoteRepoPayload(opts: {
 }): NonNullable<CreateTaskParams["repositories"]> {
   const nonEmpty = opts.remoteRepos.filter((r) => r.url.trim() !== "");
   if (nonEmpty.length === 0) return [];
-  return nonEmpty.map((row) => {
-    const url = row.url.trim();
-    // The cache is keyed on the trimmed URL (ensure() also trims), so we
-    // must look it up with the trimmed value too. Passing `row.url` directly
-    // would miss the cache when the user has stray whitespace around their
-    // URL and silently lose the PR base-branch anchoring.
-    const prInfo = opts.prInfoByUrl?.info(url);
-    if (prInfo) {
-      const isPrAutoSelection = !!prInfo.prHeadBranch && row.branch === prInfo.prHeadBranch;
-      const baseBranch = isPrAutoSelection
-        ? prInfo.prBaseBranch || undefined
-        : row.branch || undefined;
-      return {
-        repository_id: "",
-        base_branch: baseBranch,
-        checkout_branch: isPrAutoSelection ? prInfo.prHeadBranch || undefined : undefined,
-        github_url: url,
-      };
-    }
-    return {
-      repository_id: "",
-      base_branch: row.branch || undefined,
-      checkout_branch: undefined,
-      github_url: url,
-    };
-  });
+  return nonEmpty.map((row) => buildRemoteRepoPayloadRow(row, opts.prInfoByUrl));
+}
+
+function buildRemoteRepoPayloadRow(
+  row: TaskRemoteRepoRow,
+  prInfoByUrl?: Pick<UsePRInfoByURLResult, "info">,
+): CreateTaskRepositoryPayload {
+  const url = row.url.trim();
+  const metadata = remoteRepoPRMetadata(row, url, prInfoByUrl);
+  if (metadata) return buildRemoteRepoPRPayload(row, url, metadata);
+  return buildPlainRemoteRepoPayload(row, url);
+}
+
+function remoteRepoPRMetadata(
+  row: TaskRemoteRepoRow,
+  url: string,
+  prInfoByUrl?: Pick<UsePRInfoByURLResult, "info">,
+): RemoteRepoPRMetadata | null {
+  // The cache is keyed on the trimmed URL (ensure() also trims), so we
+  // must look it up with the trimmed value too. Passing `row.url` directly
+  // would miss the cache when the user has stray whitespace around their
+  // URL and silently lose the PR base-branch anchoring.
+  const prInfo = prInfoByUrl?.info(url);
+  const number = prInfo?.prNumber ?? row.prNumber;
+  if (!prInfo && !number) return null;
+  return {
+    headBranch: prInfo?.prHeadBranch ?? row.prHeadBranch,
+    baseBranch: prInfo?.prBaseBranch ?? row.prBaseBranch,
+    number,
+  };
+}
+
+function buildRemoteRepoPRPayload(
+  row: TaskRemoteRepoRow,
+  url: string,
+  metadata: RemoteRepoPRMetadata,
+): CreateTaskRepositoryPayload {
+  const isPrAutoSelection = !!metadata.headBranch && row.branch === metadata.headBranch;
+  const baseBranch = isPrAutoSelection ? metadata.baseBranch || undefined : row.branch || undefined;
+  return {
+    repository_id: "",
+    base_branch: baseBranch,
+    checkout_branch: isPrAutoSelection ? metadata.headBranch || undefined : undefined,
+    pr_number: isPrAutoSelection ? metadata.number || undefined : undefined,
+    github_url: url,
+  };
+}
+
+function buildPlainRemoteRepoPayload(
+  row: TaskRemoteRepoRow,
+  url: string,
+): CreateTaskRepositoryPayload {
+  return {
+    repository_id: "",
+    base_branch: row.branch || undefined,
+    checkout_branch: undefined,
+    github_url: url,
+  };
 }
 
 function resolveRowDefaultBranch(

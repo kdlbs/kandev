@@ -453,6 +453,52 @@ func TestService_CreateTask_CreatesProviderRepositoryForTaskWorktreeRepositoryID
 	}
 }
 
+func TestService_CreateTask_ErrorsForTaskWorktreeRepositoryWithoutProviderIdentity(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	const (
+		workspaceID = "ws-1"
+		workflowID  = "wf-1"
+		badRepoID   = "repo-task-worktree"
+	)
+
+	svc.discoveryConfig.TaskWorktreeRoots = []string{"/data/tasks"}
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: workflowID, WorkspaceID: workspaceID, Name: "WF"})
+	_ = repo.CreateRepository(ctx, &models.Repository{
+		ID:          badRepoID,
+		WorkspaceID: workspaceID,
+		Name:        "task worktree without provider identity",
+		SourceType:  sourceTypeLocal,
+		LocalPath:   "/data/tasks/pr-1541-fix-skip-cle_3bm/kdlbs-kandev",
+	})
+
+	_, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID:    workspaceID,
+		WorkflowID:     workflowID,
+		WorkflowStepID: "step-1",
+		Title:          "PR review",
+		Repositories: []TaskRepositoryInput{
+			{RepositoryID: badRepoID, BaseBranch: "feature/pr-head"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected missing provider identity error")
+	}
+	if !strings.Contains(err.Error(), "points at a Kandev task worktree") {
+		t.Fatalf("expected task worktree provider identity error, got %v", err)
+	}
+	repos, listErr := repo.ListRepositories(ctx, workspaceID)
+	if listErr != nil {
+		t.Fatalf("ListRepositories: %v", listErr)
+	}
+	if len(repos) != 1 {
+		t.Fatalf("expected no provider repository to be created, got %d repositories", len(repos))
+	}
+}
+
 func TestService_CreateTask_GitHubURLIgnoresTaskWorktreeProviderMatch(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

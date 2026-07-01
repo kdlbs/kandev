@@ -198,7 +198,15 @@ function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInit
   if (ghUrl) {
     const seededBranch = iv?.checkoutBranch ?? iv?.branch ?? "";
     resetters.setRemoteRepos([
-      { key: "remote-0", url: ghUrl, branch: seededBranch, source: "paste" },
+      {
+        key: "remote-0",
+        url: ghUrl,
+        branch: seededBranch,
+        source: "paste",
+        prNumber: iv?.prNumber,
+        prBaseBranch: iv?.prBaseBranch,
+        prHeadBranch: iv?.checkoutBranch,
+      },
     ]);
   } else {
     resetters.setRemoteRepos([]);

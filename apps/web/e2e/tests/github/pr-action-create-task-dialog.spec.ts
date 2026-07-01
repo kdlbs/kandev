@@ -1,3 +1,4 @@
+import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 
 test.describe("GitHub PR task launcher", () => {
@@ -5,6 +6,7 @@ test.describe("GitHub PR task launcher", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     const owner = "staleorg";
     const repo = "stalerepo";
@@ -29,7 +31,7 @@ test.describe("GitHub PR task launcher", () => {
 
     await apiClient.createRepository(
       seedData.workspaceId,
-      "/root/.kandev/tasks/pr-1541-fix-skip-cle_3bm/stalerepo",
+      path.join(backend.tmpDir, ".kandev", "tasks", "pr-1541-fix-skip-cle_3bm", "stalerepo"),
       "main",
       {
         name: `${owner}/${repo}`,

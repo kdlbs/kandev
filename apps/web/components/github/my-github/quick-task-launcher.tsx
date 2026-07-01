@@ -27,6 +27,8 @@ type DialogState = {
   branch?: string;
   checkoutBranch?: string;
   githubUrl?: string;
+  prNumber?: number;
+  prBaseBranch?: string;
 };
 
 const LOCAL_SOURCE_TYPE = "local";
@@ -67,7 +69,7 @@ function isGitHubRepository(repo: Repository): boolean {
 
 function isTaskWorktreePath(path: string | undefined): boolean {
   const normalized = (path || "").replaceAll("\\", "/");
-  return normalized.includes("/.kandev/tasks/");
+  return normalized.includes("/.kandev/tasks/") || normalized.endsWith("/.kandev/tasks");
 }
 
 function emptyToUndefined(value: string | undefined): string | undefined {
@@ -123,7 +125,6 @@ function extractPayload(payload: LaunchPayload) {
 
 function buildDialogState(payload: LaunchPayload, repositories: Repository[]): DialogState {
   const data = extractPayload(payload);
-  const repo = matchRepo(repositories, data.owner, data.name);
   const description = payload.preset.prompt({ url: data.url, title: data.title });
   const title = `${payload.preset.label}: ${data.title}`;
   // For a PR launch we want the dialog to display and check out the PR's head
@@ -131,6 +132,18 @@ function buildDialogState(payload: LaunchPayload, repositories: Repository[]): D
   // auto-resolves to the PR head. Same branch for both: the chip shows it and
   // the worktree checks it out.
   const checkoutBranch = payload.kind === "pr" ? data.branch : undefined;
+  if (payload.kind === "pr") {
+    return {
+      title,
+      description,
+      githubUrl: data.url,
+      branch: data.branch,
+      checkoutBranch,
+      prNumber: payload.pr.number,
+      prBaseBranch: payload.pr.base_branch,
+    };
+  }
+  const repo = matchRepo(repositories, data.owner, data.name);
   if (repo) {
     return {
       title,
@@ -143,7 +156,7 @@ function buildDialogState(payload: LaunchPayload, repositories: Repository[]): D
   return {
     title,
     description,
-    githubUrl: payload.kind === "pr" ? data.url : `github.com/${data.owner}/${data.name}`,
+    githubUrl: `github.com/${data.owner}/${data.name}`,
     branch: data.branch,
     checkoutBranch,
   };
@@ -231,6 +244,8 @@ export function QuickTaskLauncher({
         branch: dialog.branch,
         checkoutBranch: dialog.checkoutBranch,
         githubUrl: dialog.githubUrl,
+        prNumber: dialog.prNumber,
+        prBaseBranch: dialog.prBaseBranch,
       }}
       onSuccess={handleSuccess}
     />
