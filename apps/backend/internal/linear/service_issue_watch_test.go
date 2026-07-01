@@ -344,6 +344,39 @@ func TestService_IssueWatch_SortByRoundTrips(t *testing.T) {
 		t.Fatalf("sortBy did not round-trip: %q", got.SortBy)
 	}
 
+	// PATCH from one allowed value to another persists through the edit path
+	// (UpdateIssueWatchRequest.SortBy → applyIssueWatchPatch → validate → store).
+	newSort := SortByCreatedAsc
+	updated, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{SortBy: &newSort})
+	if err != nil {
+		t.Fatalf("update sortBy: %v", err)
+	}
+	if updated.SortBy != SortByCreatedAsc {
+		t.Fatalf("sortBy not applied on update: %q", updated.SortBy)
+	}
+	if got, err := f.svc.GetIssueWatch(ctx, created.ID); err != nil {
+		t.Fatalf("get after update: %v", err)
+	} else if got.SortBy != SortByCreatedAsc {
+		t.Fatalf("updated sortBy did not persist: %q", got.SortBy)
+	}
+
+	// PATCH back to "" pins the "Linear default order" case.
+	defaultSort := SortByDefault
+	if _, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{SortBy: &defaultSort}); err != nil {
+		t.Fatalf("update sortBy to default: %v", err)
+	}
+	if got, err := f.svc.GetIssueWatch(ctx, created.ID); err != nil {
+		t.Fatalf("get after reset: %v", err)
+	} else if got.SortBy != SortByDefault {
+		t.Fatalf("reset sortBy did not persist: %q", got.SortBy)
+	}
+
+	// PATCH with an unknown sortBy is rejected.
+	bogus := IssueSortBy("bogus")
+	if _, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{SortBy: &bogus}); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("expected ErrInvalidConfig for unknown sortBy on update, got %v", err)
+	}
+
 	// Create with an unknown sortBy is rejected.
 	if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
 		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
