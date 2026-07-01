@@ -599,6 +599,9 @@ func (s *Service) resolveRepoInputLocal(
 	repo := repoByPath[repoInput.LocalPath]
 	created := false
 	if repo == nil {
+		if isKandevTaskWorktreePath(repoInput.LocalPath, s.discoveryConfig.TaskWorktreeRoots) {
+			return "", "", false, fmt.Errorf("local path %q points at a Kandev task worktree; use the source repository or GitHub URL", repoInput.LocalPath)
+		}
 		name := strings.TrimSpace(repoInput.Name)
 		if name == "" {
 			name = filepath.Base(repoInput.LocalPath)
@@ -638,6 +641,13 @@ func (s *Service) resolveRepoInputLocal(
 			repoByPath[repoInput.LocalPath] = repo
 		}
 		created = true
+	} else {
+		replacement, replacementCreated, replaceErr := s.replaceTaskWorktreeRepositoryMatch(ctx, workspaceID, repo)
+		if replaceErr != nil {
+			return "", "", false, replaceErr
+		}
+		repo = replacement
+		created = replacementCreated
 	}
 	if baseBranch == "" {
 		baseBranch = repo.DefaultBranch
