@@ -19,28 +19,47 @@ import {
 type KanbanTask = KanbanState["tasks"][number];
 const lifecycleDebug = createDebugLogger("task-lifecycle:ws");
 
-function mergeTaskUpdate(existing: KanbanTask | undefined, nextTask: KanbanTask): KanbanTask {
+function hasPayloadField(payload: TaskEventPayload, field: keyof TaskEventPayload): boolean {
+  return Object.prototype.hasOwnProperty.call(payload, field);
+}
+
+function mergeTaskUpdate(
+  existing: KanbanTask | undefined,
+  nextTask: KanbanTask,
+  options: { preservePrimarySessionId: boolean; preservePrimarySessionState: boolean },
+): KanbanTask {
   if (!existing) return nextTask;
   const merged = {
     ...nextTask,
     ...mergeTaskRepositoryFields(existing, nextTask),
   };
-  if (nextTask.primarySessionId === undefined) merged.primarySessionId = existing.primarySessionId;
-  if (nextTask.primarySessionState === undefined) {
+  if (options.preservePrimarySessionId && nextTask.primarySessionId === undefined) {
+    merged.primarySessionId = existing.primarySessionId;
+  }
+  if (options.preservePrimarySessionState && nextTask.primarySessionState === undefined) {
     merged.primarySessionState = existing.primarySessionState;
   }
   return merged;
 }
 
-function upsertTask(tasks: KanbanTask[], nextTask: KanbanTask): KanbanTask[] {
+function upsertTask(
+  tasks: KanbanTask[],
+  nextTask: KanbanTask,
+  options: { preservePrimarySessionId: boolean; preservePrimarySessionState: boolean },
+): KanbanTask[] {
   const existing = tasks.find((task) => task.id === nextTask.id);
-  const merged = mergeTaskUpdate(existing, nextTask);
+  const merged = mergeTaskUpdate(existing, nextTask, options);
   return existing
     ? tasks.map((task) => (task.id === nextTask.id ? merged : task))
     : [...tasks, merged];
 }
 
-function upsertMultiTask(state: AppState, workflowId: string, task: KanbanTask): AppState {
+function upsertMultiTask(
+  state: AppState,
+  workflowId: string,
+  task: KanbanTask,
+  options: { preservePrimarySessionId: boolean; preservePrimarySessionState: boolean },
+): AppState {
   const snapshot = state.kanbanMulti.snapshots[workflowId];
   if (!snapshot) return state;
   return {
@@ -51,7 +70,7 @@ function upsertMultiTask(state: AppState, workflowId: string, task: KanbanTask):
         ...state.kanbanMulti.snapshots,
         [workflowId]: {
           ...snapshot,
-          tasks: upsertTask(snapshot.tasks, task),
+          tasks: upsertTask(snapshot.tasks, task, options),
         },
       },
     },
@@ -77,14 +96,21 @@ function upsertTaskInBothKanbans(
   }
 
   const nextTask = toKanbanTask(payload);
+  const mergeOptions = {
+    preservePrimarySessionId: !hasPayloadField(payload, "primary_session_id"),
+    preservePrimarySessionState: !hasPayloadField(payload, "primary_session_state"),
+  };
   let next = state;
 
   if (state.kanban.workflowId === wfId) {
-    next = { ...next, kanban: { ...next.kanban, tasks: upsertTask(next.kanban.tasks, nextTask) } };
+    next = {
+      ...next,
+      kanban: { ...next.kanban, tasks: upsertTask(next.kanban.tasks, nextTask, mergeOptions) },
+    };
   }
 
   if (state.kanbanMulti.snapshots[wfId]) {
-    next = upsertMultiTask(next, wfId, nextTask);
+    next = upsertMultiTask(next, wfId, nextTask, mergeOptions);
   }
 
   return next;

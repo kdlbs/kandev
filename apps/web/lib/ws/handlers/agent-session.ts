@@ -269,6 +269,7 @@ function patchWorkflowSnapshotPrimarySessionStates(
   taskId: string,
   sessionId: string,
   newState: TaskSessionState,
+  debugMode: boolean,
 ): {
   nextSnapshots: Record<string, WorkflowSnapshotData>;
   snapshotsChanged: boolean;
@@ -281,7 +282,7 @@ function patchWorkflowSnapshotPrimarySessionStates(
       const nextSnapshot = patchSnapshotPrimarySessionState(snapshot, taskId, sessionId, newState);
       if (nextSnapshot !== snapshot) {
         snapshotsChanged = true;
-        patchedSnapshotIds.push(workflowId);
+        if (debugMode) patchedSnapshotIds.push(workflowId);
       }
       return [workflowId, nextSnapshot];
     }),
@@ -320,7 +321,8 @@ function syncKanbanPrimarySessionState(
   const state = store.getState();
   if (!state.kanban?.tasks || !state.kanbanMulti?.snapshots) return;
 
-  const beforeTask = findKanbanTaskForLog(state, taskId);
+  const debugMode = isDebug();
+  const beforeTask = debugMode ? findKanbanTaskForLog(state, taskId) : undefined;
   const nextKanbanTasks = patchTaskPrimarySessionState(
     state.kanban.tasks,
     taskId,
@@ -333,6 +335,7 @@ function syncKanbanPrimarySessionState(
       taskId,
       sessionId,
       newState,
+      debugMode,
     );
 
   logKanbanPrimarySessionSync({
