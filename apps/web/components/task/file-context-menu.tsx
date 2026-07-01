@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import { Input } from "@kandev/ui/input";
-import { IconPencil, IconTrash } from "@tabler/icons-react";
+import { IconDownload, IconPencil, IconTrash } from "@tabler/icons-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -94,7 +94,58 @@ function DeleteConfirmDialog({
   );
 }
 
-/** Context menu for file nodes with Rename and Delete options */
+type FileContextMenuItemsProps = {
+  node: FileTreeNode;
+  isBulk: boolean;
+  selectedCount: number;
+  onDeleteFile?: (path: string) => Promise<boolean>;
+  onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
+  onDownloadFile?: (path: string) => Promise<boolean>;
+  onStartRename: () => void;
+  onDelete: () => void;
+};
+
+function FileContextMenuItems({
+  node,
+  isBulk,
+  selectedCount,
+  onDeleteFile,
+  onRenameFile,
+  onDownloadFile,
+  onStartRename,
+  onDelete,
+}: FileContextMenuItemsProps) {
+  const deleteLabel = isBulk ? `Delete ${selectedCount} items` : "Delete";
+  const showDelete = !!onDeleteFile;
+  const showRename = !!onRenameFile && !isBulk;
+  const showDownload = !!onDownloadFile && !node.is_dir && !isBulk;
+  return (
+    <>
+      {showDelete && (
+        <ContextMenuItem variant="destructive" onSelect={onDelete}>
+          <IconTrash className="h-3.5 w-3.5" />
+          {deleteLabel}
+        </ContextMenuItem>
+      )}
+      {showRename && showDelete && <ContextMenuSeparator />}
+      {showRename && (
+        <ContextMenuItem onSelect={onStartRename}>
+          <IconPencil className="h-3.5 w-3.5" />
+          Rename
+        </ContextMenuItem>
+      )}
+      {showDownload && (showRename || showDelete) && <ContextMenuSeparator />}
+      {showDownload && (
+        <ContextMenuItem onSelect={() => void onDownloadFile!(node.path)}>
+          <IconDownload className="h-3.5 w-3.5" />
+          Download
+        </ContextMenuItem>
+      )}
+    </>
+  );
+}
+
+/** Context menu for file nodes with Download, Rename, and Delete options */
 export function FileContextMenu({
   children,
   node,
@@ -102,6 +153,7 @@ export function FileContextMenu({
   setTree,
   onDeleteFile,
   onRenameFile,
+  onDownloadFile,
   onStartRename,
   selectedCount = 0,
   selectedPaths,
@@ -112,6 +164,7 @@ export function FileContextMenu({
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
   onDeleteFile?: (path: string) => Promise<boolean>;
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
+  onDownloadFile?: (path: string) => Promise<boolean>;
   onStartRename: () => void;
   selectedCount?: number;
   selectedPaths?: Set<string>;
@@ -152,28 +205,23 @@ export function FileContextMenu({
     }
   }, [tree, setTree, node.path, onDeleteFile, needsConfirmation]);
 
-  if (!onDeleteFile && !onRenameFile) return <>{children}</>;
-
-  const deleteLabel = isBulk ? `Delete ${selectedCount} items` : "Delete";
+  if (!onDeleteFile && !onRenameFile && !onDownloadFile) return <>{children}</>;
 
   return (
     <>
       <ContextMenu>
         <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
         <ContextMenuContent>
-          {onDeleteFile && (
-            <ContextMenuItem variant="destructive" onSelect={handleDelete}>
-              <IconTrash className="h-3.5 w-3.5" />
-              {deleteLabel}
-            </ContextMenuItem>
-          )}
-          {onRenameFile && onDeleteFile && !isBulk && <ContextMenuSeparator />}
-          {onRenameFile && !isBulk && (
-            <ContextMenuItem onSelect={onStartRename}>
-              <IconPencil className="h-3.5 w-3.5" />
-              Rename
-            </ContextMenuItem>
-          )}
+          <FileContextMenuItems
+            node={node}
+            isBulk={isBulk}
+            selectedCount={selectedCount}
+            onDeleteFile={onDeleteFile}
+            onRenameFile={onRenameFile}
+            onDownloadFile={onDownloadFile}
+            onStartRename={onStartRename}
+            onDelete={handleDelete}
+          />
         </ContextMenuContent>
       </ContextMenu>
       {needsConfirmation && (
