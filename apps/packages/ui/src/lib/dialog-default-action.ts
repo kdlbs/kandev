@@ -23,6 +23,12 @@ function isActionable(el: HTMLElement | null): el is HTMLElement {
   if (el.hasAttribute("disabled")) return false;
   if (el.getAttribute("aria-disabled") === "true") return false;
   if (el.getAttribute("data-disabled") !== null) return false;
+  // Don't activate a button sitting in a hidden/aria-hidden subtree (e.g. a
+  // collapsed section). `offsetParent` would be more thorough but is always null
+  // under jsdom/happy-dom, so it can't be used reliably; the attribute check
+  // works in both the browser and unit tests.
+  if (el.closest("[hidden]")) return false;
+  if (el.closest('[aria-hidden="true"]')) return false;
   return true;
 }
 
@@ -78,15 +84,27 @@ function isTextEntry(el: EventTarget | null): boolean {
   return false;
 }
 
-const DISMISS_VARIANTS = new Set(["outline", "ghost", "secondary", "link"]);
+const INTERACTIVE_ROLES = new Set([
+  "button",
+  "combobox",
+  "listbox",
+  "menu",
+  // Item-level roles: focus can rest on the item inside a composite widget
+  // (a listbox option, a menu item) whose keydown bubbles to the dialog.
+  "option",
+  "menuitem",
+  "menuitemcheckbox",
+  "menuitemradio",
+]);
 
 /**
  * When Enter fires from a focused interactive control that owns its own Enter
- * behavior — another action button, a `<select>`, a combobox — let that control
- * handle it instead of hijacking Enter for the footer action. The one exception
- * is a dismiss/secondary control (Cancel, the close "X"): overriding those is
- * the whole point (Radix focuses Cancel on an AlertDialog by default), so Enter
- * still fires the primary action there.
+ * behavior — another action button (including outline/secondary ones like a
+ * "Copy" or "Back"), a `<select>`, a combobox, or an item inside one — let that
+ * control handle it instead of hijacking Enter for the footer action. The one
+ * exception is a genuine dismiss control (an AlertDialog Cancel or the close
+ * "X", identified by its `data-slot`): overriding those is the whole point,
+ * since Radix focuses Cancel on an AlertDialog by default.
  */
 function focusKeepsEnter(target: EventTarget | null, action: HTMLElement): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -97,16 +115,14 @@ function focusKeepsEnter(target: EventTarget | null, action: HTMLElement): boole
     target.tagName === "BUTTON" ||
     target.tagName === "A" ||
     target.tagName === "SELECT" ||
-    role === "button" ||
-    role === "combobox" ||
-    role === "listbox" ||
-    role === "menu";
+    (role !== null && INTERACTIVE_ROLES.has(role));
   if (!interactive) return false;
 
+  // Only real cancel/close controls are overridden — matched by their explicit
+  // slot, not by variant, so outline/secondary buttons that are real actions
+  // keep their native Enter behavior.
   const slot = target.getAttribute("data-slot");
   if (slot === "alert-dialog-cancel" || slot === "dialog-close") return false;
-  const variant = target.getAttribute("data-variant");
-  if (variant && DISMISS_VARIANTS.has(variant)) return false;
 
   return true;
 }
@@ -122,7 +138,9 @@ export function handleDialogDefaultActionKeyDown(event: React.KeyboardEvent<HTML
   if (event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
   if (event.repeat) return; // ignore auto-repeat while Enter is held down
   if (event.defaultPrevented) return;
-  if (event.nativeEvent.isComposing) return; // mid-IME composition
+  // mid-IME composition: `isComposing`, plus keyCode 229 which some IMEs report
+  // for the Enter that accepts a candidate even after isComposing flips false.
+  if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
   if (isTextEntry(event.target)) return;
 
   const action = resolveDialogDefaultAction(event.currentTarget);

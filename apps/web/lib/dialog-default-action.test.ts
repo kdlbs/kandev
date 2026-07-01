@@ -40,7 +40,9 @@ describe("resolveDialogDefaultAction", () => {
     `);
     expect(resolveDialogDefaultAction(el)).toBeNull();
   });
+});
 
+describe("resolveDialogDefaultAction — generic dialog footer", () => {
   it("resolves the single primary button in a generic dialog footer", () => {
     const el = content(`
       <div data-slot="dialog-footer">
@@ -106,6 +108,30 @@ describe("resolveDialogDefaultAction", () => {
     expect(resolveDialogDefaultAction(el)).toBeNull();
   });
 
+  it("returns null when the only primary action is inside an aria-hidden subtree", () => {
+    const el = content(`
+      <div data-slot="dialog-footer">
+        <button data-variant="outline">Cancel</button>
+        <div aria-hidden="true">
+          <button data-variant="destructive" id="hidden">Delete</button>
+        </div>
+      </div>
+    `);
+    expect(resolveDialogDefaultAction(el)).toBeNull();
+  });
+
+  it("returns null when the only primary action is inside a [hidden] subtree", () => {
+    const el = content(`
+      <div data-slot="dialog-footer">
+        <button data-variant="outline">Cancel</button>
+        <div hidden>
+          <button type="submit" id="hidden">Save</button>
+        </div>
+      </div>
+    `);
+    expect(resolveDialogDefaultAction(el)).toBeNull();
+  });
+
   it("ignores disabled primary buttons when they are the only candidate", () => {
     const el = content(`
       <div data-slot="dialog-footer">
@@ -136,7 +162,7 @@ function keyEvent(currentTarget: HTMLElement, overrides: KeyEventOverrides = {})
     defaultPrevented: false,
     currentTarget,
     target: currentTarget,
-    nativeEvent: { isComposing: false } as KeyboardEvent,
+    nativeEvent: { isComposing: false, keyCode: 13 } as KeyboardEvent,
     preventDefault,
     ...overrides,
   } as unknown as React.KeyboardEvent<HTMLElement>;
@@ -195,7 +221,18 @@ describe("handleDialogDefaultActionKeyDown — activation and guards", () => {
 
   it("ignores Enter during IME composition", () => {
     const { el, click } = alertContent();
-    const { event } = keyEvent(el, { nativeEvent: { isComposing: true } as KeyboardEvent });
+    const { event } = keyEvent(el, {
+      nativeEvent: { isComposing: true, keyCode: 13 } as KeyboardEvent,
+    });
+    handleDialogDefaultActionKeyDown(event);
+    expect(click).not.toHaveBeenCalled();
+  });
+
+  it("ignores the composition-confirming Enter reported as keyCode 229", () => {
+    const { el, click } = alertContent();
+    const { event } = keyEvent(el, {
+      nativeEvent: { isComposing: false, keyCode: 229 } as KeyboardEvent,
+    });
     handleDialogDefaultActionKeyDown(event);
     expect(click).not.toHaveBeenCalled();
   });
@@ -258,10 +295,28 @@ describe("handleDialogDefaultActionKeyDown — focused-control handling", () => 
     expect(preventDefault).not.toHaveBeenCalled();
   });
 
+  it("lets a focused outline/secondary action button (e.g. Copy, Back) keep Enter", () => {
+    const { el, click } = alertContent();
+    const copy = document.createElement("button");
+    copy.setAttribute("data-variant", "outline"); // NOT a slot-marked cancel
+    const { event } = keyEvent(el, { target: copy });
+    handleDialogDefaultActionKeyDown(event);
+    expect(click).not.toHaveBeenCalled();
+  });
+
   it("lets a focused <select> keep its own Enter behavior", () => {
     const { el, click } = alertContent();
     const select = document.createElement("select");
     const { event } = keyEvent(el, { target: select });
+    handleDialogDefaultActionKeyDown(event);
+    expect(click).not.toHaveBeenCalled();
+  });
+
+  it("lets a focused listbox option / menu item keep its own Enter behavior", () => {
+    const { el, click } = alertContent();
+    const option = document.createElement("div");
+    option.setAttribute("role", "option");
+    const { event } = keyEvent(el, { target: option });
     handleDialogDefaultActionKeyDown(event);
     expect(click).not.toHaveBeenCalled();
   });
