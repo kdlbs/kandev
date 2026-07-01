@@ -3,7 +3,7 @@ import type { StoreApi } from "zustand";
 import { registerTaskSessionHandlers } from "./agent-session";
 import type { AppState } from "@/lib/state/store";
 import type { TaskSessionStateChangedPayload } from "@/lib/types/backend";
-import { sessionId, taskId } from "@/lib/types/http";
+import { sessionId, taskId, type TaskSessionState } from "@/lib/types/http";
 
 const STATE_CHANGED_EVENT = "session.state_changed";
 const TASK_TITLE = "Running task";
@@ -64,7 +64,7 @@ function makeTaskSession(id: string) {
   return {
     id: sessionId(id),
     task_id: taskId("t-1"),
-    state: "WAITING_FOR_INPUT",
+    state: "WAITING_FOR_INPUT" as TaskSessionState,
     started_at: "",
     updated_at: "",
   };

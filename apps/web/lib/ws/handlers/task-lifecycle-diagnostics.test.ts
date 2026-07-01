@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
-import { registerTasksHandlers } from "./tasks";
+import { didPreservePrimaryState, registerTasksHandlers } from "./tasks";
 
 type Listener = (state: AppState) => void;
 
@@ -62,6 +62,15 @@ function makeUpdatedMessage(payload: Record<string, unknown>) {
   } as Parameters<NonNullable<ReturnType<typeof registerTasksHandlers>["task.updated"]>>[0];
 }
 
+function makeCreatedMessage(payload: Record<string, unknown>) {
+  return {
+    id: "msg-1",
+    type: "notification" as const,
+    action: "task.created" as const,
+    payload,
+  } as Parameters<NonNullable<ReturnType<typeof registerTasksHandlers>["task.created"]>>[0];
+}
+
 function makeStateChangedMessage(payload: Record<string, unknown>) {
   return {
     id: "msg-1",
@@ -76,10 +85,50 @@ const existingTask = {
   workflowStepId: "step1",
   title: "Old",
   position: 0,
-  state: "IN_PROGRESS",
+  state: "IN_PROGRESS" as const,
   primarySessionId: "sess-1",
   primarySessionState: "RUNNING",
 };
+
+function taskWithPrimaryState(primarySessionState: string | undefined) {
+  return {
+    ...existingTask,
+    primarySessionState,
+  };
+}
+
+describe("didPreservePrimaryState", () => {
+  it("detects only omitted payload primary state that stayed preserved", () => {
+    expect(
+      didPreservePrimaryState(
+        { workflow_id: "wf1", primary_session_state: "RUNNING" },
+        taskWithPrimaryState("COMPLETED"),
+        taskWithPrimaryState("COMPLETED"),
+      ),
+    ).toBe(false);
+    expect(
+      didPreservePrimaryState(
+        { workflow_id: "wf1" },
+        taskWithPrimaryState(undefined),
+        taskWithPrimaryState("RUNNING"),
+      ),
+    ).toBe(false);
+    expect(
+      didPreservePrimaryState(
+        { workflow_id: "wf1" },
+        taskWithPrimaryState("RUNNING"),
+        taskWithPrimaryState("RUNNING"),
+      ),
+    ).toBe(true);
+    expect(
+      didPreservePrimaryState(
+        { workflow_id: "wf1" },
+        taskWithPrimaryState("RUNNING"),
+        taskWithPrimaryState("COMPLETED"),
+      ),
+    ).toBe(false);
+  });
+});
 
 describe("task lifecycle diagnostics", () => {
   it("upserts task state and primary session state into both kanban stores", () => {
@@ -122,6 +171,19 @@ describe("task lifecycle diagnostics", () => {
         ...makeTask("t-ephemeral", "sess-1"),
         is_ephemeral: true,
         state: "REVIEW",
+      }),
+    );
+
+    expect(store.getState().kanban.tasks).toEqual([]);
+  });
+
+  it("skips ephemeral task creation", () => {
+    const store = makeStore();
+
+    registerTasksHandlers(store)["task.created"]!(
+      makeCreatedMessage({
+        ...makeTask("t-ephemeral", "sess-1"),
+        is_ephemeral: true,
       }),
     );
 

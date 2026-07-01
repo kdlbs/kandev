@@ -122,7 +122,7 @@ function taskPrimaryStateForLog(task: KanbanTask | undefined): string {
   return task?.primarySessionState ?? "-";
 }
 
-function didPreservePrimaryState(
+export function didPreservePrimaryState(
   payload: TaskEventPayload,
   beforeTask: KanbanTask | undefined,
   afterTask: KanbanTask | undefined,
@@ -228,7 +228,10 @@ function redirectAwayFromRemovedTask(taskId: string): void {
 }
 
 type TaskUpdatedMessage = Parameters<NonNullable<WsHandlers["task.updated"]>>[0];
+type TaskCreatedMessage = Parameters<NonNullable<WsHandlers["task.created"]>>[0];
 type TaskStateChangedMessage = Parameters<NonNullable<WsHandlers["task.state_changed"]>>[0];
+type TaskUpsertMessage = TaskCreatedMessage | TaskStateChangedMessage;
+type TaskUpsertAction = "task.created" | "task.state_changed";
 
 function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessage): void {
   // Skip ephemeral tasks (e.g., quick chat) - they shouldn't appear on the Kanban board
@@ -292,7 +295,11 @@ function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessag
   }
 }
 
-function handleTaskStateChanged(store: StoreApi<AppState>, message: TaskStateChangedMessage): void {
+function handleTaskUpsert(
+  action: TaskUpsertAction,
+  store: StoreApi<AppState>,
+  message: TaskUpsertMessage,
+): void {
   // Skip ephemeral tasks (e.g., quick chat) - they shouldn't appear on the Kanban board
   if (message.payload.is_ephemeral) return;
 
@@ -300,19 +307,13 @@ function handleTaskStateChanged(store: StoreApi<AppState>, message: TaskStateCha
   store.setState((state) =>
     upsertTaskInBothKanbans(state, message.payload.workflow_id, message.payload),
   );
-  logTaskMerge("task.state_changed", beforeState, store.getState(), message.payload);
+  logTaskMerge(action, beforeState, store.getState(), message.payload);
 }
 
 export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "task.created": (message) => {
-      // Skip ephemeral tasks (e.g., quick chat) - they shouldn't appear on the Kanban board
-      if (message.payload.is_ephemeral) return;
-      const beforeState = store.getState();
-      store.setState((state) =>
-        upsertTaskInBothKanbans(state, message.payload.workflow_id, message.payload),
-      );
-      logTaskMerge("task.created", beforeState, store.getState(), message.payload);
+      handleTaskUpsert("task.created", store, message);
     },
     "task.updated": (message) => handleTaskUpdated(store, message),
     "task.deleted": (message) => {
@@ -376,7 +377,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       }
     },
     "task.state_changed": (message) => {
-      handleTaskStateChanged(store, message);
+      handleTaskUpsert("task.state_changed", store, message);
     },
   };
 }
