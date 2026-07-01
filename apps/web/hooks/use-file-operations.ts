@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { WebSocketClient } from "@/lib/ws/client";
 import { createFile, deleteFile, renameFile, requestFileContent } from "@/lib/ws/workspace-files";
-import { triggerFileDownload } from "@/lib/utils/file-download";
+import { fileBasename, triggerFileDownload } from "@/lib/utils/file-download";
 import { useToast } from "@/components/toast-provider";
 
 type ToastFn = ReturnType<typeof useToast>["toast"];
@@ -11,11 +11,6 @@ const ERROR_VARIANT = "error" as const;
 const UNKNOWN_ERROR = "An unknown error occurred";
 
 type DownloadResult = { ok: true } | { ok: false; error?: string };
-
-function fileBasename(path: string): string {
-  const idx = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  return idx >= 0 ? path.slice(idx + 1) : path;
-}
 
 /**
  * Fetch a file from the workspace and trigger a browser download.

@@ -4,11 +4,18 @@ const requestFileContentMock = vi.fn();
 const triggerFileDownloadMock = vi.fn();
 
 vi.mock("@/lib/ws/workspace-files", () => ({
+  createFile: vi.fn(),
+  deleteFile: vi.fn(),
+  renameFile: vi.fn(),
   requestFileContent: (...args: unknown[]) => requestFileContentMock(...args),
 }));
-vi.mock("@/lib/utils/file-download", () => ({
-  triggerFileDownload: (...args: unknown[]) => triggerFileDownloadMock(...args),
-}));
+vi.mock("@/lib/utils/file-download", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/utils/file-download")>();
+  return {
+    ...actual,
+    triggerFileDownload: (...args: unknown[]) => triggerFileDownloadMock(...args),
+  };
+});
 
 import { downloadFileContent } from "./use-file-operations";
 

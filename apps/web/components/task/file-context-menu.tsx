@@ -116,27 +116,26 @@ function FileContextMenuItems({
   onDelete,
 }: FileContextMenuItemsProps) {
   const deleteLabel = isBulk ? `Delete ${selectedCount} items` : "Delete";
-  const showDelete = !!onDeleteFile;
   const showRename = !!onRenameFile && !isBulk;
-  const showDownload = !!onDownloadFile && !node.is_dir && !isBulk;
+  const canDownload = !!onDownloadFile && !node.is_dir && !isBulk;
   return (
     <>
-      {showDelete && (
+      {onDeleteFile && (
         <ContextMenuItem variant="destructive" onSelect={onDelete}>
           <IconTrash className="h-3.5 w-3.5" />
           {deleteLabel}
         </ContextMenuItem>
       )}
-      {showRename && showDelete && <ContextMenuSeparator />}
+      {showRename && onDeleteFile && <ContextMenuSeparator />}
       {showRename && (
         <ContextMenuItem onSelect={onStartRename}>
           <IconPencil className="h-3.5 w-3.5" />
           Rename
         </ContextMenuItem>
       )}
-      {showDownload && (showRename || showDelete) && <ContextMenuSeparator />}
-      {showDownload && (
-        <ContextMenuItem onSelect={() => void onDownloadFile!(node.path)}>
+      {canDownload && (showRename || onDeleteFile) && <ContextMenuSeparator />}
+      {canDownload && onDownloadFile && (
+        <ContextMenuItem onSelect={() => void onDownloadFile(node.path)}>
           <IconDownload className="h-3.5 w-3.5" />
           Download
         </ContextMenuItem>

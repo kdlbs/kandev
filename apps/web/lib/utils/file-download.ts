@@ -4,6 +4,12 @@ export type TriggerFileDownloadParams = {
   isBinary: boolean;
 };
 
+/** Return the last path segment of a POSIX or Windows path. */
+export function fileBasename(path: string): string {
+  const idx = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return idx >= 0 ? path.slice(idx + 1) : path;
+}
+
 function base64ToArrayBuffer(base64: string): ArrayBuffer {
   const binary = atob(base64);
   const buffer = new ArrayBuffer(binary.length);
@@ -30,7 +36,7 @@ export function triggerFileDownload({
   try {
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = basename(fileName);
+    anchor.download = fileBasename(fileName);
     anchor.rel = "noopener";
     document.body.appendChild(anchor);
     anchor.click();
@@ -38,9 +44,4 @@ export function triggerFileDownload({
   } finally {
     URL.revokeObjectURL(url);
   }
-}
-
-function basename(path: string): string {
-  const idx = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  return idx >= 0 ? path.slice(idx + 1) : path;
 }
