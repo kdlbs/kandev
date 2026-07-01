@@ -23,6 +23,8 @@ type FileUploader interface {
 	WriteFile(ctx context.Context, path string, data []byte, mode os.FileMode) error
 }
 
+const credentialFileMode os.FileMode = 0o600
+
 // UploadCredentialFiles reads local credential files and uploads them to the remote environment.
 func UploadCredentialFiles(
 	ctx context.Context,
@@ -56,7 +58,7 @@ func UploadCredentialFiles(
 			}
 
 			targetPath := filepath.Join(targetHomeDir, method.TargetRelDir, filepath.Base(relPath))
-			if err := uploader.WriteFile(ctx, targetPath, data, 0o644); err != nil {
+			if err := uploader.WriteFile(ctx, targetPath, data, credentialFileMode); err != nil {
 				return fmt.Errorf("failed to upload %s: %w", targetPath, err)
 			}
 			log.Debug("uploaded credential file",

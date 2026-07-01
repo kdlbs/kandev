@@ -61,6 +61,11 @@ type CreateInstanceRequest struct {
 	// — notably opencode acp.
 	RequiresProcessKill bool `json:"requires_process_kill,omitempty"`
 
+	// StripEnv lists environment variables to strip from the agent's child
+	// process environment entirely (not just set to empty). Propagated from
+	// RuntimeConfig.StripEnv by the lifecycle executors.
+	StripEnv []string `json:"strip_env,omitempty"`
+
 	// BaseBranches maps RepositoryName → base branch ref for the task's
 	// per-repo diff stats. The empty key "" applies to the root /
 	// single-repo tracker. Empty map disables the override and falls back
