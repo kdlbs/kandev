@@ -217,8 +217,9 @@ export function ClarificationCustomInput({
         className="flex-1 min-h-0 resize-none overflow-y-auto border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0 placeholder:text-muted-foreground/60"
         onKeyDown={(e) => {
           // Shift+Enter (and Alt+Enter) fall through so the textarea inserts a
-          // newline instead of submitting.
-          if (e.key !== "Enter" || e.shiftKey || e.altKey) return;
+          // newline instead of submitting. isComposing ignores the Enter that
+          // confirms an IME candidate (CJK keyboards).
+          if (e.key !== "Enter" || e.shiftKey || e.altKey || e.nativeEvent.isComposing) return;
           if (e.metaKey || e.ctrlKey) {
             // Cmd/Ctrl+Enter only asks the parent to finalize. The draft was
             // already live-recorded via onChange, so we skip the per-question
@@ -239,9 +240,11 @@ export function ClarificationCustomInput({
           }
         }}
       />
-      {/* The keyboard hints only apply to hardware keyboards; on touch the
-          Submit button is the send affordance. */}
-      {isFinePointer && (
+      {/* Hardware keyboards get the Enter/⇧↵ hints. Touch devices get an inline
+          Send button instead: Enter inserts a newline there, and the overlay's
+          own Submit button only exists for multi-question bundles, so this is
+          the send affordance for single-question custom answers. */}
+      {isFinePointer ? (
         <div className="mt-0.5 flex flex-shrink-0 items-center gap-1">
           <kbd
             aria-hidden="true"
@@ -254,6 +257,25 @@ export function ClarificationCustomInput({
             ⇧↵ newline
           </span>
         </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => {
+            if (draft.trim()) onSubmit(draft.trim());
+          }}
+          disabled={isSubmitting || draft.trim().length === 0}
+          data-testid="clarification-custom-submit"
+          aria-label="Send answer"
+          className={cn(
+            "mt-0.5 flex flex-shrink-0 items-center gap-1 text-xs px-2 py-1 rounded font-medium transition-colors",
+            draft.trim() && !isSubmitting
+              ? "bg-blue-500 text-white hover:bg-blue-500/90 cursor-pointer"
+              : "bg-muted text-muted-foreground cursor-not-allowed",
+          )}
+        >
+          Send
+          <IconCornerDownLeft className="h-3 w-3" />
+        </button>
       )}
       {active && <IconCheck className="mt-0.5 h-3.5 w-3.5 text-blue-500 flex-shrink-0" />}
     </div>

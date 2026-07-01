@@ -15,6 +15,8 @@ afterEach(() => {
 });
 
 const INPUT_TESTID = "clarification-input";
+const TOUCH_SUBMIT_TESTID = "clarification-custom-submit";
+const MULTILINE = "line one\nline two";
 
 function makeProps(overrides: Partial<Parameters<typeof ClarificationCustomInput>[0]> = {}) {
   return {
@@ -78,10 +80,10 @@ describe("ClarificationCustomInput multiline", () => {
   it("preserves inner newlines when submitting a multi-line draft (trims ends only)", () => {
     const onSubmit = vi.fn();
     const { getByTestId } = render(
-      <ClarificationCustomInput {...makeProps({ draft: "\nline one\nline two\n", onSubmit })} />,
+      <ClarificationCustomInput {...makeProps({ draft: `\n${MULTILINE}\n`, onSubmit })} />,
     );
     pressEnter(getByTestId(INPUT_TESTID));
-    expect(onSubmit).toHaveBeenCalledWith("line one\nline two");
+    expect(onSubmit).toHaveBeenCalledWith(MULTILINE);
   });
 
   it("finalizes the bundle on Cmd+Enter without per-question submit", () => {
@@ -110,7 +112,19 @@ describe("ClarificationCustomInput multiline", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it("on touch devices Enter inserts a newline instead of submitting", () => {
+  it("does not submit while an IME candidate is being composed", () => {
+    const onSubmit = vi.fn();
+    const { getByTestId } = render(
+      <ClarificationCustomInput {...makeProps({ draft: "候補", onSubmit })} />,
+    );
+    const notDefaulted = pressEnter(getByTestId(INPUT_TESTID), { isComposing: true });
+    expect(notDefaulted).toBe(true); // default not prevented → IME confirms candidate
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+});
+
+describe("ClarificationCustomInput on touch devices", () => {
+  it("Enter inserts a newline instead of submitting", () => {
     pointer.isFinePointer = false;
     const onSubmit = vi.fn();
     const { getByTestId } = render(
@@ -125,5 +139,27 @@ describe("ClarificationCustomInput multiline", () => {
     pointer.isFinePointer = false;
     const { queryByText } = render(<ClarificationCustomInput {...makeProps()} />);
     expect(queryByText("⇧↵ newline")).toBeNull();
+  });
+
+  it("shows a Send button on touch that submits the trimmed draft", () => {
+    pointer.isFinePointer = false;
+    const onSubmit = vi.fn();
+    const { getByTestId } = render(
+      <ClarificationCustomInput {...makeProps({ draft: `${MULTILINE} `, onSubmit })} />,
+    );
+    fireEvent.click(getByTestId(TOUCH_SUBMIT_TESTID));
+    expect(onSubmit).toHaveBeenCalledWith(MULTILINE);
+  });
+
+  it("disables the touch Send button for an empty draft", () => {
+    pointer.isFinePointer = false;
+    const onSubmit = vi.fn();
+    const { getByTestId } = render(
+      <ClarificationCustomInput {...makeProps({ draft: "   ", onSubmit })} />,
+    );
+    const button = getByTestId(TOUCH_SUBMIT_TESTID) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 });
