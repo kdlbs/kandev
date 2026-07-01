@@ -12,7 +12,7 @@ The first desktop macOS failure mode we observed happened after Rust compilation
 
 ## Decision
 
-Add a maintainer-only release backfill mode to `.github/workflows/release.yml`. The `backfill_tag` input accepts an existing `vX.Y.Z` release tag, verifies that the tag exists and that `apps/cli/package.json` at that tag matches the version, then uses the existing tag as the build and publish ref. In this mode the workflow skips version bumping, changelog generation, release PR creation, and tag creation, while still running the build, GitHub release, npm publish, and Homebrew update jobs.
+Add a maintainer-only release backfill mode to `.github/workflows/release.yml`. The `backfill_tag` input accepts the current highest existing `vX.Y.Z` release tag, verifies that the tag exists, and verifies that all release-critical manifests at that tag match the version. It then uses the existing tag as the build and publish ref. In this mode the workflow skips version bumping, changelog generation, release PR creation, and tag creation, while still running the build, GitHub release, npm publish, and Homebrew update jobs.
 
 Add macOS desktop packaging guardrails to the Tauri build job. macOS DMG builds now run with a bounded timeout and a retry, and failed macOS desktop builds upload diagnostics that include disk state, `hdiutil info`, related packaging processes, bundle directory listings, and Tauri's generated `bundle_dmg.sh` when present.
 
@@ -20,7 +20,7 @@ Keep desktop installer builds on native OS runners. Linux container images remai
 
 ## Consequences
 
-Release recovery becomes explicit and repeatable for tag-only or partially published releases. Publishing scripts can keep their existing idempotent behavior, so rerunning a backfill is safe when some assets or packages already exist.
+Release recovery becomes explicit and repeatable for tag-only or partially published current releases. Publishing scripts can keep their existing idempotent behavior, so rerunning a backfill is safe when some assets or packages already exist. Older tags are rejected because this workflow still updates mutable channels such as Docker tags, npm dist-tags, and the Homebrew formula.
 
 The release workflow has more branching logic, and maintainers must choose between normal release, desktop validation, dry run, and tag backfill modes intentionally. The workflow contract is covered by a small CI test so later YAML changes do not silently remove the recovery path or macOS diagnostics.
 

@@ -8,7 +8,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "release.yml"
+DIAGNOSTICS_PATH = REPO_ROOT / ".github" / "scripts" / "collect-macos-desktop-diagnostics.sh"
 WORKFLOW = WORKFLOW_PATH.read_text()
+DIAGNOSTICS = DIAGNOSTICS_PATH.read_text()
 
 
 def step_block(name: str) -> str:
@@ -36,6 +38,17 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("backfill_tag:", WORKFLOW)
         self.assertIn("BACKFILL_TAG: ${{ inputs.backfill_tag }}", WORKFLOW)
         self.assertIn("Backfill existing release tag:", step_block("Compute next version"))
+        self.assertIn("backfill_tag is set; the 'bump' input", WORKFLOW)
+        self.assertIn("must be the latest release tag", WORKFLOW)
+
+        for path in (
+            "apps/cli/package.json",
+            "apps/desktop/package.json",
+            "apps/desktop/src-tauri/tauri.conf.json",
+            "apps/desktop/src-tauri/Cargo.toml",
+            "apps/desktop/src-tauri/Cargo.lock",
+        ):
+            self.assertIn(path, WORKFLOW)
 
         for name in (
             "Bump version + generate CHANGELOG (in working tree)",
@@ -58,25 +71,27 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
 
     def test_macos_dmg_build_has_retry_timeout_and_diagnostics(self) -> None:
         build = step_block("Build Tauri desktop app")
-        self.assertIn("timeout-minutes:", build)
+        self.assertIn("timeout-minutes: 70", build)
         self.assertIn("TAURI_BUNDLE_ATTEMPTS:", build)
         self.assertIn("run_with_timeout", build)
         self.assertIn("collect_macos_desktop_diagnostics", build)
-        self.assertIn("hdiutil info", build)
-        self.assertIn("df -h", build)
-        self.assertIn("bundle_dmg.sh", build)
+        self.assertIn("collect-macos-desktop-diagnostics.sh", build)
+        self.assertIn("terminate_process_tree_with_signal", build)
+        self.assertIn("else\n              status=$?", build)
         self.assertIn("for attempt in", build)
 
         collect = step_block("Collect macOS desktop diagnostics")
         self.assertIn("if: failure() && startsWith(matrix.platform, 'macos-')", collect)
-        self.assertIn("hdiutil info", collect)
-        self.assertIn("df -h", collect)
-        self.assertIn("bundle_dmg.sh", collect)
+        self.assertIn("collect-macos-desktop-diagnostics.sh", collect)
 
         upload = step_block("Upload macOS desktop diagnostics")
         self.assertIn("if: failure() && startsWith(matrix.platform, 'macos-')", upload)
         self.assertIn("dist/desktop-diagnostics/**", upload)
         self.assertIn("/release/bundle/dmg/**", upload)
+
+        self.assertIn("hdiutil info", DIAGNOSTICS)
+        self.assertIn("df -h", DIAGNOSTICS)
+        self.assertIn("bundle_dmg.sh", DIAGNOSTICS)
 
 
 if __name__ == "__main__":

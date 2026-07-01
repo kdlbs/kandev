@@ -7,6 +7,7 @@ on:
       - ".github/workflows/**"
       - ".github/scripts/lint-action-pinning.py"
       - ".github/scripts/lint-action-pinning_test.py"
+      - ".github/scripts/collect-macos-desktop-diagnostics.sh"
       - ".github/scripts/release-workflow-contract_test.py"
   pull_request:
     branches: [main]
@@ -14,6 +15,7 @@ on:
       - ".github/workflows/**"
       - ".github/scripts/lint-action-pinning.py"
       - ".github/scripts/lint-action-pinning_test.py"
+      - ".github/scripts/collect-macos-desktop-diagnostics.sh"
       - ".github/scripts/release-workflow-contract_test.py"
 
 concurrency:

@@ -122,6 +122,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -n "$BACKFILL_TAG" ]; then
+            echo "::notice::backfill_tag is set; the 'bump' input ($BUMP) is ignored."
             if [ "$DRY_RUN" = "true" ]; then
               echo "backfill_tag cannot be combined with dry_run." >&2
               exit 1
@@ -145,11 +146,56 @@ jobs:
             fi
 
             NEXT="${BACKFILL_TAG#v}"
-            TAG_VERSION="$(git show "${BACKFILL_TAG}:apps/cli/package.json" | node -e 'let input = ""; process.stdin.on("data", chunk => input += chunk); process.stdin.on("end", () => console.log(JSON.parse(input).version));')"
-            if [ "$TAG_VERSION" != "$NEXT" ]; then
-              echo "backfill_tag version mismatch: tag $BACKFILL_TAG points to apps/cli version $TAG_VERSION." >&2
+            LATEST_RELEASE_TAG="$(git tag --list 'v*' | python3 -c "
+          import sys, re
+          best = None
+          best_tag = ''
+          for t in (l.strip() for l in sys.stdin if l.strip()):
+              s = t.lstrip('v')
+              m3 = re.match(r'^(\d+)\.(\d+)\.(\d+)$', s)
+              m2 = re.match(r'^(\d+)\.(\d+)$', s)
+              if m3:
+                  v = tuple(int(x) for x in m3.groups())
+                  tag = f'v{v[0]}.{v[1]}.{v[2]}'
+              elif m2:
+                  v = (int(m2.group(1)), int(m2.group(2)), 0)
+                  tag = f'v{v[0]}.{v[1]}.{v[2]}'
+              else:
+                  continue
+              if best is None or v > best:
+                  best = v
+                  best_tag = tag
+          print(best_tag)
+          ")"
+            if [ "$LATEST_RELEASE_TAG" != "$BACKFILL_TAG" ]; then
+              echo "backfill_tag must be the latest release tag ($LATEST_RELEASE_TAG) because backfill publishes mutable channels." >&2
               exit 1
             fi
+
+            BACKFILL_TAG="$BACKFILL_TAG" NEXT="$NEXT" node <<'NODE'
+            const { execFileSync } = require("node:child_process");
+
+            const tag = process.env.BACKFILL_TAG;
+            const next = process.env.NEXT;
+            const show = (path) => execFileSync("git", ["show", `${tag}:${path}`], { encoding: "utf8" });
+            const versions = new Map([
+              ["apps/cli/package.json", JSON.parse(show("apps/cli/package.json")).version],
+              ["apps/desktop/package.json", JSON.parse(show("apps/desktop/package.json")).version],
+              ["apps/desktop/src-tauri/tauri.conf.json", JSON.parse(show("apps/desktop/src-tauri/tauri.conf.json")).version],
+              ["apps/desktop/src-tauri/Cargo.toml", show("apps/desktop/src-tauri/Cargo.toml").match(/^version = "([^"]+)"/m)?.[1]],
+              [
+                "apps/desktop/src-tauri/Cargo.lock",
+                show("apps/desktop/src-tauri/Cargo.lock").match(/\[\[package\]\]\nname = "kandev-desktop"\nversion = "([^"]+)"/)?.[1],
+              ],
+            ]);
+
+            for (const [path, version] of versions) {
+              if (version !== next) {
+                console.error(`backfill_tag version mismatch: ${tag} points to ${path} version ${version ?? "<missing>"}.`);
+                process.exit(1);
+              }
+            }
+          NODE
 
             TAG="$BACKFILL_TAG"
             echo "Backfill existing release tag: $TAG"
@@ -686,9 +732,11 @@ jobs:
           }
 
       - name: Build Tauri desktop app
-        timeout-minutes: 45
+        timeout-minutes: 70
         env:
           CI: "true"
+          DESKTOP_DIAGNOSTICS_PLATFORM: ${{ matrix.platform }}
+          DESKTOP_DIAGNOSTICS_RUST_TARGET: ${{ matrix.rust_target }}
           TAURI_BUNDLE_ATTEMPTS: ${{ startsWith(matrix.platform, 'macos-') && '2' || '1' }}
           TAURI_BUILD_TIMEOUT_SECONDS: ${{ startsWith(matrix.platform, 'macos-') && '1800' || '0' }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -732,55 +780,25 @@ jobs:
               return 0
             fi
 
-            local diag_dir="$GITHUB_WORKSPACE/dist/desktop-diagnostics"
-            local bundle_root="$GITHUB_WORKSPACE/apps/desktop/src-tauri/target/${{ matrix.rust_target }}/release/bundle"
-            mkdir -p "$diag_dir"
-            if [ ! -d "$bundle_root" ]; then
-              bundle_root="$GITHUB_WORKSPACE/apps/desktop/src-tauri/target/release/bundle"
-            fi
-
-            {
-              echo "label=$label"
-              echo "platform=${{ matrix.platform }}"
-              echo "rust_target=${{ matrix.rust_target }}"
-              echo "date=$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-              echo
-              echo "## system"
-              uname -a || true
-              sw_vers || true
-              echo
-              echo "## disk"
-              df -h || true
-              echo
-              echo "## hdiutil info"
-              hdiutil info || true
-              echo
-              echo "## mounts"
-              mount || true
-              echo
-              echo "## related processes"
-              ps aux | grep -E 'hdiutil|diskimages|bundle_dmg|pnpm|cargo' | grep -v grep || true
-              echo
-              echo "## bundle files"
-              if [ -d "$bundle_root" ]; then
-                find "$bundle_root" -maxdepth 5 -print || true
-              else
-                echo "Missing bundle root: $bundle_root"
-              fi
-            } > "$diag_dir/macos-${{ matrix.platform }}-${label}.txt"
-
-            if [ -f "$bundle_root/dmg/bundle_dmg.sh" ]; then
-              cp "$bundle_root/dmg/bundle_dmg.sh" "$diag_dir/bundle_dmg-${{ matrix.platform }}-${label}.sh"
-            fi
+            bash "$GITHUB_WORKSPACE/.github/scripts/collect-macos-desktop-diagnostics.sh" "$label"
           }
 
           terminate_process_tree() {
             local pid="$1"
-            pkill -TERM -P "$pid" 2>/dev/null || true
-            kill -TERM "$pid" 2>/dev/null || true
+            terminate_process_tree_with_signal "$pid" TERM
             sleep 5
-            pkill -KILL -P "$pid" 2>/dev/null || true
-            kill -KILL "$pid" 2>/dev/null || true
+            terminate_process_tree_with_signal "$pid" KILL
+          }
+
+          terminate_process_tree_with_signal() {
+            local pid="$1"
+            local signal="$2"
+            local child
+            while IFS= read -r child; do
+              [ -n "$child" ] || continue
+              terminate_process_tree_with_signal "$child" "$signal"
+            done < <(pgrep -P "$pid" 2>/dev/null || true)
+            kill "-$signal" "$pid" 2>/dev/null || true
           }
 
           run_with_timeout() {
@@ -824,9 +842,10 @@ jobs:
             if run_tauri_build; then
               status=0
               break
+            else
+              status=$?
             fi
 
-            status=$?
             echo "::warning::Tauri desktop build attempt $attempt/$TAURI_BUNDLE_ATTEMPTS failed with exit code $status."
             collect_macos_desktop_diagnostics "attempt-${attempt}"
             if [ "$attempt" -lt "$TAURI_BUNDLE_ATTEMPTS" ]; then
@@ -838,40 +857,12 @@ jobs:
 
       - name: Collect macOS desktop diagnostics
         if: failure() && startsWith(matrix.platform, 'macos-')
+        env:
+          DESKTOP_DIAGNOSTICS_PLATFORM: ${{ matrix.platform }}
+          DESKTOP_DIAGNOSTICS_RUST_TARGET: ${{ matrix.rust_target }}
         run: |
           set -euo pipefail
-          diag_dir="$GITHUB_WORKSPACE/dist/desktop-diagnostics"
-          bundle_root="$GITHUB_WORKSPACE/apps/desktop/src-tauri/target/${{ matrix.rust_target }}/release/bundle"
-          mkdir -p "$diag_dir"
-          if [ ! -d "$bundle_root" ]; then
-            bundle_root="$GITHUB_WORKSPACE/apps/desktop/src-tauri/target/release/bundle"
-          fi
-
-          {
-            echo "platform=${{ matrix.platform }}"
-            echo "rust_target=${{ matrix.rust_target }}"
-            echo "date=$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-            echo
-            echo "## disk"
-            df -h || true
-            echo
-            echo "## hdiutil info"
-            hdiutil info || true
-            echo
-            echo "## related processes"
-            ps aux | grep -E 'hdiutil|diskimages|bundle_dmg|pnpm|cargo' | grep -v grep || true
-            echo
-            echo "## bundle files"
-            if [ -d "$bundle_root" ]; then
-              find "$bundle_root" -maxdepth 5 -print || true
-            else
-              echo "Missing bundle root: $bundle_root"
-            fi
-          } > "$diag_dir/macos-${{ matrix.platform }}-failure.txt"
-
-          if [ -f "$bundle_root/dmg/bundle_dmg.sh" ]; then
-            cp "$bundle_root/dmg/bundle_dmg.sh" "$diag_dir/bundle_dmg-${{ matrix.platform }}-failure.sh"
-          fi
+          bash "$GITHUB_WORKSPACE/.github/scripts/collect-macos-desktop-diagnostics.sh" failure
 
       - name: Upload macOS desktop diagnostics
         if: failure() && startsWith(matrix.platform, 'macos-')
