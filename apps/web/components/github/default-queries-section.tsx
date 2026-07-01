@@ -127,9 +127,11 @@ function QueryEditor({
   );
 }
 
-export function DefaultQueriesSection() {
+export function DefaultQueriesSection({ workspaceId }: { workspaceId?: string }) {
   const { toast } = useToast();
-  const { prPresets, issuePresets, save, reset, isCustomized } = useDefaultQueryPresets();
+  const { prPresets, issuePresets, save, reset, isCustomized } = useDefaultQueryPresets(
+    workspaceId ?? null,
+  );
   const [prDraft, setPrDraft] = useState<StoredQueryPreset[]>(prPresets);
   const [issueDraft, setIssueDraft] = useState<StoredQueryPreset[]>(issuePresets);
 

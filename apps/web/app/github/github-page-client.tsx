@@ -189,15 +189,16 @@ function useRepoOptions(
   }, [knownRepos, repoFilter]);
 }
 
-function useResolvedQueryPresets() {
-  const { prPresets: storedPr, issuePresets: storedIssue } = useDefaultQueryPresets();
+function useResolvedQueryPresets(workspaceId: string | null = null) {
+  const { prPresets: storedPr, issuePresets: storedIssue } = useDefaultQueryPresets(workspaceId);
   const pr = useMemo(() => resolvePresetOptions(storedPr, PR_PRESETS), [storedPr]);
   const issue = useMemo(() => resolvePresetOptions(storedIssue, ISSUE_PRESETS), [storedIssue]);
   return { pr, issue };
 }
 
-function useGitHubPageState() {
-  const { pr: resolvedPrPresets, issue: resolvedIssuePresets } = useResolvedQueryPresets();
+function useGitHubPageState(workspaceId: string | null) {
+  const { pr: resolvedPrPresets, issue: resolvedIssuePresets } =
+    useResolvedQueryPresets(workspaceId);
 
   const [selection, setSelection] = useState<SidebarSelection>(() => ({
     kind: "pr",
@@ -217,16 +218,17 @@ function useGitHubPageState() {
     presets: savedPresets,
     save: saveSavedPreset,
     remove: removeSavedPreset,
-  } = useSavedPresets();
+  } = useSavedPresets(workspaceId);
 
   const presets = selection.kind === "pr" ? resolvedPrPresets : resolvedIssuePresets;
-  const search = useGitHubSearch<GitHubPR | GitHubIssue>(
-    selection.kind,
+  const search = useGitHubSearch<GitHubPR | GitHubIssue>({
+    kind: selection.kind,
     presets,
-    selection.source === "preset" ? selection.id : "",
-    committedQuery,
+    preset: selection.source === "preset" ? selection.id : "",
+    customQuery: committedQuery,
     repoFilter,
-  );
+    workspaceId,
+  });
   const repoOptions = useRepoOptions(selection, committedQuery, search.items, repoFilter);
   const title = useMemo(
     () => resolveTitle(selection, savedPresets, resolvedPrPresets, resolvedIssuePresets),
@@ -369,7 +371,7 @@ export function GitHubPageClient({
   const { status, loaded } = useGitHubStatus();
   const [launchPayload, setLaunchPayload] = useState<LaunchPayload | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const state = useGitHubPageState();
+  const state = useGitHubPageState(workspaceId ?? null);
   const { presets: storedPresets } = useGitHubActionPresets(workspaceId ?? null);
   const prPresets = useMemo(() => resolvePRPresets(storedPresets), [storedPresets]);
   const issuePresets = useMemo(() => resolveIssuePresets(storedPresets), [storedPresets]);

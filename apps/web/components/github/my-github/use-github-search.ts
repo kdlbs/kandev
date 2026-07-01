@@ -22,6 +22,16 @@ type FetchArgs = {
   customQuery: string;
   repoFilter: string;
   page: number;
+  workspaceId: string | null;
+};
+
+type UseGitHubSearchOptions = {
+  kind: SearchKind;
+  presets: PresetOption[];
+  preset: string;
+  customQuery: string;
+  repoFilter?: string;
+  workspaceId?: string | null;
 };
 
 export function buildParams(
@@ -40,13 +50,14 @@ export function buildParams(
   return { filter };
 }
 
-export function useGitHubSearch<T extends GitHubPR | GitHubIssue>(
-  kind: SearchKind,
-  presets: PresetOption[],
-  preset: string,
-  customQuery: string,
-  repoFilter: string = "",
-) {
+export function useGitHubSearch<T extends GitHubPR | GitHubIssue>({
+  kind,
+  presets,
+  preset,
+  customQuery,
+  repoFilter = "",
+  workspaceId = null,
+}: UseGitHubSearchOptions) {
   const [state, setState] = useState<SearchState<T>>({
     items: [],
     loading: false,
@@ -63,15 +74,21 @@ export function useGitHubSearch<T extends GitHubPR | GitHubIssue>(
   // Reset to page 1 whenever the filter inputs change.
   useEffect(() => {
     setPage(1);
-  }, [preset, customQuery, repoFilter, kind]);
+  }, [preset, customQuery, repoFilter, workspaceId, kind]);
 
   const fetchData = useCallback(
-    async ({ preset: ep, customQuery: ec, repoFilter: er, page: epage }: FetchArgs) => {
+    async ({
+      preset: ep,
+      customQuery: ec,
+      repoFilter: er,
+      page: epage,
+      workspaceId: ews,
+    }: FetchArgs) => {
       const seq = ++requestSeq.current;
       setState((s) => ({ ...s, loading: true, error: null }));
       try {
         const base = buildParams(presets, ep, ec, er);
-        const params = { ...base, page: epage, perPage: SEARCH_PAGE_SIZE };
+        const params = { ...base, page: epage, perPage: SEARCH_PAGE_SIZE, workspaceId: ews };
         const response =
           kind === "pr" ? await searchUserPRs(params) : await searchUserIssues(params);
         if (seq !== requestSeq.current) return;
@@ -100,12 +117,12 @@ export function useGitHubSearch<T extends GitHubPR | GitHubIssue>(
   );
 
   useEffect(() => {
-    void fetchData({ preset, customQuery, repoFilter, page });
-  }, [fetchData, preset, customQuery, repoFilter, page]);
+    void fetchData({ preset, customQuery, repoFilter, page, workspaceId });
+  }, [fetchData, preset, customQuery, repoFilter, page, workspaceId]);
 
   const refresh = useCallback(
-    () => fetchData({ preset, customQuery, repoFilter, page }),
-    [fetchData, preset, customQuery, repoFilter, page],
+    () => fetchData({ preset, customQuery, repoFilter, page, workspaceId }),
+    [fetchData, preset, customQuery, repoFilter, page, workspaceId],
   );
 
   return { ...state, page, setPage, pageSize: SEARCH_PAGE_SIZE, refresh };

@@ -196,6 +196,11 @@ func (s *Service) CheckIssueWatch(ctx context.Context, watch *IssueWatch) ([]*Is
 	if err != nil {
 		return nil, err
 	}
+	settings, settingsErr := s.GetWorkspaceSettings(ctx, watch.WorkspaceID)
+	if settingsErr != nil {
+		return nil, settingsErr
+	}
+	issues = filterIssuesByWorkspaceScope(issues, settings)
 
 	var newIssues []*Issue
 	for _, issue := range issues {

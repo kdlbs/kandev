@@ -162,6 +162,17 @@ const createTablesSQL = `
 		updated_at DATETIME NOT NULL
 	);
 
+	CREATE TABLE IF NOT EXISTS github_workspace_settings (
+		workspace_id TEXT PRIMARY KEY,
+		repo_scope_mode TEXT NOT NULL DEFAULT 'all',
+		repo_scope_orgs TEXT NOT NULL DEFAULT '[]',
+		repo_scope_repos TEXT NOT NULL DEFAULT '[]',
+		saved_presets TEXT NOT NULL DEFAULT '[]',
+		default_query_presets TEXT,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+
 	CREATE TABLE IF NOT EXISTS github_task_ci_options (
 		task_id TEXT PRIMARY KEY,
 		auto_fix_enabled BOOLEAN NOT NULL DEFAULT 0,
@@ -1935,6 +1946,177 @@ func (s *Store) ResetIssueWatchState(ctx context.Context, watchID string) error 
 		return err
 	}
 	return tx.Commit()
+}
+
+// --- Workspace settings operations ---
+
+func defaultWorkspaceSettings(workspaceID string) *WorkspaceSettings {
+	return &WorkspaceSettings{
+		WorkspaceID:         workspaceID,
+		RepoScopeMode:       RepoScopeModeAll,
+		RepoScopeOrgs:       []string{},
+		RepoScopeRepos:      []RepoFilter{},
+		SavedPresets:        json.RawMessage("[]"),
+		DefaultQueryPresets: nil,
+	}
+}
+
+func cloneRawMessage(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]byte, len(raw))
+	copy(out, raw)
+	return out
+}
+
+func normalizeRepoScopeMode(mode string) string {
+	mode = strings.TrimSpace(strings.ToLower(mode))
+	switch mode {
+	case RepoScopeModeOrgs, RepoScopeModeRepos:
+		return mode
+	default:
+		return RepoScopeModeAll
+	}
+}
+
+func normalizeWorkspaceSettings(settings *WorkspaceSettings) *WorkspaceSettings {
+	if settings == nil {
+		return nil
+	}
+	out := *settings
+	out.WorkspaceID = strings.TrimSpace(out.WorkspaceID)
+	out.RepoScopeMode = normalizeRepoScopeMode(out.RepoScopeMode)
+	if out.RepoScopeMode != RepoScopeModeOrgs {
+		out.RepoScopeOrgs = nil
+	}
+	if out.RepoScopeMode != RepoScopeModeRepos {
+		out.RepoScopeRepos = nil
+	}
+	orgs := make([]string, 0, len(out.RepoScopeOrgs))
+	seenOrgs := make(map[string]struct{}, len(out.RepoScopeOrgs))
+	for _, org := range out.RepoScopeOrgs {
+		org = strings.TrimSpace(org)
+		if org == "" {
+			continue
+		}
+		key := strings.ToLower(org)
+		if _, ok := seenOrgs[key]; ok {
+			continue
+		}
+		seenOrgs[key] = struct{}{}
+		orgs = append(orgs, org)
+	}
+	out.RepoScopeOrgs = orgs
+	repos := make([]RepoFilter, 0, len(out.RepoScopeRepos))
+	seenRepos := make(map[string]struct{}, len(out.RepoScopeRepos))
+	for _, repo := range out.RepoScopeRepos {
+		owner := strings.TrimSpace(repo.Owner)
+		name := strings.TrimSpace(repo.Name)
+		if owner == "" || name == "" {
+			continue
+		}
+		key := strings.ToLower(owner + "/" + name)
+		if _, ok := seenRepos[key]; ok {
+			continue
+		}
+		seenRepos[key] = struct{}{}
+		repos = append(repos, RepoFilter{Owner: owner, Name: name})
+	}
+	out.RepoScopeRepos = repos
+	if len(out.SavedPresets) == 0 {
+		out.SavedPresets = json.RawMessage("[]")
+	} else {
+		out.SavedPresets = cloneRawMessage(out.SavedPresets)
+	}
+	out.DefaultQueryPresets = cloneRawMessage(out.DefaultQueryPresets)
+	return &out
+}
+
+// GetWorkspaceSettings returns per-workspace GitHub settings. Missing rows
+// resolve to the backwards-compatible All repos defaults.
+func (s *Store) GetWorkspaceSettings(ctx context.Context, workspaceID string) (*WorkspaceSettings, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return nil, fmt.Errorf("workspace_id is required")
+	}
+	var row struct {
+		WorkspaceID         string         `db:"workspace_id"`
+		RepoScopeMode       string         `db:"repo_scope_mode"`
+		RepoScopeOrgsJSON   string         `db:"repo_scope_orgs"`
+		RepoScopeReposJSON  string         `db:"repo_scope_repos"`
+		SavedPresets        string         `db:"saved_presets"`
+		DefaultQueryPresets sql.NullString `db:"default_query_presets"`
+		CreatedAt           time.Time      `db:"created_at"`
+		UpdatedAt           time.Time      `db:"updated_at"`
+	}
+	err := s.ro.GetContext(ctx, &row, `
+		SELECT workspace_id, repo_scope_mode, repo_scope_orgs, repo_scope_repos,
+		       saved_presets, default_query_presets, created_at, updated_at
+		FROM github_workspace_settings
+		WHERE workspace_id = ?`, workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return defaultWorkspaceSettings(workspaceID), nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	settings := &WorkspaceSettings{
+		WorkspaceID:        row.WorkspaceID,
+		RepoScopeMode:      row.RepoScopeMode,
+		RepoScopeOrgsJSON:  row.RepoScopeOrgsJSON,
+		RepoScopeReposJSON: row.RepoScopeReposJSON,
+		SavedPresets:       json.RawMessage(row.SavedPresets),
+		CreatedAt:          row.CreatedAt,
+		UpdatedAt:          row.UpdatedAt,
+	}
+	if row.DefaultQueryPresets.Valid {
+		settings.DefaultQueryPresets = json.RawMessage(row.DefaultQueryPresets.String)
+	}
+	if err := json.Unmarshal([]byte(row.RepoScopeOrgsJSON), &settings.RepoScopeOrgs); err != nil {
+		return nil, fmt.Errorf("unmarshal repo scope orgs: %w", err)
+	}
+	if err := json.Unmarshal([]byte(row.RepoScopeReposJSON), &settings.RepoScopeRepos); err != nil {
+		return nil, fmt.Errorf("unmarshal repo scope repos: %w", err)
+	}
+	return normalizeWorkspaceSettings(settings), nil
+}
+
+// UpsertWorkspaceSettings stores per-workspace GitHub settings.
+func (s *Store) UpsertWorkspaceSettings(ctx context.Context, settings *WorkspaceSettings) error {
+	settings = normalizeWorkspaceSettings(settings)
+	if settings == nil || settings.WorkspaceID == "" {
+		return fmt.Errorf("workspace_id is required")
+	}
+	orgsJSON, err := json.Marshal(settings.RepoScopeOrgs)
+	if err != nil {
+		return fmt.Errorf("marshal repo scope orgs: %w", err)
+	}
+	reposJSON, err := json.Marshal(settings.RepoScopeRepos)
+	if err != nil {
+		return fmt.Errorf("marshal repo scope repos: %w", err)
+	}
+	now := time.Now().UTC()
+	defaults := sql.NullString{}
+	if len(settings.DefaultQueryPresets) > 0 {
+		defaults.Valid = true
+		defaults.String = string(settings.DefaultQueryPresets)
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO github_workspace_settings (
+			workspace_id, repo_scope_mode, repo_scope_orgs, repo_scope_repos,
+			saved_presets, default_query_presets, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(workspace_id) DO UPDATE SET
+			repo_scope_mode = excluded.repo_scope_mode,
+			repo_scope_orgs = excluded.repo_scope_orgs,
+			repo_scope_repos = excluded.repo_scope_repos,
+			saved_presets = excluded.saved_presets,
+			default_query_presets = excluded.default_query_presets,
+			updated_at = excluded.updated_at`,
+		settings.WorkspaceID, settings.RepoScopeMode, string(orgsJSON), string(reposJSON),
+		string(settings.SavedPresets), defaults, now, now)
+	return err
 }
 
 // --- Action preset operations ---

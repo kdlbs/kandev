@@ -16,14 +16,24 @@ import { Label } from "@kandev/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Switch } from "@kandev/ui/switch";
 import { cn } from "@/lib/utils";
-import { listUserOrgs, searchOrgRepos } from "@/lib/api/domains/github-api";
-import type { RepoFilter, GitHubOrg, GitHubRepoInfo } from "@/lib/types/github";
+import {
+  fetchGitHubWorkspaceSettings,
+  listUserOrgs,
+  searchOrgRepos,
+} from "@/lib/api/domains/github-api";
+import type {
+  RepoFilter,
+  GitHubOrg,
+  GitHubRepoInfo,
+  GitHubWorkspaceSettings,
+} from "@/lib/types/github";
 
 type RepoFilterSelectorProps = {
   allRepos: boolean;
   selectedRepos: RepoFilter[];
   onAllReposChange: (checked: boolean) => void;
   onSelectedReposChange: (repos: RepoFilter[]) => void;
+  workspaceId?: string;
 };
 
 function useGitHubOrgs() {
@@ -68,6 +78,46 @@ function useRepoSearch(org: string, query: string) {
   const loading = org ? searchState.loading : false;
 
   return { results, loading };
+}
+
+function useWorkspaceRepoScope(workspaceId: string | undefined) {
+  const [settings, setSettings] = useState<GitHubWorkspaceSettings | null>(null);
+
+  useEffect(() => {
+    if (!workspaceId) {
+      setSettings(null);
+      return;
+    }
+    let cancelled = false;
+    void fetchGitHubWorkspaceSettings(workspaceId)
+      .then((next) => {
+        if (!cancelled) setSettings(next);
+      })
+      .catch(() => {
+        if (!cancelled) setSettings(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+
+  return settings;
+}
+
+function repoAllowedByScope(settings: GitHubWorkspaceSettings | null, owner: string, repo: string) {
+  if (!settings || settings.repo_scope_mode === "all") return true;
+  if (settings.repo_scope_mode === "orgs") {
+    return (settings.repo_scope_orgs ?? []).includes(owner);
+  }
+  return (settings.repo_scope_repos ?? []).some(
+    (allowed) => allowed.owner === owner && allowed.name === repo,
+  );
+}
+
+function orgAllowedByScope(settings: GitHubWorkspaceSettings | null, org: string) {
+  if (!settings || settings.repo_scope_mode === "all") return true;
+  if (settings.repo_scope_mode === "orgs") return (settings.repo_scope_orgs ?? []).includes(org);
+  return false;
 }
 
 function SelectedFilters({
@@ -153,9 +203,11 @@ function OrgBadges({
 
 function RepoSearchCombobox({
   disabled,
+  scope,
   onAdd,
 }: {
   disabled: boolean;
+  scope: GitHubWorkspaceSettings | null;
   onAdd: (owner: string, name: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -165,7 +217,10 @@ function RepoSearchCombobox({
   const org = slashIdx > 0 ? value.slice(0, slashIdx) : "";
   const query = slashIdx > 0 ? value.slice(slashIdx + 1) : "";
   const { results, loading: searchLoading } = useRepoSearch(org, query);
-  const filteredResults = useMemo(() => results.slice(0, 10), [results]);
+  const filteredResults = useMemo(
+    () => results.filter((repo) => repoAllowedByScope(scope, repo.owner, repo.name)).slice(0, 10),
+    [results, scope],
+  );
 
   const handleSelect = useCallback(
     (fullName: string) => {
@@ -239,8 +294,15 @@ export function RepoFilterSelector({
   selectedRepos,
   onAllReposChange,
   onSelectedReposChange,
+  workspaceId,
 }: RepoFilterSelectorProps) {
   const { orgs, loading: orgsLoading } = useGitHubOrgs();
+  const scope = useWorkspaceRepoScope(workspaceId);
+  const scopedOrgs = useMemo(
+    () => orgs.filter((org) => orgAllowedByScope(scope, org.login)),
+    [orgs, scope],
+  );
+  const showOrgBadges = !scope || scope.repo_scope_mode !== "repos";
 
   const toggleOrg = useCallback(
     (login: string) => {
@@ -278,7 +340,7 @@ export function RepoFilterSelector({
       <div>
         <Label>Repositories</Label>
         <p className="text-xs text-muted-foreground">
-          Which GitHub repositories to monitor for PRs requesting your review.
+          Which allowed GitHub repositories to monitor for this watch.
         </p>
       </div>
 
@@ -290,24 +352,26 @@ export function RepoFilterSelector({
           className="cursor-pointer"
         />
         <Label htmlFor="all-repos-toggle" className="font-normal cursor-pointer">
-          All repositories (no filtering)
+          All repositories allowed by this workspace
         </Label>
       </div>
 
       {!allRepos && (
         <>
-          <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground font-normal">Organizations</Label>
-            <OrgBadges
-              orgs={orgs}
-              loading={orgsLoading}
-              selectedRepos={selectedRepos}
-              disabled={allRepos}
-              onToggleOrg={toggleOrg}
-            />
-          </div>
+          {showOrgBadges && (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground font-normal">Organizations</Label>
+              <OrgBadges
+                orgs={scopedOrgs}
+                loading={orgsLoading}
+                selectedRepos={selectedRepos}
+                disabled={allRepos}
+                onToggleOrg={toggleOrg}
+              />
+            </div>
+          )}
 
-          <RepoSearchCombobox disabled={allRepos} onAdd={addRepo} />
+          <RepoSearchCombobox disabled={allRepos} scope={scope} onAdd={addRepo} />
 
           <SelectedFilters repos={selectedRepos} onRemove={removeFilter} disabled={allRepos} />
         </>

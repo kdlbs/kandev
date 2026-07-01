@@ -15,6 +15,7 @@ import { IssueWatchTable } from "./issue-watch-table";
 import { IssueWatchDialog } from "./issue-watch-dialog";
 import { ActionPresetsSection } from "./action-presets-section";
 import { DefaultQueriesSection } from "./default-queries-section";
+import { GitHubRepoScopeSection } from "./github-repo-scope-section";
 import { PRStatsPanel } from "./pr-stats";
 import { useReviewWatches } from "@/hooks/domains/github/use-review-watches";
 import { useIssueWatches } from "@/hooks/domains/github/use-issue-watches";
@@ -276,16 +277,17 @@ export function GitHubConnectionSection() {
   );
 }
 
-// PerWorkspaceSection wraps the still-per-workspace surfaces (action presets,
-// PR analytics) under a workspace switcher. Watchers don't go in here — they
-// list flat across every workspace via their own sections.
 function PerWorkspaceSection({ workspaceId }: { workspaceId: string }) {
   return (
     <div className="space-y-8">
+      <GitHubRepoScopeSection workspaceId={workspaceId} />
+      <ReviewWatchSection workspaceId={workspaceId} />
+      <IssueWatchSection workspaceId={workspaceId} />
       <ActionPresetsSection workspaceId={workspaceId} />
       <SettingsSection title="PR Analytics" description="Pull request activity for this workspace.">
         <PRStatsPanel workspaceId={workspaceId} />
       </SettingsSection>
+      <DefaultQueriesSection workspaceId={workspaceId} />
     </div>
   );
 }
@@ -295,21 +297,15 @@ export function GitHubIntegrationPage() {
     <TooltipProvider>
       <div className="space-y-8">
         <GitHubConnectionSection />
-        <ReviewWatchSection />
-        <IssueWatchSection />
-        <WorkspaceScopedSection label="Presets and analytics for">
+        <WorkspaceScopedSection showSelector={false}>
           {(ws) => <PerWorkspaceSection key={ws} workspaceId={ws} />}
         </WorkspaceScopedSection>
-        <DefaultQueriesSection />
       </div>
     </TooltipProvider>
   );
 }
 
-// ReviewWatchSection lists every review watch across every workspace in a
-// single flat table. Pass `undefined` to the hook so it fetches all rows; the
-// dialog's create flow asks the user to pick the workspace.
-function ReviewWatchSection() {
+function ReviewWatchSection({ workspaceId }: { workspaceId: string }) {
   const {
     watches,
     create,
@@ -319,7 +315,7 @@ function ReviewWatchSection() {
     handleTrigger,
     handleReset,
     handleToggleEnabled,
-  } = useWatchActions(undefined);
+  } = useWatchActions(workspaceId);
   const { toast } = useToast();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingWatch, setEditingWatch] = useState<ReviewWatch | null>(null);
@@ -368,7 +364,6 @@ function ReviewWatchSection() {
           <CardContent className="p-0">
             <ReviewWatchTable
               watches={watches}
-              showWorkspace
               onEdit={handleEdit}
               onDelete={handleDelete}
               onTrigger={handleTrigger}
@@ -382,7 +377,7 @@ function ReviewWatchSection() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         watch={editingWatch}
-        // No workspaceId — dialog shows a workspace picker for new watches.
+        workspaceId={workspaceId}
         onCreate={async (req) => {
           await create(req);
           toast({ description: "Review watch created", variant: "success" });
@@ -405,8 +400,8 @@ function ReviewWatchSection() {
   );
 }
 
-function IssueWatchSection() {
-  const issueActions = useIssueWatchActions(undefined);
+function IssueWatchSection({ workspaceId }: { workspaceId: string }) {
+  const issueActions = useIssueWatchActions(workspaceId);
   const { toast } = useToast();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingWatch, setEditingIssueWatch] = useState<IssueWatch | null>(null);
@@ -455,7 +450,6 @@ function IssueWatchSection() {
           <CardContent className="p-0">
             <IssueWatchTable
               watches={issueActions.watches}
-              showWorkspace
               onEdit={handleEdit}
               onDelete={issueActions.handleDelete}
               onTrigger={issueActions.handleTrigger}
@@ -469,6 +463,7 @@ function IssueWatchSection() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         watch={editingWatch}
+        workspaceId={workspaceId}
         onCreate={async (req) => {
           await issueActions.create(req);
           toast({ description: "Issue watch created", variant: "success" });
