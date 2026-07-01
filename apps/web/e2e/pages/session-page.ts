@@ -348,6 +348,11 @@ export class SessionPage {
     return this.page.getByTestId("clarification-input");
   }
 
+  /** Inline Send button shown next to the custom input on touch devices. */
+  clarificationCustomSubmit(): Locator {
+    return this.page.getByTestId("clarification-custom-submit");
+  }
+
   /** Deferred notice shown when agent has disconnected from clarification. */
   clarificationDeferredNotice(): Locator {
     return this.page.getByTestId("clarification-deferred-notice");

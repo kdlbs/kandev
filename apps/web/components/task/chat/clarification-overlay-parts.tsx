@@ -271,26 +271,26 @@ export function ClarificationCustomInput({
         onKeyDown={(e) => {
           // Shift+Enter (and Alt+Enter) fall through so the textarea inserts a
           // newline instead of submitting. isComposing ignores the Enter that
-          // confirms an IME candidate (CJK keyboards); repeat ignores auto-repeat
-          // keydowns from a held Enter so it can't fire multiple submits.
-          if (e.key !== "Enter" || e.shiftKey || e.altKey || e.repeat || e.nativeEvent.isComposing)
-            return;
+          // confirms an IME candidate (CJK keyboards).
+          if (e.key !== "Enter" || e.shiftKey || e.altKey || e.nativeEvent.isComposing) return;
           if (e.metaKey || e.ctrlKey) {
             // Cmd/Ctrl+Enter only asks the parent to finalize. The draft was
             // already live-recorded via onChange, so we skip the per-question
             // commit path (which would also advance the carousel one step on
             // multi-question bundles — wasted state churn before submit).
+            // e.repeat guards a held key against firing multiple finalizes.
             e.preventDefault();
-            onRequestFinalSubmit?.();
+            if (!e.repeat) onRequestFinalSubmit?.();
             return;
           }
           // On touch devices Enter inserts a newline (submit via the button).
           if (!isFinePointer) return;
           // Plain Enter submits on desktop. preventDefault runs unconditionally
-          // so an empty/whitespace draft doesn't leak a stray newline into the
-          // textarea before the trim guard bails.
+          // (including on auto-repeat) so a held key never leaks stray newlines
+          // into this — or, once the carousel advances, the next — textarea, and
+          // so an empty/whitespace draft can't leak one before the trim guard.
           e.preventDefault();
-          if (trimmed) {
+          if (!e.repeat && trimmed) {
             onSubmit(trimmed);
           }
         }}

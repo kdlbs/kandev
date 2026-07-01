@@ -112,13 +112,15 @@ describe("ClarificationCustomInput multiline", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it("ignores auto-repeat Enter from a held key so it can't submit twice", () => {
+  it("ignores auto-repeat Enter but still suppresses the newline (no double submit)", () => {
     const onSubmit = vi.fn();
     const { getByTestId } = render(
       <ClarificationCustomInput {...makeProps({ draft: "answer", onSubmit })} />,
     );
     const notDefaulted = pressEnter(getByTestId(INPUT_TESTID), { repeat: true });
-    expect(notDefaulted).toBe(true); // default not prevented → treated as a no-op
+    // preventDefault still fires so a held key can't leak a newline into this or
+    // the next question's textarea, but onSubmit does not run again.
+    expect(notDefaulted).toBe(false);
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
