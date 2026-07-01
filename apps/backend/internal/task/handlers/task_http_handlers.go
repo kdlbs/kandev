@@ -396,6 +396,7 @@ type httpTaskRepositoryInput struct {
 	RepositoryID   string `json:"repository_id"`
 	BaseBranch     string `json:"base_branch"`
 	CheckoutBranch string `json:"checkout_branch"`
+	PRNumber       int    `json:"pr_number,omitempty"`
 	LocalPath      string `json:"local_path"`
 	Name           string `json:"name"`
 	DefaultBranch  string `json:"default_branch"`
@@ -811,6 +812,7 @@ func convertCreateTaskRepositories(c *gin.Context, inputs []httpTaskRepositoryIn
 			RepositoryID:   r.RepositoryID,
 			BaseBranch:     r.BaseBranch,
 			CheckoutBranch: r.CheckoutBranch,
+			PRNumber:       r.PRNumber,
 			LocalPath:      r.LocalPath,
 			Name:           r.Name,
 			DefaultBranch:  r.DefaultBranch,
