@@ -1,22 +1,22 @@
 import { useEffect } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { listWorkflows } from "@/lib/api";
+import type { WorkflowsState } from "@/lib/state/slices";
+
+type StoreWorkflow = WorkflowsState["items"][number];
+type SetWorkflows = (workflows: StoreWorkflow[]) => void;
 
 /**
- * Load workflows for the active workspace. Call from a component that stays
- * mounted independently of any collapsible section, so `state.workflows.items`
- * follows the active workspace even when the sidebar's Tasks section is
- * collapsed and its children (which consume workflows) are unmounted.
+ * Fire-and-forget fetch effect. Kept internal so callers that only need to
+ * populate `state.workflows.items` (e.g. `useEnsureWorkspaceWorkflows`) don't
+ * also subscribe to the store slice they wrote to — that would re-render the
+ * caller on every fetch and defeats the "top-level layout" placement.
  */
-export function useEnsureWorkspaceWorkflows() {
-  const workspaceId = useAppStore((state) => state.workspaces.activeId);
-  useWorkflows(workspaceId, true);
-}
-
-export function useWorkflows(workspaceId: string | null, enabled = true) {
-  const workflows = useAppStore((state) => state.workflows.items);
-  const setWorkflows = useAppStore((state) => state.setWorkflows);
-
+function useWorkflowsFetchEffect(
+  workspaceId: string | null,
+  enabled: boolean,
+  setWorkflows: SetWorkflows,
+) {
   useEffect(() => {
     if (!enabled || !workspaceId) return;
     let cancelled = false;
@@ -43,6 +43,23 @@ export function useWorkflows(workspaceId: string | null, enabled = true) {
       cancelled = true;
     };
   }, [enabled, setWorkflows, workspaceId]);
+}
 
+/**
+ * Load workflows for the active workspace. Call from a component that stays
+ * mounted independently of any collapsible section, so `state.workflows.items`
+ * follows the active workspace even when the sidebar's Tasks section is
+ * collapsed and its children (which consume workflows) are unmounted.
+ */
+export function useEnsureWorkspaceWorkflows() {
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const setWorkflows = useAppStore((state) => state.setWorkflows);
+  useWorkflowsFetchEffect(workspaceId, true, setWorkflows);
+}
+
+export function useWorkflows(workspaceId: string | null, enabled = true) {
+  const workflows = useAppStore((state) => state.workflows.items);
+  const setWorkflows = useAppStore((state) => state.setWorkflows);
+  useWorkflowsFetchEffect(workspaceId, enabled, setWorkflows);
   return { workflows };
 }

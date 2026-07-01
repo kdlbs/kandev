@@ -12,6 +12,7 @@ type StoreWorkflow = {
   name: string;
   description?: string | null;
   hidden?: boolean;
+  style?: "kanban" | "office" | "custom";
 };
 
 type MockState = { workflows: { items: StoreWorkflow[] } };
@@ -47,6 +48,27 @@ beforeEach(() => {
 });
 
 describe("useWorkflowSettings", () => {
+  it("does not merge office-style workflows from the global store", () => {
+    // The sidebar's `useEnsureWorkspaceWorkflows` populates the store with every
+    // workflow — including office-style ones — on all routes. The settings UI
+    // is kanban-only (ADR-0004), so office workflows must be dropped at the
+    // store boundary (matching the SSR-side filter). Otherwise they land in
+    // `workflowItems`, which is what "Export All" serialises → workflow-import-
+    // export e2e regresses.
+    const officeInB: StoreWorkflow = {
+      id: "wf-b-office",
+      workspaceId: "ws-b",
+      name: "Office Only Workflow",
+      style: "office",
+    };
+    setStore([officeInB]);
+
+    const { result } = renderHook(() => useWorkflowSettings([], "ws-b"));
+
+    expect(result.current.workflowItems).toHaveLength(0);
+    expect(result.current.savedWorkflowItems).toHaveLength(0);
+  });
+
   it("does not include workflows from other workspaces present in the global store", () => {
     // Store has a workflow from workspace A (e.g. user previously visited it)
     setStore([STORE_A1]);
