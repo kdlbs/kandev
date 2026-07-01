@@ -2,6 +2,40 @@
 
 All notable changes to Kandev.
 
+## 0.70.0 - 2026-07-01
+
+### Features
+
+- add per-watch dispatch sorting to the Linear issue watcher ([#1553](https://github.com/kdlbs/kandev/pull/1553)) by @nlenepveu
+- redirect and toast when focused task is auto-deleted ([#1544](https://github.com/kdlbs/kandev/pull/1544))
+- support remote macos ssh hosts ([#1534](https://github.com/kdlbs/kandev/pull/1534))
+
+### Bug Fixes
+
+- improve ci auto-fix delivery ([#1560](https://github.com/kdlbs/kandev/pull/1560))
+- preserve nested markdown code fences ([#1557](https://github.com/kdlbs/kandev/pull/1557))
+- trigger workflow on agent task messages ([#1555](https://github.com/kdlbs/kandev/pull/1555))
+- sync archived task websocket removals ([#1556](https://github.com/kdlbs/kandev/pull/1556))
+- keep acknowledged agent errors hidden ([#1558](https://github.com/kdlbs/kandev/pull/1558))
+- keep completed office comments editable ([#1548](https://github.com/kdlbs/kandev/pull/1548))
+- restore workspace deletion from settings ([#1547](https://github.com/kdlbs/kandev/pull/1547))
+- keep tasks active while sibling sessions run ([#1551](https://github.com/kdlbs/kandev/pull/1551))
+- persist task create last-used selections ([#1550](https://github.com/kdlbs/kandev/pull/1550))
+- coalesce ci auto-fix queue rounds ([#1552](https://github.com/kdlbs/kandev/pull/1552))
+- inherit current task profile for mcp tasks ([#1546](https://github.com/kdlbs/kandev/pull/1546))
+- skip cleanup block when stop fails for terminal sessions ([#1541](https://github.com/kdlbs/kandev/pull/1541)) by @dominikkucharski
+- focus changes panel for inactive task updates ([#1542](https://github.com/kdlbs/kandev/pull/1542))
+- prevent automatic session tab pinning ([#1538](https://github.com/kdlbs/kandev/pull/1538))
+- show repo slugs on kanban cards ([#1540](https://github.com/kdlbs/kandev/pull/1540))
+- show loading states for task detail ([#1536](https://github.com/kdlbs/kandev/pull/1536))
+- show sidebar spinner for created boot sessions ([#1537](https://github.com/kdlbs/kandev/pull/1537))
+- align ci chip with aggregate checks ([#1535](https://github.com/kdlbs/kandev/pull/1535))
+- prefer main for worktree base branches ([#1532](https://github.com/kdlbs/kandev/pull/1532))
+
+### Documentation
+
+- add debug log collection guide ([#1533](https://github.com/kdlbs/kandev/pull/1533))
+
 ## 0.69.0 - 2026-06-29
 
 ### Bug Fixes
