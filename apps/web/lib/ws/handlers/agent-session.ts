@@ -330,12 +330,14 @@ function inheritAgentctlStatus(state: AppState, fromSessionId: string, toSession
  *   2. The current active session transitions to a terminal state — hand off
  *      to the newest non-terminal session for the same task, if any.
  */
+// eslint-disable-next-line max-params -- newState/previousState/wasKnownToStore are all needed by downstream branches
 function maybeAdoptSessionOnTransition(
   store: StoreApi<AppState>,
   taskId: string,
   sessionId: string,
   newState: TaskSessionState | undefined,
   wasKnownToStore: boolean,
+  previousState: TaskSessionState | undefined,
 ): void {
   const state = store.getState();
   if (
@@ -355,13 +357,18 @@ function maybeAdoptSessionOnTransition(
 
   const isActive = state.tasks.activeSessionId === sessionId;
   if (isActive && newState && isTerminalSessionState(newState)) {
-    // The user explicitly opened this terminal session (e.g. clicked its tab
-    // to review a completed/failed run). setActiveSession pins it, so honor
-    // that pin and do NOT auto-hand-off to a running session. Switching away
-    // here was the root cause of the "click a non-primary tab, it snaps back
-    // to the primary session" bug. Workflow-driven handoffs go through
-    // setActiveSessionAuto (no pin) and still take the replacement path below.
-    if (state.tasks.pinnedSessionId === sessionId) return;
+    // When the user clicked open a terminal session (e.g. to review a
+    // completed run), setActiveSession pins it. If the backend then
+    // re-emits the same terminal state_changed (a replay — the previous
+    // stored state was already terminal), honor the pin and do NOT hand
+    // off to a running session. A genuine RUNNING→COMPLETED transition
+    // (previousState non-terminal) still hands off normally.
+    if (
+      state.tasks.pinnedSessionId === sessionId &&
+      previousState &&
+      isTerminalSessionState(previousState)
+    )
+      return;
     const replacement = pickReplacementSessionId(state, taskId);
     if (replacement && replacement !== sessionId) {
       inheritAgentctlStatus(state, sessionId, replacement);
@@ -573,7 +580,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       extractContextWindow(store, sessionId, payload);
       maybePromoteAgentctlReady(store, sessionId, newState, message.timestamp);
 
-      maybeAdoptSessionOnTransition(store, taskId, sessionId, newState, !!existingSession);
+      maybeAdoptSessionOnTransition(store, taskId, sessionId, newState, !!existingSession, existingSession?.state);
 
       maybeNotifySessionFailure(store, {
         taskId,
