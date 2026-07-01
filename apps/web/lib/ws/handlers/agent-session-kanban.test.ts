@@ -49,52 +49,55 @@ function makeMessage(payload: TaskSessionStateChangedPayload) {
   };
 }
 
+function makeKanbanTask(primarySessionId: string) {
+  return {
+    id: "t-1",
+    workflowStepId: "step-1",
+    title: TASK_TITLE,
+    position: 0,
+    primarySessionId,
+    primarySessionState: "WAITING_FOR_INPUT",
+  };
+}
+
+function makeTaskSession(id: string) {
+  return {
+    id: sessionId(id),
+    task_id: taskId("t-1"),
+    state: "WAITING_FOR_INPUT",
+    started_at: "",
+    updated_at: "",
+  };
+}
+
+function makeSnapshotTaskStore(primarySessionId: string) {
+  const task = makeKanbanTask(primarySessionId);
+  return {
+    isLoading: false,
+    snapshots: {
+      "wf-1": {
+        workflowId: "wf-1",
+        workflowName: "Development",
+        steps: [],
+        tasks: [task],
+      },
+    },
+  };
+}
+
 describe("session.state_changed -> primary kanban card state", () => {
   it("updates kanban card primary session state in workflow snapshots", () => {
+    const task = makeKanbanTask("s-1");
     const store = makeStore({
       kanban: {
         workflowId: "wf-1",
         steps: [],
-        tasks: [
-          {
-            id: "t-1",
-            workflowStepId: "step-1",
-            title: TASK_TITLE,
-            position: 0,
-            primarySessionId: "s-1",
-            primarySessionState: "WAITING_FOR_INPUT",
-          },
-        ],
+        tasks: [task],
       },
-      kanbanMulti: {
-        isLoading: false,
-        snapshots: {
-          "wf-1": {
-            workflowId: "wf-1",
-            workflowName: "Development",
-            steps: [],
-            tasks: [
-              {
-                id: "t-1",
-                workflowStepId: "step-1",
-                title: TASK_TITLE,
-                position: 0,
-                primarySessionId: "s-1",
-                primarySessionState: "WAITING_FOR_INPUT",
-              },
-            ],
-          },
-        },
-      },
+      kanbanMulti: makeSnapshotTaskStore("s-1"),
       taskSessions: {
         items: {
-          "s-1": {
-            id: sessionId("s-1"),
-            task_id: taskId("t-1"),
-            state: "WAITING_FOR_INPUT",
-            started_at: "",
-            updated_at: "",
-          },
+          "s-1": makeTaskSession("s-1"),
         },
       },
     });
@@ -106,6 +109,33 @@ describe("session.state_changed -> primary kanban card state", () => {
     expect(store.getState().kanbanMulti.snapshots["wf-1"]?.tasks[0]?.primarySessionState).toBe(
       "RUNNING",
     );
+  });
+
+  it("logs the previous primary state when the task only exists in a workflow snapshot", () => {
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => undefined);
+    const store = makeStore({
+      kanban: {
+        workflowId: "wf-other",
+        steps: [],
+        tasks: [],
+      },
+      kanbanMulti: makeSnapshotTaskStore("s-1"),
+      taskSessions: {
+        items: {
+          "s-1": makeTaskSession("s-1"),
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(makeMessage({ task_id: "t-1", session_id: "s-1", new_state: "RUNNING" }));
+
+    expect(
+      debugSpy.mock.calls.some((call) =>
+        String(call[0]).includes("beforeTaskPrimaryState=WAITING_FOR_INPUT"),
+      ),
+    ).toBe(true);
+    debugSpy.mockRestore();
   });
 });
 

@@ -251,6 +251,19 @@ function patchSnapshotPrimarySessionState(
   return tasks === snapshot.tasks ? snapshot : { ...snapshot, tasks };
 }
 
+function findKanbanTaskForLog(
+  state: AppState,
+  taskId: string,
+): KanbanState["tasks"][number] | undefined {
+  const activeTask = state.kanban.tasks.find((task) => task.id === taskId);
+  if (activeTask) return activeTask;
+  for (const snapshot of Object.values(state.kanbanMulti.snapshots)) {
+    const snapshotTask = snapshot.tasks.find((task) => task.id === taskId);
+    if (snapshotTask) return snapshotTask;
+  }
+  return undefined;
+}
+
 function patchWorkflowSnapshotPrimarySessionStates(
   snapshots: Record<string, WorkflowSnapshotData>,
   taskId: string,
@@ -307,7 +320,7 @@ function syncKanbanPrimarySessionState(
   const state = store.getState();
   if (!state.kanban?.tasks || !state.kanbanMulti?.snapshots) return;
 
-  const beforeTask = state.kanban.tasks.find((task) => task.id === taskId);
+  const beforeTask = findKanbanTaskForLog(state, taskId);
   const nextKanbanTasks = patchTaskPrimarySessionState(
     state.kanban.tasks,
     taskId,

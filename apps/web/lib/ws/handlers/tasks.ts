@@ -21,10 +21,15 @@ const lifecycleDebug = createDebugLogger("task-lifecycle:ws");
 
 function mergeTaskUpdate(existing: KanbanTask | undefined, nextTask: KanbanTask): KanbanTask {
   if (!existing) return nextTask;
-  return {
+  const merged = {
     ...nextTask,
     ...mergeTaskRepositoryFields(existing, nextTask),
   };
+  if (nextTask.primarySessionId === undefined) merged.primarySessionId = existing.primarySessionId;
+  if (nextTask.primarySessionState === undefined) {
+    merged.primarySessionState = existing.primarySessionState;
+  }
+  return merged;
 }
 
 function upsertTask(tasks: KanbanTask[], nextTask: KanbanTask): KanbanTask[] {
