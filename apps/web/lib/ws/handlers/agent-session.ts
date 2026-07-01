@@ -580,7 +580,14 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       extractContextWindow(store, sessionId, payload);
       maybePromoteAgentctlReady(store, sessionId, newState, message.timestamp);
 
-      maybeAdoptSessionOnTransition(store, taskId, sessionId, newState, !!existingSession, existingSession?.state);
+      maybeAdoptSessionOnTransition(
+        store,
+        taskId,
+        sessionId,
+        newState,
+        !!existingSession,
+        existingSession?.state,
+      );
 
       maybeNotifySessionFailure(store, {
         taskId,
