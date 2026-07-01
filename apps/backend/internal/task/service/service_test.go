@@ -548,6 +548,56 @@ func TestService_FindOrCreateRepository_ReturnsCreatedForTaskWorktreeReplacement
 	}
 }
 
+func TestService_FindOrCreateRepository_ErrorsWhenTaskWorktreeReplacementDisappears(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	const workspaceID = "ws-1"
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: "Workspace"})
+	_ = repo.CreateRepository(ctx, &models.Repository{
+		ID:            "repo-task-worktree",
+		WorkspaceID:   workspaceID,
+		Name:          "kdlbs/kandev task worktree",
+		SourceType:    sourceTypeLocal,
+		LocalPath:     "/root/.kandev/tasks/pr-1541-fix-skip-cle_3bm/kdlbs-kandev",
+		Provider:      "github",
+		ProviderOwner: "kdlbs",
+		ProviderName:  "kandev",
+		DefaultBranch: "main",
+	})
+	svc.repoEntities = missingReplacementLookupRepository{
+		RepositoryEntityRepository: repo,
+		preserveID:                 "repo-task-worktree",
+	}
+
+	_, _, err := svc.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
+		WorkspaceID:   workspaceID,
+		Provider:      "github",
+		ProviderOwner: "kdlbs",
+		ProviderName:  "kandev",
+		DefaultBranch: "main",
+	})
+	if err == nil {
+		t.Fatal("expected missing replacement repository error")
+	}
+	if !strings.Contains(err.Error(), "no longer exists") {
+		t.Fatalf("expected missing replacement error, got %v", err)
+	}
+}
+
+type missingReplacementLookupRepository struct {
+	repository.RepositoryEntityRepository
+	preserveID string
+}
+
+func (r missingReplacementLookupRepository) GetRepository(ctx context.Context, id string) (*models.Repository, error) {
+	if id != r.preserveID {
+		return nil, nil
+	}
+	return r.RepositoryEntityRepository.GetRepository(ctx, id)
+}
+
 func TestService_CreateRepository_DefaultWorktreeBranchPrefix(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

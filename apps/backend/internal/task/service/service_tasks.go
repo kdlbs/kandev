@@ -502,6 +502,9 @@ func (s *Service) replaceTaskWorktreeProviderMatch(ctx context.Context, workspac
 	if lookupErr != nil {
 		return nil, false, fmt.Errorf("looking up repository %q: %w", replacementID, lookupErr)
 	}
+	if replacement == nil {
+		return nil, false, fmt.Errorf("replacement repository %q no longer exists", replacementID)
+	}
 	return replacement, replacementCreated, nil
 }
 
