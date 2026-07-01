@@ -400,11 +400,12 @@ func TestService_CreateTask_RewritesTaskWorktreeRepositoryIDToSafeLocalRepositor
 	ctx := context.Background()
 
 	const (
-		workspaceID  = "ws-1"
-		workflowID   = "wf-1"
-		badRepoID    = "repo-task-worktree"
-		localRepoID  = "repo-local-source"
-		prHeadBranch = "feature/adding-a-download-ot-5sl"
+		workspaceID    = "ws-1"
+		workflowID     = "wf-1"
+		badRepoID      = "repo-task-worktree"
+		localRepoID    = "repo-local-source"
+		providerRepoID = "repo-provider"
+		prHeadBranch   = "feature/adding-a-download-ot-5sl"
 	)
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: "Workspace"})
@@ -426,6 +427,16 @@ func TestService_CreateTask_RewritesTaskWorktreeRepositoryIDToSafeLocalRepositor
 		Name:          "kdlbs/kandev",
 		SourceType:    sourceTypeLocal,
 		LocalPath:     "/workspaces/kandev",
+		Provider:      "github",
+		ProviderOwner: "kdlbs",
+		ProviderName:  "kandev",
+		DefaultBranch: "main",
+	})
+	_ = repo.CreateRepository(ctx, &models.Repository{
+		ID:            providerRepoID,
+		WorkspaceID:   workspaceID,
+		Name:          "kdlbs/kandev provider",
+		SourceType:    sourceTypeProvider,
 		Provider:      "github",
 		ProviderOwner: "kdlbs",
 		ProviderName:  "kandev",
@@ -454,8 +465,8 @@ func TestService_CreateTask_RewritesTaskWorktreeRepositoryIDToSafeLocalRepositor
 	if listErr != nil {
 		t.Fatalf("ListRepositories: %v", listErr)
 	}
-	if len(repos) != 2 {
-		t.Fatalf("expected no provider repository to be created, got %d repositories", len(repos))
+	if len(repos) != 3 {
+		t.Fatalf("expected no additional repository to be created, got %d repositories", len(repos))
 	}
 }
 

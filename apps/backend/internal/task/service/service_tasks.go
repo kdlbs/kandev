@@ -467,7 +467,7 @@ func (s *Service) safeRepositoryIDForTaskWorktree(ctx context.Context, workspace
 	if repo.Provider == "" || repo.ProviderOwner == "" || repo.ProviderName == "" {
 		return "", false, fmt.Errorf("repository %q points at a Kandev task worktree; use the source repository or GitHub URL", repo.ID)
 	}
-	existing, err := s.findSafeProviderRepository(ctx, workspaceID, repo)
+	existing, err := s.findSafeReplacementRepository(ctx, workspaceID, repo)
 	if err != nil {
 		return "", false, err
 	}
@@ -490,7 +490,7 @@ func (s *Service) safeRepositoryIDForTaskWorktree(ctx context.Context, workspace
 	return created.ID, true, nil
 }
 
-func (s *Service) replaceTaskWorktreeProviderMatch(ctx context.Context, workspaceID string, repo *models.Repository) (*models.Repository, bool, error) {
+func (s *Service) replaceTaskWorktreeRepositoryMatch(ctx context.Context, workspaceID string, repo *models.Repository) (*models.Repository, bool, error) {
 	replacementID, replacementCreated, err := s.safeRepositoryIDForTaskWorktree(ctx, workspaceID, repo)
 	if err != nil {
 		return nil, false, err
@@ -508,11 +508,15 @@ func (s *Service) replaceTaskWorktreeProviderMatch(ctx context.Context, workspac
 	return replacement, replacementCreated, nil
 }
 
-func (s *Service) findSafeProviderRepository(ctx context.Context, workspaceID string, repo *models.Repository) (*models.Repository, error) {
+// findSafeReplacementRepository prefers an existing safe local clone over a
+// provider row so private/offline repositories can reuse the user's checkout.
+func (s *Service) findSafeReplacementRepository(ctx context.Context, workspaceID string, repo *models.Repository) (*models.Repository, error) {
 	repos, err := s.repoEntities.ListRepositories(ctx, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("list repositories for task worktree replacement: %w", err)
 	}
+	var localClone *models.Repository
+	var providerRepo *models.Repository
 	for _, candidate := range repos {
 		if candidate == nil || candidate.ID == repo.ID {
 			continue
@@ -523,7 +527,21 @@ func (s *Service) findSafeProviderRepository(ctx context.Context, workspaceID st
 		if s.isKandevTaskWorktreeRepository(candidate) {
 			continue
 		}
-		return candidate, nil
+		if candidate.SourceType == sourceTypeLocal && candidate.LocalPath != "" {
+			if localClone == nil {
+				localClone = candidate
+			}
+			continue
+		}
+		if candidate.SourceType == sourceTypeProvider && providerRepo == nil {
+			providerRepo = candidate
+		}
+	}
+	if localClone != nil {
+		return localClone, nil
+	}
+	if providerRepo != nil {
+		return providerRepo, nil
 	}
 	return nil, nil
 }

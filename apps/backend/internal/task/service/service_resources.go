@@ -593,7 +593,7 @@ func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateR
 		return nil, false, fmt.Errorf("lookup repository: %w", err)
 	}
 	if existing != nil {
-		replacement, replacementCreated, replacementErr := s.replaceTaskWorktreeProviderMatch(ctx, req.WorkspaceID, existing)
+		replacement, replacementCreated, replacementErr := s.replaceTaskWorktreeRepositoryMatch(ctx, req.WorkspaceID, existing)
 		if replacementErr != nil {
 			return nil, false, replacementErr
 		}
