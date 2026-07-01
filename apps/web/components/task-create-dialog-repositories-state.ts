@@ -91,15 +91,15 @@ function applyRemoteRepoPatch(
   row: TaskRemoteRepoRow,
   patch: Partial<TaskRemoteRepoRow>,
 ): TaskRemoteRepoRow {
-  const next = { ...row, ...patch };
   if (typeof patch.url !== "string" || patch.url.trim() === row.url.trim()) {
-    return next;
+    return { ...row, ...patch };
   }
   return {
-    ...next,
+    ...row,
     prNumber: undefined,
     prBaseBranch: undefined,
     prHeadBranch: undefined,
+    ...patch,
   };
 }
 

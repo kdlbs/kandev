@@ -187,7 +187,9 @@ describe("useDialogFormState — remoteRepos mode", () => {
       source: "paste",
     });
   });
+});
 
+describe("useDialogFormState — remote PR metadata", () => {
   it("clears seeded PR metadata when a remote repo URL changes", () => {
     const initialValues = {
       title: "",
@@ -223,6 +225,33 @@ describe("useDialogFormState — remoteRepos mode", () => {
     expect(result.current.remoteRepos[0]?.prNumber).toBeUndefined();
     expect(result.current.remoteRepos[0]?.prBaseBranch).toBeUndefined();
     expect(result.current.remoteRepos[0]?.prHeadBranch).toBeUndefined();
+  });
+
+  it("preserves PR metadata supplied with a remote repo URL change", () => {
+    const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
+
+    act(() => {
+      result.current.setUseRemote(true);
+    });
+    const key = result.current.remoteRepos[0]?.key;
+
+    act(() => {
+      result.current.updateRemoteRepo(key!, {
+        url: PR_URL_42,
+        branch: "feature/x",
+        prNumber: 42,
+        prBaseBranch: "main",
+        prHeadBranch: "feature/x",
+      });
+    });
+
+    expect(result.current.remoteRepos[0]).toMatchObject({
+      url: PR_URL_42,
+      branch: "feature/x",
+      prNumber: 42,
+      prBaseBranch: "main",
+      prHeadBranch: "feature/x",
+    });
   });
 });
 

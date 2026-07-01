@@ -461,6 +461,9 @@ func TestService_CreateTask_RewritesTaskWorktreeRepositoryIDToSafeLocalRepositor
 	if task.Repositories[0].RepositoryID != localRepoID {
 		t.Fatalf("expected safe local repository %q, got %q", localRepoID, task.Repositories[0].RepositoryID)
 	}
+	if task.Repositories[0].BaseBranch != prHeadBranch {
+		t.Fatalf("expected base branch %q, got %q", prHeadBranch, task.Repositories[0].BaseBranch)
+	}
 	repos, listErr := repo.ListRepositories(ctx, workspaceID)
 	if listErr != nil {
 		t.Fatalf("ListRepositories: %v", listErr)
