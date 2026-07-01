@@ -7,6 +7,7 @@ import {
   DropdownMenuSeparator,
 } from "@kandev/ui/dropdown-menu";
 import { useAppStore } from "@/components/state-provider";
+import { useAllCachedRepositories } from "@/hooks/domains/workspace/use-repository-cache";
 import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-scripts";
 
 /**
@@ -15,15 +16,13 @@ import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-s
  * truthiness; callers that need the command itself can use it directly.
  */
 export function useActiveSessionDevScript(): string {
-  return useAppStore((state) => {
+  const repositoryId = useAppStore((state) => {
     const sessionId = state.tasks.activeSessionId;
-    if (!sessionId) return "";
-    const repoId = state.taskSessions.items[sessionId]?.repository_id;
-    if (!repoId) return "";
-    const allRepos = Object.values(state.repositories.itemsByWorkspaceId).flat();
-    const repo = allRepos.find((r) => r.id === repoId);
-    return repo?.dev_script?.trim() ?? "";
+    return sessionId ? (state.taskSessions.items[sessionId]?.repository_id ?? null) : null;
   });
+  const repositories = useAllCachedRepositories();
+  const repository = repositories.find((item) => item.id === repositoryId);
+  return repository?.dev_script?.trim() ?? "";
 }
 
 /**

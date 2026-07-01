@@ -19,6 +19,7 @@ import {
   type WalkthroughTargetFile,
 } from "@/lib/diff/walkthrough-match";
 import type { WalkthroughStep } from "@/lib/types/http";
+import { useTaskWalkthrough } from "@/hooks/domains/session/use-task-walkthrough";
 
 type BuildAnnotationsOpts = {
   comments: DiffComment[];
@@ -180,10 +181,7 @@ function useWalkthroughSelection(
   selectedLines: SelectedLineRange | null;
 } {
   const activeTaskId = useOptionalAppStore((s) => s.tasks.activeTaskId, null);
-  const walkthrough = useOptionalAppStore(
-    (s) => (activeTaskId ? s.walkthroughs.byTaskId[activeTaskId] : null),
-    null,
-  );
+  const walkthrough = useTaskWalkthrough(activeTaskId).data ?? null;
   const activeStep = useOptionalAppStore(
     (s) => (activeTaskId ? (s.walkthroughs.activeStepByTaskId[activeTaskId] ?? 0) : 0),
     0,

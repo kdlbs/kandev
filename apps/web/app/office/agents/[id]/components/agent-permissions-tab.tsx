@@ -8,17 +8,18 @@ import { Input } from "@kandev/ui/input";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { toast } from "sonner";
-import { useAppStore } from "@/components/state-provider";
+import { useOfficeMetaData } from "@/hooks/domains/office/use-office-data";
 import { updateAgentProfile } from "@/lib/api/domains/office-api";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
+import { usePatchOfficeAgentProfileCache } from "../use-agent-detail-data";
 
 type AgentPermissionsTabProps = {
   agent: AgentProfile;
 };
 
 export function AgentPermissionsTab({ agent }: AgentPermissionsTabProps) {
-  const meta = useAppStore((s) => s.office.meta);
-  const updateStore = useAppStore((s) => s.updateOfficeAgentProfile);
+  const meta = useOfficeMetaData().data;
+  const patchAgentCache = usePatchOfficeAgentProfileCache();
 
   const permDefs = meta?.permissions ?? [];
   const roleDefaults = meta?.permissionDefaults?.[agent.role] ?? {};
@@ -40,7 +41,7 @@ export function AgentPermissionsTab({ agent }: AgentPermissionsTabProps) {
       await updateAgentProfile(agent.id, {
         permissions: perms,
       } as Partial<AgentProfile>);
-      updateStore(agent.id, { permissions: perms });
+      patchAgentCache(agent.id, { permissions: perms });
       setDirty(false);
       toast.success("Permissions updated");
     } catch (err) {
@@ -48,7 +49,7 @@ export function AgentPermissionsTab({ agent }: AgentPermissionsTabProps) {
     } finally {
       setSaving(false);
     }
-  }, [agent.id, perms, updateStore]);
+  }, [agent.id, perms, patchAgentCache]);
 
   const isDefault = (key: string) => {
     const current = perms[key];

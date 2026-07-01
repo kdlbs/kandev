@@ -92,8 +92,7 @@ test.describe("PR detail panel dedup", () => {
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.waitForDockviewReady(30_000);
 
     // PR auto-panel is open before any click on the topbar button.
     await expect(session.prDetailTab()).toBeVisible({ timeout: 15_000 });

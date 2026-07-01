@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { listSentryInstances } from "@/lib/api/domains/sentry-api";
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { sentryInstancesQueryOptions } from "@/lib/query/query-options/sentry";
 import type { SentryConfig } from "@/lib/types/sentry";
-import { INTEGRATION_STATUS_REFRESH_MS } from "../integrations/use-integration-availability";
 import { useSentryEnabled } from "./use-sentry-enabled";
 
 // isHealthySentryInstance is the single definition of a usable instance:
@@ -29,51 +29,18 @@ export type SentryAvailability = {
   state: SentryAvailabilityState;
 };
 
-// useSentryInstances polls a workspace's Sentry instances (respecting the
-// per-workspace enabled toggle) and derives the availability state the browse
-// surfaces and settings banner consume. Fetches are request-versioned so a slow
-// response for a previous workspace can't clobber a newer one.
+// useSentryInstances reads a workspace's Sentry instances from Query
+// (respecting the per-workspace enabled toggle) and derives the availability
+// state the browse surfaces and settings banner consume.
 export function useSentryInstances(workspaceId?: string | null): SentryAvailability {
   const { enabled, loaded } = useSentryEnabled();
   const active = loaded && enabled && !!workspaceId;
-  const [instances, setInstances] = useState<SentryConfig[]>([]);
-  const [loading, setLoading] = useState(true);
-  const requestId = useRef(0);
-
-  useEffect(() => {
-    if (!active || !workspaceId) {
-      // Drop any state carried over from a previous workspace / enabled toggle
-      // so a disabled integration shows no stale instances.
-      setInstances([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setInstances([]);
-    let cancelled = false;
-    const refresh = async () => {
-      const current = ++requestId.current;
-      try {
-        const list = await listSentryInstances(workspaceId);
-        if (cancelled || current !== requestId.current) return;
-        setInstances(list);
-      } catch {
-        if (cancelled || current !== requestId.current) return;
-        setInstances([]);
-      } finally {
-        if (!cancelled && current === requestId.current) setLoading(false);
-      }
-    };
-    void refresh();
-    const id = setInterval(() => void refresh(), INTEGRATION_STATUS_REFRESH_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [active, workspaceId]);
+  const query = useQuery(sentryInstancesQueryOptions(active ? workspaceId : null));
 
   return useMemo(() => {
+    const instances = active ? (query.data ?? []) : [];
     const healthy = instances.filter(isHealthySentryInstance);
+    const loading = active && (query.isPending || (query.isFetching && !query.data));
     const available = active && healthy.length >= 1;
     let state: SentryAvailabilityState;
     if (loading) state = "loading";
@@ -82,7 +49,11 @@ export function useSentryInstances(workspaceId?: string | null): SentryAvailabil
     else if (healthy.length === 1) state = "single";
     else state = "multi";
     return { loading, instances, healthy, available, state };
-  }, [active, instances, loading]);
+  }, [active, query.data, query.isFetching, query.isPending]);
+}
+
+export function useSentryAuthed(workspaceId?: string | null): boolean {
+  return useSentryInstances(workspaceId).instances.some((instance) => instance.hasSecret);
 }
 
 // useSentryAvailable is the boolean gate that shows/hides Sentry entry points:

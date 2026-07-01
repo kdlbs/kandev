@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { RuntimeFlagState } from "@/lib/types/runtime-flags";
 import type { SettingsSaveContributor } from "../settings-save-provider";
 import { FeatureTogglesSettings } from "./feature-toggles-settings";
@@ -61,6 +62,23 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+function createQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } });
+}
+
+function renderFeatureToggles(
+  props: React.ComponentProps<typeof FeatureTogglesSettings>,
+  queryClient = createQueryClient(),
+) {
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <FeatureTogglesSettings {...props} />
+      </TooltipProvider>
+    </QueryClientProvider>,
+  );
+}
+
 describe("FeatureTogglesSettings", () => {
   it("stages an override until the route save contributor runs", async () => {
     const initial = flagState({
@@ -93,18 +111,14 @@ describe("FeatureTogglesSettings", () => {
   });
 
   it("shows restart support details without offering restart when unsupported", () => {
-    render(
-      <TooltipProvider>
-        <FeatureTogglesSettings
-          initialFlags={[flagState()]}
-          restartCapability={{
-            supported: false,
-            mode: "manual",
-            reason: "Automatic restart is not available for this launch mode.",
-          }}
-        />
-      </TooltipProvider>,
-    );
+    renderFeatureToggles({
+      initialFlags: [flagState()],
+      restartCapability: {
+        supported: false,
+        mode: "manual",
+        reason: "Automatic restart is not available for this launch mode.",
+      },
+    });
 
     expect(screen.getByText("Restart required")).not.toBeNull();
     expect(screen.getByLabelText("Restart support details")).not.toBeNull();
@@ -117,11 +131,7 @@ describe("FeatureTogglesSettings", () => {
       flags: [flagState({ requires_restart_to_apply: false })],
     });
 
-    render(
-      <TooltipProvider>
-        <FeatureTogglesSettings initialFlags={[]} restartCapability={null} />
-      </TooltipProvider>,
-    );
+    renderFeatureToggles({ initialFlags: [], restartCapability: null });
 
     await waitFor(() => expect(fetchRuntimeFlagsMock).toHaveBeenCalledTimes(1));
     expect(await screen.findByText(DEBUG_MODE_LABEL)).not.toBeNull();
@@ -138,11 +148,7 @@ describe("FeatureTogglesSettings bootstrap reload", () => {
       }),
     );
 
-    render(
-      <TooltipProvider>
-        <FeatureTogglesSettings initialFlags={[]} restartCapability={null} />
-      </TooltipProvider>,
-    );
+    renderFeatureToggles({ initialFlags: [], restartCapability: null });
 
     await waitFor(() => expect(fetchRuntimeFlagsMock).toHaveBeenCalledTimes(1));
     expect(screen.getByText("Loading feature toggles...")).not.toBeNull();
@@ -156,11 +162,7 @@ describe("FeatureTogglesSettings bootstrap reload", () => {
   it("keeps the retry state and shows a toast when the empty initial reload fails", async () => {
     fetchRuntimeFlagsMock.mockRejectedValueOnce(new Error("boom"));
 
-    render(
-      <TooltipProvider>
-        <FeatureTogglesSettings initialFlags={[]} restartCapability={null} />
-      </TooltipProvider>,
-    );
+    renderFeatureToggles({ initialFlags: [], restartCapability: null });
 
     expect(await screen.findByText(FEATURE_TOGGLES_LOAD_FAILURE)).not.toBeNull();
     expect(screen.getByRole("button", { name: "Retry" })).not.toBeNull();
@@ -174,11 +176,7 @@ describe("FeatureTogglesSettings bootstrap reload", () => {
   it("keeps the retry state without a toast when the empty initial reload returns no flags", async () => {
     fetchRuntimeFlagsMock.mockResolvedValueOnce({ flags: [] });
 
-    render(
-      <TooltipProvider>
-        <FeatureTogglesSettings initialFlags={[]} restartCapability={null} />
-      </TooltipProvider>,
-    );
+    renderFeatureToggles({ initialFlags: [], restartCapability: null });
 
     expect(await screen.findByText(FEATURE_TOGGLES_LOAD_FAILURE)).not.toBeNull();
     expect(screen.getByRole("button", { name: "Retry" })).not.toBeNull();
@@ -193,19 +191,15 @@ describe("FeatureTogglesSettings bootstrap reload", () => {
       }),
     );
 
-    const firstRender = render(
-      <TooltipProvider>
-        <FeatureTogglesSettings initialFlags={[]} restartCapability={null} />
-      </TooltipProvider>,
+    const queryClient = createQueryClient();
+    const firstRender = renderFeatureToggles(
+      { initialFlags: [], restartCapability: null },
+      queryClient,
     );
     await waitFor(() => expect(fetchRuntimeFlagsMock).toHaveBeenCalledTimes(1));
     firstRender.unmount();
 
-    render(
-      <TooltipProvider>
-        <FeatureTogglesSettings initialFlags={[]} restartCapability={null} />
-      </TooltipProvider>,
-    );
+    renderFeatureToggles({ initialFlags: [], restartCapability: null }, queryClient);
     expect(fetchRuntimeFlagsMock).toHaveBeenCalledTimes(1);
 
     resolveFlags({ flags: [flagState({ requires_restart_to_apply: false })] });

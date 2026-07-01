@@ -19,6 +19,7 @@ import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { CliModeIcon } from "@/components/cli-mode-icon";
 import { useAppStore } from "@/components/state-provider";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
 import { useWorkflowSteps, stepPlaceholder } from "@/hooks/use-workflow-steps";
@@ -125,13 +126,12 @@ function formStateFromWatch(watch: IssueWatch): FormState {
 }
 
 function useWatchFormData(workspaceId: string) {
-  useSettingsData(true);
-  useWorkflows(workspaceId, true);
+  const settingsCatalog = useSettingsData(true);
+  const { workflows: allWorkflows } = useWorkflows(workspaceId, true);
 
-  const allWorkflows = useAppStore((state) => state.workflows.items);
   const workflows = useMemo(() => allWorkflows.filter((w) => !w.hidden), [allWorkflows]);
-  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
-  const executors = useAppStore((state) => state.executors.items);
+  const agentProfiles = settingsCatalog.agentProfiles;
+  const executors = settingsCatalog.executors;
   const allExecutorProfiles = useMemo(
     () =>
       executors
@@ -559,7 +559,7 @@ function WorkspacePicker({
   onChange: (v: string) => void;
   disabled?: boolean;
 }) {
-  const workspaces = useAppStore((s) => s.workspaces.items);
+  const { items: workspaces } = useWorkspaces();
   return (
     <SelectField
       label="Workspace"

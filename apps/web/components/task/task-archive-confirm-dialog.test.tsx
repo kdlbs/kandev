@@ -3,24 +3,28 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { StateProvider, useAppStore } from "@/components/state-provider";
 import { defaultState } from "@/lib/state/default-state";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const mockGetSubtaskCount = vi.fn();
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/api/domains/kanban-api", () => ({
   getSubtaskCount: (...args: unknown[]) => mockGetSubtaskCount(...args),
 }));
 
 import { TaskArchiveConfirmDialog } from "./task-archive-confirm-dialog";
 
 function renderDialog(ui: ReactNode, confirmTaskArchive = true) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <StateProvider
-      initialState={{
-        userSettings: { ...defaultState.userSettings, confirmTaskArchive },
-      }}
-    >
-      {ui}
-    </StateProvider>,
+    <QueryClientProvider client={client}>
+      <StateProvider
+        initialState={{
+          userSettings: { ...defaultState.userSettings, confirmTaskArchive },
+        }}
+      >
+        {ui}
+      </StateProvider>
+    </QueryClientProvider>,
   );
 }
 

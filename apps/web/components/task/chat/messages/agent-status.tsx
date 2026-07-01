@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { IconAlertCircle, IconAlertTriangle, IconChevronDown } from "@tabler/icons-react";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useAppStore } from "@/components/state-provider";
 import { GridSpinner } from "@/components/grid-spinner";
 import { resolveAgentErrorLabel } from "./agent-error-label";
@@ -253,7 +254,7 @@ function useAgentLabel(sessionId: string | null, dynamicLabel?: boolean): string
   const agentProfileId = useAppStore((state) =>
     sessionId ? state.taskSessions.items[sessionId]?.agent_profile_id : undefined,
   ) as string | undefined;
-  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
+  const { agentProfiles } = useSettingsData(Boolean(dynamicLabel && agentProfileId));
   if (!dynamicLabel || !agentProfileId) return null;
   const profile = agentProfiles.find((p) => p.id === agentProfileId);
   return profile ? profile.label.split(" \u2022 ")[0] : null;

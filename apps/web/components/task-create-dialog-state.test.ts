@@ -1,8 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { computeDialogDefaultStepId } from "./task-create-dialog-defaults";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
-import { useDialogFormState } from "./task-create-dialog-state";
+import { StateProvider } from "@/components/state-provider";
+import { qk } from "@/lib/query/keys";
+import type { AppState } from "@/lib/state/store";
+import {
+  repositoryId as toRepositoryId,
+  taskId as toTaskId,
+  workflowId as toWorkflowId,
+  workspaceId as toWorkspaceId,
+  type Repository,
+  type Task,
+  type Workflow,
+  type WorkflowSnapshot,
+} from "@/lib/types/http";
+import {
+  useDialogFormState,
+  useSessionRepoName,
+  useTaskCreateDialogData,
+} from "./task-create-dialog-state";
 import { buildRepositoriesPayload } from "./task-create-dialog-helpers";
 
 // `useBranchesByURL` triggers a real network ensure() when given a URL — stub
@@ -44,6 +63,17 @@ vi.mock("@/hooks/domains/github/use-pr-info-by-url", async (importOriginal) => {
   };
 });
 
+vi.mock("@/hooks/domains/settings/use-remote-auth-specs", () => ({
+  useRemoteAuthSpecs: () => ({ specs: [], loaded: true }),
+}));
+
+const TASK_ID = toTaskId("task-1");
+const WORKSPACE_ID = toWorkspaceId("workspace-1");
+const WORKFLOW_ID = toWorkflowId("workflow-1");
+const STEP_ID = "step-1";
+const REPOSITORY_ID = toRepositoryId("repo-1");
+const CREATED_AT = "2026-06-24T00:00:00Z";
+
 function snapshot(workflowId: string): WorkflowSnapshotData {
   return {
     workflowId,
@@ -64,6 +94,124 @@ function snapshot(workflowId: string): WorkflowSnapshotData {
       },
     ],
     tasks: [],
+  };
+}
+
+function workflow(): Workflow {
+  return {
+    id: WORKFLOW_ID,
+    workspace_id: WORKSPACE_ID,
+    name: "Query Workflow",
+    sort_order: 0,
+    hidden: false,
+    created_at: CREATED_AT,
+    updated_at: CREATED_AT,
+  };
+}
+
+function rawWorkflowSnapshot(): WorkflowSnapshot {
+  return {
+    workflow: workflow(),
+    steps: [
+      {
+        id: STEP_ID,
+        workflow_id: WORKFLOW_ID,
+        name: "Query Step",
+        color: "bg-green-500",
+        position: 0,
+        allow_manual_move: true,
+        is_start_step: true,
+      },
+    ],
+    tasks: [],
+  };
+}
+
+function repository(): Repository {
+  return {
+    id: REPOSITORY_ID,
+    workspace_id: WORKSPACE_ID,
+    name: "Query Repo",
+    source_type: "local",
+    local_path: "/work/repo",
+    provider: "",
+    provider_repo_id: "",
+    provider_owner: "",
+    provider_name: "",
+    default_branch: "main",
+    worktree_branch_prefix: "",
+    pull_before_worktree: false,
+    setup_script: "",
+    cleanup_script: "",
+    dev_script: "",
+    copy_files: "",
+    created_at: CREATED_AT,
+    updated_at: CREATED_AT,
+  };
+}
+
+function rawTask(): Task {
+  return {
+    id: TASK_ID,
+    workspace_id: WORKSPACE_ID,
+    workflow_id: WORKFLOW_ID,
+    workflow_step_id: STEP_ID,
+    position: 0,
+    title: "Query task",
+    description: "",
+    state: "TODO",
+    priority: 0,
+    repositories: [
+      {
+        id: "task-repo-1",
+        task_id: TASK_ID,
+        repository_id: REPOSITORY_ID,
+        base_branch: "main",
+        position: 0,
+        created_at: CREATED_AT,
+        updated_at: CREATED_AT,
+      },
+    ],
+    created_at: CREATED_AT,
+    updated_at: CREATED_AT,
+  };
+}
+
+function queryClientWithDialogData() {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+  });
+  client.setQueryData(qk.tasks.detail(TASK_ID), rawTask());
+  client.setQueryData(qk.workspaces.repositories(WORKSPACE_ID), [repository()]);
+  client.setQueryData(qk.workflows.all(WORKSPACE_ID, { includeHidden: true }), [workflow()]);
+  client.setQueryData(qk.workflows.snapshot(WORKFLOW_ID), rawWorkflowSnapshot());
+  return client;
+}
+
+function wrapperFor(client: QueryClient) {
+  const initialState = {
+    tasks: { activeTaskId: TASK_ID },
+    workspaces: {
+      activeId: WORKSPACE_ID,
+      items: [
+        {
+          id: WORKSPACE_ID,
+          name: "Workspace",
+          owner_id: "owner-1",
+          created_at: CREATED_AT,
+          updated_at: CREATED_AT,
+        },
+      ],
+    },
+    kanban: { workflowId: null, steps: [], tasks: [] },
+    kanbanMulti: { snapshots: {} },
+  } as unknown as Partial<AppState>;
+
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return createElement(QueryClientProvider, {
+      client,
+      children: createElement(StateProvider, { initialState, children }),
+    });
   };
 }
 
@@ -121,6 +269,33 @@ describe("computeDialogDefaultStepId", () => {
         },
       }),
     ).toBe("selected-start");
+  });
+});
+
+describe("task-create dialog Query data", () => {
+  it("resolves session repository names from Query task detail when legacy kanban is empty", () => {
+    const client = queryClientWithDialogData();
+    const { result } = renderHook(() => useSessionRepoName(true), {
+      wrapper: wrapperFor(client),
+    });
+
+    expect(result.current).toBe("Query Repo");
+  });
+
+  it("returns workflow snapshots from Query caches when legacy kanbanMulti is empty", () => {
+    const client = queryClientWithDialogData();
+    const { result } = renderHook(
+      () => {
+        const fs = useDialogFormState(false, WORKSPACE_ID, null);
+        return useTaskCreateDialogData(false, WORKSPACE_ID, WORKFLOW_ID, null, fs);
+      },
+      { wrapper: wrapperFor(client) },
+    );
+
+    expect(result.current.snapshots[WORKFLOW_ID]?.steps).toEqual([
+      expect.objectContaining({ id: STEP_ID, title: "Query Step" }),
+    ]);
+    expect(result.current.computed.effectiveDefaultStepId).toBe(STEP_ID);
   });
 });
 
@@ -319,21 +494,12 @@ describe("buildRepositoriesPayload — remoteRepos rows", () => {
 const PR_URL_42 = "https://github.com/acme/site/pull/42";
 const PR_TITLE_42 = "PR #42: Test PR";
 const USER_TYPED_TITLE = "my own title";
-const ISSUE_URL_1456 = "https://github.com/acme/site/issues/1456";
-const ISSUE_TITLE_1456 = "Issue #1456: Fix remote picker";
 
 function seedPRInfo(url: string, prNumber: number, suggestedTitle: string) {
   prInfoMap.set(url, {
     prHeadBranch: "feature/x",
     prBaseBranch: "main",
     prNumber,
-    suggestedTitle,
-  });
-}
-
-function seedIssueInfo(url: string, issueNumber: number, suggestedTitle: string) {
-  prInfoMap.set(url, {
-    issueNumber,
     suggestedTitle,
   });
 }
@@ -442,80 +608,5 @@ describe("useDialogFormState — title autofill from first row GitHub URL info",
       result.current.updateRemoteRepo(secondKey!, { url: SECOND_PR_URL });
     });
     expect(result.current.taskName).toBe("PR #99: Second PR");
-  });
-});
-
-describe("useDialogFormState — title autofill from first row GitHub issue info", () => {
-  beforeEach(() => {
-    prInfoMap.clear();
-  });
-
-  it("seeds the task title from the first row's issue info when title is empty", () => {
-    seedIssueInfo(ISSUE_URL_1456, 1456, ISSUE_TITLE_1456);
-    const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
-    act(() => {
-      result.current.setUseRemote(true);
-    });
-    const key = result.current.remoteRepos[0]?.key;
-    act(() => {
-      result.current.updateRemoteRepo(key!, { url: ISSUE_URL_1456 });
-    });
-    expect(result.current.taskName).toBe(ISSUE_TITLE_1456);
-    expect(result.current.hasTitle).toBe(true);
-  });
-
-  it("does NOT overwrite a title the user typed themselves", () => {
-    seedIssueInfo(ISSUE_URL_1456, 1456, ISSUE_TITLE_1456);
-    const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
-    act(() => {
-      result.current.setTaskName(USER_TYPED_TITLE);
-      result.current.setUseRemote(true);
-    });
-    const key = result.current.remoteRepos[0]?.key;
-    act(() => {
-      result.current.updateRemoteRepo(key!, { url: ISSUE_URL_1456 });
-    });
-    expect(result.current.taskName).toBe(USER_TYPED_TITLE);
-  });
-
-  it("does NOT re-apply autofill after the user clears the title", () => {
-    seedIssueInfo(ISSUE_URL_1456, 1456, ISSUE_TITLE_1456);
-    const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
-    act(() => {
-      result.current.setUseRemote(true);
-    });
-    const key = result.current.remoteRepos[0]?.key;
-    act(() => {
-      result.current.updateRemoteRepo(key!, { url: ISSUE_URL_1456 });
-    });
-    expect(result.current.taskName).toBe(ISSUE_TITLE_1456);
-    act(() => {
-      result.current.setTaskName("");
-    });
-    expect(result.current.taskName).toBe("");
-  });
-
-  it("re-applies autofill when the user switches to a different issue URL", () => {
-    const newIssueURL = "https://github.com/acme/site/issues/1457";
-    seedIssueInfo(ISSUE_URL_1456, 1456, ISSUE_TITLE_1456);
-    seedIssueInfo(newIssueURL, 1457, "Issue #1457: Add issue URL paste");
-    const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
-    act(() => {
-      result.current.setUseRemote(true);
-    });
-    const key = result.current.remoteRepos[0]?.key;
-    act(() => {
-      result.current.updateRemoteRepo(key!, { url: ISSUE_URL_1456 });
-    });
-    expect(result.current.taskName).toBe(ISSUE_TITLE_1456);
-    act(() => {
-      result.current.setTaskName("");
-    });
-    expect(result.current.taskName).toBe("");
-
-    act(() => {
-      result.current.updateRemoteRepo(key!, { url: newIssueURL });
-    });
-    expect(result.current.taskName).toBe("Issue #1457: Add issue URL paste");
   });
 });

@@ -1,15 +1,16 @@
 import { cleanup, render, screen } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
 
 const state = {
   workspaces: {
     activeId: "kanban-1" as string | null,
-    items: [
-      { id: "kanban-1", name: "Kanban", office_workflow_id: "" },
-      { id: "office-1", name: "Office", office_workflow_id: "wf-office" },
-    ],
   },
+  setActiveWorkspace: vi.fn(),
+  setActiveWorkflow: vi.fn(),
 };
 
 vi.mock("@/components/state-provider", () => ({
@@ -22,11 +23,21 @@ vi.mock("./app-sidebar-workspace-picker", () => ({
 
 import { AppSidebarHeader } from "./app-sidebar-header";
 
+const workspaces = [
+  { id: "kanban-1", name: "Kanban", office_workflow_id: "" },
+  { id: "office-1", name: "Office", office_workflow_id: "wf-office" },
+];
+
 function renderHeader(collapsed = false) {
+  const queryClient = makeQueryClient();
+  queryClient.setQueryData(qk.workspaces.all(), workspaces);
+
   return render(
-    <TooltipProvider>
-      <AppSidebarHeader collapsed={collapsed} onToggleCollapse={vi.fn()} />
-    </TooltipProvider>,
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <AppSidebarHeader collapsed={collapsed} onToggleCollapse={vi.fn()} />
+      </TooltipProvider>
+    </QueryClientProvider>,
   );
 }
 

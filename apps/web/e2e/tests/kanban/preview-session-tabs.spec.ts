@@ -1,6 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
-import { SessionPage } from "../../pages/session-page";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
@@ -20,63 +20,42 @@ test.describe("Preview session tabs", () => {
   }) => {
     test.setTimeout(180_000);
 
-    // 1. Create a task — first session becomes primary.
-    // Task descriptions use the scenario registry (`/e2e:<name>`), so we pick a
-    // scenario with a unique, agent-only response string to avoid prompt/response
-    // text collisions in `getByText` assertions.
-    const task = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "Preview Tabs Task",
-      seedData.agentProfileId,
-      {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
-
-    // 2. Wait for first session to finish.
-    await expect
-      .poll(
-        async () => {
-          const { sessions } = await apiClient.listTaskSessions(task.id);
-          return DONE_STATES.includes(sessions[0]?.state);
-        },
-        { timeout: 30_000, message: "Waiting for first session to finish" },
-      )
-      .toBe(true);
-
-    const { sessions: afterFirst } = await apiClient.listTaskSessions(task.id);
-    const primaryId = afterFirst[0].id;
-
-    // 3. Navigate to the full task view and launch a second session via the new-session dialog.
-    // This mirrors the approach in preview-primary-session.spec.ts since there is no
-    // dedicated API helper to start a second session on an existing task.
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardByTitle("Preview Tabs Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
-      timeout: 15_000,
+    // 1. Create a task and seed two completed sessions directly. This spec
+    // tests read-only preview tabs, not full-page new-session creation.
+    const task = await apiClient.createTask(seedData.workspaceId, "Preview Tabs Task", {
+      description: "Preview session tabs",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
     });
 
-    await session.addPanelButton().click();
-    await testPage.getByTestId("new-session-button").click();
-    const dialog = testPage.getByRole("dialog");
-    await expect(dialog).toBeVisible({ timeout: 5_000 });
-    // Dialog prompts use the script command form; the agent echoes the argument.
-    await dialog.locator("textarea").fill('e2e:message("secondary-session-response")');
-    await dialog.getByRole("button").filter({ hasText: /Start/ }).click();
-    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
+    const now = Date.now();
+    const primaryId = randomUUID();
+    await apiClient.seedTaskSession(task.id, {
+      sessionId: primaryId,
+      state: "COMPLETED",
+      startedAt: new Date(now).toISOString(),
+      completedAt: new Date(now + 1_000).toISOString(),
+    });
+    await apiClient.seedSessionMessage(primaryId, {
+      type: "message",
+      content: "simple mock response from primary session",
+    });
+    await apiClient.setPrimarySession(primaryId);
 
-    // 4. Wait for the second session to finish (two sessions in a done state).
+    const secondary = await apiClient.seedTaskSession(task.id, {
+      sessionId: randomUUID(),
+      state: "COMPLETED",
+      startedAt: new Date(now + 2_000).toISOString(),
+      completedAt: new Date(now + 3_000).toISOString(),
+    });
+    const secondaryId = secondary.session_id;
+    await apiClient.seedSessionMessage(secondaryId, {
+      type: "message",
+      content: "secondary-session-response",
+    });
+
+    // 2. Wait for both sessions to be visible to the API.
     await expect
       .poll(
         async () => {
@@ -87,16 +66,9 @@ test.describe("Preview session tabs", () => {
       )
       .toBe(2);
 
-    const { sessions: afterSecond } = await apiClient.listTaskSessions(task.id);
-    const secondaryId = afterSecond.find((s) => s.id !== primaryId)?.id;
-    if (!secondaryId) throw new Error("Secondary session not created");
-
-    // The first session remains primary by default — creating a second via the
-    // new-session dialog does not steal the primary flag (verified by
-    // preview-primary-session.spec.ts).
-
-    // 5. Enable preview-on-click and return to the kanban board.
+    // 3. Enable preview-on-click and open the kanban board.
     await apiClient.saveUserSettings({ enable_preview_on_click: true });
+    const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
     const previewCard = kanban.taskCardByTitle("Preview Tabs Task");
@@ -106,7 +78,7 @@ test.describe("Preview session tabs", () => {
     });
     await previewCard.click();
 
-    // 6. Preview panel + both tabs are visible.
+    // 4. Preview panel + both tabs are visible.
     const previewPanel = testPage.getByTestId("task-preview-panel");
     await expect(previewPanel).toBeVisible({ timeout: 10_000 });
 
@@ -115,7 +87,7 @@ test.describe("Preview session tabs", () => {
     await expect(primaryTab).toBeVisible({ timeout: 10_000 });
     await expect(secondaryTab).toBeVisible();
 
-    // 7. Primary tab is active by default and its session content is visible.
+    // 5. Primary tab is active by default and its session content is visible.
     // "simple mock response" appears only in the agent's reply, not in any prompt,
     // so the single getByText match is unambiguous.
     await expect(primaryTab).toHaveAttribute("data-state", "active");
@@ -124,10 +96,7 @@ test.describe("Preview session tabs", () => {
       timeout: 15_000,
     });
 
-    // 8. Click the secondary tab → content switches, URL updates.
-    // The echoed marker "secondary-session-response" appears in both the user
-    // prompt and the agent reply; `.first()` picks one deterministically and
-    // is enough to prove the secondary session's body is rendered.
+    // 6. Click the secondary tab → content switches, URL updates.
     await secondaryTab.click();
     await expect(secondaryTab).toHaveAttribute("data-state", "active");
     await expect(primaryTab).toHaveAttribute("data-state", "inactive");

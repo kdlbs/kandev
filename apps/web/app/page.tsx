@@ -13,11 +13,13 @@ import { listWorkspaceTaskPRs } from "@/lib/api/domains/github-api";
 import { snapshotToState } from "@/lib/ssr/mapper";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
-import { ACTIVE_WORKSPACE_COOKIE } from "@/lib/routing/route-bootstrap";
 import { resolveActiveId } from "@/lib/ssr/resolve-active-id";
 import { readCookies } from "@/lib/server/cookies";
+import type { QuerySeedInitialState } from "@/lib/query/seed";
+import type { UserSettingsState } from "@/lib/state/slices";
 import type { AppState } from "@/lib/state/store";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
+import { readKanbanActiveWorkspaceCookie } from "./kanban-active-workspace-cookie";
 
 // Root page loader: keeps the old route shape while SPA boot data owns hydration.
 type PageProps = {
@@ -39,7 +41,7 @@ function mapWorkspaceItem(ws: WorkspaceItem) {
     default_environment_id: ws.default_environment_id ?? null,
     default_agent_profile_id: ws.default_agent_profile_id ?? null,
     default_config_agent_profile_id: ws.default_config_agent_profile_id ?? null,
-    office_workflow_id: ws.office_workflow_id ?? null,
+    office_workflow_id: ws.office_workflow_id ?? undefined,
     created_at: ws.created_at,
     updated_at: ws.updated_at,
   };
@@ -48,7 +50,7 @@ function mapWorkspaceItem(ws: WorkspaceItem) {
 function buildUserSettingsState(
   resp: UserSettingsResponse | null,
   workspaceId: string | null,
-): AppState["userSettings"] {
+): UserSettingsState {
   return { ...mapUserSettingsResponse(resp), workspaceId };
 }
 
@@ -86,7 +88,7 @@ function buildBaseState(
   workspaces: ListWorkspacesResponse,
   userSettingsResponse: UserSettingsResponse | null,
   activeWorkspaceId: string | null,
-): Partial<AppState> {
+): QuerySeedInitialState {
   return {
     workspaces: {
       items: workspaces.workspaces.map(mapWorkspaceItem),
@@ -110,7 +112,7 @@ async function loadSnapshotState(
   workflowId: string,
   taskId: string | undefined,
   sessionId: string | undefined,
-): Promise<Partial<AppState>> {
+): Promise<QuerySeedInitialState> {
   const [snapshot, messagesResponse] = await Promise.all([
     fetchWorkflowSnapshot(workflowId, { cache: "no-store" }),
     taskId && sessionId
@@ -121,7 +123,7 @@ async function loadSnapshotState(
         ).catch(() => null)
       : Promise.resolve(null),
   ]);
-  const state: Partial<AppState> = { ...snapshotToState(snapshot) };
+  const state: QuerySeedInitialState = { ...snapshotToState(snapshot) };
 
   if (sessionId && messagesResponse) {
     const messages = [...(messagesResponse.messages ?? [])].reverse();
@@ -159,12 +161,9 @@ export default async function Page({ searchParams }: PageProps) {
     const settingsWorkflowId = userSettingsResponse?.settings?.workflow_filter_id || null;
     // The sidebar picker writes the selected workspace to this cookie so the
     // choice survives a refresh even when userSettings is not updated on select.
-    // Kanban home only resolves against kanban workspaces; office workspaces
-    // belong under /office.
-    const cookieWorkspaceId = cookieStore?.get(ACTIVE_WORKSPACE_COOKIE)?.value ?? null;
-    // `readCookies()` is client-only in this code path; during SSR this is empty.
-    // Workspace selection still works because spa-routes.tsx re-hydrates from
-    // `readActiveWorkspaceCookie()` and the generic resolver on first client render.
+    // Priority: URL param > active workspace cookie > saved setting. Kanban home
+    // only resolves against kanban workspaces; office workspaces belong under /office.
+    const cookieWorkspaceId = readKanbanActiveWorkspaceCookie(cookieStore);
     const activeWorkspaceId = resolveActiveKanbanWorkspaceId(
       workspaces.workspaces,
       workspaceId,
@@ -208,22 +207,18 @@ export default async function Page({ searchParams }: PageProps) {
     initialState = {
       ...initialState,
       userSettings: {
-        ...(initialState.userSettings as AppState["userSettings"]),
+        ...buildUserSettingsState(userSettingsResponse, activeWorkspaceId),
         workflowId,
       },
       workflows: {
-        items: workflowList.workflows.map((w) => ({
-          id: w.id,
-          workspaceId: w.workspace_id,
-          name: w.name,
-          hidden: w.hidden,
-        })),
         activeId: workflowId,
+      },
+      workflowLists: {
+        itemsByWorkspaceId: { [activeWorkspaceId]: workflowList.workflows },
+        includeHiddenByWorkspaceId: { [activeWorkspaceId]: true },
       },
       repositories: {
         itemsByWorkspaceId: { [activeWorkspaceId]: repositoriesResponse.repositories },
-        loadingByWorkspaceId: { [activeWorkspaceId]: false },
-        loadedByWorkspaceId: { [activeWorkspaceId]: true },
       },
       quickChat: {
         isOpen: false,

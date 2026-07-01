@@ -1,41 +1,28 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
-import { fetchGitHubStatus } from "@/lib/api/domains/github-api";
-import { useAppStore } from "@/components/state-provider";
+import { useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { qk } from "@/lib/query/keys";
+import { githubStatusQueryOptions } from "@/lib/query/query-options/github";
+import type { GitHubStatus } from "@/lib/types/github";
 
-export function useGitHubStatus() {
-  const status = useAppStore((state) => state.githubStatus.status);
-  const loaded = useAppStore((state) => state.githubStatus.loaded);
-  const loading = useAppStore((state) => state.githubStatus.loading);
-  const setGitHubStatus = useAppStore((state) => state.setGitHubStatus);
-  const setGitHubStatusLoading = useAppStore((state) => state.setGitHubStatusLoading);
-  const invalidateSystemHealth = useAppStore((state) => state.invalidateSystemHealth);
-
-  const doFetch = useCallback(() => {
-    setGitHubStatusLoading(true);
-    fetchGitHubStatus({ cache: "no-store" })
-      .then((response) => {
-        setGitHubStatus(response ?? null);
-      })
-      .catch(() => {
-        setGitHubStatus(null);
-      })
-      .finally(() => {
-        setGitHubStatusLoading(false);
-      });
-  }, [setGitHubStatus, setGitHubStatusLoading]);
-
-  useEffect(() => {
-    if (loaded || loading) return;
-    doFetch();
-  }, [loaded, loading, doFetch]);
+export function useGitHubStatus(initialStatus?: GitHubStatus | null) {
+  const queryClient = useQueryClient();
+  const query = useQuery({
+    ...githubStatusQueryOptions(),
+    initialData: initialStatus ?? undefined,
+  });
 
   const refresh = useCallback(() => {
     // Also invalidate system health so the header indicator refetches
-    invalidateSystemHealth();
-    doFetch();
-  }, [doFetch, invalidateSystemHealth]);
+    void queryClient.invalidateQueries({ queryKey: qk.settings.systemHealth() });
+    void query.refetch();
+  }, [query, queryClient]);
 
-  return { status, loaded, loading, refresh };
+  return {
+    status: query.data ?? null,
+    loaded: query.isSuccess,
+    loading: query.isFetching && !query.isSuccess,
+    refresh,
+  };
 }

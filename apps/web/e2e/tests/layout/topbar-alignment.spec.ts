@@ -60,9 +60,9 @@ test.describe("Sidebar header / top bar alignment", () => {
     );
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
-    await testPage.goto(`/t/${task.id}`);
+    await testPage.goto(`/t/${task.id}?sessionId=${task.session_id}`);
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
+    await session.waitForDockviewReady(30_000);
 
     const topbar = testPage.getByTestId("task-topbar");
     await expect(topbar).toBeVisible({ timeout: 30_000 });

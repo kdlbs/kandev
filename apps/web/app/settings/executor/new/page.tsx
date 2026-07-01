@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@kandev/ui/separator";
 import { createExecutorAction } from "@/app/actions/executors";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { useAppStore } from "@/components/state-provider";
+import { useExecutorsQuerySync } from "@/hooks/domains/settings/use-executors-query-sync";
 import type { Executor } from "@/lib/types/http";
 
 const EXECUTOR_TYPES = ["local_docker", "remote_docker"] as const;
@@ -217,8 +217,7 @@ function ExecutorCreatePageContent() {
   const [dockerCertPath, setDockerCertPath] = useState("");
   const [gitToken, setGitToken] = useState("");
   const [isCreating, setIsCreating] = useState(false);
-  const executors = useAppStore((state) => state.executors.items);
-  const setExecutors = useAppStore((state) => state.setExecutors);
+  const { upsertExecutor } = useExecutorsQuerySync();
 
   const handleTypeChange = (value: ExecutorType) => {
     setType(value);
@@ -246,7 +245,7 @@ function ExecutorCreatePageContent() {
       const created = client
         ? await client.request<Executor>("executor.create", payload)
         : await createExecutorAction(payload);
-      setExecutors([...executors.filter((item: Executor) => item.id !== created.id), created]);
+      upsertExecutor(created);
       router.push("/settings/executors");
     } finally {
       setIsCreating(false);

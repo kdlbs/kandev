@@ -1,5 +1,9 @@
+import { createElement, type ReactNode } from "react";
 import { act, renderHook } from "@testing-library/react";
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { makeQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
 import type { TaskPlan } from "@/lib/types/http-agents";
 import type { TaskSession } from "@/lib/types/http";
 
@@ -94,6 +98,20 @@ function makeChatRef(value = "ship it") {
   };
 }
 
+function queryWrapper(queryClient: QueryClient) {
+  return function QueryWrapper({ children }: { children: ReactNode }) {
+    return createElement(QueryClientProvider, { client: queryClient }, children);
+  };
+}
+
+function renderImplementPlanRunner(args: Parameters<typeof useImplementPlanRunner>[0]) {
+  const queryClient = makeQueryClient();
+  return {
+    queryClient,
+    ...renderHook(() => useImplementPlanRunner(args), { wrapper: queryWrapper(queryClient) }),
+  };
+}
+
 function setup() {
   vi.clearAllMocks();
   mockStoreState = {
@@ -113,14 +131,12 @@ describe("useImplementPlanRunner same-session path", () => {
     mockMarkPlanImplementationStarted.mockResolvedValueOnce(plan);
     const handlePlanModeChange = vi.fn();
     const { ref, clear } = makeChatRef();
-    const { result } = renderHook(() =>
-      useImplementPlanRunner({
-        resolvedSessionId: SESSION_ID,
-        taskId: TASK_ID,
-        handlePlanModeChange,
-        chatInputRef: ref,
-      }),
-    );
+    const { result, queryClient } = renderImplementPlanRunner({
+      resolvedSessionId: SESSION_ID,
+      taskId: TASK_ID,
+      handlePlanModeChange,
+      chatInputRef: ref,
+    });
 
     let ok = false;
     await act(async () => {
@@ -140,7 +156,7 @@ describe("useImplementPlanRunner same-session path", () => {
       10000,
     );
     expect(mockMarkPlanImplementationStarted).toHaveBeenCalledWith(TASK_ID, SESSION_ID);
-    expect(mockSetTaskPlan).toHaveBeenCalledWith(TASK_ID, plan);
+    expect(queryClient.getQueryData(qk.taskPlan.detail(TASK_ID))).toBe(plan);
     expect(handlePlanModeChange).toHaveBeenCalledWith(false);
     expect(clear).toHaveBeenCalledTimes(1);
     expect(mockSetChatDraftContent).toHaveBeenCalledWith(SESSION_ID, null);
@@ -156,14 +172,12 @@ describe("useImplementPlanRunner same-session path", () => {
     mockMarkPlanImplementationStarted.mockRejectedValueOnce(new Error("marker offline"));
     const handlePlanModeChange = vi.fn();
     const { ref, clear } = makeChatRef();
-    const { result } = renderHook(() =>
-      useImplementPlanRunner({
-        resolvedSessionId: SESSION_ID,
-        taskId: TASK_ID,
-        handlePlanModeChange,
-        chatInputRef: ref,
-      }),
-    );
+    const { result } = renderImplementPlanRunner({
+      resolvedSessionId: SESSION_ID,
+      taskId: TASK_ID,
+      handlePlanModeChange,
+      chatInputRef: ref,
+    });
 
     let ok = false;
     await act(async () => {
@@ -185,14 +199,12 @@ describe("useImplementPlanRunner same-session path", () => {
     mockWsRequest.mockRejectedValueOnce(new Error("send failed"));
     const handlePlanModeChange = vi.fn();
     const { ref, clear } = makeChatRef();
-    const { result } = renderHook(() =>
-      useImplementPlanRunner({
-        resolvedSessionId: SESSION_ID,
-        taskId: TASK_ID,
-        handlePlanModeChange,
-        chatInputRef: ref,
-      }),
-    );
+    const { result } = renderImplementPlanRunner({
+      resolvedSessionId: SESSION_ID,
+      taskId: TASK_ID,
+      handlePlanModeChange,
+      chatInputRef: ref,
+    });
 
     let ok = true;
     await act(async () => {
@@ -214,14 +226,12 @@ describe("useImplementPlanRunner toolbar path", () => {
     const plan = makePlan();
     mockMarkPlanImplementationStarted.mockResolvedValueOnce(plan);
     const handlePlanModeChange = vi.fn();
-    const { result } = renderHook(() =>
-      useImplementPlanRunner({
-        resolvedSessionId: SESSION_ID,
-        taskId: TASK_ID,
-        handlePlanModeChange,
-        clearPlanModeAfterSend: false,
-      }),
-    );
+    const { result, queryClient } = renderImplementPlanRunner({
+      resolvedSessionId: SESSION_ID,
+      taskId: TASK_ID,
+      handlePlanModeChange,
+      clearPlanModeAfterSend: false,
+    });
 
     let ok = false;
     await act(async () => {
@@ -230,7 +240,7 @@ describe("useImplementPlanRunner toolbar path", () => {
 
     expect(ok).toBe(true);
     expect(mockMarkPlanImplementationStarted).toHaveBeenCalledWith(TASK_ID, SESSION_ID);
-    expect(mockSetTaskPlan).toHaveBeenCalledWith(TASK_ID, plan);
+    expect(queryClient.getQueryData(qk.taskPlan.detail(TASK_ID))).toBe(plan);
     expect(handlePlanModeChange).not.toHaveBeenCalled();
     expect(mockSetChatDraftContent).not.toHaveBeenCalled();
     expect(mockWsRequest).toHaveBeenCalledTimes(1);

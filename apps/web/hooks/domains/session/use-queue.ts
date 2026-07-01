@@ -1,17 +1,19 @@
-import { useEffect, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
 import {
   queueMessage,
   clearQueue,
   drainQueuedMessage,
-  getQueueStatus,
   updateQueuedMessage,
   removeQueuedEntry,
   QueueEntryNotFoundError,
 } from "@/lib/api/domains/queue-api";
-import type { QueuedMessage } from "@/lib/state/slices/session/types";
+import { queueStatusQueryOptions } from "@/lib/query/query-options";
+import type { QueueStatus, QueuedMessage } from "@/lib/state/slices/session/types";
 
 const EMPTY_ENTRIES: QueuedMessage[] = [];
+const EMPTY_STATUS: QueueStatus = { entries: EMPTY_ENTRIES, count: 0, max: 0 };
 
 export type MessageAttachment = {
   type: string;
@@ -21,34 +23,16 @@ export type MessageAttachment = {
   delivery_mode?: "prompt" | "path";
 };
 
-/** Selectors over the queue slice for one session. */
-function useQueueState(sessionId: string | null) {
-  const entries = useAppStore((state) =>
-    sessionId ? (state.queue.bySessionId[sessionId] ?? EMPTY_ENTRIES) : EMPTY_ENTRIES,
-  );
-  const meta = useAppStore((state) =>
-    sessionId ? state.queue.metaBySessionId[sessionId] : undefined,
-  );
-  const isLoading = useAppStore((state) =>
-    sessionId ? (state.queue.isLoading[sessionId] ?? false) : false,
-  );
-  const setQueueEntries = useAppStore((state) => state.setQueueEntries);
-  const removeQueueEntry = useAppStore((state) => state.removeQueueEntry);
-  const setQueueLoading = useAppStore((state) => state.setQueueLoading);
-  return { entries, meta, isLoading, setQueueEntries, removeQueueEntry, setQueueLoading };
-}
-
 type QueueActionsArgs = {
   sessionId: string | null;
-  setQueueEntries: ReturnType<typeof useQueueState>["setQueueEntries"];
-  removeQueueEntry: ReturnType<typeof useQueueState>["removeQueueEntry"];
-  setQueueLoading: ReturnType<typeof useQueueState>["setQueueLoading"];
+  setQueueLoading: (sessionId: string, loading: boolean) => void;
   metaMax: number | undefined;
+  queryClient: QueryClient;
 };
 
 function useDrainNextAction(
   sessionId: string | null,
-  setQueueLoading: ReturnType<typeof useQueueState>["setQueueLoading"],
+  setQueueLoading: (sessionId: string, loading: boolean) => void,
   refetch: (sid: string) => Promise<void>,
 ) {
   return useCallback(async () => {
@@ -63,25 +47,37 @@ function useDrainNextAction(
   }, [sessionId, refetch, setQueueLoading]);
 }
 
-/** Build an action set bound to the supplied session + slice setters. */
-function useQueueActions({
-  sessionId,
-  setQueueEntries,
-  removeQueueEntry,
-  setQueueLoading,
-  metaMax,
-}: QueueActionsArgs) {
+function writeQueueStatus(queryClient: QueryClient, sessionId: string, status: QueueStatus) {
+  queryClient.setQueryData(queueStatusQueryOptions(sessionId).queryKey, status);
+}
+
+function patchQueueStatus(
+  queryClient: QueryClient,
+  sessionId: string,
+  updater: (current: QueueStatus) => QueueStatus,
+) {
+  queryClient.setQueryData<QueueStatus>(queueStatusQueryOptions(sessionId).queryKey, (current) =>
+    updater(current ?? EMPTY_STATUS),
+  );
+}
+
+function removeEntryFromStatus(status: QueueStatus, entryId: string): QueueStatus {
+  const entries = (status.entries ?? []).filter((entry) => entry.id !== entryId);
+  return { entries, count: entries.length, max: status.max };
+}
+
+/** Build an action set bound to the supplied session and Query cache. */
+function useQueueActions({ sessionId, setQueueLoading, metaMax, queryClient }: QueueActionsArgs) {
   const refetch = useCallback(
     async (sid: string) => {
       try {
         setQueueLoading(sid, true);
-        const status = await getQueueStatus(sid);
-        setQueueEntries(sid, status.entries ?? [], { count: status.count, max: status.max });
+        await queryClient.fetchQuery({ ...queueStatusQueryOptions(sid), staleTime: 0 });
       } finally {
         setQueueLoading(sid, false);
       }
     },
-    [setQueueEntries, setQueueLoading],
+    [queryClient, setQueueLoading],
   );
 
   const queue = useCallback(
@@ -120,11 +116,15 @@ function useQueueActions({
       // will replace it with the authoritative server value. Using the
       // pre-clear entry count as a fallback for `max` was wrong (it would
       // pretend the cap equals "however many were queued").
-      setQueueEntries(sessionId, [], { count: 0, max: metaMax ?? 0 });
+      writeQueueStatus(queryClient, sessionId, {
+        entries: [],
+        count: 0,
+        max: metaMax ?? 0,
+      });
     } finally {
       setQueueLoading(sessionId, false);
     }
-  }, [sessionId, setQueueEntries, setQueueLoading, metaMax]);
+  }, [sessionId, setQueueLoading, metaMax, queryClient]);
 
   const drainNext = useDrainNextAction(sessionId, setQueueLoading, refetch);
 
@@ -152,7 +152,9 @@ function useQueueActions({
   const removeEntry = useCallback(
     async (entryId: string) => {
       if (!sessionId) return;
-      removeQueueEntry(sessionId, entryId);
+      patchQueueStatus(queryClient, sessionId, (current) =>
+        removeEntryFromStatus(current, entryId),
+      );
       try {
         await removeQueuedEntry({ session_id: sessionId, entry_id: entryId });
       } catch (err) {
@@ -161,7 +163,7 @@ function useQueueActions({
         throw err;
       }
     },
-    [sessionId, refetch, removeQueueEntry],
+    [sessionId, queryClient, refetch],
   );
 
   return { refetch, queue, clearAll, drainNext, editEntry, removeEntry };
@@ -176,20 +178,41 @@ function useQueueActions({
  *   server returns `entry_not_found` and we refetch to resync the local list.
  */
 export function useQueue(sessionId: string | null) {
-  const state = useQueueState(sessionId);
-  const { entries, meta, isLoading } = state;
+  const queryClient = useQueryClient();
   const connectionStatus = useAppStore((appState) => appState.connection.status);
+  const statusQuery = useQuery({
+    ...queueStatusQueryOptions(sessionId ?? ""),
+    enabled: Boolean(sessionId && connectionStatus === "connected"),
+  });
+  const [loadingBySessionId, setLoadingBySessionId] = useState<Record<string, boolean>>({});
+  const setQueueLoading = useCallback((sid: string, loading: boolean) => {
+    setLoadingBySessionId((current) => {
+      if ((current[sid] ?? false) === loading) return current;
+      const next = { ...current };
+      if (loading) {
+        next[sid] = true;
+      } else {
+        delete next[sid];
+      }
+      return next;
+    });
+  }, []);
+  const status = statusQuery.data ?? EMPTY_STATUS;
+  const entries = status.entries ?? EMPTY_ENTRIES;
+  const isLoading = sessionId ? (loadingBySessionId[sessionId] ?? false) : false;
   const { refetch, queue, clearAll, drainNext, editEntry, removeEntry } = useQueueActions({
     sessionId,
-    setQueueEntries: state.setQueueEntries,
-    removeQueueEntry: state.removeQueueEntry,
-    setQueueLoading: state.setQueueLoading,
-    metaMax: meta?.max,
+    setQueueLoading,
+    metaMax: status.max,
+    queryClient,
   });
 
+  const previousConnectionStatusRef = useRef(connectionStatus);
   useEffect(() => {
+    const previous = previousConnectionStatusRef.current;
+    previousConnectionStatusRef.current = connectionStatus;
     if (!sessionId) return;
-    if (connectionStatus !== "connected") return;
+    if (connectionStatus !== "connected" || previous === "connected") return;
     void refetch(sessionId).catch((err) => {
       console.error("Failed to fetch queue status:", err);
     });
@@ -215,10 +238,10 @@ export function useQueue(sessionId: string | null) {
 
   return {
     entries,
-    count: meta?.count ?? entries.length,
-    max: meta?.max ?? 0,
-    isFull: meta ? meta.count >= meta.max && meta.max > 0 : false,
-    isLoading,
+    count: status.count ?? entries.length,
+    max: status.max ?? 0,
+    isFull: status.count >= status.max && status.max > 0,
+    isLoading: isLoading || statusQuery.isFetching,
     queue,
     clearAll,
     drainNext,

@@ -3,7 +3,6 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createSessionSlice } from "./session-slice";
 import type { SessionSlice } from "./types";
-import type { TaskWalkthrough, WalkthroughStep } from "@/lib/types/http";
 
 const mockGetPlanLastSeen = vi.fn();
 const mockSetPlanLastSeen = vi.fn();
@@ -28,27 +27,6 @@ const TASK_ID = "task-1";
 const TS_EPOCH = "2026-04-20T00:00:00Z";
 const TS_LATER = "2026-04-20T01:00:00Z";
 
-function steps(n: number): WalkthroughStep[] {
-  return Array.from({ length: n }, (_, i) => ({
-    file: `f${i}.go`,
-    line: i + 1,
-    text: `step ${i}`,
-  }));
-}
-
-function makeWalkthrough(overrides: Partial<TaskWalkthrough> = {}): TaskWalkthrough {
-  return {
-    id: "wt-1",
-    task_id: TASK_ID,
-    title: "Walkthrough",
-    steps: steps(3),
-    created_by: "agent",
-    created_at: TS_EPOCH,
-    updated_at: TS_EPOCH,
-    ...overrides,
-  };
-}
-
 describe("walkthrough slice", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -56,81 +34,55 @@ describe("walkthrough slice", () => {
     mockGetWalkthroughLastSeen.mockReturnValue(null);
   });
 
-  it("setWalkthrough stores the tour and defaults the active step to 0", () => {
+  it("starts without server-owned walkthrough payload state", () => {
     const store = makeStore();
-    store.getState().setWalkthrough(TASK_ID, makeWalkthrough());
 
-    expect(store.getState().walkthroughs.byTaskId[TASK_ID]?.steps).toHaveLength(3);
-    expect(store.getState().walkthroughs.activeStepByTaskId[TASK_ID]).toBe(0);
+    expect("byTaskId" in store.getState().walkthroughs).toBe(false);
+    expect(store.getState().walkthroughs.activeStepByTaskId).toEqual({});
   });
 
-  it("setWalkthroughActiveStep clamps within [0, len-1]", () => {
+  it("setWalkthroughActiveStep clamps within [0, stepCount-1]", () => {
     const store = makeStore();
-    store.getState().setWalkthrough(TASK_ID, makeWalkthrough());
 
-    store.getState().setWalkthroughActiveStep(TASK_ID, 99);
+    store.getState().setWalkthroughActiveStep(TASK_ID, 99, 3);
     expect(store.getState().walkthroughs.activeStepByTaskId[TASK_ID]).toBe(2);
 
-    store.getState().setWalkthroughActiveStep(TASK_ID, -5);
+    store.getState().setWalkthroughActiveStep(TASK_ID, -5, 3);
     expect(store.getState().walkthroughs.activeStepByTaskId[TASK_ID]).toBe(0);
   });
 
-  it("replacing with a shorter tour clamps the active step back into range", () => {
+  it("setWalkthroughActiveStep allows non-negative values when no step count is known", () => {
     const store = makeStore();
-    store.getState().setWalkthrough(TASK_ID, makeWalkthrough());
+
     store.getState().setWalkthroughActiveStep(TASK_ID, 2);
 
-    store.getState().setWalkthrough(TASK_ID, makeWalkthrough({ steps: steps(1) }));
-
-    expect(store.getState().walkthroughs.activeStepByTaskId[TASK_ID]).toBe(0);
+    expect(store.getState().walkthroughs.activeStepByTaskId[TASK_ID]).toBe(2);
   });
 
-  it("replacing with a different tour resets the active step", () => {
+  it("markWalkthroughSeen records the supplied updated_at", () => {
     const store = makeStore();
-    store.getState().setWalkthrough(TASK_ID, makeWalkthrough());
-    store.getState().setWalkthroughActiveStep(TASK_ID, 2);
 
-    store.getState().setWalkthrough(TASK_ID, makeWalkthrough({ id: "wt-2" }));
-
-    expect(store.getState().walkthroughs.activeStepByTaskId[TASK_ID]).toBe(0);
-  });
-
-  it("setWalkthrough(null) resets the active step to 0", () => {
-    const store = makeStore();
-    store.getState().setWalkthrough(TASK_ID, makeWalkthrough());
-    store.getState().setWalkthroughActiveStep(TASK_ID, 2);
-
-    store.getState().setWalkthrough(TASK_ID, null);
-
-    expect(store.getState().walkthroughs.byTaskId[TASK_ID]).toBeNull();
-    expect(store.getState().walkthroughs.activeStepByTaskId[TASK_ID]).toBe(0);
-  });
-
-  it("markWalkthroughSeen records the current updated_at", () => {
-    const store = makeStore();
-    store.getState().setWalkthrough(TASK_ID, makeWalkthrough({ updated_at: TS_LATER }));
-
-    store.getState().markWalkthroughSeen(TASK_ID);
+    store.getState().markWalkthroughSeen(TASK_ID, TS_LATER);
 
     expect(store.getState().walkthroughs.lastSeenUpdatedAtByTaskId[TASK_ID]).toBe(TS_LATER);
     expect(mockSetWalkthroughLastSeen).toHaveBeenCalledWith(TASK_ID, TS_LATER);
   });
 
-  it("setWalkthrough hydrates stored lastSeenUpdatedAtByTaskId", () => {
+  it("hydrateWalkthroughLastSeen hydrates stored lastSeenUpdatedAtByTaskId", () => {
     mockGetWalkthroughLastSeen.mockReturnValue(TS_LATER);
     const store = makeStore();
 
-    store.getState().setWalkthrough(TASK_ID, makeWalkthrough({ updated_at: TS_LATER }));
+    store.getState().hydrateWalkthroughLastSeen(TASK_ID);
 
     expect(store.getState().walkthroughs.lastSeenUpdatedAtByTaskId[TASK_ID]).toBe(TS_LATER);
   });
 
-  it("setWalkthrough does not advance lastSeenUpdatedAtByTaskId on update", () => {
+  it("hydrateWalkthroughLastSeen does not overwrite a locally marked timestamp", () => {
     const store = makeStore();
-    store.getState().setWalkthrough(TASK_ID, makeWalkthrough({ updated_at: TS_EPOCH }));
-    store.getState().markWalkthroughSeen(TASK_ID);
+    store.getState().markWalkthroughSeen(TASK_ID, TS_EPOCH);
+    mockGetWalkthroughLastSeen.mockReturnValue(TS_LATER);
 
-    store.getState().setWalkthrough(TASK_ID, makeWalkthrough({ updated_at: TS_LATER }));
+    store.getState().hydrateWalkthroughLastSeen(TASK_ID);
 
     expect(store.getState().walkthroughs.lastSeenUpdatedAtByTaskId[TASK_ID]).toBe(TS_EPOCH);
   });

@@ -1,15 +1,10 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import type { PaginationState } from "@tanstack/react-table";
-import {
-  archiveTask,
-  deleteTask,
-  listTasksByWorkspace,
-  unarchiveTask,
-  updateUserSettings,
-} from "@/lib/api";
+import { archiveTask, deleteTask, unarchiveTask, updateUserSettings } from "@/lib/api";
 import { KanbanHeader } from "@/components/kanban/kanban-header";
 import { MobileSearchBar } from "@/components/kanban/mobile-search-bar";
 import type { Task, Workspace, Workflow, Repository } from "@/lib/types/http";
@@ -20,7 +15,7 @@ import { useDebounce } from "@/hooks/use-debounce";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { linkToTask } from "@/lib/links";
 import { unarchiveToastPayload } from "@/lib/tasks/unarchive-feedback";
-import { shouldSkipInitialTasksFetch } from "./tasks-page-fetch-policy";
+import { workspaceTasksQueryOptions } from "@/lib/query/query-options";
 import { TasksListView } from "./tasks-list-view";
 import {
   parseTasksListGroup,
@@ -54,27 +49,8 @@ type UseTaskOperationsParams = {
   setTotal: (total: number) => void;
 };
 
-function useLatestWorkspaceRequest(activeWorkspaceId: string | null) {
-  const latestFetchRef = useRef({ seq: 0, workspaceId: activeWorkspaceId });
-
-  useEffect(() => {
-    latestFetchRef.current.workspaceId = activeWorkspaceId;
-  }, [activeWorkspaceId]);
-
-  const beginRequest = useCallback((workspaceId: string) => {
-    const seq = latestFetchRef.current.seq + 1;
-    latestFetchRef.current = { seq, workspaceId };
-    return seq;
-  }, []);
-
-  const isCurrentRequest = useCallback(
-    (seq: number, workspaceId: string) =>
-      latestFetchRef.current.seq === seq && latestFetchRef.current.workspaceId === workspaceId,
-    [],
-  );
-
-  return { beginRequest, isCurrentRequest };
-}
+const LOAD_TASKS_ERROR_TITLE = "Failed to load tasks";
+const UNKNOWN_ERROR = "Unknown error";
 
 function useTaskOperations({
   activeWorkspaceId,
@@ -88,55 +64,50 @@ function useTaskOperations({
   setTotal,
 }: UseTaskOperationsParams) {
   const { toast } = useToast();
-  const [isLoading, setIsLoading] = useState(false);
-  const { beginRequest, isCurrentRequest } = useLatestWorkspaceRequest(activeWorkspaceId);
+  const taskQuery = useQuery({
+    ...workspaceTasksQueryOptions(activeWorkspaceId ?? "", {
+      page: pagination.pageIndex + 1,
+      pageSize: pagination.pageSize,
+      query: debouncedQuery,
+      includeArchived: showArchived,
+      workflowId: activeWorkflowId,
+      repositoryId: selectedRepositoryId,
+      sort: tasksListSort,
+    }),
+    enabled: Boolean(activeWorkspaceId),
+  });
+
+  useEffect(() => {
+    if (!taskQuery.data) return;
+    setTasks(taskQuery.data.tasks);
+    setTotal(taskQuery.data.total);
+  }, [setTasks, setTotal, taskQuery.data]);
+
+  useEffect(() => {
+    if (!taskQuery.error) return;
+    const error = taskQuery.error;
+    toast({
+      title: LOAD_TASKS_ERROR_TITLE,
+      description: error instanceof Error ? error.message : UNKNOWN_ERROR,
+      variant: "error",
+    });
+  }, [taskQuery.error, toast]);
 
   const fetchTasks = useCallback(async () => {
     if (!activeWorkspaceId) return;
-    const requestSeq = beginRequest(activeWorkspaceId);
-    const shouldCommit = () => isCurrentRequest(requestSeq, activeWorkspaceId);
-    setIsLoading(true);
-    try {
-      const result = await listTasksByWorkspace(activeWorkspaceId, {
-        page: pagination.pageIndex + 1,
-        pageSize: pagination.pageSize,
-        query: debouncedQuery,
-        includeArchived: showArchived,
-        workflowId: activeWorkflowId,
-        repositoryId: selectedRepositoryId,
-        sort: tasksListSort,
-      });
-      if (!shouldCommit()) return;
-      setTasks(result.tasks);
-      setTotal(result.total);
-    } catch (err) {
-      if (!shouldCommit()) return;
+    const result = await taskQuery.refetch();
+    if (result.error) {
+      const err = result.error;
       toast({
-        title: "Failed to load tasks",
-        description: errorDescription(err),
+        title: LOAD_TASKS_ERROR_TITLE,
+        description: err instanceof Error ? err.message : UNKNOWN_ERROR,
         variant: "error",
       });
-    } finally {
-      if (shouldCommit()) setIsLoading(false);
     }
-  }, [
-    activeWorkspaceId,
-    activeWorkflowId,
-    selectedRepositoryId,
-    pagination.pageIndex,
-    pagination.pageSize,
-    debouncedQuery,
-    showArchived,
-    tasksListSort,
-    beginRequest,
-    isCurrentRequest,
-    toast,
-    setTasks,
-    setTotal,
-  ]);
+  }, [activeWorkspaceId, taskQuery, toast]);
 
   const mutations = useTaskMutations(fetchTasks);
-  return { isLoading, fetchTasks, ...mutations };
+  return { isLoading: taskQuery.isFetching, fetchTasks, ...mutations };
 }
 
 function errorDescription(err: unknown): string {
@@ -200,7 +171,12 @@ function useTaskMutations(fetchTasks: () => void) {
     [fetchTasks, toast],
   );
 
-  return { deletingTaskId, handleArchive, handleUnarchive, handleDelete };
+  return {
+    deletingTaskId,
+    handleArchive,
+    handleUnarchive,
+    handleDelete,
+  };
 }
 
 function useTasksPageViewState({
@@ -257,53 +233,17 @@ function useTasksPageViewState({
 function useTasksPageEffects({
   debouncedQuery,
   setPagination,
-  activeWorkspaceId,
-  fetchTasks,
-  pagination,
-  showArchived,
   activeWorkflowId,
   selectedRepositoryId,
-  initialDataLoaded = false,
 }: {
   debouncedQuery: string;
   setPagination: (next: PaginationState | ((prev: PaginationState) => PaginationState)) => void;
-  activeWorkspaceId: string | null;
-  fetchTasks: () => void;
-  pagination: PaginationState;
-  showArchived: boolean;
   activeWorkflowId: string | null;
   selectedRepositoryId: string | null;
-  initialDataLoaded?: boolean;
 }) {
-  const skippedInitialFetchRef = useRef(false);
-
   useEffect(() => {
     void Promise.resolve().then(() => setPagination((prev) => ({ ...prev, pageIndex: 0 })));
   }, [debouncedQuery, activeWorkflowId, selectedRepositoryId, setPagination]);
-
-  useEffect(() => {
-    if (
-      shouldSkipInitialTasksFetch({
-        hasInitialData: initialDataLoaded,
-        alreadySkipped: skippedInitialFetchRef.current,
-        pageIndex: pagination.pageIndex,
-        debouncedQuery,
-        showArchived,
-      })
-    ) {
-      skippedInitialFetchRef.current = true;
-      return;
-    }
-    if (activeWorkspaceId) fetchTasks();
-  }, [
-    activeWorkspaceId,
-    pagination.pageIndex,
-    pagination.pageSize,
-    debouncedQuery,
-    showArchived,
-    fetchTasks,
-    initialDataLoaded,
-  ]);
 }
 
 function useTasksPageComputed({
@@ -361,13 +301,8 @@ function useTasksPageSetup(props: TasksPageClientProps) {
   useTasksPageEffects({
     debouncedQuery,
     setPagination: viewState.setPagination,
-    activeWorkspaceId,
-    fetchTasks: ops.fetchTasks,
-    pagination: viewState.pagination,
-    showArchived: viewState.showArchived,
     activeWorkflowId,
     selectedRepositoryId,
-    initialDataLoaded: props.initialDataLoaded,
   });
   const computed = useTasksPageComputed({
     total: viewState.total,

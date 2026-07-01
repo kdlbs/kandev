@@ -95,11 +95,184 @@ export class SessionPage {
     return this.page.locator("[data-testid='session-chat']:visible").first();
   }
 
+  private chatEditor(): Locator {
+    return this.activeChat().locator(".tiptap.ProseMirror").first();
+  }
+
+  private sessionTabTriggers(): Locator {
+    return this.page.locator(
+      '[data-testid^="session-tab-"]:not([data-testid^="session-tab-close-"])',
+    );
+  }
+
+  private visibleSessionTabTriggers(): Locator {
+    return this.page.locator(
+      '[data-testid^="session-tab-"]:not([data-testid^="session-tab-close-"]):visible',
+    );
+  }
+
+  private visibleSessionDockTabs(): Locator {
+    return this.page.locator(".dv-default-tab").filter({
+      has: this.visibleSessionTabTriggers(),
+    });
+  }
+
+  private visibleChatDockTabs(): Locator {
+    return this.page.locator(".dv-default-tab:visible").filter({ hasText: /^Chat$/ });
+  }
+
+  private currentRouteSessionId(): string | null {
+    try {
+      return new URL(this.page.url()).searchParams.get("sessionId");
+    } catch {
+      return null;
+    }
+  }
+
+  private currentRouteSessionTabTrigger(): Locator | null {
+    const sessionId = this.currentRouteSessionId();
+    return sessionId ? this.page.getByTestId(`session-tab-${sessionId}`) : null;
+  }
+
+  private currentRouteSessionDockTab(): Locator | null {
+    const routeTab = this.currentRouteSessionTabTrigger();
+    return routeTab ? this.page.locator(".dv-default-tab").filter({ has: routeTab }).first() : null;
+  }
+
+  private sessionTabClickCandidates(): Locator[] {
+    const candidates: Locator[] = [];
+    const routeDockTab = this.currentRouteSessionDockTab();
+    const routeTrigger = this.currentRouteSessionTabTrigger();
+    if (routeDockTab) candidates.push(routeDockTab);
+    if (routeTrigger) candidates.push(routeTrigger);
+    candidates.push(this.visibleChatDockTabs().first());
+    candidates.push(this.visibleSessionDockTabs().first());
+    candidates.push(this.visibleSessionTabTriggers().first());
+    return candidates;
+  }
+
+  private async clickFirstAvailableSessionTab(timeout = 15_000): Promise<void> {
+    let lastError: unknown;
+    const candidateTimeout = Math.min(timeout, 5_000);
+
+    for (const tab of this.sessionTabClickCandidates()) {
+      try {
+        await tab.waitFor({ state: "visible", timeout: candidateTimeout });
+        await tab.click();
+        return;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    if (lastError instanceof Error) throw lastError;
+    throw new Error("no session tab could be clicked");
+  }
+
+  private async foregroundSessionChatFromTab(timeout = 15_000): Promise<void> {
+    let lastError: unknown;
+    const candidateTimeout = Math.min(timeout, 5_000);
+
+    for (const tab of this.sessionTabClickCandidates()) {
+      try {
+        await tab.waitFor({ state: "visible", timeout: candidateTimeout });
+        await tab.click();
+        await this.activeChat().waitFor({ state: "visible", timeout: candidateTimeout });
+        return;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    try {
+      await this.foregroundSessionChatWithDockviewApi(timeout);
+      return;
+    } catch (err) {
+      lastError = err;
+    }
+
+    if (lastError instanceof Error) throw lastError;
+    throw new Error("session chat did not become visible");
+  }
+
+  private async foregroundSessionChatWithDockviewApi(timeout = 15_000): Promise<void> {
+    const getPanelIds = async () =>
+      this.page.evaluate(() => {
+        type PanelApi = { setActive: () => void };
+        type Panel = { id: string; api: PanelApi };
+        type Api = {
+          activePanel?: Panel;
+          panels: Panel[];
+          getPanel: (id: string) => Panel | undefined;
+        };
+        const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+        if (!api) return [];
+
+        const seen = new Set<string>();
+        const ids: string[] = [];
+        const add = (id: string | null | undefined) => {
+          if (!id || seen.has(id) || !api.getPanel(id)) return;
+          seen.add(id);
+          ids.push(id);
+        };
+
+        const sessionId = new URL(window.location.href).searchParams.get("sessionId");
+        add(sessionId ? `session:${sessionId}` : undefined);
+        if (api.activePanel?.id.startsWith("session:")) add(api.activePanel.id);
+        for (const panel of api.panels) {
+          if (panel.id.startsWith("session:")) add(panel.id);
+        }
+        add("chat");
+
+        return ids;
+      });
+
+    await expect
+      .poll(async () => (await getPanelIds()).length, {
+        timeout,
+        message: "Finding session chat panel through dockview api",
+      })
+      .toBeGreaterThan(0);
+
+    let lastError: unknown;
+    for (const panelId of await getPanelIds()) {
+      try {
+        const activated = await this.page.evaluate((id) => {
+          type PanelApi = { setActive: () => void };
+          type Panel = { id: string; api: PanelApi };
+          type Api = { getPanel: (id: string) => Panel | undefined };
+          const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+          const panel = api?.getPanel(id);
+          if (!panel) return false;
+          panel.api.setActive();
+          return true;
+        }, panelId);
+        if (!activated) continue;
+        await this.activeChat().waitFor({ state: "visible", timeout: Math.min(timeout, 5_000) });
+        return;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    if (lastError instanceof Error) throw lastError;
+    throw new Error("session chat did not become visible through dockview api");
+  }
+
+  private async waitForEditableChatEditor(timeout = 15_000): Promise<Locator> {
+    const editor = this.chatEditor();
+    await expect(editor).toBeVisible({ timeout });
+    await expect(editor).toHaveAttribute("contenteditable", "true", { timeout });
+    return editor;
+  }
+
   async waitForLoad(timeout = 15_000) {
     // When multiple session tabs are open, multiple session-chat panels exist in
     // the DOM but only the active one is visible. Use :visible to avoid matching
     // a hidden background panel (which would cause the wait to time out).
-    await this.activeChat().waitFor({ state: "visible", timeout });
+    await this.activeChat()
+      .waitFor({ state: "visible", timeout })
+      .catch(() => this.showSessionContext(timeout));
   }
 
   /**
@@ -116,12 +289,24 @@ export class SessionPage {
    * already foregrounded.
    */
   async showSessionContext(timeout = 15_000): Promise<void> {
-    const tab = this.page.locator("[data-testid^='session-tab-']").first();
-    await tab.waitFor({ state: "visible", timeout });
-    // Clicking a tab that's already active is harmless; clicking a background
-    // one promotes its panel to the foreground.
-    await tab.click();
-    await this.activeChat().waitFor({ state: "visible", timeout });
+    await this.waitForDockviewReady(Math.min(timeout, 15_000)).catch(() => undefined);
+    if (await this.activeChat().isVisible()) return;
+
+    let lastError: unknown;
+    for (const reloadFirst of [false, true]) {
+      try {
+        if (reloadFirst) await this.page.reload();
+        // Clicking a tab that's already active is harmless; clicking a background
+        // one promotes its panel to the foreground.
+        await this.foregroundSessionChatFromTab(timeout);
+        return;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    if (lastError instanceof Error) throw lastError;
+    throw new Error("session chat did not become visible");
   }
 
   /**
@@ -149,9 +334,16 @@ export class SessionPage {
     const idle = this.anyIdleInput();
     const start = Date.now();
     let reloaded = false;
+    const idleAndSettled = async () => {
+      if (!(await idle.isVisible())) return false;
+      return !(await this.activeChatAgentStatus()
+        .first()
+        .isVisible()
+        .catch(() => false));
+    };
 
     while (Date.now() - start < softTotalTimeout) {
-      if (await idle.isVisible()) return;
+      if (await idleAndSettled()) return;
 
       const resumeButton = this.recoveryResumeButton();
       if (await resumeButton.isVisible()) {
@@ -178,7 +370,7 @@ export class SessionPage {
         .catch(() => undefined);
     }
 
-    await idle.waitFor({ state: "visible", timeout: 1_000 });
+    await expect.poll(idleAndSettled, { timeout: 1_000 }).toBe(true);
   }
 
   /** Wait for the passthrough terminal to be visible (for TUI/passthrough sessions). */
@@ -297,7 +489,9 @@ export class SessionPage {
 
   /** Agent STARTING or RUNNING status indicator. */
   agentStatus(): Locator {
-    return this.page.getByRole("status", { name: /Agent is (starting|running)/ });
+    return this.page.getByRole("status", {
+      name: /^(Agent is starting|Agent is running|Starting .+)$/,
+    });
   }
 
   /** Divider that appears after the "New session started" status message is rendered. */
@@ -318,6 +512,13 @@ export class SessionPage {
       .or(this.page.locator('[data-placeholder="Continue working on the file..."]'));
   }
 
+  /** Visible agent busy status inside the active chat panel. */
+  activeChatAgentStatus(): Locator {
+    return this.activeChat().getByRole("status", {
+      name: /^(Agent is starting|Agent is running|Starting .+)$/,
+    });
+  }
+
   /** Chat input placeholder when agent is idle (plan mode). */
   planModeInput(): Locator {
     return this.page.locator('[data-placeholder="Continue working on the plan..."]');
@@ -334,7 +535,7 @@ export class SessionPage {
 
   /** Clarification overlay (visible when a clarification request is pending). */
   clarificationOverlay(): Locator {
-    return this.page.getByTestId("clarification-overlay");
+    return this.activeChat().getByTestId("clarification-overlay");
   }
 
   /** A specific clarification option button by its text label. */
@@ -346,12 +547,12 @@ export class SessionPage {
 
   /** Skip (X) button on the clarification overlay. */
   clarificationSkip(): Locator {
-    return this.page.getByTestId("clarification-skip");
+    return this.clarificationOverlay().getByTestId("clarification-skip");
   }
 
   /** Custom text input on the clarification overlay. */
   clarificationInput(): Locator {
-    return this.page.getByTestId("clarification-input");
+    return this.clarificationOverlay().getByTestId("clarification-input");
   }
 
   /** Inline Send button shown next to the custom input on touch devices. */
@@ -361,12 +562,12 @@ export class SessionPage {
 
   /** Deferred notice shown when agent has disconnected from clarification. */
   clarificationDeferredNotice(): Locator {
-    return this.page.getByTestId("clarification-deferred-notice");
+    return this.clarificationOverlay().getByTestId("clarification-deferred-notice");
   }
 
   /** Expired notice rendered in chat history when the agent timed out waiting. */
   clarificationExpiredNotice(): Locator {
-    return this.page.getByTestId("clarification-expired-notice");
+    return this.activeChat().getByTestId("clarification-expired-notice");
   }
 
   /** Label span inside a clarification option. */
@@ -447,18 +648,20 @@ export class SessionPage {
 
   /** All visible "Approve / Deny" rows for pending permission requests. */
   permissionActionRows(): Locator {
-    return this.chat.getByTestId("permission-action-row");
+    return this.activeChat().getByTestId("permission-action-row");
   }
 
   /** All "Approve" buttons for pending permission requests. */
   permissionApproveButtons(): Locator {
-    return this.chat.getByTestId("permission-approve");
+    return this.activeChat().getByTestId("permission-approve");
   }
 
   /** Kandev-MCP-only "Approve" buttons (excludes the generic ToolCallMessage
    *  fallback row that may briefly duplicate the same pending_id). */
   kandevPermissionApproveButtons(): Locator {
-    return this.chat.getByTestId("kandev-tool-permission").getByTestId("permission-approve");
+    return this.activeChat()
+      .getByTestId("kandev-tool-permission")
+      .getByTestId("permission-approve");
   }
 
   /** Reset context button in the chat input toolbar. */
@@ -605,7 +808,7 @@ export class SessionPage {
 
   /** Multi-PR aggregate popover content (segmented tabs + selected PR's CI). */
   prTopbarPopoverAggregate(): Locator {
-    return this.page.getByTestId("pr-multi-popover");
+    return this.page.locator("[data-testid='pr-multi-popover']:visible").first();
   }
 
   /** A single PR tab inside the multi-PR aggregate popover, by owner + repo + PR number. */
@@ -723,19 +926,57 @@ export class SessionPage {
    * Mirrors {@link hoverPRTopbar}: moves the real cursor onto the chip and
    * also dispatches the hover events so the open is reliable across browsers.
    */
-  async hoverPRChip(): Promise<void> {
+  private async hoverPRChipTrigger(): Promise<void> {
+    const chip = this.prStatusChip();
+    await chip.scrollIntoViewIfNeeded();
+    const box = await chip.boundingBox();
+    expect(box).not.toBeNull();
+    await chip.focus();
+    await this.page.mouse.move(0, 0);
+    await this.page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await chip.evaluate((element) => {
+      const targets = [element.parentElement, element].filter(Boolean) as Element[];
+      const mouseInit: MouseEventInit = { bubbles: true, cancelable: true, view: window };
+      const pointerInit: PointerEventInit = {
+        ...mouseInit,
+        pointerType: "mouse",
+        isPrimary: true,
+      };
+
+      for (const target of targets) {
+        if ("PointerEvent" in window) {
+          target.dispatchEvent(new PointerEvent("pointerover", pointerInit));
+          target.dispatchEvent(
+            new PointerEvent("pointerenter", { ...pointerInit, bubbles: false }),
+          );
+          target.dispatchEvent(new PointerEvent("pointermove", pointerInit));
+        }
+        target.dispatchEvent(new MouseEvent("mouseover", mouseInit));
+        target.dispatchEvent(new MouseEvent("mouseenter", { ...mouseInit, bubbles: false }));
+        target.dispatchEvent(new MouseEvent("mousemove", mouseInit));
+      }
+    });
+  }
+
+  private async hoverPRChipUntil(popover: Locator): Promise<void> {
     await expect(async () => {
-      const chip = this.prStatusChip();
-      await chip.scrollIntoViewIfNeeded();
-      const box = await chip.boundingBox();
-      expect(box).not.toBeNull();
-      await this.page.mouse.move(0, 0);
-      await this.page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
-      await chip.dispatchEvent("mouseover", { bubbles: true });
-      await chip.dispatchEvent("mouseenter", { bubbles: false });
-      await chip.dispatchEvent("mousemove", { bubbles: true });
-      await expect(this.prChipPopover()).toBeVisible({ timeout: 1_500 });
+      await this.hoverPRChipTrigger();
+      try {
+        await expect(popover).toBeVisible({ timeout: 1_500 });
+        return;
+      } catch {
+        await this.prStatusChip().click({ force: true });
+        await expect(popover).toBeVisible({ timeout: 2_000 });
+      }
     }).toPass({ timeout: 10_000 });
+  }
+
+  async hoverPRChip(): Promise<void> {
+    await this.hoverPRChipUntil(this.prChipPopover());
+  }
+
+  async hoverPRMultiChip(): Promise<void> {
+    await this.hoverPRChipUntil(this.prTopbarPopoverAggregate());
   }
 
   /**
@@ -827,7 +1068,7 @@ export class SessionPage {
    * so this uses the stable data-testid on the ContextMenuTrigger instead.
    */
   async clickSessionChatTab(): Promise<void> {
-    await this.page.locator('[data-testid^="session-tab-"]').first().click();
+    await this.clickFirstAvailableSessionTab();
   }
 
   /** Main Changes-panel button that asks the agent to create a walkthrough. */
@@ -882,10 +1123,16 @@ export class SessionPage {
   async expandChangesSection(testId: string): Promise<void> {
     const toggle = this.changes.getByTestId(`${testId}-collapse-toggle`);
     await expect(toggle).toBeVisible({ timeout: 15_000 });
-    if ((await toggle.getAttribute("aria-expanded")) === "false") {
-      await toggle.click();
-      await expect(toggle).toHaveAttribute("aria-expanded", "true");
-    }
+    await expect
+      .poll(
+        async () => {
+          if ((await toggle.getAttribute("aria-expanded")) === "true") return true;
+          await toggle.click();
+          return (await toggle.getAttribute("aria-expanded")) === "true";
+        },
+        { timeout: 15_000 },
+      )
+      .toBe(true);
   }
 
   /** Expand the commits section (collapsed by default in the changes panel). */
@@ -904,7 +1151,7 @@ export class SessionPage {
    * TipTap maps "Mod" to Meta on macOS and Control on Linux/Windows.
    */
   async sendMessage(text: string) {
-    const editor = this.page.locator(".tiptap.ProseMirror").first();
+    const editor = await this.waitForEditableChatEditor();
     await editor.click();
     await editor.fill(text);
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
@@ -916,10 +1163,10 @@ export class SessionPage {
    * don't submit on Ctrl/Cmd+Enter, so mobile specs use this instead.
    */
   async sendMessageViaButton(text: string) {
-    const editor = this.page.locator(".tiptap.ProseMirror").first();
+    const editor = await this.waitForEditableChatEditor();
     await editor.click();
     await editor.fill(text);
-    await this.page.getByTestId("submit-message-button").click();
+    await this.activeChat().getByTestId("submit-message-button").click();
   }
 
   /**
@@ -1244,7 +1491,7 @@ export class SessionPage {
 
   /** Dockview session tab matched by partial text (e.g., "Mock Agent" or index "1"). */
   sessionTabByText(text: string): Locator {
-    return this.page.locator(`[data-testid^='session-tab-']:has-text('${text}')`);
+    return this.sessionTabTriggers().filter({ hasText: text });
   }
 
   /** Session tab container identified by session ID (data-testid="session-tab-{id}"). */
@@ -1259,13 +1506,13 @@ export class SessionPage {
 
   /** Context menu on a dockview tab — right-click the tab to trigger it. */
   async rightClickTab(text: string): Promise<void> {
-    const tab = this.page.locator(`[data-testid^='session-tab-']:has-text('${text}')`);
+    const tab = this.sessionTabByText(text);
     await tab.click({ button: "right" });
   }
 
   /** Right-click the first session tab (useful when there is only one session). */
   async rightClickFirstSessionTab(): Promise<void> {
-    const tab = this.page.locator("[data-testid^='session-tab-']").first();
+    const tab = this.sessionTabTriggers().first();
     await tab.click({ button: "right" });
   }
 

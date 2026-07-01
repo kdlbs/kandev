@@ -1,21 +1,54 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+
+vi.mock("@kandev/ui/tooltip", () => ({
+  TooltipProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
+  Tooltip: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  TooltipTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
+  TooltipContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+}));
 
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
 }));
 
+vi.mock("@/lib/api/domains/kanban-api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api/domains/kanban-api")>();
+  return {
+    ...actual,
+    fetchTask: vi.fn(() => new Promise(() => {})),
+  };
+});
+
 import { StateProvider } from "@/components/state-provider";
 import { PRRowTaskIndicator } from "./pr-row-task-indicator";
+import { qk } from "@/lib/query/keys";
 import type { TaskPR } from "@/lib/types/github";
+import {
+  taskId as toTaskId,
+  workflowId as toWorkflowId,
+  workspaceId as toWorkspaceId,
+  type Task,
+  type WorkflowSnapshot,
+} from "@/lib/types/http";
 
-function renderWithStore(ui: ReactNode) {
+const CREATED_AT = "2026-06-24T00:00:00Z";
+const TASK_ID = toTaskId("task-1");
+const WORKSPACE_ID = toWorkspaceId("workspace-1");
+const WORKFLOW_ID = toWorkflowId("workflow-1");
+
+function renderWithStore(ui: ReactNode, seed?: (client: QueryClient) => void) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  seed?.(queryClient);
   return render(
-    <StateProvider>
-      <TooltipProvider>{ui}</TooltipProvider>
-    </StateProvider>,
+    <QueryClientProvider client={queryClient}>
+      <StateProvider>
+        <TooltipProvider>{ui}</TooltipProvider>
+      </StateProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -49,6 +82,48 @@ function makeTaskPR(overrides: Partial<TaskPR> = {}): TaskPR {
     last_synced_at: null,
     updated_at: "",
     ...overrides,
+  };
+}
+
+function queryTask(): Task {
+  return {
+    id: TASK_ID,
+    workspace_id: WORKSPACE_ID,
+    workflow_id: WORKFLOW_ID,
+    workflow_step_id: "step-query",
+    position: 0,
+    title: "Query task",
+    description: "",
+    state: "TODO",
+    priority: 0,
+    repositories: [],
+    created_at: CREATED_AT,
+    updated_at: CREATED_AT,
+  };
+}
+
+function workflowSnapshot(): WorkflowSnapshot {
+  return {
+    workflow: {
+      id: WORKFLOW_ID,
+      workspace_id: WORKSPACE_ID,
+      name: "Workflow",
+      sort_order: 0,
+      hidden: false,
+      created_at: CREATED_AT,
+      updated_at: CREATED_AT,
+    },
+    steps: [
+      {
+        id: "step-query",
+        workflow_id: WORKFLOW_ID,
+        name: "Query Review",
+        position: 0,
+        color: "bg-blue-500",
+        allow_manual_move: true,
+      },
+    ],
+    tasks: [queryTask()],
   };
 }
 
@@ -87,5 +162,17 @@ describe("PRRowTaskIndicator", () => {
     const btn = screen.getByRole("button");
     expect(btn.textContent).toContain(longTitle);
     expect(screen.getByText(longTitle).classList.contains("truncate")).toBe(true);
+  });
+
+  it("uses workflow snapshot Query cache for the single-task step tooltip", () => {
+    renderWithStore(
+      <PRRowTaskIndicator tasks={[makeTaskPR({ task_id: "task-1" })]} />,
+      (client) => {
+        client.setQueryData(qk.tasks.detail(TASK_ID), queryTask());
+        client.setQueryData(qk.workflows.snapshot(WORKFLOW_ID), workflowSnapshot());
+      },
+    );
+
+    expect(screen.getByText("Step: Query Review")).toBeTruthy();
   });
 });

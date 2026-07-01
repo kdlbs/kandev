@@ -19,11 +19,26 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("@/hooks/domains/settings/use-settings-data", () => ({
-  useSettingsData: vi.fn(),
+  useSettingsData: vi.fn(() => ({
+    agentProfiles: [],
+    availableAgents: [],
+    availableTools: [],
+    executors: [],
+    settingsAgents: [],
+    settingsData: {
+      agentsLoaded: true,
+      capabilitiesLoaded: true,
+      executorsLoaded: true,
+    },
+  })),
 }));
 
 vi.mock("@/hooks/use-workflows", () => ({
-  useWorkflows: vi.fn(),
+  useWorkflows: vi.fn(() => ({ workflows: mockState.workflows.items })),
+}));
+
+vi.mock("@/hooks/use-workflow-steps", () => ({
+  useWorkflowSteps: vi.fn(() => ({ steps: [] })),
 }));
 
 vi.mock("@/hooks/domains/workspace/use-repositories", () => ({
@@ -32,10 +47,6 @@ vi.mock("@/hooks/domains/workspace/use-repositories", () => ({
 
 vi.mock("@/app/actions/workspaces", () => ({
   discoverRepositoriesAction: vi.fn().mockResolvedValue({ repositories: [] }),
-}));
-
-vi.mock("@/lib/api/domains/workflow-api", () => ({
-  listWorkflowSteps: vi.fn().mockResolvedValue({ steps: [] }),
 }));
 
 import { ConfigSection } from "./config-section";

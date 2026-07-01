@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -14,7 +15,6 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useToast } from "@/components/toast-provider";
-import { useAppStoreApi } from "@/components/state-provider";
 import { getJiraTicket } from "@/lib/api/domains/jira-api";
 import { getLinearIssue } from "@/lib/api/domains/linear-api";
 import { getSentryIssue } from "@/lib/api/domains/sentry-api";
@@ -23,7 +23,7 @@ import { JIRA_KEY_RE } from "@/components/jira/jira-ticket-common";
 import { LINEAR_KEY_RE } from "@/components/linear/linear-issue-common";
 import { extractSentryShortId } from "@/components/sentry/sentry-issue-common";
 import { useSentryInstances } from "@/hooks/domains/sentry/use-sentry-availability";
-import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+import { workflowSnapshotQueryData } from "@/lib/query/workflow-snapshot-cache";
 import type { SentryIssue } from "@/lib/types/sentry";
 import { buildLinkedIssueTitle } from "./task-external-link-utils";
 
@@ -184,7 +184,7 @@ function useExternalLinkForm(
   onOpenChange: (open: boolean) => void,
 ) {
   const { toast } = useToast();
-  const store = useAppStoreApi();
+  const queryClient = useQueryClient();
   const [input, setInput] = useState("");
   const [instanceId, setInstanceId] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -213,12 +213,9 @@ function useExternalLinkForm(
     setError(null);
     try {
       const result = await config.fetch(key, workspaceId, instanceId || undefined);
-      const state = store.getState();
-      const latestTask = findTaskInSnapshots(
-        task.id,
-        state.kanbanMulti.snapshots,
-        state.kanban.tasks,
-      );
+      const latestTask = workflowSnapshotQueryData(queryClient)
+        .flatMap((snapshot) => snapshot.tasks)
+        .find((snapshotTask) => snapshotTask.id === task.id);
       const linkedKey = config.resolveLinkedKey?.(key, result) ?? key;
       await updateTask(task.id, {
         title: buildLinkedIssueTitle(latestTask?.title ?? task.title, linkedKey),

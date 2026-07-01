@@ -9,6 +9,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { useInOffice } from "@/hooks/use-in-office";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
+import { useWorkflowSnapshot } from "@/hooks/use-workflow-snapshot";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { linkToTask } from "@/lib/links";
 import type { Task } from "@/lib/types/http";
@@ -67,6 +69,12 @@ function RowActionButton({ icon: Icon, label, testId, onClick }: RowActionButton
   );
 }
 
+function sidebarActionInsetClass(canCreateSubtask: boolean, canOpenQuickChat: boolean) {
+  if (canCreateSubtask) return TWO_ROW_ACTIONS_INSET_CLASS;
+  if (canOpenQuickChat) return ONE_ROW_ACTION_INSET_CLASS;
+  return undefined;
+}
+
 /**
  * "New Task" entry in the sidebar primary nav. Inside Office (an `/office`
  * route) it opens the richer "New issue" dialog (projects/assignees/stages);
@@ -83,16 +91,14 @@ function RowActionButton({ icon: Icon, label, testId, onClick }: RowActionButton
 export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps) {
   const router = useRouter();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const workflowId = useAppStore((s) => s.kanban.workflowId);
-  const steps = useAppStore((s) => s.kanban.steps);
+  const workflowId = useAppStore((s) => s.workflows.activeId);
+  const workflowSnapshot = useWorkflowSnapshot(workflowId);
+  const steps = workflowSnapshot.snapshotState?.steps ?? [];
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
+  const activeTask = useTaskById(activeTaskId);
   const setActiveTask = useAppStore((s) => s.setActiveTask);
   const setActiveSession = useAppStore((s) => s.setActiveSession);
-  const activeTaskTitle = useAppStore((s) => {
-    const id = s.tasks.activeTaskId;
-    if (!id) return "";
-    return s.kanban.tasks.find((t) => t.id === id)?.title ?? "";
-  });
+  const activeTaskTitle = activeTask?.title ?? "";
   const inOffice = useInOffice();
   const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
   const [open, setOpen] = useState(false);
@@ -105,14 +111,9 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
   // and the expanded rail to host the trailing button.
   const canOpenQuickChat = !collapsed && !!workspaceId;
   const canCreateSubtask = !collapsed && !!workspaceId && !!activeTaskId;
-  let actionInsetClass: string | undefined;
   // Keep the label clear of the absolute action cluster:
   // pr-10 covers one w-6 button + right-1.5 inset; pr-16 covers two buttons + gap-1.
-  if (canCreateSubtask) {
-    actionInsetClass = TWO_ROW_ACTIONS_INSET_CLASS;
-  } else if (canOpenQuickChat) {
-    actionInsetClass = ONE_ROW_ACTION_INSET_CLASS;
-  }
+  const actionInsetClass = sidebarActionInsetClass(canCreateSubtask, canOpenQuickChat);
   const handleRegularTaskCreated = useCallback(
     (
       task: Task,

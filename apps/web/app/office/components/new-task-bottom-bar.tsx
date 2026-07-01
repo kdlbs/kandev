@@ -12,7 +12,7 @@ import {
 import { Button } from "@kandev/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useAppStore } from "@/components/state-provider";
+import { useOfficeMetaData } from "@/hooks/domains/office/use-office-data";
 import type { IssueDraft } from "./new-task-draft";
 
 type StatusOption = { value: string; label: string; className: string };
@@ -44,7 +44,7 @@ type Props = {
 };
 
 function useStatusOptions(): StatusOption[] {
-  const meta = useAppStore((s) => s.office.meta);
+  const meta = useOfficeMetaData().data;
   if (!meta) return FALLBACK_STATUS_OPTIONS;
   // Only show creation-relevant statuses (backlog, todo, in_progress)
   const creationStatuses = ["backlog", "todo", "in_progress"];
@@ -82,7 +82,7 @@ function StatusChip({ draft, onUpdate }: Props) {
 }
 
 function usePriorityOptions(): PriorityOption[] {
-  const meta = useAppStore((s) => s.office.meta);
+  const meta = useOfficeMetaData().data;
   if (!meta) return FALLBACK_PRIORITY_OPTIONS;
   // Exclude "none" from the creation picker
   return meta.priorities

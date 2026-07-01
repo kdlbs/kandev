@@ -52,7 +52,7 @@ async function openTaskAndPRPanel(testPage: Page, doneStepId: string, title: str
   await kanban.taskCardInColumn(title, doneStepId).click();
   await expect(testPage).toHaveURL(/\/[st]\//, { timeout: 15_000 });
   const session = new SessionPage(testPage);
-  await session.waitForLoad();
+  await session.waitForDockviewReady(30_000);
   await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
   await session.prTopbarButton().click();
   await expect(session.prDetailPanel()).toBeVisible({ timeout: 10_000 });

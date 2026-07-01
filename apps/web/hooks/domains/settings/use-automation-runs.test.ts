@@ -1,57 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createElement, type ReactNode } from "react";
+import { qk } from "@/lib/query/keys";
 import type { AutomationRun } from "@/lib/types/automation";
 
-type MockState = {
-  automationRuns: {
-    byAutomationId: Record<string, AutomationRun[]>;
-    loading: Record<string, boolean>;
-  };
-};
-
-let mockState: MockState = { automationRuns: { byAutomationId: {}, loading: {} } };
+let queryClient: QueryClient;
 
 function setRuns(automationId: string, runs: AutomationRun[]) {
-  mockState = {
-    automationRuns: {
-      ...mockState.automationRuns,
-      byAutomationId: { ...mockState.automationRuns.byAutomationId, [automationId]: runs },
-    },
-  };
+  queryClient.setQueryData(qk.automations.runs(automationId), runs);
 }
-
-const storeActions = {
-  setAutomationRuns: (automationId: string, runs: AutomationRun[]) => setRuns(automationId, runs),
-  setAutomationRunsLoading: (automationId: string, loading: boolean) => {
-    mockState = {
-      automationRuns: {
-        ...mockState.automationRuns,
-        loading: { ...mockState.automationRuns.loading, [automationId]: loading },
-      },
-    };
-  },
-  removeAutomationRun: (automationId: string, runId: string) => {
-    const runs = mockState.automationRuns.byAutomationId[automationId] ?? [];
-    setRuns(
-      automationId,
-      runs.filter((r) => r.id !== runId),
-    );
-  },
-  clearAutomationRuns: (automationId: string) => setRuns(automationId, []),
-  restoreAutomationRun: (automationId: string, run: AutomationRun) => {
-    const runs = mockState.automationRuns.byAutomationId[automationId] ?? [];
-    if (runs.some((r) => r.id === run.id)) return;
-    setRuns(automationId, [...runs, run]);
-  },
-};
-
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (s: MockState & typeof storeActions) => unknown) =>
-    selector({ ...mockState, ...storeActions }),
-  useAppStoreApi: () => ({
-    getState: () => ({ ...mockState, ...storeActions }),
-  }),
-}));
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
@@ -71,6 +29,14 @@ import { useAutomationRuns } from "./use-automation-runs";
 
 const AUTOMATION_ID = "auto-1";
 const WORKSPACE_ID = "ws-1";
+
+function wrapper({ children }: { children: ReactNode }) {
+  return createElement(QueryClientProvider, { client: queryClient }, children);
+}
+
+function renderAutomationRunsHook() {
+  return renderHook(() => useAutomationRuns(AUTOMATION_ID, WORKSPACE_ID), { wrapper });
+}
 
 function mkRun(id: string): AutomationRun {
   return {
@@ -95,7 +61,7 @@ function deferred<T>() {
 }
 
 beforeEach(() => {
-  mockState = { automationRuns: { byAutomationId: {}, loading: {} } };
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   vi.mocked(listAutomationRuns).mockReset();
   vi.mocked(deleteAutomationRun).mockReset();
   vi.mocked(deleteAllAutomationRuns).mockReset();
@@ -120,7 +86,7 @@ describe("useAutomationRuns", () => {
       .mockReturnValueOnce(Promise.withResolvers<AutomationRun[]>().promise)
       .mockResolvedValue([runX, runY]);
 
-    const { result, rerender } = renderHook(() => useAutomationRuns(AUTOMATION_ID, WORKSPACE_ID));
+    const { result, rerender } = renderAutomationRunsHook();
 
     act(() => {
       result.current.deleteRun("run-x");
@@ -158,7 +124,7 @@ describe("useAutomationRuns", () => {
       .mockReturnValueOnce(Promise.withResolvers<AutomationRun[]>().promise)
       .mockResolvedValue([runX, runY]);
 
-    const { result, rerender } = renderHook(() => useAutomationRuns(AUTOMATION_ID, WORKSPACE_ID));
+    const { result, rerender } = renderAutomationRunsHook();
 
     act(() => {
       result.current.deleteAllRuns();
@@ -186,7 +152,7 @@ describe("useAutomationRuns", () => {
     vi.mocked(deleteAutomationRun).mockResolvedValue({ deleted: true });
     vi.mocked(deleteAllAutomationRuns).mockResolvedValue({ deleted: true });
 
-    const { result } = renderHook(() => useAutomationRuns(AUTOMATION_ID, WORKSPACE_ID));
+    const { result } = renderAutomationRunsHook();
 
     act(() => {
       result.current.deleteRun("run-x");
@@ -213,7 +179,7 @@ describe("useAutomationRuns - double-failure recovery", () => {
       .mockRejectedValueOnce(new Error("network down"));
     vi.mocked(deleteAutomationRun).mockRejectedValue(new Error("delete failed"));
 
-    const { result, rerender } = renderHook(() => useAutomationRuns(AUTOMATION_ID, WORKSPACE_ID));
+    const { result, rerender } = renderAutomationRunsHook();
     await act(async () => {});
     rerender();
 
@@ -242,7 +208,7 @@ describe("useAutomationRuns - double-failure recovery", () => {
       .mockRejectedValueOnce(new Error("network down"));
     vi.mocked(deleteAllAutomationRuns).mockRejectedValue(new Error("delete-all failed"));
 
-    const { result, rerender } = renderHook(() => useAutomationRuns(AUTOMATION_ID, WORKSPACE_ID));
+    const { result, rerender } = renderAutomationRunsHook();
     await act(async () => {});
     rerender();
 
@@ -272,7 +238,7 @@ describe("useAutomationRuns - single-failure revert", () => {
     vi.mocked(listAutomationRuns).mockResolvedValue([runX, runY]);
     vi.mocked(deleteAutomationRun).mockRejectedValue(new Error("delete failed"));
 
-    const { result, rerender } = renderHook(() => useAutomationRuns(AUTOMATION_ID, WORKSPACE_ID));
+    const { result, rerender } = renderAutomationRunsHook();
     await act(async () => {});
     rerender();
 
@@ -298,7 +264,7 @@ describe("useAutomationRuns - single-failure revert", () => {
     vi.mocked(listAutomationRuns).mockResolvedValue([runX, runY]);
     vi.mocked(deleteAllAutomationRuns).mockRejectedValue(new Error("delete-all failed"));
 
-    const { result, rerender } = renderHook(() => useAutomationRuns(AUTOMATION_ID, WORKSPACE_ID));
+    const { result, rerender } = renderAutomationRunsHook();
     await act(async () => {});
     rerender();
 

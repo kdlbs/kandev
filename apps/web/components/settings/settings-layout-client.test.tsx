@@ -29,6 +29,19 @@ vi.mock("@/components/state-provider", () => ({
     selector(state) ?? fallback,
 }));
 
+vi.mock("@/hooks/domains/workspace/use-workspaces", () => ({
+  useWorkspaces: () => ({
+    items: state.workspaces.items,
+    activeId: state.workspaces.activeId,
+  }),
+}));
+
+vi.mock("@/components/task/workspace-switcher", () => ({
+  WorkspaceSwitcher: ({ activeWorkspaceId }: { activeWorkspaceId: string | null }) => (
+    <div data-testid="mock-workspace-switcher" data-active-workspace-id={activeWorkspaceId} />
+  ),
+}));
+
 vi.mock("@/components/page-topbar", () => ({
   PageTopbar: ({ actions }: { actions?: ReactNode }) => (
     <div data-testid="page-topbar-actions">{actions}</div>
@@ -68,14 +81,15 @@ describe("SettingsLayoutClient integrations actions", () => {
 
   afterEach(() => cleanup());
 
-  it("keeps copy config available without rendering the workspace switcher", () => {
+  it("shows copy config beside the integration workspace switcher", () => {
     render(
       <SettingsLayoutClient>
         <div>Settings page</div>
       </SettingsLayoutClient>,
     );
 
-    expect(screen.queryByTestId("integration-workspace-switcher")).toBeNull();
+    expect(screen.getByTestId("integration-workspace-switcher")).toBeTruthy();
+    expect(screen.getByTestId("mock-workspace-switcher").dataset.activeWorkspaceId).toBe("ws-1");
     expect(screen.getByTestId(COPY_CONFIG_TEST_ID).dataset.sourceWorkspaceId).toBe("ws-1");
   });
 
@@ -88,6 +102,7 @@ describe("SettingsLayoutClient integrations actions", () => {
       </SettingsLayoutClient>,
     );
 
+    expect(screen.queryByTestId("integration-workspace-switcher")).toBeNull();
     expect(screen.getByTestId(COPY_CONFIG_TEST_ID).dataset.sourceWorkspaceId).toBe("ws-1");
   });
 

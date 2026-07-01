@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { type IDockviewHeaderActionsProps } from "dockview-react";
 import {
   IconPlus,
@@ -19,14 +20,17 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { useDockviewStore, performLayoutSwitch } from "@/lib/state/dockview-store";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAllCachedRepositories } from "@/hooks/domains/workspace/use-repository-cache";
 import { useEnvironmentId } from "@/hooks/use-environment-session-id";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { isPassthroughSession } from "@/lib/session/is-passthrough-session";
 import { startProcess } from "@/lib/api";
 import { createUserShell } from "@/lib/api/domains/user-shell-api";
 import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-scripts";
 import { replaceTaskUrl } from "@/lib/links";
 import type { Task, ProcessInfo } from "@/lib/types/http";
 import { sessionId as toSessionId } from "@/lib/types/ids";
+import { taskQueryOptions, workflowStepsQueryOptions } from "@/lib/query/query-options";
 import type { ProcessStatusEntry } from "@/lib/state/slices";
 import { AddPanelMenuItems, MENU_ITEM_CLASS } from "./dockview-add-panel-items";
 import { useUserShells } from "@/hooks/domains/session/use-user-shells";
@@ -68,7 +72,7 @@ function useLeftHeaderState(
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
   const isPassthrough = useAppStore((state) => {
     if (!activeSessionId) return false;
-    return state.taskSessions.items[activeSessionId]?.is_passthrough === true;
+    return isPassthroughSession(state.taskSessions.items[activeSessionId]);
   });
   const { prs } = useTaskPR(taskId);
   const hasChanges = Boolean(
@@ -293,34 +297,28 @@ export function RightHeaderActions(props: IDockviewHeaderActionsProps) {
 
 function SidebarRightActions() {
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
-  const kanban = useAppStore((state) => state.kanban);
-  // Use kanban.workflowId (task context) not workflows.activeId so "All Workflows" isn't clobbered when viewing a task.
-  const workflowId = kanban.workflowId;
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const activeTaskTitle = useAppStore((state) => {
-    const id = state.tasks.activeTaskId;
-    if (!id) return "";
-    return state.kanban.tasks.find((t: { id: string }) => t.id === id)?.title ?? "";
+  const taskQuery = useQuery({
+    ...taskQueryOptions(activeTaskId ?? ""),
+    enabled: Boolean(activeTaskId),
   });
+  // Use the task detail workflow (task context), not workflows.activeId, so
+  // "All Workflows" board selection isn't clobbered when viewing a task.
+  const workflowId = taskQuery.data?.workflow_id ?? null;
+  const stepsQuery = useQuery({
+    ...workflowStepsQueryOptions(workflowId ?? ""),
+    enabled: Boolean(workflowId),
+  });
+  const activeTaskTitle = taskQuery.data?.title ?? "";
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const appStore = useAppStoreApi();
-  const steps = (kanban?.steps ?? []).map(
-    (s: {
-      id: string;
-      title: string;
-      color?: string;
-      events?: {
-        on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
-        on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
-      };
-    }) => ({
-      id: s.id,
-      title: s.title,
-      color: s.color,
-      events: s.events,
-    }),
-  );
+  const steps = (stepsQuery.data ?? []).map((s) => ({
+    id: s.id,
+    title: s.name,
+    color: s.color,
+    events: s.events,
+  }));
 
   const handleTaskCreated = useCallback(
     (task: Task, _mode: "create" | "edit", meta?: { taskSessionId?: string | null }) => {
@@ -379,15 +377,14 @@ function RightTopGroupActions() {
 
 function CenterRightActions() {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const repository = useAppStore((state) => {
-    if (!activeSessionId) return null;
-    const session = state.taskSessions.items[activeSessionId];
-    if (!session) return null;
-    const repoId = session.repository_id;
-    if (!repoId) return null;
-    const allRepos = Object.values(state.repositories.itemsByWorkspaceId).flat();
-    return allRepos.find((r) => r.id === repoId) ?? null;
-  });
+  const repositoryId = useAppStore((state) =>
+    activeSessionId ? (state.taskSessions.items[activeSessionId]?.repository_id ?? null) : null,
+  );
+  const repositories = useAllCachedRepositories();
+  const repository = useMemo(
+    () => repositories.find((repo) => repo.id === repositoryId) ?? null,
+    [repositories, repositoryId],
+  );
   const hasDevScript = Boolean(repository?.dev_script?.trim());
 
   const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);

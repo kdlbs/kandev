@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import Link from "@/components/routing/app-link";
 import { useParams } from "@/lib/routing/client-router";
 import { IconTrash } from "@tabler/icons-react";
@@ -37,6 +38,8 @@ export {
   ProfileEnvVarsSection,
 } from "@/components/settings/profile-edit/profile-env-vars-section";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { qk } from "@/lib/query/keys";
 import type {
   Agent,
   AgentProfile,
@@ -44,7 +47,6 @@ import type {
   PermissionSetting,
   PassthroughConfig,
 } from "@/lib/types/http";
-import { useAppStore } from "@/components/state-provider";
 import { AgentLogo } from "@/components/agent-logo";
 import { ProfileMcpConfigCard } from "@/app/settings/agents/[agentId]/profile-mcp-config-card";
 import { CommandPreviewCard } from "@/app/settings/agents/[agentId]/profiles/[profileId]/command-preview-card";
@@ -180,22 +182,16 @@ function ProfileSettingsCard({
   );
 }
 
-function useSyncAgentsToStore() {
-  const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
-  const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
+type AgentsQueryData = { agents: Agent[]; total?: number };
+
+function useSyncAgentsToQuery() {
+  const queryClient = useQueryClient();
   return (nextAgents: Agent[]) => {
-    setSettingsAgents(nextAgents);
-    setAgentProfiles(
-      nextAgents.flatMap((agentItem) =>
-        agentItem.profiles.map((agentProfile) => ({
-          id: agentProfile.id,
-          label: `${agentProfile.agentDisplayName ?? ""} • ${agentProfile.name}`,
-          agent_id: agentItem.id,
-          agent_name: agentItem.name,
-          cli_passthrough: agentProfile.cliPassthrough ?? false,
-        })),
-      ),
-    );
+    queryClient.setQueryData<AgentsQueryData>(qk.settings.agents(), (previous) => ({
+      ...(previous ?? {}),
+      agents: nextAgents,
+      total: previous?.total ?? nextAgents.length,
+    }));
   };
 }
 
@@ -236,7 +232,7 @@ type ProfileEditorActionsOptions = {
   setDraft: React.Dispatch<React.SetStateAction<AgentProfile>>;
   setSaveStatus: (s: SaveStatus) => void;
   settingsAgents: Agent[];
-  syncAgentsToStore: (agents: Agent[]) => void;
+  syncAgentsToQuery: (agents: Agent[]) => void;
   toast: ReturnType<typeof useToast>["toast"];
 };
 
@@ -247,7 +243,7 @@ function useProfileSave({
   setDraft,
   setSaveStatus,
   settingsAgents,
-  syncAgentsToStore,
+  syncAgentsToQuery,
   toast,
 }: ProfileEditorActionsOptions) {
   return async () => {
@@ -285,7 +281,7 @@ function useProfileSave({
             }
           : agentItem,
       );
-      syncAgentsToStore(nextAgents);
+      syncAgentsToQuery(nextAgents);
       setSaveStatus("success");
     } catch (error) {
       setSaveStatus("error");
@@ -311,7 +307,7 @@ function useProfileDelete(
   agent: Agent,
   draft: AgentProfile,
   settingsAgents: Agent[],
-  syncAgentsToStore: (agents: Agent[]) => void,
+  syncAgentsToQuery: (agents: Agent[]) => void,
   toast: ReturnType<typeof useToast>["toast"],
 ) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -326,7 +322,7 @@ function useProfileDelete(
           }
         : agentItem,
     );
-    syncAgentsToStore(nextAgents);
+    syncAgentsToQuery(nextAgents);
     window.location.assign("/settings/agents");
   };
 
@@ -499,8 +495,8 @@ function ProfileEditor({
   initialMcpConfig,
 }: ProfileEditorProps) {
   const { toast } = useToast();
-  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
-  const syncAgentsToStore = useSyncAgentsToStore();
+  const { settingsAgents } = useSettingsData(true);
+  const syncAgentsToQuery = useSyncAgentsToQuery();
   const { items: secrets } = useSecrets();
   const { draft, setDraft, savedProfile, setSavedProfile, setSaveStatus, isDirty } =
     useProfileEditorState(profile, permissionSettings);
@@ -525,7 +521,7 @@ function ProfileEditor({
     setDraft,
     setSaveStatus,
     settingsAgents,
-    syncAgentsToStore,
+    syncAgentsToQuery,
     toast,
   });
   useSettingsSaveContributor({
@@ -545,7 +541,7 @@ function ProfileEditor({
     conflict,
     setConflict,
     handleForceDelete,
-  } = useProfileDelete(agent, draft, settingsAgents, syncAgentsToStore, toast);
+  } = useProfileDelete(agent, draft, settingsAgents, syncAgentsToQuery, toast);
 
   return (
     <div className="space-y-8">

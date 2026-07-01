@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useLayoutEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { DockviewDefaultTab, type IDockviewPanelHeaderProps } from "dockview-react";
 import { useAppStore } from "@/components/state-provider";
+import { taskPlanQueryOptions } from "@/lib/query/query-options";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 
 /**
@@ -15,19 +17,28 @@ export function PlanTab(props: IDockviewPanelHeaderProps) {
   const onDoubleClick = useTabMaximizeOnDoubleClick(api);
 
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
-  const plan = useAppStore((s) => (activeTaskId ? s.taskPlans.byTaskId[activeTaskId] : null));
+  const planQuery = useQuery({
+    ...taskPlanQueryOptions(activeTaskId ?? "", false),
+    enabled: false,
+  });
+  const plan = planQuery.data ?? null;
+  const hydrateTaskPlanLastSeen = useAppStore((s) => s.hydrateTaskPlanLastSeen);
   const lastSeen = useAppStore((s) =>
     activeTaskId ? s.taskPlans.lastSeenUpdatedAtByTaskId[activeTaskId] : undefined,
   );
   const markTaskPlanSeen = useAppStore((s) => s.markTaskPlanSeen);
 
+  useEffect(() => {
+    if (activeTaskId) hydrateTaskPlanLastSeen(activeTaskId);
+  }, [activeTaskId, hydrateTaskPlanLastSeen]);
+
   // Clear the indicator when the tab becomes active.
   useEffect(() => {
     const disposable = api.onDidActiveChange((event) => {
-      if (event.isActive && activeTaskId) markTaskPlanSeen(activeTaskId);
+      if (event.isActive && activeTaskId) markTaskPlanSeen(activeTaskId, plan?.updated_at);
     });
     return () => disposable.dispose();
-  }, [api, activeTaskId, markTaskPlanSeen]);
+  }, [api, activeTaskId, markTaskPlanSeen, plan]);
 
   // If the tab is already active when the plan changes (user is viewing it),
   // treat updates as immediately seen. Use useLayoutEffect so the seen-mark
@@ -35,7 +46,7 @@ export function PlanTab(props: IDockviewPanelHeaderProps) {
   // the WS update render and the seen-mark render.
   const planUpdatedAt = plan?.updated_at;
   useLayoutEffect(() => {
-    if (api.isActive && activeTaskId) markTaskPlanSeen(activeTaskId);
+    if (api.isActive && activeTaskId) markTaskPlanSeen(activeTaskId, planUpdatedAt);
   }, [api, activeTaskId, markTaskPlanSeen, planUpdatedAt]);
 
   const hasUnseen = plan?.created_by === "agent" && lastSeen !== plan.updated_at;

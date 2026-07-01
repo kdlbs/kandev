@@ -15,6 +15,13 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: typeof state) => unknown) => selector(state),
 }));
 
+vi.mock("@/hooks/domains/workspace/use-workspaces", () => ({
+  useWorkspaces: () => ({
+    items: state.workspaces.items,
+    activeId: state.workspaces.activeId,
+  }),
+}));
+
 import { WorkspaceScopedSection } from "./workspace-scoped-section";
 
 describe("WorkspaceScopedSection", () => {

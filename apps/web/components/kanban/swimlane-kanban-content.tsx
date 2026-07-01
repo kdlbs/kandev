@@ -15,9 +15,8 @@ import { KanbanColumn } from "@/components/kanban-column";
 import { type Task } from "@/components/kanban-card";
 import { KanbanCardPreview } from "@/components/kanban-card-preview";
 import type { WorkflowStep } from "@/components/kanban-column";
-import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
-import { useTaskActions } from "@/hooks/use-task-actions";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStore } from "@/components/state-provider";
+import { useSwimlaneMove } from "@/hooks/domains/kanban/use-swimlane-move";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { MobileColumnTabs } from "./mobile-column-tabs";
 import { SwipeableColumns } from "./swipeable-columns";
@@ -25,6 +24,7 @@ import { MobileDropTargets } from "./mobile-drop-targets";
 import { getKanbanColumnGridTemplate } from "./kanban-grid-template";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { MobileWorkflowNavigation } from "@/lib/kanban/view-registry";
+import type { MoveTaskError } from "@/lib/kanban/move-task-error";
 import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
 import {
   type KanbanExternalLinkAvailability,
@@ -58,8 +58,7 @@ type SwimlaneKanbanDndOptions = {
 };
 
 function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanbanDndOptions) {
-  const store = useAppStoreApi();
-  const { moveTaskById } = useTaskActions();
+  const { moveTask } = useSwimlaneMove(workflowId, { onMoveError });
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
 
   const sensors = useSensors(
@@ -83,42 +82,9 @@ function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanban
       const targetStepId = over.id as string;
       const task = tasks.find((t) => t.id === taskId);
       if (!task || task.workflowStepId === targetStepId) return;
-
-      const state = store.getState();
-      const snapshot = state.kanbanMulti.snapshots[workflowId];
-      if (!snapshot) return;
-
-      const targetTasks = snapshot.tasks.filter(
-        (t: KanbanState["tasks"][number]) => t.workflowStepId === targetStepId && t.id !== taskId,
-      );
-      const nextPosition = targetTasks.length;
-      const originalTasks = snapshot.tasks;
-
-      state.setWorkflowSnapshot(workflowId, {
-        ...snapshot,
-        tasks: snapshot.tasks.map((t: KanbanState["tasks"][number]) =>
-          t.id === taskId ? { ...t, workflowStepId: targetStepId, position: nextPosition } : t,
-        ),
-      });
-
-      try {
-        await moveTaskById(taskId, {
-          workflow_id: workflowId,
-          workflow_step_id: targetStepId,
-          position: nextPosition,
-        });
-      } catch (error) {
-        const currentSnapshot = store.getState().kanbanMulti.snapshots[workflowId];
-        if (currentSnapshot) {
-          store
-            .getState()
-            .setWorkflowSnapshot(workflowId, { ...currentSnapshot, tasks: originalTasks });
-        }
-        const message = error instanceof Error ? error.message : "Failed to move task";
-        onMoveError?.({ message, taskId, sessionId: task.primarySessionId ?? null });
-      }
+      await moveTask(task, targetStepId);
     },
-    [tasks, workflowId, store, moveTaskById, onMoveError],
+    [tasks, moveTask],
   );
 
   const handleDragCancel = useCallback(() => {
@@ -128,9 +94,9 @@ function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanban
   const moveTaskToStep = useCallback(
     async (task: Task, targetStepId: string) => {
       if (task.workflowStepId === targetStepId) return;
-      await handleDragEnd({ active: { id: task.id }, over: { id: targetStepId } } as DragEndEvent);
+      await moveTask(task, targetStepId);
     },
-    [handleDragEnd],
+    [moveTask],
   );
 
   const activeTask = useMemo(

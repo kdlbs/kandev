@@ -112,6 +112,20 @@ function rawField(agent: Record<string, unknown>, camelKey: string, snakeKey: st
   return agent[camelKey] ?? agent[snakeKey];
 }
 
+function hasRawField(agent: Record<string, unknown>, camelKey: string, snakeKey: string): boolean {
+  return agent[camelKey] !== undefined || agent[snakeKey] !== undefined;
+}
+
+function optionalJSONField<T>(
+  agent: Record<string, unknown>,
+  camelKey: string,
+  snakeKey: string,
+  fallback: T,
+): T | undefined {
+  if (!hasRawField(agent, camelKey, snakeKey)) return undefined;
+  return parseJSONField<T>(rawField(agent, camelKey, snakeKey), fallback);
+}
+
 function stringField(agent: Record<string, unknown>, camelKey: string, snakeKey: string) {
   const value = rawField(agent, camelKey, snakeKey);
   return typeof value === "string" ? value : "";
@@ -153,7 +167,7 @@ function normalizeAgent(raw: unknown): AgentProfile {
       "max_concurrent_sessions",
       1,
     ),
-    desiredSkills: parseJSONField<string[]>(rawField(agent, "desiredSkills", "desired_skills"), []),
+    desiredSkills: optionalJSONField<string[]>(agent, "desiredSkills", "desired_skills", []),
     executorPreference: parseJSONField<Record<string, unknown>>(
       rawField(agent, "executorPreference", "executor_preference"),
       {},
@@ -161,7 +175,7 @@ function normalizeAgent(raw: unknown): AgentProfile {
     pauseReason: stringField(agent, "pauseReason", "pause_reason"),
     billingType: rawField(agent, "billingType", "billing_type") as AgentProfile["billingType"],
     utilization: (agent.utilization ?? null) as AgentProfile["utilization"],
-    skillIds: parseJSONField<string[]>(rawField(agent, "skillIds", "skill_ids"), []),
+    skillIds: optionalJSONField<string[]>(agent, "skillIds", "skill_ids", []),
     // CLI subprocess fields. Office-served rows may omit these when the
     // office agent is not yet wired to a CLI client; default to safe
     // empty values so the canonical type stays satisfied.

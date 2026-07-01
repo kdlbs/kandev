@@ -14,14 +14,25 @@ import { useSessionCommits } from "./use-session-commits";
  * a different repo's status. Read this hook instead whenever the UI needs a
  * single number representing the session's total changes.
  */
-export function useSessionChangesCount(sessionId: string | null): number {
+export function useSessionChangesSummary(sessionId: string | null): {
+  totalCount: number;
+  loaded: boolean;
+} {
   const statusByRepo = useSessionGitStatusByRepo(sessionId);
-  const { commits } = useSessionCommits(sessionId);
-  return useMemo(() => {
+  const { commits, loaded: commitsLoaded } = useSessionCommits(sessionId);
+  const totalCount = useMemo(() => {
     let fileCount = 0;
     for (const { status } of statusByRepo) {
       if (status?.files) fileCount += Object.keys(status.files).length;
     }
     return fileCount + commits.length;
   }, [statusByRepo, commits.length]);
+  return {
+    totalCount,
+    loaded: statusByRepo.length > 0 && commitsLoaded,
+  };
+}
+
+export function useSessionChangesCount(sessionId: string | null): number {
+  return useSessionChangesSummary(sessionId).totalCount;
 }

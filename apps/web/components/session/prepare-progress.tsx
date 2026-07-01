@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   IconCheck,
   IconX,
@@ -12,6 +13,10 @@ import {
 } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { ExpandableRow } from "@/components/task/chat/messages/expandable-row";
+import {
+  prepareProgressQueryOptions,
+  sessionAgentctlQueryOptions,
+} from "@/lib/query/query-options";
 import { isFallbackNoticeStep } from "@/lib/prepare/summarize";
 import { cn } from "@/lib/utils";
 import { stripAnsi } from "@/lib/utils/ansi";
@@ -208,11 +213,17 @@ function deriveStatus(input: DeriveStatusInput): EffectiveStatus {
 }
 
 function usePrepareStatus(sessionId: string) {
-  const prepareState = useAppStore((state) => state.prepareProgress.bySessionId[sessionId] ?? null);
+  const prepareQuery = useQuery(prepareProgressQueryOptions(sessionId));
+  const agentctlQuery = useQuery(sessionAgentctlQueryOptions(sessionId));
+  const storePrepareState = useAppStore(
+    (state) => state.prepareProgress.bySessionId[sessionId] ?? null,
+  );
+  const prepareState = prepareQuery.data ?? storePrepareState;
   const sessionState = useAppStore((state) => state.taskSessions.items[sessionId]?.state);
-  const agentctlStatus = useAppStore(
+  const storeAgentctlStatus = useAppStore(
     (state) => state.sessionAgentctl.itemsBySessionId[sessionId]?.status,
   );
+  const agentctlStatus = agentctlQuery.data?.status ?? storeAgentctlStatus;
 
   if (!prepareState) {
     // No live or hydrated prepare state. If the session has moved past the

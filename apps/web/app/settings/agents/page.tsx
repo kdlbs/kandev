@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "@/components/routing/app-link";
 import {
   IconAlertTriangle,
@@ -17,25 +18,25 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
-import { useAppStore } from "@/components/state-provider";
 import {
   createCustomTUIAgent,
   installAgent,
   listAgentDiscovery,
   listAgents,
   listAvailableAgents,
-  listInstallJobs,
 } from "@/lib/api";
 import type { InstallJob } from "@/lib/api";
 import { useAgentDiscovery } from "@/hooks/domains/settings/use-agent-discovery";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { qk } from "@/lib/query/keys";
+import { installJobsQueryOptions } from "@/lib/query/query-options/settings";
 import { AgentLogo } from "@/components/agent-logo";
 import { AddTUIAgentDialog } from "@/components/settings/add-tui-agent-dialog";
 import { AgentUsageSection } from "@/components/settings/agent-usage-section";
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
 import { InstallAgentCard } from "@/components/settings/install-agent-card";
 import { InstalledAgentCard } from "@/components/settings/installed-agent-card";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type {
   AgentDiscovery,
   Agent,
@@ -380,36 +381,33 @@ function AgentProfilesSection({ savedAgents }: AgentProfilesSectionProps) {
   );
 }
 
-/**
- * Install state is held in the store (driven by WS events
- * agent.install.{started,output,finished}). This hook:
- *   - Rehydrates jobs on mount so a page reload picks up in-flight installs.
- *   - Subscribes to agent.available.updated → calls onSuccess() to rescan.
- *   - Exposes handleInstall(name) which POSTs to enqueue (idempotent on the
- *     server: clicking again while running returns the same job_id).
- */
-function useInstallAgent(onSuccess: () => Promise<void>) {
-  const installJobs = useAppStore((state) => state.installJobs.byAgent);
-  const upsertInstallJob = useAppStore((state) => state.upsertInstallJob);
+function upsertInstallJob(jobs: InstallJob[], next: InstallJob): InstallJob[] {
+  const existing = jobs.findIndex((job) => job.job_id === next.job_id);
+  if (existing < 0) return [...jobs, next];
+  const copy = [...jobs];
+  copy[existing] = next;
+  return copy;
+}
 
-  useEffect(() => {
-    let cancelled = false;
-    listInstallJobs()
-      .then((resp) => {
-        if (cancelled) return;
-        // Upsert per-job rather than wholesale-replace: if a WS event
-        // already seeded an in-flight job with output chunks between page
-        // mount and this HTTP response, the snapshot from the server may
-        // be older, and a full replace would clobber the live output.
-        for (const job of resp.jobs) upsertInstallJob(job);
-      })
-      .catch(() => {
-        /* page mount; ignore */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [upsertInstallJob]);
+function useInstallAgent(onSuccess: () => Promise<void>) {
+  const queryClient = useQueryClient();
+  const installJobsQuery = useQuery(installJobsQueryOptions());
+  const installJobs = useMemo(
+    () =>
+      Object.fromEntries(
+        (installJobsQuery.data?.jobs ?? []).map((job) => [job.agent_name, job]),
+      ) as Record<string, InstallJob>,
+    [installJobsQuery.data?.jobs],
+  );
+  const seedInstallJob = useCallback(
+    (job: InstallJob) => {
+      queryClient.setQueryData(qk.settings.installJob(job.job_id), job);
+      queryClient.setQueryData<{ jobs: InstallJob[] }>(qk.settings.installJobs(), (previous) => ({
+        jobs: upsertInstallJob(previous?.jobs ?? [], job),
+      }));
+    },
+    [queryClient],
+  );
 
   // When any install finishes successfully, trigger the page-level rescan so
   // the agent disappears from "Available to Install" and shows up under
@@ -428,11 +426,11 @@ function useInstallAgent(onSuccess: () => Promise<void>) {
     async (name: string) => {
       try {
         const job = await installAgent(name);
-        // The WS event will normally arrive first, but seed the store in case
+        // The WS event will normally arrive first, but seed the query cache in case
         // the WS round-trip is slower than the HTTP response.
-        upsertInstallJob(job);
+        seedInstallJob(job);
       } catch (err) {
-        upsertInstallJob({
+        seedInstallJob({
           job_id: `local-error-${name}`,
           agent_name: name,
           status: "failed",
@@ -441,7 +439,7 @@ function useInstallAgent(onSuccess: () => Promise<void>) {
         });
       }
     },
-    [upsertInstallJob],
+    [seedInstallJob],
   );
 
   return { installJobs, handleInstall };
@@ -449,12 +447,9 @@ function useInstallAgent(onSuccess: () => Promise<void>) {
 
 function useAgentPageState() {
   const { items: discoveryAgents, loading: discoveryLoading } = useAgentDiscovery();
-  const savedAgents = useAppStore((state) => state.settingsAgents.items);
-  const setAgentDiscovery = useAppStore((state) => state.setAgentDiscovery);
-  const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
-  const setAvailableAgents = useAppStore((state) => state.setAvailableAgents);
-  const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
+  const { settingsAgents: savedAgents } = useSettingsData(true);
   const { items: availableAgents, tools } = useAvailableAgents();
+  const queryClient = useQueryClient();
   const [rescanning, setRescanning] = useState(false);
   const [tuiDialogOpen, setTuiDialogOpen] = useState(false);
 
@@ -485,8 +480,8 @@ function useAgentPageState() {
         listAgentDiscovery({ cache: "no-store" }),
         listAvailableAgents({ cache: "no-store" }),
       ]);
-      setAgentDiscovery(discoveryResp.agents);
-      setAvailableAgents(availableResp.agents, availableResp.tools ?? []);
+      queryClient.setQueryData(qk.settings.agentDiscovery(), discoveryResp);
+      queryClient.setQueryData(qk.settings.availableAgents(), availableResp);
     } finally {
       setRescanning(false);
     }
@@ -505,14 +500,9 @@ function useAgentPageState() {
       listAgents({ cache: "no-store" }),
       listAvailableAgents({ cache: "no-store" }),
     ]);
-    setAgentDiscovery(discoveryResp.agents);
-    setSettingsAgents(agentsResp.agents);
-    setAgentProfiles(
-      agentsResp.agents.flatMap((agent) =>
-        agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
-      ),
-    );
-    setAvailableAgents(availableResp.agents, availableResp.tools ?? []);
+    queryClient.setQueryData(qk.settings.agentDiscovery(), discoveryResp);
+    queryClient.setQueryData(qk.settings.agents(), agentsResp);
+    queryClient.setQueryData(qk.settings.availableAgents(), availableResp);
   };
 
   return {

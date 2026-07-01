@@ -1,5 +1,4 @@
 import type { ConnectionStatus } from "@/lib/types/connection";
-import type { HealthCheckSummary, HealthIssue, SystemHealthResponse } from "@/lib/types/health";
 import type {
   FilterClause,
   GroupKey,
@@ -24,10 +23,6 @@ export type PreviewPanelState = {
 
 export type RightPanelState = {
   activeTabBySessionId: Record<string, string>;
-};
-
-export type DiffState = {
-  files: Array<{ path: string; status: "A" | "M" | "D"; plus: number; minus: number }>;
 };
 
 export type ConnectionState = {
@@ -58,14 +53,6 @@ export type ActiveDocument =
 
 export type DocumentPanelState = {
   activeDocumentBySessionId: Record<string, ActiveDocument | null>;
-};
-
-export type SystemHealthState = {
-  issues: HealthIssue[];
-  checks: HealthCheckSummary[];
-  healthy: boolean;
-  loaded: boolean;
-  loading: boolean;
 };
 
 export type QuickChatSessionKind = "chat" | "config";
@@ -137,13 +124,11 @@ export type AppSidebarState = {
 export type UISliceState = {
   previewPanel: PreviewPanelState;
   rightPanel: RightPanelState;
-  diffs: DiffState;
   connection: ConnectionState;
   mobileKanban: MobileKanbanState;
   mobileSession: MobileSessionState;
   chatInput: ChatInputState;
   documentPanel: DocumentPanelState;
-  systemHealth: SystemHealthState;
   quickChat: QuickChatState;
   sessionFailureNotification: SessionFailureNotification | null;
   /** Set when the focused task is deleted live, so a toast can explain why. */
@@ -189,9 +174,6 @@ export type UISliceActions = {
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
   setActiveDocument: (sessionId: string, doc: ActiveDocument | null) => void;
-  setSystemHealth: (response: SystemHealthResponse) => void;
-  setSystemHealthLoading: (loading: boolean) => void;
-  invalidateSystemHealth: () => void;
   openQuickChat: (
     sessionId: string,
     workspaceId: string,

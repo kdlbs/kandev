@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useShallow } from "zustand/react/shallow";
 import {
   IconCheck,
@@ -15,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useAppStore } from "@/components/state-provider";
+import { sessionModelsQueryOptions } from "@/lib/query/query-options";
 import type { Message, Turn } from "@/lib/types/http";
 import {
   buildMessageDebugEntries,
@@ -214,6 +216,34 @@ function MessageMetaInfo({
   );
 }
 
+function useMessageTurn(message: Message): Turn | null {
+  return useAppStore(
+    useShallow((state) => {
+      const turnId = message.turn_id;
+      const turn =
+        turnId && message.session_id
+          ? (state.turns.bySession[message.session_id]?.find((item) => item.id === turnId) ?? null)
+          : null;
+      return turn;
+    }),
+  );
+}
+
+function useSessionModelsForMessage(message: Message) {
+  const sessionModelsQuery = useQuery(sessionModelsQueryOptions(message.session_id ?? ""));
+  const storeSessionModels = useAppStore((state) =>
+    message.session_id ? state.sessionModels.bySessionId[message.session_id] : undefined,
+  );
+  return sessionModelsQuery.data ?? storeSessionModels;
+}
+
+function useMessageUsageMultiplier(message: Message, turn: Turn | null) {
+  const sessionModels = useSessionModelsForMessage(message);
+  const metadataModel = (message.metadata?.model ?? turn?.metadata?.model) as string | undefined;
+  const modelId = metadataModel ?? sessionModels?.currentModelId;
+  return sessionModels?.models.find((model) => model.modelId === modelId)?.usageMultiplier ?? null;
+}
+
 export function MessageActions({
   message,
   showCopy = true,
@@ -230,24 +260,8 @@ export function MessageActions({
   hasNext = false,
 }: MessageActionsProps) {
   const { copied, copy } = useCopyToClipboard();
-  const { turn, usageMultiplier } = useAppStore(
-    useShallow((state) => {
-      const turnId = message.turn_id;
-      const turn =
-        turnId && message.session_id
-          ? (state.turns.bySession[message.session_id]?.find((item) => item.id === turnId) ?? null)
-          : null;
-      if (!message.session_id) return { turn, usageMultiplier: null };
-      const sessionModels = state.sessionModels.bySessionId[message.session_id];
-      const metadataModel = (message.metadata?.model ?? turn?.metadata?.model) as
-        | string
-        | undefined;
-      const modelId = metadataModel ?? sessionModels?.currentModelId;
-      const usageMultiplier =
-        sessionModels?.models.find((model) => model.modelId === modelId)?.usageMultiplier ?? null;
-      return { turn, usageMultiplier };
-    }),
-  );
+  const turn = useMessageTurn(message);
+  const usageMultiplier = useMessageUsageMultiplier(message, turn);
   const sessionConfigText = formatMessageSessionConfig(message.metadata, turn?.metadata);
   const handleCopy = async () => {
     await copy(message.content);

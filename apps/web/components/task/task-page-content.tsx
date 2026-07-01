@@ -1,17 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { IconAlertTriangle } from "@tabler/icons-react";
-import {
-  taskId as toTaskId,
-  workflowId as toWorkflowId,
-  workspaceId as toWorkspaceId,
-  type Repository,
-  type RepositoryScript,
-  type Task,
-} from "@/lib/types/http";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { type Repository, type RepositoryScript, type Task } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
-import type { KanbanState } from "@/lib/state/slices";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useSessionAgent } from "@/hooks/domains/session/use-session-agent";
 import { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
@@ -19,10 +12,12 @@ import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl
 import { useTaskFocus } from "@/hooks/domains/session/use-task-focus";
 import { useAppStore } from "@/components/state-provider";
 import { useEnsureTaskSession } from "@/hooks/domains/session/use-ensure-task-session";
-import { fetchTask } from "@/lib/api";
 import { useTasks } from "@/hooks/use-tasks";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { Layout } from "react-resizable-panels";
+import { taskQueryOptions, workflowStepsQueryOptions } from "@/lib/query/query-options";
+import { workflowSnapshotQueryData } from "@/lib/query/workflow-snapshot-cache";
+import { isPassthroughSession } from "@/lib/session/is-passthrough-session";
 import {
   deriveIsAgentWorking,
   buildArchivedValue,
@@ -48,66 +43,31 @@ type TaskPageContentProps = {
 function resolveEffectiveTask(
   taskDetails: Task | null,
   initialTask: Task | null,
-  kanbanTask: KanbanState["tasks"][number] | null,
+  snapshotTask: Task | null,
   effectiveTaskId: string | null,
 ): Task | null {
   const matchingTaskDetails = taskDetails?.id === effectiveTaskId ? taskDetails : null;
   const matchingInitialTask = initialTask?.id === effectiveTaskId ? initialTask : null;
-  const baseTask = matchingTaskDetails ?? matchingInitialTask;
-
-  if (!baseTask && !kanbanTask) return null;
-  if (baseTask) return mergeBaseWithKanban(baseTask, kanbanTask);
-  if (kanbanTask) return buildTaskFromKanban(kanbanTask, taskDetails, initialTask);
-  return null;
+  const matchingSnapshotTask = snapshotTask?.id === effectiveTaskId ? snapshotTask : null;
+  return matchingTaskDetails ?? matchingInitialTask ?? matchingSnapshotTask ?? null;
 }
 
-function mergeBaseWithKanban(
-  baseTask: Task,
-  kanbanTask: KanbanState["tasks"][number] | null,
-): Task {
-  if (!kanbanTask) return baseTask;
-  return {
-    ...baseTask,
-    title: kanbanTask.title ?? baseTask.title,
-    description: kanbanTask.description ?? baseTask.description,
-    workflow_step_id:
-      (kanbanTask.workflowStepId as string | undefined) ?? baseTask.workflow_step_id,
-    position: kanbanTask.position ?? baseTask.position,
-    state: (kanbanTask.state as Task["state"] | undefined) ?? baseTask.state,
-    repositories: baseTask.repositories,
-  };
-}
-
-function buildTaskFromKanban(
-  kanbanTask: KanbanState["tasks"][number],
-  taskDetails: Task | null,
-  initialTask: Task | null,
-): Task {
-  const prevWorkspaceId = taskDetails?.workspace_id ?? initialTask?.workspace_id;
-  const prevBoardId = taskDetails?.workflow_id ?? initialTask?.workflow_id;
-  return {
-    id: toTaskId(kanbanTask.id),
-    title: kanbanTask.title,
-    description: kanbanTask.description ?? "",
-    workflow_step_id: kanbanTask.workflowStepId,
-    position: kanbanTask.position,
-    state: kanbanTask.state ?? "CREATED",
-    workspace_id: prevWorkspaceId ?? toWorkspaceId(""),
-    workflow_id: prevBoardId ?? toWorkflowId(""),
-    priority: 0,
-    repositories: [],
-    created_at: "",
-    updated_at: kanbanTask.updatedAt ?? "",
-  };
-}
-
-export function useWorkflowStepsMapped() {
-  const kanbanSteps = useAppStore((state) => state.kanban.steps);
+export function useWorkflowStepsMapped(workflowIdOverride?: string | null) {
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const taskQuery = useQuery({
+    ...taskQueryOptions(activeTaskId ?? ""),
+    enabled: Boolean(activeTaskId) && !workflowIdOverride,
+  });
+  const workflowId = workflowIdOverride ?? taskQuery.data?.workflow_id ?? null;
+  const stepsQuery = useQuery({
+    ...workflowStepsQueryOptions(workflowId ?? ""),
+    enabled: Boolean(workflowId),
+  });
   return useMemo(
     () =>
-      kanbanSteps.map((s) => ({
+      (stepsQuery.data ?? []).map((s) => ({
         id: s.id,
-        name: s.title,
+        name: s.name,
         color: s.color,
         position: s.position,
         events: s.events,
@@ -116,29 +76,27 @@ export function useWorkflowStepsMapped() {
         is_start_step: s.is_start_step,
         agent_profile_id: s.agent_profile_id,
       })),
-    [kanbanSteps],
+    [stepsQuery.data],
   );
 }
 
 export function useSessionPanelState(effectiveSessionId: string | null | undefined) {
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const activeTaskQuery = useQuery({
+    ...taskQueryOptions(activeTaskId ?? ""),
+    enabled: Boolean(activeTaskId),
+  });
   const storeSessionState = useAppStore((state) =>
     effectiveSessionId ? (state.taskSessions.items[effectiveSessionId]?.state ?? null) : null,
   );
   const isSessionPassthrough = useAppStore((state) =>
-    effectiveSessionId
-      ? state.taskSessions.items[effectiveSessionId]?.is_passthrough === true
-      : false,
+    effectiveSessionId ? isPassthroughSession(state.taskSessions.items[effectiveSessionId]) : false,
   );
   // Use the task-level workflow step for the top-bar stepper. Individual sessions
   // may lag behind (e.g. a completed session stays at its old step), but the
   // task's step reflects the current workflow position and stays stable across
   // tab switches within the same task.
-  const sessionWorkflowStepId = useAppStore((state) => {
-    const taskId = state.tasks.activeTaskId;
-    if (!taskId) return null;
-    const task = state.kanban.tasks.find((t: { id: string }) => t.id === taskId);
-    return (task?.workflowStepId as string) ?? null;
-  });
+  const sessionWorkflowStepId = activeTaskQuery.data?.workflow_step_id ?? null;
   const previewOpen = useAppStore((state) =>
     effectiveSessionId ? (state.previewPanel.openBySessionId[effectiveSessionId] ?? false) : false,
   );
@@ -227,59 +185,62 @@ function TaskLoadErrorState() {
   );
 }
 
-function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
-  const [taskDetails, setTaskDetails] = useState<Task | null>(initialTask);
-  const [taskLoadError, setTaskLoadError] = useState<unknown | null>(null);
-  const kanbanTask = useAppStore((state) =>
-    activeTaskId
-      ? (state.kanban.tasks.find(
-          (item: KanbanState["tasks"][number]) => item.id === activeTaskId,
-        ) ?? null)
-      : null,
-  );
-  const effectiveTaskId = activeTaskId ?? initialTask?.id ?? null;
+export function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
+  const initialTaskId = initialTask?.id ?? null;
+  const effectiveTaskId = activeTaskId ?? initialTaskId;
+  const snapshotTask = useCachedWorkflowSnapshotTask(effectiveTaskId);
+  const taskDetailsQuery = useQuery({
+    ...taskQueryOptions(effectiveTaskId ?? ""),
+    enabled: shouldFetchActiveTaskDetails(activeTaskId, initialTaskId),
+    staleTime: 0,
+  });
+  const taskDetails = taskDetailsQuery.data?.id === effectiveTaskId ? taskDetailsQuery.data : null;
   const task = useMemo(
-    () => resolveEffectiveTask(taskDetails, initialTask, kanbanTask, effectiveTaskId),
-    [taskDetails, initialTask, kanbanTask, effectiveTaskId],
+    () => resolveEffectiveTask(taskDetails, initialTask, snapshotTask, effectiveTaskId),
+    [taskDetails, initialTask, snapshotTask, effectiveTaskId],
   );
   const hasTaskDetails = hasResolvedTaskDetails({
     effectiveTaskId,
     taskDetailsId: taskDetails?.id ?? null,
-    initialTaskId: initialTask?.id ?? null,
+    initialTaskId,
+    snapshotTaskId: snapshotTask?.id ?? null,
   });
   useTasks(task?.workflow_id ?? null);
 
   useEffect(() => {
-    if (!activeTaskId || taskDetails?.id === activeTaskId) {
-      setTaskLoadError(null);
-      return;
-    }
-    let cancelled = false;
-    setTaskLoadError(null);
-    fetchTask(activeTaskId, { cache: "no-store" })
-      .then((response) => {
-        if (cancelled) return;
-        setTaskDetails(response);
-        setTaskLoadError(null);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        console.error("[TaskPageContent] Failed to load task details:", error);
-        setTaskLoadError(error);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    activeTaskId,
-    taskDetails?.id,
-    taskDetails?.workspace_id,
-    taskDetails?.workflow_id,
-    kanbanTask,
-    setTaskDetails,
-  ]);
+    if (!taskDetailsQuery.isError) return;
+    console.error("[TaskPageContent] Failed to load task details:", taskDetailsQuery.error);
+  }, [taskDetailsQuery.error, taskDetailsQuery.isError]);
 
-  return { task, kanbanTask, taskLoadError: hasTaskDetails ? null : taskLoadError };
+  return { task, taskLoadError: hasTaskDetails ? null : taskDetailsQuery.error };
+}
+
+function shouldFetchActiveTaskDetails(
+  activeTaskId: string | null,
+  initialTaskId: string | null,
+): boolean {
+  return Boolean(activeTaskId) && activeTaskId !== initialTaskId;
+}
+
+function useCachedWorkflowSnapshotTask(taskId: string | null): Task | null {
+  const queryClient = useQueryClient();
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => queryClient.getQueryCache().subscribe(onStoreChange),
+    [queryClient],
+  );
+  const getSnapshot = useCallback(
+    () => (taskId ? taskFromWorkflowSnapshots(queryClient, taskId) : null),
+    [queryClient, taskId],
+  );
+  return useSyncExternalStore(subscribe, getSnapshot, () => null);
+}
+
+function taskFromWorkflowSnapshots(queryClient: QueryClient, taskId: string): Task | null {
+  for (const snapshot of workflowSnapshotQueryData(queryClient)) {
+    const task = snapshot.tasks.find((item) => item.id === taskId);
+    if (task) return task;
+  }
+  return null;
 }
 
 function useTaskPageData(
@@ -350,7 +311,7 @@ export function TaskPageContent({
   const { task, taskLoadError, agent, effectiveSessionId, repository, ensureSession } =
     useTaskPageData(initialTask, initialTaskId, sessionId, initialRepositories);
 
-  const workflowSteps = useWorkflowStepsMapped();
+  const workflowSteps = useWorkflowStepsMapped(task?.workflow_id ?? null);
   const sessionPanel = useSessionPanelState(effectiveSessionId);
   const agentctlStatus = useSessionAgentctl(effectiveSessionId);
   const resumption = useSessionResumption(task?.id ?? null, effectiveSessionId);

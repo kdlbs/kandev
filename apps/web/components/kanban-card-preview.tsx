@@ -8,8 +8,7 @@ import {
   type RepositoryChip,
   type Task,
 } from "@/components/kanban-card";
-import { useAppStore } from "@/components/state-provider";
-import type { Repository } from "@/lib/types/http";
+import { useAllCachedRepositories } from "@/hooks/domains/workspace/use-repository-cache";
 
 function KanbanCardPreviewLayout({
   task,
@@ -31,14 +30,10 @@ function KanbanCardPreviewLayout({
 }
 
 export function KanbanCardPreview({ task }: { task: Task }) {
-  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  const repositories = useAllCachedRepositories();
   const repositoryChips = useMemo(
-    () =>
-      resolveTaskRepositoryChips(
-        task,
-        Object.values(repositoriesByWorkspace).flat() as Repository[],
-      ),
-    [repositoriesByWorkspace, task],
+    () => resolveTaskRepositoryChips(task, repositories),
+    [repositories, task],
   );
 
   return <KanbanCardPreviewLayout task={task} repositoryChips={repositoryChips} />;

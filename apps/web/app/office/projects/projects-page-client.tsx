@@ -1,11 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
-import { listProjects } from "@/lib/api/domains/office-api";
+import { useOfficeAgentsData, useOfficeProjectsData } from "@/hooks/domains/office/use-office-data";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import type { Project } from "@/lib/state/slices/office/types";
 import { ProjectCard } from "./project-card";
@@ -13,42 +12,17 @@ import { CreateProjectDialog } from "./create-project-dialog";
 import { EmptyState } from "../components/shared/empty-state";
 
 type ProjectsPageClientProps = {
-  initialProjects: Project[];
+  initialProjects?: Project[];
 };
 
 export function ProjectsPageClient({ initialProjects }: ProjectsPageClientProps) {
-  const projects = useAppStore((s) => s.office.projects);
-  const agents = useAppStore((s) => s.office.agentProfiles);
-  const setProjects = useAppStore((s) => s.setProjects);
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+  const projectsQuery = useOfficeProjectsData(activeWorkspaceId, initialProjects);
+  const agentsQuery = useOfficeAgentsData(activeWorkspaceId);
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  // Hydrate from SSR; subsequent updates flow through the WS-driven
-  // refetch below. Skipping the unconditional mount fetch removes a
-  // redundant round-trip when SSR data is already in the store
-  // (Stream G of office optimization).
-  useEffect(() => {
-    if (initialProjects.length > 0) {
-      setProjects(initialProjects);
-    }
-  }, [initialProjects, setProjects]);
-
-  const loadProjects = useCallback(async () => {
-    if (!activeWorkspaceId) return;
-    try {
-      const res = await listProjects(activeWorkspaceId);
-      setProjects(res?.projects ?? []);
-    } catch {
-      // Silently handle fetch errors
-    }
-  }, [activeWorkspaceId, setProjects]);
-
-  useEffect(() => {
-    void loadProjects();
-  }, [loadProjects]);
-
-  useOfficeRefetch("projects", loadProjects);
-
+  const projects = projectsQuery.data?.projects ?? initialProjects ?? [];
+  const agents = agentsQuery.data?.agents ?? [];
   const agentNameMap = new Map(agents.map((a) => [a.id, a.name]));
 
   return (

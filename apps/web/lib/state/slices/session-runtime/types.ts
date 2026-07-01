@@ -1,7 +1,3 @@
-export type TerminalState = {
-  terminals: Array<{ id: string; output: string[] }>;
-};
-
 export type ShellState = {
   /** Shell output keyed by environmentId (shared across sessions in the same environment).
    *  Falls back to sessionId when no environment mapping exists. */
@@ -161,34 +157,16 @@ export type ContextWindowState = {
   bySessionId: Record<string, ContextWindowEntry>;
 };
 
-export type AgentState = {
-  agents: Array<{ id: string; status: "idle" | "running" | "error" }>;
-};
-
 export type AvailableCommand = {
   name: string;
   description?: string;
   input_hint?: string;
 };
 
-export type AvailableCommandsState = {
-  bySessionId: Record<string, AvailableCommand[]>;
-};
-
 export type SessionModeEntry = {
   id: string;
   name: string;
   description?: string;
-};
-
-export type SessionModeState = {
-  bySessionId: Record<
-    string,
-    {
-      currentModeId: string;
-      availableModes: SessionModeEntry[];
-    }
-  >;
 };
 
 export type AuthMethodEntry = {
@@ -232,10 +210,6 @@ export type PromptUsageEntry = {
   totalTokens: number;
 };
 
-export type AgentCapabilitiesState = {
-  bySessionId: Record<string, AgentCapabilitiesEntry>;
-};
-
 export type SessionModelsState = {
   bySessionId: Record<
     string,
@@ -246,10 +220,6 @@ export type SessionModelsState = {
       configBaseline?: Record<string, string>;
     }
   >;
-};
-
-export type PromptUsageState = {
-  bySessionId: Record<string, PromptUsageEntry>;
 };
 
 /**
@@ -326,18 +296,9 @@ export type TodoEntry = {
   priority?: string;
 };
 
-export type SessionTodosState = {
-  bySessionId: Record<string, TodoEntry[]>;
-};
-
 export type SessionPollMode = "fast" | "slow" | "paused";
 
-export type SessionPollModeState = {
-  bySessionId: Record<string, SessionPollMode>;
-};
-
 export type SessionRuntimeSliceState = {
-  terminal: TerminalState;
   shell: ShellState;
   processes: ProcessState;
   gitStatus: GitStatusState;
@@ -345,20 +306,12 @@ export type SessionRuntimeSliceState = {
   environmentIdBySessionId: Record<string, string>;
   sessionCommits: SessionCommitsState;
   contextWindow: ContextWindowState;
-  agents: AgentState;
-  availableCommands: AvailableCommandsState;
-  sessionMode: SessionModeState;
-  agentCapabilities: AgentCapabilitiesState;
   sessionModels: SessionModelsState;
-  promptUsage: PromptUsageState;
-  sessionTodos: SessionTodosState;
   userShells: UserShellsState;
   prepareProgress: PrepareProgressState;
-  sessionPollMode: SessionPollModeState;
 };
 
 export type SessionRuntimeSliceActions = {
-  setTerminalOutput: (terminalId: string, data: string) => void;
   appendShellOutput: (sessionId: string, data: string) => void;
   setShellStatus: (
     sessionId: string,
@@ -392,14 +345,6 @@ export type SessionRuntimeSliceActions = {
   // Signal a refetch without clearing the visible list — see
   // SessionCommitsState.refetchTrigger.
   bumpSessionCommitsRefetch: (sessionId: string) => void;
-  // Available commands actions
-  setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
-  clearAvailableCommands: (sessionId: string) => void;
-  // Session mode actions
-  setSessionMode: (sessionId: string, modeId: string, availableModes?: SessionModeEntry[]) => void;
-  clearSessionMode: (sessionId: string) => void;
-  // Agent capabilities actions
-  setAgentCapabilities: (sessionId: string, caps: AgentCapabilitiesEntry) => void;
   // Session models actions
   setSessionModels: (
     sessionId: string,
@@ -410,10 +355,6 @@ export type SessionRuntimeSliceActions = {
       configBaseline?: Record<string, string>;
     },
   ) => void;
-  // Prompt usage actions
-  setPromptUsage: (sessionId: string, usage: PromptUsageEntry) => void;
-  // Session todos actions
-  setSessionTodos: (sessionId: string, entries: TodoEntry[]) => void;
   // User shells actions — env-scoped (sessions in the same task share one shell list)
   setUserShells: (environmentId: string, shells: UserShellInfo[]) => void;
   setUserShellsLoading: (environmentId: string, loading: boolean) => void;
@@ -427,7 +368,6 @@ export type SessionRuntimeSliceActions = {
     // entry. `Omit` removes it from the patch surface.
     patch: Partial<Omit<UserShellInfo, "terminalId">>,
   ) => void;
-  setSessionPollMode: (sessionId: string, mode: SessionPollMode) => void;
 };
 
 export type SessionRuntimeSlice = SessionRuntimeSliceState & SessionRuntimeSliceActions;

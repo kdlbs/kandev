@@ -1,5 +1,7 @@
 import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
+import { sessionTurnsQueryOptions } from "@/lib/query/query-options";
 import type { Turn } from "@/lib/types/http";
 
 /**
@@ -30,11 +32,16 @@ function formatDuration(seconds: number): string {
  * @returns The last completed turn with its duration and model
  */
 export function useSessionTurn(sessionId: string | null) {
-  const turns = useAppStore((state) => (sessionId ? state.turns.bySession[sessionId] : undefined));
-  const activeTurnId = useAppStore((state) =>
+  const turnsQuery = useQuery(sessionTurnsQueryOptions(sessionId ?? ""));
+  const storeTurns = useAppStore((state) =>
+    sessionId ? state.turns.bySession[sessionId] : undefined,
+  );
+  const storeActiveTurnId = useAppStore((state) =>
     sessionId ? state.turns.activeBySession[sessionId] : null,
   );
   const session = useAppStore((state) => (sessionId ? state.taskSessions.items[sessionId] : null));
+  const turns = turnsQuery.data?.turns ?? storeTurns;
+  const activeTurnId = turnsQuery.data?.activeTurnId ?? storeActiveTurnId;
 
   // Get model from session's agent_profile_snapshot
   const sessionModel = useMemo(() => {

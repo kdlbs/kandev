@@ -8,6 +8,7 @@ import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import type { Project } from "@/lib/state/slices/office/types";
 import { ProjectRepositoryPicker } from "../project-repository-picker";
 import { RepoChip } from "../repo-chip";
+import { useSyncOfficeProjectCache } from "./project-query-cache";
 import { normalizeRepos } from "../normalize-repos";
 
 type ProjectReposSectionProps = {
@@ -16,21 +17,21 @@ type ProjectReposSectionProps = {
 
 export function ProjectReposSection({ project }: ProjectReposSectionProps) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const updateProjectStore = useAppStore((s) => s.updateProject);
+  const syncProjectCache = useSyncOfficeProjectCache();
   const { repositories } = useRepositories(workspaceId);
   const repos = useMemo(() => normalizeRepos(project.repositories), [project.repositories]);
 
   const persist = useCallback(
     async (next: string[], successMessage: string, failureMessage: string) => {
       try {
-        await updateProject(project.id, { repositories: next });
-        updateProjectStore(project.id, { repositories: next });
+        const updatedProject = await updateProject(project.id, { repositories: next });
+        syncProjectCache(updatedProject);
         toast.success(successMessage);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : failureMessage);
       }
     },
-    [project.id, updateProjectStore],
+    [project.id, syncProjectCache],
   );
 
   const handleAdd = useCallback(

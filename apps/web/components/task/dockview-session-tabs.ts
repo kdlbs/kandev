@@ -10,6 +10,7 @@ import {
   RIGHT_TOP_GROUP,
 } from "@/lib/state/layout-manager";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { wasPRPanelOffered, markPRPanelOffered } from "@/lib/local-storage";
 import { sessionId as toSessionId } from "@/lib/types/ids";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
@@ -290,16 +291,10 @@ export function runAutoPRPanelEffect(
 export function useAutoPRPanel() {
   const taskId = useAppStore((s) => s.tasks.activeTaskId);
   const sessionId = useAppStore((s) => s.tasks.activeSessionId);
-  const hasPR = useAppStore((s) => {
-    const tid = s.tasks.activeTaskId;
-    return resolveAutoPRPanelState(tid ? s.taskPRs.byTaskId[tid] : undefined).hasPR;
-  });
+  const { prs } = useTaskPR(taskId);
+  const { hasPR, defaultPRKey } = resolveAutoPRPanelState(prs);
   // Key of the PR the legacy unkeyed "pr-detail" panel renders — mirrors
   // PRDetailPanelComponent's fallback of the primary/first TaskPR.
-  const defaultPRKey = useAppStore((s) => {
-    const tid = s.tasks.activeTaskId;
-    return resolveAutoPRPanelState(tid ? s.taskPRs.byTaskId[tid] : undefined).defaultPRKey;
-  });
   const hasApi = useDockviewStore((s) => !!s.api);
   const appStore = useAppStoreApi();
 
@@ -311,7 +306,7 @@ export function useAutoPRPanel() {
         const api = useDockviewStore.getState().api;
         if (!api) return;
 
-        // Re-read live task/session/PR state before mutating dockview — a
+        // Re-read live task/session state before mutating dockview — a
         // task or session switch during this two-frame delay must not stamp
         // the panel with a stale task's PR key (cubic-dev-ai review on PR
         // #1636). If the active task/session moved on, bail: the effect
@@ -319,11 +314,10 @@ export function useAutoPRPanel() {
         // changed) will handle it correctly.
         const liveTasks = appStore.getState().tasks;
         if (liveTasks.activeTaskId !== taskId || liveTasks.activeSessionId !== sessionId) return;
-        const live = resolveAutoPRPanelState(appStore.getState().taskPRs.byTaskId[taskId]);
 
         runAutoPRPanelEffect(api, sessionId, {
-          hasPR: live.hasPR,
-          defaultPRKey: live.defaultPRKey,
+          hasPR,
+          defaultPRKey,
           isRestoringLayout: useDockviewStore.getState().isRestoringLayout,
           isMaximized: useDockviewStore.getState().preMaximizeLayout !== null,
           centerGroupId: useDockviewStore.getState().centerGroupId,

@@ -1,4 +1,6 @@
+import type { ReactElement } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   listSentryInstances,
@@ -6,6 +8,7 @@ import {
   listSentryProjects,
 } from "@/lib/api/domains/sentry-api";
 import type { SentryConfig, SentryIssueWatch } from "@/lib/types/sentry";
+import { makeQueryClient } from "@/lib/query/client";
 import { SentryIssueWatchDialog } from "./sentry-issue-watch-dialog";
 
 const { WORKSPACE_ID } = vi.hoisted(() => ({ WORKSPACE_ID: "ws-1" }));
@@ -19,8 +22,10 @@ vi.mock("@/components/state-provider", () => ({
       executors: { items: [] },
     }),
 }));
-vi.mock("@/hooks/domains/settings/use-settings-data", () => ({ useSettingsData: vi.fn() }));
-vi.mock("@/hooks/use-workflows", () => ({ useWorkflows: vi.fn() }));
+vi.mock("@/hooks/domains/settings/use-settings-data", () => ({
+  useSettingsData: () => ({ agentProfiles: [], executors: [] }),
+}));
+vi.mock("@/hooks/use-workflows", () => ({ useWorkflows: () => ({ workflows: [] }) }));
 vi.mock("@/hooks/use-workflow-steps", () => ({
   useWorkflowSteps: () => ({ steps: [], loading: false }),
   stepPlaceholder: () => "Select workflow first",
@@ -40,6 +45,53 @@ vi.mock("@/lib/api/domains/sentry-api", () => ({
   listSentryOrganizations: vi.fn(),
   listSentryProjects: vi.fn(),
 }));
+vi.mock("@kandev/ui/select", async () => {
+  const React = await import("react");
+  type SelectContextValue = {
+    disabled?: boolean;
+    onValueChange?: (value: string) => void;
+    value?: string;
+  };
+  const SelectContext = React.createContext<SelectContextValue>({});
+  return {
+    Select: ({
+      children,
+      disabled,
+      onValueChange,
+      value,
+    }: {
+      children: React.ReactNode;
+      disabled?: boolean;
+      onValueChange?: (value: string) => void;
+      value?: string;
+    }) => (
+      <SelectContext.Provider value={{ disabled, onValueChange, value }}>
+        <div>{children}</div>
+      </SelectContext.Provider>
+    ),
+    SelectTrigger: ({ children }: { children: React.ReactNode }) => {
+      const { disabled } = React.useContext(SelectContext);
+      return (
+        <button type="button" disabled={disabled}>
+          {children}
+        </button>
+      );
+    },
+    SelectValue: ({ placeholder }: { placeholder?: string }) => {
+      const { value } = React.useContext(SelectContext);
+      return <span>{value || placeholder}</span>;
+    },
+    SelectContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+    SelectItem: ({ children, value }: { children: React.ReactNode; value: string }) => {
+      const { onValueChange } = React.useContext(SelectContext);
+      return (
+        <button type="button" role="option" onClick={() => onValueChange?.(value)}>
+          {children}
+        </button>
+      );
+    },
+  };
+});
 
 const PRIMARY_INSTANCE_ID = "instance-a";
 
@@ -85,8 +137,14 @@ function selectTrigger(label: string): HTMLButtonElement {
 }
 
 async function choose(label: string, option: string): Promise<void> {
-  fireEvent.click(selectTrigger(label));
+  await waitFor(() => expect(selectTrigger(label).disabled).toBe(false));
+  fireEvent.pointerDown(selectTrigger(label), { button: 0, ctrlKey: false });
   fireEvent.click(await screen.findByRole("option", { name: option }));
+}
+
+function renderWithQuery(ui: ReactElement) {
+  const queryClient = makeQueryClient();
+  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
 }
 
 afterEach(() => {
@@ -118,7 +176,7 @@ beforeEach(() => {
 
 describe("SentryIssueWatchDialog", () => {
   it("removes the previous instance's org and project choices before the new lookup resolves", async () => {
-    render(
+    renderWithQuery(
       <SentryIssueWatchDialog
         open
         onOpenChange={vi.fn()}
@@ -130,7 +188,7 @@ describe("SentryIssueWatchDialog", () => {
     );
 
     await waitFor(() => {
-      expect(listSentryInstances).toHaveBeenCalledWith(WORKSPACE_ID);
+      expect(listSentryInstances).toHaveBeenCalledWith(WORKSPACE_ID, expect.any(Object));
     });
 
     await choose("Sentry instance", "Production");
@@ -150,7 +208,7 @@ describe("SentryIssueWatchDialog", () => {
   });
 
   it("permits mutable updates to a legacy unbound watch while its instance remains immutable", async () => {
-    render(
+    renderWithQuery(
       <SentryIssueWatchDialog
         open
         onOpenChange={vi.fn()}

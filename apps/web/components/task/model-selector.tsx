@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useCallback, useMemo, useRef } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   configOptionToModelOptions,
@@ -15,6 +16,8 @@ import { useToast } from "@/components/toast-provider";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { setSessionConfigOption, setSessionModel } from "@/lib/api/domains/session-api";
+import { qk } from "@/lib/query/keys";
+import { sessionModelsQueryOptions } from "@/lib/query/query-options";
 import type { Agent, AgentProfile, AvailableAgent, TaskSession } from "@/lib/types/http";
 import type {
   ConfigOptionEntry,
@@ -161,6 +164,7 @@ function useModelChangeHandlers(
   configOptions: SelectConfigOption[],
   sessionModelsData: SessionModelsEntry | undefined,
 ) {
+  const queryClient = useQueryClient();
   const activeModels = useAppStore((state) => state.activeModel.bySessionId);
   const setActiveModel = useAppStore((state) => state.setActiveModel);
   const setSessionModels = useAppStore((state) => state.setSessionModels);
@@ -177,8 +181,13 @@ function useModelChangeHandlers(
         currentModelId: nextCurrentModelId(sessionModelsData, configId, value),
         configOptions: updateConfigOptionValue(sessionModelsData.configOptions, configId, value),
       });
+      queryClient.setQueryData(qk.sessionRuntime.models(sid), {
+        ...sessionModelsData,
+        currentModelId: nextCurrentModelId(sessionModelsData, configId, value),
+        configOptions: updateConfigOptionValue(sessionModelsData.configOptions, configId, value),
+      });
     },
-    [sessionModelsData, setSessionModels],
+    [queryClient, sessionModelsData, setSessionModels],
   );
 
   const onFail = useCallback(
@@ -192,14 +201,17 @@ function useModelChangeHandlers(
         if (latestReqId.current[sid] !== reqId) return;
         console.error("[ModelSelector] model change failed:", err);
         setActiveModel(sid, previousActive);
-        if (previousModels) setSessionModels(sid, previousModels);
+        if (previousModels) {
+          setSessionModels(sid, previousModels);
+          queryClient.setQueryData(qk.sessionRuntime.models(sid), previousModels);
+        }
         toast({
           title: "Failed to change model",
           description: describeError(err),
           variant: "error",
         });
       },
-    [setActiveModel, setSessionModels, toast],
+    [queryClient, setActiveModel, setSessionModels, toast],
   );
 
   const nextReqId = useCallback((sid: string) => {
@@ -245,23 +257,37 @@ function useModelChangeHandlers(
   return { handleModelChange, handleConfigChange };
 }
 
-/** Resolves available models, config options and current model from store state. */
-function useModelSelectorState(sessionId: string | null) {
-  useSettingsData(true);
+function useTaskSessionForModel(sessionId: string | null) {
+  return useAppStore((state) => {
+    if (!sessionId) return null;
+    return state.taskSessions.items[sessionId] ?? null;
+  });
+}
 
-  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
-  const taskSessions = useAppStore((state) => state.taskSessions.items);
-  const activeModels = useAppStore((state) => state.activeModel.bySessionId);
-  const { items: availableAgents } = useAvailableAgents();
-  const selectedSessionModels = useAppStore((state) =>
+function useActiveModelForSession(sessionId: string | null) {
+  return useAppStore((state) => {
+    if (!sessionId) return null;
+    return state.activeModel.bySessionId[sessionId] || null;
+  });
+}
+
+function useSessionModelsData(sessionId: string | null) {
+  const sessionModelsQuery = useQuery(sessionModelsQueryOptions(sessionId ?? ""));
+  const storeSessionModelsData = useAppStore((state) =>
     sessionId ? state.sessionModels.bySessionId[sessionId] : undefined,
   );
-  const { session, activeModel, sessionModelsData } = resolveSessionState(
-    sessionId,
-    taskSessions,
-    activeModels,
-    selectedSessionModels,
-  );
+  return sessionModelsQuery.data ?? storeSessionModelsData;
+}
+
+/** Resolves available models, config options and current model from store state. */
+function useModelSelectorState(sessionId: string | null) {
+  const settingsCatalog = useSettingsData(true);
+
+  const settingsAgents = settingsCatalog.settingsAgents;
+  const { items: availableAgents } = useAvailableAgents();
+  const session = useTaskSessionForModel(sessionId);
+  const activeModel = useActiveModelForSession(sessionId);
+  const sessionModelsData = useSessionModelsData(sessionId);
   const snapshotModel = resolveSnapshotModel(session?.agent_profile_snapshot);
   const profileModel = useMemo(
     () => resolveProfileModel(session?.agent_profile_id, settingsAgents as Agent[]),

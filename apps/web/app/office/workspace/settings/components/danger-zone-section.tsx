@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@/lib/routing/client-router";
 import { IconTrash } from "@tabler/icons-react";
 import { toast } from "sonner";
@@ -20,13 +21,12 @@ import {
   getWorkspaceDeletionSummary,
   type WorkspaceDeletionSummary,
 } from "@/lib/api/domains/office-api";
-import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
 import {
   isOfficeWorkspace,
   workspaceHomeHref,
 } from "@/components/app-sidebar/app-sidebar-workspace-navigation";
-
-type Workspace = WorkspaceState["items"][number];
+import { removeWorkspaceCache } from "@/lib/query/workspace-cache";
+import type { Workspace } from "@/lib/types/http";
 
 export function resolvePostDeleteWorkspace(
   deletedWorkspaceId: string,
@@ -112,15 +112,14 @@ function DeleteWorkspaceDialog({
 export function DangerZoneSection({
   workspace,
   workspaces,
-  setWorkspaces,
   setActiveWorkspace,
 }: {
   workspace: Workspace;
   workspaces: Workspace[];
-  setWorkspaces: (items: Workspace[]) => void;
   setActiveWorkspace: (id: string | null) => void;
 }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [summary, setSummary] = useState<WorkspaceDeletionSummary | null>(null);
@@ -148,9 +147,8 @@ export function DangerZoneSection({
     setDeleting(true);
     try {
       await deleteWorkspace(workspace.id, confirmName);
-      const remaining = workspaces.filter((item) => item.id !== workspace.id);
       const nextWorkspace = resolvePostDeleteWorkspace(workspace.id, workspaces);
-      setWorkspaces(remaining);
+      removeWorkspaceCache(queryClient, workspace.id);
       setActiveWorkspace(nextWorkspace?.id ?? null);
       router.push(postDeleteWorkspaceHref(nextWorkspace));
       toast.success("Workspace deleted");

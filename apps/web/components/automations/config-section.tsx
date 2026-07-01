@@ -3,12 +3,11 @@
 import { useState, useEffect, useMemo } from "react";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
+import { useWorkflowSteps, type WorkflowStepOption } from "@/hooks/use-workflow-steps";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { discoverRepositoriesAction } from "@/app/actions/workspaces";
-import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
 import type { LocalRepository, Repository } from "@/lib/types/http";
 import type { ExecutionMode, TriggerType } from "@/lib/types/automation";
 import { RequiredFieldLabel } from "./required-field-label";
@@ -136,35 +135,10 @@ function useDiscoveredRepositories(workspaceId: string) {
   return items;
 }
 
-type StepOption = { id: string; name: string };
-
 function getWorkflowStepHelpText(workflowId: string, workflowStepId: string): string | undefined {
   if (!workflowId) return "Select a workflow before choosing a step.";
   if (!workflowStepId) return "Select a workflow step to enable saving.";
   return undefined;
-}
-
-function useWorkflowSteps(workflowId: string) {
-  const [steps, setSteps] = useState<StepOption[]>([]);
-
-  useEffect(() => {
-    if (!workflowId) return;
-    let cancelled = false;
-    listWorkflowSteps(workflowId)
-      .then((response) => {
-        if (cancelled) return;
-        const sorted = [...response.steps].sort((a, b) => a.position - b.position);
-        setSteps(sorted.map((s) => ({ id: s.id, name: s.name })));
-      })
-      .catch(() => {
-        if (!cancelled) setSteps([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workflowId]);
-
-  return steps;
 }
 
 export function ConfigSection({
@@ -184,15 +158,14 @@ export function ConfigSection({
   onRepositoryChange,
   onExecutionModeChange,
 }: ConfigSectionProps) {
-  useSettingsData(true);
-  useWorkflows(workspaceId, true);
+  const settingsCatalog = useSettingsData(true);
+  const { workflows } = useWorkflows(workspaceId, true);
   const { repositories } = useRepositories(workspaceId, true);
   const discoveredRepos = useDiscoveredRepositories(workspaceId);
 
-  const workflows = useAppStore((state) => state.workflows.items);
-  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
-  const executors = useAppStore((state) => state.executors.items);
-  const steps = useWorkflowSteps(workflowId);
+  const agentProfiles = settingsCatalog.agentProfiles;
+  const executors = settingsCatalog.executors;
+  const { steps } = useWorkflowSteps(workflowId);
 
   const filteredAgentProfiles = agentProfiles.filter((profile) => !profile.cli_passthrough);
   const allExecutorProfiles = executors
@@ -282,7 +255,7 @@ function WorkflowFields({
   workflowId: string;
   workflowStepId: string;
   workflows: Array<{ id: string; name: string }>;
-  steps: StepOption[];
+  steps: WorkflowStepOption[];
   workflowDirty: boolean;
   workflowStepDirty: boolean;
   onWorkflowChange: (id: string) => void;

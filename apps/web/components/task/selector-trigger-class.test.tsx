@@ -1,9 +1,13 @@
 import { cleanup, render, screen } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ModelSelector } from "@/components/task/model-selector";
 import { ModeSelector } from "@/components/task/mode-selector";
+import { makeQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
 
 const mocks = vi.hoisted(() => {
   const appState = {
@@ -80,7 +84,18 @@ vi.mock("@/hooks/domains/settings/use-available-agents", () => ({
 }));
 
 vi.mock("@/hooks/domains/settings/use-settings-data", () => ({
-  useSettingsData: vi.fn(),
+  useSettingsData: () => ({
+    settingsAgents: [],
+    agentProfiles: [],
+    executors: [],
+    availableAgents: [],
+    availableTools: [],
+    settingsData: {
+      agentsLoaded: true,
+      capabilitiesLoaded: true,
+      executorsLoaded: true,
+    },
+  }),
 }));
 
 vi.mock("@/lib/api/domains/session-api", () => ({
@@ -89,18 +104,31 @@ vi.mock("@/lib/api/domains/session-api", () => ({
   setSessionModel: vi.fn(),
 }));
 
-afterEach(() => {
-  cleanup();
-  mocks.storeSelections.length = 0;
-});
+function renderWithQuery(ui: ReactElement) {
+  const queryClient = makeQueryClient();
+  queryClient.setQueryData(
+    qk.sessionRuntime.models("session-1"),
+    mocks.appState.sessionModels.bySessionId["session-1"],
+  );
+  queryClient.setQueryData(
+    qk.sessionRuntime.mode("session-1"),
+    mocks.appState.sessionMode.bySessionId["session-1"],
+  );
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>{ui}</TooltipProvider>
+    </QueryClientProvider>,
+  );
+}
 
 describe("task selector trigger styling", () => {
+  afterEach(() => {
+    cleanup();
+    mocks.storeSelections.length = 0;
+  });
+
   it("forwards custom trigger classes to the model selector trigger", () => {
-    render(
-      <TooltipProvider>
-        <ModelSelector sessionId="session-1" triggerClassName="max-w-model" />
-      </TooltipProvider>,
-    );
+    renderWithQuery(<ModelSelector sessionId="session-1" triggerClassName="max-w-model" />);
 
     expect(screen.getByRole("button", { name: "Session model settings" }).className).toContain(
       "max-w-model",
@@ -108,11 +136,7 @@ describe("task selector trigger styling", () => {
   });
 
   it("opts the task model selector into its changed-values summary", () => {
-    render(
-      <TooltipProvider>
-        <ModelSelector sessionId="session-1" />
-      </TooltipProvider>,
-    );
+    renderWithQuery(<ModelSelector sessionId="session-1" />);
 
     expect(screen.getByRole("button", { name: "Session model settings" }).textContent).toBe(
       "GPT-5.5 / Low",
@@ -120,18 +144,14 @@ describe("task selector trigger styling", () => {
   });
 
   it("subscribes only to the active session model entry", () => {
-    render(
-      <TooltipProvider>
-        <ModelSelector sessionId="session-1" />
-      </TooltipProvider>,
-    );
+    renderWithQuery(<ModelSelector sessionId="session-1" />);
 
     expect(mocks.storeSelections).toContain(mocks.appState.sessionModels.bySessionId["session-1"]);
     expect(mocks.storeSelections).not.toContain(mocks.appState.sessionModels.bySessionId);
   });
 
   it("forwards custom trigger classes to the mode selector trigger", () => {
-    render(
+    renderWithQuery(
       <TooltipProvider>
         <ModeSelector sessionId="session-1" triggerClassName="max-w-mode" />
       </TooltipProvider>,

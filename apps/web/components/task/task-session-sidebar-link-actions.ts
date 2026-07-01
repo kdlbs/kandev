@@ -1,16 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import type { KanbanState } from "@/lib/state/slices";
-import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import type { ExternalLinkProvider } from "./task-external-link-dialog";
-
-type StoreApi = {
-  getState: () => {
-    kanbanMulti: { snapshots: Record<string, { tasks: KanbanState["tasks"] }> };
-    kanban: { tasks: KanbanState["tasks"] };
-  };
-};
 
 export type SidebarLinkTarget = {
   id: string;
@@ -26,7 +17,7 @@ export type SidebarExternalLinkTarget = {
   task: SidebarLinkTarget;
 };
 
-export function useSidebarLinkActions(store: StoreApi) {
+export function useSidebarLinkActions(taskById: ReadonlyMap<string, SidebarLinkTarget>) {
   const [linkingPullRequestTask, setLinkingPullRequestTask] = useState<SidebarLinkTarget | null>(
     null,
   );
@@ -36,8 +27,7 @@ export function useSidebarLinkActions(store: StoreApi) {
 
   const getLinkTarget = useCallback(
     (taskId: string, fallbackTitle?: string): SidebarLinkTarget => {
-      const state = store.getState();
-      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
+      const task = taskById.get(taskId);
       return {
         id: taskId,
         title: task?.title ?? fallbackTitle ?? "this task",
@@ -47,7 +37,7 @@ export function useSidebarLinkActions(store: StoreApi) {
         repositories: task?.repositories,
       };
     },
-    [store],
+    [taskById],
   );
 
   const handleLinkPullRequestTask = useCallback(

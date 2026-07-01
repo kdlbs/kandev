@@ -2,8 +2,9 @@
 
 import { useCallback } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import { useUserDisplaySettings } from "@/hooks/use-user-display-settings";
-import type { WorkflowsState } from "@/lib/state/slices";
+import { useWorkflows } from "@/hooks/use-workflows";
 
 type UserSettingsFields = {
   workspaceId: string | null;
@@ -20,21 +21,23 @@ function baseSettingsPayload(settings: UserSettingsFields): UserSettingsFields {
   };
 }
 
+function useWorkspaceSelectionData() {
+  const { items: workspaceItems, activeId } = useWorkspaces();
+  const activeWorkflowId = useAppStore((state) => state.workflows.activeId);
+  return { workspaces: workspaceItems, activeWorkspaceId: activeId, activeWorkflowId };
+}
+
 /**
  * Custom hook that consolidates all kanban display settings and eliminates prop drilling.
  * This hook provides access to workspaces, workflows, repositories, and preview settings,
  * along with handlers for changing these settings.
  */
 export function useKanbanDisplaySettings() {
-  // Access store directly
-  const workspaces = useAppStore((state) => state.workspaces.items);
-  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
-  const workflows = useAppStore((state) => state.workflows.items);
-  const activeWorkflowId = useAppStore((state) => state.workflows.activeId);
+  const { workspaces, activeWorkspaceId, activeWorkflowId } = useWorkspaceSelectionData();
   const setActiveWorkspace = useAppStore((state) => state.setActiveWorkspace);
   const setActiveWorkflow = useAppStore((state) => state.setActiveWorkflow);
+  const { workflows } = useWorkflows(activeWorkspaceId, Boolean(activeWorkspaceId));
 
-  // Use existing compound hook for user settings
   const {
     settings: userSettings,
     commitSettings,
@@ -46,11 +49,8 @@ export function useKanbanDisplaySettings() {
     workflowId: activeWorkflowId,
   });
 
-  // Get preview setting from store
   const enablePreviewOnClick = useAppStore((state) => state.userSettings.enablePreviewOnClick);
 
-  // Use pushState instead of router.push to avoid triggering SSR re-fetches.
-  // Filter changes only update client state; all data is already available.
   const handleWorkspaceChange = useCallback(
     (nextWorkspaceId: string | null) => {
       setActiveWorkspace(nextWorkspaceId);
@@ -70,7 +70,7 @@ export function useKanbanDisplaySettings() {
       setActiveWorkflow(nextWorkflowId);
       if (nextWorkflowId) {
         const workspaceId = workflows.find(
-          (workflow: WorkflowsState["items"][number]) => workflow.id === nextWorkflowId,
+          (workflow) => workflow.id === nextWorkflowId,
         )?.workspaceId;
         const workspaceParam = workspaceId ? `&workspaceId=${workspaceId}` : "";
         window.history.pushState({}, "", `/?workflowId=${nextWorkflowId}${workspaceParam}`);
@@ -116,7 +116,6 @@ export function useKanbanDisplaySettings() {
   );
 
   return {
-    // Data
     workspaces,
     workflows,
     activeWorkspaceId,
@@ -128,7 +127,6 @@ export function useKanbanDisplaySettings() {
     enablePreviewOnClick,
     kanbanViewMode: userSettings.kanbanViewMode,
 
-    // Handlers
     onWorkspaceChange: handleWorkspaceChange,
     onWorkflowChange: handleWorkflowChange,
     onRepositoryChange: handleRepositoryChange,

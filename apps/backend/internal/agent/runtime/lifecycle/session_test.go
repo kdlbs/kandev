@@ -656,6 +656,75 @@ func containsAction(items []string, want string) bool {
 	return false
 }
 
+func TestWaitForPromptDoneWrapsMissingSessionLoadAsExecutionNotFound(t *testing.T) {
+	tests := []string{
+		"failed to load session: session not found",
+		"session/load failed: no such session",
+		"failed to load session id session-1: Resource not found",
+		"session/load failed: could not find session",
+		"failed to load session: session id not recognized",
+		"failed to load session: unknown session",
+		"failed to load session: session does not exist",
+		"session not found",
+		"no such session",
+		"Resource not found",
+		"Session abc not found while loading",
+	}
+	for _, message := range tests {
+		t.Run(message, func(t *testing.T) {
+			sm := NewSessionManager(newSessionTestLogger(), newTestStopCh(t))
+			execution := &AgentExecution{
+				ID:           "exec-1",
+				promptDoneCh: make(chan PromptCompletionSignal, 1),
+			}
+			execution.promptDoneCh <- PromptCompletionSignal{
+				IsError: true,
+				Error:   message,
+			}
+
+			_, err := sm.waitForPromptDone(context.Background(), execution)
+			if !errors.Is(err, ErrAgentReported) {
+				t.Fatalf("expected ErrAgentReported, got %v", err)
+			}
+			if !errors.Is(err, ErrExecutionNotFound) {
+				t.Fatalf("expected ErrExecutionNotFound, got %v", err)
+			}
+		})
+	}
+}
+
+func TestWaitForPromptDoneDoesNotWrapUnrelatedNotFoundAgentErrors(t *testing.T) {
+	tests := []string{
+		"permission denied: resource not found",
+		"tool failed: no such session",
+		"tool failed: session id abc: no such session in cache",
+		"loading agent config: session profile not found in vault",
+		"loading cache: session id not found",
+		"permission denied: session not found",
+	}
+	for _, message := range tests {
+		t.Run(message, func(t *testing.T) {
+			sm := NewSessionManager(newSessionTestLogger(), newTestStopCh(t))
+			execution := &AgentExecution{
+				ID:           "exec-1",
+				promptDoneCh: make(chan PromptCompletionSignal, 1),
+			}
+			execution.promptDoneCh <- PromptCompletionSignal{
+				IsError: true,
+				Error:   message,
+			}
+
+			_, err := sm.waitForPromptDone(context.Background(), execution)
+			if !errors.Is(err, ErrAgentReported) {
+				t.Fatalf("expected ErrAgentReported, got %v", err)
+			}
+			if errors.Is(err, ErrExecutionNotFound) {
+				t.Fatalf("expected unrelated agent error, got ErrExecutionNotFound: %v", err)
+			}
+		})
+	}
+}
+
 func TestInitializeAndPrompt_StreamTimeout(t *testing.T) {
 	// This test verifies that InitializeAndPrompt returns an error if
 	// the stream fails to connect within the timeout.

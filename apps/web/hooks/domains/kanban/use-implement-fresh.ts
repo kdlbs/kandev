@@ -1,5 +1,6 @@
 import type React from "react";
 import { useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { setChatDraftContent } from "@/lib/local-storage";
@@ -49,7 +50,7 @@ export function useImplementFresh(
     resolvedSessionId ? s.taskSessions.items[resolvedSessionId] : undefined,
   );
   const setActiveSession = useAppStore((s) => s.setActiveSession);
-  const setTaskPlan = useAppStore((s) => s.setTaskPlan);
+  const queryClient = useQueryClient();
   const { toast } = useToast();
 
   return useCallback(async () => {
@@ -78,7 +79,7 @@ export function useImplementFresh(
       if (!newSessionId) return false;
 
       await setupFreshSession(newSessionId);
-      await markPlanImplementationStartedBestEffort(taskId, newSessionId, setTaskPlan);
+      await markPlanImplementationStartedBestEffort(taskId, newSessionId, queryClient);
       setActiveSession(taskId, newSessionId);
 
       // Clear composer + draft only when a fresh session was actually created.
@@ -95,7 +96,7 @@ export function useImplementFresh(
     resolvedSessionId,
     planningSession,
     chatInputRef,
-    setTaskPlan,
+    queryClient,
     setActiveSession,
     toast,
   ]);

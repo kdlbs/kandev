@@ -16,8 +16,10 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useAppStore } from "@/components/state-provider";
+import { useQueryClient } from "@tanstack/react-query";
 import { useSwimlaneCollapse } from "@/hooks/domains/kanban/use-swimlane-collapse";
+import { useAllCachedRepositories } from "@/hooks/domains/workspace/use-repository-cache";
+import { reorderCachedWorkflows, useAllCachedWorkflows } from "@/hooks/use-workflow-cache";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { filterTasksByRepositories, mapSelectedRepositoryIds } from "@/lib/kanban/filters";
 import { reorderWorkflows } from "@/lib/api";
@@ -28,11 +30,12 @@ import {
   type ViewContentProps,
 } from "@/lib/kanban/view-registry";
 import type { Task } from "@/components/kanban-card";
-import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
-import type { Repository } from "@/lib/types/http";
+import type { MoveTaskError } from "@/lib/kanban/move-task-error";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 
 export type SwimlaneContainerProps = {
+  snapshots: Record<string, WorkflowSnapshotData>;
+  snapshotsLoading: boolean;
   viewMode: string;
   workflowFilter: string | null;
   onPreviewTask: (task: Task) => void;
@@ -206,12 +209,11 @@ function WorkflowItemContent({
 }
 
 function useWorkflowReorder(
-  orderedWorkflows: { id: string; name: string }[],
+  orderedWorkflows: { id: string; name: string; workspaceId?: string }[],
   workflowFilter: string | null,
 ) {
-  const reorderWorkflowItems = useAppStore((state) => state.reorderWorkflowItems);
-  const workflows = useAppStore((state) => state.workflows.items);
-  const workspaceId = workflows[0]?.workspaceId;
+  const queryClient = useQueryClient();
+  const workspaceId = orderedWorkflows[0]?.workspaceId;
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
   const canSort = !workflowFilter && orderedWorkflows.length > 1;
 
@@ -223,34 +225,30 @@ function useWorkflowReorder(
       const newIndex = orderedWorkflows.findIndex((wf) => wf.id === over.id);
       if (oldIndex === -1 || newIndex === -1) return;
       const reordered = arrayMove(orderedWorkflows, oldIndex, newIndex);
-      reorderWorkflowItems(reordered.map((wf) => wf.id));
+      const workflowIds = reordered.map((wf) => wf.id);
       if (workspaceId) {
-        reorderWorkflows(
-          workspaceId,
-          reordered.map((wf) => wf.id),
-        ).catch(() => {});
+        reorderCachedWorkflows(queryClient, workspaceId, workflowIds);
+        reorderWorkflows(workspaceId, workflowIds).catch(() => {
+          void queryClient.invalidateQueries({ queryKey: ["workflows", workspaceId] });
+        });
       }
     },
-    [orderedWorkflows, reorderWorkflowItems, workspaceId],
+    [orderedWorkflows, queryClient, workspaceId],
   );
 
   return { sensors, canSort, handleDragEnd };
 }
 
 function useSwimlaneData(
+  snapshots: Record<string, WorkflowSnapshotData>,
+  snapshotsLoading: boolean,
   workflowFilter: string | null | undefined,
   selectedRepositoryIds: string[],
   searchQuery: string,
 ) {
-  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
-  const isLoading = useAppStore((state) => state.kanbanMulti.isLoading);
-  const workflows = useAppStore((state) => state.workflows.items);
-  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
-
-  const repositories = useMemo(
-    () => Object.values(repositoriesByWorkspace).flat() as Repository[],
-    [repositoriesByWorkspace],
-  );
+  const workflows = useAllCachedWorkflows();
+  const isLoading = snapshotsLoading;
+  const repositories = useAllCachedRepositories();
   const repoFilter = useMemo(
     () => mapSelectedRepositoryIds(repositories, selectedRepositoryIds),
     [repositories, selectedRepositoryIds],
@@ -378,7 +376,13 @@ export function SwimlaneContainer(containerProps: SwimlaneContainerProps) {
   const { isMobile } = useResponsiveBreakpoint();
   const { isCollapsed, toggleCollapse } = useSwimlaneCollapse();
   const { snapshots, isLoading, orderedWorkflows, allOrderedWorkflows, getFilteredTasks } =
-    useSwimlaneData(workflowFilter, selectedRepositoryIds, searchQuery ?? "");
+    useSwimlaneData(
+      containerProps.snapshots,
+      containerProps.snapshotsLoading,
+      workflowFilter,
+      selectedRepositoryIds,
+      searchQuery ?? "",
+    );
   const {
     sensors: workflowSensors,
     canSort: canSortWorkflows,

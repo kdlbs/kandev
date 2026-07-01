@@ -7,13 +7,14 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@kandev/ui/dropdown-menu";
-import { useAppStore } from "@/components/state-provider";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { addSessionPanel } from "@/lib/state/dockview-panel-actions";
 import { getSessionStateIcon } from "@/lib/ui/state-icons";
 import { AgentLogo } from "@/components/agent-logo";
 import { markSessionTabUserActivationIntent } from "@/components/task/session-tab-activation-intent";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 import type { TaskSession } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 
@@ -54,11 +55,9 @@ export function SessionReopenMenuItems({
   const { sessions } = useTaskSessions(taskId);
   const api = useDockviewStore((s) => s.api);
   const centerGroupId = useDockviewStore((s) => s.centerGroupId);
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items);
-  const primarySessionId = useAppStore((s) => {
-    const task = s.kanban.tasks.find((t: { id: string }) => t.id === taskId);
-    return task?.primarySessionId ?? null;
-  });
+  const { agentProfiles } = useSettingsData(true);
+  const task = useTaskById(taskId);
+  const primarySessionId = task?.primarySessionId ?? null;
 
   const profilesById = useMemo(
     () => Object.fromEntries(agentProfiles.map((p: AgentProfileOption) => [p.id, p])),

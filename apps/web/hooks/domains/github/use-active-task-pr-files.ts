@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { useTaskPR } from "./use-task-pr";
 import type { PRDiffFile, TaskPR } from "@/lib/types/github";
 
 type PRFilesByKey = Record<string, PRDiffFile[]>;
@@ -35,11 +36,9 @@ export function useActiveTaskPRsWithFiles(): {
   prs: TaskPR[];
   filesByPRKey: PRFilesByKey;
 } {
-  const prs = useAppStore((s) => {
-    const taskId = s.tasks.activeTaskId;
-    if (!taskId) return EMPTY_PRS;
-    return s.taskPRs.byTaskId[taskId] ?? EMPTY_PRS;
-  });
+  const taskId = useAppStore((s) => s.tasks.activeTaskId);
+  const { prs } = useTaskPR(taskId);
+  const stablePrs = prs.length > 0 ? prs : EMPTY_PRS;
 
   const [filesByPRKey, setFilesByPRKey] = useState<PRFilesByKey>({});
   // Refs so we can synchronously skip duplicate fetches without extra
@@ -52,7 +51,7 @@ export function useActiveTaskPRsWithFiles(): {
   // The set of keys we *want* to have results for. Drives the diff between
   // current state and what needs fetching, and lets us GC stale entries
   // (e.g. when a PR is deleted upstream or last_synced_at advances).
-  const desiredKeys = useMemo(() => prs.map(fetchKey), [prs]);
+  const desiredKeys = useMemo(() => stablePrs.map(fetchKey), [stablePrs]);
 
   // Drop cached results / tracking refs whose key is no longer desired.
   // Without this, switching tasks would leak stale PR file lists forever.
@@ -75,7 +74,7 @@ export function useActiveTaskPRsWithFiles(): {
   useEffect(() => {
     const client = getWebSocketClient();
     if (!client) return;
-    for (const pr of prs) {
+    for (const pr of stablePrs) {
       const key = fetchKey(pr);
       if (fetchedRef.current.has(key) || inFlightRef.current.has(key)) continue;
       inFlightRef.current.add(key);
@@ -103,9 +102,9 @@ export function useActiveTaskPRsWithFiles(): {
     // from the previous effect instance — and since the next effect's
     // early-continue saw the key still in inFlightRef, no fresh request
     // was issued either, leaving files permanently empty.
-  }, [prs]);
+  }, [stablePrs]);
 
-  return { prs, filesByPRKey };
+  return { prs: stablePrs, filesByPRKey };
 }
 
 function pruneByKeySet<V>(prev: Record<string, V>, desiredSet: Set<string>): Record<string, V> {

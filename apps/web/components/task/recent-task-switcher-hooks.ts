@@ -11,6 +11,9 @@ import {
 } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import { useAppStore } from "@/components/state-provider";
+import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
+import { useRepositoriesByWorkspace } from "@/hooks/domains/workspace/use-repository-cache";
+import { useAllCachedWorkflows } from "@/hooks/use-workflow-cache";
 import { useCommandPanelOpen } from "@/lib/commands/command-registry";
 import { useRegisterCommands } from "@/hooks/use-register-commands";
 import type { KeyboardShortcut } from "@/lib/keyboard/constants";
@@ -106,12 +109,9 @@ function useRecentTaskEntries() {
 function useRecentTaskBuildContext(): RecentTaskBuildContext {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
-  const kanbanWorkflowId = useAppStore((state) => state.kanban.workflowId);
-  const kanbanTasks = useAppStore((state) => state.kanban.tasks);
-  const kanbanSteps = useAppStore((state) => state.kanban.steps);
-  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
-  const workflows = useAppStore((state) => state.workflows.items);
-  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  const { snapshots } = useAllWorkflowSnapshots(activeWorkspaceId);
+  const workflows = useAllCachedWorkflows();
+  const repositoriesByWorkspace = useRepositoriesByWorkspace();
   const sessionsByTaskId = useAppStore((state) => state.taskSessionsByTask.itemsByTaskId);
   const gitStatusByEnvId = useAppStore((state) => state.gitStatus.byEnvironmentId);
   const environmentIdBySessionId = useAppStore((state) => state.environmentIdBySessionId);
@@ -120,9 +120,6 @@ function useRecentTaskBuildContext(): RecentTaskBuildContext {
     () => ({
       activeTaskId,
       activeWorkspaceId,
-      kanbanWorkflowId,
-      kanbanTasks,
-      kanbanSteps,
       snapshots,
       workflows,
       repositoriesByWorkspace,
@@ -133,9 +130,6 @@ function useRecentTaskBuildContext(): RecentTaskBuildContext {
     [
       activeTaskId,
       activeWorkspaceId,
-      kanbanWorkflowId,
-      kanbanTasks,
-      kanbanSteps,
       snapshots,
       workflows,
       repositoriesByWorkspace,

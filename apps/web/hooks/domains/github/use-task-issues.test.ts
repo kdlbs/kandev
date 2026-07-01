@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
-import { createElement, type ReactNode } from "react";
-import { StateProvider, useAppStore } from "@/components/state-provider";
+import { createElement, type ReactNode, useState } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { TaskIssueLink } from "@/lib/types/github";
 import { useWorkspaceTaskIssues } from "./use-task-issues";
 
@@ -17,11 +17,14 @@ afterEach(() => {
 });
 
 function wrapper({ children }: { children: ReactNode }) {
-  return createElement(StateProvider, null, children);
+  const [queryClient] = useState(
+    () => new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+  );
+  return createElement(QueryClientProvider, { client: queryClient }, children);
 }
 
 describe("useWorkspaceTaskIssues", () => {
-  it("loads workspace links into the GitHub store", async () => {
+  it("loads workspace links into the Query cache", async () => {
     const link: TaskIssueLink = {
       task_id: "task-1",
       task_title: "Linked task",
@@ -33,19 +36,9 @@ describe("useWorkspaceTaskIssues", () => {
     };
     mocks.listWorkspaceTaskIssues.mockResolvedValue({ task_issues: { "task-1": link } });
 
-    const { result } = renderHook(
-      () => {
-        useWorkspaceTaskIssues("ws-1");
-        return useAppStore((state) => state.taskIssues);
-      },
-      { wrapper },
-    );
+    const { result } = renderHook(() => useWorkspaceTaskIssues("ws-1"), { wrapper });
 
-    await waitFor(() =>
-      expect(result.current).toEqual({ workspaceId: "ws-1", byTaskId: { "task-1": link } }),
-    );
-    expect(mocks.listWorkspaceTaskIssues).toHaveBeenCalledWith("ws-1", {
-      cache: "no-store",
-    });
+    await waitFor(() => expect(result.current.data).toEqual({ "task-1": link }));
+    expect(mocks.listWorkspaceTaskIssues).toHaveBeenCalledWith("ws-1", expect.any(Object));
   });
 });

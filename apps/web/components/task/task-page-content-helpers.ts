@@ -119,11 +119,13 @@ export function hasResolvedTaskDetails(params: {
   effectiveTaskId: string | null;
   taskDetailsId?: string | null;
   initialTaskId?: string | null;
+  snapshotTaskId?: string | null;
 }) {
   if (!params.effectiveTaskId) return false;
   return (
     params.taskDetailsId === params.effectiveTaskId ||
-    params.initialTaskId === params.effectiveTaskId
+    params.initialTaskId === params.effectiveTaskId ||
+    params.snapshotTaskId === params.effectiveTaskId
   );
 }
 

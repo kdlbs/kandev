@@ -10,6 +10,7 @@ import {
   IconSettings,
 } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
+import { useOfficeDashboardData } from "@/hooks/domains/office/use-office-data";
 import { APP_SIDEBAR_SECTION_IDS } from "../app-sidebar-constants";
 import { AppSidebarNavItem } from "../app-sidebar-nav-item";
 import { AppSidebarSection } from "../app-sidebar-section";
@@ -36,7 +37,9 @@ export function OfficeNavigationSection({
   collapsed,
   section = "all",
 }: OfficeNavigationSectionProps) {
-  const dashboard = useAppStore((s) => s.office.dashboard);
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const dashboardQuery = useOfficeDashboardData(workspaceId);
+  const dashboard = dashboardQuery.data ?? null;
   const taskCount = dashboard?.task_count ?? 0;
   const routineCount = dashboard?.routine_count ?? 0;
   const skillCount = dashboard?.skill_count ?? 0;

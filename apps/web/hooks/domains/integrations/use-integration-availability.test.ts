@@ -1,4 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useIntegrationAuthed, type IntegrationConfigStatus } from "./use-integration-availability";
 
@@ -14,6 +16,15 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+function wrapper() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return function TestWrapper({ children }: { children: ReactNode }) {
+    return createElement(QueryClientProvider, { client: queryClient }, children);
+  };
+}
+
 describe("useIntegrationAuthed", () => {
   it("reports authed once a healthy config resolves", async () => {
     const fetchConfig = vi.fn(
@@ -23,7 +34,10 @@ describe("useIntegrationAuthed", () => {
       }),
     );
 
-    const { result } = renderHook(() => useIntegrationAuthed(fetchConfig));
+    const { result } = renderHook(
+      () => useIntegrationAuthed({ fetchConfig, queryKey: ["integration", "healthy"] }),
+      { wrapper: wrapper() },
+    );
 
     await waitFor(() => expect(result.current).toBe(true));
   });
@@ -38,8 +52,17 @@ describe("useIntegrationAuthed", () => {
     );
 
     const { result, rerender } = renderHook(
-      ({ fetchConfig }) => useIntegrationAuthed(fetchConfig),
-      { initialProps: { fetchConfig: first } },
+      ({
+        fetchConfig,
+        queryKey,
+      }: {
+        fetchConfig: () => Promise<IntegrationConfigStatus | null>;
+        queryKey: readonly unknown[];
+      }) => useIntegrationAuthed({ fetchConfig, queryKey }),
+      {
+        initialProps: { fetchConfig: first, queryKey: ["integration", "first"] },
+        wrapper: wrapper(),
+      },
     );
 
     await waitFor(() => expect(result.current).toBe(true));
@@ -50,7 +73,7 @@ describe("useIntegrationAuthed", () => {
     const pending = deferred<IntegrationConfigStatus | null>();
     const second = vi.fn(() => pending.promise);
 
-    rerender({ fetchConfig: second });
+    rerender({ fetchConfig: second, queryKey: ["integration", "second"] });
 
     expect(result.current).toBe(false);
 
@@ -72,8 +95,9 @@ describe("useIntegrationAuthed", () => {
     );
 
     const { result, rerender } = renderHook(
-      ({ active }) => useIntegrationAuthed(fetchConfig, undefined, active),
-      { initialProps: { active: true } },
+      ({ active }) =>
+        useIntegrationAuthed({ active, fetchConfig, queryKey: ["integration", "inactive"] }),
+      { initialProps: { active: true }, wrapper: wrapper() },
     );
 
     await waitFor(() => expect(result.current).toBe(true));

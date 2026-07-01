@@ -118,3 +118,7 @@ export function useAppStoreApi() {
   }
   return store;
 }
+
+export function useOptionalAppStoreApi() {
+  return useContext(StoreContext);
+}

@@ -13,7 +13,7 @@ import { cn } from "@kandev/ui/lib/utils";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
 import { needsAction } from "@/lib/utils/needs-action";
-import { useAppStore } from "@/components/state-provider";
+import { useAllCachedRepositories } from "@/hooks/domains/workspace/use-repository-cache";
 import { Graph2StepNode } from "./graph2-step-node";
 import { Graph2Connector } from "./graph2-connector";
 import type { Task } from "@/components/kanban-card";
@@ -233,16 +233,12 @@ function TaskButton({
 }
 
 function useTaskRepoName(task: Task): string | undefined {
-  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  const repositories = useAllCachedRepositories();
   return useMemo(() => {
     const primaryRepoId = task.repositories?.[0]?.repository_id;
     if (!primaryRepoId) return undefined;
-    for (const repos of Object.values(repositoriesByWorkspace)) {
-      const repo = repos.find((r) => r.id === primaryRepoId);
-      if (repo) return repo.name;
-    }
-    return undefined;
-  }, [repositoriesByWorkspace, task.repositories]);
+    return repositories.find((repo) => repo.id === primaryRepoId)?.name;
+  }, [repositories, task.repositories]);
 }
 
 export function Graph2TaskPipeline({

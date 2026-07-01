@@ -1,16 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useReducer, useState, type Dispatch } from "react";
-import {
-  INITIAL_STATE,
-  multiSelectReducer,
-  useTaskMultiSelectStore,
-} from "./use-task-multi-select";
+import { useQueryClient } from "@tanstack/react-query";
+import { INITIAL_STATE, multiSelectReducer } from "./use-task-multi-select";
 import { useTaskActions, useArchiveAndSwitchTask } from "./use-task-actions";
 import { useTaskRemoval } from "./use-task-removal";
 import { useTaskWorkflowMove } from "./use-task-workflow-move";
 import { useToast } from "@/components/toast-provider";
 import { useAppStoreApi } from "@/components/state-provider";
+import {
+  removeTasksFromWorkflowSnapshotQueries,
+  workflowSnapshotQueryData,
+} from "@/lib/query/workflow-snapshot-cache";
 
 type BulkOpts = { cascade?: boolean };
 
@@ -25,14 +26,21 @@ function useSidebarBulkActions(
   clearSelection: () => void,
 ) {
   const store = useAppStoreApi();
+  const queryClient = useQueryClient();
   const { archiveTaskById, deleteTaskById } = useTaskActions();
   const archiveAndSwitch = useArchiveAndSwitchTask({ useLayoutSwitch: true });
   const { removeTaskFromBoard } = useTaskRemoval({ store, useLayoutSwitch: true });
-  const { getWorkflowIdForTask, removeTasksFromStore } = useTaskMultiSelectStore();
   const moveTasks = useTaskWorkflowMove();
   const { toast } = useToast();
   const [isArchiving, setIsArchiving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const getWorkflowIdForTask = useCallback(
+    (taskId: string) =>
+      workflowSnapshotQueryData(queryClient).find((snapshot) =>
+        snapshot.tasks.some((task) => task.id === taskId),
+      )?.workflow.id,
+    [queryClient],
+  );
 
   const runBulkRemoval = useCallback(
     async (
@@ -51,7 +59,9 @@ function useSidebarBulkActions(
         const results = await Promise.allSettled(restIds.map((id) => per(id)));
         const failed = restIds.filter((_, i) => results[i].status === "rejected");
         const succeeded = restIds.filter((_, i) => results[i].status === "fulfilled");
-        if (succeeded.length > 0) removeTasksFromStore(new Set(succeeded));
+        if (succeeded.length > 0) {
+          removeTasksFromWorkflowSnapshotQueries(queryClient, new Set(succeeded));
+        }
         if (activeInSet) {
           try {
             await handleActive(activeId!);
@@ -73,7 +83,7 @@ function useSidebarBulkActions(
         setBusy(false);
       }
     },
-    [store, removeTasksFromStore, dispatch, toast, clearSelection],
+    [store, queryClient, dispatch, toast, clearSelection],
   );
 
   const bulkArchive = useCallback(

@@ -10,9 +10,12 @@ import {
   useMemo,
 } from "react";
 import { EditorContent } from "@tiptap/react";
+import { useQuery } from "@tanstack/react-query";
 import { useShallow } from "zustand/react/shallow";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
+import { useAllCachedWorkflows } from "@/hooks/use-workflow-cache";
+import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
 import { EditorContextProvider } from "./editor-context";
@@ -22,6 +25,7 @@ import { SlashCommandMenu } from "./slash-command-menu";
 import { buildTaskMentionItems } from "./task-mention-items";
 import { extractUserHistory } from "./message-history";
 import { useDrainOlderMessages } from "./use-drain-older-messages";
+import { availableCommandsQueryOptions } from "@/lib/query/query-options";
 import {
   createMentionSuggestion,
   createSlashSuggestion,
@@ -124,8 +128,12 @@ async function fetchFileResults(
 
 function useMentionItems(sessionId: string | null, taskId: string | null) {
   const { prompts } = useCustomPrompts();
-  const storeApi = useAppStoreApi();
+  const workflows = useAllCachedWorkflows();
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+  const { snapshots } = useAllWorkflowSnapshots(activeWorkspaceId);
   const promptsRef = useRef(prompts);
+  const workflowsRef = useRef(workflows);
+  const snapshotsRef = useRef(snapshots);
   const sessionIdRef = useRef(sessionId);
   const taskIdRef = useRef(taskId);
   const lastFileSearchRef = useRef<{ query: string; results: string[] }>({
@@ -134,51 +142,52 @@ function useMentionItems(sessionId: string | null, taskId: string | null) {
   });
   useLayoutEffect(() => {
     promptsRef.current = prompts;
+    workflowsRef.current = workflows;
+    snapshotsRef.current = snapshots;
     sessionIdRef.current = sessionId;
     taskIdRef.current = taskId;
   });
 
-  return useCallback(
-    async (query: string): Promise<MentionItem[]> => {
-      const allItems: MentionItem[] = [];
-      allItems.push(...buildTaskMentionItems(storeApi.getState(), taskIdRef.current));
+  return useCallback(async (query: string): Promise<MentionItem[]> => {
+    const allItems: MentionItem[] = [];
+    allItems.push(
+      ...buildTaskMentionItems(snapshotsRef.current, taskIdRef.current, workflowsRef.current),
+    );
+    allItems.push({
+      id: "__plan__",
+      kind: "plan",
+      label: "Plan",
+      description: "Include the plan as context",
+      onSelect: () => {},
+    });
+    for (const p of promptsRef.current) {
       allItems.push({
-        id: "__plan__",
-        kind: "plan",
-        label: "Plan",
-        description: "Include the plan as context",
+        id: p.id,
+        kind: "prompt",
+        label: p.name,
+        description: p.content.length > 100 ? p.content.slice(0, 100) + "..." : p.content,
         onSelect: () => {},
       });
-      for (const p of promptsRef.current) {
-        allItems.push({
-          id: p.id,
-          kind: "prompt",
-          label: p.name,
-          description: p.content.length > 100 ? p.content.slice(0, 100) + "..." : p.content,
-          onSelect: () => {},
-        });
-      }
-      const sid = sessionIdRef.current;
-      if (sid) {
-        try {
-          const files = await fetchFileResults(sid, query, lastFileSearchRef.current);
-          for (const filePath of files) {
-            allItems.push({
-              id: filePath,
-              kind: "file",
-              label: filePath,
-              description: "File",
-              onSelect: () => {},
-            });
-          }
-        } catch {
-          // ignore
+    }
+    const sid = sessionIdRef.current;
+    if (sid) {
+      try {
+        const files = await fetchFileResults(sid, query, lastFileSearchRef.current);
+        for (const filePath of files) {
+          allItems.push({
+            id: filePath,
+            kind: "file",
+            label: filePath,
+            description: "File",
+            onSelect: () => {},
+          });
         }
+      } catch {
+        // ignore
       }
-      return filterItems(allItems, query);
-    },
-    [storeApi],
-  );
+    }
+    return filterItems(allItems, query);
+  }, []);
 }
 
 // ── Suggestion configs hook ──────────────────────────────────────────
@@ -200,9 +209,8 @@ function useSuggestionConfigs({
   setMentionMenu,
   setSlashMenu,
 }: SuggestionConfigsInput) {
-  const agentCommands = useAppStore((state) =>
-    sessionId ? state.availableCommands.bySessionId[sessionId] : undefined,
-  );
+  const commandsQuery = useQuery(availableCommandsQueryOptions(sessionId ?? ""));
+  const agentCommands = commandsQuery.data;
   const slashCommands = useMemo((): SlashCommand[] => {
     if (!agentCommands || agentCommands.length === 0) return [];
     return agentCommands

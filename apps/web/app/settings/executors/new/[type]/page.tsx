@@ -7,8 +7,9 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
-import { useAppStore } from "@/components/state-provider";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
+import { useExecutorsQuerySync } from "@/hooks/domains/settings/use-executors-query-sync";
 import {
   createExecutorProfile,
   fetchLocalGitIdentity,
@@ -42,7 +43,7 @@ import {
   type GitIdentityState,
 } from "@/components/settings/profile-edit/remote-credentials-card";
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
-import type { Executor, ExecutorType, ProfileEnvVar } from "@/lib/types/http";
+import type { ExecutorType, ProfileEnvVar } from "@/lib/types/http";
 
 import { EXECUTOR_TYPE_MAP } from "./executor-types";
 import { SSHCreatePage } from "./ssh-create-page";
@@ -375,8 +376,7 @@ function useCreateProfileFormState(executorType: ExecutorType) {
 
 function useCreateProfileSave(executorId: string) {
   const router = useRouter();
-  const executors = useAppStore((state) => state.executors.items);
-  const setExecutors = useAppStore((state) => state.setExecutors);
+  const { upsertExecutorProfile } = useExecutorsQuerySync();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -386,11 +386,7 @@ function useCreateProfileSave(executorId: string) {
       setError(null);
       try {
         const profile = await createExecutorProfile(executorId, payload);
-        setExecutors(
-          executors.map((e: Executor) =>
-            e.id === executorId ? { ...e, profiles: [...(e.profiles ?? []), profile] } : e,
-          ),
-        );
+        upsertExecutorProfile(executorId, profile);
         runWithNavigationBlockerBypassed(() => router.push(`/settings/executors/${profile.id}`));
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to create profile");
@@ -399,7 +395,7 @@ function useCreateProfileSave(executorId: string) {
         setSaving(false);
       }
     },
-    [executorId, executors, setExecutors, router],
+    [executorId, router, upsertExecutorProfile],
   );
 
   return { saving, error, handleSave };

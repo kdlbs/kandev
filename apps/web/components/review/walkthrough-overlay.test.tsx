@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConnectionStatus } from "@/lib/types/connection";
 import type { TaskWalkthrough } from "@/lib/types/http";
@@ -43,20 +44,28 @@ function StoreProbe() {
 
 function renderOverlay() {
   setConnectionStatus = null;
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
   render(
-    <StateProvider
-      initialState={{
-        tasks: {
-          activeTaskId: TASK_ID,
-          activeSessionId: null,
-          pinnedSessionId: null,
-          lastSessionByTaskId: {},
-        },
-      }}
-    >
-      <StoreProbe />
-      <WalkthroughOverlay taskId={TASK_ID} />
-    </StateProvider>,
+    <QueryClientProvider client={queryClient}>
+      <StateProvider
+        initialState={{
+          tasks: {
+            activeTaskId: TASK_ID,
+            activeSessionId: null,
+            pinnedSessionId: null,
+            lastSessionByTaskId: {},
+          },
+        }}
+      >
+        <StoreProbe />
+        <WalkthroughOverlay taskId={TASK_ID} />
+      </StateProvider>
+    </QueryClientProvider>,
   );
 }
 

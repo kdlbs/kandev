@@ -2,7 +2,6 @@ import type { StateCreator } from "zustand";
 import type {
   SessionRuntimeSlice,
   SessionRuntimeSliceState,
-  SessionPollMode,
   GitStatusEntry,
   FileInfo,
 } from "./types";
@@ -11,9 +10,9 @@ import { createDebugLogger, isDebug } from "@/lib/debug/log";
 const debugGit = createDebugLogger("git-status:store");
 
 const maxProcessOutputBytes = 2 * 1024 * 1024;
-// Shell + terminal streams are unbounded over a session's lifetime; cap them at
-// the same 2MB tail the process buffer uses so a chatty shell can't grow the
-// store without limit (the xterm view only renders the tail anyway).
+// Shell streams are unbounded over a session's lifetime; cap them at the same
+// 2MB tail the process buffer uses so a chatty shell can't grow the store
+// without limit (the xterm view only renders the tail anyway).
 const maxShellOutputBytes = 2 * 1024 * 1024;
 
 /** Compute total additions/deletions across all files. */
@@ -191,30 +190,11 @@ function trimProcessOutput(value: string) {
   return trimTailBytes(value, maxProcessOutputBytes);
 }
 
-/** Append a chunk to a terminal's output array, dropping the oldest chunks once
- *  the buffered total exceeds the cap so the array can't grow without bound. A
- *  single chunk larger than the cap is itself clamped to the tail, so the buffer
- *  stays bounded even on the very first (or one giant) write. */
-function appendTerminalChunk(output: string[], data: string) {
-  output.push(trimTailBytes(data, maxShellOutputBytes));
-  let total = output.reduce((sum, chunk) => sum + chunk.length, 0);
-  while (output.length > 1 && total > maxShellOutputBytes) {
-    total -= output[0].length;
-    output.shift();
-  }
-}
-
 /** Per-session runtime maps (keyed directly by sessionId). */
 function purgePerSessionRuntime(state: SessionRuntimeSliceState, sessionId: string) {
   delete state.contextWindow.bySessionId[sessionId];
-  delete state.availableCommands.bySessionId[sessionId];
-  delete state.sessionMode.bySessionId[sessionId];
-  delete state.agentCapabilities.bySessionId[sessionId];
   delete state.sessionModels.bySessionId[sessionId];
-  delete state.promptUsage.bySessionId[sessionId];
-  delete state.sessionTodos.bySessionId[sessionId];
   delete state.prepareProgress.bySessionId[sessionId];
-  delete state.sessionPollMode.bySessionId[sessionId];
 }
 
 /** Process status + output for every process owned by the session. */
@@ -257,7 +237,6 @@ export function purgeSessionRuntimeState(state: SessionRuntimeSliceState, sessio
 }
 
 export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
-  terminal: { terminals: [] },
   shell: { outputs: {}, statuses: {} },
   processes: {
     outputsByProcessId: {},
@@ -270,35 +249,15 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   environmentIdBySessionId: {},
   sessionCommits: { byEnvironmentId: {}, loading: {}, refetchTrigger: {} },
   contextWindow: { bySessionId: {} },
-  agents: { agents: [] },
-  availableCommands: { bySessionId: {} },
-  sessionMode: { bySessionId: {} },
-  agentCapabilities: { bySessionId: {} },
   sessionModels: { bySessionId: {} },
-  promptUsage: { bySessionId: {} },
-  sessionTodos: { bySessionId: {} },
   userShells: { byEnvironmentId: {}, loading: {}, loaded: {} },
   prepareProgress: { bySessionId: {} },
-  sessionPollMode: { bySessionId: {} },
 };
 
 type ImmerSet = Parameters<typeof createSessionRuntimeSlice>[0];
 
 function buildTerminalShellProcessActions(set: ImmerSet) {
   return {
-    setTerminalOutput: (terminalId: string, data: string) =>
-      set((draft) => {
-        const existing = draft.terminal.terminals.find((terminal) => terminal.id === terminalId);
-        if (existing) {
-          appendTerminalChunk(existing.output, data);
-        } else {
-          // Route the first chunk through appendTerminalChunk too so the cap is
-          // enforced even on the initial WS payload for a new terminal.
-          const output: string[] = [];
-          appendTerminalChunk(output, data);
-          draft.terminal.terminals.push({ id: terminalId, output });
-        }
-      }),
     appendShellOutput: (sessionId: string, data: string) =>
       set((draft) => {
         const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
@@ -453,10 +412,6 @@ function buildUserShellActions(set: ImmerSet) {
           s.terminalId === terminalId ? { ...s, ...patch } : s,
         );
       }),
-    setSessionPollMode: (sessionId: string, mode: SessionPollMode) =>
-      set((draft) => {
-        draft.sessionPollMode.bySessionId[sessionId] = mode;
-      }),
   };
 }
 
@@ -556,41 +511,9 @@ export const createSessionRuntimeSlice: StateCreator<
     }),
   ...buildContextWindowActions(set),
   ...buildSessionCommitActions(set),
-  setAvailableCommands: (sessionId, commands) =>
-    set((draft) => {
-      draft.availableCommands.bySessionId[sessionId] = commands;
-    }),
-  clearAvailableCommands: (sessionId) =>
-    set((draft) => {
-      delete draft.availableCommands.bySessionId[sessionId];
-    }),
-  setSessionMode: (sessionId, modeId, availableModes) =>
-    set((draft) => {
-      const existing = draft.sessionMode.bySessionId[sessionId];
-      draft.sessionMode.bySessionId[sessionId] = {
-        currentModeId: modeId,
-        availableModes: availableModes ?? existing?.availableModes ?? [],
-      };
-    }),
-  clearSessionMode: (sessionId) =>
-    set((draft) => {
-      delete draft.sessionMode.bySessionId[sessionId];
-    }),
-  setAgentCapabilities: (sessionId, caps) =>
-    set((draft) => {
-      draft.agentCapabilities.bySessionId[sessionId] = caps;
-    }),
   setSessionModels: (sessionId, data) =>
     set((draft) => {
       draft.sessionModels.bySessionId[sessionId] = data;
-    }),
-  setPromptUsage: (sessionId, usage) =>
-    set((draft) => {
-      draft.promptUsage.bySessionId[sessionId] = usage;
-    }),
-  setSessionTodos: (sessionId, entries) =>
-    set((draft) => {
-      draft.sessionTodos.bySessionId[sessionId] = entries;
     }),
   ...buildUserShellActions(set),
 });

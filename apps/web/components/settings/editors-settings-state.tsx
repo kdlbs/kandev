@@ -1,11 +1,13 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
 import { useEditors } from "@/hooks/domains/settings/use-editors";
 import { createEditor, deleteEditor, updateEditor, updateUserSettings } from "@/lib/api";
 import { useRequest } from "@/lib/http/use-request";
 import { parseTasksListGroup, parseTasksListSort } from "@/lib/tasks/tasks-list-options";
+import { qk } from "@/lib/query/keys";
 import type { EditorOption } from "@/lib/types/http";
 import { type ComboboxOption } from "@/components/combobox";
 import {
@@ -27,11 +29,10 @@ import {
 import { Badge } from "@kandev/ui/badge";
 
 export function useEditorsSettingsState() {
-  const setEditors = useAppStore((state) => state.setEditors);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const currentUserSettings = useAppStore((state) => state.userSettings);
-  const { editors: storeEditors } = useEditors();
-  const [editors, setEditorItems] = useState<EditorOption[]>(() => storeEditors ?? []);
+  const { editors: queryEditors } = useEditors();
+  const [editors, setEditorItems] = useState<EditorOption[]>(() => queryEditors ?? []);
   const initialDefaultId = resolveDefaultEditorId(
     editors ?? [],
     currentUserSettings.defaultEditorId ?? "",
@@ -68,8 +69,11 @@ export function useEditorsSettingsState() {
   const [expandedConfigLang, setExpandedConfigLang] = useState<string | null>(null);
   const [lspConfigErrors, setLspConfigErrors] = useState<Record<string, string>>({});
 
+  useEffect(() => {
+    setEditorItems(queryEditors ?? []);
+  }, [queryEditors]);
+
   return {
-    setEditors,
     setUserSettings,
     currentUserSettings,
     editors,
@@ -330,10 +334,14 @@ function applySettingsResponseToStore(
 
 export function useApplyEditors(state: EditorsSettingsState) {
   const { defaultEditorId, setEditorItems, setDefaultEditorId, setBaselineDefaultId } = state;
+  const queryClient = useQueryClient();
   return useCallback(
     (updater: EditorOption[] | ((prev: EditorOption[]) => EditorOption[])) => {
       setEditorItems((prev) => {
         const next = typeof updater === "function" ? updater(prev) : updater;
+        queryClient.setQueryData<{ editors: EditorOption[] }>(qk.settings.editors(), {
+          editors: next,
+        });
         const resolvedDefault = resolveDefaultEditorId(next, defaultEditorId);
         if (resolvedDefault !== defaultEditorId) {
           setDefaultEditorId(resolvedDefault);
@@ -342,7 +350,7 @@ export function useApplyEditors(state: EditorsSettingsState) {
         return next;
       });
     },
-    [defaultEditorId, setEditorItems, setDefaultEditorId, setBaselineDefaultId],
+    [defaultEditorId, queryClient, setEditorItems, setDefaultEditorId, setBaselineDefaultId],
   );
 }
 

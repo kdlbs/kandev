@@ -20,9 +20,9 @@ import { SenderTaskBadge, type SenderTaskInfo } from "./sender-task-badge";
 import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
 import { markdownComponents } from "@/components/shared/markdown-components";
 import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
-import { useAppStore } from "@/components/state-provider";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@kandev/ui/hover-card";
 import { PromptPreview } from "@/components/task/chat/context-items/prompt-preview";
+import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import {
   buildPromptMentionNames,
   splitPreparedPromptMentionSegments,
@@ -174,7 +174,7 @@ type MarkdownChildrenProps<T extends PromptMentionMarkdownTag> = ComponentPropsW
 };
 
 function usePromptMentionNames() {
-  const prompts = useAppStore((state) => state.prompts.items);
+  const { prompts } = useCustomPrompts();
   return useMemo(() => prompts.map((prompt) => prompt.name), [prompts]);
 }
 
@@ -267,11 +267,10 @@ const PROMPT_MENTION_CHIP_CLASS =
  * doesn't need to switch to the raw message view.
  */
 function PromptMentionChip({ name, value }: { name: string; value: string }) {
-  const content = useAppStore(
-    useCallback(
-      (state) => state.prompts.items.find((prompt) => prompt.name === name)?.content ?? null,
-      [name],
-    ),
+  const { prompts } = useCustomPrompts();
+  const content = useMemo(
+    () => prompts.find((prompt) => prompt.name === name)?.content ?? null,
+    [name, prompts],
   );
 
   if (!content) {

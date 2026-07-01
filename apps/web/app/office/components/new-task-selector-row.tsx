@@ -11,6 +11,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
+import { useOfficeAgentsData, useOfficeProjectsData } from "@/hooks/domains/office/use-office-data";
 import type { AgentProfile, Project } from "@/lib/state/slices/office/types";
 import type { IssueDraft } from "./new-task-draft";
 import { ParticipantRow } from "./new-task-participant-row";
@@ -107,8 +108,9 @@ function ProjectPickerPopover({
 }
 
 export function NewTaskSelectorRow({ draft, onUpdate }: Props) {
-  const agents = useAppStore((s) => s.office.agentProfiles);
-  const projects = useAppStore((s) => s.office.projects);
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const agents = useOfficeAgentsData(workspaceId).data?.agents ?? [];
+  const projects = useOfficeProjectsData(workspaceId).data?.projects ?? [];
 
   return (
     <div className="space-y-2">

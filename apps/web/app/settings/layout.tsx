@@ -15,7 +15,6 @@ import {
 } from "@/lib/routing/route-bootstrap";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { readCookies } from "@/lib/server/cookies";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   return <SettingsLayoutServer>{children}</SettingsLayoutServer>;
@@ -59,11 +58,6 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
       executors: {
         items: executors.executors,
       },
-      agentProfiles: {
-        items: agents.agents.flatMap((agent) =>
-          agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
-        ),
-      },
       settingsAgents: {
         items: agents.agents,
       },
@@ -77,10 +71,6 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
         tools: available.tools ?? [],
         loading: false,
         loaded: true,
-      },
-      settingsData: {
-        executorsLoaded: true,
-        agentsLoaded: true,
       },
       ...(mappedUserSettings.loaded
         ? {

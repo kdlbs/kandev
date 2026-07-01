@@ -9,8 +9,7 @@ import {
   ContextMenuTrigger,
 } from "@kandev/ui/context-menu";
 import { useAppStore } from "@/components/state-provider";
-import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
-import { useSessionChangesCount } from "@/hooks/domains/session/use-session-changes-count";
+import { useSessionChangesSummary } from "@/hooks/domains/session/use-session-changes-count";
 import { cn } from "@kandev/ui/lib/utils";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 import { autoActivateChangesPanel } from "./changes-panel-focus";
@@ -25,12 +24,7 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
   const onDoubleClick = useTabMaximizeOnDoubleClick(api);
 
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
-  const gitStatus = useSessionGitStatus(activeSessionId);
-  const totalCount = useSessionChangesCount(activeSessionId ?? null);
-
-  // gitStatus is undefined until the first WS git-status event arrives,
-  // which marks the end of the initial data load for this session.
-  const gitStatusLoaded = gitStatus !== undefined;
+  const { totalCount, loaded: changesLoaded } = useSessionChangesSummary(activeSessionId ?? null);
 
   const prevTotalRef = useRef(totalCount);
   const seenCountRef = useRef(api.isActive ? totalCount : 0);
@@ -74,11 +68,15 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
     const increased = totalCount > prev && totalCount > 0;
     const decreased = totalCount < prev;
 
-    // Auto-activate on real post-load updates, but only after initial git data
-    // has settled. gitStatusLoaded is false until the first WS git-status event
-    // arrives, guaranteeing existing changes on page refresh do not steal focus.
+    // Auto-activate on real post-load updates, but only after the initial
+    // git-status and commits snapshots have both settled. Existing changes can
+    // arrive in either source during page refresh and must not steal focus.
     if (!initializedRef.current) {
-      if (gitStatusLoaded) initializedRef.current = true;
+      if (changesLoaded) {
+        initializedRef.current = true;
+        prevTotalRef.current = totalCount;
+        seenCountRef.current = api.isActive ? totalCount : 0;
+      }
     } else if (increased) {
       // The product behavior is to surface every new git update unless the
       // changes panel shares a group with agent session panels.
@@ -96,7 +94,7 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
       const unseen = Math.max(0, totalCount - seenCountRef.current);
       requestAnimationFrame(() => setBadgeCount(unseen));
     }
-  }, [totalCount, api, gitStatusLoaded, activeSessionId]);
+  }, [totalCount, api, changesLoaded, activeSessionId]);
 
   // Cleanup flash timer on unmount
   useEffect(() => {

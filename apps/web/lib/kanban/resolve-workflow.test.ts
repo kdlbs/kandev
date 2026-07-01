@@ -4,9 +4,9 @@ import {
   resolveBoardWorkflowSteps,
   resolveDesiredWorkflowId,
 } from "./resolve-workflow";
-import type { WorkflowsState } from "@/lib/state/slices";
+import type { WorkflowItem } from "@/lib/state/slices";
 
-type Workflow = WorkflowsState["items"][number];
+type Workflow = WorkflowItem;
 
 function workflow(id: string, overrides: Partial<Workflow> = {}): Workflow {
   return { id, workspaceId: "ws-1", name: id, ...overrides };

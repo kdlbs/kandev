@@ -3,10 +3,10 @@
 import { useCallback, useState, type ReactNode } from "react";
 import { IconGitMerge, IconGitPullRequestClosed, IconX } from "@tabler/icons-react";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
+import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useToast } from "@/components/toast-provider";
-import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import {
   markPRClosedBannerDismissed,
   markPRMergedBannerDismissed,
@@ -20,17 +20,15 @@ type ArchiveTarget = { title: string; executorType?: string | null };
 // dialog as every other archive surface. Only failures toast; on success the
 // archive-and-switch flow moves the user to the next task.
 function useBannerArchiveConfirm(taskId: string) {
-  const store = useAppStoreApi();
+  const task = useTaskById(taskId);
   const archiveAndSwitch = useArchiveAndSwitchTask();
   const { toast } = useToast();
   const [target, setTarget] = useState<ArchiveTarget | null>(null);
   const [isPending, setIsPending] = useState(false);
 
   const requestArchive = useCallback(() => {
-    const state = store.getState();
-    const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
     setTarget({ title: task?.title ?? "this task", executorType: task?.primaryExecutorType });
-  }, [store, taskId]);
+  }, [task]);
 
   const closeConfirm = useCallback(() => setTarget(null), []);
 
@@ -116,7 +114,7 @@ function ArchiveDismissBanner({
 }
 
 export function PRMergedBanner({ taskId }: { taskId: string }) {
-  const taskPRs = useAppStore((state) => state.taskPRs.byTaskId[taskId]);
+  const { prs: taskPRs } = useTaskPR(taskId);
   const [dismissed, setDismissed] = useState(() => wasPRMergedBannerDismissed(taskId));
 
   const handleDismiss = useCallback(() => {
@@ -126,7 +124,7 @@ export function PRMergedBanner({ taskId }: { taskId: string }) {
 
   // Multi-repo: only show "ready to archive" once every PR is merged. A
   // single merged repo with others still open means the task isn't done yet.
-  const allMerged = !!taskPRs && taskPRs.length > 0 && taskPRs.every((pr) => pr.state === "merged");
+  const allMerged = taskPRs.length > 0 && taskPRs.every((pr) => pr.state === "merged");
   if (!allMerged || dismissed) return null;
 
   const bannerText =
@@ -149,7 +147,7 @@ export function PRMergedBanner({ taskId }: { taskId: string }) {
 }
 
 export function PRClosedBanner({ taskId }: { taskId: string }) {
-  const taskPRs = useAppStore((state) => state.taskPRs.byTaskId[taskId]);
+  const { prs: taskPRs } = useTaskPR(taskId);
   const [dismissed, setDismissed] = useState(() => wasPRClosedBannerDismissed(taskId));
 
   const handleDismiss = useCallback(() => {
@@ -159,7 +157,7 @@ export function PRClosedBanner({ taskId }: { taskId: string }) {
 
   // Mirror the merged banner's all-or-nothing rule: show only once every PR is
   // closed-without-merging. A mix of merged + closed shows neither banner.
-  const allClosed = !!taskPRs && taskPRs.length > 0 && taskPRs.every((pr) => pr.state === "closed");
+  const allClosed = taskPRs.length > 0 && taskPRs.every((pr) => pr.state === "closed");
   if (!allClosed || dismissed) return null;
 
   const bannerText =

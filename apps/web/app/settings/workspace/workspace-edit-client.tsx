@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import Link from "@/components/routing/app-link";
 import { useRouter } from "@/lib/routing/client-router";
 import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
@@ -20,24 +21,23 @@ import {
   DialogTitle,
 } from "@kandev/ui/dialog";
 import { updateWorkspaceAction, deleteWorkspaceAction } from "@/app/actions/workspaces";
-import type { Executor } from "@/lib/types/http";
-import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
-
-type Workspace = WorkspaceState["items"][number];
+import type { Executor, Workspace } from "@/lib/types/http";
+import type { AgentProfileOption } from "@/lib/state/slices";
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
-import { useAppStore } from "@/components/state-provider";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { patchWorkspaceCache, removeWorkspaceCache } from "@/lib/query/workspace-cache";
 
 type WorkspaceEditClientProps = {
   workspaceId: string;
 };
 
 export function WorkspaceEditClient({ workspaceId }: WorkspaceEditClientProps) {
-  const workspace = useAppStore(
-    (state) => state.workspaces.items.find((item: Workspace) => item.id === workspaceId) ?? null,
-  );
+  const { items } = useWorkspaces();
+  const workspace = items.find((item) => item.id === workspaceId) ?? null;
 
   if (!workspace) {
     return (
@@ -330,8 +330,7 @@ type WorkspaceSaveHandlerOptions = {
   isDirty: boolean;
   setSavedState: (s: SavedState) => void;
   setCurrentWorkspace: (fn: (prev: Workspace) => Workspace) => void;
-  workspaces: Workspace[];
-  setWorkspaces: (items: Workspace[]) => void;
+  queryClient: QueryClient;
   saveWorkspaceRequest: SaveRequestLike;
   toast: ReturnType<typeof useToast>["toast"];
 };
@@ -343,8 +342,7 @@ function buildSaveHandler({
   isDirty,
   setSavedState,
   setCurrentWorkspace,
-  workspaces,
-  setWorkspaces,
+  queryClient,
   saveWorkspaceRequest,
   toast,
 }: WorkspaceSaveHandlerOptions) {
@@ -366,19 +364,7 @@ function buildSaveHandler({
         executorId: updated.default_executor_id ?? "",
         agentProfileId: updated.default_agent_profile_id ?? "",
       });
-      setWorkspaces(
-        workspaces.map((ws: Workspace) =>
-          ws.id === updated.id
-            ? {
-                ...ws,
-                name: updated.name,
-                default_executor_id: updated.default_executor_id ?? null,
-                default_environment_id: updated.default_environment_id ?? null,
-                default_agent_profile_id: updated.default_agent_profile_id ?? null,
-              }
-            : ws,
-        ),
-      );
+      patchWorkspaceCache(queryClient, updated.id, updated);
     } catch (error) {
       toast({
         title: "Failed to save workspace",
@@ -393,6 +379,7 @@ function buildSaveHandler({
 function useWorkspaceEditForm(workspace: Workspace) {
   const router = useRouter();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [currentWorkspace, setCurrentWorkspace] = useState<Workspace>(workspace);
   const [workspaceNameDraft, setWorkspaceNameDraft] = useState(workspace.name ?? "");
   const [defaultExecutorId, setDefaultExecutorId] = useState(workspace.default_executor_id ?? "");
@@ -407,10 +394,7 @@ function useWorkspaceEditForm(workspace: Workspace) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
-  const executors = useAppStore((state) => state.executors.items);
-  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
-  const workspaces = useAppStore((state) => state.workspaces.items);
-  const setWorkspaces = useAppStore((state) => state.setWorkspaces);
+  const { executors, agentProfiles } = useSettingsData(true);
 
   const saveWorkspaceRequest = useRequest(updateWorkspaceAction);
   const deleteWorkspaceRequest = useRequest(deleteWorkspaceAction);
@@ -428,8 +412,7 @@ function useWorkspaceEditForm(workspace: Workspace) {
     isDirty,
     setSavedState,
     setCurrentWorkspace,
-    workspaces,
-    setWorkspaces,
+    queryClient,
     saveWorkspaceRequest,
     toast,
   });
@@ -438,7 +421,7 @@ function useWorkspaceEditForm(workspace: Workspace) {
     if (deleteConfirmText !== currentWorkspace.name) return;
     try {
       await deleteWorkspaceRequest.run(currentWorkspace.id, currentWorkspace.name);
-      setWorkspaces(workspaces.filter((ws: Workspace) => ws.id !== currentWorkspace.id));
+      removeWorkspaceCache(queryClient, currentWorkspace.id);
       runWithNavigationBlockerBypassed(() => router.push("/settings/workspace"));
     } catch (error) {
       toast({

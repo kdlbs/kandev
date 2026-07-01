@@ -7,30 +7,51 @@ const ARCHIVE_WORKSPACE_ID = "ws-10";
 const MAIN_WORKSPACE_NAME = "Main Workspace";
 const ARCHIVE_WORKSPACE_NAME = "Archive Workspace";
 
-const state = {
-  workspaces: {
-    activeId: MAIN_WORKSPACE_ID,
-    items: [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }],
-  },
-  setActiveWorkspace: vi.fn(),
-  settingsAgents: {
-    items: [],
-  },
-  executors: {
-    items: [],
-  },
-  features: {
-    office: false,
-    plugins: false,
-  },
-};
+const setActiveWorkspaceMock = vi.hoisted(() => vi.fn());
+const workspaceState = vi.hoisted(() => ({
+  activeId: "ws-1" as string | null,
+  items: [{ id: "ws-1", name: "Main Workspace" }],
+}));
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (s: typeof state) => unknown) => selector(state),
+  useAppStore: (
+    selector: (s: {
+      workspaces: { activeId: string | null };
+      setActiveWorkspace: typeof setActiveWorkspaceMock;
+    }) => unknown,
+  ) =>
+    selector({
+      workspaces: { activeId: workspaceState.activeId },
+      setActiveWorkspace: setActiveWorkspaceMock,
+    }),
+}));
+
+vi.mock("@/hooks/domains/workspace/use-workspaces", () => ({
+  useWorkspaces: () => ({
+    items: workspaceState.items,
+    activeId: workspaceState.activeId,
+    activeWorkspace:
+      workspaceState.items.find((workspace) => workspace.id === workspaceState.activeId) ?? null,
+  }),
 }));
 
 vi.mock("@/hooks/domains/settings/use-available-agents", () => ({
   useAvailableAgents: () => undefined,
+}));
+
+vi.mock("@/hooks/domains/settings/use-settings-data", () => ({
+  useSettingsData: () => ({
+    agentProfiles: [],
+    availableAgents: [],
+    availableTools: [],
+    executors: [],
+    settingsAgents: [],
+    settingsData: {
+      agentsLoaded: true,
+      capabilitiesLoaded: true,
+      executorsLoaded: true,
+    },
+  }),
 }));
 
 vi.mock("@kandev/ui/collapsible", async () => {
@@ -51,11 +72,9 @@ import { WorkspacesGroup } from "./workspaces-group";
 
 describe("SettingsTree rendering", () => {
   beforeEach(() => {
-    state.workspaces.activeId = MAIN_WORKSPACE_ID;
-    state.workspaces.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
-    state.setActiveWorkspace.mockClear();
-    state.settingsAgents.items = [];
-    state.executors.items = [];
+    workspaceState.activeId = MAIN_WORKSPACE_ID;
+    workspaceState.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
+    setActiveWorkspaceMock.mockClear();
   });
 
   afterEach(() => cleanup());
@@ -78,7 +97,7 @@ describe("SettingsTree rendering", () => {
   });
 
   it("opens the active workspace by default when the settings tree opens", () => {
-    state.workspaces.items = [
+    workspaceState.items = [
       { id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME },
       { id: ARCHIVE_WORKSPACE_ID, name: ARCHIVE_WORKSPACE_NAME },
     ];
@@ -97,7 +116,7 @@ describe("SettingsTree rendering", () => {
   });
 
   it("uses an accordion for workspace subsections", () => {
-    state.workspaces.items = [
+    workspaceState.items = [
       { id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME },
       { id: ARCHIVE_WORKSPACE_ID, name: ARCHIVE_WORKSPACE_NAME },
     ];
@@ -117,7 +136,7 @@ describe("SettingsTree rendering", () => {
   });
 
   it("only opens the routed workspace subsection on workspace detail routes", () => {
-    state.workspaces.items = [
+    workspaceState.items = [
       { id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME },
       { id: ARCHIVE_WORKSPACE_ID, name: ARCHIVE_WORKSPACE_NAME },
     ];
@@ -144,7 +163,7 @@ describe("SettingsTree rendering", () => {
   });
 
   it("opens workspace integrations when a workspace integration route is active", () => {
-    state.workspaces.items = [
+    workspaceState.items = [
       { id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME },
       { id: ARCHIVE_WORKSPACE_ID, name: ARCHIVE_WORKSPACE_NAME },
     ];
@@ -177,12 +196,12 @@ describe("SettingsTree rendering", () => {
 
 describe("WorkspacesGroup active workspace presentation", () => {
   beforeEach(() => {
-    state.workspaces.activeId = MAIN_WORKSPACE_ID;
-    state.workspaces.items = [
+    workspaceState.activeId = MAIN_WORKSPACE_ID;
+    workspaceState.items = [
       { id: ARCHIVE_WORKSPACE_ID, name: ARCHIVE_WORKSPACE_NAME },
       { id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME },
     ];
-    state.setActiveWorkspace.mockClear();
+    setActiveWorkspaceMock.mockClear();
   });
 
   afterEach(() => cleanup());
@@ -203,7 +222,7 @@ describe("WorkspacesGroup active workspace presentation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Expand Archive Workspace" }));
 
-    expect(state.setActiveWorkspace).not.toHaveBeenCalled();
+    expect(setActiveWorkspaceMock).not.toHaveBeenCalled();
     expect(getWorkspaceRootLinks()[0].textContent).toBe(`${MAIN_WORKSPACE_NAME}Active`);
     expect(screen.getByRole("link", { name: `${MAIN_WORKSPACE_NAME} Active` })).toBeTruthy();
   });
@@ -211,8 +230,8 @@ describe("WorkspacesGroup active workspace presentation", () => {
 
 describe("WorkspacesGroup integration route sync", () => {
   beforeEach(() => {
-    state.workspaces.activeId = MAIN_WORKSPACE_ID;
-    state.workspaces.items = [
+    workspaceState.activeId = MAIN_WORKSPACE_ID;
+    workspaceState.items = [
       { id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME },
       { id: ARCHIVE_WORKSPACE_ID, name: ARCHIVE_WORKSPACE_NAME },
     ];

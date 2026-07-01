@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { IconAdjustmentsHorizontal } from "@tabler/icons-react";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import type { Repository } from "@/lib/types/http";
-import type { WorkflowsState } from "@/lib/state/slices";
+import type { WorkflowItem } from "@/lib/state/slices";
 import type { ComponentProps } from "react";
 
 type KanbanDisplayDropdownProps = {
@@ -35,7 +35,7 @@ function WorkflowSection({
   onWorkflowChange,
 }: {
   activeWorkflowId: string | null;
-  workflows: WorkflowsState["items"];
+  workflows: WorkflowItem[];
   onWorkflowChange: (id: string | null) => void;
 }) {
   return (
@@ -50,7 +50,7 @@ function WorkflowSection({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">All Workflows</SelectItem>
-          {workflows.map((workflow: WorkflowsState["items"][number]) => (
+          {workflows.map((workflow) => (
             <SelectItem key={workflow.id} value={workflow.id}>
               {workflow.name}
             </SelectItem>

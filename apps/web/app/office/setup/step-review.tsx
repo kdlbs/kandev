@@ -2,7 +2,7 @@
 
 import { Badge } from "@kandev/ui/badge";
 import { Card } from "@kandev/ui/card";
-import { useAppStore } from "@/components/state-provider";
+import { useOfficeMetaData } from "@/hooks/domains/office/use-office-data";
 
 type StepReviewProps = {
   workspaceName: string;
@@ -28,7 +28,7 @@ export function StepReview({
   executorPreference,
   taskTitle,
 }: StepReviewProps) {
-  const meta = useAppStore((s) => s.office.meta);
+  const meta = useOfficeMetaData().data;
 
   const executorLabel =
     meta?.executorTypes.find((e) => e.id === executorPreference)?.label ??

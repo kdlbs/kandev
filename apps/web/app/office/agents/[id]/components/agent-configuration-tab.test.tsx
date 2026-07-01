@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { StateProvider } from "@/components/state-provider";
 import { updateAgentProfile } from "@/lib/api/domains/office-api";
-import type { AgentProfile } from "@/lib/state/slices/office/types";
+import { makeQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
+import type { AgentProfile, OfficeMeta } from "@/lib/state/slices/office/types";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
-import { defaultOfficeState } from "@/lib/state/slices/office/office-slice";
 import { AgentConfigurationTab } from "./agent-configuration-tab";
 
 // Mock toast so the act-like hooks don't error and we don't need the toast
@@ -19,6 +21,12 @@ vi.mock("@/lib/api/domains/office-api", async () => {
     updateAgentProfile: vi.fn().mockResolvedValue({}),
   };
 });
+vi.mock("@/lib/api/domains/office-routing-api", () => ({
+  getAgentRoute: vi.fn(async () => ({ overrides: undefined, provider_order: [] })),
+  getProviderHealth: vi.fn(async () => ({ health: [] })),
+  getRoutingPreview: vi.fn(async () => ({ previews: [] })),
+  getWorkspaceRouting: vi.fn(async () => ({ config: null, known_providers: [] })),
+}));
 
 afterEach(() => {
   cleanup();
@@ -51,6 +59,61 @@ const PROFILE_OPTION = {
   cli_passthrough: false,
 };
 
+function officeMeta(): OfficeMeta {
+  return {
+    statuses: [],
+    priorities: [],
+    roles: [
+      { id: "ceo", label: "CEO", description: "Coordinator", color: "bg-purple-100" },
+      { id: "worker", label: "Worker", description: "Worker", color: "bg-blue-100" },
+    ],
+    executorTypes: [{ id: "local_pc", label: "Local", description: "Local executor" }],
+    skillSourceTypes: [],
+    projectStatuses: [],
+    agentStatuses: [{ id: "idle", label: "Idle", color: "bg-neutral-400" }],
+    routineRunStatuses: [],
+    inboxItemTypes: [],
+    permissions: [],
+    permissionDefaults: {
+      ceo: { create_agent: true },
+      worker: { create_agent: false },
+    },
+  };
+}
+
+function renderConfigurationTab(agent: AgentProfile) {
+  const queryClient = makeQueryClient();
+  queryClient.setQueryData(qk.office.meta(), officeMeta());
+  queryClient.setQueryData(qk.office.agents("ws-1"), { agents: [agent] });
+  queryClient.setQueryData(qk.settings.agents(), {
+    agents: [
+      {
+        id: CLAUDE_AGENT_ID,
+        name: CLAUDE_AGENT_ID,
+        profiles: [
+          {
+            id: PROFILE_OPTION.id,
+            name: "Default",
+            agentId: CLAUDE_AGENT_ID,
+            agentDisplayName: "Claude",
+            cliPassthrough: false,
+            createdAt: AGENT_TIMESTAMP,
+            updatedAt: AGENT_TIMESTAMP,
+          },
+        ],
+      },
+    ],
+    total: 1,
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <StateProvider initialState={{ workspaces: { activeId: "ws-1" } }}>
+        <AgentConfigurationTab agent={agent} />
+      </StateProvider>
+    </QueryClientProvider>,
+  );
+}
+
 describe("AgentConfigurationTab", () => {
   it("reconciles the form with the canonical profile returned by the backend", async () => {
     vi.mocked(updateAgentProfile).mockResolvedValueOnce({
@@ -58,17 +121,7 @@ describe("AgentConfigurationTab", () => {
       agentProfileId: toAgentProfileId(baseAgent.id),
       name: "Canonical CEO",
     });
-    render(
-      <StateProvider
-        initialState={{
-          workspaces: { activeId: "ws-1", items: [] },
-          office: { ...defaultOfficeState.office, agentProfiles: [baseAgent] },
-          agentProfiles: { items: [PROFILE_OPTION], version: 0 },
-        }}
-      >
-        <AgentConfigurationTab agent={baseAgent} />
-      </StateProvider>,
-    );
+    renderConfigurationTab(baseAgent);
 
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Local edit" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Configuration" }));
@@ -79,17 +132,7 @@ describe("AgentConfigurationTab", () => {
   });
 
   it("shows create-agent capability for CEO agents", () => {
-    render(
-      <StateProvider
-        initialState={{
-          workspaces: { activeId: "ws-1", items: [] },
-          office: { ...defaultOfficeState.office, agentProfiles: [baseAgent] },
-          agentProfiles: { items: [PROFILE_OPTION], version: 0 },
-        }}
-      >
-        <AgentConfigurationTab agent={baseAgent} />
-      </StateProvider>,
-    );
+    renderConfigurationTab(baseAgent);
 
     expect(screen.getByTestId("agent-capability-preview").textContent).toContain("Create agent");
   });
@@ -101,17 +144,7 @@ describe("AgentConfigurationTab", () => {
       name: "Worker",
       role: "worker" as const,
     };
-    render(
-      <StateProvider
-        initialState={{
-          workspaces: { activeId: "ws-1", items: [] },
-          office: { ...defaultOfficeState.office, agentProfiles: [worker] },
-          agentProfiles: { items: [PROFILE_OPTION], version: 0 },
-        }}
-      >
-        <AgentConfigurationTab agent={worker} />
-      </StateProvider>,
-    );
+    renderConfigurationTab(worker);
 
     expect(screen.getByTestId("agent-capability-preview").textContent).not.toContain(
       "Create agent",

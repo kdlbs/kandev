@@ -22,11 +22,11 @@ import { useJiraAvailable } from "@/hooks/domains/jira/use-jira-availability";
 import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availability";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useGitLabAvailable } from "@/hooks/domains/gitlab/use-task-mr";
-import { useAppStore } from "@/components/state-provider";
 import type { Icon as TablerIcon } from "@tabler/icons-react";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { resolvePluginIcon } from "@/lib/plugins/icons";
 import { usePluginRegistry } from "@/lib/plugins/registry";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import type { GitHubStatus } from "@/lib/types/github";
 
 type MobileIntegrationsSectionProps = {
@@ -94,12 +94,10 @@ export function useConfiguredIntegrationLinks(): IntegrationLink[] {
   // fall back to a legacy default-workspace resolver that can point at the
   // wrong workspace, hiding a configured integration from the sidebar. GitHub
   // and GitLab are install-wide and don't need the workspace id.
-  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
-  const activeWorkspaceExists = useAppStore((s) =>
-    s.workspaces.items.some((item) => item.id === s.workspaces.activeId),
-  );
+  const { activeId: activeWorkspaceId, items: workspaces } = useWorkspaces();
+  const activeWorkspaceExists = workspaces.some((item) => item.id === activeWorkspaceId);
   // Guard against a stale active id: if the active workspace was removed but
-  // activeId was not reconciled (e.g. setWorkspaces keeps a non-null id),
+  // activeId has not reconciled yet,
   // scoping to the deleted id would return no config and hide the links even
   // when another workspace is configured. Fall back to null so the backend's
   // default-workspace resolution applies instead.

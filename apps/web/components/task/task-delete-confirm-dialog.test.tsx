@@ -1,13 +1,22 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, waitFor, fireEvent } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 
 const mockGetSubtaskCount = vi.fn();
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/api/domains/kanban-api", () => ({
   getSubtaskCount: (...args: unknown[]) => mockGetSubtaskCount(...args),
 }));
 
 import { TaskDeleteConfirmDialog } from "./task-delete-confirm-dialog";
+
+function renderWithQuery(node: ReactNode) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(<QueryClientProvider client={client}>{node}</QueryClientProvider>);
+}
 
 beforeEach(() => {
   mockGetSubtaskCount.mockReset();
@@ -19,7 +28,7 @@ describe("TaskDeleteConfirmDialog", () => {
   it("hides the cascade checkbox when the task has no subtasks", async () => {
     mockGetSubtaskCount.mockResolvedValue({ count: 0 });
     const onConfirm = vi.fn();
-    render(
+    renderWithQuery(
       <TaskDeleteConfirmDialog
         open
         onOpenChange={() => {}}
@@ -29,7 +38,11 @@ describe("TaskDeleteConfirmDialog", () => {
         confirmTestId="confirm"
       />,
     );
-    await waitFor(() => expect(mockGetSubtaskCount).toHaveBeenCalledWith("task-1"));
+    await waitFor(() =>
+      expect(mockGetSubtaskCount).toHaveBeenCalledWith("task-1", {
+        init: { signal: expect.any(AbortSignal) },
+      }),
+    );
     expect(screen.queryByTestId("delete-cascade-checkbox")).toBeNull();
 
     fireEvent.click(screen.getByTestId("confirm"));
@@ -39,7 +52,7 @@ describe("TaskDeleteConfirmDialog", () => {
   it("shows the cascade checkbox when the task has subtasks; defaults to unchecked", async () => {
     mockGetSubtaskCount.mockResolvedValue({ count: 3 });
     const onConfirm = vi.fn();
-    render(
+    renderWithQuery(
       <TaskDeleteConfirmDialog
         open
         onOpenChange={() => {}}
@@ -59,7 +72,7 @@ describe("TaskDeleteConfirmDialog", () => {
   it("propagates cascade=true when the user ticks the checkbox", async () => {
     mockGetSubtaskCount.mockResolvedValue({ count: 2 });
     const onConfirm = vi.fn();
-    render(
+    renderWithQuery(
       <TaskDeleteConfirmDialog
         open
         onOpenChange={() => {}}
@@ -79,7 +92,7 @@ describe("TaskDeleteConfirmDialog", () => {
     mockGetSubtaskCount.mockImplementation((id: string) =>
       Promise.resolve({ count: id === "a" ? 2 : 5 }),
     );
-    render(
+    renderWithQuery(
       <TaskDeleteConfirmDialog
         open
         onOpenChange={() => {}}
@@ -96,7 +109,7 @@ describe("TaskDeleteConfirmDialog", () => {
 describe("TaskDeleteConfirmDialog executor cleanup copy", () => {
   it("local reassures repo is untouched", async () => {
     mockGetSubtaskCount.mockResolvedValue({ count: 0 });
-    render(
+    renderWithQuery(
       <TaskDeleteConfirmDialog
         open
         onOpenChange={() => {}}
@@ -112,7 +125,7 @@ describe("TaskDeleteConfirmDialog executor cleanup copy", () => {
 
   it("worktree describes worktree+branch removal", async () => {
     mockGetSubtaskCount.mockResolvedValue({ count: 0 });
-    render(
+    renderWithQuery(
       <TaskDeleteConfirmDialog
         open
         onOpenChange={() => {}}
@@ -127,7 +140,7 @@ describe("TaskDeleteConfirmDialog executor cleanup copy", () => {
 
   it("groups bulk delete copy by executor type", async () => {
     mockGetSubtaskCount.mockResolvedValue({ count: 0 });
-    render(
+    renderWithQuery(
       <TaskDeleteConfirmDialog
         open
         onOpenChange={() => {}}
@@ -144,7 +157,7 @@ describe("TaskDeleteConfirmDialog executor cleanup copy", () => {
 
   it("falls back to a generic message when no executorType is provided", async () => {
     mockGetSubtaskCount.mockResolvedValue({ count: 0 });
-    render(
+    renderWithQuery(
       <TaskDeleteConfirmDialog
         open
         onOpenChange={() => {}}

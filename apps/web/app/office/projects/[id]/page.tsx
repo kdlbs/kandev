@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { use, useCallback, useEffect, useSyncExternalStore } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "@/components/routing/app-link";
 import { useRouter } from "@/lib/routing/client-router";
 import { IconChevronRight, IconTrash } from "@tabler/icons-react";
@@ -8,13 +9,20 @@ import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
-import { getProject, deleteProject } from "@/lib/api/domains/office-api";
+import { deleteProject } from "@/lib/api/domains/office-api";
+import { qk } from "@/lib/query/keys";
+import { officeProjectQueryOptions } from "@/lib/query/query-options";
 import type { Project } from "@/lib/state/slices/office/types";
 import { OfficeTopbarPortal } from "../../components/office-topbar-portal";
 import { ProjectHeader } from "./project-header";
 import { ProjectReposSection } from "./project-repos-section";
 import { ProjectExecutorSection } from "./project-executor-section";
 import { ProjectTasksSection } from "./project-tasks-section";
+import {
+  readProjectFromListCache,
+  removeProjectFromList,
+  type OfficeProjectsCache,
+} from "./project-query-cache";
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -23,33 +31,28 @@ type PageProps = {
 export default function ProjectDetailPage({ params }: PageProps) {
   const { id } = use(params);
   const router = useRouter();
-  const removeProject = useAppStore((s) => s.removeProject);
-  const storeProject = useAppStore((s) => s.office.projects.find((p) => p.id === id));
-  const [fetchedProject, setFetchedProject] = useState<Project | null>(null);
-  const project = storeProject ?? fetchedProject;
+  const queryClient = useQueryClient();
+  const projectQuery = useQuery(officeProjectQueryOptions(id));
+  const cachedProject = useCachedProjectFromList(id);
+  const project = projectQuery.data ?? cachedProject ?? null;
 
   useEffect(() => {
-    if (storeProject) return;
-    let cancelled = false;
-    getProject(id)
-      .then((res) => {
-        if (!cancelled && res) setFetchedProject(res as unknown as Project);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          toast.error(err instanceof Error ? err.message : "Failed to load project");
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [id, storeProject]);
+    if (!projectQuery.error) return;
+    toast.error(
+      projectQuery.error instanceof Error ? projectQuery.error.message : "Failed to load project",
+    );
+  }, [projectQuery.error]);
 
   const handleDelete = async () => {
     if (!project) return;
     try {
       await deleteProject(project.id);
-      removeProject(project.id);
+      queryClient.removeQueries({ exact: true, queryKey: qk.office.project(project.id) });
+      const projectsKey = qk.office.projects(project.workspaceId);
+      queryClient.setQueryData<OfficeProjectsCache>(projectsKey, (current) =>
+        removeProjectFromList(current, project.id),
+      );
+      queryClient.invalidateQueries({ exact: true, queryKey: projectsKey });
       toast.success("Project deleted");
       router.push("/office/projects");
     } catch (err) {
@@ -104,4 +107,18 @@ export default function ProjectDetailPage({ params }: PageProps) {
       </div>
     </>
   );
+}
+
+function useCachedProjectFromList(projectId: string): Project | null {
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const queryClient = useQueryClient();
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => queryClient.getQueryCache().subscribe(onStoreChange),
+    [queryClient],
+  );
+  const getSnapshot = useCallback(
+    () => readProjectFromListCache(queryClient, workspaceId, projectId),
+    [projectId, queryClient, workspaceId],
+  );
+  return useSyncExternalStore(subscribe, getSnapshot, () => null);
 }

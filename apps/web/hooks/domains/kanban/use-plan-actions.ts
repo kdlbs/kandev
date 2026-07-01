@@ -1,9 +1,12 @@
 import React, { useCallback, useMemo, useState } from "react";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { setChatDraftContent } from "@/lib/local-storage";
 import { moveTask } from "@/lib/api/domains/kanban-api";
+import { taskQueryOptions, workflowStepsQueryOptions } from "@/lib/query/query-options";
+import { qk } from "@/lib/query/keys";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { useLayoutStore } from "@/lib/state/layout-store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
@@ -20,12 +23,15 @@ const AUTO_TRANSITION_ACTIONS = ["move_to_next", "move_to_previous", "move_to_st
 
 export function useNextWorkflowStep(taskId: string | null) {
   const { toast } = useToast();
-  const workflowId = useAppStore((s) => s.kanban.workflowId);
-  const steps = useAppStore((s) => s.kanban.steps);
-  const taskStepId = useAppStore((s) => {
-    if (!taskId) return null;
-    const task = s.kanban.tasks.find((t) => t.id === taskId);
-    return task?.workflowStepId ?? null;
+  const taskQuery = useQuery({
+    ...taskQueryOptions(taskId ?? ""),
+    enabled: Boolean(taskId),
+  });
+  const workflowId = taskQuery.data?.workflow_id ?? null;
+  const taskStepId = taskQuery.data?.workflow_step_id ?? null;
+  const stepsQuery = useQuery({
+    ...workflowStepsQueryOptions(workflowId ?? ""),
+    enabled: Boolean(workflowId),
   });
 
   // Track agent switching: isMoving stays true from "proceed" click until the
@@ -34,6 +40,14 @@ export function useNextWorkflowStep(taskId: string | null) {
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const isMoving = moveFromSessionId != null && activeSessionId === moveFromSessionId;
 
+  const steps = useMemo(
+    () =>
+      (stepsQuery.data ?? []).map((step) => ({
+        ...step,
+        title: step.name,
+      })),
+    [stepsQuery.data],
+  );
   const sortedSteps = useMemo(() => [...steps].sort((a, b) => a.position - b.position), [steps]);
 
   const { currentStep, nextStep } = useMemo(() => {
@@ -135,14 +149,11 @@ export function collectImplementPlanInput(
 export async function markPlanImplementationStartedBestEffort(
   taskId: string,
   sessionId: string,
-  setTaskPlan: (
-    taskId: string,
-    plan: Awaited<ReturnType<typeof markPlanImplementationStarted>>,
-  ) => void,
+  queryClient: QueryClient,
 ) {
   try {
     const markedPlan = await markPlanImplementationStarted(taskId, sessionId);
-    setTaskPlan(taskId, markedPlan);
+    queryClient.setQueryData(qk.taskPlan.detail(taskId), markedPlan);
   } catch (err) {
     console.error("Failed to mark plan implementation started:", err);
   }
@@ -155,7 +166,7 @@ function useImplementPlan(
   clearPlanModeAfterSend: boolean,
   chatInputRef?: React.RefObject<ChatInputContainerHandle | null>,
 ) {
-  const setTaskPlan = useAppStore((s) => s.setTaskPlan);
+  const queryClient = useQueryClient();
   const { toast } = useToast();
   return useCallback(async (): Promise<boolean> => {
     if (!resolvedSessionId || !taskId) return false;
@@ -183,7 +194,7 @@ function useImplementPlan(
         },
         attachments.length > 0 ? 30000 : 10000,
       );
-      await markPlanImplementationStartedBestEffort(taskId, resolvedSessionId, setTaskPlan);
+      await markPlanImplementationStartedBestEffort(taskId, resolvedSessionId, queryClient);
       // Exit plan mode + clear composer only on success so a failed send
       // leaves the layout and input intact for retry.
       if (clearPlanModeAfterSend) {
@@ -214,7 +225,7 @@ function useImplementPlan(
     resolvedSessionId,
     taskId,
     chatInputRef,
-    setTaskPlan,
+    queryClient,
     clearPlanModeAfterSend,
     handlePlanModeChange,
     toast,

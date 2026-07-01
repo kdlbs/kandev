@@ -13,6 +13,7 @@ import {
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { useAppStore } from "@/components/state-provider";
+import { useOfficeMetaData } from "@/hooks/domains/office/use-office-data";
 import { dismissInboxItem, retryProvider } from "@/lib/api/domains/office-extended-api";
 import type { InboxItem } from "@/lib/state/slices/office/types";
 import { timeAgo } from "@/lib/utils/time";
@@ -62,7 +63,7 @@ type Props = {
 };
 
 function useInboxTypeConfig(type: string) {
-  const meta = useAppStore((s) => s.office.meta);
+  const meta = useOfficeMetaData().data;
   const metaType = meta?.inboxItemTypes.find((t) => t.id === type);
   if (metaType) {
     return {

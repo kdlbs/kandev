@@ -23,6 +23,9 @@ export function sortRootChildren(tree: FileTreeNode | null): FileTreeNode[] {
  */
 export function mergeTreeNodes(existing: FileTreeNode, incoming: FileTreeNode): FileTreeNode {
   if (!incoming.children) return { ...existing, ...incoming, children: existing.children };
+  if (incoming.is_dir && incoming.children.length === 0 && existing.children) {
+    return { ...existing, ...incoming, children: existing.children };
+  }
   if (!existing.children) return incoming;
   const existingByPath = new Map(existing.children.map((c) => [c.path, c]));
   const mergedChildren = incoming.children.map((inChild) => {

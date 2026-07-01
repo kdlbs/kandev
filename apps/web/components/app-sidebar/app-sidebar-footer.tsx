@@ -17,6 +17,7 @@ import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
 import { ReleaseNotesDialog } from "@/components/release-notes/release-notes-dialog";
 import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import { useReleaseNotes } from "@/hooks/use-release-notes";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { linkToTask } from "@/lib/links";
@@ -100,13 +101,12 @@ function FooterIconButton({
 export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebarFooterProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const workspaces = useAppStore((s) => s.workspaces);
-  const workspaceId = workspaces.activeId;
-  const activeWorkspace = workspaces.items.find((workspace) => workspace.id === workspaceId);
+  const { items: workspaceItems, activeId: workspaceId } = useWorkspaces();
+  const activeWorkspace = workspaceItems.find((workspace) => workspace.id === workspaceId);
   const activeIsOffice = isOfficeWorkspace(activeWorkspace);
   const targetWorkspace = activeIsOffice
-    ? resolveLastKanbanWorkspace(workspaces.items)
-    : resolveLastOfficeWorkspace(workspaces.items);
+    ? resolveLastKanbanWorkspace(workspaceItems)
+    : resolveLastOfficeWorkspace(workspaceItems);
   const settingsMode = useAppStore((s) => s.appSidebar.settingsMode);
   const enterSettings = () => {
     // The gear only swaps the sidebar's own content; without also

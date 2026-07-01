@@ -12,6 +12,7 @@ import (
 func registerTestClient(h *Hub, c *Client) {
 	h.mu.Lock()
 	h.clients[c] = true
+	h.clientsByID[c.ID] = c
 	h.mu.Unlock()
 }
 

@@ -8,8 +8,8 @@ import { Textarea } from "@kandev/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { toast } from "sonner";
 import { updateProject } from "@/lib/api/domains/office-api";
-import { useAppStore } from "@/components/state-provider";
 import type { Project, ProjectStatus } from "@/lib/state/slices/office/types";
+import { useSyncOfficeProjectCache } from "./project-query-cache";
 
 const STATUS_OPTIONS: { value: ProjectStatus; label: string }[] = [
   { value: "active", label: "Active" },
@@ -23,7 +23,7 @@ type ProjectHeaderProps = {
 };
 
 export function ProjectHeader({ project }: ProjectHeaderProps) {
-  const updateProjectStore = useAppStore((s) => s.updateProject);
+  const syncProjectCache = useSyncOfficeProjectCache();
 
   const [name, setName] = useState(project.name);
   const [description, setDescription] = useState(project.description ?? "");
@@ -40,8 +40,8 @@ export function ProjectHeader({ project }: ProjectHeaderProps) {
       if (status !== project.status) patch.status = status;
 
       if (Object.keys(patch).length > 0) {
-        await updateProject(project.id, patch);
-        updateProjectStore(project.id, patch);
+        const updatedProject = await updateProject(project.id, patch);
+        syncProjectCache(updatedProject);
       }
       setDirty(false);
       toast.success("Project saved");
@@ -50,7 +50,7 @@ export function ProjectHeader({ project }: ProjectHeaderProps) {
     } finally {
       setSaving(false);
     }
-  }, [name, description, status, project, updateProjectStore]);
+  }, [name, description, status, project, syncProjectCache]);
 
   return (
     <div className="space-y-4">

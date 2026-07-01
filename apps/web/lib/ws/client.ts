@@ -3,8 +3,11 @@ import type { ConnectionStatus } from "@/lib/types/connection";
 import { generateUUID } from "@/lib/utils";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { dispatchToPluginWsHandlers } from "@/lib/ws/plugin-bridge";
+import { installWsAccountGlobalsForE2E, recordParsedWsEnvelope } from "@/lib/ws/ws-account";
 
 const debugDispatch = createDebugLogger("ws:dispatch");
+
+installWsAccountGlobalsForE2E();
 
 // High-frequency notification types we skip in the dispatch log to avoid
 // drowning the console during agent streams. Filter [ws:dispatch] to see
@@ -18,6 +21,7 @@ const DISPATCH_LOG_DENYLIST = new Set<string>([
 ]);
 
 type MessageHandler<T extends BackendMessageType> = (message: BackendMessageMap[T]) => void;
+export type EnvelopeHandler = (message: BackendMessageMap[BackendMessageType]) => void;
 
 // Internal alias kept for readability — the WS client emits the same vocabulary
 // the UI consumes. `disconnected` covers both "never connected" (formerly
@@ -44,6 +48,7 @@ export class WebSocketClient {
   private socket: WebSocket | null = null;
   private status: WebSocketStatus = "disconnected";
   private handlers = new Map<BackendMessageType, Set<MessageHandler<BackendMessageType>>>();
+  private envelopeHandlers = new Set<EnvelopeHandler>();
   private pendingRequests = new Map<
     string,
     {
@@ -407,6 +412,13 @@ export class WebSocketClient {
     }
   }
 
+  onEnvelope(handler: EnvelopeHandler) {
+    this.envelopeHandlers.add(handler);
+    return () => {
+      this.envelopeHandlers.delete(handler);
+    };
+  }
+
   private debugNotification(action: BackendMessageType, payload: unknown, handlerCount: number) {
     if (!isDebug() || DISPATCH_LOG_DENYLIST.has(action)) return;
     const payloadSessionId = (payload as { session_id?: string } | undefined)?.session_id;
@@ -418,6 +430,9 @@ export class WebSocketClient {
   }
 
   private handleParsedMessage(message: BackendMessageMap[BackendMessageType]) {
+    recordParsedWsEnvelope(message);
+    this.notifyEnvelopeHandlers(message);
+
     const msgWithId = message as { id?: string; type: string };
 
     if (msgWithId.type === "response" && msgWithId.id) {
@@ -442,6 +457,16 @@ export class WebSocketClient {
     // Plugin bridge: forward the same notification to any handlers a loaded
     // plugin registered for this action (registry.registerWsHandler).
     dispatchToPluginWsHandlers(action, message.payload);
+  }
+
+  private notifyEnvelopeHandlers(message: BackendMessageMap[BackendMessageType]) {
+    this.envelopeHandlers.forEach((handler) => {
+      try {
+        handler(message);
+      } catch (error) {
+        console.warn("WebSocket envelope listener failed", error);
+      }
+    });
   }
 
   private resolvePendingRequest(msgId: string, payload: unknown) {

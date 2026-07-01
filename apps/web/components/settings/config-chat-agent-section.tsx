@@ -1,25 +1,26 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateWorkspaceAction } from "@/app/actions/workspaces";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
+import { patchWorkspaceCache } from "@/lib/query/workspace-cache";
+import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import { useSettingsSaveContributor } from "./settings-save-provider";
 import { SettingsCard } from "./settings-card";
 
 export function ConfigChatAgentSection() {
-  const workspace = useAppStore(
-    (s) => s.workspaces.items.find((w) => w.id === s.workspaces.activeId) ?? null,
-  );
-  const profiles = useAppStore((s) => s.agentProfiles.items ?? []);
+  const { activeWorkspace: workspace } = useWorkspaces();
+  const { agentProfiles: profiles } = useSettingsData(true);
   const currentProfileId = workspace?.default_config_agent_profile_id ?? "";
   const workspaceId = workspace?.id ?? null;
   const [syncedWorkspaceId, setSyncedWorkspaceId] = useState(workspaceId);
   const [savedProfileId, setSavedProfileId] = useState(currentProfileId);
   const [draftProfileId, setDraftProfileId] = useState(currentProfileId);
-
-  const storeApi = useAppStoreApi();
+  const queryClient = useQueryClient();
   const isDirty = draftProfileId !== savedProfileId;
 
   useEffect(() => {
@@ -45,12 +46,9 @@ export function ConfigChatAgentSection() {
       await updateWorkspaceAction(workspace.id, {
         default_config_agent_profile_id: submitted,
       });
-      const { workspaces, setWorkspaces } = storeApi.getState();
-      setWorkspaces(
-        workspaces.items.map((w) =>
-          w.id === workspace.id ? { ...w, default_config_agent_profile_id: submitted } : w,
-        ),
-      );
+      patchWorkspaceCache(queryClient, workspace.id, {
+        default_config_agent_profile_id: submitted ? toAgentProfileId(submitted) : null,
+      });
       setSavedProfileId(submitted);
     },
     discard: () => setDraftProfileId(savedProfileId),

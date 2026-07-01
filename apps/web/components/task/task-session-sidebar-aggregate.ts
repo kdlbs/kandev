@@ -99,42 +99,11 @@ function collectSnapshotTasks(snapshots: WorkflowSnapshotMap, acc: Acc): void {
   }
 }
 
-function applyActiveKanbanFallback(
-  activeWorkflowId: string,
-  activeTasks: KanbanState["tasks"],
-  activeSteps: KanbanState["steps"],
-  acc: Acc,
-): void {
-  if (!acc.wfSteps[activeWorkflowId] && activeSteps.length > 0) {
-    for (const step of activeSteps) if (!acc.stepMap.has(step.id)) acc.stepMap.set(step.id, step);
-    acc.wfSteps[activeWorkflowId] = [...activeSteps].sort((a, b) => a.position - b.position);
-  }
-  // Hydrator's mergeKanbanTasks accumulates tasks across workflow switches, so
-  // activeTasks can carry stale entries whose workflowStepId references a step
-  // from another workspace's workflow. Filter to current step membership so
-  // those leaks don't get re-tagged with the active workflow id.
-  const activeStepIds = new Set(activeSteps.map((s) => s.id));
-  for (const t of activeTasks) {
-    if (acc.seen.has(t.id)) continue;
-    if (activeStepIds.size > 0 && !activeStepIds.has(t.workflowStepId)) continue;
-    acc.tasks.push({ ...t, _workflowId: activeWorkflowId });
-    acc.seen.add(t.id);
-  }
-}
-
 /**
- * Aggregate the sidebar's task/step view across all loaded workflow snapshots,
- * with a fallback to the active `kanban` slice. The fallback is essential
- * because `task.created` WS events arriving before `fetchWorkflowSnapshot`
- * completes are dropped from `kanbanMulti.snapshots` and would otherwise be
- * invisible until the next snapshot refresh.
+ * Aggregate the sidebar's task/step view across all loaded workflow snapshot
+ * query caches.
  */
-export function aggregateSidebarTasks(
-  snapshots: WorkflowSnapshotMap,
-  activeWorkflowId: string | null,
-  activeTasks: KanbanState["tasks"],
-  activeSteps: KanbanState["steps"],
-): AggregatedSidebarTasks {
+export function aggregateSidebarTasks(snapshots: WorkflowSnapshotMap): AggregatedSidebarTasks {
   const acc: Acc = {
     tasks: [],
     seen: new Set<string>(),
@@ -142,9 +111,6 @@ export function aggregateSidebarTasks(
     wfSteps: {},
   };
   collectSnapshotTasks(snapshots, acc);
-  if (activeWorkflowId) {
-    applyActiveKanbanFallback(activeWorkflowId, activeTasks, activeSteps, acc);
-  }
   const allSteps = [...acc.stepMap.values()].sort((a, b) => a.position - b.position);
   return { allTasks: acc.tasks, allSteps, stepsByWorkflowId: acc.wfSteps };
 }

@@ -178,6 +178,8 @@ func appendAgentctlStatusMessage(
 // Includes task_environment_id when present so late-subscribing clients
 // (page reload, task switch, WS reconnect) can seed environmentIdBySessionId
 // — without it, env-routed shell terminals stall on "Connecting terminal...".
+// Includes is_passthrough as an explicit boolean, including false, so snapshot
+// events can clear stale passthrough UI state after a task switch or reload.
 func appendSessionStateMessage(sessionID string, session *models.TaskSession, result []*ws.Message) []*ws.Message {
 	payload := map[string]interface{}{
 		sessionIDPayloadKey:        sessionID,
@@ -195,6 +197,13 @@ func appendSessionStateMessage(sessionID string, session *models.TaskSession, re
 	if session.TaskEnvironmentID != "" {
 		payload["task_environment_id"] = session.TaskEnvironmentID
 	}
+	if session.AgentProfileID != "" {
+		payload["agent_profile_id"] = session.AgentProfileID
+	}
+	if session.AgentProfileSnapshot != nil {
+		payload["agent_profile_snapshot"] = session.AgentProfileSnapshot
+	}
+	payload["is_passthrough"] = session.IsPassthrough
 	notification, err := ws.NewNotification(ws.ActionSessionStateChanged, payload)
 	if err == nil {
 		result = append(result, notification)
@@ -1036,6 +1045,7 @@ func registerSecondaryRoutes(
 			p.eventBus,
 			p.log,
 		)
+		registerWsSentTestRoute(p.router, p.gateway.Hub, p.log)
 		p.log.Info("E2E mock routes enabled at /api/v1/_test/* — DO NOT enable in production")
 	}
 

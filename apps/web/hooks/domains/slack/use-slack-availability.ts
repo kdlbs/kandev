@@ -7,6 +7,7 @@ import {
   useIntegrationAvailable,
   type IntegrationConfigStatus,
 } from "../integrations/use-integration-availability";
+import { qk } from "@/lib/query/keys";
 import { useSlackEnabled } from "./use-slack-enabled";
 
 // Slack stores two secrets (token + cookie) instead of one — the shared
@@ -24,13 +25,20 @@ function useSlackStatusLoader(workspaceId?: string | null) {
 }
 
 export function useSlackAuthed(workspaceId?: string | null): boolean {
-  return useIntegrationAuthed(useSlackStatusLoader(workspaceId));
+  const fetchConfig = useSlackStatusLoader(workspaceId);
+  return useIntegrationAuthed({
+    active: workspaceId !== null,
+    fetchConfig,
+    queryKey: qk.integrations.slack.config(workspaceId),
+  });
 }
 
 export function useSlackAvailable(workspaceId?: string | null): boolean {
   const fetchConfig = useSlackStatusLoader(workspaceId);
   return useIntegrationAvailable({
+    active: workspaceId !== null,
     useEnabled: useSlackEnabled,
     fetchConfig,
+    queryKey: qk.integrations.slack.config(workspaceId),
   });
 }

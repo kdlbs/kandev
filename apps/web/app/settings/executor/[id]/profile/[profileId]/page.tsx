@@ -18,12 +18,13 @@ import {
   DialogTitle,
 } from "@kandev/ui/dialog";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
-import { useAppStore } from "@/components/state-provider";
+import { RequestIndicator } from "@/components/request-indicator";
 import { useToast } from "@/components/toast-provider";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { serializeSettingsRevision } from "@/components/settings/settings-save-revision";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
+import { useExecutorsQuerySync } from "@/hooks/domains/settings/use-executors-query-sync";
 import {
   updateExecutorProfile,
   deleteExecutorProfile,
@@ -31,7 +32,7 @@ import {
 } from "@/lib/api/domains/settings-api";
 import type { ScriptPlaceholder } from "@/lib/api/domains/settings-api";
 import {
-  upsertExecutorProfile,
+  getSaveButtonLabel,
   type SaveStatus,
 } from "@/components/settings/profile-edit/profile-edit-page-chrome";
 import {
@@ -76,9 +77,8 @@ export default function ProfileDetailPage({
 }) {
   const { id: executorId, profileId } = use(params);
   const router = useRouter();
-  const executor = useAppStore(
-    (state) => state.executors.items.find((e: Executor) => e.id === executorId) ?? null,
-  );
+  const { executors } = useExecutorsQuerySync();
+  const executor = executors.find((e: Executor) => e.id === executorId) ?? null;
   const profile = executor?.profiles?.find((p: ExecutorProfile) => p.id === profileId) ?? null;
 
   if (!executor || !profile) {
@@ -330,8 +330,7 @@ function DeleteProfileDialog({
 function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
   const router = useRouter();
   const { toast } = useToast();
-  const executors = useAppStore((state) => state.executors.items);
-  const setExecutors = useAppStore((state) => state.setExecutors);
+  const { removeExecutorProfile, upsertExecutorProfile } = useExecutorsQuerySync();
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -350,7 +349,7 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
         const updated = await updateExecutorProfile(executor.id, profile.id, data);
         setSaveStatus("success");
         toast({ title: "Profile saved", variant: "success" });
-        setExecutors(upsertExecutorProfile(executors, executor, updated));
+        upsertExecutorProfile(executor.id, updated);
         window.setTimeout(() => setSaveStatus("idle"), 1500);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to save profile";
@@ -360,26 +359,20 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
         throw err;
       }
     },
-    [executor, profile.id, executors, setExecutors, toast],
+    [executor.id, profile.id, toast, upsertExecutorProfile],
   );
 
   const remove = useCallback(async () => {
     setDeleting(true);
     try {
       await deleteExecutorProfile(executor.id, profile.id);
-      setExecutors(
-        executors.map((e: Executor) =>
-          e.id === executor.id
-            ? { ...e, profiles: e.profiles?.filter((p) => p.id !== profile.id) }
-            : e,
-        ),
-      );
+      removeExecutorProfile(executor.id, profile.id);
       runWithNavigationBlockerBypassed(() => router.push(`/settings/executor/${executor.id}`));
     } catch {
       setDeleting(false);
       setDeleteDialogOpen(false);
     }
-  }, [executor.id, profile.id, executors, setExecutors, router]);
+  }, [executor.id, profile.id, removeExecutorProfile, router]);
 
   return { saveStatus, error, deleting, deleteDialogOpen, setDeleteDialogOpen, save, remove };
 }

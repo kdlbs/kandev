@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ComponentProps } from "react";
 import { StateProvider } from "@/components/state-provider";
 import { TaskItem } from "./task-item";
@@ -18,12 +19,15 @@ const SLOW_SPIN_CLASS = "[animation-duration:2s]";
 afterEach(() => cleanup());
 
 function renderTaskItem(props: Partial<ComponentProps<typeof TaskItem>> = {}) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <StateProvider>
-      <TooltipProvider>
-        <TaskItem title="Needs answer" state="REVIEW" {...props} />
-      </TooltipProvider>
-    </StateProvider>,
+    <QueryClientProvider client={queryClient}>
+      <StateProvider>
+        <TooltipProvider>
+          <TaskItem title="Needs answer" state="REVIEW" {...props} />
+        </TooltipProvider>
+      </StateProvider>
+    </QueryClientProvider>,
   );
 }
 

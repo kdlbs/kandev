@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
@@ -15,10 +16,15 @@ import {
   useGitHubUrlErrorEffect,
 } from "@/components/task-create-dialog-effects";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { useSessionWorktrees } from "@/hooks/domains/session/use-session-worktrees";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { useSummarizeSession, type SummarizeSessionResult } from "@/hooks/use-summarize-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
+import { useSubtaskCount } from "@/hooks/use-subtask-count";
+import { getLocalStorage } from "@/lib/local-storage";
+import { STORAGE_KEYS } from "@/lib/settings/constants";
+import { taskQueryOptions } from "@/lib/query/query-options";
 import type { ExecutorProfile, ExecutorType, Repository } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import {
@@ -37,26 +43,23 @@ type NewSubtaskDialogProps = {
   parentTaskTitle: string;
 };
 
-function useSubtaskDialogState() {
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items);
+function useSubtaskDialogState(parentTaskId: string) {
+  const { agentProfiles, executors } = useSettingsData(true);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
-  const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const workflowId = useAppStore((s) => s.kanban.workflowId);
-  const executors = useAppStore((s) => s.executors.items);
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+  const parentTaskQuery = useQuery({
+    ...taskQueryOptions(parentTaskId),
+    enabled: Boolean(parentTaskId),
+  });
+  const workspaceId = parentTaskQuery.data?.workspace_id ?? activeWorkspaceId;
+  const workflowId = parentTaskQuery.data?.workflow_id ?? null;
 
   const currentSession = useAppStore((s) =>
     activeSessionId ? (s.taskSessions.items[activeSessionId] ?? null) : null,
   );
 
-  const worktreeBranch = useAppStore((s) => {
-    if (!activeSessionId) return null;
-    const wtIds = s.sessionWorktreesBySessionId.itemsBySessionId[activeSessionId];
-    if (wtIds?.length) {
-      const wt = s.worktrees.items[wtIds[0]];
-      if (wt?.branch) return wt.branch;
-    }
-    return currentSession?.worktree_branch ?? null;
-  });
+  const worktrees = useSessionWorktrees(activeSessionId);
+  const worktreeBranch = worktrees[0]?.branch ?? currentSession?.worktree_branch ?? null;
 
   const initialPrompt = useAppStore((s) => {
     if (!activeSessionId) return null;
@@ -79,7 +82,7 @@ function useSubtaskDialogState() {
 
 function useSessionOptions(taskId: string) {
   const { sessions, loadSessions } = useTaskSessions(taskId);
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items);
+  const { agentProfiles } = useSettingsData(true);
   useEffect(() => {
     loadSessions(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -127,6 +130,20 @@ function useExecutorDefault(
         : allProfiles[0].id;
     setExecutorProfileId(pick);
   }, [allProfiles, executorProfileId, lastUsedExecutorProfileId, setExecutorProfileId]);
+}
+
+function useSyncedDefaultTitle(defaultTitle: string): [string, (value: string) => void] {
+  const [title, setTitle] = useState(defaultTitle);
+  const previousDefaultTitleRef = useRef(defaultTitle);
+
+  useEffect(() => {
+    const previousDefaultTitle = previousDefaultTitleRef.current;
+    if (previousDefaultTitle === defaultTitle) return;
+    previousDefaultTitleRef.current = defaultTitle;
+    setTitle((current) => (current === previousDefaultTitle ? defaultTitle : current));
+  }, [defaultTitle]);
+
+  return [title, setTitle];
 }
 
 /**
@@ -239,7 +256,7 @@ function NewSubtaskForm({
   const isUtilityConfigured = useIsUtilityConfigured();
   const { summarize, isSummarizing } = useSummarizeSession();
   const [isCreating, setIsCreating] = useState(false);
-  const [title, setTitle] = useState(defaultTitle);
+  const [title, setTitle] = useSyncedDefaultTitle(defaultTitle);
   const [hasPrompt, setHasPrompt] = useState(false);
   const [contextValue, setContextValue] = useState("blank");
   const [workspaceMode, setWorkspaceMode] = useState<SubtaskWorkspaceMode>(() =>
@@ -343,16 +360,14 @@ export function NewSubtaskDialog({
     currentSession,
     worktreeBranch,
     initialPrompt,
-  } = useSubtaskDialogState();
+  } = useSubtaskDialogState(parentTaskId);
 
   // Ensure executor/agent data is loaded when dialog opens
   useSettingsData(open);
   // Load workspace repositories so the subtask repo override picker has options.
   const { repositories: availableRepositories } = useRepositories(workspaceId, open);
 
-  const siblingCount = useAppStore(
-    (s) => s.kanban.tasks.filter((t) => t.parentTaskId === parentTaskId).length,
-  );
+  const siblingCount = useSubtaskCount(open, parentTaskId);
 
   const defaultTitle = useMemo(
     () => `${parentTaskTitle} / Subtask ${siblingCount + 1}`,

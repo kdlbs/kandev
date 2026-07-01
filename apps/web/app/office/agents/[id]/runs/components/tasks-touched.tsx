@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "@/components/routing/app-link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
+import { useQueries } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
-import { getTask } from "@/lib/api/domains/office-extended-api";
+import { useAppStore } from "@/components/state-provider";
+import { officeTaskQueryOptions } from "@/lib/query/query-options";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
 import { StatusIcon } from "@/app/office/tasks/status-icon";
 
@@ -12,8 +14,8 @@ type TasksTouchedProps = {
   runId: string;
   /**
    * Pre-resolved task ids from the run detail response. The component
-   * fetches the full task rows (identifier, title, status, priority)
-   * via the existing tasks API. Empty list renders the empty state.
+   * reads the full task rows (identifier, title, status, priority)
+   * via the task query cache. Empty list renders the empty state.
    */
   taskIds: string[];
 };
@@ -25,8 +27,8 @@ type TasksTouchedProps = {
  * runs that finished without claiming any task work.
  *
  * Prop contract is stable (Wave 0): `runId` + `taskIds`. The real task
- * rows are fetched lazily after render so the run detail page can
- * stream in even before the tasks API responds.
+ * rows are fetched lazily through TanStack Query so the run detail page
+ * can stream in even before the tasks API responds.
  */
 export function TasksTouched({ runId, taskIds }: TasksTouchedProps) {
   if (taskIds.length === 0) {
@@ -148,32 +150,24 @@ function formatStatus(status: string): string {
 }
 
 /**
- * Loads each task row in parallel via the per-task API. Kept inline in
- * this file because it's only used here; the office store is task-tree
- * shaped and not optimal for an arbitrary id list.
+ * Loads each task row in parallel through the per-task query key. Kept
+ * inline because this component is the only arbitrary id-list consumer.
  */
 function useTaskRows(taskIds: string[]): RowState[] {
-  const [results, setResults] = useState<Record<string, RowState>>({});
-  useEffect(() => {
-    let cancelled = false;
-    void Promise.all(
-      taskIds.map(async (id) => {
-        try {
-          const res = await getTask(id);
-          return [id, { kind: "loaded" as const, task: res.task }] as const;
-        } catch {
-          return [id, { kind: "error" as const, id }] as const;
-        }
-      }),
-    ).then((entries) => {
-      if (!cancelled) setResults(Object.fromEntries(entries));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [taskIds]);
+  const workspaceId = useAppStore((s) => s.workspaces.activeId) ?? "";
+  const queries = useQueries({
+    queries: taskIds.map((taskId) => officeTaskQueryOptions(workspaceId, taskId)),
+  });
+
   return useMemo(
-    () => taskIds.map((id) => results[id] ?? { kind: "loading" as const, id }),
-    [taskIds, results],
+    () =>
+      taskIds.map((id, index) => {
+        if (!workspaceId) return { kind: "error" as const, id };
+        const query = queries[index];
+        if (query?.data?.task) return { kind: "loaded" as const, task: query.data.task };
+        if (query?.isError || query?.isSuccess) return { kind: "error" as const, id };
+        return { kind: "loading" as const, id };
+      }),
+    [taskIds, queries, workspaceId],
   );
 }

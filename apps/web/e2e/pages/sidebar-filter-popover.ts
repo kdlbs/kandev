@@ -28,7 +28,7 @@ export class SidebarFilterPopoverPage {
   constructor(private readonly page: Page) {
     this.bar = page.getByTestId("tasks-view-picker");
     this.viewPicker = page.getByTestId("tasks-view-picker");
-    this.gear = page.getByTestId("sidebar-filter-gear");
+    this.gear = this.viewPicker.locator("xpath=..").getByTestId("sidebar-filter-gear");
   }
 
   get popover(): Locator {
@@ -38,6 +38,10 @@ export class SidebarFilterPopoverPage {
   /** Direct-create action inside the currently open desktop view menu. */
   get newViewAction(): Locator {
     return this.chipMenu.getByTestId("sidebar-new-view");
+  }
+
+  get dirtyIndicator(): Locator {
+    return this.popover.getByTestId("sidebar-filter-dirty-indicator");
   }
 
   /** Open radix dropdown menu hosting the view chips. Scoped to the menu that
@@ -194,7 +198,9 @@ export class SidebarFilterPopoverPage {
   }
 
   async discard(): Promise<void> {
-    await this.popover.getByTestId("view-discard-button").click();
+    const discardButton = this.popover.getByTestId("view-discard-button");
+    await expect(discardButton).toBeVisible();
+    await discardButton.click();
   }
 
   async deleteActiveView(): Promise<void> {

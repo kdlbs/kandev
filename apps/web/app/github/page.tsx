@@ -8,6 +8,7 @@ import { fetchUserSettings } from "@/lib/api";
 import { StateHydrator } from "@/components/state-hydrator";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { GitHubPageClient } from "./github-page-client";
+import type { QuerySeedInitialState } from "@/lib/query/seed";
 import type {
   Workflow,
   WorkflowStep,
@@ -15,7 +16,6 @@ import type {
   Workspace,
   UserSettingsResponse,
 } from "@/lib/types/http";
-import type { AppState } from "@/lib/state/store";
 
 export default async function GitHubPage() {
   let workspaces: Workspace[] = [];
@@ -52,26 +52,23 @@ export default async function GitHubPage() {
 
   const mappedUserSettings = mapUserSettingsResponse(userSettingsResponse);
 
-  const initialState: Partial<AppState> = {
+  const initialState: QuerySeedInitialState = {
     workspaces: { items: workspaces, activeId: workspaceId ?? null },
     workflows: {
-      items: workflows.map((w) => ({
-        id: w.id,
-        workspaceId: w.workspace_id,
-        name: w.name,
-        description: w.description ?? null,
-        sortOrder: w.sort_order ?? 0,
-        ...(w.agent_profile_id ? { agent_profile_id: w.agent_profile_id } : {}),
-      })),
       activeId: workflows[0]?.id ?? null,
     },
     userSettings: { ...mappedUserSettings, workspaceId: workspaceId ?? null },
     ...(workspaceId && workspaceDataLoaded
       ? {
+          workflowLists: {
+            itemsByWorkspaceId: { [workspaceId]: workflows },
+          },
+        }
+      : {}),
+    ...(workspaceId && workspaceDataLoaded
+      ? {
           repositories: {
             itemsByWorkspaceId: { [workspaceId]: repositories },
-            loadingByWorkspaceId: { [workspaceId]: false },
-            loadedByWorkspaceId: { [workspaceId]: true },
           },
         }
       : {}),

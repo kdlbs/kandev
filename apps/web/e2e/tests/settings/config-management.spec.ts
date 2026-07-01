@@ -41,12 +41,41 @@ async function runAndWait(
  * call(s)" group header. Click each header so the per-tool-call titles below
  * are rendered and assertions can target them.
  */
-async function expandToolCallGroups(page: SessionPage) {
-  const headers = page.chat.getByRole("button", { name: /\d+ tool calls?$/ });
-  const count = await headers.count();
-  for (let i = 0; i < count; i++) {
-    await headers.nth(i).click();
-  }
+async function expandToolCallGroups(
+  page: SessionPage,
+  expectedLabels: Array<string | RegExp> = [],
+) {
+  const chat = page.activeChat();
+  const headers = chat.getByRole("button", { name: /\d+ tool calls?$/ });
+
+  await expect
+    .poll(
+      async () => {
+        const labelsVisible = await Promise.all(
+          expectedLabels.map((label) =>
+            chat
+              .getByText(label)
+              .first()
+              .isVisible()
+              .catch(() => false),
+          ),
+        );
+        if (expectedLabels.length > 0 && labelsVisible.every(Boolean)) return "ready";
+
+        const count = await headers.count();
+        if (count === 0) return expectedLabels.length > 0 ? "waiting" : "ready";
+
+        for (let i = 0; i < count; i++) {
+          const header = headers.nth(i);
+          if (await header.isVisible().catch(() => false)) {
+            await header.click().catch(() => undefined);
+          }
+        }
+        return "expanded";
+      },
+      { timeout: 10_000, message: "Waiting for config-mode MCP tool calls to render" },
+    )
+    .not.toBe("waiting");
 }
 
 // ---------------------------------------------------------------------------
@@ -67,9 +96,10 @@ test.describe("Config-mode MCP — workflow management", () => {
     );
 
     const page = await runAndWait(testPage, session.task_id, "Done listing");
-    await expandToolCallGroups(page);
-    await expect(page.chat.getByText("Kandev: List Workspaces")).toBeVisible({ timeout: 10_000 });
-    await expect(page.chat.getByText("Kandev: List Workflows")).toBeVisible({ timeout: 10_000 });
+    await expandToolCallGroups(page, ["Kandev: List Workspaces", "Kandev: List Workflows"]);
+    const chat = page.activeChat();
+    await expect(chat.getByText("Kandev: List Workspaces")).toBeVisible({ timeout: 10_000 });
+    await expect(chat.getByText("Kandev: List Workflows")).toBeVisible({ timeout: 10_000 });
   });
 
   test("agent can create and list workflow steps", async ({ testPage, apiClient, seedData }) => {
@@ -270,9 +300,10 @@ test.describe("Config-mode MCP — agent management", () => {
     );
 
     const page = await runAndWait(testPage, session.task_id, "Agents listed");
-    await expandToolCallGroups(page);
-    await expect(page.chat.getByText("Kandev: List Agents")).toBeVisible({ timeout: 10_000 });
-    await expect(page.chat.getByText("Kandev: List Agent Profiles")).toBeVisible({
+    await expandToolCallGroups(page, ["Kandev: List Agents", "Kandev: List Agent Profiles"]);
+    const chat = page.activeChat();
+    await expect(chat.getByText("Kandev: List Agents")).toBeVisible({ timeout: 10_000 });
+    await expect(chat.getByText("Kandev: List Agent Profiles")).toBeVisible({
       timeout: 10_000,
     });
   });
@@ -420,9 +451,10 @@ test.describe("Config-mode MCP — MCP server configuration", () => {
     );
 
     const page = await runAndWait(testPage, session.task_id, "MCP config updated");
-    await expandToolCallGroups(page);
-    await expect(page.chat.getByText("Kandev: Get MCP Config")).toBeVisible({ timeout: 10_000 });
-    await expect(page.chat.getByText("Kandev: Update MCP Config")).toBeVisible({ timeout: 10_000 });
+    await expandToolCallGroups(page, ["Kandev: Get MCP Config", "Kandev: Update MCP Config"]);
+    const chat = page.activeChat();
+    await expect(chat.getByText("Kandev: Get MCP Config")).toBeVisible({ timeout: 10_000 });
+    await expect(chat.getByText("Kandev: Update MCP Config")).toBeVisible({ timeout: 10_000 });
 
     // Verify via API
     const config = await apiClient.getAgentProfileMcpConfig(seedData.agentProfileId);
@@ -454,8 +486,8 @@ test.describe("Config-mode MCP — task management", () => {
     );
 
     const page = await runAndWait(testPage, session.task_id, "Tasks listed");
-    await expandToolCallGroups(page);
-    await expect(page.chat.getByText("Kandev: List Tasks").first()).toBeVisible({
+    await expandToolCallGroups(page, ["Kandev: List Tasks"]);
+    await expect(page.activeChat().getByText("Kandev: List Tasks").first()).toBeVisible({
       timeout: 10_000,
     });
   });
@@ -553,8 +585,10 @@ test.describe("Config-mode MCP — executor management", () => {
     );
 
     const page = await runAndWait(testPage, session.task_id, "Executors listed");
-    await expandToolCallGroups(page);
-    await expect(page.chat.getByText("Kandev: List Executors", { exact: true })).toBeVisible({
+    await expandToolCallGroups(page, ["Kandev: List Executors"]);
+    await expect(
+      page.activeChat().getByText("Kandev: List Executors", { exact: true }),
+    ).toBeVisible({
       timeout: 10_000,
     });
   });

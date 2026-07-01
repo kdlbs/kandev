@@ -3,13 +3,13 @@ import { test, expect } from "../../fixtures/office-fixture";
 /**
  * Agent skills tab — UI hydration on direct navigation.
  *
- * Regression context: the tab reads `state.office.skills` from the
- * Zustand store. The workspace Skills page populates that slice as
+ * Regression context: the tab used to read skills from the Office
+ * Zustand mirror. The workspace Skills page populated that mirror as
  * a side effect of viewing, so a user landing directly on
  * `/office/agents/<id>/skills` (e.g. from a bookmark or the run-detail
  * deep link) used to see "No skills registered yet" even when the
- * workspace had 13 system skills. The tab now hydrates itself via
- * `listSkills` on mount; these specs pin that behaviour so a future
+ * workspace had 13 system skills. The tab now reads the Office skills
+ * query directly; these specs pin that behaviour so a future
  * refactor doesn't regress it again.
  */
 test.describe("Agent skills tab UI", () => {

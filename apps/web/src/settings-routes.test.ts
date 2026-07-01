@@ -1,11 +1,17 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
 import { isValidElement, type ReactElement } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import IntegrationsGitLabPage from "@/app/settings/integrations/gitlab/page";
 import { TaskActionsSettings } from "@/components/settings/general-settings";
+import { qk } from "@/lib/query/keys";
 import { workspaceId, workflowId } from "@/lib/types/ids";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
-import { buildSettingsInitialStateForRoute, renderSettingsRoute } from "./settings-routes";
+import {
+  applySettingsInitialState,
+  buildSettingsInitialStateForRoute,
+  renderSettingsRoute,
+} from "./settings-routes";
 
 const ACTIVE_WORKSPACE_COOKIE = "kandev-active-workspace";
 const OWNER_ID = "owner-1";
@@ -31,6 +37,19 @@ describe("buildSettingsInitialStateForRoute", () => {
       document.cookie = `${ACTIVE_WORKSPACE_COOKIE}=ws-2; path=/`;
 
       const state = buildState({
+        workspaces: workspaceRows(["ws-1", "ws-2"]),
+        userSettingsResponse: userSettings({ workspace_id: workspaceId("ws-1") }),
+      });
+
+      expect(state.workspaces?.activeId).toBe("ws-2");
+      expect(state.userSettings?.workspaceId).toBe("ws-2");
+    });
+
+    it("uses the route workspace on workspace settings pages", () => {
+      document.cookie = `${ACTIVE_WORKSPACE_COOKIE}=ws-1; path=/`;
+
+      const state = buildState({
+        pathname: "/settings/workspace/ws-2/integrations/gitlab",
         workspaces: workspaceRows(["ws-1", "ws-2"]),
         userSettingsResponse: userSettings({ workspace_id: workspaceId("ws-1") }),
       });
@@ -81,7 +100,6 @@ describe("buildSettingsInitialStateForRoute", () => {
 
       expect(state.workspaces).toEqual({ items: [], activeId: null });
       expect(state.executors).toEqual({ items: [] });
-      expect(state.agentProfiles).toEqual({ items: [], version: 0 });
       expect(state.settingsAgents).toEqual({ items: [] });
       expect(state.agentDiscovery).toEqual({ items: [], loading: false, loaded: true });
       expect(state.availableAgents).toEqual({
@@ -90,7 +108,6 @@ describe("buildSettingsInitialStateForRoute", () => {
         loading: false,
         loaded: true,
       });
-      expect(state.settingsData).toEqual({ executorsLoaded: true, agentsLoaded: true });
       expect(state.userSettings).toBeUndefined();
     });
   });
@@ -123,10 +140,39 @@ describe("renderSettingsRoute", () => {
   });
 });
 
+describe("applySettingsInitialState", () => {
+  it("hydrates the root store and seeds settings query keys", () => {
+    const queryClient = new QueryClient();
+    const hydrate = vi.fn();
+    const state = buildState({
+      executors: [{ id: "executor-1", name: "Docker" }],
+      agents: [
+        {
+          id: "agent-1",
+          name: "codex",
+          profiles: [{ id: "profile-1", agentDisplayName: "Codex", name: "Default" }],
+        },
+      ],
+    } as unknown as Partial<Parameters<typeof buildSettingsInitialStateForRoute>[0]>);
+
+    applySettingsInitialState({ getState: () => ({ hydrate }) }, queryClient, state);
+
+    expect(hydrate).toHaveBeenCalledWith(state);
+    expect(queryClient.getQueryData(qk.settings.executors())).toEqual({
+      executors: [{ id: "executor-1", name: "Docker" }],
+    });
+    expect(queryClient.getQueryData(qk.settings.agents())).toEqual({
+      agents: state.settingsAgents?.items,
+      total: 1,
+    });
+  });
+});
+
 function buildState(
   overrides: Partial<Parameters<typeof buildSettingsInitialStateForRoute>[0]> = {},
 ) {
   return buildSettingsInitialStateForRoute({
+    pathname: "/settings",
     workspaces: [],
     executors: [],
     agents: [],

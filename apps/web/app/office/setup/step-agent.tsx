@@ -4,7 +4,8 @@ import { useState } from "react";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Badge } from "@kandev/ui/badge";
-import { useAppStore } from "@/components/state-provider";
+import { useOfficeMetaData } from "@/hooks/domains/office/use-office-data";
+import { useAgentsQuerySync } from "@/hooks/domains/settings/use-agents-query-sync";
 import { AgentSelector } from "@/components/task-create-dialog-selectors";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
@@ -55,10 +56,9 @@ export function StepAgent({
   onChange,
   onAgentProfilesChange,
 }: StepAgentProps) {
-  const meta = useAppStore((s) => s.office.meta);
+  const meta = useOfficeMetaData().data;
   const executorOptions = meta?.executorTypes ?? FALLBACK_EXECUTOR_OPTIONS;
-  const settingsAgents = useAppStore((s) => s.settingsAgents.items);
-  const setAgentProfiles = useAppStore((s) => s.setAgentProfiles);
+  const { settingsAgents, upsertProfile } = useAgentsQuerySync();
 
   const { sortedProfiles, profileOptions } = useSelectableProfileOptions(agentProfiles);
 
@@ -99,7 +99,7 @@ export function StepAgent({
               settingsAgents={settingsAgents}
               wizardProfiles={agentProfiles}
               canCancel={profileOptions.length > 0}
-              setAgentProfiles={setAgentProfiles}
+              upsertProfile={upsertProfile}
               onAgentProfilesChange={onAgentProfilesChange}
               onProfileSaved={(profileId) => onChange({ agentProfileId: profileId })}
               onClose={() => setShowCreate(false)}

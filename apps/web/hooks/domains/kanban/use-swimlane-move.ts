@@ -1,9 +1,12 @@
 import { useCallback } from "react";
-import { useAppStoreApi } from "@/components/state-provider";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTaskActions } from "@/hooks/use-task-actions";
 import type { Task } from "@/components/kanban-card";
-import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
-import type { KanbanState } from "@/lib/state/slices/kanban/types";
+import type { MoveTaskError } from "@/lib/kanban/move-task-error";
+import {
+  updateWorkflowSnapshotQuery,
+  workflowSnapshotQueryDataForWorkflow,
+} from "@/lib/query/workflow-snapshot-cache";
 
 export function useSwimlaneMove(
   workflowId: string,
@@ -11,37 +14,31 @@ export function useSwimlaneMove(
     onMoveError?: (error: MoveTaskError) => void;
   },
 ) {
-  const store = useAppStoreApi();
+  const queryClient = useQueryClient();
   const { moveTaskById } = useTaskActions();
 
   const moveTask = useCallback(
     async (task: Task, targetStepId: string) => {
       if (task.workflowStepId === targetStepId) return;
 
-      const state = store.getState();
-      const snapshot = state.kanbanMulti.snapshots[workflowId];
+      const snapshot = workflowSnapshotQueryDataForWorkflow(queryClient, workflowId);
       if (!snapshot) return;
 
       const targetTasks = snapshot.tasks
-        .filter(
-          (t: KanbanState["tasks"][number]) =>
-            t.workflowStepId === targetStepId && t.id !== task.id,
-        )
-        .sort(
-          (a: KanbanState["tasks"][number], b: KanbanState["tasks"][number]) =>
-            a.position - b.position,
-        );
+        .filter((item) => item.workflow_step_id === targetStepId && item.id !== task.id)
+        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
       const nextPosition = targetTasks.length;
 
-      const originalTasks = snapshot.tasks;
+      const originalSnapshot = snapshot;
 
-      // Optimistic update
-      state.setWorkflowSnapshot(workflowId, {
-        ...snapshot,
-        tasks: snapshot.tasks.map((t: KanbanState["tasks"][number]) =>
-          t.id === task.id ? { ...t, workflowStepId: targetStepId, position: nextPosition } : t,
+      updateWorkflowSnapshotQuery(queryClient, workflowId, (current) => ({
+        ...current,
+        tasks: current.tasks.map((item) =>
+          item.id === task.id
+            ? { ...item, workflow_step_id: targetStepId, position: nextPosition }
+            : item,
         ),
-      });
+      }));
 
       try {
         await moveTaskById(task.id, {
@@ -52,14 +49,7 @@ export function useSwimlaneMove(
         // Backend handles on_enter actions (auto_start_agent, plan_mode, etc.)
         // via the task.moved event → orchestrator processOnEnter()
       } catch (error) {
-        // Rollback
-        const currentSnapshot = store.getState().kanbanMulti.snapshots[workflowId];
-        if (currentSnapshot) {
-          store.getState().setWorkflowSnapshot(workflowId, {
-            ...currentSnapshot,
-            tasks: originalTasks,
-          });
-        }
+        updateWorkflowSnapshotQuery(queryClient, workflowId, () => originalSnapshot);
         const message = error instanceof Error ? error.message : "Failed to move task";
         opts.onMoveError?.({
           message,
@@ -68,7 +58,7 @@ export function useSwimlaneMove(
         });
       }
     },
-    [workflowId, store, moveTaskById, opts],
+    [workflowId, queryClient, moveTaskById, opts],
   );
 
   return { moveTask };

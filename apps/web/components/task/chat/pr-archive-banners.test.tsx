@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { makeQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
+import { taskId as toTaskId, workspaceId, workflowId, type Task } from "@/lib/types/http";
 
 const archiveAndSwitchMock = vi.fn();
 const toastMock = vi.fn();
@@ -11,20 +16,11 @@ const taskPRsByTaskId = vi.hoisted(() => ({
 }));
 
 const mockState = {
-  taskPRs: {
-    get byTaskId() {
-      return taskPRsByTaskId.value;
-    },
-  },
-  kanban: {
-    tasks: [{ id: "task-1", title: "Task One", primaryExecutorType: "worktree" }],
-  },
-  kanbanMulti: { snapshots: {} },
+  clearPendingPrUrlForTaskPR: vi.fn(),
 };
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof mockState) => unknown) => selector(mockState),
-  useAppStoreApi: () => ({ getState: () => mockState }),
 }));
 
 vi.mock("@/hooks/use-task-actions", () => ({
@@ -35,8 +31,12 @@ vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: toastMock }),
 }));
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/api/domains/kanban-api", () => ({
   getSubtaskCount: (...args: unknown[]) => mockGetSubtaskCount(...args),
+}));
+
+vi.mock("@/lib/ws/connection", () => ({
+  getWebSocketClient: () => null,
 }));
 
 vi.mock("@/lib/local-storage", async (importOriginal) => ({
@@ -49,8 +49,40 @@ vi.mock("@/lib/local-storage", async (importOriginal) => ({
 
 import { PRClosedBanner, PRMergedBanner } from "./pr-archive-banners";
 
+const CREATED_AT = "2026-05-04T00:00:00Z";
 const MERGED_ARCHIVE_BUTTON = "pr-merged-archive-button";
 const MERGED_ARCHIVE_CONFIRM = "pr-merged-archive-confirm";
+
+function taskForBanner(id: string, title: string): Task {
+  return {
+    id: toTaskId(id),
+    workspace_id: workspaceId("workspace-1"),
+    workflow_id: workflowId("workflow-1"),
+    workflow_step_id: "step-1",
+    position: 0,
+    title,
+    description: "",
+    state: "CREATED",
+    priority: 0,
+    repositories: [],
+    primary_executor_type: "worktree",
+    created_at: CREATED_AT,
+    updated_at: CREATED_AT,
+  };
+}
+
+function createTestQueryClient() {
+  const queryClient = makeQueryClient();
+  for (const [taskId, prs] of Object.entries(taskPRsByTaskId.value)) {
+    queryClient.setQueryData(qk.integrations.github.taskPr(taskId), prs);
+  }
+  queryClient.setQueryData(qk.tasks.detail("task-1"), taskForBanner("task-1", "Task One"));
+  return queryClient;
+}
+
+function renderWithQuery(ui: ReactNode) {
+  return render(<QueryClientProvider client={createTestQueryClient()}>{ui}</QueryClientProvider>);
+}
 
 beforeEach(() => {
   archiveAndSwitchMock.mockResolvedValue(undefined);
@@ -68,7 +100,7 @@ afterEach(() => {
 
 describe("PRMergedBanner", () => {
   it("opens the confirmation dialog instead of archiving directly", async () => {
-    render(<PRMergedBanner taskId="task-1" />);
+    renderWithQuery(<PRMergedBanner taskId="task-1" />);
 
     fireEvent.click(screen.getByTestId(MERGED_ARCHIVE_BUTTON));
 
@@ -78,7 +110,7 @@ describe("PRMergedBanner", () => {
   });
 
   it("archives after confirming, without a success toast", async () => {
-    render(<PRMergedBanner taskId="task-1" />);
+    renderWithQuery(<PRMergedBanner taskId="task-1" />);
 
     fireEvent.click(screen.getByTestId(MERGED_ARCHIVE_BUTTON));
     fireEvent.click(await screen.findByTestId(MERGED_ARCHIVE_CONFIRM));
@@ -90,7 +122,7 @@ describe("PRMergedBanner", () => {
   });
 
   it("does not archive when the dialog is cancelled", async () => {
-    render(<PRMergedBanner taskId="task-1" />);
+    renderWithQuery(<PRMergedBanner taskId="task-1" />);
 
     fireEvent.click(screen.getByTestId(MERGED_ARCHIVE_BUTTON));
     fireEvent.click(await screen.findByText("Cancel"));
@@ -102,7 +134,7 @@ describe("PRMergedBanner", () => {
 
   it("keeps the failure toast when archive fails", async () => {
     archiveAndSwitchMock.mockRejectedValueOnce(new Error("archive failed"));
-    render(<PRMergedBanner taskId="task-1" />);
+    renderWithQuery(<PRMergedBanner taskId="task-1" />);
 
     fireEvent.click(screen.getByTestId(MERGED_ARCHIVE_BUTTON));
     fireEvent.click(await screen.findByTestId(MERGED_ARCHIVE_CONFIRM));
@@ -117,7 +149,7 @@ describe("PRMergedBanner", () => {
 
   it("passes cascade=true through when the subtask checkbox is ticked", async () => {
     mockGetSubtaskCount.mockResolvedValue({ count: 2 });
-    render(<PRMergedBanner taskId="task-1" />);
+    renderWithQuery(<PRMergedBanner taskId="task-1" />);
 
     fireEvent.click(screen.getByTestId(MERGED_ARCHIVE_BUTTON));
     fireEvent.click(await screen.findByTestId("archive-cascade-checkbox"));
@@ -133,7 +165,7 @@ describe("PRMergedBanner", () => {
     archiveAndSwitchMock.mockImplementation(
       () => new Promise<void>((resolve) => (resolveArchive = resolve)),
     );
-    render(<PRMergedBanner taskId="task-1" />);
+    renderWithQuery(<PRMergedBanner taskId="task-1" />);
 
     fireEvent.click(screen.getByTestId(MERGED_ARCHIVE_BUTTON));
     fireEvent.click(await screen.findByTestId(MERGED_ARCHIVE_CONFIRM));
@@ -152,11 +184,11 @@ describe("PRMergedBanner", () => {
     );
   });
 
-  it("falls back to a generic title when the task is not in the store", async () => {
+  it("falls back to a generic title when the task is not in the Query cache", async () => {
     taskPRsByTaskId.value = {
       "task-2": [{ pr_number: 7, state: "merged" }],
     };
-    render(<PRMergedBanner taskId="task-2" />);
+    renderWithQuery(<PRMergedBanner taskId="task-2" />);
 
     fireEvent.click(screen.getByTestId(MERGED_ARCHIVE_BUTTON));
 
@@ -170,7 +202,7 @@ describe("PRClosedBanner", () => {
     taskPRsByTaskId.value = {
       "task-1": [{ pr_number: 42, state: "closed" }],
     };
-    render(<PRClosedBanner taskId="task-1" />);
+    renderWithQuery(<PRClosedBanner taskId="task-1" />);
 
     fireEvent.click(screen.getByTestId("pr-closed-archive-button"));
     expect(archiveAndSwitchMock).not.toHaveBeenCalled();

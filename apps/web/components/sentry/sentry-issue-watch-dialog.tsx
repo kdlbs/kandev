@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { Switch } from "@kandev/ui/switch";
@@ -18,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
 import { useWorkflowSteps, stepPlaceholder } from "@/hooks/use-workflow-steps";
@@ -25,11 +27,8 @@ import {
   ScriptEditor,
   computeEditorHeight,
 } from "@/components/settings/profile-edit/script-editor";
-import {
-  listSentryInstances,
-  listSentryProjects,
-  listSentryOrganizations,
-} from "@/lib/api/domains/sentry-api";
+import { listSentryProjects, listSentryOrganizations } from "@/lib/api/domains/sentry-api";
+import { sentryInstancesQueryOptions } from "@/lib/query/query-options/sentry";
 import { WatcherRepositoryFields } from "@/components/watcher-repository-fields";
 import { clearWorkspaceScopedForm } from "@/lib/watcher-repository-default";
 import { SENTRY_ISSUE_WATCH_PLACEHOLDERS } from "./sentry-issue-watch-placeholders";
@@ -70,12 +69,11 @@ type Props = {
 };
 
 function useFormData(workspaceId: string) {
-  useSettingsData(true);
-  useWorkflows(workspaceId, true);
-  const allWorkflows = useAppStore((s) => s.workflows.items);
+  const settingsCatalog = useSettingsData(true);
+  const { workflows: allWorkflows } = useWorkflows(workspaceId, true);
   const workflows = useMemo(() => allWorkflows.filter((w) => !w.hidden), [allWorkflows]);
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items);
-  const executors = useAppStore((s) => s.executors.items);
+  const agentProfiles = settingsCatalog.agentProfiles;
+  const executors = settingsCatalog.executors;
   const allExecutorProfiles = useMemo(
     () =>
       executors
@@ -330,7 +328,7 @@ function WorkspacePicker({
   onChange: (v: string) => void;
   disabled?: boolean;
 }) {
-  const workspaces = useAppStore((s) => s.workspaces.items);
+  const { items: workspaces } = useWorkspaces();
   return (
     <SelectField
       label="Workspace"
@@ -352,24 +350,11 @@ function useWorkspaceInstances(
   hasWatch: boolean,
   setForm: FormSetter,
 ) {
-  const [instances, setInstances] = useState<SentryConfig[]>([]);
-  useEffect(() => {
-    if (!open || !workspaceId) {
-      setInstances([]);
-      return;
-    }
-    let cancelled = false;
-    listSentryInstances(workspaceId)
-      .then((list) => {
-        if (!cancelled) setInstances(list);
-      })
-      .catch(() => {
-        if (!cancelled) setInstances([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, workspaceId]);
+  const instancesQuery = useQuery({
+    ...sentryInstancesQueryOptions(workspaceId),
+    enabled: open && Boolean(workspaceId),
+  });
+  const instances = instancesQuery.data ?? [];
   useEffect(() => {
     if (hasWatch || instances.length !== 1) return;
     setForm((p) => (p.sentryInstanceId ? p : { ...p, sentryInstanceId: instances[0].id }));

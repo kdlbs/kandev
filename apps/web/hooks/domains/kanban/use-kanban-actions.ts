@@ -1,18 +1,20 @@
 "use client";
 
 import { useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@/lib/routing/client-router";
 import { useAppStoreApi } from "@/components/state-provider";
+import { useAllCachedWorkflows } from "@/hooks/use-workflow-cache";
 import { useTaskCRUD } from "@/hooks/use-task-crud";
+import { qk } from "@/lib/query/keys";
+import { updateWorkflowSnapshotQuery } from "@/lib/query/workflow-snapshot-cache";
 import type { Task as BackendTask } from "@/lib/types/http";
-import type { KanbanState, WorkspaceState, WorkflowsState } from "@/lib/state/slices";
+import type { WorkspaceState, WorkflowsState } from "@/lib/state/slices";
 
 type UseKanbanActionsOptions = {
   workspaceState: WorkspaceState;
   workflowsState: WorkflowsState;
 };
-
-type KanbanTask = KanbanState["tasks"][number];
 
 function isTaskDetailPath(): boolean {
   if (typeof window === "undefined") return false;
@@ -30,74 +32,50 @@ function kanbanWorkspaceHref(workspaceId: string): string {
 }
 
 /** Handle creating a new task in the kanban board, merging with any WS-provided data. */
-function hydrateCreatedTask(
-  store: ReturnType<typeof useAppStoreApi>,
-  task: BackendTask,
-  currentKanban: KanbanState,
-) {
-  const repoId = task.repositories?.[0]?.repository_id ?? undefined;
-  const existing = currentKanban.tasks.find((t: KanbanTask) => t.id === task.id);
-  if (existing) {
-    if (repoId && !existing.repositoryId) {
-      store.getState().hydrate({
-        kanban: {
-          ...currentKanban,
-          tasks: currentKanban.tasks.map((t: KanbanTask) =>
-            t.id === task.id ? { ...t, repositoryId: repoId } : t,
-          ),
-        },
-      });
-    }
-  } else {
-    store.getState().hydrate({
-      kanban: {
-        ...currentKanban,
-        tasks: [
-          ...currentKanban.tasks,
-          {
-            id: task.id,
-            workflowStepId: task.workflow_step_id,
-            title: task.title,
-            description: task.description ?? undefined,
-            position: task.position ?? 0,
-            state: task.state,
-            repositoryId: repoId,
-          },
-        ],
-      },
-    });
-  }
-  if (task.workspace_id) {
-    store.getState().invalidateRepositories(task.workspace_id);
-  }
+function hydrateCreatedTask(queryClient: ReturnType<typeof useQueryClient>, task: BackendTask) {
+  queryClient.setQueryData(qk.tasks.detail(task.id), task);
+  updateWorkflowSnapshotQuery(queryClient, task.workflow_id, (snapshot) => {
+    const existing = snapshot.tasks.find((item) => item.id === task.id);
+    return {
+      ...snapshot,
+      tasks: existing
+        ? snapshot.tasks.map((item) => (item.id === task.id ? { ...item, ...task } : item))
+        : [...snapshot.tasks, task],
+    };
+  });
 }
 
 /** Handle editing an existing task - only update dialog-editable fields. */
-function hydrateEditedTask(
-  store: ReturnType<typeof useAppStoreApi>,
-  task: BackendTask,
-  currentKanban: KanbanState,
-) {
-  store.getState().hydrate({
-    kanban: {
-      ...currentKanban,
-      tasks: currentKanban.tasks.map((item: KanbanTask) =>
+function hydrateEditedTask(queryClient: ReturnType<typeof useQueryClient>, task: BackendTask) {
+  queryClient.setQueryData(qk.tasks.detail(task.id), (current: BackendTask | undefined) => ({
+    ...(current ?? task),
+    title: task.title,
+    description: task.description,
+    repositories: task.repositories,
+  }));
+  updateWorkflowSnapshotQuery(queryClient, task.workflow_id, (snapshot) => {
+    if (!snapshot.tasks.some((item) => item.id === task.id)) return snapshot;
+    return {
+      ...snapshot,
+      tasks: snapshot.tasks.map((item) =>
         item.id === task.id
           ? {
               ...item,
               title: task.title,
-              description: task.description ?? undefined,
-              repositoryId: task.repositories?.[0]?.repository_id ?? item.repositoryId,
+              description: task.description,
+              repositories: task.repositories,
             }
           : item,
       ),
-    },
+    };
   });
 }
 
 export function useKanbanActions({ workspaceState, workflowsState }: UseKanbanActionsOptions) {
   const router = useRouter();
   const store = useAppStoreApi();
+  const queryClient = useQueryClient();
+  const workflows = useAllCachedWorkflows();
 
   // CRUD operations from existing hook
   const {
@@ -119,14 +97,13 @@ export function useKanbanActions({ workspaceState, workflowsState }: UseKanbanAc
   // overwriting WebSocket-driven updates that arrived while the dialog was open.
   const handleDialogSuccess = useCallback(
     (task: BackendTask, mode: "create" | "edit") => {
-      const currentKanban = store.getState().kanban;
       if (mode === "create") {
-        hydrateCreatedTask(store, task, currentKanban);
+        hydrateCreatedTask(queryClient, task);
         return;
       }
-      hydrateEditedTask(store, task, currentKanban);
+      hydrateEditedTask(queryClient, task);
     },
-    [store],
+    [queryClient],
   );
 
   // Handle workspace change with navigation
@@ -159,14 +136,14 @@ export function useKanbanActions({ workspaceState, workflowsState }: UseKanbanAc
         return;
       }
       if (nextWorkflowId) {
-        const workspaceId = workflowsState.items.find(
-          (workflow: WorkflowsState["items"][number]) => workflow.id === nextWorkflowId,
+        const workspaceId = workflows.find(
+          (workflow) => workflow.id === nextWorkflowId,
         )?.workspaceId;
         const workspaceParam = workspaceId ? `&workspaceId=${workspaceId}` : "";
         router.push(`/?workflowId=${nextWorkflowId}${workspaceParam}`);
       }
     },
-    [router, store, workflowsState.activeId, workflowsState.items],
+    [router, store, workflows, workflowsState.activeId],
   );
 
   return {

@@ -1,4 +1,6 @@
 import type { StoreApi } from "zustand";
+import { getBrowserQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
 import type { AppState } from "@/lib/state/store";
 import type { AvailableCommand } from "@/lib/state/slices/session-runtime/types";
 import type { TurnEventPayload } from "@/lib/types/backend";
@@ -139,7 +141,9 @@ export function maybeEmitEmptyTurnNotice(
     hadOutput: payload.had_output,
     isEphemeralSurface,
     messages: state.messages.bySession[sid],
-    availableCommands: state.availableCommands.bySessionId[sid],
+    availableCommands: getBrowserQueryClient().getQueryData(
+      qk.sessionRuntime.availableCommands(sid),
+    ),
     now,
   });
 

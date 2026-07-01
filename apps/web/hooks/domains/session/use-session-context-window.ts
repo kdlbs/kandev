@@ -1,42 +1,47 @@
 import { useEffect, useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
+import { qk } from "@/lib/query/keys";
+import { contextWindowQueryOptions } from "@/lib/query/query-options";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { ContextWindowEntry } from "@/lib/state/store";
-import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
 
 export function useSessionContextWindow(sessionId: string | null): ContextWindowEntry | undefined {
+  const queryClient = useQueryClient();
+  const contextWindowQuery = useQuery(contextWindowQueryOptions(sessionId ?? ""));
   // Subscribe to individual primitive values to ensure reactivity
-  const size = useAppStore((state) =>
+  const storeSize = useAppStore((state) =>
     sessionId ? state.contextWindow.bySessionId[sessionId]?.size : undefined,
   );
-  const used = useAppStore((state) =>
+  const storeUsed = useAppStore((state) =>
     sessionId ? state.contextWindow.bySessionId[sessionId]?.used : undefined,
   );
-  const remaining = useAppStore((state) =>
+  const storeRemaining = useAppStore((state) =>
     sessionId ? state.contextWindow.bySessionId[sessionId]?.remaining : undefined,
   );
-  const efficiency = useAppStore((state) =>
+  const storeEfficiency = useAppStore((state) =>
     sessionId ? state.contextWindow.bySessionId[sessionId]?.efficiency : undefined,
   );
-  const source = useAppStore((state) =>
+  const storeSource = useAppStore((state) =>
     sessionId ? state.contextWindow.bySessionId[sessionId]?.source : undefined,
   );
-  const timestamp = useAppStore((state) =>
+  const storeTimestamp = useAppStore((state) =>
     sessionId ? state.contextWindow.bySessionId[sessionId]?.timestamp : undefined,
   );
 
   // Memoize the combined object
-  const contextWindow = useMemo(() => {
-    if (size === undefined) return undefined;
+  const storeContextWindow = useMemo(() => {
+    if (storeSize === undefined) return undefined;
     return {
-      size,
-      used: used ?? 0,
-      remaining: remaining ?? 0,
-      efficiency: efficiency ?? 0,
-      source,
-      timestamp,
+      size: storeSize,
+      used: storeUsed ?? 0,
+      remaining: storeRemaining ?? 0,
+      efficiency: storeEfficiency ?? 0,
+      source: storeSource,
+      timestamp: storeTimestamp,
     };
-  }, [size, used, remaining, efficiency, source, timestamp]);
+  }, [storeSize, storeUsed, storeRemaining, storeEfficiency, storeSource, storeTimestamp]);
+  const contextWindow = contextWindowQuery.data ?? storeContextWindow;
 
   const session = useAppStore((state) =>
     sessionId ? state.taskSessions.items[sessionId] : undefined,
@@ -53,11 +58,22 @@ export function useSessionContextWindow(sessionId: string | null): ContextWindow
     if (!metadata || typeof metadata !== "object") return;
 
     const storedContextWindow = (metadata as Record<string, unknown>).context_window;
-    const entry = parseContextWindowEntry(storedContextWindow);
-    if (!entry) return;
+    if (!storedContextWindow || typeof storedContextWindow !== "object") return;
+
+    // Map stored context window to ContextWindowEntry
+    const cw = storedContextWindow as Record<string, unknown>;
+    const entry: ContextWindowEntry = {
+      size: (cw.size as number) ?? 0,
+      used: (cw.used as number) ?? 0,
+      remaining: (cw.remaining as number) ?? 0,
+      efficiency: (cw.efficiency as number) ?? 0,
+      source: (cw.source as ContextWindowEntry["source"]) ?? undefined,
+      timestamp: (cw.timestamp as string) ?? undefined,
+    };
 
     setContextWindow(sessionId, entry);
-  }, [sessionId, contextWindow, session?.metadata, setContextWindow]);
+    queryClient.setQueryData(qk.sessionRuntime.contextWindow(sessionId), entry);
+  }, [sessionId, contextWindow, session?.metadata, setContextWindow, queryClient]);
 
   // Subscribe to session updates via WebSocket
   useEffect(() => {
