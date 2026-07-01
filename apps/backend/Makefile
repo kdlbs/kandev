@@ -31,6 +31,7 @@ ifeq ($(OS),Windows_NT)
   # cmd has no Unix env-var-prefix syntax; `set X=Y&` chains `set` and the next
   # command in the same shell.
   GO_LINUX_AMD64 = set CGO_ENABLED=0& set GOOS=linux& set GOARCH=amd64&
+  GO_LINUX_ARM64 = set CGO_ENABLED=0& set GOOS=linux& set GOARCH=arm64&
   GO_DARWIN_ARM64 = set CGO_ENABLED=0& set GOOS=darwin& set GOARCH=arm64&
   GO_DARWIN_AMD64 = set CGO_ENABLED=0& set GOOS=darwin& set GOARCH=amd64&
   EXE = .exe
@@ -40,6 +41,7 @@ else
   MKDIR = mkdir -p
   CGO_PREFIX = CGO_ENABLED=1
   GO_LINUX_AMD64 = CGO_ENABLED=0 GOOS=linux GOARCH=amd64
+  GO_LINUX_ARM64 = CGO_ENABLED=0 GOOS=linux GOARCH=arm64
   GO_DARWIN_ARM64 = CGO_ENABLED=0 GOOS=darwin GOARCH=arm64
   GO_DARWIN_AMD64 = CGO_ENABLED=0 GOOS=darwin GOARCH=amd64
   EXE =
@@ -52,7 +54,7 @@ BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || powershell -c
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
-.PHONY: all build build-all build-agentctl build-agentctl-remote build-agentctl-linux build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint fmt vet help
+.PHONY: all build build-all build-agentctl build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint fmt vet help
 
 ## Default target
 all: build
@@ -108,7 +110,7 @@ build-agentctl:
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl$(EXE) ./cmd/agentctl
 
 ## Build all remote agentctl helpers used by SSH/Docker/Sprites executors.
-build-agentctl-remote: build-agentctl-linux build-agentctl-darwin-arm64 build-agentctl-darwin-amd64
+build-agentctl-remote: build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64
 
 ## Build agentctl for linux/amd64 (used by Docker/Sprites and Linux SSH hosts)
 build-agentctl-linux:
@@ -116,17 +118,40 @@ build-agentctl-linux:
 	-@$(MKDIR) $(BUILD_DIR)
 	$(GO_LINUX_AMD64) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-linux-amd64 ./cmd/agentctl
 
+## Build agentctl for linux/arm64 (used by ARM Linux SSH hosts, e.g. Graviton)
+build-agentctl-linux-arm64:
+	@echo "Building agentctl for linux/arm64..."
+	-@$(MKDIR) $(BUILD_DIR)
+	$(GO_LINUX_ARM64) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-linux-arm64 ./cmd/agentctl
+
+# Ad-hoc sign a darwin Mach-O so Apple Silicon (AMFI) will run it; ad-hoc needs
+# no Apple identity. Go already ad-hoc-signs darwin/arm64 at link time, so this
+# is mainly to (a) sign darwin/amd64 too and (b) re-sign uniformly. Prefer
+# codesign on macOS, fall back to rcodesign on Linux/CI. If neither is present,
+# warn but don't fail (darwin/arm64 stays Go-signed; darwin/amd64 runs on Intel).
+define adhoc_sign_darwin
+	@if command -v codesign >/dev/null 2>&1; then \
+		echo "  codesign --sign - $(1)"; codesign --force --sign - "$(1)"; \
+	elif command -v rcodesign >/dev/null 2>&1; then \
+		echo "  rcodesign sign (ad-hoc) $(1)"; rcodesign sign "$(1)"; \
+	else \
+		echo "  WARNING: no codesign/rcodesign found; $(1) left as-is (darwin/arm64 is Go-signed; darwin/amd64 runs only on Intel Macs)" >&2; \
+	fi
+endef
+
 ## Build agentctl for darwin/arm64 (used by Apple Silicon SSH hosts)
 build-agentctl-darwin-arm64:
 	@echo "Building agentctl for darwin/arm64..."
 	-@$(MKDIR) $(BUILD_DIR)
 	$(GO_DARWIN_ARM64) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-darwin-arm64 ./cmd/agentctl
+	$(call adhoc_sign_darwin,$(BUILD_DIR)/agentctl-darwin-arm64)
 
 ## Build agentctl for darwin/amd64 (used by Intel Mac SSH hosts)
 build-agentctl-darwin-amd64:
 	@echo "Building agentctl for darwin/amd64..."
 	-@$(MKDIR) $(BUILD_DIR)
 	$(GO_DARWIN_AMD64) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-darwin-amd64 ./cmd/agentctl
+	$(call adhoc_sign_darwin,$(BUILD_DIR)/agentctl-darwin-amd64)
 
 ## Build mock-agent for linux/amd64 (used by Docker E2E tests)
 build-mock-agent-linux:

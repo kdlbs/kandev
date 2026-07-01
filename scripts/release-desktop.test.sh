@@ -21,6 +21,7 @@ SIGNING_SECRET_ENV=(
 )
 REMOTE_AGENTCTL_HELPERS=(
   agentctl-linux-amd64
+  agentctl-linux-arm64
   agentctl-darwin-arm64
   agentctl-darwin-amd64
 )

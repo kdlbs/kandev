@@ -780,3 +780,55 @@ func TestAbandonOpenTurns_IterationCap(t *testing.T) {
 		}
 	}
 }
+
+func TestMergeExecutorConfigMetadata(t *testing.T) {
+	// Fixture values — arbitrary test inputs, not real host config.
+	const (
+		execHost   = "ssh.example.com"
+		execUser   = "agent"
+		execFP     = "SHA256:test-fingerprint"
+		liveHost   = "live-host-from-running-record"
+		staleHost  = "stale-host-from-executor"
+		droppedKey = "not_a_persistent_key"
+	)
+
+	// SSH connection keys from the executor record must be projected when absent.
+	info := &lifecycle.WorkspaceInfo{}
+	mergeExecutorConfigMetadata(info, map[string]string{
+		lifecycle.MetadataKeySSHHost:            execHost,
+		lifecycle.MetadataKeySSHUser:            execUser,
+		lifecycle.MetadataKeySSHHostFingerprint: execFP,
+		droppedKey:                              "dropme",
+	})
+	if got := info.Metadata[lifecycle.MetadataKeySSHHost]; got != execHost {
+		t.Fatalf("ssh_host = %v, want %q", got, execHost)
+	}
+	if got := info.Metadata[lifecycle.MetadataKeySSHHostFingerprint]; got != execFP {
+		t.Fatalf("ssh_host_fingerprint = %v, want %q", got, execFP)
+	}
+	if _, ok := info.Metadata[droppedKey]; ok {
+		t.Fatal("non-persistent key should be filtered out")
+	}
+
+	// Existing (live running-record) values must win over executor config.
+	info2 := &lifecycle.WorkspaceInfo{Metadata: map[string]interface{}{
+		lifecycle.MetadataKeySSHHost: liveHost,
+	}}
+	mergeExecutorConfigMetadata(info2, map[string]string{
+		lifecycle.MetadataKeySSHHost: staleHost,
+		lifecycle.MetadataKeySSHUser: execUser,
+	})
+	if got := info2.Metadata[lifecycle.MetadataKeySSHHost]; got != liveHost {
+		t.Fatalf("ssh_host = %v, want %q (existing must win)", got, liveHost)
+	}
+	if got := info2.Metadata[lifecycle.MetadataKeySSHUser]; got != execUser {
+		t.Fatalf("ssh_user = %v, want %q (absent key should be filled)", got, execUser)
+	}
+
+	// Empty config is a no-op.
+	info3 := &lifecycle.WorkspaceInfo{}
+	mergeExecutorConfigMetadata(info3, nil)
+	if info3.Metadata != nil && len(info3.Metadata) != 0 {
+		t.Fatalf("empty config should not create metadata, got %v", info3.Metadata)
+	}
+}
