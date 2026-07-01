@@ -97,7 +97,35 @@ func (s *Service) publishTaskEventWithExtra(ctx context.Context, eventType strin
 			zap.String("event_type", eventType),
 			zap.String("task_id", task.ID),
 			zap.Error(err))
+		return
 	}
+	s.logTaskLifecycleEventPublished(eventType, task, data)
+}
+
+func (s *Service) logTaskLifecycleEventPublished(eventType string, task *models.Task, data map[string]interface{}) {
+	switch eventType {
+	case events.TaskCreated, events.TaskUpdated, events.TaskStateChanged, events.TaskDeleted:
+	default:
+		return
+	}
+	s.logger.Info("task lifecycle event published",
+		zap.String("event_type", eventType),
+		zap.String("task_id", task.ID),
+		zap.String("state", eventString(data, "state")),
+		zap.String("workflow_step_id", eventString(data, "workflow_step_id")),
+		zap.String("primary_session_id", eventString(data, "primary_session_id")),
+		zap.String("primary_session_state", eventString(data, "primary_session_state")),
+		zap.Any("session_count", data["session_count"]),
+		zap.String("old_state", eventString(data, "old_state")),
+		zap.String("new_state", eventString(data, "new_state")),
+	)
+}
+
+func eventString(data map[string]interface{}, key string) string {
+	if value, ok := data[key].(string); ok {
+		return value
+	}
+	return ""
 }
 
 // addTaskSessionEventFields merges session count, primary session info, and

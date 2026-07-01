@@ -1,5 +1,5 @@
 import type { StoreApi } from "zustand";
-import { createDebugLogger } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import {
@@ -13,6 +13,7 @@ import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { KanbanState, WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 
 const debug = createDebugLogger("session:state");
+const lifecycleDebug = createDebugLogger("task-lifecycle:ws");
 
 const TERMINAL_SESSION_STATES: ReadonlySet<TaskSessionState> = new Set([
   "COMPLETED",
@@ -259,6 +260,8 @@ function syncKanbanPrimarySessionState(
   if (!newState) return;
 
   store.setState((state) => {
+    const beforeTask = state.kanban.tasks.find((task) => task.id === taskId);
+    const patchedSnapshotIds: string[] = [];
     const nextKanbanTasks = patchTaskPrimarySessionState(
       state.kanban.tasks,
       taskId,
@@ -274,10 +277,25 @@ function syncKanbanPrimarySessionState(
           sessionId,
           newState,
         );
-        if (nextSnapshot !== snapshot) snapshotsChanged = true;
+        if (nextSnapshot !== snapshot) {
+          snapshotsChanged = true;
+          patchedSnapshotIds.push(workflowId);
+        }
         return [workflowId, nextSnapshot];
       }),
     );
+
+    if (isDebug()) {
+      lifecycleDebug("session.state_changed kanban sync", {
+        task_id: taskId,
+        sessionId,
+        newState,
+        beforeTaskPrimarySessionId: beforeTask?.primarySessionId ?? "-",
+        beforeTaskPrimaryState: beforeTask?.primarySessionState ?? "-",
+        patchedKanban: nextKanbanTasks !== state.kanban.tasks,
+        patchedSnapshots: patchedSnapshotIds.join(",") || "-",
+      });
+    }
 
     if (nextKanbanTasks === state.kanban.tasks && !snapshotsChanged) return state;
 

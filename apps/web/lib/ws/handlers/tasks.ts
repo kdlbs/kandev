@@ -1,4 +1,5 @@
 import type { StoreApi } from "zustand";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
@@ -16,6 +17,7 @@ import {
 } from "@/lib/ws/handlers/agent-session";
 
 type KanbanTask = KanbanState["tasks"][number];
+const lifecycleDebug = createDebugLogger("task-lifecycle:ws");
 
 function mergeTaskUpdate(existing: KanbanTask | undefined, nextTask: KanbanTask): KanbanTask {
   if (!existing) return nextTask;
@@ -94,6 +96,61 @@ function findTaskInState(state: AppState, taskId: string): KanbanTask | undefine
   return undefined;
 }
 
+function taskEventIdForLog(payload: TaskEventPayload): string {
+  return payload.task_id ?? payload.id ?? "";
+}
+
+function valueForLog(value: string | null | undefined): string {
+  return value ?? "-";
+}
+
+function payloadPrimaryStateForLog(payload: TaskEventPayload): string {
+  if (payload.primary_session_state === undefined) return "-";
+  return payload.primary_session_state ?? "null";
+}
+
+function taskStateForLog(task: KanbanTask | undefined): string {
+  return task?.state ?? "-";
+}
+
+function taskPrimaryStateForLog(task: KanbanTask | undefined): string {
+  return task?.primarySessionState ?? "-";
+}
+
+function didPreservePrimaryState(
+  payload: TaskEventPayload,
+  beforeTask: KanbanTask | undefined,
+  afterTask: KanbanTask | undefined,
+): boolean {
+  if (payload.primary_session_state !== undefined) return false;
+  const previousPrimaryState = beforeTask?.primarySessionState;
+  if (previousPrimaryState === undefined) return false;
+  return previousPrimaryState === afterTask?.primarySessionState;
+}
+
+function logTaskMerge(
+  action: "task.created" | "task.updated" | "task.state_changed",
+  beforeState: AppState,
+  afterState: AppState,
+  payload: TaskEventPayload,
+): void {
+  if (!isDebug()) return;
+  const taskId = taskEventIdForLog(payload);
+  const beforeTask = findTaskInState(beforeState, taskId);
+  const afterTask = findTaskInState(afterState, taskId);
+  lifecycleDebug(`${action} merge`, {
+    task_id: taskId,
+    payloadState: valueForLog(payload.state),
+    payloadPrimarySessionId: valueForLog(payload.primary_session_id),
+    payloadPrimarySessionState: payloadPrimaryStateForLog(payload),
+    beforeTaskState: taskStateForLog(beforeTask),
+    beforeTaskPrimaryState: taskPrimaryStateForLog(beforeTask),
+    afterTaskState: taskStateForLog(afterTask),
+    afterTaskPrimaryState: taskPrimaryStateForLog(afterTask),
+    preservedPrimaryState: didPreservePrimaryState(payload, beforeTask, afterTask),
+  });
+}
+
 /** Remove a task from both single-kanban and multi-kanban snapshots. */
 function removeTaskFromBothKanbans(state: AppState, taskId: string): AppState {
   let next = state;
@@ -166,6 +223,7 @@ function redirectAwayFromRemovedTask(taskId: string): void {
 }
 
 type TaskUpdatedMessage = Parameters<NonNullable<WsHandlers["task.updated"]>>[0];
+type TaskStateChangedMessage = Parameters<NonNullable<WsHandlers["task.state_changed"]>>[0];
 
 function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessage): void {
   // Skip ephemeral tasks (e.g., quick chat) - they shouldn't appear on the Kanban board
@@ -215,6 +273,7 @@ function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessag
   // This makes workflow profile switches transparent for unpinned users
   // without yanking users off a live session they deliberately selected.
   const afterState = store.getState();
+  logTaskMerge("task.updated", beforeState, afterState, message.payload);
   const newPrimary = findTaskInState(afterState, taskId)?.primarySessionId ?? null;
   if (
     newPrimary &&
@@ -228,14 +287,27 @@ function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessag
   }
 }
 
+function handleTaskStateChanged(store: StoreApi<AppState>, message: TaskStateChangedMessage): void {
+  // Skip ephemeral tasks (e.g., quick chat) - they shouldn't appear on the Kanban board
+  if (message.payload.is_ephemeral) return;
+
+  const beforeState = store.getState();
+  store.setState((state) =>
+    upsertTaskInBothKanbans(state, message.payload.workflow_id, message.payload),
+  );
+  logTaskMerge("task.state_changed", beforeState, store.getState(), message.payload);
+}
+
 export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "task.created": (message) => {
       // Skip ephemeral tasks (e.g., quick chat) - they shouldn't appear on the Kanban board
       if (message.payload.is_ephemeral) return;
+      const beforeState = store.getState();
       store.setState((state) =>
         upsertTaskInBothKanbans(state, message.payload.workflow_id, message.payload),
       );
+      logTaskMerge("task.created", beforeState, store.getState(), message.payload);
     },
     "task.updated": (message) => handleTaskUpdated(store, message),
     "task.deleted": (message) => {
@@ -299,12 +371,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       }
     },
     "task.state_changed": (message) => {
-      // Skip ephemeral tasks (e.g., quick chat) - they shouldn't appear on the Kanban board
-      if (message.payload.is_ephemeral) return;
-
-      store.setState((state) =>
-        upsertTaskInBothKanbans(state, message.payload.workflow_id, message.payload),
-      );
+      handleTaskStateChanged(store, message);
     },
   };
 }

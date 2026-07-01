@@ -120,6 +120,9 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 				}
 			}
 		}
+		if data, ok := event.Data.(map[string]interface{}); ok {
+			b.logLifecycleBroadcast(action, data, sessionID)
+		}
 
 		switch action {
 		case ws.ActionSessionAgentctlStarting, ws.ActionSessionAgentctlReady, ws.ActionSessionAgentctlError:
@@ -156,4 +159,32 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 		return
 	}
 	b.subscriptions = append(b.subscriptions, sub)
+}
+
+func (b *TaskEventBroadcaster) logLifecycleBroadcast(action string, data map[string]interface{}, sessionID string) {
+	switch action {
+	case ws.ActionTaskCreated, ws.ActionTaskUpdated, ws.ActionTaskStateChanged,
+		ws.ActionTaskDeleted, ws.ActionSessionStateChanged:
+	default:
+		return
+	}
+	b.logger.Info("ws lifecycle broadcast",
+		zap.String("action", action),
+		zap.String("task_id", lifecycleString(data, "task_id")),
+		zap.String("session_id", sessionID),
+		zap.String("state", lifecycleString(data, "state")),
+		zap.String("old_state", lifecycleString(data, "old_state")),
+		zap.String("new_state", lifecycleString(data, "new_state")),
+		zap.String("primary_session_id", lifecycleString(data, "primary_session_id")),
+		zap.String("primary_session_state", lifecycleString(data, "primary_session_state")),
+		zap.String("updated_at", lifecycleString(data, "updated_at")),
+		zap.Int("connected_clients", b.hub.GetClientCount()),
+	)
+}
+
+func lifecycleString(data map[string]interface{}, key string) string {
+	if value, ok := data[key].(string); ok {
+		return value
+	}
+	return ""
 }
