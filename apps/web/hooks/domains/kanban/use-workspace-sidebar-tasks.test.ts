@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
 
 const mockUseAllWorkflowSnapshots = vi.fn();
+const mockUseWorkflows = vi.fn();
 
 type Snapshot = {
   workflowId: string;
@@ -36,6 +37,11 @@ vi.mock("@/components/state-provider", () => ({
 
 vi.mock("@/hooks/domains/kanban/use-all-workflow-snapshots", () => ({
   useAllWorkflowSnapshots: (workspaceId: string | null) => mockUseAllWorkflowSnapshots(workspaceId),
+}));
+
+vi.mock("@/hooks/use-workflows", () => ({
+  useWorkflows: (workspaceId: string | null, enabled?: boolean) =>
+    mockUseWorkflows(workspaceId, enabled),
 }));
 
 import { useWorkspaceSidebarTasks } from "./use-workspace-sidebar-tasks";
@@ -164,6 +170,36 @@ describe("useWorkspaceSidebarTasks", () => {
     const { result } = renderHook(() => useWorkspaceSidebarTasks("ws-1"));
     expect(result.current.allTasks.map((t) => t.id)).toEqual(["t-a1"]);
     expect(result.current.allTasks[0]._workflowId).toBe("wf-A");
+  });
+});
+
+describe("useWorkspaceSidebarTasks — workflow fetching", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockState = {
+      kanbanMulti: { snapshots: {}, isLoading: false },
+      workflows: { items: [] },
+      kanban: { workflowId: null, tasks: [], steps: [] },
+    };
+  });
+
+  it("loads workflows for the active workspace so the sidebar can render them", () => {
+    // The sidebar is mounted globally; without owning the workflow fetch it
+    // silently displays stale data when the user switches workspace on any
+    // route that isn't the kanban board.
+    renderHook(() => useWorkspaceSidebarTasks("ws-1"));
+    expect(mockUseWorkflows).toHaveBeenCalledWith("ws-1", true);
+  });
+
+  it("re-fires the workflows fetch when the active workspace changes", () => {
+    const { rerender } = renderHook(
+      ({ workspaceId }: { workspaceId: string | null }) => useWorkspaceSidebarTasks(workspaceId),
+      { initialProps: { workspaceId: "ws-1" } },
+    );
+    expect(mockUseWorkflows).toHaveBeenLastCalledWith("ws-1", true);
+
+    rerender({ workspaceId: "ws-2" });
+    expect(mockUseWorkflows).toHaveBeenLastCalledWith("ws-2", true);
   });
 });
 

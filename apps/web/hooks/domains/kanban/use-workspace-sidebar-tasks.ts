@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
+import { useWorkflows } from "@/hooks/use-workflows";
 import {
   aggregateSidebarTasks,
   type AggregatedSidebarTasks,
@@ -20,8 +21,14 @@ export type WorkspaceSidebarTasksResult = AggregatedSidebarTasks & {
  * single active `kanban` slice for tasks that arrived via WS before their
  * snapshot resolved). Snapshots from other workspaces are filtered out so a
  * stale hydration doesn't leak across workspace switches.
+ *
+ * Also owns `useWorkflows` so `state.workflows.items` follows the active
+ * workspace on every route — otherwise the sidebar would only refresh after
+ * a workspace switch on the kanban page (the sole other caller of
+ * `useWorkflows`), leaving stale tasks visible on non-kanban routes.
  */
 export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceSidebarTasksResult {
+  useWorkflows(workspaceId, true);
   useAllWorkflowSnapshots(workspaceId);
 
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
