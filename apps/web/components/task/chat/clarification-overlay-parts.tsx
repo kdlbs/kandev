@@ -1,8 +1,14 @@
 "use client";
 
 import { IconCheck, IconCornerDownLeft, IconArrowLeft, IconArrowRight } from "@tabler/icons-react";
+import { useLayoutEffect, useRef } from "react";
+import { Textarea } from "@kandev/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { ClarificationOption } from "@/lib/types/http";
+
+// Grow the custom-answer box up to ~6 lines, then scroll internally so the
+// clarification overlay stays compact.
+const MAX_CUSTOM_INPUT_HEIGHT = 160;
 
 export function stepClassName(active: boolean, answered: boolean): string {
   if (active) {
@@ -164,25 +170,37 @@ export function ClarificationCustomInput({
   onSubmit,
   onRequestFinalSubmit,
 }: CustomInputProps) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-grow to fit content (WebKit lacks CSS field-sizing, so measure in JS)
+  // and clamp to MAX_CUSTOM_INPUT_HEIGHT, after which the box scrolls.
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, MAX_CUSTOM_INPUT_HEIGHT)}px`;
+  }, [draft]);
+
   return (
     <div
       data-testid="clarification-custom-input"
       data-active={active ? "true" : "false"}
       className={cn(
-        "mt-2.5 flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors",
+        "mt-2.5 flex items-start gap-2 px-3 py-2 rounded-lg border transition-colors",
         active
           ? "bg-blue-500/15 border-blue-500/50 text-foreground"
           : "border-dashed border-border/70 bg-muted/30",
       )}
     >
       <span
-        className={cn("text-xs", active ? "text-blue-500" : "text-muted-foreground")}
+        className={cn("mt-0.5 text-xs", active ? "text-blue-500" : "text-muted-foreground")}
         aria-hidden="true"
       >
         ↳
       </span>
-      <input
-        type="text"
+      <Textarea
+        ref={textareaRef}
+        rows={1}
         placeholder={
           committedText !== null ? "Press Enter to update your answer…" : "Or type a custom answer…"
         }
@@ -190,8 +208,11 @@ export function ClarificationCustomInput({
         onChange={(e) => onChange(e.target.value)}
         disabled={isSubmitting}
         data-testid="clarification-input"
-        className="flex-1 text-sm bg-transparent placeholder:text-muted-foreground/60 focus:outline-none"
+        style={{ maxHeight: MAX_CUSTOM_INPUT_HEIGHT }}
+        className="flex-1 min-h-0 resize-none overflow-y-auto border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0 placeholder:text-muted-foreground/60"
         onKeyDown={(e) => {
+          // Shift+Enter (and Alt+Enter) fall through so the textarea inserts a
+          // newline instead of submitting.
           if (e.key !== "Enter" || e.shiftKey || e.altKey) return;
           if (e.metaKey || e.ctrlKey) {
             // Cmd/Ctrl+Enter only asks the parent to finalize. The draft was
@@ -208,14 +229,19 @@ export function ClarificationCustomInput({
           }
         }}
       />
-      <kbd
-        aria-hidden="true"
-        className="select-none flex items-center gap-1 font-mono text-[10px] px-1.5 py-0.5 rounded border border-border bg-background text-muted-foreground"
-      >
-        <IconCornerDownLeft className="h-2.5 w-2.5" />
-        Enter
-      </kbd>
-      {active && <IconCheck className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />}
+      <div className="mt-0.5 flex flex-shrink-0 items-center gap-1">
+        <kbd
+          aria-hidden="true"
+          className="select-none flex items-center gap-1 font-mono text-[10px] px-1.5 py-0.5 rounded border border-border bg-background text-muted-foreground"
+        >
+          <IconCornerDownLeft className="h-2.5 w-2.5" />
+          Enter
+        </kbd>
+        <span aria-hidden="true" className="select-none text-[10px] text-muted-foreground/60">
+          ⇧↵ newline
+        </span>
+      </div>
+      {active && <IconCheck className="mt-0.5 h-3.5 w-3.5 text-blue-500 flex-shrink-0" />}
     </div>
   );
 }

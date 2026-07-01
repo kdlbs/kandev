@@ -64,6 +64,37 @@ test.describe("Clarification flow", () => {
     await expect(session.chat).toContainText(/You answered|selected_option/);
   });
 
+  test("custom answer accepts multiple lines via Shift+Enter", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification Multiline",
+      "clarification",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    // The custom answer is a textarea: Shift+Enter inserts a newline, plain
+    // Enter submits the whole multi-line draft.
+    const input = session.clarificationInput();
+    await input.click();
+    await input.pressSequentially("first line");
+    await input.press("Shift+Enter");
+    await input.pressSequentially("second line");
+    await expect(input).toHaveValue("first line\nsecond line");
+
+    await input.press("Enter");
+
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(session.chat).toContainText("first line");
+    await expect(session.chat).toContainText("second line");
+  });
+
   test("skip clarification", async ({ testPage, apiClient, seedData }) => {
     const session = await seedClarificationTask(
       testPage,
