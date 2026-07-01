@@ -9,6 +9,13 @@ import * as React from "react";
  * an AlertDialog by default). This module resolves that button from the dialog
  * content and exposes a keydown handler the base Dialog/AlertDialog content
  * components attach.
+ *
+ * Note: a plain single-line `<input>` is intentionally *not* exempt — dialogs
+ * such as a "type the name to confirm" delete flow expect Enter in the input to
+ * fire the primary action. Only text-entry surfaces where Enter means "newline"
+ * (`textarea`, contenteditable) are skipped. Interactive controls with their own
+ * Enter semantics (other buttons, `<select>`, comboboxes) keep that behavior;
+ * see `focusKeepsEnter`.
  */
 
 function isActionable(el: HTMLElement | null): el is HTMLElement {
@@ -16,9 +23,13 @@ function isActionable(el: HTMLElement | null): el is HTMLElement {
   if (el.hasAttribute("disabled")) return false;
   if (el.getAttribute("aria-disabled") === "true") return false;
   if (el.getAttribute("data-disabled") !== null) return false;
-  // Hidden elements (e.g. inside a collapsed section) have no layout box.
-  if (el.offsetParent === null && el.getAttribute("aria-hidden") === "true") return false;
   return true;
+}
+
+function isPrimaryCandidate(button: HTMLElement): boolean {
+  if (button.getAttribute("type") === "submit") return true;
+  const variant = button.getAttribute("data-variant");
+  return variant === "default" || variant === "destructive";
 }
 
 /**
@@ -30,11 +41,13 @@ function isActionable(el: HTMLElement | null): el is HTMLElement {
  *  2. `[data-dialog-default-action]` — an explicit opt-in marker a generic
  *     Dialog can place on its primary button (useful when a footer has several
  *     action buttons).
- *  3. A `type="submit"` button inside the dialog footer.
- *  4. The single non-cancel action button in the dialog footer, identified by
- *     its `data-variant` (`default`/`destructive`). If the footer has zero or
- *     more than one such candidate we return null and do nothing, rather than
- *     guess and fire the wrong (possibly destructive) action.
+ *  3. The single primary action button in the dialog footer — a `type="submit"`
+ *     button or one with `data-variant` `default`/`destructive`.
+ *
+ * Primary candidates are counted *including disabled ones*: a footer with two
+ * competing actions where one is temporarily disabled (e.g. "Migrate & Delete"
+ * pending a selection, next to an enabled "Delete & Archive") is ambiguous, so
+ * we return null and do nothing rather than fire the wrong destructive action.
  */
 export function resolveDialogDefaultAction(content: HTMLElement): HTMLElement | null {
   const alertAction = content.querySelector<HTMLElement>('[data-slot="alert-dialog-action"]');
@@ -46,16 +59,13 @@ export function resolveDialogDefaultAction(content: HTMLElement): HTMLElement | 
   const footer = content.querySelector<HTMLElement>('[data-slot="dialog-footer"]');
   if (!footer) return null;
 
-  const buttons = Array.from(footer.querySelectorAll<HTMLElement>("button")).filter(isActionable);
+  const primaries = Array.from(footer.querySelectorAll<HTMLElement>("button")).filter(
+    isPrimaryCandidate,
+  );
+  if (primaries.length !== 1) return null;
 
-  const submit = buttons.find((b) => b.getAttribute("type") === "submit");
-  if (submit) return submit;
-
-  const primaries = buttons.filter((b) => {
-    const variant = b.getAttribute("data-variant");
-    return variant === "default" || variant === "destructive";
-  });
-  return primaries.length === 1 ? primaries[0] : null;
+  const only = primaries[0];
+  return isActionable(only) ? only : null;
 }
 
 const TEXT_ENTRY_TAGS = new Set(["TEXTAREA"]);
@@ -68,6 +78,39 @@ function isTextEntry(el: EventTarget | null): boolean {
   return false;
 }
 
+const DISMISS_VARIANTS = new Set(["outline", "ghost", "secondary", "link"]);
+
+/**
+ * When Enter fires from a focused interactive control that owns its own Enter
+ * behavior — another action button, a `<select>`, a combobox — let that control
+ * handle it instead of hijacking Enter for the footer action. The one exception
+ * is a dismiss/secondary control (Cancel, the close "X"): overriding those is
+ * the whole point (Radix focuses Cancel on an AlertDialog by default), so Enter
+ * still fires the primary action there.
+ */
+function focusKeepsEnter(target: EventTarget | null, action: HTMLElement): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target === action) return true; // let native activation click it (no double-fire)
+
+  const role = target.getAttribute("role");
+  const interactive =
+    target.tagName === "BUTTON" ||
+    target.tagName === "A" ||
+    target.tagName === "SELECT" ||
+    role === "button" ||
+    role === "combobox" ||
+    role === "listbox" ||
+    role === "menu";
+  if (!interactive) return false;
+
+  const slot = target.getAttribute("data-slot");
+  if (slot === "alert-dialog-cancel" || slot === "dialog-close") return false;
+  const variant = target.getAttribute("data-variant");
+  if (variant && DISMISS_VARIANTS.has(variant)) return false;
+
+  return true;
+}
+
 /**
  * Keydown handler for dialog content. Attach to the Radix `*Content` element so
  * `event.currentTarget` is the dialog content root. On a plain Enter it
@@ -77,12 +120,14 @@ function isTextEntry(el: EventTarget | null): boolean {
 export function handleDialogDefaultActionKeyDown(event: React.KeyboardEvent<HTMLElement>): void {
   if (event.key !== "Enter") return;
   if (event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (event.repeat) return; // ignore auto-repeat while Enter is held down
   if (event.defaultPrevented) return;
   if (event.nativeEvent.isComposing) return; // mid-IME composition
   if (isTextEntry(event.target)) return;
 
   const action = resolveDialogDefaultAction(event.currentTarget);
   if (!action) return;
+  if (focusKeepsEnter(event.target, action)) return;
 
   event.preventDefault();
   action.click();
