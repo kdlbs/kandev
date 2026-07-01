@@ -6,21 +6,18 @@ import { KanbanPage } from "../../pages/kanban-page";
 const START_AGENT_TEST_ID = "submit-start-agent";
 const WRAPPER_TEST_ID = "submit-start-agent-wrapper";
 const START_ENABLED_TIMEOUT = 30_000;
-const SEED_REPO_NAME = "E2E Repo";
 
 // Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
 useRegularMode();
 
-async function ensureSeedRepositorySelected(testPage: Page) {
+async function ensureSeedRepositorySelected(testPage: Page, repositoryId: string) {
+  const repoChipWrapper = testPage.getByTestId("repo-chip").first();
   const repoChip = testPage.getByTestId("repo-chip-trigger").first();
-  if (!(await repoChip.textContent())?.includes(SEED_REPO_NAME)) {
+  if ((await repoChipWrapper.getAttribute("data-repository-id")) !== repositoryId) {
     await repoChip.click();
-    await testPage
-      .getByRole("option", { name: new RegExp(`^${SEED_REPO_NAME}\\b`, "i") })
-      .first()
-      .click();
+    await testPage.locator(`[cmdk-item][data-value="${repositoryId}"]`).click();
   }
-  await expect(repoChip).toContainText(SEED_REPO_NAME);
+  await expect(repoChipWrapper).toHaveAttribute("data-repository-id", repositoryId);
   await expect(testPage.getByTestId("branch-chip-trigger").first()).toContainText("main", {
     timeout: 10_000,
   });
@@ -49,14 +46,17 @@ test.describe("Create task button: disabled-reason tooltip", () => {
     });
   });
 
-  test("tooltip omits any disabled reason once the form is valid", async ({ testPage }) => {
+  test("tooltip omits any disabled reason once the form is valid", async ({
+    testPage,
+    seedData,
+  }) => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
     await kanban.createTaskButton.first().click();
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
-    await ensureSeedRepositorySelected(testPage);
+    await ensureSeedRepositorySelected(testPage, seedData.repositoryId);
 
     await testPage.getByTestId("task-title-input").fill("Valid Task");
     await testPage.getByTestId("task-description-input").fill("doing a thing");
@@ -77,6 +77,7 @@ test.describe("Create task button: disabled-reason tooltip", () => {
 
   test("shows 'Add a task title' after clearing a previously-filled title", async ({
     testPage,
+    seedData,
   }) => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -84,7 +85,7 @@ test.describe("Create task button: disabled-reason tooltip", () => {
     await kanban.createTaskButton.first().click();
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
-    await ensureSeedRepositorySelected(testPage);
+    await ensureSeedRepositorySelected(testPage, seedData.repositoryId);
 
     const titleInput = testPage.getByTestId("task-title-input");
     await titleInput.fill("Temp Title");
