@@ -271,8 +271,10 @@ export function ClarificationCustomInput({
         onKeyDown={(e) => {
           // Shift+Enter (and Alt+Enter) fall through so the textarea inserts a
           // newline instead of submitting. isComposing ignores the Enter that
-          // confirms an IME candidate (CJK keyboards).
-          if (e.key !== "Enter" || e.shiftKey || e.altKey || e.nativeEvent.isComposing) return;
+          // confirms an IME candidate (CJK keyboards); repeat ignores auto-repeat
+          // keydowns from a held Enter so it can't fire multiple submits.
+          if (e.key !== "Enter" || e.shiftKey || e.altKey || e.repeat || e.nativeEvent.isComposing)
+            return;
           if (e.metaKey || e.ctrlKey) {
             // Cmd/Ctrl+Enter only asks the parent to finalize. The draft was
             // already live-recorded via onChange, so we skip the per-question

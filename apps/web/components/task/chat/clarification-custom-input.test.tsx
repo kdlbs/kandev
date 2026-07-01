@@ -112,6 +112,16 @@ describe("ClarificationCustomInput multiline", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it("ignores auto-repeat Enter from a held key so it can't submit twice", () => {
+    const onSubmit = vi.fn();
+    const { getByTestId } = render(
+      <ClarificationCustomInput {...makeProps({ draft: "answer", onSubmit })} />,
+    );
+    const notDefaulted = pressEnter(getByTestId(INPUT_TESTID), { repeat: true });
+    expect(notDefaulted).toBe(true); // default not prevented → treated as a no-op
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it("does not submit while an IME candidate is being composed", () => {
     const onSubmit = vi.fn();
     const { getByTestId } = render(
