@@ -2,6 +2,19 @@
 
 All notable changes to Kandev.
 
+## 0.71.0 - 2026-07-01
+
+### Features
+
+- allow multiline custom answers in clarification overlay ([#1566](https://github.com/kdlbs/kandev/pull/1566))
+- add Download option to file browser context menu ([#1567](https://github.com/kdlbs/kandev/pull/1567)) by @StefanFVogel
+
+### Bug Fixes
+
+- avoid stale task worktree repository launches ([#1568](https://github.com/kdlbs/kandev/pull/1568))
+- refresh sidebar tasks when the active workspace changes ([#1564](https://github.com/kdlbs/kandev/pull/1564)) by @StefanFVogel
+- keep user-selected terminal session active instead of auto-handoff ([#1562](https://github.com/kdlbs/kandev/pull/1562)) by @jingrandev
+
 ## 0.70.0 - 2026-07-01
 
 ### Features
