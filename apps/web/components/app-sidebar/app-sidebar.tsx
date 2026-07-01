@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { usePathname } from "@/lib/routing/client-router";
 import { useAppStore } from "@/components/state-provider";
+import { useEnsureWorkspaceWorkflows } from "@/hooks/use-workflows";
 import { useInOffice } from "@/hooks/use-in-office";
 import { cn } from "@/lib/utils";
 import {
@@ -61,6 +62,13 @@ export function AppSidebar() {
   const setWidth = useAppStore((s) => s.setAppSidebarWidth);
   const pathname = usePathname();
   const inOffice = useInOffice();
+
+  // Keep `state.workflows.items` in sync with the active workspace at the top
+  // of the always-mounted sidebar. Downstream consumers (the workspace picker,
+  // Tasks section, kanban board) all assume this state exists for the current
+  // workspace — hoisting it above the collapsible Tasks section is required so
+  // a user with the section collapsed still gets fresh workflows on a switch.
+  useEnsureWorkspaceWorkflows();
 
   const handleResize = useCallback(
     (e: React.MouseEvent) => {

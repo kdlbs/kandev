@@ -71,6 +71,10 @@ vi.mock("@/hooks/use-in-office", () => ({
   useInOffice: () => officeRouteMock.inOffice,
 }));
 
+vi.mock("@/hooks/use-workflows", () => ({
+  useEnsureWorkspaceWorkflows: () => {},
+}));
+
 const storeState = {
   appSidebar: {
     collapsed: false,

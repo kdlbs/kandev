@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
-import { useWorkflows } from "@/hooks/use-workflows";
 import {
   aggregateSidebarTasks,
   type AggregatedSidebarTasks,
@@ -22,12 +21,13 @@ export type WorkspaceSidebarTasksResult = AggregatedSidebarTasks & {
  * snapshot resolved). Snapshots from other workspaces are filtered out so a
  * stale hydration doesn't leak across workspace switches.
  *
- * The sidebar is mounted globally by `AppShell`, so it is also the sole owner
- * of the workspace-scoped `useWorkflows` fetch that keeps `state.workflows.items`
- * in sync with the active workspace on every route.
+ * Assumes `state.workflows.items` is kept in sync with the active workspace by
+ * an always-mounted caller (`useEnsureWorkspaceWorkflows` from `AppSidebar`).
+ * Do not add the fetch back here — this hook only runs when the Tasks section
+ * accordion is expanded, so co-locating the fetch would recreate the original
+ * "sidebar stale after workspace switch" bug for collapsed-section users.
  */
 export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceSidebarTasksResult {
-  useWorkflows(workspaceId, true);
   useAllWorkflowSnapshots(workspaceId);
 
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);

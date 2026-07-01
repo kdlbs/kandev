@@ -2,6 +2,17 @@ import { useEffect } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { listWorkflows } from "@/lib/api";
 
+/**
+ * Load workflows for the active workspace. Call from a component that stays
+ * mounted independently of any collapsible section, so `state.workflows.items`
+ * follows the active workspace even when the sidebar's Tasks section is
+ * collapsed and its children (which consume workflows) are unmounted.
+ */
+export function useEnsureWorkspaceWorkflows() {
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  useWorkflows(workspaceId, true);
+}
+
 export function useWorkflows(workspaceId: string | null, enabled = true) {
   const workflows = useAppStore((state) => state.workflows.items);
   const setWorkflows = useAppStore((state) => state.setWorkflows);

@@ -6,11 +6,13 @@ const mockSetWorkflows = vi.fn();
 
 type MockState = {
   workflows: { items: Array<{ id: string; workspaceId: string; name: string }> };
+  workspaces: { activeId: string | null };
   setWorkflows: typeof mockSetWorkflows;
 };
 
 let mockState: MockState = {
   workflows: { items: [] },
+  workspaces: { activeId: null },
   setWorkflows: mockSetWorkflows,
 };
 
@@ -22,7 +24,7 @@ vi.mock("@/lib/api", () => ({
   listWorkflows: (...args: unknown[]) => mockListWorkflows(...args),
 }));
 
-import { useWorkflows } from "./use-workflows";
+import { useWorkflows, useEnsureWorkspaceWorkflows } from "./use-workflows";
 
 function makeWorkflow(id: string, workspaceId: string) {
   return {
@@ -42,6 +44,7 @@ describe("useWorkflows — stale response guard", () => {
     vi.clearAllMocks();
     mockState = {
       workflows: { items: [] },
+      workspaces: { activeId: null },
       setWorkflows: mockSetWorkflows,
     };
   });
@@ -109,5 +112,31 @@ describe("useWorkflows — stale response guard", () => {
       (call) => Array.isArray(call[0]) && call[0].length === 0,
     );
     expect(cleared).toBe(false);
+  });
+});
+
+describe("useEnsureWorkspaceWorkflows", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockListWorkflows.mockResolvedValue({ workflows: [] });
+    mockState = {
+      workflows: { items: [] },
+      workspaces: { activeId: "ws-A" },
+      setWorkflows: mockSetWorkflows,
+    };
+  });
+
+  it("fetches workflows for the store's active workspace on mount", async () => {
+    renderHook(() => useEnsureWorkspaceWorkflows());
+    await waitFor(() => expect(mockListWorkflows).toHaveBeenCalledWith("ws-A", expect.anything()));
+  });
+
+  it("re-fetches when the store's active workspace changes", async () => {
+    const { rerender } = renderHook(() => useEnsureWorkspaceWorkflows());
+    await waitFor(() => expect(mockListWorkflows).toHaveBeenCalledWith("ws-A", expect.anything()));
+
+    mockState = { ...mockState, workspaces: { activeId: "ws-B" } };
+    rerender();
+    await waitFor(() => expect(mockListWorkflows).toHaveBeenCalledWith("ws-B", expect.anything()));
   });
 });
