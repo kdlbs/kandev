@@ -780,7 +780,7 @@ jobs:
               return 0
             fi
 
-            bash "$GITHUB_WORKSPACE/.github/scripts/collect-macos-desktop-diagnostics.sh" "$label"
+            bash "$GITHUB_WORKSPACE/.github/scripts/collect-macos-desktop-diagnostics.sh" "$label" || true
           }
 
           terminate_process_tree() {
@@ -862,7 +862,7 @@ jobs:
           DESKTOP_DIAGNOSTICS_RUST_TARGET: ${{ matrix.rust_target }}
         run: |
           set -euo pipefail
-          bash "$GITHUB_WORKSPACE/.github/scripts/collect-macos-desktop-diagnostics.sh" failure
+          bash "$GITHUB_WORKSPACE/.github/scripts/collect-macos-desktop-diagnostics.sh" failure || true
 
       - name: Upload macOS desktop diagnostics
         if: failure() && startsWith(matrix.platform, 'macos-')

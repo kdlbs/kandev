@@ -75,14 +75,14 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("TAURI_BUNDLE_ATTEMPTS:", build)
         self.assertIn("run_with_timeout", build)
         self.assertIn("collect_macos_desktop_diagnostics", build)
-        self.assertIn("collect-macos-desktop-diagnostics.sh", build)
+        self.assertIn('collect-macos-desktop-diagnostics.sh" "$label" || true', build)
         self.assertIn("terminate_process_tree_with_signal", build)
         self.assertIn("else\n              status=$?", build)
         self.assertIn("for attempt in", build)
 
         collect = step_block("Collect macOS desktop diagnostics")
         self.assertIn("if: failure() && startsWith(matrix.platform, 'macos-')", collect)
-        self.assertIn("collect-macos-desktop-diagnostics.sh", collect)
+        self.assertIn("collect-macos-desktop-diagnostics.sh\" failure || true", collect)
 
         upload = step_block("Upload macOS desktop diagnostics")
         self.assertIn("if: failure() && startsWith(matrix.platform, 'macos-')", upload)
@@ -92,6 +92,8 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("hdiutil info", DIAGNOSTICS)
         self.assertIn("df -h", DIAGNOSTICS)
         self.assertIn("bundle_dmg.sh", DIAGNOSTICS)
+        self.assertIn('cp "$bundle_root/dmg/bundle_dmg.sh"', DIAGNOSTICS)
+        self.assertIn("|| true", DIAGNOSTICS)
 
 
 if __name__ == "__main__":

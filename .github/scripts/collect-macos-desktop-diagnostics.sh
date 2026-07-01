@@ -43,5 +43,5 @@ fi
 } > "$diag_dir/macos-${platform}-${label}.txt"
 
 if [ -f "$bundle_root/dmg/bundle_dmg.sh" ]; then
-  cp "$bundle_root/dmg/bundle_dmg.sh" "$diag_dir/bundle_dmg-${platform}-${label}.sh"
+  cp "$bundle_root/dmg/bundle_dmg.sh" "$diag_dir/bundle_dmg-${platform}-${label}.sh" || true
 fi
