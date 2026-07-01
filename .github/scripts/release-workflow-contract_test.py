@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""Contract tests for the maintainer release workflow."""
+
+import re
+import unittest
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "release.yml"
+WORKFLOW = WORKFLOW_PATH.read_text()
+
+
+def step_block(name: str) -> str:
+    marker = f"      - name: {name}"
+    start = WORKFLOW.find(marker)
+    if start == -1:
+        raise AssertionError(f"step not found: {name}")
+    next_step = re.search(r"\n      - (?:name|uses): ", WORKFLOW[start + 1 :])
+    end = len(WORKFLOW) if next_step is None else start + 1 + next_step.start()
+    return WORKFLOW[start:end]
+
+
+def job_block(name: str) -> str:
+    marker = f"  {name}:"
+    start = WORKFLOW.find(marker)
+    if start == -1:
+        raise AssertionError(f"job not found: {name}")
+    next_job = re.search(r"\n  [a-zA-Z0-9_-]+:\n", WORKFLOW[start + 1 :])
+    end = len(WORKFLOW) if next_job is None else start + 1 + next_job.start()
+    return WORKFLOW[start:end]
+
+
+class ReleaseWorkflowContractTest(unittest.TestCase):
+    def test_backfill_tag_input_uses_existing_tag_without_recreating_it(self) -> None:
+        self.assertIn("backfill_tag:", WORKFLOW)
+        self.assertIn("BACKFILL_TAG: ${{ inputs.backfill_tag }}", WORKFLOW)
+        self.assertIn("Backfill existing release tag:", step_block("Compute next version"))
+
+        for name in (
+            "Bump version + generate CHANGELOG (in working tree)",
+            "Create release PR + squash-merge + tag",
+        ):
+            self.assertIn("inputs.backfill_tag == ''", step_block(name))
+
+    def test_backfill_tag_still_runs_build_and_publish_jobs(self) -> None:
+        for name in (
+            "build-web",
+            "build-bundles",
+            "build-desktop",
+            "publish-release",
+            "publish-npm",
+            "update-homebrew-tap",
+        ):
+            block = job_block(name)
+            self.assertIn("if: ${{ !inputs.dry_run", block)
+            self.assertNotIn("inputs.backfill_tag == ''", block)
+
+    def test_macos_dmg_build_has_retry_timeout_and_diagnostics(self) -> None:
+        build = step_block("Build Tauri desktop app")
+        self.assertIn("timeout-minutes:", build)
+        self.assertIn("TAURI_BUNDLE_ATTEMPTS:", build)
+        self.assertIn("run_with_timeout", build)
+        self.assertIn("collect_macos_desktop_diagnostics", build)
+        self.assertIn("hdiutil info", build)
+        self.assertIn("df -h", build)
+        self.assertIn("bundle_dmg.sh", build)
+        self.assertIn("for attempt in", build)
+
+        collect = step_block("Collect macOS desktop diagnostics")
+        self.assertIn("if: failure() && startsWith(matrix.platform, 'macos-')", collect)
+        self.assertIn("hdiutil info", collect)
+        self.assertIn("df -h", collect)
+        self.assertIn("bundle_dmg.sh", collect)
+
+        upload = step_block("Upload macOS desktop diagnostics")
+        self.assertIn("if: failure() && startsWith(matrix.platform, 'macos-')", upload)
+        self.assertIn("dist/desktop-diagnostics/**", upload)
+        self.assertIn("/release/bundle/dmg/**", upload)
+
+
+if __name__ == "__main__":
+    unittest.main()
