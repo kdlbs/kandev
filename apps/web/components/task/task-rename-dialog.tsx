@@ -45,7 +45,10 @@ function TaskRenameForm({
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") handleSubmit();
+          if (e.key === "Enter") {
+            e.preventDefault();
+            handleSubmit();
+          }
         }}
         onFocus={(e) => e.target.select()}
         placeholder="Task title"

@@ -131,7 +131,10 @@ function SaveLayoutDialog({
               placeholder="My layout"
               autoFocus
               onKeyDown={(e) => {
-                if (e.key === "Enter") handleSave();
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleSave();
+                }
               }}
             />
           </div>

@@ -92,6 +92,15 @@ surface.
 - Components: <200 lines, extract to domain components, composition over props.
 - Hooks: domain-organized in `hooks/domains/`, encapsulate subscription + selection.
 - **Interactivity:** all buttons and links with actions must have `cursor-pointer` class.
+- **Dialog Enter-to-confirm:** the base `@kandev/ui` `DialogContent` / `AlertDialogContent`
+  activate the dialog's semantic action on plain Enter (`packages/ui/src/lib/dialog-default-action.ts`).
+  Resolution: `AlertDialogAction` → an explicit `data-dialog-default-action` button → a footer
+  `type="submit"` → the single non-cancel primary (`data-variant="default"|"destructive"`) button in
+  `DialogFooter`. Multiple primaries or a disabled action → no-op (never guesses). Enter inside a
+  `textarea`/contenteditable, Shift/Cmd/Ctrl+Enter, and already-`preventDefault`ed events are left
+  alone. A dialog input that submits on Enter itself must `preventDefault()` to avoid double-firing;
+  pass `enterConfirms={false}` to opt a dialog out. Mark the intended button with
+  `data-dialog-default-action` when a footer has several action buttons.
 - **Radix tooltip on disabled buttons:** disabled buttons do not receive pointer/focus events, so wrap the disabled `Button` in a focusable span and put `TooltipTrigger asChild` on that span:
   ```tsx
   <Tooltip>
