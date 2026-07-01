@@ -458,7 +458,11 @@ describe("session.state_changed → respects user-pinned session", () => {
     vi.clearAllMocks();
   });
 
-  it("hands off when the pinned active session reaches a terminal state", () => {
+  it("does not hand off when the user pinned the active session even as it reaches a terminal state", () => {
+    // Regression for the "click a non-primary tab, it snaps back to primary"
+    // bug: setActiveSession pins the session, and that pin must be honored
+    // when the backend re-emits the terminal state_changed — the user opened
+    // this terminal session on purpose to review it.
     const store = makeStore({
       tasks: {
         activeTaskId: "t-1",
@@ -487,8 +491,7 @@ describe("session.state_changed → respects user-pinned session", () => {
       payload: { task_id: "t-1", session_id: "s-old", new_state: "COMPLETED" },
     });
 
-    expect(store.getState().setActiveSessionAuto).toHaveBeenCalledWith("t-1", "s-new");
-    expect(store.getState().setActiveSession).not.toHaveBeenCalled();
+    expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
   });
 });
 

@@ -355,6 +355,13 @@ function maybeAdoptSessionOnTransition(
 
   const isActive = state.tasks.activeSessionId === sessionId;
   if (isActive && newState && isTerminalSessionState(newState)) {
+    // The user explicitly opened this terminal session (e.g. clicked its tab
+    // to review a completed/failed run). setActiveSession pins it, so honor
+    // that pin and do NOT auto-hand-off to a running session. Switching away
+    // here was the root cause of the "click a non-primary tab, it snaps back
+    // to the primary session" bug. Workflow-driven handoffs go through
+    // setActiveSessionAuto (no pin) and still take the replacement path below.
+    if (state.tasks.pinnedSessionId === sessionId) return;
     const replacement = pickReplacementSessionId(state, taskId);
     if (replacement && replacement !== sessionId) {
       inheritAgentctlStatus(state, sessionId, replacement);
