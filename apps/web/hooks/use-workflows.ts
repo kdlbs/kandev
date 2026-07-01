@@ -8,8 +8,10 @@ export function useWorkflows(workspaceId: string | null, enabled = true) {
 
   useEffect(() => {
     if (!enabled || !workspaceId) return;
+    let cancelled = false;
     listWorkflows(workspaceId, { cache: "no-store", includeHidden: true })
       .then((response) => {
+        if (cancelled) return;
         const mapped = response.workflows.map((workflow) => ({
           id: workflow.id,
           workspaceId: workflow.workspace_id,
@@ -22,7 +24,13 @@ export function useWorkflows(workspaceId: string | null, enabled = true) {
         }));
         setWorkflows(mapped);
       })
-      .catch(() => setWorkflows([]));
+      .catch(() => {
+        if (cancelled) return;
+        setWorkflows([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [enabled, setWorkflows, workspaceId]);
 
   return { workflows };

@@ -2,7 +2,6 @@
 
 import { useMemo, useSyncExternalStore } from "react";
 import { useAppStore } from "@/components/state-provider";
-import { useWorkflows } from "@/hooks/use-workflows";
 import { useWorkflowSnapshot } from "@/hooks/use-workflow-snapshot";
 import { useUserDisplaySettings } from "@/hooks/use-user-display-settings";
 import { filterTasksByRepositories } from "@/lib/kanban/filters";
@@ -26,8 +25,9 @@ export function useKanbanData({
   const enablePreviewOnClick = useAppStore((state) => state.userSettings.enablePreviewOnClick);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
 
-  // Data fetching hooks
-  useWorkflows(workspaceState.activeId, true);
+  // Data fetching hooks. `state.workflows.items` is loaded by the always-mounted
+  // sidebar via `useWorkspaceSidebarTasks`, so the kanban page only needs the
+  // workflow snapshot here.
   useWorkflowSnapshot(workflowsState.activeId);
 
   // User settings hook

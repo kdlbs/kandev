@@ -22,10 +22,9 @@ export type WorkspaceSidebarTasksResult = AggregatedSidebarTasks & {
  * snapshot resolved). Snapshots from other workspaces are filtered out so a
  * stale hydration doesn't leak across workspace switches.
  *
- * Also owns `useWorkflows` so `state.workflows.items` follows the active
- * workspace on every route — otherwise the sidebar would only refresh after
- * a workspace switch on the kanban page (the sole other caller of
- * `useWorkflows`), leaving stale tasks visible on non-kanban routes.
+ * The sidebar is mounted globally by `AppShell`, so it is also the sole owner
+ * of the workspace-scoped `useWorkflows` fetch that keeps `state.workflows.items`
+ * in sync with the active workspace on every route.
  */
 export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceSidebarTasksResult {
   useWorkflows(workspaceId, true);
