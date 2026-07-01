@@ -89,6 +89,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("for attempt in", build)
 
         helper = step_block("Prepare macOS desktop diagnostics helper")
+        self.assertIn("continue-on-error: true", helper)
         self.assertIn("github.workflow_sha", helper)
         self.assertIn("DESKTOP_DIAGNOSTICS_SCRIPT=$helper", helper)
 

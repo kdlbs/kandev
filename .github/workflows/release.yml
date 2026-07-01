@@ -580,6 +580,7 @@ jobs:
 
       - name: Prepare macOS desktop diagnostics helper
         if: startsWith(matrix.platform, 'macos-')
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
