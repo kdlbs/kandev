@@ -336,6 +336,218 @@ func TestService_CreateTask_RejectsRepositoryFromOtherWorkspace(t *testing.T) {
 	}
 }
 
+func TestService_CreateTask_RewritesTaskWorktreeRepositoryIDToProviderRepository(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	const (
+		workspaceID    = "ws-1"
+		workflowID     = "wf-1"
+		badRepoID      = "repo-task-worktree"
+		providerRepoID = "repo-provider"
+		prHeadBranch   = "feature/adding-a-download-ot-5sl"
+	)
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: workflowID, WorkspaceID: workspaceID, Name: "WF"})
+	_ = repo.CreateRepository(ctx, &models.Repository{
+		ID:            badRepoID,
+		WorkspaceID:   workspaceID,
+		Name:          "kdlbs/kandev task worktree",
+		SourceType:    sourceTypeLocal,
+		LocalPath:     "/root/.kandev/tasks/pr-1541-fix-skip-cle_3bm/kdlbs-kandev",
+		Provider:      "github",
+		ProviderOwner: "kdlbs",
+		ProviderName:  "kandev",
+		DefaultBranch: "main",
+	})
+	_ = repo.CreateRepository(ctx, &models.Repository{
+		ID:            providerRepoID,
+		WorkspaceID:   workspaceID,
+		Name:          "kdlbs/kandev",
+		SourceType:    sourceTypeProvider,
+		Provider:      "github",
+		ProviderOwner: "kdlbs",
+		ProviderName:  "kandev",
+		DefaultBranch: "main",
+	})
+
+	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID:    workspaceID,
+		WorkflowID:     workflowID,
+		WorkflowStepID: "step-1",
+		Title:          "PR review",
+		Repositories: []TaskRepositoryInput{
+			{RepositoryID: badRepoID, BaseBranch: prHeadBranch},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if len(task.Repositories) != 1 {
+		t.Fatalf("expected 1 task repository, got %d", len(task.Repositories))
+	}
+	if task.Repositories[0].RepositoryID != providerRepoID {
+		t.Fatalf("expected provider repository %q, got %q", providerRepoID, task.Repositories[0].RepositoryID)
+	}
+	if task.Repositories[0].BaseBranch != prHeadBranch {
+		t.Fatalf("expected base branch %q, got %q", prHeadBranch, task.Repositories[0].BaseBranch)
+	}
+}
+
+func TestService_CreateTask_CreatesProviderRepositoryForTaskWorktreeRepositoryID(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	const (
+		workspaceID = "ws-1"
+		workflowID  = "wf-1"
+		badRepoID   = "repo-task-worktree"
+	)
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: workflowID, WorkspaceID: workspaceID, Name: "WF"})
+	_ = repo.CreateRepository(ctx, &models.Repository{
+		ID:            badRepoID,
+		WorkspaceID:   workspaceID,
+		Name:          "kdlbs/kandev task worktree",
+		SourceType:    sourceTypeLocal,
+		LocalPath:     "/root/.kandev/tasks/pr-1541-fix-skip-cle_3bm/kdlbs-kandev",
+		Provider:      "github",
+		ProviderOwner: "kdlbs",
+		ProviderName:  "kandev",
+		DefaultBranch: "main",
+	})
+
+	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID:    workspaceID,
+		WorkflowID:     workflowID,
+		WorkflowStepID: "step-1",
+		Title:          "PR review",
+		Repositories: []TaskRepositoryInput{
+			{RepositoryID: badRepoID, BaseBranch: "feature/pr-head"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if len(task.Repositories) != 1 {
+		t.Fatalf("expected 1 task repository, got %d", len(task.Repositories))
+	}
+	createdRepoID := task.Repositories[0].RepositoryID
+	if createdRepoID == badRepoID {
+		t.Fatal("expected task to use a provider repository, got the task worktree repository")
+	}
+	createdRepo, err := repo.GetRepository(ctx, createdRepoID)
+	if err != nil {
+		t.Fatalf("GetRepository(%q): %v", createdRepoID, err)
+	}
+	if createdRepo.SourceType != sourceTypeProvider {
+		t.Fatalf("expected provider source type, got %q", createdRepo.SourceType)
+	}
+	if createdRepo.LocalPath != "" {
+		t.Fatalf("expected provider repository without local path, got %q", createdRepo.LocalPath)
+	}
+	if createdRepo.Provider != "github" || createdRepo.ProviderOwner != "kdlbs" || createdRepo.ProviderName != "kandev" {
+		t.Fatalf("unexpected provider identity: %+v", createdRepo)
+	}
+}
+
+func TestService_CreateTask_GitHubURLIgnoresTaskWorktreeProviderMatch(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	const (
+		workspaceID = "ws-1"
+		workflowID  = "wf-1"
+		badRepoID   = "repo-task-worktree"
+	)
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: workflowID, WorkspaceID: workspaceID, Name: "WF"})
+	_ = repo.CreateRepository(ctx, &models.Repository{
+		ID:            badRepoID,
+		WorkspaceID:   workspaceID,
+		Name:          "kdlbs/kandev task worktree",
+		SourceType:    sourceTypeLocal,
+		LocalPath:     "/root/.kandev/tasks/pr-1541-fix-skip-cle_3bm/kdlbs-kandev",
+		Provider:      "github",
+		ProviderOwner: "kdlbs",
+		ProviderName:  "kandev",
+		DefaultBranch: "main",
+	})
+
+	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID:    workspaceID,
+		WorkflowID:     workflowID,
+		WorkflowStepID: "step-1",
+		Title:          "PR review",
+		Repositories: []TaskRepositoryInput{
+			{GitHubURL: "https://github.com/kdlbs/kandev/pull/1567"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if len(task.Repositories) != 1 {
+		t.Fatalf("expected 1 task repository, got %d", len(task.Repositories))
+	}
+	createdRepoID := task.Repositories[0].RepositoryID
+	if createdRepoID == badRepoID {
+		t.Fatal("expected GitHub URL resolution to ignore the task worktree repository")
+	}
+	createdRepo, err := repo.GetRepository(ctx, createdRepoID)
+	if err != nil {
+		t.Fatalf("GetRepository(%q): %v", createdRepoID, err)
+	}
+	if createdRepo.SourceType != sourceTypeProvider {
+		t.Fatalf("expected provider source type, got %q", createdRepo.SourceType)
+	}
+	if createdRepo.LocalPath != "" {
+		t.Fatalf("expected provider repository without local path, got %q", createdRepo.LocalPath)
+	}
+}
+
+func TestService_FindOrCreateRepository_ReturnsCreatedForTaskWorktreeReplacement(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	const workspaceID = "ws-1"
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: "Workspace"})
+	_ = repo.CreateRepository(ctx, &models.Repository{
+		ID:            "repo-task-worktree",
+		WorkspaceID:   workspaceID,
+		Name:          "kdlbs/kandev task worktree",
+		SourceType:    sourceTypeLocal,
+		LocalPath:     "/root/.kandev/tasks/pr-1541-fix-skip-cle_3bm/kdlbs-kandev",
+		Provider:      "github",
+		ProviderOwner: "kdlbs",
+		ProviderName:  "kandev",
+		DefaultBranch: "main",
+	})
+
+	resolved, created, err := svc.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
+		WorkspaceID:   workspaceID,
+		Provider:      "github",
+		ProviderOwner: "kdlbs",
+		ProviderName:  "kandev",
+		DefaultBranch: "main",
+	})
+	if err != nil {
+		t.Fatalf("FindOrCreateRepository: %v", err)
+	}
+	if !created {
+		t.Fatal("expected created=true for provider replacement row")
+	}
+	if resolved.SourceType != sourceTypeProvider {
+		t.Fatalf("expected provider source type, got %q", resolved.SourceType)
+	}
+	if resolved.LocalPath != "" {
+		t.Fatalf("expected provider repository without local path, got %q", resolved.LocalPath)
+	}
+}
+
 func TestService_CreateRepository_DefaultWorktreeBranchPrefix(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

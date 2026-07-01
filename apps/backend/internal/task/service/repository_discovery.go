@@ -59,9 +59,12 @@ var ErrPathNotAllowed = errors.New("path is not within an allowed root")
 const gitHEAD = "HEAD"
 
 // sourceTypeLocal is the Repository.SourceType value for on-machine repos
-// (a path the user discovered or added manually). Provider-backed repos use
-// other values like "provider".
+// (a path the user discovered or added manually).
 const sourceTypeLocal = "local"
+
+// sourceTypeProvider is the Repository.SourceType value for provider-backed
+// repos that can be cloned/synced from their upstream identity.
+const sourceTypeProvider = "provider"
 
 func (s *Service) DiscoverLocalRepositories(ctx context.Context, root string) (RepositoryDiscoveryResult, error) {
 	roots := s.discoveryRoots()
