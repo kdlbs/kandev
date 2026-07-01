@@ -251,6 +251,51 @@ function patchSnapshotPrimarySessionState(
   return tasks === snapshot.tasks ? snapshot : { ...snapshot, tasks };
 }
 
+function patchWorkflowSnapshotPrimarySessionStates(
+  snapshots: Record<string, WorkflowSnapshotData>,
+  taskId: string,
+  sessionId: string,
+  newState: TaskSessionState,
+): {
+  nextSnapshots: Record<string, WorkflowSnapshotData>;
+  snapshotsChanged: boolean;
+  patchedSnapshotIds: string[];
+} {
+  let snapshotsChanged = false;
+  const patchedSnapshotIds: string[] = [];
+  const nextSnapshots = Object.fromEntries(
+    Object.entries(snapshots).map(([workflowId, snapshot]) => {
+      const nextSnapshot = patchSnapshotPrimarySessionState(snapshot, taskId, sessionId, newState);
+      if (nextSnapshot !== snapshot) {
+        snapshotsChanged = true;
+        patchedSnapshotIds.push(workflowId);
+      }
+      return [workflowId, nextSnapshot];
+    }),
+  );
+  return { nextSnapshots, snapshotsChanged, patchedSnapshotIds };
+}
+
+function logKanbanPrimarySessionSync(params: {
+  taskId: string;
+  sessionId: string;
+  newState: TaskSessionState;
+  beforeTask: KanbanState["tasks"][number] | undefined;
+  patchedKanban: boolean;
+  patchedSnapshotIds: string[];
+}): void {
+  if (!isDebug()) return;
+  lifecycleDebug("session.state_changed kanban sync", {
+    task_id: params.taskId,
+    sessionId: params.sessionId,
+    newState: params.newState,
+    beforeTaskPrimarySessionId: params.beforeTask?.primarySessionId ?? "-",
+    beforeTaskPrimaryState: params.beforeTask?.primarySessionState ?? "-",
+    patchedKanban: params.patchedKanban,
+    patchedSnapshots: params.patchedSnapshotIds.join(",") || "-",
+  });
+}
+
 function syncKanbanPrimarySessionState(
   store: StoreApi<AppState>,
   taskId: TaskId,
@@ -259,59 +304,47 @@ function syncKanbanPrimarySessionState(
 ): void {
   if (!newState) return;
 
-  store.setState((state) => {
-    const beforeTask = state.kanban.tasks.find((task) => task.id === taskId);
-    const patchedSnapshotIds: string[] = [];
-    const nextKanbanTasks = patchTaskPrimarySessionState(
-      state.kanban.tasks,
+  const state = store.getState();
+  if (!state.kanban?.tasks || !state.kanbanMulti?.snapshots) return;
+
+  const beforeTask = state.kanban.tasks.find((task) => task.id === taskId);
+  const nextKanbanTasks = patchTaskPrimarySessionState(
+    state.kanban.tasks,
+    taskId,
+    sessionId,
+    newState,
+  );
+  const { nextSnapshots, snapshotsChanged, patchedSnapshotIds } =
+    patchWorkflowSnapshotPrimarySessionStates(
+      state.kanbanMulti.snapshots,
       taskId,
       sessionId,
       newState,
     );
-    let snapshotsChanged = false;
-    const nextSnapshots = Object.fromEntries(
-      Object.entries(state.kanbanMulti.snapshots).map(([workflowId, snapshot]) => {
-        const nextSnapshot = patchSnapshotPrimarySessionState(
-          snapshot,
-          taskId,
-          sessionId,
-          newState,
-        );
-        if (nextSnapshot !== snapshot) {
-          snapshotsChanged = true;
-          patchedSnapshotIds.push(workflowId);
+
+  logKanbanPrimarySessionSync({
+    taskId,
+    sessionId,
+    newState,
+    beforeTask,
+    patchedKanban: nextKanbanTasks !== state.kanban.tasks,
+    patchedSnapshotIds,
+  });
+
+  if (nextKanbanTasks === state.kanban.tasks && !snapshotsChanged) return;
+
+  store.setState({
+    ...state,
+    kanban:
+      nextKanbanTasks === state.kanban.tasks
+        ? state.kanban
+        : { ...state.kanban, tasks: nextKanbanTasks },
+    kanbanMulti: snapshotsChanged
+      ? {
+          ...state.kanbanMulti,
+          snapshots: nextSnapshots,
         }
-        return [workflowId, nextSnapshot];
-      }),
-    );
-
-    if (isDebug()) {
-      lifecycleDebug("session.state_changed kanban sync", {
-        task_id: taskId,
-        sessionId,
-        newState,
-        beforeTaskPrimarySessionId: beforeTask?.primarySessionId ?? "-",
-        beforeTaskPrimaryState: beforeTask?.primarySessionState ?? "-",
-        patchedKanban: nextKanbanTasks !== state.kanban.tasks,
-        patchedSnapshots: patchedSnapshotIds.join(",") || "-",
-      });
-    }
-
-    if (nextKanbanTasks === state.kanban.tasks && !snapshotsChanged) return state;
-
-    return {
-      ...state,
-      kanban:
-        nextKanbanTasks === state.kanban.tasks
-          ? state.kanban
-          : { ...state.kanban, tasks: nextKanbanTasks },
-      kanbanMulti: snapshotsChanged
-        ? {
-            ...state.kanbanMulti,
-            snapshots: nextSnapshots,
-          }
-        : state.kanbanMulti,
-    };
+      : state.kanbanMulti,
   });
 }
 

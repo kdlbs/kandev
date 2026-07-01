@@ -168,23 +168,16 @@ func (b *TaskEventBroadcaster) logLifecycleBroadcast(action string, data map[str
 	default:
 		return
 	}
-	b.logger.Info("ws lifecycle broadcast",
+	b.logger.Debug("ws lifecycle broadcast",
 		zap.String("action", action),
-		zap.String("task_id", lifecycleString(data, "task_id")),
+		zap.Any("task_id", data["task_id"]),
 		zap.String("session_id", sessionID),
-		zap.String("state", lifecycleString(data, "state")),
-		zap.String("old_state", lifecycleString(data, "old_state")),
-		zap.String("new_state", lifecycleString(data, "new_state")),
-		zap.String("primary_session_id", lifecycleString(data, "primary_session_id")),
-		zap.String("primary_session_state", lifecycleString(data, "primary_session_state")),
-		zap.String("updated_at", lifecycleString(data, "updated_at")),
+		zap.Any("state", data["state"]),
+		zap.Any("old_state", data["old_state"]),
+		zap.Any("new_state", data["new_state"]),
+		zap.Any("primary_session_id", data["primary_session_id"]),
+		zap.Any("primary_session_state", data["primary_session_state"]),
+		zap.Any("updated_at", data["updated_at"]),
 		zap.Int("connected_clients", b.hub.GetClientCount()),
 	)
-}
-
-func lifecycleString(data map[string]interface{}, key string) string {
-	if value, ok := data[key].(string); ok {
-		return value
-	}
-	return ""
 }

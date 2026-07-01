@@ -20,7 +20,7 @@ import {
   KanbanCardDropdownMenuItems,
   type KanbanCardMenuEntry,
 } from "@/components/kanban-card-menu-items";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { useTaskPendingClarification } from "@/hooks/use-task-pending-clarification";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
@@ -220,11 +220,11 @@ function KanbanCardActions({
   isArchiving,
 }: KanbanCardActionProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [storePrimarySessionState, setStorePrimarySessionState] = useState<string | null>(null);
+  const storeApi = useAppStoreApi();
+  const debugEnabled = isDebug();
   const effectiveMenuOpen = menuOpen || Boolean(isDeleting) || Boolean(isArchiving);
   const hasPendingClarificationRequest = useTaskPendingClarification(task.primarySessionId);
-  const storePrimarySessionState = useAppStore((s) =>
-    task.primarySessionId ? (s.taskSessions.items[task.primarySessionId]?.state ?? null) : null,
-  );
   const showQuestionIcon = shouldUseQuestionTaskIcon(task.state, hasPendingClarificationRequest);
   const showRunningSpinner = shouldShowTaskRunningSpinner(task.state, task.primarySessionState);
   const storeWouldShowRunningSpinner =
@@ -244,7 +244,25 @@ function KanbanCardActions({
     Boolean(task.primarySessionId) || Boolean(task.sessionCount && task.sessionCount > 0);
 
   useEffect(() => {
-    if (!hasSpinnerMismatch || !isDebug()) return;
+    if (!debugEnabled || !task.primarySessionId) {
+      setStorePrimarySessionState(null);
+      return;
+    }
+
+    const primarySessionId = task.primarySessionId;
+    const readPrimarySessionState = () =>
+      storeApi.getState().taskSessions.items[primarySessionId]?.state ?? null;
+    const syncPrimarySessionState = () => {
+      const nextState = readPrimarySessionState();
+      setStorePrimarySessionState((current) => (current === nextState ? current : nextState));
+    };
+
+    syncPrimarySessionState();
+    return storeApi.subscribe(syncPrimarySessionState);
+  }, [debugEnabled, storeApi, task.primarySessionId]);
+
+  useEffect(() => {
+    if (!hasSpinnerMismatch || !debugEnabled) return;
     kanbanStatusDebug("spinner mismatch", {
       task_id: task.id,
       taskState: task.state ?? "-",
@@ -254,6 +272,7 @@ function KanbanCardActions({
       showSpinner: showRunningSpinner,
     });
   }, [
+    debugEnabled,
     hasSpinnerMismatch,
     showRunningSpinner,
     storePrimarySessionState,

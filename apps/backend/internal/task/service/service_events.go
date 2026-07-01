@@ -108,24 +108,17 @@ func (s *Service) logTaskLifecycleEventPublished(eventType string, task *models.
 	default:
 		return
 	}
-	s.logger.Info("task lifecycle event published",
+	s.logger.Debug("task lifecycle event published",
 		zap.String("event_type", eventType),
 		zap.String("task_id", task.ID),
-		zap.String("state", eventString(data, "state")),
-		zap.String("workflow_step_id", eventString(data, "workflow_step_id")),
-		zap.String("primary_session_id", eventString(data, "primary_session_id")),
-		zap.String("primary_session_state", eventString(data, "primary_session_state")),
+		zap.Any("state", data["state"]),
+		zap.Any("workflow_step_id", data["workflow_step_id"]),
+		zap.Any("primary_session_id", data["primary_session_id"]),
+		zap.Any("primary_session_state", data["primary_session_state"]),
 		zap.Any("session_count", data["session_count"]),
-		zap.String("old_state", eventString(data, "old_state")),
-		zap.String("new_state", eventString(data, "new_state")),
+		zap.Any("old_state", data["old_state"]),
+		zap.Any("new_state", data["new_state"]),
 	)
-}
-
-func eventString(data map[string]interface{}, key string) string {
-	if value, ok := data[key].(string); ok {
-		return value
-	}
-	return ""
 }
 
 // addTaskSessionEventFields merges session count, primary session info, and
