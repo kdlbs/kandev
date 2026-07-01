@@ -223,6 +223,11 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 	if err != nil {
 		return nil, err
 	}
+	settings, settingsErr := s.GetWorkspaceSettings(ctx, watch.WorkspaceID)
+	if settingsErr != nil {
+		return nil, settingsErr
+	}
+	prs = filterPRsByWorkspaceScope(prs, settings)
 
 	s.logger.Debug("fetched review-requested PRs",
 		zap.String("watch_id", watch.ID),

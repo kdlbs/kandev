@@ -8,6 +8,7 @@ import { WorkspaceSwitcher } from "@/components/task/workspace-switcher";
 type WorkspaceScopedSectionProps = {
   label?: string;
   emptyMessage?: string;
+  showSelector?: boolean;
   children: (workspaceId: string) => ReactNode;
 };
 
@@ -19,6 +20,7 @@ type WorkspaceScopedSectionProps = {
 export function WorkspaceScopedSection({
   label = "Workspace",
   emptyMessage,
+  showSelector = true,
   children,
 }: WorkspaceScopedSectionProps) {
   const workspaces = useAppStore((s) => s.workspaces.items);
@@ -44,14 +46,16 @@ export function WorkspaceScopedSection({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-3 text-sm">
-        <span className="text-muted-foreground">{label}</span>
-        <WorkspaceSwitcher
-          workspaces={workspaces}
-          activeWorkspaceId={selected}
-          onSelect={setOverride}
-        />
-      </div>
+      {showSelector && (
+        <div className="flex items-center gap-3 text-sm">
+          <span className="text-muted-foreground">{label}</span>
+          <WorkspaceSwitcher
+            workspaces={workspaces}
+            activeWorkspaceId={selected}
+            onSelect={setOverride}
+          />
+        </div>
+      )}
       {selected ? children(selected) : null}
     </div>
   );

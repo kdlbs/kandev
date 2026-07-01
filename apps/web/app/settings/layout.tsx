@@ -35,6 +35,12 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
     // settings/general page mounts its own nested store for editing; that store
     // is invisible to the root-mounted GlobalCommands/useAppShortcuts.
     const mappedUserSettings = mapUserSettingsResponse(userSettingsResponse);
+    const activeWorkspaceId =
+      workspaces.workspaces.find(
+        (workspace) => workspace.id === userSettingsResponse?.settings?.workspace_id,
+      )?.id ??
+      workspaces.workspaces[0]?.id ??
+      null;
     initialState = {
       workspaces: {
         items: workspaces.workspaces.map((workspace) => ({
@@ -45,7 +51,7 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
           default_agent_profile_id: workspace.default_agent_profile_id ?? null,
           default_config_agent_profile_id: workspace.default_config_agent_profile_id ?? null,
         })),
-        activeId: workspaces.workspaces[0]?.id ?? null,
+        activeId: activeWorkspaceId,
       },
       executors: {
         items: executors.executors,
@@ -77,7 +83,7 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
         ? {
             userSettings: {
               ...mappedUserSettings,
-              workspaceId: workspaces.workspaces[0]?.id ?? null,
+              workspaceId: activeWorkspaceId,
             },
           }
         : {}),

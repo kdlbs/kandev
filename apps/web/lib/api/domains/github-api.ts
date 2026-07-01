@@ -26,6 +26,8 @@ import type {
   GitHubPRStatus,
   GitHubActionPresets,
   UpdateGitHubActionPresetsRequest,
+  GitHubWorkspaceSettings,
+  UpdateGitHubWorkspaceSettingsRequest,
   CleanupTasksResponse,
   MergeMethod,
   RepoMergeMethods,
@@ -580,6 +582,7 @@ type SearchParams = {
   filter?: string;
   page?: number;
   perPage?: number;
+  workspaceId?: string | null;
 };
 
 function buildSearchQuery(params: SearchParams) {
@@ -588,6 +591,7 @@ function buildSearchQuery(params: SearchParams) {
   if (params.filter) search.set("filter", params.filter);
   if (params.page && params.page > 1) search.set("page", String(params.page));
   if (params.perPage) search.set("per_page", String(params.perPage));
+  if (params.workspaceId) search.set("workspace_id", params.workspaceId);
   return search.toString();
 }
 
@@ -605,6 +609,28 @@ export async function searchUserIssues(params: SearchParams, options?: ApiReques
     `/api/v1/github/user/issues${suffix ? `?${suffix}` : ""}`,
     options,
   );
+}
+
+// Workspace settings for GitHub repo visibility/scope.
+export async function fetchGitHubWorkspaceSettings(
+  workspaceId: string,
+  options?: ApiRequestOptions,
+) {
+  const query = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<GitHubWorkspaceSettings>(
+    `/api/v1/github/workspace-settings?${query.toString()}`,
+    options,
+  );
+}
+
+export async function updateGitHubWorkspaceSettings(
+  payload: UpdateGitHubWorkspaceSettingsRequest,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<GitHubWorkspaceSettings>("/api/v1/github/workspace-settings", {
+    ...options,
+    init: { ...(options?.init ?? {}), method: "PUT", body: JSON.stringify(payload) },
+  });
 }
 
 // Action presets (quick-launch prompts on the /github page).
