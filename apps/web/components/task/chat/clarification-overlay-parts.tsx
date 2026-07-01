@@ -162,6 +162,58 @@ type CustomInputProps = {
   onRequestFinalSubmit?: () => void;
 };
 
+// Trailing controls for the custom-answer row. Hardware keyboards get the
+// Enter/⇧↵ hints; touch devices get an inline Send button, because the overlay's
+// own Submit button only renders for multi-question bundles and single-question
+// custom answers would otherwise have no touch-reachable send path.
+function CustomInputControls({
+  isFinePointer,
+  trimmed,
+  isSubmitting,
+  onSubmit,
+}: {
+  isFinePointer: boolean;
+  trimmed: string;
+  isSubmitting: boolean;
+  onSubmit: (text: string) => void;
+}) {
+  if (isFinePointer) {
+    return (
+      <div className="mt-0.5 flex flex-shrink-0 items-center gap-1">
+        <kbd
+          aria-hidden="true"
+          className="select-none flex items-center gap-1 font-mono text-[10px] px-1.5 py-0.5 rounded border border-border bg-background text-muted-foreground"
+        >
+          <IconCornerDownLeft className="h-2.5 w-2.5" />
+          Enter
+        </kbd>
+        <span aria-hidden="true" className="select-none text-[10px] text-muted-foreground/60">
+          ⇧↵ newline
+        </span>
+      </div>
+    );
+  }
+  const canSend = trimmed.length > 0 && !isSubmitting;
+  return (
+    <button
+      type="button"
+      onClick={() => onSubmit(trimmed)}
+      disabled={!canSend}
+      data-testid="clarification-custom-submit"
+      aria-label="Send answer"
+      className={cn(
+        "mt-0.5 flex flex-shrink-0 items-center gap-1 text-xs px-2 py-1 rounded font-medium transition-colors",
+        canSend
+          ? "bg-blue-500 text-white hover:bg-blue-500/90 cursor-pointer"
+          : "bg-muted text-muted-foreground cursor-not-allowed",
+      )}
+    >
+      Send
+      <IconCornerDownLeft className="h-3 w-3" />
+    </button>
+  );
+}
+
 export function ClarificationCustomInput({
   draft,
   isSubmitting,
@@ -172,6 +224,7 @@ export function ClarificationCustomInput({
   onRequestFinalSubmit,
 }: CustomInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const trimmed = draft.trim();
   // Touch keyboards have no Shift+Enter chord, so on coarse-pointer devices we
   // let Enter insert a newline and rely on the always-visible Submit button to
   // send — otherwise the multiline feature would be desktop-only.
@@ -235,48 +288,17 @@ export function ClarificationCustomInput({
           // so an empty/whitespace draft doesn't leak a stray newline into the
           // textarea before the trim guard bails.
           e.preventDefault();
-          if (draft.trim()) {
-            onSubmit(draft.trim());
+          if (trimmed) {
+            onSubmit(trimmed);
           }
         }}
       />
-      {/* Hardware keyboards get the Enter/⇧↵ hints. Touch devices get an inline
-          Send button instead: Enter inserts a newline there, and the overlay's
-          own Submit button only exists for multi-question bundles, so this is
-          the send affordance for single-question custom answers. */}
-      {isFinePointer ? (
-        <div className="mt-0.5 flex flex-shrink-0 items-center gap-1">
-          <kbd
-            aria-hidden="true"
-            className="select-none flex items-center gap-1 font-mono text-[10px] px-1.5 py-0.5 rounded border border-border bg-background text-muted-foreground"
-          >
-            <IconCornerDownLeft className="h-2.5 w-2.5" />
-            Enter
-          </kbd>
-          <span aria-hidden="true" className="select-none text-[10px] text-muted-foreground/60">
-            ⇧↵ newline
-          </span>
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => {
-            if (draft.trim()) onSubmit(draft.trim());
-          }}
-          disabled={isSubmitting || draft.trim().length === 0}
-          data-testid="clarification-custom-submit"
-          aria-label="Send answer"
-          className={cn(
-            "mt-0.5 flex flex-shrink-0 items-center gap-1 text-xs px-2 py-1 rounded font-medium transition-colors",
-            draft.trim() && !isSubmitting
-              ? "bg-blue-500 text-white hover:bg-blue-500/90 cursor-pointer"
-              : "bg-muted text-muted-foreground cursor-not-allowed",
-          )}
-        >
-          Send
-          <IconCornerDownLeft className="h-3 w-3" />
-        </button>
-      )}
+      <CustomInputControls
+        isFinePointer={isFinePointer}
+        trimmed={trimmed}
+        isSubmitting={isSubmitting}
+        onSubmit={onSubmit}
+      />
       {active && <IconCheck className="mt-0.5 h-3.5 w-3.5 text-blue-500 flex-shrink-0" />}
     </div>
   );

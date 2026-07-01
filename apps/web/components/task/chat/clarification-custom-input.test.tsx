@@ -162,4 +162,18 @@ describe("ClarificationCustomInput on touch devices", () => {
     fireEvent.click(button);
     expect(onSubmit).not.toHaveBeenCalled();
   });
+
+  it("disables the touch Send button while a submit is in flight", () => {
+    pointer.isFinePointer = false;
+    const onSubmit = vi.fn();
+    const { getByTestId } = render(
+      <ClarificationCustomInput
+        {...makeProps({ draft: "answer", isSubmitting: true, onSubmit })}
+      />,
+    );
+    const button = getByTestId(TOUCH_SUBMIT_TESTID) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
 });
