@@ -113,6 +113,21 @@ describe("useWorkflows — stale response guard", () => {
     );
     expect(cleared).toBe(false);
   });
+
+  it("does not clear hydrated workflows when the fetch for the current workspace fails", async () => {
+    // The sidebar mounts on every route (task detail, settings, ...) and boot
+    // hydrates `state.workflows.items` before the sidebar's refresh fetch
+    // fires. If that fetch flakes, blowing the store away leaves the sidebar,
+    // board, and kanban scoping with no workflow IDs until another success.
+    mockListWorkflows.mockRejectedValueOnce(new Error("network"));
+
+    renderHook(() => useWorkflows("ws-A", true));
+
+    await waitFor(() => expect(mockListWorkflows).toHaveBeenCalledWith("ws-A", expect.anything()));
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+
+    expect(mockSetWorkflows).not.toHaveBeenCalled();
+  });
 });
 
 describe("useEnsureWorkspaceWorkflows", () => {

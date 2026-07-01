@@ -47,7 +47,7 @@ beforeEach(() => {
   setStore([]);
 });
 
-describe("useWorkflowSettings", () => {
+describe("useWorkflowSettings — store boundary filters", () => {
   it("does not merge office-style workflows from the global store", () => {
     // The sidebar's `useEnsureWorkspaceWorkflows` populates the store with every
     // workflow — including office-style ones — on all routes. The settings UI
@@ -68,7 +68,9 @@ describe("useWorkflowSettings", () => {
     expect(result.current.workflowItems).toHaveLength(0);
     expect(result.current.savedWorkflowItems).toHaveLength(0);
   });
+});
 
+describe("useWorkflowSettings", () => {
   it("does not include workflows from other workspaces present in the global store", () => {
     // Store has a workflow from workspace A (e.g. user previously visited it)
     setStore([STORE_A1]);

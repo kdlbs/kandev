@@ -35,10 +35,11 @@ function useWorkflowsFetchEffect(
         }));
         setWorkflows(mapped);
       })
-      .catch(() => {
-        if (cancelled) return;
-        setWorkflows([]);
-      });
+      // Do not clear on error — the sidebar mounts on every route, and boot
+      // hydrates workflows before the refresh fires. Blowing the slice away on
+      // a network flake would leave the sidebar and board with no workflow IDs
+      // until another success. The next successful fetch replaces the slice.
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
