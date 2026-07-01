@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
 import { useLayoutStore } from "@/lib/state/layout-store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
@@ -12,6 +13,12 @@ import { useSessionMcp } from "@/hooks/domains/session/use-session-mcp";
 import { useProcessedMessages } from "@/hooks/use-processed-messages";
 import { useSessionModel } from "@/hooks/domains/session/use-session-model";
 import { useQueue } from "@/hooks/domains/session/use-queue";
+import {
+  availableCommandsQueryOptions,
+  sessionTodosQueryOptions,
+  taskQueryOptions,
+  workflowStepsQueryOptions,
+} from "@/lib/query/query-options";
 import { useContextFilesStore, type ContextFile } from "@/lib/state/context-files-store";
 import { useCommentsStore, isPlanComment, isPRFeedbackComment } from "@/lib/state/slices/comments";
 import { usePendingDiffCommentsByFile } from "@/hooks/domains/comments/use-diff-comments";
@@ -141,14 +148,21 @@ export function usePlanMode(resolvedSessionId: string | null, taskId: string | n
       ? state.taskSessions.items[resolvedSessionId]?.metadata?.plan_mode === true
       : false,
   );
-  const currentStepHasPlanMode = useAppStore((s) => {
-    if (!taskId) return false;
-    const task = s.kanban.tasks.find((t) => t.id === taskId);
-    const stepId = task?.workflowStepId;
-    if (!stepId) return false;
-    const step = s.kanban.steps.find((st) => st.id === stepId);
-    return step?.events?.on_enter?.some((a) => a.type === "enable_plan_mode") ?? false;
+  const taskQuery = useQuery({
+    ...taskQueryOptions(taskId ?? ""),
+    enabled: Boolean(taskId),
   });
+  const workflowId = taskQuery.data?.workflow_id ?? null;
+  const stepId = taskQuery.data?.workflow_step_id ?? null;
+  const workflowStepsQuery = useQuery({
+    ...workflowStepsQueryOptions(workflowId ?? ""),
+    enabled: Boolean(workflowId),
+  });
+  const currentStepHasPlanMode = useMemo(() => {
+    if (!stepId) return false;
+    const step = workflowStepsQuery.data?.find((st) => st.id === stepId);
+    return step?.events?.on_enter?.some((a) => a.type === "enable_plan_mode") ?? false;
+  }, [stepId, workflowStepsQuery.data]);
   const planModeEnabled = planModeFromStore;
   const planLayoutVisible = activeDocument?.type === "plan";
 
@@ -400,9 +414,8 @@ function useSessionData(
     session?.agent_profile_id,
   );
   const chatSubmitKey = useAppStore((state) => state.userSettings.chatSubmitKey);
-  const agentCommands = useAppStore((state) =>
-    resolvedSessionId ? state.availableCommands.bySessionId[resolvedSessionId] : undefined,
-  );
+  const commandsQuery = useQuery(availableCommandsQueryOptions(resolvedSessionId ?? ""));
+  const agentCommands = commandsQuery.data;
   const {
     clearAll: clearQueue,
     editEntry: editQueueEntry,
@@ -430,19 +443,18 @@ function useSessionTodoItems(
   resolvedSessionId: string | null,
   messageTodos: Array<{ text: string; done?: boolean }>,
 ) {
-  const storeTodos = useAppStore((s) =>
-    resolvedSessionId ? s.sessionTodos.bySessionId[resolvedSessionId] : undefined,
-  );
+  const todosQuery = useQuery(sessionTodosQueryOptions(resolvedSessionId ?? ""));
+  const todos = todosQuery.data;
   return useMemo(() => {
-    if (storeTodos && storeTodos.length > 0) {
-      return storeTodos.map((e: { description: string; status: string }) => ({
+    if (todos && todos.length > 0) {
+      return todos.map((e: { description: string; status: string }) => ({
         text: e.description,
         done: e.status === "completed",
         status: e.status as TodoStatus,
       }));
     }
     return messageTodos;
-  }, [storeTodos, messageTodos]);
+  }, [todos, messageTodos]);
 }
 
 export type UseChatPanelStateOptions = {

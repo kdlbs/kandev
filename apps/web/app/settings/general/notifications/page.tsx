@@ -1,5 +1,5 @@
 import { NotificationsSettings } from "@/components/settings/notifications-settings";
-import { StateProvider } from "@/components/state-provider";
+import { StateHydrator } from "@/components/state-hydrator";
 import { listNotificationProviders } from "@/lib/api";
 
 export default async function GeneralNotificationsPage() {
@@ -20,8 +20,9 @@ export default async function GeneralNotificationsPage() {
   }
 
   return (
-    <StateProvider initialState={initialState}>
+    <>
+      <StateHydrator initialState={initialState} />
       <NotificationsSettings />
-    </StateProvider>
+    </>
   );
 }

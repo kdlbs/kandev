@@ -1,12 +1,11 @@
-import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
-import type { ListWorkspacesResponse } from "@/lib/types/http";
+import type { ListWorkspacesResponse, Workspace } from "@/lib/types/http";
 
 export const ACTIVE_WORKSPACE_COOKIE = "kandev-active-workspace";
 export const LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE = "office-active-workspace";
 
 type WorkspaceItem = ListWorkspacesResponse["workspaces"][number];
 
-export function mapWorkspaceItem(ws: WorkspaceItem): WorkspaceState["items"][number] {
+export function mapWorkspaceItem(ws: WorkspaceItem): Workspace {
   return {
     id: ws.id,
     name: ws.name,
@@ -16,7 +15,7 @@ export function mapWorkspaceItem(ws: WorkspaceItem): WorkspaceState["items"][num
     default_environment_id: ws.default_environment_id ?? null,
     default_agent_profile_id: ws.default_agent_profile_id ?? null,
     default_config_agent_profile_id: ws.default_config_agent_profile_id ?? null,
-    office_workflow_id: ws.office_workflow_id ?? null,
+    office_workflow_id: ws.office_workflow_id ?? undefined,
     created_at: ws.created_at,
     updated_at: ws.updated_at,
   };

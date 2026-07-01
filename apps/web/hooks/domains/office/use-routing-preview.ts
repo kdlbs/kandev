@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { useAppStore } from "@/components/state-provider";
-import { getRoutingPreview } from "@/lib/api/domains/office-extended-api";
+import { useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { officeRoutingPreviewQueryOptions } from "@/lib/query/query-options/office";
 import type { AgentRoutePreview } from "@/lib/state/slices/office/types";
+import { queryErrorMessage } from "./query-error";
 
 export type UseRoutingPreviewResult = {
   agents: AgentRoutePreview[];
@@ -15,35 +16,15 @@ export type UseRoutingPreviewResult = {
 const EMPTY_PREVIEW: AgentRoutePreview[] = [];
 
 export function useRoutingPreview(workspaceName: string | null): UseRoutingPreviewResult {
-  const agents = useAppStore((s) =>
-    workspaceName
-      ? (s.office.routing.preview.byWorkspace[workspaceName] ?? EMPTY_PREVIEW)
-      : EMPTY_PREVIEW,
-  );
-  const setRoutingPreview = useAppStore((s) => s.setRoutingPreview);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [fetched, setFetched] = useState(false);
+  const query = useQuery(officeRoutingPreviewQueryOptions(workspaceName ?? ""));
 
   const refresh = useCallback(async () => {
     if (!workspaceName) return;
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await getRoutingPreview(workspaceName);
-      setRoutingPreview(workspaceName, res.agents ?? []);
-      setFetched(true);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load routing preview");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [workspaceName, setRoutingPreview]);
+    await query.refetch();
+  }, [query, workspaceName]);
 
-  useEffect(() => {
-    if (!workspaceName || fetched) return;
-    void refresh();
-  }, [workspaceName, fetched, refresh]);
+  const queryAgents = query.data?.agents ?? EMPTY_PREVIEW;
+  const error = queryErrorMessage(query.error);
 
-  return { agents, isLoading, error, refresh };
+  return { agents: queryAgents, isLoading: query.isPending, error, refresh };
 }

@@ -1,19 +1,26 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import type { QueryClient } from "@tanstack/react-query";
 import "@/app/globals.css";
 import { StateProvider } from "@/components/state-provider";
+import { getBrowserQueryClient } from "@/lib/query/client";
+import { QueryProvider } from "@/lib/query/provider";
+import { seedQueryClientFromBootPayload } from "@/lib/query/seed";
+import { installWsAccountGlobalsForE2E } from "@/lib/ws/ws-account";
 import { AppShell } from "./app-shell";
 import { loadBootPayload } from "./boot-payload";
 import type { BootPayload } from "./boot-payload";
 import { SpaRoutes } from "./spa-routes";
 
-function App({ payload }: { payload: BootPayload }) {
+function App({ payload, queryClient }: { payload: BootPayload; queryClient: QueryClient }) {
   return (
-    <StateProvider initialState={payload.initialState ?? {}}>
-      <AppShell>
-        <SpaRoutes routeData={payload.routeData} />
-      </AppShell>
-    </StateProvider>
+    <QueryProvider client={queryClient}>
+      <StateProvider initialState={payload.initialState ?? {}}>
+        <AppShell>
+          <SpaRoutes routeData={payload.routeData} />
+        </AppShell>
+      </StateProvider>
+    </QueryProvider>
   );
 }
 
@@ -23,10 +30,15 @@ if (!root) {
   throw new Error("Missing #root element");
 }
 
+installWsAccountGlobalsForE2E();
+
 void loadBootPayload().then((payload) => {
+  const queryClient = getBrowserQueryClient();
+  seedQueryClientFromBootPayload(queryClient, payload);
+
   createRoot(root).render(
     <StrictMode>
-      <App payload={payload} />
+      <App payload={payload} queryClient={queryClient} />
     </StrictMode>,
   );
 });

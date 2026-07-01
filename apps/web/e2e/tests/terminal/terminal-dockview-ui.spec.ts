@@ -383,7 +383,8 @@ test.describe("Terminals — dockview UI", () => {
     const input = testPage.getByTestId("terminal-tab-rename-input");
     await expect(input).toBeVisible({ timeout: 5_000 });
     await input.fill("build watcher");
-    await input.press("Enter");
+    await expect(input).toHaveValue("build watcher");
+    await input.evaluate((element) => (element as HTMLInputElement).blur());
 
     // Tab title now reads "build watcher" — proves the rename committed
     // and the displayName lookup found the customName.

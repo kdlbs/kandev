@@ -250,8 +250,12 @@ func (h *Hub) fireDebouncedDownTransition(sessionID string) {
 
 	if latest == SessionModePaused {
 		// Session is fully idle — drop the entry so the maps don't grow
-		// unbounded over a long-running gateway. Next event re-adds.
+		// unbounded over a long-running gateway. Paused requires no focused
+		// or subscribed clients after the debounce, so resetting the E2E
+		// session sequence cannot be observed by an active receiver. Next
+		// event re-adds.
 		delete(h.sessionMode.lastMode, sessionID)
+		h.clearSessionSeq(sessionID)
 	} else {
 		h.sessionMode.lastMode[sessionID] = latest
 	}

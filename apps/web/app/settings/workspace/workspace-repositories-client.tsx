@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import Link from "@/components/routing/app-link";
 import { useRouter } from "@/lib/routing/client-router";
 import { IconGitBranch } from "@tabler/icons-react";
@@ -28,7 +29,7 @@ import {
 } from "@/lib/types/http";
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
-import { useAppStore } from "@/components/state-provider";
+import { qk } from "@/lib/query/keys";
 import {
   DiscoverRepoDialog,
   type ManualValidation,
@@ -86,7 +87,7 @@ type RepoHandlerArgs = {
   setRepositoryItems: React.Dispatch<React.SetStateAction<RepositoryItem[]>>;
   setSavedRepositoryItems: React.Dispatch<React.SetStateAction<RepositoryWithScripts[]>>;
   savedRepositoriesById: Map<string, RepositoryWithScripts>;
-  clearRepositoryScripts: (id: string) => void;
+  syncRepositoryScripts: (id: string, scripts: RepositoryScript[]) => void;
 };
 
 async function saveNewRepository(
@@ -132,7 +133,7 @@ type SaveExistingArgs = {
   repo: RepositoryItem;
   repoId: string;
   savedRepositoriesById: Map<string, RepositoryWithScripts>;
-  clearRepositoryScripts: (id: string) => void;
+  syncRepositoryScripts: (id: string, scripts: RepositoryScript[]) => void;
   setRepositoryItems: React.Dispatch<React.SetStateAction<RepositoryItem[]>>;
   setSavedRepositoryItems: React.Dispatch<React.SetStateAction<RepositoryWithScripts[]>>;
 };
@@ -141,7 +142,7 @@ async function saveExistingRepository({
   repo,
   repoId,
   savedRepositoriesById,
-  clearRepositoryScripts,
+  syncRepositoryScripts,
   setRepositoryItems,
   setSavedRepositoryItems,
 }: SaveExistingArgs) {
@@ -191,7 +192,7 @@ async function saveExistingRepository({
       ? prev.map((item) => (item.id === repoId ? cloneRepository(nextRepo) : item))
       : [...prev, cloneRepository(nextRepo)],
   );
-  clearRepositoryScripts(repoId);
+  syncRepositoryScripts(repoId, nextScripts);
 }
 
 function useRepositoryHandlers({
@@ -200,7 +201,7 @@ function useRepositoryHandlers({
   setRepositoryItems,
   setSavedRepositoryItems,
   savedRepositoriesById,
-  clearRepositoryScripts,
+  syncRepositoryScripts,
 }: RepoHandlerArgs) {
   const handleUpdateRepository = (repoId: string, updates: Partial<Repository>) => {
     setRepositoryItems((prev) =>
@@ -261,7 +262,7 @@ function useRepositoryHandlers({
       repo,
       repoId,
       savedRepositoriesById,
-      clearRepositoryScripts,
+      syncRepositoryScripts,
       setRepositoryItems,
       setSavedRepositoryItems,
     });
@@ -396,7 +397,13 @@ function useWorkspaceRepositoriesPage(
 ) {
   const router = useRouter();
   const { toast } = useToast();
-  const clearRepositoryScripts = useAppStore((state) => state.clearRepositoryScripts);
+  const queryClient = useQueryClient();
+  const syncRepositoryScripts = useCallback(
+    (repoId: string, scripts: RepositoryScript[]) => {
+      queryClient.setQueryData(qk.workspaces.repositoryScripts(repoId), scripts);
+    },
+    [queryClient],
+  );
   const [repositoryItems, setRepositoryItems] = useState<RepositoryItem[]>(repositories);
   const [savedRepositoryItems, setSavedRepositoryItems] =
     useState<RepositoryWithScripts[]>(repositories);
@@ -411,7 +418,7 @@ function useWorkspaceRepositoriesPage(
     setRepositoryItems,
     setSavedRepositoryItems,
     savedRepositoriesById,
-    clearRepositoryScripts,
+    syncRepositoryScripts,
   });
   const {
     handleUpdateRepository,

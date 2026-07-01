@@ -1,42 +1,53 @@
 "use client";
 
-import { useEffect, useCallback, useRef } from "react";
-import { listWorkspaceTaskPRs } from "@/lib/api/domains/github-api";
+import { useEffect, useCallback, useRef, useSyncExternalStore } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore } from "@/components/state-provider";
+import { qk } from "@/lib/query/keys";
+import {
+  taskPrsQueryOptions,
+  workspaceTaskPrsQueryOptions,
+} from "@/lib/query/query-options/github";
 import type { TaskPR } from "@/lib/types/github";
 
 /** Fetch all PR associations for a workspace. */
 export function useWorkspacePRs(workspaceId: string | null) {
-  const setTaskPRs = useAppStore((state) => state.setTaskPRs);
-  const fetchedRef = useRef<string | null>(null);
-  const requestRef = useRef(0);
+  const queryClient = useQueryClient();
+  const taskIdsRef = useRef<{ workspaceId: string | null; taskIds: Set<string> }>({
+    workspaceId: null,
+    taskIds: new Set<string>(),
+  });
+  const query = useQuery({
+    ...workspaceTaskPrsQueryOptions(workspaceId ?? ""),
+    enabled: Boolean(workspaceId),
+  });
 
   useEffect(() => {
-    if (!workspaceId) {
-      fetchedRef.current = null;
-      return;
+    if (!query.data || !workspaceId) return;
+    const prsByTask = query.data.task_prs ?? {};
+    const nextTaskIds = new Set(Object.keys(prsByTask));
+    const previousTaskIds =
+      taskIdsRef.current.workspaceId === workspaceId
+        ? taskIdsRef.current.taskIds
+        : new Set<string>();
+    for (const taskId of previousTaskIds) {
+      if (!nextTaskIds.has(taskId)) {
+        queryClient.setQueryData(qk.integrations.github.taskPr(taskId), []);
+      }
     }
-    if (fetchedRef.current === workspaceId) return;
+    for (const [taskId, prs] of Object.entries(prsByTask)) {
+      queryClient.setQueryData(qk.integrations.github.taskPr(taskId), prs);
+    }
+    taskIdsRef.current = { workspaceId, taskIds: nextTaskIds };
+  }, [query.data, queryClient, workspaceId]);
 
-    const requestId = ++requestRef.current;
-    fetchedRef.current = workspaceId;
-
-    listWorkspaceTaskPRs(workspaceId, { cache: "no-store" })
-      .then((response) => {
-        if (requestRef.current !== requestId) return;
-        setTaskPRs(response?.task_prs ?? {});
-      })
-      .catch(() => {
-        if (requestRef.current === requestId) {
-          fetchedRef.current = null; // allow retry on failure
-        }
-      });
-  }, [workspaceId, setTaskPRs]);
+  return query.data?.task_prs ?? {};
 }
 
 const SYNC_RETRY_DELAY = 5_000; // 5 seconds
 const SYNC_MAX_RETRIES = 6; // Up to 30 seconds of retries
+const EMPTY_TASK_PRS: TaskPR[] = [];
 
 /**
  * Returns the primary PR (first by created_at) for a task. Multi-repo tasks
@@ -73,9 +84,11 @@ type SyncResponse = { prs?: TaskPR[]; permanent?: boolean } | TaskPR | null | un
 
 /** Fetch a single task's PR associations, with on-demand sync via WS. */
 export function useTaskPR(taskId: string | null) {
-  const prs = useAppStore((state) => (taskId ? (state.taskPRs.byTaskId[taskId] ?? null) : null));
+  const queryClient = useQueryClient();
+  const taskPrsQuery = useQuery(taskPrsQueryOptions(taskId ?? ""));
+  const prs = Array.isArray(taskPrsQuery.data) ? taskPrsQuery.data : [];
   const pr = getPrimaryTaskPR(prs ?? undefined);
-  const setTaskPR = useAppStore((state) => state.setTaskPR);
+  const clearPendingPrUrlForTaskPR = useAppStore((state) => state.clearPendingPrUrlForTaskPR);
   const retryRef = useRef(0);
   const permanentRef = useRef(false);
   // Monotonic counter incremented before each WS request, snapshotted in
@@ -118,15 +131,13 @@ export function useTaskPR(taskId: string | null) {
         }
         const list = normalizeSyncResponse(result);
         if (list.length === 0) return;
-        for (const pr of list) {
-          if (pr.task_id) setTaskPR(requestedTaskId, pr);
-        }
+        queryClient.setQueryData(qk.integrations.github.taskPr(requestedTaskId), list);
         retryRef.current = 0;
       })
       .catch(() => {
         // Ignore - sync may fail if no watch exists
       });
-  }, [taskId, setTaskPR]);
+  }, [queryClient, taskId]);
 
   // Reset retry/permanent state when taskId changes. Bumping requestRef
   // here invalidates any still-in-flight .then() closure from the prior
@@ -136,6 +147,13 @@ export function useTaskPR(taskId: string | null) {
     permanentRef.current = false;
     requestRef.current++;
   }, [taskId]);
+
+  useEffect(() => {
+    if (!taskId || prs.length === 0) return;
+    for (const taskPR of prs) {
+      clearPendingPrUrlForTaskPR(taskId, taskPR);
+    }
+  }, [clearPendingPrUrlForTaskPR, prs, taskId]);
 
   // Sync once when the task becomes active (freshness check).
   // Intentionally excludes `pr` so WS-driven store updates don't re-trigger.
@@ -169,11 +187,25 @@ export function useTaskPR(taskId: string | null) {
   };
 }
 
-/** Read the active task's primary PR from the store (no fetching). */
+function useCachedTaskPRs(taskId: string | null): TaskPR[] {
+  const queryClient = useQueryClient();
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => queryClient.getQueryCache().subscribe(onStoreChange),
+    [queryClient],
+  );
+  const getSnapshot = useCallback(() => {
+    if (!taskId) return EMPTY_TASK_PRS;
+    const prs = queryClient.getQueryData(qk.integrations.github.taskPr(taskId));
+    return Array.isArray(prs) ? prs : EMPTY_TASK_PRS;
+  }, [queryClient, taskId]);
+
+  return useSyncExternalStore(subscribe, getSnapshot, () => EMPTY_TASK_PRS);
+}
+
+/** Read the active task's primary PR from the cache (no fetching or sync). */
 export function useActiveTaskPR(): TaskPR | null {
-  return useAppStore((s) => {
-    const taskId = s.tasks.activeTaskId;
-    if (!taskId) return null;
-    return getPrimaryTaskPR(s.taskPRs.byTaskId[taskId]);
-  });
+  const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
+  const prs = useCachedTaskPRs(activeTaskId);
+  if (!activeTaskId) return null;
+  return getPrimaryTaskPR(prs);
 }

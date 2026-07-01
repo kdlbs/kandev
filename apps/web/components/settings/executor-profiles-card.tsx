@@ -8,7 +8,7 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
 import { deleteExecutorProfile, listExecutorProfiles } from "@/lib/api/domains/settings-api";
 import { ExecutorProfileDialog } from "@/components/settings/executor-profile-dialog";
-import { useAppStore } from "@/components/state-provider";
+import { useExecutorsQuerySync } from "@/hooks/domains/settings/use-executors-query-sync";
 import type { ExecutorProfile } from "@/lib/types/http";
 
 type ExecutorProfilesCardProps = {
@@ -19,8 +19,7 @@ type ExecutorProfilesCardProps = {
 export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesCardProps) {
   const router = useRouter();
   const [dialogOpen, setDialogOpen] = useState(false);
-  const executors = useAppStore((state) => state.executors.items);
-  const setExecutors = useAppStore((state) => state.setExecutors);
+  const { executors, setExecutors } = useExecutorsQuerySync();
 
   const refreshProfiles = useCallback(async () => {
     try {

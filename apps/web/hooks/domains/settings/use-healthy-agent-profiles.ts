@@ -1,6 +1,6 @@
 "use client";
 
-import { useAppStore } from "@/components/state-provider";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import type { AgentProfileOption } from "@/lib/state/slices";
 
 /**
@@ -9,7 +9,7 @@ import type { AgentProfileOption } from "@/lib/state/slices";
  * user can see what's currently set instead of seeing a blank select.
  */
 export function useHealthyAgentProfiles(selectedId?: string): AgentProfileOption[] {
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items);
+  const { agentProfiles } = useSettingsData(true);
   return agentProfiles.filter(
     (p) =>
       !p.capability_status ||

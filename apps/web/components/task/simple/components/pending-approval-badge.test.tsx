@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { useEffect } from "react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
-import { StateProvider, useAppStore } from "@/components/state-provider";
+import { StateProvider } from "@/components/state-provider";
+import { qk } from "@/lib/query/keys";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 import { agentProfileId as toAgentProfileId, workspaceId as toWorkspaceId } from "@/lib/types/ids";
 import {
@@ -36,12 +37,6 @@ const baseTask: Task = {
   updatedAt: TS,
 };
 
-function SeedAgents({ agents }: { agents: AgentProfile[] }) {
-  const setAgents = useAppStore((s) => s.setOfficeAgentProfiles);
-  useEffect(() => setAgents(agents), [setAgents, agents]);
-  return null;
-}
-
 function makeAgent(id: string, name: string): AgentProfile {
   return {
     id: toAgentProfileId(id),
@@ -73,13 +68,20 @@ function makeAgent(id: string, name: string): AgentProfile {
 }
 
 function Wrapper({ children, agents }: { children: ReactNode; agents: AgentProfile[] }) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+  queryClient.setQueryData(qk.office.agents("ws-1"), { agents });
+
   return (
-    <StateProvider>
-      <TooltipProvider>
-        <SeedAgents agents={agents} />
-        {children}
-      </TooltipProvider>
-    </StateProvider>
+    <QueryClientProvider client={queryClient}>
+      <StateProvider initialState={{ workspaces: { activeId: "ws-1" } }}>
+        <TooltipProvider>{children}</TooltipProvider>
+      </StateProvider>
+    </QueryClientProvider>
   );
 }
 

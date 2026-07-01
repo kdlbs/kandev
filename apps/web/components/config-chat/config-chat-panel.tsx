@@ -14,7 +14,7 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Textarea } from "@kandev/ui/textarea";
 import { QuickChatContent } from "@/components/quick-chat/quick-chat-content";
-import { useAppStore } from "@/components/state-provider";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useConfigChat } from "./use-config-chat";
 import type { ConfigChatSession } from "@/lib/state/slices/ui/types";
 
@@ -39,7 +39,7 @@ function SuggestionList() {
 }
 
 function ProfileSelector({ onSelect }: { onSelect: (id: string) => void }) {
-  const profiles = useAppStore((s) => s.agentProfiles.items ?? []);
+  const { agentProfiles: profiles } = useSettingsData(true);
   return (
     <div className="flex-1 flex flex-col">
       <p className="text-xs font-medium mb-3">Select an agent profile</p>
@@ -150,7 +150,8 @@ function ConfigChatEmptyState({
   isStarting: boolean;
   error: string | null;
 }) {
-  const profileCount = useAppStore((s) => s.agentProfiles.items?.length ?? 0);
+  const { agentProfiles } = useSettingsData(true);
+  const profileCount = agentProfiles.length;
   const [selectedProfileId, setSelectedProfileId] = useState(defaultProfileId ?? "");
   const [inputValue, setInputValue] = useState("");
 

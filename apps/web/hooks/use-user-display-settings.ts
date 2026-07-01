@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { updateUserSettings } from "@/lib/api";
 import { useSearchParams } from "@/lib/routing/client-router";
 import { mapSelectedRepositoryIds } from "@/lib/kanban/filters";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
-import { useEnsureUserSettings } from "@/hooks/use-ensure-user-settings";
+import { userSettingsQueryOptions } from "@/lib/query/query-options/settings";
+import { mapUserSettingsQueryData } from "@/hooks/domains/settings/user-settings-query-data";
+import { getLocalStorage } from "@/lib/local-storage";
+import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { repositoryId, type Repository } from "@/lib/types/http";
 import {
   DEFAULT_VOICE_MODE_STATE,
@@ -78,14 +82,39 @@ function carryForwardSidebarSettings(current: DisplaySettings) {
   };
 }
 
+function emptyTaskCreateLastUsed(): DisplaySettings["taskCreateLastUsed"] {
+  return {
+    repositoryId: null,
+    branch: null,
+    agentProfileId: null,
+    executorProfileId: null,
+  };
+}
+
+function hasTaskCreateLastUsed(value: DisplaySettings["taskCreateLastUsed"] | undefined) {
+  return Boolean(
+    value?.repositoryId || value?.branch || value?.agentProfileId || value?.executorProfileId,
+  );
+}
+
+function readCachedTaskCreateLastUsed(): DisplaySettings["taskCreateLastUsed"] {
+  const cached = {
+    repositoryId: getLocalStorage<string | null>(STORAGE_KEYS.LAST_REPOSITORY_ID, null),
+    branch: getLocalStorage<string | null>(STORAGE_KEYS.LAST_BRANCH, null),
+    agentProfileId: getLocalStorage<string | null>(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, null),
+    executorProfileId: getLocalStorage<string | null>(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, null),
+  };
+  return hasTaskCreateLastUsed(cached) ? cached : emptyTaskCreateLastUsed();
+}
+
+function resolveTaskCreateLastUsed(current: DisplaySettings) {
+  const currentLastUsed = current.taskCreateLastUsed;
+  return hasTaskCreateLastUsed(currentLastUsed) ? currentLastUsed : readCachedTaskCreateLastUsed();
+}
+
 function carryForwardSyncedLocalSettings(current: DisplaySettings) {
   return {
-    taskCreateLastUsed: current.taskCreateLastUsed ?? {
-      repositoryId: null,
-      branch: null,
-      agentProfileId: null,
-      executorProfileId: null,
-    },
+    taskCreateLastUsed: resolveTaskCreateLastUsed(current),
     jiraSavedViews: current.jiraSavedViews,
     jiraTaskPresets: current.jiraTaskPresets,
     githubSavedPresets: current.githubSavedPresets,
@@ -153,6 +182,22 @@ function useUserSettingsRef(userSettings: DisplaySettings) {
   return userSettingsRef;
 }
 
+function useLoadUserSettings(
+  loaded: boolean,
+  setUserSettings: (settings: DisplaySettings) => void,
+) {
+  const query = useQuery({ ...userSettingsQueryOptions(), enabled: !loaded });
+  const mapped = useMemo(() => mapUserSettingsQueryData(query.data), [query.data]);
+
+  useEffect(() => {
+    if (loaded) return;
+    if (!mapped) return;
+    setUserSettings(mapped);
+  }, [loaded, mapped, setUserSettings]);
+
+  return loaded ? null : mapped;
+}
+
 function usePruneStaleRepositoryIds(
   userSettings: DisplaySettings,
   repositories: Repository[],
@@ -195,10 +240,12 @@ export function useUserDisplaySettings({
   const userSettings = useAppStore((state) => state.userSettings);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const { repositories, isLoading: repositoriesLoading } = useRepositories(workspaceId, true);
-  const userSettingsRef = useUserSettingsRef(userSettings);
+  const loadedUserSettings = useLoadUserSettings(userSettings.loaded, setUserSettings);
+  const effectiveUserSettings = loadedUserSettings ?? userSettings;
+  const userSettingsRef = useUserSettingsRef(effectiveUserSettings);
   const routeWorkflowId = useSearchParams().get("workflowId");
 
-  const settingsLoadedOnMountRef = useRef(userSettings.loaded);
+  const settingsLoadedOnMountRef = useRef(effectiveUserSettings.loaded);
 
   const commitSettings = useCallback(
     (next: CommitPayload) => {
@@ -218,61 +265,67 @@ export function useUserDisplaySettings({
     [setUserSettings, userSettingsRef],
   );
 
-  useEnsureUserSettings();
-
   useEffect(() => {
-    if (!userSettings.loaded) return;
+    if (!effectiveUserSettings.loaded) return;
     if (routeWorkflowId) return;
     if (settingsLoadedOnMountRef.current) return;
     settingsLoadedOnMountRef.current = true;
-    if (userSettings.workspaceId && userSettings.workspaceId !== workspaceId) {
-      onWorkspaceChange?.(userSettings.workspaceId);
+    if (effectiveUserSettings.workspaceId && effectiveUserSettings.workspaceId !== workspaceId) {
+      onWorkspaceChange?.(effectiveUserSettings.workspaceId);
     }
   }, [
+    effectiveUserSettings.loaded,
+    effectiveUserSettings.workspaceId,
     onWorkspaceChange,
     routeWorkflowId,
-    userSettings.loaded,
-    userSettings.workspaceId,
     workspaceId,
   ]);
 
   useEffect(() => {
-    if (!userSettings.loaded || !(!userSettings.workspaceId && workspaceId)) return;
+    if (!effectiveUserSettings.loaded || !(!effectiveUserSettings.workspaceId && workspaceId)) {
+      return;
+    }
     queueMicrotask(() => {
       commitSettings({
         workspaceId,
-        workflowId: userSettings.workflowId,
-        repositoryIds: userSettings.repositoryIds,
+        workflowId: effectiveUserSettings.workflowId,
+        repositoryIds: effectiveUserSettings.repositoryIds,
       });
     });
   }, [
     commitSettings,
-    userSettings.workflowId,
-    userSettings.loaded,
-    userSettings.repositoryIds,
-    userSettings.workspaceId,
+    effectiveUserSettings.workflowId,
+    effectiveUserSettings.loaded,
+    effectiveUserSettings.repositoryIds,
+    effectiveUserSettings.workspaceId,
     workspaceId,
   ]);
 
   useEffect(() => {
-    if (!userSettings.loaded) return;
+    if (!effectiveUserSettings.loaded) return;
     if (routeWorkflowId) return;
     if (settingsLoadedOnMountRef.current) return;
-    if (userSettings.workflowId && userSettings.workflowId !== workflowId) {
-      onWorkflowChange?.(userSettings.workflowId);
+    if (effectiveUserSettings.workflowId && effectiveUserSettings.workflowId !== workflowId) {
+      onWorkflowChange?.(effectiveUserSettings.workflowId);
     }
-  }, [workflowId, onWorkflowChange, routeWorkflowId, userSettings.workflowId, userSettings.loaded]);
+  }, [
+    effectiveUserSettings.loaded,
+    effectiveUserSettings.workflowId,
+    workflowId,
+    onWorkflowChange,
+    routeWorkflowId,
+  ]);
 
-  usePruneStaleRepositoryIds(userSettings, repositories, commitSettings);
+  usePruneStaleRepositoryIds(effectiveUserSettings, repositories, commitSettings);
 
-  const allRepositoriesSelected = userSettings.repositoryIds.length === 0;
+  const allRepositoriesSelected = effectiveUserSettings.repositoryIds.length === 0;
   const selectedRepositoryIds = useMemo(
-    () => mapSelectedRepositoryIds(repositories, userSettings.repositoryIds),
-    [repositories, userSettings.repositoryIds],
+    () => mapSelectedRepositoryIds(repositories, effectiveUserSettings.repositoryIds),
+    [repositories, effectiveUserSettings.repositoryIds],
   );
 
   return {
-    settings: userSettings,
+    settings: effectiveUserSettings,
     commitSettings,
     repositories,
     repositoriesLoading,

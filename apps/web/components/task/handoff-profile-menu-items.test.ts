@@ -1,5 +1,9 @@
+import { createElement, type ReactNode } from "react";
 import { renderHook } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { makeQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { ExecutorProfile } from "@/lib/types/http";
 
@@ -27,13 +31,6 @@ const mockUseTaskExecutorProfile = vi.fn(
   (_taskId: string, _enabled?: boolean) => mockExecutorProfile,
 );
 
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({
-      agentProfiles: { items: mockProfiles },
-    }),
-}));
-
 vi.mock("@/hooks/domains/session/use-task-executor-profile", () => ({
   useTaskExecutorProfile: (taskId: string, enabled?: boolean) =>
     mockUseTaskExecutorProfile(taskId, enabled),
@@ -53,6 +50,33 @@ vi.mock("@/lib/agent-executor-compat", () => ({
 
 import { useHandoffProfiles } from "./handoff-profile-menu-items";
 
+function wrapperForProfiles() {
+  const queryClient = makeQueryClient();
+  queryClient.setQueryData(qk.settings.executors(), { executors: [] });
+  queryClient.setQueryData(qk.settings.availableAgents(), { agents: [], tools: [], total: 0 });
+  queryClient.setQueryData(qk.settings.agents(), {
+    agents:
+      mockProfiles.length === 0
+        ? []
+        : [
+            {
+              id: "agent-1",
+              name: "mock",
+              profiles: mockProfiles.map((profile) => ({
+                id: profile.id,
+                agentId: profile.agent_id,
+                agentDisplayName: "Mock Agent",
+                name: profile.label.split(" \u2022 ")[1] ?? profile.label,
+              })),
+            },
+          ],
+    total: mockProfiles.length > 0 ? 1 : 0,
+  });
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return createElement(QueryClientProvider, { client: queryClient }, children);
+  };
+}
+
 describe("useHandoffProfiles", () => {
   afterEach(() => {
     mockProfiles = [PROFILE_A, PROFILE_B];
@@ -63,7 +87,9 @@ describe("useHandoffProfiles", () => {
   });
 
   it("returns all agent profiles with display labels", () => {
-    const { result } = renderHook(() => useHandoffProfiles("task-1"));
+    const { result } = renderHook(() => useHandoffProfiles("task-1"), {
+      wrapper: wrapperForProfiles(),
+    });
     expect(result.current).toHaveLength(2);
     expect(result.current[0]).toMatchObject({
       id: "profile-a",
@@ -87,19 +113,23 @@ describe("useHandoffProfiles", () => {
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-01T00:00:00Z",
     };
-    const { result } = renderHook(() => useHandoffProfiles("task-1"));
+    const { result } = renderHook(() => useHandoffProfiles("task-1"), {
+      wrapper: wrapperForProfiles(),
+    });
     expect(result.current.find((p) => p.id === "profile-a")?.disabled).toBe(false);
     expect(result.current.find((p) => p.id === "profile-b")?.disabled).toBe(true);
   });
 
   it("returns empty list when no profiles configured", () => {
     mockProfiles = [];
-    const { result } = renderHook(() => useHandoffProfiles("task-1"));
+    const { result } = renderHook(() => useHandoffProfiles("task-1"), {
+      wrapper: wrapperForProfiles(),
+    });
     expect(result.current).toEqual([]);
   });
 
   it("passes the enabled flag to executor profile lookup", () => {
-    renderHook(() => useHandoffProfiles("task-1", false));
+    renderHook(() => useHandoffProfiles("task-1", false), { wrapper: wrapperForProfiles() });
     expect(mockUseTaskExecutorProfile).toHaveBeenCalledWith("task-1", false);
   });
 });

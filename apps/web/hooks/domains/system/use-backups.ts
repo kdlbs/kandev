@@ -1,13 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useAppStore } from "@/components/state-provider";
-import { fetchBackups } from "@/lib/api/domains/system-api";
+import { useQuery } from "@tanstack/react-query";
+import { backupsQueryOptions } from "@/lib/query/query-options/system";
 import type { SnapshotInfo } from "@/lib/types/system";
 
 export function useBackups() {
-  const backups = useAppStore((s) => s.system.backups);
-  const setSystemBackups = useAppStore((s) => s.setSystemBackups);
+  const query = useQuery(backupsQueryOptions());
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -15,22 +14,27 @@ export function useBackups() {
     setIsLoading(true);
     setError(null);
     try {
-      const items = await fetchBackups({ cache: "no-store" });
-      const nextItems = items ?? [];
-      setSystemBackups(nextItems);
-      return nextItems;
+      const res = await query.refetch();
+      if (res.error) throw res.error;
+      return res.data ?? [];
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       throw e;
     } finally {
       setIsLoading(false);
     }
-  }, [setSystemBackups]);
+  }, [query]);
 
   useEffect(() => {
-    if (backups.loaded) return;
-    void reload().catch(() => undefined);
-  }, [backups.loaded, reload]);
+    if (!query.error) return;
+    setError(query.error instanceof Error ? query.error.message : String(query.error));
+  }, [query.error]);
 
-  return { backups: backups.items, loaded: backups.loaded, isLoading, error, reload };
+  return {
+    backups: query.data ?? [],
+    loaded: query.isSuccess,
+    isLoading: isLoading || (query.isFetching && !query.isSuccess),
+    error,
+    reload,
+  };
 }

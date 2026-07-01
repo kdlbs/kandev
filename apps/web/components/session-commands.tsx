@@ -30,6 +30,7 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import { NewSessionDialog } from "@/components/task/new-session-dialog";
 import { NewSubtaskDialog } from "@/components/task/new-subtask-dialog";
 import type { CommandItem } from "@/lib/commands/types";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 
 type SessionCommandsProps = {
   sessionId: string | null;
@@ -247,11 +248,8 @@ export function SessionCommands({
   const gitWithFeedback = useGitWithFeedback();
 
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
-  const activeTaskTitle = useAppStore((s) => {
-    const id = s.tasks.activeTaskId;
-    if (!id) return "";
-    return s.kanban.tasks.find((t: { id: string }) => t.id === id)?.title ?? "";
-  });
+  const activeTask = useTaskById(activeTaskId);
+  const activeTaskTitle = activeTask?.title ?? "";
 
   const [showNewAgentDialog, setShowNewAgentDialog] = useState(false);
   const [showSubtaskDialog, setShowSubtaskDialog] = useState(false);

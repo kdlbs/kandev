@@ -1,12 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { KanbanCard, resolveTaskRepositoryChips, Task } from "./kanban-card";
 import { Badge } from "@kandev/ui/badge";
 import { cn } from "@/lib/utils";
-import { useAppStore } from "@/components/state-provider";
-import type { Repository } from "@/lib/types/http";
+import { useAllCachedRepositories } from "@/hooks/domains/workspace/use-repository-cache";
 
 export interface WorkflowStep {
   id: string;
@@ -59,12 +57,7 @@ export function KanbanColumn({
     id: step.id,
   });
 
-  // Access repositories from store to pass repository names to cards
-  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
-  const repositories = useMemo(
-    () => Object.values(repositoriesByWorkspace).flat() as Repository[],
-    [repositoriesByWorkspace],
-  );
+  const repositories = useAllCachedRepositories();
 
   return (
     <div

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
   type AgentErrorOptions,
@@ -14,6 +14,14 @@ type UseAgentErrorAcknowledgementsParams = {
   sessionIds: readonly string[];
   messagesBySession: AgentErrorOptions["messagesBySession"];
   dismissedAgentErrors: Record<string, string>;
+};
+
+type UseTaskAgentErrorAcknowledgementsParams = Omit<
+  UseAgentErrorAcknowledgementsParams,
+  "sessionIds"
+> & {
+  tasks: Array<{ id: string; primarySessionId?: string | null }>;
+  sessionsByTaskId: Record<string, TaskSession[] | undefined>;
 };
 
 /**
@@ -81,4 +89,23 @@ export function usePersistResolvedAgentErrorAcknowledgements({
     sessionsById,
     store,
   ]);
+}
+
+export function usePersistTaskAgentErrorAcknowledgements({
+  tasks,
+  sessionsByTaskId,
+  sessionsById,
+  messagesBySession,
+  dismissedAgentErrors,
+}: UseTaskAgentErrorAcknowledgementsParams) {
+  const sessionIds = useMemo(
+    () => agentErrorAcknowledgementSessionIds(tasks, sessionsByTaskId),
+    [tasks, sessionsByTaskId],
+  );
+  usePersistResolvedAgentErrorAcknowledgements({
+    sessionsById,
+    sessionIds,
+    messagesBySession,
+    dismissedAgentErrors,
+  });
 }

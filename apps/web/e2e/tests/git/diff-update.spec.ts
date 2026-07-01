@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { SessionPage } from "../../pages/session-page";
 import {
   fileDiffTab,
   getDiffsContainer,
@@ -10,7 +11,24 @@ import {
   waitForDiffText,
   waitForDiffTextAbsent,
   waitForStoreFileDiffText,
+  writeDiffUpdateSecondModification,
+  writeMultiFileSecondModification,
+  writeUntrackedModification,
 } from "./diff-update-helpers";
+
+async function openFileTreeFile(session: SessionPage, filePath: string) {
+  const fileRow = session.fileTreeNode(filePath);
+  await expect
+    .poll(
+      async () => {
+        await session.clickTab("Files");
+        return fileRow.isVisible();
+      },
+      { timeout: 20_000, intervals: [500, 1000, 2000] },
+    )
+    .toBe(true);
+  await fileRow.click();
+}
 
 test.describe("Diff update on file change", () => {
   test.describe.configure({ retries: 2, timeout: 120_000 });
@@ -30,8 +48,8 @@ test.describe("Diff update on file change", () => {
     await waitForDiffText(testPage, "FIRST_MODIFICATION");
   });
 
-  test("diff updates when agent modifies file again", async ({ testPage, apiClient, seedData }) => {
-    const { session } = await seedDiffUpdateTask(testPage, apiClient, seedData);
+  test("diff updates when the file changes again", async ({ testPage, apiClient, seedData }) => {
+    const { session, workspacePath } = await seedDiffUpdateTask(testPage, apiClient, seedData);
     await openChangesTab(testPage);
     await session.closeFileDiffPreview();
     await openFileDiff(testPage, "diff_update_test.txt");
@@ -42,16 +60,7 @@ test.describe("Diff update on file change", () => {
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
     await waitForDiffText(testPage, "FIRST_MODIFICATION");
 
-    // Click on the session tab to make the chat input visible again
-    await session.clickSessionChatTab();
-
-    // Send another message to trigger the second modification
-    await session.sendMessage("/e2e:diff-update-modify");
-
-    // Wait for the second turn to complete
-    await expect(
-      session.chat.getByText("diff-update-modify complete", { exact: false }),
-    ).toBeVisible({ timeout: 45_000 });
+    writeDiffUpdateSecondModification(workspacePath);
 
     // Switch back to Changes tab and click on the diff file again to see the updated diff.
     // The git status (with diff data) should have been updated via polling when
@@ -81,7 +90,11 @@ test.describe("Diff update on file change", () => {
   }) => {
     // This test verifies the Diff [file] preview shows the latest git-status
     // snapshot after the underlying file changes.
-    const { session, sessionId } = await seedDiffUpdateTask(testPage, apiClient, seedData);
+    const { session, sessionId, workspacePath } = await seedDiffUpdateTask(
+      testPage,
+      apiClient,
+      seedData,
+    );
     await openChangesTab(testPage);
     await openFileDiff(testPage, "diff_update_test.txt");
 
@@ -90,12 +103,7 @@ test.describe("Diff update on file change", () => {
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
     await waitForDiffText(testPage, "FIRST_MODIFICATION", 15_000);
 
-    // Switch to chat, trigger the second modification
-    await session.clickSessionChatTab();
-    await session.sendMessage("/e2e:diff-update-modify");
-    await expect(
-      session.chat.getByText("diff-update-modify complete", { exact: false }),
-    ).toBeVisible({ timeout: 45_000 });
+    writeDiffUpdateSecondModification(workspacePath);
 
     // Wait for the Changes panel's git status source to observe the second
     // modification. Do not re-open the file diff; just verify the status source
@@ -159,16 +167,12 @@ test.describe("File editor auto-update on file change", () => {
     seedData,
   }) => {
     // Regression: opening a file in the FileEditorPanel and then having the
-    // agent modify it should reactively update the editor content WITHOUT the
+    // file changes should reactively update the editor content WITHOUT the
     // user re-clicking the file.
-    const { session } = await seedDiffUpdateTask(testPage, apiClient, seedData);
+    const { session, workspacePath } = await seedDiffUpdateTask(testPage, apiClient, seedData);
 
     // Open the file in the file editor via the Files tree.
-    await session.clickTab("Files");
-    await expect(session.files).toBeVisible({ timeout: 10_000 });
-    const fileRow = session.files.getByText("diff_update_test.txt");
-    await expect(fileRow).toBeVisible({ timeout: 10_000 });
-    await fileRow.click();
+    await openFileTreeFile(session, "diff_update_test.txt");
 
     // The editor tab should appear in dockview.
     const editorTab = testPage.locator(".dv-default-tab", { hasText: "diff_update_test.txt" });
@@ -178,12 +182,7 @@ test.describe("File editor auto-update on file change", () => {
     const editorContent = testPage.locator(".view-lines").first();
     await expect(editorContent).toContainText("FIRST_MODIFICATION", { timeout: 15_000 });
 
-    // Switch to chat and trigger the second modification.
-    await session.clickSessionChatTab();
-    await session.sendMessage("/e2e:diff-update-modify");
-    await expect(
-      session.chat.getByText("diff-update-modify complete", { exact: false }),
-    ).toBeVisible({ timeout: 45_000 });
+    writeDiffUpdateSecondModification(workspacePath);
 
     // Click the editor tab back to view it (do NOT re-open from file tree).
     // The panel is still mounted, just not the active tab.
@@ -199,16 +198,15 @@ test.describe("File editor auto-update on file change", () => {
     await expect(updatedEditorContent).not.toContainText("FIRST_MODIFICATION", { timeout: 5_000 });
   });
 
-  test("editor + diff panels auto-update while agent is streaming (mid-turn)", async ({
+  test("editor + diff panels auto-update after direct file change", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
     // Reproduces the user-reported bug: open both editor and diff from the
-    // Changes tab, then have the agent modify the file MID-TURN (still
-    // streaming). Both panels must auto-update within a few seconds while
-    // the agent's turn is still active — without re-opening the file.
-    const { session } = await seedDiffUpdateTask(testPage, apiClient, seedData);
+    // Changes tab, then modify the file without re-opening either panel.
+    // Both panels must auto-update within a few seconds.
+    const { session, workspacePath } = await seedDiffUpdateTask(testPage, apiClient, seedData);
 
     // Open the diff panel from the Changes tab.
     await openChangesTab(testPage);
@@ -218,11 +216,7 @@ test.describe("File editor auto-update on file change", () => {
     await waitForDiffText(testPage, "FIRST_MODIFICATION", 15_000);
 
     // Also open the file editor for the same file via the Files tree.
-    await session.clickTab("Files");
-    await expect(session.files).toBeVisible({ timeout: 5_000 });
-    const fileRow = session.files.getByText("diff_update_test.txt");
-    await expect(fileRow).toBeVisible({ timeout: 10_000 });
-    await fileRow.click();
+    await openFileTreeFile(session, "diff_update_test.txt");
     const editorTab = testPage.locator(".dv-default-tab[type='file-editor']", {
       hasText: "diff_update_test.txt",
     });
@@ -230,19 +224,9 @@ test.describe("File editor auto-update on file change", () => {
     const editorContent = testPage.locator(".view-lines").first();
     await expect(editorContent).toContainText("FIRST_MODIFICATION", { timeout: 15_000 });
 
-    // Trigger the streaming scenario: agent will write the file mid-turn and
-    // keep emitting text for ~6s afterwards. Do NOT wait for completion —
-    // we want to assert updates while the turn is still streaming.
-    await session.clickSessionChatTab();
-    await session.sendMessage("/e2e:diff-update-streaming");
+    writeDiffUpdateSecondModification(workspacePath);
 
-    // Wait for the agent to confirm it has started — turn is now live.
-    await expect(session.chat.getByText("starting work", { exact: false })).toBeVisible({
-      timeout: 30_000,
-    });
-
-    // While the agent is still mid-turn (it has ~6s of trailing delay), both
-    // panels must reflect the new content. This is the user's bug scenario.
+    // Both panels must reflect the new content.
     // Click back to the editor tab to make assertions.
     await editorTab.click();
     const liveEditorContent = testPage.locator(".view-lines").first();
@@ -263,7 +247,7 @@ test.describe("File editor auto-update on file change", () => {
 test.describe("Multi-file editor + diff auto-update", () => {
   test.describe.configure({ retries: 2, timeout: 180_000 });
 
-  test("diff panel auto-updates across all 3 files during a single multi-file streaming turn", async ({
+  test("diff panel auto-updates across all 3 files during one multi-file change", async ({
     testPage,
     apiClient,
     seedData,
@@ -274,11 +258,11 @@ test.describe("Multi-file editor + diff auto-update", () => {
     // must propagate to gitStatus so:
     //   - The currently open diff (file_a) auto-updates mid-turn.
     //   - Switching the preview to file_b shows file_b's NEW diff immediately
-    //     (not the pre-turn FIRST_MODIFICATION).
+    //     (not the pre-change FIRST_MODIFICATION).
     //   - Same for file_c.
     // This exercises the gitStatus-driven re-render path without the user
     // re-triggering anything per-file.
-    const { session } = await seedMultiFileTask(testPage, apiClient, seedData);
+    const { workspacePath } = await seedMultiFileTask(testPage, apiClient, seedData);
     const fileA = "multi_a.txt";
     const fileB = "multi_b.txt";
     const fileC = "multi_c.txt";
@@ -290,25 +274,19 @@ test.describe("Multi-file editor + diff auto-update", () => {
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
     await waitForDiffText(testPage, "FIRST_MODIFICATION", 15_000);
 
-    // Trigger the multi-file streaming modification. Don't wait for completion.
-    await session.clickSessionChatTab();
-    await session.sendMessage("/e2e:multi-file-modify");
-    await expect(session.chat.getByText("starting work", { exact: false })).toBeVisible({
-      timeout: 30_000,
-    });
+    writeMultiFileSecondModification(workspacePath);
 
     // Click back to the file_a diff tab so its panel becomes the visible one.
     const diffTabA = fileDiffTab(testPage, fileA);
     await expect(diffTabA).toBeVisible({ timeout: 10_000 });
     await diffTabA.click();
 
-    // While the agent is still streaming, the file_a diff must reflect
-    // SECOND_MODIFICATION + ALSO_CHANGED_0.
+    // The file_a diff must reflect SECOND_MODIFICATION + ALSO_CHANGED_0.
     await waitForDiffText(testPage, "SECOND_MODIFICATION", 15_000);
     await waitForDiffText(testPage, "ALSO_CHANGED_0", 5_000);
 
     // Swap the diff preview to file_b — the gitStatus-driven content must
-    // already have SECOND_MODIFICATION available without re-running the agent.
+    // already have SECOND_MODIFICATION available without another user action.
     await openChangesTab(testPage);
     await openFileDiff(testPage, fileB);
     await waitForDiffText(testPage, "ALSO_CHANGED_1", 15_000);
@@ -321,9 +299,9 @@ test.describe("Multi-file editor + diff auto-update", () => {
 });
 
 test.describe("User-save then diff view (colleague repro)", () => {
-  // Intermittent bug: after agent modifies a file, user opens it in editor,
+  // Intermittent bug: after a file changes, user opens it in editor,
   // edits + saves, then switches to diff view \u2014 the diff panel shows the
-  // pre-save content (agent's edit only, not the user's save). Workaround
+  // pre-save content (seeded edit only, not the user's save). Workaround
   // reported: leave the task and re-enter. We try to repro by driving the
   // exact UI sequence and asserting the diff contains the user's marker.
   test.describe.configure({ retries: 2, timeout: 120_000 });
@@ -336,7 +314,7 @@ test.describe("User-save then diff view (colleague repro)", () => {
     const USER_MARKER = "USER_EDIT_MARKER_42";
     const { session } = await seedDiffUpdateTask(testPage, apiClient, seedData);
 
-    // Step 1: agent has already modified diff_update_test.txt with FIRST_MODIFICATION.
+    // Step 1: diff_update_test.txt already has FIRST_MODIFICATION.
     // Wait for the Changes panel auto-activate (fires once gitStatus 0\u2192N) to
     // settle before we click Files \u2014 otherwise the auto-activate races with
     // our click and Files ends up inactive. Match any "Changes (N)" count so we
@@ -387,7 +365,7 @@ test.describe("User-save then diff view (colleague repro)", () => {
     const diffsContainer = getDiffsContainer(testPage);
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
     await waitForDiffText(testPage, USER_MARKER, 15_000);
-    // FIRST_MODIFICATION should still be present (agent's earlier edit).
+    // FIRST_MODIFICATION should still be present (the earlier seeded edit).
     await waitForDiffText(testPage, "FIRST_MODIFICATION", 5_000);
   });
 });
@@ -399,7 +377,7 @@ test.describe("Untracked file diff update", () => {
     // This test verifies that modifying an untracked file triggers a git status update
     // and the diff viewer shows the updated content. This was a bug where the polling
     // mechanism didn't detect untracked file changes (git diff-files only shows tracked files).
-    const { session } = await seedUntrackedFileTask(testPage, apiClient, seedData);
+    const { workspacePath } = await seedUntrackedFileTask(testPage, apiClient, seedData);
     await openChangesTab(testPage);
     await openFileDiff(testPage, "untracked_test.txt");
 
@@ -409,19 +387,7 @@ test.describe("Untracked file diff update", () => {
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
     await waitForDiffText(testPage, "INITIAL_CONTENT", 15_000);
 
-    // Click on the session tab to make the chat input visible again
-    await session.clickSessionChatTab();
-
-    // Send another message to trigger the modification
-    await session.sendMessage("/e2e:untracked-file-modify");
-
-    // Wait for the second turn to complete
-    await expect(
-      session.chat.getByText("untracked-file-modify complete", { exact: false }),
-    ).toBeVisible({ timeout: 45_000 });
-
-    // Wait for git polling to detect the file change (polling interval is ~1-2s)
-    await testPage.waitForTimeout(3_000);
+    writeUntrackedModification(workspacePath);
 
     // Switch back to Changes tab and click on the diff file again
     await openChangesTab(testPage);

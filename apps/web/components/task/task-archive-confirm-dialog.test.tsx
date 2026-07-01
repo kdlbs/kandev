@@ -1,13 +1,22 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 
 const mockGetSubtaskCount = vi.fn();
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/api/domains/kanban-api", () => ({
   getSubtaskCount: (...args: unknown[]) => mockGetSubtaskCount(...args),
 }));
 
 import { TaskArchiveConfirmDialog } from "./task-archive-confirm-dialog";
+
+function renderWithQuery(node: ReactNode) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(<QueryClientProvider client={client}>{node}</QueryClientProvider>);
+}
 
 beforeEach(() => {
   mockGetSubtaskCount.mockReset();
@@ -18,7 +27,7 @@ afterEach(cleanup);
 
 describe("TaskArchiveConfirmDialog cleanup copy", () => {
   it("renders local-executor reassurance about untouched repo", () => {
-    render(
+    renderWithQuery(
       <TaskArchiveConfirmDialog
         open
         onOpenChange={() => {}}
@@ -32,7 +41,7 @@ describe("TaskArchiveConfirmDialog cleanup copy", () => {
   });
 
   it("renders worktree-executor copy about worktree + branch removal", () => {
-    render(
+    renderWithQuery(
       <TaskArchiveConfirmDialog
         open
         onOpenChange={() => {}}
@@ -46,7 +55,7 @@ describe("TaskArchiveConfirmDialog cleanup copy", () => {
   });
 
   it("warns about sandbox destruction for sprites executor", () => {
-    render(
+    renderWithQuery(
       <TaskArchiveConfirmDialog
         open
         onOpenChange={() => {}}
@@ -61,7 +70,7 @@ describe("TaskArchiveConfirmDialog cleanup copy", () => {
   });
 
   it("describes Docker container removal for local_docker", () => {
-    render(
+    renderWithQuery(
       <TaskArchiveConfirmDialog
         open
         onOpenChange={() => {}}
@@ -75,7 +84,7 @@ describe("TaskArchiveConfirmDialog cleanup copy", () => {
   });
 
   it("renders grouped copy for bulk archive", () => {
-    render(
+    renderWithQuery(
       <TaskArchiveConfirmDialog
         open
         onOpenChange={() => {}}
@@ -91,7 +100,7 @@ describe("TaskArchiveConfirmDialog cleanup copy", () => {
   });
 
   it("no longer renders the old hardcoded worktree line for non-worktree executors", () => {
-    render(
+    renderWithQuery(
       <TaskArchiveConfirmDialog
         open
         onOpenChange={() => {}}

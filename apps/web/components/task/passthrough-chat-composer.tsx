@@ -1,9 +1,11 @@
 "use client";
 
 import { useCallback, type RefObject } from "react";
+import { QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/components/toast-provider";
-import { useAppStoreApi } from "@/components/state-provider";
+import { useAppStore } from "@/components/state-provider";
 import { useCommentsStore } from "@/lib/state/slices/comments/comments-store";
+import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { formatReviewCommentsAsMarkdown } from "@/lib/state/slices/comments/format";
 import { buildSubmitMessage } from "./chat/chat-input-area";
 import {
@@ -17,10 +19,14 @@ import type { ContextFile } from "@/lib/state/context-files-store";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
 import { buildContextFilesContext, buildTaskMentionsContext } from "@/hooks/use-message-handler";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { getTaskPlan } from "@/lib/api/domains/plan-api";
-import type { AppState } from "@/lib/state/store";
+import { taskPlanQueryOptions } from "@/lib/query/query-options";
+import type { TaskPlan } from "@/lib/types/http";
+import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 
 const PLAN_CONTEXT_PATH = "plan:context";
+const standalonePlanQueryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false } },
+});
 
 export type PassthroughSubmitHandler = (
   content: string,
@@ -152,15 +158,12 @@ export function buildPassthroughPlanContext(planContent: string | undefined | nu
   );
 }
 
-function cachedTaskPlanContent(taskId: string, state: AppState) {
-  return state.taskPlans.byTaskId[taskId]?.content;
-}
-
-async function loadTaskPlanContent(taskId: string | null, getState: () => AppState) {
+async function loadTaskPlanContent(taskId: string | null, queryClient: QueryClient) {
   if (!taskId) return "";
-  const cached = cachedTaskPlanContent(taskId, getState());
-  if (cached !== undefined) return cached;
-  const plan = await getTaskPlan(taskId);
+  const options = taskPlanQueryOptions(taskId);
+  const cached = queryClient.getQueryData<TaskPlan | null>(options.queryKey);
+  if (cached !== undefined) return cached?.content ?? "";
+  const plan = await queryClient.fetchQuery(options);
   return plan?.content ?? "";
 }
 
@@ -172,7 +175,8 @@ export async function buildPassthroughFinalMessage({
   panelState,
   inlineMentions,
   inlineTaskMentions,
-  getState,
+  workflowSnapshots = {},
+  queryClient = standalonePlanQueryClient,
 }: {
   taskId: string | null;
   content: string;
@@ -181,7 +185,8 @@ export async function buildPassthroughFinalMessage({
   panelState: ReturnType<typeof useChatPanelState>;
   inlineMentions?: ContextFile[];
   inlineTaskMentions?: TaskMentionData[];
-  getState: ReturnType<typeof useAppStoreApi>["getState"];
+  workflowSnapshots?: Record<string, WorkflowSnapshotData>;
+  queryClient?: QueryClient;
 }): Promise<PassthroughFinalMessage> {
   const { formatted, commentsToSend } = formatPassthroughBaseMessage(
     content,
@@ -193,11 +198,11 @@ export async function buildPassthroughFinalMessage({
   const visibleContent = stripSelectedPlanMentions(formatted, allContextFiles);
   const contextFilesContext = buildContextFilesContext(allContextFiles, panelState.prompts);
   const planContext = hasPlanContext(allContextFiles)
-    ? buildPassthroughPlanContext(await loadTaskPlanContent(taskId, getState))
+    ? buildPassthroughPlanContext(await loadTaskPlanContent(taskId, queryClient))
     : "";
   const taskMentionsContext =
     inlineTaskMentions && inlineTaskMentions.length > 0
-      ? buildTaskMentionsContext(inlineTaskMentions, getState())
+      ? buildTaskMentionsContext(inlineTaskMentions, workflowSnapshots)
       : "";
   return {
     content: visibleContent + contextFilesContext + planContext + taskMentionsContext,
@@ -273,7 +278,9 @@ export function useSendPassthroughMessage({
 }) {
   const { toast } = useToast();
   const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
-  const storeApi = useAppStoreApi();
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+  const { snapshots } = useAllWorkflowSnapshots(activeWorkspaceId);
+  const queryClient = useQueryClient();
 
   return useCallback(
     async (
@@ -296,7 +303,8 @@ export function useSendPassthroughMessage({
           panelState,
           inlineMentions,
           inlineTaskMentions,
-          getState: storeApi.getState,
+          workflowSnapshots: snapshots,
+          queryClient,
         });
         await requestPassthroughMessage({ taskId, sessionId, message, attachments });
         if (message.commentsToSend.length > 0) {
@@ -310,6 +318,16 @@ export function useSendPassthroughMessage({
         throw error;
       }
     },
-    [taskId, sessionId, toast, pendingComments, panelState, storeApi, markCommentsSent, onSent],
+    [
+      taskId,
+      sessionId,
+      toast,
+      pendingComments,
+      panelState,
+      snapshots,
+      queryClient,
+      markCommentsSent,
+      onSent,
+    ],
   );
 }

@@ -6,6 +6,7 @@ import {
   useIntegrationAvailable,
   type IntegrationConfigStatus,
 } from "../integrations/use-integration-availability";
+import { qk } from "@/lib/query/keys";
 import { useSlackEnabled } from "./use-slack-enabled";
 
 // Slack stores two secrets (token + cookie) instead of one — the shared
@@ -21,12 +22,16 @@ async function fetchSlackStatus(): Promise<IntegrationConfigStatus | null> {
 }
 
 export function useSlackAuthed(): boolean {
-  return useIntegrationAuthed(fetchSlackStatus);
+  return useIntegrationAuthed({
+    fetchConfig: fetchSlackStatus,
+    queryKey: qk.integrations.slack.config(),
+  });
 }
 
 export function useSlackAvailable(): boolean {
   return useIntegrationAvailable({
     useEnabled: useSlackEnabled,
     fetchConfig: fetchSlackStatus,
+    queryKey: qk.integrations.slack.config(),
   });
 }

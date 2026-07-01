@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { IconEdit, IconTrash, IconEye, IconEyeOff, IconKey } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -15,7 +16,6 @@ import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
-import { useAppStore } from "@/components/state-provider";
 import {
   createSecret,
   updateSecret,
@@ -23,6 +23,7 @@ import {
   revealSecret,
 } from "@/lib/api/domains/secrets-api";
 import { useRequest } from "@/lib/http/use-request";
+import { qk } from "@/lib/query/keys";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 
 type SecretFormState = {
@@ -230,11 +231,7 @@ function DeleteSecretDialog({ target, onClose, onConfirm, isBusy }: DeleteSecret
 /* ------------------------------------------------------------------ */
 
 function useSecretsState() {
-  const { loaded } = useSecrets();
-  const items = useAppStore((s) => s.secrets.items);
-  const addSecret = useAppStore((s) => s.addSecret);
-  const updateSecretInStore = useAppStore((s) => s.updateSecret);
-  const removeSecret = useAppStore((s) => s.removeSecret);
+  const { loaded, items } = useSecrets();
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -244,9 +241,6 @@ function useSecretsState() {
   return {
     loaded,
     items,
-    addSecret,
-    updateSecretInStore,
-    removeSecret,
     editingId,
     setEditingId,
     showCreate,
@@ -259,10 +253,8 @@ function useSecretsState() {
 }
 
 function useSecretsActions(state: ReturnType<typeof useSecretsState>) {
+  const queryClient = useQueryClient();
   const {
-    addSecret: addToStore,
-    updateSecretInStore,
-    removeSecret: removeFromStore,
     editingId,
     setEditingId,
     setShowCreate,
@@ -286,7 +278,10 @@ function useSecretsActions(state: ReturnType<typeof useSecretsState>) {
 
   const createRequest = useRequest(async (s: SecretFormState) => {
     const item = await createSecret({ name: s.name.trim(), value: s.value }, { cache: "no-store" });
-    addToStore(item);
+    queryClient.setQueryData<SecretListItem[]>(qk.settings.secrets(), (prev) => [
+      ...(prev ?? []).filter((existing) => existing.id !== item.id),
+      item,
+    ]);
     resetForm();
   });
 
@@ -296,13 +291,19 @@ function useSecretsActions(state: ReturnType<typeof useSecretsState>) {
     };
     if (s.value.trim()) payload.value = s.value;
     const item = await updateSecret(id, payload, { cache: "no-store" });
-    updateSecretInStore(item);
+    queryClient.setQueryData<SecretListItem[]>(qk.settings.secrets(), (prev) =>
+      (prev ?? []).map((existing) =>
+        existing.id === item.id ? { ...existing, ...item } : existing,
+      ),
+    );
     resetForm();
   });
 
   const deleteRequest = useRequest(async (id: string) => {
     await deleteSecret(id, { cache: "no-store" });
-    removeFromStore(id);
+    queryClient.setQueryData<SecretListItem[]>(qk.settings.secrets(), (prev) =>
+      (prev ?? []).filter((secret) => secret.id !== id),
+    );
     if (editingId === id) resetForm();
   });
 

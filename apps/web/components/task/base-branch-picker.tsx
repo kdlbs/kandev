@@ -5,12 +5,14 @@ import { IconChevronDown, IconLoader2 } from "@tabler/icons-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
+import { useAllCachedRepositories } from "@/hooks/domains/workspace/use-repository-cache";
 import { useBranches } from "@/hooks/domains/workspace/use-repository-branches";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { invalidateCumulativeDiffCache } from "@/hooks/domains/session/use-cumulative-diff";
 import { updateTaskRepositoryBaseBranch } from "@/lib/api/domains/kanban-api";
 import { useToast } from "@/components/toast-provider";
-import { repositoryId, type Branch, type Repository } from "@/lib/types/http";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
+import { repositoryId, type Branch } from "@/lib/types/http";
 
 type ResolvedRepo = {
   taskRepositoryId: string;
@@ -25,14 +27,13 @@ type ResolvedRepo = {
  * tasks the empty `repositoryName` falls back to the only row.
  */
 function useResolvedTaskRepo(taskId: string | null, repositoryName: string): ResolvedRepo | null {
-  const task = useAppStore((s) => (taskId ? s.kanban.tasks.find((t) => t.id === taskId) : null));
-  const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
+  const task = useTaskById(taskId);
+  const repositories = useAllCachedRepositories();
   return useMemo(() => {
     if (!task?.repositories?.length) return null;
-    const allRepos = Object.values(reposByWorkspace).flat() as Repository[];
     if (repositoryName === "" && task.repositories.length === 1) {
       const link = task.repositories[0]!;
-      const repo = allRepos.find((r) => r.id === repositoryId(link.repository_id));
+      const repo = repositories.find((r) => r.id === repositoryId(link.repository_id));
       return repo
         ? {
             taskRepositoryId: link.id,
@@ -42,7 +43,7 @@ function useResolvedTaskRepo(taskId: string | null, repositoryName: string): Res
           }
         : null;
     }
-    const repo = allRepos.find((r) => r.name === repositoryName);
+    const repo = repositories.find((r) => r.name === repositoryName);
     if (!repo) return null;
     const link = task.repositories.find((l) => repositoryId(l.repository_id) === repo.id);
     return link
@@ -53,7 +54,7 @@ function useResolvedTaskRepo(taskId: string | null, repositoryName: string): Res
           repositoryId: repo.id,
         }
       : null;
-  }, [task, reposByWorkspace, repositoryName]);
+  }, [task, repositories, repositoryName]);
 }
 
 /**

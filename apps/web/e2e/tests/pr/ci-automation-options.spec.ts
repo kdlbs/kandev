@@ -40,13 +40,17 @@ async function seedTaskWithPR(apiClient: ApiClient, seedData: SeedData, title: s
     checks_passing: 2,
     unresolved_review_threads: 1,
   });
-  return task.id;
+  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+  return { taskId: task.id, sessionId: task.session_id };
 }
 
-async function openTask(testPage: import("@playwright/test").Page, taskId: string) {
-  await testPage.goto(`/t/${taskId}`);
+async function openTask(
+  testPage: import("@playwright/test").Page,
+  task: { taskId: string; sessionId: string },
+) {
+  await testPage.goto(`/t/${task.taskId}?sessionId=${task.sessionId}`);
   const session = new SessionPage(testPage);
-  await session.waitForLoad();
+  await session.waitForDockviewReady(30_000);
   await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
   await session.hoverPRTopbar();
   await session.prTopbarPopover().hover();
@@ -69,8 +73,8 @@ test.describe("PR CI automation options", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    const taskId = await seedTaskWithPR(apiClient, seedData, "CI automation desktop");
-    const session = await openTask(testPage, taskId);
+    const task = await seedTaskWithPR(apiClient, seedData, "CI automation desktop");
+    const session = await openTask(testPage, task);
     const popover = session.prTopbarPopover();
 
     await expect(popover.getByTestId("pr-ci-automation-controls")).toBeVisible();
@@ -83,7 +87,7 @@ test.describe("PR CI automation options", () => {
     await popover.getByRole("switch", { name: "Auto-merge when ready" }).click();
 
     await expect
-      .poll(async () => apiClient.getTaskCIAutomationOptions(taskId))
+      .poll(async () => apiClient.getTaskCIAutomationOptions(task.taskId))
       .toMatchObject({ auto_fix_enabled: true, auto_merge_enabled: true });
 
     await popover.getByLabel("Explain CI automation options").hover();
@@ -107,17 +111,17 @@ test.describe("PR CI automation options", () => {
     await testPage.getByRole("button", { name: "Save prompt" }).click();
 
     await expect
-      .poll(async () => apiClient.getTaskCIAutomationOptions(taskId))
+      .poll(async () => apiClient.getTaskCIAutomationOptions(task.taskId))
       .toMatchObject({ auto_fix_prompt_override: "Please fix only the new CI issues." });
 
     await openPromptDialog(session);
     await testPage.getByRole("button", { name: "Use default" }).click();
     await expect
-      .poll(async () => apiClient.getTaskCIAutomationOptions(taskId))
+      .poll(async () => apiClient.getTaskCIAutomationOptions(task.taskId))
       .toMatchObject({ auto_fix_prompt_override: null });
 
     await testPage.reload();
-    const reloaded = await openTask(testPage, taskId);
+    const reloaded = await openTask(testPage, task);
     await expect(
       reloaded.prTopbarPopover().getByRole("switch", {
         name: "Auto-fix CI and address comments",

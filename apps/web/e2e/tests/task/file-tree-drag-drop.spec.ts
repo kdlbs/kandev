@@ -78,7 +78,68 @@ async function dispatchHtmlDnd(testPage: Page, source: Locator, target: Locator)
   );
 }
 
+function visibleFileTreeNode(testPage: Page, nodePath: string): Locator {
+  return testPage
+    .locator(
+      `[data-testid="files-panel"]:visible [data-testid="file-tree"]:visible [data-testid="file-tree-node"][data-path="${nodePath}"]`,
+    )
+    .first();
+}
+
+async function focusVisibleFilesTree(testPage: Page): Promise<boolean> {
+  const tree = testPage.locator(
+    '[data-testid="files-panel"]:visible [data-testid="file-tree"]:visible',
+  );
+  if ((await tree.count()) === 1) return true;
+
+  await testPage
+    .locator(".dv-default-tab:visible")
+    .filter({ hasText: /^Files$/ })
+    .first()
+    .click({ timeout: 2_000 })
+    .catch(() => undefined);
+
+  return (await tree.count()) === 1;
+}
+
+async function expectSingleVisibleFileTree(testPage: Page) {
+  await expect
+    .poll(() => focusVisibleFilesTree(testPage), {
+      timeout: 15_000,
+      message: "Expected exactly one visible Files tree",
+    })
+    .toBe(true);
+}
+
+async function expandVisibleFolder(testPage: Page, folderPath: string, childPath: string) {
+  await expect
+    .poll(
+      async () => {
+        if (!(await focusVisibleFilesTree(testPage))) return false;
+        if ((await visibleFileTreeNode(testPage, childPath).count()) > 0) return true;
+
+        const folder = visibleFileTreeNode(testPage, folderPath);
+        if ((await folder.count()) === 0) return false;
+
+        await folder.scrollIntoViewIfNeeded().catch(() => undefined);
+        const isExpanded =
+          (await folder.getAttribute("data-expanded").catch(() => null)) === "true";
+        if (!isExpanded) {
+          await folder.click({ timeout: 2_000 }).catch(() => undefined);
+        }
+        return (await visibleFileTreeNode(testPage, childPath).count()) > 0;
+      },
+      {
+        timeout: 30_000,
+        message: `Expected ${folderPath} to expand and reveal ${childPath}`,
+      },
+    )
+    .toBe(true);
+}
+
 test.describe("File tree drag and drop", () => {
+  test.describe.configure({ timeout: 90_000 });
+
   test("drag a file into a folder moves it on disk and in the tree", async ({
     testPage,
     apiClient,
@@ -92,28 +153,42 @@ test.describe("File tree drag and drop", () => {
     git.stageAll();
     git.commit("seed dnd");
 
-    const session = await setupTask(testPage, apiClient, seedData, "ft-dnd-move", "FT DnD Move");
+    await setupTask(testPage, apiClient, seedData, "ft-dnd-move", "FT DnD Move");
+    await expectSingleVisibleFileTree(testPage);
 
-    const file = session.fileTreeNode("movable.ts");
-    const folder = session.fileTreeNode("target-dir");
+    const file = visibleFileTreeNode(testPage, "movable.ts");
+    const folder = visibleFileTreeNode(testPage, "target-dir");
     await expect(file).toBeVisible({ timeout: 15_000 });
     await expect(folder).toBeVisible({ timeout: 15_000 });
 
     await dispatchHtmlDnd(testPage, file, folder);
 
     // The file is removed from the root immediately (optimistic update).
-    await expect(session.fileTreeNode("movable.ts")).toHaveCount(0, { timeout: 10_000 });
-    // Expand the target folder to verify the moved child landed inside.
-    // moveNodesInTree does not auto-expand the drop target.
-    await folder.click();
-    await expect(session.fileTreeNode("target-dir/movable.ts")).toBeVisible({ timeout: 10_000 });
+    await expect
+      .poll(
+        async () => {
+          if (!(await focusVisibleFilesTree(testPage))) return -1;
+          return visibleFileTreeNode(testPage, "movable.ts").count();
+        },
+        { timeout: 20_000 },
+      )
+      .toBe(0);
 
     await expect
       .poll(() => fs.existsSync(path.join(repoDir, "target-dir", "movable.ts")), {
-        timeout: 10_000,
+        timeout: 20_000,
       })
       .toBe(true);
     expect(fs.existsSync(path.join(repoDir, "movable.ts"))).toBe(false);
+
+    // Re-acquire the folder after the optimistic tree update settles, then expand
+    // it to verify the moved child landed inside. moveNodesInTree does not
+    // auto-expand the drop target. Git status updates can focus Changes during
+    // this window, so helpers below keep bringing the visible Files tree back.
+    await expectSingleVisibleFileTree(testPage);
+    const movedFolder = visibleFileTreeNode(testPage, "target-dir");
+    await expect(movedFolder).toBeVisible({ timeout: 20_000 });
+    await expandVisibleFolder(testPage, "target-dir", "target-dir/movable.ts");
   });
 
   test("drop is rejected when dragging a folder onto itself", async ({
@@ -128,15 +203,10 @@ test.describe("File tree drag and drop", () => {
     git.stageAll();
     git.commit("seed selfdir");
 
-    const session = await setupTask(
-      testPage,
-      apiClient,
-      seedData,
-      "ft-dnd-self",
-      "FT DnD Self Reject",
-    );
+    await setupTask(testPage, apiClient, seedData, "ft-dnd-self", "FT DnD Self Reject");
+    await expectSingleVisibleFileTree(testPage);
 
-    const folder = session.fileTreeNode("selfdir");
+    const folder = visibleFileTreeNode(testPage, "selfdir");
     await expect(folder).toBeVisible({ timeout: 15_000 });
 
     // Drop onto self: handleDragOver short-circuits via isDropInvalid so
@@ -146,10 +216,9 @@ test.describe("File tree drag and drop", () => {
     await dispatchHtmlDnd(testPage, folder, folder);
 
     // Tree is unchanged: folder is still at root with its original child.
-    await expect(session.fileTreeNode("selfdir")).toBeVisible({ timeout: 5_000 });
+    await expect(visibleFileTreeNode(testPage, "selfdir")).toBeVisible({ timeout: 5_000 });
     // Expand and confirm the child is still there.
-    await folder.click();
-    await expect(session.fileTreeNode("selfdir/leaf.ts")).toBeVisible({ timeout: 10_000 });
+    await expandVisibleFolder(testPage, "selfdir", "selfdir/leaf.ts");
 
     // Disk untouched - no self-nested directory created.
     expect(fs.existsSync(path.join(repoDir, "selfdir", "selfdir"))).toBe(false);

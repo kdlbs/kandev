@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
-import { useAppStore } from "@/components/state-provider";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { listAgents } from "@/lib/api";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import { qk } from "@/lib/query/keys";
 import type {
   Agent,
   AgentProfile,
@@ -48,9 +49,8 @@ export function useAgentProfileSettings(
   agentKey: string,
   profileId: string,
 ): AgentProfileSettingsResult {
-  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
-  const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
-  const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
+  const queryClient = useQueryClient();
+  const { settingsAgents } = useSettingsData(true);
   const availableAgents = useAvailableAgents().items;
   const refreshKeyRef = useRef<string | null>(null);
 
@@ -76,12 +76,7 @@ export function useAgentProfileSettings(
     listAgents({ cache: "no-store" })
       .then((response) => {
         if (cancelled) return;
-        setSettingsAgents(response.agents);
-        setAgentProfiles(
-          response.agents.flatMap((item) =>
-            item.profiles.map((itemProfile) => toAgentProfileOption(item, itemProfile)),
-          ),
-        );
+        queryClient.setQueryData(qk.settings.agents(), response);
       })
       .catch(() => {
         refreshKeyRef.current = null;
@@ -90,7 +85,7 @@ export function useAgentProfileSettings(
     return () => {
       cancelled = true;
     };
-  }, [agentKey, profile, profileId, setAgentProfiles, setSettingsAgents]);
+  }, [agentKey, profile, profileId, queryClient]);
 
   const availableAgent = useMemo(() => {
     return availableAgents.find((item: AvailableAgent) => item.name === agent?.name) ?? null;

@@ -12,7 +12,8 @@ import {
 } from "@/lib/api/domains/office-api";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { readCookies } from "@/lib/server/cookies";
-import type { AppState } from "@/lib/state/store";
+import type { QuerySeedInitialState } from "@/lib/query/seed";
+import type { Workspace } from "@/lib/types/http";
 import { OfficeTopbar } from "./components/office-topbar";
 
 function resolveActiveOfficeWorkspaceId(
@@ -28,19 +29,7 @@ function resolveActiveOfficeWorkspaceId(
   );
 }
 
-function mapWorkspaceItem(ws: {
-  id: string;
-  name: string;
-  description?: string | null;
-  owner_id: string;
-  default_executor_id?: string | null;
-  default_environment_id?: string | null;
-  default_agent_profile_id?: string | null;
-  default_config_agent_profile_id?: string | null;
-  office_workflow_id?: string | null;
-  created_at: string;
-  updated_at: string;
-}) {
+function mapWorkspaceItem(ws: Workspace): Workspace {
   return {
     id: ws.id,
     name: ws.name,
@@ -50,7 +39,7 @@ function mapWorkspaceItem(ws: {
     default_environment_id: ws.default_environment_id ?? null,
     default_agent_profile_id: ws.default_agent_profile_id ?? null,
     default_config_agent_profile_id: ws.default_config_agent_profile_id ?? null,
-    office_workflow_id: ws.office_workflow_id ?? null,
+    office_workflow_id: ws.office_workflow_id ?? undefined,
     created_at: ws.created_at,
     updated_at: ws.updated_at,
   };
@@ -120,7 +109,7 @@ export default async function OfficeLayout({ children }: { children: React.React
       ])
     : [{ agents: [] }, { projects: [] }, { items: [], total_count: 0 }];
 
-  const initialState: Partial<AppState> = {
+  const initialState: QuerySeedInitialState = {
     workspaces: {
       items: workspaceItems,
       activeId: activeWorkspaceId,
@@ -130,35 +119,11 @@ export default async function OfficeLayout({ children }: { children: React.React
       workspaceId: activeWorkspaceId,
     },
     office: {
-      agentProfiles: agentsResponse.agents as AppState["office"]["agentProfiles"],
-      skills: [],
-      projects: projectsResponse.projects as AppState["office"]["projects"],
-      approvals: [],
-      activity: [],
-      costSummary: null,
-      budgetPolicies: [],
-      routines: [],
-      inboxItems: inboxResponse.items as AppState["office"]["inboxItems"],
+      agents: agentsResponse.agents,
+      projects: projectsResponse.projects,
+      inboxItems: inboxResponse.items,
       inboxCount: inboxResponse.total_count,
-      runs: [],
-      dashboard: null,
-      tasks: {
-        items: [],
-        filters: { statuses: [], priorities: [], assigneeIds: [], projectIds: [], search: "" },
-        viewMode: "list",
-        sortField: "updated",
-        sortDir: "desc",
-        groupBy: "none",
-        nestingEnabled: true,
-        isLoading: false,
-      },
       meta: metaResponse,
-      isLoading: false,
-      refetchTrigger: null,
-      routing: { byWorkspace: {}, knownProviders: [], preview: { byWorkspace: {} } },
-      providerHealth: { byWorkspace: {} },
-      runAttempts: { byRunId: {} },
-      agentRouting: { byAgentId: {} },
     },
   };
 

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useCallback, useRef } from "react";
+import { useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  listIssueWatches,
   createIssueWatch,
   updateIssueWatch,
   deleteIssueWatch,
@@ -11,63 +11,85 @@ import {
   type CreateIssueWatchRequest,
   type UpdateIssueWatchRequest,
 } from "@/lib/api/domains/gitlab-api";
-import { useAppStore } from "@/components/state-provider";
+import { qk } from "@/lib/query/keys";
+import { gitlabIssueWatchesQueryOptions } from "@/lib/query/query-options/gitlab";
+import type { IssueWatch } from "@/lib/types/gitlab";
 
-/**
- * useGitLabIssueWatches mirrors useGitLabReviewWatches — the per-instance
- * lastFetchedRef triggers a refetch on workspace switch, working around the
- * fact that the slice-level `loaded` flag is shared across all consumers.
- */
 export function useGitLabIssueWatches(workspaceId?: string | null) {
-  const items = useAppStore((state) => state.gitlabIssueWatches.items);
-  const loaded = useAppStore((state) => state.gitlabIssueWatches.loaded);
-  const loading = useAppStore((state) => state.gitlabIssueWatches.loading);
-  const set = useAppStore((state) => state.setGitLabIssueWatches);
-  const setLoading = useAppStore((state) => state.setGitLabIssueWatchesLoading);
-  const add = useAppStore((state) => state.addGitLabIssueWatch);
-  const upd = useAppStore((state) => state.updateGitLabIssueWatchInStore);
-  const rm = useAppStore((state) => state.removeGitLabIssueWatch);
-  const lastFetchedRef = useRef<string | null | undefined>(undefined);
-
-  useEffect(() => {
-    if (workspaceId === null || loading) return;
-    if (loaded && lastFetchedRef.current === workspaceId) return;
-    lastFetchedRef.current = workspaceId;
-    setLoading(true);
-    listIssueWatches(workspaceId ?? undefined, { cache: "no-store" })
-      .then((response) => set(response?.watches ?? []))
-      .catch(() => set([]))
-      .finally(() => setLoading(false));
-  }, [workspaceId, loaded, loading, set, setLoading]);
+  const queryClient = useQueryClient();
+  const query = useQuery(gitlabIssueWatchesQueryOptions(workspaceId));
+  const items = query.data ?? [];
 
   const create = useCallback(
     async (req: CreateIssueWatchRequest) => {
       const watch = await createIssueWatch(req);
-      add(watch);
+      patchGitLabIssueWatchCaches(queryClient, workspaceId, watch);
       return watch;
     },
-    [add],
+    [queryClient, workspaceId],
   );
 
   const update = useCallback(
     async (id: string, req: UpdateIssueWatchRequest) => {
       const watch = await updateIssueWatch(id, req);
-      upd(watch);
+      patchGitLabIssueWatchCaches(queryClient, workspaceId, watch);
       return watch;
     },
-    [upd],
+    [queryClient, workspaceId],
   );
 
   const remove = useCallback(
     async (id: string) => {
       await deleteIssueWatch(id);
-      rm(id);
+      removeGitLabIssueWatchFromCaches(queryClient, workspaceId, id);
     },
-    [rm],
+    [queryClient, workspaceId],
   );
 
   const trigger = useCallback((id: string) => triggerIssueWatch(id), []);
   const triggerAll = useCallback(() => triggerAllIssueWatches(), []);
 
-  return { items, loaded, loading, create, update, remove, trigger, triggerAll };
+  return {
+    items,
+    loaded: query.isSuccess,
+    loading: query.isFetching && !query.isSuccess,
+    create,
+    update,
+    remove,
+    trigger,
+    triggerAll,
+  };
+}
+
+function patchGitLabIssueWatchCaches(
+  queryClient: ReturnType<typeof useQueryClient>,
+  workspaceId: string | null | undefined,
+  watch: IssueWatch,
+) {
+  const patch = (prev: IssueWatch[] | undefined) => upsertById(prev ?? [], watch);
+  const patchExisting = (prev: IssueWatch[] | undefined) => (prev ? upsertById(prev, watch) : prev);
+  queryClient.setQueryData(qk.integrations.gitlab.issueWatches(workspaceId), patch);
+  queryClient.setQueryData(qk.integrations.gitlab.issueWatches(undefined), patchExisting);
+  queryClient.setQueryData(qk.integrations.gitlab.issueWatches(watch.workspace_id), patch);
+}
+
+function removeGitLabIssueWatchFromCaches(
+  queryClient: ReturnType<typeof useQueryClient>,
+  workspaceId: string | null | undefined,
+  id: string,
+) {
+  const remove = (prev: IssueWatch[] | undefined) =>
+    (prev ?? []).filter((watch) => watch.id !== id);
+  const removeExisting = (prev: IssueWatch[] | undefined) =>
+    prev ? prev.filter((watch) => watch.id !== id) : prev;
+  queryClient.setQueryData(qk.integrations.gitlab.issueWatches(workspaceId), remove);
+  queryClient.setQueryData(qk.integrations.gitlab.issueWatches(undefined), removeExisting);
+}
+
+function upsertById<T extends { id: string }>(items: T[], next: T): T[] {
+  const index = items.findIndex((item) => item.id === next.id);
+  if (index === -1) return [...items, next];
+  const copy = [...items];
+  copy[index] = next;
+  return copy;
 }

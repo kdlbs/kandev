@@ -18,10 +18,11 @@ import { useTaskSession } from "@/hooks/use-task-session";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import { Task } from "./kanban-card";
-import type { KanbanState } from "@/lib/state/slices";
+import type { WorkflowSnapshotData } from "@/lib/state/slices";
 import { PREVIEW_PANEL } from "@/lib/settings/constants";
 import { linkToTask } from "@/lib/links";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import {
   useEnsureTaskSession,
   type UseEnsureTaskSessionResult,
@@ -154,18 +155,11 @@ function useSessionSelectionReset(
 
 function useSelectedTask(
   selectedTaskId: string | null | undefined,
-  kanbanTasks: KanbanState["tasks"],
-  snapshots: Record<string, { tasks: KanbanState["tasks"] }>,
+  snapshots: Record<string, WorkflowSnapshotData>,
 ) {
   return useMemo(() => {
     if (!selectedTaskId) return null;
-    // The active workflow's tasks live in `kanban.tasks`, but cards from other
-    // workflows can also appear in the board (multi-workflow swimlane view via
-    // `kanbanMulti.snapshots`). Fall back to those so cross-workflow previews
-    // are not auto-closed by the "task no longer exists" guard below.
-    const task =
-      kanbanTasks.find((t: KanbanState["tasks"][number]) => t.id === selectedTaskId) ??
-      findTaskInSnapshots(selectedTaskId, snapshots);
+    const task = findTaskInSnapshots(selectedTaskId, snapshots);
     if (!task) return null;
     return {
       id: task.id,
@@ -177,7 +171,7 @@ function useSelectedTask(
       repositoryId: task.repositoryId,
       primarySessionId: task.primarySessionId,
     };
-  }, [selectedTaskId, kanbanTasks, snapshots]);
+  }, [selectedTaskId, snapshots]);
 }
 
 function useCloseMissingSelectedTask(params: {
@@ -246,17 +240,15 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
   const router = useRouter();
   const { isMobile } = useResponsiveBreakpoint();
 
-  // Get tasks from the kanban store
-  const kanbanTasks = useAppStore((state) => state.kanban.tasks);
-  const kanbanWorkflowId = useAppStore((state) => state.kanban.workflowId);
-  const kanbanIsLoading = useAppStore((state) => state.kanban.isLoading ?? false);
-  const kanbanMultiSnapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const activeWorkflowId = useAppStore((state) => state.workflows.activeId);
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const setKanbanPreviewedTaskId = useAppStore((state) => state.setKanbanPreviewedTaskId);
+  const allWorkflowSnapshots = useAllWorkflowSnapshots(workspaceId);
   const hasLoadedTaskSources = hasLoadedKanbanTaskSources({
-    activeWorkflowId: kanbanWorkflowId,
-    multiSnapshotCount: Object.keys(kanbanMultiSnapshots).length,
+    activeWorkflowId,
+    multiSnapshotCount: Object.keys(allWorkflowSnapshots.snapshots).length,
   });
 
   const { selectedTaskId, isOpen, previewWidthPx, open, close, updatePreviewWidth } =
@@ -290,14 +282,14 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
   // Track resize state
   const isResizingRef = useRef(false);
 
-  const selectedTask = useSelectedTask(selectedTaskId, kanbanTasks, kanbanMultiSnapshots);
+  const selectedTask = useSelectedTask(selectedTaskId, allWorkflowSnapshots.snapshots);
 
   useCloseMissingSelectedTask({
     isOpen,
     selectedTaskId,
     selectedTask,
     initialTaskId,
-    kanbanIsLoading,
+    kanbanIsLoading: allWorkflowSnapshots.isLoading,
     hasLoadedTaskSources,
     close,
   });

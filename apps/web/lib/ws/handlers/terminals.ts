@@ -4,9 +4,6 @@ import type { WsHandlers } from "@/lib/ws/handlers/types";
 
 export function registerTerminalsHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
-    "terminal.output": (message) => {
-      store.getState().setTerminalOutput(message.payload.terminalId, message.payload.data);
-    },
     "session.shell.output": (message) => {
       const { session_id, type, data } = message.payload;
       if (!session_id) {

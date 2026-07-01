@@ -1,38 +1,20 @@
-import { useEffect, useState } from "react";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { DashboardView } from "@/app/office/agents/[id]/dashboard/dashboard-view";
 import { RunsListView } from "@/app/office/agents/[id]/runs/runs-list-view";
 import { RunDetailView } from "@/app/office/agents/[id]/runs/[runId]/run-detail-view";
+
 import {
-  getAgentSummary,
-  getRunDetail,
-  listAgentRuns,
-  type AgentRunsListPage,
-  type AgentSummaryResponse,
-  type RunDetail,
-} from "@/lib/api/domains/office-extended-api";
-import { toRouteErrorState, type LoadState } from "@/lib/routing/client-route-helpers";
+  officeAgentRunsInfiniteQueryOptions,
+  officeAgentSummaryQueryOptions,
+  officeRunDetailQueryOptions,
+} from "@/lib/query/query-options/office";
+import type { LoadState } from "@/lib/routing/client-route-helpers";
 
 const DASHBOARD_DAYS = 14;
 
 export function AgentDashboardRoute({ agentId }: { agentId: string }) {
-  const [state, setState] = useState<LoadState<AgentSummaryResponse>>({ status: "loading" });
-
-  useEffect(() => {
-    let cancelled = false;
-    setState({ status: "loading" });
-
-    getAgentSummary(agentId, DASHBOARD_DAYS, { cache: "no-store" })
-      .then((data) => {
-        if (!cancelled) setState({ status: "ready", data });
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) setState(toRouteErrorState(error));
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [agentId]);
+  const query = useQuery(officeAgentSummaryQueryOptions(agentId, DASHBOARD_DAYS));
+  const state = queryState(query.data, query.error);
 
   if (state.status !== "ready") {
     return <AgentRoutePlaceholder state={state} label="agent dashboard" />;
@@ -42,24 +24,8 @@ export function AgentDashboardRoute({ agentId }: { agentId: string }) {
 }
 
 export function AgentRunsRoute({ agentId }: { agentId: string }) {
-  const [state, setState] = useState<LoadState<AgentRunsListPage>>({ status: "loading" });
-
-  useEffect(() => {
-    let cancelled = false;
-    setState({ status: "loading" });
-
-    listAgentRuns(agentId, { limit: 25 }, { cache: "no-store" })
-      .then((data) => {
-        if (!cancelled) setState({ status: "ready", data });
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) setState(toRouteErrorState(error));
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [agentId]);
+  const query = useInfiniteQuery(officeAgentRunsInfiniteQueryOptions(agentId, { limit: 25 }));
+  const state = queryState(query.data?.pages[0], query.error);
 
   if (state.status !== "ready") {
     return <AgentRoutePlaceholder state={state} label="agent runs" />;
@@ -69,34 +35,14 @@ export function AgentRunsRoute({ agentId }: { agentId: string }) {
 }
 
 export function AgentRunDetailRoute({ agentId, runId }: { agentId: string; runId: string }) {
-  const [state, setState] = useState<LoadState<{ initial: RunDetail; recent: AgentRunsListPage }>>({
-    status: "loading",
-  });
-
-  useEffect(() => {
-    let cancelled = false;
-    setState({ status: "loading" });
-
-    async function loadRunDetail() {
-      const [initial, recent] = await Promise.all([
-        getRunDetail(agentId, runId, { cache: "no-store" }),
-        listAgentRuns(agentId, { limit: 30 }, { cache: "no-store" }),
-      ]);
-      return { initial, recent };
-    }
-
-    loadRunDetail()
-      .then((data) => {
-        if (!cancelled) setState({ status: "ready", data });
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) setState(toRouteErrorState(error));
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [agentId, runId]);
+  const detailQuery = useQuery(officeRunDetailQueryOptions(agentId, runId));
+  const recentQuery = useInfiniteQuery(officeAgentRunsInfiniteQueryOptions(agentId, { limit: 30 }));
+  const initial = detailQuery.data;
+  const recent = recentQuery.data?.pages[0];
+  const state = queryState(
+    initial && recent ? { initial, recent } : undefined,
+    detailQuery.error ?? recentQuery.error,
+  );
 
   if (state.status !== "ready") {
     return <AgentRoutePlaceholder state={state} label="agent run" />;
@@ -105,6 +51,17 @@ export function AgentRunDetailRoute({ agentId, runId }: { agentId: string; runId
   return (
     <RunDetailView agentId={agentId} initial={state.data.initial} recent={state.data.recent} />
   );
+}
+
+function queryState<T>(data: T | undefined, error: unknown): LoadState<T> {
+  if (data !== undefined) return { status: "ready", data };
+  if (error) {
+    return {
+      status: "error",
+      message: error instanceof Error ? error.message : "Failed to load route",
+    };
+  }
+  return { status: "loading" };
 }
 
 function AgentRoutePlaceholder<T>({ state, label }: { state: LoadState<T>; label: string }) {

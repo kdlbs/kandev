@@ -120,12 +120,6 @@ export async function setSessionConfigOption(sessionId: string, configId: string
   });
 }
 
-export async function authenticateSession(sessionId: string, methodId: string) {
-  return fetchJson<{ ok: boolean }>(`/api/v1/task-sessions/${sessionId}/authenticate`, {
-    init: { method: "POST", body: JSON.stringify({ method_id: methodId }) },
-  });
-}
-
 export { launchSession, type LaunchSessionResponse } from "@/lib/services/session-launch-service";
 export {
   buildPRPrepareRequest,

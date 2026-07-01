@@ -1,7 +1,7 @@
 "use client";
 
 import { IconCpu } from "@tabler/icons-react";
-import { useAppStore } from "@/components/state-provider";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { getExecutorIcon } from "@/lib/executor-icons";
 import { SettingsGroup, SettingsLeaf } from "./settings-nav-primitives";
 
@@ -14,7 +14,7 @@ type ExecutorsGroupProps = {
 };
 
 export function ExecutorsGroup({ pathname, expanded, onToggle }: ExecutorsGroupProps) {
-  const executors = useAppStore((s) => s.executors.items);
+  const { executors } = useSettingsData(true);
   const allProfiles = executors.flatMap((executor) =>
     (executor.profiles ?? []).map((profile) => ({ ...profile, executorType: executor.type })),
   );

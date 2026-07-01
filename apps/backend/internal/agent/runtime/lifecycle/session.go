@@ -514,6 +514,9 @@ func (sm *SessionManager) waitForPromptDone(ctx context.Context, execution *Agen
 				sm.logger.Error("prompt completed with error",
 					zap.String("execution_id", execution.ID),
 					zap.String("error", signal.Error))
+				if isAgentReportedSessionLoadMissingErr(signal.Error) {
+					return nil, fmt.Errorf("%w: %s: %w", ErrAgentReported, signal.Error, ErrExecutionNotFound)
+				}
 				// Wrap the cancel-escalation sentinel so PromptTask can identify it and
 				// skip the REVIEW task-state transition — the user is cancelling, not
 				// hitting a real agent failure.
@@ -760,6 +763,58 @@ func isSessionUnknownErr(err error) bool {
 	// Some agents return the error in the wrapped message string instead of a
 	// structured RequestError. Match the canonical phrase as a safety net.
 	return strings.Contains(err.Error(), "Resource not found")
+}
+
+// PromptCompletionSignal currently crosses the agentctl updates stream as JSON
+// with only the rendered error string. Keep this fallback narrow until the
+// stream carries structured ACP error codes alongside the message.
+func isAgentReportedSessionLoadMissingErr(message string) bool {
+	lower := strings.ToLower(message)
+	trimmed := strings.TrimSpace(lower)
+	if isStandaloneMissingSessionMessage(trimmed) {
+		return true
+	}
+	if !hasSessionLoadContext(lower) {
+		return false
+	}
+	return isMissingSessionMessage(lower)
+}
+
+func hasSessionLoadContext(message string) bool {
+	return strings.Contains(message, "failed to load session") ||
+		strings.Contains(message, "session/load") ||
+		strings.Contains(message, "load session") ||
+		hasBroadSessionLoadContext(message)
+}
+
+func hasBroadSessionLoadContext(message string) bool {
+	hasLoadWord := strings.Contains(message, "load") || strings.Contains(message, "loading")
+	if !hasLoadWord || !strings.Contains(message, "session") {
+		return false
+	}
+	return !strings.Contains(message, "cache") &&
+		!strings.Contains(message, "config") &&
+		!strings.Contains(message, "profile")
+}
+
+func isMissingSessionMessage(message string) bool {
+	return strings.Contains(message, "session not found") ||
+		strings.Contains(message, "no such session") ||
+		strings.Contains(message, "resource not found") ||
+		strings.Contains(message, "could not find session") ||
+		strings.Contains(message, "session id not recognized") ||
+		strings.Contains(message, "unknown session") ||
+		strings.Contains(message, "session does not exist") ||
+		(strings.Contains(message, "session") && strings.Contains(message, "not found"))
+}
+
+func isStandaloneMissingSessionMessage(message string) bool {
+	switch message {
+	case "session not found", "no such session", "resource not found":
+		return true
+	default:
+		return false
+	}
 }
 
 func isAgentStreamNotConnectedErr(err error) bool {

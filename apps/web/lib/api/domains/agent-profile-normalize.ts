@@ -3,8 +3,7 @@
 // `/api/v1/agent-profiles/:id` into the canonical camelCase
 // `AgentProfile` shape.
 //
-// Wired via thin wrappers around the server actions / WS payloads in
-// `app/actions/agents.ts` and `lib/ws/handlers/agents.ts`.
+// Wired via thin wrappers around the server actions in `app/actions/agents.ts`.
 
 import type { ProfileEnvVar } from "@/lib/types/http";
 import type { AgentProfile, AgentProfilePayload, CLIFlag } from "@/lib/types/agent-profile";

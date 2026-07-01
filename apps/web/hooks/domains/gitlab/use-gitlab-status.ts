@@ -1,46 +1,29 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { fetchGitLabStatus } from "@/lib/api/domains/gitlab-api";
-import { useAppStore } from "@/components/state-provider";
+import { useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { gitlabStatusQueryOptions } from "@/lib/query/query-options/gitlab";
+import type { GitLabStatus } from "@/lib/types/gitlab";
 
 /**
- * useGitLabStatus subscribes the slice to the latest GitLab connection status.
- * Fetches on mount, retries are caller-driven via the returned `refresh`.
- *
- * Guards against an infinite re-fetch loop when GitLab is unreachable: a
- * fetch failure leaves `status` null, so without a per-mount attempted flag
- * the effect would re-run every render and hammer the backend.
+ * useGitLabStatus reads the shared GitLab connection status query. Fetches on
+ * mount; explicit retries are caller-driven through `refresh`.
  */
-export function useGitLabStatus() {
-  const status = useAppStore((state) => state.gitlabStatus.data);
-  const loading = useAppStore((state) => state.gitlabStatus.loading);
-  const loadedAt = useAppStore((state) => state.gitlabStatus.loadedAt);
-  const setStatus = useAppStore((state) => state.setGitLabStatus);
-  const setStatusLoading = useAppStore((state) => state.setGitLabStatusLoading);
-  const attemptedRef = useRef(false);
+export function useGitLabStatus(initialStatus?: GitLabStatus | null) {
+  const query = useQuery({
+    ...gitlabStatusQueryOptions(),
+    initialData: initialStatus ?? undefined,
+  });
+  const refetch = query.refetch;
 
-  useEffect(() => {
-    if (loading || loadedAt !== null || attemptedRef.current) return;
-    attemptedRef.current = true;
-    setStatusLoading(true);
-    fetchGitLabStatus({ cache: "no-store" })
-      .then((res) => setStatus(res ?? null))
-      .catch(() => setStatus(null))
-      .finally(() => setStatusLoading(false));
-  }, [loading, loadedAt, setStatus, setStatusLoading]);
+  const refresh = useCallback(async () => {
+    await refetch();
+  }, [refetch]);
 
-  const refresh = async () => {
-    setStatusLoading(true);
-    try {
-      const res = await fetchGitLabStatus({ cache: "no-store" });
-      setStatus(res ?? null);
-    } catch {
-      setStatus(null);
-    } finally {
-      setStatusLoading(false);
-    }
+  return {
+    status: query.data ?? null,
+    loaded: query.isSuccess,
+    loading: query.isFetching && !query.isSuccess,
+    refresh,
   };
-
-  return { status, loading, refresh };
 }

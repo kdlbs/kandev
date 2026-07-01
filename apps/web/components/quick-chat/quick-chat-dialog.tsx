@@ -8,6 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { IconX, IconRocket } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { useCachedRepositories } from "@/hooks/domains/workspace/use-repository-cache";
 import { startQuickChat } from "@/lib/api/domains/workspace-api";
 import type { Repository } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
@@ -89,8 +91,8 @@ export const QuickChatPickerDialog = memo(function QuickChatPickerDialog({
   const [isStarting, setIsStarting] = useState(false);
   const [selectedRepoId, setSelectedRepoId] = useState<string>("");
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
-  const repositories = useAppStore((s) => s.repositories.itemsByWorkspaceId?.[workspaceId] ?? []);
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items ?? []);
+  const repositories = useCachedRepositories(workspaceId);
+  const { agentProfiles } = useSettingsData(true);
 
   const handleStart = useCallback(async () => {
     if (isStarting) return;

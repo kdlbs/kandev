@@ -14,7 +14,10 @@ import { useAgentProfileOptions } from "@/components/task-create-dialog-options"
 import { useSummarizeSession } from "@/hooks/use-summarize-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-specs";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useTaskExecutorProfile } from "@/hooks/domains/session/use-task-executor-profile";
+import { useSessionWorktrees } from "@/hooks/domains/session/use-session-worktrees";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { ExecutorProfile } from "@/lib/types/http";
@@ -46,24 +49,15 @@ function agentProfileDisplayLabel(profile: AgentProfileOption): string {
 }
 
 function useNewSessionDialogState(taskId: string) {
-  const taskTitle = useAppStore((state) => {
-    const task = state.kanban.tasks.find((t: { id: string }) => t.id === taskId);
-    return task?.title ?? "Task";
-  });
-  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
+  const { agentProfiles, executors } = useSettingsData(true);
+  const task = useTaskById(taskId);
+  const taskTitle = task?.title ?? "Task";
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const currentSession = useAppStore((state) => {
     return activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null;
   });
-  const worktreeBranch = useAppStore((state) => {
-    if (!activeSessionId) return null;
-    const wtIds = state.sessionWorktreesBySessionId.itemsBySessionId[activeSessionId];
-    if (wtIds?.length) {
-      const wt = state.worktrees.items[wtIds[0]];
-      if (wt?.branch) return wt.branch;
-    }
-    return currentSession?.worktree_branch ?? null;
-  });
+  const worktrees = useSessionWorktrees(activeSessionId);
+  const worktreeBranch = worktrees[0]?.branch ?? currentSession?.worktree_branch ?? null;
   const initialPrompt = useAppStore((state) => {
     if (!activeSessionId) return null;
     const msgs = state.messages.bySession[activeSessionId];
@@ -71,13 +65,11 @@ function useNewSessionDialogState(taskId: string) {
     const first = msgs.find((m: { author_type?: string }) => m.author_type === "user");
     return first ? ((first as { content?: string }).content ?? null) : null;
   });
-  const executorLabel = useAppStore((state) => {
+  const executorLabel = useMemo(() => {
     if (!currentSession?.executor_id) return null;
-    const executor = state.executors.items.find(
-      (e: { id: string }) => e.id === currentSession.executor_id,
-    );
+    const executor = executors.find((e: { id: string }) => e.id === currentSession.executor_id);
     return executor?.name ?? null;
-  });
+  }, [currentSession?.executor_id, executors]);
 
   const sessionProfileId = currentSession?.agent_profile_id ?? "";
   const profileIsValid = agentProfiles.some((p: { id: string }) => p.id === sessionProfileId);
@@ -113,7 +105,7 @@ function activateNewSession(
 
 function useSessionOptions(taskId: string) {
   const { sessions, loadSessions } = useTaskSessions(taskId);
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items);
+  const { agentProfiles } = useSettingsData(true);
   useEffect(() => {
     loadSessions(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps

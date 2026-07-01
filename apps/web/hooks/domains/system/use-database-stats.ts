@@ -1,12 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useAppStore } from "@/components/state-provider";
-import { fetchDatabaseStats } from "@/lib/api/domains/system-api";
+import { useQuery } from "@tanstack/react-query";
+import { databaseStatsQueryOptions } from "@/lib/query/query-options/system";
 
 export function useDatabaseStats() {
-  const database = useAppStore((s) => s.system.database);
-  const setSystemDatabase = useAppStore((s) => s.setSystemDatabase);
+  const query = useQuery(databaseStatsQueryOptions());
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -14,19 +13,23 @@ export function useDatabaseStats() {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetchDatabaseStats({ cache: "no-store" });
-      setSystemDatabase(res);
+      await query.refetch();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setIsLoading(false);
     }
-  }, [setSystemDatabase]);
+  }, [query]);
 
   useEffect(() => {
-    if (database) return;
-    void reload();
-  }, [database, reload]);
+    if (!query.error) return;
+    setError(query.error instanceof Error ? query.error.message : String(query.error));
+  }, [query.error]);
 
-  return { database, isLoading, error, reload };
+  return {
+    database: query.data ?? null,
+    isLoading: isLoading || (query.isFetching && !query.isSuccess),
+    error,
+    reload,
+  };
 }

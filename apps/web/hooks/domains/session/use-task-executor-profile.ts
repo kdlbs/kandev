@@ -1,11 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { fetchTaskEnvironment } from "@/lib/api/domains/task-environment-api";
 import type { ExecutorProfile } from "@/lib/types/http";
 
 /** Resolves the executor profile bound to a task's environment. */
 export function useTaskExecutorProfile(taskId: string, enabled = true): ExecutorProfile | null {
-  const executors = useAppStore((state) => state.executors.items);
+  const { executors } = useSettingsData(enabled);
   const executorsFingerprint = useMemo(
     () =>
       executors

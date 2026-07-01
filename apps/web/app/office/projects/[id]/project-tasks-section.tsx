@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
-import { listTasks } from "@/lib/api/domains/office-tasks-api";
+import { useOfficeAgentsData } from "@/hooks/domains/office/use-office-data";
+import { officeTasksInfiniteQueryOptions } from "@/lib/query/query-options";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import { TaskRow } from "../../tasks/task-row";
 
@@ -12,40 +14,27 @@ type ProjectTasksSectionProps = {
 
 export function ProjectTasksSection({ projectId }: ProjectTasksSectionProps) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const appendTasks = useAppStore((s) => s.appendTasks);
-  // Select stable references; derive the filtered list and the agent-name
-  // lookup via useMemo. Returning a freshly `.filter()`'d array or a
-  // `new Map(...)` straight from the selector tripped React's
-  // getSnapshot caching guard because every render produced a new
-  // reference.
-  const allTasks = useAppStore((s) => s.office.tasks.items);
-  const agentProfiles = useAppStore((s) => s.office.agentProfiles);
+  const agentProfiles = useOfficeAgentsData(workspaceId).data?.agents ?? [];
+  const projectTasksQuery = useInfiniteQuery(
+    officeTasksInfiniteQueryOptions(workspaceId ?? "", {
+      project: projectId,
+      limit: 100,
+      sort: "updated_at",
+      order: "desc",
+    }),
+  );
 
-  // Fetch tasks for this project once on mount. The list is merged into
-  // the global store via appendTasks so other consumers (the Tasks page,
-  // the inbox, etc.) keep seeing the union of every task they've loaded.
-  useEffect(() => {
-    if (!workspaceId) return;
-    let cancelled = false;
-    listTasks(workspaceId, { project: projectId })
-      .then((res) => {
-        if (cancelled || !res?.tasks?.length) return;
-        appendTasks(res.tasks);
-      })
-      .catch(() => {
-        // Failure is non-fatal — store-resident tasks still render.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId, projectId, appendTasks]);
+  const queriedTasks = useMemo(
+    () => projectTasksQuery.data?.pages.flatMap((page) => page.tasks ?? []) ?? [],
+    [projectTasksQuery.data],
+  );
 
   const sorted = useMemo(
     () =>
-      allTasks
-        .filter((t) => t.projectId === projectId)
-        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
-    [allTasks, projectId],
+      [...queriedTasks].sort(
+        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+      ),
+    [queriedTasks],
   );
 
   const agentNameById = useMemo(

@@ -1,18 +1,25 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { StateProvider } from "@/components/state-provider";
+import { makeQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
 import { ChatMessage } from "./chat-message";
 import {
   sessionId as toSessionId,
   taskId as toTaskId,
+  workspaceId,
+  workflowId,
   type Message,
+  type Task,
   type TaskSession,
 } from "@/lib/types/http";
 
 const SENDER_TASK_ID = "task-sender";
 const SENDER_TITLE = "Fix login bug";
 const SENDER_BADGE_SELECTOR = "[data-testid='sender-task-badge']";
+const CREATED_AT = "2026-05-04T00:00:00Z";
 const PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 const OPEN_ATTACHMENT_1_LABEL = "Open Attachment 1";
@@ -30,33 +37,39 @@ function userMessage(overrides: Partial<Message>): Message {
     author_type: "user",
     content: "hello",
     type: "message",
-    created_at: "2026-05-04T00:00:00Z",
+    created_at: CREATED_AT,
     ...overrides,
+  };
+}
+
+function taskForBadge(id: string, title: string): Task {
+  return {
+    id: toTaskId(id),
+    workspace_id: workspaceId("workspace-1"),
+    workflow_id: workflowId("workflow-1"),
+    workflow_step_id: "step-1",
+    position: 0,
+    title,
+    description: "",
+    state: "CREATED",
+    priority: 0,
+    repositories: [],
+    created_at: CREATED_AT,
+    updated_at: CREATED_AT,
   };
 }
 
 function wrapper(tasks: Array<{ id: string; title: string }> = []) {
   return function Wrapper({ children }: { children: ReactNode }) {
+    const queryClient = makeQueryClient();
+    for (const task of tasks) {
+      const cachedTask = taskForBadge(task.id, task.title);
+      queryClient.setQueryData(qk.tasks.detail(cachedTask.id), cachedTask);
+    }
     return (
-      <StateProvider
-        initialState={{
-          // Seed the kanban slice so useTaskById can resolve sender tasks for
-          // live-title resolution; tests that exercise the deleted-sender
-          // fallback simply omit the sender from this list.
-          // The full Task shape isn't required by useTaskById — only id+title.
-          kanban: {
-            tasks: tasks.map((t) => ({
-              id: t.id,
-              title: t.title,
-              workflow_step_id: "",
-              priority: 0,
-              parent_id: undefined,
-            })),
-          } as unknown as never,
-        }}
-      >
-        {children}
-      </StateProvider>
+      <QueryClientProvider client={queryClient}>
+        <StateProvider>{children}</StateProvider>
+      </QueryClientProvider>
     );
   };
 }
@@ -78,18 +91,21 @@ function renderAgentMessageWithSession(session: Partial<TaskSession>, metadata =
     id: toSessionId("sess-1"),
     task_id: toTaskId("task-target"),
     state: "COMPLETED",
-    started_at: "2026-05-04T00:00:00Z",
-    updated_at: "2026-05-04T00:00:00Z",
+    started_at: CREATED_AT,
+    updated_at: CREATED_AT,
     ...session,
   };
+  const queryClient = makeQueryClient();
   const Wrapper = ({ children }: { children: ReactNode }) => (
-    <StateProvider
-      initialState={{
-        taskSessions: { items: { "sess-1": taskSession } },
-      }}
-    >
-      {children}
-    </StateProvider>
+    <QueryClientProvider client={queryClient}>
+      <StateProvider
+        initialState={{
+          taskSessions: { items: { "sess-1": taskSession } },
+        }}
+      >
+        {children}
+      </StateProvider>
+    </QueryClientProvider>
   );
 
   return render(
@@ -142,7 +158,7 @@ describe("ChatMessage sender badge", () => {
   });
 
   it("uses the live title when it differs from the snapshot", () => {
-    // The badge re-resolves the title from the kanban store so renames are
+    // The badge re-resolves the title from the Query cache so renames are
     // reflected without re-sending the message.
     const { container } = renderWithSender([{ id: SENDER_TASK_ID, title: "Renamed task" }], {
       sender_task_id: SENDER_TASK_ID,

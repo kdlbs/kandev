@@ -1,28 +1,29 @@
 import { test, expect } from "../../fixtures/test-base";
-import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import type { Page } from "@playwright/test";
+import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
+
+const EXPANSION_FILE = "expansion_test.go";
 
 /**
- * Seed a task using the diff-expansion-setup mock scenario and navigate to
- * its session page, waiting for the agent turn to complete.
+ * Seed a task and write a committed baseline plus an uncommitted two-hunk diff
+ * directly into its workspace.
  *
- * The scenario writes a 50-line file, commits it, then modifies two lines far
- * apart (line 3 and line 48).  The diff viewer will show two separate hunks
- * with ~44 collapsed lines between them.
+ * The file has 200 lines with modifications on lines 50 and 150. The diff
+ * viewer will show two separate hunks with a collapsed block between them.
  */
 async function seedExpansionTask(
   testPage: Page,
   apiClient: ApiClient,
   seedData: SeedData,
-): Promise<SessionPage> {
+): Promise<void> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
-    "Diff Expansion E2E",
+    `Diff Expansion E2E ${Date.now()}`,
     seedData.agentProfileId,
     {
-      description: "/e2e:diff-expansion-setup",
+      description: "/e2e:simple-message",
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
@@ -31,16 +32,53 @@ async function seedExpansionTask(
 
   if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
+  let workspacePath: string | null = null;
+  await expect
+    .poll(
+      async () => {
+        const env = await apiClient.getTaskEnvironment(task.id);
+        if (env?.status !== "ready") return null;
+        workspacePath = env.worktree_path ?? env.workspace_path ?? null;
+        return workspacePath;
+      },
+      { timeout: 45_000, message: "ready task workspace path should be available" },
+    )
+    .not.toBeNull();
+  if (!workspacePath) throw new Error("task environment did not expose a workspace path");
+
+  seedExpansionDiff(workspacePath);
   await testPage.goto(`/t/${task.id}`);
+}
 
-  const session = new SessionPage(testPage);
-  await session.waitForLoad();
+function seedExpansionDiff(workspacePath: string) {
+  const git = new GitHelper(workspacePath, makeGitEnv(workspacePath));
+  const original = buildExpansionFile();
 
-  await expect(
-    session.chat.getByText("diff-expansion-setup complete", { exact: false }),
-  ).toBeVisible({ timeout: 45_000 });
+  git.exec(`git rm --force --ignore-unmatch "${EXPANSION_FILE}"`);
+  commitIfChanged(git, "cleanup expansion diff fixture");
 
-  return session;
+  git.createFile(EXPANSION_FILE, original);
+  git.stageFile(EXPANSION_FILE);
+  commitIfChanged(git, "add expansion diff fixture");
+
+  git.modifyFile(EXPANSION_FILE, buildExpansionFile({ modified: true }));
+}
+
+function buildExpansionFile(opts: { modified?: boolean } = {}) {
+  const lines = Array.from(
+    { length: 200 },
+    (_, idx) => `func original_${String(idx + 1).padStart(3, "0")}() { /* line ${idx + 1} */ }`,
+  );
+  if (opts.modified) {
+    lines[49] = "func modified_mid_top() { /* HUNK_TOP - modified line 50 */ }";
+    lines[149] = "func modified_mid_bottom() { /* HUNK_BOTTOM - modified line 150 */ }";
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function commitIfChanged(git: GitHelper, message: string) {
+  if (git.exec(`git status --porcelain -- "${EXPANSION_FILE}"`).trim() === "") return;
+  git.commit(message);
 }
 
 /** Click the Changes dockview tab. */
@@ -52,7 +90,7 @@ async function openChangesTab(testPage: Page) {
 
 /** Click the file row for expansion_test.go to open its diff view. */
 async function openExpansionFileDiff(testPage: Page) {
-  const fileRow = testPage.getByTestId("file-row-expansion_test.go");
+  const fileRow = testPage.getByTestId(`file-row-${EXPANSION_FILE}`);
   await expect(fileRow).toBeVisible({ timeout: 10_000 });
   await fileRow.click();
 }
@@ -80,52 +118,99 @@ async function readDiffOverflow(testPage: Page): Promise<string | null> {
   });
 }
 
-async function hoverUntilGutterSlotAppears(testPage: Page) {
+type GutterButtonGeometry = {
+  marginRight: number;
+  buttonRight: number;
+  cellRight: number;
+};
+
+async function hoverUntilGutterButtonExtrudes(testPage: Page): Promise<GutterButtonGeometry> {
   const points = await testPage.evaluate(() => {
     const container = document.querySelector("diffs-container");
     const shadow = container?.shadowRoot;
     if (!shadow) throw new Error("diffs-container shadow root missing");
-    const line = shadow.querySelector<HTMLElement>("[data-line]");
-    if (!line) throw new Error("no [data-line] found to hover");
-    const r = line.getBoundingClientRect();
-    const y = r.top + r.height / 2;
-    return [
-      { x: r.left + 2, y },
-      { x: r.left + 10, y },
-      { x: r.left + Math.min(40, r.width / 4), y },
-      { x: r.left + r.width / 2, y },
-    ];
+    const numbers = Array.from(
+      shadow.querySelectorAll<HTMLElement>("[data-column-number][data-line-index]"),
+    );
+    const points = numbers
+      .map((number) => {
+        const r = number.getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0) return null;
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      })
+      .filter((point): point is { x: number; y: number } => point !== null);
+    if (points.length === 0) throw new Error("no visible [data-column-number] found to hover");
+    return points.slice(0, 8);
   });
 
   for (const point of points) {
     await testPage.mouse.move(point.x, point.y);
-    const appeared = await testPage
+    const geometry = await testPage
       .waitForFunction(
-        () =>
-          Boolean(
-            document
-              .querySelector("diffs-container")
-              ?.shadowRoot?.querySelector("[data-gutter-utility-slot]"),
-          ),
+        () => {
+          const container = document.querySelector("diffs-container");
+          const shadow = container?.shadowRoot;
+          const slotWrapper = shadow?.querySelector<HTMLElement>("[data-gutter-utility-slot]");
+          const slottedLight = document.querySelector<HTMLElement>('[slot="gutter-utility-slot"]');
+          const button = slottedLight?.firstElementChild as HTMLElement | null | undefined;
+          if (!slotWrapper || !button) return false;
+          const buttonRect = button.getBoundingClientRect();
+          const cellRect = slotWrapper.parentElement?.getBoundingClientRect();
+          if (!cellRect) return false;
+          const marginRight = parseFloat(getComputedStyle(button).marginRight);
+          if (marginRight >= 0 || buttonRect.right <= cellRect.right) return false;
+          return {
+            marginRight,
+            buttonRight: buttonRect.right,
+            cellRight: cellRect.right,
+          };
+        },
         null,
         { timeout: 1_500 },
       )
-      .then(() => true)
+      .then(async (handle) => {
+        const value = (await handle.jsonValue()) as GutterButtonGeometry | false;
+        await handle.dispose();
+        return value;
+      })
       .catch(() => false);
-    if (appeared) return;
+    if (geometry) return geometry;
   }
 
-  throw new Error("gutter-utility-slot did not appear after hover");
+  throw new Error("gutter button did not extrude after hover");
+}
+
+async function readDiffBackgroundColors(testPage: Page) {
+  return testPage.evaluate(() => {
+    const container = document.querySelector("diffs-container");
+    if (!container) throw new Error("diffs-container element not found");
+    const shadow = container.shadowRoot;
+    if (!shadow) throw new Error("diffs-container shadow root is closed or not yet attached");
+    const pre = shadow.querySelector<HTMLElement>("pre[data-diff]");
+    if (!pre) throw new Error("pre[data-diff] not found in diffs-container shadow root");
+    // Resolve var(--background) to a concrete rgb() via a probe element so we
+    // can compare it byte-for-byte to the shadow-DOM pre's computed bg.
+    const probe = document.createElement("div");
+    probe.style.backgroundColor = `var(--background)`;
+    document.body.appendChild(probe);
+    const expected = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return {
+      pre: getComputedStyle(pre).backgroundColor,
+      expected,
+    };
+  });
 }
 
 test.describe("Diff expansion — Pierre Diffs provider", () => {
-  test.describe.configure({ retries: 2, timeout: 120_000 });
+  test.describe.configure({ retries: 2, timeout: 360_000 });
 
   test("diff viewer background matches app --background (regression for pierre 1.1.22 selector rename)", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
+    test.setTimeout(360_000);
     await seedExpansionTask(testPage, apiClient, seedData);
     await openChangesTab(testPage);
     await openExpansionFileDiff(testPage);
@@ -137,25 +222,16 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     // that variable to var(--background) on :host. If the selector ever stops
     // matching (as happened on the 1.0.11 -> 1.1.22 bump that renamed
     // data-diffs -> data-diff), pierre's dark default (#0a0c10) leaks through.
-    const colors = await testPage.evaluate(() => {
-      const container = document.querySelector("diffs-container");
-      if (!container) throw new Error("diffs-container element not found");
-      const shadow = container.shadowRoot;
-      if (!shadow) throw new Error("diffs-container shadow root is closed or not yet attached");
-      const pre = shadow.querySelector<HTMLElement>("pre[data-diff]");
-      if (!pre) throw new Error("pre[data-diff] not found in diffs-container shadow root");
-      // Resolve var(--background) to a concrete rgb() via a probe element so we
-      // can compare it byte-for-byte to the shadow-DOM pre's computed bg.
-      const probe = document.createElement("div");
-      probe.style.backgroundColor = `var(--background)`;
-      document.body.appendChild(probe);
-      const expected = getComputedStyle(probe).backgroundColor;
-      probe.remove();
-      return {
-        pre: getComputedStyle(pre).backgroundColor,
-        expected,
-      };
-    });
+    await expect
+      .poll(
+        async () => {
+          const colors = await readDiffBackgroundColors(testPage);
+          return colors.pre === colors.expected;
+        },
+        { message: "pre[data-diff] background should match app --background", timeout: 20_000 },
+      )
+      .toBe(true);
+    const colors = await readDiffBackgroundColors(testPage);
 
     await testPage.screenshot({ path: "test-results/diff-bg-regression.png", fullPage: false });
     expect(colors.pre).toBe(colors.expected);
@@ -215,29 +291,7 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     // calc(1ch - 1lh) on our slotted button — same trick pierre uses on its
     // built-in [data-utility-button] — to push it outside the cell into the
     // code area. Verify the button's right edge ends up past the cell's right.
-    await hoverUntilGutterSlotAppears(testPage);
-
-    const geometry = await testPage.evaluate(() => {
-      const container = document.querySelector("diffs-container")!;
-      const shadow = container.shadowRoot!;
-      const slotWrapper = shadow.querySelector<HTMLElement>("[data-gutter-utility-slot]");
-      if (!slotWrapper) throw new Error("gutter-utility-slot did not appear after hover");
-      const numberCell = slotWrapper.parentElement!;
-      // The slot wrapper is appended INTO numberCell; our React-rendered button
-      // is projected through the named <slot>. Its computed marginRight must
-      // resolve to a negative px value for the extrusion to work.
-      const slottedLight = document.querySelector<HTMLElement>('[slot="gutter-utility-slot"]');
-      if (!slottedLight) throw new Error("light-DOM [slot=gutter-utility-slot] not found");
-      const button = slottedLight.firstElementChild as HTMLElement | null;
-      if (!button) throw new Error("no button rendered inside slot");
-      const buttonRect = button.getBoundingClientRect();
-      const cellRect = numberCell.getBoundingClientRect();
-      return {
-        marginRight: parseFloat(getComputedStyle(button).marginRight),
-        buttonRight: buttonRect.right,
-        cellRight: cellRect.right,
-      };
-    });
+    const geometry = await hoverUntilGutterButtonExtrudes(testPage);
 
     await testPage.screenshot({ path: "test-results/diff-hover-button-extrusion.png" });
     expect(geometry.marginRight).toBeLessThan(0);

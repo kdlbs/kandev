@@ -1,17 +1,14 @@
 import type { RecentTaskEntry } from "@/lib/recent-tasks";
-import type { KanbanState, WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
+import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import type { Repository, TaskSession, TaskSessionState, TaskState } from "@/lib/types/http";
 import { getRepositoryDisplayName } from "@/lib/utils";
 import { getSessionInfoForTask } from "@/lib/utils/session-info";
 
-type KanbanTask = KanbanState["tasks"][number];
+type SnapshotTask = WorkflowSnapshotData["tasks"][number];
 
 export type RecentTaskBuildContext = {
   activeTaskId: string | null;
   activeWorkspaceId?: string | null;
-  kanbanWorkflowId: string | null;
-  kanbanTasks: KanbanTask[];
-  kanbanSteps: KanbanState["steps"];
   snapshots: Record<string, WorkflowSnapshotData>;
   workflows: Array<{ id: string; workspaceId: string; name: string }>;
   repositoriesByWorkspace: Record<string, Repository[]>;
@@ -47,7 +44,7 @@ export type RecentTaskDisplayItem = {
 };
 
 type LiveTask = {
-  task: KanbanTask;
+  task: SnapshotTask;
   workflowId?: string;
   workflowName?: string;
 };
@@ -59,7 +56,7 @@ type RecentTaskDisplayMaps = {
 
 type DisplayResolution = {
   live: LiveTask | null;
-  task: KanbanTask | undefined;
+  task: SnapshotTask | undefined;
   taskState: TaskState | undefined;
   sessionState: TaskSessionState | undefined;
   workflowId: string | undefined;
@@ -73,19 +70,14 @@ function getWorkflowName(workflowId: string | undefined, ctx: RecentTaskBuildCon
 }
 
 function findLiveTask(taskId: string, ctx: RecentTaskBuildContext): LiveTask | null {
-  const kanbanTask = ctx.kanbanTasks.find((task) => task.id === taskId);
-  if (kanbanTask) {
-    return {
-      task: kanbanTask,
-      workflowId: ctx.kanbanWorkflowId ?? undefined,
-      workflowName: getWorkflowName(ctx.kanbanWorkflowId ?? undefined, ctx),
-    };
-  }
-
   for (const snapshot of Object.values(ctx.snapshots)) {
     const task = snapshot.tasks.find((item) => item.id === taskId);
     if (task) {
-      return { task, workflowId: snapshot.workflowId, workflowName: snapshot.workflowName };
+      return {
+        task,
+        workflowId: snapshot.workflowId,
+        workflowName: snapshot.workflowName || getWorkflowName(snapshot.workflowId, ctx),
+      };
     }
   }
   return null;
@@ -93,7 +85,6 @@ function findLiveTask(taskId: string, ctx: RecentTaskBuildContext): LiveTask | n
 
 function buildStepTitleMap(ctx: RecentTaskBuildContext): Map<string, string> {
   const map = new Map<string, string>();
-  for (const step of ctx.kanbanSteps) map.set(step.id, step.title);
   for (const snapshot of Object.values(ctx.snapshots)) {
     for (const step of snapshot.steps) map.set(step.id, step.title);
   }
@@ -120,7 +111,7 @@ function formatRepository(repository: Repository | undefined): string | undefine
 
 function getResolvedSessionState(
   taskId: string,
-  liveTask: KanbanTask | undefined,
+  liveTask: SnapshotTask | undefined,
   entry: RecentTaskEntry,
   ctx: RecentTaskBuildContext,
 ): TaskSessionState | undefined {
@@ -187,7 +178,7 @@ function resolveDisplay(entry: RecentTaskEntry, ctx: RecentTaskBuildContext): Di
 
 function resolveRepositoryPath(
   entry: RecentTaskEntry,
-  task: KanbanTask | undefined,
+  task: SnapshotTask | undefined,
   maps: RecentTaskDisplayMaps,
 ): string | undefined {
   return (
@@ -212,7 +203,7 @@ function resolveWorkflowName(
 
 function resolveWorkflowStepTitle(
   entry: RecentTaskEntry,
-  task: KanbanTask | undefined,
+  task: SnapshotTask | undefined,
   maps: RecentTaskDisplayMaps,
 ): string | undefined {
   return maps.stepTitleById.get(task?.workflowStepId ?? "") ?? entry.workflowStepTitle ?? undefined;

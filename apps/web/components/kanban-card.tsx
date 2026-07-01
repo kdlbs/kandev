@@ -13,6 +13,7 @@ import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { TaskGitHubIssueDialog } from "@/components/task/task-github-issue-dialog";
 import { TaskGitHubPRDialog } from "@/components/task/task-github-pr-dialog";
+import { useCachedRepositories } from "@/hooks/domains/workspace/use-repository-cache";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { repositorySlug } from "@/lib/repository-slug";
 import { formatUserHomePath } from "@/lib/utils";
@@ -253,9 +254,7 @@ function KanbanCardDialogs({
 
 function useActiveWorkspaceRepositories() {
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
-  return useAppStore((state) =>
-    activeWorkspaceId ? (state.repositories.itemsByWorkspaceId[activeWorkspaceId] ?? []) : [],
-  );
+  return useCachedRepositories(activeWorkspaceId);
 }
 
 export function KanbanCard({

@@ -111,10 +111,25 @@ test.describe("ssh executor — recovery after restart", () => {
         executor_profile_id: seedData.sshExecutorProfileId,
       },
     );
-    await waitForLatestSessionDone(apiClient, task.id, 1, "Launch for metadata");
 
-    const sessions = await apiClient.listSSHSessions(seedData.sshExecutorId);
-    const row = sessions.find((s) => s.task_id === task.id);
+    let row: Awaited<ReturnType<typeof apiClient.listSSHSessions>>[number] | undefined;
+    await expect
+      .poll(
+        async () => {
+          const sessions = await apiClient.listSSHSessions(seedData.sshExecutorId);
+          row = sessions.find((s) => s.task_id === task.id);
+          return Boolean(
+            row?.host === seedData.sshTarget.host &&
+            row?.user === seedData.sshTarget.user &&
+            row?.remote_agentctl_port &&
+            row?.local_forward_port &&
+            row?.remote_task_dir.includes("/tasks/"),
+          );
+        },
+        { timeout: 60_000, message: "Wait for SSH metadata row" },
+      )
+      .toBe(true);
+
     expect(row?.host).toBe(seedData.sshTarget.host);
     expect(row?.user).toBe(seedData.sshTarget.user);
     expect(row?.remote_agentctl_port).toBeGreaterThan(0);

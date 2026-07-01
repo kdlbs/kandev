@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { IconTicket, IconCode } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
@@ -19,13 +27,9 @@ import {
   IntegrationAuthStatusBanner,
   type IntegrationAuthHealth,
 } from "@/components/integrations/auth-status-banner";
-import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
-import {
-  getJiraConfig,
-  setJiraConfig,
-  deleteJiraConfig,
-  testJiraConnection,
-} from "@/lib/api/domains/jira-api";
+import { setJiraConfig, deleteJiraConfig, testJiraConnection } from "@/lib/api/domains/jira-api";
+import { qk } from "@/lib/query/keys";
+import { jiraConfigQueryOptions } from "@/lib/query/query-options/jira";
 import type {
   JiraAuthMethod,
   JiraConfig,
@@ -456,44 +460,33 @@ function ActionBar({
 
 function useJiraSettings() {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const configQuery = useQuery(jiraConfigQueryOptions());
   const [config, setConfig] = useState<JiraConfig | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestJiraConnectionResult | null>(null);
+  const formHydratedRef = useRef(false);
   const health = configToHealth(config);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const cfg = await getJiraConfig();
-      setConfig(cfg);
+  useEffect(() => {
+    if (!configQuery.isSuccess) return;
+    const cfg = configQuery.data ?? null;
+    setConfig(cfg);
+    if (!formHydratedRef.current) {
       setForm(configToForm(cfg));
-    } catch (err) {
-      toast({ description: `Failed to load Jira config: ${String(err)}`, variant: "error" });
-    } finally {
-      setLoading(false);
+      formHydratedRef.current = true;
     }
-  }, [toast]);
+  }, [configQuery.data, configQuery.isSuccess]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
-
-  // Background refresh so the auth-health banner picks up new probe results
-  // from the backend poller without requiring a page reload. We re-fetch the
-  // config rather than the loud full `load()` to avoid flashing the form.
-  useEffect(() => {
-    const id = setInterval(() => {
-      getJiraConfig()
-        .then((cfg) => setConfig(cfg))
-        .catch(() => {
-          /* transient failures are fine — next tick retries */
-        });
-    }, INTEGRATION_STATUS_REFRESH_MS);
-    return () => clearInterval(id);
-  }, []);
+    if (!configQuery.isError) return;
+    toast({
+      description: `Failed to load Jira config: ${String(configQuery.error)}`,
+      variant: "error",
+    });
+  }, [configQuery.error, configQuery.isError, toast]);
 
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -525,6 +518,7 @@ function useJiraSettings() {
         defaultProjectKey: form.defaultProjectKey,
         secret: form.secret || undefined,
       });
+      queryClient.setQueryData(qk.integrations.jira.config(), saved);
       setConfig(saved);
       setForm(configToForm(saved));
       // Clear any inline test result from the previous credentials so the
@@ -536,12 +530,13 @@ function useJiraSettings() {
     } finally {
       setSaving(false);
     }
-  }, [form, toast]);
+  }, [form, queryClient, toast]);
 
   const handleDelete = useCallback(async () => {
     if (!confirm("Remove Jira configuration?")) return;
     try {
       await deleteJiraConfig();
+      queryClient.setQueryData(qk.integrations.jira.config(), null);
       setConfig(null);
       setForm(emptyForm);
       setTestResult(null);
@@ -549,13 +544,13 @@ function useJiraSettings() {
     } catch (err) {
       toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
     }
-  }, [toast]);
+  }, [queryClient, toast]);
 
   return {
     config,
     form,
     setForm,
-    loading,
+    loading: configQuery.isFetching && !configQuery.isSuccess,
     saving,
     testing,
     testResult,

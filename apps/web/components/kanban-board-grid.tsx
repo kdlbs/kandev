@@ -259,13 +259,9 @@ function DesktopLayout({
 
 function useShowLoading(isLoading: boolean | undefined, stepsLength: number) {
   const workflowsActiveId = useAppStore((state) => state.workflows.activeId);
-  const kanbanWorkflowId = useAppStore((state) => state.kanban.workflowId);
 
-  return (
-    isLoading === true ||
-    (workflowsActiveId && !kanbanWorkflowId) ||
-    (isLoading === undefined && stepsLength === 0 && !workflowsActiveId)
-  );
+  if (isLoading !== undefined) return isLoading;
+  return stepsLength === 0 && !workflowsActiveId;
 }
 
 function useKanbanBoardSensors() {

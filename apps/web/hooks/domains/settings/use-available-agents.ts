@@ -1,28 +1,13 @@
-import { useEffect } from "react";
-import { useAppStore } from "@/components/state-provider";
-import { listAvailableAgents } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
+import { availableAgentsQueryOptions } from "@/lib/query/query-options/settings";
 
 export function useAvailableAgents(enabled = true) {
-  const availableAgents = useAppStore((state) => state.availableAgents);
-  const setAvailableAgents = useAppStore((state) => state.setAvailableAgents);
-  const setAvailableAgentsLoading = useAppStore((state) => state.setAvailableAgentsLoading);
+  const query = useQuery({ ...availableAgentsQueryOptions(), enabled });
 
-  useEffect(() => {
-    if (!enabled) return;
-    if (availableAgents.loaded || availableAgents.loading) return;
-    setAvailableAgentsLoading(true);
-    listAvailableAgents({ cache: "no-store" })
-      .then((response) => {
-        setAvailableAgents(response.agents, response.tools ?? []);
-      })
-      .catch(() => setAvailableAgents([]));
-  }, [
-    availableAgents.loaded,
-    availableAgents.loading,
-    enabled,
-    setAvailableAgents,
-    setAvailableAgentsLoading,
-  ]);
-
-  return availableAgents;
+  return {
+    items: query.data?.agents ?? [],
+    tools: query.data?.tools ?? [],
+    loaded: query.isSuccess,
+    loading: query.isFetching && !query.isSuccess,
+  };
 }

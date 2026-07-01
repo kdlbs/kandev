@@ -2,8 +2,8 @@
 
 import { IconGitPullRequest } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { cn } from "@/lib/utils";
-import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
 
 const MUTED_FOREGROUND = "text-muted-foreground";
@@ -192,7 +192,7 @@ export function prStatusRank(pr: TaskPR): number {
  * when every PR is terminal so the popover always has something to show.
  */
 export function pickDefaultPR(prs: TaskPR[]): TaskPR | null {
-  if (prs.length === 0) return null;
+  if (!Array.isArray(prs) || prs.length === 0) return null;
   let best = prs[0];
   let bestRank = prStatusRank(prs[0]);
   for (let i = 1; i < prs.length; i++) {
@@ -206,12 +206,12 @@ export function pickDefaultPR(prs: TaskPR[]): TaskPR | null {
 }
 
 export function PRTaskIcon({ taskId }: { taskId: string }) {
-  const prs = useAppStore((state) => state.taskPRs.byTaskId[taskId] ?? null);
+  const { prs } = useTaskPR(taskId);
 
   // Defensive: an upstream payload may briefly seed byTaskId[taskId] with a
   // non-array value (e.g. an empty object from a partial hydration). Bail
   // instead of falling through into MultiPRIcon, where for-of throws.
-  if (!Array.isArray(prs) || prs.length === 0) return null;
+  if (prs.length === 0) return null;
   if (prs.length === 1) return <SinglePRIcon taskId={taskId} pr={prs[0]} />;
   return <MultiPRIcon taskId={taskId} prs={prs} />;
 }

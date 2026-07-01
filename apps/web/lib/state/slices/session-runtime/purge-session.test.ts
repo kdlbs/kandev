@@ -21,7 +21,6 @@ describe("purgeSessionRuntimeState", () => {
     s.appendShellOutput("session-1", "shell noise");
     s.setShellStatus("session-1", { available: true });
     s.setContextWindow("session-1", { size: 1, used: 1, remaining: 0, efficiency: 1 });
-    s.setSessionTodos("session-1", [{ description: "do", status: "pending" }]);
     s.upsertProcessStatus({
       processId: "proc-1",
       sessionId: "session-1",
@@ -37,7 +36,6 @@ describe("purgeSessionRuntimeState", () => {
     const after = store.getState();
     expect(after.environmentIdBySessionId["session-1"]).toBeUndefined();
     expect(after.contextWindow.bySessionId["session-1"]).toBeUndefined();
-    expect(after.sessionTodos.bySessionId["session-1"]).toBeUndefined();
     expect(after.processes.processIdsBySessionId["session-1"]).toBeUndefined();
     expect(after.processes.devProcessBySessionId["session-1"]).toBeUndefined();
     expect(after.processes.processesById["proc-1"]).toBeUndefined();
@@ -45,6 +43,28 @@ describe("purgeSessionRuntimeState", () => {
     // env-scoped buffers gone because no other session references env-1.
     expect(after.shell.outputs["env-1"]).toBeUndefined();
     expect(after.shell.statuses["env-1"]).toBeUndefined();
+  });
+
+  it("does not expose Query-owned todo or prompt usage mirrors", () => {
+    const state = store.getState() as unknown as Record<string, unknown>;
+
+    expect("agents" in state).toBe(false);
+    expect("terminal" in state).toBe(false);
+    expect("setTerminalOutput" in state).toBe(false);
+    expect("agentCapabilities" in state).toBe(false);
+    expect("setAgentCapabilities" in state).toBe(false);
+    expect("sessionPollMode" in state).toBe(false);
+    expect("setSessionPollMode" in state).toBe(false);
+    expect("sessionMode" in state).toBe(false);
+    expect("setSessionMode" in state).toBe(false);
+    expect("clearSessionMode" in state).toBe(false);
+    expect("sessionTodos" in state).toBe(false);
+    expect("setSessionTodos" in state).toBe(false);
+    expect("promptUsage" in state).toBe(false);
+    expect("setPromptUsage" in state).toBe(false);
+    expect("availableCommands" in state).toBe(false);
+    expect("setAvailableCommands" in state).toBe(false);
+    expect("clearAvailableCommands" in state).toBe(false);
   });
 
   it("retains env-scoped buffers while another session shares the environment", () => {

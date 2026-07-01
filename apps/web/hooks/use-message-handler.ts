@@ -1,7 +1,8 @@
 import { useCallback } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { useAppStoreApi } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useQueue } from "./domains/session/use-queue";
+import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import type { MessageAttachment } from "@/components/task/chat/chat-input-container";
 import type { ActiveDocument } from "@/lib/state/slices/ui/types";
 import type { PlanComment } from "@/lib/state/slices/comments";
@@ -9,7 +10,7 @@ import { toBlockquote } from "@/lib/state/slices/comments/format";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { CustomPrompt, Message } from "@/lib/types/http";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
-import type { AppState } from "@/lib/state/store";
+import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 
 function buildDocumentContext(
   activeDocument: ActiveDocument | null,
@@ -40,10 +41,10 @@ function buildDocumentContext(
   return `\n\n<kandev-system>\nACTIVE DOCUMENT: The user is editing "${activeDocument.name}" (${activeDocument.path}) side-by-side with this chat.\nRead this file to understand the context before responding.\n</kandev-system>`;
 }
 
-function resolveStepTitle(stepId: string, state: AppState): string {
-  const step = state.kanban.steps.find((s) => s.id === stepId);
-  if (step) return step.title;
-  for (const snap of Object.values(state.kanbanMulti.snapshots)) {
+type WorkflowSnapshots = Record<string, WorkflowSnapshotData>;
+
+function resolveStepTitle(stepId: string, snapshots: WorkflowSnapshots): string {
+  for (const snap of Object.values(snapshots)) {
     const found = (snap.steps ?? []).find((s) => s.id === stepId);
     if (found) return found.title;
   }
@@ -58,10 +59,13 @@ function sanitizeForPrompt(value: string): string {
   return value.replace(/[\r\n<>]/g, " ");
 }
 
-export function buildTaskMentionsContext(tasks: TaskMentionData[], state: AppState): string {
+export function buildTaskMentionsContext(
+  tasks: TaskMentionData[],
+  snapshots: WorkflowSnapshots,
+): string {
   if (tasks.length === 0) return "";
   const lines = tasks.map((t) => {
-    const stepTitle = resolveStepTitle(t.workflowStepId, state);
+    const stepTitle = resolveStepTitle(t.workflowStepId, snapshots);
     const title = sanitizeForPrompt(t.title);
     const taskId = sanitizeForPrompt(t.taskId);
     const workflowId = sanitizeForPrompt(t.workflowId);
@@ -181,6 +185,8 @@ export function useMessageHandler({
   prompts = [],
 }: UseMessageHandlerParams) {
   const { queue } = useQueue(resolvedSessionId);
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+  const { snapshots } = useAllWorkflowSnapshots(activeWorkspaceId);
   const storeApi = useAppStoreApi();
 
   const buildFinalMessage = useCallback(
@@ -189,14 +195,14 @@ export function useMessageHandler({
       const documentContext = buildDocumentContext(activeDocument, planModeEnabled, planComments);
       const contextFilesContext = buildContextFilesContext(allContextFiles, prompts);
       const taskMentionsContext = inlineTaskMentions?.length
-        ? buildTaskMentionsContext(inlineTaskMentions, storeApi.getState())
+        ? buildTaskMentionsContext(inlineTaskMentions, snapshots)
         : "";
       return {
         finalMessage: message.trim() + documentContext + contextFilesContext + taskMentionsContext,
         allContextFiles,
       };
     },
-    [contextFiles, activeDocument, planModeEnabled, planComments, prompts, storeApi],
+    [contextFiles, activeDocument, planModeEnabled, planComments, prompts, snapshots],
   );
 
   const handleSendMessage = useCallback(

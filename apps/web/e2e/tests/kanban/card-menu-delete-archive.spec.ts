@@ -84,7 +84,7 @@ test.describe("Kanban card actions menu — delete/archive does not navigate", (
   });
 });
 
-// Regression: in "All Workflows" swimlane view, state.kanban.workflowId is null.
+// Regression: in "All Workflows" swimlane view, there is no single active workflow id.
 // useTaskCRUD's handleDelete/handleArchive used to early-return on that, so the
 // dialog closed but no API call ran and the task stayed on the board.
 test.describe("Kanban card actions menu — delete/archive in All Workflows view", () => {

@@ -13,6 +13,9 @@ const mockRequest = vi.fn();
 const mockRemoveTaskSession = vi.fn();
 const mockSetActiveSessionAuto = vi.fn();
 const mockClearActiveSession = vi.fn();
+const mockSetQueryData = vi.fn();
+const mockRemoveQueries = vi.fn();
+const mockInvalidateQueries = vi.fn();
 
 let mockState: Record<string, unknown> = {};
 
@@ -24,6 +27,14 @@ vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ request: mockRequest }),
 }));
 
+vi.mock("@tanstack/react-query", () => ({
+  useQueryClient: () => ({
+    setQueryData: mockSetQueryData,
+    removeQueries: mockRemoveQueries,
+    invalidateQueries: mockInvalidateQueries,
+  }),
+}));
+
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
@@ -33,6 +44,18 @@ vi.mock("@/components/state-provider", () => ({
     getState: () => mockState,
   }),
 }));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockToast.mockReturnValue("toast-1");
+  mockRequest.mockResolvedValue(undefined);
+  mockState = {
+    tasks: { activeSessionId: null },
+    taskSessionsByTask: { itemsByTaskId: {} },
+    setActiveSessionAuto: mockSetActiveSessionAuto,
+    clearActiveSession: mockClearActiveSession,
+  };
+});
 
 describe("session state predicates", () => {
   it("isSessionStoppable returns true for active states", () => {
@@ -61,18 +84,6 @@ describe("session state predicates", () => {
 });
 
 describe("useSessionActions", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockToast.mockReturnValue("toast-1");
-    mockRequest.mockResolvedValue(undefined);
-    mockState = {
-      tasks: { activeSessionId: null },
-      taskSessionsByTask: { itemsByTaskId: {} },
-      setActiveSessionAuto: mockSetActiveSessionAuto,
-      clearActiveSession: mockClearActiveSession,
-    };
-  });
-
   it("setPrimary dispatches session.set_primary with session id", async () => {
     const { result } = renderHook(() => useSessionActions({ sessionId: "s1", taskId: "t1" }));
     await result.current.setPrimary();
@@ -94,7 +105,9 @@ describe("useSessionActions", () => {
       30000,
     );
   });
+});
 
+describe("useSessionActions remove", () => {
   it("remove deletes via WS, removes from store, and runs onDeleted callback", async () => {
     const onDeleted = vi.fn();
     const { result } = renderHook(() =>
@@ -104,6 +117,25 @@ describe("useSessionActions", () => {
     await waitFor(() => expect(onDeleted).toHaveBeenCalled());
     expect(mockRequest).toHaveBeenCalledWith("session.delete", { session_id: "s1" }, 15000);
     expect(mockRemoveTaskSession).toHaveBeenCalledWith("t1", "s1");
+    expect(mockSetQueryData).toHaveBeenCalledWith(
+      ["session", "byTask", "t1"],
+      expect.any(Function),
+    );
+    expect(mockRemoveQueries).toHaveBeenCalledWith({
+      exact: true,
+      queryKey: ["session", "byId", "s1"],
+    });
+    expect(mockInvalidateQueries).toHaveBeenCalledWith({
+      exact: true,
+      queryKey: ["session", "byTask", "t1"],
+    });
+
+    const updater = mockSetQueryData.mock.calls[0]?.[1] as (current: {
+      sessions: Array<{ id: string }>;
+    }) => { sessions: Array<{ id: string }> };
+    expect(updater({ sessions: [{ id: "s1" }, { id: "s2" }] })).toEqual({
+      sessions: [{ id: "s2" }],
+    });
   });
 
   it("remove no-ops when WS request fails (store untouched)", async () => {
@@ -114,6 +146,7 @@ describe("useSessionActions", () => {
     );
     await result.current.remove();
     expect(mockRemoveTaskSession).not.toHaveBeenCalled();
+    expect(mockSetQueryData).not.toHaveBeenCalled();
     expect(onDeleted).not.toHaveBeenCalled();
   });
 

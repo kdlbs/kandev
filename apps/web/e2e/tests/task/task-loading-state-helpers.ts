@@ -40,7 +40,7 @@ async function switchToUnresolvedTask(testPage: Page, taskId: string) {
   }, taskId);
 }
 
-async function blockTaskDetailRequest(testPage: Page, taskId: string) {
+export async function blockTaskDetailRequest(testPage: Page, taskId: string) {
   const routePattern = `**/api/v1/tasks/${taskId}`;
   let unblock: () => void = () => {};
   const blocked = new Promise<void>((resolve) => {

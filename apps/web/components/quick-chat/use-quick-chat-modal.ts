@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { startQuickChat } from "@/lib/api/domains/workspace-api";
 
 async function deleteQuickChatTask(taskId: string) {
@@ -12,7 +13,7 @@ async function deleteQuickChatTask(taskId: string) {
 }
 
 function useQuickChatStore() {
-  return useAppStore(
+  const store = useAppStore(
     useShallow((s) => ({
       isOpen: s.quickChat.isOpen,
       sessions: s.quickChat.sessions,
@@ -22,10 +23,11 @@ function useQuickChatStore() {
       setActiveQuickChatSession: s.setActiveQuickChatSession,
       renameQuickChatSession: s.renameQuickChatSession,
       openQuickChat: s.openQuickChat,
-      agentProfiles: s.agentProfiles.items ?? [],
       taskSessions: s.taskSessions.items || {},
     })),
   );
+  const { agentProfiles } = useSettingsData(true);
+  return useMemo(() => ({ ...store, agentProfiles }), [agentProfiles, store]);
 }
 
 type QuickChatStore = ReturnType<typeof useQuickChatStore>;

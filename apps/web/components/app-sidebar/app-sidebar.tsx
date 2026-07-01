@@ -63,11 +63,9 @@ export function AppSidebar() {
   const pathname = usePathname();
   const inOffice = useInOffice();
 
-  // Keep `state.workflows.items` in sync with the active workspace at the top
-  // of the always-mounted sidebar. Downstream consumers (the workspace picker,
-  // Tasks section, kanban board) all assume this state exists for the current
-  // workspace — hoisting it above the collapsible Tasks section is required so
-  // a user with the section collapsed still gets fresh workflows on a switch.
+  // Keep the active workspace's workflow query warm at the top of the
+  // always-mounted sidebar. Hoisting this above the collapsible Tasks section
+  // keeps workspace switches fresh even when that section is collapsed.
   useEnsureWorkspaceWorkflows();
 
   const handleResize = useCallback(

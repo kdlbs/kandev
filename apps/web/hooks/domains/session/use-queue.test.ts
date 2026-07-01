@@ -1,9 +1,20 @@
+import { createElement, type ReactNode } from "react";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { QueuedMessage } from "@/lib/state/slices/session/types";
+import { queueStatusQueryOptions } from "@/lib/query/query-options";
+import type { QueueStatus, QueuedMessage } from "@/lib/state/slices/session/types";
 
 const queueApiMock = vi.hoisted(() => {
-  class QueueEntryNotFoundError extends Error {}
+  class QueueEntryNotFoundError extends Error {
+    readonly code = "entry_not_found";
+
+    constructor() {
+      super("Queue entry was already drained or no longer exists.");
+      this.name = "QueueEntryNotFoundError";
+    }
+  }
+
   return {
     QueueEntryNotFoundError,
     queueMessage: vi.fn(),
@@ -15,42 +26,52 @@ const queueApiMock = vi.hoisted(() => {
   };
 });
 
-type MockQueueState = {
-  queue: {
-    bySessionId: Record<string, QueuedMessage[]>;
-    metaBySessionId: Record<string, { count: number; max: number }>;
-    isLoading: Record<string, boolean>;
-  };
+type MockState = {
   connection: { status: string };
-  setQueueEntries: ReturnType<typeof vi.fn>;
-  removeQueueEntry: ReturnType<typeof vi.fn>;
-  setQueueLoading: ReturnType<typeof vi.fn>;
 };
 
-let mockState: MockQueueState;
+let mockState: MockState;
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: MockQueueState) => unknown) => selector(mockState),
+  useAppStore: (selector: (state: MockState) => unknown) => selector(mockState),
 }));
 
 vi.mock("@/lib/api/domains/queue-api", () => queueApiMock);
 
 import { useQueue } from "./use-queue";
 
-const SESSION_ID = "sess-1";
+const SESSION_ID = "session-1";
 const TASK_ID = "task-1";
+
+function createQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+    },
+  });
+}
+
+function createWrapper(client: QueryClient) {
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return createElement(QueryClientProvider, { client }, children);
+  };
+}
 
 function entry(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
   return {
-    id: "q-1",
+    id: "entry-1",
     session_id: SESSION_ID,
     task_id: TASK_ID,
-    content: "queued prompt",
+    content: "Queued prompt",
     plan_mode: false,
-    queued_at: "2026-06-27T00:00:00Z",
+    queued_at: "2026-06-23T00:00:00Z",
     queued_by: "user",
     ...overrides,
   };
+}
+
+function seedQueue(client: QueryClient, status: QueueStatus) {
+  client.setQueryData(queueStatusQueryOptions(SESSION_ID).queryKey, status);
 }
 
 function setDocumentVisibility(value: DocumentVisibilityState) {
@@ -60,35 +81,65 @@ function setDocumentVisibility(value: DocumentVisibilityState) {
   });
 }
 
-function resetMockState() {
-  mockState = {
-    queue: {
-      bySessionId: {},
-      metaBySessionId: {},
-      isLoading: {},
-    },
-    connection: { status: "connected" },
-    setQueueEntries: vi.fn(),
-    removeQueueEntry: vi.fn(),
-    setQueueLoading: vi.fn(),
-  };
-}
-
 describe("useQueue", () => {
   beforeEach(() => {
-    resetMockState();
+    vi.clearAllMocks();
+    mockState = { connection: { status: "connected" } };
     setDocumentVisibility("visible");
     queueApiMock.getQueueStatus.mockResolvedValue({ entries: [], count: 0, max: 10 });
   });
 
   afterEach(() => {
     cleanup();
-    vi.clearAllMocks();
+  });
+
+  it("reads cached queue status from Query without queue Zustand state", () => {
+    const client = createQueryClient();
+    const queued = entry();
+    seedQueue(client, { entries: [queued], count: 1, max: 3 });
+
+    const { result } = renderHook(() => useQueue(SESSION_ID), {
+      wrapper: createWrapper(client),
+    });
+
+    expect(result.current.entries).toEqual([queued]);
+    expect(result.current.count).toBe(1);
+    expect(result.current.max).toBe(3);
+    expect(result.current.isFull).toBe(false);
+  });
+
+  it("optimistically removes an entry from the queue query cache", async () => {
+    queueApiMock.removeQueuedEntry.mockResolvedValueOnce({ entry_id: "entry-1" });
+    const client = createQueryClient();
+    seedQueue(client, {
+      entries: [entry(), entry({ id: "entry-2", content: "Second prompt" })],
+      count: 2,
+      max: 3,
+    });
+    const { result } = renderHook(() => useQueue(SESSION_ID), {
+      wrapper: createWrapper(client),
+    });
+
+    await act(async () => {
+      await result.current.removeEntry("entry-1");
+    });
+
+    expect(queueApiMock.removeQueuedEntry).toHaveBeenCalledWith({
+      session_id: SESSION_ID,
+      entry_id: "entry-1",
+    });
+    expect(client.getQueryData<QueueStatus>(queueStatusQueryOptions(SESSION_ID).queryKey)).toEqual({
+      entries: [entry({ id: "entry-2", content: "Second prompt" })],
+      count: 1,
+      max: 3,
+    });
   });
 
   it("refetches the queue snapshot when the WebSocket reconnects", async () => {
     mockState.connection.status = "disconnected";
-    const { rerender } = renderHook(() => useQueue(SESSION_ID));
+    const { rerender } = renderHook(() => useQueue(SESSION_ID), {
+      wrapper: createWrapper(createQueryClient()),
+    });
 
     await act(async () => {});
     expect(queueApiMock.getQueueStatus).not.toHaveBeenCalled();
@@ -97,40 +148,27 @@ describe("useQueue", () => {
     rerender();
 
     await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID));
-    expect(mockState.setQueueEntries).toHaveBeenCalledWith(SESSION_ID, [], {
-      count: 0,
-      max: 10,
-    });
   });
 
   it("refetches a stale queue snapshot when a suspended tab becomes visible again", async () => {
-    mockState.queue.bySessionId[SESSION_ID] = [entry()];
-    mockState.queue.metaBySessionId[SESSION_ID] = { count: 1, max: 10 };
-    queueApiMock.getQueueStatus.mockResolvedValueOnce({
-      entries: [entry()],
-      count: 1,
-      max: 10,
+    renderHook(() => useQueue(SESSION_ID), {
+      wrapper: createWrapper(createQueryClient()),
     });
-
-    renderHook(() => useQueue(SESSION_ID));
     await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalledTimes(1));
 
     queueApiMock.getQueueStatus.mockClear();
-    mockState.setQueueEntries.mockClear();
     queueApiMock.getQueueStatus.mockResolvedValueOnce({ entries: [], count: 0, max: 10 });
 
     document.dispatchEvent(new Event("visibilitychange"));
 
     await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID));
-    expect(mockState.setQueueEntries).toHaveBeenCalledWith(SESSION_ID, [], {
-      count: 0,
-      max: 10,
-    });
   });
 
   it("does not refetch on foreground visibility while disconnected", async () => {
     mockState.connection.status = "disconnected";
-    renderHook(() => useQueue(SESSION_ID));
+    renderHook(() => useQueue(SESSION_ID), {
+      wrapper: createWrapper(createQueryClient()),
+    });
 
     await act(async () => {});
     document.dispatchEvent(new Event("visibilitychange"));

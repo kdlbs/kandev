@@ -1,6 +1,14 @@
 "use client";
 
-import { useState, useCallback, useRef, useMemo, useEffect } from "react";
+import {
+  useState,
+  useCallback,
+  useRef,
+  useMemo,
+  useEffect,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
@@ -36,6 +44,10 @@ type Position = {
   y: number;
 };
 
+type DetectionFrameRef = {
+  current: number | null;
+};
+
 // Debounce delay for file search (ms)
 const FILE_SEARCH_DEBOUNCE = 300;
 
@@ -46,6 +58,23 @@ function isValidMentionTrigger(text: string, pos: number): boolean {
   if (pos === 0) return true;
   const charBefore = text[pos - 1];
   return charBefore === " " || charBefore === "\n" || charBefore === "\t";
+}
+
+function cancelDetectionFrame(ref: DetectionFrameRef): void {
+  if (ref.current === null) return;
+  cancelAnimationFrame(ref.current);
+  ref.current = null;
+}
+
+function useResetMentionSelection(
+  itemCount: number,
+  setSelectedIndex: Dispatch<SetStateAction<number>>,
+): void {
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [itemCount, setSelectedIndex]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 }
 
 /** Exported for tests. */
@@ -259,21 +288,25 @@ function useMentionKeyboard({
       switch (event.key) {
         case "ArrowDown":
           event.preventDefault();
+          event.stopPropagation();
           setSelectedIndex((prev) => Math.min(prev + 1, filteredItems.length - 1));
           break;
         case "ArrowUp":
           event.preventDefault();
+          event.stopPropagation();
           setSelectedIndex((prev) => Math.max(prev - 1, 0));
           break;
         case "Enter":
         case "Tab":
           if (filteredItems.length > 0) {
             event.preventDefault();
+            event.stopPropagation();
             handleSelect(filteredItems[selectedIndex]);
           }
           break;
         case "Escape":
           event.preventDefault();
+          event.stopPropagation();
           closeMenu();
           break;
       }
@@ -339,6 +372,7 @@ export function useInlineMention({
   const [triggerStart, setTriggerStart] = useState<number>(-1);
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const detectionFrameRef = useRef<number | null>(null);
 
   const { prompts } = useCustomPrompts();
   const { fileResults, isLoading } = useFileSearch(sessionId, isOpen, query);
@@ -352,10 +386,7 @@ export function useInlineMention({
     promptInsertMode,
   });
 
-  /* eslint-disable react-hooks/set-state-in-effect */
-  useEffect(() => {
-    setSelectedIndex(0);
-  }, [filteredItems.length]);
+  useResetMentionSelection(filteredItems.length, setSelectedIndex);
 
   useEffect(() => {
     if (!isOpen || isLoading) return;
@@ -365,12 +396,20 @@ export function useInlineMention({
   }, [isOpen, isLoading, filteredItems.length, query.length]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  const cancelPendingDetection = useCallback(() => {
+    cancelDetectionFrame(detectionFrameRef);
+  }, []);
+
+  useEffect(() => cancelPendingDetection, [cancelPendingDetection]);
+
   const handleChange = useCallback(
     (newValue: string) => {
       onChange(newValue);
       const input = inputRef.current;
       if (!input) return;
-      requestAnimationFrame(() => {
+      cancelPendingDetection();
+      detectionFrameRef.current = requestAnimationFrame(() => {
+        detectionFrameRef.current = null;
         const cursorPos = input.getSelectionStart();
         const trigger = detectMentionTrigger(newValue, cursorPos);
         if (trigger) {
@@ -388,12 +427,13 @@ export function useInlineMention({
         }
       });
     },
-    [inputRef, isOpen, onChange],
+    [cancelPendingDetection, inputRef, isOpen, onChange],
   );
 
   const closeMenu = useCallback(() => {
+    cancelPendingDetection();
     clearMentionState(setIsOpen, setTriggerStart, setQuery);
-  }, []);
+  }, [cancelPendingDetection]);
 
   const handleSelect = useCallback(
     (item: MentionItem) => {

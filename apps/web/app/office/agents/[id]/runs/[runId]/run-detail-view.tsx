@@ -1,7 +1,13 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AgentRunsListPage, RunDetail } from "@/lib/api/domains/office-extended-api";
+import { qk } from "@/lib/query/keys";
+import {
+  officeAgentRunsInfiniteQueryOptions,
+  officeRunDetailQueryOptions,
+} from "@/lib/query/query-options/office";
 import { RunHeader } from "../components/run-header";
 import { RecentRunsSidebar } from "../components/recent-runs-sidebar";
 import { SessionCollapsible } from "../components/session-collapsible";
@@ -30,26 +36,40 @@ type Props = {
  * refetch.
  */
 export function RunDetailView({ agentId, initial, recent }: Props) {
-  const taskId = initial.task_id ?? "";
-  const sessionId = initial.session.session_id ?? "";
-  const { events, status } = useRunLiveSync(initial.id, initial.events, initial.status);
+  const queryClient = useQueryClient();
+  const detailQuery = useQuery(officeRunDetailQueryOptions(agentId, initial.id));
+  const recentQuery = useInfiniteQuery(officeAgentRunsInfiniteQueryOptions(agentId, { limit: 30 }));
+
+  useEffect(() => {
+    queryClient.setQueryData(qk.office.runDetail(agentId, initial.id), initial);
+    queryClient.setQueryData(qk.office.agentRuns(agentId, { limit: 30 }), {
+      pages: [recent],
+      pageParams: [undefined],
+    });
+  }, [agentId, initial, queryClient, recent]);
+
+  const run = detailQuery.data ?? initial;
+  const recentRuns = recentQuery.data?.pages[0]?.runs ?? recent.runs;
+  const taskId = run.task_id ?? "";
+  const sessionId = run.session.session_id ?? "";
+  const { events, status } = useRunLiveSync(run.id, run.events, run.status);
   const liveRun = useMemo<RunDetail>(
-    () => (status === initial.status ? initial : { ...initial, status }),
-    [initial, status],
+    () => (status === run.status ? run : { ...run, status }),
+    [run, status],
   );
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4">
       <aside className="lg:sticky lg:top-4 lg:self-start">
-        <RecentRunsSidebar runs={recent.runs} agentId={agentId} activeRunId={initial.id} />
+        <RecentRunsSidebar runs={recentRuns} agentId={agentId} activeRunId={run.id} />
       </aside>
       <main className="space-y-4 min-w-0">
         <RunHeader run={liveRun} />
-        <RoutePanel runId={initial.id} />
-        <SessionCollapsible session={initial.session} />
-        <InvocationPanel invocation={initial.invocation} />
-        <RuntimePanel runtime={initial.runtime} />
-        <PromptPanel run={initial} />
-        <TasksTouched runId={initial.id} taskIds={initial.tasks_touched} />
+        <RoutePanel runId={run.id} />
+        <SessionCollapsible session={run.session} />
+        <InvocationPanel invocation={run.invocation} />
+        <RuntimePanel runtime={run.runtime} />
+        <PromptPanel run={run} />
+        <TasksTouched runId={run.id} taskIds={run.tasks_touched} />
         <RunConversation taskId={taskId} sessionId={sessionId} />
         <EventsLog events={events} />
       </main>
