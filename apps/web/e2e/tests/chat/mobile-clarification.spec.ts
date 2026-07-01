@@ -1,8 +1,5 @@
-import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
-import type { SeedData } from "../../fixtures/test-base";
-import type { ApiClient } from "../../helpers/api-client";
-import { SessionPage } from "../../pages/session-page";
+import { seedClarificationSession } from "../../helpers/clarification";
 
 /**
  * Mobile parity for the multiline custom clarification answer. On a coarse-pointer
@@ -10,32 +7,6 @@ import { SessionPage } from "../../pages/session-page";
  * the inline "Send" button (there is no overlay Submit button for single-question
  * bundles). Runs under the Pixel 5 `mobile-chrome` project.
  */
-async function seedClarificationTask(
-  testPage: Page,
-  apiClient: ApiClient,
-  seedData: SeedData,
-  title: string,
-): Promise<SessionPage> {
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    title,
-    seedData.agentProfileId,
-    {
-      description: "/e2e:clarification",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
-
-  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
-
-  await testPage.goto(`/t/${task.id}`);
-  const session = new SessionPage(testPage);
-  await session.waitForLoad();
-  return session;
-}
-
 test.describe("Mobile clarification multiline answer", () => {
   test.describe.configure({ retries: 1, timeout: 120_000 });
 
@@ -44,7 +15,15 @@ test.describe("Mobile clarification multiline answer", () => {
     apiClient,
     seedData,
   }) => {
-    const session = await seedClarificationTask(testPage, apiClient, seedData, "Mobile Clarify");
+    const session = await seedClarificationSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Clarify",
+      {
+        scenario: "clarification",
+      },
+    );
 
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
 
