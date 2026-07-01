@@ -714,6 +714,7 @@ func derefString(p *string) string {
 var allowedProbeCommands = map[string]string{
 	"auggie":        "auggie",
 	"cursor-agent":  "cursor-agent",
+	"hermes":        "hermes",
 	"kimi":          "kimi",
 	"kiro-cli-chat": "kiro-cli-chat",
 	"mock-agent":    "mock-agent",
