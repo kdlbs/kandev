@@ -114,7 +114,7 @@ function useKanbanCardMenus({
 >) {
   const moveTargets = useKanbanCardMoveTargets(task.id, steps);
   const moveTasks = useTaskWorkflowMove();
-  const { sortByDisplayOrder } = useTaskMultiSelectStore();
+  const { sortByDisplayOrder, getWorkflowIdForTask } = useTaskMultiSelectStore();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
   const [showPRDialog, setShowPRDialog] = useState(false);
@@ -141,6 +141,12 @@ function useKanbanCardMenus({
   // Sort into board order lazily (only when a move actually fires) so a backward
   // range selection isn't scrambled — and we don't pay it on every card render.
   const orderedSelectedIds = () => sortByDisplayOrder(selectedTaskIds);
+  // A selection spanning workflows can't safely use same-workflow "Move to" (it
+  // would drag other-workflow cards into this card's workflow), so gate it — only
+  // computed for a genuine multi-selection to avoid per-render snapshot scans.
+  const isMixedWorkflowSelection =
+    selectedTaskIds.length > 1 &&
+    new Set(selectedTaskIds.map((id) => getWorkflowIdForTask(id))).size > 1;
   const moveSelectedToStep = (stepId: string) => {
     if (selectedTaskIds.length === 1 && selectedTaskIds[0] === task.id && onMove) {
       onMove(task, stepId);
@@ -175,7 +181,9 @@ function useKanbanCardMenus({
     }),
     contextMenuEntries: buildKanbanCardMenuEntries({
       ...menuBase,
-      onMoveToStep: moveSelectedToStep,
+      // Hide same-workflow "Move to" for a mixed-workflow selection; only the
+      // explicit "Send to workflow" path remains (matches the toolbar guard).
+      onMoveToStep: isMixedWorkflowSelection ? undefined : moveSelectedToStep,
       onSendToWorkflow: (workflowId, stepId) => {
         runMoveTasks(orderedSelectedIds(), workflowId, stepId);
       },
