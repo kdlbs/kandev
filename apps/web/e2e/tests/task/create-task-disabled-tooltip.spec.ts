@@ -1,13 +1,30 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { Page } from "@playwright/test";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 
 const START_AGENT_TEST_ID = "submit-start-agent";
 const WRAPPER_TEST_ID = "submit-start-agent-wrapper";
 const START_ENABLED_TIMEOUT = 30_000;
+const SEED_REPO_NAME = "E2E Repo";
 
 // Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
 useRegularMode();
+
+async function ensureSeedRepositorySelected(testPage: Page) {
+  const repoChip = testPage.getByTestId("repo-chip-trigger").first();
+  if (!(await repoChip.textContent())?.includes(SEED_REPO_NAME)) {
+    await repoChip.click();
+    await testPage
+      .getByRole("option", { name: new RegExp(`^${SEED_REPO_NAME}\\b`, "i") })
+      .first()
+      .click();
+  }
+  await expect(repoChip).toContainText(SEED_REPO_NAME);
+  await expect(testPage.getByTestId("branch-chip-trigger").first()).toContainText("main", {
+    timeout: 10_000,
+  });
+}
 
 test.describe("Create task button: disabled-reason tooltip", () => {
   test("shows 'Add a task title' when title is empty", async ({ testPage }) => {
@@ -39,6 +56,7 @@ test.describe("Create task button: disabled-reason tooltip", () => {
     await kanban.createTaskButton.first().click();
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
+    await ensureSeedRepositorySelected(testPage);
 
     await testPage.getByTestId("task-title-input").fill("Valid Task");
     await testPage.getByTestId("task-description-input").fill("doing a thing");
@@ -66,6 +84,7 @@ test.describe("Create task button: disabled-reason tooltip", () => {
     await kanban.createTaskButton.first().click();
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
+    await ensureSeedRepositorySelected(testPage);
 
     const titleInput = testPage.getByTestId("task-title-input");
     await titleInput.fill("Temp Title");
