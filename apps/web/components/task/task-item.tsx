@@ -123,6 +123,17 @@ function handleTaskItemKeyDown(
   else onClick?.();
 }
 
+/** State attributes for the row: active-task (`aria-current`) + multi-selected. */
+function taskItemStateAttrs(isSelected: boolean, isMultiSelected: boolean) {
+  return {
+    "data-active": isSelected ? "true" : "false",
+    "data-multiselected": isMultiSelected ? "true" : undefined,
+    "aria-current": isSelected ? ("true" as const) : undefined,
+    // Surface the multi-selected state to assistive tech.
+    "aria-selected": isMultiSelected ? true : undefined,
+  };
+}
+
 function taskItemRowClassName(
   isSelected: boolean,
   isMultiSelected: boolean,
@@ -424,9 +435,7 @@ export const TaskItem = memo(function TaskItem({
       role="button"
       tabIndex={0}
       data-testid="sidebar-task-item"
-      data-active={isSelected ? "true" : "false"}
-      data-multiselected={isMultiSelected ? "true" : undefined}
-      aria-current={isSelected ? "true" : undefined}
+      {...taskItemStateAttrs(isSelected, isMultiSelected)}
       onClick={taskItemRowClick(onSelect, onClick)}
       onKeyDown={(e) => handleTaskItemKeyDown(e, onSelect, onClick)}
       style={indent.depth > 0 ? { paddingLeft: indent.paddingLeftPx } : undefined}

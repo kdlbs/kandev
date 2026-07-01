@@ -105,10 +105,11 @@ function useSelectionHandlers(args: {
 
   const onBulkPin = useCallback(
     (ids: string[]) => {
-      pinTasks(ids);
+      // Pin in visible order so pinned rows keep the order the user saw.
+      pinTasks(sortIdsByVisibleOrder(ids, visibleTaskIds));
       clearSelection();
     },
-    [pinTasks, clearSelection],
+    [pinTasks, clearSelection, visibleTaskIds],
   );
 
   return { onSelectTaskRange, onBulkMove, onBulkPin };

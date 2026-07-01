@@ -197,22 +197,23 @@ function TaskContextMenuItems({
     );
   }
 
-  // Delete of a lone selected row must drop it from the selection so later plain
-  // clicks navigate instead of toggling.
-  const onDelete =
-    actingOnSelection && onClearSelection
+  // Acting on a lone selected row (Pin / Delete) must drop it from the selection
+  // so later plain clicks navigate instead of toggling.
+  const withClear = (handler?: (id: string) => void) =>
+    actingOnSelection && onClearSelection && handler
       ? (id: string) => {
           onClearSelection();
-          onDeleteTask?.(id);
+          handler(id);
         }
-      : onDeleteTask;
+      : handler;
+  const onDelete = withClear(onDeleteTask);
   return (
     <>
       <TaskPinItem
         taskId={task.id}
         isPinned={isPinned}
         disabled={isDeleting}
-        onTogglePin={onTogglePin}
+        onTogglePin={withClear(onTogglePin)}
       />
       <TaskRenameItem task={task} disabled={isDeleting} onRenameTask={onRenameTask} />
       <ContextMenuItem disabled>

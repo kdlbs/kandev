@@ -23,10 +23,10 @@ export function compareTasksByCreatedDesc(a: CreatedTask, b: CreatedTask): numbe
  * sequential positions are assigned.
  */
 export function sortIdsByCreatedDesc(ids: string[], taskById: Map<string, CreatedTask>): string[] {
-  return [...ids].sort((a, b) => {
-    const ta = taskById.get(a);
-    const tb = taskById.get(b);
-    if (!ta || !tb) return 0;
-    return compareTasksByCreatedDesc(ta, tb);
-  });
+  // Missing ids fall back to `{}`, which `compareTasksByCreatedDesc` treats as
+  // the oldest (sorts last) — keeping the comparator transitive rather than
+  // returning 0 whenever either side is unknown.
+  return [...ids].sort((a, b) =>
+    compareTasksByCreatedDesc(taskById.get(a) ?? {}, taskById.get(b) ?? {}),
+  );
 }

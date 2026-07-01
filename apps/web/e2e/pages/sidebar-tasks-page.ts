@@ -1,5 +1,7 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 
+const plural = (count: number) => (count === 1 ? "task" : "tasks");
+
 /**
  * Page object for the task list inside the unified AppSidebar (TaskSessionSidebar).
  * Covers cmd/shift-click multi-select and the selection-aware right-click menu.
@@ -59,7 +61,7 @@ export class SidebarTasksPage {
 
   // --- right-click bulk menu ---
   bulkArchiveMenuItem(count: number): Locator {
-    return this.page.getByRole("menuitem", { name: `Archive ${count} tasks` });
+    return this.page.getByRole("menuitem", { name: `Archive ${count} ${plural(count)}` });
   }
 
   singleArchiveMenuItem(): Locator {
@@ -71,11 +73,11 @@ export class SidebarTasksPage {
   }
 
   bulkPinMenuItem(count: number): Locator {
-    return this.page.getByRole("menuitem", { name: `Pin ${count} tasks` });
+    return this.page.getByRole("menuitem", { name: `Pin ${count} ${plural(count)}` });
   }
 
   bulkDeleteMenuItem(count: number): Locator {
-    return this.page.getByRole("menuitem", { name: `Delete ${count} tasks` });
+    return this.page.getByRole("menuitem", { name: `Delete ${count} ${plural(count)}` });
   }
 
   bulkDeleteConfirm(): Locator {

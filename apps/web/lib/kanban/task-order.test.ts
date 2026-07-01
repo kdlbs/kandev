@@ -68,7 +68,12 @@ describe("sortIdsByCreatedDesc", () => {
     expect(sortIdsByCreatedDesc(["a", "c", "b"], taskById)).toEqual(["c", "b", "a"]);
   });
 
-  it("keeps relative order for ids without a known task", () => {
-    expect(sortIdsByCreatedDesc(["zzz", "a"], taskById)).toEqual(["zzz", "a"]);
+  it("sorts ids without a known task last (transitive fallback)", () => {
+    expect(sortIdsByCreatedDesc(["zzz", "a"], taskById)).toEqual(["a", "zzz"]);
+  });
+
+  it("stays transitive when only some ids are missing", () => {
+    // c (newest present) < a (older present) < missing → deterministic order.
+    expect(sortIdsByCreatedDesc(["a", "missing", "c"], taskById)).toEqual(["c", "a", "missing"]);
   });
 });
