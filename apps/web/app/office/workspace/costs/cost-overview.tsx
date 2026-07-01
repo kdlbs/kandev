@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@kandev/ui/button";
 import {
   IconCurrencyDollar,
@@ -9,8 +10,7 @@ import {
   IconCpu,
   IconBuilding,
 } from "@tabler/icons-react";
-import { toast } from "sonner";
-import { getCostsBreakdown } from "@/lib/api/domains/office-api";
+import { officeCostBreakdownQueryOptions } from "@/lib/query/query-options/office";
 import { MetricCard } from "../../components/metric-card";
 import type { CostBreakdownItem } from "@/lib/state/slices/office/types";
 import { CostBreakdownTable } from "./cost-breakdown-table";
@@ -20,27 +20,12 @@ type DateRange = "mtd" | "30d";
 
 export function CostOverview({ workspaceId }: { workspaceId: string }) {
   const [range, setRange] = useState<DateRange>("mtd");
-  const [totalSubcents, setTotalSubcents] = useState(0);
-  const [byAgent, setByAgent] = useState<CostBreakdownItem[]>([]);
-  const [byProject, setByProject] = useState<CostBreakdownItem[]>([]);
-  const [byModel, setByModel] = useState<CostBreakdownItem[]>([]);
-  const [byProvider, setByProvider] = useState<CostBreakdownItem[]>([]);
-
-  useEffect(() => {
-    // Single composed call (Stream D of office optimization). Was four
-    // parallel round-trips (summary + by-agent + by-project + by-model).
-    getCostsBreakdown(workspaceId)
-      .then((res) => {
-        setTotalSubcents(res.total_subcents ?? 0);
-        setByAgent((res.by_agent ?? []) as CostBreakdownItem[]);
-        setByProject((res.by_project ?? []) as CostBreakdownItem[]);
-        setByModel((res.by_model ?? []) as CostBreakdownItem[]);
-        setByProvider((res.by_provider ?? []) as CostBreakdownItem[]);
-      })
-      .catch((err) => {
-        toast.error(err instanceof Error ? err.message : "Failed to load cost data");
-      });
-  }, [workspaceId, range]);
+  const costsQuery = useQuery(officeCostBreakdownQueryOptions(workspaceId));
+  const totalSubcents = costsQuery.data?.total_subcents ?? 0;
+  const byAgent = (costsQuery.data?.by_agent ?? []) as CostBreakdownItem[];
+  const byProject = (costsQuery.data?.by_project ?? []) as CostBreakdownItem[];
+  const byModel = (costsQuery.data?.by_model ?? []) as CostBreakdownItem[];
+  const byProvider = (costsQuery.data?.by_provider ?? []) as CostBreakdownItem[];
 
   return (
     <div className="space-y-6">

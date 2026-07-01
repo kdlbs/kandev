@@ -1,17 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useAppStore } from "@/components/state-provider";
-import { fetchLogTail } from "@/lib/api/domains/system-api";
+import { useQuery } from "@tanstack/react-query";
+import { logTailQueryOptions } from "@/lib/query/query-options/system";
 
 /**
  * Fetches the last `n` lines of the current lumberjack log. The Logs page
  * also exposes a Refresh button which re-invokes `reload()`.
  */
 export function useLogTail(n = 1000) {
-  const tail = useAppStore((s) => s.system.logs.tail);
-  const tailLoaded = useAppStore((s) => s.system.logs.tailLoaded);
-  const setSystemLogTail = useAppStore((s) => s.setSystemLogTail);
+  const query = useQuery(logTailQueryOptions(n));
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -19,19 +17,24 @@ export function useLogTail(n = 1000) {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetchLogTail(n);
-      setSystemLogTail(res?.lines ?? []);
+      await query.refetch();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setIsLoading(false);
     }
-  }, [n, setSystemLogTail]);
+  }, [query]);
 
   useEffect(() => {
-    if (tailLoaded) return;
-    void reload();
-  }, [tailLoaded, reload]);
+    if (!query.error) return;
+    setError(query.error instanceof Error ? query.error.message : String(query.error));
+  }, [query.error]);
 
-  return { tail, loaded: tailLoaded, isLoading, error, reload };
+  return {
+    tail: query.data?.lines ?? [],
+    loaded: query.isSuccess,
+    isLoading: isLoading || (query.isFetching && !query.isSuccess),
+    error,
+    reload,
+  };
 }

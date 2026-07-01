@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { Repository, Executor, ExecutorProfile } from "@/lib/types/http";
 import { DEFAULT_LOCAL_EXECUTOR_TYPE } from "@/lib/utils";
 import { useToast } from "@/components/toast-provider";
@@ -8,8 +9,8 @@ import {
   discoverRepositoriesAction,
   getLocalRepositoryStatusAction,
 } from "@/app/actions/workspaces";
-import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
 import { getLocalStorage } from "@/lib/local-storage";
+import { workflowStepsQueryOptions } from "@/lib/query/query-options";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import type {
@@ -36,25 +37,21 @@ const selectionDebug = createDebugLogger("task-create:selection");
 
 export function useWorkflowStepsEffect(fs: DialogFormState, workflowId: string | null) {
   const { selectedWorkflowId, setFetchedSteps } = fs;
+  const shouldFetch = Boolean(selectedWorkflowId && selectedWorkflowId !== workflowId);
+  const query = useQuery({
+    ...workflowStepsQueryOptions(selectedWorkflowId ?? ""),
+    enabled: shouldFetch,
+  });
+
   useEffect(() => {
-    if (!selectedWorkflowId || selectedWorkflowId === workflowId) {
-      void Promise.resolve().then(() => setFetchedSteps(null));
+    if (!shouldFetch || !query.data) {
+      setFetchedSteps(null);
       return;
     }
-    let cancelled = false;
-    listWorkflowSteps(selectedWorkflowId)
-      .then((response) => {
-        if (cancelled) return;
-        const sorted = [...response.steps].sort((a, b) => a.position - b.position);
-        setFetchedSteps(sorted.map((s) => ({ id: s.id, title: s.name, events: s.events })));
-      })
-      .catch(() => {
-        if (!cancelled) setFetchedSteps(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedWorkflowId, workflowId, setFetchedSteps]);
+    setFetchedSteps(
+      query.data.map((step) => ({ id: step.id, title: step.name, events: step.events })),
+    );
+  }, [query.data, setFetchedSteps, shouldFetch]);
 }
 
 export function useDiscoverReposEffect(

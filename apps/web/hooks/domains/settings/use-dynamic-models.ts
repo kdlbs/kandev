@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
-import { fetchDynamicModels } from "@/lib/api/domains/settings-api";
+import { useCallback, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { dynamicModelsQueryOptions } from "@/lib/query/query-options/settings";
 import type {
   CommandEntry,
   ModeEntry,
@@ -31,52 +32,58 @@ export function useAgentCapabilities(
   initial: ModelConfig,
 ): UseAgentCapabilitiesState {
   const supportsDynamicModels = initial.supports_dynamic_models;
-  const [models, setModels] = useState<ModelEntry[]>(initial.available_models);
-  const [modes, setModes] = useState<ModeEntry[]>(initial.available_modes ?? []);
-  const [commands, setCommands] = useState<CommandEntry[]>(initial.available_commands ?? []);
-  const [currentModelId, setCurrentModelId] = useState<string | undefined>(
-    initial.current_model_id,
-  );
-  const [currentModeId, setCurrentModeId] = useState<string | undefined>(initial.current_mode_id);
-  const [isLoading, setIsLoading] = useState(supportsDynamicModels && !!agentName);
-  const [error, setError] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const query = useQuery({
+    ...dynamicModelsQueryOptions(agentName ?? ""),
+    enabled: supportsDynamicModels && Boolean(agentName),
+  });
 
-  const fetchCaps = useCallback(
-    async (forceRefresh: boolean) => {
+  const refresh = useCallback(async () => {
+    setRefreshError(null);
+    try {
       if (!agentName || !supportsDynamicModels) {
         return;
       }
-      setIsLoading(true);
-      setError(null);
-      try {
-        const response: DynamicModelsResponse = await fetchDynamicModels(agentName, {
-          refresh: forceRefresh,
-        });
-        if (response.error) {
-          setError(response.error);
-          return;
-        }
-        setModels(response.models ?? []);
-        setModes(response.modes ?? []);
-        setCommands(response.commands ?? []);
-        setCurrentModelId(response.current_model_id);
-        setCurrentModeId(response.current_mode_id);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to fetch capabilities");
-      } finally {
-        setIsLoading(false);
+      const response = await queryClient.fetchQuery({
+        ...dynamicModelsQueryOptions(agentName, { refresh: true }),
+        staleTime: 0,
+      });
+      if (response.error) {
+        setRefreshError(response.error);
       }
-    },
-    [agentName, supportsDynamicModels],
-  );
-
-  useEffect(() => {
-    if (supportsDynamicModels && agentName) {
-      void fetchCaps(false);
+    } catch (err) {
+      setRefreshError(err instanceof Error ? err.message : "Failed to fetch capabilities");
     }
-  }, [agentName, supportsDynamicModels, fetchCaps]);
+  }, [agentName, queryClient, supportsDynamicModels]);
 
-  const refresh = useCallback(() => fetchCaps(true), [fetchCaps]);
+  const capabilities = useMemo<DynamicModelsResponse>(() => {
+    if (query.data?.error) return initialResponse(initial);
+    return query.data ?? initialResponse(initial);
+  }, [initial, query.data]);
 
-  return { models, modes, commands, currentModelId, currentModeId, isLoading, error, refresh };
+  const queryError = query.error instanceof Error ? query.error.message : null;
+  return {
+    models: capabilities.models ?? [],
+    modes: capabilities.modes ?? [],
+    commands: capabilities.commands ?? [],
+    currentModelId: capabilities.current_model_id,
+    currentModeId: capabilities.current_mode_id,
+    isLoading: query.isFetching,
+    error: refreshError ?? query.data?.error ?? queryError,
+    refresh,
+  };
+}
+
+function initialResponse(initial: ModelConfig): DynamicModelsResponse {
+  return {
+    agent_name: "",
+    status: initial.status ?? "ok",
+    models: initial.available_models,
+    modes: initial.available_modes ?? [],
+    commands: initial.available_commands ?? [],
+    current_model_id: initial.current_model_id,
+    current_mode_id: initial.current_mode_id,
+    error: initial.error ?? null,
+  };
 }

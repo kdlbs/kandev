@@ -9,15 +9,12 @@ vi.mock("@/lib/recent-tasks", () => ({
 }));
 
 type Listener = (state: AppState) => void;
-type KanbanTask = { id: string; title: string; workflowId: string; workflowStepId: string };
 const TASK_ID = "t1";
 const SESSION_ID = "sess-old";
 const ARCHIVED_AT = "2026-06-30T12:00:00Z";
 
 function makeStore(initial: Partial<AppState> = {}) {
   let state = {
-    kanban: { workflowId: "wf1", steps: [], tasks: [] },
-    kanbanMulti: { snapshots: {}, isLoading: false },
     tasks: {
       activeTaskId: null,
       activeSessionId: null,
@@ -29,7 +26,6 @@ function makeStore(initial: Partial<AppState> = {}) {
     setActiveSessionAuto: vi.fn(),
     removeTaskFromSidebarPrefs: vi.fn(),
     setTaskDeletedNotification: vi.fn(),
-    setOfficeRefetchTrigger: vi.fn(),
     ...initial,
   } as unknown as AppState;
 
@@ -92,11 +88,6 @@ function archiveTask(store: StoreApi<AppState>, taskId = TASK_ID) {
 
 function makeStoreWithTask(initial: Partial<AppState> = {}) {
   return makeStore({
-    kanban: {
-      workflowId: "wf1",
-      steps: [],
-      tasks: [{ id: TASK_ID, primarySessionId: SESSION_ID, workflowId: "wf1" }],
-    } as unknown as AppState["kanban"],
     ...initial,
   });
 }
@@ -105,40 +96,6 @@ describe("task.updated archive cleanup", () => {
   beforeEach(() => {
     vi.mocked(removeRecentTask).mockClear();
     window.history.replaceState({}, "", "/");
-  });
-
-  it("removes archived tasks from the active kanban cache even when workflow focus changed", () => {
-    const staleTask: KanbanTask = {
-      id: "t1",
-      title: "Test",
-      workflowId: "wf1",
-      workflowStepId: "step1",
-    };
-    const store = makeStore({
-      kanban: {
-        workflowId: "wf-active",
-        steps: [],
-        tasks: [staleTask],
-      } as unknown as AppState["kanban"],
-      kanbanMulti: {
-        isLoading: false,
-        snapshots: {
-          wf1: { workflowId: "wf1", workflowName: "WF1", steps: [], tasks: [staleTask] },
-        },
-      } as unknown as AppState["kanbanMulti"],
-    });
-
-    const handlers = registerTasksHandlers(store);
-    handlers["task.updated"]!(
-      makeUpdatedMessage({
-        ...taskPayload(TASK_ID, "wf1"),
-        archived_at: ARCHIVED_AT,
-      }),
-    );
-
-    const state = store.getState();
-    expect(state.kanban.tasks).toEqual([]);
-    expect(state.kanbanMulti.snapshots.wf1.tasks).toEqual([]);
   });
 
   it("clears active task state, pin, recent history, and sidebar prefs for archived task events", () => {
@@ -162,7 +119,16 @@ describe("task.updated archive cleanup", () => {
     expect(state.tasks.lastSessionByTaskId).toHaveProperty("t2", "sess-other");
     expect(removeRecentTask).toHaveBeenCalledWith(TASK_ID);
     expect(state.removeTaskFromSidebarPrefs).toHaveBeenCalledWith(TASK_ID);
-    expect(state.setOfficeRefetchTrigger).toHaveBeenCalledWith("tasks");
+  });
+
+  it("does not expose legacy kanban mirrors when archiving tasks", () => {
+    const store = makeStoreWithTask();
+
+    archiveTask(store);
+
+    const state = store.getState();
+    expect("kanban" in state).toBe(false);
+    expect("kanbanMulti" in state).toBe(false);
   });
 
   it.each(["/t/t1", "/tasks/t1"])("redirects away when archived on %s", (path) => {

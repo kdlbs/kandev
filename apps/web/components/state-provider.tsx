@@ -1,6 +1,13 @@
 "use client";
 
-import { createContext, useContext, useEffect, useLayoutEffect, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { StoreApi } from "zustand";
 import { useStore } from "zustand";
 import { isDebug, registerSessionTaskResolver } from "@/lib/debug/log";
@@ -120,4 +127,17 @@ export function useAppStoreApi() {
     throw new Error("useAppStoreApi must be used within StateProvider");
   }
   return store;
+}
+
+export function useOptionalAppStore<T>(selector: (state: AppState) => T, fallback: T) {
+  const store = useContext(StoreContext);
+  return useSyncExternalStore(
+    store?.subscribe ?? (() => () => {}),
+    () => (store ? selector(store.getState()) : fallback),
+    () => fallback,
+  );
+}
+
+export function useOptionalAppStoreApi() {
+  return useContext(StoreContext);
 }

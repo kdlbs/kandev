@@ -2,8 +2,8 @@
 
 import { IconRobot } from "@tabler/icons-react";
 import { AgentLogo } from "@/components/agent-logo";
-import { useAppStore } from "@/components/state-provider";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { SettingsGroup, SettingsLeaf } from "./settings-nav-primitives";
 
 const ROOT_HREF = "/settings/agents";
@@ -15,7 +15,7 @@ type AgentsGroupProps = {
 };
 
 export function AgentsGroup({ pathname, expanded, onToggle }: AgentsGroupProps) {
-  const agents = useAppStore((s) => s.settingsAgents.items);
+  const { settingsAgents: agents } = useSettingsData(true);
   useAvailableAgents();
 
   return (

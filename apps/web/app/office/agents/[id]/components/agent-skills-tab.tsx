@@ -1,56 +1,81 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import Link from "@/components/routing/app-link";
 import { toast } from "sonner";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useAppStore } from "@/components/state-provider";
-import { listSkills, updateAgentProfile } from "@/lib/api/domains/office-api";
-import type { AgentProfile } from "@/lib/state/slices/office/types";
+import { updateAgentProfile } from "@/lib/api/domains/office-api";
+import type { AgentProfile, Skill } from "@/lib/state/slices/office/types";
+import { useActiveOfficeSkills, usePatchOfficeAgentProfileCache } from "../use-agent-detail-data";
 
 type AgentSkillsTabProps = {
   agent: AgentProfile;
 };
 
-/**
- * Hydrate the office skills store on mount. The workspace Skills page
- * populates it as a side effect of viewing, but a user landing
- * directly on /office/agents/<id>/skills wouldn't have run that path
- * yet. Hitting listSkills also triggers the backend's lazy per-
- * workspace system-skill sync, so a fresh workspace shows the
- * bundled set on first visit.
- */
-function useHydrateSkills() {
-  const setSkills = useAppStore((s) => s.setSkills);
-  const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  useEffect(() => {
-    if (!workspaceId) return;
-    let cancelled = false;
-    listSkills(workspaceId)
-      .then((res) => {
-        if (!cancelled) setSkills(res.skills ?? []);
-      })
-      .catch(() => {
-        // Non-fatal: existing store contents (possibly empty) render
-        // the "No skills registered" CTA, which still lets the user
-        // pivot to the Skills page.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId, setSkills]);
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function arraysEqual(left: string[], right: string[]) {
+  if (left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
+}
+
+function resolveAgentSkillIds(agent: AgentProfile, skills: Skill[]) {
+  const hasExplicitSkillSelection =
+    agent.skillIds !== undefined || agent.desiredSkills !== undefined;
+  const directIds = uniqueStrings(agent.skillIds ?? []);
+  if (directIds.length > 0) return directIds;
+
+  const desired = uniqueStrings(agent.desiredSkills ?? []);
+  if (desired.length > 0) {
+    const skillIds = new Set(skills.map((skill) => skill.id));
+    const skillIdBySlug = new Map(skills.map((skill) => [skill.slug, skill.id]));
+    const resolved = desired
+      .map((value) => (skillIds.has(value) ? value : skillIdBySlug.get(value)))
+      .filter((value): value is string => Boolean(value));
+    if (resolved.length > 0) return uniqueStrings(resolved);
+  }
+  if (hasExplicitSkillSelection) return [];
+
+  return uniqueStrings(
+    skills
+      .filter((skill) => skill.isSystem && (skill.defaultForRoles ?? []).includes(agent.role ?? ""))
+      .map((skill) => skill.id),
+  );
+}
+
+function selectedSkillSlugs(skillIds: string[], skills: Skill[]) {
+  const selected = new Set(skillIds);
+  return skills.filter((skill) => selected.has(skill.id)).map((skill) => skill.slug);
+}
+
+function EmptySkillsState() {
+  return (
+    <div className="flex flex-col items-center justify-center py-12 gap-3">
+      <p className="text-sm text-muted-foreground">No skills registered yet.</p>
+      <Button asChild variant="outline" size="sm" className="cursor-pointer">
+        <Link href="/office/workspace/skills">Manage skills in Company</Link>
+      </Button>
+    </div>
+  );
 }
 
 export function AgentSkillsTab({ agent }: AgentSkillsTabProps) {
-  useHydrateSkills();
-  const skills = useAppStore((s) => s.office.skills);
-  const updateStore = useAppStore((s) => s.updateOfficeAgentProfile);
-  const [skillIds, setSkillIds] = useState<string[]>(agent.skillIds ?? []);
+  const skills = useActiveOfficeSkills();
+  const patchAgentCache = usePatchOfficeAgentProfileCache();
+  const resolvedSkillIds = useMemo(() => resolveAgentSkillIds(agent, skills), [agent, skills]);
+  const [skillIds, setSkillIds] = useState<string[]>(resolvedSkillIds);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    if (dirty) return;
+    setSkillIds((current) => (arraysEqual(current, resolvedSkillIds) ? current : resolvedSkillIds));
+  }, [dirty, resolvedSkillIds]);
 
   const toggle = useCallback((id: string) => {
     setSkillIds((prev) => {
@@ -63,8 +88,9 @@ export function AgentSkillsTab({ agent }: AgentSkillsTabProps) {
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
-      await updateAgentProfile(agent.id, { skillIds });
-      updateStore(agent.id, { skillIds });
+      const desiredSkills = selectedSkillSlugs(skillIds, skills);
+      await updateAgentProfile(agent.id, { skillIds, desiredSkills });
+      patchAgentCache(agent.id, { skillIds, desiredSkills });
       setDirty(false);
       toast.success("Skills updated");
     } catch (err) {
@@ -72,17 +98,10 @@ export function AgentSkillsTab({ agent }: AgentSkillsTabProps) {
     } finally {
       setSaving(false);
     }
-  }, [agent.id, skillIds, updateStore]);
+  }, [agent.id, skillIds, skills, patchAgentCache]);
 
   if (skills.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-12 gap-3">
-        <p className="text-sm text-muted-foreground">No skills registered yet.</p>
-        <Button asChild variant="outline" size="sm" className="cursor-pointer">
-          <Link href="/office/workspace/skills">Manage skills in Company</Link>
-        </Button>
-      </div>
-    );
+    return <EmptySkillsState />;
   }
 
   const selected = new Set(skillIds);

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useCallback, useRef } from "react";
+import { useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  listReviewWatches,
   createReviewWatch,
   updateReviewWatch,
   deleteReviewWatch,
@@ -11,69 +11,92 @@ import {
   type CreateReviewWatchRequest,
   type UpdateReviewWatchRequest,
 } from "@/lib/api/domains/gitlab-api";
-import { useAppStore } from "@/components/state-provider";
+import { qk } from "@/lib/query/keys";
+import { gitlabReviewWatchesQueryOptions } from "@/lib/query/query-options/gitlab";
+import type { ReviewWatch } from "@/lib/types/gitlab";
 
 /**
  * useGitLabReviewWatches — three modes:
  *   - workspaceId: string         → fetch watches scoped to one workspace
  *   - workspaceId: undefined      → fetch watches across all workspaces
  *   - workspaceId: null           → don't fetch (caller hasn't resolved a workspace yet)
- *
- * The internal `loaded` flag lives on the slice and is shared across all
- * useGitLabReviewWatches instances, so it can't double as a per-workspace
- * cache key. We track the last-fetched workspace key here and re-fetch when
- * it changes (workspace switch).
  */
 export function useGitLabReviewWatches(workspaceId?: string | null) {
-  const items = useAppStore((state) => state.gitlabReviewWatches.items);
-  const loaded = useAppStore((state) => state.gitlabReviewWatches.loaded);
-  const loading = useAppStore((state) => state.gitlabReviewWatches.loading);
-  const set = useAppStore((state) => state.setGitLabReviewWatches);
-  const setLoading = useAppStore((state) => state.setGitLabReviewWatchesLoading);
-  const add = useAppStore((state) => state.addGitLabReviewWatch);
-  const upd = useAppStore((state) => state.updateGitLabReviewWatchInStore);
-  const rm = useAppStore((state) => state.removeGitLabReviewWatch);
-  const lastFetchedRef = useRef<string | null | undefined>(undefined);
-
-  useEffect(() => {
-    if (workspaceId === null || loading) return;
-    if (loaded && lastFetchedRef.current === workspaceId) return;
-    lastFetchedRef.current = workspaceId;
-    setLoading(true);
-    listReviewWatches(workspaceId ?? undefined, { cache: "no-store" })
-      .then((response) => set(response?.watches ?? []))
-      .catch(() => set([]))
-      .finally(() => setLoading(false));
-  }, [workspaceId, loaded, loading, set, setLoading]);
+  const queryClient = useQueryClient();
+  const query = useQuery(gitlabReviewWatchesQueryOptions(workspaceId));
+  const items = query.data ?? [];
 
   const create = useCallback(
     async (req: CreateReviewWatchRequest) => {
       const watch = await createReviewWatch(req);
-      add(watch);
+      patchGitLabReviewWatchCaches(queryClient, workspaceId, watch);
       return watch;
     },
-    [add],
+    [queryClient, workspaceId],
   );
 
   const update = useCallback(
     async (id: string, req: UpdateReviewWatchRequest) => {
       const watch = await updateReviewWatch(id, req);
-      upd(watch);
+      patchGitLabReviewWatchCaches(queryClient, workspaceId, watch);
       return watch;
     },
-    [upd],
+    [queryClient, workspaceId],
   );
 
   const remove = useCallback(
     async (id: string) => {
       await deleteReviewWatch(id);
-      rm(id);
+      removeGitLabReviewWatchFromCaches(queryClient, workspaceId, id);
     },
-    [rm],
+    [queryClient, workspaceId],
   );
 
   const trigger = useCallback((id: string) => triggerReviewWatch(id), []);
   const triggerAll = useCallback(() => triggerAllReviewWatches(), []);
 
-  return { items, loaded, loading, create, update, remove, trigger, triggerAll };
+  return {
+    items,
+    loaded: query.isSuccess,
+    loading: query.isFetching && !query.isSuccess,
+    create,
+    update,
+    remove,
+    trigger,
+    triggerAll,
+  };
+}
+
+function patchGitLabReviewWatchCaches(
+  queryClient: ReturnType<typeof useQueryClient>,
+  workspaceId: string | null | undefined,
+  watch: ReviewWatch,
+) {
+  const patch = (prev: ReviewWatch[] | undefined) => upsertById(prev ?? [], watch);
+  const patchExisting = (prev: ReviewWatch[] | undefined) =>
+    prev ? upsertById(prev, watch) : prev;
+  queryClient.setQueryData(qk.integrations.gitlab.reviewWatches(workspaceId), patch);
+  queryClient.setQueryData(qk.integrations.gitlab.reviewWatches(undefined), patchExisting);
+  queryClient.setQueryData(qk.integrations.gitlab.reviewWatches(watch.workspace_id), patch);
+}
+
+function removeGitLabReviewWatchFromCaches(
+  queryClient: ReturnType<typeof useQueryClient>,
+  workspaceId: string | null | undefined,
+  id: string,
+) {
+  const remove = (prev: ReviewWatch[] | undefined) =>
+    (prev ?? []).filter((watch) => watch.id !== id);
+  const removeExisting = (prev: ReviewWatch[] | undefined) =>
+    prev ? prev.filter((watch) => watch.id !== id) : prev;
+  queryClient.setQueryData(qk.integrations.gitlab.reviewWatches(workspaceId), remove);
+  queryClient.setQueryData(qk.integrations.gitlab.reviewWatches(undefined), removeExisting);
+}
+
+function upsertById<T extends { id: string }>(items: T[], next: T): T[] {
+  const index = items.findIndex((item) => item.id === next.id);
+  if (index === -1) return [...items, next];
+  const copy = [...items];
+  copy[index] = next;
+  return copy;
 }

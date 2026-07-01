@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { searchSessionMessages, type MessageSearchHit } from "@/lib/api/domains/session-api";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { sessionSearchQueryOptions } from "@/lib/query/query-options";
+import type { MessageSearchHit } from "@/lib/api/domains/session-api";
 
 type SessionSearchState = {
   isOpen: boolean;
@@ -24,6 +26,7 @@ export type SessionSearchHook = SessionSearchState & {
 /** Debounced fetch + request-ID cancellation. */
 function useDebouncedSearch(
   sessionId: string | null | undefined,
+  queryClient: QueryClient,
   setHits: (hits: MessageSearchHit[]) => void,
   setIsSearching: (v: boolean) => void,
 ) {
@@ -40,7 +43,10 @@ function useDebouncedSearch(
       const myId = ++requestIdRef.current;
       setIsSearching(true);
       try {
-        const resp = await searchSessionMessages(sessionId, trimmed, 50);
+        const resp = await queryClient.fetchQuery({
+          ...sessionSearchQueryOptions(sessionId, trimmed, 50),
+          staleTime: 0,
+        });
         if (requestIdRef.current !== myId) return;
         setHits(resp.hits ?? []);
       } catch (err) {
@@ -51,7 +57,7 @@ function useDebouncedSearch(
         if (requestIdRef.current === myId) setIsSearching(false);
       }
     },
-    [sessionId, setHits, setIsSearching],
+    [sessionId, queryClient, setHits, setIsSearching],
   );
 }
 
@@ -97,6 +103,7 @@ export function useSessionSearch(
   sessionId: string | null | undefined,
   loadOlder?: () => Promise<number>,
 ): SessionSearchHook {
+  const queryClient = useQueryClient();
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQueryState] = useState("");
   const [hits, setHits] = useState<MessageSearchHit[]>([]);
@@ -107,7 +114,7 @@ export function useSessionSearch(
   // backfill loop (new click, search bar close, or component unmount).
   const activeHitGenRef = useRef(0);
 
-  const runSearch = useDebouncedSearch(sessionId, setHits, setIsSearching);
+  const runSearch = useDebouncedSearch(sessionId, queryClient, setHits, setIsSearching);
 
   const setQuery = useCallback(
     (q: string) => {

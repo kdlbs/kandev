@@ -20,12 +20,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { TaskCreateDialog } from "../task-create-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { performLayoutSwitch } from "@/lib/state/dockview-store";
 import type { TaskSession, TaskSessionState } from "@/lib/types/http";
 import { getSessionStateIcon } from "@/lib/ui/state-icons";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { buildAgentLabelsById, resolveAgentLabelFor, sortSessions } from "./session-sort";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 
 type SessionStatus = "running" | "waiting_input" | "complete" | "failed" | "cancelled";
 
@@ -170,7 +172,7 @@ function useSessionLifecycleActions(
 }
 
 function useSessionsDropdownState(taskId: string | null) {
-  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
+  const { agentProfiles } = useSettingsData(Boolean(taskId));
   const { sessions, loadSessions } = useTaskSessions(taskId);
   const currentTime = useRunningSessionsClock(sessions);
 
@@ -192,13 +194,8 @@ export const SessionsDropdown = memo(function SessionsDropdown({
 }: SessionsDropdownProps) {
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
   const [open, setOpen] = useState(false);
-  const storePrimarySessionId = useAppStore((state) => {
-    const activeTaskId = state.tasks.activeTaskId;
-    if (!activeTaskId) return null;
-    const task = state.kanban.tasks.find((t: { id: string }) => t.id === activeTaskId);
-    return task?.primarySessionId ?? null;
-  });
-  const primarySessionId = primarySessionIdProp ?? storePrimarySessionId;
+  const task = useTaskById(taskId);
+  const primarySessionId = primarySessionIdProp ?? task?.primarySessionId ?? null;
   const { sortedSessions, currentTime, loadSessions, resolveAgentLabel } =
     useSessionsDropdownState(taskId);
   const { handleSelectSession } = useSessionSelectionHandlers(taskId);

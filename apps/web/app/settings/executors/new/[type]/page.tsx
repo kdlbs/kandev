@@ -7,8 +7,8 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useAppStore } from "@/components/state-provider";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
+import { useExecutorsQuerySync } from "@/hooks/domains/settings/use-executors-query-sync";
 import {
   createExecutorProfile,
   fetchLocalGitIdentity,
@@ -40,7 +40,7 @@ import {
   type GitIdentityState,
 } from "@/components/settings/profile-edit/remote-credentials-card";
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
-import type { Executor, ExecutorType, ProfileEnvVar } from "@/lib/types/http";
+import type { ExecutorType, ProfileEnvVar } from "@/lib/types/http";
 
 import { EXECUTOR_TYPE_MAP } from "./executor-types";
 import { SSHCreatePage } from "./ssh-create-page";
@@ -418,8 +418,7 @@ function useCreateProfileSave(
   executorId: string,
 ) {
   const router = useRouter();
-  const executors = useAppStore((state) => state.executors.items);
-  const setExecutors = useAppStore((state) => state.setExecutors);
+  const { upsertExecutorProfile } = useExecutorsQuerySync();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -457,17 +456,13 @@ function useCreateProfileSave(
         cleanup_script: form.cleanupScript,
         env_vars: form.buildEnvVars(),
       });
-      setExecutors(
-        executors.map((e: Executor) =>
-          e.id === executorId ? { ...e, profiles: [...(e.profiles ?? []), profile] } : e,
-        ),
-      );
+      upsertExecutorProfile(executorId, profile);
       router.push(`/settings/executors/${profile.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create profile");
       setSaving(false);
     }
-  }, [form, executorId, executors, setExecutors, router]);
+  }, [form, executorId, router, upsertExecutorProfile]);
 
   return { saving, error, handleSave };
 }

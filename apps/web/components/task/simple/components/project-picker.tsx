@@ -2,10 +2,10 @@
 
 import { useMemo } from "react";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
-import { useAppStore } from "@/components/state-provider";
 import { updateTask } from "@/lib/api/domains/office-extended-api";
 import { useOptimisticTaskMutation } from "@/hooks/use-optimistic-task-mutation";
 import type { Task } from "@/app/office/tasks/[id]/types";
+import { useActiveOfficeProjects } from "../use-office-reference-data";
 
 type ProjectPickerProps = {
   task: Task;
@@ -14,7 +14,7 @@ type ProjectPickerProps = {
 const NO_PROJECT = "__none__";
 
 export function ProjectPicker({ task }: ProjectPickerProps) {
-  const projects = useAppStore((s) => s.office.projects);
+  const projects = useActiveOfficeProjects();
   const mutate = useOptimisticTaskMutation();
 
   const options = useMemo<ComboboxOption[]>(() => {

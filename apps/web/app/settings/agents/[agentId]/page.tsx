@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import Link from "@/components/routing/app-link";
 import { useParams, useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { Button } from "@kandev/ui/button";
@@ -18,8 +19,10 @@ import { buildDefaultPermissions } from "@/lib/agent-permissions";
 import { seedDefaultCLIFlags } from "@/lib/cli-flags";
 import { generateUUID } from "@/lib/utils";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
-import { useAppStore } from "@/components/state-provider";
+import { useAgentDiscovery } from "@/hooks/domains/settings/use-agent-discovery";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { qk } from "@/lib/query/keys";
 import { deleteAgentAction } from "@/app/actions/agents";
 import { saveNewAgent, saveExistingAgent, isProfileDirty } from "./agent-save-helpers";
 import type { DraftProfile, DraftAgent } from "./agent-save-helpers";
@@ -145,36 +148,34 @@ function useAgentFormState(
   };
 }
 
-function useAgentStoreSync() {
-  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
-  const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
-  const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
+type AgentsQueryData = { agents: Agent[]; total?: number };
 
-  const syncAgentsToStore = (nextAgents: Agent[]) => {
-    setSettingsAgents(nextAgents);
-    setAgentProfiles(
-      nextAgents.flatMap((agent) =>
-        agent.profiles.map((profile) => ({
-          id: profile.id,
-          label: `${profile.agentDisplayName ?? ""} • ${profile.name}`,
-          agent_id: agent.id,
-          agent_name: agent.name,
-          cli_passthrough: profile.cliPassthrough ?? false,
-        })),
-      ),
-    );
+function useAgentQuerySync() {
+  const queryClient = useQueryClient();
+  const { settingsAgents } = useSettingsData(true);
+
+  const syncAgentsToQuery = (nextAgents: Agent[]) => {
+    queryClient.setQueryData<AgentsQueryData>(qk.settings.agents(), (previous) => ({
+      ...(previous ?? {}),
+      agents: nextAgents,
+      total: nextAgents.length,
+    }));
   };
 
   const upsertAgent = (agent: Agent) => {
     const exists = settingsAgents.some((item: Agent) => item.id === agent.id);
-    syncAgentsToStore(
+    syncAgentsToQuery(
       exists
         ? settingsAgents.map((item: Agent) => (item.id === agent.id ? agent : item))
         : [...settingsAgents, agent],
     );
   };
 
-  return { upsertAgent };
+  const removeAgent = (agentId: string) => {
+    syncAgentsToQuery(settingsAgents.filter((item: Agent) => item.id !== agentId));
+  };
+
+  return { removeAgent, upsertAgent };
 }
 
 type AgentSaveHandlersProps = {
@@ -188,6 +189,7 @@ type AgentSaveHandlersProps = {
   setDraftAgent: (agent: DraftAgent) => void;
   setSaveStatus: (status: "idle" | "loading" | "success" | "error") => void;
   upsertAgent: (agent: Agent) => void;
+  removeAgent: (agentId: string) => void;
   onToastError: (error: unknown) => void;
   replaceRoute: (path: string) => void;
 };
@@ -203,6 +205,7 @@ function useAgentSaveHandlers({
   setDraftAgent,
   setSaveStatus,
   upsertAgent,
+  removeAgent,
   onToastError,
   replaceRoute,
 }: AgentSaveHandlersProps) {
@@ -248,6 +251,7 @@ function useAgentSaveHandlers({
     if (!savedAgent) return;
     try {
       await deleteAgentAction(savedAgent.id);
+      removeAgent(savedAgent.id);
       replaceRoute("/settings/agents");
     } catch (err) {
       onToastError(err);
@@ -354,7 +358,7 @@ function AgentSetupForm({
 }: AgentSetupFormProps) {
   const router = useRouter();
   const availableAgents = useAvailableAgents().items;
-  const { upsertAgent } = useAgentStoreSync();
+  const { removeAgent, upsertAgent } = useAgentQuerySync();
 
   const {
     draftAgent,
@@ -393,6 +397,7 @@ function AgentSetupForm({
     setDraftAgent,
     setSaveStatus,
     upsertAgent,
+    removeAgent,
     onToastError,
     replaceRoute: (path: string) => router.replace(path),
   });
@@ -438,8 +443,8 @@ export default function AgentSetupPage() {
   const isCreateMode = searchParams.get("mode") === "create";
   const agentKey = Array.isArray(params.agentId) ? params.agentId[0] : params.agentId;
   const decodedKey = decodeURIComponent(agentKey ?? "");
-  const discoveryAgents = useAppStore((state) => state.agentDiscovery.items);
-  const savedAgents = useAppStore((state) => state.settingsAgents.items);
+  const { items: discoveryAgents } = useAgentDiscovery();
+  const { settingsAgents: savedAgents } = useSettingsData(true);
   const availableAgents = useAvailableAgents().items;
 
   const discoveryAgent = useMemo(

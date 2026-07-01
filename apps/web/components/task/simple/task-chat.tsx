@@ -32,6 +32,7 @@ import {
   mergeChatEntries,
   type ChatEntry,
 } from "./chat-entries";
+import { useActiveOfficeAgents } from "./use-office-reference-data";
 
 const MAX_INLINE_SESSIONS = 50;
 const AUTOSCROLL_THRESHOLD_PX = 80;
@@ -85,17 +86,7 @@ function CommentEntry({
   hasLaterAgentReply?: boolean;
 }) {
   const isAgent = comment.authorType === "agent";
-  // Resolve the agent name from the office agents store so renames
-  // flow through automatically. Backend session-bridged comments don't
-  // carry a name; the mapper leaves authorName empty for agents.
-  const resolvedAgentName = useAppStore((s) =>
-    isAgent
-      ? (s.office.agentProfiles.find((a) => a.id === comment.authorId)?.name ??
-        comment.authorName ??
-        "Agent")
-      : "",
-  );
-  const displayName = isAgent ? resolvedAgentName : "You";
+  const displayName = useCommentDisplayName(comment);
   return (
     <div
       id={`comment-${comment.id}`}
@@ -165,6 +156,14 @@ function CommentEntry({
       </div>
     </div>
   );
+}
+
+function useCommentDisplayName(comment: TaskComment): string {
+  const agents = useActiveOfficeAgents();
+  if (comment.authorType !== "agent") return "You";
+  // Backend session-bridged comments don't carry a name; the mapper leaves
+  // authorName empty for agents.
+  return agents.find((a) => a.id === comment.authorId)?.name ?? comment.authorName ?? "Agent";
 }
 
 // formatDecisionLine renders the human-readable summary for a single

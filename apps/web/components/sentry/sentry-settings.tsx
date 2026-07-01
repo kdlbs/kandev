@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { IconBrandSentry, IconInfoCircle } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
@@ -17,13 +18,13 @@ import {
   IntegrationAuthStatusBanner,
   type IntegrationAuthHealth,
 } from "@/components/integrations/auth-status-banner";
-import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import {
-  fetchSentryConfig,
   saveSentryConfig,
   deleteSentryConfig,
   testSentryConnection,
 } from "@/lib/api/domains/sentry-api";
+import { qk } from "@/lib/query/keys";
+import { sentryConfigQueryOptions } from "@/lib/query/query-options/sentry";
 import {
   SENTRY_AUTH_METHOD,
   SENTRY_DEFAULT_URL,
@@ -242,6 +243,7 @@ type SettingsActionsArgs = {
 
 function useSettingsActions({ form, setConfig, setForm, setTestResult }: SettingsActionsArgs) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
 
@@ -266,6 +268,7 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
         url: form.url,
         secret: form.secret,
       });
+      queryClient.setQueryData(qk.integrations.sentry.config(), saved);
       setConfig(saved);
       setForm(configToForm(saved));
       setTestResult(null);
@@ -275,12 +278,13 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
     } finally {
       setSaving(false);
     }
-  }, [form, toast, setConfig, setForm, setTestResult]);
+  }, [form, queryClient, toast, setConfig, setForm, setTestResult]);
 
   const handleDelete = useCallback(async () => {
     if (!confirm("Remove Sentry configuration?")) return;
     try {
       await deleteSentryConfig();
+      queryClient.setQueryData(qk.integrations.sentry.config(), null);
       setConfig(null);
       setForm(emptyForm);
       setTestResult(null);
@@ -288,46 +292,37 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
     } catch (err) {
       toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
     }
-  }, [toast, setConfig, setForm, setTestResult]);
+  }, [queryClient, toast, setConfig, setForm, setTestResult]);
 
   return { saving, testing, handleTest, handleSave, handleDelete };
 }
 
 function useSentrySettings() {
   const { toast } = useToast();
+  const configQuery = useQuery(sentryConfigQueryOptions());
   const [config, setConfig] = useState<SentryConfig | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
-  const [loading, setLoading] = useState(true);
   const [testResult, setTestResult] = useState<TestSentryConnectionResult | null>(null);
+  const formHydratedRef = useRef(false);
   const health = configToHealth(config);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const cfg = (await fetchSentryConfig()) ?? null;
-      setConfig(cfg);
+  useEffect(() => {
+    if (!configQuery.isSuccess) return;
+    const cfg = configQuery.data ?? null;
+    setConfig(cfg);
+    if (!formHydratedRef.current) {
       setForm(configToForm(cfg));
-    } catch (err) {
-      toast({ description: `Failed to load Sentry config: ${String(err)}`, variant: "error" });
-    } finally {
-      setLoading(false);
+      formHydratedRef.current = true;
     }
-  }, [toast]);
+  }, [configQuery.data, configQuery.isSuccess]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      fetchSentryConfig()
-        .then((cfg) => setConfig(cfg ?? null))
-        .catch(() => {
-          /* transient failures are fine — next tick retries */
-        });
-    }, INTEGRATION_STATUS_REFRESH_MS);
-    return () => clearInterval(id);
-  }, []);
+    if (!configQuery.isError) return;
+    toast({
+      description: `Failed to load Sentry config: ${String(configQuery.error)}`,
+      variant: "error",
+    });
+  }, [configQuery.error, configQuery.isError, toast]);
 
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -345,7 +340,7 @@ function useSentrySettings() {
   return {
     config,
     form,
-    loading,
+    loading: configQuery.isFetching && !configQuery.isSuccess,
     saving,
     testing,
     testResult,

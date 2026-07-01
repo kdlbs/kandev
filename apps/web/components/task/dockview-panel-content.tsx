@@ -1,17 +1,19 @@
 "use client";
 
-import React, { useCallback, useEffect } from "react";
+import React, { useCallback, useEffect, useMemo } from "react";
 import { PRDetailPanelComponent } from "@/components/github/pr-detail-panel";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStore } from "@/components/state-provider";
 import { useActiveTaskHasRepos } from "@/hooks/domains/kanban/use-active-task-has-repos";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 import { useSessionChangesCount } from "@/hooks/domains/session/use-session-changes-count";
 import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
+import { isPassthroughSession } from "@/lib/session/is-passthrough-session";
 import { useDockviewStore } from "@/lib/state/dockview-store";
-import type { AppState } from "@/lib/state/store";
 import { BrowserPanel } from "./browser-panel";
 import type { OpenDiffOptions } from "./changes-diff-target";
 import { ChangesPanel } from "./changes-panel";
@@ -35,17 +37,19 @@ export function resolveChatPanelTitle(agentLabel: string | null | undefined): st
 }
 
 function useChatSessionTitle(panelId: string, sessionId: string | null) {
-  const agentLabel = useAppStore((state) => {
+  const agentProfileId = useAppStore((state) => {
     if (!sessionId) return null;
     const session = state.taskSessions.items[sessionId];
-    if (!session?.agent_profile_id) return null;
-    const profile = state.agentProfiles.items.find(
-      (p: { id: string }) => p.id === session.agent_profile_id,
-    );
+    return session?.agent_profile_id ?? null;
+  });
+  const { agentProfiles } = useSettingsData(Boolean(agentProfileId));
+  const agentLabel = useMemo(() => {
+    if (!agentProfileId) return null;
+    const profile = agentProfiles.find((p) => p.id === agentProfileId);
     if (!profile) return null;
     const parts = profile.label.split(" \u2022 ");
     return parts[1] || parts[0] || profile.label;
-  });
+  }, [agentProfileId, agentProfiles]);
   useEffect(() => {
     setPanelTitle(panelId, resolveChatPanelTitle(agentLabel));
   }, [panelId, agentLabel]);
@@ -58,7 +62,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
   const { openFile } = useFileEditors();
   const isPassthrough = useAppStore((state) =>
-    sessionId ? state.taskSessions.items[sessionId]?.is_passthrough === true : false,
+    sessionId ? isPassthroughSession(state.taskSessions.items[sessionId]) : false,
   );
   useChatSessionTitle(panelId, sessionId);
 
@@ -115,25 +119,17 @@ function DiffViewerContent({
   );
 }
 
-function describeTaskRepositoriesForDebug(state: AppState, taskId: string | null) {
+function describeTaskRepositoriesForDebug(
+  task: { repositoryId?: string; repositories?: Array<{ repository_id: string }> } | null,
+  taskId: string | null,
+) {
   if (!taskId) return { source: "none", repositoryId: "-", repoCount: -1, repoIds: "-" };
-  const task = state.kanban.tasks.find((item) => item.id === taskId);
   if (task) {
     return {
-      source: "kanban",
+      source: "taskQuery",
       repositoryId: task.repositoryId ?? "-",
       repoCount: task.repositories?.length ?? -1,
       repoIds: task.repositories?.map((repo) => repo.repository_id).join(",") || "-",
-    };
-  }
-  for (const [workflowId, snapshot] of Object.entries(state.kanbanMulti.snapshots)) {
-    const snapshotTask = snapshot.tasks.find((item) => item.id === taskId);
-    if (!snapshotTask) continue;
-    return {
-      source: `kanbanMulti:${workflowId}`,
-      repositoryId: snapshotTask.repositoryId ?? "-",
-      repoCount: snapshotTask.repositories?.length ?? -1,
-      repoIds: snapshotTask.repositories?.map((repo) => repo.repository_id).join(",") || "-",
     };
   }
   return { source: "missing", repositoryId: "-", repoCount: -1, repoIds: "-" };
@@ -144,12 +140,14 @@ function ChangesContent({ panelId }: { panelId: string }) {
   const addFileDiffPanel = useDockviewStore((s) => s.addFileDiffPanel);
   const addCommitDetailPanel = useDockviewStore((s) => s.addCommitDetailPanel);
   const { openFile } = useFileEditors();
-  const appStore = useAppStoreApi();
 
   // Dynamic title with file count - use environment-stable sessionId so the
   // tab title doesn't re-fetch on same-environment session tab switches.
   const activeSessionId = useEnvironmentSessionId();
   const totalCount = useSessionChangesCount(activeSessionId);
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const activeUiSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const activeTask = useTaskById(activeTaskId);
 
   // Repo-less tasks have no git changes ever - auto-close the panel so users
   // don't see a permanently empty Changes tab. Gate on a confirmed `false`:
@@ -160,9 +158,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
     const dockApi = useDockviewStore.getState().api;
     const panel = dockApi?.getPanel(panelId);
     if (isDebug()) {
-      const state = appStore.getState();
-      const activeTaskId = state.tasks.activeTaskId;
-      const repoDebug = describeTaskRepositoriesForDebug(state, activeTaskId);
+      const repoDebug = describeTaskRepositoriesForDebug(activeTask, activeTaskId);
       let action = "keep";
       if (taskHasRepos === false) {
         action = panel ? "remove" : "remove-missing-panel";
@@ -172,7 +168,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
         taskHasRepos: taskHasRepos === null ? "unknown" : String(taskHasRepos),
         action,
         activeTaskId: activeTaskId ?? "-",
-        sessionId: state.tasks.activeSessionId ?? "-",
+        sessionId: activeUiSessionId ?? "-",
         taskSource: repoDebug.source,
         repositoryId: repoDebug.repositoryId,
         repoCount: repoDebug.repoCount,
@@ -182,7 +178,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
     }
     if (taskHasRepos !== false) return;
     if (dockApi && panel) dockApi.removePanel(panel);
-  }, [taskHasRepos, panelId, appStore]);
+  }, [activeTask, activeTaskId, activeUiSessionId, taskHasRepos, panelId]);
 
   useEffect(() => {
     const title = totalCount > 0 ? `Changes (${totalCount})` : "Changes";

@@ -2,14 +2,20 @@ import { expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
+import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import type { Page } from "@playwright/test";
 
 const DIFFS_CONTAINER = "diffs-container";
 
 type SeedTaskOptions = {
   title: string;
-  scenarioCommand: string;
-  completionText: string;
+  seedWorkspace: (workspacePath: string) => void;
+};
+
+type SeededDiffTask = {
+  session: SessionPage;
+  sessionId: string;
+  workspacePath: string;
 };
 
 async function seedTaskWithScenario(
@@ -17,13 +23,13 @@ async function seedTaskWithScenario(
   apiClient: ApiClient,
   seedData: SeedData,
   options: SeedTaskOptions,
-): Promise<{ session: SessionPage; sessionId: string }> {
+): Promise<SeededDiffTask> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     options.title,
     seedData.agentProfileId,
     {
-      description: options.scenarioCommand,
+      description: "Prepare git diff fixture",
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
@@ -32,17 +38,114 @@ async function seedTaskWithScenario(
 
   if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
+  const workspacePath = await waitForWorkspacePath(apiClient, task.id);
+  options.seedWorkspace(workspacePath);
+
   await testPage.goto(`/t/${task.id}`);
 
   const session = new SessionPage(testPage);
-  await session.waitForLoad();
   await closePreviewPanels(testPage);
 
-  await expect(session.chat.getByText(options.completionText, { exact: false })).toBeVisible({
-    timeout: 45_000,
-  });
+  return { session, sessionId: task.session_id, workspacePath };
+}
 
-  return { session, sessionId: task.session_id };
+async function waitForWorkspacePath(apiClient: ApiClient, taskId: string) {
+  let workspacePath: string | null = null;
+  await expect
+    .poll(
+      async () => {
+        const env = await apiClient.getTaskEnvironment(taskId);
+        if (env?.status !== "ready") return null;
+        workspacePath = env.worktree_path ?? env.workspace_path ?? null;
+        return workspacePath;
+      },
+      { timeout: 45_000, message: "task workspace path should be available" },
+    )
+    .not.toBeNull();
+  if (!workspacePath) throw new Error("task environment did not expose a workspace path");
+  return workspacePath;
+}
+
+function gitForWorkspace(workspacePath: string) {
+  return new GitHelper(workspacePath, makeGitEnv(workspacePath));
+}
+
+function commitPathsIfChanged(git: GitHelper, paths: string[], message: string) {
+  const quotedPaths = paths.map((filePath) => `"${filePath}"`).join(" ");
+  if (git.exec(`git status --porcelain -- ${quotedPaths}`).trim() === "") return;
+  git.commit(message);
+}
+
+function seedDiffUpdateWorkspace(workspacePath: string) {
+  const git = gitForWorkspace(workspacePath);
+  const filePath = "diff_update_test.txt";
+  const originalContent = "line 1: original\nline 2: unchanged\nline 3: original\n";
+  const modifiedContent = "line 1: FIRST_MODIFICATION\nline 2: unchanged\nline 3: original\n";
+
+  git.exec(`git rm --force --ignore-unmatch "${filePath}"`);
+  commitPathsIfChanged(git, [filePath], "cleanup diff_update_test.txt");
+
+  git.createFile(filePath, originalContent);
+  git.stageFile(filePath);
+  commitPathsIfChanged(git, [filePath], "add diff_update_test.txt");
+
+  git.modifyFile(filePath, modifiedContent);
+}
+
+function seedMultiFileWorkspace(workspacePath: string) {
+  const git = gitForWorkspace(workspacePath);
+  const files = ["multi_a.txt", "multi_b.txt", "multi_c.txt"];
+
+  for (const filePath of files) {
+    git.exec(`git rm --force --ignore-unmatch "${filePath}"`);
+  }
+  commitPathsIfChanged(git, files, "cleanup multi-file fixtures");
+
+  for (const filePath of files) {
+    const original = `${filePath} line 1: original\n${filePath} line 2: unchanged\n${filePath} line 3: original\n`;
+    git.createFile(filePath, original);
+    git.stageFile(filePath);
+  }
+  commitPathsIfChanged(git, files, "add multi-file fixtures");
+
+  for (const filePath of files) {
+    const modified = `${filePath} line 1: FIRST_MODIFICATION\n${filePath} line 2: unchanged\n${filePath} line 3: original\n`;
+    git.modifyFile(filePath, modified);
+  }
+}
+
+function seedUntrackedWorkspace(workspacePath: string) {
+  const git = gitForWorkspace(workspacePath);
+  const filePath = "untracked_test.txt";
+
+  git.exec(`git rm --force --ignore-unmatch "${filePath}"`);
+  commitPathsIfChanged(git, [filePath], "cleanup untracked fixture");
+  git.deleteFile(filePath);
+  git.createFile(filePath, "line 1: INITIAL_CONTENT\nline 2: some text\n");
+}
+
+export function writeDiffUpdateSecondModification(workspacePath: string) {
+  gitForWorkspace(workspacePath).modifyFile(
+    "diff_update_test.txt",
+    "line 1: SECOND_MODIFICATION\nline 2: unchanged\nline 3: ALSO_CHANGED\n",
+  );
+}
+
+export function writeMultiFileSecondModification(workspacePath: string) {
+  const git = gitForWorkspace(workspacePath);
+  for (const [index, filePath] of ["multi_a.txt", "multi_b.txt", "multi_c.txt"].entries()) {
+    git.modifyFile(
+      filePath,
+      `${filePath} line 1: SECOND_MODIFICATION\n${filePath} line 2: unchanged\n${filePath} line 3: ALSO_CHANGED_${index}\n`,
+    );
+  }
+}
+
+export function writeUntrackedModification(workspacePath: string) {
+  gitForWorkspace(workspacePath).modifyFile(
+    "untracked_test.txt",
+    "line 1: MODIFIED_CONTENT\nline 2: some text\nline 3: NEW_LINE\n",
+  );
 }
 
 export async function closePreviewPanels(testPage: Page) {
@@ -72,24 +175,21 @@ export async function closePreviewPanels(testPage: Page) {
 export function seedUntrackedFileTask(testPage: Page, apiClient: ApiClient, seedData: SeedData) {
   return seedTaskWithScenario(testPage, apiClient, seedData, {
     title: "Untracked File E2E",
-    scenarioCommand: "/e2e:untracked-file-setup",
-    completionText: "untracked-file-setup complete",
+    seedWorkspace: seedUntrackedWorkspace,
   });
 }
 
 export function seedDiffUpdateTask(testPage: Page, apiClient: ApiClient, seedData: SeedData) {
   return seedTaskWithScenario(testPage, apiClient, seedData, {
     title: "Diff Update E2E",
-    scenarioCommand: "/e2e:diff-update-setup",
-    completionText: "diff-update-setup complete",
+    seedWorkspace: seedDiffUpdateWorkspace,
   });
 }
 
 export function seedMultiFileTask(testPage: Page, apiClient: ApiClient, seedData: SeedData) {
   return seedTaskWithScenario(testPage, apiClient, seedData, {
     title: "Multi-file Diff Update E2E",
-    scenarioCommand: "/e2e:multi-file-setup",
-    completionText: "multi-file-setup complete",
+    seedWorkspace: seedMultiFileWorkspace,
   });
 }
 

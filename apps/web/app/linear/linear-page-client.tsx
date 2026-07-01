@@ -2,6 +2,7 @@
 
 import Link from "@/components/routing/app-link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { IconExternalLink, IconHexagon, IconPlus, IconSearch } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@kandev/ui/avatar";
@@ -25,9 +26,10 @@ import {
 } from "@/components/linear/linear-issue-common";
 import { LinearIssueDialog } from "@/components/linear/linear-issue-dialog";
 import { LinearQuickTaskLauncher } from "@/components/linear/linear-quick-task-launcher";
-import { getLinearConfig, listLinearTeams, searchLinearIssues } from "@/lib/api/domains/linear-api";
+import { listLinearTeams, searchLinearIssues } from "@/lib/api/domains/linear-api";
 import type { LinearIssue, LinearTeam } from "@/lib/types/linear";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
+import { linearConfigQueryOptions } from "@/lib/query/query-options";
 
 const PAGE_SIZE = 25;
 
@@ -57,40 +59,39 @@ function NotConfiguredNotice() {
 }
 
 function useLinearPageData(workspaceId?: string) {
-  const [loaded, setLoaded] = useState(false);
-  const [configured, setConfigured] = useState(false);
   const [teams, setTeams] = useState<LinearTeam[]>([]);
+  const [teamsLoaded, setTeamsLoaded] = useState(false);
+  const configQuery = useQuery({
+    ...linearConfigQueryOptions(),
+    enabled: Boolean(workspaceId),
+  });
+  const configured = Boolean(configQuery.data?.hasSecret);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      if (!workspaceId) {
-        setLoaded(true);
+      if (!workspaceId || !configured) {
+        setTeams([]);
+        setTeamsLoaded(true);
         return;
       }
       try {
-        const cfg = await getLinearConfig();
-        if (cancelled) return;
-        const ok = !!cfg && cfg.hasSecret;
-        setConfigured(ok);
-        if (ok) {
-          try {
-            const list = await listLinearTeams();
-            if (!cancelled) setTeams(list.teams ?? []);
-          } catch {
-            // Non-fatal: team filter just stays empty.
-          }
-        }
+        setTeamsLoaded(false);
+        const list = await listLinearTeams();
+        if (!cancelled) setTeams(list.teams ?? []);
+      } catch {
+        // Non-fatal: team filter just stays empty.
       } finally {
-        if (!cancelled) setLoaded(true);
+        if (!cancelled) setTeamsLoaded(true);
       }
     }
     void load();
     return () => {
       cancelled = true;
     };
-  }, [workspaceId]);
+  }, [workspaceId, configured]);
 
+  const loaded = !workspaceId || (configQuery.isFetched && (!configured || teamsLoaded));
   return { loaded, configured, teams };
 }
 

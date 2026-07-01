@@ -18,8 +18,6 @@ export type {
 
 export type { OfficeAgentProfile as AgentProfile } from "@/lib/types/agent-profile";
 
-import type { OfficeAgentProfile as AgentProfile } from "@/lib/types/agent-profile";
-
 export type SkillSourceType =
   | "inline"
   | "local_path"
@@ -293,14 +291,12 @@ export type TaskGroupBy = "status" | "priority" | "assignee" | "project" | "pare
 export type TaskViewMode = "list" | "board";
 
 export type TasksState = {
-  items: OfficeTask[];
   filters: TaskFilterState;
   viewMode: TaskViewMode;
   sortField: TaskSortField;
   sortDir: TaskSortDir;
   groupBy: TaskGroupBy;
   nestingEnabled: boolean;
-  isLoading: boolean;
 };
 
 export type RunActivityDay = {
@@ -636,79 +632,19 @@ export type AgentRoutingSliceState = {
 
 // --- Slice state & actions ---
 
-export type OfficeRefetchTrigger = {
-  type: string;
-  timestamp: number;
-};
-
 export type OfficeSliceState = {
   office: {
-    agentProfiles: AgentProfile[];
-    skills: Skill[];
-    projects: Project[];
-    approvals: Approval[];
-    activity: ActivityEntry[];
-    costSummary: CostSummary | null;
-    budgetPolicies: BudgetPolicy[];
-    routines: Routine[];
-    inboxItems: InboxItem[];
-    inboxCount: number;
-    runs: Run[];
-    dashboard: DashboardData | null;
     tasks: TasksState;
-    meta: OfficeMeta | null;
-    isLoading: boolean;
-    refetchTrigger: OfficeRefetchTrigger | null;
-    routing: RoutingState;
-    providerHealth: ProviderHealthSliceState;
-    runAttempts: RunAttemptsState;
-    agentRouting: AgentRoutingSliceState;
   };
 };
 
 export type OfficeSliceActions = {
-  setOfficeAgentProfiles: (agents: AgentProfile[]) => void;
-  addOfficeAgentProfile: (agent: AgentProfile) => void;
-  updateOfficeAgentProfile: (id: string, patch: Partial<AgentProfile>) => void;
-  removeOfficeAgentProfile: (id: string) => void;
-  setSkills: (skills: Skill[]) => void;
-  addSkill: (skill: Skill) => void;
-  updateSkill: (id: string, patch: Partial<Skill>) => void;
-  removeSkill: (id: string) => void;
-  setProjects: (projects: Project[]) => void;
-  addProject: (project: Project) => void;
-  updateProject: (id: string, patch: Partial<Project>) => void;
-  removeProject: (id: string) => void;
-  setApprovals: (approvals: Approval[]) => void;
-  setActivity: (entries: ActivityEntry[]) => void;
-  setCostSummary: (summary: CostSummary | null) => void;
-  setBudgetPolicies: (policies: BudgetPolicy[]) => void;
-  setRoutines: (routines: Routine[]) => void;
-  setInboxItems: (items: InboxItem[]) => void;
-  setInboxCount: (count: number) => void;
-  setRuns: (runs: Run[]) => void;
-  setDashboard: (data: DashboardData | null) => void;
-  setTasks: (tasks: OfficeTask[]) => void;
-  appendTasks: (tasks: OfficeTask[]) => void;
-  patchTaskInStore: (taskId: string, patch: Partial<OfficeTask>) => void;
   setTaskFilters: (filters: Partial<TaskFilterState>) => void;
   setTaskViewMode: (mode: TaskViewMode) => void;
   setTaskSortField: (field: TaskSortField) => void;
   setTaskSortDir: (dir: TaskSortDir) => void;
   setTaskGroupBy: (groupBy: TaskGroupBy) => void;
   toggleNesting: () => void;
-  setTasksLoading: (loading: boolean) => void;
-  setMeta: (meta: OfficeMeta | null) => void;
-  setOfficeLoading: (loading: boolean) => void;
-  setOfficeRefetchTrigger: (type: string) => void;
-  setWorkspaceRouting: (workspaceId: string, cfg: WorkspaceRouting | undefined) => void;
-  setKnownProviders: (providers: string[]) => void;
-  setRoutingPreview: (workspaceId: string, agents: AgentRoutePreview[]) => void;
-  setProviderHealth: (workspaceId: string, health: ProviderHealth[]) => void;
-  upsertProviderHealth: (workspaceId: string, row: ProviderHealth) => void;
-  setRunAttempts: (runId: string, attempts: RouteAttempt[]) => void;
-  appendRunAttempt: (runId: string, attempt: RouteAttempt) => void;
-  setAgentRouting: (agentId: string, data: AgentRouteData | undefined) => void;
 };
 
 export type OfficeSlice = OfficeSliceState & OfficeSliceActions;

@@ -6,6 +6,13 @@ import { backendFixture, type BackendContext } from "./backend";
 import { ApiClient } from "../helpers/api-client";
 import { PrAssetCapture } from "../helpers/pr-asset-capture";
 import { makeGitEnv } from "../helpers/git-helper";
+import {
+  clearWsAccount,
+  computeWsDrops,
+  formatDroppedEvents,
+  formatMissingExpectedDrops,
+  reconcileExpectedWsDrops,
+} from "../helpers/ws-account";
 import type { WorkflowStep } from "../../lib/types/http";
 
 export type SeedData = {
@@ -150,7 +157,7 @@ export const test = backendFixture.extend<
   // Resets user settings to the E2E workspace/workflow before each test so that
   // SSR always resolves to the correct workspace regardless of what commitSettings
   // may have written during previous tests.
-  testPage: async ({ browser, backend, apiClient, seedData }, use) => {
+  testPage: async ({ browser, backend, apiClient, seedData }, use, testInfo) => {
     // Clean up tasks, test-created workflows, and extra agent profiles from
     // previous tests in this worker. Keep the seeded workflow and the seed
     // agent profile so the worker-scoped seedData fixture remains valid.
@@ -168,6 +175,7 @@ export const test = backendFixture.extend<
       // test renders cards with data-testid="pipeline-task-<id>" instead of
       // "task-card-<id>", breaking taskCardByTitle locators.
       kanban_view_mode: "",
+      task_create_last_used: defaultTaskCreateLastUsed(seedData),
     });
     const context = await browser.newContext({
       baseURL: backend.frontendUrl,
@@ -179,8 +187,23 @@ export const test = backendFixture.extend<
       });
     }
     await setupPage(page, backend, seedData);
-    await use(page);
-    await context.close();
+    await clearWsAccount(page);
+    try {
+      await use(page);
+      if (process.env.KANDEV_E2E_WS_ASSERT === "1" && testInfo.status === "passed") {
+        const drops = await computeSettledWsDrops(page, apiClient);
+        const { unexpected, missing } = reconcileExpectedWsDrops(page, drops);
+        if (unexpected.length > 0 || missing.length > 0) {
+          throw new Error(
+            [formatDroppedEvents(unexpected), formatMissingExpectedDrops(missing)]
+              .filter(Boolean)
+              .join("\n\n"),
+          );
+        }
+      }
+    } finally {
+      await context.close();
+    }
   },
 
   // PR asset capture — gated behind CAPTURE_PR_ASSETS env var.
@@ -206,6 +229,18 @@ export const test = backendFixture.extend<
   ],
 });
 
+async function computeSettledWsDrops(
+  page: Page,
+  apiClient: ApiClient,
+): ReturnType<typeof computeWsDrops> {
+  let drops = await computeWsDrops(page, apiClient, { strict: true });
+  for (let attempt = 0; attempt < 6 && drops.length > 0; attempt++) {
+    await page.waitForTimeout(50);
+    drops = await computeWsDrops(page, apiClient, { strict: true });
+  }
+  return drops;
+}
+
 // Reset the active workspace pointer before every test so that specs which
 // do not use the testPage fixture (e.g. API-only routing tests) start from
 // a known workspace_id instead of whatever a previous test's completeOnboarding
@@ -219,10 +254,20 @@ test.beforeEach(async ({ apiClient, seedData }) => {
     enable_preview_on_click: false,
     sidebar_views: [],
     kanban_view_mode: "",
+    task_create_last_used: defaultTaskCreateLastUsed(seedData),
   });
 });
 
 export { expect } from "@playwright/test";
+
+function defaultTaskCreateLastUsed(seedData: SeedData) {
+  return {
+    repository_id: seedData.repositoryId,
+    branch: "main",
+    agent_profile_id: seedData.agentProfileId,
+    executor_profile_id: seedData.worktreeExecutorProfileId,
+  };
+}
 
 async function setupPage(page: Page, backend: BackendContext, seedData: SeedData): Promise<void> {
   await page.addInitScript(

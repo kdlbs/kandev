@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useState, useCallback, type ReactElement } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { IconPlayerPlay } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import type { Message, TaskSessionState } from "@/lib/types/http";
@@ -8,6 +9,7 @@ import type { ToolCallMetadata } from "@/components/task/chat/types";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildStartCreatedRequest } from "@/lib/services/session-launch-helpers";
 import { useAppStore } from "@/components/state-provider";
+import { prepareProgressQueryOptions } from "@/lib/query/query-options";
 import { useTask } from "@/hooks/use-task";
 import { ChatMessage } from "@/components/task/chat/messages/chat-message";
 import { PermissionRequestMessage } from "@/components/task/chat/messages/permission-request-message";
@@ -43,9 +45,11 @@ type AdapterContext = {
 
 function TaskDescriptionStartButton({ taskId, sessionId }: { taskId: string; sessionId: string }) {
   const [isStarting, setIsStarting] = useState(false);
-  const prepareStatus = useAppStore(
+  const prepareQuery = useQuery(prepareProgressQueryOptions(sessionId));
+  const storePrepareStatus = useAppStore(
     (state) => state.prepareProgress.bySessionId[sessionId]?.status ?? null,
   );
+  const prepareStatus = prepareQuery.data?.status ?? storePrepareStatus;
 
   const handleStart = useCallback(async () => {
     setIsStarting(true);

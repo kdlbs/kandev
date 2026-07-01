@@ -1,13 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { useAppStore } from "@/components/state-provider";
-import {
-  getWorkspaceRouting,
-  retryProvider,
-  updateWorkspaceRouting,
-} from "@/lib/api/domains/office-extended-api";
+import { useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { qk } from "@/lib/query/keys";
+import { officeRoutingQueryOptions } from "@/lib/query/query-options/office";
+import { retryProvider, updateWorkspaceRouting } from "@/lib/api/domains/office-extended-api";
 import type { WorkspaceRouting } from "@/lib/state/slices/office/types";
+import { queryErrorMessage } from "./query-error";
 
 export type UseWorkspaceRoutingResult = {
   config: WorkspaceRouting | undefined;
@@ -20,43 +19,24 @@ export type UseWorkspaceRoutingResult = {
 };
 
 export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceRoutingResult {
-  const config = useAppStore((s) =>
-    workspaceName ? s.office.routing.byWorkspace[workspaceName] : undefined,
-  );
-  const knownProviders = useAppStore((s) => s.office.routing.knownProviders);
-  const setWorkspaceRouting = useAppStore((s) => s.setWorkspaceRouting);
-  const setKnownProviders = useAppStore((s) => s.setKnownProviders);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const query = useQuery(officeRoutingQueryOptions(workspaceName ?? ""));
 
   const refresh = useCallback(async () => {
     if (!workspaceName) return;
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await getWorkspaceRouting(workspaceName);
-      if (res.config) setWorkspaceRouting(workspaceName, res.config);
-      if (Array.isArray(res.known_providers)) setKnownProviders(res.known_providers);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load routing config");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [workspaceName, setWorkspaceRouting, setKnownProviders]);
-
-  useEffect(() => {
-    if (!workspaceName) return;
-    if (config !== undefined) return;
-    void refresh();
-  }, [workspaceName, config, refresh]);
+    await query.refetch();
+  }, [query, workspaceName]);
 
   const update = useCallback(
     async (cfg: WorkspaceRouting) => {
       if (!workspaceName) return;
       await updateWorkspaceRouting(workspaceName, cfg);
-      setWorkspaceRouting(workspaceName, cfg);
+      queryClient.setQueryData(qk.office.routing(workspaceName), {
+        config: cfg,
+        known_providers: query.data?.known_providers ?? [],
+      });
     },
-    [workspaceName, setWorkspaceRouting],
+    [query.data?.known_providers, queryClient, workspaceName],
   );
 
   const retry = useCallback(
@@ -67,5 +47,9 @@ export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceR
     [workspaceName],
   );
 
-  return { config, knownProviders, isLoading, error, refresh, update, retry };
+  const config = query.data?.config ?? undefined;
+  const knownProviders = query.data?.known_providers ?? [];
+  const error = queryErrorMessage(query.error);
+
+  return { config, knownProviders, isLoading: query.isPending, error, refresh, update, retry };
 }

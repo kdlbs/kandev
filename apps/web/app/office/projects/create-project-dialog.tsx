@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { IconPlus, IconX } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
@@ -10,9 +11,10 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Textarea } from "@kandev/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { useAppStore } from "@/components/state-provider";
+import { useOfficeAgentsData, useOfficeMetaData } from "@/hooks/domains/office/use-office-data";
 import { createProject } from "@/lib/api/domains/office-api";
-import type { AgentProfile } from "@/lib/state/slices/office/types";
+import { qk } from "@/lib/query/keys";
+import type { AgentProfile, Project } from "@/lib/state/slices/office/types";
 
 const COLOR_OPTIONS = [
   "#ef4444",
@@ -193,7 +195,7 @@ const INITIAL_PROJECT_STATE: ProjectFormState = {
 };
 
 function useProjectForm(workspaceId: string, onClose: () => void) {
-  const addProject = useAppStore((s) => s.addProject);
+  const queryClient = useQueryClient();
   const [form, setForm] = useState<ProjectFormState>(INITIAL_PROJECT_STATE);
   const [submitting, setSubmitting] = useState(false);
 
@@ -228,7 +230,7 @@ function useProjectForm(workspaceId: string, onClose: () => void) {
           ? { type: form.executorType, image: form.dockerImage || undefined }
           : undefined,
       });
-      if (result) addProject(result);
+      if (result) appendProject(queryClient, workspaceId, result);
       onClose();
       setForm(INITIAL_PROJECT_STATE);
       toast.success("Project created");
@@ -237,9 +239,22 @@ function useProjectForm(workspaceId: string, onClose: () => void) {
     } finally {
       setSubmitting(false);
     }
-  }, [form, workspaceId, addProject, onClose]);
+  }, [form, workspaceId, queryClient, onClose]);
 
   return { form, update, submitting, handleAddRepo, handleRemoveRepo, handleCreate };
+}
+
+function appendProject(
+  queryClient: ReturnType<typeof useQueryClient>,
+  workspaceId: string,
+  project: Project,
+) {
+  queryClient.setQueryData<{ projects: Project[] }>(qk.office.projects(workspaceId), (current) => {
+    const projects = current?.projects ?? [];
+    if (projects.some((item) => item.id === project.id)) return { projects };
+    return { projects: [...projects, project] };
+  });
+  queryClient.setQueryData(qk.office.project(project.id), project);
 }
 
 function ProjectFormBody({
@@ -320,8 +335,8 @@ function ProjectFormBody({
 }
 
 export function CreateProjectDialog({ open, onOpenChange, workspaceId }: CreateProjectDialogProps) {
-  const agents = useAppStore((s) => s.office.agentProfiles);
-  const meta = useAppStore((s) => s.office.meta);
+  const agents = useOfficeAgentsData(workspaceId).data?.agents ?? [];
+  const meta = useOfficeMetaData().data;
   const executorTypes =
     meta?.executorTypes.map((e) => ({ id: e.id, label: e.label })) ?? FALLBACK_EXECUTOR_TYPES;
   const { form, update, submitting, handleAddRepo, handleRemoveRepo, handleCreate } =

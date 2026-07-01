@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { TaskSession } from "@/lib/types/http";
 
 // Mock state
@@ -36,6 +38,13 @@ vi.mock("@/hooks/use-task", () => ({
 
 import { useSessionState } from "./use-session-state";
 
+function createWrapper() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return createElement(QueryClientProvider, { client }, children);
+  };
+}
+
 const createMockSession = (
   id: string,
   taskId: string,
@@ -48,140 +57,145 @@ const createMockSession = (
     error_message: "",
   }) as TaskSession;
 
-describe("useSessionState", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockActiveTaskId = null;
+function renderSessionState(
+  sessionId: string | null,
+  options?: Parameters<typeof useSessionState>[1],
+) {
+  return renderHook(() => useSessionState(sessionId, options), { wrapper: createWrapper() });
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockActiveTaskId = null;
+  mockActiveSessionId = null;
+  mockSessionItems = {};
+  mockSession = null;
+  mockTask = null;
+  mockPrepareProgress = {};
+});
+
+describe("useSessionState resolvedSessionId", () => {
+  it("uses sessionId directly when provided", () => {
+    mockActiveTaskId = "task-1";
+    mockActiveSessionId = "session-old";
+    mockSessionItems = { "session-old": createMockSession("session-old", "task-old") };
+
+    const { result } = renderSessionState("session-explicit");
+
+    expect(result.current.resolvedSessionId).toBe("session-explicit");
+  });
+
+  it("uses activeSessionId when sessionId is null and session belongs to active task", () => {
+    mockActiveTaskId = "task-1";
+    mockActiveSessionId = "session-1";
+    mockSessionItems = { "session-1": createMockSession("session-1", "task-1") };
+
+    const { result } = renderSessionState(null);
+
+    expect(result.current.resolvedSessionId).toBe("session-1");
+  });
+
+  it("returns null when sessionId is null and activeSessionId belongs to different task", () => {
+    mockActiveTaskId = "task-2";
+    mockActiveSessionId = "session-1";
+    mockSessionItems = { "session-1": createMockSession("session-1", "task-1") };
+
+    const { result } = renderSessionState(null);
+
+    expect(result.current.resolvedSessionId).toBeNull();
+  });
+
+  it("returns null when sessionId is null and session not yet in store", () => {
+    mockActiveTaskId = "task-1";
+    mockActiveSessionId = "session-1";
+    mockSessionItems = {};
+
+    const { result } = renderSessionState(null);
+
+    expect(result.current.resolvedSessionId).toBeNull();
+  });
+
+  it("returns null when sessionId is null and activeSessionId is null", () => {
+    mockActiveTaskId = "task-1";
     mockActiveSessionId = null;
     mockSessionItems = {};
+
+    const { result } = renderSessionState(null);
+
+    expect(result.current.resolvedSessionId).toBeNull();
+  });
+
+  it("uses taskIdHint while an explicit session row is hydrating", () => {
     mockSession = null;
-    mockTask = null;
-    mockPrepareProgress = {};
+
+    const { result } = renderSessionState("session-new", { taskIdHint: "task-1" });
+
+    expect(result.current.resolvedSessionId).toBe("session-new");
+    expect(result.current.taskId).toBe("task-1");
   });
 
-  describe("resolvedSessionId", () => {
-    it("uses sessionId directly when provided", () => {
-      mockActiveTaskId = "task-1";
-      mockActiveSessionId = "session-old";
-      mockSessionItems = { "session-old": createMockSession("session-old", "task-old") };
+  it("prefers the hydrated session task over taskIdHint", () => {
+    mockSession = createMockSession("session-1", "task-2");
 
-      const { result } = renderHook(() => useSessionState("session-explicit"));
+    const { result } = renderSessionState("session-1", { taskIdHint: "task-1" });
 
-      expect(result.current.resolvedSessionId).toBe("session-explicit");
-    });
+    expect(result.current.taskId).toBe("task-2");
+  });
+});
 
-    it("uses activeSessionId when sessionId is null and session belongs to active task", () => {
-      mockActiveTaskId = "task-1";
-      mockActiveSessionId = "session-1";
-      mockSessionItems = { "session-1": createMockSession("session-1", "task-1") };
+describe("useSessionState session flags", () => {
+  it("sets isStarting when session state is STARTING", () => {
+    mockSession = createMockSession("session-1", "task-1", "STARTING");
 
-      const { result } = renderHook(() => useSessionState(null));
+    const { result } = renderSessionState("session-1");
 
-      expect(result.current.resolvedSessionId).toBe("session-1");
-    });
-
-    it("returns null when sessionId is null and activeSessionId belongs to different task", () => {
-      mockActiveTaskId = "task-2";
-      mockActiveSessionId = "session-1";
-      mockSessionItems = { "session-1": createMockSession("session-1", "task-1") };
-
-      const { result } = renderHook(() => useSessionState(null));
-
-      expect(result.current.resolvedSessionId).toBeNull();
-    });
-
-    it("returns null when sessionId is null and session not yet in store", () => {
-      mockActiveTaskId = "task-1";
-      mockActiveSessionId = "session-1";
-      mockSessionItems = {}; // Session not loaded yet
-
-      const { result } = renderHook(() => useSessionState(null));
-
-      expect(result.current.resolvedSessionId).toBeNull();
-    });
-
-    it("returns null when sessionId is null and activeSessionId is null", () => {
-      mockActiveTaskId = "task-1";
-      mockActiveSessionId = null;
-      mockSessionItems = {};
-
-      const { result } = renderHook(() => useSessionState(null));
-
-      expect(result.current.resolvedSessionId).toBeNull();
-    });
-
-    it("uses taskIdHint while an explicit session row is hydrating", () => {
-      mockSession = null;
-
-      const { result } = renderHook(() => useSessionState("session-new", { taskIdHint: "task-1" }));
-
-      expect(result.current.resolvedSessionId).toBe("session-new");
-      expect(result.current.taskId).toBe("task-1");
-    });
-
-    it("prefers the hydrated session task over taskIdHint", () => {
-      mockSession = createMockSession("session-1", "task-2");
-
-      const { result } = renderHook(() => useSessionState("session-1", { taskIdHint: "task-1" }));
-
-      expect(result.current.taskId).toBe("task-2");
-    });
+    expect(result.current.isStarting).toBe(true);
+    expect(result.current.isWorking).toBe(true);
   });
 
-  describe("session flags", () => {
-    it("sets isStarting when session state is STARTING", () => {
-      mockSession = createMockSession("session-1", "task-1", "STARTING");
+  it("does not set isStarting when session state is CREATED", () => {
+    mockSession = createMockSession("session-1", "task-1", "CREATED");
 
-      const { result } = renderHook(() => useSessionState("session-1"));
+    const { result } = renderSessionState("session-1");
 
-      expect(result.current.isStarting).toBe(true);
-      expect(result.current.isWorking).toBe(true);
-    });
+    // CREATED is not isStarting: the input should be enabled so tests that
+    // create sessions and immediately fill() the input work correctly.
+    expect(result.current.isStarting).toBe(false);
+  });
 
-    it("does not set isStarting when session state is CREATED", () => {
-      mockSession = createMockSession("session-1", "task-1", "CREATED");
+  it("does not set isStarting when WAITING_FOR_INPUT", () => {
+    mockSession = createMockSession("session-1", "task-1", "WAITING_FOR_INPUT");
 
-      const { result } = renderHook(() => useSessionState("session-1"));
+    const { result } = renderSessionState("session-1");
 
-      // CREATED is not isStarting — the input should be enabled so tests
-      // that create sessions and immediately fill() the input work correctly.
-      expect(result.current.isStarting).toBe(false);
-    });
+    expect(result.current.isStarting).toBe(false);
+    expect(result.current.isWorking).toBe(false);
+  });
 
-    it("does not set isStarting when WAITING_FOR_INPUT", () => {
-      mockSession = createMockSession("session-1", "task-1", "WAITING_FOR_INPUT");
+  it("sets isStarting while environment preparation is still live", () => {
+    mockSession = createMockSession("session-1", "task-1", "WAITING_FOR_INPUT");
+    mockPrepareProgress = { "session-1": { status: "preparing" } };
 
-      const { result } = renderHook(() => useSessionState("session-1"));
+    const { result } = renderSessionState("session-1");
 
-      expect(result.current.isStarting).toBe(false);
-      expect(result.current.isWorking).toBe(false);
-    });
+    expect(result.current.isStarting).toBe(true);
+    expect(result.current.isWorking).toBe(true);
+  });
 
-    it("sets isStarting while environment preparation is still live", () => {
-      mockSession = createMockSession("session-1", "task-1", "WAITING_FOR_INPUT");
-      mockPrepareProgress = { "session-1": { status: "preparing" } };
+  it("sets isAgentBusy when session state is RUNNING", () => {
+    mockSession = createMockSession("session-1", "task-1", "RUNNING");
 
-      const { result } = renderHook(() => useSessionState("session-1"));
+    const { result } = renderSessionState("session-1");
 
-      expect(result.current.isStarting).toBe(true);
-      expect(result.current.isWorking).toBe(true);
-    });
+    expect(result.current.isAgentBusy).toBe(true);
+    expect(result.current.isWorking).toBe(true);
+  });
 
-    it("sets isAgentBusy when session state is RUNNING", () => {
-      mockSession = createMockSession("session-1", "task-1", "RUNNING");
+  it("sets isFailed when session state is FAILED", () => {
+    mockSession = createMockSession("session-1", "task-1", "FAILED");
 
-      const { result } = renderHook(() => useSessionState("session-1"));
+    const { result } = renderSessionState("session-1");
 
-      expect(result.current.isAgentBusy).toBe(true);
-      expect(result.current.isWorking).toBe(true);
-    });
-
-    it("sets isFailed when session state is FAILED", () => {
-      mockSession = createMockSession("session-1", "task-1", "FAILED");
-
-      const { result } = renderHook(() => useSessionState("session-1"));
-
-      expect(result.current.isFailed).toBe(true);
-    });
+    expect(result.current.isFailed).toBe(true);
   });
 });

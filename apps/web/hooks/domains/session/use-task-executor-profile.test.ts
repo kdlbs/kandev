@@ -61,11 +61,8 @@ const BASE_ENV = {
   updated_at: TIMESTAMP,
 };
 
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: { executors: { items: Executor[] } }) => unknown) =>
-    selector({
-      executors: { items: mockExecutors },
-    }),
+vi.mock("@/hooks/domains/settings/use-settings-data", () => ({
+  useSettingsData: () => ({ executors: mockExecutors }),
 }));
 
 vi.mock("@/lib/api/domains/task-environment-api", () => ({

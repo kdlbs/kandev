@@ -15,7 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@kandev/ui/dialog";
-import { useAppStore } from "@/components/state-provider";
+import { useExecutorsQuerySync } from "@/hooks/domains/settings/use-executors-query-sync";
 import { deleteExecutorProfile } from "@/lib/api/domains/settings-api";
 import { EXECUTOR_ICON_MAP, getExecutorLabel } from "@/lib/executor-icons";
 import type { Executor, ExecutorProfile } from "@/lib/types/http";
@@ -27,7 +27,7 @@ type ProfileWithExecutor = ExecutorProfile & {
 };
 
 function useAllProfiles(): ProfileWithExecutor[] {
-  const executors = useAppStore((state) => state.executors.items);
+  const { executors } = useExecutorsQuerySync();
   return useMemo(
     () =>
       executors.flatMap((e: Executor) =>
@@ -177,8 +177,7 @@ function DeleteProfileDialog({
 export default function ExecutorsHubPage() {
   const router = useRouter();
   const allProfiles = useAllProfiles();
-  const executors = useAppStore((state) => state.executors.items);
-  const setExecutors = useAppStore((state) => state.setExecutors);
+  const { removeExecutorProfile } = useExecutorsQuerySync();
   const [deleteProfileId, setDeleteProfileId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -191,13 +190,7 @@ export default function ExecutorsHubPage() {
     setDeleting(true);
     try {
       await deleteExecutorProfile(profileToDelete.parent_executor_id, profileToDelete.id);
-      setExecutors(
-        executors.map((e: Executor) =>
-          e.id === profileToDelete.parent_executor_id
-            ? { ...e, profiles: (e.profiles ?? []).filter((p) => p.id !== profileToDelete.id) }
-            : e,
-        ),
-      );
+      removeExecutorProfile(profileToDelete.parent_executor_id, profileToDelete.id);
       setDeleteProfileId(null);
     } finally {
       setDeleting(false);

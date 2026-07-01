@@ -83,9 +83,10 @@ export function OfficeDockviewLayout({ taskId, sessionId }: OfficeDockviewLayout
   // before this page subscribed to the session.
   useEffect(() => {
     if (!taskId) return;
-    ensureTaskSession(taskId, { ensureExecution: true })
+    ensureTaskSession(taskId, { ensureExecution: true, timeout: 45_000 })
       .then((resp) => {
         if (resp.session_id) {
+          setActiveSession(taskId, resp.session_id);
           setAgentctlStatus(resp.session_id, {
             status: "ready",
             updatedAt: new Date().toISOString(),
@@ -103,7 +104,7 @@ export function OfficeDockviewLayout({ taskId, sessionId }: OfficeDockviewLayout
       .catch(() => {
         // Non-fatal: panels will show appropriate empty/retry states.
       });
-  }, [taskId, setAgentctlStatus, setTaskSession, appStore]);
+  }, [taskId, setActiveSession, setAgentctlStatus, setTaskSession, appStore]);
 
   // Clean up on unmount — release portals and clear active session.
   useEffect(() => {

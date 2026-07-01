@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { SessionPrepareState } from "@/lib/state/slices/session-runtime/types";
 
 // Constants declared before mocks so the mocked factories can reference them without
@@ -27,7 +28,12 @@ let mockSessionState: string | null = null;
 let mockEnv: MockEnv | null = null;
 
 const renderButton = () => {
-  render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />
+    </QueryClientProvider>,
+  );
 };
 
 const hoverSettingsButton = () =>

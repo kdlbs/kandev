@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useCallback, useMemo, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { RichTextInputHandle } from "@/components/task/chat/rich-text-input";
-import { useAppStore } from "@/components/state-provider";
+import { availableCommandsQueryOptions } from "@/lib/query/query-options";
 
 export type SlashCommandAction = "agent";
 
@@ -123,9 +124,8 @@ export function useInlineSlash(
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
 
-  const agentCommands = useAppStore((state) =>
-    sessionId ? state.availableCommands.bySessionId[sessionId] : undefined,
-  );
+  const commandsQuery = useQuery(availableCommandsQueryOptions(sessionId ?? ""));
+  const agentCommands = commandsQuery.data;
 
   const allCommands = useMemo(() => {
     if (!agentCommands || agentCommands.length === 0) return [];

@@ -6,12 +6,11 @@ import { Label } from "@kandev/ui/label";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { useAppStore } from "@/components/state-provider";
+import { useAgentsQuerySync } from "@/hooks/domains/settings/use-agents-query-sync";
 import { useHealthyAgentProfiles } from "@/hooks/domains/settings/use-healthy-agent-profiles";
 import { CliProfileEditor } from "@/components/agent/cli-profile-editor";
 import type { AgentProfile } from "@/lib/types/agent-profile";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 
 type Props = {
   agentProfileId: string;
@@ -26,9 +25,7 @@ type Props = {
  */
 export function AgentConfigCliCard({ agentProfileId, currentAgent, onAgentProfileChange }: Props) {
   const healthy = useHealthyAgentProfiles(agentProfileId);
-  const settingsAgents = useAppStore((s) => s.settingsAgents.items);
-  const setAgentProfiles = useAppStore((s) => s.setAgentProfiles);
-  const agentProfilesState = useAppStore((s) => s.agentProfiles.items);
+  const { settingsAgents, upsertProfile } = useAgentsQuerySync();
 
   const linkedProfile = useMemo(
     () => findProfile(settingsAgents, agentProfileId) ?? currentAgent,
@@ -92,7 +89,7 @@ export function AgentConfigCliCard({ agentProfileId, currentAgent, onAgentProfil
             profile={linkedProfile}
             onClose={() => setEditorMode("closed")}
             onSaved={(saved) => {
-              optimisticUpsert(setAgentProfiles, agentProfilesState, settingsAgents, saved);
+              upsertProfile(saved);
               onAgentProfileChange(saved.id);
               setEditorMode("closed");
             }}
@@ -103,7 +100,7 @@ export function AgentConfigCliCard({ agentProfileId, currentAgent, onAgentProfil
             mode="create"
             onClose={() => setEditorMode("closed")}
             onSaved={(saved) => {
-              optimisticUpsert(setAgentProfiles, agentProfilesState, settingsAgents, saved);
+              upsertProfile(saved);
               onAgentProfileChange(saved.id);
               setEditorMode("closed");
             }}
@@ -134,20 +131,6 @@ function findProfile(
     if (found) return found;
   }
   return undefined;
-}
-
-function optimisticUpsert(
-  setAgentProfiles: (next: AgentProfileOption[]) => void,
-  current: AgentProfileOption[],
-  agents: { id: string; name: string }[],
-  saved: AgentProfile,
-) {
-  const stub = agents.find((a) => a.id === saved.agentId) ?? {
-    id: saved.agentId ?? "",
-    name: saved.agentId ?? "",
-  };
-  const option = toAgentProfileOption(stub, saved);
-  setAgentProfiles([...current.filter((p) => p.id !== option.id), option]);
 }
 
 function ProfileSummary({

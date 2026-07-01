@@ -1,6 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
-import { SessionPage } from "../../pages/session-page";
 
 /**
  * Regression test: navigating from a task with chat messages to a sessionless
@@ -18,67 +18,64 @@ test.describe("Stale session navigation", () => {
   }) => {
     test.setTimeout(120_000);
 
-    // 1. Create Task A with an agent session that produces messages
-    await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "Task With Messages",
-      seedData.agentProfileId,
-      {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
-
-    // 2. Navigate to Task A's session page and wait for its message.
-    // We wait for the chat message directly instead of polling session state
-    // because the mock agent emits the message quickly; the backend session
-    // state transition to COMPLETED/WAITING_FOR_INPUT can be slow in CI.
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const cardA = kanban.taskCardByTitle("Task With Messages");
-    await expect(cardA).toBeVisible({ timeout: 15_000 });
-    await cardA.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-
-    await expect(
-      session.activeChat().getByText("simple mock response", { exact: false }),
-    ).toBeVisible({
-      timeout: 30_000,
+    // 1. Create Task A with a completed session and message history.
+    const taskA = await apiClient.createTask(seedData.workspaceId, "Task With Messages", {
+      description: "Task with seeded messages",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
     });
+    const sessionId = randomUUID();
+    const now = Date.now();
+    await apiClient.seedTaskSession(taskA.id, {
+      sessionId,
+      state: "COMPLETED",
+      startedAt: new Date(now).toISOString(),
+      completedAt: new Date(now + 1_000).toISOString(),
+    });
+    await apiClient.seedSessionMessage(sessionId, {
+      type: "message",
+      content: "simple mock response from stale-session source",
+    });
+    await apiClient.setPrimarySession(sessionId);
 
-    // 3. Create Task B (no agent session — simulates a PR watcher or new task)
-    await apiClient.createTask(seedData.workspaceId, "Sessionless Task", {
+    // 2. Create Task B with no session — simulates a PR watcher or new task.
+    const taskB = await apiClient.createTask(seedData.workspaceId, "Sessionless Task", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
     });
 
-    // 4. Go back to kanban
+    // 3. Open Task A in the kanban preview and verify its message is visible.
+    await apiClient.saveUserSettings({ enable_preview_on_click: true });
+    const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await expect(kanban.board).toBeVisible({ timeout: 10_000 });
 
-    // 5. Click on Task B from kanban
-    const cardB = kanban.taskCardByTitle("Sessionless Task");
+    const cardA = kanban.taskCard(taskA.id);
+    await expect(cardA).toBeVisible({ timeout: 15_000 });
+    await cardA.click();
+
+    const previewPanel = testPage.getByTestId("task-preview-panel");
+    await expect(previewPanel).toBeVisible({ timeout: 10_000 });
+    await expect(previewPanel.getByText("simple mock response", { exact: false })).toBeVisible({
+      timeout: 30_000,
+    });
+
+    // 4. Close the floating preview, then click Task B from kanban. The
+    // floating layout uses a backdrop that intentionally blocks board clicks.
+    await testPage.getByLabel("Close preview").click();
+    await expect(previewPanel).not.toBeVisible({ timeout: 5_000 });
+
+    const cardB = kanban.taskCard(taskB.id);
     await expect(cardB).toBeVisible({ timeout: 10_000 });
     await cardB.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
-    // 6. Verify Task B's page shows the correct title.
-    // Use the breadcrumb link specifically — `getByText` collides with the
-    // task card still visible in the sidebar list, triggering a strict-mode
-    // failure ("resolved to 2 elements") under flaky conditions where both
-    // surfaces happen to render the title.
-    await expect(testPage.getByRole("link", { name: "Sessionless Task" })).toBeVisible({
+    // 5. Verify Task B's preview shows the correct title.
+    await expect(previewPanel.getByText("Sessionless Task", { exact: true })).toBeVisible({
       timeout: 10_000,
     });
 
-    // 7. Task A's messages must NOT appear on Task B's page
-    await expect(testPage.getByText("simple mock response", { exact: false })).not.toBeVisible({
+    // 6. Task A's messages must NOT appear on Task B's preview.
+    await expect(previewPanel.getByText("simple mock response", { exact: false })).not.toBeVisible({
       timeout: 5_000,
     });
   });

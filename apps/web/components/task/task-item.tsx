@@ -1,6 +1,7 @@
 "use client";
 
 import { memo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   IconAlertCircle,
   IconChevronDown,
@@ -14,11 +15,12 @@ import {
 } from "@tabler/icons-react";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
 import { IssueTaskIcon } from "@/components/github/issue-task-icon";
-import { useAppStore } from "@/components/state-provider";
+import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { cn } from "@/lib/utils";
 import { computeRowIndent, resolveRowDepth } from "@/lib/sidebar/row-indent";
 import { isDebugUI } from "@/lib/config";
 import { useTaskColor } from "@/hooks/use-task-color";
+import { sessionPollModeQueryOptions } from "@/lib/query/query-options";
 import { TASK_COLOR_BAR_CLASS, type TaskColor } from "@/lib/task-colors";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
 import { shouldUseQuestionTaskIcon, shouldUsePermissionTaskIcon } from "@/lib/ui/state-icons";
@@ -187,11 +189,8 @@ function TaskItemStatsRow({
   prInfo?: { number: number; state: string };
   primarySessionId?: string | null;
 }) {
-  const pollMode = useAppStore((s) =>
-    isDebugUI() && primarySessionId
-      ? (s.sessionPollMode.bySessionId[primarySessionId] ?? null)
-      : null,
-  );
+  const pollModeQuery = useQuery(sessionPollModeQueryOptions(primarySessionId ?? ""));
+  const pollMode = isDebugUI() ? pollModeQuery.data : null;
 
   if (!updatedAt && !prInfo && !pollMode) return null;
 
@@ -233,7 +232,7 @@ function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpe
   );
 }
 
-/** Shows PR icon from store (real data) or from prInfo prop (prototype/mock). */
+/** Shows PR icon from Query data or from prInfo prop (prototype/mock). */
 function TaskPRIcon({
   taskId,
   prInfo,
@@ -241,8 +240,8 @@ function TaskPRIcon({
   taskId?: string;
   prInfo?: { number: number; state: string };
 }) {
-  const hasStorePR = useAppStore((s) => !!taskId && (s.taskPRs.byTaskId[taskId]?.length ?? 0) > 0);
-  if (hasStorePR) return <PRTaskIcon taskId={taskId!} />;
+  const { prs } = useTaskPR(taskId ?? null);
+  if (taskId && prs.length > 0) return <PRTaskIcon taskId={taskId} />;
   if (!prInfo) return null;
   const state = prInfo.state.toLowerCase();
   let color = "text-muted-foreground";

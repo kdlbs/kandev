@@ -4,6 +4,7 @@ import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 
 /**
@@ -27,20 +28,59 @@ async function seedSimpleTask(
     },
   );
 
+  await waitForTaskWorkspacePath(apiClient, task.id);
   await testPage.goto(`/t/${task.id}`);
 
   const session = new SessionPage(testPage);
-  await session.waitForLoad();
-  await session.waitForChatIdle({ timeout: 30_000 });
-
   return { session, sessionId: task.session_id ?? task.id };
 }
 
-/**
- * Seed a task using the symlink-file-setup mock scenario. The scenario creates
- * real-file.txt, a symlink link-file.txt → real-file.txt, commits both, then
- * modifies real-file.txt leaving an uncommitted diff.
- */
+async function waitForTaskWorkspacePath(apiClient: ApiClient, taskId: string): Promise<string> {
+  let workspacePath = "";
+  await expect
+    .poll(
+      async () => {
+        const env = await apiClient.getTaskEnvironment(taskId);
+        workspacePath =
+          env?.status === "ready" ? (env.worktree_path ?? env.workspace_path ?? "") : "";
+        return workspacePath;
+      },
+      { timeout: 45_000, message: "task environment should be ready" },
+    )
+    .not.toBe("");
+
+  return workspacePath;
+}
+
+function gitForWorkspace(workspacePath: string) {
+  return new GitHelper(workspacePath, makeGitEnv(workspacePath));
+}
+
+function commitPathsIfChanged(git: GitHelper, paths: string[], message: string) {
+  const quotedPaths = paths.map((filePath) => `"${filePath}"`).join(" ");
+  if (git.exec(`git status --porcelain -- ${quotedPaths}`).trim() === "") return;
+  git.commit(message);
+}
+
+function seedSymlinkDiffWorkspace(workspacePath: string) {
+  const git = gitForWorkspace(workspacePath);
+  const paths = ["real-file.txt", "link-file.txt"];
+
+  git.exec(`git rm --force --ignore-unmatch ${paths.map((filePath) => `"${filePath}"`).join(" ")}`);
+  for (const filePath of paths) {
+    fs.rmSync(path.join(workspacePath, filePath), { force: true });
+  }
+  commitPathsIfChanged(git, paths, "cleanup symlink diff fixture");
+
+  git.createFile("real-file.txt", "Original symlink target\n");
+  fs.symlinkSync("real-file.txt", path.join(workspacePath, "link-file.txt"));
+  git.stageFile("real-file.txt");
+  git.stageFile("link-file.txt");
+  commitPathsIfChanged(git, paths, "add symlink diff fixture");
+
+  git.modifyFile("real-file.txt", "Modified symlink target\n");
+}
+
 async function seedSymlinkDiffTask(
   testPage: Page,
   apiClient: ApiClient,
@@ -51,22 +91,18 @@ async function seedSymlinkDiffTask(
     "Symlink Diff E2E",
     seedData.agentProfileId,
     {
-      description: "/e2e:symlink-file-setup",
+      description: "Prepare symlink diff fixture",
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
     },
   );
 
+  const workspacePath = await waitForTaskWorkspacePath(apiClient, task.id);
+  seedSymlinkDiffWorkspace(workspacePath);
   await testPage.goto(`/t/${task.id}`);
 
   const session = new SessionPage(testPage);
-  await session.waitForLoad();
-
-  await expect(session.chat.getByText("symlink-file-setup complete", { exact: false })).toBeVisible(
-    { timeout: 45_000 },
-  );
-
   return session;
 }
 

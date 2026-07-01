@@ -1,7 +1,7 @@
 "use client";
 
 import { Badge } from "@kandev/ui/badge";
-import { useAppStore } from "@/components/state-provider";
+import { useOfficeMetaData } from "@/hooks/domains/office/use-office-data";
 import type { AgentRole } from "@/lib/state/slices/office/types";
 
 const FALLBACK_COLORS: Record<AgentRole, string> = {
@@ -19,7 +19,7 @@ type AgentRoleBadgeProps = {
 };
 
 export function AgentRoleBadge({ role }: AgentRoleBadgeProps) {
-  const meta = useAppStore((s) => s.office.meta);
+  const meta = useOfficeMetaData().data;
   const metaRole = meta?.roles.find((r) => r.id === role);
   const colorClass = metaRole?.color ?? FALLBACK_COLORS[role] ?? "";
   const label = metaRole?.label ?? role;

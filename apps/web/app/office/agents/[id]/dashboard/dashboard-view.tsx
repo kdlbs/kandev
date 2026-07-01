@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useState } from "react";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
-import { getAgentSummary, type AgentSummaryResponse } from "@/lib/api/domains/office-extended-api";
+import { useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { qk } from "@/lib/query/keys";
+import { officeAgentSummaryQueryOptions } from "@/lib/query/query-options/office";
+import type { AgentSummaryResponse } from "@/lib/api/domains/office-extended-api";
 import { LatestRunCard } from "./components/latest-run-card";
 import { RunActivityChart } from "./components/run-activity-chart";
 import { TasksByPriorityChart } from "./components/tasks-by-priority-chart";
@@ -19,34 +21,19 @@ type Props = {
 };
 
 /**
- * Client-side shell for the agent dashboard. Holds the SSR snapshot
- * in `useState` and refetches via WebSocket-driven triggers (the
- * `agents` and `tasks` channels both impact the dashboard) — matching
- * the project's reactive-only convention.
- *
- * The chart components are pure route-safe presentational pieces; this
- * shell exists so a future "Refresh" / "Date range" UI has somewhere
- * to live without lifting state up into the parent route loader.
+ * Client-side shell for the agent dashboard. TanStack Query owns the
+ * SSR snapshot and the office bridge invalidates the summary key when
+ * runs, tasks, costs, agents, or session state changes.
  */
 export function DashboardView({ agentId, initial, days }: Props) {
-  const [summary, setSummary] = useState<AgentSummaryResponse>(initial);
+  const queryClient = useQueryClient();
+  const summaryQuery = useQuery(officeAgentSummaryQueryOptions(agentId, days));
 
-  const refresh = useCallback(async () => {
-    try {
-      const next = await getAgentSummary(agentId, days);
-      setSummary(next);
-    } catch {
-      // Silent; the snapshot stays useful even if the refetch fails.
-      // A stale-data badge could surface this in a follow-up.
-    }
-  }, [agentId, days]);
+  useEffect(() => {
+    queryClient.setQueryData(qk.office.agentSummary(agentId, days), initial);
+  }, [agentId, days, initial, queryClient]);
 
-  // The dashboard derives from runs, activity_log, cost_events, and
-  // tasks — every WS event in those domains can change the values, so
-  // we subscribe to both `agents` and `tasks` triggers.
-  useOfficeRefetch("agents", refresh);
-  useOfficeRefetch("tasks", refresh);
-
+  const summary = summaryQuery.data ?? initial;
   return (
     <div className="space-y-6" data-testid="agent-dashboard-view">
       <LatestRunCard run={summary.latest_run} agentId={agentId} />

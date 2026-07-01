@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useCallback, useRef } from "react";
+import { useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  listLinearIssueWatches,
   createLinearIssueWatch,
   updateLinearIssueWatch,
   deleteLinearIssueWatch,
@@ -10,8 +10,13 @@ import {
   previewResetLinearIssueWatch,
   resetLinearIssueWatch,
 } from "@/lib/api/domains/linear-api";
-import { useAppStore } from "@/components/state-provider";
-import type { CreateLinearIssueWatchInput, UpdateLinearIssueWatchInput } from "@/lib/types/linear";
+import { qk } from "@/lib/query/keys";
+import { linearIssueWatchesQueryOptions } from "@/lib/query/query-options/linear";
+import type {
+  CreateLinearIssueWatchInput,
+  LinearIssueWatch,
+  UpdateLinearIssueWatchInput,
+} from "@/lib/types/linear";
 
 // WORKSPACE_REQUIRED is thrown by per-row mutation callbacks when the
 // install-wide listing case forgets to forward the row's workspaceId.
@@ -30,43 +35,17 @@ const WORKSPACE_REQUIRED = "workspaceId required";
  * the user doesn't see the previous workspace's stale rows during the swap.
  */
 export function useLinearIssueWatches(workspaceId?: string | null) {
-  const items = useAppStore((s) => s.linearIssueWatches.items);
-  const loaded = useAppStore((s) => s.linearIssueWatches.loaded);
-  const loading = useAppStore((s) => s.linearIssueWatches.loading);
-  const setWatches = useAppStore((s) => s.setLinearIssueWatches);
-  const resetWatches = useAppStore((s) => s.resetLinearIssueWatches);
-  const setLoading = useAppStore((s) => s.setLinearIssueWatchesLoading);
-  const addWatch = useAppStore((s) => s.addLinearIssueWatch);
-  const updateWatch = useAppStore((s) => s.updateLinearIssueWatch);
-  const removeWatch = useAppStore((s) => s.removeLinearIssueWatch);
-
-  const lastScope = useRef<string | null | undefined>(undefined);
-  const scope: string | null = workspaceId ?? null;
-
-  useEffect(() => {
-    if (workspaceId === null) return;
-    if (lastScope.current !== undefined && lastScope.current !== scope) {
-      resetWatches();
-    }
-    lastScope.current = scope;
-  }, [workspaceId, scope, resetWatches]);
-
-  useEffect(() => {
-    if (workspaceId === null || loaded || loading) return;
-    setLoading(true);
-    listLinearIssueWatches(workspaceId ?? undefined, { cache: "no-store" })
-      .then((res) => setWatches(res ?? []))
-      .catch(() => setWatches([]))
-      .finally(() => setLoading(false));
-  }, [workspaceId, loaded, loading, setWatches, setLoading]);
+  const queryClient = useQueryClient();
+  const query = useQuery(linearIssueWatchesQueryOptions(workspaceId));
+  const items = query.data ?? [];
 
   const create = useCallback(
     async (req: CreateLinearIssueWatchInput) => {
       const watch = await createLinearIssueWatch(req);
-      addWatch(watch);
+      patchLinearIssueWatchCaches(queryClient, workspaceId, watch);
       return watch;
     },
-    [addWatch],
+    [queryClient, workspaceId],
   );
 
   // Per-row mutations require the row's own workspace_id to satisfy the
@@ -77,10 +56,10 @@ export function useLinearIssueWatches(workspaceId?: string | null) {
       const ws = rowWorkspaceId ?? workspaceId;
       if (!ws) throw new Error(WORKSPACE_REQUIRED);
       const watch = await updateLinearIssueWatch(ws, id, req);
-      updateWatch(watch);
+      patchLinearIssueWatchCaches(queryClient, workspaceId, watch);
       return watch;
     },
-    [workspaceId, updateWatch],
+    [queryClient, workspaceId],
   );
 
   const remove = useCallback(
@@ -88,9 +67,9 @@ export function useLinearIssueWatches(workspaceId?: string | null) {
       const ws = rowWorkspaceId ?? workspaceId;
       if (!ws) throw new Error(WORKSPACE_REQUIRED);
       await deleteLinearIssueWatch(ws, id);
-      removeWatch(id);
+      removeLinearIssueWatchFromCaches(queryClient, workspaceId, id);
     },
-    [workspaceId, removeWatch],
+    [queryClient, workspaceId],
   );
 
   const trigger = useCallback(
@@ -116,11 +95,57 @@ export function useLinearIssueWatches(workspaceId?: string | null) {
       const ws = rowWorkspaceId ?? workspaceId;
       if (!ws) throw new Error(WORKSPACE_REQUIRED);
       const res = await resetLinearIssueWatch(ws, id);
-      resetWatches();
+      queryClient.invalidateQueries({ queryKey: qk.integrations.linear.issueWatches(workspaceId) });
+      queryClient.invalidateQueries({ queryKey: qk.integrations.linear.issueWatches(undefined) });
+      queryClient.invalidateQueries({ queryKey: qk.integrations.linear.issueWatches(ws) });
       return res;
     },
-    [workspaceId, resetWatches],
+    [queryClient, workspaceId],
   );
 
-  return { items, loaded, loading, create, update, remove, trigger, previewReset, reset };
+  return {
+    items,
+    loaded: query.isSuccess,
+    loading: query.isFetching && !query.isSuccess,
+    create,
+    update,
+    remove,
+    trigger,
+    previewReset,
+    reset,
+  };
+}
+
+function patchLinearIssueWatchCaches(
+  queryClient: ReturnType<typeof useQueryClient>,
+  workspaceId: string | null | undefined,
+  watch: LinearIssueWatch,
+) {
+  const patch = (prev: LinearIssueWatch[] | undefined) => upsertById(prev ?? [], watch);
+  const patchExisting = (prev: LinearIssueWatch[] | undefined) =>
+    prev ? upsertById(prev, watch) : prev;
+  queryClient.setQueryData(qk.integrations.linear.issueWatches(workspaceId), patch);
+  queryClient.setQueryData(qk.integrations.linear.issueWatches(undefined), patchExisting);
+  queryClient.setQueryData(qk.integrations.linear.issueWatches(watch.workspaceId), patch);
+}
+
+function removeLinearIssueWatchFromCaches(
+  queryClient: ReturnType<typeof useQueryClient>,
+  workspaceId: string | null | undefined,
+  id: string,
+) {
+  const remove = (prev: LinearIssueWatch[] | undefined) =>
+    (prev ?? []).filter((watch) => watch.id !== id);
+  const removeExisting = (prev: LinearIssueWatch[] | undefined) =>
+    prev ? prev.filter((watch) => watch.id !== id) : prev;
+  queryClient.setQueryData(qk.integrations.linear.issueWatches(workspaceId), remove);
+  queryClient.setQueryData(qk.integrations.linear.issueWatches(undefined), removeExisting);
+}
+
+function upsertById<T extends { id: string }>(items: T[], next: T): T[] {
+  const index = items.findIndex((item) => item.id === next.id);
+  if (index === -1) return [...items, next];
+  const copy = [...items];
+  copy[index] = next;
+  return copy;
 }

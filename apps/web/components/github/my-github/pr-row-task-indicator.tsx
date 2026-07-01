@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useSyncExternalStore } from "react";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useRouter } from "@/lib/routing/client-router";
 import { IconChecklist } from "@tabler/icons-react";
 import {
@@ -15,7 +16,7 @@ import { useAppStore } from "@/components/state-provider";
 import { cn } from "@/lib/utils";
 import { linkToTask } from "@/lib/links";
 import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
-import type { KanbanState } from "@/lib/state/slices";
+import { workflowSnapshotQueryData } from "@/lib/query/workflow-snapshot-cache";
 import type { TaskPR } from "@/lib/types/github";
 
 type PRRowTaskIndicatorProps = {
@@ -23,18 +24,24 @@ type PRRowTaskIndicatorProps = {
 };
 
 function useTaskStepTitle(workflowStepId: string | undefined): string | null {
-  return useAppStore((state) => {
-    if (!workflowStepId) return null;
-    const findIn = (steps: KanbanState["steps"]) =>
-      steps.find((s) => s.id === workflowStepId)?.title ?? null;
-    const fromActive = findIn(state.kanban.steps);
-    if (fromActive) return fromActive;
-    for (const snap of Object.values(state.kanbanMulti.snapshots)) {
-      const t = findIn(snap.steps);
-      if (t) return t;
-    }
-    return null;
-  });
+  const queryClient = useQueryClient();
+  return useSyncExternalStore(
+    (onStoreChange) => queryClient.getQueryCache().subscribe(onStoreChange),
+    () => findWorkflowStepTitle(queryClient, workflowStepId),
+    () => null,
+  );
+}
+
+function findWorkflowStepTitle(
+  queryClient: QueryClient,
+  workflowStepId: string | undefined,
+): string | null {
+  if (!workflowStepId) return null;
+  for (const snapshot of workflowSnapshotQueryData(queryClient)) {
+    const step = snapshot.steps.find((s) => s.id === workflowStepId);
+    if (step) return step.name;
+  }
+  return null;
 }
 
 function truncateTitle(title: string): string {

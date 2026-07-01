@@ -1,17 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
-import { useAppStore } from "@/components/state-provider";
-import { listBranches, listRepositoryBranches } from "@/lib/api";
+import { useCallback } from "react";
+import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
+import {
+  repositoryBranchesQueryOptions,
+  workspaceBranchesQueryOptions,
+} from "@/lib/query/query-options";
+import { qk } from "@/lib/query/keys";
 import type { Branch } from "@/lib/types/http";
 
 const EMPTY_BRANCHES: Branch[] = [];
 
 /**
  * Source of branches for a row: either a workspace repo (by id) or an
- * on-machine folder (by path). Both routes go through one backend endpoint
- * (`/workspaces/:id/branches`) and share one Zustand cache slice — id-based
- * entries are keyed by the repo id, path-based entries get a synthetic key.
+ * on-machine folder (by path). Both routes go through Query option factories:
+ * row branch lists use `/workspaces/:id/branches`, while explicit refresh for
+ * imported repository rows uses `/repositories/:id/branches?refresh=true`.
  *
  * `workspaceId` is always required because the route segment needs it.
  */
@@ -19,9 +23,46 @@ export type BranchSource =
   | { kind: "id"; workspaceId: string; repositoryId: string }
   | { kind: "path"; workspaceId: string; path: string };
 
-function cacheKeyFor(source: BranchSource | null): string {
-  if (!source) return "";
-  return source.kind === "id" ? source.repositoryId : `path::${source.workspaceId}::${source.path}`;
+async function fetchFreshBranches(
+  source: BranchSource,
+  queryClient: ReturnType<typeof useQueryClient>,
+  pathQuery: Pick<UseQueryResult<Branch[]>, "refetch">,
+): Promise<Branch[]> {
+  if (source.kind === "id") {
+    const branches = await queryClient.fetchQuery({
+      ...repositoryBranchesQueryOptions(source.repositoryId, { refresh: true }),
+      staleTime: 0,
+    });
+    queryClient.setQueryData(
+      qk.workspaces.branches(source.workspaceId, { repositoryId: source.repositoryId }),
+      branches,
+    );
+    return branches;
+  }
+  return (await pathQuery.refetch()).data ?? EMPTY_BRANCHES;
+}
+
+function idBranchQueryOptions(source: BranchSource | null) {
+  if (source?.kind !== "id") return workspaceBranchesQueryOptions("", { repositoryId: "" });
+  return workspaceBranchesQueryOptions(source.workspaceId, { repositoryId: source.repositoryId });
+}
+
+function pathBranchQueryOptions(source: BranchSource | null) {
+  if (source?.kind !== "path") return workspaceBranchesQueryOptions("", { path: "" });
+  return workspaceBranchesQueryOptions(source.workspaceId, { path: source.path });
+}
+
+function useBranchQueries(source: BranchSource | null, enabled: boolean) {
+  const idQuery = useQuery({
+    ...idBranchQueryOptions(source),
+    enabled: enabled && source?.kind === "id",
+  });
+  const pathQuery = useQuery({
+    ...pathBranchQueryOptions(source),
+    enabled: enabled && source?.kind === "path",
+  });
+  const activeQuery = source?.kind === "id" ? idQuery : pathQuery;
+  return { activeQuery, pathQuery };
 }
 
 /**
@@ -42,63 +83,25 @@ export type UseBranchesResult = {
 };
 
 export function useBranches(source: BranchSource | null, enabled = true): UseBranchesResult {
-  const key = cacheKeyFor(source);
-  const branches = useAppStore((state) =>
-    key ? (state.repositoryBranches.itemsByRepositoryId[key] ?? EMPTY_BRANCHES) : EMPTY_BRANCHES,
-  );
-  const isLoaded = useAppStore((state) =>
-    key ? (state.repositoryBranches.loadedByRepositoryId[key] ?? false) : false,
-  );
-  const isLoading = useAppStore((state) =>
-    key ? (state.repositoryBranches.loadingByRepositoryId[key] ?? false) : false,
-  );
-  const setRepositoryBranches = useAppStore((state) => state.setRepositoryBranches);
-  const setRepositoryBranchesLoading = useAppStore((state) => state.setRepositoryBranchesLoading);
-  const inFlightRef = useRef(false);
-
-  useEffect(() => {
-    if (!enabled || !source) return;
-    if (isLoaded || inFlightRef.current) return;
-    inFlightRef.current = true;
-    setRepositoryBranchesLoading(key, true);
-
-    const promise =
-      source.kind === "id"
-        ? listBranches(source.workspaceId, { repositoryId: source.repositoryId })
-        : listBranches(source.workspaceId, { path: source.path });
-
-    promise
-      .then((response) => setRepositoryBranches(key, response.branches))
-      .catch(() => setRepositoryBranches(key, []))
-      .finally(() => {
-        inFlightRef.current = false;
-        setRepositoryBranchesLoading(key, false);
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- key encodes source identity; listing every field re-fires on every render
-  }, [enabled, isLoaded, key, setRepositoryBranches, setRepositoryBranchesLoading]);
+  const queryClient = useQueryClient();
+  const { activeQuery, pathQuery } = useBranchQueries(source, enabled);
+  const branches = activeQuery.data ?? EMPTY_BRANCHES;
 
   const refresh = useCallback(async () => {
     if (!source) return;
-    setRepositoryBranchesLoading(key, true);
     try {
-      const response =
-        source.kind === "id"
-          ? await listRepositoryBranches(source.repositoryId, { refresh: true })
-          : await listBranches(source.workspaceId, { path: source.path });
-      setRepositoryBranches(key, response.branches);
+      await fetchFreshBranches(source, queryClient, pathQuery);
     } catch {
       // Refresh failures leave the existing branch list in place; the user
       // can retry manually. Errors are surfaced via the BranchRefreshButton's
       // tooltip when wired with `fetchError`, but the hook does not own
       // error state today.
-    } finally {
-      setRepositoryBranchesLoading(key, false);
     }
-  }, [source, key, setRepositoryBranches, setRepositoryBranchesLoading]);
+  }, [pathQuery, queryClient, source]);
 
   return {
     branches,
-    isLoading,
+    isLoading: activeQuery.isFetching && branches.length === 0,
     refresh: source ? refresh : undefined,
   };
 }

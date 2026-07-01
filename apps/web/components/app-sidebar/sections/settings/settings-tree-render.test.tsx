@@ -7,24 +7,33 @@ const ARCHIVE_WORKSPACE_ID = "ws-10";
 const MAIN_WORKSPACE_NAME = "Main Workspace";
 const ARCHIVE_WORKSPACE_NAME = "Archive Workspace";
 
-const state = {
-  workspaces: {
-    items: [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }],
-  },
-  settingsAgents: {
-    items: [],
-  },
-  executors: {
-    items: [],
-  },
-};
+let workspaceItems = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (s: typeof state) => unknown) => selector(state),
+  useAppStore: (selector: (s: Record<string, unknown>) => unknown) => selector({}),
+}));
+
+vi.mock("@/hooks/domains/workspace/use-workspaces", () => ({
+  useWorkspaces: () => ({ items: workspaceItems, activeId: null, activeWorkspace: null }),
 }));
 
 vi.mock("@/hooks/domains/settings/use-available-agents", () => ({
   useAvailableAgents: () => undefined,
+}));
+
+vi.mock("@/hooks/domains/settings/use-settings-data", () => ({
+  useSettingsData: () => ({
+    agentProfiles: [],
+    availableAgents: [],
+    availableTools: [],
+    executors: [],
+    settingsAgents: [],
+    settingsData: {
+      agentsLoaded: true,
+      capabilitiesLoaded: true,
+      executorsLoaded: true,
+    },
+  }),
 }));
 
 vi.mock("@kandev/ui/collapsible", async () => {
@@ -45,9 +54,7 @@ import { WorkspacesGroup } from "./workspaces-group";
 
 describe("SettingsTree rendering", () => {
   beforeEach(() => {
-    state.workspaces.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
-    state.settingsAgents.items = [];
-    state.executors.items = [];
+    workspaceItems = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
   });
 
   afterEach(() => cleanup());
@@ -64,7 +71,7 @@ describe("SettingsTree rendering", () => {
   });
 
   it("only opens the active workspace subsection on workspace detail routes", () => {
-    state.workspaces.items = [
+    workspaceItems = [
       { id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME },
       { id: ARCHIVE_WORKSPACE_ID, name: ARCHIVE_WORKSPACE_NAME },
     ];

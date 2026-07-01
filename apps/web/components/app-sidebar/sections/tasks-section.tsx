@@ -13,7 +13,7 @@ type TasksSectionProps = {
 
 export function TasksSection({ collapsed }: TasksSectionProps) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const workflowId = useAppStore((s) => s.kanban.workflowId);
+  const workflowId = useAppStore((s) => s.workflows.activeId);
 
   return (
     <AppSidebarSection

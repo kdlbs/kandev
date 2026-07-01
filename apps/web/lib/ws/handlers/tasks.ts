@@ -1,151 +1,33 @@
+import type { QueryClient } from "@tanstack/react-query";
 import type { StoreApi } from "zustand";
-import type { AppState } from "@/lib/state/store";
-import type { WsHandlers } from "@/lib/ws/handlers/types";
-import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import { cleanupTaskStorage } from "@/lib/local-storage";
+import { getBrowserQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
+import { workflowSnapshotQueryData } from "@/lib/query/workflow-snapshot-cache";
 import { removeRecentTask } from "@/lib/recent-tasks";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
-import { toKanbanTask, type TaskLike } from "@/lib/kanban/map-task";
-import { sessionId as toSessionId } from "@/lib/types/http";
-import { mergeTaskRepositoryFields } from "@/lib/ws/handlers/task-repositories";
 import { softNavigate } from "@/lib/routing/client-router";
 import { isTaskDetailPath, normalizePathname } from "@/lib/links";
 import {
   clearPinnedSessionIfOverridden,
   shouldPreservePinnedSessionForTask,
 } from "@/lib/ws/handlers/agent-session";
+import type { AppState } from "@/lib/state/store";
+import type { Task } from "@/lib/types/http";
+import type { WsHandlers } from "@/lib/ws/handlers/types";
 
-type KanbanTask = KanbanState["tasks"][number];
-
-function mergeTaskUpdate(existing: KanbanTask | undefined, nextTask: KanbanTask): KanbanTask {
-  if (!existing) return nextTask;
-  return {
-    ...nextTask,
-    ...mergeTaskRepositoryFields(existing, nextTask),
-  };
-}
-
-function upsertTask(tasks: KanbanTask[], nextTask: KanbanTask): KanbanTask[] {
-  const existing = tasks.find((task) => task.id === nextTask.id);
-  const merged = mergeTaskUpdate(existing, nextTask);
-  return existing
-    ? tasks.map((task) => (task.id === nextTask.id ? merged : task))
-    : [...tasks, merged];
-}
-
-function upsertMultiTask(state: AppState, workflowId: string, task: KanbanTask): AppState {
-  const snapshot = state.kanbanMulti.snapshots[workflowId];
-  if (!snapshot) return state;
-  return {
-    ...state,
-    kanbanMulti: {
-      ...state.kanbanMulti,
-      snapshots: {
-        ...state.kanbanMulti.snapshots,
-        [workflowId]: {
-          ...snapshot,
-          tasks: upsertTask(snapshot.tasks, task),
-        },
-      },
-    },
-  };
-}
-
-type TaskEventPayload = TaskLike & {
-  workflow_id: string;
-  old_workflow_id?: string | null;
+type TaskUpdatedPayload = {
+  task_id: string;
+  primary_session_id?: string | null;
   is_ephemeral?: boolean;
   archived_at?: string | null;
 };
 
-/** Upsert a task in both single-kanban and multi-kanban snapshots. */
-function upsertTaskInBothKanbans(
-  state: AppState,
-  wfId: string,
-  payload: TaskEventPayload,
-): AppState {
-  // Skip ephemeral tasks - they should never be added to kanban
-  if (payload.is_ephemeral) {
-    return state;
-  }
-
-  const nextTask = toKanbanTask(payload);
-  let next = state;
-
-  if (state.kanban.workflowId === wfId) {
-    next = { ...next, kanban: { ...next.kanban, tasks: upsertTask(next.kanban.tasks, nextTask) } };
-  }
-
-  if (state.kanbanMulti.snapshots[wfId]) {
-    next = upsertMultiTask(next, wfId, nextTask);
-  }
-
-  return next;
-}
-
-/** Look up a task across both single-kanban and multi-kanban snapshots. */
-function findTaskInState(state: AppState, taskId: string): KanbanTask | undefined {
-  const fromKanban = state.kanban.tasks.find((t) => t.id === taskId);
-  if (fromKanban) return fromKanban;
-  for (const snapshot of Object.values(state.kanbanMulti.snapshots)) {
-    const found = snapshot.tasks.find((t) => t.id === taskId);
-    if (found) return found;
-  }
-  return undefined;
-}
-
-/** Remove a task from both single-kanban and multi-kanban snapshots. */
-function removeTaskFromBothKanbans(state: AppState, taskId: string): AppState {
-  let next = state;
-  if (state.kanban.tasks.some((t) => t.id === taskId)) {
-    next = {
-      ...next,
-      kanban: { ...next.kanban, tasks: next.kanban.tasks.filter((t) => t.id !== taskId) },
-    };
-  }
-
-  const snapshots = Object.entries(next.kanbanMulti.snapshots);
-  const changedSnapshots = snapshots.filter(([, snapshot]) =>
-    snapshot.tasks.some((t) => t.id === taskId),
-  );
-  if (changedSnapshots.length > 0) {
-    const nextSnapshots = { ...next.kanbanMulti.snapshots };
-    for (const [workflowId, snapshot] of changedSnapshots) {
-      nextSnapshots[workflowId] = {
-        ...snapshot,
-        tasks: snapshot.tasks.filter((t) => t.id !== taskId),
-      };
-    }
-    next = {
-      ...next,
-      kanbanMulti: {
-        ...next.kanbanMulti,
-        snapshots: nextSnapshots,
-      },
-    };
-  }
-  return next;
-}
-
-function clearRemovedTaskSelection(state: AppState, taskId: string): AppState {
-  let next = state;
-  if (next.tasks.activeTaskId === taskId) {
-    next = {
-      ...next,
-      tasks: {
-        ...next.tasks,
-        activeTaskId: null,
-        activeSessionId: null,
-        pinnedSessionId: null,
-      },
-    };
-  }
-  if (next.tasks.lastSessionByTaskId[taskId]) {
-    const { [taskId]: _, ...rest } = next.tasks.lastSessionByTaskId;
-    next = { ...next, tasks: { ...next.tasks, lastSessionByTaskId: rest } };
-  }
-  return next;
-}
+type TaskDeletedPayload = {
+  task_id: string;
+  title?: string;
+  reason?: string;
+};
 
 function removedTaskRedirectHref(pathname: string, taskId: string): string | null {
   if (isTaskDetailPath(pathname, taskId)) return "/";
@@ -165,146 +47,166 @@ function redirectAwayFromRemovedTask(taskId: string): void {
   softNavigate(href, "replace");
 }
 
-type TaskUpdatedMessage = Parameters<NonNullable<WsHandlers["task.updated"]>>[0];
+export function registerTasksHandlers(
+  store: StoreApi<AppState>,
+  queryClient: QueryClient = getBrowserQueryClient(),
+): WsHandlers {
+  return {
+    "task.updated": (message) => {
+      const payload = message.payload as TaskUpdatedPayload;
+      if (payload.archived_at) {
+        handleTaskArchived(store, payload);
+        return;
+      }
+      maybeFollowPrimarySession(store, queryClient, payload);
+    },
+    "task.deleted": (message) => {
+      handleTaskDeleted(store, message.payload as TaskDeletedPayload);
+    },
+  };
+}
 
-function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessage): void {
-  // Skip ephemeral tasks (e.g., quick chat) - they shouldn't appear on the Kanban board
-  if (message.payload.is_ephemeral) return;
+function maybeFollowPrimarySession(
+  store: StoreApi<AppState>,
+  queryClient: QueryClient,
+  payload: TaskUpdatedPayload,
+): void {
+  if (payload.is_ephemeral) return;
+  const taskId = payload.task_id;
+  const newPrimary = payload.primary_session_id ?? null;
+  if (!taskId || !newPrimary) return;
 
-  // Capture the previous primary session id BEFORE the upsert so we can
-  // detect a primary-session swap (e.g. workflow profile switch reusing a
-  // different session) and follow focus to the new primary.
-  const beforeState = store.getState();
-  const taskId = message.payload.task_id;
-  const previousPrimary = findTaskInState(beforeState, taskId)?.primarySessionId ?? null;
-  const archivedAt = message.payload.archived_at;
-
-  if (archivedAt) {
-    removeRecentTask(taskId);
-    const state = store.getState();
-    state.removeTaskFromSidebarPrefs(taskId);
-    state.setOfficeRefetchTrigger("tasks");
-  }
-
-  store.setState((state) => {
-    const wfId = message.payload.workflow_id;
-    const oldWfId = message.payload.old_workflow_id;
-    let next = state;
-
-    if (archivedAt || (oldWfId && oldWfId !== wfId)) {
-      next = removeTaskFromBothKanbans(next, taskId);
-    }
-
-    if (archivedAt) {
-      return clearRemovedTaskSelection(next, taskId);
-    }
-
-    return upsertTaskInBothKanbans(next, wfId, message.payload);
-  });
-
-  if (archivedAt) {
-    redirectAwayFromRemovedTask(taskId);
-    return;
-  }
-
-  // Follow focus to the new primary when:
-  //  - the user is currently viewing this task,
-  //  - the user was sitting on the previous primary,
-  //  - they do NOT have a non-terminal pinned session for this task, and
-  //  - the primary actually changed.
-  // This makes workflow profile switches transparent for unpinned users
-  // without yanking users off a live session they deliberately selected.
-  const afterState = store.getState();
-  const newPrimary = findTaskInState(afterState, taskId)?.primarySessionId ?? null;
+  const state = store.getState();
+  const previousPrimary = cachedPrimarySessionId(queryClient, taskId);
+  if (previousPrimary === undefined) return;
   if (
-    newPrimary &&
     newPrimary !== previousPrimary &&
-    afterState.tasks.activeTaskId === taskId &&
-    afterState.tasks.activeSessionId === previousPrimary &&
-    !shouldPreservePinnedSessionForTask(afterState, taskId)
+    state.tasks.activeTaskId === taskId &&
+    state.tasks.activeSessionId === previousPrimary &&
+    !shouldPreservePinnedSessionForTask(state, taskId)
   ) {
     clearPinnedSessionIfOverridden(store, newPrimary);
-    afterState.setActiveSessionAuto(taskId, newPrimary);
+    state.setActiveSessionAuto(taskId, newPrimary);
   }
 }
 
-export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
-  return {
-    "task.created": (message) => {
-      // Skip ephemeral tasks (e.g., quick chat) - they shouldn't appear on the Kanban board
-      if (message.payload.is_ephemeral) return;
-      store.setState((state) =>
-        upsertTaskInBothKanbans(state, message.payload.workflow_id, message.payload),
-      );
-    },
-    "task.updated": (message) => handleTaskUpdated(store, message),
-    "task.deleted": (message) => {
-      const deletedId = message.payload.task_id;
-      removeRecentTask(deletedId);
+function cachedPrimarySessionId(
+  queryClient: QueryClient,
+  taskId: string,
+): string | null | undefined {
+  const cached = queryClient.getQueryData<Pick<Task, "primary_session_id">>(
+    qk.tasks.detail(taskId),
+  );
+  if (cached && Object.prototype.hasOwnProperty.call(cached, "primary_session_id")) {
+    return cached.primary_session_id ?? null;
+  }
+  for (const snapshot of workflowSnapshotQueryData(queryClient)) {
+    const task = snapshot.tasks.find((candidate) => candidate.id === taskId);
+    if (task && Object.prototype.hasOwnProperty.call(task, "primary_session_id")) {
+      return task.primary_session_id ?? null;
+    }
+  }
+  return undefined;
+}
 
-      const currentState = store.getState();
-      const sessionIds = (currentState.taskSessionsByTask.itemsByTaskId[deletedId] ?? []).map(
-        (s) => s.id,
-      );
-      const task = currentState.kanban.tasks.find((t) => t.id === deletedId);
-      if (task?.primarySessionId) {
-        const primaryId = toSessionId(task.primarySessionId);
-        if (!sessionIds.includes(primaryId)) {
-          sessionIds.push(primaryId);
-        }
-      }
-      const envIds = Array.from(
-        new Set(
-          sessionIds
-            .map((sid) => currentState.environmentIdBySessionId[sid])
-            .filter((eid): eid is string => Boolean(eid)),
-        ),
-      );
-      cleanupTaskStorage(deletedId, sessionIds, envIds);
-      // Keep the in-memory sidebar pin/order arrays in sync — without this,
-      // a later togglePinnedTask / setSidebarTaskOrder would persist the
-      // stale state (still containing the deleted ID) back to localStorage.
-      currentState.removeTaskFromSidebarPrefs(deletedId);
-      for (const sid of sessionIds) {
-        useContextFilesStore.getState().clearSession(sid);
-      }
+function handleTaskDeleted(store: StoreApi<AppState>, payload: TaskDeletedPayload): void {
+  const deletedId = payload.task_id;
+  if (!deletedId) return;
 
-      const wasActive = currentState.tasks.activeTaskId === deletedId;
+  const currentState = store.getState();
+  const wasActive = currentState.tasks.activeTaskId === deletedId;
+  // Capture the route match before any redirect mutates the pathname. This
+  // covers a fresh load where the browser is parked on the task's route
+  // (`/t/<id>`, `/tasks/<id>`, or `/office/tasks/<id>`) but TaskPageContent
+  // hasn't hydrated `activeTaskId` yet, so `wasActive` is still false.
+  const onDeletedRoute =
+    typeof window !== "undefined" &&
+    removedTaskRedirectHref(window.location.pathname, deletedId) !== null;
+  cleanupRemovedTaskClientState(store, deletedId);
 
-      store.setState((state) =>
-        clearRemovedTaskSelection(removeTaskFromBothKanbans(state, deletedId), deletedId),
-      );
+  // Only react to genuine auto-deletions, which the backend tags with a
+  // reason (e.g. a review task whose PR was approved). User-initiated deletes
+  // carry no reason: their local delete flow owns navigation by switching to
+  // the next task, so redirecting here would preempt it.
+  if (payload.reason && (wasActive || onDeletedRoute)) {
+    redirectAwayFromRemovedTask(deletedId);
+    store.getState().setTaskDeletedNotification({
+      taskId: deletedId,
+      title: payload.title,
+      reason: payload.reason,
+    });
+  }
+}
 
-      // Capture the route match before any redirect mutates the pathname. This
-      // covers a fresh load where the browser is parked on the task's route
-      // but TaskPageContent hasn't hydrated `activeTaskId` yet, so `wasActive`
-      // is still false.
-      const onDeletedRoute =
-        typeof window !== "undefined" &&
-        removedTaskRedirectHref(window.location.pathname, deletedId) !== null;
+function handleTaskArchived(store: StoreApi<AppState>, payload: TaskUpdatedPayload): void {
+  const archivedId = payload.task_id;
+  if (!archivedId) return;
 
-      // Only react to genuine auto-deletions, which the backend tags with a
-      // reason (e.g. a review task whose PR was approved). User-initiated deletes
-      // carry no reason: their local delete flow (useTaskRemoval) owns
-      // navigation by switching to the next task, so redirecting here would
-      // preempt it and strand the user on the home route. For auto-deletions we
-      // move off the now-dead route (helper is route-guarded) and explain why.
-      if (message.payload.reason && (wasActive || onDeletedRoute)) {
-        redirectAwayFromRemovedTask(deletedId);
-        store.getState().setTaskDeletedNotification({
-          taskId: deletedId,
-          title: message.payload.title,
-          reason: message.payload.reason,
-        });
-      }
-    },
-    "task.state_changed": (message) => {
-      // Skip ephemeral tasks (e.g., quick chat) - they shouldn't appear on the Kanban board
-      if (message.payload.is_ephemeral) return;
+  const currentState = store.getState();
+  const wasActive = currentState.tasks.activeTaskId === archivedId;
+  const onArchivedRoute =
+    typeof window !== "undefined" &&
+    removedTaskRedirectHref(window.location.pathname, archivedId) !== null;
 
-      store.setState((state) =>
-        upsertTaskInBothKanbans(state, message.payload.workflow_id, message.payload),
-      );
-    },
-  };
+  cleanupRemovedTaskClientState(store, archivedId);
+
+  if (wasActive || onArchivedRoute) {
+    redirectAwayFromRemovedTask(archivedId);
+  }
+}
+
+function cleanupRemovedTaskClientState(store: StoreApi<AppState>, taskId: string): void {
+  removeRecentTask(taskId);
+
+  const currentState = store.getState();
+  const sessionIds = sessionIdsForDeletedTask(currentState, taskId);
+  const envIds = environmentIdsForSessions(currentState, sessionIds);
+  cleanupTaskStorage(taskId, sessionIds, envIds);
+  currentState.removeTaskFromSidebarPrefs(taskId);
+  for (const sid of sessionIds) {
+    useContextFilesStore.getState().clearSession(sid);
+  }
+
+  store.setState((state) => cleanupRemovedTaskSelectionState(state, taskId));
+}
+
+function sessionIdsForDeletedTask(state: AppState, taskId: string): string[] {
+  const ids = new Set<string>(
+    (state.taskSessionsByTask?.itemsByTaskId[taskId] ?? []).map((session) => session.id),
+  );
+  for (const session of Object.values(state.taskSessions?.items ?? {})) {
+    if (session.task_id === taskId) ids.add(session.id);
+  }
+  return [...ids];
+}
+
+function environmentIdsForSessions(state: AppState, sessionIds: string[]): string[] {
+  return Array.from(
+    new Set(
+      sessionIds
+        .map((sid) => state.environmentIdBySessionId[sid])
+        .filter((eid): eid is string => Boolean(eid)),
+    ),
+  );
+}
+
+function cleanupRemovedTaskSelectionState(state: AppState, deletedId: string): AppState {
+  let next = state;
+  if (state.tasks.activeTaskId === deletedId) {
+    next = {
+      ...next,
+      tasks: {
+        ...next.tasks,
+        activeTaskId: null,
+        activeSessionId: null,
+        pinnedSessionId: null,
+      },
+    };
+  }
+  if (next.tasks.lastSessionByTaskId[deletedId]) {
+    const rest = { ...next.tasks.lastSessionByTaskId };
+    delete rest[deletedId];
+    next = { ...next, tasks: { ...next.tasks, lastSessionByTaskId: rest } };
+  }
+  return next;
 }

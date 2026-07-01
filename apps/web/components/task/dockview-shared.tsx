@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect } from "react";
+import React, { useCallback, useEffect, useMemo } from "react";
 import {
   DockviewDefaultTab,
   type IDockviewPanelProps,
@@ -11,7 +11,9 @@ import { useAppStore } from "@/components/state-provider";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
+import { isPassthroughSession } from "@/lib/session/is-passthrough-session";
 
 // Panel components (rendered via portals, not directly by dockview)
 import { TaskChatPanel } from "./task-chat-panel";
@@ -146,17 +148,19 @@ export { ContextMenuTab };
 // in the PanelPortalHost and survive dockview layout switches.
 
 function useChatSessionTitle(panelId: string, sessionId: string | null, isSessionTab: boolean) {
-  const agentLabel = useAppStore((state) => {
+  const agentProfileId = useAppStore((state) => {
     if (!sessionId) return null;
     const session = state.taskSessions.items[sessionId];
-    if (!session?.agent_profile_id) return null;
-    const profile = state.agentProfiles.items.find(
-      (p: { id: string }) => p.id === session.agent_profile_id,
-    );
+    return session?.agent_profile_id ?? null;
+  });
+  const { agentProfiles } = useSettingsData(Boolean(agentProfileId));
+  const agentLabel = useMemo(() => {
+    if (!agentProfileId) return null;
+    const profile = agentProfiles.find((p) => p.id === agentProfileId);
     if (!profile) return null;
     const parts = profile.label.split(" \u2022 ");
     return parts[1] || parts[0] || profile.label;
-  });
+  }, [agentProfileId, agentProfiles]);
   useEffect(() => {
     let label = "Agent";
     if (isSessionTab && agentLabel) {
@@ -178,7 +182,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
   });
   const { openFile } = useFileEditors();
   const isPassthrough = useAppStore((state) =>
-    sessionId ? state.taskSessions.items[sessionId]?.is_passthrough === true : false,
+    sessionId ? isPassthroughSession(state.taskSessions.items[sessionId]) : false,
   );
   useChatSessionTitle(panelId, sessionId, !!paramSessionId);
 

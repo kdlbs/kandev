@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, useSyncExternalStore, type ReactNode } from "react";
+import { useQueryClient, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import {
   IconArchive,
   IconArrowRight,
@@ -27,7 +28,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from "@kandev/ui/dropdown-menu";
-import { useAppStore } from "@/components/state-provider";
+import { useAllCachedWorkflows } from "@/hooks/use-workflow-cache";
 import type { WorkflowStep } from "@/components/kanban-card";
 import {
   stepHasAutoStart,
@@ -35,6 +36,7 @@ import {
   type TaskMoveWorkflow,
 } from "@/components/task/task-move-context-menu";
 import { cn } from "@/lib/utils";
+import type { WorkflowSnapshot } from "@/lib/types/http";
 
 type ItemEntry = {
   kind: "item";
@@ -69,6 +71,13 @@ export type KanbanCardMoveTargets = {
   workflowItems: TaskMoveWorkflow[];
   stepsByWorkflowId: Record<string, TaskMoveStep[]>;
 };
+
+type WorkflowSnapshotCache = {
+  signature: string;
+  snapshots: WorkflowSnapshot[];
+};
+
+const EMPTY_SNAPSHOTS: WorkflowSnapshot[] = [];
 
 type BuildKanbanCardMenuEntriesArgs = {
   currentWorkflowId?: string | null;
@@ -344,16 +353,73 @@ export function buildKanbanCardMenuEntries({
   return entries;
 }
 
+function isWorkflowSnapshotQueryKey(key: QueryKey): boolean {
+  return Array.isArray(key) && key[0] === "workflows" && key[2] === "snapshot";
+}
+
+function isWorkflowSnapshot(value: unknown): value is WorkflowSnapshot {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "workflow" in value &&
+    "steps" in value &&
+    "tasks" in value &&
+    Array.isArray((value as { tasks?: unknown }).tasks)
+  );
+}
+
+function readWorkflowSnapshots(client: QueryClient): WorkflowSnapshotCache {
+  const queries = client
+    .getQueryCache()
+    .findAll()
+    .filter((query) => isWorkflowSnapshotQueryKey(query.queryKey))
+    .sort((a, b) => a.queryHash.localeCompare(b.queryHash));
+  const snapshots = queries
+    .map((query) => query.state.data)
+    .filter((data): data is WorkflowSnapshot => isWorkflowSnapshot(data));
+
+  return {
+    signature: queries
+      .map(
+        (query) => `${query.queryHash}:${query.state.dataUpdatedAt}:${query.state.dataUpdateCount}`,
+      )
+      .join("|"),
+    snapshots,
+  };
+}
+
+function useCachedWorkflowSnapshots(): WorkflowSnapshot[] {
+  const queryClient = useQueryClient();
+  const snapshotRef = useRef<WorkflowSnapshotCache>({
+    signature: "",
+    snapshots: EMPTY_SNAPSHOTS,
+  });
+  const getSnapshot = useCallback(() => {
+    const snapshot = readWorkflowSnapshots(queryClient);
+    if (snapshot.signature === snapshotRef.current.signature) {
+      return snapshotRef.current.snapshots;
+    }
+    snapshotRef.current = snapshot;
+    return snapshot.snapshots;
+  }, [queryClient]);
+
+  return useSyncExternalStore(
+    (onStoreChange) => queryClient.getQueryCache().subscribe(onStoreChange),
+    getSnapshot,
+    () => EMPTY_SNAPSHOTS,
+  );
+}
+
 export function useKanbanCardMoveTargets(
   taskId: string,
   steps?: WorkflowStep[],
 ): KanbanCardMoveTargets {
-  const workflows = useAppStore((state) => state.workflows.items);
-  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const workflows = useAllCachedWorkflows();
+  const snapshots = useCachedWorkflowSnapshots();
 
   const currentWorkflowId = useMemo(() => {
-    for (const [workflowId, snapshot] of Object.entries(snapshots)) {
-      if (snapshot.tasks.some((task) => task.id === taskId)) return workflowId;
+    for (const snapshot of snapshots) {
+      if (snapshot.tasks.some((task) => task.id === taskId)) return snapshot.workflow.id;
     }
     return null;
   }, [snapshots, taskId]);
@@ -367,13 +433,13 @@ export function useKanbanCardMoveTargets(
 
   const stepsByWorkflowId = useMemo<Record<string, TaskMoveStep[]>>(() => {
     const result: Record<string, TaskMoveStep[]> = {};
-    for (const [workflowId, snapshot] of Object.entries(snapshots)) {
-      result[workflowId] = snapshot.steps
+    for (const snapshot of snapshots) {
+      result[snapshot.workflow.id] = snapshot.steps
         .slice()
         .sort((a, b) => a.position - b.position)
         .map((step) => ({
           id: step.id,
-          title: step.title,
+          title: step.name,
           color: step.color,
           events: step.events,
         }));

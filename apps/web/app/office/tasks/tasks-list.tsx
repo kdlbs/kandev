@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
+import { useOfficeAgentsData } from "@/hooks/domains/office/use-office-data";
 import { NewTaskDialog } from "../components/new-task-dialog";
 import { TasksToolbar } from "./tasks-toolbar";
 import { TasksContent } from "./tasks-content";
@@ -87,15 +87,12 @@ function useRehydratePersistedFilters(workspaceId: string | null) {
 
 export function TasksList() {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const tasks = useAppStore((s) => s.office.tasks.items);
   const filters = useAppStore((s) => s.office.tasks.filters);
   const viewMode = useAppStore((s) => s.office.tasks.viewMode);
   const sortField = useAppStore((s) => s.office.tasks.sortField);
   const sortDir = useAppStore((s) => s.office.tasks.sortDir);
   const groupBy = useAppStore((s) => s.office.tasks.groupBy);
   const nestingEnabled = useAppStore((s) => s.office.tasks.nestingEnabled);
-  const isLoading = useAppStore((s) => s.office.tasks.isLoading);
-  const agents = useAppStore((s) => s.office.agentProfiles);
 
   const setTaskFilters = useAppStore((s) => s.setTaskFilters);
   const setTaskViewMode = useAppStore((s) => s.setTaskViewMode);
@@ -108,15 +105,16 @@ export function TasksList() {
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [showSystem, setShowSystem] = useShowSystemPref();
   const { searchResults, triggerSearch } = useServerSearch(workspaceId);
+  const agentsQuery = useOfficeAgentsData(workspaceId);
+  const agents = agentsQuery.data?.agents ?? [];
 
   const agentMap = new Map(agents.map((a) => [a.id, a.name]));
 
   useRehydratePersistedFilters(workspaceId);
-  const { loadMore, hasMore, isLoadingMore, refetch } = usePaginatedTasks(workspaceId, showSystem);
-  // WS-driven invalidation: refetch the current filter/sort/page-1 on
-  // task lifecycle events (task created, etc.) — moved from the page
-  // client so the refetch preserves the user's active filters.
-  useOfficeRefetch("tasks", refetch);
+  const { tasks, isLoading, loadMore, hasMore, isLoadingMore } = usePaginatedTasks(
+    workspaceId,
+    showSystem,
+  );
 
   const handleFilterChange = useCallback(
     (patch: Record<string, unknown>) => {

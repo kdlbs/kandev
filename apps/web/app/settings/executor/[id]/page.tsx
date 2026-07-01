@@ -19,7 +19,7 @@ import {
 } from "@kandev/ui/dialog";
 import { updateExecutorAction, deleteExecutorAction } from "@/app/actions/executors";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { useAppStore } from "@/components/state-provider";
+import { useExecutorsQuerySync } from "@/hooks/domains/settings/use-executors-query-sync";
 import { ExecutorProfilesCard } from "@/components/settings/executor-profiles-card";
 import type { Executor, ExecutorType } from "@/lib/types/http";
 import { EXECUTOR_ICON_MAP } from "@/lib/executor-icons";
@@ -29,9 +29,8 @@ const EXECUTORS_ROUTE = "/settings/executors";
 export default function ExecutorEditPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
-  const executor = useAppStore(
-    (state) => state.executors.items.find((item: Executor) => item.id === id) ?? null,
-  );
+  const { executors } = useExecutorsQuerySync();
+  const executor = executors.find((item: Executor) => item.id === id) ?? null;
 
   if (!executor) {
     return (
@@ -187,8 +186,7 @@ function validateMcpPolicy(value: string | undefined): string | null {
 
 function DeleteExecutorSection({ executor }: { executor: Executor }) {
   const router = useRouter();
-  const executors = useAppStore((state) => state.executors.items);
-  const setExecutors = useAppStore((state) => state.setExecutors);
+  const { removeExecutor } = useExecutorsQuerySync();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
@@ -203,7 +201,7 @@ function DeleteExecutorSection({ executor }: { executor: Executor }) {
       } else {
         await deleteExecutorAction(executor.id);
       }
-      setExecutors(executors.filter((item: Executor) => item.id !== executor.id));
+      removeExecutor(executor.id);
       router.push(EXECUTORS_ROUTE);
     } finally {
       setIsDeleting(false);
@@ -274,8 +272,7 @@ function DeleteExecutorSection({ executor }: { executor: Executor }) {
 
 function ExecutorEditForm({ executor }: { executor: Executor }) {
   const router = useRouter();
-  const executors = useAppStore((state) => state.executors.items);
-  const setExecutors = useAppStore((state) => state.setExecutors);
+  const { upsertExecutor } = useExecutorsQuerySync();
   const [mcpPolicy, setMcpPolicy] = useState(executor.config?.mcp_policy ?? "");
   const [savedMcpPolicy, setSavedMcpPolicy] = useState(executor.config?.mcp_policy ?? "");
   const [isSaving, setIsSaving] = useState(false);
@@ -295,11 +292,7 @@ function ExecutorEditForm({ executor }: { executor: Executor }) {
         ? await client.request<Executor>("executor.update", { id: executor.id, ...payload })
         : await updateExecutorAction(executor.id, payload);
       setSavedMcpPolicy(updated.config?.mcp_policy ?? "");
-      setExecutors(
-        executors.map((item: Executor) =>
-          item.id === updated.id ? { ...item, ...updated } : item,
-        ),
-      );
+      upsertExecutor(updated);
     } finally {
       setIsSaving(false);
     }

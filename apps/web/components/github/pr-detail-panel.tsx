@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import {
   IconRefresh,
@@ -24,6 +25,7 @@ import { useCommentsStore, isPRFeedbackComment } from "@/lib/state/slices/commen
 import type { PRFeedbackComment } from "@/lib/state/slices/comments";
 import { useToast } from "@/components/toast-provider";
 import { submitPRReview } from "@/lib/api/domains/github-api";
+import { qk } from "@/lib/query/keys";
 import type { TaskPR, PRFeedback } from "@/lib/types/github";
 import {
   formatTimeAgo,
@@ -111,12 +113,12 @@ function useAddPRFeedbackAsContext(sessionId: string, prNumber: number) {
   return { addAsContext };
 }
 
-// Sync live feedback data back to the store so topbar/other consumers stay up to date.
+// Sync live feedback data back to Query so topbar/other consumers stay up to date.
 // Use primitive deps to avoid re-render loops from object reference changes.
-// Guard: never regress the store to a less-terminal state (e.g. merged → open)
+// Guard: never regress Query to a less-terminal state (e.g. merged → open)
 // because the feedback fetch may return stale data from before a backend poll update.
 function useSyncLivePRState(taskPR: TaskPR, feedback: PRFeedback | null) {
-  const setTaskPR = useAppStore((s) => s.setTaskPR);
+  const queryClient = useQueryClient();
   const prState = taskPR.state;
   const prMergedAt = taskPR.merged_at ?? null;
   const prClosedAt = taskPR.closed_at ?? null;
@@ -146,7 +148,7 @@ function useSyncLivePRState(taskPR: TaskPR, feedback: PRFeedback | null) {
       livePR.deletions !== prDeletions ||
       effectiveMergeableState !== prMergeableState
     ) {
-      setTaskPR(prTaskId, {
+      const next = {
         ...taskPR,
         state: effectiveState as TaskPR["state"],
         additions: livePR.additions,
@@ -154,7 +156,10 @@ function useSyncLivePRState(taskPR: TaskPR, feedback: PRFeedback | null) {
         merged_at: effectiveMergedAt,
         closed_at: effectiveClosedAt,
         mergeable_state: effectiveMergeableState,
-      });
+      };
+      queryClient.setQueryData<TaskPR[]>(qk.integrations.github.taskPr(prTaskId), (prev) =>
+        upsertTaskPR(prev ?? [], next),
+      );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -166,8 +171,16 @@ function useSyncLivePRState(taskPR: TaskPR, feedback: PRFeedback | null) {
     prDeletions,
     prMergeableState,
     prTaskId,
-    setTaskPR,
+    queryClient,
   ]);
+}
+
+function upsertTaskPR(items: TaskPR[], next: TaskPR): TaskPR[] {
+  const index = items.findIndex((item) => item.id === next.id);
+  if (index === -1) return [...items, next];
+  const copy = [...items];
+  copy[index] = next;
+  return copy;
 }
 
 type PRPanelMetrics = {

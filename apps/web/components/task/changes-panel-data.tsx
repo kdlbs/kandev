@@ -12,9 +12,11 @@ import type { PRDiffFile } from "@/lib/types/github";
 import { useChangesGitHandlers, useChangesDialogHandlers } from "./changes-panel-hooks";
 import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
 import { useBaseBranchByRepo } from "@/hooks/domains/session/use-base-branch-by-repo";
+import { useRepositoriesByWorkspace } from "@/hooks/domains/workspace/use-repository-cache";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useActiveTaskPRsWithFiles } from "@/hooks/domains/github/use-active-task-pr-files";
 import { usePRCommits } from "@/hooks/domains/github/use-pr-commits";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 import {
   type ChangedFile,
   computePRGroupStamp,
@@ -31,26 +33,13 @@ import type { OpenDiffOptions } from "./changes-diff-target";
 function useChangesPanelStoreData() {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useEnvironmentSessionId();
-  const taskTitle = useAppStore((state) => {
-    if (!state.tasks.activeTaskId) return undefined;
-    return state.kanban.tasks.find((t: { id: string }) => t.id === state.tasks.activeTaskId)?.title;
-  });
   const baseBranch = useAppStore((state) =>
     activeSessionId ? state.taskSessions.items[activeSessionId]?.base_branch : undefined,
   );
-  const existingPrUrl = useAppStore((state) => {
-    const taskId = state.tasks.activeTaskId;
-    if (!taskId) return undefined;
-    // Multi-branch tasks hold N PRs per task. The panel-header "View PR"
-    // button is a single-URL surface, so collapse only when there's exactly
-    // one PR — otherwise the per-repo buttons (prByRepo) take over and the
-    // generic button is hidden to avoid silently linking to a sibling.
-    const taskPRs = state.taskPRs.byTaskId[taskId];
-    if (Array.isArray(taskPRs) && taskPRs.length === 1) return taskPRs[0]?.pr_url;
-    if (Array.isArray(taskPRs) && taskPRs.length > 1) return undefined;
-    return state.pendingPrUrlByTaskId.byTaskId[taskId]?.[""];
-  });
-  return { activeTaskId, activeSessionId, taskTitle, baseBranch, existingPrUrl };
+  const pendingPrUrl = useAppStore((state) =>
+    activeTaskId ? state.pendingPrUrlByTaskId.byTaskId[activeTaskId]?.[""] : undefined,
+  );
+  return { activeTaskId, activeSessionId, baseBranch, pendingPrUrl };
 }
 
 type DialogsType = ReturnType<typeof useChangesDialogHandlers> & ReturnType<typeof useVcsDialogs>;
@@ -150,14 +139,11 @@ function usePerRepoCallbacks(
 
 function useChangesPanelPRData() {
   const { prs, filesByPRKey } = useActiveTaskPRsWithFiles();
-  const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
+  const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
+  const activeTask = useTaskById(activeTaskId);
+  const reposByWorkspace = useRepositoriesByWorkspace();
   const repoNameById = useMemo(() => buildRepoNameById(reposByWorkspace), [reposByWorkspace]);
-  const taskHasMultipleRepos = useAppStore((s) => {
-    const taskId = s.tasks.activeTaskId;
-    if (!taskId) return false;
-    const task = s.kanban.tasks.find((t: { id: string }) => t.id === taskId);
-    return (task?.repositories?.length ?? 0) > 1;
-  });
+  const taskHasMultipleRepos = (activeTask?.repositories?.length ?? 0) > 1;
   const taskPR = useActiveTaskPR();
   const refreshKey = taskPR?.last_synced_at ?? null;
   const { commits: prCommitsList } = usePRCommits(
@@ -206,11 +192,11 @@ function useChangesPanelPRData() {
   }, [prs, filesByPRKey, repoNameById, taskHasMultipleRepos]);
   const hasPRFiles = prFiles.length > 0;
   const hasPRCommits = prCommitsList.length > 0;
-  return { prDiffFiles, prCommitsList, hasPRFiles, hasPRCommits, prFiles };
+  return { prs, prDiffFiles, prCommitsList, hasPRFiles, hasPRCommits, prFiles };
 }
 
 export function useChangesPanelData() {
-  const { activeTaskId, activeSessionId, baseBranch, existingPrUrl } = useChangesPanelStoreData();
+  const { activeTaskId, activeSessionId, baseBranch, pendingPrUrl } = useChangesPanelStoreData();
   const baseBranchByRepo = useBaseBranchByRepo(activeTaskId);
   const git = useSessionGit(activeSessionId);
   const { toast } = useToast();
@@ -230,10 +216,8 @@ export function useChangesPanelData() {
   const dialogs = { ...localDialogs, ...vcsDialogs };
   const repoCallbacks = usePerRepoCallbacks(git, vcsDialogs, gitHandlers);
   const repoDisplayName = useRepoDisplayName(activeSessionId);
-  const taskPRsForMap = useAppStore((state) =>
-    activeTaskId ? state.taskPRs.byTaskId[activeTaskId] : undefined,
-  );
-  const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
+  const taskPRsForMap = prData.prs;
+  const reposByWorkspace = useRepositoriesByWorkspace();
   const repoNameById = useMemo(() => buildRepoNameById(reposByWorkspace), [reposByWorkspace]);
   const pendingByRepo = useAppStore((state) =>
     activeTaskId ? state.pendingPrUrlByTaskId.byTaskId[activeTaskId] : undefined,
@@ -242,6 +226,15 @@ export function useChangesPanelData() {
     () => buildPrByRepoMap(taskPRsForMap, repoNameById, pendingByRepo),
     [taskPRsForMap, repoNameById, pendingByRepo],
   );
+  const existingPrUrl = useMemo(() => {
+    // Multi-branch tasks hold N PRs per task. The panel-header "View PR"
+    // button is a single-URL surface, so collapse only when there's exactly
+    // one PR — otherwise the per-repo buttons (prByRepo) take over and the
+    // generic button is hidden to avoid silently linking to a sibling.
+    if (taskPRsForMap.length === 1) return taskPRsForMap[0]?.pr_url;
+    if (taskPRsForMap.length > 1) return undefined;
+    return pendingPrUrl;
+  }, [pendingPrUrl, taskPRsForMap]);
   return {
     activeTaskId,
     git,

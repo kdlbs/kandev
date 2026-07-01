@@ -9,6 +9,7 @@ import { fetchUserSettings } from "@/lib/api";
 import { StateHydrator } from "@/components/state-hydrator";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
+import type { QuerySeedInitialState } from "@/lib/query/seed";
 import { TasksPageClient } from "./tasks-page-client";
 import type {
   Workflow,
@@ -18,7 +19,6 @@ import type {
   Workspace,
   UserSettingsResponse,
 } from "@/lib/types/http";
-import type { AppState } from "@/lib/state/store";
 
 type WorkspaceData = {
   workflows: Workflow[];
@@ -115,29 +115,26 @@ export default async function TasksPage({
 
   const mappedUserSettings = mapUserSettingsResponse(userSettingsResponse);
 
-  const initialState: Partial<AppState> = {
+  const initialState: QuerySeedInitialState = {
     workspaces: {
       items: workspaces,
       activeId: workspaceId ?? null,
     },
     workflows: {
-      items: workflows.map((w) => ({
-        id: w.id,
-        workspaceId: w.workspace_id,
-        name: w.name,
-        description: w.description ?? null,
-        sortOrder: w.sort_order ?? 0,
-        ...(w.agent_profile_id ? { agent_profile_id: w.agent_profile_id } : {}),
-      })),
       activeId: activeWorkflowId,
     },
     userSettings: { ...mappedUserSettings, workspaceId: workspaceId ?? null },
     ...(workspaceId
       ? {
+          workflowLists: {
+            itemsByWorkspaceId: { [workspaceId]: workflows },
+          },
+        }
+      : {}),
+    ...(workspaceId
+      ? {
           repositories: {
             itemsByWorkspaceId: { [workspaceId]: repositories },
-            loadingByWorkspaceId: { [workspaceId]: false },
-            loadedByWorkspaceId: { [workspaceId]: true },
           },
         }
       : {}),

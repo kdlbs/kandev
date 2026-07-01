@@ -1,15 +1,7 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type Dispatch,
-  type MutableRefObject,
-  type SetStateAction,
-} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
@@ -18,7 +10,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconInfoCircle, IconPower, IconRotateClockwise } from "@tabler/icons-react";
 import { useToast } from "@/components/toast-provider";
 import { useKandevRestart } from "@/hooks/domains/system/use-kandev-restart";
-import { fetchRuntimeFlags, updateRuntimeFlag } from "@/lib/api/domains/runtime-flags-api";
+import { updateRuntimeFlag } from "@/lib/api/domains/runtime-flags-api";
+import { qk } from "@/lib/query/keys";
+import { runtimeFlagsQueryOptions } from "@/lib/query/query-options/settings";
 import type { RuntimeFlagState } from "@/lib/types/runtime-flags";
 import type { RestartCapability } from "@/lib/types/system";
 import { FeatureToggleCard } from "./feature-toggle-card";
@@ -29,53 +23,45 @@ type Props = {
   restartCapability: RestartCapability | null;
 };
 
-let bootstrapRuntimeFlagsRequest: ReturnType<typeof fetchRuntimeFlags> | null = null;
-
 export function FeatureTogglesSettings({ initialFlags, restartCapability }: Props) {
-  const [flags, setFlags] = useState(initialFlags);
-  const [isLoadingFlags, setIsLoadingFlags] = useState(initialFlags.length === 0);
+  const queryClient = useQueryClient();
+  const flagsQuery = useQuery({
+    ...runtimeFlagsQueryOptions(),
+    initialData: initialFlags.length > 0 ? { flags: initialFlags } : undefined,
+  });
+  const flags = flagsQuery.data?.flags ?? initialFlags;
+  const isLoadingFlags = flagsQuery.isFetching && flags.length === 0;
   const [savingKeys, setSavingKeys] = useState<Set<string>>(() => new Set());
-  const requestSeqRef = useRef(0);
-  const attemptedEmptyInitialReloadRef = useRef(false);
   const { toast } = useToast();
   const pendingRestart = useMemo(
     () => flags.some((flag) => flag.requires_restart_to_apply),
     [flags],
   );
 
-  const reload = useCallback(
-    async (options?: { bootstrap?: boolean }) => {
-      const seq = nextRequestSeq(requestSeqRef);
-      setIsLoadingFlags(true);
-      try {
-        const res = await fetchRuntimeFlagsForReload(options?.bootstrap === true);
-        setFlagsIfLatest(requestSeqRef, seq, res.flags, setFlags);
-      } catch (err) {
-        toast({
-          title: "Failed to load feature toggles",
-          description: errorMessage(err),
-          variant: "error",
-        });
-      } finally {
-        if (seq === requestSeqRef.current) {
-          setIsLoadingFlags(false);
-        }
-      }
-    },
-    [toast],
-  );
+  const reload = useCallback(async () => {
+    const res = await flagsQuery.refetch();
+    if (res.error) {
+      toast({
+        title: "Failed to load feature toggles",
+        description: errorMessage(res.error),
+        variant: "error",
+      });
+    }
+  }, [flagsQuery, toast]);
 
   const onRestartComplete = useCallback(() => void reload(), [reload]);
   const restart = useKandevRestart({ onComplete: onRestartComplete });
 
   useEffect(() => {
-    if (flags.length > 0 || attemptedEmptyInitialReloadRef.current) return;
-    attemptedEmptyInitialReloadRef.current = true;
-    void reload({ bootstrap: true });
-  }, [flags.length, reload]);
+    if (!flagsQuery.error) return;
+    toast({
+      title: "Failed to load feature toggles",
+      description: errorMessage(flagsQuery.error),
+      variant: "error",
+    });
+  }, [flagsQuery.error, toast]);
 
   const setOverride = async (flag: RuntimeFlagState, override: boolean | null) => {
-    const seq = nextRequestSeq(requestSeqRef);
     setSavingKeys((prev) => {
       const next = new Set(prev);
       next.add(flag.key);
@@ -83,7 +69,7 @@ export function FeatureTogglesSettings({ initialFlags, restartCapability }: Prop
     });
     try {
       const res = await updateRuntimeFlag(flag.key, override);
-      setFlagsIfLatest(requestSeqRef, seq, res.flags, setFlags);
+      queryClient.setQueryData(qk.settings.runtimeFlags(), res);
       toast({ title: "Feature toggle saved", variant: "success" });
     } catch (err) {
       toast({
@@ -128,16 +114,6 @@ export function FeatureTogglesSettings({ initialFlags, restartCapability }: Prop
       />
     </div>
   );
-}
-
-function fetchRuntimeFlagsForReload(bootstrap: boolean): ReturnType<typeof fetchRuntimeFlags> {
-  if (!bootstrap) return fetchRuntimeFlags();
-  if (bootstrapRuntimeFlagsRequest === null) {
-    bootstrapRuntimeFlagsRequest = fetchRuntimeFlags().finally(() => {
-      bootstrapRuntimeFlagsRequest = null;
-    });
-  }
-  return bootstrapRuntimeFlagsRequest;
 }
 
 function FeatureTogglesEmptyState({
@@ -244,20 +220,4 @@ function restartSupportMessage(supported: boolean, reason: string | undefined): 
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-function nextRequestSeq(seqRef: MutableRefObject<number>): number {
-  seqRef.current += 1;
-  return seqRef.current;
-}
-
-function setFlagsIfLatest(
-  seqRef: MutableRefObject<number>,
-  seq: number,
-  flags: RuntimeFlagState[],
-  setFlags: Dispatch<SetStateAction<RuntimeFlagState[]>>,
-) {
-  if (seq === seqRef.current) {
-    setFlags(flags);
-  }
 }

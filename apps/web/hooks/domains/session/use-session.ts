@@ -1,5 +1,7 @@
 import { useEffect, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
+import { sessionAgentctlQueryOptions, taskSessionQueryOptions } from "@/lib/query/query-options";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { TaskSession } from "@/lib/types/http";
 
@@ -11,13 +13,23 @@ type UseSessionResult = {
 };
 
 export function useSession(sessionId: string | null): UseSessionResult {
-  const session = useAppStore((state) =>
+  const sessionQuery = useQuery(taskSessionQueryOptions(sessionId ?? ""));
+  const agentctlQuery = useQuery(sessionAgentctlQueryOptions(sessionId ?? ""));
+  const storeSession = useAppStore((state) =>
     sessionId ? (state.taskSessions.items[sessionId] ?? null) : null,
   );
+  const setTaskSession = useAppStore((state) => state.setTaskSession);
   const connectionStatus = useAppStore((state) => state.connection.status);
-  const agentctlReady = useAppStore((state) =>
+  const storeAgentctlReady = useAppStore((state) =>
     sessionId ? state.sessionAgentctl.itemsBySessionId[sessionId]?.status === "ready" : false,
   );
+  const agentctlReady = agentctlQuery.data?.status === "ready" || storeAgentctlReady;
+  const session = sessionQuery.data ?? storeSession;
+
+  useEffect(() => {
+    if (!sessionQuery.data) return;
+    setTaskSession(sessionQuery.data);
+  }, [sessionQuery.data, setTaskSession]);
 
   const isActive = useMemo(() => {
     if (!session?.state) return false;

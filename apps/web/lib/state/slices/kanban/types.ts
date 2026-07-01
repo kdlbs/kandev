@@ -83,25 +83,25 @@ export type WorkflowSnapshotData = {
 
 export type KanbanMultiState = {
   snapshots: Record<string, WorkflowSnapshotData>;
-  isLoading: boolean;
+};
+
+export type WorkflowItem = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  description?: string | null;
+  sortOrder?: number;
+  agent_profile_id?: string;
+  hidden?: boolean;
+  /**
+   * Phase 2 (ADR-0004) UX hint. Read by `<TaskMetaRail>` to choose the
+   * right meta surface (kanban / office / multi-agent). Backend never
+   * branches on this field.
+   */
+  style?: "kanban" | "office" | "custom";
 };
 
 export type WorkflowsState = {
-  items: Array<{
-    id: string;
-    workspaceId: string;
-    name: string;
-    description?: string | null;
-    sortOrder?: number;
-    agent_profile_id?: string;
-    hidden?: boolean;
-    /**
-     * Phase 2 (ADR-0004) UX hint. Read by `<TaskMetaRail>` to choose the
-     * right meta surface (kanban / office / multi-agent). Backend never
-     * branches on this field.
-     */
-    style?: "kanban" | "office" | "custom";
-  }>;
   activeId: string | null;
 };
 
@@ -121,16 +121,12 @@ export type TaskState = {
 };
 
 export type KanbanSliceState = {
-  kanban: KanbanState;
-  kanbanMulti: KanbanMultiState;
   workflows: WorkflowsState;
   tasks: TaskState;
 };
 
 export type KanbanSliceActions = {
   setActiveWorkflow: (workflowId: string | null) => void;
-  setWorkflows: (workflows: WorkflowsState["items"]) => void;
-  reorderWorkflowItems: (workflowIds: string[]) => void;
   setActiveTask: (taskId: string) => void;
   setActiveSession: (taskId: string, sessionId: string) => void;
   // setActiveSessionAuto updates the active session without creating or
@@ -138,11 +134,6 @@ export type KanbanSliceActions = {
   // it explicitly after checking no non-terminal manual pin should be preserved.
   setActiveSessionAuto: (taskId: string, sessionId: string) => void;
   clearActiveSession: () => void;
-  setWorkflowSnapshot: (workflowId: string, data: WorkflowSnapshotData) => void;
-  setKanbanMultiLoading: (loading: boolean) => void;
-  clearKanbanMulti: () => void;
-  updateMultiTask: (workflowId: string, task: KanbanState["tasks"][number]) => void;
-  removeMultiTask: (workflowId: string, taskId: string) => void;
 };
 
 export type KanbanSlice = KanbanSliceState & KanbanSliceActions;

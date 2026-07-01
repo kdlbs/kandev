@@ -6,8 +6,8 @@ import { Task } from "./kanban-card";
 import { TaskCreateDialog } from "./task-create-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { Task as BackendTask } from "@/lib/types/http";
-import type { WorkflowsState } from "@/lib/state/slices";
-import { type MoveTaskError } from "@/hooks/use-drag-and-drop";
+import type { WorkflowItem, WorkflowsState } from "@/lib/state/slices";
+import { type MoveTaskError } from "@/lib/kanban/move-task-error";
 import { SwimlaneContainer } from "./kanban/swimlane-container";
 import { KanbanHeader } from "./kanban/kanban-header";
 import { MobileFab } from "./kanban/mobile-fab";
@@ -42,15 +42,13 @@ function useWorkflowSelection({
   workflowsState,
   commitSettings,
   setActiveWorkflow,
-  setWorkflows,
 }: {
   store: ReturnType<typeof useAppStoreApi>;
   userSettings: { workflowId?: string | null };
   workspaceState: { activeId: string | null };
-  workflowsState: WorkflowsState;
+  workflowsState: WorkflowsState & { items: WorkflowItem[] };
   commitSettings: unknown;
   setActiveWorkflow: (id: string | null) => void;
-  setWorkflows: (workflows: WorkflowsState["items"]) => void;
 }) {
   const searchParams = useSearchParams();
   const routeWorkflowId = searchParams.get("workflowId");
@@ -62,15 +60,14 @@ function useWorkflowSelection({
   useEffect(() => {
     const workspaceId = workspaceState.activeId;
     if (!workspaceId) {
-      if (workflowsState.items.length || workflowsState.activeId) {
-        setWorkflows([]);
+      if (workflowsState.activeId) {
         setActiveWorkflow(null);
       }
       return;
     }
     const settings = userSettingsRef.current;
     const workspaceWorkflows = workflowsState.items.filter(
-      (workflow: WorkflowsState["items"][number]) => workflow.workspaceId === workspaceId,
+      (workflow) => workflow.workspaceId === workspaceId,
     );
 
     const desiredWorkflowId = resolveDesiredWorkflowId({
@@ -79,17 +76,11 @@ function useWorkflowSelection({
       workspaceWorkflows,
     });
     setActiveWorkflow(desiredWorkflowId);
-    if (!desiredWorkflowId) {
-      store.getState().hydrate({
-        kanban: { workflowId: null, steps: [], tasks: [] },
-      });
-    }
   }, [
     workflowsState.activeId,
     workflowsState.items,
     commitSettings,
     setActiveWorkflow,
-    setWorkflows,
     store,
     routeWorkflowId,
     workspaceState.activeId,
@@ -121,19 +112,15 @@ function useMoveErrorState(router: ReturnType<typeof useRouter>) {
 function useKanbanBoardStore() {
   const store = useAppStoreApi();
   const kanbanViewMode = useAppStore((state) => state.userSettings.kanbanViewMode);
-  const kanban = useAppStore((state) => state.kanban);
   const workspaceState = useAppStore((state) => state.workspaces);
   const workflowsState = useAppStore((state) => state.workflows);
   const setActiveWorkflow = useAppStore((state) => state.setActiveWorkflow);
-  const setWorkflows = useAppStore((state) => state.setWorkflows);
   return {
     store,
     kanbanViewMode,
-    kanban,
     workspaceState,
     workflowsState,
     setActiveWorkflow,
-    setWorkflows,
   };
 }
 
@@ -165,12 +152,19 @@ function useKanbanBoardHooks(
     deletingTaskId,
     archivingTaskId,
   } = useKanbanActions({ workspaceState, workflowsState });
-  const { enablePreviewOnClick, userSettings, commitSettings, activeSteps, isMounted } =
-    useKanbanData({
-      onWorkspaceChange: handleWorkspaceChange,
-      onWorkflowChange: handleWorkflowChange,
-      searchQuery,
-    });
+  const {
+    enablePreviewOnClick,
+    boardState,
+    userSettings,
+    commitSettings,
+    activeSteps,
+    isMounted,
+    workflowsState: queryWorkflowsState,
+  } = useKanbanData({
+    onWorkspaceChange: handleWorkspaceChange,
+    onWorkflowChange: handleWorkflowChange,
+    searchQuery,
+  });
   return {
     isDialogOpen,
     editingTask,
@@ -185,8 +179,10 @@ function useKanbanBoardHooks(
     deletingTaskId,
     archivingTaskId,
     enablePreviewOnClick,
+    boardState,
     userSettings,
     commitSettings,
+    workflowsState: queryWorkflowsState,
     activeSteps,
     isMounted,
   };
@@ -238,17 +234,10 @@ function useKanbanBoardSetup(
   const router = useRouter();
   const { isMobile } = useResponsiveBreakpoint();
   const [searchQuery, setSearchQuery] = useState("");
-  const {
-    store,
-    kanbanViewMode,
-    kanban,
-    workspaceState,
-    workflowsState,
-    setActiveWorkflow,
-    setWorkflows,
-  } = useKanbanBoardStore();
+  const { store, kanbanViewMode, workspaceState, workflowsState, setActiveWorkflow } =
+    useKanbanBoardStore();
 
-  useAllWorkflowSnapshots(workspaceState.activeId);
+  const allWorkflowSnapshots = useAllWorkflowSnapshots(workspaceState.activeId);
   useWorkspacePRs(workspaceState.activeId);
   useWorkspaceMRs(workspaceState.activeId);
 
@@ -269,12 +258,14 @@ function useKanbanBoardSetup(
     [onBeforeEdit, handleEdit],
   );
 
-  const multiSelect = useTaskMultiSelect(kanban.workflowId);
+  const multiSelect = useTaskMultiSelect(
+    hooks.boardState.workflowId,
+    allWorkflowSnapshots.snapshots,
+  );
   const { isMultiSelectMode, toggleSelect } = multiSelect;
-  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   const { isMixedWorkflowSelection, multiSelectSteps } = useMultiSelectDerived(
     multiSelect.selectedIds,
-    snapshots,
+    allWorkflowSnapshots.snapshots,
     hooks.activeSteps,
   );
 
@@ -301,18 +292,15 @@ function useKanbanBoardSetup(
     store,
     userSettings: hooks.userSettings,
     workspaceState,
-    workflowsState,
+    workflowsState: hooks.workflowsState,
     commitSettings: hooks.commitSettings,
     setActiveWorkflow,
-    setWorkflows,
   });
 
   return {
     isMobile,
     kanbanViewMode,
-    kanban,
     workspaceState,
-    workflowsState,
     searchQuery,
     setSearchQuery,
     ...hooks,
@@ -325,6 +313,7 @@ function useKanbanBoardSetup(
     multiSelect,
     isMixedWorkflowSelection,
     multiSelectSteps,
+    allWorkflowSnapshots,
   };
 }
 
@@ -369,7 +358,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
         isDialogOpen={s.isDialogOpen}
         handleDialogOpenChange={s.handleDialogOpenChange}
         workspaceId={s.workspaceState.activeId}
-        workflowId={s.kanban.workflowId}
+        workflowId={s.boardState.workflowId}
         defaultStepId={s.activeSteps[0]?.id ?? null}
         stepOptions={stepOptions}
         editingTask={s.editingTask}
@@ -379,6 +368,8 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
         handleGoToTask={s.handleGoToTask}
       />
       <SwimlaneContainer
+        snapshots={s.allWorkflowSnapshots.snapshots}
+        snapshotsLoading={s.allWorkflowSnapshots.isLoading}
         viewMode={s.kanbanViewMode || ""}
         workflowFilter={s.workflowsState.activeId}
         onPreviewTask={s.handleCardClick}
@@ -399,6 +390,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
       />
       <TaskMultiSelectToolbar
         selectedIds={s.multiSelect.selectedIds}
+        snapshots={s.allWorkflowSnapshots.snapshots}
         steps={s.multiSelectSteps}
         isProcessing={s.multiSelect.isProcessing}
         canMove={!s.isMixedWorkflowSelection}

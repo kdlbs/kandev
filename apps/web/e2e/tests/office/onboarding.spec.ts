@@ -159,6 +159,7 @@ test.describe("Onboarding", () => {
     await completeResponse;
 
     await expect(testPage).toHaveURL(/\/office(\?|$)/, { timeout: 15_000 });
+    await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 10_000 });
     const workspaceId = new URL(testPage.url()).searchParams.get("workspaceId");
     expect(workspaceId).toBeTruthy();
     const agentsResponse = await officeApi.listAgents(workspaceId!);

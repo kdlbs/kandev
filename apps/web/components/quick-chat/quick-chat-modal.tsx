@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
 import { IconLoader2, IconMessageCircle, IconPlus } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { PassthroughTerminal } from "@/components/task/passthrough-terminal";
 import { QuickChatContent } from "./quick-chat-content";
 import { QuickChatDeleteDialog } from "./quick-chat-delete-dialog";
@@ -66,17 +67,19 @@ function QuickChatTabs({
 }
 
 function useIsQuickChatPassthrough(sessionId: string) {
-  return useAppStore(
+  const sessionInfo = useAppStore(
     useShallow((s) => {
       const session = s.taskSessions.items[sessionId];
-      if (typeof session?.is_passthrough === "boolean") return session.is_passthrough;
       const profileId =
         session?.agent_profile_id ??
         s.quickChat.sessions.find((qs) => qs.sessionId === sessionId)?.agentProfileId;
-      if (!profileId) return false;
-      return s.agentProfiles.items.find((p) => p.id === profileId)?.cli_passthrough === true;
+      return { explicitPassthrough: session?.is_passthrough, profileId };
     }),
   );
+  const { agentProfiles } = useSettingsData(true);
+  if (typeof sessionInfo.explicitPassthrough === "boolean") return sessionInfo.explicitPassthrough;
+  if (!sessionInfo.profileId) return false;
+  return agentProfiles.find((p) => p.id === sessionInfo.profileId)?.cli_passthrough === true;
 }
 
 function QuickChatSessionView({ sessionId }: { sessionId: string }) {
@@ -98,7 +101,7 @@ function AgentPickerView({
   onSelectAgent: (agentId: string) => void;
   pendingAgentId: string | null;
 }) {
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items) ?? [];
+  const { agentProfiles } = useSettingsData(true);
   const isLoading = pendingAgentId !== null;
 
   return (

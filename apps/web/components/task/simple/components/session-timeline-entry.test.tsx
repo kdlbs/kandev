@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { StateProvider } from "@/components/state-provider";
@@ -92,11 +93,22 @@ function makeSession(overrides: Partial<TaskSession> = {}): TaskSession {
   };
 }
 
+function createQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+}
+
 function wrap(node: ReactNode) {
   return (
-    <StateProvider>
-      <ActiveSessionRefProvider>{node}</ActiveSessionRefProvider>
-    </StateProvider>
+    <QueryClientProvider client={createQueryClient()}>
+      <StateProvider>
+        <ActiveSessionRefProvider>{node}</ActiveSessionRefProvider>
+      </StateProvider>
+    </QueryClientProvider>
   );
 }
 

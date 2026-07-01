@@ -3,11 +3,13 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { DockviewDefaultTab, type IDockviewPanelHeaderProps } from "dockview-react";
 import { IconStar } from "@tabler/icons-react";
 import { AgentLogo } from "@/components/agent-logo";
@@ -41,6 +43,9 @@ import { ShareDialog } from "@/components/task/share/share-dialog";
 import { HandoffContextMenuSub } from "@/components/task/handoff-profile-menu-items";
 import { NewSessionDialog, type HandoffPreset } from "@/components/task/new-session-dialog";
 import { usableConfigOptions } from "@/components/model-config-selector";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
+import { sessionModelsQueryOptions } from "@/lib/query/query-options";
 import type { TaskSessionState } from "@/lib/types/http";
 import {
   markSessionTabUserActivationIntent,
@@ -50,36 +55,51 @@ import { isSessionActive } from "./session-sort";
 import { resolveSessionTabTitle } from "./session-tab-title";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 
+function resolveIsPrimarySession(
+  sessionId: string | undefined,
+  primarySessionId: string | null | undefined,
+  fallbackIsPrimary: boolean,
+): boolean {
+  if (!sessionId) return false;
+  if (primarySessionId) return primarySessionId === sessionId;
+  return fallbackIsPrimary;
+}
+
 function useSessionTabState(sessionId: string | undefined) {
-  const isPrimary = useAppStore((state) => {
-    const activeTaskId = state.tasks.activeTaskId;
-    if (!activeTaskId || !sessionId) return false;
-    const task = state.kanban.tasks.find((t: { id: string }) => t.id === activeTaskId);
-    if (task?.primarySessionId) return task.primarySessionId === sessionId;
-    return state.taskSessions.items[sessionId]?.is_primary === true;
-  });
+  const sessionModelsQuery = useQuery(sessionModelsQueryOptions(sessionId ?? ""));
+  const taskId = useAppStore((state) => state.tasks.activeTaskId);
+  const task = useTaskById(taskId);
+  const fallbackIsPrimary = useAppStore((state) =>
+    sessionId ? state.taskSessions.items[sessionId]?.is_primary === true : false,
+  );
+  const isPrimary = resolveIsPrimarySession(sessionId, task?.primarySessionId, fallbackIsPrimary);
   const sessionState = useAppStore((state) => {
     if (!sessionId) return null;
     return state.taskSessions.items[sessionId]?.state ?? null;
   }) as TaskSessionState | null;
-  const taskId = useAppStore((state) => state.tasks.activeTaskId);
-  const tabTitle = useAppStore((state) => {
+  const sessionForTitle = useAppStore((state) => {
     if (!sessionId) return null;
-    const session = state.taskSessions.items[sessionId];
-    const sessionModels = state.sessionModels.bySessionId[sessionId];
-    const activeModelId = state.activeModel.bySessionId[sessionId] || null;
-    const agentLabel = (() => {
-      if (!session?.agent_profile_id) return null;
-      const profile = state.agentProfiles.items.find(
-        (p: { id: string }) => p.id === session.agent_profile_id,
-      );
-      if (!profile) return null;
-      const parts = profile.label.split(" \u2022 ");
-      return parts[1] || parts[0] || profile.label;
-    })();
+    return state.taskSessions.items[sessionId] ?? null;
+  });
+  const storeSessionModels = useAppStore((state) =>
+    sessionId ? state.sessionModels.bySessionId[sessionId] : undefined,
+  );
+  const sessionModels = sessionModelsQuery.data ?? storeSessionModels;
+  const activeModelId = useAppStore((state) =>
+    sessionId ? state.activeModel.bySessionId[sessionId] || null : null,
+  );
+  const { agentProfiles } = useSettingsData(Boolean(sessionForTitle?.agent_profile_id));
+  const agentLabel = useMemo(() => {
+    if (!sessionForTitle?.agent_profile_id) return null;
+    const profile = agentProfiles.find((p) => p.id === sessionForTitle.agent_profile_id);
+    if (!profile) return null;
+    const parts = profile.label.split(" \u2022 ");
+    return parts[1] || parts[0] || profile.label;
+  }, [agentProfiles, sessionForTitle?.agent_profile_id]);
+  const tabTitle = useMemo(() => {
     const snapshotModel =
-      typeof session?.agent_profile_snapshot?.model === "string"
-        ? session.agent_profile_snapshot.model
+      typeof sessionForTitle?.agent_profile_snapshot?.model === "string"
+        ? sessionForTitle.agent_profile_snapshot.model
         : null;
     return resolveSessionTabTitle({
       agentLabel,
@@ -95,16 +115,14 @@ function useSessionTabState(sessionId: string | undefined) {
         })) ?? [],
       configOptions: usableConfigOptions(sessionModels?.configOptions),
     });
-  });
-  const agentName = useAppStore((state) => {
-    if (!sessionId) return null;
-    const session = state.taskSessions.items[sessionId];
-    if (!session?.agent_profile_id) return null;
+  }, [activeModelId, agentLabel, sessionForTitle?.agent_profile_snapshot, sessionModels]);
+  const agentName = useMemo(() => {
+    if (!sessionForTitle?.agent_profile_id) return null;
     return (
-      state.agentProfiles.items.find((p: { id: string }) => p.id === session.agent_profile_id)
+      agentProfiles.find((profile) => profile.id === sessionForTitle.agent_profile_id)
         ?.agent_name ?? null
     );
-  });
+  }, [agentProfiles, sessionForTitle?.agent_profile_id]);
   const sessionNumber = useAppStore((state) => {
     if (!sessionId) return null;
     const activeTaskId = state.tasks.activeTaskId;

@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "@/components/routing/app-link";
 import { IconBrandSlack } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -18,14 +19,14 @@ import {
   IntegrationAuthStatusBanner,
   type IntegrationAuthHealth,
 } from "@/components/integrations/auth-status-banner";
-import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import {
-  getSlackConfig,
   setSlackConfig,
   deleteSlackConfig,
   testSlackConnection,
 } from "@/lib/api/domains/slack-api";
 import { listUtilityAgents, type UtilityAgent } from "@/lib/api/domains/utility-api";
+import { qk } from "@/lib/query/keys";
+import { slackConfigQueryOptions } from "@/lib/query/query-options/slack";
 import type { SlackConfig, TestSlackConnectionResult } from "@/lib/types/slack";
 
 const DEFAULT_PREFIX = "!kandev";
@@ -381,6 +382,7 @@ type SettingsActionsArgs = {
 
 function useSettingsActions({ form, setConfig, setForm, setTestResult }: SettingsActionsArgs) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -416,6 +418,7 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
         token: form.token || undefined,
         cookie: form.cookie || undefined,
       });
+      queryClient.setQueryData(qk.integrations.slack.config(), saved);
       setConfig(saved);
       setForm(configToForm(saved));
       setTestResult(null);
@@ -425,13 +428,14 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
     } finally {
       setSaving(false);
     }
-  }, [form, toast, setConfig, setForm, setTestResult]);
+  }, [form, queryClient, toast, setConfig, setForm, setTestResult]);
 
   const handleDelete = useCallback(async () => {
     if (!confirm("Remove Slack configuration?")) return;
     setDeleting(true);
     try {
       await deleteSlackConfig();
+      queryClient.setQueryData(qk.integrations.slack.config(), null);
       setConfig(null);
       setForm(emptyForm);
       setTestResult(null);
@@ -441,48 +445,38 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
     } finally {
       setDeleting(false);
     }
-  }, [toast, setConfig, setForm, setTestResult]);
+  }, [queryClient, toast, setConfig, setForm, setTestResult]);
 
   return { saving, testing, deleting, handleTest, handleSave, handleDelete };
 }
 
 function useSlackSettings() {
   const { toast } = useToast();
+  const configQuery = useQuery(slackConfigQueryOptions());
   const [config, setConfig] = useState<SlackConfig | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
-  const [loading, setLoading] = useState(true);
   const [testResult, setTestResult] = useState<TestSlackConnectionResult | null>(null);
+  const formHydratedRef = useRef(false);
   const health = configToHealth(config);
   const { agents, loadingAgents } = useUtilityAgentsLoader();
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const cfg = await getSlackConfig();
-      setConfig(cfg);
+  useEffect(() => {
+    if (!configQuery.isSuccess) return;
+    const cfg = configQuery.data ?? null;
+    setConfig(cfg);
+    if (!formHydratedRef.current) {
       setForm(configToForm(cfg));
-    } catch (err) {
-      toast({ description: `Failed to load Slack config: ${String(err)}`, variant: "error" });
-    } finally {
-      setLoading(false);
+      formHydratedRef.current = true;
     }
-  }, [toast]);
+  }, [configQuery.data, configQuery.isSuccess]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
-
-  // Background refresh so the auth-health banner picks up new probe results.
-  useEffect(() => {
-    const id = setInterval(() => {
-      getSlackConfig()
-        .then((cfg) => setConfig(cfg))
-        .catch(() => {
-          /* transient failures are fine — next tick retries */
-        });
-    }, INTEGRATION_STATUS_REFRESH_MS);
-    return () => clearInterval(id);
-  }, []);
+    if (!configQuery.isError) return;
+    toast({
+      description: `Failed to load Slack config: ${String(configQuery.error)}`,
+      variant: "error",
+    });
+  }, [configQuery.error, configQuery.isError, toast]);
 
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -500,7 +494,7 @@ function useSlackSettings() {
   return {
     config,
     form,
-    loading,
+    loading: configQuery.isFetching && !configQuery.isSuccess,
     saving,
     testing,
     deleting,

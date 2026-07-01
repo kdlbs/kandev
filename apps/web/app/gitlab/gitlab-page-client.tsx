@@ -7,8 +7,7 @@ import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { PageTopbar } from "@/components/page-topbar";
-import { fetchGitLabStatus } from "@/lib/api/domains/gitlab-api";
-import type { GitLabStatus, Issue, MR } from "@/lib/types/gitlab";
+import type { Issue, MR } from "@/lib/types/gitlab";
 import { MRList } from "@/components/gitlab/my-gitlab/mr-list";
 import { IssueList } from "@/components/gitlab/my-gitlab/issue-list";
 import {
@@ -27,6 +26,7 @@ import { useCommittedQuery } from "@/components/gitlab/my-gitlab/use-committed-q
 import { ListToolbar } from "@/components/gitlab/my-gitlab/list-toolbar";
 import { ResultsPagination } from "@/components/gitlab/my-gitlab/results-pagination";
 import { SavePresetDialog } from "@/components/gitlab/my-gitlab/save-preset-dialog";
+import { useGitLabStatus } from "@/hooks/domains/gitlab/use-gitlab-status";
 
 function PageHeader({
   host,
@@ -273,32 +273,8 @@ function AuthenticatedLayout({ state }: { state: GitLabPageState }) {
   );
 }
 
-function useGitLabStatusFetch() {
-  const [status, setStatus] = useState<GitLabStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchGitLabStatus({ cache: "no-store" })
-      .then((s) => {
-        if (!cancelled) setStatus(s);
-      })
-      .catch(() => {
-        if (!cancelled) setStatus(null);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return { status, loading };
-}
-
 export function GitLabPageClient(_props: { workspaceId?: string } = {}) {
-  const { status, loading: statusLoading } = useGitLabStatusFetch();
+  const { status, loading: statusLoading } = useGitLabStatus();
   const state = useGitLabPageState();
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
