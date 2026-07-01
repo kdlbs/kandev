@@ -93,6 +93,9 @@ test.describe("Clarification flow", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await expect(session.chat).toContainText("first line");
     await expect(session.chat).toContainText("second line");
+    // The two lines must stay separated: if the newline were dropped the reply
+    // would render as the fused "first linesecond line".
+    await expect(session.chat).not.toContainText("linesecond line");
   });
 
   test("skip clarification", async ({ testPage, apiClient, seedData }) => {

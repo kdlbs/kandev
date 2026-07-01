@@ -3,6 +3,7 @@
 import { IconCheck, IconCornerDownLeft, IconArrowLeft, IconArrowRight } from "@tabler/icons-react";
 import { useLayoutEffect, useRef } from "react";
 import { Textarea } from "@kandev/ui/textarea";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { cn } from "@/lib/utils";
 import type { ClarificationOption } from "@/lib/types/http";
 
@@ -171,6 +172,10 @@ export function ClarificationCustomInput({
   onRequestFinalSubmit,
 }: CustomInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Touch keyboards have no Shift+Enter chord, so on coarse-pointer devices we
+  // let Enter insert a newline and rely on the always-visible Submit button to
+  // send — otherwise the multiline feature would be desktop-only.
+  const { isFinePointer } = useResponsiveBreakpoint();
 
   // Auto-grow to fit content (WebKit lacks CSS field-sizing, so measure in JS)
   // and clamp to MAX_CUSTOM_INPUT_HEIGHT, after which the box scrolls.
@@ -223,24 +228,33 @@ export function ClarificationCustomInput({
             onRequestFinalSubmit?.();
             return;
           }
+          // On touch devices Enter inserts a newline (submit via the button).
+          if (!isFinePointer) return;
+          // Plain Enter submits on desktop. preventDefault runs unconditionally
+          // so an empty/whitespace draft doesn't leak a stray newline into the
+          // textarea before the trim guard bails.
+          e.preventDefault();
           if (draft.trim()) {
-            e.preventDefault();
             onSubmit(draft.trim());
           }
         }}
       />
-      <div className="mt-0.5 flex flex-shrink-0 items-center gap-1">
-        <kbd
-          aria-hidden="true"
-          className="select-none flex items-center gap-1 font-mono text-[10px] px-1.5 py-0.5 rounded border border-border bg-background text-muted-foreground"
-        >
-          <IconCornerDownLeft className="h-2.5 w-2.5" />
-          Enter
-        </kbd>
-        <span aria-hidden="true" className="select-none text-[10px] text-muted-foreground/60">
-          ⇧↵ newline
-        </span>
-      </div>
+      {/* The keyboard hints only apply to hardware keyboards; on touch the
+          Submit button is the send affordance. */}
+      {isFinePointer && (
+        <div className="mt-0.5 flex flex-shrink-0 items-center gap-1">
+          <kbd
+            aria-hidden="true"
+            className="select-none flex items-center gap-1 font-mono text-[10px] px-1.5 py-0.5 rounded border border-border bg-background text-muted-foreground"
+          >
+            <IconCornerDownLeft className="h-2.5 w-2.5" />
+            Enter
+          </kbd>
+          <span aria-hidden="true" className="select-none text-[10px] text-muted-foreground/60">
+            ⇧↵ newline
+          </span>
+        </div>
+      )}
       {active && <IconCheck className="mt-0.5 h-3.5 w-3.5 text-blue-500 flex-shrink-0" />}
     </div>
   );
