@@ -37,7 +37,6 @@ export function triggerFileDownload({
     const anchor = document.createElement("a");
     anchor.href = url;
     anchor.download = fileBasename(fileName);
-    anchor.rel = "noopener";
     document.body.appendChild(anchor);
     anchor.click();
     document.body.removeChild(anchor);

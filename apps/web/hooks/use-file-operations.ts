@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { WebSocketClient } from "@/lib/ws/client";
 import { createFile, deleteFile, renameFile, requestFileContent } from "@/lib/ws/workspace-files";
-import { fileBasename, triggerFileDownload } from "@/lib/utils/file-download";
+import { triggerFileDownload } from "@/lib/utils/file-download";
 import { useToast } from "@/components/toast-provider";
 
 type ToastFn = ReturnType<typeof useToast>["toast"];
@@ -25,7 +25,7 @@ export async function downloadFileContent(
     const response = await requestFileContent(client, sessionId, path);
     if (response.error) return { ok: false, error: response.error };
     triggerFileDownload({
-      fileName: fileBasename(path),
+      fileName: path,
       content: response.content,
       isBinary: !!response.is_binary,
     });

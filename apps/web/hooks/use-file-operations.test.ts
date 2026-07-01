@@ -20,6 +20,7 @@ vi.mock("@/lib/utils/file-download", async (importOriginal) => {
 import { downloadFileContent } from "./use-file-operations";
 
 const SESSION_ID = "sess-1";
+const NESTED_PATH = "src/foo/bar.ts";
 const FAKE_CLIENT = {} as unknown as Parameters<typeof downloadFileContent>[0];
 
 beforeEach(() => {
@@ -28,19 +29,19 @@ beforeEach(() => {
 });
 
 describe("downloadFileContent", () => {
-  it("fetches file content and triggers browser download using the file basename", async () => {
+  it("fetches file content and forwards the full path so the util can derive the basename", async () => {
     requestFileContentMock.mockResolvedValueOnce({
-      path: "src/foo/bar.ts",
+      path: NESTED_PATH,
       content: "hello",
       is_binary: false,
     });
 
-    const result = await downloadFileContent(FAKE_CLIENT, SESSION_ID, "src/foo/bar.ts");
+    const result = await downloadFileContent(FAKE_CLIENT, SESSION_ID, NESTED_PATH);
 
     expect(result).toEqual({ ok: true });
-    expect(requestFileContentMock).toHaveBeenCalledWith(FAKE_CLIENT, SESSION_ID, "src/foo/bar.ts");
+    expect(requestFileContentMock).toHaveBeenCalledWith(FAKE_CLIENT, SESSION_ID, NESTED_PATH);
     expect(triggerFileDownloadMock).toHaveBeenCalledWith({
-      fileName: "bar.ts",
+      fileName: NESTED_PATH,
       content: "hello",
       isBinary: false,
     });
@@ -56,7 +57,7 @@ describe("downloadFileContent", () => {
     await downloadFileContent(FAKE_CLIENT, SESSION_ID, "assets/logo.png");
 
     expect(triggerFileDownloadMock).toHaveBeenCalledWith({
-      fileName: "logo.png",
+      fileName: "assets/logo.png",
       content: "aGk=",
       isBinary: true,
     });

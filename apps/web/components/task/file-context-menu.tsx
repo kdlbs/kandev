@@ -117,7 +117,7 @@ function FileContextMenuItems({
 }: FileContextMenuItemsProps) {
   const deleteLabel = isBulk ? `Delete ${selectedCount} items` : "Delete";
   const showRename = !!onRenameFile && !isBulk;
-  const canDownload = !!onDownloadFile && !node.is_dir && !isBulk;
+  const download = !node.is_dir && !isBulk ? onDownloadFile : undefined;
   return (
     <>
       {onDeleteFile && (
@@ -133,9 +133,9 @@ function FileContextMenuItems({
           Rename
         </ContextMenuItem>
       )}
-      {canDownload && (showRename || onDeleteFile) && <ContextMenuSeparator />}
-      {canDownload && onDownloadFile && (
-        <ContextMenuItem onSelect={() => void onDownloadFile(node.path)}>
+      {download && (showRename || onDeleteFile) && <ContextMenuSeparator />}
+      {download && (
+        <ContextMenuItem onSelect={() => void download(node.path)}>
           <IconDownload className="h-3.5 w-3.5" />
           Download
         </ContextMenuItem>
