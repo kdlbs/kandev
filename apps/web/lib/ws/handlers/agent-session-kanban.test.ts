@@ -8,7 +8,10 @@ import { sessionId, taskId, type TaskSessionState } from "@/lib/types/http";
 const STATE_CHANGED_EVENT = "session.state_changed";
 const TASK_TITLE = "Running task";
 
-function makeStore(overrides: Partial<AppState> = {}) {
+function makeStore(
+  overrides: Partial<AppState> = {},
+  beforeApplyState?: (state: AppState) => void,
+) {
   const state = {
     kanban: { workflowId: null, steps: [], tasks: [] },
     kanbanMulti: { snapshots: {}, isLoading: false },
@@ -28,6 +31,7 @@ function makeStore(overrides: Partial<AppState> = {}) {
     ...overrides,
   } as unknown as AppState;
   const setState = vi.fn((updater: unknown) => {
+    beforeApplyState?.(state);
     const next = typeof updater === "function" ? updater(state) : updater;
     if (next && next !== state) Object.assign(state, next);
   });
@@ -136,6 +140,37 @@ describe("session.state_changed -> primary kanban card state", () => {
       ),
     ).toBe(true);
     debugSpy.mockRestore();
+  });
+
+  it("preserves concurrent store changes while syncing kanban session state", () => {
+    const task = makeKanbanTask("s-1");
+    const store = makeStore(
+      {
+        kanban: {
+          workflowId: "wf-1",
+          steps: [],
+          tasks: [task],
+        },
+        kanbanMulti: makeSnapshotTaskStore("s-1"),
+        taskSessions: {
+          items: {
+            "s-1": makeTaskSession("s-1"),
+          },
+        },
+      },
+      (state) => {
+        state.tasks = {
+          ...state.tasks,
+          activeTaskId: taskId("concurrent-task"),
+        };
+      },
+    );
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(makeMessage({ task_id: "t-1", session_id: "s-1", new_state: "RUNNING" }));
+
+    expect(store.getState().kanban.tasks[0]?.primarySessionState).toBe("RUNNING");
+    expect(store.getState().tasks.activeTaskId).toBe(taskId("concurrent-task"));
   });
 });
 
