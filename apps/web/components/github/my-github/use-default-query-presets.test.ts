@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
+import {
+  fetchGitHubWorkspaceSettings,
+  updateGitHubWorkspaceSettings,
+} from "@/lib/api/domains/github-api";
 import {
   __resetSnapshotForTests,
   useDefaultQueryPresets,
@@ -9,10 +13,17 @@ import {
 
 const STORAGE_KEY = "kandev:github-default-queries:v1";
 const SYNC_FAILED_KEY = "kandev:github-default-queries:sync-failed:v1";
+const WORKSPACE_ID = "ws-1";
+const SETTINGS_TIMESTAMP = "2026-01-01T00:00:00Z";
 
 vi.mock("@/lib/api/domains/settings-api", () => ({
   fetchUserSettings: vi.fn(),
   updateUserSettings: vi.fn(),
+}));
+
+vi.mock("@/lib/api/domains/github-api", () => ({
+  fetchGitHubWorkspaceSettings: vi.fn(),
+  updateGitHubWorkspaceSettings: vi.fn(),
 }));
 
 function makeLocalStorageMock() {
@@ -31,6 +42,7 @@ function makeLocalStorageMock() {
 
 const localStorageMock = makeLocalStorageMock();
 vi.stubGlobal("localStorage", localStorageMock);
+Object.defineProperty(window, "localStorage", { value: localStorageMock, configurable: true });
 
 const preset: StoredQueryPreset = {
   value: "mine",
@@ -39,18 +51,39 @@ const preset: StoredQueryPreset = {
   group: "created",
 };
 
-describe("useDefaultQueryPresets", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    localStorageMock.clear();
-    __resetSnapshotForTests();
-    vi.mocked(fetchUserSettings).mockResolvedValue({
-      settings: { github_default_query_presets: null },
-    } as Awaited<ReturnType<typeof fetchUserSettings>>);
-    vi.mocked(updateUserSettings).mockResolvedValue({
-      settings: {},
-    } as Awaited<ReturnType<typeof updateUserSettings>>);
-  });
+function workspaceSettings(
+  defaultQueryPresets: unknown = null,
+): Awaited<ReturnType<typeof fetchGitHubWorkspaceSettings>> {
+  return {
+    workspace_id: WORKSPACE_ID,
+    repo_scope_mode: "all",
+    repo_scope_orgs: [],
+    repo_scope_repos: [],
+    saved_presets: [],
+    default_query_presets: defaultQueryPresets,
+    created_at: SETTINGS_TIMESTAMP,
+    updated_at: SETTINGS_TIMESTAMP,
+  } as Awaited<ReturnType<typeof fetchGitHubWorkspaceSettings>>;
+}
+
+function resetMocks() {
+  vi.clearAllMocks();
+  localStorageMock.clear();
+  __resetSnapshotForTests();
+  vi.mocked(fetchUserSettings).mockResolvedValue({
+    settings: { github_default_query_presets: null },
+  } as Awaited<ReturnType<typeof fetchUserSettings>>);
+  vi.mocked(updateUserSettings).mockResolvedValue({
+    settings: {},
+  } as Awaited<ReturnType<typeof updateUserSettings>>);
+  vi.mocked(fetchGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings());
+  vi.mocked(updateGitHubWorkspaceSettings).mockResolvedValue(
+    {} as Awaited<ReturnType<typeof updateGitHubWorkspaceSettings>>,
+  );
+}
+
+describe("useDefaultQueryPresets legacy sync", () => {
+  beforeEach(resetMocks);
 
   it("retries local defaults after a failed backend sync and clears the marker", async () => {
     const local = { pr: [preset], issue: [] };
@@ -113,5 +146,47 @@ describe("useDefaultQueryPresets", () => {
 
     expect(localStorageMock.getItem(STORAGE_KEY)).toBe(JSON.stringify(crossTab));
     expect(updateUserSettings).not.toHaveBeenCalled();
+  });
+});
+
+describe("useDefaultQueryPresets workspace sync", () => {
+  beforeEach(resetMocks);
+
+  it("migrates local defaults into a fresh workspace", async () => {
+    const local = { pr: [preset], issue: [] };
+    localStorageMock.setItem(STORAGE_KEY, JSON.stringify(local));
+    __resetSnapshotForTests();
+
+    const { result } = renderHook(() => useDefaultQueryPresets(WORKSPACE_ID));
+
+    await waitFor(() => expect(result.current.prPresets[0]?.value).toBe("mine"));
+    expect(updateGitHubWorkspaceSettings).toHaveBeenCalledWith({
+      workspace_id: WORKSPACE_ID,
+      default_query_presets: local,
+    });
+  });
+
+  it("does not migrate local defaults over existing workspace defaults", async () => {
+    const server = { pr: [{ ...preset, value: "server", label: "Server" }], issue: [] };
+    localStorageMock.setItem(STORAGE_KEY, JSON.stringify({ pr: [preset], issue: [] }));
+    __resetSnapshotForTests();
+    vi.mocked(fetchGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings(server));
+
+    const { result } = renderHook(() => useDefaultQueryPresets(WORKSPACE_ID));
+
+    await waitFor(() => expect(result.current.prPresets[0]?.value).toBe("server"));
+    expect(updateGitHubWorkspaceSettings).not.toHaveBeenCalled();
+  });
+
+  it("does not save or reset while workspace defaults are still loading", () => {
+    vi.mocked(fetchGitHubWorkspaceSettings).mockReturnValue(new Promise(() => {}));
+    const { result } = renderHook(() => useDefaultQueryPresets(WORKSPACE_ID));
+
+    act(() => {
+      result.current.save({ pr: [preset], issue: [] });
+      result.current.reset();
+    });
+
+    expect(updateGitHubWorkspaceSettings).not.toHaveBeenCalled();
   });
 });

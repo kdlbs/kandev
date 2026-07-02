@@ -1025,12 +1025,17 @@ func (c *Controller) httpDeleteIssueWatch(ctx *gin.Context) {
 
 func (c *Controller) httpTriggerIssueWatch(ctx *gin.Context) {
 	id := ctx.Param("id")
+	workspaceID := ctx.Query("workspace_id")
+	if workspaceID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id query parameter required"})
+		return
+	}
 	watch, err := c.service.GetIssueWatch(ctx.Request.Context(), id)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if watch == nil {
+	if watch == nil || watch.WorkspaceID != workspaceID {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "issue watch not found"})
 		return
 	}

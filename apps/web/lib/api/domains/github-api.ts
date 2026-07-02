@@ -505,8 +505,13 @@ export async function deleteIssueWatch(id: string, options?: ApiRequestOptions) 
   });
 }
 
-export async function triggerIssueWatch(id: string, options?: ApiRequestOptions) {
-  return fetchJson<TriggerIssueResponse>(`/api/v1/github/watches/issue/${id}/trigger`, {
+export async function triggerIssueWatch(
+  id: string,
+  workspaceId: string,
+  options?: ApiRequestOptions,
+) {
+  const params = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<TriggerIssueResponse>(`/api/v1/github/watches/issue/${id}/trigger?${params}`, {
     ...options,
     init: { method: "POST", ...(options?.init ?? {}) },
   });

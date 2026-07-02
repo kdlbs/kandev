@@ -91,18 +91,32 @@ function readServerPresets(value: unknown): SavedPreset[] | null {
   );
 }
 
-async function readLegacyServerPresets(): Promise<SavedPreset[]> {
+async function readLegacyServerPresets(): Promise<SavedPreset[] | undefined> {
   try {
     const response = await fetchUserSettings({ cache: "no-store" });
     return readServerPresets(response.settings.github_saved_presets) ?? [];
   } catch {
-    return [];
+    return undefined;
   }
 }
 
 const syncServer = createQueuedUserSettingsSync<SavedPreset[]>(SYNC_FAILED_KEY, (next) => ({
   github_saved_presets: next,
 }));
+
+let workspaceSyncQueue = Promise.resolve();
+
+function syncWorkspaceSavedPresets(workspaceId: string, next: SavedPreset[]): Promise<void> {
+  workspaceSyncQueue = workspaceSyncQueue
+    .catch(() => undefined)
+    .then(() =>
+      updateGitHubWorkspaceSettings({
+        workspace_id: workspaceId,
+        saved_presets: next,
+      }).then(() => undefined),
+    );
+  return workspaceSyncQueue;
+}
 
 function snapshotKey(value: SavedPreset[]): string {
   return JSON.stringify(value);
@@ -186,26 +200,27 @@ function useWorkspaceSavedPresets(workspaceId: string | null) {
       .then(async (settings) => {
         if (cancelled || seq !== writeSeq.current) return;
         const serverPresets = readServerPresets(settings.saved_presets) ?? [];
-        let local = readStorage();
+        let local: SavedPreset[] | undefined = readStorage();
         if (local.length === 0) {
           local = await readLegacyServerPresets();
         }
         if (cancelled || seq !== writeSeq.current) return;
         if (
           serverPresets.length === 0 &&
+          local !== undefined &&
           local.length > 0 &&
           !hasMigratedToWorkspace(workspaceId)
         ) {
           setWorkspacePresets(local);
-          await updateGitHubWorkspaceSettings({
-            workspace_id: workspaceId,
-            saved_presets: local,
-          });
-          markMigratedToWorkspace(workspaceId);
+          void syncWorkspaceSavedPresets(workspaceId, local)
+            .then(() => markMigratedToWorkspace(workspaceId))
+            .catch(() => {});
           return;
         }
         setWorkspacePresets(serverPresets);
-        markMigratedToWorkspace(workspaceId);
+        if (local !== undefined || serverPresets.length > 0) {
+          markMigratedToWorkspace(workspaceId);
+        }
       })
       .catch(() => {
         if (!cancelled) setWorkspacePresets([]);
@@ -229,6 +244,7 @@ export function useSavedPresets(workspaceId: string | null = null) {
 
   const save = useCallback(
     (input: Omit<SavedPreset, "id" | "createdAt">) => {
+      if (workspaceId && workspacePresets === undefined) return null;
       const preset: SavedPreset = {
         ...input,
         id: `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
@@ -237,10 +253,9 @@ export function useSavedPresets(workspaceId: string | null = null) {
       const next = [...activePresets, preset];
       if (workspaceId) {
         setWorkspacePresets(next);
-        void updateGitHubWorkspaceSettings({
-          workspace_id: workspaceId,
-          saved_presets: next,
-        }).then(() => markMigratedToWorkspace(workspaceId));
+        void syncWorkspaceSavedPresets(workspaceId, next)
+          .then(() => markMigratedToWorkspace(workspaceId))
+          .catch(() => {});
         return preset;
       }
       publish(next);
@@ -248,25 +263,25 @@ export function useSavedPresets(workspaceId: string | null = null) {
       markMigratedToBackend();
       return preset;
     },
-    [activePresets, workspaceId],
+    [activePresets, workspaceId, workspacePresets, setWorkspacePresets],
   );
 
   const remove = useCallback(
     (id: string) => {
+      if (workspaceId && workspacePresets === undefined) return;
       const next = activePresets.filter((p) => p.id !== id);
       if (workspaceId) {
         setWorkspacePresets(next);
-        void updateGitHubWorkspaceSettings({
-          workspace_id: workspaceId,
-          saved_presets: next,
-        }).then(() => markMigratedToWorkspace(workspaceId));
+        void syncWorkspaceSavedPresets(workspaceId, next)
+          .then(() => markMigratedToWorkspace(workspaceId))
+          .catch(() => {});
         return;
       }
       publish(next);
       void syncServer(next);
       markMigratedToBackend();
     },
-    [activePresets, workspaceId],
+    [activePresets, workspaceId, workspacePresets, setWorkspacePresets],
   );
 
   return { presets: activePresets, save, remove };

@@ -227,7 +227,53 @@ function useInitialSidebarSelection(
     setSelection(next);
   }, []);
 
-  return { selection, setSelection, setUserSelection };
+  return { selection, setProgrammaticSelection: setSelection, setUserSelection };
+}
+
+function firstPresetSelection(
+  kind: SidebarSelection["kind"],
+  pr: PresetOption[],
+  issue: PresetOption[],
+) {
+  const preset = (kind === "pr" ? pr : issue)[0];
+  return {
+    selection: { kind, source: "preset", id: preset?.value ?? "" } as SidebarSelection,
+    filter: preset?.filter ?? "",
+  };
+}
+
+function useSidebarSelectionHandler({
+  savedPresets,
+  resolvedPrPresets,
+  resolvedIssuePresets,
+  setQueryImmediate,
+  setRepoFilter,
+  setUserSelection,
+}: {
+  savedPresets: SavedPreset[];
+  resolvedPrPresets: PresetOption[];
+  resolvedIssuePresets: PresetOption[];
+  setQueryImmediate: (query: string) => void;
+  setRepoFilter: (repo: string) => void;
+  setUserSelection: (next: SidebarSelection) => void;
+}) {
+  return useCallback(
+    (s: SidebarSelection) => {
+      setUserSelection(s);
+      if (s.source === "saved") {
+        const found = savedPresets.find((p) => p.id === s.id);
+        setQueryImmediate(found?.customQuery ?? "");
+        setRepoFilter(found?.repoFilter ?? "");
+        return;
+      }
+      const preset = (s.kind === "pr" ? resolvedPrPresets : resolvedIssuePresets).find(
+        (p) => p.value === s.id,
+      );
+      setQueryImmediate(preset?.filter ?? "");
+      setRepoFilter("");
+    },
+    [savedPresets, setQueryImmediate, resolvedPrPresets, resolvedIssuePresets, setUserSelection],
+  );
 }
 
 function useGitHubPageState(workspaceId: string | null) {
@@ -247,7 +293,7 @@ function useGitHubPageState(workspaceId: string | null) {
     save: saveSavedPreset,
     remove: removeSavedPreset,
   } = useSavedPresets(workspaceId);
-  const { selection, setSelection, setUserSelection } = useInitialSidebarSelection(
+  const { selection, setProgrammaticSelection, setUserSelection } = useInitialSidebarSelection(
     workspaceId,
     resolvedPrPresets,
     setQueryImmediate,
@@ -275,36 +321,33 @@ function useGitHubPageState(workspaceId: string | null) {
     [selection, savedPresets, resolvedPrPresets, resolvedIssuePresets],
   );
 
-  const onSelect = useCallback(
-    (s: SidebarSelection) => {
-      setUserSelection(s);
-      if (s.source === "saved") {
-        const found = savedPresets.find((p) => p.id === s.id);
-        setQueryImmediate(found?.customQuery ?? "");
-        setRepoFilter(found?.repoFilter ?? "");
-        return;
-      }
-      const presetList = s.kind === "pr" ? resolvedPrPresets : resolvedIssuePresets;
-      const preset = presetList.find((p) => p.value === s.id);
-      setQueryImmediate(preset?.filter ?? "");
-      setRepoFilter("");
-    },
-    [savedPresets, setQueryImmediate, resolvedPrPresets, resolvedIssuePresets, setUserSelection],
-  );
+  const onSelect = useSidebarSelectionHandler({
+    savedPresets,
+    resolvedPrPresets,
+    resolvedIssuePresets,
+    setQueryImmediate,
+    setRepoFilter,
+    setUserSelection,
+  });
 
   const canSaveCurrent = customQuery.trim().length > 0 || repoFilter.length > 0;
   const suggestedLabel = customQuery.trim() || (repoFilter ? `In ${repoFilter}` : "Saved query");
   const onOpenSaveDialog = () => canSaveCurrent && setSaveDialogOpen(true);
   const onConfirmSave = (label: string) => {
     const created = saveSavedPreset({ kind: selection.kind, label, customQuery, repoFilter });
-    setSelection({ kind: selection.kind, source: "saved", id: created.id });
+    if (!created) return;
+    setProgrammaticSelection({ kind: selection.kind, source: "saved", id: created.id });
   };
   const onDeleteSaved = (id: string) => {
     removeSavedPreset(id);
     if (selection.source === "saved" && selection.id === id) {
-      const fallbackPresets = selection.kind === "pr" ? resolvedPrPresets : resolvedIssuePresets;
-      setSelection({ kind: selection.kind, source: "preset", id: fallbackPresets[0]?.value ?? "" });
-      setQueryImmediate(fallbackPresets[0]?.filter ?? "");
+      const fallback = firstPresetSelection(
+        selection.kind,
+        resolvedPrPresets,
+        resolvedIssuePresets,
+      );
+      setProgrammaticSelection(fallback.selection);
+      setQueryImmediate(fallback.filter);
       setRepoFilter("");
     }
   };

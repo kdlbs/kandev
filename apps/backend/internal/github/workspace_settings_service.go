@@ -27,19 +27,15 @@ func (s *Service) UpsertWorkspaceSettings(ctx context.Context, settings *Workspa
 
 // UpdateWorkspaceSettings applies a partial update over the existing workspace
 // settings. Scope fields are intentionally updated as a set so switching to
-// All repos clears org/repo selections.
+// All repos clears org/repo selections. Direct struct callers must set
+// SavedPresetsSet/DefaultQueriesSet when they intend to write those blobs;
+// JSON-bound requests set those flags in UpdateWorkspaceSettingsRequest.UnmarshalJSON.
 func (s *Service) UpdateWorkspaceSettings(ctx context.Context, req *UpdateWorkspaceSettingsRequest) (*WorkspaceSettings, error) {
 	if req == nil || strings.TrimSpace(req.WorkspaceID) == "" {
 		return nil, fmt.Errorf("%w: workspace_id is required", ErrWorkspaceSettingsValidation)
 	}
 	if req.RepoScopeMode != nil && !isValidRepoScopeMode(*req.RepoScopeMode) {
 		return nil, fmt.Errorf("%w: invalid repo_scope_mode %q", ErrWorkspaceSettingsValidation, *req.RepoScopeMode)
-	}
-	if req.SavedPresets != nil {
-		req.SavedPresetsSet = true
-	}
-	if req.DefaultQueryPresets != nil {
-		req.DefaultQueriesSet = true
 	}
 	if s.store == nil {
 		return nil, fmt.Errorf("github store not configured")
@@ -91,6 +87,9 @@ func (s *Service) searchUserPRsPagedScoped(
 	page int,
 	perPage int,
 ) (*PRSearchPage, error) {
+	if workspaceSettingsHasEmptyScope(settings) {
+		return &PRSearchPage{PRs: []*PR{}, TotalCount: 0, Page: page, PerPage: perPage}, nil
+	}
 	filter, customQuery = appendWorkspaceScopeToSearch(filter, customQuery, settings)
 	v, err := s.searchUserPagedScoped("pr", settings, filter, customQuery, page, perPage, func(page, perPage int) (any, error) {
 		result, err := s.client.SearchPRsPaged(ctx, filter, customQuery, page, perPage)
@@ -113,6 +112,9 @@ func (s *Service) searchUserIssuesPagedScoped(
 	page int,
 	perPage int,
 ) (*IssueSearchPage, error) {
+	if workspaceSettingsHasEmptyScope(settings) {
+		return &IssueSearchPage{Issues: []*Issue{}, TotalCount: 0, Page: page, PerPage: perPage}, nil
+	}
 	filter, customQuery = appendWorkspaceScopeToSearch(filter, customQuery, settings)
 	v, err := s.searchUserPagedScoped("issue", settings, filter, customQuery, page, perPage, func(page, perPage int) (any, error) {
 		result, err := s.client.ListIssuesPaged(ctx, filter, customQuery, page, perPage)
@@ -173,13 +175,15 @@ func workspaceSettingsHasScope(settings *WorkspaceSettings) bool {
 		return false
 	}
 	switch settings.RepoScopeMode {
-	case RepoScopeModeOrgs:
-		return len(settings.RepoScopeOrgs) > 0
-	case RepoScopeModeRepos:
-		return len(settings.RepoScopeRepos) > 0
+	case RepoScopeModeOrgs, RepoScopeModeRepos:
+		return true
 	default:
 		return false
 	}
+}
+
+func workspaceSettingsHasEmptyScope(settings *WorkspaceSettings) bool {
+	return workspaceSettingsHasScope(settings) && len(workspaceScopeQualifiers(settings)) == 0
 }
 
 func isValidRepoScopeMode(mode string) bool {
@@ -196,7 +200,11 @@ func appendWorkspaceScopeQuery(customQuery string, settings *WorkspaceSettings) 
 	if len(qualifiers) == 0 {
 		return customQuery
 	}
-	return strings.TrimSpace(strings.Join(append([]string{customQuery}, qualifiers...), " "))
+	scope := qualifiers[0]
+	if len(qualifiers) > 1 {
+		scope = "(" + strings.Join(qualifiers, " OR ") + ")"
+	}
+	return strings.TrimSpace(strings.Join([]string{customQuery, scope}, " "))
 }
 
 func appendWorkspaceScopeToSearch(filter, customQuery string, settings *WorkspaceSettings) (string, string) {

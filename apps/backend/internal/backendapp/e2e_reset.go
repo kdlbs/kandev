@@ -82,6 +82,9 @@ func handleE2EReset(
 		if _, err := repo.DB().ExecContext(ctx, `DELETE FROM runtime_flag_overrides`); err != nil {
 			log.Warn("e2e reset: runtime flag override cleanup failed", zap.Error(err))
 		}
+		if _, err := repo.DB().ExecContext(ctx, `DELETE FROM github_workspace_settings WHERE workspace_id = ?`, workspaceID); err != nil {
+			log.Warn("e2e reset: GitHub workspace settings cleanup failed", zap.Error(err))
+		}
 
 		// Reset every agent's routing override to the inherit-markers
 		// shape onboarding writes. Without this, an agent-override test

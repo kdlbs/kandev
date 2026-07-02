@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { searchUserPRs, searchUserIssues } from "@/lib/api/domains/github-api";
 import type { GitHubPR, GitHubIssue } from "@/lib/types/github";
 import type { PresetOption } from "./search-bar";
@@ -72,7 +72,7 @@ export function useGitHubSearch<T extends GitHubPR | GitHubIssue>({
   const requestSeq = useRef(0);
   const workspaceRef = useRef(workspaceId);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     workspaceRef.current = workspaceId;
   }, [workspaceId]);
 

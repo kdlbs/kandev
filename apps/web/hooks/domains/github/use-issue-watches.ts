@@ -85,8 +85,8 @@ export function useIssueWatches(workspaceId?: string | null) {
     [removeWatch],
   );
 
-  const trigger = useCallback(async (id: string) => {
-    return triggerIssueWatch(id);
+  const trigger = useCallback(async (id: string, watchWorkspaceId: string) => {
+    return triggerIssueWatch(id, watchWorkspaceId);
   }, []);
 
   const triggerAll = useCallback(async () => {

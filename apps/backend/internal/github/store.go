@@ -1951,6 +1951,7 @@ func (s *Store) ResetIssueWatchState(ctx context.Context, watchID string) error 
 // --- Workspace settings operations ---
 
 func defaultWorkspaceSettings(workspaceID string) *WorkspaceSettings {
+	now := time.Now().UTC()
 	return &WorkspaceSettings{
 		WorkspaceID:         workspaceID,
 		RepoScopeMode:       RepoScopeModeAll,
@@ -1958,6 +1959,8 @@ func defaultWorkspaceSettings(workspaceID string) *WorkspaceSettings {
 		RepoScopeRepos:      []RepoFilter{},
 		SavedPresets:        json.RawMessage("[]"),
 		DefaultQueryPresets: nil,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}
 }
 

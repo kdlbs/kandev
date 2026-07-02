@@ -81,9 +81,12 @@ func TestService_SearchUserPRsPagedForWorkspace_AppendsScopeToQuery(t *testing.T
 	ctx := context.Background()
 
 	if err := svc.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{
-		WorkspaceID:    "ws-1",
-		RepoScopeMode:  RepoScopeModeRepos,
-		RepoScopeRepos: []RepoFilter{{Owner: "kdlbs", Name: "kandev"}},
+		WorkspaceID:   "ws-1",
+		RepoScopeMode: RepoScopeModeRepos,
+		RepoScopeRepos: []RepoFilter{
+			{Owner: "kdlbs", Name: "kandev"},
+			{Owner: "kdlbs", Name: "docs"},
+		},
 	}); err != nil {
 		t.Fatalf("save workspace settings: %v", err)
 	}
@@ -96,7 +99,7 @@ func TestService_SearchUserPRsPagedForWorkspace_AppendsScopeToQuery(t *testing.T
 		t.Fatalf("expected one scoped PR, got total=%d prs=%+v", page.TotalCount, page.PRs)
 	}
 	if !strings.Contains(client.customQuery, "is:open") ||
-		!strings.Contains(client.customQuery, "repo:kdlbs/kandev") {
+		!strings.Contains(client.customQuery, "(repo:kdlbs/kandev OR repo:kdlbs/docs)") {
 		t.Fatalf("custom query was not workspace scoped: %q", client.customQuery)
 	}
 
@@ -104,8 +107,32 @@ func TestService_SearchUserPRsPagedForWorkspace_AppendsScopeToQuery(t *testing.T
 		t.Fatalf("search scoped prs with preset filter: %v", err)
 	}
 	if !strings.Contains(client.filter, "review-requested:@me") ||
-		!strings.Contains(client.filter, "repo:kdlbs/kandev") {
+		!strings.Contains(client.filter, "(repo:kdlbs/kandev OR repo:kdlbs/docs)") {
 		t.Fatalf("filter query was not workspace scoped: %q", client.filter)
+	}
+}
+
+func TestService_SearchUserPRsPagedForWorkspace_EmptyRepoScopeFailsClosed(t *testing.T) {
+	client := NewMockClient()
+	client.AddPR(&PR{RepoOwner: "kdlbs", RepoName: "kandev", Number: 1, Title: "hidden"})
+	store := newTestStore(t)
+	svc := NewService(client, AuthMethodPAT, nil, store, nil, testLogger(t))
+	ctx := context.Background()
+
+	if err := svc.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{
+		WorkspaceID:    "ws-1",
+		RepoScopeMode:  RepoScopeModeRepos,
+		RepoScopeRepos: []RepoFilter{},
+	}); err != nil {
+		t.Fatalf("save workspace settings: %v", err)
+	}
+
+	page, err := svc.SearchUserPRsPagedForWorkspace(ctx, "ws-1", "", "is:open", 1, 25)
+	if err != nil {
+		t.Fatalf("search scoped prs: %v", err)
+	}
+	if page.TotalCount != 0 || len(page.PRs) != 0 {
+		t.Fatalf("empty repo scope should return no PRs, got total=%d prs=%+v", page.TotalCount, page.PRs)
 	}
 }
 
@@ -158,6 +185,17 @@ func TestService_UpdateWorkspaceSettings_PartialUpdateAndNullClear(t *testing.T)
 	if string(got.SavedPresets) != string(nextSaved) {
 		t.Fatalf("saved presets should be preserved after clear, got %s", got.SavedPresets)
 	}
+
+	got, err = svc.UpdateWorkspaceSettings(ctx, &UpdateWorkspaceSettingsRequest{
+		WorkspaceID:     "ws-1",
+		SavedPresetsSet: true,
+	})
+	if err != nil {
+		t.Fatalf("clear saved presets: %v", err)
+	}
+	if string(got.SavedPresets) != "[]" {
+		t.Fatalf("saved presets should be cleared to empty array, got %s", got.SavedPresets)
+	}
 }
 
 func TestUpdateWorkspaceSettingsRequest_UnmarshalTracksExplicitNull(t *testing.T) {
@@ -170,6 +208,19 @@ func TestUpdateWorkspaceSettingsRequest_UnmarshalTracksExplicitNull(t *testing.T
 	}
 	if req.DefaultQueryPresets != nil {
 		t.Fatalf("expected explicit null to leave raw pointer nil, got %s", *req.DefaultQueryPresets)
+	}
+}
+
+func TestUpdateWorkspaceSettingsRequest_UnmarshalTracksSavedPresetsNull(t *testing.T) {
+	var req UpdateWorkspaceSettingsRequest
+	if err := json.Unmarshal([]byte(`{"workspace_id":"ws-1","saved_presets":null}`), &req); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+	if !req.SavedPresetsSet {
+		t.Fatal("expected saved presets to be marked present")
+	}
+	if req.SavedPresets != nil {
+		t.Fatalf("expected explicit null to leave raw pointer nil, got %s", *req.SavedPresets)
 	}
 }
 
