@@ -106,6 +106,76 @@ func TestProcessOnTurnComplete_ExplicitSignalGating(t *testing.T) {
 	})
 }
 
+func TestProcessOnTurnComplete_BlocksWhileClarificationPending(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedPendingClarificationMessage(t, repo, "t1", "s1")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+		Events: wfmodels.StepEvents{
+			OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+				{Type: wfmodels.OnTurnCompleteMoveToNext},
+			},
+		},
+	}
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+	}
+	svc := createTestService(repo, stepGetter, newMockTaskRepo())
+
+	task, _ := repo.GetTask(ctx, "t1")
+	session, _ := repo.GetTaskSession(ctx, "s1")
+	if got := svc.processOnTurnComplete(ctx, task, session); got {
+		t.Fatal("pending clarification must block legacy on_turn_complete transition")
+	}
+	updated, _ := repo.GetTask(ctx, "t1")
+	if updated.WorkflowStepID != "step1" {
+		t.Fatalf("expected workflow step to remain step1, got %q", updated.WorkflowStepID)
+	}
+}
+
+func TestProcessOnTurnCompleteViaEngine_BlocksWhileClarificationPendingEvenWithSignal(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedPendingClarificationMessage(t, repo, "t1", "s1")
+	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, models.PendingStepCompletionSignal{
+		StepID:     "step1",
+		Source:     models.StepCompletionSourceAgent,
+		Summary:    "done without answer",
+		SignaledAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed signal: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+		AutoAdvanceRequiresSignal: true,
+		Events: wfmodels.StepEvents{
+			OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+				{Type: wfmodels.OnTurnCompleteMoveToNext},
+			},
+		},
+	}
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+	}
+	svc := createEngineService(t, repo, stepGetter, &mockAgentManager{})
+
+	session, _ := repo.GetTaskSession(ctx, "s1")
+	if got := svc.processOnTurnCompleteViaEngine(ctx, "t1", session); got {
+		t.Fatal("pending clarification must block engine on_turn_complete transition even with completion signal")
+	}
+	updated, _ := repo.GetTask(ctx, "t1")
+	if updated.WorkflowStepID != "step1" {
+		t.Fatalf("expected workflow step to remain step1, got %q", updated.WorkflowStepID)
+	}
+}
+
 // TestLoadPendingStepSignal_RoundTrip verifies the bag survives JSON
 // rehydration — important for the backend-restart path where the bag is
 // read from the DB as map[string]interface{} rather than the typed struct.
@@ -243,6 +313,46 @@ func TestOnStepCompletionSignaled(t *testing.T) {
 		updated, _ := repo.GetTask(ctx, "t1")
 		if updated.WorkflowStepID != "step2" {
 			t.Errorf("expected transition to step2, got %q", updated.WorkflowStepID)
+		}
+	})
+
+	t.Run("WAITING + pending clarification → no transition", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		seedPendingClarificationMessage(t, repo, "t1", "s1")
+		if err := repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateWaitingForInput, ""); err != nil {
+			t.Fatalf("flip session waiting: %v", err)
+		}
+		signal := models.PendingStepCompletionSignal{
+			StepID:     "step1",
+			Source:     models.StepCompletionSourceAgent,
+			Summary:    "ok",
+			SignaledAt: time.Now().UTC(),
+		}
+		if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
+			t.Fatalf("seed bag: %v", err)
+		}
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+			AutoAdvanceRequiresSignal: true,
+			Events: wfmodels.StepEvents{
+				OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+					{Type: wfmodels.OnTurnCompleteMoveToNext},
+				},
+			},
+		}
+		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+		}
+		svc := createTestService(repo, stepGetter, newMockTaskRepo())
+
+		svc.onStepCompletionSignaled(ctx, buildEvent("t1", "s1", "step1"))
+
+		updated, _ := repo.GetTask(ctx, "t1")
+		if updated.WorkflowStepID != "step1" {
+			t.Errorf("expected pending clarification to keep task on step1, got %q", updated.WorkflowStepID)
 		}
 	})
 

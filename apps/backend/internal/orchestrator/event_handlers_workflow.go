@@ -56,6 +56,10 @@ func (s *Service) processOnTurnComplete(ctx context.Context, task *models.Task, 
 		return false
 	}
 
+	if s.turnCompleteBlockedByUserInput(ctx, taskID, sessionID, session) {
+		return false
+	}
+
 	// ADR 0015 — explicit completion signal gating (legacy path mirror of
 	// processOnTurnCompleteViaEngine). Steps marked
 	// `auto_advance_requires_signal=true` wait for a step_complete_kandev
@@ -2013,6 +2017,9 @@ func (s *Service) processOnTurnCompleteViaEngine(ctx context.Context, taskID str
 			zap.String("step_id", task.WorkflowStepID),
 			zap.Error(stepErr))
 		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+		return false
+	}
+	if s.turnCompleteBlockedByUserInput(ctx, taskID, session.ID, session) {
 		return false
 	}
 	if currentStep.AutoAdvanceRequiresSignal {

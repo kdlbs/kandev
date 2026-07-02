@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -270,6 +272,118 @@ func TestHandleClarificationStaleDismissed(t *testing.T) {
 			t.Fatalf("expected task state %q, got %q (ok=%v)", v1.TaskStateReview, state, ok)
 		}
 	})
+}
+
+func TestPauseForClarificationInput_SilentlyCancelsTurnWithoutWorkflowTransition(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+	seedPendingClarificationMessage(t, repo, "t1", "s1")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Plan", Position: 0,
+		Events: wfmodels.StepEvents{
+			OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+				{Type: wfmodels.OnTurnCompleteMoveToNext},
+			},
+		},
+	}
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID: "step2", WorkflowID: "wf1", Name: "Implement", Position: 1,
+	}
+
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	canceller := &recordingClarificationCanceller{}
+	svc := createEngineService(t, repo, stepGetter, agentMgr)
+	svc.SetClarificationCanceller(canceller)
+	svc.turnService = &repoBackedTurnService{repo: repo}
+
+	if err := svc.PauseForClarificationInput(ctx, "s1"); err != nil {
+		t.Fatalf("pause clarification input: %v", err)
+	}
+	if err := svc.PauseForClarificationInput(ctx, "s1"); err != nil {
+		t.Fatalf("repeat pause clarification input: %v", err)
+	}
+
+	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
+		t.Fatalf("expected silent cancel call, got %d", got)
+	}
+	if len(canceller.sessions) == 0 || canceller.sessions[0] != "s1" {
+		t.Fatalf("expected clarification detach for s1, got %#v", canceller.sessions)
+	}
+	task, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.WorkflowStepID != "step1" {
+		t.Fatalf("timeout pause must not run on_turn_complete; got step %q", task.WorkflowStepID)
+	}
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("expected session waiting for input, got %q", session.State)
+	}
+	if turn, err := repo.GetActiveTurnBySessionID(ctx, "s1"); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("get active turn: %v", err)
+	} else if turn != nil {
+		t.Fatalf("expected active turn to be completed, got %#v", turn)
+	}
+}
+
+func TestHandleClarificationAnswered_SkipsOnTurnStart(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+	if err := repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateWaitingForInput, ""); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Plan", Position: 0,
+		Events: wfmodels.StepEvents{
+			OnTurnStart: []wfmodels.OnTurnStartAction{
+				{Type: wfmodels.OnTurnStartMoveToNext},
+			},
+		},
+	}
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID: "step2", WorkflowID: "wf1", Name: "Implement", Position: 1,
+	}
+
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createEngineService(t, repo, stepGetter, agentMgr)
+	event := bus.NewEvent("clarification.answered", "test", map[string]any{
+		"session_id":  "s1",
+		"task_id":     "t1",
+		"pending_id":  "pending-1",
+		"question":    "Which database?",
+		"answer_text": "User selected: PostgreSQL",
+		"rejected":    false,
+	})
+
+	if err := svc.handleClarificationAnswered(ctx, event); err != nil {
+		t.Fatalf("handle clarification answered: %v", err)
+	}
+
+	task, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.WorkflowStepID != "step1" {
+		t.Fatalf("clarification continuation must not run on_turn_start; got step %q", task.WorkflowStepID)
+	}
+	if len(agentMgr.capturedPrompts) != 1 {
+		t.Fatalf("expected one clarification answer prompt, got %d", len(agentMgr.capturedPrompts))
+	}
+	if !strings.Contains(agentMgr.capturedPrompts[0], "User selected: PostgreSQL") {
+		t.Fatalf("clarification answer prompt missing answer: %q", agentMgr.capturedPrompts[0])
+	}
 }
 
 func TestBuildClarificationPrompt(t *testing.T) {
