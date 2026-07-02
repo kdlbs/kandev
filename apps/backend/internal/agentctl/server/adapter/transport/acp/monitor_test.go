@@ -214,6 +214,17 @@ func TestRouteMonitorEvents_NoEnvelopeShortCircuits(t *testing.T) {
 
 func TestConvertToolCallResultUpdate_MonitorRegistrationOverridesCompleted(t *testing.T) {
 	a := newTestAdapter()
+	tc := &acp.SessionUpdateToolCall{
+		ToolCallId: "tc-monitor",
+		Title:      monitorToolName,
+		Kind:       acp.ToolKind("other"),
+		Meta:       monitorMeta(),
+		RawInput:   map[string]any{"command": "tail -f /var/log/x"},
+	}
+	if ev := a.convertToolCallUpdate("s1", tc); ev == nil {
+		t.Fatalf("seed: convertToolCallUpdate returned nil")
+	}
+
 	completed := acp.ToolCallStatus("completed")
 	tcu := &acp.SessionToolCallUpdate{
 		ToolCallId: "tc-monitor",
@@ -305,6 +316,52 @@ func TestConvertToolCallResultUpdate_MonitorRegistrationSurvivesNormalize(t *tes
 	}
 	if monitor["command"] != "tail -f /var/log/x" {
 		t.Errorf("monitor.command = %v, want it carried over from initial tool_call", monitor["command"])
+	}
+}
+
+func TestConvertToolCallResultUpdate_MonitorRegistrationRequiresCommand(t *testing.T) {
+	a := newTestAdapter()
+
+	tc := &acp.SessionUpdateToolCall{
+		ToolCallId: "tc-monitor",
+		Title:      monitorToolName,
+		Kind:       acp.ToolKind("other"),
+		Meta:       monitorMeta(),
+		RawInput:   map[string]any{},
+	}
+	if ev := a.convertToolCallUpdate("s1", tc); ev == nil {
+		t.Fatalf("seed: convertToolCallUpdate returned nil")
+	}
+
+	completed := acp.ToolCallStatus("completed")
+	tcu := &acp.SessionToolCallUpdate{
+		ToolCallId: "tc-monitor",
+		Status:     &completed,
+		Meta:       monitorMeta(),
+		RawOutput:  "Monitor started (task fakeTaskId, timeout 60000ms). You will be notified.",
+	}
+
+	ev := a.convertToolCallResultUpdate("s1", tcu)
+	if ev == nil {
+		t.Fatal("expected generic tool update for malformed Monitor registration")
+	}
+	if ev.ToolStatus != toolStatusComplete {
+		t.Fatalf("ToolStatus = %q, want complete (malformed registration must not stay in_progress)", ev.ToolStatus)
+	}
+	if _, ok := a.lookupMonitorByTaskID("s1", "fakeTaskId"); ok {
+		t.Fatal("malformed Monitor registration was tracked")
+	}
+	if ev.NormalizedPayload != nil && ev.NormalizedPayload.Generic() != nil {
+		if out, ok := ev.NormalizedPayload.Generic().Output.(map[string]any); ok {
+			if _, hasMonitor := out["monitor"]; hasMonitor {
+				t.Fatalf("malformed Monitor registration rendered monitor payload: %+v", out["monitor"])
+			}
+		}
+	}
+
+	a.sweepMonitorsOnPromptEnd("s1")
+	if events := drainEvents(a); len(events) != 0 {
+		t.Fatalf("malformed Monitor registration emitted %d terminal monitor events", len(events))
 	}
 }
 

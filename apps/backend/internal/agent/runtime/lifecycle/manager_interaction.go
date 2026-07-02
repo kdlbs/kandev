@@ -987,6 +987,34 @@ func (m *Manager) IsAgentReadyForPrompt(ctx context.Context, sessionID string) b
 	return execution.agentctl.HasAgentStream()
 }
 
+func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string) error {
+	execution, exists := m.GetExecutionBySessionID(sessionID)
+	if !exists {
+		return fmt.Errorf("session %q has no execution: %w", sessionID, ErrExecutionNotFound)
+	}
+	if execution.PassthroughProcessID != "" || execution.IsPassthrough || execution.agentctl == nil {
+		return nil
+	}
+	if execution.agentctl.HasAgentStream() {
+		return nil
+	}
+	if m.streamManager == nil {
+		return fmt.Errorf("stream manager is not configured")
+	}
+
+	ready := make(chan struct{})
+	m.streamManager.connectUpdatesStreamAsync(execution, ready)
+	select {
+	case <-ready:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if !execution.agentctl.HasAgentStream() {
+		return fmt.Errorf("agent stream not connected")
+	}
+	return nil
+}
+
 // UpdateStatus updates the status of an execution
 func (m *Manager) UpdateStatus(executionID string, status v1.AgentStatus) error {
 	if err := m.executionStore.WithLock(executionID, func(execution *AgentExecution) {

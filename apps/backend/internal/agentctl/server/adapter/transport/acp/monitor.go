@@ -119,6 +119,11 @@ func monitorCommandFromPayload(payload *streams.NormalizedPayload) string {
 	return cmd
 }
 
+func validMonitorCommandFromPayload(payload *streams.NormalizedPayload) (string, bool) {
+	cmd := strings.TrimSpace(monitorCommandFromPayload(payload))
+	return cmd, cmd != ""
+}
+
 // isTrackedMonitor returns true if any taskID -> toolCallID mapping in the
 // session's activeMonitors entry equals the given toolCallID. Used by
 // convertToolCallResultUpdate to recognize agent-emitted terminal updates
@@ -127,6 +132,10 @@ func monitorCommandFromPayload(payload *streams.NormalizedPayload) string {
 func (a *Adapter) isTrackedMonitor(sessionID, toolCallID string) bool {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
+	return a.isTrackedMonitorLocked(sessionID, toolCallID)
+}
+
+func (a *Adapter) isTrackedMonitorLocked(sessionID, toolCallID string) bool {
 	for _, tcID := range a.activeMonitors[sessionID] {
 		if tcID == toolCallID {
 			return true
@@ -158,6 +167,10 @@ func (a *Adapter) dropMonitorByToolCallIDLocked(sessionID, toolCallID string) {
 func (a *Adapter) trackMonitor(sessionID, taskID, toolCallID string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.trackMonitorLocked(sessionID, taskID, toolCallID)
+}
+
+func (a *Adapter) trackMonitorLocked(sessionID, taskID, toolCallID string) {
 	monitors := a.activeMonitors[sessionID]
 	if monitors == nil {
 		monitors = make(map[string]string)
@@ -427,7 +440,7 @@ func monitorEventEvent(sessionID, toolCallID string, body string, payload *strea
 // history — drop it from the map.
 func (a *Adapter) captureReplayMonitor(sessionID string, u acp.SessionUpdate) {
 	if tc := u.ToolCall; tc != nil {
-		if _, ok := recognizeMonitorTaskCall(tc); ok {
+		if cmd, ok := recognizeMonitorTaskCall(tc); ok && strings.TrimSpace(cmd) != "" {
 			a.trackMonitor(sessionID, replayPendingTaskID(string(tc.ToolCallId)), string(tc.ToolCallId))
 		}
 	}

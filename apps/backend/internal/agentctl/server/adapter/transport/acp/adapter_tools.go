@@ -167,21 +167,6 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	// open, and remember taskID -> toolCallID so subsequent task-notification
 	// envelopes can route their events back to this card.
 	monitorTaskID, isMonitorRegistration := recognizeMonitorRegistration(tcu.Meta, tcu.RawOutput)
-	if isMonitorRegistration && status == toolStatusComplete {
-		a.trackMonitor(sessionID, monitorTaskID, toolCallID)
-		status = toolStatusInProgress
-		a.logger.Info("monitor registered",
-			zap.String("session_id", sessionID),
-			zap.String("task_id", monitorTaskID),
-			zap.String("tool_call_id", toolCallID))
-	}
-
-	// A terminal tool_call_update for an already-tracked Monitor (the agent
-	// proactively ended the watch). NormalizeToolResult would otherwise stomp
-	// the `{monitor: …}` view in Generic.Output with the raw string body, so
-	// we suppress the normalize call and let the closing-out logic below mark
-	// the view as ended instead.
-	isTrackedMonitorTerminal := !isMonitorRegistration && isMonitorMeta(tcu.Meta) && a.isTrackedMonitor(sessionID, toolCallID)
 
 	// Cheap pre-lock inspection of the meta envelope. The override itself runs
 	// under the lock so it can gate on payload kind (subagent_task only).
@@ -189,6 +174,31 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 
 	a.mu.Lock()
 	payload := a.activeToolCalls[toolCallID]
+	monitorCommand := ""
+	if isMonitorRegistration && status == toolStatusComplete {
+		if cmd, ok := validMonitorCommandFromPayload(payload); ok {
+			monitorCommand = cmd
+			a.trackMonitorLocked(sessionID, monitorTaskID, toolCallID)
+			status = toolStatusInProgress
+			a.logger.Info("monitor registered",
+				zap.String("session_id", sessionID),
+				zap.String("task_id", monitorTaskID),
+				zap.String("tool_call_id", toolCallID))
+		} else {
+			a.logger.Warn("ignoring malformed monitor registration",
+				zap.String("session_id", sessionID),
+				zap.String("task_id", monitorTaskID),
+				zap.String("tool_call_id", toolCallID))
+			isMonitorRegistration = false
+		}
+	}
+
+	// A terminal tool_call_update for an already-tracked Monitor (the agent
+	// proactively ended the watch). NormalizeToolResult would otherwise stomp
+	// the `{monitor: …}` view in Generic.Output with the raw string body, so
+	// we suppress the normalize call and let the closing-out logic below mark
+	// the view as ended instead.
+	isTrackedMonitorTerminal := !isMonitorRegistration && isMonitorMeta(tcu.Meta) && a.isTrackedMonitorLocked(sessionID, toolCallID)
 
 	// Recognize claude-acp's async-launched subagent envelope: the Task tool
 	// successfully dispatched a background subagent. The dispatch IS terminal
@@ -236,7 +246,7 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	// would shadow it and the frontend would render this as a generic
 	// tool_call instead.
 	if isMonitorRegistration && payload != nil {
-		seedMonitorView(payload, monitorTaskID, monitorCommandFromPayload(payload))
+		seedMonitorView(payload, monitorTaskID, monitorCommand)
 	}
 
 	// Preserve and mark-ended the Monitor view on tracked-Monitor terminal

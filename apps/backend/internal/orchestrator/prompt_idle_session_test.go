@@ -405,6 +405,62 @@ func TestEnsureSessionRunning_WaitsForPromptReadyWhenExecutionExists(t *testing.
 	}
 }
 
+type promptStreamRecoveringAgentManager struct {
+	*mockAgentManager
+	recovered atomic.Bool
+}
+
+func (m *promptStreamRecoveringAgentManager) RecoverAgentPromptStream(context.Context, string) error {
+	m.recovered.Store(true)
+	return nil
+}
+
+func TestPromptTask_StalePromptStreamRecoversBeforeTimeout(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(context.Background(), "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentProfileID = "profile1"
+	if err := repo.UpdateTaskSession(context.Background(), session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-stale-stream")
+
+	baseMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+	}
+	agentMgr := &promptStreamRecoveringAgentManager{mockAgentManager: baseMgr}
+	baseMgr.isAgentReadyFn = func(context.Context, string) bool {
+		return agentMgr.recovered.Load()
+	}
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID:    "task1",
+		Title: "Test Task",
+		State: v1.TaskStateInProgress,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	_, err = svc.PromptTask(ctx, "task1", "session1", "are you stuck?", "", false, nil, false)
+	if err != nil {
+		t.Fatalf("expected stale prompt stream to recover, got: %v", err)
+	}
+	if !agentMgr.recovered.Load() {
+		t.Fatal("expected prompt stream recovery to run")
+	}
+	if len(agentMgr.capturedPromptCalls) != 1 {
+		t.Fatalf("expected prompt to be delivered after recovery, got %d calls", len(agentMgr.capturedPromptCalls))
+	}
+}
+
 func TestPromptTask_LazyResumeExecutionNotFoundFallsBackToFreshLaunch(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
