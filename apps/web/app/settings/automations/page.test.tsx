@@ -69,6 +69,9 @@ describe("AutomationsTopLevelPage", () => {
 
     render(<AutomationsTopLevelPage />);
 
+    // Exactly once — `useRouter()` returns a stable (useMemo([])) reference, so the
+    // effect must not re-fire and re-redirect on re-render.
+    expect(replaceSpy).toHaveBeenCalledTimes(1);
     expect(replaceSpy).toHaveBeenCalledWith("/settings/workspace/only-ws/automations");
     expect(listWorkspacesSpy).not.toHaveBeenCalled();
   });
