@@ -157,6 +157,77 @@ func TestStore_UpdateLastSeenTS(t *testing.T) {
 	}
 }
 
+func TestStore_MigrateSingletonConfigToActiveWorkspace(t *testing.T) {
+	raw, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	raw.SetMaxOpenConns(1)
+	raw.SetMaxIdleConns(1)
+	db := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+
+	now := time.Now().UTC()
+	if _, err := db.Exec(`
+		CREATE TABLE workspaces (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		);
+		CREATE TABLE users (
+			id TEXT PRIMARY KEY,
+			email TEXT NOT NULL,
+			settings TEXT NOT NULL DEFAULT '{}',
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		);
+		CREATE TABLE slack_configs (
+			id TEXT PRIMARY KEY CHECK(id = 'singleton'),
+			auth_method TEXT NOT NULL,
+			command_prefix TEXT NOT NULL DEFAULT '',
+			utility_agent_id TEXT NOT NULL DEFAULT '',
+			poll_interval_seconds INTEGER NOT NULL DEFAULT 30,
+			slack_team_id TEXT NOT NULL DEFAULT '',
+			slack_user_id TEXT NOT NULL DEFAULT '',
+			last_seen_ts TEXT NOT NULL DEFAULT '',
+			last_checked_at DATETIME,
+			last_ok INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		);
+		INSERT INTO workspaces (id, name, created_at, updated_at)
+			VALUES ('ws-first', 'First', ?, ?), ('ws-active', 'Active', ?, ?);
+		INSERT INTO users (id, email, settings, created_at, updated_at)
+			VALUES ('default-user', 'default@kandev.local', '{"workspace_id":"ws-active"}', ?, ?);
+		INSERT INTO slack_configs (
+			id, auth_method, command_prefix, utility_agent_id, poll_interval_seconds,
+			slack_team_id, slack_user_id, last_seen_ts, last_ok, created_at, updated_at
+		) VALUES ('singleton', 'cookie', '!kandev', 'ua-active', 60, 'T-active', 'U-active', '200.0', 1, ?, ?);
+	`, now.Add(-time.Hour), now.Add(-time.Hour), now, now, now, now, now, now); err != nil {
+		t.Fatalf("seed singleton schema: %v", err)
+	}
+
+	store, err := NewStore(db, db)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	if got := store.MigratedFromWorkspace(); got != "ws-active" {
+		t.Fatalf("expected singleton config migrated to active workspace, got %q", got)
+	}
+	cfg, err := store.GetConfigForWorkspace(context.Background(), "ws-active")
+	if err != nil || cfg == nil {
+		t.Fatalf("get active workspace config: cfg=%v err=%v", cfg, err)
+	}
+	if cfg.UtilityAgentID != "ua-active" || cfg.CommandPrefix != "!kandev" || cfg.PollIntervalSeconds != 60 {
+		t.Errorf("unexpected migrated settings: %+v", cfg)
+	}
+	if cfg.SlackTeamID != "T-active" || cfg.SlackUserID != "U-active" || cfg.LastSeenTS != "200.0" {
+		t.Errorf("unexpected migrated runtime state: %+v", cfg)
+	}
+}
+
 func TestStore_LegacyPerWorkspaceMigration(t *testing.T) {
 	// Simulate a deployment running the pre-singleton schema: a slack_configs
 	// table keyed by workspace_id, with the most-recently-updated row to be

@@ -114,6 +114,73 @@ func TestStore_HasConfig(t *testing.T) {
 	}
 }
 
+func TestStore_MigrateSingletonConfigToActiveWorkspace(t *testing.T) {
+	raw, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	raw.SetMaxOpenConns(1)
+	raw.SetMaxIdleConns(1)
+	db := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+
+	now := time.Now().UTC()
+	if _, err := db.Exec(`
+		CREATE TABLE workspaces (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		);
+		CREATE TABLE users (
+			id TEXT PRIMARY KEY,
+			email TEXT NOT NULL,
+			settings TEXT NOT NULL DEFAULT '{}',
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		);
+		CREATE TABLE jira_configs (
+			id TEXT PRIMARY KEY CHECK(id = 'singleton'),
+			site_url TEXT NOT NULL,
+			email TEXT NOT NULL DEFAULT '',
+			auth_method TEXT NOT NULL,
+			default_project_key TEXT NOT NULL DEFAULT '',
+			last_checked_at DATETIME,
+			last_ok INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		);
+		INSERT INTO workspaces (id, name, created_at, updated_at)
+			VALUES ('ws-first', 'First', ?, ?), ('ws-active', 'Active', ?, ?);
+		INSERT INTO users (id, email, settings, created_at, updated_at)
+			VALUES ('default-user', 'default@kandev.local', '{"workspace_id":"ws-active"}', ?, ?);
+		INSERT INTO jira_configs
+			(id, site_url, email, auth_method, default_project_key, last_ok, created_at, updated_at)
+			VALUES ('singleton', 'https://acme.atlassian.net', 'user@example.com', ?, 'ENG', 1, ?, ?);
+	`, now.Add(-time.Hour), now.Add(-time.Hour), now, now, now, now, AuthMethodAPIToken, now, now); err != nil {
+		t.Fatalf("seed singleton schema: %v", err)
+	}
+
+	store, err := NewStore(db, db)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	if got := store.MigratedFromWorkspace(); got != "ws-active" {
+		t.Fatalf("expected singleton config migrated to active workspace, got %q", got)
+	}
+	cfg, err := store.GetConfigForWorkspace(context.Background(), "ws-active")
+	if err != nil {
+		t.Fatalf("get active workspace config: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected migrated config")
+	}
+	if cfg.SiteURL != "https://acme.atlassian.net" || cfg.DefaultProjectKey != "ENG" {
+		t.Errorf("unexpected migrated config: %+v", cfg)
+	}
+}
+
 func TestStore_UpdateAuthHealth(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
