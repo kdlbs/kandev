@@ -34,16 +34,59 @@ async function openTaskChat(page: Page, taskId: string): Promise<SessionPage> {
 }
 
 function chatEditor(scope: Locator | Page): Locator {
-  return scope.locator(".tiptap.ProseMirror").first();
+  // Multiple TipTap instances can be mounted; always scope to the first visible one in scope.
+  return scope.locator(".tiptap.ProseMirror:visible").first();
 }
 
-async function selectSlowCommandWithEnter(page: Page, editor: Locator): Promise<void> {
+async function selectSlowCommandWithEnter(
+  page: Page,
+  editor: Locator,
+  initialText = "",
+): Promise<void> {
   await editor.click();
-  await editor.fill("");
+  await editor.fill(initialText);
   await editor.pressSequentially("/s");
   await expect(page.getByText("/slow", { exact: true })).toBeVisible({ timeout: 5_000 });
   await editor.press("Enter");
   await expect(editor).toHaveText(/\/slow/, { timeout: 5_000 });
+}
+
+async function installAvailableCommandRecorder(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __wsAvailableCommands: unknown[] };
+    w.__wsAvailableCommands = [];
+    const OrigWS = window.WebSocket;
+    const Hooked = function (this: WebSocket, url: string | URL, protocols?: string | string[]) {
+      const ws = new OrigWS(url, protocols);
+      ws.addEventListener("message", (ev: MessageEvent) => {
+        try {
+          const message = JSON.parse(String(ev.data));
+          if (message.action === "session.available_commands") {
+            w.__wsAvailableCommands.push({
+              session_id: message.payload?.session_id,
+              count: message.payload?.available_commands?.length ?? 0,
+            });
+          }
+        } catch {
+          // Ignore non-JSON websocket frames.
+        }
+      });
+      return ws;
+    } as unknown as typeof WebSocket;
+    Hooked.prototype = OrigWS.prototype;
+    Object.assign(Hooked, OrigWS);
+    window.WebSocket = Hooked;
+  });
+}
+
+async function waitForAvailableCommands(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const w = window as unknown as { __wsAvailableCommands?: unknown[] };
+      return (w.__wsAvailableCommands?.length ?? 0) > 0;
+    },
+    { timeout: 15_000 },
+  );
 }
 
 async function openQuickChatWithAgent(page: Page): Promise<Locator> {
@@ -110,8 +153,60 @@ test.describe("Slash command composer", () => {
     });
   });
 
+  test("selecting a slash command preserves existing draft text", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await createReadyTask(apiClient, seedData, "Slash Command Prefix Draft");
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+    const session = await openTaskChat(testPage, task.id);
+    await seedAvailableCommands(testPage, task.session_id, [SLOW_COMMAND]);
+
+    const editor = chatEditor(testPage);
+    await selectSlowCommandWithEnter(testPage, editor, "please run ");
+
+    await expect(editor).toHaveText(/please run \/slow/, { timeout: 5_000 });
+    await expect(
+      session.chat.locator(".chat-message-list:visible").getByText("please run /slow", {
+        exact: false,
+      }),
+    ).not.toBeVisible({ timeout: 1_000 });
+  });
+
+  test("escape closes the slash command menu without sending", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await createReadyTask(apiClient, seedData, "Slash Command Escape");
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+    const session = await openTaskChat(testPage, task.id);
+    await seedAvailableCommands(testPage, task.session_id, [SLOW_COMMAND]);
+
+    const editor = chatEditor(testPage);
+    await editor.click();
+    await editor.fill("");
+    await editor.pressSequentially("/s");
+    await expect(testPage.getByText("/slow", { exact: true })).toBeVisible({ timeout: 5_000 });
+
+    await editor.press("Escape");
+
+    await expect(testPage.getByText("/slow", { exact: true })).not.toBeVisible({
+      timeout: 5_000,
+    });
+    await expect(
+      session.chat.locator(".chat-message-list:visible").getByText("/slow", { exact: false }),
+    ).not.toBeVisible({ timeout: 1_000 });
+  });
+
   test("quick chat selection does not auto-send", async ({ testPage }) => {
+    await installAvailableCommandRecorder(testPage);
     const dialog = await openQuickChatWithAgent(testPage);
+    await waitForAvailableCommands(testPage);
+
     const editor = chatEditor(dialog);
 
     await selectSlowCommandWithEnter(testPage, editor);

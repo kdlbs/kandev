@@ -1,5 +1,3 @@
-"use client";
-
 export type SlashCommandAction = "agent";
 
 export type SlashCommand = {

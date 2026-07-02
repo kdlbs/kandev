@@ -26,4 +26,10 @@ describe("formatSlashCommandInsertion", () => {
   it("falls back to the label without double-prefixing a slash", () => {
     expect(formatSlashCommandInsertion(command({ agentCommandName: undefined }))).toBe("/slow ");
   });
+
+  it("adds a slash when falling back to a bare label", () => {
+    expect(
+      formatSlashCommandInsertion(command({ agentCommandName: undefined, label: "slow" })),
+    ).toBe("/slow ");
+  });
 });
