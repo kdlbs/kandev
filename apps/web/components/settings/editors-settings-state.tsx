@@ -11,6 +11,7 @@ import {
   parseChangesPanelLayout,
   parseSystemMetricsDisplay,
   parseTerminalLinkBehavior,
+  taskCreateLastUsedHasValue,
   parseVoiceMode,
 } from "@/lib/ssr/user-settings";
 import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
@@ -269,6 +270,7 @@ function mapEditorSyncedLocalFields(
       branch: s.task_create_last_used?.branch || null,
       agentProfileId: s.task_create_last_used?.agent_profile_id || null,
       executorProfileId: s.task_create_last_used?.executor_profile_id || null,
+      synced: taskCreateLastUsedHasValue(s.task_create_last_used),
     },
     jiraSavedViews: s.jira_saved_views,
     jiraTaskPresets: s.jira_task_presets,
