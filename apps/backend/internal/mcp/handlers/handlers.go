@@ -46,6 +46,13 @@ type SessionCanceller interface {
 	DetachSessionAndNotify(ctx context.Context, sessionID string) int
 }
 
+// ClarificationInputPauser performs the orchestrator-owned hard pause for
+// ask_user_question calls that end without an answer. The returned int is the
+// number of clarification bundles detached while pausing.
+type ClarificationInputPauser interface {
+	PauseForClarificationInput(ctx context.Context, sessionID string) (int, error)
+}
+
 // MessageCreator creates messages for clarification requests.
 type MessageCreator interface {
 	CreateClarificationRequestMessages(ctx context.Context, taskID, sessionID, pendingID string, questions []clarification.Question, clarificationContext string) ([]string, error)
@@ -98,6 +105,7 @@ type Handlers struct {
 	workflowCtrl     *workflowctrl.Controller
 	clarificationSvc ClarificationService
 	sessionCanceller SessionCanceller
+	inputPauser      ClarificationInputPauser
 	messageCreator   MessageCreator
 	sessionRepo      SessionRepository
 	taskRepo         TaskRepository
@@ -151,6 +159,12 @@ func NewHandlers(
 		messageQueue:     messageQueue,
 		logger:           log.WithFields(zap.String("component", "mcp-handlers")),
 	}
+}
+
+// SetClarificationInputPauser wires the orchestrator-owned hard pause used when
+// a clarification tool call ends without delivering an answer to the agent.
+func (h *Handlers) SetClarificationInputPauser(pauser ClarificationInputPauser) {
+	h.inputPauser = pauser
 }
 
 // SetConfigDeps sets the config-mode dependencies for agent-native configuration handlers.
@@ -2275,6 +2289,14 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 	// fallback in the orchestrator handles resuming with a new turn.
 	resp, err := h.clarificationSvc.WaitForResponse(ctx, pendingID)
 	if err != nil {
+		if h.inputPauser != nil {
+			if _, pauseErr := h.inputPauser.PauseForClarificationInput(context.WithoutCancel(ctx), req.SessionID); pauseErr != nil {
+				h.logger.Warn("failed to pause session after clarification ended without answer",
+					zap.String("pending_id", pendingID),
+					zap.String("session_id", req.SessionID),
+					zap.Error(pauseErr))
+			}
+		}
 		h.logger.Warn("clarification wait ended without response",
 			zap.String("pending_id", pendingID),
 			zap.String("session_id", req.SessionID),
@@ -2516,6 +2538,28 @@ func (h *Handlers) handleClarificationTimeout(ctx context.Context, msg *ws.Messa
 	}
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+
+	if h.inputPauser != nil {
+		cancelled, err := h.inputPauser.PauseForClarificationInput(context.WithoutCancel(ctx), req.SessionID)
+		if err != nil {
+			h.logger.Warn("failed to pause session after clarification timeout",
+				zap.String("session_id", req.SessionID),
+				zap.Error(err))
+			if h.sessionCanceller == nil {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+					"failed to pause session for clarification input", nil)
+			}
+			cancelled = h.sessionCanceller.DetachSessionAndNotify(context.WithoutCancel(ctx), req.SessionID)
+			h.logger.Info("detached clarification waiters after pause failure",
+				zap.String("session_id", req.SessionID),
+				zap.Int("count", cancelled))
+			return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"ok": true, "cancelled": cancelled, "paused": false})
+		}
+		h.logger.Info("paused session after agent MCP clarification timeout",
+			zap.String("session_id", req.SessionID),
+			zap.Int("count", cancelled))
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"ok": true, "cancelled": cancelled, "paused": true})
 	}
 
 	if h.sessionCanceller == nil {
