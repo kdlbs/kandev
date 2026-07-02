@@ -137,6 +137,8 @@ func (s *Service) addTaskSessionEventFields(ctx context.Context, taskID string, 
 	}
 	sessionInfo, ok := primarySessionInfoMap[taskID]
 	if !ok || sessionInfo == nil {
+		data["primary_session_id"] = nil
+		data["primary_session_state"] = nil
 		return
 	}
 	data["primary_session_id"] = sessionInfo.ID
@@ -145,6 +147,8 @@ func (s *Service) addTaskSessionEventFields(ctx context.Context, taskID string, 
 	}
 	if sessionInfo.State != "" {
 		data["primary_session_state"] = string(sessionInfo.State)
+	} else {
+		data["primary_session_state"] = nil
 	}
 	if sessionInfo.ExecutorID != "" {
 		data["primary_executor_id"] = sessionInfo.ExecutorID

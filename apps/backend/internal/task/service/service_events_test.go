@@ -103,6 +103,26 @@ func TestPublishTaskUpdated_EmitsEmptyRepositories(t *testing.T) {
 	}
 }
 
+func TestPublishTaskUpdated_EmitsNullPrimarySessionFieldsWhenNoPrimaryExists(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	createTaskWithoutRepositories(t, ctx, repo)
+	eventBus.ClearEvents()
+
+	svc.PublishTaskUpdated(ctx, &models.Task{
+		ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+	})
+
+	data := singlePublishedEventData(t, eventBus)
+	if value, ok := data["primary_session_id"]; !ok || value != nil {
+		t.Fatalf("primary_session_id = %#v, want explicit nil", value)
+	}
+	if value, ok := data["primary_session_state"]; !ok || value != nil {
+		t.Fatalf("primary_session_state = %#v, want explicit nil", value)
+	}
+}
+
 func TestPublishTaskUpdated_OmitsRepositoriesOnLookupError(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
