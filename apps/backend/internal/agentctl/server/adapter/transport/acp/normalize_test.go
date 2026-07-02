@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/stretchr/testify/require"
+
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
@@ -831,6 +833,27 @@ func TestUpdatePayloadInput(t *testing.T) {
 		})
 		// Should not panic
 		normalizer.UpdatePayloadInput(payload, "not a map", nil)
+	})
+
+	t.Run("generic input merges without overwriting existing rawInput keys", func(t *testing.T) {
+		payload := normalizer.NormalizeToolCall("Monitor", map[string]any{
+			"kind": "other",
+			"raw_input": map[string]any{
+				"command": "tail -f old.log",
+				"timeout": "",
+			},
+		})
+
+		normalizer.UpdatePayloadInput(payload, map[string]any{
+			"command": "tail -f new.log",
+			"timeout": "60s",
+			"cwd":     "/tmp",
+		}, nil)
+
+		rawInput := payload.Generic().Input.(map[string]any)["raw_input"].(map[string]any)
+		require.Equal(t, "tail -f old.log", rawInput["command"])
+		require.Equal(t, "60s", rawInput["timeout"])
+		require.Equal(t, "/tmp", rawInput["cwd"])
 	})
 }
 

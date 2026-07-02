@@ -870,6 +870,47 @@ func TestRecoverAgentPromptStream(t *testing.T) {
 		updated, ok := mgr.executionStore.Get(exec.ID)
 		require.True(t, ok)
 		require.Equal(t, v1.AgentStatusReady, updated.Status)
+
+		mockBus, ok := mgr.eventBus.(*MockEventBus)
+		require.True(t, ok)
+		var sawBootReady bool
+		for _, ev := range mockBus.PublishedEvents {
+			if ev.Type == events.AgentBootReady {
+				sawBootReady = true
+				break
+			}
+		}
+		require.True(t, sawBootReady, "expected AgentBootReady event after stream recovery")
+	})
+
+	t.Run("does not restore failed status when agent process is stopped", func(t *testing.T) {
+		mock := newMockAgentServer(t)
+		t.Cleanup(mock.Close)
+		mock.agentStatus = "stopped"
+
+		client := createTestClient(t, mock.server.URL)
+		t.Cleanup(client.Close)
+
+		mgr := newTestManager(t)
+		exec := &AgentExecution{
+			ID:                 "exec-recover-stopped",
+			SessionID:          "session-recover-stopped",
+			ACPSessionID:       "acp-session-1",
+			Status:             v1.AgentStatusFailed,
+			agentctl:           client,
+			promptDoneCh:       make(chan PromptCompletionSignal, 1),
+			sessionInitialized: true,
+		}
+		require.NoError(t, mgr.executionStore.Add(exec))
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		t.Cleanup(cancel)
+		err := mgr.RecoverAgentPromptStream(ctx, "session-recover-stopped")
+		require.ErrorContains(t, err, "agent process is not running")
+
+		updated, ok := mgr.executionStore.Get(exec.ID)
+		require.True(t, ok)
+		require.Equal(t, v1.AgentStatusFailed, updated.Status)
 	})
 }
 

@@ -312,11 +312,26 @@ func updateGenericInput(gen *streams.GenericPayload, inputMap, supplemental map[
 			args["raw_input"] = rawInput
 		}
 		for k, v := range inputMap {
-			rawInput[k] = v
+			if isEmptyGenericInputValue(rawInput[k]) {
+				rawInput[k] = v
+			}
 		}
 	}
 	for k, v := range supplemental {
-		args[k] = v
+		if isEmptyGenericInputValue(args[k]) {
+			args[k] = v
+		}
+	}
+}
+
+func isEmptyGenericInputValue(v any) bool {
+	switch x := v.(type) {
+	case nil:
+		return true
+	case string:
+		return x == ""
+	default:
+		return false
 	}
 }
 

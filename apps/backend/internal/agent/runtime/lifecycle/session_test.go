@@ -47,6 +47,7 @@ type mockAgentServer struct {
 	mu                   sync.Mutex
 	actionLog            []string // ordered log of actions received
 	rejectStreamAttempts int
+	agentStatus          string
 	upgrader             websocket.Upgrader
 	handler              func(msg ws.Message) *ws.Message
 	wsConnected          chan struct{} // closed when WS stream connects
@@ -62,6 +63,16 @@ func newMockAgentServer(t *testing.T) *mockAgentServer {
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/status", func(w http.ResponseWriter, _ *http.Request) {
+		m.mu.Lock()
+		status := m.agentStatus
+		m.mu.Unlock()
+		if status == "" {
+			status = "running"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"agent_status":%q}`, status)
+	})
 
 	// Agent stream WebSocket endpoint
 	mux.HandleFunc("/api/v1/agent/stream", func(w http.ResponseWriter, r *http.Request) {
