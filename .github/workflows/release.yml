@@ -140,7 +140,8 @@ jobs:
               echo "backfill_tag must be a SemVer release tag like v1.2.3." >&2
               exit 1
             fi
-            if ! git rev-parse --verify --quiet "${BACKFILL_TAG}^{commit}" >/dev/null; then
+            BACKFILL_REF="refs/tags/$BACKFILL_TAG"
+            if ! git rev-parse --verify --quiet "${BACKFILL_REF}^{commit}" >/dev/null; then
               echo "backfill_tag does not exist: $BACKFILL_TAG" >&2
               exit 1
             fi
@@ -176,12 +177,13 @@ jobs:
               exit 1
             fi
 
-            BACKFILL_TAG="$BACKFILL_TAG" NEXT="$NEXT" node <<'NODE'
+            BACKFILL_REF="$BACKFILL_REF" BACKFILL_TAG="$BACKFILL_TAG" NEXT="$NEXT" node <<'NODE'
             const { execFileSync } = require("node:child_process");
 
             const tag = process.env.BACKFILL_TAG;
+            const ref = process.env.BACKFILL_REF;
             const next = process.env.NEXT;
-            const show = (path) => execFileSync("git", ["show", `${tag}:${path}`], { encoding: "utf8" });
+            const show = (path) => execFileSync("git", ["show", `${ref}:${path}`], { encoding: "utf8" });
             const versions = new Map([
               ["apps/cli/package.json", JSON.parse(show("apps/cli/package.json")).version],
               ["apps/desktop/package.json", JSON.parse(show("apps/desktop/package.json")).version],
@@ -206,7 +208,7 @@ jobs:
             echo "Next version:                 $NEXT"
             echo "version=$NEXT" >> "$GITHUB_OUTPUT"
             echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-            echo "ref=$TAG" >> "$GITHUB_OUTPUT"
+            echo "ref=$BACKFILL_REF" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -260,7 +262,7 @@ jobs:
           if [ "$DESKTOP_VALIDATION_ONLY" = "true" ]; then
             echo "ref=$CURRENT_REF" >> "$GITHUB_OUTPUT"
           else
-            echo "ref=$TAG" >> "$GITHUB_OUTPUT"
+            echo "ref=refs/tags/$TAG" >> "$GITHUB_OUTPUT"
           fi
 
           # Sanity: tag must not already exist
@@ -1042,7 +1044,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -1113,7 +1115,7 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -1226,7 +1228,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
@@ -1278,7 +1280,7 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
@@ -1381,7 +1383,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
           fetch-depth: 0
 
       - name: Generate release notes
@@ -1487,7 +1489,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
 
       - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
         with:
@@ -1519,7 +1521,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
 
       - name: Update Homebrew tap formula
         env:

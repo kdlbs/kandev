@@ -42,6 +42,10 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("backfill_tag cannot be used: no existing release tags found.", WORKFLOW)
         self.assertIn("must be the latest release tag", WORKFLOW)
         self.assertIn("(expected ${next})", WORKFLOW)
+        self.assertIn('BACKFILL_REF="refs/tags/$BACKFILL_TAG"', WORKFLOW)
+        self.assertIn('echo "ref=$BACKFILL_REF" >> "$GITHUB_OUTPUT"', WORKFLOW)
+        self.assertIn('echo "ref=refs/tags/$TAG" >> "$GITHUB_OUTPUT"', WORKFLOW)
+        self.assertNotIn("ref: ${{ needs.prepare.outputs.tag }}", WORKFLOW)
 
         for path in (
             "apps/cli/package.json",
