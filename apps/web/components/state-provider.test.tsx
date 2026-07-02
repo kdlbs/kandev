@@ -187,6 +187,7 @@ describe("StateProvider task-create cache fallback", () => {
     );
 
     expect(onSeen).toHaveBeenCalledWith(JSON.stringify("repo-cached"));
+    // Give any potential deferred deletions a chance to fire (old code used setTimeout(0)).
     await new Promise((resolve) => window.setTimeout(resolve, 10));
     expect(window.localStorage.getItem(STORAGE_KEYS.LAST_REPOSITORY_ID)).toBe(
       JSON.stringify("repo-cached"),
