@@ -302,6 +302,7 @@ func (n *Normalizer) UpdatePayloadInput(payload *streams.NormalizedPayload, rawI
 func updateGenericInput(gen *streams.GenericPayload, inputMap, supplemental map[string]any) {
 	args, ok := gen.Input.(map[string]any)
 	if !ok || args == nil {
+		// rawInput from ACP is always a JSON object; non-map input values are not expected.
 		args = map[string]any{}
 		gen.Input = args
 	}
