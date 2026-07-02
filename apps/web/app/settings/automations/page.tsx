@@ -18,10 +18,9 @@ export default function AutomationsTopLevelPage() {
     }
   }, [soleWorkspaceId, router]);
 
-  if (soleWorkspaceId) {
-    return null;
-  }
-
+  // Render the picker even while a single-workspace redirect is pending: the
+  // effect navigates away on the next tick, but if navigation is delayed or
+  // blocked the page degrades to the workspace list instead of a blank panel.
   if (workspaces.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-8 text-center">

@@ -14,24 +14,31 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 type Workspace = { id: string; name: string; description?: string | null };
 
 let mockWorkspaces: Workspace[] = [];
-const replaceSpy = vi.fn();
-const listWorkspacesSpy = vi.fn();
+const { replaceSpy, listWorkspacesSpy } = vi.hoisted(() => ({
+  replaceSpy: vi.fn(),
+  listWorkspacesSpy: vi.fn(),
+}));
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: { workspaces: { items: Workspace[] } }) => unknown) =>
     selector({ workspaces: { items: mockWorkspaces } }),
 }));
 
-vi.mock("@/lib/routing/client-router", () => ({
-  useRouter: () => ({
+// Mirror the production useRouter(), which returns a memoized (useMemo([]))
+// object — one stable reference across renders. A fresh object per call would
+// change the effect's `router` dependency on re-render and could mask a
+// re-fire regression.
+vi.mock("@/lib/routing/client-router", () => {
+  const router = {
     replace: replaceSpy,
     push: vi.fn(),
     refresh: vi.fn(),
     back: vi.fn(),
     forward: vi.fn(),
     prefetch: vi.fn(),
-  }),
-}));
+  };
+  return { useRouter: () => router };
+});
 
 vi.mock("@/lib/api", () => ({
   listWorkspaces: (...args: unknown[]) => {
@@ -74,6 +81,9 @@ describe("AutomationsTopLevelPage", () => {
     expect(replaceSpy).toHaveBeenCalledTimes(1);
     expect(replaceSpy).toHaveBeenCalledWith("/settings/workspace/only-ws/automations");
     expect(listWorkspacesSpy).not.toHaveBeenCalled();
+    // Graceful degradation: the picker renders while the redirect is pending, so
+    // the page is never blank if navigation is delayed or blocked.
+    expect(screen.getByText("Solo")).toBeTruthy();
   });
 
   it("shows an empty state when there are no workspaces", () => {
