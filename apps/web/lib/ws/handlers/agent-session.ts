@@ -1,5 +1,5 @@
 import type { StoreApi } from "zustand";
-import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import { createDebugLogger } from "@/lib/debug/log";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import {
@@ -10,10 +10,9 @@ import {
   type TaskSessionState,
 } from "@/lib/types/http";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
-import type { KanbanState, WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
+import { syncKanbanPrimarySessionState } from "@/lib/ws/handlers/agent-session-kanban-sync";
 
 const debug = createDebugLogger("session:state");
-const lifecycleDebug = createDebugLogger("task-lifecycle:ws");
 
 const TERMINAL_SESSION_STATES: ReadonlySet<TaskSessionState> = new Set([
   "COMPLETED",
@@ -223,161 +222,6 @@ function maybeFanOutOfficeRefetch(
   if (!setOfficeTrigger) return;
   setOfficeTrigger("dashboard");
   setOfficeTrigger("agents");
-}
-
-function patchTaskPrimarySessionState(
-  tasks: KanbanState["tasks"],
-  taskId: string,
-  sessionId: string,
-  newState: TaskSessionState,
-): KanbanState["tasks"] {
-  let changed = false;
-  const nextTasks = tasks.map((task) => {
-    if (task.id !== taskId || task.primarySessionId !== sessionId) return task;
-    if (task.primarySessionState === newState) return task;
-    changed = true;
-    return { ...task, primarySessionState: newState };
-  });
-  return changed ? nextTasks : tasks;
-}
-
-function patchSnapshotPrimarySessionState(
-  snapshot: WorkflowSnapshotData,
-  taskId: string,
-  sessionId: string,
-  newState: TaskSessionState,
-): WorkflowSnapshotData {
-  const tasks = patchTaskPrimarySessionState(snapshot.tasks, taskId, sessionId, newState);
-  return tasks === snapshot.tasks ? snapshot : { ...snapshot, tasks };
-}
-
-function findKanbanTaskForLog(
-  state: AppState,
-  taskId: string,
-): KanbanState["tasks"][number] | undefined {
-  const activeTask = state.kanban.tasks.find((task) => task.id === taskId);
-  if (activeTask) return activeTask;
-  for (const snapshot of Object.values(state.kanbanMulti.snapshots)) {
-    const snapshotTask = snapshot.tasks.find((task) => task.id === taskId);
-    if (snapshotTask) return snapshotTask;
-  }
-  return undefined;
-}
-
-function patchWorkflowSnapshotPrimarySessionStates(
-  snapshots: Record<string, WorkflowSnapshotData>,
-  taskId: string,
-  sessionId: string,
-  newState: TaskSessionState,
-  patchedSnapshotIds?: string[],
-): {
-  nextSnapshots: Record<string, WorkflowSnapshotData>;
-  snapshotsChanged: boolean;
-} {
-  let snapshotsChanged = false;
-  const nextSnapshots = Object.fromEntries(
-    Object.entries(snapshots).map(([workflowId, snapshot]) => {
-      const nextSnapshot = patchSnapshotPrimarySessionState(snapshot, taskId, sessionId, newState);
-      if (nextSnapshot !== snapshot) {
-        snapshotsChanged = true;
-        patchedSnapshotIds?.push(workflowId);
-      }
-      return [workflowId, nextSnapshot];
-    }),
-  );
-  return { nextSnapshots, snapshotsChanged };
-}
-
-function logKanbanPrimarySessionSync(params: {
-  taskId: string;
-  sessionId: string;
-  newState: TaskSessionState;
-  beforeTask: KanbanState["tasks"][number] | undefined;
-  patchedKanban: boolean;
-  patchedSnapshotIds: string[];
-}): void {
-  if (!isDebug()) return;
-  lifecycleDebug("session.state_changed kanban sync", {
-    task_id: params.taskId,
-    sessionId: params.sessionId,
-    newState: params.newState,
-    beforeTaskPrimarySessionId: params.beforeTask?.primarySessionId ?? "-",
-    beforeTaskPrimaryState: params.beforeTask?.primarySessionState ?? "-",
-    patchedKanban: params.patchedKanban,
-    patchedSnapshots: params.patchedSnapshotIds.join(",") || "-",
-  });
-}
-
-function syncKanbanPrimarySessionState(
-  store: StoreApi<AppState>,
-  taskId: TaskId,
-  sessionId: SessionId,
-  newState: TaskSessionState | undefined,
-): void {
-  if (!newState) return;
-
-  const state = store.getState();
-  if (!state.kanban?.tasks || !state.kanbanMulti?.snapshots) return;
-
-  const debugMode = isDebug();
-  const beforeTask = debugMode ? findKanbanTaskForLog(state, taskId) : undefined;
-  let syncLog:
-    | {
-        patchedKanban: boolean;
-        patchedSnapshotIds: string[];
-      }
-    | undefined;
-
-  store.setState((currentState) => {
-    if (!currentState.kanban?.tasks || !currentState.kanbanMulti?.snapshots) return currentState;
-    const patchedSnapshotIds = debugMode ? [] : undefined;
-    const nextKanbanTasks = patchTaskPrimarySessionState(
-      currentState.kanban.tasks,
-      taskId,
-      sessionId,
-      newState,
-    );
-    const { nextSnapshots, snapshotsChanged } = patchWorkflowSnapshotPrimarySessionStates(
-      currentState.kanbanMulti.snapshots,
-      taskId,
-      sessionId,
-      newState,
-      patchedSnapshotIds,
-    );
-    if (debugMode) {
-      syncLog = {
-        patchedKanban: nextKanbanTasks !== currentState.kanban.tasks,
-        patchedSnapshotIds: patchedSnapshotIds ?? [],
-      };
-    }
-
-    if (nextKanbanTasks === currentState.kanban.tasks && !snapshotsChanged) return currentState;
-
-    return {
-      ...currentState,
-      kanban:
-        nextKanbanTasks === currentState.kanban.tasks
-          ? currentState.kanban
-          : { ...currentState.kanban, tasks: nextKanbanTasks },
-      kanbanMulti: snapshotsChanged
-        ? {
-            ...currentState.kanbanMulti,
-            snapshots: nextSnapshots,
-          }
-        : currentState.kanbanMulti,
-    };
-  });
-
-  if (debugMode && syncLog) {
-    logKanbanPrimarySessionSync({
-      taskId,
-      sessionId,
-      newState,
-      beforeTask,
-      patchedKanban: syncLog.patchedKanban,
-      patchedSnapshotIds: syncLog.patchedSnapshotIds,
-    });
-  }
 }
 
 /** Extract context window data from payload metadata and store it. */
