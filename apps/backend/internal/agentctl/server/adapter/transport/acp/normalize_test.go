@@ -856,23 +856,21 @@ func TestUpdatePayloadInput(t *testing.T) {
 		require.Equal(t, "/tmp", rawInput["cwd"])
 	})
 
-	t.Run("generic input merges supplemental without overwriting existing keys", func(t *testing.T) {
+	t.Run("generic input fills empty supplemental keys and skips non-empty ones", func(t *testing.T) {
 		payload := normalizer.NormalizeToolCall("Monitor", map[string]any{
-			"kind":     "other",
-			"location": "existing location",
-			"empty":    "",
+			"kind":      "other",
+			"raw_input": map[string]any{},
+			"path":      "/existing/path",
 		})
 
 		normalizer.UpdatePayloadInput(payload, nil, map[string]any{
-			"location": "line 42",
-			"empty":    "filled",
-			"note":     "from update",
+			"path":  "/new/path",
+			"title": "My Monitor",
 		})
 
 		args := payload.Generic().Input.(map[string]any)
-		require.Equal(t, "existing location", args["location"])
-		require.Equal(t, "filled", args["empty"])
-		require.Equal(t, "from update", args["note"])
+		require.Equal(t, "/existing/path", args["path"])
+		require.Equal(t, "My Monitor", args["title"])
 	})
 }
 
