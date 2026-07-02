@@ -444,6 +444,23 @@ func TestBuildIssueFilter_BareNumber(t *testing.T) {
 	}
 }
 
+// TestBuildIssueFilter_BareNumberComposesWithTeam mirrors the identifier
+// compose test for the bare-number path: a selected team must AND with the
+// number OR branch (Linear ANDs all top-level conditions) so the number search
+// is scoped to that team, and no separate top-level searchableContent leaks in.
+func TestBuildIssueFilter_BareNumberComposesWithTeam(t *testing.T) {
+	got := buildIssueFilter(SearchFilter{Query: "2438", TeamKey: "ENG"})
+	if _, ok := got["or"]; !ok {
+		t.Error("expected or branch for bare-number query")
+	}
+	if _, ok := got["team"]; !ok {
+		t.Error("expected top-level team filter to AND with the or branches")
+	}
+	if _, ok := got["searchableContent"]; ok {
+		t.Error("bare-number query must not set a separate top-level searchableContent")
+	}
+}
+
 func TestParseIssueNumber(t *testing.T) {
 	cases := []struct {
 		in     string

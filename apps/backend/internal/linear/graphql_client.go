@@ -554,12 +554,13 @@ func parseIssueNumber(q string) (int, bool) {
 	return n, true
 }
 
-// searchableContentFilter matches free text across an issue's title and
-// description. `searchableContent` is a Linear ContentComparator whose only
-// text operator is `contains`, which is already case-insensitive full-text —
-// it deliberately does NOT expose `containsIgnoreCase` (sending that field
-// makes Linear reject the whole query with BAD_USER_INPUT / status 400).
-func searchableContentFilter(q string) map[string]interface{} {
+// searchableContentComparator matches free text across an issue's title and
+// description. It returns Linear's ContentComparator value (the inner map) that
+// callers nest under the `searchableContent` key — not the full filter. Its one
+// text operator, `contains`, is already case-insensitive full-text; the
+// ContentComparator deliberately does NOT expose `containsIgnoreCase` (sending
+// that field makes Linear reject the whole query with BAD_USER_INPUT / 400).
+func searchableContentComparator(q string) map[string]interface{} {
 	return map[string]interface{}{"contains": q}
 }
 
@@ -571,10 +572,10 @@ func searchableContentFilter(q string) map[string]interface{} {
 // ticket. The searchableContent branch stays in the OR so cross-references like
 // "duplicate of ENG-123" pasted into another issue's body still surface.
 func applyQueryFilter(out map[string]interface{}, q string) {
-	content := map[string]interface{}{"searchableContent": searchableContentFilter(q)}
+	content := searchableContentComparator(q)
 	if teamKey, num, ok := parseIssueIdentifier(q); ok {
 		out["or"] = []map[string]interface{}{
-			content,
+			{"searchableContent": content},
 			{
 				"team":   map[string]interface{}{"key": map[string]interface{}{"eq": teamKey}},
 				"number": map[string]interface{}{"eq": num},
@@ -584,12 +585,12 @@ func applyQueryFilter(out map[string]interface{}, q string) {
 	}
 	if num, ok := parseIssueNumber(q); ok {
 		out["or"] = []map[string]interface{}{
-			content,
+			{"searchableContent": content},
 			{"number": map[string]interface{}{"eq": num}},
 		}
 		return
 	}
-	out["searchableContent"] = searchableContentFilter(q)
+	out["searchableContent"] = content
 }
 
 // buildIssueFilter translates our SearchFilter into Linear's IssueFilter input.
