@@ -137,6 +137,11 @@ export const defaultSessionState: SessionSliceState = {
     comparePairByTaskId: {},
     lastSeenUpdatedAtByTaskId: {},
   },
+  walkthroughs: {
+    byTaskId: {},
+    activeStepByTaskId: {},
+    lastSeenUpdatedAtByTaskId: {},
+  },
   queue: { bySessionId: {}, metaBySessionId: {}, isLoading: {} },
 };
 
@@ -340,6 +345,32 @@ function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
   };
 }
 
+function buildWalkthroughActions(set: ImmerSet) {
+  return {
+    setWalkthrough: (taskId: string, walkthrough: Parameters<SessionSlice["setWalkthrough"]>[1]) =>
+      set((draft) => {
+        draft.walkthroughs.byTaskId[taskId] = walkthrough;
+        // Clamp the active step into the new step range (defaults to 0). A
+        // replaced/shorter tour must not leave the pointer past the last step.
+        const steps = walkthrough?.steps.length ?? 0;
+        const current = draft.walkthroughs.activeStepByTaskId[taskId] ?? 0;
+        draft.walkthroughs.activeStepByTaskId[taskId] =
+          steps === 0 ? 0 : Math.min(current, steps - 1);
+      }),
+    setWalkthroughActiveStep: (taskId: string, stepIndex: number) =>
+      set((draft) => {
+        const steps = draft.walkthroughs.byTaskId[taskId]?.steps.length ?? 0;
+        const clamped = steps === 0 ? 0 : Math.max(0, Math.min(stepIndex, steps - 1));
+        draft.walkthroughs.activeStepByTaskId[taskId] = clamped;
+      }),
+    markWalkthroughSeen: (taskId: string) =>
+      set((draft) => {
+        const wt = draft.walkthroughs.byTaskId[taskId];
+        draft.walkthroughs.lastSeenUpdatedAtByTaskId[taskId] = wt?.updated_at ?? "";
+      }),
+  };
+}
+
 function buildPreviewCompareActions(set: ImmerSet) {
   return {
     setPreviewRevision: (taskId: string, revisionId: string | null) =>
@@ -512,6 +543,7 @@ export const createSessionSlice: StateCreator<
       draft.activeModel.bySessionId[sessionId] = modelId;
     }),
   ...buildTaskPlanActions(set, get),
+  ...buildWalkthroughActions(set),
   setQueueEntries: (sessionId, entries, meta) =>
     set((draft) => {
       draft.queue.bySessionId[sessionId] = entries;

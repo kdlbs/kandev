@@ -46,6 +46,7 @@ import {
 } from "./dockview-desktop-layout-hooks";
 import { renderPanel } from "./dockview-panel-content";
 import { PreviewController } from "./preview-controller";
+import { WalkthroughOverlay } from "@/components/review/walkthrough-overlay";
 import { BottomTerminalPanel } from "./bottom-terminal-panel";
 import { DockviewReviewDialog } from "./dockview-review-dialog";
 import { useReviewDialog } from "./use-review-dialog";
@@ -409,6 +410,11 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       <BottomTerminalPanel />
       <PanelPortalHost renderPanel={renderPanel} />
       <DockviewReviewDialog sessionId={effectiveSessionId} review={review} />
+      <WalkthroughOverlay
+        taskId={activeTaskId}
+        sessionId={effectiveSessionId}
+        onSelectFile={review.reviewOpenFile}
+      />
     </div>
   );
 });

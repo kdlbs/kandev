@@ -9,6 +9,7 @@ import { TaskChatPanel } from "../task-chat-panel";
 import { TaskPlanPanel } from "../task-plan-panel";
 import { MobileChangesPanel } from "./mobile-changes-panel";
 import { ReviewDialog } from "@/components/review/review-dialog";
+import { WalkthroughOverlay } from "@/components/review/walkthrough-overlay";
 import { useReviewDialog } from "../use-review-dialog";
 import { TaskFilesPanel } from "../task-files-panel";
 import { PassthroughToolbar } from "../passthrough-toolbar";
@@ -233,23 +234,32 @@ function MobileTopBarSticky(props: MobileTopBarStickyProps) {
 function MobileReviewDialogMount({
   sessionId,
   review,
+  activeTaskId,
 }: {
   sessionId: string | null;
   review: ReturnType<typeof useReviewDialog>;
+  activeTaskId: string | null;
 }) {
   if (!sessionId) return null;
   return (
-    <ReviewDialog
-      open={review.reviewDialogOpen}
-      onOpenChange={review.setReviewDialogOpen}
-      sessionId={sessionId}
-      baseBranch={review.baseBranch}
-      onSendComments={review.handleReviewSendComments}
-      onOpenFile={review.reviewOpenFile}
-      gitStatusFiles={review.reviewGitStatusFiles}
-      cumulativeDiff={review.reviewCumulativeDiff}
-      prDiffFiles={review.reviewPRDiffFiles}
-    />
+    <>
+      <ReviewDialog
+        open={review.reviewDialogOpen}
+        onOpenChange={review.setReviewDialogOpen}
+        sessionId={sessionId}
+        baseBranch={review.baseBranch}
+        onSendComments={review.handleReviewSendComments}
+        onOpenFile={review.reviewOpenFile}
+        gitStatusFiles={review.reviewGitStatusFiles}
+        cumulativeDiff={review.reviewCumulativeDiff}
+        prDiffFiles={review.reviewPRDiffFiles}
+      />
+      <WalkthroughOverlay
+        taskId={activeTaskId}
+        sessionId={sessionId}
+        onSelectFile={review.reviewOpenFile}
+      />
+    </>
   );
 }
 
@@ -415,7 +425,11 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
         workflowId={workflowId}
       />
 
-      <MobileReviewDialogMount sessionId={effectiveSessionId} review={review} />
+      <MobileReviewDialogMount
+        sessionId={effectiveSessionId}
+        review={review}
+        activeTaskId={activeTaskId}
+      />
     </div>
   );
 });

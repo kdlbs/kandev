@@ -13,6 +13,8 @@ import { useDiffMetadata } from "./use-diff-metadata";
 import { useExpandableDiff } from "./use-expandable-diff";
 import type { RevertBlockInfo } from "./diff-viewer";
 import type { AnnotationMetadata } from "./use-diff-annotation-renderer";
+import { useAppStore } from "@/components/state-provider";
+import { walkthroughFileMatches } from "@/lib/diff/walkthrough-match";
 
 type BuildAnnotationsOpts = {
   comments: DiffComment[];
@@ -149,6 +151,30 @@ type UseDiffViewerStateOpts = {
   repo?: string;
 };
 
+/**
+ * Returns a `walkthrough-step` annotation anchored to the active walkthrough
+ * step's line when that step targets this file, else null. Additive and gated:
+ * with no active walkthrough it returns null and the diff is unaffected.
+ */
+function useWalkthroughAnnotation(filePath: string): DiffLineAnnotation<AnnotationMetadata> | null {
+  const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
+  const walkthrough = useAppStore((s) =>
+    activeTaskId ? s.walkthroughs.byTaskId[activeTaskId] : null,
+  );
+  const activeStep = useAppStore((s) =>
+    activeTaskId ? (s.walkthroughs.activeStepByTaskId[activeTaskId] ?? 0) : 0,
+  );
+  return useMemo(() => {
+    const step = walkthrough?.steps[activeStep];
+    if (!step || !walkthroughFileMatches(filePath, step.file)) return null;
+    return {
+      side: "additions" as AnnotationSide,
+      lineNumber: step.line,
+      metadata: { type: "walkthrough-step" as const },
+    };
+  }, [walkthrough, activeStep, filePath]);
+}
+
 function useDiffViewerAnnotations({
   comments,
   editingCommentId,
@@ -156,9 +182,11 @@ function useDiffViewerAnnotations({
   selectedLines,
   enableAcceptReject,
   fileDiffMetadata,
+  filePath,
   changeLineMapRef,
   revertInfoRef,
 }: BuildAnnotationsOpts & {
+  filePath: string;
   changeLineMapRef: RefObject<Map<string, string>>;
   revertInfoRef: RefObject<Map<string, RevertBlockInfo>>;
 }) {
@@ -182,12 +210,18 @@ function useDiffViewerAnnotations({
     ],
   );
 
+  const walkthroughAnnotation = useWalkthroughAnnotation(filePath);
+  const withWalkthrough = useMemo(
+    () => (walkthroughAnnotation ? [...annotations, walkthroughAnnotation] : annotations),
+    [annotations, walkthroughAnnotation],
+  );
+
   useEffect(() => {
     changeLineMapRef.current = lineMap;
     revertInfoRef.current = revertMap;
   }, [lineMap, revertMap, changeLineMapRef, revertInfoRef]);
 
-  return annotations;
+  return withWalkthrough;
 }
 
 type CommentHandlerOpts = {
@@ -379,6 +413,7 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
     selectedLines,
     enableAcceptReject,
     fileDiffMetadata: expansion.metadata,
+    filePath: data.filePath,
     changeLineMapRef,
     revertInfoRef,
   });

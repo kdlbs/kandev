@@ -17,6 +17,7 @@ export type {
 } from "./agent-profile";
 
 import type { AgentProfile } from "./agent-profile";
+import type { BackendMessage } from "./backend-message";
 
 export type TUIConfig = {
   command: string;
@@ -288,6 +289,36 @@ export type TaskPlan = {
 
 export type TaskPlanResponse = {
   plan: TaskPlan | null;
+};
+
+/** A single anchored stop in a code walkthrough. */
+export type WalkthroughStep = {
+  title?: string;
+  repo?: string;
+  file: string;
+  line: number;
+  line_end?: number;
+  text: string;
+};
+
+/** An agent-authored guided code tour attached to a task. */
+export type TaskWalkthrough = {
+  id: string;
+  task_id: string;
+  title: string;
+  steps: WalkthroughStep[];
+  created_by: "agent";
+  created_at: string;
+  updated_at: string;
+};
+
+// Backend WS message map for walkthrough events, kept here (rather than in
+// backend.ts) so backend.ts stays under its line cap — mirrors the way office
+// events live in office-events.ts and fold into BackendMessageMap.
+export type WalkthroughBackendMessageMap = {
+  "task.walkthrough.created": BackendMessage<"task.walkthrough.created", TaskWalkthrough>;
+  "task.walkthrough.updated": BackendMessage<"task.walkthrough.updated", TaskWalkthrough>;
+  "task.walkthrough.deleted": BackendMessage<"task.walkthrough.deleted", TaskWalkthrough>;
 };
 
 // A single revision in the task plan history. `content` is optional because

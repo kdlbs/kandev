@@ -23,6 +23,7 @@ import { registerKanbanHandlers } from "@/lib/ws/handlers/kanban";
 import { registerSystemEventsHandlers } from "@/lib/ws/handlers/system-events";
 import { registerTasksHandlers } from "@/lib/ws/handlers/tasks";
 import { registerTaskPlansHandlers } from "@/lib/ws/handlers/task-plans";
+import { registerWalkthroughsHandlers } from "@/lib/ws/handlers/walkthroughs";
 import { registerTerminalsHandlers } from "@/lib/ws/handlers/terminals";
 import { registerTurnsHandlers } from "@/lib/ws/handlers/turns";
 import { registerSecretsHandlers } from "@/lib/ws/handlers/secrets";
@@ -37,6 +38,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerKanbanHandlers(store),
     ...registerTasksHandlers(store),
     ...registerTaskPlansHandlers(store),
+    ...registerWalkthroughsHandlers(store),
     ...registerWorkflowsHandlers(store),
 
     ...registerWorkspacesHandlers(store),

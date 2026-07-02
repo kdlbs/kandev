@@ -9,6 +9,7 @@ import type { Comment } from "@/lib/state/slices/comments";
 import { useCommentsStore, isDiffComment } from "@/lib/state/slices/comments";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
 import { useGitOperations } from "@/hooks/use-git-operations";
+import { walkthroughFileMatches } from "@/lib/diff/walkthrough-match";
 import { useReviewSidebarResize } from "@/hooks/use-review-sidebar-resize";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
@@ -426,11 +427,36 @@ function useReviewDialogState(props: ReviewDialogProps) {
   };
 }
 
+/**
+ * Drives review file-selection from the active walkthrough step: when the tour
+ * advances (or the dialog opens on a tour), select+scroll to the step's file so
+ * its diff expands and the inline WalkthroughStepCard renders at the line.
+ */
+function useWalkthroughFileSelection(
+  open: boolean,
+  allFiles: ReviewFile[],
+  handleSelectFile: (key: string) => void,
+) {
+  const stepFile = useAppStore((state) => {
+    const taskId = state.tasks.activeTaskId;
+    if (!taskId) return null;
+    const wt = state.walkthroughs.byTaskId[taskId];
+    const idx = state.walkthroughs.activeStepByTaskId[taskId] ?? 0;
+    return wt?.steps[idx]?.file ?? null;
+  });
+  useEffect(() => {
+    if (!open || !stepFile) return;
+    const file = allFiles.find((f) => walkthroughFileMatches(f.path, stepFile));
+    if (file) handleSelectFile(reviewFileKey(file));
+  }, [open, stepFile, allFiles, handleSelectFile]);
+}
+
 export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps) {
   const { open, onOpenChange, sessionId, baseBranch, onOpenFile } = props;
   const s = useReviewDialogState(props);
   const splitRowRef = useRef<HTMLDivElement>(null);
   const sidebar = useReviewSidebarResize(splitRowRef, open);
+  useWalkthroughFileSelection(open, s.allFiles, s.handleSelectFile);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
