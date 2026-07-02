@@ -52,6 +52,11 @@ on:
         description: "Build desktop artifacts only (no PR, tag, publish, npm, or tap update)"
         type: boolean
         default: false
+      backfill_tag:
+        description: "Existing release tag to rebuild/publish (for recovery; leave empty for normal release)"
+        required: false
+        default: ""
+        type: string
 
 # Default to read-only at the workflow level. Each job opts into the writes
 # it actually needs.
@@ -109,11 +114,104 @@ jobs:
       - name: Compute next version
         id: compute
         env:
+          BACKFILL_TAG: ${{ inputs.backfill_tag }}
           BUMP: ${{ inputs.bump }}
+          DRY_RUN: ${{ inputs.dry_run }}
           DESKTOP_VALIDATION_ONLY: ${{ inputs.desktop_validation_only }}
           CURRENT_REF: ${{ github.sha }}
         run: |
           set -euo pipefail
+          if [ -n "$BACKFILL_TAG" ]; then
+            echo "::notice::backfill_tag is set; the 'bump' input ($BUMP) is ignored."
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "backfill_tag cannot be combined with dry_run." >&2
+              exit 1
+            fi
+            if [ "$DESKTOP_VALIDATION_ONLY" = "true" ]; then
+              echo "backfill_tag cannot be combined with desktop_validation_only." >&2
+              exit 1
+            fi
+
+            case "$BACKFILL_TAG" in
+              refs/tags/*) BACKFILL_TAG="${BACKFILL_TAG#refs/tags/}" ;;
+            esac
+
+            if [[ ! "$BACKFILL_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "backfill_tag must be a SemVer release tag like v1.2.3." >&2
+              exit 1
+            fi
+            BACKFILL_REF="refs/tags/$BACKFILL_TAG"
+            if ! git rev-parse --verify --quiet "${BACKFILL_REF}^{commit}" >/dev/null; then
+              echo "backfill_tag does not exist: $BACKFILL_TAG" >&2
+              exit 1
+            fi
+
+            NEXT="${BACKFILL_TAG#v}"
+            LATEST_RELEASE_TAG="$(git tag --list 'v*' | python3 -c "
+          import sys, re
+          best = None
+          best_tag = ''
+          for t in (l.strip() for l in sys.stdin if l.strip()):
+              s = t.lstrip('v')
+              m3 = re.match(r'^(\d+)\.(\d+)\.(\d+)$', s)
+              m2 = re.match(r'^(\d+)\.(\d+)$', s)
+              if m3:
+                  v = tuple(int(x) for x in m3.groups())
+                  tag = f'v{v[0]}.{v[1]}.{v[2]}'
+              elif m2:
+                  v = (int(m2.group(1)), int(m2.group(2)), 0)
+                  tag = f'v{v[0]}.{v[1]}.{v[2]}'
+              else:
+                  continue
+              if best is None or v > best:
+                  best = v
+                  best_tag = tag
+          print(best_tag)
+          ")"
+            if [ -z "$LATEST_RELEASE_TAG" ]; then
+              echo "backfill_tag cannot be used: no existing release tags found." >&2
+              exit 1
+            fi
+            if [ "$LATEST_RELEASE_TAG" != "$BACKFILL_TAG" ]; then
+              echo "backfill_tag must be the latest release tag ($LATEST_RELEASE_TAG) because backfill publishes mutable channels." >&2
+              exit 1
+            fi
+
+            BACKFILL_REF="$BACKFILL_REF" BACKFILL_TAG="$BACKFILL_TAG" NEXT="$NEXT" node <<'NODE'
+            const { execFileSync } = require("node:child_process");
+
+            const tag = process.env.BACKFILL_TAG;
+            const ref = process.env.BACKFILL_REF;
+            const next = process.env.NEXT;
+            const show = (path) => execFileSync("git", ["show", `${ref}:${path}`], { encoding: "utf8" });
+            const versions = new Map([
+              ["apps/cli/package.json", JSON.parse(show("apps/cli/package.json")).version],
+              ["apps/desktop/package.json", JSON.parse(show("apps/desktop/package.json")).version],
+              ["apps/desktop/src-tauri/tauri.conf.json", JSON.parse(show("apps/desktop/src-tauri/tauri.conf.json")).version],
+              ["apps/desktop/src-tauri/Cargo.toml", show("apps/desktop/src-tauri/Cargo.toml").match(/^version = "([^"]+)"/m)?.[1]],
+              [
+                "apps/desktop/src-tauri/Cargo.lock",
+                show("apps/desktop/src-tauri/Cargo.lock").match(/\[\[package\]\]\nname = "kandev-desktop"\nversion = "([^"]+)"/)?.[1],
+              ],
+            ]);
+
+            for (const [path, version] of versions) {
+              if (version !== next) {
+                console.error(`backfill_tag version mismatch: ${tag} points to ${path} version ${version ?? "<missing>"} (expected ${next}).`);
+                process.exit(1);
+              }
+            }
+          NODE
+
+            TAG="$BACKFILL_TAG"
+            echo "Backfill existing release tag: $TAG"
+            echo "Next version:                 $NEXT"
+            echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            echo "ref=$BACKFILL_REF" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           PKG_VERSION="$(node -p "require('./apps/cli/package.json').version")"
 
           # Find latest git tag, normalizing legacy two-part tags (vM.m → M.m.0)
@@ -164,7 +262,7 @@ jobs:
           if [ "$DESKTOP_VALIDATION_ONLY" = "true" ]; then
             echo "ref=$CURRENT_REF" >> "$GITHUB_OUTPUT"
           else
-            echo "ref=$TAG" >> "$GITHUB_OUTPUT"
+            echo "ref=refs/tags/$TAG" >> "$GITHUB_OUTPUT"
           fi
 
           # Sanity: tag must not already exist
@@ -178,7 +276,7 @@ jobs:
           fi
 
       - name: Bump version + generate CHANGELOG (in working tree)
-        if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
+        if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
         env:
           NEXT: ${{ steps.compute.outputs.version }}
           TAG: ${{ steps.compute.outputs.tag }}
@@ -216,7 +314,7 @@ jobs:
           git-cliff --tag "$TAG" -o CHANGELOG.md
 
       - name: Create release PR + squash-merge + tag
-        if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
+        if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NEXT: ${{ steps.compute.outputs.version }}
@@ -482,6 +580,34 @@ jobs:
           ref: ${{ needs.prepare.outputs.ref }}
           persist-credentials: false
 
+      - name: Prepare macOS desktop diagnostics helper
+        if: startsWith(matrix.platform, 'macos-')
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          helper="$RUNNER_TEMP/collect-macos-desktop-diagnostics.sh"
+          mkdir -p "$(dirname "$helper")"
+          if [ -f "$GITHUB_WORKSPACE/.github/scripts/collect-macos-desktop-diagnostics.sh" ]; then
+            cp "$GITHUB_WORKSPACE/.github/scripts/collect-macos-desktop-diagnostics.sh" "$helper"
+          else
+            encoded_helper="$RUNNER_TEMP/collect-macos-desktop-diagnostics.sh.b64"
+            gh api \
+              "repos/${{ github.repository }}/contents/.github/scripts/collect-macos-desktop-diagnostics.sh?ref=${{ github.workflow_sha }}" \
+              --jq .content > "$encoded_helper"
+            HELPER="$helper" ENCODED_HELPER="$encoded_helper" python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          encoded = Path(os.environ["ENCODED_HELPER"]).read_text()
+          Path(os.environ["HELPER"]).write_bytes(base64.b64decode(encoded))
+          PY
+          fi
+          chmod +x "$helper"
+          echo "DESKTOP_DIAGNOSTICS_SCRIPT=$helper" >> "$GITHUB_ENV"
+
       - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
         with:
           version: "9.15.9"
@@ -640,8 +766,13 @@ jobs:
           }
 
       - name: Build Tauri desktop app
+        timeout-minutes: 70
         env:
           CI: "true"
+          DESKTOP_DIAGNOSTICS_PLATFORM: ${{ matrix.platform }}
+          DESKTOP_DIAGNOSTICS_RUST_TARGET: ${{ matrix.rust_target }}
+          TAURI_BUNDLE_ATTEMPTS: ${{ startsWith(matrix.platform, 'macos-') && '2' || '1' }}
+          TAURI_BUILD_TIMEOUT_SECONDS: ${{ startsWith(matrix.platform, 'macos-') && '1800' || '0' }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -676,10 +807,110 @@ jobs:
           fi
           pnpm -C apps --filter @kandev/desktop build:vite
           cd apps/desktop
-          pnpm tauri build \
-            --features desktop-runtime \
-            --target "${{ matrix.rust_target }}" \
-            --bundles "${{ matrix.tauri_bundles }}"
+
+          collect_macos_desktop_diagnostics() {
+            local label="${1:-failure}"
+            if [[ "${{ matrix.platform }}" != macos-* ]]; then
+              return 0
+            fi
+
+            bash "${DESKTOP_DIAGNOSTICS_SCRIPT:-$GITHUB_WORKSPACE/.github/scripts/collect-macos-desktop-diagnostics.sh}" "$label" || true
+          }
+
+          terminate_process_tree() {
+            local pid="$1"
+            terminate_process_tree_with_signal "$pid" TERM
+            sleep 5
+            terminate_process_tree_with_signal "$pid" KILL
+          }
+
+          terminate_process_tree_with_signal() {
+            local pid="$1"
+            local signal="$2"
+            local child
+            while IFS= read -r child; do
+              [ -n "$child" ] || continue
+              terminate_process_tree_with_signal "$child" "$signal"
+            done < <(pgrep -P "$pid" 2>/dev/null || true)
+            kill "-$signal" "$pid" 2>/dev/null || true
+          }
+
+          run_with_timeout() {
+            local timeout_seconds="$1"
+            shift
+            if [ "$timeout_seconds" -le 0 ]; then
+              "$@"
+              return $?
+            fi
+
+            "$@" &
+            local command_pid=$!
+            local start_seconds
+            start_seconds="$(date +%s)"
+            while kill -0 "$command_pid" 2>/dev/null; do
+              local now_seconds
+              now_seconds="$(date +%s)"
+              if [ $((now_seconds - start_seconds)) -ge "$timeout_seconds" ]; then
+                echo "::warning::Command timed out after ${timeout_seconds}s: $*"
+                collect_macos_desktop_diagnostics "timeout"
+                terminate_process_tree "$command_pid"
+                wait "$command_pid" 2>/dev/null || true
+                return 124
+              fi
+              sleep 10
+            done
+            wait "$command_pid"
+          }
+
+          run_tauri_build() {
+            run_with_timeout "$TAURI_BUILD_TIMEOUT_SECONDS" \
+              pnpm tauri build \
+                --features desktop-runtime \
+                --target "${{ matrix.rust_target }}" \
+                --bundles "${{ matrix.tauri_bundles }}"
+          }
+
+          status=0
+          for attempt in $(seq 1 "$TAURI_BUNDLE_ATTEMPTS"); do
+            echo "Tauri desktop build attempt $attempt/$TAURI_BUNDLE_ATTEMPTS"
+            if run_tauri_build; then
+              status=0
+              break
+            else
+              status=$?
+            fi
+
+            echo "::warning::Tauri desktop build attempt $attempt/$TAURI_BUNDLE_ATTEMPTS failed with exit code $status."
+            collect_macos_desktop_diagnostics "attempt-${attempt}"
+            if [ "$attempt" -lt "$TAURI_BUNDLE_ATTEMPTS" ]; then
+              sleep 20
+            fi
+          done
+
+          exit "$status"
+
+      - name: Collect macOS desktop diagnostics
+        if: failure() && startsWith(matrix.platform, 'macos-')
+        env:
+          DESKTOP_DIAGNOSTICS_PLATFORM: ${{ matrix.platform }}
+          DESKTOP_DIAGNOSTICS_RUST_TARGET: ${{ matrix.rust_target }}
+        run: |
+          set -euo pipefail
+          bash "${DESKTOP_DIAGNOSTICS_SCRIPT:-$GITHUB_WORKSPACE/.github/scripts/collect-macos-desktop-diagnostics.sh}" failure || true
+
+      - name: Upload macOS desktop diagnostics
+        if: failure() && startsWith(matrix.platform, 'macos-')
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: desktop-diagnostics-${{ matrix.platform }}
+          path: |
+            dist/desktop-diagnostics/**
+            apps/desktop/src-tauri/target/${{ matrix.rust_target }}/release/bundle/dmg/**
+            apps/desktop/src-tauri/target/${{ matrix.rust_target }}/release/bundle/macos/**
+            apps/desktop/src-tauri/target/release/bundle/dmg/**
+            apps/desktop/src-tauri/target/release/bundle/macos/**
+          if-no-files-found: ignore
+          include-hidden-files: true
 
       - name: Sign Windows desktop artifacts
         if: matrix.platform == 'windows-x64' && env.WINDOWS_SIGNING_ENABLED == 'true'
@@ -813,7 +1044,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -884,7 +1115,7 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -997,7 +1228,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
@@ -1049,7 +1280,7 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
@@ -1152,7 +1383,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
           fetch-depth: 0
 
       - name: Generate release notes
@@ -1258,7 +1489,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
 
       - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
         with:
@@ -1290,7 +1521,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
 
       - name: Update Homebrew tap formula
         env:
