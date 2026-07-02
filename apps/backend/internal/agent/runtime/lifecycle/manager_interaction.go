@@ -1003,6 +1003,8 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	}
 
 	ready := make(chan struct{})
+	// Prompt recovery is reached through the per-session prompt path. Avoid a
+	// broader reconnect registry here; HasAgentStream above covers steady state.
 	m.streamManager.connectUpdatesStreamAsync(execution, ready)
 	select {
 	case <-ready:
@@ -1011,6 +1013,11 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	}
 	if !execution.agentctl.HasAgentStream() {
 		return fmt.Errorf("agent stream not connected")
+	}
+	if execution.Status == v1.AgentStatusFailed && execution.sessionInitialized && execution.ACPSessionID != "" {
+		if err := m.UpdateStatus(execution.ID, v1.AgentStatusReady); err != nil {
+			return err
+		}
 	}
 	return nil
 }

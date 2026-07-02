@@ -166,31 +166,32 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	// itself is just beginning. Override to "in_progress" so the card stays
 	// open, and remember taskID -> toolCallID so subsequent task-notification
 	// envelopes can route their events back to this card.
-	monitorTaskID, isMonitorRegistration := recognizeMonitorRegistration(tcu.Meta, tcu.RawOutput)
+	monitorTaskID, isMonitorRegistrationCandidate := recognizeMonitorRegistration(tcu.Meta, tcu.RawOutput)
 
 	// Cheap pre-lock inspection of the meta envelope. The override itself runs
 	// under the lock so it can gate on payload kind (subagent_task only).
 	isAsyncLaunchedSub := isSubagentAsyncLaunched(tcu.Meta)
+	supplemental := toolCallUpdateSupplemental(tcu)
 
 	a.mu.Lock()
 	payload := a.activeToolCalls[toolCallID]
 	monitorCommand := ""
-	if isMonitorRegistration && status == toolStatusComplete {
-		if cmd, ok := validMonitorCommandFromPayload(payload); ok {
-			monitorCommand = cmd
-			a.trackMonitorLocked(sessionID, monitorTaskID, toolCallID)
-			status = toolStatusInProgress
-			a.logger.Info("monitor registered",
-				zap.String("session_id", sessionID),
-				zap.String("task_id", monitorTaskID),
-				zap.String("tool_call_id", toolCallID))
-		} else {
-			a.logger.Warn("ignoring malformed monitor registration",
-				zap.String("session_id", sessionID),
-				zap.String("task_id", monitorTaskID),
-				zap.String("tool_call_id", toolCallID))
-			isMonitorRegistration = false
-		}
+	if payload != nil && (tcu.RawInput != nil || len(tcu.Locations) > 0) {
+		a.normalizer.UpdatePayloadInput(payload, tcu.RawInput, supplemental)
+	}
+	if payload != nil && (tcu.Title != nil || tcu.Meta != nil || tcu.RawInput != nil || supplemental != nil) {
+		a.normalizer.EnrichFromToolCallUpdate(payload, tcu.Title, tcu.Meta, tcu.RawInput, supplemental)
+	}
+
+	isMonitorRegistration := false
+	if isMonitorRegistrationCandidate {
+		monitorCommand, isMonitorRegistration, status = a.registerMonitorRegistrationLocked(
+			sessionID,
+			monitorTaskID,
+			toolCallID,
+			payload,
+			status,
+		)
 	}
 
 	// A terminal tool_call_update for an already-tracked Monitor (the agent
@@ -215,17 +216,6 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	}
 
 	isTerminal := status == toolStatusComplete || status == toolStatusError || status == toolStatusCancelled
-
-	// Update stored payload with incremental rawInput (e.g. Claude Code sends
-	// command/cwd in a tool_call_update after the initial empty tool_call).
-	// OpenCode may send filePath/locations on the update frame only.
-	supplemental := toolCallUpdateSupplemental(tcu)
-	if payload != nil && (tcu.RawInput != nil || len(tcu.Locations) > 0) {
-		a.normalizer.UpdatePayloadInput(payload, tcu.RawInput, supplemental)
-	}
-	if payload != nil && (tcu.Title != nil || tcu.Meta != nil || tcu.RawInput != nil || supplemental != nil) {
-		a.normalizer.EnrichFromToolCallUpdate(payload, tcu.Title, tcu.Meta, tcu.RawInput, supplemental)
-	}
 
 	// Update stored payload with tool result output. Skip for tracked-Monitor
 	// terminal updates so Generic.Output stays the structured `{monitor: …}`
@@ -358,6 +348,39 @@ func enrichModifyFileFromContents(mf *streams.ModifyFilePayload, contents []acp.
 		}
 		break
 	}
+}
+
+func (a *Adapter) registerMonitorRegistrationLocked(
+	sessionID string,
+	monitorTaskID string,
+	toolCallID string,
+	payload *streams.NormalizedPayload,
+	status string,
+) (string, bool, string) {
+	if status != toolStatusComplete {
+		a.logger.Warn("ignoring non-terminal monitor registration",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", monitorTaskID),
+			zap.String("tool_call_id", toolCallID),
+			zap.String("status", status))
+		return "", false, status
+	}
+
+	cmd, ok := validMonitorCommandFromPayload(payload)
+	if !ok {
+		a.logger.Warn("ignoring malformed monitor registration",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", monitorTaskID),
+			zap.String("tool_call_id", toolCallID))
+		return "", false, status
+	}
+
+	a.trackMonitorLocked(sessionID, monitorTaskID, toolCallID)
+	a.logger.Info("monitor registered",
+		zap.String("session_id", sessionID),
+		zap.String("task_id", monitorTaskID),
+		zap.String("tool_call_id", toolCallID))
+	return cmd, true, toolStatusInProgress
 }
 
 func toolCallUpdateSupplemental(tcu *acp.SessionToolCallUpdate) map[string]any {

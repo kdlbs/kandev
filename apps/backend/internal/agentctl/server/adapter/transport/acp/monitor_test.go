@@ -365,6 +365,88 @@ func TestConvertToolCallResultUpdate_MonitorRegistrationRequiresCommand(t *testi
 	}
 }
 
+func TestConvertToolCallResultUpdate_MonitorRegistrationAcceptsCommandFromUpdate(t *testing.T) {
+	a := newTestAdapter()
+
+	tc := &acp.SessionUpdateToolCall{
+		ToolCallId: "tc-monitor",
+		Title:      monitorToolName,
+		Kind:       acp.ToolKind("other"),
+		Meta:       monitorMeta(),
+		RawInput:   map[string]any{},
+	}
+	if ev := a.convertToolCallUpdate("s1", tc); ev == nil {
+		t.Fatalf("seed: convertToolCallUpdate returned nil")
+	}
+
+	completed := acp.ToolCallStatus("completed")
+	tcu := &acp.SessionToolCallUpdate{
+		ToolCallId: "tc-monitor",
+		Status:     &completed,
+		Meta:       monitorMeta(),
+		RawInput:   map[string]any{"command": "tail -f /var/log/later"},
+		RawOutput:  "Monitor started (task taskFromUpdate, timeout 60000ms). You will be notified.",
+	}
+
+	ev := a.convertToolCallResultUpdate("s1", tcu)
+	if ev == nil {
+		t.Fatal("expected event, got nil")
+	}
+	if ev.ToolStatus != toolStatusInProgress {
+		t.Fatalf("ToolStatus = %q, want in_progress", ev.ToolStatus)
+	}
+	if got, ok := a.lookupMonitorByTaskID("s1", "taskFromUpdate"); !ok || got != "tc-monitor" {
+		t.Fatalf("activeMonitors lookup = (%q, %v), want (tc-monitor, true)", got, ok)
+	}
+	out, ok := ev.NormalizedPayload.Generic().Output.(map[string]any)
+	if !ok {
+		t.Fatalf("Generic.Output = %T, want map", ev.NormalizedPayload.Generic().Output)
+	}
+	monitor, ok := out["monitor"].(map[string]any)
+	if !ok {
+		t.Fatal("monitor output missing")
+	}
+	if monitor["command"] != "tail -f /var/log/later" {
+		t.Fatalf("monitor.command = %v, want update rawInput command", monitor["command"])
+	}
+}
+
+func TestConvertToolCallResultUpdate_MonitorRegistrationRequiresCompletedStatus(t *testing.T) {
+	a := newTestAdapter()
+
+	tc := &acp.SessionUpdateToolCall{
+		ToolCallId: "tc-monitor",
+		Title:      monitorToolName,
+		Kind:       acp.ToolKind("other"),
+		Meta:       monitorMeta(),
+		RawInput:   map[string]any{"command": "tail -f /var/log/x"},
+	}
+	if ev := a.convertToolCallUpdate("s1", tc); ev == nil {
+		t.Fatalf("seed: convertToolCallUpdate returned nil")
+	}
+
+	tcu := &acp.SessionToolCallUpdate{
+		ToolCallId: "tc-monitor",
+		Meta:       monitorMeta(),
+		RawOutput:  "Monitor started (task statuslessTask, timeout 60000ms). You will be notified.",
+	}
+
+	ev := a.convertToolCallResultUpdate("s1", tcu)
+	if ev == nil {
+		t.Fatal("expected generic tool update for statusless Monitor banner")
+	}
+	if _, ok := a.lookupMonitorByTaskID("s1", "statuslessTask"); ok {
+		t.Fatal("statusless Monitor registration was tracked")
+	}
+	if ev.NormalizedPayload != nil && ev.NormalizedPayload.Generic() != nil {
+		if out, ok := ev.NormalizedPayload.Generic().Output.(map[string]any); ok {
+			if _, hasMonitor := out["monitor"]; hasMonitor {
+				t.Fatalf("statusless Monitor registration rendered monitor payload: %+v", out["monitor"])
+			}
+		}
+	}
+}
+
 // --- sweepMonitorsOnPromptEnd ---
 
 func TestSweepMonitorsOnPromptEnd_EmitsCompleteAndClears(t *testing.T) {
@@ -546,6 +628,32 @@ func TestCaptureReplayMonitor_RebuildsFromToolCallAndUpdate(t *testing.T) {
 
 	if got, ok := a.lookupMonitorByTaskID("s1", "realTask99"); !ok || got != "tc-replay" {
 		t.Errorf("after replay: lookup = (%q, %v), want (tc-replay, true)", got, ok)
+	}
+}
+
+func TestCaptureReplayMonitor_RegistrationRequiresPendingMonitor(t *testing.T) {
+	a := newTestAdapter()
+
+	tc := &acp.SessionUpdateToolCall{
+		ToolCallId: "tc-replay",
+		Title:      monitorToolName,
+		Kind:       acp.ToolKind("other"),
+		Meta:       monitorMeta(),
+		RawInput:   map[string]any{},
+	}
+	a.captureReplayMonitor("s1", acp.SessionUpdate{ToolCall: tc})
+
+	completed := acp.ToolCallStatus("completed")
+	tcu := &acp.SessionToolCallUpdate{
+		ToolCallId: "tc-replay",
+		Status:     &completed,
+		Meta:       monitorMeta(),
+		RawOutput:  "Monitor started (task fakeReplayTask, timeout 60000ms).",
+	}
+	a.captureReplayMonitor("s1", acp.SessionUpdate{ToolCallUpdate: tcu})
+
+	if _, ok := a.lookupMonitorByTaskID("s1", "fakeReplayTask"); ok {
+		t.Fatal("registration without a pending Monitor command was tracked")
 	}
 }
 

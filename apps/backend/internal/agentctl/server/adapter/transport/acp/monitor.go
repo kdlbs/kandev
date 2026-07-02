@@ -433,7 +433,8 @@ func monitorEventEvent(sessionID, toolCallID string, body string, payload *strea
 //   - `tool_call` with `_meta.claudeCode.toolName == "Monitor"` (records by toolCallID;
 //     we don't yet know taskID until the registration update arrives)
 //   - `tool_call_update` whose `rawOutput` matches the registration banner
-//     (records the taskID -> toolCallID mapping)
+//     (records the taskID -> toolCallID mapping only when the initial Monitor
+//     tool_call carried a non-empty command)
 //
 // A `tool_call_update` whose status is terminal (`completed` with non-banner
 // rawOutput, `failed`, `cancelled`) means the Monitor already ended in
@@ -449,7 +450,6 @@ func (a *Adapter) captureReplayMonitor(sessionID string, u acp.SessionUpdate) {
 		if taskID, ok := recognizeMonitorRegistration(tcu.Meta, tcu.RawOutput); ok {
 			// Replace any pending-by-toolCallID placeholder with the real taskID.
 			a.replaceMonitorPendingKey(sessionID, toolCallID, taskID)
-			a.trackMonitor(sessionID, taskID, toolCallID)
 			return
 		}
 		// Terminal update for a tracked Monitor — drop it from the map so the
@@ -473,16 +473,22 @@ func replayPendingTaskID(toolCallID string) string {
 
 // replaceMonitorPendingKey rewrites an entry in activeMonitors that was
 // registered during replay with a placeholder taskID once the real taskID
-// arrives via the registration banner.
-func (a *Adapter) replaceMonitorPendingKey(sessionID, toolCallID, realTaskID string) {
+// arrives via the registration banner. Returns false when no valid pending
+// Monitor was captured from the initial tool_call.
+func (a *Adapter) replaceMonitorPendingKey(sessionID, toolCallID, realTaskID string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	monitors := a.activeMonitors[sessionID]
 	if monitors == nil {
-		return
+		return false
 	}
-	delete(monitors, replayPendingTaskID(toolCallID))
+	pendingTaskID := replayPendingTaskID(toolCallID)
+	if monitors[pendingTaskID] != toolCallID {
+		return false
+	}
+	delete(monitors, pendingTaskID)
 	monitors[realTaskID] = toolCallID
+	return true
 }
 
 // dropMonitorByToolCallID removes any entry in activeMonitors mapped to the
