@@ -1,4 +1,5 @@
 import type React from "react";
+import { formatSlashCommandLabel } from "./tiptap-slash-command-utils";
 
 // ── JSON node types ─────────────────────────────────────────────────
 
@@ -20,7 +21,7 @@ function serializeInline(nodes: JSONNode[]): string {
         return n.attrs?.label ? `@${n.attrs.label}` : "";
       }
       if (n.type === "slashCommand") {
-        return (n.attrs?.label as string | undefined) ?? "";
+        return formatSlashCommandLabel(n.attrs);
       }
       const text = n.text ?? "";
       if (n.marks?.some((m) => m.type === "code")) {

@@ -20,4 +20,37 @@ describe("getMarkdownText", () => {
       }),
     ).toBe("please run /slow 1s");
   });
+
+  it("serializes slash command chips from commandName-only attrs", () => {
+    expect(
+      getMarkdownText({
+        getJSON: () => ({
+          content: [
+            {
+              type: "paragraph",
+              content: [
+                { type: "text", text: "please run " },
+                { type: "slashCommand", attrs: { commandName: "slow" } },
+              ],
+            },
+          ],
+        }),
+      }),
+    ).toBe("please run /slow");
+  });
+
+  it("normalizes slash command chip labels when serializing", () => {
+    expect(
+      getMarkdownText({
+        getJSON: () => ({
+          content: [
+            {
+              type: "paragraph",
+              content: [{ type: "slashCommand", attrs: { label: "slow" } }],
+            },
+          ],
+        }),
+      }),
+    ).toBe("/slow");
+  });
 });

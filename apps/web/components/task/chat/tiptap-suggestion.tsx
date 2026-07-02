@@ -205,6 +205,7 @@ export function createSlashSuggestion(
               id: cmd.id,
               label,
               commandName: cmd.agentCommandName ?? label.replace(/^\/+/, ""),
+              description: cmd.description,
             },
           },
           { type: "text", text: " " },

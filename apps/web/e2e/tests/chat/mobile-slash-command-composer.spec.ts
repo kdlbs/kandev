@@ -45,6 +45,7 @@ test.describe("Mobile slash command composer", () => {
     const session = await openTaskChat(testPage, task.id);
     await seedAvailableCommands(testPage, task.session_id, [SLOW_COMMAND]);
 
+    // Multiple TipTap instances can be mounted in mobile layouts; scope to the first visible one.
     const editor = testPage.locator(".tiptap.ProseMirror:visible").first();
     await editor.tap();
     await editor.fill("");
@@ -54,13 +55,13 @@ test.describe("Mobile slash command composer", () => {
     await expect(command).toBeVisible({ timeout: 5_000 });
     await command.tap();
 
-    await expect(editor).toHaveText(/\/slow/, { timeout: 5_000 });
-    await expect(editor.getByTestId("slash-command-chip")).toHaveText("/slow", { timeout: 5_000 });
+    await expect(editor).toHaveText(/slow/, { timeout: 5_000 });
+    await expect(editor.getByTestId("slash-command-chip")).toHaveText("slow", { timeout: 5_000 });
     const chatList = session.chat.locator(".chat-message-list:visible");
     await expect(chatList.getByText("/slow", { exact: false })).not.toBeVisible({ timeout: 1_000 });
 
     await editor.pressSequentially("1s");
-    await expect(editor).toHaveText(/\/slow\s+1s/, { timeout: 5_000 });
+    await expect(editor).toHaveText(/slow\s+1s/, { timeout: 5_000 });
     await testPage.getByTestId("submit-message-button").tap();
     await expect(chatList.getByText("/slow 1s", { exact: false })).toBeVisible({
       timeout: 10_000,

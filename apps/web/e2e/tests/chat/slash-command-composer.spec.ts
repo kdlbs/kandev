@@ -49,8 +49,10 @@ async function selectSlowCommandWithEnter(
   await editor.pressSequentially("/s");
   await expect(page.getByText("/slow", { exact: true })).toBeVisible({ timeout: 5_000 });
   await editor.press("Enter");
-  await expect(editor).toHaveText(/\/slow/, { timeout: 5_000 });
-  await expect(editor.getByTestId("slash-command-chip")).toHaveText("/slow", { timeout: 5_000 });
+  await expect(editor).toHaveText(/slow/, { timeout: 5_000 });
+  await expect(editor.getByTestId("slash-command-chip")).toHaveText("slow", { timeout: 5_000 });
+  await editor.getByTestId("slash-command-chip").hover();
+  await expect(page.getByText("Run a slow response")).toBeVisible({ timeout: 5_000 });
 }
 
 async function openQuickChatWithAgent(page: Page): Promise<Locator> {
@@ -104,7 +106,7 @@ test.describe("Slash command composer", () => {
     });
 
     await editor.pressSequentially("1s");
-    await expect(editor).toHaveText(/\/slow\s+1s/, { timeout: 5_000 });
+    await expect(editor).toHaveText(/slow\s+1s/, { timeout: 5_000 });
     await testPage.getByTestId("submit-message-button").click();
 
     await expect(chatList.getByText("/slow 1s", { exact: false })).toBeVisible({
@@ -131,8 +133,8 @@ test.describe("Slash command composer", () => {
     const editor = chatEditor(testPage);
     await selectSlowCommandWithEnter(testPage, editor, "please run ");
 
-    await expect(editor).toHaveText(/please run \/slow/, { timeout: 5_000 });
-    await expect(editor.getByTestId("slash-command-chip")).toHaveText("/slow", { timeout: 5_000 });
+    await expect(editor).toHaveText(/please run slow/, { timeout: 5_000 });
+    await expect(editor.getByTestId("slash-command-chip")).toHaveText("slow", { timeout: 5_000 });
     await expect(
       session.chat.locator(".chat-message-list:visible").getByText("please run /slow", {
         exact: false,
@@ -178,7 +180,7 @@ test.describe("Slash command composer", () => {
 
     await selectSlowCommandWithEnter(testPage, editor);
 
-    await expect(editor).toHaveText(/\/slow/, { timeout: 5_000 });
+    await expect(editor).toHaveText(/slow/, { timeout: 5_000 });
     await expect(
       dialog.locator(".chat-message-list:visible").getByText("/slow", { exact: false }),
     ).not.toBeVisible({
