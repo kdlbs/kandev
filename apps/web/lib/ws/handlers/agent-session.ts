@@ -269,25 +269,23 @@ function patchWorkflowSnapshotPrimarySessionStates(
   taskId: string,
   sessionId: string,
   newState: TaskSessionState,
-  debugMode: boolean,
+  patchedSnapshotIds?: string[],
 ): {
   nextSnapshots: Record<string, WorkflowSnapshotData>;
   snapshotsChanged: boolean;
-  patchedSnapshotIds: string[];
 } {
   let snapshotsChanged = false;
-  const patchedSnapshotIds: string[] = [];
   const nextSnapshots = Object.fromEntries(
     Object.entries(snapshots).map(([workflowId, snapshot]) => {
       const nextSnapshot = patchSnapshotPrimarySessionState(snapshot, taskId, sessionId, newState);
       if (nextSnapshot !== snapshot) {
         snapshotsChanged = true;
-        if (debugMode) patchedSnapshotIds.push(workflowId);
+        patchedSnapshotIds?.push(workflowId);
       }
       return [workflowId, nextSnapshot];
     }),
   );
-  return { nextSnapshots, snapshotsChanged, patchedSnapshotIds };
+  return { nextSnapshots, snapshotsChanged };
 }
 
 function logKanbanPrimarySessionSync(params: {
@@ -332,24 +330,26 @@ function syncKanbanPrimarySessionState(
 
   store.setState((currentState) => {
     if (!currentState.kanban?.tasks || !currentState.kanbanMulti?.snapshots) return currentState;
+    const patchedSnapshotIds = debugMode ? [] : undefined;
     const nextKanbanTasks = patchTaskPrimarySessionState(
       currentState.kanban.tasks,
       taskId,
       sessionId,
       newState,
     );
-    const { nextSnapshots, snapshotsChanged, patchedSnapshotIds } =
-      patchWorkflowSnapshotPrimarySessionStates(
-        currentState.kanbanMulti.snapshots,
-        taskId,
-        sessionId,
-        newState,
-        debugMode,
-      );
-    syncLog = {
-      patchedKanban: nextKanbanTasks !== currentState.kanban.tasks,
+    const { nextSnapshots, snapshotsChanged } = patchWorkflowSnapshotPrimarySessionStates(
+      currentState.kanbanMulti.snapshots,
+      taskId,
+      sessionId,
+      newState,
       patchedSnapshotIds,
-    };
+    );
+    if (debugMode) {
+      syncLog = {
+        patchedKanban: nextKanbanTasks !== currentState.kanban.tasks,
+        patchedSnapshotIds: patchedSnapshotIds ?? [],
+      };
+    }
 
     if (nextKanbanTasks === currentState.kanban.tasks && !snapshotsChanged) return currentState;
 
@@ -368,7 +368,7 @@ function syncKanbanPrimarySessionState(
     };
   });
 
-  if (syncLog) {
+  if (debugMode && syncLog) {
     logKanbanPrimarySessionSync({
       taskId,
       sessionId,

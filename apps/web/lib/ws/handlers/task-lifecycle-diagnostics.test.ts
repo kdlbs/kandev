@@ -248,4 +248,35 @@ describe("task primary-session clears", () => {
     expect(snapshotTask?.primarySessionId).toBeUndefined();
     expect(snapshotTask?.primarySessionState).toBeUndefined();
   });
+
+  it("does not preserve primary session fields on explicit state-change clears", () => {
+    const store = makeStore({
+      kanban: {
+        workflowId: "wf1",
+        steps: [],
+        tasks: [existingTask],
+      } as unknown as AppState["kanban"],
+      kanbanMulti: {
+        isLoading: false,
+        snapshots: {
+          wf1: { workflowId: "wf1", workflowName: "WF1", steps: [], tasks: [existingTask] },
+        },
+      } as unknown as AppState["kanbanMulti"],
+    });
+
+    registerTasksHandlers(store)["task.state_changed"]!(
+      makeStateChangedMessage({
+        ...makeTask("t1", null),
+        primary_session_state: null,
+      }),
+    );
+
+    const state = store.getState();
+    const kanbanTask = state.kanban.tasks.find((task) => task.id === "t1");
+    const snapshotTask = state.kanbanMulti.snapshots.wf1.tasks.find((task) => task.id === "t1");
+    expect(kanbanTask?.primarySessionId).toBeUndefined();
+    expect(kanbanTask?.primarySessionState).toBeUndefined();
+    expect(snapshotTask?.primarySessionId).toBeUndefined();
+    expect(snapshotTask?.primarySessionState).toBeUndefined();
+  });
 });
