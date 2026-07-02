@@ -219,13 +219,17 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 		zap.String("review_scope", watch.ReviewScope),
 		zap.Bool("enabled", watch.Enabled))
 
-	prs, err := s.fetchReviewPRs(ctx, watch)
-	if err != nil {
-		return nil, err
-	}
 	settings, settingsErr := s.GetWorkspaceSettings(ctx, watch.WorkspaceID)
 	if settingsErr != nil {
 		return nil, settingsErr
+	}
+	fetchWatch := *watch
+	if len(fetchWatch.Repos) == 0 {
+		fetchWatch.Repos = workspaceScopeRepoFilters(settings)
+	}
+	prs, err := s.fetchReviewPRs(ctx, &fetchWatch)
+	if err != nil {
+		return nil, err
 	}
 	prs = filterPRsByWorkspaceScope(prs, settings)
 

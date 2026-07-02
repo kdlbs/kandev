@@ -1970,6 +1970,8 @@ func cloneRawMessage(raw json.RawMessage) json.RawMessage {
 	return out
 }
 
+const maxWorkspaceSettingsJSONBytes = 64 * 1024
+
 func normalizeRepoScopeMode(mode string) string {
 	mode = strings.TrimSpace(strings.ToLower(mode))
 	switch mode {
@@ -2117,6 +2119,156 @@ func (s *Store) UpsertWorkspaceSettings(ctx context.Context, settings *Workspace
 		settings.WorkspaceID, settings.RepoScopeMode, string(orgsJSON), string(reposJSON),
 		string(settings.SavedPresets), defaults, now, now)
 	return err
+}
+
+// PatchWorkspaceSettings applies only the fields present in the request. This
+// avoids lost updates when independent preference migrations run concurrently.
+func (s *Store) PatchWorkspaceSettings(ctx context.Context, req *UpdateWorkspaceSettingsRequest) (*WorkspaceSettings, error) {
+	if req == nil || strings.TrimSpace(req.WorkspaceID) == "" {
+		return nil, fmt.Errorf("%w: workspace_id is required", ErrWorkspaceSettingsValidation)
+	}
+	workspaceID := strings.TrimSpace(req.WorkspaceID)
+	now := time.Now().UTC()
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT OR IGNORE INTO github_workspace_settings (
+			workspace_id, repo_scope_mode, repo_scope_orgs, repo_scope_repos,
+			saved_presets, default_query_presets, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		workspaceID, RepoScopeModeAll, "[]", "[]", "[]", nil, now, now); err != nil {
+		return nil, err
+	}
+
+	patch := workspaceSettingsPatch{
+		sets: make([]string, 0, 8),
+		args: make([]any, 0, 10),
+	}
+	if err := appendWorkspaceScopePatch(&patch, req); err != nil {
+		return nil, err
+	}
+	if err := appendWorkspacePresetPatch(&patch, req); err != nil {
+		return nil, err
+	}
+	if len(patch.sets) > 0 {
+		patch.add("updated_at = ?", now)
+		patch.args = append(patch.args, workspaceID)
+		query := "UPDATE github_workspace_settings SET " + strings.Join(patch.sets, ", ") + " WHERE workspace_id = ?"
+		if _, err := s.db.ExecContext(ctx, query, patch.args...); err != nil {
+			return nil, err
+		}
+	}
+	return s.GetWorkspaceSettings(ctx, workspaceID)
+}
+
+type workspaceSettingsPatch struct {
+	sets []string
+	args []any
+}
+
+func (p *workspaceSettingsPatch) add(set string, arg any) {
+	p.sets = append(p.sets, set)
+	p.args = append(p.args, arg)
+}
+
+func appendWorkspaceScopePatch(patch *workspaceSettingsPatch, req *UpdateWorkspaceSettingsRequest) error {
+	if req.RepoScopeMode != nil {
+		if err := appendWorkspaceScopeModePatch(patch, *req.RepoScopeMode); err != nil {
+			return err
+		}
+	}
+	if req.RepoScopeOrgs != nil {
+		raw, err := marshalNormalizedRepoScopeOrgs(*req.RepoScopeOrgs)
+		if err != nil {
+			return err
+		}
+		patch.add("repo_scope_orgs = ?", string(raw))
+	}
+	if req.RepoScopeRepos != nil {
+		raw, err := marshalNormalizedRepoScopeRepos(*req.RepoScopeRepos)
+		if err != nil {
+			return err
+		}
+		patch.add("repo_scope_repos = ?", string(raw))
+	}
+	return nil
+}
+
+func appendWorkspaceScopeModePatch(patch *workspaceSettingsPatch, rawMode string) error {
+	if !isValidRepoScopeMode(rawMode) {
+		return fmt.Errorf("%w: invalid repo_scope_mode %q", ErrWorkspaceSettingsValidation, rawMode)
+	}
+	mode := normalizeRepoScopeMode(rawMode)
+	patch.add("repo_scope_mode = ?", mode)
+	switch mode {
+	case RepoScopeModeAll:
+		patch.add("repo_scope_orgs = ?", "[]")
+		patch.add("repo_scope_repos = ?", "[]")
+	case RepoScopeModeOrgs:
+		patch.add("repo_scope_repos = ?", "[]")
+	case RepoScopeModeRepos:
+		patch.add("repo_scope_orgs = ?", "[]")
+	}
+	return nil
+}
+
+func appendWorkspacePresetPatch(patch *workspaceSettingsPatch, req *UpdateWorkspaceSettingsRequest) error {
+	if req.SavedPresetsSet {
+		raw := json.RawMessage("[]")
+		if req.SavedPresets != nil {
+			raw = cloneRawMessage(*req.SavedPresets)
+		}
+		if err := validateWorkspaceSettingsJSON("saved_presets", raw, '['); err != nil {
+			return err
+		}
+		patch.add("saved_presets = ?", string(raw))
+	}
+	if !req.DefaultQueriesSet {
+		return nil
+	}
+	if req.DefaultQueryPresets == nil {
+		patch.add("default_query_presets = ?", sql.NullString{})
+		return nil
+	}
+	raw := cloneRawMessage(*req.DefaultQueryPresets)
+	if err := validateWorkspaceSettingsJSON("default_query_presets", raw, '{'); err != nil {
+		return err
+	}
+	patch.add("default_query_presets = ?", sql.NullString{String: string(raw), Valid: true})
+	return nil
+}
+
+func marshalNormalizedRepoScopeOrgs(orgs []string) ([]byte, error) {
+	settings := normalizeWorkspaceSettings(&WorkspaceSettings{
+		RepoScopeMode: RepoScopeModeOrgs,
+		RepoScopeOrgs: orgs,
+	})
+	raw, err := json.Marshal(settings.RepoScopeOrgs)
+	if err != nil {
+		return nil, fmt.Errorf("marshal repo scope orgs: %w", err)
+	}
+	return raw, nil
+}
+
+func marshalNormalizedRepoScopeRepos(repos []RepoFilter) ([]byte, error) {
+	settings := normalizeWorkspaceSettings(&WorkspaceSettings{
+		RepoScopeMode:  RepoScopeModeRepos,
+		RepoScopeRepos: repos,
+	})
+	raw, err := json.Marshal(settings.RepoScopeRepos)
+	if err != nil {
+		return nil, fmt.Errorf("marshal repo scope repos: %w", err)
+	}
+	return raw, nil
+}
+
+func validateWorkspaceSettingsJSON(field string, raw json.RawMessage, wantFirst byte) error {
+	raw = json.RawMessage(strings.TrimSpace(string(raw)))
+	if len(raw) == 0 || len(raw) > maxWorkspaceSettingsJSONBytes || !json.Valid(raw) {
+		return fmt.Errorf("%w: invalid %s", ErrWorkspaceSettingsValidation, field)
+	}
+	if raw[0] != wantFirst {
+		return fmt.Errorf("%w: invalid %s", ErrWorkspaceSettingsValidation, field)
+	}
+	return nil
 }
 
 // --- Action preset operations ---

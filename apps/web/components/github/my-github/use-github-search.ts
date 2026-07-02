@@ -70,6 +70,11 @@ export function useGitHubSearch<T extends GitHubPR | GitHubIssue>({
   // a slow page-N request can't overwrite a fresher page-1 result after a
   // filter change.
   const requestSeq = useRef(0);
+  const workspaceRef = useRef(workspaceId);
+
+  useEffect(() => {
+    workspaceRef.current = workspaceId;
+  }, [workspaceId]);
 
   // Reset to page 1 whenever the filter inputs change.
   useEffect(() => {
@@ -91,7 +96,7 @@ export function useGitHubSearch<T extends GitHubPR | GitHubIssue>({
         const params = { ...base, page: epage, perPage: SEARCH_PAGE_SIZE, workspaceId: ews };
         const response =
           kind === "pr" ? await searchUserPRs(params) : await searchUserIssues(params);
-        if (seq !== requestSeq.current) return;
+        if (seq !== requestSeq.current || ews !== workspaceRef.current) return;
         const items = (kind === "pr"
           ? (response as { prs: GitHubPR[] }).prs
           : (response as { issues: GitHubIssue[] }).issues) as unknown as T[];
@@ -103,7 +108,7 @@ export function useGitHubSearch<T extends GitHubPR | GitHubIssue>({
           total: response.total_count ?? (items ?? []).length,
         });
       } catch (err) {
-        if (seq !== requestSeq.current) return;
+        if (seq !== requestSeq.current || ews !== workspaceRef.current) return;
         setState((s) => ({
           items: [],
           loading: false,

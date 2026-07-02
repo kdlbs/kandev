@@ -665,6 +665,40 @@ type UpdateWorkspaceSettingsRequest struct {
 	RepoScopeRepos      *[]RepoFilter    `json:"repo_scope_repos,omitempty"`
 	SavedPresets        *json.RawMessage `json:"saved_presets,omitempty"`
 	DefaultQueryPresets *json.RawMessage `json:"default_query_presets,omitempty"`
+	SavedPresetsSet     bool             `json:"-"`
+	DefaultQueriesSet   bool             `json:"-"`
+}
+
+func (r *UpdateWorkspaceSettingsRequest) UnmarshalJSON(data []byte) error {
+	type alias UpdateWorkspaceSettingsRequest
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*r = UpdateWorkspaceSettingsRequest(decoded)
+	if value, ok := raw["saved_presets"]; ok {
+		r.SavedPresetsSet = true
+		if string(value) == jsonNullLiteral {
+			r.SavedPresets = nil
+		} else {
+			next := cloneRawMessage(value)
+			r.SavedPresets = &next
+		}
+	}
+	if value, ok := raw["default_query_presets"]; ok {
+		r.DefaultQueriesSet = true
+		if string(value) == jsonNullLiteral {
+			r.DefaultQueryPresets = nil
+		} else {
+			next := cloneRawMessage(value)
+			r.DefaultQueryPresets = &next
+		}
+	}
+	return nil
 }
 
 // --- Action presets (quick-launch prompts on the /github page) ---

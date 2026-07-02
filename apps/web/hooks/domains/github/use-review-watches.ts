@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import {
   listReviewWatches,
   createReviewWatch,
@@ -27,20 +27,32 @@ export function useReviewWatches(workspaceId?: string | null) {
   const addWatch = useAppStore((state) => state.addReviewWatch);
   const updateWatch = useAppStore((state) => state.updateReviewWatch);
   const removeWatch = useAppStore((state) => state.removeReviewWatch);
+  const loadedScopeRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (workspaceId === null || loaded || loading) return;
+    if (workspaceId === null) return;
+    const scopeKey = workspaceId ?? "__all__";
+    if ((loaded || loading) && loadedScopeRef.current === scopeKey) return;
+    let cancelled = false;
     setReviewWatchesLoading(true);
     listReviewWatches(workspaceId ?? undefined, { cache: "no-store" })
       .then((response) => {
+        if (cancelled) return;
         setReviewWatches(response?.watches ?? []);
+        loadedScopeRef.current = scopeKey;
       })
       .catch(() => {
+        if (cancelled) return;
         setReviewWatches([]);
+        loadedScopeRef.current = scopeKey;
       })
       .finally(() => {
+        if (cancelled) return;
         setReviewWatchesLoading(false);
       });
+    return () => {
+      cancelled = true;
+    };
   }, [workspaceId, loaded, loading, setReviewWatches, setReviewWatchesLoading]);
 
   const create = useCallback(
