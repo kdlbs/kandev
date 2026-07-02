@@ -47,15 +47,16 @@ const (
 type MessageType string
 
 const (
-	MessageTypeMessage  MessageType = "message"
-	MessageTypeContent  MessageType = "content"
-	MessageTypeToolCall MessageType = "tool_call"
-	MessageTypeProgress MessageType = "progress"
-	MessageTypeLog      MessageType = "log"
-	MessageTypeError    MessageType = "error"
-	MessageTypeStatus   MessageType = "status"
-	MessageTypeThinking MessageType = "thinking"
-	MessageTypeTodo     MessageType = "todo"
+	MessageTypeMessage         MessageType = "message"
+	MessageTypeContent         MessageType = "content"
+	MessageTypeToolCall        MessageType = "tool_call"
+	MessageTypeProgress        MessageType = "progress"
+	MessageTypeLog             MessageType = "log"
+	MessageTypeError           MessageType = "error"
+	MessageTypeStatus          MessageType = "status"
+	MessageTypeThinking        MessageType = "thinking"
+	MessageTypeAdvisorFeedback MessageType = "advisor_feedback"
+	MessageTypeTodo            MessageType = "todo"
 )
 
 // TaskRepository represents a repository associated with a task

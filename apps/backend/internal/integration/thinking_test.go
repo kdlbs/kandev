@@ -183,6 +183,62 @@ func TestThinkingEventAppend(t *testing.T) {
 	assert.True(t, foundThinking, "should find thinking message with both chunks")
 }
 
+func TestAdvisorFeedbackEventsPersistToDatabase(t *testing.T) {
+	ts := NewOrchestratorTestServer(t)
+	defer ts.Close()
+
+	ctx := context.Background()
+	taskID := ts.CreateTestTask(t, "test-agent", 1)
+
+	sessionID := uuid.New().String()
+	session := &models.TaskSession{
+		ID:             sessionID,
+		TaskID:         taskID,
+		AgentProfileID: "test-agent",
+		State:          models.TaskSessionStateRunning,
+		StartedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+	err := ts.TaskRepo.CreateTaskSession(ctx, session)
+	require.NoError(t, err)
+
+	eventData := &lifecycle.AgentStreamEventPayload{
+		Type:      "agent/event",
+		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+		TaskID:    taskID,
+		SessionID: sessionID,
+		Data: &lifecycle.AgentStreamEventData{
+			Type: "advisor_feedback",
+			Text: "Good point. Keep the patch minimal and verify the backend path.",
+			Data: map[string]interface{}{
+				"source":   "advisor",
+				"severity": "concern",
+			},
+		},
+	}
+
+	subject := events.BuildAgentStreamSubject(taskID)
+	err = ts.EventBus.Publish(ctx, subject, bus.NewEvent(events.AgentStream, "test", eventData))
+	require.NoError(t, err)
+	time.Sleep(100 * time.Millisecond)
+
+	messages, err := ts.TaskSvc.ListMessages(ctx, sessionID)
+	require.NoError(t, err)
+
+	var found bool
+	for _, msg := range messages {
+		if msg.Type == "advisor_feedback" {
+			found = true
+			assert.Equal(t, "Good point. Keep the patch minimal and verify the backend path.", msg.Content)
+			assert.Equal(t, "advisor", msg.Metadata["source"])
+			assert.Equal(t, "concern", msg.Metadata["severity"])
+			break
+		}
+	}
+
+	assert.True(t, found, "should find advisor feedback message")
+}
+
 // TestCodexReasoningSummaryEvents verifies that Codex-style reasoning events
 // (which use ReasoningSummary instead of ReasoningText) are properly handled.
 // Codex sends item/reasoning/summaryTextDelta which sets ReasoningSummary.

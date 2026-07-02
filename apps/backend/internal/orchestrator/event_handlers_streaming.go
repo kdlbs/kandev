@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -62,6 +63,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 
 	case "thinking_streaming":
 		s.handleThinkingStreamingEvent(ctx, payload)
+
+	case streams.EventTypeAdvisorFeedback:
+		s.handleAdvisorFeedbackEvent(ctx, payload)
 
 	case agentEventToolCall:
 		s.saveAgentTextIfPresent(ctx, payload)
@@ -212,6 +216,33 @@ func (s *Service) handleAgentLogEvent(ctx context.Context, payload *lifecycle.Ag
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("level", level))
+	}
+}
+
+func (s *Service) handleAdvisorFeedbackEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	taskID := payload.TaskID
+	sessionID := payload.SessionID
+	if sessionID == "" || s.messageCreator == nil {
+		return
+	}
+	text := payload.Data.Text
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	metadata := map[string]interface{}{"source": "advisor"}
+	if dataMap, ok := payload.Data.Data.(map[string]interface{}); ok {
+		for key, value := range dataMap {
+			metadata[key] = value
+		}
+	}
+	if err := s.messageCreator.CreateSessionMessage(
+		ctx, taskID, text, sessionID,
+		string(v1.MessageTypeAdvisorFeedback), s.getActiveTurnID(sessionID), metadata, false,
+	); err != nil {
+		s.logger.Error("failed to create advisor feedback message",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
 	}
 }
 

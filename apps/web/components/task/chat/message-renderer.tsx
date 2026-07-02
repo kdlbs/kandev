@@ -157,6 +157,25 @@ const adapters: MessageAdapter[] = [
     render: (comment) => <ThinkingMessage comment={comment} />,
   },
   {
+    matches: (comment) => comment.type === "advisor_feedback",
+    render: (comment, ctx) => (
+      <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+        <div className="mb-1 text-xs font-medium text-amber-700 dark:text-amber-300">
+          OMP Advisor Feedback
+        </div>
+        <ChatMessage
+          comment={comment}
+          label="Agent"
+          className="bg-transparent text-foreground border-transparent"
+          sessionId={ctx.sessionId}
+          worktreePath={ctx.worktreePath}
+          onOpenFile={ctx.onOpenFile}
+          onScrollToMessage={ctx.onScrollToMessage}
+        />
+      </div>
+    ),
+  },
+  {
     matches: (comment) => comment.type === "todo",
     render: (comment) => <TodoMessage comment={comment} />,
   },

@@ -10,7 +10,13 @@ vi.mock("@/hooks/use-panel-actions", () => ({
 }));
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: () => null,
+  useAppStore: (selector: (state: unknown) => unknown) =>
+    selector({
+      turns: { bySession: {} },
+      taskSessions: { items: {} },
+      sessionModels: { bySessionId: {} },
+    }),
+  useAppStoreApi: () => ({ getState: () => ({}) }),
 }));
 
 function message(overrides: Partial<Message>): Message {
@@ -50,5 +56,23 @@ describe("MessageRenderer markdown file links", () => {
 
     expect(onOpenFile).toHaveBeenCalledWith("apps/web/AGENTS.md");
     expect(fallbackOpenFile).not.toHaveBeenCalled();
+  });
+});
+
+describe("MessageRenderer advisor feedback", () => {
+  it("renders advisor feedback with a distinct label", () => {
+    render(
+      <MessageRenderer
+        comment={message({
+          type: "advisor_feedback",
+          content: "Good point. Verify the ACP conversion path.",
+          metadata: { source: "advisor", severity: "concern" },
+        })}
+        isTaskDescription={false}
+      />,
+    );
+
+    expect(screen.getByText("OMP Advisor Feedback")).toBeTruthy();
+    expect(screen.getByText("Good point. Verify the ACP conversion path.")).toBeTruthy();
   });
 });

@@ -10,6 +10,21 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	advisorMetaKeySource = "source"
+	advisorMetaKeyType   = "type"
+	advisorMetaKeyKind   = "kind"
+	advisorMetaKeyRole   = "role"
+	advisorMetaSource    = "advisor"
+)
+
+var advisorMetaKeys = [...]string{
+	advisorMetaKeySource,
+	advisorMetaKeyType,
+	advisorMetaKeyKind,
+	advisorMetaKeyRole,
+}
+
 // notifWork is the item type carried on notifQueue. Exactly one of the two
 // fields is populated: notif for a real SDK notification (the common case),
 // sync for a barrier posted by syncNotifQueue. The worker closes sync when
@@ -229,13 +244,7 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 		return a.convertMessageChunk(sessionID, u.UserMessageChunk.Content, "user")
 
 	case u.AgentThoughtChunk != nil:
-		if u.AgentThoughtChunk.Content.Text != nil {
-			return &AgentEvent{
-				Type:          streams.EventTypeReasoning,
-				SessionID:     sessionID,
-				ReasoningText: u.AgentThoughtChunk.Content.Text.Text,
-			}
-		}
+		return a.convertThoughtChunk(sessionID, u.AgentThoughtChunk)
 
 	case u.ToolCall != nil:
 		return a.convertToolCallUpdate(sessionID, u.ToolCall)
@@ -305,12 +314,106 @@ type acpUsageUpdate struct {
 	} `json:"cost,omitempty"`
 }
 
+func (a *Adapter) convertThoughtChunk(sessionID string, chunk *acp.SessionUpdateAgentThoughtChunk) *AgentEvent {
+	if chunk == nil || chunk.Content.Text == nil {
+		return nil
+	}
+	text := chunk.Content.Text.Text
+	if isAdvisorFeedbackMeta(chunk.Meta) {
+		data := copyAdvisorFeedbackMeta(chunk.Meta)
+		if chunk.MessageId != nil && *chunk.MessageId != "" {
+			data["message_id"] = *chunk.MessageId
+		}
+		return &AgentEvent{
+			Type:      streams.EventTypeAdvisorFeedback,
+			SessionID: sessionID,
+			Text:      text,
+			Data:      data,
+		}
+	}
+	return &AgentEvent{
+		Type:          streams.EventTypeReasoning,
+		SessionID:     sessionID,
+		ReasoningText: text,
+	}
+}
+
+func isAdvisorFeedbackMeta(meta map[string]any) bool {
+	if len(meta) == 0 {
+		return false
+	}
+	if advisor, ok := meta[advisorMetaSource].(bool); ok && advisor {
+		return true
+	}
+	for _, key := range advisorMetaKeys {
+		value, ok := meta[key].(string)
+		if !ok {
+			continue
+		}
+		switch strings.ToLower(value) {
+		case advisorMetaSource, "omp-advisor", streams.EventTypeAdvisorFeedback, "advisor-feedback":
+			return true
+		}
+	}
+	return false
+}
+
+func copyAdvisorFeedbackMeta(meta map[string]any) map[string]any {
+	data := make(map[string]any, len(meta)+1)
+	data[advisorMetaKeySource] = advisorMetaSource
+	for key, value := range meta {
+		data[key] = value
+	}
+	return data
+}
+
+func convertAdvisorFeedbackUpdate(sessionID string, advisor acpAdvisorFeedbackUpdate) *AgentEvent {
+	if advisor.SessionUpdate != streams.EventTypeAdvisorFeedback {
+		return nil
+	}
+	text := advisor.Text
+	if text == "" {
+		text = advisor.Message
+	}
+	if text == "" {
+		text = advisor.Content
+	}
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	data := copyAdvisorFeedbackMeta(advisor.Meta)
+	if advisor.Severity != "" {
+		data["severity"] = advisor.Severity
+	}
+	if advisor.AdvisorID != "" {
+		data["advisor_id"] = advisor.AdvisorID
+	}
+	return &AgentEvent{
+		Type:      streams.EventTypeAdvisorFeedback,
+		SessionID: sessionID,
+		Text:      text,
+		Data:      data,
+	}
+}
+
 // acpSessionInfoUpdate represents the ACP "session_info_update" notification.
 // TODO: Replace with the SDK type when acp-go-sdk exposes it.
 type acpSessionInfoUpdate struct {
 	SessionUpdate string         `json:"sessionUpdate"`
 	Title         string         `json:"title,omitempty"`
 	UpdatedAt     string         `json:"updatedAt,omitempty"`
+	Meta          map[string]any `json:"_meta,omitempty"`
+}
+
+// acpAdvisorFeedbackUpdate represents an OMP advisor feedback session notification
+// if the ACP SDK has not learned the update type yet.
+type acpAdvisorFeedbackUpdate struct {
+	SessionUpdate string         `json:"sessionUpdate"`
+	Text          string         `json:"text,omitempty"`
+	Message       string         `json:"message,omitempty"`
+	Content       string         `json:"content,omitempty"`
+	Severity      string         `json:"severity,omitempty"`
+	AdvisorID     string         `json:"advisorId,omitempty"`
 	Meta          map[string]any `json:"_meta,omitempty"`
 }
 
@@ -411,6 +514,13 @@ func (a *Adapter) tryConvertUntypedUpdate(rawNotification []byte, sessionID stri
 			SessionTitle:     sessionInfo.Title,
 			SessionUpdatedAt: sessionInfo.UpdatedAt,
 			SessionMeta:      sessionInfo.Meta,
+		}
+	}
+
+	var advisor acpAdvisorFeedbackUpdate
+	if err := json.Unmarshal(envelope.Update, &advisor); err == nil {
+		if event := convertAdvisorFeedbackUpdate(sessionID, advisor); event != nil {
+			return event
 		}
 	}
 

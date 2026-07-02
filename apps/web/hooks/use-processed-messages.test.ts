@@ -263,6 +263,23 @@ describe("buildGroupedRenderItems prepare progress placement", () => {
   });
 });
 
+describe("buildGroupedRenderItems advisor feedback", () => {
+  it("keeps advisor feedback as a normal feed message", () => {
+    const advisor = makeMessage(
+      "advisor-1",
+      "advisor_feedback",
+      { source: "advisor", severity: "concern" },
+      "Good point. Verify the ACP conversion path.",
+    );
+
+    const result = buildGroupedRenderItems([advisor], "s1", {
+      canAnchorPrepareProgress: false,
+    });
+
+    expect(result).toEqual([{ type: "message", message: advisor }]);
+  });
+});
+
 describe("insertLastAgentErrorItem", () => {
   it("inserts the notice after the nearest message before the error timestamp", () => {
     const before = {

@@ -73,6 +73,7 @@ const VISIBLE_MESSAGE_TYPES: Set<string> = new Set([
   "status",
   "error",
   "thinking",
+  "advisor_feedback",
   "todo",
   "script_execution",
   "agent_plan",

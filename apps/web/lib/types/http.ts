@@ -648,6 +648,7 @@ export type MessageType =
   | "error"
   | "status"
   | "thinking"
+  | "advisor_feedback"
   | "todo"
   | "permission_request"
   | "clarification_request"

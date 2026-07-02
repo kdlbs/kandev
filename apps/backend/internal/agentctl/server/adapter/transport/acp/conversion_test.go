@@ -968,6 +968,57 @@ func TestTryConvertUntypedUpdate_UnknownUpdateType(t *testing.T) {
 		t.Errorf("expected nil for unknown update type, got %+v", result)
 	}
 }
+func TestConvertNotification_AdvisorThoughtChunkMeta(t *testing.T) {
+	a := newTestAdapter()
+	messageID := "advisor-msg-1"
+	notification := acp.SessionNotification{
+		SessionId: "s1",
+		Update: acp.SessionUpdate{
+			AgentThoughtChunk: &acp.SessionUpdateAgentThoughtChunk{
+				Meta:      map[string]any{"source": "advisor", "severity": "concern"},
+				Content:   acp.TextBlock("Prefer the backend conversion path."),
+				MessageId: &messageID,
+			},
+		},
+	}
+
+	result := a.convertNotification(notification)
+
+	if result == nil {
+		t.Fatal("expected advisor feedback event, got nil")
+		return
+	}
+	if result.Type != streams.EventTypeAdvisorFeedback {
+		t.Fatalf("Type = %q, want %q", result.Type, streams.EventTypeAdvisorFeedback)
+	}
+	if result.Text != "Prefer the backend conversion path." {
+		t.Errorf("Text = %q", result.Text)
+	}
+	if result.Data["severity"] != "concern" {
+		t.Errorf("severity metadata = %v, want concern", result.Data["severity"])
+	}
+}
+
+func TestTryConvertUntypedUpdate_AdvisorFeedback(t *testing.T) {
+	a := newTestAdapter()
+	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"advisor_feedback","text":"Run the focused test first.","severity":"concern","advisorId":"omp"}}`)
+
+	result := a.tryConvertUntypedUpdate(raw, "s1")
+
+	if result == nil {
+		t.Fatal("expected advisor feedback event, got nil")
+		return
+	}
+	if result.Type != streams.EventTypeAdvisorFeedback {
+		t.Fatalf("Type = %q, want %q", result.Type, streams.EventTypeAdvisorFeedback)
+	}
+	if result.Text != "Run the focused test first." {
+		t.Errorf("Text = %q", result.Text)
+	}
+	if result.Data["advisor_id"] != "omp" {
+		t.Errorf("advisor_id metadata = %v, want omp", result.Data["advisor_id"])
+	}
+}
 
 func TestTryConvertUntypedUpdate_InvalidJSON(t *testing.T) {
 	a := newTestAdapter()

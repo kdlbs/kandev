@@ -8,6 +8,8 @@ const (
 	// EventTypeReasoning indicates chain-of-thought or thinking content.
 	EventTypeReasoning = "reasoning"
 
+	// EventTypeAdvisorFeedback indicates per-turn feedback from an advisor side channel.
+	EventTypeAdvisorFeedback = "advisor_feedback"
 	// EventTypeToolCall indicates a tool invocation has started.
 	EventTypeToolCall = "tool_call"
 
