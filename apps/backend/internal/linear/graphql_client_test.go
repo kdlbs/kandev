@@ -342,8 +342,11 @@ func TestBuildIssueFilter_IdentifierQuery(t *testing.T) {
 		t.Fatalf("expected or with 2 branches, got %+v", got["or"])
 	}
 	sc, _ := or[0]["searchableContent"].(map[string]interface{})
-	if sc["containsIgnoreCase"] != "ENG-123" {
-		t.Errorf("first OR branch should match searchableContent.containsIgnoreCase on raw query, got %+v", or[0])
+	if sc["contains"] != "ENG-123" {
+		t.Errorf("first OR branch should match searchableContent.contains on raw query, got %+v", or[0])
+	}
+	if _, bad := sc["containsIgnoreCase"]; bad {
+		t.Error("searchableContent must not use containsIgnoreCase (Linear rejects it with 400)")
 	}
 	team, _ := or[1]["team"].(map[string]interface{})
 	teamKey, _ := team["key"].(map[string]interface{})
@@ -363,8 +366,8 @@ func TestBuildIssueFilter_IdentifierLowercase(t *testing.T) {
 		t.Fatalf("expected or with 2 branches, got %+v", got["or"])
 	}
 	sc, _ := or[0]["searchableContent"].(map[string]interface{})
-	if sc["containsIgnoreCase"] != "eng-123" {
-		t.Errorf("searchableContent branch should preserve raw query under containsIgnoreCase, got %+v", sc)
+	if sc["contains"] != "eng-123" {
+		t.Errorf("searchableContent branch should preserve raw query under contains, got %+v", sc)
 	}
 	team, _ := or[1]["team"].(map[string]interface{})
 	teamKey, _ := team["key"].(map[string]interface{})
@@ -400,10 +403,67 @@ func TestBuildIssueFilter_NonIdentifierUnchanged(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected top-level searchableContent for non-identifier query, got %+v", got)
 	}
-	if sc["containsIgnoreCase"] != "auth bug" {
-		t.Errorf("searchableContent.containsIgnoreCase mismatch: %+v", sc)
+	if sc["contains"] != "auth bug" {
+		t.Errorf("searchableContent.contains mismatch: %+v", sc)
+	}
+	if _, bad := sc["containsIgnoreCase"]; bad {
+		t.Error("searchableContent must not use containsIgnoreCase (Linear rejects it with 400)")
 	}
 	if _, ok := got["or"]; ok {
 		t.Error("non-identifier query must not produce an or branch")
+	}
+}
+
+// TestBuildIssueFilter_BareNumber is the regression test for the "error when
+// searching" bug: searching a bare ticket number (e.g. "2438") must (a) never
+// emit containsIgnoreCase — the field Linear's ContentComparator rejects with a
+// BAD_USER_INPUT / status 400 — and (b) OR in an exact number match so the
+// target ticket is actually found (searchableContent never indexes the number).
+func TestBuildIssueFilter_BareNumber(t *testing.T) {
+	got := buildIssueFilter(SearchFilter{Query: "2438"})
+	if _, ok := got["searchableContent"]; ok {
+		t.Error("bare-number query should not set a top-level searchableContent filter")
+	}
+	or, ok := got["or"].([]map[string]interface{})
+	if !ok || len(or) != 2 {
+		t.Fatalf("expected or with 2 branches, got %+v", got["or"])
+	}
+	sc, _ := or[0]["searchableContent"].(map[string]interface{})
+	if sc["contains"] != "2438" {
+		t.Errorf("first OR branch should match searchableContent.contains on raw query, got %+v", or[0])
+	}
+	if _, bad := sc["containsIgnoreCase"]; bad {
+		t.Error("searchableContent must not use containsIgnoreCase (Linear rejects it with 400)")
+	}
+	num, _ := or[1]["number"].(map[string]interface{})
+	if num["eq"] != 2438 {
+		t.Errorf("second OR branch should match number.eq=2438, got %+v", or[1])
+	}
+	if _, ok := or[1]["team"]; ok {
+		t.Error("bare-number branch must not scope to a team key (number is matched across teams)")
+	}
+}
+
+func TestParseIssueNumber(t *testing.T) {
+	cases := []struct {
+		in     string
+		wantN  int
+		wantOK bool
+	}{
+		{"2438", 2438, true},
+		{" 2438 ", 2438, true},
+		{"007", 7, true},
+		{"", 0, false},
+		{"ENG-123", 0, false},
+		{"12a", 0, false},
+		{"-5", 0, false},
+		{"+5", 0, false},
+		{"99999999999999999999999999", 0, false}, // overflow → treated as free text
+	}
+	for _, tc := range cases {
+		gotN, gotOK := parseIssueNumber(tc.in)
+		if gotOK != tc.wantOK || gotN != tc.wantN {
+			t.Errorf("parseIssueNumber(%q) = (%d,%v), want (%d,%v)", tc.in, gotN, gotOK, tc.wantN, tc.wantOK)
+		}
 	}
 }

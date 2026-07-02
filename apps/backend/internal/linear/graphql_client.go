@@ -534,34 +534,71 @@ func parseIssueIdentifier(q string) (string, int, bool) {
 	return m[1], n, true
 }
 
+// issueNumberRe matches a bare issue number like "2438" — what a user types
+// when searching for a ticket by its number without the team prefix.
+var issueNumberRe = regexp.MustCompile(`^\d+$`)
+
+// parseIssueNumber returns the issue number when q is a bare integer. ok=false
+// means q is not a plain number (an out-of-range value also fails and is then
+// treated as free text). This lets "2438" resolve to an exact number match in
+// addition to the free-text branch.
+func parseIssueNumber(q string) (int, bool) {
+	q = strings.TrimSpace(q)
+	if !issueNumberRe.MatchString(q) {
+		return 0, false
+	}
+	n, err := strconv.Atoi(q)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// searchableContentFilter matches free text across an issue's title and
+// description. `searchableContent` is a Linear ContentComparator whose only
+// text operator is `contains`, which is already case-insensitive full-text —
+// it deliberately does NOT expose `containsIgnoreCase` (sending that field
+// makes Linear reject the whole query with BAD_USER_INPUT / status 400).
+func searchableContentFilter(q string) map[string]interface{} {
+	return map[string]interface{}{"contains": q}
+}
+
+// applyQueryFilter translates the free-text portion of a search into Linear's
+// IssueFilter. `searchableContent` matches across title and description but
+// never indexes the issue identifier or number, so when the query looks like a
+// ticket reference (ENG-123, or a bare number like 2438) we OR in an exact
+// match — otherwise searching by ID/number returns zero hits for the target
+// ticket. The searchableContent branch stays in the OR so cross-references like
+// "duplicate of ENG-123" pasted into another issue's body still surface.
+func applyQueryFilter(out map[string]interface{}, q string) {
+	content := map[string]interface{}{"searchableContent": searchableContentFilter(q)}
+	if teamKey, num, ok := parseIssueIdentifier(q); ok {
+		out["or"] = []map[string]interface{}{
+			content,
+			{
+				"team":   map[string]interface{}{"key": map[string]interface{}{"eq": teamKey}},
+				"number": map[string]interface{}{"eq": num},
+			},
+		}
+		return
+	}
+	if num, ok := parseIssueNumber(q); ok {
+		out["or"] = []map[string]interface{}{
+			content,
+			{"number": map[string]interface{}{"eq": num}},
+		}
+		return
+	}
+	out["searchableContent"] = searchableContentFilter(q)
+}
+
 // buildIssueFilter translates our SearchFilter into Linear's IssueFilter input.
 // Empty fields are dropped so we don't send `{ "team": null }` and similar
 // (which Linear treats as a typed null and rejects).
 func buildIssueFilter(f SearchFilter) map[string]interface{} {
 	out := map[string]interface{}{}
 	if q := strings.TrimSpace(f.Query); q != "" {
-		// Linear has no top-level free-text field, but `searchableContent`
-		// matches across title and description. When the query looks like a
-		// ticket identifier (ENG-123) we OR in an exact team+number branch,
-		// because `searchableContent` never indexes the identifier itself —
-		// without the extra branch, searching by ID would return zero hits
-		// for the target ticket. We keep the `searchableContent` branch in
-		// the OR so cross-references like "duplicate of ENG-123" pasted into
-		// another issue's title or description still surface.
-		// `containsIgnoreCase` so identifier cross-references ("see ENG-123")
-		// match regardless of the user's input casing, and so free-text
-		// queries behave intuitively case-insensitively.
-		if teamKey, num, ok := parseIssueIdentifier(q); ok {
-			out["or"] = []map[string]interface{}{
-				{"searchableContent": map[string]interface{}{"containsIgnoreCase": q}},
-				{
-					"team":   map[string]interface{}{"key": map[string]interface{}{"eq": teamKey}},
-					"number": map[string]interface{}{"eq": num},
-				},
-			}
-		} else {
-			out["searchableContent"] = map[string]interface{}{"containsIgnoreCase": q}
-		}
+		applyQueryFilter(out, q)
 	}
 	if f.TeamKey != "" {
 		out["team"] = map[string]interface{}{"key": map[string]interface{}{"eq": f.TeamKey}}
