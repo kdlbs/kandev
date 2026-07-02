@@ -56,7 +56,6 @@ function props(overrides: Partial<ChatInputBodyProps> = {}): ChatInputBodyProps 
       sessionId: "session-1",
       taskId: "task-1",
       planContextEnabled: false,
-      handleAgentCommand: vi.fn(),
       addFiles: vi.fn().mockResolvedValue(undefined),
       fileInputRef: createRef(),
       showRequestChangesTooltip: false,

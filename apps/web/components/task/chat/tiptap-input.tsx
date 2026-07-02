@@ -31,7 +31,7 @@ import {
 } from "./tiptap-suggestion";
 import { useTipTapEditor, type TipTapInputHandle } from "./use-tiptap-editor";
 import type { MentionItem } from "@/hooks/use-inline-mention";
-import type { SlashCommand } from "@/hooks/use-inline-slash";
+import type { SlashCommand } from "./slash-command-types";
 import type { ContextFile } from "@/lib/state/context-files-store";
 
 export type { TipTapInputHandle } from "./use-tiptap-editor";
@@ -55,7 +55,6 @@ type TipTapInputProps = {
   onAddContextFile?: (file: ContextFile) => void;
   onToggleContextFile?: (file: ContextFile) => void;
   planContextEnabled?: boolean;
-  onAgentCommand?: (commandName: string) => void;
   onImagePaste?: (files: File[]) => void;
   onPlanModeChange?: (enabled: boolean) => void;
 };
@@ -187,7 +186,6 @@ function useMentionItems(sessionId: string | null, taskId: string | null) {
 type SuggestionConfigsInput = {
   sessionId: string | null;
   taskId: string | null;
-  onAgentCommand?: (commandName: string) => void;
   onMentionKeyDown: (event: KeyboardEvent) => boolean;
   onSlashKeyDown: (event: KeyboardEvent) => boolean;
   setMentionMenu: React.Dispatch<React.SetStateAction<MenuState<MentionItem>>>;
@@ -197,7 +195,6 @@ type SuggestionConfigsInput = {
 function useSuggestionConfigs({
   sessionId,
   taskId,
-  onAgentCommand,
   onMentionKeyDown,
   onSlashKeyDown,
   setMentionMenu,
@@ -225,16 +222,13 @@ function useSuggestionConfigs({
     [getMentionItems],
   );
 
-  const onAgentCommandRef = useRef(onAgentCommand);
   const slashCommandsRef = useRef(slashCommands);
   useLayoutEffect(() => {
-    onAgentCommandRef.current = onAgentCommand;
     slashCommandsRef.current = slashCommands;
   });
   const slashCallbacks = useMemo(
     (): SlashSuggestionCallbacks => ({
       getCommands: () => slashCommandsRef.current,
-      onAgentCommand: (name) => onAgentCommandRef.current?.(name),
     }),
     [],
   );
@@ -367,7 +361,6 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     onBlur,
     sessionId,
     taskId,
-    onAgentCommand,
     onImagePaste,
   },
   ref,
@@ -376,7 +369,6 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
   const { mentionSuggestion, slashSuggestion } = useSuggestionConfigs({
     sessionId,
     taskId: taskId ?? null,
-    onAgentCommand,
     onMentionKeyDown: menu.onMentionKeyDown,
     onSlashKeyDown: menu.onSlashKeyDown,
     setMentionMenu: menu.setMentionMenu,

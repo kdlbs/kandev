@@ -7,7 +7,7 @@ import type {
   SuggestionKeyDownProps,
 } from "@tiptap/suggestion";
 import type { MentionItem } from "@/hooks/use-inline-mention";
-import type { SlashCommand } from "@/hooks/use-inline-slash";
+import { formatSlashCommandInsertion, type SlashCommand } from "./slash-command-types";
 
 import { getFileName } from "@/lib/utils/file-path";
 import type { MentionKind } from "./tiptap-mention-extension";
@@ -158,7 +158,6 @@ function mentionItemToAttrs(item: MentionItem): MentionAttrs {
 
 export type SlashSuggestionCallbacks = {
   getCommands: () => SlashCommand[];
-  onAgentCommand: (commandName: string) => void;
 };
 
 export const SlashSuggestionPluginKey = new PluginKey("slashSuggestion");
@@ -195,10 +194,7 @@ export function createSlashSuggestion(
     },
 
     command: ({ editor, range, props: cmd }) => {
-      editor.chain().focus().deleteRange(range).run();
-      if (cmd.agentCommandName) {
-        callbacks.onAgentCommand(cmd.agentCommandName);
-      }
+      editor.chain().focus().insertContentAt(range, formatSlashCommandInsertion(cmd)).run();
     },
 
     render: () => {
