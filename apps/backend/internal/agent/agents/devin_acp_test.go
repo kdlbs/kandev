@@ -49,11 +49,22 @@ func TestDevinACPRemoteAuth(t *testing.T) {
 		"windsurf_api_key",
 		"api_server_url",
 		devinDefaultAPIServer,
+		"umask 077",
 		"chmod 600",
 	} {
 		if !strings.Contains(env.SetupScript, needle) {
 			t.Errorf("SetupScript missing %q: %q", needle, env.SetupScript)
 		}
+	}
+}
+
+func TestDevinACPSessionDirTargetMountsCredentialsInDocker(t *testing.T) {
+	cfg := NewDevinACP().Runtime().SessionConfig
+	if cfg.SessionDirTemplate != "{home}/.local/share/devin" {
+		t.Fatalf("SessionDirTemplate = %q, want {home}/.local/share/devin", cfg.SessionDirTemplate)
+	}
+	if cfg.SessionDirTarget != "/root/.local/share/devin" {
+		t.Fatalf("SessionDirTarget = %q, want /root/.local/share/devin", cfg.SessionDirTarget)
 	}
 }
 

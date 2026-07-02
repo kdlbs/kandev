@@ -113,6 +113,7 @@ func (a *DevinACP) Runtime() *RuntimeConfig {
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
 			SessionDirTemplate:  "{home}/.local/share/devin",
+			SessionDirTarget:    "/root/.local/share/devin",
 		},
 	}
 }
@@ -139,6 +140,7 @@ escape_toml() {
 }
 api_key="$(escape_toml "${WINDSURF_API_KEY}")"
 api_server="$(escape_toml "${WINDSURF_API_SERVER_URL:-` + devinDefaultAPIServer + `}")"
+umask 077
 cat > "${HOME}/.local/share/devin/credentials.toml" <<CREDS
 windsurf_api_key = "${api_key}"
 api_server_url = "${api_server}"
