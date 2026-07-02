@@ -1,5 +1,5 @@
 import type React from "react";
-import { formatSlashCommandLabel } from "./tiptap-slash-command-utils";
+import { formatSlashCommandLabel, normalizeSlashCommandName } from "./tiptap-slash-command-utils";
 import type { SlashCommand } from "./slash-command-types";
 
 // ── JSON node types ─────────────────────────────────────────────────
@@ -86,7 +86,7 @@ export function textToHtml(text: string): string {
 }
 
 function slashCommandName(command: SlashCommand): string {
-  return (command.agentCommandName || command.label).trim().replace(/^\/+/, "");
+  return normalizeSlashCommandName(command.agentCommandName || command.label);
 }
 
 function slashCommandAttrs(command: SlashCommand): Record<string, unknown> {
@@ -115,7 +115,7 @@ function textLineToNodes(line: string, commands: Map<string, SlashCommand>): Edi
   for (const match of line.matchAll(tokenPattern)) {
     const index = match.index ?? 0;
     const token = match[0];
-    const command = commands.get(token.replace(/^\/+/, ""));
+    const command = commands.get(normalizeSlashCommandName(token));
     if (!command) continue;
     if (index > cursor) {
       nodes.push({ type: "text", text: line.slice(cursor, index) });

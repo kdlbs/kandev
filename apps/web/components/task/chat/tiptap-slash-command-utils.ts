@@ -5,12 +5,12 @@ export type SlashCommandAttrs = {
   description?: unknown;
 };
 
-function normalizeCommandName(commandName: string): string {
+export function normalizeSlashCommandName(commandName: string): string {
   return commandName.trim().replace(/^\/+/, "");
 }
 
 function withLeadingSlash(value: string): string {
-  const normalized = normalizeCommandName(value);
+  const normalized = normalizeSlashCommandName(value);
   return normalized ? `/${normalized}` : "";
 }
 
@@ -27,7 +27,7 @@ export function formatSlashCommandLabel(attrs: SlashCommandAttrs | null | undefi
 export function formatSlashCommandDisplayLabel(
   attrs: SlashCommandAttrs | null | undefined,
 ): string {
-  return formatSlashCommandLabel(attrs).replace(/^\/+/, "");
+  return normalizeSlashCommandName(formatSlashCommandLabel(attrs));
 }
 
 export function slashCommandHtmlAttributes(

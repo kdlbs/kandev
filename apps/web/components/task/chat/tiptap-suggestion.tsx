@@ -8,6 +8,7 @@ import type {
 } from "@tiptap/suggestion";
 import type { MentionItem } from "@/hooks/use-inline-mention";
 import { formatSlashCommandInsertion, type SlashCommand } from "./slash-command-types";
+import { formatSlashCommandDisplayLabel } from "./tiptap-slash-command-utils";
 
 import { getFileName } from "@/lib/utils/file-path";
 import type { MentionKind } from "./tiptap-mention-extension";
@@ -204,7 +205,7 @@ export function createSlashSuggestion(
             attrs: {
               id: cmd.id,
               label,
-              commandName: cmd.agentCommandName ?? label.replace(/^\/+/, ""),
+              commandName: cmd.agentCommandName ?? formatSlashCommandDisplayLabel({ label }),
               description: cmd.description,
             },
           },

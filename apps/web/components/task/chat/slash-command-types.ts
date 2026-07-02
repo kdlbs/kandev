@@ -1,3 +1,5 @@
+import { normalizeSlashCommandName } from "./tiptap-slash-command-utils";
+
 export type SlashCommandAction = "agent";
 
 export type SlashCommand = {
@@ -10,6 +12,6 @@ export type SlashCommand = {
 
 export function formatSlashCommandInsertion(command: SlashCommand): string {
   const rawName = command.agentCommandName || command.label;
-  const name = rawName.trim().replace(/^\/+/, "");
+  const name = normalizeSlashCommandName(rawName);
   return `/${name} `;
 }
