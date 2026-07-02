@@ -27,7 +27,11 @@ export function formatSlashCommandLabel(attrs: SlashCommandAttrs | null | undefi
 export function formatSlashCommandDisplayLabel(
   attrs: SlashCommandAttrs | null | undefined,
 ): string {
-  return normalizeSlashCommandName(formatSlashCommandLabel(attrs));
+  const raw =
+    (typeof attrs?.label === "string" && attrs.label.trim()) ||
+    (typeof attrs?.commandName === "string" && attrs.commandName.trim()) ||
+    "";
+  return normalizeSlashCommandName(raw);
 }
 
 export function slashCommandHtmlAttributes(

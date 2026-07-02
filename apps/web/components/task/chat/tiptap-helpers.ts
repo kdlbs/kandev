@@ -134,12 +134,22 @@ export function textToEditorContent(
   slashCommands: readonly SlashCommand[] = [],
 ): EditorContentNode {
   const commands = slashCommandMap(slashCommands);
+  const content: EditorContentNode[] = [];
+  let inCodeFence = false;
+  for (const line of text.split("\n")) {
+    const isFenceLine = line.trimStart().startsWith("```");
+    let nodes: EditorContentNode[];
+    if (inCodeFence || isFenceLine) {
+      nodes = line ? [{ type: "text", text: line }] : [];
+    } else {
+      nodes = textLineToNodes(line, commands);
+    }
+    content.push(nodes.length > 0 ? { type: "paragraph", content: nodes } : { type: "paragraph" });
+    if (isFenceLine) inCodeFence = !inCodeFence;
+  }
   return {
     type: "doc",
-    content: text.split("\n").map((line) => {
-      const content = textLineToNodes(line, commands);
-      return content.length > 0 ? { type: "paragraph", content } : { type: "paragraph" };
-    }),
+    content,
   };
 }
 

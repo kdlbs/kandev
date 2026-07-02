@@ -56,16 +56,16 @@ describe("getMarkdownText", () => {
 });
 
 describe("textToEditorContent", () => {
+  const slowCommand = {
+    id: "agent-slow",
+    label: "/slow",
+    description: "Run a slow response",
+    action: "agent" as const,
+    agentCommandName: "slow",
+  };
+
   it("restores known slash commands as slash command nodes", () => {
-    const content = textToEditorContent("/slow 1s", [
-      {
-        id: "agent-slow",
-        label: "/slow",
-        description: "Run a slow response",
-        action: "agent",
-        agentCommandName: "slow",
-      },
-    ]);
+    const content = textToEditorContent("/slow 1s", [slowCommand]);
 
     expect(content).toEqual({
       type: "doc",
@@ -85,6 +85,20 @@ describe("textToEditorContent", () => {
             { type: "text", text: " 1s" },
           ],
         },
+      ],
+    });
+  });
+
+  it("does not restore slash command chips inside recalled code fences", () => {
+    const content = textToEditorContent("```python\n/slow arg\n```", [slowCommand]);
+
+    expect(JSON.stringify(content)).not.toContain('"slashCommand"');
+    expect(content).toEqual({
+      type: "doc",
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: "```python" }] },
+        { type: "paragraph", content: [{ type: "text", text: "/slow arg" }] },
+        { type: "paragraph", content: [{ type: "text", text: "```" }] },
       ],
     });
   });
