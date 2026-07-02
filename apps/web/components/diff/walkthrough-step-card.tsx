@@ -2,12 +2,14 @@
 
 import { useEffect } from "react";
 import ReactMarkdown from "react-markdown";
-import { IconX } from "@tabler/icons-react";
+import { IconX, IconFileCode } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
 import { useCommentsStore } from "@/lib/state/slices/comments";
+import { useFileEditors } from "@/hooks/use-file-editors";
 import { buildDiffComment } from "@/lib/diff/comment-utils";
+import { revealFileAtLine } from "@/lib/diff/walkthrough-reveal";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import {
   markdownComponents,
@@ -28,16 +30,29 @@ function buildStepQuestion(step: WalkthroughStep, stepIndex: number, question: s
   );
 }
 
-function StepBody({ step }: { step: WalkthroughStep }) {
+function StepBody({ step, onOpenFile }: { step: WalkthroughStep; onOpenFile: () => void }) {
+  const lineLabel = step.line_end ? `${step.line}–${step.line_end}` : `${step.line}`;
+  const fileName = step.file.split("/").pop() || step.file;
   return (
-    <div className="px-3 py-2 max-h-[40vh] overflow-y-auto">
+    <div className="px-4 py-3 max-h-[40vh] overflow-y-auto">
       {step.title ? (
-        <h4 className="text-sm font-semibold mb-1" data-testid="walkthrough-step-title">
+        <h4 className="text-sm font-semibold mb-1.5" data-testid="walkthrough-step-title">
           {step.title}
         </h4>
       ) : null}
+      <button
+        type="button"
+        onClick={onOpenFile}
+        title={`Open ${step.file}:${step.line}`}
+        data-testid="walkthrough-step-file"
+        className="mb-2.5 flex max-w-full cursor-pointer items-center gap-1.5 rounded-md bg-muted/60 px-2 py-1 text-xs font-medium hover:bg-muted"
+      >
+        <IconFileCode className="size-3.5 shrink-0 text-primary" />
+        <span className="truncate font-mono">{fileName}</span>
+        <span className="shrink-0 text-muted-foreground">:{lineLabel}</span>
+      </button>
       <div
-        className="prose prose-sm dark:prose-invert max-w-none text-sm"
+        className="prose prose-sm dark:prose-invert max-w-none text-sm text-justify [&_p]:text-justify [&_p]:my-2"
         data-testid="walkthrough-step-body"
       >
         <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
@@ -99,7 +114,7 @@ export function useHasActiveWalkthroughStep(): boolean {
  * box mirrors diff comments: "Add" queues a review comment on these lines,
  * "Run" sends the question to the agent immediately.
  */
-export function WalkthroughStepInner() {
+export function WalkthroughStepInner({ onClose }: { onClose: () => void }) {
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
   const sessionId = useAppStore((s) => s.tasks.activeSessionId);
   const walkthrough = useAppStore((s) =>
@@ -109,9 +124,9 @@ export function WalkthroughStepInner() {
     activeTaskId ? (s.walkthroughs.activeStepByTaskId[activeTaskId] ?? 0) : 0,
   );
   const setActiveStep = useAppStore((s) => s.setWalkthroughActiveStep);
-  const setWalkthrough = useAppStore((s) => s.setWalkthrough);
   const markSeen = useAppStore((s) => s.markWalkthroughSeen);
   const addComment = useCommentsStore((s) => s.addComment);
+  const { openFile } = useFileEditors();
 
   useEffect(() => {
     if (activeTaskId && walkthrough) markSeen(activeTaskId);
@@ -159,10 +174,13 @@ export function WalkthroughStepInner() {
         activeStep={activeStep}
         stepCount={stepCount}
         lineLabel={lineLabel}
-        onClose={() => setWalkthrough(activeTaskId, null)}
+        onClose={onClose}
       />
-      <StepBody step={step} />
-      <div className="flex items-center gap-2 px-3 py-1.5 border-t border-border">
+      <StepBody
+        step={step}
+        onOpenFile={() => revealFileAtLine(openFile, step.file, step.line, step.repo)}
+      />
+      <div className="flex items-center gap-2 px-4 py-2 border-t border-border">
         <Button
           variant="outline"
           size="sm"
@@ -183,7 +201,7 @@ export function WalkthroughStepInner() {
           Next
         </Button>
       </div>
-      <div className="px-3 pb-2 pt-1">
+      <div className="px-4 pb-3 pt-1">
         <CommentForm
           key={activeStep}
           onSubmit={addAsComment}
@@ -203,11 +221,15 @@ export function WalkthroughStepInner() {
  */
 export function WalkthroughStepCard() {
   const hasStep = useHasActiveWalkthroughStep();
+  const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
+  const setWalkthrough = useAppStore((s) => s.setWalkthrough);
   if (!hasStep) return null;
   return (
     <div className="relative my-2 ml-2 mr-2" data-testid="walkthrough-overlay">
       <div className="absolute -top-1.5 left-6 size-3 rotate-45 border-l border-t border-primary/60 bg-card" />
-      <WalkthroughStepInner />
+      <WalkthroughStepInner
+        onClose={() => (activeTaskId ? setWalkthrough(activeTaskId, null) : undefined)}
+      />
     </div>
   );
 }

@@ -1,26 +1,20 @@
 "use client";
 
 import { useEffect } from "react";
-import { IconMinus } from "@tabler/icons-react";
-import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
+import { useFileEditors } from "@/hooks/use-file-editors";
+import { revealFileAtLine } from "@/lib/diff/walkthrough-reveal";
 import { WalkthroughStepInner, useHasActiveWalkthroughStep } from "./walkthrough-step-card";
 
-type WalkthroughFloatingWindowProps = {
-  /** Opens a file's current state in an editor tab. */
-  openFile: (path: string, repo?: string) => void | Promise<void>;
-  /** Exit editor mode (hide the floating window) without dismissing the tour. */
-  onExit: () => void;
-};
-
 /**
- * Editor-mode walkthrough: a floating window over the editor tabs that opens the
- * active step's file in its *current state* (via openFile) and shows the step
- * card. Unlike the diff-anchored card, this works for files that did not change,
- * enabling onboarding / whole-repo tours.
+ * The primary walkthrough surface: a floating card that, for each step, opens the
+ * step's file in its *current state* and reveals/centers the anchored line in the
+ * editor. Works uniformly for changed and unchanged files (onboarding / whole-repo
+ * tours), so it does not depend on the file being part of a diff.
  */
-export function WalkthroughFloatingWindow({ openFile, onExit }: WalkthroughFloatingWindowProps) {
+export function WalkthroughFloatingWindow({ onClose }: { onClose: () => void }) {
   const hasStep = useHasActiveWalkthroughStep();
+  const { openFile } = useFileEditors();
   // Select primitives (not a fresh object) so the selector stays referentially
   // stable — returning a new object here would loop the store subscription.
   const stepFile = useAppStore((s) => {
@@ -30,6 +24,13 @@ export function WalkthroughFloatingWindow({ openFile, onExit }: WalkthroughFloat
     const idx = s.walkthroughs.activeStepByTaskId[taskId] ?? 0;
     return wt?.steps[idx]?.file ?? null;
   });
+  const stepLine = useAppStore((s) => {
+    const taskId = s.tasks.activeTaskId;
+    if (!taskId) return 0;
+    const wt = s.walkthroughs.byTaskId[taskId];
+    const idx = s.walkthroughs.activeStepByTaskId[taskId] ?? 0;
+    return wt?.steps[idx]?.line ?? 0;
+  });
   const stepRepo = useAppStore((s) => {
     const taskId = s.tasks.activeTaskId;
     if (!taskId) return undefined;
@@ -38,32 +39,19 @@ export function WalkthroughFloatingWindow({ openFile, onExit }: WalkthroughFloat
     return wt?.steps[idx]?.repo;
   });
 
-  // Open the step's file (current state) in a tab whenever the step changes.
+  // Open the step's file (current state) and reveal its line whenever the step changes.
   useEffect(() => {
-    if (stepFile) void openFile(stepFile, stepRepo);
-  }, [stepFile, stepRepo, openFile]);
+    if (stepFile) revealFileAtLine(openFile, stepFile, stepLine, stepRepo);
+  }, [stepFile, stepLine, stepRepo, openFile]);
 
   if (!hasStep) return null;
 
   return (
     <div
       data-testid="walkthrough-floating"
-      className="fixed right-6 top-20 z-[70] w-[380px] max-w-[calc(100vw-2rem)]"
+      className="fixed right-6 top-20 z-[70] w-[400px] max-w-[calc(100vw-2rem)]"
     >
-      <div className="mb-1 flex items-center justify-between rounded-md bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-        Editor walkthrough
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-5 cursor-pointer text-primary"
-          aria-label="Exit editor walkthrough"
-          data-testid="walkthrough-floating-exit"
-          onClick={onExit}
-        >
-          <IconMinus className="size-3.5" />
-        </Button>
-      </div>
-      <WalkthroughStepInner />
+      <WalkthroughStepInner onClose={onClose} />
     </div>
   );
 }
