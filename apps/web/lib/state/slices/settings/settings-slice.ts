@@ -47,6 +47,7 @@ export const defaultSettingsState: SettingsSliceState = {
       branch: null,
       agentProfileId: null,
       executorProfileId: null,
+      synced: false,
     },
     jiraSavedViews: undefined,
     jiraTaskPresets: undefined,

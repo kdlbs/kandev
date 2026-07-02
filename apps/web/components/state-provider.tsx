@@ -6,7 +6,7 @@ import { useStore } from "zustand";
 import { isDebug, registerSessionTaskResolver } from "@/lib/debug/log";
 import type { AppState, StoreProviderProps } from "@/lib/state/store";
 import { createAppStore } from "@/lib/state/store";
-import { setLocalStorage } from "@/lib/local-storage";
+import { removeLocalStorage, setLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { clearQueuedTaskCreateLastUsedIfSynced } from "./task-create-dialog-handlers";
 
@@ -66,20 +66,35 @@ export function StateProvider({ children, initialState }: StoreProviderProps) {
 function syncTaskCreateLastUsedCache(state: AppState) {
   if (!state.userSettings.loaded) return;
   const lastUsed = state.userSettings.taskCreateLastUsed;
-  syncTaskCreateLastUsedCacheField(STORAGE_KEYS.LAST_REPOSITORY_ID, lastUsed?.repositoryId);
-  syncTaskCreateLastUsedCacheField(STORAGE_KEYS.LAST_BRANCH, lastUsed?.branch);
-  syncTaskCreateLastUsedCacheField(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, lastUsed?.agentProfileId);
+  syncTaskCreateLastUsedCacheField(
+    STORAGE_KEYS.LAST_REPOSITORY_ID,
+    lastUsed?.repositoryId,
+    lastUsed?.synced,
+  );
+  syncTaskCreateLastUsedCacheField(STORAGE_KEYS.LAST_BRANCH, lastUsed?.branch, lastUsed?.synced);
+  syncTaskCreateLastUsedCacheField(
+    STORAGE_KEYS.LAST_AGENT_PROFILE_ID,
+    lastUsed?.agentProfileId,
+    lastUsed?.synced,
+  );
   syncTaskCreateLastUsedCacheField(
     STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID,
     lastUsed?.executorProfileId,
+    lastUsed?.synced,
   );
   clearQueuedTaskCreateLastUsedIfSynced(lastUsed);
 }
 
-function syncTaskCreateLastUsedCacheField(key: string, value: string | null | undefined) {
-  // A missing backend field is not a clear request; keep the browser fallback.
-  if (!value) return;
-  setLocalStorage(key, value);
+function syncTaskCreateLastUsedCacheField(
+  key: string,
+  value: string | null | undefined,
+  synced: boolean | undefined,
+) {
+  if (value) {
+    setLocalStorage(key, value);
+    return;
+  }
+  if (synced) removeLocalStorage(key);
 }
 
 function taskCreateLastUsedEqual(
@@ -90,7 +105,8 @@ function taskCreateLastUsedEqual(
     a?.repositoryId === b?.repositoryId &&
     a?.branch === b?.branch &&
     a?.agentProfileId === b?.agentProfileId &&
-    a?.executorProfileId === b?.executorProfileId
+    a?.executorProfileId === b?.executorProfileId &&
+    a?.synced === b?.synced
   );
 }
 

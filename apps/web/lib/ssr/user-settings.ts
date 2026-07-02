@@ -70,6 +70,7 @@ function parseTaskCreateLastUsed(value: UserSettingsData["task_create_last_used"
     branch: value?.branch || null,
     agentProfileId: value?.agent_profile_id || null,
     executorProfileId: value?.executor_profile_id || null,
+    synced: value !== undefined,
   };
 }
 

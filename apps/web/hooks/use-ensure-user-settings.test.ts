@@ -171,6 +171,7 @@ describe("useEnsureUserSettings", () => {
       branch: "main",
       agentProfileId: "agent-2",
       executorProfileId: "exec-profile-1",
+      synced: true,
     });
   });
 

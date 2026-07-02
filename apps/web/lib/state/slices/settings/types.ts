@@ -181,6 +181,7 @@ export type TaskCreateLastUsedState = {
   branch: string | null;
   agentProfileId: string | null;
   executorProfileId: string | null;
+  synced?: boolean;
 };
 
 export type VoiceModeState = {

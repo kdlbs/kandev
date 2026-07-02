@@ -157,14 +157,25 @@ describe("StateProvider task-create cache", () => {
 });
 
 describe("StateProvider task-create cache fallback", () => {
+  const cachedRepositoryId = "repo-cached";
+  const cachedBranch = "feature-cached";
+  const cachedAgentProfileId = "agent-cached";
+  const cachedExecutorProfileId = "exec-cached";
+
   it("keeps cached task-create choices when loaded backend settings omit them", async () => {
     const onSeen = vi.fn();
-    window.localStorage.setItem(STORAGE_KEYS.LAST_REPOSITORY_ID, JSON.stringify("repo-cached"));
-    window.localStorage.setItem(STORAGE_KEYS.LAST_BRANCH, JSON.stringify("feature-cached"));
-    window.localStorage.setItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, JSON.stringify("agent-cached"));
+    window.localStorage.setItem(
+      STORAGE_KEYS.LAST_REPOSITORY_ID,
+      JSON.stringify(cachedRepositoryId),
+    );
+    window.localStorage.setItem(STORAGE_KEYS.LAST_BRANCH, JSON.stringify(cachedBranch));
+    window.localStorage.setItem(
+      STORAGE_KEYS.LAST_AGENT_PROFILE_ID,
+      JSON.stringify(cachedAgentProfileId),
+    );
     window.localStorage.setItem(
       STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID,
-      JSON.stringify("exec-cached"),
+      JSON.stringify(cachedExecutorProfileId),
     );
 
     render(
@@ -186,21 +197,64 @@ describe("StateProvider task-create cache fallback", () => {
       </StateProvider>,
     );
 
-    expect(onSeen).toHaveBeenCalledWith(JSON.stringify("repo-cached"));
+    expect(onSeen).toHaveBeenCalledWith(JSON.stringify(cachedRepositoryId));
     // Give any potential deferred deletions a chance to fire (old code used setTimeout(0)).
     await new Promise((resolve) => window.setTimeout(resolve, 10));
     expect(window.localStorage.getItem(STORAGE_KEYS.LAST_REPOSITORY_ID)).toBe(
-      JSON.stringify("repo-cached"),
+      JSON.stringify(cachedRepositoryId),
     );
     expect(window.localStorage.getItem(STORAGE_KEYS.LAST_BRANCH)).toBe(
-      JSON.stringify("feature-cached"),
+      JSON.stringify(cachedBranch),
     );
     expect(window.localStorage.getItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID)).toBe(
-      JSON.stringify("agent-cached"),
+      JSON.stringify(cachedAgentProfileId),
     );
     expect(window.localStorage.getItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID)).toBe(
-      JSON.stringify("exec-cached"),
+      JSON.stringify(cachedExecutorProfileId),
     );
+  });
+
+  it("clears cached task-create choices when loaded backend settings explicitly sync empty values", async () => {
+    window.localStorage.setItem(
+      STORAGE_KEYS.LAST_REPOSITORY_ID,
+      JSON.stringify(cachedRepositoryId),
+    );
+    window.localStorage.setItem(STORAGE_KEYS.LAST_BRANCH, JSON.stringify(cachedBranch));
+    window.localStorage.setItem(
+      STORAGE_KEYS.LAST_AGENT_PROFILE_ID,
+      JSON.stringify(cachedAgentProfileId),
+    );
+    window.localStorage.setItem(
+      STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID,
+      JSON.stringify(cachedExecutorProfileId),
+    );
+
+    render(
+      <StateProvider
+        initialState={{
+          userSettings: {
+            ...defaultSettingsState.userSettings,
+            loaded: true,
+            taskCreateLastUsed: {
+              repositoryId: null,
+              branch: null,
+              agentProfileId: null,
+              executorProfileId: null,
+              synced: true,
+            },
+          },
+        }}
+      >
+        <div>ready</div>
+      </StateProvider>,
+    );
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem(STORAGE_KEYS.LAST_REPOSITORY_ID)).toBeNull();
+      expect(window.localStorage.getItem(STORAGE_KEYS.LAST_BRANCH)).toBeNull();
+      expect(window.localStorage.getItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID)).toBeNull();
+      expect(window.localStorage.getItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID)).toBeNull();
+    });
   });
 });
 
