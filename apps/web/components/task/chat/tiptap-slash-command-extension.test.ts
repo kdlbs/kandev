@@ -22,7 +22,7 @@ type SlashCommandNodeConfig = {
 const config = SlashCommandNode.config as unknown as SlashCommandNodeConfig;
 
 describe("SlashCommandNode", () => {
-  it("keeps internal attrs out of default HTML rendering", () => {
+  it("marks internal attrs as non-rendered TipTap attrs", () => {
     expect(config.addAttributes()).toMatchObject({
       id: { rendered: false },
       label: { rendered: false },
@@ -45,7 +45,7 @@ describe("SlashCommandNode", () => {
     );
   });
 
-  it("renders HTML with slash-prefixed fallback text and data attrs", () => {
+  it("renders HTML with only data attrs for slash command metadata", () => {
     const html = config.renderHTML({
       node: {
         attrs: {
@@ -58,7 +58,7 @@ describe("SlashCommandNode", () => {
     });
 
     expect(html[0]).toBe("span");
-    expect(html[1]).toMatchObject({
+    expect(html[1]).toEqual({
       class: "chip",
       "data-slash-command": "",
       "data-id": "cmd-1",
