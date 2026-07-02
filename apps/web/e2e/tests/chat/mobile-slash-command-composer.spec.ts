@@ -55,6 +55,7 @@ test.describe("Mobile slash command composer", () => {
     await command.tap();
 
     await expect(editor).toHaveText(/\/slow/, { timeout: 5_000 });
+    await expect(editor.getByTestId("slash-command-chip")).toHaveText("/slow", { timeout: 5_000 });
     const chatList = session.chat.locator(".chat-message-list:visible");
     await expect(chatList.getByText("/slow", { exact: false })).not.toBeVisible({ timeout: 1_000 });
 

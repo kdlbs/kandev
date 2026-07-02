@@ -19,6 +19,9 @@ function serializeInline(nodes: JSONNode[]): string {
       if (n.type === "contextMention") {
         return n.attrs?.label ? `@${n.attrs.label}` : "";
       }
+      if (n.type === "slashCommand") {
+        return (n.attrs?.label as string | undefined) ?? "";
+      }
       const text = n.text ?? "";
       if (n.marks?.some((m) => m.type === "code")) {
         return "`" + text + "`";

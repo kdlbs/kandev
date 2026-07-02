@@ -23,6 +23,7 @@ import { getChatDraftContent, setChatDraftContent } from "@/lib/local-storage";
 import { getMarkdownText, textToHtml, handleEditorPaste } from "./tiptap-helpers";
 import { CodeBlockView } from "./tiptap-code-block-view";
 import { ContextMention } from "./tiptap-mention-extension";
+import { SlashCommandNode } from "./tiptap-slash-command-extension";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
 
@@ -206,6 +207,7 @@ function buildEditorExtensions(args: {
       },
     }).configure({ lowlight: lowlightInstance }),
     DynamicPlaceholder,
+    SlashCommandNode,
     ContextMention.configure({
       suggestions: [args.mentionSuggestion, args.slashSuggestion],
     }),

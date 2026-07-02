@@ -194,7 +194,22 @@ export function createSlashSuggestion(
     },
 
     command: ({ editor, range, props: cmd }) => {
-      editor.chain().focus().insertContentAt(range, formatSlashCommandInsertion(cmd)).run();
+      const label = formatSlashCommandInsertion(cmd).trim();
+      editor
+        .chain()
+        .focus()
+        .insertContentAt(range, [
+          {
+            type: "slashCommand",
+            attrs: {
+              id: cmd.id,
+              label,
+              commandName: cmd.agentCommandName ?? label.replace(/^\/+/, ""),
+            },
+          },
+          { type: "text", text: " " },
+        ])
+        .run();
     },
 
     render: () => {
