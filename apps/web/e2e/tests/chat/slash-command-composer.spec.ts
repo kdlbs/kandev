@@ -1,6 +1,7 @@
 import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { seedAvailableCommands } from "../../helpers/session-store";
+import { attachAvailableCommandsCapture } from "../../helpers/ws-capture";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
@@ -49,44 +50,6 @@ async function selectSlowCommandWithEnter(
   await expect(page.getByText("/slow", { exact: true })).toBeVisible({ timeout: 5_000 });
   await editor.press("Enter");
   await expect(editor).toHaveText(/\/slow/, { timeout: 5_000 });
-}
-
-async function installAvailableCommandRecorder(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    const w = window as unknown as { __wsAvailableCommands: unknown[] };
-    w.__wsAvailableCommands = [];
-    const OrigWS = window.WebSocket;
-    const Hooked = function (this: WebSocket, url: string | URL, protocols?: string | string[]) {
-      const ws = new OrigWS(url, protocols);
-      ws.addEventListener("message", (ev: MessageEvent) => {
-        try {
-          const message = JSON.parse(String(ev.data));
-          if (message.action === "session.available_commands") {
-            w.__wsAvailableCommands.push({
-              session_id: message.payload?.session_id,
-              count: message.payload?.available_commands?.length ?? 0,
-            });
-          }
-        } catch {
-          // Ignore non-JSON websocket frames.
-        }
-      });
-      return ws;
-    } as unknown as typeof WebSocket;
-    Hooked.prototype = OrigWS.prototype;
-    Object.assign(Hooked, OrigWS);
-    window.WebSocket = Hooked;
-  });
-}
-
-async function waitForAvailableCommands(page: Page): Promise<void> {
-  await page.waitForFunction(
-    () => {
-      const w = window as unknown as { __wsAvailableCommands?: unknown[] };
-      return (w.__wsAvailableCommands?.length ?? 0) > 0;
-    },
-    { timeout: 15_000 },
-  );
 }
 
 async function openQuickChatWithAgent(page: Page): Promise<Locator> {
@@ -203,9 +166,11 @@ test.describe("Slash command composer", () => {
   });
 
   test("quick chat selection does not auto-send", async ({ testPage }) => {
-    await installAvailableCommandRecorder(testPage);
+    const availableCommands = attachAvailableCommandsCapture(testPage);
     const dialog = await openQuickChatWithAgent(testPage);
-    await waitForAvailableCommands(testPage);
+    await expect
+      .poll(() => availableCommands.frames.length, { timeout: 15_000 })
+      .toBeGreaterThan(0);
 
     const editor = chatEditor(dialog);
 

@@ -1,5 +1,6 @@
 import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import { attachAvailableCommandsCapture } from "../../helpers/ws-capture";
 
 /**
  * Quick Chat E2E tests: basic flow, enhance prompt, queued messages, multi-tab.
@@ -129,39 +130,7 @@ test.describe("Quick Chat", () => {
     // populated before the user sends their first prompt. Mock-agent emits
     // /slow, /error, /thinking, etc. on session/new (parity with real ACP
     // agents like OpenCode and Claude).
-    // Hook WebSocket BEFORE navigating to capture all session.available_commands
-    // frames into window.__wsAvailableCommands for assertion.
-    await testPage.addInitScript(() => {
-      const w = window as unknown as {
-        __wsAvailableCommands: unknown[];
-        __wsAll: unknown[];
-      };
-      w.__wsAvailableCommands = [];
-      w.__wsAll = [];
-      const OrigWS = window.WebSocket;
-      const Hooked = function (this: WebSocket, url: string | URL, protocols?: string | string[]) {
-        const ws = new OrigWS(url, protocols);
-        w.__wsAll.push({ event: "open", url: String(url) });
-        ws.addEventListener("message", (ev: MessageEvent) => {
-          try {
-            const m = JSON.parse(String(ev.data));
-            w.__wsAll.push({ event: "msg", action: m.action });
-            if (m.action === "session.available_commands") {
-              w.__wsAvailableCommands.push({
-                session_id: m.payload?.session_id,
-                count: m.payload?.available_commands?.length ?? 0,
-              });
-            }
-          } catch {
-            // ignore
-          }
-        });
-        return ws;
-      } as unknown as typeof WebSocket;
-      Hooked.prototype = OrigWS.prototype;
-      Object.assign(Hooked, OrigWS);
-      window.WebSocket = Hooked;
-    });
+    const availableCommands = attachAvailableCommandsCapture(testPage);
 
     const dialog = await openQuickChatWithAgent(testPage);
 
@@ -169,13 +138,9 @@ test.describe("Quick Chat", () => {
     // session/new during the HTTP request, but the agent emits commands
     // asynchronously after the response flushes — so the frame can arrive
     // moments after openQuickChatWithAgent resolves.
-    await testPage.waitForFunction(
-      () => {
-        const w = window as unknown as { __wsAvailableCommands?: unknown[] };
-        return (w.__wsAvailableCommands?.length ?? 0) > 0;
-      },
-      { timeout: 15_000 },
-    );
+    await expect
+      .poll(() => availableCommands.frames.length, { timeout: 15_000 })
+      .toBeGreaterThan(0);
 
     const editor = dialog.locator(".tiptap.ProseMirror");
     await editor.click();
