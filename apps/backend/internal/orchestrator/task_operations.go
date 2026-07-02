@@ -1385,17 +1385,21 @@ func (s *Service) waitForSessionReady(ctx context.Context, sessionID string) err
 		pollInterval = 500 * time.Millisecond
 		maxWait      = 90 * time.Second
 	)
-	deadline := time.Now().Add(maxWait)
+	// Derive a bounded context so the overall wait AND each GetTaskSession query
+	// inside the loop honor maxWait. Callers pass context.WithoutCancel(ctx) so
+	// the wait survives the caller's request timeout during resume/launch — but
+	// that context carries no deadline of its own, so without this a single
+	// blocking query could hang well past maxWait (the loop only checks the
+	// wall clock between iterations). Mirrors waitForAgentPromptReady.
+	readyCtx, cancel := context.WithTimeout(ctx, maxWait)
+	defer cancel()
 	for {
-		if time.Now().After(deadline) {
-			return fmt.Errorf("timeout waiting for agent to become ready")
-		}
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-readyCtx.Done():
+			return fmt.Errorf("timeout waiting for agent to become ready: %w", readyCtx.Err())
 		case <-time.After(pollInterval):
 		}
-		sess, err := s.repo.GetTaskSession(ctx, sessionID)
+		sess, err := s.repo.GetTaskSession(readyCtx, sessionID)
 		if err != nil {
 			return fmt.Errorf("failed to check session state: %w", err)
 		}
