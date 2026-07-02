@@ -49,7 +49,7 @@ type SessionCanceller interface {
 // ClarificationInputPauser performs the orchestrator-owned hard pause for
 // ask_user_question calls that end without an answer.
 type ClarificationInputPauser interface {
-	PauseForClarificationInput(ctx context.Context, sessionID string) error
+	PauseForClarificationInput(ctx context.Context, sessionID string) (int, error)
 }
 
 // MessageCreator creates messages for clarification requests.
@@ -2289,7 +2289,7 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 	resp, err := h.clarificationSvc.WaitForResponse(ctx, pendingID)
 	if err != nil {
 		if h.inputPauser != nil {
-			if pauseErr := h.inputPauser.PauseForClarificationInput(context.WithoutCancel(ctx), req.SessionID); pauseErr != nil {
+			if _, pauseErr := h.inputPauser.PauseForClarificationInput(context.WithoutCancel(ctx), req.SessionID); pauseErr != nil {
 				h.logger.Warn("failed to pause session after clarification ended without answer",
 					zap.String("pending_id", pendingID),
 					zap.String("session_id", req.SessionID),
@@ -2540,13 +2540,15 @@ func (h *Handlers) handleClarificationTimeout(ctx context.Context, msg *ws.Messa
 	}
 
 	if h.inputPauser != nil {
-		if err := h.inputPauser.PauseForClarificationInput(context.WithoutCancel(ctx), req.SessionID); err != nil {
+		cancelled, err := h.inputPauser.PauseForClarificationInput(context.WithoutCancel(ctx), req.SessionID)
+		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 				"failed to pause session for clarification input: "+err.Error(), nil)
 		}
 		h.logger.Info("paused session after agent MCP clarification timeout",
-			zap.String("session_id", req.SessionID))
-		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"ok": true, "paused": true})
+			zap.String("session_id", req.SessionID),
+			zap.Int("count", cancelled))
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"ok": true, "cancelled": cancelled, "paused": true})
 	}
 
 	if h.sessionCanceller == nil {

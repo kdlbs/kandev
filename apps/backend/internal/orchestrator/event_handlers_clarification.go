@@ -289,31 +289,36 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 // into a platform pause. It detaches the pending clarification so a late user
 // answer resumes through the event fallback path, then silently cancels the
 // active agent turn without evaluating workflow turn-complete actions.
-func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID string) error {
+func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID string) (int, error) {
 	if sessionID == "" {
-		return fmt.Errorf("session_id is required")
+		return 0, fmt.Errorf("session_id is required")
 	}
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), clarificationInputPauseTimeout)
 	defer cancel()
 	session, err := s.repo.GetTaskSession(writeCtx, sessionID)
 	if err != nil {
-		return fmt.Errorf("load session for clarification pause: %w", err)
+		return 0, fmt.Errorf("load session for clarification pause: %w", err)
 	}
 	if session == nil || isTerminalSessionState(session.State) {
-		return nil
+		return 0, nil
 	}
 
+	detached := 0
 	if s.clarificationCanceller != nil {
-		s.clarificationCanceller.DetachSessionAndNotify(writeCtx, sessionID)
+		detached = s.clarificationCanceller.DetachSessionAndNotify(writeCtx, sessionID)
 	}
 	if session.State == models.TaskSessionStateWaitingForInput {
 		s.completeTurnForSession(writeCtx, sessionID)
-		return nil
+		return detached, nil
 	}
+	// The backend wait path and agentctl timeout notification can race for the
+	// same ask_user_question call. A duplicate cancel is safe: lifecycle returns
+	// ErrCancelEscalated/ErrNoExecutionForSession once the first pause wins, and
+	// completeTurnForSession is idempotent when there is no active turn left.
 	if err := s.cancelAgentSilent(writeCtx, session.TaskID, sessionID); err != nil {
-		return err
+		return detached, err
 	}
-	return nil
+	return detached, nil
 }
 
 // cancelAgentSilent cancels the agent turn without creating a visible message

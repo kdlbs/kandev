@@ -300,10 +300,10 @@ func TestPauseForClarificationInput_SilentlyCancelsTurnWithoutWorkflowTransition
 	svc.SetClarificationCanceller(canceller)
 	svc.turnService = &repoBackedTurnService{repo: repo}
 
-	if err := svc.PauseForClarificationInput(ctx, "s1"); err != nil {
+	if _, err := svc.PauseForClarificationInput(ctx, "s1"); err != nil {
 		t.Fatalf("pause clarification input: %v", err)
 	}
-	if err := svc.PauseForClarificationInput(ctx, "s1"); err != nil {
+	if _, err := svc.PauseForClarificationInput(ctx, "s1"); err != nil {
 		t.Fatalf("repeat pause clarification input: %v", err)
 	}
 

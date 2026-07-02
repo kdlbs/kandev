@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -14,16 +15,17 @@ import (
 
 type recordingClarificationInputPauser struct {
 	sessions []string
+	count    int
 	err      error
 }
 
-func (p *recordingClarificationInputPauser) PauseForClarificationInput(_ context.Context, sessionID string) error {
+func (p *recordingClarificationInputPauser) PauseForClarificationInput(_ context.Context, sessionID string) (int, error) {
 	p.sessions = append(p.sessions, sessionID)
-	return p.err
+	return p.count, p.err
 }
 
 func TestHandleClarificationTimeout_UsesHardPauser(t *testing.T) {
-	pauser := &recordingClarificationInputPauser{}
+	pauser := &recordingClarificationInputPauser{count: 2}
 	h := &Handlers{logger: testLogger(t).WithFields()}
 	h.SetClarificationInputPauser(pauser)
 
@@ -32,6 +34,11 @@ func TestHandleClarificationTimeout_UsesHardPauser(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)
 	require.Equal(t, []string{"s1"}, pauser.sessions)
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	require.Equal(t, true, payload["ok"])
+	require.Equal(t, true, payload["paused"])
+	require.Equal(t, float64(2), payload["cancelled"])
 }
 
 func TestHandleAskUserQuestion_NoAnswerPausesSession(t *testing.T) {
