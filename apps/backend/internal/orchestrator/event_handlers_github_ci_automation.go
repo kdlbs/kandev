@@ -24,7 +24,9 @@ const (
 	ciAutomationOrigin           = "ci_automation"
 	ciAutomationCheckSuccess     = "success"
 	ciAutomationCheckFailure     = "failure"
+	ciAutomationCheckError       = "error"
 	ciAutomationCheckCompleted   = "completed"
+	ciAutomationCheckPending     = "pending"
 	ciAutomationChangesRequested = "changes_requested"
 	ciAutomationPRFeedbackToken  = "{{pr.feedback}}"
 	ciAutomationFixBlockWindow   = time.Hour
@@ -172,6 +174,9 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 	if !ciAutomationCanAutoFixFromFeedbackPR(feedback) {
 		return false
 	}
+	if !ciAutomationChecksSettledForAutoFix(pr, feedback) {
+		return false
+	}
 	feedback = ciAutomationFilterFeedbackForPR(pr, feedback)
 	previous := decodeCIAutomationCheckpoint(state)
 	delta := ciAutomationBuildDelta(feedback, previous)
@@ -185,7 +190,7 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 	}
 	allowNewRound := !ciAutomationFixRoundsExhausted(state)
 	prompt := ciAutomationRenderPrompt(options.EffectiveAutoFixPrompt, pr, delta)
-	session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, pr.TaskID)
+	session, err := s.resolveCIAutoFixSession(ctx, pr.TaskID, state)
 	if err != nil || session == nil {
 		if !allowNewRound {
 			s.markCIAutoFixExhausted(ctx, pr)
@@ -218,6 +223,52 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 		s.publishTaskCIOptionsState(ctx, pr.TaskID)
 	}
 	return true
+}
+
+func (s *Service) resolveCIAutoFixSession(ctx context.Context, taskID string, state *github.TaskCIPRAutomationState) (*models.TaskSession, error) {
+	if state != nil && state.LastFixSessionID != nil && strings.TrimSpace(*state.LastFixSessionID) != "" {
+		session, err := s.repo.GetTaskSession(ctx, *state.LastFixSessionID)
+		if err != nil && !errors.Is(err, models.ErrTaskSessionNotFound) {
+			return nil, err
+		}
+		if session != nil && session.TaskID != taskID {
+			return nil, fmt.Errorf("previous CI auto-fix session belongs to task %s", session.TaskID)
+		}
+		if ciAutomationSessionCanReceivePrompt(session) {
+			return session, nil
+		}
+	}
+	sessions, err := s.repo.ListActiveTaskSessionsByTaskID(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	for _, session := range sessions {
+		if ciAutomationSessionCanReceivePrompt(session) && session.IsPrimary {
+			return session, nil
+		}
+	}
+	for _, session := range sessions {
+		if ciAutomationSessionCanReceivePrompt(session) {
+			return session, nil
+		}
+	}
+	return nil, fmt.Errorf("no active agent session for task: %s", taskID)
+}
+
+func ciAutomationSessionCanReceivePrompt(session *models.TaskSession) bool {
+	if session == nil {
+		return false
+	}
+	switch session.State {
+	case models.TaskSessionStateCreated,
+		models.TaskSessionStateStarting,
+		models.TaskSessionStateRunning,
+		models.TaskSessionStateWaitingForInput,
+		models.TaskSessionStateIdle:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Service) handleTaskPRCIAutoFixEmptyDelta(ctx context.Context, pr *github.TaskPR, state *github.TaskCIPRAutomationState, previous ciAutomationCheckpoint, signature, checkpointJSON string) bool {
@@ -258,7 +309,7 @@ func (s *Service) handleTaskPRCIAutoMerge(ctx context.Context, pr *github.TaskPR
 func (s *Service) dispatchCIAutomationPromptForPR(ctx context.Context, session *models.TaskSession, pr *github.TaskPR, prompt, signature string, allowNewRound bool) (ciAutomationDispatchResult, error) {
 	chatPrompt := ciAutomationChatPrompt(prompt)
 	switch session.State {
-	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
+	case models.TaskSessionStateCreated, models.TaskSessionStateRunning, models.TaskSessionStateStarting:
 		return s.queueOrReplaceCIAutomationPromptForPR(ctx, session, pr, chatPrompt, signature, allowNewRound)
 	case models.TaskSessionStateWaitingForInput, models.TaskSessionStateIdle:
 		result, replaced, err := s.replacePendingCIAutomationPromptForPR(ctx, session, pr, chatPrompt, signature)
@@ -401,18 +452,64 @@ func ciAutomationCanAutoFixFromFeedbackPR(feedback *github.PRFeedback) bool {
 	return feedback.PR.State != "closed" && feedback.PR.State != "merged"
 }
 
+func ciAutomationChecksSettledForAutoFix(pr *github.TaskPR, feedback *github.PRFeedback) bool {
+	if pr != nil && !ciAutomationChecksRollupSettled(pr.ChecksState) {
+		return false
+	}
+	if feedback == nil {
+		return true
+	}
+	for _, check := range feedback.Checks {
+		if check.Status != ciAutomationCheckCompleted {
+			return false
+		}
+	}
+	return true
+}
+
+func ciAutomationChecksRollupSettled(state string) bool {
+	// GitHub GraphQL rollups can expose values like EXPECTED before concrete
+	// check runs exist. Keep the whitelist narrow so unknown rollup states wait.
+	switch strings.TrimSpace(strings.ToLower(state)) {
+	case "", ciAutomationCheckSuccess, ciAutomationCheckFailure, ciAutomationCheckError:
+		return true
+	default:
+		return false
+	}
+}
+
 func ciAutomationFilterFeedbackForPR(pr *github.TaskPR, feedback *github.PRFeedback) *github.PRFeedback {
-	if feedback == nil || pr == nil || pr.UnresolvedReviewThreads > 0 {
+	if feedback == nil || pr == nil {
 		return feedback
 	}
 	filtered := *feedback
 	filtered.Comments = make([]github.PRComment, 0, len(feedback.Comments))
+	includeBotPRComments := ciAutomationFeedbackHasActionableSignal(pr, feedback)
 	for _, comment := range feedback.Comments {
-		if comment.Path == "" && comment.Line == 0 {
+		if ciAutomationShouldIncludeFeedbackComment(pr, comment, includeBotPRComments) {
 			filtered.Comments = append(filtered.Comments, comment)
 		}
 	}
 	return &filtered
+}
+
+func ciAutomationFeedbackHasActionableSignal(pr *github.TaskPR, feedback *github.PRFeedback) bool {
+	if pr.UnresolvedReviewThreads > 0 {
+		return true
+	}
+	for _, check := range feedback.Checks {
+		if check.Status == ciAutomationCheckCompleted && ciAutomationCheckConclusionNeedsFix(check.Conclusion) {
+			return true
+		}
+	}
+	return false
+}
+
+func ciAutomationShouldIncludeFeedbackComment(pr *github.TaskPR, comment github.PRComment, includeBotPRComments bool) bool {
+	if comment.Path == "" && comment.Line == 0 {
+		return !comment.AuthorIsBot || includeBotPRComments
+	}
+	return pr.UnresolvedReviewThreads > 0
 }
 
 func ciAutomationReadyToMerge(pr *github.TaskPR) bool {

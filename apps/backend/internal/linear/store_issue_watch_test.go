@@ -22,6 +22,7 @@ func TestStore_IssueWatch_CreateGet(t *testing.T) {
 	ctx := context.Background()
 
 	w := newTestIssueWatch("ws-1")
+	w.SortBy = SortByPriorityDesc
 	if err := store.CreateIssueWatch(ctx, w); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -48,6 +49,32 @@ func TestStore_IssueWatch_CreateGet(t *testing.T) {
 	// Filter survives the JSON round-trip.
 	if got.Filter.TeamKey != "ENG" || len(got.Filter.StateIDs) != 1 || got.Filter.StateIDs[0] != "state-started" {
 		t.Errorf("filter round-trip failed: %+v", got.Filter)
+	}
+	if got.SortBy != SortByPriorityDesc {
+		t.Errorf("sort_by round-trip failed: %q", got.SortBy)
+	}
+}
+
+func TestStore_IssueWatch_UpdateSortBy(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	w := newTestIssueWatch("ws-1")
+	w.SortBy = SortByPriorityDesc
+	if err := store.CreateIssueWatch(ctx, w); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// Change to a different value so UPDATE's SQL column order is pinned.
+	w.SortBy = SortByCreatedDesc
+	if err := store.UpdateIssueWatch(ctx, w); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	got, err := store.GetIssueWatch(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.SortBy != SortByCreatedDesc {
+		t.Errorf("sort_by update did not persist: %q", got.SortBy)
 	}
 }
 

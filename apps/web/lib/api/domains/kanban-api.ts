@@ -56,6 +56,7 @@ export async function createTask(
       repository_id: string;
       base_branch?: string;
       checkout_branch?: string;
+      pr_number?: number;
       local_path?: string;
       name?: string;
       default_branch?: string;

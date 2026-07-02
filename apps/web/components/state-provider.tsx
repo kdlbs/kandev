@@ -66,32 +66,35 @@ export function StateProvider({ children, initialState }: StoreProviderProps) {
 function syncTaskCreateLastUsedCache(state: AppState) {
   if (!state.userSettings.loaded) return;
   const lastUsed = state.userSettings.taskCreateLastUsed;
-  syncTaskCreateLastUsedCacheField(STORAGE_KEYS.LAST_REPOSITORY_ID, lastUsed?.repositoryId);
-  syncTaskCreateLastUsedCacheField(STORAGE_KEYS.LAST_BRANCH, lastUsed?.branch);
-  syncTaskCreateLastUsedCacheField(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, lastUsed?.agentProfileId);
+  syncTaskCreateLastUsedCacheField(
+    STORAGE_KEYS.LAST_REPOSITORY_ID,
+    lastUsed?.repositoryId,
+    lastUsed?.synced,
+  );
+  syncTaskCreateLastUsedCacheField(STORAGE_KEYS.LAST_BRANCH, lastUsed?.branch, lastUsed?.synced);
+  syncTaskCreateLastUsedCacheField(
+    STORAGE_KEYS.LAST_AGENT_PROFILE_ID,
+    lastUsed?.agentProfileId,
+    lastUsed?.synced,
+  );
   syncTaskCreateLastUsedCacheField(
     STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID,
     lastUsed?.executorProfileId,
+    lastUsed?.synced,
   );
   clearQueuedTaskCreateLastUsedIfSynced(lastUsed);
 }
 
-function syncTaskCreateLastUsedCacheField(key: string, value: string | null | undefined) {
+function syncTaskCreateLastUsedCacheField(
+  key: string,
+  value: string | null | undefined,
+  synced: boolean | undefined,
+) {
   if (value) {
     setLocalStorage(key, value);
     return;
   }
-  deferRemoveTaskCreateLastUsedCacheField(key);
-}
-
-function deferRemoveTaskCreateLastUsedCacheField(key: string) {
-  const cachedValue = window.localStorage.getItem(key);
-  if (cachedValue === null) return;
-  window.setTimeout(() => {
-    if (window.localStorage.getItem(key) === cachedValue) {
-      removeLocalStorage(key);
-    }
-  }, 0);
+  if (synced) removeLocalStorage(key);
 }
 
 function taskCreateLastUsedEqual(
@@ -102,7 +105,8 @@ function taskCreateLastUsedEqual(
     a?.repositoryId === b?.repositoryId &&
     a?.branch === b?.branch &&
     a?.agentProfileId === b?.agentProfileId &&
-    a?.executorProfileId === b?.executorProfileId
+    a?.executorProfileId === b?.executorProfileId &&
+    a?.synced === b?.synced
   );
 }
 

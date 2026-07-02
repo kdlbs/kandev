@@ -10,7 +10,7 @@ import {
   type TaskSessionState,
 } from "@/lib/types/http";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
-import type { KanbanState, WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
+import { syncKanbanPrimarySessionState } from "@/lib/ws/handlers/agent-session-kanban-sync";
 
 const debug = createDebugLogger("session:state");
 
@@ -224,79 +224,6 @@ function maybeFanOutOfficeRefetch(
   setOfficeTrigger("agents");
 }
 
-function patchTaskPrimarySessionState(
-  tasks: KanbanState["tasks"],
-  taskId: string,
-  sessionId: string,
-  newState: TaskSessionState,
-): KanbanState["tasks"] {
-  let changed = false;
-  const nextTasks = tasks.map((task) => {
-    if (task.id !== taskId || task.primarySessionId !== sessionId) return task;
-    if (task.primarySessionState === newState) return task;
-    changed = true;
-    return { ...task, primarySessionState: newState };
-  });
-  return changed ? nextTasks : tasks;
-}
-
-function patchSnapshotPrimarySessionState(
-  snapshot: WorkflowSnapshotData,
-  taskId: string,
-  sessionId: string,
-  newState: TaskSessionState,
-): WorkflowSnapshotData {
-  const tasks = patchTaskPrimarySessionState(snapshot.tasks, taskId, sessionId, newState);
-  return tasks === snapshot.tasks ? snapshot : { ...snapshot, tasks };
-}
-
-function syncKanbanPrimarySessionState(
-  store: StoreApi<AppState>,
-  taskId: TaskId,
-  sessionId: SessionId,
-  newState: TaskSessionState | undefined,
-): void {
-  if (!newState) return;
-
-  store.setState((state) => {
-    const nextKanbanTasks = patchTaskPrimarySessionState(
-      state.kanban.tasks,
-      taskId,
-      sessionId,
-      newState,
-    );
-    let snapshotsChanged = false;
-    const nextSnapshots = Object.fromEntries(
-      Object.entries(state.kanbanMulti.snapshots).map(([workflowId, snapshot]) => {
-        const nextSnapshot = patchSnapshotPrimarySessionState(
-          snapshot,
-          taskId,
-          sessionId,
-          newState,
-        );
-        if (nextSnapshot !== snapshot) snapshotsChanged = true;
-        return [workflowId, nextSnapshot];
-      }),
-    );
-
-    if (nextKanbanTasks === state.kanban.tasks && !snapshotsChanged) return state;
-
-    return {
-      ...state,
-      kanban:
-        nextKanbanTasks === state.kanban.tasks
-          ? state.kanban
-          : { ...state.kanban, tasks: nextKanbanTasks },
-      kanbanMulti: snapshotsChanged
-        ? {
-            ...state.kanbanMulti,
-            snapshots: nextSnapshots,
-          }
-        : state.kanbanMulti,
-    };
-  });
-}
-
 /** Extract context window data from payload metadata and store it. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function extractContextWindow(store: StoreApi<AppState>, sessionId: string, payload: any): void {
@@ -330,12 +257,14 @@ function inheritAgentctlStatus(state: AppState, fromSessionId: string, toSession
  *   2. The current active session transitions to a terminal state — hand off
  *      to the newest non-terminal session for the same task, if any.
  */
+// eslint-disable-next-line max-params -- newState/previousState/wasKnownToStore are all needed by downstream branches
 function maybeAdoptSessionOnTransition(
   store: StoreApi<AppState>,
   taskId: string,
   sessionId: string,
   newState: TaskSessionState | undefined,
   wasKnownToStore: boolean,
+  previousState: TaskSessionState | undefined,
 ): void {
   const state = store.getState();
   if (
@@ -355,6 +284,18 @@ function maybeAdoptSessionOnTransition(
 
   const isActive = state.tasks.activeSessionId === sessionId;
   if (isActive && newState && isTerminalSessionState(newState)) {
+    // When the user clicked open a terminal session (e.g. to review a
+    // completed run), setActiveSession pins it. If the backend then
+    // re-emits the same terminal state_changed (a replay — the previous
+    // stored state was already terminal), honor the pin and do NOT hand
+    // off to a running session. A genuine RUNNING→COMPLETED transition
+    // (previousState non-terminal) still hands off normally.
+    if (
+      state.tasks.pinnedSessionId === sessionId &&
+      previousState &&
+      isTerminalSessionState(previousState)
+    )
+      return;
     const replacement = pickReplacementSessionId(state, taskId);
     if (replacement && replacement !== sessionId) {
       inheritAgentctlStatus(state, sessionId, replacement);
@@ -566,7 +507,14 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       extractContextWindow(store, sessionId, payload);
       maybePromoteAgentctlReady(store, sessionId, newState, message.timestamp);
 
-      maybeAdoptSessionOnTransition(store, taskId, sessionId, newState, !!existingSession);
+      maybeAdoptSessionOnTransition(
+        store,
+        taskId,
+        sessionId,
+        newState,
+        !!existingSession,
+        existingSession?.state,
+      );
 
       maybeNotifySessionFailure(store, {
         taskId,

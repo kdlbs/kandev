@@ -1,8 +1,15 @@
 "use client";
 
 import { IconCheck, IconCornerDownLeft, IconArrowLeft, IconArrowRight } from "@tabler/icons-react";
+import { useLayoutEffect, useRef } from "react";
+import { Textarea } from "@kandev/ui/textarea";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { cn } from "@/lib/utils";
 import type { ClarificationOption } from "@/lib/types/http";
+
+// Grow the custom-answer box up to ~6 lines, then scroll internally so the
+// clarification overlay stays compact.
+const MAX_CUSTOM_INPUT_HEIGHT = 160;
 
 export function stepClassName(active: boolean, answered: boolean): string {
   if (active) {
@@ -155,6 +162,58 @@ type CustomInputProps = {
   onRequestFinalSubmit?: () => void;
 };
 
+// Trailing controls for the custom-answer row. Hardware keyboards get the
+// Enter/⇧↵ hints; touch devices get an inline Send button, because the overlay's
+// own Submit button only renders for multi-question bundles and single-question
+// custom answers would otherwise have no touch-reachable send path.
+function CustomInputControls({
+  isFinePointer,
+  trimmed,
+  isSubmitting,
+  onSubmit,
+}: {
+  isFinePointer: boolean;
+  trimmed: string;
+  isSubmitting: boolean;
+  onSubmit: (text: string) => void;
+}) {
+  if (isFinePointer) {
+    return (
+      <div className="mt-0.5 flex flex-shrink-0 items-center gap-1">
+        <kbd
+          aria-hidden="true"
+          className="select-none flex items-center gap-1 font-mono text-[10px] px-1.5 py-0.5 rounded border border-border bg-background text-muted-foreground"
+        >
+          <IconCornerDownLeft className="h-2.5 w-2.5" />
+          Enter
+        </kbd>
+        <span aria-hidden="true" className="select-none text-[10px] text-muted-foreground/60">
+          ⇧↵ newline
+        </span>
+      </div>
+    );
+  }
+  const canSend = trimmed.length > 0 && !isSubmitting;
+  return (
+    <button
+      type="button"
+      onClick={() => onSubmit(trimmed)}
+      disabled={!canSend}
+      data-testid="clarification-custom-submit"
+      aria-label="Send answer"
+      className={cn(
+        "mt-0.5 flex flex-shrink-0 items-center gap-1 text-xs px-2 py-1 rounded font-medium transition-colors",
+        canSend
+          ? "bg-blue-500 text-white hover:bg-blue-500/90 cursor-pointer"
+          : "bg-muted text-muted-foreground cursor-not-allowed",
+      )}
+    >
+      Send
+      <IconCornerDownLeft className="h-3 w-3" />
+    </button>
+  );
+}
+
 export function ClarificationCustomInput({
   draft,
   isSubmitting,
@@ -164,25 +223,42 @@ export function ClarificationCustomInput({
   onSubmit,
   onRequestFinalSubmit,
 }: CustomInputProps) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const trimmed = draft.trim();
+  // Touch keyboards have no Shift+Enter chord, so on coarse-pointer devices we
+  // let Enter insert a newline and rely on the always-visible Submit button to
+  // send — otherwise the multiline feature would be desktop-only.
+  const { isFinePointer } = useResponsiveBreakpoint();
+
+  // Auto-grow to fit content (WebKit lacks CSS field-sizing, so measure in JS)
+  // and clamp to MAX_CUSTOM_INPUT_HEIGHT, after which the box scrolls.
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, MAX_CUSTOM_INPUT_HEIGHT)}px`;
+  }, [draft]);
+
   return (
     <div
       data-testid="clarification-custom-input"
       data-active={active ? "true" : "false"}
       className={cn(
-        "mt-2.5 flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors",
+        "mt-2.5 flex items-start gap-2 px-3 py-2 rounded-lg border transition-colors",
         active
           ? "bg-blue-500/15 border-blue-500/50 text-foreground"
           : "border-dashed border-border/70 bg-muted/30",
       )}
     >
       <span
-        className={cn("text-xs", active ? "text-blue-500" : "text-muted-foreground")}
+        className={cn("mt-0.5 text-xs", active ? "text-blue-500" : "text-muted-foreground")}
         aria-hidden="true"
       >
         ↳
       </span>
-      <input
-        type="text"
+      <Textarea
+        ref={textareaRef}
+        rows={1}
         placeholder={
           committedText !== null ? "Press Enter to update your answer…" : "Or type a custom answer…"
         }
@@ -190,32 +266,42 @@ export function ClarificationCustomInput({
         onChange={(e) => onChange(e.target.value)}
         disabled={isSubmitting}
         data-testid="clarification-input"
-        className="flex-1 text-sm bg-transparent placeholder:text-muted-foreground/60 focus:outline-none"
+        style={{ maxHeight: MAX_CUSTOM_INPUT_HEIGHT }}
+        className="flex-1 min-h-0 resize-none overflow-y-auto border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0 placeholder:text-muted-foreground/60"
         onKeyDown={(e) => {
-          if (e.key !== "Enter" || e.shiftKey || e.altKey) return;
+          // Shift+Enter (and Alt+Enter) fall through so the textarea inserts a
+          // newline instead of submitting. isComposing ignores the Enter that
+          // confirms an IME candidate (CJK keyboards).
+          if (e.key !== "Enter" || e.shiftKey || e.altKey || e.nativeEvent.isComposing) return;
           if (e.metaKey || e.ctrlKey) {
             // Cmd/Ctrl+Enter only asks the parent to finalize. The draft was
             // already live-recorded via onChange, so we skip the per-question
             // commit path (which would also advance the carousel one step on
             // multi-question bundles — wasted state churn before submit).
+            // e.repeat guards a held key against firing multiple finalizes.
             e.preventDefault();
-            onRequestFinalSubmit?.();
+            if (!e.repeat) onRequestFinalSubmit?.();
             return;
           }
-          if (draft.trim()) {
-            e.preventDefault();
-            onSubmit(draft.trim());
+          // On touch devices Enter inserts a newline (submit via the button).
+          if (!isFinePointer) return;
+          // Plain Enter submits on desktop. preventDefault runs unconditionally
+          // (including on auto-repeat) so a held key never leaks stray newlines
+          // into this — or, once the carousel advances, the next — textarea, and
+          // so an empty/whitespace draft can't leak one before the trim guard.
+          e.preventDefault();
+          if (!e.repeat && trimmed) {
+            onSubmit(trimmed);
           }
         }}
       />
-      <kbd
-        aria-hidden="true"
-        className="select-none flex items-center gap-1 font-mono text-[10px] px-1.5 py-0.5 rounded border border-border bg-background text-muted-foreground"
-      >
-        <IconCornerDownLeft className="h-2.5 w-2.5" />
-        Enter
-      </kbd>
-      {active && <IconCheck className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />}
+      <CustomInputControls
+        isFinePointer={isFinePointer}
+        trimmed={trimmed}
+        isSubmitting={isSubmitting}
+        onSubmit={onSubmit}
+      />
+      {active && <IconCheck className="mt-0.5 h-3.5 w-3.5 text-blue-500 flex-shrink-0" />}
     </div>
   );
 }

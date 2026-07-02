@@ -5,6 +5,7 @@ import type { WsHandlers } from "@/lib/ws/handlers/types";
 import {
   parseChangesPanelLayout,
   parseSystemMetricsDisplay,
+  taskCreateLastUsedHasValue,
   parseVoiceMode,
 } from "@/lib/ssr/user-settings";
 import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
@@ -29,7 +30,7 @@ function buildUserSettingsState(state: AppState, payload: UserSettingsUpdatedPay
     ...buildBehaviorSettings(payload),
     ...buildSidebarSettings(state, payload),
     ...buildLspSettings(payload),
-    ...buildSyncedLocalSettings(payload),
+    ...buildSyncedLocalSettings(state, payload),
     defaultUtilityAgentId: payload.default_utility_agent_id || null,
     keyboardShortcuts: payload.keyboard_shortcuts ?? {},
     changesPanelLayout: parseChangesPanelLayout(payload.changes_panel_layout),
@@ -46,15 +47,19 @@ function buildLspSettings(payload: UserSettingsUpdatedPayload) {
   };
 }
 
-function buildSyncedLocalSettings(payload: UserSettingsUpdatedPayload) {
+function buildSyncedLocalSettings(state: AppState, payload: UserSettingsUpdatedPayload) {
   return {
     savedLayouts: payload.saved_layouts ?? [],
-    taskCreateLastUsed: {
-      repositoryId: payload.task_create_last_used?.repository_id || null,
-      branch: payload.task_create_last_used?.branch || null,
-      agentProfileId: payload.task_create_last_used?.agent_profile_id || null,
-      executorProfileId: payload.task_create_last_used?.executor_profile_id || null,
-    },
+    taskCreateLastUsed:
+      payload.task_create_last_used === undefined
+        ? state.userSettings.taskCreateLastUsed
+        : {
+            repositoryId: payload.task_create_last_used?.repository_id || null,
+            branch: payload.task_create_last_used?.branch || null,
+            agentProfileId: payload.task_create_last_used?.agent_profile_id || null,
+            executorProfileId: payload.task_create_last_used?.executor_profile_id || null,
+            synced: taskCreateLastUsedHasValue(payload.task_create_last_used),
+          },
     jiraSavedViews: payload.jira_saved_views,
     jiraTaskPresets: payload.jira_task_presets,
     githubSavedPresets: payload.github_saved_presets,

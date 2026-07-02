@@ -64,12 +64,21 @@ function parseSidebarTaskPrefs(value: SidebarTaskPrefsApi | undefined) {
   };
 }
 
+export function taskCreateLastUsedHasValue(
+  value: UserSettingsData["task_create_last_used"] | undefined,
+) {
+  return Boolean(
+    value?.repository_id || value?.branch || value?.agent_profile_id || value?.executor_profile_id,
+  );
+}
+
 function parseTaskCreateLastUsed(value: UserSettingsData["task_create_last_used"] | undefined) {
   return {
     repositoryId: value?.repository_id || null,
     branch: value?.branch || null,
     agentProfileId: value?.agent_profile_id || null,
     executorProfileId: value?.executor_profile_id || null,
+    synced: taskCreateLastUsedHasValue(value),
   };
 }
 

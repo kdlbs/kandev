@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { LinearSettingsPage } from "../../pages/linear-settings-page";
 import { assertWatcherAgentProfileResetsToStepDefault } from "./watcher-profile-default-flow";
+import { assertWatcherDispatchOrderPersists } from "./watcher-dispatch-order-flow";
 
 test.describe("Linear settings", () => {
   test("empty workspace shows form with disabled save/test until secret is filled", async ({
@@ -139,5 +140,12 @@ test.describe("Linear settings", () => {
 
   test("watcher dialog resets the agent profile back to the step default", async ({ testPage }) => {
     await assertWatcherAgentProfileResetsToStepDefault(testPage);
+  });
+
+  test("watcher dialog persists the dispatch order across save and reopen", async ({
+    testPage,
+    apiClient,
+  }) => {
+    await assertWatcherDispatchOrderPersists(testPage, apiClient);
   });
 });

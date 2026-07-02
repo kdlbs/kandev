@@ -28,7 +28,9 @@ const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
   });
   const activeFilePath = useDockviewStore((s) => s.activeFilePath);
   const isArchived = useIsTaskArchived();
-  const { createFile, deleteFile, renameFile } = useFileOperations(activeSessionId ?? null);
+  const { createFile, deleteFile, renameFile, downloadFile } = useFileOperations(
+    activeSessionId ?? null,
+  );
 
   const handleCreateFile = useCallback(
     async (path: string): Promise<boolean> => {
@@ -65,6 +67,7 @@ const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
             onCreateFile={handleCreateFile}
             onDeleteFile={deleteFile}
             onRenameFile={renameFile}
+            onDownloadFile={downloadFile}
             activeFilePath={activeFilePath}
           />
         ) : (

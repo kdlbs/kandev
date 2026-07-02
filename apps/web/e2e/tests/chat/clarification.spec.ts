@@ -3,6 +3,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { seedClarificationSession } from "../../helpers/clarification";
 import { SessionPage } from "../../pages/session-page";
 import { KanbanPage } from "../../pages/kanban-page";
 
@@ -10,33 +11,14 @@ import { KanbanPage } from "../../pages/kanban-page";
  * Seed a task + session with a clarification scenario and navigate to the session page.
  * Does NOT wait for idle input — the agent will be blocked on the clarification MCP call.
  */
-async function seedClarificationTask(
+function seedClarificationTask(
   testPage: Page,
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
   scenario: string,
 ): Promise<SessionPage> {
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    title,
-    seedData.agentProfileId,
-    {
-      description: `/e2e:${scenario}`,
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
-
-  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
-
-  await testPage.goto(`/t/${task.id}`);
-
-  const session = new SessionPage(testPage);
-  await session.waitForLoad();
-
-  return session;
+  return seedClarificationSession(testPage, apiClient, seedData, title, { scenario });
 }
 
 // Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
@@ -62,6 +44,40 @@ test.describe("Clarification flow", () => {
 
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await expect(session.chat).toContainText(/You answered|selected_option/);
+  });
+
+  test("custom answer accepts multiple lines via Shift+Enter", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification Multiline",
+      "clarification",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    // The custom answer is a textarea: Shift+Enter inserts a newline, plain
+    // Enter submits the whole multi-line draft.
+    const input = session.clarificationInput();
+    await input.click();
+    await input.pressSequentially("first line");
+    await input.press("Shift+Enter");
+    await input.pressSequentially("second line");
+    await expect(input).toHaveValue("first line\nsecond line");
+
+    await input.press("Enter");
+
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(session.chat).toContainText("first line");
+    await expect(session.chat).toContainText("second line");
+    // The two lines must stay separated: if the newline were dropped the reply
+    // would render as the fused "first linesecond line".
+    await expect(session.chat).not.toContainText("linesecond line");
   });
 
   test("skip clarification", async ({ testPage, apiClient, seedData }) => {

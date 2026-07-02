@@ -250,6 +250,7 @@ describe("buildRepositoriesPayload — PR URL inference (per-row prInfoByUrl)", 
         repository_id: "",
         base_branch: "main",
         checkout_branch: "jira-hosted-path-auth",
+        pr_number: 977,
         github_url: url,
       },
     ]);
@@ -308,6 +309,7 @@ describe("buildRepositoriesPayload — PR URL inference (per-row prInfoByUrl)", 
         repository_id: "",
         base_branch: "main",
         checkout_branch: "feature/x",
+        pr_number: 10,
         github_url: url,
       },
     ]);
@@ -336,6 +338,56 @@ describe("buildRepositoriesPayload — checkout_branch gating on PR-auto-selecti
       discoveredRepositories: [],
     });
     expect(payload[0]).toMatchObject({ checkout_branch: "feature/x" });
+  });
+
+  it("seeded PR metadata carries checkout_branch before PR info cache loads", () => {
+    const payload = buildRepositoriesPayload({
+      useRemote: true,
+      remoteRepos: [
+        {
+          key: "remote-0",
+          url,
+          branch: "feature/x",
+          source: "paste",
+          prNumber: 42,
+          prBaseBranch: "main",
+          prHeadBranch: "feature/x",
+        },
+      ],
+      repositories: [],
+      discoveredRepositories: [],
+    });
+
+    expect(payload[0]).toMatchObject({
+      base_branch: "main",
+      checkout_branch: "feature/x",
+      pr_number: 42,
+    });
+  });
+
+  it("seeded PR metadata is dropped when the user overrides the branch", () => {
+    const payload = buildRepositoriesPayload({
+      useRemote: true,
+      remoteRepos: [
+        {
+          key: "remote-0",
+          url,
+          branch: "develop",
+          source: "paste",
+          prNumber: 42,
+          prBaseBranch: "main",
+          prHeadBranch: "feature/x",
+        },
+      ],
+      repositories: [],
+      discoveredRepositories: [],
+    });
+
+    expect(payload[0]).toMatchObject({
+      base_branch: "develop",
+      checkout_branch: undefined,
+      pr_number: undefined,
+    });
   });
 
   it("row.branch !== prHeadBranch → payload has NO checkout_branch", () => {
@@ -382,12 +434,14 @@ describe("buildRepositoriesPayload — multi-row PR/repo mix", () => {
         repository_id: "",
         base_branch: "main",
         checkout_branch: "fork-a",
+        pr_number: 1,
         github_url: urlA,
       },
       {
         repository_id: "",
         base_branch: "trunk",
         checkout_branch: "fork-b",
+        pr_number: 2,
         github_url: urlB,
       },
     ]);
@@ -417,7 +471,13 @@ describe("buildRepositoriesPayload — multi-row PR/repo mix", () => {
       discoveredRepositories: [],
     });
     expect(payload).toEqual([
-      { repository_id: "", base_branch: "main", checkout_branch: "fork-a", github_url: prUrl },
+      {
+        repository_id: "",
+        base_branch: "main",
+        checkout_branch: "fork-a",
+        pr_number: 1,
+        github_url: prUrl,
+      },
       {
         repository_id: "",
         base_branch: "develop",
@@ -456,6 +516,7 @@ describe("buildRepositoriesPayload — URL trimming for prInfoByUrl lookup", () 
         repository_id: "",
         base_branch: "main",
         checkout_branch: "feature/x",
+        pr_number: 42,
         github_url: canonical,
       },
     ]);

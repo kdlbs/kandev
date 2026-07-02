@@ -40,6 +40,12 @@ Commit any pending changes and push to the remote branch.
    If the branch has no upstream, use `git push -u origin <branch>`.
    If the branch was rebased or history was rewritten, first confirm the current
    branch is not `main` or `master`, then use `git push --force-with-lease`.
+   If the branch modifies `.github/workflows/*` and GitHub rejects the push with
+   a message like `refusing to allow an OAuth App to create or update workflow
+   ... without workflow scope`, treat it as push authentication/scope, not a code
+   or branch-protection failure. Retry with an SSH remote when available, for
+   example `git push git@github.com:<owner>/<repo>.git <branch>`, or tell the
+   user the token needs `workflow` scope.
 
 4. **Report** the pushed commit hash and branch.
 

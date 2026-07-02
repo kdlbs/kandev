@@ -72,6 +72,14 @@ For rebasing or finishing PRs written against the old Next.js runtime, follow
 
 Use subscription hooks only; the WS client auto-deduplicates.
 
+When changing task lifecycle WS handlers (`task.updated`, `task.deleted`,
+`task.state_changed`), check both kanban and Office surfaces. Archive/delete
+events may need to update kanban caches, `tasks.activeTaskId` / session pin
+state, recent/sidebar prefs, Office refetch triggers such as
+`setOfficeRefetchTrigger("tasks")`, and route redirects for `/t/:id`,
+`/tasks/:id`, and `/office/tasks/:id`. Add focused tests for every affected
+surface.
+
 ## Component conventions
 
 - **Framework adapters during Next removal:** Client components should import
@@ -84,6 +92,21 @@ Use subscription hooks only; the WS client auto-deduplicates.
 - Components: <200 lines, extract to domain components, composition over props.
 - Hooks: domain-organized in `hooks/domains/`, encapsulate subscription + selection.
 - **Interactivity:** all buttons and links with actions must have `cursor-pointer` class.
+- **Dialog Enter-to-confirm:** the base `@kandev/ui` `DialogContent` / `AlertDialogContent`
+  activate the dialog's semantic action on plain Enter (`packages/ui/src/lib/dialog-default-action.ts`),
+  so per-dialog "submit on Enter" input handlers are unnecessary — let the base own it.
+  Resolution: `AlertDialogAction` → an explicit `data-dialog-default-action` button → the single
+  primary (`type="submit"` or `data-variant="default"|"destructive"`) button in `DialogFooter`.
+  More than one primary candidate (counting disabled ones), a disabled resolved action, or one inside
+  a `hidden`/`aria-hidden` subtree → no-op (never guesses). Left alone: `textarea`/contenteditable,
+  Shift/Cmd/Ctrl/Alt+Enter, `event.repeat` auto-repeat, mid-IME composition (`isComposing` or keyCode
+  229), already-`preventDefault`ed events, and Enter fired from a focused interactive control that owns
+  Enter (any action button — including outline/secondary like Copy/Back — `<select>`, combobox, or a
+  listbox option / menu item). Only a slot-marked `alert-dialog-cancel` / `dialog-close` is treated as
+  a dismiss control and overridden (the Radix-focuses-Cancel case). A plain single-line `<input>` is
+  _not_ exempt — type-to-confirm dialogs rely on Enter firing the primary.
+  Pass `enterConfirms={false}` to opt a dialog out; mark the intended button with
+  `data-dialog-default-action` when a footer has several action buttons.
 - **Radix tooltip on disabled buttons:** disabled buttons do not receive pointer/focus events, so wrap the disabled `Button` in a focusable span and put `TooltipTrigger asChild` on that span:
   ```tsx
   <Tooltip>
@@ -102,6 +125,30 @@ Use subscription hooks only; the WS client auto-deduplicates.
   and Playwright's `getByTestId` only matches one attribute name — the
   `data-legacy-testid` alias lets existing specs keep selecting the element
   while the migration is in flight.
+- **Dockview session panel activation:** session chat panels can become active
+  through tab pointer/keyboard events, global tab-cycling shortcuts,
+  reopen/menu actions, and Dockview close controls. When changing
+  `tasks.activeSessionId` or active-session sync, audit all of those paths. Use
+  store state in addition to Dockview `api.isActive`; the current session's chat
+  tab may be Dockview-inactive while Files/Changes is active. Same-session
+  clicks must not leave stale activation intent, and Dockview
+  `.dv-default-tab-action` close controls should be treated as close/delete
+  actions rather than session-switch intent.
+- **GitHub PR status UI:** visual PR/CI status surfaces should use the shared
+  helpers in `apps/web/components/github/pr-task-icon.tsx`
+  (`hasPRChecksPassedForDisplay`, `hasPRChecksInProgressForDisplay`, and
+  `hasPRChecksPassedWithoutReviewWaitForDisplay`) instead of re-deriving status
+  from `checks_state`, `checks_total`, or `checks_passing` locally. Aggregate
+  check counts are a display-only fallback when `checks_state` is empty; they may
+  make chips or task icons render passed/in-progress, but must not enable merge
+  actions. Merge readiness must use `isPRReadyToMerge`, which requires GitHub's
+  explicit `checks_state === "success"` rollup. When changing PR status behavior,
+  update both `pr-task-icon.test.ts` and `pr-status-chip.test.tsx`.
+- **Task repository labels:** user-facing task/card repo chips should display a
+  stable repo slug or name (`owner/repo` when known, otherwise the repo name),
+  not a local filesystem path. Local clone paths or folder paths belong in
+  hover/title/tooltip metadata. Tasks with no repository, or only a non-repo
+  local folder, should not render a repo chip.
 
 ## Code-quality limits
 

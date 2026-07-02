@@ -90,6 +90,7 @@ type FileBrowserProps = {
   onCreateFile?: (path: string) => Promise<boolean>;
   onDeleteFile?: (path: string) => Promise<boolean>;
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
+  onDownloadFile?: (path: string) => Promise<boolean>;
   activeFilePath?: string | null;
 };
 
@@ -372,6 +373,41 @@ function useFileBrowserResetKey(sessionId: string, environmentId?: string | null
   return environmentId ? `${environmentId}:${worktreeCount}` : undefined;
 }
 
+function useFileBrowserData(sessionId: string, environmentId: string | null | undefined) {
+  const { session, isFailed: isSessionFailed, errorMessage: sessionError } = useSession(sessionId);
+  const repository = useRepository(session?.repository_id ?? null);
+  const gitStatus = useSessionGitStatus(sessionId);
+  const { open: openFolder } = useOpenSessionFolder(sessionId);
+  const { copied, copy: copyPath } = useCopyToClipboard(1000);
+  const search = useFileBrowserSearch(sessionId);
+  const resetKey = useFileBrowserResetKey(sessionId, environmentId);
+  const treeState = useFileBrowserTree(sessionId, resetKey);
+  const isTreeLoaded = !treeState.isLoadingTree && treeState.tree !== null;
+  const fileStatuses = useMemo(
+    () =>
+      new Map(Object.entries(gitStatus?.files ?? {}).map(([path, info]) => [path, info.status])),
+    [gitStatus?.files],
+  );
+  const paths = resolveFileBrowserPaths({
+    sessionWorktreePath: session?.worktree_path,
+    repositoryLocalPath: repository?.local_path,
+    treePath: treeState.tree?.path,
+    treeLoaded: isTreeLoaded,
+  });
+  return {
+    isSessionFailed,
+    sessionError,
+    openFolder,
+    copied,
+    copyPath,
+    search,
+    treeState,
+    isTreeLoaded,
+    fileStatuses,
+    ...paths,
+  };
+}
+
 export function FileBrowser({
   sessionId,
   environmentId,
@@ -379,34 +415,26 @@ export function FileBrowser({
   onCreateFile,
   onDeleteFile,
   onRenameFile,
+  onDownloadFile,
   activeFilePath,
 }: FileBrowserProps) {
-  const { session, isFailed: isSessionFailed, errorMessage: sessionError } = useSession(sessionId);
-  const repository = useRepository(session?.repository_id ?? null);
-  const gitStatus = useSessionGitStatus(sessionId);
-  const { open: openFolder } = useOpenSessionFolder(sessionId);
-  const { copied, copy: copyPath } = useCopyToClipboard(1000);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-
-  const search = useFileBrowserSearch(sessionId);
-  const resetKey = useFileBrowserResetKey(sessionId, environmentId);
-  const treeState = useFileBrowserTree(sessionId, resetKey);
-  const isTreeLoaded = !treeState.isLoadingTree && treeState.tree !== null;
+  const data = useFileBrowserData(sessionId, environmentId);
+  const {
+    isSessionFailed,
+    sessionError,
+    openFolder,
+    copied,
+    copyPath,
+    search,
+    treeState,
+    isTreeLoaded,
+    fileStatuses,
+    fullPath,
+    displayPath,
+  } = data;
   useScrollPersistence(sessionId, isTreeLoaded, scrollAreaRef, treeState.tree);
-
-  const fileStatuses = useMemo(
-    () =>
-      new Map(Object.entries(gitStatus?.files ?? {}).map(([path, info]) => [path, info.status])),
-    [gitStatus?.files],
-  );
-  const { fullPath, displayPath } = resolveFileBrowserPaths({
-    sessionWorktreePath: session?.worktree_path,
-    repositoryLocalPath: repository?.local_path,
-    treePath: treeState.tree?.path,
-    treeLoaded: isTreeLoaded,
-  });
-
   const handlers = useFileBrowserHandlers(sessionId, onOpenFile, onCreateFile, treeState);
   const { multiSelect, dnd, handleClickOutside } = useSelectionInteractions(
     treeState,
@@ -455,6 +483,7 @@ export function FileBrowser({
           onToggleExpand={handlers.toggleExpand}
           onDeleteFile={onDeleteFile}
           onRenameFile={onRenameFile}
+          onDownloadFile={onDownloadFile}
           onCreateFileSubmit={handlers.handleCreateFileSubmit}
           onCancelCreate={handlers.handleCancelCreate}
           onRetry={() => void treeState.loadTree({ resetRetry: true })}

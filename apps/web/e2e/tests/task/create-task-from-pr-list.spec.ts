@@ -7,7 +7,7 @@ test.describe("Create task from GitHub PR list", () => {
   // Cold-start backend boots can race on the first test in a worker.
   test.describe.configure({ retries: 1 });
 
-  test("starting a task from a PR pre-fills the matching repo and the PR head branch", async ({
+  test("starting a task from a PR opens Remote mode with the PR URL and head branch", async ({
     testPage,
     apiClient,
     seedData,
@@ -35,7 +35,8 @@ test.describe("Create task from GitHub PR list", () => {
     execSync("git checkout main", { cwd: repoDir, env: gitEnv });
 
     // Pre-seed a GitHub-backed repository that matches the mock PR's owner/repo.
-    // The launcher's matchRepo() looks up workspace repos by provider_owner/name.
+    // PR launch must still use Remote mode so stale local task worktrees cannot
+    // be selected by repository matching.
     await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
       name: `${ownerSlug}/${repoSlug}`,
       provider: "github",
@@ -75,17 +76,19 @@ test.describe("Create task from GitHub PR list", () => {
     await prRow.getByTestId("pr-start-task-trigger").click();
     await testPage.locator('[data-testid="pr-start-task-preset"][data-preset-id="review"]').click();
 
-    // The create-task dialog should open with the matching workspace repo
-    // selected and the PR head branch pre-filled in the branch chip.
+    const prURL = `https://github.com/${ownerSlug}/${repoSlug}/pull/77`;
+
+    // The create-task dialog should open in Remote mode with the PR URL and
+    // head branch pre-filled.
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByTestId("repo-chip-trigger").first()).toContainText(
-      `${ownerSlug}/${repoSlug}`,
-    );
-    await expect(dialog.getByTestId("branch-chip-trigger").first()).toContainText(
+    await expect(dialog.getByTestId("source-mode-remote")).toHaveAttribute("aria-checked", "true");
+    await expect(dialog.getByTestId("remote-repo-chip")).toHaveAttribute("data-remote-url", prURL);
+    await expect(dialog.getByTestId("remote-repo-chip-trigger")).toContainText("pull/77");
+    await expect(dialog.getByTestId("remote-branch-chip-trigger")).toContainText(
       "feature/from-pr-list",
-      { timeout: 10_000 },
     );
+    await expect(dialog.getByTestId("repo-chip")).toHaveCount(0);
 
     // The dialog title should be derived from the preset + PR title.
     await expect(testPage.getByTestId("task-title-input")).toHaveValue(

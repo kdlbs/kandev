@@ -27,18 +27,59 @@ type DialogState = {
   branch?: string;
   checkoutBranch?: string;
   githubUrl?: string;
+  prNumber?: number;
+  prBaseBranch?: string;
 };
 
+const LOCAL_SOURCE_TYPE = "local";
+const REJECT_REPO_MATCH = Number.POSITIVE_INFINITY;
+
 function matchRepo(repos: Repository[], owner: string, name: string): Repository | undefined {
-  return repos.find(
-    (r) =>
-      (r.provider_owner || "").toLowerCase() === owner.toLowerCase() &&
-      (r.provider_name || "").toLowerCase() === name.toLowerCase(),
+  let best: Repository | undefined;
+  let bestRank = REJECT_REPO_MATCH;
+  for (const repo of repos) {
+    if (!matchesProviderIdentity(repo, owner, name)) continue;
+    const rank = repositoryLaunchRank(repo);
+    if (rank < bestRank) {
+      best = repo;
+      bestRank = rank;
+    }
+  }
+  return bestRank === REJECT_REPO_MATCH ? undefined : best;
+}
+
+function matchesProviderIdentity(repo: Repository, owner: string, name: string): boolean {
+  return (
+    (repo.provider_owner || "").toLowerCase() === owner.toLowerCase() &&
+    (repo.provider_name || "").toLowerCase() === name.toLowerCase()
   );
+}
+
+function repositoryLaunchRank(repo: Repository): number {
+  if (!isGitHubRepository(repo)) return REJECT_REPO_MATCH;
+  if (isTaskWorktreePath(repo.local_path)) return REJECT_REPO_MATCH;
+  if ((repo.source_type || LOCAL_SOURCE_TYPE) !== LOCAL_SOURCE_TYPE) return 0;
+  return 1;
+}
+
+function isGitHubRepository(repo: Repository): boolean {
+  const provider = (repo.provider || "").toLowerCase();
+  return provider === "" || provider === "github";
+}
+
+function isTaskWorktreePath(path: string | undefined): boolean {
+  const normalized = (path || "").replaceAll("\\", "/");
+  return normalized.includes("/.kandev/tasks/") || normalized.endsWith("/.kandev/tasks");
 }
 
 function emptyToUndefined(value: string | undefined): string | undefined {
   return value ? value : undefined;
+}
+
+function prURL(pr: GitHubPR): string {
+  return (
+    pr.html_url || pr.url || `https://github.com/${pr.repo_owner}/${pr.repo_name}/pull/${pr.number}`
+  );
 }
 
 // Multi-repo tasks have one task_repository row per repo; pick the one that
@@ -66,7 +107,7 @@ function pickRepositoryIdForPR(
 function extractPayload(payload: LaunchPayload) {
   if (payload.kind === "pr") {
     return {
-      url: payload.pr.html_url,
+      url: prURL(payload.pr),
       title: payload.pr.title,
       owner: payload.pr.repo_owner,
       name: payload.pr.repo_name,
@@ -84,7 +125,6 @@ function extractPayload(payload: LaunchPayload) {
 
 function buildDialogState(payload: LaunchPayload, repositories: Repository[]): DialogState {
   const data = extractPayload(payload);
-  const repo = matchRepo(repositories, data.owner, data.name);
   const description = payload.preset.prompt({ url: data.url, title: data.title });
   const title = `${payload.preset.label}: ${data.title}`;
   // For a PR launch we want the dialog to display and check out the PR's head
@@ -92,6 +132,18 @@ function buildDialogState(payload: LaunchPayload, repositories: Repository[]): D
   // auto-resolves to the PR head. Same branch for both: the chip shows it and
   // the worktree checks it out.
   const checkoutBranch = payload.kind === "pr" ? data.branch : undefined;
+  if (payload.kind === "pr") {
+    return {
+      title,
+      description,
+      githubUrl: data.url,
+      branch: data.branch,
+      checkoutBranch,
+      prNumber: payload.pr.number,
+      prBaseBranch: payload.pr.base_branch,
+    };
+  }
+  const repo = matchRepo(repositories, data.owner, data.name);
   if (repo) {
     return {
       title,
@@ -164,7 +216,7 @@ export function QuickTaskLauncher({
       void createTaskPR({
         task_id: task.id,
         repository_id: repositoryId,
-        pr_url: payload.pr.html_url,
+        pr_url: prURL(payload.pr),
       }).catch(() => {
         // Silently ignore — the indicator will populate via the poller path
         // (legacy behavior) if branch matching succeeds.
@@ -192,6 +244,8 @@ export function QuickTaskLauncher({
         branch: dialog.branch,
         checkoutBranch: dialog.checkoutBranch,
         githubUrl: dialog.githubUrl,
+        prNumber: dialog.prNumber,
+        prBaseBranch: dialog.prBaseBranch,
       }}
       onSuccess={handleSuccess}
     />

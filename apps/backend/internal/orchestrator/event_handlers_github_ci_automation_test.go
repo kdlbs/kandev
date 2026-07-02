@@ -151,15 +151,26 @@ func TestCIAutomationFilterFeedbackForPRSkipsReviewCommentsWithoutUnresolvedThre
 		Comments: []github.PRComment{
 			{ID: 1, Body: "resolved review comment", Path: "main.go", Line: 12},
 			{ID: 2, Body: "plain PR comment"},
+			{ID: 3, Body: "bot status comment", AuthorIsBot: true},
 		},
 	}
 	filtered := ciAutomationFilterFeedbackForPR(&github.TaskPR{}, feedback)
 	if len(filtered.Comments) != 1 || filtered.Comments[0].ID != 2 {
-		t.Fatalf("expected only plain PR comment, got %+v", filtered.Comments)
+		t.Fatalf("expected only human plain PR comment, got %+v", filtered.Comments)
 	}
 	withThreads := ciAutomationFilterFeedbackForPR(&github.TaskPR{UnresolvedReviewThreads: 1}, feedback)
-	if len(withThreads.Comments) != 2 {
-		t.Fatalf("expected unresolved review threads to keep review comments, got %+v", withThreads.Comments)
+	if len(withThreads.Comments) != 3 || withThreads.Comments[0].ID != 1 || withThreads.Comments[1].ID != 2 || withThreads.Comments[2].ID != 3 {
+		t.Fatalf("expected unresolved review threads to keep review comments and bot context, got %+v", withThreads.Comments)
+	}
+	withFailedCheck := ciAutomationFilterFeedbackForPR(&github.TaskPR{}, &github.PRFeedback{
+		Checks: []github.CheckRun{{Name: "unit", Status: "completed", Conclusion: "failure"}},
+		Comments: []github.PRComment{
+			{ID: 1, Body: "human summary"},
+			{ID: 2, Body: "bot failure details", AuthorIsBot: true},
+		},
+	})
+	if len(withFailedCheck.Comments) != 2 || withFailedCheck.Comments[0].ID != 1 || withFailedCheck.Comments[1].ID != 2 {
+		t.Fatalf("expected failed checks to keep bot PR comment context, got %+v", withFailedCheck.Comments)
 	}
 }
 
@@ -359,6 +370,142 @@ func TestHandleTaskPRCIAutomationAutoFixUsesFreshSyncAndFullFeedback(t *testing.
 	status := svc.messageQueue.GetStatus(ctx, "session-1")
 	if status.Count != 1 || !strings.Contains(status.Entries[0].Content, "plain PR comment should trigger auto-fix") {
 		t.Fatalf("expected queued auto-fix prompt from full feedback, got %+v", status)
+	}
+}
+
+func TestHandleTaskPRCIAutomationAutoFixSkipsBotIssueCommentWithoutActionableFeedback(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	pr := &github.TaskPR{
+		TaskID:                  "task-1",
+		RepositoryID:            "repo-1",
+		Owner:                   "acme",
+		Repo:                    "widget",
+		PRNumber:                42,
+		State:                   "open",
+		ChecksState:             "success",
+		UnresolvedReviewThreads: 0,
+	}
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			EffectiveAutoFixPrompt: "Fix the PR\n\n{{pr.feedback}}",
+		},
+		triggerPRSyncAllPRs: []*github.TaskPR{pr},
+		prFeedback: &github.PRFeedback{
+			Checks: []github.CheckRun{{Name: "unit", Status: "completed", Conclusion: "success"}},
+			Comments: []github.PRComment{{
+				ID:          99,
+				Author:      "coderabbitai[bot]",
+				AuthorIsBot: true,
+				Body:        "Review in progress. No actionable comments posted yet.",
+			}},
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle auto-fix: %v", err)
+	}
+	if ghSvc.prFeedbackCalls != 1 {
+		t.Fatalf("expected one feedback fetch, got %d", ghSvc.prFeedbackCalls)
+	}
+	if status := svc.messageQueue.GetStatus(ctx, "session-1"); status.Count != 0 {
+		t.Fatalf("expected no queued auto-fix prompt for bot status comment, got %+v", status)
+	}
+	if len(ghSvc.fixAttempts) != 0 {
+		t.Fatalf("expected no fix round for bot status comment, got %+v", ghSvc.fixAttempts)
+	}
+}
+
+func TestHandleTaskPRCIAutomationAutoFixWaitsForPendingChecks(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	pr := &github.TaskPR{
+		TaskID:                  "task-1",
+		RepositoryID:            "repo-1",
+		Owner:                   "acme",
+		Repo:                    "widget",
+		PRNumber:                42,
+		State:                   "open",
+		ChecksState:             "pending",
+		UnresolvedReviewThreads: 1,
+	}
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			EffectiveAutoFixPrompt: "Fix the PR\n\n{{pr.feedback}}",
+		},
+		triggerPRSyncAllPRs: []*github.TaskPR{pr},
+		prFeedback: &github.PRFeedback{
+			Checks: []github.CheckRun{
+				{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit"},
+				{Name: "integration", Status: "in_progress", HTMLURL: "https://ci/integration"},
+			},
+			Comments: []github.PRComment{{ID: 100, Body: "please address this", Path: "main.go", Line: 12}},
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle auto-fix: %v", err)
+	}
+	if ghSvc.prFeedbackCalls != 1 {
+		t.Fatalf("expected one feedback fetch, got %d", ghSvc.prFeedbackCalls)
+	}
+	if status := svc.messageQueue.GetStatus(ctx, "session-1"); status.Count != 0 {
+		t.Fatalf("expected no queued auto-fix prompt while checks are pending, got %+v", status)
+	}
+	if len(ghSvc.fixAttempts) != 0 {
+		t.Fatalf("expected no fix round while checks are pending, got %+v", ghSvc.fixAttempts)
+	}
+}
+
+func TestHandleTaskPRCIAutomationAutoFixWaitsForExpectedChecks(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	pr := &github.TaskPR{
+		TaskID:                  "task-1",
+		RepositoryID:            "repo-1",
+		Owner:                   "acme",
+		Repo:                    "widget",
+		PRNumber:                42,
+		State:                   "open",
+		ChecksState:             "expected",
+		UnresolvedReviewThreads: 1,
+	}
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			EffectiveAutoFixPrompt: "Fix the PR\n\n{{pr.feedback}}",
+		},
+		triggerPRSyncAllPRs: []*github.TaskPR{pr},
+		prFeedback: &github.PRFeedback{
+			Comments: []github.PRComment{{ID: 100, Body: "please address this", Path: "main.go", Line: 12}},
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle auto-fix: %v", err)
+	}
+	if ghSvc.prFeedbackCalls != 1 {
+		t.Fatalf("expected one feedback fetch, got %d", ghSvc.prFeedbackCalls)
+	}
+	if status := svc.messageQueue.GetStatus(ctx, "session-1"); status.Count != 0 {
+		t.Fatalf("expected no queued auto-fix prompt while checks are expected, got %+v", status)
+	}
+	if len(ghSvc.fixAttempts) != 0 {
+		t.Fatalf("expected no fix round while checks are expected, got %+v", ghSvc.fixAttempts)
 	}
 }
 
@@ -715,6 +862,260 @@ func TestHandleTaskPRCIAutomationCoalescesQueuedAutoFixForRunningSession(t *test
 	}
 	if strings.Contains(status.Entries[0].Content, "https://ci/unit") {
 		t.Fatalf("expected replacement to avoid stale appended feedback, got %q", status.Entries[0].Content)
+	}
+}
+
+func TestHandleTaskPRCIAutomationStartsAutoFixOnPrimarySession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	if err := repo.SetSessionPrimary(ctx, "session-1"); err != nil {
+		t.Fatalf("set primary session: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:        "session-2",
+		TaskID:    "task-1",
+		State:     models.TaskSessionStateRunning,
+		StartedAt: now.Add(time.Minute),
+		UpdatedAt: now.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("create newer session: %v", err)
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	pr := &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		Owner:        "acme",
+		Repo:         "widget",
+		PRNumber:     42,
+		State:        "open",
+		LastSyncedAt: &now,
+	}
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			EffectiveAutoFixPrompt: "Fix the PR\n\n{{pr.feedback}}",
+		},
+		triggerPRSyncAllPRs: []*github.TaskPR{pr},
+		prFeedback: &github.PRFeedback{
+			Checks: []github.CheckRun{
+				{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit"},
+			},
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle auto-fix: %v", err)
+	}
+	if status := svc.messageQueue.GetStatus(ctx, "session-2"); status.Count != 0 {
+		t.Fatalf("expected newer non-primary session not to receive first auto-fix, got %+v", status)
+	}
+	status := svc.messageQueue.GetStatus(ctx, "session-1")
+	if status.Count != 1 || !strings.Contains(status.Entries[0].Content, "unit") {
+		t.Fatalf("expected primary session to receive first auto-fix, got %+v", status)
+	}
+	if len(ghSvc.fixAttempts) != 1 || ghSvc.fixAttempts[0].SessionID != "session-1" {
+		t.Fatalf("expected first fix attempt to use primary session, got %+v", ghSvc.fixAttempts)
+	}
+}
+
+func TestHandleTaskPRCIAutomationKeepsAutoFixOnPreviousSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:        "session-2",
+		TaskID:    "task-1",
+		State:     models.TaskSessionStateRunning,
+		StartedAt: now.Add(time.Minute),
+		UpdatedAt: now.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("create newer session: %v", err)
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	pr := &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		Owner:        "acme",
+		Repo:         "widget",
+		PRNumber:     42,
+		State:        "open",
+		LastSyncedAt: &now,
+	}
+	previousCheckpoint := ciAutomationCheckpoint{
+		FailedChecks: []ciAutomationCheckSnapshot{
+			{Name: "unit", Conclusion: "failure", HTMLURL: "https://ci/unit"},
+		},
+	}
+	previousJSON, previousSignature := encodeCIAutomationCheckpoint(previousCheckpoint)
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			EffectiveAutoFixPrompt: "Fix the PR\n\n{{pr.feedback}}",
+		},
+		triggerPRSyncAllPRs: []*github.TaskPR{pr},
+		prFeedback: &github.PRFeedback{
+			Checks: []github.CheckRun{
+				{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit"},
+				{Name: "lint", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/lint"},
+			},
+		},
+		ciPRState: &github.TaskCIPRAutomationState{
+			TaskID:                "task-1",
+			RepositoryID:          "repo-1",
+			PRNumber:              42,
+			LastFixSignature:      previousSignature,
+			LastFixCheckpointJSON: previousJSON,
+			LastFixEnqueuedAt:     &now,
+			LastFixSessionID:      ptrString("session-1"),
+			AutoFixRoundCount:     1,
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle auto-fix: %v", err)
+	}
+	if status := svc.messageQueue.GetStatus(ctx, "session-2"); status.Count != 0 {
+		t.Fatalf("expected newer session not to receive auto-fix, got %+v", status)
+	}
+	status := svc.messageQueue.GetStatus(ctx, "session-1")
+	if status.Count != 1 || !strings.Contains(status.Entries[0].Content, "lint") {
+		t.Fatalf("expected previous auto-fix session to receive latest feedback, got %+v", status)
+	}
+	if len(ghSvc.fixAttempts) != 1 || ghSvc.fixAttempts[0].SessionID != "session-1" {
+		t.Fatalf("expected fix attempt to stay on session-1, got %+v", ghSvc.fixAttempts)
+	}
+}
+
+func TestHandleTaskPRCIAutomationFallsBackWhenPreviousSessionInactive(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateCompleted)
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:        "session-2",
+		TaskID:    "task-1",
+		State:     models.TaskSessionStateRunning,
+		StartedAt: now.Add(time.Minute),
+		UpdatedAt: now.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("create active fallback session: %v", err)
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	pr := &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		Owner:        "acme",
+		Repo:         "widget",
+		PRNumber:     42,
+		State:        "open",
+		LastSyncedAt: &now,
+	}
+	previousCheckpoint := ciAutomationCheckpoint{
+		FailedChecks: []ciAutomationCheckSnapshot{
+			{Name: "unit", Conclusion: "failure", HTMLURL: "https://ci/unit"},
+		},
+	}
+	previousJSON, previousSignature := encodeCIAutomationCheckpoint(previousCheckpoint)
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			EffectiveAutoFixPrompt: "Fix the PR\n\n{{pr.feedback}}",
+		},
+		triggerPRSyncAllPRs: []*github.TaskPR{pr},
+		prFeedback: &github.PRFeedback{
+			Checks: []github.CheckRun{
+				{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit"},
+				{Name: "lint", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/lint"},
+			},
+		},
+		ciPRState: &github.TaskCIPRAutomationState{
+			TaskID:                "task-1",
+			RepositoryID:          "repo-1",
+			PRNumber:              42,
+			LastFixSignature:      previousSignature,
+			LastFixCheckpointJSON: previousJSON,
+			LastFixSessionID:      ptrString("session-1"),
+			AutoFixRoundCount:     1,
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle auto-fix: %v", err)
+	}
+	if status := svc.messageQueue.GetStatus(ctx, "session-1"); status.Count != 0 {
+		t.Fatalf("expected inactive previous session not to receive auto-fix, got %+v", status)
+	}
+	status := svc.messageQueue.GetStatus(ctx, "session-2")
+	if status.Count != 1 || !strings.Contains(status.Entries[0].Content, "lint") {
+		t.Fatalf("expected active fallback session to receive auto-fix, got %+v", status)
+	}
+	if len(ghSvc.fixAttempts) != 1 || ghSvc.fixAttempts[0].SessionID != "session-2" {
+		t.Fatalf("expected fix attempt to use fallback session-2, got %+v", ghSvc.fixAttempts)
+	}
+}
+
+func TestHandleTaskPRCIAutomationFallsBackWhenPreviousSessionMissing(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-2", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	pr := &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		Owner:        "acme",
+		Repo:         "widget",
+		PRNumber:     42,
+		State:        "open",
+	}
+	previousCheckpoint := ciAutomationCheckpoint{
+		FailedChecks: []ciAutomationCheckSnapshot{
+			{Name: "unit", Conclusion: "failure", HTMLURL: "https://ci/unit"},
+		},
+	}
+	previousJSON, previousSignature := encodeCIAutomationCheckpoint(previousCheckpoint)
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			EffectiveAutoFixPrompt: "Fix the PR\n\n{{pr.feedback}}",
+		},
+		triggerPRSyncAllPRs: []*github.TaskPR{pr},
+		prFeedback: &github.PRFeedback{
+			Checks: []github.CheckRun{
+				{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit"},
+				{Name: "lint", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/lint"},
+			},
+		},
+		ciPRState: &github.TaskCIPRAutomationState{
+			TaskID:                "task-1",
+			RepositoryID:          "repo-1",
+			PRNumber:              42,
+			LastFixSignature:      previousSignature,
+			LastFixCheckpointJSON: previousJSON,
+			LastFixSessionID:      ptrString("missing-session"),
+			AutoFixRoundCount:     1,
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle auto-fix: %v", err)
+	}
+	status := svc.messageQueue.GetStatus(ctx, "session-2")
+	if status.Count != 1 || !strings.Contains(status.Entries[0].Content, "lint") {
+		t.Fatalf("expected active fallback session to receive auto-fix, got %+v", status)
+	}
+	if len(ghSvc.fixAttempts) != 1 || ghSvc.fixAttempts[0].SessionID != "session-2" {
+		t.Fatalf("expected fix attempt to use fallback session-2, got %+v", ghSvc.fixAttempts)
 	}
 }
 
@@ -1219,6 +1620,30 @@ func TestDispatchCIAutomationPromptForPRQueuesWhenRunningUserMessageCannotBeReco
 	}
 	if status.Entries[0].Metadata[metaKeyUserMessageRecorded] == true {
 		t.Fatalf("expected queued prompt to retry user-message recording on drain, got %+v", status.Entries[0].Metadata)
+	}
+}
+
+func TestDispatchCIAutomationPromptForPRQueuesCreatedSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateCreated)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	session, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	pr := &github.TaskPR{TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42}
+
+	result, err := svc.dispatchCIAutomationPromptForPR(ctx, session, pr, "Fix the PR", "signature", true)
+	if err != nil {
+		t.Fatalf("expected queued CI automation prompt, got %v", err)
+	}
+	if !result.consumesRound() {
+		t.Fatalf("expected created session queue insert to consume a round, got %+v", result)
+	}
+	status := svc.messageQueue.GetStatus(ctx, "session-1")
+	if status.Count != 1 || !strings.Contains(status.Entries[0].Content, "Fix the PR") {
+		t.Fatalf("expected created session to receive queued prompt, got %+v", status)
 	}
 }
 

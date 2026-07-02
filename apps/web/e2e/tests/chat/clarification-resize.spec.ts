@@ -2,41 +2,24 @@ import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { seedClarificationSession } from "../../helpers/clarification";
 import { SessionPage } from "../../pages/session-page";
 
 /**
- * Helper to create a regular task, navigate to it, and wait for idle.
- * Mirrors clarification.spec.ts's `seedClarificationTask`, but uses a non-
- * blocking scenario so we reach the idle input and can drive the slash
- * commands `/ask-single` and `/ask-multiple` from inside the session.
+ * Create a regular task, navigate to it, and wait for idle. Uses a non-blocking
+ * scenario so we reach the idle input and can drive the slash commands
+ * `/ask-single` and `/ask-multiple` from inside the session.
  */
-async function seedTaskAndWaitForIdle(
+function seedTaskAndWaitForIdle(
   testPage: Page,
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
 ): Promise<SessionPage> {
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    title,
-    seedData.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
-
-  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
-
-  await testPage.goto(`/t/${task.id}`);
-
-  const session = new SessionPage(testPage);
-  await session.waitForLoad();
-  await session.waitForChatIdle();
-
-  return session;
+  return seedClarificationSession(testPage, apiClient, seedData, title, {
+    scenario: "simple-message",
+    waitForIdle: true,
+  });
 }
 
 test.describe("Mock agent clarification slash commands", () => {

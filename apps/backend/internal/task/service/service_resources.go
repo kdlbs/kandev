@@ -517,7 +517,7 @@ func (s *Service) ReorderWorkflows(ctx context.Context, workspaceID string, work
 func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryRequest) (*models.Repository, error) {
 	sourceType := req.SourceType
 	if sourceType == "" {
-		sourceType = "local"
+		sourceType = sourceTypeLocal
 	}
 	prefix := strings.TrimSpace(req.WorktreeBranchPrefix)
 	if err := worktree.ValidateBranchPrefix(prefix); err != nil {
@@ -593,6 +593,11 @@ func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateR
 		return nil, false, fmt.Errorf("lookup repository: %w", err)
 	}
 	if existing != nil {
+		replacement, replacementCreated, replacementErr := s.replaceTaskWorktreeRepositoryMatch(ctx, req.WorkspaceID, existing)
+		if replacementErr != nil {
+			return nil, false, replacementErr
+		}
+		existing = replacement
 		dirty := false
 		if existing.LocalPath == "" && req.LocalPath != "" {
 			existing.LocalPath = req.LocalPath
@@ -612,14 +617,14 @@ func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateR
 					zap.String("repository_id", existing.ID), zap.Error(updateErr))
 			}
 		}
-		return existing, false, nil
+		return existing, replacementCreated, nil
 	}
 
 	name := fmt.Sprintf("%s/%s", req.ProviderOwner, req.ProviderName)
 	created, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{
 		WorkspaceID:   req.WorkspaceID,
 		Name:          name,
-		SourceType:    "provider",
+		SourceType:    sourceTypeProvider,
 		LocalPath:     req.LocalPath,
 		Provider:      req.Provider,
 		ProviderOwner: req.ProviderOwner,

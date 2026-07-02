@@ -304,6 +304,7 @@ const issueFragment = `
 	description
 	url
 	updatedAt
+	createdAt
 	priority
 	priorityLabel
 	state { id name type color }
@@ -319,6 +320,7 @@ type issueNode struct {
 	Description string `json:"description"`
 	URL         string `json:"url"`
 	UpdatedAt   string `json:"updatedAt"`
+	CreatedAt   string `json:"createdAt"`
 	Priority    int    `json:"priority"`
 	PriorityLab string `json:"priorityLabel"`
 	State       struct {
@@ -357,6 +359,7 @@ func issueNodeToIssue(n *issueNode) LinearIssue {
 		Priority:      n.Priority,
 		PriorityLabel: n.PriorityLab,
 		Updated:       n.UpdatedAt,
+		Created:       n.CreatedAt,
 		URL:           n.URL,
 	}
 	if n.Assignee != nil {

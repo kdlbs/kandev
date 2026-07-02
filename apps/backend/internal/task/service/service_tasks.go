@@ -25,6 +25,8 @@ import (
 // Used when a caller omits priority so the DB CHECK constraint is satisfied.
 const defaultPriority = "medium"
 
+const defaultKandevTaskWorktreePathSegment = "/.kandev/tasks/"
+
 // ErrSubtaskDepthExceeded is returned when a caller tries to create a
 // subtask of a kanban subtask (nesting depth > 1). Office task trees are
 // intentionally exempt.
@@ -421,19 +423,7 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 	repositoryID = repoInput.RepositoryID
 	baseBranch = repoInput.BaseBranch
 	if repositoryID != "" {
-		// Verify the repository belongs to the target workspace. Without this
-		// check, an agent that knows a repository UUID from another workspace
-		// could associate it with a task in this workspace via the MCP tool's
-		// repository_id fast path (the github_url and local_path branches both
-		// scope through FindOrCreateRepository, which is workspace-bound).
-		repo, lookupErr := s.repoEntities.GetRepository(ctx, repositoryID)
-		if lookupErr != nil {
-			return "", "", false, fmt.Errorf("looking up repository %q: %w", repositoryID, lookupErr)
-		}
-		if repo == nil || repo.WorkspaceID != workspaceID {
-			return "", "", false, fmt.Errorf("repository %q does not belong to workspace %q", repositoryID, workspaceID)
-		}
-		return repositoryID, baseBranch, false, nil
+		return s.resolveRepoInputID(ctx, workspaceID, repositoryID, baseBranch)
 	}
 
 	// Handle GitHub URL: parse owner/name and use FindOrCreateRepository
@@ -447,6 +437,157 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 	return s.resolveRepoInputLocal(ctx, workspaceID, repoInput, repoByPath, baseBranch)
 }
 
+func (s *Service) resolveRepoInputID(ctx context.Context, workspaceID, repositoryID, baseBranch string) (string, string, bool, error) {
+	// Verify the repository belongs to the target workspace. Without this
+	// check, an agent that knows a repository UUID from another workspace
+	// could associate it with a task in this workspace via the MCP tool's
+	// repository_id fast path (the github_url and local_path branches both
+	// scope through FindOrCreateRepository, which is workspace-bound).
+	repo, lookupErr := s.repoEntities.GetRepository(ctx, repositoryID)
+	if lookupErr != nil {
+		return "", "", false, fmt.Errorf("looking up repository %q: %w", repositoryID, lookupErr)
+	}
+	if repo == nil || repo.WorkspaceID != workspaceID {
+		return "", "", false, fmt.Errorf("repository %q does not belong to workspace %q", repositoryID, workspaceID)
+	}
+	replacementID, replacementCreated, replacementErr := s.safeRepositoryIDForTaskWorktree(ctx, workspaceID, repo)
+	if replacementErr != nil {
+		return "", "", false, replacementErr
+	}
+	if replacementID != "" {
+		return replacementID, baseBranch, replacementCreated, nil
+	}
+	return repositoryID, baseBranch, false, nil
+}
+
+func (s *Service) safeRepositoryIDForTaskWorktree(ctx context.Context, workspaceID string, repo *models.Repository) (string, bool, error) {
+	if !s.isKandevTaskWorktreeRepository(repo) {
+		return "", false, nil
+	}
+	if repo.Provider == "" || repo.ProviderOwner == "" || repo.ProviderName == "" {
+		return "", false, fmt.Errorf("repository %q points at a Kandev task worktree; use the source repository or GitHub URL", repo.ID)
+	}
+	existing, err := s.findSafeReplacementRepository(ctx, workspaceID, repo)
+	if err != nil {
+		return "", false, err
+	}
+	if existing != nil {
+		return existing.ID, false, nil
+	}
+	created, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID:    workspaceID,
+		Name:           repo.ProviderOwner + "/" + repo.ProviderName,
+		SourceType:     sourceTypeProvider,
+		Provider:       repo.Provider,
+		ProviderRepoID: repo.ProviderRepoID,
+		ProviderOwner:  repo.ProviderOwner,
+		ProviderName:   repo.ProviderName,
+		DefaultBranch:  repo.DefaultBranch,
+	})
+	if createErr != nil {
+		return "", false, fmt.Errorf("create provider repository for task worktree %q: %w", repo.ID, createErr)
+	}
+	return created.ID, true, nil
+}
+
+func (s *Service) replaceTaskWorktreeRepositoryMatch(ctx context.Context, workspaceID string, repo *models.Repository) (*models.Repository, bool, error) {
+	replacementID, replacementCreated, err := s.safeRepositoryIDForTaskWorktree(ctx, workspaceID, repo)
+	if err != nil {
+		return nil, false, err
+	}
+	if replacementID == "" {
+		return repo, false, nil
+	}
+	replacement, lookupErr := s.repoEntities.GetRepository(ctx, replacementID)
+	if lookupErr != nil {
+		return nil, false, fmt.Errorf("looking up repository %q: %w", replacementID, lookupErr)
+	}
+	if replacement == nil {
+		return nil, false, fmt.Errorf("replacement repository %q no longer exists", replacementID)
+	}
+	return replacement, replacementCreated, nil
+}
+
+// findSafeReplacementRepository prefers an existing safe local clone over a
+// provider row so private/offline repositories can reuse the user's checkout.
+func (s *Service) findSafeReplacementRepository(ctx context.Context, workspaceID string, repo *models.Repository) (*models.Repository, error) {
+	repos, err := s.repoEntities.ListRepositories(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("list repositories for task worktree replacement: %w", err)
+	}
+	var localClone *models.Repository
+	var providerRepo *models.Repository
+	for _, candidate := range repos {
+		if candidate == nil || candidate.ID == repo.ID {
+			continue
+		}
+		if !sameProviderIdentity(repo, candidate) {
+			continue
+		}
+		if s.isKandevTaskWorktreeRepository(candidate) {
+			continue
+		}
+		if candidate.SourceType == sourceTypeLocal && candidate.LocalPath != "" {
+			if localClone == nil {
+				localClone = candidate
+			}
+			continue
+		}
+		if candidate.SourceType == sourceTypeProvider && providerRepo == nil {
+			providerRepo = candidate
+		}
+	}
+	if localClone != nil {
+		return localClone, nil
+	}
+	if providerRepo != nil {
+		return providerRepo, nil
+	}
+	return nil, nil
+}
+
+func sameProviderIdentity(left, right *models.Repository) bool {
+	return left.Provider == right.Provider &&
+		left.ProviderOwner == right.ProviderOwner &&
+		left.ProviderName == right.ProviderName
+}
+
+func (s *Service) isKandevTaskWorktreeRepository(repo *models.Repository) bool {
+	return repo != nil && isKandevTaskWorktreePath(repo.LocalPath, s.discoveryConfig.TaskWorktreeRoots)
+}
+
+func isKandevTaskWorktreePath(path string, taskWorktreeRoots []string) bool {
+	normalized := normalizeTaskWorktreePath(path)
+	if normalized == "" {
+		return false
+	}
+	for _, root := range taskWorktreeRoots {
+		if pathAtOrInsideRoot(normalized, normalizeTaskWorktreePath(root)) {
+			return true
+		}
+	}
+	return strings.Contains(normalized, defaultKandevTaskWorktreePathSegment) ||
+		strings.HasSuffix(normalized, strings.TrimSuffix(defaultKandevTaskWorktreePathSegment, "/"))
+}
+
+func normalizeTaskWorktreePath(path string) string {
+	normalized := filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
+	if normalized == "." || normalized == "" {
+		return ""
+	}
+	return normalized
+}
+
+func pathAtOrInsideRoot(path, root string) bool {
+	if path == "" || root == "" {
+		return false
+	}
+	if root != "/" {
+		root = strings.TrimRight(root, "/")
+	}
+	return path == root || strings.HasPrefix(path, root+"/")
+}
+
 // resolveRepoInputLocal handles the LocalPath branch of resolveRepoInput.
 // Looks the path up in the workspace snapshot; on miss, calls
 // CreateRepository (and reports created=true). Extracted to keep
@@ -458,6 +599,9 @@ func (s *Service) resolveRepoInputLocal(
 	repo := repoByPath[repoInput.LocalPath]
 	created := false
 	if repo == nil {
+		if isKandevTaskWorktreePath(repoInput.LocalPath, s.discoveryConfig.TaskWorktreeRoots) {
+			return "", "", false, fmt.Errorf("local path %q points at a Kandev task worktree; use the source repository or GitHub URL", repoInput.LocalPath)
+		}
 		name := strings.TrimSpace(repoInput.Name)
 		if name == "" {
 			name = filepath.Base(repoInput.LocalPath)
@@ -497,6 +641,13 @@ func (s *Service) resolveRepoInputLocal(
 			repoByPath[repoInput.LocalPath] = repo
 		}
 		created = true
+	} else {
+		replacement, replacementCreated, replaceErr := s.replaceTaskWorktreeRepositoryMatch(ctx, workspaceID, repo)
+		if replaceErr != nil {
+			return "", "", false, replaceErr
+		}
+		repo = replacement
+		created = replacementCreated
 	}
 	if baseBranch == "" {
 		baseBranch = repo.DefaultBranch

@@ -130,9 +130,6 @@ function SaveLayoutDialog({
               onChange={(e) => setName(e.target.value)}
               placeholder="My layout"
               autoFocus
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleSave();
-              }}
             />
           </div>
           <div className="flex items-center gap-2">
