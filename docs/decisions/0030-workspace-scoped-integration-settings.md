@@ -48,17 +48,17 @@ workspace when it exists, otherwise the first workspace by creation time. If no
 workspace exists, leave the singleton data untouched until a workspace is
 created or the user reconnects.
 
-Each integration settings page includes a copy action that copies the current
-workspace's provider config and credentials to another workspace. Copying
-automation/watch rows is intentionally separate and opt-in so users do not
-accidentally duplicate task-creating pollers.
+A follow-up should add a copy action that copies the current workspace's
+provider config and credentials to another workspace. Copying automation/watch
+rows should remain separate and opt-in so users do not accidentally duplicate
+task-creating pollers.
 
 ## Consequences
 
 - Existing installs migrate their singleton integration config to one
-  deterministic workspace. If that is not the user's intended workspace, the
-  copy action lets them duplicate the settings to the correct workspace and
-  then delete or replace the original.
+  deterministic workspace. If that is not the user's intended workspace, users
+  can reconnect the integration in the correct workspace today; a future copy
+  action should make that correction path faster.
 - Existing GitHub installs default to `all` repository scope, preserving
   current behavior until a workspace changes its GitHub scope.
 - Workspace-scoped GitHub searches have cache keys that include the workspace
