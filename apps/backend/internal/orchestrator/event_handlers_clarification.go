@@ -309,14 +309,14 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 	if s.clarificationCanceller != nil {
 		detached = s.clarificationCanceller.DetachSessionAndNotify(writeCtx, sessionID)
 	}
-	if _, has := models.LoadPendingStepSignal(session.Metadata); has {
-		s.clearPendingStepSignal(writeCtx, session)
-	}
 	if isTerminalSessionState(session.State) {
 		return detached, nil
 	}
 	if !hasPendingClarification && detached == 0 {
 		return detached, nil
+	}
+	if _, has := models.LoadPendingStepSignal(session.Metadata); has {
+		s.clearPendingStepSignal(writeCtx, session)
 	}
 
 	// The backend wait path and agentctl timeout notification can race for the

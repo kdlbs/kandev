@@ -356,8 +356,12 @@ func TestPauseForClarificationInput_CancelsWhileSessionAlreadyWaiting(t *testing
 	svc.SetClarificationCanceller(zeroClarificationCanceller{})
 	svc.turnService = &repoBackedTurnService{repo: repo}
 
-	if _, err := svc.PauseForClarificationInput(ctx, "s1"); err != nil {
+	detached, err := svc.PauseForClarificationInput(ctx, "s1")
+	if err != nil {
 		t.Fatalf("pause clarification input: %v", err)
+	}
+	if detached != 0 {
+		t.Fatalf("expected zero detached clarification bundles from zero canceller, got %d", detached)
 	}
 	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
 		t.Fatalf("waiting ask session must still cancel active agent, got %d calls", got)
@@ -369,6 +373,14 @@ func TestPauseForClarificationInput_IgnoresStaleTimeoutWithoutPendingClarificati
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
 	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, models.PendingStepCompletionSignal{
+		StepID:     "step1",
+		Source:     "agent",
+		Summary:    "ready",
+		SignaledAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed pending step signal: %v", err)
+	}
 
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
@@ -384,6 +396,13 @@ func TestPauseForClarificationInput_IgnoresStaleTimeoutWithoutPendingClarificati
 	}
 	if got := agentMgr.cancelAgentCalls.Load(); got != 0 {
 		t.Fatalf("stale timeout must not cancel a later turn, got %d calls", got)
+	}
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if _, has := models.LoadPendingStepSignal(session.Metadata); !has {
+		t.Fatal("stale timeout must not clear pending step signal from later turn")
 	}
 }
 
