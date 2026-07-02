@@ -325,6 +325,8 @@ func updateGenericInput(gen *streams.GenericPayload, inputMap, supplemental map[
 	}
 }
 
+// isEmptyGenericInputValue only treats absent values and empty strings as
+// fillable. Other zero values can be meaningful generic tool arguments.
 func isEmptyGenericInputValue(v any) bool {
 	switch x := v.(type) {
 	case nil:

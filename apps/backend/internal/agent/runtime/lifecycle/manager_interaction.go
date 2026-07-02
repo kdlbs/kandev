@@ -1022,10 +1022,9 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 		if !status.IsAgentRunning() {
 			return fmt.Errorf("agent process is not running after stream recovery: %s", status.AgentStatus)
 		}
-		if err := m.UpdateStatus(execution.ID, v1.AgentStatusReady); err != nil {
+		if err := m.markBootReadyFromFailed(ctx, execution.ID); err != nil {
 			return err
 		}
-		m.eventPublisher.PublishAgentEvent(ctx, events.AgentBootReady, execution)
 	}
 	return nil
 }
@@ -1079,12 +1078,27 @@ func (m *Manager) MarkReady(executionID string) error {
 //
 // Publishes events.AgentBootReady. Returns error if execution not found.
 func (m *Manager) MarkBootReady(executionID string) error {
-	return m.markReadyEvent(executionID, events.AgentBootReady)
+	return m.markReadyEventWithContext(context.Background(), executionID, events.AgentBootReady)
 }
 
 // markReadyEvent is the shared body of MarkReady / MarkBootReady — both flip
 // the execution to the Ready status and publish their respective event type.
 func (m *Manager) markReadyEvent(executionID, eventType string) error {
+	return m.markReadyEventWithContext(context.Background(), executionID, eventType)
+}
+
+func (m *Manager) markBootReadyFromFailed(ctx context.Context, executionID string) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found", executionID)
+	}
+	if execution.Status != v1.AgentStatusFailed {
+		return nil
+	}
+	return m.markReadyEventWithContext(ctx, executionID, events.AgentBootReady)
+}
+
+func (m *Manager) markReadyEventWithContext(ctx context.Context, executionID, eventType string) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
@@ -1103,7 +1117,7 @@ func (m *Manager) markReadyEvent(executionID, eventType string) error {
 		zap.String("execution_id", executionID),
 		zap.String("event_type", eventType))
 
-	m.eventPublisher.PublishAgentEvent(context.Background(), eventType, execution)
+	m.eventPublisher.PublishAgentEvent(ctx, eventType, execution)
 	return nil
 }
 

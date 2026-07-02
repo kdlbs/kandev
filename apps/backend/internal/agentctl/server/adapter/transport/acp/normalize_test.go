@@ -855,6 +855,25 @@ func TestUpdatePayloadInput(t *testing.T) {
 		require.Equal(t, "60s", rawInput["timeout"])
 		require.Equal(t, "/tmp", rawInput["cwd"])
 	})
+
+	t.Run("generic input merges supplemental without overwriting existing keys", func(t *testing.T) {
+		payload := normalizer.NormalizeToolCall("Monitor", map[string]any{
+			"kind":     "other",
+			"location": "existing location",
+			"empty":    "",
+		})
+
+		normalizer.UpdatePayloadInput(payload, nil, map[string]any{
+			"location": "line 42",
+			"empty":    "filled",
+			"note":     "from update",
+		})
+
+		args := payload.Generic().Input.(map[string]any)
+		require.Equal(t, "existing location", args["location"])
+		require.Equal(t, "filled", args["empty"])
+		require.Equal(t, "from update", args["note"])
+	})
 }
 
 // TestEnrichModifyFileFromContents tests enriching modify_file payloads from tool_call_contents.

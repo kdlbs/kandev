@@ -911,6 +911,12 @@ func TestRecoverAgentPromptStream(t *testing.T) {
 		updated, ok := mgr.executionStore.Get(exec.ID)
 		require.True(t, ok)
 		require.Equal(t, v1.AgentStatusFailed, updated.Status)
+
+		mockBus, ok := mgr.eventBus.(*MockEventBus)
+		require.True(t, ok)
+		for _, ev := range mockBus.PublishedEvents {
+			require.NotEqual(t, events.AgentBootReady, ev.Type)
+		}
 	})
 }
 
