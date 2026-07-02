@@ -6,7 +6,8 @@ import { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { matchesShortcut } from "@/lib/keyboard/utils";
 import { getShortcut, type StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
 import { navigateHistory, type HistoryState } from "./message-history";
-import { getMarkdownText, textToHtml } from "./tiptap-helpers";
+import { getMarkdownText, textToEditorContent } from "./tiptap-helpers";
+import type { SlashCommand } from "./slash-command-types";
 
 export type HistoryNavDecision =
   | { kind: "defer" }
@@ -46,6 +47,7 @@ export type HistoryKeymapRefs = {
   isSuggestionMenuOpenRef: React.RefObject<boolean>;
   isReverseSearchOpenRef: React.RefObject<boolean>;
   getHistoryRef: React.RefObject<() => readonly string[]>;
+  getSlashCommandsRef: React.RefObject<() => readonly SlashCommand[]>;
   onOpenReverseSearchRef: React.RefObject<(() => void) | undefined>;
   onChangeRef: React.RefObject<(value: string) => void>;
   keyboardShortcutsRef: React.RefObject<StoredShortcutOverrides | undefined>;
@@ -70,6 +72,7 @@ function writeHistoryContent(
   editor: Editor,
   state: HistoryRuntimeState,
   text: string,
+  slashCommands: readonly SlashCommand[],
   onChange: (value: string) => void,
 ): void {
   if (!editor) return;
@@ -78,7 +81,7 @@ function writeHistoryContent(
     if (text === "") {
       editor.chain().focus().clearContent().run();
     } else {
-      editor.chain().focus().setContent(textToHtml(text)).run();
+      editor.chain().focus().setContent(textToEditorContent(text, slashCommands)).run();
       editor.commands.focus("end");
     }
     onChange(getMarkdownText(editor));
@@ -121,7 +124,8 @@ function runHistoryArrow(
     state.draft = getMarkdownText(editor);
   }
   const text = decision.index === null ? state.draft : history[decision.index];
-  writeHistoryContent(editor, state, text, refs.onChangeRef.current);
+  const slashCommands = refs.getSlashCommandsRef.current?.() ?? [];
+  writeHistoryContent(editor, state, text, slashCommands, refs.onChangeRef.current);
   state.index = decision.index;
   return true;
 }
@@ -176,7 +180,8 @@ function applyHistoryIndexImpl(
   const history = refs.getHistoryRef.current?.() ?? [];
   if (index < 0 || index >= history.length) return;
   if (state.index === null) state.draft = getMarkdownText(editor);
-  writeHistoryContent(editor, state, history[index], refs.onChangeRef.current);
+  const slashCommands = refs.getSlashCommandsRef.current?.() ?? [];
+  writeHistoryContent(editor, state, history[index], slashCommands, refs.onChangeRef.current);
   state.index = index;
 }
 

@@ -117,6 +117,11 @@ test.describe("Slash command composer", () => {
     ).toBeVisible({
       timeout: 30_000,
     });
+
+    await editor.click();
+    await editor.press("ArrowUp");
+    await expect(editor).toHaveText(/slow\s+1s/, { timeout: 5_000 });
+    await expect(editor.getByTestId("slash-command-chip")).toHaveText("slow", { timeout: 5_000 });
   });
 
   test("selecting a slash command preserves existing draft text", async ({

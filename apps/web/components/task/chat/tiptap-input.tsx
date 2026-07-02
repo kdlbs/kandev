@@ -244,7 +244,7 @@ function useSuggestionConfigs({
   );
   /* eslint-enable react-hooks/refs */
 
-  return { mentionSuggestion, slashSuggestion };
+  return { mentionSuggestion, slashSuggestion, slashCommands };
 }
 
 // ── Menu state hook ──────────────────────────────────────────────────
@@ -366,7 +366,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
   ref,
 ) {
   const menu = useMenuHandlers();
-  const { mentionSuggestion, slashSuggestion } = useSuggestionConfigs({
+  const { mentionSuggestion, slashSuggestion, slashCommands } = useSuggestionConfigs({
     sessionId,
     taskId: taskId ?? null,
     onMentionKeyDown: menu.onMentionKeyDown,
@@ -396,6 +396,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     onImagePaste,
     mentionSuggestion,
     slashSuggestion,
+    slashCommands,
     isSuggestionMenuOpen,
     getHistory,
     onOpenReverseSearch: overlay.openReverseSearch,

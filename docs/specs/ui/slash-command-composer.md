@@ -16,6 +16,7 @@ ACP agents can advertise slash commands during session setup. Kandev exposes tho
 - Selecting a slash command with Enter, Tab, or pointer/touch replaces only the active slash trigger range with a visually distinct inline command chip in the composer. It MUST NOT submit, queue, or otherwise send a chat message.
 - The inserted command chip remains part of the editable draft. The user can add text before or after it, delete it, or leave the composer without starting an agent turn.
 - The command chip serializes to the same plain slash command text when submitted, copied from the draft value, or saved as a draft.
+- Recalling a previously sent message that contains an advertised slash command restores that command as the same inline chip in the composer while preserving the plain slash command text for submission.
 - After selection, focus remains in the composer and the caret lands after the inserted command with room to continue typing arguments.
 - Explicit send actions still submit the full current draft: the configured submit shortcut, the Send button, and existing queue behavior continue to work after the user edits the inserted command.
 - Escape dismisses the slash command menu without sending a message or changing the draft.
@@ -26,6 +27,7 @@ ACP agents can advertise slash commands during session setup. Kandev exposes tho
 
 - **GIVEN** a task chat session with advertised commands, **WHEN** the user types `/s` and presses Enter to choose `/slow`, **THEN** the composer contains `/slow` as a command chip, focus remains in the composer, and no user message or agent turn is created.
 - **GIVEN** a selected `/slow` draft in task chat, **WHEN** the user types `1s` after it and clicks Send, **THEN** the chat sends exactly `/slow 1s` and the agent handles it as a normal slash command prompt.
+- **GIVEN** the user sent `/slow 1s`, **WHEN** they focus an empty composer and press ArrowUp to recall recent messages, **THEN** the composer restores `slow` as a slash command chip followed by `1s` and sending it again would serialize to `/slow 1s`.
 - **GIVEN** the draft already contains `please run ` before the slash trigger, **WHEN** the user selects `/slow`, **THEN** the draft becomes `please run /slow` without sending.
 - **GIVEN** the slash menu is open in a composer configured to submit plain Enter, **WHEN** the user presses Enter on a highlighted menu item, **THEN** Enter selects the command and does not submit the draft.
 - **GIVEN** the slash menu is open in quick chat, **WHEN** the user selects a command, **THEN** quick chat keeps the command in the editable draft and does not send until the user explicitly sends.

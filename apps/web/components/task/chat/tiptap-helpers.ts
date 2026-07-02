@@ -1,5 +1,6 @@
 import type React from "react";
 import { formatSlashCommandLabel } from "./tiptap-slash-command-utils";
+import type { SlashCommand } from "./slash-command-types";
 
 // ── JSON node types ─────────────────────────────────────────────────
 
@@ -9,6 +10,13 @@ export type JSONNode = {
   attrs?: Record<string, unknown>;
   marks?: Array<{ type: string }>;
   content?: JSONNode[];
+};
+
+export type EditorContentNode = {
+  type: string;
+  text?: string;
+  attrs?: Record<string, unknown>;
+  content?: EditorContentNode[];
 };
 
 // ── Serialization ───────────────────────────────────────────────────
@@ -75,6 +83,64 @@ export function escapeHtml(str: string): string {
 export function textToHtml(text: string): string {
   const lines = text.split("\n");
   return lines.map((line) => `<p>${escapeHtml(line) || "<br>"}</p>`).join("");
+}
+
+function slashCommandName(command: SlashCommand): string {
+  return (command.agentCommandName || command.label).trim().replace(/^\/+/, "");
+}
+
+function slashCommandAttrs(command: SlashCommand): Record<string, unknown> {
+  const name = slashCommandName(command);
+  return {
+    id: command.id,
+    label: `/${name}`,
+    commandName: name,
+    description: command.description,
+  };
+}
+
+function slashCommandMap(commands: readonly SlashCommand[]): Map<string, SlashCommand> {
+  const map = new Map<string, SlashCommand>();
+  for (const command of commands) {
+    const name = slashCommandName(command);
+    if (name) map.set(name, command);
+  }
+  return map;
+}
+
+function textLineToNodes(line: string, commands: Map<string, SlashCommand>): EditorContentNode[] {
+  const nodes: EditorContentNode[] = [];
+  const tokenPattern = /\/\S+/g;
+  let cursor = 0;
+  for (const match of line.matchAll(tokenPattern)) {
+    const index = match.index ?? 0;
+    const token = match[0];
+    const command = commands.get(token.replace(/^\/+/, ""));
+    if (!command) continue;
+    if (index > cursor) {
+      nodes.push({ type: "text", text: line.slice(cursor, index) });
+    }
+    nodes.push({ type: "slashCommand", attrs: slashCommandAttrs(command) });
+    cursor = index + token.length;
+  }
+  if (cursor < line.length) {
+    nodes.push({ type: "text", text: line.slice(cursor) });
+  }
+  return nodes;
+}
+
+export function textToEditorContent(
+  text: string,
+  slashCommands: readonly SlashCommand[] = [],
+): EditorContentNode {
+  const commands = slashCommandMap(slashCommands);
+  return {
+    type: "doc",
+    content: text.split("\n").map((line) => {
+      const content = textLineToNodes(line, commands);
+      return content.length > 0 ? { type: "paragraph", content } : { type: "paragraph" };
+    }),
+  };
 }
 
 // ── Code fence parsing ──────────────────────────────────────────────
