@@ -97,7 +97,28 @@ func (s *Service) publishTaskEventWithExtra(ctx context.Context, eventType strin
 			zap.String("event_type", eventType),
 			zap.String("task_id", task.ID),
 			zap.Error(err))
+		return
 	}
+	s.logTaskLifecycleEventPublished(eventType, task, data)
+}
+
+func (s *Service) logTaskLifecycleEventPublished(eventType string, task *models.Task, data map[string]interface{}) {
+	switch eventType {
+	case events.TaskCreated, events.TaskUpdated, events.TaskStateChanged, events.TaskDeleted:
+	default:
+		return
+	}
+	s.logger.Debug("task lifecycle event published",
+		zap.String("event_type", eventType),
+		zap.String("task_id", task.ID),
+		zap.Any("state", data["state"]),
+		zap.Any("workflow_step_id", data["workflow_step_id"]),
+		zap.Any("primary_session_id", data["primary_session_id"]),
+		zap.Any("primary_session_state", data["primary_session_state"]),
+		zap.Any("session_count", data["session_count"]),
+		zap.Any("old_state", data["old_state"]),
+		zap.Any("new_state", data["new_state"]),
+	)
 }
 
 // addTaskSessionEventFields merges session count, primary session info, and
@@ -116,6 +137,8 @@ func (s *Service) addTaskSessionEventFields(ctx context.Context, taskID string, 
 	}
 	sessionInfo, ok := primarySessionInfoMap[taskID]
 	if !ok || sessionInfo == nil {
+		data["primary_session_id"] = nil
+		data["primary_session_state"] = nil
 		return
 	}
 	data["primary_session_id"] = sessionInfo.ID
@@ -124,6 +147,8 @@ func (s *Service) addTaskSessionEventFields(ctx context.Context, taskID string, 
 	}
 	if sessionInfo.State != "" {
 		data["primary_session_state"] = string(sessionInfo.State)
+	} else {
+		data["primary_session_state"] = nil
 	}
 	if sessionInfo.ExecutorID != "" {
 		data["primary_executor_id"] = sessionInfo.ExecutorID
