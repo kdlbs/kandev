@@ -221,6 +221,10 @@ type InstanceConfig struct {
 	// keeps child processes alive when stdin closes (opencode acp).
 	RequiresProcessKill bool
 
+	// StripEnv lists environment variables to strip from the agent's child
+	// process environment entirely (not just set to empty).
+	StripEnv []string
+
 	// BaseBranches maps RepositoryName → base branch ref for per-repo diff
 	// stats. The empty key "" applies to the root / single-repo tracker.
 	// process.Manager reads this at construction and stamps each
@@ -382,6 +386,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.RequiresProcessKill {
 		cfg.RequiresProcessKill = true
 	}
+	if len(overrides.StripEnv) > 0 {
+		cfg.StripEnv = overrides.StripEnv
+	}
 	if len(overrides.BaseBranches) > 0 {
 		cfg.BaseBranches = overrides.BaseBranches
 	}
@@ -423,6 +430,7 @@ type InstanceOverrides struct {
 	AssumeMcpHttp          bool
 	McpMode                string
 	RequiresProcessKill    bool
+	StripEnv               []string
 	BaseBranches           map[string]string
 }
 

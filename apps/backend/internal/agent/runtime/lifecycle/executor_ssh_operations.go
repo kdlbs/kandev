@@ -559,6 +559,7 @@ func createRemoteAgentInstance(
 		McpServers:          req.McpServers,
 		McpMode:             req.McpMode,
 		RequiresProcessKill: requiresProcessKillFromReq(req),
+		StripEnv:            stripEnvFromReq(req),
 		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 	})
 	if err != nil {

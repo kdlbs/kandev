@@ -676,7 +676,7 @@ func (m *Manager) profileCLIFlagTokens(p *AgentProfileInfo) []string {
 // buildInteractiveStartRequest builds the InteractiveStartRequest for a passthrough session.
 // immediateStart overrides pt.WaitForTerminal when true (used for restart/resume where the
 // terminal WebSocket is already connected).
-func buildInteractiveStartRequest(sessionID string, execution *AgentExecution, pt agents.PassthroughConfig, env map[string]string, cmd agents.Command, immediateStart bool) process.InteractiveStartRequest {
+func buildInteractiveStartRequest(sessionID string, execution *AgentExecution, pt agents.PassthroughConfig, env map[string]string, cmd agents.Command, stripEnv []string, immediateStart bool) process.InteractiveStartRequest {
 	return process.InteractiveStartRequest{
 		SessionID: sessionID,
 		Command:   cmd.Args(),
@@ -685,6 +685,7 @@ func buildInteractiveStartRequest(sessionID string, execution *AgentExecution, p
 		LogCommand:      redactPassthroughArgs(cmd.Args()),
 		WorkingDir:      execution.WorkspacePath,
 		Env:             env,
+		StripEnv:        stripEnv,
 		PromptPattern:   pt.PromptPattern,
 		IdleTimeout:     pt.IdleTimeout,
 		BufferMaxBytes:  pt.BufferMaxBytes,
@@ -699,7 +700,7 @@ func buildInteractiveStartRequest(sessionID string, execution *AgentExecution, p
 
 // startInteractiveProcess launches the interactive PTY process for a passthrough session.
 // Returns the process info on success.
-func (m *Manager) startInteractiveProcess(ctx context.Context, execution *AgentExecution, pt agents.PassthroughConfig, env map[string]string, cmd agents.Command) (*process.InteractiveProcessInfo, error) {
+func (m *Manager) startInteractiveProcess(ctx context.Context, execution *AgentExecution, pt agents.PassthroughConfig, env map[string]string, cmd agents.Command, stripEnv []string) (*process.InteractiveProcessInfo, error) {
 	interactiveRunner := m.GetInteractiveRunner()
 	if interactiveRunner == nil {
 		return nil, fmt.Errorf("interactive runner not available for passthrough mode")
@@ -710,7 +711,7 @@ func (m *Manager) startInteractiveProcess(ctx context.Context, execution *AgentE
 	// WaitForTerminal agents deadlock: the frontend won't connect the terminal
 	// until the session leaves STARTING, but the process never starts without a resize.
 	// This matches ResumePassthroughSession and restartPassthroughProcess.
-	startReq := buildInteractiveStartRequest(execution.SessionID, execution, pt, env, cmd, true)
+	startReq := buildInteractiveStartRequest(execution.SessionID, execution, pt, env, cmd, stripEnv, true)
 
 	processInfo, err := interactiveRunner.Start(ctx, startReq)
 	if err != nil {
@@ -734,7 +735,7 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 
 	env := m.buildPassthroughEnv(ctx, execution, rt.RequiredEnv)
 
-	processInfo, err := m.startInteractiveProcess(ctx, execution, pt, env, cmd)
+	processInfo, err := m.startInteractiveProcess(ctx, execution, pt, env, cmd, rt.StripEnv)
 	if err != nil {
 		return err
 	}
@@ -882,7 +883,7 @@ func (m *Manager) restartPassthroughProcess(ctx context.Context, execution *Agen
 
 	// 3. Start new PTY process with ImmediateStart (terminal is already connected)
 	env := m.buildPassthroughEnv(ctx, execution, rt.RequiredEnv)
-	startReq := buildInteractiveStartRequest(execution.SessionID, execution, pt, env, cmd, true)
+	startReq := buildInteractiveStartRequest(execution.SessionID, execution, pt, env, cmd, rt.StripEnv, true)
 
 	processInfo, err := interactiveRunner.Start(ctx, startReq)
 	if err != nil {
@@ -957,7 +958,7 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 	// from the terminal will correct the dimensions. Without this, TUI apps that use
 	// WaitForTerminal would never start because the frontend may not send resizes
 	// to a process it doesn't know about yet.
-	startReq := buildInteractiveStartRequest(sessionID, execution, resolved.pt, env, cmd, true)
+	startReq := buildInteractiveStartRequest(sessionID, execution, resolved.pt, env, cmd, resolved.rt.StripEnv, true)
 
 	processInfo, err := interactiveRunner.Start(ctx, startReq)
 	if err != nil {
@@ -1228,7 +1229,7 @@ func (m *Manager) attemptResumeFallback(execution *AgentExecution, runner *proce
 	}
 
 	env := m.buildPassthroughEnv(ctx, execution, rt.RequiredEnv)
-	startReq := buildInteractiveStartRequest(sessionID, execution, pt, env, cmd, true)
+	startReq := buildInteractiveStartRequest(sessionID, execution, pt, env, cmd, rt.StripEnv, true)
 
 	processInfo, err := runner.Start(ctx, startReq)
 	if err != nil {
