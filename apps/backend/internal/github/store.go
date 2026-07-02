@@ -2203,13 +2203,15 @@ func validateWorkspaceScopePatch(req *UpdateWorkspaceSettingsRequest) error {
 		return nil
 	}
 	mode := normalizeRepoScopeMode(*req.RepoScopeMode)
-	if mode == RepoScopeModeAll && (req.RepoScopeOrgs != nil || req.RepoScopeRepos != nil) {
+	hasOrgs := req.RepoScopeOrgs != nil && len(*req.RepoScopeOrgs) > 0
+	hasRepos := req.RepoScopeRepos != nil && len(*req.RepoScopeRepos) > 0
+	if mode == RepoScopeModeAll && (hasOrgs || hasRepos) {
 		return fmt.Errorf("%w: repo_scope_mode all cannot be patched with repo scope filters", ErrWorkspaceSettingsValidation)
 	}
-	if mode == RepoScopeModeOrgs && req.RepoScopeRepos != nil {
+	if mode == RepoScopeModeOrgs && hasRepos {
 		return fmt.Errorf("%w: repo_scope_mode orgs cannot be patched with repo_scope_repos", ErrWorkspaceSettingsValidation)
 	}
-	if mode == RepoScopeModeRepos && req.RepoScopeOrgs != nil {
+	if mode == RepoScopeModeRepos && hasOrgs {
 		return fmt.Errorf("%w: repo_scope_mode repos cannot be patched with repo_scope_orgs", ErrWorkspaceSettingsValidation)
 	}
 	return nil

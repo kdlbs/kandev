@@ -253,7 +253,7 @@ function useWorkspaceDefaultQueryPresets(workspaceId: string | null) {
         }
       })
       .catch(() => {
-        if (!cancelled) setWorkspaceDefaults(null);
+        if (!cancelled) setWorkspaceDefaults(undefined);
       });
     return () => {
       cancelled = true;

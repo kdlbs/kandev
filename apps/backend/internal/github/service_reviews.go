@@ -223,6 +223,9 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 	if settingsErr != nil {
 		return nil, settingsErr
 	}
+	if len(watch.Repos) == 0 && workspaceSettingsHasEmptyScope(settings) {
+		return nil, nil
+	}
 	fetchWatch := *watch
 	if len(fetchWatch.Repos) == 0 {
 		fetchWatch.Repos = workspaceScopeRepoFilters(settings)

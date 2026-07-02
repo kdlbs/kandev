@@ -36,7 +36,7 @@ export function useIssueWatches(workspaceId?: string | null) {
   useEffect(() => {
     if (workspaceId === null) return;
     const scopeKey = workspaceId ?? "__all__";
-    if ((loaded || loading) && loadedScopeRef.current === scopeKey) return;
+    if (loadedScopeRef.current === scopeKey) return;
     let cancelled = false;
     loadedScopeRef.current = scopeKey;
     setIssueWatchesLoading(true);
@@ -56,7 +56,7 @@ export function useIssueWatches(workspaceId?: string | null) {
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, loaded, loading, setIssueWatches, setIssueWatchesLoading]);
+  }, [workspaceId, setIssueWatches, setIssueWatchesLoading]);
 
   const create = useCallback(
     async (req: CreateIssueWatchRequest) => {

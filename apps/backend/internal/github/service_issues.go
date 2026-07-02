@@ -196,6 +196,9 @@ func (s *Service) CheckIssueWatch(ctx context.Context, watch *IssueWatch) ([]*Is
 	if settingsErr != nil {
 		return nil, settingsErr
 	}
+	if len(watch.Repos) == 0 && workspaceSettingsHasEmptyScope(settings) {
+		return nil, nil
+	}
 	fetchWatch := *watch
 	if len(fetchWatch.Repos) == 0 {
 		fetchWatch.Repos = workspaceScopeRepoFilters(settings)

@@ -32,7 +32,7 @@ export function useReviewWatches(workspaceId?: string | null) {
   useEffect(() => {
     if (workspaceId === null) return;
     const scopeKey = workspaceId ?? "__all__";
-    if ((loaded || loading) && loadedScopeRef.current === scopeKey) return;
+    if (loadedScopeRef.current === scopeKey) return;
     let cancelled = false;
     loadedScopeRef.current = scopeKey;
     setReviewWatchesLoading(true);
@@ -52,7 +52,7 @@ export function useReviewWatches(workspaceId?: string | null) {
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, loaded, loading, setReviewWatches, setReviewWatchesLoading]);
+  }, [workspaceId, setReviewWatches, setReviewWatchesLoading]);
 
   const create = useCallback(
     async (req: CreateReviewWatchRequest) => {

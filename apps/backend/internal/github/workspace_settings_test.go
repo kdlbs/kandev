@@ -340,6 +340,46 @@ func TestService_CheckReviewWatch_AppliesWorkspaceRepoScope(t *testing.T) {
 	}
 }
 
+func TestService_CheckReviewWatch_EmptyWorkspaceScopeSkipsProviderFetch(t *testing.T) {
+	client := &countingReviewClient{MockClient: NewMockClient()}
+	client.AddPR(&PR{
+		RepoOwner:          "kdlbs",
+		RepoName:           "kandev",
+		Number:             1,
+		Title:              "hidden",
+		RequestedReviewers: []RequestedReviewer{{Login: "octo", Type: "user"}},
+	})
+	store := newTestStore(t)
+	svc := NewService(client, AuthMethodPAT, nil, store, nil, testLogger(t))
+	ctx := context.Background()
+
+	if err := svc.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{
+		WorkspaceID:    "ws-1",
+		RepoScopeMode:  RepoScopeModeRepos,
+		RepoScopeRepos: []RepoFilter{},
+	}); err != nil {
+		t.Fatalf("save workspace settings: %v", err)
+	}
+
+	prs, err := svc.CheckReviewWatch(ctx, &ReviewWatch{
+		ID:                  "watch-1",
+		WorkspaceID:         "ws-1",
+		Repos:               nil,
+		ReviewScope:         ReviewScopeUserAndTeams,
+		Enabled:             true,
+		PollIntervalSeconds: 300,
+	})
+	if err != nil {
+		t.Fatalf("check review watch: %v", err)
+	}
+	if len(prs) != 0 {
+		t.Fatalf("empty workspace scope should return no PRs, got %+v", prs)
+	}
+	if client.listReviewRequestedCalls != 0 {
+		t.Fatalf("expected no broad provider fetch, got %d calls", client.listReviewRequestedCalls)
+	}
+}
+
 func TestService_CheckIssueWatch_AppliesWorkspaceRepoScope(t *testing.T) {
 	client := &issueSearchClient{
 		issues: []*Issue{
@@ -374,9 +414,61 @@ func TestService_CheckIssueWatch_AppliesWorkspaceRepoScope(t *testing.T) {
 	}
 }
 
+func TestService_CheckIssueWatch_EmptyWorkspaceScopeSkipsProviderFetch(t *testing.T) {
+	client := &countingWorkspaceIssueClient{MockClient: NewMockClient()}
+	store := newTestStore(t)
+	svc := NewService(client, AuthMethodPAT, nil, store, nil, testLogger(t))
+	ctx := context.Background()
+
+	if err := svc.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{
+		WorkspaceID:   "ws-1",
+		RepoScopeMode: RepoScopeModeOrgs,
+		RepoScopeOrgs: []string{},
+	}); err != nil {
+		t.Fatalf("save workspace settings: %v", err)
+	}
+
+	issues, err := svc.CheckIssueWatch(ctx, &IssueWatch{
+		ID:                  "watch-1",
+		WorkspaceID:         "ws-1",
+		Repos:               nil,
+		Enabled:             true,
+		PollIntervalSeconds: 300,
+	})
+	if err != nil {
+		t.Fatalf("check issue watch: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("empty workspace scope should return no issues, got %+v", issues)
+	}
+	if client.listIssuesCalls != 0 {
+		t.Fatalf("expected no broad provider fetch, got %d calls", client.listIssuesCalls)
+	}
+}
+
 type issueSearchClient struct {
 	*MockClient
 	issues []*Issue
+}
+
+type countingReviewClient struct {
+	*MockClient
+	listReviewRequestedCalls int
+}
+
+func (c *countingReviewClient) ListReviewRequestedPRs(ctx context.Context, reviewScope, owner, repo string) ([]*PR, error) {
+	c.listReviewRequestedCalls++
+	return c.MockClient.ListReviewRequestedPRs(ctx, reviewScope, owner, repo)
+}
+
+type countingWorkspaceIssueClient struct {
+	*MockClient
+	listIssuesCalls int
+}
+
+func (c *countingWorkspaceIssueClient) ListIssues(context.Context, string, string) ([]*Issue, error) {
+	c.listIssuesCalls++
+	return []*Issue{{RepoOwner: "kdlbs", RepoName: "kandev", Number: 1, Title: "hidden"}}, nil
 }
 
 type capturingSearchClient struct {

@@ -189,4 +189,18 @@ describe("useDefaultQueryPresets workspace sync", () => {
 
     expect(updateGitHubWorkspaceSettings).not.toHaveBeenCalled();
   });
+
+  it("does not save or reset after workspace defaults fail to load", async () => {
+    vi.mocked(fetchGitHubWorkspaceSettings).mockRejectedValue(new Error("settings down"));
+    const { result } = renderHook(() => useDefaultQueryPresets(WORKSPACE_ID));
+
+    await waitFor(() => expect(fetchGitHubWorkspaceSettings).toHaveBeenCalled());
+
+    act(() => {
+      result.current.save({ pr: [preset], issue: [] });
+      result.current.reset();
+    });
+
+    expect(updateGitHubWorkspaceSettings).not.toHaveBeenCalled();
+  });
 });

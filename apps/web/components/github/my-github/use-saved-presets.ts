@@ -223,7 +223,7 @@ function useWorkspaceSavedPresets(workspaceId: string | null) {
         }
       })
       .catch(() => {
-        if (!cancelled) setWorkspacePresets([]);
+        if (!cancelled) setWorkspacePresets(undefined);
       });
     return () => {
       cancelled = true;

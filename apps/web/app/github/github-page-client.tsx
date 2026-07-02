@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "@/components/routing/app-link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { IconBrandGithub, IconMenu2 } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
@@ -197,7 +197,13 @@ function useResolvedQueryPresets(workspaceId: string | null = null) {
   return { pr, issue };
 }
 
-function useInitialSidebarSelection(workspaceId: string | null, resolvedPrPresets: PresetOption[]) {
+function useInitialSidebarSelection(
+  workspaceId: string | null,
+  resolvedPrPresets: PresetOption[],
+  autoResetSearchRef: MutableRefObject<boolean>,
+  setQueryImmediate: (query: string) => void,
+  setRepoFilter: (repo: string) => void,
+) {
   const userSelectedRef = useRef(false);
   const [selection, setSelection] = useState<SidebarSelection>(() => ({
     kind: "pr",
@@ -207,13 +213,16 @@ function useInitialSidebarSelection(workspaceId: string | null, resolvedPrPreset
 
   useEffect(() => {
     userSelectedRef.current = false;
+    autoResetSearchRef.current = true;
   }, [workspaceId]);
 
   useEffect(() => {
-    if (userSelectedRef.current) return;
+    if (userSelectedRef.current || !autoResetSearchRef.current) return;
     const first = resolvedPrPresets[0];
     setSelection({ kind: "pr", source: "preset", id: first?.value ?? "" });
-  }, [workspaceId, resolvedPrPresets]);
+    setQueryImmediate(first?.filter ?? "");
+    setRepoFilter("");
+  }, [workspaceId, resolvedPrPresets, autoResetSearchRef, setQueryImmediate, setRepoFilter]);
 
   const setUserSelection = useCallback((next: SidebarSelection) => {
     userSelectedRef.current = true;
@@ -242,6 +251,7 @@ function useSidebarSelectionHandler({
   setQueryImmediate,
   setRepoFilter,
   setUserSelection,
+  markSearchInteracted,
 }: {
   savedPresets: SavedPreset[];
   resolvedPrPresets: PresetOption[];
@@ -249,9 +259,11 @@ function useSidebarSelectionHandler({
   setQueryImmediate: (query: string) => void;
   setRepoFilter: (repo: string) => void;
   setUserSelection: (next: SidebarSelection) => void;
+  markSearchInteracted: () => void;
 }) {
   return useCallback(
     (s: SidebarSelection) => {
+      markSearchInteracted();
       setUserSelection(s);
       if (s.source === "saved") {
         const found = savedPresets.find((p) => p.id === s.id);
@@ -265,8 +277,40 @@ function useSidebarSelectionHandler({
       setQueryImmediate(preset?.filter ?? "");
       setRepoFilter("");
     },
-    [savedPresets, setQueryImmediate, resolvedPrPresets, resolvedIssuePresets, setUserSelection],
+    [
+      savedPresets,
+      setQueryImmediate,
+      resolvedPrPresets,
+      resolvedIssuePresets,
+      setUserSelection,
+      markSearchInteracted,
+    ],
   );
+}
+
+function useSearchInteractionControls(
+  setCustomQueryRaw: (query: string) => void,
+  setRepoFilterRaw: (repo: string) => void,
+) {
+  const autoResetSearchRef = useRef(true);
+  const markSearchInteracted = useCallback(() => {
+    autoResetSearchRef.current = false;
+  }, []);
+  const setCustomQuery = useCallback(
+    (query: string) => {
+      markSearchInteracted();
+      setCustomQueryRaw(query);
+    },
+    [markSearchInteracted, setCustomQueryRaw],
+  );
+  const setRepoFilter = useCallback(
+    (repo: string) => {
+      markSearchInteracted();
+      setRepoFilterRaw(repo);
+    },
+    [markSearchInteracted, setRepoFilterRaw],
+  );
+  return { autoResetSearchRef, markSearchInteracted, setCustomQuery, setRepoFilter };
 }
 
 function useGitHubPageState(workspaceId: string | null) {
@@ -275,12 +319,14 @@ function useGitHubPageState(workspaceId: string | null) {
   const {
     draft: customQuery,
     committed: committedQuery,
-    setDraft: setCustomQuery,
+    setDraft: setCustomQueryRaw,
     setImmediate: setQueryImmediate,
     commit: commitCustomQuery,
   } = useCommittedQuery(resolvedPrPresets[0]?.filter ?? "");
-  const [repoFilter, setRepoFilter] = useState("");
+  const [repoFilter, setRepoFilterRaw] = useState("");
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const { autoResetSearchRef, markSearchInteracted, setCustomQuery, setRepoFilter } =
+    useSearchInteractionControls(setCustomQueryRaw, setRepoFilterRaw);
   const {
     presets: savedPresets,
     save: saveSavedPreset,
@@ -289,6 +335,9 @@ function useGitHubPageState(workspaceId: string | null) {
   const { selection, setProgrammaticSelection, setUserSelection } = useInitialSidebarSelection(
     workspaceId,
     resolvedPrPresets,
+    autoResetSearchRef,
+    setQueryImmediate,
+    setRepoFilterRaw,
   );
 
   const presets = selection.kind === "pr" ? resolvedPrPresets : resolvedIssuePresets;
@@ -317,8 +366,9 @@ function useGitHubPageState(workspaceId: string | null) {
     resolvedPrPresets,
     resolvedIssuePresets,
     setQueryImmediate,
-    setRepoFilter,
+    setRepoFilter: setRepoFilterRaw,
     setUserSelection,
+    markSearchInteracted,
   });
 
   const canSaveCurrent = customQuery.trim().length > 0 || repoFilter.length > 0;
@@ -339,7 +389,7 @@ function useGitHubPageState(workspaceId: string | null) {
       );
       setProgrammaticSelection(fallback.selection);
       setQueryImmediate(fallback.filter);
-      setRepoFilter("");
+      setRepoFilterRaw("");
     }
   };
 
