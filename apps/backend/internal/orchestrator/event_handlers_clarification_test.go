@@ -15,9 +15,12 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-type zeroClarificationCanceller struct{}
+type zeroClarificationCanceller struct {
+	sessions []string
+}
 
-func (zeroClarificationCanceller) DetachSessionAndNotify(context.Context, string) int {
+func (c *zeroClarificationCanceller) DetachSessionAndNotify(_ context.Context, sessionID string) int {
+	c.sessions = append(c.sessions, sessionID)
 	return 0
 }
 
@@ -352,8 +355,9 @@ func TestPauseForClarificationInput_CancelsWhileSessionAlreadyWaiting(t *testing
 	}
 
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	canceller := &zeroClarificationCanceller{}
 	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
-	svc.SetClarificationCanceller(zeroClarificationCanceller{})
+	svc.SetClarificationCanceller(canceller)
 	svc.turnService = &repoBackedTurnService{repo: repo}
 
 	detached, err := svc.PauseForClarificationInput(ctx, "s1")
@@ -362,6 +366,9 @@ func TestPauseForClarificationInput_CancelsWhileSessionAlreadyWaiting(t *testing
 	}
 	if detached != 0 {
 		t.Fatalf("expected zero detached clarification bundles from zero canceller, got %d", detached)
+	}
+	if len(canceller.sessions) != 1 || canceller.sessions[0] != "s1" {
+		t.Fatalf("expected clarification detach for s1, got %#v", canceller.sessions)
 	}
 	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
 		t.Fatalf("waiting ask session must still cancel active agent, got %d calls", got)
@@ -383,8 +390,9 @@ func TestPauseForClarificationInput_IgnoresStaleTimeoutWithoutPendingClarificati
 	}
 
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	canceller := &zeroClarificationCanceller{}
 	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
-	svc.SetClarificationCanceller(zeroClarificationCanceller{})
+	svc.SetClarificationCanceller(canceller)
 	svc.turnService = &repoBackedTurnService{repo: repo}
 
 	detached, err := svc.PauseForClarificationInput(ctx, "s1")
@@ -393,6 +401,9 @@ func TestPauseForClarificationInput_IgnoresStaleTimeoutWithoutPendingClarificati
 	}
 	if detached != 0 {
 		t.Fatalf("expected no detached clarifications, got %d", detached)
+	}
+	if len(canceller.sessions) != 1 || canceller.sessions[0] != "s1" {
+		t.Fatalf("expected stale timeout to probe clarification detach for s1, got %#v", canceller.sessions)
 	}
 	if got := agentMgr.cancelAgentCalls.Load(); got != 0 {
 		t.Fatalf("stale timeout must not cancel a later turn, got %d calls", got)
