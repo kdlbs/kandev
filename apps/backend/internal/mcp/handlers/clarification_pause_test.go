@@ -95,6 +95,13 @@ func TestHandleAskUserQuestion_NoAnswerPausesSession(t *testing.T) {
 	require.NoError(t, repo.CreateTaskSession(ctx, sess))
 
 	store := clarification.NewStore(time.Minute)
+	waitEntered := make(chan struct{}, 1)
+	store.SetOnWaitEntered(func(_ string) {
+		select {
+		case waitEntered <- struct{}{}:
+		default:
+		}
+	})
 	pauser := &recordingClarificationInputPauser{}
 	h := NewHandlers(svc, nil, store, nil, nil, repo, repo, nil, nil, nil, nil, testLogger(t))
 	h.SetClarificationInputPauser(pauser)
@@ -121,9 +128,11 @@ func TestHandleAskUserQuestion_NoAnswerPausesSession(t *testing.T) {
 		}
 	}()
 
-	require.Eventually(t, func() bool {
-		return len(store.ListPending()) == 1
-	}, time.Second, 5*time.Millisecond)
+	select {
+	case <-waitEntered:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for clarification request to register")
+	}
 	cancel()
 
 	select {
