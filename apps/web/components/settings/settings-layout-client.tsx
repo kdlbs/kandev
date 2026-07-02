@@ -1,12 +1,14 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { usePathname } from "@/lib/routing/client-router";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { PageTopbar } from "@/components/page-topbar";
 import { useAppStore } from "@/components/state-provider";
 import { WorkspaceSwitcher } from "@/components/task/workspace-switcher";
-import { updateUserSettings } from "@/lib/api";
+import { createQueuedUserSettingsSync } from "@/lib/user-settings-sync";
+
+const WORKSPACE_SYNC_FAILED_KEY = "kandev:settings:integration-workspace:sync-failed:v1";
 
 // Brand/initialism overrides so the derived label matches how the rest of the
 // app spells these (e.g. "github" → "GitHub", not "Github"). Anything not
@@ -113,13 +115,20 @@ function IntegrationWorkspaceSwitcher() {
   const activeId = useAppStore((s) => s.workspaces.activeId);
   const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace);
   const selected = activeId ?? workspaces[0]?.id ?? null;
+  const persistWorkspace = useMemo(
+    () =>
+      createQueuedUserSettingsSync<string>(WORKSPACE_SYNC_FAILED_KEY, (workspaceId) => ({
+        workspace_id: workspaceId,
+      })),
+    [],
+  );
 
   const onSelect = useCallback(
     (workspaceId: string) => {
       setActiveWorkspace(workspaceId);
-      void updateUserSettings({ workspace_id: workspaceId }).catch(() => undefined);
+      void persistWorkspace(workspaceId);
     },
-    [setActiveWorkspace],
+    [persistWorkspace, setActiveWorkspace],
   );
 
   if (workspaces.length === 0) return null;
