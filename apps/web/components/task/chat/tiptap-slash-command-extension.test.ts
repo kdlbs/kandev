@@ -7,6 +7,7 @@ const SLOW_COMMAND_LABEL = "/slow";
 const SLOW_COMMAND_DESCRIPTION = "Run slowly";
 
 type SlashCommandNodeConfig = {
+  addAttributes: () => Record<string, { rendered?: boolean }>;
   parseHTML: () => Array<{
     tag: string;
     getAttrs?: (element: Element) => Record<string, unknown>;
@@ -21,6 +22,15 @@ type SlashCommandNodeConfig = {
 const config = SlashCommandNode.config as unknown as SlashCommandNodeConfig;
 
 describe("SlashCommandNode", () => {
+  it("keeps internal attrs out of default HTML rendering", () => {
+    expect(config.addAttributes()).toMatchObject({
+      id: { rendered: false },
+      label: { rendered: false },
+      commandName: { rendered: false },
+      description: { rendered: false },
+    });
+  });
+
   it("renders text from label when present", () => {
     expect(
       config.renderText({

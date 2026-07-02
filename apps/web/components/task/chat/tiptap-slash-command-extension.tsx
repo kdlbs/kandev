@@ -20,10 +20,10 @@ export const SlashCommandNode = Node.create({
 
   addAttributes() {
     return {
-      id: { default: null },
-      label: { default: null },
-      commandName: { default: null },
-      description: { default: null },
+      id: { default: null, rendered: false },
+      label: { default: null, rendered: false },
+      commandName: { default: null, rendered: false },
+      description: { default: null, rendered: false },
     };
   },
 
