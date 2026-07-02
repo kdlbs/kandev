@@ -6,7 +6,7 @@ import { useStore } from "zustand";
 import { isDebug, registerSessionTaskResolver } from "@/lib/debug/log";
 import type { AppState, StoreProviderProps } from "@/lib/state/store";
 import { createAppStore } from "@/lib/state/store";
-import { removeLocalStorage, setLocalStorage } from "@/lib/local-storage";
+import { setLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { clearQueuedTaskCreateLastUsedIfSynced } from "./task-create-dialog-handlers";
 
@@ -77,21 +77,9 @@ function syncTaskCreateLastUsedCache(state: AppState) {
 }
 
 function syncTaskCreateLastUsedCacheField(key: string, value: string | null | undefined) {
-  if (value) {
-    setLocalStorage(key, value);
-    return;
-  }
-  deferRemoveTaskCreateLastUsedCacheField(key);
-}
-
-function deferRemoveTaskCreateLastUsedCacheField(key: string) {
-  const cachedValue = window.localStorage.getItem(key);
-  if (cachedValue === null) return;
-  window.setTimeout(() => {
-    if (window.localStorage.getItem(key) === cachedValue) {
-      removeLocalStorage(key);
-    }
-  }, 0);
+  // A missing backend field is not a clear request; keep the browser fallback.
+  if (!value) return;
+  setLocalStorage(key, value);
 }
 
 function taskCreateLastUsedEqual(
