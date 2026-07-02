@@ -106,17 +106,29 @@ function useWorkspaceRepoScope(workspaceId: string | undefined) {
 
 function repoAllowedByScope(settings: GitHubWorkspaceSettings | null, owner: string, repo: string) {
   if (!settings || settings.repo_scope_mode === "all") return true;
+  const ownerLower = owner.trim().toLowerCase();
+  const repoLower = repo.trim().toLowerCase();
   if (settings.repo_scope_mode === "orgs") {
-    return (settings.repo_scope_orgs ?? []).includes(owner);
+    return (settings.repo_scope_orgs ?? []).some((allowed) => {
+      return allowed.trim().toLowerCase() === ownerLower;
+    });
   }
-  return (settings.repo_scope_repos ?? []).some(
-    (allowed) => allowed.owner === owner && allowed.name === repo,
-  );
+  return (settings.repo_scope_repos ?? []).some((allowed) => {
+    return (
+      allowed.owner.trim().toLowerCase() === ownerLower &&
+      allowed.name.trim().toLowerCase() === repoLower
+    );
+  });
 }
 
 function orgAllowedByScope(settings: GitHubWorkspaceSettings | null, org: string) {
   if (!settings || settings.repo_scope_mode === "all") return true;
-  if (settings.repo_scope_mode === "orgs") return (settings.repo_scope_orgs ?? []).includes(org);
+  const orgLower = org.trim().toLowerCase();
+  if (settings.repo_scope_mode === "orgs") {
+    return (settings.repo_scope_orgs ?? []).some((allowed) => {
+      return allowed.trim().toLowerCase() === orgLower;
+    });
+  }
   return false;
 }
 

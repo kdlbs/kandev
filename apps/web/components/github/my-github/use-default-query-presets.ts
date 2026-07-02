@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   PR_PRESETS as BUILTIN_PR_PRESETS,
   ISSUE_PRESETS as BUILTIN_ISSUE_PRESETS,
@@ -89,6 +89,16 @@ function readServerDefaults(value: unknown): StoredDefaults | null | undefined {
   return value as StoredDefaults;
 }
 
+async function readLegacyServerDefaults(): Promise<StoredDefaults | null> {
+  try {
+    const response = await fetchUserSettings({ cache: "no-store" });
+    const defaults = readServerDefaults(response.settings.github_default_query_presets);
+    return defaults === undefined ? null : defaults;
+  } catch {
+    return null;
+  }
+}
+
 const syncServer = createQueuedUserSettingsSync<StoredDefaults | null>(
   SYNC_FAILED_KEY,
   (defaults) => ({
@@ -156,8 +166,9 @@ export function __resetSnapshotForTests() {
   listeners.forEach((fn) => fn());
 }
 
-function useLegacyDefaultQueryPresetSync() {
+function useLegacyDefaultQueryPresetSync(enabled: boolean) {
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     const initialKey = snapshotKey(getSnapshot());
     fetchUserSettings({ cache: "no-store" })
@@ -182,28 +193,38 @@ function useLegacyDefaultQueryPresetSync() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [enabled]);
 }
 
 function useWorkspaceDefaultQueryPresets(workspaceId: string | null) {
   const [workspaceDefaults, setWorkspaceDefaults] = useState<StoredDefaults | null | undefined>(
     undefined,
   );
+  const writeSeq = useRef(0);
   useEffect(() => {
     if (!workspaceId) {
       setWorkspaceDefaults(undefined);
       return;
     }
     let cancelled = false;
+    const seq = writeSeq.current;
     setWorkspaceDefaults(undefined);
     fetchGitHubWorkspaceSettings(workspaceId)
-      .then((settings) => {
-        if (cancelled) return;
+      .then(async (settings) => {
+        if (cancelled || seq !== writeSeq.current) return;
         const defaults = readServerDefaults(settings.default_query_presets);
-        const local = getSnapshot();
-        if (defaults === null && local !== null && !hasMigratedToWorkspace(workspaceId)) {
+        let local = getSnapshot();
+        if (local === null) {
+          local = await readLegacyServerDefaults();
+        }
+        if (cancelled || seq !== writeSeq.current) return;
+        if (
+          (defaults === null || defaults === undefined) &&
+          local !== null &&
+          !hasMigratedToWorkspace(workspaceId)
+        ) {
           setWorkspaceDefaults(local);
-          void updateGitHubWorkspaceSettings({
+          await updateGitHubWorkspaceSettings({
             workspace_id: workspaceId,
             default_query_presets: local,
           });
@@ -220,13 +241,17 @@ function useWorkspaceDefaultQueryPresets(workspaceId: string | null) {
       cancelled = true;
     };
   }, [workspaceId]);
-  return { workspaceDefaults, setWorkspaceDefaults };
+  const setWorkspaceDefaultsFromLocal = useCallback((next: StoredDefaults | null) => {
+    writeSeq.current += 1;
+    setWorkspaceDefaults(next);
+  }, []);
+  return { workspaceDefaults, setWorkspaceDefaults: setWorkspaceDefaultsFromLocal };
 }
 
 export function useDefaultQueryPresets(workspaceId: string | null = null) {
   const stored = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const { workspaceDefaults, setWorkspaceDefaults } = useWorkspaceDefaultQueryPresets(workspaceId);
-  useLegacyDefaultQueryPresetSync();
+  useLegacyDefaultQueryPresetSync(!workspaceId);
   const effectiveStored = workspaceId ? workspaceDefaults : stored;
   const prPresets = useMemo(
     () => effectiveStored?.pr ?? toStored(BUILTIN_PR_PRESETS),
@@ -244,8 +269,7 @@ export function useDefaultQueryPresets(workspaceId: string | null = null) {
         void updateGitHubWorkspaceSettings({
           workspace_id: workspaceId,
           default_query_presets: defaults,
-        });
-        markMigratedToWorkspace(workspaceId);
+        }).then(() => markMigratedToWorkspace(workspaceId));
         return;
       }
       publish(defaults);
@@ -261,8 +285,7 @@ export function useDefaultQueryPresets(workspaceId: string | null = null) {
       void updateGitHubWorkspaceSettings({
         workspace_id: workspaceId,
         default_query_presets: null,
-      });
-      markMigratedToWorkspace(workspaceId);
+      }).then(() => markMigratedToWorkspace(workspaceId));
       return;
     }
     publish(null);

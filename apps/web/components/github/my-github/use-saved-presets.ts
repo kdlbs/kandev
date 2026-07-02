@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { fetchUserSettings } from "@/lib/api/domains/settings-api";
 import {
   fetchGitHubWorkspaceSettings,
@@ -91,6 +91,15 @@ function readServerPresets(value: unknown): SavedPreset[] | null {
   );
 }
 
+async function readLegacyServerPresets(): Promise<SavedPreset[]> {
+  try {
+    const response = await fetchUserSettings({ cache: "no-store" });
+    return readServerPresets(response.settings.github_saved_presets) ?? [];
+  } catch {
+    return [];
+  }
+}
+
 const syncServer = createQueuedUserSettingsSync<SavedPreset[]>(SYNC_FAILED_KEY, (next) => ({
   github_saved_presets: next,
 }));
@@ -132,8 +141,9 @@ export function __resetSnapshotForTests() {
   for (const l of listeners) l();
 }
 
-function useLegacySavedPresetsSync() {
+function useLegacySavedPresetsSync(enabled: boolean) {
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     const initialKey = snapshotKey(readStorage());
     fetchUserSettings({ cache: "no-store" })
@@ -158,30 +168,36 @@ function useLegacySavedPresetsSync() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [enabled]);
 }
 
 function useWorkspaceSavedPresets(workspaceId: string | null) {
   const [workspacePresets, setWorkspacePresets] = useState<SavedPreset[] | undefined>(undefined);
+  const writeSeq = useRef(0);
   useEffect(() => {
     if (!workspaceId) {
       setWorkspacePresets(undefined);
       return;
     }
     let cancelled = false;
+    const seq = writeSeq.current;
     setWorkspacePresets(undefined);
     fetchGitHubWorkspaceSettings(workspaceId)
-      .then((settings) => {
-        if (cancelled) return;
+      .then(async (settings) => {
+        if (cancelled || seq !== writeSeq.current) return;
         const serverPresets = readServerPresets(settings.saved_presets) ?? [];
-        const local = readStorage();
+        let local = readStorage();
+        if (local.length === 0) {
+          local = await readLegacyServerPresets();
+        }
+        if (cancelled || seq !== writeSeq.current) return;
         if (
           serverPresets.length === 0 &&
           local.length > 0 &&
           !hasMigratedToWorkspace(workspaceId)
         ) {
           setWorkspacePresets(local);
-          void updateGitHubWorkspaceSettings({
+          await updateGitHubWorkspaceSettings({
             workspace_id: workspaceId,
             saved_presets: local,
           });
@@ -198,13 +214,17 @@ function useWorkspaceSavedPresets(workspaceId: string | null) {
       cancelled = true;
     };
   }, [workspaceId]);
-  return { workspacePresets, setWorkspacePresets };
+  const setWorkspacePresetsFromLocal = useCallback((next: SavedPreset[]) => {
+    writeSeq.current += 1;
+    setWorkspacePresets(next);
+  }, []);
+  return { workspacePresets, setWorkspacePresets: setWorkspacePresetsFromLocal };
 }
 
 export function useSavedPresets(workspaceId: string | null = null) {
   const presets = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const { workspacePresets, setWorkspacePresets } = useWorkspaceSavedPresets(workspaceId);
-  useLegacySavedPresetsSync();
+  useLegacySavedPresetsSync(!workspaceId);
   const activePresets = workspaceId ? (workspacePresets ?? []) : presets;
 
   const save = useCallback(
@@ -220,8 +240,7 @@ export function useSavedPresets(workspaceId: string | null = null) {
         void updateGitHubWorkspaceSettings({
           workspace_id: workspaceId,
           saved_presets: next,
-        });
-        markMigratedToWorkspace(workspaceId);
+        }).then(() => markMigratedToWorkspace(workspaceId));
         return preset;
       }
       publish(next);
@@ -240,8 +259,7 @@ export function useSavedPresets(workspaceId: string | null = null) {
         void updateGitHubWorkspaceSettings({
           workspace_id: workspaceId,
           saved_presets: next,
-        });
-        markMigratedToWorkspace(workspaceId);
+        }).then(() => markMigratedToWorkspace(workspaceId));
         return;
       }
       publish(next);

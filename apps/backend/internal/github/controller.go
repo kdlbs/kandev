@@ -882,7 +882,11 @@ func (c *Controller) httpUpdateWorkspaceSettings(ctx *gin.Context) {
 	}
 	settings, err := c.service.UpdateWorkspaceSettings(ctx.Request.Context(), &req)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		if errors.Is(err, ErrWorkspaceSettingsValidation) {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
 		return
 	}
 	ctx.JSON(http.StatusOK, settings)
