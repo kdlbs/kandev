@@ -15,6 +15,12 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+type zeroClarificationCanceller struct{}
+
+func (zeroClarificationCanceller) DetachSessionAndNotify(context.Context, string) int {
+	return 0
+}
+
 func TestHandleClarificationAnswered(t *testing.T) {
 	ctx := context.Background()
 
@@ -303,9 +309,6 @@ func TestPauseForClarificationInput_SilentlyCancelsTurnWithoutWorkflowTransition
 	if _, err := svc.PauseForClarificationInput(ctx, "s1"); err != nil {
 		t.Fatalf("pause clarification input: %v", err)
 	}
-	if _, err := svc.PauseForClarificationInput(ctx, "s1"); err != nil {
-		t.Fatalf("repeat pause clarification input: %v", err)
-	}
 
 	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
 		t.Fatalf("expected silent cancel call, got %d", got)
@@ -331,6 +334,52 @@ func TestPauseForClarificationInput_SilentlyCancelsTurnWithoutWorkflowTransition
 		t.Fatalf("get active turn: %v", err)
 	} else if turn != nil {
 		t.Fatalf("expected active turn to be completed, got %#v", turn)
+	}
+}
+
+func TestPauseForClarificationInput_CancelsWhileSessionAlreadyWaiting(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+	seedPendingClarificationMessage(t, repo, "t1", "s1")
+	if err := repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateWaitingForInput, ""); err != nil {
+		t.Fatalf("set waiting state: %v", err)
+	}
+
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
+	svc.SetClarificationCanceller(zeroClarificationCanceller{})
+	svc.turnService = &repoBackedTurnService{repo: repo}
+
+	if _, err := svc.PauseForClarificationInput(ctx, "s1"); err != nil {
+		t.Fatalf("pause clarification input: %v", err)
+	}
+	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
+		t.Fatalf("waiting ask session must still cancel active agent, got %d calls", got)
+	}
+}
+
+func TestPauseForClarificationInput_IgnoresStaleTimeoutWithoutPendingClarification(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
+	svc.SetClarificationCanceller(zeroClarificationCanceller{})
+	svc.turnService = &repoBackedTurnService{repo: repo}
+
+	detached, err := svc.PauseForClarificationInput(ctx, "s1")
+	if err != nil {
+		t.Fatalf("pause stale clarification input: %v", err)
+	}
+	if detached != 0 {
+		t.Fatalf("expected no detached clarifications, got %d", detached)
+	}
+	if got := agentMgr.cancelAgentCalls.Load(); got != 0 {
+		t.Fatalf("stale timeout must not cancel a later turn, got %d calls", got)
 	}
 }
 

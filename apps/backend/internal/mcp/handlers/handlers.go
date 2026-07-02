@@ -2542,8 +2542,18 @@ func (h *Handlers) handleClarificationTimeout(ctx context.Context, msg *ws.Messa
 	if h.inputPauser != nil {
 		cancelled, err := h.inputPauser.PauseForClarificationInput(context.WithoutCancel(ctx), req.SessionID)
 		if err != nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
-				"failed to pause session for clarification input: "+err.Error(), nil)
+			h.logger.Warn("failed to pause session after clarification timeout",
+				zap.String("session_id", req.SessionID),
+				zap.Error(err))
+			if h.sessionCanceller == nil {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+					"failed to pause session for clarification input", nil)
+			}
+			cancelled = h.sessionCanceller.DetachSessionAndNotify(context.WithoutCancel(ctx), req.SessionID)
+			h.logger.Info("detached clarification waiters after pause failure",
+				zap.String("session_id", req.SessionID),
+				zap.Int("count", cancelled))
+			return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"ok": true, "cancelled": cancelled, "paused": false})
 		}
 		h.logger.Info("paused session after agent MCP clarification timeout",
 			zap.String("session_id", req.SessionID),

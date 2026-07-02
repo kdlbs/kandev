@@ -299,18 +299,25 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 	if err != nil {
 		return 0, fmt.Errorf("load session for clarification pause: %w", err)
 	}
-	if session == nil || isTerminalSessionState(session.State) {
+	if session == nil {
 		return 0, nil
 	}
 
+	hasPendingClarification := s.sessionHasPendingClarification(writeCtx, sessionID)
 	detached := 0
 	if s.clarificationCanceller != nil {
 		detached = s.clarificationCanceller.DetachSessionAndNotify(writeCtx, sessionID)
 	}
-	if session.State == models.TaskSessionStateWaitingForInput {
-		s.completeTurnForSession(writeCtx, sessionID)
+	if _, has := models.LoadPendingStepSignal(session.Metadata); has {
+		s.clearPendingStepSignal(writeCtx, session)
+	}
+	if isTerminalSessionState(session.State) {
 		return detached, nil
 	}
+	if !hasPendingClarification && detached == 0 {
+		return detached, nil
+	}
+
 	// The backend wait path and agentctl timeout notification can race for the
 	// same ask_user_question call. A duplicate cancel is safe: lifecycle returns
 	// ErrCancelEscalated/ErrNoExecutionForSession once the first pause wins, and

@@ -36,6 +36,11 @@ func (s *Service) turnCompleteBlockedByUserInput(ctx context.Context, taskID, se
 	s.logger.Info("deferring on_turn_complete while clarification is pending",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID))
+	if session != nil {
+		if _, has := models.LoadPendingStepSignal(session.Metadata); has {
+			s.clearPendingStepSignal(ctx, session)
+		}
+	}
 	s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 	return true
 }

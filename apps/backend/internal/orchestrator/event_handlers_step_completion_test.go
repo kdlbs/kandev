@@ -170,6 +170,10 @@ func TestProcessOnTurnCompleteViaEngine_BlocksWhileClarificationPendingEvenWithS
 	if got := svc.processOnTurnCompleteViaEngine(ctx, "t1", session); got {
 		t.Fatal("pending clarification must block engine on_turn_complete transition even with completion signal")
 	}
+	session, _ = repo.GetTaskSession(ctx, "s1")
+	if _, has := models.LoadPendingStepSignal(session.Metadata); has {
+		t.Fatal("pending clarification must clear stale completion signal")
+	}
 	updated, _ := repo.GetTask(ctx, "t1")
 	if updated.WorkflowStepID != "step1" {
 		t.Fatalf("expected workflow step to remain step1, got %q", updated.WorkflowStepID)

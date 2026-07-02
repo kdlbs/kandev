@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -24,6 +25,16 @@ func (p *recordingClarificationInputPauser) PauseForClarificationInput(_ context
 	return p.count, p.err
 }
 
+type recordingSessionCanceller struct {
+	sessions []string
+	count    int
+}
+
+func (c *recordingSessionCanceller) DetachSessionAndNotify(_ context.Context, sessionID string) int {
+	c.sessions = append(c.sessions, sessionID)
+	return c.count
+}
+
 func TestHandleClarificationTimeout_UsesHardPauser(t *testing.T) {
 	pauser := &recordingClarificationInputPauser{count: 2}
 	h := &Handlers{logger: testLogger(t).WithFields()}
@@ -39,6 +50,27 @@ func TestHandleClarificationTimeout_UsesHardPauser(t *testing.T) {
 	require.Equal(t, true, payload["ok"])
 	require.Equal(t, true, payload["paused"])
 	require.Equal(t, float64(2), payload["cancelled"])
+}
+
+func TestHandleClarificationTimeout_FallsBackWhenHardPauseFails(t *testing.T) {
+	pauser := &recordingClarificationInputPauser{err: errors.New("db unavailable")}
+	canceller := &recordingSessionCanceller{count: 3}
+	h := &Handlers{logger: testLogger(t).WithFields(), sessionCanceller: canceller}
+	h.SetClarificationInputPauser(pauser)
+
+	msg := makeWSMessage(t, ws.ActionMCPClarificationTimeout, map[string]interface{}{"session_id": "s1"})
+	resp, err := h.handleClarificationTimeout(context.Background(), msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	require.Equal(t, []string{"s1"}, pauser.sessions)
+	require.Equal(t, []string{"s1"}, canceller.sessions)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	require.Equal(t, true, payload["ok"])
+	require.Equal(t, false, payload["paused"])
+	require.Equal(t, float64(3), payload["cancelled"])
+	require.NotContains(t, string(resp.Payload), "db unavailable")
 }
 
 func TestHandleAskUserQuestion_NoAnswerPausesSession(t *testing.T) {
