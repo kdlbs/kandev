@@ -338,6 +338,119 @@ func TestEnsureSessionRunning_WaitsForPromptReadyAfterResume(t *testing.T) {
 	}
 }
 
+// TestEnsureSessionRunning_SurvivesCallerContextCancellationDuringResume
+// pins down the fix for the "context deadline exceeded" stuck-session bug
+// (kdlbs/kandev#1578): the resume call inside ensureSessionRunning is
+// deliberately shielded from the caller's context via
+// context.WithoutCancel (its own comment explains why: a WebSocket/MCP
+// request deadline shouldn't abort an in-flight resume). Before the fix,
+// waitForSessionReady/waitForAgentPromptReady right after the resume still
+// used the original (cancelable) ctx, so cancelling the caller's context
+// mid-resume killed the wait immediately with a misleading
+// "context deadline exceeded" even though the agent was about to become
+// ready. This test cancels ctx once the resume is underway (after
+// LaunchAgent fires) and asserts ensureSessionRunning still succeeds once
+// the agent reports ready shortly after, exactly as a real resume would.
+func TestEnsureSessionRunning_SurvivesCallerContextCancellationDuringResume(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	repo := setupTestRepo(t)
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateIdle)
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentExecutionID = "exec-idle-1"
+	session.AgentProfileID = "profile1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-idle-1")
+
+	launched := make(chan struct{}, 1)
+	ready := make(chan struct{})
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         false,
+		repoForExecutionLookup: repo,
+		isAgentReadyFn: func(_ context.Context, _ string) bool {
+			select {
+			case <-ready:
+				return true
+			default:
+				return false
+			}
+		},
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			select {
+			case launched <- struct{}{}:
+			default:
+			}
+			go func(sessID string) {
+				tick := time.NewTicker(5 * time.Millisecond)
+				defer tick.Stop()
+				timeout := time.After(5 * time.Second)
+				for {
+					select {
+					case <-tick.C:
+						sess, err := repo.GetTaskSession(context.Background(), sessID)
+						if err == nil && sess != nil && sess.State == models.TaskSessionStateStarting {
+							sess.State = models.TaskSessionStateWaitingForInput
+							sess.UpdatedAt = time.Now().UTC()
+							_ = repo.UpdateTaskSession(context.Background(), sess)
+							return
+						}
+					case <-timeout:
+						return
+					}
+				}
+			}(req.SessionID)
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-resumed-1"}, nil
+		},
+	}
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID:    "task1",
+		Title: "Test Task",
+		State: v1.TaskStateInProgress,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	session, err = repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.ensureSessionRunning(ctx, "session1", session)
+	}()
+
+	// Simulate the caller's request context expiring mid-resume (e.g. a
+	// WebSocket handler timeout or an MCP tool-call deadline) — this must
+	// NOT abort the resume/ready-wait, since the resume path routes through
+	// context.WithoutCancel internally.
+	select {
+	case <-launched:
+	case <-time.After(3 * time.Second):
+		t.Fatal("expected ResumeSession to call LaunchAgent")
+	}
+	cancel()
+
+	// The agent becomes ready shortly after the caller's context is gone.
+	close(ready)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("ensureSessionRunning must survive caller context cancellation mid-resume, got: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ensureSessionRunning did not return after prompt readiness")
+	}
+}
+
 func TestEnsureSessionRunning_WaitsForPromptReadyWhenExecutionExists(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
