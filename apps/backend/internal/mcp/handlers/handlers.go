@@ -47,7 +47,8 @@ type SessionCanceller interface {
 }
 
 // ClarificationInputPauser performs the orchestrator-owned hard pause for
-// ask_user_question calls that end without an answer.
+// ask_user_question calls that end without an answer. The returned int is the
+// number of clarification bundles detached while pausing.
 type ClarificationInputPauser interface {
 	PauseForClarificationInput(ctx context.Context, sessionID string) (int, error)
 }

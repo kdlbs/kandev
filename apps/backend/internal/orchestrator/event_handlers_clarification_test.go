@@ -306,8 +306,12 @@ func TestPauseForClarificationInput_SilentlyCancelsTurnWithoutWorkflowTransition
 	svc.SetClarificationCanceller(canceller)
 	svc.turnService = &repoBackedTurnService{repo: repo}
 
-	if _, err := svc.PauseForClarificationInput(ctx, "s1"); err != nil {
+	detached, err := svc.PauseForClarificationInput(ctx, "s1")
+	if err != nil {
 		t.Fatalf("pause clarification input: %v", err)
+	}
+	if detached != 1 {
+		t.Fatalf("expected one detached clarification bundle, got %d", detached)
 	}
 
 	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {

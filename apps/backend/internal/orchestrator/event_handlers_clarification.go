@@ -288,7 +288,8 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 // PauseForClarificationInput converts a no-answer ask_user_question outcome
 // into a platform pause. It detaches the pending clarification so a late user
 // answer resumes through the event fallback path, then silently cancels the
-// active agent turn without evaluating workflow turn-complete actions.
+// active agent turn without evaluating workflow turn-complete actions. It
+// returns the number of clarification bundles detached.
 func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID string) (int, error) {
 	if sessionID == "" {
 		return 0, fmt.Errorf("session_id is required")
