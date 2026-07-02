@@ -5,10 +5,15 @@ export type ShellInputFrame = {
   data: string;
 };
 
+export type AvailableCommandsFrame = {
+  sessionId: string;
+  count: number;
+};
+
 type ParsedFrame = {
   type?: string;
   action?: string;
-  payload?: { session_id?: string; data?: string };
+  payload?: { session_id?: string; data?: string; available_commands?: unknown[] };
 };
 
 /**
@@ -81,6 +86,34 @@ export function attachShellInputCapture(page: Page): { frames: ShellInputFrame[]
       }
       const decoded = decodeBinaryFrame(payload);
       if (decoded) frames.push({ sessionId: "", data: decoded });
+    });
+  });
+  return { frames };
+}
+
+/**
+ * Subscribe to incoming WS frames and collect every session.available_commands
+ * update. Call before navigation so tests do not miss eager agent-init frames.
+ */
+export function attachAvailableCommandsCapture(page: Page): {
+  frames: AvailableCommandsFrame[];
+} {
+  const frames: AvailableCommandsFrame[] = [];
+  page.on("websocket", (ws) => {
+    ws.on("framereceived", (event) => {
+      const payload = event.payload;
+      if (typeof payload !== "string" || !payload.includes('"session.available_commands"')) return;
+      try {
+        const msg = JSON.parse(payload) as ParsedFrame;
+        if (msg.action !== "session.available_commands") return;
+        const sessionId = msg.payload?.session_id;
+        const commands = msg.payload?.available_commands;
+        if (typeof sessionId === "string" && Array.isArray(commands)) {
+          frames.push({ sessionId, count: commands.length });
+        }
+      } catch {
+        /* non-JSON string frames — ignore */
+      }
     });
   });
   return { frames };
