@@ -188,6 +188,15 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
     expect(screen.getByTestId(OFFICE_WORKSPACE_ITEM).textContent).toContain("Office");
   });
 
+  it("renders the trigger as an obvious selector", () => {
+    render(<AppSidebarWorkspacePicker />);
+
+    const trigger = screen.getByTestId("sidebar-workspace-trigger");
+    expect(trigger).toHaveAttribute("aria-label", "Switch workspace");
+    expect(trigger.textContent).toContain("Default Workspace");
+    expect(screen.getByTestId("sidebar-workspace-trigger-chevron")).not.toBeNull();
+  });
+
   it("routes to the active kanban workspace home when office routing is enabled", () => {
     storeState.features.office = true;
     render(<AppSidebarWorkspacePicker />);
