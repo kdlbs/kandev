@@ -45,6 +45,16 @@ func isContainerizedExecutor(executorType string) bool {
 	}
 }
 
+// executorNeedsResolvedCredentials reports whether an executor runs the agent
+// off the control-plane host and therefore needs credentials resolved into
+// req.Env (rather than inherited from the kandev process environment). This is
+// every containerized executor plus SSH, whose remote agentctl only receives
+// the credential keys we forward in req.Env.
+func executorNeedsResolvedCredentials(executorType string) bool {
+	return isContainerizedExecutor(executorType) ||
+		models.ExecutorType(executorType) == models.ExecutorTypeSSH
+}
+
 // runAgentProcessAsync starts the agent subprocess in a background goroutine.
 // On error it marks the session as FAILED. The task is also marked FAILED only
 // when escalateTaskOnFailure is true; resume callers pass false so a transient
@@ -776,12 +786,17 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		}
 	}
 
-	// For containerized executors, resolve credentials in this order:
+	// For remote executors (containerized *and* SSH), resolve credentials into
+	// req.Env in this order:
 	// 1. Profile remote_auth_secrets (e.g., gh_cli_env method with secret)
 	// 2. Profile remote_credentials with gh_cli_token (extract from local gh CLI)
 	// 3. Global GITHUB_TOKEN secret (fallback)
 	// 4. Auto-extract from local gh CLI (final fallback)
-	if isContainerizedExecutor(execConfig.ExecutorType) {
+	// SSH is included so env-authenticated agents (e.g. claude-acp reading
+	// CLAUDE_CODE_OAUTH_TOKEN) and remote git get their credentials from the
+	// configured profile/secret store rather than from a blanket forward of the
+	// control-plane process env — the SSH executor only forwards req.Env keys.
+	if executorNeedsResolvedCredentials(execConfig.ExecutorType) {
 		e.applyContainerCredentials(ctx, req, metadata)
 	}
 

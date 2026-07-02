@@ -1297,10 +1297,19 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 
 	// ResumeSession launches the agent asynchronously. Wait for it to finish
 	// initializing before returning, so the caller can send a prompt immediately.
-	if err := s.waitForSessionReady(ctx, sessionID); err != nil {
+	//
+	// Use resumeCtx (context.WithoutCancel) here too, not the original ctx: the
+	// resume itself is already shielded from the caller's request deadline (see
+	// comment above), but a short-lived caller context (WebSocket request,
+	// MCP tool-call timeout, etc.) would otherwise still abort these polling
+	// waits early with a misleading "context deadline exceeded" even though the
+	// resume is progressing fine in the background and would succeed within its
+	// own bounded timeouts (waitForSessionReady's 90s, waitForAgentPromptReady's
+	// 30s below).
+	if err := s.waitForSessionReady(resumeCtx, sessionID); err != nil {
 		return fmt.Errorf("session not ready after resume: %w", err)
 	}
-	if err := s.waitForAgentPromptReady(ctx, sessionID); err != nil {
+	if err := s.waitForAgentPromptReady(resumeCtx, sessionID); err != nil {
 		return fmt.Errorf("agent not ready after resume: %w", err)
 	}
 
@@ -1357,10 +1366,13 @@ func (s *Service) startAgentOnPreparedWorkspace(ctx context.Context, sessionID s
 		return fmt.Errorf("failed to start agent on prepared workspace: %w", err)
 	}
 
-	if err := s.waitForSessionReady(ctx, sessionID); err != nil {
+	// Same reasoning as ensureSessionRunning's resume path: use launchCtx
+	// (already WithoutCancel'd for the launch call above) so a short-lived
+	// caller context doesn't abort these polling waits early.
+	if err := s.waitForSessionReady(launchCtx, sessionID); err != nil {
 		return fmt.Errorf("session not ready after starting agent: %w", err)
 	}
-	if err := s.waitForAgentPromptReady(ctx, sessionID); err != nil {
+	if err := s.waitForAgentPromptReady(launchCtx, sessionID); err != nil {
 		return fmt.Errorf("agent not ready after starting agent: %w", err)
 	}
 	s.logger.Debug("agent started on prepared workspace and ready for prompt")

@@ -486,7 +486,11 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 			// SSH executor would otherwise fail with "host (or host_alias) is
 			// required in executor config" when opening a terminal or restoring
 			// the workspace. Existing values (from the running record) win.
-			mergeExecutorConfigMetadata(info, exec.Config)
+			// Scoped to SSH: this fallback only makes sense for the SSH executor
+			// and the projected keys are SSH connection/profile keys.
+			if exec.Type == models.ExecutorTypeSSH {
+				mergeExecutorConfigMetadata(info, exec.Config)
+			}
 		}
 	}
 
@@ -595,21 +599,21 @@ func ensureWorkspaceMetadata(info *lifecycle.WorkspaceInfo) map[string]interface
 	return info.Metadata
 }
 
-// mergeExecutorConfigMetadata projects an executor record's persistent config
-// keys (e.g. ssh_host, ssh_host_fingerprint, ssh_user) into the workspace
-// metadata WITHOUT overwriting values already present — a live ExecutorRunning
-// record carries authoritative per-session values (remote dirs/ports) and must
-// win. This is the fallback that lets terminal-state SSH sessions open a
-// terminal / restore the workspace when no running record exists.
+// mergeExecutorConfigMetadata projects an SSH executor record's stable
+// connection/profile config keys (e.g. ssh_host, ssh_host_alias,
+// ssh_host_fingerprint, ssh_user) into the workspace metadata WITHOUT
+// overwriting values already present — a live ExecutorRunning record carries
+// authoritative per-session values (remote dirs/ports) and must win. This is
+// the fallback that lets terminal-state SSH sessions open a terminal / restore
+// the workspace when no running record exists.
+//
+// It filters through lifecycle.FilterSSHWorkspaceFallbackConfig rather than the
+// general persistent-metadata allowlist so that (a) alias-only executors
+// (ssh_host_alias, no ssh_host) are preserved, and (b) session-scoped runtime
+// keys (remote agentctl port/PID/session dir) can never be projected — those
+// would make a restore reattach to a stale/dead remote instance.
 func mergeExecutorConfigMetadata(info *lifecycle.WorkspaceInfo, config map[string]string) {
-	if len(config) == 0 {
-		return
-	}
-	asAny := make(map[string]interface{}, len(config))
-	for k, v := range config {
-		asAny[k] = v
-	}
-	filtered := lifecycle.FilterPersistentMetadata(asAny)
+	filtered := lifecycle.FilterSSHWorkspaceFallbackConfig(config)
 	if filtered == nil {
 		return
 	}

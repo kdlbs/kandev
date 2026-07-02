@@ -55,7 +55,18 @@ func validateRuntimeBundle(dir, source string) (runtimeBundle, error) {
 			return runtimeBundle{}, fmt.Errorf("%s not found in bundle at %s", helper.Label, path)
 		}
 		if helper.MustBeSigned {
-			if signed, ok := machoHasCodeSignature(path); ok && !signed {
+			signed, ok := machoHasCodeSignature(path)
+			if !ok {
+				// Fail closed: a helper we can't parse as a thin arm64 Mach-O
+				// (read error, truncation, unexpected/fat layout) can't be
+				// verified as signed, and an unverifiable darwin/arm64 helper
+				// would still be SIGKILLed by Apple Silicon at launch.
+				return runtimeBundle{}, fmt.Errorf(
+					"%s at %s is not a parsable thin darwin/arm64 Mach-O; cannot verify its "+
+						"code signature (rebuild it via 'make -C apps/backend build-agentctl-remote')",
+					helper.Label, path)
+			}
+			if !signed {
 				return runtimeBundle{}, fmt.Errorf(
 					"%s at %s is not code-signed; Apple Silicon will refuse to run it "+
 						"(build it via 'make -C apps/backend build-agentctl-remote', which ad-hoc-signs darwin helpers)",

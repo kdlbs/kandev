@@ -31,6 +31,30 @@ func TestIsContainerizedExecutor(t *testing.T) {
 	}
 }
 
+func TestExecutorNeedsResolvedCredentials(t *testing.T) {
+	tests := []struct {
+		executorType string
+		want         bool
+	}{
+		{"local_docker", true},
+		{"remote_docker", true},
+		{"sprites", true},
+		{"ssh", true}, // SSH remotes run agentctl off-host; credentials must reach req.Env
+		{"local", false},
+		{"worktree", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.executorType, func(t *testing.T) {
+			got := executorNeedsResolvedCredentials(tt.executorType)
+			if got != tt.want {
+				t.Errorf("executorNeedsResolvedCredentials(%q) = %v, want %v", tt.executorType, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMethodIDToEnvVar(t *testing.T) {
 	tests := []struct {
 		methodID string

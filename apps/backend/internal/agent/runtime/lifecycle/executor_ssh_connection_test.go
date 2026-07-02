@@ -406,25 +406,30 @@ func TestSSHRemoteAgentEnv(t *testing.T) {
 		t.Error("PATH must NOT be forwarded to the remote agent")
 	}
 
-	// Falls back to the control-plane env when the key is absent from req.Env.
+	// Credentials present ONLY in the control-plane process env must NOT be
+	// forwarded (that would leak the kandev host's own credentials to any SSH
+	// target). Only keys explicitly resolved into req.Env are sent.
 	t.Setenv("ANTHROPIC_API_KEY", anthropicFromEnv)
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", tokenFromEnv)
 	got = sshRemoteAgentEnv(&ExecutorCreateRequest{Env: map[string]string{}})
-	if got["ANTHROPIC_API_KEY"] != anthropicFromEnv {
-		t.Fatalf("ANTHROPIC_API_KEY fallback = %q, want %q", got["ANTHROPIC_API_KEY"], anthropicFromEnv)
+	if _, ok := got["ANTHROPIC_API_KEY"]; ok {
+		t.Error("ANTHROPIC_API_KEY from control-plane env must NOT be forwarded when absent from req.Env")
+	}
+	if got != nil {
+		t.Fatalf("expected nil when req.Env has no credential keys, got %v", got)
 	}
 
-	// req.Env wins over the control-plane env.
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", tokenFromEnv)
+	// req.Env is the sole source; the control-plane env is ignored even when set.
 	got = sshRemoteAgentEnv(&ExecutorCreateRequest{Env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": tokenFromReq}})
 	if got["CLAUDE_CODE_OAUTH_TOKEN"] != tokenFromReq {
-		t.Fatalf("req.Env should win, got %q", got["CLAUDE_CODE_OAUTH_TOKEN"])
+		t.Fatalf("req.Env should be the source, got %q", got["CLAUDE_CODE_OAUTH_TOKEN"])
 	}
 }
 
 func TestSSHRemoteAgentEnvEmpty(t *testing.T) {
-	// Clear any inherited credential env so the result is deterministically empty.
-	for _, k := range sshRemoteAgentCredentialEnvKeys {
-		t.Setenv(k, "")
+	// nil req and empty req.Env both yield nil (no control-plane fallback).
+	if got := sshRemoteAgentEnv(nil); got != nil {
+		t.Fatalf("expected nil for nil req, got %v", got)
 	}
 	if got := sshRemoteAgentEnv(&ExecutorCreateRequest{}); got != nil {
 		t.Fatalf("expected nil for no credentials, got %v", got)

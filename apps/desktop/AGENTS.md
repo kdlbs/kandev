@@ -19,6 +19,7 @@ Release builds prepare `src-tauri/resources/kandev/` with:
 bin/kandev[.exe]
 bin/agentctl[.exe]
 bin/agentctl-linux-amd64
+bin/agentctl-linux-arm64
 bin/agentctl-darwin-arm64
 bin/agentctl-darwin-amd64
 ```

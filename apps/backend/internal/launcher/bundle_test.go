@@ -68,6 +68,26 @@ func TestValidateRuntimeBundleRejectsUnsignedDarwinArm64(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeBundleRejectsUnparsableDarwinArm64(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "bin", "kandev"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl-linux-amd64"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl-linux-arm64"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl-darwin-amd64"))
+	// A non-Mach-O stub (e.g. a truncated/corrupt upload) can't be verified as
+	// signed and must fail closed rather than silently pass.
+	writeFile(t, filepath.Join(dir, "bin", "agentctl-darwin-arm64"))
+
+	_, err := validateRuntimeBundle(dir, "test")
+	if err == nil {
+		t.Fatal("expected error for unparsable darwin/arm64 helper")
+	}
+	if got, want := err.Error(), "not a parsable"; !strings.Contains(got, want) {
+		t.Fatalf("error = %q, want substring %q", got, want)
+	}
+}
+
 func TestValidateRuntimeBundleAcceptsSignedDarwinArm64(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "bin", "kandev"))
@@ -153,7 +173,14 @@ func TestRequiredAgentctlRemoteHelpers(t *testing.T) {
 func writeRemoteAgentctlHelpers(t *testing.T, dir string) {
 	t.Helper()
 	for _, helper := range requiredAgentctlRemoteHelpers {
-		writeFile(t, filepath.Join(dir, "bin", helper.Name))
+		path := filepath.Join(dir, "bin", helper.Name)
+		// MustBeSigned helpers now fail closed on an unparsable artifact, so a
+		// plain stub no longer passes validation — write a signed Mach-O.
+		if helper.MustBeSigned {
+			writeMachO(t, path, true)
+			continue
+		}
+		writeFile(t, path)
 	}
 }
 

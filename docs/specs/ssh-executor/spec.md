@@ -82,6 +82,7 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
 
 - On `CreateInstance`, detect the remote platform via `uname -s` and `uname -m`, normalize it to a Go `GOOS/GOARCH` tuple, and resolve the matching agentctl helper via `AgentctlResolver`.
 - Supported remote platforms are `linux/amd64`, `linux/arm64`, `darwin/arm64`, and `darwin/amd64`. Unsupported platforms fail with a clear error: `unsupported remote platform "<platform>" — SSH executor supports linux/{amd64,arm64} and darwin/{amd64,arm64}`.
+  - **Validation status:** `linux/amd64` and `darwin/arm64` have been validated end-to-end on real hosts (`darwin/arm64` live over Tailscale against Apple Silicon Macs). `linux/arm64` and `darwin/amd64` are wired through the full build/upload/launch path and share the same cross-compiled helper, but have **not** yet been exercised on real ARM Linux / Intel Mac remotes — treat them as supported-but-unverified until someone confirms a task completes on that hardware.
 - Runtime bundles include `agentctl-linux-amd64`, `agentctl-linux-arm64`, `agentctl-darwin-arm64`, and `agentctl-darwin-amd64`; development builds produce them with `make -C apps/backend build-agentctl-remote`. The darwin helpers are ad-hoc-signed (Go signs darwin/arm64 at link time; `make` re-signs both via `codesign`/`rcodesign`); bundle validation rejects an unsigned `agentctl-darwin-arm64` because Apple Silicon refuses to run it.
 - Compute SHA256 locally; check `~/.kandev/bin/agentctl.sha256` on the remote via `sha256sum`. Upload only if missing or mismatched.
 - Upload via SFTP to `~/.kandev/bin/agentctl` (chmod 755), then write the sha256 sidecar.
@@ -141,7 +142,6 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
 ## Out of scope (v1)
 
 - **Remote Windows.** SSH transport to Windows is out of scope.
-- **Remote Linux arm64.** Lands when a new `agentctl-linux-arm64` helper is built, packaged, and covered by CI.
 - **Password / keyboard-interactive auth.** Keys + agent only.
 - **Passphrase-protected keys handled inside kandev.** User must load the key into `ssh-agent`.
 - **Chained ProxyJump.** Single bastion only; multi-hop deferred.
@@ -155,7 +155,7 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
 
 ## Future scope
 
-- **Linux arm64 agentctl + executor support** (cross-cutting with Docker).
+- **Hardware validation of `linux/arm64` and `darwin/amd64` remotes.** Both are wired through the full build/upload/launch path and share the tested cross-compiled helper, but neither has been exercised on real hardware yet (see the Validation status note in the support matrix). They stay marked supported-but-unverified until a task is confirmed end-to-end on an ARM Linux host and an Intel Mac.
 - **Auto-provision mode**: kandev runs a one-shot install script on the remote (apt/yum/brew) to set up node/docker/etc. before the first task — turns a bare Hetzner box into a ready-to-use kandev host.
 - **Multi-user-per-host** with per-task Linux user impersonation (`sudo -u worker-N`) for genuine isolation on shared boxes.
 - **Chained ProxyJump** and `ProxyCommand` support for esoteric setups.

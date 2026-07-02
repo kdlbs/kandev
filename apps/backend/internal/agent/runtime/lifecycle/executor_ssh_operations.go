@@ -633,21 +633,22 @@ var sshRemoteAgentCredentialEnvKeys = []string{
 }
 
 // sshRemoteAgentEnv builds the env map sent to the remote agent instance. Each
-// credential key is taken from the resolved request env first (profile-forwarded
-// credentials), falling back to the control plane's own environment so an
-// operator-provided token still reaches the remote agent. Empty values are
-// skipped so we never clobber a remote-side value with a blank.
+// credential key is taken ONLY from the resolved request env — credentials the
+// orchestrator explicitly resolved for this executor/session (profile env vars,
+// profile remote_auth_secrets, or the GITHUB_TOKEN resolution chain, see the
+// orchestrator's applyContainerCredentials). It deliberately does NOT fall back
+// to the control
+// plane's own process environment: that would forward whatever the kandev host
+// happens to have exported (OPENAI_API_KEY, GITHUB_TOKEN, …) to any SSH host the
+// executor connects to, bypassing per-executor credential scoping. Empty values
+// are skipped so we never clobber a remote-side value with a blank.
 func sshRemoteAgentEnv(req *ExecutorCreateRequest) map[string]string {
+	if req == nil || req.Env == nil {
+		return nil
+	}
 	env := make(map[string]string)
 	for _, key := range sshRemoteAgentCredentialEnvKeys {
-		val := ""
-		if req != nil && req.Env != nil {
-			val = req.Env[key]
-		}
-		if val == "" {
-			val = os.Getenv(key)
-		}
-		if val != "" {
+		if val := req.Env[key]; val != "" {
 			env[key] = val
 		}
 	}

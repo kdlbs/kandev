@@ -35,6 +35,13 @@ ifeq ($(OS),Windows_NT)
   GO_DARWIN_ARM64 = set CGO_ENABLED=0& set GOOS=darwin& set GOARCH=arm64&
   GO_DARWIN_AMD64 = set CGO_ENABLED=0& set GOOS=darwin& set GOARCH=amd64&
   EXE = .exe
+  # Windows recipes run under cmd.exe, which has no POSIX `if command -v ...; then`
+  # syntax. Neither codesign nor rcodesign ships on Windows anyway, so ad-hoc
+  # signing is a no-op here: darwin/arm64 stays Go-signed at link time, and
+  # darwin/amd64 runs only on Intel Macs (which don't enforce signing at exec).
+  define adhoc_sign_darwin
+	@echo   (skipping darwin ad-hoc sign on Windows: darwin/arm64 is Go-signed, darwin/amd64 runs on Intel)
+  endef
 else
   RM = rm -f
   RMDIR = rm -rf
@@ -45,6 +52,20 @@ else
   GO_DARWIN_ARM64 = CGO_ENABLED=0 GOOS=darwin GOARCH=arm64
   GO_DARWIN_AMD64 = CGO_ENABLED=0 GOOS=darwin GOARCH=amd64
   EXE =
+  # Ad-hoc sign a darwin Mach-O so Apple Silicon (AMFI) will run it; ad-hoc needs
+  # no Apple identity. Go already ad-hoc-signs darwin/arm64 at link time, so this
+  # is mainly to (a) sign darwin/amd64 too and (b) re-sign uniformly. Prefer
+  # codesign on macOS, fall back to rcodesign on Linux/CI. If neither is present,
+  # warn but don't fail (darwin/arm64 stays Go-signed; darwin/amd64 runs on Intel).
+  define adhoc_sign_darwin
+	@if command -v codesign >/dev/null 2>&1; then \
+		echo "  codesign --sign - $(1)"; codesign --force --sign - "$(1)"; \
+	elif command -v rcodesign >/dev/null 2>&1; then \
+		echo "  rcodesign sign (ad-hoc) $(1)"; rcodesign sign "$(1)"; \
+	else \
+		echo "  WARNING: no codesign/rcodesign found; $(1) left as-is (darwin/arm64 is Go-signed; darwin/amd64 runs only on Intel Macs)" >&2; \
+	fi
+  endef
 endif
 
 # Build info
@@ -123,21 +144,6 @@ build-agentctl-linux-arm64:
 	@echo "Building agentctl for linux/arm64..."
 	-@$(MKDIR) $(BUILD_DIR)
 	$(GO_LINUX_ARM64) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-linux-arm64 ./cmd/agentctl
-
-# Ad-hoc sign a darwin Mach-O so Apple Silicon (AMFI) will run it; ad-hoc needs
-# no Apple identity. Go already ad-hoc-signs darwin/arm64 at link time, so this
-# is mainly to (a) sign darwin/amd64 too and (b) re-sign uniformly. Prefer
-# codesign on macOS, fall back to rcodesign on Linux/CI. If neither is present,
-# warn but don't fail (darwin/arm64 stays Go-signed; darwin/amd64 runs on Intel).
-define adhoc_sign_darwin
-	@if command -v codesign >/dev/null 2>&1; then \
-		echo "  codesign --sign - $(1)"; codesign --force --sign - "$(1)"; \
-	elif command -v rcodesign >/dev/null 2>&1; then \
-		echo "  rcodesign sign (ad-hoc) $(1)"; rcodesign sign "$(1)"; \
-	else \
-		echo "  WARNING: no codesign/rcodesign found; $(1) left as-is (darwin/arm64 is Go-signed; darwin/amd64 runs only on Intel Macs)" >&2; \
-	fi
-endef
 
 ## Build agentctl for darwin/arm64 (used by Apple Silicon SSH hosts)
 build-agentctl-darwin-arm64:
