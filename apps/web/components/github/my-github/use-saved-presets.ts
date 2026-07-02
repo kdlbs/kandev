@@ -1,12 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { fetchUserSettings } from "@/lib/api/domains/settings-api";
+import {
+  fetchGitHubWorkspaceSettings,
+  updateGitHubWorkspaceSettings,
+} from "@/lib/api/domains/github-api";
 import { createQueuedUserSettingsSync } from "@/lib/user-settings-sync";
 import { hasUserSettingsSyncFailure } from "@/lib/user-settings-sync-failure";
 
 const STORAGE_KEY = "kandev:github-presets:v1";
 const MIGRATED_KEY = "kandev:github-presets:migrated-to-backend:v1";
+const WORKSPACE_MIGRATED_KEY_PREFIX = "kandev:github-presets:migrated-to-workspace:v1:";
 const SYNC_FAILED_KEY = "kandev:github-presets:sync-failed:v1";
 
 export type SavedPreset = {
@@ -86,6 +91,15 @@ function readServerPresets(value: unknown): SavedPreset[] | null {
   );
 }
 
+async function readLegacyServerPresets(): Promise<SavedPreset[]> {
+  try {
+    const response = await fetchUserSettings({ cache: "no-store" });
+    return readServerPresets(response.settings.github_saved_presets) ?? [];
+  } catch {
+    return [];
+  }
+}
+
 const syncServer = createQueuedUserSettingsSync<SavedPreset[]>(SYNC_FAILED_KEY, (next) => ({
   github_saved_presets: next,
 }));
@@ -108,15 +122,28 @@ function markMigratedToBackend(): void {
   }
 }
 
+function hasMigratedToWorkspace(workspaceId: string): boolean {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(WORKSPACE_MIGRATED_KEY_PREFIX + workspaceId) === "1";
+}
+
+function markMigratedToWorkspace(workspaceId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(WORKSPACE_MIGRATED_KEY_PREFIX + workspaceId, "1");
+  } catch {
+    /* ignore storage failures */
+  }
+}
+
 export function __resetSnapshotForTests() {
   snapshot = null;
   for (const l of listeners) l();
 }
 
-export function useSavedPresets() {
-  const presets = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-
+function useLegacySavedPresetsSync(enabled: boolean) {
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     const initialKey = snapshotKey(readStorage());
     fetchUserSettings({ cache: "no-store" })
@@ -141,27 +168,106 @@ export function useSavedPresets() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [enabled]);
+}
 
-  const save = useCallback((input: Omit<SavedPreset, "id" | "createdAt">) => {
-    const preset: SavedPreset = {
-      ...input,
-      id: `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-      createdAt: new Date().toISOString(),
+function useWorkspaceSavedPresets(workspaceId: string | null) {
+  const [workspacePresets, setWorkspacePresets] = useState<SavedPreset[] | undefined>(undefined);
+  const writeSeq = useRef(0);
+  useEffect(() => {
+    if (!workspaceId) {
+      setWorkspacePresets(undefined);
+      return;
+    }
+    let cancelled = false;
+    const seq = writeSeq.current;
+    setWorkspacePresets(undefined);
+    fetchGitHubWorkspaceSettings(workspaceId)
+      .then(async (settings) => {
+        if (cancelled || seq !== writeSeq.current) return;
+        const serverPresets = readServerPresets(settings.saved_presets) ?? [];
+        let local = readStorage();
+        if (local.length === 0) {
+          local = await readLegacyServerPresets();
+        }
+        if (cancelled || seq !== writeSeq.current) return;
+        if (
+          serverPresets.length === 0 &&
+          local.length > 0 &&
+          !hasMigratedToWorkspace(workspaceId)
+        ) {
+          setWorkspacePresets(local);
+          await updateGitHubWorkspaceSettings({
+            workspace_id: workspaceId,
+            saved_presets: local,
+          });
+          markMigratedToWorkspace(workspaceId);
+          return;
+        }
+        setWorkspacePresets(serverPresets);
+        markMigratedToWorkspace(workspaceId);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspacePresets([]);
+      });
+    return () => {
+      cancelled = true;
     };
-    const next = [...readStorage(), preset];
-    publish(next);
-    void syncServer(next);
-    markMigratedToBackend();
-    return preset;
+  }, [workspaceId]);
+  const setWorkspacePresetsFromLocal = useCallback((next: SavedPreset[]) => {
+    writeSeq.current += 1;
+    setWorkspacePresets(next);
   }, []);
+  return { workspacePresets, setWorkspacePresets: setWorkspacePresetsFromLocal };
+}
 
-  const remove = useCallback((id: string) => {
-    const next = readStorage().filter((p) => p.id !== id);
-    publish(next);
-    void syncServer(next);
-    markMigratedToBackend();
-  }, []);
+export function useSavedPresets(workspaceId: string | null = null) {
+  const presets = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const { workspacePresets, setWorkspacePresets } = useWorkspaceSavedPresets(workspaceId);
+  useLegacySavedPresetsSync(!workspaceId);
+  const activePresets = workspaceId ? (workspacePresets ?? []) : presets;
 
-  return { presets, save, remove };
+  const save = useCallback(
+    (input: Omit<SavedPreset, "id" | "createdAt">) => {
+      const preset: SavedPreset = {
+        ...input,
+        id: `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+        createdAt: new Date().toISOString(),
+      };
+      const next = [...activePresets, preset];
+      if (workspaceId) {
+        setWorkspacePresets(next);
+        void updateGitHubWorkspaceSettings({
+          workspace_id: workspaceId,
+          saved_presets: next,
+        }).then(() => markMigratedToWorkspace(workspaceId));
+        return preset;
+      }
+      publish(next);
+      void syncServer(next);
+      markMigratedToBackend();
+      return preset;
+    },
+    [activePresets, workspaceId],
+  );
+
+  const remove = useCallback(
+    (id: string) => {
+      const next = activePresets.filter((p) => p.id !== id);
+      if (workspaceId) {
+        setWorkspacePresets(next);
+        void updateGitHubWorkspaceSettings({
+          workspace_id: workspaceId,
+          saved_presets: next,
+        }).then(() => markMigratedToWorkspace(workspaceId));
+        return;
+      }
+      publish(next);
+      void syncServer(next);
+      markMigratedToBackend();
+    },
+    [activePresets, workspaceId],
+  );
+
+  return { presets: activePresets, save, remove };
 }

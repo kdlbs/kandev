@@ -192,10 +192,19 @@ func (s *Service) CheckIssueWatch(ctx context.Context, watch *IssueWatch) ([]*Is
 		zap.String("custom_query", watch.CustomQuery),
 		zap.Bool("enabled", watch.Enabled))
 
-	issues, err := s.fetchIssues(ctx, watch)
+	settings, settingsErr := s.GetWorkspaceSettings(ctx, watch.WorkspaceID)
+	if settingsErr != nil {
+		return nil, settingsErr
+	}
+	fetchWatch := *watch
+	if len(fetchWatch.Repos) == 0 {
+		fetchWatch.Repos = workspaceScopeRepoFilters(settings)
+	}
+	issues, err := s.fetchIssues(ctx, &fetchWatch)
 	if err != nil {
 		return nil, err
 	}
+	issues = filterIssuesByWorkspaceScope(issues, settings)
 
 	var newIssues []*Issue
 	for _, issue := range issues {

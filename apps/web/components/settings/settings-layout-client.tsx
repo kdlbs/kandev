@@ -1,8 +1,14 @@
 "use client";
 
+import { useCallback, useMemo } from "react";
 import { usePathname } from "@/lib/routing/client-router";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { PageTopbar } from "@/components/page-topbar";
+import { useAppStore } from "@/components/state-provider";
+import { WorkspaceSwitcher } from "@/components/task/workspace-switcher";
+import { createQueuedUserSettingsSync } from "@/lib/user-settings-sync";
+
+const WORKSPACE_SYNC_FAILED_KEY = "kandev:settings:integration-workspace:sync-failed:v1";
 
 // Brand/initialism overrides so the derived label matches how the rest of the
 // app spells these (e.g. "github" → "GitHub", not "Github"). Anything not
@@ -71,10 +77,17 @@ function deriveParents(pathname: string): Array<{ label: string; href: string }>
 export function SettingsLayoutClient({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isAgentDetail = pathname.startsWith("/settings/agents/") && pathname !== "/settings/agents";
+  const showWorkspaceSwitcher = pathname.startsWith("/settings/integrations");
 
   if (isAgentDetail) {
     return (
-      <SettingsShell title="Agent" backHref="/settings/agents" backLabel="Agents" parents={[]}>
+      <SettingsShell
+        title="Agent"
+        backHref="/settings/agents"
+        backLabel="Agents"
+        parents={[]}
+        showWorkspaceSwitcher={showWorkspaceSwitcher}
+      >
         {children}
       </SettingsShell>
     );
@@ -85,9 +98,45 @@ export function SettingsLayoutClient({ children }: { children: React.ReactNode }
   const parents = deriveParents(pathname);
 
   return (
-    <SettingsShell title={title} backHref="/" backLabel="Kandev" parents={parents}>
+    <SettingsShell
+      title={title}
+      backHref="/"
+      backLabel="Kandev"
+      parents={parents}
+      showWorkspaceSwitcher={showWorkspaceSwitcher}
+    >
       {children}
     </SettingsShell>
+  );
+}
+
+function IntegrationWorkspaceSwitcher() {
+  const workspaces = useAppStore((s) => s.workspaces.items);
+  const activeId = useAppStore((s) => s.workspaces.activeId);
+  const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace);
+  const selected = activeId ?? workspaces[0]?.id ?? null;
+  const persistWorkspace = useMemo(
+    () =>
+      createQueuedUserSettingsSync<string>(WORKSPACE_SYNC_FAILED_KEY, (workspaceId) => ({
+        workspace_id: workspaceId,
+      })),
+    [],
+  );
+
+  const onSelect = useCallback(
+    (workspaceId: string) => {
+      setActiveWorkspace(workspaceId);
+      void persistWorkspace(workspaceId);
+    },
+    [persistWorkspace, setActiveWorkspace],
+  );
+
+  if (workspaces.length === 0) return null;
+
+  return (
+    <div data-testid="integration-workspace-switcher">
+      <WorkspaceSwitcher workspaces={workspaces} activeWorkspaceId={selected} onSelect={onSelect} />
+    </div>
   );
 }
 
@@ -96,12 +145,14 @@ function SettingsShell({
   backHref,
   backLabel,
   parents,
+  showWorkspaceSwitcher,
   children,
 }: {
   title: string;
   backHref: string;
   backLabel: string;
   parents: Array<{ label: string; href: string }>;
+  showWorkspaceSwitcher: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -113,6 +164,7 @@ function SettingsShell({
           backLabel={backLabel}
           parents={parents}
           className="h-10"
+          actions={showWorkspaceSwitcher ? <IntegrationWorkspaceSwitcher /> : undefined}
         />
         {/* Scroll the content, not the topbar: min-h-0 lets this flex child
             shrink below its content height so overflow-y-auto can take effect. */}

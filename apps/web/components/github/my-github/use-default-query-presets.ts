@@ -1,17 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   PR_PRESETS as BUILTIN_PR_PRESETS,
   ISSUE_PRESETS as BUILTIN_ISSUE_PRESETS,
   type PresetOption,
 } from "./search-bar";
 import { fetchUserSettings } from "@/lib/api/domains/settings-api";
+import {
+  fetchGitHubWorkspaceSettings,
+  updateGitHubWorkspaceSettings,
+} from "@/lib/api/domains/github-api";
 import { createQueuedUserSettingsSync } from "@/lib/user-settings-sync";
 import { hasUserSettingsSyncFailure } from "@/lib/user-settings-sync-failure";
 
 const STORAGE_KEY = "kandev:github-default-queries:v1";
 const MIGRATED_KEY = "kandev:github-default-queries:migrated-to-backend:v1";
+const WORKSPACE_MIGRATED_KEY_PREFIX = "kandev:github-default-queries:migrated-to-workspace:v1:";
 const SYNC_FAILED_KEY = "kandev:github-default-queries:sync-failed:v1";
 
 export type StoredQueryPreset = {
@@ -84,6 +89,16 @@ function readServerDefaults(value: unknown): StoredDefaults | null | undefined {
   return value as StoredDefaults;
 }
 
+async function readLegacyServerDefaults(): Promise<StoredDefaults | null> {
+  try {
+    const response = await fetchUserSettings({ cache: "no-store" });
+    const defaults = readServerDefaults(response.settings.github_default_query_presets);
+    return defaults === undefined ? null : defaults;
+  } catch {
+    return null;
+  }
+}
+
 const syncServer = createQueuedUserSettingsSync<StoredDefaults | null>(
   SYNC_FAILED_KEY,
   (defaults) => ({
@@ -104,6 +119,20 @@ function markMigratedToBackend(): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(MIGRATED_KEY, "1");
+  } catch {
+    /* ignore storage failures */
+  }
+}
+
+function hasMigratedToWorkspace(workspaceId: string): boolean {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(WORKSPACE_MIGRATED_KEY_PREFIX + workspaceId) === "1";
+}
+
+function markMigratedToWorkspace(workspaceId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(WORKSPACE_MIGRATED_KEY_PREFIX + workspaceId, "1");
   } catch {
     /* ignore storage failures */
   }
@@ -137,10 +166,9 @@ export function __resetSnapshotForTests() {
   listeners.forEach((fn) => fn());
 }
 
-export function useDefaultQueryPresets() {
-  const stored = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-
+function useLegacyDefaultQueryPresetSync(enabled: boolean) {
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     const initialKey = snapshotKey(getSnapshot());
     fetchUserSettings({ cache: "no-store" })
@@ -165,24 +193,107 @@ export function useDefaultQueryPresets() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [enabled]);
+}
 
-  const prPresets = useMemo(() => stored?.pr ?? toStored(BUILTIN_PR_PRESETS), [stored]);
-  const issuePresets = useMemo(() => stored?.issue ?? toStored(BUILTIN_ISSUE_PRESETS), [stored]);
-
-  const save = useCallback((defaults: StoredDefaults) => {
-    publish(defaults);
-    void syncServer(defaults);
-    markMigratedToBackend();
+function useWorkspaceDefaultQueryPresets(workspaceId: string | null) {
+  const [workspaceDefaults, setWorkspaceDefaults] = useState<StoredDefaults | null | undefined>(
+    undefined,
+  );
+  const writeSeq = useRef(0);
+  useEffect(() => {
+    if (!workspaceId) {
+      setWorkspaceDefaults(undefined);
+      return;
+    }
+    let cancelled = false;
+    const seq = writeSeq.current;
+    setWorkspaceDefaults(undefined);
+    fetchGitHubWorkspaceSettings(workspaceId)
+      .then(async (settings) => {
+        if (cancelled || seq !== writeSeq.current) return;
+        const defaults = readServerDefaults(settings.default_query_presets);
+        let local = getSnapshot();
+        if (local === null) {
+          local = await readLegacyServerDefaults();
+        }
+        if (cancelled || seq !== writeSeq.current) return;
+        if (
+          (defaults === null || defaults === undefined) &&
+          local !== null &&
+          !hasMigratedToWorkspace(workspaceId)
+        ) {
+          setWorkspaceDefaults(local);
+          await updateGitHubWorkspaceSettings({
+            workspace_id: workspaceId,
+            default_query_presets: local,
+          });
+          markMigratedToWorkspace(workspaceId);
+          return;
+        }
+        setWorkspaceDefaults(defaults === undefined ? null : defaults);
+        markMigratedToWorkspace(workspaceId);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaceDefaults(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+  const setWorkspaceDefaultsFromLocal = useCallback((next: StoredDefaults | null) => {
+    writeSeq.current += 1;
+    setWorkspaceDefaults(next);
   }, []);
+  return { workspaceDefaults, setWorkspaceDefaults: setWorkspaceDefaultsFromLocal };
+}
+
+export function useDefaultQueryPresets(workspaceId: string | null = null) {
+  const stored = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const { workspaceDefaults, setWorkspaceDefaults } = useWorkspaceDefaultQueryPresets(workspaceId);
+  useLegacyDefaultQueryPresetSync(!workspaceId);
+  const effectiveStored = workspaceId ? workspaceDefaults : stored;
+  const prPresets = useMemo(
+    () => effectiveStored?.pr ?? toStored(BUILTIN_PR_PRESETS),
+    [effectiveStored],
+  );
+  const issuePresets = useMemo(
+    () => effectiveStored?.issue ?? toStored(BUILTIN_ISSUE_PRESETS),
+    [effectiveStored],
+  );
+
+  const save = useCallback(
+    (defaults: StoredDefaults) => {
+      if (workspaceId) {
+        setWorkspaceDefaults(defaults);
+        void updateGitHubWorkspaceSettings({
+          workspace_id: workspaceId,
+          default_query_presets: defaults,
+        }).then(() => markMigratedToWorkspace(workspaceId));
+        return;
+      }
+      publish(defaults);
+      void syncServer(defaults);
+      markMigratedToBackend();
+    },
+    [workspaceId],
+  );
 
   const reset = useCallback(() => {
+    if (workspaceId) {
+      setWorkspaceDefaults(null);
+      void updateGitHubWorkspaceSettings({
+        workspace_id: workspaceId,
+        default_query_presets: null,
+      }).then(() => markMigratedToWorkspace(workspaceId));
+      return;
+    }
     publish(null);
     void syncServer(null);
     markMigratedToBackend();
-  }, []);
+  }, [workspaceId]);
 
-  const isCustomized = stored !== null;
+  const isCustomized = effectiveStored !== null && effectiveStored !== undefined;
 
   return { prPresets, issuePresets, save, reset, isCustomized };
 }
