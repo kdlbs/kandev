@@ -89,6 +89,35 @@ describe("user settings websocket handler", () => {
 
     expect(store.getState().sidebarViews.draft).toBeNull();
   });
+
+  it("does not mark empty task-create last-used broadcasts as synced", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({ task_create_last_used: {} }),
+    );
+
+    expect(store.getState().userSettings.taskCreateLastUsed).toEqual({
+      repositoryId: null,
+      branch: null,
+      agentProfileId: null,
+      executorProfileId: null,
+      synced: false,
+    });
+  });
+
+  it("marks task-create last-used broadcasts as synced when a field is present", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({ task_create_last_used: { repository_id: "repo-1" } }),
+    );
+
+    expect(store.getState().userSettings.taskCreateLastUsed).toMatchObject({
+      repositoryId: "repo-1",
+      synced: true,
+    });
+  });
 });
 
 describe("user settings websocket sidebar settings", () => {

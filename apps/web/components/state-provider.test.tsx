@@ -45,6 +45,47 @@ function ObserveLastUsedCache({ onSeen }: { onSeen: (value: string | null) => vo
   return null;
 }
 
+const cachedTaskCreateChoices = {
+  repositoryId: "repo-cached",
+  branch: "feature-cached",
+  agentProfileId: "agent-cached",
+  executorProfileId: "exec-cached",
+};
+
+function seedCachedTaskCreateChoices() {
+  window.localStorage.setItem(
+    STORAGE_KEYS.LAST_REPOSITORY_ID,
+    JSON.stringify(cachedTaskCreateChoices.repositoryId),
+  );
+  window.localStorage.setItem(
+    STORAGE_KEYS.LAST_BRANCH,
+    JSON.stringify(cachedTaskCreateChoices.branch),
+  );
+  window.localStorage.setItem(
+    STORAGE_KEYS.LAST_AGENT_PROFILE_ID,
+    JSON.stringify(cachedTaskCreateChoices.agentProfileId),
+  );
+  window.localStorage.setItem(
+    STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID,
+    JSON.stringify(cachedTaskCreateChoices.executorProfileId),
+  );
+}
+
+function expectCachedTaskCreateChoices() {
+  expect(window.localStorage.getItem(STORAGE_KEYS.LAST_REPOSITORY_ID)).toBe(
+    JSON.stringify(cachedTaskCreateChoices.repositoryId),
+  );
+  expect(window.localStorage.getItem(STORAGE_KEYS.LAST_BRANCH)).toBe(
+    JSON.stringify(cachedTaskCreateChoices.branch),
+  );
+  expect(window.localStorage.getItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID)).toBe(
+    JSON.stringify(cachedTaskCreateChoices.agentProfileId),
+  );
+  expect(window.localStorage.getItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID)).toBe(
+    JSON.stringify(cachedTaskCreateChoices.executorProfileId),
+  );
+}
+
 beforeEach(() => {
   window.localStorage.clear();
   resetTaskCreateLastUsedSync({ clearQueued: true });
@@ -157,26 +198,9 @@ describe("StateProvider task-create cache", () => {
 });
 
 describe("StateProvider task-create cache fallback", () => {
-  const cachedRepositoryId = "repo-cached";
-  const cachedBranch = "feature-cached";
-  const cachedAgentProfileId = "agent-cached";
-  const cachedExecutorProfileId = "exec-cached";
-
   it("keeps cached task-create choices when loaded backend settings omit them", async () => {
     const onSeen = vi.fn();
-    window.localStorage.setItem(
-      STORAGE_KEYS.LAST_REPOSITORY_ID,
-      JSON.stringify(cachedRepositoryId),
-    );
-    window.localStorage.setItem(STORAGE_KEYS.LAST_BRANCH, JSON.stringify(cachedBranch));
-    window.localStorage.setItem(
-      STORAGE_KEYS.LAST_AGENT_PROFILE_ID,
-      JSON.stringify(cachedAgentProfileId),
-    );
-    window.localStorage.setItem(
-      STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID,
-      JSON.stringify(cachedExecutorProfileId),
-    );
+    seedCachedTaskCreateChoices();
 
     render(
       <StateProvider
@@ -197,37 +221,14 @@ describe("StateProvider task-create cache fallback", () => {
       </StateProvider>,
     );
 
-    expect(onSeen).toHaveBeenCalledWith(JSON.stringify(cachedRepositoryId));
+    expect(onSeen).toHaveBeenCalledWith(JSON.stringify(cachedTaskCreateChoices.repositoryId));
     // Give any potential deferred deletions a chance to fire (old code used setTimeout(0)).
     await new Promise((resolve) => window.setTimeout(resolve, 10));
-    expect(window.localStorage.getItem(STORAGE_KEYS.LAST_REPOSITORY_ID)).toBe(
-      JSON.stringify(cachedRepositoryId),
-    );
-    expect(window.localStorage.getItem(STORAGE_KEYS.LAST_BRANCH)).toBe(
-      JSON.stringify(cachedBranch),
-    );
-    expect(window.localStorage.getItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID)).toBe(
-      JSON.stringify(cachedAgentProfileId),
-    );
-    expect(window.localStorage.getItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID)).toBe(
-      JSON.stringify(cachedExecutorProfileId),
-    );
+    expectCachedTaskCreateChoices();
   });
 
-  it("clears cached task-create choices when loaded backend settings explicitly sync empty values", async () => {
-    window.localStorage.setItem(
-      STORAGE_KEYS.LAST_REPOSITORY_ID,
-      JSON.stringify(cachedRepositoryId),
-    );
-    window.localStorage.setItem(STORAGE_KEYS.LAST_BRANCH, JSON.stringify(cachedBranch));
-    window.localStorage.setItem(
-      STORAGE_KEYS.LAST_AGENT_PROFILE_ID,
-      JSON.stringify(cachedAgentProfileId),
-    );
-    window.localStorage.setItem(
-      STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID,
-      JSON.stringify(cachedExecutorProfileId),
-    );
+  it("keeps cached task-create choices when loaded backend settings sync an empty object", async () => {
+    seedCachedTaskCreateChoices();
 
     render(
       <StateProvider
@@ -237,6 +238,41 @@ describe("StateProvider task-create cache fallback", () => {
             loaded: true,
             taskCreateLastUsed: {
               repositoryId: null,
+              branch: null,
+              agentProfileId: null,
+              executorProfileId: null,
+              synced: false,
+            },
+          },
+        }}
+      >
+        <div>ready</div>
+      </StateProvider>,
+    );
+
+    await waitFor(() => {
+      expectCachedTaskCreateChoices();
+    });
+  });
+
+  it("clears stale cached fields when loaded backend settings contain real task-create choices", async () => {
+    window.localStorage.setItem(
+      STORAGE_KEYS.LAST_BRANCH,
+      JSON.stringify(cachedTaskCreateChoices.branch),
+    );
+    window.localStorage.setItem(
+      STORAGE_KEYS.LAST_AGENT_PROFILE_ID,
+      JSON.stringify(cachedTaskCreateChoices.agentProfileId),
+    );
+
+    render(
+      <StateProvider
+        initialState={{
+          userSettings: {
+            ...defaultSettingsState.userSettings,
+            loaded: true,
+            taskCreateLastUsed: {
+              repositoryId: "repo-server",
               branch: null,
               agentProfileId: null,
               executorProfileId: null,
@@ -250,10 +286,11 @@ describe("StateProvider task-create cache fallback", () => {
     );
 
     await waitFor(() => {
-      expect(window.localStorage.getItem(STORAGE_KEYS.LAST_REPOSITORY_ID)).toBeNull();
+      expect(window.localStorage.getItem(STORAGE_KEYS.LAST_REPOSITORY_ID)).toBe(
+        JSON.stringify("repo-server"),
+      );
       expect(window.localStorage.getItem(STORAGE_KEYS.LAST_BRANCH)).toBeNull();
       expect(window.localStorage.getItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID)).toBeNull();
-      expect(window.localStorage.getItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID)).toBeNull();
     });
   });
 });

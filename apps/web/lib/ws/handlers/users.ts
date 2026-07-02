@@ -5,6 +5,7 @@ import type { WsHandlers } from "@/lib/ws/handlers/types";
 import {
   parseChangesPanelLayout,
   parseSystemMetricsDisplay,
+  taskCreateLastUsedHasValue,
   parseVoiceMode,
 } from "@/lib/ssr/user-settings";
 import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
@@ -54,7 +55,7 @@ function buildSyncedLocalSettings(payload: UserSettingsUpdatedPayload) {
       branch: payload.task_create_last_used?.branch || null,
       agentProfileId: payload.task_create_last_used?.agent_profile_id || null,
       executorProfileId: payload.task_create_last_used?.executor_profile_id || null,
-      synced: Object.prototype.hasOwnProperty.call(payload, "task_create_last_used"),
+      synced: taskCreateLastUsedHasValue(payload.task_create_last_used),
     },
     jiraSavedViews: payload.jira_saved_views,
     jiraTaskPresets: payload.jira_task_presets,
