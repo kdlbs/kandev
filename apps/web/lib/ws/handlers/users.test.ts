@@ -89,7 +89,9 @@ describe("user settings websocket handler", () => {
 
     expect(store.getState().sidebarViews.draft).toBeNull();
   });
+});
 
+describe("user settings websocket task-create last-used", () => {
   it("does not mark empty task-create last-used broadcasts as synced", () => {
     const store = makeStore();
 
@@ -115,6 +117,35 @@ describe("user settings websocket handler", () => {
 
     expect(store.getState().userSettings.taskCreateLastUsed).toMatchObject({
       repositoryId: "repo-1",
+      synced: true,
+    });
+  });
+
+  it("preserves task-create last-used state when broadcasts omit it", () => {
+    const store = makeStore();
+    store.setState((state) => ({
+      ...state,
+      userSettings: {
+        ...state.userSettings,
+        taskCreateLastUsed: {
+          repositoryId: "repo-1",
+          branch: "main",
+          agentProfileId: "agent-1",
+          executorProfileId: "exec-1",
+          synced: true,
+        },
+      },
+    }));
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({ keyboard_shortcuts: {} }),
+    );
+
+    expect(store.getState().userSettings.taskCreateLastUsed).toEqual({
+      repositoryId: "repo-1",
+      branch: "main",
+      agentProfileId: "agent-1",
+      executorProfileId: "exec-1",
       synced: true,
     });
   });
