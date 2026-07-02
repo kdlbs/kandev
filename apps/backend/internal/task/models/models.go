@@ -1152,6 +1152,32 @@ type TaskPlanRevision struct {
 	UpdatedAt          time.Time `json:"updated_at"` // bumps on coalesce merge
 }
 
+// TaskWalkthrough is an agent-authored guided code tour attached to a task.
+// It is the "what & where" of a review narration: an ordered list of Steps,
+// each anchored to a concrete repo/file/line, rendered as popovers over the
+// review diff. Mirrors the TaskPlan artifact pattern (one per task, agent-authored).
+type TaskWalkthrough struct {
+	ID        string            `json:"id"`
+	TaskID    string            `json:"task_id"`
+	Title     string            `json:"title"`
+	Steps     []WalkthroughStep `json:"steps"`
+	CreatedBy string            `json:"created_by"` // always "agent"
+	CreatedAt time.Time         `json:"created_at"`
+	UpdatedAt time.Time         `json:"updated_at"`
+}
+
+// WalkthroughStep is a single anchored stop in a TaskWalkthrough. Text is
+// markdown shown in the popover; File/Line locate the anchor inside the diff
+// (Repo disambiguates in multi-repo reviews, LineEnd optionally spans a range).
+type WalkthroughStep struct {
+	Title   string `json:"title,omitempty"`
+	Repo    string `json:"repo,omitempty"`
+	File    string `json:"file"`
+	Line    int    `json:"line"`
+	LineEnd int    `json:"line_end,omitempty"`
+	Text    string `json:"text"`
+}
+
 // TaskDocument represents a named document (plan, spec, notes, etc.) associated with a task.
 // The key uniquely identifies the document within a task (e.g., "plan", "spec", "notes").
 type TaskDocument struct {

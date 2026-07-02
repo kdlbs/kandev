@@ -1105,9 +1105,10 @@ func registerMCPAndDebugRoutes(
 	planService *taskservice.PlanService,
 	handoffSvc *taskservice.HandoffService,
 ) {
+	walkthroughService := taskservice.NewWalkthroughService(p.taskRepo, p.eventBus, p.log)
 	mcpHandlers := mcphandlers.NewHandlers(
 		p.taskSvc, wfCtrl,
-		clarificationStore, clarificationCanceller, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, p.orchestratorSvc, p.orchestratorSvc.GetMessageQueue(), p.log,
+		clarificationStore, clarificationCanceller, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, walkthroughService, p.orchestratorSvc, p.orchestratorSvc.GetMessageQueue(), p.log,
 	)
 	// Wire config-mode dependencies for agent-native configuration
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)

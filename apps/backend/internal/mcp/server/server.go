@@ -369,6 +369,8 @@ func (s *Server) registerTools() {
 		}
 		s.registerPlanTools()
 		count += 4
+		s.registerWalkthroughTools()
+		count += 3
 		s.registerRelatedTasksTool()
 		count++
 		// Task-mode only: requires a live session to attach the new
@@ -863,6 +865,70 @@ func (s *Server) registerPlanTools() {
 		),
 		s.wrapHandler("delete_task_plan_kandev", s.deleteTaskPlanHandler()),
 	)
+}
+
+// registerWalkthroughTools registers the agent-authored code-walkthrough tools.
+// show_walkthrough is the JetBrains-style "walk a person through the code" tool:
+// the agent supplies ordered, file+line-anchored steps that the user cycles
+// through as popovers over the review diff with Previous/Next.
+func (s *Server) registerWalkthroughTools() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("show_walkthrough_kandev",
+			mcp.WithDescription(
+				"Show and store a guided code walkthrough for this task. Accepts an ordered list of "+
+					"steps; each step anchors a short markdown explanation to a specific file and line, "+
+					"and renders as a popover over the review diff. The user cycles through steps with "+
+					"Previous and Next. The walkthrough is saved to the task and replaces any prior one. "+
+					"Use this after producing a change to narrate the diff (what each hunk does and why), "+
+					"or to explain how a part of the codebase works. Order steps to follow the reader's "+
+					"natural path through the code (entry point first, then the call chain)."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to attach the walkthrough to")),
+			mcp.WithString("title", mcp.Description("Optional title for the walkthrough (default: 'Walkthrough')")),
+			mcp.WithArray("steps", mcp.Required(),
+				mcp.Description("Ordered list of walkthrough steps, each anchored to a file and line."),
+				mcp.Items(buildWalkthroughStepSchemaItem()),
+			),
+		),
+		s.wrapHandler("show_walkthrough_kandev", s.showWalkthroughHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_walkthrough_kandev",
+			mcp.WithDescription("Get the current code walkthrough for a task, including any steps."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to get the walkthrough for")),
+		),
+		s.wrapHandler("get_walkthrough_kandev", s.getWalkthroughHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("delete_walkthrough_kandev",
+			mcp.WithDescription("Delete the code walkthrough for a task."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete the walkthrough for")),
+		),
+		s.wrapHandler("delete_walkthrough_kandev", s.deleteWalkthroughHandler()),
+	)
+}
+
+// buildWalkthroughStepSchemaItem describes one step object in the
+// show_walkthrough_kandev tool schema.
+func buildWalkthroughStepSchemaItem() map[string]any {
+	const typeKey = "type"
+	str := func(desc string) map[string]any {
+		return map[string]any{typeKey: "string", descriptionArg: desc}
+	}
+	num := func(desc string) map[string]any {
+		return map[string]any{typeKey: "integer", descriptionArg: desc}
+	}
+	return map[string]any{
+		typeKey: "object",
+		"properties": map[string]any{
+			titleArg:   str("Optional short heading for this step."),
+			"repo":     str("Optional repository name; disambiguates in multi-repo reviews."),
+			"file":     str("Path to the file this step anchors to (relative to the repo root)."),
+			"line":     num("1-based line number to anchor the popover to."),
+			"line_end": num("Optional end line for a multi-line range."),
+			"text":     str("Markdown explanation shown in the step popover."),
+		},
+		"required": []string{"file", "line", "text"},
+	}
 }
 
 // buildQuestionSchemaItem describes the shape of a single question object in

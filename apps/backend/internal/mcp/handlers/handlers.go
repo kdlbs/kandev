@@ -110,20 +110,21 @@ type PromptReferenceResolver interface {
 
 // Handlers provides MCP WebSocket handlers.
 type Handlers struct {
-	taskSvc          *service.Service
-	workflowCtrl     *workflowctrl.Controller
-	clarificationSvc ClarificationService
-	sessionCanceller SessionCanceller
-	inputPauser      ClarificationInputPauser
-	messageCreator   MessageCreator
-	sessionRepo      SessionRepository
-	taskRepo         TaskRepository
-	eventBus         EventBus
-	planService      *service.PlanService
-	sessionLauncher  SessionLauncher
-	messageQueue     MessageQueuer
-	promptResolver   PromptReferenceResolver
-	logger           *logger.Logger
+	taskSvc            *service.Service
+	workflowCtrl       *workflowctrl.Controller
+	clarificationSvc   ClarificationService
+	sessionCanceller   SessionCanceller
+	inputPauser        ClarificationInputPauser
+	messageCreator     MessageCreator
+	sessionRepo        SessionRepository
+	taskRepo           TaskRepository
+	eventBus           EventBus
+	planService        *service.PlanService
+	walkthroughService *service.WalkthroughService
+	sessionLauncher    SessionLauncher
+	messageQueue       MessageQueuer
+	promptResolver     PromptReferenceResolver
+	logger             *logger.Logger
 
 	// Config-mode dependencies (optional, set via SetConfigDeps)
 	workflowSvc       *workflowsvc.Service
@@ -151,23 +152,25 @@ func NewHandlers(
 	taskRepo TaskRepository,
 	eventBus EventBus,
 	planService *service.PlanService,
+	walkthroughService *service.WalkthroughService,
 	sessionLauncher SessionLauncher,
 	messageQueue MessageQueuer,
 	log *logger.Logger,
 ) *Handlers {
 	return &Handlers{
-		taskSvc:          taskSvc,
-		workflowCtrl:     workflowCtrl,
-		clarificationSvc: clarificationSvc,
-		sessionCanceller: sessionCanceller,
-		messageCreator:   messageCreator,
-		sessionRepo:      sessionRepo,
-		taskRepo:         taskRepo,
-		eventBus:         eventBus,
-		planService:      planService,
-		sessionLauncher:  sessionLauncher,
-		messageQueue:     messageQueue,
-		logger:           log.WithFields(zap.String("component", "mcp-handlers")),
+		taskSvc:            taskSvc,
+		workflowCtrl:       workflowCtrl,
+		clarificationSvc:   clarificationSvc,
+		sessionCanceller:   sessionCanceller,
+		messageCreator:     messageCreator,
+		sessionRepo:        sessionRepo,
+		taskRepo:           taskRepo,
+		eventBus:           eventBus,
+		planService:        planService,
+		walkthroughService: walkthroughService,
+		sessionLauncher:    sessionLauncher,
+		messageQueue:       messageQueue,
+		logger:             log.WithFields(zap.String("component", "mcp-handlers")),
 	}
 }
 
@@ -213,8 +216,15 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPGetTaskPlan, h.handleGetTaskPlan)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPlan, h.handleUpdateTaskPlan)
 	d.RegisterFunc(ws.ActionMCPDeleteTaskPlan, h.handleDeleteTaskPlan)
+	d.RegisterFunc(ws.ActionMCPShowWalkthrough, h.handleShowWalkthrough)
+	d.RegisterFunc(ws.ActionMCPGetWalkthrough, h.handleGetWalkthrough)
+	d.RegisterFunc(ws.ActionMCPDeleteWalkthrough, h.handleDeleteWalkthrough)
+	// Plain (non-MCP) action so the web UI can backfill the current walkthrough
+	// on mount — live task.walkthrough.created events can fire before the page's
+	// WS subscription is established. Reuses the same read handler.
+	d.RegisterFunc(ws.ActionTaskWalkthroughGet, h.handleGetWalkthrough)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
-	count := 17
+	count := 22
 
 	// Config-mode handlers (registered when config deps are set)
 	if h.workflowSvc != nil {
@@ -2595,6 +2605,85 @@ func (h *Handlers) handleDeleteTaskPlan(ctx context.Context, msg *ws.Message) (*
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
+}
+
+// handleShowWalkthrough creates or replaces a task's agent-authored code walkthrough.
+func (h *Handlers) handleShowWalkthrough(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		TaskID string                   `json:"task_id"`
+		Title  string                   `json:"title"`
+		Steps  []models.WalkthroughStep `json:"steps"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if len(req.Steps) == 0 {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "at least one step is required", nil)
+	}
+
+	wt, err := h.walkthroughService.ShowWalkthrough(ctx, service.ShowWalkthroughRequest{
+		TaskID: req.TaskID,
+		Title:  req.Title,
+		Steps:  req.Steps,
+	})
+	if err != nil {
+		if errors.Is(err, service.ErrTaskIDRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to save walkthrough: "+err.Error(), nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, wt)
+}
+
+// parseTaskIDPayload unmarshals a `{task_id}` payload, returning a ready error
+// response (non-nil) when the payload is malformed.
+func parseTaskIDPayload(msg *ws.Message) (string, *ws.Message, error) {
+	var req struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		m, e := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+		return "", m, e
+	}
+	return req.TaskID, nil, nil
+}
+
+// handleGetWalkthrough retrieves a task's walkthrough.
+func (h *Handlers) handleGetWalkthrough(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	taskID, errMsg, errErr := parseTaskIDPayload(msg)
+	if errMsg != nil || errErr != nil {
+		return errMsg, errErr
+	}
+	wt, err := h.walkthroughService.GetWalkthrough(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, service.ErrTaskIDRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get walkthrough", nil)
+	}
+	if wt == nil {
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{})
+	}
+	return ws.NewResponse(msg.ID, msg.Action, wt)
+}
+
+// handleDeleteWalkthrough deletes a task's walkthrough.
+func (h *Handlers) handleDeleteWalkthrough(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	taskID, errMsg, errErr := parseTaskIDPayload(msg)
+	if errMsg != nil || errErr != nil {
+		return errMsg, errErr
+	}
+	switch err := h.walkthroughService.DeleteWalkthrough(ctx, taskID); {
+	case err == nil:
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
+	case errors.Is(err, service.ErrTaskIDRequired):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	case errors.Is(err, service.ErrTaskWalkthroughNotFound):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task walkthrough not found", nil)
+	default:
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete walkthrough: "+err.Error(), nil)
+	}
 }
 
 // handleClarificationTimeout is called by agentctl when the agent's MCP client

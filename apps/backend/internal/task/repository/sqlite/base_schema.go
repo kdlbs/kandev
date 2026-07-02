@@ -17,6 +17,7 @@ func (r *Repository) initSchema() error {
 	steps := []func() error{
 		r.initCoreSchema,
 		r.initPlansSchema,
+		r.initWalkthroughsSchema,
 		r.initDocumentsSchema,
 		r.initSessionSchema,
 		r.initGitSchema,
@@ -360,6 +361,26 @@ func (r *Repository) initPlansSchema() error {
 		return err
 	}
 	return r.backfillInitialPlanRevisions()
+}
+
+// initWalkthroughsSchema creates the task_walkthroughs table. Steps are stored
+// as a JSON array in a single column (read/written whole — there is no
+// per-step query path), keeping the artifact one row per task like task_plans.
+func (r *Repository) initWalkthroughsSchema() error {
+	_, err := r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS task_walkthroughs (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL UNIQUE,
+		title TEXT NOT NULL DEFAULT 'Walkthrough',
+		steps TEXT NOT NULL DEFAULT '[]',
+		created_by TEXT NOT NULL DEFAULT 'agent',
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_walkthroughs_task_id ON task_walkthroughs(task_id);
+	`)
+	return err
 }
 
 // backfillInitialPlanRevisions ensures every existing task_plans row has at least

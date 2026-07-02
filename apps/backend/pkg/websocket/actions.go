@@ -165,6 +165,10 @@ const (
 	ActionTaskPlanDeleted          = "task.plan.deleted"
 	ActionTaskPlanRevisionCreated  = "task.plan.revision.created"
 	ActionTaskPlanReverted         = "task.plan.reverted"
+	ActionTaskWalkthroughGet       = "task.walkthrough.get"
+	ActionTaskWalkthroughCreated   = "task.walkthrough.created"
+	ActionTaskWalkthroughUpdated   = "task.walkthrough.updated"
+	ActionTaskWalkthroughDeleted   = "task.walkthrough.deleted"
 	ActionAgentUpdated             = "agent.updated"
 	ActionAgentAvailableUpdated    = "agent.available.updated"
 	ActionAgentInstallStarted      = "agent.install.started"
@@ -338,6 +342,9 @@ const (
 	ActionMCPGetTaskPlan                = "mcp.get_task_plan"
 	ActionMCPUpdateTaskPlan             = "mcp.update_task_plan"
 	ActionMCPDeleteTaskPlan             = "mcp.delete_task_plan"
+	ActionMCPShowWalkthrough            = "mcp.show_walkthrough"
+	ActionMCPGetWalkthrough             = "mcp.get_walkthrough"
+	ActionMCPDeleteWalkthrough          = "mcp.delete_walkthrough"
 	ActionMCPClarificationTimeout       = "mcp.clarification_timeout"
 
 	// Office task handoffs (cross-task context).

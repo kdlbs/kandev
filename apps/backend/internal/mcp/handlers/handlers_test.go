@@ -1881,7 +1881,7 @@ func TestHandleClarificationTimeout_DetachesMessages(t *testing.T) {
 	// Drain the in-memory store so the handler must fall back to DB-driven cleanup
 	store.CancelSession(sess.ID)
 
-	h := NewHandlers(svc, nil, store, canceller, nil, repo, repo, eventBus, nil, nil, nil, testLogger(t))
+	h := NewHandlers(svc, nil, store, canceller, nil, repo, repo, eventBus, nil, nil, nil, nil, testLogger(t))
 	msg := makeWSMessage(t, ws.ActionMCPClarificationTimeout, map[string]interface{}{"session_id": sess.ID})
 	resp, err := h.handleClarificationTimeout(ctx, msg)
 	require.NoError(t, err)
@@ -1924,7 +1924,7 @@ func TestHandleAskUserQuestion_Dedup_CreatesOnePendingBundle(t *testing.T) {
 
 	store := clarification.NewStore(time.Minute)
 	log := testLogger(t)
-	h := NewHandlers(svc, nil, store, nil, nil, repo, repo, nil, nil, nil, nil, log)
+	h := NewHandlers(svc, nil, store, nil, nil, repo, repo, nil, nil, nil, nil, nil, log)
 
 	payload := map[string]interface{}{
 		"session_id": sess.ID,
