@@ -169,8 +169,8 @@ test.describe("Slash command composer", () => {
     const availableCommands = attachAvailableCommandsCapture(testPage);
     const dialog = await openQuickChatWithAgent(testPage);
     await expect
-      .poll(() => availableCommands.frames.length, { timeout: 15_000 })
-      .toBeGreaterThan(0);
+      .poll(() => availableCommands.frames.some((frame) => frame.count > 0), { timeout: 15_000 })
+      .toBe(true);
 
     const editor = chatEditor(dialog);
 

@@ -139,8 +139,8 @@ test.describe("Quick Chat", () => {
     // asynchronously after the response flushes — so the frame can arrive
     // moments after openQuickChatWithAgent resolves.
     await expect
-      .poll(() => availableCommands.frames.length, { timeout: 15_000 })
-      .toBeGreaterThan(0);
+      .poll(() => availableCommands.frames.some((frame) => frame.count > 0), { timeout: 15_000 })
+      .toBe(true);
 
     const editor = dialog.locator(".tiptap.ProseMirror");
     await editor.click();

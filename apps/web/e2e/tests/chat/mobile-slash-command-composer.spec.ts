@@ -45,7 +45,7 @@ test.describe("Mobile slash command composer", () => {
     const session = await openTaskChat(testPage, task.id);
     await seedAvailableCommands(testPage, task.session_id, [SLOW_COMMAND]);
 
-    const editor = testPage.locator(".tiptap.ProseMirror").first();
+    const editor = testPage.locator(".tiptap.ProseMirror:visible").first();
     await editor.tap();
     await editor.fill("");
     await editor.pressSequentially("/s");
