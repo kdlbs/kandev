@@ -2,6 +2,22 @@
 
 All notable changes to Kandev.
 
+## 0.73.0 - 2026-07-03
+
+### Features
+
+- filter Jira tickets by project statuses ([#1588](https://github.com/kdlbs/kandev/pull/1588)) ([#1595](https://github.com/kdlbs/kandev/pull/1595))
+- add Devin ACP agent integration ([#1497](https://github.com/kdlbs/kandev/pull/1497)) by @jijiamoer
+
+### Bug Fixes
+
+- preserve active workspace on settings bootstrap ([#1591](https://github.com/kdlbs/kandev/pull/1591))
+- clear stale agent state on inactive workspace ([#1592](https://github.com/kdlbs/kandev/pull/1592))
+- support postgres database stats page ([#1589](https://github.com/kdlbs/kandev/pull/1589))
+- persist live executor runtime state ([#1585](https://github.com/kdlbs/kandev/pull/1585)) ([#1587](https://github.com/kdlbs/kandev/pull/1587))
+- correct Linear ticket-number search filter ([#1584](https://github.com/kdlbs/kandev/pull/1584)) by @dk-blackfuel
+- recover stale prompts and invalid monitors ([#1581](https://github.com/kdlbs/kandev/pull/1581))
+
 ## 0.72.0 - 2026-07-02
 
 ### Features
