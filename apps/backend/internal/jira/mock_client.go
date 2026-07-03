@@ -192,6 +192,12 @@ func filterByProjectKeys(hits []JiraTicket, keys map[string]struct{}) []JiraTick
 
 // statusNamesFromJQL extracts the quoted status names from a `status in (...)`
 // clause. Returns nil when the JQL carries no such clause.
+//
+// NOTE: the clause boundary is the first ")" in the remaining string, so a
+// status name that itself contains ")" (e.g. "Ready (for review)") would be
+// misextracted. The frontend never emits such names in these mock-driven tests,
+// so a full quote-aware scan isn't warranted for this test stand-in. The same
+// caveat applies to projectKeysFromJQL above.
 func statusNamesFromJQL(jql string) map[string]struct{} {
 	lower := strings.ToLower(jql)
 	idx := strings.Index(lower, "status in (")

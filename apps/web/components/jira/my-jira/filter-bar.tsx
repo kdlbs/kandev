@@ -34,6 +34,7 @@ export function FilterBar({
         options={statusOptions}
         value={filters.statuses}
         onChange={(statuses) => onChange({ ...filters, statuses })}
+        hasProjectSelected={filters.projectKeys.length > 0}
       />
       <AssigneePill
         value={filters.assignee}

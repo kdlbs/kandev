@@ -154,16 +154,22 @@ export function ProjectPill({ projects, value, onChange }: ProjectPillProps) {
 }
 
 type StatusPillProps = {
-  // Available statuses for the selected project(s). Empty = no project picked,
-  // which renders the pill disabled with a hint.
+  // Available statuses for the selected project(s). Empty means either no
+  // project is selected or the selected project(s) expose no statuses; the pill
+  // is disabled either way, with a hint chosen from hasProjectSelected.
   options: JiraStatus[];
   value: string[];
   onChange: (statuses: string[]) => void;
+  // Whether at least one project is selected. Distinguishes "pick a project
+  // first" from "this project has no statuses" so the disabled hint isn't
+  // misleading once a project is chosen.
+  hasProjectSelected: boolean;
 };
 
 const NO_PROJECT_HINT = "Select a project to filter by status";
+const NO_STATUSES_HINT = "No statuses available for the selected project";
 
-export function StatusPill({ options, value, onChange }: StatusPillProps) {
+export function StatusPill({ options, value, onChange, hasProjectSelected }: StatusPillProps) {
   const [query, setQuery] = useState("");
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -185,7 +191,7 @@ export function StatusPill({ options, value, onChange }: StatusPillProps) {
       active={value.length > 0}
       onClear={() => onChange([])}
       disabled={options.length === 0}
-      disabledHint={NO_PROJECT_HINT}
+      disabledHint={hasProjectSelected ? NO_STATUSES_HINT : NO_PROJECT_HINT}
     >
       <div className="p-2 border-b">
         <Input
