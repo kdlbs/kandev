@@ -154,25 +154,21 @@ function UnsupportedMaintenance({ driver }: { driver: string }) {
   );
 }
 
-function MaintenanceButtons({
-  driver,
-  vacuumState,
-  optimizeState,
-  onVacuum,
-  onOptimize,
-  onResetOpen,
-}: {
-  driver: string;
+type SQLiteMaintenanceButtonsProps = {
   vacuumState: ActionFeedbackState;
   optimizeState: ActionFeedbackState;
   onVacuum: () => void;
   onOptimize: () => void;
   onResetOpen: () => void;
-}) {
-  if (driver !== "sqlite") {
-    return <UnsupportedMaintenance driver={driver} />;
-  }
+};
 
+function SQLiteMaintenanceButtons({
+  vacuumState,
+  optimizeState,
+  onVacuum,
+  onOptimize,
+  onResetOpen,
+}: SQLiteMaintenanceButtonsProps) {
   return (
     <div className="space-y-2">
       <OperationRow
@@ -254,12 +250,27 @@ function MaintenanceButtons({
   );
 }
 
+function MaintenanceButtons({
+  driver,
+  ...props
+}: SQLiteMaintenanceButtonsProps & { driver: string | null }) {
+  if (driver === null) {
+    return null;
+  }
+
+  if (driver !== "sqlite") {
+    return <UnsupportedMaintenance driver={driver} />;
+  }
+
+  return <SQLiteMaintenanceButtons {...props} />;
+}
+
 export function DatabaseStatsCard() {
   const { database, isLoading, error, reload } = useDatabaseStats();
   const vacuum = useActionFeedback();
   const optimize = useActionFeedback();
   const [resetOpen, setResetOpen] = useState(false);
-  const driver = database ? databaseDriver(database) : "sqlite";
+  const driver = database ? databaseDriver(database) : null;
 
   const onVacuum = () =>
     void vacuum.run(async () => {

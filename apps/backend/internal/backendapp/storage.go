@@ -174,9 +174,9 @@ func provideSupportRepos(writer, reader *sqlx.DB) (supportRepositorySet, []func(
 // recordSchemaVersion writes the current binary version into kandev_meta so the
 // next boot can detect upgrades. A failure here is non-fatal: the stored
 // version stays at the previous value and the next boot will take a fresh
-// backup (idempotent). Skipped for postgres, which has no kandev_meta table.
-func recordSchemaVersion(writer *sqlx.DB, driver, version string, log *logger.Logger) {
-	if version == "" || driver == "postgres" {
+// backup (idempotent).
+func recordSchemaVersion(writer *sqlx.DB, _ string, version string, log *logger.Logger) {
+	if version == "" {
 		return
 	}
 	if err := persistence.WriteVersion(writer, version); err != nil {
