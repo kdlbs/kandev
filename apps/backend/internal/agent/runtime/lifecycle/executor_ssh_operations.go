@@ -651,8 +651,7 @@ var sshRemoteAgentCredentialEnvKeys = []string{
 // orchestrator explicitly resolved for this executor/session (profile env vars,
 // profile remote_auth_secrets, or the GITHUB_TOKEN resolution chain, see the
 // orchestrator's applyContainerCredentials). It deliberately does NOT fall back
-// to the control
-// plane's own process environment: that would forward whatever the kandev host
+// to the control plane's own process environment: that would forward whatever the kandev host
 // happens to have exported (OPENAI_API_KEY, GITHUB_TOKEN, …) to any SSH host the
 // executor connects to, bypassing per-executor credential scoping. Empty values
 // are skipped so we never clobber a remote-side value with a blank.
