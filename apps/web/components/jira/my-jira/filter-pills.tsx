@@ -5,19 +5,56 @@ import { IconChevronDown, IconX } from "@tabler/icons-react";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Input } from "@kandev/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
-import type { JiraProject, JiraStatusCategory } from "@/lib/types/jira";
-import { STATUS_CATEGORY_OPTIONS, type AssigneeFilter } from "./filter-model";
+import type { JiraProject, JiraStatus } from "@/lib/types/jira";
+import { type AssigneeFilter } from "./filter-model";
 
 type PillShellProps = {
   label: string;
   summary: string | null;
   active: boolean;
   onClear?: () => void;
+  // When disabled the pill renders greyed-out and non-interactive; `disabledHint`
+  // is surfaced via the title tooltip so the user learns why (e.g. pick a
+  // project first).
+  disabled?: boolean;
+  disabledHint?: string;
   children: React.ReactNode;
 };
 
-function PillShell({ label, summary, active, onClear, children }: PillShellProps) {
+function DisabledPill({
+  label,
+  summary,
+  disabledHint,
+}: Pick<PillShellProps, "label" | "summary" | "disabledHint">) {
+  return (
+    <div
+      data-testid={`jira-filter-pill-${label.toLowerCase()}`}
+      data-disabled="true"
+      className="inline-flex items-stretch rounded-md border text-xs overflow-hidden bg-background opacity-50"
+      title={disabledHint}
+    >
+      <span className="px-2.5 py-1.5 flex items-center gap-1.5 cursor-not-allowed">
+        <span className="text-muted-foreground">{label}</span>
+        {summary && <span className="font-medium">{summary}</span>}
+        <IconChevronDown className="h-3 w-3 text-muted-foreground" />
+      </span>
+    </div>
+  );
+}
+
+function PillShell({
+  label,
+  summary,
+  active,
+  onClear,
+  disabled,
+  disabledHint,
+  children,
+}: PillShellProps) {
   const [open, setOpen] = useState(false);
+  if (disabled) {
+    return <DisabledPill label={label} summary={summary} disabledHint={disabledHint} />;
+  }
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <div
@@ -28,6 +65,7 @@ function PillShell({ label, summary, active, onClear, children }: PillShellProps
         <PopoverTrigger asChild>
           <button
             type="button"
+            data-testid={`jira-filter-pill-${label.toLowerCase()}`}
             className="cursor-pointer px-2.5 py-1.5 flex items-center gap-1.5 hover:bg-muted/50 transition-colors"
           >
             <span className="text-muted-foreground">{label}</span>
@@ -102,6 +140,7 @@ export function ProjectPill({ projects, value, onChange }: ProjectPillProps) {
         {filtered.map((p) => (
           <label
             key={p.key}
+            data-testid={`jira-project-option-${p.key}`}
             className="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-muted/50"
           >
             <Checkbox checked={selected.has(p.key)} onCheckedChange={() => toggle(p.key)} />
@@ -115,23 +154,29 @@ export function ProjectPill({ projects, value, onChange }: ProjectPillProps) {
 }
 
 type StatusPillProps = {
-  value: JiraStatusCategory[];
-  onChange: (cats: JiraStatusCategory[]) => void;
+  // Available statuses for the selected project(s). Empty = no project picked,
+  // which renders the pill disabled with a hint.
+  options: JiraStatus[];
+  value: string[];
+  onChange: (statuses: string[]) => void;
 };
 
-export function StatusPill({ value, onChange }: StatusPillProps) {
+const NO_PROJECT_HINT = "Select a project to filter by status";
+
+export function StatusPill({ options, value, onChange }: StatusPillProps) {
+  const [query, setQuery] = useState("");
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter((o) => o.name.toLowerCase().includes(q));
+  }, [options, query]);
+
   const selected = new Set(value);
-  const toggle = (cat: JiraStatusCategory) => {
-    if (selected.has(cat)) onChange(value.filter((c) => c !== cat));
-    else onChange([...value, cat]);
+  const toggle = (name: string) => {
+    if (selected.has(name)) onChange(value.filter((n) => n !== name));
+    else onChange([...value, name]);
   };
-  const summary =
-    value.length > 0
-      ? joinSummary(
-          value.map((c) => STATUS_CATEGORY_OPTIONS.find((o) => o.value === c)?.label ?? c),
-          2,
-        )
-      : null;
+  const summary = value.length > 0 ? joinSummary(value, 2) : null;
 
   return (
     <PillShell
@@ -139,15 +184,29 @@ export function StatusPill({ value, onChange }: StatusPillProps) {
       summary={summary}
       active={value.length > 0}
       onClear={() => onChange([])}
+      disabled={options.length === 0}
+      disabledHint={NO_PROJECT_HINT}
     >
-      <div className="py-1">
-        {STATUS_CATEGORY_OPTIONS.map((o) => (
+      <div className="p-2 border-b">
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search statuses…"
+          className="h-7 text-xs"
+        />
+      </div>
+      <div className="max-h-64 overflow-y-auto py-1">
+        {filtered.length === 0 && (
+          <div className="px-3 py-2 text-xs text-muted-foreground">No statuses match.</div>
+        )}
+        {filtered.map((o) => (
           <label
-            key={o.value}
+            key={o.id}
+            data-testid={`jira-status-option-${o.name}`}
             className="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-muted/50"
           >
-            <Checkbox checked={selected.has(o.value)} onCheckedChange={() => toggle(o.value)} />
-            <span className="text-sm">{o.label}</span>
+            <Checkbox checked={selected.has(o.name)} onCheckedChange={() => toggle(o.name)} />
+            <span className="text-sm truncate">{o.name}</span>
           </label>
         ))}
       </div>

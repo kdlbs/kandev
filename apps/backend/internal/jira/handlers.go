@@ -34,6 +34,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.DELETE("/config", c.httpDeleteConfig)
 	api.POST("/config/test", c.httpTestConfig)
 	api.GET("/projects", c.httpListProjects)
+	api.GET("/projects/:key/statuses", c.httpListProjectStatuses)
 	api.GET("/tickets", c.httpSearchTickets)
 	api.GET("/tickets/:key", c.httpGetTicket)
 	api.POST("/tickets/:key/transitions", c.httpDoTransition)
@@ -109,6 +110,16 @@ func (c *Controller) httpListProjects(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"projects": projects})
+}
+
+func (c *Controller) httpListProjectStatuses(ctx *gin.Context) {
+	key := ctx.Param("key")
+	statuses, err := c.service.ListProjectStatuses(ctx.Request.Context(), key)
+	if err != nil {
+		c.writeClientError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"statuses": statuses})
 }
 
 func (c *Controller) httpSearchTickets(ctx *gin.Context) {

@@ -86,6 +86,18 @@ export interface JiraProject {
   id: string;
 }
 
+/**
+ * A workflow status defined for a project. Unlike the coarse three-bucket
+ * `JiraStatusCategory`, `name` is the project-specific status the user sees on
+ * a ticket (e.g. "In Development", "Ready for review"). The ticket-list status
+ * filter is populated from these.
+ */
+export interface JiraStatus {
+  id: string;
+  name: string;
+  statusCategory: JiraStatusCategory;
+}
+
 export interface JiraSearchResult {
   tickets: JiraTicket[];
   maxResults: number;

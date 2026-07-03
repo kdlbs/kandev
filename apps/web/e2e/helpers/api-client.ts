@@ -1486,6 +1486,13 @@ export class ApiClient {
     await this.request("POST", "/api/v1/jira/mock/projects", { projects });
   }
 
+  async mockJiraSetProjectStatuses(projectKey: string, statuses: MockJiraStatus[]): Promise<void> {
+    await this.request("POST", "/api/v1/jira/mock/project-statuses", {
+      projectKey,
+      statuses,
+    });
+  }
+
   async mockJiraAddTickets(tickets: MockJiraTicket[]): Promise<void> {
     await this.request("POST", "/api/v1/jira/mock/tickets", { tickets });
   }
@@ -1881,6 +1888,8 @@ export class ApiClient {
 // --- Jira / Linear mock payload types ---
 
 export type MockJiraProject = { id: string; key: string; name: string };
+
+export type MockJiraStatus = { id: string; name: string; statusCategory?: string };
 
 export type MockJiraTransition = {
   id: string;

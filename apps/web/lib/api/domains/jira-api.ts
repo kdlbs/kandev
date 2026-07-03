@@ -5,6 +5,7 @@ import type {
   JiraIssueWatch,
   JiraProject,
   JiraSearchResult,
+  JiraStatus,
   JiraTicket,
   SetJiraConfigRequest,
   TestJiraConnectionResult,
@@ -44,6 +45,13 @@ export async function testJiraConnection(
 
 export async function listJiraProjects(options?: ApiRequestOptions) {
   return fetchJson<{ projects: JiraProject[] }>(`/api/v1/jira/projects`, options);
+}
+
+export async function listJiraProjectStatuses(projectKey: string, options?: ApiRequestOptions) {
+  return fetchJson<{ statuses: JiraStatus[] }>(
+    `/api/v1/jira/projects/${encodeURIComponent(projectKey)}/statuses`,
+    options,
+  );
 }
 
 export async function getJiraTicket(ticketKey: string, options?: ApiRequestOptions) {

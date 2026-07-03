@@ -58,6 +58,7 @@ type fakeClient struct {
 	getTicketFn   func(key string) (*JiraTicket, error)
 	transitionFn  func(key, id string) error
 	listProjects  func() ([]JiraProject, error)
+	listStatuses  func(projectKey string) ([]JiraStatus, error)
 	searchFn      func(jql string) (*SearchResult, error)
 	transitionLog []string // "key:id"
 }
@@ -87,6 +88,12 @@ func (c *fakeClient) DoTransition(_ context.Context, key, id string) error {
 func (c *fakeClient) ListProjects(_ context.Context) ([]JiraProject, error) {
 	if c.listProjects != nil {
 		return c.listProjects()
+	}
+	return nil, nil
+}
+func (c *fakeClient) ListProjectStatuses(_ context.Context, projectKey string) ([]JiraStatus, error) {
+	if c.listStatuses != nil {
+		return c.listStatuses(projectKey)
 	}
 	return nil, nil
 }
@@ -421,6 +428,39 @@ func TestService_GetTicket_RevealError_NotConfusedWithUnconfigured(t *testing.T)
 	}
 	if errors.Is(err, ErrNotConfigured) {
 		t.Errorf("transient Reveal failure must not be ErrNotConfigured: %v", err)
+	}
+}
+
+func TestService_ListProjectStatuses_PassThrough(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	var gotKey string
+	f.client.listStatuses = func(projectKey string) ([]JiraStatus, error) {
+		gotKey = projectKey
+		return []JiraStatus{{ID: "1", Name: "In Development", StatusCategory: "indeterminate"}}, nil
+	}
+	_, _ = f.svc.SetConfig(ctx, &SetConfigRequest{
+		SiteURL: "https://a.net", Email: "e",
+		AuthMethod: AuthMethodAPIToken, InstanceType: InstanceTypeCloud, Secret: "t",
+	})
+	waitForAuthProbe(t, f)
+	statuses, err := f.svc.ListProjectStatuses(ctx, "CLIP")
+	if err != nil {
+		t.Fatalf("list statuses: %v", err)
+	}
+	if gotKey != "CLIP" {
+		t.Errorf("project key: got %q", gotKey)
+	}
+	if len(statuses) != 1 || statuses[0].Name != "In Development" {
+		t.Errorf("unexpected statuses: %+v", statuses)
+	}
+}
+
+func TestService_ListProjectStatuses_Unconfigured(t *testing.T) {
+	f := newSvcFixture(t)
+	_, err := f.svc.ListProjectStatuses(context.Background(), "CLIP")
+	if !errors.Is(err, ErrNotConfigured) {
+		t.Errorf("expected ErrNotConfigured, got %v", err)
 	}
 }
 

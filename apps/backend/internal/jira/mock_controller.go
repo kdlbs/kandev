@@ -31,6 +31,7 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api.PUT("/auth-result", c.setAuthResult)
 	api.PUT("/auth-health", c.setAuthHealth)
 	api.POST("/projects", c.setProjects)
+	api.POST("/project-statuses", c.setProjectStatuses)
 	api.POST("/tickets", c.addTickets)
 	api.POST("/transitions", c.addTransitions)
 	api.POST("/search-hits", c.setSearchHits)
@@ -75,6 +76,19 @@ func (c *MockController) setProjects(ctx *gin.Context) {
 	}
 	c.mock.SetProjects(req.Projects)
 	ctx.JSON(http.StatusOK, gin.H{"count": len(req.Projects)})
+}
+
+func (c *MockController) setProjectStatuses(ctx *gin.Context) {
+	var req struct {
+		ProjectKey string       `json:"projectKey"`
+		Statuses   []JiraStatus `json:"statuses"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil || req.ProjectKey == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "projectKey required"})
+		return
+	}
+	c.mock.SetProjectStatuses(req.ProjectKey, req.Statuses)
+	ctx.JSON(http.StatusOK, gin.H{"count": len(req.Statuses)})
 }
 
 func (c *MockController) addTickets(ctx *gin.Context) {

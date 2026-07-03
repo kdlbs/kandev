@@ -69,6 +69,7 @@ Per-workspace credentials and triage triggers for external services.
 | [slack](integrations/slack.md) | shipped |
 | [external-mcp](integrations/external-mcp.md) | draft |
 | [gitlab-integration](gitlab-integration/spec.md) | shipped |
+| [jira-status-filter](jira-status-filter/spec.md) | draft |
 
 ## workspaces/ — workspace lifecycle
 

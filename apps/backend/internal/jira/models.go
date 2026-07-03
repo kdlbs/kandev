@@ -126,6 +126,16 @@ type JiraProject struct {
 	ID   string `json:"id"`
 }
 
+// JiraStatus is one workflow status defined for a project. Unlike the coarse
+// three-bucket StatusCategory ("new" | "indeterminate" | "done"), Name is the
+// project-specific workflow status the user actually sees on a ticket (e.g.
+// "In Development", "Ready for review"). The status filter is built from these.
+type JiraStatus struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	StatusCategory string `json:"statusCategory"` // "new" | "indeterminate" | "done"
+}
+
 // SearchResult is a page of tickets from a JQL search. Atlassian's
 // /rest/api/3/search/jql endpoint is token-paginated and returns no total
 // count, so the UI relies on IsLast and NextPageToken to walk pages.

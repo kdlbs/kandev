@@ -309,6 +309,17 @@ func (s *Service) ListProjects(ctx context.Context) ([]JiraProject, error) {
 	return client.ListProjects(ctx)
 }
 
+// ListProjectStatuses returns the workflow statuses defined for a project,
+// used by the ticket-list status filter so users can filter by the real
+// statuses in the selected project rather than the three coarse categories.
+func (s *Service) ListProjectStatuses(ctx context.Context, projectKey string) ([]JiraStatus, error) {
+	client, err := s.clientFor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return client.ListProjectStatuses(ctx, projectKey)
+}
+
 // SearchTickets runs a JQL search, returning a page of tickets. pageToken is
 // the cursor returned in the previous page's NextPageToken; pass "" for the
 // first page.
