@@ -7,6 +7,7 @@ test.describe("Mobile System Database page", () => {
     await expect(testPage.getByTestId("system-page-title")).toHaveText("Database");
     await expect(testPage.getByTestId("system-database-card")).toBeVisible();
 
+    // The default E2E backend uses SQLite, so SQLite-only maintenance buttons render.
     for (const id of [
       "system-db-driver",
       "system-db-size",

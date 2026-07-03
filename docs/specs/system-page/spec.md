@@ -163,6 +163,7 @@ All System endpoints require the same "logged-in install user" check as the exis
 - **GitHub poll failure** — log + keep the previous `kandev_meta` row; `/api/v1/system/updates` returns the stale value.
 - **Disk walk failure** (permission error on a subdir) — return the partial result with a `warnings: [...]` array per subdir; the page renders a per-row warning icon.
 - **VACUUM failure** — DB is unaffected (VACUUM is atomic); the job ends `failed` with the SQLite error string. Status page shows a recoverable error issue.
+- **Non-SQLite maintenance call** — `vacuum`, `optimize`, and `reset` jobs fail with `not supported for <driver> driver` before running SQLite-only SQL; factory reset also rejects before stopping active executions.
 - **Factory reset failure mid-run** — the pre-reset snapshot remains in `<data-dir>/backups/`; the user can restore it from the Backups page on next boot. Recovery is documented inline in the failure UI.
 - **Restore failure** — original DB file is left untouched; restore writes to a temp file and atomic-renames only on success.
 - **Log file missing / unreadable** — viewer renders an empty state with the file path so the user can investigate manually.
