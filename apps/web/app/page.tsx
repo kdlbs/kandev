@@ -140,6 +140,9 @@ export default async function Page({ searchParams }: PageProps) {
     // Kanban home only resolves against kanban workspaces; office workspaces
     // belong under /office.
     const cookieWorkspaceId = cookieStore?.get(ACTIVE_WORKSPACE_COOKIE)?.value ?? null;
+    // `readCookies()` is client-only in this code path; during SSR this is empty.
+    // Workspace selection still works because spa-routes.tsx re-hydrates from
+    // `readActiveWorkspaceCookie()` and the generic resolver on first client render.
     const activeWorkspaceId = resolveActiveKanbanWorkspaceId(
       workspaces.workspaces,
       workspaceId,

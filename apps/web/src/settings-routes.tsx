@@ -425,6 +425,7 @@ function resolveSettingsActiveWorkspaceId(
     workspaceItems.find((workspace) => workspace.id === requestedWorkspaceId)?.id ??
     kanbanWorkspaceItems.find((workspace) => workspace.id === activeCookieWorkspaceId)?.id ??
     kanbanWorkspaceItems.find((workspace) => workspace.id === settingsWorkspaceId)?.id ??
+    kanbanWorkspaceItems[0]?.id ??
     workspaceItems[0]?.id ??
     null
   );

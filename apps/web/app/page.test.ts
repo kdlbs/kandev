@@ -17,7 +17,7 @@ describe("resolveActiveKanbanWorkspaceId", () => {
     expect(activeId).toBe("ws-kanban");
   });
 
-  it("honors explicit URL workspace IDs even for office workspaces", () => {
+  it("falls back when explicit URL workspace ID is an office workspace", () => {
     const activeId = resolveActiveKanbanWorkspaceId(
       [
         { id: "ws-office", office_workflow_id: "office-flow" },
@@ -28,6 +28,6 @@ describe("resolveActiveKanbanWorkspaceId", () => {
       "ws-kanban",
     );
 
-    expect(activeId).toBe("ws-office");
+    expect(activeId).toBe("ws-kanban");
   });
 });

@@ -35,4 +35,19 @@ describe("resolveActiveOfficeWorkspaceId", () => {
 
     expect(activeId).toBe(wsOffice1);
   });
+
+  it("uses kandev-active-workspace when it holds an office workspace ID", () => {
+    const activeId = resolveActiveOfficeWorkspaceId(
+      [
+        { id: wsOffice1, office_workflow_id: "office-flow-1" },
+        { id: wsOffice2, office_workflow_id: "office-flow-2" },
+      ],
+      null,
+      wsOffice1,
+      wsOffice2,
+      null,
+    );
+
+    expect(activeId).toBe(wsOffice1);
+  });
 });
