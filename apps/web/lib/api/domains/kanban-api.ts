@@ -203,6 +203,7 @@ export async function listTasksByWorkspace(
     includeArchived?: boolean;
     workflowId?: string | null;
     repositoryId?: string | null;
+    sort?: string;
   } = {},
   options?: ApiRequestOptions,
 ) {
@@ -214,5 +215,6 @@ export async function listTasksByWorkspace(
   if (params.includeArchived) url.searchParams.set("include_archived", "true");
   if (params.workflowId) url.searchParams.set("workflow_id", params.workflowId);
   if (params.repositoryId) url.searchParams.set("repository_id", params.repositoryId);
+  if (params.sort) url.searchParams.set("sort", params.sort);
   return fetchJson<ListTasksResponse>(url.toString(), options);
 }

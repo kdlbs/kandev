@@ -5,7 +5,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useEditors } from "@/hooks/domains/settings/use-editors";
 import { createEditor, deleteEditor, updateEditor, updateUserSettings } from "@/lib/api";
 import { useRequest } from "@/lib/http/use-request";
-import { DEFAULT_TASKS_LIST_GROUP, DEFAULT_TASKS_LIST_SORT } from "@/lib/tasks/tasks-list-options";
+import { parseTasksListGroup, parseTasksListSort } from "@/lib/tasks/tasks-list-options";
 import type { EditorOption } from "@/lib/types/http";
 import { type ComboboxOption } from "@/components/combobox";
 import {
@@ -232,8 +232,8 @@ function mapTasksListSettingsFields(
   s: NonNullable<NonNullable<UpdateUserSettingsResponse>["settings"]>,
 ) {
   return {
-    tasksListSort: s.tasks_list_sort ?? DEFAULT_TASKS_LIST_SORT,
-    tasksListGroup: s.tasks_list_group ?? DEFAULT_TASKS_LIST_GROUP,
+    tasksListSort: parseTasksListSort(s.tasks_list_sort),
+    tasksListGroup: parseTasksListGroup(s.tasks_list_group),
   };
 }
 

@@ -53,6 +53,7 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 	}
 
 	query := c.Query("query")
+	sort := usermodels.NormalizeTasksListSort(c.Query("sort"))
 	workflowID := c.Query("workflow_id")
 	repositoryID := c.Query("repository_id")
 	includeArchived := c.Query("include_archived") == queryValueTrue
@@ -61,7 +62,7 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 	excludeConfig := c.Query("exclude_config") == queryValueTrue
 
 	tasks, total, err := h.service.ListTasksByWorkspace(
-		c.Request.Context(), c.Param("id"), workflowID, repositoryID, query, page, pageSize, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig,
+		c.Request.Context(), c.Param("id"), workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig,
 	)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "tasks not found")

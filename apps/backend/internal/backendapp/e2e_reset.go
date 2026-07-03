@@ -122,7 +122,7 @@ func handleE2EReset(
 		// accumulate across tests in the same Playwright worker and
 		// eventually exhaust the per-worker port range.
 		const resetPageSize = 10000
-		tasks, total, err := repo.ListTasksByWorkspace(ctx, workspaceID, "", "", "", 1, resetPageSize, true, true, false, false)
+		tasks, total, err := repo.ListTasksByWorkspace(ctx, workspaceID, "", "", "", 1, resetPageSize, "", true, true, false, false)
 		if err != nil {
 			log.Error("e2e reset: failed to list tasks", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})

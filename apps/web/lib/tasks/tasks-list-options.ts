@@ -23,16 +23,16 @@ export const DEFAULT_TASKS_LIST_SORT: TasksListSort = "updated_desc";
 export const DEFAULT_TASKS_LIST_GROUP: TasksListGroup = "state";
 
 export const TASK_STATE_ORDER: TaskState[] = [
+  "CREATED",
+  "SCHEDULING",
   "TODO",
   "IN_PROGRESS",
   "REVIEW",
-  "WAITING_FOR_INPUT",
   "BLOCKED",
-  "FAILED",
+  "WAITING_FOR_INPUT",
   "COMPLETED",
+  "FAILED",
   "CANCELLED",
-  "SCHEDULING",
-  "CREATED",
 ];
 
 export function parseTasksListSort(value: string | null | undefined): TasksListSort {

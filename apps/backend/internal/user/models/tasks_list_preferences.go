@@ -6,13 +6,36 @@ import (
 )
 
 const (
-	TasksListSortDefault  = "updated_desc"
-	TasksListGroupDefault = "state"
+	TasksListSortUpdatedDesc = "updated_desc"
+	TasksListSortUpdatedAsc  = "updated_asc"
+	TasksListSortCreatedDesc = "created_desc"
+	TasksListSortCreatedAsc  = "created_asc"
+	TasksListSortTitleAsc    = "title_asc"
+	TasksListSortTitleDesc   = "title_desc"
+	TasksListSortDefault     = TasksListSortUpdatedDesc
+
+	TasksListGroupState      = "state"
+	TasksListGroupWorkflow   = "workflow"
+	TasksListGroupRepository = "repository"
+	TasksListGroupNone       = "none"
+	TasksListGroupDefault    = TasksListGroupState
 )
 
 var (
-	tasksListSortValues  = []string{TasksListSortDefault, "updated_asc", "created_desc", "created_asc", "title_asc", "title_desc"}
-	tasksListGroupValues = []string{TasksListGroupDefault, "workflow", "repository", "none"}
+	tasksListSortValues = []string{
+		TasksListSortUpdatedDesc,
+		TasksListSortUpdatedAsc,
+		TasksListSortCreatedDesc,
+		TasksListSortCreatedAsc,
+		TasksListSortTitleAsc,
+		TasksListSortTitleDesc,
+	}
+	tasksListGroupValues = []string{
+		TasksListGroupState,
+		TasksListGroupWorkflow,
+		TasksListGroupRepository,
+		TasksListGroupNone,
+	}
 )
 
 func TasksListSortValues() []string {

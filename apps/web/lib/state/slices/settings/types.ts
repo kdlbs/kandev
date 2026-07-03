@@ -20,6 +20,7 @@ import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sideba
 import type { SidebarTaskPrefsState } from "@/lib/state/slices/ui/types";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
+import type { TasksListGroup, TasksListSort } from "@/lib/tasks/tasks-list-options";
 
 export type ExecutorsState = {
   items: Executor[];
@@ -143,8 +144,8 @@ export type UserSettingsState = {
   kanbanViewMode: string | null;
   workflowId: string | null;
   repositoryIds: string[];
-  tasksListSort: string;
-  tasksListGroup: string;
+  tasksListSort: TasksListSort;
+  tasksListGroup: TasksListGroup;
   preferredShell: string | null;
   shellOptions: Array<{ value: string; label: string }>;
   defaultEditorId: string | null;

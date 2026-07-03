@@ -319,7 +319,7 @@ func (s *Service) listAllTasksForWorkspaceDelete(ctx context.Context, workspaceI
 	var all []*models.Task
 	for page := 1; ; page++ {
 		tasks, total, err := s.tasks.ListTasksByWorkspace(
-			ctx, workspaceID, "", "", "", page, workspaceDeletePageSize, true, true, false, false,
+			ctx, workspaceID, "", "", "", page, workspaceDeletePageSize, "", true, true, false, false,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("list workspace tasks: %w", err)

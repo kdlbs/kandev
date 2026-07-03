@@ -103,7 +103,7 @@ type TaskWorkspaceService interface {
 	GetWorkspace(ctx context.Context, id string) (*taskmodels.Workspace, error)
 	ListWorkspaces(ctx context.Context) ([]*taskmodels.Workspace, error)
 	DeleteWorkspace(ctx context.Context, id string) error
-	ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*taskmodels.Task, int, error)
+	ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*taskmodels.Task, int, error)
 	DeleteTask(ctx context.Context, id string) error
 	GetLastAgentMessage(ctx context.Context, sessionID string) (string, error)
 	GetLastAgentMessageForTurn(ctx context.Context, turnID string) (string, error)

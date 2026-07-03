@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
+	usermodels "github.com/kandev/kandev/internal/user/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -414,7 +415,7 @@ func (r *Repository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID
 // If includeArchived is false, archived tasks are excluded
 // If includeEphemeral is false, ephemeral tasks are excluded
 // If onlyEphemeral is true, only ephemeral tasks are returned
-func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error) {
+func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTasksByWorkspace")
 	defer span.End()
 	// Calculate offset
@@ -422,6 +423,7 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID, work
 	if offset < 0 {
 		offset = 0
 	}
+	sort = usermodels.NormalizeTasksListSort(sort)
 
 	// Build filter conditions
 	filter := ""
@@ -447,9 +449,9 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID, work
 	var err error
 
 	if query == "" {
-		rows, total, err = r.queryAllTasks(ctx, workspaceID, filter, workflowID, repositoryID, pageSize, offset)
+		rows, total, err = r.queryAllTasks(ctx, workspaceID, filter, workflowID, repositoryID, pageSize, offset, sort)
 	} else {
-		rows, total, err = r.searchTasks(ctx, workspaceID, query, filter, workflowID, repositoryID, pageSize, offset, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig)
+		rows, total, err = r.searchTasks(ctx, workspaceID, query, filter, workflowID, repositoryID, pageSize, offset, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig)
 	}
 
 	if err != nil {
@@ -466,7 +468,7 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID, work
 }
 
 // queryAllTasks fetches all tasks (no search) for a workspace with pagination.
-func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, taskFilter, workflowID, repositoryID string, pageSize, offset int) (*sql.Rows, int, error) {
+func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, taskFilter, workflowID, repositoryID string, pageSize, offset int, sort string) (*sql.Rows, int, error) {
 	args := []interface{}{workspaceID}
 	if workflowID != "" {
 		taskFilter += " AND workflow_id = ?"
@@ -484,10 +486,30 @@ func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, taskFilter,
 		SELECT `+taskSelectColumns("t")+`
 		FROM tasks t
 		WHERE t.workspace_id = ?`+rewriteFilterForAlias(taskFilter, "t")+`
-		ORDER BY t.updated_at DESC
+		ORDER BY `+taskListOrderBy("t", sort)+`
 		LIMIT ? OFFSET ?
 	`), append(append([]interface{}{}, args...), pageSize, offset)...)
 	return rows, total, err
+}
+
+func taskListOrderBy(alias, sort string) string {
+	prefix := alias + "."
+	switch sort {
+	case usermodels.TasksListSortUpdatedAsc:
+		return prefix + "updated_at ASC, " + prefix + "title COLLATE NOCASE ASC, " + prefix + "id ASC"
+	case usermodels.TasksListSortCreatedDesc:
+		return prefix + "created_at DESC, " + prefix + "title COLLATE NOCASE ASC, " + prefix + "id ASC"
+	case usermodels.TasksListSortCreatedAsc:
+		return prefix + "created_at ASC, " + prefix + "title COLLATE NOCASE ASC, " + prefix + "id ASC"
+	case usermodels.TasksListSortTitleAsc:
+		return prefix + "title COLLATE NOCASE ASC, " + prefix + "updated_at DESC, " + prefix + "id ASC"
+	case usermodels.TasksListSortTitleDesc:
+		return prefix + "title COLLATE NOCASE DESC, " + prefix + "updated_at DESC, " + prefix + "id ASC"
+	case usermodels.TasksListSortUpdatedDesc:
+		fallthrough
+	default:
+		return prefix + "updated_at DESC, " + prefix + "title COLLATE NOCASE ASC, " + prefix + "id ASC"
+	}
 }
 
 // rewriteFilterForAlias prefixes bare column references in `filter` with
@@ -557,7 +579,7 @@ func isWordByte(b byte) bool {
 }
 
 // searchTasks fetches tasks matching a search query for a workspace with pagination.
-func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter, workflowID, repositoryID string, pageSize, offset int, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) (*sql.Rows, int, error) {
+func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter, workflowID, repositoryID string, pageSize, offset int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) (*sql.Rows, int, error) {
 	searchPattern := "%" + query + "%"
 	like := dialect.Like(r.ro.DriverName())
 
@@ -616,9 +638,9 @@ func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter
 			r.name %s ? OR
 			r.local_path %s ?
 		)
-		ORDER BY t.updated_at DESC
+		ORDER BY %s
 		LIMIT ? OFFSET ?
-	`, taskSelectColumns("t"), tFilter, like, like, like, like)
+	`, taskSelectColumns("t"), tFilter, like, like, like, like, taskListOrderBy("t", sort))
 	selectArgs := append(append([]interface{}{}, countArgs...), pageSize, offset)
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(selectQuery), selectArgs...)
 	return rows, total, err

@@ -12,7 +12,6 @@ import { TasksPageClient } from "./tasks-page-client";
 import {
   parseTasksListGroup,
   parseTasksListSort,
-  sortTasksForList,
   type TasksListGroup,
   type TasksListSort,
 } from "@/lib/tasks/tasks-list-options";
@@ -68,6 +67,7 @@ async function fetchWorkspaceData(
       pageSize: 25,
       workflowId: savedWorkflowId,
       repositoryId: savedRepositoryId,
+      sort: tasksListSort,
     }),
   ]);
 
@@ -83,7 +83,7 @@ async function fetchWorkspaceData(
   return {
     workflows,
     repositories: repositoriesResponse.repositories,
-    tasks: sortTasksForList(tasksResponse.tasks, tasksListSort),
+    tasks: tasksResponse.tasks,
     total: tasksResponse.total,
     activeWorkflowId,
   };

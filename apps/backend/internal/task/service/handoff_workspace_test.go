@@ -353,7 +353,7 @@ func (r *phase4TaskRepo) ListTasks(context.Context, string) ([]*models.Task, err
 	r.panicNotUsed("ListTasks")
 	return nil, nil
 }
-func (r *phase4TaskRepo) ListTasksByWorkspace(context.Context, string, string, string, string, int, int, bool, bool, bool, bool) ([]*models.Task, int, error) {
+func (r *phase4TaskRepo) ListTasksByWorkspace(context.Context, string, string, string, string, int, int, string, bool, bool, bool, bool) ([]*models.Task, int, error) {
 	r.panicNotUsed("ListTasksByWorkspace")
 	return nil, 0, nil
 }

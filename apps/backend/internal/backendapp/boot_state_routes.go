@@ -75,7 +75,7 @@ func (b bootStateBuilder) tasksPageBootData(ctx context.Context, req *http.Reque
 	}
 	repositories := b.repositoriesForState(ctx, activeWorkspaceID, state)
 	steps := b.workflowStepsForWorkspace(ctx, activeWorkspaceID)
-	tasks, total := b.tasksForWorkspace(ctx, activeWorkspaceID, activeWorkflowID, settingsRepositoryID)
+	tasks, total := b.tasksForWorkspace(ctx, activeWorkspaceID, activeWorkflowID, settingsRepositoryID, tasksListSort)
 	routeData := map[string]any{
 		"activeWorkspaceId": activeWorkspaceID,
 		"workflows":         workflowsToDTOs(workflows),
@@ -245,8 +245,8 @@ func (b bootStateBuilder) workflowStepsForWorkspace(ctx context.Context, workspa
 	return items
 }
 
-func (b bootStateBuilder) tasksForWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID string) ([]taskdto.TaskDTO, int) {
-	tasks, total, err := b.p.taskSvc.ListTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, "", 1, 25, false, false, false, false)
+func (b bootStateBuilder) tasksForWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, sort string) ([]taskdto.TaskDTO, int) {
+	tasks, total, err := b.p.taskSvc.ListTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, "", 1, 25, sort, false, false, false, false)
 	if err != nil {
 		b.logBootError("list tasks page tasks", err)
 		return []taskdto.TaskDTO{}, 0

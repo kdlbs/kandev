@@ -8,7 +8,7 @@ import { KanbanHeader } from "@/components/kanban/kanban-header";
 import { MobileSearchBar } from "@/components/kanban/mobile-search-bar";
 import type { Task, Workspace, Workflow, Repository } from "@/lib/types/http";
 import { useToast } from "@/components/toast-provider";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useDebounce } from "@/hooks/use-debounce";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -47,6 +47,28 @@ type UseTaskOperationsParams = {
   setTotal: (total: number) => void;
 };
 
+function useLatestWorkspaceRequest(activeWorkspaceId: string | null) {
+  const latestFetchRef = useRef({ seq: 0, workspaceId: activeWorkspaceId });
+
+  useEffect(() => {
+    latestFetchRef.current.workspaceId = activeWorkspaceId;
+  }, [activeWorkspaceId]);
+
+  const beginRequest = useCallback((workspaceId: string) => {
+    const seq = latestFetchRef.current.seq + 1;
+    latestFetchRef.current = { seq, workspaceId };
+    return seq;
+  }, []);
+
+  const isCurrentRequest = useCallback(
+    (seq: number, workspaceId: string) =>
+      latestFetchRef.current.seq === seq && latestFetchRef.current.workspaceId === workspaceId,
+    [],
+  );
+
+  return { beginRequest, isCurrentRequest };
+}
+
 function useTaskOperations({
   activeWorkspaceId,
   activeWorkflowId,
@@ -61,9 +83,12 @@ function useTaskOperations({
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
+  const { beginRequest, isCurrentRequest } = useLatestWorkspaceRequest(activeWorkspaceId);
 
   const fetchTasks = useCallback(async () => {
     if (!activeWorkspaceId) return;
+    const requestSeq = beginRequest(activeWorkspaceId);
+    const shouldCommit = () => isCurrentRequest(requestSeq, activeWorkspaceId);
     setIsLoading(true);
     try {
       const result = await listTasksByWorkspace(activeWorkspaceId, {
@@ -73,17 +98,20 @@ function useTaskOperations({
         includeArchived: showArchived,
         workflowId: activeWorkflowId,
         repositoryId: selectedRepositoryId,
+        sort: tasksListSort,
       });
-      setTasks(sortTasksForList(result.tasks, tasksListSort));
+      if (!shouldCommit()) return;
+      setTasks(result.tasks);
       setTotal(result.total);
     } catch (err) {
+      if (!shouldCommit()) return;
       toast({
         title: "Failed to load tasks",
         description: err instanceof Error ? err.message : "Unknown error",
         variant: "error",
       });
     } finally {
-      setIsLoading(false);
+      if (shouldCommit()) setIsLoading(false);
     }
   }, [
     activeWorkspaceId,
@@ -94,6 +122,8 @@ function useTaskOperations({
     debouncedQuery,
     showArchived,
     tasksListSort,
+    beginRequest,
+    isCurrentRequest,
     toast,
     setTasks,
     setTotal,
@@ -314,25 +344,28 @@ function useTasksListPreferenceSync({
   tasksListGroup,
   setTasksListGroup,
   setTasks,
+  setPagination,
 }: {
   tasksListSort: TasksListSort;
   setTasksListSort: (sort: TasksListSort) => void;
   tasksListGroup: TasksListGroup;
   setTasksListGroup: (group: TasksListGroup) => void;
   setTasks: (tasks: Task[] | ((prev: Task[]) => Task[])) => void;
+  setPagination: (next: PaginationState | ((prev: PaginationState) => PaginationState)) => void;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const userSettings = useAppStore((state) => state.userSettings);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
+  const store = useAppStoreApi();
 
   const persistPreferences = useCallback(
     (sort: TasksListSort, group: TasksListGroup) => {
-      if (userSettings.tasksListSort === sort && userSettings.tasksListGroup === group) {
+      const current = store.getState().userSettings;
+      const setUserSettings = store.getState().setUserSettings;
+      if (current.tasksListSort === sort && current.tasksListGroup === group) {
         return;
       }
       setUserSettings({
-        ...userSettings,
+        ...current,
         tasksListSort: sort,
         tasksListGroup: group,
         loaded: true,
@@ -345,7 +378,7 @@ function useTasksListPreferenceSync({
         { cache: "no-store" },
       ).catch(() => {});
     },
-    [setUserSettings, userSettings],
+    [store],
   );
 
   useEffect(() => {
@@ -360,6 +393,7 @@ function useTasksListPreferenceSync({
     if (nextSort !== tasksListSort) {
       setTasksListSort(nextSort);
       setTasks((prev) => sortTasksForList(prev, nextSort));
+      setPagination((prev) => ({ ...prev, pageIndex: 0 }));
     }
     if (nextGroup !== tasksListGroup) {
       setTasksListGroup(nextGroup);
@@ -368,6 +402,7 @@ function useTasksListPreferenceSync({
   }, [
     persistPreferences,
     searchParams,
+    setPagination,
     setTasks,
     setTasksListGroup,
     setTasksListSort,
@@ -390,10 +425,11 @@ function useTasksListPreferenceSync({
     (sort: TasksListSort) => {
       setTasksListSort(sort);
       setTasks((prev) => sortTasksForList(prev, sort));
+      setPagination((prev) => ({ ...prev, pageIndex: 0 }));
       writeUrl(sort, tasksListGroup);
       persistPreferences(sort, tasksListGroup);
     },
-    [persistPreferences, setTasks, setTasksListSort, tasksListGroup, writeUrl],
+    [persistPreferences, setPagination, setTasks, setTasksListSort, tasksListGroup, writeUrl],
   );
 
   const handleGroupChange = useCallback(
@@ -419,6 +455,7 @@ export function TasksPageClient(props: TasksPageClientProps) {
     tasksListGroup: s.tasksListGroup,
     setTasksListGroup: s.setTasksListGroup,
     setTasks: s.setTasks,
+    setPagination: s.setPagination,
   });
 
   useEffect(() => {
