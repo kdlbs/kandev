@@ -9,7 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/db"
 )
 
-func TestRecordSchemaVersionRecordsForPostgres(t *testing.T) {
+func TestRecordSchemaVersionIgnoresDriver(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "kandev.db")
 	raw, err := db.OpenSQLite(dbPath)
 	if err != nil {
@@ -27,6 +27,8 @@ func TestRecordSchemaVersionRecordsForPostgres(t *testing.T) {
 		t.Fatalf("create kandev_meta: %v", err)
 	}
 
+	// The driver argument is accepted for compatibility but ignored; even a
+	// "postgres" value must not skip recording the schema version.
 	recordSchemaVersion(writer, "postgres", "v9.9.9", nil)
 
 	var version string
