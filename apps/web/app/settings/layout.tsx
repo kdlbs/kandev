@@ -8,7 +8,9 @@ import {
   listExecutors,
   listWorkspaces,
 } from "@/lib/api";
+import { resolveActiveId } from "@/lib/ssr/resolve-active-id";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import { readCookies } from "@/lib/server/cookies";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
@@ -21,7 +23,7 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
     // Fetch discovery + available agents alongside the DB-backed list so a
     // hard refresh of /settings/agents/[name] (where no profile exists yet)
     // can still render the agent from the discovered set.
-    const [workspaces, executors, agents, discovery, available, userSettingsResponse] =
+    const [workspaces, executors, agents, discovery, available, userSettingsResponse, cookieStore] =
       await Promise.all([
         listWorkspaces({ cache: "no-store" }),
         listExecutors({ cache: "no-store" }),
@@ -29,23 +31,30 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
         listAgentDiscovery({ cache: "no-store" }),
         listAvailableAgents({ cache: "no-store" }),
         fetchUserSettings({ cache: "no-store" }).catch(() => null),
+        readCookies().catch(() => null),
       ]);
     // Hydrate userSettings into the ROOT store so app-global, override-driven
     // shortcuts (TOGGLE_SIDEBAR, Quick Chat) work on settings routes too. The
     // settings/general page mounts its own nested store for editing; that store
     // is invisible to the root-mounted GlobalCommands/useAppShortcuts.
     const mappedUserSettings = mapUserSettingsResponse(userSettingsResponse);
+    const activeWorkspaceId = resolveActiveId(
+      workspaces.workspaces,
+      cookieStore?.get("kandev-active-workspace")?.value ?? null,
+      userSettingsResponse?.settings?.workspace_id ?? null,
+    );
     initialState = {
       workspaces: {
         items: workspaces.workspaces.map((workspace) => ({
           id: workspace.id,
           name: workspace.name,
+          office_workflow_id: workspace.office_workflow_id ?? null,
           default_executor_id: workspace.default_executor_id ?? null,
           default_environment_id: workspace.default_environment_id ?? null,
           default_agent_profile_id: workspace.default_agent_profile_id ?? null,
           default_config_agent_profile_id: workspace.default_config_agent_profile_id ?? null,
         })),
-        activeId: workspaces.workspaces[0]?.id ?? null,
+        activeId: activeWorkspaceId,
       },
       executors: {
         items: executors.executors,
@@ -77,7 +86,7 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
         ? {
             userSettings: {
               ...mappedUserSettings,
-              workspaceId: workspaces.workspaces[0]?.id ?? null,
+              workspaceId: activeWorkspaceId,
             },
           }
         : {}),

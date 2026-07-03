@@ -34,5 +34,5 @@ export function readCookie(name: string): string | null {
 }
 
 export function readActiveWorkspaceCookie(): string | null {
-  return readCookie(ACTIVE_WORKSPACE_COOKIE) || readCookie(LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE);
+  return readCookie(ACTIVE_WORKSPACE_COOKIE) || null;
 }

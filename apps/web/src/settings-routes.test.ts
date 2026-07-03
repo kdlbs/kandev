@@ -1,13 +1,30 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import { workspaceId } from "@/lib/types/ids";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
 import { buildSettingsInitialStateForRoute } from "./settings-routes";
 
 describe("buildSettingsInitialStateForRoute", () => {
+  beforeEach(() => {
+    document.cookie = "kandev-active-workspace=; path=/; max-age=0";
+  });
+
   it("prefers the workspace matching the URL path param", () => {
     const state = buildState({
       pathname: "/settings/workspace/ws-2/repositories",
+      workspaces: workspaceRows(["ws-1", "ws-2"]),
+      userSettingsResponse: userSettings({ workspace_id: workspaceId("ws-1") }),
+    });
+
+    expect(state.workspaces?.activeId).toBe("ws-2");
+    expect(state.userSettings?.workspaceId).toBe("ws-2");
+  });
+
+  it("keeps the active workspace cookie on global settings pages", () => {
+    document.cookie = "kandev-active-workspace=ws-2; path=/";
+
+    const state = buildState({
+      pathname: "/settings/integrations",
       workspaces: workspaceRows(["ws-1", "ws-2"]),
       userSettingsResponse: userSettings({ workspace_id: workspaceId("ws-1") }),
     });

@@ -51,9 +51,9 @@ describe("readCookie", () => {
     expect(readActiveWorkspaceCookie()).toBe("kanban-1");
   });
 
-  it("falls back to the legacy office active workspace cookie", () => {
+  it("does not use the legacy office cookie as the generic active workspace", () => {
     document.cookie = "office-active-workspace=office-1; path=/";
 
-    expect(readActiveWorkspaceCookie()).toBe("office-1");
+    expect(readActiveWorkspaceCookie()).toBeNull();
   });
 });

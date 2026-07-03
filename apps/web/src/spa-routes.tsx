@@ -199,8 +199,11 @@ function useKanbanRouteBootstrap(route: Extract<SpaRoute, { kind: "kanban" }>) {
       const settingsWorkspaceId = settingsResponse?.settings?.workspace_id || null;
       const settingsWorkflowId = settingsResponse?.settings?.workflow_filter_id || null;
       const workspaceItems = workspacesResponse.workspaces.map(mapWorkspaceItem);
+      const kanbanWorkspaceItems = workspaceItems.filter(
+        (workspace) => !workspace.office_workflow_id,
+      );
       const activeWorkspaceId = resolveActiveId(
-        workspaceItems,
+        kanbanWorkspaceItems,
         route.workspaceId,
         readActiveWorkspaceCookie(),
         settingsWorkspaceId,

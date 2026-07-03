@@ -73,6 +73,16 @@ function buildBaseState(
   };
 }
 
+function resolveActiveKanbanWorkspaceId(
+  workspaces: WorkspaceItem[],
+  workspaceId: string | undefined,
+  cookieWorkspaceId: string | null,
+  settingsWorkspaceId: string | null,
+): string | null {
+  const kanbanWorkspaces = workspaces.filter((workspace) => !workspace.office_workflow_id);
+  return resolveActiveId(kanbanWorkspaces, workspaceId, cookieWorkspaceId, settingsWorkspaceId);
+}
+
 async function loadSnapshotState(
   workflowId: string,
   taskId: string | undefined,
@@ -125,10 +135,11 @@ export default async function Page({ searchParams }: PageProps) {
     const settingsWorkspaceId = userSettingsResponse?.settings?.workspace_id || null;
     const settingsWorkflowId = userSettingsResponse?.settings?.workflow_filter_id || null;
     // The sidebar picker writes the selected workspace to this cookie so the
-    // choice survives a refresh even when office is disabled (userSettings is
-    // not updated on select). Priority: URL param > cookie > saved setting.
-    const cookieWorkspaceId = cookieStore?.get("office-active-workspace")?.value ?? null;
-    const activeWorkspaceId = resolveActiveId(
+    // choice survives a refresh even when userSettings is not updated on select.
+    // Kanban home only resolves against kanban workspaces; office workspaces
+    // belong under /office.
+    const cookieWorkspaceId = cookieStore?.get("kandev-active-workspace")?.value ?? null;
+    const activeWorkspaceId = resolveActiveKanbanWorkspaceId(
       workspaces.workspaces,
       workspaceId,
       cookieWorkspaceId,
