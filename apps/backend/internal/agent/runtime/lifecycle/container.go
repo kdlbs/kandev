@@ -225,11 +225,13 @@ func (cm *ContainerManager) createInstanceAndClient(
 	assumeMcpSse := false
 	assumeMcpHttp := false
 	requiresProcessKill := false
+	var stripEnv []string
 	if config.AgentConfig != nil {
 		if rt := config.AgentConfig.Runtime(); rt != nil {
 			assumeMcpSse = rt.AssumeMcpSse
 			assumeMcpHttp = rt.AssumeMcpHttp
 			requiresProcessKill = rt.RequiresProcessKill
+			stripEnv = rt.StripEnv
 		}
 	}
 
@@ -251,6 +253,7 @@ func (cm *ContainerManager) createInstanceAndClient(
 		AssumeMcpHttp:       assumeMcpHttp,
 		McpMode:             config.McpMode,
 		RequiresProcessKill: requiresProcessKill,
+		StripEnv:            stripEnv,
 		BaseBranches:        config.BaseBranches,
 	}
 

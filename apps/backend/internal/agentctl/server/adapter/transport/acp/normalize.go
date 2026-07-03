@@ -279,6 +279,9 @@ func (n *Normalizer) UpdatePayloadInput(payload *streams.NormalizedPayload, rawI
 	if se := payload.ShellExec(); se != nil {
 		updateShellExecInput(se, inputMap)
 	}
+	if gen := payload.Generic(); gen != nil {
+		updateGenericInput(gen, inputMap, supplemental)
+	}
 	// Claude ACP sends file_path in incremental rawInput updates; OpenCode uses filePath.
 	if mf := payload.ModifyFile(); mf != nil {
 		updateModifyFileInput(mf, supplemental, inputMap)
@@ -293,6 +296,45 @@ func (n *Normalizer) UpdatePayloadInput(payload *streams.NormalizedPayload, rawI
 	// tool_call_update rawInput (Claude/OpenCode); fill empty fields only.
 	if sa := payload.SubagentTask(); sa != nil {
 		updateSubagentTaskInput(sa, inputMap)
+	}
+}
+
+func updateGenericInput(gen *streams.GenericPayload, inputMap, supplemental map[string]any) {
+	args, ok := gen.Input.(map[string]any)
+	if !ok || args == nil {
+		// rawInput from ACP is always a JSON object; non-map input values are not expected.
+		args = map[string]any{}
+		gen.Input = args
+	}
+	if len(inputMap) > 0 {
+		rawInput, _ := args["raw_input"].(map[string]any)
+		if rawInput == nil {
+			rawInput = map[string]any{}
+			args["raw_input"] = rawInput
+		}
+		for k, v := range inputMap {
+			if isEmptyGenericInputValue(rawInput[k]) {
+				rawInput[k] = v
+			}
+		}
+	}
+	for k, v := range supplemental {
+		if isEmptyGenericInputValue(args[k]) {
+			args[k] = v
+		}
+	}
+}
+
+// isEmptyGenericInputValue only treats absent values and empty strings as
+// fillable. Other zero values can be meaningful generic tool arguments.
+func isEmptyGenericInputValue(v any) bool {
+	switch x := v.(type) {
+	case nil:
+		return true
+	case string:
+		return x == ""
+	default:
+		return false
 	}
 }
 

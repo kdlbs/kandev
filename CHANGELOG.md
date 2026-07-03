@@ -2,6 +2,20 @@
 
 All notable changes to Kandev.
 
+## 0.72.0 - 2026-07-02
+
+### Features
+
+- press Enter on a dialog to run its semantic action ([#1565](https://github.com/kdlbs/kandev/pull/1565))
+
+### Bug Fixes
+
+- pause on clarification timeout ([#1580](https://github.com/kdlbs/kandev/pull/1580))
+- keep slash command selections as drafts ([#1576](https://github.com/kdlbs/kandev/pull/1576))
+- preserve task create defaults after refresh ([#1575](https://github.com/kdlbs/kandev/pull/1575))
+- prevent infinite refetch loop on the automations settings page ([#1573](https://github.com/kdlbs/kandev/pull/1573)) by @dk-blackfuel
+- add task lifecycle diagnostics ([#1571](https://github.com/kdlbs/kandev/pull/1571))
+
 ## 0.71.0 - 2026-07-01
 
 ### Features

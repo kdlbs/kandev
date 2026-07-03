@@ -214,6 +214,13 @@ type RuntimeConfig struct {
 	// alive). Agentctl still reaps the process group for every agent after
 	// graceful shutdown or timeout; this flag only makes that reap immediate.
 	RequiresProcessKill bool
+	// StripEnv lists environment variables to remove from the agent's child
+	// process environment entirely (not just set to empty). Some programs
+	// distinguish unset from empty string and change behavior based on
+	// presence rather than value. The process manager strips these from the
+	// final child env after adapter merge; the inference executor strips
+	// them from the one-shot probe/inference subprocess env.
+	StripEnv []string
 }
 
 // MountTemplate defines a mount with template variables.

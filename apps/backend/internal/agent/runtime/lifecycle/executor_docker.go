@@ -483,6 +483,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 	assumeMcpSse := false
 	assumeMcpHttp := false
 	requiresProcessKill := false
+	var stripEnv []string
 	if req.AgentConfig != nil {
 		agentType = req.AgentConfig.ID()
 		disableAskQuestion = agents.IsPassthroughOnly(req.AgentConfig)
@@ -490,6 +491,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 			assumeMcpSse = rt.AssumeMcpSse
 			assumeMcpHttp = rt.AssumeMcpHttp
 			requiresProcessKill = rt.RequiresProcessKill
+			stripEnv = rt.StripEnv
 		}
 	}
 	return &agentctl.CreateInstanceRequest{
@@ -510,6 +512,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		AssumeMcpHttp:       assumeMcpHttp,
 		McpMode:             req.McpMode,
 		RequiresProcessKill: requiresProcessKill,
+		StripEnv:            stripEnv,
 		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 	}
 }

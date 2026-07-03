@@ -99,18 +99,54 @@ test.describe("Clarification flow", () => {
     apiClient,
     seedData,
   }) => {
-    const session = await seedClarificationTask(
-      testPage,
-      apiClient,
-      seedData,
-      "Clarification Timeout",
-      "clarification-timeout",
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Clarification Timeout Workflow",
     );
+    const timeoutStep = await apiClient.createWorkflowStep(workflow.id, "Timeout Step", 0);
+    await apiClient.createWorkflowStep(workflow.id, "Should Not Advance", 1);
+
+    await apiClient.updateWorkflowStep(timeoutStep.id, {
+      events: {
+        on_turn_complete: [{ type: "move_to_next" }],
+      },
+    });
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Clarification Timeout",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:clarification-timeout",
+        workflow_id: workflow.id,
+        workflow_step_id: timeoutStep.id,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+    await testPage.goto(`/t/${task.id}`);
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
 
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
     await expect(session.chat).toContainText("Question timed out", { timeout: 30_000 });
     await expect(session.clarificationDeferredNotice()).toBeVisible({ timeout: 10_000 });
     await expect(session.clarificationExpiredNotice()).not.toBeVisible();
+
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id, {
+        timeout: 10_000,
+        message: "clarification timeout must not run on_turn_complete auto-advance",
+      })
+      .toBe(timeoutStep.id);
+
+    const sessionsAfterTimeout = await apiClient.listTaskSessions(task.id);
+    const primarySession = sessionsAfterTimeout.sessions.find(
+      (candidate) => candidate.id === task.session_id,
+    );
+    expect(primarySession?.state).toBe("WAITING_FOR_INPUT");
 
     // Agent moved on; a late answer goes through the event fallback as a new prompt.
     await session.clarificationOption("PostgreSQL").click();

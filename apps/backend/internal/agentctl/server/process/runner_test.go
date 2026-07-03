@@ -299,3 +299,34 @@ func TestMergeEnv_FiltersNpmVars(t *testing.T) {
 		t.Error("CUSTOM_VAR should have been added")
 	}
 }
+
+func TestMergeEnvWithStrip_RemovesDeclaredParentAndCustomVars(t *testing.T) {
+	t.Setenv("ACP_BACKEND", "windsurf")
+	t.Setenv("TEST_KEEP_ME", "yes")
+
+	result := mergeEnvWithStrip(map[string]string{
+		"ACP_BACKEND": "custom",
+		"CUSTOM_VAR":  "custom_value",
+	}, []string{"ACP_BACKEND"})
+
+	resultMap := envSliceToMap(result)
+	if _, exists := resultMap["ACP_BACKEND"]; exists {
+		t.Fatalf("ACP_BACKEND should have been stripped, got %q", resultMap["ACP_BACKEND"])
+	}
+	if resultMap["TEST_KEEP_ME"] != "yes" {
+		t.Fatalf("TEST_KEEP_ME should have been kept, got %q", resultMap["TEST_KEEP_ME"])
+	}
+	if resultMap["CUSTOM_VAR"] != "custom_value" {
+		t.Fatalf("CUSTOM_VAR should have been added, got %q", resultMap["CUSTOM_VAR"])
+	}
+}
+
+func envSliceToMap(env []string) map[string]string {
+	out := make(map[string]string)
+	for _, entry := range env {
+		if eq := strings.IndexByte(entry, '='); eq >= 0 {
+			out[entry[:eq]] = entry[eq+1:]
+		}
+	}
+	return out
+}
