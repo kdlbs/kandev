@@ -3,6 +3,7 @@ package automation
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -207,7 +208,15 @@ func TestService_DeleteAllRuns_SerializesAgainstConcurrentRecordRun(t *testing.T
 	}
 
 	// Simulate DeleteAllRuns being mid-flight by holding its lock directly.
+	// Register cleanup immediately, before any t.Fatal path, so a failure in
+	// the select below (RecordRun completing too early) can't leak the lock
+	// for the rest of the test binary's life. sync.Once makes the explicit
+	// unlock() call below and this cleanup mutually safe against a double
+	// Unlock() panic.
 	unlock := svc.automationRunLock(a.ID)
+	var unlockOnce sync.Once
+	safeUnlock := func() { unlockOnce.Do(unlock) }
+	t.Cleanup(safeUnlock)
 
 	done := make(chan error, 1)
 	go func() {
@@ -227,7 +236,7 @@ func TestService_DeleteAllRuns_SerializesAgainstConcurrentRecordRun(t *testing.T
 		// Expected: RecordRun is still blocked on the lock.
 	}
 
-	unlock()
+	safeUnlock()
 
 	if err := <-done; err != nil {
 		t.Fatalf("RecordRun: %v", err)
