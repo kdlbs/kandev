@@ -330,20 +330,22 @@ function TaskRowActions({
       )}
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-9 w-9 cursor-pointer"
-            disabled={isDeleting}
-            onClick={() => onDeleteOpenChange(true)}
-          >
-            {isDeleting ? (
-              <IconLoader className="h-4 w-4 animate-spin" />
-            ) : (
-              <IconTrash className="h-4 w-4 text-destructive" />
-            )}
-            <span className="sr-only">Delete task</span>
-          </Button>
+          <span tabIndex={isDeleting ? 0 : -1} className="inline-flex">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 cursor-pointer"
+              disabled={isDeleting}
+              onClick={() => onDeleteOpenChange(true)}
+            >
+              {isDeleting ? (
+                <IconLoader className="h-4 w-4 animate-spin" />
+              ) : (
+                <IconTrash className="h-4 w-4 text-destructive" />
+              )}
+              <span className="sr-only">Delete task</span>
+            </Button>
+          </span>
         </TooltipTrigger>
         <TooltipContent>Delete</TooltipContent>
       </Tooltip>
@@ -381,7 +383,7 @@ function TasksPagination({
     next: PaginationState | ((prev: PaginationState) => PaginationState),
   ) => void;
 }) {
-  if (total === 0) return null;
+  if (total === 0 || pageCount <= 1) return null;
   const start = pagination.pageIndex * pagination.pageSize + 1;
   const end = Math.min((pagination.pageIndex + 1) * pagination.pageSize, total);
   const canPrevious = pagination.pageIndex > 0;
