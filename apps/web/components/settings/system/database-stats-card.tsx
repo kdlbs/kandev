@@ -68,7 +68,7 @@ function databaseDriver(database: DatabaseStats): string {
 function formatDriver(driver: string): string {
   if (driver === "postgres") return "PostgreSQL";
   if (driver === "sqlite") return "SQLite";
-  return driver || "SQLite";
+  return driver;
 }
 
 function StatsTable({ database }: { database: DatabaseStats }) {
