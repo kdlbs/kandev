@@ -143,6 +143,8 @@ export type UserSettingsState = {
   kanbanViewMode: string | null;
   workflowId: string | null;
   repositoryIds: string[];
+  tasksListSort: string;
+  tasksListGroup: string;
   preferredShell: string | null;
   shellOptions: Array<{ value: string; label: string }>;
   defaultEditorId: string | null;

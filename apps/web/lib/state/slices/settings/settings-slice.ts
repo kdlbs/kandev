@@ -25,6 +25,8 @@ export const defaultSettingsState: SettingsSliceState = {
     kanbanViewMode: null,
     workflowId: null,
     repositoryIds: [],
+    tasksListSort: "updated_desc",
+    tasksListGroup: "state",
     preferredShell: null,
     shellOptions: [],
     defaultEditorId: null,

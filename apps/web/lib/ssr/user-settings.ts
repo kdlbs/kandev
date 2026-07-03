@@ -18,6 +18,32 @@ export function parseSystemMetricsDisplay(value: UserSettingsData["system_metric
   return { showInTopbar: value?.show_in_topbar ?? false };
 }
 
+export function parseTasksListSort(value: string | undefined): string {
+  switch (value) {
+    case "updated_desc":
+    case "updated_asc":
+    case "created_desc":
+    case "created_asc":
+    case "title_asc":
+    case "title_desc":
+      return value;
+    default:
+      return "updated_desc";
+  }
+}
+
+export function parseTasksListGroup(value: string | undefined): string {
+  switch (value) {
+    case "state":
+    case "workflow":
+    case "repository":
+    case "none":
+      return value;
+    default:
+      return "state";
+  }
+}
+
 /**
  * Maps the backend's snake_case VoiceMode payload into the camelCase shape
  * the store and UI use. Missing or partial payloads fall back to the defaults
@@ -88,6 +114,8 @@ function buildIdentityFields(s: UserSettingsData) {
     workflowId: s.workflow_filter_id || null,
     kanbanViewMode: s.kanban_view_mode || null,
     repositoryIds: s.repository_ids ?? [],
+    tasksListSort: parseTasksListSort(s.tasks_list_sort),
+    tasksListGroup: parseTasksListGroup(s.tasks_list_group),
     preferredShell: s.preferred_shell || null,
     defaultEditorId: s.default_editor_id || null,
     defaultUtilityAgentId: s.default_utility_agent_id || null,
@@ -149,6 +177,8 @@ export function mapUserSettingsResponse(response: UserSettingsResponse | null) {
       workflowId: null,
       kanbanViewMode: null,
       repositoryIds: [] as string[],
+      tasksListSort: "updated_desc",
+      tasksListGroup: "state",
       preferredShell: null,
       shellOptions,
       defaultEditorId: null,

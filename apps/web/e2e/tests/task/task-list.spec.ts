@@ -1,4 +1,14 @@
+import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+
+async function selectListOption(page: Page, testId: string, optionLabel: string) {
+  await page.getByTestId(testId).click();
+  await page.getByRole("listbox").getByRole("option", { name: optionLabel }).click();
+}
+
+async function taskRowTitles(page: Page): Promise<string[]> {
+  return page.getByTestId("tasks-list-row-title").allTextContents();
+}
 
 test.describe("Task List", () => {
   test("seeded task appears in task list", async ({ testPage, apiClient, seedData }) => {
@@ -17,7 +27,16 @@ test.describe("Task List", () => {
       testPage.getByTestId("tasks-list").getByText("Direct Navigate Task"),
     ).toBeVisible();
     await expect(testPage.getByTestId("kanban-header-search")).toBeVisible();
+    await expect(
+      testPage.locator("header").first().getByText("Tasks", { exact: true }),
+    ).toHaveCount(0);
     await expect(testPage.locator("main").getByRole("button", { name: "New Task" })).toHaveCount(0);
+
+    const rowBox = await testPage
+      .getByTestId("tasks-list-row")
+      .filter({ hasText: "Direct Navigate Task" })
+      .boundingBox();
+    expect(rowBox?.height).toBeLessThan(70);
   });
 
   test("subtasks render under their parent with indentation", async ({
@@ -54,5 +73,49 @@ test.describe("Task List", () => {
     await expect(childRow).toHaveAttribute("data-level", "1", { timeout: 5000 });
     await expect(parentRow).toHaveCount(1);
     await expect(childRow).toHaveCount(1);
+    await expect(taskList.getByTestId("tasks-list-row-title")).toHaveText([
+      "Hierarchy Parent Task",
+      "Hierarchy Child Task",
+    ]);
+  });
+
+  test("sort and group options are deep-linkable and persisted", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.createTask(seedData.workspaceId, "Alpha sort task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await apiClient.createTask(seedData.workspaceId, "Zulu sort task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+
+    await testPage.goto("/tasks?sort=title_desc&group=none");
+    await testPage.waitForLoadState("networkidle");
+    await testPage
+      .getByTestId("kanban-header-search")
+      .getByPlaceholder("Search tasks...")
+      .fill("sort task");
+
+    await expect(testPage.getByTestId("tasks-list-sort")).toContainText("Title Z-A");
+    await expect(testPage.getByTestId("tasks-list-group")).toContainText("None");
+    await expect.poll(() => taskRowTitles(testPage)).toEqual(["Zulu sort task", "Alpha sort task"]);
+
+    await selectListOption(testPage, "tasks-list-sort", "Title A-Z");
+    await selectListOption(testPage, "tasks-list-group", "State");
+
+    await expect(testPage).toHaveURL((url) => {
+      return (
+        url.searchParams.get("sort") === "title_asc" && url.searchParams.get("group") === "state"
+      );
+    });
+    await expect.poll(() => taskRowTitles(testPage)).toEqual(["Alpha sort task", "Zulu sort task"]);
+
+    const settings = await apiClient.getUserSettings();
+    expect(settings.settings.tasks_list_sort).toBe("title_asc");
+    expect(settings.settings.tasks_list_group).toBe("state");
   });
 });

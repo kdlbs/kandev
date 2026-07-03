@@ -646,6 +646,8 @@ export class ApiClient {
     default_utility_model?: string;
     sidebar_views?: unknown[];
     kanban_view_mode?: string;
+    tasks_list_sort?: string;
+    tasks_list_group?: string;
     voice_mode?: VoiceModeSettings;
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);

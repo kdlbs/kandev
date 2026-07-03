@@ -25,6 +25,8 @@ var (
 const (
 	changesPanelLayoutFlat = "flat"
 	changesPanelLayoutTree = "tree"
+	tasksListSortDefault   = "updated_desc"
+	tasksListGroupDefault  = "state"
 )
 
 type Service struct {
@@ -39,6 +41,8 @@ type UpdateUserSettingsRequest struct {
 	KanbanViewMode              *string
 	WorkflowFilterID            *string
 	RepositoryIDs               *[]string
+	TasksListSort               *string
+	TasksListGroup              *string
 	InitialSetupComplete        *bool
 	PreferredShell              *string
 	DefaultEditorID             *string
@@ -193,6 +197,9 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	if req.RepositoryIDs != nil {
 		settings.RepositoryIDs = *req.RepositoryIDs
 	}
+	if err := applyTasksListPreferences(settings, req.TasksListSort, req.TasksListGroup); err != nil {
+		return err
+	}
 	if req.InitialSetupComplete != nil {
 		settings.InitialSetupComplete = *req.InitialSetupComplete
 	}
@@ -246,6 +253,48 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 		settings.TerminalFontSize = v
 	}
 	return nil
+}
+
+func applyTasksListPreferences(settings *models.UserSettings, sortValue, groupValue *string) error {
+	if sortValue != nil {
+		v := strings.TrimSpace(*sortValue)
+		if v == "" {
+			v = tasksListSortDefault
+		}
+		if !validTasksListSort(v) {
+			return errors.New("tasks_list_sort must be one of updated_desc, updated_asc, created_desc, created_asc, title_asc, title_desc")
+		}
+		settings.TasksListSort = v
+	}
+	if groupValue != nil {
+		v := strings.TrimSpace(*groupValue)
+		if v == "" {
+			v = tasksListGroupDefault
+		}
+		if !validTasksListGroup(v) {
+			return errors.New("tasks_list_group must be one of state, workflow, repository, none")
+		}
+		settings.TasksListGroup = v
+	}
+	return nil
+}
+
+func validTasksListSort(value string) bool {
+	switch value {
+	case "updated_desc", "updated_asc", "created_desc", "created_asc", "title_asc", "title_desc":
+		return true
+	default:
+		return false
+	}
+}
+
+func validTasksListGroup(value string) bool {
+	switch value {
+	case "state", "workflow", "repository", "none":
+		return true
+	default:
+		return false
+	}
 }
 
 func applyTerminalLinkBehavior(settings *models.UserSettings, value *string) error {
@@ -505,6 +554,8 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"kanban_view_mode":                settings.KanbanViewMode,
 		"workflow_filter_id":              settings.WorkflowFilterID,
 		"repository_ids":                  settings.RepositoryIDs,
+		"tasks_list_sort":                 settings.TasksListSort,
+		"tasks_list_group":                settings.TasksListGroup,
 		"initial_setup_complete":          settings.InitialSetupComplete,
 		"preferred_shell":                 settings.PreferredShell,
 		"default_editor_id":               settings.DefaultEditorID,

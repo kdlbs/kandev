@@ -218,11 +218,21 @@ function mapEditorSettingsFields(
   s: NonNullable<NonNullable<UpdateUserSettingsResponse>["settings"]>,
 ) {
   return {
+    ...mapTasksListSettingsFields(s),
     ...mapEditorBehaviorFields(s),
     ...mapEditorLspFields(s),
     ...mapEditorSidebarFields(s),
     ...mapEditorSyncedLocalFields(s),
     loaded: true as const,
+  };
+}
+
+function mapTasksListSettingsFields(
+  s: NonNullable<NonNullable<UpdateUserSettingsResponse>["settings"]>,
+) {
+  return {
+    tasksListSort: s.tasks_list_sort ?? "updated_desc",
+    tasksListGroup: s.tasks_list_group ?? "state",
   };
 }
 

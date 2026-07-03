@@ -50,6 +50,8 @@ function makeUnloadedSettings(): UserSettingsState {
     workflowId: null,
     kanbanViewMode: null,
     repositoryIds: [],
+    tasksListSort: "updated_desc",
+    tasksListGroup: "state",
     preferredShell: null,
     shellOptions: [],
     defaultEditorId: null,

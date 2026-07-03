@@ -44,6 +44,8 @@ export type UserSettings = {
   kanban_view_mode?: string;
   workflow_filter_id?: string;
   repository_ids: string[];
+  tasks_list_sort?: string;
+  tasks_list_group?: string;
   initial_setup_complete?: boolean;
   preferred_shell?: string;
   default_editor_id?: string;
@@ -88,6 +90,8 @@ export type UserSettingsUpdatePayload = {
   workflow_filter_id?: string;
   kanban_view_mode?: string;
   repository_ids?: string[];
+  tasks_list_sort?: string;
+  tasks_list_group?: string;
   preferred_shell?: string;
   default_editor_id?: string;
   enable_preview_on_click?: boolean;

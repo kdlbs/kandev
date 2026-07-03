@@ -59,6 +59,8 @@ function carryForwardCoreSettings(current: DisplaySettings) {
     savedLayouts: current.savedLayouts ?? [],
     defaultUtilityAgentId: current.defaultUtilityAgentId ?? null,
     keyboardShortcuts: current.keyboardShortcuts ?? {},
+    tasksListSort: current.tasksListSort ?? "updated_desc",
+    tasksListGroup: current.tasksListGroup ?? "state",
     changesPanelLayout: current.changesPanelLayout ?? "tree",
     systemMetricsDisplay: current.systemMetricsDisplay ?? { showInTopbar: false },
     voiceMode: current.voiceMode ?? { ...DEFAULT_VOICE_MODE_STATE },

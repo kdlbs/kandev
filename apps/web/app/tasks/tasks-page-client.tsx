@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
-import { useRouter } from "@/lib/routing/client-router";
+import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import type { PaginationState } from "@tanstack/react-table";
-import { archiveTask, deleteTask, listTasksByWorkspace } from "@/lib/api";
+import { archiveTask, deleteTask, listTasksByWorkspace, updateUserSettings } from "@/lib/api";
 import { KanbanHeader } from "@/components/kanban/kanban-header";
 import { MobileSearchBar } from "@/components/kanban/mobile-search-bar";
-import type { Task, Workspace, Workflow, WorkflowStep, Repository } from "@/lib/types/http";
+import type { Task, Workspace, Workflow, Repository } from "@/lib/types/http";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
@@ -15,16 +15,24 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { linkToTask } from "@/lib/links";
 import { shouldSkipInitialTasksFetch } from "./tasks-page-fetch-policy";
 import { TasksListView } from "./tasks-list-view";
+import {
+  parseTasksListGroup,
+  parseTasksListSort,
+  sortTasksForList,
+  type TasksListGroup,
+  type TasksListSort,
+} from "./tasks-list-options";
 
 interface TasksPageClientProps {
   workspaces: Workspace[];
   initialWorkspaceId?: string;
   initialWorkflows: Workflow[];
-  initialSteps: WorkflowStep[];
   initialRepositories: Repository[];
   initialTasks: Task[];
   initialTotal: number;
   initialDataLoaded?: boolean;
+  initialSort: TasksListSort;
+  initialGroup: TasksListGroup;
 }
 
 type UseTaskOperationsParams = {
@@ -34,6 +42,7 @@ type UseTaskOperationsParams = {
   pagination: PaginationState;
   debouncedQuery: string;
   showArchived: boolean;
+  tasksListSort: TasksListSort;
   setTasks: (tasks: Task[]) => void;
   setTotal: (total: number) => void;
 };
@@ -45,6 +54,7 @@ function useTaskOperations({
   pagination,
   debouncedQuery,
   showArchived,
+  tasksListSort,
   setTasks,
   setTotal,
 }: UseTaskOperationsParams) {
@@ -64,7 +74,7 @@ function useTaskOperations({
         workflowId: activeWorkflowId,
         repositoryId: selectedRepositoryId,
       });
-      setTasks(result.tasks);
+      setTasks(sortTasksForList(result.tasks, tasksListSort));
       setTotal(result.total);
     } catch (err) {
       toast({
@@ -83,6 +93,7 @@ function useTaskOperations({
     pagination.pageSize,
     debouncedQuery,
     showArchived,
+    tasksListSort,
     toast,
     setTasks,
     setTotal,
@@ -129,31 +140,33 @@ function useTaskOperations({
 
 function useTasksPageViewState({
   initialWorkflows,
-  initialSteps,
   initialRepositories,
   initialTasks,
   initialTotal,
+  initialSort,
+  initialGroup,
   storeRepositories,
 }: {
   initialWorkflows: Workflow[];
-  initialSteps: WorkflowStep[];
   initialRepositories: Repository[];
   initialTasks: Task[];
   initialTotal: number;
+  initialSort: TasksListSort;
+  initialGroup: TasksListGroup;
   storeRepositories: Repository[];
 }) {
   const [workflows] = useState(initialWorkflows);
-  const [steps] = useState(initialSteps);
   const repositories = storeRepositories.length > 0 ? storeRepositories : initialRepositories;
   const [tasks, setTasks] = useState(initialTasks);
   const [total, setTotal] = useState(initialTotal);
   const [searchQuery, setSearchQuery] = useState("");
+  const [tasksListSort, setTasksListSort] = useState<TasksListSort>(initialSort);
+  const [tasksListGroup, setTasksListGroup] = useState<TasksListGroup>(initialGroup);
   const [showArchived, setShowArchived] = useState(false);
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 25 });
 
   return {
     workflows,
-    steps,
     repositories,
     tasks,
     setTasks,
@@ -161,6 +174,10 @@ function useTasksPageViewState({
     setTotal,
     searchQuery,
     setSearchQuery,
+    tasksListSort,
+    setTasksListSort,
+    tasksListGroup,
+    setTasksListGroup,
     showArchived,
     setShowArchived,
     pagination,
@@ -253,10 +270,11 @@ function useTasksPageSetup(props: TasksPageClientProps) {
   } = useKanbanDisplaySettings();
   const viewState = useTasksPageViewState({
     initialWorkflows: props.initialWorkflows,
-    initialSteps: props.initialSteps,
     initialRepositories: props.initialRepositories,
     initialTasks: props.initialTasks,
     initialTotal: props.initialTotal,
+    initialSort: props.initialSort,
+    initialGroup: props.initialGroup,
     storeRepositories,
   });
   const debouncedQuery = useDebounce(viewState.searchQuery, 300);
@@ -267,6 +285,7 @@ function useTasksPageSetup(props: TasksPageClientProps) {
     pagination: viewState.pagination,
     debouncedQuery,
     showArchived: viewState.showArchived,
+    tasksListSort: viewState.tasksListSort,
     setTasks: viewState.setTasks,
     setTotal: viewState.setTotal,
   });
@@ -289,11 +308,118 @@ function useTasksPageSetup(props: TasksPageClientProps) {
   return { ...viewState, ...ops, ...computed, activeWorkspaceId, debouncedQuery };
 }
 
+function useTasksListPreferenceSync({
+  tasksListSort,
+  setTasksListSort,
+  tasksListGroup,
+  setTasksListGroup,
+  setTasks,
+}: {
+  tasksListSort: TasksListSort;
+  setTasksListSort: (sort: TasksListSort) => void;
+  tasksListGroup: TasksListGroup;
+  setTasksListGroup: (group: TasksListGroup) => void;
+  setTasks: (tasks: Task[] | ((prev: Task[]) => Task[])) => void;
+}) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const userSettings = useAppStore((state) => state.userSettings);
+  const setUserSettings = useAppStore((state) => state.setUserSettings);
+
+  const persistPreferences = useCallback(
+    (sort: TasksListSort, group: TasksListGroup) => {
+      if (userSettings.tasksListSort === sort && userSettings.tasksListGroup === group) {
+        return;
+      }
+      setUserSettings({
+        ...userSettings,
+        tasksListSort: sort,
+        tasksListGroup: group,
+        loaded: true,
+      });
+      updateUserSettings(
+        {
+          tasks_list_sort: sort,
+          tasks_list_group: group,
+        },
+        { cache: "no-store" },
+      ).catch(() => {});
+    },
+    [setUserSettings, userSettings],
+  );
+
+  useEffect(() => {
+    const hasSortParam = searchParams.has("sort");
+    const hasGroupParam = searchParams.has("group");
+    if (!hasSortParam && !hasGroupParam) return;
+
+    const nextSort = hasSortParam ? parseTasksListSort(searchParams.get("sort")) : tasksListSort;
+    const nextGroup = hasGroupParam
+      ? parseTasksListGroup(searchParams.get("group"))
+      : tasksListGroup;
+    if (nextSort !== tasksListSort) {
+      setTasksListSort(nextSort);
+      setTasks((prev) => sortTasksForList(prev, nextSort));
+    }
+    if (nextGroup !== tasksListGroup) {
+      setTasksListGroup(nextGroup);
+    }
+    persistPreferences(nextSort, nextGroup);
+  }, [
+    persistPreferences,
+    searchParams,
+    setTasks,
+    setTasksListGroup,
+    setTasksListSort,
+    tasksListGroup,
+    tasksListSort,
+  ]);
+
+  const writeUrl = useCallback(
+    (sort: TasksListSort, group: TasksListGroup) => {
+      const params = new URLSearchParams(window.location.search);
+      params.set("sort", sort);
+      params.set("group", group);
+      const query = params.toString();
+      router.replace(`${window.location.pathname}${query ? `?${query}` : ""}`, { scroll: false });
+    },
+    [router],
+  );
+
+  const handleSortChange = useCallback(
+    (sort: TasksListSort) => {
+      setTasksListSort(sort);
+      setTasks((prev) => sortTasksForList(prev, sort));
+      writeUrl(sort, tasksListGroup);
+      persistPreferences(sort, tasksListGroup);
+    },
+    [persistPreferences, setTasks, setTasksListSort, tasksListGroup, writeUrl],
+  );
+
+  const handleGroupChange = useCallback(
+    (group: TasksListGroup) => {
+      setTasksListGroup(group);
+      writeUrl(tasksListSort, group);
+      persistPreferences(tasksListSort, group);
+    },
+    [persistPreferences, setTasksListGroup, tasksListSort, writeUrl],
+  );
+
+  return { handleSortChange, handleGroupChange };
+}
+
 export function TasksPageClient(props: TasksPageClientProps) {
   const s = useTasksPageSetup(props);
   const setMobileSearchOpen = useAppStore((state) => state.setMobileKanbanSearchOpen);
   const isMobileSearchOpen = useAppStore((state) => state.mobileKanban.isSearchOpen);
   const { isMobile } = useResponsiveBreakpoint();
+  const { handleSortChange, handleGroupChange } = useTasksListPreferenceSync({
+    tasksListSort: s.tasksListSort,
+    setTasksListSort: s.setTasksListSort,
+    tasksListGroup: s.tasksListGroup,
+    setTasksListGroup: s.setTasksListGroup,
+    setTasks: s.setTasks,
+  });
 
   useEffect(() => {
     setMobileSearchOpen(false);
@@ -305,6 +431,7 @@ export function TasksPageClient(props: TasksPageClientProps) {
       <KanbanHeader
         workspaceId={s.activeWorkspaceId ?? undefined}
         currentPage="tasks"
+        hideTitle
         searchQuery={s.searchQuery}
         onSearchChange={s.setSearchQuery}
         isSearchLoading={s.isLoading && !!s.debouncedQuery}
@@ -315,9 +442,12 @@ export function TasksPageClient(props: TasksPageClientProps) {
       <TasksListView
         showArchived={s.showArchived}
         setShowArchived={s.setShowArchived}
+        tasksListSort={s.tasksListSort}
+        onTasksListSortChange={handleSortChange}
+        tasksListGroup={s.tasksListGroup}
+        onTasksListGroupChange={handleGroupChange}
         tasks={s.tasks}
         workflows={s.workflows}
-        steps={s.steps}
         repositories={s.repositories}
         total={s.total}
         pageCount={s.pageCount}

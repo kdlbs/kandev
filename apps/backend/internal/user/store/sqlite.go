@@ -329,6 +329,8 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"kanban_view_mode":                settings.KanbanViewMode,
 		"workflow_filter_id":              settings.WorkflowFilterID,
 		"repository_ids":                  settings.RepositoryIDs,
+		"tasks_list_sort":                 normalizeTasksListSort(settings.TasksListSort),
+		"tasks_list_group":                normalizeTasksListGroup(settings.TasksListGroup),
 		"initial_setup_complete":          settings.InitialSetupComplete,
 		"preferred_shell":                 settings.PreferredShell,
 		"default_editor_id":               settings.DefaultEditorID,
@@ -447,6 +449,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.UserID = userID
 	if settingsRaw == "" || settingsRaw == "{}" {
 		settings.RepositoryIDs = []string{}
+		settings.TasksListSort = defaultTasksListSort()
+		settings.TasksListGroup = defaultTasksListGroup()
 		settings.ShowReleaseNotification = true
 		settings.ReviewAutoMarkOnScroll = true
 		settings.ChatSubmitKey = "cmd_enter"
@@ -463,6 +467,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		KanbanViewMode              string                              `json:"kanban_view_mode"`
 		WorkflowFilterID            string                              `json:"workflow_filter_id"`
 		RepositoryIDs               []string                            `json:"repository_ids"`
+		TasksListSort               string                              `json:"tasks_list_sort"`
+		TasksListGroup              string                              `json:"tasks_list_group"`
 		InitialSetupComplete        bool                                `json:"initial_setup_complete"`
 		PreferredShell              string                              `json:"preferred_shell"`
 		DefaultEditorID             string                              `json:"default_editor_id"`
@@ -502,6 +508,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.KanbanViewMode = payload.KanbanViewMode
 	settings.WorkflowFilterID = payload.WorkflowFilterID
 	settings.RepositoryIDs = payload.RepositoryIDs
+	settings.TasksListSort = normalizeTasksListSort(payload.TasksListSort)
+	settings.TasksListGroup = normalizeTasksListGroup(payload.TasksListGroup)
 	settings.InitialSetupComplete = payload.InitialSetupComplete
 	settings.PreferredShell = payload.PreferredShell
 	settings.DefaultEditorID = payload.DefaultEditorID
@@ -570,6 +578,32 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.ChangesPanelLayout = "tree"
 	}
 	return settings, nil
+}
+
+func defaultTasksListSort() string {
+	return "updated_desc"
+}
+
+func defaultTasksListGroup() string {
+	return "state"
+}
+
+func normalizeTasksListSort(value string) string {
+	switch value {
+	case "updated_desc", "updated_asc", "created_desc", "created_asc", "title_asc", "title_desc":
+		return value
+	default:
+		return defaultTasksListSort()
+	}
+}
+
+func normalizeTasksListGroup(value string) string {
+	switch value {
+	case "state", "workflow", "repository", "none":
+		return value
+	default:
+		return defaultTasksListGroup()
+	}
 }
 
 func normalizeSidebarTaskPrefs(prefs models.SidebarTaskPrefs) models.SidebarTaskPrefs {
