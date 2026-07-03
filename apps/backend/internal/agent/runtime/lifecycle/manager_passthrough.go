@@ -36,7 +36,9 @@ func (m *Manager) MarkPassthroughRunning(sessionID string) error {
 
 	// Only publish if not already running (prevents duplicate events)
 	if execution.Status != v1.AgentStatusRunning {
-		m.executionStore.UpdateStatus(execution.ID, v1.AgentStatusRunning)
+		if err := m.UpdateStatus(execution.ID, v1.AgentStatusRunning); err != nil {
+			return err
+		}
 		m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
 	}
 

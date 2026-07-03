@@ -116,3 +116,34 @@ func TestMarkReadyPersistsReadyExecutorRunningStatus(t *testing.T) {
 		t.Fatalf("persisted port = %d, want 45678", writer.running.AgentctlPort)
 	}
 }
+
+func TestUpdateStatusPersistsRunningExecutorRunningStatus(t *testing.T) {
+	log := newNopLogger(t)
+	client := agentctl.NewClient("127.0.0.1", 45678, log)
+	writer := &captureExecutorRunningWriter{}
+	mgr := newTestManager(t)
+	mgr.SetExecutorRunningWriter(writer)
+
+	if err := mgr.executionStore.Add(&AgentExecution{
+		ID:             "exec-running",
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		RuntimeName:    agentruntime.RuntimeStandalone,
+		Status:         v1.AgentStatusReady,
+		agentctl:       client,
+		standalonePort: 45678,
+	}); err != nil {
+		t.Fatalf("Add execution: %v", err)
+	}
+
+	if err := mgr.UpdateStatus("exec-running", v1.AgentStatusRunning); err != nil {
+		t.Fatalf("UpdateStatus: %v", err)
+	}
+
+	if writer.running == nil {
+		t.Fatal("expected UpdateStatus to persist executors_running row")
+	}
+	if writer.running.Status != models.ExecutorRunningStatusRunning {
+		t.Fatalf("persisted status = %q, want running", writer.running.Status)
+	}
+}

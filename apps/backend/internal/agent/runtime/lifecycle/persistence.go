@@ -213,6 +213,11 @@ func (m *Manager) persistExecutorRunning(ctx context.Context, execution *AgentEx
 	if reader, ok := m.runningWriter.(executorRunningReader); ok {
 		if existing, err := reader.GetExecutorRunningBySessionID(ctx, execution.SessionID); err == nil {
 			prior = existing
+		} else if !errors.Is(err, models.ErrExecutorRunningNotFound) {
+			m.logger.Warn("failed to read prior executors_running row; orchestrator-owned columns may be cleared",
+				zap.String("execution_id", execution.ID),
+				zap.String("session_id", execution.SessionID),
+				zap.Error(err))
 		}
 	}
 
