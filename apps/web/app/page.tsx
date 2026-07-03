@@ -74,7 +74,7 @@ function buildBaseState(
   };
 }
 
-function resolveActiveKanbanWorkspaceId(
+export function resolveActiveKanbanWorkspaceId(
   workspaces: WorkspaceItem[],
   workspaceId: string | undefined,
   cookieWorkspaceId: string | null,
