@@ -66,7 +66,11 @@ import {
 import { listWorkflowTemplates } from "@/lib/api/domains/workflow-api";
 import { listRepositories, listWorkspaces } from "@/lib/api/domains/workspace-api";
 import { useRouter } from "@/lib/routing/client-router";
-import { mapWorkspaceItem, readActiveWorkspaceCookie } from "@/lib/routing/route-bootstrap";
+import {
+  mapWorkspaceItem,
+  readActiveWorkspaceCookie,
+  resolveSettingsActiveWorkspaceId,
+} from "@/lib/routing/route-bootstrap";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type { AppState } from "@/lib/state/store";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
@@ -411,24 +415,6 @@ export function buildSettingsInitialStateForRoute({
         }
       : {}),
   };
-}
-
-function resolveSettingsActiveWorkspaceId(
-  workspaceItems: Array<{ id: string; office_workflow_id: string | null }>,
-  requestedWorkspaceId: string | null,
-  activeCookieWorkspaceId: string | null,
-  settingsWorkspaceId: string | null,
-) {
-  const kanbanWorkspaceItems = workspaceItems.filter((workspace) => !workspace.office_workflow_id);
-
-  return (
-    workspaceItems.find((workspace) => workspace.id === requestedWorkspaceId)?.id ??
-    kanbanWorkspaceItems.find((workspace) => workspace.id === activeCookieWorkspaceId)?.id ??
-    kanbanWorkspaceItems.find((workspace) => workspace.id === settingsWorkspaceId)?.id ??
-    kanbanWorkspaceItems[0]?.id ??
-    workspaceItems[0]?.id ??
-    null
-  );
 }
 
 function WorkspaceRepositoriesRoute({ workspaceId }: { workspaceId: string }) {

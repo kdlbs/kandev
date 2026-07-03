@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { workspaceId } from "@/lib/types/ids";
+import { workspaceId, workflowId } from "@/lib/types/ids";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
 import { buildSettingsInitialStateForRoute } from "./settings-routes";
 
@@ -45,7 +45,7 @@ describe("buildSettingsInitialStateForRoute", () => {
       const state = buildState({
         pathname: SETTINGS_ROUTE,
         workspaces: [
-          buildWorkspace({ id: "ws-office", office_workflow_id: "office" }),
+          buildWorkspace({ id: "ws-office", office_workflow_id: workflowId("office") }),
           buildWorkspace({ id: "ws-kanban", office_workflow_id: null }),
         ],
         userSettingsResponse: userSettings({ workspace_id: workspaceId("ws-kanban") }),
@@ -130,24 +130,28 @@ function buildState(
 }
 
 function buildWorkspace(
-  params: Partial<ListWorkspacesResponse["workspaces"][number]> & {
+  params: Omit<
+    Partial<ListWorkspacesResponse["workspaces"][number]>,
+    "id" | "office_workflow_id"
+  > & {
     id: string;
-    office_workflow_id: string | null;
+    office_workflow_id: ReturnType<typeof workflowId> | null;
   },
 ) {
+  const { id, office_workflow_id, ...rest } = params;
   return {
-    id: workspaceId(params.id),
-    name: `Workspace ${params.id}`,
+    id: workspaceId(id),
+    name: `Workspace ${id}`,
     description: null,
     owner_id: OWNER_ID,
     default_executor_id: null,
     default_environment_id: null,
     default_agent_profile_id: null,
     default_config_agent_profile_id: null,
-    office_workflow_id: params.office_workflow_id,
+    office_workflow_id,
     created_at: TIMESTAMP,
     updated_at: TIMESTAMP,
-    ...params,
+    ...rest,
   } as unknown as ListWorkspacesResponse["workspaces"][number];
 }
 
@@ -162,7 +166,7 @@ function userSettings(
     settings: {
       user_id: OWNER_ID,
       workspace_id: workspaceId(""),
-      workflow_filter_id: "",
+      workflow_filter_id: workflowId(""),
       repository_ids: [],
       updated_at: TIMESTAMP,
       ...settings,

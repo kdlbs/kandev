@@ -8,8 +8,11 @@ import {
   listExecutors,
   listWorkspaces,
 } from "@/lib/api";
-import { ACTIVE_WORKSPACE_COOKIE, mapWorkspaceItem } from "@/lib/routing/route-bootstrap";
-import { resolveActiveId } from "@/lib/ssr/resolve-active-id";
+import {
+  ACTIVE_WORKSPACE_COOKIE,
+  mapWorkspaceItem,
+  resolveSettingsActiveWorkspaceId,
+} from "@/lib/routing/route-bootstrap";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { readCookies } from "@/lib/server/cookies";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
@@ -39,14 +42,16 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
     // settings/general page mounts its own nested store for editing; that store
     // is invisible to the root-mounted GlobalCommands/useAppShortcuts.
     const mappedUserSettings = mapUserSettingsResponse(userSettingsResponse);
-    const activeWorkspaceId = resolveActiveId(
-      workspaces.workspaces,
+    const workspaceItems = workspaces.workspaces.map(mapWorkspaceItem);
+    const activeWorkspaceId = resolveSettingsActiveWorkspaceId(
+      workspaceItems,
+      null,
       cookieStore?.get(ACTIVE_WORKSPACE_COOKIE)?.value ?? null,
       userSettingsResponse?.settings?.workspace_id ?? null,
     );
     initialState = {
       workspaces: {
-        items: workspaces.workspaces.map(mapWorkspaceItem),
+        items: workspaceItems,
         activeId: activeWorkspaceId,
       },
       executors: {

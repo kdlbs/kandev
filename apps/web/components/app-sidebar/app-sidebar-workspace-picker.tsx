@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import {
   rememberLastOfficeWorkspace,
   rememberLastKanbanWorkspace,
+  workspaceHomeHref,
 } from "./app-sidebar-workspace-navigation";
 
 /**
@@ -78,6 +79,14 @@ function WorkspaceTypeIcon({ type, className }: { type: WorkspaceType; className
   return <IconLayoutKanban className={className} />;
 }
 
+function rememberSelectedWorkspace(workspace: WorkspaceItem) {
+  if (workspaceType(workspace) === "office") {
+    rememberLastOfficeWorkspace(workspace);
+  } else {
+    rememberLastKanbanWorkspace(workspace);
+  }
+}
+
 export function AppSidebarWorkspacePicker() {
   const router = useRouter();
   const officeEnabled = useFeature("office");
@@ -93,6 +102,10 @@ export function AppSidebarWorkspacePicker() {
     (workspace: WorkspaceItem) => {
       const { id } = workspace;
       if (id === activeId) {
+        if (officeEnabled) {
+          rememberSelectedWorkspace(workspace);
+          router.push(workspaceHomeHref(workspace));
+        }
         setOpen(false);
         return;
       }

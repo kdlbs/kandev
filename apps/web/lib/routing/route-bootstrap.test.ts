@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { mapWorkspaceItem, readActiveWorkspaceCookie, readCookie } from "./route-bootstrap";
+import {
+  mapWorkspaceItem,
+  readActiveWorkspaceCookie,
+  readCookie,
+  resolveSettingsActiveWorkspaceId,
+} from "./route-bootstrap";
 import type { ListWorkspacesResponse } from "@/lib/types/http";
 
 type WorkspaceItem = ListWorkspacesResponse["workspaces"][number];
@@ -55,5 +60,21 @@ describe("readCookie", () => {
     document.cookie = "office-active-workspace=office-1; path=/";
 
     expect(readActiveWorkspaceCookie()).toBeNull();
+  });
+});
+
+describe("resolveSettingsActiveWorkspaceId", () => {
+  it("falls back to a kanban workspace before an office workspace", () => {
+    expect(
+      resolveSettingsActiveWorkspaceId(
+        [
+          { id: "office-1", office_workflow_id: "office-workflow" },
+          { id: "kanban-1", office_workflow_id: null },
+        ],
+        null,
+        null,
+        null,
+      ),
+    ).toBe("kanban-1");
   });
 });

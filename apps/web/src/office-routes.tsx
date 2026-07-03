@@ -248,7 +248,7 @@ function useOfficeRouteBootstrap(
 }
 
 export function resolveActiveOfficeWorkspaceId(
-  workspaceItems: { id: string }[],
+  workspaceItems: { id: string; office_workflow_id?: string | null }[],
   routeWorkspaceId: string | null,
   activeCookieWorkspaceId: string | null,
   officeCookieWorkspaceId: string | null,
