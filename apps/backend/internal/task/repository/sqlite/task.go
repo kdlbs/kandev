@@ -486,30 +486,37 @@ func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, taskFilter,
 		SELECT `+taskSelectColumns("t")+`
 		FROM tasks t
 		WHERE t.workspace_id = ?`+rewriteFilterForAlias(taskFilter, "t")+`
-		ORDER BY `+taskListOrderBy("t", sort)+`
+		ORDER BY `+taskListOrderBy(r.ro.DriverName(), "t", sort)+`
 		LIMIT ? OFFSET ?
 	`), append(append([]interface{}{}, args...), pageSize, offset)...)
 	return rows, total, err
 }
 
-func taskListOrderBy(alias, sort string) string {
+func taskListOrderBy(driver, alias, sort string) string {
 	prefix := alias + "."
 	switch sort {
 	case usermodels.TasksListSortUpdatedAsc:
-		return prefix + "updated_at ASC, " + prefix + "title COLLATE NOCASE ASC, " + prefix + "id ASC"
+		return prefix + "updated_at ASC, " + taskTitleOrder(driver, prefix, "ASC") + ", " + prefix + "id ASC"
 	case usermodels.TasksListSortCreatedDesc:
-		return prefix + "created_at DESC, " + prefix + "title COLLATE NOCASE ASC, " + prefix + "id ASC"
+		return prefix + "created_at DESC, " + taskTitleOrder(driver, prefix, "ASC") + ", " + prefix + "id ASC"
 	case usermodels.TasksListSortCreatedAsc:
-		return prefix + "created_at ASC, " + prefix + "title COLLATE NOCASE ASC, " + prefix + "id ASC"
+		return prefix + "created_at ASC, " + taskTitleOrder(driver, prefix, "ASC") + ", " + prefix + "id ASC"
 	case usermodels.TasksListSortTitleAsc:
-		return prefix + "title COLLATE NOCASE ASC, " + prefix + "updated_at DESC, " + prefix + "id ASC"
+		return taskTitleOrder(driver, prefix, "ASC") + ", " + prefix + "updated_at DESC, " + prefix + "id ASC"
 	case usermodels.TasksListSortTitleDesc:
-		return prefix + "title COLLATE NOCASE DESC, " + prefix + "updated_at DESC, " + prefix + "id ASC"
+		return taskTitleOrder(driver, prefix, "DESC") + ", " + prefix + "updated_at DESC, " + prefix + "id ASC"
 	case usermodels.TasksListSortUpdatedDesc:
 		fallthrough
 	default:
-		return prefix + "updated_at DESC, " + prefix + "title COLLATE NOCASE ASC, " + prefix + "id ASC"
+		return prefix + "updated_at DESC, " + taskTitleOrder(driver, prefix, "ASC") + ", " + prefix + "id ASC"
 	}
+}
+
+func taskTitleOrder(driver, prefix, direction string) string {
+	if dialect.IsPostgres(driver) {
+		return "LOWER(" + prefix + "title) " + direction + ", " + prefix + "title " + direction
+	}
+	return prefix + "title COLLATE NOCASE " + direction
 }
 
 // rewriteFilterForAlias prefixes bare column references in `filter` with
@@ -640,7 +647,7 @@ func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter
 		)
 		ORDER BY %s
 		LIMIT ? OFFSET ?
-	`, taskSelectColumns("t"), tFilter, like, like, like, like, taskListOrderBy("t", sort))
+	`, taskSelectColumns("t"), tFilter, like, like, like, like, taskListOrderBy(r.ro.DriverName(), "t", sort))
 	selectArgs := append(append([]interface{}{}, countArgs...), pageSize, offset)
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(selectQuery), selectArgs...)
 	return rows, total, err
