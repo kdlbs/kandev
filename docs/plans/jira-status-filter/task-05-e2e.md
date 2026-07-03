@@ -19,10 +19,10 @@ Verify the user-visible flow against the mock Jira client.
 - Uses the mock control routes to seed projects, project statuses, and tickets.
 
 ## Verification
-- `cd apps/web && pnpm e2e -- jira/status-filter.spec.ts`
+- `cd apps/web && pnpm e2e tests/integrations/jira-status-filter.spec.ts`
 
 ## Files likely touched
-- `apps/web/e2e/jira/status-filter.spec.ts`
+- `apps/web/e2e/tests/integrations/jira-status-filter.spec.ts`
 - possibly a shared Jira e2e fixture/helper under `apps/web/e2e/`
 
 ## Inputs

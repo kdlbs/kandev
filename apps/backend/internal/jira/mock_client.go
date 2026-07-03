@@ -123,28 +123,38 @@ func (m *MockClient) SearchTickets(_ context.Context, jql, _ string, maxResults 
 
 // filterByJQL is a stand-in for real JQL parsing. An empty query passes every
 // hit through; a `project in (...)` clause narrows to hits in those projects;
-// a `status in (...)` clause narrows to hits whose StatusName is listed (both
-// clauses compose); a query that mentions a seeded ticket key restricts to that
-// key; a non-empty query that matches none of the above returns every hit (so
+// a `status in (...)` clause narrows to hits whose StatusName is listed; a
+// mentioned seeded ticket key restricts to that key. All three compose, so a
+// query combining project/status with a key still narrows to the key. A
+// non-empty query that carries none of these clauses returns every hit (so
 // tests don't have to construct a fully parseable JQL string just to fetch what
-// they seeded). The project/status handling lets E2E assert the filters narrow
-// the list rather than being a no-op.
+// they seeded). The clause handling lets E2E assert the filters narrow the list
+// rather than being a no-op.
 func filterByJQL(hits []JiraTicket, jql string) []JiraTicket {
 	if jql == "" {
 		return hits
 	}
-	narrowed := false
 	if keys := projectKeysFromJQL(jql); len(keys) > 0 {
 		hits = filterByProjectKeys(hits, keys)
-		narrowed = true
 	}
 	if names := statusNamesFromJQL(jql); len(names) > 0 {
 		hits = filterByStatusNames(hits, names)
-		narrowed = true
 	}
-	if narrowed {
-		return hits
+	// Ticket-key narrowing composes with project/status filters: apply it
+	// whenever the (already narrowed) hits mention a seeded key, so a query that
+	// combines project/status with a key still restricts to that key. When no
+	// key is mentioned, return whatever the project/status clauses left (which
+	// is every hit when the query carried none of these clauses).
+	if matched := filterByTicketKey(hits, jql); matched != nil {
+		return matched
 	}
+	return hits
+}
+
+// filterByTicketKey narrows hits to those whose key appears in the JQL. Returns
+// nil (not an empty slice) when no seeded key is mentioned, so callers can tell
+// "no key clause" apart from "key clause matched nothing".
+func filterByTicketKey(hits []JiraTicket, jql string) []JiraTicket {
 	matched := make([]JiraTicket, 0, len(hits))
 	for _, t := range hits {
 		if t.Key != "" && strings.Contains(jql, t.Key) {
@@ -152,7 +162,7 @@ func filterByJQL(hits []JiraTicket, jql string) []JiraTicket {
 		}
 	}
 	if len(matched) == 0 {
-		return hits
+		return nil
 	}
 	return matched
 }

@@ -28,15 +28,11 @@ const BUILTIN_VIEWS: SavedView[] = [
     builtin: true,
     filters: { ...DEFAULT_FILTERS, assignee: "me" },
   },
-  {
-    id: "builtin:in-progress",
-    name: "In progress",
-    builtin: true,
-    // Status names are project-specific, so a global builtin can't hard-code an
-    // "In Progress" status. Scope to the current user; the user layers on the
-    // project-specific status filter once a project is selected.
-    filters: { ...DEFAULT_FILTERS, assignee: "me" },
-  },
+  // The former "In progress" builtin filtered by the "indeterminate" status
+  // category. Status names are now project-specific, so a global builtin can't
+  // hard-code an in-progress status without a selected project; dropping the
+  // status filter would have left it indistinguishable from "Assigned to me".
+  // Users get an in-progress view by selecting a project and its statuses.
   {
     id: "builtin:unassigned",
     name: "Unassigned",

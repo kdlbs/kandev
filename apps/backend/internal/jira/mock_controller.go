@@ -83,7 +83,11 @@ func (c *MockController) setProjectStatuses(ctx *gin.Context) {
 		ProjectKey string       `json:"projectKey"`
 		Statuses   []JiraStatus `json:"statuses"`
 	}
-	if err := ctx.ShouldBindJSON(&req); err != nil || req.ProjectKey == "" {
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if req.ProjectKey == "" {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "projectKey required"})
 		return
 	}

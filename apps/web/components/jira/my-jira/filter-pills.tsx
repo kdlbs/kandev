@@ -30,6 +30,12 @@ function DisabledPill({
     <div
       data-testid={`jira-filter-pill-${label.toLowerCase()}`}
       data-disabled="true"
+      // Focusable + aria so keyboard users reach the pill and hear why it's
+      // disabled, instead of the reason being hover-only via the title tooltip.
+      tabIndex={0}
+      role="button"
+      aria-disabled="true"
+      aria-label={disabledHint ?? `${label} filter disabled`}
       className="inline-flex items-stretch rounded-md border text-xs overflow-hidden bg-background opacity-50"
       title={disabledHint}
     >

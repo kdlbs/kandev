@@ -129,6 +129,29 @@ func TestMockClient_SearchTickets_FiltersByProjectKey(t *testing.T) {
 	}
 }
 
+func TestMockClient_SearchTickets_ProjectAndKeyNarrowingCompose(t *testing.T) {
+	m := NewMockClient()
+	m.SetSearchHits([]JiraTicket{
+		{Key: "CLIP-1", ProjectKey: "CLIP", StatusName: "In Development"},
+		{Key: "CLIP-2", ProjectKey: "CLIP", StatusName: "In Development"},
+		{Key: "OPS-9", ProjectKey: "OPS", StatusName: "In Development"},
+	})
+	// A project clause plus a specific ticket key must narrow to that key, not
+	// short-circuit on the project clause and return the whole project.
+	res, err := m.SearchTickets(
+		context.Background(),
+		`project in ("CLIP") AND key = CLIP-2 ORDER BY updated DESC`,
+		"",
+		50,
+	)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(res.Tickets) != 1 || res.Tickets[0].Key != "CLIP-2" {
+		t.Fatalf("expected only CLIP-2, got %+v", res.Tickets)
+	}
+}
+
 func TestMockClient_ResetClearsState(t *testing.T) {
 	m := NewMockClient()
 	m.AddTicket(&JiraTicket{Key: "X-1"})
