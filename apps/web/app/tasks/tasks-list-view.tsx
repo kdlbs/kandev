@@ -5,7 +5,6 @@ import type { PaginationState } from "@tanstack/react-table";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
-import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
@@ -13,8 +12,6 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconLoader,
-  IconPlus,
-  IconSearch,
   IconTrash,
 } from "@tabler/icons-react";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
@@ -43,9 +40,6 @@ export type TasksListViewProps = {
   setPagination: (next: PaginationState | ((prev: PaginationState) => PaginationState)) => void;
   isLoading: boolean;
   handleRowClick: (task: Task) => void;
-  searchQuery: string;
-  setSearchQuery: (query: string) => void;
-  setCreateDialogOpen: (open: boolean) => void;
   deletingTaskId: string | null;
   handleArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   handleDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
@@ -64,9 +58,6 @@ export function TasksListView({
   setPagination,
   isLoading,
   handleRowClick,
-  searchQuery,
-  setSearchQuery,
-  setCreateDialogOpen,
   deletingTaskId,
   handleArchive,
   handleDelete,
@@ -74,13 +65,7 @@ export function TasksListView({
   return (
     <main className="flex-1 overflow-auto px-4 py-4 sm:px-6 sm:py-6">
       <div className="space-y-4">
-        <TasksListToolbar
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          showArchived={showArchived}
-          onShowArchivedChange={setShowArchived}
-          onNewTask={() => setCreateDialogOpen(true)}
-        />
+        <TasksListControls showArchived={showArchived} onShowArchivedChange={setShowArchived} />
         <TaskRows
           tasks={tasks}
           workflows={workflows}
@@ -103,34 +88,15 @@ export function TasksListView({
   );
 }
 
-function TasksListToolbar({
-  searchQuery,
-  onSearchChange,
+function TasksListControls({
   showArchived,
   onShowArchivedChange,
-  onNewTask,
 }: {
-  searchQuery: string;
-  onSearchChange: (query: string) => void;
   showArchived: boolean;
   onShowArchivedChange: (show: boolean) => void;
-  onNewTask: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-      <Button className="h-11 w-full cursor-pointer sm:w-auto lg:h-9" onClick={onNewTask}>
-        <IconPlus className="mr-1 h-4 w-4" />
-        New Task
-      </Button>
-      <div className="relative w-full lg:max-w-[400px]">
-        <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={searchQuery}
-          onChange={(event) => onSearchChange(event.target.value)}
-          placeholder="Search tasks..."
-          className="h-11 pl-9 text-[16px] lg:h-9 lg:text-sm"
-        />
-      </div>
+    <div className="flex min-h-9 items-center">
       <Label className="flex h-11 items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none lg:h-9">
         <Checkbox
           checked={showArchived}
@@ -142,6 +108,11 @@ function TasksListToolbar({
     </div>
   );
 }
+
+type TaskListNode = {
+  task: Task;
+  level: number;
+};
 
 function TaskRows({
   tasks,
@@ -167,6 +138,7 @@ function TaskRows({
   const workflowMap = useMemo(() => new Map(workflows.map((w) => [w.id, w.name])), [workflows]);
   const stepMap = useMemo(() => new Map(steps.map((s) => [s.id, s.name])), [steps]);
   const repoMap = useMemo(() => new Map(repositories.map((r) => [r.id, r.name])), [repositories]);
+  const taskNodes = useMemo(() => buildTaskNodes(tasks), [tasks]);
 
   if (isLoading) {
     return (
@@ -188,10 +160,11 @@ function TaskRows({
       className="rounded-lg border border-border divide-y divide-border"
       data-testid="tasks-list"
     >
-      {tasks.map((task) => (
+      {taskNodes.map(({ task, level }) => (
         <TaskListRow
           key={task.id}
           task={task}
+          level={level}
           workflowName={workflowMap.get(task.workflow_id)}
           stepName={stepMap.get(task.workflow_step_id)}
           repositoryName={resolveRepositoryName(task, repoMap)}
@@ -205,6 +178,37 @@ function TaskRows({
   );
 }
 
+function buildTaskNodes(tasks: Task[]): TaskListNode[] {
+  const childrenByParent = new Map<string, Task[]>();
+  const taskIds = new Set(tasks.map((task) => task.id));
+  const roots: Task[] = [];
+
+  for (const task of tasks) {
+    if (task.parent_id && taskIds.has(task.parent_id)) {
+      const siblings = childrenByParent.get(task.parent_id) ?? [];
+      siblings.push(task);
+      childrenByParent.set(task.parent_id, siblings);
+    } else {
+      roots.push(task);
+    }
+  }
+
+  const nodes: TaskListNode[] = [];
+  const visited = new Set<string>();
+
+  const append = (task: Task, level: number) => {
+    if (visited.has(task.id)) return;
+    visited.add(task.id);
+    nodes.push({ task, level });
+    for (const child of childrenByParent.get(task.id) ?? []) append(child, level + 1);
+  };
+
+  for (const task of roots) append(task, 0);
+  for (const task of tasks) append(task, 0);
+
+  return nodes;
+}
+
 function resolveRepositoryName(task: Task, repoMap: Map<string, string>): string | undefined {
   const primaryRepo = primaryTaskRepository(task.repositories);
   return primaryRepo ? repoMap.get(primaryRepo.repository_id) : undefined;
@@ -212,6 +216,7 @@ function resolveRepositoryName(task: Task, repoMap: Map<string, string>): string
 
 function TaskListRow({
   task,
+  level,
   workflowName,
   stepName,
   repositoryName,
@@ -221,6 +226,7 @@ function TaskListRow({
   onRowClick,
 }: {
   task: Task;
+  level: number;
   workflowName?: string;
   stepName?: string;
   repositoryName?: string;
@@ -239,6 +245,7 @@ function TaskListRow({
       role="button"
       tabIndex={0}
       data-testid="tasks-list-row"
+      data-level={level}
       className="grid min-h-[56px] grid-cols-1 gap-3 px-4 py-3 text-sm transition-colors hover:bg-muted/60 cursor-pointer md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
       onClick={() => onRowClick(task)}
       onKeyDown={(event) => {
@@ -249,7 +256,11 @@ function TaskListRow({
         }
       }}
     >
-      <div className="flex min-w-0 items-center gap-2">
+      <div
+        className="flex min-w-0 items-center gap-2"
+        data-testid="tasks-list-row-content"
+        style={{ paddingLeft: `${level * 28}px` }}
+      >
         {getTaskStateIcon(task.state, "h-4 w-4 shrink-0")}
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">

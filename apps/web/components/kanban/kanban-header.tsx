@@ -43,7 +43,7 @@ const VIEW_TOGGLE_ITEMS: ViewToggleItem[] = [
 ];
 
 const WORKBENCH_TOPBAR_CLASSNAME = "h-12 border-b-0 px-3 py-2";
-const DESKTOP_HEADER_NARROW_PX = 1100;
+const DESKTOP_HEADER_NARROW_PX = 800;
 
 function getWorkspaceLabel(
   workspaces: Array<{ id: string; name: string }>,
@@ -229,10 +229,8 @@ function DesktopHeader({
   ) : null;
   const isHome = title === "Home";
   const centerSearch =
-    isHome && searchInput && !isNarrow ? (
-      <div data-testid="kanban-header-search">{searchInput}</div>
-    ) : null;
-  const actionsSearch = !isHome || isNarrow ? searchInput : null;
+    searchInput && !isNarrow ? <div data-testid="kanban-header-search">{searchInput}</div> : null;
+  const actionsSearch = isNarrow ? searchInput : null;
 
   return (
     <PageTopbar

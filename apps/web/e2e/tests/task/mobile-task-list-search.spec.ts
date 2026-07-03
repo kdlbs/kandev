@@ -1,7 +1,11 @@
 import { test, expect } from "../../fixtures/test-base";
 
 test.describe("Mobile task list search", () => {
-  test("toolbar search filters the list", async ({ testPage, apiClient, seedData }) => {
+  test("topbar search icon reveals, filters, and clears on collapse", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     await apiClient.createTask(seedData.workspaceId, "List Alpha Task", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
@@ -15,16 +19,23 @@ test.describe("Mobile task list search", () => {
     await testPage.waitForLoadState("networkidle");
 
     const taskList = testPage.getByTestId("tasks-list");
-    const searchInput = testPage.getByPlaceholder("Search tasks...");
+    const searchBar = testPage.getByTestId("mobile-search-bar");
+    const searchToggle = testPage.getByTestId("mobile-search-toggle");
 
     await expect(taskList.getByText("List Alpha Task")).toBeVisible();
     await expect(taskList.getByText("List Beta Task")).toBeVisible();
+    await expect(searchBar).not.toBeVisible();
 
-    await searchInput.fill("Alpha");
+    await searchToggle.click();
+    await expect(searchBar).toBeVisible();
+    await expect(searchBar.getByPlaceholder("Search tasks...")).toBeFocused();
+
+    await searchBar.getByPlaceholder("Search tasks...").fill("Alpha");
     await expect(taskList.getByText("List Alpha Task")).toBeVisible({ timeout: 5000 });
     await expect(taskList.getByText("List Beta Task")).not.toBeVisible({ timeout: 5000 });
 
-    await searchInput.fill("");
+    await searchToggle.click();
+    await expect(searchBar).not.toBeVisible();
     await expect(taskList.getByText("List Alpha Task")).toBeVisible({ timeout: 5000 });
     await expect(taskList.getByText("List Beta Task")).toBeVisible({ timeout: 5000 });
   });

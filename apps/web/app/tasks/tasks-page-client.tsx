@@ -4,13 +4,14 @@ import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import type { PaginationState } from "@tanstack/react-table";
 import { archiveTask, deleteTask, listTasksByWorkspace } from "@/lib/api";
-import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { KanbanHeader } from "@/components/kanban/kanban-header";
+import { MobileSearchBar } from "@/components/kanban/mobile-search-bar";
 import type { Task, Workspace, Workflow, WorkflowStep, Repository } from "@/lib/types/http";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useDebounce } from "@/hooks/use-debounce";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { linkToTask } from "@/lib/links";
 import { shouldSkipInitialTasksFetch } from "./tasks-page-fetch-policy";
 import { TasksListView } from "./tasks-list-view";
@@ -126,44 +127,6 @@ function useTaskOperations({
   return { isLoading, deletingTaskId, fetchTasks, handleArchive, handleDelete };
 }
 
-type TaskCreateDialogMountProps = {
-  activeWorkspaceId: string | null;
-  defaultWorkflow: Workflow | undefined;
-  defaultStep: WorkflowStep | undefined;
-  createDialogOpen: boolean;
-  setCreateDialogOpen: (open: boolean) => void;
-  steps: WorkflowStep[];
-  fetchTasks: () => void;
-};
-
-function TaskCreateDialogMount({
-  activeWorkspaceId,
-  defaultWorkflow,
-  defaultStep,
-  createDialogOpen,
-  setCreateDialogOpen,
-  steps,
-  fetchTasks,
-}: TaskCreateDialogMountProps) {
-  if (!activeWorkspaceId || !defaultWorkflow || !defaultStep) return null;
-  return (
-    <TaskCreateDialog
-      open={createDialogOpen}
-      onOpenChange={setCreateDialogOpen}
-      workspaceId={activeWorkspaceId}
-      workflowId={defaultWorkflow.id}
-      defaultStepId={defaultStep.id}
-      steps={steps
-        .filter((s) => s.workflow_id === defaultWorkflow.id)
-        .map((s) => ({ id: s.id, title: s.name, events: s.events }))}
-      onSuccess={() => {
-        setCreateDialogOpen(false);
-        fetchTasks();
-      }}
-    />
-  );
-}
-
 function useTasksPageViewState({
   initialWorkflows,
   initialSteps,
@@ -184,7 +147,6 @@ function useTasksPageViewState({
   const repositories = storeRepositories.length > 0 ? storeRepositories : initialRepositories;
   const [tasks, setTasks] = useState(initialTasks);
   const [total, setTotal] = useState(initialTotal);
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 25 });
@@ -197,8 +159,6 @@ function useTasksPageViewState({
     setTasks,
     total,
     setTotal,
-    createDialogOpen,
-    setCreateDialogOpen,
     searchQuery,
     setSearchQuery,
     showArchived,
@@ -263,17 +223,11 @@ function useTasksPageEffects({
 function useTasksPageComputed({
   total,
   pagination,
-  workflows,
-  steps,
   router,
-  activeWorkflowId,
 }: {
   total: number;
   pagination: PaginationState;
-  workflows: Workflow[];
-  steps: WorkflowStep[];
   router: ReturnType<typeof useRouter>;
-  activeWorkflowId: string | null;
 }) {
   const pageCount = useMemo(
     () => Math.ceil(total / pagination.pageSize),
@@ -285,12 +239,8 @@ function useTasksPageComputed({
     },
     [router],
   );
-  const defaultWorkflow = activeWorkflowId
-    ? workflows.find((w) => w.id === activeWorkflowId)
-    : workflows[0];
-  const defaultStep = steps.find((s) => s.workflow_id === defaultWorkflow?.id);
 
-  return { pageCount, handleRowClick, defaultWorkflow, defaultStep };
+  return { pageCount, handleRowClick };
 }
 
 function useTasksPageSetup(props: TasksPageClientProps) {
@@ -334,10 +284,7 @@ function useTasksPageSetup(props: TasksPageClientProps) {
   const computed = useTasksPageComputed({
     total: viewState.total,
     pagination: viewState.pagination,
-    workflows: viewState.workflows,
-    steps: viewState.steps,
     router,
-    activeWorkflowId,
   });
   return { ...viewState, ...ops, ...computed, activeWorkspaceId, debouncedQuery };
 }
@@ -345,6 +292,8 @@ function useTasksPageSetup(props: TasksPageClientProps) {
 export function TasksPageClient(props: TasksPageClientProps) {
   const s = useTasksPageSetup(props);
   const setMobileSearchOpen = useAppStore((state) => state.setMobileKanbanSearchOpen);
+  const isMobileSearchOpen = useAppStore((state) => state.mobileKanban.isSearchOpen);
+  const { isMobile } = useResponsiveBreakpoint();
 
   useEffect(() => {
     setMobileSearchOpen(false);
@@ -353,7 +302,16 @@ export function TasksPageClient(props: TasksPageClientProps) {
 
   return (
     <div className="h-screen w-full flex flex-col bg-background">
-      <KanbanHeader workspaceId={s.activeWorkspaceId ?? undefined} currentPage="tasks" />
+      <KanbanHeader
+        workspaceId={s.activeWorkspaceId ?? undefined}
+        currentPage="tasks"
+        searchQuery={s.searchQuery}
+        onSearchChange={s.setSearchQuery}
+        isSearchLoading={s.isLoading && !!s.debouncedQuery}
+      />
+      {isMobile && isMobileSearchOpen && (
+        <MobileSearchBar searchQuery={s.searchQuery} onSearchChange={s.setSearchQuery} />
+      )}
       <TasksListView
         showArchived={s.showArchived}
         setShowArchived={s.setShowArchived}
@@ -367,21 +325,9 @@ export function TasksPageClient(props: TasksPageClientProps) {
         setPagination={s.setPagination}
         isLoading={s.isLoading}
         handleRowClick={s.handleRowClick}
-        searchQuery={s.searchQuery}
-        setSearchQuery={s.setSearchQuery}
-        setCreateDialogOpen={s.setCreateDialogOpen}
         deletingTaskId={s.deletingTaskId}
         handleArchive={s.handleArchive}
         handleDelete={s.handleDelete}
-      />
-      <TaskCreateDialogMount
-        activeWorkspaceId={s.activeWorkspaceId}
-        defaultWorkflow={s.defaultWorkflow}
-        defaultStep={s.defaultStep}
-        createDialogOpen={s.createDialogOpen}
-        setCreateDialogOpen={s.setCreateDialogOpen}
-        steps={s.steps}
-        fetchTasks={s.fetchTasks}
       />
     </div>
   );
