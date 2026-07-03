@@ -23,6 +23,39 @@ import (
 // the `tasks` table directly rather than through a join alias.
 const defaultTaskAlias = "tasks"
 
+type taskScanColumn struct {
+	name       string
+	selectExpr func(alias string) string
+}
+
+var taskScanColumns = []taskScanColumn{
+	{name: "id"},
+	{name: "workspace_id"},
+	{name: "workflow_id"},
+	{name: "workflow_step_id"},
+	{name: "title"},
+	{name: "description"},
+	{name: "state"},
+	{name: "priority"},
+	{name: "position"},
+	{name: "metadata"},
+	{name: "is_ephemeral"},
+	{name: "parent_id"},
+	{name: "archived_at"},
+	{name: "created_at"},
+	{name: "updated_at"},
+	{name: "assignee_agent_profile_id", selectExpr: func(alias string) string {
+		return runnerProjection(alias) + ` AS assignee_agent_profile_id`
+	}},
+	{name: "origin"},
+	{name: "project_id"},
+	{name: "labels"},
+	{name: "identifier"},
+	{name: "is_from_office", selectExpr: func(alias string) string {
+		return isFromOfficeProjection(alias) + ` AS is_from_office`
+	}},
+}
+
 // taskSelectColumns returns the column projection (with runner subquery)
 // for a SELECT against tasks aliased as `alias`. The output column order
 // matches scanSingleTask / scanTasks.
@@ -30,27 +63,27 @@ func taskSelectColumns(alias string) string {
 	if alias == "" {
 		alias = defaultTaskAlias
 	}
-	prefix := alias + "."
-	return prefix + "id, " + prefix + "workspace_id, " + prefix + "workflow_id, " + prefix + "workflow_step_id, " +
-		prefix + "title, " + prefix + "description, " + prefix + "state, " + prefix + "priority, " + prefix + "position, " +
-		prefix + "metadata, " + prefix + "is_ephemeral, " + prefix + "parent_id, " + prefix + "archived_at, " +
-		prefix + "created_at, " + prefix + "updated_at, " +
-		runnerProjection(alias) + ` AS assignee_agent_profile_id, ` +
-		prefix + "origin, " + prefix + "project_id, " + prefix + "labels, " + prefix + "identifier, " +
-		isFromOfficeProjection(alias) + ` AS is_from_office`
+	return taskScanColumnSQL(alias, true)
 }
 
 func taskProjectedColumns(alias string) string {
 	if alias == "" {
 		alias = defaultTaskAlias
 	}
+	return taskScanColumnSQL(alias, false)
+}
+
+func taskScanColumnSQL(alias string, useExpressions bool) string {
 	prefix := alias + "."
-	return prefix + "id, " + prefix + "workspace_id, " + prefix + "workflow_id, " + prefix + "workflow_step_id, " +
-		prefix + "title, " + prefix + "description, " + prefix + "state, " + prefix + "priority, " + prefix + "position, " +
-		prefix + "metadata, " + prefix + "is_ephemeral, " + prefix + "parent_id, " + prefix + "archived_at, " +
-		prefix + "created_at, " + prefix + "updated_at, " + prefix + "assignee_agent_profile_id, " +
-		prefix + "origin, " + prefix + "project_id, " + prefix + "labels, " + prefix + "identifier, " +
-		prefix + "is_from_office"
+	cols := make([]string, 0, len(taskScanColumns))
+	for _, col := range taskScanColumns {
+		if useExpressions && col.selectExpr != nil {
+			cols = append(cols, col.selectExpr(alias))
+			continue
+		}
+		cols = append(cols, prefix+col.name)
+	}
+	return strings.Join(cols, ", ")
 }
 
 // isFromOfficeProjection returns a SQL boolean expression that is true

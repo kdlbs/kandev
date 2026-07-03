@@ -185,7 +185,7 @@ function useTasksPageViewState({
   initialGroup: TasksListGroup;
   storeRepositories: Repository[];
 }) {
-  const [workflows] = useState(initialWorkflows);
+  const [workflows, setWorkflows] = useState(initialWorkflows);
   const repositories = storeRepositories.length > 0 ? storeRepositories : initialRepositories;
   const [tasks, setTasks] = useState(initialTasks);
   const [total, setTotal] = useState(initialTotal);
@@ -194,6 +194,10 @@ function useTasksPageViewState({
   const [tasksListGroup, setTasksListGroup] = useState<TasksListGroup>(initialGroup);
   const [showArchived, setShowArchived] = useState(false);
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 25 });
+
+  useEffect(() => {
+    setWorkflows(initialWorkflows);
+  }, [initialWorkflows]);
 
   return {
     workflows,
