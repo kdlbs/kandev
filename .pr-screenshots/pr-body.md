@@ -8,7 +8,7 @@ Failed automation runs were accumulating and blocking the scheduler's `max_concu
 
 ## Validation
 
-```
+```bash
 # Backend unit + service tests (includes regression guard)
 cd apps/backend && go test ./internal/automation/... -v
 
