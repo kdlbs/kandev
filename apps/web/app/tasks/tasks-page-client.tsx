@@ -3,21 +3,17 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import type { PaginationState } from "@tanstack/react-table";
-import { DataTable } from "@/components/ui/data-table";
-import { getColumns } from "./columns";
 import { archiveTask, deleteTask, listTasksByWorkspace } from "@/lib/api";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { KanbanHeader } from "@/components/kanban/kanban-header";
-import { MobileSearchBar } from "@/components/kanban/mobile-search-bar";
-import { Checkbox } from "@kandev/ui/checkbox";
-import { Label } from "@kandev/ui/label";
 import type { Task, Workspace, Workflow, WorkflowStep, Repository } from "@/lib/types/http";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
-import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useDebounce } from "@/hooks/use-debounce";
+import { linkToTask } from "@/lib/links";
 import { shouldSkipInitialTasksFetch } from "./tasks-page-fetch-policy";
+import { TasksListView } from "./tasks-list-view";
 
 interface TasksPageClientProps {
   workspaces: Workspace[];
@@ -128,67 +124,6 @@ function useTaskOperations({
   );
 
   return { isLoading, deletingTaskId, fetchTasks, handleArchive, handleDelete };
-}
-
-type TasksPageBodyProps = {
-  total: number;
-  showArchived: boolean;
-  setShowArchived: (show: boolean) => void;
-  columns: ReturnType<typeof getColumns>;
-  tasks: Task[];
-  pageCount: number;
-  pagination: PaginationState;
-  setPagination: (next: PaginationState | ((prev: PaginationState) => PaginationState)) => void;
-  isLoading: boolean;
-  handleRowClick: (task: Task) => void;
-};
-
-function TasksPageBody({
-  total,
-  showArchived,
-  setShowArchived,
-  columns,
-  tasks,
-  pageCount,
-  pagination,
-  setPagination,
-  isLoading,
-  handleRowClick,
-}: TasksPageBodyProps) {
-  return (
-    <div className="flex-1 overflow-auto px-6 py-6">
-      <div className="mx-auto max-w-5xl">
-        <div className="mb-5 flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-semibold">All Tasks</h1>
-            <p className="text-sm text-muted-foreground">
-              {total} task{total !== 1 ? "s" : ""} found
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="show-archived"
-              checked={showArchived}
-              onCheckedChange={(checked) => setShowArchived(checked === true)}
-            />
-            <Label htmlFor="show-archived" className="text-sm cursor-pointer">
-              Show archived
-            </Label>
-          </div>
-        </div>
-        <DataTable
-          columns={columns}
-          data={tasks}
-          pageCount={pageCount}
-          rowCount={total}
-          pagination={pagination}
-          onPaginationChange={setPagination}
-          isLoading={isLoading}
-          onRowClick={handleRowClick}
-        />
-      </div>
-    </div>
-  );
 }
 
 type TaskCreateDialogMountProps = {
@@ -330,10 +265,6 @@ function useTasksPageComputed({
   pagination,
   workflows,
   steps,
-  repositories,
-  handleArchive,
-  handleDelete,
-  deletingTaskId,
   router,
   activeWorkflowId,
 }: {
@@ -341,10 +272,6 @@ function useTasksPageComputed({
   pagination: PaginationState;
   workflows: Workflow[];
   steps: WorkflowStep[];
-  repositories: Repository[];
-  handleArchive: (taskId: string) => Promise<void>;
-  handleDelete: (taskId: string) => Promise<void>;
-  deletingTaskId: string | null;
   router: ReturnType<typeof useRouter>;
   activeWorkflowId: string | null;
 }) {
@@ -352,21 +279,9 @@ function useTasksPageComputed({
     () => Math.ceil(total / pagination.pageSize),
     [total, pagination.pageSize],
   );
-  const columns = useMemo(
-    () =>
-      getColumns({
-        workflows,
-        steps,
-        repositories,
-        onArchive: handleArchive,
-        onDelete: handleDelete,
-        deletingTaskId,
-      }),
-    [workflows, steps, repositories, handleArchive, handleDelete, deletingTaskId],
-  );
   const handleRowClick = useCallback(
     (task: Task) => {
-      router.push(`/tasks/${task.id}`);
+      router.push(linkToTask(task.id));
     },
     [router],
   );
@@ -375,7 +290,7 @@ function useTasksPageComputed({
     : workflows[0];
   const defaultStep = steps.find((s) => s.workflow_id === defaultWorkflow?.id);
 
-  return { pageCount, columns, handleRowClick, defaultWorkflow, defaultStep };
+  return { pageCount, handleRowClick, defaultWorkflow, defaultStep };
 }
 
 function useTasksPageSetup(props: TasksPageClientProps) {
@@ -421,10 +336,6 @@ function useTasksPageSetup(props: TasksPageClientProps) {
     pagination: viewState.pagination,
     workflows: viewState.workflows,
     steps: viewState.steps,
-    repositories: viewState.repositories,
-    handleArchive: ops.handleArchive,
-    handleDelete: ops.handleDelete,
-    deletingTaskId: ops.deletingTaskId,
     router,
     activeWorkflowId,
   });
@@ -433,36 +344,35 @@ function useTasksPageSetup(props: TasksPageClientProps) {
 
 export function TasksPageClient(props: TasksPageClientProps) {
   const s = useTasksPageSetup(props);
-  const { isMobile } = useResponsiveBreakpoint();
-  const isMobileSearchOpen = useAppStore((state) => state.mobileKanban.isSearchOpen);
   const setMobileSearchOpen = useAppStore((state) => state.setMobileKanbanSearchOpen);
 
-  // Collapse search on unmount so the global flag doesn't auto-open (and focus)
-  // the search bar after navigating to another route.
-  useEffect(() => () => setMobileSearchOpen(false), [setMobileSearchOpen]);
+  useEffect(() => {
+    setMobileSearchOpen(false);
+    return () => setMobileSearchOpen(false);
+  }, [setMobileSearchOpen]);
+
   return (
     <div className="h-screen w-full flex flex-col bg-background">
-      <KanbanHeader
-        workspaceId={s.activeWorkspaceId ?? undefined}
-        currentPage="tasks"
-        searchQuery={s.searchQuery}
-        onSearchChange={s.setSearchQuery}
-        isSearchLoading={s.isLoading && !!s.debouncedQuery}
-      />
-      {isMobile && isMobileSearchOpen && (
-        <MobileSearchBar searchQuery={s.searchQuery} onSearchChange={s.setSearchQuery} />
-      )}
-      <TasksPageBody
+      <KanbanHeader workspaceId={s.activeWorkspaceId ?? undefined} currentPage="tasks" />
+      <TasksListView
         showArchived={s.showArchived}
         setShowArchived={s.setShowArchived}
-        columns={s.columns}
         tasks={s.tasks}
+        workflows={s.workflows}
+        steps={s.steps}
+        repositories={s.repositories}
         total={s.total}
         pageCount={s.pageCount}
         pagination={s.pagination}
         setPagination={s.setPagination}
         isLoading={s.isLoading}
         handleRowClick={s.handleRowClick}
+        searchQuery={s.searchQuery}
+        setSearchQuery={s.setSearchQuery}
+        setCreateDialogOpen={s.setCreateDialogOpen}
+        deletingTaskId={s.deletingTaskId}
+        handleArchive={s.handleArchive}
+        handleDelete={s.handleDelete}
       />
       <TaskCreateDialogMount
         activeWorkspaceId={s.activeWorkspaceId}

@@ -7,12 +7,14 @@ test.describe("Task List", () => {
       workflow_step_id: seedData.startStepId,
     });
 
-    // The /tasks page shows all tasks for the workspace in a data table (SSR)
+    // The /tasks page shows all tasks for the workspace in the list view (SSR)
     await testPage.goto("/tasks");
     await testPage.waitForLoadState("networkidle");
 
     // The global AppSidebar also lists tasks (data-testid="sidebar-task-item"),
-    // so a bare getByText matches two elements. Scope to the page's data table.
-    await expect(testPage.getByRole("table").getByText("Direct Navigate Task")).toBeVisible();
+    // so a bare getByText matches two elements. Scope to the page list.
+    await expect(
+      testPage.getByTestId("tasks-list").getByText("Direct Navigate Task"),
+    ).toBeVisible();
   });
 });

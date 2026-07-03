@@ -1,11 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 
 test.describe("Mobile task list search", () => {
-  test("topbar search icon reveals, filters, and clears on collapse", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
+  test("toolbar search filters the list", async ({ testPage, apiClient, seedData }) => {
     await apiClient.createTask(seedData.workspaceId, "List Alpha Task", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
@@ -18,36 +14,18 @@ test.describe("Mobile task list search", () => {
     await testPage.goto("/tasks");
     await testPage.waitForLoadState("networkidle");
 
-    const searchBar = testPage.getByTestId("mobile-search-bar");
-    const searchToggle = testPage.getByTestId("mobile-search-toggle");
+    const taskList = testPage.getByTestId("tasks-list");
+    const searchInput = testPage.getByPlaceholder("Search tasks...");
 
-    // Both tasks are listed and search is collapsed behind the topbar icon
-    await expect(testPage.getByRole("table").getByText("List Alpha Task")).toBeVisible();
-    await expect(testPage.getByRole("table").getByText("List Beta Task")).toBeVisible();
-    await expect(searchBar).not.toBeVisible();
+    await expect(taskList.getByText("List Alpha Task")).toBeVisible();
+    await expect(taskList.getByText("List Beta Task")).toBeVisible();
 
-    // Tapping the icon reveals the focused search input
-    await searchToggle.click();
-    await expect(searchBar).toBeVisible();
-    await expect(searchBar.getByPlaceholder("Search tasks...")).toBeFocused();
+    await searchInput.fill("Alpha");
+    await expect(taskList.getByText("List Alpha Task")).toBeVisible({ timeout: 5000 });
+    await expect(taskList.getByText("List Beta Task")).not.toBeVisible({ timeout: 5000 });
 
-    // Typing filters the list down to the match
-    await searchBar.getByPlaceholder("Search tasks...").fill("Alpha");
-    await expect(testPage.getByRole("table").getByText("List Alpha Task")).toBeVisible({
-      timeout: 5000,
-    });
-    await expect(testPage.getByRole("table").getByText("List Beta Task")).not.toBeVisible({
-      timeout: 5000,
-    });
-
-    // Collapsing clears the query so the full list returns
-    await searchToggle.click();
-    await expect(searchBar).not.toBeVisible();
-    await expect(testPage.getByRole("table").getByText("List Alpha Task")).toBeVisible({
-      timeout: 5000,
-    });
-    await expect(testPage.getByRole("table").getByText("List Beta Task")).toBeVisible({
-      timeout: 5000,
-    });
+    await searchInput.fill("");
+    await expect(taskList.getByText("List Alpha Task")).toBeVisible({ timeout: 5000 });
+    await expect(taskList.getByText("List Beta Task")).toBeVisible({ timeout: 5000 });
   });
 });
