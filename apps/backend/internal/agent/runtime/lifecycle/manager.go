@@ -202,6 +202,7 @@ func NewManager(
 
 	// Set session manager dependencies for full orchestration
 	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore, historyManager)
+	sessionManager.SetStatusUpdater(mgr.UpdateStatus)
 
 	mgr.pollAggregator = newWorkspacePollAggregator(mgr)
 

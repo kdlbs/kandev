@@ -30,9 +30,10 @@ type branchMaterializerRepo interface {
 
 // agentctlRescanner is the lifecycle-tier surface the materializer uses to
 // reach a running agentctl by session_id. The lifecycle manager owns the
-// agentctl URL in memory — the executors_running row never persists it —
-// so the materializer can't HTTP-POST agentctl directly. Defined as an
-// interface so the materializer stays decoupled from the lifecycle package.
+// authenticated agentctl client; executors_running may carry endpoint metadata
+// for diagnostics/recovery, but callers should not bypass lifecycle ownership.
+// Defined as an interface so the materializer stays decoupled from the
+// lifecycle package.
 type agentctlRescanner interface {
 	RescanWorkspaceForSession(ctx context.Context, sessionID, workDir string) error
 	NotifyWorktreeMaterialized(ctx context.Context, wt lifecycle.MaterializedWorktree)
@@ -228,9 +229,8 @@ func (b *branchMaterializer) promoteWorkspacePathIfNeeded(ctx context.Context, e
 // notifyAgentctlRescan tells the running agentctl instance attached to
 // this session to re-discover repo subdirs and add per-repo trackers for
 // new sibling worktrees. Routes through the lifecycle manager because the
-// agentctl URL is in-memory runtime state — the executors_running row
-// never persists it — and the lifecycle manager is the single owner of
-// per-execution agentctl clients.
+// lifecycle manager is the single owner of authenticated per-execution
+// agentctl clients.
 //
 // No-op when no rescanner is wired (test stubs, agentless test envs) or
 // when the session has no active execution (agent stopped). The next

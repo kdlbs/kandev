@@ -123,8 +123,10 @@ func (m *Manager) handleCompleteEventMarkState(execution *AgentExecution, event 
 		m.logger.Info("flipping Ready→Running for empty wakeup turn before publishing AgentReady",
 			zap.String("execution_id", execution.ID),
 			zap.String("session_id", execution.SessionID))
-		if m.executionStore != nil {
-			m.executionStore.UpdateStatus(execution.ID, v1.AgentStatusRunning)
+		if err := m.UpdateStatus(execution.ID, v1.AgentStatusRunning); err != nil {
+			m.logger.Warn("failed to persist empty wakeup turn running status",
+				zap.String("execution_id", execution.ID),
+				zap.Error(err))
 		}
 		m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
 	}
@@ -369,7 +371,12 @@ func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.Agent
 	if _, ok := turnContentEventTypes[event.Type]; !ok {
 		return
 	}
-	m.executionStore.UpdateStatus(execution.ID, v1.AgentStatusRunning)
+	if err := m.UpdateStatus(execution.ID, v1.AgentStatusRunning); err != nil {
+		m.logger.Warn("failed to persist wakeup-driven running status",
+			zap.String("execution_id", execution.ID),
+			zap.Error(err))
+		return
+	}
 	m.logger.Info("wakeup-driven turn detected; flipping execution back to Running",
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID),
@@ -386,8 +393,10 @@ func (m *Manager) handleStreamDisconnect(execution *AgentExecution, err error) {
 		zap.String("session_id", execution.SessionID),
 		zap.Error(err))
 
-	if m.executionStore != nil {
-		m.executionStore.UpdateStatus(execution.ID, v1.AgentStatusFailed)
+	if err := m.UpdateStatus(execution.ID, v1.AgentStatusFailed); err != nil {
+		m.logger.Warn("failed to persist stream disconnect failed status",
+			zap.String("execution_id", execution.ID),
+			zap.Error(err))
 	}
 
 	m.eventPublisher.PublishAgentctlEvent(

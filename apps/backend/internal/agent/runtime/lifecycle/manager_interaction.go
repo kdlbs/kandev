@@ -739,7 +739,9 @@ func (m *Manager) initializeACPSessionForRestart(
 	// Mark execution as ready. This is a *boot* signal — initializeACPSessionForRestart
 	// is the post-restart init path and no turn has run yet, so AgentBootReady (not
 	// AgentReady) is what subscribers want to route on.
-	m.executionStore.UpdateStatus(execution.ID, v1.AgentStatusReady)
+	if err := m.updateStatusAndPersist(ctx, execution.ID, v1.AgentStatusReady); err != nil {
+		return err
+	}
 	m.eventPublisher.PublishAgentEvent(ctx, events.AgentBootReady, execution)
 
 	return nil
@@ -1031,8 +1033,14 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 
 // UpdateStatus updates the status of an execution
 func (m *Manager) UpdateStatus(executionID string, status v1.AgentStatus) error {
+	return m.updateStatusAndPersist(context.Background(), executionID, status)
+}
+
+func (m *Manager) updateStatusAndPersist(ctx context.Context, executionID string, status v1.AgentStatus) error {
+	var updated *AgentExecution
 	if err := m.executionStore.WithLock(executionID, func(execution *AgentExecution) {
 		execution.Status = status
+		updated = execution
 	}); err != nil {
 		if errors.Is(err, ErrExecutionNotFound) {
 			return fmt.Errorf("execution %q not found", executionID)
@@ -1044,6 +1052,9 @@ func (m *Manager) UpdateStatus(executionID string, status v1.AgentStatus) error 
 		zap.String("execution_id", executionID),
 		zap.String("status", string(status)))
 
+	if updated != nil {
+		m.persistExecutorRunning(context.WithoutCancel(ctx), updated)
+	}
 	return nil
 }
 
@@ -1111,7 +1122,9 @@ func (m *Manager) markReadyEventWithContext(ctx context.Context, executionID, ev
 		return nil
 	}
 
-	m.executionStore.UpdateStatus(executionID, v1.AgentStatusReady)
+	if err := m.updateStatusAndPersist(ctx, executionID, v1.AgentStatusReady); err != nil {
+		return err
+	}
 
 	m.logger.Info("execution ready",
 		zap.String("execution_id", executionID),

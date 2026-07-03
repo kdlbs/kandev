@@ -708,10 +708,11 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 	} else {
 		// Prepare-only launch: the workspace + agentctl are up but the agent
 		// process is intentionally not being started. The lifecycle manager
-		// always writes status='starting' on row creation; flip it to
-		// 'prepared' so the row doesn't look stuck mid-launch. When the user
-		// later starts the agent (StartCreatedSession), Launch re-runs and
-		// rewrites the row with status='starting' via the usual path.
+		// writes an active runtime status on row creation; flip it to
+		// 'prepared' so the row doesn't look like an agent process is running.
+		// When the user later starts the agent (StartCreatedSession), Launch
+		// re-runs and rewrites the row with the active runtime status via the
+		// usual path.
 		//
 		// Detach from the caller context so a client disconnect / WS timeout
 		// right after launch returns can't drop this write — that would leave

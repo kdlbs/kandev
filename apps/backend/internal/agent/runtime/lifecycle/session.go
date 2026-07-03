@@ -27,6 +27,7 @@ type SessionManager struct {
 	eventPublisher *EventPublisher
 	streamManager  *StreamManager
 	executionStore *ExecutionStore
+	statusUpdater  func(executionID string, status v1.AgentStatus) error
 	historyManager *SessionHistoryManager
 	stopCh         <-chan struct{} // For graceful shutdown coordination
 }
@@ -46,6 +47,10 @@ func (sm *SessionManager) SetDependencies(ep *EventPublisher, strm *StreamManage
 	sm.streamManager = strm
 	sm.executionStore = store
 	sm.historyManager = history
+}
+
+func (sm *SessionManager) SetStatusUpdater(updater func(executionID string, status v1.AgentStatus) error) {
+	sm.statusUpdater = updater
 }
 
 // InitializeResult contains the result of session initialization
@@ -605,7 +610,11 @@ func (sm *SessionManager) SendPrompt(
 		if execution.Status != v1.AgentStatusRunning && execution.Status != v1.AgentStatusReady {
 			return nil, fmt.Errorf("execution %q is not ready for prompts (status: %s)", execution.ID, execution.Status)
 		}
-		if sm.executionStore != nil {
+		if sm.statusUpdater != nil {
+			if err := sm.statusUpdater(execution.ID, v1.AgentStatusRunning); err != nil {
+				return nil, err
+			}
+		} else if sm.executionStore != nil {
 			sm.executionStore.UpdateStatus(execution.ID, v1.AgentStatusRunning)
 		}
 	}

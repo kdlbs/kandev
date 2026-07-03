@@ -33,12 +33,17 @@ var ErrExecutorNotFound = errors.New("executor not found")
 // will produce its own events.
 var ErrExecutionRotated = errors.New("execution rotated; CAS write rejected")
 
-// Status values for executors_running.status. The lifecycle manager defaults
-// rows to "starting" on creation (see runtime/lifecycle/persistence.go); the
-// orchestrator flips a row to "prepared" when a prepare-only launch finishes
-// with the agent process intentionally not started.
+// Status values for executors_running.status. The lifecycle manager mirrors
+// active execution state into this column; the orchestrator flips a row to
+// "prepared" when a prepare-only launch finishes with the agent process
+// intentionally not started.
 const (
 	ExecutorRunningStatusStarting = "starting"
+	ExecutorRunningStatusRunning  = "running"
+	ExecutorRunningStatusReady    = "ready"
+	ExecutorRunningStatusFailed   = "failed"
+	ExecutorRunningStatusStopped  = "stopped"
+	ExecutorRunningStatusComplete = "completed"
 	ExecutorRunningStatusPrepared = "prepared"
 )
 
