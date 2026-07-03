@@ -57,7 +57,7 @@ func (s *Service) runOptimize(_ context.Context) (map[string]interface{}, error)
 }
 
 func (s *Service) requireSQLiteMaintenance(operation string) error {
-	if s.pool == nil {
+	if s.pool == nil || s.pool.Writer() == nil {
 		return fmt.Errorf("%s: no database pool", operation)
 	}
 	driver := s.databaseDriver()

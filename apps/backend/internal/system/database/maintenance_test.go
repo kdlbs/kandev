@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/system/jobs"
 )
 
@@ -152,6 +153,15 @@ func TestMaintenanceOperationsRejectPostgres(t *testing.T) {
 	}
 	if shutdownCalled {
 		t.Fatal("factory reset called orchestrator shutdown before rejecting postgres")
+	}
+}
+
+func TestMaintenanceOperationsRejectNilWriter(t *testing.T) {
+	svc := NewService(db.NewPool(nil, nil), t.TempDir(), ResetDirs{}, nil, nil)
+
+	_, err := svc.runVacuum(context.Background())
+	if err == nil || err.Error() != "vacuum: no database pool" {
+		t.Fatalf("err = %v, want vacuum: no database pool", err)
 	}
 }
 
