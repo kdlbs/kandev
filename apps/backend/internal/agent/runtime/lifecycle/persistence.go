@@ -3,10 +3,14 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"net/url"
+	"strconv"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // ExecutorRunningWriter is the narrow persistence interface the lifecycle manager
@@ -50,19 +54,32 @@ func (m *Manager) SetExecutorRunningWriter(w ExecutorRunningWriter) {
 // pre-existing row (a previous run's resume state) so the lifecycle write
 // doesn't clobber data the orchestrator's narrow CAS update wrote earlier.
 func buildRunningFromExecution(execution *AgentExecution, prior *models.ExecutorRunning) *models.ExecutorRunning {
+	agentctlURL := execution.AgentctlURL()
+	agentctlPort := agentctlPortFromExecution(execution, agentctlURL)
+	pid := agentctlPIDFromExecution(execution)
+	var lastSeenAt *time.Time
+	if agentctlURL != "" || agentctlPort > 0 || pid > 0 {
+		now := time.Now().UTC()
+		lastSeenAt = &now
+	}
+
 	running := &models.ExecutorRunning{
 		ID:               execution.SessionID,
 		SessionID:        execution.SessionID,
 		TaskID:           execution.TaskID,
 		Runtime:          execution.RuntimeName,
-		Status:           models.ExecutorRunningStatusStarting,
+		Status:           executorRunningStatusFromExecution(execution),
 		Resumable:        true,
 		AgentExecutionID: execution.ID,
 		ContainerID:      execution.ContainerID,
+		AgentctlURL:      agentctlURL,
+		AgentctlPort:     agentctlPort,
+		PID:              pid,
 		WorktreeID:       getMetadataString(execution.Metadata, MetadataKeyWorktreeID),
 		WorktreePath:     getMetadataString(execution.Metadata, "worktree_path"),
 		WorktreeBranch:   getMetadataString(execution.Metadata, MetadataKeyWorktreeBranch),
 		Metadata:         FilterPersistentMetadata(execution.Metadata),
+		LastSeenAt:       lastSeenAt,
 	}
 	if prior != nil {
 		running.ExecutorID = prior.ExecutorID
@@ -82,6 +99,82 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 		}
 	}
 	return running
+}
+
+func agentctlPortFromExecution(execution *AgentExecution, agentctlURL string) int {
+	if execution == nil {
+		return 0
+	}
+	if execution.standalonePort > 0 {
+		return execution.standalonePort
+	}
+	if port := metadataInt(execution.Metadata, MetadataKeySSHLocalForwardPort); port > 0 {
+		return port
+	}
+	if port := metadataInt(execution.Metadata, MetadataKeyLocalPort); port > 0 {
+		return port
+	}
+	if agentctlURL == "" {
+		return 0
+	}
+	parsed, err := url.Parse(agentctlURL)
+	if err != nil {
+		return 0
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		return 0
+	}
+	return port
+}
+
+func agentctlPIDFromExecution(execution *AgentExecution) int {
+	if execution == nil {
+		return 0
+	}
+	return metadataInt(execution.Metadata, MetadataKeySSHRemoteAgentctlPID)
+}
+
+func metadataInt(metadata map[string]interface{}, key string) int {
+	if metadata == nil {
+		return 0
+	}
+	switch v := metadata[key].(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	case string:
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return 0
+		}
+		return n
+	default:
+		return 0
+	}
+}
+
+func executorRunningStatusFromExecution(execution *AgentExecution) string {
+	if execution == nil {
+		return models.ExecutorRunningStatusStarting
+	}
+	switch execution.Status {
+	case v1.AgentStatusRunning:
+		return models.ExecutorRunningStatusRunning
+	case v1.AgentStatusReady:
+		return models.ExecutorRunningStatusReady
+	case v1.AgentStatusFailed:
+		return models.ExecutorRunningStatusFailed
+	case v1.AgentStatusStopped:
+		return models.ExecutorRunningStatusStopped
+	case v1.AgentStatusCompleted:
+		return models.ExecutorRunningStatusComplete
+	default:
+		return models.ExecutorRunningStatusStarting
+	}
 }
 
 // persistExecutorRunning writes the executors_running row for an execution that

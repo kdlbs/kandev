@@ -308,3 +308,46 @@ func TestAbandonOpenTurnsHandlesMultipleZombies(t *testing.T) {
 		t.Fatalf("expected 0 open turns after abandon, got %d", open)
 	}
 }
+
+func TestReconcileSessionsOnStartupAbandonsOpenTurns(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+
+	stale, err := svc.turnService.StartTurn(ctx, "session1")
+	if err != nil {
+		t.Fatalf("seed turn: %v", err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:               "session1",
+		SessionID:        "session1",
+		TaskID:           "task1",
+		AgentExecutionID: "exec-before-restart",
+		Status:           models.ExecutorRunningStatusStarting,
+	}); err != nil {
+		t.Fatalf("seed executors_running: %v", err)
+	}
+
+	svc.reconcileSessionsOnStartup(ctx)
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state = %s, want WAITING_FOR_INPUT", session.State)
+	}
+	if open := openTurnCount(t, repo, "session1"); open != 0 {
+		t.Fatalf("expected 0 open turns after startup reconciliation, got %d", open)
+	}
+	got, err := repo.GetTurn(ctx, stale.ID)
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	if got.CompletedAt == nil {
+		t.Fatal("expected startup reconciliation to set completed_at")
+	}
+	if !got.CompletedAt.Equal(got.StartedAt) {
+		t.Fatalf("expected completed_at == started_at, got started=%v completed=%v",
+			got.StartedAt, *got.CompletedAt)
+	}
+}

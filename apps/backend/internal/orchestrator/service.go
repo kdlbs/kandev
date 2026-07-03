@@ -1100,6 +1100,7 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 				zap.Error(err))
 		}
 	}
+	s.abandonOpenTurnsOnStartup(ctx, sessionID, "active session reconciled to waiting")
 
 	// PRESERVE executors_running.agent_execution_id post-restart. The in-memory
 	// process is gone, but the stored ID still serves as a "this session was
@@ -1160,6 +1161,19 @@ func (s *Service) handleMissingSessionOnStartup(ctx context.Context, running *mo
 	}
 }
 
+func (s *Service) abandonOpenTurnsOnStartup(ctx context.Context, sessionID, reason string) {
+	if s.turnService == nil {
+		return
+	}
+	s.activeTurns.Delete(sessionID)
+	if err := s.turnService.AbandonOpenTurns(ctx, sessionID); err != nil {
+		s.logger.Warn("failed to abandon open turns during startup reconciliation",
+			zap.String("session_id", sessionID),
+			zap.String("reason", reason),
+			zap.Error(err))
+	}
+}
+
 func isTaskSessionNotFound(err error) bool {
 	return errors.Is(err, models.ErrTaskSessionNotFound)
 }
@@ -1174,6 +1188,7 @@ func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *m
 			zap.String("session_id", sessionID),
 			zap.String("task_id", session.TaskID),
 			zap.String("state", string(previousState)))
+		s.abandonOpenTurnsOnStartup(ctx, sessionID, "terminal session cleanup")
 		executionID := strings.TrimSpace(running.AgentExecutionID)
 		if executionID != "" && s.agentManager != nil {
 			if err := s.agentManager.StopAgentWithReason(ctx, executionID, "startup terminal session cleanup", true); err != nil {

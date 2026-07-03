@@ -1117,6 +1117,7 @@ func (m *Manager) markReadyEventWithContext(ctx context.Context, executionID, ev
 		zap.String("execution_id", executionID),
 		zap.String("event_type", eventType))
 
+	m.persistExecutorRunning(ctx, execution)
 	m.eventPublisher.PublishAgentEvent(ctx, eventType, execution)
 	return nil
 }
