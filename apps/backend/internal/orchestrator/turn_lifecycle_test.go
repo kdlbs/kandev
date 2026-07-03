@@ -351,3 +351,45 @@ func TestReconcileSessionsOnStartupAbandonsOpenTurns(t *testing.T) {
 			got.StartedAt, *got.CompletedAt)
 	}
 }
+
+func TestReconcileTerminalSessionOnStartupAbandonsOpenTurns(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+
+	stale, err := svc.turnService.StartTurn(ctx, "session1")
+	if err != nil {
+		t.Fatalf("seed turn: %v", err)
+	}
+	if err := repo.UpdateTaskSessionState(ctx, "session1", models.TaskSessionStateCompleted, ""); err != nil {
+		t.Fatalf("mark session completed: %v", err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:               "session1",
+		SessionID:        "session1",
+		TaskID:           "task1",
+		AgentExecutionID: "exec-before-restart",
+		Status:           models.ExecutorRunningStatusRunning,
+	}); err != nil {
+		t.Fatalf("seed executors_running: %v", err)
+	}
+
+	svc.reconcileSessionsOnStartup(ctx)
+
+	if open := openTurnCount(t, repo, "session1"); open != 0 {
+		t.Fatalf("expected 0 open turns after terminal startup reconciliation, got %d", open)
+	}
+	got, err := repo.GetTurn(ctx, stale.ID)
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	if got.CompletedAt == nil {
+		t.Fatal("expected terminal startup reconciliation to set completed_at")
+	}
+	if !got.CompletedAt.Equal(got.StartedAt) {
+		t.Fatalf("expected completed_at == started_at, got started=%v completed=%v",
+			got.StartedAt, *got.CompletedAt)
+	}
+	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session1"); !errors.Is(err, models.ErrExecutorRunningNotFound) {
+		t.Fatalf("expected executor row cleanup, got err=%v", err)
+	}
+}
