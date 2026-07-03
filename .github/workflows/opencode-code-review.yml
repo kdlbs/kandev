@@ -228,7 +228,6 @@ jobs:
   # fork review job's label path, this gives per-commit maintainer opt-in.
   strip-safe-to-review:
     if: >
-      vars.OPENCODE_REVIEW_ENABLED == 'true' &&
       github.event_name == 'pull_request_target' &&
       github.event.action == 'synchronize' &&
       github.event.pull_request.head.repo.full_name != github.repository &&
