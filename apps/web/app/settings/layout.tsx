@@ -8,6 +8,7 @@ import {
   listExecutors,
   listWorkspaces,
 } from "@/lib/api";
+import { ACTIVE_WORKSPACE_COOKIE, mapWorkspaceItem } from "@/lib/routing/route-bootstrap";
 import { resolveActiveId } from "@/lib/ssr/resolve-active-id";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { readCookies } from "@/lib/server/cookies";
@@ -40,20 +41,12 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
     const mappedUserSettings = mapUserSettingsResponse(userSettingsResponse);
     const activeWorkspaceId = resolveActiveId(
       workspaces.workspaces,
-      cookieStore?.get("kandev-active-workspace")?.value ?? null,
+      cookieStore?.get(ACTIVE_WORKSPACE_COOKIE)?.value ?? null,
       userSettingsResponse?.settings?.workspace_id ?? null,
     );
     initialState = {
       workspaces: {
-        items: workspaces.workspaces.map((workspace) => ({
-          id: workspace.id,
-          name: workspace.name,
-          office_workflow_id: workspace.office_workflow_id ?? null,
-          default_executor_id: workspace.default_executor_id ?? null,
-          default_environment_id: workspace.default_environment_id ?? null,
-          default_agent_profile_id: workspace.default_agent_profile_id ?? null,
-          default_config_agent_profile_id: workspace.default_config_agent_profile_id ?? null,
-        })),
+        items: workspaces.workspaces.map(mapWorkspaceItem),
         activeId: activeWorkspaceId,
       },
       executors: {

@@ -13,6 +13,7 @@ import { listWorkspaceTaskPRs } from "@/lib/api/domains/github-api";
 import { snapshotToState } from "@/lib/ssr/mapper";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
+import { ACTIVE_WORKSPACE_COOKIE } from "@/lib/routing/route-bootstrap";
 import { resolveActiveId } from "@/lib/ssr/resolve-active-id";
 import { readCookies } from "@/lib/server/cookies";
 import type { AppState } from "@/lib/state/store";
@@ -138,7 +139,7 @@ export default async function Page({ searchParams }: PageProps) {
     // choice survives a refresh even when userSettings is not updated on select.
     // Kanban home only resolves against kanban workspaces; office workspaces
     // belong under /office.
-    const cookieWorkspaceId = cookieStore?.get("kandev-active-workspace")?.value ?? null;
+    const cookieWorkspaceId = cookieStore?.get(ACTIVE_WORKSPACE_COOKIE)?.value ?? null;
     const activeWorkspaceId = resolveActiveKanbanWorkspaceId(
       workspaces.workspaces,
       workspaceId,

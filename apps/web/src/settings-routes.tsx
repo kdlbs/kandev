@@ -414,15 +414,17 @@ export function buildSettingsInitialStateForRoute({
 }
 
 function resolveSettingsActiveWorkspaceId(
-  workspaceItems: Array<{ id: string }>,
+  workspaceItems: Array<{ id: string; office_workflow_id: string | null }>,
   requestedWorkspaceId: string | null,
   activeCookieWorkspaceId: string | null,
   settingsWorkspaceId: string | null,
 ) {
+  const kanbanWorkspaceItems = workspaceItems.filter((workspace) => !workspace.office_workflow_id);
+
   return (
     workspaceItems.find((workspace) => workspace.id === requestedWorkspaceId)?.id ??
-    workspaceItems.find((workspace) => workspace.id === activeCookieWorkspaceId)?.id ??
-    workspaceItems.find((workspace) => workspace.id === settingsWorkspaceId)?.id ??
+    kanbanWorkspaceItems.find((workspace) => workspace.id === activeCookieWorkspaceId)?.id ??
+    kanbanWorkspaceItems.find((workspace) => workspace.id === settingsWorkspaceId)?.id ??
     workspaceItems[0]?.id ??
     null
   );
