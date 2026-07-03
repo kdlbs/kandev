@@ -22,3 +22,24 @@ func TestTaskListOrderBy_UsesDialectTitleOrdering(t *testing.T) {
 		t.Fatalf("postgres order = %q, want LOWER(title) ordering", postgresOrder)
 	}
 }
+
+func TestTaskSearchSelectQuery_OrdersOutsideDistinctForPostgres(t *testing.T) {
+	query := taskSearchSelectQuery(dialect.PGX, "", "ILIKE", usermodels.TasksListSortTitleAsc)
+	distinctIndex := strings.Index(query, "SELECT DISTINCT")
+	orderIndex := strings.LastIndex(query, "ORDER BY")
+	if distinctIndex == -1 {
+		t.Fatalf("query = %q, want SELECT DISTINCT", query)
+	}
+	if orderIndex == -1 {
+		t.Fatalf("query = %q, want ORDER BY", query)
+	}
+	if orderIndex < distinctIndex {
+		t.Fatalf("query = %q, ORDER BY must be outside SELECT DISTINCT subquery", query)
+	}
+	if strings.Contains(query[distinctIndex:orderIndex], "LOWER(") {
+		t.Fatalf("query = %q, distinct subquery must not order by LOWER(title)", query)
+	}
+	if !strings.Contains(query, "ORDER BY LOWER(task_search.title) ASC") {
+		t.Fatalf("query = %q, want outer Postgres title ordering", query)
+	}
+}

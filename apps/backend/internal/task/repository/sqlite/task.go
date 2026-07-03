@@ -40,6 +40,19 @@ func taskSelectColumns(alias string) string {
 		isFromOfficeProjection(alias) + ` AS is_from_office`
 }
 
+func taskProjectedColumns(alias string) string {
+	if alias == "" {
+		alias = defaultTaskAlias
+	}
+	prefix := alias + "."
+	return prefix + "id, " + prefix + "workspace_id, " + prefix + "workflow_id, " + prefix + "workflow_step_id, " +
+		prefix + "title, " + prefix + "description, " + prefix + "state, " + prefix + "priority, " + prefix + "position, " +
+		prefix + "metadata, " + prefix + "is_ephemeral, " + prefix + "parent_id, " + prefix + "archived_at, " +
+		prefix + "created_at, " + prefix + "updated_at, " + prefix + "assignee_agent_profile_id, " +
+		prefix + "origin, " + prefix + "project_id, " + prefix + "labels, " + prefix + "identifier, " +
+		prefix + "is_from_office"
+}
+
 // isFromOfficeProjection returns a SQL boolean expression that is true
 // when the task is owned by office: either it has a non-empty project_id
 // (explicit office task) or its workflow matches the workspace's
@@ -633,24 +646,31 @@ func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter
 		return nil, 0, err
 	}
 
-	selectQuery := fmt.Sprintf(`
-		SELECT DISTINCT %s
-		FROM tasks t
-		LEFT JOIN task_repositories tr ON t.id = tr.task_id
-		LEFT JOIN repositories r ON tr.repository_id = r.id
-		WHERE t.workspace_id = ?%s
-		AND (
-			t.title %s ? OR
-			t.description %s ? OR
-			r.name %s ? OR
-			r.local_path %s ?
-		)
-		ORDER BY %s
-		LIMIT ? OFFSET ?
-	`, taskSelectColumns("t"), tFilter, like, like, like, like, taskListOrderBy(r.ro.DriverName(), "t", sort))
+	selectQuery := taskSearchSelectQuery(r.ro.DriverName(), tFilter, like, sort)
 	selectArgs := append(append([]interface{}{}, countArgs...), pageSize, offset)
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(selectQuery), selectArgs...)
 	return rows, total, err
+}
+
+func taskSearchSelectQuery(driver, tFilter, like, sort string) string {
+	return fmt.Sprintf(`
+		SELECT %s
+		FROM (
+			SELECT DISTINCT %s
+			FROM tasks t
+			LEFT JOIN task_repositories tr ON t.id = tr.task_id
+			LEFT JOIN repositories r ON tr.repository_id = r.id
+			WHERE t.workspace_id = ?%s
+			AND (
+				t.title %s ? OR
+				t.description %s ? OR
+				r.name %s ? OR
+				r.local_path %s ?
+			)
+		) task_search
+		ORDER BY %s
+		LIMIT ? OFFSET ?
+	`, taskProjectedColumns("task_search"), taskSelectColumns("t"), tFilter, like, like, like, like, taskListOrderBy(driver, "task_search", sort))
 }
 
 // scanSingleTask scans a single row into a Task.
