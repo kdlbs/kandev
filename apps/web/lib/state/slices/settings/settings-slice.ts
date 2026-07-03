@@ -1,4 +1,5 @@
 import type { StateCreator } from "zustand";
+import { DEFAULT_TASKS_LIST_GROUP, DEFAULT_TASKS_LIST_SORT } from "@/lib/tasks/tasks-list-options";
 import { DEFAULT_VOICE_MODE_STATE, type SettingsSlice, type SettingsSliceState } from "./types";
 
 export const defaultSettingsState: SettingsSliceState = {
@@ -25,8 +26,8 @@ export const defaultSettingsState: SettingsSliceState = {
     kanbanViewMode: null,
     workflowId: null,
     repositoryIds: [],
-    tasksListSort: "updated_desc",
-    tasksListGroup: "state",
+    tasksListSort: DEFAULT_TASKS_LIST_SORT,
+    tasksListGroup: DEFAULT_TASKS_LIST_GROUP,
     preferredShell: null,
     shellOptions: [],
     defaultEditorId: null,

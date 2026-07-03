@@ -21,7 +21,7 @@ import {
   sortTasksForList,
   type TasksListGroup,
   type TasksListSort,
-} from "./tasks-list-options";
+} from "@/lib/tasks/tasks-list-options";
 
 interface TasksPageClientProps {
   workspaces: Workspace[];

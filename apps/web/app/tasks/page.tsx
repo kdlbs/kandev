@@ -15,7 +15,7 @@ import {
   sortTasksForList,
   type TasksListGroup,
   type TasksListSort,
-} from "./tasks-list-options";
+} from "@/lib/tasks/tasks-list-options";
 import type { Workflow, Task, Repository, Workspace, UserSettingsResponse } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
 

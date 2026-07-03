@@ -446,8 +446,8 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"kanbanViewMode":              nullString(settings.KanbanViewMode),
 		"workflowId":                  nullString(settings.WorkflowFilterID),
 		"repositoryIds":               stringSlice(settings.RepositoryIDs),
-		"tasksListSort":               defaultString(settings.TasksListSort, "updated_desc"),
-		"tasksListGroup":              defaultString(settings.TasksListGroup, "state"),
+		"tasksListSort":               usermodels.NormalizeTasksListSort(settings.TasksListSort),
+		"tasksListGroup":              usermodels.NormalizeTasksListGroup(settings.TasksListGroup),
 		"preferredShell":              nullString(settings.PreferredShell),
 		"shellOptions":                response.ShellOptions,
 		"defaultEditorId":             nullString(settings.DefaultEditorID),
@@ -646,41 +646,17 @@ func queryValue(req *http.Request, name string) string {
 }
 
 func tasksListSortForRoute(queryValue, settingsValue string) string {
-	if validTasksListSort(queryValue) {
-		return queryValue
+	if usermodels.IsValidTasksListSort(queryValue) {
+		return strings.TrimSpace(queryValue)
 	}
-	if validTasksListSort(settingsValue) {
-		return settingsValue
-	}
-	return "updated_desc"
+	return usermodels.NormalizeTasksListSort(settingsValue)
 }
 
 func tasksListGroupForRoute(queryValue, settingsValue string) string {
-	if validTasksListGroup(queryValue) {
-		return queryValue
+	if usermodels.IsValidTasksListGroup(queryValue) {
+		return strings.TrimSpace(queryValue)
 	}
-	if validTasksListGroup(settingsValue) {
-		return settingsValue
-	}
-	return "state"
-}
-
-func validTasksListSort(value string) bool {
-	switch strings.TrimSpace(value) {
-	case "updated_desc", "updated_asc", "created_desc", "created_asc", "title_asc", "title_desc":
-		return true
-	default:
-		return false
-	}
-}
-
-func validTasksListGroup(value string) bool {
-	switch strings.TrimSpace(value) {
-	case "state", "workflow", "repository", "none":
-		return true
-	default:
-		return false
-	}
+	return usermodels.NormalizeTasksListGroup(settingsValue)
 }
 
 func readActiveWorkspaceCookie(req *http.Request) string {

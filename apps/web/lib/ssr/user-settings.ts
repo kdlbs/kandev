@@ -1,3 +1,9 @@
+import {
+  DEFAULT_TASKS_LIST_GROUP,
+  DEFAULT_TASKS_LIST_SORT,
+  parseTasksListGroup,
+  parseTasksListSort,
+} from "@/lib/tasks/tasks-list-options";
 import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
 import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
 import { DEFAULT_VOICE_MODE_STATE, type VoiceModeState } from "@/lib/state/slices/settings/types";
@@ -16,32 +22,6 @@ export function parseChangesPanelLayout(value: string | undefined): "flat" | "tr
 
 export function parseSystemMetricsDisplay(value: UserSettingsData["system_metrics_display"]) {
   return { showInTopbar: value?.show_in_topbar ?? false };
-}
-
-export function parseTasksListSort(value: string | undefined): string {
-  switch (value) {
-    case "updated_desc":
-    case "updated_asc":
-    case "created_desc":
-    case "created_asc":
-    case "title_asc":
-    case "title_desc":
-      return value;
-    default:
-      return "updated_desc";
-  }
-}
-
-export function parseTasksListGroup(value: string | undefined): string {
-  switch (value) {
-    case "state":
-    case "workflow":
-    case "repository":
-    case "none":
-      return value;
-    default:
-      return "state";
-  }
 }
 
 /**
@@ -177,8 +157,8 @@ export function mapUserSettingsResponse(response: UserSettingsResponse | null) {
       workflowId: null,
       kanbanViewMode: null,
       repositoryIds: [] as string[],
-      tasksListSort: "updated_desc",
-      tasksListGroup: "state",
+      tasksListSort: DEFAULT_TASKS_LIST_SORT,
+      tasksListGroup: DEFAULT_TASKS_LIST_GROUP,
       preferredShell: null,
       shellOptions,
       defaultEditorId: null,

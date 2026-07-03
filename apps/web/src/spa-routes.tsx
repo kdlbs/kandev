@@ -12,7 +12,7 @@ import {
   parseTasksListGroup,
   parseTasksListSort,
   sortTasksForList,
-} from "@/app/tasks/tasks-list-options";
+} from "@/lib/tasks/tasks-list-options";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { BootRouteData } from "./boot-payload";
 import { fetchJson } from "@/lib/api/client";

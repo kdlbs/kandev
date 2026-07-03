@@ -27,7 +27,7 @@ import {
   TASK_STATE_ORDER,
   type TasksListGroup,
   type TasksListSort,
-} from "./tasks-list-options";
+} from "@/lib/tasks/tasks-list-options";
 
 export type TasksListViewProps = {
   total: number;

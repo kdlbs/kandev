@@ -25,8 +25,6 @@ var (
 const (
 	changesPanelLayoutFlat = "flat"
 	changesPanelLayoutTree = "tree"
-	tasksListSortDefault   = "updated_desc"
-	tasksListGroupDefault  = "state"
 )
 
 type Service struct {
@@ -259,42 +257,24 @@ func applyTasksListPreferences(settings *models.UserSettings, sortValue, groupVa
 	if sortValue != nil {
 		v := strings.TrimSpace(*sortValue)
 		if v == "" {
-			v = tasksListSortDefault
+			v = models.TasksListSortDefault
 		}
-		if !validTasksListSort(v) {
-			return errors.New("tasks_list_sort must be one of updated_desc, updated_asc, created_desc, created_asc, title_asc, title_desc")
+		if !models.IsValidTasksListSort(v) {
+			return fmt.Errorf("tasks_list_sort must be one of %s", strings.Join(models.TasksListSortValues(), ", "))
 		}
 		settings.TasksListSort = v
 	}
 	if groupValue != nil {
 		v := strings.TrimSpace(*groupValue)
 		if v == "" {
-			v = tasksListGroupDefault
+			v = models.TasksListGroupDefault
 		}
-		if !validTasksListGroup(v) {
-			return errors.New("tasks_list_group must be one of state, workflow, repository, none")
+		if !models.IsValidTasksListGroup(v) {
+			return fmt.Errorf("tasks_list_group must be one of %s", strings.Join(models.TasksListGroupValues(), ", "))
 		}
 		settings.TasksListGroup = v
 	}
 	return nil
-}
-
-func validTasksListSort(value string) bool {
-	switch value {
-	case "updated_desc", "updated_asc", "created_desc", "created_asc", "title_asc", "title_desc":
-		return true
-	default:
-		return false
-	}
-}
-
-func validTasksListGroup(value string) bool {
-	switch value {
-	case "state", "workflow", "repository", "none":
-		return true
-	default:
-		return false
-	}
 }
 
 func applyTerminalLinkBehavior(settings *models.UserSettings, value *string) error {
