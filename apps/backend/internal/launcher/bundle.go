@@ -88,7 +88,18 @@ func machoHasCodeSignature(path string) (signed bool, ok bool) {
 		machoHeaderSize64  = 32
 		loadCommandHdrSize = 8
 	)
-	data, err := os.ReadFile(path)
+	const maxScanBytes = 64 * 1024 // more than enough for any real Mach-O load-command table
+	f, err := os.Open(path)
+	if err != nil {
+		return false, false
+	}
+	defer f.Close()
+	data := make([]byte, maxScanBytes)
+	n, err := io.ReadFull(f, data)
+	if err != nil && n < machoHeaderSize64 {
+		return false, false
+	}
+	data = data[:n]
 	if err != nil || len(data) < machoHeaderSize64 {
 		return false, false
 	}
