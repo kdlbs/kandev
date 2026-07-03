@@ -21,11 +21,11 @@ func (s *Service) runVacuum(_ context.Context) (map[string]interface{}, error) {
 	if s.pool == nil {
 		return nil, fmt.Errorf("vacuum: no database pool")
 	}
-	before, _ := readDBSize(s.pool.Reader())
+	before, _ := readDatabaseSize(s.pool.Reader())
 	if _, err := s.pool.Writer().Exec("VACUUM"); err != nil {
 		return nil, fmt.Errorf("vacuum: %w", err)
 	}
-	after, _ := readDBSize(s.pool.Reader())
+	after, _ := readDatabaseSize(s.pool.Reader())
 	reclaimed := before - after
 	if reclaimed < 0 {
 		reclaimed = 0

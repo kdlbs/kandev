@@ -156,7 +156,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/system/database": () => (
     <SystemPageShell
       title="Database"
-      description="SQLite path and size, plus VACUUM, optimize, and factory reset."
+      description="Database driver, size, and available maintenance controls."
     >
       <DatabaseStatsCard />
     </SystemPageShell>
