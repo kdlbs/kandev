@@ -64,17 +64,99 @@ describe("readCookie", () => {
 });
 
 describe("resolveSettingsActiveWorkspaceId", () => {
+  const officeWorkflow = "office-workflow";
+  const officeWorkflow1 = "office-workflow-1";
+  const officeWorkflow2 = "office-workflow-2";
+  const kanbanOne = "kanban-1";
+  const kanbanTwo = "kanban-2";
+
   it("falls back to a kanban workspace before an office workspace", () => {
     expect(
       resolveSettingsActiveWorkspaceId(
         [
-          { id: "office-1", office_workflow_id: "office-workflow" },
-          { id: "kanban-1", office_workflow_id: null },
+          { id: "office-1", office_workflow_id: officeWorkflow },
+          { id: kanbanOne, office_workflow_id: null },
         ],
         null,
         null,
         null,
       ),
-    ).toBe("kanban-1");
+    ).toBe(kanbanOne);
+  });
+
+  it("prefers explicit route workspace ID", () => {
+    expect(
+      resolveSettingsActiveWorkspaceId(
+        [
+          { id: "office-1", office_workflow_id: officeWorkflow },
+          { id: kanbanOne, office_workflow_id: null },
+        ],
+        "office-1",
+        null,
+        null,
+      ),
+    ).toBe("office-1");
+  });
+
+  it("uses active cookie when it matches a kanban workspace", () => {
+    expect(
+      resolveSettingsActiveWorkspaceId(
+        [
+          { id: "office-1", office_workflow_id: officeWorkflow },
+          { id: kanbanOne, office_workflow_id: null },
+          { id: kanbanTwo, office_workflow_id: null },
+        ],
+        null,
+        kanbanTwo,
+        null,
+      ),
+    ).toBe(kanbanTwo);
+  });
+
+  it("falls back to settings workspace when no cookie matches", () => {
+    expect(
+      resolveSettingsActiveWorkspaceId(
+        [
+          { id: "office-1", office_workflow_id: officeWorkflow },
+          { id: kanbanOne, office_workflow_id: null },
+          { id: kanbanTwo, office_workflow_id: null },
+        ],
+        null,
+        "ws-missing",
+        kanbanOne,
+      ),
+    ).toBe(kanbanOne);
+  });
+
+  it("returns null when no workspaces exist", () => {
+    expect(resolveSettingsActiveWorkspaceId([], null, "k-1", "k-2")).toBeNull();
+  });
+
+  it("falls back to office workspace only when no kanban workspaces exist", () => {
+    expect(
+      resolveSettingsActiveWorkspaceId(
+        [
+          { id: "office-1", office_workflow_id: officeWorkflow1 },
+          { id: "office-2", office_workflow_id: officeWorkflow2 },
+        ],
+        null,
+        "missing",
+        null,
+      ),
+    ).toBe("office-1");
+  });
+
+  it("returns first kanban workspace when multiple kanban options exist", () => {
+    expect(
+      resolveSettingsActiveWorkspaceId(
+        [
+          { id: kanbanOne, office_workflow_id: null },
+          { id: kanbanTwo, office_workflow_id: null },
+        ],
+        null,
+        null,
+        null,
+      ),
+    ).toBe(kanbanOne);
   });
 });
