@@ -325,11 +325,13 @@ function groupForTask(
 ) {
   if (groupBy === "workflow") {
     const title = workflowMap.get(task.workflow_id) ?? "No workflow";
-    return { key: `workflow:${title}`, title };
+    return { key: `workflow:${task.workflow_id || "none"}`, title };
   }
   if (groupBy === "repository") {
-    const title = resolveRepositoryName(task, repoMap) ?? "No repository";
-    return { key: `repository:${title}`, title };
+    const primaryRepo = primaryTaskRepository(task.repositories);
+    const repoId = primaryRepo?.repository_id ?? "none";
+    const title = primaryRepo ? (repoMap.get(repoId) ?? "No repository") : "No repository";
+    return { key: `repository:${repoId}`, title };
   }
   const title = formatTaskStateLabel(task.state);
   return { key: `state:${task.state}`, title };
@@ -349,11 +351,6 @@ function compareSection(a: TaskListSection, b: TaskListSection, groupBy: TasksLi
 
 function flattenTaskTree(nodes: TaskTreeNode[]): TaskTreeNode[] {
   return nodes.flatMap((node) => [node, ...flattenTaskTree(node.children)]);
-}
-
-function resolveRepositoryName(task: Task, repoMap: Map<string, string>): string | undefined {
-  const primaryRepo = primaryTaskRepository(task.repositories);
-  return primaryRepo ? repoMap.get(primaryRepo.repository_id) : undefined;
 }
 
 function TaskListRow({

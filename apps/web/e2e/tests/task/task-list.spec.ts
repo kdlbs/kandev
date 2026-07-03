@@ -118,4 +118,46 @@ test.describe("Task List", () => {
     expect(settings.settings.tasks_list_sort).toBe("title_asc");
     expect(settings.settings.tasks_list_group).toBe("state");
   });
+
+  test("workflow grouping keeps duplicate workflow names separate", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflowA = await apiClient.createWorkflow(seedData.workspaceId, "Duplicate Group");
+    const workflowB = await apiClient.createWorkflow(seedData.workspaceId, "Duplicate Group");
+    const stepA = await apiClient.createWorkflowStep(workflowA.id, "Start", 0, {
+      is_start_step: true,
+    });
+    const stepB = await apiClient.createWorkflowStep(workflowB.id, "Start", 0, {
+      is_start_step: true,
+    });
+    await apiClient.createTask(seedData.workspaceId, "Duplicate group Alpha", {
+      workflow_id: workflowA.id,
+      workflow_step_id: stepA.id,
+    });
+    await apiClient.createTask(seedData.workspaceId, "Duplicate group Beta", {
+      workflow_id: workflowB.id,
+      workflow_step_id: stepB.id,
+    });
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: "",
+    });
+
+    await testPage.goto("/tasks?sort=title_asc&group=workflow");
+    await testPage.waitForLoadState("networkidle");
+    await testPage
+      .getByTestId("kanban-header-search")
+      .getByPlaceholder("Search tasks...")
+      .fill("Duplicate group");
+
+    const sections = testPage.getByTestId("tasks-list-section");
+    await expect(sections).toHaveCount(2);
+    await expect(sections.nth(0).getByTestId("tasks-list-row")).toHaveCount(1);
+    await expect(sections.nth(1).getByTestId("tasks-list-row")).toHaveCount(1);
+    await expect
+      .poll(() => taskRowTitles(testPage))
+      .toEqual(["Duplicate group Alpha", "Duplicate group Beta"]);
+  });
 });
