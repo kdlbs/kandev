@@ -102,7 +102,7 @@ export function AppSidebarWorkspacePicker() {
     (workspace: WorkspaceItem) => {
       const { id } = workspace;
       if (id === activeId) {
-        if (officeEnabled) {
+        if (officeEnabled && workspaceType(workspace) === "kanban") {
           rememberSelectedWorkspace(workspace);
           router.push(workspaceHomeHref(workspace));
         }
