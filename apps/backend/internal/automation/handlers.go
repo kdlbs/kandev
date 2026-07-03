@@ -300,6 +300,29 @@ func wsDeleteRun(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *
 		if runID == "" {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "run_id required", nil)
 		}
+		workspaceID, _ := payload["workspace_id"].(string)
+		if workspaceID == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "workspace_id required", nil)
+		}
+		// The WS layer is not itself workspace-scoped, so we resolve the run's
+		// automation and reject the request when it belongs to a different
+		// workspace — otherwise any authenticated client who knows a foreign
+		// run_id could permanently delete it. NotFound (not Forbidden) avoids
+		// disclosing whether the id exists at all, mirroring wsRevealWebhookSecret.
+		run, err := svc.GetRun(ctx, runID)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		if run == nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "run not found", nil)
+		}
+		a, err := svc.GetAutomation(ctx, run.AutomationID)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		if a == nil || a.WorkspaceID != workspaceID {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "run not found", nil)
+		}
 		if err := svc.DeleteRun(ctx, runID); err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
@@ -313,6 +336,19 @@ func wsDeleteAllRuns(svc *Service, _ *logger.Logger) func(ctx context.Context, m
 		automationID, _ := payload["automation_id"].(string)
 		if automationID == "" {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "automation_id required", nil)
+		}
+		workspaceID, _ := payload["workspace_id"].(string)
+		if workspaceID == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "workspace_id required", nil)
+		}
+		// See wsDeleteRun: the WS layer isn't workspace-scoped, so this
+		// destructive bulk delete must verify ownership itself.
+		a, err := svc.GetAutomation(ctx, automationID)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		if a == nil || a.WorkspaceID != workspaceID {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "automation not found", nil)
 		}
 		if err := svc.DeleteAllRuns(ctx, automationID); err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)

@@ -12,7 +12,7 @@ import type { AutomationRun } from "@/lib/types/automation";
 
 const EMPTY_RUNS: AutomationRun[] = [];
 
-export function useAutomationRuns(automationId: string | null) {
+export function useAutomationRuns(automationId: string | null, workspaceId: string) {
   const runs = useAppStore((state) =>
     automationId ? (state.automationRuns.byAutomationId[automationId] ?? EMPTY_RUNS) : EMPTY_RUNS,
   );
@@ -57,7 +57,7 @@ export function useAutomationRuns(automationId: string | null) {
     (runId: string) => {
       if (!automationId) return;
       removeRun(automationId, runId); // optimistic
-      deleteAutomationRun(runId).catch((err: unknown) => {
+      deleteAutomationRun(runId, workspaceId).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : "Failed to delete run";
         toast.error(msg);
         // revert on failure
@@ -66,13 +66,13 @@ export function useAutomationRuns(automationId: string | null) {
           .catch(() => {});
       });
     },
-    [automationId, removeRun, setRuns],
+    [automationId, removeRun, setRuns, workspaceId],
   );
 
   const deleteAllRuns = useCallback(() => {
     if (!automationId) return;
     clearRuns(automationId); // optimistic
-    deleteAllAutomationRuns(automationId).catch((err: unknown) => {
+    deleteAllAutomationRuns(automationId, workspaceId).catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : "Failed to delete runs";
       toast.error(msg);
       // revert on failure
@@ -80,7 +80,7 @@ export function useAutomationRuns(automationId: string | null) {
         .then((result) => setRuns(automationId, result ?? []))
         .catch(() => {});
     });
-  }, [automationId, clearRuns, setRuns]);
+  }, [automationId, clearRuns, setRuns, workspaceId]);
 
   return { runs, loading, refresh, deleteRun, deleteAllRuns };
 }

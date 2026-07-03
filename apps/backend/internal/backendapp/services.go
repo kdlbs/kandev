@@ -121,7 +121,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		log.Warn("Automation service initialization failed (non-fatal)", zap.Error(automationErr))
 	}
 	if automationComponents != nil {
-		automationComponents.Service.SetTaskDeleter(taskSvc)
+		automationComponents.Service.SetTaskDeleter(&automationTaskDeleterAdapter{svc: taskSvc})
 	}
 
 	return &Services{

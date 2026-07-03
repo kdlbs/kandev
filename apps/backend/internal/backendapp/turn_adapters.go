@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -119,6 +120,26 @@ func (a *taskDeleterAdapter) translateDeleteErr(err error) error {
 	}
 	if errors.Is(err, taskrepo.ErrTaskNotFound) {
 		return fmt.Errorf("%w: %w", github.ErrTaskNotFound, err)
+	}
+	return err
+}
+
+// automationTaskDeleterAdapter satisfies automation.TaskDeleter and
+// translates the task repository's ErrTaskNotFound sentinel to
+// automation.ErrTaskNotFound so the automation run-cleanup paths can
+// classify the "already gone" case via errors.Is without importing the task
+// repository's package.
+type automationTaskDeleterAdapter struct {
+	svc *taskservice.Service
+}
+
+func (a *automationTaskDeleterAdapter) DeleteTask(ctx context.Context, taskID string) error {
+	err := a.svc.DeleteTask(ctx, taskID)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, taskrepo.ErrTaskNotFound) {
+		return fmt.Errorf("%w: %w", automation.ErrTaskNotFound, err)
 	}
 	return err
 }

@@ -322,18 +322,28 @@ test.describe("Automations settings page", () => {
     const deleteAllBtn = testPage.getByTestId("delete-all-runs");
     await expect(deleteAllBtn).toBeVisible();
 
-    // Hover over the first row to reveal its delete button and click it.
+    // Before hover, the per-row delete button is transparent and
+    // non-interactive — Playwright's toBeVisible() would pass even with
+    // opacity:0, so assert the actual CSS values gating visibility/clicks.
     const firstRow = tbody.locator("tr").first();
-    await firstRow.hover();
     const deleteRowBtn = firstRow.getByTestId("delete-run");
-    await expect(deleteRowBtn).toBeVisible();
+    await expect(deleteRowBtn).toHaveCSS("opacity", "0");
+    await expect(deleteRowBtn).toHaveCSS("pointer-events", "none");
+
+    // Hover over the first row to reveal its delete button and click it.
+    await firstRow.hover();
+    await expect(deleteRowBtn).toHaveCSS("opacity", "1");
+    await expect(deleteRowBtn).toHaveCSS("pointer-events", "auto");
     await deleteRowBtn.click();
 
     // One run removed — table should now have 1 row.
     await expect(tbody.locator("tr")).toHaveCount(1, { timeout: 5_000 });
 
-    // Delete all remaining runs — click trigger, then confirm in the dialog.
+    // Delete all remaining runs — click trigger, and confirm the dialog uses
+    // unqualified wording rather than a count that could understate runs
+    // beyond what's currently loaded in the table.
     await deleteAllBtn.click();
+    await expect(testPage.getByText(/permanently remove all run records/)).toBeVisible();
     await testPage.getByTestId("delete-all-runs-confirm").click();
 
     // Table should show the empty state.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -12,11 +13,20 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
-	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
+
+// ErrTaskNotFound is the sentinel that run-cleanup paths check to distinguish
+// "the task is already gone — fine, drop the run row anyway" from a real
+// upstream failure. TaskDeleter implementations should wrap this when the
+// task domain reports a missing row, so this package can recognize the case
+// via errors.Is without importing the task repository package (see
+// backendapp's taskDeleterAdapter for the production wiring).
+var ErrTaskNotFound = errors.New("automation: task not found for cleanup")
 
 // TaskDeleter deletes a task and cleans up its resources.
 // Satisfied by *taskservice.Service; injected to avoid a cyclic import.
+// Implementations should return errors wrapping ErrTaskNotFound when the
+// task is already gone.
 type TaskDeleter interface {
 	DeleteTask(ctx context.Context, id string) error
 }
@@ -27,6 +37,14 @@ type Service struct {
 	eventBus    bus.EventBus
 	logger      *logger.Logger
 	taskDeleter TaskDeleter // optional; nil-safe
+
+	// runLocks serializes run creation (RecordRun, the concurrency-cap skip
+	// insert) against DeleteAllRuns per automation ID. Without this, a run
+	// created between DeleteAllRuns' task-id snapshot and its final row
+	// purge would have its row deleted without its task ever reaching the
+	// TaskDeleter — orphaning the task. Entries are never removed: growth is
+	// bounded by the number of distinct automation IDs (~160 B per entry).
+	runLocks sync.Map // automationID (string) -> *sync.Mutex
 }
 
 // NewService creates a new automation service.
@@ -189,6 +207,29 @@ func (s *Service) ListRuns(ctx context.Context, automationID string, limit int) 
 	return s.store.ListRuns(ctx, automationID, limit)
 }
 
+// GetRun returns a single run by ID, or nil if not found.
+func (s *Service) GetRun(ctx context.Context, id string) (*AutomationRun, error) {
+	return s.store.GetRun(ctx, id)
+}
+
+// automationRunLock returns an unlock func for the per-automation mutex that
+// serializes run creation (createRunLocked) against DeleteAllRuns.
+func (s *Service) automationRunLock(automationID string) func() {
+	v, _ := s.runLocks.LoadOrStore(automationID, &sync.Mutex{})
+	mu := v.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
+// createRunLocked persists a run row while holding the per-automation lock
+// that DeleteAllRuns also acquires. Without this, a run created between
+// DeleteAllRuns' task-id snapshot and its final row purge would be deleted
+// without its task ever reaching the TaskDeleter, orphaning the task.
+func (s *Service) createRunLocked(ctx context.Context, run *AutomationRun) error {
+	defer s.automationRunLock(run.AutomationID)()
+	return s.store.CreateRun(ctx, run)
+}
+
 // DeleteRun removes a single run and its associated task (if any).
 // Task deletion is best-effort: a not-found error is silently ignored so
 // stale/orphaned run rows are always removable by the user.
@@ -199,7 +240,7 @@ func (s *Service) DeleteRun(ctx context.Context, runID string) error {
 	}
 	if run != nil && run.TaskID != "" && s.taskDeleter != nil {
 		if delErr := s.taskDeleter.DeleteTask(ctx, run.TaskID); delErr != nil {
-			if !errors.Is(delErr, taskrepo.ErrTaskNotFound) {
+			if !errors.Is(delErr, ErrTaskNotFound) {
 				return fmt.Errorf("delete task: %w", delErr)
 			}
 			s.logger.Debug("run task already gone, continuing delete",
@@ -213,6 +254,7 @@ func (s *Service) DeleteRun(ctx context.Context, runID string) error {
 // DeleteAllRuns removes every run for an automation, deleting each associated
 // task first. Task deletion is best-effort: not-found errors are ignored.
 func (s *Service) DeleteAllRuns(ctx context.Context, automationID string) error {
+	defer s.automationRunLock(automationID)()
 	if s.taskDeleter != nil {
 		taskIDs, err := s.store.ListRunTaskIDs(ctx, automationID)
 		if err != nil {
@@ -220,7 +262,7 @@ func (s *Service) DeleteAllRuns(ctx context.Context, automationID string) error 
 		}
 		for _, taskID := range taskIDs {
 			if delErr := s.taskDeleter.DeleteTask(ctx, taskID); delErr != nil {
-				if !errors.Is(delErr, taskrepo.ErrTaskNotFound) {
+				if !errors.Is(delErr, ErrTaskNotFound) {
 					return fmt.Errorf("delete task %s: %w", taskID, delErr)
 				}
 				s.logger.Debug("run task already gone, skipping",
@@ -306,7 +348,7 @@ func (s *Service) FireTrigger(ctx context.Context, automationID, triggerID strin
 
 // RecordRun records a trigger run outcome.
 func (s *Service) RecordRun(ctx context.Context, run *AutomationRun) error {
-	return s.store.CreateRun(ctx, run)
+	return s.createRunLocked(ctx, run)
 }
 
 // maybeSkipForConcurrencyCap enforces max_concurrent_runs. Returns (skipped,
@@ -336,7 +378,7 @@ func (s *Service) maybeSkipForConcurrencyCap(ctx context.Context, automationID, 
 		TriggerData:  triggerData,
 		ErrorMessage: fmt.Sprintf("max_concurrent_runs=%d reached", a.MaxConcurrentRuns),
 	}
-	if recErr := s.store.CreateRun(ctx, skipRun); recErr != nil {
+	if recErr := s.createRunLocked(ctx, skipRun); recErr != nil {
 		s.logger.Warn("failed to record skipped run", zap.Error(recErr))
 	}
 	s.logger.Info("automation trigger skipped: concurrency cap reached",

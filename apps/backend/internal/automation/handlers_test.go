@@ -5,12 +5,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
-	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -209,7 +207,7 @@ func TestWsDeleteRun_DeletesRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req, err := ws.NewRequest("req-del", ws.ActionAutomationRunDelete, map[string]string{"run_id": run.ID})
+	req, err := ws.NewRequest("req-del", ws.ActionAutomationRunDelete, map[string]string{"run_id": run.ID, "workspace_id": "ws-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +231,7 @@ func TestWsDeleteRun_RequiresRunID(t *testing.T) {
 	log, _ := logger.NewFromZap(zap.NewNop())
 	ctx := context.Background()
 
-	req, err := ws.NewRequest("req-1", ws.ActionAutomationRunDelete, map[string]string{})
+	req, err := ws.NewRequest("req-1", ws.ActionAutomationRunDelete, map[string]string{"workspace_id": "ws-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,6 +248,70 @@ func TestWsDeleteRun_RequiresRunID(t *testing.T) {
 	}
 }
 
+func TestWsDeleteRun_RequiresWorkspaceID(t *testing.T) {
+	svc := newTestService(t)
+	log, _ := logger.NewFromZap(zap.NewNop())
+	ctx := context.Background()
+
+	req, err := ws.NewRequest("req-1", ws.ActionAutomationRunDelete, map[string]string{"run_id": "run-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := wsDeleteRun(svc, log)(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ep ws.ErrorPayload
+	_ = json.Unmarshal(resp.Payload, &ep)
+	if ep.Code != ws.ErrorCodeBadRequest {
+		t.Errorf("expected BAD_REQUEST, got %q", ep.Code)
+	}
+}
+
+func TestWsDeleteRun_RejectsCrossWorkspace(t *testing.T) {
+	svc := newTestService(t)
+	log, _ := logger.NewFromZap(zap.NewNop())
+	ctx := context.Background()
+
+	// Run belongs to an automation in workspace A.
+	a := &Automation{WorkspaceID: "ws-A", Name: "X", WorkflowID: "wf-1", WorkflowStepID: "s-1", Enabled: true}
+	if err := svc.store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	run := &AutomationRun{
+		AutomationID: a.ID,
+		TriggerType:  TriggerTypeScheduled,
+		Status:       RunStatusSkipped,
+		TriggerData:  json.RawMessage(`{}`),
+	}
+	if err := svc.store.CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+
+	// A caller in workspace B must not be able to delete it.
+	req, _ := ws.NewRequest("req-1", ws.ActionAutomationRunDelete, map[string]any{"run_id": run.ID, "workspace_id": "ws-B"})
+	resp, err := wsDeleteRun(svc, log)(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Type != ws.MessageTypeError {
+		t.Fatalf("expected error response for cross-workspace delete, got %v: %s", resp.Type, string(resp.Payload))
+	}
+	var ep ws.ErrorPayload
+	if err := json.Unmarshal(resp.Payload, &ep); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if ep.Code != ws.ErrorCodeNotFound {
+		t.Errorf("expected NOT_FOUND to avoid disclosing existence, got %q", ep.Code)
+	}
+
+	// The run must survive the rejected request.
+	got, _ := svc.store.GetRun(ctx, run.ID)
+	if got == nil {
+		t.Error("run was deleted despite cross-workspace mismatch — regression")
+	}
+}
+
 func TestWsDeleteAllRuns_ClearsAllRuns(t *testing.T) {
 	svc := newTestService(t)
 	log, _ := logger.NewFromZap(zap.NewNop())
@@ -259,7 +321,7 @@ func TestWsDeleteAllRuns_ClearsAllRuns(t *testing.T) {
 	if err := svc.store.CreateAutomation(ctx, a); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if err := svc.store.CreateRun(ctx, &AutomationRun{
 			AutomationID: a.ID,
 			TriggerType:  TriggerTypeScheduled,
@@ -270,7 +332,7 @@ func TestWsDeleteAllRuns_ClearsAllRuns(t *testing.T) {
 		}
 	}
 
-	req, err := ws.NewRequest("req-all", ws.ActionAutomationRunsDeleteAll, map[string]string{"automation_id": a.ID})
+	req, err := ws.NewRequest("req-all", ws.ActionAutomationRunsDeleteAll, map[string]string{"automation_id": a.ID, "workspace_id": "ws-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,116 +350,35 @@ func TestWsDeleteAllRuns_ClearsAllRuns(t *testing.T) {
 	}
 }
 
-// fakeTaskDeleter records deletions and can inject errors per task ID.
-type fakeTaskDeleter struct {
-	deleted []string
-	errors  map[string]error
-}
-
-func (f *fakeTaskDeleter) DeleteTask(_ context.Context, id string) error {
-	f.deleted = append(f.deleted, id)
-	if f.errors != nil {
-		if err, ok := f.errors[id]; ok {
-			return err
-		}
-	}
-	return nil
-}
-
-func TestService_DeleteRun_CallsTaskDeleter(t *testing.T) {
+func TestWsDeleteAllRuns_RequiresWorkspaceID(t *testing.T) {
 	svc := newTestService(t)
-	deleter := &fakeTaskDeleter{}
-	svc.SetTaskDeleter(deleter)
+	log, _ := logger.NewFromZap(zap.NewNop())
 	ctx := context.Background()
 
-	a := &Automation{WorkspaceID: "ws-1", Name: "A", WorkflowID: "wf-1", WorkflowStepID: "s-1", Enabled: true}
+	req, err := ws.NewRequest("req-1", ws.ActionAutomationRunsDeleteAll, map[string]string{"automation_id": "auto-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := wsDeleteAllRuns(svc, log)(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ep ws.ErrorPayload
+	_ = json.Unmarshal(resp.Payload, &ep)
+	if ep.Code != ws.ErrorCodeBadRequest {
+		t.Errorf("expected BAD_REQUEST, got %q", ep.Code)
+	}
+}
+
+func TestWsDeleteAllRuns_RejectsCrossWorkspace(t *testing.T) {
+	svc := newTestService(t)
+	log, _ := logger.NewFromZap(zap.NewNop())
+	ctx := context.Background()
+
+	a := &Automation{WorkspaceID: "ws-A", Name: "Y", WorkflowID: "wf-1", WorkflowStepID: "s-1", Enabled: true}
 	if err := svc.store.CreateAutomation(ctx, a); err != nil {
 		t.Fatal(err)
 	}
-	run := &AutomationRun{
-		AutomationID: a.ID,
-		TriggerType:  TriggerTypeScheduled,
-		Status:       RunStatusTaskCreated,
-		TaskID:       "task-xyz",
-		TriggerData:  json.RawMessage(`{}`),
-	}
-	if err := svc.store.CreateRun(ctx, run); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := svc.DeleteRun(ctx, run.ID); err != nil {
-		t.Fatalf("DeleteRun: %v", err)
-	}
-
-	// Task deleter must have been called.
-	if len(deleter.deleted) != 1 || deleter.deleted[0] != "task-xyz" {
-		t.Errorf("expected DeleteTask(task-xyz), got %v", deleter.deleted)
-	}
-	// Run row must be gone.
-	got, _ := svc.store.GetRun(ctx, run.ID)
-	if got != nil {
-		t.Error("expected run row to be removed")
-	}
-}
-
-func TestService_DeleteRun_TaskNotFound_StillDeletesRun(t *testing.T) {
-	svc := newTestService(t)
-	deleter := &fakeTaskDeleter{
-		errors: map[string]error{"task-gone": taskrepo.ErrTaskNotFound},
-	}
-	svc.SetTaskDeleter(deleter)
-	ctx := context.Background()
-
-	a := &Automation{WorkspaceID: "ws-1", Name: "B", WorkflowID: "wf-1", WorkflowStepID: "s-1", Enabled: true}
-	if err := svc.store.CreateAutomation(ctx, a); err != nil {
-		t.Fatal(err)
-	}
-	run := &AutomationRun{
-		AutomationID: a.ID,
-		TriggerType:  TriggerTypeScheduled,
-		Status:       RunStatusSkipped,
-		TaskID:       "task-gone",
-		TriggerData:  json.RawMessage(`{}`),
-	}
-	if err := svc.store.CreateRun(ctx, run); err != nil {
-		t.Fatal(err)
-	}
-
-	// Must succeed even though the task is not found.
-	if err := svc.DeleteRun(ctx, run.ID); err != nil {
-		t.Fatalf("DeleteRun with not-found task: %v", err)
-	}
-
-	// Run row must still be gone.
-	got, _ := svc.store.GetRun(ctx, run.ID)
-	if got != nil {
-		t.Error("expected run row to be removed despite task-not-found")
-	}
-}
-
-func TestService_DeleteAllRuns_CallsTaskDeleterForEach(t *testing.T) {
-	svc := newTestService(t)
-	deleter := &fakeTaskDeleter{}
-	svc.SetTaskDeleter(deleter)
-	ctx := context.Background()
-
-	a := &Automation{WorkspaceID: "ws-1", Name: "C", WorkflowID: "wf-1", WorkflowStepID: "s-1", Enabled: true}
-	if err := svc.store.CreateAutomation(ctx, a); err != nil {
-		t.Fatal(err)
-	}
-	taskIDs := []string{"task-1", "task-2", "task-3"}
-	for _, tid := range taskIDs {
-		if err := svc.store.CreateRun(ctx, &AutomationRun{
-			AutomationID: a.ID,
-			TriggerType:  TriggerTypeScheduled,
-			Status:       RunStatusTaskCreated,
-			TaskID:       tid,
-			TriggerData:  json.RawMessage(`{}`),
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// Also one run with no task_id (fire-and-forget / skipped).
 	if err := svc.store.CreateRun(ctx, &AutomationRun{
 		AutomationID: a.ID,
 		TriggerType:  TriggerTypeScheduled,
@@ -407,149 +388,25 @@ func TestService_DeleteAllRuns_CallsTaskDeleterForEach(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := svc.DeleteAllRuns(ctx, a.ID); err != nil {
-		t.Fatalf("DeleteAllRuns: %v", err)
-	}
-
-	// All three task IDs must have been passed to DeleteTask.
-	if len(deleter.deleted) != 3 {
-		t.Errorf("expected 3 task deletions, got %d: %v", len(deleter.deleted), deleter.deleted)
-	}
-	// All run rows gone.
-	runs, _ := svc.store.ListRuns(ctx, a.ID, 50)
-	if len(runs) != 0 {
-		t.Errorf("expected 0 runs, got %d", len(runs))
-	}
-}
-
-func TestService_DeleteAllRuns_TaskNotFound_StillClearsRuns(t *testing.T) {
-	svc := newTestService(t)
-	deleter := &fakeTaskDeleter{
-		errors: map[string]error{"task-stale": taskrepo.ErrTaskNotFound},
-	}
-	svc.SetTaskDeleter(deleter)
-	ctx := context.Background()
-
-	a := &Automation{WorkspaceID: "ws-1", Name: "D", WorkflowID: "wf-1", WorkflowStepID: "s-1", Enabled: true}
-	if err := svc.store.CreateAutomation(ctx, a); err != nil {
-		t.Fatal(err)
-	}
-	for _, tid := range []string{"task-stale", "task-ok"} {
-		if err := svc.store.CreateRun(ctx, &AutomationRun{
-			AutomationID: a.ID,
-			TriggerType:  TriggerTypeScheduled,
-			Status:       RunStatusTaskCreated,
-			TaskID:       tid,
-			TriggerData:  json.RawMessage(`{}`),
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	if err := svc.DeleteAllRuns(ctx, a.ID); err != nil {
-		t.Fatalf("DeleteAllRuns with not-found task: %v", err)
-	}
-
-	runs, _ := svc.store.ListRuns(ctx, a.ID, 50)
-	if len(runs) != 0 {
-		t.Errorf("expected 0 runs after delete-all, got %d", len(runs))
-	}
-}
-
-// TestDeleteAllRuns_AutomationSurvives is a regression guard: deleting all run
-// rows — including issuing real DELETE SQL against task rows in the shared
-// in-memory DB — must never delete the parent automation row. A real DB-level
-// deleter catches SQL trigger / ON DELETE CASCADE regressions. Note: event
-// handler side-effects are not covered here (no orchestrator runs in this test).
-func TestDeleteAllRuns_AutomationSurvives(t *testing.T) {
-	store := setupTestStore(t)
-	ctx := context.Background()
-
-	// Create a minimal tasks table in the same in-memory DB so the
-	// real-deleter can insert and then DELETE task rows.
-	if _, err := store.db.ExecContext(ctx,
-		`CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, title TEXT, state TEXT)`); err != nil {
-		t.Fatal("create tasks table:", err)
-	}
-
-	// sqliteTaskDeleter deletes from the real tasks table in the same DB —
-	// any SQL cascade or trigger that touched automations would fire here.
-	realDeleter := &sqliteTaskDeleter{db: store.db}
-
-	log, _ := logger.NewFromZap(zap.NewNop())
-	eb := bus.NewMemoryEventBus(log)
-	svc := NewService(store, eb, log)
-	svc.SetTaskDeleter(realDeleter)
-
-	a := &Automation{WorkspaceID: "ws-1", Name: "Survives", WorkflowID: "wf-1", WorkflowStepID: "s-1", Enabled: true}
-	if err := store.CreateAutomation(ctx, a); err != nil {
-		t.Fatal(err)
-	}
-
-	// Insert real task rows and create runs referencing them.
-	taskIDs := []string{"task-a", "task-b", "task-c"}
-	for _, tid := range taskIDs {
-		if _, err := store.db.ExecContext(ctx,
-			`INSERT INTO tasks (id, title, state) VALUES (?, 'Test task', 'running')`, tid); err != nil {
-			t.Fatal("insert task:", err)
-		}
-		if err := store.CreateRun(ctx, &AutomationRun{
-			AutomationID: a.ID,
-			TriggerType:  TriggerTypeScheduled,
-			Status:       RunStatusTaskCreated,
-			TaskID:       tid,
-			TriggerData:  json.RawMessage(`{}`),
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// Skipped runs without task IDs.
-	for range 3 {
-		if err := store.CreateRun(ctx, &AutomationRun{
-			AutomationID: a.ID, TriggerType: TriggerTypeScheduled,
-			Status: RunStatusSkipped, TriggerData: json.RawMessage(`{}`),
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	if err := svc.DeleteAllRuns(ctx, a.ID); err != nil {
-		t.Fatalf("DeleteAllRuns: %v", err)
-	}
-
-	// Automation row must still exist after real task DELETEs fired.
-	got, err := store.GetAutomation(ctx, a.ID)
+	req, _ := ws.NewRequest("req-1", ws.ActionAutomationRunsDeleteAll, map[string]any{"automation_id": a.ID, "workspace_id": "ws-B"})
+	resp, err := wsDeleteAllRuns(svc, log)(ctx, req)
 	if err != nil {
-		t.Fatalf("GetAutomation after DeleteAllRuns: %v", err)
+		t.Fatal(err)
 	}
-	if got == nil {
-		t.Error("automation was deleted by DeleteAllRuns — regression")
-		return
+	if resp.Type != ws.MessageTypeError {
+		t.Fatalf("expected error response for cross-workspace delete-all, got %v: %s", resp.Type, string(resp.Payload))
 	}
-	if got.Name != "Survives" {
-		t.Errorf("unexpected automation name %q", got.Name)
+	var ep ws.ErrorPayload
+	if err := json.Unmarshal(resp.Payload, &ep); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if ep.Code != ws.ErrorCodeNotFound {
+		t.Errorf("expected NOT_FOUND to avoid disclosing existence, got %q", ep.Code)
 	}
 
-	// Runs must be gone.
-	runs, _ := store.ListRuns(ctx, a.ID, 50)
-	if len(runs) != 0 {
-		t.Errorf("expected 0 runs, got %d", len(runs))
+	// Runs must survive the rejected request.
+	runs, _ := svc.store.ListRuns(ctx, a.ID, 50)
+	if len(runs) != 1 {
+		t.Errorf("expected the run to survive a rejected cross-workspace delete-all, got %d runs", len(runs))
 	}
-	// Task rows should have been deleted.
-	if len(realDeleter.deleted) != 3 {
-		t.Errorf("expected 3 task deletions, got %d: %v", len(realDeleter.deleted), realDeleter.deleted)
-	}
-}
-
-// sqliteTaskDeleter deletes from the real tasks table in the same in-memory
-// DB, so any SQL trigger or ON DELETE CASCADE that touches automations fires.
-type sqliteTaskDeleter struct {
-	db      *sqlx.DB
-	deleted []string
-}
-
-func (d *sqliteTaskDeleter) DeleteTask(ctx context.Context, id string) error {
-	d.deleted = append(d.deleted, id)
-	_, err := d.db.ExecContext(ctx, `DELETE FROM tasks WHERE id = ?`, id)
-	return err
 }

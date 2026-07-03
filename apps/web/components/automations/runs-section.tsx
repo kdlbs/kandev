@@ -25,6 +25,7 @@ import { formatRelativeTime } from "./format-utils";
 type RunsSectionProps = {
   automationId: string | null;
   executionMode: ExecutionMode;
+  workspaceId: string;
 };
 
 const STATUS_BADGE: Record<
@@ -74,7 +75,7 @@ function RunRow({ run, taskClickable, onDelete, onNavigate }: RunRowProps) {
         <Button
           variant="ghost"
           size="icon-sm"
-          className="cursor-pointer text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100"
+          className="cursor-pointer text-muted-foreground hover:text-destructive opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto [@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto"
           onClick={(e) => {
             e.stopPropagation();
             e.preventDefault();
@@ -90,9 +91,9 @@ function RunRow({ run, taskClickable, onDelete, onNavigate }: RunRowProps) {
   );
 }
 
-type DeleteAllButtonProps = { count: number; disabled: boolean; onConfirm: () => void };
+type DeleteAllButtonProps = { disabled: boolean; onConfirm: () => void };
 
-function DeleteAllButton({ count, disabled, onConfirm }: DeleteAllButtonProps) {
+function DeleteAllButton({ disabled, onConfirm }: DeleteAllButtonProps) {
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
@@ -111,8 +112,8 @@ function DeleteAllButton({ count, disabled, onConfirm }: DeleteAllButtonProps) {
         <AlertDialogHeader>
           <AlertDialogTitle>Delete all runs?</AlertDialogTitle>
           <AlertDialogDescription>
-            This will permanently remove all {count} run records and their associated tasks. This
-            cannot be undone.
+            This will permanently remove all run records for this automation — including any not
+            currently loaded — and their associated tasks. This cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -130,9 +131,12 @@ function DeleteAllButton({ count, disabled, onConfirm }: DeleteAllButtonProps) {
   );
 }
 
-export function RunsSection({ automationId, executionMode }: RunsSectionProps) {
+export function RunsSection({ automationId, executionMode, workspaceId }: RunsSectionProps) {
   const [expanded, setExpanded] = useState(false);
-  const { runs, loading, refresh, deleteRun, deleteAllRuns } = useAutomationRuns(automationId);
+  const { runs, loading, refresh, deleteRun, deleteAllRuns } = useAutomationRuns(
+    automationId,
+    workspaceId,
+  );
   const router = useRouter();
 
   if (!automationId) return null;
@@ -165,9 +169,7 @@ export function RunsSection({ automationId, executionMode }: RunsSectionProps) {
             >
               <IconRefresh className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
             </Button>
-            {runs.length > 0 && (
-              <DeleteAllButton count={runs.length} disabled={loading} onConfirm={deleteAllRuns} />
-            )}
+            {runs.length > 0 && <DeleteAllButton disabled={loading} onConfirm={deleteAllRuns} />}
           </div>
         )}
       </div>

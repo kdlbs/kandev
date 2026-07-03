@@ -353,23 +353,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
 
   return (
     <div className="max-w-3xl space-y-6" data-testid="automation-editor">
-      <div className="space-y-2">
-        <RequiredFieldLabel htmlFor="automation-name">Name</RequiredFieldLabel>
-        <Input
-          id="automation-name"
-          data-testid="automation-name-input"
-          value={form.name}
-          onChange={(e) => updateField("name", e.target.value)}
-          placeholder="Automation name"
-          aria-describedby={!form.name.trim() ? "automation-name-help" : undefined}
-          aria-invalid={!form.name.trim() ? true : undefined}
-        />
-        {!form.name.trim() && (
-          <p id="automation-name-help" className="text-xs text-muted-foreground">
-            Enter an automation name to enable saving.
-          </p>
-        )}
-      </div>
+      <NameField value={form.name} onChange={(v) => updateField("name", v)} />
       <Separator />
       <WhenSection
         triggerActions={triggerActions}
@@ -389,7 +373,11 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
       <Separator />
       <SettingsSection form={form} updateField={updateField} />
       <Separator />
-      <RunsSection automationId={currentId} executionMode={form.executionMode} />
+      <RunsSection
+        automationId={currentId}
+        executionMode={form.executionMode}
+        workspaceId={workspaceId}
+      />
       <EditorFooter
         canSave={canSave}
         saving={saving}
@@ -404,6 +392,28 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
           router.push(`/settings/workspace/${workspaceId}/automations`);
         }}
       />
+    </div>
+  );
+}
+
+function NameField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <div className="space-y-2">
+      <RequiredFieldLabel htmlFor="automation-name">Name</RequiredFieldLabel>
+      <Input
+        id="automation-name"
+        data-testid="automation-name-input"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Automation name"
+        aria-describedby={!value.trim() ? "automation-name-help" : undefined}
+        aria-invalid={!value.trim() ? true : undefined}
+      />
+      {!value.trim() && (
+        <p id="automation-name-help" className="text-xs text-muted-foreground">
+          Enter an automation name to enable saving.
+        </p>
+      )}
     </div>
   );
 }
