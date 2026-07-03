@@ -353,6 +353,7 @@ func TestEnsureSessionRunning_WaitsForPromptReadyAfterResume(t *testing.T) {
 // the agent reports ready shortly after, exactly as a real resume would.
 func TestEnsureSessionRunning_SurvivesCallerContextCancellationDuringResume(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	repo := setupTestRepo(t)
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateIdle)

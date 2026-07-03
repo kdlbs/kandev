@@ -1507,11 +1507,17 @@ func (s *Service) waitForSessionReady(ctx context.Context, sessionID string) err
 	// wall clock between iterations). Mirrors waitForAgentPromptReady.
 	readyCtx, cancel := context.WithTimeout(ctx, maxWait)
 	defer cancel()
+	// Ticker rather than time.After(pollInterval) in the loop: time.After
+	// allocates a fresh timer each iteration that lives until it fires, so a
+	// long wait would pile up ~maxWait/pollInterval live timers. Mirrors
+	// waitForAgentPromptReady.
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-readyCtx.Done():
 			return fmt.Errorf("timeout waiting for agent to become ready: %w", readyCtx.Err())
-		case <-time.After(pollInterval):
+		case <-ticker.C:
 		}
 		sess, err := s.repo.GetTaskSession(readyCtx, sessionID)
 		if err != nil {
