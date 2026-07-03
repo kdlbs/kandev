@@ -622,14 +622,27 @@ func createRemoteAgentInstance(
 // CLAUDE_CODE_OAUTH_TOKEN, not a credentials file — failed with "Authentication
 // required" on every SSH remote. We forward ONLY this credential allowlist (not
 // the control plane's HOME/PATH/etc., which would break a different remote).
+// Credential env var names. Named constants keep each string single-sourced
+// (several also appear in the Docker/Sprites credential paths) so goconst stays
+// satisfied and the allowlist reads as intent rather than magic strings.
+const (
+	envKeyClaudeCodeOAuthToken = "CLAUDE_CODE_OAUTH_TOKEN"
+	envKeyAnthropicAPIKey      = "ANTHROPIC_API_KEY"
+	envKeyOpenAIAPIKey         = "OPENAI_API_KEY"
+	envKeyGeminiAPIKey         = "GEMINI_API_KEY"
+	envKeyGoogleAPIKey         = "GOOGLE_API_KEY"
+	envKeyGitHubToken          = "GITHUB_TOKEN"
+	envKeyGHToken              = "GH_TOKEN"
+)
+
 var sshRemoteAgentCredentialEnvKeys = []string{
-	"CLAUDE_CODE_OAUTH_TOKEN",
-	"ANTHROPIC_API_KEY",
-	"OPENAI_API_KEY",
-	"GEMINI_API_KEY",
-	"GOOGLE_API_KEY",
-	"GITHUB_TOKEN",
-	"GH_TOKEN",
+	envKeyClaudeCodeOAuthToken,
+	envKeyAnthropicAPIKey,
+	envKeyOpenAIAPIKey,
+	envKeyGeminiAPIKey,
+	envKeyGoogleAPIKey,
+	envKeyGitHubToken,
+	envKeyGHToken,
 }
 
 // sshRemoteAgentEnv builds the env map sent to the remote agent instance. Each

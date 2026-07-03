@@ -110,7 +110,7 @@ func TestMachoHasCodeSignature(t *testing.T) {
 	writeMachO(t, unsigned, false)
 
 	if got, ok := machoHasCodeSignature(signed); !ok || !got {
-		t.Fatalf("signed: got=%v ok=%v, want true true", got, ok)
+		t.Fatalf("signed: got=%v ok=%v, want signed=true ok=true", got, ok)
 	}
 	if got, ok := machoHasCodeSignature(unsigned); !ok || got {
 		t.Fatalf("unsigned: got=%v ok=%v, want false true", got, ok)

@@ -828,7 +828,7 @@ func TestMergeExecutorConfigMetadata(t *testing.T) {
 	// Empty config is a no-op.
 	info3 := &lifecycle.WorkspaceInfo{}
 	mergeExecutorConfigMetadata(info3, nil)
-	if info3.Metadata != nil && len(info3.Metadata) != 0 {
+	if len(info3.Metadata) != 0 {
 		t.Fatalf("empty config should not create metadata, got %v", info3.Metadata)
 	}
 
