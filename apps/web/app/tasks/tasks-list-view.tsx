@@ -8,19 +8,14 @@ import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import {
-  IconArchive,
-  IconChevronLeft,
-  IconChevronRight,
-  IconLoader,
-  IconTrash,
-} from "@tabler/icons-react";
+import { IconArchive, IconLoader, IconTrash } from "@tabler/icons-react";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { primaryTaskRepository, type Repository, type Task, type Workflow } from "@/lib/types/http";
 import { formatTaskStateLabel } from "@/lib/ui/state-labels";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
 import { formatRelativeTime } from "@/lib/utils";
+import { TasksPagination } from "./tasks-pagination";
 import {
   TASKS_LIST_GROUP_OPTIONS,
   TASKS_LIST_SORT_OPTIONS,
@@ -324,13 +319,16 @@ function groupForTask(
   repoMap: Map<string, string>,
 ) {
   if (groupBy === "workflow") {
-    const title = workflowMap.get(task.workflow_id) ?? "No workflow";
+    const title = workflowMap.get(task.workflow_id);
+    if (!title) return { key: "workflow:none", title: "No workflow" };
     return { key: `workflow:${task.workflow_id || "none"}`, title };
   }
   if (groupBy === "repository") {
     const primaryRepo = primaryTaskRepository(task.repositories);
+    if (!primaryRepo) return { key: "repository:none", title: "No repository" };
     const repoId = primaryRepo?.repository_id ?? "none";
-    const title = primaryRepo ? (repoMap.get(repoId) ?? "No repository") : "No repository";
+    const title = repoMap.get(repoId);
+    if (!title) return { key: "repository:none", title: "No repository" };
     return { key: `repository:${repoId}`, title };
   }
   const title = formatTaskStateLabel(task.state);
@@ -543,58 +541,6 @@ function TaskRowActions({
         executorType={task.primary_executor_type}
         onConfirm={({ cascade }) => onArchive(task.id, { cascade })}
       />
-    </div>
-  );
-}
-
-function TasksPagination({
-  total,
-  pageCount,
-  pagination,
-  onPaginationChange,
-}: {
-  total: number;
-  pageCount: number;
-  pagination: PaginationState;
-  onPaginationChange: (
-    next: PaginationState | ((prev: PaginationState) => PaginationState),
-  ) => void;
-}) {
-  if (total === 0 || pageCount <= 1) return null;
-  const start = pagination.pageIndex * pagination.pageSize + 1;
-  const end = Math.min((pagination.pageIndex + 1) * pagination.pageSize, total);
-  const canPrevious = pagination.pageIndex > 0;
-  const canNext = pagination.pageIndex + 1 < pageCount;
-
-  return (
-    <div className="flex flex-col gap-3 px-1 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-      <span>
-        Showing {start} to {end} of {total} tasks
-      </span>
-      <div className="flex items-center gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-10 cursor-pointer sm:h-8"
-          disabled={!canPrevious}
-          onClick={() =>
-            onPaginationChange((prev) => ({ ...prev, pageIndex: Math.max(0, prev.pageIndex - 1) }))
-          }
-        >
-          <IconChevronLeft className="h-4 w-4" />
-          Previous
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-10 cursor-pointer sm:h-8"
-          disabled={!canNext}
-          onClick={() => onPaginationChange((prev) => ({ ...prev, pageIndex: prev.pageIndex + 1 }))}
-        >
-          Next
-          <IconChevronRight className="h-4 w-4" />
-        </Button>
-      </div>
     </div>
   );
 }

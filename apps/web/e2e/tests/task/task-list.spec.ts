@@ -160,4 +160,47 @@ test.describe("Task List", () => {
       .poll(() => taskRowTitles(testPage))
       .toEqual(["Duplicate group Alpha", "Duplicate group Beta"]);
   });
+
+  test("pagination shows totals, rows per page, and page numbers", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await Promise.all(
+      Array.from({ length: 26 }, (_, index) =>
+        apiClient.createTask(
+          seedData.workspaceId,
+          `Paged list task ${String(index + 1).padStart(2, "0")}`,
+          {
+            workflow_id: seedData.workflowId,
+            workflow_step_id: seedData.startStepId,
+          },
+        ),
+      ),
+    );
+
+    await testPage.goto("/tasks?sort=title_asc&group=none");
+    await testPage.waitForLoadState("networkidle");
+    await testPage
+      .getByTestId("kanban-header-search")
+      .getByPlaceholder("Search tasks...")
+      .fill("Paged list task");
+
+    const pagination = testPage.getByTestId("tasks-pagination");
+    await expect(pagination).toContainText("Showing 1 to 25 of 26 results");
+    await expect(testPage.getByTestId("tasks-pagination-page-size")).toContainText("25");
+    await expect(pagination.getByRole("button", { name: "1", exact: true })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+
+    await pagination.getByRole("button", { name: "Go to next page" }).click();
+    await expect(pagination).toContainText("Showing 26 to 26 of 26 results");
+    await expect.poll(() => taskRowTitles(testPage)).toEqual(["Paged list task 26"]);
+
+    await testPage.getByTestId("tasks-pagination-page-size").click();
+    await testPage.getByRole("listbox").getByRole("option", { name: "10" }).click();
+    await expect(pagination).toContainText("Showing 1 to 10 of 26 results");
+    await expect(testPage.getByTestId("tasks-pagination-page-size")).toContainText("10");
+  });
 });
