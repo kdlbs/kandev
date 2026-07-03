@@ -30,6 +30,12 @@ type ExecutorRunningWriter interface {
 	// DeleteExecutorRunningBySessionID removes the row when an execution is
 	// torn down. Idempotent: no-op if no row exists.
 	DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error
+
+	// UpdateExecutorRunningStatus narrowly updates the status column (and
+	// updated_at), touching nothing else. Called on every execution ready
+	// transition to promote the row to 'ready' so the durable state reflects a
+	// live agent. Returns ErrExecutorRunningNotFound when no row exists.
+	UpdateExecutorRunningStatus(ctx context.Context, sessionID, status string) error
 }
 
 // SetExecutorRunningWriter wires the writer used to persist row state in
@@ -126,6 +132,32 @@ func (m *Manager) persistExecutorRunning(ctx context.Context, execution *AgentEx
 	running := buildRunningFromExecution(execution, prior)
 	if err := m.runningWriter.UpsertExecutorRunning(ctx, running); err != nil {
 		m.logger.Error("failed to persist executors_running row in lockstep with store",
+			zap.String("execution_id", execution.ID),
+			zap.String("session_id", execution.SessionID),
+			zap.Error(err))
+	}
+}
+
+// promoteExecutorRunningReady flips the durable executors_running row to
+// status='ready' and stamps last_seen_at (+ the live agentctl port/url) once an
+// execution has finished initializing. Called from every ready transition
+// (MarkBootReady + MarkReady/turn-complete) and on recovery of a live execution,
+// so the row stops being stuck at 'starting' with pid/port 0 — the #1585 defect.
+//
+// Best-effort: a failure is logged but never fails the ready transition. A
+// missing row (never persisted, or torn down concurrently) is a debug-level
+// no-op rather than an error.
+func (m *Manager) promoteExecutorRunningReady(ctx context.Context, execution *AgentExecution) {
+	if m.runningWriter == nil || execution == nil || execution.SessionID == "" {
+		return
+	}
+	if err := m.runningWriter.UpdateExecutorRunningStatus(ctx, execution.SessionID, models.ExecutorRunningStatusReady); err != nil {
+		if errors.Is(err, models.ErrExecutorRunningNotFound) {
+			m.logger.Debug("promote executors_running to ready: row not found",
+				zap.String("session_id", execution.SessionID))
+			return
+		}
+		m.logger.Warn("failed to promote executors_running row to ready",
 			zap.String("execution_id", execution.ID),
 			zap.String("session_id", execution.SessionID),
 			zap.Error(err))

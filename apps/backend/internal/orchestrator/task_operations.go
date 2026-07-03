@@ -1652,7 +1652,7 @@ func shouldHealStuckStartingSession(session *models.TaskSession, running *models
 	if session.State != models.TaskSessionStateStarting {
 		return false
 	}
-	if running.Status != "ready" {
+	if running.Status != models.ExecutorRunningStatusReady {
 		return false
 	}
 	// Pre-refactor this also checked session.AgentExecutionID vs running.AgentExecutionID

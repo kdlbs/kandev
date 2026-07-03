@@ -1113,6 +1113,13 @@ func (m *Manager) markReadyEventWithContext(ctx context.Context, executionID, ev
 
 	m.executionStore.UpdateStatus(executionID, v1.AgentStatusReady)
 
+	// Promote the durable executors_running row to 'ready' + stamp last_seen_at
+	// so it reflects a live agent. Without this the row stays 'starting' forever
+	// (pid/port 0) and consumers that gate on status=='ready' treat the live
+	// agent as stale — the #1585 desync. Fires on both boot-ready and every
+	// turn-complete, giving a natural liveness heartbeat.
+	m.promoteExecutorRunningReady(ctx, execution)
+
 	m.logger.Info("execution ready",
 		zap.String("execution_id", executionID),
 		zap.String("event_type", eventType))

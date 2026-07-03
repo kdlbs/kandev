@@ -40,6 +40,12 @@ var ErrExecutionRotated = errors.New("execution rotated; CAS write rejected")
 const (
 	ExecutorRunningStatusStarting = "starting"
 	ExecutorRunningStatusPrepared = "prepared"
+	// ExecutorRunningStatusReady marks a row whose agent has finished
+	// initializing and is live. The lifecycle manager promotes the row to this
+	// on every ready transition (boot ready + each turn completion) so consumers
+	// that gate on a live agent — today shouldHealStuckStartingSession — can
+	// tell a genuinely-running agent from a stale 'starting' row.
+	ExecutorRunningStatusReady = "ready"
 )
 
 // ListMessagesOptions defines pagination options for listing messages
