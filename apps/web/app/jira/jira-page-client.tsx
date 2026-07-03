@@ -175,18 +175,24 @@ function AuthenticatedView({
 }: AuthenticatedViewProps) {
   const state = useFilterState(defaultProjectKey);
   const search = useJiraSearch(workspaceId ?? null, state.effectiveJql);
-  const statusOptions = useProjectStatuses(state.filters.projectKeys);
+  const { options: statusOptions, loaded: statusesLoaded } = useProjectStatuses(
+    state.filters.projectKeys,
+  );
 
   // When the available status union changes (project selection changed, or
   // statuses finished loading), drop any selected statuses that are no longer
   // offered so the JQL never references a status absent from the selection.
+  // Gate on statusesLoaded so a saved view's statuses aren't stripped on the
+  // first render, before useProjectStatuses has fetched the current project's
+  // statuses (options is still [] until then).
   const { filters, updateFilters } = state;
   useEffect(() => {
+    if (!statusesLoaded) return;
     const reconciled = reconcileStatuses(filters.statuses, statusOptions);
     if (reconciled !== filters.statuses) {
       updateFilters({ ...filters, statuses: reconciled });
     }
-  }, [statusOptions, filters, updateFilters]);
+  }, [statusesLoaded, statusOptions, filters, updateFilters]);
 
   return (
     <>

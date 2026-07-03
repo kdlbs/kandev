@@ -1,6 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { JiraStatus } from "@/lib/types/jira";
-import { reconcileStatuses } from "./use-project-statuses";
+
+const listJiraProjectStatusesMock = vi.fn<[string], Promise<{ statuses: JiraStatus[] }>>();
+
+vi.mock("@/lib/api/domains/jira-api", () => ({
+  listJiraProjectStatuses: (key: string) => listJiraProjectStatusesMock(key),
+}));
+
+import { reconcileStatuses, useProjectStatuses } from "./use-project-statuses";
+
+afterEach(() => {
+  cleanup();
+  listJiraProjectStatusesMock.mockReset();
+});
 
 function status(id: string, name: string): JiraStatus {
   return { id, name, statusCategory: "indeterminate" };
@@ -34,5 +47,35 @@ describe("reconcileStatuses", () => {
     const selected = ["Open"];
     const result = reconcileStatuses(selected, [status("1", "Open")]);
     expect(result).toBe(selected);
+  });
+});
+
+describe("useProjectStatuses", () => {
+  it("reports loaded=true with empty options when no project is selected", async () => {
+    const { result } = renderHook(() => useProjectStatuses([]));
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    expect(result.current.options).toEqual([]);
+    expect(listJiraProjectStatusesMock).not.toHaveBeenCalled();
+  });
+
+  it("stays unloaded until the fetch resolves, then exposes the options", async () => {
+    let resolve: ((v: { statuses: JiraStatus[] }) => void) | undefined;
+    listJiraProjectStatusesMock.mockReturnValue(
+      new Promise((r) => {
+        resolve = r;
+      }),
+    );
+
+    const { result } = renderHook(() => useProjectStatuses(["CLIP"]));
+
+    // Before the fetch resolves the hook must not claim to be loaded, otherwise
+    // callers would reconcile a saved status selection against empty options.
+    expect(result.current.loaded).toBe(false);
+    expect(result.current.options).toEqual([]);
+
+    resolve?.({ statuses: [status("1", IN_DEV)] });
+
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    expect(result.current.options).toEqual([status("1", IN_DEV)]);
   });
 });
