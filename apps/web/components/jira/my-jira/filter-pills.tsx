@@ -5,6 +5,7 @@ import { IconChevronDown, IconX } from "@tabler/icons-react";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Input } from "@kandev/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { JiraProject, JiraStatus } from "@/lib/types/jira";
 import { type AssigneeFilter } from "./filter-model";
 
@@ -14,8 +15,8 @@ type PillShellProps = {
   active: boolean;
   onClear?: () => void;
   // When disabled the pill renders greyed-out and non-interactive; `disabledHint`
-  // is surfaced via the title tooltip so the user learns why (e.g. pick a
-  // project first).
+  // is surfaced via a Radix tooltip on a focusable wrapper so the user learns
+  // why (e.g. pick a project first), reachable by keyboard and screen readers.
   disabled?: boolean;
   disabledHint?: string;
   children: React.ReactNode;
@@ -26,18 +27,18 @@ function DisabledPill({
   summary,
   disabledHint,
 }: Pick<PillShellProps, "label" | "summary" | "disabledHint">) {
-  return (
+  // Radix Tooltip on a focusable wrapper (per apps/web/AGENTS.md) so keyboard
+  // and screen-reader users reach the disabled pill and learn why it's off,
+  // instead of the reason being mouse-hover-only via a raw title attribute.
+  const pill = (
     <div
       data-testid={`jira-filter-pill-${label.toLowerCase()}`}
       data-disabled="true"
-      // Focusable + aria so keyboard users reach the pill and hear why it's
-      // disabled, instead of the reason being hover-only via the title tooltip.
       tabIndex={0}
       role="button"
       aria-disabled="true"
       aria-label={disabledHint ?? `${label} filter disabled`}
       className="inline-flex items-stretch rounded-md border text-xs overflow-hidden bg-background opacity-50"
-      title={disabledHint}
     >
       <span className="px-2.5 py-1.5 flex items-center gap-1.5 cursor-not-allowed">
         <span className="text-muted-foreground">{label}</span>
@@ -45,6 +46,13 @@ function DisabledPill({
         <IconChevronDown className="h-3 w-3 text-muted-foreground" />
       </span>
     </div>
+  );
+  if (!disabledHint) return pill;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{pill}</TooltipTrigger>
+      <TooltipContent>{disabledHint}</TooltipContent>
+    </Tooltip>
   );
 }
 
