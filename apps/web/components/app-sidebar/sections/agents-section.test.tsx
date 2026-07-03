@@ -15,6 +15,17 @@ const defaultAgentId = "claude";
 const defaultAgentDisplayName = "Claude";
 const defaultAgentModel = "claude-sonnet-4-5";
 const timestamp = "2026-01-01T00:00:00Z";
+type Deferred<T> = {
+  resolve: (value: T) => void;
+  promise: Promise<T>;
+};
+const createDeferred = <T,>() => {
+  let resolve: (value: T) => void = () => {};
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve } as Deferred<T>;
+};
 
 const state = {
   appSidebar: {
@@ -115,17 +126,21 @@ vi.mock("@kandev/ui/tooltip", () => ({
 
 import { AgentsSection } from "./agents-section";
 
-describe("AgentsSection", () => {
-  afterEach(() => {
-    cleanup();
-    vi.clearAllMocks();
-    state.office.agentProfiles = [];
-    state.office.projects = [];
-    state.office.inboxItems = [];
-    state.office.inboxCount = 0;
-    state.workspaces.activeId = defaultWorkspaceId;
-  });
+const resetOfficeState = () => {
+  state.office.agentProfiles = [];
+  state.office.projects = [];
+  state.office.inboxItems = [];
+  state.office.inboxCount = 0;
+  state.workspaces.activeId = defaultWorkspaceId;
+};
 
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+  resetOfficeState();
+});
+
+describe("AgentsSection header", () => {
   it("renders Agent Topology as the header action before Add agent", () => {
     render(<AgentsSection collapsed={false} />);
 
@@ -135,52 +150,30 @@ describe("AgentsSection", () => {
     const topology = within(agentsHeader as HTMLElement).getByRole("link", {
       name: "Agent topology",
     });
-    const addAgent = within(agentsHeader as HTMLElement).getByRole("button", {
-      name: "Add agent",
-    });
+    const addAgent = within(agentsHeader as HTMLElement).getByRole("button", { name: "Add agent" });
 
     expect(topology.getAttribute("href")).toBe("/office/workspace/org");
     expect(topology.compareDocumentPosition(addAgent) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
   });
+});
 
+describe("AgentsSection stale state cleanup", () => {
   it("does not render stale agent links when no office workspace is active", () => {
     state.workspaces.activeId = null;
     state.office.agentProfiles = [
-      createAgentProfile({ id: "stale-agent", workspace: staleWorkspaceId, name: "Stale Agent" }),
+      createAgentProfile({
+        id: "stale-agent",
+        workspace: staleWorkspaceId,
+        name: "Stale Agent",
+      }),
     ];
 
     render(<AgentsSection collapsed={false} />);
 
     expect(screen.queryByRole("link", { name: /stale agent/i })).toBeNull();
     expect(screen.getByText(noAgentsText)).toBeTruthy();
-  });
-
-  it("does not overwrite stale agent state when workspace changes mid-fetch", async () => {
-    let resolveAgents: (value: { agents: AgentProfile[] }) => void = () => {};
-    const pending = new Promise<{ agents: AgentProfile[] }>((resolve) => {
-      resolveAgents = resolve;
-    });
-
-    vi.mocked(listAgentProfiles).mockReturnValue(pending);
-
-    state.workspaces.activeId = staleWorkspaceId;
-    render(<AgentsSection collapsed={false} />);
-
-    state.workspaces.activeId = null;
-    const staleAgents = {
-      agents: [
-        createAgentProfile({ id: "race-agent", workspace: staleWorkspaceId, name: "Race Agent" }),
-      ],
-    };
-
-    await act(async () => {
-      resolveAgents(staleAgents);
-      await pending;
-    });
-
-    expect(state.setOfficeAgentProfiles).not.toHaveBeenCalled();
   });
 
   it("clears all office data when workspace becomes inactive", () => {
@@ -204,5 +197,82 @@ describe("AgentsSection", () => {
     expect(state.setProjects).toHaveBeenCalledWith([]);
     expect(state.setInboxItems).toHaveBeenCalledWith([]);
     expect(state.setInboxCount).toHaveBeenCalledWith(0);
+  });
+
+  it("does not overwrite stale agent state when workspace changes mid-fetch", async () => {
+    let resolveAgents: (value: { agents: AgentProfile[] }) => void = () => {};
+    const pending = new Promise<{ agents: AgentProfile[] }>((resolve) => {
+      resolveAgents = resolve;
+    });
+
+    vi.mocked(listAgentProfiles).mockReturnValue(pending);
+
+    state.workspaces.activeId = staleWorkspaceId;
+    render(<AgentsSection collapsed={false} />);
+
+    state.workspaces.activeId = null;
+    const staleAgents = {
+      agents: [
+        createAgentProfile({
+          id: "race-agent",
+          workspace: staleWorkspaceId,
+          name: "Race Agent",
+        }),
+      ],
+    };
+
+    await act(async () => {
+      resolveAgents(staleAgents);
+      await pending;
+    });
+
+    expect(state.setOfficeAgentProfiles).not.toHaveBeenCalled();
+  });
+});
+
+describe("AgentsSection request sequencing", () => {
+  it("applies only the latest response after rapid workspace switches", async () => {
+    const request1 = createDeferred<{ agents: AgentProfile[] }>();
+    const request2 = createDeferred<{ agents: AgentProfile[] }>();
+    const request3 = createDeferred<{ agents: AgentProfile[] }>();
+    const agentFromFirstRequest = createAgentProfile({
+      id: "agent-a",
+      workspace: defaultWorkspaceId,
+      name: "First Agent",
+    });
+    const agentFromSecondRequest = createAgentProfile({
+      id: "agent-b",
+      workspace: staleWorkspaceId,
+      name: "Second Agent",
+    });
+    const agentFromThirdRequest = createAgentProfile({
+      id: "agent-c",
+      workspace: defaultWorkspaceId,
+      name: "Third Agent",
+    });
+
+    vi.mocked(listAgentProfiles)
+      .mockReturnValueOnce(request1.promise)
+      .mockReturnValueOnce(request2.promise)
+      .mockReturnValueOnce(request3.promise);
+
+    state.workspaces.activeId = defaultWorkspaceId;
+    const { rerender } = render(<AgentsSection collapsed={false} />);
+    state.workspaces.activeId = staleWorkspaceId;
+    rerender(<AgentsSection collapsed={false} />);
+    state.workspaces.activeId = defaultWorkspaceId;
+    rerender(<AgentsSection collapsed={false} />);
+
+    await act(async () => {
+      request1.resolve({ agents: [agentFromFirstRequest] });
+      request2.resolve({ agents: [agentFromSecondRequest] });
+      request3.resolve({ agents: [agentFromThirdRequest] });
+      await request1.promise;
+      await request2.promise;
+      await request3.promise;
+    });
+
+    expect(state.setOfficeAgentProfiles).toHaveBeenCalledTimes(1);
+    expect(state.setOfficeAgentProfiles).toHaveBeenCalledWith([agentFromThirdRequest]);
   });
 });

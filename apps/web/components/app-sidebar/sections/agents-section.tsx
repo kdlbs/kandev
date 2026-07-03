@@ -28,23 +28,16 @@ type AgentsSectionProps = {
 };
 
 const hasStaleOfficeData = ({
-  inOffice,
-  workspaceId,
   agentsLength,
   inboxCount,
   inboxItemsLength,
   projectsLength,
 }: {
-  inOffice: boolean;
-  workspaceId: string | null;
   agentsLength: number;
   inboxCount: number;
   inboxItemsLength: number;
   projectsLength: number;
-}) =>
-  inOffice &&
-  !workspaceId &&
-  (agentsLength > 0 || inboxItemsLength > 0 || projectsLength > 0 || inboxCount > 0);
+}) => agentsLength > 0 || inboxItemsLength > 0 || projectsLength > 0 || inboxCount > 0;
 
 function isCurrentWorkspaceResponse(
   requestWorkspaceId: string | null,
@@ -125,8 +118,6 @@ export function AgentsSection({ collapsed }: AgentsSectionProps) {
     if (!inOffice || workspaceId) return;
     if (
       !hasStaleOfficeData({
-        inOffice,
-        workspaceId,
         agentsLength: agents.length,
         inboxCount,
         inboxItemsLength: inboxItems.length,
