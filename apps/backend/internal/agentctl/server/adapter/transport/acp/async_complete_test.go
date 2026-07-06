@@ -118,6 +118,67 @@ func TestAsyncTurnComplete_CancelledByPromptStart(t *testing.T) {
 	})
 }
 
+func TestAsyncTurnComplete_CancelledByNewSession(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		setAsyncTurnCompleteIdleForTest(t, 50*time.Millisecond)
+		a, _ := setupConcurrencyFakeAgent(t)
+		if err := a.Initialize(context.Background()); err != nil {
+			t.Fatalf("Initialize: %v", err)
+		}
+		_ = drainEvents(a)
+
+		a.handleACPUpdate(makeNotification("s-old", acp.SessionUpdate{
+			AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{
+				Content: acp.TextBlock("old session async chunk"),
+			},
+		}))
+		first := readAdapterEvent(t, a, 100*time.Millisecond)
+		if first.Type != streams.EventTypeMessageChunk {
+			t.Fatalf("first event type = %q, want %q", first.Type, streams.EventTypeMessageChunk)
+		}
+
+		if _, err := a.NewSession(context.Background(), nil); err != nil {
+			t.Fatalf("NewSession: %v", err)
+		}
+		_ = drainEvents(a)
+
+		time.Sleep(150 * time.Millisecond)
+		synctest.Wait()
+		assertNoAdapterEvent(t, a, "after NewSession")
+	})
+}
+
+func TestAsyncTurnComplete_CancelledByLoadSession(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		setAsyncTurnCompleteIdleForTest(t, 50*time.Millisecond)
+		a, _ := setupConcurrencyFakeAgent(t)
+		if err := a.Initialize(context.Background()); err != nil {
+			t.Fatalf("Initialize: %v", err)
+		}
+		_ = drainEvents(a)
+		a.capabilities.LoadSession = true
+
+		a.handleACPUpdate(makeNotification("s-old", acp.SessionUpdate{
+			AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{
+				Content: acp.TextBlock("old session async chunk"),
+			},
+		}))
+		first := readAdapterEvent(t, a, 100*time.Millisecond)
+		if first.Type != streams.EventTypeMessageChunk {
+			t.Fatalf("first event type = %q, want %q", first.Type, streams.EventTypeMessageChunk)
+		}
+
+		if err := a.LoadSession(context.Background(), "s-new", nil); err != nil {
+			t.Fatalf("LoadSession: %v", err)
+		}
+		_ = drainEvents(a)
+
+		time.Sleep(150 * time.Millisecond)
+		synctest.Wait()
+		assertNoAdapterEvent(t, a, "after LoadSession")
+	})
+}
+
 func setAsyncTurnCompleteIdleForTest(t *testing.T, d time.Duration) {
 	t.Helper()
 	previous := asyncTurnCompleteIdle
