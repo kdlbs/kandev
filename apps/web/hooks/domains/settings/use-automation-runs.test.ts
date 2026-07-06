@@ -38,12 +38,22 @@ const storeActions = {
     );
   },
   clearAutomationRuns: (automationId: string) => setRuns(automationId, []),
+  restoreAutomationRun: (automationId: string, run: AutomationRun) => {
+    const runs = mockState.automationRuns.byAutomationId[automationId] ?? [];
+    if (runs.some((r) => r.id === run.id)) return;
+    setRuns(automationId, [...runs, run]);
+  },
 };
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: MockState & typeof storeActions) => unknown) =>
     selector({ ...mockState, ...storeActions }),
+  useAppStoreApi: () => ({
+    getState: () => ({ ...mockState, ...storeActions }),
+  }),
 }));
+
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 vi.mock("@/lib/api/domains/automation-api", () => ({
   listAutomationRuns: vi.fn(),
@@ -185,5 +195,66 @@ describe("useAutomationRuns", () => {
       result.current.deleteAllRuns();
     });
     expect(deleteAllAutomationRuns).toHaveBeenCalledWith(AUTOMATION_ID, WORKSPACE_ID);
+  });
+});
+
+describe("useAutomationRuns - double-failure recovery", () => {
+  it("restores the specific deleted run if both the delete and the recovery refresh fail", async () => {
+    const runX = mkRun("run-x");
+    const runY = mkRun("run-y");
+    setRuns(AUTOMATION_ID, [runX, runY]);
+
+    // Mount-effect fetch resolves immediately with the initial list so it
+    // doesn't interfere with the delete-triggered recovery fetch below.
+    vi.mocked(listAutomationRuns)
+      .mockResolvedValueOnce([runX, runY])
+      .mockRejectedValueOnce(new Error("network down"));
+    vi.mocked(deleteAutomationRun).mockRejectedValue(new Error("delete failed"));
+
+    const { result, rerender } = renderHook(() => useAutomationRuns(AUTOMATION_ID, WORKSPACE_ID));
+    await act(async () => {});
+    rerender();
+
+    await act(async () => {
+      result.current.deleteRun("run-x");
+      // Flush the delete rejection and the subsequent revert-fetch rejection.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    rerender();
+
+    // Both the delete and the revert fetch failed — the store must not be
+    // left permanently missing run-x. It should be restored from the
+    // pre-delete snapshot rather than silently staying gone.
+    expect(result.current.runs.map((r) => r.id).sort()).toEqual(["run-x", "run-y"]);
+  });
+
+  it("restores the full pre-clear snapshot if both delete-all and the recovery refresh fail", async () => {
+    const runX = mkRun("run-x");
+    const runY = mkRun("run-y");
+    setRuns(AUTOMATION_ID, [runX, runY]);
+
+    vi.mocked(listAutomationRuns)
+      .mockResolvedValueOnce([runX, runY])
+      .mockRejectedValueOnce(new Error("network down"));
+    vi.mocked(deleteAllAutomationRuns).mockRejectedValue(new Error("delete-all failed"));
+
+    const { result, rerender } = renderHook(() => useAutomationRuns(AUTOMATION_ID, WORKSPACE_ID));
+    await act(async () => {});
+    rerender();
+
+    await act(async () => {
+      result.current.deleteAllRuns();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    rerender();
+
+    // Both delete-all and the revert fetch failed — the store must not be
+    // left permanently empty. It should be restored from the pre-clear
+    // snapshot rather than silently staying cleared.
+    expect(result.current.runs.map((r) => r.id).sort()).toEqual(["run-x", "run-y"]);
   });
 });

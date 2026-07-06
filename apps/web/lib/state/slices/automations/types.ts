@@ -26,6 +26,7 @@ export type AutomationsSliceActions = {
   setAutomationRunsLoading: (automationId: string, loading: boolean) => void;
   removeAutomationRun: (automationId: string, runId: string) => void;
   clearAutomationRuns: (automationId: string) => void;
+  restoreAutomationRun: (automationId: string, run: AutomationRun) => void;
 };
 
 export type AutomationsSlice = AutomationsSliceState & AutomationsSliceActions;

@@ -7,7 +7,7 @@ import {
   deleteAutomationRun,
   deleteAllAutomationRuns,
 } from "@/lib/api/domains/automation-api";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { AutomationRun } from "@/lib/types/automation";
 
 const EMPTY_RUNS: AutomationRun[] = [];
@@ -23,6 +23,8 @@ export function useAutomationRuns(automationId: string | null, workspaceId: stri
   const setRunsLoading = useAppStore((state) => state.setAutomationRunsLoading);
   const removeRun = useAppStore((state) => state.removeAutomationRun);
   const clearRuns = useAppStore((state) => state.clearAutomationRuns);
+  const restoreRun = useAppStore((state) => state.restoreAutomationRun);
+  const storeApi = useAppStoreApi();
 
   useEffect(() => {
     if (!automationId || loading) return;
@@ -56,6 +58,12 @@ export function useAutomationRuns(automationId: string | null, workspaceId: stri
   const deleteRun = useCallback(
     (runId: string) => {
       if (!automationId) return;
+      // Snapshot the run being removed so we can restore it precisely (not
+      // the whole list, which could clobber unrelated concurrent changes)
+      // if both the delete and the recovery refresh below fail.
+      const deletedRun = storeApi
+        .getState()
+        .automationRuns.byAutomationId[automationId]?.find((r) => r.id === runId);
       removeRun(automationId, runId); // optimistic
       deleteAutomationRun(runId, workspaceId)
         .then(() => {
@@ -72,14 +80,26 @@ export function useAutomationRuns(automationId: string | null, workspaceId: stri
           // revert on failure
           listAutomationRuns(automationId)
             .then((result) => setRuns(automationId, result ?? []))
-            .catch(() => {});
+            .catch(() => {
+              // The recovery refresh also failed — the store would
+              // otherwise stay permanently missing this row even though
+              // the delete never succeeded server-side. Fall back to
+              // re-inserting just the run we know we removed.
+              if (deletedRun) {
+                restoreRun(automationId, deletedRun);
+              }
+              toast.error("Could not refresh runs — restored from local cache");
+            });
         });
     },
-    [automationId, removeRun, setRuns, workspaceId],
+    [automationId, removeRun, restoreRun, setRuns, storeApi, workspaceId],
   );
 
   const deleteAllRuns = useCallback(() => {
     if (!automationId) return;
+    // Snapshot the full list so we can restore it if both the delete-all
+    // and the recovery refresh below fail.
+    const previousRuns = storeApi.getState().automationRuns.byAutomationId[automationId] ?? [];
     clearRuns(automationId); // optimistic
     deleteAllAutomationRuns(automationId, workspaceId)
       .then(() => {
@@ -93,9 +113,15 @@ export function useAutomationRuns(automationId: string | null, workspaceId: stri
         // revert on failure
         listAutomationRuns(automationId)
           .then((result) => setRuns(automationId, result ?? []))
-          .catch(() => {});
+          .catch(() => {
+            // The recovery refresh also failed — without this the store
+            // would stay permanently empty even though delete-all never
+            // succeeded server-side. Fall back to the pre-clear snapshot.
+            setRuns(automationId, previousRuns);
+            toast.error("Could not refresh runs — restored from local cache");
+          });
       });
-  }, [automationId, clearRuns, setRuns, workspaceId]);
+  }, [automationId, clearRuns, setRuns, storeApi, workspaceId]);
 
   return { runs, loading, refresh, deleteRun, deleteAllRuns };
 }
