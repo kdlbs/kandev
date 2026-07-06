@@ -1437,6 +1437,9 @@ func (s *Service) waitForAgentPromptReady(ctx context.Context, sessionID string)
 
 		select {
 		case <-readyCtx.Done():
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			return fmt.Errorf("%w: %w", ErrAgentNotReadyForPrompt, readyCtx.Err())
 		case <-ticker.C:
 		}

@@ -405,6 +405,44 @@ func TestEnsureSessionRunning_WaitsForPromptReadyWhenExecutionExists(t *testing.
 	}
 }
 
+func TestEnsureSessionRunning_CancelledContextDoesNotReapExecution(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(context.Background(), "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentProfileID = "profile1"
+	if err := repo.UpdateTaskSession(context.Background(), session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-live")
+
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		isAgentReadyFn: func(context.Context, string) bool {
+			return false
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	err = svc.ensureSessionRunning(ctx, "session1", session)
+	agentMgr.mu.Lock()
+	stopCalls := append([]stopAgentCall(nil), agentMgr.stopAgentWithReasonArgs...)
+	agentMgr.mu.Unlock()
+	if len(stopCalls) != 0 {
+		t.Fatalf("expected canceled caller context not to stop live execution, got %#v", stopCalls)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected caller cancellation, got %v", err)
+	}
+}
+
 type promptStreamRecoveringAgentManager struct {
 	*mockAgentManager
 	recovered atomic.Bool
