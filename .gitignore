@@ -123,3 +123,8 @@ normalized-*.jsonl
 
 # Local worktrees (not the backend-managed tree under ~/.kandev)
 /.worktrees/
+
+# PR screenshot/asset scratch dirs — never committed; drag-and-drop into the
+# GitHub PR description instead (see apps/web/e2e/scripts/upload-pr-assets.ts).
+/.pr-screenshots/
+/apps/web/.pr-assets/
