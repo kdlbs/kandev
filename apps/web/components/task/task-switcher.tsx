@@ -1,9 +1,7 @@
 "use client";
 
 import { memo, useMemo } from "react";
-import { IconChevronDown } from "@tabler/icons-react";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
-import { cn } from "@/lib/utils";
 import { TaskItem } from "./task-item";
 import { TaskItemWithContextMenu, type StepDef } from "./task-switcher-context-menu";
 import {
@@ -13,6 +11,7 @@ import {
 } from "@/lib/sidebar/apply-view";
 import { type TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
 import { SortableTaskLevel, SortableTaskNode } from "./task-switcher-subtask-dnd";
+import { GroupHeader, TaskSwitcherSkeleton } from "./task-switcher-group";
 
 export type TaskSwitcherItem = {
   id: string;
@@ -123,53 +122,6 @@ type SubtaskToggleInfo = {
   subtasksCollapsed: boolean;
   onToggleSubtasks: () => void;
 };
-
-function TaskSwitcherSkeleton() {
-  return (
-    <div className="animate-pulse">
-      <div className="h-10 bg-foreground/5" />
-      <div className="h-10 bg-foreground/5 mt-px" />
-      <div className="h-10 bg-foreground/5 mt-px" />
-      <div className="h-10 bg-foreground/5 mt-px" />
-    </div>
-  );
-}
-
-function GroupHeader({
-  label,
-  groupKey,
-  count,
-  isCollapsed,
-  onToggle,
-}: {
-  label: string;
-  groupKey: string;
-  count: number;
-  isCollapsed: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      data-testid="sidebar-group-header"
-      data-group-key={groupKey}
-      data-group-label={label}
-      className="flex w-full items-center gap-2 bg-background px-3 py-1.5 cursor-pointer hover:bg-foreground/[0.03]"
-    >
-      <span className="flex-1 truncate text-left text-[12px] font-medium text-foreground/80">
-        {label}
-      </span>
-      <span className="text-[11px] text-muted-foreground/50">{count}</span>
-      <IconChevronDown
-        className={cn(
-          "h-3 w-3 text-muted-foreground/40 transition-transform",
-          isCollapsed && "-rotate-90",
-        )}
-      />
-    </button>
-  );
-}
 
 type TaskRowProps = {
   task: TaskSwitcherItem;
