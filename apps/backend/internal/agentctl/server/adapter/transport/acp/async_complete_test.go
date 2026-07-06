@@ -87,6 +87,31 @@ func TestAsyncTurnComplete_CancelledByRealPromptCompletion(t *testing.T) {
 	}
 }
 
+func TestAsyncTurnComplete_CancelledByPromptStart(t *testing.T) {
+	setAsyncTurnCompleteIdleForTest(t, 50*time.Millisecond)
+	a := newTestAdapter()
+	t.Cleanup(func() { _ = a.Close() })
+
+	a.handleACPUpdate(makeNotification("s-start", acp.SessionUpdate{
+		AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{
+			Content: acp.TextBlock("async chunk before prompt"),
+		},
+	}))
+
+	first := readAdapterEvent(t, a, 100*time.Millisecond)
+	if first.Type != streams.EventTypeMessageChunk {
+		t.Fatalf("first event type = %q, want %q", first.Type, streams.EventTypeMessageChunk)
+	}
+
+	a.beginPromptTurn("s-start")
+
+	select {
+	case ev := <-a.updatesCh:
+		t.Fatalf("unexpected event after prompt start: %+v", ev)
+	case <-time.After(150 * time.Millisecond):
+	}
+}
+
 func setAsyncTurnCompleteIdleForTest(t *testing.T, d time.Duration) {
 	t.Helper()
 	previous := asyncTurnCompleteIdle

@@ -76,6 +76,7 @@ func (a *Adapter) sendPrompt(ctx context.Context, message string, attachments []
 			zap.String("session_id", sessionID),
 			zap.Int("context_length", len(pendingContext)))
 	}
+	a.beginPromptTurn(sessionID)
 
 	contentBlocks := a.buildPromptContentBlocks(finalMessage, attachments)
 

@@ -253,6 +253,7 @@ type Adapter struct {
 	// prompt response, so sendPrompt's normal complete emission never runs.
 	asyncTurnMu         sync.Mutex
 	asyncTurnFinalizers map[string]*asyncTurnFinalizer
+	asyncTurnEpochs     map[string]uint64
 
 	// lifetimeCtx is cancelled by Close. Background work that may outlive
 	// the call site (e.g. the synthetic wakeup prompt goroutine) derives its
@@ -270,8 +271,9 @@ type promptTurnState struct {
 }
 
 type asyncTurnFinalizer struct {
-	timer *time.Timer
-	seq   uint64
+	timer       *time.Timer
+	seq         uint64
+	promptEpoch uint64
 }
 
 // promptCancelJoinTimeout bounds how long Cancel and sendPrompt wait for a stuck
@@ -298,6 +300,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		attachMgr:           shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
 		promptGate:          make(chan struct{}, 1),
 		asyncTurnFinalizers: make(map[string]*asyncTurnFinalizer),
+		asyncTurnEpochs:     make(map[string]uint64),
 		lifetimeCtx:         ctx,
 		lifetimeCancel:      cancel,
 	}

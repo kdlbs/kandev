@@ -46,35 +46,72 @@ func (a *Adapter) maybeScheduleAsyncTurnComplete(event AgentEvent) {
 	}
 	finalizer.seq++
 	seq := finalizer.seq
+	finalizer.promptEpoch = a.asyncTurnEpochs[event.SessionID]
+	promptEpoch := finalizer.promptEpoch
 	if finalizer.timer != nil {
 		finalizer.timer.Stop()
 	}
 	finalizer.timer = time.AfterFunc(delay, func() {
-		a.emitAsyncTurnComplete(event.SessionID, seq)
+		a.emitAsyncTurnComplete(event.SessionID, seq, promptEpoch)
 	})
 	a.asyncTurnMu.Unlock()
 }
 
-func (a *Adapter) emitAsyncTurnComplete(sessionID string, seq uint64) {
+func (a *Adapter) emitAsyncTurnComplete(sessionID string, seq uint64, promptEpoch uint64) {
 	// Fast-path stale timers before the more expensive notification-queue drain.
-	// consumeAsyncTurnFinalizer below is still the authoritative emit gate.
-	if !a.isCurrentAsyncTurnFinalizer(sessionID, seq) {
+	// emitCurrentAsyncTurnComplete below is still the authoritative emit gate.
+	if !a.isCurrentAsyncTurnFinalizer(sessionID, seq, promptEpoch) {
 		return
 	}
 	if a.currentPromptTurn() != nil {
-		a.consumeAsyncTurnFinalizer(sessionID, seq)
+		a.consumeAsyncTurnFinalizer(sessionID, seq, promptEpoch)
 		return
 	}
 
 	a.syncNotifQueue()
 
 	if a.currentPromptTurn() != nil {
-		a.consumeAsyncTurnFinalizer(sessionID, seq)
+		a.consumeAsyncTurnFinalizer(sessionID, seq, promptEpoch)
 		return
 	}
-	if !a.consumeAsyncTurnFinalizer(sessionID, seq) {
+	a.emitCurrentAsyncTurnComplete(sessionID, seq, promptEpoch)
+}
+
+func (a *Adapter) isCurrentAsyncTurnFinalizer(sessionID string, seq uint64, promptEpoch uint64) bool {
+	a.asyncTurnMu.Lock()
+	defer a.asyncTurnMu.Unlock()
+	finalizer := a.asyncTurnFinalizers[sessionID]
+	return finalizer != nil &&
+		finalizer.seq == seq &&
+		finalizer.promptEpoch == promptEpoch &&
+		a.asyncTurnEpochs[sessionID] == promptEpoch
+}
+
+func (a *Adapter) consumeAsyncTurnFinalizer(sessionID string, seq uint64, promptEpoch uint64) bool {
+	a.asyncTurnMu.Lock()
+	defer a.asyncTurnMu.Unlock()
+	finalizer := a.asyncTurnFinalizers[sessionID]
+	if finalizer == nil ||
+		finalizer.seq != seq ||
+		finalizer.promptEpoch != promptEpoch ||
+		a.asyncTurnEpochs[sessionID] != promptEpoch {
+		return false
+	}
+	delete(a.asyncTurnFinalizers, sessionID)
+	return true
+}
+
+func (a *Adapter) emitCurrentAsyncTurnComplete(sessionID string, seq uint64, promptEpoch uint64) {
+	a.asyncTurnMu.Lock()
+	defer a.asyncTurnMu.Unlock()
+	finalizer := a.asyncTurnFinalizers[sessionID]
+	if finalizer == nil ||
+		finalizer.seq != seq ||
+		finalizer.promptEpoch != promptEpoch ||
+		a.asyncTurnEpochs[sessionID] != promptEpoch {
 		return
 	}
+	delete(a.asyncTurnFinalizers, sessionID)
 
 	a.logger.Info("emitting synthetic complete event for idle async ACP turn",
 		zap.String("session_id", sessionID),
@@ -90,27 +127,20 @@ func (a *Adapter) emitAsyncTurnComplete(sessionID string, seq uint64) {
 	})
 }
 
-func (a *Adapter) isCurrentAsyncTurnFinalizer(sessionID string, seq uint64) bool {
+func (a *Adapter) beginPromptTurn(sessionID string) {
 	a.asyncTurnMu.Lock()
 	defer a.asyncTurnMu.Unlock()
-	finalizer := a.asyncTurnFinalizers[sessionID]
-	return finalizer != nil && finalizer.seq == seq
-}
-
-func (a *Adapter) consumeAsyncTurnFinalizer(sessionID string, seq uint64) bool {
-	a.asyncTurnMu.Lock()
-	defer a.asyncTurnMu.Unlock()
-	finalizer := a.asyncTurnFinalizers[sessionID]
-	if finalizer == nil || finalizer.seq != seq {
-		return false
-	}
-	delete(a.asyncTurnFinalizers, sessionID)
-	return true
+	a.asyncTurnEpochs[sessionID]++
+	a.cancelAsyncTurnCompleteLocked(sessionID)
 }
 
 func (a *Adapter) cancelAsyncTurnComplete(sessionID string) {
 	a.asyncTurnMu.Lock()
 	defer a.asyncTurnMu.Unlock()
+	a.cancelAsyncTurnCompleteLocked(sessionID)
+}
+
+func (a *Adapter) cancelAsyncTurnCompleteLocked(sessionID string) {
 	finalizer := a.asyncTurnFinalizers[sessionID]
 	if finalizer == nil {
 		return
@@ -129,5 +159,8 @@ func (a *Adapter) cancelAllAsyncTurnCompletes() {
 			finalizer.timer.Stop()
 		}
 		delete(a.asyncTurnFinalizers, sessionID)
+	}
+	for sessionID := range a.asyncTurnEpochs {
+		delete(a.asyncTurnEpochs, sessionID)
 	}
 }
