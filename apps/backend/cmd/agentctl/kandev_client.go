@@ -45,6 +45,8 @@ func newKandevClient() (*kandevClient, error) {
 
 func normalizeKandevAPIURL(raw string) string {
 	base := strings.TrimRight(strings.TrimSpace(raw), "/")
+	// Runtime injection includes /api/v1, while this client appends
+	// /api/v1/<endpoint> itself. Strip that single expected suffix.
 	return strings.TrimSuffix(base, "/api/v1")
 }
 

@@ -1460,8 +1460,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 
 // handleGetTaskConversation returns paginated conversation history for a task.
 // If session_id is omitted, it uses the task's primary session and falls back
-// to the latest session for Office tasks, which intentionally do not mark
-// sessions primary.
+// to the latest session when no primary session exists.
 func (h *Handlers) handleGetTaskConversation(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	req, errResp := parseTaskConversationRequest(msg)
 	if errResp != nil {
