@@ -75,6 +75,7 @@ export function useCommentActions(params: {
       if (externalComments !== undefined) {
         if (onCommentUpdate) {
           onCommentUpdate(commentId, updates);
+          setEditingComment(null);
         } else if (isDevelopmentMode()) {
           console.warn(
             "[DiffViewer] `comments` is set without `onCommentUpdate`; edited comments must be handled by the controlled owner.",
@@ -82,8 +83,8 @@ export function useCommentActions(params: {
         }
       } else {
         updateComment(commentId, updates);
+        setEditingComment(null);
       }
-      setEditingComment(null);
     },
     [updateComment, onCommentUpdate, externalComments, setEditingComment],
   );

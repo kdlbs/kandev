@@ -94,7 +94,7 @@ describe("useCommentActions", () => {
 
     expect(updateComment).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("`onCommentUpdate`"));
-    expect(setEditingComment).toHaveBeenCalledWith(null);
+    expect(setEditingComment).not.toHaveBeenCalled();
   });
 
   it("routes deletes to the external handler in controlled comment mode", () => {
