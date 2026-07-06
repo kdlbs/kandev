@@ -60,8 +60,14 @@ export function useCommentActions(params: {
 
   const handleCommentDelete = useCallback(
     (commentId: string) => {
-      if (onCommentDelete && externalComments !== undefined) {
-        onCommentDelete(commentId);
+      if (externalComments !== undefined) {
+        if (onCommentDelete) {
+          onCommentDelete(commentId);
+        } else if (isDevelopmentMode()) {
+          console.warn(
+            "[DiffViewer] `comments` is set without `onCommentDelete`; deleted comments must be handled by the controlled owner.",
+          );
+        }
       } else {
         removeComment(commentId);
       }
