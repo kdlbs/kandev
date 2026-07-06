@@ -169,6 +169,7 @@ func (a *Adapter) sendPrompt(ctx context.Context, message string, attachments []
 	a.logger.Debug("emitting complete event after prompt",
 		zap.String("session_id", sessionID),
 		zap.String("stop_reason", stopReason))
+	a.cancelAsyncTurnComplete(sessionID)
 	usage := extractUsage(&resp)
 	// codex-acp emits no per-turn usage frame, only cumulative
 	// usage_update.used. Fall back to the inferred delta so the office
