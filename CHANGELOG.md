@@ -2,6 +2,21 @@
 
 All notable changes to Kandev.
 
+## 0.74.0 - 2026-07-06
+
+### Features
+
+- cmd+click and shift+click multi-select for kanban and sidebar ([#1518](https://github.com/kdlbs/kandev/pull/1518))
+- delete buttons for individual and all runs in Recent Runs ([#1586](https://github.com/kdlbs/kandev/pull/1586)) by @ClemDNL
+- adopt Office-style /tasks list UX ([#1593](https://github.com/kdlbs/kandev/pull/1593))
+
+### Bug Fixes
+
+- reap prompt-dead executions on resume ([#1602](https://github.com/kdlbs/kandev/pull/1602))
+- complete idle acp monitor turns ([#1600](https://github.com/kdlbs/kandev/pull/1600))
+- repair office agent launch context ([#1601](https://github.com/kdlbs/kandev/pull/1601))
+- stop scheduled trigger retry storm on concurrency cap skip ([#1598](https://github.com/kdlbs/kandev/pull/1598)) by @ClemDNL
+
 ## 0.73.0 - 2026-07-03
 
 ### Features
