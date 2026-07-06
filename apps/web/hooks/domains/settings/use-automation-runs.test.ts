@@ -61,6 +61,7 @@ vi.mock("@/lib/api/domains/automation-api", () => ({
   deleteAllAutomationRuns: vi.fn(),
 }));
 
+import { toast } from "sonner";
 import {
   listAutomationRuns,
   deleteAutomationRun,
@@ -98,6 +99,7 @@ beforeEach(() => {
   vi.mocked(listAutomationRuns).mockReset();
   vi.mocked(deleteAutomationRun).mockReset();
   vi.mocked(deleteAllAutomationRuns).mockReset();
+  vi.mocked(toast.error).mockReset();
 });
 
 describe("useAutomationRuns", () => {
@@ -255,6 +257,60 @@ describe("useAutomationRuns - double-failure recovery", () => {
     // Both delete-all and the revert fetch failed — the store must not be
     // left permanently empty. It should be restored from the pre-clear
     // snapshot rather than silently staying cleared.
+    expect(result.current.runs.map((r) => r.id).sort()).toEqual(["run-x", "run-y"]);
+  });
+});
+
+describe("useAutomationRuns - single-failure revert", () => {
+  it("shows a toast and reverts to the server list when deleteRun fails but the recovery refresh succeeds", async () => {
+    const runX = mkRun("run-x");
+    const runY = mkRun("run-y");
+    setRuns(AUTOMATION_ID, [runX, runY]);
+
+    // Mount-effect fetch, then the delete-triggered recovery fetch, both
+    // succeed with the server's authoritative (unchanged) list.
+    vi.mocked(listAutomationRuns).mockResolvedValue([runX, runY]);
+    vi.mocked(deleteAutomationRun).mockRejectedValue(new Error("delete failed"));
+
+    const { result, rerender } = renderHook(() => useAutomationRuns(AUTOMATION_ID, WORKSPACE_ID));
+    await act(async () => {});
+    rerender();
+
+    await act(async () => {
+      result.current.deleteRun("run-x");
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    rerender();
+
+    expect(toast.error).toHaveBeenCalledWith("delete failed");
+    // The recovery refresh succeeded, so the store reflects the server's
+    // authoritative list rather than the double-failure local-cache fallback.
+    expect(result.current.runs.map((r) => r.id).sort()).toEqual(["run-x", "run-y"]);
+  });
+
+  it("shows a toast and reverts to the server list when deleteAllRuns fails but the recovery refresh succeeds", async () => {
+    const runX = mkRun("run-x");
+    const runY = mkRun("run-y");
+    setRuns(AUTOMATION_ID, [runX, runY]);
+
+    vi.mocked(listAutomationRuns).mockResolvedValue([runX, runY]);
+    vi.mocked(deleteAllAutomationRuns).mockRejectedValue(new Error("delete-all failed"));
+
+    const { result, rerender } = renderHook(() => useAutomationRuns(AUTOMATION_ID, WORKSPACE_ID));
+    await act(async () => {});
+    rerender();
+
+    await act(async () => {
+      result.current.deleteAllRuns();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    rerender();
+
+    expect(toast.error).toHaveBeenCalledWith("delete-all failed");
     expect(result.current.runs.map((r) => r.id).sort()).toEqual(["run-x", "run-y"]);
   });
 });
