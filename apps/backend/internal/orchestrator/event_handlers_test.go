@@ -165,6 +165,7 @@ type mockAgentManager struct {
 	mu                      sync.Mutex
 	stopAgentWithReasonArgs []stopAgentCall // tracks StopAgentWithReason calls
 	stopAgentWithReasonErr  error           // optional error to return from StopAgentWithReason
+	stopAgentWithReasonFunc func(context.Context, string, string, bool) error
 	stopAgentArgs           []stopAgentCall // tracks StopAgent calls (no reason)
 	stopAgentErr            error           // optional error to return from StopAgent
 
@@ -260,15 +261,20 @@ func (m *mockAgentManager) StopAgent(_ context.Context, agentExecutionID string,
 	m.stopAgentArgs = append(m.stopAgentArgs, stopAgentCall{ExecutionID: agentExecutionID, Force: force})
 	return m.stopAgentErr
 }
-func (m *mockAgentManager) StopAgentWithReason(_ context.Context, agentExecutionID, reason string, force bool) error {
+func (m *mockAgentManager) StopAgentWithReason(ctx context.Context, agentExecutionID, reason string, force bool) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.stopAgentWithReasonArgs = append(m.stopAgentWithReasonArgs, stopAgentCall{
 		ExecutionID: agentExecutionID,
 		Reason:      reason,
 		Force:       force,
 	})
-	return m.stopAgentWithReasonErr
+	hook := m.stopAgentWithReasonFunc
+	err := m.stopAgentWithReasonErr
+	m.mu.Unlock()
+	if hook != nil {
+		return hook(ctx, agentExecutionID, reason, force)
+	}
+	return err
 }
 func (m *mockAgentManager) PromptAgent(_ context.Context, executionID string, prompt string, _ []v1.MessageAttachment, dispatchOnly bool) (*executor.PromptResult, error) {
 	m.mu.Lock()
