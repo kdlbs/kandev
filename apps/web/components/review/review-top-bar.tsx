@@ -4,7 +4,6 @@ import { memo, useCallback } from "react";
 import {
   IconSettings,
   IconX,
-  IconMessageForward,
   IconLayoutColumns,
   IconLayoutRows,
   IconTextWrap,
@@ -17,26 +16,13 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
 import { Checkbox } from "@kandev/ui/checkbox";
 import type { DiffComment } from "@/lib/diff/types";
 import { useAppStore } from "@/components/state-provider";
-import { useHoverPopover } from "@/hooks/domains/github/use-hover-popover";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { updateUserSettings } from "@/lib/api";
 import { VcsSplitButton } from "@/components/vcs-split-button";
-import { ReviewCommentsOverview } from "./review-comments-overview";
-
-const COMMENTS_HOVER_OPEN_DELAY_MS = 150;
-const COMMENTS_HOVER_CLOSE_DELAY_MS = 150;
-
-function shouldOpenOverviewOnClick(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(hover: none), (pointer: coarse)").matches
-  );
-}
+import { FixCommentsButton } from "./review-fix-comments-button";
 
 type ReviewTopBarProps = {
   sessionId: string;
@@ -92,64 +78,6 @@ function ReviewSettingsMenu({ reviewAutoMarkOnScroll, onToggleAutoMark }: Review
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-type FixCommentsButtonProps = {
-  commentCount: number;
-  getPendingComments: () => DiffComment[];
-  onFixComments: () => void;
-};
-
-function FixCommentsButton({
-  commentCount,
-  getPendingComments,
-  onFixComments,
-}: FixCommentsButtonProps) {
-  const { open, onOpenChange, onTriggerEnter, onTriggerLeave, onContentEnter, onContentLeave } =
-    useHoverPopover({
-      openDelayMs: COMMENTS_HOVER_OPEN_DELAY_MS,
-      closeDelayMs: COMMENTS_HOVER_CLOSE_DELAY_MS,
-    });
-  const handleClick = useCallback(() => {
-    if (!open && shouldOpenOverviewOnClick()) {
-      onOpenChange(true);
-      return;
-    }
-    onFixComments();
-  }, [open, onOpenChange, onFixComments]);
-
-  return (
-    <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverAnchor asChild>
-        <span className="inline-flex" onMouseEnter={onTriggerEnter} onMouseLeave={onTriggerLeave}>
-          <Button
-            size="sm"
-            variant="outline"
-            className="cursor-pointer"
-            onClick={handleClick}
-            data-testid="review-fix-comments-button"
-          >
-            <IconMessageForward className="h-4 w-4" />
-            Fix Comments
-            <span className="ml-1 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-xs font-medium text-blue-600 dark:text-blue-400">
-              {commentCount}
-            </span>
-          </Button>
-        </span>
-      </PopoverAnchor>
-      <PopoverContent
-        side="bottom"
-        align="end"
-        sideOffset={8}
-        className="w-80 p-0"
-        onMouseEnter={onContentEnter}
-        onMouseLeave={onContentLeave}
-        onOpenAutoFocus={(e) => e.preventDefault()}
-      >
-        <ReviewCommentsOverview comments={getPendingComments()} />
-      </PopoverContent>
-    </Popover>
   );
 }
 

@@ -81,6 +81,7 @@ function latestCommentText(): string | undefined {
 }
 
 beforeEach(() => {
+  window.sessionStorage.clear();
   useCommentsStore.setState({
     byId: {},
     bySession: {},
@@ -92,7 +93,7 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-describe("DiffViewer comment editing (internal store mode)", () => {
+describe("DiffViewer comment editing", () => {
   it("propagates an edited comment's new text to the renderer", async () => {
     useCommentsStore.getState().addComment(comment(ORIGINAL_TEXT));
 
@@ -122,5 +123,32 @@ describe("DiffViewer comment editing (internal store mode)", () => {
 
     await waitFor(() => expect(latestCommentText()).toBe(EDITED_TEXT));
     expect(screen.getByText(EDITED_TEXT)).toBeTruthy();
+  });
+
+  it("routes controlled inline edits to onCommentUpdate", async () => {
+    const onCommentUpdate = vi.fn();
+
+    render(
+      <DiffViewer
+        data={data}
+        sessionId={SESSION_ID}
+        enableComments
+        comments={[comment(ORIGINAL_TEXT)]}
+        onCommentUpdate={onCommentUpdate}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText(ORIGINAL_TEXT)).toBeTruthy());
+
+    fireEvent.click(screen.getByLabelText("Edit comment"));
+    fireEvent.change(screen.getByPlaceholderText("Add a comment..."), {
+      target: { value: EDITED_TEXT },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Update/i }));
+
+    await waitFor(() =>
+      expect(onCommentUpdate).toHaveBeenCalledWith(COMMENT_ID, { text: EDITED_TEXT }),
+    );
+    expect(useCommentsStore.getState().byId[COMMENT_ID]?.text).not.toBe(EDITED_TEXT);
   });
 });

@@ -1,5 +1,5 @@
 import { useMemo, useCallback } from "react";
-import type { DiffComment } from "./types";
+import type { DiffComment, DiffCommentUpdate } from "./types";
 
 /** Build a DiffComment object from common parameters */
 export function buildDiffComment(params: {
@@ -43,10 +43,10 @@ export function useCommentedLines(comments: DiffComment[]): Set<number> {
  */
 export function useCommentActions(params: {
   removeComment: (commentId: string) => void;
-  updateComment: (commentId: string, updates: Partial<DiffComment>) => void;
+  updateComment: (commentId: string, updates: DiffCommentUpdate) => void;
   setEditingComment: (id: string | null) => void;
   onCommentDelete?: (commentId: string) => void;
-  onCommentUpdate?: (commentId: string, updates: Partial<DiffComment>) => void;
+  onCommentUpdate?: (commentId: string, updates: DiffCommentUpdate) => void;
   externalComments?: DiffComment[];
 }) {
   const {
@@ -72,8 +72,14 @@ export function useCommentActions(params: {
   const handleCommentUpdate = useCallback(
     (commentId: string, content: string) => {
       const updates = { text: content };
-      if (onCommentUpdate && externalComments !== undefined) {
-        onCommentUpdate(commentId, updates);
+      if (externalComments !== undefined) {
+        if (onCommentUpdate) {
+          onCommentUpdate(commentId, updates);
+        } else if (isDevelopmentMode()) {
+          console.warn(
+            "[DiffViewer] `comments` is set without `onCommentUpdate`; edited comments must be handled by the controlled owner.",
+          );
+        }
       } else {
         updateComment(commentId, updates);
       }
@@ -83,4 +89,16 @@ export function useCommentActions(params: {
   );
 
   return { handleCommentDelete, handleCommentUpdate };
+}
+
+function isDevelopmentMode(): boolean {
+  const viteEnv = (
+    import.meta as unknown as {
+      env?: { DEV?: boolean };
+    }
+  ).env;
+  return (
+    viteEnv?.DEV === true ||
+    (typeof process !== "undefined" && process.env.NODE_ENV !== "production")
+  );
 }

@@ -4,7 +4,11 @@ import { IconMessage } from "@tabler/icons-react";
 import type { DiffComment } from "@/lib/diff/types";
 import { formatLineRange } from "@/lib/diff";
 
-type FileGroup = { filePath: string; comments: DiffComment[] };
+type FileGroup = { key: string; filePath: string; comments: DiffComment[] };
+
+function fileGroupKey(comment: DiffComment): string {
+  return JSON.stringify([comment.repositoryId ?? null, comment.filePath]);
+}
 
 /**
  * Groups comments by file, preserving first-seen file order so the overview
@@ -13,16 +17,23 @@ type FileGroup = { filePath: string; comments: DiffComment[] };
 export function groupCommentsByFile(comments: DiffComment[]): FileGroup[] {
   const order: string[] = [];
   const byFile = new Map<string, DiffComment[]>();
+  const filePathByKey = new Map<string, string>();
   for (const comment of comments) {
-    const existing = byFile.get(comment.filePath);
+    const key = fileGroupKey(comment);
+    const existing = byFile.get(key);
     if (existing) {
       existing.push(comment);
     } else {
-      order.push(comment.filePath);
-      byFile.set(comment.filePath, [comment]);
+      order.push(key);
+      filePathByKey.set(key, comment.filePath);
+      byFile.set(key, [comment]);
     }
   }
-  return order.map((filePath) => ({ filePath, comments: byFile.get(filePath)! }));
+  return order.map((key) => ({
+    key,
+    filePath: filePathByKey.get(key)!,
+    comments: byFile.get(key)!,
+  }));
 }
 
 function fileDir(filePath: string): string {
@@ -68,7 +79,7 @@ export function ReviewCommentsOverview({ comments }: { comments: DiffComment[] }
         data-testid="review-comments-overview-scroll"
       >
         {groups.map((group) => (
-          <div key={group.filePath} className="mb-2 last:mb-0">
+          <div key={group.key} className="mb-2 last:mb-0">
             <div className="flex items-baseline gap-1.5 px-1 pb-1">
               <span className="truncate text-xs font-medium text-foreground" title={group.filePath}>
                 {fileName(group.filePath)}

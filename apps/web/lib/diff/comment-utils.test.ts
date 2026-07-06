@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useCommentActions } from "./comment-utils";
 import type { DiffComment } from "./types";
@@ -22,6 +22,10 @@ function comment(): DiffComment {
     status: "pending",
   };
 }
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("useCommentActions", () => {
   it("routes updates to the external handler in controlled comment mode", () => {
@@ -68,5 +72,68 @@ describe("useCommentActions", () => {
 
     expect(updateComment).toHaveBeenCalledWith(COMMENT_ID, { text: EDITED_TEXT });
     expect(setEditingComment).toHaveBeenCalledWith(null);
+  });
+
+  it("does not write to the internal store when controlled updates lack a handler", () => {
+    const updateComment = vi.fn();
+    const setEditingComment = vi.fn();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const { result } = renderHook(() =>
+      useCommentActions({
+        removeComment: vi.fn(),
+        updateComment,
+        setEditingComment,
+        externalComments: [comment()],
+      }),
+    );
+
+    act(() => {
+      result.current.handleCommentUpdate(COMMENT_ID, EDITED_TEXT);
+    });
+
+    expect(updateComment).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("`onCommentUpdate`"));
+    expect(setEditingComment).toHaveBeenCalledWith(null);
+  });
+
+  it("routes deletes to the external handler in controlled comment mode", () => {
+    const removeComment = vi.fn();
+    const onCommentDelete = vi.fn();
+
+    const { result } = renderHook(() =>
+      useCommentActions({
+        removeComment,
+        updateComment: vi.fn(),
+        setEditingComment: vi.fn(),
+        onCommentDelete,
+        externalComments: [comment()],
+      }),
+    );
+
+    act(() => {
+      result.current.handleCommentDelete(COMMENT_ID);
+    });
+
+    expect(onCommentDelete).toHaveBeenCalledWith(COMMENT_ID);
+    expect(removeComment).not.toHaveBeenCalled();
+  });
+
+  it("routes deletes to the internal store handler when comments are uncontrolled", () => {
+    const removeComment = vi.fn();
+
+    const { result } = renderHook(() =>
+      useCommentActions({
+        removeComment,
+        updateComment: vi.fn(),
+        setEditingComment: vi.fn(),
+      }),
+    );
+
+    act(() => {
+      result.current.handleCommentDelete(COMMENT_ID);
+    });
+
+    expect(removeComment).toHaveBeenCalledWith(COMMENT_ID);
   });
 });

@@ -6,7 +6,7 @@ import type {
   AnnotationSide,
   ChangeContent,
 } from "@pierre/diffs";
-import type { FileDiffData, DiffComment } from "@/lib/diff/types";
+import type { FileDiffData, DiffComment, DiffCommentUpdate } from "@/lib/diff/types";
 import { buildDiffComment, useCommentActions } from "@/lib/diff/comment-utils";
 import { useDiffComments } from "./use-diff-comments";
 import { useDiffMetadata } from "./use-diff-metadata";
@@ -137,7 +137,7 @@ type UseDiffViewerStateOpts = {
   sessionId?: string;
   onCommentAdd?: (comment: DiffComment) => void;
   onCommentDelete?: (commentId: string) => void;
-  onCommentUpdate?: (commentId: string, updates: Partial<DiffComment>) => void;
+  onCommentUpdate?: (commentId: string, updates: DiffCommentUpdate) => void;
   onCommentRun?: (comment: DiffComment) => void;
   externalComments?: DiffComment[];
   onRevertBlock?: (filePath: string, info: RevertBlockInfo) => Promise<void> | void;
@@ -202,10 +202,10 @@ type CommentHandlerOpts = {
   sessionId?: string;
   addComment: (range: SelectedLineRange, content: string) => DiffComment;
   removeComment: (commentId: string) => void;
-  updateComment: (commentId: string, updates: Partial<DiffComment>) => void;
+  updateComment: (commentId: string, updates: DiffCommentUpdate) => void;
   setEditingComment: (commentId: string | null) => void;
   onCommentDelete?: (commentId: string) => void;
-  onCommentUpdate?: (commentId: string, updates: Partial<DiffComment>) => void;
+  onCommentUpdate?: (commentId: string, updates: DiffCommentUpdate) => void;
 };
 
 function useDiffViewerCommentHandlers(opts: CommentHandlerOpts) {

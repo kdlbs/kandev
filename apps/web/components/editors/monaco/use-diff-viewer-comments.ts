@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { editor as monacoEditor } from "monaco-editor";
 import type { DiffOnMount } from "@monaco-editor/react";
-import type { DiffComment } from "@/lib/diff/types";
+import type { DiffComment, DiffCommentUpdate } from "@/lib/diff/types";
 import { buildDiffComment, useCommentedLines, useCommentActions } from "@/lib/diff/comment-utils";
 import { useDiffComments } from "@/components/diff/use-diff-comments";
 import { useGutterComments } from "@/hooks/use-gutter-comments";
@@ -31,7 +31,7 @@ interface UseDiffViewerCommentsOpts {
   compact: boolean;
   onCommentAdd?: (comment: DiffComment) => void;
   onCommentDelete?: (commentId: string) => void;
-  onCommentUpdate?: (commentId: string, updates: Partial<DiffComment>) => void;
+  onCommentUpdate?: (commentId: string, updates: DiffCommentUpdate) => void;
   onCommentRun?: (comment: DiffComment) => void;
   externalComments?: DiffComment[];
   onModifiedContentChange?: (filePath: string, content: string) => void;

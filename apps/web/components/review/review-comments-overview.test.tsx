@@ -36,6 +36,17 @@ describe("groupCommentsByFile", () => {
     expect(groups[1].comments.map((c) => c.id)).toEqual(["b"]);
   });
 
+  it("keeps matching paths in different repositories as separate groups", () => {
+    const groups = groupCommentsByFile([
+      comment({ id: "a", repositoryId: "repo-1", filePath: APP_PATH }),
+      comment({ id: "b", repositoryId: "repo-2", filePath: APP_PATH }),
+      comment({ id: "c", repositoryId: "repo-1", filePath: APP_PATH }),
+    ]);
+    expect(groups.map((g) => g.filePath)).toEqual([APP_PATH, APP_PATH]);
+    expect(groups[0].comments.map((c) => c.id)).toEqual(["a", "c"]);
+    expect(groups[1].comments.map((c) => c.id)).toEqual(["b"]);
+  });
+
   it("returns an empty list for no comments", () => {
     expect(groupCommentsByFile([])).toEqual([]);
   });

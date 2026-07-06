@@ -3,7 +3,7 @@
 import { memo, useMemo } from "react";
 import { DiffViewerResolved as DiffViewer } from "./diff-viewer-resolver";
 import { transformGitDiff } from "@/lib/diff";
-import type { DiffComment } from "@/lib/diff/types";
+import type { DiffComment, DiffCommentUpdate } from "@/lib/diff/types";
 import type { RevertBlockInfo } from "./diff-viewer-resolver";
 
 interface FileDiffViewerProps {
@@ -14,7 +14,7 @@ interface FileDiffViewerProps {
   sessionId?: string;
   onCommentAdd?: (comment: DiffComment) => void;
   onCommentDelete?: (commentId: string) => void;
-  onCommentUpdate?: (commentId: string, updates: Partial<DiffComment>) => void;
+  onCommentUpdate?: (commentId: string, updates: DiffCommentUpdate) => void;
   onCommentRun?: (comment: DiffComment) => void;
   comments?: DiffComment[];
   className?: string;

@@ -62,6 +62,25 @@ test.describe("Review dialog Fix Comments popover", () => {
     await expect(overview).toBeVisible();
   });
 
+  test("focusing Fix Comments shows the comments overview", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await seedReviewTask(testPage, apiClient, seedData);
+    const sessionId = task.session_id!;
+    expect(sessionId).toBeTruthy();
+    await seedComments(testPage, sessionId);
+
+    await loadSession(testPage, task.id);
+    const dialog = await openDialogWithChanges(testPage);
+
+    const button = dialog.getByTestId("review-fix-comments-button");
+    await button.focus();
+
+    await expect(testPage.getByTestId("review-comments-overview")).toBeVisible();
+  });
+
   test("no Fix Comments button when there are no comments", async ({
     testPage,
     apiClient,
