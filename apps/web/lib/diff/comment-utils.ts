@@ -49,8 +49,14 @@ export function useCommentActions(params: {
   onCommentUpdate?: (commentId: string, updates: Partial<DiffComment>) => void;
   externalComments?: DiffComment[];
 }) {
-  const { removeComment, updateComment, setEditingComment, onCommentDelete, externalComments } =
-    params;
+  const {
+    removeComment,
+    updateComment,
+    setEditingComment,
+    onCommentDelete,
+    onCommentUpdate,
+    externalComments,
+  } = params;
 
   const handleCommentDelete = useCallback(
     (commentId: string) => {
@@ -65,10 +71,15 @@ export function useCommentActions(params: {
 
   const handleCommentUpdate = useCallback(
     (commentId: string, content: string) => {
-      updateComment(commentId, { text: content });
+      const updates = { text: content };
+      if (onCommentUpdate && externalComments !== undefined) {
+        onCommentUpdate(commentId, updates);
+      } else {
+        updateComment(commentId, updates);
+      }
       setEditingComment(null);
     },
-    [updateComment, setEditingComment],
+    [updateComment, onCommentUpdate, externalComments, setEditingComment],
   );
 
   return { handleCommentDelete, handleCommentUpdate };

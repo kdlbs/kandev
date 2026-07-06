@@ -28,6 +28,7 @@ interface MonacoDiffViewerProps {
   sessionId?: string;
   onCommentAdd?: (comment: DiffComment) => void;
   onCommentDelete?: (commentId: string) => void;
+  onCommentUpdate?: (commentId: string, updates: Partial<DiffComment>) => void;
   onCommentRun?: (comment: DiffComment) => void;
   comments?: DiffComment[];
   className?: string;
@@ -47,6 +48,7 @@ function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
     compact = false,
     onCommentAdd,
     onCommentDelete,
+    onCommentUpdate,
     onCommentRun,
     comments: externalComments,
     onModifiedContentChange,
@@ -68,6 +70,7 @@ function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
     compact,
     onCommentAdd,
     onCommentDelete,
+    onCommentUpdate,
     onCommentRun,
     externalComments,
     onModifiedContentChange,

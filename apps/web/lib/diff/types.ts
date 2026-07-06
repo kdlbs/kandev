@@ -84,6 +84,8 @@ export interface DiffViewerProps {
   onCommentAdd?: (comment: DiffComment) => void;
   /** Callback when comment is deleted */
   onCommentDelete?: (commentId: string) => void;
+  /** Callback when comment is updated */
+  onCommentUpdate?: (commentId: string, updates: Partial<DiffComment>) => void;
   /** External comments (controlled mode) */
   comments?: DiffComment[];
   /** Additional class name */

@@ -137,6 +137,7 @@ type UseDiffViewerStateOpts = {
   sessionId?: string;
   onCommentAdd?: (comment: DiffComment) => void;
   onCommentDelete?: (commentId: string) => void;
+  onCommentUpdate?: (commentId: string, updates: Partial<DiffComment>) => void;
   onCommentRun?: (comment: DiffComment) => void;
   externalComments?: DiffComment[];
   onRevertBlock?: (filePath: string, info: RevertBlockInfo) => Promise<void> | void;
@@ -204,6 +205,7 @@ type CommentHandlerOpts = {
   updateComment: (commentId: string, updates: Partial<DiffComment>) => void;
   setEditingComment: (commentId: string | null) => void;
   onCommentDelete?: (commentId: string) => void;
+  onCommentUpdate?: (commentId: string, updates: Partial<DiffComment>) => void;
 };
 
 function useDiffViewerCommentHandlers(opts: CommentHandlerOpts) {
@@ -222,6 +224,7 @@ function useDiffViewerCommentHandlers(opts: CommentHandlerOpts) {
     updateComment,
     setEditingComment,
     onCommentDelete,
+    onCommentUpdate,
   } = opts;
   const handleLineSelectionEnd = useCallback(
     (range: SelectedLineRange | null) => {
@@ -289,6 +292,7 @@ function useDiffViewerCommentHandlers(opts: CommentHandlerOpts) {
     updateComment,
     setEditingComment,
     onCommentDelete,
+    onCommentUpdate,
     externalComments,
   });
 
@@ -325,6 +329,7 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
     sessionId,
     onCommentAdd,
     onCommentDelete,
+    onCommentUpdate,
     onCommentRun,
     externalComments,
     onRevertBlock,
@@ -393,6 +398,7 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
     updateComment,
     setEditingComment,
     onCommentDelete,
+    onCommentUpdate,
   });
 
   return {

@@ -25,6 +25,7 @@ interface DiffViewerProps {
   sessionId?: string;
   onCommentAdd?: (comment: DiffComment) => void;
   onCommentDelete?: (commentId: string) => void;
+  onCommentUpdate?: (commentId: string, updates: Partial<DiffComment>) => void;
   onCommentRun?: (comment: DiffComment) => void;
   comments?: DiffComment[];
   className?: string;
@@ -51,6 +52,10 @@ interface DiffViewerProps {
 const SCALAR_PROP_KEYS: (keyof DiffViewerProps)[] = [
   "enableComments",
   "sessionId",
+  "onCommentAdd",
+  "onCommentDelete",
+  "onCommentUpdate",
+  "onCommentRun",
   "compact",
   "hideHeader",
   "className",
@@ -193,6 +198,7 @@ export const DiffViewer = memo(function DiffViewer({
   sessionId,
   onCommentAdd,
   onCommentDelete,
+  onCommentUpdate,
   onCommentRun,
   comments: externalComments,
   className,
@@ -227,6 +233,7 @@ export const DiffViewer = memo(function DiffViewer({
     sessionId,
     onCommentAdd,
     onCommentDelete,
+    onCommentUpdate,
     onCommentRun,
     externalComments,
     onRevertBlock,

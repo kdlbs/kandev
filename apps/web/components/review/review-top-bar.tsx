@@ -17,12 +17,18 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
 import { Checkbox } from "@kandev/ui/checkbox";
 import type { DiffComment } from "@/lib/diff/types";
 import { useAppStore } from "@/components/state-provider";
+import { useHoverPopover } from "@/hooks/domains/github/use-hover-popover";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { updateUserSettings } from "@/lib/api";
 import { VcsSplitButton } from "@/components/vcs-split-button";
+import { ReviewCommentsOverview } from "./review-comments-overview";
+
+const COMMENTS_HOVER_OPEN_DELAY_MS = 150;
+const COMMENTS_HOVER_CLOSE_DELAY_MS = 150;
 
 type ReviewTopBarProps = {
   sessionId: string;
@@ -78,6 +84,60 @@ function ReviewSettingsMenu({ reviewAutoMarkOnScroll, onToggleAutoMark }: Review
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+type FixCommentsButtonProps = {
+  commentCount: number;
+  getPendingComments: () => DiffComment[];
+  onFixComments: () => void;
+};
+
+function FixCommentsButton({
+  commentCount,
+  getPendingComments,
+  onFixComments,
+}: FixCommentsButtonProps) {
+  const hover = useHoverPopover({
+    openDelayMs: COMMENTS_HOVER_OPEN_DELAY_MS,
+    closeDelayMs: COMMENTS_HOVER_CLOSE_DELAY_MS,
+  });
+
+  return (
+    <Popover open={hover.open} onOpenChange={hover.onOpenChange}>
+      <PopoverAnchor asChild>
+        <span
+          className="inline-flex"
+          onMouseEnter={hover.onTriggerEnter}
+          onMouseLeave={hover.onTriggerLeave}
+        >
+          <Button
+            size="sm"
+            variant="outline"
+            className="cursor-pointer"
+            onClick={onFixComments}
+            data-testid="review-fix-comments-button"
+          >
+            <IconMessageForward className="h-4 w-4" />
+            Fix Comments
+            <span className="ml-1 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-xs font-medium text-blue-600 dark:text-blue-400">
+              {commentCount}
+            </span>
+          </Button>
+        </span>
+      </PopoverAnchor>
+      <PopoverContent
+        side="bottom"
+        align="end"
+        sideOffset={8}
+        className="w-80 p-0"
+        onMouseEnter={hover.onContentEnter}
+        onMouseLeave={hover.onContentLeave}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
+        <ReviewCommentsOverview comments={getPendingComments()} />
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -174,13 +234,11 @@ export const ReviewTopBar = memo(function ReviewTopBar({
         </TooltipContent>
       </Tooltip>
       {commentCount > 0 && (
-        <Button size="sm" variant="outline" className="cursor-pointer" onClick={handleFixComments}>
-          <IconMessageForward className="h-4 w-4" />
-          Fix Comments
-          <span className="ml-1 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-xs font-medium text-blue-600 dark:text-blue-400">
-            {commentCount}
-          </span>
-        </Button>
+        <FixCommentsButton
+          commentCount={commentCount}
+          getPendingComments={getPendingComments}
+          onFixComments={handleFixComments}
+        />
       )}
       <VcsSplitButton sessionId={sessionId} baseBranch={baseBranch} />
       <Button size="sm" variant="ghost" className="px-2 cursor-pointer" onClick={onClose}>

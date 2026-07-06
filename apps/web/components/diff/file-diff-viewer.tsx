@@ -14,6 +14,7 @@ interface FileDiffViewerProps {
   sessionId?: string;
   onCommentAdd?: (comment: DiffComment) => void;
   onCommentDelete?: (commentId: string) => void;
+  onCommentUpdate?: (commentId: string, updates: Partial<DiffComment>) => void;
   onCommentRun?: (comment: DiffComment) => void;
   comments?: DiffComment[];
   className?: string;
@@ -54,6 +55,7 @@ export const FileDiffViewer = memo(function FileDiffViewer({
   sessionId,
   onCommentAdd,
   onCommentDelete,
+  onCommentUpdate,
   onCommentRun,
   comments,
   className,
@@ -80,6 +82,7 @@ export const FileDiffViewer = memo(function FileDiffViewer({
       sessionId={sessionId}
       onCommentAdd={onCommentAdd}
       onCommentDelete={onCommentDelete}
+      onCommentUpdate={onCommentUpdate}
       onCommentRun={onCommentRun}
       comments={comments}
       className={className}

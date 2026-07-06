@@ -31,6 +31,7 @@ interface UseDiffViewerCommentsOpts {
   compact: boolean;
   onCommentAdd?: (comment: DiffComment) => void;
   onCommentDelete?: (commentId: string) => void;
+  onCommentUpdate?: (commentId: string, updates: Partial<DiffComment>) => void;
   onCommentRun?: (comment: DiffComment) => void;
   externalComments?: DiffComment[];
   onModifiedContentChange?: (filePath: string, content: string) => void;
@@ -44,6 +45,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
     compact,
     onCommentAdd,
     onCommentDelete,
+    onCommentUpdate,
     onCommentRun,
     externalComments,
     onModifiedContentChange,
@@ -245,6 +247,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
     updateComment,
     setEditingComment,
     onCommentDelete,
+    onCommentUpdate,
     externalComments,
   });
 
