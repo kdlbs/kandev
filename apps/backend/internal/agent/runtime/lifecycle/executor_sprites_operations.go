@@ -168,8 +168,8 @@ func cleanSpriteSkillFilePath(p string) (string, bool) {
 		return "", false
 	}
 	cleaned := path.Clean(p)
-	if cleaned == "." || strings.HasPrefix(cleaned, "../") ||
-		strings.Contains(cleaned, "/../") || strings.HasPrefix(cleaned, "/") ||
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") ||
+		strings.HasPrefix(cleaned, "/") ||
 		cleaned == "SKILL.md" {
 		return "", false
 	}

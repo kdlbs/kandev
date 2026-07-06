@@ -199,3 +199,13 @@ func TestInjectSkills_NoGitDirIsNotFatal(t *testing.T) {
 		t.Errorf("skill should still land without .git: %v", err)
 	}
 }
+
+func TestCleanRelativeSkillFilePathRejectsTraversal(t *testing.T) {
+	for _, input := range []string{"..", "../x", "a/../..", "a/.."} {
+		t.Run(input, func(t *testing.T) {
+			if got, ok := cleanRelativeSkillFilePath(input); ok {
+				t.Fatalf("cleanRelativeSkillFilePath(%q) = %q, true; want reject", input, got)
+			}
+		})
+	}
+}

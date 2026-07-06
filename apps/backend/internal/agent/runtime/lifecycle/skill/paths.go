@@ -36,7 +36,7 @@ func cleanRelativeSkillFilePath(p string) (string, bool) {
 		return "", false
 	}
 	cleaned := filepath.ToSlash(filepath.Clean(p))
-	if cleaned == "." || strings.HasPrefix(cleaned, "../") || strings.Contains(cleaned, "/../") {
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
 		return "", false
 	}
 	if strings.HasPrefix(cleaned, "/") || cleaned == "SKILL.md" {
