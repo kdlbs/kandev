@@ -7,7 +7,7 @@ import type { Repository, TaskSession, TaskSessionState, TaskState } from "@/lib
 import type { TaskPR } from "@/lib/types/github";
 import type { KanbanState } from "@/lib/state/slices";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
-import { TaskSwitcher } from "./task-switcher";
+import { TaskSwitcher, type TaskSwitcherItem } from "./task-switcher";
 import { SidebarFilterBar } from "./sidebar-filter/sidebar-filter-bar";
 import { MOCK_ITEMS, MOCK_SIDEBAR } from "./sidebar-mock-data";
 import { SidebarDialogs } from "./task-session-sidebar-dialogs";
@@ -28,6 +28,7 @@ import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import { buildPendingFlags, readPendingFlags } from "./task-session-sidebar-aggregate";
 import { useGroupedSidebarView } from "./task-session-sidebar-grouped-view";
 import { useSidebarLinkActions } from "./task-session-sidebar-link-actions";
+import { buildArchivedSidebarItem } from "./task-session-sidebar-archived-item";
 import { useShallow } from "zustand/react/shallow";
 import { type AgentErrorOptions, agentErrorMessageForTask } from "@/lib/task-agent-error";
 import {
@@ -161,40 +162,6 @@ type TaskSessionSidebarProps = {
   hideFilterBar?: boolean;
 };
 
-type SidebarItem = Omit<ReturnType<typeof toSidebarItem>, "workflowId"> & { workflowId?: string };
-
-function buildArchivedItem(s: ReturnType<typeof useArchivedTaskState>): SidebarItem {
-  return {
-    id: s.archivedTaskId!,
-    title: s.archivedTaskTitle ?? "Archived task",
-    state: undefined,
-    sessionState: undefined,
-    description: undefined,
-    workflowId: undefined,
-    workflowName: undefined,
-    workflowStepId: undefined,
-    workflowStepTitle: undefined,
-    repositoryPath: s.archivedTaskRepositoryPath,
-    diffStats: undefined,
-    isRemoteExecutor: false,
-    remoteExecutorType: undefined,
-    remoteExecutorName: undefined,
-    primarySessionId: null,
-    hasPendingClarification: false,
-    hasPendingPermission: false,
-    updatedAt: s.archivedTaskUpdatedAt,
-    createdAt: undefined,
-    isArchived: true,
-    parentTaskTitle: undefined,
-    parentTaskId: undefined,
-    prInfo: undefined,
-    isPRReview: false,
-    isIssueWatch: false,
-    issueInfo: undefined,
-    agentErrorMessage: null,
-  };
-}
-
 function useSidebarData(workspaceId: string | null) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
@@ -263,13 +230,13 @@ function useSidebarData(workspaceId: string | null) {
       acknowledgedAgentErrors,
       messagesBySession,
     };
-    const items: SidebarItem[] = allTasks.map((task) => toSidebarItem(task, mapCtx));
+    const items: TaskSwitcherItem[] = allTasks.map((task) => toSidebarItem(task, mapCtx));
     if (
       archivedState.isArchived &&
       archivedState.archivedTaskId &&
       !items.some((t) => t.id === archivedState.archivedTaskId)
     ) {
-      items.unshift(buildArchivedItem(archivedState));
+      items.unshift(buildArchivedSidebarItem(archivedState));
     }
     return items;
   }, [

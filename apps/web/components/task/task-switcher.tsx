@@ -189,6 +189,7 @@ type TaskRowProps = {
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onTogglePin?: (taskId: string) => void;
   isPinned?: boolean;
+  pinnedTaskIds?: string[];
   deletingTaskId?: string | null;
   selectedTaskIds?: Set<string>;
   onToggleSelectTask?: (taskId: string) => void;
@@ -219,6 +220,7 @@ function TaskRow({
   onMoveToStep,
   onTogglePin,
   isPinned,
+  pinnedTaskIds,
   deletingTaskId,
   selectedTaskIds,
   onToggleSelectTask,
@@ -248,6 +250,7 @@ function TaskRow({
       onMoveToStep={onMoveToStep}
       onTogglePin={onTogglePin}
       isPinned={isPinned}
+      pinnedTaskIds={pinnedTaskIds}
       isDeleting={deletingTaskId === task.id}
       selectedTaskIds={selectedTaskIds}
       onBulkArchive={onBulkArchive}
@@ -423,6 +426,7 @@ type GroupSectionProps = {
   onTogglePin?: (taskId: string) => void;
   onReorderGroup?: (groupTaskIds: string[]) => void;
   onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
+  pinnedTaskIds?: string[];
   pinnedSet: Set<string>;
   deletingTaskId?: string | null;
   selectedTaskIds?: Set<string>;
@@ -458,6 +462,7 @@ function GroupSection({
   onTogglePin,
   onReorderGroup,
   onReorderSubtasks,
+  pinnedTaskIds,
   pinnedSet,
   deletingTaskId,
   selectedTaskIds,
@@ -489,6 +494,7 @@ function GroupSection({
       onLinkIssue,
       onMoveToStep,
       onTogglePin,
+      pinnedTaskIds,
       deletingTaskId,
       selectedTaskIds,
       onToggleSelectTask,
@@ -594,6 +600,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
           onTogglePin={onTogglePin}
           onReorderGroup={onReorderGroup}
           onReorderSubtasks={onReorderSubtasks}
+          pinnedTaskIds={pinnedTaskIds}
           pinnedSet={pinnedSet}
           deletingTaskId={deletingTaskId}
           selectedTaskIds={selectedTaskIds}

@@ -61,6 +61,7 @@ type ContextMenuProps = {
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onTogglePin?: (taskId: string) => void;
   isPinned?: boolean;
+  pinnedTaskIds?: string[];
   isDeleting?: boolean;
   /** Active multi-selection; when this task is part of it, actions apply to the whole set. */
   selectedTaskIds?: Set<string>;
@@ -87,6 +88,7 @@ export function TaskItemWithContextMenu({
   onMoveToStep,
   onTogglePin,
   isPinned,
+  pinnedTaskIds,
   isDeleting,
   selectedTaskIds,
   onBulkArchive,
@@ -124,6 +126,7 @@ export function TaskItemWithContextMenu({
           onMoveToStep={onMoveToStep}
           onTogglePin={onTogglePin}
           isPinned={isPinned}
+          pinnedTaskIds={pinnedTaskIds}
           isDeleting={isDeleting}
           selectedTaskIds={selectedTaskIds}
           onBulkArchive={onBulkArchive}
@@ -158,6 +161,7 @@ function TaskContextMenuItems({
   onMoveToStep,
   onTogglePin,
   isPinned,
+  pinnedTaskIds,
   isDeleting,
   selectedTaskIds,
   onBulkArchive,
@@ -187,6 +191,7 @@ function TaskContextMenuItems({
         stepsByWorkflowId={stepsByWorkflowId}
         steps={steps}
         isMixedWorkflowSelection={isMixedWorkflowSelection}
+        pinnedTaskIds={pinnedTaskIds}
         onBulkPin={onBulkPin}
         onBulkArchive={onBulkArchive}
         onBulkDelete={onBulkDelete}
@@ -261,6 +266,7 @@ function BulkSelectionMenuItems({
   stepsByWorkflowId,
   steps,
   isMixedWorkflowSelection,
+  pinnedTaskIds,
   onBulkPin,
   onBulkArchive,
   onBulkDelete,
@@ -274,6 +280,7 @@ function BulkSelectionMenuItems({
   stepsByWorkflowId?: Record<string, StepDef[]>;
   steps?: StepDef[];
   isMixedWorkflowSelection?: boolean;
+  pinnedTaskIds?: string[];
   onBulkPin?: (taskIds: string[]) => void;
   onBulkArchive?: (taskIds: string[]) => void;
   onBulkDelete?: (taskIds: string[]) => void;
@@ -282,12 +289,19 @@ function BulkSelectionMenuItems({
   moveTasks: ReturnType<typeof useTaskWorkflowMove>;
 }) {
   const n = actingIds.length;
+  const allPinned =
+    actingIds.length > 0 && actingIds.every((id) => pinnedTaskIds?.includes(id) ?? false);
+  const pinLabel = `${allPinned ? "Unpin" : "Pin"} ${n} ${n === 1 ? "task" : "tasks"}`;
   return (
     <>
       {onBulkPin && (
         <ContextMenuItem onSelect={() => onBulkPin(actingIds)}>
-          <IconPin className="mr-2 h-4 w-4" />
-          Pin {n} tasks
+          {allPinned ? (
+            <IconPinFilled className="mr-2 h-4 w-4" />
+          ) : (
+            <IconPin className="mr-2 h-4 w-4" />
+          )}
+          {pinLabel}
         </ContextMenuItem>
       )}
       <TaskArchiveItem

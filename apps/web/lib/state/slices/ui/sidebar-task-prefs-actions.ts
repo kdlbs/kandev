@@ -81,6 +81,21 @@ export function buildSidebarTaskPrefsActions(set: ImmerSet, get: () => UISlice) 
       });
       if (changed) syncSidebarTaskPrefs(get().sidebarTaskPrefs, set);
     },
+    // Unpin every matching id in one state update (bulk "Unpin").
+    unpinTasks: (taskIds: string[]) => {
+      const toRemove = new Set(taskIds);
+      let changed = false;
+      set((draft) => {
+        const list = draft.sidebarTaskPrefs.pinnedTaskIds;
+        const next = list.filter((id) => !toRemove.has(id));
+        if (next.length === list.length) return;
+        changed = true;
+        draft.sidebarTaskPrefs.syncPending = true;
+        draft.sidebarTaskPrefs.pinnedTaskIds = next;
+        setStoredPinnedTaskIds(next);
+      });
+      if (changed) syncSidebarTaskPrefs(get().sidebarTaskPrefs, set);
+    },
     setSidebarTaskOrder: (orderedTaskIds: string[]) => {
       set((draft) => {
         draft.sidebarTaskPrefs.syncPending = true;

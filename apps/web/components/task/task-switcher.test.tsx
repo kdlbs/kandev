@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { TaskSwitcher, type TaskSwitcherItem } from "./task-switcher";
@@ -23,6 +23,8 @@ function item(id: string, parentTaskId?: string): TaskSwitcherItem {
 const ROOT = item("Root");
 const CHILD = item("Child", "Root");
 const GRANDCHILD = item("Grandchild", "Child");
+const TASK_A = item("Task A");
+const TASK_B = item("Task B");
 
 function grouped(): GroupedSidebarList {
   return {
@@ -134,5 +136,30 @@ describe("TaskSwitcher — nested subtasks beyond depth 1", () => {
       expect(handle).not.toBeNull();
       expect(handle!.className).not.toContain("cursor-grab");
     }
+  });
+});
+
+describe("TaskSwitcher — bulk pin menu", () => {
+  it("offers bulk unpin when every selected root task is pinned", () => {
+    render(
+      <Providers>
+        <TaskSwitcher
+          grouped={{
+            groups: [{ key: "__all__", label: "All", tasks: [TASK_A, TASK_B] }],
+            subTasksByParentId: new Map(),
+          }}
+          activeTaskId={null}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          onBulkPin={vi.fn()}
+          pinnedTaskIds={[TASK_A.id, TASK_B.id]}
+          selectedTaskIds={new Set([TASK_A.id, TASK_B.id])}
+        />
+      </Providers>,
+    );
+
+    fireEvent.contextMenu(screen.getByText(TASK_A.title));
+
+    expect(screen.getByText("Unpin 2 tasks")).toBeTruthy();
   });
 });

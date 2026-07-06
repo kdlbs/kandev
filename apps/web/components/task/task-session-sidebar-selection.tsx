@@ -60,10 +60,13 @@ type Multi = ReturnType<typeof useSidebarMultiSelect>;
 function useSelectionHandlers(args: {
   multiSelect: Multi;
   pinTasks: (ids: string[]) => void;
+  unpinTasks: (ids: string[]) => void;
+  pinnedTaskIds: string[];
   visibleTaskIds: string[];
   movableSelectedIds: Set<string>;
 }) {
-  const { multiSelect, pinTasks, visibleTaskIds, movableSelectedIds } = args;
+  const { multiSelect, pinTasks, unpinTasks, pinnedTaskIds, visibleTaskIds, movableSelectedIds } =
+    args;
   const { isSelecting, clearSelection, selectRange, pruneToVisible } = multiSelect;
 
   // Escape clears an active selection.
@@ -105,11 +108,15 @@ function useSelectionHandlers(args: {
 
   const onBulkPin = useCallback(
     (ids: string[]) => {
+      const orderedIds = sortIdsByVisibleOrder(ids, visibleTaskIds);
+      const pinnedSet = new Set(pinnedTaskIds);
+      const allPinned = orderedIds.length > 0 && orderedIds.every((id) => pinnedSet.has(id));
       // Pin in visible order so pinned rows keep the order the user saw.
-      pinTasks(sortIdsByVisibleOrder(ids, visibleTaskIds));
+      if (allPinned) unpinTasks(orderedIds);
+      else pinTasks(orderedIds);
       clearSelection();
     },
-    [pinTasks, clearSelection, visibleTaskIds],
+    [pinTasks, unpinTasks, pinnedTaskIds, clearSelection, visibleTaskIds],
   );
 
   return { onSelectTaskRange, onBulkMove, onBulkPin };
@@ -137,6 +144,8 @@ export function useSidebarSelection({
   const multiSelect = useSidebarMultiSelect(workspaceId);
   const { selectedIds, clearSelection, toggleSelect } = multiSelect;
   const pinTasks = useAppStore((s) => s.pinTasks);
+  const unpinTasks = useAppStore((s) => s.unpinTasks);
+  const pinnedTaskIds = useAppStore((s) => s.sidebarTaskPrefs.pinnedTaskIds);
   const archiveDialog = useBulkConfirmDialog(displayTasks, multiSelect.bulkArchive);
   const deleteDialog = useBulkConfirmDialog(displayTasks, multiSelect.bulkDelete);
 
@@ -156,6 +165,8 @@ export function useSidebarSelection({
   const { onSelectTaskRange, onBulkMove, onBulkPin } = useSelectionHandlers({
     multiSelect,
     pinTasks,
+    unpinTasks,
+    pinnedTaskIds,
     visibleTaskIds,
     movableSelectedIds,
   });

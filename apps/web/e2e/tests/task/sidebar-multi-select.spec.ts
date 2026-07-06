@@ -237,6 +237,21 @@ test.describe("Sidebar selection-aware context menu", () => {
     // Both rows now render the pinned icon.
     await expect(sidebar.row(a.id).getByTestId("task-pinned-icon")).toBeVisible({ timeout: 5_000 });
     await expect(sidebar.row(b.id).getByTestId("task-pinned-icon")).toBeVisible({ timeout: 5_000 });
+
+    await sidebar.cmdClick(a.id);
+    await sidebar.cmdClick(b.id);
+    await sidebar.rightClick(a.id);
+
+    const unpin = sidebar.bulkUnpinMenuItem(2);
+    await expect(unpin).toBeVisible({ timeout: 5_000 });
+    await unpin.click();
+
+    await expect(sidebar.row(a.id).getByTestId("task-pinned-icon")).toBeHidden({
+      timeout: 5_000,
+    });
+    await expect(sidebar.row(b.id).getByTestId("task-pinned-icon")).toBeHidden({
+      timeout: 5_000,
+    });
   });
 
   test("right-clicking an unselected row acts on that row only", async ({

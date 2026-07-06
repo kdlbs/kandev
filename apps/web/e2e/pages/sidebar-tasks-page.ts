@@ -76,6 +76,10 @@ export class SidebarTasksPage {
     return this.page.getByRole("menuitem", { name: `Pin ${count} ${plural(count)}` });
   }
 
+  bulkUnpinMenuItem(count: number): Locator {
+    return this.page.getByRole("menuitem", { name: `Unpin ${count} ${plural(count)}` });
+  }
+
   bulkDeleteMenuItem(count: number): Locator {
     return this.page.getByRole("menuitem", { name: `Delete ${count} ${plural(count)}` });
   }
