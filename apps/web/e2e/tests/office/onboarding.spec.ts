@@ -74,6 +74,34 @@ test.describe("Onboarding", () => {
     });
   });
 
+  test("first task step is prefilled with the workspace setup brief", async ({
+    testPage,
+    officeSeed: _,
+  }) => {
+    await testPage.goto("/office/setup?mode=new");
+    await expect(
+      testPage.getByRole("heading", { name: "Set up your Office workspace" }),
+    ).toBeVisible();
+    await testPage.getByRole("button", { name: /next/i }).click();
+    await expect(
+      testPage.getByRole("heading", { name: "Create your coordinator agent" }),
+    ).toBeVisible();
+    await expect(testPage.getByText("Agent tier profiles")).toBeVisible();
+    await expect(testPage.getByRole("button", { name: "Frontier tier usage" })).toBeVisible();
+    await expect(testPage.getByRole("button", { name: "Balanced tier usage" })).toBeVisible();
+    await expect(testPage.getByRole("button", { name: "Economy tier usage" })).toBeVisible();
+    await testPage.getByRole("button", { name: /next/i }).click();
+
+    await expect(
+      testPage.getByRole("heading", { name: "Give your CEO something to do" }),
+    ).toBeVisible();
+    await expect(testPage.getByLabel("Task title")).toHaveValue("Setup Workspace");
+    await expect(testPage.getByLabel("Description")).toHaveValue(
+      /Create one project per repository/,
+    );
+    await expect(testPage.getByLabel("Description")).toHaveValue(/Create the agent team/);
+  });
+
   test('"New office workspace" opens setup and close returns to homepage', async ({
     testPage,
     officeSeed: _,

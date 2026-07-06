@@ -60,6 +60,37 @@ test.describe("Tasks (Issues)", () => {
     await expect(testPage.getByText("UI Visible Issue")).toBeVisible({ timeout: 10_000 });
   });
 
+  test("subtasks are expanded and nested by default", async ({
+    testPage,
+    apiClient,
+    officeSeed,
+  }) => {
+    const parentTitle = "Default Expanded Parent";
+    const childTitle = "Default Expanded Child";
+    const parent = await apiClient.createTask(officeSeed.workspaceId, parentTitle, {
+      workflow_id: officeSeed.workflowId,
+    });
+    await apiClient.createTask(officeSeed.workspaceId, childTitle, {
+      workflow_id: officeSeed.workflowId,
+      parent_id: parent.id,
+    });
+
+    await testPage.goto("/office/tasks");
+
+    await expect(testPage.getByText(parentTitle)).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByText(childTitle)).toBeVisible();
+
+    const parentTitleBox = await testPage.getByText(parentTitle).boundingBox();
+    const childTitleBox = await testPage.getByText(childTitle).boundingBox();
+    expect(parentTitleBox).not.toBeNull();
+    expect(childTitleBox).not.toBeNull();
+    expect(childTitleBox!.x).toBeGreaterThan(parentTitleBox!.x + 16);
+
+    const parentRow = testPage.locator('[role="button"]').filter({ hasText: parentTitle }).first();
+    await parentRow.getByRole("button", { name: "Collapse" }).click();
+    await expect(testPage.getByText(childTitle)).toBeHidden();
+  });
+
   test("get task by id returns correct data", async ({ apiClient, officeApi, officeSeed }) => {
     const task = await apiClient.createTask(officeSeed.workspaceId, "Fetch By ID Issue", {
       workflow_id: officeSeed.workflowId,

@@ -15,8 +15,14 @@ import { StepTask } from "./step-task";
 import { StepReview } from "./step-review";
 import { WizardFooter } from "./wizard-footer";
 import { CloseButton } from "./close-button";
+import {
+  DEFAULT_ONBOARDING_TASK_DESCRIPTION,
+  DEFAULT_ONBOARDING_TASK_TITLE,
+} from "./setup-task-defaults";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { Tier } from "@/lib/state/slices/office/types";
+
+export { DEFAULT_ONBOARDING_TASK_DESCRIPTION, DEFAULT_ONBOARDING_TASK_TITLE };
 
 type SetupWizardProps = {
   agentProfiles: AgentProfileOption[];
@@ -42,24 +48,33 @@ type WizardData = {
   taskPrefix: string;
   agentName: string;
   agentProfileId: string;
+  tierProfileIds: Partial<Record<Tier, string>>;
   executorPreference: string;
   defaultTier?: Tier;
   taskTitle: string;
   taskDescription: string;
 };
 
-function getInitialData(
+export function getInitialData(
   suggestedWorkspaceName: string,
   defaultAgentProfileId?: string,
 ): WizardData {
+  const initialTierProfileIds = defaultAgentProfileId
+    ? {
+        frontier: defaultAgentProfileId,
+        balanced: defaultAgentProfileId,
+        economy: defaultAgentProfileId,
+      }
+    : {};
   return {
     workspaceName: suggestedWorkspaceName,
     taskPrefix: derivePrefix(suggestedWorkspaceName),
     agentName: "CEO",
     agentProfileId: defaultAgentProfileId ?? "",
+    tierProfileIds: initialTierProfileIds,
     executorPreference: "local_pc",
-    taskTitle: "",
-    taskDescription: "",
+    taskTitle: DEFAULT_ONBOARDING_TASK_TITLE,
+    taskDescription: DEFAULT_ONBOARDING_TASK_DESCRIPTION,
   };
 }
 
@@ -67,7 +82,14 @@ const STEP_COUNT = 4;
 
 function computeCanAdvance(step: number, data: WizardData): boolean {
   if (step === 0) return data.workspaceName.trim() !== "";
-  if (step === 1) return data.agentName.trim() !== "" && data.agentProfileId !== "";
+  if (step === 1)
+    return (
+      data.agentName.trim() !== "" &&
+      data.agentProfileId !== "" &&
+      Boolean(data.tierProfileIds.frontier) &&
+      Boolean(data.tierProfileIds.balanced) &&
+      Boolean(data.tierProfileIds.economy)
+    );
   return true;
 }
 
@@ -83,6 +105,11 @@ export async function submitOnboarding(data: WizardData) {
     taskPrefix: data.taskPrefix.trim() || "KAN",
     agentName: data.agentName.trim() || "CEO",
     agentProfileId: data.agentProfileId,
+    tier_profiles: {
+      frontier: data.tierProfileIds.frontier,
+      balanced: data.tierProfileIds.balanced,
+      economy: data.tierProfileIds.economy,
+    },
     executorPreference: data.executorPreference || "local_pc",
     taskTitle: data.taskTitle.trim() || undefined,
     taskDescription: data.taskDescription.trim() || undefined,
@@ -117,6 +144,7 @@ function WizardStepContent({
       <StepAgent
         agentName={data.agentName}
         agentProfileId={data.agentProfileId}
+        tierProfileIds={data.tierProfileIds}
         executorPreference={data.executorPreference}
         defaultTier={data.defaultTier}
         agentProfiles={agentProfiles}
@@ -167,6 +195,10 @@ export function SetupWizard({
     (updates: Partial<WizardData>) => setData((prev) => ({ ...prev, ...updates })),
     [],
   );
+  const skipInitialTask = useCallback(() => {
+    patch({ taskTitle: "", taskDescription: "" });
+    setStep((s) => s + 1);
+  }, [patch]);
   const canAdvance = computeCanAdvance(step, data);
 
   const handleSubmit = useCallback(async () => {
@@ -231,7 +263,7 @@ export function SetupWizard({
           submitting={submitting}
           onBack={() => setStep((s) => s - 1)}
           onNext={() => setStep((s) => s + 1)}
-          onSkip={() => setStep((s) => s + 1)}
+          onSkip={skipInitialTask}
           onSubmit={handleSubmit}
         />
       </div>

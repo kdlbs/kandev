@@ -25,6 +25,7 @@ import (
 	githubpkg "github.com/kandev/kandev/internal/github"
 	jirapkg "github.com/kandev/kandev/internal/jira"
 	linearpkg "github.com/kandev/kandev/internal/linear"
+	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/repoclone"
@@ -467,6 +468,32 @@ func (a *watcherDepsAdapter) DisableWatchersByAgentProfile(ctx context.Context, 
 		disabled = append(disabled, ref)
 	}
 	return disabled, nil
+}
+
+type routingTierDepsAdapter struct {
+	repo *officesqlite.Repository
+}
+
+func (a *routingTierDepsAdapter) ListRoutingTierReferencesByAgentProfile(
+	ctx context.Context,
+	profileID string,
+) ([]agentsettingscontroller.RoutingTierReference, error) {
+	if a == nil || a.repo == nil || profileID == "" {
+		return nil, nil
+	}
+	refs, err := a.repo.ListRoutingTierReferencesByAgentProfile(ctx, profileID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]agentsettingscontroller.RoutingTierReference, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, agentsettingscontroller.RoutingTierReference{
+			WorkspaceID: ref.WorkspaceID,
+			ProviderID:  string(ref.ProviderID),
+			Tier:        string(ref.Tier),
+		})
+	}
+	return out, nil
 }
 
 func (a *watcherDepsAdapter) disableByKind(ctx context.Context, kind, watchID, cause string) error {

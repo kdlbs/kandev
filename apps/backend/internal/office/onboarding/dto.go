@@ -22,13 +22,14 @@ type OnboardingImportFSResponse struct {
 
 // OnboardingCompleteRequest is the request body for POST /onboarding/complete.
 type OnboardingCompleteRequest struct {
-	WorkspaceName      string `json:"workspaceName"`
-	TaskPrefix         string `json:"taskPrefix"`
-	AgentName          string `json:"agentName"`
-	AgentProfileID     string `json:"agentProfileId"`
-	ExecutorPreference string `json:"executorPreference"`
-	TaskTitle          string `json:"taskTitle,omitempty"`
-	TaskDescription    string `json:"taskDescription,omitempty"`
+	WorkspaceName      string         `json:"workspaceName"`
+	TaskPrefix         string         `json:"taskPrefix"`
+	AgentName          string         `json:"agentName"`
+	AgentProfileID     string         `json:"agentProfileId"`
+	TierProfiles       TierProfileIDs `json:"tier_profiles,omitempty"`
+	ExecutorPreference string         `json:"executorPreference"`
+	TaskTitle          string         `json:"taskTitle,omitempty"`
+	TaskDescription    string         `json:"taskDescription,omitempty"`
 	// DefaultTier is the workspace routing default tier captured in the
 	// onboarding wizard. Valid values: "frontier", "balanced", "economy".
 	// Empty or invalid values default to "balanced" (silent — onboarding

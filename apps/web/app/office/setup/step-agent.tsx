@@ -5,6 +5,8 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { IconInfoCircle } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { AgentSelector } from "@/components/task-create-dialog-selectors";
 import { useAgentProfileOptions } from "@/components/task-create-dialog-options";
@@ -21,12 +23,14 @@ import { seedTier } from "./seed-tier-mapping";
 type StepAgentProps = {
   agentName: string;
   agentProfileId: string;
+  tierProfileIds: Partial<Record<Tier, string>>;
   executorPreference: string;
   defaultTier?: Tier;
   agentProfiles: AgentProfileOption[];
   onChange: (patch: {
     agentName?: string;
     agentProfileId?: string;
+    tierProfileIds?: Partial<Record<Tier, string>>;
     executorPreference?: string;
     defaultTier?: Tier;
   }) => void;
@@ -58,6 +62,7 @@ function sortProfiles(profiles: AgentProfileOption[]): AgentProfileOption[] {
 export function StepAgent({
   agentName,
   agentProfileId,
+  tierProfileIds,
   executorPreference,
   defaultTier,
   agentProfiles,
@@ -110,18 +115,16 @@ export function StepAgent({
           />
         </div>
         <div>
-          <Label>CLI agent profile</Label>
-          {!showCreate && (
-            <AgentSelector
-              options={profileOptions}
-              value={agentProfileId}
-              onValueChange={(v) => onChange({ agentProfileId: v })}
-              disabled={profileOptions.length === 0}
-              placeholder="Select an agent profile..."
-              triggerClassName="mt-1 border border-input rounded-md px-3 h-9"
-            />
-          )}
-          {showCreate ? (
+          <ProfileSelectorSection
+            showCreate={showCreate}
+            profileOptions={profileOptions}
+            agentProfileId={agentProfileId}
+            tierProfileIds={tierProfileIds}
+            selectedProfile={selectedProfile}
+            onChange={onChange}
+            onCreateClick={() => setShowCreate(true)}
+          />
+          {showCreate && (
             <CreateProfilePanel
               settingsAgents={settingsAgents}
               storeProfiles={agentProfilesState}
@@ -132,12 +135,6 @@ export function StepAgent({
               onChange={onChange}
               onClose={() => setShowCreate(false)}
             />
-          ) : (
-            <ProfilePickerHint
-              hasProfiles={profileOptions.length > 0}
-              selected={selectedProfile}
-              onCreateClick={() => setShowCreate(true)}
-            />
           )}
         </div>
         <ExecutorSelector
@@ -145,12 +142,169 @@ export function StepAgent({
           options={executorOptions}
           onChange={(v) => onChange({ executorPreference: v })}
         />
+        <TierProfileSelectorGroup
+          tierProfileIds={tierProfileIds}
+          profileOptions={profileOptions}
+          onChange={(tier, profileId) =>
+            onChange({ tierProfileIds: { ...tierProfileIds, [tier]: profileId } })
+          }
+        />
         <TierIndicator
           selectedProfile={selectedProfile}
           defaultTier={defaultTier}
           onChange={(t) => onChange({ defaultTier: t })}
         />
       </div>
+    </div>
+  );
+}
+
+function ProfileSelectorSection({
+  showCreate,
+  profileOptions,
+  agentProfileId,
+  tierProfileIds,
+  selectedProfile,
+  onChange,
+  onCreateClick,
+}: {
+  showCreate: boolean;
+  profileOptions: ReturnType<typeof useAgentProfileOptions>;
+  agentProfileId: string;
+  tierProfileIds: Partial<Record<Tier, string>>;
+  selectedProfile: AgentProfileOption | undefined;
+  onChange: StepAgentProps["onChange"];
+  onCreateClick: () => void;
+}) {
+  return (
+    <>
+      <Label>CLI agent profile</Label>
+      {!showCreate && (
+        <AgentSelector
+          options={profileOptions}
+          value={agentProfileId}
+          onValueChange={(v) =>
+            onChange({
+              agentProfileId: v,
+              tierProfileIds: fillMissingTierProfileIds(tierProfileIds, v),
+            })
+          }
+          disabled={profileOptions.length === 0}
+          placeholder="Select an agent profile..."
+          triggerClassName="mt-1 border border-input rounded-md px-3 h-9"
+        />
+      )}
+      {!showCreate && (
+        <ProfilePickerHint
+          hasProfiles={profileOptions.length > 0}
+          selected={selectedProfile}
+          onCreateClick={onCreateClick}
+        />
+      )}
+    </>
+  );
+}
+
+function fillMissingTierProfileIds(
+  current: Partial<Record<Tier, string>>,
+  profileId: string,
+): Partial<Record<Tier, string>> {
+  return {
+    frontier: current.frontier || profileId,
+    balanced: current.balanced || profileId,
+    economy: current.economy || profileId,
+  };
+}
+
+const TIER_PROFILE_COPY: Record<Tier, { label: string; description: string }> = {
+  frontier: {
+    label: "Frontier",
+    description:
+      "Used when the coordinator creates agents for the highest-capability work or assigns the Frontier tier.",
+  },
+  balanced: {
+    label: "Balanced",
+    description: "Used for general worker agents when the coordinator assigns the Balanced tier.",
+  },
+  economy: {
+    label: "Economy",
+    description:
+      "Used for QA, routine, and lower-cost agents when the coordinator assigns the Economy tier.",
+  },
+};
+
+function TierProfileSelectorGroup({
+  tierProfileIds,
+  profileOptions,
+  onChange,
+}: {
+  tierProfileIds: Partial<Record<Tier, string>>;
+  profileOptions: ReturnType<typeof useAgentProfileOptions>;
+  onChange: (tier: Tier, profileId: string) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <div>
+        <Label>Agent tier profiles</Label>
+        <p className="text-xs text-muted-foreground mt-1">
+          These profiles become the workspace tier families used when the coordinator creates or
+          schedules agents.
+        </p>
+      </div>
+      <div className="grid gap-3 md:grid-cols-3">
+        {(["frontier", "balanced", "economy"] as const).map((tier) => (
+          <TierProfileSelector
+            key={tier}
+            tier={tier}
+            value={tierProfileIds[tier] ?? ""}
+            options={profileOptions}
+            onChange={(profileId) => onChange(tier, profileId)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TierProfileSelector({
+  tier,
+  value,
+  options,
+  onChange,
+}: {
+  tier: Tier;
+  value: string;
+  options: ReturnType<typeof useAgentProfileOptions>;
+  onChange: (profileId: string) => void;
+}) {
+  const copy = TIER_PROFILE_COPY[tier];
+  return (
+    <div className="min-w-0 space-y-1.5">
+      <div className="flex items-center gap-1.5">
+        <Label className="text-xs font-medium">{copy.label}</Label>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className="inline-flex size-4 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={`${copy.label} tier usage`}
+            >
+              <IconInfoCircle className="size-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs" side="top">
+            {copy.description}
+          </TooltipContent>
+        </Tooltip>
+      </div>
+      <AgentSelector
+        options={options}
+        value={value}
+        onValueChange={onChange}
+        disabled={options.length === 0}
+        placeholder="Select profile..."
+        triggerClassName="border border-input rounded-md px-3 h-9 w-full"
+      />
     </div>
   );
 }
@@ -232,7 +386,10 @@ function CreateProfilePanel({
           const option = toAgentProfileOption(agentForProfile, saved);
           setAgentProfiles([...storeProfiles.filter((p) => p.id !== option.id), option]);
           onAgentProfilesChange?.([...wizardProfiles.filter((p) => p.id !== option.id), option]);
-          onChange({ agentProfileId: saved.id });
+          onChange({
+            agentProfileId: saved.id,
+            tierProfileIds: fillMissingTierProfileIds({}, saved.id),
+          });
           onClose();
         }}
         onCancel={canCancel ? onClose : undefined}

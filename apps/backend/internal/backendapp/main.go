@@ -490,6 +490,9 @@ func startAgentInfrastructure(
 		github: services.GitHub,
 		log:    log,
 	})
+	agentSettingsController.SetRoutingTierDependencyChecker(&routingTierDepsAdapter{
+		repo: repos.Office,
+	})
 
 	// Wire GitHub service into orchestrator for PR auto-detection on push
 	if services.GitHub != nil {

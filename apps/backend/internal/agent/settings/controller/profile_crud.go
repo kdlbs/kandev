@@ -249,6 +249,13 @@ func (c *Controller) DeleteProfile(ctx context.Context, id string, force bool) (
 // safety net for profiles deleted by other paths, e.g. reconciler cleanup of
 // disabled agent types).
 func (c *Controller) prepareProfileDeletion(ctx context.Context, profileID string, force bool) error {
+	routingTierRefs, err := c.listRoutingTierReferences(ctx, profileID)
+	if err != nil {
+		return err
+	}
+	if len(routingTierRefs) > 0 {
+		return &ErrProfileInUseDetail{RoutingTiers: routingTierRefs}
+	}
 	if c.sessionChecker == nil {
 		return nil
 	}
@@ -275,6 +282,17 @@ func (c *Controller) prepareProfileDeletion(ctx context.Context, profileID strin
 	// Done after the force check since these don't need user confirmation.
 	c.cleanupEphemeralTasks(ctx, profileID)
 	return nil
+}
+
+func (c *Controller) listRoutingTierReferences(ctx context.Context, profileID string) ([]RoutingTierReference, error) {
+	if c.routingTierDeps == nil {
+		return nil, nil
+	}
+	refs, err := c.routingTierDeps.ListRoutingTierReferencesByAgentProfile(ctx, profileID)
+	if err != nil {
+		return nil, err
+	}
+	return refs, nil
 }
 
 // disableReferencingWatchers stamps the deletion cause onto every watcher

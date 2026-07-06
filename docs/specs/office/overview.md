@@ -160,16 +160,16 @@ When a user opens `/office`, the backend checks both DB and filesystem state via
 **Onboarding wizard** is a full-page (not modal) 4-step flow:
 
 1. **Welcome + Workspace** - workspace name (default "Default Workspace") and task prefix (default "KAN", explained as "Tasks will be numbered KAN-1, KAN-2, etc.").
-2. **Create CEO Agent** - agent name (default "CEO"), agent profile dropdown (Claude, Codex, etc.), executor preference (Local / Docker / Sprites) with descriptions, budget (default $0 = unlimited).
-3. **First Task (optional)** - title (placeholder "Explore the codebase and create an engineering roadmap"), optional description prefilled with a helpful default. `[Back] [Skip] [Next]`.
+2. **Create CEO Agent** - agent name (default "CEO"), coordinator agent profile dropdown (Claude, Codex, etc.), Frontier / Balanced / Economy tier profile selectors with hover help explaining that the CEO-created agents inherit the selected tier family, executor preference (Local / Docker / Sprites) with descriptions, budget (default $0 = unlimited).
+3. **First Task** - editable starter task prefilled with title "Setup Workspace" and a CEO brief that asks the agent to inspect `https://github.com/org/repo` (replaceable by the user), create one project per repository, create the needed agent team, assign responsibilities, and seed the initial backlog. `[Back] [Skip] [Next]`; Skip clears the starter task.
 4. **Review & Launch** - summary card of what will be created. `[Back] [Create & Launch]`.
 
 **On "Create & Launch"** the following are created in a single transaction:
 1. Office workspace: `kandev.yml` on filesystem + DB row in `workspaces` + system office workflow (7 steps).
 2. CEO agent instance with `role=ceo`, full permissions, linked profile, bundled skills (kandev-protocol, memory).
 3. Agent runtime row `status=idle` in `office_agent_runtime`.
-4. "Onboarding" project (auto) for the initial task.
-5. First task if provided: assigned to the CEO, in the Onboarding project, `status=todo`; a `task_assigned` wakeup is enqueued so the scheduler picks it up.
+4. Workspace provider routing seed: disabled by default, default tier persisted, Frontier / Balanced / Economy mapped from the selected source profiles, and profile IDs recorded as tier metadata so profile deletion is blocked while a tier still references them.
+5. First task if not skipped: assigned to the CEO, `status=todo`; a `task_assigned` wakeup is enqueued so the scheduler picks it up. The task brief tells the CEO to create the required projects, including one per repository.
 6. Onboarding state marked completed in the DB.
 
 After creation the user is redirected to `/office`.
@@ -335,7 +335,7 @@ The CEO and workers move tasks between states by calling the same API the UI use
 
 - **GIVEN** a user on the import prompt, **WHEN** they click "Start Fresh", **THEN** the import is skipped and the 4-step wizard is shown.
 
-- **GIVEN** a user on step 4 who clicks "Create & Launch" with a task title provided, **WHEN** all inputs are valid, **THEN** the workspace, CEO agent, Onboarding project, and first task are created, a `task_assigned` wakeup is enqueued, and the dashboard shows 1 agent enabled and 1 task in progress.
+- **GIVEN** a user on step 4 who clicks "Create & Launch" with the default first task still present, **WHEN** all inputs are valid, **THEN** the workspace, CEO agent, and setup task are created, a `task_assigned` wakeup is enqueued, and the dashboard shows 1 agent enabled and 1 task in progress.
 
 - **GIVEN** a user who skipped the first task on step 3, **WHEN** they reach the dashboard, **THEN** the CEO agent exists but is idle (no tasks) and the empty state says "Assign a task to your CEO to get started."
 

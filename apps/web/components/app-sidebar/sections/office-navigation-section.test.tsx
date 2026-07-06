@@ -80,4 +80,13 @@ describe("OfficeNavigationSection", () => {
     expect(screen.getByRole("link", { name: /Tasks/i })).toBeTruthy();
     expect(screen.getByRole("link", { name: /Preferences/i })).toBeTruthy();
   });
+
+  it("renders the skills count with muted badge styling", () => {
+    render(<OfficeNavigationSection collapsed={false} />);
+
+    const badge = screen.getByText("3");
+    expect(badge.classList.contains("bg-muted")).toBe(true);
+    expect(badge.classList.contains("text-muted-foreground")).toBe(true);
+    expect(badge.classList.contains("bg-primary")).toBe(false);
+  });
 });

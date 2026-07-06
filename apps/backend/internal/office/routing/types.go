@@ -108,10 +108,20 @@ func (m TierMap) IsConfigured(t Tier) bool { return m.Model(t) != "" }
 // per-provider permission override would require modelling the existing
 // boolean/CLIFlag system as named presets first — out of scope here.
 type ProviderProfile struct {
-	TierMap TierMap           `json:"tier_map"`
-	Mode    string            `json:"mode,omitempty"`
-	Flags   []string          `json:"flags,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
+	TierMap        TierMap           `json:"tier_map"`
+	TierProfileIDs TierProfileIDs    `json:"tier_profile_ids,omitempty"`
+	Mode           string            `json:"mode,omitempty"`
+	Flags          []string          `json:"flags,omitempty"`
+	Env            map[string]string `json:"env,omitempty"`
+}
+
+// TierProfileIDs records which source agent profile authored each tier map
+// entry. Runtime routing uses TierMap; this metadata lets settings block
+// deleting a profile while a workspace tier still points at it.
+type TierProfileIDs struct {
+	Frontier string `json:"frontier,omitempty"`
+	Balanced string `json:"balanced,omitempty"`
+	Economy  string `json:"economy,omitempty"`
 }
 
 // WorkspaceConfig is the persisted routing config for one workspace.

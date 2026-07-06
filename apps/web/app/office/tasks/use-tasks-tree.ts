@@ -92,6 +92,80 @@ export type UseIssuesTreeOptions = {
   expandedIds: Set<string>;
 };
 
+export function getExpandableTaskIds(tasks: OfficeTask[]): Set<string> {
+  const ids = new Set(tasks.map((task) => task.id));
+  const expandableIds = new Set<string>();
+  for (const task of tasks) {
+    if (task.parentId && ids.has(task.parentId)) {
+      expandableIds.add(task.parentId);
+    }
+  }
+  return expandableIds;
+}
+
+export function buildTaskTreeNodes({
+  tasks,
+  filters,
+  sortField,
+  sortDir,
+  nestingEnabled,
+  expandedIds,
+  statusOrder,
+  priorityOrder,
+}: UseIssuesTreeOptions & {
+  statusOrder: Record<string, number>;
+  priorityOrder: Record<string, number>;
+}): FlatTaskNode[] {
+  const filtered = tasks.filter((i) => matchesFilters(i, filters));
+  const sortCtx: SortContext = {
+    field: sortField,
+    dir: sortDir,
+    statusOrder,
+    priorityOrder,
+  };
+  const sorted = [...filtered].sort((a, b) => compareIssues(a, b, sortCtx));
+
+  if (!nestingEnabled) {
+    return sorted.map((task) => ({ task, level: 0, hasChildren: false }));
+  }
+
+  const sortedIds = new Set(sorted.map((task) => task.id));
+  const childrenMap = new Map<string | undefined, OfficeTask[]>();
+  for (const task of sorted) {
+    const key = task.parentId ?? "__root__";
+    const list = childrenMap.get(key);
+    if (list) {
+      list.push(task);
+    } else {
+      childrenMap.set(key, [task]);
+    }
+  }
+
+  const result: FlatTaskNode[] = [];
+  function walk(parentId: string | undefined, level: number) {
+    const key = parentId ?? "__root__";
+    const children = childrenMap.get(key) ?? [];
+    for (const task of children) {
+      const kids = childrenMap.get(task.id) ?? [];
+      const hasChildren = kids.length > 0;
+      result.push({ task, level, hasChildren });
+      if (hasChildren && expandedIds.has(task.id)) {
+        walk(task.id, level + 1);
+      }
+    }
+  }
+  walk(undefined, 0);
+
+  const renderedIds = new Set(result.map((n) => n.task.id));
+  for (const task of sorted) {
+    if (!renderedIds.has(task.id) && task.parentId && !sortedIds.has(task.parentId)) {
+      result.push({ task, level: 0, hasChildren: false });
+    }
+  }
+
+  return result;
+}
+
 export function useIssuesTree(opts: UseIssuesTreeOptions): FlatTaskNode[] {
   const { tasks, filters, sortField, sortDir, nestingEnabled, expandedIds } = opts;
   const meta = useAppStore((s) => s.office.meta);
@@ -111,54 +185,16 @@ export function useIssuesTree(opts: UseIssuesTreeOptions): FlatTaskNode[] {
   }, [meta]);
 
   return useMemo(() => {
-    const filtered = tasks.filter((i) => matchesFilters(i, filters));
-    const sortCtx: SortContext = {
-      field: sortField,
-      dir: sortDir,
+    return buildTaskTreeNodes({
+      tasks,
+      filters,
+      sortField,
+      sortDir,
+      nestingEnabled,
+      expandedIds,
       statusOrder: STATUS_ORDER,
       priorityOrder: PRIORITY_ORDER,
-    };
-    const sorted = [...filtered].sort((a, b) => compareIssues(a, b, sortCtx));
-
-    if (!nestingEnabled) {
-      return sorted.map((task) => ({ task, level: 0, hasChildren: false }));
-    }
-
-    const childrenMap = new Map<string | undefined, OfficeTask[]>();
-    for (const task of sorted) {
-      const key = task.parentId ?? "__root__";
-      const list = childrenMap.get(key);
-      if (list) {
-        list.push(task);
-      } else {
-        childrenMap.set(key, [task]);
-      }
-    }
-
-    const result: FlatTaskNode[] = [];
-    function walk(parentId: string | undefined, level: number) {
-      const key = parentId ?? "__root__";
-      const children = childrenMap.get(key) ?? [];
-      for (const task of children) {
-        const kids = childrenMap.get(task.id) ?? [];
-        const hasChildren = kids.length > 0;
-        result.push({ task, level, hasChildren });
-        if (hasChildren && expandedIds.has(task.id)) {
-          walk(task.id, level + 1);
-        }
-      }
-    }
-    walk(undefined, 0);
-
-    // Also include orphans (tasks whose parent is not in filtered set)
-    const renderedIds = new Set(result.map((n) => n.task.id));
-    for (const task of sorted) {
-      if (!renderedIds.has(task.id)) {
-        result.push({ task, level: 0, hasChildren: false });
-      }
-    }
-
-    return result;
+    });
   }, [
     tasks,
     filters,

@@ -16,6 +16,7 @@ describe("AgentProfileDeleteConflictDialog", () => {
             { id: "linear-w2", kind: "linear", label: "team WEB" },
             { id: "github-w1", kind: "github_issue", label: "kdlbs/kandev" },
           ],
+          routingTiers: [],
         }}
         onOpenChange={() => {}}
         onConfirm={() => {}}
@@ -41,6 +42,7 @@ describe("AgentProfileDeleteConflictDialog", () => {
         conflict={{
           activeSessions: [{ task_id: "t1", task_title: "Live task", is_ephemeral: false }],
           watchers: [],
+          routingTiers: [],
         }}
         onOpenChange={() => {}}
         onConfirm={() => {}}
@@ -58,6 +60,7 @@ describe("AgentProfileDeleteConflictDialog", () => {
         conflict={{
           activeSessions: [{ task_id: "t1", task_title: "Live task", is_ephemeral: false }],
           watchers: [{ id: "jira-w1", kind: "jira", label: "project = ENG" }],
+          routingTiers: [],
         }}
         onOpenChange={() => {}}
         onConfirm={() => {}}
@@ -67,6 +70,25 @@ describe("AgentProfileDeleteConflictDialog", () => {
     expect(screen.getByText("Live task")).toBeTruthy();
     expect(screen.getByText(/Jira:/)).toBeTruthy();
     expect(screen.getByText(/project = ENG/)).toBeTruthy();
+  });
+
+  it("renders tier mappings as a hard blocker", () => {
+    render(
+      <AgentProfileDeleteConflictDialog
+        conflict={{
+          activeSessions: [],
+          watchers: [],
+          routingTiers: [{ workspace_id: "ws-1", provider_id: "codex-acp", tier: "balanced" }],
+        }}
+        onOpenChange={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+
+    expect(screen.getByText(/Cannot delete agent profile/i)).toBeTruthy();
+    expect(screen.getByText(/Workspace tier mappings:/)).toBeTruthy();
+    expect(screen.getByText(/ws-1: codex-acp balanced/)).toBeTruthy();
+    expect(screen.queryByText(/Delete Anyway/)).toBeNull();
   });
 
   it("does not render the dialog when conflict is null", () => {

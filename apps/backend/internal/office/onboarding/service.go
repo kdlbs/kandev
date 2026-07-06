@@ -176,12 +176,21 @@ type CompleteRequest struct {
 	TaskPrefix         string
 	AgentName          string
 	AgentProfileID     string
+	TierProfiles       TierProfileIDs
 	ExecutorPreference string
 	TaskTitle          string
 	TaskDescription    string
 	// DefaultTier is the workspace routing default tier captured by the
 	// onboarding wizard. Empty / unknown values fall back to balanced.
 	DefaultTier string
+}
+
+// TierProfileIDs captures the source profile selected for each workspace
+// routing tier during onboarding.
+type TierProfileIDs struct {
+	Frontier string `json:"frontier,omitempty"`
+	Balanced string `json:"balanced,omitempty"`
+	Economy  string `json:"economy,omitempty"`
 }
 
 // CompleteResult holds the IDs of entities created during onboarding.
@@ -572,6 +581,10 @@ func (s *OnboardingService) seedWorkspaceRouting(
 		return
 	}
 	cfg := buildOnboardingRoutingConfig(tier, agent)
+	if err := s.applyOnboardingTierProfiles(ctx, cfg, req.TierProfiles); err != nil {
+		s.logger.Warn("routing seed: tier profile lookup failed",
+			zap.String("workspace_id", workspaceID), zap.Error(err))
+	}
 	if err := s.repo.UpsertWorkspaceRouting(ctx, workspaceID, cfg); err != nil {
 		s.logger.Warn("routing seed: upsert workspace routing failed",
 			zap.String("workspace_id", workspaceID), zap.Error(err))
@@ -651,6 +664,78 @@ func buildOnboardingRoutingConfig(tier routing.Tier, agent *models.AgentInstance
 		TierMap: tierMap, Mode: agent.Mode,
 	}
 	return cfg
+}
+
+func (s *OnboardingService) applyOnboardingTierProfiles(
+	ctx context.Context,
+	cfg *routing.WorkspaceConfig,
+	tierProfiles TierProfileIDs,
+) error {
+	if cfg == nil || s.sourceProfile == nil {
+		return nil
+	}
+	if err := s.applyOnboardingTierProfile(ctx, cfg, routing.TierFrontier, tierProfiles.Frontier); err != nil {
+		return err
+	}
+	if err := s.applyOnboardingTierProfile(ctx, cfg, routing.TierBalanced, tierProfiles.Balanced); err != nil {
+		return err
+	}
+	return s.applyOnboardingTierProfile(ctx, cfg, routing.TierEconomy, tierProfiles.Economy)
+}
+
+func (s *OnboardingService) applyOnboardingTierProfile(
+	ctx context.Context,
+	cfg *routing.WorkspaceConfig,
+	tier routing.Tier,
+	profileID string,
+) error {
+	if strings.TrimSpace(profileID) == "" {
+		return nil
+	}
+	src, err := s.sourceProfile.GetAgentProfile(ctx, profileID)
+	if err != nil {
+		return fmt.Errorf("look up tier profile %s: %w", profileID, err)
+	}
+	if src.AgentID == "" {
+		return nil
+	}
+	providerID := routing.ProviderID(src.AgentID)
+	if cfg.ProviderProfiles == nil {
+		cfg.ProviderProfiles = map[routing.ProviderID]routing.ProviderProfile{}
+	}
+	profile := cfg.ProviderProfiles[providerID]
+	if profile.Mode == "" {
+		profile.Mode = src.Mode
+	}
+	applyTierProfileSeed(&profile, tier, src.Model, profileID)
+	cfg.ProviderProfiles[providerID] = profile
+	if !providerInOrder(cfg.ProviderOrder, providerID) {
+		cfg.ProviderOrder = append(cfg.ProviderOrder, providerID)
+	}
+	return nil
+}
+
+func applyTierProfileSeed(profile *routing.ProviderProfile, tier routing.Tier, model, profileID string) {
+	switch tier {
+	case routing.TierFrontier:
+		profile.TierMap.Frontier = model
+		profile.TierProfileIDs.Frontier = profileID
+	case routing.TierEconomy:
+		profile.TierMap.Economy = model
+		profile.TierProfileIDs.Economy = profileID
+	default:
+		profile.TierMap.Balanced = model
+		profile.TierProfileIDs.Balanced = profileID
+	}
+}
+
+func providerInOrder(order []routing.ProviderID, providerID routing.ProviderID) bool {
+	for _, existing := range order {
+		if existing == providerID {
+			return true
+		}
+	}
+	return false
 }
 
 // writeAgentInheritMarkers stamps explicit routing.tier_source = inherit
