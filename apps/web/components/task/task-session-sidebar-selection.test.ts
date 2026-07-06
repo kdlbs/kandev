@@ -42,13 +42,15 @@ describe("useBulkConfirmDialog", () => {
   it("clears the dialog even when archiving rejects", async () => {
     const bulkArchive = vi.fn().mockRejectedValue(new Error("boom"));
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const { result } = renderHook(() => useBulkConfirmDialog(tasks, bulkArchive));
-
-    act(() => result.current.open(["a"]));
-    await act(async () => {
-      await result.current.confirm({ cascade: false });
-    });
-    expect(result.current.state).toBeNull();
-    errorSpy.mockRestore();
+    try {
+      const { result } = renderHook(() => useBulkConfirmDialog(tasks, bulkArchive));
+      act(() => result.current.open(["a"]));
+      await act(async () => {
+        await result.current.confirm({ cascade: false });
+      });
+      expect(result.current.state).toBeNull();
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
