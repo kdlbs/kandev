@@ -53,6 +53,40 @@ func TestSchedulerIntegration_TickProcessesRun(t *testing.T) {
 	}
 }
 
+func TestSchedulerIntegration_ResolvesExecutorFromTaskProject(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	ctx := context.Background()
+
+	agent := makeAgent("worker-project-exec", models.AgentRoleWorker)
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	project := &models.Project{
+		WorkspaceID:    "ws-1",
+		Name:           "Project Executor",
+		ExecutorConfig: `{"type":"local_pc"}`,
+	}
+	if err := svc.CreateProject(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	svc.ExecSQL(t, `INSERT INTO tasks
+		(id, workspace_id, project_id, title, description, created_at, updated_at)
+		VALUES ('task-project-exec', 'ws-1', ?, 'Project executor task', 'desc',
+		        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`, project.ID)
+
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+		`{"task_id":"task-project-exec"}`, ""); err != nil {
+		t.Fatalf("queue run: %v", err)
+	}
+
+	service.RunSchedulerTick(svc, ctx)
+
+	if mock.callCount() != 1 {
+		t.Fatalf("StartTask calls = %d, want 1", mock.callCount())
+	}
+}
+
 func TestSchedulerIntegration_PausedAgentSkipped(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()

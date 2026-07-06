@@ -221,6 +221,40 @@ func TestCommentCreated_WakesAssignee(t *testing.T) {
 	t.Fatal("expected task_comment run for assigned worker")
 }
 
+func TestTaskCreated_WakesAssigneeFromStoredRunner(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "worker-created")
+	insertTestTask(t, svc, "task-created-assigned", "ws-1")
+	setTestTaskAssignee(t, svc, "task-created-assigned", "worker-created")
+
+	event := bus.NewEvent(events.TaskCreated, "test", map[string]string{
+		"task_id": "task-created-assigned",
+	})
+	if err := eb.Publish(ctx, events.TaskCreated, event); err != nil {
+		t.Fatalf("publish task created event: %v", err)
+	}
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	for _, run := range runs {
+		if run.AgentProfileID == "worker-created" && run.Reason == service.RunReasonTaskAssigned {
+			var payload map[string]string
+			if err := json.Unmarshal([]byte(run.Payload), &payload); err != nil {
+				t.Fatalf("unmarshal payload: %v", err)
+			}
+			if payload["task_id"] != "task-created-assigned" {
+				t.Fatalf("payload = %#v, want created task ID", payload)
+			}
+			return
+		}
+	}
+	t.Fatalf("expected task_assigned run for worker-created, got %#v", runs)
+}
+
 func TestCommentCreated_SkipsSelfComment(t *testing.T) {
 	svc, eb := newTestServiceWithBus(t)
 	ctx := context.Background()

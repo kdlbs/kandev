@@ -16,10 +16,11 @@ import (
 // don't need to learn about workflow_step rows. CreatedAt is best-effort:
 // workflow_step_participants doesn't store it, so we emit zero time.
 type Participant struct {
-	TaskID         string    `db:"task_id" json:"task_id"`
-	AgentProfileID string    `db:"agent_profile_id" json:"agent_profile_id"`
-	Role           string    `db:"role" json:"role"`
-	CreatedAt      time.Time `db:"created_at" json:"created_at"`
+	TaskID           string    `db:"task_id" json:"task_id"`
+	AgentProfileID   string    `db:"agent_profile_id" json:"agent_profile_id"`
+	Role             string    `db:"role" json:"role"`
+	DecisionRequired bool      `db:"decision_required" json:"decision_required"`
+	CreatedAt        time.Time `db:"created_at" json:"created_at"`
 }
 
 // stepIDForTask resolves the current workflow_step_id for the given task.
@@ -112,7 +113,7 @@ func (r *Repository) ListTaskParticipants(ctx context.Context, taskID, role stri
 		return []Participant{}, nil
 	}
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
-		SELECT task_id, agent_profile_id, role
+		SELECT task_id, agent_profile_id, role, decision_required
 		FROM workflow_step_participants
 		WHERE step_id = ? AND role = ?
 		  AND (task_id = '' OR task_id = ?)
@@ -126,12 +127,19 @@ func (r *Repository) ListTaskParticipants(ctx context.Context, taskID, role stri
 	for rows.Next() {
 		var p Participant
 		var rowTask sql.NullString
-		if err := rows.Scan(&rowTask, &p.AgentProfileID, &p.Role); err != nil {
+		var decisionRequired int
+		if err := rows.Scan(
+			&rowTask,
+			&p.AgentProfileID,
+			&p.Role,
+			&decisionRequired,
+		); err != nil {
 			return nil, err
 		}
 		// Project the canonical task_id into the row (template-level rows
 		// have task_id = ''; we surface them as participants of the input task).
 		p.TaskID = taskID
+		p.DecisionRequired = decisionRequired != 0
 		out = append(out, p)
 	}
 	return mergeOfficeParticipants(out), rows.Err()
@@ -149,7 +157,7 @@ func (r *Repository) ListAllTaskParticipants(ctx context.Context, taskID string)
 		return []Participant{}, nil
 	}
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
-		SELECT task_id, agent_profile_id, role
+		SELECT task_id, agent_profile_id, role, decision_required
 		FROM workflow_step_participants
 		WHERE step_id = ?
 		  AND (task_id = '' OR task_id = ?)
@@ -163,10 +171,17 @@ func (r *Repository) ListAllTaskParticipants(ctx context.Context, taskID string)
 	for rows.Next() {
 		var p Participant
 		var rowTask sql.NullString
-		if err := rows.Scan(&rowTask, &p.AgentProfileID, &p.Role); err != nil {
+		var decisionRequired int
+		if err := rows.Scan(
+			&rowTask,
+			&p.AgentProfileID,
+			&p.Role,
+			&decisionRequired,
+		); err != nil {
 			return nil, err
 		}
 		p.TaskID = taskID
+		p.DecisionRequired = decisionRequired != 0
 		out = append(out, p)
 	}
 	return mergeOfficeParticipants(out), rows.Err()

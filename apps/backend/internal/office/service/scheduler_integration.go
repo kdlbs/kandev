@@ -711,9 +711,10 @@ func (si *SchedulerIntegration) checkIdleSkip(
 // task-level execution_policy override was retired in Phase 4 of
 // task-model-unification.
 func (si *SchedulerIntegration) resolveExecutorForRun(
-	ctx context.Context, agent *models.AgentInstance, _ string,
+	ctx context.Context, agent *models.AgentInstance, payload string,
 ) (*ExecutorConfig, error) {
-	return si.svc.ResolveExecutor(ctx, "", agent.ID, "", "")
+	projectID := si.extractProjectID(ctx, payload)
+	return si.svc.ResolveExecutor(ctx, "", agent.ID, projectID, "")
 }
 
 // buildPromptContext assembles a PromptContext from run data.

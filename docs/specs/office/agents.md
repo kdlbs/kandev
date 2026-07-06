@@ -64,6 +64,8 @@ The executor is resolved automatically when the scheduler launches a session for
 
 `executor_preference` shape mirrors project executor config: `{ type, image, resource_limits, environment_id }`.
 
+When an agent creates another agent and omits `executor_preference`, the new agent inherits the creator's executor preference before defaults are applied. This keeps delegated child agents launchable in the same executor context unless the creator explicitly overrides the preference.
+
 Worktrees are automatic: when a task targets a repository, the system creates a git worktree (branch) using the existing `worktree.Manager`. Strategy (per-task or shared) comes from the project config.
 
 ## Data model

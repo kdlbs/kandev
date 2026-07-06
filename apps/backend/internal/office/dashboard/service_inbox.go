@@ -348,6 +348,12 @@ func (s *DashboardService) viewerRoles(
 	seen := map[string]struct{}{}
 	out := []string{}
 	for _, p := range parts {
+		if !p.DecisionRequired {
+			continue
+		}
+		if p.Role != models.ParticipantRoleReviewer && p.Role != models.ParticipantRoleApprover {
+			continue
+		}
 		if viewerAgentID != "" && p.AgentProfileID != viewerAgentID {
 			continue
 		}
