@@ -52,6 +52,7 @@ interface DiffViewerProps {
 const SCALAR_PROP_KEYS: (keyof DiffViewerProps)[] = [
   "enableComments",
   "sessionId",
+  "onCommentDelete",
   "onCommentUpdate",
   "compact",
   "hideHeader",

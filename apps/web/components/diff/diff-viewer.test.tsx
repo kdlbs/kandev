@@ -38,4 +38,17 @@ describe("DiffViewer", () => {
     await waitFor(() => expect(fileDiffProps.length).toBeGreaterThan(0));
     expect(fileDiffProps.at(-1)?.options?.overflow).toBe("wrap");
   });
+
+  it("rerenders when the controlled delete handler changes", async () => {
+    const firstDelete = vi.fn();
+    const secondDelete = vi.fn();
+    const { rerender } = render(<DiffViewer data={data} onCommentDelete={firstDelete} />);
+
+    await waitFor(() => expect(fileDiffProps.length).toBeGreaterThan(0));
+    const renderCount = fileDiffProps.length;
+
+    rerender(<DiffViewer data={data} onCommentDelete={secondDelete} />);
+
+    await waitFor(() => expect(fileDiffProps.length).toBeGreaterThan(renderCount));
+  });
 });
