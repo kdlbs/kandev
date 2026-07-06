@@ -57,7 +57,7 @@ $KANDEV_CLI kandev task update --id "$KANDEV_TASK_ID" \
 ### Step 3: Post a comment and set blocked status
 
 ```bash
-$KANDEV_CLI kandev comment add --body "Escalated to human: created task $HUMAN_TASK_ID. Waiting for decision on: <question>"
+$KANDEV_CLI kandev tasks message --prompt "Escalated to human: created task $HUMAN_TASK_ID. Waiting for decision on: <question>"
 
 $KANDEV_CLI kandev task update --status blocked
 ```

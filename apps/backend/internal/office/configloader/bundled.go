@@ -78,6 +78,9 @@ type BundledSkillFile struct {
 // BundledSkillFiles returns supporting files embedded under a system skill
 // directory. Paths are relative to the skill root and use slash separators.
 func BundledSkillFiles(slug string) ([]BundledSkillFile, error) {
+	if slug == "" {
+		return nil, fmt.Errorf("empty slug")
+	}
 	root := filepath.ToSlash(filepath.Join("skills", slug))
 	var files []BundledSkillFile
 	err := fs.WalkDir(bundledSkills, root, func(path string, d fs.DirEntry, err error) error {

@@ -85,7 +85,7 @@ If `task.blockedBy` is not empty, post a comment explaining you are blocked and 
 Never work on blocked tasks -- the orchestrator will wake you when blockers clear.
 
 ```bash
-$KANDEV_CLI kandev comment add --body "Blocked by tasks: KAN-43, KAN-44. Waiting for resolution."
+$KANDEV_CLI kandev tasks message --prompt "Blocked by tasks: KAN-43, KAN-44. Waiting for resolution."
 ```
 
 ### Step 4: Do the work
@@ -99,13 +99,13 @@ Always post a comment before changing task status. This creates an audit trail
 and keeps other agents informed.
 
 ```bash
-$KANDEV_CLI kandev comment add --body "Implemented OAuth2 login flow with Google provider. Tests pass."
+$KANDEV_CLI kandev tasks message --prompt "Implemented OAuth2 login flow with Google provider. Tests pass."
 ```
 
 For multiline comments, pipe via stdin:
 
 ```bash
-cat <<'EOF' | $KANDEV_CLI kandev comment add --body -
+cat <<'EOF' | $KANDEV_CLI kandev tasks message --prompt -
 Implementation summary:
 - Added Google OAuth2 provider with PKCE flow
 - Wrote integration tests covering token refresh
@@ -162,7 +162,8 @@ task create --title T [--parent ID]   Create a task or subtask
 ### comment
 
 ```
-comment add [--task ID] --body BODY   Post a comment (--body - reads stdin)
+tasks message [--id ID] --prompt P    Post an agent-authored comment
+comment add [--task ID] --body BODY   Simulate a user comment for fixtures
 comment list [--task ID] [--limit N]  List comments on a task
 ```
 

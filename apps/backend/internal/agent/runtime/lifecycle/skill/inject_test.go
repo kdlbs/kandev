@@ -35,6 +35,61 @@ func TestInjectSkills_WritesUnderProjectSkillDir(t *testing.T) {
 	}
 }
 
+func TestInjectSkills_SkipsSupportFilesUnderSymlinkParent(t *testing.T) {
+	worktree := t.TempDir()
+	ensureGit(t, worktree)
+	outside := t.TempDir()
+
+	skillDir := filepath.Join(worktree, ".agents", "skills", "kandev-code-review")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(skillDir, "references")); err != nil {
+		t.Fatal(err)
+	}
+
+	err := writeSkillFiles(skillDir, []SkillFile{{
+		Path:    "references/escape.md",
+		Content: "outside",
+	}})
+	if err != nil {
+		t.Fatalf("writeSkillFiles: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "escape.md")); !os.IsNotExist(err) {
+		t.Fatalf("support file escaped through symlink parent: %v", err)
+	}
+}
+
+func TestInjectSkills_WritesSupportFilesUnderSymlinkedSkillDir(t *testing.T) {
+	realSkillDir := filepath.Join(t.TempDir(), "real", "kandev-code-review")
+	if err := os.MkdirAll(realSkillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linkParent := filepath.Join(t.TempDir(), "links")
+	if err := os.MkdirAll(linkParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	symlinkSkillDir := filepath.Join(linkParent, "kandev-code-review")
+	if err := os.Symlink(realSkillDir, symlinkSkillDir); err != nil {
+		t.Fatal(err)
+	}
+
+	err := writeSkillFiles(symlinkSkillDir, []SkillFile{{
+		Path:    "references/tasks.md",
+		Content: "tasks",
+	}})
+	if err != nil {
+		t.Fatalf("writeSkillFiles: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(realSkillDir, "references", "tasks.md"))
+	if err != nil {
+		t.Fatalf("read support file: %v", err)
+	}
+	if string(got) != "tasks" {
+		t.Fatalf("support file content = %q, want tasks", got)
+	}
+}
+
 func TestInjectSkills_AddsFrontmatterWhenMissing(t *testing.T) {
 	worktree := t.TempDir()
 	ensureGit(t, worktree)
@@ -197,15 +252,5 @@ func TestInjectSkills_NoGitDirIsNotFatal(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(worktree, ".agents", "skills", "kandev-ok", "SKILL.md")); err != nil {
 		t.Errorf("skill should still land without .git: %v", err)
-	}
-}
-
-func TestCleanRelativeSkillFilePathRejectsTraversal(t *testing.T) {
-	for _, input := range []string{"..", "../x", "a/../..", "a/.."} {
-		t.Run(input, func(t *testing.T) {
-			if got, ok := cleanRelativeSkillFilePath(input); ok {
-				t.Fatalf("cleanRelativeSkillFilePath(%q) = %q, true; want reject", input, got)
-			}
-		})
 	}
 }

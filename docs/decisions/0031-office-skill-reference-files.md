@@ -22,4 +22,6 @@ Existing body-only system rows are refreshed during system sync even when their 
 
 ## Alternatives Considered
 
-Keeping all Office workflows as separate skills avoided runtime changes, but continued to produce a noisy skill list and made discovery less precise. Storing reference text inline in `SKILL.md` avoided support-file materialization, but would increase prompt/context load for every skill discovery. Renaming only the descriptions without preserving frontmatter would not fix the deployed placeholder metadata.
+- **Keep every Office workflow as a separate skill.** Rejected because it avoided runtime changes but continued to produce a noisy skill list and made discovery less precise.
+- **Store all reference text inline in `SKILL.md`.** Rejected because it avoided support-file materialization but would increase prompt/context load for every skill discovery.
+- **Only rename skill descriptions.** Rejected because it would not fix the deployed placeholder metadata unless frontmatter was preserved.

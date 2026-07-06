@@ -15,9 +15,9 @@ package skill
 import "context"
 
 // Skill is the runtime-tier view of a skill record. It carries only
-// what the deployer needs to materialise files; the upstream office
-// model (with workspace, file inventory, created_at, ...) collapses
-// to these three fields.
+// what the deployer needs to materialise files; upstream office
+// metadata such as workspace IDs and timestamps is resolved before the
+// deployer receives the skill.
 type Skill struct {
 	Slug    string
 	Content string
