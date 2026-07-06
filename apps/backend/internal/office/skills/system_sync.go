@@ -34,6 +34,7 @@ type SystemSkillSpec struct {
 	Version         string
 	DefaultForRoles []string
 	Content         string
+	FileInventory   string
 	ContentHash     string
 }
 
@@ -156,7 +157,7 @@ func syncWorkspace(
 			inserted = append(inserted, slug)
 			continue
 		}
-		if cur.ContentHash == spec.ContentHash && cur.IsSystem {
+		if systemSkillUpToDate(cur, spec) {
 			continue
 		}
 		applySystemSkillUpdate(cur, spec)
@@ -205,6 +206,17 @@ func detachSkillFromAgents(
 	return nil
 }
 
+func systemSkillUpToDate(cur *models.Skill, spec SystemSkillSpec) bool {
+	return cur.IsSystem &&
+		cur.ContentHash == spec.ContentHash &&
+		cur.Content == spec.Content &&
+		cur.FileInventory == normalizedFileInventory(spec.FileInventory) &&
+		cur.Name == spec.Name &&
+		cur.Description == spec.Description &&
+		cur.Version == spec.Version &&
+		cur.SystemVersion == spec.Version
+}
+
 // removeIDFromJSONArray parses a JSON-array string, removes every
 // occurrence of `id`, and returns the re-encoded array along with a
 // flag indicating whether anything was removed. Malformed input is
@@ -249,7 +261,7 @@ func newSystemSkillRow(wsID string, spec SystemSkillSpec) *models.Skill {
 		SourceType:      SourceTypeSystem,
 		SourceLocator:   "bundled:" + spec.Slug,
 		Content:         spec.Content,
-		FileInventory:   "[]",
+		FileInventory:   normalizedFileInventory(spec.FileInventory),
 		Version:         spec.Version,
 		ContentHash:     spec.ContentHash,
 		ApprovalState:   "approved",
@@ -266,12 +278,20 @@ func applySystemSkillUpdate(cur *models.Skill, spec SystemSkillSpec) {
 	cur.SourceType = SourceTypeSystem
 	cur.SourceLocator = "bundled:" + spec.Slug
 	cur.Content = spec.Content
+	cur.FileInventory = normalizedFileInventory(spec.FileInventory)
 	cur.Version = spec.Version
 	cur.ContentHash = spec.ContentHash
 	cur.ApprovalState = "approved"
 	cur.IsSystem = true
 	cur.SystemVersion = spec.Version
 	cur.DefaultForRoles = string(roles)
+}
+
+func normalizedFileInventory(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return "[]"
+	}
+	return raw
 }
 
 func scope(wsID string, slugs []string) []string {
@@ -309,10 +329,54 @@ func LoadBundledSystemSkills() ([]SystemSkillSpec, error) {
 		if spec == nil {
 			continue
 		}
+		inventory, err := bundledSkillFileInventory(slug)
+		if err != nil {
+			return nil, fmt.Errorf("inventory %s: %w", slug, err)
+		}
+		spec.FileInventory = inventory
+		spec.ContentHash = bundledSkillContentHash([]byte(spec.Content), inventory)
 		out = append(out, *spec)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Slug < out[j].Slug })
 	return out, nil
+}
+
+type bundledSkillInventoryFile struct {
+	Path    string `json:"path"`
+	Size    int64  `json:"size"`
+	SHA256  string `json:"sha256"`
+	Content string `json:"content,omitempty"`
+}
+
+func bundledSkillFileInventory(slug string) (string, error) {
+	files, err := configloader.BundledSkillFiles(slug)
+	if err != nil {
+		return "", err
+	}
+	inventory := make([]bundledSkillInventoryFile, 0, len(files))
+	for _, file := range files {
+		sum := sha256.Sum256(file.Content)
+		inventory = append(inventory, bundledSkillInventoryFile{
+			Path:    file.Path,
+			Size:    int64(len(file.Content)),
+			SHA256:  hex.EncodeToString(sum[:]),
+			Content: string(file.Content),
+		})
+	}
+	data, err := json.Marshal(inventory)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func bundledSkillContentHash(content []byte, inventory string) string {
+	if inventory == "[]" || strings.TrimSpace(inventory) == "" {
+		sum := sha256.Sum256(content)
+		return hex.EncodeToString(sum[:])
+	}
+	sum := sha256.Sum256([]byte(string(content) + "\x00" + inventory))
+	return hex.EncodeToString(sum[:])
 }
 
 // skillFrontmatter is the parsed YAML block at the top of a
@@ -330,12 +394,12 @@ type kandevFrontmatter struct {
 	DefaultForRoles []string `yaml:"default_for_roles"`
 }
 
-// parseSystemSkill splits a SKILL.md into its frontmatter + body,
-// validates the kandev block, and returns the spec. nil + nil
-// signals "not a system skill" (kandev block missing or system =
-// false) — the caller skips it without erroring.
+// parseSystemSkill validates a SKILL.md frontmatter block and returns
+// the spec while preserving the original file content for runtime
+// delivery. nil + nil signals "not a system skill" (kandev block
+// missing or system = false) — the caller skips it without erroring.
 func parseSystemSkill(slug string, raw []byte) (*SystemSkillSpec, error) {
-	frontmatterBytes, body, ok := splitFrontmatter(raw)
+	frontmatterBytes, _, ok := splitFrontmatter(raw)
 	if !ok {
 		// No frontmatter at all → not a system skill (some bundled
 		// fixtures pre-date the kandev frontmatter block). Skip
@@ -360,7 +424,7 @@ func parseSystemSkill(slug string, raw []byte) (*SystemSkillSpec, error) {
 		Description:     fm.Description,
 		Version:         fm.Kandev.Version,
 		DefaultForRoles: append([]string{}, fm.Kandev.DefaultForRoles...),
-		Content:         string(body),
+		Content:         string(raw),
 		ContentHash:     hex.EncodeToString(sum[:]),
 	}, nil
 }

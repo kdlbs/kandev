@@ -119,7 +119,7 @@ Before each session, instructions are written to `~/.kandev/runtime/<workspace-s
 
 ### Skills
 
-A skill is a directory containing `SKILL.md` (required: the markdown instructions the agent reads) plus optional scripts and reference files. The structure matches Claude Code's native skill discovery and other agent CLIs. Materialized `SKILL.md` files must be valid Codex/Claude-style skill files: when stored content lacks YAML frontmatter, the runtime prepends generated `name` and `description` frontmatter from the skill slug before writing or uploading the file.
+A skill is a directory containing `SKILL.md` (required: the markdown instructions the agent reads) plus optional scripts and reference files. The structure matches Claude Code's native skill discovery and other agent CLIs. Materialized `SKILL.md` files must be valid Codex/Claude-style skill files: when stored content lacks YAML frontmatter, the runtime prepends generated `name` and `description` frontmatter from the skill slug before writing or uploading the file. Supporting files recorded in `file_inventory` are written beside `SKILL.md` so bundled skills can use progressive disclosure through `references/`. Decision: ADR-0030.
 
 `skill` DB row (workspace-scoped): `id` PK, `name`, `slug` (kebab-case, used as `kandev-<slug>` directory), `description`, `source_type` (`inline` | `local_path` | `git`), `source_locator` (path/URL), `content` (SKILL.md text for inline, null otherwise), `file_inventory` (JSON list of `{name, size}`), `workspace_id` FK, `created_by_agent_instance_id` (nullable; agents only edit skills they created), `is_system` (bool), `system_version` (kandev release).
 
@@ -127,7 +127,7 @@ System skills ship inside the kandev binary (`apps/backend/internal/office/confi
 
 System SKILL.md carries an optional `kandev:` frontmatter block with `system: true`, `version: "<release>"`, `default_for_roles: [<roles>]`. `default_for_roles` drives auto-attach: a new agent with role `R` automatically gets every system skill whose `default_for_roles` contains `R`, unless the caller passes an explicit `desired_skills`. Users can untick a default-attached system skill on any agent (role default is a soft suggestion).
 
-v1 system-skill set: `kandev-protocol` and `memory` (every role); `kandev-task-comment` (every role); `kandev-escalation` (worker, specialist, assistant, reviewer); `kandev-tasks` (ceo, worker, specialist); `kandev-team`, `kandev-hiring`, `kandev-agent-edit`, `kandev-routines`, `kandev-approvals`, `kandev-budget`, `kandev-config-export`, `kandev-config-import` (ceo).
+v1 system-skill set: `kandev-protocol`, `memory`, and `kandev-task-ops` (every role); `kandev-escalation` (worker, specialist, assistant, reviewer); `kandev-team-admin`, `kandev-routines`, `kandev-approvals`, and `kandev-config-sync` (ceo).
 
 ### Activity, runs, events
 

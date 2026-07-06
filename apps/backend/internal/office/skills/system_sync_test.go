@@ -311,6 +311,66 @@ func TestSyncSystemSkills_UpdatesContentWhenBundledHashDiffers(t *testing.T) {
 	}
 }
 
+// TestSyncSystemSkills_UpdatesBodyOnlyRowsWithMatchingHash pins the
+// migration from the old parser, which stored only the markdown body
+// while already recording the hash of the full SKILL.md. The sync
+// must refresh content even when content_hash already matches.
+func TestSyncSystemSkills_UpdatesBodyOnlyRowsWithMatchingHash(t *testing.T) {
+	repo := newStubSyncRepo()
+	log := logger.Default()
+
+	const slug = "frontmatter-skill"
+	const fullContent = "---\nname: Frontmatter Skill\ndescription: Use for frontmatter preservation.\n---\n# Guidance\n"
+	const existingHash = "hash-full-content"
+
+	repo.rows["ws-1"] = map[string]*models.Skill{
+		slug: {
+			ID:            "skill-frontmatter-1",
+			WorkspaceID:   "ws-1",
+			Slug:          slug,
+			Name:          "Frontmatter Skill",
+			Description:   "Use for frontmatter preservation.",
+			SourceType:    skills.SourceTypeSystem,
+			SourceLocator: "bundled:" + slug,
+			Content:       "# Guidance\n",
+			ContentHash:   existingHash,
+			Version:       "1.0.0",
+			IsSystem:      true,
+			SystemVersion: "1.0.0",
+			ApprovalState: "approved",
+		},
+	}
+
+	bundled := []skills.SystemSkillSpec{{
+		Slug:        slug,
+		Name:        "Frontmatter Skill",
+		Description: "Use for frontmatter preservation.",
+		Version:     "1.0.0",
+		Content:     fullContent,
+		ContentHash: existingHash,
+	}}
+
+	report, err := skills.SyncSystemSkills(
+		context.Background(), repo, []string{"ws-1"}, bundled, log,
+	)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if len(report.Updated) != 1 || !strings.HasSuffix(report.Updated[0], slug) {
+		t.Fatalf("expected one update for %s, got %v", slug, report.Updated)
+	}
+	got, err := repo.GetSkillBySlug(context.Background(), "ws-1", slug)
+	if err != nil {
+		t.Fatalf("get after sync: %v", err)
+	}
+	if got.Content != fullContent {
+		t.Errorf("content = %q, want full SKILL.md %q", got.Content, fullContent)
+	}
+	if got.ContentHash != existingHash {
+		t.Errorf("content_hash = %q, want %q", got.ContentHash, existingHash)
+	}
+}
+
 // TestSyncSystemSkills_RemovesOrphanedSlugAndDetachesFromAgents pins
 // the "kandev release retired a bundled skill" scenario: a system
 // row whose slug is missing from the injected `bundled` slice must be

@@ -1,6 +1,6 @@
 ---
 name: kandev-escalation
-description: How to create a human-actionable decision task when you are blocked
+description: Escalate to a human when required information, access, credentials, or a product decision blocks completion and no reasonable default is available.
 kandev:
   system: true
   version: "0.42.0"

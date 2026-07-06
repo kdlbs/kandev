@@ -55,11 +55,31 @@ func injectSkills(worktreePath, projectSkillDir string, skills []Skill) error {
 		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(renderSkillMarkdown(sk)), 0o644); err != nil {
 			return fmt.Errorf("write SKILL.md for %s: %w", sk.Slug, err)
 		}
+		if err := writeSkillFiles(dir, sk.Files); err != nil {
+			return fmt.Errorf("write support files for %s: %w", sk.Slug, err)
+		}
 	}
 	// git-exclude is best-effort: a worktree without .git (tests, fresh
 	// dirs) just means the file won't be created. Never fail injection
 	// over it.
 	_ = ensureGitExclude(worktreePath, projectSkillDir)
+	return nil
+}
+
+func writeSkillFiles(skillDir string, files []SkillFile) error {
+	for _, file := range files {
+		rel, ok := cleanRelativeSkillFilePath(file.Path)
+		if !ok {
+			continue
+		}
+		target := filepath.Join(skillDir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(target, []byte(file.Content), 0o644); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

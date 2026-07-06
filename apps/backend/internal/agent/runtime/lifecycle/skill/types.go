@@ -21,11 +21,19 @@ import "context"
 type Skill struct {
 	Slug    string
 	Content string
+	Files   []SkillFile
 	// SourceType discriminates how Content was produced. Today the
 	// deployer only writes inline content; other source types are
 	// resolved upstream by the SkillReader before reaching the
 	// deployer.
 	SourceType string
+}
+
+// SkillFile is a supporting file inside a skill package. Paths are
+// validated during delivery and must stay relative to the skill root.
+type SkillFile struct {
+	Path    string
+	Content string
 }
 
 // InstructionFile is the runtime-tier view of an agent's instruction

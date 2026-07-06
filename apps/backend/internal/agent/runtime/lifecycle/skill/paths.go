@@ -30,6 +30,21 @@ func isValidPathComponent(s string) bool {
 	return true
 }
 
+func cleanRelativeSkillFilePath(p string) (string, bool) {
+	p = strings.TrimSpace(p)
+	if p == "" || strings.Contains(p, "\\") {
+		return "", false
+	}
+	cleaned := filepath.ToSlash(filepath.Clean(p))
+	if cleaned == "." || strings.HasPrefix(cleaned, "../") || strings.Contains(cleaned, "/../") {
+		return "", false
+	}
+	if strings.HasPrefix(cleaned, "/") || cleaned == "SKILL.md" {
+		return "", false
+	}
+	return cleaned, true
+}
+
 // SpritesRuntimeBase is the on-sprite path where runtime instruction
 // files are uploaded. Skills no longer live under this tree; they go
 // directly into the sprite's worktree (/workspace/<projectSkillDir>).

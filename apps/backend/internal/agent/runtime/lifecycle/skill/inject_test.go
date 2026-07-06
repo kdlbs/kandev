@@ -40,17 +40,17 @@ func TestInjectSkills_AddsFrontmatterWhenMissing(t *testing.T) {
 	ensureGit(t, worktree)
 
 	if err := injectSkills(worktree, ".agents/skills", []Skill{
-		{Slug: "kandev-team", Content: "# Team\n\nUse the team commands."},
+		{Slug: "kandev-team-admin", Content: "# Team\n\nUse the team commands."},
 	}); err != nil {
 		t.Fatalf("injectSkills: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(worktree, ".agents", "skills", "kandev-kandev-team", "SKILL.md"))
+	data, err := os.ReadFile(filepath.Join(worktree, ".agents", "skills", "kandev-kandev-team-admin", "SKILL.md"))
 	if err != nil {
 		t.Fatalf("read SKILL.md: %v", err)
 	}
 	got := string(data)
-	if !strings.HasPrefix(got, "---\nname: kandev-team\ndescription: kandev-team\n---\n") {
+	if !strings.HasPrefix(got, "---\nname: kandev-team-admin\ndescription: kandev-team-admin\n---\n") {
 		t.Fatalf("SKILL.md missing synthesized frontmatter:\n%s", got)
 	}
 	if !strings.Contains(got, "# Team\n\nUse the team commands.") {

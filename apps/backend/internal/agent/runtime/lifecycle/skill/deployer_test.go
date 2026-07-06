@@ -108,6 +108,52 @@ func TestDeploy_Local_WritesSkillsAndInstructions(t *testing.T) {
 	}
 }
 
+// TestDeploy_Local_WritesSkillSupportingFiles verifies progressive
+// disclosure files travel with a skill instead of only SKILL.md being
+// materialised.
+func TestDeploy_Local_WritesSkillSupportingFiles(t *testing.T) {
+	base := t.TempDir()
+	worktree := t.TempDir()
+	reader := &fakeSkillReader{skills: map[string]*skill.Skill{
+		"sk-office": {
+			Slug:    "sk-office",
+			Content: "# office skill",
+			Files: []skill.SkillFile{
+				{Path: "references/tasks.md", Content: "# Tasks\n"},
+				{Path: "references/team.md", Content: "# Team\n"},
+			},
+		},
+	}}
+	d := newDeployer(t, base, reader, &fakeInstructionLister{})
+
+	_, err := d.Deploy(context.Background(), skill.Request{
+		Profile: &settingsmodels.AgentProfile{
+			ID:       "profile-1",
+			AgentID:  "claude-acp",
+			SkillIDs: `["sk-office"]`,
+		},
+		ExecutorType:  "local_pc",
+		WorkspacePath: worktree,
+	})
+	if err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	root := filepath.Join(worktree, ".claude", "skills", "kandev-sk-office")
+	for path, want := range map[string]string{
+		"references/tasks.md": "# Tasks\n",
+		"references/team.md":  "# Team\n",
+	} {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if string(data) != want {
+			t.Errorf("%s = %q, want %q", path, string(data), want)
+		}
+	}
+}
+
 // TestDeploy_Local_RewritesSiblingRefs verifies relative `./X.md`
 // references inside instruction file content are rewritten to
 // absolute paths under the materialised instructions dir, so the

@@ -1,6 +1,6 @@
 ---
 name: kandev-protocol
-description: How to interact with the kandev orchestrator via the CLI
+description: Follow the core Office agent protocol on wakeup, including parsing KANDEV_* context, checking blockers, commenting progress, updating status, and using the CLI safely.
 kandev:
   system: true
   version: "0.42.0"
