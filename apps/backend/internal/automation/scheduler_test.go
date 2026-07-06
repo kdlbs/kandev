@@ -142,3 +142,58 @@ func TestCronScheduler_DailyTrigger_DoesNotRefireNextTick(t *testing.T) {
 		t.Fatal("expected shouldFire to be false one minute after a skipped evaluation of a daily trigger")
 	}
 }
+
+// TestFireTrigger_ConcurrencyCapCheckError_DoesNotAdvanceLastEvaluatedAt guards
+// against silently missing a whole day of a @daily trigger's schedule. If
+// maybeSkipForConcurrencyCap fails for an infrastructural reason (e.g. the
+// reader pool backing CountActiveRuns is briefly unavailable), FireTrigger
+// must return the error without having already advanced LastEvaluatedAt.
+// Otherwise CronScheduler.shouldFire treats the trigger as freshly
+// evaluated and suppresses the next attempt until the full cron interval
+// elapses, instead of retrying on the next 30s scheduler tick.
+func TestFireTrigger_ConcurrencyCapCheckError_DoesNotAdvanceLastEvaluatedAt(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	a := &Automation{
+		WorkspaceID:       "ws-1",
+		Name:              "Daily rebase",
+		WorkflowID:        "wf-1",
+		WorkflowStepID:    "s-1",
+		Enabled:           true,
+		MaxConcurrentRuns: 1,
+	}
+	if err := svc.store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, _ := json.Marshal(ScheduledTriggerConfig{CronExpression: "@daily"})
+	trig := &AutomationTrigger{AutomationID: a.ID, Type: TriggerTypeScheduled, Config: cfg, Enabled: true}
+	if err := svc.store.CreateTrigger(ctx, trig); err != nil {
+		t.Fatal(err)
+	}
+
+	// Break CountActiveRuns in isolation: it queries automation_runs while
+	// GetAutomation (the earlier lookup in maybeSkipForConcurrencyCap) only
+	// queries automations, so dropping just the former reproduces "the cap
+	// check itself failed" without masking the failure behind an earlier,
+	// softly-handled lookup error.
+	if _, err := svc.store.db.ExecContext(ctx, `DROP TABLE automation_runs`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), ""); err == nil {
+		t.Fatal("expected FireTrigger to return the concurrency-cap check error")
+	}
+
+	triggers, err := svc.store.ListTriggers(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(triggers) != 1 {
+		t.Fatalf("expected 1 trigger, got %d", len(triggers))
+	}
+	if triggers[0].LastEvaluatedAt != nil {
+		t.Fatal("expected LastEvaluatedAt to remain nil after a concurrency-cap check error, got non-nil")
+	}
+}

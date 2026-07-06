@@ -193,24 +193,29 @@ func (s *Service) FireTrigger(ctx context.Context, automationID, triggerID strin
 		}
 	}
 
-	// Record that the trigger was evaluated regardless of outcome. Scheduled
-	// triggers use this to pace themselves against their cron interval
-	// (CronScheduler.shouldFire): if it were only updated on an actual fire,
-	// a trigger stuck behind max_concurrent_runs would look "overdue" again
-	// on every subsequent scheduler tick and get re-evaluated — and
-	// re-skipped — far more often than its configured schedule.
-	now := time.Now().UTC()
-	if updateErr := s.store.UpdateTriggerEvaluatedAt(ctx, triggerID, now); updateErr != nil {
-		s.logger.Warn("failed to update last_evaluated_at",
-			zap.String("trigger_id", triggerID), zap.Error(updateErr))
-	}
-
 	// Enforce max_concurrent_runs: a run is "active" while still in
 	// task_created (succeeded/failed/skipped don't count). If at the cap,
 	// record a skipped run so the user can see the cap kicked in.
 	skipped, capErr := s.maybeSkipForConcurrencyCap(ctx, automationID, triggerID, triggerType, triggerData, dedupKey)
 	if capErr != nil {
 		return capErr
+	}
+
+	// Record that the trigger was evaluated now that the cap check itself
+	// has succeeded. Scheduled triggers use this to pace themselves against
+	// their cron interval (CronScheduler.shouldFire): if this were updated
+	// before the cap check (or despite the cap check returning an error), an
+	// infrastructural failure in the check would look like a completed
+	// evaluation and suppress the next attempt until the full cron interval
+	// elapses, instead of retrying on the next scheduler tick. And if it
+	// were only updated on an actual fire, a trigger stuck behind
+	// max_concurrent_runs would look "overdue" again on every subsequent
+	// tick and get re-evaluated — and re-skipped — far more often than its
+	// configured schedule.
+	now := time.Now().UTC()
+	if updateErr := s.store.UpdateTriggerEvaluatedAt(ctx, triggerID, now); updateErr != nil {
+		s.logger.Warn("failed to update last_evaluated_at",
+			zap.String("trigger_id", triggerID), zap.Error(updateErr))
 	}
 	if skipped {
 		return nil
