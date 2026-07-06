@@ -9,6 +9,9 @@ import (
 
 const defaultAsyncTurnCompleteIdle = 5 * time.Second
 
+// asyncTurnCompleteIdle is the debounce window. Tests shorten it via
+// setAsyncTurnCompleteIdleForTest; do not add t.Parallel() to tests that call
+// that helper, or they will race each other on this global.
 var asyncTurnCompleteIdle = defaultAsyncTurnCompleteIdle
 
 func isAsyncTurnContentEvent(event AgentEvent) bool {
@@ -53,6 +56,8 @@ func (a *Adapter) maybeScheduleAsyncTurnComplete(event AgentEvent) {
 }
 
 func (a *Adapter) emitAsyncTurnComplete(sessionID string, seq uint64) {
+	// Fast-path stale timers before the more expensive notification-queue drain.
+	// consumeAsyncTurnFinalizer below is still the authoritative emit gate.
 	if !a.isCurrentAsyncTurnFinalizer(sessionID, seq) {
 		return
 	}
