@@ -463,6 +463,98 @@ func TestSyncSystemSkills_RemovesOrphanedSlugAndDetachesFromAgents(t *testing.T)
 	}
 }
 
+func TestSyncSystemSkills_ReplacesRetiredDefaultSkillReferences(t *testing.T) {
+	repo := newStubSyncRepo()
+	log := logger.Default()
+
+	const oldTasksID = "skill-old-tasks"
+	const oldCommentID = "skill-old-comment"
+	const newTaskOpsID = "skill-new-task-ops"
+
+	repo.rows["ws-1"] = map[string]*models.Skill{
+		"kandev-tasks": {
+			ID:          oldTasksID,
+			WorkspaceID: "ws-1",
+			Slug:        "kandev-tasks",
+			Name:        "Tasks",
+			IsSystem:    true,
+			SourceType:  skills.SourceTypeSystem,
+		},
+		"kandev-task-comment": {
+			ID:          oldCommentID,
+			WorkspaceID: "ws-1",
+			Slug:        "kandev-task-comment",
+			Name:        "Task Comment",
+			IsSystem:    true,
+			SourceType:  skills.SourceTypeSystem,
+		},
+		"kandev-task-ops": {
+			ID:          newTaskOpsID,
+			WorkspaceID: "ws-1",
+			Slug:        "kandev-task-ops",
+			Name:        "Task Ops",
+			IsSystem:    true,
+			SourceType:  skills.SourceTypeSystem,
+			ContentHash: "old-task-ops-hash",
+		},
+	}
+	repo.agents["ws-1"] = map[string]*settingsmodels.AgentProfile{
+		"agent-1": {
+			ID:            "agent-1",
+			WorkspaceID:   "ws-1",
+			SkillIDs:      mustJSONArray(t, []string{oldTasksID, oldCommentID}),
+			DesiredSkills: mustJSONArray(t, []string{"kandev-tasks", "kandev-task-comment"}),
+		},
+		"agent-2": {
+			ID:            "agent-2",
+			WorkspaceID:   "ws-1",
+			SkillIDs:      mustJSONArray(t, []string{oldTasksID, newTaskOpsID}),
+			DesiredSkills: mustJSONArray(t, []string{"kandev-tasks", "kandev-task-ops"}),
+		},
+	}
+
+	bundled := []skills.SystemSkillSpec{{
+		Slug:        "kandev-task-ops",
+		Name:        "Task Ops",
+		Description: "Task operations",
+		Version:     "1.0.0",
+		Content:     "---\nname: kandev-task-ops\ndescription: Task operations\n---\n# Task Ops\n",
+		ContentHash: "hash-task-ops",
+	}}
+
+	report, err := skills.SyncSystemSkills(context.Background(), repo, []string{"ws-1"}, bundled, log)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if len(report.Removed) != 2 {
+		t.Fatalf("expected two retired removals, got %v", report.Removed)
+	}
+
+	gotTaskOps, err := repo.GetSkillBySlug(context.Background(), "ws-1", "kandev-task-ops")
+	if err != nil {
+		t.Fatalf("replacement skill missing: %v", err)
+	}
+	if gotTaskOps.ID == "" {
+		t.Fatal("replacement skill should have an ID")
+	}
+
+	agent1 := repo.agents["ws-1"]["agent-1"]
+	if got := decodeIDs(t, agent1.SkillIDs); len(got) != 1 || got[0] != gotTaskOps.ID {
+		t.Fatalf("agent-1.skill_ids = %v, want replacement %s", got, gotTaskOps.ID)
+	}
+	if got := decodeIDs(t, agent1.DesiredSkills); len(got) != 1 || got[0] != "kandev-task-ops" {
+		t.Fatalf("agent-1.desired_skills = %v, want kandev-task-ops", got)
+	}
+
+	agent2 := repo.agents["ws-1"]["agent-2"]
+	if got := decodeIDs(t, agent2.SkillIDs); len(got) != 1 || got[0] != newTaskOpsID {
+		t.Fatalf("agent-2.skill_ids should dedupe existing replacement, got %v", got)
+	}
+	if got := decodeIDs(t, agent2.DesiredSkills); len(got) != 1 || got[0] != "kandev-task-ops" {
+		t.Fatalf("agent-2.desired_skills should dedupe existing replacement, got %v", got)
+	}
+}
+
 func mustJSONArray(t *testing.T, ids []string) string {
 	t.Helper()
 	b, err := json.Marshal(ids)

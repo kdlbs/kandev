@@ -25,6 +25,17 @@ import (
 // the spec stay in sync.
 const SourceTypeSystem = "system"
 
+var retiredDefaultSkillReplacements = map[string]string{
+	"kandev-agent-edit":    "kandev-team-admin",
+	"kandev-budget":        "kandev-team-admin",
+	"kandev-config-export": "kandev-config-sync",
+	"kandev-config-import": "kandev-config-sync",
+	"kandev-hiring":        "kandev-team-admin",
+	"kandev-task-comment":  "kandev-task-ops",
+	"kandev-tasks":         "kandev-task-ops",
+	"kandev-team":          "kandev-team-admin",
+}
+
 // SystemSkillSpec is the parsed view of a single embedded SKILL.md
 // from `apps/backend/internal/office/configloader/skills/<slug>/`.
 type SystemSkillSpec struct {
@@ -151,9 +162,11 @@ func syncWorkspace(
 		spec := bundled[slug]
 		cur, ok := existingBySlug[slug]
 		if !ok {
-			if err := repo.CreateSkill(ctx, newSystemSkillRow(wsID, spec)); err != nil {
+			row := newSystemSkillRow(wsID, spec)
+			if err := repo.CreateSkill(ctx, row); err != nil {
 				return inserted, updated, removed, fmt.Errorf("insert %s: %w", slug, err)
 			}
+			existingBySlug[slug] = row
 			inserted = append(inserted, slug)
 			continue
 		}
@@ -171,6 +184,11 @@ func syncWorkspace(
 		if _, kept := bundled[slug]; kept {
 			continue
 		}
+		if replacement := replacementSystemSkill(existingBySlug, slug); replacement != nil {
+			if err := replaceSkillOnAgents(ctx, repo, wsID, cur, replacement); err != nil {
+				return inserted, updated, removed, fmt.Errorf("replace %s: %w", slug, err)
+			}
+		}
 		if err := repo.DeleteSkill(ctx, cur.ID); err != nil {
 			return inserted, updated, removed, fmt.Errorf("delete %s: %w", slug, err)
 		}
@@ -180,6 +198,44 @@ func syncWorkspace(
 		removed = append(removed, slug)
 	}
 	return inserted, updated, removed, nil
+}
+
+func replacementSystemSkill(skills map[string]*models.Skill, retiredSlug string) *models.Skill {
+	replacementSlug, ok := retiredDefaultSkillReplacements[retiredSlug]
+	if !ok {
+		return nil
+	}
+	return skills[replacementSlug]
+}
+
+func replaceSkillOnAgents(
+	ctx context.Context,
+	repo SystemSyncRepo,
+	wsID string,
+	retired *models.Skill,
+	replacement *models.Skill,
+) error {
+	agents, err := repo.ListAgentInstances(ctx, wsID)
+	if err != nil {
+		return fmt.Errorf("list agents: %w", err)
+	}
+	for _, agent := range agents {
+		newSkillIDs, skillIDsChanged := replaceJSONArrayValue(agent.SkillIDs, retired.ID, replacement.ID)
+		newDesired, desiredChanged := replaceJSONArrayValue(agent.DesiredSkills, retired.Slug, replacement.Slug)
+		if !skillIDsChanged && !desiredChanged {
+			continue
+		}
+		if skillIDsChanged {
+			agent.SkillIDs = newSkillIDs
+		}
+		if desiredChanged {
+			agent.DesiredSkills = newDesired
+		}
+		if err := repo.UpdateAgentInstance(ctx, agent); err != nil {
+			return fmt.Errorf("update agent %s: %w", agent.ID, err)
+		}
+	}
+	return nil
 }
 
 // detachSkillFromAgents removes the deleted skill's ID from every
@@ -215,6 +271,42 @@ func systemSkillUpToDate(cur *models.Skill, spec SystemSkillSpec) bool {
 		cur.Description == spec.Description &&
 		cur.Version == spec.Version &&
 		cur.SystemVersion == spec.Version
+}
+
+func replaceJSONArrayValue(raw, oldValue, newValue string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" {
+		return raw, false
+	}
+	var values []string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return raw, false
+	}
+	out := make([]string, 0, len(values))
+	changed := false
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		if value == oldValue {
+			value = newValue
+			changed = true
+		}
+		if value == "" || seen[value] {
+			if value != "" {
+				changed = true
+			}
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	if !changed {
+		return raw, false
+	}
+	encoded, err := json.Marshal(out)
+	if err != nil {
+		return raw, false
+	}
+	return string(encoded), true
 }
 
 // removeIDFromJSONArray parses a JSON-array string, removes every
