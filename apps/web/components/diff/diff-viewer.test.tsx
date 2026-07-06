@@ -51,4 +51,17 @@ describe("DiffViewer", () => {
 
     await waitFor(() => expect(fileDiffProps.length).toBeGreaterThan(renderCount));
   });
+
+  it("rerenders when the controlled update handler changes", async () => {
+    const firstUpdate = vi.fn();
+    const secondUpdate = vi.fn();
+    const { rerender } = render(<DiffViewer data={data} onCommentUpdate={firstUpdate} />);
+
+    await waitFor(() => expect(fileDiffProps.length).toBeGreaterThan(0));
+    const renderCount = fileDiffProps.length;
+
+    rerender(<DiffViewer data={data} onCommentUpdate={secondUpdate} />);
+
+    await waitFor(() => expect(fileDiffProps.length).toBeGreaterThan(renderCount));
+  });
 });
