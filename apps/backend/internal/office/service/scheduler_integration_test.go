@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -85,6 +86,39 @@ func TestSchedulerIntegration_ResolvesExecutorFromTaskProject(t *testing.T) {
 	if mock.callCount() != 1 {
 		t.Fatalf("StartTask calls = %d, want 1", mock.callCount())
 	}
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	var runID string
+	for _, run := range runs {
+		if run.AgentProfileID == agent.ID && run.Reason == service.RunReasonTaskAssigned {
+			runID = run.ID
+			break
+		}
+	}
+	if runID == "" {
+		t.Fatalf("missing task_assigned run for %s: %#v", agent.ID, runs)
+	}
+	events, err := svc.ListRunEventsForTest(ctx, runID)
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	for _, event := range events {
+		if event.EventType != "adapter.invoke" {
+			continue
+		}
+		var payload map[string]interface{}
+		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+			t.Fatalf("unmarshal adapter event payload: %v", err)
+		}
+		if payload["executor_type"] != "local_pc" {
+			t.Fatalf("executor_type = %v, want local_pc", payload["executor_type"])
+		}
+		return
+	}
+	t.Fatalf("missing adapter.invoke event for run %s: %#v", runID, events)
 }
 
 func TestSchedulerIntegration_PausedAgentSkipped(t *testing.T) {

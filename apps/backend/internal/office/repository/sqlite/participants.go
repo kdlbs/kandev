@@ -138,11 +138,13 @@ func (r *Repository) ListTaskParticipants(ctx context.Context, taskID, role stri
 		}
 		// Project the canonical task_id into the row (template-level rows
 		// have task_id = ''; we surface them as participants of the input task).
-		p.TaskID = taskID
+		if rowTask.Valid {
+			p.TaskID = rowTask.String
+		}
 		p.DecisionRequired = decisionRequired != 0
 		out = append(out, p)
 	}
-	return mergeOfficeParticipants(out), rows.Err()
+	return projectOfficeParticipants(taskID, mergeOfficeParticipants(out)), rows.Err()
 }
 
 // ListAllTaskParticipants returns every participant for a task across both
@@ -180,11 +182,13 @@ func (r *Repository) ListAllTaskParticipants(ctx context.Context, taskID string)
 		); err != nil {
 			return nil, err
 		}
-		p.TaskID = taskID
+		if rowTask.Valid {
+			p.TaskID = rowTask.String
+		}
 		p.DecisionRequired = decisionRequired != 0
 		out = append(out, p)
 	}
-	return mergeOfficeParticipants(out), rows.Err()
+	return projectOfficeParticipants(taskID, mergeOfficeParticipants(out)), rows.Err()
 }
 
 // mergeOfficeParticipants enforces per-task precedence: when a
@@ -195,20 +199,26 @@ func mergeOfficeParticipants(rows []Participant) []Participant {
 	if len(rows) <= 1 {
 		return rows
 	}
-	// Since both flavours scan into the same Participant shape (task_id is
-	// already projected to the input taskID), we can't distinguish them by
-	// task_id alone. The merge is therefore a uniqueness collapse on
-	// (role, agent_profile_id) — each unique key is kept once.
 	type key struct{ role, agent string }
-	seen := make(map[key]bool, len(rows))
+	chosen := make(map[key]int, len(rows))
 	out := make([]Participant, 0, len(rows))
 	for _, p := range rows {
 		k := key{p.Role, p.AgentProfileID}
-		if seen[k] {
+		if idx, ok := chosen[k]; ok {
+			if out[idx].TaskID == "" && p.TaskID != "" {
+				out[idx] = p
+			}
 			continue
 		}
-		seen[k] = true
+		chosen[k] = len(out)
 		out = append(out, p)
 	}
 	return out
+}
+
+func projectOfficeParticipants(taskID string, rows []Participant) []Participant {
+	for i := range rows {
+		rows[i].TaskID = taskID
+	}
+	return rows
 }

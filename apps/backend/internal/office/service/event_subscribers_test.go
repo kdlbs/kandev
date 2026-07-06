@@ -255,6 +255,64 @@ func TestTaskCreated_WakesAssigneeFromStoredRunner(t *testing.T) {
 	t.Fatalf("expected task_assigned run for worker-created, got %#v", runs)
 }
 
+func TestTaskCreated_NoopWhenNoStoredRunner(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	insertTestTask(t, svc, "task-created-unassigned", "ws-1")
+
+	event := bus.NewEvent(events.TaskCreated, "test", map[string]string{
+		"task_id": "task-created-unassigned",
+	})
+	if err := eb.Publish(ctx, events.TaskCreated, event); err != nil {
+		t.Fatalf("publish task created event: %v", err)
+	}
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	for _, run := range runs {
+		if run.Reason == service.RunReasonTaskAssigned {
+			t.Fatalf("task.created without runner queued task_assigned run: %#v", run)
+		}
+	}
+}
+
+func TestTaskAssigned_ReassignmentUsesAgentScopedIdempotency(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "worker-old")
+	createTestAgent(t, svc, "ws-1", "worker-new")
+	insertTestTask(t, svc, "task-reassigned", "ws-1")
+
+	for _, agentID := range []string{"worker-old", "worker-new"} {
+		event := bus.NewEvent(events.TaskUpdated, "test", map[string]string{
+			"task_id":                   "task-reassigned",
+			"assignee_agent_profile_id": agentID,
+		})
+		if err := eb.Publish(ctx, events.TaskUpdated, event); err != nil {
+			t.Fatalf("publish task updated event for %s: %v", agentID, err)
+		}
+	}
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, run := range runs {
+		if run.Reason == service.RunReasonTaskAssigned &&
+			(run.AgentProfileID == "worker-old" || run.AgentProfileID == "worker-new") {
+			seen[run.AgentProfileID] = true
+		}
+	}
+	if !seen["worker-old"] || !seen["worker-new"] {
+		t.Fatalf("task assignment runs = %#v, want both old and new assignees", runs)
+	}
+}
+
 func TestCommentCreated_SkipsSelfComment(t *testing.T) {
 	svc, eb := newTestServiceWithBus(t)
 	ctx := context.Background()

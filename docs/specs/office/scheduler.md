@@ -58,7 +58,7 @@ Coalescing happens entirely at the wakeup-request layer; the runs table is the e
 1. **Source-level dedup via `idempotency_key`** (UNIQUE column). Format:
    - `routine:<routine_id>:<trigger_id>:<unix_minute>` for cron routines.
    - `comment:<comment_id>` for comments.
-   - `task_assigned:<task_id>` for task creation/assignment events.
+   - `task_assigned:<task_id>:<agent_instance_id>` for task creation/assignment events.
    Duplicate inserts in the same window are rejected silently. Handles webhook re-delivery, event-bus replay, and restart recovery.
 
 2. **Claim-time merge.** When the dispatcher processes a wakeup-request, it looks for an in-flight run for the same agent (`queued` -> `scheduled-retry` -> `running`, in that order). If one exists: insert the new request with `status="coalesced"`, `run_id=<existing>`, merge the new request's payload into the existing run's `context_snapshot`, and increment `coalesced_count` on the in-flight wakeup-request. The agent sees the merged context when it actually runs. If none exists: insert the wakeup-request with `status="queued"` and create the corresponding `runs` row.

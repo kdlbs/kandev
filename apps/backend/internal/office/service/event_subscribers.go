@@ -685,7 +685,7 @@ func (s *Service) queueTaskAssignedRun(
 		return nil
 	}
 	payload := mustJSON(map[string]string{"task_id": taskID})
-	key := fmt.Sprintf("task_assigned:%s", taskID)
+	key := fmt.Sprintf("task_assigned:%s:%s", taskID, agentProfileID)
 	return s.QueueRun(ctx, agentProfileID, RunReasonTaskAssigned, payload, key)
 }
 
