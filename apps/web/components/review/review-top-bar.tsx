@@ -30,6 +30,14 @@ import { ReviewCommentsOverview } from "./review-comments-overview";
 const COMMENTS_HOVER_OPEN_DELAY_MS = 150;
 const COMMENTS_HOVER_CLOSE_DELAY_MS = 150;
 
+function shouldOpenOverviewOnClick(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(hover: none), (pointer: coarse)").matches
+  );
+}
+
 type ReviewTopBarProps = {
   sessionId: string;
   reviewedCount: number;
@@ -98,24 +106,28 @@ function FixCommentsButton({
   getPendingComments,
   onFixComments,
 }: FixCommentsButtonProps) {
-  const hover = useHoverPopover({
-    openDelayMs: COMMENTS_HOVER_OPEN_DELAY_MS,
-    closeDelayMs: COMMENTS_HOVER_CLOSE_DELAY_MS,
-  });
+  const { open, onOpenChange, onTriggerEnter, onTriggerLeave, onContentEnter, onContentLeave } =
+    useHoverPopover({
+      openDelayMs: COMMENTS_HOVER_OPEN_DELAY_MS,
+      closeDelayMs: COMMENTS_HOVER_CLOSE_DELAY_MS,
+    });
+  const handleClick = useCallback(() => {
+    if (!open && shouldOpenOverviewOnClick()) {
+      onOpenChange(true);
+      return;
+    }
+    onFixComments();
+  }, [open, onOpenChange, onFixComments]);
 
   return (
-    <Popover open={hover.open} onOpenChange={hover.onOpenChange}>
+    <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverAnchor asChild>
-        <span
-          className="inline-flex"
-          onMouseEnter={hover.onTriggerEnter}
-          onMouseLeave={hover.onTriggerLeave}
-        >
+        <span className="inline-flex" onMouseEnter={onTriggerEnter} onMouseLeave={onTriggerLeave}>
           <Button
             size="sm"
             variant="outline"
             className="cursor-pointer"
-            onClick={onFixComments}
+            onClick={handleClick}
             data-testid="review-fix-comments-button"
           >
             <IconMessageForward className="h-4 w-4" />
@@ -131,8 +143,8 @@ function FixCommentsButton({
         align="end"
         sideOffset={8}
         className="w-80 p-0"
-        onMouseEnter={hover.onContentEnter}
-        onMouseLeave={hover.onContentLeave}
+        onMouseEnter={onContentEnter}
+        onMouseLeave={onContentLeave}
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <ReviewCommentsOverview comments={getPendingComments()} />

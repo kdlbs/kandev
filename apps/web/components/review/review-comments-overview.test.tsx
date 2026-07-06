@@ -58,13 +58,13 @@ describe("ReviewCommentsOverview", () => {
         ]}
       />,
     );
-    expect(screen.getByText("3 comments")).toBeDefined();
+    expect(screen.getByText("3 pending review comments")).toBeDefined();
     expect(screen.getByText("across 2 files")).toBeDefined();
   });
 
   it("uses singular labels for a single comment on a single file", () => {
     render(<ReviewCommentsOverview comments={[comment({ id: "a" })]} />);
-    expect(screen.getByText("1 comment")).toBeDefined();
+    expect(screen.getByText("1 pending review comment")).toBeDefined();
     expect(screen.getByText("across 1 file")).toBeDefined();
   });
 
