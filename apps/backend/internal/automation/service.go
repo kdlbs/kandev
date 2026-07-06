@@ -193,6 +193,18 @@ func (s *Service) FireTrigger(ctx context.Context, automationID, triggerID strin
 		}
 	}
 
+	// Record that the trigger was evaluated regardless of outcome. Scheduled
+	// triggers use this to pace themselves against their cron interval
+	// (CronScheduler.shouldFire): if it were only updated on an actual fire,
+	// a trigger stuck behind max_concurrent_runs would look "overdue" again
+	// on every subsequent scheduler tick and get re-evaluated — and
+	// re-skipped — far more often than its configured schedule.
+	now := time.Now().UTC()
+	if updateErr := s.store.UpdateTriggerEvaluatedAt(ctx, triggerID, now); updateErr != nil {
+		s.logger.Warn("failed to update last_evaluated_at",
+			zap.String("trigger_id", triggerID), zap.Error(updateErr))
+	}
+
 	// Enforce max_concurrent_runs: a run is "active" while still in
 	// task_created (succeeded/failed/skipped don't count). If at the cap,
 	// record a skipped run so the user can see the cap kicked in.
@@ -212,14 +224,9 @@ func (s *Service) FireTrigger(ctx context.Context, automationID, triggerID strin
 		DedupKey:     dedupKey,
 	}
 
-	now := time.Now().UTC()
 	if updateErr := s.store.UpdateLastTriggered(ctx, automationID, now); updateErr != nil {
 		s.logger.Warn("failed to update last_triggered_at",
 			zap.String("automation_id", automationID), zap.Error(updateErr))
-	}
-	if updateErr := s.store.UpdateTriggerEvaluatedAt(ctx, triggerID, now); updateErr != nil {
-		s.logger.Warn("failed to update last_evaluated_at",
-			zap.String("trigger_id", triggerID), zap.Error(updateErr))
 	}
 
 	event := bus.NewEvent(events.AutomationTriggered, "automation_service", evt)
