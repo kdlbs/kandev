@@ -1885,6 +1885,38 @@ export class ApiClient {
   async probeSSHShells(executorId: string): Promise<SSHProbeShellsResponse> {
     return this.request("POST", `/api/v1/ssh/executors/${executorId}/probe-shells`);
   }
+
+  /**
+   * Seed an automation via the E2E HTTP endpoint (avoids WS / Node 24 requirement).
+   * Only works when KANDEV_MOCK_AGENT is active.
+   */
+  async seedAutomation(opts: {
+    workspaceId: string;
+    name: string;
+    workflowId?: string;
+    workflowStepId?: string;
+  }): Promise<{ id: string; workspace_id: string; name: string }> {
+    return this.request("POST", "/api/v1/e2e/automations", {
+      workspace_id: opts.workspaceId,
+      name: opts.name,
+      workflow_id: opts.workflowId ?? "",
+      workflow_step_id: opts.workflowStepId ?? "",
+    });
+  }
+
+  /**
+   * Seed an automation run row via the E2E HTTP endpoint.
+   * Only works when KANDEV_MOCK_AGENT is active.
+   */
+  async seedAutomationRun(
+    automationId: string,
+    status = "skipped",
+  ): Promise<{ id: string; automation_id: string; status: string }> {
+    return this.request("POST", "/api/v1/e2e/automation-runs", {
+      automation_id: automationId,
+      status,
+    });
+  }
 }
 
 // --- Jira / Linear mock payload types ---

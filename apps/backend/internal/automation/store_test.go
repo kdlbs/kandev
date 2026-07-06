@@ -212,3 +212,89 @@ func TestDeleteAutomation(t *testing.T) {
 		t.Error("expected nil after delete")
 	}
 }
+
+func TestDeleteRun(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+
+	a := &Automation{WorkspaceID: "ws-1", Name: "A", WorkflowID: "wf-1", WorkflowStepID: "s-1", Enabled: true}
+	if err := store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	run := &AutomationRun{
+		AutomationID: a.ID,
+		TriggerType:  TriggerTypeScheduled,
+		Status:       RunStatusSkipped,
+		TaskID:       "task-abc",
+		TriggerData:  json.RawMessage(`{}`),
+	}
+	if err := store.CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+
+	// GetRun finds it.
+	got, err := store.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Error("expected run, got nil")
+		return
+	}
+	if got.TaskID != "task-abc" {
+		t.Errorf("expected task_id 'task-abc', got %q", got.TaskID)
+	}
+
+	// DeleteRun removes it.
+	if err := store.DeleteRun(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err = store.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		t.Error("expected nil after delete, got run")
+	}
+}
+
+func TestDeleteAllRuns(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+
+	a := &Automation{WorkspaceID: "ws-1", Name: "B", WorkflowID: "wf-1", WorkflowStepID: "s-1", Enabled: true}
+	if err := store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if err := store.CreateRun(ctx, &AutomationRun{
+			AutomationID: a.ID,
+			TriggerType:  TriggerTypeScheduled,
+			Status:       RunStatusSkipped,
+			TaskID:       "task-" + string(rune('0'+i)),
+			TriggerData:  json.RawMessage(`{}`),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	taskIDs, err := store.ListRunTaskIDs(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(taskIDs) != 3 {
+		t.Fatalf("expected 3 task IDs, got %d", len(taskIDs))
+	}
+
+	if err := store.DeleteAllRuns(ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	runs, err := store.ListRuns(ctx, a.ID, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 0 {
+		t.Errorf("expected 0 runs after delete, got %d", len(runs))
+	}
+}
