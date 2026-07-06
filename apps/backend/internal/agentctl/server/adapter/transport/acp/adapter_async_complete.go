@@ -51,6 +51,10 @@ func (a *Adapter) maybeScheduleAsyncTurnComplete(event AgentEvent) {
 	if finalizer.timer != nil {
 		finalizer.timer.Stop()
 	}
+	// time.AfterFunc goroutines are not tracked by workerWg. A timer that fires
+	// concurrently with Close may call emitAsyncTurnComplete after
+	// cancelAllAsyncTurnCompletes returns; the path is safe because sendUpdate
+	// checks a.closed and syncNotifQueue respects lifetimeCtx.
 	finalizer.timer = time.AfterFunc(delay, func() {
 		a.emitAsyncTurnComplete(event.SessionID, seq, promptEpoch)
 	})
