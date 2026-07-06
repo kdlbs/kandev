@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -553,5 +554,97 @@ func TestResumeTaskSession_ReapsPromptDeadExecutionAndRelaunches(t *testing.T) {
 	}
 	if running.ResumeToken != "resume-token-123" {
 		t.Fatalf("expected resume token to be preserved, got %q", running.ResumeToken)
+	}
+}
+
+func TestResumeTaskSession_ReapStopFailureDoesNotFailTask(t *testing.T) {
+	oldReadyTimeout := agentPromptReadyTimeout
+	oldReadyInterval := agentPromptReadyInterval
+	agentPromptReadyTimeout = 20 * time.Millisecond
+	agentPromptReadyInterval = time.Millisecond
+	t.Cleanup(func() {
+		agentPromptReadyTimeout = oldReadyTimeout
+		agentPromptReadyInterval = oldReadyInterval
+	})
+
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentProfileID = "profile1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:               "er1",
+		SessionID:        "session1",
+		TaskID:           "task1",
+		AgentExecutionID: "exec-zombie",
+		Status:           "running",
+		Resumable:        true,
+		ResumeToken:      "resume-token-123",
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}); err != nil {
+		t.Fatalf("failed to seed executor running: %v", err)
+	}
+
+	var launchCalls atomic.Int32
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		isAgentRunningFn: func(_ context.Context, _ string) bool {
+			return true
+		},
+		isAgentReadyFn: func(_ context.Context, _ string) bool {
+			return false
+		},
+		stopAgentWithReasonErr: errors.New("stop timeout"),
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchCalls.Add(1)
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-replacement"}, nil
+		},
+	}
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID:    "task1",
+		Title: "Test Task",
+		State: v1.TaskStateInProgress,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	exec, err := svc.ResumeTaskSession(ctx, "task1", "session1")
+	if err == nil {
+		t.Fatal("expected stop failure to be returned")
+	}
+	if exec != nil {
+		t.Fatalf("expected no execution on stop failure, got %#v", exec)
+	}
+	if !errors.Is(err, ErrAgentNotReadyForPrompt) {
+		t.Fatalf("expected prompt-not-ready error, got: %v", err)
+	}
+	if got := launchCalls.Load(); got != 0 {
+		t.Fatalf("expected no replacement launch after failed stop, got %d", got)
+	}
+
+	refreshed, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to reload session: %v", err)
+	}
+	if refreshed.State == models.TaskSessionStateFailed {
+		t.Fatalf("expected session to remain retryable, got state %s", refreshed.State)
+	}
+	if got := taskRepo.updatedStates["task1"]; got == v1.TaskStateFailed {
+		t.Fatal("expected task state not to be marked failed on transient stop failure")
+	}
+	if got := taskRepo.stateWrites["task1"]; got != 0 {
+		t.Fatalf("expected no task state writes on transient stop failure, got %d", got)
 	}
 }

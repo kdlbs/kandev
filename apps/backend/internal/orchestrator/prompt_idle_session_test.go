@@ -510,6 +510,8 @@ func TestPromptTask_ReapsPromptDeadExecutionBeforeSend(t *testing.T) {
 	})
 
 	ctx := context.Background()
+	pollCtx, cancelPoll := context.WithCancel(context.Background())
+	t.Cleanup(cancelPoll)
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
 	session, err := repo.GetTaskSession(ctx, "session1")
@@ -567,12 +569,15 @@ func TestPromptTask_ReapsPromptDeadExecutionBeforeSend(t *testing.T) {
 					t.Errorf("persist replacement executor running: %v", err)
 				}
 			}
-			go func(sessID string) {
+			go func(ctx context.Context, sessID string) {
 				tick := time.NewTicker(5 * time.Millisecond)
 				defer tick.Stop()
-				timeout := time.After(5 * time.Second)
+				timeout := time.NewTimer(5 * time.Second)
+				defer timeout.Stop()
 				for {
 					select {
+					case <-ctx.Done():
+						return
 					case <-tick.C:
 						sess, err := repo.GetTaskSession(context.Background(), sessID)
 						if err == nil && sess != nil && sess.State == models.TaskSessionStateStarting {
@@ -582,11 +587,11 @@ func TestPromptTask_ReapsPromptDeadExecutionBeforeSend(t *testing.T) {
 							replacementReady.Store(true)
 							return
 						}
-					case <-timeout:
+					case <-timeout.C:
 						return
 					}
 				}
-			}(req.SessionID)
+			}(pollCtx, req.SessionID)
 			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-replacement"}, nil
 		},
 	}

@@ -1154,7 +1154,7 @@ func (s *Service) recoverAlreadyRunningResume(
 	}
 
 	if err := s.reapPromptUnreadyExecution(resumeCtx, sessionID, waitErr); err != nil {
-		return nil, nil, fmt.Errorf("failed to stop prompt-unready execution: %w", err)
+		return nil, nil, fmt.Errorf("%w: failed to stop prompt-unready execution: %w", ErrAgentNotReadyForPrompt, err)
 	}
 
 	session, err := s.repo.GetTaskSession(resumeCtx, sessionID)
@@ -1348,7 +1348,7 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
 			s.recoverAgentPromptStreamIfNeeded(ctx, sessionID)
 			if readyErr := s.waitForAgentPromptReady(ctx, sessionID); readyErr != nil {
-				return readyErr
+				return fmt.Errorf("agent not ready after resume race: %w", readyErr)
 			}
 			return nil
 		}
