@@ -91,3 +91,88 @@ func TestReconcileSessionsOnStartupMakesRowsTrue(t *testing.T) {
 		t.Errorf("sD SSH row must be untouched by the local reconcile; got pid=%d token=%q", d.PID, d.ResumeToken)
 	}
 }
+
+// TestReconcileSessionsOnStartup_MissingSessionStopsAgentAndDeletesRow covers
+// the orphan-row branch of startup reconciliation: a row whose task_session is
+// gone entirely (deleted task/worktree) routes to handleMissingSessionOnStartup,
+// which stops the still-registered runtime handle (forced) and, once that
+// succeeds, deletes the now-meaningless executors_running row — so orphan rows
+// don't survive restarts and inflate the backlog (§req:success-criteria #5).
+func TestReconcileSessionsOnStartup_MissingSessionStopsAgentAndDeletesRow(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// No backing task_session row for "sO" — GetTaskSession returns not-found.
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:               "sO",
+		SessionID:        "sO",
+		TaskID:           "taskO",
+		Runtime:          agentruntime.RuntimeStandalone,
+		Status:           models.ExecutorRunningStatusRunning,
+		AgentExecutionID: "execO",
+		LocalPID:         4242,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}); err != nil {
+		t.Fatalf("upsert sO: %v", err)
+	}
+
+	agentMgr := &mockAgentManager{}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+	svc.reconcileSessionsOnStartup(ctx)
+
+	if len(agentMgr.stopAgentWithReasonArgs) != 1 || agentMgr.stopAgentWithReasonArgs[0].ExecutionID != "execO" {
+		t.Fatalf("orphan row must stop its runtime handle via StopAgentWithReason; got %+v", agentMgr.stopAgentWithReasonArgs)
+	}
+	if !agentMgr.stopAgentWithReasonArgs[0].Force {
+		t.Errorf("missing-session stop must be forced")
+	}
+	if _, err := repo.GetExecutorRunningBySessionID(ctx, "sO"); err == nil {
+		t.Error("orphan row must be deleted once the runtime stop succeeds")
+	}
+}
+
+// TestReconcileSessionsOnStartup_CreatedSessionRowPrunedUnlessResumable covers
+// the never-started-session cleanup site, which routes through the resume-safety
+// invariant rather than deleting unconditionally: a Created session's row with
+// no resume_token is pruned (nothing to lose), while the rare Created row that
+// already carries a resume_token is repaired in place — the token is the only
+// handle to the agent-side conversation and must survive
+// (§spec:resume-safety-invariant, §req:success-criteria #7).
+func TestReconcileSessionsOnStartup_CreatedSessionRowPrunedUnlessResumable(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	seedTaskAndSession(t, repo, "taskE", "sE", models.TaskSessionStateCreated) // no token → prune
+	seedTaskAndSession(t, repo, "taskF", "sF", models.TaskSessionStateCreated) // token → repair
+
+	upsert := func(er *models.ExecutorRunning) {
+		er.CreatedAt, er.UpdatedAt = now, now
+		if err := repo.UpsertExecutorRunning(ctx, er); err != nil {
+			t.Fatalf("upsert %s: %v", er.SessionID, err)
+		}
+	}
+	upsert(&models.ExecutorRunning{ID: "sE", SessionID: "sE", TaskID: "taskE", Runtime: agentruntime.RuntimeStandalone, Status: models.ExecutorRunningStatusStarting, LocalPID: 555})
+	upsert(&models.ExecutorRunning{ID: "sF", SessionID: "sF", TaskID: "taskF", Runtime: agentruntime.RuntimeStandalone, Status: models.ExecutorRunningStatusStarting, ResumeToken: "tokF", Resumable: true, LocalPID: 666})
+
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	svc.reconcileSessionsOnStartup(ctx)
+
+	if _, err := repo.GetExecutorRunningBySessionID(ctx, "sE"); err == nil {
+		t.Error("sE: never-started row with no resume_token should be pruned")
+	}
+
+	f, err := repo.GetExecutorRunningBySessionID(ctx, "sF")
+	if err != nil {
+		t.Fatalf("sF: Created row holding a resume_token must be preserved: %v", err)
+	}
+	if f.ResumeToken != "tokF" {
+		t.Errorf("sF resume_token lost: %q", f.ResumeToken)
+	}
+	if f.Status != models.ExecutorRunningStatusStopped || f.LocalPID != 0 {
+		t.Errorf("sF should be repaired to stopped with cleared local_pid; got status=%q local_pid=%d", f.Status, f.LocalPID)
+	}
+}
