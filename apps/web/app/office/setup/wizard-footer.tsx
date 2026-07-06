@@ -3,7 +3,7 @@
 import { Button } from "@kandev/ui/button";
 import { IconArrowLeft, IconArrowRight, IconRocket } from "@tabler/icons-react";
 
-const STEP_COUNT = 4;
+const STEP_COUNT = 5;
 
 type WizardFooterProps = {
   step: number;
@@ -25,7 +25,7 @@ export function WizardFooter({
   onSubmit,
 }: WizardFooterProps) {
   const isLast = step === STEP_COUNT - 1;
-  const isTaskStep = step === 2;
+  const isTaskStep = step === 3;
 
   return (
     <div className="flex items-center justify-between mt-8">

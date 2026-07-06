@@ -58,6 +58,11 @@ describe("submitOnboarding", () => {
     expect(data.taskDescription).toContain("https://github.com/org/repo");
     expect(data.taskDescription).toContain("Create one project per repository");
     expect(data.taskDescription).toContain("Create the agent team");
+    expect(data.taskDescription).toContain("proposed plan");
+    expect(data.taskDescription).toContain("Wait for the human to approve");
+    expect(data.taskDescription).not.toContain("Assign agents to the right projects");
+    expect(data.taskDescription).not.toContain("Create the first backlog");
+    expect(data.defaultTier).toBe("frontier");
     expect(data.tierProfileIds).toEqual({
       frontier: "profile-1",
       balanced: "profile-1",

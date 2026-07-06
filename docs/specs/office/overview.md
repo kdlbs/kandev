@@ -149,7 +149,7 @@ When a user opens `/office`, the backend checks both DB and filesystem state via
 
 | State | DB workspaces | FS workspaces | Action |
 |-------|------|-----|--------|
-| Fresh install | 0 | 0 | Redirect to `/office/setup` -> 4-step wizard |
+| Fresh install | 0 | 0 | Redirect to `/office/setup` -> 5-step wizard |
 | Shared config | 0 | >=1 | Redirect to `/office/setup` -> import prompt |
 | Normal | >=1 | any | Show dashboard |
 
@@ -157,19 +157,20 @@ When a user opens `/office`, the backend checks both DB and filesystem state via
 
 **Import prompt** (shared-config state): shows "Existing configuration found - Found N workspace(s) on the filesystem. Import settings to get started?", lists the workspace names, and offers `[Import & Continue]` (creates DB rows for FS workspaces, runs the config sync import, marks onboarding complete) or `[Start Fresh]` (skip import, proceed to wizard).
 
-**Onboarding wizard** is a full-page (not modal) 4-step flow:
+**Onboarding wizard** is a full-page (not modal) 5-step flow:
 
 1. **Welcome + Workspace** - workspace name (default "Default Workspace") and task prefix (default "KAN", explained as "Tasks will be numbered KAN-1, KAN-2, etc.").
-2. **Create CEO Agent** - agent name (default "CEO"), coordinator agent profile dropdown (Claude, Codex, etc.), Frontier / Balanced / Economy tier profile selectors with hover help explaining that the CEO-created agents inherit the selected tier family, executor preference (Local / Docker / Sprites) with descriptions, budget (default $0 = unlimited).
-3. **First Task** - editable starter task prefilled with title "Setup Workspace" and a CEO brief that asks the agent to inspect `https://github.com/org/repo` (replaceable by the user), create one project per repository, create the needed agent team, assign responsibilities, and seed the initial backlog. `[Back] [Skip] [Next]`; Skip clears the starter task.
-4. **Review & Launch** - summary card of what will be created. `[Back] [Create & Launch]`.
+2. **Tier Agent Profiles** - Frontier / Balanced / Economy profile selectors with hover help explaining where each tier family is used when the coordinator creates or schedules agents.
+3. **Create CEO Agent** - agent name (default "CEO"), coordinator agent profile dropdown (Claude, Codex, etc.), executor preference (Local / Docker / Sprites) with descriptions, and coordinator tier selector defaulting to Frontier.
+4. **First Task** - editable starter task prefilled with title "Setup Workspace" and a CEO brief that asks the agent to inspect `https://github.com/org/repo` (replaceable by the user), create one project per repository, create the needed agent team, give agents responsibilities and permissions, then propose follow-up tasks/subtasks for human approval before creating them. `[Back] [Skip] [Next]`; Skip clears the starter task.
+5. **Review & Launch** - summary card of what will be created. `[Back] [Create & Launch]`.
 
 **On "Create & Launch"** the following are created in a single transaction:
 1. Office workspace: `kandev.yml` on filesystem + DB row in `workspaces` + system office workflow (7 steps).
 2. CEO agent instance with `role=ceo`, full permissions, linked profile, bundled skills (kandev-protocol, memory).
 3. Agent runtime row `status=idle` in `office_agent_runtime`.
-4. Workspace provider routing seed: disabled by default, default tier persisted, Frontier / Balanced / Economy mapped from the selected source profiles, and profile IDs recorded as tier metadata so profile deletion is blocked while a tier still references them.
-5. First task if not skipped: assigned to the CEO, `status=todo`; a `task_assigned` wakeup is enqueued so the scheduler picks it up. The task brief tells the CEO to create the required projects, including one per repository.
+4. Workspace provider routing seed: disabled by default, default tier persisted from the coordinator tier selector, Frontier / Balanced / Economy mapped from the selected source profiles, and profile IDs recorded as tier metadata so profile deletion is blocked while a tier still references them.
+5. First task if not skipped: assigned to the CEO, `status=todo`; a `task_assigned` wakeup is enqueued so the scheduler picks it up. The task brief tells the CEO to create the required projects, including one per repository, and propose follow-up tasks for human approval before creating them.
 6. Onboarding state marked completed in the DB.
 
 After creation the user is redirected to `/office`.

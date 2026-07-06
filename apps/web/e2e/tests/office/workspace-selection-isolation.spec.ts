@@ -32,19 +32,25 @@ test.describe("Workspace selection isolation", () => {
     await testPage.getByLabel("Workspace name").fill("Isolation Test Workspace");
     await testPage.getByRole("button", { name: /next/i }).click();
 
-    // Step 2: agent config - advance without changing profile selection.
+    // Step 2: tier profiles - advance without changing profile selection.
+    await expect(testPage.getByRole("heading", { name: "Setup tier agent profiles" })).toBeVisible({
+      timeout: 10_000,
+    });
+    await testPage.getByRole("button", { name: /next/i }).click();
+
+    // Step 3: agent config - advance without changing profile selection.
     await expect(
       testPage.getByRole("heading", { name: "Create your coordinator agent" }),
     ).toBeVisible({ timeout: 10_000 });
     await testPage.getByRole("button", { name: /next/i }).click();
 
-    // Step 3: task - skip.
+    // Step 4: task - skip.
     await expect(
       testPage.getByRole("heading", { name: "Give your CEO something to do" }),
     ).toBeVisible({ timeout: 10_000 });
     await testPage.getByRole("button", { name: /skip/i }).click();
 
-    // Step 4: review and submit.
+    // Step 5: review and submit.
     await expect(testPage.getByRole("heading", { name: "Review and launch" })).toBeVisible({
       timeout: 10_000,
     });

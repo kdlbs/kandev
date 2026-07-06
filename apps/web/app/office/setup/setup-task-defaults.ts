@@ -6,6 +6,7 @@ As the CEO agent:
 - Inspect the repository or repositories and summarize the product, architecture, tech stack, and current risks.
 - Create one project per repository, linking each project to its repository and capturing the main goals.
 - Create the agent team needed to own the work, such as engineering lead, frontend, backend, QA, DevOps, product/research, or documentation agents as appropriate.
-- Assign agents to the right projects and give them clear responsibilities, permissions, and initial work items.
-- Create the first backlog of tasks and subtasks needed to make this workspace useful, including repo discovery, setup, build/test verification, and follow-up improvements.
-- Note assumptions, missing access, and questions for the human before making risky changes.`;
+- Give each agent clear responsibilities, permissions, and operating guidance.
+- Draft a proposed plan for the next setup steps, including repo discovery, build/test verification, initial improvements, and which tasks or subtasks should be created.
+- Wait for the human to approve the proposed plan before creating follow-up tasks or making risky changes.
+- Note assumptions, missing access, and questions for the human.`;

@@ -16,7 +16,7 @@ type StepTaskProps = {
 };
 
 export function StepTask({ agentName, taskTitle, taskDescription, onChange }: StepTaskProps) {
-  // Step 1 (agent creation) requires a non-empty agentName before advancing,
+  // The coordinator step requires a non-empty agentName before advancing,
   // so by the time this step renders we always have a real value.
   const name = agentName.trim() || "coordinator";
   return (
@@ -24,7 +24,8 @@ export function StepTask({ agentName, taskTitle, taskDescription, onChange }: St
       <div>
         <h2 className="text-xl font-semibold">Give your {name} something to do</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          {name} will use this starter task to set up projects, agents, and the initial backlog.
+          {name} will use this starter task to inspect the repos, set up the team, and propose the
+          next work for approval.
         </p>
       </div>
       <div className="space-y-4">

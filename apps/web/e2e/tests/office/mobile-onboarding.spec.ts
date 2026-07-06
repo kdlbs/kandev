@@ -9,8 +9,9 @@ import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-asserti
 
 const SETUP_ROUTE = "/office/setup?mode=new";
 const STEP_0_HEADING = "Set up your Office workspace";
-const STEP_1_HEADING = "Create your coordinator agent";
-const STEP_2_HEADING = "Give your CEO something to do";
+const STEP_1_HEADING = "Setup tier agent profiles";
+const STEP_2_HEADING = "Create your coordinator agent";
+const STEP_3_HEADING = "Give your CEO something to do";
 
 test.describe("Office onboarding — mobile layout", () => {
   test("setup wizard does not overflow horizontally on Pixel 5", async ({
@@ -54,7 +55,7 @@ test.describe("Office onboarding — mobile layout", () => {
     await expect(testPage).toHaveURL((url) => url.pathname === "/", { timeout: 10_000 });
   });
 
-  test("agent step (Step 1) fits within the viewport horizontally", async ({
+  test("tier profile step (Step 1) fits within the viewport horizontally", async ({
     testPage,
     officeSeed: _,
   }) => {
@@ -64,7 +65,7 @@ test.describe("Office onboarding — mobile layout", () => {
     await expect(testPage.getByRole("heading", { name: STEP_1_HEADING })).toBeVisible();
     await expect(testPage.getByText("Agent tier profiles")).toBeVisible();
 
-    await assertNoDocumentHorizontalOverflow(testPage, "agent step (Step 1)");
+    await assertNoDocumentHorizontalOverflow(testPage, "tier profile step (Step 1)");
 
     const viewport = testPage.viewportSize();
     expect(viewport).not.toBeNull();
@@ -85,7 +86,7 @@ test.describe("Office onboarding — mobile layout", () => {
     }
   });
 
-  test("agent step (Step 1) heading and Next button are reachable on mobile", async ({
+  test("tier profile step (Step 1) heading and Next button are reachable on mobile", async ({
     testPage,
     officeSeed: _,
   }) => {
@@ -132,12 +133,12 @@ test.describe("Office onboarding — mobile layout", () => {
     // scroll cannot bring it on-screen and the click times out — which is
     // exactly the user-facing bug.
     await next.click();
-    await expect(
-      testPage.getByRole("heading", { name: /Give your .* something to do/i }),
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByRole("heading", { name: STEP_2_HEADING })).toBeVisible({
+      timeout: 10_000,
+    });
   });
 
-  test("task step (Step 2) starter brief fits horizontally on mobile", async ({
+  test("task step (Step 3) starter brief fits horizontally on mobile", async ({
     testPage,
     officeSeed: _,
   }) => {
@@ -146,14 +147,17 @@ test.describe("Office onboarding — mobile layout", () => {
     await testPage.getByRole("button", { name: /next/i }).click();
     await expect(testPage.getByRole("heading", { name: STEP_1_HEADING })).toBeVisible();
     await testPage.getByRole("button", { name: /next/i }).click();
-
     await expect(testPage.getByRole("heading", { name: STEP_2_HEADING })).toBeVisible();
+    await testPage.getByRole("button", { name: /next/i }).click();
+
+    await expect(testPage.getByRole("heading", { name: STEP_3_HEADING })).toBeVisible();
     await expect(testPage.getByLabel("Task title")).toHaveValue("Setup Workspace");
     await expect(testPage.getByLabel("Description")).toHaveValue(
       /Create one project per repository/,
     );
+    await expect(testPage.getByLabel("Description")).toHaveValue(/proposed plan/);
 
-    await assertNoDocumentHorizontalOverflow(testPage, "task step (Step 2)");
+    await assertNoDocumentHorizontalOverflow(testPage, "task step (Step 3)");
   });
 
   test("opening the agent profile combobox keeps the document within the viewport", async ({
@@ -163,6 +167,8 @@ test.describe("Office onboarding — mobile layout", () => {
     await testPage.goto(SETUP_ROUTE);
     await testPage.getByRole("button", { name: /next/i }).click();
     await expect(testPage.getByRole("heading", { name: STEP_1_HEADING })).toBeVisible();
+    await testPage.getByRole("button", { name: /next/i }).click();
+    await expect(testPage.getByRole("heading", { name: STEP_2_HEADING })).toBeVisible();
 
     await testPage.getByTestId("agent-profile-selector").click();
     // Wait for the popover to actually mount instead of sleeping — the

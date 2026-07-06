@@ -10,6 +10,7 @@ import {
 } from "@/lib/api/domains/office-api";
 import { StepImport } from "./step-import";
 import { StepWorkspace, derivePrefix } from "./step-workspace";
+import { StepTierProfiles } from "./step-tier-profiles";
 import { StepAgent } from "./step-agent";
 import { StepTask } from "./step-task";
 import { StepReview } from "./step-review";
@@ -73,23 +74,23 @@ export function getInitialData(
     agentProfileId: defaultAgentProfileId ?? "",
     tierProfileIds: initialTierProfileIds,
     executorPreference: "local_pc",
+    defaultTier: "frontier",
     taskTitle: DEFAULT_ONBOARDING_TASK_TITLE,
     taskDescription: DEFAULT_ONBOARDING_TASK_DESCRIPTION,
   };
 }
 
-const STEP_COUNT = 4;
+const STEP_COUNT = 5;
 
 function computeCanAdvance(step: number, data: WizardData): boolean {
   if (step === 0) return data.workspaceName.trim() !== "";
   if (step === 1)
     return (
-      data.agentName.trim() !== "" &&
-      data.agentProfileId !== "" &&
       Boolean(data.tierProfileIds.frontier) &&
       Boolean(data.tierProfileIds.balanced) &&
       Boolean(data.tierProfileIds.economy)
     );
+  if (step === 2) return data.agentName.trim() !== "" && data.agentProfileId !== "";
   return true;
 }
 
@@ -141,10 +142,18 @@ function WizardStepContent({
     );
   if (step === 1)
     return (
+      <StepTierProfiles
+        tierProfileIds={data.tierProfileIds}
+        agentProfiles={agentProfiles}
+        onChange={patch}
+        onAgentProfilesChange={onAgentProfilesChange}
+      />
+    );
+  if (step === 2)
+    return (
       <StepAgent
         agentName={data.agentName}
         agentProfileId={data.agentProfileId}
-        tierProfileIds={data.tierProfileIds}
         executorPreference={data.executorPreference}
         defaultTier={data.defaultTier}
         agentProfiles={agentProfiles}
@@ -152,7 +161,7 @@ function WizardStepContent({
         onAgentProfilesChange={onAgentProfilesChange}
       />
     );
-  if (step === 2)
+  if (step === 3)
     return (
       <StepTask
         agentName={data.agentName}
