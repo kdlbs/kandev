@@ -99,7 +99,7 @@ func TestDeploy_Local_WritesSkillsAndInstructions(t *testing.T) {
 	skillPath := filepath.Join(worktree, ".claude", "skills", "kandev-sk-foo", "SKILL.md")
 	if data, err := os.ReadFile(skillPath); err != nil {
 		t.Fatalf("read SKILL.md: %v", err)
-	} else if string(data) != "# foo skill" {
+	} else if string(data) != "---\nname: sk-foo\ndescription: sk-foo\n---\n# foo skill" {
 		t.Errorf("SKILL.md content = %q", string(data))
 	}
 	// The legacy host runtime layout for skills must NOT be populated.
@@ -220,7 +220,7 @@ func TestDeploy_Docker_WritesSkillsToWorktree(t *testing.T) {
 	skillPath := filepath.Join(worktree, ".claude", "skills", "kandev-sk-foo", "SKILL.md")
 	if data, err := os.ReadFile(skillPath); err != nil {
 		t.Fatalf("skill file missing in worktree: %v", err)
-	} else if string(data) != "# foo" {
+	} else if string(data) != "---\nname: sk-foo\ndescription: sk-foo\n---\n# foo" {
 		t.Errorf("SKILL.md content = %q", string(data))
 	}
 }
@@ -261,6 +261,8 @@ func TestDeploy_Sprites_SetsManifestJSONMetadata(t *testing.T) {
 	}
 	if len(decoded.Skills) != 1 || decoded.Skills[0].Slug != "sk-foo" {
 		t.Errorf("manifest skills = %+v", decoded.Skills)
+	} else if decoded.Skills[0].Content != "---\nname: sk-foo\ndescription: sk-foo\n---\n# foo" {
+		t.Errorf("manifest skill content = %q", decoded.Skills[0].Content)
 	}
 	if len(decoded.Instructions) != 1 || decoded.Instructions[0].Filename != "AGENTS.md" {
 		t.Errorf("manifest instructions = %+v", decoded.Instructions)

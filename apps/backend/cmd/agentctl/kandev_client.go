@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -26,7 +27,7 @@ type kandevClient struct {
 // newKandevClient creates a client from environment variables.
 // Returns an error if required variables (KANDEV_API_URL, KANDEV_API_KEY) are missing.
 func newKandevClient() (*kandevClient, error) {
-	apiURL := os.Getenv("KANDEV_API_URL")
+	apiURL := normalizeKandevAPIURL(os.Getenv("KANDEV_API_URL"))
 	apiKey := os.Getenv("KANDEV_API_KEY")
 	if apiURL == "" || apiKey == "" {
 		return nil, fmt.Errorf("KANDEV_API_URL and KANDEV_API_KEY must be set")
@@ -40,6 +41,11 @@ func newKandevClient() (*kandevClient, error) {
 		workspaceID: os.Getenv("KANDEV_WORKSPACE_ID"),
 		http:        &http.Client{Timeout: 30 * time.Second},
 	}, nil
+}
+
+func normalizeKandevAPIURL(raw string) string {
+	base := strings.TrimRight(strings.TrimSpace(raw), "/")
+	return strings.TrimSuffix(base, "/api/v1")
 }
 
 // isMutating returns true for methods that modify server state.

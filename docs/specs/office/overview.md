@@ -129,7 +129,7 @@ Filesystem layout:
 
 **Git integration** for repo-backed workspaces: setup via `git clone <repo-url> ~/.kandev/workspaces/<name>/`; pulling new config -> Sync UI shows incoming diff -> user applies; conflicts are resolved in the terminal then imported via Sync UI.
 
-**Skill injection**: skills for agent sessions are written into the agent's worktree (CWD) before each session. Skill content can come from the DB (inline skills created via UI), the filesystem (imported from GitHub/skills.sh), or bundled (shipped with the kandev binary). All routes inject into the agent-specific skill path under the worktree. See [office-skills](../office-skills/spec.md).
+**Skill injection**: skills for agent sessions are written into the agent's worktree (CWD) before each session. Skill content can come from the DB (inline skills created via UI), the filesystem (imported from GitHub/skills.sh), or bundled (shipped with the kandev binary). All routes inject into the agent-specific skill path under the worktree. See [office agents](./agents.md#skill-injection).
 
 **Agent profiles** (model, CLI flags, MCP servers) stay in the existing kandev `agent_profiles` DB table. Office agent instances reference profiles by ID. Filesystem export format:
 
@@ -367,7 +367,7 @@ The CEO and workers move tasks between states by calling the same API the UI use
 ## Related specs
 
 - [office-agents](../office-agents/spec.md) - agent instances, hierarchy, permissions
-- [office-skills](../office-skills/spec.md) - skill registry and CWD injection
+- [office agents](./agents.md#skill-injection) - skill registry and CWD injection
 - [office-scheduler](../office-scheduler/spec.md) - wakeup queue and heartbeat scheduler
 - [office-costs](../office-costs/spec.md) - cost tracking and budget management
 - [office-routines](../office-routines/spec.md) - recurring scheduled tasks

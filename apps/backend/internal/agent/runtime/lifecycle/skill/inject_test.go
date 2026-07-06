@@ -35,6 +35,49 @@ func TestInjectSkills_WritesUnderProjectSkillDir(t *testing.T) {
 	}
 }
 
+func TestInjectSkills_AddsFrontmatterWhenMissing(t *testing.T) {
+	worktree := t.TempDir()
+	ensureGit(t, worktree)
+
+	if err := injectSkills(worktree, ".agents/skills", []Skill{
+		{Slug: "kandev-team", Content: "# Team\n\nUse the team commands."},
+	}); err != nil {
+		t.Fatalf("injectSkills: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(worktree, ".agents", "skills", "kandev-kandev-team", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read SKILL.md: %v", err)
+	}
+	got := string(data)
+	if !strings.HasPrefix(got, "---\nname: kandev-team\ndescription: kandev-team\n---\n") {
+		t.Fatalf("SKILL.md missing synthesized frontmatter:\n%s", got)
+	}
+	if !strings.Contains(got, "# Team\n\nUse the team commands.") {
+		t.Errorf("SKILL.md missing original body:\n%s", got)
+	}
+}
+
+func TestInjectSkills_PreservesExistingFrontmatter(t *testing.T) {
+	worktree := t.TempDir()
+	ensureGit(t, worktree)
+
+	content := "---\nname: custom\ndescription: existing\n---\n# Body"
+	if err := injectSkills(worktree, ".agents/skills", []Skill{
+		{Slug: "custom", Content: content},
+	}); err != nil {
+		t.Fatalf("injectSkills: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(worktree, ".agents", "skills", "kandev-custom", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read SKILL.md: %v", err)
+	}
+	if string(data) != content {
+		t.Errorf("existing frontmatter should be preserved, got %q", string(data))
+	}
+}
+
 func TestInjectSkills_CleanSlateRemovesPreviousKandevDirs(t *testing.T) {
 	worktree := t.TempDir()
 	ensureGit(t, worktree)

@@ -52,7 +52,7 @@ func injectSkills(worktreePath, projectSkillDir string, skills []Skill) error {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("mkdir skill %s: %w", sk.Slug, err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(sk.Content), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(renderSkillMarkdown(sk)), 0o644); err != nil {
 			return fmt.Errorf("write SKILL.md for %s: %w", sk.Slug, err)
 		}
 	}
@@ -129,4 +129,16 @@ func resolveGitDir(worktreePath string) (string, error) {
 // /workspace/<projectSkillDir>/kandev-<slug>/SKILL.md.
 func SpritesProjectSkillPath(projectSkillDir, slug string) string {
 	return "/workspace/" + projectSkillDir + "/kandev-" + slug + "/SKILL.md"
+}
+
+func renderSkillMarkdown(sk Skill) string {
+	content := strings.TrimLeft(sk.Content, "\r\n")
+	if hasYAMLFrontmatter(content) {
+		return content
+	}
+	return fmt.Sprintf("---\nname: %s\ndescription: %s\n---\n%s", sk.Slug, sk.Slug, content)
+}
+
+func hasYAMLFrontmatter(content string) bool {
+	return strings.HasPrefix(content, "---\n") || strings.HasPrefix(content, "---\r\n")
 }

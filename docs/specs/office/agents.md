@@ -119,7 +119,7 @@ Before each session, instructions are written to `~/.kandev/runtime/<workspace-s
 
 ### Skills
 
-A skill is a directory containing `SKILL.md` (required: the markdown instructions the agent reads) plus optional scripts and reference files. The structure matches Claude Code's native skill discovery and other agent CLIs.
+A skill is a directory containing `SKILL.md` (required: the markdown instructions the agent reads) plus optional scripts and reference files. The structure matches Claude Code's native skill discovery and other agent CLIs. Materialized `SKILL.md` files must be valid Codex/Claude-style skill files: when stored content lacks YAML frontmatter, the runtime prepends generated `name` and `description` frontmatter from the skill slug before writing or uploading the file.
 
 `skill` DB row (workspace-scoped): `id` PK, `name`, `slug` (kebab-case, used as `kandev-<slug>` directory), `description`, `source_type` (`inline` | `local_path` | `git`), `source_locator` (path/URL), `content` (SKILL.md text for inline, null otherwise), `file_inventory` (JSON list of `{name, size}`), `workspace_id` FK, `created_by_agent_instance_id` (nullable; agents only edit skills they created), `is_system` (bool), `system_version` (kandev release).
 
@@ -255,7 +255,7 @@ Read them when referenced in these instructions.
 
 ### Skill injection
 
-Skill content is stored in the DB (source of truth). Before each session, each desired skill's `SKILL.md` is written into the agent's worktree CWD.
+Skill content is stored in the DB (source of truth). Before each session, each desired skill's `SKILL.md` is written into the agent's worktree CWD. If the stored content does not already begin with YAML frontmatter delimited by `---`, runtime materialization prepends generated `name` and `description` frontmatter from the skill slug so agent CLIs can load the file as a native skill.
 
 Each agent type defines `ProjectSkillDir` in its `RuntimeConfig`:
 
@@ -556,7 +556,7 @@ There are no TTLs on agent rows, runtime rows, instructions, skills, run history
 
 - **GIVEN** a user on `/office/workspace/skills`, **WHEN** they click "Add Skill" and enter a name, description, and SKILL.md content, **THEN** the skill appears in the registry and is available for assignment.
 
-- **GIVEN** a skill assigned to a Claude Code worker, **WHEN** the worker starts a new session, **THEN** the skill's `SKILL.md` is written to `<worktree>/.claude/skills/kandev-<slug>/SKILL.md` (Claude's `ProjectSkillDir`). For non-Claude agents, the path is `<worktree>/.agents/skills/kandev-<slug>/SKILL.md`.
+- **GIVEN** a skill assigned to a Claude Code worker, **WHEN** the worker starts a new session, **THEN** the skill's `SKILL.md` is written to `<worktree>/.claude/skills/kandev-<slug>/SKILL.md` (Claude's `ProjectSkillDir`) and begins with YAML frontmatter. For non-Claude agents, the path is `<worktree>/.agents/skills/kandev-<slug>/SKILL.md`.
 
 - **GIVEN** a skill sourced from a git URL, **WHEN** the user creates the skill entry, **THEN** the repository is cloned and cached and the file inventory displays in the UI.
 

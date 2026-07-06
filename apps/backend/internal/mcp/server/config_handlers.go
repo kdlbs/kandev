@@ -295,7 +295,7 @@ func (s *Server) registerConfigTaskTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_task_conversation_kandev",
-			mcp.WithDescription("Get conversation history for a task. If session_id is omitted, the primary session is used."),
+			mcp.WithDescription("Get conversation history for a task. If session_id is omitted, the primary session is used, falling back to the latest task session."),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
 			mcp.WithString("session_id", mcp.Description("Optional session ID (must belong to task_id)")),
 			mcp.WithNumber("limit", mcp.Description("Optional page size (defaults to backend setting, max backend-capped)")),
