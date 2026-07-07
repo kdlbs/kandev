@@ -250,6 +250,7 @@ function ModelConfigSelectorContent({
 }: ModelConfigSelectorContentProps) {
   const pendingFocusConfigId = useRef<string | null>(null);
   const triggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const showModelFilter = modelOptions.length > 5;
 
   useEffect(() => {
     if (activeConfig) return;
@@ -279,7 +280,7 @@ function ModelConfigSelectorContent({
   return (
     <>
       <Command>
-        <CommandInput placeholder="Filter models..." className="h-8" />
+        {showModelFilter && <CommandInput placeholder="Filter models..." className="h-8" />}
         <CommandList className="max-h-60">
           <CommandEmpty>No models found.</CommandEmpty>
           <CommandGroup heading="Model">

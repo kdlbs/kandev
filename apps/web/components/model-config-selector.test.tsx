@@ -10,6 +10,12 @@ afterEach(() => {
 describe("ModelConfigSelector", () => {
   const effortSectionTestId = "config-option-section-effort";
   const effortTriggerTestId = "config-option-trigger-effort";
+  const modelSettingsButtonName = "Model settings";
+  const makeModelOptions = (count: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      id: `model-${index + 1}`,
+      name: `Model ${index + 1}`,
+    }));
 
   it("passes custom trigger classes to the button", () => {
     render(
@@ -21,7 +27,7 @@ describe("ModelConfigSelector", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Model settings" }).className).toContain(
+    expect(screen.getByRole("button", { name: modelSettingsButtonName }).className).toContain(
       "max-w-[56vw]",
     );
   });
@@ -59,7 +65,7 @@ describe("ModelConfigSelector", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Model settings" }));
+    fireEvent.click(screen.getByRole("button", { name: modelSettingsButtonName }));
 
     const effortTrigger = screen.getByTestId(effortTriggerTestId);
     expect(effortTrigger.textContent).toContain("Effort");
@@ -84,5 +90,33 @@ describe("ModelConfigSelector", () => {
 
     expect(onConfigChange).toHaveBeenCalledWith("effort", "high");
     expect(screen.queryByTestId(effortSectionTestId)).toBeNull();
+  });
+
+  it("hides the model filter when there are five or fewer models", () => {
+    render(
+      <ModelConfigSelector
+        modelOptions={makeModelOptions(5)}
+        currentModel="model-1"
+        onModelChange={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: modelSettingsButtonName }));
+
+    expect(screen.queryByPlaceholderText("Filter models...")).toBeNull();
+  });
+
+  it("shows the model filter when there are more than five models", () => {
+    render(
+      <ModelConfigSelector
+        modelOptions={makeModelOptions(6)}
+        currentModel="model-1"
+        onModelChange={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: modelSettingsButtonName }));
+
+    expect(screen.getByPlaceholderText("Filter models...")).not.toBeNull();
   });
 });
