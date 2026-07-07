@@ -1,6 +1,28 @@
 import type { Repository, RepositoryScript } from "@/lib/types/http";
+import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
 
 export type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
+
+const repositoryFields: Array<keyof RepositoryWithScripts> = [
+  "name",
+  "source_type",
+  "local_path",
+  "provider",
+  "provider_repo_id",
+  "provider_owner",
+  "provider_name",
+  "default_branch",
+  "worktree_branch_prefix",
+  "pull_before_worktree",
+  "setup_script",
+  "cleanup_script",
+  "dev_script",
+  "copy_files",
+];
+
+function branchTemplate(repo: RepositoryWithScripts): string {
+  return repo.worktree_branch_template || defaultWorktreeBranchTemplate;
+}
 
 export function cloneRepository(repo: RepositoryWithScripts): RepositoryWithScripts {
   return { ...repo, scripts: repo.scripts.map((script) => ({ ...script })) };
@@ -12,20 +34,8 @@ export function isRepositoryDirty(
 ): boolean {
   if (!saved) return true;
   return (
-    repo.name !== saved.name ||
-    repo.source_type !== saved.source_type ||
-    repo.local_path !== saved.local_path ||
-    repo.provider !== saved.provider ||
-    repo.provider_repo_id !== saved.provider_repo_id ||
-    repo.provider_owner !== saved.provider_owner ||
-    repo.provider_name !== saved.provider_name ||
-    repo.default_branch !== saved.default_branch ||
-    repo.worktree_branch_prefix !== saved.worktree_branch_prefix ||
-    repo.pull_before_worktree !== saved.pull_before_worktree ||
-    repo.setup_script !== saved.setup_script ||
-    repo.cleanup_script !== saved.cleanup_script ||
-    repo.dev_script !== saved.dev_script ||
-    repo.copy_files !== saved.copy_files
+    repositoryFields.some((field) => repo[field] !== saved[field]) ||
+    branchTemplate(repo) !== branchTemplate(saved)
   );
 }
 

@@ -105,6 +105,7 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
           onRepoPull={data.repoCallbacks.onRepoPull}
           onRepoRebase={data.repoCallbacks.onRepoRebase}
           onRepoMerge={data.repoCallbacks.onRepoMerge}
+          onRenameBranch={data.git.renameBranch}
           repoDisplayName={data.repoDisplayName}
           taskId={data.activeTaskId}
         />

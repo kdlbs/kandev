@@ -122,7 +122,7 @@ export type SessionGit = {
   unstageAll: () => Promise<GitOperationResult>;
   discard: (paths?: string[], repo?: string) => Promise<GitOperationResult>;
   revertCommit: (commitSHA: string, repo?: string) => Promise<GitOperationResult>;
-  renameBranch: (newName: string) => Promise<GitOperationResult>;
+  renameBranch: (newName: string, repo?: string) => Promise<GitOperationResult>;
   reset: (commitSHA: string, mode: "soft" | "hard", repo?: string) => Promise<GitOperationResult>;
   createPR: (
     title: string,

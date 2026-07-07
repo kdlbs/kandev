@@ -69,6 +69,19 @@ func TestBuildWorktreeNames(t *testing.T) {
 		}
 	})
 
+	t.Run("branch template", func(t *testing.T) {
+		req := CreateRequest{
+			TaskID:                 "task-1",
+			TaskTitle:              "Add feature",
+			WorktreeBranchTemplate: "task/{task_id}-{title}-{suffix}",
+		}
+		_, branchName := mgr.buildWorktreeNames(req)
+
+		if !strings.HasPrefix(branchName, "task/task-1-add-feature-") {
+			t.Errorf("branchName = %q, want prefix %q", branchName, "task/task-1-add-feature-")
+		}
+	})
+
 	t.Run("title with only special chars falls back to task ID for branch", func(t *testing.T) {
 		req := CreateRequest{
 			TaskID:               "task-fallback",
@@ -99,6 +112,13 @@ func TestBuildWorktreeNames(t *testing.T) {
 		// TaskBranchNameWithSuffix falls back to the sanitized task ID.
 		if !strings.HasPrefix(branchName, "kandev/task-cjk-") {
 			t.Errorf("branchName = %q, want prefix %q", branchName, "kandev/task-cjk-")
+		}
+	})
+
+	t.Run("invalid title fallback separates custom prefix from task body", func(t *testing.T) {
+		got := TaskBranchNameWithSuffix("修复登录问题", "task-cjk", "custom", "abc")
+		if got != "custom-task-cjk-abc" {
+			t.Fatalf("TaskBranchNameWithSuffix = %q, want %q", got, "custom-task-cjk-abc")
 		}
 	})
 

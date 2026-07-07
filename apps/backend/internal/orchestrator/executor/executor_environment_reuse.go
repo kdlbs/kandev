@@ -202,19 +202,21 @@ func topLevelLaunchRepoSpec(req *LaunchAgentRequest) (RepoSpec, bool) {
 		return RepoSpec{}, false
 	}
 	return RepoSpec{
-		RepositoryID:         req.RepositoryID,
-		RepositoryPath:       req.RepositoryPath,
-		RepositoryURL:        req.RepositoryURL,
-		RepoName:             req.RepoName,
-		BaseBranch:           req.BaseBranch,
-		DefaultBranch:        req.DefaultBranch,
-		CheckoutBranch:       req.CheckoutBranch,
-		PRNumber:             req.PRNumber,
-		WorktreeID:           req.WorktreeID,
-		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
-		PullBeforeWorktree:   req.PullBeforeWorktree,
-		CopyFiles:            req.CopyFiles,
-		BranchIdentitySlug:   topLevelBranchIdentitySlug(req),
+		RepositoryID:           req.RepositoryID,
+		RepositoryPath:         req.RepositoryPath,
+		RepositoryURL:          req.RepositoryURL,
+		RepoName:               req.RepoName,
+		BaseBranch:             req.BaseBranch,
+		DefaultBranch:          req.DefaultBranch,
+		CheckoutBranch:         req.CheckoutBranch,
+		PRNumber:               req.PRNumber,
+		WorktreeID:             req.WorktreeID,
+		WorktreeBranchPrefix:   req.WorktreeBranchPrefix,
+		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
+		WorktreeBranchTicket:   req.WorktreeBranchTicket,
+		PullBeforeWorktree:     req.PullBeforeWorktree,
+		CopyFiles:              req.CopyFiles,
+		BranchIdentitySlug:     topLevelBranchIdentitySlug(req),
 	}, true
 }
 

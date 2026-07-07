@@ -247,22 +247,24 @@ func (p *WorktreePreparer) createWorktreeWithSync(
 // manager's CreateRequest. Progress callbacks are wired by the caller.
 func buildWorktreeCreateRequest(req *EnvPrepareRequest) worktree.CreateRequest {
 	return worktree.CreateRequest{
-		TaskID:               req.TaskID,
-		SessionID:            req.SessionID,
-		TaskTitle:            req.TaskTitle,
-		RepositoryID:         req.RepositoryID,
-		RepositoryPath:       req.RepositoryPath,
-		BaseBranch:           req.BaseBranch,
-		FallbackBaseBranch:   req.DefaultBranch,
-		CheckoutBranch:       req.CheckoutBranch,
-		PRNumber:             req.PRNumber,
-		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
-		PullBeforeWorktree:   req.PullBeforeWorktree,
-		WorktreeID:           req.WorktreeID,
-		TaskDirName:          req.TaskDirName,
-		RepoName:             req.RepoName,
-		BranchSlug:           req.BranchSlug,
-		BranchIdentitySlug:   req.BranchIdentitySlug,
+		TaskID:                 req.TaskID,
+		SessionID:              req.SessionID,
+		TaskTitle:              req.TaskTitle,
+		RepositoryID:           req.RepositoryID,
+		RepositoryPath:         req.RepositoryPath,
+		BaseBranch:             req.BaseBranch,
+		FallbackBaseBranch:     req.DefaultBranch,
+		CheckoutBranch:         req.CheckoutBranch,
+		PRNumber:               req.PRNumber,
+		WorktreeBranchPrefix:   req.WorktreeBranchPrefix,
+		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
+		WorktreeBranchTicket:   req.WorktreeBranchTicket,
+		PullBeforeWorktree:     req.PullBeforeWorktree,
+		WorktreeID:             req.WorktreeID,
+		TaskDirName:            req.TaskDirName,
+		RepoName:               req.RepoName,
+		BranchSlug:             req.BranchSlug,
+		BranchIdentitySlug:     req.BranchIdentitySlug,
 	}
 }
 
@@ -453,6 +455,8 @@ func (p *WorktreePreparer) prepareOneRepo(
 	subReq.PRNumber = spec.PRNumber
 	subReq.WorktreeID = spec.WorktreeID
 	subReq.WorktreeBranchPrefix = spec.WorktreeBranchPrefix
+	subReq.WorktreeBranchTemplate = spec.WorktreeBranchTemplate
+	subReq.WorktreeBranchTicket = spec.WorktreeBranchTicket
 	subReq.PullBeforeWorktree = spec.PullBeforeWorktree
 	subReq.BranchSlug = spec.BranchSlug
 	subReq.BranchIdentitySlug = repoBranchIdentitySlug(spec)

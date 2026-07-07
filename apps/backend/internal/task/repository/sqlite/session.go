@@ -1112,6 +1112,23 @@ func (r *Repository) UpdateTaskSessionWorktreeBranch(ctx context.Context, sessio
 	return err
 }
 
+// UpdateTaskSessionWorktreeBranchByRepository updates the cached worktree_branch
+// for one repository row in a session. Use this for repo-scoped live git
+// operations in multi-repo tasks so sibling repositories keep their branch
+// snapshots.
+func (r *Repository) UpdateTaskSessionWorktreeBranchByRepository(ctx context.Context, sessionID, repositoryID, branch string) error {
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_session_worktrees
+		SET worktree_branch = ?, updated_at = ?
+		WHERE session_id = ?
+		  AND repository_id = ?
+		  AND deleted_at IS NULL
+		  AND status = 'active'
+	`), branch, now, sessionID, repositoryID)
+	return err
+}
+
 func (r *Repository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT

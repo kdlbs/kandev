@@ -42,6 +42,7 @@ const ChangesPanel = memo(function ChangesPanel(props: ChangesPanelProps) {
         onRepoPull={data.repoCallbacks.onRepoPull}
         onRepoRebase={data.repoCallbacks.onRepoRebase}
         onRepoMerge={data.repoCallbacks.onRepoMerge}
+        onRenameBranch={data.git.renameBranch}
         repoDisplayName={data.repoDisplayName}
         taskId={data.activeTaskId}
       />

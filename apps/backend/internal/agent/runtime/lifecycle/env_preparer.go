@@ -26,18 +26,20 @@ const (
 // carried at the top level. When EnvPrepareRequest.Repositories is non-empty,
 // each entry produces one prepared worktree under the shared TaskDirName.
 type RepoPrepareSpec struct {
-	RepositoryID         string
-	RepositoryPath       string
-	RepoName             string
-	BaseBranch           string
-	DefaultBranch        string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch       string
-	PRNumber             int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	WorktreeID           string
-	WorktreeBranch       string
-	WorktreeBranchPrefix string
-	PullBeforeWorktree   bool
-	RepoSetupScript      string
+	RepositoryID           string
+	RepositoryPath         string
+	RepoName               string
+	BaseBranch             string
+	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch         string
+	PRNumber               int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	WorktreeID             string
+	WorktreeBranch         string
+	WorktreeBranchPrefix   string
+	WorktreeBranchTemplate string
+	WorktreeBranchTicket   string
+	PullBeforeWorktree     bool
+	RepoSetupScript        string
 	// BranchSlug, when set, suffixes the worktree path as
 	// {RepoName}-{BranchSlug} so two specs sharing a RepositoryID don't collide
 	// on disk.
@@ -68,8 +70,10 @@ type EnvPrepareRequest struct {
 	WorktreeID      string
 	WorktreeBranch  string
 
-	WorktreeBranchPrefix string
-	PullBeforeWorktree   bool
+	WorktreeBranchPrefix   string
+	WorktreeBranchTemplate string
+	WorktreeBranchTicket   string
+	PullBeforeWorktree     bool
 
 	TaskDirName string // Per-task directory name within the workspace (e.g. "task-abc123")
 	RepoName    string // Repository slug used with TaskDirName to locate checkouts
@@ -100,20 +104,22 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 		return nil
 	}
 	return []RepoPrepareSpec{{
-		RepositoryID:         r.RepositoryID,
-		RepositoryPath:       r.RepositoryPath,
-		RepoName:             r.RepoName,
-		BaseBranch:           r.BaseBranch,
-		DefaultBranch:        r.DefaultBranch,
-		CheckoutBranch:       r.CheckoutBranch,
-		PRNumber:             r.PRNumber,
-		WorktreeID:           r.WorktreeID,
-		WorktreeBranch:       r.WorktreeBranch,
-		WorktreeBranchPrefix: r.WorktreeBranchPrefix,
-		PullBeforeWorktree:   r.PullBeforeWorktree,
-		RepoSetupScript:      r.RepoSetupScript,
-		BranchSlug:           r.BranchSlug,
-		BranchIdentitySlug:   r.BranchIdentitySlug,
+		RepositoryID:           r.RepositoryID,
+		RepositoryPath:         r.RepositoryPath,
+		RepoName:               r.RepoName,
+		BaseBranch:             r.BaseBranch,
+		DefaultBranch:          r.DefaultBranch,
+		CheckoutBranch:         r.CheckoutBranch,
+		PRNumber:               r.PRNumber,
+		WorktreeID:             r.WorktreeID,
+		WorktreeBranch:         r.WorktreeBranch,
+		WorktreeBranchPrefix:   r.WorktreeBranchPrefix,
+		WorktreeBranchTemplate: r.WorktreeBranchTemplate,
+		WorktreeBranchTicket:   r.WorktreeBranchTicket,
+		PullBeforeWorktree:     r.PullBeforeWorktree,
+		RepoSetupScript:        r.RepoSetupScript,
+		BranchSlug:             r.BranchSlug,
+		BranchIdentitySlug:     r.BranchIdentitySlug,
 	}}
 }
 

@@ -180,6 +180,7 @@ type SessionRepository interface {
 type SessionWorktreeRepository interface {
 	CreateTaskSessionWorktree(ctx context.Context, sessionWorktree *models.TaskSessionWorktree) error
 	UpdateTaskSessionWorktreeBranch(ctx context.Context, sessionID, branch string) error
+	UpdateTaskSessionWorktreeBranchByRepository(ctx context.Context, sessionID, repositoryID, branch string) error
 	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error)
 	ListWorktreesBySessionIDs(ctx context.Context, sessionIDs []string) (map[string][]*models.TaskSessionWorktree, error)
 	DeleteTaskSessionWorktree(ctx context.Context, id string) error

@@ -743,6 +743,38 @@ func resolveRepositoryIDForSubpath(ctx context.Context, taskRepo *sqliterepo.Rep
 	return ""
 }
 
+func resolveRepositoryIDForSessionSubpath(ctx context.Context, taskRepo *sqliterepo.Repository, sessionID, subpath string, log *logger.Logger) string {
+	worktrees, err := taskRepo.ListTaskSessionWorktrees(ctx, sessionID)
+	if err != nil {
+		log.Warn("session worktrees lookup failed",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return ""
+	}
+	if subpath == "" {
+		if len(worktrees) == 1 {
+			return worktrees[0].RepositoryID
+		}
+		log.Warn("branch rename did not specify repo for multi-repo session",
+			zap.String("session_id", sessionID), zap.Int("worktree_count", len(worktrees)))
+		return ""
+	}
+	for _, wt := range worktrees {
+		// Multi-repo sessions are small today and repository lookup is only on
+		// branch rename, so keep this direct until the repository interface grows
+		// a batch lookup.
+		repo, err := taskRepo.GetRepository(ctx, wt.RepositoryID)
+		if err != nil || repo == nil {
+			continue
+		}
+		if repo.Name == subpath || worktree.SanitizeRepoDirName(repo.Name) == subpath {
+			return wt.RepositoryID
+		}
+	}
+	log.Warn("no session worktree repository matches subpath",
+		zap.String("session_id", sessionID), zap.String("subpath", subpath))
+	return ""
+}
+
 // registerTaskRoutes registers all task-related HTTP and WebSocket routes.
 func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, handoffSvc *taskservice.HandoffService) {
 	taskhandlers.RegisterWorkspaceRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
