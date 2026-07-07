@@ -1200,6 +1200,82 @@ func TestService_DeleteTaskCleansSuccessfulSessionResourcesOnPartialStopFailure(
 	}
 }
 
+func TestService_QuickChatExpirationDeletesExpiredCandidates(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+	quickChatDir := t.TempDir()
+	svc.SetQuickChatDir(quickChatDir)
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-expire", Name: "Expire"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	expiredTaskID := "quick-expired"
+	recentTaskID := "quick-recent"
+	now := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+
+	createQuickChatExpirationServiceFixture(t, repo, ctx, expiredTaskID, now.Add(-8*24*time.Hour))
+	createQuickChatExpirationServiceFixture(t, repo, ctx, recentTaskID, now.Add(-time.Hour))
+	expiredSessionDir := filepath.Join(quickChatDir, expiredTaskID+"-session")
+	if err := os.MkdirAll(expiredSessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir expired session dir: %v", err)
+	}
+
+	svc.runQuickChatExpiration(ctx, now)
+	waitForCleanupDone(t, svc)
+
+	if _, err := repo.GetTask(ctx, expiredTaskID); err == nil {
+		t.Fatal("expired quick chat should be deleted")
+	}
+	if _, err := repo.GetTask(ctx, recentTaskID); err != nil {
+		t.Fatalf("recent quick chat should remain: %v", err)
+	}
+	if _, err := os.Stat(expiredSessionDir); !os.IsNotExist(err) {
+		t.Fatalf("expired quick-chat directory should be removed, got %v", err)
+	}
+	if !eventBusHasType(eventBus, "task.deleted") {
+		t.Fatalf("expected task.deleted event, got %#v", eventBus.GetPublishedEvents())
+	}
+}
+
+func createQuickChatExpirationServiceFixture(
+	t *testing.T,
+	repo *sqliterepo.Repository,
+	ctx context.Context,
+	taskID string,
+	updatedAt time.Time,
+) {
+	t.Helper()
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:          taskID,
+		WorkspaceID: "ws-expire",
+		Title:       taskID,
+		State:       v1.TaskStateTODO,
+		Priority:    "medium",
+		IsEphemeral: true,
+		CreatedAt:   updatedAt.Add(-time.Hour),
+		UpdatedAt:   updatedAt,
+	}); err != nil {
+		t.Fatalf("CreateTask(%s): %v", taskID, err)
+	}
+	if _, err := repo.DB().ExecContext(ctx,
+		`UPDATE tasks SET created_at = ?, updated_at = ? WHERE id = ?`,
+		updatedAt.Add(-time.Hour), updatedAt, taskID,
+	); err != nil {
+		t.Fatalf("backdate task(%s): %v", taskID, err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:        taskID + "-session",
+		TaskID:    taskID,
+		State:     models.TaskSessionStateCompleted,
+		StartedAt: updatedAt.Add(-time.Hour),
+		UpdatedAt: updatedAt,
+		IsPrimary: true,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession(%s): %v", taskID, err)
+	}
+}
+
 func TestService_DeleteTaskCleansMissingSessionExecutorRowAfterStop(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

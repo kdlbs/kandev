@@ -3,6 +3,8 @@ package backendapp
 import (
 	"context"
 	"net/http"
+	"sort"
+	"time"
 
 	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
@@ -16,6 +18,8 @@ import (
 const (
 	activeWorkspaceCookie       = "kandev-active-workspace"
 	legacyOfficeWorkspaceCookie = "office-active-workspace"
+	bootStateKeySessionID       = "sessionId"
+	bootStateKeyWorkspaceID     = "workspaceId"
 )
 
 func bootInitialState(
@@ -48,6 +52,7 @@ func bootInitialState(
 	if route.Route == webapp.RouteOffice {
 		builder.addOfficeRouteState(ctx, req, state)
 	}
+	builder.addQuickChatState(ctx, req, state)
 	return state
 }
 
@@ -259,6 +264,176 @@ func (b bootStateBuilder) addRepositoriesState(ctx context.Context, state map[st
 			workspaceID: true,
 		},
 	}
+}
+
+func (b bootStateBuilder) addQuickChatState(ctx context.Context, req *http.Request, state map[string]any) {
+	workspaceID := b.resolveQuickChatWorkspaceID(ctx, req, state)
+	if workspaceID == "" {
+		return
+	}
+	sessions, err := b.quickChatSessions(ctx, workspaceID)
+	if err != nil {
+		b.logBootError("list quick-chat sessions", err)
+		return
+	}
+	state["quickChat"] = map[string]any{
+		"isOpen":          false,
+		"sessions":        sessions,
+		"activeSessionId": nil,
+	}
+}
+
+func (b bootStateBuilder) resolveQuickChatWorkspaceID(ctx context.Context, req *http.Request, state map[string]any) string {
+	if active := activeWorkspaceIDFromState(state); active != "" {
+		return active
+	}
+	if b.p.taskSvc == nil {
+		return ""
+	}
+	workspaces, err := b.p.taskSvc.ListWorkspaces(ctx)
+	if err != nil {
+		b.logBootError("list quick-chat workspaces", err)
+		return ""
+	}
+	settingsWorkspaceID := ""
+	if settings, ok := b.userSettings(ctx); ok {
+		settingsWorkspaceID = settings.Settings.WorkspaceID
+	}
+	return firstValidID(
+		workspaceIDSet(workspaces),
+		queryValue(req, "workspaceId"),
+		queryValue(req, "workspace"),
+		readActiveWorkspaceCookie(req),
+		settingsWorkspaceID,
+		firstWorkspaceID(workspaces),
+	)
+}
+
+func activeWorkspaceIDFromState(state map[string]any) string {
+	workspaces, ok := state["workspaces"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	active, _ := workspaces["activeId"].(string)
+	return active
+}
+
+func (b bootStateBuilder) quickChatSessions(ctx context.Context, workspaceID string) ([]map[string]any, error) {
+	tasks, err := b.listQuickChatTasks(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if len(tasks) == 0 {
+		return []map[string]any{}, nil
+	}
+	taskIDs := taskIDs(tasks)
+	sessionsByTask, err := b.p.taskSvc.BatchGetSessionsForTasks(ctx, taskIDs)
+	if err != nil {
+		return nil, err
+	}
+	primaryByTask, err := b.p.taskSvc.GetPrimarySessionInfoForTasks(ctx, taskIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]quickChatBootSession, 0, len(tasks))
+	for _, task := range tasks {
+		if !isRestorableQuickChatTask(task) {
+			continue
+		}
+		primary := primaryByTask[task.ID]
+		if primary == nil || primary.ID == "" {
+			continue
+		}
+		items = append(items, quickChatBootSession{
+			state:        mapQuickChatSessionState(task, primary),
+			lastActivity: quickChatLastActivity(task, sessionsByTask[task.ID]),
+		})
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return items[i].lastActivity.After(items[j].lastActivity)
+	})
+	result := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		result = append(result, item.state)
+	}
+	return result, nil
+}
+
+func (b bootStateBuilder) listQuickChatTasks(ctx context.Context, workspaceID string) ([]*taskmodels.Task, error) {
+	const pageSize = 100
+	var all []*taskmodels.Task
+	for page := 1; ; page++ {
+		tasks, total, err := b.p.taskSvc.ListTasksByWorkspace(ctx, workspaceID, "", "", "", page, pageSize, "", false, false, true, true)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, tasks...)
+		if len(tasks) == 0 || len(all) >= total {
+			return all, nil
+		}
+	}
+}
+
+type quickChatBootSession struct {
+	state        map[string]any
+	lastActivity time.Time
+}
+
+func taskIDs(tasks []*taskmodels.Task) []string {
+	ids := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		if task != nil {
+			ids = append(ids, task.ID)
+		}
+	}
+	return ids
+}
+
+func isRestorableQuickChatTask(task *taskmodels.Task) bool {
+	return task != nil &&
+		task.IsEphemeral &&
+		task.WorkflowID == "" &&
+		task.Origin != taskmodels.TaskOriginAutomationRun
+}
+
+func mapQuickChatSessionState(task *taskmodels.Task, primary *taskmodels.TaskSession) map[string]any {
+	state := map[string]any{
+		bootStateKeySessionID:   primary.ID,
+		bootStateKeyWorkspaceID: task.WorkspaceID,
+	}
+	if task.Title != "" && task.Title != "Quick Chat" {
+		state["name"] = task.Title
+	}
+	if agentProfileID := quickChatAgentProfileID(task, primary); agentProfileID != "" {
+		state["agentProfileId"] = agentProfileID
+	}
+	return state
+}
+
+func quickChatAgentProfileID(task *taskmodels.Task, primary *taskmodels.TaskSession) string {
+	if task != nil {
+		if value, ok := task.Metadata[taskmodels.MetaKeyAgentProfileID].(string); ok {
+			return value
+		}
+	}
+	if primary != nil {
+		return primary.AgentProfileID
+	}
+	return ""
+}
+
+func quickChatLastActivity(task *taskmodels.Task, sessions []*taskmodels.TaskSession) time.Time {
+	last := time.Time{}
+	if task != nil {
+		last = task.UpdatedAt
+	}
+	for _, session := range sessions {
+		if session != nil && session.UpdatedAt.After(last) {
+			last = session.UpdatedAt
+		}
+	}
+	return last
 }
 
 func (b bootStateBuilder) addKanbanSnapshotsState(

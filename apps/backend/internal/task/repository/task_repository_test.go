@@ -182,6 +182,121 @@ func TestSQLiteRepository_UpdateTaskStateIfCurrentIn(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_ListExpiredQuickChatTasks(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-quick", Name: "Quick"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-quick", WorkspaceID: "ws-quick", Name: "Workflow"}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+
+	now := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	cutoff := now.Add(-7 * 24 * time.Hour)
+	old := cutoff.Add(-time.Hour)
+	older := cutoff.Add(-2 * time.Hour)
+	recent := cutoff.Add(time.Hour)
+
+	cases := []struct {
+		id             string
+		taskUpdated    time.Time
+		sessionUpdated time.Time
+		sessionState   models.TaskSessionState
+		ephemeral      bool
+		workflowID     string
+		archived       bool
+		origin         string
+		metadata       map[string]interface{}
+		wantExpired    bool
+	}{
+		{id: "expired-older", taskUpdated: older, sessionUpdated: older, sessionState: models.TaskSessionStateCompleted, ephemeral: true, wantExpired: true},
+		{id: "expired-old", taskUpdated: old, sessionUpdated: old, sessionState: models.TaskSessionStateCompleted, ephemeral: true, wantExpired: true},
+		{id: "recent-task", taskUpdated: recent, sessionUpdated: old, sessionState: models.TaskSessionStateCompleted, ephemeral: true},
+		{id: "recent-session", taskUpdated: old, sessionUpdated: recent, sessionState: models.TaskSessionStateCompleted, ephemeral: true},
+		{id: "running-session", taskUpdated: older, sessionUpdated: older, sessionState: models.TaskSessionStateRunning, ephemeral: true},
+		{id: "config-mode", taskUpdated: older, sessionUpdated: older, sessionState: models.TaskSessionStateCompleted, ephemeral: true, metadata: map[string]interface{}{"config_mode": true}},
+		{id: "automation-run", taskUpdated: older, sessionUpdated: older, sessionState: models.TaskSessionStateCompleted, ephemeral: true, origin: models.TaskOriginAutomationRun},
+		{id: "kanban-task", taskUpdated: older, sessionUpdated: older, sessionState: models.TaskSessionStateCompleted, ephemeral: false, workflowID: "wf-quick"},
+		{id: "ephemeral-workflow", taskUpdated: older, sessionUpdated: older, sessionState: models.TaskSessionStateCompleted, ephemeral: true, workflowID: "wf-quick"},
+		{id: "archived", taskUpdated: older, sessionUpdated: older, sessionState: models.TaskSessionStateCompleted, ephemeral: true, archived: true},
+	}
+
+	for _, tc := range cases {
+		createQuickChatExpiryFixture(t, repo, ctx, tc.id, tc.workflowID, tc.origin, tc.metadata, tc.ephemeral, tc.archived, tc.taskUpdated, tc.sessionUpdated, tc.sessionState)
+	}
+
+	tasks, err := repo.ListExpiredQuickChatTasks(ctx, cutoff)
+	if err != nil {
+		t.Fatalf("ListExpiredQuickChatTasks: %v", err)
+	}
+
+	var got []string
+	for _, task := range tasks {
+		got = append(got, task.ID)
+	}
+	want := []string{"expired-older", "expired-old"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("expired task IDs = %v, want %v", got, want)
+	}
+}
+
+func createQuickChatExpiryFixture(
+	t *testing.T,
+	repo *sqlite.Repository,
+	ctx context.Context,
+	id string,
+	workflowID string,
+	origin string,
+	metadata map[string]interface{},
+	ephemeral bool,
+	archived bool,
+	taskUpdated time.Time,
+	sessionUpdated time.Time,
+	sessionState models.TaskSessionState,
+) {
+	t.Helper()
+	task := &models.Task{
+		ID:          id,
+		WorkspaceID: "ws-quick",
+		WorkflowID:  workflowID,
+		Title:       id,
+		State:       v1.TaskStateTODO,
+		Priority:    "medium",
+		IsEphemeral: ephemeral,
+		Origin:      origin,
+		Metadata:    metadata,
+		CreatedAt:   taskUpdated.Add(-time.Hour),
+		UpdatedAt:   taskUpdated,
+	}
+	if archived {
+		archivedAt := taskUpdated.Add(time.Minute)
+		task.ArchivedAt = &archivedAt
+	}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask(%s): %v", id, err)
+	}
+	if _, err := repo.DB().ExecContext(ctx,
+		`UPDATE tasks SET created_at = ?, updated_at = ?, archived_at = ? WHERE id = ?`,
+		task.CreatedAt, taskUpdated, task.ArchivedAt, id,
+	); err != nil {
+		t.Fatalf("backdate task(%s): %v", id, err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:             id + "-session",
+		TaskID:         id,
+		AgentProfileID: "agent-1",
+		State:          sessionState,
+		StartedAt:      sessionUpdated.Add(-time.Hour),
+		UpdatedAt:      sessionUpdated,
+		IsPrimary:      true,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession(%s): %v", id, err)
+	}
+}
+
 func TestSQLiteRepository_ListChildCompletionRows_ActiveChildren(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()

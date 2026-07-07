@@ -75,6 +75,27 @@ describe("hydrateUI — quick chat name overlay", () => {
 
     expect(result.quickChat.sessions.map((s) => s.name)).toEqual(["Renamed A", "Original B"]);
   });
+
+  it("clears stale quick chat sessions when the backend returns none", () => {
+    const result = produce(makeDraft(), (draft: Draft<AppState>) => {
+      draft.quickChat = {
+        isOpen: true,
+        activeSessionId: "stale-session",
+        sessions: [{ sessionId: "stale-session", workspaceId: "ws-1", name: "Stale" }],
+      };
+      hydrateUI(draft, {
+        quickChat: {
+          isOpen: false,
+          activeSessionId: null,
+          sessions: [],
+        },
+      });
+    });
+
+    expect(result.quickChat.sessions).toEqual([]);
+    expect(result.quickChat.isOpen).toBe(false);
+    expect(result.quickChat.activeSessionId).toBeNull();
+  });
 });
 
 describe("hydrateState — sidebar views from user settings", () => {

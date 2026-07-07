@@ -865,6 +865,56 @@ func (r *Repository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Tas
 	return r.scanTasks(rows)
 }
 
+// ListExpiredQuickChatTasks returns quick-chat tasks whose last task/session
+// activity is older than cutoff. Active sessions are excluded so in-use chats
+// are never deleted by the idle sweeper.
+func (r *Repository) ListExpiredQuickChatTasks(ctx context.Context, cutoff time.Time) ([]*models.Task, error) {
+	drv := r.ro.DriverName()
+	sessionActivity := "COALESCE(MAX(ts.updated_at), t.updated_at)"
+	lastActivity := dialect.GreatestTimestamp(drv, "t.updated_at", sessionActivity)
+	query := fmt.Sprintf(`
+		WITH candidates AS (
+			SELECT t.id, %s AS last_activity
+			FROM tasks t
+			LEFT JOIN task_sessions ts ON ts.task_id = t.id
+			WHERE t.is_ephemeral = 1
+				AND COALESCE(t.workflow_id, '') = ''
+				AND COALESCE(t.origin, '') != ?
+				AND %s
+				AND t.archived_at IS NULL
+				AND NOT EXISTS (
+					SELECT 1 FROM task_sessions active
+					WHERE active.task_id = t.id
+						AND active.state IN (?, ?, ?, ?)
+				)
+			GROUP BY t.id, t.updated_at
+			HAVING %s < ?
+		)
+		SELECT %s
+		FROM tasks t
+		JOIN candidates c ON c.id = t.id
+		ORDER BY c.last_activity ASC
+	`,
+		lastActivity,
+		excludeConfigModePredicate(drv, "t.metadata"),
+		lastActivity,
+		taskSelectColumns("t"),
+	)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query),
+		models.TaskOriginAutomationRun,
+		models.TaskSessionStateCreated,
+		models.TaskSessionStateStarting,
+		models.TaskSessionStateRunning,
+		models.TaskSessionStateWaitingForInput,
+		cutoff,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanTasks(rows)
+}
+
 // isSafeMetadataKey reports whether s is a safe JSON metadata key to splice
 // into a json_extract path. The key is concatenated into the SQL text (it
 // cannot be a bind parameter inside the '$.<key>' path literal), so it must be

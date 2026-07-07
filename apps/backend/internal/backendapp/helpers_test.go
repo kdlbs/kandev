@@ -22,6 +22,7 @@ import (
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
+	sqlitetaskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	usercontroller "github.com/kandev/kandev/internal/user/controller"
 	userservice "github.com/kandev/kandev/internal/user/service"
@@ -30,6 +31,7 @@ import (
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 	"github.com/kandev/kandev/internal/worktree"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -612,6 +614,131 @@ func TestBootPayloadIncludesDebugRuntimeWhenDevMode(t *testing.T) {
 	}
 }
 
+func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	repo := harness.taskRepo
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-qc", Name: "Quick Chats"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-qc", WorkspaceID: "ws-qc", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	base := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
+		id: "task-old", title: "Older Chat", updatedAt: base.Add(-2 * time.Hour),
+		sessionUpdatedAt: base.Add(-90 * time.Minute), agentProfileID: "agent-old",
+	})
+	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
+		id: "task-new", title: "Newer Chat", updatedAt: base.Add(-4 * time.Hour),
+		sessionUpdatedAt: base.Add(-10 * time.Minute), agentProfileID: "agent-new",
+	})
+	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
+		id: "task-config", title: "Config", updatedAt: base, sessionUpdatedAt: base,
+		agentProfileID: "agent-config", metadata: map[string]interface{}{"config_mode": true},
+	})
+	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
+		id: "task-automation", title: "Automation", updatedAt: base, sessionUpdatedAt: base,
+		agentProfileID: "agent-automation", origin: models.TaskOriginAutomationRun,
+	})
+	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
+		id: "task-workflow", title: "Workflow Ephemeral", updatedAt: base, sessionUpdatedAt: base,
+		agentProfileID: "agent-workflow", workflowID: "wf-qc",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/?workspaceId=ws-qc", nil)
+	payload := bootPayload(ctx, req, routeParams{
+		taskSvc:  harness.taskSvc,
+		services: &Services{Workflow: harness.workflowSvc},
+		userCtrl: harness.userCtrl,
+	}, webapp.ClassifyRoute("/"))
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("Marshal payload: %v", err)
+	}
+	var decoded struct {
+		InitialState struct {
+			QuickChat struct {
+				Sessions []struct {
+					SessionID      string `json:"sessionId"`
+					WorkspaceID    string `json:"workspaceId"`
+					Name           string `json:"name"`
+					AgentProfileID string `json:"agentProfileId"`
+				} `json:"sessions"`
+				IsOpen bool `json:"isOpen"`
+			} `json:"quickChat"`
+		} `json:"initialState"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("Unmarshal payload: %v", err)
+	}
+
+	sessions := decoded.InitialState.QuickChat.Sessions
+	if len(sessions) != 2 {
+		t.Fatalf("quickChat sessions = %#v, want 2 restored sessions", sessions)
+	}
+	if got := sessions[0].SessionID; got != "task-new-session" {
+		t.Fatalf("first restored session = %q, want newest task-new-session", got)
+	}
+	if sessions[0].AgentProfileID != "agent-new" || sessions[1].AgentProfileID != "agent-old" {
+		t.Fatalf("agent profile IDs = %#v", sessions)
+	}
+	if decoded.InitialState.QuickChat.IsOpen {
+		t.Fatal("quick chat should hydrate closed")
+	}
+}
+
+type bootQuickChatFixture struct {
+	id               string
+	title            string
+	workflowID       string
+	origin           string
+	agentProfileID   string
+	metadata         map[string]interface{}
+	updatedAt        time.Time
+	sessionUpdatedAt time.Time
+}
+
+func seedBootQuickChatTask(t *testing.T, repo *sqlitetaskrepo.Repository, ctx context.Context, f bootQuickChatFixture) {
+	t.Helper()
+	metadata := map[string]interface{}{models.MetaKeyAgentProfileID: f.agentProfileID}
+	for key, value := range f.metadata {
+		metadata[key] = value
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:          f.id,
+		WorkspaceID: "ws-qc",
+		WorkflowID:  f.workflowID,
+		Title:       f.title,
+		State:       v1.TaskStateTODO,
+		Priority:    "medium",
+		IsEphemeral: true,
+		Origin:      f.origin,
+		Metadata:    metadata,
+	}); err != nil {
+		t.Fatalf("CreateTask(%s): %v", f.id, err)
+	}
+	if _, err := repo.DB().ExecContext(ctx,
+		`UPDATE tasks SET created_at = ?, updated_at = ? WHERE id = ?`,
+		f.updatedAt.Add(-time.Hour), f.updatedAt, f.id,
+	); err != nil {
+		t.Fatalf("backdate task(%s): %v", f.id, err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:             f.id + "-session",
+		TaskID:         f.id,
+		AgentProfileID: f.agentProfileID,
+		State:          models.TaskSessionStateCompleted,
+		StartedAt:      f.sessionUpdatedAt.Add(-time.Hour),
+		UpdatedAt:      f.sessionUpdatedAt,
+		IsPrimary:      true,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession(%s): %v", f.id, err)
+	}
+}
+
 func TestBootRouteDataIntegrationRouteIncludesOnlyLocalContext(t *testing.T) {
 	taskSvc, workflowSvc := newBootStateTestServices(t)
 	ctx := context.Background()
@@ -827,6 +954,7 @@ func TestQueryValueReadsRouteQueryFromAppStatePath(t *testing.T) {
 
 type bootStateTestHarness struct {
 	taskSvc     *taskservice.Service
+	taskRepo    *sqlitetaskrepo.Repository
 	workflowSvc *workflowservice.Service
 	userCtrl    *usercontroller.Controller
 	userSvc     *userservice.Service
@@ -901,6 +1029,7 @@ func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
 	workflowSvc.SetWorkflowProvider(&workflowProviderAdapter{svc: taskSvc})
 	return bootStateTestHarness{
 		taskSvc:     taskSvc,
+		taskRepo:    taskRepo,
 		workflowSvc: workflowSvc,
 		userCtrl:    usercontroller.NewController(userSvc),
 		userSvc:     userSvc,

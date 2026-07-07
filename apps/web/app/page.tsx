@@ -60,6 +60,21 @@ function readAgentProfileId(
   return typeof value === "string" ? value : undefined;
 }
 
+type QuickChatTask = Awaited<ReturnType<typeof listQuickChatSessions>>["tasks"][number];
+
+function mapQuickChatSessions(tasks: QuickChatTask[]): AppState["quickChat"]["sessions"] {
+  return tasks
+    .filter((task) => task.primary_session_id)
+    .filter((task) => task.origin !== "automation_run")
+    .sort((a, b) => Date.parse(b.updated_at ?? "") - Date.parse(a.updated_at ?? ""))
+    .map((task) => ({
+      sessionId: task.primary_session_id!,
+      workspaceId: task.workspace_id,
+      name: task.title !== "Quick Chat" ? task.title : undefined,
+      agentProfileId: readAgentProfileId(task.metadata),
+    }));
+}
+
 function buildBaseState(
   workspaces: ListWorkspacesResponse,
   userSettingsResponse: UserSettingsResponse | null,
@@ -181,15 +196,7 @@ export default async function Page({ searchParams }: PageProps) {
       workspaceWorkflows: workflowList.workflows,
     });
 
-    // Map quick chat tasks to sessions
-    const quickChatSessions = quickChatResponse.tasks
-      .filter((t) => t.primary_session_id) // Only include tasks with active sessions
-      .map((t) => ({
-        sessionId: t.primary_session_id!,
-        workspaceId: t.workspace_id,
-        name: t.title !== "Quick Chat" ? t.title : undefined,
-        agentProfileId: readAgentProfileId(t.metadata),
-      }));
+    const quickChatSessions = mapQuickChatSessions(quickChatResponse.tasks);
 
     initialState = {
       ...initialState,
