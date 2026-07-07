@@ -68,9 +68,11 @@ func (s *Service) CopyConfigToWorkspace(ctx context.Context, sourceWorkspaceID, 
 	cfgOut, err := s.SetConfigForWorkspace(ctx, targetWorkspaceID, req)
 	if err != nil {
 		// The write failed, so the target's config is unchanged but we already
-		// flipped its health row. Re-probe (best effort) so the row reflects the
-		// target's real state again rather than a spurious "unhealthy".
-		s.RecordAuthHealthForWorkspace(ctx, targetWorkspaceID)
+		// flipped its health row. Re-probe asynchronously (best effort) so the row
+		// reflects the target's real state again rather than a spurious
+		// "unhealthy", without delaying the error response by the probe timeout.
+		// Detach from the request context, which may already be cancelled.
+		go s.RecordAuthHealthForWorkspace(context.Background(), targetWorkspaceID)
 		return nil, err
 	}
 	return cfgOut, nil
