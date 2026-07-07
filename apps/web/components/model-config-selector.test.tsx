@@ -69,5 +69,10 @@ describe("ModelConfigSelector", () => {
     fireEvent.click(within(effortSection).getByRole("button", { name: "High" }));
 
     expect(onConfigChange).toHaveBeenCalledWith("effort", "high");
+
+    fireEvent.click(screen.getByRole("button", { name: /back to model settings from effort/i }));
+
+    expect(screen.queryByTestId("config-option-section-effort")).toBeNull();
+    expect(screen.getByTestId("config-option-trigger-effort")).not.toBeNull();
   });
 });

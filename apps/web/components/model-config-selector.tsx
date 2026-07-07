@@ -183,6 +183,7 @@ function ConfigOptionSubSelector({
     <div className="flex min-h-0 flex-col gap-2">
       <button
         type="button"
+        aria-label={`Back to model settings from ${option.name}`}
         className="flex min-h-9 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-xs/relaxed hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/35 focus-visible:outline-none"
         onClick={onBack}
       >
@@ -271,15 +272,17 @@ function ModelConfigSelectorContent({
       {extraConfigOptions.length > 0 && (
         <>
           <Separator />
-          <div className="space-y-1">
-            {extraConfigOptions.map((option) => (
-              <ConfigOptionTrigger
-                key={option.id}
-                option={option}
-                onSelect={() => onConfigSelect(option.id)}
-              />
-            ))}
-          </div>
+          <ScrollArea className="max-h-40 pr-2">
+            <div className="space-y-1">
+              {extraConfigOptions.map((option) => (
+                <ConfigOptionTrigger
+                  key={option.id}
+                  option={option}
+                  onSelect={() => onConfigSelect(option.id)}
+                />
+              ))}
+            </div>
+          </ScrollArea>
         </>
       )}
     </>
