@@ -14,6 +14,7 @@ import {
   defaultAutomationsState,
   defaultSystemState,
 } from "./slices";
+import { getStoredQuickChatNames } from "@/lib/local-storage";
 
 export const defaultState = {
   kanban: defaultKanbanState.kanban,
@@ -130,6 +131,20 @@ function mergeGitLabFields(
   };
 }
 
+function mergeQuickChatState(initialState: Partial<DefaultState>): DefaultState["quickChat"] {
+  const quickChat = { ...defaultState.quickChat, ...initialState.quickChat };
+  if (!initialState.quickChat?.sessions) return quickChat;
+
+  const storedNames = getStoredQuickChatNames();
+  return {
+    ...quickChat,
+    sessions: initialState.quickChat.sessions.map((session) => {
+      const localName = storedNames[session.sessionId];
+      return localName ? { ...session, name: localName } : session;
+    }),
+  };
+}
+
 export function mergeInitialState(initialState?: Partial<DefaultState>): DefaultState {
   if (!initialState) return defaultState;
 
@@ -220,7 +235,7 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
     chatInput: { ...defaultState.chatInput, ...initialState.chatInput },
     documentPanel: { ...defaultState.documentPanel, ...initialState.documentPanel },
     systemHealth: { ...defaultState.systemHealth, ...initialState.systemHealth },
-    quickChat: { ...defaultState.quickChat, ...initialState.quickChat },
+    quickChat: mergeQuickChatState(initialState),
     sessionFailureNotification:
       initialState.sessionFailureNotification ?? defaultState.sessionFailureNotification,
     bottomTerminal: { ...defaultState.bottomTerminal, ...initialState.bottomTerminal },

@@ -214,6 +214,7 @@ func TestSQLiteRepository_ListExpiredQuickChatTasks(t *testing.T) {
 	}{
 		{id: "expired-older", taskUpdated: older, sessionUpdated: older, sessionState: models.TaskSessionStateCompleted, ephemeral: true, wantExpired: true},
 		{id: "expired-old", taskUpdated: old, sessionUpdated: old, sessionState: models.TaskSessionStateCompleted, ephemeral: true, wantExpired: true},
+		{id: "expired-waiting-input", taskUpdated: old, sessionUpdated: old, sessionState: models.TaskSessionStateWaitingForInput, ephemeral: true, wantExpired: true},
 		{id: "recent-task", taskUpdated: recent, sessionUpdated: old, sessionState: models.TaskSessionStateCompleted, ephemeral: true},
 		{id: "recent-session", taskUpdated: old, sessionUpdated: recent, sessionState: models.TaskSessionStateCompleted, ephemeral: true},
 		{id: "running-session", taskUpdated: older, sessionUpdated: older, sessionState: models.TaskSessionStateRunning, ephemeral: true},
@@ -238,7 +239,7 @@ func TestSQLiteRepository_ListExpiredQuickChatTasks(t *testing.T) {
 	for _, task := range tasks {
 		got = append(got, task.ID)
 	}
-	want := []string{"expired-older", "expired-old"}
+	want := []string{"expired-older", "expired-old", "expired-waiting-input"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("expired task IDs = %v, want %v", got, want)
 	}

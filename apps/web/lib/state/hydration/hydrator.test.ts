@@ -3,7 +3,7 @@ import { produce } from "immer";
 import type { Draft } from "immer";
 import { hydrateState, hydrateUI } from "./hydrator";
 import { defaultUIState } from "@/lib/state/slices/ui/ui-slice";
-import { defaultState } from "@/lib/state/default-state";
+import { defaultState, mergeInitialState } from "@/lib/state/default-state";
 import type { AppState } from "@/lib/state/store";
 
 function makeDraft(): AppState {
@@ -95,6 +95,35 @@ describe("hydrateUI — quick chat name overlay", () => {
     expect(result.quickChat.sessions).toEqual([]);
     expect(result.quickChat.isOpen).toBe(false);
     expect(result.quickChat.activeSessionId).toBeNull();
+  });
+});
+
+describe("mergeInitialState — quick chat name overlay", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("overlays locally-renamed names during boot payload merge", () => {
+    window.localStorage.setItem(
+      "kandev.quickChat.names",
+      JSON.stringify({ "sess-boot": "Local boot name" }),
+    );
+
+    const result = mergeInitialState({
+      quickChat: {
+        isOpen: false,
+        activeSessionId: null,
+        sessions: [
+          { sessionId: "sess-boot", workspaceId: "ws-1", name: "Backend task title" },
+          { sessionId: "sess-other", workspaceId: "ws-1", name: "Other title" },
+        ],
+      },
+    });
+
+    expect(result.quickChat.sessions.map((s) => s.name)).toEqual([
+      "Local boot name",
+      "Other title",
+    ]);
   });
 });
 

@@ -52,7 +52,6 @@ func (s *Service) runQuickChatExpiration(ctx context.Context, now time.Time) {
 			continue
 		}
 		s.logger.Info("quick-chat expiration: deleted task",
-			zap.String("task_id", task.ID),
-			zap.String("title", task.Title))
+			zap.String("task_id", task.ID))
 	}
 }
