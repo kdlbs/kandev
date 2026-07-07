@@ -43,6 +43,33 @@ function makeUpdateMessage(workflowId: string, tasks: unknown[], steps: unknown[
 }
 
 describe("kanban.update handler — primarySessionId preservation", () => {
+  it("preserves workflow step WIP fields", () => {
+    const store = makeStore();
+    const handler = registerKanbanHandlers(store)["kanban.update"]!;
+
+    handler(
+      makeUpdateMessage(
+        WORKFLOW_ID,
+        [],
+        [
+          {
+            id: STEP_ID,
+            title: "Review",
+            position: 1,
+            color: "bg-blue-500",
+            wip_limit: 2,
+            pull_from_step_id: "step-0",
+          },
+        ],
+      ),
+    );
+
+    expect(store.getState().kanban.steps[0]).toMatchObject({
+      wip_limit: 2,
+      pull_from_step_id: "step-0",
+    });
+  });
+
   it("preserves primarySessionId from existing tasks", () => {
     const store = makeStore({
       kanban: {

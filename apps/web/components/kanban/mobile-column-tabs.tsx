@@ -4,6 +4,7 @@ import { useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@kandev/ui/badge";
 import type { WorkflowStep } from "../kanban-column";
+import { formatWipCount, isOverWipLimit } from "@/lib/kanban/wip-limit";
 
 type MobileColumnTabsProps = {
   steps: WorkflowStep[];
@@ -45,28 +46,41 @@ export function MobileColumnTabs({
       ref={tabsRef}
       className="flex overflow-x-auto overflow-y-hidden scrollbar-hide border-b border-border px-4 gap-1"
     >
-      {steps.map((step, index) => (
-        <button
-          key={step.id}
-          ref={index === activeIndex ? activeTabRef : null}
-          data-testid={`column-tab-${index}`}
-          data-active={index === activeIndex}
-          onClick={() => onColumnChange(index)}
-          className={cn(
-            "flex items-center gap-2 px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors",
-            "border-b-2 -mb-px",
-            index === activeIndex
-              ? "border-primary text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground",
-          )}
-        >
-          <div className={cn("w-2 h-2 rounded-full flex-shrink-0", step.color)} />
-          <span className="truncate max-w-[100px]">{step.title}</span>
-          <Badge variant="secondary" className="text-xs h-5 px-1.5">
-            {taskCounts[step.id] ?? 0}
-          </Badge>
-        </button>
-      ))}
+      {steps.map((step, index) => {
+        const count = taskCounts[step.id] ?? 0;
+        const overWipLimit = isOverWipLimit(count, step.wip_limit);
+        const wipCountLabel = formatWipCount(count, step.wip_limit);
+        return (
+          <button
+            key={step.id}
+            ref={index === activeIndex ? activeTabRef : null}
+            data-testid={`column-tab-${index}`}
+            data-active={index === activeIndex}
+            onClick={() => onColumnChange(index)}
+            className={cn(
+              "flex items-center gap-2 px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors",
+              "border-b-2 -mb-px",
+              index === activeIndex
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <div className={cn("w-2 h-2 rounded-full flex-shrink-0", step.color)} />
+            <span className="truncate max-w-[100px]">{step.title}</span>
+            <Badge
+              variant="secondary"
+              className={cn(
+                "text-xs h-5 px-1.5 tabular-nums",
+                overWipLimit &&
+                  "border-amber-500/50 bg-amber-500/15 text-amber-700 dark:text-amber-300",
+              )}
+              aria-label={overWipLimit ? `${wipCountLabel} tasks, over WIP limit` : undefined}
+            >
+              {wipCountLabel}
+            </Badge>
+          </button>
+        );
+      })}
     </div>
   );
 }

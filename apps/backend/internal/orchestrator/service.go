@@ -22,6 +22,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -618,6 +619,29 @@ func (s *Service) publishTaskStateChanged(ctx context.Context, task *models.Task
 	s.taskEvents.PublishTaskStateChanged(ctx, task, oldState)
 }
 
+func (s *Service) publishTaskMoved(ctx context.Context, task *models.Task, fromWorkflowID, fromStepID, toStepID, sessionID string) {
+	if s.eventBus == nil || task == nil {
+		return
+	}
+	data := map[string]interface{}{
+		"task_id":                   task.ID,
+		"from_workflow_id":          fromWorkflowID,
+		"to_workflow_id":            task.WorkflowID,
+		"from_step_id":              fromStepID,
+		"to_step_id":                toStepID,
+		"session_id":                sessionID,
+		"workflow_id":               task.WorkflowID,
+		"task_description":          task.Description,
+		"parent_id":                 task.ParentID,
+		"assignee_agent_profile_id": task.AssigneeAgentProfileID,
+	}
+	event := bus.NewEvent(events.TaskMoved, "orchestrator", data)
+	if err := s.eventBus.Publish(ctx, events.TaskMoved, event); err != nil {
+		s.logger.Error("failed to publish pulled task.moved event",
+			zap.String("task_id", task.ID), zap.Error(err))
+	}
+}
+
 // StepRequiresCompletionSignal reports whether the workflow step bound to taskID
 // has `auto_advance_requires_signal = true` (ADR 0015). Used by sysprompt
 // injection sites to decide whether to expose the `step_complete_kandev` MCP
@@ -685,7 +709,7 @@ func (s *Service) initWorkflowEngine() {
 	if s.workflowStepGetter == nil {
 		return
 	}
-	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger)
+	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger, s.publishTaskMoved)
 	callbacks := buildWorkflowCallbacks(s)
 	s.workflowStore = store
 	s.workflowEngine = engine.New(store, callbacks, s.engineOptions...)

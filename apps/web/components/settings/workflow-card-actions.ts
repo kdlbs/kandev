@@ -405,6 +405,10 @@ function diffStepUpdates(userStep: WorkflowStep, backendStep: WorkflowStep): Par
     updates.is_start_step = userStep.is_start_step;
   if (userStep.allow_manual_move !== backendStep.allow_manual_move)
     updates.allow_manual_move = userStep.allow_manual_move;
+  if ((userStep.wip_limit ?? 0) !== (backendStep.wip_limit ?? 0))
+    updates.wip_limit = userStep.wip_limit ?? 0;
+  if ((userStep.pull_from_step_id ?? "") !== (backendStep.pull_from_step_id ?? ""))
+    updates.pull_from_step_id = userStep.pull_from_step_id ?? "";
   // Events are NOT compared - backend has correct step_id UUIDs, user has template aliases
   return updates;
 }
@@ -419,6 +423,8 @@ function stepPayload(workflowId: string, step: WorkflowStep) {
     events: step.events,
     is_start_step: step.is_start_step,
     allow_manual_move: step.allow_manual_move,
+    wip_limit: step.wip_limit ?? 0,
+    pull_from_step_id: step.pull_from_step_id ?? "",
   };
 }
 

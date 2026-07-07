@@ -27,6 +27,10 @@ export type KanbanState = {
     is_start_step?: boolean;
     show_in_command_panel?: boolean;
     agent_profile_id?: string;
+    /** Maximum concurrent tasks allowed in this step. 0 or undefined means unlimited. */
+    wip_limit?: number;
+    /** Optional upstream step used by automation to pull more work. */
+    pull_from_step_id?: string | null;
     /**
      * Phase 2 (ADR-0004) semantic UX hint. Read by `<TaskMetaRail>` to
      * pick the right meta surface (review/approval shows multi-agent

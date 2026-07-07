@@ -162,7 +162,7 @@ func (h *Handlers) httpCreateStep(c *gin.Context) {
 	resp, err := h.controller.CreateStep(c.Request.Context(), req)
 	if err != nil {
 		h.logger.Error("failed to create step", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create step"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusCreated, resp.Step)
@@ -178,7 +178,7 @@ func (h *Handlers) httpUpdateStep(c *gin.Context) {
 	resp, err := h.controller.UpdateStep(c.Request.Context(), req)
 	if err != nil {
 		h.logger.Error("failed to update step", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update step"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, resp.Step)

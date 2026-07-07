@@ -48,6 +48,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [blocked-task-escalation](tasks/blocked-task-escalation.md) | draft |
 | [runtime-cleanup](tasks/runtime-cleanup.md) | draft |
 | [link-existing-task-github-issue](tasks/link-existing-task-github-issue.md) | building |
+| [wip-limit-pull-system](tasks/wip-limit-pull-system.md) | building |
 | [multi-branch](tasks/multi-branch/spec.md) | shipped |
 | [quick-chat-expiration](tasks/quick-chat-expiration.md) | draft |
 

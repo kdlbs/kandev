@@ -122,6 +122,12 @@ describe("useAllWorkflowSnapshots — workspace scoping", () => {
     expect(mockFetchWorkflowSnapshot.mock.calls[1][0]).toBe("wf-A2");
     expect(mockClearKanbanMulti).not.toHaveBeenCalled();
   });
+});
+
+describe("useAllWorkflowSnapshots — fetch guards", () => {
+  beforeEach(() => {
+    resetMocks([{ id: "wf-A", workspaceId: "ws-A", name: "A" }]);
+  });
 
   it("discards a stale in-flight fetch when workspace switches mid-fetch", async () => {
     // Hold the first fetch open so it resolves after the workspace switch.
@@ -158,5 +164,38 @@ describe("useAllWorkflowSnapshots — workspace scoping", () => {
 
     const writtenIds = mockSetWorkflowSnapshot.mock.calls.map((args) => args[0]);
     expect(writtenIds).not.toContain("wf-A");
+  });
+});
+
+describe("useAllWorkflowSnapshots — snapshot mapping", () => {
+  beforeEach(() => {
+    resetMocks([{ id: "wf-A", workspaceId: "ws-A", name: "A" }]);
+  });
+
+  it("preserves workflow step WIP fields in snapshots", async () => {
+    mockFetchWorkflowSnapshot.mockResolvedValueOnce({
+      steps: [
+        {
+          id: "step-1",
+          name: "Review",
+          position: 1,
+          color: "bg-blue-500",
+          wip_limit: 2,
+          pull_from_step_id: "step-0",
+        },
+      ],
+      tasks: [],
+    });
+
+    renderHook(
+      ({ workspaceId }: { workspaceId: string | null }) => useAllWorkflowSnapshots(workspaceId),
+      { initialProps: { workspaceId: "ws-A" } },
+    );
+
+    await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
+    expect(mockSetWorkflowSnapshot.mock.calls[0][1].steps[0]).toMatchObject({
+      wip_limit: 2,
+      pull_from_step_id: "step-0",
+    });
   });
 });

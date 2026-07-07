@@ -73,6 +73,8 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         is_start_step: step.is_start_step,
         show_in_command_panel: step.show_in_command_panel,
         agent_profile_id: step.agent_profile_id,
+        wip_limit: step.wip_limit,
+        pull_from_step_id: step.pull_from_step_id ?? null,
         stage_type: step.stage_type,
       })),
       tasks,

@@ -275,6 +275,14 @@ type MoveTaskOptions struct {
 	AllowActivePrimarySession bool
 }
 
+type workflowMoveLimitsRepository interface {
+	CountTasksByWorkflowStepExcludingTask(ctx context.Context, stepID, excludeTaskID string) (int, error)
+}
+
+type workflowPullRepository interface {
+	NextPullCandidate(ctx context.Context, stepID, excludeTaskID string) (*models.Task, error)
+}
+
 // MoveTask moves a task to a different workflow step and position
 func (s *Service) MoveTask(ctx context.Context, id string, workflowID string, workflowStepID string, position int) (*MoveTaskResult, error) {
 	return s.MoveTaskWithOptions(ctx, id, workflowID, workflowStepID, position, MoveTaskOptions{})
@@ -330,6 +338,7 @@ func (s *Service) MoveTaskWithOptions(
 	// Publish task.moved event so the orchestrator can process on_exit/on_enter actions
 	if stepChanged {
 		s.publishTaskMovedEvent(ctx, task, oldWorkflowID, oldStepID, workflowStepID, sessionID)
+		s.pullNextTaskOnVacate(ctx, oldStepID, task.ID)
 	}
 
 	s.logger.Info("task moved",
@@ -423,6 +432,95 @@ func (s *Service) syncTaskStateForBulkWorkflowMove(ctx context.Context, task *mo
 	return nil
 }
 
+func (s *Service) pullNextTaskOnVacate(ctx context.Context, vacatedStepID, excludeTaskID string) {
+	vacatedStep := s.pullEnabledStep(ctx, vacatedStepID)
+	if vacatedStep == nil {
+		return
+	}
+	limitsRepo, pullRepo, ok := s.pullRepositories(vacatedStep.ID)
+	if !ok {
+		return
+	}
+	occupants, ok := s.currentWIPOccupants(ctx, limitsRepo, vacatedStep.ID)
+	if !ok || occupants >= vacatedStep.WIPLimit {
+		return
+	}
+	for occupants < vacatedStep.WIPLimit {
+		pulled := s.pullOneFeederTask(ctx, pullRepo, vacatedStep, occupants, excludeTaskID)
+		if !pulled {
+			return
+		}
+		occupants++
+	}
+}
+
+func (s *Service) pullEnabledStep(ctx context.Context, vacatedStepID string) *wfmodels.WorkflowStep {
+	if s.workflowStepGetter == nil || vacatedStepID == "" {
+		return nil
+	}
+	vacatedStep, err := s.workflowStepGetter.GetStep(ctx, vacatedStepID)
+	if err != nil || vacatedStep == nil || vacatedStep.WIPLimit <= 0 || vacatedStep.PullFromStepID == "" {
+		return nil
+	}
+	if vacatedStep.PullFromStepID == vacatedStep.ID {
+		return nil
+	}
+	return vacatedStep
+}
+
+func (s *Service) pullRepositories(stepID string) (workflowMoveLimitsRepository, workflowPullRepository, bool) {
+	limitsRepo, ok := s.tasks.(workflowMoveLimitsRepository)
+	if !ok {
+		s.logger.Warn("cannot pull feeder task: WIP limit repository unavailable",
+			zap.String("step_id", stepID))
+		return nil, nil, false
+	}
+	pullRepo, ok := s.tasks.(workflowPullRepository)
+	if !ok {
+		s.logger.Warn("cannot pull feeder task: pull repository unavailable",
+			zap.String("step_id", stepID))
+		return nil, nil, false
+	}
+	return limitsRepo, pullRepo, true
+}
+
+func (s *Service) currentWIPOccupants(ctx context.Context, limitsRepo workflowMoveLimitsRepository, stepID string) (int, bool) {
+	occupants, err := limitsRepo.CountTasksByWorkflowStepExcludingTask(ctx, stepID, "")
+	if err != nil {
+		s.logger.Warn("cannot pull feeder task: failed to count vacated step",
+			zap.String("step_id", stepID), zap.Error(err))
+		return 0, false
+	}
+	return occupants, true
+}
+
+func (s *Service) pullOneFeederTask(
+	ctx context.Context,
+	pullRepo workflowPullRepository,
+	vacatedStep *wfmodels.WorkflowStep,
+	position int,
+	excludeTaskID string,
+) bool {
+	candidate, err := pullRepo.NextPullCandidate(ctx, vacatedStep.PullFromStepID, excludeTaskID)
+	if err != nil {
+		s.logger.Warn("cannot pull feeder task: failed to select candidate",
+			zap.String("step_id", vacatedStep.ID), zap.Error(err))
+		return false
+	}
+	if candidate == nil {
+		return false
+	}
+	if _, err := s.MoveTask(ctx, candidate.ID, vacatedStep.WorkflowID, vacatedStep.ID, position); err != nil {
+		s.logger.Warn("failed to pull feeder task into vacated WIP-limited step",
+			zap.String("task_id", candidate.ID),
+			zap.String("from_step_id", vacatedStep.PullFromStepID),
+			zap.String("to_step_id", vacatedStep.ID),
+			zap.Error(err))
+		return false
+	}
+	return true
+}
+
 func (s *Service) validateTaskMove(ctx context.Context, task *models.Task, workflowID, workflowStepID string, opts MoveTaskOptions) error {
 	if task.ArchivedAt != nil {
 		return fmt.Errorf("archived tasks cannot be moved")
@@ -446,6 +544,27 @@ func (s *Service) validateTaskMove(ctx context.Context, task *models.Task, workf
 	}
 	if targetStep.WorkflowID != workflowID {
 		return fmt.Errorf("target workflow step does not belong to target workflow")
+	}
+	if err := s.validateMoveWIPLimit(ctx, task, targetStep); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Service) validateMoveWIPLimit(ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep) error {
+	if targetStep == nil || targetStep.WIPLimit <= 0 || task.WorkflowStepID == targetStep.ID {
+		return nil
+	}
+	limitsRepo, ok := s.tasks.(workflowMoveLimitsRepository)
+	if !ok {
+		return fmt.Errorf("WIP limit cannot be checked for workflow step %s", targetStep.ID)
+	}
+	occupants, err := limitsRepo.CountTasksByWorkflowStepExcludingTask(ctx, targetStep.ID, task.ID)
+	if err != nil {
+		return fmt.Errorf("failed to count target workflow step tasks: %w", err)
+	}
+	if occupants >= targetStep.WIPLimit {
+		return fmt.Errorf("WIP limit exceeded for workflow step %s: limit %d already occupied", targetStep.ID, targetStep.WIPLimit)
 	}
 	return nil
 }
@@ -594,44 +713,9 @@ func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceSte
 		return &BulkMoveTasksResult{MovedCount: 0}, nil
 	}
 
-	targetIsTerminal, err := s.terminalWorkflowStep(ctx, targetStepID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check target step terminal status: %w", err)
-	}
-	sourceIsTerminal := false
-	sourceTerminalKnown := false
-	if sourceStepID != "" {
-		sourceIsTerminal, err = s.terminalWorkflowStep(ctx, sourceStepID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to check source step terminal status: %w", err)
-		}
-		sourceTerminalKnown = true
-	}
-
-	now := time.Now().UTC()
 	for i, task := range tasks {
-		oldWorkflowID := task.WorkflowID
-		oldStepID := task.WorkflowStepID
-		oldState := task.State
-		task.WorkflowID = targetWorkflowID
-		task.WorkflowStepID = targetStepID
-		task.Position = i
-		err := s.syncTaskStateForBulkWorkflowMove(ctx, task, oldStepID, targetStepID, targetIsTerminal, sourceIsTerminal, sourceTerminalKnown)
-		if err != nil {
-			return nil, fmt.Errorf("failed to sync task state for bulk move %s: %w", task.ID, err)
-		}
-		task.UpdatedAt = now
-
-		if err := s.tasks.UpdateTask(ctx, task); err != nil {
-			s.logger.Error("failed to move task in bulk move",
-				zap.String("task_id", task.ID),
-				zap.Error(err))
+		if _, err := s.MoveTask(ctx, task.ID, targetWorkflowID, targetStepID, i); err != nil {
 			return nil, fmt.Errorf("failed to move task %s: %w", task.ID, err)
-		}
-
-		s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, oldWorkflowID)
-		if oldState != task.State {
-			s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
 		}
 	}
 

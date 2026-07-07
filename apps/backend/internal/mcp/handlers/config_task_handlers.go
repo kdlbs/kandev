@@ -148,7 +148,7 @@ func (h *Handlers) applyMoveTaskImmediate(
 			}
 		}
 		h.logger.Error("failed to move task", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to move task", nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(result.Task))
 }

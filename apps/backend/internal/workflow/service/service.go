@@ -219,6 +219,8 @@ func (s *Service) CreateStepsFromTemplate(ctx context.Context, workflowID, templ
 			ShowInCommandPanel:    stepDef.ShowInCommandPanel,
 			AutoArchiveAfterHours: stepDef.AutoArchiveAfterHours,
 			AgentProfileID:        stepDef.AgentProfileID,
+			WIPLimit:              stepDef.WIPLimit,
+			PullFromStepID:        models.RemapStepID(stepDef.PullFromStepID, idMap),
 			StageType:             stepDef.StageType,
 		}
 
@@ -541,6 +543,8 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 			AllowManualMove:           sp.AllowManualMove,
 			AutoArchiveAfterHours:     sp.AutoArchiveAfterHours,
 			AutoAdvanceRequiresSignal: sp.AutoAdvanceRequiresSignal,
+			WIPLimit:                  sp.WIPLimit,
+			PullFromStepID:            sp.PullFromStepID(posToID),
 		}
 		// Match step-level agent profile if present.
 		if sp.AgentProfile != nil && s.matchProfile != nil {

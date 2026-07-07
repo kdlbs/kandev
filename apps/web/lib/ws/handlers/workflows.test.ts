@@ -45,6 +45,18 @@ function createdMessage(payload: WorkflowPayload): BackendMessageMap["workflow.c
   };
 }
 
+function stepUpdatedMessage(
+  step: BackendMessageMap["workflow.step.updated"]["payload"]["step"],
+): BackendMessageMap["workflow.step.updated"] {
+  return {
+    id: "msg-1",
+    type: "notification",
+    action: "workflow.step.updated",
+    payload: { step },
+    timestamp: "2026-01-01T00:00:00Z",
+  };
+}
+
 describe("workflow.created handler — preserves user filter", () => {
   it("does not promote a new workflow when activeId is null ('All Workflows')", () => {
     const store = makeStore(
@@ -139,5 +151,38 @@ describe("workflow.updated handler — hidden flag reconciles activeId", () => {
 
     expect(store.getState().workflows.activeId).toBe("wf-1");
     expect(store.getState().workflows.items[0]?.name).toBe("New Name");
+  });
+});
+
+describe("workflow step handlers", () => {
+  it("preserves WIP fields from step update payloads", () => {
+    const store = makeStore([{ id: "wf-1", workspaceId: "ws-1", name: "Workflow" }], "wf-1");
+    store.setState({
+      ...store.getState(),
+      kanban: {
+        workflowId: "wf-1",
+        steps: [{ id: "step-1", title: "Review", color: "bg-blue-500", position: 1 }],
+        tasks: [],
+      },
+    } as AppState);
+    const handlers = registerWorkflowsHandlers(store);
+
+    handlers["workflow.step.updated"]?.(
+      stepUpdatedMessage({
+        id: "step-1",
+        workflow_id: "wf-1",
+        name: "Review",
+        state: "",
+        position: 1,
+        color: "bg-blue-500",
+        wip_limit: 2,
+        pull_from_step_id: "step-0",
+      }),
+    );
+
+    expect(store.getState().kanban.steps[0]).toMatchObject({
+      wip_limit: 2,
+      pull_from_step_id: "step-0",
+    });
   });
 });

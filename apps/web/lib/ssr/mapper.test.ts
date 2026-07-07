@@ -58,4 +58,34 @@ describe("snapshotToState", () => {
 
     expect(state.kanban?.tasks[0]?.primarySessionPendingAction).toBeUndefined();
   });
+
+  it("preserves workflow step WIP fields", () => {
+    const state = snapshotToState({
+      workflow: {
+        id: workflowID,
+        workspace_id: workspaceID,
+        name: "Workflow",
+        created_at: now,
+        updated_at: now,
+      },
+      steps: [
+        {
+          id: "step-1",
+          workflow_id: workflowID,
+          name: "Review",
+          position: 1,
+          color: "bg-blue-500",
+          allow_manual_move: true,
+          wip_limit: 2,
+          pull_from_step_id: "step-0",
+        },
+      ],
+      tasks: [],
+    } as unknown as WorkflowSnapshot);
+
+    expect(state.kanban?.steps[0]).toMatchObject({
+      wip_limit: 2,
+      pull_from_step_id: "step-0",
+    });
+  });
 });

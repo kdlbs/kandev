@@ -203,6 +203,32 @@ test.describe("Mobile kanban view", () => {
     }
   });
 
+  test("column tabs show WIP occupancy over limit", async ({ testPage, apiClient, seedData }) => {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Mobile WIP Workflow");
+    const limitedStep = await apiClient.createWorkflowStep(workflow.id, "Limited", 0, {
+      is_start_step: true,
+    });
+    await apiClient.createWorkflowStep(workflow.id, "Done", 1);
+    await apiClient.updateWorkflowStep(limitedStep.id, { wip_limit: 1 });
+    await apiClient.createTask(seedData.workspaceId, "Mobile WIP One", {
+      workflow_id: workflow.id,
+      workflow_step_id: limitedStep.id,
+    });
+    await apiClient.createTask(seedData.workspaceId, "Mobile WIP Two", {
+      workflow_id: workflow.id,
+      workflow_step_id: limitedStep.id,
+    });
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+    });
+
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+
+    await expect(testPage.getByTestId("column-tab-0")).toContainText("2/1");
+  });
+
   test("mobile search bar filters tasks", async ({ testPage, apiClient, seedData }) => {
     await apiClient.createTask(seedData.workspaceId, "Searchable Alpha", {
       workflow_id: seedData.workflowId,

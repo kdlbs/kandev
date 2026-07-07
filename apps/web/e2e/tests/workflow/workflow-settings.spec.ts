@@ -136,6 +136,35 @@ test.describe("Workflow settings", () => {
       .toEqual([{ type: "move_to_step", config: { step_id: doneStep.id } }]);
   });
 
+  test("configures WIP limit and feeder step", async ({ testPage, apiClient, seedData }) => {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "WIP Settings");
+    const backlogStep = await apiClient.createWorkflowStep(workflow.id, "Backlog", 0);
+    const reviewStep = await apiClient.createWorkflowStep(workflow.id, "Review", 1);
+
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+
+    const card = await page.findWorkflowCard("WIP Settings");
+    await expect(card).toBeVisible();
+    await page.stepNodeByName(card, "Review").click();
+
+    await card.getByTestId(`${reviewStep.id}-wip-limit-input`).fill("2");
+    await card.getByTestId(`${reviewStep.id}-pull-from-step-select`).click();
+    await testPage.getByRole("option", { name: "Backlog" }).click();
+
+    await page.saveButton(card).click();
+
+    await expect
+      .poll(async () => {
+        const { steps } = await apiClient.listWorkflowSteps(workflow.id);
+        return steps.find((step) => step.id === reviewStep.id);
+      })
+      .toMatchObject({
+        wip_limit: 2,
+        pull_from_step_id: backlogStep.id,
+      });
+  });
+
   test("modifies a template step name and persists after save", async ({ testPage, seedData }) => {
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);

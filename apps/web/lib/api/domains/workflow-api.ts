@@ -17,6 +17,8 @@ type BackendTemplateStep = {
   events?: StepEvents;
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
+  wip_limit?: number;
+  pull_from_step_id?: string | null;
 };
 
 type BackendWorkflowTemplate = Omit<WorkflowTemplate, "default_steps"> & {
@@ -34,6 +36,8 @@ const normalizeWorkflowTemplate = (template: BackendWorkflowTemplate): WorkflowT
     events: step.events,
     is_start_step: step.is_start_step,
     show_in_command_panel: step.show_in_command_panel,
+    wip_limit: step.wip_limit,
+    pull_from_step_id: step.pull_from_step_id ?? null,
   }));
   return {
     ...template,
@@ -83,6 +87,8 @@ export async function createWorkflowStep(
     color?: string;
     prompt?: string;
     events?: StepEvents;
+    wip_limit?: number;
+    pull_from_step_id?: string | null;
   },
   options?: ApiRequestOptions,
 ) {

@@ -337,6 +337,53 @@ func (r *Repository) CountTasksByWorkflowStep(ctx context.Context, stepID string
 	return count, nil
 }
 
+// CountTasksByWorkflowStepExcludingTask returns active, visible occupants in
+// a workflow step, excluding the task currently being moved.
+func (r *Repository) CountTasksByWorkflowStepExcludingTask(ctx context.Context, stepID, excludeTaskID string) (int, error) {
+	var count int
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT COUNT(*) FROM tasks
+		WHERE workflow_step_id = ?
+		  AND id != ?
+		  AND archived_at IS NULL
+		  AND is_ephemeral = 0
+	`), stepID, excludeTaskID).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// NextPullCandidate returns the next active, visible task from a feeder step.
+func (r *Repository) NextPullCandidate(ctx context.Context, stepID, excludeTaskID string) (*models.Task, error) {
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT `+taskSelectColumns("t")+`
+		FROM tasks t
+		WHERE t.workflow_step_id = ?
+		  AND t.id != ?
+		  AND t.archived_at IS NULL
+		  AND t.is_ephemeral = 0
+		ORDER BY
+		  t.position ASC,
+		  CASE LOWER(COALESCE(t.priority, ''))
+		    WHEN 'critical' THEN 0
+		    WHEN 'high' THEN 1
+		    WHEN 'medium' THEN 2
+		    WHEN 'low' THEN 3
+		    WHEN 'none' THEN 4
+		    ELSE 4
+		  END ASC,
+		  t.created_at ASC,
+		  t.id ASC
+		LIMIT 1
+	`), stepID, excludeTaskID)
+	task, err := r.scanSingleTask(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return task, err
+}
+
 // ListChildren returns non-archived, non-ephemeral children of parentID.
 // Returns an empty list when parentID is empty (so root tasks resolve to
 // "no children" cleanly).
