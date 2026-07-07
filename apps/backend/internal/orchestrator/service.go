@@ -1087,6 +1087,15 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 	// the chat UI render as "working" because the office session shape
 	// uses IDLE specifically to avoid that.
 	if previousState == models.TaskSessionStateIdle {
+		// Keep the IDLE session state (no flip to WAITING_FOR_INPUT), but still
+		// make the ROW true: an office turn writes IDLE and then tears down, so a
+		// crash/restart in that window leaves a row claiming status=running with a
+		// dead local_pid. If the local process is confirmed dead, repair the row
+		// in place — resume_token/worktree are preserved (RowMustBePreserved
+		// treats IDLE as resumable). Remote rows report Unknown and are untouched.
+		if s.rowLiveness(running) == models.ProcessLivenessDead {
+			s.repairDeadRowLiveness(ctx, running)
+		}
 		s.logger.Info("session reconciled for lazy recovery (idle, no state change)",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", running.TaskID),

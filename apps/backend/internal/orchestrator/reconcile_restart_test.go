@@ -93,6 +93,56 @@ func TestReconcileSessionsOnStartupMakesRowsTrue(t *testing.T) {
 	}
 }
 
+// TestReconcileSessionsOnStartup_IdleSessionDeadRowRepaired covers the office
+// IDLE path: an office turn writes IDLE and tears down, so a crash/restart in
+// that window leaves a row claiming status=running with a dead local_pid.
+// Startup reconciliation must repair the row (stopped, local_pid cleared,
+// resume_token preserved) WITHOUT flipping the session out of IDLE — the IDLE
+// state is the office "between turns" shape and must be preserved (#1597).
+func TestReconcileSessionsOnStartup_IdleSessionDeadRowRepaired(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	seedTaskAndSession(t, repo, "taskI", "sI", models.TaskSessionStateIdle)
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "sI", SessionID: "sI", TaskID: "taskI", Runtime: agentruntime.RuntimeStandalone,
+		Status: models.ExecutorRunningStatusRunning, ResumeToken: "tokI", Resumable: true,
+		LocalPID: 4343, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("upsert sI: %v", err)
+	}
+
+	agentMgr := &mockAgentManager{
+		rowLivenessFn: func(*models.ExecutorRunning) models.ProcessLiveness {
+			return models.ProcessLivenessDead
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+	svc.reconcileSessionsOnStartup(ctx)
+
+	// Session state stays IDLE (not flipped to WAITING_FOR_INPUT).
+	session, err := repo.GetTaskSession(ctx, "sI")
+	if err != nil {
+		t.Fatalf("GetTaskSession(sI): %v", err)
+	}
+	if session.State != models.TaskSessionStateIdle {
+		t.Errorf("IDLE session state must be preserved; got %q", session.State)
+	}
+	// But the row is repaired so it no longer claims a live process.
+	row, err := repo.GetExecutorRunningBySessionID(ctx, "sI")
+	if err != nil {
+		t.Fatalf("idle resumable row must be preserved: %v", err)
+	}
+	if row.Status != models.ExecutorRunningStatusStopped || row.LocalPID != 0 {
+		t.Errorf("dead idle row must be repaired to stopped with cleared local_pid; got status=%q local_pid=%d", row.Status, row.LocalPID)
+	}
+	if row.ResumeToken != "tokI" {
+		t.Errorf("resume_token must survive the idle repair; got %q", row.ResumeToken)
+	}
+}
+
 // TestReconcileSessionsOnStartup_MissingSessionStopsAgentAndDeletesRow covers
 // the orphan-row branch of startup reconciliation: a row whose task_session is
 // gone entirely (deleted task/worktree) routes to handleMissingSessionOnStartup,

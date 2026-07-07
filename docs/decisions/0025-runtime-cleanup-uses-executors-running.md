@@ -7,7 +7,7 @@
 ## Update (2026-07-06, #1597 executor-row-desync)
 
 This decision **stays**: `executors_running` remains the authoritative durable
-runtime inventory. It was made *trustworthy* rather than reverted. Two
+runtime inventory. It was made *trustworthy* rather than reverted. Three
 clarifications now hold:
 
 - **Events are the primary producer; startup reconciliation heals what events
