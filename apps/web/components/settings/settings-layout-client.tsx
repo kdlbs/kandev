@@ -172,8 +172,10 @@ function IntegrationWorkspaceSwitcher() {
   if (workspaces.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-2" data-testid="integration-workspace-switcher">
-      <span className="text-xs text-muted-foreground whitespace-nowrap">Editing workspace</span>
+    <div className="flex min-w-0 items-center gap-2" data-testid="integration-workspace-switcher">
+      <span className="hidden text-xs whitespace-nowrap text-muted-foreground sm:inline">
+        Editing workspace
+      </span>
       <WorkspaceSwitcher workspaces={workspaces} activeWorkspaceId={selected} onSelect={onSelect} />
       {integration && selected ? (
         <IntegrationCopyConfigMenu

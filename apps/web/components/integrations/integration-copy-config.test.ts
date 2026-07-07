@@ -26,5 +26,7 @@ describe("integrationLabel", () => {
     expect(integrationLabel("github")).toBe("GitHub");
     expect(integrationLabel("jira")).toBe("Jira");
     expect(integrationLabel("slack")).toBe("Slack");
+    expect(integrationLabel("linear")).toBe("Linear");
+    expect(integrationLabel("sentry")).toBe("Sentry");
   });
 });

@@ -44,16 +44,22 @@ type copyConfigRequest struct {
 }
 
 func (c *Controller) httpCopyConfig(ctx *gin.Context) {
+	sourceWorkspaceID := c.workspaceID(ctx)
+	if sourceWorkspaceID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id query parameter required"})
+		return
+	}
 	var req copyConfigRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	if strings.TrimSpace(req.TargetWorkspaceID) == "" {
+	targetWorkspaceID := strings.TrimSpace(req.TargetWorkspaceID)
+	if targetWorkspaceID == "" {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "targetWorkspaceId required"})
 		return
 	}
-	cfg, err := c.service.CopyConfigToWorkspace(ctx.Request.Context(), c.workspaceID(ctx), req.TargetWorkspaceID)
+	cfg, err := c.service.CopyConfigToWorkspace(ctx.Request.Context(), sourceWorkspaceID, targetWorkspaceID)
 	if err != nil {
 		status := http.StatusInternalServerError
 		switch {

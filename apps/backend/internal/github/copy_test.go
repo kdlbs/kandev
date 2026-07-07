@@ -27,6 +27,12 @@ func TestCopyWorkspaceSettingsToWorkspace_CopiesSettings(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed source: %v", err)
 	}
+	if _, err := svc.UpdateActionPresets(ctx, &UpdateActionPresetsRequest{
+		WorkspaceID: src,
+		PR:          &[]ActionPreset{{ID: "custom", Label: "Custom", PromptTemplate: "do {{url}}"}},
+	}); err != nil {
+		t.Fatalf("seed source action presets: %v", err)
+	}
 
 	got, err := svc.CopyWorkspaceSettingsToWorkspace(ctx, src, dst)
 	if err != nil {
@@ -35,11 +41,23 @@ func TestCopyWorkspaceSettingsToWorkspace_CopiesSettings(t *testing.T) {
 	if got.WorkspaceID != dst || got.RepoScopeMode != RepoScopeModeRepos {
 		t.Errorf("copied settings identity/scope mismatch: %+v", got)
 	}
-	if len(got.RepoScopeRepos) != 1 || got.RepoScopeRepos[0].Owner != "kdlbs" {
+	if len(got.RepoScopeRepos) != 1 || got.RepoScopeRepos[0].Owner != "kdlbs" ||
+		got.RepoScopeRepos[0].Name != "kandev" {
 		t.Errorf("repo scope not copied: %+v", got.RepoScopeRepos)
 	}
 	if string(got.SavedPresets) != `[{"id":"p1","kind":"pr","label":"Mine"}]` {
 		t.Errorf("saved presets not copied: %s", got.SavedPresets)
+	}
+	if string(got.DefaultQueryPresets) != `{"pr":[],"issue":[]}` {
+		t.Errorf("default query presets not copied: %s", got.DefaultQueryPresets)
+	}
+
+	presets, err := svc.GetActionPresets(ctx, dst)
+	if err != nil {
+		t.Fatalf("get copied action presets: %v", err)
+	}
+	if len(presets.PR) != 1 || presets.PR[0].ID != "custom" {
+		t.Errorf("action presets not copied: %+v", presets.PR)
 	}
 }
 
@@ -53,6 +71,9 @@ func TestCopyWorkspaceSettingsToWorkspace_SameWorkspace(t *testing.T) {
 func TestCopyWorkspaceSettingsToWorkspace_MissingIDs(t *testing.T) {
 	svc := newCopyTestService(t)
 	if _, err := svc.CopyWorkspaceSettingsToWorkspace(context.Background(), "", "ws-dst"); !errors.Is(err, ErrWorkspaceSettingsValidation) {
-		t.Fatalf("expected ErrWorkspaceSettingsValidation, got %v", err)
+		t.Fatalf("expected ErrWorkspaceSettingsValidation for empty source, got %v", err)
+	}
+	if _, err := svc.CopyWorkspaceSettingsToWorkspace(context.Background(), "ws-src", ""); !errors.Is(err, ErrWorkspaceSettingsValidation) {
+		t.Fatalf("expected ErrWorkspaceSettingsValidation for empty destination, got %v", err)
 	}
 }

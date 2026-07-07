@@ -43,6 +43,12 @@ func (s *Service) CopyConfigToWorkspace(ctx context.Context, sourceWorkspaceID, 
 	if err != nil {
 		return nil, err
 	}
+	// Empty Token/Cookie mean "preserve existing" in SetConfigForWorkspace, so a
+	// source without stored secrets would silently leave the target on its old
+	// credentials. Treat a missing source secret as nothing to copy instead.
+	if token == "" || cookie == "" {
+		return nil, ErrNothingToCopy
+	}
 	req := &SetConfigRequest{
 		AuthMethod:          cfg.AuthMethod,
 		CommandPrefix:       cfg.CommandPrefix,

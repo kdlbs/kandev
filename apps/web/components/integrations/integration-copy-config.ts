@@ -23,7 +23,7 @@ const integrationLabels: Record<IntegrationSlug, string> = {
 export function integrationFromPathname(pathname: string): IntegrationSlug | null {
   const match = pathname.match(/^\/settings\/integrations\/([^/]+)/);
   const slug = match?.[1];
-  if (slug && slug in integrationLabels) {
+  if (slug && Object.prototype.hasOwnProperty.call(integrationLabels, slug)) {
     return slug as IntegrationSlug;
   }
   return null;
@@ -57,7 +57,7 @@ export async function copyIntegrationConfig(
       await copySentryConfig(targetWorkspaceId, options);
       return;
     case "github":
-      await copyGitHubWorkspaceSettings(sourceWorkspaceId, targetWorkspaceId);
+      await copyGitHubWorkspaceSettings(targetWorkspaceId, options);
       return;
   }
 }

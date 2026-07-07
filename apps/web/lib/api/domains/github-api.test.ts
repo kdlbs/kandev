@@ -323,7 +323,7 @@ describe("copyGitHubWorkspaceSettings", () => {
   it("POSTs targetWorkspaceId to /workspace-settings/copy scoped to the source", async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ workspace_id: "ws-dst" }));
 
-    await copyGitHubWorkspaceSettings("ws-src", "ws-dst");
+    await copyGitHubWorkspaceSettings("ws-dst", { workspaceId: "ws-src" });
 
     const call = fetchSpy.mock.calls.at(-1);
     expect(String(call?.[0])).toBe(

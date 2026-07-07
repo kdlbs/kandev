@@ -45,7 +45,11 @@ func TestCopyConfigToWorkspace_CopiesConfigAndSecret(t *testing.T) {
 		got.InstanceType != InstanceTypeCloud || got.DefaultProjectKey != "ENG" {
 		t.Errorf("copied config mismatch: %+v", got)
 	}
-	if v, _ := f.secrets.Reveal(ctx, SecretKeyForWorkspace(dst)); v != "tok-src" {
+	v, err := f.secrets.Reveal(ctx, SecretKeyForWorkspace(dst))
+	if err != nil {
+		t.Fatalf("reveal copied secret: %v", err)
+	}
+	if v != "tok-src" {
 		t.Errorf("secret not copied: %q", v)
 	}
 }

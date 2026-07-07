@@ -655,20 +655,22 @@ export async function updateGitHubWorkspaceSettings(
 }
 
 // copyGitHubWorkspaceSettings copies the per-workspace GitHub settings (repo
-// scope + presets) from sourceWorkspaceId to targetWorkspaceId. GitHub auth is
-// install-wide, so there are no credentials to copy.
+// scope + presets) from the source workspace (options.workspaceId) to
+// targetWorkspaceId. GitHub auth is install-wide, so there are no credentials to
+// copy. The signature mirrors the other integrations' copy helpers
+// (targetWorkspaceId first, source via options) for consistency.
 export async function copyGitHubWorkspaceSettings(
-  sourceWorkspaceId: string,
   targetWorkspaceId: string,
-  options?: ApiRequestOptions,
+  options: { workspaceId: string } & ApiRequestOptions,
 ) {
+  const { workspaceId: sourceWorkspaceId, ...requestOptions } = options;
   const query = new URLSearchParams({ workspace_id: sourceWorkspaceId });
   return fetchJson<GitHubWorkspaceSettings>(
     `/api/v1/github/workspace-settings/copy?${query.toString()}`,
     {
-      ...options,
+      ...requestOptions,
       init: {
-        ...(options?.init ?? {}),
+        ...(requestOptions.init ?? {}),
         method: "POST",
         body: JSON.stringify({ targetWorkspaceId }),
       },

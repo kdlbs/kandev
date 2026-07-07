@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconCopy } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -95,6 +95,7 @@ function CopyConfigDialogBody({
           className="cursor-pointer"
           disabled={!targetId || copying}
           onClick={onCopy}
+          data-dialog-default-action
           data-testid="integration-copy-config-confirm"
         >
           <IconCopy className="h-4 w-4" />
@@ -126,6 +127,22 @@ export function IntegrationCopyConfigMenu({
   );
   const sourceName = workspaceName(workspaces, sourceWorkspaceId);
 
+  // Clear a selected target that is no longer valid — e.g. the user switched the
+  // editing workspace (making the old source a valid target, or the old target
+  // the new source) while a target was already picked.
+  useEffect(() => {
+    if (targetId && !targets.some((w) => w.id === targetId)) {
+      setTargetId(null);
+    }
+  }, [targetId, targets]);
+
+  const onOpenChange = useCallback((next: boolean) => {
+    setOpen(next);
+    // Reset the selection when the dialog closes (ESC, backdrop, or Cancel) so
+    // reopening doesn't pre-select a previously chosen target.
+    if (!next) setTargetId(null);
+  }, []);
+
   const onCopy = useCallback(async () => {
     if (!targetId) return;
     const targetName = workspaceName(workspaces, targetId);
@@ -155,7 +172,7 @@ export function IntegrationCopyConfigMenu({
   if (targets.length === 0) return null;
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -181,7 +198,7 @@ export function IntegrationCopyConfigMenu({
         setTargetId={setTargetId}
         copying={copying}
         onCopy={() => void onCopy()}
-        onCancel={() => setOpen(false)}
+        onCancel={() => onOpenChange(false)}
       />
     </Dialog>
   );

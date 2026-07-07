@@ -39,6 +39,12 @@ func (s *Service) CopyConfigToWorkspace(ctx context.Context, sourceWorkspaceID, 
 	if err != nil {
 		return nil, fmt.Errorf("read source jira secret: %w", err)
 	}
+	// An empty Secret means "keep existing" in SetConfigForWorkspace, so copying
+	// from a workspace without a stored token would leave the target on its old
+	// credential paired with the copied site/email. Treat that as nothing to copy.
+	if secret == "" {
+		return nil, ErrNothingToCopy
+	}
 	req := &SetConfigRequest{
 		SiteURL:           cfg.SiteURL,
 		Email:             cfg.Email,

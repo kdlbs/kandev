@@ -40,7 +40,11 @@ func TestCopyConfigToWorkspace_CopiesConfigAndSecret(t *testing.T) {
 	if got.URL != "https://sentry.example.com" || got.AuthMethod != AuthMethodAuthToken {
 		t.Errorf("copied config mismatch: %+v", got)
 	}
-	if v, _ := f.secrets.Reveal(ctx, SecretKeyForWorkspace(dst)); v != "sen-src" {
+	v, err := f.secrets.Reveal(ctx, SecretKeyForWorkspace(dst))
+	if err != nil {
+		t.Fatalf("reveal copied secret: %v", err)
+	}
+	if v != "sen-src" {
 		t.Errorf("secret not copied: %q", v)
 	}
 }

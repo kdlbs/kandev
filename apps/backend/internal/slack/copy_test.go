@@ -109,3 +109,23 @@ func TestCopyConfigToWorkspace_NothingToCopy(t *testing.T) {
 		t.Fatalf("expected ErrNothingToCopy, got %v", err)
 	}
 }
+
+// TestCopyConfigToWorkspace_MissingSecret guards against silently leaving the
+// target on its previous credentials: a source config row without stored
+// token/cookie must fail rather than copy an empty secret (which
+// SetConfigForWorkspace would treat as "preserve existing").
+func TestCopyConfigToWorkspace_MissingSecret(t *testing.T) {
+	ctx := context.Background()
+	svc := newCopyTestService(t, newFakeSecrets())
+	// Seed a config row directly, without storing any token/cookie secret.
+	if err := svc.store.UpsertConfigForWorkspace(ctx, "ws-src", &SlackConfig{
+		AuthMethod:          AuthMethodCookie,
+		UtilityAgentID:      "ua-1",
+		PollIntervalSeconds: 30,
+	}); err != nil {
+		t.Fatalf("seed source config: %v", err)
+	}
+	if _, err := svc.CopyConfigToWorkspace(ctx, "ws-src", "ws-dst"); !errors.Is(err, ErrNothingToCopy) {
+		t.Fatalf("expected ErrNothingToCopy for missing secret, got %v", err)
+	}
+}
