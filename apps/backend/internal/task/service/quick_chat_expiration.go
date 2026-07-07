@@ -45,8 +45,9 @@ func (s *Service) runQuickChatExpiration(ctx context.Context, now time.Time) {
 	}
 
 	s.logger.Info("quick-chat expiration: found candidates", zap.Int("count", len(tasks)))
+	candidateIDs := s.expiredQuickChatCandidateIDs(ctx, cutoff)
 	for _, task := range tasks {
-		if !s.isExpiredQuickChatCandidate(ctx, task.ID, cutoff) {
+		if !candidateIDs[task.ID] {
 			continue
 		}
 		if err := s.DeleteTask(ctx, task.ID); err != nil {
@@ -60,18 +61,17 @@ func (s *Service) runQuickChatExpiration(ctx context.Context, now time.Time) {
 	}
 }
 
-func (s *Service) isExpiredQuickChatCandidate(ctx context.Context, taskID string, cutoff time.Time) bool {
+func (s *Service) expiredQuickChatCandidateIDs(ctx context.Context, cutoff time.Time) map[string]bool {
 	tasks, err := s.tasks.ListExpiredQuickChatTasks(ctx, cutoff)
 	if err != nil {
-		s.logger.Warn("quick-chat expiration: failed to recheck candidate",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-		return false
+		s.logger.Warn("quick-chat expiration: failed to recheck candidates", zap.Error(err))
+		return map[string]bool{}
 	}
+	candidates := make(map[string]bool, len(tasks))
 	for _, task := range tasks {
-		if task != nil && task.ID == taskID {
-			return true
+		if task != nil {
+			candidates[task.ID] = true
 		}
 	}
-	return false
+	return candidates
 }
