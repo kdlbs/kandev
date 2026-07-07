@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // ErrSameWorkspace is returned when a copy targets the same workspace it reads
@@ -56,6 +57,13 @@ func (s *Service) CopyConfigToWorkspace(ctx context.Context, sourceWorkspaceID, 
 		PollIntervalSeconds: cfg.PollIntervalSeconds,
 		Token:               token,
 		Cookie:              cookie,
+	}
+	// Mark the target unhealthy before the write so the UI doesn't briefly flash
+	// a stale "connected" state (old team/user id) from the target's previous
+	// connection while the async probe validates the copied credentials. The
+	// probe repopulates team/user id from the new credentials.
+	if err := s.store.UpdateAuthHealthForWorkspace(ctx, targetWorkspaceID, false, "", "", "", time.Now().UTC()); err != nil {
+		return nil, fmt.Errorf("reset target slack health: %w", err)
 	}
 	return s.SetConfigForWorkspace(ctx, targetWorkspaceID, req)
 }
