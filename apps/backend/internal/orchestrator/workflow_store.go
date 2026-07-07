@@ -189,7 +189,7 @@ func (s *workflowStore) pullNextTaskOnVacate(ctx context.Context, vacatedStepID,
 	if vacatedStep == nil {
 		return
 	}
-	limitsRepo, pullRepo, ok := s.pullRepositories(vacatedStep.ID)
+	limitsRepo, pullRepo, limitedRepo, ok := s.pullRepositories(vacatedStep.ID)
 	if !ok {
 		return
 	}
@@ -199,7 +199,7 @@ func (s *workflowStore) pullNextTaskOnVacate(ctx context.Context, vacatedStepID,
 	}
 	skipped := map[string]struct{}{excludeTaskID: {}}
 	for occupants < vacatedStep.WIPLimit {
-		pulled := s.pullOneFeederTask(ctx, pullRepo, vacatedStep, occupants, skipped)
+		pulled := s.pullOneFeederTask(ctx, pullRepo, limitedRepo, vacatedStep, occupants, skipped)
 		if !pulled {
 			return
 		}
@@ -221,20 +221,26 @@ func (s *workflowStore) pullEnabledStep(ctx context.Context, vacatedStepID strin
 	return vacatedStep
 }
 
-func (s *workflowStore) pullRepositories(stepID string) (workflowMoveLimitsRepository, workflowPullRepository, bool) {
+func (s *workflowStore) pullRepositories(stepID string) (workflowMoveLimitsRepository, workflowPullRepository, workflowLimitedMoveRepository, bool) {
 	limitsRepo, ok := s.repo.(workflowMoveLimitsRepository)
 	if !ok {
 		s.logger.Warn("cannot pull feeder task: WIP limit repository unavailable",
 			zap.String("step_id", stepID))
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	pullRepo, ok := s.repo.(workflowPullRepository)
 	if !ok {
 		s.logger.Warn("cannot pull feeder task: pull repository unavailable",
 			zap.String("step_id", stepID))
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
-	return limitsRepo, pullRepo, true
+	limitedRepo, ok := s.repo.(workflowLimitedMoveRepository)
+	if !ok {
+		s.logger.Warn("cannot pull feeder task: transactional WIP limit repository unavailable",
+			zap.String("step_id", stepID))
+		return nil, nil, nil, false
+	}
+	return limitsRepo, pullRepo, limitedRepo, true
 }
 
 func (s *workflowStore) currentWIPOccupants(ctx context.Context, limitsRepo workflowMoveLimitsRepository, stepID string) (int, bool) {
@@ -250,6 +256,7 @@ func (s *workflowStore) currentWIPOccupants(ctx context.Context, limitsRepo work
 func (s *workflowStore) pullOneFeederTask(
 	ctx context.Context,
 	pullRepo workflowPullRepository,
+	limitedRepo workflowLimitedMoveRepository,
 	vacatedStep *wfmodels.WorkflowStep,
 	position int,
 	skipped map[string]struct{},
@@ -274,7 +281,7 @@ func (s *workflowStore) pullOneFeederTask(
 		candidate.WorkflowStepID = vacatedStep.ID
 		candidate.Position = position
 		candidate.UpdatedAt = time.Now().UTC()
-		if err := s.repo.UpdateTask(ctx, candidate); err != nil {
+		if err := limitedRepo.UpdateTaskIfWorkflowStepHasCapacity(ctx, candidate, vacatedStep.ID, candidate.ID, vacatedStep.WIPLimit); err != nil {
 			skipped[candidate.ID] = struct{}{}
 			s.logger.Warn("skipping feeder task that could not be pulled",
 				zap.String("task_id", candidate.ID), zap.Error(err))
