@@ -885,7 +885,7 @@ func (r *Repository) ListExpiredQuickChatTasks(ctx context.Context, cutoff time.
 				AND NOT EXISTS (
 					SELECT 1 FROM task_sessions active
 					WHERE active.task_id = t.id
-						AND active.state IN (?, ?, ?, ?)
+						AND active.state IN (?, ?)
 				)
 			GROUP BY t.id, t.updated_at
 			HAVING %s < ?
@@ -902,8 +902,6 @@ func (r *Repository) ListExpiredQuickChatTasks(ctx context.Context, cutoff time.
 	)
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query),
 		models.TaskOriginAutomationRun,
-		models.TaskSessionStateCreated,
-		models.TaskSessionStateStarting,
 		models.TaskSessionStateRunning,
 		models.TaskSessionStateIdle,
 		cutoff,
@@ -935,7 +933,7 @@ func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, 
 				AND NOT EXISTS (
 					SELECT 1 FROM task_sessions active
 					WHERE active.task_id = t.id
-						AND active.state IN (?, ?, ?, ?)
+						AND active.state IN (?, ?)
 				)
 			GROUP BY t.id, t.updated_at
 			HAVING %s < ?
@@ -951,8 +949,6 @@ func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, 
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(query),
 		id,
 		models.TaskOriginAutomationRun,
-		models.TaskSessionStateCreated,
-		models.TaskSessionStateStarting,
 		models.TaskSessionStateRunning,
 		models.TaskSessionStateIdle,
 		cutoff,

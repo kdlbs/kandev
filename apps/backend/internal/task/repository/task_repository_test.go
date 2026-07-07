@@ -197,7 +197,9 @@ func TestSQLiteRepository_ListExpiredQuickChatTasks(t *testing.T) {
 	now := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
 	cutoff := now.Add(-7 * 24 * time.Hour)
 	old := cutoff.Add(-time.Hour)
-	older := cutoff.Add(-2 * time.Hour)
+	older := cutoff.Add(-3 * time.Hour)
+	abandonedCreated := cutoff.Add(-2 * time.Hour)
+	abandonedStarting := cutoff.Add(-90 * time.Minute)
 	recent := cutoff.Add(time.Hour)
 
 	cases := []struct {
@@ -213,6 +215,8 @@ func TestSQLiteRepository_ListExpiredQuickChatTasks(t *testing.T) {
 		wantExpired    bool
 	}{
 		{id: "expired-older", taskUpdated: older, sessionUpdated: older, sessionState: models.TaskSessionStateCompleted, ephemeral: true, wantExpired: true},
+		{id: "abandoned-created", taskUpdated: abandonedCreated, sessionUpdated: abandonedCreated, sessionState: models.TaskSessionStateCreated, ephemeral: true, wantExpired: true},
+		{id: "abandoned-starting", taskUpdated: abandonedStarting, sessionUpdated: abandonedStarting, sessionState: models.TaskSessionStateStarting, ephemeral: true, wantExpired: true},
 		{id: "expired-old", taskUpdated: old, sessionUpdated: old, sessionState: models.TaskSessionStateCompleted, ephemeral: true, wantExpired: true},
 		{id: "expired-waiting-input", taskUpdated: old, sessionUpdated: old, sessionState: models.TaskSessionStateWaitingForInput, ephemeral: true, wantExpired: true},
 		{id: "recent-task", taskUpdated: recent, sessionUpdated: old, sessionState: models.TaskSessionStateCompleted, ephemeral: true},
