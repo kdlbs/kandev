@@ -52,14 +52,18 @@ func (s *Service) CopyWorkspaceSettingsToWorkspace(ctx context.Context, sourceWo
 
 // copyActionPresets duplicates the source workspace's stored quick-action
 // presets onto the target. When the source has no stored row it relies on
-// built-in defaults, so the target row is left untouched (it will fall back to
-// the same defaults on read).
+// built-in defaults, so the target's row is cleared as well — otherwise a copy
+// would leave the target on its own customised presets while reporting success,
+// diverging from the source. Both then fall back to the same defaults on read.
 func (s *Service) copyActionPresets(ctx context.Context, sourceWorkspaceID, targetWorkspaceID string) error {
 	stored, err := s.store.GetActionPresets(ctx, sourceWorkspaceID)
 	if err != nil {
 		return fmt.Errorf("read source github action presets: %w", err)
 	}
 	if stored == nil {
+		if err := s.store.DeleteActionPresets(ctx, targetWorkspaceID); err != nil {
+			return fmt.Errorf("clear target github action presets: %w", err)
+		}
 		return nil
 	}
 	target := &ActionPresets{
