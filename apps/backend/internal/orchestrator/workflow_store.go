@@ -26,8 +26,12 @@ type workflowMoveLimitsRepository interface {
 	CountTasksByWorkflowStepExcludingTask(ctx context.Context, stepID, excludeTaskID string) (int, error)
 }
 
+type workflowLimitedMoveRepository interface {
+	UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, task *models.Task, targetStepID, excludeTaskID string, limit int) error
+}
+
 type workflowPullRepository interface {
-	NextPullCandidate(ctx context.Context, stepID, excludeTaskID string) (*models.Task, error)
+	NextPullCandidateExcluding(ctx context.Context, stepID string, excludeTaskIDs []string) (*models.Task, error)
 }
 
 // workflowStore implements engine.TransitionStore by delegating to the
@@ -128,7 +132,7 @@ func (s *workflowStore) ApplyTransition(ctx context.Context, taskID, sessionID, 
 
 	task.WorkflowStepID = toStepID
 	task.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpdateTask(ctx, task); err != nil {
+	if err := s.updateTransitionTask(ctx, task, targetStep); err != nil {
 		return fmt.Errorf("update task workflow step: %w", err)
 	}
 
@@ -149,6 +153,17 @@ func (s *workflowStore) ApplyTransition(ctx context.Context, taskID, sessionID, 
 	s.pullNextTaskOnVacate(ctx, fromStepID, taskID)
 
 	return nil
+}
+
+func (s *workflowStore) updateTransitionTask(ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep) error {
+	if targetStep == nil || targetStep.WIPLimit <= 0 {
+		return s.repo.UpdateTask(ctx, task)
+	}
+	limitedRepo, ok := s.repo.(workflowLimitedMoveRepository)
+	if !ok {
+		return fmt.Errorf("WIP limit cannot be checked for workflow step %s", targetStep.ID)
+	}
+	return limitedRepo.UpdateTaskIfWorkflowStepHasCapacity(ctx, task, targetStep.ID, task.ID, targetStep.WIPLimit)
 }
 
 func (s *workflowStore) validateWIPLimit(ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep) error {
@@ -182,8 +197,9 @@ func (s *workflowStore) pullNextTaskOnVacate(ctx context.Context, vacatedStepID,
 	if !ok || occupants >= vacatedStep.WIPLimit {
 		return
 	}
+	skipped := map[string]struct{}{excludeTaskID: {}}
 	for occupants < vacatedStep.WIPLimit {
-		pulled := s.pullOneFeederTask(ctx, pullRepo, vacatedStep, occupants, excludeTaskID)
+		pulled := s.pullOneFeederTask(ctx, pullRepo, vacatedStep, occupants, skipped)
 		if !pulled {
 			return
 		}
@@ -236,35 +252,61 @@ func (s *workflowStore) pullOneFeederTask(
 	pullRepo workflowPullRepository,
 	vacatedStep *wfmodels.WorkflowStep,
 	position int,
-	excludeTaskID string,
+	skipped map[string]struct{},
 ) bool {
-	candidate, err := pullRepo.NextPullCandidate(ctx, vacatedStep.PullFromStepID, excludeTaskID)
-	if err != nil {
-		s.logger.Warn("cannot pull feeder task: failed to select candidate",
-			zap.String("step_id", vacatedStep.ID), zap.Error(err))
+	for {
+		candidate, err := pullRepo.NextPullCandidateExcluding(ctx, vacatedStep.PullFromStepID, skippedTaskIDs(skipped))
+		if err != nil {
+			s.logger.Warn("cannot pull feeder task: failed to select candidate",
+				zap.String("step_id", vacatedStep.ID), zap.Error(err))
+			return false
+		}
+		if candidate == nil {
+			return false
+		}
+		if s.feederCandidateBlocked(ctx, candidate.ID) {
+			skipped[candidate.ID] = struct{}{}
+			continue
+		}
+		fromWorkflowID := candidate.WorkflowID
+		fromStepID := candidate.WorkflowStepID
+		candidate.WorkflowID = vacatedStep.WorkflowID
+		candidate.WorkflowStepID = vacatedStep.ID
+		candidate.Position = position
+		candidate.UpdatedAt = time.Now().UTC()
+		if err := s.repo.UpdateTask(ctx, candidate); err != nil {
+			skipped[candidate.ID] = struct{}{}
+			s.logger.Warn("skipping feeder task that could not be pulled",
+				zap.String("task_id", candidate.ID), zap.Error(err))
+			continue
+		}
+		s.publishTaskUpdated(ctx, candidate)
+		sessionID := ""
+		if session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, candidate.ID); err == nil && session != nil {
+			sessionID = session.ID
+		}
+		s.publishTaskMoved(ctx, candidate, fromWorkflowID, fromStepID, vacatedStep.ID, sessionID)
+		return true
+	}
+}
+
+func (s *workflowStore) feederCandidateBlocked(ctx context.Context, taskID string) bool {
+	session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, taskID)
+	if err != nil || session == nil {
 		return false
 	}
-	if candidate == nil {
-		return false
+	return session.State == models.TaskSessionStateStarting ||
+		session.State == models.TaskSessionStateRunning
+}
+
+func skippedTaskIDs(skipped map[string]struct{}) []string {
+	ids := make([]string, 0, len(skipped))
+	for id := range skipped {
+		if id != "" {
+			ids = append(ids, id)
+		}
 	}
-	fromWorkflowID := candidate.WorkflowID
-	fromStepID := candidate.WorkflowStepID
-	candidate.WorkflowID = vacatedStep.WorkflowID
-	candidate.WorkflowStepID = vacatedStep.ID
-	candidate.Position = position
-	candidate.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpdateTask(ctx, candidate); err != nil {
-		s.logger.Warn("failed to pull feeder task into vacated WIP-limited step",
-			zap.String("task_id", candidate.ID), zap.Error(err))
-		return false
-	}
-	s.publishTaskUpdated(ctx, candidate)
-	sessionID := ""
-	if session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, candidate.ID); err == nil && session != nil {
-		sessionID = session.ID
-	}
-	s.publishTaskMoved(ctx, candidate, fromWorkflowID, fromStepID, vacatedStep.ID, sessionID)
-	return true
+	return ids
 }
 
 func (s *workflowStore) PersistData(ctx context.Context, sessionID string, data map[string]any) error {

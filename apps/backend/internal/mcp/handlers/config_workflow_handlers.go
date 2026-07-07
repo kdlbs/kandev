@@ -293,6 +293,8 @@ func (h *Handlers) publishWorkflowStepEvent(ctx context.Context, eventType strin
 			"allow_manual_move":            step.AllowManualMove,
 			"is_start_step":                step.IsStartStep,
 			"auto_archive_after_hours":     step.AutoArchiveAfterHours,
+			"wip_limit":                    step.WIPLimit,
+			"pull_from_step_id":            step.PullFromStepID,
 			"agent_profile_id":             step.AgentProfileID,
 			"stage_type":                   string(step.StageType),
 			"auto_advance_requires_signal": step.AutoAdvanceRequiresSignal,

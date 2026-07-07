@@ -243,6 +243,34 @@ func (c *Controller) validatePullFromStep(ctx context.Context, step *models.Work
 	if source.WorkflowID != step.WorkflowID {
 		return fmt.Errorf("pull_from_step_id must reference a step in the same workflow")
 	}
+	if err := c.validatePullFromStepAcyclic(ctx, step.ID, source); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Controller) validatePullFromStepAcyclic(ctx context.Context, stepID string, source *models.WorkflowStep) error {
+	if stepID == "" {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	for current := source; current != nil && current.PullFromStepID != ""; {
+		if current.PullFromStepID == stepID {
+			return fmt.Errorf("pull_from_step_id cannot create a pull cycle")
+		}
+		if _, ok := seen[current.ID]; ok {
+			return fmt.Errorf("pull_from_step_id cannot create a pull cycle")
+		}
+		seen[current.ID] = struct{}{}
+		next, err := c.svc.GetStep(ctx, current.PullFromStepID)
+		if err != nil {
+			return fmt.Errorf("pull_from_step_id is invalid: %w", err)
+		}
+		if next.WorkflowID != source.WorkflowID {
+			return fmt.Errorf("pull_from_step_id must reference a step in the same workflow")
+		}
+		current = next
+	}
 	return nil
 }
 

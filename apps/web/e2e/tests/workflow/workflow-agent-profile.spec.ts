@@ -74,6 +74,9 @@ test.describe("Workflow agent profile", () => {
     const profileLabel = `${agentProfile.agent_display_name} \u2022 ${agentProfile.name}`;
 
     // Select an agent profile for this step
+    await testPage.addStyleTag({
+      content: '[data-slot="tooltip-content"] { display: none !important; }',
+    });
     await stepProfileSelect.click();
     await testPage.getByRole("option", { name: profileLabel }).click();
 

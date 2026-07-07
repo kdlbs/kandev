@@ -65,7 +65,7 @@ func isMoveConflict(err error) bool {
 		strings.Contains(msg, "archived tasks cannot be moved") ||
 		strings.Contains(msg, "different workspace") ||
 		strings.Contains(msg, "does not belong to target workflow") ||
-		strings.Contains(msg, "wip limit")
+		strings.Contains(msg, "wip limit exceeded")
 }
 
 func isValidationError(err error) bool {

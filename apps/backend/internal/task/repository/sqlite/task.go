@@ -285,6 +285,52 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 	return tx.Commit()
 }
 
+// UpdateTaskIfWorkflowStepHasCapacity updates a task inside the same write
+// transaction that checks a WIP-limited target step's current occupancy.
+func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, task *models.Task, targetStepID, excludeTaskID string, limit int) error {
+	task.UpdatedAt = time.Now().UTC()
+	metadata, err := json.Marshal(task.Metadata)
+	if err != nil {
+		metadata = []byte("{}")
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var occupants int
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT COUNT(*) FROM tasks
+		WHERE workflow_step_id = ?
+		  AND id != ?
+		  AND archived_at IS NULL
+		  AND is_ephemeral = 0
+	`), targetStepID, excludeTaskID).Scan(&occupants); err != nil {
+		return err
+	}
+	if occupants >= limit {
+		return fmt.Errorf("WIP limit exceeded for workflow step %s: limit %d already occupied", targetStepID, limit)
+	}
+
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
+		WHERE id = ?
+	`), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
+	}
+	if err := syncRunnerInTx(ctx, tx, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // DeleteTask deletes a task by ID
 func (r *Repository) DeleteTask(ctx context.Context, id string) error {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM tasks WHERE id = ?`), id)
@@ -356,16 +402,41 @@ func (r *Repository) CountTasksByWorkflowStepExcludingTask(ctx context.Context, 
 
 // NextPullCandidate returns the next active, visible task from a feeder step.
 func (r *Repository) NextPullCandidate(ctx context.Context, stepID, excludeTaskID string) (*models.Task, error) {
+	excludeTaskIDs := []string(nil)
+	if excludeTaskID != "" {
+		excludeTaskIDs = append(excludeTaskIDs, excludeTaskID)
+	}
+	return r.NextPullCandidateExcluding(ctx, stepID, excludeTaskIDs)
+}
+
+// NextPullCandidateExcluding returns the next active, visible task from a
+// feeder step, skipping any candidate IDs the caller already tried.
+func (r *Repository) NextPullCandidateExcluding(ctx context.Context, stepID string, excludeTaskIDs []string) (*models.Task, error) {
+	args := []any{stepID}
+	excludeClause := ""
+	if len(excludeTaskIDs) > 0 {
+		placeholders := make([]string, 0, len(excludeTaskIDs))
+		for _, id := range excludeTaskIDs {
+			if id == "" {
+				continue
+			}
+			placeholders = append(placeholders, "?")
+			args = append(args, id)
+		}
+		if len(placeholders) > 0 {
+			excludeClause = " AND t.id NOT IN (" + strings.Join(placeholders, ", ") + ")"
+		}
+	}
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT `+taskSelectColumns("t")+`
-		FROM tasks t
-		WHERE t.workflow_step_id = ?
-		  AND t.id != ?
-		  AND t.archived_at IS NULL
-		  AND t.is_ephemeral = 0
-		ORDER BY
-		  t.position ASC,
-		  CASE LOWER(COALESCE(t.priority, ''))
+			SELECT `+taskSelectColumns("t")+`
+			FROM tasks t
+			WHERE t.workflow_step_id = ?
+			  AND t.archived_at IS NULL
+			  AND t.is_ephemeral = 0
+			  `+excludeClause+`
+			ORDER BY
+			  t.position ASC,
+			  CASE LOWER(COALESCE(t.priority, ''))
 		    WHEN 'critical' THEN 0
 		    WHEN 'high' THEN 1
 		    WHEN 'medium' THEN 2
@@ -374,9 +445,9 @@ func (r *Repository) NextPullCandidate(ctx context.Context, stepID, excludeTaskI
 		    ELSE 4
 		  END ASC,
 		  t.created_at ASC,
-		  t.id ASC
-		LIMIT 1
-	`), stepID, excludeTaskID)
+			  t.id ASC
+			LIMIT 1
+		`), args...)
 	task, err := r.scanSingleTask(row)
 	if err == sql.ErrNoRows {
 		return nil, nil
