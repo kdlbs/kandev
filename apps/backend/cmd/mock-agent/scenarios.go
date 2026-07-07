@@ -858,8 +858,8 @@ func walkthroughDemoArgs() map[string]interface{} {
 				"Step 3: WALKTHROUGH_CHANGE_B lives in file B.", 2, 0),
 			wtStep("File C", "walkthrough_c.txt",
 				"Step 4: WALKTHROUGH_CHANGE_C lives in file C.", 2, 0),
-			wtStep("Unchanged file", "walkthrough_unchanged.txt",
-				"Step 5: WALKTHROUGH_UNCHANGED — this file did not change; shown from its current state.", 1, 0),
+			wtStep("Unchanged file", "walkthrough_base.txt",
+				"Step 5: WALKTHROUGH_UNCHANGED — this base file did not change; shown from its current state.", 1, 0),
 		},
 	}
 }
@@ -904,8 +904,6 @@ func scenarioWalkthroughBasic(e *emitter) {
 		"line 1: B\nline 2: BASE\n", "line 1: B\nline 2: WALKTHROUGH_CHANGE_B\n")
 	ok = ok && writeWalkthroughFile(e, runGitCmd, "walkthrough_c.txt",
 		"line 1: C\nline 2: BASE\n", "line 1: C\nline 2: WALKTHROUGH_CHANGE_C\n")
-	ok = ok && writeWalkthroughFile(e, runGitCmd, "walkthrough_unchanged.txt",
-		"line 1: WALKTHROUGH_UNCHANGED\nline 2: still here\n", "")
 	if !ok {
 		return
 	}

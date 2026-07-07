@@ -235,10 +235,12 @@ function MobileReviewDialogMount({
   sessionId,
   review,
   activeTaskId,
+  onSelectWalkthroughFile,
 }: {
   sessionId: string | null;
   review: ReturnType<typeof useReviewDialog>;
   activeTaskId: string | null;
+  onSelectWalkthroughFile: (path: string) => void;
 }) {
   if (!sessionId) return null;
   return (
@@ -257,7 +259,7 @@ function MobileReviewDialogMount({
       <WalkthroughOverlay
         taskId={activeTaskId}
         sessionId={sessionId}
-        onSelectFile={review.reviewOpenFile}
+        onSelectFile={onSelectWalkthroughFile}
       />
     </>
   );
@@ -429,6 +431,7 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
         sessionId={effectiveSessionId}
         review={review}
         activeTaskId={activeTaskId}
+        onSelectWalkthroughFile={handleOpenFileFromChat}
       />
     </div>
   );

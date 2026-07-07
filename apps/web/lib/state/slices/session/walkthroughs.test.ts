@@ -1,9 +1,24 @@
-import { describe, it, expect } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createSessionSlice } from "./session-slice";
 import type { SessionSlice } from "./types";
 import type { TaskWalkthrough, WalkthroughStep } from "@/lib/types/http";
+
+const mockGetPlanLastSeen = vi.fn();
+const mockSetPlanLastSeen = vi.fn();
+const mockGetWalkthroughLastSeen = vi.fn();
+const mockSetWalkthroughLastSeen = vi.fn();
+
+vi.mock("@/lib/local-storage", () => ({
+  getPlanLastSeen: (...args: unknown[]) => mockGetPlanLastSeen(...args),
+  setPlanLastSeen: (...args: unknown[]) => mockSetPlanLastSeen(...args),
+}));
+
+vi.mock("@/lib/walkthrough-notification-storage", () => ({
+  getWalkthroughLastSeen: (...args: unknown[]) => mockGetWalkthroughLastSeen(...args),
+  setWalkthroughLastSeen: (...args: unknown[]) => mockSetWalkthroughLastSeen(...args),
+}));
 
 function makeStore() {
   return create<SessionSlice>()(immer(createSessionSlice));
@@ -35,6 +50,12 @@ function makeWalkthrough(overrides: Partial<TaskWalkthrough> = {}): TaskWalkthro
 }
 
 describe("walkthrough slice", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetPlanLastSeen.mockReturnValue(null);
+    mockGetWalkthroughLastSeen.mockReturnValue(null);
+  });
+
   it("setWalkthrough stores the tour and defaults the active step to 0", () => {
     const store = makeStore();
     store.getState().setWalkthrough(TASK_ID, makeWalkthrough());
@@ -82,5 +103,25 @@ describe("walkthrough slice", () => {
     store.getState().markWalkthroughSeen(TASK_ID);
 
     expect(store.getState().walkthroughs.lastSeenUpdatedAtByTaskId[TASK_ID]).toBe(TS_LATER);
+    expect(mockSetWalkthroughLastSeen).toHaveBeenCalledWith(TASK_ID, TS_LATER);
+  });
+
+  it("setWalkthrough hydrates stored lastSeenUpdatedAtByTaskId", () => {
+    mockGetWalkthroughLastSeen.mockReturnValue(TS_LATER);
+    const store = makeStore();
+
+    store.getState().setWalkthrough(TASK_ID, makeWalkthrough({ updated_at: TS_LATER }));
+
+    expect(store.getState().walkthroughs.lastSeenUpdatedAtByTaskId[TASK_ID]).toBe(TS_LATER);
+  });
+
+  it("setWalkthrough does not advance lastSeenUpdatedAtByTaskId on update", () => {
+    const store = makeStore();
+    store.getState().setWalkthrough(TASK_ID, makeWalkthrough({ updated_at: TS_EPOCH }));
+    store.getState().markWalkthroughSeen(TASK_ID);
+
+    store.getState().setWalkthrough(TASK_ID, makeWalkthrough({ updated_at: TS_LATER }));
+
+    expect(store.getState().walkthroughs.lastSeenUpdatedAtByTaskId[TASK_ID]).toBe(TS_EPOCH);
   });
 });

@@ -98,6 +98,63 @@ func TestWalkthroughService_ShowWalkthrough_Validation(t *testing.T) {
 	if _, err := svc.ShowWalkthrough(ctx, ShowWalkthroughRequest{TaskID: "task-1"}); err == nil {
 		t.Fatal("expected error for empty steps")
 	}
+
+	tests := []struct {
+		name  string
+		steps []models.WalkthroughStep
+	}{
+		{
+			name:  "empty file",
+			steps: []models.WalkthroughStep{{File: "  ", Line: 1, Text: "x"}},
+		},
+		{
+			name:  "empty text",
+			steps: []models.WalkthroughStep{{File: "a.go", Line: 1, Text: "  "}},
+		},
+		{
+			name:  "non-positive line",
+			steps: []models.WalkthroughStep{{File: "a.go", Line: 0, Text: "x"}},
+		},
+		{
+			name:  "line_end before line",
+			steps: []models.WalkthroughStep{{File: "a.go", Line: 5, LineEnd: 4, Text: "x"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := svc.ShowWalkthrough(ctx, ShowWalkthroughRequest{TaskID: "task-1", Steps: tt.steps}); err == nil {
+				t.Fatalf("expected validation error for %s", tt.name)
+			}
+		})
+	}
+}
+
+func TestWalkthroughService_ShowWalkthrough_TrimsInput(t *testing.T) {
+	svc, _, repo := createTestWalkthroughService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-1")
+
+	wt, err := svc.ShowWalkthrough(ctx, ShowWalkthroughRequest{
+		TaskID: "task-1",
+		Title:  "  Tour  ",
+		Steps: []models.WalkthroughStep{{
+			Title: "  Intro  ",
+			Repo:  "  repo-a  ",
+			File:  "  main.go  ",
+			Line:  7,
+			Text:  "  explanation  ",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("ShowWalkthrough failed: %v", err)
+	}
+	if wt.Title != "Tour" {
+		t.Fatalf("expected trimmed title, got %q", wt.Title)
+	}
+	step := wt.Steps[0]
+	if step.Title != "Intro" || step.Repo != "repo-a" || step.File != "main.go" || step.Text != "explanation" {
+		t.Fatalf("expected trimmed step fields, got %+v", step)
+	}
 }
 
 func TestWalkthroughService_GetMissing(t *testing.T) {

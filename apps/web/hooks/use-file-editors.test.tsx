@@ -47,6 +47,18 @@ describe("scrollEditorIfMounted", () => {
     expect(consumePendingCursorPosition(APP_PATH)).toBeUndefined();
   });
 
+  it("falls back to a path-segment suffix match when the worktree path is unknown", () => {
+    const editor = createEditor(WORKTREE_APP_PATH);
+    getMonacoInstance.mockReturnValue({ editor: { getEditors: () => [editor] } });
+    setPendingCursorPosition(APP_PATH, 12, 1);
+
+    expect(scrollEditorIfMounted(APP_PATH, null, 42, 3)).toBe(true);
+
+    expect(editor.setPosition).toHaveBeenCalledWith({ lineNumber: 42, column: 3 });
+    expect(editor.revealLineInCenter).toHaveBeenCalledWith(42);
+    expect(consumePendingCursorPosition(APP_PATH)).toBeUndefined();
+  });
+
   it("returns false when no mounted Monaco editor matches the path", () => {
     const editor = createEditor("/worktree/src/other.ts");
     getMonacoInstance.mockReturnValue({ editor: { getEditors: () => [editor] } });

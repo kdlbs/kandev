@@ -95,7 +95,12 @@ export const test = backendFixture.extend<
       fs.mkdirSync(repoDir, { recursive: true });
       const gitEnv = makeGitEnv(backend.tmpDir);
       execSync("git init -b main", { cwd: repoDir, env: gitEnv });
-      execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
+      fs.writeFileSync(
+        path.join(repoDir, "walkthrough_base.txt"),
+        "line 1: WALKTHROUGH_UNCHANGED\nline 2: seeded on main\n",
+      );
+      execSync("git add walkthrough_base.txt", { cwd: repoDir, env: gitEnv });
+      execSync('git commit -m "init"', { cwd: repoDir, env: gitEnv });
       const repo = await apiClient.createRepository(workspace.id, repoDir);
 
       // Agent registry seeding (runInitialAgentSetup → discovery) is

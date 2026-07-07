@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -63,8 +65,9 @@ func (s *WalkthroughService) ShowWalkthrough(ctx context.Context, req ShowWalkth
 	if req.TaskID == "" {
 		return nil, ErrTaskIDRequired
 	}
-	if len(req.Steps) == 0 {
-		return nil, errors.New("at least one step is required")
+	title, steps, err := normalizeWalkthroughRequest(req)
+	if err != nil {
+		return nil, err
 	}
 
 	existing, err := s.repo.GetTaskWalkthrough(ctx, req.TaskID)
@@ -77,14 +80,10 @@ func (s *WalkthroughService) ShowWalkthrough(ctx context.Context, req ShowWalkth
 		eventType = events.TaskWalkthroughUpdated
 	}
 
-	title := req.Title
-	if title == "" {
-		title = "Walkthrough"
-	}
 	wt := &models.TaskWalkthrough{
 		TaskID:    req.TaskID,
 		Title:     title,
-		Steps:     req.Steps,
+		Steps:     steps,
 		CreatedBy: createdByAgent,
 	}
 	if existing != nil {
@@ -99,6 +98,44 @@ func (s *WalkthroughService) ShowWalkthrough(ctx context.Context, req ShowWalkth
 
 	s.publishEvent(ctx, eventType, wt)
 	return wt, nil
+}
+
+func normalizeWalkthroughRequest(req ShowWalkthroughRequest) (string, []models.WalkthroughStep, error) {
+	if len(req.Steps) == 0 {
+		return "", nil, errors.New("at least one step is required")
+	}
+
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		title = "Walkthrough"
+	}
+
+	steps := make([]models.WalkthroughStep, 0, len(req.Steps))
+	for i, raw := range req.Steps {
+		step := models.WalkthroughStep{
+			Title:   strings.TrimSpace(raw.Title),
+			Repo:    strings.TrimSpace(raw.Repo),
+			File:    strings.TrimSpace(raw.File),
+			Line:    raw.Line,
+			LineEnd: raw.LineEnd,
+			Text:    strings.TrimSpace(raw.Text),
+		}
+		if step.File == "" {
+			return "", nil, fmt.Errorf("step %d file is required", i+1)
+		}
+		if step.Text == "" {
+			return "", nil, fmt.Errorf("step %d text is required", i+1)
+		}
+		if step.Line <= 0 {
+			return "", nil, fmt.Errorf("step %d line must be positive", i+1)
+		}
+		if step.LineEnd != 0 && step.LineEnd < step.Line {
+			return "", nil, fmt.Errorf("step %d line_end must be greater than or equal to line", i+1)
+		}
+		steps = append(steps, step)
+	}
+
+	return title, steps, nil
 }
 
 // GetWalkthrough returns a task's walkthrough, or nil, nil when none exists.

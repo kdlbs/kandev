@@ -69,10 +69,55 @@ test.describe("Code walkthrough", () => {
     await expectStep(5, "WALKTHROUGH_UNCHANGED");
     await expect(card.getByTestId("walkthrough-next")).toBeDisabled();
 
-    // The unchanged file was opened in an editor tab (current state).
-    await expect(
-      testPage.locator('.dv-default-tab:has-text("walkthrough_unchanged.txt")'),
-    ).toBeVisible({ timeout: 15_000 });
+    // The unchanged/base file is opened in an editor tab, but it does not belong
+    // in the Review diff because it was not changed by this task.
+    await expect(testPage.locator('.dv-default-tab:has-text("walkthrough_base.txt")')).toBeVisible({
+      timeout: 15_000,
+    });
+    await testPage.evaluate(() => window.dispatchEvent(new CustomEvent("open-review-dialog")));
+    const dialog = testPage.getByRole("dialog", { name: "Review Changes" });
+    await expect(dialog).toBeVisible({ timeout: 15_000 });
+    await expect(dialog.getByText("walkthrough_base.txt")).toHaveCount(0);
+  });
+
+  test("editor walkthrough shows range marker, connector, and supports dragging", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedWalkthroughTask(testPage, apiClient, seedData, "walkthrough-basic", "5-step tour");
+    const card = await openWalkthrough(testPage);
+
+    await expect(testPage.getByTestId("walkthrough-editor-range")).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(testPage.getByTestId("walkthrough-connector")).toBeVisible({ timeout: 15_000 });
+
+    await card.getByTestId("walkthrough-next").click();
+    await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 2 / 5");
+    await expect(testPage.getByTestId("walkthrough-editor-range")).toHaveAttribute(
+      "data-line-range",
+      "2-3",
+      { timeout: 15_000 },
+    );
+
+    const before = await card.boundingBox();
+    if (!before) throw new Error("walkthrough card missing before drag");
+    const dragHandle = card.getByTestId("walkthrough-drag-handle");
+    const handleBox = await dragHandle.boundingBox();
+    if (!handleBox) throw new Error("walkthrough drag handle missing");
+    await testPage.mouse.move(
+      handleBox.x + handleBox.width / 2,
+      handleBox.y + handleBox.height / 2,
+    );
+    await testPage.mouse.down();
+    await testPage.mouse.move(handleBox.x - 120, handleBox.y + 80, { steps: 6 });
+    await testPage.mouse.up();
+
+    const after = await card.boundingBox();
+    if (!after) throw new Error("walkthrough card missing after drag");
+    expect(Math.abs(after.x - before.x)).toBeGreaterThan(40);
+    expect(Math.abs(after.y - before.y)).toBeGreaterThan(30);
   });
 
   test("step file label is shown and opens the file", async ({ testPage, apiClient, seedData }) => {

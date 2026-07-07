@@ -150,6 +150,7 @@ vi.mock("./chat/use-chat-panel-state", () => ({
     prompts: [{ id: "prompt-1", name: "Prompt", content: "Prompt content" }],
     planComments: [],
     pendingPRFeedback: [],
+    walkthroughComments: [],
     pendingCommentsByFile: mockPendingByFile,
   }),
 }));

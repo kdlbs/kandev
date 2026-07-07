@@ -48,7 +48,9 @@ export function PassthroughComposerPanel({
   isSending: boolean;
 }) {
   const hasContextComments =
-    panelState.planComments.length > 0 || panelState.pendingPRFeedback.length > 0;
+    panelState.planComments.length > 0 ||
+    panelState.pendingPRFeedback.length > 0 ||
+    panelState.walkthroughComments.length > 0;
   return (
     <div
       data-testid="passthrough-composer"
@@ -106,7 +108,8 @@ export function formatPassthroughBaseMessage(
   const hasStructuredComments =
     !!reviewComments ||
     panelState.pendingPRFeedback.length > 0 ||
-    panelState.planComments.length > 0;
+    panelState.planComments.length > 0 ||
+    panelState.walkthroughComments.length > 0;
   if (hasStructuredComments) {
     return {
       formatted: buildSubmitMessage(
@@ -114,6 +117,7 @@ export function formatPassthroughBaseMessage(
         commentsToSend.length > 0 ? commentsToSend : undefined,
         panelState.pendingPRFeedback,
         panelState.planComments,
+        panelState.walkthroughComments,
       ),
       commentsToSend,
     };
@@ -247,6 +251,9 @@ export function clearPassthroughComposerContext(panelState: ReturnType<typeof us
   }
   if (panelState.planComments.length > 0) {
     panelState.clearSessionPlanComments();
+  }
+  if (panelState.walkthroughComments.length > 0) {
+    panelState.handleClearWalkthroughComments();
   }
   if (!panelState.resolvedSessionId) return;
   panelState.clearEphemeral(panelState.resolvedSessionId);

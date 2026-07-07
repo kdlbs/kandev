@@ -9,7 +9,7 @@ import type { Comment } from "@/lib/state/slices/comments";
 import { useCommentsStore, isDiffComment } from "@/lib/state/slices/comments";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
 import { useGitOperations } from "@/hooks/use-git-operations";
-import { walkthroughFileMatches } from "@/lib/diff/walkthrough-match";
+import { walkthroughStepMatchesFile } from "@/lib/diff/walkthrough-match";
 import { useReviewSidebarResize } from "@/hooks/use-review-sidebar-resize";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
@@ -437,18 +437,18 @@ function useWalkthroughFileSelection(
   allFiles: ReviewFile[],
   handleSelectFile: (key: string) => void,
 ) {
-  const stepFile = useAppStore((state) => {
+  const step = useAppStore((state) => {
     const taskId = state.tasks.activeTaskId;
     if (!taskId) return null;
     const wt = state.walkthroughs.byTaskId[taskId];
     const idx = state.walkthroughs.activeStepByTaskId[taskId] ?? 0;
-    return wt?.steps[idx]?.file ?? null;
+    return wt?.steps[idx] ?? null;
   });
   useEffect(() => {
-    if (!open || !stepFile) return;
-    const file = allFiles.find((f) => walkthroughFileMatches(f.path, stepFile));
+    if (!open || !step) return;
+    const file = allFiles.find((f) => walkthroughStepMatchesFile(f, step, allFiles));
     if (file) handleSelectFile(reviewFileKey(file));
-  }, [open, stepFile, allFiles, handleSelectFile]);
+  }, [open, step, allFiles, handleSelectFile]);
 }
 
 export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps) {

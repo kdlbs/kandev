@@ -1,5 +1,11 @@
-import type { Comment, DiffComment, PlanComment, PRFeedbackComment } from "./types";
-import { isDiffComment, isPlanComment, isPRFeedbackComment } from "./types";
+import type {
+  Comment,
+  DiffComment,
+  PlanComment,
+  PRFeedbackComment,
+  WalkthroughComment,
+} from "./types";
+import { isDiffComment, isPlanComment, isPRFeedbackComment, isWalkthroughComment } from "./types";
 
 /**
  * Format diff review comments as human-readable markdown for sending to agent.
@@ -86,22 +92,53 @@ export function formatPRFeedbackAsMarkdown(comments: PRFeedbackComment[]): strin
 }
 
 /**
+ * Format walkthrough feedback as markdown for sending to agent.
+ */
+export function formatWalkthroughCommentsAsMarkdown(comments: WalkthroughComment[]): string {
+  if (!comments || comments.length === 0) return "";
+
+  const lines: string[] = ["### Walkthrough Feedback", ""];
+  for (const c of comments) {
+    const lineRange = c.startLine === c.endLine ? `${c.startLine}` : `${c.startLine}-${c.endLine}`;
+    const repoPrefix = c.repo ? `${c.repo}/` : "";
+    const title = c.walkthroughTitle || "Walkthrough";
+
+    lines.push(`**${title} · Step ${c.stepIndex + 1} / ${c.stepCount}**`);
+    lines.push(`**${repoPrefix}${c.filePath}:${lineRange}**`);
+    lines.push("");
+    lines.push("Agent walkthrough text:");
+    lines.push(toBlockquote(c.stepText));
+    lines.push("");
+    lines.push("User feedback:");
+    lines.push(toBlockquote(c.text));
+    lines.push("");
+  }
+
+  lines.push("---");
+  lines.push("");
+  return lines.join("\n");
+}
+
+/**
  * Format all pending comments for inclusion in a chat message.
  */
 export function formatCommentsForMessage(comments: Comment[]): {
   diffComments: DiffComment[];
   planComments: PlanComment[];
   prFeedbackComments: PRFeedbackComment[];
+  walkthroughComments: WalkthroughComment[];
 } {
   const diffComments: DiffComment[] = [];
   const planComments: PlanComment[] = [];
   const prFeedbackComments: PRFeedbackComment[] = [];
+  const walkthroughComments: WalkthroughComment[] = [];
 
   for (const c of comments) {
     if (isDiffComment(c)) diffComments.push(c);
     else if (isPlanComment(c)) planComments.push(c);
     else if (isPRFeedbackComment(c)) prFeedbackComments.push(c);
+    else if (isWalkthroughComment(c)) walkthroughComments.push(c);
   }
 
-  return { diffComments, planComments, prFeedbackComments };
+  return { diffComments, planComments, prFeedbackComments, walkthroughComments };
 }

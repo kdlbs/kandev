@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { IconX, IconFileCode } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
@@ -8,27 +8,18 @@ import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
 import { useCommentsStore } from "@/lib/state/slices/comments";
 import { useFileEditors } from "@/hooks/use-file-editors";
-import { buildDiffComment } from "@/lib/diff/comment-utils";
-import { revealFileAtLine } from "@/lib/diff/walkthrough-reveal";
-import { getWebSocketClient } from "@/lib/ws/connection";
+import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
+import { revealFileAtLine, type OpenFileFn } from "@/lib/diff/walkthrough-reveal";
+import { generateUUID } from "@/lib/utils";
+import { useToast } from "@/components/toast-provider";
 import {
   markdownComponents,
   normalizeMarkdown,
   remarkPlugins,
 } from "@/components/shared/markdown-components";
-import type { WalkthroughStep } from "@/lib/types/http";
+import type { TaskWalkthrough, WalkthroughStep } from "@/lib/types/http";
+import type { WalkthroughComment } from "@/lib/state/slices/comments";
 import { CommentForm } from "./comment-form";
-
-/** Compose the chat prompt sent when the user asks about a step. */
-function buildStepQuestion(step: WalkthroughStep, stepIndex: number, question: string): string {
-  const where = step.line_end
-    ? `${step.file}:${step.line}-${step.line_end}`
-    : `${step.file}:${step.line}`;
-  return (
-    `<kandev-system>Re: walkthrough step ${stepIndex + 1} (${where})</kandev-system>\n\n` +
-    `> ${step.text}\n\n${question}`
-  );
-}
 
 function StepBody({ step, onOpenFile }: { step: WalkthroughStep; onOpenFile: () => void }) {
   const lineLabel = step.line_end ? `${step.line}–${step.line_end}` : `${step.line}`;
@@ -75,7 +66,11 @@ function StepHeader({
   onClose: () => void;
 }) {
   return (
-    <div className="flex items-center gap-2 px-3 pt-2 pb-1.5 border-b border-border">
+    <div
+      className="flex cursor-move touch-none items-center gap-2 border-b border-border px-3 pt-2 pb-1.5"
+      data-testid="walkthrough-drag-handle"
+      data-walkthrough-drag-handle
+    >
       <Badge variant="secondary" data-testid="walkthrough-badge">
         Walkthrough
       </Badge>
@@ -96,6 +91,42 @@ function StepHeader({
   );
 }
 
+function StepNavigation({
+  activeStep,
+  stepCount,
+  onPrevious,
+  onNext,
+}: {
+  activeStep: number;
+  stepCount: number;
+  onPrevious: () => void;
+  onNext: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 px-4 py-2 border-t border-border">
+      <Button
+        variant="outline"
+        size="sm"
+        className="cursor-pointer"
+        disabled={activeStep <= 0}
+        data-testid="walkthrough-prev"
+        onClick={onPrevious}
+      >
+        Previous
+      </Button>
+      <Button
+        size="sm"
+        className="cursor-pointer"
+        disabled={activeStep >= stepCount - 1}
+        data-testid="walkthrough-next"
+        onClick={onNext}
+      >
+        Next
+      </Button>
+    </div>
+  );
+}
+
 /** True when the active task has a walkthrough with a valid active step. */
 export function useHasActiveWalkthroughStep(): boolean {
   return useAppStore((s) => {
@@ -110,11 +141,17 @@ export function useHasActiveWalkthroughStep(): boolean {
 /**
  * The shared inner card body (header, markdown, Prev/Next, ask box) used by both
  * the inline diff-anchored card and the editor-mode floating window. Reads all
- * state from the store; renders nothing when there is no active step. The ask
- * box mirrors diff comments: "Add" queues a review comment on these lines,
- * "Run" sends the question to the agent immediately.
+ * state from the store; renders nothing when there is no active step. The note
+ * box mirrors other agent feedback surfaces: "Add" creates a pending
+ * walkthrough context item, and "Run" sends the same context to the agent.
  */
-export function WalkthroughStepInner({ onClose }: { onClose: () => void }) {
+export function WalkthroughStepInner({
+  onClose,
+  onSelectFile,
+}: {
+  onClose: () => void;
+  onSelectFile?: OpenFileFn;
+}) {
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
   const sessionId = useAppStore((s) => s.tasks.activeSessionId);
   const walkthrough = useAppStore((s) =>
@@ -126,46 +163,52 @@ export function WalkthroughStepInner({ onClose }: { onClose: () => void }) {
   const setActiveStep = useAppStore((s) => s.setWalkthroughActiveStep);
   const markSeen = useAppStore((s) => s.markWalkthroughSeen);
   const addComment = useCommentsStore((s) => s.addComment);
-  const { openFile } = useFileEditors();
-
+  const { runComment } = useRunComment({ sessionId, taskId: activeTaskId });
+  const { openFile: defaultOpenFile } = useFileEditors();
+  const openFile = onSelectFile ?? defaultOpenFile;
+  const { toast } = useToast();
   useEffect(() => {
     if (activeTaskId && walkthrough) markSeen(activeTaskId);
   }, [activeTaskId, walkthrough, markSeen]);
-
   if (!activeTaskId || !walkthrough) return null;
   const stepCount = walkthrough.steps.length;
   const step = walkthrough.steps[activeStep];
   if (!step) return null;
-
   const lineLabel = step.line_end ? `Lines ${step.line}–${step.line_end}` : `Line ${step.line}`;
-
-  const addAsComment = (text: string) => {
-    if (!sessionId) return;
-    addComment(
-      buildDiffComment({
-        filePath: step.file,
-        sessionId,
-        startLine: step.line,
-        endLine: step.line_end ?? step.line,
-        side: "additions",
-        text,
-      }),
-    );
+  const buildComment = (text: string): WalkthroughComment | null => {
+    if (!sessionId) return null;
+    return buildWalkthroughComment({
+      sessionId,
+      taskId: activeTaskId,
+      walkthrough,
+      step,
+      activeStep,
+      stepCount,
+      text,
+    });
   };
 
-  const askNow = (text: string) => {
-    if (!sessionId) return;
-    getWebSocketClient()
-      ?.request(
-        "message.add",
-        {
-          task_id: activeTaskId,
-          session_id: sessionId,
-          content: buildStepQuestion(step, activeStep, text),
-        },
-        10000,
-      )
-      .catch(() => {});
+  const addWalkthroughFeedback = (text: string) => {
+    const comment = buildComment(text);
+    if (!comment) return;
+    addComment(comment);
+    toast({ title: "Walkthrough note added", variant: "success" });
+  };
+
+  const runWalkthroughFeedback = (text: string) => {
+    const comment = buildComment(text);
+    if (!comment) return;
+    addComment(comment);
+    void runComment(comment)
+      .then(({ queued }) => {
+        toast({
+          title: queued ? "Walkthrough note queued" : "Walkthrough note sent",
+          variant: "success",
+        });
+      })
+      .catch(() => {
+        toast({ title: "Failed to send walkthrough note", variant: "error" });
+      });
   };
 
   return (
@@ -180,38 +223,55 @@ export function WalkthroughStepInner({ onClose }: { onClose: () => void }) {
         step={step}
         onOpenFile={() => revealFileAtLine(openFile, step.file, step.line, step.repo)}
       />
-      <div className="flex items-center gap-2 px-4 py-2 border-t border-border">
-        <Button
-          variant="outline"
-          size="sm"
-          className="cursor-pointer"
-          disabled={activeStep <= 0}
-          data-testid="walkthrough-prev"
-          onClick={() => setActiveStep(activeTaskId, activeStep - 1)}
-        >
-          Previous
-        </Button>
-        <Button
-          size="sm"
-          className="cursor-pointer"
-          disabled={activeStep >= stepCount - 1}
-          data-testid="walkthrough-next"
-          onClick={() => setActiveStep(activeTaskId, activeStep + 1)}
-        >
-          Next
-        </Button>
-      </div>
+      <StepNavigation
+        activeStep={activeStep}
+        stepCount={stepCount}
+        onPrevious={() => setActiveStep(activeTaskId, activeStep - 1)}
+        onNext={() => setActiveStep(activeTaskId, activeStep + 1)}
+      />
       <div className="px-4 pb-3 pt-1">
         <CommentForm
           key={activeStep}
-          onSubmit={addAsComment}
-          onSubmitAndRun={askNow}
+          onSubmit={addWalkthroughFeedback}
+          onSubmitAndRun={runWalkthroughFeedback}
           onCancel={() => {}}
           autoFocus={false}
         />
       </div>
     </div>
   );
+}
+
+function buildWalkthroughComment(params: {
+  sessionId: string;
+  taskId: string;
+  walkthrough: TaskWalkthrough;
+  step: WalkthroughStep;
+  activeStep: number;
+  stepCount: number;
+  text: string;
+}): WalkthroughComment {
+  const { sessionId, taskId, walkthrough, step, activeStep, stepCount, text } = params;
+  const startLine = step.line;
+  const endLine = step.line_end ?? step.line;
+  return {
+    id: generateUUID(),
+    source: "walkthrough",
+    sessionId,
+    taskId,
+    walkthroughId: walkthrough.id,
+    walkthroughTitle: walkthrough.title,
+    stepIndex: activeStep,
+    stepCount,
+    repo: step.repo,
+    filePath: step.file,
+    startLine: Math.min(startLine, endLine),
+    endLine: Math.max(startLine, endLine),
+    stepText: step.text,
+    text,
+    createdAt: new Date().toISOString(),
+    status: "pending",
+  };
 }
 
 /**
@@ -222,14 +282,19 @@ export function WalkthroughStepInner({ onClose }: { onClose: () => void }) {
 export function WalkthroughStepCard() {
   const hasStep = useHasActiveWalkthroughStep();
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
-  const setWalkthrough = useAppStore((s) => s.setWalkthrough);
-  if (!hasStep) return null;
+  const activeStep = useAppStore((s) =>
+    activeTaskId ? (s.walkthroughs.activeStepByTaskId[activeTaskId] ?? 0) : 0,
+  );
+  const updatedAt = useAppStore((s) =>
+    activeTaskId ? s.walkthroughs.byTaskId[activeTaskId]?.updated_at : undefined,
+  );
+  const [dismissedKey, setDismissedKey] = useState<string | null>(null);
+  const stepKey = activeTaskId ? `${activeTaskId}:${updatedAt ?? ""}:${activeStep}` : "";
+  if (!hasStep || dismissedKey === stepKey) return null;
   return (
     <div className="relative my-2 ml-2 mr-2" data-testid="walkthrough-overlay">
       <div className="absolute -top-1.5 left-6 size-3 rotate-45 border-l border-t border-primary/60 bg-card" />
-      <WalkthroughStepInner
-        onClose={() => (activeTaskId ? setWalkthrough(activeTaskId, null) : undefined)}
-      />
+      <WalkthroughStepInner onClose={() => setDismissedKey(stepKey)} />
     </div>
   );
 }

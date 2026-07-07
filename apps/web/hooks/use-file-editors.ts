@@ -25,6 +25,7 @@ import {
   isRestoreWriteCurrent,
   type FileEditorRequestToken,
 } from "./file-editor-state";
+import { walkthroughFileMatches } from "@/lib/diff/walkthrough-match";
 
 // Module-level guard: ensures restoration only runs once across all hook instances
 let _restoredSessionId: string | null = null;
@@ -71,7 +72,9 @@ export function scrollEditorIfMounted(
     const model = editor.getModel();
     if (!model) continue;
     const modelPath = model.uri.path;
-    if (modelPath === `/${monacoPath}` || modelPath === monacoPath) {
+    const exactMatch = modelPath === `/${monacoPath}` || modelPath === monacoPath;
+    const suffixMatch = !worktreePath && walkthroughFileMatches(modelPath, path);
+    if (exactMatch || suffixMatch) {
       consumePendingCursorPosition(path);
       editor.setPosition({ lineNumber: line, column });
       editor.revealLineInCenter(line);

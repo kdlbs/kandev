@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import type { DiffComment, PlanComment } from "@/lib/state/slices/comments";
+import type { DiffComment, PlanComment, WalkthroughComment } from "@/lib/state/slices/comments";
 
 // ---------------------------------------------------------------------------
 // Mocks — declared before imports that use them
@@ -34,6 +34,8 @@ vi.mock("@/lib/state/slices/comments/format", () => ({
   formatReviewCommentsAsMarkdown: (comments: DiffComment[]) => `[diff] ${comments[0]?.text ?? ""}`,
   formatPlanCommentsAsMarkdown: (comments: PlanComment[]) => `[plan] ${comments[0]?.text ?? ""}`,
   formatPRFeedbackAsMarkdown: () => "[pr-feedback]",
+  formatWalkthroughCommentsAsMarkdown: (comments: WalkthroughComment[]) =>
+    `[walkthrough] ${comments[0]?.text ?? ""}`,
 }));
 
 import { useRunComment } from "./use-run-comment";
@@ -77,6 +79,26 @@ function makePlanComment(text = "split step 2"): PlanComment {
     sessionId: "sess-1",
     text,
     selectedText: "step 2",
+    createdAt: new Date().toISOString(),
+    status: "pending",
+  };
+}
+
+function makeWalkthroughComment(text = "explain this step"): WalkthroughComment {
+  return {
+    id: "c-3",
+    source: "walkthrough",
+    sessionId: "sess-1",
+    taskId: "task-1",
+    walkthroughId: "wt-1",
+    walkthroughTitle: "Tour",
+    stepIndex: 0,
+    stepCount: 2,
+    filePath: "src/app.ts",
+    startLine: 10,
+    endLine: 12,
+    stepText: "Agent explanation",
+    text,
     createdAt: new Date().toISOString(),
     status: "pending",
   };
@@ -222,6 +244,20 @@ describe("useRunComment — busy agent queues", () => {
     expect(res).toEqual({ queued: true });
     expect(mockAppendToQueue).toHaveBeenCalled();
     expect(mockRequest).not.toHaveBeenCalled();
+  });
+
+  it("formats walkthrough comments when queuing", async () => {
+    mockStoreState = makeStoreState("RUNNING");
+    const { result } = renderCommentHook();
+
+    await act(async () => {
+      await result.current.runComment(makeWalkthroughComment("please expand"));
+    });
+
+    expect(mockAppendToQueue).toHaveBeenCalledWith(
+      expect.objectContaining({ content: "[walkthrough] please expand" }),
+    );
+    expect(mockMarkCommentsSent).toHaveBeenCalledWith(["c-3"]);
   });
 });
 

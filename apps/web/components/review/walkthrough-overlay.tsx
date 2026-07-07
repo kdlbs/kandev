@@ -22,10 +22,13 @@ type WalkthroughOverlayProps = {
  * the anchored line. Works for changed and unchanged files alike (no review
  * surface required).
  */
-export function WalkthroughOverlay({ taskId }: WalkthroughOverlayProps) {
+export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayProps) {
   const walkthrough = useAppStore((s) => (taskId ? s.walkthroughs.byTaskId[taskId] : null));
   const activeStep = useAppStore((s) =>
     taskId ? (s.walkthroughs.activeStepByTaskId[taskId] ?? 0) : 0,
+  );
+  const lastSeenUpdatedAt = useAppStore((s) =>
+    taskId ? s.walkthroughs.lastSeenUpdatedAtByTaskId[taskId] : undefined,
   );
   const setWalkthrough = useAppStore((s) => s.setWalkthrough);
   const [open, setOpen] = useState(false);
@@ -42,6 +45,7 @@ export function WalkthroughOverlay({ taskId }: WalkthroughOverlayProps) {
   }, [taskId, setWalkthrough]);
 
   if (!taskId || !walkthrough) return null;
+  const hasUnseen = walkthrough.updated_at !== lastSeenUpdatedAt;
 
   // Refresh to the latest persisted walkthrough when opening the card — covers
   // the case where the agent re-emitted a walkthrough and the live WS update
@@ -57,7 +61,9 @@ export function WalkthroughOverlay({ taskId }: WalkthroughOverlayProps) {
 
   return (
     <>
-      {open ? <WalkthroughFloatingWindow onClose={() => setOpen(false)} /> : null}
+      {open ? (
+        <WalkthroughFloatingWindow onClose={() => setOpen(false)} onSelectFile={onSelectFile} />
+      ) : null}
       <button
         type="button"
         data-testid="walkthrough-launcher"
@@ -67,6 +73,13 @@ export function WalkthroughOverlay({ taskId }: WalkthroughOverlayProps) {
       >
         <IconRoute className="size-4 text-primary" />
         Walkthrough
+        {hasUnseen ? (
+          <span
+            aria-label="New walkthrough"
+            className="size-1.5 rounded-full bg-primary"
+            data-testid="walkthrough-unseen-dot"
+          />
+        ) : null}
         <span className="text-muted-foreground">
           {activeStep + 1}/{walkthrough.steps.length}
         </span>

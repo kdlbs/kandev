@@ -26,6 +26,7 @@ import {
   formatReviewCommentsAsMarkdown,
   formatPRFeedbackAsMarkdown,
   formatPlanCommentsAsMarkdown,
+  formatWalkthroughCommentsAsMarkdown,
 } from "@/lib/state/slices/comments/format";
 import { usePlanActions } from "@/hooks/domains/kanban/use-plan-actions";
 import { useExecutorEnvironmentAvailability } from "@/hooks/domains/session/use-executor-environment-availability";
@@ -40,10 +41,14 @@ export function buildSubmitMessage(
   reviewComments: DiffComment[] | undefined,
   pendingPRFeedback: import("@/lib/state/slices/comments").PRFeedbackComment[],
   planComments: import("@/lib/state/slices/comments").PlanComment[],
+  walkthroughComments: import("@/lib/state/slices/comments").WalkthroughComment[] = [],
 ): string {
   let finalMessage = message;
   if (reviewComments && reviewComments.length > 0) {
     finalMessage = formatReviewCommentsAsMarkdown(reviewComments) + (message || "");
+  }
+  if (walkthroughComments.length > 0) {
+    finalMessage = formatWalkthroughCommentsAsMarkdown(walkthroughComments) + finalMessage;
   }
   if (pendingPRFeedback.length > 0) {
     finalMessage = formatPRFeedbackAsMarkdown(pendingPRFeedback) + finalMessage;
@@ -140,9 +145,11 @@ export function useSubmitHandler(
     resolvedSessionId,
     planComments,
     pendingPRFeedback,
+    walkthroughComments,
     markCommentsSent,
     clearSessionPlanComments,
     handleClearPRFeedback,
+    handleClearWalkthroughComments,
     clearEphemeral,
     addContextFile,
     planModeEnabled,
@@ -165,6 +172,7 @@ export function useSubmitHandler(
           reviewComments,
           pendingPRFeedback,
           planComments,
+          walkthroughComments,
         );
         const hasReviewComments = !!(reviewComments && reviewComments.length > 0);
         if (onSend) {
@@ -185,6 +193,7 @@ export function useSubmitHandler(
         if (reviewComments && reviewComments.length > 0)
           markCommentsSent(reviewComments.map((c) => c.id));
         if (pendingPRFeedback.length > 0) handleClearPRFeedback();
+        if (walkthroughComments.length > 0) handleClearWalkthroughComments();
         if (planComments.length > 0) clearSessionPlanComments();
         if (resolvedSessionId) {
           clearEphemeral(resolvedSessionId);
@@ -208,6 +217,8 @@ export function useSubmitHandler(
       markCommentsSent,
       planComments,
       clearSessionPlanComments,
+      walkthroughComments,
+      handleClearWalkthroughComments,
       pendingPRFeedback,
       handleClearPRFeedback,
       resolvedSessionId,
@@ -461,7 +472,9 @@ export function ChatInputArea({
           onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
           pendingCommentsByFile={panelState.pendingCommentsByFile}
           hasContextComments={
-            panelState.planComments.length > 0 || panelState.pendingPRFeedback.length > 0
+            panelState.planComments.length > 0 ||
+            panelState.pendingPRFeedback.length > 0 ||
+            panelState.walkthroughComments.length > 0
           }
           submitKey={panelState.chatSubmitKey}
           hasAgentCommands={!!(panelState.agentCommands && panelState.agentCommands.length > 0)}

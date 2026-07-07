@@ -2,7 +2,11 @@ import type { ContextFile } from "@/lib/state/context-files-store";
 import { getFileName } from "@/lib/utils/file-path";
 import type { ContextItem } from "@/lib/types/context";
 import type { DiffComment } from "@/lib/diff/types";
-import type { PlanComment, PRFeedbackComment } from "@/lib/state/slices/comments";
+import type {
+  PlanComment,
+  PRFeedbackComment,
+  WalkthroughComment,
+} from "@/lib/state/slices/comments";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -24,6 +28,9 @@ export type BuildContextItemsParams = {
   pendingPRFeedback: PRFeedbackComment[];
   handleRemovePRFeedback: (commentId: string) => void;
   handleClearPRFeedback: () => void;
+  walkthroughComments: WalkthroughComment[];
+  handleRemoveWalkthroughComment: (commentId: string) => void;
+  handleClearWalkthroughComments: () => void;
   taskId: string | null;
 };
 
@@ -169,6 +176,22 @@ function buildPRFeedbackItems(params: BuildContextItemsParams): ContextItem[] {
   ];
 }
 
+function buildWalkthroughCommentItems(params: BuildContextItemsParams): ContextItem[] {
+  const { walkthroughComments, handleRemoveWalkthroughComment, handleClearWalkthroughComments } =
+    params;
+  if (!walkthroughComments || walkthroughComments.length === 0) return [];
+  return [
+    {
+      kind: "walkthrough-comment" as const,
+      id: "walkthrough-comments",
+      label: `${walkthroughComments.length} walkthrough note${walkthroughComments.length !== 1 ? "s" : ""}`,
+      comments: walkthroughComments,
+      onRemove: handleClearWalkthroughComments,
+      onRemoveComment: (id: string) => handleRemoveWalkthroughComment(id),
+    },
+  ];
+}
+
 /** Sort: pinned first, then by kind order, then by label */
 const KIND_ORDER: Record<string, number> = {
   plan: 0,
@@ -176,8 +199,9 @@ const KIND_ORDER: Record<string, number> = {
   prompt: 2,
   comment: 3,
   "plan-comment": 4,
-  image: 5,
-  "pr-feedback": 6,
+  "walkthrough-comment": 5,
+  image: 6,
+  "pr-feedback": 7,
 };
 
 export function contextItemSortFn(a: ContextItem, b: ContextItem): number {
@@ -196,6 +220,7 @@ export function buildContextItems(params: BuildContextItemsParams): ContextItem[
   if (planItem) items.push(planItem);
   items.push(...buildFileAndPromptItems(params));
   items.push(...buildCommentItems(params));
+  items.push(...buildWalkthroughCommentItems(params));
   items.push(...buildPRFeedbackItems(params));
 
   if (params.planComments.length > 0) {
