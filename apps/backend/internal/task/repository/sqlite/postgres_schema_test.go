@@ -5,9 +5,61 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/testutil"
 )
+
+// TestPostgresExecutorRunningLocalPIDMigration is the Postgres counterpart to
+// TestExecutorRunningLocalPIDMigrationOnLegacyDB (SQLite): local_pid is on the
+// shared migration path, so ADR 0027 asks for env-gated Postgres replay coverage
+// too. It rewinds to a pre-local_pid schema, re-runs migrations, and asserts the
+// ADD COLUMN re-adds the column with its default while an existing row survives.
+// Skips unless KANDEV_TEST_POSTGRES_DSN is set.
+func TestPostgresExecutorRunningLocalPIDMigration(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+
+	seedExecutorRunningCleanupTask(t, repo, "task-pg")
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-pg", TaskID: "task-pg", State: models.TaskSessionStateWaitingForInput,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "session-pg", SessionID: "session-pg", TaskID: "task-pg", ExecutorID: "exec-pg",
+		Runtime: agentruntime.RuntimeStandalone, Status: models.ExecutorRunningStatusStarting,
+		Resumable: true, ResumeToken: "pg-resume-token", LocalPID: 321,
+	}); err != nil {
+		t.Fatalf("UpsertExecutorRunning: %v", err)
+	}
+
+	// Rewind to a pre-local_pid schema, then re-migrate as a new-binary boot would.
+	if _, err := db.Exec(`ALTER TABLE executors_running DROP COLUMN local_pid`); err != nil {
+		t.Fatalf("simulate legacy schema (drop local_pid): %v", err)
+	}
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("runMigrations on legacy postgres DB: %v", err)
+	}
+
+	got, err := repo.GetExecutorRunningBySessionID(ctx, "session-pg")
+	if err != nil {
+		t.Fatalf("legacy row must survive the migration: %v", err)
+	}
+	if got.LocalPID != 0 {
+		t.Errorf("legacy row local_pid = %d, want 0 (column default after ADD COLUMN)", got.LocalPID)
+	}
+	if got.ResumeToken != "pg-resume-token" {
+		t.Errorf("resume_token lost across migration: got %q", got.ResumeToken)
+	}
+	if got.Status != models.ExecutorRunningStatusStarting {
+		t.Errorf("status lost across migration: got %q", got.Status)
+	}
+}
 
 func TestPostgresSchemaReinitializes(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
