@@ -1,9 +1,11 @@
 package sqlite
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/testutil"
 )
 
@@ -51,6 +53,54 @@ func TestPostgresSkipsLegacyTaskEnvironmentBackfill(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("task environment count = %d, want 0", count)
+	}
+}
+
+func TestPostgresWorkflowHiddenRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init fresh postgres schema: %v", err)
+	}
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-postgres", Name: "Postgres"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	visible := &models.Workflow{ID: "wf-visible", WorkspaceID: "ws-postgres", Name: "Visible"}
+	if err := repo.CreateWorkflow(ctx, visible); err != nil {
+		t.Fatalf("create visible workflow: %v", err)
+	}
+	retrieved, err := repo.GetWorkflow(ctx, visible.ID)
+	if err != nil {
+		t.Fatalf("get visible workflow: %v", err)
+	}
+	if retrieved.Hidden {
+		t.Fatalf("visible workflow Hidden = true, want false")
+	}
+
+	hidden := &models.Workflow{ID: "wf-hidden", WorkspaceID: "ws-postgres", Name: "Hidden", Hidden: true}
+	if err := repo.CreateWorkflow(ctx, hidden); err != nil {
+		t.Fatalf("create hidden workflow: %v", err)
+	}
+	retrieved, err = repo.GetWorkflow(ctx, hidden.ID)
+	if err != nil {
+		t.Fatalf("get hidden workflow: %v", err)
+	}
+	if !retrieved.Hidden {
+		t.Fatalf("hidden workflow Hidden = false, want true")
+	}
+
+	hidden.Hidden = false
+	if err := repo.UpdateWorkflow(ctx, hidden); err != nil {
+		t.Fatalf("update hidden workflow to visible: %v", err)
+	}
+	retrieved, err = repo.GetWorkflow(ctx, hidden.ID)
+	if err != nil {
+		t.Fatalf("get updated workflow: %v", err)
+	}
+	if retrieved.Hidden {
+		t.Fatalf("updated workflow Hidden = true, want false")
 	}
 }
 
