@@ -58,5 +58,13 @@ func (s *Service) CopyConfigToWorkspace(ctx context.Context, sourceWorkspaceID, 
 	if err := s.store.UpdateAuthHealthForWorkspace(ctx, targetWorkspaceID, false, "", time.Now().UTC()); err != nil {
 		return nil, fmt.Errorf("reset target sentry health: %w", err)
 	}
-	return s.SetConfigForWorkspace(ctx, targetWorkspaceID, req)
+	cfgOut, err := s.SetConfigForWorkspace(ctx, targetWorkspaceID, req)
+	if err != nil {
+		// The write failed, so the target's config is unchanged but we already
+		// flipped its health row. Re-probe (best effort) so the row reflects the
+		// target's real state again rather than a spurious "unhealthy".
+		s.RecordAuthHealthForWorkspace(ctx, targetWorkspaceID)
+		return nil, err
+	}
+	return cfgOut, nil
 }

@@ -41,11 +41,16 @@ func (s *Service) CopyWorkspaceSettingsToWorkspace(ctx context.Context, sourceWo
 		SavedPresets:        cloneRawMessage(source.SavedPresets),
 		DefaultQueryPresets: cloneRawMessage(source.DefaultQueryPresets),
 	}
-	if err := s.store.UpsertWorkspaceSettings(ctx, target); err != nil {
-		return nil, fmt.Errorf("write target github settings: %w", err)
-	}
+	// Copy the action presets before the workspace-settings write. These are two
+	// separate store writes without a shared transaction, so ordering the
+	// preset copy first means a preset failure leaves the target completely
+	// untouched; only a failure of the final settings write can leave a partial
+	// copy, and a full retry overwrites both.
 	if err := s.copyActionPresets(ctx, sourceWorkspaceID, targetWorkspaceID); err != nil {
 		return nil, err
+	}
+	if err := s.store.UpsertWorkspaceSettings(ctx, target); err != nil {
+		return nil, fmt.Errorf("write target github settings: %w", err)
 	}
 	return s.store.GetWorkspaceSettings(ctx, targetWorkspaceID)
 }

@@ -40,7 +40,11 @@ func TestCopyConfigToWorkspace_CopiesConfigAndSecret(t *testing.T) {
 	if got.DefaultTeamKey != "ENG" || got.AuthMethod != AuthMethodAPIKey {
 		t.Errorf("copied config mismatch: %+v", got)
 	}
-	if v, _ := f.secrets.Reveal(ctx, SecretKeyForWorkspace(dst)); v != "lin-src" {
+	v, err := f.secrets.Reveal(ctx, SecretKeyForWorkspace(dst))
+	if err != nil {
+		t.Fatalf("reveal copied secret: %v", err)
+	}
+	if v != "lin-src" {
 		t.Errorf("secret not copied: %q", v)
 	}
 }
