@@ -24,6 +24,7 @@ type WalkthroughOverlayProps = {
  */
 export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayProps) {
   const walkthrough = useAppStore((s) => (taskId ? s.walkthroughs.byTaskId[taskId] : null));
+  const connectionStatus = useAppStore((s) => s.connection.status);
   const activeStep = useAppStore((s) =>
     taskId ? (s.walkthroughs.activeStepByTaskId[taskId] ?? 0) : 0,
   );
@@ -34,15 +35,33 @@ export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayP
   const [open, setOpen] = useState(false);
 
   const fetchedRef = useRef<Set<string>>(new Set());
+  const inFlightRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!taskId || fetchedRef.current.has(taskId)) return;
-    fetchedRef.current.add(taskId);
+    if (
+      !taskId ||
+      walkthrough ||
+      connectionStatus !== "connected" ||
+      fetchedRef.current.has(taskId) ||
+      inFlightRef.current.has(taskId)
+    ) {
+      return;
+    }
+    let cancelled = false;
+    inFlightRef.current.add(taskId);
     getTaskWalkthrough(taskId)
       .then((wt) => {
+        if (cancelled) return;
+        fetchedRef.current.add(taskId);
         if (wt) setWalkthrough(taskId, wt);
       })
-      .catch(() => {});
-  }, [taskId, setWalkthrough]);
+      .catch(() => {})
+      .finally(() => {
+        inFlightRef.current.delete(taskId);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [taskId, walkthrough, connectionStatus, setWalkthrough]);
 
   if (!taskId || !walkthrough) return null;
   const hasUnseen = walkthrough.updated_at !== lastSeenUpdatedAt;
