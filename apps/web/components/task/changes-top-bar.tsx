@@ -7,6 +7,7 @@ import {
   IconLayoutRows,
   IconMessageForward,
   IconArrowsMaximize,
+  IconRoute,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
@@ -31,6 +32,7 @@ export type ChangesTopBarProps = {
   handleToggleSplitView: (v: boolean) => void;
   handleToggleAutoMark: (v: boolean) => void;
   handleFixComments: () => void;
+  handleRequestWalkthrough?: () => void;
 };
 
 function ChangesTopBarLeft({
@@ -88,6 +90,7 @@ function ChangesTopBarRight({
   setWordWrap,
   handleToggleSplitView,
   handleFixComments,
+  handleRequestWalkthrough,
 }: Pick<
   ChangesTopBarProps,
   | "splitView"
@@ -96,9 +99,26 @@ function ChangesTopBarRight({
   | "setWordWrap"
   | "handleToggleSplitView"
   | "handleFixComments"
+  | "handleRequestWalkthrough"
 >) {
   return (
     <>
+      {handleRequestWalkthrough ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="px-1.5 h-5 cursor-pointer"
+              aria-label="Request walkthrough"
+              onClick={handleRequestWalkthrough}
+            >
+              <IconRoute className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Request walkthrough</TooltipContent>
+        </Tooltip>
+      ) : null}
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -172,6 +192,7 @@ export function ChangesTopBar({
   handleToggleSplitView,
   handleToggleAutoMark,
   handleFixComments,
+  handleRequestWalkthrough,
 }: ChangesTopBarProps) {
   return (
     <PanelHeaderBarSplit
@@ -192,6 +213,7 @@ export function ChangesTopBar({
           setWordWrap={setWordWrap}
           handleToggleSplitView={handleToggleSplitView}
           handleFixComments={handleFixComments}
+          handleRequestWalkthrough={handleRequestWalkthrough}
         />
       }
     />

@@ -844,8 +844,8 @@ func scenarioWalkthroughReemit(e *emitter) {
 }
 
 // walkthroughDemoArgs builds a 5-step tour spanning three changed files plus
-// one unchanged file (exercising both the diff-anchored card and the full-file
-// / editor-mode floating window).
+// one clean committed file (exercising both the diff-anchored card and the
+// full-file / editor-mode floating window).
 func walkthroughDemoArgs() map[string]interface{} {
 	return map[string]interface{}{
 		wtKeyTitle: "Tour of the change",
@@ -871,8 +871,14 @@ func writeWalkthroughFile(e *emitter, runGitCmd func(args ...string) error, path
 		e.text("walkthrough-basic: write base failed: " + err.Error())
 		return false
 	}
-	_ = runGitCmd("add", path)
-	_ = runGitCmd("commit", "-m", "add "+path)
+	if err := runGitCmd("add", path); err != nil {
+		e.text("walkthrough-basic: git add failed: " + err.Error())
+		return false
+	}
+	if err := runGitCmd("commit", "-m", "add "+path); err != nil {
+		e.text("walkthrough-basic: git commit failed: " + err.Error())
+		return false
+	}
 	if changed == "" {
 		return true
 	}
@@ -896,7 +902,11 @@ func scenarioWalkthroughBasic(e *emitter) {
 	}
 	runGitCmd := makeGitRunner(wd)
 
-	// Three changed files (diff-anchored steps) + one unchanged file (editor-mode step).
+	fixtures := []string{"walkthrough_a.txt", "walkthrough_b.txt", "walkthrough_c.txt", "walkthrough_base.txt"}
+	_ = runGitCmd(append([]string{"rm", "--force"}, fixtures...)...)
+	_ = runGitCmd("commit", "-m", "cleanup walkthrough fixtures")
+
+	// Three changed files (diff-anchored steps) + one clean committed file (editor-mode step).
 	ok := writeWalkthroughFile(e, runGitCmd, "walkthrough_a.txt",
 		"line 1: ENTRY\nline 2: BASE\nline 3: BASE\n",
 		"line 1: ENTRY\nline 2: WALKTHROUGH_CHANGE_A\nline 3: WALKTHROUGH_CHANGE_A\n")
@@ -904,6 +914,8 @@ func scenarioWalkthroughBasic(e *emitter) {
 		"line 1: B\nline 2: BASE\n", "line 1: B\nline 2: WALKTHROUGH_CHANGE_B\n")
 	ok = ok && writeWalkthroughFile(e, runGitCmd, "walkthrough_c.txt",
 		"line 1: C\nline 2: BASE\n", "line 1: C\nline 2: WALKTHROUGH_CHANGE_C\n")
+	ok = ok && writeWalkthroughFile(e, runGitCmd, "walkthrough_base.txt",
+		"line 1: WALKTHROUGH_UNCHANGED\nline 2: supporting context\n", "")
 	if !ok {
 		return
 	}

@@ -11,7 +11,9 @@ import { useAppStore } from "@/components/state-provider";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { revealFileAtLine, type OpenFileFn } from "@/lib/diff/walkthrough-reveal";
 import {
+  clearWalkthroughEditorAnchor,
   computeWalkthroughConnectorPath,
+  isWalkthroughAnchorTargetVisible,
   useWalkthroughEditorAnchor,
   type WalkthroughViewportRect,
 } from "@/lib/walkthrough-editor-anchor";
@@ -120,9 +122,34 @@ function useCardRect(
   return rect;
 }
 
-function WalkthroughConnector({ cardRect }: { cardRect: WalkthroughViewportRect | null }) {
+function useVisibleWalkthroughAnchor() {
   const anchor = useWalkthroughEditorAnchor();
+  useEffect(() => {
+    if (!anchor?.container) return;
+    const check = () => {
+      if (!isWalkthroughAnchorTargetVisible(anchor.container ?? null, anchor.rect)) {
+        clearWalkthroughEditorAnchor(anchor.key);
+      }
+    };
+    check();
+    const interval = window.setInterval(check, 150);
+    window.addEventListener("resize", check);
+    window.addEventListener("scroll", check, true);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("resize", check);
+      window.removeEventListener("scroll", check, true);
+    };
+  }, [anchor]);
+  return anchor;
+}
+
+function WalkthroughConnector({ cardRect }: { cardRect: WalkthroughViewportRect | null }) {
+  const anchor = useVisibleWalkthroughAnchor();
   if (!anchor || !cardRect) return null;
+  if (anchor.container && !isWalkthroughAnchorTargetVisible(anchor.container, anchor.rect)) {
+    return null;
+  }
   const path = computeWalkthroughConnectorPath(cardRect, anchor.rect);
   if (!path) return null;
   return (

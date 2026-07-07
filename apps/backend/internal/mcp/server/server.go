@@ -876,16 +876,20 @@ func (s *Server) registerWalkthroughTools() {
 		mcp.NewTool("show_walkthrough_kandev",
 			mcp.WithDescription(
 				"Show and store a guided code walkthrough for this task. Accepts an ordered list of "+
-					"steps; each step anchors a short markdown explanation to a specific file and line, "+
-					"and renders as a popover over the review diff. The user cycles through steps with "+
-					"Previous and Next. The walkthrough is saved to the task and replaces any prior one. "+
+					"steps; each step anchors a short markdown explanation to a specific file line or "+
+					"line range, and renders as a popover over the review diff/editor. The user cycles "+
+					"through steps with Previous and Next. The walkthrough is saved to the task and "+
+					"replaces any prior one. Only reference files that exist in the task's local worktree "+
+					"or current review diff; for PR-only files, do not assume the PR head is checked out "+
+					"locally. Use line_end when a logical explanation spans multiple lines. "+
 					"Use this after producing a change to narrate the diff (what each hunk does and why), "+
 					"or to explain how a part of the codebase works. Order steps to follow the reader's "+
-					"natural path through the code (entry point first, then the call chain)."),
+					"natural path through the code (entry point first, then the call chain). Keep text "+
+					"concise and do not add a 'Justification:' preamble."),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to attach the walkthrough to")),
 			mcp.WithString("title", mcp.Description("Optional title for the walkthrough (default: 'Walkthrough')")),
 			mcp.WithArray("steps", mcp.Required(),
-				mcp.Description("Ordered list of walkthrough steps, each anchored to a file and line."),
+				mcp.Description("Ordered list of walkthrough steps, each anchored to a file line or range."),
 				mcp.Items(buildWalkthroughStepSchemaItem()),
 			),
 		),
@@ -920,12 +924,18 @@ func buildWalkthroughStepSchemaItem() map[string]any {
 	return map[string]any{
 		typeKey: "object",
 		"properties": map[string]any{
-			titleArg:   str("Optional short heading for this step."),
-			"repo":     str("Optional repository name; disambiguates in multi-repo reviews."),
-			"file":     str("Path to the file this step anchors to (relative to the repo root)."),
-			"line":     num("1-based line number to anchor the popover to."),
-			"line_end": num("Optional end line for a multi-line range."),
-			"text":     str("Markdown explanation shown in the step popover."),
+			titleArg: str("Optional short heading for this step."),
+			"repo":   str("Optional repository name; disambiguates in multi-repo reviews."),
+			"file": str(
+				"Path to a file present in the task worktree or current review diff, relative to the repo root.",
+			),
+			"line": num("1-based start line to anchor the popover to."),
+			"line_end": num(
+				"Optional 1-based end line. Use this for multi-line ranges instead of adjacent single-line steps.",
+			),
+			"text": str(
+				"Concise markdown explanation shown in the step popover. Do not start with 'Justification:'.",
+			),
 		},
 		"required": []string{"file", "line", "text"},
 	}

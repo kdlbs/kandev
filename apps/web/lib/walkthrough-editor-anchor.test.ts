@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   computeWalkthroughConnectorPath,
+  isWalkthroughAnchorTargetVisible,
   type WalkthroughViewportRect,
 } from "./walkthrough-editor-anchor";
 
@@ -32,5 +33,39 @@ describe("computeWalkthroughConnectorPath", () => {
 
   it("returns null for empty geometry", () => {
     expect(computeWalkthroughConnectorPath(rect({ width: 0 }), rect({}))).toBeNull();
+  });
+});
+
+describe("isWalkthroughAnchorTargetVisible", () => {
+  it("returns true when the anchor point resolves inside the editor container", () => {
+    const container = document.createElement("div");
+    const child = document.createElement("span");
+    container.appendChild(child);
+    document.body.appendChild(container);
+    Object.defineProperty(container, "getBoundingClientRect", {
+      value: () => rect({ left: 0, top: 0, width: 300, height: 300 }),
+    });
+
+    expect(
+      isWalkthroughAnchorTargetVisible(container, rect({ left: 20, top: 20 }), () => child),
+    ).toBe(true);
+
+    container.remove();
+  });
+
+  it("returns false when a hidden dock tab leaves stale coordinates over another element", () => {
+    const container = document.createElement("div");
+    const other = document.createElement("button");
+    document.body.append(container, other);
+    Object.defineProperty(container, "getBoundingClientRect", {
+      value: () => rect({ left: 0, top: 0, width: 300, height: 300 }),
+    });
+
+    expect(
+      isWalkthroughAnchorTargetVisible(container, rect({ left: 20, top: 20 }), () => other),
+    ).toBe(false);
+
+    container.remove();
+    other.remove();
   });
 });

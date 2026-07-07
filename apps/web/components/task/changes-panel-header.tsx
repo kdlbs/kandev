@@ -11,6 +11,7 @@ import {
   IconArrowRight,
   IconLoader2,
   IconEdit,
+  IconRoute,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -420,10 +421,12 @@ function ChangesPanelHeaderLeft({
   showDiffReview,
   onOpenDiffAll,
   onOpenReview,
+  onRequestWalkthrough,
 }: {
   showDiffReview: boolean;
   onOpenDiffAll?: () => void;
   onOpenReview?: () => void;
+  onRequestWalkthrough?: () => void;
 }) {
   if (!showDiffReview) return null;
   return (
@@ -446,6 +449,18 @@ function ChangesPanelHeaderLeft({
         <IconEye className="h-3 w-3" />
         Review
       </Button>
+      {onRequestWalkthrough ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-5 text-[11px] px-1.5 gap-1 cursor-pointer"
+          aria-label="Request walkthrough"
+          onClick={onRequestWalkthrough}
+        >
+          <IconRoute className="h-3 w-3" />
+          <span className="hidden min-[430px]:inline sm:inline">Walkthrough</span>
+        </Button>
+      ) : null}
     </>
   );
 }
@@ -462,6 +477,7 @@ export function ChangesPanelHeader({
   loadingOperation,
   onOpenDiffAll,
   onOpenReview,
+  onRequestWalkthrough,
   repoNames,
   perRepoStatus,
   onRepoPull,
@@ -484,6 +500,7 @@ export function ChangesPanelHeader({
   loadingOperation: string | null;
   onOpenDiffAll?: () => void;
   onOpenReview?: () => void;
+  onRequestWalkthrough?: () => void;
   /** Always non-empty (single-repo includes the empty-name entry). */
   repoNames: string[];
   perRepoStatus: PerRepoStatus[];
@@ -511,6 +528,7 @@ export function ChangesPanelHeader({
           showDiffReview={showDiffReview}
           onOpenDiffAll={onOpenDiffAll}
           onOpenReview={onOpenReview}
+          onRequestWalkthrough={onRequestWalkthrough}
         />
       }
       right={

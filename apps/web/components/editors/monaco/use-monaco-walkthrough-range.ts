@@ -3,6 +3,7 @@ import type { editor as monacoEditor } from "monaco-editor";
 import { useAppStore } from "@/components/state-provider";
 import {
   clearWalkthroughEditorAnchor,
+  isWalkthroughAnchorTargetVisible,
   setWalkthroughEditorAnchor,
   type WalkthroughViewportRect,
 } from "@/lib/walkthrough-editor-anchor";
@@ -131,6 +132,12 @@ export function useMonacoWalkthroughRange({
           clearWalkthroughEditorAnchor(anchorKey);
           return;
         }
+        const editorDom = editor.getDomNode();
+        if (!isWalkthroughAnchorTargetVisible(editorDom, measured.viewportRect)) {
+          setBox(null);
+          clearWalkthroughEditorAnchor(anchorKey);
+          return;
+        }
         setBox(measured.box);
         setWalkthroughEditorAnchor({
           key: anchorKey,
@@ -141,6 +148,7 @@ export function useMonacoWalkthroughRange({
           line: range.startLine,
           lineEnd: range.endLine,
           rect: measured.viewportRect,
+          container: editorDom ?? undefined,
         });
       });
     };
@@ -150,12 +158,14 @@ export function useMonacoWalkthroughRange({
     const layoutSub = editor.onDidLayoutChange(update);
     const resizeObserver = new ResizeObserver(update);
     resizeObserver.observe(area);
+    const visibilityInterval = window.setInterval(update, 150);
     window.addEventListener("resize", update);
     return () => {
       if (frame !== null) cancelAnimationFrame(frame);
       scrollSub.dispose();
       layoutSub.dispose();
       resizeObserver.disconnect();
+      window.clearInterval(visibilityInterval);
       window.removeEventListener("resize", update);
       clearWalkthroughEditorAnchor(anchorKey);
     };

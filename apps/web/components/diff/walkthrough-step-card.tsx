@@ -25,7 +25,7 @@ function StepBody({ step, onOpenFile }: { step: WalkthroughStep; onOpenFile: () 
   const lineLabel = step.line_end ? `${step.line}–${step.line_end}` : `${step.line}`;
   const fileName = step.file.split("/").pop() || step.file;
   return (
-    <div className="px-4 py-3 max-h-[40vh] overflow-y-auto">
+    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
       {step.title ? (
         <h4 className="text-sm font-semibold mb-1.5" data-testid="walkthrough-step-title">
           {step.title}
@@ -43,7 +43,7 @@ function StepBody({ step, onOpenFile }: { step: WalkthroughStep; onOpenFile: () 
         <span className="shrink-0 text-muted-foreground">:{lineLabel}</span>
       </button>
       <div
-        className="prose prose-sm dark:prose-invert max-w-none text-sm text-justify [&_p]:text-justify [&_p]:my-2"
+        className="prose prose-sm dark:prose-invert max-w-none text-sm leading-6 [overflow-wrap:anywhere] [&_p]:my-2"
         data-testid="walkthrough-step-body"
       >
         <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
@@ -212,7 +212,7 @@ export function WalkthroughStepInner({
   };
 
   return (
-    <div className="rounded-xl border-l-2 border-primary/60 border border-border bg-card shadow-lg">
+    <div className="flex max-h-[calc(100dvh-2rem)] flex-col rounded-xl border-l-2 border-primary/60 border border-border bg-card shadow-lg sm:max-h-[min(78vh,720px)]">
       <StepHeader
         activeStep={activeStep}
         stepCount={stepCount}

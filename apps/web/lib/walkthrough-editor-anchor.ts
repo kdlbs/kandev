@@ -18,9 +18,11 @@ export type WalkthroughEditorAnchor = {
   line: number;
   lineEnd: number;
   rect: WalkthroughViewportRect;
+  container?: HTMLElement;
 };
 
 type Listener = () => void;
+type ElementFromPoint = (x: number, y: number) => Element | null;
 
 let currentAnchor: WalkthroughEditorAnchor | null = null;
 const listeners = new Set<Listener>();
@@ -66,6 +68,36 @@ function center(rect: WalkthroughViewportRect) {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function rectIntersectsViewport(rect: WalkthroughViewportRect): boolean {
+  if (rect.width <= 0 || rect.height <= 0) return false;
+  if (typeof window === "undefined") return true;
+  return (
+    rect.right > 0 &&
+    rect.bottom > 0 &&
+    rect.left < window.innerWidth &&
+    rect.top < window.innerHeight
+  );
+}
+
+export function isWalkthroughAnchorTargetVisible(
+  container: HTMLElement | null,
+  rect: WalkthroughViewportRect,
+  elementFromPoint: ElementFromPoint = (x, y) => document.elementFromPoint(x, y),
+): boolean {
+  if (!container?.isConnected || !rectIntersectsViewport(rect)) return false;
+  const containerRect = container.getBoundingClientRect();
+  if (containerRect.width <= 0 || containerRect.height <= 0) return false;
+  const style = window.getComputedStyle(container);
+  if (style.display === "none" || style.visibility === "hidden") return false;
+
+  const point = center(rect);
+  if (point.x < 0 || point.y < 0 || point.x > window.innerWidth || point.y > window.innerHeight) {
+    return false;
+  }
+  const elementAtPoint = elementFromPoint(point.x, point.y);
+  return !!elementAtPoint && container.contains(elementAtPoint);
 }
 
 export function computeWalkthroughConnectorPath(

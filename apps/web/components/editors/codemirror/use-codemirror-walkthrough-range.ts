@@ -3,6 +3,7 @@ import { EditorView } from "@codemirror/view";
 import { useAppStore } from "@/components/state-provider";
 import {
   clearWalkthroughEditorAnchor,
+  isWalkthroughAnchorTargetVisible,
   setWalkthroughEditorAnchor,
   type WalkthroughViewportRect,
 } from "@/lib/walkthrough-editor-anchor";
@@ -109,6 +110,11 @@ export function useCodeMirrorWalkthroughRange({
           clearWalkthroughEditorAnchor(anchorKey);
           return;
         }
+        if (!isWalkthroughAnchorTargetVisible(view.dom, measured.viewportRect)) {
+          setBox(null);
+          clearWalkthroughEditorAnchor(anchorKey);
+          return;
+        }
         setBox(measured.box);
         setWalkthroughEditorAnchor({
           key: anchorKey,
@@ -119,6 +125,7 @@ export function useCodeMirrorWalkthroughRange({
           line: range.startLine,
           lineEnd: range.endLine,
           rect: measured.viewportRect,
+          container: view.dom,
         });
       });
     };
@@ -126,11 +133,13 @@ export function useCodeMirrorWalkthroughRange({
     update();
     const resizeObserver = new ResizeObserver(update);
     resizeObserver.observe(area);
+    const visibilityInterval = window.setInterval(update, 150);
     view.scrollDOM.addEventListener("scroll", update);
     window.addEventListener("resize", update);
     return () => {
       if (frame !== null) cancelAnimationFrame(frame);
       resizeObserver.disconnect();
+      window.clearInterval(visibilityInterval);
       view.scrollDOM.removeEventListener("scroll", update);
       window.removeEventListener("resize", update);
       clearWalkthroughEditorAnchor(anchorKey);
