@@ -361,7 +361,7 @@ func (b bootStateBuilder) quickChatSessions(ctx context.Context, workspaceID str
 }
 
 func (b bootStateBuilder) listQuickChatTasks(ctx context.Context, workspaceID string) ([]*taskmodels.Task, error) {
-	const pageSize = 100
+	const pageSize = 1000
 	var all []*taskmodels.Task
 	for page := 1; ; page++ {
 		tasks, total, err := b.p.taskSvc.ListTasksByWorkspace(ctx, workspaceID, "", "", "", page, pageSize, "", false, false, true, true)

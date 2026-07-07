@@ -217,6 +217,7 @@ func TestSQLiteRepository_ListExpiredQuickChatTasks(t *testing.T) {
 		{id: "recent-task", taskUpdated: recent, sessionUpdated: old, sessionState: models.TaskSessionStateCompleted, ephemeral: true},
 		{id: "recent-session", taskUpdated: old, sessionUpdated: recent, sessionState: models.TaskSessionStateCompleted, ephemeral: true},
 		{id: "running-session", taskUpdated: older, sessionUpdated: older, sessionState: models.TaskSessionStateRunning, ephemeral: true},
+		{id: "idle-session", taskUpdated: older, sessionUpdated: older, sessionState: models.TaskSessionStateIdle, ephemeral: true},
 		{id: "config-mode", taskUpdated: older, sessionUpdated: older, sessionState: models.TaskSessionStateCompleted, ephemeral: true, metadata: map[string]interface{}{"config_mode": true}},
 		{id: "automation-run", taskUpdated: older, sessionUpdated: older, sessionState: models.TaskSessionStateCompleted, ephemeral: true, origin: models.TaskOriginAutomationRun},
 		{id: "kanban-task", taskUpdated: older, sessionUpdated: older, sessionState: models.TaskSessionStateCompleted, ephemeral: false, workflowID: "wf-quick"},

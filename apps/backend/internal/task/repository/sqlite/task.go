@@ -885,7 +885,7 @@ func (r *Repository) ListExpiredQuickChatTasks(ctx context.Context, cutoff time.
 				AND NOT EXISTS (
 					SELECT 1 FROM task_sessions active
 					WHERE active.task_id = t.id
-						AND active.state IN (?, ?, ?, ?)
+						AND active.state IN (?, ?, ?, ?, ?)
 				)
 			GROUP BY t.id, t.updated_at
 			HAVING %s < ?
@@ -906,6 +906,7 @@ func (r *Repository) ListExpiredQuickChatTasks(ctx context.Context, cutoff time.
 		models.TaskSessionStateStarting,
 		models.TaskSessionStateRunning,
 		models.TaskSessionStateWaitingForInput,
+		models.TaskSessionStateIdle,
 		cutoff,
 	)
 	if err != nil {
