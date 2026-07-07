@@ -75,6 +75,15 @@ export async function testSentryConnection(
   );
 }
 
+// copySentryConfig copies the Sentry config + credential from the workspace in
+// options (source) to targetWorkspaceId.
+export async function copySentryConfig(targetWorkspaceId: string, options?: WorkspaceApiOptions) {
+  return fetchJson<SentryConfig>(withWorkspace(`/api/v1/sentry/config/copy`, options), {
+    ...requestOptions(options),
+    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify({ targetWorkspaceId }) },
+  });
+}
+
 export async function listSentryOrganizations(options?: WorkspaceApiOptions) {
   return fetchJson<{ organizations: SentryOrganization[] }>(
     withWorkspace(`/api/v1/sentry/organizations`, options),

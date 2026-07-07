@@ -68,6 +68,15 @@ export async function testLinearConnection(
   );
 }
 
+// copyLinearConfig copies the Linear config + credential from the workspace in
+// options (source) to targetWorkspaceId.
+export async function copyLinearConfig(targetWorkspaceId: string, options?: WorkspaceApiOptions) {
+  return fetchJson<LinearConfig>(withWorkspace(`/api/v1/linear/config/copy`, options), {
+    ...requestOptions(options),
+    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify({ targetWorkspaceId }) },
+  });
+}
+
 export async function listLinearTeams(options?: WorkspaceApiOptions) {
   return fetchJson<{ teams: LinearTeam[] }>(
     withWorkspace(`/api/v1/linear/teams`, options),

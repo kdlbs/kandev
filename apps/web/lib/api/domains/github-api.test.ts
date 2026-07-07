@@ -5,6 +5,7 @@ vi.mock("@/lib/config", () => ({
 }));
 
 import {
+  copyGitHubWorkspaceSettings,
   createTaskPR,
   fetchAccessibleRepos,
   fetchIssueInfo,
@@ -315,5 +316,20 @@ describe("task CI automation options", () => {
       auto_merge_enabled: true,
       auto_fix_prompt_override: null,
     });
+  });
+});
+
+describe("copyGitHubWorkspaceSettings", () => {
+  it("POSTs targetWorkspaceId to /workspace-settings/copy scoped to the source", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ workspace_id: "ws-dst" }));
+
+    await copyGitHubWorkspaceSettings("ws-src", "ws-dst");
+
+    const call = fetchSpy.mock.calls.at(-1);
+    expect(String(call?.[0])).toBe(
+      "http://api.test/api/v1/github/workspace-settings/copy?workspace_id=ws-src",
+    );
+    expect(call?.[1]?.method).toBe("POST");
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ targetWorkspaceId: "ws-dst" });
   });
 });

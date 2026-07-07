@@ -312,7 +312,7 @@ export function GitHubIntegrationPage() {
     <TooltipProvider>
       <div className="space-y-8">
         <GitHubConnectionSection />
-        <WorkspaceScopedSection showSelector={false}>
+        <WorkspaceScopedSection>
           {(ws) => <PerWorkspaceSection key={ws} workspaceId={ws} />}
         </WorkspaceScopedSection>
       </div>

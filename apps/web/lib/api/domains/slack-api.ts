@@ -54,3 +54,12 @@ export async function testSlackConnection(
     init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
   });
 }
+
+// copySlackConfig copies the Slack config + credentials from the workspace in
+// options (source) to targetWorkspaceId.
+export async function copySlackConfig(targetWorkspaceId: string, options?: WorkspaceApiOptions) {
+  return fetchJson<SlackConfig>(withWorkspace(`/api/v1/slack/config/copy`, options), {
+    ...requestOptions(options),
+    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify({ targetWorkspaceId }) },
+  });
+}

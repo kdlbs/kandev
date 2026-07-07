@@ -60,6 +60,15 @@ export async function testJiraConnection(
   });
 }
 
+// copyJiraConfig copies the Jira config + credential from the workspace in
+// options (source) to targetWorkspaceId.
+export async function copyJiraConfig(targetWorkspaceId: string, options?: WorkspaceApiOptions) {
+  return fetchJson<JiraConfig>(withWorkspace(`/api/v1/jira/config/copy`, options), {
+    ...requestOptions(options),
+    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify({ targetWorkspaceId }) },
+  });
+}
+
 export async function listJiraProjects(options?: WorkspaceApiOptions) {
   return fetchJson<{ projects: JiraProject[] }>(
     withWorkspace(`/api/v1/jira/projects`, options),

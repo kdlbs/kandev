@@ -92,6 +92,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.POST("/action-presets/reset", c.httpResetActionPresets)
 	api.GET("/workspace-settings", c.httpGetWorkspaceSettings)
 	api.PUT("/workspace-settings", c.httpUpdateWorkspaceSettings)
+	api.POST("/workspace-settings/copy", c.httpCopyWorkspaceSettings)
 
 	api.GET("/stats", c.httpGetStats)
 }
@@ -893,6 +894,41 @@ func (c *Controller) httpUpdateWorkspaceSettings(ctx *gin.Context) {
 		} else {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}
+		return
+	}
+	ctx.JSON(http.StatusOK, settings)
+}
+
+// copyWorkspaceSettingsRequest carries the target workspace for a copy. The
+// source workspace comes from the workspace_id query param, matching the other
+// integration copy endpoints.
+type copyWorkspaceSettingsRequest struct {
+	TargetWorkspaceID string `json:"targetWorkspaceId"`
+}
+
+func (c *Controller) httpCopyWorkspaceSettings(ctx *gin.Context) {
+	source := strings.TrimSpace(ctx.Query("workspace_id"))
+	if source == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id query parameter required"})
+		return
+	}
+	var req copyWorkspaceSettingsRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if strings.TrimSpace(req.TargetWorkspaceID) == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "targetWorkspaceId required"})
+		return
+	}
+	settings, err := c.service.CopyWorkspaceSettingsToWorkspace(ctx.Request.Context(), source, req.TargetWorkspaceID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, ErrSameWorkspace), errors.Is(err, ErrWorkspaceSettingsValidation):
+			status = http.StatusBadRequest
+		}
+		ctx.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, settings)

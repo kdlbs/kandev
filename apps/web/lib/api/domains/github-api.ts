@@ -654,6 +654,28 @@ export async function updateGitHubWorkspaceSettings(
   });
 }
 
+// copyGitHubWorkspaceSettings copies the per-workspace GitHub settings (repo
+// scope + presets) from sourceWorkspaceId to targetWorkspaceId. GitHub auth is
+// install-wide, so there are no credentials to copy.
+export async function copyGitHubWorkspaceSettings(
+  sourceWorkspaceId: string,
+  targetWorkspaceId: string,
+  options?: ApiRequestOptions,
+) {
+  const query = new URLSearchParams({ workspace_id: sourceWorkspaceId });
+  return fetchJson<GitHubWorkspaceSettings>(
+    `/api/v1/github/workspace-settings/copy?${query.toString()}`,
+    {
+      ...options,
+      init: {
+        ...(options?.init ?? {}),
+        method: "POST",
+        body: JSON.stringify({ targetWorkspaceId }),
+      },
+    },
+  );
+}
+
 // Action presets (quick-launch prompts on the /github page).
 export async function fetchGitHubActionPresets(workspaceId: string, options?: ApiRequestOptions) {
   const query = new URLSearchParams({ workspace_id: workspaceId });
