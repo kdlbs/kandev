@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { IconCheck, IconChevronDown, IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 
 import { cn } from "@/lib/utils";
@@ -150,13 +150,16 @@ function ModelRow({
 function ConfigOptionTrigger({
   option,
   onSelect,
+  triggerRef,
 }: {
   option: SelectConfigOption;
   onSelect: () => void;
+  triggerRef?: (element: HTMLButtonElement | null) => void;
 }) {
   return (
     <button
       type="button"
+      ref={triggerRef}
       data-testid={`config-option-trigger-${option.id}`}
       className="flex min-h-9 w-full cursor-pointer items-center justify-between gap-3 rounded-md px-2.5 py-2 text-left text-xs/relaxed hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/35 focus-visible:outline-none"
       onClick={onSelect}
@@ -184,6 +187,7 @@ function ConfigOptionSubSelector({
       <button
         type="button"
         aria-label={`Back to model settings from ${option.name}`}
+        autoFocus
         className="flex min-h-9 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-xs/relaxed hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/35 focus-visible:outline-none"
         onClick={onBack}
       >
@@ -203,7 +207,10 @@ function ConfigOptionSubSelector({
               size="sm"
               className="h-9 w-full min-w-0 cursor-pointer justify-start px-2 text-left"
               disabled={!onChange}
-              onClick={() => onChange?.(option.id, item.value)}
+              onClick={() => {
+                onChange?.(option.id, item.value);
+                onBack();
+              }}
             >
               <span className="truncate">{item.name}</span>
               <IconCheck
@@ -241,11 +248,29 @@ function ModelConfigSelectorContent({
   onConfigBack,
   onConfigChange,
 }: ModelConfigSelectorContentProps) {
+  const pendingFocusConfigId = useRef<string | null>(null);
+  const triggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+
+  useEffect(() => {
+    if (activeConfig) return;
+    const configId = pendingFocusConfigId.current;
+    if (!configId) return;
+    pendingFocusConfigId.current = null;
+    triggerRefs.current[configId]?.focus();
+  }, [activeConfig]);
+
+  const returnToConfigTrigger = () => {
+    if (activeConfig) {
+      pendingFocusConfigId.current = activeConfig.id;
+    }
+    onConfigBack();
+  };
+
   if (activeConfig) {
     return (
       <ConfigOptionSubSelector
         option={activeConfig}
-        onBack={onConfigBack}
+        onBack={returnToConfigTrigger}
         onChange={onConfigChange}
       />
     );
@@ -279,6 +304,9 @@ function ModelConfigSelectorContent({
                   key={option.id}
                   option={option}
                   onSelect={() => onConfigSelect(option.id)}
+                  triggerRef={(element) => {
+                    triggerRefs.current[option.id] = element;
+                  }}
                 />
               ))}
             </div>

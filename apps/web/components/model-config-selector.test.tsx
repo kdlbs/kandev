@@ -8,6 +8,9 @@ afterEach(() => {
 });
 
 describe("ModelConfigSelector", () => {
+  const effortSectionTestId = "config-option-section-effort";
+  const effortTriggerTestId = "config-option-trigger-effort";
+
   it("passes custom trigger classes to the button", () => {
     render(
       <ModelConfigSelector
@@ -58,21 +61,28 @@ describe("ModelConfigSelector", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Model settings" }));
 
-    const effortTrigger = screen.getByTestId("config-option-trigger-effort");
+    const effortTrigger = screen.getByTestId(effortTriggerTestId);
     expect(effortTrigger.textContent).toContain("Effort");
     expect(effortTrigger.textContent).toContain("Medium");
-    expect(screen.queryByTestId("config-option-section-effort")).toBeNull();
+    expect(screen.queryByTestId(effortSectionTestId)).toBeNull();
 
     fireEvent.click(effortTrigger);
 
-    const effortSection = screen.getByTestId("config-option-section-effort");
-    fireEvent.click(within(effortSection).getByRole("button", { name: "High" }));
+    const effortSection = screen.getByTestId(effortSectionTestId);
+    expect(effortSection).not.toBeNull();
+    const backButton = screen.getByRole("button", { name: /back to model settings from effort/i });
+    expect(document.activeElement).toBe(backButton);
+
+    fireEvent.click(backButton);
+
+    expect(screen.queryByTestId(effortSectionTestId)).toBeNull();
+    expect(document.activeElement).toBe(screen.getByTestId(effortTriggerTestId));
+
+    fireEvent.click(screen.getByTestId(effortTriggerTestId));
+    const reopenedEffortSection = screen.getByTestId(effortSectionTestId);
+    fireEvent.click(within(reopenedEffortSection).getByRole("button", { name: "High" }));
 
     expect(onConfigChange).toHaveBeenCalledWith("effort", "high");
-
-    fireEvent.click(screen.getByRole("button", { name: /back to model settings from effort/i }));
-
-    expect(screen.queryByTestId("config-option-section-effort")).toBeNull();
-    expect(screen.getByTestId("config-option-trigger-effort")).not.toBeNull();
+    expect(screen.queryByTestId(effortSectionTestId)).toBeNull();
   });
 });
