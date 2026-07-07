@@ -174,10 +174,14 @@ func classifyMoveTaskError(err error) string {
 }
 
 func moveTaskErrorMessage(err error) string {
-	if classifyMoveTaskError(err) == ws.ErrorCodeInternalError {
+	switch classifyMoveTaskError(err) {
+	case ws.ErrorCodeConflict:
+		return "Move task conflicts with the current task or workflow state"
+	case ws.ErrorCodeValidation:
+		return "Invalid move_task request"
+	default:
 		return "Failed to move task"
 	}
-	return err.Error()
 }
 
 // synthesizeMovedTaskDTO returns a task DTO with the post-move step/workflow

@@ -397,6 +397,7 @@ func TestService_MoveTaskRejectsFullWIPLimitedTarget(t *testing.T) {
 	if task.WorkflowStepID != "step-source" {
 		t.Fatalf("task moved despite WIP limit: %s", task.WorkflowStepID)
 	}
+
 }
 
 func TestService_ApproveSessionRejectsFullWIPLimitedTarget(t *testing.T) {
@@ -434,6 +435,14 @@ func TestService_ApproveSessionRejectsFullWIPLimitedTarget(t *testing.T) {
 	}
 	if task.WorkflowStepID != "step-source" {
 		t.Fatalf("task moved despite WIP limit: %s", task.WorkflowStepID)
+	}
+
+	session, err := repo.GetTaskSession(ctx, "session-approve")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.ReviewStatus != models.ReviewStatusPending {
+		t.Fatalf("review status = %q, want pending after rejected approval", session.ReviewStatus)
 	}
 }
 

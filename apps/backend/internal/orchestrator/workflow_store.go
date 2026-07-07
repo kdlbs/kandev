@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -299,7 +300,15 @@ func (s *workflowStore) pullOneFeederTask(
 
 func (s *workflowStore) feederCandidateBlocked(ctx context.Context, taskID string) bool {
 	session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, taskID)
-	if err != nil || session == nil {
+	if err != nil {
+		if errors.Is(err, models.ErrTaskSessionNotFound) {
+			return false
+		}
+		s.logger.Warn("skipping feeder task after active session lookup failed",
+			zap.String("task_id", taskID), zap.Error(err))
+		return true
+	}
+	if session == nil {
 		return false
 	}
 	return session.State == models.TaskSessionStateStarting ||

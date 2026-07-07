@@ -25,17 +25,11 @@ type ApproveSessionResult struct {
 // It reads the step's on_turn_complete actions to determine where to transition.
 // If no transition actions are configured, it falls back to the next step by position.
 func (s *Service) ApproveSession(ctx context.Context, sessionID string) (*ApproveSessionResult, error) {
-	// Update review status to approved
-	if err := s.sessions.UpdateSessionReviewStatus(ctx, sessionID, "approved"); err != nil {
-		return nil, fmt.Errorf("failed to update review status: %w", err)
-	}
-
 	result := &ApproveSessionResult{}
 
-	// Reload session to get updated review status
 	session, err := s.sessions.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to reload session: %w", err)
+		return nil, fmt.Errorf("failed to get session: %w", err)
 	}
 	result.Session = session
 
@@ -55,6 +49,13 @@ func (s *Service) ApproveSession(ctx context.Context, sessionID string) (*Approv
 		} else if err := s.applyApprovalStepTransition(ctx, sessionID, step, result); err != nil {
 			return nil, err
 		}
+	}
+
+	if err := s.sessions.UpdateSessionReviewStatus(ctx, sessionID, "approved"); err != nil {
+		return nil, fmt.Errorf("failed to update review status: %w", err)
+	}
+	if session, err := s.sessions.GetTaskSession(ctx, sessionID); err == nil {
+		result.Session = session
 	}
 
 	return result, nil

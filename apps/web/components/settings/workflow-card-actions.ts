@@ -445,18 +445,24 @@ function stepPayloadWithoutPullSource(workflowId: string, step: WorkflowStep) {
   return { ...stepPayload(workflowId, step), pull_from_step_id: "" };
 }
 
-async function createStepsThenRemapPullSources(workflowId: string, steps: WorkflowStep[]) {
-  const createdByDraftID = new Map<string, string>();
+async function createStepsThenRemapPullSources(
+  workflowId: string,
+  steps: WorkflowStep[],
+  existingStepIDByDraftID = new Map<string, string>(),
+) {
+  const createdByDraftID = new Map(existingStepIDByDraftID);
+  const addedStepIDByDraftID = new Map<string, string>();
   const createdByPosition = new Map<number, string>();
   for (const step of steps) {
     const created = await createWorkflowStepAction(stepPayloadWithoutPullSource(workflowId, step));
     createdByDraftID.set(step.id, created.id);
+    addedStepIDByDraftID.set(step.id, created.id);
     createdByPosition.set(step.position, created.id);
   }
   for (const step of steps) {
     const pullFromStepID = remapPullFromStepID(step.pull_from_step_id, createdByDraftID);
     if (!pullFromStepID) continue;
-    const createdID = createdByDraftID.get(step.id) ?? createdByPosition.get(step.position);
+    const createdID = addedStepIDByDraftID.get(step.id) ?? createdByPosition.get(step.position);
     if (createdID) await updateWorkflowStepAction(createdID, { pull_from_step_id: pullFromStepID });
   }
 }
@@ -484,7 +490,7 @@ async function reconcileTemplateSteps(
 
   // Create any additional steps the user added beyond the template
   const addedSteps = userSteps.filter((step) => step.position >= templateStepCount);
-  await createStepsThenRemapPullSources(createdId, addedSteps);
+  await createStepsThenRemapPullSources(createdId, addedSteps, stepIDByDraftID);
 }
 
 type WorkflowSaveActionsParams = {

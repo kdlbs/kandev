@@ -22,6 +22,7 @@ func setupTestRepoWithDB(t *testing.T) (*Repository, *sqlx.DB) {
 	if err != nil {
 		t.Fatalf("failed to open sqlite: %v", err)
 	}
+	rawDB.SetMaxOpenConns(1)
 	sqlxDB := sqlx.NewDb(rawDB, "sqlite3")
 	t.Cleanup(func() { _ = sqlxDB.Close() })
 	// Enable FK enforcement explicitly so workflow_step_participants

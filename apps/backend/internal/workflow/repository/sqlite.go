@@ -847,15 +847,13 @@ func (r *Repository) ClearStepReferences(ctx context.Context, workflowID, stepID
 				}
 			}
 		}
+		if step.PullFromStepID == stepID {
+			step.PullFromStepID = ""
+			modified = true
+		}
 		if modified {
 			if err := r.UpdateStep(ctx, step); err != nil {
 				return fmt.Errorf("failed to clear step reference from step %s: %w", step.ID, err)
-			}
-		}
-		if step.PullFromStepID == stepID {
-			step.PullFromStepID = ""
-			if err := r.UpdateStep(ctx, step); err != nil {
-				return fmt.Errorf("failed to clear pull source from step %s: %w", step.ID, err)
 			}
 		}
 	}
