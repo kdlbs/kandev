@@ -22,6 +22,7 @@ function parseWipLimit(value: string): number {
 export function StepWipControls({ step, steps, onUpdate, readOnly }: StepWipControlsProps) {
   const otherSteps = steps.filter((s) => s.id !== step.id);
   const pullFromValue = step.pull_from_step_id || "none";
+  const pullFromSelectID = `${step.id}-pull-from-step`;
 
   return (
     <div className="grid grid-cols-1 gap-3 pt-3 sm:grid-cols-2 xl:grid-cols-[180px_minmax(220px,320px)]">
@@ -49,7 +50,9 @@ export function StepWipControls({ step, steps, onUpdate, readOnly }: StepWipCont
       </div>
       <div className="space-y-1.5">
         <div className="flex items-center gap-1.5">
-          <Label className="text-xs font-medium">Pull from</Label>
+          <Label htmlFor={pullFromSelectID} className="text-xs font-medium">
+            Pull from
+          </Label>
           <HelpTip text="Optional feeder step to pull work from when this step has capacity." />
         </div>
         <Select
@@ -60,7 +63,11 @@ export function StepWipControls({ step, steps, onUpdate, readOnly }: StepWipCont
           }}
           disabled={readOnly || otherSteps.length === 0}
         >
-          <SelectTrigger className="h-8" data-testid={`${step.id}-pull-from-step-select`}>
+          <SelectTrigger
+            id={pullFromSelectID}
+            className="h-8"
+            data-testid={`${step.id}-pull-from-step-select`}
+          >
             <SelectValue placeholder="No feeder step" />
           </SelectTrigger>
           <SelectContent>

@@ -500,7 +500,7 @@ func (s *Service) pullOneFeederTask(
 			return false
 		}
 		if _, seen := skipped[candidate.ID]; seen {
-			return false
+			continue
 		}
 		if _, err := s.MoveTask(ctx, candidate.ID, vacatedStep.WorkflowID, vacatedStep.ID, position); err != nil {
 			skipped[candidate.ID] = struct{}{}
