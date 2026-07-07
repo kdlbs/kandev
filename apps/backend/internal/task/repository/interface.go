@@ -12,6 +12,7 @@ import (
 
 var ErrWorkspaceNameMismatch = repoerrors.ErrWorkspaceNameMismatch
 var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
+var ErrTaskNotFound = repoerrors.ErrTaskNotFound
 
 // WorkspaceRepository handles workspace CRUD.
 type WorkspaceRepository interface {

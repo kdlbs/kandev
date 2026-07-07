@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -1016,9 +1017,13 @@ func (s *Service) deleteTaskWithReason(ctx context.Context, id, reason string) e
 }
 
 func (s *Service) deleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error) {
-	return s.deleteTaskWithReasonAndDBDelete(ctx, id, "", func(ctx context.Context, id string) (bool, error) {
+	deleted, err := s.deleteTaskWithReasonAndDBDelete(ctx, id, "", func(ctx context.Context, id string) (bool, error) {
 		return s.tasks.DeleteExpiredQuickChatTask(ctx, id, cutoff)
 	})
+	if errors.Is(err, taskrepo.ErrTaskNotFound) {
+		return false, nil
+	}
+	return deleted, err
 }
 
 func (s *Service) deleteTaskWithReasonAndDBDelete(

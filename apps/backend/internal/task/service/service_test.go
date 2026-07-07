@@ -1258,6 +1258,18 @@ func TestService_QuickChatExpirationLoopRunsOnStartup(t *testing.T) {
 	}
 }
 
+func TestService_DeleteExpiredQuickChatTaskIgnoresMissingTask(t *testing.T) {
+	svc, _, _ := createTestService(t)
+
+	deleted, err := svc.deleteExpiredQuickChatTask(context.Background(), "missing", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("deleteExpiredQuickChatTask missing task: %v", err)
+	}
+	if deleted {
+		t.Fatal("missing task should not be reported as deleted")
+	}
+}
+
 func createQuickChatExpirationServiceFixture(
 	t *testing.T,
 	repo *sqliterepo.Repository,
