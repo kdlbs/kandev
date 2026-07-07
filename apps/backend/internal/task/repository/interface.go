@@ -44,6 +44,7 @@ type TaskRepository interface {
 	UnarchiveTaskByCascade(ctx context.Context, id, cascadeID string) (bool, error)
 	ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error)
 	ListExpiredQuickChatTasks(ctx context.Context, cutoff time.Time) ([]*models.Task, error)
+	DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error)
 	// CountOpenWatcherCreatedTasks returns the number of open watcher-created
 	// tasks for a single watch, identified by the integration's task-metadata
 	// key (e.g. "sentry_issue_watch_id") and the watch id. Open = non-archived

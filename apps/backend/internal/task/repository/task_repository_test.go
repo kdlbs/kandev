@@ -250,6 +250,49 @@ func TestSQLiteRepository_ListExpiredQuickChatTasks(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_DeleteExpiredQuickChatTask(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-quick", Name: "Quick"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	now := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	cutoff := now.Add(-7 * 24 * time.Hour)
+	old := cutoff.Add(-time.Hour)
+	recent := cutoff.Add(time.Hour)
+
+	createQuickChatExpiryFixture(t, repo, ctx, "expired", "", "", nil, true, false, old, old, models.TaskSessionStateCompleted)
+	createQuickChatExpiryFixture(t, repo, ctx, "active", "", "", nil, true, false, old, old, models.TaskSessionStateRunning)
+	createQuickChatExpiryFixture(t, repo, ctx, "recent", "", "", nil, true, false, old, recent, models.TaskSessionStateCompleted)
+
+	deleted, err := repo.DeleteExpiredQuickChatTask(ctx, "expired", cutoff)
+	if err != nil {
+		t.Fatalf("DeleteExpiredQuickChatTask expired: %v", err)
+	}
+	if !deleted {
+		t.Fatal("expected expired quick chat to be deleted")
+	}
+	if _, err := repo.GetTask(ctx, "expired"); err == nil {
+		t.Fatal("expired quick chat still exists after guarded delete")
+	}
+
+	for _, id := range []string{"active", "recent"} {
+		deleted, err := repo.DeleteExpiredQuickChatTask(ctx, id, cutoff)
+		if err != nil {
+			t.Fatalf("DeleteExpiredQuickChatTask %s: %v", id, err)
+		}
+		if deleted {
+			t.Fatalf("%s should not be deleted while ineligible", id)
+		}
+		if _, err := repo.GetTask(ctx, id); err != nil {
+			t.Fatalf("%s should still exist: %v", id, err)
+		}
+	}
+}
+
 func createQuickChatExpiryFixture(
 	t *testing.T,
 	repo *sqlite.Repository,

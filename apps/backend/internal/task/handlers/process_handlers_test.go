@@ -86,6 +86,9 @@ func (m *mockRepository) ListTasksForAutoArchive(ctx context.Context) ([]*models
 func (m *mockRepository) ListExpiredQuickChatTasks(ctx context.Context, cutoff time.Time) ([]*models.Task, error) {
 	return nil, nil
 }
+func (m *mockRepository) DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error) {
+	return false, nil
+}
 func (m *mockRepository) CountOpenWatcherCreatedTasks(_ context.Context, _, _ string) (int, error) {
 	return 0, nil
 }

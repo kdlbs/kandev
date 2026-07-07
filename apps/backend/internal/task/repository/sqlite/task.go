@@ -915,6 +915,56 @@ func (r *Repository) ListExpiredQuickChatTasks(ctx context.Context, cutoff time.
 	return r.scanTasks(rows)
 }
 
+// DeleteExpiredQuickChatTask deletes id only when it still matches the expired
+// quick-chat predicate at delete time.
+func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error) {
+	drv := r.db.DriverName()
+	sessionActivity := "COALESCE(MAX(ts.updated_at), t.updated_at)"
+	lastActivity := dialect.GreatestTimestamp(drv, "t.updated_at", sessionActivity)
+	query := fmt.Sprintf(`
+		WITH candidate AS (
+			SELECT t.id, %s AS last_activity
+			FROM tasks t
+			LEFT JOIN task_sessions ts ON ts.task_id = t.id
+			WHERE t.id = ?
+				AND t.is_ephemeral = 1
+				AND COALESCE(t.workflow_id, '') = ''
+				AND COALESCE(t.origin, '') != ?
+				AND %s
+				AND t.archived_at IS NULL
+				AND NOT EXISTS (
+					SELECT 1 FROM task_sessions active
+					WHERE active.task_id = t.id
+						AND active.state IN (?, ?, ?, ?)
+				)
+			GROUP BY t.id, t.updated_at
+			HAVING %s < ?
+		)
+		DELETE FROM tasks
+		WHERE id = ?
+			AND EXISTS (SELECT 1 FROM candidate)
+	`,
+		lastActivity,
+		excludeConfigModePredicate(drv, "t.metadata"),
+		lastActivity,
+	)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query),
+		id,
+		models.TaskOriginAutomationRun,
+		models.TaskSessionStateCreated,
+		models.TaskSessionStateStarting,
+		models.TaskSessionStateRunning,
+		models.TaskSessionStateIdle,
+		cutoff,
+		id,
+	)
+	if err != nil {
+		return false, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows > 0, nil
+}
+
 // isSafeMetadataKey reports whether s is a safe JSON metadata key to splice
 // into a json_extract path. The key is concatenated into the SQL text (it
 // cannot be a bind parameter inside the '$.<key>' path literal), so it must be
