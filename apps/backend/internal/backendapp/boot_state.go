@@ -271,16 +271,17 @@ func (b bootStateBuilder) addQuickChatState(ctx context.Context, req *http.Reque
 	if workspaceID == "" {
 		return
 	}
-	sessions, err := b.quickChatSessions(ctx, workspaceID)
+	quickChat, err := b.quickChatSessions(ctx, workspaceID)
 	if err != nil {
 		b.logBootError("list quick-chat sessions", err)
 		return
 	}
 	state["quickChat"] = map[string]any{
 		"isOpen":          false,
-		"sessions":        sessions,
+		"sessions":        quickChat.sessions,
 		"activeSessionId": nil,
 	}
+	mergeBootTaskSessionItems(state, quickChat.taskSessions)
 }
 
 func (b bootStateBuilder) resolveQuickChatWorkspaceID(ctx context.Context, req *http.Request, state map[string]any) string {
@@ -318,25 +319,26 @@ func activeWorkspaceIDFromState(state map[string]any) string {
 	return active
 }
 
-func (b bootStateBuilder) quickChatSessions(ctx context.Context, workspaceID string) ([]map[string]any, error) {
+func (b bootStateBuilder) quickChatSessions(ctx context.Context, workspaceID string) (quickChatBootState, error) {
 	tasks, err := b.listQuickChatTasks(ctx, workspaceID)
 	if err != nil {
-		return nil, err
+		return quickChatBootState{}, err
 	}
 	if len(tasks) == 0 {
-		return []map[string]any{}, nil
+		return quickChatBootState{sessions: []map[string]any{}}, nil
 	}
 	taskIDs := taskIDs(tasks)
 	sessionsByTask, err := b.p.taskSvc.BatchGetSessionsForTasks(ctx, taskIDs)
 	if err != nil {
-		return nil, err
+		return quickChatBootState{}, err
 	}
 	primaryByTask, err := b.p.taskSvc.GetPrimarySessionInfoForTasks(ctx, taskIDs)
 	if err != nil {
-		return nil, err
+		return quickChatBootState{}, err
 	}
 
 	items := make([]quickChatBootSession, 0, len(tasks))
+	taskSessions := make(map[string]taskdto.TaskSessionDTO, len(tasks))
 	for _, task := range tasks {
 		if !isRestorableQuickChatTask(task) {
 			continue
@@ -349,6 +351,7 @@ func (b bootStateBuilder) quickChatSessions(ctx context.Context, workspaceID str
 			state:        mapQuickChatSessionState(task, primary),
 			lastActivity: quickChatLastActivity(task, sessionsByTask[task.ID]),
 		})
+		taskSessions[primary.ID] = taskdto.FromTaskSession(primary)
 	}
 	sort.SliceStable(items, func(i, j int) bool {
 		return items[i].lastActivity.After(items[j].lastActivity)
@@ -357,7 +360,7 @@ func (b bootStateBuilder) quickChatSessions(ctx context.Context, workspaceID str
 	for _, item := range items {
 		result = append(result, item.state)
 	}
-	return result, nil
+	return quickChatBootState{sessions: result, taskSessions: taskSessions}, nil
 }
 
 func (b bootStateBuilder) listQuickChatTasks(ctx context.Context, workspaceID string) ([]*taskmodels.Task, error) {
@@ -378,6 +381,37 @@ func (b bootStateBuilder) listQuickChatTasks(ctx context.Context, workspaceID st
 type quickChatBootSession struct {
 	state        map[string]any
 	lastActivity time.Time
+}
+
+type quickChatBootState struct {
+	sessions     []map[string]any
+	taskSessions map[string]taskdto.TaskSessionDTO
+}
+
+func mergeBootTaskSessionItems(state map[string]any, items map[string]taskdto.TaskSessionDTO) {
+	if len(items) == 0 {
+		return
+	}
+	taskSessions, ok := state["taskSessions"].(map[string]any)
+	if !ok {
+		state["taskSessions"] = map[string]any{"items": items}
+		return
+	}
+	merged := make(map[string]any, len(items))
+	switch existing := taskSessions["items"].(type) {
+	case map[string]taskdto.TaskSessionDTO:
+		for id, session := range existing {
+			merged[id] = session
+		}
+	case map[string]any:
+		for id, session := range existing {
+			merged[id] = session
+		}
+	}
+	for id, session := range items {
+		merged[id] = session
+	}
+	taskSessions["items"] = merged
 }
 
 func taskIDs(tasks []*taskmodels.Task) []string {

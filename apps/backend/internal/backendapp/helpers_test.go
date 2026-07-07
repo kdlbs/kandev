@@ -669,6 +669,11 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 				} `json:"sessions"`
 				IsOpen bool `json:"isOpen"`
 			} `json:"quickChat"`
+			TaskSessions struct {
+				Items map[string]struct {
+					TaskID string `json:"task_id"`
+				} `json:"items"`
+			} `json:"taskSessions"`
 		} `json:"initialState"`
 	}
 	if err := json.Unmarshal(raw, &decoded); err != nil {
@@ -684,6 +689,9 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 	}
 	if sessions[0].AgentProfileID != "agent-new" || sessions[1].AgentProfileID != "agent-old" {
 		t.Fatalf("agent profile IDs = %#v", sessions)
+	}
+	if got := decoded.InitialState.TaskSessions.Items["task-new-session"].TaskID; got != "task-new" {
+		t.Fatalf("quick chat task session task_id = %q, want task-new", got)
 	}
 	if decoded.InitialState.QuickChat.IsOpen {
 		t.Fatal("quick chat should hydrate closed")

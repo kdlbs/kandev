@@ -239,7 +239,12 @@ func TestSQLiteRepository_ListExpiredQuickChatTasks(t *testing.T) {
 	for _, task := range tasks {
 		got = append(got, task.ID)
 	}
-	want := []string{"expired-older", "expired-old", "expired-waiting-input"}
+	var want []string
+	for _, tc := range cases {
+		if tc.wantExpired {
+			want = append(want, tc.id)
+		}
+	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("expired task IDs = %v, want %v", got, want)
 	}

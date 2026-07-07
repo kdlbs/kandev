@@ -1238,6 +1238,26 @@ func TestService_QuickChatExpirationDeletesExpiredCandidates(t *testing.T) {
 	}
 }
 
+func TestService_QuickChatExpirationLoopRunsOnStartup(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-expire", Name: "Expire"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	taskID := "quick-expired-startup"
+	createQuickChatExpirationServiceFixture(t, repo, ctx, taskID, time.Now().UTC().Add(-8*24*time.Hour))
+
+	svc.StartQuickChatExpirationLoop(ctx)
+	waitForCleanupDone(t, svc)
+
+	if _, err := repo.GetTask(context.Background(), taskID); err == nil {
+		t.Fatal("expired quick chat should be deleted by startup sweep")
+	}
+}
+
 func createQuickChatExpirationServiceFixture(
 	t *testing.T,
 	repo *sqliterepo.Repository,
