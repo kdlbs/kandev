@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // ErrSameWorkspace is returned when a copy targets the same workspace it reads
@@ -52,6 +53,12 @@ func (s *Service) CopyConfigToWorkspace(ctx context.Context, sourceWorkspaceID, 
 		InstanceType:      cfg.InstanceType,
 		DefaultProjectKey: cfg.DefaultProjectKey,
 		Secret:            secret,
+	}
+	// Mark the target unhealthy before the write so the UI doesn't briefly flash
+	// a stale "connected" state from the target's previous credential while the
+	// async probe kicked off by SetConfigForWorkspace validates the copied one.
+	if err := s.store.UpdateAuthHealthForWorkspace(ctx, targetWorkspaceID, false, "", time.Now().UTC()); err != nil {
+		return nil, fmt.Errorf("reset target jira health: %w", err)
 	}
 	return s.SetConfigForWorkspace(ctx, targetWorkspaceID, req)
 }
