@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState } from "react";
-import { IconCheck, IconChevronDown } from "@tabler/icons-react";
+import { IconCheck, IconChevronDown, IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@kandev/ui/button";
@@ -147,34 +147,142 @@ function ModelRow({
   );
 }
 
-function ConfigOptionSection({
+function ConfigOptionTrigger({
   option,
+  onSelect,
+}: {
+  option: SelectConfigOption;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      data-testid={`config-option-trigger-${option.id}`}
+      className="flex min-h-9 w-full cursor-pointer items-center justify-between gap-3 rounded-md px-2.5 py-2 text-left text-xs/relaxed hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/35 focus-visible:outline-none"
+      onClick={onSelect}
+    >
+      <span className="font-medium">{option.name}</span>
+      <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
+        <span className="truncate">{currentOptionName(option)}</span>
+        <IconChevronRight className="h-3.5 w-3.5 shrink-0" />
+      </span>
+    </button>
+  );
+}
+
+function ConfigOptionSubSelector({
+  option,
+  onBack,
   onChange,
 }: {
   option: SelectConfigOption;
+  onBack: () => void;
   onChange?: (configId: string, value: string) => void;
 }) {
   return (
-    <div className="space-y-1.5" data-testid={`config-option-section-${option.id}`}>
-      <div className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
-        {option.name}
-      </div>
-      <div className="grid grid-cols-2 gap-1">
-        {option.options.map((item) => (
-          <Button
-            key={item.value}
-            type="button"
-            variant={item.value === option.currentValue ? "secondary" : "ghost"}
-            size="sm"
-            className="h-9 min-w-0 cursor-pointer justify-start px-2 text-left"
-            disabled={!onChange}
-            onClick={() => onChange?.(option.id, item.value)}
-          >
-            <span className="truncate">{item.name}</span>
-          </Button>
-        ))}
-      </div>
+    <div className="flex min-h-0 flex-col gap-2">
+      <button
+        type="button"
+        className="flex min-h-9 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-xs/relaxed hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/35 focus-visible:outline-none"
+        onClick={onBack}
+      >
+        <IconChevronLeft className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="truncate font-medium">{option.name}</span>
+      </button>
+      <ScrollArea
+        className="max-h-[min(18rem,calc(100vh-8rem))] pr-2"
+        data-testid={`config-option-section-${option.id}`}
+      >
+        <div className="space-y-1">
+          {option.options.map((item) => (
+            <Button
+              key={item.value}
+              type="button"
+              variant={item.value === option.currentValue ? "secondary" : "ghost"}
+              size="sm"
+              className="h-9 w-full min-w-0 cursor-pointer justify-start px-2 text-left"
+              disabled={!onChange}
+              onClick={() => onChange?.(option.id, item.value)}
+            >
+              <span className="truncate">{item.name}</span>
+              <IconCheck
+                className={cn(
+                  "ml-auto h-4 w-4 shrink-0",
+                  item.value === option.currentValue ? "opacity-100" : "opacity-0",
+                )}
+              />
+            </Button>
+          ))}
+        </div>
+      </ScrollArea>
     </div>
+  );
+}
+
+type ModelConfigSelectorContentProps = {
+  activeConfig: SelectConfigOption | undefined;
+  modelOptions: ModelSelectorOption[];
+  currentModelValue: string;
+  extraConfigOptions: SelectConfigOption[];
+  onModelSelect: (value: string) => void;
+  onConfigSelect: (configId: string) => void;
+  onConfigBack: () => void;
+  onConfigChange?: (configId: string, value: string) => void;
+};
+
+function ModelConfigSelectorContent({
+  activeConfig,
+  modelOptions,
+  currentModelValue,
+  extraConfigOptions,
+  onModelSelect,
+  onConfigSelect,
+  onConfigBack,
+  onConfigChange,
+}: ModelConfigSelectorContentProps) {
+  if (activeConfig) {
+    return (
+      <ConfigOptionSubSelector
+        option={activeConfig}
+        onBack={onConfigBack}
+        onChange={onConfigChange}
+      />
+    );
+  }
+
+  return (
+    <>
+      <Command>
+        <CommandInput placeholder="Filter models..." className="h-8" />
+        <CommandList className="max-h-60">
+          <CommandEmpty>No models found.</CommandEmpty>
+          <CommandGroup heading="Model">
+            {modelOptions.map((model) => (
+              <ModelRow
+                key={model.id}
+                model={model}
+                selected={model.id === currentModelValue}
+                onSelect={onModelSelect}
+              />
+            ))}
+          </CommandGroup>
+        </CommandList>
+      </Command>
+      {extraConfigOptions.length > 0 && (
+        <>
+          <Separator />
+          <div className="space-y-1">
+            {extraConfigOptions.map((option) => (
+              <ConfigOptionTrigger
+                key={option.id}
+                option={option}
+                onSelect={() => onConfigSelect(option.id)}
+              />
+            ))}
+          </div>
+        </>
+      )}
+    </>
   );
 }
 
@@ -206,9 +314,11 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
   triggerClassName: customTriggerClassName,
 }: ModelConfigSelectorProps) {
   const [open, setOpen] = useState(false);
+  const [activeConfigId, setActiveConfigId] = useState<string | null>(null);
   const selectConfigOptions = usableConfigOptions(configOptions);
   const modelConfig = selectConfigOptions.find(isModelConfigOption);
   const extraConfigOptions = selectConfigOptions.filter((option) => !isModelConfigOption(option));
+  const activeConfig = extraConfigOptions.find((option) => option.id === activeConfigId);
   const currentModelValue = modelConfig?.currentValue || currentModel || "";
   const label = resolveTriggerLabel(modelOptions, currentModel, modelConfig, configOptions);
 
@@ -225,9 +335,15 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
     variant === "compact"
       ? "h-7 max-w-[min(18rem,70vw)] cursor-pointer gap-1 px-2 text-xs hover:bg-muted/40"
       : "w-full justify-between font-normal cursor-pointer";
+  const onOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (!nextOpen) {
+      setActiveConfigId(null);
+    }
+  };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
         <Button
           type="button"
@@ -244,36 +360,18 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
       <PopoverContent
         align="end"
         side={popoverSide}
-        className="w-[min(24rem,calc(100vw-1rem))] gap-2 p-2"
+        className="w-[min(24rem,calc(100vw-1rem))] max-h-[min(32rem,calc(100vh-1rem))] gap-2 overflow-hidden p-2"
       >
-        <Command>
-          <CommandInput placeholder="Filter models..." className="h-8" />
-          <CommandList className="max-h-60">
-            <CommandEmpty>No models found.</CommandEmpty>
-            <CommandGroup heading="Model">
-              {modelOptions.map((model) => (
-                <ModelRow
-                  key={model.id}
-                  model={model}
-                  selected={model.id === currentModelValue}
-                  onSelect={onModelSelect}
-                />
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-        {extraConfigOptions.length > 0 && (
-          <>
-            <Separator />
-            <ScrollArea className="max-h-56 pr-2">
-              <div className="space-y-3">
-                {extraConfigOptions.map((option) => (
-                  <ConfigOptionSection key={option.id} option={option} onChange={onConfigChange} />
-                ))}
-              </div>
-            </ScrollArea>
-          </>
-        )}
+        <ModelConfigSelectorContent
+          activeConfig={activeConfig}
+          modelOptions={modelOptions}
+          currentModelValue={currentModelValue}
+          extraConfigOptions={extraConfigOptions}
+          onModelSelect={onModelSelect}
+          onConfigSelect={setActiveConfigId}
+          onConfigBack={() => setActiveConfigId(null)}
+          onConfigChange={onConfigChange}
+        />
       </PopoverContent>
     </Popover>
   );

@@ -161,6 +161,11 @@ test.describe("Quick Chat", () => {
     await expect(trigger).toContainText("Mock Fast", { timeout: 15_000 });
     await trigger.click();
 
+    const effortTrigger = testPage.getByTestId("config-option-trigger-effort");
+    await expect(effortTrigger).toBeVisible({
+      timeout: 10_000,
+    });
+    await effortTrigger.click();
     await expect(testPage.getByTestId("config-option-section-effort")).toBeVisible({
       timeout: 10_000,
     });
