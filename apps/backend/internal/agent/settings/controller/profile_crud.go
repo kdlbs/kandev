@@ -240,14 +240,14 @@ func (c *Controller) DeleteProfile(ctx context.Context, id string, force bool) (
 	return &result, nil
 }
 
-// prepareProfileDeletion checks for active sessions and referencing watchers,
-// then cleans up ephemeral tasks. Returns *ErrProfileInUseDetail when force
-// is false and any active session OR referencing watcher exists — the UI uses
-// the breakdown to render a confirmation dialog. force=true skips both checks;
-// the eager disable of referencing watchers runs in DeleteProfile after the
-// row is actually gone (the dispatch coordinator's preflight stays as the
-// safety net for profiles deleted by other paths, e.g. reconciler cleanup of
-// disabled agent types).
+// prepareProfileDeletion blocks every routing-tier reference, then checks for
+// active sessions and referencing watchers before cleaning up ephemeral tasks.
+// Routing-tier references are hard blockers even when force=true because a
+// deleted profile would orphan workspace tier mappings. When force is false,
+// active sessions and watchers return *ErrProfileInUseDetail so the UI can
+// render a confirmation dialog. force=true skips only those soft blockers; the
+// eager disable of referencing watchers runs in DeleteProfile after the row is
+// actually gone.
 func (c *Controller) prepareProfileDeletion(ctx context.Context, profileID string, force bool) error {
 	routingTierRefs, err := c.listRoutingTierReferences(ctx, profileID)
 	if err != nil {

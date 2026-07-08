@@ -567,6 +567,56 @@ func TestCompleteOnboarding_SeedsWorkspaceRoutingTierProfiles(t *testing.T) {
 	}
 }
 
+func TestCompleteOnboarding_TierProfileLookupFailureKeepsValidSelections(t *testing.T) {
+	svc, _, repo, _ := newTestOnboardingServiceWithRepo(t)
+	svc.sourceProfile = fakeSourceProfileReader{profiles: map[string]*models.AgentInstance{
+		"profile-balanced": {
+			AgentID: "codex-acp",
+			Model:   "gpt-5.5-medium",
+			Mode:    "medium",
+		},
+		"profile-economy": {
+			AgentID: "codex-acp",
+			Model:   "gpt-5.5-low",
+			Mode:    "low",
+		},
+	}}
+	ctx := context.Background()
+
+	result, err := svc.CompleteOnboarding(ctx, CompleteRequest{
+		WorkspaceName:      "partial-tier-profiles",
+		TaskPrefix:         "PTP",
+		AgentName:          "CEO",
+		AgentProfileID:     "profile-balanced",
+		ExecutorPreference: "local_pc",
+		DefaultTier:        "balanced",
+		TierProfiles: TierProfileIDs{
+			Frontier: "missing-frontier",
+			Balanced: "profile-balanced",
+			Economy:  "profile-economy",
+		},
+	})
+	if err != nil {
+		t.Fatalf("complete onboarding: %v", err)
+	}
+
+	cfg, err := repo.GetWorkspaceRouting(ctx, result.WorkspaceID)
+	if err != nil {
+		t.Fatalf("get workspace routing: %v", err)
+	}
+	profile := cfg.ProviderProfiles["codex-acp"]
+	if profile.TierMap.Balanced != "gpt-5.5-medium" {
+		t.Errorf("balanced tier map = %q", profile.TierMap.Balanced)
+	}
+	if profile.TierMap.Economy != "gpt-5.5-low" {
+		t.Errorf("economy tier map = %q", profile.TierMap.Economy)
+	}
+	if profile.TierProfileIDs.Balanced != "profile-balanced" ||
+		profile.TierProfileIDs.Economy != "profile-economy" {
+		t.Errorf("valid tier profile ids were not preserved: %+v", profile.TierProfileIDs)
+	}
+}
+
 func TestCompleteOnboarding_SeedsCEOInheritMarkers(t *testing.T) {
 	_, agent := completeOnboardingForRoutingSeed(t, onboardingRoutingScenario{
 		name: "inherit-markers", inputTier: "balanced",

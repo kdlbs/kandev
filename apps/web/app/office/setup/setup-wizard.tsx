@@ -20,6 +20,7 @@ import {
   DEFAULT_ONBOARDING_TASK_DESCRIPTION,
   DEFAULT_ONBOARDING_TASK_TITLE,
 } from "./setup-task-defaults";
+import { SETUP_WIZARD_STEP_COUNT, SETUP_WIZARD_STEPS } from "./setup-wizard-steps";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { Tier } from "@/lib/state/slices/office/types";
 
@@ -80,17 +81,16 @@ export function getInitialData(
   };
 }
 
-const STEP_COUNT = 5;
-
 function computeCanAdvance(step: number, data: WizardData): boolean {
-  if (step === 0) return data.workspaceName.trim() !== "";
-  if (step === 1)
+  if (step === SETUP_WIZARD_STEPS.WORKSPACE) return data.workspaceName.trim() !== "";
+  if (step === SETUP_WIZARD_STEPS.TIER_PROFILES)
     return (
       Boolean(data.tierProfileIds.frontier) &&
       Boolean(data.tierProfileIds.balanced) &&
       Boolean(data.tierProfileIds.economy)
     );
-  if (step === 2) return data.agentName.trim() !== "" && data.agentProfileId !== "";
+  if (step === SETUP_WIZARD_STEPS.AGENT)
+    return data.agentName.trim() !== "" && data.agentProfileId !== "";
   return true;
 }
 
@@ -132,7 +132,7 @@ function WizardStepContent({
   patch: (updates: Partial<WizardData>) => void;
   onAgentProfilesChange: (profiles: AgentProfileOption[]) => void;
 }) {
-  if (step === 0)
+  if (step === SETUP_WIZARD_STEPS.WORKSPACE)
     return (
       <StepWorkspace
         workspaceName={data.workspaceName}
@@ -140,7 +140,7 @@ function WizardStepContent({
         onChange={patch}
       />
     );
-  if (step === 1)
+  if (step === SETUP_WIZARD_STEPS.TIER_PROFILES)
     return (
       <StepTierProfiles
         tierProfileIds={data.tierProfileIds}
@@ -149,7 +149,7 @@ function WizardStepContent({
         onAgentProfilesChange={onAgentProfilesChange}
       />
     );
-  if (step === 2)
+  if (step === SETUP_WIZARD_STEPS.AGENT)
     return (
       <StepAgent
         agentName={data.agentName}
@@ -161,7 +161,7 @@ function WizardStepContent({
         onAgentProfilesChange={onAgentProfilesChange}
       />
     );
-  if (step === 3)
+  if (step === SETUP_WIZARD_STEPS.TASK)
     return (
       <StepTask
         agentName={data.agentName}
@@ -256,7 +256,7 @@ export function SetupWizard({
     <div className="fixed inset-0 z-50 bg-background flex items-center justify-center">
       <div className="relative w-full max-w-2xl mx-auto px-6">
         <CloseButton href={closeHref} />
-        <StepIndicator current={step} total={STEP_COUNT} />
+        <StepIndicator current={step} total={SETUP_WIZARD_STEP_COUNT} />
         <div className="mt-8">
           <WizardStepContent
             step={step}

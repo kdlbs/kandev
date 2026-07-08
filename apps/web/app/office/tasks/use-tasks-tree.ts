@@ -77,6 +77,31 @@ function compareIssues(a: OfficeTask, b: OfficeTask, ctx: SortContext): number {
   return ctx.dir === "asc" ? cmp : -cmp;
 }
 
+function computeTaskLevels(sorted: OfficeTask[]): Map<string, number> {
+  const byID = new Map(sorted.map((task) => [task.id, task]));
+  const levels = new Map<string, number>();
+
+  function levelFor(task: OfficeTask, seen: Set<string>): number {
+    const cached = levels.get(task.id);
+    if (cached !== undefined) return cached;
+    if (!task.parentId || !byID.has(task.parentId) || seen.has(task.id)) {
+      levels.set(task.id, 0);
+      return 0;
+    }
+    seen.add(task.id);
+    const parent = byID.get(task.parentId);
+    const level = parent ? levelFor(parent, seen) + 1 : 0;
+    seen.delete(task.id);
+    levels.set(task.id, level);
+    return level;
+  }
+
+  for (const task of sorted) {
+    levelFor(task, new Set());
+  }
+  return levels;
+}
+
 export type FlatTaskNode = {
   task: OfficeTask;
   level: number;
@@ -130,6 +155,7 @@ export function buildTaskTreeNodes({
   }
 
   const sortedIds = new Set(sorted.map((task) => task.id));
+  const levels = computeTaskLevels(tasks);
   const childrenMap = new Map<string | undefined, OfficeTask[]>();
   for (const task of sorted) {
     const key = task.parentId ?? "__root__";
@@ -157,9 +183,19 @@ export function buildTaskTreeNodes({
   walk(undefined, 0);
 
   const renderedIds = new Set(result.map((n) => n.task.id));
+  function appendOrphanSubtree(task: OfficeTask) {
+    if (renderedIds.has(task.id)) return;
+    const kids = childrenMap.get(task.id) ?? [];
+    const hasChildren = kids.length > 0;
+    result.push({ task, level: levels.get(task.id) ?? 0, hasChildren });
+    renderedIds.add(task.id);
+    if (hasChildren && expandedIds.has(task.id)) {
+      for (const child of kids) appendOrphanSubtree(child);
+    }
+  }
   for (const task of sorted) {
     if (!renderedIds.has(task.id) && task.parentId && !sortedIds.has(task.parentId)) {
-      result.push({ task, level: 0, hasChildren: false });
+      appendOrphanSubtree(task);
     }
   }
 

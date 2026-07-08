@@ -52,7 +52,6 @@ export function StepTierProfiles({
 }: StepTierProfilesProps) {
   const settingsAgents = useAppStore((s) => s.settingsAgents.items);
   const setAgentProfiles = useAppStore((s) => s.setAgentProfiles);
-  const agentProfilesState = useAppStore((s) => s.agentProfiles.items);
   const { profileOptions } = useSelectableProfileOptions(agentProfiles);
   const [showCreate, setShowCreate] = useState(profileOptions.length === 0);
 
@@ -97,7 +96,6 @@ export function StepTierProfiles({
         {showCreate ? (
           <CreateProfilePanel
             settingsAgents={settingsAgents}
-            storeProfiles={agentProfilesState}
             wizardProfiles={agentProfiles}
             canCancel={profileOptions.length > 0}
             setAgentProfiles={setAgentProfiles}
@@ -105,7 +103,7 @@ export function StepTierProfiles({
             onProfileSaved={(profileId) =>
               onChange({
                 agentProfileId: profileId,
-                tierProfileIds: fillMissingTierProfileIds({}, profileId),
+                tierProfileIds: fillMissingTierProfileIds(tierProfileIds, profileId),
               })
             }
             onClose={() => setShowCreate(false)}

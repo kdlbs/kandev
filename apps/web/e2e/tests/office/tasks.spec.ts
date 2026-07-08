@@ -86,7 +86,7 @@ test.describe("Tasks (Issues)", () => {
     expect(childTitleBox).not.toBeNull();
     expect(childTitleBox!.x).toBeGreaterThan(parentTitleBox!.x + 16);
 
-    const parentRow = testPage.locator('[role="button"]').filter({ hasText: parentTitle }).first();
+    const parentRow = testPage.getByRole("button", { name: new RegExp(parentTitle) });
     await parentRow.getByRole("button", { name: "Collapse" }).click();
     await expect(testPage.getByText(childTitle)).toBeHidden();
   });

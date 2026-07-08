@@ -10,6 +10,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
+import { useAppStore } from "@/components/state-provider";
 import type {
   ActiveSessionInfo,
   RoutingTierReference,
@@ -83,6 +84,8 @@ export function AgentProfileDeleteConflictDialog({
   const routingTiers = conflict?.routingTiers ?? [];
   const hasHardBlockers = routingTiers.length > 0;
   const watchersByKind = groupWatchersByKind(watchers);
+  const workspaces = useAppStore((s) => s.workspaces.items);
+  const providers = useAppStore((s) => s.settingsAgents.items);
 
   return (
     <AlertDialog open={!!conflict} onOpenChange={onOpenChange}>
@@ -101,7 +104,11 @@ export function AgentProfileDeleteConflictDialog({
                 fallback="Untitled quick chat"
               />
               <WatcherConflictSection watchersByKind={watchersByKind} />
-              <RoutingTierConflictSection routingTiers={routingTiers} />
+              <RoutingTierConflictSection
+                routingTiers={routingTiers}
+                workspaceLabels={new Map(workspaces.map((w) => [w.id, w.name]))}
+                providerLabels={new Map(providers.map((p) => [p.id, p.name]))}
+              />
               {hasHardBlockers ? (
                 <p className="mt-2">
                   Change these workspace tier mappings before deleting this profile.
@@ -179,7 +186,15 @@ function WatcherConflictSection({
   );
 }
 
-function RoutingTierConflictSection({ routingTiers }: { routingTiers: RoutingTierReference[] }) {
+function RoutingTierConflictSection({
+  routingTiers,
+  workspaceLabels,
+  providerLabels,
+}: {
+  routingTiers: RoutingTierReference[];
+  workspaceLabels: Map<string, string>;
+  providerLabels: Map<string, string>;
+}) {
   if (routingTiers.length === 0) return null;
   return (
     <div className="mt-2">
@@ -187,12 +202,23 @@ function RoutingTierConflictSection({ routingTiers }: { routingTiers: RoutingTie
       <ul className="list-disc list-inside mt-1 space-y-0.5">
         {routingTiers.map((ref) => (
           <li key={`${ref.workspace_id}-${ref.provider_id}-${ref.tier}`} className="text-sm">
-            {ref.workspace_id}: {ref.provider_id} {ref.tier}
+            <span className="font-medium">{formatRoutingTier(ref.tier)}</span> tier in{" "}
+            {formatLookupLabel(workspaceLabels, ref.workspace_id)} for{" "}
+            {formatLookupLabel(providerLabels, ref.provider_id)}
           </li>
         ))}
       </ul>
     </div>
   );
+}
+
+function formatRoutingTier(tier: string): string {
+  return tier.charAt(0).toUpperCase() + tier.slice(1);
+}
+
+function formatLookupLabel(labels: Map<string, string>, id: string): string {
+  const label = labels.get(id);
+  return label && label !== id ? `${label} (${id})` : id;
 }
 
 function groupWatchersByKind(watchers: WatcherReference[]): Record<string, WatcherReference[]> {

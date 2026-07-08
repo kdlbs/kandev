@@ -6,7 +6,6 @@ import { Label } from "@kandev/ui/label";
 import { Badge } from "@kandev/ui/badge";
 import { useAppStore } from "@/components/state-provider";
 import { AgentSelector } from "@/components/task-create-dialog-selectors";
-import { useAgentProfileOptions } from "@/components/task-create-dialog-options";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { getExecutorIcon } from "@/lib/executor-icons";
@@ -18,6 +17,8 @@ import {
   CreateProfilePanel,
   useSelectableProfileOptions,
 } from "./agent-profile-setup-controls";
+
+type ProfileSelectOption = ReturnType<typeof useSelectableProfileOptions>["profileOptions"][number];
 
 type StepAgentProps = {
   agentName: string;
@@ -58,7 +59,6 @@ export function StepAgent({
   const executorOptions = meta?.executorTypes ?? FALLBACK_EXECUTOR_OPTIONS;
   const settingsAgents = useAppStore((s) => s.settingsAgents.items);
   const setAgentProfiles = useAppStore((s) => s.setAgentProfiles);
-  const agentProfilesState = useAppStore((s) => s.agentProfiles.items);
 
   const { sortedProfiles, profileOptions } = useSelectableProfileOptions(agentProfiles);
 
@@ -97,7 +97,6 @@ export function StepAgent({
           {showCreate && (
             <CreateProfilePanel
               settingsAgents={settingsAgents}
-              storeProfiles={agentProfilesState}
               wizardProfiles={agentProfiles}
               canCancel={profileOptions.length > 0}
               setAgentProfiles={setAgentProfiles}
@@ -131,7 +130,7 @@ function ProfileSelectorSection({
   onCreateClick,
 }: {
   showCreate: boolean;
-  profileOptions: ReturnType<typeof useAgentProfileOptions>;
+  profileOptions: ProfileSelectOption[];
   agentProfileId: string;
   selectedProfile: AgentProfileOption | undefined;
   onChange: StepAgentProps["onChange"];

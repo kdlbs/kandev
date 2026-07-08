@@ -136,7 +136,7 @@ func (r *Repository) ListRoutingTierReferencesByAgentProfile(
 		return nil, nil
 	}
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
-		SELECT workspace_id, provider_profiles
+		SELECT workspace_id, provider_order, provider_profiles
 		FROM office_workspace_routing
 		WHERE provider_profiles LIKE ?
 	`), "%"+profileID+"%")
@@ -149,15 +149,23 @@ func (r *Repository) ListRoutingTierReferencesByAgentProfile(
 
 	var refs []RoutingTierProfileReference
 	for rows.Next() {
-		var workspaceID, profsRaw string
-		if err := rows.Scan(&workspaceID, &profsRaw); err != nil {
+		var workspaceID, orderRaw, profsRaw string
+		if err := rows.Scan(&workspaceID, &orderRaw, &profsRaw); err != nil {
 			return nil, fmt.Errorf("routing: scan tier profile refs: %w", err)
+		}
+		var order []routing.ProviderID
+		if err := json.Unmarshal([]byte(orderRaw), &order); err != nil {
+			return nil, fmt.Errorf("routing: decode tier profile order refs: %w", err)
 		}
 		profiles := map[routing.ProviderID]routing.ProviderProfile{}
 		if err := json.Unmarshal([]byte(profsRaw), &profiles); err != nil {
 			return nil, fmt.Errorf("routing: decode tier profile refs: %w", err)
 		}
-		for providerID, profile := range profiles {
+		for _, providerID := range order {
+			profile, ok := profiles[providerID]
+			if !ok {
+				continue
+			}
 			refs = appendTierProfileReference(refs, workspaceID, providerID, routing.TierFrontier, profile.TierProfileIDs.Frontier, profileID)
 			refs = appendTierProfileReference(refs, workspaceID, providerID, routing.TierBalanced, profile.TierProfileIDs.Balanced, profileID)
 			refs = appendTierProfileReference(refs, workspaceID, providerID, routing.TierEconomy, profile.TierProfileIDs.Economy, profileID)

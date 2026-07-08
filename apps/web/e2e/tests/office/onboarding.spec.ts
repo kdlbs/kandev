@@ -215,6 +215,7 @@ test.describe("Onboarding", () => {
       ).agents ?? [];
     const agent = agents.find((candidate) => candidate.name === "CEO") ?? agents[0];
     expect(agent?.id).toBeTruthy();
+    expect(agent?.agent_profile_id ?? agent?.agentProfileId).toBeTruthy();
 
     await officeApi.deleteWorkspace(workspaceId!, workspaceName);
   });

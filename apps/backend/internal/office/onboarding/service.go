@@ -2,6 +2,7 @@ package onboarding
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -674,13 +675,11 @@ func (s *OnboardingService) applyOnboardingTierProfiles(
 	if cfg == nil || s.sourceProfile == nil {
 		return nil
 	}
-	if err := s.applyOnboardingTierProfile(ctx, cfg, routing.TierFrontier, tierProfiles.Frontier); err != nil {
-		return err
-	}
-	if err := s.applyOnboardingTierProfile(ctx, cfg, routing.TierBalanced, tierProfiles.Balanced); err != nil {
-		return err
-	}
-	return s.applyOnboardingTierProfile(ctx, cfg, routing.TierEconomy, tierProfiles.Economy)
+	return errors.Join(
+		s.applyOnboardingTierProfile(ctx, cfg, routing.TierFrontier, tierProfiles.Frontier),
+		s.applyOnboardingTierProfile(ctx, cfg, routing.TierBalanced, tierProfiles.Balanced),
+		s.applyOnboardingTierProfile(ctx, cfg, routing.TierEconomy, tierProfiles.Economy),
+	)
 }
 
 func (s *OnboardingService) applyOnboardingTierProfile(

@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { Button } from "@kandev/ui/button";
 import { CliProfileEditor } from "@/components/agent/cli-profile-editor";
+import { useAppStoreApi } from "@/components/state-provider";
 import { getCapabilityWarning } from "@/lib/capability-warning";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
@@ -36,6 +37,13 @@ export function sortProfiles(profiles: AgentProfileOption[]): AgentProfileOption
   });
 }
 
+function upsertProfileOption(
+  profiles: AgentProfileOption[],
+  option: AgentProfileOption,
+): AgentProfileOption[] {
+  return [...profiles.filter((p) => p.id !== option.id), option];
+}
+
 export function useSelectableProfileOptions(agentProfiles: AgentProfileOption[]) {
   const sortedProfiles = useMemo(() => sortProfiles(agentProfiles), [agentProfiles]);
   const baseOptions = useAgentProfileOptions(sortedProfiles);
@@ -57,7 +65,6 @@ export function useSelectableProfileOptions(agentProfiles: AgentProfileOption[])
 
 export function CreateProfilePanel({
   settingsAgents,
-  storeProfiles,
   wizardProfiles,
   canCancel,
   setAgentProfiles,
@@ -66,7 +73,6 @@ export function CreateProfilePanel({
   onClose,
 }: {
   settingsAgents: { id: string; name: string }[];
-  storeProfiles: AgentProfileOption[];
   wizardProfiles: AgentProfileOption[];
   canCancel: boolean;
   setAgentProfiles: (profiles: AgentProfileOption[]) => void;
@@ -74,6 +80,7 @@ export function CreateProfilePanel({
   onProfileSaved: (profileId: string) => void;
   onClose: () => void;
 }) {
+  const store = useAppStoreApi();
   return (
     <div className="mt-2 rounded-md border bg-muted/30 p-3">
       <CliProfileEditor
@@ -87,8 +94,12 @@ export function CreateProfilePanel({
             name: saved.agentId ?? "",
           };
           const option = toAgentProfileOption(agentForProfile, saved);
-          setAgentProfiles([...storeProfiles.filter((p) => p.id !== option.id), option]);
-          onAgentProfilesChange?.([...wizardProfiles.filter((p) => p.id !== option.id), option]);
+          const nextStoreProfiles = upsertProfileOption(
+            store.getState().agentProfiles.items,
+            option,
+          );
+          setAgentProfiles(nextStoreProfiles);
+          onAgentProfilesChange?.(upsertProfileOption(wizardProfiles, option));
           onProfileSaved(saved.id);
           onClose();
         }}

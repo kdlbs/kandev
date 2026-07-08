@@ -334,9 +334,9 @@ The CEO and workers move tasks between states by calling the same API the UI use
 
 - **GIVEN** a user on the import prompt, **WHEN** they click "Import & Continue", **THEN** all FS workspaces are imported to DB, onboarding is marked complete, and they are redirected to the dashboard.
 
-- **GIVEN** a user on the import prompt, **WHEN** they click "Start Fresh", **THEN** the import is skipped and the 4-step wizard is shown.
+- **GIVEN** a user on the import prompt, **WHEN** they click "Start Fresh", **THEN** the import is skipped and the 5-step wizard is shown.
 
-- **GIVEN** a user on step 4 who clicks "Create & Launch" with the default first task still present, **WHEN** all inputs are valid, **THEN** the workspace, CEO agent, and setup task are created, a `task_assigned` wakeup is enqueued, and the dashboard shows 1 agent enabled and 1 task in progress.
+- **GIVEN** a user on the review step who clicks "Create & Launch" with the default first task still present, **WHEN** all inputs are valid, **THEN** the workspace, CEO agent, and setup task are created, a `task_assigned` wakeup is enqueued, and the dashboard shows 1 agent enabled and 1 task in progress.
 
 - **GIVEN** a user who skipped the first task on step 3, **WHEN** they reach the dashboard, **THEN** the CEO agent exists but is idle (no tasks) and the empty state says "Assign a task to your CEO to get started."
 

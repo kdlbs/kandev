@@ -133,6 +133,35 @@ func TestListRoutingTierReferencesByAgentProfile(t *testing.T) {
 	}
 }
 
+func TestListRoutingTierReferencesByAgentProfile_IgnoresRemovedProviders(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	cfg := &routing.WorkspaceConfig{
+		Enabled:       false,
+		DefaultTier:   routing.TierBalanced,
+		ProviderOrder: []routing.ProviderID{"codex-acp"},
+		ProviderProfiles: map[routing.ProviderID]routing.ProviderProfile{
+			"codex-acp": {
+				TierProfileIDs: routing.TierProfileIDs{Balanced: "active-profile"},
+			},
+			"claude-acp": {
+				TierProfileIDs: routing.TierProfileIDs{Balanced: "removed-profile"},
+			},
+		},
+	}
+	if err := repo.UpsertWorkspaceRouting(ctx, "ws-1", cfg); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	refs, err := repo.ListRoutingTierReferencesByAgentProfile(ctx, "removed-profile")
+	if err != nil {
+		t.Fatalf("list removed provider refs: %v", err)
+	}
+	if len(refs) != 0 {
+		t.Fatalf("removed provider should not block profile deletion: %+v", refs)
+	}
+}
+
 func TestUpsertWorkspaceRouting_Idempotent(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
