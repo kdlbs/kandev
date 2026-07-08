@@ -454,8 +454,10 @@ test.describe("Chat status bar", () => {
 
     const urlBeforeArchive = testPage.url();
 
-    // Click archive in the PR merged banner
+    // Click archive in the PR merged banner, then confirm in the dialog
     await session.prMergedArchiveButton().click();
+    await expect(session.prMergedArchiveConfirmButton()).toBeVisible({ timeout: 10_000 });
+    await session.prMergedArchiveConfirmButton().click();
 
     // Should switch to task B
     await expect(session.taskInSidebar("Archive Banner Task A")).not.toBeVisible({
