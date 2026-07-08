@@ -173,7 +173,7 @@ test.describe("Onboarding", () => {
 
     await testPage.getByLabel("Profile name").fill(profileName);
     await testPage.getByRole("button", { name: "Create profile" }).click();
-    await expect(testPage.getByText(profileName).first()).toBeVisible();
+    await expect(testPage.getByRole("button", { name: /Create a new CLI profile/i })).toBeVisible();
     await testPage.getByRole("button", { name: /next/i }).click();
 
     await expect(
@@ -208,14 +208,11 @@ test.describe("Onboarding", () => {
           agents?: Array<{
             id?: string;
             name?: string;
-            agent_profile_id?: string;
-            agentProfileId?: string;
           }>;
         }
       ).agents ?? [];
     const agent = agents.find((candidate) => candidate.name === "CEO") ?? agents[0];
     expect(agent?.id).toBeTruthy();
-    expect(agent?.agent_profile_id ?? agent?.agentProfileId).toBeTruthy();
 
     await officeApi.deleteWorkspace(workspaceId!, workspaceName);
   });

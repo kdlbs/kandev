@@ -517,5 +517,9 @@ async function saveNewProfile(form: FormState, settingsAgents: Agent[]): Promise
       `Created agent ${form.agentName} but the response did not include the new profile.`,
     );
   }
-  return newProfile;
+  return {
+    ...newProfile,
+    agentId: newProfile.agentId || created.id,
+    agentDisplayName: newProfile.agentDisplayName || created.name,
+  };
 }

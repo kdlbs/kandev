@@ -155,7 +155,7 @@ export function buildTaskTreeNodes({
   }
 
   const sortedIds = new Set(sorted.map((task) => task.id));
-  const levels = computeTaskLevels(tasks);
+  const levels = computeTaskLevels(sorted);
   const childrenMap = new Map<string | undefined, OfficeTask[]>();
   for (const task of sorted) {
     const key = task.parentId ?? "__root__";

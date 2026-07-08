@@ -104,7 +104,7 @@ describe("office task tree", () => {
     ]);
   });
 
-  it("keeps visible orphan subtrees indented when an ancestor is filtered out", () => {
+  it("roots visible orphan subtrees at the top level when an ancestor is filtered out", () => {
     const parent = task("parent", "Hidden parent", "missing-grandparent");
     const child = task("child", "Visible child", parent.id);
     const grandchild = task("grandchild", "Visible grandchild", child.id);
@@ -121,8 +121,8 @@ describe("office task tree", () => {
     });
 
     expect(nodes.map((node) => [node.task.id, node.level, node.hasChildren])).toEqual([
-      [child.id, 1, true],
-      [grandchild.id, 2, false],
+      [child.id, 0, true],
+      [grandchild.id, 1, false],
     ]);
   });
 });

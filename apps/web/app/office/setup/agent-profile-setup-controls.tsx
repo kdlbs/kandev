@@ -94,11 +94,7 @@ export function CreateProfilePanel({
             name: saved.agentId ?? "",
           };
           const option = toAgentProfileOption(agentForProfile, saved);
-          const nextStoreProfiles = upsertProfileOption(
-            store.getState().agentProfiles.items,
-            option,
-          );
-          setAgentProfiles(nextStoreProfiles);
+          setAgentProfiles(upsertProfileOption(store.getState().agentProfiles.items, option));
           onAgentProfilesChange?.(upsertProfileOption(wizardProfiles, option));
           onProfileSaved(saved.id);
           onClose();
