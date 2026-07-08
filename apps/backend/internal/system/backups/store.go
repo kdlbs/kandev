@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/persistence"
@@ -130,20 +132,72 @@ func (s *Service) runCreate(_ context.Context) (map[string]interface{}, error) {
 	if err := s.ensureBackupsDir(); err != nil {
 		return nil, err
 	}
+	// A .tmp sidecar is normally renamed away on success and removed on the
+	// error paths below, but a crash between SnapshotSQLite and os.Rename
+	// leaves one behind. classify() hides it from List()/Delete(), so it can
+	// never be cleaned up through the UI and would leak disk (up to the size
+	// of the live DB) indefinitely. Sweep any leftovers before writing a new
+	// one so crash debris is reclaimed on the next manual backup.
+	s.sweepStaleTmpFiles()
 	// Nanosecond precision so double-clicks or concurrent /backups POSTs do
 	// not collide on the same filename and silently overwrite one job's
 	// snapshot with another.
 	name := fmt.Sprintf("%s%d%s", manualPrefix, time.Now().UTC().UnixNano(), dbSuffix)
 	path := filepath.Join(s.backupsDir(), name)
-	size, err := persistence.SnapshotSQLite(s.pool.Writer(), path)
+	// VACUUM INTO writes the multi-hundred-MB snapshot incrementally. If we
+	// wrote directly to the final "manual-*.db" name, a concurrent List()
+	// (the UI refetches immediately after the 202) would os.Stat a
+	// half-written file and report a truncated size. Write to a ".tmp"
+	// sidecar first — classify() ignores non-.db suffixes so it is never
+	// listed — then atomically rename it into place at its full size.
+	tmpPath := path + tmpSuffix
+	size, err := persistence.SnapshotSQLite(s.pool.Writer(), tmpPath)
 	if err != nil {
+		_ = os.Remove(tmpPath)
 		return nil, err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return nil, fmt.Errorf("rename snapshot into place: %w", err)
 	}
 	return map[string]interface{}{
 		"name":       name,
 		"path":       path,
 		"size_bytes": size,
 	}, nil
+}
+
+// staleTmpAge is how old a ".tmp" sidecar must be before the sweep reclaims
+// it. Concurrent backup-create jobs are not serialized (jobs.Tracker runs each
+// in its own goroutine), so a just-created sidecar may belong to another
+// in-flight VACUUM INTO. Only files older than this are treated as crash debris,
+// which keeps concurrent creates safe while still reclaiming leaked files. The
+// threshold is far above any realistic VACUUM INTO duration.
+const staleTmpAge = 10 * time.Minute
+
+// sweepStaleTmpFiles removes leftover ".tmp" VACUUM INTO sidecars from a
+// previously crashed runCreate, skipping any modified within staleTmpAge so a
+// concurrent create's in-progress sidecar is never deleted out from under it.
+// Best-effort: read/stat/remove failures are logged and ignored so a stale
+// file never blocks a fresh backup.
+func (s *Service) sweepStaleTmpFiles() {
+	entries, err := os.ReadDir(s.backupsDir())
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), tmpSuffix) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || time.Since(info.ModTime()) < staleTmpAge {
+			continue
+		}
+		p := filepath.Join(s.backupsDir(), e.Name())
+		if err := os.Remove(p); err != nil && s.log != nil {
+			s.log.Warn("backups: failed to remove stale tmp snapshot", zap.String("path", p), zap.Error(err))
+		}
+	}
 }
 
 // Restore validates the confirm token, then runs the restore as a job.
