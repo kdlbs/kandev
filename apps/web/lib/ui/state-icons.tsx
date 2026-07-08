@@ -106,7 +106,9 @@ export function shouldShowTaskRunningSpinner(
   primarySessionState?: string | null,
 ): boolean {
   if (taskState === "TODO") return false;
-  if (primarySessionState && primarySessionState !== "CREATED") {
+  const sessionIsKnownAndNotCreated =
+    primarySessionState != null && primarySessionState !== "CREATED";
+  if (sessionIsKnownAndNotCreated) {
     return ACTIVE_SESSION_STATES.has(primarySessionState);
   }
   return taskState === "IN_PROGRESS" || taskState === "SCHEDULING";

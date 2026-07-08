@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/persistence"
@@ -130,6 +132,13 @@ func (s *Service) runCreate(_ context.Context) (map[string]interface{}, error) {
 	if err := s.ensureBackupsDir(); err != nil {
 		return nil, err
 	}
+	// A .tmp sidecar is normally renamed away on success and removed on the
+	// error paths below, but a crash between SnapshotSQLite and os.Rename
+	// leaves one behind. classify() hides it from List()/Delete(), so it can
+	// never be cleaned up through the UI and would leak disk (up to the size
+	// of the live DB) indefinitely. Sweep any leftovers before writing a new
+	// one so crash debris is reclaimed on the next manual backup.
+	s.sweepStaleTmpFiles()
 	// Nanosecond precision so double-clicks or concurrent /backups POSTs do
 	// not collide on the same filename and silently overwrite one job's
 	// snapshot with another.
@@ -141,7 +150,7 @@ func (s *Service) runCreate(_ context.Context) (map[string]interface{}, error) {
 	// half-written file and report a truncated size. Write to a ".tmp"
 	// sidecar first — classify() ignores non-.db suffixes so it is never
 	// listed — then atomically rename it into place at its full size.
-	tmpPath := path + ".tmp"
+	tmpPath := path + tmpSuffix
 	size, err := persistence.SnapshotSQLite(s.pool.Writer(), tmpPath)
 	if err != nil {
 		_ = os.Remove(tmpPath)
@@ -156,6 +165,25 @@ func (s *Service) runCreate(_ context.Context) (map[string]interface{}, error) {
 		"path":       path,
 		"size_bytes": size,
 	}, nil
+}
+
+// sweepStaleTmpFiles removes any leftover ".tmp" VACUUM INTO sidecars from a
+// previously crashed runCreate. Best-effort: read/remove failures are logged
+// and ignored so a stale file never blocks a fresh backup.
+func (s *Service) sweepStaleTmpFiles() {
+	entries, err := os.ReadDir(s.backupsDir())
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), tmpSuffix) {
+			continue
+		}
+		p := filepath.Join(s.backupsDir(), e.Name())
+		if err := os.Remove(p); err != nil && s.log != nil {
+			s.log.Warn("backups: failed to remove stale tmp snapshot", zap.String("path", p), zap.Error(err))
+		}
+	}
 }
 
 // Restore validates the confirm token, then runs the restore as a job.

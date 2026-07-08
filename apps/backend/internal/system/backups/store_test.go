@@ -234,6 +234,37 @@ func TestList_IgnoresTmpSidecar(t *testing.T) {
 	}
 }
 
+// A crash between SnapshotSQLite and os.Rename leaves a ".tmp" sidecar that
+// classify() hides from List()/Delete(), so it could never be cleaned up via
+// the UI. Create must sweep such stale sidecars before writing a new snapshot.
+func TestCreate_SweepsStaleTmpSidecar(t *testing.T) {
+	svc, dataDir := newTestService(t)
+	backupsDir := filepath.Join(dataDir, "backups")
+	if err := os.MkdirAll(backupsDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	stale := filepath.Join(backupsDir, "manual-1700000000.db.tmp")
+	if err := os.WriteFile(stale, []byte("crashed vacuum debris"), 0o644); err != nil {
+		t.Fatalf("seed stale tmp: %v", err)
+	}
+
+	id := svc.Create(context.Background())
+	waitForJob(t, svc.jobs, id, jobs.StateSucceeded)
+
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("stale tmp sidecar not swept: stat err = %v", err)
+	}
+	entries, err := os.ReadDir(backupsDir)
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmp") {
+			t.Errorf("leftover tmp file after Create: %s", e.Name())
+		}
+	}
+}
+
 // Core retention property: persistence.PruneBackups(dir, 0) must remove all
 // auto snapshots but must NOT touch manual snapshots. This is the contract
 // that lets manual snapshots survive the existing pre-migration pruning.
