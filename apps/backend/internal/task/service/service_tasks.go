@@ -1063,7 +1063,7 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 	worktrees := s.gatherWorktreesForDelete(ctx, id)
 	taskEnv := s.gatherTaskEnvironmentForCleanup(ctx, id)
 	if preserved, err := s.preserveTaskEnvironmentForActiveBorrower(ctx, id, taskEnv); err != nil {
-		return err
+		return false, err
 	} else if preserved {
 		s.logger.Info("transferred borrowed task environment before task delete",
 			zap.String("task_id", id),
