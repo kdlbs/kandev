@@ -1,7 +1,5 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { expect } from "../../fixtures/test-base";
-
-const INTEGRATION_LABELS = ["GitHub", "GitLab", "Jira", "Linear", "Sentry", "Slack"];
 
 // Cards own the vertical padding (py-4 = 16px); allow border/subpixel slack, but catch extra content top padding.
 const MAX_ICON_TOP_INSET_PX = 22;
@@ -15,15 +13,13 @@ export async function expectStableIntegrationCardLayout(page: Page) {
 }
 
 async function integrationCardHeights(page: Page) {
-  const content = page.getByTestId("settings-scroll-container");
+  const cards = await integrationCards(page);
+
   const heights = await Promise.all(
-    INTEGRATION_LABELS.map(async (label) => {
-      const card = content
-        .getByRole("link", { name: new RegExp(`^${label}\\b`) })
-        .locator("xpath=./*[1]");
+    cards.map(async (card, index) => {
       await expect(card).toBeVisible();
       const box = await card.boundingBox();
-      if (!box) throw new Error(`Missing integration card bounds for ${label}`);
+      if (!box) throw new Error(`Missing integration card bounds at index ${index}`);
       return box.height;
     }),
   );
@@ -31,17 +27,34 @@ async function integrationCardHeights(page: Page) {
 }
 
 async function integrationCardIconTopInsets(page: Page) {
-  const content = page.getByTestId("settings-scroll-container");
+  const cards = await integrationCards(page);
+
   const topInsets = await Promise.all(
-    INTEGRATION_LABELS.map(async (label) => {
-      const card = content
-        .getByRole("link", { name: new RegExp(`^${label}\\b`) })
-        .locator("xpath=./*[1]");
+    cards.map(async (card, index) => {
       const icon = card.locator("svg").first();
       const [cardBox, iconBox] = await Promise.all([card.boundingBox(), icon.boundingBox()]);
-      if (!cardBox || !iconBox) throw new Error(`Missing integration card bounds for ${label}`);
+      if (!cardBox || !iconBox) {
+        throw new Error(`Missing integration card icon bounds at index ${index}`);
+      }
       return iconBox.y - cardBox.y;
     }),
   );
   return topInsets;
+}
+
+async function integrationCards(page: Page): Promise<Locator[]> {
+  const links = page
+    .getByTestId("settings-scroll-container")
+    .locator('a[href^="/settings/integrations/"]');
+  await expect(links.first()).toBeVisible();
+  const count = await links.count();
+  expect(count).toBeGreaterThan(0);
+
+  return Promise.all(
+    Array.from({ length: count }, async (_, index) => {
+      const card = links.nth(index).locator(':scope > [data-slot="card"]');
+      await expect(card).toHaveCount(1);
+      return card;
+    }),
+  );
 }
