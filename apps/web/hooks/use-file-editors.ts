@@ -418,7 +418,6 @@ function useOpenFileAction({
       const currentSessionId = activeSessionIdRef.current;
       if (!client || !currentSessionId) return;
       const fileKey = buildRepoScopedItemId(filePath, repo);
-      const requestToken = markActiveFileRequest(activeFileRequestRef, fileKey);
       const files = getOpenFiles();
       if (files.has(fileKey)) {
         const existing = files.get(fileKey);
@@ -432,6 +431,7 @@ function useOpenFileAction({
         );
         return;
       }
+      const requestToken = markActiveFileRequest(activeFileRequestRef, fileKey);
       try {
         const state = await fetchFileEditorState({
           client,
@@ -500,7 +500,6 @@ function useMarkdownPreviewAction({
       const currentSessionId = activeSessionIdRef.current;
       if (!client || !currentSessionId) return;
       const fileKey = buildRepoScopedItemId(filePath, repo);
-      const requestToken = markActiveFileRequest(activeFileRequestRef, fileKey);
       const files = getOpenFiles();
       if (files.has(fileKey)) {
         updateFileState(fileKey, { markdownPreview: true });
@@ -514,6 +513,7 @@ function useMarkdownPreviewAction({
         );
         return;
       }
+      const requestToken = markActiveFileRequest(activeFileRequestRef, fileKey);
       try {
         const state = await fetchFileEditorState({
           client,
