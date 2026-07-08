@@ -167,9 +167,19 @@ func (s *Service) runCreate(_ context.Context) (map[string]interface{}, error) {
 	}, nil
 }
 
-// sweepStaleTmpFiles removes any leftover ".tmp" VACUUM INTO sidecars from a
-// previously crashed runCreate. Best-effort: read/remove failures are logged
-// and ignored so a stale file never blocks a fresh backup.
+// staleTmpAge is how old a ".tmp" sidecar must be before the sweep reclaims
+// it. Concurrent backup-create jobs are not serialized (jobs.Tracker runs each
+// in its own goroutine), so a just-created sidecar may belong to another
+// in-flight VACUUM INTO. Only files older than this are treated as crash debris,
+// which keeps concurrent creates safe while still reclaiming leaked files. The
+// threshold is far above any realistic VACUUM INTO duration.
+const staleTmpAge = 10 * time.Minute
+
+// sweepStaleTmpFiles removes leftover ".tmp" VACUUM INTO sidecars from a
+// previously crashed runCreate, skipping any modified within staleTmpAge so a
+// concurrent create's in-progress sidecar is never deleted out from under it.
+// Best-effort: read/stat/remove failures are logged and ignored so a stale
+// file never blocks a fresh backup.
 func (s *Service) sweepStaleTmpFiles() {
 	entries, err := os.ReadDir(s.backupsDir())
 	if err != nil {
@@ -177,6 +187,10 @@ func (s *Service) sweepStaleTmpFiles() {
 	}
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), tmpSuffix) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || time.Since(info.ModTime()) < staleTmpAge {
 			continue
 		}
 		p := filepath.Join(s.backupsDir(), e.Name())

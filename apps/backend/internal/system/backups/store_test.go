@@ -236,7 +236,8 @@ func TestList_IgnoresTmpSidecar(t *testing.T) {
 
 // A crash between SnapshotSQLite and os.Rename leaves a ".tmp" sidecar that
 // classify() hides from List()/Delete(), so it could never be cleaned up via
-// the UI. Create must sweep such stale sidecars before writing a new snapshot.
+// the UI. Create must sweep such stale (old) sidecars before writing a new
+// snapshot.
 func TestCreate_SweepsStaleTmpSidecar(t *testing.T) {
 	svc, dataDir := newTestService(t)
 	backupsDir := filepath.Join(dataDir, "backups")
@@ -246,6 +247,11 @@ func TestCreate_SweepsStaleTmpSidecar(t *testing.T) {
 	stale := filepath.Join(backupsDir, "manual-1700000000.db.tmp")
 	if err := os.WriteFile(stale, []byte("crashed vacuum debris"), 0o644); err != nil {
 		t.Fatalf("seed stale tmp: %v", err)
+	}
+	// Backdate past the age guard so the sweep treats it as crash debris.
+	old := time.Now().Add(-2 * staleTmpAge)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatalf("chtimes stale tmp: %v", err)
 	}
 
 	id := svc.Create(context.Background())
@@ -262,6 +268,28 @@ func TestCreate_SweepsStaleTmpSidecar(t *testing.T) {
 		if strings.HasSuffix(e.Name(), ".tmp") {
 			t.Errorf("leftover tmp file after Create: %s", e.Name())
 		}
+	}
+}
+
+// A recently-modified ".tmp" sidecar may be the in-progress VACUUM INTO of a
+// concurrent Create job (jobs are not serialized), so the sweep must leave it
+// alone — deleting it would make the other job's os.Rename fail with ENOENT.
+func TestCreate_PreservesRecentTmpSidecar(t *testing.T) {
+	svc, dataDir := newTestService(t)
+	backupsDir := filepath.Join(dataDir, "backups")
+	if err := os.MkdirAll(backupsDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	recent := filepath.Join(backupsDir, "manual-1700000001.db.tmp")
+	if err := os.WriteFile(recent, []byte("another job's in-progress vacuum"), 0o644); err != nil {
+		t.Fatalf("seed recent tmp: %v", err)
+	}
+
+	id := svc.Create(context.Background())
+	waitForJob(t, svc.jobs, id, jobs.StateSucceeded)
+
+	if _, err := os.Stat(recent); err != nil {
+		t.Errorf("recent tmp sidecar was swept but should have been preserved: %v", err)
 	}
 }
 
