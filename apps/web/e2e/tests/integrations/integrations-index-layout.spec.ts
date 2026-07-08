@@ -9,8 +9,10 @@ test.describe("integrations settings index layout", () => {
     await testPage.goto("/settings/integrations");
 
     const heights = await integrationCardHeights(testPage);
+    const topInsets = await integrationCardIconTopInsets(testPage);
 
     expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(1);
+    expect(Math.max(...topInsets)).toBeLessThanOrEqual(22);
   });
 });
 
@@ -28,4 +30,20 @@ async function integrationCardHeights(page: Page) {
     }),
   );
   return heights;
+}
+
+async function integrationCardIconTopInsets(page: Page) {
+  const content = page.getByTestId("settings-scroll-container");
+  const topInsets = await Promise.all(
+    INTEGRATION_LABELS.map(async (label) => {
+      const card = content
+        .getByRole("link", { name: new RegExp(`^${label}\\b`) })
+        .locator("xpath=./*[1]");
+      const icon = card.locator("svg").first();
+      const [cardBox, iconBox] = await Promise.all([card.boundingBox(), icon.boundingBox()]);
+      if (!cardBox || !iconBox) throw new Error(`Missing integration card bounds for ${label}`);
+      return iconBox.y - cardBox.y;
+    }),
+  );
+  return topInsets;
 }

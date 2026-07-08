@@ -62,7 +62,7 @@ export default function IntegrationsIndexPage() {
         {INTEGRATIONS.map(({ href, label, description, Icon }) => (
           <Link key={href} href={href} className="flex h-full cursor-pointer">
             <Card className="h-full w-full transition-colors hover:border-primary/40">
-              <CardContent className="space-y-2 pt-6">
+              <CardContent className="space-y-2">
                 <div className="flex items-center gap-2 text-base font-semibold">
                   <Icon className="h-5 w-5" />
                   {label}
