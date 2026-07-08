@@ -921,6 +921,22 @@ func (r *Repository) HasActiveTaskSessionsByTaskEnvironmentExcludingTask(ctx con
 	return err == nil, err
 }
 
+func (r *Repository) FindActiveTaskSessionTaskIDByTaskEnvironmentExcludingTask(ctx context.Context, taskEnvironmentID, taskID string) (string, error) {
+	var borrowerTaskID string
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT task_id FROM task_sessions
+		WHERE task_environment_id = ?
+			AND task_id != ?
+			AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
+		ORDER BY updated_at DESC
+		LIMIT 1
+	`), taskEnvironmentID, taskID).Scan(&borrowerTaskID)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return borrowerTaskID, err
+}
+
 func (r *Repository) HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error) {
 	var exists int
 	// Only sessions of live (non-archived) tasks count; archived tasks never

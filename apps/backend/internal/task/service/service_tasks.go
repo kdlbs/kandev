@@ -57,6 +57,14 @@ type taskEnvironmentSessionUsageChecker interface {
 	HasActiveTaskSessionsByTaskEnvironmentExcludingTask(ctx context.Context, taskEnvironmentID, taskID string) (bool, error)
 }
 
+type taskEnvironmentSessionBorrowerFinder interface {
+	FindActiveTaskSessionTaskIDByTaskEnvironmentExcludingTask(ctx context.Context, taskEnvironmentID, taskID string) (string, error)
+}
+
+type taskEnvironmentOwnerTransferer interface {
+	TransferTaskEnvironmentToTask(ctx context.Context, envID, taskID string) error
+}
+
 // Task operations
 
 // isOfficeRequest returns true if the request should create an office task.
@@ -1054,6 +1062,14 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 
 	worktrees := s.gatherWorktreesForDelete(ctx, id)
 	taskEnv := s.gatherTaskEnvironmentForCleanup(ctx, id)
+	if preserved, err := s.preserveTaskEnvironmentForActiveBorrower(ctx, id, taskEnv); err != nil {
+		return err
+	} else if preserved {
+		s.logger.Info("transferred borrowed task environment before task delete",
+			zap.String("task_id", id),
+			zap.String("env_id", taskEnvironmentID(taskEnv)),
+			zap.String("new_owner_task_id", taskEnv.TaskID))
+	}
 
 	// 3. Get active sessions for stopping agents (sync, fast)
 	// Must query before delete since DB records will be gone
@@ -1140,6 +1156,23 @@ func (s *Service) CleanupTaskResources(ctx context.Context, taskID string, delet
 	}
 	worktrees := s.gatherWorktreesForDelete(ctx, taskID)
 	taskEnv := s.gatherTaskEnvironmentForCleanup(ctx, taskID)
+	if deleteEnvRow {
+		preserved, err := s.preserveTaskEnvironmentForActiveBorrower(ctx, taskID, taskEnv)
+		if err != nil {
+			s.logger.Warn("skipping cascade cleanup because task environment could not be preserved for borrower",
+				zap.String("task_id", taskID),
+				zap.String("env_id", taskEnvironmentID(taskEnv)),
+				zap.Error(err))
+			return
+		}
+		if preserved {
+			deleteEnvRow = false
+			s.logger.Info("transferred borrowed task environment before cascade delete",
+				zap.String("task_id", taskID),
+				zap.String("env_id", taskEnvironmentID(taskEnv)),
+				zap.String("new_owner_task_id", taskEnv.TaskID))
+		}
+	}
 	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: deleteEnvRow}
 	if len(sessions) == 0 && len(worktrees) == 0 && len(stopTargets) == 0 && taskEnv == nil {
 		return
@@ -1537,6 +1570,32 @@ func (s *Service) hasActiveOtherTaskSessionsForEnvironment(ctx context.Context, 
 	return checker.HasActiveTaskSessionsByTaskEnvironmentExcludingTask(ctx, env.ID, taskID)
 }
 
+func (s *Service) preserveTaskEnvironmentForActiveBorrower(ctx context.Context, taskID string, env *models.TaskEnvironment) (bool, error) {
+	if env == nil || env.ID == "" || s.sessions == nil {
+		return false, nil
+	}
+	finder, ok := s.sessions.(taskEnvironmentSessionBorrowerFinder)
+	if !ok {
+		return false, nil
+	}
+	borrowerTaskID, err := finder.FindActiveTaskSessionTaskIDByTaskEnvironmentExcludingTask(ctx, env.ID, taskID)
+	if err != nil {
+		return false, fmt.Errorf("find task environment borrower %s: %w", env.ID, err)
+	}
+	if borrowerTaskID == "" {
+		return false, nil
+	}
+	ownerTransfer, ok := s.taskEnvironments.(taskEnvironmentOwnerTransferer)
+	if !ok {
+		return false, fmt.Errorf("task environment repository cannot transfer borrowed environment %s", env.ID)
+	}
+	if err := ownerTransfer.TransferTaskEnvironmentToTask(ctx, env.ID, borrowerTaskID); err != nil {
+		return false, fmt.Errorf("transfer task environment %s to %s: %w", env.ID, borrowerTaskID, err)
+	}
+	env.TaskID = borrowerTaskID
+	return true, nil
+}
+
 func (s *Service) filterOwnedWorktreesForTaskCleanup(
 	ctx context.Context,
 	taskID string,
@@ -1560,8 +1619,8 @@ func (s *Service) filterOwnedWorktreesForTaskCleanup(
 		if wt == nil {
 			continue
 		}
-		sess := bySession[wt.SessionID]
-		if s.taskOwnsSessionWorktree(ctx, taskID, sess, ownedEnv, skipOwnedEnvironment, envCache) {
+		sess, sessionLoaded := bySession[wt.SessionID]
+		if s.taskOwnsSessionWorktree(ctx, taskID, wt.SessionID, sess, sessionLoaded, ownedEnv, skipOwnedEnvironment, envCache) {
 			filtered = append(filtered, wt)
 		}
 	}
@@ -1571,12 +1630,25 @@ func (s *Service) filterOwnedWorktreesForTaskCleanup(
 func (s *Service) taskOwnsSessionWorktree(
 	ctx context.Context,
 	taskID string,
+	sessionID string,
 	session *models.TaskSession,
+	sessionLoaded bool,
 	ownedEnv *models.TaskEnvironment,
 	skipOwnedEnvironment bool,
 	envCache map[string]*models.TaskEnvironment,
 ) bool {
-	if session == nil || session.TaskEnvironmentID == "" {
+	if session == nil {
+		if sessionID == "" {
+			return true
+		}
+		if !sessionLoaded {
+			s.logger.Warn("skipping task worktree cleanup because session ownership cannot be checked",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID))
+		}
+		return false
+	}
+	if session.TaskEnvironmentID == "" {
 		return true
 	}
 	if ownedEnv != nil && session.TaskEnvironmentID == ownedEnv.ID {
