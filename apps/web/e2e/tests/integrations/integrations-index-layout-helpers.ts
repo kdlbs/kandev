@@ -5,16 +5,15 @@ import { expect } from "../../fixtures/test-base";
 const MAX_ICON_TOP_INSET_PX = 22;
 
 export async function expectStableIntegrationCardLayout(page: Page) {
-  const heights = await integrationCardHeights(page);
-  const topInsets = await integrationCardIconTopInsets(page);
+  const cards = await integrationCards(page);
+  const heights = await integrationCardHeights(cards);
+  const topInsets = await integrationCardIconTopInsets(cards);
 
   expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(1);
   expect(Math.max(...topInsets)).toBeLessThanOrEqual(MAX_ICON_TOP_INSET_PX);
 }
 
-async function integrationCardHeights(page: Page) {
-  const cards = await integrationCards(page);
-
+async function integrationCardHeights(cards: Locator[]) {
   const heights = await Promise.all(
     cards.map(async (card, index) => {
       await expect(card).toBeVisible();
@@ -26,9 +25,7 @@ async function integrationCardHeights(page: Page) {
   return heights;
 }
 
-async function integrationCardIconTopInsets(page: Page) {
-  const cards = await integrationCards(page);
-
+async function integrationCardIconTopInsets(cards: Locator[]) {
   const topInsets = await Promise.all(
     cards.map(async (card, index) => {
       const icon = card.locator("svg").first();
