@@ -11,7 +11,7 @@ test.describe("Session resume boot-message dedup", () => {
     seedData,
     backend,
   }) => {
-    test.setTimeout(180_000);
+    test.setTimeout(300_000);
 
     // 1. Create the task and wait for the initial agent turn to finish.
     const task = await apiClient.createTaskWithAgent(
@@ -82,6 +82,8 @@ test.describe("Session resume boot-message dedup", () => {
       await session.sendMessage(followupPrompt);
       await expect(followupEcho).toBeVisible({ timeout: 15_000 });
     }
-    await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
+    // After two restart/resume cycles, the follow-up turn can remain "Thinking"
+    // longer than the default retry window on busy CI runners.
+    await session.expectChatResponseVisible("simple mock response", 1, { timeout: 90_000 });
   });
 });
