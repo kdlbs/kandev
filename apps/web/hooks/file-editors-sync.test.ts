@@ -262,7 +262,11 @@ describe("syncOpenFileFromWorkspace repo scoping", () => {
   });
 });
 
-function makeStatus(files: Record<string, FileInfo>, timestamp: string): GitStatusEntry {
+function makeStatus(
+  files: Record<string, FileInfo>,
+  timestamp: string,
+  repo?: string,
+): GitStatusEntry {
   return {
     branch: "main",
     remote_branch: null,
@@ -275,6 +279,7 @@ function makeStatus(files: Record<string, FileInfo>, timestamp: string): GitStat
     behind: 0,
     files,
     timestamp,
+    repository_name: repo,
   } as GitStatusEntry;
 }
 
@@ -354,6 +359,42 @@ describe("useOpenFileWorkspaceSync", () => {
         expect.objectContaining({ content: "v2", originalContent: "v2" }),
       ),
     );
+
+    cleanup();
+  });
+
+  it("ignores sibling-repo git statuses for an open file at the same path", async () => {
+    seedOpenFile({
+      content: "user edits",
+      originalContent: "v1",
+      originalHash: "h:2:v1",
+      isDirty: true,
+      repo: "frontend",
+    });
+    const updateFileState = vi.fn();
+    mockRequestFileContent.mockResolvedValue({
+      content: "backend changed",
+      is_binary: false,
+      resolved_path: PATH,
+    });
+
+    const initialStatus = makeStatus({}, "2026-05-08T11:00:00.000Z", "frontend");
+    const { rerender } = renderSyncHook({
+      gitStatus: initialStatus,
+      openFiles: openFilesMap,
+      updateFileState,
+    });
+
+    const siblingRepoStatus = makeStatus(
+      { [PATH]: modifiedFile("@@ -1 +1 @@\n-v1\n+backend") },
+      "2026-05-08T11:00:02.000Z",
+      "backend",
+    );
+    rerender({ gitStatus: siblingRepoStatus, openFiles: openFilesMap, updateFileState });
+
+    await Promise.resolve();
+    expect(mockRequestFileContent).not.toHaveBeenCalled();
+    expect(updateFileState).not.toHaveBeenCalled();
 
     cleanup();
   });

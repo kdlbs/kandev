@@ -146,6 +146,7 @@ export function useOpenFileWorkspaceSync({
     const gitFiles = gitStatus?.files ?? {};
     const sigMap = gitFileSignaturesRef.current;
     for (const [fileKey, file] of openFiles.entries()) {
+      if ((gitStatus?.repository_name ?? "") !== (file.repo ?? "")) continue;
       // For symlinks, also check the resolved target path in git status
       const gitFileInfo = (gitFiles[file.path] ??
         (file.resolvedPath ? gitFiles[file.resolvedPath] : undefined)) as FileInfo | undefined;

@@ -24,7 +24,7 @@ vi.mock("@/hooks/use-file-editors", () => ({
     savingFiles: new Set<string>(),
     handleFileChange: vi.fn(),
     saveFile: vi.fn(),
-    deleteFileAction: vi.fn(),
+    deleteFile: vi.fn(),
     openFile: vi.fn(),
     openFileInMarkdownPreview: vi.fn(),
     applyRemoteUpdate: vi.fn(),
