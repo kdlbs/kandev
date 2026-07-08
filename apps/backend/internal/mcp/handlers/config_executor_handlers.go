@@ -20,7 +20,7 @@ func (h *Handlers) handleListExecutors(ctx context.Context, msg *ws.Message) (*w
 
 	profiles, err := h.taskSvc.ListAllExecutorProfiles(ctx)
 	if err != nil {
-		h.logger.Warn("failed to list executor profiles for executor listing", zap.Error(err))
+		h.logger.Error("failed to list executor profiles for executor listing", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list executor profiles", nil)
 	}
 	profilesByExecutor := make(map[string][]dto.ExecutorProfileDTO, len(executors))
