@@ -910,11 +910,6 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
         // fallback for old non-repo-scoped IDs without params.
         if (panelId.startsWith("file:")) return panelId.slice(5);
         if (panelId.startsWith("diff:file:")) return panelId.slice("diff:file:".length);
-        if (panelId === "preview:file-editor" || panelId === "preview:file-diff") {
-          const path = (api.getPanel(panelId)?.params as Record<string, unknown> | undefined)
-            ?.path as string | undefined;
-          return path ?? null;
-        }
         return null;
       };
       api.onDidActivePanelChange((event) => {
