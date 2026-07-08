@@ -53,6 +53,10 @@ type taskEnvironmentCleanup struct {
 	deleteRow bool
 }
 
+type taskEnvironmentSessionUsageChecker interface {
+	HasActiveTaskSessionsByTaskEnvironmentExcludingTask(ctx context.Context, taskEnvironmentID, taskID string) (bool, error)
+}
+
 // Task operations
 
 // isOfficeRequest returns true if the request should create an office task.
@@ -1366,7 +1370,7 @@ func (s *Service) performTaskCleanup(
 			zap.String("task_id", taskID),
 			zap.Int("preserved_runtime_count", len(preserveExecutorRows)))
 	}
-	errs = append(errs, s.cleanupDestructiveTaskResources(ctx, taskID, worktrees, envCleanup, preserveExecutorRows)...)
+	errs = append(errs, s.cleanupDestructiveTaskResources(ctx, taskID, sessions, worktrees, envCleanup, preserveExecutorRows)...)
 
 	sessionIDs := cleanupSessionIDs(sessions, stopTargets)
 	for _, sessionID := range sessionIDs {
@@ -1467,15 +1471,31 @@ func (s *Service) cleanupQuickChatDirs(
 func (s *Service) cleanupDestructiveTaskResources(
 	ctx context.Context,
 	taskID string,
+	sessions []*models.TaskSession,
 	worktrees []*worktree.Worktree,
 	envCleanup taskEnvironmentCleanup,
 	preserveExecutorRows map[string]struct{},
 ) []error {
 	var errs []error
-	if len(preserveExecutorRows) == 0 {
+	skipOwnedEnvironment, err := s.hasActiveOtherTaskSessionsForEnvironment(ctx, taskID, envCleanup.env)
+	if err != nil {
+		s.logger.Warn("skipping task environment cleanup after shared-environment ownership check failed",
+			zap.String("task_id", taskID),
+			zap.String("env_id", taskEnvironmentID(envCleanup.env)),
+			zap.Error(err))
+		errs = append(errs, fmt.Errorf("check task environment ownership %s: %w", taskEnvironmentID(envCleanup.env), err))
+		skipOwnedEnvironment = true
+	}
+	if skipOwnedEnvironment {
+		s.logger.Info("skipping task environment cleanup while another task still uses it",
+			zap.String("task_id", taskID),
+			zap.String("env_id", taskEnvironmentID(envCleanup.env)))
+	}
+	if len(preserveExecutorRows) == 0 && !skipOwnedEnvironment {
 		errs = append(errs, s.cleanupTaskEnvironment(ctx, taskID, envCleanup)...)
 	}
 	originalWorktreeCount := len(worktrees)
+	worktrees = s.filterOwnedWorktreesForTaskCleanup(ctx, taskID, sessions, worktrees, envCleanup.env, skipOwnedEnvironment)
 	worktrees = cleanupEligibleWorktrees(worktrees, envCleanup.env, preserveExecutorRows)
 	if len(worktrees) == 0 {
 		if originalWorktreeCount > 0 {
@@ -1497,6 +1517,96 @@ func (s *Service) cleanupDestructiveTaskResources(
 		errs = append(errs, fmt.Errorf("cleanup worktrees: %w", err))
 	}
 	return errs
+}
+
+func taskEnvironmentID(env *models.TaskEnvironment) string {
+	if env == nil {
+		return ""
+	}
+	return env.ID
+}
+
+func (s *Service) hasActiveOtherTaskSessionsForEnvironment(ctx context.Context, taskID string, env *models.TaskEnvironment) (bool, error) {
+	if env == nil || env.ID == "" || s.sessions == nil {
+		return false, nil
+	}
+	checker, ok := s.sessions.(taskEnvironmentSessionUsageChecker)
+	if !ok {
+		return false, nil
+	}
+	return checker.HasActiveTaskSessionsByTaskEnvironmentExcludingTask(ctx, env.ID, taskID)
+}
+
+func (s *Service) filterOwnedWorktreesForTaskCleanup(
+	ctx context.Context,
+	taskID string,
+	sessions []*models.TaskSession,
+	worktrees []*worktree.Worktree,
+	ownedEnv *models.TaskEnvironment,
+	skipOwnedEnvironment bool,
+) []*worktree.Worktree {
+	if len(worktrees) == 0 {
+		return worktrees
+	}
+	bySession := make(map[string]*models.TaskSession, len(sessions))
+	for _, sess := range sessions {
+		if sess != nil && sess.ID != "" {
+			bySession[sess.ID] = sess
+		}
+	}
+	envCache := map[string]*models.TaskEnvironment{}
+	filtered := worktrees[:0]
+	for _, wt := range worktrees {
+		if wt == nil {
+			continue
+		}
+		sess := bySession[wt.SessionID]
+		if s.taskOwnsSessionWorktree(ctx, taskID, sess, ownedEnv, skipOwnedEnvironment, envCache) {
+			filtered = append(filtered, wt)
+		}
+	}
+	return filtered
+}
+
+func (s *Service) taskOwnsSessionWorktree(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	ownedEnv *models.TaskEnvironment,
+	skipOwnedEnvironment bool,
+	envCache map[string]*models.TaskEnvironment,
+) bool {
+	if session == nil || session.TaskEnvironmentID == "" {
+		return true
+	}
+	if ownedEnv != nil && session.TaskEnvironmentID == ownedEnv.ID {
+		return !skipOwnedEnvironment
+	}
+	if s.taskEnvironments == nil {
+		s.logger.Warn("skipping task worktree cleanup because task environment ownership cannot be checked",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.String("task_environment_id", session.TaskEnvironmentID))
+		return false
+	}
+	env, ok := envCache[session.TaskEnvironmentID]
+	if !ok {
+		var err error
+		env, err = s.taskEnvironments.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+		if err != nil {
+			s.logger.Warn("skipping task worktree cleanup because task environment lookup failed",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.String("task_environment_id", session.TaskEnvironmentID),
+				zap.Error(err))
+			return false
+		}
+		envCache[session.TaskEnvironmentID] = env
+	}
+	if env == nil || env.TaskID != taskID {
+		return false
+	}
+	return true
 }
 
 func cleanupEligibleWorktrees(worktrees []*worktree.Worktree, env *models.TaskEnvironment, preserveExecutorRows map[string]struct{}) []*worktree.Worktree {
