@@ -11,7 +11,7 @@ type KanbanTask = KanbanState["tasks"][number];
 type Workflow = { id: string; name: string };
 
 function isBootHydratedSnapshot(snapshot: WorkflowSnapshotData | undefined): boolean {
-  return !!snapshot && snapshot.steps.length > 0;
+  return !!snapshot && snapshot.isPlaceholder !== true;
 }
 
 async function fetchAndWriteSnapshot(
@@ -58,7 +58,7 @@ async function fetchAndWriteSnapshot(
       })
       .filter((t): t is KanbanTask => t !== null);
     const snapshotTaskIds = new Set(tasks.map((t) => t.id));
-    const preserveExistingPlaceholderTasks = (snapshotAtFetchStart?.steps.length ?? 0) === 0;
+    const preserveExistingPlaceholderTasks = snapshotAtFetchStart?.isPlaceholder === true;
     const inFlightCreatedTasks = (existingSnapshot?.tasks ?? []).filter(
       (task) =>
         (preserveExistingPlaceholderTasks || !taskIdsAtFetchStart.has(task.id)) &&

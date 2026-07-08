@@ -16,7 +16,13 @@ type MockState = {
   kanbanMulti: {
     snapshots: Record<
       string,
-      { workflowId: string; workflowName: string; steps: []; tasks: SnapshotTask[] }
+      {
+        workflowId: string;
+        workflowName: string;
+        steps: [];
+        tasks: SnapshotTask[];
+        isPlaceholder?: boolean;
+      }
     >;
     isLoading: boolean;
   };
@@ -74,6 +80,7 @@ function setLightweightSnapshot(task: SnapshotTask) {
     workflowName: "A",
     steps: [],
     tasks: [task],
+    isPlaceholder: true,
   };
 }
 

@@ -76,6 +76,7 @@ describe("task.created sidebar snapshots", () => {
     const snapshot = store.getState().kanbanMulti.snapshots.wf2;
     expect(snapshot.workflowName).toBe("Sibling Flow");
     expect(snapshot.steps).toEqual([]);
+    expect(snapshot.isPlaceholder).toBe(true);
     expect(snapshot.tasks.map((task) => task.id)).toEqual(["child-before-snapshot"]);
     expect(snapshot.tasks[0].parentTaskId).toBe("parent-task");
   });

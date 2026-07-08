@@ -78,6 +78,7 @@ function upsertMultiTask(
             workflowName,
             steps: [],
             tasks: upsertTask([], task, payload),
+            isPlaceholder: true,
           },
         },
       },
