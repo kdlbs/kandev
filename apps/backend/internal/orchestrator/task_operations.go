@@ -1059,7 +1059,7 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 	if err != nil {
 		// If the execution is already running (duplicate resume request), return it as success.
 		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
-			execution, readySession, err = s.recoverAlreadyRunningResume(ctx, resumeCtx, taskID, sessionID)
+			execution, readySession, err = s.recoverAlreadyRunningResume(resumeCtx, taskID, sessionID)
 			if err != nil && errors.Is(err, ErrAgentNotReadyForPrompt) {
 				return nil, err
 			}
@@ -1093,7 +1093,7 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 		}
 	}
 	if readySession == nil {
-		readySession, err = s.waitForResumedSessionReady(ctx, sessionID)
+		readySession, err = s.waitForResumedSessionReady(resumeCtx, sessionID)
 		if err != nil {
 			return nil, err
 		}
@@ -1134,7 +1134,6 @@ func (s *Service) waitForResumedSessionReady(ctx context.Context, sessionID stri
 }
 
 func (s *Service) recoverAlreadyRunningResume(
-	ctx context.Context,
 	resumeCtx context.Context,
 	taskID string,
 	sessionID string,
@@ -1144,7 +1143,7 @@ func (s *Service) recoverAlreadyRunningResume(
 		return nil, nil, executor.ErrExecutionAlreadyRunning
 	}
 
-	readySession, waitErr := s.waitForResumedSessionReady(ctx, sessionID)
+	readySession, waitErr := s.waitForResumedSessionReady(resumeCtx, sessionID)
 	if waitErr == nil {
 		existing.SessionState = v1.TaskSessionState(readySession.State)
 		return existing, readySession, nil
@@ -1169,7 +1168,7 @@ func (s *Service) recoverAlreadyRunningResume(
 	if err != nil {
 		return nil, nil, err
 	}
-	readySession, err = s.waitForResumedSessionReady(ctx, sessionID)
+	readySession, err = s.waitForResumedSessionReady(resumeCtx, sessionID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1346,14 +1345,14 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 	resumeCtx := context.WithoutCancel(ctx)
 	if _, err = s.executor.ResumeSession(resumeCtx, session, true); err != nil {
 		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
-			s.recoverAgentPromptStreamIfNeeded(ctx, sessionID)
-			if readyErr := s.waitForAgentPromptReady(ctx, sessionID); readyErr != nil {
+			s.recoverAgentPromptStreamIfNeeded(resumeCtx, sessionID)
+			if readyErr := s.waitForAgentPromptReady(resumeCtx, sessionID); readyErr != nil {
 				return fmt.Errorf("agent not ready after resume race: %w", readyErr)
 			}
 			return nil
 		}
-		s.updateTaskSessionState(ctx, session.TaskID, sessionID, models.TaskSessionStateFailed, err.Error(), false, session)
-		if stateErr := s.taskRepo.UpdateTaskState(ctx, session.TaskID, v1.TaskStateFailed); stateErr != nil {
+		s.updateTaskSessionState(resumeCtx, session.TaskID, sessionID, models.TaskSessionStateFailed, err.Error(), false, session)
+		if stateErr := s.taskRepo.UpdateTaskState(resumeCtx, session.TaskID, v1.TaskStateFailed); stateErr != nil {
 			s.logger.Warn("failed to update task state to FAILED after session ensure resume error",
 				zap.String("task_id", session.TaskID),
 				zap.String("session_id", sessionID),

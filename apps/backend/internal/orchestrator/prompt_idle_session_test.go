@@ -452,6 +452,66 @@ func TestEnsureSessionRunning_SurvivesCallerContextCancellationDuringResume(t *t
 	}
 }
 
+func TestEnsureSessionRunning_FailedStateWriteSurvivesCancelledCallerCtx(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	repo := setupTestRepo(t)
+	mockTR := newMockTaskRepo()
+	taskRepo := &ctxAwareTaskRepo{inner: mockTR}
+
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         false,
+		repoForExecutionLookup: repo,
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			cancel()
+			return nil, errors.New("simulated resume failure")
+		},
+	}
+
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), mockTR, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.taskRepo = taskRepo
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateIdle)
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentExecutionID = "exec-idle-1"
+	session.AgentProfileID = "profile1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-idle-1")
+
+	err = svc.ensureSessionRunning(ctx, "session1", session)
+	if err == nil {
+		t.Fatal("expected ensureSessionRunning to return the simulated resume failure")
+	}
+	if !strings.Contains(err.Error(), "simulated resume failure") {
+		t.Fatalf("expected simulated resume failure, got %v", err)
+	}
+	if ctx.Err() == nil {
+		t.Fatal("test did not cancel the caller context")
+	}
+
+	state, ok := mockTR.updatedStates["task1"]
+	if !ok {
+		t.Fatal("task FAILED state was NOT persisted; the failure-recording write used the cancelled caller ctx")
+	}
+	if state != v1.TaskStateFailed {
+		t.Errorf("expected task1 state=FAILED, got %v", state)
+	}
+
+	persisted, getErr := repo.GetTaskSession(context.Background(), "session1")
+	if getErr != nil {
+		t.Fatalf("failed to reload session: %v", getErr)
+	}
+	if persisted.State != models.TaskSessionStateFailed {
+		t.Errorf("expected session1 state=FAILED, got %v", persisted.State)
+	}
+}
+
 func TestEnsureSessionRunning_WaitsForPromptReadyWhenExecutionExists(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

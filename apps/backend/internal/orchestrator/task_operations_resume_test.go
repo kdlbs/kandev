@@ -648,3 +648,127 @@ func TestResumeTaskSession_ReapStopFailureDoesNotFailTask(t *testing.T) {
 		t.Fatalf("expected no task state writes on transient stop failure, got %d", got)
 	}
 }
+
+func TestResumeTaskSession_SurvivesCallerContextCancellationDuringReadyWait(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentExecutionID = "exec-old-1"
+	session.AgentProfileID = "profile1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-old-1")
+
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         false,
+		repoForExecutionLookup: repo,
+		isAgentReadyFn: func(_ context.Context, _ string) bool {
+			return true
+		},
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			cancel()
+			go func(sessID string) {
+				tick := time.NewTicker(5 * time.Millisecond)
+				defer tick.Stop()
+				timeout := time.After(5 * time.Second)
+				for {
+					select {
+					case <-tick.C:
+						sess, err := repo.GetTaskSession(context.Background(), sessID)
+						if err == nil && sess != nil && sess.State == models.TaskSessionStateStarting {
+							sess.State = models.TaskSessionStateWaitingForInput
+							sess.UpdatedAt = time.Now().UTC()
+							_ = repo.UpdateTaskSession(context.Background(), sess)
+							return
+						}
+					case <-timeout:
+						return
+					}
+				}
+			}(req.SessionID)
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-resumed-1"}, nil
+		},
+	}
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID:    "task1",
+		Title: "Test Task",
+		State: v1.TaskStateInProgress,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	exec, err := svc.ResumeTaskSession(ctx, "task1", "session1")
+	if err != nil {
+		t.Fatalf("ResumeTaskSession must survive caller context cancellation mid-resume: %v", err)
+	}
+	if exec == nil {
+		t.Fatal("ResumeTaskSession returned nil execution")
+	}
+	if ctx.Err() == nil {
+		t.Fatal("test did not cancel the caller context")
+	}
+	if exec.SessionState != v1.TaskSessionStateWaitingForInput {
+		t.Fatalf("expected WAITING_FOR_INPUT response state, got %s", exec.SessionState)
+	}
+}
+
+func TestResumeTaskSession_AlreadyRunningReadyWaitSurvivesCancelledCallerContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentExecutionID = "exec-old-1"
+	session.AgentProfileID = "profile1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-old-1")
+
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		isAgentRunningFn: func(_ context.Context, _ string) bool {
+			cancel()
+			return true
+		},
+		isAgentReadyFn: func(_ context.Context, _ string) bool {
+			return true
+		},
+	}
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID:    "task1",
+		Title: "Test Task",
+		State: v1.TaskStateInProgress,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	exec, err := svc.ResumeTaskSession(ctx, "task1", "session1")
+	if err != nil {
+		t.Fatalf("already-running resume must survive caller context cancellation: %v", err)
+	}
+	if exec == nil {
+		t.Fatal("ResumeTaskSession returned nil execution")
+	}
+	if ctx.Err() == nil {
+		t.Fatal("test did not cancel the caller context")
+	}
+	if exec.SessionState != v1.TaskSessionStateWaitingForInput {
+		t.Fatalf("expected WAITING_FOR_INPUT response state, got %s", exec.SessionState)
+	}
+}
