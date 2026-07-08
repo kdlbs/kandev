@@ -115,6 +115,19 @@ describe("PRMergedBanner", () => {
     );
   });
 
+  it("passes cascade=true through when the subtask checkbox is ticked", async () => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 2 });
+    render(<PRMergedBanner taskId="task-1" />);
+
+    fireEvent.click(screen.getByTestId(MERGED_ARCHIVE_BUTTON));
+    fireEvent.click(await screen.findByTestId("archive-cascade-checkbox"));
+    fireEvent.click(screen.getByTestId(MERGED_ARCHIVE_CONFIRM));
+
+    await waitFor(() =>
+      expect(archiveAndSwitchMock).toHaveBeenCalledWith("task-1", { cascade: true }),
+    );
+  });
+
   it("falls back to a generic title when the task is not in the store", async () => {
     taskPRsByTaskId.value = {
       "task-2": [{ pr_number: 7, state: "merged" }],
