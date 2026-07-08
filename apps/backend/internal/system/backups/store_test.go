@@ -160,6 +160,80 @@ func TestCreate_ProducesManualVacuumIntoFile(t *testing.T) {
 	}
 }
 
+// Regression for the truncated-size bug: the manual snapshot must be written
+// to a ".tmp" sidecar and atomically renamed into place, so a concurrent
+// List() never stats a half-written file. After a successful Create there
+// must be exactly one "manual-*.db" and no leftover ".tmp" file, and the
+// reported size must equal the final file's on-disk size.
+func TestCreate_AtomicRenameLeavesNoTmpAndReportsFullSize(t *testing.T) {
+	svc, dataDir := newTestService(t)
+	id := svc.Create(context.Background())
+	waitForJob(t, svc.jobs, id, jobs.StateSucceeded)
+
+	backupsDir := filepath.Join(dataDir, "backups")
+	entries, err := os.ReadDir(backupsDir)
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+	var manualFile string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmp") {
+			t.Errorf("leftover tmp file after Create: %s", e.Name())
+		}
+		if strings.HasPrefix(e.Name(), "manual-") && strings.HasSuffix(e.Name(), ".db") {
+			manualFile = filepath.Join(backupsDir, e.Name())
+		}
+	}
+	if manualFile == "" {
+		t.Fatalf("manual-*.db not produced; dir contents: %+v", entries)
+	}
+
+	// The size reported in the job result must match the final file on disk,
+	// not a partial VACUUM INTO write.
+	info, err := os.Stat(manualFile)
+	if err != nil {
+		t.Fatalf("stat manual file: %v", err)
+	}
+	job := svc.jobs.Get(id)
+	if job == nil {
+		t.Fatal("job not found")
+	}
+	reported, ok := job.Result["size_bytes"].(int64)
+	if !ok {
+		t.Fatalf("size_bytes missing or wrong type in job result: %+v", job.Result)
+	}
+	if reported != info.Size() {
+		t.Errorf("reported size %d != on-disk size %d", reported, info.Size())
+	}
+}
+
+// A ".tmp" sidecar (an in-progress VACUUM INTO) must never appear in List(),
+// so the UI cannot show or restore a half-written snapshot.
+func TestList_IgnoresTmpSidecar(t *testing.T) {
+	svc, dataDir := newTestService(t)
+	backupsDir := filepath.Join(dataDir, "backups")
+	if err := os.MkdirAll(backupsDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	seed := []string{
+		"manual-1700000000.db",
+		"manual-1700000001.db.tmp",
+	}
+	for _, n := range seed {
+		if err := os.WriteFile(filepath.Join(backupsDir, n), []byte("x"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", n, err)
+		}
+	}
+
+	got, err := svc.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "manual-1700000000.db" {
+		t.Errorf("expected only the completed .db snapshot, got %+v", got)
+	}
+}
+
 // Core retention property: persistence.PruneBackups(dir, 0) must remove all
 // auto snapshots but must NOT touch manual snapshots. This is the contract
 // that lets manual snapshots survive the existing pre-migration pruning.

@@ -135,9 +135,21 @@ func (s *Service) runCreate(_ context.Context) (map[string]interface{}, error) {
 	// snapshot with another.
 	name := fmt.Sprintf("%s%d%s", manualPrefix, time.Now().UTC().UnixNano(), dbSuffix)
 	path := filepath.Join(s.backupsDir(), name)
-	size, err := persistence.SnapshotSQLite(s.pool.Writer(), path)
+	// VACUUM INTO writes the multi-hundred-MB snapshot incrementally. If we
+	// wrote directly to the final "manual-*.db" name, a concurrent List()
+	// (the UI refetches immediately after the 202) would os.Stat a
+	// half-written file and report a truncated size. Write to a ".tmp"
+	// sidecar first — classify() ignores non-.db suffixes so it is never
+	// listed — then atomically rename it into place at its full size.
+	tmpPath := path + ".tmp"
+	size, err := persistence.SnapshotSQLite(s.pool.Writer(), tmpPath)
 	if err != nil {
+		_ = os.Remove(tmpPath)
 		return nil, err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return nil, fmt.Errorf("rename snapshot into place: %w", err)
 	}
 	return map[string]interface{}{
 		"name":       name,
