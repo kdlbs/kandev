@@ -700,6 +700,7 @@ func startGatewayAndServe(
 	}
 
 	services.Task.StartAutoArchiveLoop(ctx)
+	services.Task.StartQuickChatExpirationLoop(ctx)
 
 	// ============================================
 	// SYSTEM PAGES

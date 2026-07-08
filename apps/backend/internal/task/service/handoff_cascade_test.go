@@ -327,6 +327,10 @@ func (r *fakeDeleteRepo) DeleteTask(_ context.Context, id string) error {
 	return nil
 }
 
+func (r *fakeDeleteRepo) DeleteExpiredQuickChatTask(context.Context, string, time.Time) (bool, error) {
+	panic("DeleteExpiredQuickChatTask should not be used by delete cascade tests")
+}
+
 // REGRESSION (post-review #4): a parent with already-archived children
 // must still have those children deleted by the cascade. The original
 // collectTaskTree used ListChildren which filtered archived rows; the

@@ -60,6 +60,27 @@ function readAgentProfileId(
   return typeof value === "string" ? value : undefined;
 }
 
+type QuickChatTask = Awaited<ReturnType<typeof listQuickChatSessions>>["tasks"][number];
+
+function mapQuickChatSessions(tasks: QuickChatTask[]): AppState["quickChat"]["sessions"] {
+  const quickChatUpdatedAt = (task: QuickChatTask) => Date.parse(task.updated_at ?? "") || 0;
+
+  return (
+    tasks
+      .filter((task) => task.primary_session_id)
+      .filter((task) => task.origin !== "automation_run")
+      // Legacy Next.js path only receives task.updated_at. The Go boot payload
+      // sorts by max(task/session updated_at) and is the authoritative SPA path.
+      .sort((a, b) => quickChatUpdatedAt(b) - quickChatUpdatedAt(a))
+      .map((task) => ({
+        sessionId: task.primary_session_id!,
+        workspaceId: task.workspace_id,
+        name: task.title !== "Quick Chat" ? task.title : undefined,
+        agentProfileId: readAgentProfileId(task.metadata),
+      }))
+  );
+}
+
 function buildBaseState(
   workspaces: ListWorkspacesResponse,
   userSettingsResponse: UserSettingsResponse | null,
@@ -181,15 +202,7 @@ export default async function Page({ searchParams }: PageProps) {
       workspaceWorkflows: workflowList.workflows,
     });
 
-    // Map quick chat tasks to sessions
-    const quickChatSessions = quickChatResponse.tasks
-      .filter((t) => t.primary_session_id) // Only include tasks with active sessions
-      .map((t) => ({
-        sessionId: t.primary_session_id!,
-        workspaceId: t.workspace_id,
-        name: t.title !== "Quick Chat" ? t.title : undefined,
-        agentProfileId: readAgentProfileId(t.metadata),
-      }));
+    const quickChatSessions = mapQuickChatSessions(quickChatResponse.tasks);
 
     initialState = {
       ...initialState,

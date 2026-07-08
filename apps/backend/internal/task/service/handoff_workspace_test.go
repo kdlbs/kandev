@@ -375,6 +375,14 @@ func (r *phase4TaskRepo) ListTasksForAutoArchive(context.Context) ([]*models.Tas
 	r.panicNotUsed("ListTasksForAutoArchive")
 	return nil, nil
 }
+func (r *phase4TaskRepo) ListExpiredQuickChatTasks(context.Context, time.Time) ([]*models.Task, error) {
+	r.panicNotUsed("ListExpiredQuickChatTasks")
+	return nil, nil
+}
+func (r *phase4TaskRepo) DeleteExpiredQuickChatTask(context.Context, string, time.Time) (bool, error) {
+	r.panicNotUsed("DeleteExpiredQuickChatTask")
+	return false, nil
+}
 func (r *phase4TaskRepo) CountOpenWatcherCreatedTasks(context.Context, string, string) (int, error) {
 	r.panicNotUsed("CountOpenWatcherCreatedTasks")
 	return 0, nil

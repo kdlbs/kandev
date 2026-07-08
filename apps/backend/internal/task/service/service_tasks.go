@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -1006,12 +1007,37 @@ func (s *Service) DeleteTaskWithReason(ctx context.Context, id, reason string) e
 }
 
 func (s *Service) deleteTaskWithReason(ctx context.Context, id, reason string) error {
+	_, err := s.deleteTaskWithReasonAndDBDelete(ctx, id, reason, func(ctx context.Context, id string) (bool, error) {
+		if err := s.tasks.DeleteTask(ctx, id); err != nil {
+			return false, err
+		}
+		return true, nil
+	})
+	return err
+}
+
+func (s *Service) deleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error) {
+	deleted, err := s.deleteTaskWithReasonAndDBDelete(ctx, id, "", func(ctx context.Context, id string) (bool, error) {
+		return s.tasks.DeleteExpiredQuickChatTask(ctx, id, cutoff)
+	})
+	if errors.Is(err, taskrepo.ErrTaskNotFound) {
+		return false, nil
+	}
+	return deleted, err
+}
+
+func (s *Service) deleteTaskWithReasonAndDBDelete(
+	ctx context.Context,
+	id string,
+	reason string,
+	deleteFromDB func(context.Context, string) (bool, error),
+) (bool, error) {
 	start := time.Now()
 
 	// 1. Get task (sync, fast)
 	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// 2. Gather data needed for cleanup BEFORE delete (sync, fast)
@@ -1037,14 +1063,18 @@ func (s *Service) deleteTaskWithReason(ctx context.Context, id, reason string) e
 		}
 		stopTargets, err = s.buildStopTargets(ctx, id, activeSessions)
 		if err != nil {
-			return fmt.Errorf("list runtime cleanup inventory: %w", err)
+			return false, fmt.Errorf("list runtime cleanup inventory: %w", err)
 		}
 	}
 
 	// 4. Delete from DB (sync, fast)
-	if err := s.tasks.DeleteTask(ctx, id); err != nil {
+	deleted, err := deleteFromDB(ctx, id)
+	if err != nil {
 		s.logger.Error("failed to delete task", zap.String("task_id", id), zap.Error(err))
-		return err
+		return false, err
+	}
+	if !deleted {
+		return false, nil
 	}
 
 	// 5. Publish event (sync, fast) - frontend removes task immediately
@@ -1068,7 +1098,7 @@ func (s *Service) deleteTaskWithReason(ctx context.Context, id, reason string) e
 			"task deleted", "failed to stop session on task delete", "task cleanup completed")
 	}
 
-	return nil
+	return true, nil
 }
 
 // CleanupTaskResources tears down a task's runtime resources (container,
