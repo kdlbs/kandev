@@ -76,6 +76,13 @@ func TestFormatConfigContext_InjectsSessionID(t *testing.T) {
 	assert.NotContains(t, result, "{session_id}")
 }
 
+func TestConfigContext_DocumentsWorkflowStepSignalGate(t *testing.T) {
+	ctx := ConfigContext()
+	assert.Contains(t, ctx, "auto_advance_requires_signal")
+	assert.Contains(t, ctx, "create_workflow_step_kandev")
+	assert.Contains(t, ctx, "update_workflow_step_kandev")
+}
+
 func TestInjectConfigContext_WrapsInSystemTags(t *testing.T) {
 	result := InjectConfigContext(testSessionID, testConfigPrompt)
 	assert.True(t, strings.HasPrefix(result, TagStart))
