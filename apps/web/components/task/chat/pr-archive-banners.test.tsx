@@ -128,6 +128,30 @@ describe("PRMergedBanner", () => {
     );
   });
 
+  it("disables the confirm button while an archive is in flight", async () => {
+    let resolveArchive: () => void = () => {};
+    archiveAndSwitchMock.mockImplementation(
+      () => new Promise<void>((resolve) => (resolveArchive = resolve)),
+    );
+    render(<PRMergedBanner taskId="task-1" />);
+
+    fireEvent.click(screen.getByTestId(MERGED_ARCHIVE_BUTTON));
+    fireEvent.click(await screen.findByTestId(MERGED_ARCHIVE_CONFIRM));
+    await waitFor(() => expect(archiveAndSwitchMock).toHaveBeenCalledTimes(1));
+
+    // Reopen while the async archive is still pending: confirm must be disabled.
+    fireEvent.click(screen.getByTestId(MERGED_ARCHIVE_BUTTON));
+    const confirm = await screen.findByTestId<HTMLButtonElement>(MERGED_ARCHIVE_CONFIRM);
+    expect(confirm.disabled).toBe(true);
+    fireEvent.click(confirm);
+    expect(archiveAndSwitchMock).toHaveBeenCalledTimes(1);
+
+    resolveArchive();
+    await waitFor(() =>
+      expect(screen.getByTestId<HTMLButtonElement>(MERGED_ARCHIVE_CONFIRM).disabled).toBe(false),
+    );
+  });
+
   it("falls back to a generic title when the task is not in the store", async () => {
     taskPRsByTaskId.value = {
       "task-2": [{ pr_number: 7, state: "merged" }],

@@ -24,6 +24,7 @@ function useBannerArchiveConfirm(taskId: string) {
   const archiveAndSwitch = useArchiveAndSwitchTask();
   const { toast } = useToast();
   const [target, setTarget] = useState<ArchiveTarget | null>(null);
+  const [isPending, setIsPending] = useState(false);
 
   const requestArchive = useCallback(() => {
     const state = store.getState();
@@ -35,16 +36,19 @@ function useBannerArchiveConfirm(taskId: string) {
 
   const confirmArchive = useCallback(
     async ({ cascade }: { cascade: boolean }) => {
+      setIsPending(true);
       try {
         await archiveAndSwitch(taskId, { cascade });
       } catch {
         toast({ description: "Failed to archive task", variant: "error" });
+      } finally {
+        setIsPending(false);
       }
     },
     [archiveAndSwitch, taskId, toast],
   );
 
-  return { target, requestArchive, closeConfirm, confirmArchive };
+  return { target, requestArchive, closeConfirm, confirmArchive, isPending };
 }
 
 // Presentational banner shared by PRMergedBanner / PRClosedBanner — an icon, a
@@ -70,7 +74,8 @@ function ArchiveDismissBanner({
   taskId: string;
   onDismiss: () => void;
 }) {
-  const { target, requestArchive, closeConfirm, confirmArchive } = useBannerArchiveConfirm(taskId);
+  const { target, requestArchive, closeConfirm, confirmArchive, isPending } =
+    useBannerArchiveConfirm(taskId);
   return (
     <>
       <div data-testid={`${testIdPrefix}-banner`} className={containerClass}>
@@ -102,6 +107,7 @@ function ArchiveDismissBanner({
         taskTitle={target?.title ?? ""}
         taskId={taskId}
         executorType={target?.executorType}
+        isArchiving={isPending}
         onConfirm={confirmArchive}
         confirmTestId={`${testIdPrefix}-archive-confirm`}
       />
