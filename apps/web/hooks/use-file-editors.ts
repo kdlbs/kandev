@@ -387,10 +387,13 @@ function addFileEditorPanelWithPreviewCleanup(
 type OpenFileActionParams = Pick<
   FileEditorActionsParams,
   "activeSessionIdRef" | "setFileState" | "removeFileState" | "addFileEditorPanel" | "toast"
->;
+> & {
+  activeFileRequestRef: React.MutableRefObject<string | null>;
+};
 
 function useOpenFileAction({
   activeSessionIdRef,
+  activeFileRequestRef,
   setFileState,
   removeFileState,
   addFileEditorPanel,
@@ -402,6 +405,7 @@ function useOpenFileAction({
       const currentSessionId = activeSessionIdRef.current;
       if (!client || !currentSessionId) return;
       const fileKey = buildRepoScopedItemId(filePath, repo);
+      activeFileRequestRef.current = fileKey;
       const files = getOpenFiles();
       if (files.has(fileKey)) {
         const existing = files.get(fileKey);
@@ -416,13 +420,15 @@ function useOpenFileAction({
         return;
       }
       try {
-        const state = await fetchFileEditorState(
+        const state = await fetchFileEditorState({
           client,
-          currentSessionId,
+          sessionId: currentSessionId,
           filePath,
           repo,
           activeSessionIdRef,
-        );
+          activeFileKeyRef: activeFileRequestRef,
+          fileKey,
+        });
         if (!state) return;
         // Create the panel BEFORE setting file state. The openFiles subscription
         // triggers tab persistence — it needs the dockview panel to already exist
@@ -443,7 +449,14 @@ function useOpenFileAction({
         });
       }
     },
-    [activeSessionIdRef, addFileEditorPanel, removeFileState, setFileState, toast],
+    [
+      activeSessionIdRef,
+      activeFileRequestRef,
+      addFileEditorPanel,
+      removeFileState,
+      setFileState,
+      toast,
+    ],
   );
 }
 
@@ -455,10 +468,13 @@ type MarkdownPreviewActionParams = Pick<
   | "removeFileState"
   | "addFileEditorPanel"
   | "toast"
->;
+> & {
+  activeFileRequestRef: React.MutableRefObject<string | null>;
+};
 
 function useMarkdownPreviewAction({
   activeSessionIdRef,
+  activeFileRequestRef,
   setFileState,
   updateFileState,
   removeFileState,
@@ -471,6 +487,7 @@ function useMarkdownPreviewAction({
       const currentSessionId = activeSessionIdRef.current;
       if (!client || !currentSessionId) return;
       const fileKey = buildRepoScopedItemId(filePath, repo);
+      activeFileRequestRef.current = fileKey;
       const files = getOpenFiles();
       if (files.has(fileKey)) {
         updateFileState(fileKey, { markdownPreview: true });
@@ -485,13 +502,15 @@ function useMarkdownPreviewAction({
         return;
       }
       try {
-        const state = await fetchFileEditorState(
+        const state = await fetchFileEditorState({
           client,
-          currentSessionId,
+          sessionId: currentSessionId,
           filePath,
           repo,
           activeSessionIdRef,
-        );
+          activeFileKeyRef: activeFileRequestRef,
+          fileKey,
+        });
         if (!state) return;
         addFileEditorPanelWithPreviewCleanup(
           filePath,
@@ -523,8 +542,10 @@ function useFileEditorActions({
   setSavingFiles,
   toast,
 }: FileEditorActionsParams) {
+  const activeFileRequestRef = useRef<string | null>(null);
   const openFile = useOpenFileAction({
     activeSessionIdRef,
+    activeFileRequestRef,
     setFileState,
     removeFileState,
     addFileEditorPanel,
@@ -532,6 +553,7 @@ function useFileEditorActions({
   });
   const openFileInMarkdownPreview = useMarkdownPreviewAction({
     activeSessionIdRef,
+    activeFileRequestRef,
     setFileState,
     updateFileState,
     removeFileState,

@@ -22,7 +22,7 @@ import {
   isFileEditorPanelAlreadyRestored,
   isRestoreWriteCurrent,
 } from "./file-editor-state";
-import { PREVIEW_FILE_EDITOR_ID } from "@/lib/state/dockview-panel-actions";
+import { buildRepoScopedItemId, PREVIEW_FILE_EDITOR_ID } from "@/lib/state/dockview-panel-actions";
 
 const PATH = "src/foo.ts";
 const REPO = "enrichment-commons";
@@ -70,7 +70,13 @@ describe("fetchFileEditorState", () => {
     mockRequestFileContent.mockResolvedValueOnce(RESPONSE);
     const ref = { current: SESSION_ID };
 
-    const state = await fetchFileEditorState(FAKE_CLIENT, SESSION_ID, PATH, REPO, ref);
+    const state = await fetchFileEditorState({
+      client: FAKE_CLIENT,
+      sessionId: SESSION_ID,
+      filePath: PATH,
+      repo: REPO,
+      activeSessionIdRef: ref,
+    });
 
     expect(mockRequestFileContent).toHaveBeenCalledWith(FAKE_CLIENT, SESSION_ID, PATH, REPO);
     expect(state?.repo).toBe(REPO);
@@ -85,7 +91,34 @@ describe("fetchFileEditorState", () => {
       return RESPONSE;
     });
 
-    const state = await fetchFileEditorState(FAKE_CLIENT, SESSION_ID, PATH, undefined, ref);
+    const state = await fetchFileEditorState({
+      client: FAKE_CLIENT,
+      sessionId: SESSION_ID,
+      filePath: PATH,
+      repo: undefined,
+      activeSessionIdRef: ref,
+    });
+
+    expect(state).toBeNull();
+  });
+
+  it("returns null when another file in the same session became the latest request", async () => {
+    const fileKey = buildRepoScopedItemId(PATH, REPO);
+    const activeFileKeyRef = { current: fileKey };
+    mockRequestFileContent.mockImplementationOnce(async () => {
+      activeFileKeyRef.current = buildRepoScopedItemId("src/bar.ts", REPO);
+      return RESPONSE;
+    });
+
+    const state = await fetchFileEditorState({
+      client: FAKE_CLIENT,
+      sessionId: SESSION_ID,
+      filePath: PATH,
+      repo: REPO,
+      activeSessionIdRef: { current: SESSION_ID },
+      activeFileKeyRef,
+      fileKey,
+    });
 
     expect(state).toBeNull();
   });

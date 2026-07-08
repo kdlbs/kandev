@@ -36,21 +36,37 @@ export async function buildFileEditorState(
   };
 }
 
+type FetchFileEditorStateParams = {
+  client: NonNullable<ReturnType<typeof getWebSocketClient>>;
+  sessionId: string;
+  filePath: string;
+  repo: string | undefined;
+  activeSessionIdRef: MutableRefObject<string | null>;
+  activeFileKeyRef?: MutableRefObject<string | null>;
+  fileKey?: string;
+};
+
 /**
  * Fetch a file's content and build its editor state, returning null if the
- * active session changed while the request was in flight — a late response must
- * not write content for a file the user has navigated away from.
+ * active session or requested file changed while the request was in flight.
  */
-export async function fetchFileEditorState(
-  client: NonNullable<ReturnType<typeof getWebSocketClient>>,
-  sessionId: string,
-  filePath: string,
-  repo: string | undefined,
-  activeSessionIdRef: MutableRefObject<string | null>,
-): Promise<FileEditorState | null> {
+export async function fetchFileEditorState({
+  client,
+  sessionId,
+  filePath,
+  repo,
+  activeSessionIdRef,
+  activeFileKeyRef,
+  fileKey = buildRepoScopedItemId(filePath, repo),
+}: FetchFileEditorStateParams): Promise<FileEditorState | null> {
+  const isCurrent = () =>
+    activeSessionIdRef.current === sessionId &&
+    (!activeFileKeyRef || activeFileKeyRef.current === fileKey);
   const response = await requestFileContent(client, sessionId, filePath, repo);
-  if (activeSessionIdRef.current !== sessionId) return null;
-  return buildFileEditorState(filePath, response, repo);
+  if (!isCurrent()) return null;
+  const state = await buildFileEditorState(filePath, response, repo);
+  if (!isCurrent()) return null;
+  return state;
 }
 
 function panelParamsMatchFile(
