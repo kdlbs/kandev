@@ -58,9 +58,10 @@ async function fetchAndWriteSnapshot(
       })
       .filter((t): t is KanbanTask => t !== null);
     const snapshotTaskIds = new Set(tasks.map((t) => t.id));
+    const preserveExistingPlaceholderTasks = (snapshotAtFetchStart?.steps.length ?? 0) === 0;
     const inFlightCreatedTasks = (existingSnapshot?.tasks ?? []).filter(
       (task) =>
-        !taskIdsAtFetchStart.has(task.id) &&
+        (preserveExistingPlaceholderTasks || !taskIdsAtFetchStart.has(task.id)) &&
         !snapshotTaskIds.has(task.id) &&
         stepIds.has(task.workflowStepId),
     );

@@ -25,6 +25,11 @@ type MockState = {
   setWorkflowSnapshot: ReturnType<typeof vi.fn>;
 };
 
+const WORKFLOW_ID = "wf-A";
+const WORKSPACE_ID = "ws-A";
+const STEP_ID = "step-1";
+const PARENT_TASK_ID = "parent-task";
+
 const mocks = vi.hoisted(() => ({
   clearKanbanMulti: vi.fn(),
   fetchWorkflowSnapshot: vi.fn(),
@@ -48,7 +53,7 @@ function resetState() {
   vi.clearAllMocks();
   mocks.state = {
     connection: { status: "connected" },
-    workflows: { items: [{ id: "wf-A", workspaceId: "ws-A", name: "A" }] },
+    workflows: { items: [{ id: WORKFLOW_ID, workspaceId: WORKSPACE_ID, name: "A" }] },
     kanbanMulti: { snapshots: {}, isLoading: false },
     clearKanbanMulti: mocks.clearKanbanMulti,
     setKanbanMultiLoading: mocks.setKanbanMultiLoading,
@@ -56,33 +61,70 @@ function resetState() {
   };
 }
 
-describe("useAllWorkflowSnapshots in-flight websocket tasks", () => {
+function staleSnapshotResponse() {
+  return {
+    steps: [{ id: STEP_ID, name: "Doing", color: null, position: 0 }],
+    tasks: [],
+  };
+}
+
+function setLightweightSnapshot(task: SnapshotTask) {
+  mocks.state!.kanbanMulti.snapshots[WORKFLOW_ID] = {
+    workflowId: WORKFLOW_ID,
+    workflowName: "A",
+    steps: [],
+    tasks: [task],
+  };
+}
+
+describe("useAllWorkflowSnapshots lightweight snapshots", () => {
   it("does not treat a lightweight websocket snapshot as boot-hydrated", async () => {
     resetState();
-    mocks.fetchWorkflowSnapshot.mockResolvedValueOnce({
-      steps: [{ id: "step-1", name: "Doing", color: null, position: 0 }],
-      tasks: [],
+    mocks.fetchWorkflowSnapshot.mockResolvedValueOnce(staleSnapshotResponse());
+    setLightweightSnapshot({
+      id: "child-before-hydration",
+      workflowStepId: STEP_ID,
+      title: "Child before hydration",
+      position: 0,
+      state: "IN_PROGRESS",
     });
-    mocks.state!.kanbanMulti.snapshots["wf-A"] = {
-      workflowId: "wf-A",
-      workflowName: "A",
-      steps: [],
-      tasks: [
-        {
-          id: "child-before-hydration",
-          workflowStepId: "step-1",
-          title: "Child before hydration",
-          position: 0,
-          state: "IN_PROGRESS",
-        },
-      ],
-    };
 
-    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+    renderHook(() => useAllWorkflowSnapshots(WORKSPACE_ID));
 
     await waitFor(() => expect(mocks.fetchWorkflowSnapshot).toHaveBeenCalledTimes(1));
   });
 
+  it("preserves tasks already present in a lightweight snapshot before fetch starts", async () => {
+    resetState();
+    mocks.fetchWorkflowSnapshot.mockResolvedValueOnce(staleSnapshotResponse());
+    setLightweightSnapshot({
+      id: "child-before-fetch",
+      workflowStepId: STEP_ID,
+      title: "Child before fetch",
+      position: 0,
+      state: "IN_PROGRESS",
+      parentTaskId: PARENT_TASK_ID,
+    });
+
+    renderHook(() => useAllWorkflowSnapshots(WORKSPACE_ID));
+
+    await waitFor(() =>
+      expect(mocks.setWorkflowSnapshot).toHaveBeenCalledWith(
+        WORKFLOW_ID,
+        expect.objectContaining({
+          tasks: [
+            expect.objectContaining({
+              id: "child-before-fetch",
+              parentTaskId: PARENT_TASK_ID,
+            }),
+          ],
+        }),
+      ),
+    );
+  });
+});
+
+describe("useAllWorkflowSnapshots in-flight websocket tasks", () => {
   it("preserves tasks created while the workflow snapshot fetch is in flight", async () => {
     resetState();
     let resolveFetch: (value: unknown) => void = () => {};
@@ -92,39 +134,29 @@ describe("useAllWorkflowSnapshots in-flight websocket tasks", () => {
       }),
     );
 
-    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+    renderHook(() => useAllWorkflowSnapshots(WORKSPACE_ID));
     await waitFor(() =>
-      expect(mocks.fetchWorkflowSnapshot).toHaveBeenCalledWith("wf-A", expect.anything()),
+      expect(mocks.fetchWorkflowSnapshot).toHaveBeenCalledWith(WORKFLOW_ID, expect.anything()),
     );
 
-    mocks.state!.kanbanMulti.snapshots["wf-A"] = {
-      workflowId: "wf-A",
-      workflowName: "A",
-      steps: [],
-      tasks: [
-        {
-          id: "child-created-during-fetch",
-          workflowStepId: "step-1",
-          title: "Child created during fetch",
-          position: 0,
-          state: "IN_PROGRESS",
-          parentTaskId: "parent-task",
-        },
-      ],
-    };
-    resolveFetch({
-      steps: [{ id: "step-1", name: "Doing", color: null, position: 0 }],
-      tasks: [],
+    setLightweightSnapshot({
+      id: "child-created-during-fetch",
+      workflowStepId: STEP_ID,
+      title: "Child created during fetch",
+      position: 0,
+      state: "IN_PROGRESS",
+      parentTaskId: PARENT_TASK_ID,
     });
+    resolveFetch(staleSnapshotResponse());
 
     await waitFor(() =>
       expect(mocks.setWorkflowSnapshot).toHaveBeenCalledWith(
-        "wf-A",
+        WORKFLOW_ID,
         expect.objectContaining({
           tasks: [
             expect.objectContaining({
               id: "child-created-during-fetch",
-              parentTaskId: "parent-task",
+              parentTaskId: PARENT_TASK_ID,
             }),
           ],
         }),
