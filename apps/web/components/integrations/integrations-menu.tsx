@@ -91,10 +91,19 @@ export function useConfiguredIntegrationLinks(): IntegrationLink[] {
   // wrong workspace, hiding a configured integration from the sidebar. GitHub
   // and GitLab are install-wide and don't need the workspace id.
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+  const activeWorkspaceExists = useAppStore((s) =>
+    s.workspaces.items.some((item) => item.id === s.workspaces.activeId),
+  );
+  // Guard against a stale active id: if the active workspace was removed but
+  // activeId was not reconciled (e.g. setWorkspaces keeps a non-null id),
+  // scoping to the deleted id would return no config and hide the links even
+  // when another workspace is configured. Fall back to null so the backend's
+  // default-workspace resolution applies instead.
+  const scopedWorkspaceId = activeWorkspaceExists ? activeWorkspaceId : null;
   const { status, loading } = useGitHubStatus();
   const gitlabAvailable = useGitLabAvailable();
-  const jiraAvailable = useJiraAvailable(activeWorkspaceId);
-  const linearAvailable = useLinearAvailable(activeWorkspaceId);
+  const jiraAvailable = useJiraAvailable(scopedWorkspaceId);
+  const linearAvailable = useLinearAvailable(scopedWorkspaceId);
   const githubStatus = getGitHubIntegrationStatus(status, loading);
 
   return getAvailableIntegrationLinks({
