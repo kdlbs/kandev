@@ -154,14 +154,18 @@ test.describe("Code walkthrough", () => {
   }) => {
     await seedWalkthroughTask(testPage, apiClient, seedData, "walkthrough-basic", "5-step tour");
     const card = await openWalkthrough(testPage);
+    const range = testPage.getByTestId("walkthrough-editor-range");
+    await expect(range).toBeVisible({ timeout: 15_000 });
 
     await card.getByTestId("walkthrough-close").click();
     await expect(card).toBeHidden({ timeout: 5_000 });
+    await expect(range).toHaveCount(0);
     // The launcher persists — the tour is not lost, just minimized.
     const launcher = testPage.getByTestId("walkthrough-launcher");
     await expect(launcher).toBeVisible();
     await launcher.click();
     await expect(testPage.getByTestId("walkthrough-floating")).toBeVisible({ timeout: 10_000 });
+    await expect(range).toBeVisible({ timeout: 15_000 });
   });
 
   test("a re-emitted walkthrough is shown without a page reload", async ({

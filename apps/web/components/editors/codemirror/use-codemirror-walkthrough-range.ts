@@ -12,6 +12,7 @@ import {
   type WalkthroughEditorRange,
   type WalkthroughRangeBox,
 } from "@/lib/walkthrough-editor-range";
+import { useIsWalkthroughOpenForTask } from "@/lib/walkthrough-open-state";
 
 type UseCodeMirrorWalkthroughRangeOpts = {
   view: EditorView | null;
@@ -58,13 +59,14 @@ function measureRangeBox(
 
 function useActiveWalkthroughStep() {
   const taskId = useAppStore((s) => s.tasks.activeTaskId);
+  const isOpen = useIsWalkthroughOpenForTask(taskId);
   const stepIndex = useAppStore((s) =>
     taskId ? (s.walkthroughs.activeStepByTaskId[taskId] ?? 0) : 0,
   );
   const step = useAppStore((s) =>
     taskId ? (s.walkthroughs.byTaskId[taskId]?.steps[stepIndex] ?? null) : null,
   );
-  return { taskId, stepIndex, step };
+  return { taskId, stepIndex, step: isOpen ? step : null };
 }
 
 export function useCodeMirrorWalkthroughRange({

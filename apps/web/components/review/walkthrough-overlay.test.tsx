@@ -1,9 +1,10 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConnectionStatus } from "@/lib/types/connection";
 import type { TaskWalkthrough } from "@/lib/types/http";
 import { StateProvider, useAppStore } from "@/components/state-provider";
 import { getTaskWalkthrough } from "@/lib/api/domains/walkthrough-api";
+import { getOpenWalkthroughTaskId, setOpenWalkthroughTaskId } from "@/lib/walkthrough-open-state";
 import { WalkthroughOverlay } from "./walkthrough-overlay";
 
 vi.mock("@/lib/api/domains/walkthrough-api", () => ({
@@ -57,6 +58,7 @@ function renderOverlay() {
 describe("WalkthroughOverlay", () => {
   beforeEach(() => {
     vi.mocked(getTaskWalkthrough).mockReset();
+    setOpenWalkthroughTaskId(null);
   });
 
   it("waits for websocket connection before backfilling the launcher", async () => {
@@ -71,5 +73,25 @@ describe("WalkthroughOverlay", () => {
 
     expect(await screen.findByTestId("walkthrough-launcher")).toBeTruthy();
     expect(getTaskWalkthrough).toHaveBeenCalledWith(TASK_ID);
+  });
+
+  it("uses a readable selected launcher state and clears open state on close", async () => {
+    vi.mocked(getTaskWalkthrough).mockResolvedValue(walkthrough());
+    renderOverlay();
+    await waitFor(() => expect(setConnectionStatus).toBeTruthy());
+    act(() => setConnectionStatus?.("connected"));
+    const launcher = await screen.findByTestId("walkthrough-launcher");
+
+    fireEvent.click(launcher);
+
+    await waitFor(() => expect(getOpenWalkthroughTaskId()).toBe(TASK_ID));
+    expect(screen.getByTestId("walkthrough-floating")).toBeTruthy();
+    expect(launcher.className).not.toContain("bg-accent");
+    const count = within(launcher).getByText("1/1");
+    expect(count.className).toContain("text-foreground");
+
+    fireEvent.click(launcher);
+
+    expect(getOpenWalkthroughTaskId()).toBeNull();
   });
 });

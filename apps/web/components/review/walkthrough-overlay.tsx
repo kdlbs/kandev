@@ -5,6 +5,8 @@ import { IconRoute } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { getTaskWalkthrough } from "@/lib/api/domains/walkthrough-api";
 import { WalkthroughFloatingWindow } from "@/components/diff/walkthrough-floating-window";
+import { clearOpenWalkthroughTaskId, setOpenWalkthroughTaskId } from "@/lib/walkthrough-open-state";
+import { cn } from "@kandev/ui/lib/utils";
 
 type WalkthroughOverlayProps = {
   /** The task whose walkthrough launcher should be shown. */
@@ -63,6 +65,12 @@ export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayP
     };
   }, [taskId, walkthrough, connectionStatus, setWalkthrough]);
 
+  useEffect(() => {
+    if (!taskId || !open) return;
+    setOpenWalkthroughTaskId(taskId);
+    return () => clearOpenWalkthroughTaskId(taskId);
+  }, [open, taskId]);
+
   if (!taskId || !walkthrough) return null;
   const hasUnseen = walkthrough.updated_at !== lastSeenUpdatedAt;
 
@@ -70,6 +78,7 @@ export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayP
   // the case where the agent re-emitted a walkthrough and the live WS update
   // was missed (e.g. the tab was idle), so it shows without a page reload.
   const openTour = () => {
+    setOpenWalkthroughTaskId(taskId);
     getTaskWalkthrough(taskId)
       .then((wt) => {
         if (wt) setWalkthrough(taskId, wt);
@@ -77,18 +86,25 @@ export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayP
       .catch(() => {});
     setOpen(true);
   };
+  const closeTour = () => {
+    clearOpenWalkthroughTaskId(taskId);
+    setOpen(false);
+  };
 
   return (
     <>
-      {open ? (
-        <WalkthroughFloatingWindow onClose={() => setOpen(false)} onSelectFile={onSelectFile} />
-      ) : null}
+      {open ? <WalkthroughFloatingWindow onClose={closeTour} onSelectFile={onSelectFile} /> : null}
       <button
         type="button"
         data-testid="walkthrough-launcher"
         aria-pressed={open}
-        onClick={() => (open ? setOpen(false) : openTour())}
-        className="fixed bottom-6 right-6 z-[60] flex cursor-pointer items-center gap-1.5 rounded-full border border-primary/40 bg-card px-3 py-1.5 text-xs font-medium shadow-lg hover:bg-accent aria-pressed:bg-accent"
+        onClick={() => (open ? closeTour() : openTour())}
+        className={cn(
+          "fixed bottom-6 right-6 z-[60] flex cursor-pointer items-center gap-1.5 rounded-full",
+          "border bg-card/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-lg backdrop-blur-sm",
+          "transition-colors hover:border-primary/45 hover:bg-muted/70",
+          open ? "border-primary/50 bg-card ring-2 ring-primary/25" : "border-border/80",
+        )}
       >
         <IconRoute className="size-4 text-primary" />
         Walkthrough
@@ -99,7 +115,12 @@ export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayP
             data-testid="walkthrough-unseen-dot"
           />
         ) : null}
-        <span className="text-muted-foreground">
+        <span
+          className={cn(
+            "rounded-full px-1.5 py-0.5 text-[11px] font-medium",
+            open ? "bg-primary/10 text-foreground" : "bg-muted/70 text-muted-foreground",
+          )}
+        >
           {activeStep + 1}/{walkthrough.steps.length}
         </span>
       </button>
