@@ -37,6 +37,10 @@ vi.mock("@/hooks/domains/session/use-session-git-status", () => ({
 
 import { FileEditorPanel } from "./file-editor-panel";
 
+const PREVIEW_PANEL_ID = "preview:file-editor";
+const IMAGE_VIEWER_TEST_ID = "image-viewer";
+const SHARED_IMAGE_PATH = "docs/shared.png";
+
 const makeImageState = (path: string, content: string): FileEditorState => ({
   path,
   name: path.split("/").pop() ?? path,
@@ -64,19 +68,41 @@ describe("FileEditorPanel image preview", () => {
   it("updates displayed image content when a reused preview tab switches files", async () => {
     act(() => seedImage("docs/first.png", "first-image"));
     const { rerender } = render(
-      <FileEditorPanel panelId="preview:file-editor" params={{ path: "docs/first.png" }} />,
+      <FileEditorPanel panelId={PREVIEW_PANEL_ID} params={{ path: "docs/first.png" }} />,
     );
 
-    expect(screen.getByTestId("image-viewer").textContent).toBe("first-image");
+    expect(screen.getByTestId(IMAGE_VIEWER_TEST_ID).textContent).toBe("first-image");
     await act(async () => {
       await Promise.resolve();
     });
 
     act(() => seedImage("docs/second.png", "second-image"));
-    rerender(
-      <FileEditorPanel panelId="preview:file-editor" params={{ path: "docs/second.png" }} />,
+    rerender(<FileEditorPanel panelId={PREVIEW_PANEL_ID} params={{ path: "docs/second.png" }} />);
+
+    expect(screen.getByTestId(IMAGE_VIEWER_TEST_ID).textContent).toBe("second-image");
+  });
+
+  it("shows different image content for the same path across repos", () => {
+    act(() => {
+      seedImage(SHARED_IMAGE_PATH, "content-from-repo-a", "repo-a");
+      seedImage(SHARED_IMAGE_PATH, "content-from-repo-b", "repo-b");
+    });
+    const { rerender } = render(
+      <FileEditorPanel
+        panelId={PREVIEW_PANEL_ID}
+        params={{ path: SHARED_IMAGE_PATH, repo: "repo-a" }}
+      />,
     );
 
-    expect(screen.getByTestId("image-viewer").textContent).toBe("second-image");
+    expect(screen.getByTestId(IMAGE_VIEWER_TEST_ID).textContent).toBe("content-from-repo-a");
+
+    rerender(
+      <FileEditorPanel
+        panelId={PREVIEW_PANEL_ID}
+        params={{ path: SHARED_IMAGE_PATH, repo: "repo-b" }}
+      />,
+    );
+
+    expect(screen.getByTestId(IMAGE_VIEWER_TEST_ID).textContent).toBe("content-from-repo-b");
   });
 });
