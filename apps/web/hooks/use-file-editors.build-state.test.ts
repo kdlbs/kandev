@@ -18,8 +18,11 @@ vi.mock("@/lib/ws/connection", () => ({
 import {
   buildFileEditorState,
   fetchFileEditorState,
+  getPreviewItemIdToRemoveOnReplace,
   isFileEditorPanelAlreadyRestored,
-} from "./use-file-editors";
+  isRestoreWriteCurrent,
+} from "./file-editor-state";
+import { PREVIEW_FILE_EDITOR_ID } from "@/lib/state/dockview-panel-actions";
 
 const PATH = "src/foo.ts";
 const REPO = "enrichment-commons";
@@ -88,6 +91,16 @@ describe("fetchFileEditorState", () => {
   });
 });
 
+describe("isRestoreWriteCurrent", () => {
+  it("rejects a restore write when the active session ref changed", () => {
+    expect(isRestoreWriteCurrent(SESSION_ID, SESSION_ID, { current: "sess-2" })).toBe(false);
+  });
+
+  it("allows a restore write only when both guards still match", () => {
+    expect(isRestoreWriteCurrent(SESSION_ID, SESSION_ID, { current: SESSION_ID })).toBe(true);
+  });
+});
+
 describe("isFileEditorPanelAlreadyRestored", () => {
   it("detects legacy pinned editor ids when restored panel params match the repo file", () => {
     const dockApi = makeDockApi({
@@ -103,5 +116,52 @@ describe("isFileEditorPanelAlreadyRestored", () => {
     });
 
     expect(isFileEditorPanelAlreadyRestored(dockApi, PATH, REPO)).toBe(false);
+  });
+});
+
+describe("getPreviewItemIdToRemoveOnReplace", () => {
+  const previousItemId = "frontend:README.md";
+  const nextItemId = "backend:README.md";
+
+  it("returns the previous preview item when an unpinned preview is replaced", () => {
+    const dockApi = makeDockApi({
+      [PREVIEW_FILE_EDITOR_ID]: { params: { previewItemId: previousItemId } },
+    });
+
+    expect(getPreviewItemIdToRemoveOnReplace(dockApi, nextItemId)).toBe(previousItemId);
+  });
+
+  it("keeps state when the previous preview was promoted for materialization", () => {
+    const dockApi = makeDockApi({
+      [PREVIEW_FILE_EDITOR_ID]: { params: { previewItemId: previousItemId, promoted: true } },
+    });
+
+    expect(getPreviewItemIdToRemoveOnReplace(dockApi, nextItemId)).toBeNull();
+  });
+
+  it("keeps state when a pinned panel owns the previous preview item", () => {
+    const dockApi = makeDockApi({
+      [PREVIEW_FILE_EDITOR_ID]: { params: { previewItemId: previousItemId } },
+      [`file:${previousItemId}`]: {},
+    });
+
+    expect(getPreviewItemIdToRemoveOnReplace(dockApi, nextItemId)).toBeNull();
+  });
+
+  it("keeps the current preview state when opening an already pinned next item", () => {
+    const dockApi = makeDockApi({
+      [PREVIEW_FILE_EDITOR_ID]: { params: { previewItemId: previousItemId } },
+      [`file:${nextItemId}`]: {},
+    });
+
+    expect(getPreviewItemIdToRemoveOnReplace(dockApi, nextItemId)).toBeNull();
+  });
+
+  it("does nothing when reopening the same preview item", () => {
+    const dockApi = makeDockApi({
+      [PREVIEW_FILE_EDITOR_ID]: { params: { previewItemId: previousItemId } },
+    });
+
+    expect(getPreviewItemIdToRemoveOnReplace(dockApi, previousItemId)).toBeNull();
   });
 });
