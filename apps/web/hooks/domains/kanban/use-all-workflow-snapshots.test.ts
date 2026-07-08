@@ -69,7 +69,12 @@ describe("useAllWorkflowSnapshots — workspace scoping", () => {
 
   it("does not fetch on initial mount when all workflow snapshots are boot-hydrated", () => {
     mockState.kanbanMulti.snapshots = {
-      "wf-A": { workflowId: "wf-A", workflowName: "A", steps: [], tasks: [] },
+      "wf-A": {
+        workflowId: "wf-A",
+        workflowName: "A",
+        steps: [{ id: "step-A", title: "Doing", color: "bg-neutral-400", position: 0 }],
+        tasks: [],
+      },
     };
 
     renderHook(
