@@ -104,9 +104,13 @@ describe("fetchFileEditorState", () => {
 
   it("returns null when another file in the same session became the latest request", async () => {
     const fileKey = buildRepoScopedItemId(PATH, REPO);
-    const activeFileKeyRef = { current: fileKey };
+    const requestToken = { fileKey, generation: 1 };
+    const activeRequestRef = { current: requestToken };
     mockRequestFileContent.mockImplementationOnce(async () => {
-      activeFileKeyRef.current = buildRepoScopedItemId("src/bar.ts", REPO);
+      activeRequestRef.current = {
+        fileKey: buildRepoScopedItemId("src/bar.ts", REPO),
+        generation: 2,
+      };
       return RESPONSE;
     });
 
@@ -116,8 +120,30 @@ describe("fetchFileEditorState", () => {
       filePath: PATH,
       repo: REPO,
       activeSessionIdRef: { current: SESSION_ID },
-      activeFileKeyRef,
-      fileKey,
+      activeRequestRef,
+      requestToken,
+    });
+
+    expect(state).toBeNull();
+  });
+
+  it("returns null when a newer request for the same file superseded it", async () => {
+    const fileKey = buildRepoScopedItemId(PATH, REPO);
+    const requestToken = { fileKey, generation: 1 };
+    const activeRequestRef = { current: requestToken };
+    mockRequestFileContent.mockImplementationOnce(async () => {
+      activeRequestRef.current = { fileKey, generation: 2 };
+      return RESPONSE;
+    });
+
+    const state = await fetchFileEditorState({
+      client: FAKE_CLIENT,
+      sessionId: SESSION_ID,
+      filePath: PATH,
+      repo: REPO,
+      activeSessionIdRef: { current: SESSION_ID },
+      activeRequestRef,
+      requestToken,
     });
 
     expect(state).toBeNull();

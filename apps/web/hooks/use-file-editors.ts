@@ -23,6 +23,7 @@ import {
   getPreviewItemIdToRemoveOnReplace,
   isFileEditorPanelAlreadyRestored,
   isRestoreWriteCurrent,
+  type FileEditorRequestToken,
 } from "./file-editor-state";
 
 // Module-level guard: ensures restoration only runs once across all hook instances
@@ -384,11 +385,23 @@ function addFileEditorPanelWithPreviewCleanup(
   if (previewItemIdToRemove) removeFileState(previewItemIdToRemove);
 }
 
+function markActiveFileRequest(
+  ref: React.MutableRefObject<FileEditorRequestToken | null>,
+  fileKey: string,
+): FileEditorRequestToken {
+  const requestToken = {
+    fileKey,
+    generation: (ref.current?.generation ?? 0) + 1,
+  };
+  ref.current = requestToken;
+  return requestToken;
+}
+
 type OpenFileActionParams = Pick<
   FileEditorActionsParams,
   "activeSessionIdRef" | "setFileState" | "removeFileState" | "addFileEditorPanel" | "toast"
 > & {
-  activeFileRequestRef: React.MutableRefObject<string | null>;
+  activeFileRequestRef: React.MutableRefObject<FileEditorRequestToken | null>;
 };
 
 function useOpenFileAction({
@@ -405,7 +418,7 @@ function useOpenFileAction({
       const currentSessionId = activeSessionIdRef.current;
       if (!client || !currentSessionId) return;
       const fileKey = buildRepoScopedItemId(filePath, repo);
-      activeFileRequestRef.current = fileKey;
+      const requestToken = markActiveFileRequest(activeFileRequestRef, fileKey);
       const files = getOpenFiles();
       if (files.has(fileKey)) {
         const existing = files.get(fileKey);
@@ -426,8 +439,8 @@ function useOpenFileAction({
           filePath,
           repo,
           activeSessionIdRef,
-          activeFileKeyRef: activeFileRequestRef,
-          fileKey,
+          activeRequestRef: activeFileRequestRef,
+          requestToken,
         });
         if (!state) return;
         // Create the panel BEFORE setting file state. The openFiles subscription
@@ -469,7 +482,7 @@ type MarkdownPreviewActionParams = Pick<
   | "addFileEditorPanel"
   | "toast"
 > & {
-  activeFileRequestRef: React.MutableRefObject<string | null>;
+  activeFileRequestRef: React.MutableRefObject<FileEditorRequestToken | null>;
 };
 
 function useMarkdownPreviewAction({
@@ -487,7 +500,7 @@ function useMarkdownPreviewAction({
       const currentSessionId = activeSessionIdRef.current;
       if (!client || !currentSessionId) return;
       const fileKey = buildRepoScopedItemId(filePath, repo);
-      activeFileRequestRef.current = fileKey;
+      const requestToken = markActiveFileRequest(activeFileRequestRef, fileKey);
       const files = getOpenFiles();
       if (files.has(fileKey)) {
         updateFileState(fileKey, { markdownPreview: true });
@@ -508,8 +521,8 @@ function useMarkdownPreviewAction({
           filePath,
           repo,
           activeSessionIdRef,
-          activeFileKeyRef: activeFileRequestRef,
-          fileKey,
+          activeRequestRef: activeFileRequestRef,
+          requestToken,
         });
         if (!state) return;
         addFileEditorPanelWithPreviewCleanup(
@@ -542,7 +555,7 @@ function useFileEditorActions({
   setSavingFiles,
   toast,
 }: FileEditorActionsParams) {
-  const activeFileRequestRef = useRef<string | null>(null);
+  const activeFileRequestRef = useRef<FileEditorRequestToken | null>(null);
   const openFile = useOpenFileAction({
     activeSessionIdRef,
     activeFileRequestRef,

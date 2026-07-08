@@ -10,6 +10,11 @@ import type { FileContentResponse } from "@/lib/types/backend";
 
 type DockApi = ReturnType<typeof useDockviewStore.getState>["api"];
 
+export type FileEditorRequestToken = {
+  fileKey: string;
+  generation: number;
+};
+
 /**
  * Build a FileEditorState from a file content response. `repo` is the
  * multi-repo subpath (repository_name) the file belongs to; it is recorded on
@@ -42,8 +47,8 @@ type FetchFileEditorStateParams = {
   filePath: string;
   repo: string | undefined;
   activeSessionIdRef: MutableRefObject<string | null>;
-  activeFileKeyRef?: MutableRefObject<string | null>;
-  fileKey?: string;
+  activeRequestRef?: MutableRefObject<FileEditorRequestToken | null>;
+  requestToken?: FileEditorRequestToken;
 };
 
 /**
@@ -56,12 +61,14 @@ export async function fetchFileEditorState({
   filePath,
   repo,
   activeSessionIdRef,
-  activeFileKeyRef,
-  fileKey = buildRepoScopedItemId(filePath, repo),
+  activeRequestRef,
+  requestToken = { fileKey: buildRepoScopedItemId(filePath, repo), generation: 0 },
 }: FetchFileEditorStateParams): Promise<FileEditorState | null> {
-  const isCurrent = () =>
-    activeSessionIdRef.current === sessionId &&
-    (!activeFileKeyRef || activeFileKeyRef.current === fileKey);
+  const requestMatches = () =>
+    !activeRequestRef ||
+    (activeRequestRef.current?.fileKey === requestToken.fileKey &&
+      activeRequestRef.current.generation === requestToken.generation);
+  const isCurrent = () => activeSessionIdRef.current === sessionId && requestMatches();
   const response = await requestFileContent(client, sessionId, filePath, repo);
   if (!isCurrent()) return null;
   const state = await buildFileEditorState(filePath, response, repo);
