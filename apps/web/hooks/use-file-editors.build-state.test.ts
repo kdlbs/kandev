@@ -15,7 +15,11 @@ vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({}),
 }));
 
-import { buildFileEditorState, fetchFileEditorState } from "./use-file-editors";
+import {
+  buildFileEditorState,
+  fetchFileEditorState,
+  isFileEditorPanelAlreadyRestored,
+} from "./use-file-editors";
 
 const PATH = "src/foo.ts";
 const REPO = "enrichment-commons";
@@ -30,6 +34,14 @@ const RESPONSE: FileContentResponse = {
 const FAKE_CLIENT = {} as NonNullable<
   ReturnType<typeof import("@/lib/ws/connection").getWebSocketClient>
 >;
+
+function makeDockApi(panels: Record<string, { params?: Record<string, unknown> }>) {
+  return {
+    getPanel: vi.fn((id: string) => panels[id]),
+  } as unknown as ReturnType<
+    typeof import("@/lib/state/dockview-store").useDockviewStore.getState
+  >["api"];
+}
 
 describe("buildFileEditorState", () => {
   it("carries the repo subpath so subsequent save/sync calls scope to the right repository", async () => {
@@ -73,5 +85,23 @@ describe("fetchFileEditorState", () => {
     const state = await fetchFileEditorState(FAKE_CLIENT, SESSION_ID, PATH, undefined, ref);
 
     expect(state).toBeNull();
+  });
+});
+
+describe("isFileEditorPanelAlreadyRestored", () => {
+  it("detects legacy pinned editor ids when restored panel params match the repo file", () => {
+    const dockApi = makeDockApi({
+      [`file:${PATH}`]: { params: { path: PATH, repo: REPO } },
+    });
+
+    expect(isFileEditorPanelAlreadyRestored(dockApi, PATH, REPO)).toBe(true);
+  });
+
+  it("ignores a legacy bare-path panel when its repo params do not match", () => {
+    const dockApi = makeDockApi({
+      [`file:${PATH}`]: { params: { path: PATH, repo: "other-repo" } },
+    });
+
+    expect(isFileEditorPanelAlreadyRestored(dockApi, PATH, REPO)).toBe(false);
   });
 });

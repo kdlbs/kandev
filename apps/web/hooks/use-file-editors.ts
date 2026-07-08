@@ -222,7 +222,22 @@ type RestoreTabsParams = {
  * see the round-trip task switch where a promoted preview was persisted as
  * pinned in localStorage and then re-opened on top of the restored preview.
  */
-function isAlreadyRestored(
+function panelParamsMatchFile(
+  params: Record<string, unknown> | undefined,
+  path: string,
+  repo?: string,
+) {
+  if (params?.path !== path) return false;
+  let panelRepo: string | undefined;
+  if (typeof params.repo === "string") {
+    panelRepo = params.repo;
+  } else if (typeof params.repositoryName === "string") {
+    panelRepo = params.repositoryName;
+  }
+  return panelRepo === repo;
+}
+
+export function isFileEditorPanelAlreadyRestored(
   dockApi: ReturnType<typeof useDockviewStore.getState>["api"],
   path: string,
   repo?: string,
@@ -230,10 +245,16 @@ function isAlreadyRestored(
   if (!dockApi) return false;
   const itemId = buildRepoScopedItemId(path, repo);
   if (dockApi.getPanel(`file:${itemId}`)) return true;
+  const legacyPanel = dockApi.getPanel(`file:${path}`);
+  const legacyParams = legacyPanel?.params as Record<string, unknown> | undefined;
+  if (legacyPanel && panelParamsMatchFile(legacyParams, path, repo)) return true;
   const previewParams = dockApi.getPanel(PREVIEW_FILE_EDITOR_ID)?.params as
     | Record<string, unknown>
     | undefined;
-  return previewParams?.previewItemId === itemId;
+  return (
+    previewParams?.previewItemId === itemId ||
+    (previewParams?.previewItemId === path && panelParamsMatchFile(previewParams, path, repo))
+  );
 }
 
 async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Promise<void> {
@@ -257,7 +278,7 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
   const dockApi = useDockviewStore.getState().api;
   for (const savedTab of savedTabs) {
     const itemId = buildRepoScopedItemId(savedTab.path, savedTab.repo);
-    if (isAlreadyRestored(dockApi, savedTab.path, savedTab.repo)) continue;
+    if (isFileEditorPanelAlreadyRestored(dockApi, savedTab.path, savedTab.repo)) continue;
     addFileEditorPanel(savedTab.path, savedTab.name, {
       quiet: true,
       pin: savedTab.pinned,
