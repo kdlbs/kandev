@@ -457,7 +457,7 @@ test.describe("Chat status bar", () => {
     // Cancelling the confirmation dialog must not archive anything
     await session.prMergedArchiveButton().click();
     await expect(session.prMergedArchiveConfirmButton()).toBeVisible({ timeout: 10_000 });
-    await testPage.getByRole("button", { name: "Cancel" }).click();
+    await testPage.getByRole("alertdialog").getByRole("button", { name: "Cancel" }).click();
     await expect(session.prMergedArchiveConfirmButton()).not.toBeVisible();
     await expect(session.prMergedBanner()).toBeVisible();
     expect(testPage.url()).toBe(urlBeforeArchive);
