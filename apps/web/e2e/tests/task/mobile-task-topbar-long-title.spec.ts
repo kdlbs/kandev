@@ -28,7 +28,10 @@ async function readMobileTopbarMetrics(
     const title = Array.from(header?.querySelectorAll("span") ?? []).find(
       (node) => node.textContent?.trim() === titleText,
     ) as HTMLElement | undefined;
-    const actions = header?.children.item(1) as HTMLElement | null | undefined;
+    const actions = header?.querySelector('[data-testid="mobile-topbar-actions"]') as
+      | HTMLElement
+      | null
+      | undefined;
     if (!header || !title || !actions) return null;
 
     const headerRect = header.getBoundingClientRect();
