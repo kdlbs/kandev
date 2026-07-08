@@ -17,7 +17,7 @@ import (
 type Store struct {
 	db                  *sqlx.DB
 	ro                  *sqlx.DB
-	defaultWorkspace    workspacescope.CachedResolver
+	defaultWorkspace    workspacescope.DefaultResolver
 	migratedToWorkspace string
 }
 

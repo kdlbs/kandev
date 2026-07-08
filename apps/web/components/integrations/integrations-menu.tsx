@@ -22,6 +22,7 @@ import { useJiraAvailable } from "@/hooks/domains/jira/use-jira-availability";
 import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availability";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useGitLabAvailable } from "@/hooks/domains/gitlab/use-task-mr";
+import { useAppStore } from "@/components/state-provider";
 import type { GitHubStatus } from "@/lib/types/github";
 
 type MobileIntegrationsSectionProps = {
@@ -84,10 +85,16 @@ export function getGitHubIntegrationStatus(status: GitHubStatus | null, loading:
 }
 
 export function useConfiguredIntegrationLinks(): IntegrationLink[] {
+  // Jira and Linear are per-workspace integrations, so their availability must
+  // be checked against the active workspace. Omitting the id makes the backend
+  // fall back to a legacy default-workspace resolver that can point at the
+  // wrong workspace, hiding a configured integration from the sidebar. GitHub
+  // and GitLab are install-wide and don't need the workspace id.
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   const { status, loading } = useGitHubStatus();
   const gitlabAvailable = useGitLabAvailable();
-  const jiraAvailable = useJiraAvailable();
-  const linearAvailable = useLinearAvailable();
+  const jiraAvailable = useJiraAvailable(activeWorkspaceId);
+  const linearAvailable = useLinearAvailable(activeWorkspaceId);
   const githubStatus = getGitHubIntegrationStatus(status, loading);
 
   return getAvailableIntegrationLinks({
