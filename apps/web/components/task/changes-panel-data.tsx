@@ -92,7 +92,7 @@ export type ChangesPanelBodyProps = {
   loadingOperation: string | null;
   dialogs: DialogsType;
   onOpenDiffFile: (path: string, options?: OpenDiffOptions) => void;
-  onEditFile: (path: string) => void;
+  onEditFile: (path: string, repo?: string) => void;
   onOpenCommitDetail?: (sha: string, repo?: string) => void;
   onOpenReview?: () => void;
   onRevertCommit?: (sha: string, repo?: string) => void;
@@ -265,7 +265,7 @@ export function useChangesPanelData() {
 
 type ChangesPanelCallbacks = {
   onOpenDiffFile: (path: string, options?: OpenDiffOptions) => void;
-  onEditFile: (path: string) => void;
+  onEditFile: (path: string, repo?: string) => void;
   onOpenCommitDetail?: (sha: string, repo?: string) => void;
   onOpenReview?: () => void;
 };

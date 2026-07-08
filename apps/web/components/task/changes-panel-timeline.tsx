@@ -232,7 +232,7 @@ type FileListSectionProps = {
   isSecondaryActionLoading?: boolean;
   onSecondaryAction?: () => void;
   onOpenDiff: (path: string, options?: OpenDiffOptions) => void;
-  onEditFile: (path: string) => void;
+  onEditFile: (path: string, repo?: string) => void;
   // Multi-repo: handlers receive the file's repositoryName so each per-file op
   // hits the right git repo. Same-named files across repos collide by path.
   onStage: (path: string, repo?: string) => void;
@@ -263,7 +263,7 @@ type FileListBodyProps = {
   multiSelect: ReturnType<typeof useMultiSelect>;
   onKeyDown: (e: React.KeyboardEvent) => void;
   onOpenDiff: (path: string, options?: OpenDiffOptions) => void;
-  onEditFile: (path: string) => void;
+  onEditFile: (path: string, repo?: string) => void;
   onStage: (path: string, repo?: string) => void;
   onUnstage: (path: string, repo?: string) => void;
   onDiscard: (path: string, repo?: string) => void;

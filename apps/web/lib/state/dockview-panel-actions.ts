@@ -67,6 +67,10 @@ function getFileName(path: string): string {
   return path.split("/").pop() || path;
 }
 
+export function buildRepoScopedItemId(path: string, repo?: string): string {
+  return repo ? `${repo}:${path}` : path;
+}
+
 type OpenPreviewArgs = {
   api: DockviewApi;
   type: PreviewType;
@@ -263,10 +267,11 @@ function buildFileEditorAction(get: StoreGet) {
   return (path: string, name: string, opts?: OpenPanelOpts) => {
     const { api, centerGroupId } = get();
     if (!api) return;
+    const itemId = buildRepoScopedItemId(path, opts?.repo);
     openOrReplacePreview({
       api,
       type: "file-editor",
-      itemId: path,
+      itemId,
       title: name,
       params: { path, ...(opts?.repo ? { repo: opts.repo } : {}) },
       groupId: centerGroupId,
@@ -289,10 +294,11 @@ function buildFileDiffAction(get: StoreGet) {
   ) => {
     const { api, centerGroupId } = get();
     if (!api) return;
+    const itemId = buildRepoScopedItemId(path, opts?.repositoryName);
     openOrReplacePreview({
       api,
       type: "file-diff",
-      itemId: path,
+      itemId,
       title: `Diff [${getFileName(path)}]`,
       params: {
         kind: "file",

@@ -36,9 +36,10 @@ const PATH = "src/foo.ts";
 const REPO = "enrichment-commons";
 
 function seedOpenFile(state: Partial<FileEditorState> = {}) {
+  const key = state.repo ? `${state.repo}:${PATH}` : PATH;
   openFilesMap = new Map<string, FileEditorState>([
     [
-      PATH,
+      key,
       {
         path: PATH,
         name: "foo.ts",
@@ -80,7 +81,7 @@ describe("useSaveDeleteActions repo threading", () => {
 
     const { result } = renderActions();
     await act(async () => {
-      await result.current.saveFile(PATH);
+      await result.current.saveFile(PATH, REPO);
     });
 
     expect(mockUpdateFileContent).toHaveBeenCalledWith(
@@ -96,7 +97,7 @@ describe("useSaveDeleteActions repo threading", () => {
 
     const { result } = renderActions();
     await act(async () => {
-      await result.current.deleteFileAction(PATH);
+      await result.current.deleteFileAction(PATH, REPO);
     });
 
     expect(mockDeleteFile).toHaveBeenCalledWith(FAKE_CLIENT, SESSION_ID, PATH, REPO);
