@@ -4,6 +4,7 @@ import { useRef } from "react";
 import type { FileEditorState } from "@/lib/state/dockview-store";
 import type { FileInfo } from "@/lib/state/store";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
+import { buildRepoScopedItemId } from "@/lib/state/dockview-panel-actions";
 
 const mockRequestFileContent = vi.fn();
 const mockGetWebSocketClient = vi.fn();
@@ -42,7 +43,7 @@ const SESSION_ID = "sess-1";
 const PATH = "src/foo.ts";
 
 function fileKey(repo?: string) {
-  return repo ? `${repo}:${PATH}` : PATH;
+  return buildRepoScopedItemId(PATH, repo);
 }
 
 function seedOpenFile(state: Partial<FileEditorState> = {}) {
