@@ -14,6 +14,7 @@ import { useReviewSidebarResize } from "@/hooks/use-review-sidebar-resize";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { DEFAULT_DIFF_WORD_WRAP } from "@/components/diff/diff-defaults";
+import { useRequestChangesWalkthrough } from "@/hooks/domains/session/use-request-changes-walkthrough";
 import { ReviewTopBar } from "./review-top-bar";
 import { ReviewFileTree } from "./review-file-tree";
 import { ReviewDiffList } from "./review-diff-list";
@@ -454,6 +455,12 @@ function useWalkthroughFileSelection(
 export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps) {
   const { open, onOpenChange, sessionId, baseBranch, onOpenFile } = props;
   const s = useReviewDialogState(props);
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const handleRequestWalkthrough = useRequestChangesWalkthrough({
+    taskId: activeTaskId,
+    sessionId,
+    files: s.allFiles,
+  });
   const splitRowRef = useRef<HTMLDivElement>(null);
   const sidebar = useReviewSidebarResize(splitRowRef, open);
   useWalkthroughFileSelection(open, s.allFiles, s.handleSelectFile);
@@ -481,6 +488,8 @@ export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps)
           onToggleWordWrap={s.setWordWrap}
           onSendComments={s.handleSendComments}
           onClose={() => onOpenChange(false)}
+          onRequestWalkthrough={handleRequestWalkthrough}
+          requestWalkthroughDisabled={s.allFiles.length === 0}
           getPendingComments={s.getPendingComments}
           markCommentsSent={s.markCommentsSent}
         />

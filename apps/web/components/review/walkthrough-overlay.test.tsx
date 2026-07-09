@@ -3,12 +3,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConnectionStatus } from "@/lib/types/connection";
 import type { TaskWalkthrough } from "@/lib/types/http";
 import { StateProvider, useAppStore } from "@/components/state-provider";
-import { getTaskWalkthrough } from "@/lib/api/domains/walkthrough-api";
+import { deleteTaskWalkthrough, getTaskWalkthrough } from "@/lib/api/domains/walkthrough-api";
 import { getOpenWalkthroughTaskId, setOpenWalkthroughTaskId } from "@/lib/walkthrough-open-state";
 import { WalkthroughOverlay } from "./walkthrough-overlay";
 
 vi.mock("@/lib/api/domains/walkthrough-api", () => ({
+  deleteTaskWalkthrough: vi.fn(),
   getTaskWalkthrough: vi.fn(),
+}));
+
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: vi.fn() }),
 }));
 
 vi.mock("@/components/diff/walkthrough-floating-window", () => ({
@@ -58,6 +63,7 @@ function renderOverlay() {
 describe("WalkthroughOverlay", () => {
   beforeEach(() => {
     vi.mocked(getTaskWalkthrough).mockReset();
+    vi.mocked(deleteTaskWalkthrough).mockReset();
     setOpenWalkthroughTaskId(null);
   });
 

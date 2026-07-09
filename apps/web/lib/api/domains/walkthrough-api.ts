@@ -20,3 +20,13 @@ export async function getTaskWalkthrough(taskId: string): Promise<TaskWalkthroug
   }
   return response as TaskWalkthrough;
 }
+
+/** Delete the current persisted walkthrough for a task. */
+export async function deleteTaskWalkthrough(taskId: string): Promise<void> {
+  const client = getWebSocketClient();
+  if (!client) {
+    throw new Error(WS_CLIENT_UNAVAILABLE);
+  }
+
+  await client.request("task.walkthrough.delete", { task_id: taskId }, 10000);
+}

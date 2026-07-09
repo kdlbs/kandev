@@ -111,6 +111,25 @@ func TestStripKandevSystem(t *testing.T) {
 	}
 }
 
+func TestIsChangesWalkthroughRequest(t *testing.T) {
+	prompt := strings.Join([]string{
+		"Please create an agent-authored walkthrough of the current changes using `show_walkthrough_kandev`.",
+		"",
+		"Walkthrough requirements:",
+		"- Anchor steps to changed lines or changed line ranges whenever possible.",
+		"",
+		"Available changed files:",
+		"- src/app.ts [uncommitted]",
+	}, "\n")
+
+	if !isChangesWalkthroughRequest(prompt) {
+		t.Fatal("expected generated changes walkthrough prompt to be detected")
+	}
+	if isChangesWalkthroughRequest("show_walkthrough_kandev without the generated prompt shape") {
+		t.Fatal("expected unrelated prompt not to be detected")
+	}
+}
+
 func TestDelayRange(t *testing.T) {
 	tests := []struct {
 		model     string

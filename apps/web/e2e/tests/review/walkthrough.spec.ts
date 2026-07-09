@@ -27,7 +27,36 @@ async function seedWalkthroughTask(
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await expect(session.chat.getByText(doneText, { exact: false })).toBeVisible({ timeout: 45_000 });
+  await session.waitForChatIdle();
   return session;
+}
+
+async function seedWalkthroughChangesTask(
+  testPage: Page,
+  apiClient: ApiClient,
+  seedData: SeedData,
+): Promise<SessionPage> {
+  return seedWalkthroughTask(testPage, apiClient, seedData, "walkthrough-setup", "changes ready");
+}
+
+async function customizeChangesWalkthroughPrompt(apiClient: ApiClient): Promise<void> {
+  const { prompts } = await apiClient.listPrompts();
+  const prompt = prompts.find((p) => p.name === "changes-walkthrough");
+  expect(prompt, "changes-walkthrough built-in prompt should be seeded").toBeTruthy();
+  await apiClient.updatePrompt(prompt!.id, {
+    content: [
+      "E2E_CUSTOM_CHANGES_WALKTHROUGH",
+      "Please create an agent-authored walkthrough of the current changes using `show_walkthrough_kandev`.",
+      "",
+      "Walkthrough requirements:",
+      "- Use `line_end` whenever a logical explanation spans multiple lines.",
+      "- For PR-only files, do not assume the PR head is checked out locally.",
+      "- Keep each step concise and direct. Do not include a `Justification:` preamble.",
+      "",
+      "Available changed files:",
+      "{{changed_files}}",
+    ].join("\n"),
+  });
 }
 
 /** Open the floating walkthrough card via the launcher pill. */
@@ -42,6 +71,61 @@ async function openWalkthrough(testPage: Page): Promise<Locator> {
 
 test.describe("Code walkthrough", () => {
   test.describe.configure({ retries: 2, timeout: 120_000 });
+
+  test("Changes-panel request asks the agent to walk through current changes", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedWalkthroughChangesTask(testPage, apiClient, seedData);
+    await customizeChangesWalkthroughPrompt(apiClient);
+
+    await expect(session.walkthroughLauncher()).toHaveCount(0);
+    await session.clickTab("Changes");
+    const request = session.changesRequestWalkthroughButton();
+    await expect(request).toBeVisible({ timeout: 15_000 });
+    await expect(request).toContainText("Walkthrough");
+    await expect(request).toBeEnabled({ timeout: 30_000 });
+
+    await request.click();
+    await session.showSessionContext();
+
+    await expect(session.activeChat()).toContainText("E2E_CUSTOM_CHANGES_WALKTHROUGH", {
+      timeout: 15_000,
+    });
+    await expect(session.activeChat()).toContainText("Use line_end");
+    await expect(session.activeChat()).toContainText("walkthrough_a.txt [");
+    await expect(session.activeChat()).toContainText("Walkthrough: Tour of the change", {
+      timeout: 45_000,
+    });
+    await expect(session.activeChat().locator(".tabler-icon-route").first()).toBeVisible();
+    await expect(session.activeChat()).toContainText("walkthrough-request complete", {
+      timeout: 45_000,
+    });
+
+    const card = await openWalkthrough(testPage);
+    await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 1 / 5");
+    await expect(card.getByTestId("walkthrough-step-body")).toContainText("Step 1");
+    await expect(session.walkthroughEditorRange()).toBeVisible({ timeout: 15_000 });
+  });
+
+  test("expanded review toolbar exposes a labelled walkthrough request", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedWalkthroughChangesTask(testPage, apiClient, seedData);
+    await session.clickTab("Changes");
+
+    await session.changes.getByRole("button", { name: "Review" }).click();
+    const dialog = testPage.getByRole("dialog", { name: "Review Changes" });
+    await expect(dialog).toBeVisible({ timeout: 15_000 });
+
+    const request = session.reviewRequestWalkthroughButton();
+    await expect(request).toBeVisible();
+    await expect(request).toBeEnabled({ timeout: 30_000 });
+    await expect(request).toHaveAttribute("aria-label", "Walk me through these review changes");
+  });
 
   test("floating card walks all steps across changed and unchanged files", async ({
     testPage,
@@ -77,7 +161,12 @@ test.describe("Code walkthrough", () => {
     await testPage.evaluate(() => window.dispatchEvent(new CustomEvent("open-review-dialog")));
     const dialog = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(dialog).toBeVisible({ timeout: 15_000 });
-    await expect(dialog.getByText("walkthrough_base.txt")).toHaveCount(0);
+    await expect(
+      dialog.getByTestId("review-dialog-sidebar").getByText("walkthrough_base.txt"),
+    ).toHaveCount(0);
+    await expect(
+      dialog.getByTestId("changes-repo-group").getByText("walkthrough_base.txt"),
+    ).toHaveCount(0);
   });
 
   test("editor walkthrough shows range marker, connector, and supports dragging", async ({
@@ -168,7 +257,44 @@ test.describe("Code walkthrough", () => {
     await expect(range).toBeVisible({ timeout: 15_000 });
   });
 
-  test("a re-emitted walkthrough is shown without a page reload", async ({
+  test("discard removes the persisted walkthrough after confirmation", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedWalkthroughTask(
+      testPage,
+      apiClient,
+      seedData,
+      "walkthrough-basic",
+      "5-step tour",
+    );
+    const card = await openWalkthrough(testPage);
+    await expect(session.walkthroughEditorRange()).toBeVisible({ timeout: 15_000 });
+
+    await session.walkthroughLauncher().hover();
+    await expect(session.walkthroughDiscardButton()).toBeVisible({ timeout: 5_000 });
+    await session.walkthroughDiscardButton().click();
+    await expect(session.walkthroughDiscardDialog()).toBeVisible();
+    await session.walkthroughDiscardDialog().getByRole("button", { name: "Cancel" }).click();
+    await expect(card).toBeVisible();
+    await expect(session.walkthroughLauncher()).toHaveCount(1);
+
+    await session.walkthroughLauncher().hover();
+    await session.walkthroughDiscardButton().click();
+    await expect(session.walkthroughDiscardDialog()).toBeVisible();
+    await session
+      .walkthroughDiscardDialog()
+      .getByRole("button", { name: "Discard walkthrough" })
+      .click();
+
+    await expect(session.walkthroughDiscardDialog()).toBeHidden({ timeout: 10_000 });
+    await expect(session.walkthroughLauncher()).toHaveCount(0);
+    await expect(session.walkthroughFloating()).toHaveCount(0);
+    await expect(session.walkthroughEditorRange()).toHaveCount(0);
+  });
+
+  test("a re-emitted walkthrough replaces the previous one without a page reload", async ({
     testPage,
     apiClient,
     seedData,
@@ -184,7 +310,9 @@ test.describe("Code walkthrough", () => {
     );
     const card = await openWalkthrough(testPage);
 
+    await expect(testPage.getByTestId("walkthrough-launcher")).toHaveCount(1);
     await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 1 / 3");
     await expect(card.getByTestId("walkthrough-step-body")).toContainText("REEMIT_SECOND");
+    await expect(card.getByTestId("walkthrough-step-body")).not.toContainText("REEMIT_FIRST");
   });
 });

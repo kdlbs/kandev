@@ -7,6 +7,7 @@ import {
   IconLayoutColumns,
   IconLayoutRows,
   IconTextWrap,
+  IconRoute,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -36,6 +37,8 @@ type ReviewTopBarProps = {
   onToggleWordWrap: (wrap: boolean) => void;
   onSendComments: (comments: DiffComment[]) => void;
   onClose: () => void;
+  onRequestWalkthrough?: () => void;
+  requestWalkthroughDisabled?: boolean;
   getPendingComments: () => DiffComment[];
   markCommentsSent: (ids: string[]) => void;
 };
@@ -100,6 +103,35 @@ function ReviewProgress({ reviewedCount, totalCount }: ReviewProgressProps) {
   );
 }
 
+function ReviewWalkthroughButton({
+  onRequestWalkthrough,
+  disabled,
+}: {
+  onRequestWalkthrough: (() => void) | undefined;
+  disabled?: boolean;
+}) {
+  if (!onRequestWalkthrough) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="px-2 cursor-pointer"
+          aria-label="Walk me through these review changes"
+          data-testid="review-request-walkthrough"
+          disabled={disabled}
+          title={disabled ? "Loading changed files..." : "Walk me through these changes"}
+          onClick={onRequestWalkthrough}
+        >
+          <IconRoute className="h-4 w-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Walk me through these changes</TooltipContent>
+    </Tooltip>
+  );
+}
+
 export const ReviewTopBar = memo(function ReviewTopBar({
   sessionId,
   reviewedCount,
@@ -112,6 +144,8 @@ export const ReviewTopBar = memo(function ReviewTopBar({
   onToggleWordWrap,
   onSendComments,
   onClose,
+  onRequestWalkthrough,
+  requestWalkthroughDisabled,
   getPendingComments,
   markCommentsSent,
 }: ReviewTopBarProps) {
@@ -180,6 +214,10 @@ export const ReviewTopBar = memo(function ReviewTopBar({
           onFixComments={handleFixComments}
         />
       )}
+      <ReviewWalkthroughButton
+        onRequestWalkthrough={onRequestWalkthrough}
+        disabled={requestWalkthroughDisabled}
+      />
       <VcsSplitButton sessionId={sessionId} baseBranch={baseBranch} />
       <Button size="sm" variant="ghost" className="px-2 cursor-pointer" onClick={onClose}>
         <IconX className="h-4 w-4" />

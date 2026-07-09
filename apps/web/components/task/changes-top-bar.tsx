@@ -33,6 +33,7 @@ export type ChangesTopBarProps = {
   handleToggleAutoMark: (v: boolean) => void;
   handleFixComments: () => void;
   handleRequestWalkthrough?: () => void;
+  requestWalkthroughDisabled?: boolean;
 };
 
 function ChangesTopBarLeft({
@@ -83,6 +84,36 @@ function ChangesTopBarLeft({
   );
 }
 
+function ReviewWalkthroughRequestButton({
+  handleRequestWalkthrough,
+  requestWalkthroughDisabled,
+}: Pick<ChangesTopBarProps, "handleRequestWalkthrough" | "requestWalkthroughDisabled">) {
+  if (!handleRequestWalkthrough) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="px-1.5 h-5 cursor-pointer"
+          aria-label="Walk me through these review changes"
+          data-testid="review-request-walkthrough"
+          disabled={requestWalkthroughDisabled}
+          title={
+            requestWalkthroughDisabled
+              ? "Loading changed files..."
+              : "Walk me through these changes"
+          }
+          onClick={handleRequestWalkthrough}
+        >
+          <IconRoute className="h-3.5 w-3.5" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Walk me through these changes</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function ChangesTopBarRight({
   splitView,
   wordWrap,
@@ -91,6 +122,7 @@ function ChangesTopBarRight({
   handleToggleSplitView,
   handleFixComments,
   handleRequestWalkthrough,
+  requestWalkthroughDisabled,
 }: Pick<
   ChangesTopBarProps,
   | "splitView"
@@ -100,25 +132,14 @@ function ChangesTopBarRight({
   | "handleToggleSplitView"
   | "handleFixComments"
   | "handleRequestWalkthrough"
+  | "requestWalkthroughDisabled"
 >) {
   return (
     <>
-      {handleRequestWalkthrough ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="px-1.5 h-5 cursor-pointer"
-              aria-label="Request walkthrough"
-              onClick={handleRequestWalkthrough}
-            >
-              <IconRoute className="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Request walkthrough</TooltipContent>
-        </Tooltip>
-      ) : null}
+      <ReviewWalkthroughRequestButton
+        handleRequestWalkthrough={handleRequestWalkthrough}
+        requestWalkthroughDisabled={requestWalkthroughDisabled}
+      />
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -193,6 +214,7 @@ export function ChangesTopBar({
   handleToggleAutoMark,
   handleFixComments,
   handleRequestWalkthrough,
+  requestWalkthroughDisabled,
 }: ChangesTopBarProps) {
   return (
     <PanelHeaderBarSplit
@@ -214,6 +236,7 @@ export function ChangesTopBar({
           handleToggleSplitView={handleToggleSplitView}
           handleFixComments={handleFixComments}
           handleRequestWalkthrough={handleRequestWalkthrough}
+          requestWalkthroughDisabled={requestWalkthroughDisabled}
         />
       }
     />

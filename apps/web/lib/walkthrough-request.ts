@@ -6,6 +6,8 @@ export type WalkthroughPromptFile = {
 };
 
 const MAX_PROMPT_FILES = 80;
+export const CHANGES_WALKTHROUGH_PROMPT_NAME = "changes-walkthrough";
+const CHANGED_FILES_PLACEHOLDER = "{{changed_files}}";
 
 function fileKey(file: WalkthroughPromptFile): string {
   return `${file.repository_name ?? file.repositoryName ?? ""}\0${file.path}\0${file.source ?? ""}`;
@@ -17,7 +19,7 @@ function formatPromptFile(file: WalkthroughPromptFile): string {
   return repo ? `${repo}:${file.path}${source}` : `${file.path}${source}`;
 }
 
-export function buildChangesWalkthroughPrompt(files: WalkthroughPromptFile[]): string {
+export function formatChangedFilesForWalkthroughPrompt(files: WalkthroughPromptFile[]): string {
   const uniqueFiles: WalkthroughPromptFile[] = [];
   const seen = new Set<string>();
   for (const file of files) {
@@ -30,24 +32,20 @@ export function buildChangesWalkthroughPrompt(files: WalkthroughPromptFile[]): s
 
   const shown = uniqueFiles.slice(0, MAX_PROMPT_FILES);
   const omitted = uniqueFiles.length - shown.length;
-  const availableFiles =
-    shown.length > 0
-      ? shown.map((file) => `- ${formatPromptFile(file)}`).join("\n") +
+  return shown.length > 0
+    ? shown.map((file) => `- ${formatPromptFile(file)}`).join("\n") +
         (omitted > 0 ? `\n- ... ${omitted} more file(s) omitted from this prompt` : "")
-      : "- No changed files were listed by the UI; inspect the local task state before anchoring.";
+    : "- No changed files were listed by the UI; inspect the local task state before anchoring.";
+}
 
-  return [
-    "Please create an agent-authored walkthrough of the current changes using `show_walkthrough_kandev`.",
-    "",
-    "Walkthrough requirements:",
-    "- Use only files listed below or files you verify exist in this task's local worktree/review diff.",
-    "- For PR-only files, do not assume the PR head is checked out locally; anchor to the review diff when available, and avoid editor-only/current-worktree claims.",
-    "- Anchor steps to changed lines or changed line ranges whenever possible.",
-    "- Use `line_end` whenever a logical explanation spans multiple lines; prefer one range step over adjacent single-line steps.",
-    "- Keep each step concise and direct. Do not include a `Justification:` preamble.",
-    "- If a good local/review anchor is unavailable, omit that step instead of referencing a remote-only path.",
-    "",
-    "Available changed files:",
-    availableFiles,
-  ].join("\n");
+export function buildChangesWalkthroughPrompt(
+  template: string,
+  files: WalkthroughPromptFile[],
+): string {
+  const changedFiles = formatChangedFilesForWalkthroughPrompt(files);
+  const trimmedTemplate = template.trim();
+  if (trimmedTemplate.includes(CHANGED_FILES_PLACEHOLDER)) {
+    return trimmedTemplate.replaceAll(CHANGED_FILES_PLACEHOLDER, changedFiles);
+  }
+  return [trimmedTemplate, "", "Available changed files:", changedFiles].join("\n");
 }

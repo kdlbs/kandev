@@ -438,6 +438,13 @@ export class ApiClient {
     return this.request("POST", "/api/v1/prompts", { name, content });
   }
 
+  async updatePrompt(
+    promptId: string,
+    patch: { name?: string; content?: string },
+  ): Promise<{ id: string; name: string; content: string; builtin: boolean }> {
+    return this.request("PATCH", `/api/v1/prompts/${promptId}`, patch);
+  }
+
   async deletePrompt(promptId: string): Promise<void> {
     await this.request("DELETE", `/api/v1/prompts/${promptId}`);
   }

@@ -422,11 +422,13 @@ function ChangesPanelHeaderLeft({
   onOpenDiffAll,
   onOpenReview,
   onRequestWalkthrough,
+  requestWalkthroughDisabled,
 }: {
   showDiffReview: boolean;
   onOpenDiffAll?: () => void;
   onOpenReview?: () => void;
   onRequestWalkthrough?: () => void;
+  requestWalkthroughDisabled?: boolean;
 }) {
   if (!showDiffReview) return null;
   return (
@@ -454,7 +456,14 @@ function ChangesPanelHeaderLeft({
           size="sm"
           variant="ghost"
           className="h-5 text-[11px] px-1.5 gap-1 cursor-pointer"
-          aria-label="Request walkthrough"
+          aria-label="Walk me through these changes"
+          data-testid="changes-request-walkthrough"
+          disabled={requestWalkthroughDisabled}
+          title={
+            requestWalkthroughDisabled
+              ? "Loading changed files..."
+              : "Walk me through these changes"
+          }
           onClick={onRequestWalkthrough}
         >
           <IconRoute className="h-3 w-3" />
@@ -478,6 +487,7 @@ export function ChangesPanelHeader({
   onOpenDiffAll,
   onOpenReview,
   onRequestWalkthrough,
+  requestWalkthroughDisabled,
   repoNames,
   perRepoStatus,
   onRepoPull,
@@ -501,6 +511,7 @@ export function ChangesPanelHeader({
   onOpenDiffAll?: () => void;
   onOpenReview?: () => void;
   onRequestWalkthrough?: () => void;
+  requestWalkthroughDisabled?: boolean;
   /** Always non-empty (single-repo includes the empty-name entry). */
   repoNames: string[];
   perRepoStatus: PerRepoStatus[];
@@ -529,6 +540,7 @@ export function ChangesPanelHeader({
           onOpenDiffAll={onOpenDiffAll}
           onOpenReview={onOpenReview}
           onRequestWalkthrough={onRequestWalkthrough}
+          requestWalkthroughDisabled={requestWalkthroughDisabled}
         />
       }
       right={

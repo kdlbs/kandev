@@ -223,8 +223,9 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	// on mount — live task.walkthrough.created events can fire before the page's
 	// WS subscription is established. Reuses the same read handler.
 	d.RegisterFunc(ws.ActionTaskWalkthroughGet, h.handleGetWalkthrough)
+	d.RegisterFunc(ws.ActionTaskWalkthroughDelete, h.handleDeleteWalkthrough)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
-	count := 22
+	count := 23
 
 	// Config-mode handlers (registered when config deps are set)
 	if h.workflowSvc != nil {

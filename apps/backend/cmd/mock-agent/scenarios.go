@@ -36,6 +36,7 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"multi-permission":        scenarioMultiPermission,
 	"kandev-mcp-permission":   scenarioKandevMCPPermission,
 	"review-cumulative-setup": scenarioReviewCumulativeSetup,
+	"walkthrough-setup":       scenarioWalkthroughSetup,
 	"walkthrough-basic":       scenarioWalkthroughBasic,
 	"walkthrough-reemit":      scenarioWalkthroughReemit,
 	"symlink-file-setup":      scenarioSymlinkFileSetup,
@@ -889,16 +890,11 @@ func writeWalkthroughFile(e *emitter, runGitCmd func(args ...string) error, path
 	return true
 }
 
-// scenarioWalkthroughBasic creates a small committed file plus an uncommitted
-// change (so the review surface has a diff), then emits a 2-step code
-// walkthrough over it via the show_walkthrough_kandev MCP tool.
-func scenarioWalkthroughBasic(e *emitter) {
-	fixedDelay(50)
-
+func setupWalkthroughFiles(e *emitter) bool {
 	wd, err := os.Getwd()
 	if err != nil {
 		e.text("walkthrough-basic: getwd failed: " + err.Error())
-		return
+		return false
 	}
 	runGitCmd := makeGitRunner(wd)
 
@@ -916,18 +912,51 @@ func scenarioWalkthroughBasic(e *emitter) {
 		"line 1: C\nline 2: BASE\n", "line 1: C\nline 2: WALKTHROUGH_CHANGE_C\n")
 	ok = ok && writeWalkthroughFile(e, runGitCmd, "walkthrough_base.txt",
 		"line 1: WALKTHROUGH_UNCHANGED\nline 2: supporting context\n", "")
-	if !ok {
-		return
-	}
+	return ok
+}
 
+func emitWalkthroughTour(e *emitter, doneText string) {
 	fixedDelay(100)
 	e.text("Let me walk you through the change.")
-	if _, err := callMCPTool("kandev", "show_walkthrough_kandev", walkthroughDemoArgs()); err != nil {
+	toolID := nextToolID()
+	toolName := "show_walkthrough_kandev"
+	args := walkthroughDemoArgs()
+	e.startTool(toolID, toolName, acp.ToolKindOther, args)
+	result, err := callMCPTool("kandev", toolName, args)
+	if err != nil {
+		e.completeTool(toolID, map[string]any{"error": "MCP error: " + err.Error()})
 		e.text(fmt.Sprintf("show_walkthrough failed: %s", err))
 		return
 	}
+	e.completeTool(toolID, map[string]any{"result": result})
 	fixedDelay(50)
-	e.text("walkthrough-basic complete: 5-step tour emitted")
+	e.text(doneText)
+}
+
+// scenarioWalkthroughSetup creates changed files without emitting a walkthrough.
+// It lets E2E tests click the actual Changes-panel Walkthrough request button.
+func scenarioWalkthroughSetup(e *emitter) {
+	fixedDelay(50)
+	if !setupWalkthroughFiles(e) {
+		return
+	}
+	e.text("walkthrough-setup complete: changes ready")
+}
+
+// scenarioWalkthroughRequested is the mock-agent response to the prompt generated
+// by the Changes-panel Walkthrough button.
+func scenarioWalkthroughRequested(e *emitter) {
+	emitWalkthroughTour(e, "walkthrough-request complete: 5-step tour emitted")
+}
+
+// scenarioWalkthroughBasic creates changed files, then emits a 5-step code
+// walkthrough over them via the show_walkthrough_kandev MCP tool.
+func scenarioWalkthroughBasic(e *emitter) {
+	fixedDelay(50)
+	if !setupWalkthroughFiles(e) {
+		return
+	}
+	emitWalkthroughTour(e, "walkthrough-basic complete: 5-step tour emitted")
 }
 
 // scenarioSymlinkFileSetup creates a file and a symlink to it, commits both,

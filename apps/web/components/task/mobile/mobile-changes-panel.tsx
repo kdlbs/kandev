@@ -107,6 +107,7 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
           onOpenDiffAll={handleOpenDiffAll}
           onOpenReview={handleOpenReview}
           onRequestWalkthrough={requestWalkthrough}
+          requestWalkthroughDisabled={data.walkthroughPromptFiles.length === 0}
           repoNames={data.git.repoNames}
           perRepoStatus={data.git.perRepoStatus}
           onRepoPull={data.repoCallbacks.onRepoPull}

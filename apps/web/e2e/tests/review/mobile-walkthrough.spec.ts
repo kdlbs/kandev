@@ -8,13 +8,15 @@ async function seedWalkthroughTask(
   testPage: Page,
   apiClient: ApiClient,
   seedData: SeedData,
+  scenario = "walkthrough-basic",
+  doneText = "5-step tour",
 ): Promise<void> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     "Mobile Walkthrough E2E",
     seedData.agentProfileId,
     {
-      description: "/e2e:walkthrough-basic",
+      description: `/e2e:${scenario}`,
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
@@ -24,9 +26,10 @@ async function seedWalkthroughTask(
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  await expect(session.chat.getByText("5-step tour", { exact: false })).toBeVisible({
+  await expect(session.chat.getByText(doneText, { exact: false })).toBeVisible({
     timeout: 45_000,
   });
+  await session.waitForChatIdle();
 }
 
 test.describe("Mobile code walkthrough", () => {
@@ -55,5 +58,57 @@ test.describe("Mobile code walkthrough", () => {
     await expect(testPage.getByTestId("walkthrough-editor-range")).toBeVisible({
       timeout: 15_000,
     });
+  });
+
+  test("requests a walkthrough from Changes and opens the generated bottom sheet", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedWalkthroughTask(testPage, apiClient, seedData, "walkthrough-setup", "changes ready");
+
+    await testPage.getByRole("button", { name: "Changes" }).click();
+    const changes = testPage.getByTestId("mobile-changes-panel");
+    await expect(changes).toBeVisible({ timeout: 15_000 });
+    const request = changes.getByTestId("changes-request-walkthrough");
+    await expect(request).toBeEnabled({ timeout: 30_000 });
+    await request.click();
+
+    await testPage.getByRole("button", { name: "Chat" }).click();
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.activeChat()).toContainText("Walkthrough: Tour of the change", {
+      timeout: 45_000,
+    });
+    await expect(session.activeChat()).toContainText("walkthrough-request complete", {
+      timeout: 45_000,
+    });
+
+    await session.walkthroughLauncher().click();
+    const card = session.walkthroughFloating();
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    await expect(card).toHaveAttribute("data-mobile-variant", "bottom-sheet");
+    await expect(session.walkthroughEditorRange()).toBeVisible({ timeout: 15_000 });
+  });
+
+  test("can discard a walkthrough from the touch launcher", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedWalkthroughTask(testPage, apiClient, seedData);
+    const session = new SessionPage(testPage);
+
+    await expect(session.walkthroughLauncher()).toBeVisible({ timeout: 30_000 });
+    await expect(session.walkthroughDiscardButton()).toBeVisible({ timeout: 5_000 });
+    await session.walkthroughDiscardButton().click();
+    await expect(session.walkthroughDiscardDialog()).toBeVisible();
+    await session
+      .walkthroughDiscardDialog()
+      .getByRole("button", { name: "Discard walkthrough" })
+      .click();
+
+    await expect(session.walkthroughLauncher()).toHaveCount(0);
+    await expect(session.walkthroughFloating()).toHaveCount(0);
   });
 });

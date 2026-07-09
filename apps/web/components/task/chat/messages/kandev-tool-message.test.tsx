@@ -51,6 +51,9 @@ describe("hasKandevRenderer", () => {
     expect(hasKandevRenderer(kandevToolCall({ toolName: "mcp__kandev__list_tasks_kandev" }))).toBe(
       true,
     );
+    expect(
+      hasKandevRenderer(kandevToolCall({ toolName: "mcp__kandev__show_walkthrough_kandev" })),
+    ).toBe(true);
   });
 
   it("does not match unrelated tools", () => {
@@ -69,6 +72,7 @@ describe("hasKandevRenderer", () => {
 // constants to satisfy the "no duplicate string" lint rule.
 const COMPLETED = "COMPLETED";
 const FIX_LOGIN_BUG = "Fix login bug";
+const CHANGE_TOUR = "Change tour";
 
 // The expandable row only renders its body when expanded. For tests that
 // need to inspect the body, set status to "running" which auto-expands the
@@ -271,6 +275,59 @@ describe("KandevToolMessage document & question renderers", () => {
       />,
     );
     expect(html).toBe("");
+  });
+});
+
+describe("KandevToolMessage walkthrough renderer", () => {
+  const step = {
+    title: "Review handler",
+    file: "apps/backend/internal/mcp/handlers.go",
+    line: 42,
+    line_end: 45,
+    text: "This handler persists the walkthrough.",
+  };
+
+  it("renders show_walkthrough with a walkthrough icon and title", () => {
+    const html = renderToStaticMarkup(
+      <KandevToolMessage
+        comment={kandevToolCall({
+          status: "running",
+          toolName: "mcp__kandev__show_walkthrough_kandev",
+          input: {
+            task_id: "task-1",
+            title: CHANGE_TOUR,
+            steps: [step],
+          },
+        })}
+      />,
+    );
+
+    expect(html).toContain("Walkthrough: Change tour");
+    expect(html).toContain("tabler-icon-route");
+    expect(html).toContain("1 step");
+    expect(html).toContain("apps/backend/internal/mcp/handlers.go:42-45");
+    expect(html).toContain("Review handler");
+  });
+
+  it("renders show_walkthrough from an MCP text result when args are absent", () => {
+    const html = renderToStaticMarkup(
+      <KandevToolMessage
+        comment={kandevToolCall({
+          status: "running",
+          toolName: "show_walkthrough_kandev",
+          resultJson: {
+            result: `Walkthrough saved:\n${JSON.stringify({
+              title: CHANGE_TOUR,
+              steps: [step],
+            })}`,
+          },
+        })}
+      />,
+    );
+
+    expect(html).toContain("Walkthrough: Change tour");
+    expect(html).toContain("1 step");
+    expect(html).toContain("Review handler");
   });
 });
 

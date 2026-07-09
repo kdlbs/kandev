@@ -166,6 +166,7 @@ const (
 	ActionTaskPlanRevisionCreated  = "task.plan.revision.created"
 	ActionTaskPlanReverted         = "task.plan.reverted"
 	ActionTaskWalkthroughGet       = "task.walkthrough.get"
+	ActionTaskWalkthroughDelete    = "task.walkthrough.delete"
 	ActionTaskWalkthroughCreated   = "task.walkthrough.created"
 	ActionTaskWalkthroughUpdated   = "task.walkthrough.updated"
 	ActionTaskWalkthroughDeleted   = "task.walkthrough.deleted"

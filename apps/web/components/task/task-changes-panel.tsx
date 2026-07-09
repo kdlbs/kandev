@@ -525,6 +525,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
         handleToggleAutoMark={handleToggleAutoMark}
         handleFixComments={handleFixComments}
         handleRequestWalkthrough={handleRequestWalkthrough}
+        requestWalkthroughDisabled={allFiles.length === 0}
       />
       <PanelBody padding={false} scroll={false} className="overflow-hidden">
         <TruncatedFilesBanner count={truncatedFilesCount} />

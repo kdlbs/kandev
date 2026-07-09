@@ -21,6 +21,9 @@ import type { TaskWalkthrough, WalkthroughStep } from "@/lib/types/http";
 import type { WalkthroughComment } from "@/lib/state/slices/comments";
 import { CommentForm } from "./comment-form";
 
+export const WALKTHROUGH_STEP_BODY_CLASS =
+  "prose prose-sm dark:prose-invert max-w-none text-left text-sm leading-6 [overflow-wrap:anywhere] [text-align:left] [&_li]:text-left [&_p]:my-2 [&_p]:text-left";
+
 function StepBody({ step, onOpenFile }: { step: WalkthroughStep; onOpenFile: () => void }) {
   const lineLabel = step.line_end ? `${step.line}–${step.line_end}` : `${step.line}`;
   const fileName = step.file.split("/").pop() || step.file;
@@ -42,10 +45,7 @@ function StepBody({ step, onOpenFile }: { step: WalkthroughStep; onOpenFile: () 
         <span className="truncate font-mono">{fileName}</span>
         <span className="shrink-0 text-muted-foreground">:{lineLabel}</span>
       </button>
-      <div
-        className="prose prose-sm dark:prose-invert max-w-none text-sm leading-6 [overflow-wrap:anywhere] [&_p]:my-2"
-        data-testid="walkthrough-step-body"
-      >
+      <div className={WALKTHROUGH_STEP_BODY_CLASS} data-testid="walkthrough-step-body">
         <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
           {normalizeMarkdown(step.text)}
         </ReactMarkdown>

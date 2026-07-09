@@ -28,6 +28,15 @@ const overloaded529Message = "Internal error: API Error: 529 Overloaded. This is
 // through to the red recovery banner.
 var overloadedCmdRe = regexp.MustCompile(`(?i)^/(?:e2e:)?overloaded(?::(\d+))?$`)
 
+const changesWalkthroughPromptMarker = "Please create an agent-authored walkthrough of the current changes"
+
+func isChangesWalkthroughRequest(prompt string) bool {
+	cmd := stripKandevSystem(strings.TrimSpace(prompt))
+	return strings.Contains(cmd, changesWalkthroughPromptMarker) &&
+		strings.Contains(cmd, "show_walkthrough_kandev") &&
+		strings.Contains(cmd, "Available changed files:")
+}
+
 // parseOverloadedCmd reports whether the prompt is the /overloaded command and,
 // if so, how many consecutive prompts it should fail before recovering
 // (default 1). Returns ok=false for any other prompt.
@@ -213,6 +222,10 @@ func handlePrompt(e *emitter, prompt, model string) {
 	// `/e2e:<scenario>` branch.
 	if count, ok := parseBulkCmd(prompt); ok {
 		emitBulk(e, count)
+		return
+	}
+	if isChangesWalkthroughRequest(cmd) {
+		scenarioWalkthroughRequested(e)
 		return
 	}
 
