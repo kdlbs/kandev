@@ -72,7 +72,10 @@ vi.mock("@/components/toast-provider", () => ({
 }));
 
 vi.mock("@/hooks/domains/kanban/use-plan-actions", () => ({
-  useNextWorkflowStep: () => mockNextStep,
+  usePlanActions: () => ({
+    ...mockNextStep,
+    implementPlanHandler: undefined,
+  }),
 }));
 
 vi.mock("@/hooks/domains/comments/use-diff-comments", () => ({

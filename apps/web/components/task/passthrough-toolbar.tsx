@@ -25,7 +25,7 @@ import { PRMergedBanner } from "./chat/pr-archive-banners";
 import { type ChatInputContainerHandle } from "./chat/chat-input-container";
 import { useChatPanelState } from "./chat/use-chat-panel-state";
 import { useAppStore } from "@/components/state-provider";
-import { useNextWorkflowStep } from "@/hooks/domains/kanban/use-plan-actions";
+import { usePlanActions } from "@/hooks/domains/kanban/use-plan-actions";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { usePendingDiffCommentsByFile } from "@/hooks/domains/comments/use-diff-comments";
 import { useCommentsStore } from "@/lib/state/slices/comments/comments-store";
@@ -101,13 +101,18 @@ export function PassthroughToolbar({
   const focusShortcut = getShortcut("FOCUS_PASSTHROUGH_INPUT", keyboardShortcuts);
   const isAgentBusy = sessionState === "RUNNING" || sessionState === "STARTING";
 
-  const nextStep = useNextWorkflowStep(taskId);
-  const showProceed = !!nextStep.proceedStepName && !isAgentBusy;
-
   const { pendingComments, pendingCount } = usePendingPassthroughComments(sessionId);
   const { isMobile } = useResponsiveBreakpoint();
   const { openFile } = useFileEditors();
   const panelState = useChatPanelState({ sessionId: sessionId ?? null, onOpenFile: openFile });
+  const planActions = usePlanActions({
+    resolvedSessionId: panelState.resolvedSessionId,
+    taskId,
+    planModeEnabled: panelState.planModeEnabled,
+    handlePlanModeChange: panelState.handlePlanModeChange,
+    chatInputRef,
+  });
+  const showProceed = !!planActions.proceedStepName && !isAgentBusy;
 
   // Derive open state: auto-close when pending comments are cleared
   const commentsOpen = commentsOpenState && pendingCount > 0;
@@ -163,16 +168,17 @@ export function PassthroughToolbar({
           onCancel={() => setComposerOpen(false)}
           panelState={panelState}
           taskId={taskId}
-          isMoving={nextStep.isMoving}
+          isMoving={planActions.isMoving}
           isSending={isSending}
+          onImplementPlan={planActions.implementPlanHandler}
         />
       )}
 
       <PassthroughStatusRow
         taskId={taskId}
-        nextStepName={nextStep.proceedStepName}
-        onProceed={nextStep.proceed}
-        isMoving={nextStep.isMoving}
+        nextStepName={planActions.proceedStepName}
+        onProceed={planActions.proceed}
+        isMoving={planActions.isMoving}
         showProceed={showProceed}
         composerOpen={composerOpen}
         focusShortcut={focusShortcut}
