@@ -6,6 +6,7 @@ import { PageTopbar } from "@/components/page-topbar";
 import { useAppStore } from "@/components/state-provider";
 import { IntegrationCopyConfigMenu } from "@/components/integrations/integration-copy-config-menu";
 import { integrationFromPathname } from "@/components/integrations/integration-copy-config";
+import { safeDecodePathSegment } from "@/lib/routing/path";
 
 // Brand/initialism overrides so the derived label matches how the rest of the
 // app spells these (e.g. "github" → "GitHub", not "Github"). Anything not
@@ -134,15 +135,6 @@ function IntegrationCopyConfigAction() {
 function workspaceIdFromPathname(pathname: string): string | null {
   const match = pathname.match(/^\/settings\/workspace\/([^/]+)(?:\/|$)/);
   return safeDecodePathSegment(match?.[1]);
-}
-
-function safeDecodePathSegment(segment: string | undefined): string | null {
-  if (!segment) return null;
-  try {
-    return decodeURIComponent(segment);
-  } catch {
-    return null;
-  }
 }
 
 function SettingsShell({

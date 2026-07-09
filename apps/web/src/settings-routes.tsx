@@ -66,6 +66,7 @@ import {
 import { listWorkflowTemplates } from "@/lib/api/domains/workflow-api";
 import { listRepositories, listWorkspaces } from "@/lib/api/domains/workspace-api";
 import { useRouter } from "@/lib/routing/client-router";
+import { safeDecodePathSegment } from "@/lib/routing/path";
 import {
   mapWorkspaceItem,
   readActiveWorkspaceCookie,
@@ -560,15 +561,6 @@ function matchDouble(pathname: string, pattern: RegExp): [string, string] | null
   const first = safeDecodePathSegment(match[1]);
   const second = safeDecodePathSegment(match[2]);
   return first && second ? [first, second] : null;
-}
-
-function safeDecodePathSegment(segment: string | undefined): string | null {
-  if (!segment) return null;
-  try {
-    return decodeURIComponent(segment);
-  } catch {
-    return null;
-  }
 }
 
 function normalizeSettingsPath(pathname: string): string {
