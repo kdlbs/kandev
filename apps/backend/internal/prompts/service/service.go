@@ -20,6 +20,13 @@ type Service struct {
 	repo promptstore.Repository
 }
 
+type PromptReferenceExpansion struct {
+	Name    string
+	Content string
+}
+
+const maxPromptReferenceDepth = 8
+
 func NewService(repo promptstore.Repository) *Service {
 	return &Service{repo: repo}
 }
@@ -125,4 +132,73 @@ func (s *Service) ResolvePromptContent(ctx context.Context, name, fallback strin
 		return fallback
 	}
 	return content
+}
+
+func (s *Service) ResolvePromptReferences(ctx context.Context, content string) ([]PromptReferenceExpansion, error) {
+	prompts, err := s.repo.ListPrompts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byName := make(map[string]*models.Prompt, len(prompts))
+	for _, prompt := range prompts {
+		if prompt == nil || prompt.Name == "" {
+			continue
+		}
+		byName[prompt.Name] = prompt
+	}
+	expansions := make([]PromptReferenceExpansion, 0)
+	collectPromptReferences(content, byName, map[string]bool{}, map[string]bool{}, &expansions, 0)
+	return expansions, nil
+}
+
+func collectPromptReferences(content string, byName map[string]*models.Prompt, stack, seen map[string]bool, expansions *[]PromptReferenceExpansion, depth int) {
+	for index := 0; index < len(content); {
+		if content[index] != '@' || !isPromptReferenceStart(content, index) {
+			index++
+			continue
+		}
+		nameStart := index + 1
+		nameEnd := nameStart
+		for nameEnd < len(content) && isPromptReferenceNameChar(content[nameEnd]) {
+			nameEnd++
+		}
+		name := content[nameStart:nameEnd]
+		prompt := byName[name]
+		if name == "" || prompt == nil || stack[prompt.Name] || depth >= maxPromptReferenceDepth {
+			if nameEnd == index {
+				index++
+			} else {
+				index = nameEnd
+			}
+			continue
+		}
+		if !seen[prompt.Name] {
+			seen[prompt.Name] = true
+			*expansions = append(*expansions, PromptReferenceExpansion{Name: prompt.Name, Content: prompt.Content})
+			stack[prompt.Name] = true
+			collectPromptReferences(prompt.Content, byName, stack, seen, expansions, depth+1)
+			delete(stack, prompt.Name)
+		}
+		index = nameEnd
+	}
+}
+
+func isPromptReferenceStart(content string, index int) bool {
+	if index == 0 {
+		return true
+	}
+	switch content[index-1] {
+	case ' ', '\n', '\t', '\r':
+		return true
+	default:
+		return false
+	}
+}
+
+func isPromptReferenceNameChar(ch byte) bool {
+	return ch >= 'a' && ch <= 'z' ||
+		ch >= 'A' && ch <= 'Z' ||
+		ch >= '0' && ch <= '9' ||
+		ch == '-' ||
+		ch == '_'
 }

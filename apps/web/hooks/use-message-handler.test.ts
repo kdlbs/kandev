@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildTaskMentionsContext } from "./use-message-handler";
+import { buildContextFilesContext, buildTaskMentionsContext } from "./use-message-handler";
 import type { AppState } from "@/lib/state/store";
 import type { TaskMentionData } from "./use-inline-mention";
 
@@ -116,5 +116,37 @@ describe("buildTaskMentionsContext", () => {
     const out = buildTaskMentionsContext(tasks, state);
     expect(out).toContain("workflow_id: wf-2");
     expect(out).toContain("step: Review");
+  });
+});
+
+describe("buildContextFilesContext", () => {
+  it("preserves saved prompt references and appends their expansion as hidden context", () => {
+    const out = buildContextFilesContext(
+      [{ path: "prompt:outer", name: "outer" }],
+      [
+        {
+          id: "outer",
+          name: "outer",
+          content: "Send this to peers:\n@improve-harness",
+          builtin: false,
+          created_at: "",
+          updated_at: "",
+        },
+        {
+          id: "inner",
+          name: "improve-harness",
+          content: "Review this session for durable harness improvements.",
+          builtin: false,
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    );
+
+    expect(out).toContain("Send this to peers:");
+    expect(out).toContain("@improve-harness");
+    expect(out).toContain("EXPANDED PROMPT REFERENCES");
+    expect(out).toContain("### @improve-harness");
+    expect(out).toContain("Review this session for durable harness improvements.");
   });
 });

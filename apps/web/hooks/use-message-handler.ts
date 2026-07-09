@@ -10,6 +10,10 @@ import type { ContextFile } from "@/lib/state/context-files-store";
 import type { CustomPrompt, Message } from "@/lib/types/http";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
 import type { AppState } from "@/lib/state/store";
+import {
+  collectPromptReferenceExpansions,
+  formatPromptReferenceExpansions,
+} from "@/lib/prompts/expand-prompt-references";
 
 function buildDocumentContext(
   activeDocument: ActiveDocument | null,
@@ -96,16 +100,29 @@ export function buildContextFilesContext(
 
   if (promptFiles.length > 0) {
     const promptsById = new Map(prompts.map((p) => [p.id, p]));
+    const promptExpansions = new Map<string, string>();
     const resolved = promptFiles
       .map((f) => {
         const id = f.path.replace("prompt:", "");
         const prompt = promptsById.get(id);
-        return prompt ? `### ${prompt.name}\n${prompt.content}` : null;
+        if (!prompt) return null;
+        for (const expansion of collectPromptReferenceExpansions(
+          prompt.content,
+          prompts,
+          prompt.name,
+        )) {
+          if (!promptExpansions.has(expansion.name)) {
+            promptExpansions.set(expansion.name, expansion.content);
+          }
+        }
+        return `### ${prompt.name}\n${prompt.content}`;
       })
       .filter(Boolean);
 
     if (resolved.length > 0) {
-      context += `\n\n<kandev-system>\nCONTEXT PROMPTS: The user has included the following prompt instructions as context:\n${resolved.join("\n\n")}\n</kandev-system>`;
+      const expansions = Array.from(promptExpansions, ([name, content]) => ({ name, content }));
+      const expansionContext = formatPromptReferenceExpansions(expansions);
+      context += `\n\n<kandev-system>\nCONTEXT PROMPTS: The user has included the following prompt instructions as context:\n${resolved.join("\n\n")}${expansionContext ? "\n\n" + expansionContext : ""}\n</kandev-system>`;
     }
   }
 

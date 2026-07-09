@@ -319,7 +319,7 @@ function AgentMessageContent({
       <div className="flex-1 min-w-0">
         {showRaw ? (
           <pre className="whitespace-pre-wrap font-mono text-xs bg-muted/20 p-3 rounded-md">
-            {comment.content || "(empty)"}
+            {comment.raw_content || comment.content || "(empty)"}
           </pre>
         ) : (
           <div className="markdown-body max-w-none">

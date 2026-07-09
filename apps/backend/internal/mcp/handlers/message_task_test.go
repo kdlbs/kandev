@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -105,6 +106,15 @@ func (f *fakeOrchestrator) ProcessOnTurnStart(ctx context.Context, taskID, sessi
 }
 
 func (f *fakeOrchestrator) GetMessageQueue() *messagequeue.Service { return f.queue }
+
+type fakePromptReferenceResolver struct {
+	expansions []promptservice.PromptReferenceExpansion
+	err        error
+}
+
+func (f fakePromptReferenceResolver) ResolvePromptReferences(context.Context, string) ([]promptservice.PromptReferenceExpansion, error) {
+	return f.expansions, f.err
+}
 
 func newMessageTaskHandler(t *testing.T, svc *service.Service, taskRepo ...TaskRepository) (*Handlers, *fakeOrchestrator) {
 	t.Helper()
@@ -284,6 +294,32 @@ func TestHandleMessageTask_RunningSession_Queues(t *testing.T) {
 	assert.Equal(t, "sender-sess-1", entry.Metadata["sender_session_id"])
 	assert.Empty(t, orch.promptCalls)
 	assert.Empty(t, orch.startCreatedCalls)
+}
+
+func TestHandleMessageTask_AppendsPromptReferenceExpansions(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+	h.SetPromptReferenceResolver(fakePromptReferenceResolver{
+		expansions: []promptservice.PromptReferenceExpansion{
+			{Name: "improve-harness", Content: "Review this session for durable harness improvements."},
+		},
+	})
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "Please run @improve-harness", sender.ID))
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	status := orch.queue.GetStatus(context.Background(), sess.ID)
+	require.Equal(t, 1, status.Count)
+	entry := status.Entries[0]
+	assert.Contains(t, entry.Content, "Please run @improve-harness")
+	assert.Contains(t, entry.Content, "EXPANDED PROMPT REFERENCES")
+	assert.Contains(t, entry.Content, "### @improve-harness")
+	assert.Contains(t, entry.Content, "Review this session for durable harness improvements.")
 }
 
 func TestHandleMessageTask_QueueFull_ReturnsStructuredError(t *testing.T) {

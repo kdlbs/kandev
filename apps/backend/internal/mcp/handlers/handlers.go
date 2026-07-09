@@ -21,6 +21,8 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	promptservice "github.com/kandev/kandev/internal/prompts/service"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -99,6 +101,13 @@ type MessageQueuer interface {
 	TakeQueued(ctx context.Context, sessionID string) (*messagequeue.QueuedMessage, bool)
 }
 
+// PromptReferenceResolver expands saved prompt references that appear inside
+// agent-sent prompts while preserving the original @mentions in the visible
+// prompt body.
+type PromptReferenceResolver interface {
+	ResolvePromptReferences(ctx context.Context, content string) ([]promptservice.PromptReferenceExpansion, error)
+}
+
 // Handlers provides MCP WebSocket handlers.
 type Handlers struct {
 	taskSvc          *service.Service
@@ -113,6 +122,7 @@ type Handlers struct {
 	planService      *service.PlanService
 	sessionLauncher  SessionLauncher
 	messageQueue     MessageQueuer
+	promptResolver   PromptReferenceResolver
 	logger           *logger.Logger
 
 	// Config-mode dependencies (optional, set via SetConfigDeps)
@@ -165,6 +175,10 @@ func NewHandlers(
 // a clarification tool call ends without delivering an answer to the agent.
 func (h *Handlers) SetClarificationInputPauser(pauser ClarificationInputPauser) {
 	h.inputPauser = pauser
+}
+
+func (h *Handlers) SetPromptReferenceResolver(resolver PromptReferenceResolver) {
+	h.promptResolver = resolver
 }
 
 // SetConfigDeps sets the config-mode dependencies for agent-native configuration handlers.
@@ -1439,7 +1453,8 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 			"failed to get session for task: "+err.Error(), nil)
 	}
 
-	wrappedPrompt, senderMeta := wrapAgentMessage(req.Prompt, senderTask, req.SenderSessionID)
+	prompt := h.appendPromptReferenceExpansionContext(ctx, req.Prompt)
+	wrappedPrompt, senderMeta := wrapAgentMessage(prompt, senderTask, req.SenderSessionID)
 
 	result, err := h.dispatchTaskMessage(ctx, req.TaskID, session, wrappedPrompt, senderMeta)
 	if err != nil {
@@ -1457,6 +1472,34 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		"session_id": result.sessionID,
 		"status":     result.status,
 	})
+}
+
+func (h *Handlers) appendPromptReferenceExpansionContext(ctx context.Context, prompt string) string {
+	if h.promptResolver == nil {
+		return prompt
+	}
+	expansions, err := h.promptResolver.ResolvePromptReferences(ctx, prompt)
+	if err != nil {
+		h.logger.Warn("failed to resolve prompt references for message_task", zap.Error(err))
+		return prompt
+	}
+	if len(expansions) == 0 {
+		return prompt
+	}
+	return prompt + "\n\n" + sysprompt.Wrap(formatPromptReferenceExpansions(expansions))
+}
+
+func formatPromptReferenceExpansions(expansions []promptservice.PromptReferenceExpansion) string {
+	var b strings.Builder
+	b.WriteString("EXPANDED PROMPT REFERENCES: The message above references saved prompts by @name. ")
+	b.WriteString("Use these expansions as hidden context while preserving the original @mentions.")
+	for _, expansion := range expansions {
+		b.WriteString("\n\n### @")
+		b.WriteString(expansion.Name)
+		b.WriteString("\n")
+		b.WriteString(expansion.Content)
+	}
+	return b.String()
 }
 
 // handleGetTaskConversation returns paginated conversation history for a task.

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 import { ChatMessage } from "./chat-message";
 import {
@@ -19,6 +19,7 @@ const OPEN_ATTACHMENT_1_LABEL = "Open Attachment 1";
 const FULL_SIZE_ATTACHMENT_1_ALT = "Full size Attachment 1";
 
 afterEach(() => {
+  cleanup();
   vi.restoreAllMocks();
 });
 
@@ -199,6 +200,75 @@ describe("ChatMessage sender badge", () => {
     expect(container.querySelector("[data-testid='workflow-message-dot']")?.className).toContain(
       "bg-neutral-400",
     );
+  });
+});
+
+describe("ChatMessage raw view", () => {
+  it("shows user raw_content with hidden kandev-system blocks when raw view is enabled", () => {
+    const raw = `<kandev-system>This message was sent by an agent working in task "Sender" (${SENDER_TASK_ID}).</kandev-system>
+
+@improve-task
+
+<kandev-system>EXPANDED PROMPT REFERENCES: The message above references saved prompts by @name.
+
+### @improve-task
+Review this task for durable improvements.</kandev-system>`;
+    const Wrapper = wrapper([{ id: SENDER_TASK_ID, title: SENDER_TITLE }]);
+
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({
+            content: "@improve-task",
+            raw_content: raw,
+            metadata: {
+              sender_task_id: SENDER_TASK_ID,
+              sender_task_title: SENDER_TITLE,
+              has_hidden_prompts: true,
+            },
+          })}
+          label="Message"
+          className=""
+        />
+      </Wrapper>,
+    );
+
+    expect(screen.queryByText(/EXPANDED PROMPT REFERENCES/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show raw text" }));
+
+    expect(screen.getByText(/This message was sent by an agent/)).not.toBeNull();
+    expect(screen.getByText(/EXPANDED PROMPT REFERENCES/)).not.toBeNull();
+    expect(screen.getByText(/### @improve-task/)).not.toBeNull();
+    expect(screen.getByText(/Review this task for durable improvements/)).not.toBeNull();
+  });
+
+  it("shows agent raw_content with hidden kandev-system blocks when raw view is enabled", () => {
+    const raw = `<kandev-system>Hidden agent context.</kandev-system>
+
+Visible agent response.`;
+    const Wrapper = wrapper([]);
+
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({
+            author_type: "agent",
+            content: "Visible agent response.",
+            raw_content: raw,
+          })}
+          label="Message"
+          className=""
+        />
+      </Wrapper>,
+    );
+
+    expect(screen.queryByText(/Hidden agent context/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show raw text" }));
+
+    expect(screen.getByText(/Hidden agent context/)).not.toBeNull();
+    expect(screen.getByText(/Visible agent response/)).not.toBeNull();
   });
 });
 
