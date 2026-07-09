@@ -40,9 +40,7 @@ async function integrationCardIconTopInsets(cards: Locator[]) {
 }
 
 async function integrationCards(page: Page): Promise<Locator[]> {
-  const links = page
-    .getByTestId("settings-scroll-container")
-    .locator('a[href^="/settings/integrations/"]');
+  const links = page.getByTestId("settings-scroll-container").locator('a[href*="/integrations/"]');
   await expect(links.first()).toBeVisible();
   const count = await links.count();
   expect(count).toBeGreaterThan(0);

@@ -136,13 +136,13 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/external-mcp": () => <ExternalMcpPage />,
   "/settings/prompts": () => <PromptsSettings />,
   "/settings/voice-mode": () => <VoiceModeSettings />,
-  "/settings/integrations": () => <IntegrationsIndexPage />,
-  "/settings/integrations/github": () => <GitHubIntegrationPage />,
-  "/settings/integrations/gitlab": () => <IntegrationsGitLabPage />,
-  "/settings/integrations/jira": () => <IntegrationsJiraPage />,
-  "/settings/integrations/linear": () => <IntegrationsLinearPage />,
-  "/settings/integrations/sentry": () => <IntegrationsSentryPage />,
-  "/settings/integrations/slack": () => <IntegrationsSlackPage />,
+  "/settings/integrations": () => renderIntegrationSettingsRoute(null),
+  "/settings/integrations/github": () => renderIntegrationSettingsRoute("github"),
+  "/settings/integrations/gitlab": () => renderIntegrationSettingsRoute("gitlab"),
+  "/settings/integrations/jira": () => renderIntegrationSettingsRoute("jira"),
+  "/settings/integrations/linear": () => renderIntegrationSettingsRoute("linear"),
+  "/settings/integrations/sentry": () => renderIntegrationSettingsRoute("sentry"),
+  "/settings/integrations/slack": () => renderIntegrationSettingsRoute("slack"),
   "/settings/system": () => <SettingsRedirect to="/settings/system/status" />,
   "/settings/system/about": () => (
     <SystemPageShell title="About" description="Version, build metadata, and links.">
@@ -225,37 +225,8 @@ function renderSettingsRoute(pathname: string) {
 }
 
 function renderDynamicSettingsRoute(pathname: string) {
-  const workspaceAutomation = matchDouble(
-    pathname,
-    /^\/settings\/workspace\/([^/]+)\/automations\/([^/]+)$/,
-  );
-  if (workspaceAutomation) {
-    const [id, automationId] = workspaceAutomation;
-    if (automationId === "new") {
-      return <NewAutomationPage params={Promise.resolve({ id })} />;
-    }
-    return <AutomationEditorPage params={Promise.resolve({ id, automationId })} />;
-  }
-
-  const workspaceSubpage = matchDouble(
-    pathname,
-    /^\/settings\/workspace\/([^/]+)\/(repositories|workflows|automations)$/,
-  );
-  if (workspaceSubpage) {
-    const [id, section] = workspaceSubpage;
-    if (section === "repositories") {
-      return <WorkspaceRepositoriesRoute workspaceId={id} />;
-    }
-    if (section === "workflows") {
-      return <WorkspaceWorkflowsRoute workspaceId={id} />;
-    }
-    return <AutomationsPage params={Promise.resolve({ id })} />;
-  }
-
-  const workspaceId = matchSingle(pathname, /^\/settings\/workspace\/([^/]+)$/);
-  if (workspaceId) {
-    return <WorkspaceEditPage params={Promise.resolve({ id: workspaceId })} />;
-  }
+  const workspaceRoute = renderWorkspaceSettingsRoute(pathname);
+  if (workspaceRoute) return workspaceRoute;
 
   const agentProfile = matchDouble(pathname, /^\/settings\/agents\/([^/]+)\/profiles\/([^/]+)$/);
   if (agentProfile) {
@@ -297,6 +268,73 @@ function renderDynamicSettingsRoute(pathname: string) {
   }
 
   return null;
+}
+
+function renderWorkspaceSettingsRoute(pathname: string) {
+  const workspaceIntegration = pathname.match(
+    /^\/settings\/workspace\/([^/]+)\/integrations(?:\/([^/]+))?$/,
+  );
+  if (workspaceIntegration?.[1]) {
+    return renderIntegrationSettingsRoute(
+      workspaceIntegration[2] ? decodeURIComponent(workspaceIntegration[2]) : null,
+      decodeURIComponent(workspaceIntegration[1]),
+    );
+  }
+
+  const workspaceAutomation = matchDouble(
+    pathname,
+    /^\/settings\/workspace\/([^/]+)\/automations\/([^/]+)$/,
+  );
+  if (workspaceAutomation) {
+    const [id, automationId] = workspaceAutomation;
+    if (automationId === "new") {
+      return <NewAutomationPage params={Promise.resolve({ id })} />;
+    }
+    return <AutomationEditorPage params={Promise.resolve({ id, automationId })} />;
+  }
+
+  const workspaceSubpage = matchDouble(
+    pathname,
+    /^\/settings\/workspace\/([^/]+)\/(repositories|workflows|automations)$/,
+  );
+  if (workspaceSubpage) {
+    const [id, section] = workspaceSubpage;
+    if (section === "repositories") {
+      return <WorkspaceRepositoriesRoute workspaceId={id} />;
+    }
+    if (section === "workflows") {
+      return <WorkspaceWorkflowsRoute workspaceId={id} />;
+    }
+    return <AutomationsPage params={Promise.resolve({ id })} />;
+  }
+
+  const workspaceId = matchSingle(pathname, /^\/settings\/workspace\/([^/]+)$/);
+  if (workspaceId) {
+    return <WorkspaceEditPage params={Promise.resolve({ id: workspaceId })} />;
+  }
+
+  return null;
+}
+
+function renderIntegrationSettingsRoute(section: string | null, workspaceId?: string) {
+  switch (section) {
+    case null:
+      return <IntegrationsIndexPage workspaceId={workspaceId} />;
+    case "github":
+      return <GitHubIntegrationPage />;
+    case "gitlab":
+      return <IntegrationsGitLabPage />;
+    case "jira":
+      return <IntegrationsJiraPage />;
+    case "linear":
+      return <IntegrationsLinearPage />;
+    case "sentry":
+      return <IntegrationsSentryPage />;
+    case "slack":
+      return <IntegrationsSlackPage />;
+    default:
+      return null;
+  }
 }
 
 function renderUpdatesRoute() {

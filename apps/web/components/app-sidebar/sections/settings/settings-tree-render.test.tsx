@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -9,6 +9,7 @@ const ARCHIVE_WORKSPACE_NAME = "Archive Workspace";
 
 const state = {
   workspaces: {
+    activeId: MAIN_WORKSPACE_ID,
     items: [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }],
   },
   settingsAgents: {
@@ -45,6 +46,7 @@ import { WorkspacesGroup } from "./workspaces-group";
 
 describe("SettingsTree rendering", () => {
   beforeEach(() => {
+    state.workspaces.activeId = MAIN_WORKSPACE_ID;
     state.workspaces.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
     state.settingsAgents.items = [];
     state.executors.items = [];
@@ -61,9 +63,53 @@ describe("SettingsTree rendering", () => {
     expect(screen.getByRole("link", { name: "Workflows" }).getAttribute("href")).toBe(
       "/settings/workspace/ws-1/workflows",
     );
+    expect(screen.getByRole("link", { name: "Automations" }).getAttribute("href")).toBe(
+      "/settings/workspace/ws-1/automations",
+    );
+    expect(screen.getByRole("link", { name: "Integrations" }).getAttribute("href")).toBe(
+      "/settings/workspace/ws-1/integrations",
+    );
   });
 
-  it("only opens the active workspace subsection on workspace detail routes", () => {
+  it("opens the active workspace by default when the settings tree opens", () => {
+    state.workspaces.items = [
+      { id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME },
+      { id: ARCHIVE_WORKSPACE_ID, name: ARCHIVE_WORKSPACE_NAME },
+    ];
+
+    render(<SettingsTree pathname="/settings" />);
+
+    expect(screen.getByRole("link", { name: `${MAIN_WORKSPACE_NAME} [active]` })).toBeTruthy();
+    expect(screen.getByRole("link", { name: ARCHIVE_WORKSPACE_NAME })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Repositories" }).getAttribute("href")).toBe(
+      "/settings/workspace/ws-1/repositories",
+    );
+    expect(screen.getByRole("link", { name: "Automations" }).getAttribute("href")).toBe(
+      "/settings/workspace/ws-1/automations",
+    );
+  });
+
+  it("uses an accordion for workspace subsections", () => {
+    state.workspaces.items = [
+      { id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME },
+      { id: ARCHIVE_WORKSPACE_ID, name: ARCHIVE_WORKSPACE_NAME },
+    ];
+
+    render(<WorkspacesGroup pathname="/settings" expanded />);
+
+    expect(screen.getByRole("link", { name: "Repositories" }).getAttribute("href")).toBe(
+      "/settings/workspace/ws-1/repositories",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand Archive Workspace" }));
+
+    expect(screen.getByRole("button", { name: "Expand Main Workspace" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Repositories" }).getAttribute("href")).toBe(
+      "/settings/workspace/ws-10/repositories",
+    );
+  });
+
+  it("only opens the routed workspace subsection on workspace detail routes", () => {
     state.workspaces.items = [
       { id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME },
       { id: ARCHIVE_WORKSPACE_ID, name: ARCHIVE_WORKSPACE_NAME },
@@ -71,13 +117,13 @@ describe("SettingsTree rendering", () => {
 
     const { rerender } = render(<WorkspacesGroup pathname="/settings/workspace" expanded />);
 
-    expect(screen.getAllByRole("link", { name: "Repositories" })).toHaveLength(2);
+    expect(screen.getAllByRole("link", { name: "Repositories" })).toHaveLength(1);
 
     rerender(<WorkspacesGroup pathname="/settings/workspace/ws-10/repositories" expanded />);
 
-    expect(screen.getByRole("link", { name: MAIN_WORKSPACE_NAME }).getAttribute("href")).toBe(
-      "/settings/workspace/ws-1",
-    );
+    expect(
+      screen.getByRole("link", { name: `${MAIN_WORKSPACE_NAME} [active]` }).getAttribute("href"),
+    ).toBe("/settings/workspace/ws-1");
     const repositoryLinks = screen.getAllByRole("link", { name: "Repositories" });
     const workflowLinks = screen.getAllByRole("link", { name: "Workflows" });
 
@@ -88,6 +134,20 @@ describe("SettingsTree rendering", () => {
     expect(screen.getByRole("link", { name: ARCHIVE_WORKSPACE_NAME }).getAttribute("href")).toBe(
       "/settings/workspace/ws-10",
     );
+  });
+
+  it("opens workspace integrations when a workspace integration route is active", () => {
+    state.workspaces.items = [
+      { id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME },
+      { id: ARCHIVE_WORKSPACE_ID, name: ARCHIVE_WORKSPACE_NAME },
+    ];
+
+    render(<WorkspacesGroup pathname="/settings/workspace/ws-10/integrations/github" expanded />);
+
+    expect(screen.getByRole("link", { name: "GitHub" }).getAttribute("href")).toBe(
+      "/settings/workspace/ws-10/integrations/github",
+    );
+    expect(screen.getByRole("button", { name: "Expand Main Workspace" })).toBeTruthy();
   });
 
   it("keeps Voice Mode in the settings tree as a standalone active leaf", () => {

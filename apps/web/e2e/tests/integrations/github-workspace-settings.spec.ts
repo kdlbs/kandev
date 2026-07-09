@@ -35,8 +35,8 @@ test.describe("GitHub workspace settings", () => {
       },
     ]);
 
-    await testPage.goto("/settings/integrations/github");
-    await expect(testPage.getByTestId("integration-workspace-switcher")).toBeVisible();
+    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
+    await expect(testPage.getByTestId("integration-workspace-switcher")).toHaveCount(0);
 
     await testPage.getByTestId("github-scope-mode").click();
     await testPage.getByRole("option", { name: "Selected repositories" }).click();

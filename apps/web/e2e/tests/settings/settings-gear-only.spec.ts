@@ -20,6 +20,13 @@ test.describe("Settings sidebar takeover", () => {
     // Gear opens the takeover again.
     await gear.click();
     await expect(takeover).toBeVisible();
+    await expect(takeover.getByRole("link", { name: /active/i })).toBeVisible();
+    await expect(takeover.getByRole("link", { name: "Repositories" })).toBeVisible();
+    await expect(takeover.getByRole("link", { name: "Integrations" })).toHaveAttribute(
+      "href",
+      /\/settings\/workspace\/[^/]+\/integrations$/,
+    );
+    await expect(takeover.locator('a[href="/settings/integrations"]')).toHaveCount(0);
 
     // Enter a section: navigates to a settings sub-page; takeover stays open.
     await takeover.locator('a[href="/settings/agents"]').first().click();

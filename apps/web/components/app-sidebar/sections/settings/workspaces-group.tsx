@@ -1,10 +1,37 @@
 "use client";
 
-import { IconArrowsShuffle, IconFolder, IconGitBranch } from "@tabler/icons-react";
+import { useEffect, useState } from "react";
+import {
+  IconArrowsShuffle,
+  IconBolt,
+  IconBrandGithub,
+  IconBrandGitlab,
+  IconBrandSentry,
+  IconBrandSlack,
+  IconFolder,
+  IconGitBranch,
+  IconHexagon,
+  IconPlugConnected,
+  IconTicket,
+} from "@tabler/icons-react";
+import type { Icon as TablerIcon } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { SettingsGroup, SettingsLeaf } from "./settings-nav-primitives";
 
 const ROOT_HREF = "/settings/workspace";
+
+const INTEGRATIONS: Array<{ slug: string; label: string; icon: TablerIcon }> = [
+  { slug: "github", label: "GitHub", icon: IconBrandGithub },
+  { slug: "gitlab", label: "GitLab", icon: IconBrandGitlab },
+  { slug: "jira", label: "Jira", icon: IconTicket },
+  { slug: "linear", label: "Linear", icon: IconHexagon },
+  { slug: "sentry", label: "Sentry", icon: IconBrandSentry },
+  { slug: "slack", label: "Slack", icon: IconBrandSlack },
+];
+
+const ACTIVE_WORKSPACE_LABEL = (
+  <span className="shrink-0 text-[10px] font-semibold uppercase text-primary">[active]</span>
+);
 
 type WorkspacesGroupProps = {
   pathname: string;
@@ -19,14 +46,24 @@ function isWorkspaceRoute(pathname: string, workspaceId: string): boolean {
 
 export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGroupProps) {
   const workspaces = useAppStore((s) => s.workspaces.items);
-  const activeWorkspaceId =
+  const storeActiveWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+  const routeWorkspaceId =
     workspaces.find((workspace) => isWorkspaceRoute(pathname, workspace.id))?.id ?? null;
-  const routeExpansionKey = activeWorkspaceId ?? "all";
-  const hasActiveWorkspaceRoute = activeWorkspaceId !== null;
+  const activeWorkspaceId = workspaces.some((workspace) => workspace.id === storeActiveWorkspaceId)
+    ? storeActiveWorkspaceId
+    : null;
+  const defaultExpandedWorkspaceId = routeWorkspaceId ?? activeWorkspaceId ?? workspaces[0]?.id;
+  const [expandedWorkspaceId, setExpandedWorkspaceId] = useState<string | null>(
+    defaultExpandedWorkspaceId ?? null,
+  );
 
-  function shouldExpandWorkspace(workspaceId: string): boolean {
-    return !hasActiveWorkspaceRoute || activeWorkspaceId === workspaceId;
-  }
+  useEffect(() => {
+    setExpandedWorkspaceId(defaultExpandedWorkspaceId ?? null);
+  }, [defaultExpandedWorkspaceId]);
+
+  const toggleWorkspace = (workspaceId: string) => {
+    setExpandedWorkspaceId((current) => (current === workspaceId ? null : workspaceId));
+  };
 
   return (
     <SettingsGroup
@@ -41,13 +78,20 @@ export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGrou
         const workspacePath = `${ROOT_HREF}/${workspace.id}`;
         const repositoriesPath = `${workspacePath}/repositories`;
         const workflowsPath = `${workspacePath}/workflows`;
+        const automationsPath = `${workspacePath}/automations`;
+        const integrationsPath = `${workspacePath}/integrations`;
+        const integrationsActive =
+          pathname === integrationsPath || pathname.startsWith(`${integrationsPath}/`);
+        const workspaceIsActive = activeWorkspaceId === workspace.id;
         return (
           <SettingsGroup
-            key={`${workspace.id}:${routeExpansionKey}`}
+            key={workspace.id}
             label={workspace.name}
+            labelSuffix={workspaceIsActive ? ACTIVE_WORKSPACE_LABEL : undefined}
             href={workspacePath}
             isActive={pathname === workspacePath}
-            defaultExpanded={shouldExpandWorkspace(workspace.id)}
+            expanded={expandedWorkspaceId === workspace.id}
+            onToggle={() => toggleWorkspace(workspace.id)}
             depth={1}
           >
             <SettingsLeaf
@@ -62,6 +106,35 @@ export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGrou
               label="Workflows"
               icon={IconArrowsShuffle}
               isActive={pathname === workflowsPath}
+              depth={2}
+            />
+            <SettingsGroup
+              label="Integrations"
+              icon={IconPlugConnected}
+              href={integrationsPath}
+              isActive={pathname === integrationsPath}
+              defaultExpanded={integrationsActive}
+              depth={2}
+            >
+              {INTEGRATIONS.map(({ slug, label, icon }) => {
+                const href = `${integrationsPath}/${slug}`;
+                return (
+                  <SettingsLeaf
+                    key={href}
+                    href={href}
+                    label={label}
+                    icon={icon}
+                    isActive={pathname === href}
+                    depth={2}
+                  />
+                );
+              })}
+            </SettingsGroup>
+            <SettingsLeaf
+              href={automationsPath}
+              label="Automations"
+              icon={IconBolt}
+              isActive={pathname === automationsPath}
               depth={2}
             />
           </SettingsGroup>

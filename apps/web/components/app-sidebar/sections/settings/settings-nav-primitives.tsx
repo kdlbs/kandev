@@ -59,6 +59,7 @@ export function SettingsLeaf({
 
 type SettingsGroupProps = {
   label: string;
+  labelSuffix?: ReactNode;
   icon?: TablerIcon;
   /** When the group itself has a destination, the label area is also a link. */
   href?: string;
@@ -78,6 +79,7 @@ type SettingsGroupProps = {
 
 export function SettingsGroup({
   label,
+  labelSuffix,
   icon: Icon,
   href,
   isActive,
@@ -100,6 +102,7 @@ export function SettingsGroup({
     <>
       {Icon && <Icon className="h-3.5 w-3.5 shrink-0" />}
       <span className="flex-1 truncate">{label}</span>
+      {labelSuffix}
     </>
   );
 
