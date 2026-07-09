@@ -71,6 +71,21 @@ export function useSidebarLinkActions(store: StoreApi) {
     [getLinkTarget],
   );
 
+  const handleLinkJiraTicketTask = useCallback(
+    (taskId: string) => handleLinkExternalIssueTask("jira", taskId),
+    [handleLinkExternalIssueTask],
+  );
+
+  const handleLinkLinearIssueTask = useCallback(
+    (taskId: string) => handleLinkExternalIssueTask("linear", taskId),
+    [handleLinkExternalIssueTask],
+  );
+
+  const handleLinkSentryIssueTask = useCallback(
+    (taskId: string) => handleLinkExternalIssueTask("sentry", taskId),
+    [handleLinkExternalIssueTask],
+  );
+
   return {
     linkingPullRequestTask,
     setLinkingPullRequestTask,
@@ -80,8 +95,8 @@ export function useSidebarLinkActions(store: StoreApi) {
     handleLinkIssueTask,
     linkingExternalIssueTask,
     setLinkingExternalIssueTask,
-    handleLinkJiraTicketTask: (taskId: string) => handleLinkExternalIssueTask("jira", taskId),
-    handleLinkLinearIssueTask: (taskId: string) => handleLinkExternalIssueTask("linear", taskId),
-    handleLinkSentryIssueTask: (taskId: string) => handleLinkExternalIssueTask("sentry", taskId),
+    handleLinkJiraTicketTask,
+    handleLinkLinearIssueTask,
+    handleLinkSentryIssueTask,
   };
 }
