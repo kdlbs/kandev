@@ -356,17 +356,6 @@ func (s *Service) MoveTaskWithOptions(
 	return result, nil
 }
 
-func (s *Service) isTerminalWorkflowStep(ctx context.Context, workflowStepID string) bool {
-	terminal, err := s.terminalWorkflowStep(ctx, workflowStepID)
-	if err != nil {
-		s.logger.Warn("failed to get workflow step terminal status",
-			zap.String("workflow_step_id", workflowStepID),
-			zap.Error(err))
-		return false
-	}
-	return terminal
-}
-
 func (s *Service) terminalWorkflowStep(ctx context.Context, workflowStepID string) (bool, error) {
 	if s.workflowStepGetter == nil || workflowStepID == "" {
 		return false, nil
@@ -394,7 +383,7 @@ func (s *Service) syncTaskStateForWorkflowMove(ctx context.Context, task *models
 		task.State = v1.TaskStateCompleted
 		return nil
 	}
-	if oldStepID == newStepID || !models.IsTerminalTaskState(task.State) {
+	if oldStepID == newStepID || task.State != v1.TaskStateCompleted {
 		return nil
 	}
 	oldTerminal, err := s.terminalWorkflowStep(ctx, oldStepID)
@@ -578,6 +567,11 @@ func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceSte
 		return &BulkMoveTasksResult{MovedCount: 0}, nil
 	}
 
+	targetIsTerminal, err := s.terminalWorkflowStep(ctx, targetStepID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check target step terminal status: %w", err)
+	}
+
 	now := time.Now().UTC()
 	for i, task := range tasks {
 		oldWorkflowID := task.WorkflowID
@@ -586,8 +580,16 @@ func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceSte
 		task.WorkflowID = targetWorkflowID
 		task.WorkflowStepID = targetStepID
 		task.Position = i
-		if err := s.syncTaskStateForWorkflowMove(ctx, task, oldStepID, targetStepID); err != nil {
-			return nil, fmt.Errorf("failed to sync task state for bulk move %s: %w", task.ID, err)
+		if targetIsTerminal {
+			task.State = v1.TaskStateCompleted
+		} else if oldStepID != targetStepID && task.State == v1.TaskStateCompleted {
+			oldTerminal, err := s.terminalWorkflowStep(ctx, oldStepID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to sync task state for bulk move %s: %w", task.ID, err)
+			}
+			if oldTerminal {
+				task.State = v1.TaskStateTODO
+			}
 		}
 		task.UpdatedAt = now
 

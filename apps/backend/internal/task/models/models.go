@@ -365,7 +365,7 @@ type ChildCompletionRow struct {
 	State                v1.TaskState `json:"state" db:"state"`
 	Title                string       `json:"title" db:"title"`
 	WorkflowStepID       string       `json:"workflow_step_id" db:"workflow_step_id"`
-	TerminalWorkflowStep bool         `json:"terminal_workflow_step"`
+	TerminalWorkflowStep bool         `json:"terminal_workflow_step"` // computed by annotateTerminalChildSteps, not a DB column
 	UpdatedAt            time.Time    `json:"updated_at" db:"updated_at"`
 }
 

@@ -439,7 +439,10 @@ func TestProcessOnTurnCompleteViaEngine_NonTerminalStepWritesTaskStateReview(t *
 	}
 
 	assertStepByName(t, ctx, repo, "s1", "In Progress", nameToID)
-	if state, ok := taskRepo.updatedStates["t1"]; !ok || state != v1.TaskStateReview {
+	taskRepo.mu.Lock()
+	state, ok := taskRepo.updatedStates["t1"]
+	taskRepo.mu.Unlock()
+	if !ok || state != v1.TaskStateReview {
 		t.Errorf("tasks.state = %q, want %q (ok=%v)", state, v1.TaskStateReview, ok)
 	}
 }
