@@ -9,7 +9,12 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { listSentryProjects, searchSentryIssues } from "@/lib/api/domains/sentry-api";
+import {
+  useSentryInstances,
+  type SentryAvailabilityState,
+} from "@/hooks/domains/sentry/use-sentry-availability";
 import type {
+  SentryConfig,
   SentryIssue,
   SentryLevel,
   SentryProject,
@@ -68,9 +73,31 @@ export function SentryIssueDialog({ open, onOpenChange, workspaceId }: SentryIss
   );
 }
 
-type DialogState = ReturnType<typeof useDialogState>;
+// DialogState is the browse dialog's shared view-model, passed to the filter and
+// results subcomponents. Named explicitly (not ReturnType) so the contract lives
+// at this module boundary.
+interface DialogState {
+  filter: FilterState;
+  updateFilter: <K extends keyof FilterState>(key: K, value: FilterState[K]) => void;
+  projects: SentryProject[];
+  issues: SentryIssue[];
+  nextCursor: string | undefined;
+  isLast: boolean;
+  loading: boolean;
+  error: string | null;
+  search: (nextCursorValue?: string) => Promise<void>;
+  // instanceId is the Sentry instance the browse calls are scoped to; empty
+  // until one is chosen (or auto-selected when the workspace has exactly one
+  // healthy instance).
+  instanceId: string;
+  setInstanceId: (id: string) => void;
+  healthy: SentryConfig[];
+  instancesState: SentryAvailabilityState;
+}
 
-function useDialogState(open: boolean, workspaceId?: string) {
+function useDialogState(open: boolean, workspaceId?: string): DialogState {
+  const { healthy, state: instancesState } = useSentryInstances(workspaceId);
+  const [instanceId, setInstanceId] = useState("");
   const [filter, setFilter] = useState<FilterState>(initialFilter);
   const [projects, setProjects] = useState<SentryProject[]>([]);
   const [issues, setIssues] = useState<SentryIssue[]>([]);
@@ -83,9 +110,32 @@ function useDialogState(open: boolean, workspaceId?: string) {
   // out-of-order response from a superseded search can't clobber the list.
   const searchSeq = useRef(0);
 
+  // Auto-select the sole healthy instance; force an explicit pick when several;
+  // drop a selection that is no longer healthy.
+  useEffect(() => {
+    setInstanceId((prev) => {
+      if (healthy.length === 0) return "";
+      if (healthy.length === 1) return healthy[0].id;
+      return healthy.some((i) => i.id === prev) ? prev : "";
+    });
+  }, [healthy]);
+
+  // Switching instance invalidates the previous instance's filter, results and
+  // cursor: reset them, invalidate any in-flight search, and refetch projects.
+  useEffect(() => {
+    setFilter(initialFilter);
+    setIssues([]);
+    setNextCursor(undefined);
+    setIsLast(true);
+    setError(null);
+    setConfigLoaded(false);
+    searchSeq.current++;
+  }, [instanceId]);
+
   useBrowseProjects({
     open,
     workspaceId,
+    instanceId,
     loaded: configLoaded,
     setFilter,
     setLoaded: setConfigLoaded,
@@ -100,20 +150,21 @@ function useDialogState(open: boolean, workspaceId?: string) {
 
   const search = useCallback(
     async (nextCursorValue?: string) => {
+      if (!instanceId) {
+        setError("Select a Sentry instance to search");
+        return;
+      }
       if (!filter.orgSlug) {
         setError("Organization slug is required");
         return;
       }
+      if (!workspaceId) return;
       const seq = ++searchSeq.current;
       setLoading(true);
       setError(null);
       try {
         const payload = toSearchFilter(filter);
-        const res = await searchSentryIssues(
-          payload,
-          nextCursorValue,
-          workspaceId ? { workspaceId } : undefined,
-        );
+        const res = await searchSentryIssues(workspaceId, instanceId, payload, nextCursorValue);
         // A newer search started while this one was in flight — drop the result.
         if (seq !== searchSeq.current) return;
         const page = res.issues ?? [];
@@ -128,7 +179,7 @@ function useDialogState(open: boolean, workspaceId?: string) {
         if (seq === searchSeq.current) setLoading(false);
       }
     },
-    [workspaceId, filter],
+    [workspaceId, instanceId, filter],
   );
 
   return {
@@ -141,6 +192,10 @@ function useDialogState(open: boolean, workspaceId?: string) {
     loading,
     error,
     search,
+    instanceId,
+    setInstanceId,
+    healthy,
+    instancesState,
   };
 }
 
@@ -159,6 +214,7 @@ function toSearchFilter(filter: FilterState): SentrySearchFilter {
 type BrowseProjectsArgs = {
   open: boolean;
   workspaceId: string | undefined;
+  instanceId: string;
   loaded: boolean;
   setFilter: (f: (prev: FilterState) => FilterState) => void;
   setLoaded: (v: boolean) => void;
@@ -168,6 +224,7 @@ type BrowseProjectsArgs = {
 function useBrowseProjects({
   open,
   workspaceId,
+  instanceId,
   loaded,
   setFilter,
   setLoaded,
@@ -181,14 +238,18 @@ function useBrowseProjects({
       return;
     }
     if (loaded) return;
+    // Without a chosen instance there is nothing to fetch; wait (leave `loaded`
+    // false) until one is selected.
+    if (!workspaceId || !instanceId) {
+      setProjects([]);
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
-        const res = await listSentryProjects(workspaceId ? { workspaceId } : undefined).catch(
-          () => ({
-            projects: [] as SentryProject[],
-          }),
-        );
+        const res = await listSentryProjects(workspaceId, instanceId).catch(() => ({
+          projects: [] as SentryProject[],
+        }));
         if (cancelled) return;
         const projects = res.projects ?? [];
         setProjects(projects);
@@ -205,12 +266,13 @@ function useBrowseProjects({
     return () => {
       cancelled = true;
     };
-  }, [open, workspaceId, loaded, setFilter, setLoaded, setProjects]);
+  }, [open, workspaceId, instanceId, loaded, setFilter, setLoaded, setProjects]);
 }
 
 function FiltersBar({ state }: { state: DialogState }) {
   return (
     <div className="border-b px-5 py-4 space-y-3 shrink-0">
+      <InstanceSelectRow state={state} />
       <FilterTopRow state={state} />
       <FilterChipRow
         label="Level"
@@ -227,6 +289,45 @@ function FiltersBar({ state }: { state: DialogState }) {
         chipClass={(v) => statusBadgeClass(v as SentryStatus)}
       />
       <SearchActionRow state={state} />
+    </div>
+  );
+}
+
+// InstanceSelectRow renders the instance picker when the workspace has several
+// healthy instances, a hint when none are usable, and nothing when a sole
+// instance was auto-selected.
+function InstanceSelectRow({ state }: { state: DialogState }) {
+  const { healthy, instanceId, setInstanceId, instancesState } = state;
+  if (instancesState === "empty") {
+    return (
+      <p className="text-xs text-muted-foreground">
+        No Sentry instances configured for this workspace.
+      </p>
+    );
+  }
+  if (instancesState === "unhealthy") {
+    return (
+      <p className="text-xs text-muted-foreground">
+        No healthy Sentry instance — check the integration settings.
+      </p>
+    );
+  }
+  if (healthy.length <= 1) return null;
+  return (
+    <div className="space-y-1 max-w-sm">
+      <Label className="text-xs text-muted-foreground">Sentry instance</Label>
+      <Select value={instanceId || undefined} onValueChange={setInstanceId}>
+        <SelectTrigger className="h-8 text-xs" data-testid="sentry-browse-instance-select">
+          <SelectValue placeholder="Select an instance to browse" />
+        </SelectTrigger>
+        <SelectContent>
+          {healthy.map((instance) => (
+            <SelectItem key={instance.id} value={instance.id}>
+              {instance.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }
@@ -367,7 +468,7 @@ function FilterChipRow({ label, options, selected, onToggle, chipClass }: ChipRo
 }
 
 function SearchActionRow({ state }: { state: DialogState }) {
-  const { filter, updateFilter, loading, search } = state;
+  const { filter, updateFilter, loading, search, instanceId } = state;
   return (
     <div className="flex items-end gap-2">
       <div className="flex-1 space-y-1">
@@ -392,7 +493,7 @@ function SearchActionRow({ state }: { state: DialogState }) {
         type="button"
         size="sm"
         onClick={() => void search()}
-        disabled={loading || !filter.orgSlug}
+        disabled={loading || !filter.orgSlug || !instanceId}
         className="cursor-pointer gap-1.5"
       >
         {loading ? (
@@ -407,7 +508,7 @@ function SearchActionRow({ state }: { state: DialogState }) {
 }
 
 function ResultsBody({ state }: { state: DialogState }) {
-  const { issues, loading, error, isLast, nextCursor, search } = state;
+  const { issues, loading, error, isLast, nextCursor, search, instanceId } = state;
   const empty = useMemo(() => !loading && !error && issues.length === 0, [loading, error, issues]);
 
   return (
@@ -415,7 +516,9 @@ function ResultsBody({ state }: { state: DialogState }) {
       {error && <SentryErrorMessage error={error} compact />}
       {empty && (
         <div className="text-sm text-muted-foreground py-12 text-center">
-          No issues yet. Run a search to begin.
+          {instanceId
+            ? "No issues yet. Run a search to begin."
+            : "Select a Sentry instance to browse its issues."}
         </div>
       )}
       {issues.map((issue) => (

@@ -1,5 +1,7 @@
-import { fetchJson, type ApiRequestOptions } from "../client";
+import { ApiError, fetchJson, type ApiRequestOptions } from "../client";
 import type {
+  CopySentryConfigRequest,
+  CreateSentryConfigRequest,
   CreateSentryIssueWatchRequest,
   SentryConfig,
   SentryIssue,
@@ -8,93 +10,197 @@ import type {
   SentryProject,
   SentrySearchFilter,
   SentrySearchResult,
-  SetSentryConfigRequest,
   TestSentryConnectionResult,
+  UpdateSentryConfigRequest,
   UpdateSentryIssueWatchRequest,
 } from "@/lib/types/sentry";
 
-type WorkspaceApiOptions = ApiRequestOptions & { workspaceId?: string };
+const BASE = "/api/v1/sentry";
 
-function withWorkspace(path: string, options?: WorkspaceApiOptions): string {
-  if (!options?.workspaceId) return path;
-  const separator = path.includes("?") ? "&" : "?";
-  return `${path}${separator}workspace_id=${encodeURIComponent(options.workspaceId)}`;
+// SENTRY_ERROR_CODES are the wire-level `code` discriminators the backend
+// stamps on structured error bodies so the UI can react without matching on
+// human-readable error text.
+export const SENTRY_ERROR_CODES = {
+  instanceRequired: "SENTRY_INSTANCE_REQUIRED",
+  instanceNotFound: "SENTRY_INSTANCE_NOT_FOUND",
+  instanceInUse: "SENTRY_INSTANCE_IN_USE",
+  nameTaken: "SENTRY_INSTANCE_NAME_TAKEN",
+  notConfigured: "SENTRY_NOT_CONFIGURED",
+} as const;
+
+// sentryErrorCode extracts the backend `code` from a failed request, or null
+// when the rejection is not an ApiError or carries no code.
+export function sentryErrorCode(err: unknown): string | null {
+  if (!(err instanceof ApiError)) return null;
+  const body = err.body;
+  if (body && typeof body === "object" && "code" in body) {
+    const code = body.code;
+    return typeof code === "string" ? code : null;
+  }
+  return null;
 }
 
-function requestOptions(options?: WorkspaceApiOptions): ApiRequestOptions | undefined {
-  if (!options) return undefined;
-  const { workspaceId: _workspaceId, ...rest } = options;
-  return rest;
+// sentryInUseWatchCount returns the count of watches blocking a delete when the
+// error is a 409 SENTRY_INSTANCE_IN_USE, else null.
+export function sentryInUseWatchCount(err: unknown): number | null {
+  if (!(err instanceof ApiError) || err.status !== 409) return null;
+  if (sentryErrorCode(err) !== SENTRY_ERROR_CODES.instanceInUse) return null;
+  const body = err.body;
+  if (body && typeof body === "object" && "watchCount" in body) {
+    const count = body.watchCount;
+    return typeof count === "number" ? count : null;
+  }
+  return null;
 }
 
-// fetchSentryConfig returns undefined when the backend responds 204 (no config yet).
-export async function fetchSentryConfig(
-  options?: WorkspaceApiOptions,
-): Promise<SentryConfig | undefined> {
-  return fetchJson<SentryConfig | undefined>(
-    withWorkspace(`/api/v1/sentry/config`, options),
-    requestOptions(options),
+// withParams appends non-empty query params to a path, respecting any existing
+// query string.
+function withParams(path: string, params: Record<string, string>): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value) search.set(key, value);
+  }
+  const query = search.toString();
+  if (!query) return path;
+  return `${path}${path.includes("?") ? "&" : "?"}${query}`;
+}
+
+// --- Instances (per-workspace named Sentry configs) ---
+
+// listSentryInstances returns every Sentry instance configured in a workspace.
+export async function listSentryInstances(workspaceId: string, options?: ApiRequestOptions) {
+  const res = await fetchJson<{ instances: SentryConfig[] }>(
+    withParams(`${BASE}/instances`, { workspace_id: workspaceId }),
+    options,
+  );
+  return res.instances ?? [];
+}
+
+// getSentryInstance fetches one instance by id, scoped to its workspace.
+export async function getSentryInstance(
+  workspaceId: string,
+  id: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<SentryConfig>(
+    withParams(`${BASE}/instances/${encodeURIComponent(id)}`, { workspace_id: workspaceId }),
+    options,
   );
 }
 
-export async function saveSentryConfig(
-  payload: SetSentryConfigRequest,
-  options?: WorkspaceApiOptions,
+// createSentryInstance adds a new named instance to a workspace.
+export async function createSentryInstance(
+  workspaceId: string,
+  payload: CreateSentryConfigRequest,
+  options?: ApiRequestOptions,
 ) {
-  return fetchJson<SentryConfig>(withWorkspace(`/api/v1/sentry/config`, options), {
-    ...requestOptions(options),
-    init: { ...(options?.init ?? {}), method: "PUT", body: JSON.stringify(payload) },
+  return fetchJson<SentryConfig>(withParams(`${BASE}/instances`, { workspace_id: workspaceId }), {
+    ...options,
+    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
   });
 }
 
-export async function deleteSentryConfig(options?: WorkspaceApiOptions) {
-  return fetchJson<{ deleted: boolean }>(withWorkspace(`/api/v1/sentry/config`, options), {
-    ...requestOptions(options),
-    init: { ...(options?.init ?? {}), method: "DELETE" },
-  });
-}
-
-export async function testSentryConnection(
-  secret?: string,
-  url?: string,
-  options?: WorkspaceApiOptions,
+// updateSentryInstance replaces an instance's name/url/auth (and, when a
+// non-empty secret is supplied, its stored token).
+export async function updateSentryInstance(
+  workspaceId: string,
+  id: string,
+  payload: UpdateSentryConfigRequest,
+  options?: ApiRequestOptions,
 ) {
-  const payload: { secret?: string; url?: string } = {};
-  if (secret) payload.secret = secret;
-  if (url) payload.url = url;
-  return fetchJson<TestSentryConnectionResult>(
-    withWorkspace(`/api/v1/sentry/config/test`, options),
+  return fetchJson<SentryConfig>(
+    withParams(`${BASE}/instances/${encodeURIComponent(id)}`, { workspace_id: workspaceId }),
     {
-      ...requestOptions(options),
-      init: {
-        ...(options?.init ?? {}),
-        method: "POST",
-        body: JSON.stringify(payload),
-      },
+      ...options,
+      init: { ...(options?.init ?? {}), method: "PUT", body: JSON.stringify(payload) },
     },
   );
 }
 
-// copySentryConfig copies the Sentry config + credential from the workspace in
-// options (source) to targetWorkspaceId.
-export async function copySentryConfig(targetWorkspaceId: string, options?: WorkspaceApiOptions) {
-  return fetchJson<SentryConfig>(withWorkspace(`/api/v1/sentry/config/copy`, options), {
-    ...requestOptions(options),
-    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify({ targetWorkspaceId }) },
-  });
-}
-
-export async function listSentryOrganizations(options?: WorkspaceApiOptions) {
-  return fetchJson<{ organizations: SentryOrganization[] }>(
-    withWorkspace(`/api/v1/sentry/organizations`, options),
-    requestOptions(options),
+// deleteSentryInstance removes an instance. Rejects with a 409
+// SENTRY_INSTANCE_IN_USE (carrying watchCount) when watches still bind to it.
+export async function deleteSentryInstance(
+  workspaceId: string,
+  id: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ deleted: boolean }>(
+    withParams(`${BASE}/instances/${encodeURIComponent(id)}`, { workspace_id: workspaceId }),
+    {
+      ...options,
+      init: { ...(options?.init ?? {}), method: "DELETE" },
+    },
   );
 }
 
-export async function listSentryProjects(options?: WorkspaceApiOptions) {
+// testSentryInstance pings Sentry with a saved instance's stored credentials.
+export async function testSentryInstance(
+  workspaceId: string,
+  id: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<TestSentryConnectionResult>(
+    withParams(`${BASE}/instances/${encodeURIComponent(id)}/test`, { workspace_id: workspaceId }),
+    { ...options, init: { ...(options?.init ?? {}), method: "POST" } },
+  );
+}
+
+// testSentryConnection pings Sentry with ad-hoc credentials (before an instance
+// is saved) to validate a token/URL pair.
+export async function testSentryConnection(
+  workspaceId: string,
+  creds: { secret?: string; url?: string; authMethod?: string },
+  options?: ApiRequestOptions,
+) {
+  const payload: { secret?: string; url?: string; authMethod?: string } = {};
+  if (creds.secret) payload.secret = creds.secret;
+  if (creds.url) payload.url = creds.url;
+  if (creds.authMethod) payload.authMethod = creds.authMethod;
+  return fetchJson<TestSentryConnectionResult>(
+    withParams(`${BASE}/test-connection`, { workspace_id: workspaceId }),
+    {
+      ...options,
+      init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
+    },
+  );
+}
+
+// copySentryInstances copies every instance (and its credential) from one
+// workspace into another, returning the newly-created instances.
+export async function copySentryInstances(
+  sourceWorkspaceId: string,
+  targetWorkspaceId: string,
+  options?: ApiRequestOptions,
+) {
+  const payload: CopySentryConfigRequest = { sourceWorkspaceId, targetWorkspaceId };
+  const res = await fetchJson<{ instances: SentryConfig[] }>(`${BASE}/config/copy`, {
+    ...options,
+    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
+  });
+  return res.instances ?? [];
+}
+
+// --- Browse (org/project/issue lookups scoped to one instance) ---
+
+export async function listSentryOrganizations(
+  workspaceId: string,
+  instanceId: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ organizations: SentryOrganization[] }>(
+    withParams(`${BASE}/organizations`, { workspace_id: workspaceId, instanceId }),
+    options,
+  );
+}
+
+export async function listSentryProjects(
+  workspaceId: string,
+  instanceId: string,
+  options?: ApiRequestOptions,
+) {
   return fetchJson<{ projects: SentryProject[] }>(
-    withWorkspace(`/api/v1/sentry/projects`, options),
-    requestOptions(options),
+    withParams(`${BASE}/projects`, { workspace_id: workspaceId, instanceId }),
+    options,
   );
 }
 
@@ -109,23 +215,32 @@ function appendFilter(search: URLSearchParams, filter: SentrySearchFilter): void
 }
 
 export async function searchSentryIssues(
+  workspaceId: string,
+  instanceId: string,
   filter: SentrySearchFilter,
   cursor?: string,
-  options?: WorkspaceApiOptions,
+  options?: ApiRequestOptions,
 ) {
   const search = new URLSearchParams();
+  search.set("workspace_id", workspaceId);
+  search.set("instanceId", instanceId);
   appendFilter(search, filter);
   if (cursor) search.set("cursor", cursor);
-  return fetchJson<SentrySearchResult>(
-    withWorkspace(`/api/v1/sentry/issues?${search.toString()}`, options),
-    requestOptions(options),
-  );
+  return fetchJson<SentrySearchResult>(`${BASE}/issues?${search.toString()}`, options);
 }
 
-export async function getSentryIssue(idOrShortId: string, options?: WorkspaceApiOptions) {
+export async function getSentryIssue(
+  workspaceId: string,
+  instanceId: string,
+  idOrShortId: string,
+  options?: ApiRequestOptions,
+) {
   return fetchJson<SentryIssue>(
-    withWorkspace(`/api/v1/sentry/issues/${encodeURIComponent(idOrShortId)}`, options),
-    requestOptions(options),
+    withParams(`${BASE}/issues/${encodeURIComponent(idOrShortId)}`, {
+      workspace_id: workspaceId,
+      instanceId,
+    }),
+    options,
   );
 }
 
@@ -156,10 +271,13 @@ export async function createSentryIssueWatch(
   payload: CreateSentryIssueWatchRequest,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<SentryIssueWatch>(`/api/v1/sentry/watches/issue`, {
-    ...options,
-    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
-  });
+  return fetchJson<SentryIssueWatch>(
+    withParams(`${BASE}/watches/issue`, { workspace_id: payload.workspaceId }),
+    {
+      ...options,
+      init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
+    },
+  );
 }
 
 export async function updateSentryIssueWatch(

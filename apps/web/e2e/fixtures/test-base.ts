@@ -204,12 +204,9 @@ export const test = backendFixture.extend<
       await apiClient
         .rawRequest("DELETE", `/api/v1/linear/config?${scoped}`)
         .catch(() => undefined);
-      await apiClient
-        .rawRequest("DELETE", `/api/v1/sentry/config?${scoped}`)
-        .catch(() => undefined);
+      await apiClient.deleteAllSentryInstances(seedData.workspaceId).catch(() => undefined);
       await apiClient.rawRequest("DELETE", `/api/v1/jira/config`).catch(() => undefined);
       await apiClient.rawRequest("DELETE", `/api/v1/linear/config`).catch(() => undefined);
-      await apiClient.rawRequest("DELETE", `/api/v1/sentry/config`).catch(() => undefined);
       await Promise.all([
         apiClient.mockJiraReset().catch(() => undefined),
         apiClient.mockLinearReset().catch(() => undefined),

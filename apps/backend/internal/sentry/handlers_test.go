@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -30,63 +31,183 @@ func newTestController(t *testing.T) (*Controller, *gin.Engine, *fakeClient) {
 	return ctrl, router, client
 }
 
-// seedConfig persists a singleton config + secret without going through
-// Service.SetConfig (which fires an async probe we'd have to drain).
-func seedConfig(t *testing.T, ctrl *Controller) {
+// seedInstance persists an instance (+ optional secret) directly via the store.
+func seedInstance(t *testing.T, ctrl *Controller, workspaceID, name, secret string) *SentryConfig {
 	t.Helper()
 	ctx := context.Background()
-	if err := ctrl.service.store.UpsertConfig(ctx, &SentryConfig{
-		AuthMethod: AuthMethodAuthToken,
-	}); err != nil {
-		t.Fatalf("upsert: %v", err)
+	cfg := &SentryConfig{WorkspaceID: workspaceID, Name: name, AuthMethod: AuthMethodAuthToken, URL: DefaultSentryURL}
+	if err := ctrl.service.store.CreateInstance(ctx, cfg); err != nil {
+		t.Fatalf("seed instance: %v", err)
 	}
-	if err := ctrl.service.secrets.Set(ctx, SecretKey, "sentry", "tok"); err != nil {
-		t.Fatalf("set secret: %v", err)
+	if secret != "" {
+		if err := ctrl.service.secrets.Set(ctx, secretKeyForInstance(cfg.ID), "sentry", secret); err != nil {
+			t.Fatalf("seed secret: %v", err)
+		}
 	}
+	return cfg
 }
 
-func TestHTTPGetConfig_NoConfig_Returns204(t *testing.T) {
+func do(router *gin.Engine, method, target, body string) *httptest.ResponseRecorder {
+	var r *http.Request
+	if body == "" {
+		r = httptest.NewRequest(method, target, nil)
+	} else {
+		r = httptest.NewRequest(method, target, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+	}
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, r)
+	return w
+}
+
+func TestHTTP_ListInstances_RequiresWorkspace(t *testing.T) {
 	_, router, _ := newTestController(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sentry/config", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	if w.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204", w.Code)
+	if w := do(router, http.MethodGet, "/api/v1/sentry/instances", ""); w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 without workspace_id, got %d", w.Code)
 	}
 }
 
-func TestHTTPGetConfig_ReturnsConfig(t *testing.T) {
+func TestHTTP_ListInstances_Wrapped(t *testing.T) {
 	ctrl, router, _ := newTestController(t)
-	seedConfig(t, ctrl)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sentry/config", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	seedInstance(t, ctrl, "ws-1", "A", "tok")
+	seedInstance(t, ctrl, "ws-2", "B", "tok")
+	w := do(router, http.MethodGet, "/api/v1/sentry/instances?workspace_id=ws-1", "")
 	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", w.Code)
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Instances []SentryConfig `json:"instances"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Instances) != 1 || resp.Instances[0].Name != "A" {
+		t.Errorf("expected only ws-1's instance, got %+v", resp.Instances)
+	}
+}
+
+func TestHTTP_CreateInstance_MismatchedWorkspaceRejected(t *testing.T) {
+	_, router, _ := newTestController(t)
+	// Body workspaceId mismatches the query → 400 (acceptance e).
+	body := `{"workspaceId":"ws-2","name":"A","secret":"t"}`
+	if w := do(router, http.MethodPost, "/api/v1/sentry/instances?workspace_id=ws-1", body); w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for mismatched workspaceId, got %d body=%s", w.Code, w.Body.String())
+	}
+	// Missing workspace_id query → 400.
+	if w := do(router, http.MethodPost, "/api/v1/sentry/instances", `{"name":"A"}`); w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 without workspace_id, got %d", w.Code)
+	}
+}
+
+func TestHTTP_CreateInstance_OK(t *testing.T) {
+	ctrl, router, _ := newTestController(t)
+	probed := make(chan struct{}, 4)
+	ctrl.service.SetProbeHook(func() {
+		select {
+		case probed <- struct{}{}:
+		default:
+		}
+	})
+	w := do(router, http.MethodPost, "/api/v1/sentry/instances?workspace_id=ws-1",
+		`{"workspaceId":"ws-1","name":"SaaS","secret":"tok"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
 	}
 	var cfg SentryConfig
 	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if cfg.AuthMethod != AuthMethodAuthToken || !cfg.HasSecret {
-		t.Errorf("config = %+v", cfg)
+	if cfg.ID == "" || cfg.Name != "SaaS" || !cfg.HasSecret {
+		t.Errorf("unexpected created instance: %+v", cfg)
+	}
+	select {
+	case <-probed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("async probe did not fire")
 	}
 }
 
-func TestHTTPSearchIssues_MultiValueLevelsAndStatuses(t *testing.T) {
+func TestHTTP_CreateInstance_BadJSON(t *testing.T) {
+	_, router, _ := newTestController(t)
+	if w := do(router, http.MethodPost, "/api/v1/sentry/instances?workspace_id=ws-1", "not-json"); w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestHTTP_GetInstance_CrossWorkspace404(t *testing.T) {
+	ctrl, router, _ := newTestController(t)
+	inst := seedInstance(t, ctrl, "ws-1", "A", "tok")
+	w := do(router, http.MethodGet, "/api/v1/sentry/instances/"+inst.ID+"?workspace_id=ws-2", "")
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 cross-workspace, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `"code":"SENTRY_INSTANCE_NOT_FOUND"`) {
+		t.Errorf("missing code in body: %s", w.Body.String())
+	}
+}
+
+func TestHTTP_DeleteInstance_InUse409(t *testing.T) {
+	ctrl, router, _ := newTestController(t)
+	inst := seedInstance(t, ctrl, "ws-1", "A", "tok")
+	w := newTestIssueWatch("ws-1")
+	w.SentryInstanceID = inst.ID
+	if err := ctrl.service.store.CreateIssueWatch(context.Background(), w); err != nil {
+		t.Fatalf("seed watch: %v", err)
+	}
+	resp := do(router, http.MethodDelete, "/api/v1/sentry/instances/"+inst.ID+"?workspace_id=ws-1", "")
+	if resp.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	var body struct {
+		Code       string `json:"code"`
+		WatchCount int    `json:"watchCount"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Code != "SENTRY_INSTANCE_IN_USE" || body.WatchCount != 1 {
+		t.Errorf("unexpected 409 body: %+v", body)
+	}
+}
+
+func TestHTTP_Browse_RequiresWorkspaceAndInstance(t *testing.T) {
+	ctrl, router, _ := newTestController(t)
+	seedInstance(t, ctrl, "ws-1", "A", "tok")
+	// Missing workspace_id → 400.
+	if w := do(router, http.MethodGet, "/api/v1/sentry/projects", ""); w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 without workspace_id, got %d", w.Code)
+	}
+	// Missing instanceId → 400 SENTRY_INSTANCE_REQUIRED.
+	w := do(router, http.MethodGet, "/api/v1/sentry/projects?workspace_id=ws-1", "")
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), `"code":"SENTRY_INSTANCE_REQUIRED"`) {
+		t.Errorf("expected 400 SENTRY_INSTANCE_REQUIRED, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestHTTP_Browse_NotConfigured503(t *testing.T) {
+	ctrl, router, _ := newTestController(t)
+	// Instance with no secret → 503 SENTRY_NOT_CONFIGURED.
+	inst := seedInstance(t, ctrl, "ws-1", "A", "")
+	w := do(router, http.MethodGet, "/api/v1/sentry/projects?workspace_id=ws-1&instanceId="+inst.ID, "")
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"code":"SENTRY_NOT_CONFIGURED"`) {
+		t.Errorf("missing code in body: %s", w.Body.String())
+	}
+}
+
+func TestHTTP_SearchIssues_ForwardsFilter(t *testing.T) {
 	ctrl, router, client := newTestController(t)
-	seedConfig(t, ctrl)
+	inst := seedInstance(t, ctrl, "ws-1", "A", "tok")
 	var seen SearchFilter
 	client.searchIssuesFn = func(filter SearchFilter, _ string) (*SearchResult, error) {
 		seen = filter
 		return &SearchResult{IsLast: true}, nil
 	}
-	req := httptest.NewRequest(http.MethodGet,
-		"/api/v1/sentry/issues?orgSlug=acme&projectSlug=fe&level=error&level=fatal&status=unresolved&query=boom&statsPeriod=24h",
-		nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
+	target := "/api/v1/sentry/issues?workspace_id=ws-1&instanceId=" + inst.ID +
+		"&orgSlug=acme&projectSlug=fe&level=error&level=fatal&status=unresolved&query=boom&statsPeriod=24h"
+	if w := do(router, http.MethodGet, target, ""); w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
 	}
 	if seen.OrgSlug != "acme" || seen.ProjectSlug != "fe" || seen.Query != "boom" || seen.StatsPeriod != "24h" {
@@ -100,47 +221,30 @@ func TestHTTPSearchIssues_MultiValueLevelsAndStatuses(t *testing.T) {
 	}
 }
 
-func TestHTTPGetIssue_ForwardsID(t *testing.T) {
+func TestHTTP_GetIssue_ForwardsID(t *testing.T) {
 	ctrl, router, client := newTestController(t)
-	seedConfig(t, ctrl)
+	inst := seedInstance(t, ctrl, "ws-1", "A", "tok")
 	var seenID string
 	client.getIssueFn = func(id string) (*SentryIssue, error) {
 		seenID = id
 		return &SentryIssue{ID: "99", ShortID: id}, nil
 	}
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sentry/issues/PROJ-7", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d", w.Code)
+	target := "/api/v1/sentry/issues/PROJ-7?workspace_id=ws-1&instanceId=" + inst.ID
+	if w := do(router, http.MethodGet, target, ""); w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
 	}
 	if seenID != "PROJ-7" {
 		t.Errorf("id forwarded = %q", seenID)
 	}
 }
 
-func TestHTTPListProjects_NotConfigured_Returns503(t *testing.T) {
-	_, router, _ := newTestController(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sentry/projects", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("status = %d, want 503", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), `"code":"SENTRY_NOT_CONFIGURED"`) {
-		t.Errorf("missing code in body: %s", w.Body.String())
-	}
-}
-
-func TestHTTPListOrganizations_ReturnsOrganizations(t *testing.T) {
+func TestHTTP_ListOrganizations_ReturnsWrapped(t *testing.T) {
 	ctrl, router, client := newTestController(t)
-	seedConfig(t, ctrl)
+	inst := seedInstance(t, ctrl, "ws-1", "A", "tok")
 	client.listOrganizationsFn = func() ([]SentryOrganization, error) {
 		return []SentryOrganization{{ID: "1", Slug: "acme", Name: "Acme"}}, nil
 	}
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sentry/organizations", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	w := do(router, http.MethodGet, "/api/v1/sentry/organizations?workspace_id=ws-1&instanceId="+inst.ID, "")
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
 	}
@@ -155,27 +259,81 @@ func TestHTTPListOrganizations_ReturnsOrganizations(t *testing.T) {
 	}
 }
 
-func TestHTTPListOrganizations_NotConfigured_Returns503(t *testing.T) {
+func TestHTTP_TestConnection_RequiresWorkspace(t *testing.T) {
 	_, router, _ := newTestController(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sentry/organizations", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("status = %d, want 503", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), `"code":"SENTRY_NOT_CONFIGURED"`) {
-		t.Errorf("missing code in body: %s", w.Body.String())
+	if w := do(router, http.MethodPost, "/api/v1/sentry/test-connection", `{"secret":"t"}`); w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 without workspace_id, got %d", w.Code)
 	}
 }
 
-func TestHTTPSetConfig_BadJSON(t *testing.T) {
-	_, router, _ := newTestController(t)
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/sentry/config", strings.NewReader("not-json"))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", w.Code)
+func TestHTTP_TestConnection_OK(t *testing.T) {
+	ctrl, router, client := newTestController(t)
+	client.testAuthFn = func() (*TestConnectionResult, error) {
+		return &TestConnectionResult{OK: true, DisplayName: "Alice"}, nil
+	}
+	_ = ctrl
+	w := do(router, http.MethodPost, "/api/v1/sentry/test-connection?workspace_id=ws-1",
+		`{"authMethod":"auth_token","secret":"tok","url":"https://sentry.example.com"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var res TestConnectionResult
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !res.OK {
+		t.Errorf("expected OK result, got %+v", res)
+	}
+}
+
+func TestHTTP_CopyConfig_ReturnsWrappedList(t *testing.T) {
+	ctrl, router, _ := newTestController(t)
+	probed := make(chan struct{}, 4)
+	ctrl.service.SetProbeHook(func() {
+		select {
+		case probed <- struct{}{}:
+		default:
+		}
+	})
+	seedInstance(t, ctrl, "ws-src", "SaaS", "sec")
+	w := do(router, http.MethodPost, "/api/v1/sentry/config/copy",
+		`{"sourceWorkspaceId":"ws-src","targetWorkspaceId":"ws-dst"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Instances []SentryConfig `json:"instances"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Instances) != 1 || resp.Instances[0].WorkspaceID != "ws-dst" {
+		t.Errorf("copied = %+v", resp.Instances)
+	}
+	select {
+	case <-probed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("async probe did not fire")
+	}
+}
+
+// TestHTTP_CreateIssueWatch_RejectsMismatchedWorkspace pins acceptance (e) for
+// watch-create.
+func TestHTTP_CreateIssueWatch_RejectsMismatchedWorkspace(t *testing.T) {
+	ctrl, router, _ := newTestController(t)
+	inst := seedInstance(t, ctrl, "ws-1", "A", "tok")
+	body := `{"workspaceId":"ws-1","sentryInstanceId":"` + inst.ID + `","workflowId":"wf","workflowStepId":"step","filter":{"orgSlug":"acme","projectSlug":"fe"}}`
+	// Missing workspace_id query → 400.
+	if w := do(router, http.MethodPost, "/api/v1/sentry/watches/issue", body); w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 without workspace_id, got %d body=%s", w.Code, w.Body.String())
+	}
+	// Mismatched workspace_id query → 400.
+	if w := do(router, http.MethodPost, "/api/v1/sentry/watches/issue?workspace_id=ws-2", body); w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for mismatched workspace_id, got %d", w.Code)
+	}
+	// Matching → created (200).
+	if w := do(router, http.MethodPost, "/api/v1/sentry/watches/issue?workspace_id=ws-1", body); w.Code != http.StatusOK {
+		t.Errorf("expected 200 for matching workspace_id, got %d body=%s", w.Code, w.Body.String())
 	}
 }
 
@@ -212,8 +370,6 @@ func TestWriteClientError_GenericError(t *testing.T) {
 }
 
 func TestRegisterRoutes_AcceptsNilDispatcher(t *testing.T) {
-	// Sanity check that RegisterRoutes can be called with a real dispatcher
-	// without registering any WS handlers (Phase 1 has no WS surface).
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	store := newTestStore(t)

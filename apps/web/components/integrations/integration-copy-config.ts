@@ -1,7 +1,7 @@
 import { copySlackConfig } from "@/lib/api/domains/slack-api";
 import { copyJiraConfig } from "@/lib/api/domains/jira-api";
 import { copyLinearConfig } from "@/lib/api/domains/linear-api";
-import { copySentryConfig } from "@/lib/api/domains/sentry-api";
+import { copySentryInstances } from "@/lib/api/domains/sentry-api";
 import { copyGitHubWorkspaceSettings } from "@/lib/api/domains/github-api";
 
 // IntegrationSlug is the set of integration settings pages that support copying
@@ -55,7 +55,7 @@ export async function copyIntegrationConfig(
       await copyLinearConfig(targetWorkspaceId, options);
       return;
     case "sentry":
-      await copySentryConfig(targetWorkspaceId, options);
+      await copySentryInstances(sourceWorkspaceId, targetWorkspaceId);
       return;
     case "github":
       await copyGitHubWorkspaceSettings(targetWorkspaceId, options);

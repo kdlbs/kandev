@@ -72,6 +72,39 @@ task-creating pollers.
   active workspace route state. Install-wide `/config` semantics are deprecated
   for integrations that support workspace-scoped settings.
 
+## Sentry: multiple named instances per workspace
+
+Sentry extends the workspace-scoped baseline: a workspace may hold **several
+named Sentry instances** (e.g. a sentry.io SaaS org plus a self-hosted host),
+not a single config. This deliberately diverges from the Jira/Linear/GitLab
+one-config-per-workspace shape — teams commonly watch issues across more than
+one Sentry deployment from the same workspace.
+
+- `sentry_configs` is keyed by an instance `id` (UUID) with a `workspace_id`
+  column and `UNIQUE(workspace_id, name)`; the secret lives under
+  `sentry:instance:<id>:token`, disjoint from the legacy
+  `sentry:<workspaceId>:token` / `sentry:singleton:token` namespaces so a
+  workspace UUID can never collide with an instance UUID.
+- `sentry_issue_watches.sentry_instance_id` is a nullable FK to
+  `sentry_configs(id)` with `ON DELETE RESTRICT`. NULL marks a migrated legacy
+  watch; the poller resolves it to the workspace's sole instance at poll time,
+  or disables it with a recorded error when zero/many instances exist. The
+  bound instance is **immutable** — changing it means creating a new watch.
+- The HTTP surface is instance CRUD under `/api/v1/sentry/instances` with an
+  authoritative `?workspace_id=`; the instance must belong to that workspace or
+  the request 404s. Browse endpoints require `workspace_id` + `instanceId`.
+  Install-wide `/config` GET/PUT/DELETE is removed; `/config/copy` copies a
+  workspace's instances (new ids, copied secrets, no watches, deduped names).
+- Deleting an instance that still has watches returns 409
+  `SENTRY_INSTANCE_IN_USE` (with `watchCount`); the FK RESTRICT is the atomic
+  backstop behind the friendly count.
+
+Startup migration chains singleton → workspace-config → per-instance: main's
+existing legacy-singleton→workspace step runs first, then each workspace config
+row becomes one instance (name derived from the URL host, deduped per
+workspace), watches backfill to that instance, and the secret is re-keyed
+idempotently (crash-safe: derivable from the post-migration instance rows).
+
 ## Alternatives Considered
 
 ### Keep GitHub settings global

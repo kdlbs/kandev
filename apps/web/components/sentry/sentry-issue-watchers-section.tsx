@@ -13,8 +13,8 @@ import { SentryIssueWatchDialog } from "./sentry-issue-watch-dialog";
 import type { SentryIssueWatch } from "@/lib/types/sentry";
 
 // SentryIssueWatchersSection lists watches across every workspace in a single
-// flat table on the install-wide settings page. The dialog's create flow asks
-// the user to pick the workspace.
+// flat table on the install-wide settings page. Creating a watch is locked to
+// the active workspace and requires picking one of its Sentry instances.
 type RawActions = {
   create: ReturnType<typeof useSentryIssueWatches>["create"];
   update: ReturnType<typeof useSentryIssueWatches>["update"];

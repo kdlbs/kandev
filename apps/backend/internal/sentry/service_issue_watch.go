@@ -32,12 +32,19 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 	if err := validateIssueWatchCreate(req); err != nil {
 		return nil, err
 	}
+	if strings.TrimSpace(req.SentryInstanceID) == "" {
+		return nil, fmt.Errorf("%w: sentryInstanceId is required", ErrInvalidConfig)
+	}
+	if _, err := s.requireInstance(ctx, req.WorkspaceID, req.SentryInstanceID); err != nil {
+		return nil, err
+	}
 	repositoryID, baseBranch, err := s.resolveRepositoryBinding(ctx, req.WorkspaceID, req.RepositoryID, req.BaseBranch)
 	if err != nil {
 		return nil, err
 	}
 	w := &IssueWatch{
 		WorkspaceID:         req.WorkspaceID,
+		SentryInstanceID:    req.SentryInstanceID,
 		WorkflowID:          req.WorkflowID,
 		WorkflowStepID:      req.WorkflowStepID,
 		RepositoryID:        repositoryID,
@@ -182,7 +189,12 @@ func (s *Service) ResetIssueWatch(ctx context.Context, watchID string) (int, err
 // bails. Same pattern as the Linear / Jira watchers.
 func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*SentryIssue, error) {
 	defer s.stampWatchLastPolled(w.ID)
-	client, err := s.clientFor(ctx, w.WorkspaceID)
+	instanceID, err := s.resolveWatchInstanceID(ctx, w)
+	if err != nil {
+		s.stampWatchError(w.ID, err.Error())
+		return nil, err
+	}
+	client, err := s.clientForInstance(ctx, instanceID)
 	if err != nil {
 		return nil, err
 	}
@@ -224,6 +236,40 @@ func (s *Service) stampWatchLastPolled(watchID string) {
 	}
 }
 
+// resolveWatchInstanceID picks the Sentry instance a watch should poll. A bound
+// watch uses its stored instance. An unbound (migrated legacy) watch resolves
+// to its workspace's sole instance; when the workspace has zero or several
+// instances the watch cannot be run unambiguously.
+func (s *Service) resolveWatchInstanceID(ctx context.Context, w *IssueWatch) (string, error) {
+	if w.SentryInstanceID != "" {
+		return w.SentryInstanceID, nil
+	}
+	instances, err := s.store.ListInstances(ctx, w.WorkspaceID)
+	if err != nil {
+		return "", err
+	}
+	switch len(instances) {
+	case 1:
+		return instances[0].ID, nil
+	case 0:
+		return "", fmt.Errorf("%w: watch is unbound and its workspace has no Sentry instance", ErrNotConfigured)
+	default:
+		return "", fmt.Errorf("%w: watch is unbound and its workspace has %d Sentry instances; bind one to the watch", ErrInvalidConfig, len(instances))
+	}
+}
+
+// stampWatchError records a non-fatal poll-time failure cause on the watch row
+// without disabling it, using a detached short-deadline context so a cancelled
+// caller ctx does not drop the record.
+func (s *Service) stampWatchError(watchID, cause string) {
+	ctx, cancel := context.WithTimeout(context.Background(), authHealthWriteTimeout)
+	defer cancel()
+	if err := s.store.StampIssueWatchError(ctx, watchID, cause); err != nil {
+		s.log.Warn("sentry: stamp watch error failed",
+			zap.String("watch_id", watchID), zap.Error(err))
+	}
+}
+
 // ReserveIssueWatchTask exposes the dedup store API to the orchestrator's
 // WatcherSource implementation.
 func (s *Service) ReserveIssueWatchTask(ctx context.Context, watchID, shortID, issueURL string) (bool, error) {
@@ -255,6 +301,7 @@ func (s *Service) publishNewSentryIssueEvent(ctx context.Context, w *IssueWatch,
 	evt := bus.NewEvent(events.SentryNewIssue, "sentry", &NewSentryIssueEvent{
 		IssueWatchID:      w.ID,
 		WorkspaceID:       w.WorkspaceID,
+		SentryInstanceID:  w.SentryInstanceID,
 		WorkflowID:        w.WorkflowID,
 		WorkflowStepID:    w.WorkflowStepID,
 		RepositoryID:      w.RepositoryID,

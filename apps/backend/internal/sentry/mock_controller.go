@@ -11,7 +11,8 @@ import (
 
 // MockController exposes HTTP endpoints that drive the in-memory MockClient
 // during E2E tests. Mounted by RegisterMockRoutes only when the service was
-// built with a MockClient.
+// built with a MockClient. Every data endpoint is scoped to an instance via the
+// `?instanceId=` query param so tests can seed distinct datasets per instance.
 type MockController struct {
 	mock  *MockClient
 	store *Store
@@ -36,14 +37,18 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api.DELETE("/reset", c.reset)
 }
 
+func (c *MockController) instanceID(ctx *gin.Context) string {
+	return ctx.Query("instanceId")
+}
+
 func (c *MockController) setAuthResult(ctx *gin.Context) {
 	var req TestConnectionResult
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		writeBadPayload(ctx)
 		return
 	}
 	r := req
-	c.mock.SetAuthResult(&r)
+	c.mock.SetAuthResult(c.instanceID(ctx), &r)
 	ctx.JSON(http.StatusOK, gin.H{"set": true})
 }
 
@@ -53,18 +58,16 @@ func (c *MockController) setAuthHealth(ctx *gin.Context) {
 		Error string `json:"error"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		writeBadPayload(ctx)
 		return
 	}
-	workspaceID := ctx.Query("workspace_id")
-	var err error
-	if workspaceID == "" {
-		err = c.store.UpdateAuthHealth(ctx.Request.Context(), req.OK, req.Error, time.Now().UTC())
-	} else {
-		err = c.store.UpdateAuthHealthForWorkspace(ctx.Request.Context(), workspaceID, req.OK, req.Error, time.Now().UTC())
+	instanceID := c.instanceID(ctx)
+	if instanceID == "" {
+		writeErr(ctx, http.StatusBadRequest, "instanceId query parameter required")
+		return
 	}
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if err := c.store.UpdateAuthHealthForInstance(ctx.Request.Context(), instanceID, req.OK, req.Error, time.Now().UTC()); err != nil {
+		writeErr(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"set": true})
@@ -75,10 +78,10 @@ func (c *MockController) setOrganizations(ctx *gin.Context) {
 		Organizations []SentryOrganization `json:"organizations"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		writeBadPayload(ctx)
 		return
 	}
-	c.mock.SetOrganizations(req.Organizations)
+	c.mock.SetOrganizations(c.instanceID(ctx), req.Organizations)
 	ctx.JSON(http.StatusOK, gin.H{"count": len(req.Organizations)})
 }
 
@@ -87,10 +90,10 @@ func (c *MockController) setProjects(ctx *gin.Context) {
 		Projects []SentryProject `json:"projects"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		writeBadPayload(ctx)
 		return
 	}
-	c.mock.SetProjects(req.Projects)
+	c.mock.SetProjects(c.instanceID(ctx), req.Projects)
 	ctx.JSON(http.StatusOK, gin.H{"count": len(req.Projects)})
 }
 
@@ -99,11 +102,12 @@ func (c *MockController) addIssues(ctx *gin.Context) {
 		Issues []SentryIssue `json:"issues"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		writeBadPayload(ctx)
 		return
 	}
+	instanceID := c.instanceID(ctx)
 	for i := range req.Issues {
-		c.mock.AddIssue(&req.Issues[i])
+		c.mock.AddIssue(instanceID, &req.Issues[i])
 	}
 	ctx.JSON(http.StatusOK, gin.H{"added": len(req.Issues)})
 }
@@ -114,13 +118,13 @@ func (c *MockController) setGetIssueError(ctx *gin.Context) {
 		Message    string `json:"message"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		writeBadPayload(ctx)
 		return
 	}
 	if req.StatusCode == 0 {
-		c.mock.SetGetIssueError(nil)
+		c.mock.SetGetIssueError(c.instanceID(ctx), nil)
 	} else {
-		c.mock.SetGetIssueError(&APIError{StatusCode: req.StatusCode, Message: req.Message})
+		c.mock.SetGetIssueError(c.instanceID(ctx), &APIError{StatusCode: req.StatusCode, Message: req.Message})
 	}
 	ctx.JSON(http.StatusOK, gin.H{"set": true})
 }

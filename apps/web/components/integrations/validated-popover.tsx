@@ -39,6 +39,10 @@ export type ValidatedPopoverProps<T> = {
   align?: "start" | "end";
   headline: string;
   placeholder: string;
+  // extraFields renders integration-specific controls (e.g. a Sentry instance
+  // selector) between the headline and the key input. Optional; omitted by
+  // integrations that need only the key input.
+  extraFields?: ReactNode;
   // Validation: extract a key from the user's input. Returning null shows the
   // hint as an error. The hint typically reads "Paste a Jira ticket URL or
   // key (PROJ-123)" or similar — integration-specific copy.
@@ -51,6 +55,10 @@ export type ValidatedPopoverProps<T> = {
   // Submit button labels.
   submitLabel: string; // e.g. "Link", "Import"
   submittingLabel: string; // e.g. "Linking...", "Loading..."
+  // submitDisabled blocks submission even when the key input is non-empty (e.g.
+  // a required instance selector has no choice yet). Optional; defaults to
+  // enabled.
+  submitDisabled?: boolean;
 };
 
 type TriggerButtonProps = Pick<
@@ -122,6 +130,8 @@ type PopoverBodyProps = {
   submitLabel: string;
   submittingLabel: string;
   testIdPrefix?: string;
+  extraFields?: ReactNode;
+  submitDisabled?: boolean;
 };
 
 function PopoverBody({
@@ -135,10 +145,13 @@ function PopoverBody({
   submitLabel,
   submittingLabel,
   testIdPrefix,
+  extraFields,
+  submitDisabled,
 }: PopoverBodyProps) {
   return (
     <div className="space-y-2">
       <div className="text-xs font-medium">{headline}</div>
+      {extraFields}
       <Input
         autoFocus
         value={value}
@@ -167,7 +180,7 @@ function PopoverBody({
           type="button"
           size="sm"
           onClick={() => void onSubmit()}
-          disabled={loading || !value.trim()}
+          disabled={loading || !value.trim() || !!submitDisabled}
           className="h-7 cursor-pointer"
           data-testid={testIdPrefix ? `${testIdPrefix}-submit` : undefined}
         >
@@ -256,6 +269,8 @@ export function ValidatedPopover<T>(props: ValidatedPopoverProps<T>) {
       <PopoverContent align={align ?? "end"} className="w-80 p-3">
         <PopoverBody
           headline={headline}
+          extraFields={props.extraFields}
+          submitDisabled={props.submitDisabled}
           placeholder={placeholder}
           value={value}
           onChange={setValue}
