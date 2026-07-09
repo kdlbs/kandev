@@ -48,6 +48,12 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	require.True(t, ok, "agent_profile_id should have a description")
 	assert.Contains(t, agentProfileDesc, "explicit value > current/source task or parent task > workflow defaults > workspace default")
 
+	workflowProp, ok := props["workflow_id"].(map[string]interface{})
+	require.True(t, ok, "workflow_id schema should be an object")
+	workflowDesc, ok := workflowProp["description"].(string)
+	require.True(t, ok, "workflow_id should have a description")
+	assert.Contains(t, workflowDesc, "workspace_id is also omitted")
+
 	workflowStepProp, ok := props["workflow_step_id"].(map[string]interface{})
 	require.True(t, ok, "workflow_step_id schema should be an object")
 	workflowStepDesc, ok := workflowStepProp["description"].(string)
