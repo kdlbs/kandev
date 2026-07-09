@@ -54,7 +54,7 @@ function collectExpansions(content: string, state: ExpansionState, depth: number
       state.stack.has(prompt.name) ||
       depth >= MAX_PROMPT_REFERENCE_DEPTH
     ) {
-      index = nameEnd || index + 1;
+      index = nameEnd;
       continue;
     }
 
@@ -63,6 +63,8 @@ function collectExpansions(content: string, state: ExpansionState, depth: number
       state.expansions.push({ name: prompt.name, content: prompt.content });
       collectExpansions(
         prompt.content,
+        // Only stack is copied; seen and expansions are intentionally shared
+        // so global dedup and ordered output work across the full DFS tree.
         { ...state, stack: new Set([...state.stack, prompt.name]) },
         depth + 1,
       );

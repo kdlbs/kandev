@@ -165,11 +165,7 @@ func collectPromptReferences(content string, byName map[string]*models.Prompt, s
 		name := content[nameStart:nameEnd]
 		prompt := byName[name]
 		if name == "" || prompt == nil || stack[prompt.Name] || depth >= maxPromptReferenceDepth {
-			if nameEnd == index {
-				index++
-			} else {
-				index = nameEnd
-			}
+			index = nameEnd
 			continue
 		}
 		if !seen[prompt.Name] {

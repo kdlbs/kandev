@@ -322,6 +322,25 @@ func TestHandleMessageTask_AppendsPromptReferenceExpansions(t *testing.T) {
 	assert.Contains(t, entry.Content, "Review this session for durable harness improvements.")
 }
 
+func TestHandleMessageTask_PromptResolverError_FallsBackToOriginal(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+	h.SetPromptReferenceResolver(fakePromptReferenceResolver{err: errors.New("db error")})
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "plain text", sender.ID))
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	status := orch.queue.GetStatus(context.Background(), sess.ID)
+	require.Equal(t, 1, status.Count)
+	entry := status.Entries[0]
+	assert.Contains(t, entry.Content, "plain text")
+	assert.NotContains(t, entry.Content, "EXPANDED PROMPT REFERENCES")
+}
+
 func TestHandleMessageTask_QueueFull_ReturnsStructuredError(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
