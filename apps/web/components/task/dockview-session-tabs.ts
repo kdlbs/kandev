@@ -14,6 +14,8 @@ import { wasPRPanelOffered, markPRPanelOffered } from "@/lib/local-storage";
 import { sessionId as toSessionId } from "@/lib/types/ids";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import type { TaskSession } from "@/lib/types/http";
+import { getPrimaryTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { prTaskKey } from "@/components/github/pr-detail-panel";
 
 const debug = createDebugLogger("dockview:session-tabs");
 
@@ -178,6 +180,67 @@ export function resolvePRPanelTargetGroup(
 }
 
 /**
+ * Pure effect logic for `useAutoPRPanel`: decides whether to add, remove,
+ * or leave alone the auto-shown PR detail panel, and mutates the given
+ * dockview `api` accordingly. Extracted for unit testing.
+ */
+export function runAutoPRPanelEffect(
+  api: DockviewApi,
+  sessionId: string,
+  params: {
+    hasPR: boolean;
+    /** Key of the PR the legacy unkeyed "pr-detail" panel should render. */
+    defaultPRKey: string | undefined;
+    isRestoringLayout: boolean;
+    isMaximized: boolean;
+    centerGroupId: string;
+  },
+): void {
+  const decision = shouldAutoAddPRPanel({
+    hasPR: params.hasPR,
+    panelExists: !!api.getPanel("pr-detail"),
+    isRestoringLayout: params.isRestoringLayout,
+    isMaximized: params.isMaximized,
+    wasOffered: wasPRPanelOffered(sessionId),
+  });
+  if (decision === "remove") {
+    api.getPanel("pr-detail")?.api.close();
+    return;
+  }
+
+  if (decision === "add") {
+    const targetGroupId = resolvePRPanelTargetGroup(api, sessionId, params.centerGroupId);
+    focusOrAddPanel(api, {
+      id: "pr-detail",
+      component: "pr-detail",
+      title: "Pull Request",
+      position: { referenceGroup: targetGroupId },
+      inactive: true,
+      // Stamp the panel's params so addPRPanel can tell a matching menu
+      // click (reuse this tab) apart from a different PR's click (open a
+      // new tab) — see addPRPanel in dockview-panel-actions.ts.
+      params: params.defaultPRKey ? { prKey: params.defaultPRKey } : undefined,
+    });
+    markPRPanelOffered(sessionId);
+    return;
+  }
+
+  // "none" — panel already present or conditions not met.
+  // Mark as offered if the panel exists (e.g. restored from saved layout).
+  const legacy = api.getPanel("pr-detail");
+  if (params.hasPR && legacy) {
+    markPRPanelOffered(sessionId);
+    // Backfill panels restored from a layout saved before per-PR keys
+    // existed, so a later "+" menu click can dedupe correctly instead of
+    // always treating them as a different PR. Never overwrite a panel that
+    // already carries a key — that would clobber a deliberate PR switch.
+    if (legacy.params?.prKey === undefined && params.defaultPRKey) {
+      legacy.api.updateParameters({ prKey: params.defaultPRKey });
+    }
+  }
+}
+
+/**
  * Auto-add the PR detail panel to the center group when the active task
  * has an associated pull request. The panel is added as a background tab
  * (the session/agent tab stays focused).
@@ -192,6 +255,13 @@ export function useAutoPRPanel() {
     const tid = s.tasks.activeTaskId;
     return tid ? (s.taskPRs.byTaskId[tid]?.length ?? 0) > 0 : false;
   });
+  // Key of the PR the legacy unkeyed "pr-detail" panel renders — mirrors
+  // PRDetailPanelComponent's fallback of the primary/first TaskPR.
+  const defaultPRKey = useAppStore((s) => {
+    const tid = s.tasks.activeTaskId;
+    const primary = tid ? getPrimaryTaskPR(s.taskPRs.byTaskId[tid]) : null;
+    return primary ? prTaskKey(primary) : undefined;
+  });
   const hasApi = useDockviewStore((s) => !!s.api);
 
   useEffect(() => {
@@ -201,45 +271,16 @@ export function useAutoPRPanel() {
       requestAnimationFrame(() => {
         const api = useDockviewStore.getState().api;
         if (!api) return;
-
-        const decisionParams = {
+        runAutoPRPanelEffect(api, sessionId, {
           hasPR,
-          panelExists: !!api.getPanel("pr-detail"),
+          defaultPRKey,
           isRestoringLayout: useDockviewStore.getState().isRestoringLayout,
           isMaximized: useDockviewStore.getState().preMaximizeLayout !== null,
-          wasOffered: wasPRPanelOffered(sessionId),
-        };
-        const decision = shouldAutoAddPRPanel(decisionParams);
-        if (decision === "remove") {
-          api.getPanel("pr-detail")?.api.close();
-          return;
-        }
-
-        if (decision === "add") {
-          const targetGroupId = resolvePRPanelTargetGroup(
-            api,
-            sessionId,
-            useDockviewStore.getState().centerGroupId,
-          );
-          focusOrAddPanel(api, {
-            id: "pr-detail",
-            component: "pr-detail",
-            title: "Pull Request",
-            position: { referenceGroup: targetGroupId },
-            inactive: true,
-          });
-          markPRPanelOffered(sessionId);
-          return;
-        }
-
-        // "none" — panel already present or conditions not met.
-        // Mark as offered if the panel exists (e.g. restored from saved layout).
-        if (hasPR && api.getPanel("pr-detail")) {
-          markPRPanelOffered(sessionId);
-        }
+          centerGroupId: useDockviewStore.getState().centerGroupId,
+        });
       });
     });
-  }, [taskId, hasPR, hasApi, sessionId]);
+  }, [taskId, hasPR, hasApi, sessionId, defaultPRKey]);
 }
 
 /**

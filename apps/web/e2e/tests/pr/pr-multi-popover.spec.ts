@@ -203,4 +203,33 @@ test.describe("Multi-PR CI popover", () => {
     await expect(testPage.getByTestId("pr-topbar-menu-item-42")).toBeVisible();
     await expect(testPage.getByTestId("pr-topbar-menu-item-77")).toBeVisible();
   });
+
+  test('selecting a different PR from the "+" add-panel menu opens its own tab', async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const title = "Multi Popover Add Panel Tabs";
+    const seed = await seedTask(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      title,
+    );
+    await associateTwoPRs(apiClient, seed.taskId);
+    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+
+    // Auto-shown panel defaults to the primary/first-associated PR (web#42).
+    await expect(session.prDetailTab()).toHaveCount(1, { timeout: 15_000 });
+
+    // Regression: selecting the OTHER PR from the "+" add-panel menu must
+    // open a second, distinct tab instead of repurposing the auto-shown one.
+    // (Dedup when re-selecting the same PR is covered by the
+    // runAutoPRPanelEffect / addPRPanel unit tests.)
+    await session.addPanelButton().click();
+    await testPage.getByTestId("add-panel-pr-item-77").click();
+    await expect(session.prDetailTab()).toHaveCount(2, { timeout: 15_000 });
+  });
 });

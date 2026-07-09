@@ -467,12 +467,16 @@ export function buildExtraPanelActions(get: StoreGet) {
       // Legacy single-repo callers (no key) get the historical panel id.
       const id = prKey ? `pr-detail|${prKey}` : "pr-detail";
       // If a legacy "pr-detail" panel is already open (auto-shown on task
-      // open or restored from a saved layout), reuse it instead of adding a
-      // second tab. Update its params so it renders the requested PR.
+      // open or restored from a saved layout) AND it's currently showing
+      // this exact PR (see useAutoPRPanel, which stamps the panel's params
+      // with the PR it renders), reuse it instead of adding a second tab.
+      // A legacy panel showing a DIFFERENT PR (multi-repo "+" menu click)
+      // must NOT be repurposed — that would silently swap its content
+      // instead of opening a distinct tab for the newly requested PR.
       if (prKey && !api.getPanel(id)) {
         const legacy = api.getPanel("pr-detail");
-        if (legacy) {
-          legacy.api.updateParameters({ prKey });
+        const legacyKey = (legacy?.params as { prKey?: string } | undefined)?.prKey;
+        if (legacy && legacyKey === prKey) {
           legacy.api.setActive();
           return;
         }
