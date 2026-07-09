@@ -45,6 +45,33 @@ const storeState = {
 };
 const KANBAN_WORKSPACE_ITEM = "sidebar-workspace-item-w1";
 const OFFICE_WORKSPACE_ITEM = "sidebar-workspace-item-w2";
+// jsdom over http drops `secure` cookies, so intercept the setter to capture
+// the write directly rather than reading `document.cookie` back.
+let cookieWrites: string[] = [];
+let cookieDescriptor: PropertyDescriptor | undefined;
+
+function resetWorkspaceSelectTest() {
+  navigationMock.push = vi.fn();
+  storeState.features.office = false;
+  storeState.workspaces.activeId = "w1";
+  storeState.setActiveWorkspace = vi.fn();
+  cookieWrites = [];
+  cookieDescriptor = Object.getOwnPropertyDescriptor(Document.prototype, "cookie");
+  Object.defineProperty(document, "cookie", {
+    configurable: true,
+    get: () => cookieWrites.join("; "),
+    set: (value: string) => {
+      cookieWrites.push(value);
+    },
+  });
+}
+
+function cleanupWorkspaceSelectTest() {
+  if (cookieDescriptor) {
+    Object.defineProperty(document, "cookie", cookieDescriptor);
+  }
+  cleanup();
+}
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof storeState) => unknown) => selector(storeState),
@@ -90,36 +117,22 @@ describe("AppSidebarWorkspacePicker — Add workspace routing", () => {
 
     expect(navigationMock.push).toHaveBeenCalledWith("/settings/workspace");
   });
+
+  it("calls onActionComplete after navigating to add a workspace", () => {
+    const onActionComplete = vi.fn();
+    storeState.features.office = false;
+    render(<AppSidebarWorkspacePicker onActionComplete={onActionComplete} />);
+
+    fireEvent.click(screen.getByText("Add workspace"));
+
+    expect(onActionComplete).toHaveBeenCalledOnce();
+  });
 });
 
 describe("AppSidebarWorkspacePicker — workspace select", () => {
-  // jsdom over http drops `secure` cookies, so intercept the setter to capture
-  // the write directly rather than reading `document.cookie` back.
-  let cookieWrites: string[] = [];
-  let cookieDescriptor: PropertyDescriptor | undefined;
+  beforeEach(resetWorkspaceSelectTest);
 
-  beforeEach(() => {
-    navigationMock.push = vi.fn();
-    storeState.features.office = false;
-    storeState.workspaces.activeId = "w1";
-    storeState.setActiveWorkspace = vi.fn();
-    cookieWrites = [];
-    cookieDescriptor = Object.getOwnPropertyDescriptor(Document.prototype, "cookie");
-    Object.defineProperty(document, "cookie", {
-      configurable: true,
-      get: () => cookieWrites.join("; "),
-      set: (value: string) => {
-        cookieWrites.push(value);
-      },
-    });
-  });
-
-  afterEach(() => {
-    if (cookieDescriptor) {
-      Object.defineProperty(document, "cookie", cookieDescriptor);
-    }
-    cleanup();
-  });
+  afterEach(cleanupWorkspaceSelectTest);
 
   it("does nothing when selecting the already active workspace", () => {
     storeState.features.office = false;
@@ -141,6 +154,16 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
     expect(cookieWrites.some((c) => c.startsWith("office-active-workspace=w2"))).toBe(true);
     expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w2");
     expect(navigationMock.push).not.toHaveBeenCalled();
+  });
+
+  it("calls onActionComplete when selecting a different workspace", () => {
+    const onActionComplete = vi.fn();
+    storeState.features.office = false;
+    render(<AppSidebarWorkspacePicker onActionComplete={onActionComplete} />);
+
+    fireEvent.click(screen.getByTestId(OFFICE_WORKSPACE_ITEM));
+
+    expect(onActionComplete).toHaveBeenCalledOnce();
   });
 
   it("does not overwrite the office workspace cookie when selecting a kanban workspace", () => {
@@ -178,6 +201,12 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
     expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w1");
     expect(navigationMock.push).toHaveBeenCalledWith("/?workspaceId=w1");
   });
+});
+
+describe("AppSidebarWorkspacePicker — active workspace display and routing", () => {
+  beforeEach(resetWorkspaceSelectTest);
+
+  afterEach(cleanupWorkspaceSelectTest);
 
   it("labels workspace types in the menu without using trigger space", () => {
     storeState.workspaces.activeId = "w1";
@@ -218,5 +247,15 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
     expect(cookieWrites).toEqual([]);
     expect(storeState.setActiveWorkspace).not.toHaveBeenCalled();
     expect(navigationMock.push).not.toHaveBeenCalled();
+  });
+
+  it("calls onActionComplete when re-selecting the active workspace", () => {
+    const onActionComplete = vi.fn();
+    storeState.features.office = false;
+    render(<AppSidebarWorkspacePicker onActionComplete={onActionComplete} />);
+
+    fireEvent.click(screen.getByTestId(KANBAN_WORKSPACE_ITEM));
+
+    expect(onActionComplete).toHaveBeenCalledOnce();
   });
 });

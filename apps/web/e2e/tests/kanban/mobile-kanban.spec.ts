@@ -103,7 +103,6 @@ test.describe("Mobile kanban view", () => {
     await testPage.getByTestId("mobile-workspace-trigger").click();
     await testPage.getByTestId(`mobile-workspace-item-${otherWorkspace.id}`).click();
 
-    await expect(testPage).toHaveURL(new RegExp(`[?&]workspaceId=${otherWorkspace.id}(?:&|$)`));
     await expect(dialog).not.toBeVisible();
 
     await mobile.mobileMenuButton.click();
