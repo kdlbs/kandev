@@ -449,11 +449,13 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.ParentID != "" {
 		req.WorkspaceID = resolved.WorkspaceID
 		req.WorkflowID = resolved.WorkflowID
-	} else if req.WorkspaceID == "" {
-		req.WorkspaceID = resolved.WorkspaceID
-	}
-	if req.WorkflowID == "" {
-		req.WorkflowID = resolved.WorkflowID
+	} else {
+		if req.WorkspaceID == "" {
+			req.WorkspaceID = resolved.WorkspaceID
+		}
+		if req.WorkflowID == "" {
+			req.WorkflowID = resolved.WorkflowID
+		}
 	}
 
 	// Auto-resolve workspace/workflow when not provided and there's exactly one option.
