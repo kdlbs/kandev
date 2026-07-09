@@ -627,6 +627,7 @@ test.describe("PR detail panel", () => {
 
     await session.clickTaskInSidebar("Refresh Task A");
     await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
     await expect(session.prDetailTab()).toHaveText("PR #401", { timeout: 15_000 });
   });
 });
