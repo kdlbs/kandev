@@ -6,6 +6,7 @@ import { ChatMessage } from "./chat-message";
 import {
   sessionId as toSessionId,
   taskId as toTaskId,
+  type CustomPrompt,
   type Message,
   type TaskSession,
 } from "@/lib/types/http";
@@ -13,6 +14,7 @@ import {
 const SENDER_TASK_ID = "task-sender";
 const SENDER_TITLE = "Fix login bug";
 const SENDER_BADGE_SELECTOR = "[data-testid='sender-task-badge']";
+const MESSAGE_TIMESTAMP = "2026-05-04T00:00:00Z";
 const PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 const OPEN_ATTACHMENT_1_LABEL = "Open Attachment 1";
@@ -31,12 +33,23 @@ function userMessage(overrides: Partial<Message>): Message {
     author_type: "user",
     content: "hello",
     type: "message",
-    created_at: "2026-05-04T00:00:00Z",
+    created_at: MESSAGE_TIMESTAMP,
     ...overrides,
   };
 }
 
-function wrapper(tasks: Array<{ id: string; title: string }> = []) {
+function customPrompt(name: string): CustomPrompt {
+  return {
+    id: `prompt-${name}`,
+    name,
+    content: `${name} content`,
+    builtin: false,
+    created_at: MESSAGE_TIMESTAMP,
+    updated_at: MESSAGE_TIMESTAMP,
+  };
+}
+
+function wrapper(tasks: Array<{ id: string; title: string }> = [], prompts: CustomPrompt[] = []) {
   return function Wrapper({ children }: { children: ReactNode }) {
     return (
       <StateProvider
@@ -54,6 +67,7 @@ function wrapper(tasks: Array<{ id: string; title: string }> = []) {
               parent_id: undefined,
             })),
           } as unknown as never,
+          prompts: { items: prompts, loaded: true, loading: false },
         }}
       >
         {children}
@@ -61,6 +75,28 @@ function wrapper(tasks: Array<{ id: string; title: string }> = []) {
     );
   };
 }
+
+describe("ChatMessage prompt mentions", () => {
+  it("renders saved prompt mentions as visual chips", () => {
+    const Wrapper = wrapper([], [customPrompt("hello")]);
+
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({ content: "@hello and @missing" })}
+          label="Message"
+          className=""
+        />
+      </Wrapper>,
+    );
+
+    const chips = screen.getAllByTestId("custom-prompt-mention");
+    expect(chips).toHaveLength(1);
+    const [chip] = chips;
+    expect(chip.textContent).toBe("@hello");
+    expect(screen.getByText(/and @missing/)).not.toBeNull();
+  });
+});
 
 function renderWithSender(
   tasks: Array<{ id: string; title: string }>,
@@ -79,8 +115,8 @@ function renderAgentMessageWithSession(session: Partial<TaskSession>, metadata =
     id: toSessionId("sess-1"),
     task_id: toTaskId("task-target"),
     state: "COMPLETED",
-    started_at: "2026-05-04T00:00:00Z",
-    updated_at: "2026-05-04T00:00:00Z",
+    started_at: MESSAGE_TIMESTAMP,
+    updated_at: MESSAGE_TIMESTAMP,
     ...session,
   };
   const Wrapper = ({ children }: { children: ReactNode }) => (
