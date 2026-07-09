@@ -411,6 +411,39 @@ func assertSessionState(t *testing.T, ctx context.Context, repo sessionExecutorS
 	}
 }
 
+// A non-terminal on_turn_complete engine transition must still write
+// tasks.state = REVIEW. This preserves the #985 regression coverage while
+// terminal targets use COMPLETED instead.
+func TestProcessOnTurnCompleteViaEngine_NonTerminalStepWritesTaskStateReview(t *testing.T) {
+	ctx := context.Background()
+
+	sg, nameToID := buildWorkflowFromJSON(t, developmentWorkflowJSON)
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", nameToID["Backlog"])
+	setSessionExecID(t, repo, "s1", "exec-1")
+	setSessionState(t, ctx, repo, "s1", models.TaskSessionStateRunning)
+
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createEngineService(t, repo, sg, agentMgr)
+	taskRepo := svc.taskRepo.(*mockTaskRepo)
+	seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+
+	transitioned := svc.processOnTurnCompleteViaEngine(ctx, "t1", session)
+	if !transitioned {
+		t.Fatalf("expected a transition from Backlog -> In Progress, got none")
+	}
+
+	assertStepByName(t, ctx, repo, "s1", "In Progress", nameToID)
+	if state, ok := taskRepo.updatedStates["t1"]; !ok || state != v1.TaskStateReview {
+		t.Errorf("tasks.state = %q, want %q (ok=%v)", state, v1.TaskStateReview, ok)
+	}
+}
+
 // A terminal on_turn_complete engine transition flips the session to
 // WAITING_FOR_INPUT, moves the task to the Done step, and persists
 // tasks.state = COMPLETED so the board column and API state agree.

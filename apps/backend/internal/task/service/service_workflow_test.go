@@ -170,6 +170,76 @@ func TestService_MoveTaskToTerminalStepCompletesTask(t *testing.T) {
 	findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskStateChanged)
 }
 
+func TestService_MoveTaskOutOfTerminalStepReopensTask(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
+	getter.steps["step-done"] = &wfmodels.WorkflowStep{
+		ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2,
+	}
+	createMoveTask(t, ctx, repo, "task-reopened", "wf-source", "step-done", nil)
+	task, err := repo.GetTask(ctx, "task-reopened")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	task.State = v1.TaskStateCompleted
+	must(t, repo.UpdateTask(ctx, task))
+	eventBus.ClearEvents()
+
+	moved, err := svc.MoveTask(ctx, "task-reopened", "wf-source", "step-source", 0)
+	if err != nil {
+		t.Fatalf("MoveTask: %v", err)
+	}
+	if moved.Task.State != v1.TaskStateTODO {
+		t.Fatalf("moved task state = %q, want TODO", moved.Task.State)
+	}
+
+	task, err = repo.GetTask(ctx, "task-reopened")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.State != v1.TaskStateTODO {
+		t.Fatalf("persisted task state = %q, want TODO", task.State)
+	}
+	findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskStateChanged)
+}
+
+func TestService_ApproveSessionToTerminalStepCompletesTask(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
+	getter.steps["step-done"] = &wfmodels.WorkflowStep{
+		ID: "step-done", WorkflowID: "wf-source", Name: "Approved", Position: 2,
+	}
+	createMoveTask(t, ctx, repo, "task-approved", "wf-source", "step-review-target", nil)
+	createMoveSession(t, ctx, repo, "session-approved", "task-approved", models.TaskSessionStateWaitingForInput, models.ReviewStatusPending)
+	eventBus.ClearEvents()
+
+	result, err := svc.ApproveSession(ctx, "session-approved")
+	if err != nil {
+		t.Fatalf("ApproveSession: %v", err)
+	}
+	if result.Task == nil || result.Task.WorkflowStepID != "step-done" {
+		t.Fatalf("approved task step = %+v, want step-done", result.Task)
+	}
+	if result.Task.State != v1.TaskStateCompleted {
+		t.Fatalf("approved task state = %q, want COMPLETED", result.Task.State)
+	}
+
+	task, err := repo.GetTask(ctx, "task-approved")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.State != v1.TaskStateCompleted {
+		t.Fatalf("persisted task state = %q, want COMPLETED", task.State)
+	}
+	findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskStateChanged)
+}
+
 func TestService_MoveTaskRejectsRunningSession(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -290,6 +360,33 @@ func TestService_BulkMoveTasksUpdatedEventIncludesSourceWorkflow(t *testing.T) {
 	if got := updatedData["old_workflow_id"]; got != "wf-source" {
 		t.Fatalf("old_workflow_id = %v, want wf-source", got)
 	}
+}
+
+func TestService_BulkMoveTasksToTerminalStepCompletesTasks(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
+	getter.steps["step-done"] = &wfmodels.WorkflowStep{
+		ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2,
+	}
+	createMoveTask(t, ctx, repo, "task-bulk-terminal", "wf-source", "step-source", nil)
+	eventBus.ClearEvents()
+
+	_, err := svc.BulkMoveTasks(ctx, "wf-source", "step-source", "wf-source", "step-done")
+	if err != nil {
+		t.Fatalf("BulkMoveTasks: %v", err)
+	}
+
+	task, err := repo.GetTask(ctx, "task-bulk-terminal")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.State != v1.TaskStateCompleted {
+		t.Fatalf("bulk-moved task state = %q, want COMPLETED", task.State)
+	}
+	findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskStateChanged)
 }
 
 func TestService_BulkMoveSelectedTasksValidatesBatchBeforeMoving(t *testing.T) {
