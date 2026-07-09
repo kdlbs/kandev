@@ -53,17 +53,21 @@ func (s *Service) processParentChildrenCompletedForTerminalStepMove(ctx context.
 }
 
 func (s *Service) markTaskCompletedForTerminalStep(ctx context.Context, taskID, terminalStepID string) {
+	s.taskRuntimeStateMu.Lock()
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
+		s.taskRuntimeStateMu.Unlock()
 		s.logger.Warn("terminal step completion: failed to load task",
 			zap.String("task_id", taskID),
 			zap.Error(err))
 		return
 	}
 	if terminalStepID != "" && task.WorkflowStepID != terminalStepID {
+		s.taskRuntimeStateMu.Unlock()
 		return
 	}
 	if models.IsTerminalTaskState(task.State) {
+		s.taskRuntimeStateMu.Unlock()
 		s.processParentChildrenCompletedForTaskState(ctx, taskID, task.State)
 		return
 	}
@@ -71,11 +75,13 @@ func (s *Service) markTaskCompletedForTerminalStep(ctx context.Context, taskID, 
 	task.State = v1.TaskStateCompleted
 	task.UpdatedAt = time.Now().UTC()
 	if err := s.repo.UpdateTask(ctx, task); err != nil {
+		s.taskRuntimeStateMu.Unlock()
 		s.logger.Warn("terminal step completion: failed to mark task completed",
 			zap.String("task_id", taskID),
 			zap.Error(err))
 		return
 	}
+	s.taskRuntimeStateMu.Unlock()
 	s.publishTaskUpdated(ctx, task)
 	s.publishTaskStateChanged(ctx, task, oldState)
 	s.processParentChildrenCompletedForTaskState(ctx, taskID, v1.TaskStateCompleted)
