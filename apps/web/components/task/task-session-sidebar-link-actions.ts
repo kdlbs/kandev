@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import type { KanbanState } from "@/lib/state/slices";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+import type { ExternalLinkProvider } from "./task-external-link-dialog";
 
 type StoreApi = {
   getState: () => {
@@ -20,19 +21,26 @@ export type SidebarLinkTarget = {
   repositories?: Array<{ id?: string; repository_id: string; position?: number }>;
 };
 
+export type SidebarExternalLinkTarget = {
+  provider: ExternalLinkProvider;
+  task: SidebarLinkTarget;
+};
+
 export function useSidebarLinkActions(store: StoreApi) {
   const [linkingPullRequestTask, setLinkingPullRequestTask] = useState<SidebarLinkTarget | null>(
     null,
   );
   const [linkingIssueTask, setLinkingIssueTask] = useState<SidebarLinkTarget | null>(null);
+  const [linkingExternalIssueTask, setLinkingExternalIssueTask] =
+    useState<SidebarExternalLinkTarget | null>(null);
 
   const getLinkTarget = useCallback(
-    (taskId: string): SidebarLinkTarget => {
+    (taskId: string, fallbackTitle?: string): SidebarLinkTarget => {
       const state = store.getState();
       const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
       return {
         id: taskId,
-        title: task?.title ?? "this task",
+        title: task?.title ?? fallbackTitle ?? "this task",
         repositoryId: task?.repositoryId,
         issueUrl: task?.issueUrl,
         issueNumber: task?.issueNumber,
@@ -43,17 +51,42 @@ export function useSidebarLinkActions(store: StoreApi) {
   );
 
   const handleLinkPullRequestTask = useCallback(
-    (taskId: string) => {
-      setLinkingPullRequestTask(getLinkTarget(taskId));
+    (taskId: string, fallbackTitle?: string) => {
+      setLinkingPullRequestTask(getLinkTarget(taskId, fallbackTitle));
     },
     [getLinkTarget],
   );
 
   const handleLinkIssueTask = useCallback(
-    (taskId: string) => {
-      setLinkingIssueTask(getLinkTarget(taskId));
+    (taskId: string, fallbackTitle?: string) => {
+      setLinkingIssueTask(getLinkTarget(taskId, fallbackTitle));
     },
     [getLinkTarget],
+  );
+
+  const handleLinkExternalIssueTask = useCallback(
+    (provider: ExternalLinkProvider, taskId: string, fallbackTitle?: string) => {
+      setLinkingExternalIssueTask({ provider, task: getLinkTarget(taskId, fallbackTitle) });
+    },
+    [getLinkTarget],
+  );
+
+  const handleLinkJiraTicketTask = useCallback(
+    (taskId: string, fallbackTitle?: string) =>
+      handleLinkExternalIssueTask("jira", taskId, fallbackTitle),
+    [handleLinkExternalIssueTask],
+  );
+
+  const handleLinkLinearIssueTask = useCallback(
+    (taskId: string, fallbackTitle?: string) =>
+      handleLinkExternalIssueTask("linear", taskId, fallbackTitle),
+    [handleLinkExternalIssueTask],
+  );
+
+  const handleLinkSentryIssueTask = useCallback(
+    (taskId: string, fallbackTitle?: string) =>
+      handleLinkExternalIssueTask("sentry", taskId, fallbackTitle),
+    [handleLinkExternalIssueTask],
   );
 
   return {
@@ -63,5 +96,10 @@ export function useSidebarLinkActions(store: StoreApi) {
     linkingIssueTask,
     setLinkingIssueTask,
     handleLinkIssueTask,
+    linkingExternalIssueTask,
+    setLinkingExternalIssueTask,
+    handleLinkJiraTicketTask,
+    handleLinkLinearIssueTask,
+    handleLinkSentryIssueTask,
   };
 }

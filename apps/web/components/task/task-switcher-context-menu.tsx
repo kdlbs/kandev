@@ -3,6 +3,7 @@
 import { cloneElement, isValidElement, useState } from "react";
 import {
   IconArchive,
+  IconBrandSentry,
   IconCopy,
   IconCircleDot,
   IconGitPullRequest,
@@ -11,6 +12,7 @@ import {
   IconPencil,
   IconPin,
   IconPinFilled,
+  IconTicket,
   IconTrash,
 } from "@tabler/icons-react";
 import {
@@ -47,8 +49,11 @@ type ContextMenuProps = {
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
-  onLinkPullRequest?: (taskId: string) => void;
-  onLinkIssue?: (taskId: string) => void;
+  onLinkPullRequest?: (taskId: string, taskTitle?: string) => void;
+  onLinkIssue?: (taskId: string, taskTitle?: string) => void;
+  onLinkJiraTicket?: (taskId: string, taskTitle?: string) => void;
+  onLinkLinearIssue?: (taskId: string, taskTitle?: string) => void;
+  onLinkSentryIssue?: (taskId: string, taskTitle?: string) => void;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onTogglePin?: (taskId: string) => void;
   isPinned?: boolean;
@@ -76,6 +81,9 @@ export function TaskItemWithContextMenu({
   onDeleteTask,
   onLinkPullRequest,
   onLinkIssue,
+  onLinkJiraTicket,
+  onLinkLinearIssue,
+  onLinkSentryIssue,
   onMoveToStep,
   onTogglePin,
   isPinned,
@@ -114,6 +122,9 @@ export function TaskItemWithContextMenu({
           onDeleteTask={onDeleteTask}
           onLinkPullRequest={onLinkPullRequest}
           onLinkIssue={onLinkIssue}
+          onLinkJiraTicket={onLinkJiraTicket}
+          onLinkLinearIssue={onLinkLinearIssue}
+          onLinkSentryIssue={onLinkSentryIssue}
           onMoveToStep={onMoveToStep}
           onTogglePin={onTogglePin}
           isPinned={isPinned}
@@ -139,31 +150,30 @@ type TaskContextMenuItemsProps = Omit<ContextMenuProps, "children"> & {
   moveTasks: ReturnType<typeof useTaskWorkflowMove>;
 };
 
-function TaskContextMenuItems({
-  task,
-  workflows,
-  stepsByWorkflowId,
-  steps,
-  onRenameTask,
-  onArchiveTask,
-  onDeleteTask,
-  onLinkPullRequest,
-  onLinkIssue,
-  onMoveToStep,
-  onTogglePin,
-  isPinned,
-  pinnedTaskIds,
-  isDeleting,
-  selectedTaskIds,
-  onBulkArchive,
-  onBulkDelete,
-  onBulkPin,
-  onBulkMove,
-  onClearSelection,
-  isMixedWorkflowSelection,
-  closeMenu,
-  moveTasks,
-}: TaskContextMenuItemsProps) {
+function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
+  const {
+    task,
+    workflows,
+    stepsByWorkflowId,
+    steps,
+    onRenameTask,
+    onArchiveTask,
+    onDeleteTask,
+    onMoveToStep,
+    onTogglePin,
+    isPinned,
+    pinnedTaskIds,
+    isDeleting,
+    selectedTaskIds,
+    onBulkArchive,
+    onBulkDelete,
+    onBulkPin,
+    onBulkMove,
+    onClearSelection,
+    isMixedWorkflowSelection,
+    closeMenu,
+    moveTasks,
+  } = props;
   // Right-clicking any row that's part of the active selection acts on the whole
   // selection (even a one-row selection, so the action clears it); right-clicking
   // a non-selected row acts on just that task and leaves the selection intact.
@@ -225,11 +235,7 @@ function TaskContextMenuItems({
         onBulkArchive={onBulkArchive}
       />
       <TaskColorMenu taskId={task.id} disabled={isDeleting} />
-      <TaskLinkMenu
-        disabled={isDeleting}
-        onLinkPullRequest={selectTaskAction(task.id, onLinkPullRequest, closeMenu)}
-        onLinkIssue={selectTaskAction(task.id, onLinkIssue, closeMenu)}
-      />
+      <TaskLinkMenu disabled={isDeleting} {...selectTaskLinkActions(task, closeMenu, props)} />
       <TaskMoveItems
         task={task}
         workflows={workflows}
@@ -328,15 +334,36 @@ function BulkSelectionMenuItems({
   );
 }
 
-function selectTaskAction(
-  taskId: string,
-  handler: ((taskId: string) => void) | undefined,
+export function createTaskLinkSelectAction(
+  task: Pick<TaskSwitcherItem, "id" | "title">,
+  handler: ((taskId: string, taskTitle?: string) => void) | undefined,
   closeMenu: () => void,
 ) {
   if (!handler) return undefined;
   return () => {
     closeMenu();
-    handler(taskId);
+    handler(task.id, task.title);
+  };
+}
+
+function selectTaskLinkActions(
+  task: Pick<TaskSwitcherItem, "id" | "title">,
+  closeMenu: () => void,
+  handlers: Pick<
+    ContextMenuProps,
+    | "onLinkPullRequest"
+    | "onLinkIssue"
+    | "onLinkJiraTicket"
+    | "onLinkLinearIssue"
+    | "onLinkSentryIssue"
+  >,
+) {
+  return {
+    onLinkPullRequest: createTaskLinkSelectAction(task, handlers.onLinkPullRequest, closeMenu),
+    onLinkIssue: createTaskLinkSelectAction(task, handlers.onLinkIssue, closeMenu),
+    onLinkJiraTicket: createTaskLinkSelectAction(task, handlers.onLinkJiraTicket, closeMenu),
+    onLinkLinearIssue: createTaskLinkSelectAction(task, handlers.onLinkLinearIssue, closeMenu),
+    onLinkSentryIssue: createTaskLinkSelectAction(task, handlers.onLinkSentryIssue, closeMenu),
   };
 }
 
@@ -537,12 +564,26 @@ function TaskLinkMenu({
   disabled,
   onLinkPullRequest,
   onLinkIssue,
+  onLinkJiraTicket,
+  onLinkLinearIssue,
+  onLinkSentryIssue,
 }: {
   disabled?: boolean;
   onLinkPullRequest?: () => void;
   onLinkIssue?: () => void;
+  onLinkJiraTicket?: () => void;
+  onLinkLinearIssue?: () => void;
+  onLinkSentryIssue?: () => void;
 }) {
-  if (!onLinkPullRequest && !onLinkIssue) return null;
+  if (
+    !onLinkPullRequest &&
+    !onLinkIssue &&
+    !onLinkJiraTicket &&
+    !onLinkLinearIssue &&
+    !onLinkSentryIssue
+  ) {
+    return null;
+  }
   return (
     <ContextMenuSub>
       <ContextMenuSubTrigger disabled={disabled}>
@@ -550,14 +591,36 @@ function TaskLinkMenu({
         Link
       </ContextMenuSubTrigger>
       <ContextMenuSubContent className="w-56">
-        <ContextMenuItem disabled={disabled || !onLinkPullRequest} onSelect={onLinkPullRequest}>
-          <IconGitPullRequest className="mr-2 h-4 w-4" />
-          GitHub Pull Request
-        </ContextMenuItem>
-        <ContextMenuItem disabled={disabled || !onLinkIssue} onSelect={onLinkIssue}>
-          <IconCircleDot className="mr-2 h-4 w-4" />
-          GitHub Issue
-        </ContextMenuItem>
+        {onLinkPullRequest && (
+          <ContextMenuItem disabled={disabled} onSelect={onLinkPullRequest}>
+            <IconGitPullRequest className="mr-2 h-4 w-4" />
+            GitHub Pull Request
+          </ContextMenuItem>
+        )}
+        {onLinkIssue && (
+          <ContextMenuItem disabled={disabled} onSelect={onLinkIssue}>
+            <IconCircleDot className="mr-2 h-4 w-4" />
+            GitHub Issue
+          </ContextMenuItem>
+        )}
+        {onLinkJiraTicket && (
+          <ContextMenuItem disabled={disabled} onSelect={onLinkJiraTicket}>
+            <IconTicket className="mr-2 h-4 w-4" />
+            Jira Ticket
+          </ContextMenuItem>
+        )}
+        {onLinkLinearIssue && (
+          <ContextMenuItem disabled={disabled} onSelect={onLinkLinearIssue}>
+            <IconCircleDot className="mr-2 h-4 w-4" />
+            Linear Issue
+          </ContextMenuItem>
+        )}
+        {onLinkSentryIssue && (
+          <ContextMenuItem disabled={disabled} onSelect={onLinkSentryIssue}>
+            <IconBrandSentry className="mr-2 h-4 w-4" />
+            Sentry Issue
+          </ContextMenuItem>
+        )}
       </ContextMenuSubContent>
     </ContextMenuSub>
   );
