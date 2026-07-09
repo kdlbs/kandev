@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { isValidElement, type ReactElement } from "react";
 
+import IntegrationsGitLabPage from "@/app/settings/integrations/gitlab/page";
 import { workspaceId, workflowId } from "@/lib/types/ids";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
-import { buildSettingsInitialStateForRoute } from "./settings-routes";
+import { buildSettingsInitialStateForRoute, renderSettingsRoute } from "./settings-routes";
 
 const ACTIVE_WORKSPACE_COOKIE = "kandev-active-workspace";
 const OWNER_ID = "owner-1";
@@ -107,6 +109,13 @@ describe("buildSettingsInitialStateForRoute", () => {
   });
 });
 
+describe("renderSettingsRoute", () => {
+  it("passes the route workspace id to the GitLab integration page", () => {
+    expect(gitLabRouteWorkspaceId("/settings/workspace/ws-2/integrations/gitlab")).toBe("ws-2");
+    expect(gitLabRouteWorkspaceId("/settings/workspace/ws%202/integrations/gitlab")).toBe("ws 2");
+  });
+});
+
 function buildState(
   overrides: Partial<Parameters<typeof buildSettingsInitialStateForRoute>[0]> = {},
 ) {
@@ -165,4 +174,13 @@ function userSettings(
       ...settings,
     },
   };
+}
+
+function gitLabRouteWorkspaceId(pathname: string): string | undefined {
+  const route = renderSettingsRoute(pathname);
+  if (!isValidElement(route)) {
+    throw new Error("expected GitLab integration route element");
+  }
+  expect(route.type).toBe(IntegrationsGitLabPage);
+  return (route as ReactElement<{ workspaceId?: string }>).props.workspaceId;
 }

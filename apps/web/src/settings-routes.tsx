@@ -218,7 +218,7 @@ export function settingsRouteKey(pathname: string): string {
   return normalizeSettingsPath(pathname);
 }
 
-function renderSettingsRoute(pathname: string) {
+export function renderSettingsRoute(pathname: string) {
   const dynamicRoute = renderDynamicSettingsRoute(pathname);
   if (dynamicRoute) return dynamicRoute;
   return SETTINGS_ROUTES[pathname]?.() ?? <SettingsRouteFallback pathname={pathname} />;
@@ -323,7 +323,7 @@ function renderIntegrationSettingsRoute(section: string | null, workspaceId?: st
     case "github":
       return <GitHubIntegrationPage workspaceId={workspaceId} />;
     case "gitlab":
-      return <IntegrationsGitLabPage />;
+      return <IntegrationsGitLabPage workspaceId={workspaceId} />;
     case "jira":
       return <IntegrationsJiraPage workspaceId={workspaceId} />;
     case "linear":
