@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -13,7 +14,8 @@ import (
 )
 
 type fakeWorkflowStepGetter struct {
-	steps map[string]*wfmodels.WorkflowStep
+	steps   map[string]*wfmodels.WorkflowStep
+	nextErr error
 }
 
 func (f *fakeWorkflowStepGetter) GetStep(_ context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
@@ -24,6 +26,9 @@ func (f *fakeWorkflowStepGetter) GetStep(_ context.Context, stepID string) (*wfm
 }
 
 func (f *fakeWorkflowStepGetter) GetNextStepByPosition(_ context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error) {
+	if f.nextErr != nil {
+		return nil, f.nextErr
+	}
 	for _, step := range f.steps {
 		if step.WorkflowID == workflowID && step.Position == currentPosition+1 {
 			return step, nil
@@ -168,6 +173,29 @@ func TestService_MoveTaskToTerminalStepCompletesTask(t *testing.T) {
 		t.Fatalf("persisted task state = %q, want COMPLETED", task.State)
 	}
 	findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskStateChanged)
+}
+
+func TestService_MoveTaskFailsWhenTerminalStatusLookupFails(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
+	getter.nextErr = errors.New("next step lookup failed")
+	createMoveTask(t, ctx, repo, "task-terminal-lookup-error", "wf-source", "step-source", nil)
+
+	_, err := svc.MoveTask(ctx, "task-terminal-lookup-error", "wf-source", "step-review-target", 0)
+	if err == nil {
+		t.Fatalf("expected move to fail when terminal status lookup fails")
+	}
+
+	task, err := repo.GetTask(ctx, "task-terminal-lookup-error")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.WorkflowStepID != "step-source" {
+		t.Fatalf("task moved despite lookup error: %s", task.WorkflowStepID)
+	}
 }
 
 func TestService_MoveTaskOutOfTerminalStepReopensTask(t *testing.T) {

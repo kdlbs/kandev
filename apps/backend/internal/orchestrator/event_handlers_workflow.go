@@ -2148,7 +2148,7 @@ func (s *Service) applyEngineTransition(
 	}
 
 	if terminalTarget {
-		s.markTaskCompletedForTerminalStep(ctx, taskID)
+		s.markTaskCompletedForTerminalStep(ctx, taskID, targetStep.ID)
 	}
 
 	if !triggerOnEnter {

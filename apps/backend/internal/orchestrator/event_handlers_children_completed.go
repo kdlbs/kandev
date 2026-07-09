@@ -49,15 +49,18 @@ func (s *Service) processParentChildrenCompletedForTerminalStepMove(ctx context.
 	if !s.workflowStepIsTerminal(ctx, stepID) {
 		return
 	}
-	s.markTaskCompletedForTerminalStep(ctx, taskID)
+	s.markTaskCompletedForTerminalStep(ctx, taskID, stepID)
 }
 
-func (s *Service) markTaskCompletedForTerminalStep(ctx context.Context, taskID string) {
+func (s *Service) markTaskCompletedForTerminalStep(ctx context.Context, taskID, terminalStepID string) {
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		s.logger.Warn("terminal step completion: failed to load task",
 			zap.String("task_id", taskID),
 			zap.Error(err))
+		return
+	}
+	if terminalStepID != "" && task.WorkflowStepID != terminalStepID {
 		return
 	}
 	if models.IsTerminalTaskState(task.State) {

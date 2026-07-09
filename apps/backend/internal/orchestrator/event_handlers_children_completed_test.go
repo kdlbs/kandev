@@ -151,7 +151,7 @@ func TestProcessOnChildrenCompleted_TreatsTerminalStepAsCompleted(t *testing.T) 
 
 	now := time.Now().UTC()
 	requireCreateTask(t, repo, &models.Task{
-		ID: "child-terminal-step", WorkspaceID: "ws1", WorkflowID: "wf1", WorkflowStepID: "child_done",
+		ID: "child-terminal-step", WorkspaceID: "ws1", WorkflowID: "wf-child", WorkflowStepID: "child_done",
 		Title: "Child in Done", State: v1.TaskStateReview, ParentID: "parent",
 		CreatedAt: now, UpdatedAt: now,
 	})
@@ -237,6 +237,59 @@ func TestHandleTaskMovedToTerminalStepProcessesParentChildrenCompleted(t *testin
 	}
 	if parent.WorkflowStepID != "step_parent_done" {
 		t.Fatalf("expected parent to move to step_parent_done, got %q", parent.WorkflowStepID)
+	}
+}
+
+func TestTerminalStepMoveIgnoresStaleTaskStep(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "parent", "parent-session", "step_wait")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step_wait"] = &wfmodels.WorkflowStep{
+		ID:         "step_wait",
+		WorkflowID: "wf1",
+		Name:       "Wait for Subtasks",
+		Position:   0,
+	}
+	stepGetter.steps["child_work"] = &wfmodels.WorkflowStep{
+		ID:         "child_work",
+		WorkflowID: "wf-child",
+		Name:       "Work",
+		Position:   0,
+	}
+	stepGetter.steps["child_done"] = &wfmodels.WorkflowStep{
+		ID:         "child_done",
+		WorkflowID: "wf-child",
+		Name:       "Done",
+		Position:   1,
+	}
+
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createEngineService(t, repo, stepGetter, agentMgr)
+
+	now := time.Now().UTC()
+	requireCreateTask(t, repo, &models.Task{
+		ID: "child-stale-terminal-move", WorkspaceID: "ws1", WorkflowID: "wf-child", WorkflowStepID: "child_work",
+		Title: "Child already moved out", State: v1.TaskStateReview, ParentID: "parent",
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	svc.processParentChildrenCompletedForTerminalStepMove(ctx, "child-stale-terminal-move", "child_done")
+
+	child, err := repo.GetTask(ctx, "child-stale-terminal-move")
+	if err != nil {
+		t.Fatalf("load child after stale move: %v", err)
+	}
+	if child.State != v1.TaskStateReview {
+		t.Fatalf("expected child to remain REVIEW after stale terminal move, got %q", child.State)
+	}
+	parent, err := repo.GetTask(ctx, "parent")
+	if err != nil {
+		t.Fatalf("load parent after stale move: %v", err)
+	}
+	if parent.WorkflowStepID != "step_wait" {
+		t.Fatalf("expected parent to remain on step_wait, got %q", parent.WorkflowStepID)
 	}
 }
 
