@@ -13,6 +13,7 @@ Validate a desktop runtime directory with this layout:
       kandev[.exe]
       agentctl[.exe]
       agentctl-linux-amd64
+      agentctl-linux-arm64
       agentctl-darwin-arm64
       agentctl-darwin-amd64
 
@@ -26,6 +27,7 @@ RUNTIME_DIR_SET=false
 PLATFORM=""
 REMOTE_AGENTCTL_HELPERS=(
   "agentctl-linux-amd64:agentctl linux/amd64 helper"
+  "agentctl-linux-arm64:agentctl linux/arm64 helper"
   "agentctl-darwin-arm64:agentctl darwin/arm64 helper"
   "agentctl-darwin-amd64:agentctl darwin/amd64 helper"
 )
@@ -68,7 +70,7 @@ is_executable_file() {
   # MSYS/Git Bash can report Windows executables differently from Unix mode bits.
   if [ "${OS:-}" = "Windows_NT" ]; then
     case "$(basename "$path")" in
-      *.exe|agentctl-linux-amd64|agentctl-darwin-arm64|agentctl-darwin-amd64) return 0 ;;
+      *.exe|agentctl-linux-amd64|agentctl-linux-arm64|agentctl-darwin-arm64|agentctl-darwin-amd64) return 0 ;;
     esac
   fi
   return 1
