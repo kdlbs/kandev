@@ -179,6 +179,52 @@ func TestService_MoveTaskToTerminalStepCompletesTask(t *testing.T) {
 	findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskStateChanged)
 }
 
+func TestService_MoveTaskToTerminalStepPreservesTerminalFailureStates(t *testing.T) {
+	cases := []struct {
+		name  string
+		state v1.TaskState
+	}{
+		{name: "failed", state: v1.TaskStateFailed},
+		{name: "cancelled", state: v1.TaskStateCancelled},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _, repo := createTestService(t)
+			ctx := context.Background()
+			seedMoveWorkflows(t, ctx, repo)
+			seedMoveSteps(svc)
+			getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
+			getter.steps["step-done"] = &wfmodels.WorkflowStep{
+				ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2,
+			}
+			createMoveTask(t, ctx, repo, "task-terminal-"+tc.name, "wf-source", "step-source", nil)
+			task, err := repo.GetTask(ctx, "task-terminal-"+tc.name)
+			if err != nil {
+				t.Fatalf("GetTask: %v", err)
+			}
+			task.State = tc.state
+			must(t, repo.UpdateTask(ctx, task))
+
+			moved, err := svc.MoveTask(ctx, task.ID, "wf-source", "step-done", 0)
+			if err != nil {
+				t.Fatalf("MoveTask: %v", err)
+			}
+			if moved.Task.State != tc.state {
+				t.Fatalf("moved task state = %q, want %q", moved.Task.State, tc.state)
+			}
+
+			task, err = repo.GetTask(ctx, task.ID)
+			if err != nil {
+				t.Fatalf("GetTask: %v", err)
+			}
+			if task.State != tc.state {
+				t.Fatalf("persisted task state = %q, want %q", task.State, tc.state)
+			}
+		})
+	}
+}
+
 func TestService_MoveTaskFailsWhenTerminalStatusLookupFails(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -419,6 +465,49 @@ func TestService_BulkMoveTasksToTerminalStepCompletesTasks(t *testing.T) {
 		t.Fatalf("bulk-moved task state = %q, want COMPLETED", task.State)
 	}
 	findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskStateChanged)
+}
+
+func TestService_BulkMoveTasksToTerminalStepPreservesTerminalFailureStates(t *testing.T) {
+	cases := []struct {
+		name  string
+		state v1.TaskState
+	}{
+		{name: "failed", state: v1.TaskStateFailed},
+		{name: "cancelled", state: v1.TaskStateCancelled},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _, repo := createTestService(t)
+			ctx := context.Background()
+			seedMoveWorkflows(t, ctx, repo)
+			seedMoveSteps(svc)
+			getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
+			getter.steps["step-done"] = &wfmodels.WorkflowStep{
+				ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2,
+			}
+			createMoveTask(t, ctx, repo, "task-bulk-terminal-"+tc.name, "wf-source", "step-source", nil)
+			task, err := repo.GetTask(ctx, "task-bulk-terminal-"+tc.name)
+			if err != nil {
+				t.Fatalf("GetTask: %v", err)
+			}
+			task.State = tc.state
+			must(t, repo.UpdateTask(ctx, task))
+
+			_, err = svc.BulkMoveTasks(ctx, "wf-source", "step-source", "wf-source", "step-done")
+			if err != nil {
+				t.Fatalf("BulkMoveTasks: %v", err)
+			}
+
+			task, err = repo.GetTask(ctx, task.ID)
+			if err != nil {
+				t.Fatalf("GetTask: %v", err)
+			}
+			if task.State != tc.state {
+				t.Fatalf("bulk-moved task state = %q, want %q", task.State, tc.state)
+			}
+		})
+	}
 }
 
 func TestService_BulkMoveSelectedTasksValidatesBatchBeforeMoving(t *testing.T) {

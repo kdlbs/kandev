@@ -380,7 +380,9 @@ func (s *Service) syncTaskStateForWorkflowMove(ctx context.Context, task *models
 		return err
 	}
 	if newTerminal {
-		task.State = v1.TaskStateCompleted
+		if !models.IsTerminalTaskState(task.State) {
+			task.State = v1.TaskStateCompleted
+		}
 		return nil
 	}
 	if oldStepID == newStepID || task.State != v1.TaskStateCompleted {
@@ -571,6 +573,15 @@ func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceSte
 	if err != nil {
 		return nil, fmt.Errorf("failed to check target step terminal status: %w", err)
 	}
+	sourceIsTerminal := false
+	sourceTerminalKnown := false
+	if sourceStepID != "" {
+		sourceIsTerminal, err = s.terminalWorkflowStep(ctx, sourceStepID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check source step terminal status: %w", err)
+		}
+		sourceTerminalKnown = true
+	}
 
 	now := time.Now().UTC()
 	for i, task := range tasks {
@@ -581,11 +592,16 @@ func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceSte
 		task.WorkflowStepID = targetStepID
 		task.Position = i
 		if targetIsTerminal {
-			task.State = v1.TaskStateCompleted
+			if !models.IsTerminalTaskState(task.State) {
+				task.State = v1.TaskStateCompleted
+			}
 		} else if oldStepID != targetStepID && task.State == v1.TaskStateCompleted {
-			oldTerminal, err := s.terminalWorkflowStep(ctx, oldStepID)
-			if err != nil {
-				return nil, fmt.Errorf("failed to sync task state for bulk move %s: %w", task.ID, err)
+			oldTerminal := sourceIsTerminal
+			if !sourceTerminalKnown {
+				oldTerminal, err = s.terminalWorkflowStep(ctx, oldStepID)
+				if err != nil {
+					return nil, fmt.Errorf("failed to sync task state for bulk move %s: %w", task.ID, err)
+				}
 			}
 			if oldTerminal {
 				task.State = v1.TaskStateTODO
