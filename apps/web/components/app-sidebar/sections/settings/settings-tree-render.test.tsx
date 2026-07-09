@@ -12,6 +12,7 @@ const state = {
     activeId: MAIN_WORKSPACE_ID,
     items: [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }],
   },
+  setActiveWorkspace: vi.fn(),
   settingsAgents: {
     items: [],
   },
@@ -48,6 +49,7 @@ describe("SettingsTree rendering", () => {
   beforeEach(() => {
     state.workspaces.activeId = MAIN_WORKSPACE_ID;
     state.workspaces.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
+    state.setActiveWorkspace.mockClear();
     state.settingsAgents.items = [];
     state.executors.items = [];
   });
@@ -79,8 +81,9 @@ describe("SettingsTree rendering", () => {
 
     render(<SettingsTree pathname="/settings" />);
 
-    expect(screen.getByRole("link", { name: `${MAIN_WORKSPACE_NAME} [active]` })).toBeTruthy();
+    expect(screen.getByRole("link", { name: `${MAIN_WORKSPACE_NAME} Active` })).toBeTruthy();
     expect(screen.getByRole("link", { name: ARCHIVE_WORKSPACE_NAME })).toBeTruthy();
+    expect(screen.queryByText("[active]")).toBeNull();
     expect(screen.getByRole("link", { name: "Repositories" }).getAttribute("href")).toBe(
       "/settings/workspace/ws-1/repositories",
     );
@@ -122,7 +125,7 @@ describe("SettingsTree rendering", () => {
     rerender(<WorkspacesGroup pathname="/settings/workspace/ws-10/repositories" expanded />);
 
     expect(
-      screen.getByRole("link", { name: `${MAIN_WORKSPACE_NAME} [active]` }).getAttribute("href"),
+      screen.getByRole("link", { name: `${MAIN_WORKSPACE_NAME} Active` }).getAttribute("href"),
     ).toBe("/settings/workspace/ws-1");
     const repositoryLinks = screen.getAllByRole("link", { name: "Repositories" });
     const workflowLinks = screen.getAllByRole("link", { name: "Workflows" });
@@ -168,6 +171,40 @@ describe("SettingsTree rendering", () => {
   });
 });
 
+describe("WorkspacesGroup active workspace presentation", () => {
+  beforeEach(() => {
+    state.workspaces.activeId = MAIN_WORKSPACE_ID;
+    state.workspaces.items = [
+      { id: ARCHIVE_WORKSPACE_ID, name: ARCHIVE_WORKSPACE_NAME },
+      { id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME },
+    ];
+    state.setActiveWorkspace.mockClear();
+  });
+
+  afterEach(() => cleanup());
+
+  it("keeps the active workspace first even when the API returns it later", () => {
+    render(<WorkspacesGroup pathname="/settings" expanded />);
+
+    const workspaceLinks = getWorkspaceRootLinks();
+
+    expect(workspaceLinks.map((link) => link.textContent)).toEqual([
+      `${MAIN_WORKSPACE_NAME}Active`,
+      ARCHIVE_WORKSPACE_NAME,
+    ]);
+  });
+
+  it("expands another workspace without changing the active workspace", () => {
+    render(<WorkspacesGroup pathname="/settings" expanded />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand Archive Workspace" }));
+
+    expect(state.setActiveWorkspace).not.toHaveBeenCalled();
+    expect(getWorkspaceRootLinks()[0].textContent).toBe(`${MAIN_WORKSPACE_NAME}Active`);
+    expect(screen.getByRole("link", { name: `${MAIN_WORKSPACE_NAME} Active` })).toBeTruthy();
+  });
+});
+
 describe("WorkspacesGroup integration route sync", () => {
   beforeEach(() => {
     state.workspaces.activeId = MAIN_WORKSPACE_ID;
@@ -193,3 +230,10 @@ describe("WorkspacesGroup integration route sync", () => {
     );
   });
 });
+
+function getWorkspaceRootLinks(): HTMLAnchorElement[] {
+  return screen.getAllByRole("link").filter((link): link is HTMLAnchorElement => {
+    const href = link.getAttribute("href");
+    return Boolean(href?.match(/^\/settings\/workspace\/[^/]+$/));
+  });
+}

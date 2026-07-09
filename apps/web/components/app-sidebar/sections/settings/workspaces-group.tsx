@@ -30,7 +30,9 @@ const INTEGRATIONS: Array<{ slug: string; label: string; icon: TablerIcon }> = [
 ];
 
 const ACTIVE_WORKSPACE_LABEL = (
-  <span className="shrink-0 text-[10px] font-semibold uppercase text-primary">[active]</span>
+  <span className="shrink-0 rounded-full border border-primary/35 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
+    Active
+  </span>
 );
 
 type WorkspacesGroupProps = {
@@ -44,14 +46,30 @@ function isWorkspaceRoute(pathname: string, workspaceId: string): boolean {
   return pathname === workspacePath || pathname.startsWith(`${workspacePath}/`);
 }
 
+function activeWorkspaceIdFor(
+  workspaces: Array<{ id: string }>,
+  storeActiveWorkspaceId: string | null,
+): string | null {
+  return workspaces.some((workspace) => workspace.id === storeActiveWorkspaceId)
+    ? storeActiveWorkspaceId
+    : null;
+}
+
+function activeWorkspaceFirst<T extends { id: string }>(workspaces: T[], activeId: string | null) {
+  if (!activeId) return workspaces;
+  return [
+    ...workspaces.filter((workspace) => workspace.id === activeId),
+    ...workspaces.filter((workspace) => workspace.id !== activeId),
+  ];
+}
+
 export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGroupProps) {
   const workspaces = useAppStore((s) => s.workspaces.items);
   const storeActiveWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   const routeWorkspaceId =
     workspaces.find((workspace) => isWorkspaceRoute(pathname, workspace.id))?.id ?? null;
-  const activeWorkspaceId = workspaces.some((workspace) => workspace.id === storeActiveWorkspaceId)
-    ? storeActiveWorkspaceId
-    : null;
+  const activeWorkspaceId = activeWorkspaceIdFor(workspaces, storeActiveWorkspaceId);
+  const orderedWorkspaces = activeWorkspaceFirst(workspaces, activeWorkspaceId);
   const defaultExpandedWorkspaceId = routeWorkspaceId ?? activeWorkspaceId ?? workspaces[0]?.id;
   const [expandedWorkspaceId, setExpandedWorkspaceId] = useState<string | null>(
     defaultExpandedWorkspaceId ?? null,
@@ -74,7 +92,7 @@ export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGrou
       expanded={expanded}
       onToggle={onToggle}
     >
-      {workspaces.map((workspace) => {
+      {orderedWorkspaces.map((workspace) => {
         const workspacePath = `${ROOT_HREF}/${workspace.id}`;
         const repositoriesPath = `${workspacePath}/repositories`;
         const workflowsPath = `${workspacePath}/workflows`;

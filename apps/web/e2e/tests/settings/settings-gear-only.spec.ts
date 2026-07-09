@@ -20,7 +20,7 @@ test.describe("Settings sidebar takeover", () => {
     // Gear opens the takeover again.
     await gear.click();
     await expect(takeover).toBeVisible();
-    await expect(takeover.getByRole("link", { name: /\[active\]/i })).toBeVisible();
+    await expect(takeover.getByText("Active", { exact: true })).toBeVisible();
     await expect(takeover.getByRole("link", { name: "Repositories" })).toBeVisible();
     await expect(takeover.getByRole("link", { name: "Integrations" })).toHaveAttribute(
       "href",

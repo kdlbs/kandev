@@ -98,7 +98,6 @@ type WorkspaceWorkflowsRouteState = {
   workflowTemplates: WorkflowTemplate[];
 };
 type SettingsInitialStateData = {
-  pathname: string;
   workspaces: ListWorkspacesResponse["workspaces"];
   executors: Awaited<ReturnType<typeof listExecutors>>["executors"];
   agents: Awaited<ReturnType<typeof listAgents>>["agents"];
@@ -369,7 +368,7 @@ function SettingsRouteBootstrap({ pathname }: { pathname: string }) {
     let cancelled = false;
 
     async function bootstrap() {
-      const initialState = await loadSettingsInitialState(pathname);
+      const initialState = await loadSettingsInitialState();
       if (!cancelled && Object.keys(initialState).length > 0) {
         store.getState().hydrate(initialState);
       }
@@ -385,7 +384,7 @@ function SettingsRouteBootstrap({ pathname }: { pathname: string }) {
   return null;
 }
 
-async function loadSettingsInitialState(pathname: string): Promise<Partial<AppState>> {
+async function loadSettingsInitialState(): Promise<Partial<AppState>> {
   const [workspaces, executors, agents, discovery, available, userSettingsResponse] =
     await Promise.all([
       listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
@@ -397,7 +396,6 @@ async function loadSettingsInitialState(pathname: string): Promise<Partial<AppSt
     ]);
 
   return buildSettingsInitialStateForRoute({
-    pathname,
     workspaces: workspaces.workspaces,
     executors: executors.executors,
     agents: agents.agents,
@@ -409,7 +407,6 @@ async function loadSettingsInitialState(pathname: string): Promise<Partial<AppSt
 }
 
 export function buildSettingsInitialStateForRoute({
-  pathname,
   workspaces,
   executors,
   agents,
@@ -421,7 +418,6 @@ export function buildSettingsInitialStateForRoute({
   const workspaceItems = workspaces.map(mapWorkspaceItem);
   const activeWorkspaceId = resolveSettingsActiveWorkspaceId(
     workspaceItems,
-    matchSingle(pathname, /^\/settings\/workspace\/([^/]+)/),
     readActiveWorkspaceCookie(),
     userSettingsResponse?.settings?.workspace_id ?? null,
   );
