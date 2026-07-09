@@ -449,27 +449,15 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			repos[i].BaseBranch = req.BaseBranch
 		}
 	}
-	if req.ParentID != "" {
-		if req.WorkspaceID == "" {
-			req.WorkspaceID = resolved.WorkspaceID
-		}
-		if req.WorkflowID == "" && !explicitWorkspaceID {
-			req.WorkflowID = resolved.WorkflowID
-		}
-		// A caller-supplied step is only safe when the caller also supplies the
-		// workflow it belongs to. Otherwise the target workflow is inherited or
-		// auto-resolved and the step can straddle workflow boundaries.
-		if !explicitWorkflowID {
-			req.WorkflowStepID = ""
-		}
-	} else {
-		if req.WorkspaceID == "" {
-			req.WorkspaceID = resolved.WorkspaceID
-		}
-		if req.WorkflowID == "" {
-			req.WorkflowID = resolved.WorkflowID
-		}
-	}
+	req.WorkspaceID, req.WorkflowID, req.WorkflowStepID = applyMCPTaskScopeDefaults(
+		req.ParentID,
+		req.WorkspaceID,
+		req.WorkflowID,
+		req.WorkflowStepID,
+		explicitWorkspaceID,
+		explicitWorkflowID,
+		resolved,
+	)
 
 	// Auto-resolve workspace/workflow when not provided and there's exactly one option.
 	if req.WorkspaceID == "" && h.taskSvc != nil {
@@ -674,6 +662,33 @@ func mergeMCPMetadata(base, extra map[string]interface{}) map[string]interface{}
 		base[k] = v
 	}
 	return base
+}
+
+func applyMCPTaskScopeDefaults(parentID, workspaceID, workflowID, workflowStepID string, explicitWorkspaceID, explicitWorkflowID bool, resolved taskRepoResult) (string, string, string) {
+	if parentID == "" {
+		return firstNonEmptyString(workspaceID, resolved.WorkspaceID), firstNonEmptyString(workflowID, resolved.WorkflowID), workflowStepID
+	}
+
+	workspaceID = firstNonEmptyString(workspaceID, resolved.WorkspaceID)
+	if workflowID == "" && !explicitWorkspaceID {
+		workflowID = resolved.WorkflowID
+	}
+	// A caller-supplied step is only safe when the caller also supplies the
+	// workflow it belongs to. Otherwise the target workflow is inherited or
+	// auto-resolved and the step can straddle workflow boundaries.
+	if !explicitWorkflowID {
+		workflowStepID = ""
+	}
+	return workspaceID, workflowID, workflowStepID
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // explicitRepoInputsWithDefaults maps the MCP-side explicit repo list to
