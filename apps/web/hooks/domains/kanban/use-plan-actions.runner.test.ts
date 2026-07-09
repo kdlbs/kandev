@@ -206,3 +206,35 @@ describe("useImplementPlanRunner same-session path", () => {
     expect(mockToast).toHaveBeenCalledWith(expect.objectContaining({ variant: "error" }));
   });
 });
+
+describe("useImplementPlanRunner toolbar path", () => {
+  beforeEach(() => setup());
+
+  it("can keep plan mode open for toolbar implementation", async () => {
+    const plan = makePlan();
+    mockMarkPlanImplementationStarted.mockResolvedValueOnce(plan);
+    const handlePlanModeChange = vi.fn();
+    const { ref, clear } = makeChatRef();
+    const { result } = renderHook(() =>
+      useImplementPlanRunner({
+        resolvedSessionId: SESSION_ID,
+        taskId: TASK_ID,
+        handlePlanModeChange,
+        chatInputRef: ref,
+        clearPlanModeAfterSend: false,
+      }),
+    );
+
+    let ok = false;
+    await act(async () => {
+      ok = await result.current(false);
+    });
+
+    expect(ok).toBe(true);
+    expect(mockMarkPlanImplementationStarted).toHaveBeenCalledWith(TASK_ID, SESSION_ID);
+    expect(mockSetTaskPlan).toHaveBeenCalledWith(TASK_ID, plan);
+    expect(handlePlanModeChange).not.toHaveBeenCalled();
+    expect(clear).toHaveBeenCalledTimes(1);
+    expect(mockWsRequest).toHaveBeenCalledTimes(1);
+  });
+});

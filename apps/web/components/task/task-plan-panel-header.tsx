@@ -3,12 +3,9 @@
 import { useCallback, useState } from "react";
 import { PanelHeaderBarSplit } from "./panel-primitives";
 import { TaskPlanRevisions } from "./task-plan-revisions";
-import { shouldShowPlanToolbarImplement } from "./task-plan-implement";
+import { getPlanToolbarImplementState } from "./task-plan-implement";
 import { ImplementPlanButton } from "./chat/implement-plan-button";
-import {
-  useDirectDisablePlanMode,
-  useImplementPlanRunner,
-} from "@/hooks/domains/kanban/use-plan-actions";
+import { useImplementPlanRunner } from "@/hooks/domains/kanban/use-plan-actions";
 import type { TaskPlan, TaskPlanRevision } from "@/lib/types/http";
 
 type PlanPanelHeaderProps = {
@@ -55,20 +52,14 @@ export function PlanPanelHeader({
   clearComparePair,
 }: PlanPanelHeaderProps) {
   const [isImplementing, setIsImplementing] = useState(false);
-  const disablePlanMode = useDirectDisablePlanMode(activeSessionId);
-  const handlePlanModeChange = useCallback(
-    (enabled: boolean) => {
-      if (!enabled) disablePlanMode();
-    },
-    [disablePlanMode],
-  );
   const implementPlan = useImplementPlanRunner({
     resolvedSessionId: activeSessionId,
     taskId,
-    handlePlanModeChange,
+    clearPlanModeAfterSend: false,
   });
-  const showImplement = shouldShowPlanToolbarImplement({ draftContent, plan });
-  const implementDisabled = isSaving || isImplementing || isAgentBusy || !activeSessionId;
+  const implementState = getPlanToolbarImplementState({ draftContent, plan });
+  const implementDisabled =
+    implementState.disabled || isSaving || isImplementing || isAgentBusy || !activeSessionId;
   const handleImplement = useCallback(
     async (fresh: boolean) => {
       if (implementDisabled) return;
@@ -80,7 +71,11 @@ export function PlanPanelHeader({
           if (!savedPlan) return;
         }
         if (!savedPlan) return;
-        if (!shouldShowPlanToolbarImplement({ draftContent: savedPlan.content, plan: savedPlan })) {
+        const savedState = getPlanToolbarImplementState({
+          draftContent: savedPlan.content,
+          plan: savedPlan,
+        });
+        if (!savedState.visible || savedState.disabled) {
           return;
         }
         await implementPlan(fresh);
@@ -96,11 +91,14 @@ export function PlanPanelHeader({
       left={null}
       right={
         <>
-          {showImplement && (
+          {implementState.visible && (
             <ImplementPlanButton
               onClick={handleImplement}
               disabled={implementDisabled}
+              disabledReason={implementState.disabledReason}
+              framed
               testIds={{
+                root: "plan-toolbar-implement-control",
                 button: "plan-toolbar-implement-button",
                 menuTrigger: "plan-toolbar-implement-menu-trigger",
                 freshItem: "plan-toolbar-implement-fresh-menu-item",

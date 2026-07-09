@@ -5,10 +5,25 @@ type PlanToolbarImplementArgs = {
   plan: TaskPlan | null;
 };
 
-export function shouldShowPlanToolbarImplement({
+export type PlanToolbarImplementState = {
+  visible: boolean;
+  disabled: boolean;
+  disabledReason?: string;
+};
+
+export function getPlanToolbarImplementState({
   draftContent,
   plan,
-}: PlanToolbarImplementArgs): boolean {
-  if (draftContent.trim() === "") return false;
-  return !plan?.implementation_started_at;
+}: PlanToolbarImplementArgs): PlanToolbarImplementState {
+  if (draftContent.trim() === "") {
+    return { visible: false, disabled: false };
+  }
+  if (plan?.implementation_started_at) {
+    return {
+      visible: true,
+      disabled: true,
+      disabledReason: "This plan has already been sent for implementation.",
+    };
+  }
+  return { visible: true, disabled: false };
 }

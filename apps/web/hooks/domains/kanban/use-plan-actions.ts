@@ -150,6 +150,7 @@ function useImplementPlan(
   resolvedSessionId: string | null,
   taskId: string | null,
   handlePlanModeChange: ((enabled: boolean) => void) | undefined,
+  clearPlanModeAfterSend: boolean,
   chatInputRef?: React.RefObject<ChatInputContainerHandle | null>,
 ) {
   const setTaskPlan = useAppStore((s) => s.setTaskPlan);
@@ -183,23 +184,37 @@ function useImplementPlan(
       await markPlanImplementationStartedBestEffort(taskId, resolvedSessionId, setTaskPlan);
       // Exit plan mode + clear composer only on success so a failed send
       // leaves the layout and input intact for retry.
-      handlePlanModeChange?.(false);
+      if (clearPlanModeAfterSend) {
+        handlePlanModeChange?.(false);
+      }
       chatInputRef?.current?.clear();
       setChatDraftContent(resolvedSessionId, null);
       // Authoritatively clear plan_mode in session metadata so a refresh
       // mid-implementation cannot re-hydrate plan mode from the server.
       // Run as a separate request with its own catch so a set_plan_mode
       // failure doesn't masquerade as a message send failure.
-      client
-        .request("session.set_plan_mode", { session_id: resolvedSessionId, enabled: false }, 5000)
-        .catch((err: unknown) => console.error("Failed to clear plan mode after implement:", err));
+      if (clearPlanModeAfterSend) {
+        client
+          .request("session.set_plan_mode", { session_id: resolvedSessionId, enabled: false }, 5000)
+          .catch((err: unknown) =>
+            console.error("Failed to clear plan mode after implement:", err),
+          );
+      }
       return true;
     } catch (err) {
       console.error("Failed to start implementation:", err);
       toast({ description: "Failed to start implementing the plan", variant: "error" });
       return false;
     }
-  }, [resolvedSessionId, taskId, chatInputRef, setTaskPlan, handlePlanModeChange, toast]);
+  }, [
+    resolvedSessionId,
+    taskId,
+    chatInputRef,
+    setTaskPlan,
+    clearPlanModeAfterSend,
+    handlePlanModeChange,
+    toast,
+  ]);
 }
 
 /** Directly disable plan mode state + layout, bypassing the MCP availability guard. */
@@ -267,12 +282,14 @@ export function useImplementPlanRunner(opts: {
   resolvedSessionId: string | null;
   taskId: string | null;
   handlePlanModeChange?: (enabled: boolean) => void;
+  clearPlanModeAfterSend?: boolean;
   chatInputRef?: React.RefObject<ChatInputContainerHandle | null>;
 }) {
   const handleImplementPlan = useImplementPlan(
     opts.resolvedSessionId,
     opts.taskId,
     opts.handlePlanModeChange,
+    opts.clearPlanModeAfterSend ?? true,
     opts.chatInputRef,
   );
   const handleImplementFresh = useImplementFresh(

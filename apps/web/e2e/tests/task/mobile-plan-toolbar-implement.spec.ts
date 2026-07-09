@@ -37,7 +37,7 @@ async function openMobilePlanPanel(testPage: Page, session: SessionPage) {
 test.describe("mobile: Plan toolbar implement", () => {
   test.describe.configure({ retries: 1 });
 
-  test("marks the plan implemented and remains hidden after refresh", async ({
+  test("marks the plan implemented and remains disabled after refresh", async ({
     testPage,
     apiClient,
     seedData,
@@ -71,13 +71,15 @@ test.describe("mobile: Plan toolbar implement", () => {
       )
       .toBe(sessionId);
 
-    await expect(toolbarButton).not.toBeVisible({ timeout: 10_000 });
+    await expect(toolbarButton).toBeVisible({ timeout: 10_000 });
+    await expect(toolbarButton).toBeDisabled();
 
     await testPage.reload();
     await session.waitForLoad();
     await openMobilePlanPanel(testPage, session);
-    await expect(testPage.getByTestId("plan-toolbar-implement-button")).not.toBeVisible({
+    await expect(testPage.getByTestId("plan-toolbar-implement-button")).toBeVisible({
       timeout: 10_000,
     });
+    await expect(testPage.getByTestId("plan-toolbar-implement-button")).toBeDisabled();
   });
 });

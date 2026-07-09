@@ -41,7 +41,7 @@ async function openPlanPanel(session: SessionPage) {
 test.describe("Plan toolbar implement", () => {
   test.describe.configure({ retries: 1 });
 
-  test("saves unsaved plan text, starts implementation, and stays hidden after refresh", async ({
+  test("saves unsaved plan text, starts implementation, and stays disabled after refresh", async ({
     testPage,
     apiClient,
     seedData,
@@ -80,13 +80,20 @@ test.describe("Plan toolbar implement", () => {
     const { messages } = await apiClient.listSessionMessages(sessionId);
     const latestUserMessage = messages.filter((m) => m.author_type === "user").pop();
     expect(latestUserMessage?.content).toContain("Implement the plan");
-    await expect(toolbarButton).not.toBeVisible({ timeout: 10_000 });
+    await expect(toolbarButton).toBeVisible({ timeout: 10_000 });
+    await expect(toolbarButton).toBeDisabled();
+
+    await testPage.getByTestId("plan-toolbar-implement-control").hover();
+    await expect(
+      testPage.getByText("This plan has already been sent for implementation."),
+    ).toBeVisible();
 
     await testPage.reload();
     await session.waitForLoad();
     await openPlanPanel(session);
-    await expect(testPage.getByTestId("plan-toolbar-implement-button")).not.toBeVisible({
+    await expect(testPage.getByTestId("plan-toolbar-implement-button")).toBeVisible({
       timeout: 10_000,
     });
+    await expect(testPage.getByTestId("plan-toolbar-implement-button")).toBeDisabled();
   });
 });
