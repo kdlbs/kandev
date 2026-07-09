@@ -349,4 +349,60 @@ test.describe("Automations settings page", () => {
     // Table should show the empty state.
     await expect(testPage.getByText("No runs yet")).toBeVisible({ timeout: 5_000 });
   });
+
+  test("archived task's run shows Cancelled instead of Running", async ({
+    testPage,
+    seedData,
+    apiClient,
+  }) => {
+    // Regression test: an automation-generated task that gets archived
+    // (manually, via auto-archive, or via cascade) before its run is
+    // otherwise finalized used to leave the run stuck at "task_created"
+    // forever, displayed as "Running" and permanently pinned against
+    // max_concurrent_runs. See internal/automation.Store.CountActiveRuns /
+    // ListRuns.
+    const automation = await apiClient.seedAutomation({
+      workspaceId: seedData.workspaceId,
+      name: "Archived Task Run Test",
+      workflowId: seedData.workflowId,
+      workflowStepId: seedData.startStepId,
+    });
+
+    const archivedTask = await apiClient.createTask(
+      seedData.workspaceId,
+      "Archived Automation Task",
+      { workflow_id: seedData.workflowId, workflow_step_id: seedData.startStepId },
+    );
+    const openTask = await apiClient.createTask(seedData.workspaceId, "Open Automation Task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await apiClient.seedAutomationRun(automation.id, "task_created", archivedTask.id);
+    await apiClient.seedAutomationRun(automation.id, "task_created", openTask.id);
+    await apiClient.archiveTask(archivedTask.id);
+
+    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/automations/${automation.id}`);
+    await testPage.getByTestId("automation-editor").waitFor({ state: "visible", timeout: 15_000 });
+
+    const scrollContainer = testPage.getByTestId("settings-scroll-container");
+    await scrollContainer.evaluate((el) => (el.scrollTop = el.scrollHeight));
+
+    const recentRunsButton = testPage.locator("button", { hasText: /Recent Runs/ });
+    await recentRunsButton.waitFor({ state: "visible", timeout: 10_000 });
+    await recentRunsButton.click();
+
+    const tbody = testPage.locator("table tbody");
+    await tbody.waitFor({ state: "visible", timeout: 5_000 });
+    await expect(tbody.locator("tr")).toHaveCount(2, { timeout: 10_000 });
+
+    // The archived task's run is no longer outstanding work.
+    const archivedRow = testPage.locator("table tbody tr", {
+      hasText: archivedTask.id.slice(0, 8),
+    });
+    await expect(archivedRow.getByText("Cancelled", { exact: true })).toBeVisible();
+
+    // The still-open task's run is unaffected.
+    const openRow = testPage.locator("table tbody tr", { hasText: openTask.id.slice(0, 8) });
+    await expect(openRow.getByText("Running", { exact: true })).toBeVisible();
+  });
 });

@@ -261,6 +261,10 @@ func handleE2ECreateAutomation(svc *automation.Service, log *logger.Logger) gin.
 type e2eCreateAutomationRunRequest struct {
 	AutomationID string `json:"automation_id"`
 	Status       string `json:"status"`
+	// TaskID optionally links the seeded run to a real task so E2E tests can
+	// exercise task-lifecycle interactions (e.g. archiving the task and
+	// asserting the run's displayed status/concurrency accounting reacts).
+	TaskID string `json:"task_id"`
 }
 
 // handleE2ECreateAutomationRun seeds an automation run row for E2E tests.
@@ -279,6 +283,7 @@ func handleE2ECreateAutomationRun(svc *automation.Service, log *logger.Logger) g
 			AutomationID: body.AutomationID,
 			TriggerType:  automation.TriggerTypeScheduled,
 			Status:       status,
+			TaskID:       body.TaskID,
 			TriggerData:  []byte(`{}`),
 		}
 		if err := svc.RecordRun(c.Request.Context(), run); err != nil {
@@ -286,6 +291,8 @@ func handleE2ECreateAutomationRun(svc *automation.Service, log *logger.Logger) g
 			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
 			return
 		}
-		c.JSON(http.StatusCreated, gin.H{"id": run.ID, "automation_id": run.AutomationID, statusKey: run.Status})
+		c.JSON(http.StatusCreated, gin.H{
+			"id": run.ID, "automation_id": run.AutomationID, statusKey: run.Status, taskIDPayloadKey: run.TaskID,
+		})
 	}
 }

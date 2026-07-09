@@ -1961,10 +1961,12 @@ export class ApiClient {
   async seedAutomationRun(
     automationId: string,
     status = "skipped",
-  ): Promise<{ id: string; automation_id: string; status: string }> {
+    taskId?: string,
+  ): Promise<{ id: string; automation_id: string; status: string; task_id: string }> {
     return this.request("POST", "/api/v1/e2e/automation-runs", {
       automation_id: automationId,
       status,
+      task_id: taskId ?? "",
     });
   }
 }
