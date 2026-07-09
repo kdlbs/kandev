@@ -29,12 +29,16 @@ func (f *fakeWorkflowStepGetter) GetNextStepByPosition(_ context.Context, workfl
 	if f.nextErr != nil {
 		return nil, f.nextErr
 	}
+	var next *wfmodels.WorkflowStep
 	for _, step := range f.steps {
-		if step.WorkflowID == workflowID && step.Position == currentPosition+1 {
-			return step, nil
+		if step.WorkflowID != workflowID || step.Position <= currentPosition {
+			continue
+		}
+		if next == nil || step.Position < next.Position {
+			next = step
 		}
 	}
-	return nil, nil
+	return next, nil
 }
 
 type testStepNotFound struct{}
