@@ -80,11 +80,11 @@ export function MobileTaskList({
   onSelectTask: (taskId: string) => void;
   onArchiveTask: (taskId: string) => void;
   onDeleteTask: (taskId: string) => Promise<void> | void;
-  onLinkPullRequest?: (taskId: string) => void;
-  onLinkIssue?: (taskId: string) => void;
-  onLinkJiraTicket?: (taskId: string) => void;
-  onLinkLinearIssue?: (taskId: string) => void;
-  onLinkSentryIssue?: (taskId: string) => void;
+  onLinkPullRequest?: (taskId: string, taskTitle?: string) => void;
+  onLinkIssue?: (taskId: string, taskTitle?: string) => void;
+  onLinkJiraTicket?: (taskId: string, taskTitle?: string) => void;
+  onLinkLinearIssue?: (taskId: string, taskTitle?: string) => void;
+  onLinkSentryIssue?: (taskId: string, taskTitle?: string) => void;
   deletingTaskId: string | null;
   isLoading?: boolean;
 }) {

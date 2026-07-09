@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { TaskSwitcher, type TaskSwitcherItem } from "./task-switcher";
+import { createTaskLinkSelectAction } from "./task-switcher-context-menu";
 import type { GroupedSidebarList } from "@/lib/sidebar/apply-view";
 
 afterEach(() => cleanup());
@@ -197,5 +198,20 @@ describe("TaskSwitcher — external issue link menu", () => {
       expect(screen.getByText("Linear Issue")).toBeTruthy();
       expect(screen.getByText("Sentry Issue")).toBeTruthy();
     });
+  });
+
+  it("passes the visible task title to external issue link handlers", () => {
+    const archivedTask: TaskSwitcherItem = {
+      id: "archived-task",
+      title: "Archived task title",
+      isArchived: true,
+    };
+    const closeMenu = vi.fn();
+    const onLinkJiraTicket = vi.fn();
+
+    createTaskLinkSelectAction(archivedTask, onLinkJiraTicket, closeMenu)?.();
+
+    expect(onLinkJiraTicket).toHaveBeenCalledWith(archivedTask.id, archivedTask.title);
+    expect(closeMenu).toHaveBeenCalledOnce();
   });
 });

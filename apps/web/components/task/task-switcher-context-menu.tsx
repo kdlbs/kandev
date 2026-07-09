@@ -49,11 +49,11 @@ type ContextMenuProps = {
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
-  onLinkPullRequest?: (taskId: string) => void;
-  onLinkIssue?: (taskId: string) => void;
-  onLinkJiraTicket?: (taskId: string) => void;
-  onLinkLinearIssue?: (taskId: string) => void;
-  onLinkSentryIssue?: (taskId: string) => void;
+  onLinkPullRequest?: (taskId: string, taskTitle?: string) => void;
+  onLinkIssue?: (taskId: string, taskTitle?: string) => void;
+  onLinkJiraTicket?: (taskId: string, taskTitle?: string) => void;
+  onLinkLinearIssue?: (taskId: string, taskTitle?: string) => void;
+  onLinkSentryIssue?: (taskId: string, taskTitle?: string) => void;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onTogglePin?: (taskId: string) => void;
   isPinned?: boolean;
@@ -235,7 +235,7 @@ function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
         onBulkArchive={onBulkArchive}
       />
       <TaskColorMenu taskId={task.id} disabled={isDeleting} />
-      <TaskLinkMenu disabled={isDeleting} {...selectTaskLinkActions(task.id, closeMenu, props)} />
+      <TaskLinkMenu disabled={isDeleting} {...selectTaskLinkActions(task, closeMenu, props)} />
       <TaskMoveItems
         task={task}
         workflows={workflows}
@@ -334,20 +334,20 @@ function BulkSelectionMenuItems({
   );
 }
 
-function selectTaskAction(
-  taskId: string,
-  handler: ((taskId: string) => void) | undefined,
+export function createTaskLinkSelectAction(
+  task: Pick<TaskSwitcherItem, "id" | "title">,
+  handler: ((taskId: string, taskTitle?: string) => void) | undefined,
   closeMenu: () => void,
 ) {
   if (!handler) return undefined;
   return () => {
     closeMenu();
-    handler(taskId);
+    handler(task.id, task.title);
   };
 }
 
 function selectTaskLinkActions(
-  taskId: string,
+  task: Pick<TaskSwitcherItem, "id" | "title">,
   closeMenu: () => void,
   handlers: Pick<
     ContextMenuProps,
@@ -359,11 +359,11 @@ function selectTaskLinkActions(
   >,
 ) {
   return {
-    onLinkPullRequest: selectTaskAction(taskId, handlers.onLinkPullRequest, closeMenu),
-    onLinkIssue: selectTaskAction(taskId, handlers.onLinkIssue, closeMenu),
-    onLinkJiraTicket: selectTaskAction(taskId, handlers.onLinkJiraTicket, closeMenu),
-    onLinkLinearIssue: selectTaskAction(taskId, handlers.onLinkLinearIssue, closeMenu),
-    onLinkSentryIssue: selectTaskAction(taskId, handlers.onLinkSentryIssue, closeMenu),
+    onLinkPullRequest: createTaskLinkSelectAction(task, handlers.onLinkPullRequest, closeMenu),
+    onLinkIssue: createTaskLinkSelectAction(task, handlers.onLinkIssue, closeMenu),
+    onLinkJiraTicket: createTaskLinkSelectAction(task, handlers.onLinkJiraTicket, closeMenu),
+    onLinkLinearIssue: createTaskLinkSelectAction(task, handlers.onLinkLinearIssue, closeMenu),
+    onLinkSentryIssue: createTaskLinkSelectAction(task, handlers.onLinkSentryIssue, closeMenu),
   };
 }
 

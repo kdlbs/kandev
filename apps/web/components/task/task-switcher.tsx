@@ -58,11 +58,11 @@ type TaskSwitcherProps = {
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
-  onLinkPullRequest?: (taskId: string) => void;
-  onLinkIssue?: (taskId: string) => void;
-  onLinkJiraTicket?: (taskId: string) => void;
-  onLinkLinearIssue?: (taskId: string) => void;
-  onLinkSentryIssue?: (taskId: string) => void;
+  onLinkPullRequest?: TaskLinkHandler;
+  onLinkIssue?: TaskLinkHandler;
+  onLinkJiraTicket?: TaskLinkHandler;
+  onLinkLinearIssue?: TaskLinkHandler;
+  onLinkSentryIssue?: TaskLinkHandler;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onTogglePin?: (taskId: string) => void;
   onReorderGroup?: (groupTaskIds: string[]) => void;
@@ -83,6 +83,8 @@ type TaskSwitcherProps = {
   onClearSelection?: () => void;
   isMixedWorkflowSelection?: boolean;
 };
+
+type TaskLinkHandler = (taskId: string, taskTitle?: string) => void;
 
 /**
  * Modifier-aware sidebar row click: cmd/ctrl toggles one task, shift extends a
@@ -139,11 +141,11 @@ type TaskRowProps = {
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
-  onLinkPullRequest?: (taskId: string) => void;
-  onLinkIssue?: (taskId: string) => void;
-  onLinkJiraTicket?: (taskId: string) => void;
-  onLinkLinearIssue?: (taskId: string) => void;
-  onLinkSentryIssue?: (taskId: string) => void;
+  onLinkPullRequest?: TaskLinkHandler;
+  onLinkIssue?: TaskLinkHandler;
+  onLinkJiraTicket?: TaskLinkHandler;
+  onLinkLinearIssue?: TaskLinkHandler;
+  onLinkSentryIssue?: TaskLinkHandler;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onTogglePin?: (taskId: string) => void;
   isPinned?: boolean;
@@ -171,11 +173,11 @@ function taskLinkHandlerProps(props: Pick<TaskRowProps, keyof TaskLinkHandlerPro
 }
 
 type TaskLinkHandlerProps = {
-  onLinkPullRequest?: (taskId: string) => void;
-  onLinkIssue?: (taskId: string) => void;
-  onLinkJiraTicket?: (taskId: string) => void;
-  onLinkLinearIssue?: (taskId: string) => void;
-  onLinkSentryIssue?: (taskId: string) => void;
+  onLinkPullRequest?: TaskLinkHandler;
+  onLinkIssue?: TaskLinkHandler;
+  onLinkJiraTicket?: TaskLinkHandler;
+  onLinkLinearIssue?: TaskLinkHandler;
+  onLinkSentryIssue?: TaskLinkHandler;
 };
 
 function TaskRow({
@@ -394,11 +396,11 @@ type GroupSectionProps = {
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
-  onLinkPullRequest?: (taskId: string) => void;
-  onLinkIssue?: (taskId: string) => void;
-  onLinkJiraTicket?: (taskId: string) => void;
-  onLinkLinearIssue?: (taskId: string) => void;
-  onLinkSentryIssue?: (taskId: string) => void;
+  onLinkPullRequest?: TaskLinkHandler;
+  onLinkIssue?: TaskLinkHandler;
+  onLinkJiraTicket?: TaskLinkHandler;
+  onLinkLinearIssue?: TaskLinkHandler;
+  onLinkSentryIssue?: TaskLinkHandler;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onTogglePin?: (taskId: string) => void;
   onReorderGroup?: (groupTaskIds: string[]) => void;
