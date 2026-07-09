@@ -51,6 +51,14 @@ func createTestPlanService(t *testing.T) (*PlanService, *MockEventBus, *sqlitere
 	return svc, eventBus, repo
 }
 
+type nilMarkPlanRepo struct {
+	*sqliterepo.Repository
+}
+
+func (r *nilMarkPlanRepo) MarkTaskPlanImplementationStarted(ctx context.Context, taskID, sessionID, actor string) (*models.TaskPlan, error) {
+	return nil, nil
+}
+
 func TestPlanService_CreatePlan(t *testing.T) {
 	svc, _, repo := createTestPlanService(t)
 	ctx := context.Background()
@@ -259,6 +267,61 @@ func TestPlanService_MarkImplementationStartedRejectsCrossTaskSession(t *testing
 	})
 	if err != ErrSessionTaskMismatch {
 		t.Fatalf("expected ErrSessionTaskMismatch, got %v", err)
+	}
+}
+
+func TestPlanService_MarkImplementationStartedRejectsMissingSession(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-impl")
+
+	_, err := svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID:  "task-impl",
+		Title:   "Plan",
+		Content: "Ship the toolbar",
+	})
+	if err != nil {
+		t.Fatalf("CreatePlan failed: %v", err)
+	}
+
+	_, err = svc.MarkImplementationStarted(ctx, MarkImplementationStartedRequest{
+		TaskID:    "task-impl",
+		SessionID: "missing-session",
+		Actor:     "user",
+	})
+	if err != ErrSessionTaskMismatch {
+		t.Fatalf("expected ErrSessionTaskMismatch, got %v", err)
+	}
+}
+
+func TestPlanService_MarkImplementationStartedHandlesNilPlanAfterWrite(t *testing.T) {
+	_, eventBus, repo := createTestService(t)
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	svc := NewPlanService(&nilMarkPlanRepo{Repository: repo}, eventBus, log)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-impl")
+	seedSession(t, ctx, repo, "task-impl", "session-1")
+
+	_, err := svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID:  "task-impl",
+		Title:   "Plan",
+		Content: "Ship the toolbar",
+	})
+	if err != nil {
+		t.Fatalf("CreatePlan failed: %v", err)
+	}
+	eventBus.ClearEvents()
+
+	_, err = svc.MarkImplementationStarted(ctx, MarkImplementationStartedRequest{
+		TaskID:    "task-impl",
+		SessionID: "session-1",
+		Actor:     "user",
+	})
+	if err != ErrTaskPlanNotFound {
+		t.Fatalf("expected ErrTaskPlanNotFound, got %v", err)
+	}
+	if got := len(eventBus.GetPublishedEvents()); got != 0 {
+		t.Fatalf("expected no events after nil plan marker, got %d", got)
 	}
 }
 

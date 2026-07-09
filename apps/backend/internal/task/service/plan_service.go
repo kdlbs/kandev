@@ -327,6 +327,9 @@ func (s *PlanService) MarkImplementationStarted(ctx context.Context, req MarkImp
 	}
 	session, err := s.repo.GetTaskSession(ctx, req.SessionID)
 	if err != nil {
+		if errors.Is(err, models.ErrTaskSessionNotFound) {
+			return nil, ErrSessionTaskMismatch
+		}
 		return nil, err
 	}
 	if session == nil || session.TaskID != req.TaskID {
@@ -342,6 +345,9 @@ func (s *PlanService) MarkImplementationStarted(ctx context.Context, req MarkImp
 			return nil, ErrTaskPlanNotFound
 		}
 		return nil, err
+	}
+	if plan == nil {
+		return nil, ErrTaskPlanNotFound
 	}
 	s.publishPlanEvent(ctx, events.TaskPlanUpdated, plan)
 	return plan, nil
