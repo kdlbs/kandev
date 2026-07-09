@@ -135,6 +135,36 @@ func (h *TaskHandlers) wsDeleteTaskPlan(ctx context.Context, msg *ws.Message) (*
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{responseKeySuccess: true})
 }
 
+func (h *TaskHandlers) wsMarkTaskPlanImplementationStarted(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		TaskID    string `json:"task_id"`
+		SessionID string `json:"session_id"`
+		Actor     string `json:"actor"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+
+	plan, err := h.planService.MarkImplementationStarted(ctx, service.MarkImplementationStartedRequest{
+		TaskID:    req.TaskID,
+		SessionID: req.SessionID,
+		Actor:     req.Actor,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrTaskIDRequired):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+		case errors.Is(err, service.ErrSessionIDRequired):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+		case errors.Is(err, service.ErrTaskPlanNotFound):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task plan not found", nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to mark task plan implementation started: "+err.Error(), nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanFromModel(plan))
+}
+
 // wsListTaskPlanRevisions returns revision metadata newest-first (no content).
 func (h *TaskHandlers) wsListTaskPlanRevisions(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {

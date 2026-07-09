@@ -20,6 +20,7 @@ var (
 	ErrTaskPlanNotFound     = errors.New("task plan not found")
 	ErrTaskIDRequired       = errors.New("task_id is required")
 	ErrContentRequired      = errors.New("content is required")
+	ErrSessionIDRequired    = errors.New("session_id is required")
 	ErrRevisionNotFound     = errors.New("task plan revision not found")
 	ErrRevisionIDRequired   = errors.New("target_revision_id is required")
 	ErrRevisionTaskMismatch = errors.New("revision does not belong to given task")
@@ -211,9 +212,13 @@ func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest) (*m
 		return nil, err
 	}
 
-	s.publishPlanEvent(ctx, eventType, plan)
+	saved, err := s.repo.GetTaskPlan(ctx, req.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	s.publishPlanEvent(ctx, eventType, saved)
 	s.publishRevisionEvent(ctx, rev, coalesce)
-	return plan, nil
+	return saved, nil
 }
 
 // resolveAgentDisplayName returns the agent profile's display name for the
@@ -300,6 +305,34 @@ func (s *PlanService) GetPlan(ctx context.Context, taskID string) (*models.TaskP
 		return nil, ErrTaskIDRequired
 	}
 	return s.repo.GetTaskPlan(ctx, taskID)
+}
+
+type MarkImplementationStartedRequest struct {
+	TaskID    string
+	SessionID string
+	Actor     string
+}
+
+func (s *PlanService) MarkImplementationStarted(ctx context.Context, req MarkImplementationStartedRequest) (*models.TaskPlan, error) {
+	if req.TaskID == "" {
+		return nil, ErrTaskIDRequired
+	}
+	if req.SessionID == "" {
+		return nil, ErrSessionIDRequired
+	}
+	actor := req.Actor
+	if actor == "" {
+		actor = createdByUser
+	}
+	plan, err := s.repo.MarkTaskPlanImplementationStarted(ctx, req.TaskID, req.SessionID, actor)
+	if err != nil {
+		if errors.Is(err, repository.ErrTaskPlanNotFound) {
+			return nil, ErrTaskPlanNotFound
+		}
+		return nil, err
+	}
+	s.publishPlanEvent(ctx, events.TaskPlanUpdated, plan)
+	return plan, nil
 }
 
 // DeletePlan removes a plan and all its revisions (cascade via FK when task goes; here we delete only HEAD).
@@ -403,7 +436,11 @@ func (s *PlanService) RevertPlan(ctx context.Context, req RevertPlanRequest) (*m
 		return nil, err
 	}
 
-	s.publishPlanEvent(ctx, events.TaskPlanUpdated, plan)
+	saved, err := s.repo.GetTaskPlan(ctx, req.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	s.publishPlanEvent(ctx, events.TaskPlanUpdated, saved)
 	s.publishRevisionEvent(ctx, rev, false)
 	s.publishReverted(ctx, rev)
 	return rev, nil
@@ -421,6 +458,15 @@ func (s *PlanService) publishPlanEvent(ctx context.Context, eventType string, pl
 		"created_by": plan.CreatedBy,
 		"created_at": plan.CreatedAt,
 		"updated_at": plan.UpdatedAt,
+	}
+	if plan.ImplementationStartedAt != nil {
+		payload["implementation_started_at"] = *plan.ImplementationStartedAt
+	}
+	if plan.ImplementationStartedSessionID != nil {
+		payload["implementation_started_session_id"] = *plan.ImplementationStartedSessionID
+	}
+	if plan.ImplementationStartedBy != nil {
+		payload["implementation_started_by"] = *plan.ImplementationStartedBy
 	}
 	if err := s.eventBus.Publish(ctx, eventType, bus.NewEvent(eventType, "plan-service", payload)); err != nil {
 		s.logger.Error("publish plan event", zap.String("event_type", eventType), zap.Error(err))

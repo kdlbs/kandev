@@ -284,6 +284,9 @@ export type TaskPlan = {
   created_by: "agent" | "user";
   created_at: string;
   updated_at: string;
+  implementation_started_at?: string | null;
+  implementation_started_session_id?: string | null;
+  implementation_started_by?: string | null;
 };
 
 export type TaskPlanResponse = {

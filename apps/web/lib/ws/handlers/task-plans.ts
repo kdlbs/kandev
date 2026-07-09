@@ -10,7 +10,18 @@ type RevisionMessage =
   | BackendMessageMap["task.plan.reverted"];
 
 function handlePlanUpsert(store: StoreApi<AppState>, message: PlanMessage) {
-  const { task_id, id, title, content, created_by, created_at, updated_at } = message.payload;
+  const {
+    task_id,
+    id,
+    title,
+    content,
+    created_by,
+    created_at,
+    updated_at,
+    implementation_started_at,
+    implementation_started_session_id,
+    implementation_started_by,
+  } = message.payload;
   const prevPlan = store.getState().taskPlans.byTaskId[task_id];
   store.getState().setTaskPlan(task_id, {
     id,
@@ -20,6 +31,9 @@ function handlePlanUpsert(store: StoreApi<AppState>, message: PlanMessage) {
     created_by,
     created_at,
     updated_at,
+    implementation_started_at,
+    implementation_started_session_id,
+    implementation_started_by,
   });
 
   // User-authored writes mark the plan as seen — but only when the content

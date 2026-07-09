@@ -7,7 +7,11 @@ vi.mock("@/lib/state/context-files-store", () => ({
   useContextFilesStore: { getState: () => mockGetState() },
 }));
 
-import { buildImplementPlanContent, readContextFilesMeta } from "./use-plan-actions";
+import {
+  buildImplementPlanContent,
+  collectImplementPlanInput,
+  readContextFilesMeta,
+} from "./use-plan-actions";
 
 describe("buildImplementPlanContent", () => {
   it("appends the kandev-system block to user text", () => {
@@ -75,5 +79,16 @@ describe("readContextFilesMeta", () => {
       },
     });
     expect(readContextFilesMeta(sessionId)).toEqual([{ path: appFilePath, name: appFileName }]);
+  });
+});
+
+describe("collectImplementPlanInput", () => {
+  it("uses default empty input when no chat input handle exists", () => {
+    mockGetState.mockReturnValue({ filesBySessionId: {} });
+    expect(collectImplementPlanInput(null, "sess-1")).toEqual({
+      userText: "",
+      attachments: [],
+      contextFilesMeta: [],
+    });
   });
 });

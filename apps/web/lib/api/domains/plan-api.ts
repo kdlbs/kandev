@@ -70,6 +70,22 @@ export async function updateTaskPlan(
   return response as TaskPlan;
 }
 
+export async function markPlanImplementationStarted(
+  taskId: string,
+  sessionId: string,
+): Promise<TaskPlan> {
+  const client = getWebSocketClient();
+  if (!client) {
+    throw new Error(WS_CLIENT_UNAVAILABLE);
+  }
+  const response = await client.request("task.plan.implementation_started", {
+    task_id: taskId,
+    session_id: sessionId,
+    actor: "user",
+  });
+  return response as TaskPlan;
+}
+
 /**
  * Delete a task plan.
  */

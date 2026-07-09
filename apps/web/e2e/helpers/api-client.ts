@@ -1224,6 +1224,9 @@ export class ApiClient {
     title?: string;
     created_by: string;
     updated_at: string;
+    implementation_started_at?: string | null;
+    implementation_started_session_id?: string | null;
+    implementation_started_by?: string | null;
   } | null> {
     try {
       return await this.wsRequest("task.plan.get", { task_id: taskId });

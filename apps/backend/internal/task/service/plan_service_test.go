@@ -162,6 +162,68 @@ func TestPlanService_UpdatePlan(t *testing.T) {
 	}
 }
 
+func TestPlanService_MarkImplementationStartedIsDurableAndIdempotent(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-impl")
+
+	_, err := svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID:    "task-impl",
+		Title:     "Plan",
+		Content:   "Ship the toolbar",
+		CreatedBy: "user",
+	})
+	if err != nil {
+		t.Fatalf("CreatePlan failed: %v", err)
+	}
+
+	marked, err := svc.MarkImplementationStarted(ctx, MarkImplementationStartedRequest{
+		TaskID:    "task-impl",
+		SessionID: "session-1",
+		Actor:     "user",
+	})
+	if err != nil {
+		t.Fatalf("MarkImplementationStarted failed: %v", err)
+	}
+	if marked.ImplementationStartedAt == nil {
+		t.Fatal("expected implementation_started_at to be set")
+	}
+	if marked.ImplementationStartedSessionID == nil || *marked.ImplementationStartedSessionID != "session-1" {
+		t.Fatalf("expected session marker session-1, got %v", marked.ImplementationStartedSessionID)
+	}
+	if marked.ImplementationStartedBy == nil || *marked.ImplementationStartedBy != "user" {
+		t.Fatalf("expected actor marker user, got %v", marked.ImplementationStartedBy)
+	}
+
+	firstStartedAt := *marked.ImplementationStartedAt
+	idempotent, err := svc.MarkImplementationStarted(ctx, MarkImplementationStartedRequest{
+		TaskID:    "task-impl",
+		SessionID: "session-2",
+		Actor:     "agent",
+	})
+	if err != nil {
+		t.Fatalf("second MarkImplementationStarted failed: %v", err)
+	}
+	if !idempotent.ImplementationStartedAt.Equal(firstStartedAt) {
+		t.Fatalf("expected started_at to remain %s, got %s", firstStartedAt, *idempotent.ImplementationStartedAt)
+	}
+	if idempotent.ImplementationStartedSessionID == nil || *idempotent.ImplementationStartedSessionID != "session-1" {
+		t.Fatalf("expected idempotent session marker session-1, got %v", idempotent.ImplementationStartedSessionID)
+	}
+
+	updated, err := svc.UpdatePlan(ctx, UpdatePlanRequest{
+		TaskID:    "task-impl",
+		Content:   "Ship the toolbar after review",
+		CreatedBy: "user",
+	})
+	if err != nil {
+		t.Fatalf("UpdatePlan failed: %v", err)
+	}
+	if updated.ImplementationStartedAt == nil || !updated.ImplementationStartedAt.Equal(firstStartedAt) {
+		t.Fatalf("expected update to preserve implementation marker, got %v", updated.ImplementationStartedAt)
+	}
+}
+
 func TestPlanService_UpdatePlanNotFound(t *testing.T) {
 	svc, _, repo := createTestPlanService(t)
 	ctx := context.Background()

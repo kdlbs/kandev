@@ -16,7 +16,22 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
  * a new session with a clean context window. `onClick(fresh)` is invoked
  * with `false` for the primary path and `true` for the fresh-agent path.
  */
-export function ImplementPlanButton({ onClick }: { onClick: (fresh: boolean) => void }) {
+type ImplementPlanButtonProps = {
+  onClick: (fresh: boolean) => void | Promise<unknown>;
+  disabled?: boolean;
+  testIds?: {
+    button?: string;
+    menuTrigger?: string;
+    freshItem?: string;
+  };
+};
+
+export function ImplementPlanButton({ onClick, disabled, testIds }: ImplementPlanButtonProps) {
+  const ids = {
+    button: testIds?.button ?? "implement-plan-button",
+    menuTrigger: testIds?.menuTrigger ?? "implement-plan-menu-trigger",
+    freshItem: testIds?.freshItem ?? "implement-fresh-menu-item",
+  };
   const primary = (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -24,7 +39,8 @@ export function ImplementPlanButton({ onClick }: { onClick: (fresh: boolean) => 
           type="button"
           variant="ghost"
           size="sm"
-          data-testid="implement-plan-button"
+          data-testid={ids.button}
+          disabled={disabled}
           className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 text-violet-400 rounded-r-none pr-1.5"
           onClick={() => onClick(false)}
         >
@@ -44,8 +60,9 @@ export function ImplementPlanButton({ onClick }: { onClick: (fresh: boolean) => 
             type="button"
             variant="ghost"
             size="sm"
-            data-testid="implement-plan-menu-trigger"
+            data-testid={ids.menuTrigger}
             aria-label="More implement options"
+            disabled={disabled}
             className="h-7 px-1 cursor-pointer hover:bg-muted/40 text-violet-400 rounded-l-none border-l border-violet-400/20"
           >
             <IconChevronDown className="h-3.5 w-3.5" />
@@ -53,7 +70,7 @@ export function ImplementPlanButton({ onClick }: { onClick: (fresh: boolean) => 
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-64">
           <DropdownMenuItem
-            data-testid="implement-fresh-menu-item"
+            data-testid={ids.freshItem}
             onClick={() => onClick(true)}
             className="cursor-pointer"
           >

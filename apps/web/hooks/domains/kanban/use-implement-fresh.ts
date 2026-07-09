@@ -3,9 +3,10 @@ import { useCallback } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { setChatDraftContent } from "@/lib/local-storage";
+import { markPlanImplementationStarted } from "@/lib/api/domains/plan-api";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { buildImplementPlanContent } from "./use-plan-actions";
+import { buildImplementPlanContent, collectImplementPlanInput } from "./use-plan-actions";
 import type { ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
 
 async function setupFreshSession(newSessionId: string): Promise<void> {
@@ -39,21 +40,24 @@ async function setupFreshSession(newSessionId: string): Promise<void> {
 export function useImplementFresh(
   resolvedSessionId: string | null,
   taskId: string | null,
-  chatInputRef: React.RefObject<ChatInputContainerHandle | null>,
+  chatInputRef?: React.RefObject<ChatInputContainerHandle | null>,
 ) {
   const planningSession = useAppStore((s) =>
     resolvedSessionId ? s.taskSessions.items[resolvedSessionId] : undefined,
   );
   const setActiveSession = useAppStore((s) => s.setActiveSession);
+  const setTaskPlan = useAppStore((s) => s.setTaskPlan);
   const { toast } = useToast();
 
   return useCallback(async () => {
     if (!taskId || !resolvedSessionId || !planningSession?.agent_profile_id) {
-      return;
+      return false;
     }
 
-    const userText = chatInputRef.current?.getValue() ?? "";
-    const attachments = chatInputRef.current?.getAttachments() ?? [];
+    const { userText, attachments } = collectImplementPlanInput(
+      chatInputRef?.current,
+      resolvedSessionId,
+    );
     const prompt = buildImplementPlanContent(userText);
 
     try {
@@ -68,17 +72,29 @@ export function useImplementFresh(
       });
 
       const newSessionId = response.session_id;
-      if (!newSessionId) return;
+      if (!newSessionId) return false;
 
       await setupFreshSession(newSessionId);
+      const markedPlan = await markPlanImplementationStarted(taskId, newSessionId);
+      setTaskPlan(taskId, markedPlan);
       setActiveSession(taskId, newSessionId);
 
       // Clear composer + draft only when a fresh session was actually created.
-      chatInputRef.current?.clear();
+      chatInputRef?.current?.clear();
       setChatDraftContent(resolvedSessionId, null);
+      return true;
     } catch (err) {
       console.error("Failed to launch fresh implementation session:", err);
       toast({ description: "Failed to start implementation session", variant: "error" });
+      return false;
     }
-  }, [taskId, resolvedSessionId, planningSession, chatInputRef, setActiveSession, toast]);
+  }, [
+    taskId,
+    resolvedSessionId,
+    planningSession,
+    chatInputRef,
+    setTaskPlan,
+    setActiveSession,
+    toast,
+  ]);
 }

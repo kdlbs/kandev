@@ -1,3 +1,5 @@
+import type { TaskPlanEventPayload, TaskPlanRevisionEventPayload } from "./task-plan-events";
+
 export type BackendMessageType =
   | "kanban.update"
   | "task.created"
@@ -485,28 +487,7 @@ export {
   type SessionTodosPayload,
 } from "./session-runtime-payloads";
 
-export type TaskPlanEventPayload = {
-  id: string;
-  task_id: string;
-  title: string;
-  content: string;
-  created_by: "agent" | "user";
-  created_at: string;
-  updated_at: string;
-};
-
-export type TaskPlanRevisionEventPayload = {
-  id: string;
-  task_id: string;
-  revision_number: number;
-  title: string;
-  author_kind: "agent" | "user";
-  author_name: string;
-  revert_of_revision_id?: string | null;
-  coalesced?: boolean;
-  created_at: string;
-  updated_at: string;
-};
+export type { TaskPlanEventPayload, TaskPlanRevisionEventPayload } from "./task-plan-events";
 
 export type QueuedMessagePayload = {
   content: string;
@@ -635,10 +616,7 @@ export type BackendMessageMap = OfficeBackendMessageMap & {
   "run.event.appended": BackendMessage<"run.event.appended", RunEventAppendedPayload>;
 };
 
-// Run event payload — the WS gateway forwards the bus event verbatim,
-// which means the run id sits at the top level and the full RunEvent
-// row sits under `event`. The handler dispatches to subscribers keyed
-// on `run_id`.
+// The WS gateway forwards run events verbatim: id at top level, row under `event`.
 export type RunEventAppendedPayload = {
   run_id: string;
   event: {
