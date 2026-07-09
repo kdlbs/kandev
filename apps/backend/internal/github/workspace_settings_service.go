@@ -244,8 +244,8 @@ func (s *Service) fetchScopedPRsAcrossQualifiers(
 	perPage int,
 	qualifiers []string,
 ) ([]*PR, int, error) {
-	return fetchScopedResultsAcrossQualifiers(filter, customQuery, page, perPage, qualifiers, prScopeKey, func(scopedFilter, scopedCustomQuery string, fetchPerPage int) ([]*PR, int, error) {
-		result, err := s.client.SearchPRsPaged(ctx, scopedFilter, scopedCustomQuery, 1, fetchPerPage)
+	return fetchScopedResultsAcrossQualifiers(settings, filter, customQuery, page, perPage, qualifiers, prScopeKey, func(scopedFilter, scopedCustomQuery string, providerPage, fetchPerPage int) ([]*PR, int, error) {
+		result, err := s.client.SearchPRsPaged(ctx, scopedFilter, scopedCustomQuery, providerPage, fetchPerPage)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -265,8 +265,8 @@ func (s *Service) fetchScopedIssuesAcrossQualifiers(
 	perPage int,
 	qualifiers []string,
 ) ([]*Issue, int, error) {
-	return fetchScopedResultsAcrossQualifiers(filter, customQuery, page, perPage, qualifiers, issueScopeKey, func(scopedFilter, scopedCustomQuery string, fetchPerPage int) ([]*Issue, int, error) {
-		result, err := s.client.ListIssuesPaged(ctx, scopedFilter, scopedCustomQuery, 1, fetchPerPage)
+	return fetchScopedResultsAcrossQualifiers(settings, filter, customQuery, page, perPage, qualifiers, issueScopeKey, func(scopedFilter, scopedCustomQuery string, providerPage, fetchPerPage int) ([]*Issue, int, error) {
+		result, err := s.client.ListIssuesPaged(ctx, scopedFilter, scopedCustomQuery, providerPage, fetchPerPage)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -278,38 +278,49 @@ func (s *Service) fetchScopedIssuesAcrossQualifiers(
 }
 
 func fetchScopedResultsAcrossQualifiers[T any](
+	settings *WorkspaceSettings,
 	filter string,
 	customQuery string,
 	page int,
 	perPage int,
 	qualifiers []string,
 	resultKey func(T) string,
-	fetch func(scopedFilter string, scopedCustomQuery string, fetchPerPage int) ([]T, int, error),
+	fetch func(scopedFilter string, scopedCustomQuery string, providerPage int, fetchPerPage int) ([]T, int, error),
 ) ([]T, int, error) {
 	seen := make(map[string]struct{})
 	all := make([]T, 0, perPage)
-	total := 0
 	fetchPerPage := workspaceScopeFanoutFetchPerPage(page, perPage)
+	pagesToFetch := workspaceScopeFanoutPagesToFetch(page, perPage, fetchPerPage)
+	counts := make([]int, 0, len(qualifiers))
 	for _, qualifier := range qualifiers {
 		scopedFilter, scopedCustomQuery := appendWorkspaceScopeQualifierToSearch(filter, customQuery, qualifier)
-		items, count, err := fetch(scopedFilter, scopedCustomQuery, fetchPerPage)
-		if err != nil {
-			return nil, 0, err
-		}
-		total += count
-		for _, item := range items {
-			key := resultKey(item)
-			if key == "" {
-				continue
+		qualifierCount := 0
+		for providerPage := 1; providerPage <= pagesToFetch; providerPage++ {
+			items, count, err := fetch(scopedFilter, scopedCustomQuery, providerPage, fetchPerPage)
+			if err != nil {
+				return nil, 0, err
 			}
-			if _, ok := seen[key]; ok {
-				continue
+			if providerPage == 1 {
+				qualifierCount = count
 			}
-			seen[key] = struct{}{}
-			all = append(all, item)
+			for _, item := range items {
+				key := resultKey(item)
+				if key == "" {
+					continue
+				}
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				all = append(all, item)
+			}
+			if workspaceScopeFanoutFetchedAll(providerPage, fetchPerPage, count, len(items)) {
+				break
+			}
 		}
+		counts = append(counts, qualifierCount)
 	}
-	return all, total, nil
+	return all, workspaceScopeFanoutTotal(settings, counts, len(all)), nil
 }
 
 func workspaceScopeFanoutFetchPerPage(page, perPage int) int {
@@ -321,6 +332,61 @@ func workspaceScopeFanoutFetchPerPage(page, perPage int) int {
 		return 100
 	}
 	return fetchPerPage
+}
+
+func workspaceScopeFanoutPagesToFetch(page, perPage, fetchPerPage int) int {
+	if fetchPerPage <= 0 {
+		return 1
+	}
+	target := page * perPage
+	if target < perPage {
+		target = perPage
+	}
+	pages := target / fetchPerPage
+	if target%fetchPerPage != 0 {
+		pages++
+	}
+	if pages < 1 {
+		return 1
+	}
+	return pages
+}
+
+func workspaceScopeFanoutFetchedAll(providerPage, fetchPerPage, totalCount, itemCount int) bool {
+	if itemCount == 0 {
+		return true
+	}
+	if itemCount < fetchPerPage {
+		return true
+	}
+	return totalCount > 0 && providerPage*fetchPerPage >= totalCount
+}
+
+func workspaceScopeFanoutTotal(settings *WorkspaceSettings, counts []int, uniqueFetched int) int {
+	settings = normalizeWorkspaceSettings(settings)
+	if settings == nil || settings.RepoScopeMode != RepoScopeModeOrgs {
+		return sumInts(counts)
+	}
+	total := 0
+	for i := 0; i < len(counts); i += 2 {
+		if i+1 >= len(counts) {
+			total += counts[i]
+			continue
+		}
+		total += max(counts[i], counts[i+1])
+	}
+	if uniqueFetched > total {
+		return uniqueFetched
+	}
+	return total
+}
+
+func sumInts(values []int) int {
+	total := 0
+	for _, value := range values {
+		total += value
+	}
+	return total
 }
 
 func paginateSearchResults[T any](items []T, page, perPage int) []T {
@@ -396,14 +462,6 @@ func isValidRepoScopeMode(mode string) bool {
 	default:
 		return false
 	}
-}
-
-func appendWorkspaceScopeQuery(customQuery string, settings *WorkspaceSettings) string {
-	qualifiers := workspaceScopeQualifiers(settings)
-	if len(qualifiers) == 0 {
-		return customQuery
-	}
-	return appendWorkspaceScopeQualifier(customQuery, qualifiers[0])
 }
 
 func appendWorkspaceScopeToSearch(filter, customQuery string, settings *WorkspaceSettings) (string, string) {

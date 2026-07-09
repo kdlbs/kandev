@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -124,6 +125,17 @@ func assertSearchCalls(t *testing.T, calls []searchCall, baseQuery string, quali
 	}
 }
 
+func assertHasSearchCall(t *testing.T, calls []searchCall, qualifier string, page, perPage int) {
+	t.Helper()
+	for _, call := range calls {
+		query := strings.TrimSpace(call.filter + " " + call.customQuery)
+		if strings.Contains(query, qualifier) && call.page == page && call.perPage == perPage {
+			return
+		}
+	}
+	t.Fatalf("search calls = %+v, want %s page=%d perPage=%d", calls, qualifier, page, perPage)
+}
+
 func TestService_SearchUserPRsPagedForWorkspace_OrgScopeIncludesPersonalOwner(t *testing.T) {
 	client := &capturingSearchClient{MockClient: NewMockClient()}
 	client.AddPR(&PR{RepoOwner: "octo", RepoName: "personal", Number: 1, Title: "in scope"})
@@ -141,6 +153,78 @@ func TestService_SearchUserPRsPagedForWorkspace_OrgScopeIncludesPersonalOwner(t 
 
 	if _, err := svc.SearchUserPRsPagedForWorkspace(ctx, "ws-1", "", "is:open", 1, 25); err != nil {
 		t.Fatalf("search scoped prs: %v", err)
+	}
+	assertSearchCalls(t, client.calls, "is:open", []string{"org:octo", "user:octo"})
+}
+
+func TestService_SearchUserPRsPagedForWorkspace_FanoutFetchesDeeperProviderPages(t *testing.T) {
+	client := &capturingSearchClient{MockClient: NewMockClient()}
+	for i := 1; i <= 150; i++ {
+		client.AddPR(&PR{RepoOwner: "kdlbs", RepoName: "kandev", Number: i, Title: fmt.Sprintf("kandev-%d", i)})
+	}
+	for i := 1; i <= 10; i++ {
+		client.AddPR(&PR{RepoOwner: "example", RepoName: "api", Number: i, Title: fmt.Sprintf("api-%d", i)})
+	}
+	store := newTestStore(t)
+	svc := NewService(client, AuthMethodPAT, nil, store, nil, testLogger(t))
+	ctx := context.Background()
+
+	if err := svc.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{
+		WorkspaceID:   "ws-1",
+		RepoScopeMode: RepoScopeModeRepos,
+		RepoScopeRepos: []RepoFilter{
+			{Owner: "kdlbs", Name: "kandev"},
+			{Owner: "example", Name: "api"},
+		},
+	}); err != nil {
+		t.Fatalf("save workspace settings: %v", err)
+	}
+
+	page, err := svc.SearchUserPRsPagedForWorkspace(ctx, "ws-1", "", "is:open", 5, 25)
+	if err != nil {
+		t.Fatalf("search scoped prs: %v", err)
+	}
+	if page.TotalCount != 160 {
+		t.Fatalf("total count = %d, want 160", page.TotalCount)
+	}
+	if len(page.PRs) != 25 {
+		t.Fatalf("page PR count = %d, want 25", len(page.PRs))
+	}
+	if page.PRs[0].RepoOwner != "kdlbs" || page.PRs[0].RepoName != "kandev" || page.PRs[0].Number != 101 {
+		t.Fatalf("first PR on page = %+v, want kdlbs/kandev#101", page.PRs[0])
+	}
+	if page.PRs[24].RepoOwner != "kdlbs" || page.PRs[24].RepoName != "kandev" || page.PRs[24].Number != 125 {
+		t.Fatalf("last PR on page = %+v, want kdlbs/kandev#125", page.PRs[24])
+	}
+	assertHasSearchCall(t, client.calls, "repo:kdlbs/kandev", 2, 100)
+}
+
+func TestService_SearchUserPRsPagedForWorkspace_OrgScopeDedupesFanoutTotal(t *testing.T) {
+	client := &capturingSearchClient{MockClient: NewMockClient()}
+	for i := 1; i <= 120; i++ {
+		client.AddPR(&PR{RepoOwner: "octo", RepoName: "repo", Number: i, Title: fmt.Sprintf("octo-%d", i)})
+	}
+	store := newTestStore(t)
+	svc := NewService(client, AuthMethodPAT, nil, store, nil, testLogger(t))
+	ctx := context.Background()
+
+	if err := svc.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{
+		WorkspaceID:   "ws-1",
+		RepoScopeMode: RepoScopeModeOrgs,
+		RepoScopeOrgs: []string{"octo"},
+	}); err != nil {
+		t.Fatalf("save workspace settings: %v", err)
+	}
+
+	page, err := svc.SearchUserPRsPagedForWorkspace(ctx, "ws-1", "", "is:open", 1, 25)
+	if err != nil {
+		t.Fatalf("search scoped prs: %v", err)
+	}
+	if page.TotalCount != 120 {
+		t.Fatalf("total count = %d, want 120", page.TotalCount)
+	}
+	if len(page.PRs) != 25 {
+		t.Fatalf("page PR count = %d, want 25", len(page.PRs))
 	}
 	assertSearchCalls(t, client.calls, "is:open", []string{"org:octo", "user:octo"})
 }
@@ -536,6 +620,8 @@ type capturingSearchClient struct {
 type searchCall struct {
 	filter      string
 	customQuery string
+	page        int
+	perPage     int
 }
 
 type rejectingORIssueSearchClient struct {
@@ -547,7 +633,7 @@ type rejectingORIssueSearchClient struct {
 func (c *capturingSearchClient) SearchPRsPaged(ctx context.Context, filter, customQuery string, page, perPage int) (*PRSearchPage, error) {
 	c.filter = filter
 	c.customQuery = customQuery
-	c.calls = append(c.calls, searchCall{filter: filter, customQuery: customQuery})
+	c.calls = append(c.calls, searchCall{filter: filter, customQuery: customQuery, page: page, perPage: perPage})
 	result, err := c.MockClient.SearchPRsPaged(ctx, filter, customQuery, page, perPage)
 	if err != nil {
 		return nil, err
@@ -564,14 +650,14 @@ func (c *issueSearchClient) ListIssuesPaged(context.Context, string, string, int
 }
 
 func (c *rejectingORIssueSearchClient) ListIssuesPaged(_ context.Context, filter, customQuery string, page, perPage int) (*IssueSearchPage, error) {
-	c.calls = append(c.calls, searchCall{filter: filter, customQuery: customQuery})
+	c.calls = append(c.calls, searchCall{filter: filter, customQuery: customQuery, page: page, perPage: perPage})
 	query := strings.TrimSpace(filter + " " + customQuery)
 	if strings.Contains(query, " OR ") || strings.ContainsAny(query, "()") {
 		return nil, fmt.Errorf("github rejected invalid qualifier query %q", query)
 	}
 	for repo, issues := range c.issuesByRepo {
 		if strings.Contains(query, "repo:"+repo) {
-			return &IssueSearchPage{Issues: issues, TotalCount: len(issues), Page: page, PerPage: perPage}, nil
+			return &IssueSearchPage{Issues: paginateSearchResults(issues, page, perPage), TotalCount: len(issues), Page: page, PerPage: perPage}, nil
 		}
 	}
 	return &IssueSearchPage{Issues: []*Issue{}, TotalCount: 0, Page: page, PerPage: perPage}, nil
@@ -590,7 +676,15 @@ func filterPRSearchPageByQuery(page *PRSearchPage, query string, pageNum, perPag
 			prs = append(prs, pr)
 		}
 	}
-	return &PRSearchPage{PRs: prs, TotalCount: len(prs), Page: pageNum, PerPage: perPage}
+	sort.Slice(prs, func(i, j int) bool {
+		left := strings.ToLower(prs[i].RepoOwner + "/" + prs[i].RepoName)
+		right := strings.ToLower(prs[j].RepoOwner + "/" + prs[j].RepoName)
+		if left != right {
+			return left < right
+		}
+		return prs[i].Number < prs[j].Number
+	})
+	return &PRSearchPage{PRs: paginateSearchResults(prs, pageNum, perPage), TotalCount: len(prs), Page: pageNum, PerPage: perPage}
 }
 
 func prMatchesQueryQualifier(pr *PR, query string) bool {
