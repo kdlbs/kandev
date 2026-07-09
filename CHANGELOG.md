@@ -2,6 +2,17 @@
 
 All notable changes to Kandev.
 
+## 0.76.0 - 2026-07-09
+
+### Bug Fixes
+
+- forward agent creds, fix terminal host config, restore linux/arm64 ([#1559](https://github.com/kdlbs/kandev/pull/1559)) by @iamcobolt
+- keep resume readiness waits alive under caller cancellation ([#1582](https://github.com/kdlbs/kandev/pull/1582)) by @iamcobolt
+- truncate long task titles in topbar ([#1630](https://github.com/kdlbs/kandev/pull/1630))
+- handle config MCP executor listing ([#1628](https://github.com/kdlbs/kandev/pull/1628))
+- expose signal-gated workflow steps in config MCP ([#1629](https://github.com/kdlbs/kandev/pull/1629))
+- truthful executor rows, startup reconciliation, resume-safe cleanup ([#1597](https://github.com/kdlbs/kandev/pull/1597)) ([#1608](https://github.com/kdlbs/kandev/pull/1608)) by @point-source
+
 ## 0.75.0 - 2026-07-08
 
 ### Features
