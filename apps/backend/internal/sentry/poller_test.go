@@ -30,15 +30,26 @@ func newPollerFixture(t *testing.T) *pollerFixture {
 	return f
 }
 
-// saveConfig persists the singleton directly via store + secret fakes,
+// saveConfig persists the default workspace directly via store + secret fakes,
 // bypassing Service.SetConfig (and its async probe).
 func (f *pollerFixture) saveConfig(t *testing.T, secret string) {
 	t.Helper()
+	f.saveConfigForWorkspace(t, "", secret)
+}
+
+// saveConfigForWorkspace persists a workspace config directly via store +
+// secret fakes, bypassing Service.SetConfig (and its async probe).
+func (f *pollerFixture) saveConfigForWorkspace(t *testing.T, workspaceID, secret string) {
+	t.Helper()
 	ctx := context.Background()
-	if err := f.store.UpsertConfig(ctx, &SentryConfig{AuthMethod: AuthMethodAuthToken}); err != nil {
+	if err := f.store.UpsertConfigForWorkspace(ctx, workspaceID, &SentryConfig{AuthMethod: AuthMethodAuthToken}); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
-	if err := f.secrets.Set(ctx, SecretKey, "sentry", secret); err != nil {
+	key := SecretKey
+	if workspaceID != "" {
+		key = SecretKeyForWorkspace(workspaceID)
+	}
+	if err := f.secrets.Set(ctx, key, "sentry", secret); err != nil {
 		t.Fatalf("save secret: %v", err)
 	}
 }

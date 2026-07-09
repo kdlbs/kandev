@@ -68,6 +68,14 @@ export function getConversationLoadingState(params: {
     params.sessionState === "FAILED" ||
     params.sessionState === "COMPLETED" ||
     params.sessionState === "CANCELLED";
+  // CREATED sessions are prepare-only: the agent hasn't been started yet, so
+  // there is no conversation to load and the "Start agent" button is the
+  // primary CTA. Suppress the spinner unconditionally to avoid a misleading
+  // overlay racing with that button (synthetic task-description counts as a
+  // message and would otherwise trip the messagesCount > 0 branch).
+  if (params.sessionState === "CREATED") {
+    return { isInitialLoading, showLoadingState: false };
+  }
   return {
     isInitialLoading,
     showLoadingState:

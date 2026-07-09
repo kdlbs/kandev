@@ -17,6 +17,7 @@ import {
   IntegrationAuthStatusBanner,
   type IntegrationAuthHealth,
 } from "@/components/integrations/auth-status-banner";
+import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import {
   getLinearConfig,
@@ -203,13 +204,20 @@ function ActionBar({
 }
 
 type SettingsActionsArgs = {
+  workspaceId: string;
   form: FormState;
   setConfig: (cfg: LinearConfig | null) => void;
   setForm: (form: FormState) => void;
   setTestResult: (r: TestLinearConnectionResult | null) => void;
 };
 
-function useSettingsActions({ form, setConfig, setForm, setTestResult }: SettingsActionsArgs) {
+function useSettingsActions({
+  workspaceId,
+  form,
+  setConfig,
+  setForm,
+  setTestResult,
+}: SettingsActionsArgs) {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -218,26 +226,32 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await testLinearConnection({
-        authMethod: "api_key",
-        secret: form.secret || undefined,
-      });
+      const res = await testLinearConnection(
+        {
+          authMethod: "api_key",
+          secret: form.secret || undefined,
+        },
+        { workspaceId },
+      );
       setTestResult(res);
     } catch (err) {
       setTestResult({ ok: false, error: String(err) });
     } finally {
       setTesting(false);
     }
-  }, [form, setTestResult]);
+  }, [workspaceId, form, setTestResult]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
-      const saved = await setLinearConfig({
-        authMethod: "api_key",
-        defaultTeamKey: form.defaultTeamKey,
-        secret: form.secret || undefined,
-      });
+      const saved = await setLinearConfig(
+        {
+          authMethod: "api_key",
+          defaultTeamKey: form.defaultTeamKey,
+          secret: form.secret || undefined,
+        },
+        { workspaceId },
+      );
       setConfig(saved);
       setForm(configToForm(saved));
       setTestResult(null);
@@ -247,12 +261,12 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
     } finally {
       setSaving(false);
     }
-  }, [form, toast, setConfig, setForm, setTestResult]);
+  }, [workspaceId, form, toast, setConfig, setForm, setTestResult]);
 
   const handleDelete = useCallback(async () => {
     if (!confirm("Remove Linear configuration?")) return;
     try {
-      await deleteLinearConfig();
+      await deleteLinearConfig({ workspaceId });
       setConfig(null);
       setForm(emptyForm);
       setTestResult(null);
@@ -260,12 +274,16 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
     } catch (err) {
       toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
     }
-  }, [toast, setConfig, setForm, setTestResult]);
+  }, [workspaceId, toast, setConfig, setForm, setTestResult]);
 
   return { saving, testing, handleTest, handleSave, handleDelete };
 }
 
-function useTeamsLoader(hasSecret: boolean | undefined, lastOk: boolean | undefined) {
+function useTeamsLoader(
+  workspaceId: string,
+  hasSecret: boolean | undefined,
+  lastOk: boolean | undefined,
+) {
   // `teams === null` means "no fetch attempt yet", so the dropdown can show a
   // "Loading…" placeholder without us calling setState synchronously inside
   // the effect (which the lint rule forbids). Once a fetch settles we always
@@ -278,7 +296,7 @@ function useTeamsLoader(hasSecret: boolean | undefined, lastOk: boolean | undefi
   useEffect(() => {
     if (!hasSecret) return;
     let cancelled = false;
-    listLinearTeams()
+    listLinearTeams({ workspaceId })
       .then((res) => {
         if (!cancelled) setTeams(res.teams ?? []);
       })
@@ -288,23 +306,23 @@ function useTeamsLoader(hasSecret: boolean | undefined, lastOk: boolean | undefi
     return () => {
       cancelled = true;
     };
-  }, [hasSecret, lastOk]);
+  }, [workspaceId, hasSecret, lastOk]);
   return { teams: teams ?? [], loadingTeams: teams === null && !!hasSecret };
 }
 
-function useLinearSettings() {
+function useLinearSettings(workspaceId: string) {
   const { toast } = useToast();
   const [config, setConfig] = useState<LinearConfig | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [loading, setLoading] = useState(true);
   const [testResult, setTestResult] = useState<TestLinearConnectionResult | null>(null);
   const health = configToHealth(config);
-  const { teams, loadingTeams } = useTeamsLoader(config?.hasSecret, config?.lastOk);
+  const { teams, loadingTeams } = useTeamsLoader(workspaceId, config?.hasSecret, config?.lastOk);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const cfg = await getLinearConfig();
+      const cfg = await getLinearConfig({ workspaceId });
       setConfig(cfg);
       setForm(configToForm(cfg));
     } catch (err) {
@@ -312,7 +330,7 @@ function useLinearSettings() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [workspaceId, toast]);
 
   useEffect(() => {
     void load();
@@ -321,14 +339,14 @@ function useLinearSettings() {
   // Background refresh so the auth-health banner picks up new probe results.
   useEffect(() => {
     const id = setInterval(() => {
-      getLinearConfig()
+      getLinearConfig({ workspaceId })
         .then((cfg) => setConfig(cfg))
         .catch(() => {
           /* transient failures are fine — next tick retries */
         });
     }, INTEGRATION_STATUS_REFRESH_MS);
     return () => clearInterval(id);
-  }, []);
+  }, [workspaceId]);
 
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -337,6 +355,7 @@ function useLinearSettings() {
   );
 
   const { saving, testing, handleTest, handleSave, handleDelete } = useSettingsActions({
+    workspaceId,
     form,
     setConfig,
     setForm,
@@ -377,11 +396,8 @@ function EnabledPill() {
   );
 }
 
-// LinearConnectionSection holds the install-wide credentials form. Linear has
-// no per-workspace state to surface here today, so the page composes only this
-// section.
-export function LinearConnectionSection() {
-  const s = useLinearSettings();
+export function LinearConnectionSection({ workspaceId }: { workspaceId: string }) {
+  const s = useLinearSettings(workspaceId);
   const missingSecret = !s.config?.hasSecret && !s.form.secret;
   const disableSave = s.saving || missingSecret;
   const disableTest = missingSecret;
@@ -390,7 +406,7 @@ export function LinearConnectionSection() {
     <SettingsSection
       icon={<IconHexagon className="h-5 w-5" />}
       title="Linear integration"
-      description="Connect Kandev to Linear with a personal API key. Credentials are stored encrypted server-side and shared across all workspaces."
+      description="Connect this workspace to Linear with a personal API key. Credentials are stored encrypted server-side for the selected workspace."
       action={<EnabledPill />}
     >
       <Card>
@@ -432,7 +448,9 @@ export function LinearConnectionSection() {
 export function LinearIntegrationPage() {
   return (
     <div className="space-y-8">
-      <LinearConnectionSection />
+      <WorkspaceScopedSection>
+        {(workspaceId) => <LinearConnectionSection key={workspaceId} workspaceId={workspaceId} />}
+      </WorkspaceScopedSection>
       <LinearIssueWatchersSection />
     </div>
   );

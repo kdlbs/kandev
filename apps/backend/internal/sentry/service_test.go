@@ -170,7 +170,7 @@ func TestService_SetConfig_PersistsAndStoresSecret(t *testing.T) {
 	if !cfg.HasSecret {
 		t.Error("expected HasSecret=true")
 	}
-	if got, _ := f.secrets.Reveal(ctx, SecretKey); got != "sntrys_xyz" {
+	if got, _ := f.secrets.Reveal(ctx, SecretKeyForWorkspace("default")); got != "sntrys_xyz" {
 		t.Errorf("secret stored = %q", got)
 	}
 }
@@ -206,7 +206,7 @@ func TestService_SetConfig_EmptySecret_KeepsExisting(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if got, _ := f.secrets.Reveal(ctx, SecretKey); got != "first" {
+	if got, _ := f.secrets.Reveal(ctx, SecretKeyForWorkspace("default")); got != "first" {
 		t.Errorf("secret should be preserved, got %q", got)
 	}
 }
@@ -351,7 +351,7 @@ func TestService_DeleteConfig_RemovesSecretAndCache(t *testing.T) {
 // rebuild, hitting the factory a second time.
 func TestService_ClientFor_InvalidateDuringBuild(t *testing.T) {
 	fakes := newFakeSecretStore()
-	_ = fakes.Set(context.Background(), SecretKey, "tok", "sntrys_xyz")
+	_ = fakes.Set(context.Background(), SecretKeyForWorkspace("default"), "tok", "sntrys_xyz")
 
 	store := newTestStore(t)
 	ctx := context.Background()
@@ -389,13 +389,13 @@ func TestService_ClientFor_InvalidateDuringBuild(t *testing.T) {
 	// First clientFor call — will block in Reveal while we invalidate.
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := svc.clientFor(ctx)
+		_, err := svc.clientFor(ctx, "default")
 		errCh <- err
 	}()
 
 	// Wait until clientFor is inside Reveal, then invalidate.
 	<-invalidateCh
-	svc.invalidateClient()
+	svc.invalidateClient("default")
 
 	// Wait for the first clientFor to finish.
 	if err := <-errCh; err != nil {
@@ -405,7 +405,7 @@ func TestService_ClientFor_InvalidateDuringBuild(t *testing.T) {
 	// The invalidation must have reset the cache, so s.client should be nil now.
 	// A second clientFor must hit the factory again (not return the cached stale client).
 	slow.revealHook = nil // no more blocking
-	if _, err := svc.clientFor(ctx); err != nil {
+	if _, err := svc.clientFor(ctx, "default"); err != nil {
 		t.Fatalf("second clientFor: %v", err)
 	}
 

@@ -9,20 +9,22 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+
+	"github.com/kandev/kandev/internal/integrations/workspacescope"
 )
 
-// Store persists the Jira configuration. Secret values are delegated to the
-// shared encrypted secret store and not stored here. The configuration is a
-// singleton — there is one Jira account per install, not one per workspace.
+// Store persists workspace-scoped Jira configuration. Secret values are
+// delegated to the shared encrypted secret store and not stored here.
 type Store struct {
 	db *sqlx.DB
 	ro *sqlx.DB
 
-	// migratedFromWorkspace records the workspace_id of the row that was
-	// promoted into the singleton during initSchema. Provider reads this to
-	// migrate the per-workspace secret to the new global key. Empty when no
-	// migration ran (fresh install or already migrated).
-	migratedFromWorkspace string
+	defaultWorkspace workspacescope.DefaultResolver
+
+	// migratedToWorkspace records the workspace_id that received a legacy
+	// singleton row during initSchema. Provider reads this to migrate the
+	// singleton secret to the workspace-scoped key. Empty when no migration ran.
+	migratedToWorkspace string
 }
 
 // NewStore creates a new Store and initializes the schema if needed.
@@ -34,16 +36,15 @@ func NewStore(writer, reader *sqlx.DB) (*Store, error) {
 	return s, nil
 }
 
-// MigratedFromWorkspace returns the workspace_id of the row promoted to the
-// singleton during the per-workspace → singleton schema migration, or "" when
-// no migration ran. Provider uses this to copy the secret over.
+// MigratedFromWorkspace is kept for older provider call sites. It now returns
+// the workspace_id that received a legacy singleton row during migration.
 func (s *Store) MigratedFromWorkspace() string {
-	return s.migratedFromWorkspace
+	return s.migratedToWorkspace
 }
 
 const createTablesSQL = `
 	CREATE TABLE IF NOT EXISTS jira_configs (
-		id TEXT PRIMARY KEY CHECK(id = 'singleton'),
+		workspace_id TEXT PRIMARY KEY,
 		site_url TEXT NOT NULL,
 		email TEXT NOT NULL DEFAULT '',
 		auth_method TEXT NOT NULL,
@@ -97,19 +98,21 @@ const createTablesSQL = `
 	);
 `
 
-// singletonID is the synthetic primary key of the (only) row in jira_configs.
-// The CHECK constraint on the column makes inserting any other id an error,
-// so the table can never accidentally grow back to per-workspace rows.
+// singletonID is the synthetic primary key used by the legacy install-wide
+// jira_configs table.
 const singletonID = "singleton"
 
 func (s *Store) initSchema() error {
-	if err := s.migrateLegacyPerWorkspaceTable(); err != nil {
+	if err := s.migrateLegacySingletonTable(); err != nil {
 		return err
 	}
 	if _, err := s.db.Exec(createTablesSQL); err != nil {
 		return err
 	}
 	if err := s.addInstanceTypeColumn(); err != nil {
+		return err
+	}
+	if err := s.addConfigHealthColumns(); err != nil {
 		return err
 	}
 	if err := s.addMaxInflightTasksColumn(); err != nil {
@@ -120,6 +123,32 @@ func (s *Store) initSchema() error {
 	}
 	if err := s.addIssueWatchRepositoryColumns(); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (s *Store) addConfigHealthColumns() error {
+	cols, err := s.tableColumns("jira_configs")
+	if err != nil {
+		return err
+	}
+	if len(cols) == 0 {
+		return nil
+	}
+	if _, ok := cols["last_checked_at"]; !ok {
+		if _, err := s.db.Exec(`ALTER TABLE jira_configs ADD COLUMN last_checked_at DATETIME`); err != nil {
+			return fmt.Errorf("add last_checked_at column: %w", err)
+		}
+	}
+	if _, ok := cols["last_ok"]; !ok {
+		if _, err := s.db.Exec(`ALTER TABLE jira_configs ADD COLUMN last_ok INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add last_ok column: %w", err)
+		}
+	}
+	if _, ok := cols["last_error"]; !ok {
+		if _, err := s.db.Exec(`ALTER TABLE jira_configs ADD COLUMN last_error TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add last_error column: %w", err)
+		}
 	}
 	return nil
 }
@@ -212,14 +241,10 @@ func (s *Store) addInstanceTypeColumn() error {
 	return nil
 }
 
-// migrateLegacyPerWorkspaceTable detects the pre-singleton schema (where
-// jira_configs was keyed by workspace_id) and rewrites it into the singleton
-// shape. Picks the most-recently-updated row as the surviving config and
-// records the source workspace_id so the provider can migrate the secret.
-//
-// Idempotent: a fresh install has no legacy table and falls through to the
-// CREATE TABLE IF NOT EXISTS in createTablesSQL.
-func (s *Store) migrateLegacyPerWorkspaceTable() error {
+// migrateLegacySingletonTable detects the install-wide singleton schema and
+// rewrites it into the workspace-scoped shape. Picks the active/default
+// workspace as the target so startup is deterministic.
+func (s *Store) migrateLegacySingletonTable() error {
 	cols, err := s.tableColumns("jira_configs")
 	if err != nil {
 		return err
@@ -227,8 +252,15 @@ func (s *Store) migrateLegacyPerWorkspaceTable() error {
 	if len(cols) == 0 {
 		return nil
 	}
-	if _, hasWorkspace := cols["workspace_id"]; !hasWorkspace {
+	if _, hasWorkspace := cols["workspace_id"]; hasWorkspace {
 		return nil
+	}
+	if _, hasID := cols["id"]; !hasID {
+		return nil
+	}
+	targetWorkspace, err := workspacescope.ResolveMigrationTarget(s.db)
+	if err != nil {
+		return err
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -236,25 +268,20 @@ func (s *Store) migrateLegacyPerWorkspaceTable() error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// `last_checked_at`, `last_ok`, and `last_error` were added to the legacy
-	// schema in a later release via ALTER TABLE. A deployment that upgrades
-	// from the original schema would have a `workspace_id` column but not
-	// these — selecting them unconditionally would crash startup. Build the
-	// SELECT against only columns present in this database.
 	healthCols := healthColumnsPresent(cols)
-	selectCols := "workspace_id, site_url, email, auth_method, default_project_key"
+	selectCols := "site_url, email, auth_method, default_project_key"
 	if healthCols {
 		selectCols += ", last_checked_at, last_ok, last_error"
 	} else {
 		selectCols += ", NULL AS last_checked_at, 0 AS last_ok, '' AS last_error"
 	}
 	selectCols += ", created_at, updated_at"
-	var sourceWorkspace, siteURL, email, authMethod, defaultProjectKey, lastError sql.NullString
+	var siteURL, email, authMethod, defaultProjectKey, lastError sql.NullString
 	var lastCheckedAt sql.NullTime
 	var lastOk sql.NullInt64
 	var createdAt, updatedAt sql.NullTime
-	row := tx.QueryRow(`SELECT ` + selectCols + ` FROM jira_configs ORDER BY updated_at DESC LIMIT 1`)
-	switch err := row.Scan(&sourceWorkspace, &siteURL, &email, &authMethod, &defaultProjectKey,
+	row := tx.QueryRow(`SELECT `+selectCols+` FROM jira_configs WHERE id = ? LIMIT 1`, singletonID)
+	switch err := row.Scan(&siteURL, &email, &authMethod, &defaultProjectKey,
 		&lastCheckedAt, &lastOk, &lastError, &createdAt, &updatedAt); {
 	case errors.Is(err, sql.ErrNoRows):
 		// Empty legacy table — drop and let createTablesSQL build the new shape.
@@ -270,7 +297,7 @@ func (s *Store) migrateLegacyPerWorkspaceTable() error {
 	}
 	if _, err := tx.Exec(`
 		CREATE TABLE jira_configs (
-			id TEXT PRIMARY KEY CHECK(id = 'singleton'),
+			workspace_id TEXT PRIMARY KEY,
 			site_url TEXT NOT NULL,
 			email TEXT NOT NULL DEFAULT '',
 			auth_method TEXT NOT NULL,
@@ -284,14 +311,11 @@ func (s *Store) migrateLegacyPerWorkspaceTable() error {
 		)`); err != nil {
 		return err
 	}
-	// instance_type column is intentionally omitted from the INSERT: the column
-	// default ('cloud') is the correct value for every legacy row, since prior
-	// releases only supported Atlassian Cloud.
 	if _, err := tx.Exec(`
-		INSERT INTO jira_configs (id, site_url, email, auth_method, default_project_key,
+		INSERT INTO jira_configs (workspace_id, site_url, email, auth_method, default_project_key,
 			last_checked_at, last_ok, last_error, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		singletonID, siteURL.String, email.String, authMethod.String, defaultProjectKey.String,
+		targetWorkspace, siteURL.String, email.String, authMethod.String, defaultProjectKey.String,
 		nullableTime(lastCheckedAt), lastOk.Int64, lastError.String,
 		nullableTime(createdAt), nullableTime(updatedAt)); err != nil {
 		return err
@@ -299,7 +323,7 @@ func (s *Store) migrateLegacyPerWorkspaceTable() error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	s.migratedFromWorkspace = sourceWorkspace.String
+	s.migratedToWorkspace = targetWorkspace
 	return nil
 }
 
@@ -347,14 +371,29 @@ func (s *Store) tableColumns(table string) (map[string]struct{}, error) {
 	return cols, rows.Err()
 }
 
-const selectConfigColumns = `site_url, email, auth_method, instance_type, default_project_key,
+const selectConfigColumns = `workspace_id, site_url, email, auth_method, instance_type, default_project_key,
 		last_checked_at, last_ok, last_error, created_at, updated_at`
 
-// GetConfig returns the singleton Jira config, or nil when no row exists.
+// GetConfig returns the default workspace Jira config, or nil when no row
+// exists. New code should call GetConfigForWorkspace.
 func (s *Store) GetConfig(ctx context.Context) (*JiraConfig, error) {
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return nil, err
+	}
+	return s.GetConfigForWorkspace(ctx, workspaceID)
+}
+
+// GetConfigForWorkspace returns the Jira config for a workspace, or nil when
+// no row exists.
+func (s *Store) GetConfigForWorkspace(ctx context.Context, workspaceID string) (*JiraConfig, error) {
+	workspaceID, err := s.resolveWorkspaceID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	var cfg JiraConfig
-	err := s.ro.GetContext(ctx, &cfg,
-		`SELECT `+selectConfigColumns+` FROM jira_configs WHERE id = ?`, singletonID)
+	err = s.ro.GetContext(ctx, &cfg,
+		`SELECT `+selectConfigColumns+` FROM jira_configs WHERE workspace_id = ?`, workspaceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -364,11 +403,24 @@ func (s *Store) GetConfig(ctx context.Context) (*JiraConfig, error) {
 	return &cfg, nil
 }
 
-// UpsertConfig inserts or updates the singleton config row. It never touches
+// UpsertConfig inserts or updates the default workspace config row. It never touches
 // the secret store — callers must persist the token separately. The last_*
 // health columns are deliberately not touched here; the poller owns those and
 // writes them via UpdateAuthHealth.
 func (s *Store) UpsertConfig(ctx context.Context, cfg *JiraConfig) error {
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return err
+	}
+	return s.UpsertConfigForWorkspace(ctx, workspaceID, cfg)
+}
+
+// UpsertConfigForWorkspace inserts or updates a workspace config row.
+func (s *Store) UpsertConfigForWorkspace(ctx context.Context, workspaceID string, cfg *JiraConfig) error {
+	workspaceID, err := s.resolveWorkspaceID(workspaceID)
+	if err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	if cfg.CreatedAt.IsZero() {
 		cfg.CreatedAt = now
@@ -380,50 +432,97 @@ func (s *Store) UpsertConfig(ctx context.Context, cfg *JiraConfig) error {
 	if cfg.InstanceType == "" {
 		cfg.InstanceType = InstanceTypeCloud
 	}
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO jira_configs (id, site_url, email, auth_method, instance_type, default_project_key, created_at, updated_at)
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO jira_configs (workspace_id, site_url, email, auth_method, instance_type, default_project_key, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET
+		ON CONFLICT(workspace_id) DO UPDATE SET
 			site_url = excluded.site_url,
 			email = excluded.email,
 			auth_method = excluded.auth_method,
 			instance_type = excluded.instance_type,
 			default_project_key = excluded.default_project_key,
 			updated_at = excluded.updated_at`,
-		singletonID, cfg.SiteURL, cfg.Email, cfg.AuthMethod, cfg.InstanceType, cfg.DefaultProjectKey, cfg.CreatedAt, cfg.UpdatedAt)
+		workspaceID, cfg.SiteURL, cfg.Email, cfg.AuthMethod, cfg.InstanceType, cfg.DefaultProjectKey, cfg.CreatedAt, cfg.UpdatedAt)
 	return err
 }
 
-// DeleteConfig removes the singleton config row. Secrets must be cleared
+// DeleteConfig removes the default workspace config row. Secrets must be cleared
 // separately by the caller.
 func (s *Store) DeleteConfig(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM jira_configs WHERE id = ?`, singletonID)
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return err
+	}
+	return s.DeleteConfigForWorkspace(ctx, workspaceID)
+}
+
+// DeleteConfigForWorkspace removes the workspace config row.
+func (s *Store) DeleteConfigForWorkspace(ctx context.Context, workspaceID string) error {
+	workspaceID, err := s.resolveWorkspaceID(workspaceID)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `DELETE FROM jira_configs WHERE workspace_id = ?`, workspaceID)
 	return err
 }
 
-// HasConfig reports whether the singleton row exists. Used by the auth-health
+// HasConfig reports whether any config row exists. Used by the auth-health
 // poller to decide whether to probe at all.
 func (s *Store) HasConfig(ctx context.Context) (bool, error) {
 	var present int
 	err := s.ro.GetContext(ctx, &present,
-		`SELECT COUNT(*) FROM jira_configs WHERE id = ?`, singletonID)
+		`SELECT COUNT(*) FROM jira_configs`)
 	if err != nil {
 		return false, err
 	}
 	return present > 0, nil
 }
 
-// UpdateAuthHealth records the result of a credential probe on the singleton
+// ListConfigWorkspaceIDs returns every workspace with a saved Jira config.
+func (s *Store) ListConfigWorkspaceIDs(ctx context.Context) ([]string, error) {
+	var ids []string
+	if err := s.ro.SelectContext(ctx, &ids, `SELECT workspace_id FROM jira_configs ORDER BY workspace_id`); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+// UpdateAuthHealth records the result of a credential probe on the default workspace
 // config row. errMsg is the empty string when ok is true. If the row no longer
 // exists (e.g. the user removed the config concurrently with the poller), the
 // update is a silent no-op rather than an error.
 func (s *Store) UpdateAuthHealth(ctx context.Context, ok bool, errMsg string, checkedAt time.Time) error {
-	_, err := s.db.ExecContext(ctx, `
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return err
+	}
+	return s.UpdateAuthHealthForWorkspace(ctx, workspaceID, ok, errMsg, checkedAt)
+}
+
+// UpdateAuthHealthForWorkspace records the result of a credential probe for a
+// single workspace config row.
+func (s *Store) UpdateAuthHealthForWorkspace(ctx context.Context, workspaceID string, ok bool, errMsg string, checkedAt time.Time) error {
+	workspaceID, err := s.resolveWorkspaceID(workspaceID)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
 		UPDATE jira_configs
 		SET last_checked_at = ?, last_ok = ?, last_error = ?
-		WHERE id = ?`,
-		checkedAt, ok, errMsg, singletonID)
+		WHERE workspace_id = ?`,
+		checkedAt, ok, errMsg, workspaceID)
 	return err
+}
+
+func (s *Store) defaultWorkspaceID() (string, error) {
+	return s.defaultWorkspace.Resolve(s.db)
+}
+
+func (s *Store) resolveWorkspaceID(workspaceID string) (string, error) {
+	if workspaceID != "" {
+		return workspaceID, nil
+	}
+	return s.defaultWorkspaceID()
 }
 
 // --- Issue watch operations ---

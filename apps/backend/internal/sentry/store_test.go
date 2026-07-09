@@ -149,6 +149,81 @@ func TestStore_UpsertGetConfig_RoundTripsURL(t *testing.T) {
 	}
 }
 
+func TestStore_MigrateSingletonConfigToActiveWorkspace(t *testing.T) {
+	raw, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	raw.SetMaxOpenConns(1)
+	raw.SetMaxIdleConns(1)
+	db := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+
+	now := time.Now().UTC()
+	checkedAt := now.Add(-5 * time.Minute).Truncate(time.Second)
+	if _, err := db.Exec(`
+		CREATE TABLE workspaces (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		);
+		CREATE TABLE users (
+			id TEXT PRIMARY KEY,
+			email TEXT NOT NULL,
+			settings TEXT NOT NULL DEFAULT '{}',
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		);
+		CREATE TABLE sentry_configs (
+			id TEXT PRIMARY KEY CHECK(id = 'singleton'),
+			auth_method TEXT NOT NULL,
+			url TEXT NOT NULL DEFAULT 'https://sentry.io',
+			last_checked_at DATETIME,
+			last_ok INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		);
+		INSERT INTO workspaces (id, name, created_at, updated_at)
+			VALUES ('ws-first', 'First', ?, ?), ('ws-active', 'Active', ?, ?);
+		INSERT INTO users (id, email, settings, created_at, updated_at)
+			VALUES ('default-user', 'default@kandev.local', '{"workspace_id":"ws-active"}', ?, ?);
+		INSERT INTO sentry_configs
+			(id, auth_method, url, last_checked_at, last_ok, last_error, created_at, updated_at)
+			VALUES ('singleton', ?, 'https://sentry.example.com', ?, 1, 'healthy', ?, ?);
+	`, now.Add(-time.Hour), now.Add(-time.Hour), now, now, now, now, AuthMethodAuthToken, checkedAt, now, now); err != nil {
+		t.Fatalf("seed singleton schema: %v", err)
+	}
+
+	store, err := NewStore(db, db)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	if got := store.MigratedFromWorkspace(); got != "ws-active" {
+		t.Fatalf("expected singleton config migrated to active workspace, got %q", got)
+	}
+	cfg, err := store.GetConfigForWorkspace(context.Background(), "ws-active")
+	if err != nil {
+		t.Fatalf("get active workspace config: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected migrated config")
+	}
+	if cfg.URL != "https://sentry.example.com" {
+		t.Errorf("expected migrated URL, got %q", cfg.URL)
+	}
+	if cfg.AuthMethod != AuthMethodAuthToken {
+		t.Errorf("expected migrated auth method %q, got %q", AuthMethodAuthToken, cfg.AuthMethod)
+	}
+	if !cfg.LastOk || cfg.LastError != "healthy" {
+		t.Errorf("unexpected migrated health state: %+v", cfg)
+	}
+	if cfg.LastCheckedAt == nil || !cfg.LastCheckedAt.Equal(checkedAt) {
+		t.Errorf("expected last_checked_at=%v, got %v", checkedAt, cfg.LastCheckedAt)
+	}
+}
+
 // TestStore_MigratesURLColumn seeds a pre-self-hosted sentry_configs table (no
 // url column) and verifies NewStore adds the column, backfilling the existing
 // SaaS row to the sentry.io default rather than an empty string.

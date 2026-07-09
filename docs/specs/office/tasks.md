@@ -47,7 +47,7 @@ This spec consolidates the office task surface: lifecycle, parent/child handoffs
 - Transitioning `in_review → todo|in_progress` (rework) supersedes all prior decisions; re-entering `in_review` starts a fresh round.
 - Approving a task while approvers are pending wakes the assignee with `task_changes_requested` (when changes are requested) or `task_ready_to_close` (when the final approval lands).
 - Recording a decision does NOT terminate the deciding agent's session. The reviewer's session stays IDLE between cycles and is re-used on a subsequent `task_review_requested` wakeup.
-- Tasks awaiting the current user's review/approval surface in the inbox as item type `task_review_request`.
+- Tasks awaiting the current user's review/approval surface in the inbox as item type `task_review_request` only when the user/agent is a reviewer or approver participant with a required decision. Runner/assignee participation alone does not create a review inbox item.
 - v1 approval is **unanimous**: every listed approver must approve. There is no quorum / any-of-N mode.
 
 ### D. Inline editable properties
@@ -69,6 +69,7 @@ A backend pipeline runs synchronously on every relevant task property change. Pr
 - `status: blocked → unblocked`: wake assignee with `{reason: "task_unblocked"}`.
 - `status: done|cancelled → todo|in_progress`: wake assignee with `{reason: "task_reopened", actor_id, actor_type}`.
 - **Assignee change**: wake new assignee with `{reason: "assigned", comment_id?, actor_id}`. If old assignee had an active session, cancel it cleanly (`session.cancelled` notification) and surface that to the new assignee's context.
+- **Created task with assignee**: if a newly-created task or subtask already has a runner, queue the same assigned wakeup idempotently with `{reason: "assigned", task_id}`.
 - **Comment created by user**: wake assignee with `{reason: "user_comment", comment_id}`. Wake any @-mentioned agents in the same workspace with `{reason: "mentioned", comment_id}`.
 - `status → in_review`: wake every reviewer and approver with `{reason: "task_review_requested", role}`.
 - `decision = changes_requested`: wake assignee with `{reason: "task_changes_requested", comment}`.
@@ -342,6 +343,7 @@ An agent's run JWT also pins an `AllowedTaskIDs` scope. The runtime rejects muta
 
 - **GIVEN** a coordinator creates a planning task and an implementation task with the implementation blocked-by the planner, **WHEN** the planner writes `spec` and `plan` documents up to the parent and completes, **THEN** the blocker resolves and the implementation task wakes; its prompt names the parent's available document keys so the agent fetches them via the task document tool.
 - **GIVEN** a parent policy says children inherit the parent workspace and run sequentially, **WHEN** the coordinator creates child tasks, **THEN** the children reuse the parent materialized workspace and receive dependency edges that order their execution.
+- **GIVEN** a child task inherits a parent materialized workspace, **WHEN** the child is archived or deleted, **THEN** the inherited parent workspace remains available to the parent and any other active child that still references it.
 - **GIVEN** a user opens a Kanban task detail page, **WHEN** they create a subtask, **THEN** they can choose to inherit the parent task workspace or create a new workspace by selecting repositories, local folders, or a remote URL.
 - **GIVEN** two tasks share a workspace group without dependency edges, **WHEN** the scheduler starts both, **THEN** they may run concurrently in the same materialized workspace.
 - **GIVEN** a parent task has descendant tasks, **WHEN** the user deletes the parent, **THEN** Kandev cancels active descendant runs, deletes every descendant, releases their workspace memberships, and runs cleanup.

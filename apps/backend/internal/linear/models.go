@@ -15,10 +15,10 @@ import (
 // and leaves room for OAuth in the future.
 const AuthMethodAPIKey = "api_key"
 
-// LinearConfig is the install-wide configuration for the Linear integration.
-// The API key is stored separately in the encrypted secret store under
-// SecretKey.
+// LinearConfig is the workspace-scoped configuration for the Linear
+// integration. The API key is stored separately in the encrypted secret store.
 type LinearConfig struct {
+	WorkspaceID    string `json:"workspaceId,omitempty" db:"workspace_id"`
 	AuthMethod     string `json:"authMethod" db:"auth_method"`
 	DefaultTeamKey string `json:"defaultTeamKey" db:"default_team_key"`
 	HasSecret      bool   `json:"hasSecret" db:"-"`
@@ -181,15 +181,18 @@ type SearchResult struct {
 	NextPageToken string        `json:"nextPageToken,omitempty"`
 }
 
-// SecretKey is the secret-store key used for the install-wide Linear API key.
-// Centralised so the service, store and provider migration agree.
+// SecretKey is the legacy secret-store key used for the old install-wide Linear
+// API key. New workspace-scoped configs use SecretKeyForWorkspace.
 const SecretKey = "linear:singleton:token"
 
-// LegacySecretKeyForWorkspace returns the pre-singleton per-workspace secret
-// key. Only used by the one-shot startup migration in provider.go to copy an
-// existing token over to SecretKey.
-func LegacySecretKeyForWorkspace(workspaceID string) string {
+// SecretKeyForWorkspace returns the workspace-scoped Linear secret key.
+func SecretKeyForWorkspace(workspaceID string) string {
 	return "linear:" + workspaceID + ":token"
+}
+
+// LegacySecretKeyForWorkspace is kept for older tests/callers.
+func LegacySecretKeyForWorkspace(workspaceID string) string {
+	return SecretKeyForWorkspace(workspaceID)
 }
 
 // DefaultIssueWatchPollInterval is the polling cadence assigned to a watcher

@@ -4,7 +4,6 @@ import { memo, useCallback } from "react";
 import {
   IconSettings,
   IconX,
-  IconMessageForward,
   IconLayoutColumns,
   IconLayoutRows,
   IconTextWrap,
@@ -23,6 +22,7 @@ import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { updateUserSettings } from "@/lib/api";
 import { VcsSplitButton } from "@/components/vcs-split-button";
+import { FixCommentsButton } from "./review-fix-comments-button";
 
 type ReviewTopBarProps = {
   sessionId: string;
@@ -174,13 +174,11 @@ export const ReviewTopBar = memo(function ReviewTopBar({
         </TooltipContent>
       </Tooltip>
       {commentCount > 0 && (
-        <Button size="sm" variant="outline" className="cursor-pointer" onClick={handleFixComments}>
-          <IconMessageForward className="h-4 w-4" />
-          Fix Comments
-          <span className="ml-1 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-xs font-medium text-blue-600 dark:text-blue-400">
-            {commentCount}
-          </span>
-        </Button>
+        <FixCommentsButton
+          commentCount={commentCount}
+          getPendingComments={getPendingComments}
+          onFixComments={handleFixComments}
+        />
       )}
       <VcsSplitButton sessionId={sessionId} baseBranch={baseBranch} />
       <Button size="sm" variant="ghost" className="px-2 cursor-pointer" onClick={onClose}>

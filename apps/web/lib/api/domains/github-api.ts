@@ -26,6 +26,8 @@ import type {
   GitHubPRStatus,
   GitHubActionPresets,
   UpdateGitHubActionPresetsRequest,
+  GitHubWorkspaceSettings,
+  UpdateGitHubWorkspaceSettingsRequest,
   CleanupTasksResponse,
   MergeMethod,
   RepoMergeMethods,
@@ -258,17 +260,24 @@ export async function createReviewWatch(
 
 export async function updateReviewWatch(
   id: string,
+  workspaceId: string,
   payload: UpdateReviewWatchRequest,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<ReviewWatch>(`/api/v1/github/watches/review/${id}`, {
+  const params = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<ReviewWatch>(`/api/v1/github/watches/review/${id}?${params}`, {
     ...options,
     init: { method: "PUT", body: JSON.stringify(payload), ...(options?.init ?? {}) },
   });
 }
 
-export async function deleteReviewWatch(id: string, options?: ApiRequestOptions) {
-  return fetchJson<{ success: boolean }>(`/api/v1/github/watches/review/${id}`, {
+export async function deleteReviewWatch(
+  id: string,
+  workspaceId: string,
+  options?: ApiRequestOptions,
+) {
+  const params = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<{ success: boolean }>(`/api/v1/github/watches/review/${id}?${params}`, {
     ...options,
     init: { method: "DELETE", ...(options?.init ?? {}) },
   });
@@ -487,24 +496,36 @@ export async function createIssueWatch(
 
 export async function updateIssueWatch(
   id: string,
+  workspaceId: string,
   payload: UpdateIssueWatchRequest,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<IssueWatch>(`/api/v1/github/watches/issue/${id}`, {
+  const params = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<IssueWatch>(`/api/v1/github/watches/issue/${id}?${params}`, {
     ...options,
     init: { method: "PUT", body: JSON.stringify(payload), ...(options?.init ?? {}) },
   });
 }
 
-export async function deleteIssueWatch(id: string, options?: ApiRequestOptions) {
-  return fetchJson<{ deleted: boolean }>(`/api/v1/github/watches/issue/${id}`, {
+export async function deleteIssueWatch(
+  id: string,
+  workspaceId: string,
+  options?: ApiRequestOptions,
+) {
+  const params = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<{ deleted: boolean }>(`/api/v1/github/watches/issue/${id}?${params}`, {
     ...options,
     init: { method: "DELETE", ...(options?.init ?? {}) },
   });
 }
 
-export async function triggerIssueWatch(id: string, options?: ApiRequestOptions) {
-  return fetchJson<TriggerIssueResponse>(`/api/v1/github/watches/issue/${id}/trigger`, {
+export async function triggerIssueWatch(
+  id: string,
+  workspaceId: string,
+  options?: ApiRequestOptions,
+) {
+  const params = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<TriggerIssueResponse>(`/api/v1/github/watches/issue/${id}/trigger?${params}`, {
     ...options,
     init: { method: "POST", ...(options?.init ?? {}) },
   });
@@ -558,15 +579,17 @@ export async function triggerAllIssueWatches(workspaceId: string, options?: ApiR
 // Manual cleanup sweeps. The poller runs these every 5min per watch, but a
 // user with a pile of legacy merged-PR tasks (created before the cleanup
 // policy was in place) can invoke them on demand from the settings page.
-export async function cleanupMergedReviewTasks(options?: ApiRequestOptions) {
-  return fetchJson<CleanupTasksResponse>("/api/v1/github/cleanup/review-tasks", {
+export async function cleanupMergedReviewTasks(workspaceId?: string, options?: ApiRequestOptions) {
+  const query = workspaceId ? `?${new URLSearchParams({ workspace_id: workspaceId })}` : "";
+  return fetchJson<CleanupTasksResponse>(`/api/v1/github/cleanup/review-tasks${query}`, {
     ...options,
     init: { method: "POST", ...(options?.init ?? {}) },
   });
 }
 
-export async function cleanupClosedIssueTasks(options?: ApiRequestOptions) {
-  return fetchJson<CleanupTasksResponse>("/api/v1/github/cleanup/issue-tasks", {
+export async function cleanupClosedIssueTasks(workspaceId?: string, options?: ApiRequestOptions) {
+  const query = workspaceId ? `?${new URLSearchParams({ workspace_id: workspaceId })}` : "";
+  return fetchJson<CleanupTasksResponse>(`/api/v1/github/cleanup/issue-tasks${query}`, {
     ...options,
     init: { method: "POST", ...(options?.init ?? {}) },
   });
@@ -580,6 +603,7 @@ type SearchParams = {
   filter?: string;
   page?: number;
   perPage?: number;
+  workspaceId?: string | null;
 };
 
 function buildSearchQuery(params: SearchParams) {
@@ -588,6 +612,7 @@ function buildSearchQuery(params: SearchParams) {
   if (params.filter) search.set("filter", params.filter);
   if (params.page && params.page > 1) search.set("page", String(params.page));
   if (params.perPage) search.set("per_page", String(params.perPage));
+  if (params.workspaceId) search.set("workspace_id", params.workspaceId);
   return search.toString();
 }
 
@@ -604,6 +629,52 @@ export async function searchUserIssues(params: SearchParams, options?: ApiReques
   return fetchJson<SearchIssuesResponse>(
     `/api/v1/github/user/issues${suffix ? `?${suffix}` : ""}`,
     options,
+  );
+}
+
+// Workspace settings for GitHub repo visibility/scope.
+export async function fetchGitHubWorkspaceSettings(
+  workspaceId: string,
+  options?: ApiRequestOptions,
+) {
+  const query = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<GitHubWorkspaceSettings>(
+    `/api/v1/github/workspace-settings?${query.toString()}`,
+    options,
+  );
+}
+
+export async function updateGitHubWorkspaceSettings(
+  payload: UpdateGitHubWorkspaceSettingsRequest,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<GitHubWorkspaceSettings>("/api/v1/github/workspace-settings", {
+    ...options,
+    init: { ...(options?.init ?? {}), method: "PUT", body: JSON.stringify(payload) },
+  });
+}
+
+// copyGitHubWorkspaceSettings copies the per-workspace GitHub settings (repo
+// scope + presets) from the source workspace (options.workspaceId) to
+// targetWorkspaceId. GitHub auth is install-wide, so there are no credentials to
+// copy. The signature mirrors the other integrations' copy helpers
+// (targetWorkspaceId first, source via options) for consistency.
+export async function copyGitHubWorkspaceSettings(
+  targetWorkspaceId: string,
+  options: { workspaceId: string } & ApiRequestOptions,
+) {
+  const { workspaceId: sourceWorkspaceId, ...requestOptions } = options;
+  const query = new URLSearchParams({ workspace_id: sourceWorkspaceId });
+  return fetchJson<GitHubWorkspaceSettings>(
+    `/api/v1/github/workspace-settings/copy?${query.toString()}`,
+    {
+      ...requestOptions,
+      init: {
+        ...(requestOptions.init ?? {}),
+        method: "POST",
+        body: JSON.stringify({ targetWorkspaceId }),
+      },
+    },
   );
 }
 

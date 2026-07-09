@@ -111,6 +111,17 @@ func TestNowMinusHours(t *testing.T) {
 	}
 }
 
+func TestGreatestTimestamp(t *testing.T) {
+	got := GreatestTimestamp(SQLite3, "t.updated_at", "MAX(ts.updated_at)")
+	if got != "max(t.updated_at, MAX(ts.updated_at))" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	got = GreatestTimestamp(PGX, "t.updated_at", "MAX(ts.updated_at)")
+	if got != "GREATEST(t.updated_at, MAX(ts.updated_at))" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
 func TestCurrentDate(t *testing.T) {
 	if CurrentDate(SQLite3) != "date('now')" {
 		t.Errorf("sqlite: got %q", CurrentDate(SQLite3))

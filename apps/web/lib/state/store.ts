@@ -526,6 +526,8 @@ export type AppState = {
   migrateLocalViewsToBackend: UIA["migrateLocalViewsToBackend"];
   setKanbanPreviewedTaskId: UIA["setKanbanPreviewedTaskId"];
   togglePinnedTask: UIA["togglePinnedTask"];
+  pinTasks: UIA["pinTasks"];
+  unpinTasks: UIA["unpinTasks"];
   setSidebarTaskOrder: UIA["setSidebarTaskOrder"];
   setSubtaskOrder: UIA["setSubtaskOrder"];
   removeTaskFromSidebarPrefs: UIA["removeTaskFromSidebarPrefs"];

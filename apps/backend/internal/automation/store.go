@@ -471,6 +471,43 @@ func (s *Store) CountActiveRuns(ctx context.Context, automationID string) (int, 
 	return count, err
 }
 
+// GetRun returns a single run by ID, or nil if not found.
+func (s *Store) GetRun(ctx context.Context, id string) (*AutomationRun, error) {
+	var r AutomationRun
+	err := s.ro.GetContext(ctx, &r,
+		`SELECT * FROM automation_runs WHERE id = ?`, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	r.TriggerData = json.RawMessage(r.TriggerDataJSON)
+	return &r, nil
+}
+
+// DeleteRun removes a single run row.
+func (s *Store) DeleteRun(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM automation_runs WHERE id = ?`, id)
+	return err
+}
+
+// ListRunTaskIDs returns all non-empty task_id values for an automation's runs.
+// Used by DeleteAllRuns so the service can clean up tasks before purging rows.
+func (s *Store) ListRunTaskIDs(ctx context.Context, automationID string) ([]string, error) {
+	var ids []string
+	err := s.ro.SelectContext(ctx, &ids,
+		`SELECT task_id FROM automation_runs WHERE automation_id = ? AND task_id != ''`,
+		automationID)
+	return ids, err
+}
+
+// DeleteAllRuns removes every run row for an automation.
+func (s *Store) DeleteAllRuns(ctx context.Context, automationID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM automation_runs WHERE automation_id = ?`, automationID)
+	return err
+}
+
 // DeleteAutomationsByWorkspace removes all automations (and their triggers/runs) for a workspace.
 // Used by e2e reset.
 func (s *Store) DeleteAutomationsByWorkspace(ctx context.Context, workspaceID string) (int, error) {

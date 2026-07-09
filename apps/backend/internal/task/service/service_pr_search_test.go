@@ -62,7 +62,7 @@ func TestListTasksByWorkspace_PRNumberSurfacesTask(t *testing.T) {
 	ctx := context.Background()
 
 	// "#1243" — task-pr has no "1243" in its title, only the PR association.
-	tasks, total, err := svc.ListTasksByWorkspace(ctx, "ws-1", "", "", "#1243", 1, 5, true, false, false, false)
+	tasks, total, err := svc.ListTasksByWorkspace(ctx, "ws-1", "", "", "#1243", 1, 5, "", true, false, false, false)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestListTasksByWorkspace_PRNumberDedupes(t *testing.T) {
 	svc.SetPRTaskResolver(&fakePRResolver{byPR: map[int][]string{1243: {"task-title"}}})
 	ctx := context.Background()
 
-	tasks, _, err := svc.ListTasksByWorkspace(ctx, "ws-1", "", "", "1243", 1, 5, true, false, false, false)
+	tasks, _, err := svc.ListTasksByWorkspace(ctx, "ws-1", "", "", "1243", 1, 5, "", true, false, false, false)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestListTasksByWorkspace_NonNumericQuerySkipsResolver(t *testing.T) {
 	svc.SetPRTaskResolver(resolver)
 	ctx := context.Background()
 
-	tasks, _, err := svc.ListTasksByWorkspace(ctx, "ws-1", "", "", "unrelated", 1, 5, true, false, false, false)
+	tasks, _, err := svc.ListTasksByWorkspace(ctx, "ws-1", "", "", "unrelated", 1, 5, "", true, false, false, false)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestListTasksByWorkspace_NilResolverNoPanic(t *testing.T) {
 	ctx := context.Background()
 
 	// No resolver wired — PR-number search must be a safe no-op.
-	tasks, _, err := svc.ListTasksByWorkspace(ctx, "ws-1", "", "", "#1243", 1, 5, true, false, false, false)
+	tasks, _, err := svc.ListTasksByWorkspace(ctx, "ws-1", "", "", "#1243", 1, 5, "", true, false, false, false)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestListTasksByWorkspace_PRMatchRespectsArchivedFilter(t *testing.T) {
 	ctx := context.Background()
 
 	// includeArchived=false → archived PR task excluded.
-	excluded, _, err := svc.ListTasksByWorkspace(ctx, "ws-1", "", "", "#1243", 1, 5, false, false, false, false)
+	excluded, _, err := svc.ListTasksByWorkspace(ctx, "ws-1", "", "", "#1243", 1, 5, "", false, false, false, false)
 	if err != nil {
 		t.Fatalf("search excluded: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestListTasksByWorkspace_PRMatchRespectsArchivedFilter(t *testing.T) {
 	}
 
 	// includeArchived=true → archived PR task included.
-	included, _, err := svc.ListTasksByWorkspace(ctx, "ws-1", "", "", "#1243", 1, 5, true, false, false, false)
+	included, _, err := svc.ListTasksByWorkspace(ctx, "ws-1", "", "", "#1243", 1, 5, "", true, false, false, false)
 	if err != nil {
 		t.Fatalf("search included: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestListTasksByWorkspace_PRMatchSkippedOnLaterPagesAndScopedSearches(t *tes
 			resolver := &fakePRResolver{byPR: map[int][]string{1243: {"task-pr"}}}
 			svc.SetPRTaskResolver(resolver)
 
-			tasks, _, err := svc.ListTasksByWorkspace(ctx, "ws-1", tc.workflowID, tc.repoID, "#1243", tc.page, 5, true, false, false, false)
+			tasks, _, err := svc.ListTasksByWorkspace(ctx, "ws-1", tc.workflowID, tc.repoID, "#1243", tc.page, 5, "", true, false, false, false)
 			if err != nil {
 				t.Fatalf("search: %v", err)
 			}

@@ -31,6 +31,8 @@ export type BootRouteData = {
     repositories?: Repository[];
     tasks?: Task[];
     total?: number;
+    tasksListSort?: string;
+    tasksListGroup?: string;
   };
 };
 

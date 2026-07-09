@@ -18,6 +18,8 @@ type UserSettings struct {
 	KanbanViewMode              string                            `json:"kanban_view_mode"`
 	WorkflowFilterID            string                            `json:"workflow_filter_id"`
 	RepositoryIDs               []string                          `json:"repository_ids"`
+	TasksListSort               string                            `json:"tasks_list_sort"`
+	TasksListGroup              string                            `json:"tasks_list_group"`
 	InitialSetupComplete        bool                              `json:"initial_setup_complete"`
 	PreferredShell              string                            `json:"preferred_shell"`
 	DefaultEditorID             string                            `json:"default_editor_id"`

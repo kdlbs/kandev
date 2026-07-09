@@ -19,6 +19,7 @@ import {
   IntegrationAuthStatusBanner,
   type IntegrationAuthHealth,
 } from "@/components/integrations/auth-status-banner";
+import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import {
   getJiraConfig,
@@ -454,7 +455,23 @@ function ActionBar({
   );
 }
 
-function useJiraSettings() {
+function useJiraConfigRefresh(workspaceId: string, setConfig: (cfg: JiraConfig | null) => void) {
+  // Background refresh so the auth-health banner picks up new probe results
+  // from the backend poller without requiring a page reload. We re-fetch the
+  // config rather than the loud full `load()` to avoid flashing the form.
+  useEffect(() => {
+    const id = setInterval(() => {
+      getJiraConfig({ workspaceId })
+        .then((cfg) => setConfig(cfg))
+        .catch(() => {
+          /* transient failures are fine — next tick retries */
+        });
+    }, INTEGRATION_STATUS_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [workspaceId, setConfig]);
+}
+
+function useJiraSettings(workspaceId: string) {
   const { toast } = useToast();
   const [config, setConfig] = useState<JiraConfig | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
@@ -467,7 +484,7 @@ function useJiraSettings() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const cfg = await getJiraConfig();
+      const cfg = await getJiraConfig({ workspaceId });
       setConfig(cfg);
       setForm(configToForm(cfg));
     } catch (err) {
@@ -475,25 +492,13 @@ function useJiraSettings() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [workspaceId, toast]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  // Background refresh so the auth-health banner picks up new probe results
-  // from the backend poller without requiring a page reload. We re-fetch the
-  // config rather than the loud full `load()` to avoid flashing the form.
-  useEffect(() => {
-    const id = setInterval(() => {
-      getJiraConfig()
-        .then((cfg) => setConfig(cfg))
-        .catch(() => {
-          /* transient failures are fine — next tick retries */
-        });
-    }, INTEGRATION_STATUS_REFRESH_MS);
-    return () => clearInterval(id);
-  }, []);
+  useJiraConfigRefresh(workspaceId, setConfig);
 
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -505,26 +510,29 @@ function useJiraSettings() {
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await testJiraConnection({ ...form });
+      const res = await testJiraConnection({ ...form }, { workspaceId });
       setTestResult(res);
     } catch (err) {
       setTestResult({ ok: false, error: String(err) });
     } finally {
       setTesting(false);
     }
-  }, [form]);
+  }, [workspaceId, form]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
-      const saved = await setJiraConfig({
-        siteUrl: form.siteUrl,
-        email: form.email,
-        authMethod: form.authMethod,
-        instanceType: form.instanceType,
-        defaultProjectKey: form.defaultProjectKey,
-        secret: form.secret || undefined,
-      });
+      const saved = await setJiraConfig(
+        {
+          siteUrl: form.siteUrl,
+          email: form.email,
+          authMethod: form.authMethod,
+          instanceType: form.instanceType,
+          defaultProjectKey: form.defaultProjectKey,
+          secret: form.secret || undefined,
+        },
+        { workspaceId },
+      );
       setConfig(saved);
       setForm(configToForm(saved));
       // Clear any inline test result from the previous credentials so the
@@ -536,12 +544,12 @@ function useJiraSettings() {
     } finally {
       setSaving(false);
     }
-  }, [form, toast]);
+  }, [workspaceId, form, toast]);
 
   const handleDelete = useCallback(async () => {
     if (!confirm("Remove Jira configuration?")) return;
     try {
-      await deleteJiraConfig();
+      await deleteJiraConfig({ workspaceId });
       setConfig(null);
       setForm(emptyForm);
       setTestResult(null);
@@ -549,7 +557,7 @@ function useJiraSettings() {
     } catch (err) {
       toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
     }
-  }, [toast]);
+  }, [workspaceId, toast]);
 
   return {
     config,
@@ -612,10 +620,8 @@ function savedSecretMatches(config: JiraConfig | null, form: FormState): boolean
   return (config.email ?? "").toLowerCase() === form.email.toLowerCase();
 }
 
-// JiraConnectionSection holds the install-wide credentials form. Watchers and
-// task presets live elsewhere because they scope per workspace.
-export function JiraConnectionSection() {
-  const s = useJiraSettings();
+export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) {
+  const s = useJiraSettings(workspaceId);
   const savedSecretMatchesMode = savedSecretMatches(s.config, s.form);
   const missingSecret = !savedSecretMatchesMode && !s.form.secret;
   // Email is only required for the Cloud + api_token combination. Server PAT
@@ -629,7 +635,7 @@ export function JiraConnectionSection() {
     <SettingsSection
       icon={<IconTicket className="h-5 w-5" />}
       title="Jira integration"
-      description="Connect Kandev to Atlassian Cloud or a self-hosted Jira Server / Data Center instance. Credentials are stored encrypted server-side and shared across all workspaces."
+      description="Connect this workspace to Atlassian Cloud or a self-hosted Jira Server / Data Center instance. Credentials are stored encrypted server-side for the selected workspace."
       action={<EnabledPill />}
     >
       <Card>
@@ -664,15 +670,12 @@ export function JiraConnectionSection() {
   );
 }
 
-// JiraIntegrationPage is the install-wide settings surface mounted at
-// /settings/integrations/jira. The connection form and task-prompt presets
-// are global; the watchers section lists every watch across every workspace
-// in a single table, with workspace selection happening inside the create
-// dialog.
 export function JiraIntegrationPage() {
   return (
     <div className="space-y-8">
-      <JiraConnectionSection />
+      <WorkspaceScopedSection>
+        {(workspaceId) => <JiraConnectionSection key={workspaceId} workspaceId={workspaceId} />}
+      </WorkspaceScopedSection>
       <JiraIssueWatchersSection />
       <TaskPresetsSection />
     </div>

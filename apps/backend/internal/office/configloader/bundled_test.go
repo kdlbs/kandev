@@ -111,3 +111,13 @@ func TestBundledSkillSlugs(t *testing.T) {
 		}
 	}
 }
+
+func TestBundledSkillFilesRejectsEmptySlug(t *testing.T) {
+	files, err := BundledSkillFiles("")
+	if err == nil {
+		t.Fatalf("BundledSkillFiles(\"\") returned nil error")
+	}
+	if files != nil {
+		t.Fatalf("BundledSkillFiles(\"\") returned files: %#v", files)
+	}
+}

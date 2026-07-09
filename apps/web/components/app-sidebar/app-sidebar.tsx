@@ -43,6 +43,51 @@ function isSettingsRoute(pathname: string | null): boolean {
   return pathname === "/settings" || Boolean(pathname?.startsWith("/settings/"));
 }
 
+type AppSidebarNavigationProps = {
+  collapsed: boolean;
+  inOffice: boolean;
+  settingsMode: boolean;
+};
+
+function AppSidebarNavigation({ collapsed, inOffice, settingsMode }: AppSidebarNavigationProps) {
+  return (
+    <nav className="relative flex-1 min-h-0 flex flex-col gap-2 px-2 py-2 overflow-hidden">
+      {settingsMode && !collapsed ? (
+        <AppSidebarSettingsMode />
+      ) : (
+        <>
+          <div
+            className={cn(
+              "flex flex-col gap-2 overflow-y-auto",
+              inOffice ? "flex-1 min-h-0 pb-8 scroll-pb-8" : "shrink-0",
+            )}
+            data-testid="app-sidebar-scroll"
+          >
+            <AppSidebarPrimaryNav collapsed={collapsed} />
+            {inOffice && <OfficeNavigationSection collapsed={collapsed} section="work" />}
+            <ProjectsSection collapsed={collapsed} />
+            <AgentsSection collapsed={collapsed} />
+            {inOffice && <OfficeNavigationSection collapsed={collapsed} section="office" />}
+            {!inOffice && <IntegrationsSection collapsed={collapsed} />}
+          </div>
+          {/* In regular kanban mode, Tasks is the flex-grow middle section so
+              it absorbs remaining vertical space and scrolls internally.
+              Office has a dedicated /office/tasks page, so the sidebar only
+              renders a lightweight Tasks nav row above. */}
+          {!inOffice && <TasksSection collapsed={collapsed} />}
+          {inOffice && (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-background to-transparent"
+              data-testid="app-sidebar-bottom-fade"
+            />
+          )}
+        </>
+      )}
+    </nav>
+  );
+}
+
 /**
  * Unified app sidebar mounted at the root layout. Replaces the legacy
  * WorkspaceRail + OfficeSidebar + dockview-embedded sidebar surfaces.
@@ -146,27 +191,7 @@ export function AppSidebar() {
       }}
     >
       <AppSidebarHeader collapsed={collapsed} onToggleCollapse={toggleCollapsed} />
-      <nav className="flex-1 min-h-0 flex flex-col gap-2 px-2 py-2 overflow-hidden">
-        {settingsMode && !collapsed ? (
-          <AppSidebarSettingsMode />
-        ) : (
-          <>
-            <div className="shrink-0 flex flex-col gap-2 overflow-y-auto">
-              <AppSidebarPrimaryNav collapsed={collapsed} />
-              {inOffice && <OfficeNavigationSection collapsed={collapsed} section="work" />}
-              <ProjectsSection collapsed={collapsed} />
-              <AgentsSection collapsed={collapsed} />
-              {inOffice && <OfficeNavigationSection collapsed={collapsed} section="office" />}
-              {!inOffice && <IntegrationsSection collapsed={collapsed} />}
-            </div>
-            {/* In regular kanban mode, Tasks is the flex-grow middle section so
-                it absorbs remaining vertical space and scrolls internally.
-                Office has a dedicated /office/tasks page, so the sidebar only
-                renders a lightweight Tasks nav row above. */}
-            {!inOffice && <TasksSection collapsed={collapsed} />}
-          </>
-        )}
-      </nav>
+      <AppSidebarNavigation collapsed={collapsed} inOffice={inOffice} settingsMode={settingsMode} />
       <AppSidebarFooter collapsed={collapsed} />
       {!collapsed && <AppSidebarResizeHandle onMouseDown={handleResize} />}
     </aside>

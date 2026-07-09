@@ -329,6 +329,8 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"kanban_view_mode":                settings.KanbanViewMode,
 		"workflow_filter_id":              settings.WorkflowFilterID,
 		"repository_ids":                  settings.RepositoryIDs,
+		"tasks_list_sort":                 models.NormalizeTasksListSort(settings.TasksListSort),
+		"tasks_list_group":                models.NormalizeTasksListGroup(settings.TasksListGroup),
 		"initial_setup_complete":          settings.InitialSetupComplete,
 		"preferred_shell":                 settings.PreferredShell,
 		"default_editor_id":               settings.DefaultEditorID,
@@ -447,6 +449,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.UserID = userID
 	if settingsRaw == "" || settingsRaw == "{}" {
 		settings.RepositoryIDs = []string{}
+		settings.TasksListSort = models.TasksListSortDefault
+		settings.TasksListGroup = models.TasksListGroupDefault
 		settings.ShowReleaseNotification = true
 		settings.ReviewAutoMarkOnScroll = true
 		settings.ChatSubmitKey = "cmd_enter"
@@ -463,6 +467,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		KanbanViewMode              string                              `json:"kanban_view_mode"`
 		WorkflowFilterID            string                              `json:"workflow_filter_id"`
 		RepositoryIDs               []string                            `json:"repository_ids"`
+		TasksListSort               string                              `json:"tasks_list_sort"`
+		TasksListGroup              string                              `json:"tasks_list_group"`
 		InitialSetupComplete        bool                                `json:"initial_setup_complete"`
 		PreferredShell              string                              `json:"preferred_shell"`
 		DefaultEditorID             string                              `json:"default_editor_id"`
@@ -502,6 +508,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.KanbanViewMode = payload.KanbanViewMode
 	settings.WorkflowFilterID = payload.WorkflowFilterID
 	settings.RepositoryIDs = payload.RepositoryIDs
+	settings.TasksListSort = models.NormalizeTasksListSort(payload.TasksListSort)
+	settings.TasksListGroup = models.NormalizeTasksListGroup(payload.TasksListGroup)
 	settings.InitialSetupComplete = payload.InitialSetupComplete
 	settings.PreferredShell = payload.PreferredShell
 	settings.DefaultEditorID = payload.DefaultEditorID

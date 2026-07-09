@@ -6,7 +6,12 @@ import type { SelectedLineRange } from "@pierre/diffs";
 import { useCommentsStore } from "@/lib/state/slices/comments";
 import { useDiffFileComments } from "@/hooks/domains/comments/use-diff-comments";
 import { commentsToAnnotations, extractCodeFromDiff, extractCodeFromContent } from "@/lib/diff";
-import type { DiffComment, AnnotationSide, CommentAnnotation } from "@/lib/diff/types";
+import type {
+  DiffComment,
+  DiffCommentUpdate,
+  AnnotationSide,
+  CommentAnnotation,
+} from "@/lib/diff/types";
 
 interface UseDiffCommentsOptions {
   sessionId: string;
@@ -29,7 +34,7 @@ interface UseDiffCommentsReturn {
   /** Remove a comment */
   removeComment: (commentId: string) => void;
   /** Update a comment */
-  updateComment: (commentId: string, updates: Partial<DiffComment>) => void;
+  updateComment: (commentId: string, updates: DiffCommentUpdate) => void;
   /** Currently editing comment ID */
   editingCommentId: string | null;
   /** Set the editing comment ID */
@@ -104,7 +109,7 @@ export function useDiffComments({
   );
 
   const updateComment = useCallback(
-    (commentId: string, updates: Partial<DiffComment>) => {
+    (commentId: string, updates: DiffCommentUpdate) => {
       storeUpdateComment(commentId, updates);
     },
     [storeUpdateComment],

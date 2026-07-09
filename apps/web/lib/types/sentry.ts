@@ -8,6 +8,7 @@ export const SENTRY_AUTH_METHOD: SentryAuthMethod = "auth_token";
 export const SENTRY_DEFAULT_URL = "https://sentry.io";
 
 export interface SentryConfig {
+  workspaceId?: string;
   authMethod: SentryAuthMethod;
   url: string;
   hasSecret: boolean;

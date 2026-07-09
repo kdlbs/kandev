@@ -24,10 +24,12 @@ env:
 jobs:
   opencode-review-same-repo:
     if: >
+      vars.OPENCODE_REVIEW_ENABLED == 'true' &&
       github.event_name == 'pull_request' &&
       github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       pull-requests: write
@@ -258,12 +260,14 @@ jobs:
     #     blocked on `synchronize` so a contributor push cannot re-use a stale
     #     label — the maintainer must re-apply it after each push.
     if: >
+      vars.OPENCODE_REVIEW_ENABLED == 'true' &&
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name != github.repository &&
       ((github.event.action != 'synchronize' && contains(github.event.pull_request.labels.*.name, 'safe-to-review')) ||
        (vars.OPENCODE_REVIEW_ALLOWLIST != '' && contains(fromJSON(vars.OPENCODE_REVIEW_ALLOWLIST), github.event.pull_request.user.login)))
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       pull-requests: write

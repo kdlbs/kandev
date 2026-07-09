@@ -10,7 +10,7 @@ owner: tbd
 
 Today, settings-style operational concerns (health, disk usage, current version, OSS attribution, log access, database maintenance) have no home in kandev's UI. The existing settings sidebar is product-configuration only (executors, agents, integrations); the only system-shaped entry — Changelog — sits awkwardly inside it. When something goes wrong, users have no path inside the app to see "where is my database, how big is it, what version am I on, is there an update, where are the logs." This forces them into the filesystem and into GitHub, and it makes recoverable problems (bloated SQLite, corrupt state) look unrecoverable.
 
-Radarr and Sonarr solve this with a dedicated **System** area: a group of read-only diagnostic pages plus a small number of gated maintenance actions. This spec brings the same shape to kandev, scoped to the kandev-specific surface (SQLite + worktrees + GitHub releases + lumberjack log files).
+Radarr and Sonarr solve this with a dedicated **System** area: a group of read-only diagnostic pages plus a small number of gated maintenance actions. This spec brings the same shape to kandev, scoped to the kandev-specific surface (database diagnostics, SQLite backups/maintenance, worktrees, GitHub releases, and lumberjack log files).
 
 ## What (v1)
 
@@ -23,10 +23,10 @@ A new **System** group is added to the existing settings sidebar (`apps/web/comp
    - **Disk usage** card: shows total kandev data footprint with a per-subdirectory breakdown (`data dir / worktrees / repos / sessions / tasks / quick-chat / backups`), an "as of HH:MM" timestamp, and a **Refresh** button. The disk walk is lazy and asynchronous: the first visit after a cold start (or after the 2h cache expires) returns `null` immediately and the page shows a loading spinner while the walk runs in the background; subsequent visits within 2h return the cached value instantly.
    - **Version + update** card: short summary of current version and "update available" badge, with a CTA to the Updates page.
 2. **Database** — `/settings/system/database`
-   - Read-only: SQLite file path, file size, WAL size, schema version, last-backup timestamp (from `<data-dir>/backups/`).
-   - **VACUUM** button — safe, reclaims space; shows progress and final size delta.
-   - **Optimize** button — runs `PRAGMA optimize`; shows progress.
-   - **Factory Reset** button — destructive. Wipes the full kandev install (database + worktrees + repo clones + session dirs + tasks dir + quick-chat dir), equivalent to deleting `~/.kandev/` and starting over. Opens a modal that requires (a) typing the literal string `RESET` to enable the confirm button, (b) acknowledging that the backend will create a pre-reset snapshot first and then restart. Server-side: stop orchestrator and running executions → snapshot DB to `<data-dir>/backups/pre-reset-<ts>.db` → drop DB tables and re-run migrations → `rm -rf` the worktrees/repos/sessions/tasks/quick-chat subdirs → restart backend process. The frontend disables the UI and waits for the backend to come back, then routes to the empty onboarding state.
+   - Read-only: database driver, database size, and schema version. SQLite additionally shows file path, WAL size, and last-backup timestamp (from `<data-dir>/backups/`). Postgres shows database-level size and does not render SQLite file/WAL/backup rows.
+   - SQLite-only **VACUUM** button — safe, reclaims space; shows progress and final size delta.
+   - SQLite-only **Optimize** button — runs `PRAGMA optimize`; shows progress.
+   - SQLite-only **Factory Reset** button — destructive. Wipes the full kandev install (database + worktrees + repo clones + session dirs + tasks dir + quick-chat dir), equivalent to deleting `~/.kandev/` and starting over. Opens a modal that requires (a) typing the literal string `RESET` to enable the confirm button, (b) acknowledging that the backend will create a pre-reset snapshot first and then restart. Server-side: stop orchestrator and running executions → snapshot DB to `<data-dir>/backups/pre-reset-<ts>.db` → drop DB tables and re-run migrations → `rm -rf` the worktrees/repos/sessions/tasks/quick-chat subdirs → restart backend process. The frontend disables the UI and waits for the backend to come back, then routes to the empty onboarding state.
 3. **Backups** — `/settings/system/backups`
    - Lists existing snapshots in `<data-dir>/backups/` with name, size, and mtime.
    - Per-row actions: **Download**, **Restore** (gated like Factory Reset), **Delete** (confirm-only).
@@ -59,7 +59,7 @@ GET    /api/v1/system/health                      (existing; unchanged)
 GET    /api/v1/system/info                        - versions, commit, build time, OS/arch
 GET    /api/v1/system/disk-usage                  - cached breakdown + computedAt; null while computing
 POST   /api/v1/system/disk-usage/refresh          - kick async recompute; 202
-GET    /api/v1/system/database                    - path, sizeBytes, walSizeBytes, schemaVersion, lastBackupAt
+GET    /api/v1/system/database                    - driver, path, sizeBytes, walSizeBytes, schemaVersion, lastBackupAt
 POST   /api/v1/system/database/vacuum             - 202 + jobId
 POST   /api/v1/system/database/optimize           - 202 + jobId
 POST   /api/v1/system/database/reset              - factory reset; body { confirm: "RESET" }
@@ -124,6 +124,7 @@ The page reads the JSON statically; no backend endpoint is needed.
 - **GIVEN** the user is running a kandev-managed user service and a newer release exists, **WHEN** they open `/settings/system/updates`, **THEN** the page shows **Apply update** and the confirmation queues a `self-update` job.
 - **GIVEN** the user is not running as a kandev-managed service or is running a `--system` service, **WHEN** they open `/settings/system/updates`, **THEN** the page does not render an update-apply control and instead shows the manual update commands.
 - **GIVEN** the user clicks **VACUUM** on the Database page, **WHEN** the operation completes, **THEN** the DB size delta is shown ("Reclaimed 12.3 MB"), the page Database stats refresh, and a transient info issue appears on the Status page.
+- **GIVEN** the backend uses Postgres, **WHEN** the user opens the Database page, **THEN** the page shows the PostgreSQL driver and database size without issuing SQLite-only PRAGMA queries, and SQLite-only maintenance controls are not rendered.
 - **GIVEN** the user clicks **Factory Reset**, types `RESET`, and confirms, **WHEN** the backend executes, **THEN** a fresh snapshot is created first, all tables are dropped and migrations re-run, the backend restarts, and the frontend redirects to the empty onboarding state once it reconnects.
 - **GIVEN** the backend cannot reach GitHub, **WHEN** the poller fires, **THEN** the failure is logged but the previous `latest_version` and `latest_version_checked_at` remain in `kandev_meta`; the Updates page surfaces the stale value with a "Last checked <time>" subtitle.
 - **GIVEN** the user clicks **Check now** twice within 30 seconds, **WHEN** the second click fires, **THEN** the endpoint returns `429 Too Many Requests` and the UI shows "Already checked, try again in <N>s".
@@ -162,6 +163,7 @@ All System endpoints require the same "logged-in install user" check as the exis
 - **GitHub poll failure** — log + keep the previous `kandev_meta` row; `/api/v1/system/updates` returns the stale value.
 - **Disk walk failure** (permission error on a subdir) — return the partial result with a `warnings: [...]` array per subdir; the page renders a per-row warning icon.
 - **VACUUM failure** — DB is unaffected (VACUUM is atomic); the job ends `failed` with the SQLite error string. Status page shows a recoverable error issue.
+- **Non-SQLite maintenance call** — `vacuum`, `optimize`, and `reset` jobs fail with `not supported for <driver> driver` before running SQLite-only SQL; factory reset also rejects before stopping active executions.
 - **Factory reset failure mid-run** — the pre-reset snapshot remains in `<data-dir>/backups/`; the user can restore it from the Backups page on next boot. Recovery is documented inline in the failure UI.
 - **Restore failure** — original DB file is left untouched; restore writes to a temp file and atomic-renames only on success.
 - **Log file missing / unreadable** — viewer renders an empty state with the file path so the user can investigate manually.

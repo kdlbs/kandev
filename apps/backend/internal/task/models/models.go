@@ -890,28 +890,36 @@ type Executor struct {
 
 // ExecutorRunning tracks an active executor instance for a session.
 type ExecutorRunning struct {
-	ID               string                 `json:"id"`
-	SessionID        string                 `json:"session_id"`
-	TaskID           string                 `json:"task_id"`
-	ExecutorID       string                 `json:"executor_id"`
-	Runtime          agentruntime.Runtime   `json:"runtime,omitempty"`
-	Status           string                 `json:"status"`
-	Resumable        bool                   `json:"resumable"`
-	ResumeToken      string                 `json:"resume_token,omitempty"`
-	LastMessageUUID  string                 `json:"last_message_uuid,omitempty"`
-	AgentExecutionID string                 `json:"agent_execution_id,omitempty"`
-	ContainerID      string                 `json:"container_id,omitempty"`
-	AgentctlURL      string                 `json:"agentctl_url,omitempty"`
-	AgentctlPort     int                    `json:"agentctl_port,omitempty"`
-	PID              int                    `json:"pid,omitempty"`
-	WorktreeID       string                 `json:"worktree_id,omitempty"`
-	WorktreePath     string                 `json:"worktree_path,omitempty"`
-	WorktreeBranch   string                 `json:"worktree_branch,omitempty"`
-	ErrorMessage     string                 `json:"error_message,omitempty"`
-	Metadata         map[string]interface{} `json:"metadata,omitempty"`
-	LastSeenAt       *time.Time             `json:"last_seen_at,omitempty"`
-	CreatedAt        time.Time              `json:"created_at"`
-	UpdatedAt        time.Time              `json:"updated_at"`
+	ID               string               `json:"id"`
+	SessionID        string               `json:"session_id"`
+	TaskID           string               `json:"task_id"`
+	ExecutorID       string               `json:"executor_id"`
+	Runtime          agentruntime.Runtime `json:"runtime,omitempty"`
+	Status           string               `json:"status"`
+	Resumable        bool                 `json:"resumable"`
+	ResumeToken      string               `json:"resume_token,omitempty"`
+	LastMessageUUID  string               `json:"last_message_uuid,omitempty"`
+	AgentExecutionID string               `json:"agent_execution_id,omitempty"`
+	ContainerID      string               `json:"container_id,omitempty"`
+	AgentctlURL      string               `json:"agentctl_url,omitempty"`
+	AgentctlPort     int                  `json:"agentctl_port,omitempty"`
+	// PID is SSH-only: the agentctl PID on the *remote* host, used by the SSH
+	// executor's remote-pid stop path. It is 0 for local/standalone rows.
+	PID int `json:"pid,omitempty"`
+	// LocalPID is a host-local liveness handle: the PID of the standalone
+	// agentctl control-server process Kandev spawned on this host. Populated for
+	// local/standalone runtimes so a dead row is distinguishable from a live one
+	// without external context. 0 for SSH/remote rows (their process lives on
+	// another host — see PID). Never probe LocalPID for SSH rows.
+	LocalPID       int                    `json:"local_pid,omitempty"`
+	WorktreeID     string                 `json:"worktree_id,omitempty"`
+	WorktreePath   string                 `json:"worktree_path,omitempty"`
+	WorktreeBranch string                 `json:"worktree_branch,omitempty"`
+	ErrorMessage   string                 `json:"error_message,omitempty"`
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	LastSeenAt     *time.Time             `json:"last_seen_at,omitempty"`
+	CreatedAt      time.Time              `json:"created_at"`
+	UpdatedAt      time.Time              `json:"updated_at"`
 }
 
 // ProfileEnvVar represents an environment variable for an executor profile.

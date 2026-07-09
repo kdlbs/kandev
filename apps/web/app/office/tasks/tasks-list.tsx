@@ -1,13 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
 import { useOfficeRefetch } from "@/hooks/use-office-refetch";
+import type { OfficeTask } from "@/lib/state/slices/office/types";
 import { NewTaskDialog } from "../components/new-task-dialog";
 import { TasksToolbar } from "./tasks-toolbar";
 import { TasksContent } from "./tasks-content";
-import { useIssuesTree } from "./use-tasks-tree";
+import { getExpandableTaskIds, useIssuesTree } from "./use-tasks-tree";
 import { useServerSearch } from "./use-server-search";
 import { usePaginatedTasks } from "./use-paginated-tasks";
 
@@ -85,6 +86,21 @@ function useRehydratePersistedFilters(workspaceId: string | null) {
   }, [workspaceId, setTaskFilters]);
 }
 
+function useExpandedTaskIds(
+  tasks: OfficeTask[],
+  collapsedIds: Set<string>,
+  nestingEnabled: boolean,
+) {
+  return useMemo(() => {
+    if (!nestingEnabled) return new Set<string>();
+    const expandableIds = getExpandableTaskIds(tasks);
+    for (const id of collapsedIds) {
+      expandableIds.delete(id);
+    }
+    return expandableIds;
+  }, [tasks, collapsedIds, nestingEnabled]);
+}
+
 export function TasksList() {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const tasks = useAppStore((s) => s.office.tasks.items);
@@ -104,7 +120,7 @@ export function TasksList() {
   const setTaskGroupBy = useAppStore((s) => s.setTaskGroupBy);
   const toggleNesting = useAppStore((s) => s.toggleNesting);
 
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [showSystem, setShowSystem] = useShowSystemPref();
   const { searchResults, triggerSearch } = useServerSearch(workspaceId);
@@ -135,7 +151,7 @@ export function TasksList() {
   );
 
   const handleToggleExpand = useCallback((id: string) => {
-    setExpandedIds((prev) => {
+    setCollapsedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -147,6 +163,7 @@ export function TasksList() {
   // Skip local search filter when using server results to avoid
   // rejecting matches on description or identifier.
   const treeFilters = searchResults ? { ...filters, search: "" } : filters;
+  const expandedIds = useExpandedTaskIds(activeIssues, collapsedIds, nestingEnabled);
 
   const flatNodes = useIssuesTree({
     tasks: activeIssues,

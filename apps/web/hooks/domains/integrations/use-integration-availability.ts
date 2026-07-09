@@ -29,6 +29,11 @@ export function useIntegrationAuthed(
       setAuthed(false);
       return;
     }
+    // Drop any auth state carried over from a previous `fetchConfig` before the
+    // new probe resolves. `fetchConfig` is keyed by workspace for per-workspace
+    // integrations, so a workspace switch must not keep showing the previous
+    // workspace's "authed" result during the in-flight recheck.
+    setAuthed(false);
     let cancelled = false;
     // Monotonic request id: if a slow earlier probe finishes after a newer
     // one we ignore it, otherwise an old "auth ok" could clobber a fresh

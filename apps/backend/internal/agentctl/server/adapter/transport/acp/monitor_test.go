@@ -3,6 +3,8 @@ package acp
 import (
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -180,6 +182,37 @@ func TestRouteMonitorEvents_EmitsSyntheticUpdateAndStripsEnvelope(t *testing.T) 
 		ev.ToolCallContents[0].Content.Text != "event-A" {
 		t.Errorf("contents = %+v, want one text content 'event-A'", ev.ToolCallContents)
 	}
+}
+
+func TestRouteMonitorEvents_AsyncMonitorEventEmitsIdleComplete(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		setAsyncTurnCompleteIdleForTest(t, 10*time.Millisecond)
+		a := newTestAdapter()
+		defer func() { _ = a.Close() }()
+		seedMonitor(t, a, "s1", "t1", "tc-monitor")
+
+		cleaned := a.routeMonitorEvents("s1",
+			"<task-notification><task-id>t1</task-id><event>event-A</event></task-notification>")
+		if strings.TrimSpace(cleaned) != "" {
+			t.Errorf("cleaned = %q, want empty", cleaned)
+		}
+
+		update := readAdapterEvent(t, a, 100*time.Millisecond)
+		if update.Type != streams.EventTypeToolUpdate {
+			t.Fatalf("first event type = %q, want %q", update.Type, streams.EventTypeToolUpdate)
+		}
+
+		time.Sleep(50 * time.Millisecond)
+		synctest.Wait()
+
+		complete := readAdapterEvent(t, a, 100*time.Millisecond)
+		if complete.Type != streams.EventTypeComplete {
+			t.Fatalf("second event type = %q, want %q", complete.Type, streams.EventTypeComplete)
+		}
+		if complete.Data["synthetic_reason"] != "async_turn_idle" {
+			t.Errorf("synthetic_reason = %v, want async_turn_idle", complete.Data["synthetic_reason"])
+		}
+	})
 }
 
 func TestRouteMonitorEvents_UnknownTaskIDLeavesTextIntact(t *testing.T) {

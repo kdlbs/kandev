@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -179,6 +180,9 @@ func TestParseSystemSkill_HappyPathPopulatesAllFields(t *testing.T) {
 	if spec.ContentHash == "" {
 		t.Error("content_hash must be populated")
 	}
+	if !strings.HasPrefix(spec.Content, "---\nname: Demo Skill") {
+		t.Errorf("content should preserve original SKILL.md frontmatter, got %q", spec.Content)
+	}
 }
 
 // TestLoadBundledSystemSkills_FailsLoudOnEmbeddedYAMLError documents
@@ -211,5 +215,36 @@ func TestLoadBundledSystemSkills_FailsLoudContract(t *testing.T) {
 		if s.Name == "" {
 			t.Errorf("loader returned spec %q with empty name", s.Slug)
 		}
+	}
+}
+
+func TestLoadBundledSystemSkills_IncludesReferenceFileInventory(t *testing.T) {
+	specs, err := LoadBundledSystemSkills()
+	if err != nil {
+		t.Fatalf("LoadBundledSystemSkills: %v", err)
+	}
+	var teamAdmin *SystemSkillSpec
+	for i := range specs {
+		if specs[i].Slug == "kandev-team-admin" {
+			teamAdmin = &specs[i]
+			break
+		}
+	}
+	if teamAdmin == nil {
+		t.Fatal("expected kandev-team-admin bundled skill")
+	}
+	var files []bundledSkillInventoryFile
+	if err := json.Unmarshal([]byte(teamAdmin.FileInventory), &files); err != nil {
+		t.Fatalf("decode file inventory: %v", err)
+	}
+	found := false
+	for _, file := range files {
+		if file.Path == "references/team.md" && strings.Contains(file.Content, "List the whole organization") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("references/team.md not found in inventory: %+v", files)
 	}
 }

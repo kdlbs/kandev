@@ -51,10 +51,11 @@ const initialFilter: FilterState = {
 type SentryIssueDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  workspaceId?: string;
 };
 
-export function SentryIssueDialog({ open, onOpenChange }: SentryIssueDialogProps) {
-  const dialog = useDialogState(open);
+export function SentryIssueDialog({ open, onOpenChange, workspaceId }: SentryIssueDialogProps) {
+  const dialog = useDialogState(open, workspaceId);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -69,7 +70,7 @@ export function SentryIssueDialog({ open, onOpenChange }: SentryIssueDialogProps
 
 type DialogState = ReturnType<typeof useDialogState>;
 
-function useDialogState(open: boolean) {
+function useDialogState(open: boolean, workspaceId?: string) {
   const [filter, setFilter] = useState<FilterState>(initialFilter);
   const [projects, setProjects] = useState<SentryProject[]>([]);
   const [issues, setIssues] = useState<SentryIssue[]>([]);
@@ -82,7 +83,14 @@ function useDialogState(open: boolean) {
   // out-of-order response from a superseded search can't clobber the list.
   const searchSeq = useRef(0);
 
-  useBrowseProjects(open, configLoaded, setFilter, setConfigLoaded, setProjects);
+  useBrowseProjects({
+    open,
+    workspaceId,
+    loaded: configLoaded,
+    setFilter,
+    setLoaded: setConfigLoaded,
+    setProjects,
+  });
 
   const updateFilter = useCallback(
     <K extends keyof FilterState>(key: K, value: FilterState[K]) =>
@@ -101,7 +109,11 @@ function useDialogState(open: boolean) {
       setError(null);
       try {
         const payload = toSearchFilter(filter);
-        const res = await searchSentryIssues(payload, nextCursorValue);
+        const res = await searchSentryIssues(
+          payload,
+          nextCursorValue,
+          workspaceId ? { workspaceId } : undefined,
+        );
         // A newer search started while this one was in flight — drop the result.
         if (seq !== searchSeq.current) return;
         const page = res.issues ?? [];
@@ -116,7 +128,7 @@ function useDialogState(open: boolean) {
         if (seq === searchSeq.current) setLoading(false);
       }
     },
-    [filter],
+    [workspaceId, filter],
   );
 
   return {
@@ -144,13 +156,23 @@ function toSearchFilter(filter: FilterState): SentrySearchFilter {
   };
 }
 
-function useBrowseProjects(
-  open: boolean,
-  loaded: boolean,
-  setFilter: (f: (prev: FilterState) => FilterState) => void,
-  setLoaded: (v: boolean) => void,
-  setProjects: (p: SentryProject[]) => void,
-) {
+type BrowseProjectsArgs = {
+  open: boolean;
+  workspaceId: string | undefined;
+  loaded: boolean;
+  setFilter: (f: (prev: FilterState) => FilterState) => void;
+  setLoaded: (v: boolean) => void;
+  setProjects: (p: SentryProject[]) => void;
+};
+
+function useBrowseProjects({
+  open,
+  workspaceId,
+  loaded,
+  setFilter,
+  setLoaded,
+  setProjects,
+}: BrowseProjectsArgs) {
   useEffect(() => {
     // Reset when the dialog closes so reopening (component stays mounted)
     // refetches projects rather than showing a stale snapshot.
@@ -162,9 +184,11 @@ function useBrowseProjects(
     let cancelled = false;
     (async () => {
       try {
-        const res = await listSentryProjects().catch(() => ({
-          projects: [] as SentryProject[],
-        }));
+        const res = await listSentryProjects(workspaceId ? { workspaceId } : undefined).catch(
+          () => ({
+            projects: [] as SentryProject[],
+          }),
+        );
         if (cancelled) return;
         const projects = res.projects ?? [];
         setProjects(projects);
@@ -181,7 +205,7 @@ function useBrowseProjects(
     return () => {
       cancelled = true;
     };
-  }, [open, loaded, setFilter, setLoaded, setProjects]);
+  }, [open, workspaceId, loaded, setFilter, setLoaded, setProjects]);
 }
 
 function FiltersBar({ state }: { state: DialogState }) {

@@ -13,13 +13,20 @@ import (
 // user or organization auth token sent as `Authorization: Bearer <token>`.
 const AuthMethodAuthToken = "auth_token"
 
-// SecretKey is the secret-store key used for the install-wide Sentry token.
+// SecretKey is the legacy secret-store key used for the old install-wide Sentry
+// token. New workspace-scoped configs use SecretKeyForWorkspace.
 const SecretKey = "sentry:singleton:token"
 
-// SentryConfig is the install-wide configuration for the Sentry integration.
-// The token is stored separately in the encrypted secret store under SecretKey.
+// SecretKeyForWorkspace returns the workspace-scoped Sentry secret key.
+func SecretKeyForWorkspace(workspaceID string) string {
+	return "sentry:" + workspaceID + ":token"
+}
+
+// SentryConfig is the workspace-scoped configuration for the Sentry
+// integration. The token is stored separately in the encrypted secret store.
 type SentryConfig struct {
-	AuthMethod string `json:"authMethod" db:"auth_method"`
+	WorkspaceID string `json:"workspaceId,omitempty" db:"workspace_id"`
+	AuthMethod  string `json:"authMethod" db:"auth_method"`
 	// URL is the base URL of the Sentry instance (e.g. https://sentry.io for
 	// SaaS, or a self-hosted host). The REST client appends /api/0. Defaults
 	// to the sentry.io SaaS endpoint when left blank.

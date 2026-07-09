@@ -193,12 +193,22 @@ export const test = backendFixture.extend<
   },
 
   integrationCleanup: [
-    async ({ apiClient }, use) => {
+    async ({ apiClient, seedData }, use) => {
+      const scoped = `workspace_id=${encodeURIComponent(seedData.workspaceId)}`;
+      await apiClient.rawRequest("DELETE", `/api/v1/jira/config?${scoped}`).catch(() => undefined);
+      await apiClient
+        .rawRequest("DELETE", `/api/v1/linear/config?${scoped}`)
+        .catch(() => undefined);
+      await apiClient
+        .rawRequest("DELETE", `/api/v1/sentry/config?${scoped}`)
+        .catch(() => undefined);
       await apiClient.rawRequest("DELETE", `/api/v1/jira/config`).catch(() => undefined);
       await apiClient.rawRequest("DELETE", `/api/v1/linear/config`).catch(() => undefined);
+      await apiClient.rawRequest("DELETE", `/api/v1/sentry/config`).catch(() => undefined);
       await Promise.all([
         apiClient.mockJiraReset().catch(() => undefined),
         apiClient.mockLinearReset().catch(() => undefined),
+        apiClient.mockSentryReset().catch(() => undefined),
       ]);
       await use();
     },

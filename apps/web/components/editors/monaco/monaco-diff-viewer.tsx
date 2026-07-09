@@ -4,7 +4,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { DiffEditor } from "@monaco-editor/react";
 import { useTheme } from "@/components/theme/app-theme";
 import { cn } from "@kandev/ui/lib/utils";
-import type { FileDiffData, DiffComment } from "@/lib/diff/types";
+import type { FileDiffData, DiffComment, DiffCommentUpdate } from "@/lib/diff/types";
 import { getMonacoLanguage } from "@/lib/editor/language-map";
 import { useCommandPanelOpen } from "@/lib/commands/command-registry";
 import { useDiffEditorHeight } from "@/hooks/use-diff-editor-height";
@@ -28,6 +28,7 @@ interface MonacoDiffViewerProps {
   sessionId?: string;
   onCommentAdd?: (comment: DiffComment) => void;
   onCommentDelete?: (commentId: string) => void;
+  onCommentUpdate?: (commentId: string, updates: DiffCommentUpdate) => void;
   onCommentRun?: (comment: DiffComment) => void;
   comments?: DiffComment[];
   className?: string;
@@ -47,6 +48,7 @@ function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
     compact = false,
     onCommentAdd,
     onCommentDelete,
+    onCommentUpdate,
     onCommentRun,
     comments: externalComments,
     onModifiedContentChange,
@@ -68,6 +70,7 @@ function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
     compact,
     onCommentAdd,
     onCommentDelete,
+    onCommentUpdate,
     onCommentRun,
     externalComments,
     onModifiedContentChange,

@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/system/jobs"
 )
 
@@ -103,6 +104,64 @@ func TestOptimize_StartsJobAndSucceeds(t *testing.T) {
 	}
 	if stats.SchemaVersion != "v0.99.0" {
 		t.Errorf("schema_version lost after optimize: %q", stats.SchemaVersion)
+	}
+}
+
+func TestMaintenanceOperationsRejectPostgres(t *testing.T) {
+	svc := NewService(newFakePostgresStatsPool(t), t.TempDir(), ResetDirs{}, nil, nil)
+	shutdownCalled := false
+	svc.OrchestratorShutdown = func() { shutdownCalled = true }
+
+	cases := []struct {
+		name    string
+		run     func() error
+		wantErr string
+	}{
+		{
+			name: "vacuum",
+			run: func() error {
+				_, err := svc.runVacuum(context.Background())
+				return err
+			},
+			wantErr: "vacuum: not supported for postgres driver",
+		},
+		{
+			name: "optimize",
+			run: func() error {
+				_, err := svc.runOptimize(context.Background())
+				return err
+			},
+			wantErr: "optimize: not supported for postgres driver",
+		},
+		{
+			name: "factory reset",
+			run: func() error {
+				_, err := svc.runFactoryReset(context.Background())
+				return err
+			},
+			wantErr: "factory reset: not supported for postgres driver",
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.run()
+			if err == nil || err.Error() != tt.wantErr {
+				t.Fatalf("err = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+	if shutdownCalled {
+		t.Fatal("factory reset called orchestrator shutdown before rejecting postgres")
+	}
+}
+
+func TestMaintenanceOperationsRejectNilWriter(t *testing.T) {
+	svc := NewService(db.NewPool(nil, nil), t.TempDir(), ResetDirs{}, nil, nil)
+
+	_, err := svc.runVacuum(context.Background())
+	if err == nil || err.Error() != "vacuum: no database pool" {
+		t.Fatalf("err = %v, want vacuum: no database pool", err)
 	}
 }
 

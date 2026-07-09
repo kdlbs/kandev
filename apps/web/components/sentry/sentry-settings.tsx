@@ -17,6 +17,7 @@ import {
   IntegrationAuthStatusBanner,
   type IntegrationAuthHealth,
 } from "@/components/integrations/auth-status-banner";
+import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import {
   fetchSentryConfig,
@@ -234,13 +235,20 @@ function ActionBar({
 }
 
 type SettingsActionsArgs = {
+  workspaceId: string;
   form: FormState;
   setConfig: (cfg: SentryConfig | null) => void;
   setForm: (form: FormState) => void;
   setTestResult: (r: TestSentryConnectionResult | null) => void;
 };
 
-function useSettingsActions({ form, setConfig, setForm, setTestResult }: SettingsActionsArgs) {
+function useSettingsActions({
+  workspaceId,
+  form,
+  setConfig,
+  setForm,
+  setTestResult,
+}: SettingsActionsArgs) {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -249,23 +257,28 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await testSentryConnection(form.secret || undefined, form.url || undefined);
+      const res = await testSentryConnection(form.secret || undefined, form.url || undefined, {
+        workspaceId,
+      });
       setTestResult(res);
     } catch (err) {
       setTestResult({ ok: false, error: String(err) });
     } finally {
       setTesting(false);
     }
-  }, [form, setTestResult]);
+  }, [workspaceId, form, setTestResult]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
-      const saved = await saveSentryConfig({
-        authMethod: SENTRY_AUTH_METHOD,
-        url: form.url,
-        secret: form.secret,
-      });
+      const saved = await saveSentryConfig(
+        {
+          authMethod: SENTRY_AUTH_METHOD,
+          url: form.url,
+          secret: form.secret,
+        },
+        { workspaceId },
+      );
       setConfig(saved);
       setForm(configToForm(saved));
       setTestResult(null);
@@ -275,12 +288,12 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
     } finally {
       setSaving(false);
     }
-  }, [form, toast, setConfig, setForm, setTestResult]);
+  }, [workspaceId, form, toast, setConfig, setForm, setTestResult]);
 
   const handleDelete = useCallback(async () => {
     if (!confirm("Remove Sentry configuration?")) return;
     try {
-      await deleteSentryConfig();
+      await deleteSentryConfig({ workspaceId });
       setConfig(null);
       setForm(emptyForm);
       setTestResult(null);
@@ -288,12 +301,12 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
     } catch (err) {
       toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
     }
-  }, [toast, setConfig, setForm, setTestResult]);
+  }, [workspaceId, toast, setConfig, setForm, setTestResult]);
 
   return { saving, testing, handleTest, handleSave, handleDelete };
 }
 
-function useSentrySettings() {
+function useSentrySettings(workspaceId: string) {
   const { toast } = useToast();
   const [config, setConfig] = useState<SentryConfig | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
@@ -304,7 +317,7 @@ function useSentrySettings() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const cfg = (await fetchSentryConfig()) ?? null;
+      const cfg = (await fetchSentryConfig({ workspaceId })) ?? null;
       setConfig(cfg);
       setForm(configToForm(cfg));
     } catch (err) {
@@ -312,7 +325,7 @@ function useSentrySettings() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [workspaceId, toast]);
 
   useEffect(() => {
     void load();
@@ -320,14 +333,14 @@ function useSentrySettings() {
 
   useEffect(() => {
     const id = setInterval(() => {
-      fetchSentryConfig()
+      fetchSentryConfig({ workspaceId })
         .then((cfg) => setConfig(cfg ?? null))
         .catch(() => {
           /* transient failures are fine — next tick retries */
         });
     }, INTEGRATION_STATUS_REFRESH_MS);
     return () => clearInterval(id);
-  }, []);
+  }, [workspaceId]);
 
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -336,6 +349,7 @@ function useSentrySettings() {
   );
 
   const { saving, testing, handleTest, handleSave, handleDelete } = useSettingsActions({
+    workspaceId,
     form,
     setConfig,
     setForm,
@@ -374,8 +388,8 @@ function EnabledPill() {
   );
 }
 
-export function SentryConnectionSection() {
-  const s = useSentrySettings();
+export function SentryConnectionSection({ workspaceId }: { workspaceId: string }) {
+  const s = useSentrySettings(workspaceId);
   const missingSecret = !s.config?.hasSecret && !s.form.secret;
   const disableSave = s.saving || missingSecret;
   const disableTest = missingSecret;
@@ -384,7 +398,7 @@ export function SentryConnectionSection() {
     <SettingsSection
       icon={<IconBrandSentry className="h-5 w-5" />}
       title="Sentry integration"
-      description="Connect Kandev to Sentry with a user auth token. Credentials are stored encrypted server-side and shared across all workspaces."
+      description="Connect this workspace to Sentry with a user auth token. Credentials are stored encrypted server-side for the selected workspace."
       action={<EnabledPill />}
     >
       <Card>
@@ -419,7 +433,9 @@ export function SentryConnectionSection() {
 export function SentryIntegrationPage() {
   return (
     <div className="space-y-8">
-      <SentryConnectionSection />
+      <WorkspaceScopedSection>
+        {(workspaceId) => <SentryConnectionSection key={workspaceId} workspaceId={workspaceId} />}
+      </WorkspaceScopedSection>
       <SentryIssueWatchersSection />
     </div>
   );

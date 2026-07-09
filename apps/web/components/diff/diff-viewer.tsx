@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, memo, useEffect } from "react";
 import { FileDiff } from "@pierre/diffs/react";
 import { cn } from "@kandev/ui/lib/utils";
-import type { FileDiffData, DiffComment } from "@/lib/diff/types";
+import type { FileDiffData, DiffComment, DiffCommentUpdate } from "@/lib/diff/types";
 import { useHunkHover } from "./use-hunk-hover";
 import { useAnnotationRenderer } from "./use-diff-annotation-renderer";
 import { DEFAULT_DIFF_WORD_WRAP } from "./diff-defaults";
@@ -25,6 +25,7 @@ interface DiffViewerProps {
   sessionId?: string;
   onCommentAdd?: (comment: DiffComment) => void;
   onCommentDelete?: (commentId: string) => void;
+  onCommentUpdate?: (commentId: string, updates: DiffCommentUpdate) => void;
   onCommentRun?: (comment: DiffComment) => void;
   comments?: DiffComment[];
   className?: string;
@@ -51,6 +52,8 @@ interface DiffViewerProps {
 const SCALAR_PROP_KEYS: (keyof DiffViewerProps)[] = [
   "enableComments",
   "sessionId",
+  "onCommentDelete",
+  "onCommentUpdate",
   "compact",
   "hideHeader",
   "className",
@@ -193,6 +196,7 @@ export const DiffViewer = memo(function DiffViewer({
   sessionId,
   onCommentAdd,
   onCommentDelete,
+  onCommentUpdate,
   onCommentRun,
   comments: externalComments,
   className,
@@ -227,6 +231,7 @@ export const DiffViewer = memo(function DiffViewer({
     sessionId,
     onCommentAdd,
     onCommentDelete,
+    onCommentUpdate,
     onCommentRun,
     externalComments,
     onRevertBlock,

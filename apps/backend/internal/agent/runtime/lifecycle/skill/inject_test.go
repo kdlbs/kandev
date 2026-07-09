@@ -35,6 +35,104 @@ func TestInjectSkills_WritesUnderProjectSkillDir(t *testing.T) {
 	}
 }
 
+func TestInjectSkills_SkipsSupportFilesUnderSymlinkParent(t *testing.T) {
+	worktree := t.TempDir()
+	ensureGit(t, worktree)
+	outside := t.TempDir()
+
+	skillDir := filepath.Join(worktree, ".agents", "skills", "kandev-code-review")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(skillDir, "references")); err != nil {
+		t.Fatal(err)
+	}
+
+	err := writeSkillFiles(skillDir, []SkillFile{{
+		Path:    "references/escape.md",
+		Content: "outside",
+	}})
+	if err != nil {
+		t.Fatalf("writeSkillFiles: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "escape.md")); !os.IsNotExist(err) {
+		t.Fatalf("support file escaped through symlink parent: %v", err)
+	}
+}
+
+func TestInjectSkills_WritesSupportFilesUnderSymlinkedSkillDir(t *testing.T) {
+	realSkillDir := filepath.Join(t.TempDir(), "real", "kandev-code-review")
+	if err := os.MkdirAll(realSkillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linkParent := filepath.Join(t.TempDir(), "links")
+	if err := os.MkdirAll(linkParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	symlinkSkillDir := filepath.Join(linkParent, "kandev-code-review")
+	if err := os.Symlink(realSkillDir, symlinkSkillDir); err != nil {
+		t.Fatal(err)
+	}
+
+	err := writeSkillFiles(symlinkSkillDir, []SkillFile{{
+		Path:    "references/tasks.md",
+		Content: "tasks",
+	}})
+	if err != nil {
+		t.Fatalf("writeSkillFiles: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(realSkillDir, "references", "tasks.md"))
+	if err != nil {
+		t.Fatalf("read support file: %v", err)
+	}
+	if string(got) != "tasks" {
+		t.Fatalf("support file content = %q, want tasks", got)
+	}
+}
+
+func TestInjectSkills_AddsFrontmatterWhenMissing(t *testing.T) {
+	worktree := t.TempDir()
+	ensureGit(t, worktree)
+
+	if err := injectSkills(worktree, ".agents/skills", []Skill{
+		{Slug: "kandev-team-admin", Content: "# Team\n\nUse the team commands."},
+	}); err != nil {
+		t.Fatalf("injectSkills: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(worktree, ".agents", "skills", "kandev-kandev-team-admin", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read SKILL.md: %v", err)
+	}
+	got := string(data)
+	if !strings.HasPrefix(got, "---\nname: kandev-team-admin\ndescription: kandev-team-admin\n---\n") {
+		t.Fatalf("SKILL.md missing synthesized frontmatter:\n%s", got)
+	}
+	if !strings.Contains(got, "# Team\n\nUse the team commands.") {
+		t.Errorf("SKILL.md missing original body:\n%s", got)
+	}
+}
+
+func TestInjectSkills_PreservesExistingFrontmatter(t *testing.T) {
+	worktree := t.TempDir()
+	ensureGit(t, worktree)
+
+	content := "---\nname: custom\ndescription: existing\n---\n# Body"
+	if err := injectSkills(worktree, ".agents/skills", []Skill{
+		{Slug: "custom", Content: content},
+	}); err != nil {
+		t.Fatalf("injectSkills: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(worktree, ".agents", "skills", "kandev-custom", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read SKILL.md: %v", err)
+	}
+	if string(data) != content {
+		t.Errorf("existing frontmatter should be preserved, got %q", string(data))
+	}
+}
+
 func TestInjectSkills_CleanSlateRemovesPreviousKandevDirs(t *testing.T) {
 	worktree := t.TempDir()
 	ensureGit(t, worktree)

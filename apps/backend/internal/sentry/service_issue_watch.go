@@ -182,7 +182,7 @@ func (s *Service) ResetIssueWatch(ctx context.Context, watchID string) (int, err
 // bails. Same pattern as the Linear / Jira watchers.
 func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*SentryIssue, error) {
 	defer s.stampWatchLastPolled(w.ID)
-	client, err := s.clientFor(ctx)
+	client, err := s.clientFor(ctx, w.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}

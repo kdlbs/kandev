@@ -58,8 +58,8 @@ test.describe("Kanban board", () => {
   // The default Desktop Chrome 1280px viewport now leaves the header below the
   // 1100px narrow threshold even with no preview open, so this test forces a
   // viewport wide enough that the centered search shows with the sidebar
-  // present (1500 − ~320 = ~1180 ≥ 1100), and opening the 500px preview drops
-  // it below the threshold (1500 − ~320 − 500 = ~680 < 1100).
+  // present (1500 - ~320 = ~1180 >= 800), and opening the 500px preview drops
+  // it below the threshold (1500 - ~320 - 500 = ~680 < 800).
   test("hides header search when preview panel narrows the kanban area", async ({
     testPage,
     apiClient,
@@ -75,12 +75,12 @@ test.describe("Kanban board", () => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
-    // With no preview open, the header is wide enough (viewport − sidebar ≥
-    // 1100px) that the centered search is visible.
+    // With no preview open, the header is wide enough (viewport - sidebar >=
+    // 800px) that the centered search is visible.
     const search = testPage.getByTestId("kanban-header-search");
     await expect(search).toBeVisible();
 
-    // Open the preview — the header width drops below 1100px and the centered
+    // Open the preview - the header width drops below 800px and the centered
     // search must hide.
     const card = kanban.taskCard(task.id);
     await expect(card).toBeVisible();

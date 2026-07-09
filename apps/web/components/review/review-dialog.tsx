@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
 import type { DiffComment } from "@/lib/diff/types";
 import type { FileInfo, CumulativeDiff } from "@/lib/state/slices/session-runtime/types";
 import type { PRDiffFile } from "@/lib/types/github";
+import type { Comment } from "@/lib/state/slices/comments";
 import { useCommentsStore, isDiffComment } from "@/lib/state/slices/comments";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
 import { useGitOperations } from "@/hooks/use-git-operations";
@@ -149,6 +150,15 @@ export function buildAllFiles(
   if (cumulativeDiff?.files) addCumulativeDiffFiles(fileMap, cumulativeDiff.files, gitStatusFiles);
   if (prDiffFiles) addPRFiles(fileMap, prDiffFiles);
   return Array.from(fileMap.values()).sort((a, b) => a.path.localeCompare(b.path));
+}
+
+export function filterPendingDiffCommentsForSession(
+  comments: Comment[],
+  sessionId: string,
+): DiffComment[] {
+  return comments.filter(
+    (comment): comment is DiffComment => comment.sessionId === sessionId && isDiffComment(comment),
+  );
 }
 
 type ReviewDialogProps = {
@@ -324,8 +334,8 @@ function useReviewDialogState(props: ReviewDialogProps) {
   const sessionCommentIds = useCommentsStore((s) => s.bySession[sessionId]);
   const getStorePendingComments = useCommentsStore((s) => s.getPendingComments);
   const getPendingComments = useCallback((): DiffComment[] => {
-    return getStorePendingComments().filter(isDiffComment);
-  }, [getStorePendingComments]);
+    return filterPendingDiffCommentsForSession(getStorePendingComments(), sessionId);
+  }, [getStorePendingComments, sessionId]);
   const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
 
   const [filter, setFilter] = useState("");

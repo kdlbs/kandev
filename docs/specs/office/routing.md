@@ -31,7 +31,9 @@ Office agents need a predictable way to choose between CLI providers and model s
 - Each Office agent can inherit workspace routing or override it.
 - Agent overrides can choose a model tier and provider order independently; an override order with only `claude` never falls back to `codex` or `opencode`.
 - Users configure provider tier mappings explicitly; the UI does not silently apply recommended presets.
-- Onboarding keeps its current simple flow: the user chooses one concrete CLI profile, model, and mode for the coordinator. Office stores an effective tier through workspace default inheritance, so enabling routing later does not require editing every agent.
+- Onboarding lets the user choose one concrete CLI profile for the coordinator and one source profile for each workspace tier: Frontier, Balanced, and Economy. Office expands those source profiles into provider/model tier mappings so enabling routing later does not require editing every agent.
+- The tier profile selectors are profile-family choices, not direct agent assignments. When the CEO creates a worker, QA, or specialist agent and assigns a tier, the agent inherits the workspace tier family selected during onboarding or later routing settings.
+- Source profile IDs used to seed tier mappings are recorded as routing metadata. Deleting a profile that is still referenced by a workspace tier returns an in-use error until the mapping is changed; manually editing a tier model in routing settings clears the source-profile association for that tier.
 
 ### Run resolution
 
@@ -85,12 +87,12 @@ office_workspace_routing
   enabled           int     0|1
   default_tier      string  frontier|balanced|economy
   provider_order    text    JSON array of provider IDs
-  provider_profiles text    JSON map: provider_id -> {tier_map, mode, flags, env}
+  provider_profiles text    JSON map: provider_id -> {tier_map, tier_profile_ids, mode, flags, env}
   tier_per_reason   text    JSON map: wake_reason -> tier (NOT NULL, "{}" default)
   updated_at        timestamp
 ```
 
-`provider_profiles[pid].tier_map` is `{frontier, balanced, economy}` with each value either a model ID or empty string ("skip this provider for this tier"). `tier_per_reason` keys are restricted to `heartbeat | routine_trigger | budget_alert` (see `routing.AllWakeReasons`); other keys are rejected by `routing.ValidateWorkspaceConfig`.
+`provider_profiles[pid].tier_map` is `{frontier, balanced, economy}` with each value either a model ID or empty string ("skip this provider for this tier"). `provider_profiles[pid].tier_profile_ids` is optional metadata with the source profile ID that authored each tier mapping; routing resolution ignores it, but profile deletion checks use it to prevent orphaned tier/profile associations. `tier_per_reason` keys are restricted to `heartbeat | routine_trigger | budget_alert` (see `routing.AllWakeReasons`); other keys are rejected by `routing.ValidateWorkspaceConfig`.
 
 ### `office_provider_health` (per workspace, per provider, per scope)
 
@@ -308,7 +310,8 @@ See also: [`office/runtime.md`](runtime.md) for how the runtime classifies and s
 - **GIVEN** all configured providers require user action, **WHEN** a task exhausts the route list, **THEN** the task is blocked until the user reconnects, configures a provider, fixes model mappings, or manually retries.
 - **GIVEN** exhausted provider routes include both auto-retryable and user-actionable failures, **WHEN** the task is blocked, **THEN** the UI shows the earliest automatic retry and the user actions needed for the blocked routes.
 - **GIVEN** a provider is unavailable for a workspace, **WHEN** the provider health state changes, **THEN** the dashboard and inbox show an actionable issue listing affected agents and routes.
-- **GIVEN** onboarding creates a new workspace, **WHEN** setup completes, **THEN** no provider routing policy is enabled or required.
+- **GIVEN** onboarding creates a new workspace, **WHEN** setup completes, **THEN** provider routing is disabled but the selected Frontier / Balanced / Economy source profiles are expanded into the workspace routing seed.
+- **GIVEN** an agent profile is referenced by a workspace tier, **WHEN** the user tries to delete that profile, **THEN** deletion returns an in-use error until the tier mapping is changed.
 - **GIVEN** routing is enabled and the workspace's `tier_per_reason.heartbeat = economy`, **WHEN** a heartbeat run launches, **THEN** the resolver picks the Economy tier model regardless of the agent's default tier.
 - **GIVEN** the security agent overrides wake-reason tiers with `heartbeat = frontier`, **WHEN** its heartbeat fires, **THEN** it uses Frontier even though the workspace policy says Economy.
 - **GIVEN** a run reason has no policy (e.g. `task_assigned`), **WHEN** that run launches, **THEN** it uses the agent's effective tier as before, ignoring the wake-reason policy entirely.

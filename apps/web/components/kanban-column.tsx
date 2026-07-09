@@ -34,6 +34,8 @@ interface KanbanColumnProps {
   hideHeader?: boolean;
   selectedIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
+  /** Shift-click range select; receives the clicked id + this column's ordered ids. */
+  onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
 }
 
@@ -53,6 +55,7 @@ export function KanbanColumn({
   hideHeader = false,
   selectedIds,
   onToggleSelect,
+  onSelectRange,
   isMultiSelectMode,
 }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({
@@ -65,6 +68,10 @@ export function KanbanColumn({
     () => Object.values(repositoriesByWorkspace).flat() as Repository[],
     [repositoriesByWorkspace],
   );
+
+  // Ordered ids of the cards rendered in this column — the source of truth for
+  // shift-click range selection (matches exactly what the user sees).
+  const columnTaskIds = useMemo(() => tasks.map((t) => t.id), [tasks]);
 
   return (
     <div
@@ -109,6 +116,9 @@ export function KanbanColumn({
             isSelected={selectedIds?.has(task.id)}
             selectedIds={selectedIds}
             onToggleSelect={onToggleSelect}
+            onRangeSelect={
+              onSelectRange ? (taskId) => onSelectRange(taskId, columnTaskIds) : undefined
+            }
             isMultiSelectMode={isMultiSelectMode}
           />
         ))}

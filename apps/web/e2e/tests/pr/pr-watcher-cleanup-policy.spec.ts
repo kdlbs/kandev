@@ -385,7 +385,7 @@ test.describe("PR watcher cleanup policy", () => {
 
     // Disable the watch + merge the PR. The disabled watch is invisible to
     // the per-watch loop now, so without the global sweep the task survives.
-    await apiClient.updateReviewWatch(watch.id, { enabled: false });
+    await apiClient.updateReviewWatch(watch.id, watch.workspace_id, { enabled: false });
     await apiClient.mockGitHubAddPRs([
       {
         number: 701,
@@ -463,7 +463,7 @@ test.describe("PR watcher cleanup policy", () => {
     });
 
     // Delete the watch — service cascade should reap the task too.
-    await apiClient.deleteReviewWatch(watch.id);
+    await apiClient.deleteReviewWatch(watch.id, watch.workspace_id);
 
     await expect(kanban.taskCardByTitle("PR #801: Cascade-delete me")).not.toBeVisible({
       timeout: 15_000,

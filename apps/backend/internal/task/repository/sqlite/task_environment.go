@@ -170,6 +170,23 @@ func (r *Repository) UpdateTaskEnvironment(ctx context.Context, env *models.Task
 	return nil
 }
 
+func (r *Repository) TransferTaskEnvironmentToTask(ctx context.Context, envID, taskID string) error {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_environments SET
+			task_id = ?,
+			updated_at = ?
+		WHERE id = ?
+	`), taskID, time.Now().UTC(), envID)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("task environment not found: %s", envID)
+	}
+	return nil
+}
+
 // DeleteTaskEnvironment deletes a task environment by ID.
 // Per-repo rows are removed via ON DELETE CASCADE.
 func (r *Repository) DeleteTaskEnvironment(ctx context.Context, id string) error {

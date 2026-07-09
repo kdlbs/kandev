@@ -1,3 +1,9 @@
+import {
+  DEFAULT_TASKS_LIST_GROUP,
+  DEFAULT_TASKS_LIST_SORT,
+  parseTasksListGroup,
+  parseTasksListSort,
+} from "@/lib/tasks/tasks-list-options";
 import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
 import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
 import { DEFAULT_VOICE_MODE_STATE, type VoiceModeState } from "@/lib/state/slices/settings/types";
@@ -88,6 +94,8 @@ function buildIdentityFields(s: UserSettingsData) {
     workflowId: s.workflow_filter_id || null,
     kanbanViewMode: s.kanban_view_mode || null,
     repositoryIds: s.repository_ids ?? [],
+    tasksListSort: parseTasksListSort(s.tasks_list_sort),
+    tasksListGroup: parseTasksListGroup(s.tasks_list_group),
     preferredShell: s.preferred_shell || null,
     defaultEditorId: s.default_editor_id || null,
     defaultUtilityAgentId: s.default_utility_agent_id || null,
@@ -149,6 +157,8 @@ export function mapUserSettingsResponse(response: UserSettingsResponse | null) {
       workflowId: null,
       kanbanViewMode: null,
       repositoryIds: [] as string[],
+      tasksListSort: DEFAULT_TASKS_LIST_SORT,
+      tasksListGroup: DEFAULT_TASKS_LIST_GROUP,
       preferredShell: null,
       shellOptions,
       defaultEditorId: null,

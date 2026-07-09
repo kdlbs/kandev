@@ -2,7 +2,10 @@
 // review queue management, and CI/check status tracking.
 package github
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // TaskCIAutoFixMaxRounds is the server-enforced CI auto-fix loop guard.
 const TaskCIAutoFixMaxRounds = 10
@@ -626,6 +629,76 @@ type UpdateIssueWatchRequest struct {
 	Enabled             *bool         `json:"enabled,omitempty"`
 	PollIntervalSeconds *int          `json:"poll_interval_seconds,omitempty"`
 	CleanupPolicy       *string       `json:"cleanup_policy,omitempty"`
+}
+
+// --- Workspace GitHub scope/settings ---
+
+const (
+	RepoScopeModeAll   = "all"
+	RepoScopeModeOrgs  = "orgs"
+	RepoScopeModeRepos = "repos"
+)
+
+// WorkspaceSettings stores per-workspace GitHub operational settings.
+// Authentication remains install-wide; these settings scope GitHub UI/search
+// surfaces to the workspace's intended repositories.
+type WorkspaceSettings struct {
+	WorkspaceID         string          `json:"workspace_id" db:"workspace_id"`
+	RepoScopeMode       string          `json:"repo_scope_mode" db:"repo_scope_mode"`
+	RepoScopeOrgs       []string        `json:"repo_scope_orgs" db:"-"`
+	RepoScopeRepos      []RepoFilter    `json:"repo_scope_repos" db:"-"`
+	RepoScopeOrgsJSON   string          `json:"-" db:"repo_scope_orgs"`
+	RepoScopeReposJSON  string          `json:"-" db:"repo_scope_repos"`
+	SavedPresets        json.RawMessage `json:"saved_presets,omitempty" db:"saved_presets"`
+	DefaultQueryPresets json.RawMessage `json:"default_query_presets,omitempty" db:"default_query_presets"`
+	CreatedAt           time.Time       `json:"created_at" db:"created_at"`
+	UpdatedAt           time.Time       `json:"updated_at" db:"updated_at"`
+}
+
+// UpdateWorkspaceSettingsRequest replaces the workspace GitHub scope and/or
+// preference blobs. Nil blobs leave values unchanged; explicit JSON null clears
+// default query presets back to built-ins.
+type UpdateWorkspaceSettingsRequest struct {
+	WorkspaceID         string           `json:"workspace_id"`
+	RepoScopeMode       *string          `json:"repo_scope_mode,omitempty"`
+	RepoScopeOrgs       *[]string        `json:"repo_scope_orgs,omitempty"`
+	RepoScopeRepos      *[]RepoFilter    `json:"repo_scope_repos,omitempty"`
+	SavedPresets        *json.RawMessage `json:"saved_presets,omitempty"`
+	DefaultQueryPresets *json.RawMessage `json:"default_query_presets,omitempty"`
+	SavedPresetsSet     bool             `json:"-"`
+	DefaultQueriesSet   bool             `json:"-"`
+}
+
+func (r *UpdateWorkspaceSettingsRequest) UnmarshalJSON(data []byte) error {
+	type alias UpdateWorkspaceSettingsRequest
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*r = UpdateWorkspaceSettingsRequest(decoded)
+	if value, ok := raw["saved_presets"]; ok {
+		r.SavedPresetsSet = true
+		if string(value) == jsonNullLiteral {
+			r.SavedPresets = nil
+		} else {
+			next := cloneRawMessage(value)
+			r.SavedPresets = &next
+		}
+	}
+	if value, ok := raw["default_query_presets"]; ok {
+		r.DefaultQueriesSet = true
+		if string(value) == jsonNullLiteral {
+			r.DefaultQueryPresets = nil
+		} else {
+			next := cloneRawMessage(value)
+			r.DefaultQueryPresets = &next
+		}
+	}
+	return nil
 }
 
 // --- Action presets (quick-launch prompts on the /github page) ---

@@ -8,13 +8,17 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+
+	"github.com/kandev/kandev/internal/integrations/workspacescope"
 )
 
-// Store persists the install-wide Sentry configuration. The secret token is
+// Store persists workspace-scoped Sentry configuration. The secret token is
 // delegated to the shared encrypted secret store and not stored here.
 type Store struct {
-	db *sqlx.DB
-	ro *sqlx.DB
+	db                  *sqlx.DB
+	ro                  *sqlx.DB
+	defaultWorkspace    workspacescope.DefaultResolver
+	migratedToWorkspace string
 }
 
 // NewStore creates a new Store and initializes the schema if needed.
@@ -28,7 +32,7 @@ func NewStore(writer, reader *sqlx.DB) (*Store, error) {
 
 const createTablesSQL = `
 	CREATE TABLE IF NOT EXISTS sentry_configs (
-		id TEXT PRIMARY KEY CHECK(id = 'singleton'),
+		workspace_id TEXT PRIMARY KEY,
 		auth_method TEXT NOT NULL,
 		url TEXT NOT NULL DEFAULT 'https://sentry.io',
 		last_checked_at DATETIME,
@@ -76,12 +80,22 @@ const createTablesSQL = `
 	);
 `
 
-// singletonID is the synthetic primary key of the (only) row in sentry_configs.
+// singletonID is the synthetic primary key used by the legacy install-wide
+// sentry_configs table.
 const singletonID = "singleton"
+
+// MigratedFromWorkspace is kept for parity with Jira/Linear provider
+// migrations. It returns the workspace_id that received a legacy singleton row.
+func (s *Store) MigratedFromWorkspace() string {
+	return s.migratedToWorkspace
+}
 
 // initSchema creates the integration tables when absent and applies the
 // additive column migrations that bring older databases to the current schema.
 func (s *Store) initSchema() error {
+	if err := s.migrateLegacySingletonTable(); err != nil {
+		return err
+	}
 	if _, err := s.db.Exec(createTablesSQL); err != nil {
 		return err
 	}
@@ -95,6 +109,109 @@ func (s *Store) initSchema() error {
 		return err
 	}
 	return s.addIssueWatchRepositoryColumns()
+}
+
+func (s *Store) migrateLegacySingletonTable() error {
+	cols, err := s.tableColumns("sentry_configs")
+	if err != nil {
+		return err
+	}
+	if !isLegacySingletonConfig(cols) {
+		return nil
+	}
+	targetWorkspace, err := workspacescope.ResolveMigrationTarget(s.db)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	selectCols := "auth_method"
+	if _, ok := cols["url"]; ok {
+		selectCols += ", url"
+	} else {
+		selectCols += ", 'https://sentry.io' AS url"
+	}
+	if healthColumnsPresent(cols) {
+		selectCols += ", last_checked_at, last_ok, last_error"
+	} else {
+		selectCols += ", NULL AS last_checked_at, 0 AS last_ok, '' AS last_error"
+	}
+	selectCols += ", created_at, updated_at"
+	var authMethod, rawURL, lastError sql.NullString
+	var lastCheckedAt sql.NullTime
+	var lastOk sql.NullInt64
+	var createdAt, updatedAt sql.NullTime
+	row := tx.QueryRow(`SELECT `+selectCols+` FROM sentry_configs WHERE id = ? LIMIT 1`, singletonID)
+	switch err := row.Scan(&authMethod, &rawURL, &lastCheckedAt, &lastOk, &lastError, &createdAt, &updatedAt); {
+	case errors.Is(err, sql.ErrNoRows):
+		if _, err := tx.Exec(`DROP TABLE sentry_configs`); err != nil {
+			return err
+		}
+		return tx.Commit()
+	case err != nil:
+		return err
+	}
+	if _, err := tx.Exec(`DROP TABLE sentry_configs`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		CREATE TABLE sentry_configs (
+			workspace_id TEXT PRIMARY KEY,
+			auth_method TEXT NOT NULL,
+			url TEXT NOT NULL DEFAULT 'https://sentry.io',
+			last_checked_at DATETIME,
+			last_ok INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO sentry_configs (workspace_id, auth_method, url,
+			last_checked_at, last_ok, last_error, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		targetWorkspace, authMethod.String, rawURL.String,
+		nullableTime(lastCheckedAt), lastOk.Int64, lastError.String,
+		nullableTime(createdAt), nullableTime(updatedAt)); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.migratedToWorkspace = targetWorkspace
+	return nil
+}
+
+func isLegacySingletonConfig(cols map[string]struct{}) bool {
+	if len(cols) == 0 {
+		return false
+	}
+	if _, hasWorkspace := cols["workspace_id"]; hasWorkspace {
+		return false
+	}
+	_, hasID := cols["id"]
+	return hasID
+}
+
+func healthColumnsPresent(cols map[string]struct{}) bool {
+	for _, name := range []string{"last_checked_at", "last_ok", "last_error"} {
+		if _, ok := cols[name]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func nullableTime(t sql.NullTime) interface{} {
+	if !t.Valid {
+		return nil
+	}
+	return t.Time
 }
 
 // addIssueWatchRepositoryColumns brings older databases up to the current
@@ -219,14 +336,29 @@ func (s *Store) tableColumns(table string) (map[string]struct{}, error) {
 	return cols, rows.Err()
 }
 
-const selectConfigColumns = `auth_method, url,
+const selectConfigColumns = `workspace_id, auth_method, url,
 		last_checked_at, last_ok, last_error, created_at, updated_at`
 
-// GetConfig returns the singleton Sentry config, or nil when no row exists.
+// GetConfig returns the default workspace Sentry config, or nil when no row
+// exists. New code should call GetConfigForWorkspace.
 func (s *Store) GetConfig(ctx context.Context) (*SentryConfig, error) {
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return nil, err
+	}
+	return s.GetConfigForWorkspace(ctx, workspaceID)
+}
+
+// GetConfigForWorkspace returns the Sentry config for a workspace, or nil when
+// no row exists.
+func (s *Store) GetConfigForWorkspace(ctx context.Context, workspaceID string) (*SentryConfig, error) {
+	workspaceID, err := s.resolveWorkspaceID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	var cfg SentryConfig
-	err := s.ro.GetContext(ctx, &cfg,
-		`SELECT `+selectConfigColumns+` FROM sentry_configs WHERE id = ?`, singletonID)
+	err = s.ro.GetContext(ctx, &cfg,
+		`SELECT `+selectConfigColumns+` FROM sentry_configs WHERE workspace_id = ?`, workspaceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -236,49 +368,109 @@ func (s *Store) GetConfig(ctx context.Context) (*SentryConfig, error) {
 	return &cfg, nil
 }
 
-// UpsertConfig inserts or updates the singleton config row. The last_* health
+// UpsertConfig inserts or updates the default workspace config row. The last_* health
 // columns are owned by the poller and written via UpdateAuthHealth.
 func (s *Store) UpsertConfig(ctx context.Context, cfg *SentryConfig) error {
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return err
+	}
+	return s.UpsertConfigForWorkspace(ctx, workspaceID, cfg)
+}
+
+// UpsertConfigForWorkspace inserts or updates a workspace config row.
+func (s *Store) UpsertConfigForWorkspace(ctx context.Context, workspaceID string, cfg *SentryConfig) error {
+	workspaceID, err := s.resolveWorkspaceID(workspaceID)
+	if err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	if cfg.CreatedAt.IsZero() {
 		cfg.CreatedAt = now
 	}
 	cfg.UpdatedAt = now
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO sentry_configs (id, auth_method, url, created_at, updated_at)
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO sentry_configs (workspace_id, auth_method, url, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET
+		ON CONFLICT(workspace_id) DO UPDATE SET
 			auth_method = excluded.auth_method,
 			url = excluded.url,
 			updated_at = excluded.updated_at`,
-		singletonID, cfg.AuthMethod, cfg.URL, cfg.CreatedAt, cfg.UpdatedAt)
+		workspaceID, cfg.AuthMethod, cfg.URL, cfg.CreatedAt, cfg.UpdatedAt)
 	return err
 }
 
-// DeleteConfig removes the singleton config row.
+// DeleteConfig removes the default workspace config row.
 func (s *Store) DeleteConfig(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM sentry_configs WHERE id = ?`, singletonID)
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return err
+	}
+	return s.DeleteConfigForWorkspace(ctx, workspaceID)
+}
+
+// DeleteConfigForWorkspace removes the workspace config row.
+func (s *Store) DeleteConfigForWorkspace(ctx context.Context, workspaceID string) error {
+	workspaceID, err := s.resolveWorkspaceID(workspaceID)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `DELETE FROM sentry_configs WHERE workspace_id = ?`, workspaceID)
 	return err
 }
 
-// HasConfig reports whether the singleton row exists. Used by the auth-health
+// HasConfig reports whether any config row exists. Used by the auth-health
 // poller to decide whether to probe at all.
 func (s *Store) HasConfig(ctx context.Context) (bool, error) {
 	var present int
 	err := s.ro.GetContext(ctx, &present,
-		`SELECT COUNT(*) FROM sentry_configs WHERE id = ?`, singletonID)
+		`SELECT COUNT(*) FROM sentry_configs`)
 	if err != nil {
 		return false, err
 	}
 	return present > 0, nil
 }
 
+// ListConfigWorkspaceIDs returns every workspace with a saved Sentry config.
+func (s *Store) ListConfigWorkspaceIDs(ctx context.Context) ([]string, error) {
+	var ids []string
+	if err := s.ro.SelectContext(ctx, &ids, `SELECT workspace_id FROM sentry_configs ORDER BY workspace_id`); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
 // UpdateAuthHealth records the result of a credential probe.
 func (s *Store) UpdateAuthHealth(ctx context.Context, ok bool, errMsg string, checkedAt time.Time) error {
-	_, err := s.db.ExecContext(ctx, `
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return err
+	}
+	return s.UpdateAuthHealthForWorkspace(ctx, workspaceID, ok, errMsg, checkedAt)
+}
+
+// UpdateAuthHealthForWorkspace records the result of a credential probe for a
+// single workspace config row.
+func (s *Store) UpdateAuthHealthForWorkspace(ctx context.Context, workspaceID string, ok bool, errMsg string, checkedAt time.Time) error {
+	workspaceID, err := s.resolveWorkspaceID(workspaceID)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
 		UPDATE sentry_configs
 		SET last_checked_at = ?, last_ok = ?, last_error = ?
-		WHERE id = ?`,
-		checkedAt, ok, errMsg, singletonID)
+		WHERE workspace_id = ?`,
+		checkedAt, ok, errMsg, workspaceID)
 	return err
+}
+
+func (s *Store) defaultWorkspaceID() (string, error) {
+	return s.defaultWorkspace.Resolve(s.db)
+}
+
+func (s *Store) resolveWorkspaceID(workspaceID string) (string, error) {
+	if workspaceID != "" {
+		return workspaceID, nil
+	}
+	return s.defaultWorkspaceID()
 }

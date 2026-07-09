@@ -13,26 +13,43 @@ import type {
   UpdateSentryIssueWatchRequest,
 } from "@/lib/types/sentry";
 
+type WorkspaceApiOptions = ApiRequestOptions & { workspaceId?: string };
+
+function withWorkspace(path: string, options?: WorkspaceApiOptions): string {
+  if (!options?.workspaceId) return path;
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}workspace_id=${encodeURIComponent(options.workspaceId)}`;
+}
+
+function requestOptions(options?: WorkspaceApiOptions): ApiRequestOptions | undefined {
+  if (!options) return undefined;
+  const { workspaceId: _workspaceId, ...rest } = options;
+  return rest;
+}
+
 // fetchSentryConfig returns undefined when the backend responds 204 (no config yet).
 export async function fetchSentryConfig(
-  options?: ApiRequestOptions,
+  options?: WorkspaceApiOptions,
 ): Promise<SentryConfig | undefined> {
-  return fetchJson<SentryConfig | undefined>(`/api/v1/sentry/config`, options);
+  return fetchJson<SentryConfig | undefined>(
+    withWorkspace(`/api/v1/sentry/config`, options),
+    requestOptions(options),
+  );
 }
 
 export async function saveSentryConfig(
   payload: SetSentryConfigRequest,
-  options?: ApiRequestOptions,
+  options?: WorkspaceApiOptions,
 ) {
-  return fetchJson<SentryConfig>(`/api/v1/sentry/config`, {
-    ...options,
+  return fetchJson<SentryConfig>(withWorkspace(`/api/v1/sentry/config`, options), {
+    ...requestOptions(options),
     init: { ...(options?.init ?? {}), method: "PUT", body: JSON.stringify(payload) },
   });
 }
 
-export async function deleteSentryConfig(options?: ApiRequestOptions) {
-  return fetchJson<{ deleted: boolean }>(`/api/v1/sentry/config`, {
-    ...options,
+export async function deleteSentryConfig(options?: WorkspaceApiOptions) {
+  return fetchJson<{ deleted: boolean }>(withWorkspace(`/api/v1/sentry/config`, options), {
+    ...requestOptions(options),
     init: { ...(options?.init ?? {}), method: "DELETE" },
   });
 }
@@ -40,30 +57,45 @@ export async function deleteSentryConfig(options?: ApiRequestOptions) {
 export async function testSentryConnection(
   secret?: string,
   url?: string,
-  options?: ApiRequestOptions,
+  options?: WorkspaceApiOptions,
 ) {
   const payload: { secret?: string; url?: string } = {};
   if (secret) payload.secret = secret;
   if (url) payload.url = url;
-  return fetchJson<TestSentryConnectionResult>(`/api/v1/sentry/config/test`, {
-    ...options,
-    init: {
-      ...(options?.init ?? {}),
-      method: "POST",
-      body: JSON.stringify(payload),
+  return fetchJson<TestSentryConnectionResult>(
+    withWorkspace(`/api/v1/sentry/config/test`, options),
+    {
+      ...requestOptions(options),
+      init: {
+        ...(options?.init ?? {}),
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
     },
-  });
-}
-
-export async function listSentryOrganizations(options?: ApiRequestOptions) {
-  return fetchJson<{ organizations: SentryOrganization[] }>(
-    `/api/v1/sentry/organizations`,
-    options,
   );
 }
 
-export async function listSentryProjects(options?: ApiRequestOptions) {
-  return fetchJson<{ projects: SentryProject[] }>(`/api/v1/sentry/projects`, options);
+// copySentryConfig copies the Sentry config + credential from the workspace in
+// options (source) to targetWorkspaceId.
+export async function copySentryConfig(targetWorkspaceId: string, options?: WorkspaceApiOptions) {
+  return fetchJson<SentryConfig>(withWorkspace(`/api/v1/sentry/config/copy`, options), {
+    ...requestOptions(options),
+    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify({ targetWorkspaceId }) },
+  });
+}
+
+export async function listSentryOrganizations(options?: WorkspaceApiOptions) {
+  return fetchJson<{ organizations: SentryOrganization[] }>(
+    withWorkspace(`/api/v1/sentry/organizations`, options),
+    requestOptions(options),
+  );
+}
+
+export async function listSentryProjects(options?: WorkspaceApiOptions) {
+  return fetchJson<{ projects: SentryProject[] }>(
+    withWorkspace(`/api/v1/sentry/projects`, options),
+    requestOptions(options),
+  );
 }
 
 function appendFilter(search: URLSearchParams, filter: SentrySearchFilter): void {
@@ -79,18 +111,21 @@ function appendFilter(search: URLSearchParams, filter: SentrySearchFilter): void
 export async function searchSentryIssues(
   filter: SentrySearchFilter,
   cursor?: string,
-  options?: ApiRequestOptions,
+  options?: WorkspaceApiOptions,
 ) {
   const search = new URLSearchParams();
   appendFilter(search, filter);
   if (cursor) search.set("cursor", cursor);
-  return fetchJson<SentrySearchResult>(`/api/v1/sentry/issues?${search.toString()}`, options);
+  return fetchJson<SentrySearchResult>(
+    withWorkspace(`/api/v1/sentry/issues?${search.toString()}`, options),
+    requestOptions(options),
+  );
 }
 
-export async function getSentryIssue(idOrShortId: string, options?: ApiRequestOptions) {
+export async function getSentryIssue(idOrShortId: string, options?: WorkspaceApiOptions) {
   return fetchJson<SentryIssue>(
-    `/api/v1/sentry/issues/${encodeURIComponent(idOrShortId)}`,
-    options,
+    withWorkspace(`/api/v1/sentry/issues/${encodeURIComponent(idOrShortId)}`, options),
+    requestOptions(options),
   );
 }
 

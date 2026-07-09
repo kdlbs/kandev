@@ -172,6 +172,28 @@ func TestHandleCreateWorkflowStep_PublishesDemotedStartStep(t *testing.T) {
 	assert.True(t, (*published)[1].step["is_start_step"].(bool))
 }
 
+func TestHandleCreateWorkflowStep_PersistsAutoAdvanceRequiresSignal(t *testing.T) {
+	h, _, repo := setupImportHandlers(t)
+	ctx := context.Background()
+	h.workflowCtrl = workflowctrl.NewController(h.workflowSvc)
+
+	msg := makeWSMessage(t, ws.ActionMCPCreateWorkflowStep, map[string]interface{}{
+		"workflow_id":                  "wf-test",
+		"name":                         "Signal gated",
+		"position":                     0,
+		"auto_advance_requires_signal": true,
+	})
+
+	resp, err := h.handleCreateWorkflowStep(ctx, msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	steps, err := repo.ListStepsByWorkflow(ctx, "wf-test")
+	require.NoError(t, err)
+	require.Len(t, steps, 1)
+	assert.True(t, steps[0].AutoAdvanceRequiresSignal)
+}
+
 func TestHandleUpdateWorkflowStep_PublishesDemotedStartStep(t *testing.T) {
 	h, _, repo := setupImportHandlers(t)
 	ctx := context.Background()
@@ -217,6 +239,75 @@ func TestHandleUpdateWorkflowStep_PublishesDemotedStartStep(t *testing.T) {
 	assert.True(t, (*published)[0].step["auto_advance_requires_signal"].(bool))
 	assert.Equal(t, "new-start", (*published)[1].step["id"])
 	assert.True(t, (*published)[1].step["is_start_step"].(bool))
+}
+
+func TestHandleUpdateWorkflowStep_PersistsAutoAdvanceRequiresSignalFalse(t *testing.T) {
+	h, _, repo := setupImportHandlers(t)
+	ctx := context.Background()
+	h.workflowCtrl = workflowctrl.NewController(h.workflowSvc)
+
+	require.NoError(t, repo.CreateStep(ctx, &wfmodels.WorkflowStep{
+		ID:                        "signal-gated",
+		WorkflowID:                "wf-test",
+		Name:                      "Signal gated",
+		Position:                  0,
+		ShowInCommandPanel:        true,
+		AutoAdvanceRequiresSignal: true,
+	}))
+
+	msg := makeWSMessage(t, ws.ActionMCPUpdateWorkflowStep, map[string]interface{}{
+		"step_id":                      "signal-gated",
+		"auto_advance_requires_signal": false,
+	})
+
+	resp, err := h.handleUpdateWorkflowStep(ctx, msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	step, err := repo.GetStep(ctx, "signal-gated")
+	require.NoError(t, err)
+	assert.False(t, step.AutoAdvanceRequiresSignal)
+}
+
+func TestHandleListWorkflowSteps_IncludesAutoAdvanceRequiresSignal(t *testing.T) {
+	h, _, repo := setupImportHandlers(t)
+	ctx := context.Background()
+	h.workflowCtrl = workflowctrl.NewController(h.workflowSvc)
+
+	require.NoError(t, repo.CreateStep(ctx, &wfmodels.WorkflowStep{
+		ID:                 "legacy",
+		WorkflowID:         "wf-test",
+		Name:               "Legacy",
+		Position:           0,
+		ShowInCommandPanel: true,
+	}))
+	require.NoError(t, repo.CreateStep(ctx, &wfmodels.WorkflowStep{
+		ID:                        "signal-gated",
+		WorkflowID:                "wf-test",
+		Name:                      "Signal gated",
+		Position:                  1,
+		ShowInCommandPanel:        true,
+		AutoAdvanceRequiresSignal: true,
+	}))
+
+	msg := makeWSMessage(t, ws.ActionMCPListWorkflowSteps, map[string]interface{}{
+		"workflow_id": "wf-test",
+	})
+
+	resp, err := h.handleListWorkflowSteps(ctx, msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var body struct {
+		Steps []map[string]interface{} `json:"steps"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &body))
+	require.Len(t, body.Steps, 2)
+
+	assert.Contains(t, body.Steps[0], "auto_advance_requires_signal")
+	assert.Equal(t, false, body.Steps[0]["auto_advance_requires_signal"])
+	assert.Contains(t, body.Steps[1], "auto_advance_requires_signal")
+	assert.Equal(t, true, body.Steps[1]["auto_advance_requires_signal"])
 }
 
 func TestHandleImportWorkflow_PersistsWorkflow(t *testing.T) {

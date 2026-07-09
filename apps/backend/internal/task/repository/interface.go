@@ -12,6 +12,7 @@ import (
 
 var ErrWorkspaceNameMismatch = repoerrors.ErrWorkspaceNameMismatch
 var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
+var ErrTaskNotFound = repoerrors.ErrTaskNotFound
 
 // WorkspaceRepository handles workspace CRUD.
 type WorkspaceRepository interface {
@@ -33,7 +34,7 @@ type TaskRepository interface {
 	UpdateTask(ctx context.Context, task *models.Task) error
 	DeleteTask(ctx context.Context, id string) error
 	ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error)
-	ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error)
+	ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error)
 	ListTasksByWorkflowStep(ctx context.Context, workflowStepID string) ([]*models.Task, error)
 	ArchiveTask(ctx context.Context, id string) error
 	// ArchiveTaskIfActive is the CAS variant used by office task-handoffs
@@ -43,6 +44,8 @@ type TaskRepository interface {
 	// archived by the named cascade. Returns whether the row was updated.
 	UnarchiveTaskByCascade(ctx context.Context, id, cascadeID string) (bool, error)
 	ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error)
+	ListExpiredQuickChatTasks(ctx context.Context, cutoff time.Time) ([]*models.Task, error)
+	DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error)
 	// CountOpenWatcherCreatedTasks returns the number of open watcher-created
 	// tasks for a single watch, identified by the integration's task-metadata
 	// key (e.g. "sentry_issue_watch_id") and the watch id. Open = non-archived
@@ -248,6 +251,12 @@ type ExecutorRepository interface {
 	// launch) so the row doesn't sit on the misleading default "starting" forever.
 	// Returns models.ErrExecutorRunningNotFound if no row exists for the session.
 	UpdateExecutorRunningStatus(ctx context.Context, sessionID, status string) error
+	// RepairExecutorRunningDead repairs a row in place to reflect a dead backing
+	// process (status=stopped, local_pid cleared, last_seen re-stamped) while
+	// preserving resume_token/worktree/endpoint. Used by cleanup paths to honor
+	// the resume-safety invariant instead of deleting a resumable row.
+	// Returns models.ErrExecutorRunningNotFound if no row exists for the session.
+	RepairExecutorRunningDead(ctx context.Context, sessionID string) error
 }
 
 // EnvironmentRepository handles environment CRUD.

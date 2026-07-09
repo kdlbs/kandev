@@ -1,22 +1,24 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Badge } from "@kandev/ui/badge";
-import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
 import { AgentSelector } from "@/components/task-create-dialog-selectors";
-import { useAgentProfileOptions } from "@/components/task-create-dialog-options";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
-import { getCapabilityWarning } from "@/lib/capability-warning";
-import { CliProfileEditor } from "@/components/agent/cli-profile-editor";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { getExecutorIcon } from "@/lib/executor-icons";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import type { Tier } from "@/lib/state/slices/office/types";
 import { seedTier } from "./seed-tier-mapping";
+import {
+  CreateProfileButton,
+  CreateProfilePanel,
+  useSelectableProfileOptions,
+} from "./agent-profile-setup-controls";
+
+type ProfileSelectOption = ReturnType<typeof useSelectableProfileOptions>["profileOptions"][number];
 
 type StepAgentProps = {
   agentName: string;
@@ -44,17 +46,6 @@ const FALLBACK_EXECUTOR_OPTIONS = [
   },
 ];
 
-function sortProfiles(profiles: AgentProfileOption[]): AgentProfileOption[] {
-  return [...profiles].sort((a, b) => {
-    const aDisabled =
-      a.cli_passthrough || !!getCapabilityWarning(a.capability_status, a.capability_error);
-    const bDisabled =
-      b.cli_passthrough || !!getCapabilityWarning(b.capability_status, b.capability_error);
-    if (aDisabled === bDisabled) return 0;
-    return aDisabled ? 1 : -1;
-  });
-}
-
 export function StepAgent({
   agentName,
   agentProfileId,
@@ -68,23 +59,8 @@ export function StepAgent({
   const executorOptions = meta?.executorTypes ?? FALLBACK_EXECUTOR_OPTIONS;
   const settingsAgents = useAppStore((s) => s.settingsAgents.items);
   const setAgentProfiles = useAppStore((s) => s.setAgentProfiles);
-  const agentProfilesState = useAppStore((s) => s.agentProfiles.items);
 
-  const sortedProfiles = useMemo(() => sortProfiles(agentProfiles), [agentProfiles]);
-  const baseOptions = useAgentProfileOptions(sortedProfiles);
-  const profileOptions = useMemo(
-    () =>
-      baseOptions.map((opt, i) => ({
-        ...opt,
-        disabled:
-          sortedProfiles[i]?.cli_passthrough ||
-          !!getCapabilityWarning(
-            sortedProfiles[i]?.capability_status,
-            sortedProfiles[i]?.capability_error,
-          ),
-      })),
-    [baseOptions, sortedProfiles],
-  );
+  const { sortedProfiles, profileOptions } = useSelectableProfileOptions(agentProfiles);
 
   const selectedProfile = sortedProfiles.find((p) => p.id === agentProfileId);
   const [showCreate, setShowCreate] = useState(profileOptions.length === 0);
@@ -110,33 +86,23 @@ export function StepAgent({
           />
         </div>
         <div>
-          <Label>CLI agent profile</Label>
-          {!showCreate && (
-            <AgentSelector
-              options={profileOptions}
-              value={agentProfileId}
-              onValueChange={(v) => onChange({ agentProfileId: v })}
-              disabled={profileOptions.length === 0}
-              placeholder="Select an agent profile..."
-              triggerClassName="mt-1 border border-input rounded-md px-3 h-9"
-            />
-          )}
-          {showCreate ? (
+          <ProfileSelectorSection
+            showCreate={showCreate}
+            profileOptions={profileOptions}
+            agentProfileId={agentProfileId}
+            selectedProfile={selectedProfile}
+            onChange={onChange}
+            onCreateClick={() => setShowCreate(true)}
+          />
+          {showCreate && (
             <CreateProfilePanel
               settingsAgents={settingsAgents}
-              storeProfiles={agentProfilesState}
               wizardProfiles={agentProfiles}
               canCancel={profileOptions.length > 0}
               setAgentProfiles={setAgentProfiles}
               onAgentProfilesChange={onAgentProfilesChange}
-              onChange={onChange}
+              onProfileSaved={(profileId) => onChange({ agentProfileId: profileId })}
               onClose={() => setShowCreate(false)}
-            />
-          ) : (
-            <ProfilePickerHint
-              hasProfiles={profileOptions.length > 0}
-              selected={selectedProfile}
-              onCreateClick={() => setShowCreate(true)}
             />
           )}
         </div>
@@ -152,6 +118,45 @@ export function StepAgent({
         />
       </div>
     </div>
+  );
+}
+
+function ProfileSelectorSection({
+  showCreate,
+  profileOptions,
+  agentProfileId,
+  selectedProfile,
+  onChange,
+  onCreateClick,
+}: {
+  showCreate: boolean;
+  profileOptions: ProfileSelectOption[];
+  agentProfileId: string;
+  selectedProfile: AgentProfileOption | undefined;
+  onChange: StepAgentProps["onChange"];
+  onCreateClick: () => void;
+}) {
+  return (
+    <>
+      <Label>CLI agent profile</Label>
+      {!showCreate && (
+        <AgentSelector
+          options={profileOptions}
+          value={agentProfileId}
+          onValueChange={(v) => onChange({ agentProfileId: v })}
+          disabled={profileOptions.length === 0}
+          placeholder="Select an agent profile..."
+          triggerClassName="mt-1 border border-input rounded-md px-3 h-9"
+        />
+      )}
+      {!showCreate && (
+        <ProfilePickerHint
+          hasProfiles={profileOptions.length > 0}
+          selected={selectedProfile}
+          onCreateClick={onCreateClick}
+        />
+      )}
+    </>
   );
 }
 
@@ -198,49 +203,6 @@ function TierIndicator({
   );
 }
 
-function CreateProfilePanel({
-  settingsAgents,
-  storeProfiles,
-  wizardProfiles,
-  canCancel,
-  setAgentProfiles,
-  onAgentProfilesChange,
-  onChange,
-  onClose,
-}: {
-  settingsAgents: { id: string; name: string }[];
-  storeProfiles: AgentProfileOption[];
-  wizardProfiles: AgentProfileOption[];
-  canCancel: boolean;
-  setAgentProfiles: (profiles: AgentProfileOption[]) => void;
-  onAgentProfilesChange?: (profiles: AgentProfileOption[]) => void;
-  onChange: StepAgentProps["onChange"];
-  onClose: () => void;
-}) {
-  return (
-    <div className="mt-2 rounded-md border bg-muted/30 p-3">
-      <CliProfileEditor
-        mode="create"
-        defaultProfileName="default"
-        showAdvanced
-        allowCliPassthrough={false}
-        onSaved={(saved) => {
-          const agentForProfile = settingsAgents.find((a) => a.id === saved.agentId) ?? {
-            id: saved.agentId ?? "",
-            name: saved.agentId ?? "",
-          };
-          const option = toAgentProfileOption(agentForProfile, saved);
-          setAgentProfiles([...storeProfiles.filter((p) => p.id !== option.id), option]);
-          onAgentProfilesChange?.([...wizardProfiles.filter((p) => p.id !== option.id), option]);
-          onChange({ agentProfileId: saved.id });
-          onClose();
-        }}
-        onCancel={canCancel ? onClose : undefined}
-      />
-    </div>
-  );
-}
-
 function ProfilePickerHint({
   hasProfiles,
   selected,
@@ -254,14 +216,7 @@ function ProfilePickerHint({
     return (
       <div className="mt-2 text-xs text-muted-foreground space-y-1">
         <p>No CLI agent profiles available yet.</p>
-        <Button
-          type="button"
-          variant="link"
-          onClick={onCreateClick}
-          className="h-auto p-0 cursor-pointer text-primary"
-        >
-          Create one inline
-        </Button>
+        <CreateProfileButton hasProfiles={false} onCreateClick={onCreateClick} />
       </div>
     );
   }
@@ -275,14 +230,7 @@ function ProfilePickerHint({
       ) : (
         <p>Picks the CLI client, model, mode, and flags this agent will use.</p>
       )}
-      <Button
-        type="button"
-        variant="link"
-        onClick={onCreateClick}
-        className="h-auto p-0 cursor-pointer text-primary"
-      >
-        + Create a new CLI profile
-      </Button>
+      <CreateProfileButton hasProfiles={hasProfiles} onCreateClick={onCreateClick} />
     </div>
   );
 }

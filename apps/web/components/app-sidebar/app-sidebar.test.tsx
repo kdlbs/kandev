@@ -146,17 +146,18 @@ describe("AppSidebar", () => {
     render(<AppSidebar />);
 
     const nav = screen.getByRole("navigation");
-    expect(
-      Array.from(nav.querySelectorAll("[data-testid]")).map((node) =>
-        node.getAttribute("data-testid"),
-      ),
-    ).toEqual([
+    const expectedSections = [
       "primary-nav",
       "office-navigation-section-work",
       "projects-section",
       "agents-section",
       "office-navigation-section-office",
-    ]);
+    ];
+    expect(
+      Array.from(nav.querySelectorAll("[data-testid]"))
+        .map((node) => node.getAttribute("data-testid"))
+        .filter((id): id is string => id !== null && expectedSections.includes(id)),
+    ).toEqual(expectedSections);
   });
 
   it("renders collapsed when store reports collapsed=true", () => {

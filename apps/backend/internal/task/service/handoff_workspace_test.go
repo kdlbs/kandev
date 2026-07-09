@@ -353,7 +353,7 @@ func (r *phase4TaskRepo) ListTasks(context.Context, string) ([]*models.Task, err
 	r.panicNotUsed("ListTasks")
 	return nil, nil
 }
-func (r *phase4TaskRepo) ListTasksByWorkspace(context.Context, string, string, string, string, int, int, bool, bool, bool, bool) ([]*models.Task, int, error) {
+func (r *phase4TaskRepo) ListTasksByWorkspace(context.Context, string, string, string, string, int, int, string, bool, bool, bool, bool) ([]*models.Task, int, error) {
 	r.panicNotUsed("ListTasksByWorkspace")
 	return nil, 0, nil
 }
@@ -374,6 +374,14 @@ func (r *phase4TaskRepo) UnarchiveTaskByCascade(context.Context, string, string)
 func (r *phase4TaskRepo) ListTasksForAutoArchive(context.Context) ([]*models.Task, error) {
 	r.panicNotUsed("ListTasksForAutoArchive")
 	return nil, nil
+}
+func (r *phase4TaskRepo) ListExpiredQuickChatTasks(context.Context, time.Time) ([]*models.Task, error) {
+	r.panicNotUsed("ListExpiredQuickChatTasks")
+	return nil, nil
+}
+func (r *phase4TaskRepo) DeleteExpiredQuickChatTask(context.Context, string, time.Time) (bool, error) {
+	r.panicNotUsed("DeleteExpiredQuickChatTask")
+	return false, nil
 }
 func (r *phase4TaskRepo) CountOpenWatcherCreatedTasks(context.Context, string, string) (int, error) {
 	r.panicNotUsed("CountOpenWatcherCreatedTasks")

@@ -234,6 +234,10 @@ export type UISliceActions = {
   migrateLocalViewsToBackend: () => void;
   setKanbanPreviewedTaskId: (taskId: string | null) => void;
   togglePinnedTask: (taskId: string) => void;
+  /** Pin every id that isn't already pinned (bulk "Pin" for multi-select). */
+  pinTasks: (taskIds: string[]) => void;
+  /** Unpin every id that is currently pinned (bulk "Unpin" for multi-select). */
+  unpinTasks: (taskIds: string[]) => void;
   setSidebarTaskOrder: (orderedTaskIds: string[]) => void;
   /** Replace the stored subtask order for a parent task. Empty array clears it. */
   setSubtaskOrder: (parentTaskId: string, orderedSubtaskIds: string[]) => void;

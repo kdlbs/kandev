@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import {
   rememberLastOfficeWorkspace,
   rememberLastKanbanWorkspace,
+  workspaceHomeHref,
 } from "./app-sidebar-workspace-navigation";
 
 /**
@@ -44,13 +45,16 @@ const WorkspaceTrigger = forwardRef<
       data-testid="sidebar-workspace-trigger"
       aria-label="Switch workspace"
       className={cn(
-        "group/ws flex min-w-0 flex-1 items-center gap-1 rounded-md px-1.5 py-1 text-sm font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground cursor-pointer transition-colors",
+        "group/ws flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md border border-border/70 bg-background px-2.5 text-sm font-medium text-foreground shadow-sm cursor-pointer transition-colors hover:border-border hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
         className,
       )}
       {...props}
     >
       <span className="min-w-0 flex-1 truncate text-left sidebar-fade-in">{activeName}</span>
-      <IconChevronDown className="h-3.5 w-3.5 shrink-0 opacity-50 transition-opacity group-hover/ws:opacity-80" />
+      <IconChevronDown
+        data-testid="sidebar-workspace-trigger-chevron"
+        className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-colors group-hover/ws:text-foreground/80"
+      />
     </button>
   );
 });
@@ -78,6 +82,14 @@ function WorkspaceTypeIcon({ type, className }: { type: WorkspaceType; className
   return <IconLayoutKanban className={className} />;
 }
 
+function rememberSelectedWorkspace(workspace: WorkspaceItem) {
+  if (workspaceType(workspace) === "office") {
+    rememberLastOfficeWorkspace(workspace);
+  } else {
+    rememberLastKanbanWorkspace(workspace);
+  }
+}
+
 export function AppSidebarWorkspacePicker() {
   const router = useRouter();
   const officeEnabled = useFeature("office");
@@ -93,6 +105,10 @@ export function AppSidebarWorkspacePicker() {
     (workspace: WorkspaceItem) => {
       const { id } = workspace;
       if (id === activeId) {
+        if (officeEnabled && workspaceType(workspace) === "kanban") {
+          rememberSelectedWorkspace(workspace);
+          router.push(workspaceHomeHref(workspace));
+        }
         setOpen(false);
         return;
       }

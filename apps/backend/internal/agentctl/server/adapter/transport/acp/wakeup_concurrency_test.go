@@ -54,6 +54,9 @@ func (f *concurrencyFakeAgent) CloseSession(_ context.Context, _ acp.CloseSessio
 func (f *concurrencyFakeAgent) ListSessions(_ context.Context, _ acp.ListSessionsRequest) (acp.ListSessionsResponse, error) {
 	return acp.ListSessionsResponse{}, nil
 }
+func (f *concurrencyFakeAgent) LoadSession(_ context.Context, _ acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
+	return acp.LoadSessionResponse{}, nil
+}
 func (f *concurrencyFakeAgent) ResumeSession(_ context.Context, _ acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
 	return acp.ResumeSessionResponse{}, nil
 }

@@ -197,6 +197,21 @@ describe("getConversationLoadingState", () => {
       }),
     ).toEqual({ isInitialLoading: true, showLoadingState: false });
   });
+
+  it("suppresses loading for CREATED sessions even when a synthetic task-description message is present", () => {
+    // Prepare-only launches keep the session in CREATED with the "Start agent"
+    // button as the primary CTA. useProcessedMessages injects a synthetic
+    // task-description message so messagesCount is 1, but there is nothing to
+    // load — the spinner would clash with the button.
+    expect(
+      getConversationLoadingState({
+        messagesLoading: true,
+        messagesCount: 1,
+        isWorking: false,
+        sessionState: "CREATED",
+      }),
+    ).toEqual({ isInitialLoading: false, showLoadingState: false });
+  });
 });
 
 describe("MessageListStatus", () => {

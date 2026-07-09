@@ -85,11 +85,11 @@ function useFormData(workspaceId: string) {
   return { workflows, agentProfiles: filteredAgentProfiles, allExecutorProfiles };
 }
 
-function useSentryProjects(orgSlug: string) {
+function useSentryProjects(workspaceId: string, orgSlug: string) {
   const [projects, setProjects] = useState<SentryProject[]>([]);
   useEffect(() => {
     let cancelled = false;
-    listSentryProjects()
+    listSentryProjects({ workspaceId })
       .then((res) => {
         if (!cancelled) setProjects(res.projects ?? []);
       })
@@ -99,7 +99,7 @@ function useSentryProjects(orgSlug: string) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [workspaceId]);
   // Sentry's auth-token endpoint already filters to the user's accessible orgs;
   // if an orgSlug is set, restrict to projects that match.
   return useMemo(
@@ -194,7 +194,7 @@ function FilterFields({
   setForm: FormSetter;
   orgs: string[];
 }) {
-  const projects = useSentryProjects(form.orgSlug);
+  const projects = useSentryProjects(form.workspaceId, form.orgSlug);
   const toggleLevel = useCallback(
     (level: SentryLevel) =>
       setForm((p) => ({
@@ -428,12 +428,12 @@ function savingLabel(saving: boolean, isEdit: boolean): string {
 
 // useWatchOrgs loads the org list for the org dropdown and auto-selects the
 // sole org on a fresh create (with one choice there is nothing to pick).
-function useWatchOrgs(open: boolean, hasWatch: boolean, setForm: FormSetter) {
+function useWatchOrgs(open: boolean, workspaceId: string, hasWatch: boolean, setForm: FormSetter) {
   const [orgs, setOrgs] = useState<string[]>([]);
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    listSentryOrganizations()
+    listSentryOrganizations({ workspaceId })
       .then((res) => {
         if (!cancelled) setOrgs((res.organizations ?? []).map((o) => o.slug));
       })
@@ -443,7 +443,7 @@ function useWatchOrgs(open: boolean, hasWatch: boolean, setForm: FormSetter) {
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, workspaceId]);
   useEffect(() => {
     if (hasWatch || orgs.length !== 1) return;
     setForm((p) => (p.orgSlug ? p : { ...p, orgSlug: orgs[0] }));
@@ -471,7 +471,7 @@ export function SentryIssueWatchDialog({
     }
   }, [watch, open, workspaceId, activeWorkspaceId]);
 
-  const orgs = useWatchOrgs(open, !!watch, setForm);
+  const orgs = useWatchOrgs(open, form.workspaceId, !!watch, setForm);
 
   const workspaceLocked = !!watch || !!workspaceId;
 

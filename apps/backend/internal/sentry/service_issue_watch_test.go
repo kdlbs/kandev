@@ -253,7 +253,7 @@ func TestService_CheckIssueWatch_FiltersAlreadySeen(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
 
-	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
+	if _, err := f.svc.SetConfigForWorkspace(ctx, "ws-1", &SetConfigRequest{
 		AuthMethod: AuthMethodAuthToken, Secret: "sntrys_abc",
 	}); err != nil {
 		t.Fatalf("set config: %v", err)

@@ -18,7 +18,7 @@ type SentryLinkButtonProps = {
 // SentryLinkButton attaches a Sentry issue to an existing task by prepending
 // its short ID to the title ("PROJ-123: ...").
 export function SentryLinkButton({ taskId, workspaceId, taskTitle }: SentryLinkButtonProps) {
-  const available = useSentryAvailable();
+  const available = useSentryAvailable(workspaceId);
 
   const buildLinkedTitle = useCallback(
     (key: string) => {
@@ -49,7 +49,7 @@ export function SentryLinkButton({ taskId, workspaceId, taskTitle }: SentryLinkB
       }}
       validationHint="Paste a Sentry issue URL or short ID (PROJ-123)"
       fetch={async (key) => {
-        const issue = await getSentryIssue(key);
+        const issue = await getSentryIssue(key, { workspaceId });
         await updateTask(taskId, { title: buildLinkedTitle(key) });
         return issue;
       }}

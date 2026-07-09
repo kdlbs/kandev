@@ -18,6 +18,7 @@ import {
   IntegrationAuthStatusBanner,
   type IntegrationAuthHealth,
 } from "@/components/integrations/auth-status-banner";
+import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import {
   getSlackConfig,
@@ -373,13 +374,20 @@ function useUtilityAgentsLoader() {
 }
 
 type SettingsActionsArgs = {
+  workspaceId: string;
   form: FormState;
   setConfig: (cfg: SlackConfig | null) => void;
   setForm: (form: FormState) => void;
   setTestResult: (r: TestSlackConnectionResult | null) => void;
 };
 
-function useSettingsActions({ form, setConfig, setForm, setTestResult }: SettingsActionsArgs) {
+function useSettingsActions({
+  workspaceId,
+  form,
+  setConfig,
+  setForm,
+  setTestResult,
+}: SettingsActionsArgs) {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -389,33 +397,39 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await testSlackConnection({
-        authMethod: "cookie",
-        utilityAgentId: form.utilityAgentId,
-        commandPrefix: form.commandPrefix,
-        pollIntervalSeconds: form.pollIntervalSeconds,
-        token: form.token || undefined,
-        cookie: form.cookie || undefined,
-      });
+      const res = await testSlackConnection(
+        {
+          authMethod: "cookie",
+          utilityAgentId: form.utilityAgentId,
+          commandPrefix: form.commandPrefix,
+          pollIntervalSeconds: form.pollIntervalSeconds,
+          token: form.token || undefined,
+          cookie: form.cookie || undefined,
+        },
+        { workspaceId },
+      );
       setTestResult(res);
     } catch (err) {
       setTestResult({ ok: false, error: String(err) });
     } finally {
       setTesting(false);
     }
-  }, [form, setTestResult]);
+  }, [workspaceId, form, setTestResult]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
-      const saved = await setSlackConfig({
-        authMethod: "cookie",
-        utilityAgentId: form.utilityAgentId,
-        commandPrefix: form.commandPrefix,
-        pollIntervalSeconds: form.pollIntervalSeconds,
-        token: form.token || undefined,
-        cookie: form.cookie || undefined,
-      });
+      const saved = await setSlackConfig(
+        {
+          authMethod: "cookie",
+          utilityAgentId: form.utilityAgentId,
+          commandPrefix: form.commandPrefix,
+          pollIntervalSeconds: form.pollIntervalSeconds,
+          token: form.token || undefined,
+          cookie: form.cookie || undefined,
+        },
+        { workspaceId },
+      );
       setConfig(saved);
       setForm(configToForm(saved));
       setTestResult(null);
@@ -425,13 +439,13 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
     } finally {
       setSaving(false);
     }
-  }, [form, toast, setConfig, setForm, setTestResult]);
+  }, [workspaceId, form, toast, setConfig, setForm, setTestResult]);
 
   const handleDelete = useCallback(async () => {
     if (!confirm("Remove Slack configuration?")) return;
     setDeleting(true);
     try {
-      await deleteSlackConfig();
+      await deleteSlackConfig({ workspaceId });
       setConfig(null);
       setForm(emptyForm);
       setTestResult(null);
@@ -441,12 +455,12 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
     } finally {
       setDeleting(false);
     }
-  }, [toast, setConfig, setForm, setTestResult]);
+  }, [workspaceId, toast, setConfig, setForm, setTestResult]);
 
   return { saving, testing, deleting, handleTest, handleSave, handleDelete };
 }
 
-function useSlackSettings() {
+function useSlackSettings(workspaceId: string) {
   const { toast } = useToast();
   const [config, setConfig] = useState<SlackConfig | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
@@ -458,7 +472,7 @@ function useSlackSettings() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const cfg = await getSlackConfig();
+      const cfg = await getSlackConfig({ workspaceId });
       setConfig(cfg);
       setForm(configToForm(cfg));
     } catch (err) {
@@ -466,7 +480,7 @@ function useSlackSettings() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [workspaceId, toast]);
 
   useEffect(() => {
     void load();
@@ -475,14 +489,14 @@ function useSlackSettings() {
   // Background refresh so the auth-health banner picks up new probe results.
   useEffect(() => {
     const id = setInterval(() => {
-      getSlackConfig()
+      getSlackConfig({ workspaceId })
         .then((cfg) => setConfig(cfg))
         .catch(() => {
           /* transient failures are fine — next tick retries */
         });
     }, INTEGRATION_STATUS_REFRESH_MS);
     return () => clearInterval(id);
-  }, []);
+  }, [workspaceId]);
 
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -491,6 +505,7 @@ function useSlackSettings() {
   );
 
   const { saving, testing, deleting, handleTest, handleSave, handleDelete } = useSettingsActions({
+    workspaceId,
     form,
     setConfig,
     setForm,
@@ -532,8 +547,8 @@ function EnabledPill() {
   );
 }
 
-export function SlackConnectionSection() {
-  const s = useSlackSettings();
+export function SlackConnectionSection({ workspaceId }: { workspaceId: string }) {
+  const s = useSlackSettings(workspaceId);
   const missingSecrets =
     (!s.config?.hasToken && !s.form.token) || (!s.config?.hasCookie && !s.form.cookie);
   const missingAgent = !s.form.utilityAgentId;
@@ -544,7 +559,7 @@ export function SlackConnectionSection() {
     <SettingsSection
       icon={<IconBrandSlack className="h-5 w-5" />}
       title="Slack integration"
-      description="Capture Slack threads as Kandev tasks. Type !kandev <instruction> in any thread you can see and the configured utility agent picks the workspace/workflow/repo and creates the task."
+      description="Capture Slack threads as tasks for the selected workspace. Type !kandev <instruction> in any thread you can see and the configured utility agent creates the task."
       action={<EnabledPill />}
     >
       <Card>
@@ -591,7 +606,9 @@ export function SlackConnectionSection() {
 export function SlackIntegrationPage() {
   return (
     <div className="space-y-8">
-      <SlackConnectionSection />
+      <WorkspaceScopedSection>
+        {(workspaceId) => <SlackConnectionSection key={workspaceId} workspaceId={workspaceId} />}
+      </WorkspaceScopedSection>
     </div>
   );
 }

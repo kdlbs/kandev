@@ -35,7 +35,12 @@ import {
 } from "@/lib/api/domains/office-api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
-import { mapWorkspaceItem, readActiveWorkspaceCookie } from "@/lib/routing/route-bootstrap";
+import {
+  LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE,
+  mapWorkspaceItem,
+  readActiveWorkspaceCookie,
+  readCookie,
+} from "@/lib/routing/route-bootstrap";
 import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import {
@@ -196,6 +201,7 @@ function useOfficeRouteBootstrap(
         officeWorkspaceItems,
         routeWorkspaceId,
         readActiveWorkspaceCookie(),
+        readCookie(LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE),
         userSettingsResponse?.settings?.workspace_id ?? null,
       );
 
@@ -209,6 +215,10 @@ function useOfficeRouteBootstrap(
       store.getState().setMeta(metaResponse);
 
       if (!activeWorkspaceId) {
+        store.getState().setOfficeAgentProfiles([]);
+        store.getState().setProjects([]);
+        store.getState().setInboxItems([]);
+        store.getState().setInboxCount(0);
         setBootstrap({ complete: true, onboardingComplete });
         return;
       }
@@ -241,15 +251,17 @@ function useOfficeRouteBootstrap(
   return bootstrap;
 }
 
-function resolveActiveOfficeWorkspaceId(
-  workspaceItems: { id: string }[],
+export function resolveActiveOfficeWorkspaceId(
+  workspaceItems: { id: string; office_workflow_id?: string | null }[],
   routeWorkspaceId: string | null,
-  cookieWorkspaceId: string | null,
+  activeCookieWorkspaceId: string | null,
+  officeCookieWorkspaceId: string | null,
   settingsWorkspaceId: string | null,
 ): string | null {
   return (
     workspaceItems.find((workspace) => workspace.id === routeWorkspaceId)?.id ??
-    workspaceItems.find((workspace) => workspace.id === cookieWorkspaceId)?.id ??
+    workspaceItems.find((workspace) => workspace.id === activeCookieWorkspaceId)?.id ??
+    workspaceItems.find((workspace) => workspace.id === officeCookieWorkspaceId)?.id ??
     workspaceItems.find((workspace) => workspace.id === settingsWorkspaceId)?.id ??
     workspaceItems[0]?.id ??
     null

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import {
   listReviewWatches,
   createReviewWatch,
@@ -27,21 +27,32 @@ export function useReviewWatches(workspaceId?: string | null) {
   const addWatch = useAppStore((state) => state.addReviewWatch);
   const updateWatch = useAppStore((state) => state.updateReviewWatch);
   const removeWatch = useAppStore((state) => state.removeReviewWatch);
+  const loadedScopeRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (workspaceId === null || loaded || loading) return;
+    if (workspaceId === null) return;
+    const scopeKey = workspaceId ?? "__all__";
+    if (loadedScopeRef.current === scopeKey) return;
+    let cancelled = false;
+    loadedScopeRef.current = scopeKey;
     setReviewWatchesLoading(true);
     listReviewWatches(workspaceId ?? undefined, { cache: "no-store" })
       .then((response) => {
+        if (cancelled) return;
         setReviewWatches(response?.watches ?? []);
       })
       .catch(() => {
+        if (cancelled) return;
         setReviewWatches([]);
       })
       .finally(() => {
+        if (cancelled) return;
         setReviewWatchesLoading(false);
       });
-  }, [workspaceId, loaded, loading, setReviewWatches, setReviewWatchesLoading]);
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, setReviewWatches, setReviewWatchesLoading]);
 
   const create = useCallback(
     async (req: CreateReviewWatchRequest) => {
@@ -53,8 +64,8 @@ export function useReviewWatches(workspaceId?: string | null) {
   );
 
   const update = useCallback(
-    async (id: string, req: UpdateReviewWatchRequest) => {
-      const watch = await updateReviewWatch(id, req);
+    async (id: string, watchWorkspaceId: string, req: UpdateReviewWatchRequest) => {
+      const watch = await updateReviewWatch(id, watchWorkspaceId, req);
       updateWatch(watch);
       return watch;
     },
@@ -62,8 +73,8 @@ export function useReviewWatches(workspaceId?: string | null) {
   );
 
   const remove = useCallback(
-    async (id: string) => {
-      await deleteReviewWatch(id);
+    async (id: string, watchWorkspaceId: string) => {
+      await deleteReviewWatch(id, watchWorkspaceId);
       removeWatch(id);
     },
     [removeWatch],

@@ -2,6 +2,58 @@
 
 All notable changes to Kandev.
 
+## 0.75.0 - 2026-07-08
+
+### Features
+
+- persist and expire quick chats ([#1612](https://github.com/kdlbs/kandev/pull/1612))
+- improve office onboarding and workspace flows ([#1606](https://github.com/kdlbs/kandev/pull/1606))
+- single workspace switcher with deep links and copy-config dialog ([#1616](https://github.com/kdlbs/kandev/pull/1616))
+- consolidate office system skills ([#1604](https://github.com/kdlbs/kandev/pull/1604))
+- scope GitHub integration settings by workspace ([#1572](https://github.com/kdlbs/kandev/pull/1572))
+
+### Bug Fixes
+
+- stop kanban spinner for not-started sessions and fix truncated manual backup size ([#1622](https://github.com/kdlbs/kandev/pull/1622))
+- preserve inherited task worktrees ([#1621](https://github.com/kdlbs/kandev/pull/1621))
+- scope sidebar availability to active workspace ([#1620](https://github.com/kdlbs/kandev/pull/1620))
+- confirm before archiving from PR merged/closed banners ([#1619](https://github.com/kdlbs/kandev/pull/1619))
+- compact model config selector ([#1611](https://github.com/kdlbs/kandev/pull/1611))
+- encode workflow hidden flag for postgres ([#1614](https://github.com/kdlbs/kandev/pull/1614))
+- route controlled diff comment updates ([#1599](https://github.com/kdlbs/kandev/pull/1599))
+- schedule agent-created office tasks ([#1605](https://github.com/kdlbs/kandev/pull/1605))
+
+## 0.74.0 - 2026-07-06
+
+### Features
+
+- cmd+click and shift+click multi-select for kanban and sidebar ([#1518](https://github.com/kdlbs/kandev/pull/1518))
+- delete buttons for individual and all runs in Recent Runs ([#1586](https://github.com/kdlbs/kandev/pull/1586)) by @ClemDNL
+- adopt Office-style /tasks list UX ([#1593](https://github.com/kdlbs/kandev/pull/1593))
+
+### Bug Fixes
+
+- reap prompt-dead executions on resume ([#1602](https://github.com/kdlbs/kandev/pull/1602))
+- complete idle acp monitor turns ([#1600](https://github.com/kdlbs/kandev/pull/1600))
+- repair office agent launch context ([#1601](https://github.com/kdlbs/kandev/pull/1601))
+- stop scheduled trigger retry storm on concurrency cap skip ([#1598](https://github.com/kdlbs/kandev/pull/1598)) by @ClemDNL
+
+## 0.73.0 - 2026-07-03
+
+### Features
+
+- filter Jira tickets by project statuses ([#1588](https://github.com/kdlbs/kandev/pull/1588)) ([#1595](https://github.com/kdlbs/kandev/pull/1595))
+- add Devin ACP agent integration ([#1497](https://github.com/kdlbs/kandev/pull/1497)) by @jijiamoer
+
+### Bug Fixes
+
+- preserve active workspace on settings bootstrap ([#1591](https://github.com/kdlbs/kandev/pull/1591))
+- clear stale agent state on inactive workspace ([#1592](https://github.com/kdlbs/kandev/pull/1592))
+- support postgres database stats page ([#1589](https://github.com/kdlbs/kandev/pull/1589))
+- persist live executor runtime state ([#1585](https://github.com/kdlbs/kandev/pull/1585)) ([#1587](https://github.com/kdlbs/kandev/pull/1587))
+- correct Linear ticket-number search filter ([#1584](https://github.com/kdlbs/kandev/pull/1584)) by @dk-blackfuel
+- recover stale prompts and invalid monitors ([#1581](https://github.com/kdlbs/kandev/pull/1581))
+
 ## 0.72.0 - 2026-07-02
 
 ### Features

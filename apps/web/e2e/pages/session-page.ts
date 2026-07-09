@@ -58,6 +58,9 @@ export class SessionPage {
   prMergedArchiveButton() {
     return this.page.getByTestId("pr-merged-archive-button");
   }
+  prMergedArchiveConfirmButton() {
+    return this.page.getByTestId("pr-merged-archive-confirm");
+  }
   prMergedDismissButton() {
     return this.page.getByTestId("pr-merged-dismiss-button");
   }
@@ -66,6 +69,9 @@ export class SessionPage {
   }
   prClosedArchiveButton() {
     return this.page.getByTestId("pr-closed-archive-button");
+  }
+  prClosedArchiveConfirmButton() {
+    return this.page.getByTestId("pr-closed-archive-confirm");
   }
   prClosedDismissButton() {
     return this.page.getByTestId("pr-closed-dismiss-button");

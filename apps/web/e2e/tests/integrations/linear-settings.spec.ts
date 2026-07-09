@@ -45,6 +45,93 @@ test.describe("Linear settings", () => {
     await expect(testPage.getByText(/leave blank to keep the current value/i)).toBeVisible();
   });
 
+  test("workspace selector scopes the saved credentials form", async ({ testPage, apiClient }) => {
+    const other = await apiClient.createWorkspace("Linear Secondary Workspace");
+    await apiClient.mockLinearSetTeams([{ id: "team-1", key: "ENG", name: "Engineering" }]);
+
+    const settings = new LinearSettingsPage(testPage);
+    await settings.goto();
+
+    await settings.secretInput.fill("lin_api_default");
+    await settings.saveButton.click();
+    await expect(settings.deleteButton).toBeVisible();
+    await expect(testPage.getByText(/leave blank to keep the current value/i)).toBeVisible();
+
+    await settings.workspaceTrigger.click();
+    await testPage.getByRole("menuitem", { name: new RegExp(other.name) }).click();
+
+    await expect(settings.secretInput).toHaveValue("");
+    await expect(settings.saveButton).toBeDisabled();
+    await expect(settings.deleteButton).toHaveCount(0);
+    await expect(testPage.getByText(/leave blank to keep the current value/i)).toHaveCount(0);
+  });
+
+  test("a ?workspace deep link adopts that workspace on load", async ({ testPage, apiClient }) => {
+    const other = await apiClient.createWorkspace("Linear Deep Link Workspace");
+    // Seed the secondary workspace so the deep link lands on a configured row,
+    // proving the query param — not the user's global default — drove selection.
+    await apiClient.setLinearConfig({ secret: "lin_api_deeplink", workspaceId: other.id });
+
+    const settings = new LinearSettingsPage(testPage);
+    await settings.goto(`?workspace=${other.id}`);
+
+    await expect(settings.switcher).toContainText("Editing workspace");
+    await expect(settings.switcher).toContainText(other.name);
+    // The seeded row loads, confirming the deep link scoped the form to `other`.
+    await expect(testPage.getByText(/leave blank to keep the current value/i)).toBeVisible();
+  });
+
+  test("selecting a workspace writes it to the ?workspace query param", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const other = await apiClient.createWorkspace("Linear Query Param Workspace");
+
+    const settings = new LinearSettingsPage(testPage);
+    await settings.goto();
+
+    await settings.workspaceTrigger.click();
+    await testPage.getByRole("menuitem", { name: new RegExp(other.name) }).click();
+
+    await expect(testPage).toHaveURL(new RegExp(`[?&]workspace=${other.id}(&|$)`));
+    await expect(settings.switcher).toContainText(other.name);
+  });
+
+  test("copy config duplicates the credentials to another workspace", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const other = await apiClient.createWorkspace("Linear Copy Target Workspace");
+    await apiClient.mockLinearSetTeams([{ id: "team-1", key: "ENG", name: "Engineering" }]);
+
+    const settings = new LinearSettingsPage(testPage);
+    await settings.goto();
+
+    // Configure the source (default) workspace.
+    await settings.secretInput.fill("lin_api_source");
+    await settings.saveButton.click();
+    await expect(settings.deleteButton).toBeVisible();
+
+    // Copy the config to the empty target workspace via the dialog.
+    await settings.copyConfigTrigger.click();
+    await settings.copyConfigTarget.click();
+    await testPage.getByRole("option", { name: new RegExp(other.name) }).click();
+    await settings.copyConfigConfirm.click();
+    await expect(testPage.getByText(/Copied Linear config/i)).toBeVisible();
+
+    // The target workspace should now report a saved secret via the API.
+    const res = await apiClient.rawRequest("GET", `/api/v1/linear/config?workspace_id=${other.id}`);
+    expect(res.status).toBe(200);
+    const cfg = (await res.json()) as { hasSecret?: boolean };
+    expect(cfg.hasSecret).toBe(true);
+
+    // Switching to the target in the UI shows the copied credentials loaded.
+    await settings.workspaceTrigger.click();
+    await testPage.getByRole("menuitem", { name: new RegExp(other.name) }).click();
+    await expect(settings.deleteButton).toBeVisible();
+    await expect(testPage.getByText(/leave blank to keep the current value/i)).toBeVisible();
+  });
+
   test("test connection surfaces inline success and failure", async ({ testPage, apiClient }) => {
     const settings = new LinearSettingsPage(testPage);
     await settings.goto();

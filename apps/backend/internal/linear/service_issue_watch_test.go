@@ -468,7 +468,7 @@ func TestService_CheckIssueWatch_FiltersAlreadySeen(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
 
-	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
+	if _, err := f.svc.SetConfigForWorkspace(ctx, "ws-1", &SetConfigRequest{
 		AuthMethod: AuthMethodAPIKey, Secret: "lin_api",
 	}); err != nil {
 		t.Fatalf("set config: %v", err)
@@ -516,7 +516,7 @@ func TestService_CheckIssueWatch_AppliesSort(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
 
-	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
+	if _, err := f.svc.SetConfigForWorkspace(ctx, "ws-1", &SetConfigRequest{
 		AuthMethod: AuthMethodAPIKey, Secret: "lin_api",
 	}); err != nil {
 		t.Fatalf("set config: %v", err)
@@ -558,7 +558,7 @@ func TestService_CheckIssueWatch_AppliesSort(t *testing.T) {
 func TestService_CheckIssueWatch_PaginatesBacklog(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
-	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
+	if _, err := f.svc.SetConfigForWorkspace(ctx, "ws-1", &SetConfigRequest{
 		AuthMethod: AuthMethodAPIKey, Secret: "lin_api",
 	}); err != nil {
 		t.Fatalf("set config: %v", err)
@@ -605,7 +605,7 @@ func TestService_CheckIssueWatch_PaginatesBacklog(t *testing.T) {
 func TestService_CheckIssueWatch_BoundsPages(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
-	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
+	if _, err := f.svc.SetConfigForWorkspace(ctx, "ws-1", &SetConfigRequest{
 		AuthMethod: AuthMethodAPIKey, Secret: "lin_api",
 	}); err != nil {
 		t.Fatalf("set config: %v", err)
@@ -648,7 +648,7 @@ func TestService_CheckIssueWatch_BoundsPages(t *testing.T) {
 func TestService_CheckIssueWatch_DefaultSortFetchesSinglePage(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
-	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
+	if _, err := f.svc.SetConfigForWorkspace(ctx, "ws-1", &SetConfigRequest{
 		AuthMethod: AuthMethodAPIKey, Secret: "lin_api",
 	}); err != nil {
 		t.Fatalf("set config: %v", err)
@@ -691,7 +691,7 @@ func TestService_CheckIssueWatch_DefaultSortFetchesSinglePage(t *testing.T) {
 func TestService_CheckIssueWatch_CancelStopsPagination(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
-	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
+	if _, err := f.svc.SetConfigForWorkspace(ctx, "ws-1", &SetConfigRequest{
 		AuthMethod: AuthMethodAPIKey, Secret: "lin_api",
 	}); err != nil {
 		t.Fatalf("set config: %v", err)
@@ -727,7 +727,7 @@ func TestService_CheckIssueWatch_CancelStopsPagination(t *testing.T) {
 func TestService_CheckIssueWatch_StampsLastPolledOnError(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
-	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
+	if _, err := f.svc.SetConfigForWorkspace(ctx, "ws-1", &SetConfigRequest{
 		AuthMethod: AuthMethodAPIKey, Secret: "lin_api",
 	}); err != nil {
 		t.Fatalf("set config: %v", err)

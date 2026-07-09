@@ -18,13 +18,8 @@ async function gotoTasksPage(page: Page): Promise<void> {
   await page.getByTestId("display-button").waitFor();
 }
 
-/**
- * Task title within the /tasks page's data table. The global AppSidebar also
- * lists tasks (data-testid="sidebar-task-item"), so a bare getByText matches
- * two elements; scoping to the table targets the list this spec is asserting on.
- */
 function taskInList(page: Page, title: string): Locator {
-  return page.getByRole("table").getByText(title);
+  return page.getByTestId("tasks-list").getByText(title);
 }
 
 async function pickListboxOption(page: Page, optionLabel: string): Promise<void> {

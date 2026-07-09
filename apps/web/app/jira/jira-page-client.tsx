@@ -22,6 +22,10 @@ import {
   type FilterState,
 } from "@/components/jira/my-jira/filter-model";
 import { DEFAULT_VIEW, useSavedViews } from "@/components/jira/my-jira/use-saved-views";
+import {
+  reconcileStatuses,
+  useProjectStatuses,
+} from "@/components/jira/my-jira/use-project-statuses";
 import { ListToolbar } from "@/components/jira/my-jira/list-toolbar";
 import { FilterBar, hasActiveFilters } from "@/components/jira/my-jira/filter-bar";
 import { ResultsPagination } from "@/components/jira/my-jira/results-pagination";
@@ -51,13 +55,16 @@ function NotConfiguredNotice() {
   );
 }
 
-async function loadUserProjects(): Promise<JiraProject[]> {
+async function loadUserProjects(workspaceId: string): Promise<JiraProject[]> {
   const [{ projects: all }, search] = await Promise.all([
-    listJiraProjects(),
-    searchJiraTickets({
-      jql: "(assignee = currentUser() OR reporter = currentUser()) ORDER BY updated DESC",
-      maxResults: 100,
-    }),
+    listJiraProjects({ workspaceId }),
+    searchJiraTickets(
+      {
+        jql: "(assignee = currentUser() OR reporter = currentUser()) ORDER BY updated DESC",
+        maxResults: 100,
+      },
+      { workspaceId },
+    ),
   ]);
   const userKeys = new Set(search.tickets.map((t) => t.projectKey));
   return (all ?? []).filter((p) => userKeys.has(p.key));
@@ -67,6 +74,7 @@ function useJiraPageData(workspaceId?: string) {
   const [loaded, setLoaded] = useState(false);
   const [configured, setConfigured] = useState(false);
   const [projects, setProjects] = useState<JiraProject[]>([]);
+  const [defaultProjectKey, setDefaultProjectKey] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -76,13 +84,14 @@ function useJiraPageData(workspaceId?: string) {
         return;
       }
       try {
-        const cfg = await getJiraConfig();
+        const cfg = await getJiraConfig({ workspaceId });
         if (cancelled) return;
         const ok = !!cfg && cfg.hasSecret;
         setConfigured(ok);
+        setDefaultProjectKey(cfg?.defaultProjectKey ?? "");
         if (ok) {
           try {
-            const list = await loadUserProjects();
+            const list = await loadUserProjects(workspaceId);
             if (!cancelled) setProjects(list);
           } catch {
             // Non-fatal: pill will just show empty list. Users can still filter by other dims.
@@ -98,7 +107,16 @@ function useJiraPageData(workspaceId?: string) {
     };
   }, [workspaceId]);
 
-  return { loaded, configured, projects };
+  return { loaded, configured, projects, defaultProjectKey };
+}
+
+// initialFilters seeds the ticket list with the workspace's default project
+// (issue #1588 follow-up) so opening /jira lands on that project pre-selected.
+// An empty defaultProjectKey keeps the historical "no project" default.
+function initialFilters(defaultProjectKey: string): FilterState {
+  const key = defaultProjectKey.trim();
+  if (!key) return DEFAULT_VIEW.filters;
+  return { ...DEFAULT_VIEW.filters, projectKeys: [key] };
 }
 
 function TicketResults({
@@ -144,6 +162,7 @@ function TicketResults({
 type AuthenticatedViewProps = {
   workspaceId: string | undefined;
   projects: JiraProject[];
+  defaultProjectKey: string;
   presets: JiraTaskPreset[];
   onStartTask: (ticket: JiraTicket, preset: JiraTaskPreset) => void;
   onOpenTicket: (ticket: JiraTicket) => void;
@@ -152,12 +171,32 @@ type AuthenticatedViewProps = {
 function AuthenticatedView({
   workspaceId,
   projects,
+  defaultProjectKey,
   presets,
   onStartTask,
   onOpenTicket,
 }: AuthenticatedViewProps) {
-  const state = useFilterState();
+  const state = useFilterState(defaultProjectKey);
   const search = useJiraSearch(workspaceId ?? null, state.effectiveJql);
+  const { options: statusOptions, loaded: statusesLoaded } = useProjectStatuses(
+    state.filters.projectKeys,
+    workspaceId,
+  );
+
+  // When the available status union changes (project selection changed, or
+  // statuses finished loading), drop any selected statuses that are no longer
+  // offered so the JQL never references a status absent from the selection.
+  // Gate on statusesLoaded so a saved view's statuses aren't stripped on the
+  // first render, before useProjectStatuses has fetched the current project's
+  // statuses (options is still [] until then).
+  const { filters, updateFilters } = state;
+  useEffect(() => {
+    if (!statusesLoaded) return;
+    const reconciled = reconcileStatuses(filters.statuses, statusOptions);
+    if (reconciled !== filters.statuses) {
+      updateFilters({ ...filters, statuses: reconciled });
+    }
+  }, [statusesLoaded, statusOptions, filters, updateFilters]);
 
   return (
     <>
@@ -190,6 +229,7 @@ function AuthenticatedView({
           filters={state.filters}
           onChange={state.updateFilters}
           projects={projects}
+          statusOptions={statusOptions}
           hasActiveFilters={hasActiveFilters(state.filters)}
           onClear={() => state.updateFilters(DEFAULT_FILTERS)}
         />
@@ -216,9 +256,9 @@ function AuthenticatedView({
   );
 }
 
-function useFilterState() {
+function useFilterState(defaultProjectKey: string) {
   const savedViews = useSavedViews();
-  const [filters, setFilters] = useState<FilterState>(DEFAULT_VIEW.filters);
+  const [filters, setFilters] = useState<FilterState>(() => initialFilters(defaultProjectKey));
   const [activeViewId, setActiveViewId] = useState<string | null>(DEFAULT_VIEW.id);
   const [customJql, setCustomJql] = useState<string | null>(null);
   const [showJqlEditor, setShowJqlEditor] = useState(false);
@@ -276,7 +316,7 @@ function useFilterState() {
 }
 
 export function JiraPageClient({ workspaceId, workflows, steps }: JiraPageClientProps) {
-  const { loaded, configured, projects } = useJiraPageData(workspaceId);
+  const { loaded, configured, projects, defaultProjectKey } = useJiraPageData(workspaceId);
   const { taskPresets } = useJiraTaskPresets();
   const [launchPayload, setLaunchPayload] = useState<JiraLaunchPayload | null>(null);
   const [openTicket, setOpenTicket] = useState<JiraTicket | null>(null);
@@ -300,6 +340,7 @@ export function JiraPageClient({ workspaceId, workflows, steps }: JiraPageClient
         <AuthenticatedView
           workspaceId={workspaceId}
           projects={projects}
+          defaultProjectKey={defaultProjectKey}
           presets={taskPresets}
           onStartTask={onStartTask}
           onOpenTicket={onOpenTicket}

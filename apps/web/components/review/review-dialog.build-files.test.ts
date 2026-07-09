@@ -1,6 +1,24 @@
 import { describe, it, expect } from "vitest";
-import { buildAllFiles } from "./review-dialog";
+import { buildAllFiles, filterPendingDiffCommentsForSession } from "./review-dialog";
 import type { CumulativeDiff } from "@/lib/state/slices/session-runtime/types";
+import type { Comment } from "@/lib/state/slices/comments";
+
+function pendingDiffComment(overrides: Partial<Comment>): Comment {
+  return {
+    id: "c1",
+    sessionId: "s1",
+    source: "diff",
+    filePath: "src/app.tsx",
+    startLine: 1,
+    endLine: 1,
+    side: "additions",
+    codeContent: "const value = 1;",
+    text: "fix this",
+    createdAt: "2026-01-01T00:00:00Z",
+    status: "pending",
+    ...overrides,
+  } as Comment;
+}
 
 describe("buildAllFiles (review dialog)", () => {
   // Regression for the "No changes to review" bug introduced by multi-repo
@@ -118,5 +136,27 @@ describe("buildAllFiles (review dialog)", () => {
     // Exact equality (not toContain) so a future normalization change that
     // appends or rewrites diff content can't silently pass this guard.
     expect(result[0].diff).toBe("@@ -1 +1 @@\n-u\n+u");
+  });
+});
+
+describe("filterPendingDiffCommentsForSession", () => {
+  it("keeps only diff comments from the active session", () => {
+    const comments = [
+      pendingDiffComment({ id: "current", sessionId: "current" }),
+      pendingDiffComment({ id: "other", sessionId: "other" }),
+      {
+        id: "plan",
+        sessionId: "current",
+        source: "plan",
+        selectedText: "task text",
+        text: "plan note",
+        createdAt: "2026-01-01T00:00:00Z",
+        status: "pending",
+      },
+    ] satisfies Comment[];
+
+    expect(filterPendingDiffCommentsForSession(comments, "current").map((c) => c.id)).toEqual([
+      "current",
+    ]);
   });
 });

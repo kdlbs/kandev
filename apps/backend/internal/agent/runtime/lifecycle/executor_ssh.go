@@ -465,6 +465,12 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 		return fmt.Errorf("ssh resume: connect: %w", err)
 	}
 
+	// SSH liveness is judged on the REMOTE host: MetadataKeySSHRemoteAgentctlPID
+	// (mirrored into executors_running.pid) is a pid on the remote box, so it is
+	// probed with a remote `kill -0` over this SSH client — never with a local
+	// os.FindProcess. The runtime-aware row predicate (RowProcessLiveness in
+	// liveness.go) deliberately returns Unknown for SSH rows so nothing applies a
+	// host-local check here (#1597 runtime-aware liveness).
 	pid, _ := strconv.Atoi(pidStr)
 	if !isRemoteAgentctlAlive(ctx, client, pid) {
 		_ = client.Close()

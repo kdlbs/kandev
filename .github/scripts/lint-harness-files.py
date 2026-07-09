@@ -123,6 +123,8 @@ def main() -> int:
 
     try:
         for path in paths:
+            if not path.exists():
+                continue
             kind = classify_path(path)
             if kind == "unknown":
                 continue

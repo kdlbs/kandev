@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback } from "react";
 import { fetchSentryConfig } from "@/lib/api/domains/sentry-api";
 import {
   useIntegrationAuthed,
@@ -7,15 +8,21 @@ import {
 } from "../integrations/use-integration-availability";
 import { useSentryEnabled } from "./use-sentry-enabled";
 
-const loadSentryConfig = async () => (await fetchSentryConfig()) ?? null;
-
-export function useSentryAuthed(): boolean {
-  return useIntegrationAuthed(loadSentryConfig);
+export function useSentryAuthed(workspaceId?: string | null): boolean {
+  const fetchConfig = useCallback(
+    async () => (await fetchSentryConfig(workspaceId ? { workspaceId } : undefined)) ?? null,
+    [workspaceId],
+  );
+  return useIntegrationAuthed(fetchConfig);
 }
 
-export function useSentryAvailable(): boolean {
+export function useSentryAvailable(workspaceId?: string | null): boolean {
+  const fetchConfig = useCallback(
+    async () => (await fetchSentryConfig(workspaceId ? { workspaceId } : undefined)) ?? null,
+    [workspaceId],
+  );
   return useIntegrationAvailable({
     useEnabled: useSentryEnabled,
-    fetchConfig: loadSentryConfig,
+    fetchConfig,
   });
 }

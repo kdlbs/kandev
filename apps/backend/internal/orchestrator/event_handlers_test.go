@@ -153,8 +153,13 @@ type mockAgentManager struct {
 	// isAgentRunningFn, when non-nil, overrides isAgentRunning for
 	// IsAgentRunningForSession. Lets tests model state changes mid-sequence
 	// (e.g. stream disconnect between PromptAgent call and queue write).
-	isAgentRunningFn    func(context.Context, string) bool
-	isAgentReadyFn      func(context.Context, string) bool
+	isAgentRunningFn func(context.Context, string) bool
+	isAgentReadyFn   func(context.Context, string) bool
+	// rowLivenessFn, when non-nil, makes the mock satisfy the orchestrator's
+	// optional rowLivenessProber so reconciliation tests can drive runtime-aware
+	// liveness per row. Nil → the mock is not a prober and reconciliation treats
+	// every row as Unknown.
+	rowLivenessFn       func(*models.ExecutorRunning) models.ProcessLiveness
 	resolveProfileErr   error
 	restartProcessCalls []string // tracks execution IDs passed to RestartAgentProcess
 	restartProcessErr   error
@@ -165,6 +170,7 @@ type mockAgentManager struct {
 	mu                      sync.Mutex
 	stopAgentWithReasonArgs []stopAgentCall // tracks StopAgentWithReason calls
 	stopAgentWithReasonErr  error           // optional error to return from StopAgentWithReason
+	stopAgentWithReasonFunc func(context.Context, string, string, bool) error
 	stopAgentArgs           []stopAgentCall // tracks StopAgent calls (no reason)
 	stopAgentErr            error           // optional error to return from StopAgent
 
@@ -260,15 +266,20 @@ func (m *mockAgentManager) StopAgent(_ context.Context, agentExecutionID string,
 	m.stopAgentArgs = append(m.stopAgentArgs, stopAgentCall{ExecutionID: agentExecutionID, Force: force})
 	return m.stopAgentErr
 }
-func (m *mockAgentManager) StopAgentWithReason(_ context.Context, agentExecutionID, reason string, force bool) error {
+func (m *mockAgentManager) StopAgentWithReason(ctx context.Context, agentExecutionID, reason string, force bool) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.stopAgentWithReasonArgs = append(m.stopAgentWithReasonArgs, stopAgentCall{
 		ExecutionID: agentExecutionID,
 		Reason:      reason,
 		Force:       force,
 	})
-	return m.stopAgentWithReasonErr
+	hook := m.stopAgentWithReasonFunc
+	err := m.stopAgentWithReasonErr
+	m.mu.Unlock()
+	if hook != nil {
+		return hook(ctx, agentExecutionID, reason, force)
+	}
+	return err
 }
 func (m *mockAgentManager) PromptAgent(_ context.Context, executionID string, prompt string, _ []v1.MessageAttachment, dispatchOnly bool) (*executor.PromptResult, error) {
 	m.mu.Lock()
@@ -317,6 +328,16 @@ func (m *mockAgentManager) IsAgentReadyForPrompt(ctx context.Context, sessionID 
 		return m.isAgentReadyFn(ctx, sessionID)
 	}
 	return m.IsAgentRunningForSession(ctx, sessionID)
+}
+
+// RowLiveness makes the mock satisfy the orchestrator's optional
+// rowLivenessProber. It delegates to rowLivenessFn when set, else reports Unknown
+// so tests that don't care about liveness see the safe default.
+func (m *mockAgentManager) RowLiveness(row *models.ExecutorRunning) models.ProcessLiveness {
+	if m.rowLivenessFn != nil {
+		return m.rowLivenessFn(row)
+	}
+	return models.ProcessLivenessUnknown
 }
 func (m *mockAgentManager) ResolveAgentProfile(_ context.Context, _ string) (*executor.AgentProfileInfo, error) {
 	if m.resolveProfileErr != nil {

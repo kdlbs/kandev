@@ -48,6 +48,7 @@ export type SwimlaneContainerProps = {
   selectedRepositoryIds?: string[];
   selectedIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
+  onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
   onToggleMultiSelect?: () => void;
 };
@@ -119,6 +120,7 @@ type WorkflowItemProps = {
   showMaximizeButton?: boolean;
   selectedIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
+  onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
   onToggleMultiSelect?: () => void;
 };
@@ -263,6 +265,7 @@ export function SwimlaneContainer({
   selectedRepositoryIds = [],
   selectedIds,
   onToggleSelect,
+  onSelectRange,
   isMultiSelectMode,
   onToggleMultiSelect,
 }: SwimlaneContainerProps) {
@@ -332,6 +335,7 @@ export function SwimlaneContainer({
                 showMaximizeButton={showMaximizeButton}
                 selectedIds={selectedIds}
                 onToggleSelect={onToggleSelect}
+                onSelectRange={onSelectRange}
                 isMultiSelectMode={isMultiSelectMode}
                 onToggleMultiSelect={index === 0 ? onToggleMultiSelect : undefined}
               />

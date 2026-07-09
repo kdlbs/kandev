@@ -52,8 +52,11 @@ func injectSkills(worktreePath, projectSkillDir string, skills []Skill) error {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("mkdir skill %s: %w", sk.Slug, err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(sk.Content), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(renderSkillMarkdown(sk)), 0o644); err != nil {
 			return fmt.Errorf("write SKILL.md for %s: %w", sk.Slug, err)
+		}
+		if err := writeSkillFiles(dir, sk.Files); err != nil {
+			return fmt.Errorf("write support files for %s: %w", sk.Slug, err)
 		}
 	}
 	// git-exclude is best-effort: a worktree without .git (tests, fresh
@@ -61,6 +64,90 @@ func injectSkills(worktreePath, projectSkillDir string, skills []Skill) error {
 	// over it.
 	_ = ensureGitExclude(worktreePath, projectSkillDir)
 	return nil
+}
+
+func writeSkillFiles(skillDir string, files []SkillFile) error {
+	absSkillDir, err := filepath.Abs(skillDir)
+	if err != nil {
+		return err
+	}
+	absSkillDir, err = filepath.EvalSymlinks(absSkillDir)
+	if err != nil {
+		return err
+	}
+	for _, file := range files {
+		rel, ok := cleanRelativeSkillFilePath(file.Path)
+		if !ok {
+			continue
+		}
+		target, ok, err := secureSkillFileDestination(absSkillDir, filepath.FromSlash(rel))
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+		if err := os.WriteFile(target, []byte(file.Content), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func secureSkillFileDestination(absSkillDir, rel string) (string, bool, error) {
+	target, err := filepath.Abs(filepath.Join(absSkillDir, rel))
+	if err != nil {
+		return "", false, err
+	}
+	if !pathStaysInside(absSkillDir, target) {
+		return "", false, nil
+	}
+	parent := filepath.Dir(target)
+	if !parentChainAllowsSkillWrite(absSkillDir, parent) {
+		return "", false, nil
+	}
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return "", false, err
+	}
+	canonParent, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		return "", false, nil
+	}
+	final := filepath.Join(canonParent, filepath.Base(target))
+	if !pathStaysInside(absSkillDir, final) {
+		return "", false, nil
+	}
+	return final, true, nil
+}
+
+func pathStaysInside(absBase, target string) bool {
+	rel, err := filepath.Rel(absBase, target)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func parentChainAllowsSkillWrite(absSkillDir, parent string) bool {
+	rel, err := filepath.Rel(absSkillDir, parent)
+	if err != nil {
+		return false
+	}
+	if rel == "." || rel == "" {
+		return true
+	}
+	cur := absSkillDir
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		cur = filepath.Join(cur, part)
+		info, err := os.Lstat(cur)
+		if err != nil {
+			return true
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // ensureGitExclude appends "<projectSkillDir>/kandev-*" to the
@@ -129,4 +216,16 @@ func resolveGitDir(worktreePath string) (string, error) {
 // /workspace/<projectSkillDir>/kandev-<slug>/SKILL.md.
 func SpritesProjectSkillPath(projectSkillDir, slug string) string {
 	return "/workspace/" + projectSkillDir + "/kandev-" + slug + "/SKILL.md"
+}
+
+func renderSkillMarkdown(sk Skill) string {
+	content := strings.TrimLeft(sk.Content, "\r\n")
+	if hasYAMLFrontmatter(content) {
+		return content
+	}
+	return fmt.Sprintf("---\nname: %s\ndescription: %s\n---\n%s", sk.Slug, sk.Slug, content)
+}
+
+func hasYAMLFrontmatter(content string) bool {
+	return strings.HasPrefix(content, "---\n") || strings.HasPrefix(content, "---\r\n")
 }

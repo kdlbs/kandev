@@ -104,6 +104,41 @@ func TestApplyBasicSettings_ReleaseNotes(t *testing.T) {
 	})
 }
 
+func TestApplyBasicSettings_TasksListPreferences(t *testing.T) {
+	t.Run("sets valid sort and group", func(t *testing.T) {
+		settings := &models.UserSettings{}
+		req := &UpdateUserSettingsRequest{
+			TasksListSort:  ptr("title_asc"),
+			TasksListGroup: ptr("repository"),
+		}
+		if err := applyBasicSettings(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.TasksListSort != "title_asc" {
+			t.Fatalf("TasksListSort = %q, want title_asc", settings.TasksListSort)
+		}
+		if settings.TasksListGroup != "repository" {
+			t.Fatalf("TasksListGroup = %q, want repository", settings.TasksListGroup)
+		}
+	})
+
+	t.Run("rejects invalid sort", func(t *testing.T) {
+		settings := &models.UserSettings{}
+		req := &UpdateUserSettingsRequest{TasksListSort: ptr("priority_desc")}
+		if err := applyBasicSettings(settings, req); err == nil {
+			t.Fatal("expected invalid sort error")
+		}
+	})
+
+	t.Run("rejects invalid group", func(t *testing.T) {
+		settings := &models.UserSettings{}
+		req := &UpdateUserSettingsRequest{TasksListGroup: ptr("assignee")}
+		if err := applyBasicSettings(settings, req); err == nil {
+			t.Fatal("expected invalid group error")
+		}
+	})
+}
+
 func TestApplyBasicSettings_TerminalFontFamily(t *testing.T) {
 	t.Run("nil leaves settings unchanged", func(t *testing.T) {
 		settings := &models.UserSettings{TerminalFontFamily: "Fira Code"}

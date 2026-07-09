@@ -39,7 +39,7 @@ type Service struct {
 	log       *logger.Logger
 	mu        sync.Mutex
 	clientFn  ClientFactory
-	client    Client // singleton, cleared on config change.
+	clients   map[string]Client
 	probeHook func()
 	eventBus  bus.EventBus
 	// taskDeleter is the cascade-delete entry point used by ResetIssueWatch.
@@ -105,19 +105,33 @@ func NewService(store *Store, secrets SecretStore, clientFn ClientFactory, log *
 		secrets:  secrets,
 		log:      log,
 		clientFn: clientFn,
+		clients:  make(map[string]Client),
 	}
 }
 
-// GetConfig returns the singleton config enriched with a HasSecret flag.
+// GetConfig returns the default workspace config enriched with a HasSecret flag.
 func (s *Service) GetConfig(ctx context.Context) (*LinearConfig, error) {
-	cfg, err := s.store.GetConfig(ctx)
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return nil, err
+	}
+	return s.GetConfigForWorkspace(ctx, workspaceID)
+}
+
+// GetConfigForWorkspace returns a workspace config enriched with a HasSecret flag.
+func (s *Service) GetConfigForWorkspace(ctx context.Context, workspaceID string) (*LinearConfig, error) {
+	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := s.store.GetConfigForWorkspace(ctx, workspaceID)
 	if err != nil || cfg == nil {
 		return cfg, err
 	}
 	if s.secrets == nil {
 		return cfg, nil
 	}
-	exists, existsErr := s.secrets.Exists(ctx, SecretKey)
+	exists, existsErr := s.secretExists(ctx, workspaceID)
 	if existsErr != nil {
 		s.log.Warn("linear: secret exists check failed", zap.Error(existsErr))
 	}
@@ -130,6 +144,20 @@ var ErrInvalidConfig = errors.New("linear: invalid configuration")
 
 // SetConfig is upsert. An empty Secret on update keeps the existing token.
 func (s *Service) SetConfig(ctx context.Context, req *SetConfigRequest) (*LinearConfig, error) {
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return nil, err
+	}
+	return s.SetConfigForWorkspace(ctx, workspaceID, req)
+}
+
+// SetConfigForWorkspace is upsert for one workspace. An empty Secret on update
+// keeps the existing token.
+func (s *Service) SetConfigForWorkspace(ctx context.Context, workspaceID string, req *SetConfigRequest) (*LinearConfig, error) {
+	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	if err := validateConfigRequest(req); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidConfig, err.Error())
 	}
@@ -137,40 +165,66 @@ func (s *Service) SetConfig(ctx context.Context, req *SetConfigRequest) (*Linear
 		AuthMethod:     req.AuthMethod,
 		DefaultTeamKey: req.DefaultTeamKey,
 	}
-	if err := s.store.UpsertConfig(ctx, cfg); err != nil {
+	if err := s.store.UpsertConfigForWorkspace(ctx, workspaceID, cfg); err != nil {
 		return nil, fmt.Errorf("upsert linear config: %w", err)
 	}
 	if req.Secret != "" && s.secrets != nil {
-		if err := s.secrets.Set(ctx, SecretKey, "Linear API key", req.Secret); err != nil {
+		if err := s.secrets.Set(ctx, SecretKeyForWorkspace(workspaceID), "Linear API key", req.Secret); err != nil {
 			return nil, fmt.Errorf("store linear secret: %w", err)
 		}
 	}
-	s.invalidateClient()
+	s.invalidateClient(workspaceID)
 	// Probe asynchronously so a slow Linear doesn't stall the save response.
 	go func() {
-		s.RecordAuthHealth(context.Background())
+		s.RecordAuthHealthForWorkspace(context.Background(), workspaceID)
 	}()
-	return s.GetConfig(ctx)
+	return s.GetConfigForWorkspace(ctx, workspaceID)
 }
 
 // DeleteConfig removes both the config row and the stored secret.
 func (s *Service) DeleteConfig(ctx context.Context) error {
-	if err := s.store.DeleteConfig(ctx); err != nil {
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return err
+	}
+	return s.DeleteConfigForWorkspace(ctx, workspaceID)
+}
+
+// DeleteConfigForWorkspace removes both the config row and the stored secret.
+func (s *Service) DeleteConfigForWorkspace(ctx context.Context, workspaceID string) error {
+	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	if err != nil {
+		return err
+	}
+	if err := s.store.DeleteConfigForWorkspace(ctx, workspaceID); err != nil {
 		return err
 	}
 	if s.secrets != nil {
-		if err := s.secrets.Delete(ctx, SecretKey); err != nil {
+		if err := s.secrets.Delete(ctx, SecretKeyForWorkspace(workspaceID)); err != nil {
 			s.log.Warn("linear: secret delete failed", zap.Error(err))
 		}
 	}
-	s.invalidateClient()
+	s.invalidateClient(workspaceID)
 	return nil
 }
 
 // TestConnection validates credentials either from a fresh SetConfigRequest
 // (before persisting) or from the stored config (after saving).
 func (s *Service) TestConnection(ctx context.Context, req *SetConfigRequest) (*TestConnectionResult, error) {
-	cfg, secret, err := s.resolveCredentials(ctx, req)
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
+	}
+	return s.TestConnectionForWorkspace(ctx, workspaceID, req)
+}
+
+// TestConnectionForWorkspace validates credentials for one workspace.
+func (s *Service) TestConnectionForWorkspace(ctx context.Context, workspaceID string, req *SetConfigRequest) (*TestConnectionResult, error) {
+	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	if err != nil {
+		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
+	}
+	cfg, secret, err := s.resolveCredentials(ctx, workspaceID, req)
 	if err != nil {
 		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
 	}
@@ -180,7 +234,20 @@ func (s *Service) TestConnection(ctx context.Context, req *SetConfigRequest) (*T
 
 // ProbeAuth validates the stored credentials.
 func (s *Service) ProbeAuth(ctx context.Context) (*TestConnectionResult, error) {
-	client, err := s.clientFor(ctx)
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
+	}
+	return s.ProbeAuthForWorkspace(ctx, workspaceID)
+}
+
+// ProbeAuthForWorkspace validates the stored credentials for one workspace.
+func (s *Service) ProbeAuthForWorkspace(ctx context.Context, workspaceID string) (*TestConnectionResult, error) {
+	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	if err != nil {
+		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
+	}
+	client, err := s.clientFor(ctx, workspaceID)
 	if err != nil {
 		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
 	}
@@ -209,9 +276,31 @@ func (s *Service) SetProbeHook(fn func()) {
 
 // RecordAuthHealth probes credentials and writes the outcome onto the row.
 func (s *Service) RecordAuthHealth(ctx context.Context) {
+	workspaceIDs, err := s.store.ListConfigWorkspaceIDs(ctx)
+	if err != nil {
+		s.log.Warn("linear: list config workspaces failed", zap.Error(err))
+		return
+	}
+	if len(workspaceIDs) == 0 {
+		s.fireProbeHook()
+		return
+	}
+	for _, workspaceID := range workspaceIDs {
+		s.RecordAuthHealthForWorkspace(ctx, workspaceID)
+	}
+}
+
+// RecordAuthHealthForWorkspace probes credentials and writes the outcome onto
+// one workspace row.
+func (s *Service) RecordAuthHealthForWorkspace(ctx context.Context, workspaceID string) {
+	workspaceID, normalizeErr := s.normalizeWorkspaceID(workspaceID)
+	if normalizeErr != nil {
+		s.log.Warn("linear: resolve workspace for auth health failed", zap.Error(normalizeErr))
+		return
+	}
 	probeCtx, cancel := context.WithTimeout(ctx, authProbeTimeout)
 	defer cancel()
-	res, err := s.ProbeAuth(probeCtx)
+	res, err := s.ProbeAuthForWorkspace(probeCtx, workspaceID)
 	ok := err == nil && res != nil && res.OK
 	errMsg := ""
 	switch {
@@ -228,9 +317,13 @@ func (s *Service) RecordAuthHealth(ctx context.Context) {
 	// still record the failure.
 	writeCtx, writeCancel := context.WithTimeout(context.Background(), authHealthWriteTimeout)
 	defer writeCancel()
-	if updateErr := s.store.UpdateAuthHealth(writeCtx, ok, errMsg, orgSlug, time.Now().UTC()); updateErr != nil {
+	if updateErr := s.store.UpdateAuthHealthForWorkspace(writeCtx, workspaceID, ok, errMsg, orgSlug, time.Now().UTC()); updateErr != nil {
 		s.log.Warn("linear: update auth health failed", zap.Error(updateErr))
 	}
+	s.fireProbeHook()
+}
+
+func (s *Service) fireProbeHook() {
 	s.mu.Lock()
 	hook := s.probeHook
 	s.mu.Unlock()
@@ -241,7 +334,11 @@ func (s *Service) RecordAuthHealth(ctx context.Context) {
 
 // GetIssue loads a Linear issue by identifier (e.g. "ENG-123").
 func (s *Service) GetIssue(ctx context.Context, identifier string) (*LinearIssue, error) {
-	client, err := s.clientFor(ctx)
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return nil, err
+	}
+	client, err := s.clientFor(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +347,11 @@ func (s *Service) GetIssue(ctx context.Context, identifier string) (*LinearIssue
 
 // SetIssueState moves an issue into the requested workflow state.
 func (s *Service) SetIssueState(ctx context.Context, issueID, stateID string) error {
-	client, err := s.clientFor(ctx)
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return err
+	}
+	client, err := s.clientFor(ctx, workspaceID)
 	if err != nil {
 		return err
 	}
@@ -259,7 +360,11 @@ func (s *Service) SetIssueState(ctx context.Context, issueID, stateID string) er
 
 // ListTeams populates the team selector on the settings page.
 func (s *Service) ListTeams(ctx context.Context) ([]LinearTeam, error) {
-	client, err := s.clientFor(ctx)
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return nil, err
+	}
+	client, err := s.clientFor(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -268,7 +373,11 @@ func (s *Service) ListTeams(ctx context.Context) ([]LinearTeam, error) {
 
 // ListStates returns the workflow states for a team identified by its key.
 func (s *Service) ListStates(ctx context.Context, teamKey string) ([]LinearWorkflowState, error) {
-	client, err := s.clientFor(ctx)
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return nil, err
+	}
+	client, err := s.clientFor(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +386,11 @@ func (s *Service) ListStates(ctx context.Context, teamKey string) ([]LinearWorkf
 
 // ListLabels returns the issue labels for a team identified by its key.
 func (s *Service) ListLabels(ctx context.Context, teamKey string) ([]LinearLabel, error) {
-	client, err := s.clientFor(ctx)
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return nil, err
+	}
+	client, err := s.clientFor(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -287,7 +400,11 @@ func (s *Service) ListLabels(ctx context.Context, teamKey string) ([]LinearLabel
 // ListUsers returns the members of a team identified by its key. Used to
 // populate creator / assignee selectors on the watcher filter UI.
 func (s *Service) ListUsers(ctx context.Context, teamKey string) ([]LinearUser, error) {
-	client, err := s.clientFor(ctx)
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return nil, err
+	}
+	client, err := s.clientFor(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +413,20 @@ func (s *Service) ListUsers(ctx context.Context, teamKey string) ([]LinearUser, 
 
 // SearchIssues runs a filtered search.
 func (s *Service) SearchIssues(ctx context.Context, filter SearchFilter, pageToken string, maxResults int) (*SearchResult, error) {
-	client, err := s.clientFor(ctx)
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return nil, err
+	}
+	return s.SearchIssuesForWorkspace(ctx, workspaceID, filter, pageToken, maxResults)
+}
+
+// SearchIssuesForWorkspace runs a filtered search against one workspace's client.
+func (s *Service) SearchIssuesForWorkspace(ctx context.Context, workspaceID string, filter SearchFilter, pageToken string, maxResults int) (*SearchResult, error) {
+	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	client, err := s.clientFor(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -304,16 +434,23 @@ func (s *Service) SearchIssues(ctx context.Context, filter SearchFilter, pageTok
 }
 
 // clientFor returns the cached client, creating it if needed.
-func (s *Service) clientFor(ctx context.Context) (Client, error) {
+func (s *Service) clientFor(ctx context.Context, workspaceID string) (Client, error) {
+	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
-	if s.client != nil {
-		c := s.client
+	if s.clients == nil {
+		s.clients = make(map[string]Client)
+	}
+	if s.clients[workspaceID] != nil {
+		c := s.clients[workspaceID]
 		s.mu.Unlock()
 		return c, nil
 	}
 	s.mu.Unlock()
 
-	cfg, err := s.store.GetConfig(ctx)
+	cfg, err := s.store.GetConfigForWorkspace(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -322,7 +459,7 @@ func (s *Service) clientFor(ctx context.Context) (Client, error) {
 	}
 	secret := ""
 	if s.secrets != nil {
-		secret, err = s.secrets.Reveal(ctx, SecretKey)
+		secret, err = s.revealSecret(ctx, workspaceID)
 		if err != nil {
 			return nil, fmt.Errorf("read linear secret: %w", err)
 		}
@@ -333,23 +470,28 @@ func (s *Service) clientFor(ctx context.Context) (Client, error) {
 	client := s.clientFn(cfg, secret)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.client != nil {
-		return s.client, nil
+	if s.clients == nil {
+		s.clients = make(map[string]Client)
 	}
-	s.client = client
+	if s.clients[workspaceID] != nil {
+		return s.clients[workspaceID], nil
+	}
+	s.clients[workspaceID] = client
 	return client, nil
 }
 
 // invalidateClient drops the cached client so the next request rebuilds it.
-func (s *Service) invalidateClient() {
+func (s *Service) invalidateClient(workspaceID string) {
 	s.mu.Lock()
-	s.client = nil
+	if s.clients != nil {
+		delete(s.clients, workspaceID)
+	}
 	s.mu.Unlock()
 }
 
 // resolveCredentials picks credentials for a test: inline if the request
 // carries a secret, otherwise the stored secret.
-func (s *Service) resolveCredentials(ctx context.Context, req *SetConfigRequest) (*LinearConfig, string, error) {
+func (s *Service) resolveCredentials(ctx context.Context, workspaceID string, req *SetConfigRequest) (*LinearConfig, string, error) {
 	cfg := &LinearConfig{
 		AuthMethod: req.AuthMethod,
 	}
@@ -359,7 +501,7 @@ func (s *Service) resolveCredentials(ctx context.Context, req *SetConfigRequest)
 	if s.secrets == nil {
 		return nil, "", errors.New("no secret store configured")
 	}
-	secret, err := s.secrets.Reveal(ctx, SecretKey)
+	secret, err := s.revealSecret(ctx, workspaceID)
 	if err != nil {
 		s.log.Warn("linear: secret reveal failed", zap.Error(err))
 		return nil, "", fmt.Errorf("read linear secret: %w", err)
@@ -367,7 +509,7 @@ func (s *Service) resolveCredentials(ctx context.Context, req *SetConfigRequest)
 	if secret == "" {
 		return nil, "", errors.New("no api key stored — paste one to test")
 	}
-	stored, storeErr := s.store.GetConfig(ctx)
+	stored, storeErr := s.store.GetConfigForWorkspace(ctx, workspaceID)
 	if storeErr != nil {
 		// Soft-fail: a transient DB error here only loses the saved-config
 		// fallback values; the inline credentials still work for the test.
@@ -377,6 +519,46 @@ func (s *Service) resolveCredentials(ctx context.Context, req *SetConfigRequest)
 		cfg.AuthMethod = stored.AuthMethod
 	}
 	return cfg, secret, nil
+}
+
+func (s *Service) defaultWorkspaceID() (string, error) {
+	return s.store.defaultWorkspaceID()
+}
+
+func (s *Service) normalizeWorkspaceID(workspaceID string) (string, error) {
+	if workspaceID != "" {
+		return workspaceID, nil
+	}
+	return s.defaultWorkspaceID()
+}
+
+func (s *Service) secretExists(ctx context.Context, workspaceID string) (bool, error) {
+	if s.secrets == nil {
+		return false, nil
+	}
+	exists, err := s.secrets.Exists(ctx, SecretKeyForWorkspace(workspaceID))
+	if err != nil || exists {
+		return exists, err
+	}
+	return s.secrets.Exists(ctx, SecretKey)
+}
+
+func (s *Service) revealSecret(ctx context.Context, workspaceID string) (string, error) {
+	if s.secrets == nil {
+		return "", nil
+	}
+	secret, err := s.secrets.Reveal(ctx, SecretKeyForWorkspace(workspaceID))
+	if err == nil && secret != "" {
+		return secret, nil
+	}
+	legacy, legacyErr := s.secrets.Reveal(ctx, SecretKey)
+	if legacyErr == nil && legacy != "" {
+		return legacy, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return "", legacyErr
 }
 
 func validateConfigRequest(req *SetConfigRequest) error {

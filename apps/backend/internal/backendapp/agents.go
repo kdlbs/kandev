@@ -119,6 +119,10 @@ func provideLifecycleManager(
 	preparerRegistry.Register(models.ExecutorTypeSSH, lifecycle.NewSSHPreparer(log))
 	lifecycleMgr.SetPreparerRegistry(preparerRegistry)
 	lifecycleMgr.SetSecretStore(secretStore)
+	// Record the standalone agentctl control-server PID (populated by
+	// provideAgentctlLauncher, which runs before this) so local/standalone
+	// executor rows carry a real host-local liveness handle.
+	lifecycleMgr.SetStandaloneHostPID(cfg.Agent.StandalonePID)
 	// Wire the agent_profiles reader so the launch-prep skill deploy hook
 	// (ADR 0005 Wave A) can resolve full profile rows including the office
 	// enrichment fields. Without a wired SkillDeployer this is a no-op,

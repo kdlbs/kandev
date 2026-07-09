@@ -187,7 +187,7 @@ func (s *Service) ResetIssueWatch(ctx context.Context, watchID string) (int, err
 // the JIRA watcher.
 func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*LinearIssue, error) {
 	defer s.stampWatchLastPolled(w.ID)
-	client, err := s.clientFor(ctx)
+	client, err := s.clientFor(ctx, w.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}

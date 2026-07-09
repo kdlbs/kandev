@@ -223,10 +223,11 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		d.RegisterFunc(ws.ActionMCPDeleteAgentProfile, h.handleDeleteAgentProfile)
 		count += 6
 	}
-	// list_executor_profiles is always available (read-only, used in task mode for create_task)
+	// Executor discovery/profile listing is always available (read-only, used in task mode for create_task)
 	if h.taskSvc != nil {
+		d.RegisterFunc(ws.ActionMCPListExecutors, h.handleListExecutors)
 		d.RegisterFunc(ws.ActionMCPListExecutorProfiles, h.handleListExecutorProfiles)
-		count++
+		count += 2
 	}
 	if h.mcpConfigSvc != nil {
 		d.RegisterFunc(ws.ActionMCPGetMcpConfig, h.handleGetMcpConfig)
@@ -1459,7 +1460,8 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 }
 
 // handleGetTaskConversation returns paginated conversation history for a task.
-// If session_id is omitted, it uses the task's primary session.
+// If session_id is omitted, it uses the task's primary session and falls back
+// to the latest session when no primary session exists.
 func (h *Handlers) handleGetTaskConversation(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	req, errResp := parseTaskConversationRequest(msg)
 	if errResp != nil {
@@ -1538,10 +1540,20 @@ func (h *Handlers) resolveConversationSession(ctx context.Context, msg *ws.Messa
 		return session, nil
 	}
 	session, err := h.taskSvc.GetPrimarySession(ctx, taskID)
-	if err != nil || session == nil {
+	if err == nil && session != nil {
+		return session, nil
+	}
+	if err != nil && !errors.Is(err, taskrepo.ErrNoPrimarySession) {
+		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to get task session")
+	}
+	sessions, listErr := h.taskSvc.ListTaskSessions(ctx, taskID)
+	if listErr != nil {
+		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to list task sessions")
+	}
+	if len(sessions) == 0 {
 		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task has no session")
 	}
-	return session, nil
+	return sessions[0], nil
 }
 
 func wsError(id, action, code, message string) *ws.Message {

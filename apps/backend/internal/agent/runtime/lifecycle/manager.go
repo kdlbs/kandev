@@ -122,6 +122,22 @@ type Manager struct {
 	// returns CodeNpxCacheCorrupted. NewManager wires routingerr.RemediateNpxCache;
 	// tests override it to avoid touching the real filesystem.
 	remediateNpxCache func(path string, log *zap.Logger) error
+
+	// standaloneHostPID is the OS process id of the standalone agentctl
+	// control-server this backend spawned on the local host. It is the
+	// host-local liveness handle recorded in executors_running.local_pid for
+	// local/standalone rows (see persistence.go / #1597 truthful executor rows).
+	// 0 when unset (tests, or before the launcher wires it). Never used for
+	// SSH/remote rows — their process lives on another host.
+	standaloneHostPID atomic.Int64
+}
+
+// SetStandaloneHostPID records the local agentctl control-server PID so
+// local/standalone executor rows can carry a real host-local liveness handle.
+// Wired during DI from the agentctl launcher (see backendapp). Safe to leave
+// unset in tests that don't exercise the persistence path.
+func (m *Manager) SetStandaloneHostPID(pid int) {
+	m.standaloneHostPID.Store(int64(pid))
 }
 
 // NewManager creates a new lifecycle manager.

@@ -14,6 +14,7 @@ import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-d
 import { TaskGitHubIssueDialog } from "@/components/task/task-github-issue-dialog";
 import { TaskGitHubPRDialog } from "@/components/task/task-github-pr-dialog";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
+import { useTaskMultiSelectStore } from "@/hooks/use-task-multi-select";
 import { repositorySlug } from "@/lib/repository-slug";
 import { formatUserHomePath } from "@/lib/utils";
 import { repositoryId as toRepositoryId, type Repository, type TaskState } from "@/lib/types/http";
@@ -82,6 +83,8 @@ interface KanbanCardProps {
   isSelected?: boolean;
   selectedIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
+  /** Shift-click range select within this card's column. */
+  onRangeSelect?: (taskId: string) => void;
   isMultiSelectMode?: boolean;
 }
 
@@ -111,6 +114,7 @@ function useKanbanCardMenus({
 >) {
   const moveTargets = useKanbanCardMoveTargets(task.id, steps);
   const moveTasks = useTaskWorkflowMove();
+  const { sortByDisplayOrder, getWorkflowIdForTask } = useTaskMultiSelectStore();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
   const [showPRDialog, setShowPRDialog] = useState(false);
@@ -134,13 +138,22 @@ function useKanbanCardMenus({
   };
 
   const selectedTaskIds = isSelected && selectedIds?.size ? [...selectedIds] : [task.id];
+  // Sort into board order lazily (only when a move actually fires) so a backward
+  // range selection isn't scrambled — and we don't pay it on every card render.
+  const orderedSelectedIds = () => sortByDisplayOrder(selectedTaskIds);
+  // A selection spanning workflows can't safely use same-workflow "Move to" (it
+  // would drag other-workflow cards into this card's workflow), so gate it — only
+  // computed for a genuine multi-selection to avoid per-render snapshot scans.
+  const isMixedWorkflowSelection =
+    selectedTaskIds.length > 1 &&
+    new Set(selectedTaskIds.map((id) => getWorkflowIdForTask(id))).size > 1;
   const moveSelectedToStep = (stepId: string) => {
     if (selectedTaskIds.length === 1 && selectedTaskIds[0] === task.id && onMove) {
       onMove(task, stepId);
       return;
     }
     if (!moveTargets.currentWorkflowId) return;
-    runMoveTasks(selectedTaskIds, moveTargets.currentWorkflowId, stepId);
+    runMoveTasks(orderedSelectedIds(), moveTargets.currentWorkflowId, stepId);
   };
 
   const menuBase = {
@@ -168,9 +181,11 @@ function useKanbanCardMenus({
     }),
     contextMenuEntries: buildKanbanCardMenuEntries({
       ...menuBase,
-      onMoveToStep: moveSelectedToStep,
+      // Hide same-workflow "Move to" for a mixed-workflow selection; only the
+      // explicit "Send to workflow" path remains (matches the toolbar guard).
+      onMoveToStep: isMixedWorkflowSelection ? undefined : moveSelectedToStep,
       onSendToWorkflow: (workflowId, stepId) => {
-        runMoveTasks(selectedTaskIds, workflowId, stepId);
+        runMoveTasks(orderedSelectedIds(), workflowId, stepId);
       },
     }),
     showDeleteConfirm,
@@ -251,6 +266,42 @@ function KanbanCardDialogs({
   );
 }
 
+/**
+ * Cmd/Ctrl-click toggles a single card; Shift-click range-selects within the
+ * column; either modifier enters multi-select mode without the toggle button.
+ * A plain click toggles while in multi-select mode, otherwise previews/opens.
+ */
+/** @internal Exported for unit testing the four-branch click dispatch. */
+export function dispatchKanbanCardClick(
+  e: React.MouseEvent,
+  taskId: string,
+  task: Task,
+  handlers: {
+    onToggleSelect?: (taskId: string) => void;
+    onRangeSelect?: (taskId: string) => void;
+    onClick?: (task: Task) => void;
+    isMultiSelectMode?: boolean;
+  },
+): void {
+  // Only intercept a modifier click when the matching handler is wired, so a
+  // card rendered without selection handlers still opens on Cmd/Shift click.
+  if ((e.metaKey || e.ctrlKey) && handlers.onToggleSelect) {
+    e.preventDefault();
+    handlers.onToggleSelect(taskId);
+    return;
+  }
+  if (e.shiftKey && handlers.onRangeSelect) {
+    e.preventDefault();
+    handlers.onRangeSelect(taskId);
+    return;
+  }
+  if (handlers.isMultiSelectMode && handlers.onToggleSelect) {
+    handlers.onToggleSelect(taskId);
+    return;
+  }
+  handlers.onClick?.(task);
+}
+
 function useActiveWorkspaceRepositories() {
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
   return useAppStore((state) =>
@@ -274,6 +325,7 @@ export function KanbanCard({
   isSelected,
   selectedIds,
   onToggleSelect,
+  onRangeSelect,
   isMultiSelectMode,
 }: KanbanCardProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -306,18 +358,13 @@ export function KanbanCard({
     onMove,
   });
 
-  const handleClick = () => {
-    if (isMultiSelectMode) {
-      onToggleSelect?.(task.id);
-      return;
-    }
-    onClick?.(task);
-  };
-
-  const handleCheckboxClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onToggleSelect?.(task.id);
-  };
+  const handleClick = (e: React.MouseEvent) =>
+    dispatchKanbanCardClick(e, task.id, task, {
+      onToggleSelect,
+      onRangeSelect,
+      onClick,
+      isMultiSelectMode,
+    });
 
   return (
     <>
@@ -338,7 +385,10 @@ export function KanbanCard({
           isArchiving={isArchiving}
           menuEntries={dropdownMenuEntries}
           onClick={handleClick}
-          onCheckboxClick={handleCheckboxClick}
+          onCheckboxClick={(e) => {
+            e.stopPropagation();
+            onToggleSelect?.(task.id);
+          }}
           onOpenFullPage={onOpenFullPage}
         />
       </KanbanCardContextMenu>

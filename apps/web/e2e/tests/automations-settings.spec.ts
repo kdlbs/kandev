@@ -284,4 +284,69 @@ test.describe("Automations settings page", () => {
     const toggleAfterReload = rowAfterReload.locator('[role="switch"]');
     await expect(toggleAfterReload).not.toBeChecked();
   });
+
+  test("delete individual and all runs from Recent Runs", async ({
+    testPage,
+    seedData,
+    apiClient,
+  }) => {
+    // Seed an automation and two run rows via HTTP (avoids Node-24 WS requirement).
+    const automation = await apiClient.seedAutomation({
+      workspaceId: seedData.workspaceId,
+      name: "Run Delete Test",
+      workflowId: seedData.workflowId,
+      workflowStepId: seedData.startStepId,
+    });
+    await apiClient.seedAutomationRun(automation.id, "skipped");
+    await apiClient.seedAutomationRun(automation.id, "skipped");
+
+    // Navigate to the editor page for this automation.
+    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/automations/${automation.id}`);
+    await testPage.getByTestId("automation-editor").waitFor({ state: "visible", timeout: 15_000 });
+
+    // Scroll to the bottom to ensure Recent Runs is visible.
+    const scrollContainer = testPage.getByTestId("settings-scroll-container");
+    await scrollContainer.evaluate((el) => (el.scrollTop = el.scrollHeight));
+
+    // Expand the Recent Runs section.
+    const recentRunsButton = testPage.locator("button", { hasText: /Recent Runs/ });
+    await recentRunsButton.waitFor({ state: "visible", timeout: 10_000 });
+    await recentRunsButton.click();
+
+    // Wait for the table to appear with at least one row.
+    const tbody = testPage.locator("table tbody");
+    await tbody.waitFor({ state: "visible", timeout: 5_000 });
+    await expect(tbody.locator("tr")).toHaveCount(2, { timeout: 10_000 });
+
+    // Delete-all button should be visible in the header.
+    const deleteAllBtn = testPage.getByTestId("delete-all-runs");
+    await expect(deleteAllBtn).toBeVisible();
+
+    // Before hover, the per-row delete button is transparent and
+    // non-interactive — Playwright's toBeVisible() would pass even with
+    // opacity:0, so assert the actual CSS values gating visibility/clicks.
+    const firstRow = tbody.locator("tr").first();
+    const deleteRowBtn = firstRow.getByTestId("delete-run");
+    await expect(deleteRowBtn).toHaveCSS("opacity", "0");
+    await expect(deleteRowBtn).toHaveCSS("pointer-events", "none");
+
+    // Hover over the first row to reveal its delete button and click it.
+    await firstRow.hover();
+    await expect(deleteRowBtn).toHaveCSS("opacity", "1");
+    await expect(deleteRowBtn).toHaveCSS("pointer-events", "auto");
+    await deleteRowBtn.click();
+
+    // One run removed — table should now have 1 row.
+    await expect(tbody.locator("tr")).toHaveCount(1, { timeout: 5_000 });
+
+    // Delete all remaining runs — click trigger, and confirm the dialog uses
+    // unqualified wording rather than a count that could understate runs
+    // beyond what's currently loaded in the table.
+    await deleteAllBtn.click();
+    await expect(testPage.getByText(/permanently remove all run records/)).toBeVisible();
+    await testPage.getByTestId("delete-all-runs-confirm").click();
+
+    // Table should show the empty state.
+    await expect(testPage.getByText("No runs yet")).toBeVisible({ timeout: 5_000 });
+  });
 });

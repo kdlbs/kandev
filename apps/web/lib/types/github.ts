@@ -239,6 +239,28 @@ export type RepoFilter = {
   name: string;
 };
 
+export type GitHubRepoScopeMode = "all" | "orgs" | "repos";
+
+export type GitHubWorkspaceSettings = {
+  workspace_id: string;
+  repo_scope_mode: GitHubRepoScopeMode;
+  repo_scope_orgs: string[];
+  repo_scope_repos: RepoFilter[];
+  saved_presets?: unknown;
+  default_query_presets?: unknown | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type UpdateGitHubWorkspaceSettingsRequest = {
+  workspace_id: string;
+  repo_scope_mode?: GitHubRepoScopeMode;
+  repo_scope_orgs?: string[];
+  repo_scope_repos?: RepoFilter[];
+  saved_presets?: unknown;
+  default_query_presets?: unknown | null;
+};
+
 export type GitHubOrg = {
   login: string;
   avatar_url: string;

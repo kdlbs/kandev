@@ -26,7 +26,7 @@ import type { LinearLabel, LinearTeam, LinearUser, LinearWorkflowState } from "@
 // dataset is cached so switching teams renders an empty list (or the cached
 // list) without us having to setState in an effect — only the lookup
 // expression changes.
-export function useTeamsAndStates(teamKey: string) {
+export function useTeamsAndStates(workspaceId: string, teamKey: string) {
   const [teams, setTeams] = useState<LinearTeam[]>([]);
   const [statesByTeam, setStatesByTeam] = useState<Record<string, LinearWorkflowState[]>>({});
   const [labelsByTeam, setLabelsByTeam] = useState<Record<string, LinearLabel[]>>({});
@@ -35,7 +35,7 @@ export function useTeamsAndStates(teamKey: string) {
 
   useEffect(() => {
     let cancelled = false;
-    listLinearTeams()
+    listLinearTeams({ workspaceId })
       .then((res) => {
         if (!cancelled) setTeams(res.teams ?? []);
       })
@@ -45,7 +45,7 @@ export function useTeamsAndStates(teamKey: string) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [workspaceId]);
 
   useEffect(() => {
     // Capture the Set once so cleanup uses the exact instance the effect
@@ -64,7 +64,7 @@ export function useTeamsAndStates(teamKey: string) {
       anyFailed = true;
     };
     Promise.allSettled([
-      listLinearStates(teamKey)
+      listLinearStates(teamKey, { workspaceId })
         .then((res) => {
           if (!cancelled) setStatesByTeam((prev) => ({ ...prev, [teamKey]: res.states ?? [] }));
         })
@@ -72,7 +72,7 @@ export function useTeamsAndStates(teamKey: string) {
           markFailed();
           if (!cancelled) setStatesByTeam((prev) => ({ ...prev, [teamKey]: [] }));
         }),
-      listLinearLabels(teamKey)
+      listLinearLabels(teamKey, { workspaceId })
         .then((res) => {
           if (!cancelled) setLabelsByTeam((prev) => ({ ...prev, [teamKey]: res.labels ?? [] }));
         })
@@ -80,7 +80,7 @@ export function useTeamsAndStates(teamKey: string) {
           markFailed();
           if (!cancelled) setLabelsByTeam((prev) => ({ ...prev, [teamKey]: [] }));
         }),
-      listLinearUsers(teamKey)
+      listLinearUsers(teamKey, { workspaceId })
         .then((res) => {
           if (!cancelled) setUsersByTeam((prev) => ({ ...prev, [teamKey]: res.users ?? [] }));
         })
@@ -104,7 +104,7 @@ export function useTeamsAndStates(teamKey: string) {
       // also evicting a healthy cache after a normal team change.
       if (!loaded) fetched.delete(teamKey);
     };
-  }, [teamKey]);
+  }, [workspaceId, teamKey]);
 
   const states = teamKey ? (statesByTeam[teamKey] ?? []) : [];
   const labels = teamKey ? (labelsByTeam[teamKey] ?? []) : [];

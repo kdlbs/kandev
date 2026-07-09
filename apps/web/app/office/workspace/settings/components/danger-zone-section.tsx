@@ -21,8 +21,24 @@ import {
   type WorkspaceDeletionSummary,
 } from "@/lib/api/domains/office-api";
 import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
+import {
+  isOfficeWorkspace,
+  workspaceHomeHref,
+} from "@/components/app-sidebar/app-sidebar-workspace-navigation";
 
 type Workspace = WorkspaceState["items"][number];
+
+export function resolvePostDeleteWorkspace(
+  deletedWorkspaceId: string,
+  workspaces: Workspace[],
+): Workspace | null {
+  const remaining = workspaces.filter((item) => item.id !== deletedWorkspaceId);
+  return remaining.find(isOfficeWorkspace) ?? remaining[0] ?? null;
+}
+
+export function postDeleteWorkspaceHref(workspace: Workspace | null): string {
+  return workspace ? workspaceHomeHref(workspace) : "/office/setup?mode=new";
+}
 
 function SettingCard({ children }: { children: React.ReactNode }) {
   return <div className="rounded-lg border border-border p-4 space-y-4">{children}</div>;
@@ -133,10 +149,10 @@ export function DangerZoneSection({
     try {
       await deleteWorkspace(workspace.id, confirmName);
       const remaining = workspaces.filter((item) => item.id !== workspace.id);
-      const nextWorkspace = remaining[0] ?? null;
+      const nextWorkspace = resolvePostDeleteWorkspace(workspace.id, workspaces);
       setWorkspaces(remaining);
       setActiveWorkspace(nextWorkspace?.id ?? null);
-      router.push(nextWorkspace ? "/office" : "/office/setup");
+      router.push(postDeleteWorkspaceHref(nextWorkspace));
       toast.success("Workspace deleted");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to delete workspace");

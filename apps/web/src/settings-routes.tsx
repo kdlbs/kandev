@@ -66,7 +66,11 @@ import {
 import { listWorkflowTemplates } from "@/lib/api/domains/workflow-api";
 import { listRepositories, listWorkspaces } from "@/lib/api/domains/workspace-api";
 import { useRouter } from "@/lib/routing/client-router";
-import { mapWorkspaceItem } from "@/lib/routing/route-bootstrap";
+import {
+  mapWorkspaceItem,
+  readActiveWorkspaceCookie,
+  resolveSettingsActiveWorkspaceId,
+} from "@/lib/routing/route-bootstrap";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type { AppState } from "@/lib/state/store";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
@@ -156,7 +160,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/system/database": () => (
     <SystemPageShell
       title="Database"
-      description="SQLite path and size, plus VACUUM, optimize, and factory reset."
+      description="Database driver, size, and available maintenance controls."
     >
       <DatabaseStatsCard />
     </SystemPageShell>
@@ -379,6 +383,7 @@ export function buildSettingsInitialStateForRoute({
   const activeWorkspaceId = resolveSettingsActiveWorkspaceId(
     workspaceItems,
     matchSingle(pathname, /^\/settings\/workspace\/([^/]+)/),
+    readActiveWorkspaceCookie(),
     userSettingsResponse?.settings?.workspace_id ?? null,
   );
   const mappedUserSettings = mapUserSettingsResponse(userSettingsResponse);
@@ -410,19 +415,6 @@ export function buildSettingsInitialStateForRoute({
         }
       : {}),
   };
-}
-
-function resolveSettingsActiveWorkspaceId(
-  workspaceItems: Array<{ id: string }>,
-  requestedWorkspaceId: string | null,
-  settingsWorkspaceId: string | null,
-) {
-  return (
-    workspaceItems.find((workspace) => workspace.id === requestedWorkspaceId)?.id ??
-    workspaceItems.find((workspace) => workspace.id === settingsWorkspaceId)?.id ??
-    workspaceItems[0]?.id ??
-    null
-  );
 }
 
 function WorkspaceRepositoriesRoute({ workspaceId }: { workspaceId: string }) {

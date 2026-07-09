@@ -176,6 +176,7 @@ const infraSchemaDDL = `
 		agentctl_url TEXT DEFAULT '',
 		agentctl_port INTEGER DEFAULT 0,
 		pid INTEGER DEFAULT 0,
+		local_pid INTEGER DEFAULT 0,
 		worktree_id TEXT DEFAULT '',
 		worktree_path TEXT DEFAULT '',
 		worktree_branch TEXT DEFAULT '',

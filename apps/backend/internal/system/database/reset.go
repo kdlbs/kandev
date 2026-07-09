@@ -47,6 +47,10 @@ func (s *Service) FactoryReset(ctx context.Context, confirm string) (string, err
 }
 
 func (s *Service) runFactoryReset(_ context.Context) (map[string]interface{}, error) {
+	if err := s.requireSQLiteMaintenance("factory reset"); err != nil {
+		return nil, err
+	}
+
 	if s.OrchestratorShutdown != nil {
 		s.OrchestratorShutdown()
 	}

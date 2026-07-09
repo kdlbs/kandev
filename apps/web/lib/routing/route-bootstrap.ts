@@ -34,5 +34,28 @@ export function readCookie(name: string): string | null {
 }
 
 export function readActiveWorkspaceCookie(): string | null {
-  return readCookie(ACTIVE_WORKSPACE_COOKIE) || readCookie(LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE);
+  return readCookie(ACTIVE_WORKSPACE_COOKIE) || null;
+}
+
+type SettingsWorkspaceItem = {
+  id: string;
+  office_workflow_id?: string | null;
+};
+
+export function resolveSettingsActiveWorkspaceId(
+  workspaceItems: SettingsWorkspaceItem[],
+  requestedWorkspaceId: string | null,
+  activeCookieWorkspaceId: string | null,
+  settingsWorkspaceId: string | null,
+): string | null {
+  const kanbanWorkspaceItems = workspaceItems.filter((workspace) => !workspace.office_workflow_id);
+
+  return (
+    workspaceItems.find((workspace) => workspace.id === requestedWorkspaceId)?.id ??
+    kanbanWorkspaceItems.find((workspace) => workspace.id === activeCookieWorkspaceId)?.id ??
+    kanbanWorkspaceItems.find((workspace) => workspace.id === settingsWorkspaceId)?.id ??
+    kanbanWorkspaceItems[0]?.id ??
+    workspaceItems[0]?.id ??
+    null
+  );
 }

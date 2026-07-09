@@ -33,11 +33,13 @@ const view: SavedView = {
   name: "Mine",
   filters: {
     projectKeys: [],
-    statusCategories: [],
+    statuses: [],
     assignee: "me",
     searchText: "",
     sort: "updated",
   },
+  customJql: null,
+  builtin: false,
 };
 
 describe("useSavedViews", () => {
@@ -60,6 +62,33 @@ describe("useSavedViews", () => {
     await waitFor(() => {
       expect(updateUserSettings).toHaveBeenCalledWith({ jira_saved_views: [view] });
       expect(localStorageMock.getItem(SYNC_FAILED_KEY)).toBeNull();
+    });
+  });
+
+  it("hydrates a legacy statusCategories view to statuses: [] without throwing", async () => {
+    // Views persisted before the status-name migration carry `statusCategories`
+    // and no `statuses`. They must load, dropping the old category filter.
+    const legacy = {
+      id: "custom:legacy",
+      name: "Legacy",
+      filters: {
+        projectKeys: ["CLIP"],
+        statusCategories: ["indeterminate"],
+        assignee: "me",
+        searchText: "",
+        sort: "updated",
+      },
+    };
+    localStorageMock.setItem(STORAGE_KEY, JSON.stringify([legacy]));
+
+    const { result } = renderHook(() => useSavedViews());
+
+    await waitFor(() => {
+      const loaded = result.current.custom.find((v) => v.id === "custom:legacy");
+      expect(loaded).toBeDefined();
+      expect(loaded?.filters.statuses).toEqual([]);
+      expect(loaded?.filters.projectKeys).toEqual(["CLIP"]);
+      expect("statusCategories" in loaded!.filters).toBe(false);
     });
   });
 

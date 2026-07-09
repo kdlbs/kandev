@@ -144,7 +144,11 @@ export async function updateAgentProfileAction(
   return normalizeAgentProfile(raw);
 }
 
-import type { ActiveSessionInfo, WatcherReference } from "@/lib/types/agent-profile-errors";
+import type {
+  ActiveSessionInfo,
+  RoutingTierReference,
+  WatcherReference,
+} from "@/lib/types/agent-profile-errors";
 
 export type DeleteProfileResult =
   | { status: "ok" }
@@ -152,6 +156,7 @@ export type DeleteProfileResult =
       status: "conflict";
       activeSessions: ActiveSessionInfo[];
       watchers: WatcherReference[];
+      routingTiers: RoutingTierReference[];
     }
   | { status: "error"; message: string };
 
@@ -167,14 +172,15 @@ export async function deleteAgentProfileAction(
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    // A 409 is either active-sessions, referencing watchers, or both.
+    // A 409 is active sessions, referencing watchers, routing tier mappings, or a mix.
     // Treat any non-empty list as the conflict signal — a watcher-only
     // conflict (the new self-heal path) must still pop the dialog.
-    if (response.status === 409 && (body.active_sessions || body.watchers)) {
+    if (response.status === 409 && (body.active_sessions || body.watchers || body.routing_tiers)) {
       return {
         status: "conflict",
         activeSessions: body.active_sessions ?? [],
         watchers: body.watchers ?? [],
+        routingTiers: body.routing_tiers ?? [],
       };
     }
     return {

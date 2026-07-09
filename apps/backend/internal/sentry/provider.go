@@ -1,10 +1,13 @@
 package sentry
 
 import (
+	"context"
 	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
+	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -30,6 +33,7 @@ func Provide(writer, reader *sqlx.DB, secrets SecretStore, eventBus bus.EventBus
 	if err != nil {
 		return nil, nil, err
 	}
+	migrateLegacySecret(store, secrets, log)
 	clientFn := DefaultClientFactory
 	var mock *MockClient
 	if MockEnabled() {
@@ -44,6 +48,30 @@ func Provide(writer, reader *sqlx.DB, secrets SecretStore, eventBus bus.EventBus
 	}
 	cleanup := func() error { return nil }
 	return svc, cleanup, nil
+}
+
+func migrateLegacySecret(store *Store, secrets SecretStore, log *logger.Logger) {
+	target := store.MigratedFromWorkspace()
+	if target == "" || secrets == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	targetKey := SecretKeyForWorkspace(target)
+	if exists, err := secrets.Exists(ctx, targetKey); err == nil && exists {
+		return
+	}
+	value, err := secrets.Reveal(ctx, SecretKey)
+	if err != nil || value == "" {
+		return
+	}
+	if err := secrets.Set(ctx, targetKey, "Sentry auth token", value); err != nil {
+		log.Warn("sentry: legacy secret migration failed", zap.Error(err))
+		return
+	}
+	if err := secrets.Delete(ctx, SecretKey); err != nil {
+		log.Warn("sentry: legacy secret cleanup failed", zap.Error(err))
+	}
 }
 
 // RegisterMockRoutes mounts the mock control routes when the service was built

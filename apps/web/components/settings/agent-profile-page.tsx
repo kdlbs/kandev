@@ -332,7 +332,11 @@ function useProfileDelete(
     if (result.status === "ok") {
       removeProfileFromStore();
     } else if (result.status === "conflict") {
-      setConflict({ activeSessions: result.activeSessions, watchers: result.watchers });
+      setConflict({
+        activeSessions: result.activeSessions,
+        watchers: result.watchers,
+        routingTiers: result.routingTiers,
+      });
     } else {
       toast({ title: "Failed to delete profile", description: result.message, variant: "error" });
     }
@@ -343,6 +347,12 @@ function useProfileDelete(
     setConflict(null);
     if (result.status === "ok") {
       removeProfileFromStore();
+    } else if (result.status === "conflict") {
+      setConflict({
+        activeSessions: result.activeSessions,
+        watchers: result.watchers,
+        routingTiers: result.routingTiers,
+      });
     } else if (result.status === "error") {
       toast({ title: "Failed to delete profile", description: result.message, variant: "error" });
     }

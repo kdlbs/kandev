@@ -40,6 +40,41 @@ func (s *Service) CleanupAllReviewTasks(ctx context.Context) (int, error) {
 	return s.cleanupAllReviewTasks(ctx, false)
 }
 
+// CleanupReviewTasksForWorkspace sweeps review dedup rows owned by watches in
+// one workspace. Rows for deleted watches are intentionally skipped because
+// their workspace can no longer be proven.
+//
+//nolint:dupl // mirrors CleanupIssueTasksForWorkspace — different task/watch types
+func (s *Service) CleanupReviewTasksForWorkspace(ctx context.Context, workspaceID string) (int, error) {
+	if s.client == nil || s.taskDeleter == nil {
+		return 0, nil
+	}
+	watches, err := s.store.ListReviewWatches(ctx, workspaceID)
+	if err != nil {
+		return 0, fmt.Errorf("list review watches: %w", err)
+	}
+	watchPolicies := make(map[string]string, len(watches))
+	for _, watch := range watches {
+		watchPolicies[watch.ID] = NormalizeCleanupPolicy(watch.CleanupPolicy)
+	}
+	if len(watchPolicies) == 0 {
+		return 0, nil
+	}
+	prTasks, err := s.store.ListAllReviewPRTasks(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list all review PR tasks: %w", err)
+	}
+	candidates := make([]*ReviewPRTask, 0, len(prTasks))
+	for _, rpt := range prTasks {
+		if _, ok := watchPolicies[rpt.ReviewWatchID]; ok {
+			candidates = append(candidates, rpt)
+		}
+	}
+	return s.cleanupReviewPRTaskBatch(ctx, candidates, func(rpt *ReviewPRTask) string {
+		return watchPolicies[rpt.ReviewWatchID]
+	}), nil
+}
+
 // cleanupAllReviewTasks is the shared body. When orphansOnly is true, rows
 // whose watch is currently enabled are skipped (the per-watch poller will
 // handle them in the same cycle).
@@ -98,6 +133,8 @@ func (s *Service) cleanupAllReviewTasks(ctx context.Context, orphansOnly bool) (
 // retries the fetch and recovers naturally. Missing watches (deleted) are
 // distinct: they're absent from both `policy` and `enabled` but NOT in
 // `unknown`, so callers treat them as legitimate orphans.
+//
+//nolint:dupl // mirrors buildIssueWatchCaches — different task/watch types
 func (s *Service) buildReviewWatchCaches(ctx context.Context, prTasks []*ReviewPRTask) (policy map[string]string, enabled map[string]bool, unknown map[string]bool) {
 	seen := make(map[string]struct{})
 	for _, rpt := range prTasks {
@@ -324,6 +361,40 @@ func (s *Service) CleanupAllIssueTasks(ctx context.Context) (int, error) {
 	return s.cleanupAllIssueTasks(ctx, false)
 }
 
+// CleanupIssueTasksForWorkspace mirrors CleanupReviewTasksForWorkspace for
+// issue-watch dedup rows.
+//
+//nolint:dupl // mirrors CleanupReviewTasksForWorkspace — different task/watch types
+func (s *Service) CleanupIssueTasksForWorkspace(ctx context.Context, workspaceID string) (int, error) {
+	if s.client == nil || s.taskDeleter == nil {
+		return 0, nil
+	}
+	watches, err := s.store.ListIssueWatches(ctx, workspaceID)
+	if err != nil {
+		return 0, fmt.Errorf("list issue watches: %w", err)
+	}
+	watchPolicies := make(map[string]string, len(watches))
+	for _, watch := range watches {
+		watchPolicies[watch.ID] = NormalizeCleanupPolicy(watch.CleanupPolicy)
+	}
+	if len(watchPolicies) == 0 {
+		return 0, nil
+	}
+	issueTasks, err := s.store.ListAllIssueWatchTasks(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list all issue watch tasks: %w", err)
+	}
+	candidates := make([]*IssueWatchTask, 0, len(issueTasks))
+	for _, it := range issueTasks {
+		if _, ok := watchPolicies[it.IssueWatchID]; ok {
+			candidates = append(candidates, it)
+		}
+	}
+	return s.cleanupIssueTaskBatch(ctx, candidates, func(it *IssueWatchTask) string {
+		return watchPolicies[it.IssueWatchID]
+	}), nil
+}
+
 //nolint:dupl // mirrors cleanupAllReviewTasks — different types, same orchestration
 func (s *Service) cleanupAllIssueTasks(ctx context.Context, orphansOnly bool) (int, error) {
 	if s.client == nil || s.taskDeleter == nil {
@@ -358,6 +429,7 @@ func (s *Service) cleanupAllIssueTasks(ctx context.Context, orphansOnly bool) (i
 	}), nil
 }
 
+//nolint:dupl // mirrors buildReviewWatchCaches — different task/watch types
 func (s *Service) buildIssueWatchCaches(ctx context.Context, issueTasks []*IssueWatchTask) (policy map[string]string, enabled map[string]bool, unknown map[string]bool) {
 	seen := make(map[string]struct{})
 	for _, it := range issueTasks {

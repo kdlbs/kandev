@@ -8,6 +8,11 @@ import { StatsPageClient } from "@/app/stats/stats-page-client";
 import { isRangeKey } from "@/app/stats/stats-utils";
 import type { RangeKey } from "@/app/stats/stats-utils";
 import { TasksPageClient } from "@/app/tasks/tasks-page-client";
+import {
+  parseTasksListGroup,
+  parseTasksListSort,
+  sortTasksForList,
+} from "@/lib/tasks/tasks-list-options";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { BootRouteData } from "./boot-payload";
 import { fetchJson } from "@/lib/api/client";
@@ -199,8 +204,11 @@ function useKanbanRouteBootstrap(route: Extract<SpaRoute, { kind: "kanban" }>) {
       const settingsWorkspaceId = settingsResponse?.settings?.workspace_id || null;
       const settingsWorkflowId = settingsResponse?.settings?.workflow_filter_id || null;
       const workspaceItems = workspacesResponse.workspaces.map(mapWorkspaceItem);
+      const kanbanWorkspaceItems = workspaceItems.filter(
+        (workspace) => !workspace.office_workflow_id,
+      );
       const activeWorkspaceId = resolveActiveId(
-        workspaceItems,
+        kanbanWorkspaceItems,
         route.workspaceId,
         readActiveWorkspaceCookie(),
         settingsWorkspaceId,
@@ -280,20 +288,52 @@ function TasksDataRoute({
   bootstrapped: RouteDataState;
   tasksPage?: BootRouteData["tasksPage"];
 }) {
+  const searchParams = useSearchParams();
+  const userSettings = useAppStore((state) => state.userSettings);
+  const { initialSort, initialGroup } = resolveTasksDataRoutePreferences(
+    searchParams,
+    tasksPage,
+    userSettings,
+  );
+  const initialData = resolveTasksDataRouteInitialData(bootstrapped, tasksPage, initialSort);
   return (
     <TasksPageClient
       workspaces={[]}
-      initialWorkspaceId={
-        tasksPage?.activeWorkspaceId ?? bootstrapped.activeWorkspaceId ?? undefined
-      }
-      initialWorkflows={tasksPage?.workflows ?? bootstrapped.workflows}
-      initialSteps={tasksPage?.steps ?? bootstrapped.steps}
-      initialRepositories={tasksPage?.repositories ?? bootstrapped.repositories}
-      initialTasks={tasksPage?.tasks ?? []}
-      initialTotal={tasksPage?.total ?? 0}
-      initialDataLoaded={Boolean(tasksPage)}
+      {...initialData}
+      initialSort={initialSort}
+      initialGroup={initialGroup}
     />
   );
+}
+
+function resolveTasksDataRoutePreferences(
+  searchParams: URLSearchParams,
+  tasksPage: BootRouteData["tasksPage"] | undefined,
+  userSettings: { tasksListSort?: string | null; tasksListGroup?: string | null },
+) {
+  return {
+    initialSort: parseTasksListSort(
+      searchParams.get("sort") ?? tasksPage?.tasksListSort ?? userSettings.tasksListSort,
+    ),
+    initialGroup: parseTasksListGroup(
+      searchParams.get("group") ?? tasksPage?.tasksListGroup ?? userSettings.tasksListGroup,
+    ),
+  };
+}
+
+function resolveTasksDataRouteInitialData(
+  bootstrapped: RouteDataState,
+  tasksPage: BootRouteData["tasksPage"] | undefined,
+  initialSort: ReturnType<typeof parseTasksListSort>,
+) {
+  return {
+    initialWorkspaceId: tasksPage?.activeWorkspaceId ?? bootstrapped.activeWorkspaceId ?? undefined,
+    initialWorkflows: tasksPage?.workflows ?? bootstrapped.workflows,
+    initialRepositories: tasksPage?.repositories ?? bootstrapped.repositories,
+    initialTasks: sortTasksForList(tasksPage?.tasks ?? [], initialSort),
+    initialTotal: tasksPage?.total ?? 0,
+    initialDataLoaded: Boolean(tasksPage),
+  };
 }
 
 function ExternalDataRoute({

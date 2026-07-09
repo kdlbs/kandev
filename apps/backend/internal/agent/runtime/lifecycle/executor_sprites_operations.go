@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"regexp"
 	"strings"
 	"sync"
@@ -86,6 +87,10 @@ func (r *SpritesExecutor) uploadSkillFiles(
 		Skills []struct {
 			Slug    string `json:"Slug"`
 			Content string `json:"Content"`
+			Files   []struct {
+				Path    string `json:"Path"`
+				Content string `json:"Content"`
+			} `json:"Files"`
 		} `json:"Skills"`
 		Instructions []struct {
 			Filename string `json:"Filename"`
@@ -118,10 +123,23 @@ func (r *SpritesExecutor) uploadSkillFiles(
 		if !validSlugRe.MatchString(sk.Slug) {
 			continue
 		}
-		path := fmt.Sprintf("/workspace/%s/kandev-%s/SKILL.md", projectSkillDir, sk.Slug)
-		if err := r.writeFileWithRetry(stepCtx, sprite, path, []byte(sk.Content), 0o644); err != nil {
+		skillRoot := fmt.Sprintf("/workspace/%s/kandev-%s", projectSkillDir, sk.Slug)
+		skillPath := skillRoot + "/SKILL.md"
+		if err := r.writeFileWithRetry(stepCtx, sprite, skillPath, []byte(sk.Content), 0o644); err != nil {
 			r.logger.Warn("failed to upload skill file",
 				zap.String("slug", sk.Slug), zap.Error(err))
+		}
+		for _, file := range sk.Files {
+			rel, ok := cleanSpriteSkillFilePath(file.Path)
+			if !ok {
+				continue
+			}
+			if err := r.writeFileWithRetry(stepCtx, sprite, skillRoot+"/"+rel, []byte(file.Content), 0o644); err != nil {
+				r.logger.Warn("failed to upload skill support file",
+					zap.String("slug", sk.Slug),
+					zap.String("path", rel),
+					zap.Error(err))
+			}
 		}
 	}
 
@@ -142,6 +160,20 @@ func (r *SpritesExecutor) uploadSkillFiles(
 		zap.Int("instructions", len(manifest.Instructions)),
 		zap.String("project_skill_dir", projectSkillDir))
 	return nil
+}
+
+func cleanSpriteSkillFilePath(p string) (string, bool) {
+	p = strings.TrimSpace(p)
+	if p == "" || strings.Contains(p, "\\") {
+		return "", false
+	}
+	cleaned := path.Clean(p)
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") ||
+		strings.HasPrefix(cleaned, "/") ||
+		cleaned == "SKILL.md" {
+		return "", false
+	}
+	return cleaned, true
 }
 
 // cleanSpriteKandevSkills removes any kandev-* directories left over from

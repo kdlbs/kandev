@@ -115,19 +115,21 @@ type ListTasksOptions = {
   query?: string;
   workflowId?: string | null;
   repositoryId?: string | null;
+  sort?: string;
 };
 
 export async function listTasksByWorkspaceAction(
   workspaceId: string,
   options: ListTasksOptions = {},
 ): Promise<ListTasksResponse> {
-  const { page = 1, pageSize = 50, query, workflowId, repositoryId } = options;
+  const { page = 1, pageSize = 50, query, workflowId, repositoryId, sort } = options;
   const url = new URL(`${apiBaseUrl}/api/v1/workspaces/${workspaceId}/tasks`);
   url.searchParams.set("page", String(page));
   url.searchParams.set("page_size", String(pageSize));
   if (query) url.searchParams.set("query", query);
   if (workflowId) url.searchParams.set("workflow_id", workflowId);
   if (repositoryId) url.searchParams.set("repository_id", repositoryId);
+  if (sort) url.searchParams.set("sort", sort);
   return fetchJson<ListTasksResponse>(url.toString());
 }
 

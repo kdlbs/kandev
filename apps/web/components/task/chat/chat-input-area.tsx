@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useState, type ReactNode } from "react";
-import { IconArrowRight, IconGitMerge, IconGitPullRequestClosed, IconX } from "@tabler/icons-react";
+import { IconArrowRight } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { TodoIndicator } from "./todo-indicator";
+import { PRMergedBanner, PRClosedBanner } from "./pr-archive-banners";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
 import { ShareButton, shareableSessionStateClient } from "@/components/task/share/share-button";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -28,14 +29,7 @@ import {
 } from "@/lib/state/slices/comments/format";
 import { usePlanActions } from "@/hooks/domains/kanban/use-plan-actions";
 import { useExecutorEnvironmentAvailability } from "@/hooks/domains/session/use-executor-environment-availability";
-import { useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useToast } from "@/components/toast-provider";
-import {
-  markPRClosedBannerDismissed,
-  markPRMergedBannerDismissed,
-  wasPRClosedBannerDismissed,
-  wasPRMergedBannerDismissed,
-} from "@/lib/local-storage";
 import type { DiffComment } from "@/lib/diff/types";
 import type { useChatPanelState } from "./use-chat-panel-state";
 
@@ -265,135 +259,6 @@ export function useChatPanelHandlers(
   );
 
   return { handleCancelTurn };
-}
-
-// Shared archive-task action for the terminal-state banners: archives the task,
-// switches to the next one, and only toasts on failure.
-function useArchiveTaskAction(taskId: string) {
-  const archiveAndSwitch = useArchiveAndSwitchTask();
-  const { toast } = useToast();
-  return useCallback(async () => {
-    try {
-      await archiveAndSwitch(taskId);
-    } catch {
-      toast({ description: "Failed to archive task", variant: "error" });
-    }
-  }, [taskId, archiveAndSwitch, toast]);
-}
-
-// Presentational banner shared by PRMergedBanner / PRClosedBanner — an icon, a
-// message, and Archive + Dismiss controls. Colors/icon/testIds are supplied by
-// the caller so the two variants stay visually distinct.
-function ArchiveDismissBanner({
-  testIdPrefix,
-  icon,
-  text,
-  containerClass,
-  archiveClass,
-  dismissClass,
-  onArchive,
-  onDismiss,
-}: {
-  testIdPrefix: string;
-  icon: ReactNode;
-  text: string;
-  containerClass: string;
-  archiveClass: string;
-  dismissClass: string;
-  onArchive: () => void;
-  onDismiss: () => void;
-}) {
-  return (
-    <div data-testid={`${testIdPrefix}-banner`} className={containerClass}>
-      {icon}
-      <span className="flex-1">{text}</span>
-      <button
-        type="button"
-        data-testid={`${testIdPrefix}-archive-button`}
-        onClick={onArchive}
-        className={archiveClass}
-      >
-        Archive
-      </button>
-      <button
-        type="button"
-        aria-label="Dismiss"
-        data-testid={`${testIdPrefix}-dismiss-button`}
-        onClick={onDismiss}
-        className={dismissClass}
-      >
-        <IconX className="h-3 w-3" />
-      </button>
-    </div>
-  );
-}
-
-export function PRMergedBanner({ taskId }: { taskId: string }) {
-  const taskPRs = useAppStore((state) => state.taskPRs.byTaskId[taskId]);
-  const [dismissed, setDismissed] = useState(() => wasPRMergedBannerDismissed(taskId));
-  const handleArchive = useArchiveTaskAction(taskId);
-
-  const handleDismiss = useCallback(() => {
-    markPRMergedBannerDismissed(taskId);
-    setDismissed(true);
-  }, [taskId]);
-
-  // Multi-repo: only show "ready to archive" once every PR is merged. A
-  // single merged repo with others still open means the task isn't done yet.
-  const allMerged = !!taskPRs && taskPRs.length > 0 && taskPRs.every((pr) => pr.state === "merged");
-  if (!allMerged || dismissed) return null;
-
-  const bannerText =
-    taskPRs.length === 1
-      ? `PR #${taskPRs[0].pr_number} has been merged. You can archive this task.`
-      : `All ${taskPRs.length} PRs have been merged. You can archive this task.`;
-
-  return (
-    <ArchiveDismissBanner
-      testIdPrefix="pr-merged"
-      icon={<IconGitMerge className="h-3.5 w-3.5 shrink-0" />}
-      text={bannerText}
-      containerClass="flex flex-1 items-center gap-2 rounded-md bg-purple-500/10 px-2 py-1 text-purple-600 dark:text-purple-400"
-      archiveClass="underline underline-offset-2 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer"
-      dismissClass="p-0.5 hover:bg-purple-500/10 rounded cursor-pointer"
-      onArchive={handleArchive}
-      onDismiss={handleDismiss}
-    />
-  );
-}
-
-export function PRClosedBanner({ taskId }: { taskId: string }) {
-  const taskPRs = useAppStore((state) => state.taskPRs.byTaskId[taskId]);
-  const [dismissed, setDismissed] = useState(() => wasPRClosedBannerDismissed(taskId));
-  const handleArchive = useArchiveTaskAction(taskId);
-
-  const handleDismiss = useCallback(() => {
-    markPRClosedBannerDismissed(taskId);
-    setDismissed(true);
-  }, [taskId]);
-
-  // Mirror the merged banner's all-or-nothing rule: show only once every PR is
-  // closed-without-merging. A mix of merged + closed shows neither banner.
-  const allClosed = !!taskPRs && taskPRs.length > 0 && taskPRs.every((pr) => pr.state === "closed");
-  if (!allClosed || dismissed) return null;
-
-  const bannerText =
-    taskPRs.length === 1
-      ? `PR #${taskPRs[0].pr_number} was closed without merging. You can archive this task.`
-      : `All ${taskPRs.length} PRs were closed without merging. You can archive this task.`;
-
-  return (
-    <ArchiveDismissBanner
-      testIdPrefix="pr-closed"
-      icon={<IconGitPullRequestClosed className="h-3.5 w-3.5 shrink-0" />}
-      text={bannerText}
-      containerClass="flex flex-1 items-center gap-2 rounded-md bg-red-500/10 px-2 py-1 text-red-600 dark:text-red-400"
-      archiveClass="underline underline-offset-2 hover:text-red-700 dark:hover:text-red-300 cursor-pointer"
-      dismissClass="p-0.5 hover:bg-red-500/10 rounded cursor-pointer"
-      onArchive={handleArchive}
-      onDismiss={handleDismiss}
-    />
-  );
 }
 
 type TodoDisplayItem = {

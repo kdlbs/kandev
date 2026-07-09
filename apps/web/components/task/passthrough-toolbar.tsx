@@ -21,7 +21,7 @@ import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
-import { PRMergedBanner } from "./chat/chat-input-area";
+import { PRMergedBanner } from "./chat/pr-archive-banners";
 import { type ChatInputContainerHandle } from "./chat/chat-input-container";
 import { useChatPanelState } from "./chat/use-chat-panel-state";
 import { useAppStore } from "@/components/state-provider";

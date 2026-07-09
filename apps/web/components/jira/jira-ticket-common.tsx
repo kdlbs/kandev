@@ -92,14 +92,14 @@ export function useTicketState(
     setLoading(true);
     setError(null);
     try {
-      const t = await getJiraTicket(ticketKey);
+      const t = await getJiraTicket(ticketKey, { workspaceId });
       setTicket(t);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, [ticketKey]);
+  }, [workspaceId, ticketKey]);
 
   useEffect(() => {
     if (!enabled || !workspaceId || !ticketKey) return;
@@ -109,7 +109,7 @@ export function useTicketState(
       setLoading(true);
       setError(null);
       try {
-        const t = await getJiraTicket(ticketKey);
+        const t = await getJiraTicket(ticketKey, { workspaceId });
         if (!cancelled) setTicket(t);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
@@ -128,7 +128,7 @@ export function useTicketState(
       setPendingTransition(transitionId);
       setError(null);
       try {
-        await transitionJiraTicket(ticketKey, transitionId);
+        await transitionJiraTicket(ticketKey, transitionId, { workspaceId });
         await load();
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -136,7 +136,7 @@ export function useTicketState(
         setPendingTransition(null);
       }
     },
-    [ticketKey, load],
+    [workspaceId, ticketKey, load],
   );
 
   return { ticket, loading, error, pendingTransition, load, handleTransition };
