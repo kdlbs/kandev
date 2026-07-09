@@ -99,7 +99,7 @@ export function AddPanelMenuItems({
           key={pr.id}
           onClick={() => addPRPanel(prTaskKey(pr), activeSessionId)}
           className={MENU_ITEM_CLASS}
-          data-testid={`add-panel-pr-item-${pr.pr_number}`}
+          data-testid={`add-panel-pr-item-${pr.owner}-${pr.repo}-${pr.pr_number}`}
         >
           <IconGitPullRequest className={MENU_ICON_CLASS} />
           {state.prs.length > 1

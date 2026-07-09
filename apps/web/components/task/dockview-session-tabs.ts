@@ -14,6 +14,7 @@ import { wasPRPanelOffered, markPRPanelOffered } from "@/lib/local-storage";
 import { sessionId as toSessionId } from "@/lib/types/ids";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import type { TaskSession } from "@/lib/types/http";
+import type { TaskPR } from "@/lib/types/github";
 import { getPrimaryTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { prTaskKey } from "@/components/github/pr-detail-panel";
 
@@ -179,6 +180,18 @@ export function resolvePRPanelTargetGroup(
   return isCenterCandidateGroupId(centerGroupId) ? centerGroupId : CENTER_GROUP;
 }
 
+/** Derive the auto-PR-panel decision inputs from one task's live PR list. */
+function resolveAutoPRPanelState(taskPRs: TaskPR[] | undefined): {
+  hasPR: boolean;
+  defaultPRKey: string | undefined;
+} {
+  const primary = getPrimaryTaskPR(taskPRs);
+  return {
+    hasPR: !!taskPRs && taskPRs.length > 0,
+    defaultPRKey: primary ? prTaskKey(primary) : undefined,
+  };
+}
+
 /**
  * Pure effect logic for `useAutoPRPanel`: decides whether to add, remove,
  * or leave alone the auto-shown PR detail panel, and mutates the given
@@ -230,11 +243,15 @@ export function runAutoPRPanelEffect(
   const legacy = api.getPanel("pr-detail");
   if (params.hasPR && legacy) {
     markPRPanelOffered(sessionId);
-    // Backfill panels restored from a layout saved before per-PR keys
-    // existed, so a later "+" menu click can dedupe correctly instead of
-    // always treating them as a different PR. Never overwrite a panel that
-    // already carries a key — that would clobber a deliberate PR switch.
-    if (legacy.params?.prKey === undefined && params.defaultPRKey) {
+    // Keep the legacy tab's stamped key in sync with the CURRENT default PR.
+    // Nothing else ever writes a different key onto this specific panel — a
+    // manual "+" menu pick of a different PR always creates its own keyed
+    // `pr-detail|<key>` tab instead (see addPRPanel in
+    // dockview-panel-actions.ts) — so unconditionally resyncing here is safe
+    // and fixes staleness both when the primary PR changes for this task and
+    // when this panel is reused across a task switch (see Greptile/cubic
+    // review on PR #1636).
+    if (params.defaultPRKey && legacy.params?.prKey !== params.defaultPRKey) {
       legacy.api.updateParameters({ prKey: params.defaultPRKey });
     }
   }
@@ -253,16 +270,16 @@ export function useAutoPRPanel() {
   const sessionId = useAppStore((s) => s.tasks.activeSessionId);
   const hasPR = useAppStore((s) => {
     const tid = s.tasks.activeTaskId;
-    return tid ? (s.taskPRs.byTaskId[tid]?.length ?? 0) > 0 : false;
+    return resolveAutoPRPanelState(tid ? s.taskPRs.byTaskId[tid] : undefined).hasPR;
   });
   // Key of the PR the legacy unkeyed "pr-detail" panel renders — mirrors
   // PRDetailPanelComponent's fallback of the primary/first TaskPR.
   const defaultPRKey = useAppStore((s) => {
     const tid = s.tasks.activeTaskId;
-    const primary = tid ? getPrimaryTaskPR(s.taskPRs.byTaskId[tid]) : null;
-    return primary ? prTaskKey(primary) : undefined;
+    return resolveAutoPRPanelState(tid ? s.taskPRs.byTaskId[tid] : undefined).defaultPRKey;
   });
   const hasApi = useDockviewStore((s) => !!s.api);
+  const appStore = useAppStoreApi();
 
   useEffect(() => {
     if (!taskId || !hasApi || !sessionId) return;
@@ -271,16 +288,27 @@ export function useAutoPRPanel() {
       requestAnimationFrame(() => {
         const api = useDockviewStore.getState().api;
         if (!api) return;
+
+        // Re-read live task/session/PR state before mutating dockview — a
+        // task or session switch during this two-frame delay must not stamp
+        // the panel with a stale task's PR key (cubic-dev-ai review on PR
+        // #1636). If the active task/session moved on, bail: the effect
+        // instance already scheduled for the new task/session (its deps
+        // changed) will handle it correctly.
+        const liveTasks = appStore.getState().tasks;
+        if (liveTasks.activeTaskId !== taskId || liveTasks.activeSessionId !== sessionId) return;
+        const live = resolveAutoPRPanelState(appStore.getState().taskPRs.byTaskId[taskId]);
+
         runAutoPRPanelEffect(api, sessionId, {
-          hasPR,
-          defaultPRKey,
+          hasPR: live.hasPR,
+          defaultPRKey: live.defaultPRKey,
           isRestoringLayout: useDockviewStore.getState().isRestoringLayout,
           isMaximized: useDockviewStore.getState().preMaximizeLayout !== null,
           centerGroupId: useDockviewStore.getState().centerGroupId,
         });
       });
     });
-  }, [taskId, hasPR, hasApi, sessionId, defaultPRKey]);
+  }, [taskId, hasPR, hasApi, sessionId, defaultPRKey, appStore]);
 }
 
 /**

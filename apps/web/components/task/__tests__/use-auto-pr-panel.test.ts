@@ -191,10 +191,14 @@ describe("runAutoPRPanelEffect", () => {
     expect(panel.params.prKey).toBe(DEFAULT_PR_KEY);
   });
 
-  it("never overwrites a legacy panel that already carries a different key", () => {
-    // Regression guard: a manual "+" menu switch (addPRPanel updating a
-    // keyed panel's params) must not be silently reverted back to the
-    // computed default the next time this effect runs.
+  it("resyncs a legacy panel whose stamped key no longer matches the current default", () => {
+    // Regression (Greptile P1 / cubic-dev-ai on PR #1636): the legacy panel
+    // must track whichever PR is CURRENTLY the task's default — reused
+    // across a task switch or after the primary PR changes for the same
+    // task. Nothing else ever stamps a deliberately different key onto this
+    // specific panel (a manual "+" menu pick of another PR always creates
+    // its own separate `pr-detail|<key>` tab instead), so resyncing here can
+    // never clobber a real user choice.
     const { api } = makeFullApi();
     api.addPanel({
       id: LEGACY_PR_ID,
@@ -204,13 +208,13 @@ describe("runAutoPRPanelEffect", () => {
       position: { referenceGroup: CENTER_GROUP },
     });
 
-    runAutoPRPanelEffect(api, "session-preserve", {
+    runAutoPRPanelEffect(api, "session-resync", {
       ...BASE_EFFECT_PARAMS,
       hasPR: true,
       defaultPRKey: DEFAULT_PR_KEY,
     });
 
     const panel = api.getPanel(LEGACY_PR_ID) as unknown as FullMockPanel;
-    expect(panel.params.prKey).toBe("org/repo/2");
+    expect(panel.params.prKey).toBe(DEFAULT_PR_KEY);
   });
 });

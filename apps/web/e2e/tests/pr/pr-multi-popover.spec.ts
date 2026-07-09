@@ -229,7 +229,7 @@ test.describe("Multi-PR CI popover", () => {
     // (Dedup when re-selecting the same PR is covered by the
     // runAutoPRPanelEffect / addPRPanel unit tests.)
     await session.addPanelButton().click();
-    await testPage.getByTestId("add-panel-pr-item-77").click();
+    await testPage.getByTestId(`add-panel-pr-item-${OWNER}-api-77`).click();
     await expect(session.prDetailTab()).toHaveCount(2, { timeout: 15_000 });
   });
 });
