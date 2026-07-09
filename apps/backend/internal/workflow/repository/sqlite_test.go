@@ -151,6 +151,7 @@ func TestWorkflowStepWIPFields_ReplayMigrationDefaultsExistingRows(t *testing.T)
 	if err != nil {
 		t.Fatalf("failed to open sqlite: %v", err)
 	}
+	rawDB.SetMaxOpenConns(1)
 	db := sqlx.NewDb(rawDB, "sqlite3")
 	t.Cleanup(func() { _ = db.Close() })
 
@@ -352,6 +353,7 @@ func TestInitSchema_NormalizesDuplicateStartSteps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open sqlite: %v", err)
 	}
+	rawDB.SetMaxOpenConns(1)
 	db := sqlx.NewDb(rawDB, "sqlite3")
 	t.Cleanup(func() { _ = db.Close() })
 	ctx := context.Background()

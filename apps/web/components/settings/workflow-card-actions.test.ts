@@ -88,7 +88,7 @@ describe("useWorkflowStepActions", () => {
 });
 
 describe("useWorkflowSaveActions", () => {
-  it("remaps added template step pull sources to backend-created template steps", async () => {
+  it("remaps template workflow pull sources between backend-created and added steps", async () => {
     const createdWorkflowId = "wf-created" as Workflow["id"];
     const templateName = "Template Step";
     const addedName = "Added Step";
@@ -120,7 +120,10 @@ describe("useWorkflowSaveActions", () => {
       step(backendAddedId, addedName, 1, false),
     );
 
-    const templateStep = step(draftTemplateId, templateName, 0, true);
+    const templateStep = {
+      ...step(draftTemplateId, templateName, 0, true),
+      pull_from_step_id: "draft-added",
+    };
     const addedStep = {
       ...step("draft-added", addedName, 1, false),
       pull_from_step_id: draftTemplateId,
@@ -141,8 +144,14 @@ describe("useWorkflowSaveActions", () => {
       await result.current.handleSaveWorkflow();
     });
 
+    expect(createWorkflowStepAction).toHaveBeenCalledWith(
+      expect.objectContaining({ pull_from_step_id: "" }),
+    );
     expect(updateWorkflowStepAction).toHaveBeenCalledWith(backendAddedId, {
       pull_from_step_id: backendTemplateId,
+    });
+    expect(updateWorkflowStepAction).toHaveBeenCalledWith(backendTemplateId, {
+      pull_from_step_id: backendAddedId,
     });
   });
 });

@@ -465,6 +465,7 @@ async function createStepsThenRemapPullSources(
     const createdID = addedStepIDByDraftID.get(step.id) ?? createdByPosition.get(step.position);
     if (createdID) await updateWorkflowStepAction(createdID, { pull_from_step_id: pullFromStepID });
   }
+  return addedStepIDByDraftID;
 }
 
 async function reconcileTemplateSteps(
@@ -479,6 +480,18 @@ async function reconcileTemplateSteps(
     if (userStep) stepIDByDraftID.set(userStep.id, backendStep.id);
   }
 
+  // Create added steps first so template-step updates can remap pull sources
+  // that point at a newly-added step.
+  const addedSteps = userSteps.filter((step) => step.position >= templateStepCount);
+  const addedStepIDByDraftID = await createStepsThenRemapPullSources(
+    createdId,
+    addedSteps,
+    stepIDByDraftID,
+  );
+  for (const [draftID, createdID] of addedStepIDByDraftID) {
+    stepIDByDraftID.set(draftID, createdID);
+  }
+
   // Reconcile user edits (name, color, etc.) with backend steps.
   // We do NOT touch events - the backend has correct step_id UUIDs.
   for (const backendStep of backendSteps) {
@@ -487,10 +500,6 @@ async function reconcileTemplateSteps(
     const updates = diffStepUpdates(userStep, backendStep, stepIDByDraftID);
     if (Object.keys(updates).length > 0) await updateWorkflowStepAction(backendStep.id, updates);
   }
-
-  // Create any additional steps the user added beyond the template
-  const addedSteps = userSteps.filter((step) => step.position >= templateStepCount);
-  await createStepsThenRemapPullSources(createdId, addedSteps, stepIDByDraftID);
 }
 
 type WorkflowSaveActionsParams = {
