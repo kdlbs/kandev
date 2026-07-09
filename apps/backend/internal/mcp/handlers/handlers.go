@@ -446,7 +446,10 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			repos[i].BaseBranch = req.BaseBranch
 		}
 	}
-	if req.WorkspaceID == "" {
+	if req.ParentID != "" {
+		req.WorkspaceID = resolved.WorkspaceID
+		req.WorkflowID = resolved.WorkflowID
+	} else if req.WorkspaceID == "" {
 		req.WorkspaceID = resolved.WorkspaceID
 	}
 	if req.WorkflowID == "" {

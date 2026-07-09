@@ -1536,6 +1536,41 @@ func TestHandleCreateTask_SubtaskBaseBranchOverride_ExplicitReposWin(t *testing.
 		"explicit per-repo base_branch must win over the top-level override")
 }
 
+func TestHandleCreateTask_SubtaskIgnoresExplicitWorkspaceAndWorkflow(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-2", Name: "Wrong"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-2", WorkspaceID: "ws-2", Name: "Wrong Board"}))
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":            "Child",
+		"description":      "do the thing",
+		"parent_id":        parentID,
+		"workspace_id":     "ws-2",
+		"workflow_id":      "wf-2",
+		"agent_profile_id": "profile-1",
+		"start_agent":      false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+
+	subtask, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "ws-1", subtask.WorkspaceID, "subtask workspace must come from parent")
+	assert.Equal(t, "wf-1", subtask.WorkflowID, "subtask workflow must come from parent")
+}
+
 func TestResolveTaskRepositories_ParentWithExplicitRepos_OverridesRepoButInheritsWorkspace(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	parentID := seedParentWithRepo(t, svc, repo)
