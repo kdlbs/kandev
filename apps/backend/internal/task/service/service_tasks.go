@@ -1071,20 +1071,9 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 			zap.String("new_owner_task_id", taskEnv.TaskID))
 	}
 
-	// 3. Get active sessions for stopping agents (sync, fast)
-	// Must query before delete since DB records will be gone
-	var stopTargets []taskStopTarget
-	if s.executionStopper != nil {
-		activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, id)
-		if err != nil {
-			s.logger.Warn("failed to list active sessions for delete",
-				zap.String("task_id", id),
-				zap.Error(err))
-		}
-		stopTargets, err = s.buildStopTargets(ctx, id, activeSessions)
-		if err != nil {
-			return false, fmt.Errorf("list runtime cleanup inventory: %w", err)
-		}
+	stopTargets, err := s.deleteTaskStopTargets(ctx, id)
+	if err != nil {
+		return false, err
 	}
 
 	// 4. Delete from DB (sync, fast)
@@ -1119,6 +1108,24 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 	}
 
 	return true, nil
+}
+
+func (s *Service) deleteTaskStopTargets(ctx context.Context, id string) ([]taskStopTarget, error) {
+	// Must query before delete since DB records will be gone.
+	if s.executionStopper == nil {
+		return nil, nil
+	}
+	activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, id)
+	if err != nil {
+		s.logger.Warn("failed to list active sessions for delete",
+			zap.String("task_id", id),
+			zap.Error(err))
+	}
+	stopTargets, err := s.buildStopTargets(ctx, id, activeSessions)
+	if err != nil {
+		return nil, fmt.Errorf("list runtime cleanup inventory: %w", err)
+	}
+	return stopTargets, nil
 }
 
 // CleanupTaskResources tears down a task's runtime resources (container,

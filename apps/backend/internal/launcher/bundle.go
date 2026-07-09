@@ -94,7 +94,7 @@ func machoHasCodeSignature(path string) (signed bool, ok bool) {
 	if err != nil {
 		return false, false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	data := make([]byte, maxScanBytes)
 	n, err := io.ReadFull(f, data)
 	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
