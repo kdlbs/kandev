@@ -13,13 +13,16 @@ import {
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { useToast } from "@/components/toast-provider";
+import { useAppStoreApi } from "@/components/state-provider";
 import { getJiraTicket } from "@/lib/api/domains/jira-api";
 import { getLinearIssue } from "@/lib/api/domains/linear-api";
 import { getSentryIssue } from "@/lib/api/domains/sentry-api";
 import { updateTask } from "@/lib/api/domains/kanban-api";
 import { JIRA_KEY_RE } from "@/components/jira/jira-ticket-common";
 import { LINEAR_KEY_RE } from "@/components/linear/linear-issue-common";
-import { SENTRY_SHORT_ID_RE } from "@/components/sentry/sentry-issue-common";
+import { extractSentryShortId } from "@/components/sentry/sentry-issue-common";
+import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+import type { SentryIssue } from "@/lib/types/sentry";
 import { buildLinkedIssueTitle } from "./task-external-link-utils";
 
 export type ExternalLinkProvider = "jira" | "linear" | "sentry";
@@ -46,7 +49,22 @@ type ProviderConfig = {
   successLabel: string;
   extractKey: (raw: string) => string | null;
   fetch: (key: string, workspaceId: string) => Promise<unknown>;
+  resolveLinkedKey?: (requestedKey: string, result: unknown) => string;
 };
+
+const SENTRY_NUMERIC_ISSUE_URL_RE = /\/issues\/(\d+)(?:[/?#]|$)/i;
+
+function extractSentryIssueKey(raw: string): string | null {
+  return extractSentryShortId(raw) ?? raw.match(SENTRY_NUMERIC_ISSUE_URL_RE)?.[1] ?? null;
+}
+
+function isSentryIssue(result: unknown): result is SentryIssue {
+  return (
+    typeof result === "object" &&
+    result !== null &&
+    typeof (result as Partial<SentryIssue>).shortId === "string"
+  );
+}
 
 const PROVIDERS: Record<ExternalLinkProvider, ProviderConfig> = {
   jira: {
@@ -76,13 +94,10 @@ const PROVIDERS: Record<ExternalLinkProvider, ProviderConfig> = {
     placeholder: "PROJ-123 or paste issue URL",
     validationHint: "Paste a Sentry issue URL or short ID (PROJ-123).",
     successLabel: "Sentry issue linked",
-    extractKey: (raw) => {
-      const upper = raw.toUpperCase().trim();
-      return SENTRY_SHORT_ID_RE.test(upper)
-        ? upper
-        : (upper.match(/[A-Z][A-Z0-9_-]*-\d+/)?.[0] ?? null);
-    },
+    extractKey: extractSentryIssueKey,
     fetch: (key, workspaceId) => getSentryIssue(key, { workspaceId }),
+    resolveLinkedKey: (requestedKey, result) =>
+      isSentryIssue(result) && result.shortId ? result.shortId : requestedKey,
   },
 };
 
@@ -94,6 +109,7 @@ export function TaskExternalLinkDialog({
   workspaceId,
 }: TaskExternalLinkDialogProps) {
   const { toast } = useToast();
+  const store = useAppStoreApi();
   const config = PROVIDERS[provider];
   const [input, setInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -116,8 +132,17 @@ export function TaskExternalLinkDialog({
     setSubmitting(true);
     setError(null);
     try {
-      await config.fetch(key, workspaceId);
-      await updateTask(task.id, { title: buildLinkedIssueTitle(task.title, key) });
+      const result = await config.fetch(key, workspaceId);
+      const state = store.getState();
+      const latestTask = findTaskInSnapshots(
+        task.id,
+        state.kanbanMulti.snapshots,
+        state.kanban.tasks,
+      );
+      const linkedKey = config.resolveLinkedKey?.(key, result) ?? key;
+      await updateTask(task.id, {
+        title: buildLinkedIssueTitle(latestTask?.title ?? task.title, linkedKey),
+      });
       toast({ description: config.successLabel, variant: "success" });
       onOpenChange(false);
     } catch (err) {
@@ -140,7 +165,10 @@ export function TaskExternalLinkDialog({
             id="task-external-link-input"
             data-testid="task-external-link-input"
             value={input}
-            onChange={(event) => setInput(event.target.value)}
+            onChange={(event) => {
+              setInput(event.target.value);
+              if (error) setError(null);
+            }}
             placeholder={config.placeholder}
             disabled={submitting}
           />
@@ -165,6 +193,7 @@ export function TaskExternalLinkDialog({
             className="cursor-pointer"
             onClick={submit}
             disabled={submitting || !input.trim()}
+            data-dialog-default-action
             data-testid="task-external-link-submit"
           >
             {submitting ? "Saving" : "Save"}

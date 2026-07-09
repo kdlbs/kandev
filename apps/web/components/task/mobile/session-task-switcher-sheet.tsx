@@ -13,15 +13,14 @@ import { applyView } from "@/lib/sidebar/apply-view";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useEffectiveSidebarView } from "@/hooks/domains/sidebar/use-effective-sidebar-view";
 import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-prefs";
-import { useJiraAvailable } from "@/hooks/domains/jira/use-jira-availability";
-import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availability";
-import { useSentryAvailable } from "@/hooks/domains/sentry/use-sentry-availability";
+import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { WorkspaceSwitcher } from "../workspace-switcher";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { TaskArchiveConfirmDialog } from "../task-archive-confirm-dialog";
 import { TaskDeleteConfirmDialog } from "../task-delete-confirm-dialog";
 import { SidebarLinkDialogs } from "../task-session-sidebar-dialogs";
 import { useSidebarLinkActions } from "../task-session-sidebar-link-actions";
+import { useSidebarTaskLinking } from "../task-session-sidebar-task-linking";
 import { useSheetData, useSheetActions } from "./session-task-switcher-sheet-hooks";
 
 type SessionTaskSwitcherSheetProps = {
@@ -34,24 +33,13 @@ type SessionTaskSwitcherSheetProps = {
 function useMobileTaskLinking(workspaceId: string | null) {
   const store = useAppStoreApi();
   const actions = useSidebarLinkActions(store);
-  const jiraAvailable = useJiraAvailable(workspaceId);
-  const linearAvailable = useLinearAvailable(workspaceId);
-  const sentryAvailable = useSentryAvailable(workspaceId);
-  const repositories =
-    useAppStore((state) =>
-      workspaceId ? state.repositories.itemsByWorkspaceId[workspaceId] : undefined,
-    ) ?? [];
+  const taskListHandlers = useSidebarTaskLinking(workspaceId, actions);
+  const { repositories } = useRepositories(workspaceId);
 
   return {
     actions,
     repositories,
-    taskListHandlers: {
-      onLinkPullRequest: actions.handleLinkPullRequestTask,
-      onLinkIssue: actions.handleLinkIssueTask,
-      onLinkJiraTicket: jiraAvailable ? actions.handleLinkJiraTicketTask : undefined,
-      onLinkLinearIssue: linearAvailable ? actions.handleLinkLinearIssueTask : undefined,
-      onLinkSentryIssue: sentryAvailable ? actions.handleLinkSentryIssueTask : undefined,
-    },
+    taskListHandlers,
   };
 }
 

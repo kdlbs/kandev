@@ -6,9 +6,7 @@ import { KanbanCard, resolveTaskRepositoryChips, Task } from "./kanban-card";
 import { Badge } from "@kandev/ui/badge";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
-import { useJiraAvailable } from "@/hooks/domains/jira/use-jira-availability";
-import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availability";
-import { useSentryAvailable } from "@/hooks/domains/sentry/use-sentry-availability";
+import type { KanbanExternalLinkAvailability } from "./kanban-external-link-availability";
 import type { Repository } from "@/lib/types/http";
 
 export interface WorkflowStep {
@@ -40,6 +38,7 @@ interface KanbanColumnProps {
   /** Shift-click range select; receives the clicked id + this column's ordered ids. */
   onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
+  externalLinkAvailability: KanbanExternalLinkAvailability;
 }
 
 export function KanbanColumn({
@@ -60,14 +59,12 @@ export function KanbanColumn({
   onToggleSelect,
   onSelectRange,
   isMultiSelectMode,
+  externalLinkAvailability,
 }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({
     id: step.id,
   });
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
-  const jiraAvailable = useJiraAvailable(activeWorkspaceId);
-  const linearAvailable = useLinearAvailable(activeWorkspaceId);
-  const sentryAvailable = useSentryAvailable(activeWorkspaceId);
 
   // Access repositories from store to pass repository names to cards
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
@@ -110,11 +107,7 @@ export function KanbanColumn({
             key={task.id}
             task={task}
             workspaceId={activeWorkspaceId}
-            externalLinkAvailability={{
-              jira: jiraAvailable,
-              linear: linearAvailable,
-              sentry: sentryAvailable,
-            }}
+            externalLinkAvailability={externalLinkAvailability}
             repositoryChips={resolveTaskRepositoryChips(task, repositories)}
             onClick={onPreviewTask}
             onOpenFullPage={onOpenTask}

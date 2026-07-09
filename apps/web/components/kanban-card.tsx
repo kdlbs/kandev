@@ -15,6 +15,7 @@ import {
   TaskExternalLinkDialog,
   type ExternalLinkProvider,
 } from "@/components/task/task-external-link-dialog";
+import type { KanbanExternalLinkAvailability } from "./kanban-external-link-availability";
 import { TaskGitHubIssueDialog } from "@/components/task/task-github-issue-dialog";
 import { TaskGitHubPRDialog } from "@/components/task/task-github-pr-dialog";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
@@ -73,7 +74,7 @@ export interface WorkflowStep {
 interface KanbanCardProps {
   task: Task;
   workspaceId: string | null;
-  externalLinkAvailability?: Record<ExternalLinkProvider, boolean>;
+  externalLinkAvailability: KanbanExternalLinkAvailability;
   /** Display labels and hover paths of every repository linked to the task, primary first. */
   repositoryChips?: RepositoryChip[];
   onClick?: (task: Task) => void;
@@ -151,9 +152,9 @@ function externalLinkHandlers(
   setExternalLinkProvider: (provider: ExternalLinkProvider) => void,
 ) {
   return {
-    onLinkJiraTicket: availability?.jira ? () => setExternalLinkProvider("jira") : undefined,
-    onLinkLinearIssue: availability?.linear ? () => setExternalLinkProvider("linear") : undefined,
-    onLinkSentryIssue: availability?.sentry ? () => setExternalLinkProvider("sentry") : undefined,
+    onLinkJiraTicket: availability.jira ? () => setExternalLinkProvider("jira") : undefined,
+    onLinkLinearIssue: availability.linear ? () => setExternalLinkProvider("linear") : undefined,
+    onLinkSentryIssue: availability.sentry ? () => setExternalLinkProvider("sentry") : undefined,
   };
 }
 

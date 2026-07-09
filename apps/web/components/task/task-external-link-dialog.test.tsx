@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { getJiraTicket } from "@/lib/api/domains/jira-api";
 import { getLinearIssue } from "@/lib/api/domains/linear-api";
@@ -37,15 +38,17 @@ afterEach(() => {
 
 function renderDialog(provider: "jira" | "linear" | "sentry" = "jira") {
   return render(
-    <ToastProvider>
-      <TaskExternalLinkDialog
-        open={true}
-        onOpenChange={vi.fn()}
-        provider={provider}
-        task={{ id: TASK_ID, title: TASK_TITLE }}
-        workspaceId={WORKSPACE_ID}
-      />
-    </ToastProvider>,
+    <StateProvider>
+      <ToastProvider>
+        <TaskExternalLinkDialog
+          open={true}
+          onOpenChange={vi.fn()}
+          provider={provider}
+          task={{ id: TASK_ID, title: TASK_TITLE }}
+          workspaceId={WORKSPACE_ID}
+        />
+      </ToastProvider>
+    </StateProvider>,
   );
 }
 
@@ -84,19 +87,19 @@ describe("TaskExternalLinkDialog", () => {
     expect(updateTask).toHaveBeenCalledWith(TASK_ID, { title: "ENG-20: Fix login" });
   });
 
-  it("extracts and links a Sentry issue key from a URL", async () => {
+  it("extracts and links a Sentry issue key from a numeric issue URL", async () => {
     vi.mocked(getSentryIssue).mockResolvedValue({ shortId: "API-42" } as never);
     vi.mocked(updateTask).mockResolvedValue({ id: TASK_ID, title: "API-42: Fix login" } as never);
 
     renderDialog("sentry");
 
     fireEvent.change(screen.getByTestId(INPUT_TEST_ID), {
-      target: { value: "https://sentry.io/organizations/acme/issues/api-42/" },
+      target: { value: "https://sentry.io/organizations/acme/issues/123456/" },
     });
     fireEvent.click(screen.getByTestId(SUBMIT_TEST_ID));
 
     await waitFor(() => {
-      expect(getSentryIssue).toHaveBeenCalledWith("API-42", { workspaceId: WORKSPACE_ID });
+      expect(getSentryIssue).toHaveBeenCalledWith("123456", { workspaceId: WORKSPACE_ID });
     });
     expect(updateTask).toHaveBeenCalledWith(TASK_ID, { title: "API-42: Fix login" });
   });
@@ -113,5 +116,11 @@ describe("TaskExternalLinkDialog", () => {
       /Paste a Jira ticket URL or key/i,
     );
     expect(updateTask).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByTestId(INPUT_TEST_ID), {
+      target: { value: "PROJ-12" },
+    });
+
+    expect(screen.queryByTestId(ERROR_TEST_ID)).toBeNull();
   });
 });
