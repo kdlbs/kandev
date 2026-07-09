@@ -462,6 +462,14 @@ func (s *Store) ListRuns(ctx context.Context, automationID string, limit int) ([
 }
 
 func (s *Store) listRunsWithTaskState(ctx context.Context, automationID string, limit int) ([]*AutomationRun, error) {
+	// Assumes a task_created run always carries a non-empty ar.task_id: the
+	// sole production write path (orchestrator's recordSuccessRun) sets
+	// TaskID and Status together in the same INSERT. If that's ever
+	// violated, the LEFT JOIN never matches an empty task_id against a
+	// real task row, so the run falls into the "no live task" branch below
+	// and displays as cancelled rather than its raw stored status —
+	// reachable today only through the e2e run-seeding endpoint, never in
+	// production.
 	var runs []*AutomationRun
 	err := s.ro.SelectContext(ctx, &runs, `
 		SELECT ar.id, ar.automation_id, ar.trigger_id, ar.trigger_type, ar.task_id,
@@ -514,6 +522,9 @@ func (s *Store) CountActiveRuns(ctx context.Context, automationID string) (int, 
 }
 
 func (s *Store) countActiveRunsWithTaskState(ctx context.Context, automationID string) (int, error) {
+	// Same non-empty-task_id assumption as listRunsWithTaskState above: an
+	// empty ar.task_id never matches a real task row either, so such a run
+	// silently falls out of the active count below instead of erroring.
 	var count int
 	err := s.ro.GetContext(ctx, &count, `
 		SELECT COUNT(*) FROM automation_runs ar

@@ -328,9 +328,10 @@ func insertTask(t *testing.T, store *Store, id string, archived bool) {
 // bug: an automation-generated task that gets archived (manually, via
 // auto-archive, or via cascade) leaves its automation run stuck at
 // task_created forever unless CountActiveRuns checks the task's current
-// state. A run whose task is archived — or gone entirely — no longer
-// represents outstanding work and must not count against
-// max_concurrent_runs.
+// state. A run whose task is archived, gone entirely, or never recorded
+// (empty task_id — see countActiveRunsWithTaskState's docstring in
+// store.go) no longer represents outstanding work and must not count
+// against max_concurrent_runs.
 func TestCountActiveRuns_ExcludesArchivedOrMissingTask(t *testing.T) {
 	store := setupTestStore(t)
 	createTasksTable(t, store)
@@ -343,9 +344,11 @@ func TestCountActiveRuns_ExcludesArchivedOrMissingTask(t *testing.T) {
 
 	insertTask(t, store, "task-active", false)
 	insertTask(t, store, "task-archived", true)
-	// "task-missing" deliberately has no row in tasks at all.
+	// "task-missing" deliberately has no row in tasks at all; "" (the
+	// task_id column default) exercises the same no-live-task branch
+	// through a different route.
 
-	for _, tid := range []string{"task-active", "task-archived", "task-missing"} {
+	for _, tid := range []string{"task-active", "task-archived", "task-missing", ""} {
 		if err := store.CreateRun(ctx, &AutomationRun{
 			AutomationID: a.ID,
 			TriggerType:  TriggerTypeScheduled,
@@ -399,8 +402,9 @@ func TestCountActiveRuns_FallsBackWhenTasksTableAbsent(t *testing.T) {
 
 // TestListRuns_ArchivedOrMissingTaskShowsCancelled ensures the "Recent Runs"
 // list the settings UI reads stops labeling a run "Running" once its
-// generated task is archived or gone, without touching the stored status of
-// runs that already reached a real terminal outcome.
+// generated task is archived, gone, or never recorded (empty task_id — see
+// listRunsWithTaskState's docstring in store.go), without touching the
+// stored status of runs that already reached a real terminal outcome.
 func TestListRuns_ArchivedOrMissingTaskShowsCancelled(t *testing.T) {
 	store := setupTestStore(t)
 	createTasksTable(t, store)
@@ -416,8 +420,9 @@ func TestListRuns_ArchivedOrMissingTaskShowsCancelled(t *testing.T) {
 	active := &AutomationRun{AutomationID: a.ID, TriggerType: TriggerTypeScheduled, Status: RunStatusTaskCreated, TaskID: "task-active", TriggerData: json.RawMessage(`{}`)}
 	archived := &AutomationRun{AutomationID: a.ID, TriggerType: TriggerTypeScheduled, Status: RunStatusTaskCreated, TaskID: "task-archived", TriggerData: json.RawMessage(`{}`)}
 	missing := &AutomationRun{AutomationID: a.ID, TriggerType: TriggerTypeScheduled, Status: RunStatusTaskCreated, TaskID: "task-missing", TriggerData: json.RawMessage(`{}`)}
+	emptyTaskID := &AutomationRun{AutomationID: a.ID, TriggerType: TriggerTypeScheduled, Status: RunStatusTaskCreated, TaskID: "", TriggerData: json.RawMessage(`{}`)}
 	succeededOnArchived := &AutomationRun{AutomationID: a.ID, TriggerType: TriggerTypeScheduled, Status: RunStatusSucceeded, TaskID: "task-archived", TriggerData: json.RawMessage(`{}`)}
-	for _, r := range []*AutomationRun{active, archived, missing, succeededOnArchived} {
+	for _, r := range []*AutomationRun{active, archived, missing, emptyTaskID, succeededOnArchived} {
 		if err := store.CreateRun(ctx, r); err != nil {
 			t.Fatal(err)
 		}
@@ -439,6 +444,9 @@ func TestListRuns_ArchivedOrMissingTaskShowsCancelled(t *testing.T) {
 	}
 	if s := statusByID[missing.ID]; s != RunStatusCancelled {
 		t.Errorf("missing task run: expected cancelled, got %q", s)
+	}
+	if s := statusByID[emptyTaskID.ID]; s != RunStatusCancelled {
+		t.Errorf("empty task_id run: expected cancelled, got %q", s)
 	}
 	if s := statusByID[succeededOnArchived.ID]; s != RunStatusSucceeded {
 		t.Errorf("already-succeeded run on now-archived task: expected succeeded preserved, got %q", s)
