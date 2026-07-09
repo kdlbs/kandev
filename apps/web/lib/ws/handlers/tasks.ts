@@ -64,7 +64,26 @@ function upsertMultiTask(
   payload: TaskEventPayload,
 ): AppState {
   const snapshot = state.kanbanMulti.snapshots[workflowId];
-  if (!snapshot) return state;
+  if (!snapshot) {
+    const workflowName =
+      state.workflows?.items.find((item) => item.id === workflowId)?.name ?? workflowId;
+    return {
+      ...state,
+      kanbanMulti: {
+        ...state.kanbanMulti,
+        snapshots: {
+          ...state.kanbanMulti.snapshots,
+          [workflowId]: {
+            workflowId,
+            workflowName,
+            steps: [],
+            tasks: upsertTask([], task, payload),
+            isPlaceholder: true,
+          },
+        },
+      },
+    };
+  }
   return {
     ...state,
     kanbanMulti: {
@@ -108,9 +127,7 @@ function upsertTaskInBothKanbans(
     };
   }
 
-  if (state.kanbanMulti.snapshots[wfId]) {
-    next = upsertMultiTask(next, wfId, nextTask, payload);
-  }
+  next = upsertMultiTask(next, wfId, nextTask, payload);
 
   return next;
 }

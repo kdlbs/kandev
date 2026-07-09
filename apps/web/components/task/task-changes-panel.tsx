@@ -30,7 +30,7 @@ type TaskChangesPanelProps = {
   onClearSelected: () => void;
   onBecameEmpty?: () => void;
   /** Callback to open file in editor */
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, repo?: string) => void;
   /**
    * Restrict the diff list to a single source. Defaults to `"all"` (no
    * filter). Mobile uses this for source tabs; desktop omits it.
@@ -558,7 +558,7 @@ function ChangesPanelContent({
   selectedFile?: string | null;
   onToggleReviewed: (path: string, reviewed: boolean) => void;
   onDiscard: (path: string) => Promise<void>;
-  onOpenFile: (path: string) => void;
+  onOpenFile: (path: string, repo?: string) => void;
   onPreviewMarkdown?: (path: string) => void;
   fileRefs: Map<string, React.RefObject<HTMLDivElement | null>>;
 }) {
