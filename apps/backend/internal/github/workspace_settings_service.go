@@ -90,6 +90,10 @@ func (s *Service) searchUserPRsPagedScoped(
 	if workspaceSettingsHasEmptyScope(settings) {
 		return &PRSearchPage{PRs: []*PR{}, TotalCount: 0, Page: page, PerPage: perPage}, nil
 	}
+	qualifiers := workspaceScopeQualifiers(settings)
+	if len(qualifiers) > 1 {
+		return s.searchUserPRsPagedScopedAcrossQualifiers(ctx, settings, filter, customQuery, page, perPage, qualifiers)
+	}
 	filter, customQuery = appendWorkspaceScopeToSearch(filter, customQuery, settings)
 	v, err := s.searchUserPagedScoped("pr", settings, filter, customQuery, page, perPage, func(page, perPage int) (any, error) {
 		result, err := s.client.SearchPRsPaged(ctx, filter, customQuery, page, perPage)
@@ -114,6 +118,10 @@ func (s *Service) searchUserIssuesPagedScoped(
 ) (*IssueSearchPage, error) {
 	if workspaceSettingsHasEmptyScope(settings) {
 		return &IssueSearchPage{Issues: []*Issue{}, TotalCount: 0, Page: page, PerPage: perPage}, nil
+	}
+	qualifiers := workspaceScopeQualifiers(settings)
+	if len(qualifiers) > 1 {
+		return s.searchUserIssuesPagedScopedAcrossQualifiers(ctx, settings, filter, customQuery, page, perPage, qualifiers)
 	}
 	filter, customQuery = appendWorkspaceScopeToSearch(filter, customQuery, settings)
 	v, err := s.searchUserPagedScoped("issue", settings, filter, customQuery, page, perPage, func(page, perPage int) (any, error) {
@@ -147,6 +155,201 @@ func (s *Service) searchUserPagedScoped(
 	return s.searchCache.doOrFetch(key, func() (any, error) {
 		return fetch(page, perPage)
 	})
+}
+
+func (s *Service) searchUserPRsPagedScopedAcrossQualifiers(
+	ctx context.Context,
+	settings *WorkspaceSettings,
+	filter string,
+	customQuery string,
+	page int,
+	perPage int,
+	qualifiers []string,
+) (*PRSearchPage, error) {
+	result, err := cachedScopedSearchAcrossQualifiers(s.client, s.searchCache, "pr", settings, filter, customQuery, page, perPage, func(page, perPage int) ([]*PR, int, error) {
+		return s.fetchScopedPRsAcrossQualifiers(ctx, settings, filter, customQuery, page, perPage, qualifiers)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &PRSearchPage{PRs: result.items, TotalCount: result.total, Page: result.page, PerPage: result.perPage}, nil
+}
+
+func (s *Service) searchUserIssuesPagedScopedAcrossQualifiers(
+	ctx context.Context,
+	settings *WorkspaceSettings,
+	filter string,
+	customQuery string,
+	page int,
+	perPage int,
+	qualifiers []string,
+) (*IssueSearchPage, error) {
+	result, err := cachedScopedSearchAcrossQualifiers(s.client, s.searchCache, "issue", settings, filter, customQuery, page, perPage, func(page, perPage int) ([]*Issue, int, error) {
+		return s.fetchScopedIssuesAcrossQualifiers(ctx, settings, filter, customQuery, page, perPage, qualifiers)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &IssueSearchPage{Issues: result.items, TotalCount: result.total, Page: result.page, PerPage: result.perPage}, nil
+}
+
+type scopedFanoutResult[T any] struct {
+	items   []T
+	total   int
+	page    int
+	perPage int
+}
+
+func cachedScopedSearchAcrossQualifiers[T any](
+	client Client,
+	cache *ttlCache,
+	kind string,
+	settings *WorkspaceSettings,
+	filter string,
+	customQuery string,
+	page int,
+	perPage int,
+	fetch func(page int, perPage int) ([]T, int, error),
+) (scopedFanoutResult[T], error) {
+	if client == nil {
+		return scopedFanoutResult[T]{}, fmt.Errorf("github client not available")
+	}
+	page, perPage = clampSearchPage(page, perPage)
+	scopeKey := workspaceSearchScopeKey(settings)
+	key := searchCacheKey(kind+":"+scopeKey+":fanout", filter, customQuery, page, perPage)
+	v, err := cache.doOrFetch(key, func() (any, error) {
+		items, total, err := fetch(page, perPage)
+		if err != nil {
+			return nil, err
+		}
+		return scopedFanoutResult[T]{
+			items:   paginateSearchResults(items, page, perPage),
+			total:   total,
+			page:    page,
+			perPage: perPage,
+		}, nil
+	})
+	if err != nil {
+		return scopedFanoutResult[T]{}, err
+	}
+	return v.(scopedFanoutResult[T]), nil
+}
+
+func (s *Service) fetchScopedPRsAcrossQualifiers(
+	ctx context.Context,
+	settings *WorkspaceSettings,
+	filter string,
+	customQuery string,
+	page int,
+	perPage int,
+	qualifiers []string,
+) ([]*PR, int, error) {
+	return fetchScopedResultsAcrossQualifiers(filter, customQuery, page, perPage, qualifiers, prScopeKey, func(scopedFilter, scopedCustomQuery string, fetchPerPage int) ([]*PR, int, error) {
+		result, err := s.client.SearchPRsPaged(ctx, scopedFilter, scopedCustomQuery, 1, fetchPerPage)
+		if err != nil {
+			return nil, 0, err
+		}
+		if result == nil {
+			return []*PR{}, 0, nil
+		}
+		return filterPRsByWorkspaceScope(result.PRs, settings), result.TotalCount, nil
+	})
+}
+
+func (s *Service) fetchScopedIssuesAcrossQualifiers(
+	ctx context.Context,
+	settings *WorkspaceSettings,
+	filter string,
+	customQuery string,
+	page int,
+	perPage int,
+	qualifiers []string,
+) ([]*Issue, int, error) {
+	return fetchScopedResultsAcrossQualifiers(filter, customQuery, page, perPage, qualifiers, issueScopeKey, func(scopedFilter, scopedCustomQuery string, fetchPerPage int) ([]*Issue, int, error) {
+		result, err := s.client.ListIssuesPaged(ctx, scopedFilter, scopedCustomQuery, 1, fetchPerPage)
+		if err != nil {
+			return nil, 0, err
+		}
+		if result == nil {
+			return []*Issue{}, 0, nil
+		}
+		return filterIssuesByWorkspaceScope(result.Issues, settings), result.TotalCount, nil
+	})
+}
+
+func fetchScopedResultsAcrossQualifiers[T any](
+	filter string,
+	customQuery string,
+	page int,
+	perPage int,
+	qualifiers []string,
+	resultKey func(T) string,
+	fetch func(scopedFilter string, scopedCustomQuery string, fetchPerPage int) ([]T, int, error),
+) ([]T, int, error) {
+	seen := make(map[string]struct{})
+	all := make([]T, 0, perPage)
+	total := 0
+	fetchPerPage := workspaceScopeFanoutFetchPerPage(page, perPage)
+	for _, qualifier := range qualifiers {
+		scopedFilter, scopedCustomQuery := appendWorkspaceScopeQualifierToSearch(filter, customQuery, qualifier)
+		items, count, err := fetch(scopedFilter, scopedCustomQuery, fetchPerPage)
+		if err != nil {
+			return nil, 0, err
+		}
+		total += count
+		for _, item := range items {
+			key := resultKey(item)
+			if key == "" {
+				continue
+			}
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			all = append(all, item)
+		}
+	}
+	return all, total, nil
+}
+
+func workspaceScopeFanoutFetchPerPage(page, perPage int) int {
+	fetchPerPage := page * perPage
+	if fetchPerPage < perPage {
+		return perPage
+	}
+	if fetchPerPage > 100 {
+		return 100
+	}
+	return fetchPerPage
+}
+
+func paginateSearchResults[T any](items []T, page, perPage int) []T {
+	if len(items) == 0 {
+		return []T{}
+	}
+	start := (page - 1) * perPage
+	if start >= len(items) {
+		return []T{}
+	}
+	end := start + perPage
+	if end > len(items) {
+		end = len(items)
+	}
+	return append([]T(nil), items[start:end]...)
+}
+
+func prScopeKey(pr *PR) string {
+	if pr == nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(fmt.Sprintf("%s/%s#%d", pr.RepoOwner, pr.RepoName, pr.Number)))
+}
+
+func issueScopeKey(issue *Issue) string {
+	if issue == nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(fmt.Sprintf("%s/%s#%d", issue.RepoOwner, issue.RepoName, issue.Number)))
 }
 
 func scopedPRSearchPage(result *PRSearchPage, settings *WorkspaceSettings, page int, perPage int) *PRSearchPage {
@@ -200,18 +403,26 @@ func appendWorkspaceScopeQuery(customQuery string, settings *WorkspaceSettings) 
 	if len(qualifiers) == 0 {
 		return customQuery
 	}
-	scope := qualifiers[0]
-	if len(qualifiers) > 1 {
-		scope = "(" + strings.Join(qualifiers, " OR ") + ")"
-	}
-	return strings.TrimSpace(strings.Join([]string{customQuery, scope}, " "))
+	return appendWorkspaceScopeQualifier(customQuery, qualifiers[0])
 }
 
 func appendWorkspaceScopeToSearch(filter, customQuery string, settings *WorkspaceSettings) (string, string) {
-	if strings.TrimSpace(customQuery) != "" {
-		return filter, appendWorkspaceScopeQuery(customQuery, settings)
+	qualifiers := workspaceScopeQualifiers(settings)
+	if len(qualifiers) == 0 {
+		return filter, customQuery
 	}
-	return appendWorkspaceScopeQuery(filter, settings), customQuery
+	return appendWorkspaceScopeQualifierToSearch(filter, customQuery, qualifiers[0])
+}
+
+func appendWorkspaceScopeQualifierToSearch(filter, customQuery, qualifier string) (string, string) {
+	if strings.TrimSpace(customQuery) != "" {
+		return filter, appendWorkspaceScopeQualifier(customQuery, qualifier)
+	}
+	return appendWorkspaceScopeQualifier(filter, qualifier), customQuery
+}
+
+func appendWorkspaceScopeQualifier(query, qualifier string) string {
+	return strings.TrimSpace(strings.Join([]string{query, qualifier}, " "))
 }
 
 func workspaceScopeQualifiers(settings *WorkspaceSettings) []string {
