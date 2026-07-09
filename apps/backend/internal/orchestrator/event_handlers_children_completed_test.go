@@ -231,6 +231,14 @@ func TestHandleTaskMovedToTerminalStepProcessesParentChildrenCompleted(t *testin
 	})
 	waitForChildrenCompletedOnEnter(t, onEnterDone)
 
+	child, err := repo.GetTask(ctx, "child-terminal-move")
+	if err != nil {
+		t.Fatalf("load child after terminal move: %v", err)
+	}
+	if child.State != v1.TaskStateCompleted {
+		t.Fatalf("expected child state COMPLETED after terminal move, got %q", child.State)
+	}
+
 	parent, err := repo.GetTask(ctx, "parent")
 	if err != nil {
 		t.Fatalf("load parent after child move: %v", err)
