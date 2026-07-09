@@ -10,6 +10,10 @@ export function buildPromptMentionNames(promptNames: string[]) {
   );
 }
 
+/**
+ * Match using names ordered by buildPromptMentionNames so longer names win
+ * over shorter prefixes.
+ */
 export function matchPromptMention(
   content: string,
   index: number,

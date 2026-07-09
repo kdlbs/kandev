@@ -113,6 +113,7 @@ describe("ChatMessage prompt mentions", () => {
     );
 
     const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
+    expect(screen.getAllByTestId("custom-prompt-mention")).toHaveLength(2);
     expect(checkbox.checked).toBe(true);
     expect(checkbox.closest("li")?.className).toContain("task-list-item");
     expect(screen.getByRole("cell").getAttribute("style")).toContain("text-align: center");
