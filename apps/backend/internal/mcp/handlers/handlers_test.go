@@ -911,7 +911,7 @@ func TestHandleCreateTask_MetadataExecutorProfileClearsSessionExecutorID(t *test
 	assert.Empty(t, task.Metadata[models.MetaKeyExecutorID])
 }
 
-func TestHandleCreateTask_InvalidWorkflowProfileLookupReturnsInternalError(t *testing.T) {
+func TestHandleCreateTask_InvalidWorkflowReturnsValidationError(t *testing.T) {
 	svc, _ := newTestTaskService(t)
 	ctx := context.Background()
 	workspaces, err := svc.ListWorkspaces(ctx)
@@ -931,11 +931,12 @@ func TestHandleCreateTask_InvalidWorkflowProfileLookupReturnsInternalError(t *te
 
 	resp, err := h.handleCreateTask(ctx, msg)
 	require.NoError(t, err)
-	assertWSError(t, resp, ws.ErrorCodeInternalError)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
 
 	var ep ws.ErrorPayload
 	require.NoError(t, json.Unmarshal(resp.Payload, &ep))
-	assert.Contains(t, ep.Message, "failed to resolve launch profile")
+	assert.Contains(t, ep.Message, "workflow_id")
+	assert.Contains(t, ep.Message, "could not be resolved")
 }
 
 func TestHandleCreateTask_StartAgentUsesWorkspaceDefaultAgentProfile(t *testing.T) {
@@ -1691,6 +1692,30 @@ func TestHandleCreateTask_SubtaskExplicitWorkspaceAutoResolvesWorkflow(t *testin
 	require.NoError(t, err)
 	assert.Equal(t, "ws-2", subtask.WorkspaceID)
 	assert.Equal(t, "wf-2", subtask.WorkflowID, "workflow should auto-resolve inside the explicitly chosen workspace")
+}
+
+func TestHandleCreateTask_SubtaskRejectsWorkflowFromDifferentWorkspace(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-2", Name: "Other"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-2", WorkspaceID: "ws-2", Name: "Other Board"}))
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":            "Cross-workspace child",
+		"description":      "do the thing",
+		"parent_id":        parentID,
+		"workflow_id":      "wf-2",
+		"agent_profile_id": "profile-1",
+		"start_agent":      false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
 }
 
 func TestResolveTaskRepositories_ParentWithExplicitRepos_OverridesRepoButInheritsWorkspace(t *testing.T) {

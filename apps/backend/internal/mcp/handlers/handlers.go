@@ -481,6 +481,9 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.WorkflowID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
 	}
+	if err := h.validateMCPWorkflowWorkspace(ctx, req.WorkflowID, req.WorkspaceID); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
 
 	workspacePolicy, err := h.resolveMCPWorkspacePolicy(req.ParentID, req.WorkspaceMode)
 	if err != nil {
@@ -689,6 +692,20 @@ func firstNonEmptyString(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func (h *Handlers) validateMCPWorkflowWorkspace(ctx context.Context, workflowID, workspaceID string) error {
+	if h.taskSvc == nil || workflowID == "" || workspaceID == "" {
+		return nil
+	}
+	workflow, err := h.taskSvc.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		return fmt.Errorf("workflow_id %q could not be resolved: %w", workflowID, err)
+	}
+	if workflow.WorkspaceID != workspaceID {
+		return fmt.Errorf("workflow_id %q belongs to workspace_id %q, not %q", workflowID, workflow.WorkspaceID, workspaceID)
+	}
+	return nil
 }
 
 // explicitRepoInputsWithDefaults maps the MCP-side explicit repo list to

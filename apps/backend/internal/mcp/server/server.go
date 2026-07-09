@@ -524,7 +524,7 @@ WHEN TO OMIT parent_id (top-level task):
 - workspace_id and workflow_id are auto-resolved if only one exists; provide explicitly if ambiguous
 
 IMPORTANT:
-- Subtasks inherit task workspace, workflow, agent profile, executor, and materialized workspace from the parent by default. Pass workspace_id/workflow_id only when deliberately targeting a different task workspace/workflow, and pass workspace_mode='new_workspace' when the subtask needs its own materialized workspace/worktree.
+- Subtasks inherit task workspace, workflow, agent profile, executor, and materialized workspace from the parent by default. Pass workspace_id/workflow_id only when deliberately targeting a different task workspace/workflow; any supplied workflow_id must belong to the effective workspace_id. Pass workspace_mode='new_workspace' when the subtask needs its own materialized workspace/worktree.
 - Agent profile precedence is explicit agent_profile_id > current/source task or parent task > workflow defaults > workspace default
 - When launched from a current task, omitting parent_id still uses the current task as the source for profile inheritance before workflow/workspace defaults. Do not rely on workspace defaults for follow-up work from an active task.
 - Every created task must have a resolvable agent profile. start_agent=false still records the profile for a later manual start.
@@ -560,7 +560,7 @@ IMPORTANT:
 			mcp.WithDescription(toolDesc),
 			mcp.WithString("parent_id", mcp.Description(parentDesc)),
 			mcp.WithString("workspace_id", mcp.Description("The workspace ID. Auto-resolved if only one workspace exists. Defaulted from parent for subtasks when omitted.")),
-			mcp.WithString("workflow_id", mcp.Description("The workflow ID. Auto-resolved if the workspace has only one workflow. Defaulted from parent for subtasks when workspace_id is also omitted.")),
+			mcp.WithString("workflow_id", mcp.Description("The workflow ID. Auto-resolved if the workspace has only one workflow. Defaulted from parent for subtasks when workspace_id is also omitted; if supplied, it must belong to the effective workspace_id.")),
 			mcp.WithString("workflow_step_id", mcp.Description("The workflow step ID (optional, auto-resolved if omitted; for subtasks, pass only with an explicit workflow_id)")),
 			mcp.WithString("workspace_mode", mcp.Description("Subtask materialized-workspace mode: inherit_parent reuses the parent's worktree/materialized workspace (default for subtasks); new_workspace launches the subtask in its own workspace/worktree.")),
 			mcp.WithString("title", mcp.Required(), mcp.Description("The task title")),
