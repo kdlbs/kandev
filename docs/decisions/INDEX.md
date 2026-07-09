@@ -30,7 +30,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0022 | [Embedded Vite assets](0022-embedded-vite-assets.md)                                                                                | accepted   | backend, frontend, cli      | 2026-06-17 |
 | 0023 | [Active workspace cookie for boot state](0023-active-workspace-cookie.md)                                                           | accepted   | backend, frontend           | 2026-06-18 |
 | 0024 | [Go-fronted Vite dev mode](0024-go-fronted-vite-dev-mode.md)                                                                        | accepted   | backend, frontend, cli      | 2026-06-18 |
-| 0025 | [Runtime cleanup uses `executors_running`](0025-runtime-cleanup-uses-executors-running.md)                                          | accepted   | backend                     | 2026-06-22 |
+| 0025 | [Runtime cleanup uses `executors_running`](0025-runtime-cleanup-uses-executors-running.md)                                          | accepted (amended 2026-07-06) | backend            | 2026-06-22 |
 | 0026 | [Tauri desktop shell over native runtime](0026-tauri-desktop-shell.md)                                                              | accepted   | frontend, backend, cli, infra | 2026-06-23 |
 | 0027 | [Replayable schema migrations across SQLite and Postgres](0027-replayable-schema-migrations.md)                                     | accepted   | backend                     | 2026-06-24 |
 | 0028 | [Backend-owned task-create last-used preferences](0028-task-create-last-used-source-of-truth.md)                                    | accepted   | backend, frontend           | 2026-06-29 |

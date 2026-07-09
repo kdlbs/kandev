@@ -32,6 +32,7 @@ import { TerminalPanel } from "./terminal-panel";
 import { BrowserPanel } from "./browser-panel";
 import { VscodePanel } from "./vscode-panel";
 import { CommitDetailPanel } from "./commit-detail-panel";
+import type { OpenDiffOptions } from "./changes-diff-target";
 import { PRDetailPanelComponent } from "@/components/github/pr-detail-panel";
 
 import { setPanelTitle, panelPortalManager } from "@/lib/layout/panel-portal-manager";
@@ -254,6 +255,8 @@ function DiffViewerContent({
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const panelKind = (params?.kind as string) ?? "all";
   const selectedPath = panelKind === "file" ? (params?.path as string) : undefined;
+  const selectedRepositoryName =
+    panelKind === "file" ? (params?.repositoryName as string | undefined) : undefined;
   const panelSelectedDiff = panelKind === "all" ? selectedDiff : null;
   useResyncGitStatusOnTabActivate(panelId, activeSessionId);
   const handleClosePanel = useCallback(() => {
@@ -266,6 +269,7 @@ function DiffViewerContent({
     <TaskChangesPanel
       mode={panelKind as "all" | "file"}
       filePath={selectedPath}
+      fileRepositoryName={selectedRepositoryName}
       selectedDiff={panelSelectedDiff}
       onClearSelected={() => setSelectedDiff(null)}
       onOpenFile={openFile}
@@ -293,13 +297,17 @@ function ChangesContent({ panelId }: { panelId: string }) {
     setPanelTitle(panelId, title);
   }, [totalCount, panelId]);
 
-  const handleEditFile = useCallback((path: string) => openFile(path), [openFile]);
+  const handleEditFile = useCallback(
+    (path: string, repo?: string) => openFile(path, repo),
+    [openFile],
+  );
   const handleOpenDiffFile = useCallback(
-    (path: string) => addFileDiffPanel(path),
+    (path: string, options?: OpenDiffOptions) =>
+      addFileDiffPanel(path, { source: options?.source, repositoryName: options?.repositoryName }),
     [addFileDiffPanel],
   );
   const handleOpenCommitDetail = useCallback(
-    (sha: string) => addCommitDetailPanel(sha),
+    (sha: string, repo?: string) => addCommitDetailPanel(sha, { repo }),
     [addCommitDetailPanel],
   );
   const handleOpenDiffAll = useCallback(() => addDiffViewerPanel(), [addDiffViewerPanel]);

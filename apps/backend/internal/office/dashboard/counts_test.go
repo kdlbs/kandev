@@ -47,7 +47,12 @@ func TestDashboard_TaskSkillRoutineCounts(t *testing.T) {
 
 	// Wire stub skill/routine listers.
 	deps.svc.SetSkillLister(&stubSkillLister{
-		skills: []*models.Skill{{ID: "s1"}, {ID: "s2"}},
+		skills: []*models.Skill{
+			{ID: "s1"},
+			{ID: "s2"},
+			{ID: "system-1", IsSystem: true},
+			nil,
+		},
 	})
 	deps.svc.SetRoutineLister(&stubRoutineLister{
 		routines: []*models.Routine{
@@ -73,7 +78,7 @@ func TestDashboard_TaskSkillRoutineCounts(t *testing.T) {
 		t.Errorf("task_count: got %d, want 3", resp.TaskCount)
 	}
 	if resp.SkillCount != 2 {
-		t.Errorf("skill_count: got %d, want 2", resp.SkillCount)
+		t.Errorf("skill_count: got %d, want 2 user-defined skills", resp.SkillCount)
 	}
 	if resp.RoutineCount != 1 {
 		t.Errorf("routine_count: got %d, want 1 (active only)", resp.RoutineCount)

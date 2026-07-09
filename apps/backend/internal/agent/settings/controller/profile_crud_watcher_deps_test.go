@@ -40,6 +40,15 @@ type fakeWatcherDependencyChecker struct {
 	disabledCause   string
 }
 
+type fakeRoutingTierDependencyChecker struct {
+	refs []RoutingTierReference
+	err  error
+}
+
+func (f fakeRoutingTierDependencyChecker) ListRoutingTierReferencesByAgentProfile(context.Context, string) ([]RoutingTierReference, error) {
+	return f.refs, f.err
+}
+
 func (f *fakeWatcherDependencyChecker) ListWatchersByAgentProfile(context.Context, string) ([]WatcherReference, error) {
 	return f.refs, f.err
 }
@@ -81,6 +90,33 @@ func TestDeleteProfile_BlocksOnReferencingWatchers(t *testing.T) {
 	}
 	if detail.Watchers[0].Kind != "linear" || detail.Watchers[1].Kind != "github_issue" {
 		t.Errorf("unexpected watcher refs: %+v", detail.Watchers)
+	}
+}
+
+func TestDeleteProfile_BlocksOnRoutingTierReferencesEvenWithForce(t *testing.T) {
+	ctrl := newTestController(map[string]agents.Agent{"test-agent": &testAgent{id: "test-agent", name: "test-agent", enabled: true}})
+	st := newFakeStore()
+	agent := &models.Agent{ID: "agent-1", Name: "test-agent"}
+	st.agents[agent.ID] = agent
+	st.byName[agent.Name] = agent
+	st.profiles[agent.ID] = []*models.AgentProfile{{ID: "prof-1", AgentID: agent.ID, Name: "Kilo Profile"}}
+	ctrl.repo = st
+	ctrl.sessionChecker = &fakeSessionChecker{}
+	ctrl.routingTierDeps = fakeRoutingTierDependencyChecker{refs: []RoutingTierReference{
+		{WorkspaceID: "ws-1", ProviderID: "codex-acp", Tier: "balanced"},
+	}}
+
+	_, err := ctrl.DeleteProfile(context.Background(), "prof-1", true)
+
+	var detail *ErrProfileInUseDetail
+	if !errors.As(err, &detail) {
+		t.Fatalf("expected ErrProfileInUseDetail, got %v", err)
+	}
+	if len(detail.RoutingTiers) != 1 {
+		t.Fatalf("expected 1 routing tier ref, got %+v", detail.RoutingTiers)
+	}
+	if detail.RoutingTiers[0].Tier != "balanced" {
+		t.Errorf("unexpected routing tier ref: %+v", detail.RoutingTiers[0])
 	}
 }
 

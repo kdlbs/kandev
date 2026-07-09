@@ -206,7 +206,7 @@ type WorkflowStep struct {
 	// When true, bare turn-end does NOT trigger the step's transition
 	// actions; instead the orchestrator waits for the agent (or a manual
 	// UI fallback) to write the pending-signal bag on TaskSession.Metadata.
-	AutoAdvanceRequiresSignal bool      `json:"auto_advance_requires_signal,omitempty"`
+	AutoAdvanceRequiresSignal bool      `json:"auto_advance_requires_signal"`
 	CreatedAt                 time.Time `json:"created_at"`
 	UpdatedAt                 time.Time `json:"updated_at"`
 }

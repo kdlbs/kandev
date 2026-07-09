@@ -1192,6 +1192,14 @@ func (m *Manager) MarkCompleted(executionID string, exitCode int, errorMessage s
 	// End session trace span
 	execution.EndSessionSpan()
 
+	// Persist the terminal status to executors_running. Unlike the Ready/Running
+	// transitions (which flow through updateStatusAndPersist), MarkCompleted is
+	// the process-exit/crash boundary and historically skipped persistence — so a
+	// row kept claiming a `running`/`starting` process after it had exited
+	// (#1597). Re-stamping here leaves the row truthful (terminal
+	// status + fresh last_seen_at) the moment the process is gone.
+	m.persistExecutorRunning(context.Background(), execution)
+
 	m.logger.Info("execution completed",
 		zap.String("execution_id", executionID),
 		zap.Int("exit_code", exitCode),

@@ -280,6 +280,16 @@ func (a *lifecycleAdapter) StopAgentWithReason(ctx context.Context, agentInstanc
 	return a.mgr.StopAgentWithReason(ctx, agentInstanceID, reason, force)
 }
 
+// RowLiveness classifies the liveness of the OS process backing an
+// executors_running row using the runtime-aware host-local probe. It is the
+// orchestrator's window into the platform-split liveness check (kept in the
+// lifecycle package) used by startup reconciliation
+// (#1597 runtime-aware liveness). A local check never runs against a
+// remote/SSH row — such rows return Unknown.
+func (a *lifecycleAdapter) RowLiveness(row *models.ExecutorRunning) models.ProcessLiveness {
+	return lifecycle.RowProcessLiveness(row)
+}
+
 // GetAgentStatus returns the status of an agent execution
 func (a *lifecycleAdapter) GetAgentStatus(ctx context.Context, agentInstanceID string) (*v1.AgentExecution, error) {
 	execution, found := a.mgr.GetExecution(agentInstanceID)

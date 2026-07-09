@@ -83,6 +83,12 @@ func (m *mockRepository) ArchiveTask(ctx context.Context, id string) error {
 func (m *mockRepository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error) {
 	return nil, nil
 }
+func (m *mockRepository) ListExpiredQuickChatTasks(ctx context.Context, cutoff time.Time) ([]*models.Task, error) {
+	return nil, nil
+}
+func (m *mockRepository) DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error) {
+	return false, nil
+}
 func (m *mockRepository) CountOpenWatcherCreatedTasks(_ context.Context, _, _ string) (int, error) {
 	return 0, nil
 }
@@ -397,6 +403,9 @@ func (m *mockRepository) UpdateResumeToken(ctx context.Context, sessionID, expec
 	return nil
 }
 func (m *mockRepository) UpdateExecutorRunningStatus(ctx context.Context, sessionID, status string) error {
+	return nil
+}
+func (m *mockRepository) RepairExecutorRunningDead(ctx context.Context, sessionID string) error {
 	return nil
 }
 func (m *mockRepository) CreateEnvironment(ctx context.Context, environment *models.Environment) error {

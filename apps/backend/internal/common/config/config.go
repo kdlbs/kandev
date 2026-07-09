@@ -240,6 +240,12 @@ type AgentConfig struct {
 	// StandaloneAuthToken is the per-launch auth token retrieved via handshake.
 	// Set at runtime after agentctl starts; not persisted in config files.
 	StandaloneAuthToken string `mapstructure:"-"`
+
+	// StandalonePID is the OS process id of the standalone agentctl control-server
+	// this backend spawned. Set at runtime after agentctl starts (from the
+	// launcher); not persisted in config files. Used as the host-local liveness
+	// handle recorded in executors_running.local_pid for local/standalone rows.
+	StandalonePID int `mapstructure:"-"`
 }
 
 // ReadTimeoutDuration returns the read timeout as a time.Duration.

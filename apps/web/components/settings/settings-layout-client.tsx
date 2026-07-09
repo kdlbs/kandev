@@ -1,12 +1,14 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
-import { usePathname } from "@/lib/routing/client-router";
+import { useCallback, useEffect, useMemo } from "react";
+import { usePathname, useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { PageTopbar } from "@/components/page-topbar";
 import { useAppStore } from "@/components/state-provider";
 import { WorkspaceSwitcher } from "@/components/task/workspace-switcher";
 import { createQueuedUserSettingsSync } from "@/lib/user-settings-sync";
+import { IntegrationCopyConfigMenu } from "@/components/integrations/integration-copy-config-menu";
+import { integrationFromPathname } from "@/components/integrations/integration-copy-config";
 
 const WORKSPACE_SYNC_FAILED_KEY = "kandev:settings:integration-workspace:sync-failed:v1";
 
@@ -110,11 +112,45 @@ export function SettingsLayoutClient({ children }: { children: React.ReactNode }
   );
 }
 
+// useWorkspaceQueryParamSync keeps the top-right switcher and the `?workspace`
+// query param in agreement. On load (or when a shared deep link points at a
+// valid workspace), it adopts the query param as the active workspace without
+// persisting it as the user's global default. setWorkspaceParam writes the
+// param back when the user picks a workspace.
+function useWorkspaceQueryParamSync(
+  workspaces: Array<{ id: string }>,
+  activeId: string | null,
+  setActiveWorkspace: (id: string) => void,
+) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const paramWorkspace = searchParams.get("workspace");
+
+  useEffect(() => {
+    if (!paramWorkspace || paramWorkspace === activeId) return;
+    if (!workspaces.some((w) => w.id === paramWorkspace)) return;
+    setActiveWorkspace(paramWorkspace);
+  }, [paramWorkspace, activeId, workspaces, setActiveWorkspace]);
+
+  const setWorkspaceParam = useCallback(
+    (workspaceId: string) => {
+      const next = new URLSearchParams(window.location.search);
+      next.set("workspace", workspaceId);
+      router.replace(`${window.location.pathname}?${next.toString()}`, { scroll: false });
+    },
+    [router],
+  );
+
+  return setWorkspaceParam;
+}
+
 function IntegrationWorkspaceSwitcher() {
+  const pathname = usePathname();
   const workspaces = useAppStore((s) => s.workspaces.items);
   const activeId = useAppStore((s) => s.workspaces.activeId);
   const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace);
   const selected = activeId ?? workspaces[0]?.id ?? null;
+  const integration = integrationFromPathname(pathname);
   const persistWorkspace = useMemo(
     () =>
       createQueuedUserSettingsSync<string>(WORKSPACE_SYNC_FAILED_KEY, (workspaceId) => ({
@@ -122,20 +158,32 @@ function IntegrationWorkspaceSwitcher() {
       })),
     [],
   );
+  const setWorkspaceParam = useWorkspaceQueryParamSync(workspaces, activeId, setActiveWorkspace);
 
   const onSelect = useCallback(
     (workspaceId: string) => {
       setActiveWorkspace(workspaceId);
+      setWorkspaceParam(workspaceId);
       void persistWorkspace(workspaceId);
     },
-    [persistWorkspace, setActiveWorkspace],
+    [persistWorkspace, setActiveWorkspace, setWorkspaceParam],
   );
 
   if (workspaces.length === 0) return null;
 
   return (
-    <div data-testid="integration-workspace-switcher">
+    <div className="flex min-w-0 items-center gap-2" data-testid="integration-workspace-switcher">
+      <span className="hidden text-xs whitespace-nowrap text-muted-foreground sm:inline">
+        Editing workspace
+      </span>
       <WorkspaceSwitcher workspaces={workspaces} activeWorkspaceId={selected} onSelect={onSelect} />
+      {integration && selected ? (
+        <IntegrationCopyConfigMenu
+          slug={integration}
+          sourceWorkspaceId={selected}
+          workspaces={workspaces}
+        />
+      ) : null}
     </div>
   );
 }

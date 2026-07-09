@@ -80,6 +80,7 @@ Today, a workflow step's `on_turn_complete` actions (most commonly `move_to_next
 
 - **Per-step:** the existing `auto_advance` UI checkbox stays; a new sub-toggle "Wait for agent completion signal" appears underneath when an `on_turn_complete` transition is configured. Single switch; no profile/global flag.
 - **Workflow step model:** add `auto_advance_requires_signal bool` to `wfmodels.WorkflowStep`. Migration adds the column with default `false`; existing steps keep legacy "any turn-end advances" behaviour until the user opts a step in.
+- **Config MCP:** `create_workflow_step_kandev` and `update_workflow_step_kandev` accept an optional `auto_advance_requires_signal` boolean with the same omitted-versus-false semantics as the REST step endpoints. `list_workflow_steps_kandev` returns the field explicitly for every step so config agents can audit which steps are signal-gated.
 
 ## Consequences
 

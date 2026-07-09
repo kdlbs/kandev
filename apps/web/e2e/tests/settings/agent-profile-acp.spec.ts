@@ -134,7 +134,9 @@ test.describe("Agent profile — ACP-first", () => {
       await expect(selector).toContainText("High", { timeout: 10_000 });
 
       await selector.click();
-      await expect(testPage.getByText("Effort", { exact: true })).toBeVisible();
+      const effortTrigger = testPage.getByTestId("config-option-trigger-effort");
+      await expect(effortTrigger).toBeVisible();
+      await effortTrigger.click();
       await testPage.getByRole("button", { name: "Low", exact: true }).click();
       await expect(selector).toContainText("Low");
 

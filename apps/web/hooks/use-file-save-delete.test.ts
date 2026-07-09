@@ -29,6 +29,7 @@ vi.mock("@/lib/utils/file-diff", () => ({
 }));
 
 import { useSaveDeleteActions, type SaveDeleteParams } from "./use-file-save-delete";
+import { buildRepoScopedItemId } from "@/lib/state/dockview-panel-actions";
 
 const FAKE_CLIENT = {} as ReturnType<typeof import("@/lib/ws/connection").getWebSocketClient>;
 const SESSION_ID = "sess-1";
@@ -36,9 +37,10 @@ const PATH = "src/foo.ts";
 const REPO = "enrichment-commons";
 
 function seedOpenFile(state: Partial<FileEditorState> = {}) {
+  const key = buildRepoScopedItemId(PATH, state.repo);
   openFilesMap = new Map<string, FileEditorState>([
     [
-      PATH,
+      key,
       {
         path: PATH,
         name: "foo.ts",
@@ -80,7 +82,7 @@ describe("useSaveDeleteActions repo threading", () => {
 
     const { result } = renderActions();
     await act(async () => {
-      await result.current.saveFile(PATH);
+      await result.current.saveFile(PATH, REPO);
     });
 
     expect(mockUpdateFileContent).toHaveBeenCalledWith(
@@ -96,7 +98,7 @@ describe("useSaveDeleteActions repo threading", () => {
 
     const { result } = renderActions();
     await act(async () => {
-      await result.current.deleteFileAction(PATH);
+      await result.current.deleteFileAction(PATH, REPO);
     });
 
     expect(mockDeleteFile).toHaveBeenCalledWith(FAKE_CLIENT, SESSION_ID, PATH, REPO);

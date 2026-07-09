@@ -43,7 +43,7 @@ export function WorkspaceSwitcher({
           type="button"
           title="Switch Workspace"
           className={cn(
-            "group flex h-8 items-center gap-1.5 rounded-md border bg-background px-2.5 text-sm font-medium cursor-pointer",
+            "group flex h-8 min-w-0 items-center gap-1.5 rounded-md border bg-background px-2.5 text-sm font-medium cursor-pointer",
             "text-muted-foreground hover:text-foreground transition-colors duration-150",
             "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           )}

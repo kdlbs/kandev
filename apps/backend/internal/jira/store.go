@@ -19,7 +19,7 @@ type Store struct {
 	db *sqlx.DB
 	ro *sqlx.DB
 
-	defaultWorkspace workspacescope.CachedResolver
+	defaultWorkspace workspacescope.DefaultResolver
 
 	// migratedToWorkspace records the workspace_id that received a legacy
 	// singleton row during initSchema. Provider reads this to migrate the

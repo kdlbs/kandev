@@ -902,13 +902,14 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
     if (api) {
       const resolveFilePath = (panelId: string | undefined): string | null => {
         if (!panelId) return null;
+        const panelPath = (api.getPanel(panelId)?.params as Record<string, unknown> | undefined)
+          ?.path as string | undefined;
+        if (panelPath) return panelPath;
+        // Legacy bare-path panel IDs did not encode repository scope. Modern
+        // file/diff panels resolve through params above, so slicing is only a
+        // fallback for old non-repo-scoped IDs without params.
         if (panelId.startsWith("file:")) return panelId.slice(5);
         if (panelId.startsWith("diff:file:")) return panelId.slice("diff:file:".length);
-        if (panelId === "preview:file-editor" || panelId === "preview:file-diff") {
-          const path = (api.getPanel(panelId)?.params as Record<string, unknown> | undefined)
-            ?.path as string | undefined;
-          return path ?? null;
-        }
         return null;
       };
       api.onDidActivePanelChange((event) => {

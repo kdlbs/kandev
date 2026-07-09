@@ -153,8 +153,13 @@ type mockAgentManager struct {
 	// isAgentRunningFn, when non-nil, overrides isAgentRunning for
 	// IsAgentRunningForSession. Lets tests model state changes mid-sequence
 	// (e.g. stream disconnect between PromptAgent call and queue write).
-	isAgentRunningFn    func(context.Context, string) bool
-	isAgentReadyFn      func(context.Context, string) bool
+	isAgentRunningFn func(context.Context, string) bool
+	isAgentReadyFn   func(context.Context, string) bool
+	// rowLivenessFn, when non-nil, makes the mock satisfy the orchestrator's
+	// optional rowLivenessProber so reconciliation tests can drive runtime-aware
+	// liveness per row. Nil → the mock is not a prober and reconciliation treats
+	// every row as Unknown.
+	rowLivenessFn       func(*models.ExecutorRunning) models.ProcessLiveness
 	resolveProfileErr   error
 	restartProcessCalls []string // tracks execution IDs passed to RestartAgentProcess
 	restartProcessErr   error
@@ -323,6 +328,16 @@ func (m *mockAgentManager) IsAgentReadyForPrompt(ctx context.Context, sessionID 
 		return m.isAgentReadyFn(ctx, sessionID)
 	}
 	return m.IsAgentRunningForSession(ctx, sessionID)
+}
+
+// RowLiveness makes the mock satisfy the orchestrator's optional
+// rowLivenessProber. It delegates to rowLivenessFn when set, else reports Unknown
+// so tests that don't care about liveness see the safe default.
+func (m *mockAgentManager) RowLiveness(row *models.ExecutorRunning) models.ProcessLiveness {
+	if m.rowLivenessFn != nil {
+		return m.rowLivenessFn(row)
+	}
+	return models.ProcessLivenessUnknown
 }
 func (m *mockAgentManager) ResolveAgentProfile(_ context.Context, _ string) (*executor.AgentProfileInfo, error) {
 	if m.resolveProfileErr != nil {

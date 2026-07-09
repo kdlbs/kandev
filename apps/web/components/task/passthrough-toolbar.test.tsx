@@ -111,7 +111,7 @@ vi.mock("@/components/github/pr-status-chip", () => ({
   PRStatusChip: () => null,
 }));
 
-vi.mock("./chat/chat-input-area", () => ({
+vi.mock("./chat/pr-archive-banners", () => ({
   PRMergedBanner: () => null,
 }));
 

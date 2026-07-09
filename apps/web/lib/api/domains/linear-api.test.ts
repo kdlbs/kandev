@@ -7,6 +7,7 @@ vi.mock("@/lib/config", () => ({
 }));
 
 import {
+  copyLinearConfig,
   createLinearIssueWatch,
   deleteLinearConfig,
   deleteLinearIssueWatch,
@@ -105,6 +106,17 @@ describe("setLinearConfig", () => {
       authMethod: AUTH,
       secret: "tok",
     });
+  });
+});
+
+describe("copyLinearConfig", () => {
+  it("POSTs targetWorkspaceId to /config/copy scoped to the source workspace", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ authMethod: AUTH }));
+    await copyLinearConfig("ws-dst", { workspaceId: "ws-src" });
+    const { url, init } = lastCall();
+    expect(url).toBe(`${CONFIG_URL}/copy?workspace_id=ws-src`);
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({ targetWorkspaceId: "ws-dst" });
   });
 });
 

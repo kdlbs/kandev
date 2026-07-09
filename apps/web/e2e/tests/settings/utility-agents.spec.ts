@@ -288,9 +288,8 @@ test.describe("Utility Agents settings page", () => {
     await expect(suggestions.getByText("Mock Fast", { exact: true })).toBeVisible();
     await expect(suggestions.getByText("Mock Smart", { exact: true })).toBeVisible();
 
-    // Search input is part of the shared selector — filtering narrows the list.
-    await testPage.getByPlaceholder("Filter models...").fill("smart");
-    await expect(suggestions.getByText("Mock Fast", { exact: true })).toHaveCount(0);
+    // Short model lists hide the shared selector's filter input.
+    await expect(testPage.getByPlaceholder("Filter models...")).toHaveCount(0);
 
     // Pick Mock Smart and verify the trigger reflects the selection.
     await suggestions.getByText("Mock Smart", { exact: true }).click();

@@ -25,8 +25,9 @@ const DESKTOP_HEALTH_TOKEN_ENV: &str = "KANDEV_DESKTOP_HEALTH_TOKEN";
 const DESKTOP_HEALTH_TOKEN_HEADER: &str = "x-kandev-desktop-health-token";
 const STARTUP_OUTPUT_LIMIT: usize = 12 * 1024;
 const HEALTH_READY_SETTLE: Duration = Duration::from_millis(100);
-const REMOTE_AGENTCTL_HELPERS: [(&str, &str); 3] = [
+const REMOTE_AGENTCTL_HELPERS: [(&str, &str); 4] = [
     ("agentctl-linux-amd64", "agentctl linux/amd64 helper"),
+    ("agentctl-linux-arm64", "agentctl linux/arm64 helper"),
     ("agentctl-darwin-arm64", "agentctl darwin/arm64 helper"),
     ("agentctl-darwin-amd64", "agentctl darwin/amd64 helper"),
 ];
@@ -728,6 +729,7 @@ mod tests {
         fs::write(bin.join(executable_name("kandev")), b"stub").expect("write launcher");
         fs::write(bin.join(executable_name("agentctl")), b"stub").expect("write agentctl");
         fs::write(bin.join("agentctl-linux-amd64"), b"stub").expect("write linux helper");
+        fs::write(bin.join("agentctl-linux-arm64"), b"stub").expect("write linux arm64 helper");
         fs::write(bin.join("agentctl-darwin-amd64"), b"stub").expect("write darwin amd64 helper");
 
         let err =

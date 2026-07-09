@@ -39,6 +39,9 @@ func provideAgentctlLauncher(ctx context.Context, cfg *config.Config, log *logge
 	}
 	// Store the per-launch auth token so downstream clients can authenticate
 	cfg.Agent.StandaloneAuthToken = l.AuthToken()
+	// Store the agentctl control-server PID so local/standalone executor rows can
+	// carry a real host-local liveness handle (executors_running.local_pid).
+	cfg.Agent.StandalonePID = l.Pid()
 	return &agentctlLauncherResult{
 		cleanup:    cleanup,
 		binaryPath: l.BinaryPath(),

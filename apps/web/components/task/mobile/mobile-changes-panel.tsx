@@ -17,7 +17,7 @@ import type { OpenDiffOptions, DiffSheetMode } from "../changes-diff-target";
 type MobileChangesPanelProps = {
   selectedDiff: SelectedDiff | null;
   onClearSelected: () => void;
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, repo?: string) => void;
 };
 
 /**

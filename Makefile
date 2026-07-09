@@ -266,6 +266,7 @@ service-bundle: install build
 	@mkdir -p "$(SERVICE_BUNDLE_DIR)/bin"
 	@cp "$(BACKEND_DIR)/bin/kandev" "$(BACKEND_DIR)/bin/agentctl" \
 		"$(BACKEND_DIR)/bin/agentctl-linux-amd64" \
+		"$(BACKEND_DIR)/bin/agentctl-linux-arm64" \
 		"$(BACKEND_DIR)/bin/agentctl-darwin-arm64" \
 		"$(BACKEND_DIR)/bin/agentctl-darwin-amd64" \
 		"$(SERVICE_BUNDLE_DIR)/bin/"

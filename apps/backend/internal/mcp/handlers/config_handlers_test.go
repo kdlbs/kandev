@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -616,6 +617,34 @@ func TestRegisterHandlers_NilDeps_DoesNotPanic(t *testing.T) {
 
 	// Should not panic with nil config/task deps — handlers simply not registered.
 	assert.NotPanics(t, func() { h.RegisterHandlers(d) })
+}
+
+func TestRegisterHandlers_ListExecutorsActionDispatches(t *testing.T) {
+	svc, _ := newTestTaskService(t)
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	d := ws.NewDispatcher()
+	h.RegisterHandlers(d)
+
+	msg := makeWSMessage(t, ws.ActionMCPListExecutors, map[string]interface{}{})
+	resp, err := d.Dispatch(context.Background(), msg)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	assert.Equal(t, ws.ActionMCPListExecutors, resp.Action)
+
+	var payload dto.ListExecutorsResponse
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, len(payload.Executors), payload.Total)
+	assert.Contains(t, executorIDs(payload.Executors), models.ExecutorIDLocal)
+}
+
+func executorIDs(executors []dto.ExecutorDTO) []string {
+	ids := make([]string, 0, len(executors))
+	for _, executor := range executors {
+		ids = append(ids, executor.ID)
+	}
+	return ids
 }
 
 // --- Helper function tests ---

@@ -158,13 +158,13 @@ function TopBarLeft({
 }: TopBarLeftProps) {
   const showExecutorSettings = shouldShowExecutorEnvironmentControls(remoteExecutorType);
   return (
-    <div className="flex items-center gap-2.5 min-w-0 overflow-hidden">
-      <Breadcrumb className="min-w-0">
-        <BreadcrumbList className="flex-nowrap text-sm min-w-0">
-          <BreadcrumbItem className="min-w-0">
+    <div className="flex min-w-0 max-w-[min(44rem,45vw)] items-center gap-2.5 overflow-hidden">
+      <Breadcrumb className="min-w-0 max-w-full">
+        <BreadcrumbList className="min-w-0 max-w-full flex-nowrap text-sm">
+          <BreadcrumbItem className="min-w-0 max-w-full">
             <Tooltip>
               <TooltipTrigger asChild>
-                <BreadcrumbPage className="font-medium truncate">
+                <BreadcrumbPage className="block max-w-full truncate font-medium">
                   {taskTitle ?? "Task details"}
                 </BreadcrumbPage>
               </TooltipTrigger>

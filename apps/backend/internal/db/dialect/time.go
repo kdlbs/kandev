@@ -47,6 +47,17 @@ func NowMinusHours(driver, hoursExpr string) string {
 	return fmt.Sprintf("datetime('now', '-' || %s || ' hours')", hoursExpr)
 }
 
+// GreatestTimestamp returns the greater of two timestamp expressions.
+//
+//	SQLite:   max(left, right)
+//	Postgres: GREATEST(left, right)
+func GreatestTimestamp(driver, left, right string) string {
+	if IsPostgres(driver) {
+		return fmt.Sprintf("GREATEST(%s, %s)", left, right)
+	}
+	return fmt.Sprintf("max(%s, %s)", left, right)
+}
+
 // CurrentDate returns the SQL expression for the current date (no time component).
 //
 //	SQLite:   date('now')

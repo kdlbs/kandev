@@ -13,6 +13,7 @@ type AppSidebarNavItemProps = {
   label: string;
   href?: string;
   badge?: number;
+  badgeVariant?: "primary" | "muted";
   onClick?: () => void;
   collapsed: boolean;
   /** Override the auto-derived active-state from pathname. */
@@ -79,6 +80,7 @@ export function AppSidebarNavItem({
   label,
   href,
   badge,
+  badgeVariant = "primary",
   onClick,
   collapsed,
   isActive,
@@ -106,7 +108,14 @@ export function AppSidebarNavItem({
         <>
           <span className="flex-1 truncate sidebar-fade-in">{label}</span>
           {typeof badge === "number" && badge > 0 && (
-            <Badge className="rounded-full px-1.5 py-0.5 text-xs bg-primary text-primary-foreground">
+            <Badge
+              className={cn(
+                "rounded-full px-1.5 py-0.5 text-xs",
+                badgeVariant === "primary"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground",
+              )}
+            >
               {badge}
             </Badge>
           )}

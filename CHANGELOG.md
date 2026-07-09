@@ -2,6 +2,38 @@
 
 All notable changes to Kandev.
 
+## 0.76.0 - 2026-07-09
+
+### Bug Fixes
+
+- forward agent creds, fix terminal host config, restore linux/arm64 ([#1559](https://github.com/kdlbs/kandev/pull/1559)) by @iamcobolt
+- keep resume readiness waits alive under caller cancellation ([#1582](https://github.com/kdlbs/kandev/pull/1582)) by @iamcobolt
+- truncate long task titles in topbar ([#1630](https://github.com/kdlbs/kandev/pull/1630))
+- handle config MCP executor listing ([#1628](https://github.com/kdlbs/kandev/pull/1628))
+- expose signal-gated workflow steps in config MCP ([#1629](https://github.com/kdlbs/kandev/pull/1629))
+- truthful executor rows, startup reconciliation, resume-safe cleanup ([#1597](https://github.com/kdlbs/kandev/pull/1597)) ([#1608](https://github.com/kdlbs/kandev/pull/1608)) by @point-source
+
+## 0.75.0 - 2026-07-08
+
+### Features
+
+- persist and expire quick chats ([#1612](https://github.com/kdlbs/kandev/pull/1612))
+- improve office onboarding and workspace flows ([#1606](https://github.com/kdlbs/kandev/pull/1606))
+- single workspace switcher with deep links and copy-config dialog ([#1616](https://github.com/kdlbs/kandev/pull/1616))
+- consolidate office system skills ([#1604](https://github.com/kdlbs/kandev/pull/1604))
+- scope GitHub integration settings by workspace ([#1572](https://github.com/kdlbs/kandev/pull/1572))
+
+### Bug Fixes
+
+- stop kanban spinner for not-started sessions and fix truncated manual backup size ([#1622](https://github.com/kdlbs/kandev/pull/1622))
+- preserve inherited task worktrees ([#1621](https://github.com/kdlbs/kandev/pull/1621))
+- scope sidebar availability to active workspace ([#1620](https://github.com/kdlbs/kandev/pull/1620))
+- confirm before archiving from PR merged/closed banners ([#1619](https://github.com/kdlbs/kandev/pull/1619))
+- compact model config selector ([#1611](https://github.com/kdlbs/kandev/pull/1611))
+- encode workflow hidden flag for postgres ([#1614](https://github.com/kdlbs/kandev/pull/1614))
+- route controlled diff comment updates ([#1599](https://github.com/kdlbs/kandev/pull/1599))
+- schedule agent-created office tasks ([#1605](https://github.com/kdlbs/kandev/pull/1605))
+
 ## 0.74.0 - 2026-07-06
 
 ### Features

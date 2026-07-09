@@ -46,6 +46,11 @@ func (r *Repository) migrateSessionsAddCostColumns() {
 func (r *Repository) runMigrations() error {
 	r.migrate.Apply("executors_running.last_message_uuid", `ALTER TABLE executors_running ADD COLUMN last_message_uuid TEXT DEFAULT ''`)
 	r.migrate.Apply("executors_running.metadata", `ALTER TABLE executors_running ADD COLUMN metadata TEXT DEFAULT '{}'`)
+	// local_pid holds a host-local liveness handle (the standalone agentctl
+	// control-server PID Kandev spawns) for local/standalone rows. It is kept
+	// deliberately separate from the SSH-only `pid` column, which holds an
+	// agentctl PID on the *remote* host. See ADR 0025 / issue #1597.
+	r.migrate.Apply("executors_running.local_pid", `ALTER TABLE executors_running ADD COLUMN local_pid INTEGER DEFAULT 0`)
 	r.migrate.Apply("tasks.is_ephemeral", `ALTER TABLE tasks ADD COLUMN is_ephemeral INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_repositories.checkout_branch", `ALTER TABLE task_repositories ADD COLUMN checkout_branch TEXT DEFAULT ''`)
 	// Multi-branch support: drop the old UNIQUE(task_id, repository_id) and

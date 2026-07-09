@@ -33,6 +33,43 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.POST("/config", c.httpSetConfig)
 	api.DELETE("/config", c.httpDeleteConfig)
 	api.POST("/config/test", c.httpTestConfig)
+	api.POST("/config/copy", c.httpCopyConfig)
+}
+
+// copyConfigRequest is the payload for the copy-config endpoint. The source
+// workspace is taken from the workspace_id query param (like every other
+// handler here); the body carries the target.
+type copyConfigRequest struct {
+	TargetWorkspaceID string `json:"targetWorkspaceId"`
+}
+
+func (c *Controller) httpCopyConfig(ctx *gin.Context) {
+	sourceWorkspaceID := c.workspaceID(ctx)
+	if sourceWorkspaceID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id query parameter required"})
+		return
+	}
+	var req copyConfigRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	targetWorkspaceID := strings.TrimSpace(req.TargetWorkspaceID)
+	if targetWorkspaceID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "targetWorkspaceId required"})
+		return
+	}
+	cfg, err := c.service.CopyConfigToWorkspace(ctx.Request.Context(), sourceWorkspaceID, targetWorkspaceID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, ErrSameWorkspace), errors.Is(err, ErrNothingToCopy), errors.Is(err, ErrInvalidConfig):
+			status = http.StatusBadRequest
+		}
+		ctx.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, cfg)
 }
 
 // --- HTTP handlers ---

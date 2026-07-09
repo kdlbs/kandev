@@ -78,6 +78,7 @@ export function OfficeNavigationSection({
               label={item.label}
               href={item.href}
               badge={getWorkspaceBadge(item.href, skillCount)}
+              badgeVariant={item.href === "/office/workspace/skills" ? "muted" : "primary"}
               collapsed={collapsed}
             />
           ))}

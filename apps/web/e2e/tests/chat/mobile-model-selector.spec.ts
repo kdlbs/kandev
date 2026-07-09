@@ -48,5 +48,10 @@ test.describe("Mobile chat model selector", () => {
     await expect(testPage.getByRole("option", { name: /Mock Smart/ })).toBeVisible({
       timeout: 5_000,
     });
+
+    const effortTrigger = testPage.getByTestId("config-option-trigger-effort");
+    await expect(effortTrigger).toBeVisible();
+    await effortTrigger.tap();
+    await expect(testPage.getByTestId("config-option-section-effort")).toBeVisible();
   });
 });

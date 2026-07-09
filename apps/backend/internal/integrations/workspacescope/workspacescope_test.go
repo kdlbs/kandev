@@ -50,11 +50,11 @@ func seedActiveWorkspace(t *testing.T, db *sqlx.DB, workspaceID string) {
 	}
 }
 
-func TestCachedResolverReusesSuccessfulResolution(t *testing.T) {
+func TestDefaultResolverReflectsActiveWorkspaceChange(t *testing.T) {
 	db := newTestDB(t)
 	seedActiveWorkspace(t, db, "ws-first")
 
-	var resolver CachedResolver
+	var resolver DefaultResolver
 	got, err := resolver.Resolve(db)
 	if err != nil {
 		t.Fatalf("first resolve: %v", err)
@@ -63,23 +63,25 @@ func TestCachedResolverReusesSuccessfulResolution(t *testing.T) {
 		t.Fatalf("expected ws-first, got %q", got)
 	}
 
+	// The active workspace is mutable at runtime; switching it must be
+	// reflected on the next resolve, not pinned to the first value.
 	seedActiveWorkspace(t, db, "ws-second")
 	got, err = resolver.Resolve(db)
 	if err != nil {
 		t.Fatalf("second resolve: %v", err)
 	}
-	if got != "ws-first" {
-		t.Fatalf("expected cached ws-first, got %q", got)
+	if got != "ws-second" {
+		t.Fatalf("expected ws-second after switch, got %q", got)
 	}
 }
 
-func TestCachedResolverCachesPerDB(t *testing.T) {
+func TestDefaultResolverIsPerDB(t *testing.T) {
 	db1 := newTestDB(t)
 	db2 := newTestDB(t)
 	seedActiveWorkspace(t, db1, "ws-one")
 	seedActiveWorkspace(t, db2, "ws-two")
 
-	var resolver CachedResolver
+	var resolver DefaultResolver
 	got, err := resolver.Resolve(db1)
 	if err != nil {
 		t.Fatalf("resolve db1: %v", err)
@@ -96,7 +98,7 @@ func TestCachedResolverCachesPerDB(t *testing.T) {
 	}
 }
 
-func TestCachedResolverDoesNotMemoizeErrors(t *testing.T) {
+func TestDefaultResolverRecoversAfterError(t *testing.T) {
 	db := newTestDB(t)
 	now := time.Now().UTC()
 	if _, err := db.Exec(`
@@ -115,7 +117,7 @@ func TestCachedResolverDoesNotMemoizeErrors(t *testing.T) {
 		t.Fatalf("seed malformed users table: %v", err)
 	}
 
-	var resolver CachedResolver
+	var resolver DefaultResolver
 	if _, err := resolver.Resolve(db); err == nil {
 		t.Fatal("expected malformed users table to fail")
 	}

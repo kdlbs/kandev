@@ -36,7 +36,9 @@ test.describe("Mobile agent profile config selector", () => {
       const selector = testPage.getByRole("button", { name: "Profile start model settings" });
       await expect(selector).toBeVisible({ timeout: 15_000 });
       await selector.click();
-      await expect(testPage.getByText("Effort", { exact: true })).toBeVisible();
+      const effortTrigger = testPage.getByTestId("config-option-trigger-effort");
+      await expect(effortTrigger).toBeVisible();
+      await effortTrigger.click();
       await testPage.getByRole("button", { name: "High", exact: true }).click();
       await expect(selector).toContainText("High");
     } finally {

@@ -13,7 +13,7 @@ export { filterUnpushedCommits, mergeCommits };
 
 type ChangesPanelProps = {
   onOpenDiffFile: (path: string, options?: OpenDiffOptions) => void;
-  onEditFile: (path: string) => void;
+  onEditFile: (path: string, repo?: string) => void;
   onOpenCommitDetail?: (sha: string, repo?: string) => void;
   onOpenDiffAll?: () => void;
   onOpenReview?: () => void;

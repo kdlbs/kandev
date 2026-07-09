@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"sync"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -13,28 +12,19 @@ import (
 // where integration config exists before the workspaces table is available.
 const FallbackWorkspaceID = "default"
 
-// CachedResolver memoizes the default workspace used by legacy integration
+// DefaultResolver resolves the default workspace used by legacy integration
 // methods that predate explicit workspace IDs. New request paths should pass a
 // workspace ID and bypass this fallback entirely.
-type CachedResolver struct {
-	mu          sync.Mutex
-	db          *sqlx.DB
-	workspaceID string
-}
+//
+// The resolved workspace is derived from the user's active workspace setting,
+// which is mutable at runtime, so it is re-read on every call rather than
+// memoized — caching it would pin the process to whichever workspace happened
+// to be active first and hide a configured integration after the user switches
+// workspaces.
+type DefaultResolver struct{}
 
-func (r *CachedResolver) Resolve(db *sqlx.DB) (string, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.workspaceID != "" && r.db == db {
-		return r.workspaceID, nil
-	}
-	workspaceID, err := ResolveMigrationTarget(db)
-	if err != nil {
-		return "", err
-	}
-	r.db = db
-	r.workspaceID = workspaceID
-	return workspaceID, nil
+func (DefaultResolver) Resolve(db *sqlx.DB) (string, error) {
+	return ResolveMigrationTarget(db)
 }
 
 // ResolveMigrationTarget returns the workspace that should receive an upgraded

@@ -597,10 +597,30 @@ func TestCancelAgent_TaskStateReconcile(t *testing.T) {
 	}
 }
 
-func TestCancelAgent_LeavesQueuedMessageForManualDrain(t *testing.T) {
+// TestCancelAgent_DeliversQueuedMessageOnResume pins the corrected pause→resume
+// contract (#1597 pause→resume recovery): a message queued while the agent was
+// running is DELIVERED once cancel settles the session to WAITING_FOR_INPUT, not
+// stranded on the queue for indefinite manual drain.
+//
+// This replaces the former TestCancelAgent_LeavesQueuedMessageForManualDrain,
+// which codified the wedge as expected. On a normal cancel the agent's
+// complete(cancelled) event fires handleAgentReady → on_turn_complete → drain,
+// but on an escalated / dead-process cancel no agent.ready event ever fires, so
+// nothing drained the queue and the operator's queued message was lost until a
+// second manual send. Cancel now drains directly after reconciling the session.
+//
+// Proof of delivery is the queue emptying: drainQueuedMessageForPromptableSession
+// pops the message synchronously (TakeQueued) before dispatching it, so a
+// Count==0 immediately after CancelAgent returns is deterministic. The actual
+// PromptTask dispatch runs in a goroutine (state may already be RUNNING by the
+// time we re-read), mirroring TestHandleAgentBootReady_DrainsOrphanedQueuedMessage.
+func TestCancelAgent_DeliversQueuedMessageOnResume(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	agentMgr := &mockAgentManager{isAgentRunning: true}
+	// repoForExecutionLookup + isAgentRunning let the executeQueuedMessage
+	// goroutine's PromptTask → ensureSessionRunning → GetExecutionBySession land
+	// on a working path instead of nil-derefing s.executor under -race.
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 
@@ -616,23 +636,21 @@ func TestCancelAgent_LeavesQueuedMessageForManualDrain(t *testing.T) {
 		t.Fatalf("cancel agent: %v", err)
 	}
 
+	// Cancel settles the session so a new prompt can land. The drain goroutine
+	// may already have moved it back to RUNNING; either state proves the wedge
+	// (stuck RUNNING with a full queue) is gone.
 	updated, err := repo.GetTaskSession(ctx, "session1")
 	if err != nil {
 		t.Fatalf("get updated session: %v", err)
 	}
-	if updated.State != models.TaskSessionStateWaitingForInput {
-		t.Fatalf("expected session state %q, got %q", models.TaskSessionStateWaitingForInput, updated.State)
+	if updated.State != models.TaskSessionStateWaitingForInput &&
+		updated.State != models.TaskSessionStateRunning {
+		t.Fatalf("expected session state WAITING_FOR_INPUT or RUNNING after cancel, got %q", updated.State)
 	}
 
 	status := svc.messageQueue.GetStatus(ctx, "session1")
-	if status.Count != 1 {
-		t.Fatalf("expected cancel to leave queued message for manual drain, count=%d entries=%+v", status.Count, status.Entries)
-	}
-	if got := status.Entries[0].Content; got != "queued after cancel" {
-		t.Fatalf("queued prompt = %q, want %q", got, "queued after cancel")
-	}
-	if len(agentMgr.capturedPrompts) != 0 {
-		t.Fatalf("expected cancel not to prompt queued message, got %d prompts", len(agentMgr.capturedPrompts))
+	if status.Count != 0 {
+		t.Fatalf("expected cancel to deliver the queued message on resume, count=%d entries=%+v", status.Count, status.Entries)
 	}
 }
 

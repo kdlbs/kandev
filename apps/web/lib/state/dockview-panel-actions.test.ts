@@ -125,8 +125,10 @@ function build(api: DockviewApi) {
 const PATH_A = "src/a.ts";
 const PATH_B = "src/b.ts";
 const PATH_NESTED_B = "src/nested/b.ts";
+const SHARED_PATH = "README.md";
 const NAME_A = "a.ts";
 const NAME_B = "b.ts";
+const SHARED_NAME = "README.md";
 const PINNED_FILE_A_ID = "file:src/a.ts";
 const PREVIEW_FILE_ID = "preview:file-editor";
 const PREVIEW_DIFF_ID = "preview:file-diff";
@@ -270,6 +272,21 @@ describe("addFileEditorPanel — preview behavior", () => {
   });
 });
 
+describe("addFileEditorPanel — multi-repo identity", () => {
+  it("does not reuse a pinned editor for the same path in a different repo", () => {
+    const { api, actions } = build(makeApi());
+
+    actions.addFileEditorPanel(SHARED_PATH, SHARED_NAME, { pin: true, repo: "frontend" });
+    actions.addFileEditorPanel(SHARED_PATH, SHARED_NAME, { repo: "backend" });
+
+    const preview = api.getPanel(PREVIEW_FILE_ID) as unknown as MockPanel;
+    expect(preview).toBeDefined();
+    expect(preview.params.path).toBe(SHARED_PATH);
+    expect(preview.params.repo).toBe("backend");
+    expect(preview.isActive).toBe(true);
+  });
+});
+
 describe("addFileDiffPanel — preview behavior", () => {
   let api: DockviewApi;
   let actions: ReturnType<typeof buildPanelActions>;
@@ -310,6 +327,18 @@ describe("addFileDiffPanel — preview behavior", () => {
     const preview = api.getPanel(PREVIEW_DIFF_ID) as unknown as MockPanel;
     expect(pinned.isActive).toBe(true);
     expect(preview.params.path).toBe(PATH_B);
+  });
+
+  it("does not reuse a pinned diff for the same path in a different repo", () => {
+    actions.addFileDiffPanel(SHARED_PATH, { pin: true, repositoryName: "frontend" });
+
+    actions.addFileDiffPanel(SHARED_PATH, { repositoryName: "backend" });
+
+    const preview = api.getPanel(PREVIEW_DIFF_ID) as unknown as MockPanel;
+    expect(preview).toBeDefined();
+    expect(preview.params.path).toBe(SHARED_PATH);
+    expect(preview.params.repositoryName).toBe("backend");
+    expect(preview.isActive).toBe(true);
   });
 
   it("promotePreviewToPinned sets promoted flag on the preview diff", () => {

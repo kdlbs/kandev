@@ -1,30 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  renderHook,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { act, cleanup, renderHook } from "@testing-library/react";
 
-const archiveAndSwitchMock = vi.fn();
 const toastMock = vi.fn();
 const handleSendMessageMock = vi.fn();
-const taskPRsByTaskId = vi.hoisted(() => ({
-  value: {
-    "task-1": [{ pr_number: 42, state: "merged" }],
-  } as Record<string, Array<{ pr_number: number; state: string }>>,
-}));
+
+const mockState = {};
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof mockState) => unknown) => selector(mockState),
   useAppStoreApi: () => ({ getState: () => mockState }),
-}));
-
-vi.mock("@/hooks/use-task-actions", () => ({
-  useArchiveAndSwitchTask: () => archiveAndSwitchMock,
 }));
 
 vi.mock("@/components/toast-provider", () => ({
@@ -46,6 +30,11 @@ vi.mock("@/components/task/chat/chat-input-container", () => ({
 
 vi.mock("@/components/task/chat/todo-indicator", () => ({
   TodoIndicator: () => null,
+}));
+
+vi.mock("./pr-archive-banners", () => ({
+  PRMergedBanner: () => null,
+  PRClosedBanner: () => null,
 }));
 
 vi.mock("@/hooks/use-keyboard-shortcut", () => ({
@@ -77,61 +66,16 @@ vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ send: vi.fn() }),
 }));
 
-vi.mock("@/lib/local-storage", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/local-storage")>()),
-  markPRClosedBannerDismissed: vi.fn(),
-  markPRMergedBannerDismissed: vi.fn(),
-  wasPRClosedBannerDismissed: () => false,
-  wasPRMergedBannerDismissed: () => false,
-}));
-
-const mockState = {
-  taskPRs: {
-    get byTaskId() {
-      return taskPRsByTaskId.value;
-    },
-  },
-};
-
-import { PRMergedBanner, useSubmitHandler } from "./chat-input-area";
+import { useSubmitHandler } from "./chat-input-area";
 
 beforeEach(() => {
-  archiveAndSwitchMock.mockResolvedValue(undefined);
   handleSendMessageMock.mockResolvedValue(undefined);
-  taskPRsByTaskId.value = {
-    "task-1": [{ pr_number: 42, state: "merged" }],
-  };
 });
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.clearAllMocks();
-});
-
-describe("PRMergedBanner", () => {
-  it("archives without showing a success toast", async () => {
-    render(<PRMergedBanner taskId="task-1" />);
-
-    fireEvent.click(screen.getByTestId("pr-merged-archive-button"));
-
-    await waitFor(() => expect(archiveAndSwitchMock).toHaveBeenCalledWith("task-1"));
-    expect(toastMock).not.toHaveBeenCalled();
-  });
-
-  it("keeps the failure toast when archive fails", async () => {
-    archiveAndSwitchMock.mockRejectedValueOnce(new Error("archive failed"));
-    render(<PRMergedBanner taskId="task-1" />);
-
-    fireEvent.click(screen.getByTestId("pr-merged-archive-button"));
-
-    await waitFor(() =>
-      expect(toastMock).toHaveBeenCalledWith({
-        description: "Failed to archive task",
-        variant: "error",
-      }),
-    );
-  });
 });
 
 describe("useSubmitHandler", () => {

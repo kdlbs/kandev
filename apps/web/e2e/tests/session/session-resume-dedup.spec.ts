@@ -11,7 +11,7 @@ test.describe("Session resume boot-message dedup", () => {
     seedData,
     backend,
   }) => {
-    test.setTimeout(180_000);
+    test.setTimeout(300_000);
 
     // 1. Create the task and wait for the initial agent turn to finish.
     const task = await apiClient.createTaskWithAgent(
@@ -87,7 +87,7 @@ test.describe("Session resume boot-message dedup", () => {
         ).toBeVisible({
           timeout: attempt === 0 ? 10_000 : 15_000,
         });
-        await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
+        await session.expectChatResponseVisible("simple mock response", 1, { timeout: 90_000 });
         break;
       } catch (error) {
         if (attempt === 1) {

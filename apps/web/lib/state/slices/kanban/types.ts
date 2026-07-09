@@ -79,6 +79,7 @@ export type WorkflowSnapshotData = {
   workflowName: string;
   steps: KanbanState["steps"];
   tasks: KanbanState["tasks"];
+  isPlaceholder?: boolean;
 };
 
 export type KanbanMultiState = {

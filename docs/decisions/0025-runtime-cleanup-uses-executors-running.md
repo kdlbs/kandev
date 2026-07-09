@@ -1,8 +1,45 @@
 # 0025: Runtime Cleanup Uses `executors_running`
 
-**Status:** accepted
+**Status:** accepted (amended 2026-07-06 — see "Update")
 **Date:** 2026-06-22
 **Area:** backend
+
+## Update (2026-07-06, #1597 executor-row-desync)
+
+This decision **stays**: `executors_running` remains the authoritative durable
+runtime inventory. It was made *trustworthy* rather than reverted. Three
+clarifications now hold:
+
+- **Events are the primary producer; startup reconciliation heals what events
+  cannot.** Every lifecycle transition writes the row (launch, boot-ready,
+  turn-complete, cancel, process-exit/crash, stop), populating a host-local
+  liveness handle (`executors_running.local_pid`) for local/standalone rows. A
+  startup pass repairs rows whose process is confirmed dead and prunes only
+  terminal ones — a backend restart is exactly the moment events could not
+  have fired. A periodic in-run polling pass was prototyped and deliberately
+  not merged: it defended against failure modes (OOM kill, dropped event)
+  that have not been observed, and polling never updates a row the moment an
+  event could.
+- **`local_pid` is a NEW column, deliberately not the existing `pid`.**
+  `executors_running.pid` holds the agentctl PID *on the remote host* for SSH
+  rows; overloading it with a host-local pid would silently change that
+  column's meaning and invite local process checks against remote rows. The
+  two handles stay separate, and liveness is runtime-aware
+  (`lifecycle.RowProcessLiveness`): a host-local process check never runs
+  against a remote/SSH or containerized row — those report Unknown, never
+  Dead.
+- **One ironclad deletion invariant governs every reconciliation cleanup
+  path.** A row backing a resumable session, or holding a `resume_token`, is
+  **repaired in place** (status=stopped, `local_pid` cleared,
+  `resume_token`/worktree preserved) — never deleted; only a
+  finished/never-started row with no `resume_token` may be pruned.
+  Reconciliation repairs rather than deletes-and-relaunches because
+  `resume_token` is single-sourced in this table — an erroneous delete costs
+  the operator the only handle to a resumable conversation. Duplicating the
+  token into a second table was rejected: two writers of the same fact is the
+  divergence pattern this decision exists to eliminate. The rule is
+  `models.RowMustBePreserved`; see #1597 for the measured evidence and
+  expected behavior this implements.
 
 ## Context
 
