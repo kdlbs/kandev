@@ -47,7 +47,6 @@ export type SwimlaneKanbanContentProps = {
   onToggleSelect?: (taskId: string) => void;
   onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
-  externalLinkAvailability: KanbanExternalLinkAvailability;
 };
 
 type SwimlaneKanbanDndOptions = {
