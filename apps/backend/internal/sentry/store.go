@@ -351,8 +351,9 @@ func (s *Store) readLegacyWorkspaceConfigs(cols map[string]struct{}) ([]legacyWo
 // connection with foreign_keys temporarily off so DROP TABLE does not
 // cascade-delete the sentry_issue_watch_tasks children (the PRAGMA is a no-op
 // inside a transaction and per-connection, hence the dedicated conn), then
-// restores enforcement. Idempotent: a table that already carries
-// sentry_instance_id is left untouched, so a crash mid-migration re-runs safely.
+// restores enforcement. Idempotent: the migration is skipped only when the
+// column already has the exact nullable-FK target shape, so a crash
+// mid-migration (or an older wrong-shaped column) always re-runs safely.
 func (s *Store) migrateWatchesAddInstanceColumn() error {
 	cols, err := s.tableColumns("sentry_issue_watches")
 	if err != nil {
@@ -362,7 +363,16 @@ func (s *Store) migrateWatchesAddInstanceColumn() error {
 		return nil // fresh install — createTablesSQL builds the column + FK.
 	}
 	if _, ok := cols["sentry_instance_id"]; ok {
-		return nil // already migrated.
+		correct, err := s.watchesInstanceColumnCorrect()
+		if err != nil {
+			return err
+		}
+		if correct {
+			return nil // already the nullable-FK shape.
+		}
+		// Column exists but predates the FK/nullable schema (an experimental
+		// pre-release build stored it as NOT NULL DEFAULT '' with no foreign
+		// key). Fall through to rebuild it into the correct shape.
 	}
 	ctx := context.Background()
 	conn, err := s.db.Conn(ctx)
@@ -376,6 +386,78 @@ func (s *Store) migrateWatchesAddInstanceColumn() error {
 	// Restore enforcement on the way out regardless of outcome.
 	defer func() { _, _ = conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`) }()
 	return rebuildWatchesWithInstanceColumn(ctx, conn)
+}
+
+// watchesInstanceColumnCorrect reports whether sentry_issue_watches
+// .sentry_instance_id already has the target shape: a NULLABLE column backed by
+// a foreign key to sentry_configs. Older experimental builds added it as
+// NOT NULL DEFAULT ” without a foreign key; those must be rebuilt, not skipped.
+func (s *Store) watchesInstanceColumnCorrect() (bool, error) {
+	nullable, err := s.columnIsNullable("sentry_issue_watches", "sentry_instance_id")
+	if err != nil {
+		return false, err
+	}
+	if !nullable {
+		return false, nil
+	}
+	return s.hasForeignKey("sentry_issue_watches", "sentry_instance_id", "sentry_configs", "id", "RESTRICT")
+}
+
+// columnIsNullable reports whether a column exists and permits NULL (PRAGMA
+// table_info notnull flag == 0).
+func (s *Store) columnIsNullable(table, column string) (bool, error) {
+	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return notnull == 0, nil
+		}
+	}
+	return false, rows.Err()
+}
+
+// hasForeignKey reports whether `table` has a foreign key from `column` to
+// `refTable(wantRefColumn)` with the given ON DELETE rule (PRAGMA
+// foreign_key_list; SQLite reports on_delete uppercased, e.g. "RESTRICT").
+func (s *Store) hasForeignKey(table, column, refTable, wantRefColumn, wantOnDelete string) (bool, error) {
+	rows, err := s.db.Query(fmt.Sprintf("PRAGMA foreign_key_list(%s)", table))
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var (
+			id       int
+			seq      int
+			refTbl   string
+			from     string
+			to       sql.NullString
+			onUpdate string
+			onDelete string
+			match    string
+		)
+		if err := rows.Scan(&id, &seq, &refTbl, &from, &to, &onUpdate, &onDelete, &match); err != nil {
+			return false, err
+		}
+		if from == column && refTbl == refTable && to.String == wantRefColumn && onDelete == wantOnDelete {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // rebuildWatchesWithInstanceColumn performs the create/copy/drop/rename table

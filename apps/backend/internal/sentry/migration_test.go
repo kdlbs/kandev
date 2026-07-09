@@ -270,3 +270,102 @@ func TestMigration_CrashAfterConfigsRebuild(t *testing.T) {
 		t.Errorf("config-less workspace watch should stay unbound, got %q", gw3.SentryInstanceID)
 	}
 }
+
+// experimentalWatchesDDL is the unmerged-#1469 experimental shape:
+// sentry_issue_watches carries sentry_instance_id as NOT NULL DEFAULT ” with
+// NO foreign key. It only ever existed on dev machines that ran that build;
+// migrateWatchesAddInstanceColumn must still converge it to the nullable-FK
+// shape rather than skip it because the column name happens to be present.
+const experimentalWatchesDDL = `
+	CREATE TABLE sentry_issue_watches (
+		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		sentry_instance_id TEXT NOT NULL DEFAULT '',
+		workflow_id TEXT NOT NULL,
+		workflow_step_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL DEFAULT '',
+		base_branch TEXT NOT NULL DEFAULT '',
+		filter_json TEXT NOT NULL DEFAULT '{}',
+		agent_profile_id TEXT NOT NULL DEFAULT '',
+		executor_profile_id TEXT NOT NULL DEFAULT '',
+		prompt TEXT NOT NULL DEFAULT '',
+		enabled BOOLEAN NOT NULL DEFAULT 1,
+		poll_interval_seconds INTEGER NOT NULL DEFAULT 300,
+		max_inflight_tasks INTEGER DEFAULT 5,
+		last_polled_at DATETIME,
+		last_error TEXT NOT NULL DEFAULT '',
+		last_error_at DATETIME,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+	CREATE TABLE sentry_issue_watch_tasks (
+		id TEXT PRIMARY KEY,
+		issue_watch_id TEXT NOT NULL,
+		issue_short_id TEXT NOT NULL,
+		issue_url TEXT NOT NULL,
+		task_id TEXT NOT NULL DEFAULT '',
+		created_at DATETIME NOT NULL,
+		UNIQUE(issue_watch_id, issue_short_id),
+		FOREIGN KEY(issue_watch_id) REFERENCES sentry_issue_watches(id) ON DELETE CASCADE
+	);`
+
+// TestMigration_ExperimentalNonNullInstanceColumnRebuilt pins the hardened
+// guard: a watches table that already has sentry_instance_id but as
+// NOT NULL DEFAULT ” with no foreign key is rebuilt into the nullable-FK shape
+// (not skipped), converting the ” sentinel to a real backfill / NULL.
+func TestMigration_ExperimentalNonNullInstanceColumnRebuilt(t *testing.T) {
+	db := openMigrationDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	inst1 := uuid.New().String()
+	if _, err := db.Exec(`CREATE TABLE sentry_configs (` + sentryConfigsColumns + `)`); err != nil {
+		t.Fatalf("create id-keyed configs: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO sentry_configs (id, workspace_id, name, auth_method, url, last_ok, last_error, created_at, updated_at)
+		VALUES (?, 'ws-1', 'sentry.example.com', ?, 'https://sentry.example.com', 0, '', ?, ?)`,
+		inst1, AuthMethodAuthToken, now, now); err != nil {
+		t.Fatalf("seed configs: %v", err)
+	}
+	if _, err := db.Exec(experimentalWatchesDDL); err != nil {
+		t.Fatalf("seed experimental watches: %v", err)
+	}
+	w1, w3 := uuid.New().String(), uuid.New().String()
+	// Experimental rows store the '' sentinel for the unbound case.
+	for _, watch := range []struct{ id, ws string }{{w1, "ws-1"}, {w3, "ws-3"}} {
+		if _, err := db.Exec(`
+			INSERT INTO sentry_issue_watches (id, workspace_id, sentry_instance_id, workflow_id, workflow_step_id, filter_json, created_at, updated_at)
+			VALUES (?, ?, '', 'wf', 'step', '{}', ?, ?)`, watch.id, watch.ws, now, now); err != nil {
+			t.Fatalf("seed watch %s: %v", watch.ws, err)
+		}
+	}
+
+	store, err := NewStore(db, db)
+	if err != nil {
+		t.Fatalf("migrate experimental schema: %v", err)
+	}
+
+	// Column is now nullable and backed by the ON DELETE RESTRICT FK to id.
+	nullable, err := store.columnIsNullable("sentry_issue_watches", "sentry_instance_id")
+	if err != nil || !nullable {
+		t.Errorf("sentry_instance_id nullable=%v err=%v, want nullable", nullable, err)
+	}
+	hasFK, err := store.hasForeignKey("sentry_issue_watches", "sentry_instance_id", "sentry_configs", "id", "RESTRICT")
+	if err != nil || !hasFK {
+		t.Errorf("sentry_instance_id FK present=%v err=%v, want RESTRICT FK to id", hasFK, err)
+	}
+
+	// Rows re-backfilled: ws-1 to its sole instance, config-less ws-3 to NULL.
+	if gw1, _ := store.GetIssueWatch(ctx, w1); gw1.SentryInstanceID != inst1 {
+		t.Errorf("ws-1 watch bound to %q, want %q", gw1.SentryInstanceID, inst1)
+	}
+	if gw3, _ := store.GetIssueWatch(ctx, w3); gw3.SentryInstanceID != "" {
+		t.Errorf("config-less watch should be unbound, got %q", gw3.SentryInstanceID)
+	}
+
+	// FK now enforced: deleting an in-use instance is blocked.
+	if _, err := db.Exec(`DELETE FROM sentry_configs WHERE id = ?`, inst1); err == nil {
+		t.Error("expected FK RESTRICT to block deleting an in-use instance after rebuild")
+	}
+}
