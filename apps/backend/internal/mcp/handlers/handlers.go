@@ -999,9 +999,19 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
 
+	var state *v1.TaskState
+	if req.State != nil {
+		normalized := normalizeTaskState(*req.State)
+		if !isValidTaskState(normalized) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "invalid task state: "+*req.State, nil)
+		}
+		state = &normalized
+	}
+
 	task, err := h.taskSvc.UpdateTask(ctx, req.TaskID, &service.UpdateTaskRequest{
 		Title:       req.Title,
 		Description: req.Description,
+		State:       state,
 	})
 	if err != nil {
 		h.logger.Error("failed to update task", zap.Error(err))

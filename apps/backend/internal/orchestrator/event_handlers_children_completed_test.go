@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -105,6 +106,146 @@ func TestProcessOnChildrenCompleted_TransitionsParentWhenAllActiveChildrenTermin
 	}
 	if parent.WorkflowStepID != "step_done" {
 		t.Fatalf("expected parent to remain on step_done after duplicate evaluation, got %q", parent.WorkflowStepID)
+	}
+}
+
+func TestProcessOnChildrenCompleted_TreatsTerminalStepAsCompleted(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "parent", "parent-session", "step_wait")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step_wait"] = &wfmodels.WorkflowStep{
+		ID:         "step_wait",
+		WorkflowID: "wf1",
+		Name:       "Wait for Subtasks",
+		Position:   0,
+		Events: wfmodels.StepEvents{
+			OnChildrenCompleted: []wfmodels.GenericAction{
+				{Type: wfmodels.GenericActionMoveToNext},
+			},
+		},
+	}
+	stepGetter.steps["step_parent_done"] = &wfmodels.WorkflowStep{
+		ID:         "step_parent_done",
+		WorkflowID: "wf1",
+		Name:       "Done",
+		Position:   1,
+	}
+	stepGetter.steps["child_done"] = &wfmodels.WorkflowStep{
+		ID:         "child_done",
+		WorkflowID: "wf-child",
+		Name:       "Done",
+		Position:   1,
+	}
+
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createEngineService(t, repo, stepGetter, agentMgr)
+	onEnterDone := make(chan struct{}, 1)
+	svc.onProcessOnEnterComplete = func() {
+		select {
+		case onEnterDone <- struct{}{}:
+		default:
+		}
+	}
+
+	now := time.Now().UTC()
+	requireCreateTask(t, repo, &models.Task{
+		ID: "child-terminal-step", WorkspaceID: "ws1", WorkflowID: "wf1", WorkflowStepID: "child_done",
+		Title: "Child in Done", State: v1.TaskStateReview, ParentID: "parent",
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	if transitioned := svc.processOnChildrenCompleted(ctx, "parent"); !transitioned {
+		t.Fatalf("expected child in terminal workflow step to transition parent")
+	}
+	waitForChildrenCompletedOnEnter(t, onEnterDone)
+
+	parent, err := repo.GetTask(ctx, "parent")
+	if err != nil {
+		t.Fatalf("load parent after transition: %v", err)
+	}
+	if parent.WorkflowStepID != "step_parent_done" {
+		t.Fatalf("expected parent to move to step_parent_done, got %q", parent.WorkflowStepID)
+	}
+}
+
+func TestHandleTaskMovedToTerminalStepProcessesParentChildrenCompleted(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "parent", "parent-session", "step_wait")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step_wait"] = &wfmodels.WorkflowStep{
+		ID:         "step_wait",
+		WorkflowID: "wf1",
+		Name:       "Wait for Subtasks",
+		Position:   0,
+		Events: wfmodels.StepEvents{
+			OnChildrenCompleted: []wfmodels.GenericAction{
+				{Type: wfmodels.GenericActionMoveToNext},
+			},
+		},
+	}
+	stepGetter.steps["step_parent_done"] = &wfmodels.WorkflowStep{
+		ID:         "step_parent_done",
+		WorkflowID: "wf1",
+		Name:       "Done",
+		Position:   1,
+	}
+	stepGetter.steps["child_work"] = &wfmodels.WorkflowStep{
+		ID:         "child_work",
+		WorkflowID: "wf-child",
+		Name:       "Work",
+		Position:   0,
+	}
+	stepGetter.steps["child_done"] = &wfmodels.WorkflowStep{
+		ID:         "child_done",
+		WorkflowID: "wf-child",
+		Name:       "Done",
+		Position:   1,
+	}
+
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createEngineService(t, repo, stepGetter, agentMgr)
+	onEnterDone := make(chan struct{}, 1)
+	svc.onProcessOnEnterComplete = func() {
+		select {
+		case onEnterDone <- struct{}{}:
+		default:
+		}
+	}
+
+	now := time.Now().UTC()
+	requireCreateTask(t, repo, &models.Task{
+		ID: "child-terminal-move", WorkspaceID: "ws1", WorkflowID: "wf-child", WorkflowStepID: "child_done",
+		Title: "Child moved to Done", State: v1.TaskStateReview, ParentID: "parent",
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	svc.handleTaskMoved(ctx, watcher.TaskMovedEventData{
+		TaskID:     "child-terminal-move",
+		FromStepID: "child_work",
+		ToStepID:   "child_done",
+		WorkflowID: "wf-child",
+	})
+	waitForChildrenCompletedOnEnter(t, onEnterDone)
+
+	parent, err := repo.GetTask(ctx, "parent")
+	if err != nil {
+		t.Fatalf("load parent after child move: %v", err)
+	}
+	if parent.WorkflowStepID != "step_parent_done" {
+		t.Fatalf("expected parent to move to step_parent_done, got %q", parent.WorkflowStepID)
+	}
+}
+
+func requireCreateTask(t *testing.T, repo interface {
+	CreateTask(context.Context, *models.Task) error
+}, task *models.Task) {
+	t.Helper()
+	if err := repo.CreateTask(context.Background(), task); err != nil {
+		t.Fatalf("create task %s: %v", task.ID, err)
 	}
 }
 

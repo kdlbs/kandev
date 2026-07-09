@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -42,6 +43,39 @@ func (s *Service) processParentChildrenCompletedForTaskState(ctx context.Context
 	}
 
 	s.processOnChildrenCompleted(ctx, child.ParentID)
+}
+
+func (s *Service) processParentChildrenCompletedForTerminalStepMove(ctx context.Context, taskID, stepID string) {
+	if !s.workflowStepIsTerminal(ctx, stepID) {
+		return
+	}
+	s.markTaskCompletedForTerminalStep(ctx, taskID)
+}
+
+func (s *Service) markTaskCompletedForTerminalStep(ctx context.Context, taskID string) {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("terminal step completion: failed to load task",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	if models.IsTerminalTaskState(task.State) {
+		s.processParentChildrenCompletedForTaskState(ctx, taskID, task.State)
+		return
+	}
+	oldState := task.State
+	task.State = v1.TaskStateCompleted
+	task.UpdatedAt = time.Now().UTC()
+	if err := s.repo.UpdateTask(ctx, task); err != nil {
+		s.logger.Warn("terminal step completion: failed to mark task completed",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	s.publishTaskUpdated(ctx, task)
+	s.publishTaskStateChanged(ctx, task, oldState)
+	s.processParentChildrenCompletedForTaskState(ctx, taskID, v1.TaskStateCompleted)
 }
 
 func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID string) bool {
@@ -101,6 +135,7 @@ func (s *Service) readyChildCompletionRows(ctx context.Context, parentID string)
 			zap.Error(err))
 		return nil, false
 	}
+	s.annotateTerminalChildSteps(ctx, rows)
 	if len(rows) == 0 || !allChildrenTerminal(rows) {
 		return nil, false
 	}
@@ -208,11 +243,47 @@ func (s *Service) markChildCompletionApplied(ctx context.Context, parentID, oper
 
 func allChildrenTerminal(rows []models.ChildCompletionRow) bool {
 	for _, row := range rows {
-		if !models.IsTerminalTaskState(row.State) {
+		if !models.IsTerminalTaskState(row.State) && !row.TerminalWorkflowStep {
 			return false
 		}
 	}
 	return true
+}
+
+func (s *Service) annotateTerminalChildSteps(ctx context.Context, rows []models.ChildCompletionRow) {
+	if s.workflowStepGetter == nil {
+		return
+	}
+	cache := make(map[string]bool)
+	for i := range rows {
+		if models.IsTerminalTaskState(rows[i].State) || rows[i].WorkflowStepID == "" {
+			continue
+		}
+		terminal, ok := cache[rows[i].WorkflowStepID]
+		if !ok {
+			terminal = s.workflowStepIsTerminal(ctx, rows[i].WorkflowStepID)
+			cache[rows[i].WorkflowStepID] = terminal
+		}
+		rows[i].TerminalWorkflowStep = terminal
+	}
+}
+
+func (s *Service) workflowStepIsTerminal(ctx context.Context, workflowStepID string) bool {
+	if s.workflowStepGetter == nil || workflowStepID == "" {
+		return false
+	}
+	step, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
+	if err != nil || step == nil {
+		return false
+	}
+	nextStep, err := s.workflowStepGetter.GetNextStepByPosition(ctx, step.WorkflowID, step.Position)
+	if err != nil {
+		s.logger.Warn("failed to get next workflow step for terminal check",
+			zap.String("workflow_step_id", workflowStepID),
+			zap.Error(err))
+		return false
+	}
+	return wfmodels.IsTerminalStep(step, nextStep)
 }
 
 func childCompletionPayload(rows []models.ChildCompletionRow) engine.OnChildrenCompletedPayload {
@@ -220,11 +291,18 @@ func childCompletionPayload(rows []models.ChildCompletionRow) engine.OnChildrenC
 	for _, row := range rows {
 		summaries = append(summaries, engine.ChildSummary{
 			TaskID:  row.ID,
-			Status:  string(row.State),
+			Status:  childCompletionStatus(row),
 			Summary: row.Title,
 		})
 	}
 	return engine.OnChildrenCompletedPayload{ChildSummaries: summaries}
+}
+
+func childCompletionStatus(row models.ChildCompletionRow) string {
+	if row.TerminalWorkflowStep && !models.IsTerminalTaskState(row.State) {
+		return string(v1.TaskStateCompleted)
+	}
+	return string(row.State)
 }
 
 func childCompletionOperationID(parentID string, rows []models.ChildCompletionRow) string {
@@ -235,6 +313,14 @@ func childCompletionOperationID(parentID string, rows []models.ChildCompletionRo
 		b.WriteString(row.ID)
 		b.WriteString(":")
 		b.WriteString(string(row.State))
+		b.WriteString(":")
+		b.WriteString(row.WorkflowStepID)
+		b.WriteString(":")
+		if row.TerminalWorkflowStep {
+			b.WriteString("terminal")
+		} else {
+			b.WriteString("active")
+		}
 		b.WriteString(":")
 		b.WriteString(row.UpdatedAt.UTC().Format(time.RFC3339Nano))
 	}

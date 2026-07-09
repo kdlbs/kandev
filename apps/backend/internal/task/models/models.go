@@ -361,10 +361,12 @@ type Task struct {
 // ChildCompletionRow is the compact active-child projection used to decide
 // whether a parent task's on_children_completed trigger is ready to fire.
 type ChildCompletionRow struct {
-	ID        string       `json:"id" db:"id"`
-	State     v1.TaskState `json:"state" db:"state"`
-	Title     string       `json:"title" db:"title"`
-	UpdatedAt time.Time    `json:"updated_at" db:"updated_at"`
+	ID                   string       `json:"id" db:"id"`
+	State                v1.TaskState `json:"state" db:"state"`
+	Title                string       `json:"title" db:"title"`
+	WorkflowStepID       string       `json:"workflow_step_id" db:"workflow_step_id"`
+	TerminalWorkflowStep bool         `json:"terminal_workflow_step"`
+	UpdatedAt            time.Time    `json:"updated_at" db:"updated_at"`
 }
 
 // IsTerminalTaskState reports whether a task state means no further child work

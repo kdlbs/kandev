@@ -270,6 +270,7 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	// Publish task updated event via the task service so the payload carries
 	// the full context (session counts, primary session, repositories).
 	s.publishTaskUpdated(ctx, task)
+	s.processParentChildrenCompletedForTerminalStepMove(ctx, taskID, toStepID)
 
 	s.logger.Info("workflow transition completed",
 		zap.String("task_id", taskID),
@@ -326,6 +327,8 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 	if s.workflowStepGetter == nil {
 		return
 	}
+
+	s.processParentChildrenCompletedForTerminalStepMove(ctx, data.TaskID, data.ToStepID)
 
 	// No session yet — check if we need to create one via auto-start
 	if data.SessionID == "" {
@@ -1054,6 +1057,8 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		zap.String("session_id", sessionID),
 		zap.String("from_step_id", fromStepID),
 		zap.String("to_step_id", move.WorkflowStepID))
+
+	s.processParentChildrenCompletedForTerminalStepMove(ctx, taskID, move.WorkflowStepID)
 
 	// Run on_exit + on_enter asynchronously. This call originated from
 	// handleAgentReady on the WS event reader goroutine; processStepExitAndEnter
@@ -2107,6 +2112,8 @@ func (s *Service) applyEngineTransition(
 		}
 	}
 
+	terminalTarget := s.workflowStepIsTerminal(ctx, targetStep.ID)
+
 	fromStep, err := s.workflowStepGetter.GetStep(ctx, result.FromStepID)
 	if err != nil {
 		s.logger.Warn("failed to load from-step for on_exit",
@@ -2138,6 +2145,10 @@ func (s *Service) applyEngineTransition(
 				zap.String("session_id", session.ID),
 				zap.Error(err))
 		}
+	}
+
+	if terminalTarget {
+		s.markTaskCompletedForTerminalStep(ctx, taskID)
 	}
 
 	if !triggerOnEnter {
@@ -2172,7 +2183,9 @@ func (s *Service) applyEngineTransition(
 	if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
 		s.updateTaskSessionState(ctx, taskID, session.ID, models.TaskSessionStateWaitingForInput, "", false, session)
 		session.State = models.TaskSessionStateWaitingForInput
-		s.writeTaskReviewState(ctx, taskID, session.ID)
+		if !terminalTarget {
+			s.writeTaskReviewState(ctx, taskID, session.ID)
+		}
 	}
 
 	// Launch processOnEnter asynchronously to avoid blocking the stream reader goroutine.

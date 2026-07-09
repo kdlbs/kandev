@@ -289,11 +289,15 @@ func (s *Service) MoveTaskWithOptions(
 
 	oldWorkflowID := task.WorkflowID
 	oldStepID := task.WorkflowStepID
+	oldState := task.State
 	stepChanged := oldStepID != workflowStepID
 
 	task.WorkflowID = workflowID
 	task.WorkflowStepID = workflowStepID
 	task.Position = position
+	if s.isTerminalWorkflowStep(ctx, workflowStepID) {
+		task.State = v1.TaskStateCompleted
+	}
 	task.UpdatedAt = time.Now().UTC()
 
 	if err := s.tasks.UpdateTask(ctx, task); err != nil {
@@ -308,6 +312,9 @@ func (s *Service) MoveTaskWithOptions(
 	}
 
 	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, oldWorkflowID)
+	if oldState != task.State {
+		s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
+	}
 
 	// Publish task.moved event so the orchestrator can process on_exit/on_enter actions
 	if stepChanged {
@@ -336,6 +343,24 @@ func (s *Service) MoveTaskWithOptions(
 	}
 
 	return result, nil
+}
+
+func (s *Service) isTerminalWorkflowStep(ctx context.Context, workflowStepID string) bool {
+	if s.workflowStepGetter == nil || workflowStepID == "" {
+		return false
+	}
+	step, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
+	if err != nil || step == nil {
+		return false
+	}
+	nextStep, err := s.workflowStepGetter.GetNextStepByPosition(ctx, step.WorkflowID, step.Position)
+	if err != nil {
+		s.logger.Warn("failed to get next workflow step for terminal check",
+			zap.String("workflow_step_id", workflowStepID),
+			zap.Error(err))
+		return false
+	}
+	return wfmodels.IsTerminalStep(step, nextStep)
 }
 
 func (s *Service) validateTaskMove(ctx context.Context, task *models.Task, workflowID, workflowStepID string, opts MoveTaskOptions) error {

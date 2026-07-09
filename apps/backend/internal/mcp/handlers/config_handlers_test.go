@@ -534,6 +534,37 @@ func TestHandleUpdateTaskState_MissingState(t *testing.T) {
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 }
 
+func TestHandleUpdateTask_PersistsState(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
+		ID: "ws-update-state", Name: "Update State", CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{
+		ID: "wf-update-state", WorkspaceID: "ws-update-state", Name: "Board", CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID: "task-update-state", WorkspaceID: "ws-update-state", WorkflowID: "wf-update-state",
+		Title: "Stateful", State: v1.TaskStateReview, CreatedAt: now, UpdatedAt: now,
+	}))
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPUpdateTask, map[string]interface{}{
+		"task_id": "task-update-state",
+		"state":   "COMPLETED",
+	})
+
+	resp, err := h.handleUpdateTask(ctx, msg)
+	require.NoError(t, err)
+	assert.NotEqual(t, ws.MessageTypeError, resp.Type)
+
+	task, err := svc.GetTask(ctx, "task-update-state")
+	require.NoError(t, err)
+	assert.Equal(t, v1.TaskStateCompleted, task.State)
+}
+
 // TestHandleMoveTask_ActiveSessionWithoutPrompt_DefersMove pins the production
 // bug where an agent on Work called move_task_kandev → Done without a prompt
 // mid-turn. The immediate path hit validateMoveSessions (RUNNING session) and

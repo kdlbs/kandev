@@ -266,13 +266,7 @@ func (h *Handlers) handleUpdateTaskState(ctx context.Context, msg *ws.Message) (
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "state is required", nil)
 	}
 	state := normalizeTaskState(req.State)
-	switch state {
-	case v1.TaskStateTODO, v1.TaskStateCreated, v1.TaskStateScheduling,
-		v1.TaskStateInProgress, v1.TaskStateReview, v1.TaskStateBlocked,
-		v1.TaskStateWaitingForInput, v1.TaskStateCompleted,
-		v1.TaskStateFailed, v1.TaskStateCancelled:
-		// valid
-	default:
+	if !isValidTaskState(state) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "invalid task state: "+req.State, nil)
 	}
 
@@ -282,6 +276,18 @@ func (h *Handlers) handleUpdateTaskState(ctx context.Context, msg *ws.Message) (
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update task state", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
+}
+
+func isValidTaskState(state v1.TaskState) bool {
+	switch state {
+	case v1.TaskStateTODO, v1.TaskStateCreated, v1.TaskStateScheduling,
+		v1.TaskStateInProgress, v1.TaskStateReview, v1.TaskStateBlocked,
+		v1.TaskStateWaitingForInput, v1.TaskStateCompleted,
+		v1.TaskStateFailed, v1.TaskStateCancelled:
+		return true
+	default:
+		return false
+	}
 }
 
 // normalizeTaskState maps common agent-supplied aliases to canonical TaskState

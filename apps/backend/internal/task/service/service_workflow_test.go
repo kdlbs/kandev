@@ -140,6 +140,36 @@ func TestService_MoveTaskAllowsPendingReviewWhenSessionIdle(t *testing.T) {
 	}
 }
 
+func TestService_MoveTaskToTerminalStepCompletesTask(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
+	getter.steps["step-done"] = &wfmodels.WorkflowStep{
+		ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2,
+	}
+	createMoveTask(t, ctx, repo, "task-terminal", "wf-source", "step-source", nil)
+	eventBus.ClearEvents()
+
+	moved, err := svc.MoveTask(ctx, "task-terminal", "wf-source", "step-done", 0)
+	if err != nil {
+		t.Fatalf("MoveTask: %v", err)
+	}
+	if moved.Task.State != v1.TaskStateCompleted {
+		t.Fatalf("moved task state = %q, want COMPLETED", moved.Task.State)
+	}
+
+	task, err := repo.GetTask(ctx, "task-terminal")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.State != v1.TaskStateCompleted {
+		t.Fatalf("persisted task state = %q, want COMPLETED", task.State)
+	}
+	findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskStateChanged)
+}
+
 func TestService_MoveTaskRejectsRunningSession(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
