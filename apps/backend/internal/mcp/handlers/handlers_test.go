@@ -936,7 +936,7 @@ func TestHandleCreateTask_InvalidWorkflowReturnsValidationError(t *testing.T) {
 	var ep ws.ErrorPayload
 	require.NoError(t, json.Unmarshal(resp.Payload, &ep))
 	assert.Contains(t, ep.Message, "workflow_id")
-	assert.Contains(t, ep.Message, "could not be resolved")
+	assert.Contains(t, ep.Message, "was not found")
 }
 
 func TestHandleCreateTask_StartAgentUsesWorkspaceDefaultAgentProfile(t *testing.T) {
@@ -1716,6 +1716,10 @@ func TestHandleCreateTask_SubtaskRejectsWorkflowFromDifferentWorkspace(t *testin
 	resp, err := h.handleCreateTask(ctx, msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
+
+	var ep ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &ep))
+	assert.Contains(t, ep.Message, "belongs to workspace_id \"ws-2\", not \"ws-1\"")
 }
 
 func TestResolveTaskRepositories_ParentWithExplicitRepos_OverridesRepoButInheritsWorkspace(t *testing.T) {

@@ -481,8 +481,14 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.WorkflowID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
 	}
-	if err := h.validateMCPWorkflowWorkspace(ctx, req.WorkflowID, req.WorkspaceID); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	if code, message, err := h.validateMCPWorkflowWorkspace(ctx, req.WorkflowID, req.WorkspaceID); code != "" {
+		if err != nil && h.logger != nil {
+			h.logger.Error("failed to validate MCP workflow workspace",
+				zap.String("workflow_id", req.WorkflowID),
+				zap.String("workspace_id", req.WorkspaceID),
+				zap.Error(err))
+		}
+		return ws.NewError(msg.ID, msg.Action, code, message, nil)
 	}
 
 	workspacePolicy, err := h.resolveMCPWorkspacePolicy(req.ParentID, req.WorkspaceMode)
@@ -694,18 +700,25 @@ func firstNonEmptyString(values ...string) string {
 	return ""
 }
 
-func (h *Handlers) validateMCPWorkflowWorkspace(ctx context.Context, workflowID, workspaceID string) error {
+func (h *Handlers) validateMCPWorkflowWorkspace(ctx context.Context, workflowID, workspaceID string) (string, string, error) {
 	if h.taskSvc == nil || workflowID == "" || workspaceID == "" {
-		return nil
+		return "", "", nil
 	}
 	workflow, err := h.taskSvc.GetWorkflow(ctx, workflowID)
 	if err != nil {
-		return fmt.Errorf("workflow_id %q could not be resolved: %w", workflowID, err)
+		if isMCPWorkflowNotFoundError(err) {
+			return ws.ErrorCodeValidation, fmt.Sprintf("workflow_id %q was not found", workflowID), nil
+		}
+		return ws.ErrorCodeInternalError, "Failed to validate workflow_id", err
 	}
 	if workflow.WorkspaceID != workspaceID {
-		return fmt.Errorf("workflow_id %q belongs to workspace_id %q, not %q", workflowID, workflow.WorkspaceID, workspaceID)
+		return ws.ErrorCodeValidation, fmt.Sprintf("workflow_id %q belongs to workspace_id %q, not %q", workflowID, workflow.WorkspaceID, workspaceID), nil
 	}
-	return nil
+	return "", "", nil
+}
+
+func isMCPWorkflowNotFoundError(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "workflow not found")
 }
 
 // explicitRepoInputsWithDefaults maps the MCP-side explicit repo list to
