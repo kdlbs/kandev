@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -70,6 +71,9 @@ func TestWalkthroughRepo_Upsert(t *testing.T) {
 	if err := repo.CreateTaskWalkthrough(ctx, second); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
+	if second.ID != first.ID || !second.CreatedAt.Equal(first.CreatedAt) {
+		t.Fatalf("expected upsert to reuse persisted id+created_at: first=%+v second=%+v", first, second)
+	}
 
 	got, _ := repo.GetTaskWalkthrough(ctx, "task-1")
 	if got == nil || len(got.Steps) != 2 || got.Steps[0].File != "b.go" {
@@ -106,8 +110,8 @@ func TestWalkthroughRepo_Delete(t *testing.T) {
 	if got != nil {
 		t.Fatalf("expected nil after delete, got %+v", got)
 	}
-	if err := repo.DeleteTaskWalkthrough(ctx, "task-1"); err == nil {
-		t.Fatal("expected error deleting missing walkthrough")
+	if err := repo.DeleteTaskWalkthrough(ctx, "task-1"); !errors.Is(err, models.ErrTaskWalkthroughNotFound) {
+		t.Fatalf("expected ErrTaskWalkthroughNotFound deleting missing walkthrough, got %v", err)
 	}
 }
 

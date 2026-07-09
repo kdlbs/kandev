@@ -39,10 +39,13 @@ async function seedWalkthroughChangesTask(
   return seedWalkthroughTask(testPage, apiClient, seedData, "walkthrough-setup", "changes ready");
 }
 
-async function customizeChangesWalkthroughPrompt(apiClient: ApiClient): Promise<void> {
+async function customizeChangesWalkthroughPrompt(
+  apiClient: ApiClient,
+): Promise<() => Promise<void>> {
   const { prompts } = await apiClient.listPrompts();
   const prompt = prompts.find((p) => p.name === "changes-walkthrough");
   expect(prompt, "changes-walkthrough built-in prompt should be seeded").toBeTruthy();
+  const originalContent = prompt!.content;
   await apiClient.updatePrompt(prompt!.id, {
     content: [
       "E2E_CUSTOM_CHANGES_WALKTHROUGH",
@@ -57,6 +60,7 @@ async function customizeChangesWalkthroughPrompt(apiClient: ApiClient): Promise<
       "{{changed_files}}",
     ].join("\n"),
   });
+  return () => apiClient.updatePrompt(prompt!.id, { content: originalContent });
 }
 
 /** Open the floating walkthrough card via the launcher pill. */
@@ -78,36 +82,39 @@ test.describe("Code walkthrough", () => {
     seedData,
   }) => {
     const session = await seedWalkthroughChangesTask(testPage, apiClient, seedData);
-    await customizeChangesWalkthroughPrompt(apiClient);
+    const restorePrompt = await customizeChangesWalkthroughPrompt(apiClient);
+    try {
+      await expect(session.walkthroughLauncher()).toHaveCount(0);
+      await session.clickTab("Changes");
+      const request = session.changesRequestWalkthroughButton();
+      await expect(request).toBeVisible({ timeout: 15_000 });
+      await expect(request).toContainText("Walkthrough");
+      await expect(request).toBeEnabled({ timeout: 30_000 });
 
-    await expect(session.walkthroughLauncher()).toHaveCount(0);
-    await session.clickTab("Changes");
-    const request = session.changesRequestWalkthroughButton();
-    await expect(request).toBeVisible({ timeout: 15_000 });
-    await expect(request).toContainText("Walkthrough");
-    await expect(request).toBeEnabled({ timeout: 30_000 });
+      await request.click();
+      await session.showSessionContext();
 
-    await request.click();
-    await session.showSessionContext();
+      await expect(session.activeChat()).toContainText("@changes-walkthrough", {
+        timeout: 15_000,
+      });
+      await expect(session.activeChat()).toContainText("Changed files:");
+      await expect(session.activeChat()).toContainText("walkthrough_a.txt [");
+      await expect(session.activeChat()).not.toContainText("E2E_CUSTOM_CHANGES_WALKTHROUGH");
+      await expect(session.activeChat()).toContainText("Walkthrough: Tour of the change", {
+        timeout: 45_000,
+      });
+      await expect(session.activeChat().locator(".tabler-icon-route")).toBeVisible();
+      await expect(session.activeChat()).toContainText("walkthrough-request complete", {
+        timeout: 45_000,
+      });
 
-    await expect(session.activeChat()).toContainText("@changes-walkthrough", {
-      timeout: 15_000,
-    });
-    await expect(session.activeChat()).toContainText("Changed files:");
-    await expect(session.activeChat()).toContainText("walkthrough_a.txt [");
-    await expect(session.activeChat()).not.toContainText("E2E_CUSTOM_CHANGES_WALKTHROUGH");
-    await expect(session.activeChat()).toContainText("Walkthrough: Tour of the change", {
-      timeout: 45_000,
-    });
-    await expect(session.activeChat().locator(".tabler-icon-route").first()).toBeVisible();
-    await expect(session.activeChat()).toContainText("walkthrough-request complete", {
-      timeout: 45_000,
-    });
-
-    const card = await openWalkthrough(testPage);
-    await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 1 / 5");
-    await expect(card.getByTestId("walkthrough-step-body")).toContainText("Step 1");
-    await expect(session.walkthroughEditorRange()).toBeVisible({ timeout: 15_000 });
+      const card = await openWalkthrough(testPage);
+      await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 1 / 5");
+      await expect(card.getByTestId("walkthrough-step-body")).toContainText("Step 1");
+      await expect(session.walkthroughEditorRange()).toBeVisible({ timeout: 15_000 });
+    } finally {
+      await restorePrompt();
+    }
   });
 
   test("expanded review toolbar sends the saved walkthrough prompt reference", async ({
@@ -116,32 +123,36 @@ test.describe("Code walkthrough", () => {
     seedData,
   }) => {
     const session = await seedWalkthroughChangesTask(testPage, apiClient, seedData);
-    await customizeChangesWalkthroughPrompt(apiClient);
-    await session.clickTab("Changes");
+    const restorePrompt = await customizeChangesWalkthroughPrompt(apiClient);
+    try {
+      await session.clickTab("Changes");
 
-    await session.changes.getByRole("button", { name: "Review" }).click();
-    const dialog = testPage.getByRole("dialog", { name: "Review Changes" });
-    await expect(dialog).toBeVisible({ timeout: 15_000 });
+      await session.changes.getByRole("button", { name: "Review" }).click();
+      const dialog = testPage.getByRole("dialog", { name: "Review Changes" });
+      await expect(dialog).toBeVisible({ timeout: 15_000 });
 
-    const request = session.reviewRequestWalkthroughButton();
-    await expect(request).toBeVisible();
-    await expect(request).toBeEnabled({ timeout: 30_000 });
-    await expect(request).toHaveAttribute("aria-label", "Walk me through these review changes");
-    await request.click();
+      const request = session.reviewRequestWalkthroughButton();
+      await expect(request).toBeVisible();
+      await expect(request).toBeEnabled({ timeout: 30_000 });
+      await expect(request).toHaveAttribute("aria-label", "Walk me through these review changes");
+      await request.click();
 
-    await testPage.keyboard.press("Escape");
-    await expect(dialog).toBeHidden({ timeout: 15_000 });
-    await session.showSessionContext();
+      await testPage.keyboard.press("Escape");
+      await expect(dialog).toBeHidden({ timeout: 15_000 });
+      await session.showSessionContext();
 
-    await expect(session.activeChat()).toContainText("@changes-walkthrough", {
-      timeout: 15_000,
-    });
-    await expect(session.activeChat()).toContainText("Changed files:");
-    await expect(session.activeChat()).toContainText("walkthrough_a.txt [");
-    await expect(session.activeChat()).not.toContainText("E2E_CUSTOM_CHANGES_WALKTHROUGH");
-    await expect(session.activeChat()).toContainText("walkthrough-request complete", {
-      timeout: 45_000,
-    });
+      await expect(session.activeChat()).toContainText("@changes-walkthrough", {
+        timeout: 15_000,
+      });
+      await expect(session.activeChat()).toContainText("Changed files:");
+      await expect(session.activeChat()).toContainText("walkthrough_a.txt [");
+      await expect(session.activeChat()).not.toContainText("E2E_CUSTOM_CHANGES_WALKTHROUGH");
+      await expect(session.activeChat()).toContainText("walkthrough-request complete", {
+        timeout: 45_000,
+      });
+    } finally {
+      await restorePrompt();
+    }
   });
 
   test("floating card walks all steps across changed and unchanged files", async ({

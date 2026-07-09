@@ -18,6 +18,9 @@ var ErrExecutorRunningNotFound = errors.New("executor running not found")
 // ErrTaskSessionNotFound is returned when no task session record exists.
 var ErrTaskSessionNotFound = errors.New("task session not found")
 
+// ErrTaskWalkthroughNotFound is returned when no walkthrough record exists.
+var ErrTaskWalkthroughNotFound = errors.New("task walkthrough not found")
+
 // ErrExecutorNotFound is returned by the executor repository when no
 // executor row exists for the given ID. Callers should use errors.Is to
 // distinguish "row doesn't exist" (404 semantically) from transport-level

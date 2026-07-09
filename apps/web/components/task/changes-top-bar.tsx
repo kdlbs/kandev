@@ -89,27 +89,31 @@ function ReviewWalkthroughRequestButton({
   requestWalkthroughDisabled,
 }: Pick<ChangesTopBarProps, "handleRequestWalkthrough" | "requestWalkthroughDisabled">) {
   if (!handleRequestWalkthrough) return null;
+  const tooltip = requestWalkthroughDisabled
+    ? "Loading changed files..."
+    : "Walk me through these changes";
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="px-1.5 h-5 cursor-pointer"
-          aria-label="Walk me through these review changes"
-          data-testid="review-request-walkthrough"
-          disabled={requestWalkthroughDisabled}
-          title={
-            requestWalkthroughDisabled
-              ? "Loading changed files..."
-              : "Walk me through these changes"
-          }
-          onClick={handleRequestWalkthrough}
+        <span
+          tabIndex={requestWalkthroughDisabled ? 0 : undefined}
+          aria-label={requestWalkthroughDisabled ? tooltip : undefined}
         >
-          <IconRoute className="h-3.5 w-3.5" />
-        </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="px-1.5 h-5 cursor-pointer"
+            aria-label="Walk me through these review changes"
+            data-testid="review-request-walkthrough"
+            disabled={requestWalkthroughDisabled}
+            title={tooltip}
+            onClick={handleRequestWalkthrough}
+          >
+            <IconRoute className="h-3.5 w-3.5" />
+          </Button>
+        </span>
       </TooltipTrigger>
-      <TooltipContent>Walk me through these changes</TooltipContent>
+      <TooltipContent>{tooltip}</TooltipContent>
     </Tooltip>
   );
 }

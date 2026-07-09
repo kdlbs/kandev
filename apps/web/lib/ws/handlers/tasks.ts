@@ -251,6 +251,24 @@ function clearRemovedTaskSelection(state: AppState, taskId: string): AppState {
   return next;
 }
 
+function clearDeletedTaskWalkthrough(state: AppState, taskId: string): AppState {
+  if (!state.walkthroughs?.byTaskId) return state;
+  if (!(taskId in state.walkthroughs.byTaskId)) return state;
+  const { [taskId]: _removedWalkthrough, ...byTaskId } = state.walkthroughs.byTaskId;
+  const { [taskId]: _removedStep, ...activeStepByTaskId } = state.walkthroughs.activeStepByTaskId;
+  const { [taskId]: _removedLastSeen, ...lastSeenUpdatedAtByTaskId } =
+    state.walkthroughs.lastSeenUpdatedAtByTaskId;
+  return {
+    ...state,
+    walkthroughs: {
+      ...state.walkthroughs,
+      byTaskId,
+      activeStepByTaskId,
+      lastSeenUpdatedAtByTaskId,
+    },
+  };
+}
+
 function removedTaskRedirectHref(pathname: string, taskId: string): string | null {
   if (isTaskDetailPath(pathname, taskId)) return "/";
   const normalized = normalizePathname(pathname);
@@ -392,7 +410,10 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       const wasActive = currentState.tasks.activeTaskId === deletedId;
 
       store.setState((state) =>
-        clearRemovedTaskSelection(removeTaskFromBothKanbans(state, deletedId), deletedId),
+        clearDeletedTaskWalkthrough(
+          clearRemovedTaskSelection(removeTaskFromBothKanbans(state, deletedId), deletedId),
+          deletedId,
+        ),
       );
 
       // Capture the route match before any redirect mutates the pathname. This

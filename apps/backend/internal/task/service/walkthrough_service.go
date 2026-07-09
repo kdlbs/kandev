@@ -15,7 +15,7 @@ import (
 )
 
 // ErrTaskWalkthroughNotFound is returned when no walkthrough exists for a task.
-var ErrTaskWalkthroughNotFound = errors.New("task walkthrough not found")
+var ErrTaskWalkthroughNotFound = models.ErrTaskWalkthroughNotFound
 
 // Event-payload keys, hoisted to constants to satisfy goconst.
 const (

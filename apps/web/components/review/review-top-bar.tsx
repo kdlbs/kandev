@@ -111,23 +111,26 @@ function ReviewWalkthroughButton({
   disabled?: boolean;
 }) {
   if (!onRequestWalkthrough) return null;
+  const tooltip = disabled ? "Loading changed files..." : "Walk me through these changes";
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="px-2 cursor-pointer"
-          aria-label="Walk me through these review changes"
-          data-testid="review-request-walkthrough"
-          disabled={disabled}
-          title={disabled ? "Loading changed files..." : "Walk me through these changes"}
-          onClick={onRequestWalkthrough}
-        >
-          <IconRoute className="h-4 w-4" />
-        </Button>
+        <span tabIndex={disabled ? 0 : undefined} aria-label={disabled ? tooltip : undefined}>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="px-2 cursor-pointer"
+            aria-label="Walk me through these review changes"
+            data-testid="review-request-walkthrough"
+            disabled={disabled}
+            title={tooltip}
+            onClick={onRequestWalkthrough}
+          >
+            <IconRoute className="h-4 w-4" />
+          </Button>
+        </span>
       </TooltipTrigger>
-      <TooltipContent>Walk me through these changes</TooltipContent>
+      <TooltipContent>{tooltip}</TooltipContent>
     </Tooltip>
   );
 }

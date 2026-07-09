@@ -38,7 +38,7 @@ func (r *Repository) CreateTaskWalkthrough(ctx context.Context, wt *models.TaskW
 		return err
 	}
 
-	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
+	err = r.db.QueryRowContext(ctx, r.db.Rebind(`
 		INSERT INTO task_walkthroughs (id, task_id, title, steps, created_by, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_id) DO UPDATE SET
@@ -46,7 +46,12 @@ func (r *Repository) CreateTaskWalkthrough(ctx context.Context, wt *models.TaskW
 			steps = excluded.steps,
 			created_by = excluded.created_by,
 			updated_at = excluded.updated_at
-	`), wt.ID, wt.TaskID, wt.Title, stepsJSON, wt.CreatedBy, wt.CreatedAt, wt.UpdatedAt)
+		RETURNING id, created_at, updated_at
+	`), wt.ID, wt.TaskID, wt.Title, stepsJSON, wt.CreatedBy, wt.CreatedAt, wt.UpdatedAt).Scan(
+		&wt.ID,
+		&wt.CreatedAt,
+		&wt.UpdatedAt,
+	)
 	if err != nil {
 		return fmt.Errorf("failed to upsert task walkthrough: %w", err)
 	}
@@ -85,7 +90,7 @@ func (r *Repository) DeleteTaskWalkthrough(ctx context.Context, taskID string) e
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("task walkthrough not found for task: %s", taskID)
+		return fmt.Errorf("%w for task: %s", models.ErrTaskWalkthroughNotFound, taskID)
 	}
 	return nil
 }

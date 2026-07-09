@@ -107,6 +107,27 @@ describe("global sidebar width storage", () => {
   });
 });
 
+describe("task-scoped artifact notification storage", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("clears walkthrough last-seen state via cleanupTaskStorage", () => {
+    window.localStorage.setItem(
+      "kandev.walkthrough.lastSeenByTask",
+      JSON.stringify({ "task-a": "2026-01-01T00:00:00Z", "task-b": "2026-01-02T00:00:00Z" }),
+    );
+
+    cleanupTaskStorage("task-a", []);
+
+    expect(
+      JSON.parse(window.localStorage.getItem("kandev.walkthrough.lastSeenByTask") ?? "{}"),
+    ).toEqual({
+      "task-b": "2026-01-02T00:00:00Z",
+    });
+  });
+});
+
 describe("open file tabs storage", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
