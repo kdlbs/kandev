@@ -1058,7 +1058,7 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		zap.String("from_step_id", fromStepID),
 		zap.String("to_step_id", move.WorkflowStepID))
 
-	s.processParentChildrenCompletedForTerminalStepMove(ctx, taskID, move.WorkflowStepID)
+	s.syncTaskStateForPendingMove(ctx, taskID, fromStepID, move.WorkflowStepID)
 
 	// Run on_exit + on_enter asynchronously. This call originated from
 	// handleAgentReady on the WS event reader goroutine; processStepExitAndEnter
@@ -1069,6 +1069,44 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	// it's safe to defer the rest.
 	taskDescription := task.Description
 	go s.processStepExitAndEnter(context.WithoutCancel(ctx), taskID, session, fromStepID, move.WorkflowStepID, taskDescription)
+}
+
+func (s *Service) syncTaskStateForPendingMove(ctx context.Context, taskID, fromStepID, toStepID string) {
+	if s.workflowStepIsTerminal(ctx, toStepID) {
+		s.markTaskCompletedForTerminalStep(ctx, taskID, toStepID)
+		return
+	}
+	if fromStepID == toStepID || !s.workflowStepIsTerminal(ctx, fromStepID) {
+		return
+	}
+
+	s.taskRuntimeStateMu.Lock()
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		s.taskRuntimeStateMu.Unlock()
+		s.logger.Warn("pending move state sync: failed to load task",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	if task.WorkflowStepID != toStepID || task.State != v1.TaskStateCompleted {
+		s.taskRuntimeStateMu.Unlock()
+		return
+	}
+
+	oldState := task.State
+	task.State = v1.TaskStateTODO
+	task.UpdatedAt = time.Now().UTC()
+	if err := s.repo.UpdateTask(ctx, task); err != nil {
+		s.taskRuntimeStateMu.Unlock()
+		s.logger.Warn("pending move state sync: failed to reopen completed task",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	s.taskRuntimeStateMu.Unlock()
+	s.publishTaskUpdated(ctx, task)
+	s.publishTaskStateChanged(ctx, task, oldState)
 }
 
 // drainQueuedMessageForPromptableSession takes the next queued message and dispatches
