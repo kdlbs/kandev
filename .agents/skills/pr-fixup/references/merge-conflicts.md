@@ -17,14 +17,14 @@ Inspect the local worktree:
 ```bash
 git status --short
 git ls-files -u
-rg -n "^(<<<<<<<|=======|>>>>>>>)" --glob '!apps/node_modules/**' --glob '!node_modules/**' --glob '!dist/**' --glob '!build/**'
+git grep -n -E '^(<<<<<<<|>>>>>>>)'
 ```
 
-If `git ls-files -u` prints entries, or conflict markers are present in tracked source files, resolve those conflicts before fixing CI or review comments. Do not start a new merge/rebase while the index is already unmerged.
+If `git ls-files -u` prints entries, or conflict markers are present in tracked source files, resolve those conflicts before fixing CI or review comments. `git grep` scans only tracked files, and intentionally checks only the unambiguous start/end markers so Markdown setext headings do not create false positives. Do not start a new merge/rebase while the index is already unmerged.
 
 ## Resolve
 
-When GitHub reports file-level conflicts but the local index is clean:
+### When GitHub reports conflicts and the local index is clean
 
 1. Fetch the latest base branch:
    ```bash
@@ -39,8 +39,36 @@ When GitHub reports file-level conflicts but the local index is clean:
 4. Confirm the conflict is gone before continuing:
    ```bash
    git ls-files -u
-   rg -n "^(<<<<<<<|=======|>>>>>>>)" --glob '!apps/node_modules/**' --glob '!node_modules/**' --glob '!dist/**' --glob '!build/**'
+   git grep -n -E '^(<<<<<<<|>>>>>>>)'
    git diff --check
+   git diff --cached --check
+   ```
+
+### When the local index is already unmerged
+
+If `git ls-files -u` shows entries, a previous merge or rebase was left incomplete. Do not start another merge. Instead:
+
+1. Inspect each conflicted file:
+   ```bash
+   git diff --diff-filter=U
+   ```
+2. Resolve conflict markers manually, preserving the intended behavior from both sides.
+3. Stage each resolved file:
+   ```bash
+   git add <file>
+   ```
+4. Confirm the conflict is gone before continuing:
+   ```bash
+   git ls-files -u
+   git grep -n -E '^(<<<<<<<|>>>>>>>)'
+   git diff --check
+   git diff --cached --check
+   ```
+5. Complete the interrupted operation:
+   ```bash
+   git commit
+   # or, if mid-rebase:
+   git rebase --continue
    ```
 
 Do not discard unrelated user changes to make a merge/rebase easier. If unrelated dirty files block the conflict-resolution attempt, stop and ask before stashing, committing, or reverting them.
