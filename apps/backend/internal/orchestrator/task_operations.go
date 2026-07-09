@@ -1059,7 +1059,7 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 	if err != nil {
 		// If the execution is already running (duplicate resume request), return it as success.
 		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
-			execution, readySession, err = s.recoverAlreadyRunningResume(ctx, resumeCtx, taskID, sessionID)
+			execution, readySession, err = s.recoverAlreadyRunningResume(resumeCtx, taskID, sessionID)
 			if err != nil && errors.Is(err, ErrAgentNotReadyForPrompt) {
 				return nil, err
 			}
@@ -1093,7 +1093,7 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 		}
 	}
 	if readySession == nil {
-		readySession, err = s.waitForResumedSessionReady(ctx, sessionID)
+		readySession, err = s.waitForResumedSessionReady(resumeCtx, sessionID)
 		if err != nil {
 			return nil, err
 		}
@@ -1134,7 +1134,6 @@ func (s *Service) waitForResumedSessionReady(ctx context.Context, sessionID stri
 }
 
 func (s *Service) recoverAlreadyRunningResume(
-	ctx context.Context,
 	resumeCtx context.Context,
 	taskID string,
 	sessionID string,
@@ -1144,7 +1143,7 @@ func (s *Service) recoverAlreadyRunningResume(
 		return nil, nil, executor.ErrExecutionAlreadyRunning
 	}
 
-	readySession, waitErr := s.waitForResumedSessionReady(ctx, sessionID)
+	readySession, waitErr := s.waitForResumedSessionReady(resumeCtx, sessionID)
 	if waitErr == nil {
 		existing.SessionState = v1.TaskSessionState(readySession.State)
 		return existing, readySession, nil
@@ -1169,7 +1168,7 @@ func (s *Service) recoverAlreadyRunningResume(
 	if err != nil {
 		return nil, nil, err
 	}
-	readySession, err = s.waitForResumedSessionReady(ctx, sessionID)
+	readySession, err = s.waitForResumedSessionReady(resumeCtx, sessionID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1346,14 +1345,14 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 	resumeCtx := context.WithoutCancel(ctx)
 	if _, err = s.executor.ResumeSession(resumeCtx, session, true); err != nil {
 		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
-			s.recoverAgentPromptStreamIfNeeded(ctx, sessionID)
-			if readyErr := s.waitForAgentPromptReady(ctx, sessionID); readyErr != nil {
+			s.recoverAgentPromptStreamIfNeeded(resumeCtx, sessionID)
+			if readyErr := s.waitForAgentPromptReady(resumeCtx, sessionID); readyErr != nil {
 				return fmt.Errorf("agent not ready after resume race: %w", readyErr)
 			}
 			return nil
 		}
-		s.updateTaskSessionState(ctx, session.TaskID, sessionID, models.TaskSessionStateFailed, err.Error(), false, session)
-		if stateErr := s.taskRepo.UpdateTaskState(ctx, session.TaskID, v1.TaskStateFailed); stateErr != nil {
+		s.updateTaskSessionState(resumeCtx, session.TaskID, sessionID, models.TaskSessionStateFailed, err.Error(), false, session)
+		if stateErr := s.taskRepo.UpdateTaskState(resumeCtx, session.TaskID, v1.TaskStateFailed); stateErr != nil {
 			s.logger.Warn("failed to update task state to FAILED after session ensure resume error",
 				zap.String("task_id", session.TaskID),
 				zap.String("session_id", sessionID),
@@ -1366,10 +1365,19 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 
 	// ResumeSession launches the agent asynchronously. Wait for it to finish
 	// initializing before returning, so the caller can send a prompt immediately.
-	if err := s.waitForSessionReady(ctx, sessionID); err != nil {
+	//
+	// Use resumeCtx (context.WithoutCancel) here too, not the original ctx: the
+	// resume itself is already shielded from the caller's request deadline (see
+	// comment above), but a short-lived caller context (WebSocket request,
+	// MCP tool-call timeout, etc.) would otherwise still abort these polling
+	// waits early with a misleading "context deadline exceeded" even though the
+	// resume is progressing fine in the background and would succeed within its
+	// own bounded timeouts (waitForSessionReady's 90s, waitForAgentPromptReady's
+	// 30s below).
+	if err := s.waitForSessionReady(resumeCtx, sessionID); err != nil {
 		return fmt.Errorf("session not ready after resume: %w", err)
 	}
-	if err := s.waitForAgentPromptReady(ctx, sessionID); err != nil {
+	if err := s.waitForAgentPromptReady(resumeCtx, sessionID); err != nil {
 		return fmt.Errorf("agent not ready after resume: %w", err)
 	}
 
@@ -1471,10 +1479,13 @@ func (s *Service) startAgentOnPreparedWorkspace(ctx context.Context, sessionID s
 		return fmt.Errorf("failed to start agent on prepared workspace: %w", err)
 	}
 
-	if err := s.waitForSessionReady(ctx, sessionID); err != nil {
+	// Same reasoning as ensureSessionRunning's resume path: use launchCtx
+	// (already WithoutCancel'd for the launch call above) so a short-lived
+	// caller context doesn't abort these polling waits early.
+	if err := s.waitForSessionReady(launchCtx, sessionID); err != nil {
 		return fmt.Errorf("session not ready after starting agent: %w", err)
 	}
-	if err := s.waitForAgentPromptReady(ctx, sessionID); err != nil {
+	if err := s.waitForAgentPromptReady(launchCtx, sessionID); err != nil {
 		return fmt.Errorf("agent not ready after starting agent: %w", err)
 	}
 	s.logger.Debug("agent started on prepared workspace and ready for prompt")
@@ -1487,17 +1498,27 @@ func (s *Service) waitForSessionReady(ctx context.Context, sessionID string) err
 		pollInterval = 500 * time.Millisecond
 		maxWait      = 90 * time.Second
 	)
-	deadline := time.Now().Add(maxWait)
+	// Derive a bounded context so the overall wait AND each GetTaskSession query
+	// inside the loop honor maxWait. Callers pass context.WithoutCancel(ctx) so
+	// the wait survives the caller's request timeout during resume/launch — but
+	// that context carries no deadline of its own, so without this a single
+	// blocking query could hang well past maxWait (the loop only checks the
+	// wall clock between iterations). Mirrors waitForAgentPromptReady.
+	readyCtx, cancel := context.WithTimeout(ctx, maxWait)
+	defer cancel()
+	// Ticker rather than time.After(pollInterval) in the loop: time.After
+	// allocates a fresh timer each iteration that lives until it fires, so a
+	// long wait would pile up ~maxWait/pollInterval live timers. Mirrors
+	// waitForAgentPromptReady.
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
 	for {
-		if time.Now().After(deadline) {
-			return fmt.Errorf("timeout waiting for agent to become ready")
-		}
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(pollInterval):
+		case <-readyCtx.Done():
+			return fmt.Errorf("timeout waiting for agent to become ready: %w", readyCtx.Err())
+		case <-ticker.C:
 		}
-		sess, err := s.repo.GetTaskSession(ctx, sessionID)
+		sess, err := s.repo.GetTaskSession(readyCtx, sessionID)
 		if err != nil {
 			return fmt.Errorf("failed to check session state: %w", err)
 		}
