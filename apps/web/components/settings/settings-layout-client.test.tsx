@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let pathname = "/settings/integrations/github";
+const COPY_CONFIG_TEST_ID = "mock-copy-config";
 
 const state = {
   workspaces: {
@@ -35,13 +36,9 @@ vi.mock("@kandev/ui/tooltip", () => ({
   TooltipProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
-vi.mock("@/components/task/workspace-switcher", () => ({
-  WorkspaceSwitcher: () => <div data-testid="mock-workspace-switcher" />,
-}));
-
 vi.mock("@/components/integrations/integration-copy-config-menu", () => ({
   IntegrationCopyConfigMenu: ({ sourceWorkspaceId }: { sourceWorkspaceId: string }) => (
-    <div data-testid="mock-copy-config" data-source-workspace-id={sourceWorkspaceId} />
+    <div data-testid={COPY_CONFIG_TEST_ID} data-source-workspace-id={sourceWorkspaceId} />
   ),
 }));
 
@@ -64,8 +61,7 @@ describe("SettingsLayoutClient integrations actions", () => {
     );
 
     expect(screen.queryByTestId("integration-workspace-switcher")).toBeNull();
-    expect(screen.queryByTestId("mock-workspace-switcher")).toBeNull();
-    expect(screen.getByTestId("mock-copy-config").dataset.sourceWorkspaceId).toBe("ws-1");
+    expect(screen.getByTestId(COPY_CONFIG_TEST_ID).dataset.sourceWorkspaceId).toBe("ws-1");
   });
 
   it("shows copy config on workspace-scoped integration pages", () => {
@@ -77,7 +73,7 @@ describe("SettingsLayoutClient integrations actions", () => {
       </SettingsLayoutClient>,
     );
 
-    expect(screen.getByTestId("mock-copy-config").dataset.sourceWorkspaceId).toBe("ws-1");
+    expect(screen.getByTestId(COPY_CONFIG_TEST_ID).dataset.sourceWorkspaceId).toBe("ws-1");
   });
 
   it("uses the workspace from scoped integration routes before store hydration catches up", () => {
@@ -90,6 +86,19 @@ describe("SettingsLayoutClient integrations actions", () => {
       </SettingsLayoutClient>,
     );
 
-    expect(screen.getByTestId("mock-copy-config").dataset.sourceWorkspaceId).toBe("ws-2");
+    expect(screen.getByTestId(COPY_CONFIG_TEST_ID).dataset.sourceWorkspaceId).toBe("ws-2");
+  });
+
+  it("falls back to the active workspace when a scoped route has invalid encoding", () => {
+    pathname = "/settings/workspace/%E0%A4%A/integrations/github";
+    state.workspaces.activeId = "ws-1";
+
+    render(
+      <SettingsLayoutClient>
+        <div>Settings page</div>
+      </SettingsLayoutClient>,
+    );
+
+    expect(screen.getByTestId(COPY_CONFIG_TEST_ID).dataset.sourceWorkspaceId).toBe("ws-1");
   });
 });

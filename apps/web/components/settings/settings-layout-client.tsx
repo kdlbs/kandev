@@ -133,7 +133,16 @@ function IntegrationCopyConfigAction() {
 
 function workspaceIdFromPathname(pathname: string): string | null {
   const match = pathname.match(/^\/settings\/workspace\/([^/]+)(?:\/|$)/);
-  return match?.[1] ? decodeURIComponent(match[1]) : null;
+  return safeDecodePathSegment(match?.[1]);
+}
+
+function safeDecodePathSegment(segment: string | undefined): string | null {
+  if (!segment) return null;
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
 }
 
 function SettingsShell({

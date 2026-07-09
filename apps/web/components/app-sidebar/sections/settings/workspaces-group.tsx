@@ -125,7 +125,7 @@ export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGrou
                     label={label}
                     icon={icon}
                     isActive={pathname === href}
-                    depth={2}
+                    depth={3}
                   />
                 );
               })}

@@ -22,8 +22,8 @@ type SettingsLeafProps = {
   depth?: number;
 };
 
-const LEAF_DEPTH_PADDING = ["px-2.5", "pl-7 pr-2.5", "pl-10 pr-2.5"] as const;
-const GROUP_DEPTH_PADDING = ["pl-2.5 pr-1", "pl-7 pr-1", "pl-10 pr-1"] as const;
+const LEAF_DEPTH_PADDING = ["px-2.5", "pl-7 pr-2.5", "pl-10 pr-2.5", "pl-[52px] pr-2.5"] as const;
+const GROUP_DEPTH_PADDING = ["pl-2.5 pr-1", "pl-7 pr-1", "pl-10 pr-1", "pl-[52px] pr-1"] as const;
 const NAV_FOCUS_CLASS =
   "outline-none focus-visible:ring-1 focus-visible:ring-primary/50 focus-visible:ring-offset-1";
 

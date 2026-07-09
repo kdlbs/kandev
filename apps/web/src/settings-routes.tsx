@@ -275,10 +275,10 @@ function renderWorkspaceSettingsRoute(pathname: string) {
     /^\/settings\/workspace\/([^/]+)\/integrations(?:\/([^/]+))?$/,
   );
   if (workspaceIntegration?.[1]) {
-    return renderIntegrationSettingsRoute(
-      workspaceIntegration[2] ? decodeURIComponent(workspaceIntegration[2]) : null,
-      decodeURIComponent(workspaceIntegration[1]),
-    );
+    const workspaceId = safeDecodePathSegment(workspaceIntegration[1]);
+    const section = workspaceIntegration[2] ? safeDecodePathSegment(workspaceIntegration[2]) : null;
+    if (!workspaceId || (workspaceIntegration[2] && !section)) return null;
+    return renderIntegrationSettingsRoute(section, workspaceId);
   }
 
   const workspaceAutomation = matchDouble(
@@ -551,13 +551,24 @@ function SettingsRouteFallback({ pathname }: { pathname: string }) {
 
 function matchSingle(pathname: string, pattern: RegExp): string | null {
   const match = pathname.match(pattern);
-  return match?.[1] ? decodeURIComponent(match[1]) : null;
+  return safeDecodePathSegment(match?.[1]);
 }
 
 function matchDouble(pathname: string, pattern: RegExp): [string, string] | null {
   const match = pathname.match(pattern);
   if (!match?.[1] || !match[2]) return null;
-  return [decodeURIComponent(match[1]), decodeURIComponent(match[2])];
+  const first = safeDecodePathSegment(match[1]);
+  const second = safeDecodePathSegment(match[2]);
+  return first && second ? [first, second] : null;
+}
+
+function safeDecodePathSegment(segment: string | undefined): string | null {
+  if (!segment) return null;
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
 }
 
 function normalizeSettingsPath(pathname: string): string {
