@@ -24,9 +24,14 @@ async function seedMobileTaskWithPlan(testPage: Page, apiClient: ApiClient, seed
   await session.waitForLoad();
   await expect.poll(() => apiClient.getTaskPlan(task.id), { timeout: 30_000 }).not.toBeNull();
   await session.waitForChatIdle({ timeout: 45_000 });
+  await openMobilePlanPanel(testPage, session);
+  return { taskId: task.id, sessionId: task.session_id!, session };
+}
+
+async function openMobilePlanPanel(testPage: Page, session: SessionPage) {
+  await session.togglePlanMode();
   await testPage.getByRole("button", { name: "Plan" }).tap();
   await expect(session.planPanel).toBeVisible({ timeout: 10_000 });
-  return { taskId: task.id, sessionId: task.session_id!, session };
 }
 
 test.describe("mobile: Plan toolbar implement", () => {
@@ -70,8 +75,7 @@ test.describe("mobile: Plan toolbar implement", () => {
 
     await testPage.reload();
     await session.waitForLoad();
-    await testPage.getByRole("button", { name: "Plan" }).tap();
-    await expect(session.planPanel).toBeVisible({ timeout: 10_000 });
+    await openMobilePlanPanel(testPage, session);
     await expect(testPage.getByTestId("plan-toolbar-implement-button")).not.toBeVisible({
       timeout: 10_000,
     });

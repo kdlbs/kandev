@@ -24,6 +24,7 @@ var (
 	ErrRevisionNotFound     = errors.New("task plan revision not found")
 	ErrRevisionIDRequired   = errors.New("target_revision_id is required")
 	ErrRevisionTaskMismatch = errors.New("revision does not belong to given task")
+	ErrSessionTaskMismatch  = errors.New("session does not belong to given task")
 )
 
 const (
@@ -43,6 +44,7 @@ type planRepo interface {
 	repository.PlanRepository
 	GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
 	GetTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
+	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
 }
 
 // PlanService provides task plan business logic.
@@ -216,6 +218,9 @@ func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest) (*m
 	if err != nil {
 		return nil, err
 	}
+	if saved == nil {
+		return nil, ErrTaskPlanNotFound
+	}
 	s.publishPlanEvent(ctx, eventType, saved)
 	s.publishRevisionEvent(ctx, rev, coalesce)
 	return saved, nil
@@ -319,6 +324,13 @@ func (s *PlanService) MarkImplementationStarted(ctx context.Context, req MarkImp
 	}
 	if req.SessionID == "" {
 		return nil, ErrSessionIDRequired
+	}
+	session, err := s.repo.GetTaskSession(ctx, req.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if session == nil || session.TaskID != req.TaskID {
+		return nil, ErrSessionTaskMismatch
 	}
 	actor := req.Actor
 	if actor == "" {
@@ -439,6 +451,9 @@ func (s *PlanService) RevertPlan(ctx context.Context, req RevertPlanRequest) (*m
 	saved, err := s.repo.GetTaskPlan(ctx, req.TaskID)
 	if err != nil {
 		return nil, err
+	}
+	if saved == nil {
+		return nil, ErrTaskPlanNotFound
 	}
 	s.publishPlanEvent(ctx, events.TaskPlanUpdated, saved)
 	s.publishRevisionEvent(ctx, rev, false)

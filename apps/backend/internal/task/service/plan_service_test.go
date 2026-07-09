@@ -36,6 +36,13 @@ func seedTask(t *testing.T, ctx context.Context, repo *sqliterepo.Repository, ta
 	})
 }
 
+func seedSession(t *testing.T, ctx context.Context, repo *sqliterepo.Repository, taskID, sessionID string) {
+	t.Helper()
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: sessionID, TaskID: taskID}); err != nil {
+		t.Fatalf("CreateTaskSession(%s): %v", sessionID, err)
+	}
+}
+
 func createTestPlanService(t *testing.T) (*PlanService, *MockEventBus, *sqliterepo.Repository) {
 	t.Helper()
 	_, eventBus, repo := createTestService(t)
@@ -166,6 +173,8 @@ func TestPlanService_MarkImplementationStartedIsDurableAndIdempotent(t *testing.
 	svc, _, repo := createTestPlanService(t)
 	ctx := context.Background()
 	seedTask(t, ctx, repo, "task-impl")
+	seedSession(t, ctx, repo, "task-impl", "session-1")
+	seedSession(t, ctx, repo, "task-impl", "session-2")
 
 	_, err := svc.CreatePlan(ctx, CreatePlanRequest{
 		TaskID:    "task-impl",
@@ -210,6 +219,9 @@ func TestPlanService_MarkImplementationStartedIsDurableAndIdempotent(t *testing.
 	if idempotent.ImplementationStartedSessionID == nil || *idempotent.ImplementationStartedSessionID != "session-1" {
 		t.Fatalf("expected idempotent session marker session-1, got %v", idempotent.ImplementationStartedSessionID)
 	}
+	if idempotent.ImplementationStartedBy == nil || *idempotent.ImplementationStartedBy != "user" {
+		t.Fatalf("expected idempotent actor marker user, got %v", idempotent.ImplementationStartedBy)
+	}
 
 	updated, err := svc.UpdatePlan(ctx, UpdatePlanRequest{
 		TaskID:    "task-impl",
@@ -221,6 +233,32 @@ func TestPlanService_MarkImplementationStartedIsDurableAndIdempotent(t *testing.
 	}
 	if updated.ImplementationStartedAt == nil || !updated.ImplementationStartedAt.Equal(firstStartedAt) {
 		t.Fatalf("expected update to preserve implementation marker, got %v", updated.ImplementationStartedAt)
+	}
+}
+
+func TestPlanService_MarkImplementationStartedRejectsCrossTaskSession(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-impl")
+	seedTask(t, ctx, repo, "task-other")
+	seedSession(t, ctx, repo, "task-other", "session-other")
+
+	_, err := svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID:  "task-impl",
+		Title:   "Plan",
+		Content: "Ship the toolbar",
+	})
+	if err != nil {
+		t.Fatalf("CreatePlan failed: %v", err)
+	}
+
+	_, err = svc.MarkImplementationStarted(ctx, MarkImplementationStartedRequest{
+		TaskID:    "task-impl",
+		SessionID: "session-other",
+		Actor:     "user",
+	})
+	if err != ErrSessionTaskMismatch {
+		t.Fatalf("expected ErrSessionTaskMismatch, got %v", err)
 	}
 }
 

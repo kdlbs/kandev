@@ -22,6 +22,22 @@ async function setupFreshSession(newSessionId: string): Promise<void> {
   }
 }
 
+async function markFreshPlanImplementationStarted(
+  taskId: string,
+  newSessionId: string,
+  setTaskPlan: (
+    taskId: string,
+    plan: Awaited<ReturnType<typeof markPlanImplementationStarted>>,
+  ) => void,
+): Promise<void> {
+  try {
+    const markedPlan = await markPlanImplementationStarted(taskId, newSessionId);
+    setTaskPlan(taskId, markedPlan);
+  } catch (err) {
+    console.error("Failed to mark plan implementation started:", err);
+  }
+}
+
 /**
  * Launches a brand-new agent session that starts implementing the task plan
  * from a clean context window. Inherits agent + executor from the planning
@@ -75,8 +91,7 @@ export function useImplementFresh(
       if (!newSessionId) return false;
 
       await setupFreshSession(newSessionId);
-      const markedPlan = await markPlanImplementationStarted(taskId, newSessionId);
-      setTaskPlan(taskId, markedPlan);
+      await markFreshPlanImplementationStarted(taskId, newSessionId, setTaskPlan);
       setActiveSession(taskId, newSessionId);
 
       // Clear composer + draft only when a fresh session was actually created.

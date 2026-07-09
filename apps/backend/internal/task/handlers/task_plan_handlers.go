@@ -156,6 +156,8 @@ func (h *TaskHandlers) wsMarkTaskPlanImplementationStarted(ctx context.Context, 
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 		case errors.Is(err, service.ErrSessionIDRequired):
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+		case errors.Is(err, service.ErrSessionTaskMismatch):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Session does not belong to task", nil)
 		case errors.Is(err, service.ErrTaskPlanNotFound):
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task plan not found", nil)
 		}

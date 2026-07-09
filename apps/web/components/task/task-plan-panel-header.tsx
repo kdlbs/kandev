@@ -5,7 +5,10 @@ import { PanelHeaderBarSplit } from "./panel-primitives";
 import { TaskPlanRevisions } from "./task-plan-revisions";
 import { shouldShowPlanToolbarImplement } from "./task-plan-implement";
 import { ImplementPlanButton } from "./chat/implement-plan-button";
-import { useImplementPlanRunner } from "@/hooks/domains/kanban/use-plan-actions";
+import {
+  useDirectDisablePlanMode,
+  useImplementPlanRunner,
+} from "@/hooks/domains/kanban/use-plan-actions";
 import type { TaskPlan, TaskPlanRevision } from "@/lib/types/http";
 
 type PlanPanelHeaderProps = {
@@ -52,9 +55,17 @@ export function PlanPanelHeader({
   clearComparePair,
 }: PlanPanelHeaderProps) {
   const [isImplementing, setIsImplementing] = useState(false);
+  const disablePlanMode = useDirectDisablePlanMode(activeSessionId);
+  const handlePlanModeChange = useCallback(
+    (enabled: boolean) => {
+      if (!enabled) disablePlanMode();
+    },
+    [disablePlanMode],
+  );
   const implementPlan = useImplementPlanRunner({
     resolvedSessionId: activeSessionId,
     taskId,
+    handlePlanModeChange,
   });
   const showImplement = shouldShowPlanToolbarImplement({ draftContent, plan });
   const implementDisabled = isSaving || isImplementing || isAgentBusy || !activeSessionId;

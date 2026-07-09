@@ -130,6 +130,22 @@ export function collectImplementPlanInput(
   };
 }
 
+async function markPlanImplementationStartedBestEffort(
+  taskId: string,
+  sessionId: string,
+  setTaskPlan: (
+    taskId: string,
+    plan: Awaited<ReturnType<typeof markPlanImplementationStarted>>,
+  ) => void,
+) {
+  try {
+    const markedPlan = await markPlanImplementationStarted(taskId, sessionId);
+    setTaskPlan(taskId, markedPlan);
+  } catch (err) {
+    console.error("Failed to mark plan implementation started:", err);
+  }
+}
+
 function useImplementPlan(
   resolvedSessionId: string | null,
   taskId: string | null,
@@ -164,8 +180,7 @@ function useImplementPlan(
         },
         attachments.length > 0 ? 30000 : 10000,
       );
-      const markedPlan = await markPlanImplementationStarted(taskId, resolvedSessionId);
-      setTaskPlan(taskId, markedPlan);
+      await markPlanImplementationStartedBestEffort(taskId, resolvedSessionId, setTaskPlan);
       // Exit plan mode + clear composer only on success so a failed send
       // leaves the layout and input intact for retry.
       handlePlanModeChange?.(false);
@@ -175,16 +190,12 @@ function useImplementPlan(
       // mid-implementation cannot re-hydrate plan mode from the server.
       // Run as a separate request with its own catch so a set_plan_mode
       // failure doesn't masquerade as a message send failure.
-      if (handlePlanModeChange) {
-        client
-          .request("session.set_plan_mode", { session_id: resolvedSessionId, enabled: false }, 5000)
-          .catch((err: unknown) =>
-            console.error("Failed to clear plan mode after implement:", err),
-          );
-      }
+      client
+        .request("session.set_plan_mode", { session_id: resolvedSessionId, enabled: false }, 5000)
+        .catch((err: unknown) => console.error("Failed to clear plan mode after implement:", err));
       return true;
     } catch (err) {
-      console.error("Failed to send implement plan message:", err);
+      console.error("Failed to start implementation:", err);
       toast({ description: "Failed to start implementing the plan", variant: "error" });
       return false;
     }
@@ -192,7 +203,7 @@ function useImplementPlan(
 }
 
 /** Directly disable plan mode state + layout, bypassing the MCP availability guard. */
-function useDirectDisablePlanMode(resolvedSessionId: string | null) {
+export function useDirectDisablePlanMode(resolvedSessionId: string | null) {
   const setPlanMode = useAppStore((s) => s.setPlanMode);
   const setActiveDocument = useAppStore((s) => s.setActiveDocument);
   const closeDocument = useLayoutStore((s) => s.closeDocument);

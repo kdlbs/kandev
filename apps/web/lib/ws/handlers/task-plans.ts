@@ -56,6 +56,7 @@ function handleRevisionPush(store: StoreApi<AppState>, message: RevisionMessage)
     author_kind: p.author_kind,
     author_name: p.author_name,
     revert_of_revision_id: p.revert_of_revision_id ?? null,
+    coalesced: p.coalesced,
     created_at: p.created_at,
     updated_at: p.updated_at,
   };

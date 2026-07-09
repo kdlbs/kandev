@@ -35,18 +35,20 @@ export function ImplementPlanButton({ onClick, disabled, testIds }: ImplementPla
   const primary = (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          data-testid={ids.button}
-          disabled={disabled}
-          className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 text-violet-400 rounded-r-none pr-1.5"
-          onClick={() => onClick(false)}
-        >
-          <IconRocket className="h-4 w-4" />
-          <span className="text-xs">Implement</span>
-        </Button>
+        <span className="inline-flex">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            data-testid={ids.button}
+            disabled={disabled}
+            className={`h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 text-violet-400 rounded-r-none pr-1.5 ${disabled ? "pointer-events-none" : ""}`}
+            onClick={() => onClick(false)}
+          >
+            <IconRocket className="h-4 w-4" />
+            <span className="text-xs">Implement</span>
+          </Button>
+        </span>
       </TooltipTrigger>
       <TooltipContent>Implement the plan in this session</TooltipContent>
     </Tooltip>

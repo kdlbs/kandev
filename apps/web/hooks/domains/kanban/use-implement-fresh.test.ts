@@ -201,6 +201,21 @@ describe("useImplementFresh", () => {
     expect(mockMarkPlanImplementationStarted).toHaveBeenCalledWith(TASK_ID, SESS_FRESH);
     expect(mockSetTaskPlan).toHaveBeenCalledWith(TASK_ID, markedPlan);
   });
+
+  it("continues focusing and clearing when the marker write fails after launch", async () => {
+    mockMarkPlanImplementationStarted.mockRejectedValueOnce(new Error("marker offline"));
+    const { ref, clear } = makeChatRef({ value: "implement" });
+    const { result } = renderHook(() => useImplementFresh(SESS_PLAN, TASK_ID, ref));
+
+    await act(async () => {
+      await result.current();
+    });
+
+    expect(mockSetActiveSession).toHaveBeenCalledWith(TASK_ID, SESS_FRESH);
+    expect(clear).toHaveBeenCalledTimes(1);
+    expect(mockSetChatDraftContent).toHaveBeenCalledWith(SESS_PLAN, null);
+    expect(mockToast).not.toHaveBeenCalled();
+  });
 });
 
 describe("useImplementFresh post-launch side effects", () => {

@@ -304,6 +304,7 @@ export type TaskPlanRevision = {
   author_kind: "agent" | "user";
   author_name: string;
   revert_of_revision_id?: string | null;
+  coalesced?: boolean;
   created_at: string;
   updated_at: string;
 };
