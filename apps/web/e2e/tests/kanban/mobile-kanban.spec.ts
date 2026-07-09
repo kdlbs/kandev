@@ -88,6 +88,30 @@ test.describe("Mobile kanban view", () => {
     await expect(testPage.getByText("Display Options")).toBeVisible();
   });
 
+  test("switches workspaces from the mobile menu", async ({ testPage, apiClient }) => {
+    const otherWorkspace = await apiClient.createWorkspace("Mobile Alternate Workspace");
+    await apiClient.createWorkflow(otherWorkspace.id, "Mobile Alternate Workflow", "simple");
+
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+
+    await mobile.mobileMenuButton.click();
+    const dialog = testPage.getByRole("dialog", { name: "Menu" });
+    await expect(dialog.getByText("Workspace", { exact: true })).toBeVisible();
+    await expect(testPage.getByTestId("mobile-workspace-trigger")).toContainText("E2E Workspace");
+
+    await testPage.getByTestId("mobile-workspace-trigger").click();
+    await testPage.getByTestId(`mobile-workspace-item-${otherWorkspace.id}`).click();
+
+    await expect(testPage).toHaveURL(new RegExp(`[?&]workspaceId=${otherWorkspace.id}(?:&|$)`));
+    await expect(dialog).not.toBeVisible();
+
+    await mobile.mobileMenuButton.click();
+    await expect(testPage.getByTestId("mobile-workspace-trigger")).toContainText(
+      "Mobile Alternate Workspace",
+    );
+  });
+
   test("mobile menu exposes settings navigation", async ({ testPage }) => {
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();

@@ -15,6 +15,7 @@ import {
   IconSettings,
   IconTimeline,
 } from "@tabler/icons-react";
+import { AppSidebarWorkspacePicker } from "@/components/app-sidebar/app-sidebar-workspace-picker";
 import { TaskSearchInput } from "./task-search-input";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { linkToTasks } from "@/lib/links";
@@ -155,6 +156,23 @@ function MobileSearchSection({
         placeholder="Search tasks..."
         isLoading={isSearchLoading}
         className="w-full"
+      />
+    </div>
+  );
+}
+
+function MobileWorkspaceSection({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
+  return (
+    <div className="space-y-2">
+      <label className="text-sm font-medium">Workspace</label>
+      <AppSidebarWorkspacePicker
+        modal={false}
+        onActionComplete={() => onOpenChange(false)}
+        triggerClassName="h-11 w-full flex-none px-3 text-base"
+        triggerTestId="mobile-workspace-trigger"
+        chevronTestId="mobile-workspace-trigger-chevron"
+        itemTestIdPrefix="mobile-workspace-item"
+        contentClassName="w-80 max-w-[calc(100vw-2rem)]"
       />
     </div>
   );
@@ -310,6 +328,7 @@ export function MobileMenuSheet({
             onSearchChange={onSearchChange}
             isSearchLoading={isSearchLoading}
           />
+          <MobileWorkspaceSection onOpenChange={onOpenChange} />
           <MobileViewSection viewValue={viewValue} onViewChange={handleViewChange} />
 
           <MobileDisplayOptions
