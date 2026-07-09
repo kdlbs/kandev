@@ -180,7 +180,16 @@ export function resolvePRPanelTargetGroup(
   return isCenterCandidateGroupId(centerGroupId) ? centerGroupId : CENTER_GROUP;
 }
 
-/** Derive the auto-PR-panel decision inputs from one task's live PR list. */
+/**
+ * Derive the auto-PR-panel decision inputs from one task's live PR list.
+ *
+ * @param taskPRs - The task's associated PRs, in creation order; `undefined`
+ *   when the task has none loaded.
+ * @returns `hasPR` — whether the task has any linked PR; `defaultPRKey` —
+ *   the key of the primary/first PR (matches `PRDetailPanelComponent`'s
+ *   fallback when no explicit `prKey` param is set), or `undefined` when
+ *   there's no PR.
+ */
 function resolveAutoPRPanelState(taskPRs: TaskPR[] | undefined): {
   hasPR: boolean;
   defaultPRKey: string | undefined;
@@ -196,6 +205,19 @@ function resolveAutoPRPanelState(taskPRs: TaskPR[] | undefined): {
  * Pure effect logic for `useAutoPRPanel`: decides whether to add, remove,
  * or leave alone the auto-shown PR detail panel, and mutates the given
  * dockview `api` accordingly. Extracted for unit testing.
+ *
+ * @param api - The live dockview API to add/remove/update panels on.
+ * @param sessionId - The active session, used for the offered/dismissed
+ *   sessionStorage flag and to resolve the panel's target group.
+ * @param params.hasPR - Whether the active task has any linked PR.
+ * @param params.defaultPRKey - Key of the PR the legacy unkeyed
+ *   "pr-detail" panel should render (and stay resynced to).
+ * @param params.isRestoringLayout - Suppresses auto-add while a saved
+ *   layout is being restored.
+ * @param params.isMaximized - Suppresses auto-add while a group is
+ *   maximized.
+ * @param params.centerGroupId - Fallback group when no live session panel
+ *   can anchor the new PR panel.
  */
 export function runAutoPRPanelEffect(
   api: DockviewApi,

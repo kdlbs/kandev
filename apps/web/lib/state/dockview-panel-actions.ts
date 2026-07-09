@@ -459,6 +459,24 @@ export function buildExtraPanelActions(get: StoreGet) {
         opts?.quiet ?? false,
       );
     },
+    /**
+     * Opens the PR detail panel for a given key, or focuses the tab already
+     * showing that exact PR.
+     *
+     * @param prKey - `<owner>/<repo>/<pr_number>` identifying the PR to
+     *   show; `undefined` targets the legacy single-repo panel id
+     *   ("pr-detail").
+     * @param activeSessionId - Session to anchor the panel next to as a
+     *   tab; falls back to `centerGroupId` when omitted or when no matching
+     *   session panel exists.
+     *
+     * Reuses the legacy unkeyed "pr-detail" panel only when it's already
+     * showing this exact PR (tracked via its stamped `params.prKey` — see
+     * `runAutoPRPanelEffect` in dockview-session-tabs.ts, which keeps that
+     * key in sync with the task's current default PR). A different PR
+     * always gets its own `pr-detail|<prKey>` tab instead of overwriting
+     * the one already open.
+     */
     addPRPanel: (prKey?: string, activeSessionId?: string | null) => {
       const { api, centerGroupId } = get();
       if (!api) return;

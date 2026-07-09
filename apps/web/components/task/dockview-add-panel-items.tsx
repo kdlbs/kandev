@@ -9,7 +9,7 @@ import {
   IconGitPullRequest,
 } from "@tabler/icons-react";
 import { DropdownMenuItem } from "@kandev/ui/dropdown-menu";
-import { prPanelLabel } from "@/components/github/pr-utils";
+import { prPanelLabel, prIdentitySlug } from "@/components/github/pr-utils";
 import { prTaskKey } from "@/components/github/pr-detail-panel";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useAppStore } from "@/components/state-provider";
@@ -99,7 +99,7 @@ export function AddPanelMenuItems({
           key={pr.id}
           onClick={() => addPRPanel(prTaskKey(pr), activeSessionId)}
           className={MENU_ITEM_CLASS}
-          data-testid={`add-panel-pr-item-${pr.owner}-${pr.repo}-${pr.pr_number}`}
+          data-testid={`add-panel-pr-item-${prIdentitySlug(pr)}`}
         >
           <IconGitPullRequest className={MENU_ICON_CLASS} />
           {state.prs.length > 1
