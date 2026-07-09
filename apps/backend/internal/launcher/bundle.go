@@ -3,6 +3,7 @@ package launcher
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -96,11 +97,11 @@ func machoHasCodeSignature(path string) (signed bool, ok bool) {
 	defer f.Close()
 	data := make([]byte, maxScanBytes)
 	n, err := io.ReadFull(f, data)
-	if err != nil && n < machoHeaderSize64 {
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
 		return false, false
 	}
 	data = data[:n]
-	if err != nil || len(data) < machoHeaderSize64 {
+	if len(data) < machoHeaderSize64 {
 		return false, false
 	}
 	if binary.LittleEndian.Uint32(data[0:4]) != machoMagic64LE {
