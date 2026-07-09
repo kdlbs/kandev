@@ -307,12 +307,16 @@ function PerWorkspaceSection({ workspaceId }: { workspaceId: string }) {
   );
 }
 
-export function GitHubIntegrationPage() {
+type GitHubIntegrationPageProps = {
+  workspaceId?: string;
+};
+
+export function GitHubIntegrationPage({ workspaceId }: GitHubIntegrationPageProps = {}) {
   return (
     <TooltipProvider>
       <div className="space-y-8">
         <GitHubConnectionSection />
-        <WorkspaceScopedSection>
+        <WorkspaceScopedSection workspaceId={workspaceId}>
           {(ws) => <PerWorkspaceSection key={ws} workspaceId={ws} />}
         </WorkspaceScopedSection>
       </div>

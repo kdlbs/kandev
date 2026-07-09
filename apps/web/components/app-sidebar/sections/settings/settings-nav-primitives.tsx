@@ -3,7 +3,7 @@
 import Link from "@/components/routing/app-link";
 import { IconChevronRight } from "@tabler/icons-react";
 import type { Icon as TablerIcon } from "@tabler/icons-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Collapsible, CollapsibleContent } from "@kandev/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { SIDEBAR_ITEM_ACTIVE, SIDEBAR_ITEM_INACTIVE } from "../../app-sidebar-constants";
@@ -93,6 +93,11 @@ export function SettingsGroup({
   const isControlled = controlledExpanded !== undefined;
   const expanded = isControlled ? controlledExpanded : internalExpanded;
   const paddingClass = GROUP_DEPTH_PADDING[clampDepth(depth, GROUP_DEPTH_PADDING.length - 1)];
+
+  useEffect(() => {
+    if (!isControlled) setInternalExpanded(defaultExpanded);
+  }, [defaultExpanded, isControlled]);
+
   const toggle = () => {
     if (isControlled) onToggle?.();
     else setInternalExpanded((v) => !v);

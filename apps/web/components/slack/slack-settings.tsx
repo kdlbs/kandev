@@ -603,10 +603,14 @@ export function SlackConnectionSection({ workspaceId }: { workspaceId: string })
   );
 }
 
-export function SlackIntegrationPage() {
+type SlackIntegrationPageProps = {
+  workspaceId?: string;
+};
+
+export function SlackIntegrationPage({ workspaceId }: SlackIntegrationPageProps = {}) {
   return (
     <div className="space-y-8">
-      <WorkspaceScopedSection>
+      <WorkspaceScopedSection workspaceId={workspaceId}>
         {(workspaceId) => <SlackConnectionSection key={workspaceId} workspaceId={workspaceId} />}
       </WorkspaceScopedSection>
     </div>

@@ -167,3 +167,29 @@ describe("SettingsTree rendering", () => {
     expect(screen.queryByRole("link", { name: "Appearance" })).toBeNull();
   });
 });
+
+describe("WorkspacesGroup integration route sync", () => {
+  beforeEach(() => {
+    state.workspaces.activeId = MAIN_WORKSPACE_ID;
+    state.workspaces.items = [
+      { id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME },
+      { id: ARCHIVE_WORKSPACE_ID, name: ARCHIVE_WORKSPACE_NAME },
+    ];
+  });
+
+  afterEach(() => cleanup());
+
+  it("opens workspace integrations after navigating into an integration route", async () => {
+    const { rerender } = render(
+      <WorkspacesGroup pathname="/settings/workspace/ws-10/repositories" expanded />,
+    );
+
+    expect(screen.queryByRole("link", { name: "GitHub" })).toBeNull();
+
+    rerender(<WorkspacesGroup pathname="/settings/workspace/ws-10/integrations/github" expanded />);
+
+    expect((await screen.findByRole("link", { name: "GitHub" })).getAttribute("href")).toBe(
+      "/settings/workspace/ws-10/integrations/github",
+    );
+  });
+});

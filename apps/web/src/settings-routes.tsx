@@ -321,17 +321,17 @@ function renderIntegrationSettingsRoute(section: string | null, workspaceId?: st
     case null:
       return <IntegrationsIndexPage workspaceId={workspaceId} />;
     case "github":
-      return <GitHubIntegrationPage />;
+      return <GitHubIntegrationPage workspaceId={workspaceId} />;
     case "gitlab":
       return <IntegrationsGitLabPage />;
     case "jira":
-      return <IntegrationsJiraPage />;
+      return <IntegrationsJiraPage workspaceId={workspaceId} />;
     case "linear":
-      return <IntegrationsLinearPage />;
+      return <IntegrationsLinearPage workspaceId={workspaceId} />;
     case "sentry":
-      return <IntegrationsSentryPage />;
+      return <IntegrationsSentryPage workspaceId={workspaceId} />;
     case "slack":
-      return <IntegrationsSlackPage />;
+      return <IntegrationsSlackPage workspaceId={workspaceId} />;
     default:
       return null;
   }
