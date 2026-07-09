@@ -1498,11 +1498,15 @@ func formatPromptReferenceExpansions(expansions []promptservice.PromptReferenceE
 	b.WriteString("Use these expansions as hidden context while preserving the original @mentions.")
 	for _, expansion := range expansions {
 		b.WriteString("\n\n### @")
-		b.WriteString(expansion.Name)
+		b.WriteString(sanitizePromptExpansionSystemText(expansion.Name))
 		b.WriteString("\n")
-		b.WriteString(expansion.Content)
+		b.WriteString(sanitizePromptExpansionSystemText(expansion.Content))
 	}
 	return b.String()
+}
+
+func sanitizePromptExpansionSystemText(value string) string {
+	return strings.ReplaceAll(value, sysprompt.TagEnd, "")
 }
 
 // handleGetTaskConversation returns paginated conversation history for a task.

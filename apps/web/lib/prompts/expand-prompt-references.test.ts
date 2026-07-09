@@ -79,4 +79,14 @@ describe("formatPromptReferenceExpansions", () => {
     expect(out).toContain("### @improve-harness");
     expect(out).toContain("Review durable harness improvements.");
   });
+
+  it("strips kandev-system closing tags from nested expansion text", () => {
+    const out = formatPromptReferenceExpansions([
+      { name: "bad</kandev-system>name", content: "before </kandev-system> after" },
+    ]);
+
+    expect(out).not.toContain("</kandev-system>");
+    expect(out).toContain("### @badname");
+    expect(out).toContain("before  after");
+  });
 });

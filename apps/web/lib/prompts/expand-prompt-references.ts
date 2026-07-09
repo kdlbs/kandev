@@ -10,6 +10,7 @@ export type PromptReferenceExpansion = {
 };
 
 const MAX_PROMPT_REFERENCE_DEPTH = 8;
+const KANDEV_SYSTEM_TAG_END = "</kandev-system>";
 
 function isWhitespace(value: string) {
   return value === " " || value === "\n" || value === "\t" || value === "\r";
@@ -108,6 +109,13 @@ export function formatPromptReferenceExpansions(expansions: PromptReferenceExpan
   if (expansions.length === 0) return "";
   return [
     "EXPANDED PROMPT REFERENCES: The message above references saved prompts by @name. Use these expansions as hidden context while preserving the original @mentions.",
-    ...expansions.map((expansion) => `### @${expansion.name}\n${expansion.content}`),
+    ...expansions.map(
+      (expansion) =>
+        `### @${stripKandevSystemTagEnd(expansion.name)}\n${stripKandevSystemTagEnd(expansion.content)}`,
+    ),
   ].join("\n\n");
+}
+
+function stripKandevSystemTagEnd(value: string) {
+  return value.replaceAll(KANDEV_SYSTEM_TAG_END, "");
 }

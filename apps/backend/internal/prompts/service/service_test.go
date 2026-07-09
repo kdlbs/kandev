@@ -198,6 +198,18 @@ func TestService_ResolvePromptReferencesRecursive(t *testing.T) {
 	}
 }
 
+func TestService_ResolvePromptReferencesSkipsListWithoutAtMention(t *testing.T) {
+	svc := NewService(panicListPromptsRepo{})
+
+	got, err := svc.ResolvePromptReferences(context.Background(), "plain text")
+	if err != nil {
+		t.Fatalf("resolve references: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("got %#v, want empty expansions", got)
+	}
+}
+
 func TestService_ResolvePromptReferencesSkipsUnknownInlineAndCycles(t *testing.T) {
 	svc, cleanup := createService(t)
 	defer cleanup()
@@ -263,6 +275,14 @@ type raceRepo struct {
 	promptstore.Repository
 	createErr error
 	updateErr error
+}
+
+type panicListPromptsRepo struct {
+	promptstore.Repository
+}
+
+func (panicListPromptsRepo) ListPrompts(context.Context) ([]*models.Prompt, error) {
+	panic("ListPrompts should not be called")
 }
 
 func (r *raceRepo) GetPromptByID(_ context.Context, id string) (*models.Prompt, error) {

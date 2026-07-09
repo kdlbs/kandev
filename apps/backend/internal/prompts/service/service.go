@@ -136,6 +136,9 @@ func (s *Service) ResolvePromptContent(ctx context.Context, name, fallback strin
 }
 
 func (s *Service) ResolvePromptReferences(ctx context.Context, content string) ([]PromptReferenceExpansion, error) {
+	if !strings.Contains(content, "@") {
+		return nil, nil
+	}
 	prompts, err := s.repo.ListPrompts(ctx)
 	if err != nil {
 		return nil, err
