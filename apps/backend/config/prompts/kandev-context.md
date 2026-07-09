@@ -14,7 +14,7 @@ Available tools:
 - list_workspaces_kandev: List all workspaces.
 - list_workflows_kandev: List workflows in a workspace. Required params: workspace_id.
 - list_tasks_kandev: List tasks in a workflow. Required params: workflow_id.
-- create_task_kandev: Create a new task or subtask. Required params: title. For subtasks, set parent_id to the literal string "self" (the MCP server expands it to your current task ID) and omit workspace_id/workflow_id; they inherit from the parent. For top-level tasks, provide workspace_id/workflow_id unless each can be auto-resolved uniquely. workflow_step_id is optional.
+- create_task_kandev: Create a new task or subtask. Required params: title. For subtasks, set parent_id to the literal string "self" (the MCP server expands it to your current task ID) and omit workspace_id/workflow_id/workflow_step_id; they inherit from the parent. For top-level tasks, provide workspace_id/workflow_id unless each can be auto-resolved uniquely. workflow_step_id is optional.
 - update_task_kandev: Update a task. Required params: task_id.
 
 IMPORTANT: You MUST use these MCP tools when instructed to create plans, ask questions, or interact with the Kandev platform. Do not skip them.

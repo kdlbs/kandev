@@ -561,7 +561,7 @@ IMPORTANT:
 			mcp.WithString("parent_id", mcp.Description(parentDesc)),
 			mcp.WithString("workspace_id", mcp.Description("The workspace ID. Auto-resolved if only one workspace exists. Inherited from parent for subtasks.")),
 			mcp.WithString("workflow_id", mcp.Description("The workflow ID. Auto-resolved if the workspace has only one workflow. Inherited from parent for subtasks.")),
-			mcp.WithString("workflow_step_id", mcp.Description("The workflow step ID (optional, auto-resolved if omitted)")),
+			mcp.WithString("workflow_step_id", mcp.Description("The workflow step ID (optional, auto-resolved if omitted; ignored for subtasks)")),
 			mcp.WithString("title", mcp.Required(), mcp.Description("The task title")),
 			mcp.WithString("description", mcp.Description("The initial prompt for the sub-agent. This is the ONLY context the agent receives when it starts — treat it as the agent's first user message. REQUIRED for subtasks: without a description the sub-agent starts with no context and cannot do useful work. Be specific and detailed.")),
 			mcp.WithString("agent_profile_id", mcp.Description(agentProfileDesc)),

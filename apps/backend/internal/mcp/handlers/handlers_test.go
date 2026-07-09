@@ -1552,6 +1552,7 @@ func TestHandleCreateTask_SubtaskIgnoresExplicitWorkspaceAndWorkflow(t *testing.
 		"parent_id":        parentID,
 		"workspace_id":     "ws-2",
 		"workflow_id":      "wf-2",
+		"workflow_step_id": "step-wrong-board",
 		"agent_profile_id": "profile-1",
 		"start_agent":      false,
 	})
@@ -1569,6 +1570,7 @@ func TestHandleCreateTask_SubtaskIgnoresExplicitWorkspaceAndWorkflow(t *testing.
 	require.NoError(t, err)
 	assert.Equal(t, "ws-1", subtask.WorkspaceID, "subtask workspace must come from parent")
 	assert.Equal(t, "wf-1", subtask.WorkflowID, "subtask workflow must come from parent")
+	assert.Empty(t, subtask.WorkflowStepID, "subtask workflow step must not come from caller-supplied workflow")
 }
 
 func TestResolveTaskRepositories_ParentWithExplicitRepos_OverridesRepoButInheritsWorkspace(t *testing.T) {

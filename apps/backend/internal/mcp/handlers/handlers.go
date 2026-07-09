@@ -449,6 +449,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.ParentID != "" {
 		req.WorkspaceID = resolved.WorkspaceID
 		req.WorkflowID = resolved.WorkflowID
+		req.WorkflowStepID = ""
 	} else {
 		if req.WorkspaceID == "" {
 			req.WorkspaceID = resolved.WorkspaceID
