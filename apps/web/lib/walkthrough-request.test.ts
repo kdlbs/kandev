@@ -5,12 +5,16 @@ import {
 } from "./walkthrough-request";
 
 describe("buildChangesWalkthroughPrompt", () => {
-  it("injects the changed file list into the configured prompt template", () => {
+  it("sends the saved prompt reference visibly and hides the expanded prompt content", () => {
     const prompt = buildChangesWalkthroughPrompt("CUSTOM_PROMPT\n{{changed_files}}", [
       { path: "src/app.ts", source: "uncommitted" },
       { path: "src/review.ts", repository_name: "web", source: "pr" },
     ]);
 
+    expect(prompt).toMatch(/^@changes-walkthrough\n\nChanged files:/);
+    expect(prompt).toContain("<kandev-system>");
+    expect(prompt).toContain("EXPANDED PROMPT REFERENCES");
+    expect(prompt).toContain("### @changes-walkthrough");
     expect(prompt).toContain("CUSTOM_PROMPT");
     expect(prompt).toContain("- src/app.ts [uncommitted]");
     expect(prompt).toContain("- web:src/review.ts [pr]");
@@ -28,13 +32,13 @@ describe("buildChangesWalkthroughPrompt", () => {
     expect(prompt).toContain("5 more file(s) omitted");
   });
 
-  it("appends the changed file list when a customized prompt omits the placeholder", () => {
+  it("keeps the changed file list visible when a customized prompt omits the placeholder", () => {
     const prompt = buildChangesWalkthroughPrompt("CUSTOM_WITHOUT_PLACEHOLDER", [
       { path: "src/app.ts", source: "committed" },
     ]);
 
+    expect(prompt).toMatch(/^@changes-walkthrough\n\nChanged files:/);
     expect(prompt).toContain("CUSTOM_WITHOUT_PLACEHOLDER");
-    expect(prompt).toContain("Available changed files:");
     expect(prompt).toContain("- src/app.ts [committed]");
   });
 });

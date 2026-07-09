@@ -32,9 +32,12 @@ const changesWalkthroughPromptMarker = "Please create an agent-authored walkthro
 
 func isChangesWalkthroughRequest(prompt string) bool {
 	cmd := stripKandevSystem(strings.TrimSpace(prompt))
-	return strings.Contains(cmd, changesWalkthroughPromptMarker) &&
+	legacyPrompt := strings.Contains(cmd, changesWalkthroughPromptMarker) &&
 		strings.Contains(cmd, "show_walkthrough_kandev") &&
 		strings.Contains(cmd, "Available changed files:")
+	promptReference := strings.Contains(cmd, "@changes-walkthrough") &&
+		strings.Contains(cmd, "Changed files:")
+	return legacyPrompt || promptReference
 }
 
 // parseOverloadedCmd reports whether the prompt is the /overloaded command and,

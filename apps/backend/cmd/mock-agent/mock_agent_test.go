@@ -112,7 +112,7 @@ func TestStripKandevSystem(t *testing.T) {
 }
 
 func TestIsChangesWalkthroughRequest(t *testing.T) {
-	prompt := strings.Join([]string{
+	legacyPrompt := strings.Join([]string{
 		"Please create an agent-authored walkthrough of the current changes using `show_walkthrough_kandev`.",
 		"",
 		"Walkthrough requirements:",
@@ -121,9 +121,23 @@ func TestIsChangesWalkthroughRequest(t *testing.T) {
 		"Available changed files:",
 		"- src/app.ts [uncommitted]",
 	}, "\n")
+	promptReference := strings.Join([]string{
+		"@changes-walkthrough",
+		"",
+		"Changed files:",
+		"- src/app.ts [uncommitted]",
+		"",
+		"<kandev-system>",
+		"EXPANDED PROMPT REFERENCES",
+		"### @changes-walkthrough",
+		"Please create an agent-authored walkthrough of the current changes using `show_walkthrough_kandev`.",
+		"</kandev-system>",
+	}, "\n")
 
-	if !isChangesWalkthroughRequest(prompt) {
-		t.Fatal("expected generated changes walkthrough prompt to be detected")
+	for _, prompt := range []string{legacyPrompt, promptReference} {
+		if !isChangesWalkthroughRequest(prompt) {
+			t.Fatalf("expected generated changes walkthrough prompt to be detected:\n%s", prompt)
+		}
 	}
 	if isChangesWalkthroughRequest("show_walkthrough_kandev without the generated prompt shape") {
 		t.Fatal("expected unrelated prompt not to be detected")

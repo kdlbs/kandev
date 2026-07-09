@@ -1,3 +1,5 @@
+import { formatPromptReferenceExpansions } from "@/lib/prompts/expand-prompt-references";
+
 export type WalkthroughPromptFile = {
   path: string;
   repository_name?: string;
@@ -8,6 +10,7 @@ export type WalkthroughPromptFile = {
 const MAX_PROMPT_FILES = 80;
 export const CHANGES_WALKTHROUGH_PROMPT_NAME = "changes-walkthrough";
 const CHANGED_FILES_PLACEHOLDER = "{{changed_files}}";
+const CHANGED_FILES_REFERENCE = "The changed files are listed in the user-visible message above.";
 
 function fileKey(file: WalkthroughPromptFile): string {
   return `${file.repository_name ?? file.repositoryName ?? ""}\0${file.path}\0${file.source ?? ""}`;
@@ -44,8 +47,20 @@ export function buildChangesWalkthroughPrompt(
 ): string {
   const changedFiles = formatChangedFilesForWalkthroughPrompt(files);
   const trimmedTemplate = template.trim();
-  if (trimmedTemplate.includes(CHANGED_FILES_PLACEHOLDER)) {
-    return trimmedTemplate.replaceAll(CHANGED_FILES_PLACEHOLDER, changedFiles);
-  }
-  return [trimmedTemplate, "", "Available changed files:", changedFiles].join("\n");
+  const expansionContent = trimmedTemplate.includes(CHANGED_FILES_PLACEHOLDER)
+    ? trimmedTemplate.replaceAll(CHANGED_FILES_PLACEHOLDER, CHANGED_FILES_REFERENCE)
+    : trimmedTemplate;
+  const expansionContext = formatPromptReferenceExpansions([
+    { name: CHANGES_WALKTHROUGH_PROMPT_NAME, content: expansionContent },
+  ]);
+  return [
+    `@${CHANGES_WALKTHROUGH_PROMPT_NAME}`,
+    "",
+    "Changed files:",
+    changedFiles,
+    "",
+    "<kandev-system>",
+    expansionContext,
+    "</kandev-system>",
+  ].join("\n");
 }

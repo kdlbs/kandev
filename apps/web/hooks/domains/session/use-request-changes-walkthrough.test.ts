@@ -87,10 +87,13 @@ describe("useRequestChangesWalkthrough", () => {
       expect.objectContaining({
         task_id: "task-1",
         session_id: "session-1",
-        content: expect.stringContaining("CUSTOM_WALKTHROUGH_PROMPT"),
+        content: expect.stringMatching(/^@changes-walkthrough\n\nChanged files:/),
       }),
       10000,
     );
+    const sentContent = mockRequest.mock.calls[0]?.[1]?.content as string;
+    expect(sentContent).toContain("<kandev-system>");
+    expect(sentContent).toContain("CUSTOM_WALKTHROUGH_PROMPT");
     expect(mockListPrompts).toHaveBeenCalledWith({ cache: "no-store" });
     expect(mockAddMessage).toHaveBeenCalledWith(expect.objectContaining({ id: "msg-1" }));
     expect(mockAppendToQueue).not.toHaveBeenCalled();
@@ -112,9 +115,12 @@ describe("useRequestChangesWalkthrough", () => {
         session_id: "session-1",
         task_id: "task-1",
         plan_mode: true,
-        content: expect.stringContaining("CUSTOM_WALKTHROUGH_PROMPT"),
+        content: expect.stringMatching(/^@changes-walkthrough\n\nChanged files:/),
       }),
     );
+    const queuedContent = mockAppendToQueue.mock.calls[0]?.[0]?.content as string;
+    expect(queuedContent).toContain("<kandev-system>");
+    expect(queuedContent).toContain("CUSTOM_WALKTHROUGH_PROMPT");
     expect(mockRequest).not.toHaveBeenCalled();
     expect(mockToast).toHaveBeenCalledWith(
       expect.objectContaining({ title: "Walkthrough request queued" }),
