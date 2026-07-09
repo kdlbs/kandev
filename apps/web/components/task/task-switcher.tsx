@@ -60,6 +60,9 @@ type TaskSwitcherProps = {
   onDeleteTask?: (taskId: string) => void;
   onLinkPullRequest?: (taskId: string) => void;
   onLinkIssue?: (taskId: string) => void;
+  onLinkJiraTicket?: (taskId: string) => void;
+  onLinkLinearIssue?: (taskId: string) => void;
+  onLinkSentryIssue?: (taskId: string) => void;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onTogglePin?: (taskId: string) => void;
   onReorderGroup?: (groupTaskIds: string[]) => void;
@@ -138,6 +141,9 @@ type TaskRowProps = {
   onDeleteTask?: (taskId: string) => void;
   onLinkPullRequest?: (taskId: string) => void;
   onLinkIssue?: (taskId: string) => void;
+  onLinkJiraTicket?: (taskId: string) => void;
+  onLinkLinearIssue?: (taskId: string) => void;
+  onLinkSentryIssue?: (taskId: string) => void;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onTogglePin?: (taskId: string) => void;
   isPinned?: boolean;
@@ -154,6 +160,24 @@ type TaskRowProps = {
   isMixedWorkflowSelection?: boolean;
 };
 
+function taskLinkHandlerProps(props: Pick<TaskRowProps, keyof TaskLinkHandlerProps>) {
+  return {
+    onLinkPullRequest: props.onLinkPullRequest,
+    onLinkIssue: props.onLinkIssue,
+    onLinkJiraTicket: props.onLinkJiraTicket,
+    onLinkLinearIssue: props.onLinkLinearIssue,
+    onLinkSentryIssue: props.onLinkSentryIssue,
+  };
+}
+
+type TaskLinkHandlerProps = {
+  onLinkPullRequest?: (taskId: string) => void;
+  onLinkIssue?: (taskId: string) => void;
+  onLinkJiraTicket?: (taskId: string) => void;
+  onLinkLinearIssue?: (taskId: string) => void;
+  onLinkSentryIssue?: (taskId: string) => void;
+};
+
 function TaskRow({
   task,
   isSubTask,
@@ -167,8 +191,6 @@ function TaskRow({
   onRenameTask,
   onArchiveTask,
   onDeleteTask,
-  onLinkPullRequest,
-  onLinkIssue,
   onMoveToStep,
   onTogglePin,
   isPinned,
@@ -183,6 +205,7 @@ function TaskRow({
   onBulkMove,
   onClearSelection,
   isMixedWorkflowSelection,
+  ...props
 }: TaskRowProps) {
   const isSelected = task.id === selectedTaskId || task.id === activeTaskId;
   const isMultiSelected = selectedTaskIds?.has(task.id) ?? false;
@@ -197,8 +220,7 @@ function TaskRow({
       onRenameTask={onRenameTask}
       onArchiveTask={onArchiveTask}
       onDeleteTask={onDeleteTask}
-      onLinkPullRequest={onLinkPullRequest}
-      onLinkIssue={onLinkIssue}
+      {...taskLinkHandlerProps(props)}
       onMoveToStep={onMoveToStep}
       onTogglePin={onTogglePin}
       isPinned={isPinned}
@@ -374,6 +396,9 @@ type GroupSectionProps = {
   onDeleteTask?: (taskId: string) => void;
   onLinkPullRequest?: (taskId: string) => void;
   onLinkIssue?: (taskId: string) => void;
+  onLinkJiraTicket?: (taskId: string) => void;
+  onLinkLinearIssue?: (taskId: string) => void;
+  onLinkSentryIssue?: (taskId: string) => void;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onTogglePin?: (taskId: string) => void;
   onReorderGroup?: (groupTaskIds: string[]) => void;
@@ -410,6 +435,9 @@ function GroupSection({
   onDeleteTask,
   onLinkPullRequest,
   onLinkIssue,
+  onLinkJiraTicket,
+  onLinkLinearIssue,
+  onLinkSentryIssue,
   onMoveToStep,
   onTogglePin,
   onReorderGroup,
@@ -444,6 +472,9 @@ function GroupSection({
       onDeleteTask,
       onLinkPullRequest,
       onLinkIssue,
+      onLinkJiraTicket,
+      onLinkLinearIssue,
+      onLinkSentryIssue,
       onMoveToStep,
       onTogglePin,
       pinnedTaskIds,
@@ -496,6 +527,9 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   onDeleteTask,
   onLinkPullRequest,
   onLinkIssue,
+  onLinkJiraTicket,
+  onLinkLinearIssue,
+  onLinkSentryIssue,
   onMoveToStep,
   onTogglePin,
   onReorderGroup,
@@ -548,6 +582,9 @@ export const TaskSwitcher = memo(function TaskSwitcher({
           onDeleteTask={onDeleteTask}
           onLinkPullRequest={onLinkPullRequest}
           onLinkIssue={onLinkIssue}
+          onLinkJiraTicket={onLinkJiraTicket}
+          onLinkLinearIssue={onLinkLinearIssue}
+          onLinkSentryIssue={onLinkSentryIssue}
           onMoveToStep={onMoveToStep}
           onTogglePin={onTogglePin}
           onReorderGroup={onReorderGroup}

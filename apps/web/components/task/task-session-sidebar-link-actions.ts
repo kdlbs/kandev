@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import type { KanbanState } from "@/lib/state/slices";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+import type { ExternalLinkProvider } from "./task-external-link-dialog";
 
 type StoreApi = {
   getState: () => {
@@ -20,11 +21,18 @@ export type SidebarLinkTarget = {
   repositories?: Array<{ id?: string; repository_id: string; position?: number }>;
 };
 
+export type SidebarExternalLinkTarget = {
+  provider: ExternalLinkProvider;
+  task: SidebarLinkTarget;
+};
+
 export function useSidebarLinkActions(store: StoreApi) {
   const [linkingPullRequestTask, setLinkingPullRequestTask] = useState<SidebarLinkTarget | null>(
     null,
   );
   const [linkingIssueTask, setLinkingIssueTask] = useState<SidebarLinkTarget | null>(null);
+  const [linkingExternalIssueTask, setLinkingExternalIssueTask] =
+    useState<SidebarExternalLinkTarget | null>(null);
 
   const getLinkTarget = useCallback(
     (taskId: string): SidebarLinkTarget => {
@@ -56,6 +64,13 @@ export function useSidebarLinkActions(store: StoreApi) {
     [getLinkTarget],
   );
 
+  const handleLinkExternalIssueTask = useCallback(
+    (provider: ExternalLinkProvider, taskId: string) => {
+      setLinkingExternalIssueTask({ provider, task: getLinkTarget(taskId) });
+    },
+    [getLinkTarget],
+  );
+
   return {
     linkingPullRequestTask,
     setLinkingPullRequestTask,
@@ -63,5 +78,10 @@ export function useSidebarLinkActions(store: StoreApi) {
     linkingIssueTask,
     setLinkingIssueTask,
     handleLinkIssueTask,
+    linkingExternalIssueTask,
+    setLinkingExternalIssueTask,
+    handleLinkJiraTicketTask: (taskId: string) => handleLinkExternalIssueTask("jira", taskId),
+    handleLinkLinearIssueTask: (taskId: string) => handleLinkExternalIssueTask("linear", taskId),
+    handleLinkSentryIssueTask: (taskId: string) => handleLinkExternalIssueTask("sentry", taskId),
   };
 }

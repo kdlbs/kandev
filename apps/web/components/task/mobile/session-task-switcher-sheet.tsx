@@ -10,13 +10,18 @@ import { SidebarFilterBar } from "../sidebar-filter/sidebar-filter-bar";
 import type { StepDef } from "../task-switcher-context-menu";
 import type { TaskMoveWorkflow } from "../task-move-context-menu";
 import { applyView } from "@/lib/sidebar/apply-view";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useEffectiveSidebarView } from "@/hooks/domains/sidebar/use-effective-sidebar-view";
 import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-prefs";
+import { useJiraAvailable } from "@/hooks/domains/jira/use-jira-availability";
+import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availability";
+import { useSentryAvailable } from "@/hooks/domains/sentry/use-sentry-availability";
 import { WorkspaceSwitcher } from "../workspace-switcher";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { TaskArchiveConfirmDialog } from "../task-archive-confirm-dialog";
 import { TaskDeleteConfirmDialog } from "../task-delete-confirm-dialog";
+import { SidebarLinkDialogs } from "../task-session-sidebar-dialogs";
+import { useSidebarLinkActions } from "../task-session-sidebar-link-actions";
 import { useSheetData, useSheetActions } from "./session-task-switcher-sheet-hooks";
 
 type SessionTaskSwitcherSheetProps = {
@@ -25,6 +30,30 @@ type SessionTaskSwitcherSheetProps = {
   workspaceId: string | null;
   workflowId: string | null;
 };
+
+function useMobileTaskLinking(workspaceId: string | null) {
+  const store = useAppStoreApi();
+  const actions = useSidebarLinkActions(store);
+  const jiraAvailable = useJiraAvailable(workspaceId);
+  const linearAvailable = useLinearAvailable(workspaceId);
+  const sentryAvailable = useSentryAvailable(workspaceId);
+  const repositories =
+    useAppStore((state) =>
+      workspaceId ? state.repositories.itemsByWorkspaceId[workspaceId] : undefined,
+    ) ?? [];
+
+  return {
+    actions,
+    repositories,
+    taskListHandlers: {
+      onLinkPullRequest: actions.handleLinkPullRequestTask,
+      onLinkIssue: actions.handleLinkIssueTask,
+      onLinkJiraTicket: jiraAvailable ? actions.handleLinkJiraTicketTask : undefined,
+      onLinkLinearIssue: linearAvailable ? actions.handleLinkLinearIssueTask : undefined,
+      onLinkSentryIssue: sentryAvailable ? actions.handleLinkSentryIssueTask : undefined,
+    },
+  };
+}
 
 export function MobileTaskList({
   tasks,
@@ -35,6 +64,11 @@ export function MobileTaskList({
   onSelectTask,
   onArchiveTask,
   onDeleteTask,
+  onLinkPullRequest,
+  onLinkIssue,
+  onLinkJiraTicket,
+  onLinkLinearIssue,
+  onLinkSentryIssue,
   deletingTaskId,
   isLoading,
 }: {
@@ -46,6 +80,11 @@ export function MobileTaskList({
   onSelectTask: (taskId: string) => void;
   onArchiveTask: (taskId: string) => void;
   onDeleteTask: (taskId: string) => Promise<void> | void;
+  onLinkPullRequest?: (taskId: string) => void;
+  onLinkIssue?: (taskId: string) => void;
+  onLinkJiraTicket?: (taskId: string) => void;
+  onLinkLinearIssue?: (taskId: string) => void;
+  onLinkSentryIssue?: (taskId: string) => void;
   deletingTaskId: string | null;
   isLoading?: boolean;
 }) {
@@ -88,6 +127,11 @@ export function MobileTaskList({
       onSelectTask={onSelectTask}
       onArchiveTask={onArchiveTask}
       onDeleteTask={onDeleteTask}
+      onLinkPullRequest={onLinkPullRequest}
+      onLinkIssue={onLinkIssue}
+      onLinkJiraTicket={onLinkJiraTicket}
+      onLinkLinearIssue={onLinkLinearIssue}
+      onLinkSentryIssue={onLinkSentryIssue}
       onTogglePin={togglePinnedTask}
       onReorderGroup={handleReorderGroup}
       onReorderSubtasks={handleReorderSubtasks}
@@ -108,6 +152,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   const [dialogOpen, setDialogOpen] = useState(false);
   const data = useSheetData(workspaceId);
   const actions = useSheetActions(workspaceId, onOpenChange);
+  const linking = useMobileTaskLinking(workspaceId);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -150,6 +195,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
             onSelectTask={actions.handleSelectTask}
             onArchiveTask={actions.handleArchiveTask}
             onDeleteTask={actions.handleDeleteTask}
+            {...linking.taskListHandlers}
             deletingTaskId={actions.deletingTaskId}
             isLoading={data.tasksLoading}
           />
@@ -188,6 +234,11 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
         executorType={actions.deletingTask?.executorType}
         isDeleting={actions.isDeleting}
         onConfirm={({ cascade }) => actions.handleDeleteConfirm({ cascade })}
+      />
+      <SidebarLinkDialogs
+        actions={linking.actions}
+        repositories={linking.repositories}
+        workspaceId={workspaceId}
       />
     </Sheet>
   );

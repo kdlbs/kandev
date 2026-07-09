@@ -18,9 +18,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 // Each integration provides {icon, label, tooltip, placeholder, regex,
 // fetch, onSuccess, validationHint, headline, submitLabel, submittingLabel}.
 //
-// Designing this as one shared skeleton both fixes the existing bug that
-// JiraLinkButton was missing the clear-error-on-close behaviour LinearLinkButton
-// had, and prevents future drift between the four near-identical popovers.
+// Designing this as one shared skeleton prevents drift between the
+// near-identical integration popovers.
 
 export type ValidatedPopoverTriggerStyle = "outline-with-label" | "ghost-icon";
 
