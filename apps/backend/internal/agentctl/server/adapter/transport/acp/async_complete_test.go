@@ -181,10 +181,14 @@ func TestAsyncTurnComplete_CancelledByLoadSession(t *testing.T) {
 
 func setAsyncTurnCompleteIdleForTest(t *testing.T, d time.Duration) {
 	t.Helper()
+	asyncTurnCompleteIdleMu.Lock()
 	previous := asyncTurnCompleteIdle
 	asyncTurnCompleteIdle = d
+	asyncTurnCompleteIdleMu.Unlock()
 	t.Cleanup(func() {
+		asyncTurnCompleteIdleMu.Lock()
 		asyncTurnCompleteIdle = previous
+		asyncTurnCompleteIdleMu.Unlock()
 	})
 }
 
