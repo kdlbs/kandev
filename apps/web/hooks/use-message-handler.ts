@@ -100,16 +100,18 @@ export function buildContextFilesContext(
 
   if (promptFiles.length > 0) {
     const promptsById = new Map(prompts.map((p) => [p.id, p]));
+    const selectedPrompts = promptFiles
+      .map((f) => promptsById.get(f.path.replace("prompt:", "")))
+      .filter((prompt): prompt is CustomPrompt => Boolean(prompt));
+    const selectedPromptNames = new Set(selectedPrompts.map((prompt) => prompt.name));
     const promptExpansions = new Map<string, string>();
-    const resolved = promptFiles
-      .map((f) => {
-        const id = f.path.replace("prompt:", "");
-        const prompt = promptsById.get(id);
-        if (!prompt) return null;
+    const resolved = selectedPrompts
+      .map((prompt) => {
         for (const expansion of collectPromptReferenceExpansions(
           prompt.content,
           prompts,
           prompt.name,
+          selectedPromptNames,
         )) {
           if (!promptExpansions.has(expansion.name)) {
             promptExpansions.set(expansion.name, expansion.content);

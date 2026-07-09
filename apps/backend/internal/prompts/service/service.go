@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sort"
 	"strings"
 
 	"github.com/kandev/kandev/internal/prompts/models"
@@ -140,43 +141,60 @@ func (s *Service) ResolvePromptReferences(ctx context.Context, content string) (
 		return nil, err
 	}
 	byName := make(map[string]*models.Prompt, len(prompts))
+	names := make([]string, 0, len(prompts))
 	for _, prompt := range prompts {
 		if prompt == nil || prompt.Name == "" {
 			continue
 		}
 		byName[prompt.Name] = prompt
+		names = append(names, prompt.Name)
 	}
+	sort.Slice(names, func(i, j int) bool {
+		if len(names[i]) == len(names[j]) {
+			return names[i] < names[j]
+		}
+		return len(names[i]) > len(names[j])
+	})
 	expansions := make([]PromptReferenceExpansion, 0)
-	collectPromptReferences(content, byName, map[string]bool{}, map[string]bool{}, &expansions, 0)
+	collectPromptReferences(content, byName, names, map[string]bool{}, map[string]bool{}, &expansions, 0)
 	return expansions, nil
 }
 
-func collectPromptReferences(content string, byName map[string]*models.Prompt, stack, seen map[string]bool, expansions *[]PromptReferenceExpansion, depth int) {
+func collectPromptReferences(content string, byName map[string]*models.Prompt, names []string, stack, seen map[string]bool, expansions *[]PromptReferenceExpansion, depth int) {
 	for index := 0; index < len(content); {
 		if content[index] != '@' || !isPromptReferenceStart(content, index) {
 			index++
 			continue
 		}
-		nameStart := index + 1
-		nameEnd := nameStart
-		for nameEnd < len(content) && isPromptReferenceNameChar(content[nameEnd]) {
-			nameEnd++
-		}
-		name := content[nameStart:nameEnd]
-		prompt := byName[name]
-		if name == "" || prompt == nil || stack[prompt.Name] || depth >= maxPromptReferenceDepth {
-			index = nameEnd
+		prompt, referenceEnd, ok := matchPromptReference(content, index, byName, names)
+		if !ok || stack[prompt.Name] || depth >= maxPromptReferenceDepth {
+			index = referenceEnd
 			continue
 		}
 		if !seen[prompt.Name] {
 			seen[prompt.Name] = true
 			*expansions = append(*expansions, PromptReferenceExpansion{Name: prompt.Name, Content: prompt.Content})
 			stack[prompt.Name] = true
-			collectPromptReferences(prompt.Content, byName, stack, seen, expansions, depth+1)
+			collectPromptReferences(prompt.Content, byName, names, stack, seen, expansions, depth+1)
 			delete(stack, prompt.Name)
 		}
-		index = nameEnd
+		index = referenceEnd
 	}
+}
+
+func matchPromptReference(content string, index int, byName map[string]*models.Prompt, names []string) (*models.Prompt, int, bool) {
+	referenceStart := index + 1
+	for _, name := range names {
+		if !strings.HasPrefix(content[referenceStart:], name) {
+			continue
+		}
+		referenceEnd := referenceStart + len(name)
+		if referenceEnd < len(content) && isPromptReferenceNameChar(content[referenceEnd]) {
+			continue
+		}
+		return byName[name], referenceEnd, true
+	}
+	return nil, referenceStart, false
 }
 
 func isPromptReferenceStart(content string, index int) bool {

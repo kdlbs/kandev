@@ -116,6 +116,12 @@ func (f fakePromptReferenceResolver) ResolvePromptReferences(context.Context, st
 	return f.expansions, f.err
 }
 
+type panicPromptReferenceResolver struct{}
+
+func (panicPromptReferenceResolver) ResolvePromptReferences(context.Context, string) ([]promptservice.PromptReferenceExpansion, error) {
+	panic("prompt reference resolver should not be called")
+}
+
 func newMessageTaskHandler(t *testing.T, svc *service.Service, taskRepo ...TaskRepository) (*Handlers, *fakeOrchestrator) {
 	t.Helper()
 	log := testLogger(t)
@@ -329,7 +335,7 @@ func TestHandleMessageTask_PromptResolverError_FallsBackToOriginal(t *testing.T)
 	h, orch := newMessageTaskHandler(t, svc)
 	h.SetPromptReferenceResolver(fakePromptReferenceResolver{err: errors.New("db error")})
 
-	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "plain text", sender.ID))
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "plain @missing text", sender.ID))
 	resp, err := h.handleMessageTask(context.Background(), msg)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
@@ -337,8 +343,25 @@ func TestHandleMessageTask_PromptResolverError_FallsBackToOriginal(t *testing.T)
 	status := orch.queue.GetStatus(context.Background(), sess.ID)
 	require.Equal(t, 1, status.Count)
 	entry := status.Entries[0]
-	assert.Contains(t, entry.Content, "plain text")
+	assert.Contains(t, entry.Content, "plain @missing text")
 	assert.NotContains(t, entry.Content, "EXPANDED PROMPT REFERENCES")
+}
+
+func TestHandleMessageTask_NoPromptReferencesSkipsResolver(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+	h.SetPromptReferenceResolver(panicPromptReferenceResolver{})
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "plain text", sender.ID))
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	status := orch.queue.GetStatus(context.Background(), sess.ID)
+	require.Equal(t, 1, status.Count)
+	assert.Contains(t, status.Entries[0].Content, "plain text")
 }
 
 func TestHandleMessageTask_QueueFull_ReturnsStructuredError(t *testing.T) {

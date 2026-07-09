@@ -3,6 +3,9 @@ import { buildContextFilesContext, buildTaskMentionsContext } from "./use-messag
 import type { AppState } from "@/lib/state/store";
 import type { TaskMentionData } from "./use-inline-mention";
 
+const IMPROVE_HARNESS_PROMPT = "improve-harness";
+const IMPROVE_HARNESS_CONTENT = "Review this session for durable harness improvements.";
+
 function makeState(overrides: Partial<AppState> = {}): AppState {
   const base = {
     kanban: { workflowId: "wf-1", steps: [], tasks: [] },
@@ -134,8 +137,8 @@ describe("buildContextFilesContext", () => {
         },
         {
           id: "inner",
-          name: "improve-harness",
-          content: "Review this session for durable harness improvements.",
+          name: IMPROVE_HARNESS_PROMPT,
+          content: IMPROVE_HARNESS_CONTENT,
           builtin: false,
           created_at: "",
           updated_at: "",
@@ -147,6 +150,37 @@ describe("buildContextFilesContext", () => {
     expect(out).toContain("@improve-harness");
     expect(out).toContain("EXPANDED PROMPT REFERENCES");
     expect(out).toContain("### @improve-harness");
-    expect(out).toContain("Review this session for durable harness improvements.");
+    expect(out).toContain(IMPROVE_HARNESS_CONTENT);
+  });
+
+  it("does not repeat prompt expansions for directly attached prompts", () => {
+    const out = buildContextFilesContext(
+      [
+        { path: "prompt:outer", name: "outer" },
+        { path: "prompt:inner", name: IMPROVE_HARNESS_PROMPT },
+      ],
+      [
+        {
+          id: "outer",
+          name: "outer",
+          content: "Send this to peers:\n@improve-harness",
+          builtin: false,
+          created_at: "",
+          updated_at: "",
+        },
+        {
+          id: "inner",
+          name: IMPROVE_HARNESS_PROMPT,
+          content: IMPROVE_HARNESS_CONTENT,
+          builtin: false,
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    );
+
+    expect(out).toContain("### improve-harness");
+    expect(out).toContain(IMPROVE_HARNESS_CONTENT);
+    expect(out).not.toContain("### @improve-harness");
   });
 });

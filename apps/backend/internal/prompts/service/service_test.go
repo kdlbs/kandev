@@ -228,6 +228,33 @@ func TestService_ResolvePromptReferencesSkipsUnknownInlineAndCycles(t *testing.T
 	}
 }
 
+func TestService_ResolvePromptReferencesMatchesStoredNames(t *testing.T) {
+	svc, cleanup := createService(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if _, err := svc.CreatePrompt(ctx, "Daily", "Short daily prompt"); err != nil {
+		t.Fatalf("seed daily: %v", err)
+	}
+	if _, err := svc.CreatePrompt(ctx, "Daily Summary", "Summarize the work."); err != nil {
+		t.Fatalf("seed daily summary: %v", err)
+	}
+
+	got, err := svc.ResolvePromptReferences(ctx, "Please run @Daily Summary.")
+	if err != nil {
+		t.Fatalf("resolve references: %v", err)
+	}
+	want := []PromptReferenceExpansion{{Name: "Daily Summary", Content: "Summarize the work."}}
+	if len(got) != len(want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got[%d]=%#v, want %#v", i, got[i], want[i])
+		}
+	}
+}
+
 // raceRepo simulates a TOCTOU loss against the SQLite UNIQUE index: the
 // pre-check sees no row, but the write fails because a concurrent insert
 // landed first. The service must translate that into ErrPromptAlreadyExists

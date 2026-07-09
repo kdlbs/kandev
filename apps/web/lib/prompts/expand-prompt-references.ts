@@ -27,12 +27,31 @@ function buildPromptMap(prompts: PromptReference[]) {
   return new Map(prompts.map((prompt) => [prompt.name, prompt]));
 }
 
+function buildPromptNames(prompts: PromptReference[]) {
+  return prompts
+    .map((prompt) => prompt.name)
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length || a.localeCompare(b));
+}
+
 type ExpansionState = {
   promptsByName: Map<string, PromptReference>;
+  promptNames: string[];
   stack: Set<string>;
   seen: Set<string>;
   expansions: PromptReferenceExpansion[];
 };
+
+function matchPromptReference(content: string, index: number, state: ExpansionState) {
+  const referenceStart = index + 1;
+  for (const name of state.promptNames) {
+    if (!content.startsWith(name, referenceStart)) continue;
+    const referenceEnd = referenceStart + name.length;
+    if (referenceEnd < content.length && isMentionNameChar(content[referenceEnd])) continue;
+    return { prompt: state.promptsByName.get(name), referenceEnd };
+  }
+  return { prompt: undefined, referenceEnd: referenceStart };
+}
 
 function collectExpansions(content: string, state: ExpansionState, depth: number): void {
   for (let index = 0; index < content.length; ) {
@@ -41,20 +60,9 @@ function collectExpansions(content: string, state: ExpansionState, depth: number
       continue;
     }
 
-    const nameStart = index + 1;
-    let nameEnd = nameStart;
-    while (nameEnd < content.length && isMentionNameChar(content[nameEnd])) {
-      nameEnd += 1;
-    }
-    const name = content.slice(nameStart, nameEnd);
-    const prompt = state.promptsByName.get(name);
-    if (
-      name === "" ||
-      !prompt ||
-      state.stack.has(prompt.name) ||
-      depth >= MAX_PROMPT_REFERENCE_DEPTH
-    ) {
-      index = nameEnd;
+    const { prompt, referenceEnd } = matchPromptReference(content, index, state);
+    if (!prompt || state.stack.has(prompt.name) || depth >= MAX_PROMPT_REFERENCE_DEPTH) {
+      index = referenceEnd;
       continue;
     }
 
@@ -69,7 +77,7 @@ function collectExpansions(content: string, state: ExpansionState, depth: number
         depth + 1,
       );
     }
-    index = nameEnd;
+    index = referenceEnd;
   }
 }
 
@@ -77,13 +85,20 @@ export function collectPromptReferenceExpansions(
   content: string,
   prompts: PromptReference[],
   currentPromptName?: string,
+  initialSeen: Iterable<string> = [],
 ): PromptReferenceExpansion[] {
   const stack = new Set<string>();
   if (currentPromptName) stack.add(currentPromptName);
   const expansions: PromptReferenceExpansion[] = [];
   collectExpansions(
     content,
-    { promptsByName: buildPromptMap(prompts), stack, seen: new Set(), expansions },
+    {
+      promptsByName: buildPromptMap(prompts),
+      promptNames: buildPromptNames(prompts),
+      stack,
+      seen: new Set(initialSeen),
+      expansions,
+    },
     0,
   );
   return expansions;

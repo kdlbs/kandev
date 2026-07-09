@@ -9,6 +9,11 @@ function prompt(name: string, content: string): PromptReference {
   return { id: name, name, content };
 }
 
+const OUTER_PROMPT = "outer";
+const INNER_PROMPT = "inner";
+const OUTER_CONTENT = "Outer @inner";
+const INNER_CONTENT = "Inner @outer";
+
 describe("collectPromptReferenceExpansions", () => {
   it("recursively collects saved prompt references without rewriting content", () => {
     const prompts = [
@@ -33,14 +38,33 @@ describe("collectPromptReferenceExpansions", () => {
   });
 
   it("does not recurse forever when prompts reference each other", () => {
-    const prompts = [prompt("outer", "Outer @inner"), prompt("inner", "Inner @outer")];
+    const prompts = [prompt(OUTER_PROMPT, OUTER_CONTENT), prompt(INNER_PROMPT, INNER_CONTENT)];
 
     expect(collectPromptReferenceExpansions("@outer", prompts)).toEqual([
-      { name: "outer", content: "Outer @inner" },
-      { name: "inner", content: "Inner @outer" },
+      { name: OUTER_PROMPT, content: OUTER_CONTENT },
+      { name: INNER_PROMPT, content: INNER_CONTENT },
     ]);
     expect(collectPromptReferenceExpansions("@inner", prompts, "outer")).toEqual([
-      { name: "inner", content: "Inner @outer" },
+      { name: INNER_PROMPT, content: INNER_CONTENT },
+    ]);
+  });
+
+  it("matches stored prompt names instead of only slug-shaped names", () => {
+    const prompts = [
+      prompt("Daily", "short daily prompt"),
+      prompt("Daily Summary", "summarize the work"),
+    ];
+
+    expect(collectPromptReferenceExpansions("@Daily Summary.", prompts)).toEqual([
+      { name: "Daily Summary", content: "summarize the work" },
+    ]);
+  });
+
+  it("skips references that were already seen by the caller", () => {
+    const prompts = [prompt(OUTER_PROMPT, OUTER_CONTENT), prompt(INNER_PROMPT, "Inner content")];
+
+    expect(collectPromptReferenceExpansions("@outer", prompts, undefined, ["inner"])).toEqual([
+      { name: OUTER_PROMPT, content: OUTER_CONTENT },
     ]);
   });
 });

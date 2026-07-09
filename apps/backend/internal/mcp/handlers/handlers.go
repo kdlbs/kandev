@@ -1478,6 +1478,9 @@ func (h *Handlers) appendPromptReferenceExpansionContext(ctx context.Context, pr
 	if h.promptResolver == nil {
 		return prompt
 	}
+	if !strings.Contains(prompt, "@") {
+		return prompt
+	}
 	expansions, err := h.promptResolver.ResolvePromptReferences(ctx, prompt)
 	if err != nil {
 		h.logger.Warn("failed to resolve prompt references for message_task", zap.Error(err))
