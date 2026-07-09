@@ -301,6 +301,57 @@ func TestTerminalStepMoveIgnoresStaleTaskStep(t *testing.T) {
 	}
 }
 
+func TestTerminalStepMoveSkipsAlreadyTerminalTaskState(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "parent", "parent-session", "step_wait")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step_wait"] = &wfmodels.WorkflowStep{
+		ID:         "step_wait",
+		WorkflowID: "wf1",
+		Name:       "Wait for Subtasks",
+		Position:   0,
+		Events: wfmodels.StepEvents{
+			OnChildrenCompleted: []wfmodels.GenericAction{
+				{Type: wfmodels.GenericActionMoveToNext},
+			},
+		},
+	}
+	stepGetter.steps["step_done"] = &wfmodels.WorkflowStep{
+		ID:         "step_done",
+		WorkflowID: "wf1",
+		Name:       "Done",
+		Position:   1,
+	}
+	stepGetter.steps["child_done"] = &wfmodels.WorkflowStep{
+		ID:         "child_done",
+		WorkflowID: "wf-child",
+		Name:       "Done",
+		Position:   0,
+	}
+
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createEngineService(t, repo, stepGetter, agentMgr)
+
+	now := time.Now().UTC()
+	requireCreateTask(t, repo, &models.Task{
+		ID: "child-already-terminal", WorkspaceID: "ws1", WorkflowID: "wf-child", WorkflowStepID: "child_done",
+		Title: "Child already terminal", State: v1.TaskStateCompleted, ParentID: "parent",
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	svc.processParentChildrenCompletedForTerminalStepMove(ctx, "child-already-terminal", "child_done")
+
+	parent, err := repo.GetTask(ctx, "parent")
+	if err != nil {
+		t.Fatalf("load parent after redundant terminal move: %v", err)
+	}
+	if parent.WorkflowStepID != "step_wait" {
+		t.Fatalf("expected parent to remain on step_wait after redundant terminal move, got %q", parent.WorkflowStepID)
+	}
+}
+
 func requireCreateTask(t *testing.T, repo interface {
 	CreateTask(context.Context, *models.Task) error
 }, task *models.Task) {

@@ -68,7 +68,6 @@ func (s *Service) markTaskCompletedForTerminalStep(ctx context.Context, taskID, 
 	}
 	if models.IsTerminalTaskState(task.State) {
 		s.taskRuntimeStateMu.Unlock()
-		s.processParentChildrenCompletedForTaskState(ctx, taskID, task.State)
 		return
 	}
 	oldState := task.State
