@@ -96,6 +96,27 @@ describe("ChatMessage prompt mentions", () => {
     expect(chip.textContent).toBe("@hello");
     expect(screen.getByText(/and @missing/)).not.toBeNull();
   });
+
+  it("preserves GFM attributes while highlighting prompt mentions", () => {
+    const Wrapper = wrapper([], [customPrompt("hello")]);
+
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({
+            content: "- [x] @hello\n\n| Name |\n| :---: |\n| @hello |",
+          })}
+          label="Message"
+          className=""
+        />
+      </Wrapper>,
+    );
+
+    const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
+    expect(checkbox.checked).toBe(true);
+    expect(checkbox.closest("li")?.className).toContain("task-list-item");
+    expect(screen.getByRole("cell").getAttribute("style")).toContain("text-align: center");
+  });
 });
 
 function renderWithSender(

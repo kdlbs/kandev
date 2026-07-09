@@ -1,6 +1,14 @@
 "use client";
 
-import { Children, memo, useState, useCallback, useMemo, type ReactNode } from "react";
+import {
+  Children,
+  memo,
+  useState,
+  useCallback,
+  useMemo,
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+} from "react";
 import type { Components } from "react-markdown";
 import { IconWand, IconMessageDots, IconFile } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
@@ -13,7 +21,10 @@ import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
 import { markdownComponents } from "@/components/shared/markdown-components";
 import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
 import { useAppStore } from "@/components/state-provider";
-import { splitPromptMentionSegments } from "@/lib/prompts/prompt-mention-segments";
+import {
+  buildPromptMentionNames,
+  splitPreparedPromptMentionSegments,
+} from "@/lib/prompts/prompt-mention-segments";
 import {
   WorkflowStepMessageBadge,
   workflowMessageInfoFromMetadata,
@@ -141,8 +152,22 @@ type UserMessageMetadata = WorkflowMessageMetadata & {
   sender_session_id?: string;
 };
 
-type MarkdownChildrenProps = {
+type PromptMentionMarkdownTag =
+  | "p"
+  | "li"
+  | "h1"
+  | "h2"
+  | "h3"
+  | "h4"
+  | "h5"
+  | "h6"
+  | "blockquote"
+  | "td"
+  | "th";
+
+type MarkdownChildrenProps<T extends PromptMentionMarkdownTag> = ComponentPropsWithoutRef<T> & {
   children?: ReactNode;
+  node?: unknown;
 };
 
 function usePromptMentionNames() {
@@ -152,24 +177,56 @@ function usePromptMentionNames() {
 
 function usePromptMentionMarkdownComponents(promptNames: string[]): Components | undefined {
   return useMemo(() => {
-    if (promptNames.length === 0) return undefined;
+    const mentionNames = buildPromptMentionNames(promptNames);
+    if (mentionNames.length === 0) return undefined;
     const renderChildren = (children: ReactNode, keyPrefix: string) =>
-      renderChildrenWithPromptMentions(children, promptNames, keyPrefix);
+      renderChildrenWithPromptMentions(children, mentionNames, keyPrefix);
     return {
       ...markdownComponents,
-      p: ({ children }: MarkdownChildrenProps) => <p>{renderChildren(children, "p")}</p>,
-      li: ({ children }: MarkdownChildrenProps) => <li>{renderChildren(children, "li")}</li>,
-      h1: ({ children }: MarkdownChildrenProps) => <h1>{renderChildren(children, "h1")}</h1>,
-      h2: ({ children }: MarkdownChildrenProps) => <h2>{renderChildren(children, "h2")}</h2>,
-      h3: ({ children }: MarkdownChildrenProps) => <h3>{renderChildren(children, "h3")}</h3>,
-      h4: ({ children }: MarkdownChildrenProps) => <h4>{renderChildren(children, "h4")}</h4>,
-      h5: ({ children }: MarkdownChildrenProps) => <h5>{renderChildren(children, "h5")}</h5>,
-      h6: ({ children }: MarkdownChildrenProps) => <h6>{renderChildren(children, "h6")}</h6>,
-      blockquote: ({ children }: MarkdownChildrenProps) => (
-        <blockquote>{renderChildren(children, "blockquote")}</blockquote>
-      ),
-      td: ({ children }: MarkdownChildrenProps) => <td>{renderChildren(children, "td")}</td>,
-      th: ({ children }: MarkdownChildrenProps) => <th>{renderChildren(children, "th")}</th>,
+      p: ({ children, node, ...props }: MarkdownChildrenProps<"p">) => {
+        void node;
+        return <p {...props}>{renderChildren(children, "p")}</p>;
+      },
+      li: ({ children, node, ...props }: MarkdownChildrenProps<"li">) => {
+        void node;
+        return <li {...props}>{renderChildren(children, "li")}</li>;
+      },
+      h1: ({ children, node, ...props }: MarkdownChildrenProps<"h1">) => {
+        void node;
+        return <h1 {...props}>{renderChildren(children, "h1")}</h1>;
+      },
+      h2: ({ children, node, ...props }: MarkdownChildrenProps<"h2">) => {
+        void node;
+        return <h2 {...props}>{renderChildren(children, "h2")}</h2>;
+      },
+      h3: ({ children, node, ...props }: MarkdownChildrenProps<"h3">) => {
+        void node;
+        return <h3 {...props}>{renderChildren(children, "h3")}</h3>;
+      },
+      h4: ({ children, node, ...props }: MarkdownChildrenProps<"h4">) => {
+        void node;
+        return <h4 {...props}>{renderChildren(children, "h4")}</h4>;
+      },
+      h5: ({ children, node, ...props }: MarkdownChildrenProps<"h5">) => {
+        void node;
+        return <h5 {...props}>{renderChildren(children, "h5")}</h5>;
+      },
+      h6: ({ children, node, ...props }: MarkdownChildrenProps<"h6">) => {
+        void node;
+        return <h6 {...props}>{renderChildren(children, "h6")}</h6>;
+      },
+      blockquote: ({ children, node, ...props }: MarkdownChildrenProps<"blockquote">) => {
+        void node;
+        return <blockquote {...props}>{renderChildren(children, "blockquote")}</blockquote>;
+      },
+      td: ({ children, node, ...props }: MarkdownChildrenProps<"td">) => {
+        void node;
+        return <td {...props}>{renderChildren(children, "td")}</td>;
+      },
+      th: ({ children, node, ...props }: MarkdownChildrenProps<"th">) => {
+        void node;
+        return <th {...props}>{renderChildren(children, "th")}</th>;
+      },
     };
   }, [promptNames]);
 }
@@ -186,7 +243,7 @@ function renderChildrenWithPromptMentions(
 }
 
 function renderTextWithPromptMentions(text: string, promptNames: string[], keyPrefix: string) {
-  return splitPromptMentionSegments(text, promptNames).map((segment, index) => {
+  return splitPreparedPromptMentionSegments(text, promptNames).map((segment, index) => {
     if (segment.kind === "text") return segment.value;
     return (
       <span

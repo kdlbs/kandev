@@ -9,30 +9,13 @@ export type PromptReferenceExpansion = {
   content: string;
 };
 
+import { buildPromptMentionNames, matchPromptMention } from "./prompt-mention-parser";
+
 const MAX_PROMPT_REFERENCE_DEPTH = 8;
 const KANDEV_SYSTEM_TAG_END = "</kandev-system>";
 
-function isWhitespace(value: string) {
-  return value === " " || value === "\n" || value === "\t" || value === "\r";
-}
-
-function isMentionNameChar(value: string) {
-  return /[A-Za-z0-9_-]/.test(value);
-}
-
-function isMentionStart(content: string, index: number) {
-  return index === 0 || isWhitespace(content[index - 1]);
-}
-
 function buildPromptMap(prompts: PromptReference[]) {
   return new Map(prompts.map((prompt) => [prompt.name, prompt]));
-}
-
-function buildPromptNames(prompts: PromptReference[]) {
-  return prompts
-    .map((prompt) => prompt.name)
-    .filter(Boolean)
-    .sort((a, b) => b.length - a.length || a.localeCompare(b));
 }
 
 type ExpansionState = {
@@ -43,27 +26,17 @@ type ExpansionState = {
   expansions: PromptReferenceExpansion[];
 };
 
-function matchPromptReference(content: string, index: number, state: ExpansionState) {
-  const referenceStart = index + 1;
-  for (const name of state.promptNames) {
-    if (!content.startsWith(name, referenceStart)) continue;
-    const referenceEnd = referenceStart + name.length;
-    if (referenceEnd < content.length && isMentionNameChar(content[referenceEnd])) continue;
-    return { prompt: state.promptsByName.get(name), referenceEnd };
-  }
-  return { prompt: undefined, referenceEnd: referenceStart };
-}
-
 function collectExpansions(content: string, state: ExpansionState, depth: number): void {
   for (let index = 0; index < content.length; ) {
-    if (content[index] !== "@" || !isMentionStart(content, index)) {
+    const match = matchPromptMention(content, index, state.promptNames);
+    if (!match) {
       index += 1;
       continue;
     }
 
-    const { prompt, referenceEnd } = matchPromptReference(content, index, state);
+    const prompt = state.promptsByName.get(match.name);
     if (!prompt || state.stack.has(prompt.name) || depth >= MAX_PROMPT_REFERENCE_DEPTH) {
-      index = referenceEnd;
+      index = match.end;
       continue;
     }
 
@@ -78,7 +51,7 @@ function collectExpansions(content: string, state: ExpansionState, depth: number
         depth + 1,
       );
     }
-    index = referenceEnd;
+    index = match.end;
   }
 }
 
@@ -95,7 +68,7 @@ export function collectPromptReferenceExpansions(
     content,
     {
       promptsByName: buildPromptMap(prompts),
-      promptNames: buildPromptNames(prompts),
+      promptNames: buildPromptMentionNames(prompts.map((prompt) => prompt.name)),
       stack,
       seen: new Set(initialSeen),
       expansions,
