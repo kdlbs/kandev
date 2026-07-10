@@ -121,18 +121,26 @@ func (f *fakeOrchestrator) ProcessOnTurnStart(ctx context.Context, taskID, sessi
 
 func (f *fakeOrchestrator) GetMessageQueue() *messagequeue.Service { return f.queue }
 
-// InterruptForPeerMessage records the call and returns the configured
-// interruptErr, or (false, nil) when interruptSkippedNoError simulates the
-// busy-skip branch — real interrupt/drain behavior is exercised by the
-// orchestrator-level InterruptForPeerMessage tests, not this fake.
-func (f *fakeOrchestrator) InterruptForPeerMessage(_ context.Context, taskID, sessionID, entryID string) (bool, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.interruptCalls = append(f.interruptCalls, interruptCall{taskID: taskID, sessionID: sessionID, entryID: entryID})
-	if f.interruptErr != nil {
-		return false, f.interruptErr
+// QueueAndInterruptForPeerMessage inserts prompt into the fake's real
+// message queue (so tests can assert on queue state via f.queue), then
+// reports the configured interruptErr, or (false, nil) when
+// interruptSkippedNoError simulates a busy/failed-take outcome — real
+// interrupt/drain behavior is exercised by the orchestrator-level
+// QueueAndInterruptForPeerMessage tests, not this fake.
+func (f *fakeOrchestrator) QueueAndInterruptForPeerMessage(ctx context.Context, taskID, sessionID, prompt string, metadata map[string]interface{}) (*messagequeue.QueuedMessage, bool, error) {
+	queued, err := f.queue.QueueMessageWithMetadata(ctx, sessionID, taskID, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata)
+	if err != nil {
+		return nil, false, err
 	}
-	return !f.interruptSkippedNoError, nil
+
+	f.mu.Lock()
+	f.interruptCalls = append(f.interruptCalls, interruptCall{taskID: taskID, sessionID: sessionID, entryID: queued.ID})
+	f.mu.Unlock()
+
+	if f.interruptErr != nil {
+		return queued, false, f.interruptErr
+	}
+	return queued, !f.interruptSkippedNoError, nil
 }
 
 type fakePromptReferenceResolver struct {

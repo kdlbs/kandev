@@ -1193,11 +1193,12 @@ func (m *mockSessionLauncher) ProcessOnTurnStart(context.Context, string, string
 }
 func (m *mockSessionLauncher) GetMessageQueue() *messagequeue.Service { return nil }
 
-// InterruptForPeerMessage always reports a successful immediate dispatch;
-// tests exercising other outcomes (busy-skip, failure) use fakeOrchestrator
-// in message_task_test.go instead of this generic stub.
-func (m *mockSessionLauncher) InterruptForPeerMessage(context.Context, string, string, string) (bool, error) {
-	return true, nil
+// QueueAndInterruptForPeerMessage always reports a successful immediate
+// dispatch with a fake queued entry; tests exercising other outcomes
+// (failure, not-dispatched) use fakeOrchestrator in message_task_test.go
+// instead of this generic stub.
+func (m *mockSessionLauncher) QueueAndInterruptForPeerMessage(context.Context, string, string, string, map[string]interface{}) (*messagequeue.QueuedMessage, bool, error) {
+	return &messagequeue.QueuedMessage{ID: "mock-entry"}, true, nil
 }
 
 func TestAutoStartTask_DefaultsToWorktreeExecutor(t *testing.T) {

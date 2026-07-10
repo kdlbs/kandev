@@ -235,6 +235,20 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 	// on the queue until the user manually sends another message. After the
 	// agent has booted and the session is back to WAITING_FOR_INPUT it's safe
 	// to dispatch any pending message.
+	//
+	// Claim the shared per-session lock first (see handleAgentReady's
+	// analogous claim for the full race this closes): a concurrent
+	// QueueAndInterruptForPeerMessage racing to deliver its own just-queued
+	// message must never have this drain steal it before the interrupt's
+	// own cancel+take runs.
+	lock := s.getCancelInFlightLock(data.SessionID)
+	if !lock.TryLock() {
+		s.logger.Debug("skipping boot-ready drain; a cancel/interrupt is in flight",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID))
+		return
+	}
+	defer lock.Unlock()
 	s.drainQueuedMessageForPromptableSession(ctx, data.SessionID)
 }
 
@@ -327,6 +341,32 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		return
 	}
 
+	// Claim the same per-session lock CancelAgent / QueueAndInterruptForPeer
+	// Message use, for the duration of this take+dispatch decision. This
+	// must be a genuine claim (TryLock), not the passive isCancelInFlight
+	// peek above: a concurrent QueueAndInterruptForPeerMessage racing to
+	// deliver its own just-queued message needs this drain to be mutually
+	// exclusive with its own insert+cancel+take, otherwise this drain could
+	// steal and start a new turn for the very message the interrupt is
+	// about to (or already did) claim — see QueueAndInterruptForPeerMessage's
+	// doc comment for the full race this closes. Skipping here when busy is
+	// safe in the common case: the current holder's own take-or-fallback
+	// step usually dispatches something, which fires a future agent.ready
+	// that gives this drain another chance. The one exception —
+	// cancelAndTakeForPeerMessage's cancel step genuinely fails, so nothing
+	// gets dispatched and the message stays queued — is a pre-existing,
+	// already-accepted contract (see queueThenInterruptTaskMessage in
+	// mcp/handlers): the message relies on whatever later naturally drains
+	// the session (a still-running turn eventually completing) or a manual
+	// user cancel, unrelated to and unchanged by this lock.
+	lock := s.getCancelInFlightLock(data.SessionID)
+	if !lock.TryLock() {
+		s.logger.Debug("skipping turn-complete drain; a cancel/interrupt is in flight",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID))
+		return
+	}
+	defer lock.Unlock()
 	// Check for queued messages when no workflow transition occurred.
 	queueStatus := s.messageQueue.GetStatus(ctx, data.SessionID)
 	s.logger.Info("checking for queued messages",

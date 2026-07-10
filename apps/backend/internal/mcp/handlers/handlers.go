@@ -89,18 +89,17 @@ type SessionLauncher interface {
 	ResumeTaskSession(ctx context.Context, taskID, sessionID string) (*executor.TaskExecution, error)
 	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error
 	GetMessageQueue() *messagequeue.Service
-	// InterruptForPeerMessage cancels a running/starting session's in-flight
-	// turn and dispatches entryID (the message the caller just queued for
-	// this same interrupt) immediately, bypassing FIFO order. Used only by
-	// queueThenInterruptTaskMessage when the message_task_kandev sender is
-	// the target task's parent (see handleMessageTask) — see the
-	// orchestrator implementation's doc comment for why this must not reuse
-	// CancelAgent's user-facing side effects, and for why entryID must be
-	// the specific queued message rather than just "drain the FIFO head".
-	// The bool reports whether this call actually dispatched something —
-	// false (with a nil error) when skipped because a cancel was already
-	// in flight for sessionID; callers must not report "sent" in that case.
-	InterruptForPeerMessage(ctx context.Context, taskID, sessionID, entryID string) (bool, error)
+	// QueueAndInterruptForPeerMessage atomically queues prompt for sessionID
+	// then interrupts the session's in-flight turn to dispatch it right
+	// away, bypassing FIFO order. Used only by queueThenInterruptTaskMessage
+	// when the message_task_kandev sender is the target task's parent (see
+	// handleMessageTask) — see the orchestrator implementation's doc
+	// comment for why "queue" and "interrupt" must be one atomic call
+	// rather than two separate steps. The returned bool reports whether
+	// this call actually dispatched the message immediately; callers must
+	// not report "sent" when it's false — the message is still only
+	// queued, to be delivered later by whichever drain gets to it.
+	QueueAndInterruptForPeerMessage(ctx context.Context, taskID, sessionID, prompt string, metadata map[string]interface{}) (*messagequeue.QueuedMessage, bool, error)
 }
 
 // MessageQueuer queues a prompt message for delivery to a session on its next turn.
@@ -2173,41 +2172,66 @@ func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session 
 	return taskMessageDispatchResult{status: "queued", sessionID: session.ID, queuedEntryID: queued.ID}, nil
 }
 
-// queueThenInterruptTaskMessage queues prompt for a running/starting session
-// exactly like queueTaskMessage, then synchronously interrupts the target
-// session's current turn so the message is delivered right away instead of
-// waiting for the turn to end naturally. Used only when the sender is the
-// target's parent task (see handleMessageTask); regular peer messages keep
-// the default queue-and-wait behavior documented on message_task_kandev.
+// queueThenInterruptTaskMessage atomically queues prompt for a running/
+// starting session and interrupts its current turn so the message is
+// delivered right away instead of waiting for the turn to end naturally.
+// Used only when the sender is the target's parent task (see
+// handleMessageTask); regular peer messages keep the default queue-and-wait
+// behavior documented on message_task_kandev via queueTaskMessage.
 //
-// The interrupt runs synchronously (not fire-and-forget) so the returned
-// status reflects what actually happened: "sent" only when the interrupt
-// actually dispatched the message immediately (the returned bool), or
-// "queued" (the same status as the non-interrupt path) when the interrupt
-// failed, or when it was skipped because a cancel was already in flight for
-// this session — see InterruptForPeerMessage's doc comment for that case.
-// An interrupt failure is deliberately NOT surfaced as an error to the
-// caller — the message is already safely persisted by queueTaskMessage
-// above and will still be delivered by the normal turn-completion drain,
-// so the interrupt is purely a latency optimization on top of that
-// always-safe default. The calling agent has no useful recovery action on
-// a hard error here besides retrying message_task_kandev, and retrying
-// would enqueue a second copy of the same message since queuing is not
-// idempotent — reporting the accurate "queued" status avoids inviting that
-// duplicate. The failure is still logged server-side for operators.
+// "Queue" and "interrupt" must be one atomic orchestrator call
+// (QueueAndInterruptForPeerMessage), not queueTaskMessage followed by a
+// separate interrupt call: between an insert becoming visible and a later,
+// separate interrupt call claiming the session's cancel lock, the child's
+// turn could complete naturally and the orchestrator's normal FIFO drain
+// could grab the just-queued entry and start dispatching it as an ordinary
+// turn — only for the later interrupt's cancel to land on and kill that
+// very turn, orphaning the parent's message mid-delivery. See
+// QueueAndInterruptForPeerMessage's doc comment for the full race this
+// closes.
+//
+// The returned status reflects what actually happened: "sent" only when
+// the interrupt actually dispatched the message immediately (the returned
+// bool), or "queued" when the cancel-and-take step ran but genuinely
+// failed to dispatch anything (see cancelAndTakeForPeerMessage's doc
+// comment for that case — it does not include lock contention, since
+// QueueAndInterruptForPeerMessage always waits for the lock rather than
+// skipping a busy one).
+// A failure past the queue insert is deliberately NOT surfaced as an error to the caller —
+// the message is already safely persisted and will still be delivered by
+// the normal turn-completion drain, so the interrupt is purely a latency
+// optimization on top of that always-safe default. The calling agent has
+// no useful recovery action on a hard error here besides retrying
+// message_task_kandev, and retrying would enqueue a second copy of the
+// same message since queuing is not idempotent — reporting the accurate
+// "queued" status avoids inviting that duplicate. The failure is still
+// logged server-side for operators.
 func (h *Handlers) queueThenInterruptTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string, metadata map[string]interface{}) (taskMessageDispatchResult, error) {
-	result, err := h.queueTaskMessage(ctx, taskID, session, prompt, metadata)
+	queued, dispatched, err := h.sessionLauncher.QueueAndInterruptForPeerMessage(ctx, taskID, session.ID, prompt, metadata)
 	if err != nil {
-		return result, err
-	}
-	dispatched, err := h.sessionLauncher.InterruptForPeerMessage(ctx, taskID, session.ID, result.queuedEntryID)
-	if err != nil {
+		if errors.Is(err, messagequeue.ErrQueueFull) {
+			queue := h.sessionLauncher.GetMessageQueue()
+			status := queue.GetStatus(ctx, session.ID)
+			return taskMessageDispatchResult{}, &queueFullDispatchError{
+				sessionID: session.ID,
+				queueSize: status.Count,
+				max:       status.Max,
+				entries:   status.Entries,
+			}
+		}
+		if queued == nil {
+			return taskMessageDispatchResult{}, fmt.Errorf("failed to queue and interrupt message: %w", err)
+		}
+		// The message is already safely queued (queued != nil); only the
+		// interrupt step failed — see the doc comment above for why that
+		// is not surfaced as an error to the caller.
 		h.logger.Warn("failed to interrupt child session's turn; message stays queued for normal drain",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
 			zap.Error(err))
-		return result, nil
+		return taskMessageDispatchResult{status: "queued", sessionID: session.ID, queuedEntryID: queued.ID}, nil
 	}
+	result := taskMessageDispatchResult{status: "queued", sessionID: session.ID, queuedEntryID: queued.ID}
 	if dispatched {
 		result.status = taskMessageStatusSent
 	}

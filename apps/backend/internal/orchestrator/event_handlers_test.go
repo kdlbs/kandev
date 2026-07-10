@@ -192,6 +192,13 @@ type mockAgentManager struct {
 	// Optional: closed once on the first PromptAgent call so tests can wait
 	// deterministically without polling. Tests opt in by initializing the channel.
 	promptDone chan struct{}
+	// Optional: closed once len(capturedPrompts) reaches promptCallTarget, for
+	// tests that dispatch more than one prompt and need to join every one of
+	// them (not just the first, which promptDone alone can't express) before
+	// tearing down — avoids leaving executeQueuedMessage goroutines racing
+	// test teardown. Tests opt in by setting both fields.
+	promptCallTarget int
+	promptCallsDone  chan struct{}
 
 	// Passthrough stdin tracking
 	passthroughStdinCalls []passthroughStdinCall
@@ -302,12 +309,17 @@ func (m *mockAgentManager) PromptAgent(ctx context.Context, executionID string, 
 	m.capturedPrompts = append(m.capturedPrompts, prompt)
 	m.capturedPromptCalls = append(m.capturedPromptCalls, promptCall{ExecutionID: executionID, Prompt: prompt, DispatchOnly: dispatchOnly})
 	promptAgentFunc := m.promptAgentFunc
+	reachedTarget := m.promptCallTarget > 0 && len(m.capturedPrompts) == m.promptCallTarget
 	promptErr := m.promptErr
 	promptResult := m.promptResult
 	doneCh := m.promptDone
+	callsDoneCh := m.promptCallsDone
 	m.mu.Unlock()
 	if first && doneCh != nil {
 		close(doneCh)
+	}
+	if reachedTarget && callsDoneCh != nil {
+		close(callsDoneCh)
 	}
 	if promptAgentFunc != nil {
 		return promptAgentFunc(ctx, executionID, prompt, attachments, dispatchOnly)
@@ -748,8 +760,9 @@ func TestHandleAgentReadyGuards(t *testing.T) {
 		if _, err := svc.messageQueue.QueueMessage(ctx, "s1", "t1", "queued", "", messagequeue.QueuedByUser, false, nil); err != nil {
 			t.Fatalf("failed to queue message: %v", err)
 		}
-		svc.cancelInFlight.Store("s1", struct{}{})
-		defer svc.cancelInFlight.Delete("s1")
+		lock := svc.getCancelInFlightLock("s1")
+		lock.Lock()
+		defer lock.Unlock()
 
 		svc.handleAgentReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
 

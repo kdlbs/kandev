@@ -854,8 +854,9 @@ func TestHandleAgentBootReady_DoesNotDrainWhileCancelInFlight(t *testing.T) {
 	); err != nil {
 		t.Fatalf("queue prompt: %v", err)
 	}
-	svc.cancelInFlight.Store("s1", struct{}{})
-	defer svc.cancelInFlight.Delete("s1")
+	lock := svc.getCancelInFlightLock("s1")
+	lock.Lock()
+	defer lock.Unlock()
 
 	svc.handleAgentBootReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
 

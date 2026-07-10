@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -16,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
@@ -2530,9 +2532,25 @@ func (s *Service) DrainQueuedMessage(ctx context.Context, sessionID string) (boo
 	return s.drainQueuedMessageForPromptableSession(ctx, sessionID), nil
 }
 
+// getCancelInFlightLock returns the per-session mutex guarding cancel/
+// interrupt/queue-take decisions for sessionID, creating one if it doesn't
+// exist yet. See the cancelInFlight field doc comment for the full list of
+// callers that must share this one lock.
+func (s *Service) getCancelInFlightLock(sessionID string) *sync.Mutex {
+	val, _ := s.cancelInFlight.LoadOrStore(sessionID, &sync.Mutex{})
+	return val.(*sync.Mutex)
+}
+
+// isCancelInFlight reports whether sessionID's cancelInFlight lock is
+// currently held by someone else, without itself claiming it — a
+// TryLock-then-immediately-Unlock peek rather than a real acquisition.
 func (s *Service) isCancelInFlight(sessionID string) bool {
-	_, ok := s.cancelInFlight.Load(sessionID)
-	return ok
+	lock := s.getCancelInFlightLock(sessionID)
+	if lock.TryLock() {
+		lock.Unlock()
+		return false
+	}
+	return true
 }
 
 // CancelAgent interrupts the current agent turn without terminating the process,
@@ -2553,12 +2571,13 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	// "Turn cancelled by user" message and races on turn cleanup — the second
 	// call's getActiveTurnID lazily starts a phantom turn after the first call
 	// already closed the real one.
-	if _, busy := s.cancelInFlight.LoadOrStore(sessionID, struct{}{}); busy {
+	lock := s.getCancelInFlightLock(sessionID)
+	if !lock.TryLock() {
 		s.logger.Debug("cancel already in flight; skipping duplicate",
 			zap.String("session_id", sessionID))
 		return nil
 	}
-	defer s.cancelInFlight.Delete(sessionID)
+	defer lock.Unlock()
 
 	// Fetch session for state updates and message creation
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
@@ -2658,37 +2677,23 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	return nil
 }
 
-// InterruptForPeerMessage cancels sessionID's in-flight turn and immediately
-// takes and dispatches entryID — the specific message that triggered this
-// interrupt — instead of waiting for the turn to end naturally. It is used
-// only by handleMessageTask (mcp/handlers) when the sender is the target
-// task's parent: a long-running child otherwise leaves its parent's
-// control/steer messages parked on the FIFO queue until the child's current
-// turn finishes on its own, and with several such children running in
-// parallel the per-session queue can fill up to
-// messagequeue.DefaultMaxPerSession before any of them are delivered.
-//
-// entryID must target the message the caller just queued for this same
-// interrupt (see queueThenInterruptTaskMessage), not merely the FIFO head:
-// the target session may already have older queued entries (e.g. from a
-// sibling task) ahead of it, and taking the FIFO head in that case would
-// dispatch the older message while leaving the parent's urgent one parked
-// exactly as before the interrupt — defeating the point of interrupting at
-// all. If entryID is empty or was already taken by a concurrent path (lost
-// race with a normal turn-completion drain — a plain not-found result, not
-// a repository error), this falls back to draining whatever is at the
-// FIFO head so the newly-idle session still picks
-// something up. A genuine repository error on the targeted take is
-// propagated instead of falling back: an error says nothing about which
-// entry is actually at the FIFO head, and dispatching it anyway would risk
+// cancelAndTakeForPeerMessage cancels sessionID's in-flight turn and takes
+// and dispatches entryID — the specific message that triggered this
+// interrupt — falling back to draining the FIFO head only if the targeted
+// take doesn't find it (a benign not-found, e.g. already taken by a
+// concurrent path). entryID must be non-empty: the only caller,
+// QueueAndInterruptForPeerMessage, always passes the entry it just
+// inserted. A genuine repository error on the targeted take is propagated
+// instead of falling back: an error says nothing about which entry is
+// actually at the FIFO head, and dispatching it anyway would risk
 // delivering the wrong message while the caller still reports "sent" for
-// the parent's (see queueThenInterruptTaskMessage's use of the bool).
+// the parent's.
 //
-// The returned bool reports whether THIS call actually dispatched a
-// message — false when skipped because a cancel was already in flight for
-// sessionID (the busy branch below), or when nothing was available to take.
-// Callers (queueThenInterruptTaskMessage) must not report immediate
-// delivery ("sent") for a false result: the caller's message is still only
+// The caller must already hold sessionID's cancelInFlight lock; this
+// neither acquires nor releases it — see QueueAndInterruptForPeerMessage.
+//
+// The returned bool reports whether this call actually dispatched a
+// message; a false result means the caller's message is still only
 // queued, to be delivered later by whichever drain gets to it.
 //
 // Deliberately mirrors cancelAgentSilent + dispatchTakenQueuedMessage rather
@@ -2696,20 +2701,11 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 // signal from the parent, not a user action, so unlike the cancel button it
 // must not write a visible "Turn cancelled" message and must not move the
 // task to REVIEW (writeTaskReviewStateOnCancel).
-func (s *Service) InterruptForPeerMessage(ctx context.Context, taskID, sessionID, entryID string) (bool, error) {
-	if _, busy := s.cancelInFlight.LoadOrStore(sessionID, struct{}{}); busy {
-		s.logger.Debug("interrupt for peer message skipped; a cancel is already in flight",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID))
-		return false, nil
-	}
-	defer s.cancelInFlight.Delete(sessionID)
-
+func (s *Service) cancelAndTakeForPeerMessage(ctx context.Context, taskID, sessionID, entryID string) (bool, error) {
 	if err := s.cancelAgentSilent(ctx, taskID, sessionID); err != nil {
 		return false, fmt.Errorf("interrupt for peer message: %w", err)
 	}
-
-	if entryID != "" && s.messageQueue != nil {
+	if s.messageQueue != nil {
 		queuedMsg, ok, err := s.messageQueue.TakeQueuedEntry(ctx, sessionID, entryID)
 		if err != nil {
 			return false, fmt.Errorf("take targeted queued message: %w", err)
@@ -2719,6 +2715,59 @@ func (s *Service) InterruptForPeerMessage(ctx context.Context, taskID, sessionID
 		}
 	}
 	return s.drainQueuedMessageForPromptableSession(ctx, sessionID), nil
+}
+
+// QueueAndInterruptForPeerMessage atomically queues prompt for sessionID
+// and then interrupts the child's in-flight turn to deliver it immediately,
+// instead of waiting for the turn to end naturally. It is used only by
+// handleMessageTask (mcp/handlers) when the sender is the target task's
+// parent: a long-running child otherwise leaves its parent's control/steer
+// messages parked on the FIFO queue until the child's current turn finishes
+// on its own, and with several such children running in parallel the
+// per-session queue can fill up to messagequeue.DefaultMaxPerSession before
+// any of them are delivered.
+//
+// This must be one atomic operation rather than "queue, then separately
+// interrupt" (the original two-step split across the handlers/orchestrator
+// boundary): between an insert becoming visible and a later, separate
+// interrupt call acquiring the session's cancelInFlight lock, the child's
+// turn can complete naturally and handleAgentReady's normal FIFO drain can
+// grab the just-queued entry and start dispatching it as an ordinary turn —
+// only for the later interrupt's cancel to land on and kill that very turn,
+// orphaning the parent's message mid-delivery. Taking the lock before the
+// queue insert closes that: handleAgentReady and handleAgentBootReady's
+// take-decision claims (TryLock, not a passive peek) the exact same lock
+// before their own take, so neither can ever observe — and steal — an
+// entry this call is still in the process of queueing-and-claiming.
+//
+// The lock is a genuine, blocking claim (Lock, mirroring
+// executor.Executor.getSessionLock's precedent for per-session mutual
+// exclusion in this codebase) — not a try-once peek with a fallback
+// unguarded insert. Working around a busy lock with an unguarded insert
+// would leave that insert visible to nobody in particular: the current
+// holder may have already finished its own take-or-skip decision before
+// the insert lands, and nothing then guarantees a future drain (the
+// session can go idle with no further agent.ready to retry on). Every
+// existing holder already bounds its own hold time through an independent
+// mechanism (cancelAgentSilent's underlying agent-cancel escalation
+// timeout, or a single fast DB round-trip in the natural-drain paths), so
+// blocking here adds no new deadlock risk.
+func (s *Service) QueueAndInterruptForPeerMessage(ctx context.Context, taskID, sessionID, prompt string, metadata map[string]interface{}) (*messagequeue.QueuedMessage, bool, error) {
+	if s.messageQueue == nil {
+		return nil, false, errors.New("message queue not available")
+	}
+	lock := s.getCancelInFlightLock(sessionID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	queued, err := s.messageQueue.QueueMessageWithMetadata(ctx, sessionID, taskID, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata)
+	if err != nil {
+		return nil, false, err
+	}
+	s.publishQueueStatusEvent(ctx, sessionID)
+
+	dispatched, err := s.cancelAndTakeForPeerMessage(ctx, taskID, sessionID, queued.ID)
+	return queued, dispatched, err
 }
 
 // CompleteTask explicitly completes a task and stops all its agents

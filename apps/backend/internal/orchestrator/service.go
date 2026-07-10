@@ -403,10 +403,18 @@ type Service struct {
 	// activity before triggering fallback resume.
 	clarificationWatchdogTimeout time.Duration
 
-	// cancelInFlight tracks sessionIDs whose CancelAgent call is currently in
-	// progress. It deduplicates impatient retries from the UI and lets late
-	// agent.ready/boot_ready events from the cancelled turn return before they
-	// evaluate workflow transitions or drain queued messages.
+	// cancelInFlight holds a per-session *sync.Mutex (via getCancelInFlightLock)
+	// serializing every operation that cancels a session's turn and/or decides
+	// what to take-and-dispatch from its message queue next: CancelAgent (the
+	// user cancel button — TryLock, dedup impatient retries), the natural
+	// turn-completion/boot-ready drain decision in handleAgentReady /
+	// handleAgentBootReady (TryLock, skip if a cancel/interrupt owns it), and
+	// QueueAndInterruptForPeerMessage (blocking Lock — must wait rather than
+	// work around a busy lock with an unguarded insert; see its doc comment).
+	// All of these must go through this one lock — a second, independent
+	// lock for any of them would defeat the mutual exclusion the others rely
+	// on to avoid racing each other's take-and-dispatch decision for the same
+	// session.
 	cancelInFlight sync.Map
 
 	// transientRetries tracks in-progress transient-provider-error (529
