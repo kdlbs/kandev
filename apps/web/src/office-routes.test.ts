@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveActiveOfficeWorkspaceId } from "./office-routes";
+import { idParamsPromise, resolveActiveOfficeWorkspaceId } from "./office-routes";
 
 describe("resolveActiveOfficeWorkspaceId", () => {
   const wsOffice1 = "ws-office-1";
@@ -66,5 +66,27 @@ describe("resolveActiveOfficeWorkspaceId", () => {
     );
 
     expect(activeId).toBe(wsOffice1);
+  });
+});
+
+describe("idParamsPromise", () => {
+  // The helper backs Next-style `params: Promise<{ id }>` props consumed via
+  // `use(params)`. Every call site inside `renderOfficeRoute` runs on each
+  // render of `OfficeRoutes`, so identity must be stable across calls or the
+  // enclosing `<Suspense>` re-suspends forever and hides the office tree.
+  it("returns the same promise instance for the same id", () => {
+    const a = idParamsPromise("agent-123");
+    const b = idParamsPromise("agent-123");
+    expect(a).toBe(b);
+  });
+
+  it("returns distinct promises for different ids", () => {
+    const a = idParamsPromise("agent-123");
+    const b = idParamsPromise("agent-456");
+    expect(a).not.toBe(b);
+  });
+
+  it("resolves to an object with the requested id", async () => {
+    await expect(idParamsPromise("agent-789")).resolves.toEqual({ id: "agent-789" });
   });
 });

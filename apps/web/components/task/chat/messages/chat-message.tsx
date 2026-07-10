@@ -21,6 +21,8 @@ import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
 import { markdownComponents } from "@/components/shared/markdown-components";
 import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
 import { useAppStore } from "@/components/state-provider";
+import { HoverCard, HoverCardTrigger, HoverCardContent } from "@kandev/ui/hover-card";
+import { PromptPreview } from "@/components/task/chat/context-items/prompt-preview";
 import {
   buildPromptMentionNames,
   splitPreparedPromptMentionSegments,
@@ -246,17 +248,60 @@ function renderTextWithPromptMentions(text: string, promptNames: string[], keyPr
   return splitPreparedPromptMentionSegments(text, promptNames).map((segment, index) => {
     if (segment.kind === "text") return segment.value;
     return (
-      <span
+      <PromptMentionChip
         key={`${keyPrefix}-prompt-${index}`}
-        data-testid="custom-prompt-mention"
-        data-prompt-name={segment.name}
-        title={`Custom prompt: ${segment.name}`}
-        className="inline rounded-md border border-emerald-300/35 bg-emerald-400/20 px-1.5 py-0.5 font-mono text-[0.88em] font-semibold text-emerald-950 box-decoration-clone break-all dark:text-emerald-100"
-      >
-        {segment.value}
-      </span>
+        name={segment.name}
+        value={segment.value}
+      />
     );
   });
+}
+
+const PROMPT_MENTION_CHIP_CLASS =
+  "inline rounded-md border border-emerald-300/35 bg-emerald-400/20 px-1.5 py-0.5 font-mono text-[0.88em] font-semibold text-emerald-950 box-decoration-clone break-all dark:text-emerald-100";
+
+/**
+ * Renders a saved-prompt @mention as a chip. When the referenced prompt is
+ * loaded in the store, hovering the chip reveals its contents so the reader
+ * doesn't need to switch to the raw message view.
+ */
+function PromptMentionChip({ name, value }: { name: string; value: string }) {
+  const content = useAppStore(
+    useCallback(
+      (state) => state.prompts.items.find((prompt) => prompt.name === name)?.content ?? null,
+      [name],
+    ),
+  );
+
+  if (!content) {
+    return (
+      <span
+        data-testid="custom-prompt-mention"
+        data-prompt-name={name}
+        title={`Custom prompt: ${name}`}
+        className={PROMPT_MENTION_CHIP_CLASS}
+      >
+        {value}
+      </span>
+    );
+  }
+
+  return (
+    <HoverCard openDelay={300} closeDelay={0}>
+      <HoverCardTrigger asChild>
+        <span
+          data-testid="custom-prompt-mention"
+          data-prompt-name={name}
+          className={cn(PROMPT_MENTION_CHIP_CLASS, "cursor-default")}
+        >
+          {value}
+        </span>
+      </HoverCardTrigger>
+      <HoverCardContent side="top" align="start" className="w-80 max-h-80 overflow-y-auto">
+        <PromptPreview content={content} />
+      </HoverCardContent>
+    </HoverCard>
+  );
 }
 
 function parseUserMessageMetadata(comment: Message) {

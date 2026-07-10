@@ -177,4 +177,20 @@ test.describe("Agent dashboard", () => {
     await expect(testPage.getByTestId("stacked-bar").first()).toBeVisible({ timeout: 15_000 });
     await expect(testPage.locator('[data-segment-key="succeeded"]').first()).toBeAttached();
   });
+
+  test("dashboard content is not hidden by a stuck Suspense boundary", async ({
+    testPage,
+    officeSeed,
+  }) => {
+    // Regression guard for a React 19 Suspense loop caused by feeding
+    // `use(params)` a fresh `Promise.resolve({ id })` on every render of
+    // `OfficeRoutes`. Symptom: the dashboard tree lived in the DOM but the
+    // office wrapper was stuck with `display: none !important` from
+    // React's `hideInstance` because the enclosing Suspense kept re-entering
+    // fallback. `toBeVisible()` traverses ancestors, so it catches the case
+    // where a parent hides the subtree even though the target is attached.
+    await testPage.goto(`/office/agents/${officeSeed.agentId}/dashboard`);
+    await expect(testPage.getByTestId("agent-detail-section")).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByTestId("agent-dashboard-view")).toBeVisible({ timeout: 15_000 });
+  });
 });

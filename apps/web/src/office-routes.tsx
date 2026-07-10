@@ -130,6 +130,23 @@ export function resolveOfficeHomeSetupRedirect(
   return hasOfficeWorkspace(workspaceItems) ? null : "/office/setup?mode=new";
 }
 
+// The Next.js App Router page/layout convention passes route params as a
+// Promise so async server components can `await` them. In this SPA we render
+// those same components with `Promise.resolve({ id })`, but every render of
+// `OfficeRoutes` would otherwise mint a fresh Promise identity. That makes
+// `use(params)` in the consumer re-suspend forever, keeping the enclosing
+// `<Suspense>` in fallback and hiding the office tree (`display: none`).
+// Caching the resolved promise per id keeps identity stable across renders.
+const idParamsPromiseCache = new Map<string, Promise<{ id: string }>>();
+export function idParamsPromise(id: string): Promise<{ id: string }> {
+  let promise = idParamsPromiseCache.get(id);
+  if (!promise) {
+    promise = Promise.resolve({ id });
+    idParamsPromiseCache.set(id, promise);
+  }
+  return promise;
+}
+
 function renderOfficeRoute(pathname: string) {
   const agentRoute = matchAgentRoute(pathname);
   if (agentRoute) {
@@ -138,7 +155,7 @@ function renderOfficeRoute(pathname: string) {
 
   const projectId = matchSingle(pathname, /^\/office\/projects\/([^/]+)$/);
   if (projectId) {
-    return <ProjectDetailPage params={Promise.resolve({ id: projectId })} />;
+    return <ProjectDetailPage params={idParamsPromise(projectId)} />;
   }
 
   const routineId = matchSingle(pathname, /^\/office\/routines\/([^/]+)$/);
@@ -148,7 +165,7 @@ function renderOfficeRoute(pathname: string) {
 
   const taskId = matchSingle(pathname, /^\/office\/tasks\/([^/]+)$/);
   if (taskId) {
-    return <IssueDetailPage params={Promise.resolve({ id: taskId })} />;
+    return <IssueDetailPage params={idParamsPromise(taskId)} />;
   }
 
   return OFFICE_ROUTES[pathname]?.() ?? <OfficeRouteFallback pathname={pathname} />;
@@ -276,7 +293,7 @@ type AgentRouteMatch = {
 };
 
 function renderAgentRoute(route: AgentRouteMatch) {
-  const params = Promise.resolve({ id: route.id });
+  const params = idParamsPromise(route.id);
   if (route.bare) {
     return (
       <AgentDetailLayout params={params}>
