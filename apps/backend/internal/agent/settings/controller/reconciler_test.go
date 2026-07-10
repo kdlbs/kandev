@@ -346,6 +346,41 @@ func TestProfileReconciler_CleansOrphanProfiles(t *testing.T) {
 	}
 }
 
+// TestProfileReconciler_DoesNotCleanOrphansWhenRegistryEmpty guards against
+// kdlbs/kandev#1652: a registry that hasn't finished loading yet (boot race,
+// a reload racing with reconciliation, a discovery hiccup) also reports zero
+// enabled agents via ListEnabled(), indistinguishable from "every agent type
+// was genuinely removed". Every built-in agent type hardcodes
+// Enabled() == true, so an empty enabled set can never legitimately mean the
+// latter. cleanupOrphans must fail closed and skip the whole pass instead of
+// soft-deleting every profile for every configured agent in one batch.
+func TestProfileReconciler_DoesNotCleanOrphansWhenRegistryEmpty(t *testing.T) {
+	st := newFakeStore()
+	// A previously-provisioned agent with a live profile, as if the app had
+	// booted normally before this reconciliation pass.
+	dbAgent := &models.Agent{Name: "claude-acp"}
+	_ = st.CreateAgent(context.Background(), dbAgent)
+	liveProfile := &models.AgentProfile{AgentID: dbAgent.ID, Name: "Sonnet 4.6", Model: "claude-sonnet"}
+	_ = st.CreateAgentProfile(context.Background(), liveProfile)
+
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	// Empty registry: nothing registered yet, modelling the transient
+	// not-ready state rather than a genuine removal of every agent type.
+	reg := registry.NewRegistry(log)
+	caps := &fakeCapReader{caps: map[string]hostutility.AgentCapabilities{}}
+	r := NewProfileReconciler(caps, reg, st, log)
+
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(st.softDeleted) != 0 {
+		t.Fatalf("expected no profiles soft-deleted when registry reports zero enabled agents, got %v", st.softDeleted)
+	}
+}
+
 // newDiscoveryController builds a Controller with just the dependencies that
 // syncAgentFromDiscovery touches: the agent registry, the store, and a logger.
 func newDiscoveryController(t *testing.T, st *fakeStore, ag agents.Agent) *Controller {

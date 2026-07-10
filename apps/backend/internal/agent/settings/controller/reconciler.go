@@ -62,8 +62,9 @@ func (r *ProfileReconciler) Run(ctx context.Context) error {
 		return fmt.Errorf("reconciler not fully configured")
 	}
 
-	// Orphan cleanup first: removed agents can't come back, regardless of
-	// probe state, so we can clean these unconditionally.
+	// Orphan cleanup first: removed agents can't come back, so we run this
+	// regardless of per-agent probe state (see cleanupOrphans for the
+	// fail-closed guard against a not-yet-populated registry).
 	r.cleanupOrphans(ctx)
 
 	// Walk enabled inference agents and reconcile each one.
@@ -82,10 +83,23 @@ func (r *ProfileReconciler) Run(ctx context.Context) error {
 // behind by the removed streamjson-based variants). The settings store keys
 // each DB agent by a UUID in `id`, with the registry-facing identifier stored
 // in `name` — we match against the registry on `name`.
+//
+// Fails closed on an empty enabled set: every built-in agent type hardcodes
+// Enabled() == true, so ListEnabled() returning zero agents can never
+// legitimately mean "every agent type was removed" — it means the registry
+// hasn't finished loading yet (boot race, a reload racing with
+// reconciliation, a discovery hiccup). Trusting that empty result as
+// authoritative soft-deletes every profile for every configured agent in a
+// single pass, which is exactly what happened in kdlbs/kandev#1652.
 func (r *ProfileReconciler) cleanupOrphans(ctx context.Context) {
-	enabled := make(map[string]struct{})
-	for _, ag := range r.registry.ListEnabled() {
+	enabledAgents := r.registry.ListEnabled()
+	enabled := make(map[string]struct{}, len(enabledAgents))
+	for _, ag := range enabledAgents {
 		enabled[ag.ID()] = struct{}{}
+	}
+	if len(enabled) == 0 {
+		r.log.Warn("orphan cleanup: skipping pass, registry reported zero enabled agents")
+		return
 	}
 
 	dbAgents, err := r.store.ListAgents(ctx)
@@ -93,6 +107,9 @@ func (r *ProfileReconciler) cleanupOrphans(ctx context.Context) {
 		r.log.Warn("orphan cleanup: list agents failed", zap.Error(err))
 		return
 	}
+	r.log.Info("orphan cleanup: starting pass",
+		zap.Int("enabled_agent_count", len(enabled)),
+		zap.Int("db_agent_count", len(dbAgents)))
 	for _, dbAgent := range dbAgents {
 		if _, ok := enabled[dbAgent.Name]; ok {
 			continue
