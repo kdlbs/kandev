@@ -26,12 +26,15 @@ func TestCatalogPermissionSettings_MergesCursorForce(t *testing.T) {
 	}
 }
 
-func TestCatalogPermissionSettings_MergesCodexCLIFlags(t *testing.T) {
+func TestCatalogPermissionSettings_CodexDoesNotExposeLegacyCLIFlags(t *testing.T) {
 	catalog := CatalogPermissionSettings(NewCodexACP())
-	if len(codexACPPermSettings) != 2 {
-		t.Fatalf("codexACPPermSettings len = %d, want 2", len(codexACPPermSettings))
+	if len(codexACPPermSettings) != 0 {
+		t.Fatalf("codexACPPermSettings len = %d, want 0", len(codexACPPermSettings))
 	}
-	if _, ok := catalog["config_approval_policy_never"]; !ok {
-		t.Fatal("missing codex config_approval_policy_never")
+	if _, ok := catalog["config_approval_policy_never"]; ok {
+		t.Fatal("codex catalog must not include old config_approval_policy_never CLI flag")
+	}
+	if catalog[PermissionKeyAutoApprove].ApplyMethod != PermissionApplyMethodAgentctlAutoApprove {
+		t.Fatal("codex auto_approve must be agentctl-managed")
 	}
 }

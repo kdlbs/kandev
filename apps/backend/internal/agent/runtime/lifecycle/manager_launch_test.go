@@ -276,7 +276,7 @@ func TestConfigureAndStartAgent_DoesNotSendTaskDescriptionEnv(t *testing.T) {
 		TaskID:         "task-1",
 		SessionID:      "session-1",
 		AgentProfileID: "profile-1",
-		AgentCommand:   "npx -y @zed-industries/codex-acp",
+		AgentCommand:   "npx -y @agentclientprotocol/codex-acp",
 		WorkspacePath:  t.TempDir(),
 		Metadata: map[string]interface{}{
 			"runtime_env":      map[string]string{"KEEP_ME": "yes"},
@@ -289,7 +289,7 @@ func TestConfigureAndStartAgent_DoesNotSendTaskDescriptionEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("configureAndStartAgent() error = %v", err)
 	}
-	if bootCommand != "npx -y @zed-industries/codex-acp" {
+	if bootCommand != "npx -y @agentclientprotocol/codex-acp" {
 		t.Fatalf("bootCommand = %q, want agent command", bootCommand)
 	}
 	if configuredEnv["KEEP_ME"] != "yes" {
@@ -311,7 +311,7 @@ func TestConfigureAndStartAgent_SpillsLargeWakePayloadEnv(t *testing.T) {
 		TaskID:         "task-1",
 		SessionID:      "session-1",
 		AgentProfileID: "profile-1",
-		AgentCommand:   "npx -y @zed-industries/codex-acp",
+		AgentCommand:   "npx -y @agentclientprotocol/codex-acp",
 		WorkspacePath:  workspace,
 		Metadata: map[string]interface{}{
 			"runtime_env": map[string]string{
@@ -388,7 +388,7 @@ func newConfigureCaptureAgentctlClient(t *testing.T, log *logger.Logger, capture
 			*captured = req.Env
 			_, _ = w.Write([]byte(`{"success":true}`))
 		case "/api/v1/start":
-			_, _ = w.Write([]byte(`{"success":true,"command":"npx -y @zed-industries/codex-acp"}`))
+			_, _ = w.Write([]byte(`{"success":true,"command":"npx -y @agentclientprotocol/codex-acp"}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}

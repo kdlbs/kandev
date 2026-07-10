@@ -16,11 +16,7 @@ var codexACPLogoLight []byte
 //go:embed logos/codex_dark.svg
 var codexACPLogoDark []byte
 
-const codexACPPkg = "@zed-industries/codex-acp"
-
-// CodexACPSandboxDiskFullReadCLIFlag is the seeded cli_flags text for disk-full-read sandbox access.
-// Single quotes preserve inner JSON double-quotes through cliflags.Tokenise.
-const CodexACPSandboxDiskFullReadCLIFlag = `-c 'sandbox_permissions=["disk-full-read-access"]'`
+const codexACPPkg = "@agentclientprotocol/codex-acp"
 
 var (
 	_ Agent            = (*CodexACP)(nil)
@@ -28,40 +24,19 @@ var (
 	_ InferenceAgent   = (*CodexACP)(nil)
 )
 
-// CodexACP implements Agent for the Zed Industries codex-acp package.
-// It speaks the ACP protocol (JSON-RPC 2.0 over stdin/stdout) via a Rust binary
-// wrapping OpenAI Codex. Used for A/B comparison against the native Codex agent.
+// CodexACP implements Agent for the agentclientprotocol codex-acp package.
+// It speaks the ACP protocol (JSON-RPC 2.0 over stdin/stdout) via the Codex App
+// Server bridge. Used for A/B comparison against the native Codex agent.
 type CodexACP struct {
 	StandardPassthrough
 }
 
-// codexACPPermSettings seeds profile cli_flags for @zed-industries/codex-acp.
-// Values are passed as -c key=value overrides (see codex-acp --help and
-// https://developers.openai.com/codex/config-reference). Toggles default off;
-var codexACPPermSettings = map[string]PermissionSetting{
-	"config_approval_policy_never": {
-		Supported:    true,
-		Default:      false,
-		Label:        "Skip approval prompts (config)",
-		Description:  "-c approval_policy=never (allowed: untrusted, on-request, never, granular)",
-		ApplyMethod:  PermissionApplyMethodCLIFlag,
-		CLIFlag:      "-c",
-		CLIFlagValue: "approval_policy=never",
-	},
-	"config_sandbox_disk_full_read": {
-		Supported:    true,
-		Default:      false,
-		Label:        "Disk full read access (config)",
-		Description:  `-c sandbox_permissions=["disk-full-read-access"] (legacy list; prefer sandbox_mode in config.toml)`,
-		ApplyMethod:  PermissionApplyMethodCLIFlag,
-		CLIFlag:      "-c",
-		CLIFlagValue: `'sandbox_permissions=["disk-full-read-access"]'`,
-	},
-}
+var codexACPPermSettings = emptyPermSettings
 
 // codexPassthroughPermSettings maps passthrough-only toggles to @openai/codex CLI
-// flags. Not returned from PermissionSettings(): @zed-industries/codex-acp only
-// accepts -c/--config overrides; ACP auto-approve uses agentctl approval_policy.
+// flags. Not returned from PermissionSettings(): ACP auto-approve uses
+// agentctl approval_policy/session mode, while the @agentclientprotocol/codex-acp
+// server does not accept the old @zed-industries/codex-acp -c overrides.
 // The legacy --full-auto flag was removed; auto_approve uses --ask-for-approval never.
 var codexPassthroughPermSettings = map[string]PermissionSetting{
 	PermissionKeyAutoApprove: {
@@ -99,7 +74,7 @@ func (a *CodexACP) ID() string          { return "codex-acp" }
 func (a *CodexACP) Name() string        { return "Codex ACP Agent" }
 func (a *CodexACP) DisplayName() string { return "Codex" }
 func (a *CodexACP) Description() string {
-	return "OpenAI Codex coding agent using the ACP protocol via the Zed Industries bridge."
+	return "OpenAI Codex coding agent using the ACP protocol via the agentclientprotocol bridge."
 }
 func (a *CodexACP) Enabled() bool     { return true }
 func (a *CodexACP) DisplayOrder() int { return 2 }
@@ -188,8 +163,7 @@ func (a *CodexACP) LoginCommand() *LoginCommand {
 }
 
 // Install both the user-facing OpenAI codex CLI (which `codex login` runs
-// against) and the ACP bridge package — the bridge wraps codex internally
-// and depends on it being on PATH.
+// against) and the ACP bridge package.
 func (a *CodexACP) InstallScript() string {
 	return "npm install -g @openai/codex " + codexACPPkg
 }

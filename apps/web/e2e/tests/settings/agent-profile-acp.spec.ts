@@ -5,7 +5,7 @@ import { SessionPage } from "../../pages/session-page";
  * Verifies the ACP-first profile editor:
  *
  * - Universal agentctl auto-approve toggle renders with danger styling.
- * - Codex curated `-c` config toggles render (off by default).
+ * - Codex does not render legacy Zed adapter `-c` config toggles.
  * - Profile name edits persist across reload (exercises the new AgentProfile
  *   DTO shape with `mode` / `migrated_from` columns).
  * - Mode picker renders when the agent's capability cache advertises modes.
@@ -38,10 +38,10 @@ test.describe("Agent profile — ACP-first", () => {
     if (agent.name === "codex-acp") {
       await expect(
         testPage.getByTestId("cli-flag-curated-config_approval_policy_never"),
-      ).toBeVisible();
+      ).toHaveCount(0);
       await expect(
         testPage.getByTestId("cli-flag-curated-config_sandbox_disk_full_read"),
-      ).toBeVisible();
+      ).toHaveCount(0);
     }
 
     // The mock agent advertises modes, so the mode picker is rendered.

@@ -61,30 +61,13 @@ func TestSeedCLIFlags_EmptyForAgentWithNoCurated(t *testing.T) {
 	}
 }
 
-// TestSeedCLIFlags_FromCodexACP seeds codex-acp -c config overrides (off by
-// default) and never @openai/codex passthrough flags like --ask-for-approval.
-func TestSeedCLIFlags_FromCodexACP(t *testing.T) {
+// TestSeedCLIFlags_EmptyForCodexACP verifies the new Codex ACP adapter does
+// not seed the old @zed-industries/codex-acp -c config overrides.
+func TestSeedCLIFlags_EmptyForCodexACP(t *testing.T) {
 	flags := seedCLIFlags(agents.NewCodexACP())
 
-	want := map[string]bool{
-		"-c approval_policy=never":                false,
-		agents.CodexACPSandboxDiskFullReadCLIFlag: false,
-	}
-	if len(flags) != len(want) {
-		t.Fatalf("expected %d seeded flags, got %d: %+v", len(want), len(flags), flags)
-	}
-	for _, f := range flags {
-		enabled, ok := want[f.Flag]
-		if !ok {
-			t.Errorf("unexpected seeded flag: %q", f.Flag)
-			continue
-		}
-		if f.Enabled != enabled {
-			t.Errorf("%q: Enabled=%v, want %v", f.Flag, f.Enabled, enabled)
-		}
-		if f.Description == "" {
-			t.Errorf("%q: missing Description", f.Flag)
-		}
+	if len(flags) != 0 {
+		t.Fatalf("expected no seeded flags for codex-acp, got %+v", flags)
 	}
 }
 
