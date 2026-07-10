@@ -423,7 +423,10 @@ func TestProcessOnTurnCompleteViaEngine_NonTerminalStepWritesTaskStateReview(t *
 	setSessionExecID(t, repo, "s1", "exec-1")
 	setSessionState(t, ctx, repo, "s1", models.TaskSessionStateRunning)
 
-	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		isAgentRunning:         true,
+	}
 	svc := createEngineService(t, repo, sg, agentMgr)
 	taskRepo := svc.taskRepo.(*mockTaskRepo)
 	seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
