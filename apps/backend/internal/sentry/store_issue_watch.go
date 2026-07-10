@@ -271,6 +271,17 @@ func (s *Store) StampIssueWatchError(ctx context.Context, id, cause string) erro
 	return err
 }
 
+// ClearIssueWatchError removes the non-fatal poll error state after a
+// successful watch check so the settings UI reflects current health.
+func (s *Store) ClearIssueWatchError(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE sentry_issue_watches
+		   SET last_error = '', last_error_at = NULL, updated_at = ?
+		 WHERE id = ? AND (last_error <> '' OR last_error_at IS NOT NULL)`,
+		time.Now().UTC(), id)
+	return err
+}
+
 // DeleteIssueWatch removes a watch and its dedup rows in a single transaction.
 // The explicit child DELETE guards older databases where foreign_keys may not
 // have been enabled at attach time.

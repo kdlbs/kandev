@@ -148,10 +148,13 @@ export function projectSelectItems(projects: SentryProject[], current: string): 
 
 // isWatchFormReady aggregates the dialog's "can Save enable?" rule. Kept here
 // so the rule has one named home and the dialog stays under its line limit.
-export function isWatchFormReady(form: FormState): boolean {
+export function isWatchFormReady(
+  form: FormState,
+  { requiresInstance = true }: { requiresInstance?: boolean } = {},
+): boolean {
   return (
     !!form.workspaceId &&
-    !!form.sentryInstanceId &&
+    (!requiresInstance || !!form.sentryInstanceId) &&
     !!form.orgSlug.trim() &&
     !!form.projectSlug.trim() &&
     !!form.workflowId &&

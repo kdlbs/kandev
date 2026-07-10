@@ -87,7 +87,7 @@ function renderDialog(provider: "jira" | "linear" | "sentry" = "jira") {
   );
 }
 
-describe("TaskExternalLinkDialog", () => {
+describe("TaskExternalLinkDialog — Jira and Linear", () => {
   it("validates and links a Jira ticket by updating the task title", async () => {
     vi.mocked(getJiraTicket).mockResolvedValue({ key: "PROJ-12" } as never);
     vi.mocked(updateTask).mockResolvedValue({ id: TASK_ID, title: "PROJ-12: Fix login" } as never);
@@ -121,7 +121,9 @@ describe("TaskExternalLinkDialog", () => {
     });
     expect(updateTask).toHaveBeenCalledWith(TASK_ID, { title: "ENG-20: Fix login" });
   });
+});
 
+describe("TaskExternalLinkDialog — Sentry linking", () => {
   it("auto-selects the sole healthy Sentry instance and links against it", async () => {
     mockSentryInstances("single", [instance("inst-1", "Production")]);
     vi.mocked(getSentryIssue).mockResolvedValue({ shortId: "API-42" } as never);
@@ -173,7 +175,9 @@ describe("TaskExternalLinkDialog", () => {
     fireEvent.click(submit);
     expect(getSentryIssue).not.toHaveBeenCalled();
   });
+});
 
+describe("TaskExternalLinkDialog — validation", () => {
   it("shows an inline validation error for invalid input", async () => {
     renderDialog("jira");
 
@@ -192,5 +196,32 @@ describe("TaskExternalLinkDialog", () => {
     });
 
     expect(screen.queryByTestId(ERROR_TEST_ID)).toBeNull();
+  });
+});
+
+describe("TaskExternalLinkDialog — Sentry availability", () => {
+  it("clears a selected Sentry instance when it is no longer healthy", async () => {
+    mockSentryInstances("multi", [
+      instance("inst-1", "Production"),
+      instance("inst-2", "Self-hosted"),
+    ]);
+    renderDialog("sentry");
+
+    fireEvent.change(screen.getByTestId(INPUT_TEST_ID), { target: { value: "PROJ-1" } });
+    fireEvent.click(screen.getByTestId(INSTANCE_SELECT_TEST_ID));
+    fireEvent.click(await screen.findByRole("option", { name: "Production" }));
+    await waitFor(() => {
+      expect((screen.getByTestId(SUBMIT_TEST_ID) as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    mockSentryInstances("multi", [
+      instance("inst-2", "Self-hosted"),
+      instance("inst-3", "Staging"),
+    ]);
+    fireEvent.change(screen.getByTestId(INPUT_TEST_ID), { target: { value: "PROJ-2" } });
+
+    await waitFor(() => {
+      expect((screen.getByTestId(SUBMIT_TEST_ID) as HTMLButtonElement).disabled).toBe(true);
+    });
   });
 });

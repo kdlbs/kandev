@@ -193,7 +193,11 @@ func (s *Service) CreateInstance(ctx context.Context, workspaceID string, req *C
 	}
 	if req.Secret != "" && s.secrets != nil {
 		if err := s.secrets.Set(ctx, secretKeyForInstance(cfg.ID), "Sentry auth token", req.Secret); err != nil {
-			return nil, fmt.Errorf("store sentry secret: %w", err)
+			secretErr := fmt.Errorf("store sentry secret: %w", err)
+			if rollbackErr := s.store.DeleteInstance(context.WithoutCancel(ctx), cfg.ID); rollbackErr != nil {
+				return nil, errors.Join(secretErr, fmt.Errorf("rollback created sentry instance: %w", rollbackErr))
+			}
+			return nil, secretErr
 		}
 	}
 	s.invalidateClient(cfg.ID)
@@ -215,15 +219,22 @@ func (s *Service) UpdateInstance(ctx context.Context, workspaceID, id string, re
 	if err := validateInstanceWrite(req.Name, &authMethod, &instanceURL); err != nil {
 		return nil, err
 	}
-	existing.Name = strings.TrimSpace(req.Name)
-	existing.AuthMethod = authMethod
-	existing.URL = instanceURL
-	if err := s.store.UpdateInstance(ctx, existing); err != nil {
+	previous := *existing
+	updated := previous
+	updated.Name = strings.TrimSpace(req.Name)
+	updated.AuthMethod = authMethod
+	updated.URL = instanceURL
+	if err := s.store.UpdateInstance(ctx, &updated); err != nil {
 		return nil, err
 	}
 	if req.Secret != "" && s.secrets != nil {
 		if err := s.secrets.Set(ctx, secretKeyForInstance(id), "Sentry auth token", req.Secret); err != nil {
-			return nil, fmt.Errorf("store sentry secret: %w", err)
+			secretErr := fmt.Errorf("store sentry secret: %w", err)
+			if rollbackErr := s.store.UpdateInstance(context.WithoutCancel(ctx), &previous); rollbackErr != nil {
+				s.invalidateClient(id)
+				return nil, errors.Join(secretErr, fmt.Errorf("rollback sentry instance update: %w", rollbackErr))
+			}
+			return nil, secretErr
 		}
 	}
 	s.invalidateClient(id)

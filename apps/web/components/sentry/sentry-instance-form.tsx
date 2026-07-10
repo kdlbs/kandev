@@ -163,27 +163,27 @@ function useInstanceForm({ workspaceId, instance, form, onSaved }: UseInstanceFo
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestSentryConnectionResult | null>(null);
 
+  // A saved instance can re-test its stored token only while its URL is
+  // unchanged. Any typed token or URL change is a candidate configuration.
+  const candidateTest = !instance || !!form.secret || form.url !== instance.url;
   const handleTest = useCallback(async () => {
     setTesting(true);
     setTestResult(null);
     try {
-      // A typed secret tests the new credentials; a saved instance with a blank
-      // secret re-tests its stored token.
-      const res =
-        form.secret || !instance
-          ? await testSentryConnection(workspaceId, {
-              secret: form.secret || undefined,
-              url: form.url || undefined,
-              authMethod: SENTRY_AUTH_METHOD,
-            })
-          : await testSentryInstance(workspaceId, instance.id);
+      const res = candidateTest
+        ? await testSentryConnection(workspaceId, {
+            secret: form.secret || undefined,
+            url: form.url || undefined,
+            authMethod: SENTRY_AUTH_METHOD,
+          })
+        : await testSentryInstance(workspaceId, instance!.id);
       setTestResult(res);
     } catch (err) {
       setTestResult({ ok: false, error: String(err) });
     } finally {
       setTesting(false);
     }
-  }, [workspaceId, instance, form.secret, form.url]);
+  }, [workspaceId, instance, candidateTest, form.secret, form.url]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -215,7 +215,7 @@ function useInstanceForm({ workspaceId, instance, form, onSaved }: UseInstanceFo
     }
   }, [workspaceId, instance, form, toast, onSaved]);
 
-  return { saving, testing, testResult, handleTest, handleSave };
+  return { saving, testing, testResult, candidateTest, handleTest, handleSave };
 }
 
 type SentryInstanceFormProps = {
@@ -242,7 +242,7 @@ export function SentryInstanceForm({
       setForm((prev) => ({ ...prev, [key]: value })),
     [],
   );
-  const { saving, testing, testResult, handleTest, handleSave } = useInstanceForm({
+  const { saving, testing, testResult, candidateTest, handleTest, handleSave } = useInstanceForm({
     workspaceId,
     instance,
     form,
@@ -251,13 +251,19 @@ export function SentryInstanceForm({
 
   const hasSavedSecret = !!instance?.hasSecret;
   const missingSecret = !hasSavedSecret && !form.secret;
+  const requiresTestSecret = !form.secret && (candidateTest || missingSecret);
   const disableSave = saving || !form.name.trim() || missingSecret;
-  const disableTest = testing || missingSecret;
+  const disableTest = testing || requiresTestSecret;
   let saveLabel = instance ? "Update" : "Save";
   if (saving) saveLabel = "Saving...";
 
   return (
     <div className="space-y-4 rounded-md border p-4" data-testid={`${idPrefix}-form`}>
+      {instance === null && (
+        <h4 data-testid={`${idPrefix}-form-heading`} className="text-sm font-semibold">
+          New Instance
+        </h4>
+      )}
       <NameField form={form} idPrefix={idPrefix} loading={saving} update={update} />
       <UrlField form={form} idPrefix={idPrefix} loading={saving} update={update} />
       <SecretField
@@ -276,7 +282,7 @@ export function SentryInstanceForm({
           onClick={handleTest}
           disabled={disableTest}
           className="cursor-pointer"
-          title={missingSecret ? "Paste an auth token to test the connection" : undefined}
+          title={requiresTestSecret ? "Paste an auth token to test the connection" : undefined}
           data-testid={`${idPrefix}-test-button`}
         >
           {testing ? "Testing..." : "Test connection"}

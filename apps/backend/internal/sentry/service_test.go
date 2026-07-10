@@ -26,8 +26,14 @@ func (s *slowSecretStore) Reveal(ctx context.Context, id string) (string, error)
 }
 
 type fakeSecretStore struct {
-	mu      sync.Mutex
-	secrets map[string]string
+	mu               sync.Mutex
+	secrets          map[string]string
+	setErr           error
+	setErrAfter      int
+	setErrAfterWrite bool
+	revealErr        error
+	revealErrForID   string
+	deleteMissingErr error
 }
 
 func newFakeSecretStore() *fakeSecretStore {
@@ -37,6 +43,9 @@ func newFakeSecretStore() *fakeSecretStore {
 func (f *fakeSecretStore) Reveal(_ context.Context, id string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.revealErr != nil && (f.revealErrForID == "" || f.revealErrForID == id) {
+		return "", f.revealErr
+	}
 	v, ok := f.secrets[id]
 	if !ok {
 		return "", errors.New("secret not found: " + id)
@@ -47,6 +56,15 @@ func (f *fakeSecretStore) Reveal(_ context.Context, id string) (string, error) {
 func (f *fakeSecretStore) Set(_ context.Context, id, _, value string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.setErr != nil {
+		if f.setErrAfter == 0 {
+			if f.setErrAfterWrite {
+				f.secrets[id] = value
+			}
+			return f.setErr
+		}
+		f.setErrAfter--
+	}
 	f.secrets[id] = value
 	return nil
 }
@@ -54,6 +72,9 @@ func (f *fakeSecretStore) Set(_ context.Context, id, _, value string) error {
 func (f *fakeSecretStore) Delete(_ context.Context, id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if _, ok := f.secrets[id]; !ok && f.deleteMissingErr != nil {
+		return f.deleteMissingErr
+	}
 	delete(f.secrets, id)
 	return nil
 }
@@ -63,6 +84,11 @@ func (f *fakeSecretStore) Exists(_ context.Context, id string) (bool, error) {
 	defer f.mu.Unlock()
 	_, ok := f.secrets[id]
 	return ok, nil
+}
+func (f *fakeSecretStore) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.secrets)
 }
 
 // fakeClient is an in-memory Client for verifying service plumbing.
@@ -207,6 +233,36 @@ func TestService_CreateInstance_PersistsAndStoresSecret(t *testing.T) {
 	}
 }
 
+func TestService_CreateInstance_SecretSetFailureRollsBackAndAllowsRetry(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	injected := errors.New("secret store unavailable")
+	req := &CreateConfigRequest{Name: "SaaS", Secret: "sntrys_xyz"}
+
+	f.secrets.setErr = injected
+	if _, err := f.svc.CreateInstance(ctx, "ws-1", req); !errors.Is(err, injected) {
+		t.Fatalf("expected injected secret error, got %v", err)
+	}
+
+	instances, err := f.store.ListInstances(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list instances after failed create: %v", err)
+	}
+	if len(instances) != 0 {
+		t.Fatalf("failed create left %d instance(s), want 0", len(instances))
+	}
+
+	f.secrets.setErr = nil
+	created, err := f.svc.CreateInstance(ctx, "ws-1", req)
+	if err != nil {
+		t.Fatalf("retry same-name create: %v", err)
+	}
+	if created.Name != req.Name {
+		t.Errorf("retry created unexpected instance: %+v", created)
+	}
+	waitForAuthProbe(t, f)
+}
+
 func TestService_CreateInstance_Validation(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
@@ -307,6 +363,52 @@ func TestService_UpdateInstance_EmptySecretKeepsExisting(t *testing.T) {
 	reloaded, _ := f.svc.GetInstance(ctx, "ws-1", created.ID)
 	if reloaded.Name != "A2" {
 		t.Errorf("name not updated: %q", reloaded.Name)
+	}
+}
+
+func TestService_UpdateInstance_SecretSetFailureRestoresMetadataAndClient(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	created := f.seedInstance(t, "ws-1", "Original", "old-token")
+
+	var builds atomic.Int32
+	f.svc.clientFn = func(_ *SentryConfig, _ string) Client {
+		builds.Add(1)
+		return &fakeClient{}
+	}
+	cached, err := f.svc.clientForInstance(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("cache original client: %v", err)
+	}
+
+	injected := errors.New("secret store unavailable")
+	f.secrets.setErr = injected
+	if _, err := f.svc.UpdateInstance(ctx, "ws-1", created.ID, &UpdateConfigRequest{
+		Name: "Replacement", URL: "https://replacement.example.com", Secret: "new-token",
+	}); !errors.Is(err, injected) {
+		t.Fatalf("expected injected secret error, got %v", err)
+	}
+
+	stored, err := f.store.GetInstance(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("reload instance after failed update: %v", err)
+	}
+	if stored == nil || stored.Name != "Original" || stored.AuthMethod != AuthMethodAuthToken || stored.URL != DefaultSentryURL {
+		t.Fatalf("failed update changed persisted metadata: %+v", stored)
+	}
+	if secret, err := f.secrets.Reveal(ctx, secretKeyForInstance(created.ID)); err != nil || secret != "old-token" {
+		t.Errorf("failed update changed persisted secret: secret=%q err=%v", secret, err)
+	}
+
+	afterFailure, err := f.svc.clientForInstance(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("read client after failed update: %v", err)
+	}
+	if afterFailure != cached {
+		t.Error("failed update replaced the cached client")
+	}
+	if got := builds.Load(); got != 1 {
+		t.Errorf("failed update rebuilt a client: builds=%d", got)
 	}
 }
 
@@ -503,11 +605,9 @@ func TestService_ClientFor_InvalidateDuringBuild(t *testing.T) {
 	}, logger.Default())
 
 	invalidateCh := make(chan struct{})
-	doneCh := make(chan struct{})
 	slow.revealHook = func() {
 		close(invalidateCh)
 		time.Sleep(10 * time.Millisecond)
-		close(doneCh)
 	}
 
 	errCh := make(chan error, 1)

@@ -109,6 +109,18 @@ function useDialogState(open: boolean, workspaceId?: string): DialogState {
   // Monotonic request id: only the most recent search may write results, so an
   // out-of-order response from a superseded search can't clobber the list.
   const searchSeq = useRef(0);
+  const previousWorkspaceId = useRef(workspaceId);
+
+  const resetBrowseState = useCallback((clearProjects = false) => {
+    setFilter(initialFilter);
+    if (clearProjects) setProjects([]);
+    setIssues([]);
+    setNextCursor(undefined);
+    setIsLast(true);
+    setError(null);
+    setConfigLoaded(false);
+    searchSeq.current++;
+  }, []);
 
   // Auto-select the sole healthy instance; force an explicit pick when several;
   // drop a selection that is no longer healthy.
@@ -123,14 +135,17 @@ function useDialogState(open: boolean, workspaceId?: string): DialogState {
   // Switching instance invalidates the previous instance's filter, results and
   // cursor: reset them, invalidate any in-flight search, and refetch projects.
   useEffect(() => {
-    setFilter(initialFilter);
-    setIssues([]);
-    setNextCursor(undefined);
-    setIsLast(true);
-    setError(null);
-    setConfigLoaded(false);
-    searchSeq.current++;
-  }, [instanceId]);
+    resetBrowseState();
+  }, [instanceId, resetBrowseState]);
+
+  // A workspace switch can retain a stale instance selection until availability
+  // finishes loading. Clear the browse state directly instead of waiting for
+  // that selection to change.
+  useEffect(() => {
+    if (previousWorkspaceId.current === workspaceId) return;
+    previousWorkspaceId.current = workspaceId;
+    resetBrowseState(true);
+  }, [workspaceId, resetBrowseState]);
 
   useBrowseProjects({
     open,

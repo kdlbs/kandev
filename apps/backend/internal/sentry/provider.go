@@ -82,11 +82,11 @@ func migrateLegacySecret(store *Store, secrets SecretStore, log *logger.Logger) 
 	}
 }
 
-// migrateInstanceSecrets rekeys each instance's auth token from the legacy
-// secret keys (workspace-scoped, or the install-wide singleton) to the
-// per-instance key. Derived purely from the post-migration instance rows so it
-// re-runs safely after a crash: an instance whose per-instance key already
-// exists is skipped. This is the only live code path that reads the legacy keys.
+// migrateInstanceSecrets rekeys a legacy workspace token only to its sole
+// instance. The pre-instance schema allowed exactly one config per workspace,
+// so a later second instance is not a migration target and must never inherit
+// the old token. Completed rekeys remove the legacy keys; cardinality guards
+// also make a restart safe if a cleanup attempt previously failed.
 func migrateInstanceSecrets(store *Store, secrets SecretStore, log *logger.Logger) {
 	if secrets == nil {
 		return
@@ -98,12 +98,21 @@ func migrateInstanceSecrets(store *Store, secrets SecretStore, log *logger.Logge
 		log.Warn("sentry: list instances for secret migration failed", zap.Error(err))
 		return
 	}
+	instancesByWorkspace := make(map[string]int, len(instances))
 	for _, inst := range instances {
-		rekeyInstanceSecret(ctx, secrets, inst, log)
+		instancesByWorkspace[inst.WorkspaceID]++
 	}
+	allowSingleton := len(instances) == 1
+	for _, inst := range instances {
+		if instancesByWorkspace[inst.WorkspaceID] != 1 {
+			continue
+		}
+		rekeyInstanceSecret(ctx, secrets, inst, allowSingleton, log)
+	}
+	cleanupLegacyInstanceSecretKeys(ctx, secrets, instances, log)
 }
 
-func rekeyInstanceSecret(ctx context.Context, secrets SecretStore, inst *SentryConfig, log *logger.Logger) {
+func rekeyInstanceSecret(ctx context.Context, secrets SecretStore, inst *SentryConfig, allowSingleton bool, log *logger.Logger) {
 	instanceKey := secretKeyForInstance(inst.ID)
 	exists, err := secrets.Exists(ctx, instanceKey)
 	if err != nil {
@@ -114,7 +123,7 @@ func rekeyInstanceSecret(ctx context.Context, secrets SecretStore, inst *SentryC
 	if exists {
 		return
 	}
-	value := revealLegacySecret(ctx, secrets, inst.WorkspaceID)
+	value := revealLegacySecret(ctx, secrets, inst.WorkspaceID, allowSingleton)
 	if value == "" {
 		return
 	}
@@ -124,11 +133,62 @@ func rekeyInstanceSecret(ctx context.Context, secrets SecretStore, inst *SentryC
 	}
 }
 
-// revealLegacySecret reads the pre-instance token for a workspace, trying the
-// workspace-scoped key first, then the install-wide singleton. Confined to the
-// migration path: live reads use secretKeyForInstance only.
-func revealLegacySecret(ctx context.Context, secrets SecretStore, workspaceID string) string {
-	for _, key := range []string{SecretKeyForWorkspace(workspaceID), SecretKey} {
+// cleanupLegacyInstanceSecretKeys deletes a workspace key only after every
+// instance in that workspace has an instance-scoped key. The global singleton
+// key is likewise removed only after every instance has been rekeyed.
+func cleanupLegacyInstanceSecretKeys(ctx context.Context, secrets SecretStore, instances []*SentryConfig, log *logger.Logger) {
+	workspaceComplete := make(map[string]bool, len(instances))
+	allComplete := len(instances) > 0
+	for _, inst := range instances {
+		if _, ok := workspaceComplete[inst.WorkspaceID]; !ok {
+			workspaceComplete[inst.WorkspaceID] = true
+		}
+		exists, err := secrets.Exists(ctx, secretKeyForInstance(inst.ID))
+		if err != nil {
+			log.Warn("sentry: instance secret existence check failed during legacy cleanup",
+				zap.String("instance_id", inst.ID), zap.Error(err))
+			workspaceComplete[inst.WorkspaceID] = false
+			allComplete = false
+			continue
+		}
+		if !exists {
+			workspaceComplete[inst.WorkspaceID] = false
+			allComplete = false
+		}
+	}
+	for workspaceID, complete := range workspaceComplete {
+		if complete {
+			deleteLegacySecret(ctx, secrets, SecretKeyForWorkspace(workspaceID), log)
+		}
+	}
+	if allComplete {
+		deleteLegacySecret(ctx, secrets, SecretKey, log)
+	}
+}
+
+func deleteLegacySecret(ctx context.Context, secrets SecretStore, key string, log *logger.Logger) {
+	exists, err := secrets.Exists(ctx, key)
+	if err != nil {
+		log.Warn("sentry: legacy secret existence check failed", zap.String("secret_key", key), zap.Error(err))
+		return
+	}
+	if !exists {
+		return
+	}
+	if err := secrets.Delete(ctx, key); err != nil {
+		log.Warn("sentry: legacy secret cleanup failed", zap.String("secret_key", key), zap.Error(err))
+	}
+}
+
+// revealLegacySecret reads the pre-instance token for a workspace. The
+// install-wide singleton is considered only when it has one unambiguous
+// instance destination; live reads use secretKeyForInstance only.
+func revealLegacySecret(ctx context.Context, secrets SecretStore, workspaceID string, allowSingleton bool) string {
+	keys := []string{SecretKeyForWorkspace(workspaceID)}
+	if allowSingleton {
+		keys = append(keys, SecretKey)
+	}
+	for _, key := range keys {
 		exists, err := secrets.Exists(ctx, key)
 		if err != nil || !exists {
 			continue

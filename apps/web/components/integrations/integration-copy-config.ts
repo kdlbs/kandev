@@ -55,7 +55,7 @@ export async function copyIntegrationConfig(
       await copyLinearConfig(targetWorkspaceId, options);
       return;
     case "sentry":
-      await copySentryInstances(sourceWorkspaceId, targetWorkspaceId);
+      await copySentryInstances(targetWorkspaceId, options);
       return;
     case "github":
       await copyGitHubWorkspaceSettings(targetWorkspaceId, options);

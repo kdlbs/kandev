@@ -33,7 +33,7 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 		return nil, err
 	}
 	if strings.TrimSpace(req.SentryInstanceID) == "" {
-		return nil, fmt.Errorf("%w: sentryInstanceId is required", ErrInvalidConfig)
+		return nil, fmt.Errorf("%w: sentryInstanceId is required", ErrInstanceRequired)
 	}
 	if _, err := s.requireInstance(ctx, req.WorkspaceID, req.SentryInstanceID); err != nil {
 		return nil, err
@@ -221,6 +221,7 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*Sentry
 		}
 		out = append(out, &issue)
 	}
+	s.clearWatchError(w.ID)
 	return out, nil
 }
 
@@ -238,8 +239,8 @@ func (s *Service) stampWatchLastPolled(watchID string) {
 
 // resolveWatchInstanceID picks the Sentry instance a watch should poll. A bound
 // watch uses its stored instance. An unbound (migrated legacy) watch resolves
-// to its workspace's sole instance; when the workspace has zero or several
-// instances the watch cannot be run unambiguously.
+// to the workspace's sole healthy instance; zero or several healthy instances
+// cannot be run unambiguously.
 func (s *Service) resolveWatchInstanceID(ctx context.Context, w *IssueWatch) (string, error) {
 	if w.SentryInstanceID != "" {
 		return w.SentryInstanceID, nil
@@ -248,13 +249,19 @@ func (s *Service) resolveWatchInstanceID(ctx context.Context, w *IssueWatch) (st
 	if err != nil {
 		return "", err
 	}
-	switch len(instances) {
+	healthyInstances := make([]*SentryConfig, 0, len(instances))
+	for _, instance := range instances {
+		if instance.LastOk {
+			healthyInstances = append(healthyInstances, instance)
+		}
+	}
+	switch len(healthyInstances) {
 	case 1:
-		return instances[0].ID, nil
+		return healthyInstances[0].ID, nil
 	case 0:
-		return "", fmt.Errorf("%w: watch is unbound and its workspace has no Sentry instance", ErrNotConfigured)
+		return "", fmt.Errorf("%w: watch is unbound and its workspace has no healthy Sentry instance", ErrNotConfigured)
 	default:
-		return "", fmt.Errorf("%w: watch is unbound and its workspace has %d Sentry instances; bind one to the watch", ErrInvalidConfig, len(instances))
+		return "", fmt.Errorf("%w: watch is unbound and its workspace has %d healthy Sentry instances; bind one to the watch", ErrInvalidConfig, len(healthyInstances))
 	}
 }
 
@@ -266,6 +273,18 @@ func (s *Service) stampWatchError(watchID, cause string) {
 	defer cancel()
 	if err := s.store.StampIssueWatchError(ctx, watchID, cause); err != nil {
 		s.log.Warn("sentry: stamp watch error failed",
+			zap.String("watch_id", watchID), zap.Error(err))
+	}
+}
+
+// clearWatchError removes stale poll error state using a detached context so a
+// successful check still clears it if the caller context is subsequently
+// cancelled.
+func (s *Service) clearWatchError(watchID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), authHealthWriteTimeout)
+	defer cancel()
+	if err := s.store.ClearIssueWatchError(ctx, watchID); err != nil {
+		s.log.Warn("sentry: clear watch error failed",
 			zap.String("watch_id", watchID), zap.Error(err))
 	}
 }

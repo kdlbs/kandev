@@ -155,15 +155,18 @@ func (c *Controller) httpTestConnection(ctx *gin.Context) {
 }
 
 func (c *Controller) httpCopyConfig(ctx *gin.Context) {
+	source, ok := c.requireWorkspace(ctx)
+	if !ok {
+		return
+	}
 	var req CopyConfigRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		writeBadPayload(ctx)
 		return
 	}
-	source := strings.TrimSpace(req.SourceWorkspaceID)
 	target := strings.TrimSpace(req.TargetWorkspaceID)
-	if source == "" || target == "" {
-		writeErr(ctx, http.StatusBadRequest, "sourceWorkspaceId and targetWorkspaceId are required")
+	if target == "" {
+		writeErr(ctx, http.StatusBadRequest, "targetWorkspaceId is required")
 		return
 	}
 	copied, err := c.service.CopyConfigToWorkspace(ctx.Request.Context(), source, target)
@@ -173,7 +176,8 @@ func (c *Controller) httpCopyConfig(ctx *gin.Context) {
 		case errors.Is(err, ErrSameWorkspace), errors.Is(err, ErrNothingToCopy), errors.Is(err, ErrInvalidConfig):
 			status = http.StatusBadRequest
 		case errors.Is(err, ErrDuplicateInstanceName):
-			status = http.StatusConflict
+			writeCoded(ctx, http.StatusConflict, err.Error(), errCodeSentryInstanceNameTaken)
+			return
 		}
 		writeErr(ctx, status, err.Error())
 		return

@@ -146,6 +146,32 @@ func TestHTTP_GetInstance_CrossWorkspace404(t *testing.T) {
 	}
 }
 
+func TestHTTP_UpdateInstance_UpdatesAndRejectsCrossWorkspace(t *testing.T) {
+	ctrl, router, _ := newTestController(t)
+	inst := seedInstance(t, ctrl, "ws-1", "Original", "tok")
+	body := `{"name":"Renamed","authMethod":"auth_token","url":"https://sentry.example.com"}`
+
+	updated := do(router, http.MethodPut, "/api/v1/sentry/instances/"+inst.ID+"?workspace_id=ws-1", body)
+	if updated.Code != http.StatusOK {
+		t.Fatalf("update status = %d, body=%s", updated.Code, updated.Body.String())
+	}
+	var cfg SentryConfig
+	if err := json.Unmarshal(updated.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode update: %v", err)
+	}
+	if cfg.Name != "Renamed" || cfg.URL != "https://sentry.example.com" {
+		t.Errorf("updated instance = %+v", cfg)
+	}
+
+	crossWorkspace := do(router, http.MethodPut, "/api/v1/sentry/instances/"+inst.ID+"?workspace_id=ws-2", body)
+	if crossWorkspace.Code != http.StatusNotFound {
+		t.Fatalf("cross-workspace update status = %d, want 404; body=%s", crossWorkspace.Code, crossWorkspace.Body.String())
+	}
+	if !strings.Contains(crossWorkspace.Body.String(), `"code":"SENTRY_INSTANCE_NOT_FOUND"`) {
+		t.Errorf("missing cross-workspace not-found code: %s", crossWorkspace.Body.String())
+	}
+}
+
 func TestHTTP_DeleteInstance_InUse409(t *testing.T) {
 	ctrl, router, _ := newTestController(t)
 	inst := seedInstance(t, ctrl, "ws-1", "A", "tok")
@@ -296,8 +322,8 @@ func TestHTTP_CopyConfig_ReturnsWrappedList(t *testing.T) {
 		}
 	})
 	seedInstance(t, ctrl, "ws-src", "SaaS", "sec")
-	w := do(router, http.MethodPost, "/api/v1/sentry/config/copy",
-		`{"sourceWorkspaceId":"ws-src","targetWorkspaceId":"ws-dst"}`)
+	w := do(router, http.MethodPost, "/api/v1/sentry/config/copy?workspace_id=ws-src",
+		`{"targetWorkspaceId":"ws-dst"}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
 	}
@@ -314,6 +340,66 @@ func TestHTTP_CopyConfig_ReturnsWrappedList(t *testing.T) {
 	case <-probed:
 	case <-time.After(2 * time.Second):
 		t.Fatal("async probe did not fire")
+	}
+}
+
+func TestHTTP_CopyConfig_IgnoresBodySourceWorkspace(t *testing.T) {
+	ctrl, router, _ := newTestController(t)
+	seedInstance(t, ctrl, "ws-query", "Authoritative", "sec")
+
+	w := do(router, http.MethodPost, "/api/v1/sentry/config/copy?workspace_id=ws-query",
+		`{"sourceWorkspaceId":"ws-body","targetWorkspaceId":"ws-dst"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Instances []SentryConfig `json:"instances"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Instances) != 1 || resp.Instances[0].Name != "Authoritative" {
+		t.Errorf("copied = %+v", resp.Instances)
+	}
+}
+
+func TestHTTP_CopyConfig_RejectsBodyOnlySourceWorkspace(t *testing.T) {
+	ctrl, router, _ := newTestController(t)
+	seedInstance(t, ctrl, "ws-src", "SaaS", "sec")
+
+	w := do(router, http.MethodPost, "/api/v1/sentry/config/copy",
+		`{"sourceWorkspaceId":"ws-src","targetWorkspaceId":"ws-dst"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestHTTP_CopyConfig_DuplicateNameReturnsCodedConflict(t *testing.T) {
+	ctrl, router, _ := newTestController(t)
+	seedInstance(t, ctrl, "ws-src", "SaaS", "sec")
+	if _, err := ctrl.service.store.db.Exec(`
+		CREATE TRIGGER copy_duplicate_name
+		BEFORE INSERT ON sentry_configs
+		WHEN NEW.workspace_id = 'ws-dst'
+		BEGIN
+			SELECT RAISE(ABORT, 'UNIQUE constraint failed: sentry_configs.workspace_id, sentry_configs.name');
+		END`); err != nil {
+		t.Fatalf("create duplicate trigger: %v", err)
+	}
+
+	w := do(router, http.MethodPost, "/api/v1/sentry/config/copy?workspace_id=ws-src",
+		`{"targetWorkspaceId":"ws-dst"}`)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if response.Code != errCodeSentryInstanceNameTaken {
+		t.Errorf("code = %q, want %q", response.Code, errCodeSentryInstanceNameTaken)
 	}
 }
 
@@ -334,6 +420,25 @@ func TestHTTP_CreateIssueWatch_RejectsMismatchedWorkspace(t *testing.T) {
 	// Matching → created (200).
 	if w := do(router, http.MethodPost, "/api/v1/sentry/watches/issue?workspace_id=ws-1", body); w.Code != http.StatusOK {
 		t.Errorf("expected 200 for matching workspace_id, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestHTTP_CreateIssueWatch_RequiresInstance(t *testing.T) {
+	_, router, _ := newTestController(t)
+	body := `{"workspaceId":"ws-1","workflowId":"wf","workflowStepId":"step","filter":{"orgSlug":"acme","projectSlug":"fe"}}`
+
+	resp := do(router, http.MethodPost, "/api/v1/sentry/watches/issue?workspace_id=ws-1", body)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", resp.Code, resp.Body.String())
+	}
+	var response struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Code != errCodeSentryInstanceRequired {
+		t.Errorf("error code = %q, want %q", response.Code, errCodeSentryInstanceRequired)
 	}
 }
 

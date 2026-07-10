@@ -115,7 +115,7 @@ func seedWorkspaceScopedSchema(t *testing.T, db *sqlx.DB) (w1, w2, w3 string) {
 // TestMigration_WorkspaceConfigsToInstances pins acceptance (a): the
 // workspace-scoped model upgrades to id-keyed instances, the per-workspace
 // secret is rekeyed to the per-instance key, and every watch's
-// sentry_instance_id is backfilled (NULL when the workspace has no config).
+// sentry_instance_id is backfilled when its workspace has exactly one config.
 func TestMigration_WorkspaceConfigsToInstances(t *testing.T) {
 	db := openMigrationDB(t)
 	w1, w2, w3 := seedWorkspaceScopedSchema(t, db)
@@ -367,5 +367,122 @@ func TestMigration_ExperimentalNonNullInstanceColumnRebuilt(t *testing.T) {
 	// FK now enforced: deleting an in-use instance is blocked.
 	if _, err := db.Exec(`DELETE FROM sentry_configs WHERE id = ?`, inst1); err == nil {
 		t.Error("expected FK RESTRICT to block deleting an in-use instance after rebuild")
+	}
+}
+
+// TestMigration_RekeyDoesNotSeedLaterSecretlessInstance ensures a completed
+// legacy secret migration cannot grant an ordinary later instance the stale
+// workspace or singleton token on a subsequent process start.
+func TestMigration_RekeyDoesNotSeedLaterSecretlessInstance(t *testing.T) {
+	db := openMigrationDB(t)
+	seedWorkspaceScopedSchema(t, db)
+	ctx := context.Background()
+	secrets := newFakeSecretStore()
+	if err := secrets.Set(ctx, SecretKeyForWorkspace("ws-1"), "tok", "workspace-token"); err != nil {
+		t.Fatalf("seed workspace token: %v", err)
+	}
+	if err := secrets.Set(ctx, SecretKey, "tok", "singleton-token"); err != nil {
+		t.Fatalf("seed singleton token: %v", err)
+	}
+
+	svc, _, err := Provide(db, db, secrets, nil, logger.Default())
+	if err != nil {
+		t.Fatalf("first Provide: %v", err)
+	}
+	later := testInstance("ws-1", "Later")
+	if err := svc.Store().CreateInstance(ctx, later); err != nil {
+		t.Fatalf("create later secretless instance: %v", err)
+	}
+
+	if _, _, err := Provide(db, db, secrets, nil, logger.Default()); err != nil {
+		t.Fatalf("restart Provide: %v", err)
+	}
+	if exists, err := secrets.Exists(ctx, secretKeyForInstance(later.ID)); err != nil {
+		t.Fatalf("check later instance secret: %v", err)
+	} else if exists {
+		t.Fatal("later secretless instance inherited a stale legacy token")
+	}
+}
+
+// TestMigration_MultipleInstancesLeaveLegacyWatchUnbound ensures the watch
+// rebuild preserves the unbound fallback when a workspace has several possible
+// instance targets rather than guessing the oldest one.
+func TestMigration_MultipleInstancesLeaveLegacyWatchUnbound(t *testing.T) {
+	db := openMigrationDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	first, second := uuid.New().String(), uuid.New().String()
+	if _, err := db.Exec(`CREATE TABLE sentry_configs (` + sentryConfigsColumns + `)`); err != nil {
+		t.Fatalf("create id-keyed configs: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO sentry_configs (id, workspace_id, name, auth_method, url, last_ok, last_error, created_at, updated_at)
+		VALUES (?, 'ws-1', 'First', ?, 'https://first.example.com', 0, '', ?, ?),
+		       (?, 'ws-1', 'Second', ?, 'https://second.example.com', 0, '', ?, ?)`,
+		first, AuthMethodAuthToken, now, now,
+		second, AuthMethodAuthToken, now.Add(time.Minute), now.Add(time.Minute)); err != nil {
+		t.Fatalf("seed instances: %v", err)
+	}
+	if _, err := db.Exec(workspaceScopedWatchesDDL); err != nil {
+		t.Fatalf("create legacy watches: %v", err)
+	}
+	watchID := uuid.New().String()
+	if _, err := db.Exec(`
+		INSERT INTO sentry_issue_watches (id, workspace_id, workflow_id, workflow_step_id, filter_json, created_at, updated_at)
+		VALUES (?, 'ws-1', 'wf', 'step', '{}', ?, ?)`, watchID, now, now); err != nil {
+		t.Fatalf("seed legacy watch: %v", err)
+	}
+
+	store, err := NewStore(db, db)
+	if err != nil {
+		t.Fatalf("migrate watches: %v", err)
+	}
+	watch, err := store.GetIssueWatch(ctx, watchID)
+	if err != nil {
+		t.Fatalf("get migrated watch: %v", err)
+	}
+	if watch.SentryInstanceID != "" {
+		t.Fatalf("multi-instance legacy watch bound to %q, want unbound", watch.SentryInstanceID)
+	}
+}
+
+// TestMigration_ExperimentalBindingSurvivesRebuild ensures a valid explicit
+// binding from the experimental no-FK shape is not overwritten by backfill.
+func TestMigration_ExperimentalBindingSurvivesRebuild(t *testing.T) {
+	db := openMigrationDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	first, selected := uuid.New().String(), uuid.New().String()
+	if _, err := db.Exec(`CREATE TABLE sentry_configs (` + sentryConfigsColumns + `)`); err != nil {
+		t.Fatalf("create id-keyed configs: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO sentry_configs (id, workspace_id, name, auth_method, url, last_ok, last_error, created_at, updated_at)
+		VALUES (?, 'ws-1', 'First', ?, 'https://first.example.com', 0, '', ?, ?),
+		       (?, 'ws-1', 'Selected', ?, 'https://selected.example.com', 0, '', ?, ?)`,
+		first, AuthMethodAuthToken, now, now,
+		selected, AuthMethodAuthToken, now.Add(time.Minute), now.Add(time.Minute)); err != nil {
+		t.Fatalf("seed instances: %v", err)
+	}
+	if _, err := db.Exec(experimentalWatchesDDL); err != nil {
+		t.Fatalf("create experimental watches: %v", err)
+	}
+	watchID := uuid.New().String()
+	if _, err := db.Exec(`
+		INSERT INTO sentry_issue_watches (id, workspace_id, sentry_instance_id, workflow_id, workflow_step_id, filter_json, created_at, updated_at)
+		VALUES (?, 'ws-1', ?, 'wf', 'step', '{}', ?, ?)`, watchID, selected, now, now); err != nil {
+		t.Fatalf("seed experimental watch: %v", err)
+	}
+
+	store, err := NewStore(db, db)
+	if err != nil {
+		t.Fatalf("migrate watches: %v", err)
+	}
+	watch, err := store.GetIssueWatch(ctx, watchID)
+	if err != nil {
+		t.Fatalf("get migrated watch: %v", err)
+	}
+	if watch.SentryInstanceID != selected {
+		t.Fatalf("experimental binding = %q, want %q", watch.SentryInstanceID, selected)
 	}
 }

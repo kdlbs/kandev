@@ -124,8 +124,14 @@ function SentryLinkInstanceField({
 
   useEffect(() => {
     if (sentry.state === "single") onChange(sentry.healthy[0].id);
-    else if (sentry.state === "empty" || sentry.state === "unhealthy") onChange("");
-  }, [sentry.state, sentry.healthy, onChange]);
+    else if (
+      sentry.state === "empty" ||
+      sentry.state === "unhealthy" ||
+      (instanceId !== "" && !sentry.healthy.some((instance) => instance.id === instanceId))
+    ) {
+      onChange("");
+    }
+  }, [sentry.state, sentry.healthy, instanceId, onChange]);
 
   if (sentry.state === "empty" || sentry.state === "unhealthy") {
     return (

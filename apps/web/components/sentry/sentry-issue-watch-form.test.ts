@@ -5,6 +5,7 @@ import {
   maxInflightTasksString,
   parseMaxInflightTasks,
   buildFilterPayload,
+  isWatchFormReady,
   makeEmptyForm,
 } from "./sentry-issue-watch-form";
 import type { SentryProject } from "@/lib/types/sentry";
@@ -95,5 +96,20 @@ describe("buildFilterPayload", () => {
     const filter = buildFilterPayload(form);
     expect(filter.orgSlug).toBe("acme");
     expect(filter.projectSlug).toBe("web");
+  });
+});
+
+describe("isWatchFormReady", () => {
+  it("allows a legacy unbound watch to update its mutable fields", () => {
+    const legacyUnbound = {
+      ...makeEmptyForm("ws-1"),
+      orgSlug: "acme",
+      projectSlug: "web",
+      workflowId: "workflow-1",
+      workflowStepId: "step-1",
+      sentryInstanceId: "",
+    };
+
+    expect(isWatchFormReady(legacyUnbound, { requiresInstance: false })).toBe(true);
   });
 });

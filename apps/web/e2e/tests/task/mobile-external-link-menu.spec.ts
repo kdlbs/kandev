@@ -13,11 +13,16 @@ test.describe("Mobile sidebar — external link menu", () => {
       secret: "api-token-value",
     });
     await apiClient.setLinearConfig({ secret: "lin_api_xxx" });
-    await apiClient.setSentryConfig({ secret: "sntrys_xxx" });
+    const sentry = await apiClient.createSentryInstance({
+      workspaceId: seedData.workspaceId,
+      name: "Sentry",
+      secret: "sntrys_xxx",
+    });
+    await apiClient.mockSentrySetAuthHealth({ instanceId: sentry.id, ok: true });
     await Promise.all([
       apiClient.waitForIntegrationAuthHealthy("jira"),
       apiClient.waitForIntegrationAuthHealthy("linear"),
-      apiClient.waitForIntegrationAuthHealthy("sentry"),
+      apiClient.waitForIntegrationAuthHealthy("sentry", { workspaceId: seedData.workspaceId }),
     ]);
 
     const task = await apiClient.seedTask(seedData.workspaceId, "Mobile external link task", {

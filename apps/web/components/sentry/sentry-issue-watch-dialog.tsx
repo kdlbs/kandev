@@ -97,6 +97,7 @@ function useSentryProjects(workspaceId: string, instanceId: string, orgSlug: str
       setProjects([]);
       return;
     }
+    setProjects([]);
     let cancelled = false;
     listSentryProjects(workspaceId, instanceId)
       .then((res) => {
@@ -508,6 +509,7 @@ function useWatchOrgs(
       setOrgs([]);
       return;
     }
+    setOrgs([]);
     let cancelled = false;
     listSentryOrganizations(workspaceId, instanceId)
       .then((res) => {
@@ -552,7 +554,7 @@ export function SentryIssueWatchDialog({
 
   const workspaceLocked = true;
 
-  const canSave = isWatchFormReady(form);
+  const canSave = isWatchFormReady(form, { requiresInstance: !watch });
 
   const handleSave = useCallback(async () => {
     const maxInflight = parseMaxInflightTasks(form.maxInflightTasks);

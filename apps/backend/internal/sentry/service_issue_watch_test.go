@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/integrations/optional"
 )
@@ -19,6 +20,9 @@ func (c *fakeClient) withSearchResults(issues []SentryIssue) *fakeClient {
 
 func validFilter() SearchFilter {
 	return SearchFilter{OrgSlug: "acme", ProjectSlug: "frontend"}
+}
+func intPtr(value int) *int {
+	return &value
 }
 
 func TestService_CreateIssueWatch_DefaultsAndValidation(t *testing.T) {
@@ -63,11 +67,11 @@ func TestService_CreateIssueWatch_InstanceValidation(t *testing.T) {
 	ctx := context.Background()
 	other := f.seedInstance(t, "ws-2", "Other", "")
 
-	// Missing instance → ErrInvalidConfig.
+	// Missing instance → ErrInstanceRequired.
 	if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
 		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step", Filter: validFilter(),
-	}); !errors.Is(err, ErrInvalidConfig) {
-		t.Errorf("expected ErrInvalidConfig for missing instance, got %v", err)
+	}); !errors.Is(err, ErrInstanceRequired) {
+		t.Errorf("expected ErrInstanceRequired for missing instance, got %v", err)
 	}
 	// Instance from another workspace → ErrInstanceNotFound.
 	if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
@@ -161,12 +165,12 @@ func TestService_IssueWatch_MaxInflightTasks(t *testing.T) {
 	}
 
 	req := base()
-	req.MaxInflightTasks = new(0)
+	req.MaxInflightTasks = intPtr(0)
 	if _, err := f.svc.CreateIssueWatch(ctx, req); !errors.Is(err, ErrInvalidConfig) {
 		t.Errorf("expected ErrInvalidConfig for non-positive cap, got %v", err)
 	}
 	req = base()
-	req.MaxInflightTasks = new(3)
+	req.MaxInflightTasks = intPtr(3)
 	created, err := f.svc.CreateIssueWatch(ctx, req)
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -186,7 +190,7 @@ func TestService_IssueWatch_MaxInflightTasks(t *testing.T) {
 		t.Errorf("null cap should clear to uncapped, got %v (err %v)", uncapped.MaxInflightTasks, err)
 	}
 	if _, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{
-		MaxInflightTasks: optional.Int{Present: true, Value: new(-1)},
+		MaxInflightTasks: optional.Int{Present: true, Value: intPtr(-1)},
 	}); !errors.Is(err, ErrInvalidConfig) {
 		t.Errorf("expected ErrInvalidConfig for negative cap patch, got %v", err)
 	}
@@ -298,13 +302,47 @@ func TestService_CheckIssueWatch_StampsLastPolledOnError(t *testing.T) {
 	}
 }
 
+func TestService_CheckIssueWatch_ClearsLastErrorAfterSuccess(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	inst := f.seedInstance(t, "ws-1", "A", "sntrys_abc")
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", SentryInstanceID: inst.ID,
+		WorkflowID: "wf", WorkflowStepID: "step", Filter: validFilter(),
+	})
+	if err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+	if err := f.store.StampIssueWatchError(ctx, w.ID, "upstream 500"); err != nil {
+		t.Fatalf("stamp initial error: %v", err)
+	}
+
+	f.client.withSearchResults(nil)
+	if _, err := f.svc.CheckIssueWatch(ctx, w); err != nil {
+		t.Fatalf("check recovered watch: %v", err)
+	}
+	reloaded, err := f.store.GetIssueWatch(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("reload watch: %v", err)
+	}
+	if reloaded.LastError != "" {
+		t.Errorf("last error = %q, want cleared after success", reloaded.LastError)
+	}
+	if reloaded.LastErrorAt != nil {
+		t.Errorf("last error timestamp = %v, want cleared after success", reloaded.LastErrorAt)
+	}
+}
+
 // TestService_CheckIssueWatch_ResolvesSoleInstance pins acceptance (b): an
 // unbound (NULL-instance) watch resolves to its workspace's sole instance at
 // poll time.
 func TestService_CheckIssueWatch_ResolvesSoleInstance(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
-	f.seedInstance(t, "ws-1", "Primary", "tok") // the sole instance, with a secret
+	inst := f.seedInstance(t, "ws-1", "Primary", "tok") // the sole healthy instance, with a secret
+	if err := f.store.UpdateAuthHealthForInstance(ctx, inst.ID, true, "", time.Now().UTC()); err != nil {
+		t.Fatalf("mark instance healthy: %v", err)
+	}
 	f.client.withSearchResults([]SentryIssue{
 		{ShortID: "PROJ-1", Title: "one", Permalink: "https://sentry.io/issues/PROJ-1"},
 	})
@@ -323,6 +361,51 @@ func TestService_CheckIssueWatch_ResolvesSoleInstance(t *testing.T) {
 	if len(got) != 1 || got[0].ShortID != "PROJ-1" {
 		t.Fatalf("expected sole-instance resolution to return PROJ-1, got %+v", got)
 	}
+}
+
+func TestService_ResolveWatchInstanceID_RequiresExactlyOneHealthyInstance(t *testing.T) {
+	t.Run("selects the sole healthy instance", func(t *testing.T) {
+		f := newSvcFixture(t)
+		ctx := context.Background()
+		f.seedInstance(t, "ws-1", "Unhealthy", "tok")
+		healthy := f.seedInstance(t, "ws-1", "Healthy", "tok")
+		if err := f.store.UpdateAuthHealthForInstance(ctx, healthy.ID, true, "", time.Now().UTC()); err != nil {
+			t.Fatalf("mark instance healthy: %v", err)
+		}
+
+		instanceID, err := f.svc.resolveWatchInstanceID(ctx, newTestIssueWatch("ws-1"))
+		if err != nil {
+			t.Fatalf("resolve watch instance: %v", err)
+		}
+		if instanceID != healthy.ID {
+			t.Errorf("resolved instance = %q, want healthy instance %q", instanceID, healthy.ID)
+		}
+	})
+
+	t.Run("rejects when no instance is healthy", func(t *testing.T) {
+		f := newSvcFixture(t)
+		ctx := context.Background()
+		f.seedInstance(t, "ws-1", "Unhealthy", "tok")
+
+		if _, err := f.svc.resolveWatchInstanceID(ctx, newTestIssueWatch("ws-1")); !errors.Is(err, ErrNotConfigured) {
+			t.Errorf("expected ErrNotConfigured with no healthy instance, got %v", err)
+		}
+	})
+
+	t.Run("rejects when multiple instances are healthy", func(t *testing.T) {
+		f := newSvcFixture(t)
+		ctx := context.Background()
+		for _, name := range []string{"A", "B"} {
+			instance := f.seedInstance(t, "ws-1", name, "tok")
+			if err := f.store.UpdateAuthHealthForInstance(ctx, instance.ID, true, "", time.Now().UTC()); err != nil {
+				t.Fatalf("mark %s healthy: %v", name, err)
+			}
+		}
+
+		if _, err := f.svc.resolveWatchInstanceID(ctx, newTestIssueWatch("ws-1")); !errors.Is(err, ErrInvalidConfig) {
+			t.Errorf("expected ErrInvalidConfig with multiple healthy instances, got %v", err)
+		}
+	})
 }
 
 // TestService_CheckIssueWatch_UnboundNoInstanceStampsError pins the other half

@@ -165,18 +165,21 @@ export async function testSentryConnection(
   );
 }
 
-// copySentryInstances copies every instance (and its credential) from one
-// workspace into another, returning the newly-created instances.
+// copySentryInstances copies every instance (and its credential) from the
+// source workspace in `workspace_id` into the target workspace in the JSON
+// body, returning the newly-created instances.
 export async function copySentryInstances(
-  sourceWorkspaceId: string,
   targetWorkspaceId: string,
-  options?: ApiRequestOptions,
+  options?: ApiRequestOptions & { workspaceId?: string },
 ) {
-  const payload: CopySentryConfigRequest = { sourceWorkspaceId, targetWorkspaceId };
-  const res = await fetchJson<{ instances: SentryConfig[] }>(`${BASE}/config/copy`, {
-    ...options,
-    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
-  });
+  const payload: Pick<CopySentryConfigRequest, "targetWorkspaceId"> = { targetWorkspaceId };
+  const res = await fetchJson<{ instances: SentryConfig[] }>(
+    withParams(`${BASE}/config/copy`, { workspace_id: options?.workspaceId ?? "" }),
+    {
+      ...options,
+      init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
+    },
+  );
   return res.instances ?? [];
 }
 

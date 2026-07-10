@@ -2,6 +2,7 @@ package sentry
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -37,8 +38,13 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api.DELETE("/reset", c.reset)
 }
 
-func (c *MockController) instanceID(ctx *gin.Context) string {
-	return ctx.Query("instanceId")
+func (c *MockController) requireInstanceID(ctx *gin.Context) (string, bool) {
+	instanceID := strings.TrimSpace(ctx.Query("instanceId"))
+	if instanceID == "" {
+		writeErr(ctx, http.StatusBadRequest, "instanceId query parameter required")
+		return "", false
+	}
+	return instanceID, true
 }
 
 func (c *MockController) setAuthResult(ctx *gin.Context) {
@@ -47,8 +53,12 @@ func (c *MockController) setAuthResult(ctx *gin.Context) {
 		writeBadPayload(ctx)
 		return
 	}
+	instanceID, ok := c.requireInstanceID(ctx)
+	if !ok {
+		return
+	}
 	r := req
-	c.mock.SetAuthResult(c.instanceID(ctx), &r)
+	c.mock.SetAuthResult(instanceID, &r)
 	ctx.JSON(http.StatusOK, gin.H{"set": true})
 }
 
@@ -61,9 +71,8 @@ func (c *MockController) setAuthHealth(ctx *gin.Context) {
 		writeBadPayload(ctx)
 		return
 	}
-	instanceID := c.instanceID(ctx)
-	if instanceID == "" {
-		writeErr(ctx, http.StatusBadRequest, "instanceId query parameter required")
+	instanceID, ok := c.requireInstanceID(ctx)
+	if !ok {
 		return
 	}
 	if err := c.store.UpdateAuthHealthForInstance(ctx.Request.Context(), instanceID, req.OK, req.Error, time.Now().UTC()); err != nil {
@@ -81,7 +90,11 @@ func (c *MockController) setOrganizations(ctx *gin.Context) {
 		writeBadPayload(ctx)
 		return
 	}
-	c.mock.SetOrganizations(c.instanceID(ctx), req.Organizations)
+	instanceID, ok := c.requireInstanceID(ctx)
+	if !ok {
+		return
+	}
+	c.mock.SetOrganizations(instanceID, req.Organizations)
 	ctx.JSON(http.StatusOK, gin.H{"count": len(req.Organizations)})
 }
 
@@ -93,7 +106,11 @@ func (c *MockController) setProjects(ctx *gin.Context) {
 		writeBadPayload(ctx)
 		return
 	}
-	c.mock.SetProjects(c.instanceID(ctx), req.Projects)
+	instanceID, ok := c.requireInstanceID(ctx)
+	if !ok {
+		return
+	}
+	c.mock.SetProjects(instanceID, req.Projects)
 	ctx.JSON(http.StatusOK, gin.H{"count": len(req.Projects)})
 }
 
@@ -105,7 +122,10 @@ func (c *MockController) addIssues(ctx *gin.Context) {
 		writeBadPayload(ctx)
 		return
 	}
-	instanceID := c.instanceID(ctx)
+	instanceID, ok := c.requireInstanceID(ctx)
+	if !ok {
+		return
+	}
 	for i := range req.Issues {
 		c.mock.AddIssue(instanceID, &req.Issues[i])
 	}
@@ -121,10 +141,14 @@ func (c *MockController) setGetIssueError(ctx *gin.Context) {
 		writeBadPayload(ctx)
 		return
 	}
+	instanceID, ok := c.requireInstanceID(ctx)
+	if !ok {
+		return
+	}
 	if req.StatusCode == 0 {
-		c.mock.SetGetIssueError(c.instanceID(ctx), nil)
+		c.mock.SetGetIssueError(instanceID, nil)
 	} else {
-		c.mock.SetGetIssueError(c.instanceID(ctx), &APIError{StatusCode: req.StatusCode, Message: req.Message})
+		c.mock.SetGetIssueError(instanceID, &APIError{StatusCode: req.StatusCode, Message: req.Message})
 	}
 	ctx.JSON(http.StatusOK, gin.H{"set": true})
 }

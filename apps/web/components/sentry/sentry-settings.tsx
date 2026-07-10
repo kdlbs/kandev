@@ -34,26 +34,34 @@ function useInstanceList(workspaceId: string) {
   const [loading, setLoading] = useState(true);
   const requestId = useRef(0);
 
-  const reload = useCallback(async () => {
-    const current = ++requestId.current;
-    try {
-      const list = await listSentryInstances(workspaceId);
-      if (current !== requestId.current) return;
-      setInstances(list);
-    } catch (err) {
-      if (current !== requestId.current) return;
-      toast({ description: `Failed to load Sentry instances: ${String(err)}`, variant: "error" });
-    } finally {
-      if (current === requestId.current) setLoading(false);
-    }
-  }, [workspaceId, toast]);
+  const reload = useCallback(
+    async (reportError = true) => {
+      const current = ++requestId.current;
+      try {
+        const list = await listSentryInstances(workspaceId);
+        if (current !== requestId.current) return;
+        setInstances(list);
+      } catch (err) {
+        if (current !== requestId.current) return;
+        if (reportError) {
+          toast({
+            description: `Failed to load Sentry instances: ${String(err)}`,
+            variant: "error",
+          });
+        }
+      } finally {
+        if (current === requestId.current) setLoading(false);
+      }
+    },
+    [workspaceId, toast],
+  );
 
   useEffect(() => {
     setLoading(true);
     setInstances([]);
     void reload();
     // Poll so per-instance health banners stay fresh without a manual refresh.
-    const id = setInterval(() => void reload(), INTEGRATION_STATUS_REFRESH_MS);
+    const id = setInterval(() => void reload(false), INTEGRATION_STATUS_REFRESH_MS);
     return () => clearInterval(id);
   }, [reload]);
 
@@ -162,6 +170,10 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
     [workspaceId, toast, reload],
   );
 
+  const canAddInstance =
+    mode.kind === "none" ||
+    (mode.kind === "edit" && !instances.some((instance) => instance.id === mode.id));
+
   return (
     <SettingsSection
       icon={<IconBrandSentry className="h-5 w-5" />}
@@ -196,7 +208,7 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
               onCancel={closeForm}
             />
           )}
-          {mode.kind === "none" && (
+          {canAddInstance && (
             <Button
               type="button"
               variant="outline"

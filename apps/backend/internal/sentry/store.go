@@ -346,14 +346,15 @@ func (s *Store) readLegacyWorkspaceConfigs(cols map[string]struct{}) ([]legacyWo
 // migrateWatchesAddInstanceColumn rebuilds sentry_issue_watches to add the
 // nullable sentry_instance_id foreign key. SQLite cannot ALTER-ADD a column
 // with a FOREIGN KEY clause, so the table is rebuilt: create new, copy rows,
-// drop old, rename. Each watch is backfilled to its workspace's sole instance
-// (NULL when the workspace has no instance). The rebuild runs on a dedicated
-// connection with foreign_keys temporarily off so DROP TABLE does not
-// cascade-delete the sentry_issue_watch_tasks children (the PRAGMA is a no-op
-// inside a transaction and per-connection, hence the dedicated conn), then
-// restores enforcement. Idempotent: the migration is skipped only when the
-// column already has the exact nullable-FK target shape, so a crash
-// mid-migration (or an older wrong-shaped column) always re-runs safely.
+// drop old, rename. An unbound watch is backfilled only when its workspace has
+// exactly one instance; zero or multiple candidates remain NULL for the
+// poll-time fallback. Existing valid experimental bindings survive the rebuild.
+// The rebuild runs on a dedicated connection with foreign_keys temporarily off
+// so DROP TABLE does not cascade-delete sentry_issue_watch_tasks children (the
+// PRAGMA is a no-op inside a transaction and per-connection), then restores
+// enforcement. Idempotent: the migration is skipped only when the column
+// already has the exact nullable-FK target shape, so a crash mid-migration (or
+// an older wrong-shaped column) always re-runs safely.
 func (s *Store) migrateWatchesAddInstanceColumn() error {
 	cols, err := s.tableColumns("sentry_issue_watches")
 	if err != nil {
@@ -362,6 +363,7 @@ func (s *Store) migrateWatchesAddInstanceColumn() error {
 	if len(cols) == 0 {
 		return nil // fresh install — createTablesSQL builds the column + FK.
 	}
+	hasExistingInstanceID := false
 	if _, ok := cols["sentry_instance_id"]; ok {
 		correct, err := s.watchesInstanceColumnCorrect()
 		if err != nil {
@@ -372,7 +374,9 @@ func (s *Store) migrateWatchesAddInstanceColumn() error {
 		}
 		// Column exists but predates the FK/nullable schema (an experimental
 		// pre-release build stored it as NOT NULL DEFAULT '' with no foreign
-		// key). Fall through to rebuild it into the correct shape.
+		// key). Rebuild it into the correct shape while preserving a valid
+		// explicit binding.
+		hasExistingInstanceID = true
 	}
 	ctx := context.Background()
 	conn, err := s.db.Conn(ctx)
@@ -385,7 +389,7 @@ func (s *Store) migrateWatchesAddInstanceColumn() error {
 	}
 	// Restore enforcement on the way out regardless of outcome.
 	defer func() { _, _ = conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`) }()
-	return rebuildWatchesWithInstanceColumn(ctx, conn)
+	return rebuildWatchesWithInstanceColumn(ctx, conn, hasExistingInstanceID)
 }
 
 // watchesInstanceColumnCorrect reports whether sentry_issue_watches
@@ -462,9 +466,26 @@ func (s *Store) hasForeignKey(table, column, refTable, wantRefColumn, wantOnDele
 
 // rebuildWatchesWithInstanceColumn performs the create/copy/drop/rename table
 // rebuild inside a single transaction on conn (which already has foreign_keys
-// disabled). Split out to keep migrateWatchesAddInstanceColumn within lint
-// limits.
-func rebuildWatchesWithInstanceColumn(ctx context.Context, conn *sql.Conn) error {
+// disabled). A legacy unbound watch is backfilled only when its workspace has
+// exactly one instance; otherwise NULL preserves the poll-time fallback.
+func rebuildWatchesWithInstanceColumn(ctx context.Context, conn *sql.Conn, hasExistingInstanceID bool) error {
+	instanceIDExpr := `
+			CASE
+				WHEN (SELECT COUNT(*) FROM sentry_configs c WHERE c.workspace_id = w.workspace_id) = 1 THEN
+					(SELECT c.id FROM sentry_configs c WHERE c.workspace_id = w.workspace_id)
+				ELSE NULL
+			END`
+	if hasExistingInstanceID {
+		instanceIDExpr = `
+			CASE
+				WHEN w.sentry_instance_id <> '' THEN
+					(SELECT c.id FROM sentry_configs c
+						WHERE c.id = w.sentry_instance_id AND c.workspace_id = w.workspace_id)
+				WHEN (SELECT COUNT(*) FROM sentry_configs c WHERE c.workspace_id = w.workspace_id) = 1 THEN
+					(SELECT c.id FROM sentry_configs c WHERE c.workspace_id = w.workspace_id)
+				ELSE NULL
+			END`
+	}
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -473,7 +494,7 @@ func rebuildWatchesWithInstanceColumn(ctx context.Context, conn *sql.Conn) error
 	if _, err := tx.ExecContext(ctx, `CREATE TABLE sentry_issue_watches_new (`+sentryWatchesColumns+`)`); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `
+	copySQL := `
 		INSERT INTO sentry_issue_watches_new (
 			id, workspace_id, sentry_instance_id, workflow_id, workflow_step_id,
 			repository_id, base_branch, filter_json, agent_profile_id,
@@ -481,14 +502,13 @@ func rebuildWatchesWithInstanceColumn(ctx context.Context, conn *sql.Conn) error
 			max_inflight_tasks, last_polled_at, last_error, last_error_at,
 			created_at, updated_at)
 		SELECT
-			w.id, w.workspace_id,
-			(SELECT c.id FROM sentry_configs c WHERE c.workspace_id = w.workspace_id
-			 ORDER BY c.created_at, c.id LIMIT 1),
+			w.id, w.workspace_id,` + instanceIDExpr + `,
 			w.workflow_id, w.workflow_step_id, w.repository_id, w.base_branch,
 			w.filter_json, w.agent_profile_id, w.executor_profile_id, w.prompt,
 			w.enabled, w.poll_interval_seconds, w.max_inflight_tasks,
 			w.last_polled_at, w.last_error, w.last_error_at, w.created_at, w.updated_at
-		FROM sentry_issue_watches w`); err != nil {
+		FROM sentry_issue_watches w`
+	if _, err := tx.ExecContext(ctx, copySQL); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DROP TABLE sentry_issue_watches`); err != nil {

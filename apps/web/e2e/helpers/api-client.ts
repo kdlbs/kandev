@@ -1484,14 +1484,15 @@ export class ApiClient {
     });
   }
 
-  async setSentryConfig(payload: {
+  async createSentryInstance(payload: {
+    name: string;
     secret: string;
     url?: string;
     workspaceId?: string;
-  }): Promise<unknown> {
+  }): Promise<{ id: string }> {
     const { workspaceId, ...config } = payload;
-    const path = await this.withActiveWorkspace("/api/v1/sentry/config", workspaceId);
-    return this.request("PUT", path, {
+    const path = await this.withActiveWorkspace("/api/v1/sentry/instances", workspaceId);
+    return this.request("POST", path, {
       authMethod: "auth_token",
       url: "https://sentry.io",
       ...config,
@@ -1514,9 +1515,7 @@ export class ApiClient {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       if (await this.integrationReportsHealthy(integration, workspaceId)) return;
-      const { promise, resolve } = Promise.withResolvers<void>();
-      setTimeout(resolve, 100);
-      await promise;
+      await new Promise<void>((resolve) => setTimeout(resolve, 100));
     }
     throw new Error(`${integration} config never reported lastOk: true within ${timeoutMs}ms`);
   }
