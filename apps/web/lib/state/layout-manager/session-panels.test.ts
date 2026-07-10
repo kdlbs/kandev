@@ -55,6 +55,19 @@ it("normalizes saved session chat panels to a reusable chat placeholder", () => 
   expect(normalized.columns[0]?.groups[0]?.panels).toEqual([chatPlaceholder(), panel("changes")]);
 });
 
+it("keeps normalized reusable chat placeholders idempotent", () => {
+  const once = normalizeReusableSessionPanels(
+    layoutWithGroup({
+      id: CENTER_GROUP_ID,
+      activePanel: CHAT_ID,
+      panels: [chatPlaceholder(), panel("plan")],
+    }),
+  );
+  const twice = normalizeReusableSessionPanels(once);
+
+  expect(twice).toEqual(once);
+});
+
 it("materializes reusable chat panels to the active task session", () => {
   const materialized = materializeReusableChatPanel(
     layoutWithGroup({

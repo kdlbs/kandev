@@ -531,7 +531,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       preserveChatScrollDuringLayout();
       const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
       set({ isRestoringLayout: true });
-      const { state, oldFormatRestoreFailed } = restoreCustomLayout({
+      const { appliedState, oldFormatRestoreFailed } = restoreCustomLayout({
         api,
         layout,
         opts,
@@ -541,7 +541,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
         set,
       });
       const hasSidebar = !!api.getPanel("sidebar");
-      const colCount = state?.columns?.length ?? api.groups.length;
+      const colCount = appliedState?.columns?.length ?? api.groups.length;
       const sidebarCols = hasSidebar ? 1 : 0;
       const hasRight = colCount > sidebarCols + 1;
       set({ sidebarVisible: hasSidebar, rightPanelsVisible: hasRight });
@@ -580,26 +580,28 @@ function restoreCustomLayout({
   safeWidth,
   safeHeight,
   set,
-}: RestoreCustomLayoutParams): { state: LayoutState; oldFormatRestoreFailed: boolean } {
+}: RestoreCustomLayoutParams): { appliedState: LayoutState; oldFormatRestoreFailed: boolean } {
   const state = layout.layout as unknown as LayoutState;
   if (state?.columns) {
+    // Normalize first so both old saved layouts with session-specific panels
+    // and newer reusable layouts with chat placeholders apply through one path.
     const activeState = materializeReusableChatPanel(
       normalizeReusableSessionPanels(state),
       opts?.activeSessionId ?? null,
       opts?.sessionIds ?? [],
     );
     set(applyLayout(api, activeState, liveWidths, safeWidth, safeHeight));
-    return { state, oldFormatRestoreFailed: false };
+    return { appliedState: activeState, oldFormatRestoreFailed: false };
   }
 
   try {
     api.fromJSON(layout.layout as unknown as SerializedDockview);
     replaceStaleSessionPanels(api, opts?.activeSessionId ?? null, opts?.sessionIds ?? []);
     set(applyLayoutFixups(api));
-    return { state, oldFormatRestoreFailed: false };
+    return { appliedState: state, oldFormatRestoreFailed: false };
   } catch (e) {
     console.warn("applyCustomLayout: old-format restore failed:", e);
-    return { state, oldFormatRestoreFailed: true };
+    return { appliedState: state, oldFormatRestoreFailed: true };
   }
 }
 

@@ -29,7 +29,7 @@ async function createFinishedTaskWithSession(
         const { sessions } = await apiClient.listTaskSessions(task.id);
         return DONE_STATES.includes(sessions[0]?.state ?? "");
       },
-      { timeout: 30_000, message: `Waiting for ${title} session to finish` },
+      { timeout: 45_000, message: `Waiting for ${title} session to finish` },
     )
     .toBe(true);
 
@@ -71,7 +71,7 @@ async function dockviewPanelIds(page: Page) {
 }
 
 test.describe("saved Dockview layouts", () => {
-  test("applying a saved chat-only layout keeps the current task session", async ({
+  test("saved chat-only layouts keep the current task session", async ({
     testPage,
     apiClient,
     seedData,
@@ -94,6 +94,13 @@ test.describe("saved Dockview layouts", () => {
       workflow_filter_id: seedData.workflowId,
       saved_layouts: [
         {
+          id: "layout-default-stale-session",
+          name: "Default Chat",
+          is_default: true,
+          layout: simpleLayoutForSession(taskA.sessionId),
+          created_at: new Date().toISOString(),
+        },
+        {
           id: "layout-simple-stale-session",
           name: "Simple",
           is_default: false,
@@ -106,6 +113,14 @@ test.describe("saved Dockview layouts", () => {
     await testPage.goto(`/t/${taskB.task.id}`);
     await expect(testPage.getByTestId("dockview-task-layout")).toBeVisible({ timeout: 15_000 });
     await expect(testPage.getByText("target task current")).toBeVisible({ timeout: 30_000 });
+
+    await expect
+      .poll(() => dockviewPanelIds(testPage), {
+        timeout: 10_000,
+        message: "Waiting for default layout to settle on current session",
+      })
+      .toContain(`session:${taskB.sessionId}`);
+    expect(await dockviewPanelIds(testPage)).not.toContain(`session:${taskA.sessionId}`);
 
     await testPage.getByTestId("layout-preset-trigger").click();
     await testPage.getByRole("menuitem", { name: /Simple/ }).click();

@@ -186,6 +186,12 @@ const customLayout = {
   layout: { columns: [{ id: "center", views: [], activeView: null }] },
 };
 
+const NEW_SESSION_ID = "s-new";
+const NEW_SESSION_PANEL_ID = `session:${NEW_SESSION_ID}`;
+const SIBLING_SESSION_ID = "s-sibling";
+const SIBLING_SESSION_PANEL_ID = `session:${SIBLING_SESSION_ID}`;
+const CUSTOM_ENV_ID = "env-custom";
+
 function staleSessionLayout() {
   return {
     id: "simple",
@@ -206,6 +212,35 @@ function staleSessionLayout() {
                 },
               ],
               activePanel: "session:s-old",
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
+function staleSessionOnlyRightColumnLayout() {
+  return {
+    id: "simple",
+    name: "Simple",
+    layout: {
+      columns: [
+        staleSessionLayout().layout.columns[0],
+        {
+          id: "right",
+          groups: [
+            {
+              panels: [
+                {
+                  id: "session:s-other",
+                  component: "chat",
+                  title: "Agent",
+                  tabComponent: "sessionTab",
+                  params: { sessionId: "s-other" },
+                },
+              ],
+              activePanel: "session:s-other",
             },
           ],
         },
@@ -275,12 +310,12 @@ describe("applyBuiltInPreset — persistence at call site", () => {
   });
 });
 
-describe("applyCustomLayout — persistence at call site", () => {
+describe("applyCustomLayout — session panel normalization", () => {
   beforeEach(resetStoreForIntegration);
 
   it("retargets saved session chat panels to the active session", async () => {
     const api = makeStoreApi();
-    useDockviewStore.setState({ api, currentLayoutEnvId: "env-custom" });
+    useDockviewStore.setState({ api, currentLayoutEnvId: CUSTOM_ENV_ID });
 
     (
       useDockviewStore.getState().applyCustomLayout as (
@@ -288,8 +323,8 @@ describe("applyCustomLayout — persistence at call site", () => {
         opts: { activeSessionId: string; sessionIds: string[] },
       ) => void
     )(staleSessionLayout() as unknown as ApplyCustomLayoutArg, {
-      activeSessionId: "s-new",
-      sessionIds: ["s-sibling", "s-new"],
+      activeSessionId: NEW_SESSION_ID,
+      sessionIds: [SIBLING_SESSION_ID, NEW_SESSION_ID],
     });
 
     await flushRaf();
@@ -297,27 +332,54 @@ describe("applyCustomLayout — persistence at call site", () => {
     const appliedState = vi.mocked(applyLayout).mock.calls.at(-1)?.[1];
     const panel = appliedState?.columns[0]?.groups[0]?.panels[0];
     expect(panel).toMatchObject({
-      id: "session:s-new",
+      id: NEW_SESSION_PANEL_ID,
       component: "chat",
       tabComponent: "sessionTab",
-      params: { sessionId: "s-new" },
+      params: { sessionId: NEW_SESSION_ID },
     });
     expect(appliedState?.columns[0]?.groups[0]?.panels.map((item) => item.id)).toEqual([
-      "session:s-new",
-      "session:s-sibling",
+      NEW_SESSION_PANEL_ID,
+      SIBLING_SESSION_PANEL_ID,
     ]);
-    expect(appliedState?.columns[0]?.groups[0]?.activePanel).toBe("session:s-new");
+    expect(appliedState?.columns[0]?.groups[0]?.activePanel).toBe(NEW_SESSION_PANEL_ID);
   });
+
+  it("derives right panel visibility from the materialized custom layout", async () => {
+    const api = makeStoreApi();
+    useDockviewStore.setState({
+      api,
+      currentLayoutEnvId: CUSTOM_ENV_ID,
+      rightPanelsVisible: true,
+    });
+
+    (
+      useDockviewStore.getState().applyCustomLayout as (
+        layout: ApplyCustomLayoutArg,
+        opts: { activeSessionId: string },
+      ) => void
+    )(staleSessionOnlyRightColumnLayout() as unknown as ApplyCustomLayoutArg, {
+      activeSessionId: NEW_SESSION_ID,
+    });
+
+    const appliedState = vi.mocked(applyLayout).mock.calls.at(-1)?.[1];
+    expect(appliedState?.columns.map((column) => column.id)).toEqual(["center"]);
+    expect(useDockviewStore.getState().rightPanelsVisible).toBe(false);
+    await flushRaf();
+  });
+});
+
+describe("applyCustomLayout — persistence at call site", () => {
+  beforeEach(resetStoreForIntegration);
 
   it("persists the env layout after isRestoringLayout clears", async () => {
     const api = makeStoreApi();
-    useDockviewStore.setState({ api, currentLayoutEnvId: "env-custom" });
+    useDockviewStore.setState({ api, currentLayoutEnvId: CUSTOM_ENV_ID });
 
     useDockviewStore.getState().applyCustomLayout(customLayout as unknown as ApplyCustomLayoutArg);
     await flushRaf();
 
     expect(setEnvLayout).toHaveBeenCalledTimes(1);
-    expect(setEnvLayout).toHaveBeenCalledWith("env-custom", expect.any(Object));
+    expect(setEnvLayout).toHaveBeenCalledWith(CUSTOM_ENV_ID, expect.any(Object));
   });
 
   it("does not persist when no env is adopted yet", async () => {

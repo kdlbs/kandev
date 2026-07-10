@@ -67,6 +67,8 @@ function rewriteGroup(
     }
 
     activeWasRewritten = activeWasRewritten || group.activePanel === current.id;
+    // Keep only the first reusable chat slot. Later chat/session slots are
+    // duplicate stale session tabs and should disappear with their group/column.
     if (!inserted.value) {
       panels.push(...targets);
       inserted.value = true;
