@@ -533,3 +533,58 @@ func TestMigration_ExperimentalBindingSurvivesRebuild(t *testing.T) {
 		t.Fatalf("experimental binding = %q, want %q", watch.SentryInstanceID, selected)
 	}
 }
+
+// TestHasForeignKey_ImplicitPrimaryKeyReference pins the NULL-`to` edge case: a
+// FK declared as `REFERENCES sentry_configs` (implicit primary key, no column
+// named) is reported by SQLite's foreign_key_list with a NULL `to`. hasForeignKey
+// must resolve that to the single-column PK (`id`) and recognize the FK rather
+// than treat the NULL as a non-match and force an unnecessary table rebuild.
+func TestHasForeignKey_ImplicitPrimaryKeyReference(t *testing.T) {
+	db := openMigrationDB(t)
+	if _, err := db.Exec(`CREATE TABLE sentry_configs (` + sentryConfigsColumns + `)`); err != nil {
+		t.Fatalf("create configs: %v", err)
+	}
+	if _, err := db.Exec(`
+		CREATE TABLE child (
+			id TEXT PRIMARY KEY,
+			sentry_instance_id TEXT,
+			FOREIGN KEY(sentry_instance_id) REFERENCES sentry_configs ON DELETE RESTRICT
+		)`); err != nil {
+		t.Fatalf("create child with implicit-PK FK: %v", err)
+	}
+	store := &Store{db: db, ro: db}
+	ok, err := store.hasForeignKey("child", "sentry_instance_id", "sentry_configs", "id", "RESTRICT")
+	if err != nil {
+		t.Fatalf("hasForeignKey error: %v", err)
+	}
+	if !ok {
+		t.Error("hasForeignKey = false, want true for an implicit-PK reference (REFERENCES sentry_configs)")
+	}
+}
+
+// TestHasForeignKey_ImplicitCompositePrimaryKeyNoFalseMatch guards the composite
+// case: an implicit reference to a table whose PRIMARY KEY spans several columns
+// targets the whole key, so it must not be reported as matching a single wanted
+// column.
+func TestHasForeignKey_ImplicitCompositePrimaryKeyNoFalseMatch(t *testing.T) {
+	db := openMigrationDB(t)
+	if _, err := db.Exec(`CREATE TABLE parent (a TEXT, b TEXT, PRIMARY KEY(a, b))`); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	if _, err := db.Exec(`
+		CREATE TABLE child (
+			a TEXT,
+			b TEXT,
+			FOREIGN KEY(a, b) REFERENCES parent ON DELETE RESTRICT
+		)`); err != nil {
+		t.Fatalf("create child with composite implicit-PK FK: %v", err)
+	}
+	store := &Store{db: db, ro: db}
+	ok, err := store.hasForeignKey("child", "a", "parent", "a", "RESTRICT")
+	if err != nil {
+		t.Fatalf("hasForeignKey error: %v", err)
+	}
+	if ok {
+		t.Error("hasForeignKey = true, want false: an implicit composite-PK reference must not match a single wanted column")
+	}
+}

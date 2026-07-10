@@ -122,16 +122,29 @@ function SentryLinkInstanceField({
 }) {
   const sentry = useSentryInstances(workspaceId);
 
+  // Depend on a by-value signature of the healthy instance IDs rather than the
+  // `healthy` array identity: useSentryInstances rebuilds that array on every
+  // poll (new reference, usually identical contents), which would otherwise
+  // re-fire this effect needlessly. The signature still changes when the sole
+  // healthy instance is swapped (state stays "single") or a selected instance
+  // drops out of a "multi" set.
+  const healthySignature = sentry.healthy
+    .map((instance) => instance.id)
+    .sort()
+    .join("\n");
+
   useEffect(() => {
-    if (sentry.state === "single") onChange(sentry.healthy[0].id);
-    else if (
+    const healthyIds = healthySignature ? healthySignature.split("\n") : [];
+    if (sentry.state === "single") {
+      onChange(healthyIds[0]);
+    } else if (
       sentry.state === "empty" ||
       sentry.state === "unhealthy" ||
-      (instanceId !== "" && !sentry.healthy.some((instance) => instance.id === instanceId))
+      (instanceId !== "" && !healthyIds.includes(instanceId))
     ) {
       onChange("");
     }
-  }, [sentry.state, sentry.healthy, instanceId, onChange]);
+  }, [sentry.state, healthySignature, instanceId, onChange]);
 
   if (sentry.state === "empty" || sentry.state === "unhealthy") {
     return (

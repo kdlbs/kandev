@@ -442,7 +442,13 @@ func (s *Store) hasForeignKey(table, column, refTable, wantRefColumn, wantOnDele
 	if err != nil {
 		return false, err
 	}
-	defer func() { _ = rows.Close() }()
+	type fkRow struct {
+		from     string
+		refTbl   string
+		to       sql.NullString
+		onDelete string
+	}
+	var fks []fkRow
 	for rows.Next() {
 		var (
 			id       int
@@ -455,13 +461,76 @@ func (s *Store) hasForeignKey(table, column, refTable, wantRefColumn, wantOnDele
 			match    string
 		)
 		if err := rows.Scan(&id, &seq, &refTbl, &from, &to, &onUpdate, &onDelete, &match); err != nil {
+			_ = rows.Close()
 			return false, err
 		}
-		if from == column && refTbl == refTable && to.String == wantRefColumn && onDelete == wantOnDelete {
+		fks = append(fks, fkRow{from: from, refTbl: refTbl, to: to, onDelete: onDelete})
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return false, err
+	}
+	if err := rows.Close(); err != nil {
+		return false, err
+	}
+	for _, fk := range fks {
+		if fk.from != column || fk.refTbl != refTable || fk.onDelete != wantOnDelete {
+			continue
+		}
+		toColumn := fk.to.String
+		if !fk.to.Valid {
+			// SQLite reports `to` as NULL when the FK references the referenced
+			// table's PRIMARY KEY implicitly (`REFERENCES sentry_configs` rather
+			// than `REFERENCES sentry_configs(id)`). Resolve it to the
+			// single-column PK — after the rows above are closed so this nested
+			// query never contends for a single-connection pool.
+			pk, err := s.singleColumnPrimaryKey(fk.refTbl)
+			if err != nil {
+				return false, err
+			}
+			toColumn = pk
+		}
+		if toColumn == wantRefColumn {
 			return true, nil
 		}
 	}
-	return false, rows.Err()
+	return false, nil
+}
+
+// singleColumnPrimaryKey returns the primary-key column of table when it has
+// exactly one; empty for a table with no primary key or a composite one. Used
+// to resolve a NULL `to` in foreign_key_list, which SQLite reports when a FK
+// references the referenced table's PRIMARY KEY implicitly.
+func (s *Store) singleColumnPrimaryKey(table string) (string, error) {
+	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = rows.Close() }()
+	pkCols := make([]string, 0, 1)
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return "", err
+		}
+		if pk > 0 {
+			pkCols = append(pkCols, name)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	if len(pkCols) == 1 {
+		return pkCols[0], nil
+	}
+	return "", nil
 }
 
 // rebuildWatchesWithInstanceColumn performs the create/copy/drop/rename table

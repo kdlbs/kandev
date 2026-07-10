@@ -225,3 +225,42 @@ describe("TaskExternalLinkDialog — Sentry availability", () => {
     });
   });
 });
+
+describe("TaskExternalLinkDialog — Sentry sole-instance swap", () => {
+  it("retargets the link when a poll swaps the sole healthy instance (state stays single)", async () => {
+    mockSentryInstances("single", [instance("inst-1", "Alpha")]);
+    vi.mocked(getSentryIssue).mockResolvedValue({ shortId: "PROJ-2" } as never);
+    vi.mocked(updateTask).mockResolvedValue({ id: TASK_ID, title: "PROJ-2: Fix login" } as never);
+
+    const view = renderDialog("sentry");
+    fireEvent.change(screen.getByTestId(INPUT_TEST_ID), { target: { value: "PROJ-1" } });
+    await waitFor(() => {
+      expect((screen.getByTestId(SUBMIT_TEST_ID) as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    // A polling refresh replaces the sole healthy instance (inst-1 -> inst-2)
+    // while availability state remains "single". The effect must retarget the
+    // new instance rather than link against the stale inst-1.
+    mockSentryInstances("single", [instance("inst-2", "Beta")]);
+    view.rerender(
+      <StateProvider>
+        <ToastProvider>
+          <TaskExternalLinkDialog
+            open={true}
+            onOpenChange={vi.fn()}
+            provider="sentry"
+            task={{ id: TASK_ID, title: TASK_TITLE }}
+            workspaceId={WORKSPACE_ID}
+          />
+        </ToastProvider>
+      </StateProvider>,
+    );
+
+    fireEvent.change(screen.getByTestId(INPUT_TEST_ID), { target: { value: "PROJ-2" } });
+    fireEvent.click(screen.getByTestId(SUBMIT_TEST_ID));
+
+    await waitFor(() => {
+      expect(getSentryIssue).toHaveBeenCalledWith(WORKSPACE_ID, "inst-2", "PROJ-2");
+    });
+  });
+});
