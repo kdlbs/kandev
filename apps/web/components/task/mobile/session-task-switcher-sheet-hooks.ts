@@ -343,7 +343,10 @@ function resolvePrimarySessionPendingAction(
   task: Task,
   existing: KanbanState["tasks"][number] | undefined,
 ) {
-  return task.primary_session_pending_action ?? existing?.primarySessionPendingAction ?? undefined;
+  if ("primary_session_pending_action" in task) {
+    return task.primary_session_pending_action ?? undefined;
+  }
+  return existing?.primarySessionPendingAction ?? undefined;
 }
 
 function resolveSessionCount(

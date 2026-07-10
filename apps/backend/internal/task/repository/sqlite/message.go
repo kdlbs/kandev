@@ -412,6 +412,9 @@ func (r *Repository) GetPendingActionsBySessionIDs(ctx context.Context, sessionI
 		pending_clarifications AS (
 			SELECT DISTINCT m.task_session_id, 'clarification' AS action
 			FROM task_session_messages m
+			JOIN latest_message latest
+			  ON latest.task_session_id = m.task_session_id
+			 AND latest.turn_id = m.turn_id
 			WHERE m.task_session_id IN (`+strings.Join(placeholders, ",")+`)
 			  AND m.type = 'clarification_request'
 			  AND COALESCE(%s, '') IN ('', 'pending')

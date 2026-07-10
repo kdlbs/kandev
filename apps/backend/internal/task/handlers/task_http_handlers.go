@@ -108,7 +108,7 @@ func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tas
 	}
 	pendingActionsBySession, err := pendingActionsForWaitingPrimarySessions(ctx, svc, primarySessionInfoMap)
 	if err != nil {
-		return nil, err
+		pendingActionsBySession = map[string]models.TaskPendingAction{}
 	}
 	result := make([]dto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {

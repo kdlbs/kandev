@@ -209,6 +209,7 @@ func TestGetPendingActionsBySessionIDs(t *testing.T) {
 
 	seedForMsgTest(t, repo, "task-stale", "sess-stale", "turn-stale")
 	createPendingActionMessage(t, repo, "perm-stale", "task-stale", "sess-stale", "turn-stale", models.MessageTypePermissionRequest, "pending", now)
+	createPendingActionMessage(t, repo, "clar-stale", "task-stale", "sess-stale", "turn-stale", models.MessageTypeClarificationRequest, "pending", now)
 	seedForMsgTest(t, repo, "task-stale", "sess-stale", "turn-current")
 	createPendingActionMessage(t, repo, "message-current", "task-stale", "sess-stale", "turn-current", models.MessageTypeMessage, "<missing>", now.Add(time.Second))
 
@@ -232,7 +233,7 @@ func TestGetPendingActionsBySessionIDs(t *testing.T) {
 		t.Fatalf("sess-perm action = %q, want permission", got["sess-perm"])
 	}
 	if _, ok := got["sess-stale"]; ok {
-		t.Fatalf("sess-stale should not inherit a previous turn permission: %#v", got["sess-stale"])
+		t.Fatalf("sess-stale should not inherit previous turn actions: %#v", got["sess-stale"])
 	}
 	if _, ok := got["sess-missing"]; ok {
 		t.Fatalf("sess-missing should not have a pending action: %#v", got["sess-missing"])
