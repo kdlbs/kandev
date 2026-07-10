@@ -65,12 +65,14 @@ export function PlanPanelHeader({
       if (implementDisabled) return;
       setIsImplementing(true);
       try {
-        let savedPlan = plan;
+        let savedPlan: TaskPlan;
         if (hasUnsavedChanges || !plan) {
-          savedPlan = await savePlan(draftContent, plan?.title);
-          if (!savedPlan) return;
+          const nextPlan = await savePlan(draftContent, plan?.title);
+          if (!nextPlan) return;
+          savedPlan = nextPlan;
+        } else {
+          savedPlan = plan;
         }
-        if (!savedPlan) return;
         const savedState = getPlanToolbarImplementState({
           draftContent: savedPlan.content,
           plan: savedPlan,

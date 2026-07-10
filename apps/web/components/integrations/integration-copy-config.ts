@@ -18,10 +18,11 @@ const integrationLabels: Record<IntegrationSlug, string> = {
 };
 
 // integrationFromPathname returns the integration slug for a settings pathname
-// like /settings/integrations/slack, or null when the current page is not a
-// copyable integration page.
+// like /settings/integrations/slack or
+// /settings/workspace/<id>/integrations/slack, or null when the current page is
+// not a copyable integration page.
 export function integrationFromPathname(pathname: string): IntegrationSlug | null {
-  const match = pathname.match(/^\/settings\/integrations\/([^/]+)/);
+  const match = pathname.match(/^\/settings(?:\/workspace\/[^/]+)?\/integrations\/([^/]+)/);
   const slug = match?.[1];
   if (slug && Object.prototype.hasOwnProperty.call(integrationLabels, slug)) {
     return slug as IntegrationSlug;

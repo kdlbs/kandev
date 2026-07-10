@@ -12,7 +12,7 @@ Plan mode can create a reviewed task plan, then the user may start implementatio
 
 `task_plans` stores an implementation-start marker: timestamp, session id, and actor. The marker is set by an explicit backend action when the UI starts implementation from an Implement button. The write is idempotent: the first implementation start wins, and later clicks or plan edits do not clear or replace it.
 
-Task plan reads, WebSocket plan events, and frontend task-plan state include the marker. The plan toolbar shows its accent Implement action only when the current draft has non-empty content and the persisted marker is absent. Before starting implementation from the toolbar, the frontend saves any unsaved plan edits, sends the normal implement prompt to the target session, then marks the plan implemented so the button remains hidden after refresh.
+Task plan reads, WebSocket plan events, and frontend task-plan state include the marker. The plan toolbar shows its accent Implement action whenever the current draft has non-empty content, and disables it with an explanatory tooltip once the persisted marker is present. Before starting implementation from the toolbar, the frontend saves any unsaved plan edits, sends the normal implement prompt to the target session, then marks the plan implemented so the button remains visible but disabled after refresh.
 
 ## Consequences
 

@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { TaskSwitcher, type TaskSwitcherItem } from "./task-switcher";
+import { createTaskLinkSelectAction } from "./task-switcher-context-menu";
 import type { GroupedSidebarList } from "@/lib/sidebar/apply-view";
 
 afterEach(() => cleanup());
@@ -161,5 +162,56 @@ describe("TaskSwitcher — bulk pin menu", () => {
     fireEvent.contextMenu(screen.getByText(TASK_A.title));
 
     expect(screen.getByText("Unpin 2 tasks")).toBeTruthy();
+  });
+});
+
+describe("TaskSwitcher — external issue link menu", () => {
+  it("offers configured external issue providers from the task context menu", async () => {
+    render(
+      <Providers>
+        <TaskSwitcher
+          grouped={{
+            groups: [{ key: "__all__", label: "All", tasks: [TASK_A] }],
+            subTasksByParentId: new Map(),
+          }}
+          activeTaskId={null}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          onLinkPullRequest={vi.fn()}
+          onLinkIssue={vi.fn()}
+          {...({
+            onLinkJiraTicket: vi.fn(),
+            onLinkLinearIssue: vi.fn(),
+            onLinkSentryIssue: vi.fn(),
+          } as Partial<Parameters<typeof TaskSwitcher>[0]>)}
+        />
+      </Providers>,
+    );
+
+    fireEvent.contextMenu(screen.getByText(TASK_A.title));
+    const linkTrigger = screen.getByText("Link");
+    fireEvent.focus(linkTrigger);
+    fireEvent.keyDown(linkTrigger, { key: "ArrowRight" });
+
+    await waitFor(() => {
+      expect(screen.getByText("Jira Ticket")).toBeTruthy();
+      expect(screen.getByText("Linear Issue")).toBeTruthy();
+      expect(screen.getByText("Sentry Issue")).toBeTruthy();
+    });
+  });
+
+  it("passes the visible task title to external issue link handlers", () => {
+    const archivedTask: TaskSwitcherItem = {
+      id: "archived-task",
+      title: "Archived task title",
+      isArchived: true,
+    };
+    const closeMenu = vi.fn();
+    const onLinkJiraTicket = vi.fn();
+
+    createTaskLinkSelectAction(archivedTask, onLinkJiraTicket, closeMenu)?.();
+
+    expect(onLinkJiraTicket).toHaveBeenCalledWith(archivedTask.id, archivedTask.title);
+    expect(closeMenu).toHaveBeenCalledOnce();
   });
 });

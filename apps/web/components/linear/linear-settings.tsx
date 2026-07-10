@@ -445,10 +445,14 @@ export function LinearConnectionSection({ workspaceId }: { workspaceId: string }
   );
 }
 
-export function LinearIntegrationPage() {
+type LinearIntegrationPageProps = {
+  workspaceId?: string;
+};
+
+export function LinearIntegrationPage({ workspaceId }: LinearIntegrationPageProps = {}) {
   return (
     <div className="space-y-8">
-      <WorkspaceScopedSection>
+      <WorkspaceScopedSection workspaceId={workspaceId}>
         {(workspaceId) => <LinearConnectionSection key={workspaceId} workspaceId={workspaceId} />}
       </WorkspaceScopedSection>
       <LinearIssueWatchersSection />

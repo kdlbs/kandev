@@ -123,6 +123,32 @@ function NoDiffPlaceholder({ className }: { className?: string }) {
   );
 }
 
+function useScrollWalkthroughRangeIntoView(
+  wrapperRef: React.RefObject<HTMLDivElement | null>,
+  selectedLines: ReturnType<typeof useDiffViewerState>["walkthroughSelectedLines"],
+  filePath: string,
+) {
+  useEffect(() => {
+    if (!selectedLines) return;
+    let innerFrame: number | null = null;
+    const frame = requestAnimationFrame(() => {
+      innerFrame = requestAnimationFrame(() => {
+        const container = wrapperRef.current?.querySelector("diffs-container");
+        const shadow = container?.shadowRoot;
+        const selected = shadow?.querySelector<HTMLElement>(
+          '[data-selected-line="first"], [data-selected-line="single"], [data-selected-line]',
+        );
+        const fallback = shadow?.querySelector<HTMLElement>(`[data-line="${selectedLines.start}"]`);
+        (selected ?? fallback)?.scrollIntoView({ block: "center", behavior: "smooth" });
+      });
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      if (innerFrame !== null) cancelAnimationFrame(innerFrame);
+    };
+  }, [wrapperRef, selectedLines, filePath]);
+}
+
 type WiringArgs = {
   data: FileDiffData;
   state: ReturnType<typeof useDiffViewerState>;
@@ -239,6 +265,7 @@ export const DiffViewer = memo(function DiffViewer({
     baseRef,
     repo,
   });
+  useScrollWalkthroughRangeIntoView(wrapperRef, state.walkthroughSelectedLines, data.filePath);
 
   const { options, renderHeaderMetadata, renderHoverUtility, renderAnnotation } =
     useDiffViewerWiring({
@@ -260,14 +287,20 @@ export const DiffViewer = memo(function DiffViewer({
       repo,
     });
 
-  const controlledSelection = state.showCommentForm ? state.selectedLines : null;
+  const controlledSelection = state.showCommentForm
+    ? state.selectedLines
+    : state.walkthroughSelectedLines;
 
   if (!state.fileDiffMetadata) {
     return <NoDiffPlaceholder className={className} />;
   }
 
   return (
-    <div ref={wrapperRef} className={cn("diff-viewer", className)}>
+    <div
+      ref={wrapperRef}
+      className={cn("diff-viewer", className)}
+      data-walkthrough-active={state.walkthroughSelectedLines ? "true" : undefined}
+    >
       <FileDiff
         fileDiff={state.fileDiffMetadata}
         options={options}

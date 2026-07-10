@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useCallback, useRef, useState } from "react";
+import React, { useEffect, useMemo, useCallback, useLayoutEffect, useRef, useState } from "react";
 import { ScrollArea } from "@kandev/ui/scroll-area";
 import type { FileTreeNode, OpenFileTab } from "@/lib/types/backend";
 import { useSession } from "@/hooks/domains/session/use-session";
@@ -103,6 +103,15 @@ function useFileBrowserHandlers(
   const { toast } = useToast();
   const [creatingInPath, setCreatingInPath] = useState<string | null>(null);
   const [activeFolderPath, setActiveFolderPath] = useState<string>("");
+  const openFileAbortRef = useRef<AbortController | null>(null);
+
+  useLayoutEffect(
+    () => () => {
+      openFileAbortRef.current?.abort();
+      openFileAbortRef.current = null;
+    },
+    [sessionId],
+  );
 
   const handleStartCreate = useCallback(() => {
     if (activeFolderPath && !treeState.expandedPaths.has(activeFolderPath)) {
@@ -134,7 +143,18 @@ function useFileBrowserHandlers(
   );
 
   const openFileByPath = useCallback(
-    (path: string) => fetchAndOpenFile(sessionId, path, onOpenFile, toast),
+    (path: string) => {
+      openFileAbortRef.current?.abort();
+      const controller = new AbortController();
+      openFileAbortRef.current = controller;
+      return fetchAndOpenFile(sessionId, path, onOpenFile, toast, {
+        signal: controller.signal,
+      }).finally(() => {
+        if (openFileAbortRef.current === controller) {
+          openFileAbortRef.current = null;
+        }
+      });
+    },
     [sessionId, onOpenFile, toast],
   );
   const handleCancelCreate = useCallback(() => setCreatingInPath(null), []);

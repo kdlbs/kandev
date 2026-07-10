@@ -28,6 +28,7 @@ import {
   WriteTaskDocumentRenderer,
 } from "./document-renderers";
 import { AskUserQuestionRenderer } from "./ask-user-question-renderer";
+import { ShowWalkthroughRenderer } from "./walkthrough-renderer";
 import type { KandevRenderer } from "./types";
 
 export const KANDEV_RENDERERS: Record<string, KandevRenderer> = {
@@ -54,6 +55,7 @@ export const KANDEV_RENDERERS: Record<string, KandevRenderer> = {
   get_task_conversation: GetTaskConversationRenderer,
 
   ask_user_question: AskUserQuestionRenderer,
+  show_walkthrough: ShowWalkthroughRenderer,
 };
 
 export function getKandevRenderer(stem: string | null): KandevRenderer | null {

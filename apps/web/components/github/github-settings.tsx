@@ -271,7 +271,10 @@ export function GitHubConnectionSection() {
   return (
     <>
       <div>
-        <h2 className="text-2xl font-bold flex items-center gap-2">
+        <h2
+          className="text-2xl font-bold flex items-center gap-2"
+          data-testid="github-integration-heading"
+        >
           <IconBrandGithub className="h-6 w-6" />
           GitHub Integration
         </h2>
@@ -307,12 +310,16 @@ function PerWorkspaceSection({ workspaceId }: { workspaceId: string }) {
   );
 }
 
-export function GitHubIntegrationPage() {
+type GitHubIntegrationPageProps = {
+  workspaceId?: string;
+};
+
+export function GitHubIntegrationPage({ workspaceId }: GitHubIntegrationPageProps = {}) {
   return (
     <TooltipProvider>
       <div className="space-y-8">
         <GitHubConnectionSection />
-        <WorkspaceScopedSection>
+        <WorkspaceScopedSection workspaceId={workspaceId}>
           {(ws) => <PerWorkspaceSection key={ws} workspaceId={ws} />}
         </WorkspaceScopedSection>
       </div>

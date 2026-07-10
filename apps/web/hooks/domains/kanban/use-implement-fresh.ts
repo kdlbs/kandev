@@ -3,10 +3,13 @@ import { useCallback } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { setChatDraftContent } from "@/lib/local-storage";
-import { markPlanImplementationStarted } from "@/lib/api/domains/plan-api";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { buildImplementPlanContent, collectImplementPlanInput } from "./use-plan-actions";
+import {
+  buildImplementPlanContent,
+  collectImplementPlanInput,
+  markPlanImplementationStartedBestEffort,
+} from "./use-plan-actions";
 import type { ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
 
 async function setupFreshSession(newSessionId: string): Promise<void> {
@@ -19,22 +22,6 @@ async function setupFreshSession(newSessionId: string): Promise<void> {
       console.error("Failed to set fresh session as primary:", err);
       // Continue even if set_primary fails
     }
-  }
-}
-
-async function markFreshPlanImplementationStarted(
-  taskId: string,
-  newSessionId: string,
-  setTaskPlan: (
-    taskId: string,
-    plan: Awaited<ReturnType<typeof markPlanImplementationStarted>>,
-  ) => void,
-): Promise<void> {
-  try {
-    const markedPlan = await markPlanImplementationStarted(taskId, newSessionId);
-    setTaskPlan(taskId, markedPlan);
-  } catch (err) {
-    console.error("Failed to mark plan implementation started:", err);
   }
 }
 
@@ -91,7 +78,7 @@ export function useImplementFresh(
       if (!newSessionId) return false;
 
       await setupFreshSession(newSessionId);
-      await markFreshPlanImplementationStarted(taskId, newSessionId, setTaskPlan);
+      await markPlanImplementationStartedBestEffort(taskId, newSessionId, setTaskPlan);
       setActiveSession(taskId, newSessionId);
 
       // Clear composer + draft only when a fresh session was actually created.

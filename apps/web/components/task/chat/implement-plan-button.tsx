@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { IconChevronDown, IconPlus, IconRocket } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -29,6 +30,29 @@ type ImplementPlanButtonProps = {
     freshItem?: string;
   };
 };
+
+function legacyRootTestId(rootId: string) {
+  return rootId === "implement-plan-control" ? undefined : "implement-plan-control";
+}
+
+function DisabledImplementTooltip({
+  disabledReason,
+  children,
+}: {
+  disabledReason: string;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} className="inline-flex">
+          {children}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{disabledReason}</TooltipContent>
+    </Tooltip>
+  );
+}
 
 export function ImplementPlanButton({
   onClick,
@@ -74,6 +98,7 @@ export function ImplementPlanButton({
   const splitButton = (
     <div
       data-testid={ids.root}
+      data-legacy-testid={legacyRootTestId(ids.root)}
       className={cn(
         "inline-flex items-center rounded-md",
         framed &&
@@ -88,7 +113,8 @@ export function ImplementPlanButton({
             variant="ghost"
             size="sm"
             data-testid={ids.menuTrigger}
-            aria-label={disabledReason ?? "More implement options"}
+            aria-label="More implement options"
+            aria-disabled={disabled}
             disabled={disabled}
             className={cn(
               "h-7 px-1 text-violet-400 rounded-l-none border-y-0 border-r-0 border-l border-violet-400/20",
@@ -121,11 +147,8 @@ export function ImplementPlanButton({
   if (!disabledReason) return splitButton;
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="inline-flex">{splitButton}</span>
-      </TooltipTrigger>
-      <TooltipContent>{disabledReason}</TooltipContent>
-    </Tooltip>
+    <DisabledImplementTooltip disabledReason={disabledReason}>
+      {splitButton}
+    </DisabledImplementTooltip>
   );
 }

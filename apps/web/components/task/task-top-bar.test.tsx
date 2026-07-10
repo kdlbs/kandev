@@ -44,17 +44,9 @@ vi.mock("@/components/jira/jira-ticket-button", () => ({
   extractJiraKey: () => null,
 }));
 
-vi.mock("@/components/jira/jira-link-button", () => ({
-  JiraLinkButton: () => null,
-}));
-
 vi.mock("@/components/linear/linear-issue-button", () => ({
   LinearIssueButton: () => null,
   extractLinearKey: () => null,
-}));
-
-vi.mock("@/components/linear/linear-link-button", () => ({
-  LinearLinkButton: () => null,
 }));
 
 vi.mock("@/hooks/domains/jira/use-jira-availability", () => ({

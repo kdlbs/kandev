@@ -4,9 +4,10 @@ import type { DiffComment } from "@/lib/diff/types";
 import { CommentForm } from "./comment-form";
 import { CommentDisplay } from "./comment-display";
 import { HunkActionBar } from "./hunk-action-bar";
+import { WalkthroughStepCard } from "./walkthrough-step-card";
 
 type AnnotationMetadata = {
-  type: "comment" | "new-comment-form" | "hunk-actions";
+  type: "comment" | "new-comment-form" | "hunk-actions" | "walkthrough-step";
   comment?: DiffComment;
   isEditing?: boolean;
   changeBlockId?: string;
@@ -46,6 +47,10 @@ export function useAnnotationRenderer(opts: UseAnnotationRendererOpts) {
   return useCallback(
     (annotation: DiffLineAnnotation<AnnotationMetadata>): ReactNode => {
       const { type, comment, isEditing, changeBlockId } = annotation.metadata;
+
+      if (type === "walkthrough-step") {
+        return <WalkthroughStepCard key="walkthrough-step" />;
+      }
 
       if (type === "hunk-actions" && changeBlockId) {
         return (

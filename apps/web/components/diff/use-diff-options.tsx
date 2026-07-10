@@ -25,6 +25,8 @@ const DIFF_UNSAFE_CSS = `
     --diffs-bg-deletion-number: rgb(var(--git-deletion) / 0.15) !important;
     --diffs-bg-addition-emphasis: rgb(var(--git-addition) / 0.3) !important;
     --diffs-bg-deletion-emphasis: rgb(var(--git-deletion) / 0.3) !important;
+    --diffs-bg-selection-override: color-mix(in lab, var(--background) 74%, var(--primary)) !important;
+    --diffs-bg-selection-number-override: color-mix(in lab, var(--background) 60%, var(--primary)) !important;
     --diffs-line-height: 24px !important;
     --diffs-font-size: ${FONT.size}px !important;
     --diffs-font-family: ${FONT.mono} !important;
@@ -35,6 +37,9 @@ const DIFF_UNSAFE_CSS = `
   [data-line] {
     min-height: 24px !important;
     line-height: 24px !important;
+  }
+  [data-selected-line]:is([data-line], [data-line-annotation]) {
+    box-shadow: inset 2px 0 0 var(--primary) !important;
   }
   [data-separator='metadata'],
   [data-separator]:empty {

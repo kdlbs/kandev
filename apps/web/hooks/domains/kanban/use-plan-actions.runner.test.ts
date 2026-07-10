@@ -214,13 +214,11 @@ describe("useImplementPlanRunner toolbar path", () => {
     const plan = makePlan();
     mockMarkPlanImplementationStarted.mockResolvedValueOnce(plan);
     const handlePlanModeChange = vi.fn();
-    const { ref, clear } = makeChatRef();
     const { result } = renderHook(() =>
       useImplementPlanRunner({
         resolvedSessionId: SESSION_ID,
         taskId: TASK_ID,
         handlePlanModeChange,
-        chatInputRef: ref,
         clearPlanModeAfterSend: false,
       }),
     );
@@ -234,7 +232,7 @@ describe("useImplementPlanRunner toolbar path", () => {
     expect(mockMarkPlanImplementationStarted).toHaveBeenCalledWith(TASK_ID, SESSION_ID);
     expect(mockSetTaskPlan).toHaveBeenCalledWith(TASK_ID, plan);
     expect(handlePlanModeChange).not.toHaveBeenCalled();
-    expect(clear).toHaveBeenCalledTimes(1);
+    expect(mockSetChatDraftContent).not.toHaveBeenCalled();
     expect(mockWsRequest).toHaveBeenCalledTimes(1);
   });
 });

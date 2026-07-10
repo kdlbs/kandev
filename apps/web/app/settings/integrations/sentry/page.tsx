@@ -1,5 +1,9 @@
 import { SentryIntegrationPage } from "@/components/sentry/sentry-settings";
 
-export default function IntegrationsSentryPage() {
-  return <SentryIntegrationPage />;
+type IntegrationsSentryPageProps = {
+  workspaceId?: string;
+};
+
+export default function IntegrationsSentryPage({ workspaceId }: IntegrationsSentryPageProps = {}) {
+  return <SentryIntegrationPage workspaceId={workspaceId} />;
 }

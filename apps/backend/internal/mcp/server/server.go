@@ -369,6 +369,8 @@ func (s *Server) registerTools() {
 		}
 		s.registerPlanTools()
 		count += 4
+		s.registerWalkthroughTools()
+		count += 3
 		s.registerRelatedTasksTool()
 		count++
 		// Task-mode only: requires a live session to attach the new
@@ -514,7 +516,7 @@ func (s *Server) registerCreateTaskTool() {
 
 WHEN TO USE parent_id='self':
 - Breaking down your current task into phases/steps → use parent_id='self'
-- Creating tasks from a plan → use parent_id='self' (inherits repo, workspace, workflow)
+- Creating tasks from a plan → use parent_id='self' (inherits repo, task workspace, workflow, and materialized workspace by default)
 - Delegating work to another agent → use parent_id='self'
 - Delegating work that lives in a sibling repo → use parent_id='self' AND pass repository_url / repository_id / local_path to point the subtask at that repo
 
@@ -524,11 +526,11 @@ WHEN TO OMIT parent_id (top-level task):
 - workspace_id and workflow_id are auto-resolved if only one exists; provide explicitly if ambiguous
 
 IMPORTANT:
-- Subtasks inherit workspace, workflow, agent profile, and executor from the parent
+- Subtasks inherit task workspace, workflow, agent profile, executor, and materialized workspace from the parent by default. Pass workspace_id/workflow_id only when deliberately targeting a different task workspace/workflow; any supplied workflow_id must belong to the effective workspace_id. Pass workspace_mode='new_workspace' when the subtask needs its own materialized workspace/worktree.
 - Agent profile precedence is explicit agent_profile_id > current/source task or parent task > workflow defaults > workspace default
 - When launched from a current task, omitting parent_id still uses the current task as the source for profile inheritance before workflow/workspace defaults. Do not rely on workspace defaults for follow-up work from an active task.
 - Every created task must have a resolvable agent profile. start_agent=false still records the profile for a later manual start.
-- Subtasks inherit the parent's repository unless you supply repository_url, repository_id, or local_path — in which case the subtask targets that repo instead (must live in the parent's workspace)
+- Subtasks inherit the parent's repository unless you supply repository_url, repository_id, or local_path — in which case the subtask targets that repo instead
 - base_branch behaviour:
   - Same repo as parent (no repo args): subtask inherits the parent's base_branch (sibling branches off the same starting point — useful for PR stacks)
   - Different repo (you passed repository_url / repository_id / local_path): subtask defaults to that repo's default_branch
@@ -559,9 +561,10 @@ IMPORTANT:
 		mcp.NewTool("create_task_kandev",
 			mcp.WithDescription(toolDesc),
 			mcp.WithString("parent_id", mcp.Description(parentDesc)),
-			mcp.WithString("workspace_id", mcp.Description("The workspace ID. Auto-resolved if only one workspace exists. Inherited from parent for subtasks.")),
-			mcp.WithString("workflow_id", mcp.Description("The workflow ID. Auto-resolved if the workspace has only one workflow. Inherited from parent for subtasks.")),
-			mcp.WithString("workflow_step_id", mcp.Description("The workflow step ID (optional, auto-resolved if omitted)")),
+			mcp.WithString("workspace_id", mcp.Description("The workspace ID. Auto-resolved if only one workspace exists. Defaulted from parent for subtasks when omitted.")),
+			mcp.WithString("workflow_id", mcp.Description("The workflow ID. Auto-resolved if the workspace has only one workflow. Defaulted from parent for subtasks when workspace_id is also omitted; if supplied, it must belong to the effective workspace_id.")),
+			mcp.WithString("workflow_step_id", mcp.Description("The workflow step ID (optional, auto-resolved if omitted; for subtasks, pass only with an explicit workflow_id)")),
+			mcp.WithString("workspace_mode", mcp.Description("Subtask materialized-workspace mode: inherit_parent reuses the parent's worktree/materialized workspace (default for subtasks); new_workspace launches the subtask in its own workspace/worktree.")),
 			mcp.WithString("title", mcp.Required(), mcp.Description("The task title")),
 			mcp.WithString("description", mcp.Description("The initial prompt for the sub-agent. This is the ONLY context the agent receives when it starts — treat it as the agent's first user message. REQUIRED for subtasks: without a description the sub-agent starts with no context and cannot do useful work. Be specific and detailed.")),
 			mcp.WithString("agent_profile_id", mcp.Description(agentProfileDesc)),
@@ -863,6 +866,80 @@ func (s *Server) registerPlanTools() {
 		),
 		s.wrapHandler("delete_task_plan_kandev", s.deleteTaskPlanHandler()),
 	)
+}
+
+// registerWalkthroughTools registers the agent-authored code-walkthrough tools.
+// show_walkthrough is the JetBrains-style "walk a person through the code" tool:
+// the agent supplies ordered, file+line-anchored steps that the user cycles
+// through as popovers over the review diff with Previous/Next.
+func (s *Server) registerWalkthroughTools() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("show_walkthrough_kandev",
+			mcp.WithDescription(
+				"Show and store a guided code walkthrough for this task. Accepts an ordered list of "+
+					"steps; each step anchors a short markdown explanation to a specific file line or "+
+					"line range, and renders as a popover over the review diff/editor. The user cycles "+
+					"through steps with Previous and Next. The walkthrough is saved to the task and "+
+					"replaces any prior one. Only reference files that exist in the task's local worktree "+
+					"or current review diff; for PR-only files, do not assume the PR head is checked out "+
+					"locally. Use line_end when a logical explanation spans multiple lines. "+
+					"Use this after producing a change to narrate the diff (what each hunk does and why), "+
+					"or to explain how a part of the codebase works. Order steps to follow the reader's "+
+					"natural path through the code (entry point first, then the call chain). Keep text "+
+					"concise and do not add a 'Justification:' preamble."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to attach the walkthrough to")),
+			mcp.WithString("title", mcp.Description("Optional title for the walkthrough (default: 'Walkthrough')")),
+			mcp.WithArray("steps", mcp.Required(),
+				mcp.Description("Ordered list of walkthrough steps, each anchored to a file line or range."),
+				mcp.Items(buildWalkthroughStepSchemaItem()),
+			),
+		),
+		s.wrapHandler("show_walkthrough_kandev", s.showWalkthroughHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_walkthrough_kandev",
+			mcp.WithDescription("Get the current code walkthrough for a task, including any steps."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to get the walkthrough for")),
+		),
+		s.wrapHandler("get_walkthrough_kandev", s.getWalkthroughHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("delete_walkthrough_kandev",
+			mcp.WithDescription("Delete the code walkthrough for a task."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete the walkthrough for")),
+		),
+		s.wrapHandler("delete_walkthrough_kandev", s.deleteWalkthroughHandler()),
+	)
+}
+
+// buildWalkthroughStepSchemaItem describes one step object in the
+// show_walkthrough_kandev tool schema.
+func buildWalkthroughStepSchemaItem() map[string]any {
+	const typeKey = "type"
+	str := func(desc string) map[string]any {
+		return map[string]any{typeKey: "string", descriptionArg: desc}
+	}
+	num := func(desc string) map[string]any {
+		return map[string]any{typeKey: "integer", descriptionArg: desc}
+	}
+	return map[string]any{
+		typeKey: "object",
+		"properties": map[string]any{
+			titleArg: str("Optional short heading for this step."),
+			"repo":   str("Optional repository name; disambiguates in multi-repo reviews."),
+			"file": str(
+				"Path to a file present in the task worktree or current review diff, relative to the repo root.",
+			),
+			"line": num("1-based start line to anchor the popover to."),
+			"line_end": num(
+				"Optional 1-based end line. Use this for multi-line ranges instead of adjacent single-line steps.",
+			),
+			"text": str(
+				"Concise markdown explanation shown in the step popover. Do not start with 'Justification:'.",
+			),
+		},
+		"required": []string{"file", "line", "text"},
+	}
 }
 
 // buildQuestionSchemaItem describes the shape of a single question object in

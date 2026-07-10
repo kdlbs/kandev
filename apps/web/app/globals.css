@@ -1378,6 +1378,22 @@
   background-color: color-mix(in oklab, var(--primary) 15%, transparent) !important;
 }
 
+/* Monaco Editor - Walkthrough active range */
+.monaco-walkthrough-line {
+  background-color: color-mix(in oklab, var(--primary) 11%, transparent) !important;
+}
+.monaco-walkthrough-line-number {
+  background-color: color-mix(in oklab, var(--primary) 15%, transparent) !important;
+  color: var(--foreground) !important;
+}
+.monaco-walkthrough-range,
+.monaco-walkthrough-range-start {
+  background-color: color-mix(in oklab, var(--primary) 10%, transparent) !important;
+}
+.monaco-walkthrough-range-start {
+  border-left: 3px solid color-mix(in oklab, var(--primary) 72%, transparent) !important;
+}
+
 /* Monaco Editor - Peek view / references widget overrides */
 .monaco-editor .peekview-widget .head {
   box-sizing: border-box;

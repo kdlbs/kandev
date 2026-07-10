@@ -103,7 +103,7 @@ func TestHandleAskUserQuestion_NoAnswerPausesSession(t *testing.T) {
 		}
 	})
 	pauser := &recordingClarificationInputPauser{}
-	h := NewHandlers(svc, nil, store, nil, nil, repo, repo, nil, nil, nil, nil, testLogger(t))
+	h := NewHandlers(svc, nil, store, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
 	h.SetClarificationInputPauser(pauser)
 
 	payload := map[string]interface{}{

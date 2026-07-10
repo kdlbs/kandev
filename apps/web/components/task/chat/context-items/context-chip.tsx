@@ -8,6 +8,7 @@ import {
   IconPhoto,
   IconAt,
   IconGitPullRequest,
+  IconRoute,
   IconX,
   IconPinFilled,
 } from "@tabler/icons-react";
@@ -20,6 +21,7 @@ const ICON_BY_KIND: Record<ContextItemKind, TablerIcon> = {
   file: IconFile,
   comment: IconMessageDots,
   "plan-comment": IconMessageDots,
+  "walkthrough-comment": IconRoute,
   image: IconPhoto,
   "file-attachment": IconFile,
   prompt: IconAt,

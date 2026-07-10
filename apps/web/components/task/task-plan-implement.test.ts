@@ -42,4 +42,17 @@ describe("getPlanToolbarImplementState", () => {
       disabledReason: "This plan has already been sent for implementation.",
     });
   });
+
+  it("keeps the disabled marker affordance visible even when the draft is empty", () => {
+    expect(
+      getPlanToolbarImplementState({
+        draftContent: "  \n",
+        plan: plan({ implementation_started_at: "2026-07-09T12:30:00Z" }),
+      }),
+    ).toEqual({
+      visible: true,
+      disabled: true,
+      disabledReason: "This plan has already been sent for implementation.",
+    });
+  });
 });

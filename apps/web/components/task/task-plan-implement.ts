@@ -15,15 +15,15 @@ export function getPlanToolbarImplementState({
   draftContent,
   plan,
 }: PlanToolbarImplementArgs): PlanToolbarImplementState {
-  if (draftContent.trim() === "") {
-    return { visible: false, disabled: false };
-  }
   if (plan?.implementation_started_at) {
     return {
       visible: true,
       disabled: true,
       disabledReason: "This plan has already been sent for implementation.",
     };
+  }
+  if (draftContent.trim() === "") {
+    return { visible: false, disabled: false };
   }
   return { visible: true, disabled: false };
 }

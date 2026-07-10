@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { isValidElement, type ReactElement } from "react";
 
+import IntegrationsGitLabPage from "@/app/settings/integrations/gitlab/page";
 import { workspaceId, workflowId } from "@/lib/types/ids";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
-import { buildSettingsInitialStateForRoute } from "./settings-routes";
+import { buildSettingsInitialStateForRoute, renderSettingsRoute } from "./settings-routes";
 
 const ACTIVE_WORKSPACE_COOKIE = "kandev-active-workspace";
 const OWNER_ID = "owner-1";
 const TIMESTAMP = "2026-01-01T00:00:00Z";
-const SETTINGS_ROUTE = "/settings/integrations";
 
 describe("buildSettingsInitialStateForRoute", () => {
   beforeEach(() => {
@@ -15,22 +16,20 @@ describe("buildSettingsInitialStateForRoute", () => {
   });
 
   describe("workspace selection", () => {
-    it("prefers the workspace matching the URL path param", () => {
+    it("keeps the saved active workspace for settings hydration", () => {
       const state = buildState({
-        pathname: "/settings/workspace/ws-2/repositories",
         workspaces: workspaceRows(["ws-1", "ws-2"]),
         userSettingsResponse: userSettings({ workspace_id: workspaceId("ws-1") }),
       });
 
-      expect(state.workspaces?.activeId).toBe("ws-2");
-      expect(state.userSettings?.workspaceId).toBe("ws-2");
+      expect(state.workspaces?.activeId).toBe("ws-1");
+      expect(state.userSettings?.workspaceId).toBe("ws-1");
     });
 
     it("keeps the active workspace cookie on global settings pages", () => {
       document.cookie = `${ACTIVE_WORKSPACE_COOKIE}=ws-2; path=/`;
 
       const state = buildState({
-        pathname: SETTINGS_ROUTE,
         workspaces: workspaceRows(["ws-1", "ws-2"]),
         userSettingsResponse: userSettings({ workspace_id: workspaceId("ws-1") }),
       });
@@ -43,7 +42,6 @@ describe("buildSettingsInitialStateForRoute", () => {
       document.cookie = `${ACTIVE_WORKSPACE_COOKIE}=ws-office; path=/`;
 
       const state = buildState({
-        pathname: SETTINGS_ROUTE,
         workspaces: [
           buildWorkspace({ id: "ws-office", office_workflow_id: workflowId("office") }),
           buildWorkspace({ id: "ws-kanban", office_workflow_id: null }),
@@ -57,9 +55,8 @@ describe("buildSettingsInitialStateForRoute", () => {
   });
 
   describe("fallbacks", () => {
-    it("falls back to the settings workspace_id when no URL param matches", () => {
+    it("falls back to the settings workspace_id when no cookie matches", () => {
       const state = buildState({
-        pathname: "/settings/workspace/missing/repositories",
         workspaces: workspaceRows(["ws-1", "ws-2"]),
         userSettingsResponse: userSettings({ workspace_id: workspaceId("ws-2") }),
       });
@@ -68,9 +65,8 @@ describe("buildSettingsInitialStateForRoute", () => {
       expect(state.userSettings?.workspaceId).toBe("ws-2");
     });
 
-    it("falls back to the first workspace when neither URL param nor settings match", () => {
+    it("falls back to the first workspace when neither cookie nor settings match", () => {
       const state = buildState({
-        pathname: "/settings/utility-agents",
         workspaces: workspaceRows(["ws-1", "ws-2"]),
         userSettingsResponse: userSettings({ workspace_id: workspaceId("missing") }),
       });
@@ -113,11 +109,17 @@ describe("buildSettingsInitialStateForRoute", () => {
   });
 });
 
+describe("renderSettingsRoute", () => {
+  it("passes the route workspace id to the GitLab integration page", () => {
+    expect(gitLabRouteWorkspaceId("/settings/workspace/ws-2/integrations/gitlab")).toBe("ws-2");
+    expect(gitLabRouteWorkspaceId("/settings/workspace/ws%202/integrations/gitlab")).toBe("ws 2");
+  });
+});
+
 function buildState(
   overrides: Partial<Parameters<typeof buildSettingsInitialStateForRoute>[0]> = {},
 ) {
   return buildSettingsInitialStateForRoute({
-    pathname: "/settings",
     workspaces: [],
     executors: [],
     agents: [],
@@ -172,4 +174,13 @@ function userSettings(
       ...settings,
     },
   };
+}
+
+function gitLabRouteWorkspaceId(pathname: string): string | undefined {
+  const route = renderSettingsRoute(pathname);
+  if (!isValidElement(route)) {
+    throw new Error("expected GitLab integration route element");
+  }
+  expect(route.type).toBe(IntegrationsGitLabPage);
+  return (route as ReactElement<{ workspaceId?: string }>).props.workspaceId;
 }

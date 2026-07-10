@@ -62,6 +62,7 @@ export type SessionGit = {
   commitsLoading: boolean;
 
   // Derived state — single source of truth for all git-dependent UI
+  statusLoaded: boolean;
   hasUnstaged: boolean;
   hasStaged: boolean;
   hasCommits: boolean;
@@ -660,6 +661,7 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
   } = useFileDerivations(statusByRepo, gitStatus);
   usePerRepoPendingClear(statusByRepo, allFiles, setPendingStageFiles);
   const ahead = gitStatus?.ahead ?? 0;
+  const statusLoaded = Boolean(gitStatus || statusByRepo.length > 0);
   const hasUnstaged = unstagedFiles.length > 0;
   const hasStaged = stagedFiles.length > 0;
   const hasCommits = commits.length > 0;
@@ -694,6 +696,7 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
     cumulativeDiff,
     commitsLoading: commitsLoading ?? false,
 
+    statusLoaded,
     hasUnstaged,
     hasStaged,
     hasCommits,

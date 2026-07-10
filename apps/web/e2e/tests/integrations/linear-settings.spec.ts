@@ -45,7 +45,10 @@ test.describe("Linear settings", () => {
     await expect(testPage.getByText(/leave blank to keep the current value/i)).toBeVisible();
   });
 
-  test("workspace selector scopes the saved credentials form", async ({ testPage, apiClient }) => {
+  test("workspace-scoped route scopes the saved credentials form", async ({
+    testPage,
+    apiClient,
+  }) => {
     const other = await apiClient.createWorkspace("Linear Secondary Workspace");
     await apiClient.mockLinearSetTeams([{ id: "team-1", key: "ENG", name: "Engineering" }]);
 
@@ -57,8 +60,7 @@ test.describe("Linear settings", () => {
     await expect(settings.deleteButton).toBeVisible();
     await expect(testPage.getByText(/leave blank to keep the current value/i)).toBeVisible();
 
-    await settings.workspaceTrigger.click();
-    await testPage.getByRole("menuitem", { name: new RegExp(other.name) }).click();
+    await settings.gotoWorkspace(other.id);
 
     await expect(settings.secretInput).toHaveValue("");
     await expect(settings.saveButton).toBeDisabled();
@@ -66,35 +68,36 @@ test.describe("Linear settings", () => {
     await expect(testPage.getByText(/leave blank to keep the current value/i)).toHaveCount(0);
   });
 
-  test("a ?workspace deep link adopts that workspace on load", async ({ testPage, apiClient }) => {
+  test("a workspace-scoped deep link adopts that workspace on load", async ({
+    testPage,
+    apiClient,
+  }) => {
     const other = await apiClient.createWorkspace("Linear Deep Link Workspace");
     // Seed the secondary workspace so the deep link lands on a configured row,
-    // proving the query param — not the user's global default — drove selection.
+    // proving the route path — not the user's global default — drove selection.
     await apiClient.setLinearConfig({ secret: "lin_api_deeplink", workspaceId: other.id });
 
     const settings = new LinearSettingsPage(testPage);
-    await settings.goto(`?workspace=${other.id}`);
+    await settings.gotoWorkspace(other.id);
 
-    await expect(settings.switcher).toContainText("Editing workspace");
-    await expect(settings.switcher).toContainText(other.name);
     // The seeded row loads, confirming the deep link scoped the form to `other`.
     await expect(testPage.getByText(/leave blank to keep the current value/i)).toBeVisible();
   });
 
-  test("selecting a workspace writes it to the ?workspace query param", async ({
+  test("workspace-scoped integration route keeps the workspace in the path", async ({
     testPage,
     apiClient,
   }) => {
-    const other = await apiClient.createWorkspace("Linear Query Param Workspace");
+    const other = await apiClient.createWorkspace("Linear Path Workspace");
 
     const settings = new LinearSettingsPage(testPage);
-    await settings.goto();
+    await settings.gotoWorkspace(other.id);
 
-    await settings.workspaceTrigger.click();
-    await testPage.getByRole("menuitem", { name: new RegExp(other.name) }).click();
-
-    await expect(testPage).toHaveURL(new RegExp(`[?&]workspace=${other.id}(&|$)`));
-    await expect(settings.switcher).toContainText(other.name);
+    await expect(testPage).toHaveURL(
+      new RegExp(`/settings/workspace/${other.id}/integrations/linear$`),
+    );
+    await expect(testPage).not.toHaveURL(/[?&]workspace=/);
+    await expect(settings.secretInput).toHaveValue("");
   });
 
   test("copy config duplicates the credentials to another workspace", async ({
@@ -125,9 +128,8 @@ test.describe("Linear settings", () => {
     const cfg = (await res.json()) as { hasSecret?: boolean };
     expect(cfg.hasSecret).toBe(true);
 
-    // Switching to the target in the UI shows the copied credentials loaded.
-    await settings.workspaceTrigger.click();
-    await testPage.getByRole("menuitem", { name: new RegExp(other.name) }).click();
+    // Opening the target workspace route shows the copied credentials loaded.
+    await settings.gotoWorkspace(other.id);
     await expect(settings.deleteButton).toBeVisible();
     await expect(testPage.getByText(/leave blank to keep the current value/i)).toBeVisible();
   });

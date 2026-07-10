@@ -11,12 +11,14 @@ import {
   IconArrowRight,
   IconLoader2,
   IconEdit,
+  IconRoute,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -420,10 +422,14 @@ function ChangesPanelHeaderLeft({
   showDiffReview,
   onOpenDiffAll,
   onOpenReview,
+  onRequestWalkthrough,
+  requestWalkthroughDisabled,
 }: {
   showDiffReview: boolean;
   onOpenDiffAll?: () => void;
   onOpenReview?: () => void;
+  onRequestWalkthrough?: () => void;
+  requestWalkthroughDisabled?: boolean;
 }) {
   if (!showDiffReview) return null;
   return (
@@ -446,7 +452,46 @@ function ChangesPanelHeaderLeft({
         <IconEye className="h-3 w-3" />
         Review
       </Button>
+      {onRequestWalkthrough ? (
+        <ChangesPanelWalkthroughButton
+          onRequestWalkthrough={onRequestWalkthrough}
+          requestWalkthroughDisabled={requestWalkthroughDisabled}
+        />
+      ) : null}
     </>
+  );
+}
+
+function ChangesPanelWalkthroughButton({
+  onRequestWalkthrough,
+  requestWalkthroughDisabled,
+}: {
+  onRequestWalkthrough: () => void;
+  requestWalkthroughDisabled?: boolean;
+}) {
+  const tooltip = requestWalkthroughDisabled
+    ? "Loading changed files..."
+    : "Walk me through these changes";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex" tabIndex={requestWalkthroughDisabled ? 0 : undefined}>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-5 text-[11px] px-1.5 gap-1 cursor-pointer"
+            aria-label="Walk me through these changes"
+            data-testid="changes-request-walkthrough"
+            disabled={requestWalkthroughDisabled}
+            onClick={onRequestWalkthrough}
+          >
+            <IconRoute className="h-3 w-3" />
+            <span className="hidden min-[430px]:inline sm:inline">Walkthrough</span>
+          </Button>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -462,6 +507,8 @@ export function ChangesPanelHeader({
   loadingOperation,
   onOpenDiffAll,
   onOpenReview,
+  onRequestWalkthrough,
+  requestWalkthroughDisabled,
   repoNames,
   perRepoStatus,
   onRepoPull,
@@ -484,6 +531,8 @@ export function ChangesPanelHeader({
   loadingOperation: string | null;
   onOpenDiffAll?: () => void;
   onOpenReview?: () => void;
+  onRequestWalkthrough?: () => void;
+  requestWalkthroughDisabled?: boolean;
   /** Always non-empty (single-repo includes the empty-name entry). */
   repoNames: string[];
   perRepoStatus: PerRepoStatus[];
@@ -511,6 +560,8 @@ export function ChangesPanelHeader({
           showDiffReview={showDiffReview}
           onOpenDiffAll={onOpenDiffAll}
           onOpenReview={onOpenReview}
+          onRequestWalkthrough={onRequestWalkthrough}
+          requestWalkthroughDisabled={requestWalkthroughDisabled}
         />
       }
       right={

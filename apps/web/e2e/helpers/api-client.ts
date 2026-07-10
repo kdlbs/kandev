@@ -438,6 +438,13 @@ export class ApiClient {
     return this.request("POST", "/api/v1/prompts", { name, content });
   }
 
+  async updatePrompt(
+    promptId: string,
+    patch: { name?: string; content?: string },
+  ): Promise<{ id: string; name: string; content: string; builtin: boolean }> {
+    return this.request("PATCH", `/api/v1/prompts/${promptId}`, patch);
+  }
+
   async deletePrompt(promptId: string): Promise<void> {
     await this.request("DELETE", `/api/v1/prompts/${promptId}`);
   }
@@ -1473,6 +1480,20 @@ export class ApiClient {
       defaultTeamKey: "",
       ...config,
       authMethod: "api_key",
+    });
+  }
+
+  async setSentryConfig(payload: {
+    secret: string;
+    url?: string;
+    workspaceId?: string;
+  }): Promise<unknown> {
+    const { workspaceId, ...config } = payload;
+    const path = await this.withActiveWorkspace("/api/v1/sentry/config", workspaceId);
+    return this.request("PUT", path, {
+      authMethod: "auth_token",
+      url: "https://sentry.io",
+      ...config,
     });
   }
 

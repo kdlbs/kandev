@@ -130,7 +130,7 @@ export function collectImplementPlanInput(
   };
 }
 
-async function markPlanImplementationStartedBestEffort(
+export async function markPlanImplementationStartedBestEffort(
   taskId: string,
   sessionId: string,
   setTaskPlan: (
@@ -187,8 +187,10 @@ function useImplementPlan(
       if (clearPlanModeAfterSend) {
         handlePlanModeChange?.(false);
       }
-      chatInputRef?.current?.clear();
-      setChatDraftContent(resolvedSessionId, null);
+      if (chatInputRef) {
+        chatInputRef.current?.clear();
+        setChatDraftContent(resolvedSessionId, null);
+      }
       // Authoritatively clear plan_mode in session metadata so a refresh
       // mid-implementation cannot re-hydrate plan mode from the server.
       // Run as a separate request with its own catch so a set_plan_mode
@@ -218,7 +220,7 @@ function useImplementPlan(
 }
 
 /** Directly disable plan mode state + layout, bypassing the MCP availability guard. */
-export function useDirectDisablePlanMode(resolvedSessionId: string | null) {
+function useDirectDisablePlanMode(resolvedSessionId: string | null) {
   const setPlanMode = useAppStore((s) => s.setPlanMode);
   const setActiveDocument = useAppStore((s) => s.setActiveDocument);
   const closeDocument = useLayoutStore((s) => s.closeDocument);
