@@ -299,6 +299,7 @@ function CodeMirrorOverlays({ state }: { state: CodeMirrorEditorState }) {
           comments={state.commentView.comments}
           position={state.commentView.position}
           onDelete={state.handleDeleteComment}
+          onUpdate={state.handleUpdateComment}
           onClose={state.handleCommentViewClose}
         />
       )}

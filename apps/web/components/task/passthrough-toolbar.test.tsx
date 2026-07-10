@@ -29,6 +29,8 @@ let mockSessionState: string | null = null;
 let mockKeyboardShortcuts: Record<string, { key: string; modifiers?: Record<string, boolean> }> =
   {};
 let mockPendingByFile: Record<string, import("@/lib/state/slices/comments").DiffComment[]> = {};
+let mockPlanModeEnabled = false;
+let mockImplementPlanHandler: ((fresh: boolean) => void) | undefined;
 let mockNextStep: {
   proceedStepName: string | null;
   proceed: ReturnType<typeof vi.fn>;
@@ -72,7 +74,10 @@ vi.mock("@/components/toast-provider", () => ({
 }));
 
 vi.mock("@/hooks/domains/kanban/use-plan-actions", () => ({
-  useNextWorkflowStep: () => mockNextStep,
+  usePlanActions: () => ({
+    ...mockNextStep,
+    implementPlanHandler: mockImplementPlanHandler,
+  }),
 }));
 
 vi.mock("@/hooks/domains/comments/use-diff-comments", () => ({
@@ -133,7 +138,7 @@ vi.mock("./chat/use-chat-panel-state", () => ({
     taskId: TASK_ID,
     task: { id: TASK_ID, title: "Task title" },
     taskDescription: "Task description",
-    planModeEnabled: false,
+    planModeEnabled: mockPlanModeEnabled,
     planModeAvailable: true,
     mcpServers: ["kandev"],
     handlePlanModeChange: vi.fn(),
@@ -242,6 +247,8 @@ function resetMocks() {
   mockSessionState = null;
   mockKeyboardShortcuts = {};
   mockPendingByFile = {};
+  mockPlanModeEnabled = false;
+  mockImplementPlanHandler = undefined;
   mockNextStep = { proceedStepName: null, proceed: vi.fn(), isMoving: false };
   mockWsRequestFn = vi.fn().mockResolvedValue(undefined);
   chatInputMock.renderProps.mockClear();
@@ -405,6 +412,50 @@ describe("PassthroughToolbar – composer toggle", () => {
     } finally {
       xterm.remove();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Implement plan handler
+// ---------------------------------------------------------------------------
+
+describe("PassthroughToolbar – implement plan handler", () => {
+  beforeEach(resetMocks);
+  afterEach(cleanup);
+
+  it("forwards the implement handler to the composer while plan mode is active", async () => {
+    const implementHandler = vi.fn();
+    mockPlanModeEnabled = true;
+    mockImplementPlanHandler = implementHandler;
+
+    renderToolbar();
+    await openComposer();
+
+    expect(latestChatInputProps().planModeEnabled).toBe(true);
+    expect(latestChatInputProps().onImplementPlan).toBe(implementHandler);
+  });
+
+  it("does not forward an implement handler when plan mode is disabled", async () => {
+    mockPlanModeEnabled = false;
+    mockImplementPlanHandler = vi.fn();
+
+    renderToolbar();
+    await openComposer();
+
+    expect(latestChatInputProps().planModeEnabled).toBe(false);
+    expect(latestChatInputProps().onImplementPlan).toBeUndefined();
+  });
+
+  it("does not forward an implement handler while the passthrough session is busy", async () => {
+    mockPlanModeEnabled = true;
+    mockImplementPlanHandler = vi.fn();
+    mockSessionState = "RUNNING";
+
+    renderToolbar();
+    await openComposer();
+
+    expect(latestChatInputProps().planModeEnabled).toBe(true);
+    expect(latestChatInputProps().onImplementPlan).toBeUndefined();
   });
 });
 

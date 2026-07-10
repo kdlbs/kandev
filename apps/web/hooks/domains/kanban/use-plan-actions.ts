@@ -64,7 +64,7 @@ export function useNextWorkflowStep(taskId: string | null) {
   }, [nextStep]);
 
   const proceed = useCallback(async () => {
-    if (!taskId || !workflowId || !nextStep) return;
+    if (!taskId || !workflowId || !nextStep) return false;
     const capturedSessionId = activeSessionId;
     setMoveFromSessionId(capturedSessionId);
     try {
@@ -79,10 +79,12 @@ export function useNextWorkflowStep(taskId: string | null) {
       setTimeout(() => {
         setMoveFromSessionId((prev) => (prev === capturedSessionId ? null : prev));
       }, 10_000);
+      return true;
     } catch (err) {
       console.error("Failed to proceed to next step:", err);
       toast({ description: "Failed to proceed to next step", variant: "error" });
       setMoveFromSessionId(null);
+      return false;
     }
   }, [taskId, workflowId, nextStep, activeSessionId, toast]);
 
@@ -266,17 +268,22 @@ export function usePlanActions(opts: {
 
   const disablePlanMode = useDirectDisablePlanMode(opts.resolvedSessionId);
   const { planModeEnabled } = opts;
-  // Disable plan mode before proceeding so the layout switches back to default
-  // and the next step's auto-start prompt is visible in chat.
-  const proceed = useCallback(() => {
-    if (planModeEnabled) {
+  // Disable plan mode only after a successful move. A failed workflow move
+  // should leave the plan layout and context intact for retry.
+  const proceed = useCallback(async () => {
+    const moved = await rawProceed();
+    if (moved && planModeEnabled) {
       disablePlanMode();
     }
-    rawProceed();
   }, [planModeEnabled, disablePlanMode, rawProceed]);
 
-  const showImplement = opts.planModeEnabled && !nextStepIsWorkStep;
-  const implementPlanHandler = showImplement ? implementPlan : undefined;
+  const showImplement = opts.planModeEnabled;
+  const implementPlanHandler = showImplement
+    ? (fresh: boolean) => {
+        if (nextStepIsWorkStep) return proceed();
+        return implementPlan(fresh);
+      }
+    : undefined;
   return { implementPlanHandler, proceedStepName, proceed, isMoving };
 }
 

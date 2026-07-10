@@ -1164,6 +1164,53 @@
   color: var(--primary);
 }
 
+.markdown-preview-source-block {
+  position: relative;
+}
+
+.markdown-preview-commented-range {
+  background-color: color-mix(in oklch, var(--accent) 46%, transparent);
+  border-radius: 4px;
+  cursor: pointer;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.markdown-preview-commented-range:hover {
+  background-color: color-mix(in oklch, var(--accent) 62%, transparent);
+}
+
+.markdown-preview-comment-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  color: var(--primary);
+  vertical-align: middle;
+  border: 1px solid color-mix(in oklch, var(--primary) 35%, transparent);
+  border-radius: 4px;
+  background-color: color-mix(in oklch, var(--background) 88%, transparent);
+  cursor: pointer;
+}
+
+.markdown-preview-comment-badge:hover {
+  color: var(--primary-foreground);
+  background-color: var(--primary);
+}
+
+.markdown-preview-pre-comment-wrapper {
+  position: relative;
+}
+
+.markdown-preview-pre-comment-wrapper .markdown-preview-comment-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  margin-left: 0;
+}
+
 /* Drag handle */
 .plan-drag-handle {
   display: flex;

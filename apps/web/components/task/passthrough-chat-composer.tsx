@@ -38,6 +38,7 @@ export function PassthroughComposerPanel({
   taskId,
   isMoving,
   isSending,
+  onImplementPlan,
 }: {
   refHandle: RefObject<ChatInputContainerHandle | null>;
   onSubmit: PassthroughSubmitHandler;
@@ -46,6 +47,7 @@ export function PassthroughComposerPanel({
   taskId: string | null;
   isMoving: boolean;
   isSending: boolean;
+  onImplementPlan?: (fresh: boolean) => void;
 }) {
   const hasContextComments =
     panelState.planComments.length > 0 ||
@@ -85,6 +87,7 @@ export function PassthroughComposerPanel({
         contextFiles={panelState.contextFiles}
         onToggleContextFile={panelState.handleToggleContextFile}
         onAddContextFile={panelState.handleAddContextFile}
+        onImplementPlan={onImplementPlan}
         hideSessionsDropdown
         hideAgentControls
       />

@@ -426,6 +426,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
             tab={tab}
             activeSession={activeSession}
             activeSessionId={activeSessionId}
+            taskId={activeSessionId ? activeTaskId : null}
             isSaving={savingFiles.has(tab.path)}
             onFileChange={handleFileChange}
             onFileSave={handleFileSave}
