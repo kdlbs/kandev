@@ -275,6 +275,7 @@ test.describe("Markdown preview", () => {
     await expect(commentButton).toBeVisible({ timeout: 5_000 });
     await commentButton.click();
 
+    await expect(testPage.getByRole("button", { name: "Run" })).toBeVisible();
     await testPage
       .locator('textarea[placeholder="Add your comment or instruction..."]')
       .fill("Please tighten this paragraph.");
