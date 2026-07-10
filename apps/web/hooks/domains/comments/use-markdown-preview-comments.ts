@@ -35,8 +35,8 @@ type UseMarkdownPreviewCommentsArgs = {
   rootRef: RefObject<HTMLDivElement | null>;
 };
 
-function isIgnoredTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
+export function isIgnoredTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
   return Boolean(
     target.closest(
       [
