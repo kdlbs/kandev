@@ -19,6 +19,7 @@ const PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 const OPEN_ATTACHMENT_1_LABEL = "Open Attachment 1";
 const FULL_SIZE_ATTACHMENT_1_ALT = "Full size Attachment 1";
+const PROMPT_MENTION_TESTID = "custom-prompt-mention";
 
 afterEach(() => {
   cleanup();
@@ -90,11 +91,46 @@ describe("ChatMessage prompt mentions", () => {
       </Wrapper>,
     );
 
-    const chips = screen.getAllByTestId("custom-prompt-mention");
+    const chips = screen.getAllByTestId(PROMPT_MENTION_TESTID);
     expect(chips).toHaveLength(1);
     const [chip] = chips;
     expect(chip.textContent).toBe("@hello");
     expect(screen.getByText(/and @missing/)).not.toBeNull();
+  });
+
+  it("exposes the prompt contents on hover when the prompt is loaded", () => {
+    const Wrapper = wrapper([], [customPrompt("hello")]);
+
+    render(
+      <Wrapper>
+        <ChatMessage comment={userMessage({ content: "@hello" })} label="Message" className="" />
+      </Wrapper>,
+    );
+
+    const [chip] = screen.getAllByTestId(PROMPT_MENTION_TESTID);
+    // The chip becomes a hover-card trigger so its contents surface on hover,
+    // rather than relying on the plain browser title tooltip. `data-slot` is a
+    // shadcn/Radix implementation detail (slot-based CSS targeting), used here
+    // as a jsdom proxy for "chip is wired as a HoverCard trigger" since we
+    // can't reliably fire hover in jsdom.
+    expect(chip.getAttribute("data-slot")).toBe("hover-card-trigger");
+    expect(chip.getAttribute("title")).toBeNull();
+  });
+
+  it("falls back to a plain chip with a title when the prompt has no contents", () => {
+    // A prompt with empty content has nothing to reveal on hover, so keep the
+    // lightweight title tooltip instead of a hover card.
+    const Wrapper = wrapper([], [{ ...customPrompt("hollow"), content: "" }]);
+
+    render(
+      <Wrapper>
+        <ChatMessage comment={userMessage({ content: "@hollow" })} label="Message" className="" />
+      </Wrapper>,
+    );
+
+    const [chip] = screen.getAllByTestId(PROMPT_MENTION_TESTID);
+    expect(chip.getAttribute("data-slot")).not.toBe("hover-card-trigger");
+    expect(chip.getAttribute("title")).toBe("Custom prompt: hollow");
   });
 
   it("preserves GFM attributes while highlighting prompt mentions", () => {
@@ -113,7 +149,7 @@ describe("ChatMessage prompt mentions", () => {
     );
 
     const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
-    expect(screen.getAllByTestId("custom-prompt-mention")).toHaveLength(2);
+    expect(screen.getAllByTestId(PROMPT_MENTION_TESTID)).toHaveLength(2);
     expect(checkbox.checked).toBe(true);
     expect(checkbox.closest("li")?.className).toContain("task-list-item");
     expect(screen.getByRole("cell").getAttribute("style")).toContain("text-align: center");
