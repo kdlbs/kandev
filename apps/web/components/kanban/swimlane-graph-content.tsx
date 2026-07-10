@@ -74,7 +74,7 @@ function DraggableTaskChip({
     id: task.id,
   });
   const isPreviewed = useAppStore((state) => state.kanbanPreviewedTaskId === task.id);
-  const hasPendingClarificationRequest = useTaskPendingClarification(task.primarySessionId);
+  const hasPendingClarificationRequest = useTaskPendingClarification(task);
   const statusIcon = getTaskStateIcon(task.state, "h-3 w-3", hasPendingClarificationRequest);
 
   return (
@@ -101,7 +101,7 @@ function DraggableTaskChip({
 }
 
 function TaskChipPreview({ task }: { task: Task }) {
-  const hasPendingClarificationRequest = useTaskPendingClarification(task.primarySessionId);
+  const hasPendingClarificationRequest = useTaskPendingClarification(task);
   const statusIcon = getTaskStateIcon(task.state, "h-3 w-3", hasPendingClarificationRequest);
   return (
     <div

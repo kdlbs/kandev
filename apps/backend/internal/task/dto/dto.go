@@ -119,31 +119,36 @@ type EnvironmentDTO struct {
 }
 
 type TaskDTO struct {
-	ID                      string                 `json:"id"`
-	WorkspaceID             string                 `json:"workspace_id"`
-	WorkflowID              string                 `json:"workflow_id"`
-	WorkflowStepID          string                 `json:"workflow_step_id"`
-	Title                   string                 `json:"title"`
-	Description             string                 `json:"description"`
-	State                   v1.TaskState           `json:"state"`
-	Priority                string                 `json:"priority"`
-	Repositories            []TaskRepositoryDTO    `json:"repositories,omitempty"`
-	Position                int                    `json:"position"`
-	PrimarySessionID        *string                `json:"primary_session_id,omitempty"`
-	SessionCount            *int                   `json:"session_count,omitempty"`
-	ReviewStatus            models.ReviewStatus    `json:"review_status,omitempty"`
-	PrimaryExecutorID       *string                `json:"primary_executor_id,omitempty"`
-	PrimaryExecutorType     *string                `json:"primary_executor_type,omitempty"`
-	PrimaryExecutorName     *string                `json:"primary_executor_name,omitempty"`
-	PrimaryAgentName        *string                `json:"primary_agent_name,omitempty"`
-	PrimaryWorkingDirectory *string                `json:"primary_working_directory,omitempty"`
-	PrimarySessionState     *string                `json:"primary_session_state,omitempty"`
-	IsRemoteExecutor        bool                   `json:"is_remote_executor,omitempty"`
-	ParentID                string                 `json:"parent_id,omitempty"`
-	ArchivedAt              *time.Time             `json:"archived_at,omitempty"`
-	CreatedAt               time.Time              `json:"created_at"`
-	UpdatedAt               time.Time              `json:"updated_at"`
-	Metadata                map[string]interface{} `json:"metadata,omitempty"`
+	ID                      string              `json:"id"`
+	WorkspaceID             string              `json:"workspace_id"`
+	WorkflowID              string              `json:"workflow_id"`
+	WorkflowStepID          string              `json:"workflow_step_id"`
+	Title                   string              `json:"title"`
+	Description             string              `json:"description"`
+	State                   v1.TaskState        `json:"state"`
+	Priority                string              `json:"priority"`
+	Repositories            []TaskRepositoryDTO `json:"repositories,omitempty"`
+	Position                int                 `json:"position"`
+	PrimarySessionID        *string             `json:"primary_session_id,omitempty"`
+	SessionCount            *int                `json:"session_count,omitempty"`
+	ReviewStatus            models.ReviewStatus `json:"review_status,omitempty"`
+	PrimaryExecutorID       *string             `json:"primary_executor_id,omitempty"`
+	PrimaryExecutorType     *string             `json:"primary_executor_type,omitempty"`
+	PrimaryExecutorName     *string             `json:"primary_executor_name,omitempty"`
+	PrimaryAgentName        *string             `json:"primary_agent_name,omitempty"`
+	PrimaryWorkingDirectory *string             `json:"primary_working_directory,omitempty"`
+	PrimarySessionState     *string             `json:"primary_session_state,omitempty"`
+	// PrimarySessionPendingAction is set when the primary session is in
+	// WAITING_FOR_INPUT because it is blocked on a pending clarification or
+	// permission request ("clarification" | "permission"). Lets list surfaces
+	// show the "needs input" indicator without loading session messages.
+	PrimarySessionPendingAction *string                `json:"primary_session_pending_action,omitempty"`
+	IsRemoteExecutor            bool                   `json:"is_remote_executor,omitempty"`
+	ParentID                    string                 `json:"parent_id,omitempty"`
+	ArchivedAt                  *time.Time             `json:"archived_at,omitempty"`
+	CreatedAt                   time.Time              `json:"created_at"`
+	UpdatedAt                   time.Time              `json:"updated_at"`
+	Metadata                    map[string]interface{} `json:"metadata,omitempty"`
 
 	// Office extensions
 	AssigneeAgentProfileID string `json:"assignee_agent_profile_id,omitempty"`

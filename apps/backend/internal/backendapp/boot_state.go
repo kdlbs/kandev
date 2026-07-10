@@ -623,6 +623,11 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 		b.logBootError("get task detail primary session info", err)
 		return taskDTOs(tasks)
 	}
+	pendingBySession, err := b.p.taskSvc.GetPendingActionsForWaitingSessions(ctx, primaryInfoByTask)
+	if err != nil {
+		b.logBootError("get task detail pending session actions", err)
+		pendingBySession = map[string]taskmodels.SessionPendingAction{}
+	}
 	result := make([]taskdto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
 		if task == nil {
@@ -643,7 +648,7 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 			sessionCount = &count
 		}
 		info := bootSessionInfo(primaryInfoByTask[task.ID])
-		result = append(result, taskdto.FromTaskWithSessionInfo(
+		taskDTO := taskdto.FromTaskWithSessionInfo(
 			task,
 			primarySessionID,
 			sessionCount,
@@ -654,7 +659,14 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 			info.agentName,
 			info.workingDirectory,
 			info.sessionState,
-		))
+		)
+		if primary := primaryInfoByTask[task.ID]; primary != nil {
+			if action, ok := pendingBySession[primary.ID]; ok {
+				val := string(action)
+				taskDTO.PrimarySessionPendingAction = &val
+			}
+		}
+		result = append(result, taskDTO)
 	}
 	return result
 }

@@ -106,6 +106,10 @@ func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tas
 	if err != nil {
 		return nil, err
 	}
+	pendingBySession, err := svc.GetPendingActionsForWaitingSessions(ctx, primarySessionInfoMap)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]dto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
 		sessions := sessionsByTask[task.ID]
@@ -122,7 +126,7 @@ func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tas
 			sessionCount = &n
 		}
 		si := extractSessionInfo(primarySessionInfoMap[task.ID])
-		result = append(result, dto.FromTaskWithSessionInfo(
+		taskDTO := dto.FromTaskWithSessionInfo(
 			task,
 			primarySessionID,
 			sessionCount,
@@ -133,9 +137,27 @@ func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tas
 			si.agentName,
 			si.workingDirectory,
 			si.sessionState,
-		))
+		)
+		setPendingAction(&taskDTO, primarySessionInfoMap[task.ID], pendingBySession)
+		result = append(result, taskDTO)
 	}
 	return result, nil
+}
+
+// setPendingAction copies the primary session's blocking pending action (if
+// any) onto the DTO so list surfaces can flag "needs input" without messages.
+func setPendingAction(
+	taskDTO *dto.TaskDTO,
+	primarySession *models.TaskSession,
+	pendingBySession map[string]models.SessionPendingAction,
+) {
+	if primarySession == nil {
+		return
+	}
+	if action, ok := pendingBySession[primarySession.ID]; ok {
+		val := string(action)
+		taskDTO.PrimarySessionPendingAction = &val
+	}
 }
 
 type sessionInfoFields struct {

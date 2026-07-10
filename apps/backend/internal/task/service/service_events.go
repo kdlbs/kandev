@@ -145,6 +145,7 @@ func (s *Service) addTaskSessionEventFields(ctx context.Context, taskID string, 
 	if !ok || sessionInfo == nil {
 		data["primary_session_id"] = nil
 		data["primary_session_state"] = nil
+		data["primary_session_pending_action"] = nil
 		return
 	}
 	data["primary_session_id"] = sessionInfo.ID
@@ -155,6 +156,14 @@ func (s *Service) addTaskSessionEventFields(ctx context.Context, taskID string, 
 		data["primary_session_state"] = string(sessionInfo.State)
 	} else {
 		data["primary_session_state"] = nil
+	}
+	// Explicit nil when there is no blocking request so WS consumers clear a
+	// previously-set pending indicator instead of keeping it stale.
+	data["primary_session_pending_action"] = nil
+	if pending, err := s.GetPendingActionsForWaitingSessions(ctx, primarySessionInfoMap); err == nil {
+		if action, ok := pending[sessionInfo.ID]; ok {
+			data["primary_session_pending_action"] = string(action)
+		}
 	}
 	if sessionInfo.ExecutorID != "" {
 		data["primary_executor_id"] = sessionInfo.ExecutorID

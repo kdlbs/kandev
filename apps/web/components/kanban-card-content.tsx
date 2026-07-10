@@ -224,7 +224,7 @@ function KanbanCardActions({
   const storeApi = useAppStoreApi();
   const debugEnabled = isDebug();
   const effectiveMenuOpen = menuOpen || Boolean(isDeleting) || Boolean(isArchiving);
-  const hasPendingClarificationRequest = useTaskPendingClarification(task.primarySessionId);
+  const hasPendingClarificationRequest = useTaskPendingClarification(task);
   const showQuestionIcon = shouldUseQuestionTaskIcon(task.state, hasPendingClarificationRequest);
   const showRunningSpinner = shouldShowTaskRunningSpinner(task.state, task.primarySessionState);
   const storeWouldShowRunningSpinner =

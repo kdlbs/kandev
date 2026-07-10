@@ -646,6 +646,19 @@ const (
 	TaskSessionStateCancelled TaskSessionState = "CANCELLED"
 )
 
+// SessionPendingAction identifies the kind of request a WAITING_FOR_INPUT
+// session is blocked on. Denormalized onto task snapshots so list surfaces
+// (sidebar, kanban cards) can show the "needs input" indicator without
+// loading the session's messages.
+type SessionPendingAction string
+
+const (
+	// SessionPendingActionClarification - a clarification_request message is pending
+	SessionPendingActionClarification SessionPendingAction = "clarification"
+	// SessionPendingActionPermission - the latest permission_request message is pending
+	SessionPendingActionPermission SessionPendingAction = "permission"
+)
+
 // TaskSessionWorktree represents the association between a task session and a worktree
 type TaskSessionWorktree struct {
 	ID           string    `json:"id"`

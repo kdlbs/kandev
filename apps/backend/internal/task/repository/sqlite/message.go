@@ -504,3 +504,64 @@ func (r *Repository) CountToolCallMessagesBySession(ctx context.Context, session
 	}
 	return out, rows.Err()
 }
+
+// GetPendingSessionActions returns, for each session in `sessionIDs` that is
+// currently blocked on a request, which kind of request blocks it:
+// models.SessionPendingActionClarification when any clarification_request row
+// is still pending, otherwise models.SessionPendingActionPermission when the
+// session's latest permission_request row is still pending. Sessions with no
+// blocking request are omitted. Mirrors the web client's message-derived
+// indicator semantics (`hasPendingClarification` / `hasPendingPermissionRequest`):
+// an old pending permission row superseded by a newer decided one must not
+// count, hence latest-permission-wins rather than an EXISTS check.
+func (r *Repository) GetPendingSessionActions(ctx context.Context, sessionIDs []string) (map[string]models.SessionPendingAction, error) {
+	out := make(map[string]models.SessionPendingAction)
+	if len(sessionIDs) == 0 {
+		return out, nil
+	}
+	placeholders := make([]string, len(sessionIDs))
+	args := make([]interface{}, 0, len(sessionIDs))
+	for i, id := range sessionIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	drv := r.ro.DriverName()
+	query := fmt.Sprintf(`SELECT task_session_id, type, COALESCE(%s, '') AS status
+	          FROM task_session_messages
+	          WHERE type IN ('clarification_request', 'permission_request')
+	            AND task_session_id IN (`+strings.Join(placeholders, ",")+`)
+	          ORDER BY created_at ASC, id ASC`, dialect.JSONExtract(drv, "metadata", "status"))
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	lastPermissionPending := make(map[string]bool)
+	for rows.Next() {
+		var sessionID, msgType, status string
+		if err := rows.Scan(&sessionID, &msgType, &status); err != nil {
+			return nil, err
+		}
+		pending := status == "" || status == "pending"
+		switch msgType {
+		case string(models.MessageTypeClarificationRequest):
+			if pending {
+				out[sessionID] = models.SessionPendingActionClarification
+			}
+		case string(models.MessageTypePermissionRequest):
+			// Rows are ordered by created_at, so the last row seen wins.
+			lastPermissionPending[sessionID] = pending
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for sessionID, pending := range lastPermissionPending {
+		if pending {
+			if _, hasClarification := out[sessionID]; !hasClarification {
+				out[sessionID] = models.SessionPendingActionPermission
+			}
+		}
+	}
+	return out, nil
+}

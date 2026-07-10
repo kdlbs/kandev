@@ -35,6 +35,7 @@ export type TaskLike = {
   repository_id?: string;
   primary_session_id?: string | null;
   primary_session_state?: TaskSessionState | string | null;
+  primary_session_pending_action?: "clarification" | "permission" | string | null;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primary_executor_id?: string | null;
@@ -46,6 +47,11 @@ export type TaskLike = {
   created_at?: string;
   metadata?: Record<string, unknown> | null;
 };
+
+function pickPendingAction(source: TaskLike): "clarification" | "permission" | undefined {
+  const action = source.primary_session_pending_action;
+  return action === "clarification" || action === "permission" ? action : undefined;
+}
 
 function pickRepositoryId(source: TaskLike): string | undefined {
   return source.repository_id ?? source.repositories?.[0]?.repository_id ?? undefined;
@@ -86,6 +92,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     repositories: pickRepositories(source),
     primarySessionId: source.primary_session_id ?? undefined,
     primarySessionState: source.primary_session_state ?? undefined,
+    primarySessionPendingAction: pickPendingAction(source),
     sessionCount: source.session_count ?? undefined,
     reviewStatus: source.review_status ?? undefined,
     primaryExecutorId: source.primary_executor_id ?? undefined,

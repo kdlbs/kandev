@@ -147,6 +147,8 @@ export type TaskSessionState =
   | "FAILED"
   | "CANCELLED";
 
+export type SessionPendingAction = "clarification" | "permission";
+
 export type Workflow = {
   id: WorkflowId;
   workspace_id: WorkspaceId;
@@ -278,6 +280,10 @@ export type Task = {
   repositories?: TaskRepository[];
   primary_session_id?: SessionId | null;
   primary_session_state?: TaskSessionState | null;
+  /** Set when the primary session is blocked on a pending clarification or
+   *  permission request; lets list surfaces show the "needs input" indicator
+   *  without loading the session's messages. */
+  primary_session_pending_action?: SessionPendingAction | null;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primary_executor_id?: string | null;

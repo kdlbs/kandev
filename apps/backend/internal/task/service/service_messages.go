@@ -268,6 +268,28 @@ func (s *Service) ListMessages(ctx context.Context, sessionID string) ([]*models
 	return s.messages.ListMessages(ctx, sessionID)
 }
 
+// GetPendingActionsForWaitingSessions returns the blocking pending action
+// (clarification/permission) per session ID for the subset of the given
+// sessions currently in WAITING_FOR_INPUT. Sessions in any other state are
+// skipped: a pending message row left behind by a crash must not flag a
+// session that has already moved on. Used to denormalize the "needs input"
+// indicator onto task snapshots (issue #1657).
+func (s *Service) GetPendingActionsForWaitingSessions(
+	ctx context.Context,
+	sessions map[string]*models.TaskSession,
+) (map[string]models.SessionPendingAction, error) {
+	ids := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		if session != nil && session.State == models.TaskSessionStateWaitingForInput {
+			ids = append(ids, session.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return map[string]models.SessionPendingAction{}, nil
+	}
+	return s.messages.GetPendingSessionActions(ctx, ids)
+}
+
 // ListMessagesPaginated returns messages for a session with pagination options.
 func (s *Service) ListMessagesPaginated(ctx context.Context, req ListMessagesRequest) ([]*models.Message, bool, error) {
 	limit := req.Limit

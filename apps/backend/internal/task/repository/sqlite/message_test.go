@@ -159,3 +159,73 @@ func TestCountToolCallMessagesBySession_Multi(t *testing.T) {
 		t.Errorf("s3 should be omitted (zero tool_call rows), got %d", got["s3"])
 	}
 }
+
+// insertMsgWithMetadata inserts a message row with an explicit metadata JSON
+// payload, so tests can control clarification/permission pending status.
+func insertMsgWithMetadata(t *testing.T, repo *Repository, id, sessionID, turnID, msgType, metadata string, ts time.Time) {
+	t.Helper()
+	_, err := repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO task_session_messages
+			(id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at)
+		VALUES (?, ?, '', ?, 'agent', '', '', 0, ?, ?, ?)
+	`), id, sessionID, turnID, msgType, metadata, ts)
+	if err != nil {
+		t.Fatalf("insert message %s: %v", id, err)
+	}
+}
+
+func TestGetPendingSessionActions(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	seedForMsgTest(t, repo, "task-P", "s-clar", "turn-1")
+	seedForMsgTest(t, repo, "task-P2", "s-perm", "turn-2")
+	seedForMsgTest(t, repo, "task-P3", "s-perm-decided", "turn-3")
+	seedForMsgTest(t, repo, "task-P4", "s-clar-answered", "turn-4")
+	seedForMsgTest(t, repo, "task-P5", "s-none", "turn-5")
+	seedForMsgTest(t, repo, "task-P6", "s-both", "turn-6")
+
+	// Pending clarification: metadata.status missing counts as pending.
+	insertMsgWithMetadata(t, repo, "m-c1", "s-clar", "turn-1", "clarification_request", `{}`, now)
+	// Latest permission pending → "permission".
+	insertMsgWithMetadata(t, repo, "m-p1", "s-perm", "turn-2", "permission_request", `{"status":"approved"}`, now)
+	insertMsgWithMetadata(t, repo, "m-p2", "s-perm", "turn-2", "permission_request", `{"status":"pending"}`, now.Add(time.Second))
+	// Latest permission decided → stale earlier pending row must NOT count.
+	insertMsgWithMetadata(t, repo, "m-pd1", "s-perm-decided", "turn-3", "permission_request", `{"status":"pending"}`, now)
+	insertMsgWithMetadata(t, repo, "m-pd2", "s-perm-decided", "turn-3", "permission_request", `{"status":"approved"}`, now.Add(time.Second))
+	// Answered clarification → no pending action.
+	insertMsgWithMetadata(t, repo, "m-ca1", "s-clar-answered", "turn-4", "clarification_request", `{"status":"answered"}`, now)
+	// Plain messages only → omitted.
+	insertMsgWithType(t, repo, "m-n1", "s-none", "turn-5", "message", now)
+	// Both pending → clarification wins.
+	insertMsgWithMetadata(t, repo, "m-b1", "s-both", "turn-6", "permission_request", `{"status":"pending"}`, now)
+	insertMsgWithMetadata(t, repo, "m-b2", "s-both", "turn-6", "clarification_request", `{"status":"pending"}`, now.Add(time.Second))
+
+	got, err := repo.GetPendingSessionActions(ctx, []string{
+		"s-clar", "s-perm", "s-perm-decided", "s-clar-answered", "s-none", "s-both",
+	})
+	if err != nil {
+		t.Fatalf("GetPendingSessionActions: %v", err)
+	}
+	want := map[string]models.SessionPendingAction{
+		"s-clar": models.SessionPendingActionClarification,
+		"s-perm": models.SessionPendingActionPermission,
+		"s-both": models.SessionPendingActionClarification,
+	}
+	if len(got) != len(want) {
+		t.Errorf("got %d entries (%v), want %d", len(got), got, len(want))
+	}
+	for sessionID, action := range want {
+		if got[sessionID] != action {
+			t.Errorf("%s = %q, want %q", sessionID, got[sessionID], action)
+		}
+	}
+
+	empty, err := repo.GetPendingSessionActions(ctx, nil)
+	if err != nil {
+		t.Fatalf("GetPendingSessionActions(nil): %v", err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("expected empty map for no session ids, got %v", empty)
+	}
+}

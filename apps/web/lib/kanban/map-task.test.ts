@@ -133,4 +133,22 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
     expect(toKanbanTask(http).isRemoteExecutor).toBe(false);
     expect(toKanbanTask(ws).isRemoteExecutor).toBe(false);
   });
+
+  it("maps primary_session_pending_action from both shapes; unknown values dropped", () => {
+    const pending = { primary_session_pending_action: "clarification" as const };
+    expect(toKanbanTask(httpDTO(pending)).primarySessionPendingAction).toBe("clarification");
+    expect(toKanbanTask(wsPayload(pending)).primarySessionPendingAction).toBe("clarification");
+    expect(
+      toKanbanTask(httpDTO({ primary_session_pending_action: "permission" }))
+        .primarySessionPendingAction,
+    ).toBe("permission");
+    // Explicit null (no blocking request) and unexpected values both map to undefined.
+    expect(
+      toKanbanTask(httpDTO({ primary_session_pending_action: null })).primarySessionPendingAction,
+    ).toBeUndefined();
+    expect(
+      toKanbanTask(httpDTO({ primary_session_pending_action: "bogus" }))
+        .primarySessionPendingAction,
+    ).toBeUndefined();
+  });
 });

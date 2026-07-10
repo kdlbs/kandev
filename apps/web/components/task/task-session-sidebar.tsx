@@ -25,7 +25,7 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { useArchivedTaskState } from "./task-archived-context";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
-import { buildPendingFlags, readPendingFlags } from "./task-session-sidebar-aggregate";
+import { buildPendingFlags, resolvePendingFlags } from "./task-session-sidebar-aggregate";
 import { useGroupedSidebarView } from "./task-session-sidebar-grouped-view";
 import { useSidebarLinkActions } from "./task-session-sidebar-link-actions";
 import { buildArchivedSidebarItem } from "./task-session-sidebar-archived-item";
@@ -113,7 +113,12 @@ function toSidebarItem(
   const repoSlug = task.repositoryId ? ctx.repositorySlugById.get(task.repositoryId) : undefined;
   // Sidebar shows just one slot; pick the primary PR (first by created_at).
   const pr = ctx.taskPRsByTaskId[task.id]?.[0];
-  const pending = readPendingFlags(ctx.pendingFlags, task.primarySessionId);
+  const pending = resolvePendingFlags(
+    ctx.pendingFlags,
+    task.primarySessionId,
+    resolvedSessionState,
+    task.primarySessionPendingAction,
+  );
 
   const diffStats = resolveDiffStats(
     sessionInfo.diffStats,

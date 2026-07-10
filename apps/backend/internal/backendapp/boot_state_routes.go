@@ -540,21 +540,22 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		})
 	}
 	return map[string]any{
-		"id":                  task.ID,
-		"workflowStepId":      task.WorkflowStepID,
-		"title":               task.Title,
-		"description":         task.Description,
-		"position":            task.Position,
-		"state":               task.State,
-		"repositoryId":        primaryRepositoryID,
-		"repositories":        repositories,
-		"primarySessionId":    task.PrimarySessionID,
-		"primarySessionState": task.PrimarySessionState,
-		"sessionCount":        task.SessionCount,
-		"reviewStatus":        nullString(string(task.ReviewStatus)),
-		"parentTaskId":        nullString(task.ParentID),
-		"updatedAt":           task.UpdatedAt,
-		"createdAt":           task.CreatedAt,
+		"id":                          task.ID,
+		"workflowStepId":              task.WorkflowStepID,
+		"title":                       task.Title,
+		"description":                 task.Description,
+		"position":                    task.Position,
+		"state":                       task.State,
+		"repositoryId":                primaryRepositoryID,
+		"repositories":                repositories,
+		"primarySessionId":            task.PrimarySessionID,
+		"primarySessionState":         task.PrimarySessionState,
+		"primarySessionPendingAction": task.PrimarySessionPendingAction,
+		"sessionCount":                task.SessionCount,
+		"reviewStatus":                nullString(string(task.ReviewStatus)),
+		"parentTaskId":                nullString(task.ParentID),
+		"updatedAt":                   task.UpdatedAt,
+		"createdAt":                   task.CreatedAt,
 	}
 }
 

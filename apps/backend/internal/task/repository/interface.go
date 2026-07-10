@@ -122,6 +122,10 @@ type MessageRepository interface {
 	FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*models.Message, error)
 	FindMessageByPendingIDAndQuestion(ctx context.Context, sessionID, pendingID, questionID string) (*models.Message, error)
 	FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error)
+	// GetPendingSessionActions reports, per session, whether it is blocked on a
+	// pending clarification_request or permission_request message. Sessions with
+	// no blocking request are omitted from the result map.
+	GetPendingSessionActions(ctx context.Context, sessionIDs []string) (map[string]models.SessionPendingAction, error)
 	UpdateMessage(ctx context.Context, message *models.Message) error
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
 	ListMessagesByTurnID(ctx context.Context, turnID string) ([]*models.Message, error)

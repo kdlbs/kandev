@@ -10,6 +10,7 @@ import {
  *  every streaming token that churns the messages map. */
 const pendingClarKey = (sessionId: string) => `${sessionId}#clar`;
 const pendingPermKey = (sessionId: string) => `${sessionId}#perm`;
+const messagesLoadedKey = (sessionId: string) => `${sessionId}#loaded`;
 
 export function buildPendingFlags(
   bySession: Record<string, Message[] | undefined>,
@@ -20,6 +21,7 @@ export function buildPendingFlags(
     const msgs = bySession[id];
     flags[pendingClarKey(id)] = hasPendingClarification(msgs);
     flags[pendingPermKey(id)] = hasPendingPermissionRequest(msgs);
+    flags[messagesLoadedKey(id)] = msgs !== undefined;
   }
   return flags;
 }
@@ -32,6 +34,38 @@ export function readPendingFlags(
   return {
     clarification: pendingFlags[pendingClarKey(sessionId)] ?? false,
     permission: pendingFlags[pendingPermKey(sessionId)] ?? false,
+  };
+}
+
+export type SessionPendingActionSnapshot = "clarification" | "permission" | null | undefined;
+
+/**
+ * Resolve the pending clarification/permission flags for a task row.
+ *
+ * Message-derived flags are authoritative once the session's messages are in
+ * the store (they update live on answer/approve). Before that — a fresh page
+ * load with the task never opened — they always read `false`, which used to
+ * make blocked tasks look done in the sidebar. Fall back to the
+ * `primary_session_pending_action` snapshot the backend denormalizes onto the
+ * task, gated on the session still being WAITING_FOR_INPUT so a stale
+ * snapshot flag self-clears as soon as the session state moves on.
+ */
+export function resolvePendingFlags(
+  pendingFlags: Record<string, boolean>,
+  sessionId: string | null | undefined,
+  sessionState: string | null | undefined,
+  snapshotPendingAction: SessionPendingActionSnapshot,
+): { clarification: boolean; permission: boolean } {
+  if (!sessionId) return { clarification: false, permission: false };
+  if (pendingFlags[messagesLoadedKey(sessionId)]) {
+    return readPendingFlags(pendingFlags, sessionId);
+  }
+  if (sessionState !== "WAITING_FOR_INPUT") {
+    return { clarification: false, permission: false };
+  }
+  return {
+    clarification: snapshotPendingAction === "clarification",
+    permission: snapshotPendingAction === "permission",
   };
 }
 

@@ -57,6 +57,7 @@ export type KanbanState = {
     }>;
     primarySessionId?: string | null;
     primarySessionState?: string | null;
+    primarySessionPendingAction?: "clarification" | "permission" | null;
     sessionCount?: number | null;
     reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
     primaryExecutorId?: string | null;

@@ -3,6 +3,7 @@ import {
   aggregateSidebarTasks,
   buildPendingFlags,
   readPendingFlags,
+  resolvePendingFlags,
   type SidebarStepInfo,
   type WorkflowSnapshotMap,
 } from "./task-session-sidebar-aggregate";
@@ -183,5 +184,54 @@ describe("buildPendingFlags / readPendingFlags", () => {
   it("returns all-false for a null/unknown session", () => {
     expect(readPendingFlags({}, null)).toEqual({ clarification: false, permission: false });
     expect(readPendingFlags({}, "missing")).toEqual({ clarification: false, permission: false });
+  });
+});
+
+describe("resolvePendingFlags", () => {
+  it("prefers message-derived flags once the session's messages are loaded", () => {
+    const flags = buildPendingFlags({ "sess-1": [makePermissionRequest("p1", "approved")] }, [
+      "sess-1",
+    ]);
+    // Snapshot claims a pending permission, but the loaded messages say it
+    // was approved — the live flags win.
+    expect(resolvePendingFlags(flags, "sess-1", "WAITING_FOR_INPUT", "permission")).toEqual({
+      clarification: false,
+      permission: false,
+    });
+  });
+
+  it("falls back to the snapshot pending action when messages are not loaded", () => {
+    const flags = buildPendingFlags({}, ["sess-1"]);
+    expect(resolvePendingFlags(flags, "sess-1", "WAITING_FOR_INPUT", "clarification")).toEqual({
+      clarification: true,
+      permission: false,
+    });
+    expect(resolvePendingFlags(flags, "sess-1", "WAITING_FOR_INPUT", "permission")).toEqual({
+      clarification: false,
+      permission: true,
+    });
+  });
+
+  it("ignores a stale snapshot flag when the session is no longer WAITING_FOR_INPUT", () => {
+    const flags = buildPendingFlags({}, ["sess-1"]);
+    expect(resolvePendingFlags(flags, "sess-1", "RUNNING", "clarification")).toEqual({
+      clarification: false,
+      permission: false,
+    });
+  });
+
+  it("shows nothing for a waiting session without a snapshot pending action", () => {
+    const flags = buildPendingFlags({}, ["sess-1"]);
+    expect(resolvePendingFlags(flags, "sess-1", "WAITING_FOR_INPUT", null)).toEqual({
+      clarification: false,
+      permission: false,
+    });
+  });
+
+  it("returns all-false without a session id", () => {
+    expect(resolvePendingFlags({}, null, "WAITING_FOR_INPUT", "clarification")).toEqual({
+      clarification: false,
+      permission: false,
+    });
   });
 });
