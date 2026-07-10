@@ -470,6 +470,15 @@ func TestHandleMessageTask_ParentToChildRunningSession_InterruptSkipped_KeepsQue
 
 	status := orch.queue.GetStatus(context.Background(), sess.ID)
 	require.Equal(t, 1, status.Count, "message must remain queued when the interrupt was skipped")
+
+	// Confirm the interrupt path was actually entered, even though it
+	// reported the busy-skip outcome — otherwise this test would pass
+	// identically if the handler never called InterruptForPeerMessage at
+	// all, since the queued message and "queued" status look the same
+	// either way.
+	require.Len(t, orch.interruptCalls, 1)
+	assert.Equal(t, child.ID, orch.interruptCalls[0].taskID)
+	assert.Equal(t, sess.ID, orch.interruptCalls[0].sessionID)
 }
 
 func TestHandleMessageTask_AppendsPromptReferenceExpansions(t *testing.T) {

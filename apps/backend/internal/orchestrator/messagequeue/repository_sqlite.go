@@ -388,7 +388,11 @@ func (r *sqliteRepository) TakeHead(ctx context.Context, sessionID string) (*Que
 // regardless of its FIFO position. Mirrors TakeHead's race handling: if a
 // concurrent take already removed the row between the SELECT and DELETE,
 // RowsAffected()==0 is treated as "already taken" (nil, nil) rather than an
-// error, so two racing takers can never both dispatch the same entry.
+// error, so two racing takers can never both dispatch the same entry. The
+// DELETE is also scoped by session_id (not just id) so a concurrent
+// TransferSession that reassigns this row to a different session between
+// the SELECT and DELETE can't have it removed out from under the new
+// session — same session-scope invariant DeleteByID/UpdateContent enforce.
 func (r *sqliteRepository) TakeByID(ctx context.Context, sessionID, entryID string) (*QueuedMessage, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -409,7 +413,7 @@ func (r *sqliteRepository) TakeByID(ctx context.Context, sessionID, entryID stri
 		}
 		return nil, fmt.Errorf("take by id: %w", err)
 	}
-	res, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE id = ?`), msg.ID)
+	res, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE id = ? AND session_id = ?`), msg.ID, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("delete by id: %w", err)
 	}
