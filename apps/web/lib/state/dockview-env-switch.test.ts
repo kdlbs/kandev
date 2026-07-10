@@ -33,7 +33,12 @@ vi.mock("./layout-manager", () => ({
 import { getEnvLayout } from "@/lib/local-storage";
 import { layoutStructuresMatch, savedLayoutMatchesLive } from "./layout-manager";
 
-const NEW_SESSION_PANEL_ID = "session:new-session";
+const NEW_SESSION_ID = "new-session";
+const OLD_SESSION_PANEL_ID = "session:old-session";
+const SIBLING_SESSION_ID = "sibling-session";
+const NEW_SESSION_PANEL_ID = `session:${NEW_SESSION_ID}`;
+const SIBLING_SESSION_PANEL_ID = `session:${SIBLING_SESSION_ID}`;
+const CENTER_GROUP_ID = "center-group";
 
 function makeMockApi() {
   return {
@@ -71,7 +76,7 @@ function makeParams(overrides?: Partial<EnvSwitchParams>): EnvSwitchParams {
     api: makeMockApi(),
     oldEnvId: "old-env",
     newEnvId: "new-env",
-    activeSessionId: "new-session",
+    activeSessionId: NEW_SESSION_ID,
     safeWidth: 800,
     safeHeight: 600,
     buildDefault: vi.fn(),
@@ -186,11 +191,11 @@ describe("performEnvSwitch", () => {
     vi.mocked(layoutStructuresMatch).mockReturnValueOnce(true);
     const groupPanels = [
       { id: "files", api: { component: "files" } },
-      { id: "session:old-session", api: { component: "chat" } },
+      { id: OLD_SESSION_PANEL_ID, api: { component: "chat" } },
       { id: "changes", api: { component: "changes" } },
       { id: "terminal-default", api: { component: "terminal" } },
     ];
-    const groupId = "center-group";
+    const groupId = CENTER_GROUP_ID;
     const outgoing = {
       ...groupPanels[1],
       group: { id: groupId, panels: groupPanels },
@@ -231,10 +236,10 @@ describe("performEnvSwitch fast-path group survival", () => {
     vi.mocked(layoutStructuresMatch).mockReturnValueOnce(true);
     const order: string[] = [];
     const closeOutgoing = vi.fn(() => order.push("close"));
-    const groupId = "center-group";
+    const groupId = CENTER_GROUP_ID;
     const outgoingPanels = [
       {
-        id: "session:old-session",
+        id: OLD_SESSION_PANEL_ID,
         api: { component: "chat", isActive: true, close: closeOutgoing },
       },
     ];
@@ -257,6 +262,73 @@ describe("performEnvSwitch fast-path group survival", () => {
       }),
     );
     expect(order).toEqual(["add", "close"]);
+  });
+
+  it("restores sibling session tabs when the fast path replaces the outgoing session", () => {
+    vi.mocked(layoutStructuresMatch).mockReturnValueOnce(true);
+
+    type TestPanel = {
+      id: string;
+      api: { component: string; isActive?: boolean; close: () => void };
+      group: { id: string; panels: TestPanel[] };
+    };
+
+    const group = { id: CENTER_GROUP_ID, panels: [] as TestPanel[] };
+    const panels: TestPanel[] = [];
+    const removePanel = (id: string) => {
+      const panelIndex = panels.findIndex((p) => p.id === id);
+      if (panelIndex >= 0) panels.splice(panelIndex, 1);
+      const groupIndex = group.panels.findIndex((p) => p.id === id);
+      if (groupIndex >= 0) group.panels.splice(groupIndex, 1);
+    };
+    const closeStale = vi.fn(() => removePanel(OLD_SESSION_PANEL_ID));
+    const stalePanel: TestPanel = {
+      id: OLD_SESSION_PANEL_ID,
+      api: { component: "chat", isActive: true, close: closeStale },
+      group,
+    };
+    panels.push(stalePanel);
+    group.panels.push(stalePanel);
+
+    const addPanel = vi.fn((opts: { id: string; component: string }) => {
+      const panel: TestPanel = {
+        id: opts.id,
+        api: { component: opts.component, close: () => removePanel(opts.id) },
+        group,
+      };
+      panels.push(panel);
+      group.panels.push(panel);
+    });
+    const api = {
+      ...makeMockApi(),
+      panels,
+      groups: [group],
+      getPanel: vi.fn((id: string) => panels.find((p) => p.id === id) ?? null),
+      addPanel,
+    } as unknown as EnvSwitchParams["api"];
+
+    performEnvSwitch(
+      makeParams({
+        api,
+        currentSessionIds: [NEW_SESSION_ID, SIBLING_SESSION_ID],
+      }),
+    );
+
+    expect(addPanel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: NEW_SESSION_PANEL_ID,
+        position: { referenceGroup: group.id, index: 0 },
+      }),
+    );
+    expect(addPanel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: SIBLING_SESSION_PANEL_ID,
+        params: { sessionId: SIBLING_SESSION_ID },
+        position: { referenceGroup: group.id, index: 1 },
+        inactive: true,
+      }),
+    );
+    expect(closeStale).toHaveBeenCalledOnce();
   });
 });
 

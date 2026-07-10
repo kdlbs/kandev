@@ -615,11 +615,18 @@ function captureReusableLayout(get: StoreGet): Record<string, unknown> {
 }
 
 /** Restore a saved maximize state from sessionStorage onto the dockview API. */
-function restoreMaximizeFromStorage(api: DockviewApi, envId: string, set: StoreSet): boolean {
+function restoreMaximizeFromStorage(
+  api: DockviewApi,
+  envId: string,
+  set: StoreSet,
+  activeSessionId: string | null,
+  currentSessionIds: string[] = [],
+): boolean {
   const saved = getEnvMaximizeState(envId);
   if (!saved) return false;
   try {
     api.fromJSON(saved.maximizedDockviewJson as SerializedDockview);
+    replaceStaleSessionPanels(api, activeSessionId, currentSessionIds);
     // After fromJSON, `api.width/height` reflect the JSON's recorded grid
     // dims, which may not match the live container. Always lay out against
     // the measured DOM size so a stale value can't pin the dockview at the
@@ -776,7 +783,8 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
     set({ preMaximizeLayout: null, maximizedGroupId: null });
     set({ isRestoringLayout: true, currentLayoutEnvId: newEnvId });
     try {
-      if (restoreMaximizeFromStorage(api, newEnvId, set)) return;
+      if (restoreMaximizeFromStorage(api, newEnvId, set, activeSessionId, currentSessionIds))
+        return;
       const measured = measureDockviewContainer(api);
       const ids = performEnvSwitch({
         api,
