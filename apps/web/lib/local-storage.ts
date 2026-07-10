@@ -1,3 +1,5 @@
+import { setWalkthroughLastSeen } from "@/lib/walkthrough-notification-storage";
+
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
 // Session Storage helpers (cleared when browser tab closes)
@@ -637,10 +639,7 @@ export function cleanupTaskStorage(
 ): void {
   // Plan notification (localStorage, keyed per task inside a Record)
   setPlanLastSeen(taskId, null);
-  const walkthroughKey = "kandev.walkthrough.lastSeenByTask";
-  const walkthroughState = getLocalStorage<PlanNotificationState>(walkthroughKey, {});
-  delete walkthroughState[taskId];
-  setLocalStorage(walkthroughKey, walkthroughState);
+  setWalkthroughLastSeen(taskId, null);
 
   // PR merged / closed banner dismissal (sessionStorage, keyed per task)
   removeSessionStorage(`${PR_MERGED_BANNER_DISMISSED_PREFIX}${taskId}`);
