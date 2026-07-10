@@ -212,6 +212,11 @@ func TestTakeQueued(t *testing.T) {
 	})
 }
 
+// TestTakeQueuedEntry covers TakeQueuedEntry: out-of-FIFO-order removal,
+// takeability of agent-authored entries (unlike RemoveEntry), the
+// not-found (nil, false, nil) shape for a missing or foreign-session id,
+// and — distinctly — a genuine repository error propagating as a non-nil
+// error rather than being collapsed into the not-found shape.
 func TestTakeQueuedEntry(t *testing.T) {
 	t.Run("removes and returns the targeted entry regardless of FIFO position", func(t *testing.T) {
 		svc := setupService(t)
@@ -306,6 +311,10 @@ type errInjectingRepository struct {
 	takeByIDErr error
 }
 
+// TakeByID returns the configured error if set, otherwise delegates to the
+// embedded Repository so the remaining repository operations (Insert,
+// ListBySession, CountBySession, ...) still work against the real
+// underlying store.
 func (r *errInjectingRepository) TakeByID(ctx context.Context, sessionID, entryID string) (*QueuedMessage, error) {
 	if r.takeByIDErr != nil {
 		return nil, r.takeByIDErr

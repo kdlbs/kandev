@@ -1192,6 +1192,10 @@ func (m *mockSessionLauncher) ProcessOnTurnStart(context.Context, string, string
 	return nil
 }
 func (m *mockSessionLauncher) GetMessageQueue() *messagequeue.Service { return nil }
+
+// InterruptForPeerMessage always reports a successful immediate dispatch;
+// tests exercising other outcomes (busy-skip, failure) use fakeOrchestrator
+// in message_task_test.go instead of this generic stub.
 func (m *mockSessionLauncher) InterruptForPeerMessage(context.Context, string, string, string) (bool, error) {
 	return true, nil
 }

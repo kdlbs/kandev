@@ -978,6 +978,7 @@ type erroringTakeByIDRepository struct {
 	takeByIDErr error
 }
 
+// TakeByID always returns the configured error, ignoring its arguments.
 func (r *erroringTakeByIDRepository) TakeByID(context.Context, string, string) (*messagequeue.QueuedMessage, error) {
 	return nil, r.takeByIDErr
 }

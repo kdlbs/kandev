@@ -249,6 +249,9 @@ func TestSQLiteRepository_DeleteByID(t *testing.T) {
 	}
 }
 
+// TestSQLiteRepository_TakeByID covers TakeByID's cross-session guard,
+// out-of-FIFO-order removal, idempotent re-take of an already-taken id, and
+// (unlike DeleteByID) that agent-authored entries are takeable.
 func TestSQLiteRepository_TakeByID(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()

@@ -2145,6 +2145,12 @@ func (h *Handlers) shouldStartTaskMessageSession(ctx context.Context, session *m
 	return err == nil && running != nil && running.Status == models.ExecutorRunningStatusPrepared
 }
 
+// queueTaskMessage appends prompt to the target session's FIFO message
+// queue for delivery on its next turn boundary (normal turn completion, or
+// an explicit interrupt — see queueThenInterruptTaskMessage). Returns the
+// queued entry's id via taskMessageDispatchResult.queuedEntryID so callers
+// that need to target this exact entry (rather than the FIFO head) can do
+// so later.
 func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string, metadata map[string]interface{}) (taskMessageDispatchResult, error) {
 	queue := h.sessionLauncher.GetMessageQueue()
 	if queue == nil {
