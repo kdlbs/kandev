@@ -109,7 +109,10 @@ describe("ChatMessage prompt mentions", () => {
 
     const [chip] = screen.getAllByTestId(PROMPT_MENTION_TESTID);
     // The chip becomes a hover-card trigger so its contents surface on hover,
-    // rather than relying on the plain browser title tooltip.
+    // rather than relying on the plain browser title tooltip. `data-slot` is a
+    // shadcn/Radix implementation detail (slot-based CSS targeting), used here
+    // as a jsdom proxy for "chip is wired as a HoverCard trigger" since we
+    // can't reliably fire hover in jsdom.
     expect(chip.getAttribute("data-slot")).toBe("hover-card-trigger");
     expect(chip.getAttribute("title")).toBeNull();
   });

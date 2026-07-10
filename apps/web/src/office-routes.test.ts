@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
-import { idParamsPromise, resolveActiveOfficeWorkspaceId } from "./office-routes";
+import {
+  __resetIdParamsPromiseCacheForTests,
+  idParamsPromise,
+  resolveActiveOfficeWorkspaceId,
+} from "./office-routes";
 
 describe("resolveActiveOfficeWorkspaceId", () => {
   const wsOffice1 = "ws-office-1";
@@ -74,6 +78,10 @@ describe("idParamsPromise", () => {
   // `use(params)`. Every call site inside `renderOfficeRoute` runs on each
   // render of `OfficeRoutes`, so identity must be stable across calls or the
   // enclosing `<Suspense>` re-suspends forever and hides the office tree.
+  beforeEach(() => {
+    __resetIdParamsPromiseCacheForTests();
+  });
+
   it("returns the same promise instance for the same id", () => {
     const a = idParamsPromise("agent-123");
     const b = idParamsPromise("agent-123");

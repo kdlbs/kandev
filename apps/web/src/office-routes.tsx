@@ -157,6 +157,11 @@ export function idParamsPromise(id: string): Promise<{ id: string }> {
   return promise;
 }
 
+/** Test-only: reset the module-level cache so each test starts clean. */
+export function __resetIdParamsPromiseCacheForTests(): void {
+  idParamsPromiseCache.clear();
+}
+
 function renderOfficeRoute(pathname: string) {
   const agentRoute = matchAgentRoute(pathname);
   if (agentRoute) {
