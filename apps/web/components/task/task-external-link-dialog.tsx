@@ -12,6 +12,7 @@ import {
 } from "@kandev/ui/dialog";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useToast } from "@/components/toast-provider";
 import { useAppStoreApi } from "@/components/state-provider";
 import { getJiraTicket } from "@/lib/api/domains/jira-api";
@@ -21,6 +22,7 @@ import { updateTask } from "@/lib/api/domains/kanban-api";
 import { JIRA_KEY_RE } from "@/components/jira/jira-ticket-common";
 import { LINEAR_KEY_RE } from "@/components/linear/linear-issue-common";
 import { extractSentryShortId } from "@/components/sentry/sentry-issue-common";
+import { useSentryInstances } from "@/hooks/domains/sentry/use-sentry-availability";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import type { SentryIssue } from "@/lib/types/sentry";
 import { buildLinkedIssueTitle } from "./task-external-link-utils";
@@ -48,8 +50,11 @@ type ProviderConfig = {
   validationHint: string;
   successLabel: string;
   extractKey: (raw: string) => string | null;
-  fetch: (key: string, workspaceId: string) => Promise<unknown>;
+  fetch: (key: string, workspaceId: string, instanceId?: string) => Promise<unknown>;
   resolveLinkedKey?: (requestedKey: string, result: unknown) => string;
+  // requiresInstance gates providers (Sentry) whose fetch must target a chosen
+  // instance within the workspace before it can run.
+  requiresInstance?: boolean;
 };
 
 const SENTRY_NUMERIC_ISSUE_URL_RE = /\/issues\/(\d+)(?:[/?#]|$)/i;
@@ -95,23 +100,74 @@ const PROVIDERS: Record<ExternalLinkProvider, ProviderConfig> = {
     validationHint: "Paste a Sentry issue URL or short ID (PROJ-123).",
     successLabel: "Sentry issue linked",
     extractKey: extractSentryIssueKey,
-    fetch: (key, workspaceId) => getSentryIssue(key, { workspaceId }),
+    fetch: (key, workspaceId, instanceId) => getSentryIssue(workspaceId, instanceId ?? "", key),
     resolveLinkedKey: (requestedKey, result) =>
       isSentryIssue(result) && result.shortId ? result.shortId : requestedKey,
+    requiresInstance: true,
   },
 };
 
-export function TaskExternalLinkDialog({
-  open,
-  onOpenChange,
-  provider,
-  task,
+// SentryLinkInstanceField resolves which Sentry instance a link targets: it
+// auto-selects the sole healthy instance, prompts with a picker when several
+// are healthy, and explains when none is usable. Owns the instances hook so the
+// parent dialog stays provider-agnostic.
+function SentryLinkInstanceField({
   workspaceId,
-}: TaskExternalLinkDialogProps) {
+  instanceId,
+  onChange,
+}: {
+  workspaceId: string;
+  instanceId: string;
+  onChange: (id: string) => void;
+}) {
+  const sentry = useSentryInstances(workspaceId);
+
+  useEffect(() => {
+    if (sentry.state === "single") onChange(sentry.healthy[0].id);
+    else if (sentry.state === "empty" || sentry.state === "unhealthy") onChange("");
+  }, [sentry.state, sentry.healthy, onChange]);
+
+  if (sentry.state === "empty" || sentry.state === "unhealthy") {
+    return (
+      <p className="text-xs text-muted-foreground" data-testid="sentry-link-no-instance">
+        Connect a healthy Sentry instance in Settings → Integrations → Sentry to link issues.
+      </p>
+    );
+  }
+  if (sentry.state !== "multi") return null;
+  return (
+    <div className="space-y-2">
+      <Label htmlFor="sentry-link-instance">Sentry instance</Label>
+      <Select value={instanceId} onValueChange={onChange}>
+        <SelectTrigger id="sentry-link-instance" data-testid="sentry-link-instance-select">
+          <SelectValue placeholder="Select an instance" />
+        </SelectTrigger>
+        <SelectContent>
+          {sentry.healthy.map((inst) => (
+            <SelectItem key={inst.id} value={inst.id}>
+              {inst.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+// useExternalLinkForm holds the dialog's transient state and the submit action
+// (resolve key → fetch the external issue → rename the task). Extracted so the
+// component body stays within the max-lines lint budget.
+function useExternalLinkForm(
+  config: ProviderConfig,
+  task: TaskExternalLinkTarget,
+  workspaceId: string,
+  open: boolean,
+  onOpenChange: (open: boolean) => void,
+) {
   const { toast } = useToast();
   const store = useAppStoreApi();
-  const config = PROVIDERS[provider];
   const [input, setInput] = useState("");
+  const [instanceId, setInstanceId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -119,6 +175,7 @@ export function TaskExternalLinkDialog({
     if (open) {
       setInput("");
       setError(null);
+      setInstanceId("");
     }
   }, [open]);
 
@@ -128,11 +185,15 @@ export function TaskExternalLinkDialog({
       setError(config.validationHint);
       return;
     }
+    if (config.requiresInstance && !instanceId) {
+      setError("Select a Sentry instance to link against.");
+      return;
+    }
 
     setSubmitting(true);
     setError(null);
     try {
-      const result = await config.fetch(key, workspaceId);
+      const result = await config.fetch(key, workspaceId, instanceId || undefined);
       const state = store.getState();
       const latestTask = findTaskInSnapshots(
         task.id,
@@ -152,6 +213,20 @@ export function TaskExternalLinkDialog({
     }
   };
 
+  return { input, setInput, instanceId, setInstanceId, submitting, error, setError, submit };
+}
+
+export function TaskExternalLinkDialog({
+  open,
+  onOpenChange,
+  provider,
+  task,
+  workspaceId,
+}: TaskExternalLinkDialogProps) {
+  const config = PROVIDERS[provider];
+  const { input, setInput, instanceId, setInstanceId, submitting, error, setError, submit } =
+    useExternalLinkForm(config, task, workspaceId, open, onOpenChange);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-lg">
@@ -159,6 +234,13 @@ export function TaskExternalLinkDialog({
           <DialogTitle>{config.title}</DialogTitle>
           <DialogDescription>{config.description}</DialogDescription>
         </DialogHeader>
+        {provider === "sentry" && (
+          <SentryLinkInstanceField
+            workspaceId={workspaceId}
+            instanceId={instanceId}
+            onChange={setInstanceId}
+          />
+        )}
         <div className="space-y-2">
           <Label htmlFor="task-external-link-input">{config.inputLabel}</Label>
           <Input
@@ -192,7 +274,7 @@ export function TaskExternalLinkDialog({
             type="button"
             className="cursor-pointer"
             onClick={submit}
-            disabled={submitting || !input.trim()}
+            disabled={submitting || !input.trim() || (config.requiresInstance && !instanceId)}
             data-dialog-default-action
             data-testid="task-external-link-submit"
           >
