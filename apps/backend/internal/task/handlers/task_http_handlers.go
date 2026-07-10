@@ -114,9 +114,7 @@ func buildTaskDTOsWithSessionInfo(
 	}
 	pendingActionsBySession, err := pendingActionsForWaitingPrimarySessions(ctx, svc, primarySessionInfoMap)
 	if err != nil {
-		if log != nil {
-			log.Warn("failed to load pending actions for task list, using empty map", zap.Error(err))
-		}
+		log.Warn("failed to load pending actions for task list, using empty map", zap.Error(err))
 		pendingActionsBySession = map[string]models.TaskPendingAction{}
 	}
 	result := make([]dto.TaskDTO, 0, len(tasks))
