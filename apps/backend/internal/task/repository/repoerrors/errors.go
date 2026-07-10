@@ -11,3 +11,6 @@ var ErrWorkspaceNotFound = errors.New("workspace not found")
 
 // ErrTaskNotFound reports that no task row matched the supplied id.
 var ErrTaskNotFound = errors.New("task not found")
+
+// ErrTaskPlanNotFound reports that no task plan row matched the supplied task id.
+var ErrTaskPlanNotFound = errors.New("task plan not found")

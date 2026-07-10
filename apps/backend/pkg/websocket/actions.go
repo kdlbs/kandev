@@ -73,6 +73,7 @@ const (
 	ActionTaskPlanRevisionsList = "task.plan.revisions.list"
 	ActionTaskPlanRevisionGet   = "task.plan.revision.get"
 	ActionTaskPlanRevert        = "task.plan.revert"
+	ActionTaskPlanImplement     = "task.plan.implementation_started"
 
 	ActionTaskSessionList   = "task.session.list"
 	ActionTaskSessionStatus = "task.session.status"

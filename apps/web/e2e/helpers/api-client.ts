@@ -667,6 +667,7 @@ export class ApiClient {
     default_utility_agent_id?: string;
     default_utility_model?: string;
     sidebar_views?: unknown[];
+    saved_layouts?: unknown[];
     kanban_view_mode?: string;
     tasks_list_sort?: string;
     tasks_list_group?: string;
@@ -1231,6 +1232,9 @@ export class ApiClient {
     title?: string;
     created_by: string;
     updated_at: string;
+    implementation_started_at?: string | null;
+    implementation_started_session_id?: string | null;
+    implementation_started_by?: string | null;
   } | null> {
     try {
       return await this.wsRequest("task.plan.get", { task_id: taskId });

@@ -1142,13 +1142,16 @@ func (r *TaskEnvironmentRepo) ToAPI() map[string]interface{} {
 
 // TaskPlan represents a plan associated with a task
 type TaskPlan struct {
-	ID        string    `json:"id"`
-	TaskID    string    `json:"task_id"`
-	Title     string    `json:"title"`
-	Content   string    `json:"content"`
-	CreatedBy string    `json:"created_by"` // "agent" or "user"
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID                             string     `json:"id"`
+	TaskID                         string     `json:"task_id"`
+	Title                          string     `json:"title"`
+	Content                        string     `json:"content"`
+	CreatedBy                      string     `json:"created_by"` // "agent" or "user"
+	CreatedAt                      time.Time  `json:"created_at"`
+	UpdatedAt                      time.Time  `json:"updated_at"`
+	ImplementationStartedAt        *time.Time `json:"implementation_started_at,omitempty"`
+	ImplementationStartedSessionID *string    `json:"implementation_started_session_id,omitempty"`
+	ImplementationStartedBy        *string    `json:"implementation_started_by,omitempty"`
 }
 
 // TaskPlanRevision is one immutable snapshot in the revision history of a task plan.

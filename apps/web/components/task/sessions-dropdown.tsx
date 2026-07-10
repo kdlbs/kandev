@@ -106,8 +106,11 @@ function useSessionSelectionHandlers(taskId: string | null) {
       const oldSessionId = state.tasks.activeSessionId;
       const oldEnvId = oldSessionId ? (state.environmentIdBySessionId[oldSessionId] ?? null) : null;
       const newEnvId = state.environmentIdBySessionId[sessionId] ?? null;
+      const sessionIds = (state.taskSessionsByTask.itemsByTaskId[taskId] ?? []).map(
+        (session) => session.id,
+      );
       setActiveSession(taskId, sessionId);
-      if (newEnvId) performLayoutSwitch(oldEnvId, newEnvId, sessionId);
+      if (newEnvId) performLayoutSwitch(oldEnvId, newEnvId, sessionId, sessionIds);
       close();
     },
     [appStore, setActiveSession, taskId],

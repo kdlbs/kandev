@@ -13,6 +13,7 @@ import (
 var ErrWorkspaceNameMismatch = repoerrors.ErrWorkspaceNameMismatch
 var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
 var ErrTaskNotFound = repoerrors.ErrTaskNotFound
+var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
 
 // WorkspaceRepository handles workspace CRUD.
 type WorkspaceRepository interface {
@@ -319,6 +320,7 @@ type PlanRepository interface {
 	CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) error
 	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
 	UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) error
+	MarkTaskPlanImplementationStarted(ctx context.Context, taskID, sessionID, actor string) (*models.TaskPlan, error)
 	DeleteTaskPlan(ctx context.Context, taskID string) error
 
 	// Revision history

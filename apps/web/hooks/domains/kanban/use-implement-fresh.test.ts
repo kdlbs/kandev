@@ -7,19 +7,24 @@ import {
   type TaskSession,
 } from "@/lib/types/http";
 import type { MessageAttachment } from "@/components/task/chat/chat-input-container";
+import type { TaskPlan } from "@/lib/types/http-agents";
 
 const mockLaunchSession = vi.fn();
+const mockMarkPlanImplementationStarted = vi.fn();
 const mockSetChatDraftContent = vi.fn();
 const mockToast = vi.fn();
 const mockWsRequest = vi.fn();
 const mockSetActiveSession = vi.fn();
+const mockSetTaskPlan = vi.fn();
 
 let mockStoreState: {
   taskSessions: { items: Record<string, TaskSession> };
   setActiveSession: typeof mockSetActiveSession;
+  setTaskPlan: typeof mockSetTaskPlan;
 } = {
   taskSessions: { items: {} },
   setActiveSession: mockSetActiveSession,
+  setTaskPlan: mockSetTaskPlan,
 };
 
 vi.mock("@/components/state-provider", () => ({
@@ -32,6 +37,10 @@ vi.mock("@/components/toast-provider", () => ({
 
 vi.mock("@/lib/services/session-launch-service", () => ({
   launchSession: (...args: unknown[]) => mockLaunchSession(...args),
+}));
+
+vi.mock("@/lib/api/domains/plan-api", () => ({
+  markPlanImplementationStarted: (...args: unknown[]) => mockMarkPlanImplementationStarted(...args),
 }));
 
 vi.mock("@/lib/ws/connection", () => ({
@@ -51,6 +60,22 @@ import { useImplementFresh } from "./use-implement-fresh";
 const TASK_ID = "task-1";
 const SESS_PLAN = "sess-plan";
 const SESS_FRESH = "sess-fresh";
+
+function makePlan(overrides: Partial<TaskPlan> = {}): TaskPlan {
+  return {
+    id: "plan-1",
+    task_id: TASK_ID,
+    title: "Plan",
+    content: "## Plan",
+    created_by: "agent",
+    created_at: "",
+    updated_at: "",
+    implementation_started_at: "2026-07-09T12:00:00Z",
+    implementation_started_session_id: SESS_FRESH,
+    implementation_started_by: "user",
+    ...overrides,
+  };
+}
 
 function makeSession(overrides: Partial<TaskSession> = {}): TaskSession {
   return {
@@ -90,9 +115,11 @@ function setup(session: TaskSession | undefined = makeSession()) {
     state: "RUNNING",
   });
   mockWsRequest.mockResolvedValue({ success: true });
+  mockMarkPlanImplementationStarted.mockResolvedValue(makePlan());
   mockStoreState = {
     taskSessions: { items: session ? { [session.id]: session } : {} },
     setActiveSession: mockSetActiveSession,
+    setTaskPlan: mockSetTaskPlan,
   };
 }
 
@@ -160,6 +187,39 @@ describe("useImplementFresh", () => {
       10000,
     );
   });
+
+  it("marks the task plan as implementation-started after launch", async () => {
+    const markedPlan = makePlan({ implementation_started_session_id: SESS_FRESH });
+    mockMarkPlanImplementationStarted.mockResolvedValueOnce(markedPlan);
+    const { ref } = makeChatRef({ value: "implement" });
+    const { result } = renderHook(() => useImplementFresh(SESS_PLAN, TASK_ID, ref));
+
+    await act(async () => {
+      await result.current();
+    });
+
+    expect(mockMarkPlanImplementationStarted).toHaveBeenCalledWith(TASK_ID, SESS_FRESH);
+    expect(mockSetTaskPlan).toHaveBeenCalledWith(TASK_ID, markedPlan);
+  });
+
+  it("continues focusing and clearing when the marker write fails after launch", async () => {
+    mockMarkPlanImplementationStarted.mockRejectedValueOnce(new Error("marker offline"));
+    const { ref, clear } = makeChatRef({ value: "implement" });
+    const { result } = renderHook(() => useImplementFresh(SESS_PLAN, TASK_ID, ref));
+
+    await act(async () => {
+      await result.current();
+    });
+
+    expect(mockSetActiveSession).toHaveBeenCalledWith(TASK_ID, SESS_FRESH);
+    expect(clear).toHaveBeenCalledTimes(1);
+    expect(mockSetChatDraftContent).toHaveBeenCalledWith(SESS_PLAN, null);
+    expect(mockToast).not.toHaveBeenCalled();
+  });
+});
+
+describe("useImplementFresh post-launch side effects", () => {
+  beforeEach(() => setup());
 
   it("focuses the fresh session as active in the UI after launch", async () => {
     const { ref } = makeChatRef({ value: "implement" });
@@ -278,7 +338,11 @@ describe("useImplementFresh guards", () => {
   });
 
   it("no-ops when planning session is not in the store", async () => {
-    mockStoreState = { taskSessions: { items: {} }, setActiveSession: mockSetActiveSession }; // Empty store
+    mockStoreState = {
+      taskSessions: { items: {} },
+      setActiveSession: mockSetActiveSession,
+      setTaskPlan: mockSetTaskPlan,
+    }; // Empty store
     mockLaunchSession.mockClear();
     const { ref } = makeChatRef();
     const { result } = renderHook(() => useImplementFresh(SESS_PLAN, TASK_ID, ref));

@@ -19,6 +19,8 @@ const revisionSelectCols = `id, task_id, revision_number, title, content, author
 // and is the fallback for unknown values when persisting plan history rows.
 const authorKindAgent = "agent"
 
+const planSelectCols = `id, task_id, title, content, created_by, created_at, updated_at, implementation_started_at, implementation_started_session_id, implementation_started_by`
+
 // CreateTaskPlan creates a new task plan.
 func (r *Repository) CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) error {
 	if plan.ID == "" {
@@ -44,15 +46,10 @@ func (r *Repository) CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) 
 
 // GetTaskPlan retrieves a task plan by task ID.
 func (r *Repository) GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error) {
-	plan := &models.TaskPlan{}
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, task_id, title, content, created_by, created_at, updated_at
+	plan, err := scanPlanRow(r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT `+planSelectCols+`
 		FROM task_plans WHERE task_id = ?
-	`), taskID).Scan(&plan.ID, &plan.TaskID, &plan.Title, &plan.Content, &plan.CreatedBy, &plan.CreatedAt, &plan.UpdatedAt)
-
-	if err == sql.ErrNoRows {
-		return nil, nil // Return nil, nil when no plan exists
-	}
+	`), taskID))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get task plan: %w", err)
 	}
@@ -76,6 +73,38 @@ func (r *Repository) UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) 
 		return fmt.Errorf("task plan not found for task: %s", plan.TaskID)
 	}
 	return nil
+}
+
+// MarkTaskPlanImplementationStarted records the first accepted implementation start.
+// It is idempotent: later calls return the existing marker without changing it.
+func (r *Repository) MarkTaskPlanImplementationStarted(ctx context.Context, taskID, sessionID, actor string) (*models.TaskPlan, error) {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_plans
+		SET
+			implementation_started_at = COALESCE(implementation_started_at, ?),
+			implementation_started_session_id = CASE
+				WHEN implementation_started_at IS NULL THEN ?
+				ELSE implementation_started_session_id
+			END,
+			implementation_started_by = CASE
+				WHEN implementation_started_at IS NULL THEN ?
+				ELSE implementation_started_by
+			END,
+			updated_at = CASE
+				WHEN implementation_started_at IS NULL THEN ?
+				ELSE updated_at
+			END
+		WHERE task_id = ?
+	`), now, sessionID, actor, now, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to mark task plan implementation started: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return nil, fmt.Errorf("%w: %s", ErrTaskPlanNotFound, taskID)
+	}
+	return r.GetTaskPlan(ctx, taskID)
 }
 
 // DeleteTaskPlan deletes a task plan by task ID.
@@ -244,6 +273,41 @@ func (r *Repository) WritePlanRevision(
 		}
 	}
 	return tx.Commit()
+}
+
+func scanPlanRow(row *sql.Row) (*models.TaskPlan, error) {
+	plan := &models.TaskPlan{}
+	var startedAt sql.NullTime
+	var sessionID sql.NullString
+	var actor sql.NullString
+	err := row.Scan(
+		&plan.ID,
+		&plan.TaskID,
+		&plan.Title,
+		&plan.Content,
+		&plan.CreatedBy,
+		&plan.CreatedAt,
+		&plan.UpdatedAt,
+		&startedAt,
+		&sessionID,
+		&actor,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if startedAt.Valid {
+		plan.ImplementationStartedAt = &startedAt.Time
+	}
+	if sessionID.Valid {
+		plan.ImplementationStartedSessionID = &sessionID.String
+	}
+	if actor.Valid {
+		plan.ImplementationStartedBy = &actor.String
+	}
+	return plan, nil
 }
 
 func upsertPlanHead(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, head *models.TaskPlan, now time.Time) error {

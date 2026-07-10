@@ -8,7 +8,11 @@ import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { useLayoutStore } from "@/lib/state/layout-store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useImplementFresh } from "./use-implement-fresh";
-import type { ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
+import { markPlanImplementationStarted } from "@/lib/api/domains/plan-api";
+import type {
+  ChatInputContainerHandle,
+  MessageAttachment,
+} from "@/components/task/chat/chat-input-container";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -108,26 +112,64 @@ export function readContextFilesMeta(sessionId: string): Array<{ path: string; n
     .map((f) => ({ path: f.path, name: f.name }));
 }
 
+export function collectImplementPlanInput(
+  chatInput: ChatInputContainerHandle | null | undefined,
+  sessionId: string | null,
+): {
+  userText: string;
+  attachments: MessageAttachment[];
+  contextFilesMeta: Array<{ path: string; name: string }>;
+} {
+  if (!chatInput || !sessionId) {
+    return { userText: "", attachments: [], contextFilesMeta: [] };
+  }
+  return {
+    userText: chatInput.getValue(),
+    attachments: chatInput.getAttachments(),
+    contextFilesMeta: readContextFilesMeta(sessionId),
+  };
+}
+
+export async function markPlanImplementationStartedBestEffort(
+  taskId: string,
+  sessionId: string,
+  setTaskPlan: (
+    taskId: string,
+    plan: Awaited<ReturnType<typeof markPlanImplementationStarted>>,
+  ) => void,
+) {
+  try {
+    const markedPlan = await markPlanImplementationStarted(taskId, sessionId);
+    setTaskPlan(taskId, markedPlan);
+  } catch (err) {
+    console.error("Failed to mark plan implementation started:", err);
+  }
+}
+
 function useImplementPlan(
   resolvedSessionId: string | null,
   taskId: string | null,
-  handlePlanModeChange: (enabled: boolean) => void,
-  chatInputRef: React.RefObject<ChatInputContainerHandle | null>,
+  handlePlanModeChange: ((enabled: boolean) => void) | undefined,
+  clearPlanModeAfterSend: boolean,
+  chatInputRef?: React.RefObject<ChatInputContainerHandle | null>,
 ) {
-  return useCallback(() => {
-    if (!resolvedSessionId || !taskId) return;
+  const setTaskPlan = useAppStore((s) => s.setTaskPlan);
+  const { toast } = useToast();
+  return useCallback(async (): Promise<boolean> => {
+    if (!resolvedSessionId || !taskId) return false;
 
     const client = getWebSocketClient();
-    if (!client) return;
+    if (!client) return false;
 
-    const userText = chatInputRef.current?.getValue() ?? "";
-    const attachments = chatInputRef.current?.getAttachments() ?? [];
-    const contextFilesMeta = readContextFilesMeta(resolvedSessionId);
+    const { userText, attachments, contextFilesMeta } = collectImplementPlanInput(
+      chatInputRef?.current,
+      resolvedSessionId,
+    );
 
     const content = buildImplementPlanContent(userText);
 
-    client
-      .request(
+    try {
+      await client.request(
         "message.add",
         {
           task_id: taskId,
@@ -138,25 +180,43 @@ function useImplementPlan(
           ...(contextFilesMeta.length > 0 && { context_files: contextFilesMeta }),
         },
         attachments.length > 0 ? 30000 : 10000,
-      )
-      .then(() => {
-        // Exit plan mode + clear composer only on success so a failed send
-        // leaves the layout and input intact for retry.
-        handlePlanModeChange(false);
+      );
+      await markPlanImplementationStartedBestEffort(taskId, resolvedSessionId, setTaskPlan);
+      // Exit plan mode + clear composer only on success so a failed send
+      // leaves the layout and input intact for retry.
+      if (clearPlanModeAfterSend) {
+        handlePlanModeChange?.(false);
+      }
+      if (chatInputRef) {
         chatInputRef.current?.clear();
         setChatDraftContent(resolvedSessionId, null);
-        // Authoritatively clear plan_mode in session metadata so a refresh
-        // mid-implementation cannot re-hydrate plan mode from the server.
-        // Run as a separate request with its own catch so a set_plan_mode
-        // failure doesn't masquerade as a message send failure.
+      }
+      // Authoritatively clear plan_mode in session metadata so a refresh
+      // mid-implementation cannot re-hydrate plan mode from the server.
+      // Run as a separate request with its own catch so a set_plan_mode
+      // failure doesn't masquerade as a message send failure.
+      if (clearPlanModeAfterSend) {
         client
           .request("session.set_plan_mode", { session_id: resolvedSessionId, enabled: false }, 5000)
           .catch((err: unknown) =>
             console.error("Failed to clear plan mode after implement:", err),
           );
-      })
-      .catch((err: unknown) => console.error("Failed to send implement plan message:", err));
-  }, [resolvedSessionId, taskId, handlePlanModeChange, chatInputRef]);
+      }
+      return true;
+    } catch (err) {
+      console.error("Failed to start implementation:", err);
+      toast({ description: "Failed to start implementing the plan", variant: "error" });
+      return false;
+    }
+  }, [
+    resolvedSessionId,
+    taskId,
+    chatInputRef,
+    setTaskPlan,
+    clearPlanModeAfterSend,
+    handlePlanModeChange,
+    toast,
+  ]);
 }
 
 /** Directly disable plan mode state + layout, bypassing the MCP availability guard. */
@@ -191,17 +251,12 @@ export function usePlanActions(opts: {
   handlePlanModeChange: (enabled: boolean) => void;
   chatInputRef: React.RefObject<ChatInputContainerHandle | null>;
 }) {
-  const handleImplementPlan = useImplementPlan(
-    opts.resolvedSessionId,
-    opts.taskId,
-    opts.handlePlanModeChange,
-    opts.chatInputRef,
-  );
-  const handleImplementFresh = useImplementFresh(
-    opts.resolvedSessionId,
-    opts.taskId,
-    opts.chatInputRef,
-  );
+  const implementPlan = useImplementPlanRunner({
+    resolvedSessionId: opts.resolvedSessionId,
+    taskId: opts.taskId,
+    handlePlanModeChange: opts.handlePlanModeChange,
+    chatInputRef: opts.chatInputRef,
+  });
   const {
     proceedStepName,
     nextStepIsWorkStep,
@@ -221,8 +276,31 @@ export function usePlanActions(opts: {
   }, [planModeEnabled, disablePlanMode, rawProceed]);
 
   const showImplement = opts.planModeEnabled && !nextStepIsWorkStep;
-  const implementPlanHandler = showImplement
-    ? (fresh: boolean) => (fresh ? handleImplementFresh() : handleImplementPlan())
-    : undefined;
+  const implementPlanHandler = showImplement ? implementPlan : undefined;
   return { implementPlanHandler, proceedStepName, proceed, isMoving };
+}
+
+export function useImplementPlanRunner(opts: {
+  resolvedSessionId: string | null;
+  taskId: string | null;
+  handlePlanModeChange?: (enabled: boolean) => void;
+  clearPlanModeAfterSend?: boolean;
+  chatInputRef?: React.RefObject<ChatInputContainerHandle | null>;
+}) {
+  const handleImplementPlan = useImplementPlan(
+    opts.resolvedSessionId,
+    opts.taskId,
+    opts.handlePlanModeChange,
+    opts.clearPlanModeAfterSend ?? true,
+    opts.chatInputRef,
+  );
+  const handleImplementFresh = useImplementFresh(
+    opts.resolvedSessionId,
+    opts.taskId,
+    opts.chatInputRef,
+  );
+  return useCallback(
+    (fresh: boolean) => (fresh ? handleImplementFresh() : handleImplementPlan()),
+    [handleImplementFresh, handleImplementPlan],
+  );
 }

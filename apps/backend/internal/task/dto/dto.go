@@ -763,13 +763,16 @@ type ApproveSessionResponse struct {
 
 // TaskPlanDTO represents a task plan for API responses
 type TaskPlanDTO struct {
-	ID        string    `json:"id"`
-	TaskID    string    `json:"task_id"`
-	Title     string    `json:"title"`
-	Content   string    `json:"content"`
-	CreatedBy string    `json:"created_by"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID                             string     `json:"id"`
+	TaskID                         string     `json:"task_id"`
+	Title                          string     `json:"title"`
+	Content                        string     `json:"content"`
+	CreatedBy                      string     `json:"created_by"`
+	CreatedAt                      time.Time  `json:"created_at"`
+	UpdatedAt                      time.Time  `json:"updated_at"`
+	ImplementationStartedAt        *time.Time `json:"implementation_started_at,omitempty"`
+	ImplementationStartedSessionID *string    `json:"implementation_started_session_id,omitempty"`
+	ImplementationStartedBy        *string    `json:"implementation_started_by,omitempty"`
 }
 
 // TaskPlanFromModel converts a TaskPlan model to a TaskPlanDTO.
@@ -778,13 +781,16 @@ func TaskPlanFromModel(plan *models.TaskPlan) *TaskPlanDTO {
 		return nil
 	}
 	return &TaskPlanDTO{
-		ID:        plan.ID,
-		TaskID:    plan.TaskID,
-		Title:     plan.Title,
-		Content:   plan.Content,
-		CreatedBy: plan.CreatedBy,
-		CreatedAt: plan.CreatedAt,
-		UpdatedAt: plan.UpdatedAt,
+		ID:                             plan.ID,
+		TaskID:                         plan.TaskID,
+		Title:                          plan.Title,
+		Content:                        plan.Content,
+		CreatedBy:                      plan.CreatedBy,
+		CreatedAt:                      plan.CreatedAt,
+		UpdatedAt:                      plan.UpdatedAt,
+		ImplementationStartedAt:        plan.ImplementationStartedAt,
+		ImplementationStartedSessionID: plan.ImplementationStartedSessionID,
+		ImplementationStartedBy:        plan.ImplementationStartedBy,
 	}
 }
 

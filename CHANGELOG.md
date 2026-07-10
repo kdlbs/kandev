@@ -2,6 +2,32 @@
 
 All notable changes to Kandev.
 
+## 0.77.0 - 2026-07-10
+
+### Features
+
+- add agent-authored code walkthroughs ([#1647](https://github.com/kdlbs/kandev/pull/1647))
+- move integration links into task menus ([#1644](https://github.com/kdlbs/kandev/pull/1644))
+- improve workspace sidebar navigation ([#1643](https://github.com/kdlbs/kandev/pull/1643))
+- add configurable branch names ([#1615](https://github.com/kdlbs/kandev/pull/1615))
+
+### Bug Fixes
+
+- add mobile workspace switcher ([#1640](https://github.com/kdlbs/kandev/pull/1640))
+- repair GitHub repository scope filters ([#1641](https://github.com/kdlbs/kandev/pull/1641))
+- inherit parent scope for mcp subtasks ([#1638](https://github.com/kdlbs/kandev/pull/1638))
+- sync task completion with terminal workflow steps ([#1639](https://github.com/kdlbs/kandev/pull/1639))
+- expand nested custom prompts ([#1637](https://github.com/kdlbs/kandev/pull/1637))
+- open each linked PR in its own tab from the "+" menu ([#1636](https://github.com/kdlbs/kandev/pull/1636)) by @ClemDNL
+- stop archived automation-run tasks from pinning max_concurrent_runs ([#1632](https://github.com/kdlbs/kandev/pull/1632)) by @ClemDNL
+- keep created subtasks during hydration ([#1626](https://github.com/kdlbs/kandev/pull/1626))
+- keep diff previews tied to the correct file ([#1618](https://github.com/kdlbs/kandev/pull/1618))
+- equalize integration card heights ([#1624](https://github.com/kdlbs/kandev/pull/1624))
+
+### Documentation
+
+- add pr fixup conflict guidance ([#1642](https://github.com/kdlbs/kandev/pull/1642))
+
 ## 0.76.0 - 2026-07-09
 
 ### Bug Fixes

@@ -16,6 +16,10 @@ var ErrTaskNotFound = repoerrors.ErrTaskNotFound
 // matches the supplied id.
 var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
 
+// ErrTaskPlanNotFound is returned by Repository task-plan methods when no row
+// matches the supplied task id.
+var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
+
 // ErrNoPrimarySession is returned by GetPrimarySessionByTaskID when the task
 // has no primary session row. Callers should use errors.Is to distinguish this
 // "not found" case from genuine backend/DB errors.

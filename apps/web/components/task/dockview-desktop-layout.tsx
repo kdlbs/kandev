@@ -57,6 +57,7 @@ import type { Terminal } from "@/hooks/domains/session/use-terminals";
 // Portal system
 import { PanelPortalHost, usePortalSlot } from "@/lib/layout/panel-portal-host";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "@/lib/state/dockview-env-scoped-components";
+import { normalizeReusableSessionPanels, type LayoutState } from "@/lib/state/layout-manager";
 
 // ---------------------------------------------------------------------------
 // PORTAL SLOT — generic dockview component that adopts a persistent portal
@@ -154,16 +155,16 @@ function useSyncUserDefaultLayout() {
   const setUserDefaultLayout = useDockviewStore((s) => s.setUserDefaultLayout);
   useEffect(() => {
     const defaultLayout = savedLayouts.find((l) => l.is_default);
-    const state = defaultLayout?.layout as unknown as
-      | import("@/lib/state/layout-manager").LayoutState
-      | undefined;
+    const state = defaultLayout?.layout as unknown as LayoutState | undefined;
     // Drop the obsolete "sidebar" column: the dockview-embedded sidebar pane was
     // retired for the unified AppSidebar, but a default layout saved before that
     // change still carries it. The default-build path applies this layout
     // without the restore-time sanitize layer, so an orphaned sidebar column
     // (its panel component is no longer registered) renders a broken grid.
     const columns = state?.columns?.filter((c) => c.id !== "sidebar");
-    setUserDefaultLayout(columns && columns.length > 0 ? { ...state, columns } : null);
+    setUserDefaultLayout(
+      columns && columns.length > 0 ? normalizeReusableSessionPanels({ ...state, columns }) : null,
+    );
   }, [savedLayouts, setUserDefaultLayout]);
 }
 
@@ -196,6 +197,12 @@ function useEnvSwitchCleanup(
 ) {
   const prevEnvRef = useRef<string | null | undefined>(undefined);
   const prevTaskRef = useRef<string | null | undefined>(undefined);
+  const currentSessionIdsKey = useAppStore((state) => {
+    if (!activeTaskId) return "";
+    return (state.taskSessionsByTask.itemsByTaskId[activeTaskId] ?? [])
+      .map((session) => session.id)
+      .join(",");
+  });
   useEffect(() => {
     const newEnvId = effectiveEnvId;
     const newTaskId = activeTaskId;
@@ -235,9 +242,13 @@ function useEnvSwitchCleanup(
     // through the sidebar/dropdown switch helpers. Same-env switches return
     // early above (no-op).
     if (newEnvId) {
-      performLayoutSwitch(oldEnvId, newEnvId, effectiveSessionId);
+      const currentSessionIds = currentSessionIdsKey ? currentSessionIdsKey.split(",") : [];
+      if (effectiveSessionId && !currentSessionIds.includes(effectiveSessionId)) {
+        currentSessionIds.unshift(effectiveSessionId);
+      }
+      performLayoutSwitch(oldEnvId, newEnvId, effectiveSessionId, currentSessionIds);
     }
-  }, [effectiveEnvId, effectiveSessionId, activeTaskId]);
+  }, [effectiveEnvId, effectiveSessionId, activeTaskId, currentSessionIdsKey]);
 }
 
 // ---------------------------------------------------------------------------
