@@ -226,6 +226,7 @@ export async function createRepositoryAction(payload: {
   cleanup_script: string;
   dev_script: string;
   copy_files: string;
+  startup_prompt: string;
 }) {
   return fetchJson<Repository>(
     `${apiBaseUrl}/api/v1/workspaces/${payload.workspace_id}/repositories`,
@@ -246,6 +247,7 @@ export async function createRepositoryAction(payload: {
         cleanup_script: payload.cleanup_script,
         dev_script: payload.dev_script,
         copy_files: payload.copy_files,
+        startup_prompt: payload.startup_prompt,
       }),
     },
   );

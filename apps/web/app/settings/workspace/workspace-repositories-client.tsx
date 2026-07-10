@@ -113,6 +113,7 @@ async function saveNewRepository(
     cleanup_script: repo.cleanup_script,
     dev_script: repo.dev_script,
     copy_files: repo.copy_files,
+    startup_prompt: repo.startup_prompt,
   });
   const scripts = await Promise.all(
     repo.scripts.map((script, index) =>
@@ -161,6 +162,7 @@ async function saveExistingRepository({
     cleanup_script: repo.cleanup_script,
     dev_script: repo.dev_script,
     copy_files: repo.copy_files,
+    startup_prompt: repo.startup_prompt,
   });
   const savedScripts = savedRepositoriesById.get(repoId)?.scripts ?? [];
   const currentScriptIds = new Set(repo.scripts.map((s) => s.id));

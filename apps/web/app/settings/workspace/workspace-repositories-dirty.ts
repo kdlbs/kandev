@@ -6,27 +6,30 @@ export function cloneRepository(repo: RepositoryWithScripts): RepositoryWithScri
   return { ...repo, scripts: repo.scripts.map((script) => ({ ...script })) };
 }
 
+const REPOSITORY_DIRTY_FIELDS = [
+  "name",
+  "source_type",
+  "local_path",
+  "provider",
+  "provider_repo_id",
+  "provider_owner",
+  "provider_name",
+  "default_branch",
+  "worktree_branch_prefix",
+  "pull_before_worktree",
+  "setup_script",
+  "cleanup_script",
+  "dev_script",
+  "copy_files",
+  "startup_prompt",
+] as const satisfies ReadonlyArray<keyof Repository>;
+
 export function isRepositoryDirty(
   repo: RepositoryWithScripts,
   saved: RepositoryWithScripts | undefined,
 ): boolean {
   if (!saved) return true;
-  return (
-    repo.name !== saved.name ||
-    repo.source_type !== saved.source_type ||
-    repo.local_path !== saved.local_path ||
-    repo.provider !== saved.provider ||
-    repo.provider_repo_id !== saved.provider_repo_id ||
-    repo.provider_owner !== saved.provider_owner ||
-    repo.provider_name !== saved.provider_name ||
-    repo.default_branch !== saved.default_branch ||
-    repo.worktree_branch_prefix !== saved.worktree_branch_prefix ||
-    repo.pull_before_worktree !== saved.pull_before_worktree ||
-    repo.setup_script !== saved.setup_script ||
-    repo.cleanup_script !== saved.cleanup_script ||
-    repo.dev_script !== saved.dev_script ||
-    repo.copy_files !== saved.copy_files
-  );
+  return REPOSITORY_DIRTY_FIELDS.some((field) => repo[field] !== saved[field]);
 }
 
 export function areRepositoryScriptsDirty(
