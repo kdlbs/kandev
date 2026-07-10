@@ -107,6 +107,17 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
     expect((http as Record<string, unknown>).primarySessionPendingAction).toBe("clarification");
   });
 
+  it("drops unrecognized primary session pending action values", () => {
+    const invalidPendingAction = {
+      primary_session_pending_action: "unknown",
+    } as Record<string, unknown> as Partial<TaskLike>;
+
+    expect(toKanbanTask(httpDTO(invalidPendingAction)).primarySessionPendingAction).toBeUndefined();
+    expect(
+      toKanbanTask(wsPayload(invalidPendingAction)).primarySessionPendingAction,
+    ).toBeUndefined();
+  });
+
   it("missing repository on either shape: repositoryId is undefined", () => {
     const http = httpDTO({ repositories: undefined });
     const ws = wsPayload({ repository_id: undefined, repositories: undefined });

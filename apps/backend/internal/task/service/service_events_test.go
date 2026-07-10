@@ -15,6 +15,11 @@ type failingTaskRepoRepository struct {
 	err error
 }
 
+type failingMessageRepository struct {
+	repository.MessageRepository
+	err error
+}
+
 type primarySessionInfoRepository struct {
 	repository.SessionRepository
 	info map[string]*models.TaskSession
@@ -27,6 +32,10 @@ type taskEventTestRepository interface {
 }
 
 func (r failingTaskRepoRepository) ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error) {
+	return nil, r.err
+}
+
+func (r failingMessageRepository) GetPendingActionsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error) {
 	return nil, r.err
 }
 
@@ -218,6 +227,33 @@ func TestAddTaskSessionEventFields_EmitsNullPrimarySessionStateWhenEmpty(t *test
 	}
 	if value, ok := data["primary_session_state"]; !ok || value != nil {
 		t.Fatalf("primary_session_state = %#v, want explicit nil", value)
+	}
+}
+
+func TestAddTaskSessionEventFields_OmitsPendingActionOnLookupErrorForWaitingSession(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	svc.sessions = primarySessionInfoRepository{
+		info: map[string]*models.TaskSession{
+			"task-1": {
+				ID:     "session-1",
+				TaskID: "task-1",
+				State:  models.TaskSessionStateWaitingForInput,
+			},
+		},
+	}
+	svc.messages = failingMessageRepository{err: errors.New("pending lookup failed")}
+	data := map[string]interface{}{}
+
+	svc.addTaskSessionEventFields(context.Background(), "task-1", data)
+
+	if value := data["primary_session_id"]; value != "session-1" {
+		t.Fatalf("primary_session_id = %#v, want session-1", value)
+	}
+	if value := data["primary_session_state"]; value != string(models.TaskSessionStateWaitingForInput) {
+		t.Fatalf("primary_session_state = %#v, want WAITING_FOR_INPUT", value)
+	}
+	if value, ok := data["primary_session_pending_action"]; ok {
+		t.Fatalf("primary_session_pending_action should be omitted on lookup error, got %#v", value)
 	}
 }
 

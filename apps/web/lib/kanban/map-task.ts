@@ -56,6 +56,13 @@ function pickId(source: TaskLike): string {
   return (source.id ?? source.task_id ?? "") as string;
 }
 
+export function pickPendingAction(action: unknown): TaskPendingAction | undefined {
+  if (action === "clarification" || action === "permission") {
+    return action;
+  }
+  return undefined;
+}
+
 type KanbanTaskRepository = NonNullable<KanbanTask["repositories"]>[number];
 
 function pickRepositories(source: TaskLike): KanbanTaskRepository[] | undefined {
@@ -87,7 +94,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     repositories: pickRepositories(source),
     primarySessionId: source.primary_session_id ?? undefined,
     primarySessionState: source.primary_session_state ?? undefined,
-    primarySessionPendingAction: source.primary_session_pending_action ?? undefined,
+    primarySessionPendingAction: pickPendingAction(source.primary_session_pending_action),
     sessionCount: source.session_count ?? undefined,
     reviewStatus: source.review_status ?? undefined,
     primaryExecutorId: source.primary_executor_id ?? undefined,

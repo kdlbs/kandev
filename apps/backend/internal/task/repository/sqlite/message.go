@@ -421,6 +421,8 @@ func (r *Repository) GetPendingActionsBySessionIDs(ctx context.Context, sessionI
 func pendingActionsBySessionQuery(driverName string, placeholders []string) string {
 	placeholderList := strings.Join(placeholders, ",")
 	statusExpr := dialect.JSONExtract(driverName, "m.metadata", "status")
+	latestOrderExpr := pendingActionMessageOrder(driverName, "")
+	permissionOrderExpr := pendingActionMessageOrder(driverName, "m")
 	return fmt.Sprintf(`
 		WITH latest_message AS (
 			SELECT task_session_id, turn_id
@@ -429,7 +431,7 @@ func pendingActionsBySessionQuery(driverName string, placeholders []string) stri
 				       turn_id,
 				       ROW_NUMBER() OVER (
 				         PARTITION BY task_session_id
-				         ORDER BY created_at DESC, id DESC
+				         ORDER BY created_at DESC, %s DESC
 				       ) AS rn
 				FROM task_session_messages
 				WHERE task_session_id IN (%s)
@@ -451,7 +453,7 @@ func pendingActionsBySessionQuery(driverName string, placeholders []string) stri
 			       COALESCE(%s, '') AS status,
 			       ROW_NUMBER() OVER (
 			         PARTITION BY m.task_session_id
-			         ORDER BY m.created_at DESC, m.id DESC
+			         ORDER BY m.created_at DESC, %s DESC
 			       ) AS rn
 			FROM task_session_messages m
 			JOIN latest_message latest
@@ -465,7 +467,18 @@ func pendingActionsBySessionQuery(driverName string, placeholders []string) stri
 		SELECT task_session_id, 'permission' AS action
 		FROM latest_permissions
 		WHERE rn = 1 AND status IN ('', 'pending')
-	`, placeholderList, placeholderList, statusExpr, statusExpr)
+	`, latestOrderExpr, placeholderList, placeholderList, statusExpr, statusExpr, permissionOrderExpr)
+}
+
+func pendingActionMessageOrder(driverName string, qualifier string) string {
+	column := "id"
+	if driverName == dialect.SQLite3 {
+		column = "rowid"
+	}
+	if qualifier == "" {
+		return column
+	}
+	return qualifier + "." + column
 }
 
 // FindMessageByPendingIDAndQuestion finds the message for a specific (pending_id,

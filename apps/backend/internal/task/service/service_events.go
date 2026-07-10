@@ -157,13 +157,21 @@ func (s *Service) addTaskSessionEventFields(ctx context.Context, taskID string, 
 	} else {
 		data["primary_session_state"] = nil
 	}
-	data["primary_session_pending_action"] = nil
 	if sessionInfo.State == models.TaskSessionStateWaitingForInput {
-		if actions, err := s.GetPendingActionsForSessions(ctx, []string{sessionInfo.ID}); err == nil {
+		actions, err := s.GetPendingActionsForSessions(ctx, []string{sessionInfo.ID})
+		if err != nil {
+			s.logger.Warn("failed to load pending action for task event",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionInfo.ID),
+				zap.Error(err))
+		} else {
+			data["primary_session_pending_action"] = nil
 			if action, ok := actions[sessionInfo.ID]; ok {
 				data["primary_session_pending_action"] = string(action)
 			}
 		}
+	} else {
+		data["primary_session_pending_action"] = nil
 	}
 	if sessionInfo.ExecutorID != "" {
 		data["primary_executor_id"] = sessionInfo.ExecutorID

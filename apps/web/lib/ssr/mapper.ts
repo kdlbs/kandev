@@ -1,6 +1,7 @@
 import type { AppState, KanbanState } from "@/lib/state/store";
 import { primaryTaskRepository } from "@/lib/types/http";
 import type { WorkflowSnapshot, Message, Task } from "@/lib/types/http";
+import { pickPendingAction } from "@/lib/kanban/map-task";
 import {
   isPRReviewFromMetadata,
   isIssueWatchFromMetadata,
@@ -45,7 +46,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         })),
         primarySessionId: task.primary_session_id ?? undefined,
         primarySessionState: task.primary_session_state ?? undefined,
-        primarySessionPendingAction: task.primary_session_pending_action ?? undefined,
+        primarySessionPendingAction: pickPendingAction(task.primary_session_pending_action),
         sessionCount: task.session_count ?? undefined,
         reviewStatus: task.review_status ?? undefined,
         parentTaskId: task.parent_id ?? undefined,
