@@ -157,22 +157,7 @@ func (s *Service) addTaskSessionEventFields(ctx context.Context, taskID string, 
 	} else {
 		data["primary_session_state"] = nil
 	}
-	if sessionInfo.State == models.TaskSessionStateWaitingForInput {
-		actions, err := s.GetPendingActionsForSessions(ctx, []string{sessionInfo.ID})
-		if err != nil {
-			s.logger.Warn("failed to load pending action for task event",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionInfo.ID),
-				zap.Error(err))
-		} else {
-			data["primary_session_pending_action"] = nil
-			if action, ok := actions[sessionInfo.ID]; ok {
-				data["primary_session_pending_action"] = string(action)
-			}
-		}
-	} else {
-		data["primary_session_pending_action"] = nil
-	}
+	s.addPrimarySessionPendingActionEventField(ctx, taskID, sessionInfo, data)
 	if sessionInfo.ExecutorID != "" {
 		data["primary_executor_id"] = sessionInfo.ExecutorID
 	}
@@ -189,6 +174,27 @@ func (s *Service) addTaskSessionEventFields(ctx context.Context, taskID string, 
 	if execType != "" {
 		data["is_remote_executor"] = models.IsRemoteExecutorType(models.ExecutorType(execType))
 	}
+}
+
+func (s *Service) addPrimarySessionPendingActionEventField(ctx context.Context, taskID string, sessionInfo *models.TaskSession, data map[string]interface{}) {
+	if sessionInfo.State != models.TaskSessionStateWaitingForInput {
+		data["primary_session_pending_action"] = nil
+		return
+	}
+	actions, err := s.GetPendingActionsForSessions(ctx, []string{sessionInfo.ID})
+	if err != nil {
+		s.logger.Warn("failed to load pending action for task event",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionInfo.ID),
+			zap.Error(err))
+		return
+	}
+	action, ok := actions[sessionInfo.ID]
+	if !ok {
+		data["primary_session_pending_action"] = nil
+		return
+	}
+	data["primary_session_pending_action"] = string(action)
 }
 
 // taskRepositoriesForEvent returns the task's full repository list, ordered by
