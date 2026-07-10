@@ -195,8 +195,10 @@ func (s *Service) CreateInstance(ctx context.Context, workspaceID string, req *C
 		if err := s.secrets.Set(ctx, secretKeyForInstance(cfg.ID), "Sentry auth token", req.Secret); err != nil {
 			secretErr := fmt.Errorf("store sentry secret: %w", err)
 			if rollbackErr := s.store.DeleteInstance(context.WithoutCancel(ctx), cfg.ID); rollbackErr != nil {
+				s.invalidateClient(cfg.ID)
 				return nil, errors.Join(secretErr, fmt.Errorf("rollback created sentry instance: %w", rollbackErr))
 			}
+			s.invalidateClient(cfg.ID)
 			return nil, secretErr
 		}
 	}
@@ -234,6 +236,7 @@ func (s *Service) UpdateInstance(ctx context.Context, workspaceID, id string, re
 				s.invalidateClient(id)
 				return nil, errors.Join(secretErr, fmt.Errorf("rollback sentry instance update: %w", rollbackErr))
 			}
+			s.invalidateClient(id)
 			return nil, secretErr
 		}
 	}

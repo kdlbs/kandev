@@ -47,16 +47,17 @@ func (c *MockController) requireInstanceID(ctx *gin.Context) (string, bool) {
 	return instanceID, true
 }
 
+// setAuthResult seeds an instance's TestAuth response. instanceId is
+// optional (unlike the other seed routes): TestConnectionCandidate builds a
+// client for a not-yet-persisted config using the empty-string instance ID,
+// so pre-save "Test connection" specs must be able to seed that dataset too.
 func (c *MockController) setAuthResult(ctx *gin.Context) {
 	var req TestConnectionResult
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		writeBadPayload(ctx)
 		return
 	}
-	instanceID, ok := c.requireInstanceID(ctx)
-	if !ok {
-		return
-	}
+	instanceID := strings.TrimSpace(ctx.Query("instanceId"))
 	r := req
 	c.mock.SetAuthResult(instanceID, &r)
 	ctx.JSON(http.StatusOK, gin.H{"set": true})

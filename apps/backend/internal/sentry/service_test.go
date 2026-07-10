@@ -31,6 +31,7 @@ type fakeSecretStore struct {
 	setErr           error
 	setErrAfter      int
 	setErrAfterWrite bool
+	setHook          func()
 	revealErr        error
 	revealErrForID   string
 	deleteMissingErr error
@@ -53,7 +54,13 @@ func (f *fakeSecretStore) Reveal(_ context.Context, id string) (string, error) {
 	return v, nil
 }
 
+// Set runs setHook (if any) before acquiring its lock, letting a test drive a
+// synchronous client build against the pre-failure row state — simulating a
+// concurrent clientForInstance call racing the write this Set is about to fail.
 func (f *fakeSecretStore) Set(_ context.Context, id, _, value string) error {
+	if f.setHook != nil {
+		f.setHook()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.setErr != nil {
@@ -366,14 +373,25 @@ func TestService_UpdateInstance_EmptySecretKeepsExisting(t *testing.T) {
 	}
 }
 
+// TestService_UpdateInstance_SecretSetFailureRestoresMetadataAndClient pins
+// the metadata/secret rollback and the defensive cache invalidation that
+// backs it: a client cached before the update is dropped once the update
+// fails, and the next access rebuilds against the restored (not the
+// attempted) configuration — closing the narrower race pinned by
+// TestService_UpdateInstance_SecretSetFailureInvalidatesRacedClient below,
+// where a client built during the failed window must not survive either.
 func TestService_UpdateInstance_SecretSetFailureRestoresMetadataAndClient(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
 	created := f.seedInstance(t, "ws-1", "Original", "old-token")
 
-	var builds atomic.Int32
-	f.svc.clientFn = func(_ *SentryConfig, _ string) Client {
-		builds.Add(1)
+	type build struct {
+		url    string
+		secret string
+	}
+	var builds []build
+	f.svc.clientFn = func(cfg *SentryConfig, secret string) Client {
+		builds = append(builds, build{url: cfg.URL, secret: secret})
 		return &fakeClient{}
 	}
 	cached, err := f.svc.clientForInstance(ctx, created.ID)
@@ -404,11 +422,63 @@ func TestService_UpdateInstance_SecretSetFailureRestoresMetadataAndClient(t *tes
 	if err != nil {
 		t.Fatalf("read client after failed update: %v", err)
 	}
-	if afterFailure != cached {
-		t.Error("failed update replaced the cached client")
+	if afterFailure == cached {
+		t.Error("failed update did not invalidate the pre-existing cached client")
 	}
-	if got := builds.Load(); got != 1 {
-		t.Errorf("failed update rebuilt a client: builds=%d", got)
+	if len(builds) != 2 || builds[1].url != DefaultSentryURL || builds[1].secret != "old-token" {
+		t.Fatalf("expected the post-failure rebuild against the restored config, got %+v", builds)
+	}
+}
+
+// TestService_UpdateInstance_SecretSetFailureInvalidatesRacedClient pins a
+// narrower race than the previous test: a client built and cached DURING the
+// failed update (after the row is temporarily persisted with the new URL but
+// before the failing secret write) must not survive the rollback. Without an
+// invalidation on the successful-rollback path, that stale new-URL+old-secret
+// client would keep serving forever, since clientForInstance's cache check
+// never re-validates against the store.
+func TestService_UpdateInstance_SecretSetFailureInvalidatesRacedClient(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	created := f.seedInstance(t, "ws-1", "Original", "old-token")
+
+	type build struct {
+		url    string
+		secret string
+	}
+	var builds []build
+	f.svc.clientFn = func(cfg *SentryConfig, secret string) Client {
+		builds = append(builds, build{url: cfg.URL, secret: secret})
+		return &fakeClient{}
+	}
+	f.secrets.setErr = errors.New("secret store unavailable")
+	f.secrets.setHook = func() {
+		// Runs after UpdateInstance has already persisted the new URL but
+		// before the secret write it's about to fail — simulating a request
+		// racing in during that exact window.
+		if _, err := f.svc.clientForInstance(ctx, created.ID); err != nil {
+			t.Fatalf("raced client build: %v", err)
+		}
+	}
+
+	if _, err := f.svc.UpdateInstance(ctx, "ws-1", created.ID, &UpdateConfigRequest{
+		Name: "Replacement", URL: "https://replacement.example.com", Secret: "new-token",
+	}); !errors.Is(err, f.secrets.setErr) {
+		t.Fatalf("expected injected secret error, got %v", err)
+	}
+	if len(builds) != 1 || builds[0].url != "https://replacement.example.com" || builds[0].secret != "old-token" {
+		t.Fatalf("expected the race to build against the temporary row, got %+v", builds)
+	}
+
+	rebuilt, err := f.svc.clientForInstance(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("read client after rollback: %v", err)
+	}
+	if len(builds) != 2 || builds[1].url != DefaultSentryURL || builds[1].secret != "old-token" {
+		t.Fatalf("expected a fresh build against the rolled-back row, got %+v", builds)
+	}
+	if rebuilt == nil {
+		t.Error("expected a rebuilt client, got nil")
 	}
 }
 
