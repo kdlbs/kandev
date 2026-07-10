@@ -163,42 +163,44 @@ export function BuiltinActionRow({
 
   return (
     <div
-      className="flex items-center gap-4 py-2 px-2 rounded hover:bg-muted/50"
+      className="flex flex-col gap-2 py-2 px-2 rounded hover:bg-muted/50 md:flex-row md:items-center md:gap-4"
       data-testid={`utility-action-row-${agent.id}`}
     >
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 md:flex-1">
         <div className="text-sm font-medium truncate">{agent.name}</div>
         <p className="text-xs text-muted-foreground truncate">{agent.description}</p>
       </div>
-      <Select value={currentValue} onValueChange={(v) => onModelChange(agent, v)}>
-        <SelectTrigger className="w-[240px] shrink-0 cursor-pointer">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectGroup>
-            <SelectItem value={USE_DEFAULT}>{defaultLabel}</SelectItem>
-          </SelectGroup>
-          {groupModelsByAgent(allModels).map((group) => (
-            <SelectGroup key={group.agentName}>
-              <SelectSeparator />
-              <SelectLabel>{group.agentName}</SelectLabel>
-              {group.models.map((m) => (
-                <SelectItem key={m.value} value={m.value}>
-                  {m.modelName}
-                </SelectItem>
-              ))}
+      <div className="flex items-center gap-2">
+        <Select value={currentValue} onValueChange={(v) => onModelChange(agent, v)}>
+          <SelectTrigger className="min-w-0 flex-1 cursor-pointer md:w-[240px] md:flex-none">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectItem value={USE_DEFAULT}>{defaultLabel}</SelectItem>
             </SelectGroup>
-          ))}
-        </SelectContent>
-      </Select>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => onEdit(agent)}
-        className="h-7 w-7 p-0 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"
-      >
-        <IconPencil className="h-3.5 w-3.5" />
-      </Button>
+            {groupModelsByAgent(allModels).map((group) => (
+              <SelectGroup key={group.agentName}>
+                <SelectSeparator />
+                <SelectLabel>{group.agentName}</SelectLabel>
+                {group.models.map((m) => (
+                  <SelectItem key={m.value} value={m.value}>
+                    {m.modelName}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onEdit(agent)}
+          className="h-7 w-7 p-0 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"
+        >
+          <IconPencil className="h-3.5 w-3.5" />
+        </Button>
+      </div>
     </div>
   );
 }

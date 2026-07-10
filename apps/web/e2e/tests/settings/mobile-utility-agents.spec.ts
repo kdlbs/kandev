@@ -84,10 +84,19 @@ test.describe("Mobile utility agents action rows", () => {
     const isOverflowing = await card.evaluate((el) => el.scrollWidth > el.clientWidth + 1);
     expect(isOverflowing).toBe(false);
 
-    // The model selector and edit button must stay clickable, not clipped
-    // outside the card.
+    // The model selector must also stay a comfortably usable width — not
+    // just "not clipped" but not squeezed illegibly thin either. The row
+    // stacks below `md`, so the select gets the card's full content width
+    // to itself (minus the edit button), not a slice shared with the name
+    // column.
     const row = testPage.getByTestId("utility-action-row-builtin-commit-message");
     const select = row.getByRole("combobox");
+    const selectBox = await select.boundingBox();
+    expect(selectBox).not.toBeNull();
+    expect(selectBox!.width).toBeGreaterThanOrEqual(150);
+
+    // The model selector and edit button must stay clickable, not clipped
+    // outside the card.
     await select.click();
     await testPage.getByRole("option", { name: "Claude Fast", exact: true }).click();
     await expect(select).toContainText("Claude Fast");
