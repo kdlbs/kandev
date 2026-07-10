@@ -1,10 +1,9 @@
 import { cleanup, render } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { useSentryIssueWatches } from "@/hooks/domains/sentry/use-sentry-issue-watches";
 import { SentryIssueWatchersSection } from "./sentry-issue-watchers-section";
 
-// Mutable active-workspace id the store mock reads (hoisted so the vi.mock
-// factory can reference it).
+// The global active workspace intentionally differs from the routed workspace.
 const h = vi.hoisted(() => ({ activeId: "ws-active" as string | null }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -49,25 +48,22 @@ vi.mock("@/components/watches/reset-watch-dialog", () => ({
   }),
 }));
 
-beforeEach(() => {
-  h.activeId = "ws-active";
-});
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
 
 describe("SentryIssueWatchersSection scoping", () => {
-  it("fetches watches only for the active workspace (never all workspaces)", () => {
-    render(<SentryIssueWatchersSection />);
+  it("fetches watches only for its supplied workspace (never all workspaces)", () => {
+    render(<SentryIssueWatchersSection workspaceId="ws-active" />);
     expect(vi.mocked(useSentryIssueWatches)).toHaveBeenCalledWith("ws-active");
     // never the unscoped `undefined` that would return foreign-workspace watches
     expect(vi.mocked(useSentryIssueWatches)).not.toHaveBeenCalledWith(undefined);
   });
 
-  it("does not fetch when there is no active workspace", () => {
-    h.activeId = null;
-    render(<SentryIssueWatchersSection />);
-    expect(vi.mocked(useSentryIssueWatches)).toHaveBeenCalledWith(null);
+  it("fetches watches for the routed workspace before the active workspace", () => {
+    render(<SentryIssueWatchersSection workspaceId="ws-route" />);
+    expect(vi.mocked(useSentryIssueWatches)).toHaveBeenCalledWith("ws-route");
+    expect(vi.mocked(useSentryIssueWatches)).not.toHaveBeenCalledWith("ws-active");
   });
 });

@@ -237,10 +237,13 @@ func (s *Service) stampWatchLastPolled(watchID string) {
 	}
 }
 
-// resolveWatchInstanceID picks the Sentry instance a watch should poll. A bound
-// watch uses its stored instance. An unbound (migrated legacy) watch resolves
-// to the workspace's sole healthy instance; zero or several healthy instances
-// cannot be run unambiguously.
+// resolveWatchInstanceID picks the Sentry instance a watch should poll. A
+// bound watch uses its stored instance. An unbound (migrated legacy) watch
+// resolves to the workspace's sole instance per ADR-0030, regardless of that
+// instance's health — matching the pre-existing single-instance contract.
+// When the workspace has several instances, the choice is otherwise
+// ambiguous, so it narrows to the healthy subset: a single healthy instance
+// wins, and zero or several healthy instances still cannot run unambiguously.
 func (s *Service) resolveWatchInstanceID(ctx context.Context, w *IssueWatch) (string, error) {
 	if w.SentryInstanceID != "" {
 		return w.SentryInstanceID, nil
@@ -249,6 +252,20 @@ func (s *Service) resolveWatchInstanceID(ctx context.Context, w *IssueWatch) (st
 	if err != nil {
 		return "", err
 	}
+	switch len(instances) {
+	case 0:
+		return "", fmt.Errorf("%w: watch is unbound and its workspace has no Sentry instance", ErrNotConfigured)
+	case 1:
+		return instances[0].ID, nil
+	default:
+		return resolveAmbiguousWatchInstance(instances)
+	}
+}
+
+// resolveAmbiguousWatchInstance breaks a multi-instance tie by preferring the
+// workspace's sole healthy instance; zero or several healthy instances remain
+// ambiguous and require an explicit binding.
+func resolveAmbiguousWatchInstance(instances []*SentryConfig) (string, error) {
 	healthyInstances := make([]*SentryConfig, 0, len(instances))
 	for _, instance := range instances {
 		if instance.LastOk {

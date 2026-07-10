@@ -363,8 +363,27 @@ func TestService_CheckIssueWatch_ResolvesSoleInstance(t *testing.T) {
 	}
 }
 
-func TestService_ResolveWatchInstanceID_RequiresExactlyOneHealthyInstance(t *testing.T) {
-	t.Run("selects the sole healthy instance", func(t *testing.T) {
+// TestService_ResolveWatchInstanceID_SoleInstanceIgnoresHealth pins the
+// ADR-0030 single-instance contract: an unbound watch resolves to its
+// workspace's only instance even when that instance has never been health
+// probed (LastOk still false) — matching the pre-existing behavior every
+// poller test's saveConfigForWorkspace helper relies on.
+func TestService_ResolveWatchInstanceID_SoleInstanceIgnoresHealth(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	inst := f.seedInstance(t, "ws-1", "Primary", "tok")
+
+	instanceID, err := f.svc.resolveWatchInstanceID(ctx, newTestIssueWatch("ws-1"))
+	if err != nil {
+		t.Fatalf("resolve watch instance: %v", err)
+	}
+	if instanceID != inst.ID {
+		t.Errorf("resolved instance = %q, want sole instance %q", instanceID, inst.ID)
+	}
+}
+
+func TestService_ResolveWatchInstanceID_AmbiguousMultiInstancePrefersHealthy(t *testing.T) {
+	t.Run("selects the sole healthy instance among several", func(t *testing.T) {
 		f := newSvcFixture(t)
 		ctx := context.Background()
 		f.seedInstance(t, "ws-1", "Unhealthy", "tok")
@@ -382,13 +401,14 @@ func TestService_ResolveWatchInstanceID_RequiresExactlyOneHealthyInstance(t *tes
 		}
 	})
 
-	t.Run("rejects when no instance is healthy", func(t *testing.T) {
+	t.Run("rejects when several instances exist and none is healthy", func(t *testing.T) {
 		f := newSvcFixture(t)
 		ctx := context.Background()
-		f.seedInstance(t, "ws-1", "Unhealthy", "tok")
+		f.seedInstance(t, "ws-1", "A", "tok")
+		f.seedInstance(t, "ws-1", "B", "tok")
 
 		if _, err := f.svc.resolveWatchInstanceID(ctx, newTestIssueWatch("ws-1")); !errors.Is(err, ErrNotConfigured) {
-			t.Errorf("expected ErrNotConfigured with no healthy instance, got %v", err)
+			t.Errorf("expected ErrNotConfigured with no healthy instance among several, got %v", err)
 		}
 	})
 

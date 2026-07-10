@@ -7,17 +7,15 @@ import { Card, CardContent } from "@kandev/ui/card";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { useToast } from "@/components/toast-provider";
 import { useSentryIssueWatches } from "@/hooks/domains/sentry/use-sentry-issue-watches";
-import { useAppStore } from "@/components/state-provider";
 import { useSentryInstances } from "@/hooks/domains/sentry/use-sentry-availability";
 import { ResetWatchDialog, useWatchResetController } from "@/components/watches/reset-watch-dialog";
 import { SentryIssueWatchTable } from "./sentry-issue-watch-table";
 import { SentryIssueWatchDialog } from "./sentry-issue-watch-dialog";
 import type { SentryIssueWatch } from "@/lib/types/sentry";
 
-// SentryIssueWatchersSection lists the Sentry watches for the ACTIVE workspace
-// (the integration is workspace-scoped, so watches from other workspaces are
-// never shown). Creating a watch is locked to that workspace and requires
-// picking one of its Sentry instances.
+// SentryIssueWatchersSection lists watches for the workspace resolved by its
+// parent integration page. Creating a watch is locked to that workspace and
+// requires picking one of its Sentry instances.
 type RawActions = {
   create: ReturnType<typeof useSentryIssueWatches>["create"];
   update: ReturnType<typeof useSentryIssueWatches>["update"];
@@ -124,11 +122,10 @@ function useToastedActions({ create, update, remove, trigger, reset }: RawAction
   };
 }
 
-export function SentryIssueWatchersSection() {
-  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+export function SentryIssueWatchersSection({ workspaceId }: { workspaceId: string }) {
   const { items, loading, create, update, remove, trigger, previewReset, reset } =
-    useSentryIssueWatches(activeWorkspaceId ?? null);
-  const { instances } = useSentryInstances(activeWorkspaceId);
+    useSentryIssueWatches(workspaceId);
+  const { instances } = useSentryInstances(workspaceId);
   const instanceName = useCallback(
     (id: string) => {
       if (!id) return "—";

@@ -5,8 +5,13 @@ import { listSentryInstances } from "@/lib/api/domains/sentry-api";
 import type { SentryConfig } from "@/lib/types/sentry";
 
 const mocks = vi.hoisted(() => ({
+  activeWorkspaceId: "ws-active",
   setEnabled: vi.fn(),
   toast: vi.fn(),
+  workspaces: [
+    { id: "ws-active", name: "Active" },
+    { id: "ws-route", name: "Route" },
+  ],
 }));
 
 vi.mock("@/components/toast-provider", () => ({
@@ -27,6 +32,26 @@ vi.mock("@kandev/ui/switch", () => ({
   ),
 }));
 
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (
+    selector: (state: {
+      workspaces: { activeId: string; items: { id: string; name: string }[] };
+    }) => unknown,
+  ) =>
+    selector({
+      workspaces: {
+        activeId: mocks.activeWorkspaceId,
+        items: mocks.workspaces,
+      },
+    }),
+}));
+
+vi.mock("./sentry-issue-watchers-section", () => ({
+  SentryIssueWatchersSection: ({ workspaceId }: { workspaceId: string }) => (
+    <div data-testid="sentry-watchers-workspace">{workspaceId}</div>
+  ),
+}));
+
 vi.mock("@/lib/api/domains/sentry-api", () => ({
   createSentryInstance: vi.fn(),
   deleteSentryInstance: vi.fn(),
@@ -39,7 +64,7 @@ vi.mock("@/lib/api/domains/sentry-api", () => ({
   SENTRY_ERROR_CODES: { nameTaken: "SENTRY_INSTANCE_NAME_TAKEN" },
 }));
 
-import { SentryConnectionSection } from "./sentry-settings";
+import { SentryConnectionSection, SentryIntegrationPage } from "./sentry-settings";
 
 const instance: SentryConfig = {
   id: "instance-1",
@@ -55,6 +80,7 @@ const instance: SentryConfig = {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  mocks.activeWorkspaceId = "ws-active";
 });
 
 afterEach(() => {
@@ -106,5 +132,31 @@ describe("SentryConnectionSection", () => {
     });
 
     expect(mocks.toast).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("SentryIntegrationPage workspace scope", () => {
+  it("passes the route workspace to watchers before the global active workspace", () => {
+    vi.mocked(listSentryInstances).mockResolvedValue([]);
+
+    render(
+      <TooltipProvider>
+        <SentryIntegrationPage workspaceId="ws-route" />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByTestId("sentry-watchers-workspace").textContent).toBe("ws-route");
+  });
+
+  it("uses the global active workspace when no route workspace is supplied", () => {
+    vi.mocked(listSentryInstances).mockResolvedValue([]);
+
+    render(
+      <TooltipProvider>
+        <SentryIntegrationPage />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByTestId("sentry-watchers-workspace").textContent).toBe("ws-active");
   });
 });
