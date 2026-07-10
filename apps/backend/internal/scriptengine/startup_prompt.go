@@ -81,7 +81,9 @@ func ResolveStartupPrompt(prompt, taskTitle string, metadata map[string]interfac
 		return ""
 	}
 	resolver := NewResolver().WithProvider(TicketContextProvider(taskTitle, metadata))
-	lines := strings.Split(prompt, "\n")
+	// Normalize CRLF to LF so prompts saved by Windows editors don't leave a
+	// stray \r in each resolved line.
+	lines := strings.Split(strings.ReplaceAll(prompt, "\r\n", "\n"), "\n")
 	kept := make([]string, 0, len(lines))
 	for _, line := range lines {
 		resolved := resolver.Resolve(line)

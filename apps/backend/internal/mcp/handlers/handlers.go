@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/scriptengine"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -409,10 +410,9 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	// Default start_agent to true for backward compatibility
 	startAgent := req.StartAgent == nil || *req.StartAgent
 
-	// Only require description for subtasks if we're starting an agent
-	if req.ParentID != "" && req.Description == "" && startAgent {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "description is required for subtasks: it is the sub-agent's initial prompt and the only context it receives to start working", nil)
-	}
+	// Subtask-description guard is applied AFTER startup-prompt resolution
+	// below so a repository's startup_prompt can satisfy the sub-agent's
+	// initial-prompt requirement without the caller re-typing a description.
 
 	// Resolve repositories and inherit workspace/workflow from parent if needed.
 	resolved, err := h.resolveTaskRepositories(ctx, req.ParentID, req.SourceTaskID, req.Repositories)
@@ -482,7 +482,14 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	// unresolved placeholder lines are dropped by ResolveStartupPrompt.
 	description := req.Description
 	if description == "" {
-		description = h.resolveStartupPromptForMCP(ctx, req.ParentID, req.Title, repos)
+		description = h.resolveStartupPromptForMCP(ctx, req.WorkspaceID, req.ParentID, req.Title, repos)
+	}
+
+	// Subtasks with a live agent need an initial prompt. Check AFTER startup
+	// prompt resolution so a repository's startup_prompt can satisfy this
+	// requirement without the caller re-typing a description.
+	if req.ParentID != "" && description == "" && startAgent {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "description is required for subtasks: it is the sub-agent's initial prompt and the only context it receives to start working", nil)
 	}
 
 	task, err := h.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
@@ -664,27 +671,21 @@ var ticketMetadataKeys = []string{
 
 // resolveStartupPromptForMCP looks up the first-listed repository's
 // startup_prompt and resolves it using the parent task's ticket metadata (when
-// a parent is present) and the new task's title. Returns empty string when no
-// repo is resolvable or when the repo has no startup_prompt.
-func (h *Handlers) resolveStartupPromptForMCP(ctx context.Context, parentID, taskTitle string, repos []service.TaskRepositoryInput) string {
-	repoID := firstRepoID(repos)
-	if repoID == "" || h.taskSvc == nil {
+// a parent is present) and the new task's title. Callers who identify their
+// repo by local_path or github_url instead of repository_id are handled via
+// Service.FindRepositoryForInput so the same repo lookup works before
+// CreateTask has had a chance to resolve those alternate forms. Returns empty
+// string when no repo is resolvable or when the repo has no startup_prompt.
+func (h *Handlers) resolveStartupPromptForMCP(ctx context.Context, workspaceID, parentID, taskTitle string, repos []service.TaskRepositoryInput) string {
+	if h.taskSvc == nil || len(repos) == 0 {
+		return ""
+	}
+	repo, err := h.taskSvc.FindRepositoryForInput(ctx, workspaceID, repos[0])
+	if err != nil || repo == nil || repo.StartupPrompt == "" {
 		return ""
 	}
 	metadata := h.inheritedTicketMetadata(ctx, parentID)
-	return h.taskSvc.ResolveRepositoryStartupPrompt(ctx, repoID, taskTitle, metadata)
-}
-
-// firstRepoID returns the first non-empty RepositoryID in the resolved repo
-// list. Empty repos (e.g. local_path / github_url that haven't been resolved
-// yet) are skipped; the resolver treats an empty ID as "no prompt to apply".
-func firstRepoID(repos []service.TaskRepositoryInput) string {
-	for _, r := range repos {
-		if r.RepositoryID != "" {
-			return r.RepositoryID
-		}
-	}
-	return ""
+	return scriptengine.ResolveStartupPrompt(repo.StartupPrompt, taskTitle, metadata)
 }
 
 // inheritedTicketMetadata returns the parent task's ticket-related metadata

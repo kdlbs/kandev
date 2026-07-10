@@ -24,7 +24,7 @@ export function useRepositoryStartupPromptPrefillEffect(
   repositories: Repository[],
   taskName: string,
 ): void {
-  const { descriptionInputRef, hasDescription, setHasDescription, repositories: rows } = fs;
+  const { descriptionInputRef, setHasDescription, repositories: rows } = fs;
   const lastAppliedRef = useRef<string>("");
 
   const firstRepoId = rows[0]?.repositoryId ?? "";
@@ -55,6 +55,5 @@ export function useRepositoryStartupPromptPrefillEffect(
     taskName,
     descriptionInputRef,
     setHasDescription,
-    hasDescription,
   ]);
 }

@@ -164,4 +164,22 @@ func TestResolveStartupPrompt(t *testing.T) {
 			t.Errorf("got %q, want %q", got, want)
 		}
 	})
+
+	t.Run("CRLF line endings normalize to LF", func(t *testing.T) {
+		prompt := "Read {{TICKET_URL}}.\r\nStart with {{TASK_TITLE}}."
+		got := ResolveStartupPrompt(prompt, "Refactor", nil)
+		want := "Start with Refactor."
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("CRLF-only prompt does not leave stray CR in output", func(t *testing.T) {
+		prompt := "Start with {{TASK_TITLE}}.\r\nSecond line."
+		got := ResolveStartupPrompt(prompt, "X", nil)
+		want := "Start with X.\nSecond line."
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
 }

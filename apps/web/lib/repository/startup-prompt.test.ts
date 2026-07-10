@@ -40,4 +40,18 @@ describe("resolveStartupPromptForManualDialog", () => {
   it("preserves plain lines untouched", () => {
     expect(resolveStartupPromptForManualDialog("Just start work.", "X")).toBe("Just start work.");
   });
+
+  it("normalizes CRLF line endings to LF", () => {
+    const prompt = "Read {{TICKET_URL}}.\r\nStart with {{TASK_TITLE}}.";
+    expect(resolveStartupPromptForManualDialog(prompt, "Refactor")).toBe(
+      "Start with Refactor.",
+    );
+  });
+
+  it("does not leave stray CR characters in resolved output", () => {
+    const prompt = "Start with {{TASK_TITLE}}.\r\nSecond line.";
+    expect(resolveStartupPromptForManualDialog(prompt, "X")).toBe(
+      "Start with X.\nSecond line.",
+    );
+  });
 });

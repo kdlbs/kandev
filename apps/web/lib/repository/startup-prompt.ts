@@ -15,7 +15,9 @@ const UNRESOLVED_PLACEHOLDER = /\{\{[^}]*\}\}/;
  */
 export function resolveStartupPromptForManualDialog(prompt: string, taskTitle: string): string {
   if (!prompt) return "";
-  const lines = prompt.split("\n");
+  // Normalize CRLF to LF so prompts saved by Windows editors don't leave a
+  // stray \r in each resolved line.
+  const lines = prompt.replace(/\r\n/g, "\n").split("\n");
   const kept: string[] = [];
   for (const line of lines) {
     const resolved = line.replace(/\{\{TASK_TITLE\}\}/g, taskTitle);

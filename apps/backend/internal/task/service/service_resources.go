@@ -752,6 +752,35 @@ func (s *Service) ResolveRepositoryStartupPrompt(ctx context.Context, repository
 	return scriptengine.ResolveStartupPrompt(repo.StartupPrompt, taskTitle, metadata)
 }
 
+// FindRepositoryForInput returns the workspace repository that matches the
+// given input — resolved from repository_id, github_url, or local_path in that
+// order. Returns nil (with nil error) when no match exists; callers treat
+// that as "no repo to apply". Used by the MCP path so create_task_kandev
+// callers who identify their repo via URL or local path still get the
+// repository's startup_prompt applied.
+func (s *Service) FindRepositoryForInput(ctx context.Context, workspaceID string, input TaskRepositoryInput) (*models.Repository, error) {
+	if input.RepositoryID != "" {
+		return s.repoEntities.GetRepository(ctx, input.RepositoryID)
+	}
+	if input.GitHubURL != "" {
+		if owner, name, err := parseGitHubRepoURL(input.GitHubURL); err == nil && workspaceID != "" {
+			return s.repoEntities.GetRepositoryByProviderInfo(ctx, workspaceID, "github", owner, name)
+		}
+	}
+	if input.LocalPath != "" && workspaceID != "" {
+		repos, err := s.repoEntities.ListRepositories(ctx, workspaceID)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range repos {
+			if r.LocalPath == input.LocalPath {
+				return r, nil
+			}
+		}
+	}
+	return nil, nil
+}
+
 // CountActiveSessionsByRepository returns the number of agent sessions in an
 // active state (CREATED / STARTING / RUNNING / WAITING_FOR_INPUT) that are
 // attached to the given repository. Used by the UI to warn users before they
