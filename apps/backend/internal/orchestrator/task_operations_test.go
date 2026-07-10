@@ -24,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
 )
 
 // seedTaskAndSession inserts a workspace, workflow, task, and session with the given state.
@@ -887,8 +888,6 @@ func TestQueueAndInterruptForPeerMessage_WaitsForConcurrentHolderThenDelivers(t 
 		isAgentRunning:         true,
 		repoForExecutionLookup: repo,
 		promptDone:             make(chan struct{}),
-		promptCallTarget:       2,
-		promptCallsDone:        make(chan struct{}),
 		cancelAgentBlock:       make(chan struct{}),
 		cancelAgentEntered:     make(chan struct{}, 1),
 	}
@@ -960,15 +959,25 @@ func TestQueueAndInterruptForPeerMessage_WaitsForConcurrentHolderThenDelivers(t 
 		t.Fatalf("expected exactly 2 agent cancel calls (one per message), got %d", got)
 	}
 
-	// Join both executeQueuedMessage goroutines before returning — without
-	// this, they can still be running when the test's DB closes on
-	// teardown, racing and logging (benign but noisy) errors during later
-	// tests.
-	select {
-	case <-agentMgr.promptCallsDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for both queued messages to be dispatched")
-	}
+	// Join whatever executeQueuedMessage did for the second message before
+	// returning — without this, its goroutine can still be running when
+	// the test's DB closes on teardown, racing and logging a benign but
+	// noisy error. The second message's async prompt races the first
+	// message's own in-flight turn (the lock here only serializes the
+	// queue take, not the actual prompt delivery): it either lands as a
+	// second PromptAgent call, or the mock's session-busy rejection sends
+	// it through requeueMessage instead, in which case it settles back
+	// into the queue for a later drain — either is a correct outcome, the
+	// second call must simply not be lost.
+	require.Eventually(t, func() bool {
+		agentMgr.mu.Lock()
+		promptCount := len(agentMgr.capturedPrompts)
+		agentMgr.mu.Unlock()
+		if promptCount >= 2 {
+			return true
+		}
+		return svc.messageQueue.GetStatus(ctx, "session1").Count == 1
+	}, 2*time.Second, 10*time.Millisecond, "expected the second message to either be dispatched or settle back into the queue via requeueMessage")
 }
 
 // erroringTakeByIDRepository wraps a messagequeue.Repository and returns a

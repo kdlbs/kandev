@@ -192,13 +192,6 @@ type mockAgentManager struct {
 	// Optional: closed once on the first PromptAgent call so tests can wait
 	// deterministically without polling. Tests opt in by initializing the channel.
 	promptDone chan struct{}
-	// Optional: closed once len(capturedPrompts) reaches promptCallTarget, for
-	// tests that dispatch more than one prompt and need to join every one of
-	// them (not just the first, which promptDone alone can't express) before
-	// tearing down — avoids leaving executeQueuedMessage goroutines racing
-	// test teardown. Tests opt in by setting both fields.
-	promptCallTarget int
-	promptCallsDone  chan struct{}
 
 	// Passthrough stdin tracking
 	passthroughStdinCalls []passthroughStdinCall
@@ -309,17 +302,12 @@ func (m *mockAgentManager) PromptAgent(ctx context.Context, executionID string, 
 	m.capturedPrompts = append(m.capturedPrompts, prompt)
 	m.capturedPromptCalls = append(m.capturedPromptCalls, promptCall{ExecutionID: executionID, Prompt: prompt, DispatchOnly: dispatchOnly})
 	promptAgentFunc := m.promptAgentFunc
-	reachedTarget := m.promptCallTarget > 0 && len(m.capturedPrompts) == m.promptCallTarget
 	promptErr := m.promptErr
 	promptResult := m.promptResult
 	doneCh := m.promptDone
-	callsDoneCh := m.promptCallsDone
 	m.mu.Unlock()
 	if first && doneCh != nil {
 		close(doneCh)
-	}
-	if reachedTarget && callsDoneCh != nil {
-		close(callsDoneCh)
 	}
 	if promptAgentFunc != nil {
 		return promptAgentFunc(ctx, executionID, prompt, attachments, dispatchOnly)

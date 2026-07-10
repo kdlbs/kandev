@@ -2624,7 +2624,14 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 			zap.String("session_id", sessionID))
 		return nil
 	}
-	defer lock.Unlock()
+	unlocked := false
+	unlockGuard := func() {
+		if !unlocked {
+			unlocked = true
+			lock.Unlock()
+		}
+	}
+	defer unlockGuard()
 
 	// Fetch session for state updates and message creation
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
@@ -2701,10 +2708,14 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	// concurrent agent.complete event having already closed the turn.
 	s.completeTurnForSession(ctx, sessionID)
 
-	// Clear the duplicate-cancel guard early so drainQueuedMessageForPromptableSession
-	// can dispatch the queued prompt without being blocked by the in-flight sentinel.
-	// The defer at function entry remains as the error-path safety net.
-	s.cancelInFlight.Delete(sessionID)
+	// Release the cancel/interrupt guard early — before, not deferred until
+	// function exit — so the drainQueuedMessageForPromptableSession call
+	// below can dispatch the queued prompt without racing its own
+	// asynchronous PromptAgent dispatch against this function's still-held
+	// lock. Both unlockGuard and release are idempotent, so the deferred
+	// calls above become safe no-op error-path safety nets once this fires.
+	unlockGuard()
+	release()
 
 	// Deliver any message the operator queued while the turn was running
 	// (#1597 pause→resume recovery). On a normal cancel the agent emits
