@@ -213,7 +213,7 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
           isWholeLine: true,
           className: "monaco-comment-line",
           lineNumberClassName: "monaco-comment-line-number",
-          linesDecorationsClassName: firstLines.has(lineNum)
+          firstLineDecorationClassName: firstLines.has(lineNum)
             ? "monaco-comment-bar-icon"
             : "monaco-comment-bar",
         },

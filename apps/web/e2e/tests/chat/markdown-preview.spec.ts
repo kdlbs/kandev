@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { type Page } from "@playwright/test";
+import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
@@ -63,6 +63,67 @@ async function openFileInPreview(
   await previewToggle.click();
 
   await expect(testPage.getByTestId("markdown-preview")).toBeVisible({ timeout: 5_000 });
+}
+
+/** Open a markdown file from the Files panel and leave it in code mode. */
+async function openFileInCode(
+  testPage: Page,
+  session: SessionPage,
+  fileName: string,
+): Promise<void> {
+  await session.clickTab("Files");
+  await expect(session.files).toBeVisible({ timeout: 5_000 });
+  const fileRow = session.files.getByText(fileName);
+  await expect(fileRow).toBeVisible({ timeout: 10_000 });
+  await fileRow.click();
+
+  const editorTab = testPage.locator(`.dv-default-tab:has-text('${fileName}')`);
+  await expect(editorTab).toBeVisible({ timeout: 10_000 });
+  await expect(testPage.locator(".monaco-editor").first()).toBeVisible({ timeout: 10_000 });
+}
+
+async function selectMarkdownPreviewText(target: Locator): Promise<void> {
+  await target.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const selection = window.getSelection();
+    if (!selection) throw new Error("Browser selection is unavailable");
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    const rect = element.getBoundingClientRect();
+    element.dispatchEvent(
+      new MouseEvent("mouseup", {
+        bubbles: true,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.bottom,
+      }),
+    );
+  });
+}
+
+async function selectMarkdownPreviewRange(start: Locator, end: Locator): Promise<void> {
+  await start.evaluate(
+    (startElement, endElement) => {
+      const range = document.createRange();
+      range.setStartBefore(startElement);
+      range.setEndAfter(endElement);
+      const selection = window.getSelection();
+      if (!selection) throw new Error("Browser selection is unavailable");
+      selection.removeAllRanges();
+      selection.addRange(range);
+
+      const rect = endElement.getBoundingClientRect();
+      endElement.dispatchEvent(
+        new MouseEvent("mouseup", {
+          bubbles: true,
+          clientX: rect.left + rect.width / 2,
+          clientY: rect.bottom,
+        }),
+      );
+    },
+    await end.elementHandle(),
+  );
 }
 
 test.describe("Markdown preview", () => {
@@ -227,5 +288,161 @@ test.describe("Markdown preview", () => {
     const preview = testPage.getByTestId("markdown-preview");
     await expect(preview).toBeVisible({ timeout: 10_000 });
     await expect(preview.locator("h1")).toContainText("Preview From Diff");
+  });
+
+  test("can add a pending comment from markdown preview selection", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const filePath = path.join(repoDir, "comment-preview.md");
+    fs.writeFileSync(filePath, MARKDOWN_CONTENT);
+
+    const { session } = await seedTaskWithSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Markdown Preview Comment Test",
+    );
+
+    await openFileInPreview(testPage, session, "comment-preview.md");
+    const preview = testPage.getByTestId("markdown-preview");
+    await selectMarkdownPreviewText(preview.locator("p").first());
+
+    const commentButton = testPage.getByTestId("markdown-preview-comment-button");
+    await expect(commentButton).toBeVisible({ timeout: 5_000 });
+    await commentButton.click();
+
+    await testPage
+      .locator('textarea[placeholder="Add your comment or instruction..."]')
+      .fill("Please tighten this paragraph.");
+    await testPage.getByRole("button", { name: "Add", exact: true }).click();
+
+    await expect(testPage.getByTestId("markdown-preview-commented-range").first()).toBeVisible({
+      timeout: 5_000,
+    });
+
+    await session.clickSessionChatTab();
+    await expect(session.activeChat().getByText("comment-preview.md (1)")).toBeVisible({
+      timeout: 5_000,
+    });
+  });
+
+  test("shows one editable badge for a multiline markdown preview comment", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const filePath = path.join(repoDir, "multiline-preview-comment.md");
+    fs.writeFileSync(
+      filePath,
+      [
+        "# Multiline Preview Comment",
+        "",
+        "First paragraph for the preview selection.",
+        "",
+        "Second paragraph for the preview selection.",
+        "",
+        "Third paragraph for the preview selection.",
+        "",
+      ].join("\n"),
+    );
+
+    const { session } = await seedTaskWithSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Markdown Preview Multiline Comment Test",
+    );
+
+    await openFileInPreview(testPage, session, "multiline-preview-comment.md");
+    const preview = testPage.getByTestId("markdown-preview");
+    await selectMarkdownPreviewRange(preview.locator("p").nth(0), preview.locator("p").nth(2));
+
+    const commentButton = testPage.getByTestId("markdown-preview-comment-button");
+    await expect(commentButton).toBeVisible({ timeout: 5_000 });
+    await commentButton.click();
+
+    await testPage
+      .locator('textarea[placeholder="Add your comment or instruction..."]')
+      .fill("Please revise these paragraphs.");
+    await testPage.getByRole("button", { name: "Add", exact: true }).click();
+
+    const badges = preview.getByTestId("markdown-preview-comment-badge");
+    await expect(badges).toHaveCount(1);
+    await badges.first().click();
+
+    await testPage.getByText("Please revise these paragraphs.").hover();
+    await testPage.getByRole("button", { name: "Edit comment" }).click();
+    const editTextarea = testPage.locator('textarea[placeholder="Add a comment..."]').last();
+    await editTextarea.fill("Please tighten these paragraphs.");
+    await testPage.getByRole("button", { name: "Update", exact: true }).click();
+
+    await expect(testPage.getByText("Please tighten these paragraphs.")).toBeVisible({
+      timeout: 5_000,
+    });
+  });
+
+  test("shows one code comment marker on the first visual row of a wrapped line", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const fileName = "wrapped-code-comment.md";
+    const wrappedLine = Array.from(
+      { length: 80 },
+      (_, i) => `wrapped-word-${i.toString().padStart(2, "0")}`,
+    ).join(" ");
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    fs.writeFileSync(path.join(repoDir, fileName), `${wrappedLine}\n`);
+
+    const { session, sessionId } = await seedTaskWithSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Markdown Code Wrapped Comment Test",
+    );
+    await testPage.evaluate(
+      ({ sid, pathName, codeContent }) => {
+        window.sessionStorage.setItem(
+          `kandev.comments.${sid}`,
+          JSON.stringify([
+            {
+              id: "wrapped-code-comment",
+              source: "diff",
+              sessionId: sid,
+              filePath: pathName,
+              startLine: 1,
+              endLine: 1,
+              side: "additions",
+              codeContent,
+              text: "Review this wrapped line.",
+              createdAt: new Date().toISOString(),
+              status: "pending",
+            },
+          ]),
+        );
+      },
+      { sid: sessionId, pathName: fileName, codeContent: wrappedLine },
+    );
+
+    await openFileInCode(testPage, session, fileName);
+    await expect(testPage.locator(".view-line").first()).toContainText("wrapped-word-00", {
+      timeout: 10_000,
+    });
+    await expect
+      .poll(() => testPage.locator(".view-line").count(), { timeout: 10_000 })
+      .toBeGreaterThan(1);
+
+    await expect
+      .poll(() => testPage.locator(".monaco-comment-bar-icon").count(), {
+        timeout: 10_000,
+      })
+      .toBe(1);
   });
 });

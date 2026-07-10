@@ -118,17 +118,19 @@ function buildCommentGutter(
   return gutter({
     class: "cm-comment-gutter",
     lineMarker: (view, line) => {
-      const lineNum = view.state.doc.lineAt(line.from).number;
-      const lineComments = commentsByLine.get(lineNum);
+      const docLine = view.state.doc.lineAt(line.from);
+      if (line.from !== docLine.from) return null;
+      const lineComments = commentsByLine.get(docLine.number);
       if (lineComments && lineComments.length > 0) {
-        return new CommentGutterMarker(lineComments, firstLines.has(lineNum));
+        return new CommentGutterMarker(lineComments, firstLines.has(docLine.number));
       }
       return null;
     },
     domEventHandlers: {
       click: (view, line, event) => {
-        const lineNum = view.state.doc.lineAt(line.from).number;
-        const lineComments = commentsByLine.get(lineNum);
+        const docLine = view.state.doc.lineAt(line.from);
+        if (line.from !== docLine.from) return false;
+        const lineComments = commentsByLine.get(docLine.number);
         if (lineComments && lineComments.length > 0) {
           event.preventDefault();
           event.stopPropagation();
@@ -224,6 +226,7 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
 
   const addComment = useCommentsStore((state) => state.addComment);
   const removeComment = useCommentsStore((state) => state.removeComment);
+  const updateComment = useCommentsStore((state) => state.updateComment);
   const comments = useDiffFileComments(sessionId ?? "", path);
   const langExt = getCodeMirrorExtensionFromPath(path);
 
@@ -517,6 +520,22 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
     [sessionId, removeComment, commentView, toast],
   );
 
+  const handleUpdateComment = useCallback(
+    (commentId: string, text: string) => {
+      updateComment(commentId, { text });
+      if (commentView) {
+        setCommentView({
+          ...commentView,
+          comments: commentView.comments.map((comment) =>
+            comment.id === commentId ? { ...comment, text } : comment,
+          ),
+        });
+      }
+      toast({ title: "Comment updated" });
+    },
+    [commentView, toast, updateComment],
+  );
+
   const handleCommentViewClose = useCallback(() => {
     setCommentView(null);
   }, []);
@@ -536,6 +555,7 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
     handleCommentSubmitAndRun,
     handlePopoverClose,
     handleDeleteComment,
+    handleUpdateComment,
     handleCommentViewClose,
   };
 }

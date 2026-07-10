@@ -26,6 +26,11 @@ function computeInitialPos(position: { x: number; y: number }, width: number, he
   return { left, top };
 }
 
+function getPopoverWidth() {
+  if (typeof window === "undefined") return 384;
+  return Math.min(384, Math.max(280, window.innerWidth - 32));
+}
+
 function useDraggablePos(position: { x: number; y: number }, width: number, height: number) {
   const [pos, setPos] = useState(() => computeInitialPos(position, width, height));
   const dragRef = useRef<DragState | null>(null);
@@ -195,7 +200,7 @@ export function EditorCommentPopover({
   const [comment, setComment] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
-  const { pos, onDragStart } = useDraggablePos(position, 384, 220);
+  const { pos, onDragStart } = useDraggablePos(position, getPopoverWidth(), 220);
   usePopoverDismiss(onClose, popoverRef);
 
   useEffect(() => {
@@ -221,7 +226,7 @@ export function EditorCommentPopover({
     <div
       ref={popoverRef}
       className={cn(
-        "fixed z-50 w-96 rounded-xl border border-border/50 bg-popover/95 backdrop-blur-sm shadow-xl",
+        "fixed z-50 w-[min(24rem,calc(100vw-2rem))] rounded-xl border border-border/50 bg-popover/95 backdrop-blur-sm shadow-xl",
         "animate-in fade-in-0 zoom-in-95 duration-150",
       )}
       style={{ left: pos.left, top: pos.top }}

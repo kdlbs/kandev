@@ -237,6 +237,7 @@ export const FileEditorPanel = memo(function FileEditorPanel({
   const updateFileState = useDockviewStore((s) => s.updateFileState);
 
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSession = useAppStore((state) =>
     activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null,
   );
@@ -304,6 +305,7 @@ export const FileEditorPanel = memo(function FileEditorPanel({
           vcsDiff={vcsDiff}
           isSaving={savingFiles.has(fileKey)}
           sessionId={activeSessionId || undefined}
+          taskId={activeTaskId}
           worktreePath={worktreePath}
           enableComments={!!activeSessionId}
           markdownPreview={isMarkdown ? markdownPreview : false}

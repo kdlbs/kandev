@@ -3,7 +3,7 @@
 //
 // Regression guard: tapping a file in the Files → All files tab must replace
 // the Files panel with the file viewer, NOT navigate to the Changes panel.
-import { type Page } from "@playwright/test";
+import { type Locator, type Page } from "@playwright/test";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
@@ -63,6 +63,26 @@ async function setupMobileFileViewerTest({
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 45_000 });
   return { session, filePath };
+}
+
+async function selectMarkdownPreviewText(target: Locator): Promise<void> {
+  await target.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const selection = window.getSelection();
+    if (!selection) throw new Error("Browser selection is unavailable");
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    const rect = element.getBoundingClientRect();
+    element.dispatchEvent(
+      new MouseEvent("mouseup", {
+        bubbles: true,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.bottom,
+      }),
+    );
+  });
 }
 
 test.describe("Mobile file viewer panel", () => {
@@ -256,7 +276,7 @@ test.describe("Mobile file viewer panel", () => {
   }) => {
     test.setTimeout(90_000);
 
-    const { filePath } = await setupMobileFileViewerTest({
+    const { session, filePath } = await setupMobileFileViewerTest({
       testPage,
       apiClient,
       seedData,
@@ -276,6 +296,35 @@ test.describe("Mobile file viewer panel", () => {
 
     await viewer.getByTestId("markdown-preview-toggle").tap();
     await expect(viewer.getByTestId("markdown-preview")).toBeVisible();
+
+    await selectMarkdownPreviewText(viewer.getByTestId("markdown-preview").locator("p").first());
+    const commentButton = testPage.getByTestId("markdown-preview-comment-button");
+    await expect(commentButton).toBeVisible({ timeout: 5_000 });
+    await commentButton.tap();
+
+    await testPage
+      .locator('textarea[placeholder="Add your comment or instruction..."]')
+      .fill("Mobile preview comment.");
+    await testPage.getByRole("button", { name: "Add", exact: true }).tap();
+    await expect(viewer.getByTestId("markdown-preview-commented-range").first()).toBeVisible({
+      timeout: 5_000,
+    });
+
+    const badge = viewer.getByTestId("markdown-preview-comment-badge");
+    await expect(badge).toHaveCount(1);
+    await badge.tap();
+    await testPage.getByRole("button", { name: "Edit comment" }).tap();
+    await testPage
+      .locator('textarea[placeholder="Add a comment..."]')
+      .fill("Updated mobile comment.");
+    await testPage.getByRole("button", { name: "Update", exact: true }).tap();
+    await expect(testPage.getByText("Updated mobile comment.")).toBeVisible({ timeout: 5_000 });
+
+    await testPage.getByRole("button", { name: "Chat" }).tap();
+    const fileName = filePath.split("/").pop() ?? filePath;
+    await expect(session.activeChat().getByText(`${fileName} (1)`)).toBeVisible({
+      timeout: 5_000,
+    });
   });
 
   test("viewer header shows full path for files inside subdirectories", async ({
