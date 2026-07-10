@@ -292,6 +292,7 @@ function PromptMentionChip({ name, value }: { name: string; value: string }) {
         <span
           data-testid="custom-prompt-mention"
           data-prompt-name={name}
+          tabIndex={0}
           className={cn(PROMPT_MENTION_CHIP_CLASS, "cursor-default")}
         >
           {value}

@@ -89,4 +89,18 @@ describe("idParamsPromise", () => {
   it("resolves to an object with the requested id", async () => {
     await expect(idParamsPromise("agent-789")).resolves.toEqual({ id: "agent-789" });
   });
+
+  it("re-inserting a cached id after eviction returns a fresh, still-stable promise", () => {
+    // FIFO eviction runs at MAX_ID_PARAMS_PROMISE_CACHE = 500 entries. Fill
+    // past that with unique ids, then re-request one of the earliest ids;
+    // it should have been evicted (new identity) but the *new* identity must
+    // still be stable on subsequent calls.
+    const first = idParamsPromise("evict-target");
+    for (let i = 0; i < 600; i++) {
+      idParamsPromise(`fill-${i}`);
+    }
+    const refetched = idParamsPromise("evict-target");
+    expect(refetched).not.toBe(first);
+    expect(idParamsPromise("evict-target")).toBe(refetched);
+  });
 });

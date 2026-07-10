@@ -137,11 +137,21 @@ export function resolveOfficeHomeSetupRedirect(
 // `use(params)` in the consumer re-suspend forever, keeping the enclosing
 // `<Suspense>` in fallback and hiding the office tree (`display: none`).
 // Caching the resolved promise per id keeps identity stable across renders.
+// Bound the cache so long-lived sessions in large workspaces (thousands of
+// tasks/agents/projects) don't retain entries for every id ever visited. A
+// simple FIFO eviction is enough — identity only needs to be stable across the
+// renders that happen while a given route is mounted, and the current route's
+// id is always re-inserted on render (which no-ops if it's already present).
+const MAX_ID_PARAMS_PROMISE_CACHE = 500;
 const idParamsPromiseCache = new Map<string, Promise<{ id: string }>>();
 export function idParamsPromise(id: string): Promise<{ id: string }> {
   let promise = idParamsPromiseCache.get(id);
   if (!promise) {
     promise = Promise.resolve({ id });
+    if (idParamsPromiseCache.size >= MAX_ID_PARAMS_PROMISE_CACHE) {
+      const oldestKey = idParamsPromiseCache.keys().next().value;
+      if (oldestKey !== undefined) idParamsPromiseCache.delete(oldestKey);
+    }
     idParamsPromiseCache.set(id, promise);
   }
   return promise;
