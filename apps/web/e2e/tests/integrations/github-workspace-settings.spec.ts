@@ -36,7 +36,7 @@ test.describe("GitHub workspace settings", () => {
     ]);
 
     await testPage.goto("/settings/integrations/github");
-    await expect(testPage.getByRole("heading", { name: "GitHub Integration" })).toBeVisible();
+    await expect(testPage.getByTestId("github-integration-heading")).toBeVisible();
 
     await testPage.getByTestId("github-scope-mode").click();
     await testPage.getByRole("option", { name: "Selected repositories" }).click();
