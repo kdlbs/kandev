@@ -27,6 +27,9 @@ const (
 // DefaultFileMaterializeMode is applied when a file has no explicit mode.
 const DefaultFileMaterializeMode = FileMaterializeCopy
 
+// gitDirName is the reserved git admin entry that must never be materialized.
+const gitDirName = ".git"
+
 // FileSpec is a single file to materialize into a worktree with its own mode.
 type FileSpec struct {
 	Path string
@@ -67,10 +70,14 @@ func ValidateFileMaterializeMode(mode string) error {
 
 // MaterializeWorktreeFiles copies or symlinks each configured file from srcRoot
 // (the main repository) into destRoot (the worktree), using that file's own
-// mode. Blank entries and files missing from the source are skipped; copy/symlink
-// failures and paths that escape the repository root are returned as errors (no
-// silent fallback).
-func MaterializeWorktreeFiles(srcRoot, destRoot string, files []FileSpec) error {
+// mode. Blank entries and files missing from the source are skipped silently.
+// Any other per-file failure (path traversal, reserved .git, source resolving
+// outside the repo, permission errors, etc.) is collected as a warning and the
+// remaining files are still processed — mirroring copyConfiguredFiles so partial
+// failures stay observable rather than silently aborting the rest. There is no
+// silent fallback from symlink to copy. Returns the collected warnings.
+func MaterializeWorktreeFiles(srcRoot, destRoot string, files []FileSpec) []string {
+	var warnings []string
 	for _, file := range files {
 		if strings.TrimSpace(file.Path) == "" {
 			continue
@@ -80,10 +87,10 @@ func MaterializeWorktreeFiles(srcRoot, destRoot string, files []FileSpec) error 
 			if errors.Is(err, errSourceMissing) {
 				continue
 			}
-			return err
+			warnings = append(warnings, fmt.Sprintf("%s: %v", file.Path, err))
 		}
 	}
-	return nil
+	return warnings
 }
 
 // materializeFile places a single repo-relative file into destRoot.
@@ -105,7 +112,7 @@ func CleanWorktreeFilePath(relPath string) (string, error) {
 		strings.HasPrefix(cleanRel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("%w: %q escapes repository root", ErrInvalidWorktreeFilePath, relPath)
 	}
-	if cleanRel == ".git" || strings.HasPrefix(cleanRel, ".git"+string(filepath.Separator)) {
+	if cleanRel == gitDirName || strings.HasPrefix(cleanRel, gitDirName+string(filepath.Separator)) {
 		return "", fmt.Errorf("%w: %q targets the reserved .git path", ErrInvalidWorktreeFilePath, relPath)
 	}
 	return cleanRel, nil
@@ -150,7 +157,7 @@ func materializeFile(mode FileMaterializeMode, srcRoot, destRoot, relPath string
 	if mode == FileMaterializeSymlink {
 		return symlinkWorktreeFile(src, dest)
 	}
-	return copyPath(src, dest)
+	return copyPath(srcRoot, src, dest)
 }
 
 // rejectSymlinkedDestAncestor returns an error when any existing directory
@@ -198,7 +205,18 @@ func symlinkWorktreeFile(src, dest string) error {
 }
 
 // copyPath copies a regular file or (recursively) a directory from src to dest.
-func copyPath(src, dest string) error {
+// It first resolves symlinks and rejects sources that escape srcRoot so a
+// repo-controlled symlink (e.g. .env -> /home/user/.ssh/id_rsa) can't exfiltrate
+// files from outside the repository, and it skips non-regular sources (FIFOs,
+// devices, sockets) which would otherwise block or error on open.
+func copyPath(srcRoot, src, dest string) error {
+	resolved, err := filepath.EvalSymlinks(src)
+	if err != nil {
+		return fmt.Errorf("resolve source %q: %w", src, err)
+	}
+	if err := ensureWithinRoot(srcRoot, resolved); err != nil {
+		return err
+	}
 	info, err := os.Stat(src)
 	if err != nil {
 		return fmt.Errorf("stat %q: %w", src, err)
@@ -206,7 +224,24 @@ func copyPath(src, dest string) error {
 	if info.IsDir() {
 		return copyDir(src, dest)
 	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("worktree file %q is not a regular file (mode %s)", src, info.Mode())
+	}
 	return copyFile(src, dest, info.Mode())
+}
+
+// ensureWithinRoot returns ErrInvalidWorktreeFilePath when path (already
+// symlink-resolved) is not contained within root.
+func ensureWithinRoot(root, path string) error {
+	rootResolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		rootResolved = root
+	}
+	rel, err := filepath.Rel(rootResolved, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("%w: source %q resolves outside the repository", ErrInvalidWorktreeFilePath, path)
+	}
+	return nil
 }
 
 // copyDir recursively copies the directory tree at src into dest.
@@ -236,6 +271,11 @@ func copyDir(src, dest string) error {
 		}
 		if d.IsDir() {
 			return os.MkdirAll(target, info.Mode().Perm())
+		}
+		// Skip non-regular entries (FIFOs, devices, sockets) rather than
+		// blocking/erroring on open.
+		if !info.Mode().IsRegular() {
+			return nil
 		}
 		return copyFile(path, target, info.Mode())
 	})

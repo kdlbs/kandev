@@ -67,12 +67,10 @@ export function RepositoryWorktreeFiles({
       ) : (
         <div className="space-y-2">
           {files.map((file, index) => (
-            // Key by path for filled rows so removing a middle row doesn't shift
-            // input focus/cursor; empty (new) rows fall back to index.
-            <div
-              key={file.path ? `p:${file.path}` : `new:${index}`}
-              className="flex items-center gap-2"
-            >
+            // Key by row index so typing the first character of a path doesn't
+            // remount the row and steal input focus. Rows are only added at the
+            // end and removed explicitly, so a stable index key is correct here.
+            <div key={`row:${index}`} className="flex items-center gap-2">
               <Input
                 value={file.path ?? ""}
                 onChange={(e) => changePath(index, e.target.value)}

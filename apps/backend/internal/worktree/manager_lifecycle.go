@@ -852,16 +852,18 @@ func (m *Manager) materializeWorktreeFiles(ctx context.Context, wt *Worktree, re
 	if repo == nil || len(repo.WorktreeFiles) == 0 {
 		return
 	}
-	if err := MaterializeWorktreeFiles(repositoryPath, wt.Path, repo.WorktreeFiles); err != nil {
-		m.logger.Warn("worktree file materialization failed",
+	warnings := MaterializeWorktreeFiles(repositoryPath, wt.Path, repo.WorktreeFiles)
+	wt.WorktreeFilesWarnings = warnings
+	for _, w := range warnings {
+		m.logger.Warn("worktree file materialization warning",
 			zap.String("worktree_id", wt.ID),
 			zap.String("repository_path", repositoryPath),
-			zap.Error(err))
-		return
+			zap.String("warning", w))
 	}
 	m.logger.Info("materialized worktree files",
 		zap.String("worktree_id", wt.ID),
-		zap.Int("file_count", len(repo.WorktreeFiles)))
+		zap.Int("file_count", len(repo.WorktreeFiles)),
+		zap.Int("warnings", len(warnings)))
 }
 
 // resolveRepositoryConfig fetches the repository config by ID when available,
