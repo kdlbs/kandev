@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -932,6 +933,27 @@ func TestSendPrompt_DrainsStaleSignalFromPriorDispatchOnly(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), context.DeadlineExceeded.Error()) {
 		t.Fatalf("expected deadline exceeded error, got: %v", err)
+	}
+}
+
+func TestWaitForPromptDone_TreatsPromptAbandonedAfterCancelAsCancelEscalated(t *testing.T) {
+	log := newSessionTestLogger()
+	sm := NewSessionManager(log, make(chan struct{}))
+	execution := &AgentExecution{
+		ID:           "test-exec",
+		promptDoneCh: make(chan PromptCompletionSignal, 1),
+	}
+	execution.promptDoneCh <- PromptCompletionSignal{
+		IsError: true,
+		Error:   "prompt abandoned after cancel",
+	}
+
+	_, err := sm.waitForPromptDone(context.Background(), execution)
+	if !errors.Is(err, ErrCancelEscalated) {
+		t.Fatalf("expected ErrCancelEscalated, got: %v", err)
+	}
+	if !errors.Is(err, ErrAgentReported) {
+		t.Fatalf("expected ErrAgentReported wrapper, got: %v", err)
 	}
 }
 

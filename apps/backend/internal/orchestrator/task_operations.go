@@ -2635,6 +2635,11 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	// concurrent agent.complete event having already closed the turn.
 	s.completeTurnForSession(ctx, sessionID)
 
+	// From here the cancel has been reconciled and any queued prompt is a fresh
+	// turn. Clear the duplicate-cancel guard before draining so the follow-up
+	// prompt cannot be mistaken for part of the cancelled turn.
+	s.cancelInFlight.Delete(sessionID)
+
 	// Deliver any message the operator queued while the turn was running
 	// (#1597 pause→resume recovery). On a normal cancel the agent emits
 	// complete(cancelled) → handleAgentReady → on_turn_complete, which drains

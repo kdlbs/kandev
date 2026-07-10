@@ -165,6 +165,7 @@ type mockAgentManager struct {
 	restartProcessErr   error
 	promptErr           error
 	promptResult        *executor.PromptResult
+	promptAgentFunc     func(context.Context, string, string, []v1.MessageAttachment, bool) (*executor.PromptResult, error)
 	launchAgentFunc     func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error)
 
 	mu                      sync.Mutex
@@ -281,17 +282,21 @@ func (m *mockAgentManager) StopAgentWithReason(ctx context.Context, agentExecuti
 	}
 	return err
 }
-func (m *mockAgentManager) PromptAgent(_ context.Context, executionID string, prompt string, _ []v1.MessageAttachment, dispatchOnly bool) (*executor.PromptResult, error) {
+func (m *mockAgentManager) PromptAgent(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool) (*executor.PromptResult, error) {
 	m.mu.Lock()
 	first := len(m.capturedPrompts) == 0
 	m.capturedPrompts = append(m.capturedPrompts, prompt)
 	m.capturedPromptCalls = append(m.capturedPromptCalls, promptCall{ExecutionID: executionID, Prompt: prompt, DispatchOnly: dispatchOnly})
+	promptAgentFunc := m.promptAgentFunc
 	promptErr := m.promptErr
 	promptResult := m.promptResult
 	doneCh := m.promptDone
 	m.mu.Unlock()
 	if first && doneCh != nil {
 		close(doneCh)
+	}
+	if promptAgentFunc != nil {
+		return promptAgentFunc(ctx, executionID, prompt, attachments, dispatchOnly)
 	}
 	if promptErr != nil {
 		return nil, promptErr

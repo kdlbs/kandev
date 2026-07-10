@@ -654,6 +654,48 @@ func TestCancelAgent_DeliversQueuedMessageOnResume(t *testing.T) {
 	}
 }
 
+func TestCancelAgent_DrainsQueuedMessageAfterCancelGuardClears(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	promptDone := make(chan struct{})
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptDone:             promptDone,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	agentMgr.promptAgentFunc = func(context.Context, string, string, []v1.MessageAttachment, bool) (*executor.PromptResult, error) {
+		if svc.isCancelInFlight("session1") {
+			return nil, fmt.Errorf("prompt abandoned after cancel: %w", lifecycle.ErrCancelEscalated)
+		}
+		return &executor.PromptResult{}, nil
+	}
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+	if _, err := svc.messageQueue.QueueMessage(
+		ctx, "session1", "task1", "queued after cancel", "", messagequeue.QueuedByUser, false, nil,
+	); err != nil {
+		t.Fatalf("queue message: %v", err)
+	}
+
+	if err := svc.CancelAgent(ctx, "session1"); err != nil {
+		t.Fatalf("cancel agent: %v", err)
+	}
+
+	select {
+	case <-promptDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for queued prompt dispatch")
+	}
+
+	status := svc.messageQueue.GetStatus(ctx, "session1")
+	if status.Count != 0 {
+		t.Fatalf("expected queued prompt to stay drained after cancel guard clears, count=%d entries=%+v", status.Count, status.Entries)
+	}
+}
+
 // --- StartCreatedSession ---
 
 func TestStartCreatedSession_WrongTask(t *testing.T) {
