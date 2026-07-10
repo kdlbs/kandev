@@ -2635,9 +2635,9 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	// concurrent agent.complete event having already closed the turn.
 	s.completeTurnForSession(ctx, sessionID)
 
-	// From here the cancel has been reconciled and any queued prompt is a fresh
-	// turn. Clear the duplicate-cancel guard before draining so the follow-up
-	// prompt cannot be mistaken for part of the cancelled turn.
+	// Clear the duplicate-cancel guard early so drainQueuedMessageForPromptableSession
+	// can dispatch the queued prompt without being blocked by the in-flight sentinel.
+	// The defer at function entry remains as the error-path safety net.
 	s.cancelInFlight.Delete(sessionID)
 
 	// Deliver any message the operator queued while the turn was running

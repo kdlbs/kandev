@@ -32,17 +32,18 @@ func (f *fakeCapReader) Get(agentType string) (hostutility.AgentCapabilities, bo
 
 // fakeStore implements just enough of store.Repository for the reconciler.
 type fakeStore struct {
-	agents       map[string]*models.Agent          // keyed by DB ID
-	byName       map[string]*models.Agent          // keyed by Name
-	profiles     map[string][]*models.AgentProfile // keyed by DB agent ID (live)
-	deleted      map[string][]*models.AgentProfile // keyed by DB agent ID (soft-deleted)
-	created      []*models.AgentProfile
-	updated      []*models.AgentProfile
-	softDeleted  []string
-	nextAgentID  int
-	nextProfID   int
-	getByNameErr error
-	listProfErr  map[string]error
+	agents        map[string]*models.Agent          // keyed by DB ID
+	byName        map[string]*models.Agent          // keyed by Name
+	profiles      map[string][]*models.AgentProfile // keyed by DB agent ID (live)
+	deleted       map[string][]*models.AgentProfile // keyed by DB agent ID (soft-deleted)
+	created       []*models.AgentProfile
+	updated       []*models.AgentProfile
+	softDeleted   []string
+	nextAgentID   int
+	nextProfID    int
+	getByNameErr  error
+	listAgentsErr error
+	listProfErr   map[string]error
 }
 
 func newFakeStore() *fakeStore {
@@ -80,6 +81,9 @@ func (f *fakeStore) UpdateAgent(context.Context, *models.Agent) error { return n
 func (f *fakeStore) DeleteAgent(context.Context, string) error        { return nil }
 
 func (f *fakeStore) ListAgents(_ context.Context) ([]*models.Agent, error) {
+	if f.listAgentsErr != nil {
+		return nil, f.listAgentsErr
+	}
 	out := make([]*models.Agent, 0, len(f.agents))
 	for _, a := range f.agents {
 		out = append(out, a)
@@ -421,6 +425,38 @@ func TestProfileReconciler_SkipsOrphanCleanupWhenEnabledRegistryEmpty(t *testing
 	if len(st.profiles[claudeAgent.ID]) != 1 || len(st.profiles[codexAgent.ID]) != 1 {
 		t.Fatalf("expected live profiles to remain, got claude=%d codex=%d",
 			len(st.profiles[claudeAgent.ID]), len(st.profiles[codexAgent.ID]))
+	}
+}
+
+func TestProfileReconciler_SkipsOrphanCleanupWhenAgentListFails(t *testing.T) {
+	st := newFakeStore()
+	st.listAgentsErr = errors.New("database locked")
+	orphanAgent := &models.Agent{Name: "removed-old-agent"}
+	_ = st.CreateAgent(context.Background(), orphanAgent)
+	orphanProfile := &models.AgentProfile{
+		AgentID: orphanAgent.ID,
+		Name:    "legacy",
+		Model:   "x",
+	}
+	_ = st.CreateAgentProfile(context.Background(), orphanProfile)
+
+	log, logs := newObserverLogger(t)
+	reg := registry.NewRegistry(log)
+	reg.LoadDefaults()
+	r := NewProfileReconciler(&fakeCapReader{caps: map[string]hostutility.AgentCapabilities{}}, reg, st, log)
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(st.softDeleted) != 0 {
+		t.Fatalf("expected agent-list failure to fail closed, got soft-deletes %v", st.softDeleted)
+	}
+	entries := logs.FilterMessage("orphan cleanup summary").All()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 summary log, got %d", len(entries))
+	}
+	fields := entries[0].ContextMap()
+	if fields["skip_reason"] != "list_agents_failed" {
+		t.Errorf("skip_reason = %v, want list_agents_failed", fields["skip_reason"])
 	}
 }
 
