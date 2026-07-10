@@ -79,23 +79,8 @@ describe("resolveSettingsActiveWorkspaceId", () => {
         ],
         null,
         null,
-        null,
       ),
     ).toBe(kanbanOne);
-  });
-
-  it("prefers explicit route workspace ID", () => {
-    expect(
-      resolveSettingsActiveWorkspaceId(
-        [
-          { id: "office-1", office_workflow_id: officeWorkflow },
-          { id: kanbanOne, office_workflow_id: null },
-        ],
-        "office-1",
-        null,
-        null,
-      ),
-    ).toBe("office-1");
   });
 
   it("uses active cookie when it matches a kanban workspace", () => {
@@ -106,7 +91,6 @@ describe("resolveSettingsActiveWorkspaceId", () => {
           { id: kanbanOne, office_workflow_id: null },
           { id: kanbanTwo, office_workflow_id: null },
         ],
-        null,
         kanbanTwo,
         null,
       ),
@@ -121,7 +105,6 @@ describe("resolveSettingsActiveWorkspaceId", () => {
           { id: kanbanOne, office_workflow_id: null },
           { id: kanbanTwo, office_workflow_id: null },
         ],
-        null,
         "ws-missing",
         kanbanOne,
       ),
@@ -129,7 +112,7 @@ describe("resolveSettingsActiveWorkspaceId", () => {
   });
 
   it("returns null when no workspaces exist", () => {
-    expect(resolveSettingsActiveWorkspaceId([], null, "k-1", "k-2")).toBeNull();
+    expect(resolveSettingsActiveWorkspaceId([], "k-1", "k-2")).toBeNull();
   });
 
   it("falls back to office workspace only when no kanban workspaces exist", () => {
@@ -139,7 +122,6 @@ describe("resolveSettingsActiveWorkspaceId", () => {
           { id: "office-1", office_workflow_id: officeWorkflow1 },
           { id: "office-2", office_workflow_id: officeWorkflow2 },
         ],
-        null,
         "missing",
         null,
       ),
@@ -153,7 +135,6 @@ describe("resolveSettingsActiveWorkspaceId", () => {
           { id: kanbanOne, office_workflow_id: null },
           { id: kanbanTwo, office_workflow_id: null },
         ],
-        null,
         null,
         null,
       ),

@@ -45,7 +45,6 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
     const workspaceItems = workspaces.workspaces.map(mapWorkspaceItem);
     const activeWorkspaceId = resolveSettingsActiveWorkspaceId(
       workspaceItems,
-      null,
       // `readCookies()` is client-only in this path; during SSR this is empty.
       // Settings active workspace selection is completed on first client render by
       // spa-routes via `readActiveWorkspaceCookie()`.

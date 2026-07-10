@@ -426,6 +426,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		WorkspaceID            string               `json:"workspace_id"`
 		WorkflowID             string               `json:"workflow_id"`
 		WorkflowStepID         string               `json:"workflow_step_id"`
+		WorkspaceMode          string               `json:"workspace_mode"`
 		Title                  string               `json:"title"`
 		Description            string               `json:"description"`
 		AgentProfileID         string               `json:"agent_profile_id"`
@@ -454,7 +455,9 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "description is required for subtasks: it is the sub-agent's initial prompt and the only context it receives to start working", nil)
 	}
 
-	// Resolve repositories and inherit workspace/workflow from parent if needed.
+	// Resolve repositories and default workspace/workflow from parent if needed.
+	explicitWorkspaceID := req.WorkspaceID != ""
+	explicitWorkflowID := req.WorkflowID != ""
 	resolved, err := h.resolveTaskRepositories(ctx, req.ParentID, req.SourceTaskID, req.Repositories)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
@@ -471,12 +474,15 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			repos[i].BaseBranch = req.BaseBranch
 		}
 	}
-	if req.WorkspaceID == "" {
-		req.WorkspaceID = resolved.WorkspaceID
-	}
-	if req.WorkflowID == "" {
-		req.WorkflowID = resolved.WorkflowID
-	}
+	req.WorkspaceID, req.WorkflowID, req.WorkflowStepID = applyMCPTaskScopeDefaults(
+		req.ParentID,
+		req.WorkspaceID,
+		req.WorkflowID,
+		req.WorkflowStepID,
+		explicitWorkspaceID,
+		explicitWorkflowID,
+		resolved,
+	)
 
 	// Auto-resolve workspace/workflow when not provided and there's exactly one option.
 	if req.WorkspaceID == "" && h.taskSvc != nil {
@@ -500,6 +506,20 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.WorkflowID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
 	}
+	if code, message, err := h.validateMCPWorkflowWorkspace(ctx, req.WorkflowID, req.WorkspaceID); code != "" {
+		if err != nil && h.logger != nil {
+			h.logger.Error("failed to validate MCP workflow workspace",
+				zap.String("workflow_id", req.WorkflowID),
+				zap.String("workspace_id", req.WorkspaceID),
+				zap.Error(err))
+		}
+		return ws.NewError(msg.ID, msg.Action, code, message, nil)
+	}
+
+	workspacePolicy, err := h.resolveMCPWorkspacePolicy(req.ParentID, req.WorkspaceMode)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
 
 	pendingTask := &models.Task{
 		ParentID:       req.ParentID,
@@ -515,6 +535,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 		return ws.NewError(msg.ID, msg.Action, code, err.Error(), nil)
 	}
+	metadata = mergeMCPMetadata(metadata, workspacePolicy.MetadataBlock())
 
 	task, err := h.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
 		ParentID:               req.ParentID,
@@ -538,6 +559,18 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)
 	}
 
+	if h.handoffSvc != nil && workspacePolicy.NeedsAttachment() {
+		if attachErr := h.handoffSvc.AttachWorkspacePolicy(ctx, task.ID, req.ParentID, workspacePolicy); attachErr != nil {
+			h.logger.Error("attach workspace policy; rolling back task creation",
+				zap.String("task_id", task.ID), zap.Error(attachErr))
+			if delErr := h.taskSvc.DeleteTask(ctx, task.ID); delErr != nil {
+				h.logger.Error("rollback delete failed; task left in inconsistent state",
+					zap.String("task_id", task.ID), zap.Error(delErr))
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to attach workspace policy: "+attachErr.Error(), nil)
+		}
+	}
+
 	// Auto-start agent session asynchronously only if requested
 	if startAgent && h.sessionLauncher != nil {
 		h.launchAutoStartTask(ctx, task, launchConfig)
@@ -555,11 +588,11 @@ type taskRepoResult struct {
 
 // resolveTaskRepositories builds the repository list for a new task.
 //
-// For subtasks (parentID set) workspace and workflow always come from the
-// parent. Explicit repositories override the parent's repos when supplied,
-// otherwise the parent's repos are inherited verbatim — letting an agent
-// spin up a subtask that targets a sibling repo while staying in the same
-// workspace/workflow.
+// For subtasks (parentID set), workspace and workflow default from the parent
+// when the caller omits explicit scope. Explicit repositories override the
+// parent's repos when supplied, otherwise the parent's repos are inherited
+// verbatim — letting an agent spin up a subtask that targets a sibling repo
+// while staying in the same workspace/workflow by default.
 //
 // For top-level tasks (parentID empty) explicit repos win over source-task
 // inheritance; workspace falls back to the source task when available.
@@ -623,6 +656,94 @@ func (h *Handlers) resolveTaskRepositories(
 	}
 
 	return taskRepoResult{}, nil
+}
+
+const (
+	mcpWorkspaceModeInheritParent = "inherit_parent"
+	mcpWorkspaceModeNewWorkspace  = "new_workspace"
+)
+
+func (h *Handlers) resolveMCPWorkspacePolicy(parentID, workspaceMode string) (service.WorkspacePolicy, error) {
+	mode := strings.TrimSpace(workspaceMode)
+	if mode == "" && parentID != "" {
+		mode = mcpWorkspaceModeInheritParent
+	}
+	if mode == "" {
+		return service.WorkspacePolicy{}, nil
+	}
+
+	switch mode {
+	case mcpWorkspaceModeInheritParent:
+		if parentID == "" {
+			return service.WorkspacePolicy{}, fmt.Errorf("workspace_mode=%s requires parent_id", mcpWorkspaceModeInheritParent)
+		}
+	case mcpWorkspaceModeNewWorkspace:
+	default:
+		return service.WorkspacePolicy{}, fmt.Errorf("invalid workspace_mode: %s (allowed: inherit_parent, new_workspace)", mode)
+	}
+
+	return service.WorkspacePolicy{Mode: mode}, nil
+}
+
+func mergeMCPMetadata(base, extra map[string]interface{}) map[string]interface{} {
+	if len(extra) == 0 {
+		return base
+	}
+	if base == nil {
+		base = map[string]interface{}{}
+	}
+	for k, v := range extra {
+		base[k] = v
+	}
+	return base
+}
+
+func applyMCPTaskScopeDefaults(parentID, workspaceID, workflowID, workflowStepID string, explicitWorkspaceID, explicitWorkflowID bool, resolved taskRepoResult) (string, string, string) {
+	if parentID == "" {
+		return firstNonEmptyString(workspaceID, resolved.WorkspaceID), firstNonEmptyString(workflowID, resolved.WorkflowID), workflowStepID
+	}
+
+	workspaceID = firstNonEmptyString(workspaceID, resolved.WorkspaceID)
+	if workflowID == "" && !explicitWorkspaceID {
+		workflowID = resolved.WorkflowID
+	}
+	// A caller-supplied step is only safe when the caller also supplies the
+	// workflow it belongs to. Otherwise the target workflow is inherited or
+	// auto-resolved and the step can straddle workflow boundaries.
+	if !explicitWorkflowID {
+		workflowStepID = ""
+	}
+	return workspaceID, workflowID, workflowStepID
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func (h *Handlers) validateMCPWorkflowWorkspace(ctx context.Context, workflowID, workspaceID string) (string, string, error) {
+	if h.taskSvc == nil || workflowID == "" || workspaceID == "" {
+		return "", "", nil
+	}
+	workflow, err := h.taskSvc.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		if isMCPWorkflowNotFoundError(err) {
+			return ws.ErrorCodeValidation, fmt.Sprintf("workflow_id %q was not found", workflowID), nil
+		}
+		return ws.ErrorCodeInternalError, "Failed to validate workflow_id", err
+	}
+	if workflow.WorkspaceID != workspaceID {
+		return ws.ErrorCodeValidation, fmt.Sprintf("workflow_id %q belongs to workspace_id %q, not %q", workflowID, workflow.WorkspaceID, workspaceID), nil
+	}
+	return "", "", nil
+}
+
+func isMCPWorkflowNotFoundError(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "workflow not found")
 }
 
 // explicitRepoInputsWithDefaults maps the MCP-side explicit repo list to

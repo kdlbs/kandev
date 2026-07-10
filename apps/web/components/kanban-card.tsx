@@ -11,6 +11,11 @@ import {
 import { useAppStore } from "@/components/state-provider";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
+import {
+  TaskExternalLinkDialog,
+  type ExternalLinkProvider,
+} from "@/components/task/task-external-link-dialog";
+import type { KanbanExternalLinkAvailability } from "./kanban-external-link-availability";
 import { TaskGitHubIssueDialog } from "@/components/task/task-github-issue-dialog";
 import { TaskGitHubPRDialog } from "@/components/task/task-github-pr-dialog";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
@@ -68,6 +73,8 @@ export interface WorkflowStep {
 
 interface KanbanCardProps {
   task: Task;
+  workspaceId: string | null;
+  externalLinkAvailability: KanbanExternalLinkAvailability;
   /** Display labels and hover paths of every repository linked to the task, primary first. */
   repositoryChips?: RepositoryChip[];
   onClick?: (task: Task) => void;
@@ -88,45 +95,22 @@ interface KanbanCardProps {
   isMultiSelectMode?: boolean;
 }
 
-function useKanbanCardMenus({
+function useKanbanCardMoveMenuActions({
   task,
   steps,
-  isDeleting,
-  isArchiving,
   isSelected,
   selectedIds,
-  onEdit,
-  onDelete,
-  onArchive,
   onMove,
-}: Pick<
-  KanbanCardProps,
-  | "task"
-  | "steps"
-  | "isDeleting"
-  | "isArchiving"
-  | "isSelected"
-  | "selectedIds"
-  | "onEdit"
-  | "onDelete"
-  | "onArchive"
-  | "onMove"
->) {
+}: Pick<KanbanCardProps, "task" | "steps" | "isSelected" | "selectedIds" | "onMove">) {
   const moveTargets = useKanbanCardMoveTargets(task.id, steps);
   const moveTasks = useTaskWorkflowMove();
   const { sortByDisplayOrder, getWorkflowIdForTask } = useTaskMultiSelectStore();
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
-  const [showPRDialog, setShowPRDialog] = useState(false);
-  const [showIssueDialog, setShowIssueDialog] = useState(false);
-  const disabled = Boolean(isDeleting || isArchiving);
 
   const runMoveTasks = (taskIds: string[], workflowId: string, stepId: string) => {
     void moveTasks(taskIds, workflowId, stepId).catch(() => {
       // useTaskWorkflowMove already shows the failure toast.
     });
   };
-
   const moveToStepFromDropdown = (stepId: string) => {
     if (onMove) {
       onMove(task, stepId);
@@ -136,14 +120,8 @@ function useKanbanCardMenus({
       runMoveTasks([task.id], moveTargets.currentWorkflowId, stepId);
     }
   };
-
   const selectedTaskIds = isSelected && selectedIds?.size ? [...selectedIds] : [task.id];
-  // Sort into board order lazily (only when a move actually fires) so a backward
-  // range selection isn't scrambled — and we don't pay it on every card render.
   const orderedSelectedIds = () => sortByDisplayOrder(selectedTaskIds);
-  // A selection spanning workflows can't safely use same-workflow "Move to" (it
-  // would drag other-workflow cards into this card's workflow), so gate it — only
-  // computed for a genuine multi-selection to avoid per-render snapshot scans.
   const isMixedWorkflowSelection =
     selectedTaskIds.length > 1 &&
     new Set(selectedTaskIds.map((id) => getWorkflowIdForTask(id))).size > 1;
@@ -156,11 +134,71 @@ function useKanbanCardMenus({
     runMoveTasks(orderedSelectedIds(), moveTargets.currentWorkflowId, stepId);
   };
 
+  return {
+    moveTargets,
+    moveToStepFromDropdown,
+    moveSelectedToStep: isMixedWorkflowSelection ? undefined : moveSelectedToStep,
+    sendTaskToWorkflow: (workflowId: string, stepId: string) => {
+      runMoveTasks([task.id], workflowId, stepId);
+    },
+    sendSelectionToWorkflow: (workflowId: string, stepId: string) => {
+      runMoveTasks(orderedSelectedIds(), workflowId, stepId);
+    },
+  };
+}
+
+function externalLinkHandlers(
+  availability: KanbanCardProps["externalLinkAvailability"],
+  setExternalLinkProvider: (provider: ExternalLinkProvider) => void,
+) {
+  return {
+    onLinkJiraTicket: availability.jira ? () => setExternalLinkProvider("jira") : undefined,
+    onLinkLinearIssue: availability.linear ? () => setExternalLinkProvider("linear") : undefined,
+    onLinkSentryIssue: availability.sentry ? () => setExternalLinkProvider("sentry") : undefined,
+  };
+}
+
+function useKanbanCardMenus({
+  task,
+  steps,
+  isDeleting,
+  isArchiving,
+  isSelected,
+  selectedIds,
+  onEdit,
+  onDelete,
+  onArchive,
+  onMove,
+  externalLinkAvailability,
+}: Pick<
+  KanbanCardProps,
+  | "task"
+  | "externalLinkAvailability"
+  | "steps"
+  | "isDeleting"
+  | "isArchiving"
+  | "isSelected"
+  | "selectedIds"
+  | "onEdit"
+  | "onDelete"
+  | "onArchive"
+  | "onMove"
+>) {
+  const moveMenu = useKanbanCardMoveMenuActions({ task, steps, isSelected, selectedIds, onMove });
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [showPRDialog, setShowPRDialog] = useState(false);
+  const [showIssueDialog, setShowIssueDialog] = useState(false);
+  const [externalLinkProvider, setExternalLinkProvider] = useState<ExternalLinkProvider | null>(
+    null,
+  );
+  const disabled = Boolean(isDeleting || isArchiving);
+
   const menuBase = {
-    currentWorkflowId: moveTargets.currentWorkflowId,
+    currentWorkflowId: moveMenu.moveTargets.currentWorkflowId,
     currentStepId: task.workflowStepId,
-    workflows: moveTargets.workflowItems,
-    stepsByWorkflowId: moveTargets.stepsByWorkflowId,
+    workflows: moveMenu.moveTargets.workflowItems,
+    stepsByWorkflowId: moveMenu.moveTargets.stepsByWorkflowId,
     disabled,
     isDeleting,
     isArchiving,
@@ -169,24 +207,19 @@ function useKanbanCardMenus({
     onDelete: onDelete ? () => setShowDeleteConfirm(true) : undefined,
     onLinkPullRequest: () => setShowPRDialog(true),
     onLinkIssue: () => setShowIssueDialog(true),
+    ...externalLinkHandlers(externalLinkAvailability, setExternalLinkProvider),
   };
 
   return {
     dropdownMenuEntries: buildKanbanCardMenuEntries({
       ...menuBase,
-      onMoveToStep: moveToStepFromDropdown,
-      onSendToWorkflow: (workflowId, stepId) => {
-        runMoveTasks([task.id], workflowId, stepId);
-      },
+      onMoveToStep: moveMenu.moveToStepFromDropdown,
+      onSendToWorkflow: moveMenu.sendTaskToWorkflow,
     }),
     contextMenuEntries: buildKanbanCardMenuEntries({
       ...menuBase,
-      // Hide same-workflow "Move to" for a mixed-workflow selection; only the
-      // explicit "Send to workflow" path remains (matches the toolbar guard).
-      onMoveToStep: isMixedWorkflowSelection ? undefined : moveSelectedToStep,
-      onSendToWorkflow: (workflowId, stepId) => {
-        runMoveTasks(orderedSelectedIds(), workflowId, stepId);
-      },
+      onMoveToStep: moveMenu.moveSelectedToStep,
+      onSendToWorkflow: moveMenu.sendSelectionToWorkflow,
     }),
     showDeleteConfirm,
     setShowDeleteConfirm,
@@ -196,35 +229,27 @@ function useKanbanCardMenus({
     setShowPRDialog,
     showIssueDialog,
     setShowIssueDialog,
+    externalLinkProvider,
+    setExternalLinkProvider,
   };
 }
 
+type KanbanCardMenuState = ReturnType<typeof useKanbanCardMenus>;
+
 function KanbanCardDialogs({
   task,
+  workspaceId,
   repositories,
-  showDeleteConfirm,
-  setShowDeleteConfirm,
-  showArchiveConfirm,
-  setShowArchiveConfirm,
-  showPRDialog,
-  setShowPRDialog,
-  showIssueDialog,
-  setShowIssueDialog,
+  menu,
   isDeleting,
   isArchiving,
   onDelete,
   onArchive,
 }: {
   task: Task;
+  workspaceId: string | null;
   repositories: Repository[];
-  showDeleteConfirm: boolean;
-  setShowDeleteConfirm: (open: boolean) => void;
-  showArchiveConfirm: boolean;
-  setShowArchiveConfirm: (open: boolean) => void;
-  showPRDialog: boolean;
-  setShowPRDialog: (open: boolean) => void;
-  showIssueDialog: boolean;
-  setShowIssueDialog: (open: boolean) => void;
+  menu: KanbanCardMenuState;
   isDeleting?: boolean;
   isArchiving?: boolean;
   onDelete?: KanbanCardProps["onDelete"];
@@ -233,8 +258,8 @@ function KanbanCardDialogs({
   return (
     <>
       <TaskDeleteConfirmDialog
-        open={showDeleteConfirm}
-        onOpenChange={setShowDeleteConfirm}
+        open={menu.showDeleteConfirm}
+        onOpenChange={menu.setShowDeleteConfirm}
         taskTitle={task.title}
         taskId={task.id}
         executorType={task.primaryExecutorType}
@@ -242,8 +267,8 @@ function KanbanCardDialogs({
         onConfirm={({ cascade }) => onDelete?.(task, { cascade })}
       />
       <TaskArchiveConfirmDialog
-        open={showArchiveConfirm}
-        onOpenChange={setShowArchiveConfirm}
+        open={menu.showArchiveConfirm}
+        onOpenChange={menu.setShowArchiveConfirm}
         taskTitle={task.title}
         taskId={task.id}
         executorType={task.primaryExecutorType}
@@ -251,17 +276,28 @@ function KanbanCardDialogs({
         onConfirm={({ cascade }) => onArchive?.(task, { cascade })}
       />
       <TaskGitHubPRDialog
-        open={showPRDialog}
-        onOpenChange={setShowPRDialog}
+        open={menu.showPRDialog}
+        onOpenChange={menu.setShowPRDialog}
         task={task}
         repositories={repositories}
       />
       <TaskGitHubIssueDialog
-        open={showIssueDialog}
-        onOpenChange={setShowIssueDialog}
+        open={menu.showIssueDialog}
+        onOpenChange={menu.setShowIssueDialog}
         task={task}
         repositories={repositories}
       />
+      {menu.externalLinkProvider && workspaceId && (
+        <TaskExternalLinkDialog
+          open={true}
+          onOpenChange={(open) => {
+            if (!open) menu.setExternalLinkProvider(null);
+          }}
+          provider={menu.externalLinkProvider}
+          task={task}
+          workspaceId={workspaceId}
+        />
+      )}
     </>
   );
 }
@@ -309,8 +345,69 @@ function useActiveWorkspaceRepositories() {
   );
 }
 
+function KanbanCardFrame({
+  task,
+  repositoryChips,
+  draggable,
+  menu,
+  isPreviewed,
+  isSelected,
+  isMultiSelectMode,
+  showMaximizeButton,
+  isDeleting,
+  isArchiving,
+  onClick,
+  onToggleSelect,
+  onOpenFullPage,
+}: Pick<
+  KanbanCardProps,
+  | "task"
+  | "repositoryChips"
+  | "isSelected"
+  | "isMultiSelectMode"
+  | "showMaximizeButton"
+  | "isDeleting"
+  | "isArchiving"
+  | "onToggleSelect"
+  | "onOpenFullPage"
+> & {
+  draggable: ReturnType<typeof useDraggable>;
+  menu: KanbanCardMenuState;
+  isPreviewed: boolean;
+  onClick: (e: React.MouseEvent) => void;
+}) {
+  return (
+    <KanbanCardContextMenu entries={menu.contextMenuEntries}>
+      <KanbanCardShell
+        task={task}
+        repositoryChips={repositoryChips}
+        attributes={draggable.attributes}
+        listeners={draggable.listeners}
+        setNodeRef={draggable.setNodeRef}
+        transform={draggable.transform}
+        isDragging={draggable.isDragging}
+        isPreviewed={isPreviewed}
+        isSelected={isSelected}
+        isMultiSelectMode={isMultiSelectMode}
+        showMaximizeButton={showMaximizeButton}
+        isDeleting={isDeleting}
+        isArchiving={isArchiving}
+        menuEntries={menu.dropdownMenuEntries}
+        onClick={onClick}
+        onCheckboxClick={(e) => {
+          e.stopPropagation();
+          onToggleSelect?.(task.id);
+        }}
+        onOpenFullPage={onOpenFullPage}
+      />
+    </KanbanCardContextMenu>
+  );
+}
+
 export function KanbanCard({
   task,
+  workspaceId,
+  externalLinkAvailability,
   repositoryChips,
   onClick,
   onEdit,
@@ -328,25 +425,15 @@ export function KanbanCard({
   onRangeSelect,
   isMultiSelectMode,
 }: KanbanCardProps) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+  const draggable = useDraggable({
     id: task.id,
     disabled: isMultiSelectMode,
   });
   const isPreviewed = useAppStore((state) => state.kanbanPreviewedTaskId === task.id);
   const repositories = useActiveWorkspaceRepositories();
-  const {
-    dropdownMenuEntries,
-    contextMenuEntries,
-    showDeleteConfirm,
-    setShowDeleteConfirm,
-    showArchiveConfirm,
-    setShowArchiveConfirm,
-    showPRDialog,
-    setShowPRDialog,
-    showIssueDialog,
-    setShowIssueDialog,
-  } = useKanbanCardMenus({
+  const menu = useKanbanCardMenus({
     task,
+    externalLinkAvailability,
     steps,
     isDeleting,
     isArchiving,
@@ -368,41 +455,26 @@ export function KanbanCard({
 
   return (
     <>
-      <KanbanCardContextMenu entries={contextMenuEntries}>
-        <KanbanCardShell
-          task={task}
-          repositoryChips={repositoryChips}
-          attributes={attributes}
-          listeners={listeners}
-          setNodeRef={setNodeRef}
-          transform={transform}
-          isDragging={isDragging}
-          isPreviewed={isPreviewed}
-          isSelected={isSelected}
-          isMultiSelectMode={isMultiSelectMode}
-          showMaximizeButton={showMaximizeButton}
-          isDeleting={isDeleting}
-          isArchiving={isArchiving}
-          menuEntries={dropdownMenuEntries}
-          onClick={handleClick}
-          onCheckboxClick={(e) => {
-            e.stopPropagation();
-            onToggleSelect?.(task.id);
-          }}
-          onOpenFullPage={onOpenFullPage}
-        />
-      </KanbanCardContextMenu>
+      <KanbanCardFrame
+        task={task}
+        repositoryChips={repositoryChips}
+        draggable={draggable}
+        menu={menu}
+        isPreviewed={isPreviewed}
+        isSelected={isSelected}
+        isMultiSelectMode={isMultiSelectMode}
+        showMaximizeButton={showMaximizeButton}
+        isDeleting={isDeleting}
+        isArchiving={isArchiving}
+        onClick={handleClick}
+        onToggleSelect={onToggleSelect}
+        onOpenFullPage={onOpenFullPage}
+      />
       <KanbanCardDialogs
         task={task}
+        workspaceId={workspaceId}
         repositories={repositories}
-        showDeleteConfirm={showDeleteConfirm}
-        setShowDeleteConfirm={setShowDeleteConfirm}
-        showArchiveConfirm={showArchiveConfirm}
-        setShowArchiveConfirm={setShowArchiveConfirm}
-        showPRDialog={showPRDialog}
-        setShowPRDialog={setShowPRDialog}
-        showIssueDialog={showIssueDialog}
-        setShowIssueDialog={setShowIssueDialog}
+        menu={menu}
         isDeleting={isDeleting}
         isArchiving={isArchiving}
         onDelete={onDelete}

@@ -58,8 +58,11 @@ type TaskSwitcherProps = {
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
-  onLinkPullRequest?: (taskId: string) => void;
-  onLinkIssue?: (taskId: string) => void;
+  onLinkPullRequest?: TaskLinkHandler;
+  onLinkIssue?: TaskLinkHandler;
+  onLinkJiraTicket?: TaskLinkHandler;
+  onLinkLinearIssue?: TaskLinkHandler;
+  onLinkSentryIssue?: TaskLinkHandler;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onTogglePin?: (taskId: string) => void;
   onReorderGroup?: (groupTaskIds: string[]) => void;
@@ -80,6 +83,8 @@ type TaskSwitcherProps = {
   onClearSelection?: () => void;
   isMixedWorkflowSelection?: boolean;
 };
+
+type TaskLinkHandler = (taskId: string, taskTitle?: string) => void;
 
 /**
  * Modifier-aware sidebar row click: cmd/ctrl toggles one task, shift extends a
@@ -136,8 +141,11 @@ type TaskRowProps = {
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
-  onLinkPullRequest?: (taskId: string) => void;
-  onLinkIssue?: (taskId: string) => void;
+  onLinkPullRequest?: TaskLinkHandler;
+  onLinkIssue?: TaskLinkHandler;
+  onLinkJiraTicket?: TaskLinkHandler;
+  onLinkLinearIssue?: TaskLinkHandler;
+  onLinkSentryIssue?: TaskLinkHandler;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onTogglePin?: (taskId: string) => void;
   isPinned?: boolean;
@@ -154,6 +162,24 @@ type TaskRowProps = {
   isMixedWorkflowSelection?: boolean;
 };
 
+function taskLinkHandlerProps(props: Pick<TaskRowProps, keyof TaskLinkHandlerProps>) {
+  return {
+    onLinkPullRequest: props.onLinkPullRequest,
+    onLinkIssue: props.onLinkIssue,
+    onLinkJiraTicket: props.onLinkJiraTicket,
+    onLinkLinearIssue: props.onLinkLinearIssue,
+    onLinkSentryIssue: props.onLinkSentryIssue,
+  };
+}
+
+type TaskLinkHandlerProps = {
+  onLinkPullRequest?: TaskLinkHandler;
+  onLinkIssue?: TaskLinkHandler;
+  onLinkJiraTicket?: TaskLinkHandler;
+  onLinkLinearIssue?: TaskLinkHandler;
+  onLinkSentryIssue?: TaskLinkHandler;
+};
+
 function TaskRow({
   task,
   isSubTask,
@@ -167,8 +193,6 @@ function TaskRow({
   onRenameTask,
   onArchiveTask,
   onDeleteTask,
-  onLinkPullRequest,
-  onLinkIssue,
   onMoveToStep,
   onTogglePin,
   isPinned,
@@ -183,6 +207,7 @@ function TaskRow({
   onBulkMove,
   onClearSelection,
   isMixedWorkflowSelection,
+  ...props
 }: TaskRowProps) {
   const isSelected = task.id === selectedTaskId || task.id === activeTaskId;
   const isMultiSelected = selectedTaskIds?.has(task.id) ?? false;
@@ -197,8 +222,7 @@ function TaskRow({
       onRenameTask={onRenameTask}
       onArchiveTask={onArchiveTask}
       onDeleteTask={onDeleteTask}
-      onLinkPullRequest={onLinkPullRequest}
-      onLinkIssue={onLinkIssue}
+      {...taskLinkHandlerProps(props)}
       onMoveToStep={onMoveToStep}
       onTogglePin={onTogglePin}
       isPinned={isPinned}
@@ -372,8 +396,11 @@ type GroupSectionProps = {
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
-  onLinkPullRequest?: (taskId: string) => void;
-  onLinkIssue?: (taskId: string) => void;
+  onLinkPullRequest?: TaskLinkHandler;
+  onLinkIssue?: TaskLinkHandler;
+  onLinkJiraTicket?: TaskLinkHandler;
+  onLinkLinearIssue?: TaskLinkHandler;
+  onLinkSentryIssue?: TaskLinkHandler;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onTogglePin?: (taskId: string) => void;
   onReorderGroup?: (groupTaskIds: string[]) => void;
@@ -410,6 +437,9 @@ function GroupSection({
   onDeleteTask,
   onLinkPullRequest,
   onLinkIssue,
+  onLinkJiraTicket,
+  onLinkLinearIssue,
+  onLinkSentryIssue,
   onMoveToStep,
   onTogglePin,
   onReorderGroup,
@@ -444,6 +474,9 @@ function GroupSection({
       onDeleteTask,
       onLinkPullRequest,
       onLinkIssue,
+      onLinkJiraTicket,
+      onLinkLinearIssue,
+      onLinkSentryIssue,
       onMoveToStep,
       onTogglePin,
       pinnedTaskIds,
@@ -496,6 +529,9 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   onDeleteTask,
   onLinkPullRequest,
   onLinkIssue,
+  onLinkJiraTicket,
+  onLinkLinearIssue,
+  onLinkSentryIssue,
   onMoveToStep,
   onTogglePin,
   onReorderGroup,
@@ -548,6 +584,9 @@ export const TaskSwitcher = memo(function TaskSwitcher({
           onDeleteTask={onDeleteTask}
           onLinkPullRequest={onLinkPullRequest}
           onLinkIssue={onLinkIssue}
+          onLinkJiraTicket={onLinkJiraTicket}
+          onLinkLinearIssue={onLinkLinearIssue}
+          onLinkSentryIssue={onLinkSentryIssue}
           onMoveToStep={onMoveToStep}
           onTogglePin={onTogglePin}
           onReorderGroup={onReorderGroup}

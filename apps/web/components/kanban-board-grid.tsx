@@ -22,6 +22,10 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import { getKanbanColumnGridTemplate } from "./kanban/kanban-grid-template";
 import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
+import {
+  type KanbanExternalLinkAvailability,
+  useKanbanExternalLinkAvailability,
+} from "./kanban-external-link-availability";
 
 export type KanbanBoardGridProps = {
   steps: WorkflowStep[];
@@ -56,7 +60,9 @@ type ColumnGridProps = Pick<
   | "showMaximizeButton"
   | "deletingTaskId"
   | "archivingTaskId"
->;
+> & {
+  externalLinkAvailability: KanbanExternalLinkAvailability;
+};
 
 function getTasksForStep(tasks: Task[], stepId: string) {
   return tasks
@@ -92,6 +98,7 @@ function MobileLayout({
   activeColumnIndex,
   setActiveColumnIndex,
   currentStepId,
+  externalLinkAvailability,
 }: ColumnGridProps & {
   showLoading: boolean;
   activeTask: Task | null;
@@ -128,6 +135,7 @@ function MobileLayout({
               showMaximizeButton={showMaximizeButton}
               deletingTaskId={deletingTaskId}
               archivingTaskId={archivingTaskId}
+              externalLinkAvailability={externalLinkAvailability}
             />
             <MobileDropTargets
               steps={steps}
@@ -161,6 +169,7 @@ function TabletLayout({
   archivingTaskId,
   showLoading,
   activeTask,
+  externalLinkAvailability,
 }: ColumnGridProps & { showLoading: boolean; activeTask: Task | null }) {
   return (
     <>
@@ -184,6 +193,7 @@ function TabletLayout({
                   showMaximizeButton={showMaximizeButton}
                   deletingTaskId={deletingTaskId}
                   archivingTaskId={archivingTaskId}
+                  externalLinkAvailability={externalLinkAvailability}
                 />
               </div>
             ))}
@@ -212,6 +222,7 @@ function DesktopLayout({
   showLoading,
   activeTask,
   isCompactDesktop,
+  externalLinkAvailability,
 }: ColumnGridProps & {
   showLoading: boolean;
   activeTask: Task | null;
@@ -245,6 +256,7 @@ function DesktopLayout({
                 showMaximizeButton={showMaximizeButton}
                 deletingTaskId={deletingTaskId}
                 archivingTaskId={archivingTaskId}
+                externalLinkAvailability={externalLinkAvailability}
               />
             ))}
           </div>
@@ -306,6 +318,8 @@ export function KanbanBoardGrid({
   const { isMobile, isTablet, isCompactDesktop } = useResponsiveBreakpoint();
   const activeColumnIndex = useAppStore((state) => state.mobileKanban.activeColumnIndex);
   const setActiveColumnIndex = useAppStore((state) => state.setMobileKanbanColumnIndex);
+  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
+  const externalLinkAvailability = useKanbanExternalLinkAvailability(activeWorkspaceId);
   const sensors = useKanbanBoardSensors();
 
   // Calculate task counts per step for tabs
@@ -347,6 +361,7 @@ export function KanbanBoardGrid({
     showMaximizeButton,
     deletingTaskId,
     archivingTaskId,
+    externalLinkAvailability,
   };
 
   let layoutContent: React.ReactNode;

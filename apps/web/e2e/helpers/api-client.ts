@@ -1480,6 +1480,20 @@ export class ApiClient {
     });
   }
 
+  async setSentryConfig(payload: {
+    secret: string;
+    url?: string;
+    workspaceId?: string;
+  }): Promise<unknown> {
+    const { workspaceId, ...config } = payload;
+    const path = await this.withActiveWorkspace("/api/v1/sentry/config", workspaceId);
+    return this.request("PUT", path, {
+      authMethod: "auth_token",
+      url: "https://sentry.io",
+      ...config,
+    });
+  }
+
   /**
    * Poll until the integration config reports `lastOk: true`. SetConfig kicks
    * off an async auth-health probe in a goroutine, so the row's `lastOk` flips
