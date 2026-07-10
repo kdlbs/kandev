@@ -26,7 +26,10 @@ const overloaded529Message = "Internal error: API Error: 529 Overloaded. This is
 // before recovering (default 1, so the turn self-heals on the first retry).
 // Use a large N (e.g. `/overloaded:9`) to exhaust the retry budget and fall
 // through to the red recovery banner.
-var overloadedCmdRe = regexp.MustCompile(`(?i)^/(?:e2e:)?overloaded(?::(\d+))?$`)
+var (
+	overloadedCmdRe               = regexp.MustCompile(`(?i)^/(?:e2e:)?overloaded(?::(\d+))?$`)
+	changesWalkthroughPromptRefRe = regexp.MustCompile(`^@changes-walkthrough(?:\s|$)`)
+)
 
 const changesWalkthroughPromptMarker = "Please create an agent-authored walkthrough of the current changes"
 
@@ -35,7 +38,7 @@ func isChangesWalkthroughRequest(prompt string) bool {
 	legacyPrompt := strings.Contains(cmd, changesWalkthroughPromptMarker) &&
 		strings.Contains(cmd, "show_walkthrough_kandev") &&
 		strings.Contains(cmd, "Available changed files:")
-	promptReference := strings.Contains(cmd, "@changes-walkthrough")
+	promptReference := changesWalkthroughPromptRefRe.MatchString(cmd)
 	return legacyPrompt || promptReference
 }
 

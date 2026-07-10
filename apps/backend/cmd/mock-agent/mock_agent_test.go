@@ -139,6 +139,9 @@ func TestIsChangesWalkthroughRequest(t *testing.T) {
 	if isChangesWalkthroughRequest("show_walkthrough_kandev without the generated prompt shape") {
 		t.Fatal("expected unrelated prompt not to be detected")
 	}
+	if isChangesWalkthroughRequest("what does @changes-walkthrough do?") {
+		t.Fatal("expected incidental prompt reference not to be detected")
+	}
 }
 
 func TestDelayRange(t *testing.T) {

@@ -2,6 +2,7 @@ import { formatPromptReferenceExpansions } from "@/lib/prompts/expand-prompt-ref
 
 export const CHANGES_WALKTHROUGH_PROMPT_NAME = "changes-walkthrough";
 
+// Custom prompts may still contain placeholders from earlier walkthrough prompt iterations.
 const DIFF_CONTEXT_PLACEHOLDER = "{{diff_context}}";
 const CHANGED_FILES_PLACEHOLDER = "{{changed_files}}";
 const STATIC_CONTEXT_INSTRUCTION = "Inspect the task changes and compare against the correct base.";
