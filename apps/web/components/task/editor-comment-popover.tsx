@@ -6,6 +6,7 @@ import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useDraggablePopover, usePopoverDismiss } from "@/components/task/use-draggable-popover";
 
 type EditorCommentPopoverProps = {
   selectedText: string;
@@ -16,81 +17,9 @@ type EditorCommentPopoverProps = {
   onClose: () => void;
 };
 
-type DragState = { startX: number; startY: number; origLeft: number; origTop: number };
-
-function computeInitialPos(position: { x: number; y: number }, width: number, height: number) {
-  let left = position.x;
-  let top = position.y;
-  if (left + width > window.innerWidth - 16) left = Math.max(16, window.innerWidth - width - 16);
-  if (top + height > window.innerHeight - 16) top = Math.max(16, position.y - height);
-  return { left, top };
-}
-
 function getPopoverWidth() {
   if (typeof window === "undefined") return 384;
   return Math.min(384, Math.max(280, window.innerWidth - 32));
-}
-
-function useDraggablePos(position: { x: number; y: number }, width: number, height: number) {
-  const [pos, setPos] = useState(() => computeInitialPos(position, width, height));
-  const dragRef = useRef<DragState | null>(null);
-
-  const onDragStart = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      dragRef.current = {
-        startX: e.clientX,
-        startY: e.clientY,
-        origLeft: pos.left,
-        origTop: pos.top,
-      };
-      const onMove = (ev: MouseEvent) => {
-        if (!dragRef.current) return;
-        const dx = ev.clientX - dragRef.current.startX;
-        const dy = ev.clientY - dragRef.current.startY;
-        setPos({ left: dragRef.current.origLeft + dx, top: dragRef.current.origTop + dy });
-      };
-      const onUp = () => {
-        dragRef.current = null;
-        document.removeEventListener("mousemove", onMove);
-        document.removeEventListener("mouseup", onUp);
-      };
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp);
-    },
-    [pos.left, pos.top],
-  );
-
-  return { pos, onDragStart };
-}
-
-function usePopoverDismiss(
-  onClose: () => void,
-  popoverRef: React.RefObject<HTMLDivElement | null>,
-) {
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) onClose();
-    };
-    const timer = setTimeout(() => {
-      document.addEventListener("mousedown", handleClickOutside);
-    }, 100);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, [onClose, popoverRef]);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown, true);
-    return () => document.removeEventListener("keydown", handleKeyDown, true);
-  }, [onClose]);
 }
 
 function PopoverBody({
@@ -200,7 +129,7 @@ export function EditorCommentPopover({
   const [comment, setComment] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
-  const { pos, onDragStart } = useDraggablePos(position, getPopoverWidth(), 220);
+  const { pos, onDragStart } = useDraggablePopover(position, getPopoverWidth(), 220);
   usePopoverDismiss(onClose, popoverRef);
 
   useEffect(() => {

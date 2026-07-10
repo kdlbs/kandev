@@ -46,6 +46,21 @@ describe("markdown preview source line ranges", () => {
     });
   });
 
+  it("limits raw markdown fallback lookup to reasonable selection spans", () => {
+    const content = Array.from({ length: 35 }, (_, index) => `line ${index + 1}`).join("\n");
+
+    expect(findLineRangeForSelectedText(content, "line 1 line 2 line 3")).toEqual({
+      startLine: 1,
+      endLine: 3,
+    });
+    expect(
+      findLineRangeForSelectedText(
+        content,
+        Array.from({ length: 31 }, (_, index) => `line ${index + 1}`).join(" "),
+      ),
+    ).toBeNull();
+  });
+
   it("resolves a DOM selection to the combined source line range", () => {
     const root = document.createElement("div");
     const first = document.createElement("p");

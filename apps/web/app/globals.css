@@ -1199,6 +1199,17 @@
   background-color: var(--primary);
 }
 
+.markdown-preview-pre-comment-wrapper {
+  position: relative;
+}
+
+.markdown-preview-pre-comment-wrapper .markdown-preview-comment-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  margin-left: 0;
+}
+
 /* Drag handle */
 .plan-drag-handle {
   display: flex;

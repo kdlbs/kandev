@@ -10,6 +10,7 @@ export type MarkdownPreviewSelection = SourceLineRange & {
 
 export const SOURCE_START_ATTR = "data-md-source-start";
 export const SOURCE_END_ATTR = "data-md-source-end";
+const MAX_FALLBACK_SELECTION_SPAN = 30;
 
 function readPositiveInt(value: string | null): number | null {
   if (!value) return null;
@@ -65,7 +66,7 @@ export function findLineRangeForSelectedText(
   if (!needle) return null;
 
   const lines = content.replace(/\r\n?/g, "\n").split("\n");
-  for (let span = 1; span <= lines.length; span++) {
+  for (let span = 1; span <= Math.min(lines.length, MAX_FALLBACK_SELECTION_SPAN); span++) {
     for (let start = 0; start + span <= lines.length; start++) {
       const end = start + span - 1;
       const haystack = normalizeMarkdownSourceWindow(lines.slice(start, end + 1).join(" "));

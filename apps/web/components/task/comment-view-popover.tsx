@@ -1,11 +1,12 @@
 "use client";
 
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useState, useCallback } from "react";
 import { IconEdit, IconTrash, IconGripHorizontal } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { cn } from "@/lib/utils";
 import type { DiffComment } from "@/lib/diff/types";
 import { CommentForm } from "@/components/diff/comment-form";
+import { useDraggablePopover, usePopoverDismiss } from "@/components/task/use-draggable-popover";
 
 type CommentViewPopoverProps = {
   comments: DiffComment[];
@@ -14,79 +15,6 @@ type CommentViewPopoverProps = {
   onUpdate?: (commentId: string, text: string) => void;
   onClose: () => void;
 };
-
-type DragState = { startX: number; startY: number; origLeft: number; origTop: number };
-
-function computePopoverInitialPos(
-  position: { x: number; y: number },
-  width: number,
-  height: number,
-) {
-  let left = position.x;
-  let top = position.y;
-  if (left + width > window.innerWidth - 16) left = Math.max(16, window.innerWidth - width - 16);
-  if (top + height > window.innerHeight - 16) top = Math.max(16, position.y - height);
-  return { left, top };
-}
-
-function useDraggablePos(position: { x: number; y: number }, width: number, height: number) {
-  const [pos, setPos] = useState(() => computePopoverInitialPos(position, width, height));
-  const dragRef = useRef<DragState | null>(null);
-
-  const onDragStart = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      dragRef.current = {
-        startX: e.clientX,
-        startY: e.clientY,
-        origLeft: pos.left,
-        origTop: pos.top,
-      };
-      const onMove = (ev: MouseEvent) => {
-        if (!dragRef.current) return;
-        const dx = ev.clientX - dragRef.current.startX;
-        const dy = ev.clientY - dragRef.current.startY;
-        setPos({ left: dragRef.current.origLeft + dx, top: dragRef.current.origTop + dy });
-      };
-      const onUp = () => {
-        dragRef.current = null;
-        document.removeEventListener("mousemove", onMove);
-        document.removeEventListener("mouseup", onUp);
-      };
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp);
-    },
-    [pos.left, pos.top],
-  );
-
-  return { pos, onDragStart };
-}
-
-function usePopoverClose(onClose: () => void, popoverRef: React.RefObject<HTMLDivElement | null>) {
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) onClose();
-    };
-    const timer = setTimeout(() => {
-      document.addEventListener("mousedown", handleClickOutside);
-    }, 100);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, [onClose, popoverRef]);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown, true);
-    return () => document.removeEventListener("keydown", handleKeyDown, true);
-  }, [onClose]);
-}
 
 function formatLineRange(start: number, end: number) {
   return start === end ? `L${start}` : `L${start}-${end}`;
@@ -178,8 +106,8 @@ export function CommentViewPopover({
 }: CommentViewPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
-  const { pos, onDragStart } = useDraggablePos(position, 350, 200);
-  usePopoverClose(onClose, popoverRef);
+  const { pos, onDragStart } = useDraggablePopover(position, 350, 200);
+  usePopoverDismiss(onClose, popoverRef);
 
   return (
     <div
