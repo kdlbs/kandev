@@ -760,7 +760,8 @@ func TestHandleAgentReadyGuards(t *testing.T) {
 		if _, err := svc.messageQueue.QueueMessage(ctx, "s1", "t1", "queued", "", messagequeue.QueuedByUser, false, nil); err != nil {
 			t.Fatalf("failed to queue message: %v", err)
 		}
-		lock := svc.getCancelInFlightLock("s1")
+		lock, release := svc.acquireCancelInFlightGuard("s1")
+		defer release()
 		lock.Lock()
 		defer lock.Unlock()
 

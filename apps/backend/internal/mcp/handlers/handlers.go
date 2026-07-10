@@ -1875,6 +1875,12 @@ const (
 // the full status enum ("queued", "sent", "started").
 const taskMessageStatusSent = "sent"
 
+// taskMessageStatusQueued is the taskMessageDispatchResult.status value
+// used when a message_task_kandev prompt is left in the FIFO queue for
+// later delivery rather than dispatched immediately. Extracted alongside
+// taskMessageStatusSent to satisfy goconst's repeated-string rule.
+const taskMessageStatusQueued = "queued"
+
 // queuedEntryID is set only by queueTaskMessage (the message queue's
 // returned entry id) so queueThenInterruptTaskMessage can target that exact
 // entry when interrupting instead of the FIFO head — see
@@ -2169,7 +2175,7 @@ func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session 
 		return taskMessageDispatchResult{}, fmt.Errorf("failed to queue message: %w", err)
 	}
 	h.publishQueueStatusEvent(ctx, session.ID, queue)
-	return taskMessageDispatchResult{status: "queued", sessionID: session.ID, queuedEntryID: queued.ID}, nil
+	return taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID, queuedEntryID: queued.ID}, nil
 }
 
 // queueThenInterruptTaskMessage atomically queues prompt for a running/
@@ -2229,9 +2235,9 @@ func (h *Handlers) queueThenInterruptTaskMessage(ctx context.Context, taskID str
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
 			zap.Error(err))
-		return taskMessageDispatchResult{status: "queued", sessionID: session.ID, queuedEntryID: queued.ID}, nil
+		return taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID, queuedEntryID: queued.ID}, nil
 	}
-	result := taskMessageDispatchResult{status: "queued", sessionID: session.ID, queuedEntryID: queued.ID}
+	result := taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID, queuedEntryID: queued.ID}
 	if dispatched {
 		result.status = taskMessageStatusSent
 	}

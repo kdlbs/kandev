@@ -241,7 +241,8 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 	// QueueAndInterruptForPeerMessage racing to deliver its own just-queued
 	// message must never have this drain steal it before the interrupt's
 	// own cancel+take runs.
-	lock := s.getCancelInFlightLock(data.SessionID)
+	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
+	defer release()
 	if !lock.TryLock() {
 		s.logger.Debug("skipping boot-ready drain; a cancel/interrupt is in flight",
 			zap.String("task_id", data.TaskID),
@@ -354,12 +355,15 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	// step usually dispatches something, which fires a future agent.ready
 	// that gives this drain another chance. The one exception —
 	// cancelAndTakeForPeerMessage's cancel step genuinely fails, so nothing
-	// gets dispatched and the message stays queued — is a pre-existing,
-	// already-accepted contract (see queueThenInterruptTaskMessage in
-	// mcp/handlers): the message relies on whatever later naturally drains
-	// the session (a still-running turn eventually completing) or a manual
-	// user cancel, unrelated to and unchanged by this lock.
-	lock := s.getCancelInFlightLock(data.SessionID)
+	// gets dispatched and the message stays queued — is a narrowed,
+	// pre-existing edge case (see queueThenInterruptTaskMessage in
+	// mcp/handlers): cancelAndTakeForPeerMessage already retries the take
+	// itself when the session turns out to already be promptable (this
+	// exact stale-drain scenario), so the only way the message can still
+	// be left relying on a future natural drain is a genuine cancel error
+	// arriving while the previous turn is still actually running.
+	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
+	defer release()
 	if !lock.TryLock() {
 		s.logger.Debug("skipping turn-complete drain; a cancel/interrupt is in flight",
 			zap.String("task_id", data.TaskID),

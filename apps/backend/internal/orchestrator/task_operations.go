@@ -2532,20 +2532,66 @@ func (s *Service) DrainQueuedMessage(ctx context.Context, sessionID string) (boo
 	return s.drainQueuedMessageForPromptableSession(ctx, sessionID), nil
 }
 
-// getCancelInFlightLock returns the per-session mutex guarding cancel/
-// interrupt/queue-take decisions for sessionID, creating one if it doesn't
-// exist yet. See the cancelInFlight field doc comment for the full list of
-// callers that must share this one lock.
-func (s *Service) getCancelInFlightLock(sessionID string) *sync.Mutex {
-	val, _ := s.cancelInFlight.LoadOrStore(sessionID, &sync.Mutex{})
-	return val.(*sync.Mutex)
+// cancelInFlightGuard is a per-session mutex serializing cancel/interrupt/
+// queue-take decisions (see the Service.cancelInFlight field doc comment),
+// paired with a reference count so the registry can safely reclaim the
+// entry once every acquirer has released it — refs is guarded by
+// Service.cancelInFlightMu, never by mu itself, since mu can be held for
+// the caller's whole critical section while refs bookkeeping must stay
+// brief and independent of that.
+type cancelInFlightGuard struct {
+	mu   sync.Mutex
+	refs int
 }
 
-// isCancelInFlight reports whether sessionID's cancelInFlight lock is
+// acquireCancelInFlightGuard returns the shared per-session mutex guarding
+// cancel/interrupt/queue-take decisions for sessionID, creating one if it
+// doesn't exist yet and registering the caller's reference to it. Callers
+// MUST call the returned release func exactly once when done with the
+// mutex — whether or not they actually acquired it (e.g. a TryLock that
+// returned false still needs release to drop its reference). Pairing every
+// acquire with a release is what keeps cancelInFlight bounded by
+// concurrently-active sessions: once refs drops to zero the entry is
+// deleted from the map instead of accumulating one permanent entry per
+// session ever created.
+func (s *Service) acquireCancelInFlightGuard(sessionID string) (*sync.Mutex, func()) {
+	s.cancelInFlightMu.Lock()
+	guard, ok := s.cancelInFlight[sessionID]
+	if !ok {
+		guard = &cancelInFlightGuard{}
+		if s.cancelInFlight == nil {
+			s.cancelInFlight = make(map[string]*cancelInFlightGuard)
+		}
+		s.cancelInFlight[sessionID] = guard
+	}
+	guard.refs++
+	s.cancelInFlightMu.Unlock()
+
+	var released bool
+	release := func() {
+		if released {
+			return
+		}
+		released = true
+		s.cancelInFlightMu.Lock()
+		guard.refs--
+		if guard.refs == 0 {
+			delete(s.cancelInFlight, sessionID)
+		}
+		s.cancelInFlightMu.Unlock()
+	}
+	return &guard.mu, release
+}
+
+// isCancelInFlight reports whether sessionID's cancelInFlight guard is
 // currently held by someone else, without itself claiming it — a
-// TryLock-then-immediately-Unlock peek rather than a real acquisition.
+// TryLock-then-immediately-Unlock peek rather than a real acquisition. The
+// guard entry this creates to perform the peek is released (and pruned if
+// nothing else references it) before this returns, so a passive readiness
+// probe never leaves permanent state behind.
 func (s *Service) isCancelInFlight(sessionID string) bool {
-	lock := s.getCancelInFlightLock(sessionID)
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	defer release()
 	if lock.TryLock() {
 		lock.Unlock()
 		return false
@@ -2571,7 +2617,8 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	// "Turn cancelled by user" message and races on turn cleanup — the second
 	// call's getActiveTurnID lazily starts a phantom turn after the first call
 	// already closed the real one.
-	lock := s.getCancelInFlightLock(sessionID)
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	defer release()
 	if !lock.TryLock() {
 		s.logger.Debug("cancel already in flight; skipping duplicate",
 			zap.String("session_id", sessionID))
@@ -2702,8 +2749,28 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 // must not write a visible "Turn cancelled" message and must not move the
 // task to REVIEW (writeTaskReviewStateOnCancel).
 func (s *Service) cancelAndTakeForPeerMessage(ctx context.Context, taskID, sessionID, entryID string) (bool, error) {
-	if err := s.cancelAgentSilent(ctx, taskID, sessionID); err != nil {
-		return false, fmt.Errorf("interrupt for peer message: %w", err)
+	if cancelErr := s.cancelAgentSilent(ctx, taskID, sessionID); cancelErr != nil {
+		// A genuine (non-tolerated — cancelAgentSilent already swallows "no
+		// active execution") cancel failure usually means the previous turn
+		// is still actually running server-side and will complete naturally,
+		// firing a future agent.ready that drains this entry through the
+		// normal FIFO path once the lock is free — see the doc comment
+		// above. But handleAgentReady/handleAgentBootReady's own
+		// completion/workflow bookkeeping runs *before* their take-decision
+		// claims this same lock (see their guard comments), so a losing
+		// TryLock there can still have already marked the session
+		// promptable — meaning that turn already ended and no future
+		// agent.ready is coming. Recheck: if the session is promptable
+		// despite the cancel error, take-and-dispatch anyway instead of
+		// leaving the message stranded with nothing left to trigger it.
+		session, sessErr := s.repo.GetTaskSession(ctx, sessionID)
+		if sessErr != nil || session == nil || s.checkSessionPromptable(taskID, sessionID, session.State) != nil {
+			return false, fmt.Errorf("interrupt for peer message: %w", cancelErr)
+		}
+		s.logger.Warn("cancel failed but session is already promptable; taking queued message directly instead of relying on a future drain",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(cancelErr))
 	}
 	if s.messageQueue != nil {
 		queuedMsg, ok, err := s.messageQueue.TakeQueuedEntry(ctx, sessionID, entryID)
@@ -2756,7 +2823,8 @@ func (s *Service) QueueAndInterruptForPeerMessage(ctx context.Context, taskID, s
 	if s.messageQueue == nil {
 		return nil, false, errors.New("message queue not available")
 	}
-	lock := s.getCancelInFlightLock(sessionID)
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	defer release()
 	lock.Lock()
 	defer lock.Unlock()
 

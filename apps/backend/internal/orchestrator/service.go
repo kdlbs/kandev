@@ -403,19 +403,30 @@ type Service struct {
 	// activity before triggering fallback resume.
 	clarificationWatchdogTimeout time.Duration
 
-	// cancelInFlight holds a per-session *sync.Mutex (via getCancelInFlightLock)
-	// serializing every operation that cancels a session's turn and/or decides
-	// what to take-and-dispatch from its message queue next: CancelAgent (the
-	// user cancel button — TryLock, dedup impatient retries), the natural
-	// turn-completion/boot-ready drain decision in handleAgentReady /
-	// handleAgentBootReady (TryLock, skip if a cancel/interrupt owns it), and
-	// QueueAndInterruptForPeerMessage (blocking Lock — must wait rather than
-	// work around a busy lock with an unguarded insert; see its doc comment).
-	// All of these must go through this one lock — a second, independent
-	// lock for any of them would defeat the mutual exclusion the others rely
-	// on to avoid racing each other's take-and-dispatch decision for the same
-	// session.
-	cancelInFlight sync.Map
+	// cancelInFlightMu guards cancelInFlight's map structure (insert/
+	// lookup/remove of *cancelInFlightGuard entries) — held only briefly
+	// for that bookkeeping, never across a caller's actual per-session
+	// critical section (which is guarded by the entry's own mutex, handed
+	// to callers by acquireCancelInFlightGuard).
+	cancelInFlightMu sync.Mutex
+	// cancelInFlight holds one *cancelInFlightGuard per session with an
+	// active reference — an in-progress or waiting claim from CancelAgent
+	// (the user cancel button — TryLock, dedup impatient retries), the
+	// natural turn-completion/boot-ready drain decision in handleAgentReady
+	// / handleAgentBootReady (TryLock, skip if a cancel/interrupt owns it),
+	// or QueueAndInterruptForPeerMessage (blocking Lock — must wait rather
+	// than work around a busy lock with an unguarded insert; see its doc
+	// comment). All of these must go through the same per-session guard —
+	// a second, independent lock for any of them would defeat the mutual
+	// exclusion the others rely on to avoid racing each other's
+	// take-and-dispatch decision for the same session.
+	//
+	// Entries are reference-counted (acquireCancelInFlightGuard /
+	// releaseCancelInFlightGuard) and pruned once nobody holds a reference,
+	// so this stays bounded by concurrently-active sessions rather than
+	// growing by one permanent entry per session ever created over a
+	// long-lived backend's lifetime.
+	cancelInFlight map[string]*cancelInFlightGuard
 
 	// transientRetries tracks in-progress transient-provider-error (529
 	// Overloaded) retry loops. key: sessionID, value: *transientRetryEntry.
