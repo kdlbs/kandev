@@ -1192,6 +1192,9 @@ func (m *mockSessionLauncher) ProcessOnTurnStart(context.Context, string, string
 	return nil
 }
 func (m *mockSessionLauncher) GetMessageQueue() *messagequeue.Service { return nil }
+func (m *mockSessionLauncher) InterruptForPeerMessage(context.Context, string, string) error {
+	return nil
+}
 
 func TestAutoStartTask_DefaultsToWorktreeExecutor(t *testing.T) {
 	launcher := newMockSessionLauncher()

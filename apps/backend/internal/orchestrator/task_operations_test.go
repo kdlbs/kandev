@@ -696,6 +696,122 @@ func TestCancelAgent_DrainsQueuedMessageAfterCancelGuardClears(t *testing.T) {
 	}
 }
 
+// --- InterruptForPeerMessage ---
+
+// TestInterruptForPeerMessage_DeliversQueuedMessageWithoutUserCancelSideEffects
+// pins the parent -> child steering contract: InterruptForPeerMessage cancels
+// the child's in-flight turn and drains its queue like CancelAgent does, but
+// — unlike the user-facing cancel button — it must not write a visible "Turn
+// cancelled" message and must not move the task to REVIEW
+// (writeTaskReviewStateOnCancel). Those are user-cancel-specific side effects
+// that would misrepresent an internal steering signal from the parent task.
+func TestInterruptForPeerMessage_DeliversQueuedMessageWithoutUserCancelSideEffects(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo, promptDone: make(chan struct{})}
+	taskRepo := newMockTaskRepo()
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	msgCreator := &mockMessageCreator{}
+	svc.messageCreator = msgCreator
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	if _, err := svc.messageQueue.QueueMessage(
+		ctx, "session1", "task1", "parent steer message", "", messagequeue.QueuedByAgent, false, nil,
+	); err != nil {
+		t.Fatalf("queue message: %v", err)
+	}
+
+	if err := svc.InterruptForPeerMessage(ctx, "task1", "session1"); err != nil {
+		t.Fatalf("interrupt for peer message: %v", err)
+	}
+
+	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
+		t.Fatalf("expected exactly 1 agent cancel call, got %d", got)
+	}
+
+	status := svc.messageQueue.GetStatus(ctx, "session1")
+	if status.Count != 0 {
+		t.Fatalf("expected the queued message to be drained, count=%d entries=%+v", status.Count, status.Entries)
+	}
+
+	// Join the executeQueuedMessage goroutine spawned by the drain (see
+	// drainQueuedMessageForPromptableSession) via the mock's PromptAgent
+	// signal instead of racing test teardown — this proves the parent's
+	// queued message was actually dispatched to the agent, not merely popped
+	// off the queue.
+	select {
+	case <-agentMgr.promptDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the interrupted turn's queued message to be dispatched")
+	}
+	agentMgr.mu.Lock()
+	prompts := append([]string(nil), agentMgr.capturedPrompts...)
+	agentMgr.mu.Unlock()
+	if len(prompts) != 1 || prompts[0] != "parent steer message" {
+		t.Fatalf("expected the queued parent message to be dispatched to the agent, got prompts=%v", prompts)
+	}
+
+	// The downstream turn dispatch legitimately writes IN_PROGRESS as part of
+	// normal PromptTask semantics (unrelated to this contract) — only guard
+	// against the cancel-button-specific REVIEW write
+	// (writeTaskReviewStateOnCancel). Checking the full stateHistory (not
+	// just the latest updatedStates value) matters here: a faulty
+	// implementation could write REVIEW and then have the async-dispatched
+	// prompt legitimately overwrite it with IN_PROGRESS, which would hide
+	// the bug from a latest-value-only check.
+	for _, state := range taskRepo.stateHistory["task1"] {
+		if state == v1.TaskStateReview {
+			t.Fatalf("interrupt must never move the task to REVIEW like the cancel button does, history=%v", taskRepo.stateHistory["task1"])
+		}
+	}
+	for _, msg := range msgCreator.sessionMessages {
+		if strings.Contains(msg.content, "cancelled") {
+			t.Fatalf("interrupt must not write a visible cancel message, got %+v", msg)
+		}
+	}
+}
+
+// TestInterruptForPeerMessage_CancelFailurePropagatesAndKeepsMessageQueued pins
+// the failure contract: a genuine cancel error (not the tolerated
+// ErrNoExecutionForSession / ErrCancelEscalated sentinels cancelAgentSilent
+// already handles) must be returned to the caller rather than swallowed —
+// silently reporting success while the interrupt failed would strand the
+// message exactly like the bug this operation exists to fix, just with an
+// invisible delay. The message must stay queued (not dropped) so the normal
+// turn-completion drain can still deliver it later.
+func TestInterruptForPeerMessage_CancelFailurePropagatesAndKeepsMessageQueued(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		cancelAgentErr:         errors.New("agent manager unreachable"),
+	}
+	taskRepo := newMockTaskRepo()
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	if _, err := svc.messageQueue.QueueMessage(
+		ctx, "session1", "task1", "parent steer message", "", messagequeue.QueuedByAgent, false, nil,
+	); err != nil {
+		t.Fatalf("queue message: %v", err)
+	}
+
+	if err := svc.InterruptForPeerMessage(ctx, "task1", "session1"); err == nil {
+		t.Fatal("expected InterruptForPeerMessage to propagate the cancel failure")
+	}
+
+	status := svc.messageQueue.GetStatus(ctx, "session1")
+	if status.Count != 1 {
+		t.Fatalf("expected the queued message to remain queued after a failed interrupt, count=%d", status.Count)
+	}
+}
+
 // --- StartCreatedSession ---
 
 func TestStartCreatedSession_WrongTask(t *testing.T) {

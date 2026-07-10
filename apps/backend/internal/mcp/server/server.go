@@ -481,7 +481,7 @@ func (s *Server) registerKanbanTools() {
 Use this to communicate with a sibling task, a parent task, or any task you know the ID of — for example to ask a delegated subtask for clarification, hand it new context, or nudge a paused task forward.
 
 Behaviour by session state:
-- Running/starting: the message is queued and delivered when the current turn ends.
+- Running/starting: the message is queued and delivered when the current turn ends — unless you are the target's parent task, in which case its current turn is interrupted immediately so the message is delivered without waiting (keeps a parent's steering/stop messages from piling up behind a long-running child's turn).
 - Idle (waiting for input or completed): the message is sent immediately as a new turn.
 - Created (not yet started): the agent is started with this message as its first prompt.
 - Failed/cancelled: an error is returned (use create_task_kandev to start fresh).

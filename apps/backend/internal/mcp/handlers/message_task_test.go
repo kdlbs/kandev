@@ -36,11 +36,20 @@ type fakeOrchestrator struct {
 	resumeCalls       int
 	turnStartCalls    []turnStartCall
 	onTurnStart       func(context.Context, string, string) error
+	interruptCalls    []interruptCall
 
 	// Configurable: error returned by PromptTask. Cleared after first call so
 	// the retry-after-resume path can succeed on the second call.
 	promptErrFirst  error
 	startCreatedErr error
+	// interruptErr is returned by every InterruptForPeerMessage call — lets
+	// tests exercise the "interrupt failed, message must stay queued" path.
+	interruptErr error
+}
+
+// interruptCall records one InterruptForPeerMessage invocation.
+type interruptCall struct {
+	taskID, sessionID string
 }
 
 type promptCall struct {
@@ -106,6 +115,16 @@ func (f *fakeOrchestrator) ProcessOnTurnStart(ctx context.Context, taskID, sessi
 }
 
 func (f *fakeOrchestrator) GetMessageQueue() *messagequeue.Service { return f.queue }
+
+// InterruptForPeerMessage records the call and returns the configured
+// interruptErr — real interrupt/drain behavior is exercised by the
+// orchestrator-level InterruptForPeerMessage tests, not this fake.
+func (f *fakeOrchestrator) InterruptForPeerMessage(_ context.Context, taskID, sessionID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.interruptCalls = append(f.interruptCalls, interruptCall{taskID: taskID, sessionID: sessionID})
+	return f.interruptErr
+}
 
 type fakePromptReferenceResolver struct {
 	expansions []promptservice.PromptReferenceExpansion
@@ -224,6 +243,45 @@ func seedTaskWithSession(t *testing.T, svc *service.Service, repo seedRepo, stat
 	return sender, target, loaded
 }
 
+// seedChildTaskWithSession is like seedTaskWithSession, but the target task
+// is created as a child of the sender task (ParentID = sender.ID) so callers
+// can exercise the parent -> child interrupt-on-message path. Returns
+// (parent/sender, child/target, target session).
+func seedChildTaskWithSession(t *testing.T, svc *service.Service, repo seedRepo, state models.TaskSessionState) (*models.Task, *models.Task, *models.TaskSession) {
+	t.Helper()
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
+	parent, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "Parent task",
+	})
+	require.NoError(t, err)
+	child, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "Child task",
+		ParentID:    parent.ID,
+	})
+	require.NoError(t, err)
+
+	sess := &models.TaskSession{
+		ID:             "sess-1",
+		TaskID:         child.ID,
+		AgentProfileID: "agent-profile-1",
+		IsPrimary:      true,
+		State:          models.TaskSessionStateCreated,
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, sess))
+	if state != models.TaskSessionStateCreated {
+		require.NoError(t, repo.UpdateTaskSessionState(ctx, sess.ID, state, ""))
+	}
+	loaded, err := svc.GetTaskSession(ctx, sess.ID)
+	require.NoError(t, err)
+	return parent, child, loaded
+}
+
 // senderPayload returns the standard payload shape sent by the MCP server
 // (agentctl injects sender_task_id and sender_session_id). Helper keeps test
 // bodies focused on the behaviour under test.
@@ -300,6 +358,67 @@ func TestHandleMessageTask_RunningSession_Queues(t *testing.T) {
 	assert.Equal(t, "sender-sess-1", entry.Metadata["sender_session_id"])
 	assert.Empty(t, orch.promptCalls)
 	assert.Empty(t, orch.startCreatedCalls)
+	// Unrelated senders (not the target's parent) must never trigger an
+	// interrupt — the default "queue and deliver at turn end" contract
+	// documented on message_task_kandev stays unchanged for them.
+	assert.Empty(t, orch.interruptCalls)
+}
+
+// TestHandleMessageTask_ParentToChildRunningSession_Interrupts pins the
+// steering contract: when the sender is the target's parent task, a
+// running/starting target is interrupted right after the message is queued,
+// so the message is delivered without waiting for the child's current turn
+// to finish naturally. See InterruptForPeerMessage's doc comment for why
+// this matters for long-running children.
+func TestHandleMessageTask_ParentToChildRunningSession_Interrupts(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	parent, child, sess := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(child.ID, "stop and pivot to X", parent.ID))
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "queued", payload["status"])
+
+	// The message is queued exactly like any other message_task call...
+	status := orch.queue.GetStatus(context.Background(), sess.ID)
+	require.Equal(t, 1, status.Count)
+	assert.Contains(t, status.Entries[0].Content, "stop and pivot to X")
+
+	// ...but because the sender is the target's parent, the child's current
+	// turn is interrupted immediately instead of waiting for it to finish.
+	require.Len(t, orch.interruptCalls, 1)
+	assert.Equal(t, child.ID, orch.interruptCalls[0].taskID)
+	assert.Equal(t, sess.ID, orch.interruptCalls[0].sessionID)
+}
+
+// TestHandleMessageTask_ParentToChildRunningSession_InterruptFailure_KeepsMessageQueued
+// pins the failure contract: an interrupt failure must surface as an error
+// (not be silently swallowed — that would strand the message with no visible
+// signal, exactly the bug this feature exists to fix) while leaving the
+// already-queued message in place so the normal turn-completion drain can
+// still deliver it.
+func TestHandleMessageTask_ParentToChildRunningSession_InterruptFailure_KeepsMessageQueued(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	parent, child, sess := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.interruptErr = errors.New("cancel agent: agent manager unreachable")
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(child.ID, "stop now", parent.ID))
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeError, resp.Type)
+
+	status := orch.queue.GetStatus(context.Background(), sess.ID)
+	require.Equal(t, 1, status.Count, "message must remain queued even though the interrupt failed")
 }
 
 func TestHandleMessageTask_AppendsPromptReferenceExpansions(t *testing.T) {

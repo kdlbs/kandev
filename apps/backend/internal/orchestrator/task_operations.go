@@ -2658,6 +2658,38 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+// InterruptForPeerMessage cancels sessionID's in-flight turn and immediately
+// takes and dispatches its next queued message (the FIFO head — see
+// drainQueuedMessageForPromptableSession) instead of waiting for the turn to
+// end naturally. It is used only by handleMessageTask
+// (mcp/handlers) when the sender is the target task's parent: a long-running
+// child otherwise leaves its parent's control/steer messages parked on the
+// FIFO queue until the child's current turn finishes on its own, and with
+// several such children running in parallel the per-session queue can fill
+// up to messagequeue.DefaultMaxPerSession before any of them are delivered.
+//
+// Deliberately mirrors cancelAgentSilent + drainQueuedMessageForPromptableSession
+// rather than delegating to CancelAgent: the interrupt is an internal steering
+// signal from the parent, not a user action, so unlike the cancel button it
+// must not write a visible "Turn cancelled" message and must not move the
+// task to REVIEW (writeTaskReviewStateOnCancel).
+func (s *Service) InterruptForPeerMessage(ctx context.Context, taskID, sessionID string) error {
+	if _, busy := s.cancelInFlight.LoadOrStore(sessionID, struct{}{}); busy {
+		s.logger.Debug("interrupt for peer message skipped; a cancel is already in flight",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+		return nil
+	}
+	defer s.cancelInFlight.Delete(sessionID)
+
+	if err := s.cancelAgentSilent(ctx, taskID, sessionID); err != nil {
+		return fmt.Errorf("interrupt for peer message: %w", err)
+	}
+
+	s.drainQueuedMessageForPromptableSession(ctx, sessionID)
+	return nil
+}
+
 // CompleteTask explicitly completes a task and stops all its agents
 func (s *Service) CompleteTask(ctx context.Context, taskID string) error {
 	s.logger.Info("completing task",

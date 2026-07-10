@@ -87,7 +87,13 @@ type mockTaskRepo struct {
 	tasks         map[string]*v1.Task
 	updatedStates map[string]v1.TaskState
 	stateWrites   map[string]int // per-task UpdateTaskState call count for dedup tests
-	getTaskErr    error          // if set, GetTask returns this error
+	// stateHistory records every state actually written per task, in order.
+	// updatedStates only keeps the latest value, which hides a transient
+	// write (e.g. a REVIEW write later overwritten by an async prompt
+	// dispatch's IN_PROGRESS write) — tests asserting a state was NEVER
+	// written at any point must check stateHistory, not updatedStates.
+	stateHistory map[string][]v1.TaskState
+	getTaskErr   error // if set, GetTask returns this error
 }
 
 func newMockTaskRepo() *mockTaskRepo {
@@ -95,6 +101,7 @@ func newMockTaskRepo() *mockTaskRepo {
 		tasks:         make(map[string]*v1.Task),
 		updatedStates: make(map[string]v1.TaskState),
 		stateWrites:   make(map[string]int),
+		stateHistory:  make(map[string][]v1.TaskState),
 	}
 }
 
@@ -119,6 +126,7 @@ func (m *mockTaskRepo) UpdateTaskState(_ context.Context, taskID string, state v
 	defer m.mu.Unlock()
 	m.updatedStates[taskID] = state
 	m.stateWrites[taskID]++
+	m.stateHistory[taskID] = append(m.stateHistory[taskID], state)
 	if t, ok := m.tasks[taskID]; ok {
 		t.State = state
 	}
@@ -140,6 +148,7 @@ func (m *mockTaskRepo) UpdateTaskStateIfCurrentIn(
 		}
 		m.updatedStates[taskID] = state
 		m.stateWrites[taskID]++
+		m.stateHistory[taskID] = append(m.stateHistory[taskID], state)
 		t.State = state
 		return true, nil
 	}
@@ -215,6 +224,11 @@ type mockAgentManager struct {
 	cancelAgentCalls   atomic.Int32
 	cancelAgentBlock   chan struct{}
 	cancelAgentEntered chan struct{}
+	// cancelAgentErr, when set, is returned by CancelAgent instead of nil —
+	// lets tests exercise callers that must react to a genuine cancel
+	// failure (as opposed to the tolerated ErrNoExecutionForSession /
+	// ErrCancelEscalated sentinels handled inside cancelAgentSilent).
+	cancelAgentErr error
 
 	// set_session_mode tracking (issue #1183). Records (sessionID, modeID) for
 	// every SetSessionModeBySessionID call. setSessionModeErr, when set, is
@@ -317,7 +331,7 @@ func (m *mockAgentManager) CancelAgent(_ context.Context, _ string) error {
 	if m.cancelAgentBlock != nil {
 		<-m.cancelAgentBlock
 	}
-	return nil
+	return m.cancelAgentErr
 }
 func (m *mockAgentManager) RespondToPermissionBySessionID(_ context.Context, _, _, _ string, _ bool) error {
 	return nil
