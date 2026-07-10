@@ -475,11 +475,7 @@ function ChangesPanelWalkthroughButton({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span
-          className="inline-flex"
-          tabIndex={requestWalkthroughDisabled ? 0 : undefined}
-          aria-label={requestWalkthroughDisabled ? tooltip : undefined}
-        >
+        <span className="inline-flex" tabIndex={requestWalkthroughDisabled ? 0 : undefined}>
           <Button
             size="sm"
             variant="ghost"

@@ -276,6 +276,7 @@ export function useMobilePanelHandlers({
   const [selectedFile, setSelectedFile] = useState<OpenFileTab | null>(null);
   const [trackedSessionId, setTrackedSessionId] = useState<string | null>(effectiveSessionId);
   const latestRequestIdRef = useRef(0);
+  const openFileAbortRef = useRef<AbortController | null>(null);
 
   // Reset viewer when switching sessions — adjust state during render per
   // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
@@ -286,23 +287,42 @@ export function useMobilePanelHandlers({
 
   useEffect(() => {
     latestRequestIdRef.current += 1;
+    openFileAbortRef.current?.abort();
+    openFileAbortRef.current = null;
   }, [effectiveSessionId]);
+
+  useEffect(
+    () => () => {
+      openFileAbortRef.current?.abort();
+      openFileAbortRef.current = null;
+    },
+    [],
+  );
 
   const handleOpenFileFromChat = useCallback(
     (path: string, repo?: string) => {
       if (!effectiveSessionId) return;
       const requestId = (latestRequestIdRef.current += 1);
-      void fetchAndOpenFile(
-        effectiveSessionId,
-        path,
-        (file) => {
-          if (requestId !== latestRequestIdRef.current) return;
-          setSelectedFile(file);
-          handlePanelChange("files");
-        },
-        toast,
-        repo,
-      );
+      openFileAbortRef.current?.abort();
+      const controller = new AbortController();
+      openFileAbortRef.current = controller;
+      void Promise.resolve(
+        fetchAndOpenFile(
+          effectiveSessionId,
+          path,
+          (file) => {
+            if (requestId !== latestRequestIdRef.current || controller.signal.aborted) return;
+            setSelectedFile(file);
+            handlePanelChange("files");
+          },
+          toast,
+          { repo, signal: controller.signal },
+        ),
+      ).finally(() => {
+        if (openFileAbortRef.current === controller) {
+          openFileAbortRef.current = null;
+        }
+      });
     },
     [effectiveSessionId, handlePanelChange, toast],
   );
@@ -310,6 +330,8 @@ export function useMobilePanelHandlers({
   const handleOpenFile = useCallback(
     (file: OpenFileTab) => {
       latestRequestIdRef.current += 1;
+      openFileAbortRef.current?.abort();
+      openFileAbortRef.current = null;
       setSelectedFile(file);
       handlePanelChange("files");
     },
@@ -319,6 +341,8 @@ export function useMobilePanelHandlers({
   const handlePanelChangeAndClearSheet = useCallback(
     (panel: MobileSessionPanel) => {
       latestRequestIdRef.current += 1;
+      openFileAbortRef.current?.abort();
+      openFileAbortRef.current = null;
       setSelectedFile(null);
       handlePanelChange(panel);
     },

@@ -64,7 +64,7 @@ describe("useMobilePanelHandlers", () => {
       CHAT_LINK_PATH,
       expect.any(Function),
       expect.any(Function),
-      undefined,
+      { repo: undefined, signal: expect.objectContaining({ aborted: false }) },
     );
 
     const openFile = fetchAndOpenFileMock.mock.calls[0]?.[2] as (file: OpenFileTab) => void;
@@ -83,7 +83,7 @@ describe("useMobilePanelHandlers", () => {
       CHAT_LINK_PATH,
       expect.any(Function),
       expect.any(Function),
-      REPO,
+      { repo: REPO, signal: expect.objectContaining({ aborted: false }) },
     );
   });
 
@@ -131,7 +131,7 @@ describe("useMobilePanelHandlers", () => {
       CHAT_LINK_PATH,
       expect.any(Function),
       expect.any(Function),
-      undefined,
+      { repo: undefined, signal: expect.objectContaining({ aborted: false }) },
     );
 
     // Simulate session switch before the async callback fires
@@ -153,5 +153,23 @@ describe("useMobilePanelHandlers", () => {
       result.current.handleOpenFile(OTHER_FILE);
     });
     expect(result.current.selectedFile).toEqual(OTHER_FILE);
+  });
+});
+
+describe("useMobilePanelHandlers request cancellation", () => {
+  beforeEach(() => {
+    fetchAndOpenFileMock.mockReset();
+  });
+
+  it("aborts stale chat file requests when a newer one starts", () => {
+    const { result } = renderHandlers();
+    act(() => result.current.handleOpenFileFromChat(CHAT_LINK_PATH));
+    const firstOptions = fetchAndOpenFileMock.mock.calls[0]?.[4] as { signal: AbortSignal };
+
+    act(() => result.current.handleOpenFileFromChat("src/newer.ts"));
+    const secondOptions = fetchAndOpenFileMock.mock.calls[1]?.[4] as { signal: AbortSignal };
+
+    expect(firstOptions.signal.aborted).toBe(true);
+    expect(secondOptions.signal.aborted).toBe(false);
   });
 });
