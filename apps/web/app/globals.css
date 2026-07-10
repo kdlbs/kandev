@@ -1171,6 +1171,7 @@
 .markdown-preview-commented-range {
   background-color: color-mix(in oklch, var(--accent) 46%, transparent);
   border-radius: 4px;
+  cursor: pointer;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }

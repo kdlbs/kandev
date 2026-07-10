@@ -16,6 +16,7 @@ export type FileEditorContentProps = {
   isSaving: boolean;
   sessionId?: string;
   taskId?: string | null;
+  repositoryId?: string | null;
   worktreePath?: string;
   enableComments?: boolean;
   markdownPreview?: boolean;
@@ -37,6 +38,7 @@ export const FileEditorContent = memo(function FileEditorContent(props: FileEdit
         worktreePath={props.worktreePath}
         sessionId={props.sessionId}
         taskId={props.taskId}
+        repositoryId={props.repositoryId}
         enableComments={props.enableComments}
         onTogglePreview={props.onToggleMarkdownPreview}
       />

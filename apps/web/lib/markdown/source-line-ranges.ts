@@ -80,11 +80,7 @@ export function findLineRangeForSelectedText(
 }
 
 function selectionTouchesRoot(root: HTMLElement, range: Range): boolean {
-  return (
-    root.contains(range.commonAncestorContainer) ||
-    root.contains(range.startContainer) ||
-    root.contains(range.endContainer)
-  );
+  return root.contains(range.startContainer) && root.contains(range.endContainer);
 }
 
 function selectionPosition(

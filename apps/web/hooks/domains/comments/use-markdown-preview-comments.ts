@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { useToast } from "@/components/toast-provider";
 import { useCommentsStore, type DiffComment } from "@/lib/state/slices/comments";
 import {
@@ -19,6 +19,7 @@ export type MarkdownCommentView = {
 
 type UseMarkdownPreviewCommentsArgs = {
   path: string;
+  repositoryId?: string | null;
   content: string;
   sessionId?: string;
   taskId?: string | null;
@@ -67,6 +68,8 @@ function useMarkdownSelectionCapture({
   onSelectionStart: () => void;
 }) {
   const [currentSelection, setCurrentSelection] = useState<MarkdownPreviewSelection | null>(null);
+  const resolveSelectionRef = useRef<() => void>(() => {});
+  const timeoutRef = useRef<number | null>(null);
 
   const resolveSelection = useCallback(() => {
     if (!enabled) return;
@@ -78,12 +81,20 @@ function useMarkdownSelectionCapture({
   }, [content, enabled, rootRef]);
 
   useEffect(() => {
+    resolveSelectionRef.current = resolveSelection;
+  }, [resolveSelection]);
+
+  useEffect(() => {
     const root = rootRef.current;
     if (!root || !enabled) return;
 
     const handleSelectionEnd = (event: MouseEvent | TouchEvent) => {
       if (isIgnoredTarget(event.target)) return;
-      window.setTimeout(resolveSelection, 10);
+      if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
+      timeoutRef.current = window.setTimeout(() => {
+        timeoutRef.current = null;
+        resolveSelectionRef.current();
+      }, 10);
     };
     const handleSelectionStart = (event: MouseEvent | TouchEvent) => {
       if (isIgnoredTarget(event.target)) return;
@@ -100,8 +111,12 @@ function useMarkdownSelectionCapture({
       root.removeEventListener("touchend", handleSelectionEnd);
       root.removeEventListener("mousedown", handleSelectionStart);
       root.removeEventListener("touchstart", handleSelectionStart);
+      if (timeoutRef.current !== null) {
+        window.clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
     };
-  }, [enabled, onSelectionStart, resolveSelection, rootRef]);
+  }, [enabled, onSelectionStart, rootRef]);
 
   return { currentSelection, setCurrentSelection };
 }
@@ -133,12 +148,14 @@ function useMarkdownCommentShortcut({
 
 function useMarkdownCommentSubmitters({
   path,
+  repositoryId,
   sessionId,
   taskId,
   textSelection,
   clearTextSelection,
 }: {
   path: string;
+  repositoryId?: string | null;
   sessionId?: string;
   taskId?: string | null;
   textSelection: MarkdownPreviewSelection | null;
@@ -147,12 +164,14 @@ function useMarkdownCommentSubmitters({
   const addComment = useCommentsStore((s) => s.addComment);
   const { runComment } = useRunComment({ sessionId: sessionId ?? null, taskId: taskId ?? null });
   const { toast } = useToast();
+  const canRunComment = Boolean(sessionId && taskId);
 
   const createComment = useCallback(
     (text: string): DiffComment | null => {
       if (!sessionId || !textSelection) return null;
       const comment = buildMarkdownPreviewComment({
         filePath: path,
+        repositoryId: repositoryId ?? undefined,
         sessionId,
         selectedText: textSelection.selectedText,
         text,
@@ -163,7 +182,7 @@ function useMarkdownCommentSubmitters({
       clearTextSelection();
       return comment;
     },
-    [addComment, clearTextSelection, path, sessionId, textSelection],
+    [addComment, clearTextSelection, path, repositoryId, sessionId, textSelection],
   );
 
   const submitComment = useCallback(
@@ -180,6 +199,14 @@ function useMarkdownCommentSubmitters({
 
   const submitAndRunComment = useCallback(
     async (text: string) => {
+      if (!canRunComment) {
+        toast({
+          title: "Failed to send comment",
+          description: "Open a task session before sending to the agent.",
+          variant: "error",
+        });
+        return;
+      }
       const comment = createComment(text);
       if (!comment) return;
       try {
@@ -196,10 +223,10 @@ function useMarkdownCommentSubmitters({
         });
       }
     },
-    [createComment, runComment, toast],
+    [canRunComment, createComment, runComment, toast],
   );
 
-  return { submitComment, submitAndRunComment };
+  return { submitComment, submitAndRunComment: canRunComment ? submitAndRunComment : undefined };
 }
 
 function useMarkdownCommentRangeView({
@@ -221,6 +248,7 @@ function useMarkdownCommentRangeView({
 
 export function useMarkdownPreviewComments({
   path,
+  repositoryId,
   content,
   sessionId,
   taskId,
@@ -229,7 +257,7 @@ export function useMarkdownPreviewComments({
 }: UseMarkdownPreviewCommentsArgs) {
   const [textSelection, setTextSelection] = useState<MarkdownPreviewSelection | null>(null);
   const [commentView, setCommentView] = useState<MarkdownCommentView>(null);
-  const comments = useDiffFileComments(sessionId ?? "", path);
+  const comments = useDiffFileComments(sessionId ?? "", path, repositoryId ?? undefined);
   const removeComment = useCommentsStore((s) => s.removeComment);
   const updateComment = useCommentsStore((s) => s.updateComment);
   const { toast } = useToast();
@@ -270,6 +298,7 @@ export function useMarkdownPreviewComments({
 
   const { submitComment, submitAndRunComment } = useMarkdownCommentSubmitters({
     path,
+    repositoryId,
     sessionId,
     taskId,
     textSelection,

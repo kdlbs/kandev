@@ -10,6 +10,7 @@ describe("markdown preview comments", () => {
   it("builds a pending diff comment for selected markdown preview text", () => {
     const comment = buildMarkdownPreviewComment({
       filePath: "README.md",
+      repositoryId: "repo-front",
       sessionId: "session-1",
       selectedText: "Rendered paragraph",
       text: "Tighten wording",
@@ -20,6 +21,7 @@ describe("markdown preview comments", () => {
     expect(comment).toMatchObject({
       source: "diff",
       sessionId: "session-1",
+      repositoryId: "repo-front",
       filePath: "README.md",
       startLine: 3,
       endLine: 5,

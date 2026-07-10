@@ -90,6 +90,7 @@ interface MarkdownPreviewContentProps {
   worktreePath?: string;
   sessionId?: string;
   taskId?: string | null;
+  repositoryId?: string | null;
   enableComments?: boolean;
   onTogglePreview: () => void;
 }
@@ -131,6 +132,13 @@ function sourceDataAttrs(range: SourceLineRange | null) {
   };
 }
 
+function isInteractiveSourceClickTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return Boolean(
+    target.closest("a, button, input, textarea, select, [role='button'], [contenteditable]"),
+  );
+}
+
 function CommentBadge({
   onClick,
 }: {
@@ -154,10 +162,12 @@ function SourceBlock({ tag, node, children, className, onClick, ...rest }: Sourc
   const range = sourceRangeFromNode(node);
   const comments = commentContext?.comments ?? [];
   const isCommented = range ? commentsOverlapRange(comments, range) : false;
-  const hasCommentBadge = range ? commentsBeginInRange(comments, range) : false;
+  const canRenderBadge = tag !== "blockquote";
+  const hasCommentBadge = canRenderBadge && range ? commentsBeginInRange(comments, range) : false;
   const handleClick = (event: React.MouseEvent<HTMLElement>) => {
     onClick?.(event);
     if (!range || !isCommented || event.defaultPrevented || !commentContext) return;
+    if (isInteractiveSourceClickTarget(event.target)) return;
     if (window.getSelection()?.toString().trim()) return;
     commentContext.showCommentsForRange(range, { x: event.clientX, y: event.clientY });
   };
@@ -291,6 +301,7 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
   worktreePath,
   sessionId,
   taskId,
+  repositoryId,
   enableComments = false,
   onTogglePreview,
 }: MarkdownPreviewContentProps) {
@@ -302,6 +313,7 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
     content,
     sessionId,
     taskId,
+    repositoryId,
     enabled: commentsEnabled,
     rootRef,
   });

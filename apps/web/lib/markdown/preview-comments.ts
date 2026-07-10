@@ -4,13 +4,14 @@ import type { SourceLineRange } from "./source-line-ranges";
 
 export type BuildMarkdownPreviewCommentArgs = SourceLineRange & {
   filePath: string;
+  repositoryId?: string;
   sessionId: string;
   selectedText: string;
   text: string;
 };
 
 export function buildMarkdownPreviewComment(args: BuildMarkdownPreviewCommentArgs): DiffComment {
-  return buildDiffComment({
+  const comment = buildDiffComment({
     filePath: args.filePath,
     sessionId: args.sessionId,
     startLine: args.startLine,
@@ -19,6 +20,8 @@ export function buildMarkdownPreviewComment(args: BuildMarkdownPreviewCommentArg
     text: args.text,
     codeContent: args.selectedText,
   });
+  if (args.repositoryId) comment.repositoryId = args.repositoryId;
+  return comment;
 }
 
 export function commentsOverlapRange(comments: DiffComment[], range: SourceLineRange): boolean {

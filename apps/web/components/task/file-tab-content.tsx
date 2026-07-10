@@ -17,7 +17,7 @@ export function FileTabContent({
   onFileDelete,
 }: {
   tab: OpenFileTab;
-  activeSession: { worktree_path?: string | null } | null;
+  activeSession: { worktree_path?: string | null; repository_id?: string | null } | null;
   activeSessionId: string | null;
   isSaving: boolean;
   onFileChange: (path: string, content: string) => void;
@@ -51,6 +51,7 @@ export function FileTabContent({
           isDirty={tab.isDirty}
           isSaving={isSaving}
           sessionId={activeSessionId || undefined}
+          repositoryId={activeSession?.repository_id ?? undefined}
           worktreePath={activeSession?.worktree_path ?? undefined}
           enableComments={!!activeSessionId}
           onChange={(newContent) => onFileChange(tab.path, newContent)}

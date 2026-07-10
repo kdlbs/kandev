@@ -13,6 +13,11 @@ type AnchorPosition = { x: number; y: number };
 type PopoverPosition = { left: number; top: number };
 type DragState = { startX: number; startY: number; origLeft: number; origTop: number };
 
+export function isEditablePopoverDismissTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return Boolean(target.closest("input, textarea, select, [contenteditable]"));
+}
+
 export function computePopoverInitialPos(
   position: AnchorPosition,
   width: number,
@@ -79,6 +84,7 @@ export function usePopoverDismiss(
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (isEditablePopoverDismissTarget(event.target)) return;
       if (event.key === "Escape") {
         event.stopPropagation();
         onClose();

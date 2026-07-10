@@ -92,4 +92,29 @@ describe("markdown preview source line ranges", () => {
     root.remove();
     selection.removeAllRanges();
   });
+
+  it("rejects selections that leave the markdown preview root", () => {
+    const root = document.createElement("div");
+    const paragraph = document.createElement("p");
+    paragraph.setAttribute(SOURCE_START_ATTR, "3");
+    paragraph.setAttribute(SOURCE_END_ATTR, "3");
+    paragraph.textContent = "Alpha paragraph";
+    const outside = document.createElement("span");
+    outside.textContent = "outside";
+    root.appendChild(paragraph);
+    document.body.append(root, outside);
+
+    const range = document.createRange();
+    range.setStart(paragraph.firstChild!, 0);
+    range.setEnd(outside.firstChild!, 3);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    expect(resolveMarkdownDomSelection(root, "Alpha paragraph", selection)).toBeNull();
+
+    root.remove();
+    outside.remove();
+    selection.removeAllRanges();
+  });
 });

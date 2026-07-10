@@ -276,6 +276,7 @@ export const FileEditorPanel = memo(function FileEditorPanel({
   }
 
   const worktreePath = activeSession?.worktree_path ?? undefined;
+  const repositoryId = activeSession?.repository_id ?? undefined;
   const category = resolveFileCategory(isBinary, path);
 
   if (category === "image")
@@ -306,6 +307,7 @@ export const FileEditorPanel = memo(function FileEditorPanel({
           isSaving={savingFiles.has(fileKey)}
           sessionId={activeSessionId || undefined}
           taskId={activeTaskId}
+          repositoryId={repositoryId}
           worktreePath={worktreePath}
           enableComments={!!activeSessionId}
           markdownPreview={isMarkdown ? markdownPreview : false}
