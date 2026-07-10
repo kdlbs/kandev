@@ -222,7 +222,10 @@ func copyPath(srcRoot, src, dest string) error {
 		return fmt.Errorf("stat %q: %w", src, err)
 	}
 	if info.IsDir() {
-		return copyDir(src, dest)
+		// Walk the symlink-resolved directory: filepath.WalkDir does not follow a
+		// symlinked root, so passing the original src would recreate a
+		// symlink-to-directory as a link instead of copying its contents.
+		return copyDir(srcRoot, resolved, dest)
 	}
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("worktree file %q is not a regular file (mode %s)", src, info.Mode())
@@ -244,8 +247,9 @@ func ensureWithinRoot(root, path string) error {
 	return nil
 }
 
-// copyDir recursively copies the directory tree at src into dest.
-func copyDir(src, dest string) error {
+// copyDir recursively copies the directory tree at src into dest. srcRoot is the
+// repository root, used to reject inner symlinks whose target escapes the repo.
+func copyDir(srcRoot, src, dest string) error {
 	return filepath.WalkDir(src, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -263,11 +267,7 @@ func copyDir(src, dest string) error {
 		// with the symlink bit set. Recreate the link rather than opening it
 		// (which would EISDIR on symlinked dirs or copy with wrong perms).
 		if info.Mode()&os.ModeSymlink != 0 {
-			linkTarget, readErr := os.Readlink(path)
-			if readErr != nil {
-				return fmt.Errorf("read symlink %q: %w", path, readErr)
-			}
-			return os.Symlink(linkTarget, target)
+			return copyInnerSymlink(srcRoot, path, target)
 		}
 		if d.IsDir() {
 			return os.MkdirAll(target, info.Mode().Perm())
@@ -279,6 +279,25 @@ func copyDir(src, dest string) error {
 		}
 		return copyFile(path, target, info.Mode())
 	})
+}
+
+// copyInnerSymlink recreates a symlink found inside a copied directory, but only
+// when its target resolves inside srcRoot. Links that escape the repository (or
+// dangle) are skipped so a copied directory can't smuggle a pointer to files
+// outside the repo into the worktree.
+func copyInnerSymlink(srcRoot, path, target string) error {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return nil // dangling or unreadable link: skip rather than abort the copy
+	}
+	if err := ensureWithinRoot(srcRoot, resolved); err != nil {
+		return nil // target escapes the repository: skip the link entirely
+	}
+	linkTarget, err := os.Readlink(path)
+	if err != nil {
+		return fmt.Errorf("read symlink %q: %w", path, err)
+	}
+	return os.Symlink(linkTarget, target)
 }
 
 // copyFile copies the bytes of src into dest, preserving the source file mode.

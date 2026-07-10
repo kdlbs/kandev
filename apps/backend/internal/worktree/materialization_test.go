@@ -328,6 +328,57 @@ func TestMaterializeWorktreeFiles_CopyDirPreservesInnerSymlink(t *testing.T) {
 	}
 }
 
+// A configured path that is a symlink to a directory must copy the directory's
+// contents (copy semantics), not be recreated as a symlink.
+func TestMaterializeWorktreeFiles_CopySymlinkedDirCopiesContents(t *testing.T) {
+	src := t.TempDir()
+	dest := t.TempDir()
+	writeFile(t, filepath.Join(src, "real", "app.env"), "K=V")
+	// "cfg" is a symlink to the real directory, both inside the repo.
+	if err := os.Symlink("real", filepath.Join(src, "cfg")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	if w := MaterializeWorktreeFiles(src, dest, []FileSpec{{Path: "cfg", Mode: FileMaterializeCopy}}); len(w) != 0 {
+		t.Fatalf("MaterializeWorktreeFiles: %v", w)
+	}
+	info, err := os.Lstat(filepath.Join(dest, "cfg"))
+	if err != nil {
+		t.Fatalf("lstat copied dir: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("symlinked directory was not copied as a real directory (mode %s)", info.Mode())
+	}
+	if _, err := os.Stat(filepath.Join(dest, "cfg", "app.env")); err != nil {
+		t.Fatalf("directory contents not copied: %v", err)
+	}
+}
+
+// A symlink nested inside a copied directory whose target escapes the repository
+// must be skipped, not recreated, so the worktree never points outside the repo.
+func TestMaterializeWorktreeFiles_CopyDirSkipsEscapingInnerSymlink(t *testing.T) {
+	src := t.TempDir()
+	dest := t.TempDir()
+	outside := t.TempDir()
+	writeFile(t, filepath.Join(outside, "secret"), "TOP SECRET")
+	writeFile(t, filepath.Join(src, "cfg", "real.env"), "K=V")
+	// An inner symlink pointing outside the repository.
+	if err := os.Symlink(filepath.Join(outside, "secret"), filepath.Join(src, "cfg", "escape")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	if w := MaterializeWorktreeFiles(src, dest, []FileSpec{{Path: "cfg", Mode: FileMaterializeCopy}}); len(w) != 0 {
+		t.Fatalf("MaterializeWorktreeFiles: %v", w)
+	}
+	// The safe inner file is copied, the escaping link is not recreated.
+	if _, err := os.Stat(filepath.Join(dest, "cfg", "real.env")); err != nil {
+		t.Fatalf("safe inner file not copied: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(dest, "cfg", "escape")); !os.IsNotExist(err) {
+		t.Fatalf("escaping inner symlink was materialized: %v", err)
+	}
+}
+
 func TestMaterializeWorktreeFiles_EmptyListNoop(t *testing.T) {
 	src := t.TempDir()
 	dest := t.TempDir()
