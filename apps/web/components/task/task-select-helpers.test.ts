@@ -46,9 +46,23 @@ function makeStore(activeSessionId: string | null): StoreApi<AppState> {
   } as unknown as StoreApi<AppState>;
 }
 
-function makeEnvStore(envIds: Record<string, string>): StoreApi<AppState> {
+function makeEnvStore(
+  envIds: Record<string, string>,
+  taskSessionsByTask: Record<string, string[]> = {},
+): StoreApi<AppState> {
   return {
-    getState: () => ({ environmentIdBySessionId: envIds }) as unknown as AppState,
+    getState: () =>
+      ({
+        environmentIdBySessionId: envIds,
+        taskSessionsByTask: {
+          itemsByTaskId: Object.fromEntries(
+            Object.entries(taskSessionsByTask).map(([taskId, sessionIds]) => [
+              taskId,
+              sessionIds.map((id) => ({ id })),
+            ]),
+          ),
+        },
+      }) as unknown as AppState,
   } as unknown as StoreApi<AppState>;
 }
 
@@ -251,14 +265,20 @@ describe("buildSwitchToSession", () => {
   });
 
   it("performs an env switch when the new session's environment is known", () => {
-    const store = makeEnvStore({ "sess-old": "env-A", "sess-new": "env-B" });
+    const store = makeEnvStore(
+      { "sess-old": "env-A", "sess-new": "env-B" },
+      { "task-new": ["sess-new", "sess-sibling"] },
+    );
     const setActiveSession = vi.fn();
     const switchToSession = buildSwitchToSession(store, setActiveSession);
 
     switchToSession("task-new", "sess-new", "sess-old");
 
     expect(setActiveSession).toHaveBeenCalledWith("task-new", "sess-new");
-    expect(performLayoutSwitch).toHaveBeenCalledWith("env-A", "env-B", "sess-new");
+    expect(performLayoutSwitch).toHaveBeenCalledWith("env-A", "env-B", "sess-new", [
+      "sess-new",
+      "sess-sibling",
+    ]);
     expect(releaseLayoutToDefault).not.toHaveBeenCalled();
   });
 

@@ -194,6 +194,7 @@ type DockviewStore = {
     oldEnvId: string | null,
     newEnvId: string,
     activeSessionId: string | null,
+    currentSessionIds?: string[],
   ) => void;
   deferredPanelActions: DeferredPanelAction[];
   queuePanelAction: (action: DeferredPanelAction) => void;
@@ -727,7 +728,12 @@ function saveOutgoingEnv(
 }
 
 function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
-  return (oldEnvId: string | null, newEnvId: string, activeSessionId: string | null) => {
+  return (
+    oldEnvId: string | null,
+    newEnvId: string,
+    activeSessionId: string | null,
+    currentSessionIds: string[] = [],
+  ) => {
     const { api, currentLayoutEnvId, preMaximizeLayout } = get();
     if (!api) {
       debugSwitch("envSwitch: skip (no api)", { oldEnvId, newEnvId, activeSessionId });
@@ -777,6 +783,7 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
         oldEnvId: effectiveOld,
         newEnvId,
         activeSessionId,
+        currentSessionIds,
         safeWidth: measured.width,
         safeHeight: measured.height,
         buildDefault: (a) => get().buildDefaultLayout(a),
@@ -1050,8 +1057,11 @@ export function performLayoutSwitch(
   oldEnvId: string | null,
   newEnvId: string,
   activeSessionId: string | null,
+  currentSessionIds: string[] = [],
 ): void {
-  useDockviewStore.getState().switchEnvLayout(oldEnvId, newEnvId, activeSessionId);
+  useDockviewStore
+    .getState()
+    .switchEnvLayout(oldEnvId, newEnvId, activeSessionId, currentSessionIds);
 }
 
 /**

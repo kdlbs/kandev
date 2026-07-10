@@ -349,6 +349,72 @@ describe("performEnvSwitch slow-path stale session strip", () => {
     );
     expect(closeStale).toHaveBeenCalledOnce();
   });
+});
+
+describe("performEnvSwitch slow-path session tab restoration", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("restores sibling session tabs when slow-path replacement receives current session ids", () => {
+    vi.mocked(getEnvLayout)
+      .mockReturnValueOnce(makeHealthyLayoutWith({}))
+      .mockReturnValueOnce(makeHealthyLayoutWith({}));
+    vi.mocked(savedLayoutMatchesLive).mockReturnValueOnce(false);
+
+    const closeStale = vi.fn();
+    const groupId = "saved-center-group";
+    const groupPanels = [
+      { id: "session:phantom-from-other-env", api: { component: "chat", close: closeStale } },
+    ];
+    const stale = {
+      ...groupPanels[0],
+      group: { id: groupId, panels: groupPanels },
+    };
+    const panelsById = new Map<
+      string,
+      { id: string; api: { component: string }; group: unknown }
+    >();
+    const addPanel = vi.fn((opts: { id: string; component: string }) => {
+      panelsById.set(opts.id, {
+        id: opts.id,
+        api: { component: opts.component },
+        group: { id: groupId, panels: [] },
+      });
+    });
+    const api = {
+      ...makeMockApi(),
+      panels: [stale],
+      groups: [{ id: groupId }],
+      getPanel: vi.fn((id: string) => panelsById.get(id) ?? null),
+      addPanel,
+    } as unknown as EnvSwitchParams["api"];
+
+    performEnvSwitch(
+      makeParams({
+        api,
+        currentSessionIds: ["new-session", "sibling-session"],
+      }),
+    );
+
+    expect(addPanel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: NEW_SESSION_PANEL_ID,
+        component: "chat",
+        position: { referenceGroup: groupId, index: 0 },
+      }),
+    );
+    expect(addPanel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "session:sibling-session",
+        component: "chat",
+        params: { sessionId: "sibling-session" },
+        position: { referenceGroup: groupId, index: 0 },
+        inactive: true,
+      }),
+    );
+    expect(closeStale).toHaveBeenCalledOnce();
+  });
 
   it("skips addPanel when there is no active session (sessionless task)", () => {
     vi.mocked(getEnvLayout)

@@ -123,8 +123,12 @@ function switchToSessionForTask(params: {
   const { store, nextTask, sessionId, oldEnvId, useLayoutSwitch } = params;
   store.getState().setActiveSession(nextTask.id, sessionId);
   if (!useLayoutSwitch) return;
-  const newEnvId = store.getState().environmentIdBySessionId[sessionId] ?? null;
-  if (newEnvId) performLayoutSwitch(oldEnvId, newEnvId, sessionId);
+  const state = store.getState();
+  const newEnvId = state.environmentIdBySessionId[sessionId] ?? null;
+  const sessionIds = (state.taskSessionsByTask.itemsByTaskId[nextTask.id] ?? []).map(
+    (session) => session.id,
+  );
+  if (newEnvId) performLayoutSwitch(oldEnvId, newEnvId, sessionId, sessionIds);
 }
 
 async function switchToNextTask(params: {

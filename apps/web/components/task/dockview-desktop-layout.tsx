@@ -196,6 +196,12 @@ function useEnvSwitchCleanup(
 ) {
   const prevEnvRef = useRef<string | null | undefined>(undefined);
   const prevTaskRef = useRef<string | null | undefined>(undefined);
+  const currentSessionIdsKey = useAppStore((state) => {
+    if (!activeTaskId) return "";
+    return (state.taskSessionsByTask.itemsByTaskId[activeTaskId] ?? [])
+      .map((session) => session.id)
+      .join(",");
+  });
   useEffect(() => {
     const newEnvId = effectiveEnvId;
     const newTaskId = activeTaskId;
@@ -235,9 +241,13 @@ function useEnvSwitchCleanup(
     // through the sidebar/dropdown switch helpers. Same-env switches return
     // early above (no-op).
     if (newEnvId) {
-      performLayoutSwitch(oldEnvId, newEnvId, effectiveSessionId);
+      const currentSessionIds = currentSessionIdsKey ? currentSessionIdsKey.split(",") : [];
+      if (effectiveSessionId && !currentSessionIds.includes(effectiveSessionId)) {
+        currentSessionIds.unshift(effectiveSessionId);
+      }
+      performLayoutSwitch(oldEnvId, newEnvId, effectiveSessionId, currentSessionIds);
     }
-  }, [effectiveEnvId, effectiveSessionId, activeTaskId]);
+  }, [effectiveEnvId, effectiveSessionId, activeTaskId, currentSessionIdsKey]);
 }
 
 // ---------------------------------------------------------------------------

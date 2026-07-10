@@ -133,6 +133,8 @@ export type EnvSwitchParams = {
   newEnvId: string;
   /** Active session for the incoming env — used to keep the right session chat tab. */
   activeSessionId: string | null;
+  /** All sessions for the active task, so slow-path restores keep sibling chat tabs. */
+  currentSessionIds?: string[];
   safeWidth: number;
   safeHeight: number;
   buildDefault: (api: DockviewApi) => void;
@@ -518,7 +520,16 @@ function addIncomingSessionPanel(
  * env-scoped portals before calling this function.
  */
 export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
-  const { api, oldEnvId, newEnvId, activeSessionId, safeWidth, safeHeight, buildDefault } = params;
+  const {
+    api,
+    oldEnvId,
+    newEnvId,
+    activeSessionId,
+    currentSessionIds = [],
+    safeWidth,
+    safeHeight,
+    buildDefault,
+  } = params;
   if (isDebug()) {
     debug("performEnvSwitch: entry", {
       oldEnvId,
@@ -565,7 +576,7 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
       // editors, etc.). File editors/diffs/etc. on their own are legitimately
       // part of this env's saved state and must NOT be touched.
       // useAutoSessionTab will still no-op if the panel was just added here.
-      replaceStaleSessionPanels(api, activeSessionId);
+      replaceStaleSessionPanels(api, activeSessionId, currentSessionIds);
       api.layout(safeWidth, safeHeight);
       if (isDebug()) {
         debug("performEnvSwitch: completed via slow path (fromJSON)", {

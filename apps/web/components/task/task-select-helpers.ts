@@ -27,6 +27,10 @@ export type SwitchToSessionFn = (
   oldSessionId: string | null | undefined,
 ) => void;
 
+function getTaskSessionIds(state: AppState, taskId: string): string[] {
+  return (state.taskSessionsByTask?.itemsByTaskId?.[taskId] ?? []).map((session) => session.id);
+}
+
 export function resolveLoadedSessionId(
   sessions: TaskSession[],
   preferredSessionId: string,
@@ -92,7 +96,7 @@ export function buildSwitchToSession(
     }
     setActiveSession(taskId, sessionId);
     if (newEnvId) {
-      performLayoutSwitch(oldEnvId, newEnvId, sessionId);
+      performLayoutSwitch(oldEnvId, newEnvId, sessionId, getTaskSessionIds(state, taskId));
       return;
     }
     // The new session's task_environment_id has not been loaded into the store
