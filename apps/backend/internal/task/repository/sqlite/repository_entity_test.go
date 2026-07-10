@@ -181,9 +181,9 @@ func TestRepositoryStartupPrompt_RoundTrip(t *testing.T) {
 
 // TestRepositoryStartupPrompt_LegacyRowScansAsEmpty simulates a row inserted
 // by a caller that pre-dates the startup_prompt column — i.e. an INSERT that
-// never mentions the column and therefore falls back to the schema DEFAULT ”.
-// Guards against a nil-scan panic in GetRepository / ListRepositories on such
-// rows and pins the DEFAULT ” contract.
+// never mentions the column and therefore falls back to the schema empty-string
+// default. Guards against a nil-scan panic in GetRepository / ListRepositories
+// on such rows and pins the empty-string default contract.
 func TestRepositoryStartupPrompt_LegacyRowScansAsEmpty(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()
