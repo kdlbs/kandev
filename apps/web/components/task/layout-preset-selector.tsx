@@ -35,9 +35,11 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Badge } from "@kandev/ui/badge";
 import { useDockviewStore, type BuiltInPreset } from "@/lib/state/dockview-store";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import type { SavedLayout } from "@/lib/types/http";
+import { useTaskSessions } from "@/hooks/use-task-sessions";
+import { resolveLayoutApplySessionIds } from "./layout-preset-selector-session-ids";
 
 type PresetOption = {
   id: BuiltInPreset;
@@ -172,7 +174,7 @@ function SavedLayoutItems({
   onDelete,
 }: {
   layouts: SavedLayout[];
-  onApply: (layout: SavedLayout) => void;
+  onApply: (layout: SavedLayout) => void | Promise<void>;
   onDelete: (layoutId: string) => void;
 }) {
   if (layouts.length === 0) {
@@ -182,7 +184,9 @@ function SavedLayoutItems({
     <DropdownMenuItem
       key={layout.id}
       className="cursor-pointer group/layout"
-      onClick={() => onApply(layout)}
+      onClick={() => {
+        void onApply(layout);
+      }}
     >
       <IconCheck className="h-3.5 w-3.5 mr-2 shrink-0 opacity-0" />
       <span className="text-xs truncate flex-1">{layout.name}</span>
@@ -228,26 +232,23 @@ function BuiltInPresetItems({ onApply }: { onApply: (presetId: BuiltInPreset) =>
   });
 }
 
-export function LayoutPresetSelector() {
-  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [tooltipOpen, setTooltipOpen] = useState(false);
-  const recentlyClosedRef = useRef(false);
-  const applyBuiltInPreset = useDockviewStore((s) => s.applyBuiltInPreset);
+function useApplySavedLayout() {
   const applyCustomLayout = useDockviewStore((s) => s.applyCustomLayout);
-  const savedLayouts = useAppStore((s) => s.userSettings.savedLayouts);
+  const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
-  const activeTaskSessionIds = useAppStore((s) => {
-    const activeTaskId = s.tasks.activeTaskId;
-    if (!activeTaskId) return "";
-    return (s.taskSessionsByTask.itemsByTaskId[activeTaskId] ?? [])
-      .map((session) => session.id)
-      .join(",");
-  });
+  const appStore = useAppStoreApi();
+  const { isLoaded: taskSessionsLoaded, loadSessions } = useTaskSessions(activeTaskId);
 
-  const handleApplyCustom = useCallback(
-    (layout: SavedLayout) => {
-      const sessionIds = activeTaskSessionIds ? activeTaskSessionIds.split(",") : [];
+  return useCallback(
+    async (layout: SavedLayout) => {
+      const sessionIds = await resolveLayoutApplySessionIds({
+        activeTaskId,
+        activeSessionId,
+        sessionsLoaded: taskSessionsLoaded,
+        loadSessions,
+        getSessionsForTask: (taskId) =>
+          appStore.getState().taskSessionsByTask.itemsByTaskId[taskId] ?? [],
+      });
       applyCustomLayout(
         {
           id: layout.id,
@@ -259,8 +260,18 @@ export function LayoutPresetSelector() {
         { activeSessionId, sessionIds },
       );
     },
-    [activeSessionId, activeTaskSessionIds, applyCustomLayout],
+    [activeSessionId, activeTaskId, appStore, applyCustomLayout, loadSessions, taskSessionsLoaded],
   );
+}
+
+export function LayoutPresetSelector() {
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [tooltipOpen, setTooltipOpen] = useState(false);
+  const recentlyClosedRef = useRef(false);
+  const applyBuiltInPreset = useDockviewStore((s) => s.applyBuiltInPreset);
+  const savedLayouts = useAppStore((s) => s.userSettings.savedLayouts);
+  const handleApplyCustom = useApplySavedLayout();
 
   const handleDeleteLayout = useCallback(
     async (layoutId: string) => {
