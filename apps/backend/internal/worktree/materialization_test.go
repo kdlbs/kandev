@@ -226,6 +226,29 @@ func TestMaterializeWorktreeFiles_RejectsGitPath(t *testing.T) {
 	}
 }
 
+// A file configured under a symlinked destination ancestor must be rejected so
+// materialization can't escape the worktree via os.MkdirAll following the link.
+func TestMaterializeWorktreeFiles_RejectsSymlinkedDestAncestor(t *testing.T) {
+	src := t.TempDir()
+	dest := t.TempDir()
+	outside := t.TempDir()
+	writeFile(t, filepath.Join(src, "shared", "app.env"), "K=V")
+
+	// Make dest/shared a symlink to a directory outside the worktree.
+	if err := os.Symlink(outside, filepath.Join(dest, "shared")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	err := MaterializeWorktreeFiles(src, dest, []FileSpec{{Path: "shared/app.env", Mode: FileMaterializeCopy}})
+	if !errors.Is(err, ErrInvalidWorktreeFilePath) {
+		t.Fatalf("expected ErrInvalidWorktreeFilePath for symlinked ancestor, got %v", err)
+	}
+	// Nothing should have been written through the symlink into the outside dir.
+	if _, statErr := os.Lstat(filepath.Join(outside, "app.env")); !os.IsNotExist(statErr) {
+		t.Fatalf("file escaped through symlinked ancestor: %v", statErr)
+	}
+}
+
 // copyDir must recreate symlinks inside a copied directory rather than following
 // them (which would EISDIR on symlinked dirs or copy with wrong perms).
 func TestMaterializeWorktreeFiles_CopyDirPreservesInnerSymlink(t *testing.T) {

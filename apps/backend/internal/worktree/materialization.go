@@ -130,6 +130,14 @@ func materializeFile(mode FileMaterializeMode, srcRoot, destRoot, relPath string
 		return fmt.Errorf("stat worktree file source %q: %w", src, err)
 	}
 
+	// Reject symlinked destination ancestors before writing: os.MkdirAll follows
+	// symlinks, so a symlinked parent (e.g. a checked-out repo symlink, or an
+	// earlier symlink-mode entry) could otherwise let RemoveAll/copy/symlink
+	// escape the worktree.
+	if err := rejectSymlinkedDestAncestor(destRoot, dest); err != nil {
+		return err
+	}
+
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return fmt.Errorf("create parent dir for %q: %w", dest, err)
 	}
@@ -143,6 +151,36 @@ func materializeFile(mode FileMaterializeMode, srcRoot, destRoot, relPath string
 		return symlinkWorktreeFile(src, dest)
 	}
 	return copyPath(src, dest)
+}
+
+// rejectSymlinkedDestAncestor returns an error when any existing directory
+// between destRoot (exclusive) and dest is a symlink. Since os.MkdirAll follows
+// symlinked ancestors, this prevents a configured file from being materialized
+// outside the worktree through a symlinked parent. Non-existent ancestors are
+// fine — os.MkdirAll will create them as real directories.
+func rejectSymlinkedDestAncestor(destRoot, dest string) error {
+	rel, err := filepath.Rel(destRoot, filepath.Dir(dest))
+	if err != nil {
+		return err
+	}
+	current := destRoot
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if part == "" || part == "." {
+			continue
+		}
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil // deeper ancestors don't exist yet; MkdirAll creates them
+			}
+			return fmt.Errorf("stat worktree dest ancestor %q: %w", current, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%w: destination parent %q is a symlink", ErrInvalidWorktreeFilePath, current)
+		}
+	}
+	return nil
 }
 
 // symlinkWorktreeFile creates a relative symlink at dest pointing to src, so the
