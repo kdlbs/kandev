@@ -167,9 +167,7 @@ test.describe("Utility Agents settings page", () => {
     ).toBeVisible();
 
     // Default-model section.
-    await expect(
-      testPage.getByRole("heading", { name: "Default utility agent model", exact: true }),
-    ).toBeVisible();
+    await expect(testPage.getByText("Default utility agent model", { exact: true })).toBeVisible();
 
     // Built-in actions (seeded on first boot — see builtins.go).
     // Assert a representative subset; the full list lives server-side.
@@ -178,14 +176,35 @@ test.describe("Utility Agents settings page", () => {
     await expect(testPage.getByText("enhance-prompt", { exact: true })).toBeVisible();
 
     // Custom agents section + empty state.
-    await expect(
-      testPage.getByRole("heading", { name: "Custom utility agents", exact: true }),
-    ).toBeVisible();
+    await expect(testPage.getByText("Custom utility agents", { exact: true })).toBeVisible();
     await expect(testPage.getByText("No custom utility agents.")).toBeVisible();
 
     expect(pageErrors, `uncaught errors: ${pageErrors.map((e) => e.message).join("; ")}`).toEqual(
       [],
     );
+  });
+
+  test("wraps each settings sub-section in a bounded card, matching Voice Mode", async ({
+    testPage,
+  }) => {
+    // Regression guard: these sub-sections used to be bare divs with no
+    // visible border, unlike every other settings page (e.g. Voice Mode's
+    // Card-wrapped Enable/Engine/Behavior sections).
+    await testPage.goto("/settings/utility-agents");
+    await expect(
+      testPage.getByRole("heading", { name: "Utility Agents", exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
+
+    for (const testId of [
+      "utility-default-model-card",
+      "utility-actions-card",
+      "utility-custom-agents-card",
+      "config-chat-agent-card",
+    ]) {
+      const card = testPage.getByTestId(testId);
+      await expect(card).toBeVisible();
+      await expect(card).toHaveAttribute("data-slot", "card");
+    }
   });
 
   test("opens the create-agent dialog from the Add button", async ({ testPage }) => {
@@ -389,9 +408,7 @@ test.describe("Utility Agents settings page", () => {
     await expect(
       testPage.getByRole("heading", { name: "Utility Agents", exact: true }),
     ).toBeVisible({ timeout: 15_000 });
-    await expect(
-      testPage.getByRole("heading", { name: "Configuration Chat Agent", exact: true }),
-    ).toBeVisible();
+    await expect(testPage.getByText("Configuration Chat Agent", { exact: true })).toBeVisible();
     await expect(
       testPage.getByText(
         "Choose which agent profile to use for the Configuration Chat. This agent can manage your workflows, agent profiles, and MCP configuration.",
@@ -402,8 +419,6 @@ test.describe("Utility Agents settings page", () => {
     await expect(testPage.getByRole("heading", { name: "Agents", exact: true })).toBeVisible({
       timeout: 15_000,
     });
-    await expect(
-      testPage.getByRole("heading", { name: "Configuration Chat Agent", exact: true }),
-    ).toHaveCount(0);
+    await expect(testPage.getByText("Configuration Chat Agent", { exact: true })).toHaveCount(0);
   });
 });

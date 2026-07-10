@@ -2,8 +2,8 @@
 
 import { IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
-import { Separator } from "@kandev/ui/separator";
 import {
   Select,
   SelectContent,
@@ -91,50 +91,52 @@ export function DefaultModelSection({
   }));
 
   return (
-    <div className="space-y-3">
-      <div>
-        <h3 className="text-base font-medium">Default utility agent model</h3>
+    <Card data-testid="utility-default-model-card">
+      <CardHeader>
+        <CardTitle className="text-base">Default utility agent model</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
         <p className="text-sm text-muted-foreground">
           Select the default model used by all built-in utility actions.
         </p>
-      </div>
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <div className="w-full sm:w-[180px]">
-          <Label className="text-xs text-muted-foreground mb-1 block">Agent</Label>
-          <Select value={defaultAgentId} onValueChange={(v) => onDefaultChange(v, "")}>
-            <SelectTrigger className="cursor-pointer">
-              <SelectValue placeholder="Select agent..." />
-            </SelectTrigger>
-            <SelectContent>
-              {inferenceAgents.map((ia) => (
-                <SelectItem key={ia.id} value={ia.id}>
-                  {ia.display_name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <div className="w-full sm:w-[180px]">
+            <Label className="text-xs text-muted-foreground mb-1 block">Agent</Label>
+            <Select value={defaultAgentId} onValueChange={(v) => onDefaultChange(v, "")}>
+              <SelectTrigger className="cursor-pointer">
+                <SelectValue placeholder="Select agent..." />
+              </SelectTrigger>
+              <SelectContent>
+                {inferenceAgents.map((ia) => (
+                  <SelectItem key={ia.id} value={ia.id}>
+                    {ia.display_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="w-full sm:w-[280px]">
+            <Label className="text-xs text-muted-foreground mb-1 block">Model</Label>
+            <ModelConfigSelector
+              modelOptions={selectorModels}
+              currentModel={selectedModel}
+              configOptions={selectedConfigOptions}
+              onModelChange={(v) => onDefaultChange(defaultAgentId, v)}
+              disabled={!defaultAgentId}
+              placeholder="Select model..."
+              ariaLabel="Default utility model settings"
+            />
+          </div>
         </div>
-        <div className="w-full sm:w-[280px]">
-          <Label className="text-xs text-muted-foreground mb-1 block">Model</Label>
-          <ModelConfigSelector
-            modelOptions={selectorModels}
-            currentModel={selectedModel}
-            configOptions={selectedConfigOptions}
-            onModelChange={(v) => onDefaultChange(defaultAgentId, v)}
-            disabled={!defaultAgentId}
-            placeholder="Select model..."
-            ariaLabel="Default utility model settings"
+        {defaultAgentId && (
+          <InferenceAgentStatusNote
+            agent={selectedAgent}
+            fallbackName={defaultAgentId}
+            onRefresh={() => onRefreshAgent(defaultAgentId)}
           />
-        </div>
-      </div>
-      {defaultAgentId && (
-        <InferenceAgentStatusNote
-          agent={selectedAgent}
-          fallbackName={defaultAgentId}
-          onRefresh={() => onRefreshAgent(defaultAgentId)}
-        />
-      )}
-    </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -257,10 +259,11 @@ export function PerActionOverridesSection({
   const defaultLabel = defaultModel ? `Default (${defaultModel})` : "Default";
 
   return (
-    <div className="space-y-2">
-      <Separator />
-      <h3 className="text-base font-medium pt-2">Actions</h3>
-      <div className="space-y-0">
+    <Card data-testid="utility-actions-card">
+      <CardHeader>
+        <CardTitle className="text-base">Actions</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-0">
         {builtins.map((agent) => (
           <BuiltinActionRow
             key={agent.id}
@@ -271,8 +274,8 @@ export function PerActionOverridesSection({
             onEdit={onEdit}
           />
         ))}
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -286,30 +289,32 @@ type CustomAgentsSectionProps = {
 
 export function CustomAgentsSection({ agents, onAdd, onEdit, onDelete }: CustomAgentsSectionProps) {
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-base font-medium">Custom utility agents</h3>
-          <p className="text-sm text-muted-foreground">
-            Create your own utility agents with custom prompts.
-          </p>
-        </div>
-        <Button onClick={onAdd} size="sm" className="cursor-pointer">
-          <IconPlus className="h-4 w-4 mr-1" />
-          Add
-        </Button>
-      </div>
-      {agents.length === 0 && (
-        <p className="text-sm text-muted-foreground py-4">No custom utility agents.</p>
-      )}
-      {agents.length > 0 && (
-        <div className="space-y-2">
-          {agents.map((agent) => (
-            <CustomAgentRow key={agent.id} agent={agent} onEdit={onEdit} onDelete={onDelete} />
-          ))}
-        </div>
-      )}
-    </div>
+    <Card data-testid="utility-custom-agents-card">
+      <CardHeader>
+        <CardTitle className="text-base">Custom utility agents</CardTitle>
+        <CardAction>
+          <Button onClick={onAdd} size="sm" className="cursor-pointer">
+            <IconPlus className="h-4 w-4 mr-1" />
+            Add
+          </Button>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          Create your own utility agents with custom prompts.
+        </p>
+        {agents.length === 0 && (
+          <p className="text-sm text-muted-foreground py-4">No custom utility agents.</p>
+        )}
+        {agents.length > 0 && (
+          <div className="space-y-2">
+            {agents.map((agent) => (
+              <CustomAgentRow key={agent.id} agent={agent} onEdit={onEdit} onDelete={onDelete} />
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
