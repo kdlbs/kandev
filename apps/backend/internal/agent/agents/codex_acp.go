@@ -25,8 +25,8 @@ var (
 )
 
 // CodexACP implements Agent for the Agent Client Protocol codex-acp package.
-// It speaks the ACP protocol (JSON-RPC 2.0 over stdin/stdout) via a Rust binary
-// wrapping OpenAI Codex. Used for A/B comparison against the native Codex agent.
+// It speaks the ACP protocol (JSON-RPC 2.0 over stdin/stdout) through the npm
+// bridge for OpenAI Codex. Used for A/B comparison against the native Codex agent.
 type CodexACP struct {
 	StandardPassthrough
 }
