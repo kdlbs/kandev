@@ -64,6 +64,24 @@ func TestCodexACP_BuildCommand_NoCodexCLIFlags(t *testing.T) {
 	}
 }
 
+func TestCodexACP_UsesAgentClientProtocolBridge(t *testing.T) {
+	a := NewCodexACP()
+	want := []string{"npx", "-y", "@agentclientprotocol/codex-acp"}
+
+	if got := a.BuildCommand(CommandOptions{}).Args(); !slices.Equal(got, want) {
+		t.Fatalf("BuildCommand = %#v, want %#v", got, want)
+	}
+	if got := a.Runtime().Cmd.Args(); !slices.Equal(got, want) {
+		t.Fatalf("Runtime Cmd = %#v, want %#v", got, want)
+	}
+	if got := a.InferenceConfig().Command.Args(); !slices.Equal(got, want) {
+		t.Fatalf("Inference Command = %#v, want %#v", got, want)
+	}
+	if got := a.InstallScript(); !strings.Contains(got, "@agentclientprotocol/codex-acp") {
+		t.Fatalf("InstallScript = %q, want agentclientprotocol bridge package", got)
+	}
+}
+
 func TestCodexACPSessionDirTemplate(t *testing.T) {
 	a := NewCodexACP()
 	cfg := a.Runtime().SessionConfig
