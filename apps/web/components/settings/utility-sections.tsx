@@ -93,7 +93,9 @@ export function DefaultModelSection({
   return (
     <Card data-testid="utility-default-model-card">
       <CardHeader>
-        <CardTitle className="text-base">Default utility agent model</CardTitle>
+        <CardTitle className="text-base">
+          <h3>Default utility agent model</h3>
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-sm text-muted-foreground">
@@ -164,12 +166,12 @@ export function BuiltinActionRow({
       className="flex items-center gap-4 py-2 px-2 rounded hover:bg-muted/50"
       data-testid={`utility-action-row-${agent.id}`}
     >
-      <div className="w-[420px] shrink-0">
-        <div className="text-sm font-medium">{agent.name}</div>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium truncate">{agent.name}</div>
         <p className="text-xs text-muted-foreground truncate">{agent.description}</p>
       </div>
       <Select value={currentValue} onValueChange={(v) => onModelChange(agent, v)}>
-        <SelectTrigger className="w-[240px] cursor-pointer">
+        <SelectTrigger className="w-[240px] shrink-0 cursor-pointer">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -193,7 +195,7 @@ export function BuiltinActionRow({
         variant="ghost"
         size="sm"
         onClick={() => onEdit(agent)}
-        className="h-7 w-7 p-0 cursor-pointer text-muted-foreground hover:text-foreground"
+        className="h-7 w-7 p-0 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"
       >
         <IconPencil className="h-3.5 w-3.5" />
       </Button>
@@ -261,7 +263,9 @@ export function PerActionOverridesSection({
   return (
     <Card data-testid="utility-actions-card">
       <CardHeader>
-        <CardTitle className="text-base">Actions</CardTitle>
+        <CardTitle className="text-base">
+          <h3>Actions</h3>
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-0">
         {builtins.map((agent) => (
@@ -291,7 +295,9 @@ export function CustomAgentsSection({ agents, onAdd, onEdit, onDelete }: CustomA
   return (
     <Card data-testid="utility-custom-agents-card">
       <CardHeader>
-        <CardTitle className="text-base">Custom utility agents</CardTitle>
+        <CardTitle className="text-base">
+          <h3>Custom utility agents</h3>
+        </CardTitle>
         <CardAction>
           <Button onClick={onAdd} size="sm" className="cursor-pointer">
             <IconPlus className="h-4 w-4 mr-1" />

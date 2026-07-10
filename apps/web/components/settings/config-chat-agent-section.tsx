@@ -49,7 +49,9 @@ export function ConfigChatAgentSection() {
   return (
     <Card data-testid="config-chat-agent-card">
       <CardHeader>
-        <CardTitle className="text-base">Configuration Chat Agent</CardTitle>
+        <CardTitle className="text-base">
+          <h3>Configuration Chat Agent</h3>
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">

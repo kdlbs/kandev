@@ -190,20 +190,76 @@ test.describe("Utility Agents settings page", () => {
     // Regression guard: these sub-sections used to be bare divs with no
     // visible border, unlike every other settings page (e.g. Voice Mode's
     // Card-wrapped Enable/Engine/Behavior sections).
+    //
+    // Mock the inference-agent + builtin-agent APIs so the Actions card
+    // (which renders null when there are no builtins — see
+    // PerActionOverridesSection) is deterministically present, instead of
+    // depending on the backend's boot-time seed state.
+    await testPage.route("**/api/v1/utility/inference-agents", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          agents: [
+            {
+              id: "claude",
+              name: "claude",
+              display_name: "Claude",
+              status: "ok",
+              models: [
+                { id: "claude-fast", name: "Claude Fast", description: "", is_default: true },
+              ],
+            },
+          ],
+        }),
+      }),
+    );
+    await testPage.route("**/api/v1/utility/agents", (route) => {
+      if (route.request().method() !== "GET") {
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ success: true }),
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          agents: [
+            {
+              id: "builtin-commit-message",
+              name: "commit-message",
+              description: "Generate a commit message.",
+              builtin: true,
+              enabled: true,
+              agent_id: "",
+              model: "",
+            },
+          ],
+        }),
+      });
+    });
+
     await testPage.goto("/settings/utility-agents");
     await expect(
       testPage.getByRole("heading", { name: "Utility Agents", exact: true }),
     ).toBeVisible({ timeout: 15_000 });
 
-    for (const testId of [
-      "utility-default-model-card",
-      "utility-actions-card",
-      "utility-custom-agents-card",
-      "config-chat-agent-card",
+    for (const { testId, heading } of [
+      { testId: "utility-default-model-card", heading: "Default utility agent model" },
+      { testId: "utility-actions-card", heading: "Actions" },
+      { testId: "utility-custom-agents-card", heading: "Custom utility agents" },
+      { testId: "config-chat-agent-card", heading: "Configuration Chat Agent" },
     ]) {
       const card = testPage.getByTestId(testId);
       await expect(card).toBeVisible();
       await expect(card).toHaveAttribute("data-slot", "card");
+      // Card titles must stay real headings (level 3), not just styled div
+      // text, so screen-reader heading navigation keeps working.
+      await expect(
+        card.getByRole("heading", { name: heading, level: 3, exact: true }),
+      ).toBeVisible();
     }
   });
 
