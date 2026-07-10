@@ -2679,32 +2679,38 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 // whatever is at the FIFO head so the newly-idle session still picks
 // something up.
 //
+// The returned bool reports whether THIS call actually dispatched a
+// message — false when skipped because a cancel was already in flight for
+// sessionID (the busy branch below), or when nothing was available to take.
+// Callers (queueThenInterruptTaskMessage) must not report immediate
+// delivery ("sent") for a false result: the caller's message is still only
+// queued, to be delivered later by whichever drain gets to it.
+//
 // Deliberately mirrors cancelAgentSilent + dispatchTakenQueuedMessage rather
 // than delegating to CancelAgent: the interrupt is an internal steering
 // signal from the parent, not a user action, so unlike the cancel button it
 // must not write a visible "Turn cancelled" message and must not move the
 // task to REVIEW (writeTaskReviewStateOnCancel).
-func (s *Service) InterruptForPeerMessage(ctx context.Context, taskID, sessionID, entryID string) error {
+func (s *Service) InterruptForPeerMessage(ctx context.Context, taskID, sessionID, entryID string) (bool, error) {
 	if _, busy := s.cancelInFlight.LoadOrStore(sessionID, struct{}{}); busy {
 		s.logger.Debug("interrupt for peer message skipped; a cancel is already in flight",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID))
-		return nil
+		return false, nil
 	}
 	defer s.cancelInFlight.Delete(sessionID)
 
 	if err := s.cancelAgentSilent(ctx, taskID, sessionID); err != nil {
-		return fmt.Errorf("interrupt for peer message: %w", err)
+		return false, fmt.Errorf("interrupt for peer message: %w", err)
 	}
 
 	if entryID != "" && s.messageQueue != nil {
 		queuedMsg, ok := s.messageQueue.TakeQueuedEntry(ctx, sessionID, entryID)
 		if s.dispatchTakenQueuedMessage(ctx, sessionID, queuedMsg, ok) {
-			return nil
+			return true, nil
 		}
 	}
-	s.drainQueuedMessageForPromptableSession(ctx, sessionID)
-	return nil
+	return s.drainQueuedMessageForPromptableSession(ctx, sessionID), nil
 }
 
 // CompleteTask explicitly completes a task and stops all its agents

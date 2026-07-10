@@ -725,8 +725,12 @@ func TestInterruptForPeerMessage_DeliversQueuedMessageWithoutUserCancelSideEffec
 		t.Fatalf("queue message: %v", err)
 	}
 
-	if err := svc.InterruptForPeerMessage(ctx, "task1", "session1", queued.ID); err != nil {
+	dispatched, err := svc.InterruptForPeerMessage(ctx, "task1", "session1", queued.ID)
+	if err != nil {
 		t.Fatalf("interrupt for peer message: %v", err)
+	}
+	if !dispatched {
+		t.Fatal("expected InterruptForPeerMessage to report the message as dispatched")
 	}
 
 	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
@@ -804,8 +808,12 @@ func TestInterruptForPeerMessage_CancelFailurePropagatesAndKeepsMessageQueued(t 
 		t.Fatalf("queue message: %v", err)
 	}
 
-	if err := svc.InterruptForPeerMessage(ctx, "task1", "session1", queued.ID); err == nil {
+	dispatched, err := svc.InterruptForPeerMessage(ctx, "task1", "session1", queued.ID)
+	if err == nil {
 		t.Fatal("expected InterruptForPeerMessage to propagate the cancel failure")
+	}
+	if dispatched {
+		t.Fatal("expected InterruptForPeerMessage to report nothing dispatched on cancel failure")
 	}
 
 	status := svc.messageQueue.GetStatus(ctx, "session1")
@@ -847,8 +855,12 @@ func TestInterruptForPeerMessage_DeliversTargetedEntryAheadOfOlderQueuedMessages
 		t.Fatalf("queue parent message: %v", err)
 	}
 
-	if err := svc.InterruptForPeerMessage(ctx, "task1", "session1", parentMsg.ID); err != nil {
+	dispatched, err := svc.InterruptForPeerMessage(ctx, "task1", "session1", parentMsg.ID)
+	if err != nil {
 		t.Fatalf("interrupt for peer message: %v", err)
+	}
+	if !dispatched {
+		t.Fatal("expected InterruptForPeerMessage to report the message as dispatched")
 	}
 
 	select {
@@ -891,8 +903,12 @@ func TestInterruptForPeerMessage_FallsBackToFIFOHeadWhenNoEntryIDGiven(t *testin
 		t.Fatalf("queue message: %v", err)
 	}
 
-	if err := svc.InterruptForPeerMessage(ctx, "task1", "session1", ""); err != nil {
+	dispatched, err := svc.InterruptForPeerMessage(ctx, "task1", "session1", "")
+	if err != nil {
 		t.Fatalf("interrupt for peer message: %v", err)
+	}
+	if !dispatched {
+		t.Fatal("expected InterruptForPeerMessage to report the message as dispatched")
 	}
 
 	select {
@@ -905,6 +921,51 @@ func TestInterruptForPeerMessage_FallsBackToFIFOHeadWhenNoEntryIDGiven(t *testin
 	agentMgr.mu.Unlock()
 	if len(prompts) != 1 || prompts[0] != "only queued message" {
 		t.Fatalf("expected the FIFO head to still be dispatched without an entry id, got prompts=%v", prompts)
+	}
+}
+
+// TestInterruptForPeerMessage_BusySkipReturnsNotDispatchedWithoutError pins
+// the busy-skip contract: when a cancel is already in flight for the
+// session, InterruptForPeerMessage must return (false, nil) rather than
+// (true, nil) — the caller (queueThenInterruptTaskMessage) uses that bool to
+// decide whether to report "sent"; reporting dispatched=true here would
+// claim immediate delivery for a message this call never touched (the
+// in-flight cancel owns delivery instead, whenever it completes).
+func TestInterruptForPeerMessage_BusySkipReturnsNotDispatchedWithoutError(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	taskRepo := newMockTaskRepo()
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	queued, err := svc.messageQueue.QueueMessage(
+		ctx, "session1", "task1", "parent steer message", "", messagequeue.QueuedByAgent, false, nil,
+	)
+	if err != nil {
+		t.Fatalf("queue message: %v", err)
+	}
+
+	// Simulate a concurrent interrupt/cancel already owning this session.
+	svc.cancelInFlight.Store("session1", struct{}{})
+	defer svc.cancelInFlight.Delete("session1")
+
+	dispatched, err := svc.InterruptForPeerMessage(ctx, "task1", "session1", queued.ID)
+	if err != nil {
+		t.Fatalf("expected no error from the busy-skip branch, got %v", err)
+	}
+	if dispatched {
+		t.Fatal("expected the busy-skip branch to report nothing dispatched")
+	}
+	if got := agentMgr.cancelAgentCalls.Load(); got != 0 {
+		t.Fatalf("expected the busy-skip branch to never call CancelAgent, got %d calls", got)
+	}
+
+	status := svc.messageQueue.GetStatus(ctx, "session1")
+	if status.Count != 1 {
+		t.Fatalf("expected the message to remain queued for the in-flight cancel to deliver, count=%d", status.Count)
 	}
 }
 

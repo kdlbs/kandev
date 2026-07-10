@@ -45,6 +45,11 @@ type fakeOrchestrator struct {
 	// interruptErr is returned by every InterruptForPeerMessage call — lets
 	// tests exercise the "interrupt failed, message must stay queued" path.
 	interruptErr error
+	// interruptSkippedNoError simulates InterruptForPeerMessage's busy-skip
+	// branch: returns (false, nil) — no error, but nothing was actually
+	// dispatched by this call — so tests can exercise the "status stays
+	// queued even though InterruptForPeerMessage succeeded" contract.
+	interruptSkippedNoError bool
 }
 
 // interruptCall records one InterruptForPeerMessage invocation.
@@ -117,13 +122,17 @@ func (f *fakeOrchestrator) ProcessOnTurnStart(ctx context.Context, taskID, sessi
 func (f *fakeOrchestrator) GetMessageQueue() *messagequeue.Service { return f.queue }
 
 // InterruptForPeerMessage records the call and returns the configured
-// interruptErr — real interrupt/drain behavior is exercised by the
+// interruptErr, or (false, nil) when interruptSkippedNoError simulates the
+// busy-skip branch — real interrupt/drain behavior is exercised by the
 // orchestrator-level InterruptForPeerMessage tests, not this fake.
-func (f *fakeOrchestrator) InterruptForPeerMessage(_ context.Context, taskID, sessionID, entryID string) error {
+func (f *fakeOrchestrator) InterruptForPeerMessage(_ context.Context, taskID, sessionID, entryID string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.interruptCalls = append(f.interruptCalls, interruptCall{taskID: taskID, sessionID: sessionID, entryID: entryID})
-	return f.interruptErr
+	if f.interruptErr != nil {
+		return false, f.interruptErr
+	}
+	return !f.interruptSkippedNoError, nil
 }
 
 type fakePromptReferenceResolver struct {
@@ -433,6 +442,34 @@ func TestHandleMessageTask_ParentToChildRunningSession_InterruptFailure_KeepsMes
 
 	status := orch.queue.GetStatus(context.Background(), sess.ID)
 	require.Equal(t, 1, status.Count, "message must remain queued even though the interrupt failed")
+}
+
+// TestHandleMessageTask_ParentToChildRunningSession_InterruptSkipped_KeepsQueuedStatus
+// pins the busy-skip status contract: InterruptForPeerMessage returning
+// (false, nil) — no error, but nothing actually dispatched by this call,
+// e.g. because a concurrent cancel already owned the session — must still
+// report "queued" (not "sent"). Reporting "sent" here would tell the parent
+// its message was delivered immediately when it is still only sitting in
+// the queue for the in-flight cancel to deliver later.
+func TestHandleMessageTask_ParentToChildRunningSession_InterruptSkipped_KeepsQueuedStatus(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	parent, child, sess := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.interruptSkippedNoError = true
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(child.ID, "stop now", parent.ID))
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "queued", payload["status"])
+
+	status := orch.queue.GetStatus(context.Background(), sess.ID)
+	require.Equal(t, 1, status.Count, "message must remain queued when the interrupt was skipped")
 }
 
 func TestHandleMessageTask_AppendsPromptReferenceExpansions(t *testing.T) {
