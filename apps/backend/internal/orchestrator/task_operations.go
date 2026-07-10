@@ -2659,21 +2659,32 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 }
 
 // InterruptForPeerMessage cancels sessionID's in-flight turn and immediately
-// takes and dispatches its next queued message (the FIFO head — see
-// drainQueuedMessageForPromptableSession) instead of waiting for the turn to
-// end naturally. It is used only by handleMessageTask
-// (mcp/handlers) when the sender is the target task's parent: a long-running
-// child otherwise leaves its parent's control/steer messages parked on the
-// FIFO queue until the child's current turn finishes on its own, and with
-// several such children running in parallel the per-session queue can fill
-// up to messagequeue.DefaultMaxPerSession before any of them are delivered.
+// takes and dispatches entryID — the specific message that triggered this
+// interrupt — instead of waiting for the turn to end naturally. It is used
+// only by handleMessageTask (mcp/handlers) when the sender is the target
+// task's parent: a long-running child otherwise leaves its parent's
+// control/steer messages parked on the FIFO queue until the child's current
+// turn finishes on its own, and with several such children running in
+// parallel the per-session queue can fill up to
+// messagequeue.DefaultMaxPerSession before any of them are delivered.
 //
-// Deliberately mirrors cancelAgentSilent + drainQueuedMessageForPromptableSession
-// rather than delegating to CancelAgent: the interrupt is an internal steering
+// entryID must target the message the caller just queued for this same
+// interrupt (see queueThenInterruptTaskMessage), not merely the FIFO head:
+// the target session may already have older queued entries (e.g. from a
+// sibling task) ahead of it, and taking the FIFO head in that case would
+// dispatch the older message while leaving the parent's urgent one parked
+// exactly as before the interrupt — defeating the point of interrupting at
+// all. If entryID is empty or was already taken by a concurrent path (lost
+// race with a normal turn-completion drain), this falls back to draining
+// whatever is at the FIFO head so the newly-idle session still picks
+// something up.
+//
+// Deliberately mirrors cancelAgentSilent + dispatchTakenQueuedMessage rather
+// than delegating to CancelAgent: the interrupt is an internal steering
 // signal from the parent, not a user action, so unlike the cancel button it
 // must not write a visible "Turn cancelled" message and must not move the
 // task to REVIEW (writeTaskReviewStateOnCancel).
-func (s *Service) InterruptForPeerMessage(ctx context.Context, taskID, sessionID string) error {
+func (s *Service) InterruptForPeerMessage(ctx context.Context, taskID, sessionID, entryID string) error {
 	if _, busy := s.cancelInFlight.LoadOrStore(sessionID, struct{}{}); busy {
 		s.logger.Debug("interrupt for peer message skipped; a cancel is already in flight",
 			zap.String("task_id", taskID),
@@ -2686,6 +2697,12 @@ func (s *Service) InterruptForPeerMessage(ctx context.Context, taskID, sessionID
 		return fmt.Errorf("interrupt for peer message: %w", err)
 	}
 
+	if entryID != "" && s.messageQueue != nil {
+		queuedMsg, ok := s.messageQueue.TakeQueuedEntry(ctx, sessionID, entryID)
+		if s.dispatchTakenQueuedMessage(ctx, sessionID, queuedMsg, ok) {
+			return nil
+		}
+	}
 	s.drainQueuedMessageForPromptableSession(ctx, sessionID)
 	return nil
 }

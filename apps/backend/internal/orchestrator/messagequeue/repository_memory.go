@@ -154,6 +154,31 @@ func (r *memoryRepository) TakeHead(_ context.Context, sessionID string) (*Queue
 	return &out, nil
 }
 
+// TakeByID atomically returns and deletes the entry identified by entryID,
+// regardless of its FIFO position. Unlike DeleteByID, it has no
+// QueuedByAgent guard — see the Repository interface doc comment.
+func (r *memoryRepository) TakeByID(_ context.Context, sessionID, entryID string) (*QueuedMessage, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	list, ok := r.entries[sessionID]
+	if !ok {
+		return nil, nil
+	}
+	for i, m := range list {
+		if m.ID != entryID {
+			continue
+		}
+		r.entries[sessionID] = append(list[:i], list[i+1:]...)
+		if len(r.entries[sessionID]) == 0 {
+			delete(r.entries, sessionID)
+			delete(r.nextPosition, sessionID)
+		}
+		out := *m
+		return &out, nil
+	}
+	return nil, nil
+}
+
 func (r *memoryRepository) UpdateContent(_ context.Context, sessionID, entryID, content string, attachments []MessageAttachment, queuedBy string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

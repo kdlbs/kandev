@@ -1192,7 +1192,7 @@ func (m *mockSessionLauncher) ProcessOnTurnStart(context.Context, string, string
 	return nil
 }
 func (m *mockSessionLauncher) GetMessageQueue() *messagequeue.Service { return nil }
-func (m *mockSessionLauncher) InterruptForPeerMessage(context.Context, string, string) error {
+func (m *mockSessionLauncher) InterruptForPeerMessage(context.Context, string, string, string) error {
 	return nil
 }
 

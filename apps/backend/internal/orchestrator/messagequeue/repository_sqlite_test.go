@@ -249,6 +249,76 @@ func TestSQLiteRepository_DeleteByID(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_TakeByID(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+
+	first := &QueuedMessage{SessionID: "s1", TaskID: "t1", Content: "first", QueuedBy: "u"}
+	if err := repo.Insert(ctx, first, 0); err != nil {
+		t.Fatalf("insert first: %v", err)
+	}
+	second := &QueuedMessage{SessionID: "s1", TaskID: "t1", Content: "second", QueuedBy: "u"}
+	if err := repo.Insert(ctx, second, 0); err != nil {
+		t.Fatalf("insert second: %v", err)
+	}
+	third := &QueuedMessage{SessionID: "s1", TaskID: "t1", Content: "third", QueuedBy: "u"}
+	if err := repo.Insert(ctx, third, 0); err != nil {
+		t.Fatalf("insert third: %v", err)
+	}
+
+	// Cross-session take attempt: must not affect the row.
+	got, err := repo.TakeByID(ctx, "s-attacker", second.ID)
+	if err != nil {
+		t.Fatalf("cross-session take: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil for cross-session take, got %+v", got)
+	}
+	count, _ := repo.CountBySession(ctx, "s1")
+	if count != 3 {
+		t.Errorf("entries should survive cross-session take attempt, got count=%d", count)
+	}
+
+	// Taking the middle entry out of FIFO order must not disturb the others.
+	got, err = repo.TakeByID(ctx, "s1", second.ID)
+	if err != nil {
+		t.Fatalf("take: %v", err)
+	}
+	if got == nil || got.Content != "second" {
+		t.Fatalf("expected to take %q, got %+v", "second", got)
+	}
+	remaining, err := repo.ListBySession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(remaining) != 2 || remaining[0].Content != "first" || remaining[1].Content != "third" {
+		t.Fatalf("expected [first, third] to remain in order, got %+v", remaining)
+	}
+
+	// Taking the same id again finds nothing — it's already gone.
+	got, err = repo.TakeByID(ctx, "s1", second.ID)
+	if err != nil {
+		t.Fatalf("re-take: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil on re-take of already-taken id, got %+v", got)
+	}
+
+	// Unlike DeleteByID, TakeByID has no queued_by="agent" guard — the caller
+	// is internal orchestrator code dispatching its own queued entry.
+	agentMsg := &QueuedMessage{SessionID: "s1", TaskID: "t1", Content: "agent", QueuedBy: QueuedByAgent}
+	if err := repo.Insert(ctx, agentMsg, 0); err != nil {
+		t.Fatalf("insert agent message: %v", err)
+	}
+	got, err = repo.TakeByID(ctx, "s1", agentMsg.ID)
+	if err != nil {
+		t.Fatalf("take agent-authored entry: %v", err)
+	}
+	if got == nil || got.Content != "agent" {
+		t.Fatalf("expected to take agent-authored entry, got %+v", got)
+	}
+}
+
 func TestSQLiteRepository_DeleteAllBySession(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()

@@ -90,12 +90,14 @@ type SessionLauncher interface {
 	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error
 	GetMessageQueue() *messagequeue.Service
 	// InterruptForPeerMessage cancels a running/starting session's in-flight
-	// turn and drains its queue immediately. Used only by
+	// turn and dispatches entryID (the message the caller just queued for
+	// this same interrupt) immediately, bypassing FIFO order. Used only by
 	// queueThenInterruptTaskMessage when the message_task_kandev sender is
 	// the target task's parent (see handleMessageTask) — see the
 	// orchestrator implementation's doc comment for why this must not reuse
-	// CancelAgent's user-facing side effects.
-	InterruptForPeerMessage(ctx context.Context, taskID, sessionID string) error
+	// CancelAgent's user-facing side effects, and for why entryID must be
+	// the specific queued message rather than just "drain the FIFO head".
+	InterruptForPeerMessage(ctx context.Context, taskID, sessionID, entryID string) error
 }
 
 // MessageQueuer queues a prompt message for delivery to a session on its next turn.
@@ -1862,9 +1864,24 @@ const (
 	keyPosition         = "position"
 )
 
+// taskMessageStatusSent is the taskMessageDispatchResult.status value used
+// when a message_task_kandev prompt was dispatched immediately rather than
+// left in the FIFO queue for later delivery — either because the target
+// session was idle (promptWithAutoResume) or because a parent's interrupt
+// just dispatched it (queueThenInterruptTaskMessage). Extracted to satisfy
+// goconst's repeated-string rule; see dispatchTaskMessage's doc comment for
+// the full status enum ("queued", "sent", "started").
+const taskMessageStatusSent = "sent"
+
+// queuedEntryID is set only by queueTaskMessage (the message queue's
+// returned entry id) so queueThenInterruptTaskMessage can target that exact
+// entry when interrupting instead of the FIFO head — see
+// InterruptForPeerMessage's doc comment. Never serialized to the wire; the
+// MCP response only reads status/sessionID (see handleMessageTask).
 type taskMessageDispatchResult struct {
-	status    string
-	sessionID string
+	status        string
+	sessionID     string
+	queuedEntryID string
 }
 
 type taskMessageReviewRollback struct {
@@ -2130,7 +2147,8 @@ func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session 
 	if queue == nil {
 		return taskMessageDispatchResult{}, errors.New("message queue not available")
 	}
-	if _, err := queue.QueueMessageWithMetadata(ctx, session.ID, taskID, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata); err != nil {
+	queued, err := queue.QueueMessageWithMetadata(ctx, session.ID, taskID, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata)
+	if err != nil {
 		if errors.Is(err, messagequeue.ErrQueueFull) {
 			status := queue.GetStatus(ctx, session.ID)
 			return taskMessageDispatchResult{}, &queueFullDispatchError{
@@ -2143,7 +2161,7 @@ func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session 
 		return taskMessageDispatchResult{}, fmt.Errorf("failed to queue message: %w", err)
 	}
 	h.publishQueueStatusEvent(ctx, session.ID, queue)
-	return taskMessageDispatchResult{status: "queued", sessionID: session.ID}, nil
+	return taskMessageDispatchResult{status: "queued", sessionID: session.ID, queuedEntryID: queued.ID}, nil
 }
 
 // queueThenInterruptTaskMessage queues prompt for a running/starting session
@@ -2153,21 +2171,32 @@ func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session 
 // target's parent task (see handleMessageTask); regular peer messages keep
 // the default queue-and-wait behavior documented on message_task_kandev.
 //
-// The interrupt runs synchronously (not fire-and-forget): if it fails, that
-// failure must surface to the caller rather than being logged and dropped —
-// silently reporting "queued" success while the interrupt failed would
-// strand the message exactly like the bug this path exists to fix, just
-// with an invisible delay. The message itself is never rolled back on an
-// interrupt failure, so it is still delivered later by the normal
-// turn-completion drain.
+// The interrupt runs synchronously (not fire-and-forget) so the returned
+// status reflects what actually happened: "sent" when the interrupt
+// dispatched the message immediately, or "queued" (the same status as the
+// non-interrupt path) when the interrupt itself failed. An interrupt
+// failure is deliberately NOT surfaced as an error to the caller — the
+// message is already safely persisted by queueTaskMessage above and will
+// still be delivered by the normal turn-completion drain, so the interrupt
+// is purely a latency optimization on top of that always-safe default. The
+// calling agent has no useful recovery action on a hard error here besides
+// retrying message_task_kandev, and retrying would enqueue a second copy of
+// the same message since queuing is not idempotent — reporting the accurate
+// "queued" status avoids inviting that duplicate. The failure is still
+// logged server-side for operators.
 func (h *Handlers) queueThenInterruptTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string, metadata map[string]interface{}) (taskMessageDispatchResult, error) {
 	result, err := h.queueTaskMessage(ctx, taskID, session, prompt, metadata)
 	if err != nil {
 		return result, err
 	}
-	if err := h.sessionLauncher.InterruptForPeerMessage(ctx, taskID, session.ID); err != nil {
-		return result, fmt.Errorf("message queued but failed to interrupt child session's turn: %w", err)
+	if err := h.sessionLauncher.InterruptForPeerMessage(ctx, taskID, session.ID, result.queuedEntryID); err != nil {
+		h.logger.Warn("failed to interrupt child session's turn; message stays queued for normal drain",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+		return result, nil
 	}
+	result.status = taskMessageStatusSent
 	return result, nil
 }
 
@@ -2423,7 +2452,7 @@ func (h *Handlers) deleteRecordedUserMessage(ctx context.Context, message *model
 func (h *Handlers) promptWithAutoResume(ctx context.Context, taskID, sessionID, prompt string) (string, error) {
 	_, err := h.sessionLauncher.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil, true)
 	if err == nil {
-		return "sent", nil
+		return taskMessageStatusSent, nil
 	}
 	if !errors.Is(err, executor.ErrExecutionNotFound) {
 		return "", fmt.Errorf("failed to send prompt: %w", err)
@@ -2439,7 +2468,7 @@ func (h *Handlers) promptWithAutoResume(ctx context.Context, taskID, sessionID, 
 	if _, retryErr := h.sessionLauncher.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil, true); retryErr != nil {
 		return "", fmt.Errorf("failed to send prompt after resume: %w", retryErr)
 	}
-	return "sent", nil
+	return taskMessageStatusSent, nil
 }
 
 // publishQueueStatusEvent fires a queue.status_changed event so the frontend

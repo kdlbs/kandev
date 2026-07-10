@@ -49,7 +49,7 @@ type fakeOrchestrator struct {
 
 // interruptCall records one InterruptForPeerMessage invocation.
 type interruptCall struct {
-	taskID, sessionID string
+	taskID, sessionID, entryID string
 }
 
 type promptCall struct {
@@ -119,10 +119,10 @@ func (f *fakeOrchestrator) GetMessageQueue() *messagequeue.Service { return f.qu
 // InterruptForPeerMessage records the call and returns the configured
 // interruptErr — real interrupt/drain behavior is exercised by the
 // orchestrator-level InterruptForPeerMessage tests, not this fake.
-func (f *fakeOrchestrator) InterruptForPeerMessage(_ context.Context, taskID, sessionID string) error {
+func (f *fakeOrchestrator) InterruptForPeerMessage(_ context.Context, taskID, sessionID, entryID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.interruptCalls = append(f.interruptCalls, interruptCall{taskID: taskID, sessionID: sessionID})
+	f.interruptCalls = append(f.interruptCalls, interruptCall{taskID: taskID, sessionID: sessionID, entryID: entryID})
 	return f.interruptErr
 }
 
@@ -368,8 +368,10 @@ func TestHandleMessageTask_RunningSession_Queues(t *testing.T) {
 // steering contract: when the sender is the target's parent task, a
 // running/starting target is interrupted right after the message is queued,
 // so the message is delivered without waiting for the child's current turn
-// to finish naturally. See InterruptForPeerMessage's doc comment for why
-// this matters for long-running children.
+// to finish naturally. The reported status is "sent" (not "queued") because
+// the interrupt actually dispatched it immediately — see
+// queueThenInterruptTaskMessage's doc comment. See InterruptForPeerMessage's
+// doc comment for why this matters for long-running children.
 func TestHandleMessageTask_ParentToChildRunningSession_Interrupts(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	parent, child, sess := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
@@ -384,26 +386,34 @@ func TestHandleMessageTask_ParentToChildRunningSession_Interrupts(t *testing.T) 
 
 	var payload map[string]interface{}
 	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
-	assert.Equal(t, "queued", payload["status"])
+	assert.Equal(t, "sent", payload["status"])
 
-	// The message is queued exactly like any other message_task call...
+	// The message was queued first exactly like any other message_task
+	// call...
 	status := orch.queue.GetStatus(context.Background(), sess.ID)
 	require.Equal(t, 1, status.Count)
 	assert.Contains(t, status.Entries[0].Content, "stop and pivot to X")
 
 	// ...but because the sender is the target's parent, the child's current
-	// turn is interrupted immediately instead of waiting for it to finish.
+	// turn is interrupted immediately instead of waiting for it to finish,
+	// targeting the exact entry id that was just queued (not just "whatever
+	// is at the FIFO head") — see InterruptForPeerMessage's doc comment.
 	require.Len(t, orch.interruptCalls, 1)
 	assert.Equal(t, child.ID, orch.interruptCalls[0].taskID)
 	assert.Equal(t, sess.ID, orch.interruptCalls[0].sessionID)
+	assert.Equal(t, status.Entries[0].ID, orch.interruptCalls[0].entryID)
 }
 
 // TestHandleMessageTask_ParentToChildRunningSession_InterruptFailure_KeepsMessageQueued
-// pins the failure contract: an interrupt failure must surface as an error
-// (not be silently swallowed — that would strand the message with no visible
-// signal, exactly the bug this feature exists to fix) while leaving the
-// already-queued message in place so the normal turn-completion drain can
-// still deliver it.
+// pins the failure contract: an interrupt failure must NOT surface as an MCP
+// error. The message was already safely persisted by queueTaskMessage and is
+// still delivered later by the normal turn-completion drain, so the
+// interrupt is only a latency optimization on top of that always-safe
+// default — surfacing a hard error here would just invite the calling agent
+// to retry message_task_kandev, which would enqueue a second copy of the
+// same message since queuing is not idempotent. The response instead reports
+// the accurate "queued" status (identical to the non-interrupt path), and
+// the queued message is left in place.
 func TestHandleMessageTask_ParentToChildRunningSession_InterruptFailure_KeepsMessageQueued(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	parent, child, sess := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
@@ -415,7 +425,11 @@ func TestHandleMessageTask_ParentToChildRunningSession_InterruptFailure_KeepsMes
 	resp, err := h.handleMessageTask(context.Background(), msg)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	assert.Equal(t, ws.MessageTypeError, resp.Type)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "queued", payload["status"])
 
 	status := orch.queue.GetStatus(context.Background(), sess.ID)
 	require.Equal(t, 1, status.Count, "message must remain queued even though the interrupt failed")

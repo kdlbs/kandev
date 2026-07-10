@@ -384,6 +384,48 @@ func (r *sqliteRepository) TakeHead(ctx context.Context, sessionID string) (*Que
 	return msg, nil
 }
 
+// TakeByID atomically returns and deletes the entry identified by entryID,
+// regardless of its FIFO position. Mirrors TakeHead's race handling: if a
+// concurrent take already removed the row between the SELECT and DELETE,
+// RowsAffected()==0 is treated as "already taken" (nil, nil) rather than an
+// error, so two racing takers can never both dispatch the same entry.
+func (r *sqliteRepository) TakeByID(ctx context.Context, sessionID, entryID string) (*QueuedMessage, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin take tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	row := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT id, session_id, task_id, position, content, model, plan_mode,
+		       attachments_json, metadata_json, queued_at, queued_by
+		FROM queued_messages
+		WHERE id = ? AND session_id = ?
+	`), entryID, sessionID)
+	msg, err := scanQueuedRow(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("take by id: %w", err)
+	}
+	res, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE id = ?`), msg.ID)
+	if err != nil {
+		return nil, fmt.Errorf("delete by id: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("delete by id rows affected: %w", err)
+	}
+	if affected == 0 {
+		return nil, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return msg, nil
+}
+
 func (r *sqliteRepository) UpdateContent(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, queuedBy string) error {
 	attachmentsJSON, err := marshalAttachments(attachments)
 	if err != nil {

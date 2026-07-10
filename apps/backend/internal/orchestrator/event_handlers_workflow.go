@@ -1150,6 +1150,15 @@ func (s *Service) drainQueuedMessageForPromptableSession(ctx context.Context, se
 		return false
 	}
 	queuedMsg, ok := s.messageQueue.TakeQueued(ctx, sessionID)
+	return s.dispatchTakenQueuedMessage(ctx, sessionID, queuedMsg, ok)
+}
+
+// dispatchTakenQueuedMessage publishes the queue-status update and dispatches
+// queuedMsg for execution, given the (message, ok) pair returned by a Take*
+// call on the message queue (TakeQueued or TakeQueuedEntry). Shared so
+// InterruptForPeerMessage's targeted-entry take gets the same empty-message
+// guard and dispatch behavior as the FIFO-head drain.
+func (s *Service) dispatchTakenQueuedMessage(ctx context.Context, sessionID string, queuedMsg *messagequeue.QueuedMessage, ok bool) bool {
 	if !ok || queuedMsg == nil {
 		return false
 	}

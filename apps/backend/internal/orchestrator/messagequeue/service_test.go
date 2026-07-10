@@ -212,6 +212,63 @@ func TestTakeQueued(t *testing.T) {
 	})
 }
 
+func TestTakeQueuedEntry(t *testing.T) {
+	t.Run("removes and returns the targeted entry regardless of FIFO position", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		_, err := svc.QueueMessage(ctx, "s", "t", "first", "", "u", false, nil)
+		require.NoError(t, err)
+		second, err := svc.QueueMessage(ctx, "s", "t", "second", "", "u", false, nil)
+		require.NoError(t, err)
+		_, err = svc.QueueMessage(ctx, "s", "t", "third", "", "u", false, nil)
+		require.NoError(t, err)
+
+		msg, ok := svc.TakeQueuedEntry(ctx, "s", second.ID)
+		require.True(t, ok)
+		assert.Equal(t, "second", msg.Content)
+
+		// The other two entries are untouched and keep their relative order.
+		status := svc.GetStatus(ctx, "s")
+		require.Equal(t, 2, status.Count)
+		assert.Equal(t, "first", status.Entries[0].Content)
+		assert.Equal(t, "third", status.Entries[1].Content)
+
+		// Taking the same id again finds nothing — it's already gone.
+		_, ok = svc.TakeQueuedEntry(ctx, "s", second.ID)
+		assert.False(t, ok)
+	})
+
+	t.Run("takes agent-authored entries unlike RemoveEntry", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		agentEntry, err := svc.QueueMessageWithMetadata(ctx, "s", "t", "agent entry", "", QueuedByAgent, false, nil, nil)
+		require.NoError(t, err)
+
+		msg, ok := svc.TakeQueuedEntry(ctx, "s", agentEntry.ID)
+		require.True(t, ok)
+		assert.Equal(t, "agent entry", msg.Content)
+	})
+
+	t.Run("returns false for a missing or foreign-session id", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		victim, err := svc.QueueMessage(ctx, "s-victim", "t", "victim entry", "", "u", false, nil)
+		require.NoError(t, err)
+
+		_, ok := svc.TakeQueuedEntry(ctx, "s-victim", "missing-id")
+		assert.False(t, ok)
+
+		_, ok = svc.TakeQueuedEntry(ctx, "s-attacker", victim.ID)
+		assert.False(t, ok)
+
+		status := svc.GetStatus(ctx, "s-victim")
+		assert.Equal(t, 1, status.Count)
+	})
+}
+
 func TestUpdateMessage(t *testing.T) {
 	t.Run("updates content and survives in list", func(t *testing.T) {
 		svc := setupService(t)

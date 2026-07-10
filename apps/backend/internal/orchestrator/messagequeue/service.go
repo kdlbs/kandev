@@ -164,6 +164,30 @@ func (s *Service) TakeQueued(ctx context.Context, sessionID string) (*QueuedMess
 	return msg, true
 }
 
+// TakeQueuedEntry atomically removes and returns the entry identified by
+// entryID, regardless of its FIFO position. Returns nil, false when the
+// entry no longer exists (already drained or removed by a concurrent path).
+// Used by InterruptForPeerMessage to dispatch the specific message that
+// triggered the interrupt instead of whatever happens to be at the FIFO
+// head — see that function's doc comment.
+func (s *Service) TakeQueuedEntry(ctx context.Context, sessionID, entryID string) (*QueuedMessage, bool) {
+	msg, err := s.repo.TakeByID(ctx, sessionID, entryID)
+	if err != nil {
+		s.logger.Error("take by id failed",
+			zap.String("session_id", sessionID),
+			zap.String("entry_id", entryID),
+			zap.Error(err))
+		return nil, false
+	}
+	if msg == nil {
+		return nil, false
+	}
+	s.logger.Info("message dequeued by id",
+		zap.String("session_id", sessionID),
+		zap.String("entry_id", msg.ID))
+	return msg, true
+}
+
 // UpdateMessage replaces the content (and optionally attachments) of a queued
 // entry. The sessionID scope is mandatory — callers can't update an entry by
 // guessing its UUID across sessions. Returns ErrEntryNotFound when the entry

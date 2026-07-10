@@ -31,6 +31,14 @@ type Repository interface {
 	// session. Returns nil, nil if the queue is empty.
 	TakeHead(ctx context.Context, sessionID string) (*QueuedMessage, error)
 
+	// TakeByID atomically returns and deletes the entry identified by entryID
+	// for sessionID, regardless of its FIFO position. Unlike DeleteByID, it has
+	// no queued_by="agent" guard: the caller is internal orchestrator code
+	// (InterruptForPeerMessage) dispatching the specific entry that triggered
+	// its own interrupt, not a user-driven "remove queued message" request.
+	// Returns nil, nil if no entry matches (already taken or never existed).
+	TakeByID(ctx context.Context, sessionID, entryID string) (*QueuedMessage, error)
+
 	// UpdateContent replaces the content/attachments of an entry. The session
 	// scope (`AND session_id = ?`) is mandatory so a caller can't update an
 	// entry by guessing its UUID across sessions. If queuedBy is non-empty the

@@ -718,13 +718,14 @@ func TestInterruptForPeerMessage_DeliversQueuedMessageWithoutUserCancelSideEffec
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
 
-	if _, err := svc.messageQueue.QueueMessage(
+	queued, err := svc.messageQueue.QueueMessage(
 		ctx, "session1", "task1", "parent steer message", "", messagequeue.QueuedByAgent, false, nil,
-	); err != nil {
+	)
+	if err != nil {
 		t.Fatalf("queue message: %v", err)
 	}
 
-	if err := svc.InterruptForPeerMessage(ctx, "task1", "session1"); err != nil {
+	if err := svc.InterruptForPeerMessage(ctx, "task1", "session1", queued.ID); err != nil {
 		t.Fatalf("interrupt for peer message: %v", err)
 	}
 
@@ -796,19 +797,114 @@ func TestInterruptForPeerMessage_CancelFailurePropagatesAndKeepsMessageQueued(t 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
 
-	if _, err := svc.messageQueue.QueueMessage(
+	queued, err := svc.messageQueue.QueueMessage(
 		ctx, "session1", "task1", "parent steer message", "", messagequeue.QueuedByAgent, false, nil,
-	); err != nil {
+	)
+	if err != nil {
 		t.Fatalf("queue message: %v", err)
 	}
 
-	if err := svc.InterruptForPeerMessage(ctx, "task1", "session1"); err == nil {
+	if err := svc.InterruptForPeerMessage(ctx, "task1", "session1", queued.ID); err == nil {
 		t.Fatal("expected InterruptForPeerMessage to propagate the cancel failure")
 	}
 
 	status := svc.messageQueue.GetStatus(ctx, "session1")
 	if status.Count != 1 {
 		t.Fatalf("expected the queued message to remain queued after a failed interrupt, count=%d", status.Count)
+	}
+}
+
+// TestInterruptForPeerMessage_DeliversTargetedEntryAheadOfOlderQueuedMessages
+// pins the fix for the FIFO-head bug: when the target session already has an
+// older queued entry (e.g. from a sibling task) ahead of the parent's
+// just-queued steering message, InterruptForPeerMessage must still dispatch
+// the parent's specific entry — not whatever happens to sit at the FIFO
+// head — otherwise the interrupt cancels the turn but hands control back to
+// the older message, leaving the parent's urgent message stranded behind it
+// exactly as before the interrupt (defeating the point of interrupting at
+// all). See queueThenInterruptTaskMessage (mcp/handlers) for the caller that
+// captures and passes the entry id.
+func TestInterruptForPeerMessage_DeliversTargetedEntryAheadOfOlderQueuedMessages(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo, promptDone: make(chan struct{})}
+	taskRepo := newMockTaskRepo()
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	if _, err := svc.messageQueue.QueueMessage(
+		ctx, "session1", "task1", "older sibling message", "", messagequeue.QueuedByAgent, false, nil,
+	); err != nil {
+		t.Fatalf("queue older message: %v", err)
+	}
+	parentMsg, err := svc.messageQueue.QueueMessage(
+		ctx, "session1", "task1", "parent steer message", "", messagequeue.QueuedByAgent, false, nil,
+	)
+	if err != nil {
+		t.Fatalf("queue parent message: %v", err)
+	}
+
+	if err := svc.InterruptForPeerMessage(ctx, "task1", "session1", parentMsg.ID); err != nil {
+		t.Fatalf("interrupt for peer message: %v", err)
+	}
+
+	select {
+	case <-agentMgr.promptDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the interrupted turn's queued message to be dispatched")
+	}
+	agentMgr.mu.Lock()
+	prompts := append([]string(nil), agentMgr.capturedPrompts...)
+	agentMgr.mu.Unlock()
+	if len(prompts) != 1 || prompts[0] != "parent steer message" {
+		t.Fatalf("expected the parent's targeted message to be dispatched ahead of the older queued entry, got prompts=%v", prompts)
+	}
+
+	// The older entry is untouched — still queued for its own natural turn.
+	status := svc.messageQueue.GetStatus(ctx, "session1")
+	if status.Count != 1 || status.Entries[0].Content != "older sibling message" {
+		t.Fatalf("expected the older entry to remain queued alone, got count=%d entries=%+v", status.Count, status.Entries)
+	}
+}
+
+// TestInterruptForPeerMessage_FallsBackToFIFOHeadWhenNoEntryIDGiven pins the
+// fallback contract: passing an empty entryID (a caller with nothing specific
+// to target) preserves the pre-fix behavior of draining whatever is at the
+// FIFO head, so callers that can't supply an id still get a drain.
+func TestInterruptForPeerMessage_FallsBackToFIFOHeadWhenNoEntryIDGiven(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo, promptDone: make(chan struct{})}
+	taskRepo := newMockTaskRepo()
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	if _, err := svc.messageQueue.QueueMessage(
+		ctx, "session1", "task1", "only queued message", "", messagequeue.QueuedByAgent, false, nil,
+	); err != nil {
+		t.Fatalf("queue message: %v", err)
+	}
+
+	if err := svc.InterruptForPeerMessage(ctx, "task1", "session1", ""); err != nil {
+		t.Fatalf("interrupt for peer message: %v", err)
+	}
+
+	select {
+	case <-agentMgr.promptDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the interrupted turn's queued message to be dispatched")
+	}
+	agentMgr.mu.Lock()
+	prompts := append([]string(nil), agentMgr.capturedPrompts...)
+	agentMgr.mu.Unlock()
+	if len(prompts) != 1 || prompts[0] != "only queued message" {
+		t.Fatalf("expected the FIFO head to still be dispatched without an entry id, got prompts=%v", prompts)
 	}
 }
 
