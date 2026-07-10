@@ -118,6 +118,7 @@ export type SavedLayoutConfig = {
 
 export type ApplyCustomLayoutOptions = {
   activeSessionId?: string | null;
+  sessionIds?: string[];
 };
 
 type DockviewStore = {
@@ -530,25 +531,15 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       preserveChatScrollDuringLayout();
       const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
       set({ isRestoringLayout: true });
-      const state = layout.layout as unknown as LayoutState;
-      let oldFormatRestoreFailed = false;
-      if (!state?.columns) {
-        try {
-          api.fromJSON(layout.layout as unknown as SerializedDockview);
-          replaceStaleSessionPanels(api, opts?.activeSessionId ?? null);
-          set(applyLayoutFixups(api));
-        } catch (e) {
-          console.warn("applyCustomLayout: old-format restore failed:", e);
-          oldFormatRestoreFailed = true;
-        }
-      } else {
-        const activeState = materializeReusableChatPanel(
-          normalizeReusableSessionPanels(state),
-          opts?.activeSessionId ?? null,
-        );
-        const ids = applyLayout(api, activeState, liveWidths, safeWidth, safeHeight);
-        set(ids);
-      }
+      const { state, oldFormatRestoreFailed } = restoreCustomLayout({
+        api,
+        layout,
+        opts,
+        liveWidths,
+        safeWidth,
+        safeHeight,
+        set,
+      });
       const hasSidebar = !!api.getPanel("sidebar");
       const colCount = state?.columns?.length ?? api.groups.length;
       const sidebarCols = hasSidebar ? 1 : 0;
@@ -569,6 +560,47 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
     },
     captureCurrentLayout: () => captureReusableLayout(get),
   };
+}
+
+type RestoreCustomLayoutParams = {
+  api: DockviewApi;
+  layout: SavedLayoutConfig;
+  opts: ApplyCustomLayoutOptions | undefined;
+  liveWidths: Map<string, number>;
+  safeWidth: number;
+  safeHeight: number;
+  set: StoreSet;
+};
+
+function restoreCustomLayout({
+  api,
+  layout,
+  opts,
+  liveWidths,
+  safeWidth,
+  safeHeight,
+  set,
+}: RestoreCustomLayoutParams): { state: LayoutState; oldFormatRestoreFailed: boolean } {
+  const state = layout.layout as unknown as LayoutState;
+  if (state?.columns) {
+    const activeState = materializeReusableChatPanel(
+      normalizeReusableSessionPanels(state),
+      opts?.activeSessionId ?? null,
+      opts?.sessionIds ?? [],
+    );
+    set(applyLayout(api, activeState, liveWidths, safeWidth, safeHeight));
+    return { state, oldFormatRestoreFailed: false };
+  }
+
+  try {
+    api.fromJSON(layout.layout as unknown as SerializedDockview);
+    replaceStaleSessionPanels(api, opts?.activeSessionId ?? null, opts?.sessionIds ?? []);
+    set(applyLayoutFixups(api));
+    return { state, oldFormatRestoreFailed: false };
+  } catch (e) {
+    console.warn("applyCustomLayout: old-format restore failed:", e);
+    return { state, oldFormatRestoreFailed: true };
+  }
 }
 
 function captureReusableLayout(get: StoreGet): Record<string, unknown> {

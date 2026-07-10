@@ -196,7 +196,11 @@ function removeEphemeralPanels(api: DockviewApi, keepSessionId: string | null): 
  * File-editors/diffs/browser/etc. are NEVER touched here — they
  * legitimately belong to this env's saved state.
  */
-export function replaceStaleSessionPanels(api: DockviewApi, keepSessionId: string | null): void {
+export function replaceStaleSessionPanels(
+  api: DockviewApi,
+  keepSessionId: string | null,
+  currentSessionIds: string[] = [],
+): void {
   const keepId = keepSessionId ? `session:${keepSessionId}` : null;
   // keepId=null (sessionless task) → strips all session panels, unlike the
   // fast path's shouldRemoveDuringSwitch which keeps them. In practice
@@ -239,6 +243,29 @@ export function replaceStaleSessionPanels(api: DockviewApi, keepSessionId: strin
     } catch {
       /* panel may already be gone */
     }
+  }
+
+  addCurrentSessionSiblings(api, keepSessionId, currentSessionIds);
+}
+
+function addCurrentSessionSiblings(
+  api: DockviewApi,
+  keepSessionId: string | null,
+  currentSessionIds: string[],
+): void {
+  if (!keepSessionId) return;
+  const activePanel = api.getPanel(`session:${keepSessionId}`);
+  if (!activePanel) return;
+
+  const uniqueSessionIds = currentSessionIds.filter(
+    (sessionId, index, sessionIds) =>
+      sessionId && sessionId !== keepSessionId && sessionIds.indexOf(sessionId) === index,
+  );
+  for (const sessionId of uniqueSessionIds) {
+    if (api.getPanel(`session:${sessionId}`)) continue;
+    addIncomingSessionPanel(api, sessionId, activePanel.group.id, activePanel.group.panels.length, {
+      inactive: true,
+    });
   }
 }
 
@@ -459,6 +486,7 @@ function addIncomingSessionPanel(
   sessionId: string,
   outgoingGroupId: string | undefined,
   outgoingIndex: number,
+  options: { inactive?: boolean } = {},
 ): void {
   let position: import("dockview-react").AddPanelOptions["position"];
   if (outgoingGroupId && api.groups.some((g) => g.id === outgoingGroupId)) {
@@ -476,6 +504,7 @@ function addIncomingSessionPanel(
     title: "Agent",
     params: { sessionId },
     position,
+    inactive: options.inactive,
   });
 }
 

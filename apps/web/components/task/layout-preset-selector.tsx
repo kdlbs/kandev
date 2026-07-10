@@ -237,9 +237,17 @@ export function LayoutPresetSelector() {
   const applyCustomLayout = useDockviewStore((s) => s.applyCustomLayout);
   const savedLayouts = useAppStore((s) => s.userSettings.savedLayouts);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
+  const activeTaskSessionIds = useAppStore((s) => {
+    const activeTaskId = s.tasks.activeTaskId;
+    if (!activeTaskId) return "";
+    return (s.taskSessionsByTask.itemsByTaskId[activeTaskId] ?? [])
+      .map((session) => session.id)
+      .join(",");
+  });
 
   const handleApplyCustom = useCallback(
-    (layout: SavedLayout) =>
+    (layout: SavedLayout) => {
+      const sessionIds = activeTaskSessionIds ? activeTaskSessionIds.split(",") : [];
       applyCustomLayout(
         {
           id: layout.id,
@@ -248,9 +256,10 @@ export function LayoutPresetSelector() {
           layout: layout.layout,
           createdAt: layout.created_at,
         },
-        { activeSessionId },
-      ),
-    [activeSessionId, applyCustomLayout],
+        { activeSessionId, sessionIds },
+      );
+    },
+    [activeSessionId, activeTaskSessionIds, applyCustomLayout],
   );
 
   const handleDeleteLayout = useCallback(

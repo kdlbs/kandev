@@ -185,6 +185,35 @@ const customLayout = {
   name: "custom",
   layout: { columns: [{ id: "center", views: [], activeView: null }] },
 };
+
+function staleSessionLayout() {
+  return {
+    id: "simple",
+    name: "Simple",
+    layout: {
+      columns: [
+        {
+          id: "center",
+          groups: [
+            {
+              panels: [
+                {
+                  id: "session:s-old",
+                  component: "chat",
+                  title: "Agent",
+                  tabComponent: "sessionTab",
+                  params: { sessionId: "s-old" },
+                },
+              ],
+              activePanel: "session:s-old",
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
 type ApplyCustomLayoutArg = Parameters<
   ReturnType<typeof useDockviewStore.getState>["applyCustomLayout"]
 >[0];
@@ -253,38 +282,15 @@ describe("applyCustomLayout — persistence at call site", () => {
     const api = makeStoreApi();
     useDockviewStore.setState({ api, currentLayoutEnvId: "env-custom" });
 
-    const layoutWithOldSession = {
-      id: "simple",
-      name: "Simple",
-      layout: {
-        columns: [
-          {
-            id: "center",
-            groups: [
-              {
-                panels: [
-                  {
-                    id: "session:s-old",
-                    component: "chat",
-                    title: "Agent",
-                    tabComponent: "sessionTab",
-                    params: { sessionId: "s-old" },
-                  },
-                ],
-                activePanel: "session:s-old",
-              },
-            ],
-          },
-        ],
-      },
-    };
-
     (
       useDockviewStore.getState().applyCustomLayout as (
         layout: ApplyCustomLayoutArg,
-        opts: { activeSessionId: string },
+        opts: { activeSessionId: string; sessionIds: string[] },
       ) => void
-    )(layoutWithOldSession as unknown as ApplyCustomLayoutArg, { activeSessionId: "s-new" });
+    )(staleSessionLayout() as unknown as ApplyCustomLayoutArg, {
+      activeSessionId: "s-new",
+      sessionIds: ["s-sibling", "s-new"],
+    });
 
     await flushRaf();
 
@@ -296,6 +302,10 @@ describe("applyCustomLayout — persistence at call site", () => {
       tabComponent: "sessionTab",
       params: { sessionId: "s-new" },
     });
+    expect(appliedState?.columns[0]?.groups[0]?.panels.map((item) => item.id)).toEqual([
+      "session:s-new",
+      "session:s-sibling",
+    ]);
     expect(appliedState?.columns[0]?.groups[0]?.activePanel).toBe("session:s-new");
   });
 

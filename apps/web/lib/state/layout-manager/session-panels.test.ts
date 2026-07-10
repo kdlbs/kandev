@@ -6,8 +6,10 @@ import type { LayoutGroup, LayoutPanel, LayoutState } from "./types";
 const CENTER_GROUP_ID = "group-center";
 const OLD_SESSION_ID = "s-old";
 const NEW_SESSION_ID = "s-new";
+const SIBLING_SESSION_ID = "s-sibling";
 const OLD_SESSION_PANEL_ID = `session:${OLD_SESSION_ID}`;
 const NEW_SESSION_PANEL_ID = `session:${NEW_SESSION_ID}`;
+const SIBLING_SESSION_PANEL_ID = `session:${SIBLING_SESSION_ID}`;
 const CHAT_ID = "chat";
 const CHAT_COMPONENT = "chat";
 
@@ -71,6 +73,25 @@ it("materializes reusable chat panels to the active task session", () => {
     tabComponent: "sessionTab",
     params: { sessionId: NEW_SESSION_ID },
   });
+});
+
+it("materializes sibling task session tabs beside the active session", () => {
+  const materialized = materializeReusableChatPanel(
+    layoutWithGroup({
+      id: CENTER_GROUP_ID,
+      activePanel: CHAT_ID,
+      panels: [chatPlaceholder(), panel("plan")],
+    }),
+    NEW_SESSION_ID,
+    [SIBLING_SESSION_ID, NEW_SESSION_ID],
+  );
+
+  expect(materialized.columns[0]?.groups[0]?.activePanel).toBe(NEW_SESSION_PANEL_ID);
+  expect(materialized.columns[0]?.groups[0]?.panels.map((item) => item.id)).toEqual([
+    NEW_SESSION_PANEL_ID,
+    SIBLING_SESSION_PANEL_ID,
+    "plan",
+  ]);
 });
 
 it("keeps tree and flat groups in sync when rewriting session panels", () => {
@@ -146,4 +167,43 @@ it("deduplicates session chat panels across columns", () => {
     NEW_SESSION_PANEL_ID,
   ]);
   expect(materialized.columns[1]?.groups[0]?.panels.map((item) => item.id)).toEqual(["plan"]);
+});
+
+it("preserves groups that were already empty before normalization", () => {
+  const normalized = normalizeReusableSessionPanels({
+    columns: [
+      {
+        id: "center",
+        groups: [
+          { id: CENTER_GROUP_ID, panels: [oldSessionPanel()] },
+          { id: "empty-split", panels: [] },
+        ],
+      },
+    ],
+  });
+
+  expect(normalized.columns[0]?.groups.map((group) => group.id)).toEqual([
+    CENTER_GROUP_ID,
+    "empty-split",
+  ]);
+  expect(normalized.columns[0]?.groups[1]?.panels).toEqual([]);
+});
+
+it("removes groups that become empty only after duplicate session tabs are discarded", () => {
+  const materialized = materializeReusableChatPanel(
+    {
+      columns: [
+        {
+          id: "center",
+          groups: [
+            { id: CENTER_GROUP_ID, panels: [oldSessionPanel()] },
+            { id: "duplicate-session-only", panels: [oldSessionPanel("session:s-other")] },
+          ],
+        },
+      ],
+    },
+    NEW_SESSION_ID,
+  );
+
+  expect(materialized.columns[0]?.groups.map((group) => group.id)).toEqual([CENTER_GROUP_ID]);
 });
