@@ -91,7 +91,7 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("workflows.hidden", `ALTER TABLE workflows ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_sessions.workspace_path", `ALTER TABLE task_sessions ADD COLUMN workspace_path TEXT DEFAULT ''`)
 	r.migrate.Apply("repositories.copy_files", `ALTER TABLE repositories ADD COLUMN copy_files TEXT DEFAULT ''`)
-	r.migrate.Apply("repositories.startup_prompt", `ALTER TABLE repositories ADD COLUMN startup_prompt TEXT DEFAULT ''`)
+	r.migrate.Apply("repositories.startup_prompt", `ALTER TABLE repositories ADD COLUMN startup_prompt TEXT NOT NULL DEFAULT ''`)
 
 	// Authoritative per-message change signal (chat render-perf). SQLite forbids a
 	// non-constant default on ADD COLUMN, so the column is added nullable and

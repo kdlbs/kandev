@@ -15,10 +15,12 @@ export function RepositoryStartupPromptField({
   startupPrompt,
   onUpdate,
 }: StartupPromptFieldProps) {
+  const inputId = `repo-startup-prompt-${repositoryId}`;
   return (
     <div className="space-y-2">
-      <Label>Startup Prompt</Label>
+      <Label htmlFor={inputId}>Startup Prompt</Label>
       <Textarea
+        id={inputId}
         value={startupPrompt}
         onChange={(e) => onUpdate(repositoryId, { startup_prompt: e.target.value })}
         placeholder="Read {{TICKET_URL}} and start work on {{TASK_TITLE}}."

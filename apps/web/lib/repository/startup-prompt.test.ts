@@ -54,4 +54,34 @@ describe("resolveStartupPromptForManualDialog", () => {
       "Start with X.\nSecond line.",
     );
   });
+
+  it("task titles containing $ replacement tokens are inserted literally", () => {
+    // Regression: String.prototype.replace with a plain-string replacement
+    // treats $&, $$, $', $` as substitution patterns; the callback form
+    // avoids that.
+    const prompt = "Fixing: {{TASK_TITLE}}.";
+    expect(resolveStartupPromptForManualDialog(prompt, "Fix $& bug")).toBe(
+      "Fixing: Fix $& bug.",
+    );
+    expect(resolveStartupPromptForManualDialog(prompt, "Price $$ update")).toBe(
+      "Fixing: Price $$ update.",
+    );
+  });
+
+  it("task title containing literal {{...}} is preserved", () => {
+    // Regression: the resolved-string regex previously misidentified a
+    // substituted {{BUG-123}} inside the task title as an unresolved
+    // placeholder and dropped the line.
+    const prompt = "Description: {{TASK_TITLE}}";
+    expect(resolveStartupPromptForManualDialog(prompt, "Investigate {{BUG-123}}")).toBe(
+      "Description: Investigate {{BUG-123}}",
+    );
+  });
+
+  it("preserves leading whitespace on kept lines", () => {
+    const prompt = "  - Read {{TICKET_URL}}\n  - Start on {{TASK_TITLE}}";
+    expect(resolveStartupPromptForManualDialog(prompt, "Refactor")).toBe(
+      "  - Start on Refactor",
+    );
+  });
 });

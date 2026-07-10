@@ -182,4 +182,25 @@ func TestResolveStartupPrompt(t *testing.T) {
 			t.Errorf("got %q, want %q", got, want)
 		}
 	})
+
+	t.Run("task title containing literal {{...}} is preserved", func(t *testing.T) {
+		// Regression: previously the resolved-string regex would misidentify
+		// the substituted {{BUG-123}} as an unresolved placeholder and drop
+		// the line.
+		prompt := "Description: {{TASK_TITLE}}"
+		got := ResolveStartupPrompt(prompt, "Investigate {{BUG-123}}", nil)
+		want := "Description: Investigate {{BUG-123}}"
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("preserves leading whitespace on kept lines", func(t *testing.T) {
+		prompt := "  - Read {{TICKET_URL}}\n  - Start on {{TASK_TITLE}}"
+		got := ResolveStartupPrompt(prompt, "Refactor", nil)
+		want := "  - Start on Refactor"
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
 }

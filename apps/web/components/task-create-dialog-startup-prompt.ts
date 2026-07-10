@@ -27,7 +27,10 @@ export function useRepositoryStartupPromptPrefillEffect(
   const { descriptionInputRef, setHasDescription, repositories: rows } = fs;
   const lastAppliedRef = useRef<string>("");
 
-  const firstRepoId = rows[0]?.repositoryId ?? "";
+  // Scan for the first row with an actual selection — rows[0] can be an
+  // empty placeholder (autopick leaves one when no stored preference matches,
+  // useRepositoriesState initialises new rows without one).
+  const firstRepoId = rows.find((r) => r.repositoryId)?.repositoryId ?? "";
   const startupPrompt = firstRepoId
     ? (repositories.find((r) => r.id === firstRepoId)?.startup_prompt ?? "")
     : "";

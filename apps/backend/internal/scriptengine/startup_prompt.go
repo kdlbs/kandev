@@ -13,10 +13,23 @@ const (
 	placeholderTaskTitle      = "TASK_TITLE"
 )
 
-// unresolvedPlaceholder matches any remaining `{{...}}` sequence after
-// substitution. Used by ResolveStartupPrompt to drop lines whose ticket
-// placeholders never resolved.
-var unresolvedPlaceholder = regexp.MustCompile(`\{\{[^}]*\}\}`)
+// placeholderToken matches any `{{...}}` sequence. Used by ResolveStartupPrompt
+// to inspect the ORIGINAL line's tokens against the resolver's known keys, so
+// substituted values that happen to contain a `{{...}}` literal (e.g. a task
+// title like "Investigate {{BUG-123}}") don't trigger a false drop.
+var placeholderToken = regexp.MustCompile(`\{\{([^}]*)\}\}`)
+
+// hasUnknownPlaceholder reports whether the line references at least one
+// `{{KEY}}` whose KEY is not in the known-vars map. Those are genuine
+// unresolved placeholders and their line is dropped by ResolveStartupPrompt.
+func hasUnknownPlaceholder(line string, known map[string]string) bool {
+	for _, match := range placeholderToken.FindAllStringSubmatch(line, -1) {
+		if _, ok := known[match[1]]; !ok {
+			return true
+		}
+	}
+	return false
+}
 
 // TicketContextProvider builds placeholders for a repository startup prompt
 // from a task's title and metadata. TASK_TITLE is always present (even when
@@ -81,16 +94,24 @@ func ResolveStartupPrompt(prompt, taskTitle string, metadata map[string]interfac
 		return ""
 	}
 	resolver := NewResolver().WithProvider(TicketContextProvider(taskTitle, metadata))
+	// Snapshot the known placeholder keys once so we can decide per-line
+	// whether an original {{...}} token has a mapping. Checking against the
+	// original line's tokens — not the resolved string — prevents false drops
+	// when a substituted value (e.g. a task title like "Investigate
+	// {{BUG-123}}") happens to contain a {{...}} literal.
+	known := resolver.mergedVars()
 	// Normalize CRLF to LF so prompts saved by Windows editors don't leave a
 	// stray \r in each resolved line.
 	lines := strings.Split(strings.ReplaceAll(prompt, "\r\n", "\n"), "\n")
 	kept := make([]string, 0, len(lines))
 	for _, line := range lines {
-		resolved := resolver.Resolve(line)
-		if unresolvedPlaceholder.MatchString(resolved) {
+		if hasUnknownPlaceholder(line, known) {
 			continue
 		}
-		kept = append(kept, resolved)
+		kept = append(kept, resolver.Resolve(line))
 	}
-	return strings.Trim(strings.Join(kept, "\n"), "\n \t")
+	// Trim only newlines — preserve any leading/trailing spaces or tabs a
+	// user intentionally put on the first or last kept line (e.g. indented
+	// bullet content).
+	return strings.Trim(strings.Join(kept, "\n"), "\n")
 }
