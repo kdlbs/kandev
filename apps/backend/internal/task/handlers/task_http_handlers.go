@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/common/constants"
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
@@ -90,7 +91,12 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 // method (the persisted ExecutorSnapshot JSON uses different keys), so the
 // batch loader alone can't supply them without a regression. Two queries
 // total, down from three pre-batch.
-func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tasks []*models.Task) ([]dto.TaskDTO, error) {
+func buildTaskDTOsWithSessionInfo(
+	ctx context.Context,
+	svc *service.Service,
+	log *logger.Logger,
+	tasks []*models.Task,
+) ([]dto.TaskDTO, error) {
 	if len(tasks) == 0 {
 		return []dto.TaskDTO{}, nil
 	}
@@ -108,6 +114,9 @@ func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tas
 	}
 	pendingActionsBySession, err := pendingActionsForWaitingPrimarySessions(ctx, svc, primarySessionInfoMap)
 	if err != nil {
+		if log != nil {
+			log.Warn("failed to load pending actions for task list, using empty map", zap.Error(err))
+		}
 		pendingActionsBySession = map[string]models.TaskPendingAction{}
 	}
 	result := make([]dto.TaskDTO, 0, len(tasks))
@@ -226,7 +235,7 @@ func pendingActionPtr(
 }
 
 func (h *TaskHandlers) toTaskDTOsWithSessionInfo(ctx context.Context, tasks []*models.Task) ([]dto.TaskDTO, error) {
-	return buildTaskDTOsWithSessionInfo(ctx, h.service, tasks)
+	return buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, tasks)
 }
 
 func (h *TaskHandlers) httpGetTask(c *gin.Context) {
@@ -235,7 +244,7 @@ func (h *TaskHandlers) httpGetTask(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task not found")
 		return
 	}
-	dtos, err := buildTaskDTOsWithSessionInfo(c.Request.Context(), h.service, []*models.Task{task})
+	dtos, err := buildTaskDTOsWithSessionInfo(c.Request.Context(), h.service, h.logger, []*models.Task{task})
 	if err != nil {
 		h.logger.Error("failed to build task DTO with session info", zap.Error(err))
 		c.JSON(http.StatusOK, dto.FromTask(task))
