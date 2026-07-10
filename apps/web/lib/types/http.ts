@@ -174,8 +174,16 @@ export type Repository = {
   setup_script: string;
   cleanup_script: string;
   dev_script: string;
+  /** Files materialized into each new worktree, each with its own copy/symlink mode. */
+  worktree_files: WorktreeFile[];
   created_at: string;
   updated_at: string;
+};
+
+/** A single file materialized into new worktrees. `mode` is "copy" or "symlink". */
+export type WorktreeFile = {
+  path: string;
+  mode: string;
 };
 
 export type RepositoryScript = {

@@ -21,6 +21,7 @@ import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
 import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
 import { EditableCard } from "@/components/settings/editable-card";
+import { RepositoryWorktreeFiles } from "@/components/settings/repository-worktree-files";
 import type { Repository, RepositoryScript } from "@/lib/types/http";
 
 type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
@@ -301,6 +302,12 @@ function RepositoryEditView({
             sourceType={repository.source_type}
             worktreeBranchPrefix={repository.worktree_branch_prefix ?? ""}
             pullBeforeWorktree={repository.pull_before_worktree ?? true}
+          />
+
+          <RepositoryWorktreeFiles
+            repositoryId={repository.id}
+            worktreeFiles={repository.worktree_files ?? []}
+            onUpdate={onUpdate}
           />
 
           <RepositoryScriptFields

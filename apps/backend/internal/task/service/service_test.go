@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -325,6 +326,82 @@ func TestService_CreateRepository_DefaultWorktreeBranchPrefix(t *testing.T) {
 	}
 	if !stored.PullBeforeWorktree {
 		t.Fatalf("expected stored pull_before_worktree to default to true")
+	}
+}
+
+func TestService_CreateRepository_WorktreeFileDefaults(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID: "ws-1",
+		Name:        "Test Repo",
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository failed: %v", err)
+	}
+	if len(created.WorktreeFiles) != 0 {
+		t.Fatalf("expected no worktree files by default, got %v", created.WorktreeFiles)
+	}
+}
+
+func TestService_CreateRepository_WorktreeFilesPerFileModeAndTrim(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID: "ws-1",
+		Name:        "Test Repo",
+		WorktreeFiles: []models.WorktreeFile{
+			{Path: " .env.local ", Mode: "symlink"},
+			{Path: "", Mode: "copy"}, // dropped (blank path)
+			{Path: "config.env"},     // empty mode defaults to copy
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository failed: %v", err)
+	}
+	if len(created.WorktreeFiles) != 2 {
+		t.Fatalf("expected 2 files after trim, got %+v", created.WorktreeFiles)
+	}
+	if created.WorktreeFiles[0] != (models.WorktreeFile{Path: ".env.local", Mode: "symlink"}) {
+		t.Fatalf("file[0] = %+v", created.WorktreeFiles[0])
+	}
+	if created.WorktreeFiles[1] != (models.WorktreeFile{Path: "config.env", Mode: "copy"}) {
+		t.Fatalf("file[1] = %+v (empty mode should default to copy)", created.WorktreeFiles[1])
+	}
+}
+
+func TestService_CreateRepository_InvalidWorktreeFileMode(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+
+	_, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID:   "ws-1",
+		Name:          "Test Repo",
+		WorktreeFiles: []models.WorktreeFile{{Path: ".env", Mode: "hardlink"}},
+	})
+	if !errors.Is(err, ErrInvalidRepositorySettings) {
+		t.Fatalf("expected ErrInvalidRepositorySettings, got %v", err)
+	}
+}
+
+func TestService_UpdateRepository_InvalidWorktreeFileMode(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{WorkspaceID: "ws-1", Name: "Test Repo"})
+	if err != nil {
+		t.Fatalf("CreateRepository failed: %v", err)
+	}
+
+	bad := []models.WorktreeFile{{Path: ".env", Mode: "move"}}
+	_, err = svc.UpdateRepository(ctx, created.ID, &UpdateRepositoryRequest{WorktreeFiles: &bad})
+	if !errors.Is(err, ErrInvalidRepositorySettings) {
+		t.Fatalf("expected ErrInvalidRepositorySettings, got %v", err)
 	}
 }
 

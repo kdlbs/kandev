@@ -105,37 +105,39 @@ type FindOrCreateRepositoryRequest struct {
 
 // CreateRepositoryRequest contains the data for creating a new repository
 type CreateRepositoryRequest struct {
-	WorkspaceID          string `json:"workspace_id"`
-	Name                 string `json:"name"`
-	SourceType           string `json:"source_type"`
-	LocalPath            string `json:"local_path"`
-	Provider             string `json:"provider"`
-	ProviderRepoID       string `json:"provider_repo_id"`
-	ProviderOwner        string `json:"provider_owner"`
-	ProviderName         string `json:"provider_name"`
-	DefaultBranch        string `json:"default_branch"`
-	WorktreeBranchPrefix string `json:"worktree_branch_prefix"`
-	PullBeforeWorktree   *bool  `json:"pull_before_worktree"`
-	SetupScript          string `json:"setup_script"`
-	CleanupScript        string `json:"cleanup_script"`
-	DevScript            string `json:"dev_script"`
+	WorkspaceID          string                `json:"workspace_id"`
+	Name                 string                `json:"name"`
+	SourceType           string                `json:"source_type"`
+	LocalPath            string                `json:"local_path"`
+	Provider             string                `json:"provider"`
+	ProviderRepoID       string                `json:"provider_repo_id"`
+	ProviderOwner        string                `json:"provider_owner"`
+	ProviderName         string                `json:"provider_name"`
+	DefaultBranch        string                `json:"default_branch"`
+	WorktreeBranchPrefix string                `json:"worktree_branch_prefix"`
+	PullBeforeWorktree   *bool                 `json:"pull_before_worktree"`
+	SetupScript          string                `json:"setup_script"`
+	CleanupScript        string                `json:"cleanup_script"`
+	DevScript            string                `json:"dev_script"`
+	WorktreeFiles        []models.WorktreeFile `json:"worktree_files"`
 }
 
 // UpdateRepositoryRequest contains the data for updating a repository
 type UpdateRepositoryRequest struct {
-	Name                 *string `json:"name,omitempty"`
-	SourceType           *string `json:"source_type,omitempty"`
-	LocalPath            *string `json:"local_path,omitempty"`
-	Provider             *string `json:"provider,omitempty"`
-	ProviderRepoID       *string `json:"provider_repo_id,omitempty"`
-	ProviderOwner        *string `json:"provider_owner,omitempty"`
-	ProviderName         *string `json:"provider_name,omitempty"`
-	DefaultBranch        *string `json:"default_branch,omitempty"`
-	WorktreeBranchPrefix *string `json:"worktree_branch_prefix,omitempty"`
-	PullBeforeWorktree   *bool   `json:"pull_before_worktree,omitempty"`
-	SetupScript          *string `json:"setup_script,omitempty"`
-	CleanupScript        *string `json:"cleanup_script,omitempty"`
-	DevScript            *string `json:"dev_script,omitempty"`
+	Name                 *string                `json:"name,omitempty"`
+	SourceType           *string                `json:"source_type,omitempty"`
+	LocalPath            *string                `json:"local_path,omitempty"`
+	Provider             *string                `json:"provider,omitempty"`
+	ProviderRepoID       *string                `json:"provider_repo_id,omitempty"`
+	ProviderOwner        *string                `json:"provider_owner,omitempty"`
+	ProviderName         *string                `json:"provider_name,omitempty"`
+	DefaultBranch        *string                `json:"default_branch,omitempty"`
+	WorktreeBranchPrefix *string                `json:"worktree_branch_prefix,omitempty"`
+	PullBeforeWorktree   *bool                  `json:"pull_before_worktree,omitempty"`
+	SetupScript          *string                `json:"setup_script,omitempty"`
+	CleanupScript        *string                `json:"cleanup_script,omitempty"`
+	DevScript            *string                `json:"dev_script,omitempty"`
+	WorktreeFiles        *[]models.WorktreeFile `json:"worktree_files,omitempty"`
 }
 
 // CreateExecutorRequest contains the data for creating an executor

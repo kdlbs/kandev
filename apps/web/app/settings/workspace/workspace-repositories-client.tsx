@@ -34,6 +34,10 @@ import {
   type ManualValidation,
 } from "@/app/settings/workspace/workspace-repositories-dialog";
 import { WorkspaceNotFoundCard } from "@/app/settings/workspace/workspace-not-found-card";
+import {
+  areRepositoryScriptsDirty,
+  isRepositoryDirty,
+} from "@/app/settings/workspace/repository-dirty";
 
 type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
 type RepositoryItem = RepositoryWithScripts & { __autoOpen?: boolean };
@@ -44,48 +48,6 @@ type WorkspaceRepositoriesClientProps = {
 
 function cloneRepository(repo: RepositoryWithScripts): RepositoryWithScripts {
   return { ...repo, scripts: repo.scripts.map((script) => ({ ...script })) };
-}
-
-function isRepositoryDirty(
-  repo: RepositoryItem,
-  saved: RepositoryWithScripts | undefined,
-): boolean {
-  if (!saved) return true;
-  return (
-    repo.name !== saved.name ||
-    repo.source_type !== saved.source_type ||
-    repo.local_path !== saved.local_path ||
-    repo.provider !== saved.provider ||
-    repo.provider_repo_id !== saved.provider_repo_id ||
-    repo.provider_owner !== saved.provider_owner ||
-    repo.provider_name !== saved.provider_name ||
-    repo.default_branch !== saved.default_branch ||
-    repo.worktree_branch_prefix !== saved.worktree_branch_prefix ||
-    repo.pull_before_worktree !== saved.pull_before_worktree ||
-    repo.setup_script !== saved.setup_script ||
-    repo.cleanup_script !== saved.cleanup_script ||
-    repo.dev_script !== saved.dev_script
-  );
-}
-
-function areRepositoryScriptsDirty(
-  repo: RepositoryItem,
-  saved: RepositoryWithScripts | undefined,
-): boolean {
-  if (!saved) return repo.scripts.length > 0;
-  if (repo.scripts.length !== saved.scripts.length) return true;
-  const savedScripts = new Map(saved.scripts.map((script) => [script.id, script]));
-  for (const script of repo.scripts) {
-    const savedScript = savedScripts.get(script.id);
-    if (
-      !savedScript ||
-      script.name !== savedScript.name ||
-      script.command !== savedScript.command ||
-      script.position !== savedScript.position
-    )
-      return true;
-  }
-  return false;
 }
 
 function buildDraftRepo(
@@ -113,6 +75,7 @@ function buildDraftRepo(
     setup_script: "",
     cleanup_script: "",
     dev_script: "",
+    worktree_files: [],
     created_at: "",
     updated_at: "",
     scripts: [],
@@ -151,6 +114,7 @@ async function saveNewRepository(
     setup_script: repo.setup_script,
     cleanup_script: repo.cleanup_script,
     dev_script: repo.dev_script,
+    worktree_files: repo.worktree_files,
   });
   const scripts = await Promise.all(
     repo.scripts.map((script, index) =>
@@ -198,6 +162,7 @@ async function saveExistingRepository({
     setup_script: repo.setup_script,
     cleanup_script: repo.cleanup_script,
     dev_script: repo.dev_script,
+    worktree_files: repo.worktree_files,
   });
   const savedScripts = savedRepositoriesById.get(repoId)?.scripts ?? [];
   const currentScriptIds = new Set(repo.scripts.map((s) => s.id));

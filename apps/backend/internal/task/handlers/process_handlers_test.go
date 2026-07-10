@@ -321,6 +321,9 @@ func (m *mockRepository) ListScriptsByRepositoryIDs(_ context.Context, _ []strin
 func (m *mockRepository) GetRepositoryByProviderInfo(_ context.Context, _, _, _, _ string) (*models.Repository, error) {
 	return nil, nil
 }
+func (m *mockRepository) GetRepositoryByLocalPath(_ context.Context, _ string) (*models.Repository, error) {
+	return nil, nil
+}
 func (m *mockRepository) CreateExecutor(ctx context.Context, executor *models.Executor) error {
 	return nil
 }

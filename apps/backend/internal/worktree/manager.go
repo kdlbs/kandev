@@ -396,6 +396,12 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 		return nil, err
 	}
 
+	// Materialize configured repository files (copy or symlink) before running
+	// the setup script so the script can rely on their presence.
+	if err := m.materializeWorktreeFiles(ctx, wt, req.RepositoryPath); err != nil {
+		return nil, err
+	}
+
 	if err := m.runWorktreeSetupScript(ctx, wt, req.RepositoryPath); err != nil {
 		return nil, err
 	}
@@ -1104,6 +1110,58 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 		zap.Bool("branch_removed", removeBranch))
 
 	return nil
+}
+
+// materializeWorktreeFiles copies or symlinks the repository's configured
+// worktree files into the freshly created worktree. Failures (e.g. a symlink
+// that cannot be created) are surfaced and the partially populated worktree is
+// cleaned up — there is no silent fallback from symlink to copy. A missing
+// repository provider, missing repo config, or empty file list is a no-op, so
+// repositories without the field behave exactly as before.
+func (m *Manager) materializeWorktreeFiles(ctx context.Context, wt *Worktree, repositoryPath string) error {
+	if m.repoProvider == nil {
+		return nil
+	}
+	// The worktree CreateRequest doesn't always carry a RepositoryID (the
+	// launch path only sets RepositoryPath), so resolve by ID when available
+	// and fall back to the repository's local path.
+	repo, err := m.resolveRepositoryConfig(ctx, wt.RepositoryID, repositoryPath)
+	if err != nil {
+		// Non-fatal: without repo config we materialize nothing, matching
+		// pre-feature behavior. Log for visibility.
+		m.logger.Warn("failed to fetch repository for worktree file materialization",
+			zap.String("repository_id", wt.RepositoryID),
+			zap.String("repository_path", repositoryPath),
+			zap.Error(err))
+		return nil
+	}
+	if repo == nil || len(repo.WorktreeFiles) == 0 {
+		return nil
+	}
+	if err := MaterializeWorktreeFiles(repositoryPath, wt.Path, repo.WorktreeFiles); err != nil {
+		m.logger.Error("failed to materialize worktree files, cleaning up worktree",
+			zap.String("worktree_id", wt.ID),
+			zap.Error(err))
+		m.cleanupWorktreeOnSetupFailure(ctx, wt, repositoryPath)
+		return fmt.Errorf("materialize worktree files: %w", err)
+	}
+	m.logger.Info("materialized worktree files",
+		zap.String("worktree_id", wt.ID),
+		zap.Int("file_count", len(repo.WorktreeFiles)))
+	return nil
+}
+
+// resolveRepositoryConfig fetches the repository config by ID when one is
+// available, otherwise by local path. Returns (nil, nil) when neither locates a
+// repository so callers can treat it as "no config, nothing to do".
+func (m *Manager) resolveRepositoryConfig(ctx context.Context, repositoryID, repositoryPath string) (*Repository, error) {
+	if repositoryID != "" {
+		return m.repoProvider.GetRepository(ctx, repositoryID)
+	}
+	if repositoryPath != "" {
+		return m.repoProvider.GetRepositoryByPath(ctx, repositoryPath)
+	}
+	return nil, nil
 }
 
 func (m *Manager) runWorktreeSetupScript(ctx context.Context, wt *Worktree, repositoryPath string) error {

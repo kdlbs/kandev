@@ -202,6 +202,8 @@ Client (WS) ← Orchestrator ← Lifecycle Manager ←──── stream update
 
 **Worktrees:** `internal/worktree/Manager` provides workspace isolation. Each session can have its own worktree (branch) to prevent conflicts between concurrent agents.
 
+**Worktree file materialization:** A repository configures `worktree_files` — a list of `{path, mode}` entries where each file's `mode` is `copy` (default) or `symlink`. On worktree creation `Manager.materializeWorktreeFiles` places each file into the new worktree — `copy` = isolated per-worktree copy, `symlink` = link back to the main repo so shared files (e.g. `.env.local`) stay centralized and reflect updates across worktrees. Per-file `FileSpec` + logic live in `internal/worktree/materialization.go`; missing source files are skipped and symlink/copy failures surface (no silent fallback). Defaults preserve existing behavior (empty list; each entry defaults to copy). Platform note: symlinks use relative targets and rely on `os.Symlink` (unix/macOS; Windows may need elevated privileges).
+
 **Executor default scripts:** Default prepare scripts are in `internal/agent/runtime/lifecycle/default_scripts.go`; `internal/scriptengine/` handles placeholder resolution.
 
 ---

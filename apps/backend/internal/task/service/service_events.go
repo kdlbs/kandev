@@ -377,6 +377,8 @@ func (s *Service) publishRepositoryEvent(ctx context.Context, eventType string, 
 		"pull_before_worktree":   repository.PullBeforeWorktree,
 		"setup_script":           repository.SetupScript,
 		"cleanup_script":         repository.CleanupScript,
+		"dev_script":             repository.DevScript,
+		"worktree_files":         repository.WorktreeFiles,
 		"created_at":             repository.CreatedAt.Format(time.RFC3339),
 		"updated_at":             repository.UpdatedAt.Format(time.RFC3339),
 	}

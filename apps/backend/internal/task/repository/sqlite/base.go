@@ -169,6 +169,11 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("executors_running.metadata", `ALTER TABLE executors_running ADD COLUMN metadata TEXT DEFAULT '{}'`)
 	r.migrate.Apply("tasks.is_ephemeral", `ALTER TABLE tasks ADD COLUMN is_ephemeral INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_repositories.checkout_branch", `ALTER TABLE task_repositories ADD COLUMN checkout_branch TEXT DEFAULT ''`)
+	// Repository worktree file materialization. Each file carries its own
+	// copy/symlink mode inside the JSON list. Idempotent ALTER so existing
+	// databases pick up the column; the default '[]' preserves current
+	// behavior (no files materialized).
+	r.migrate.Apply("repositories.worktree_files", `ALTER TABLE repositories ADD COLUMN worktree_files TEXT DEFAULT '[]'`)
 	r.migrate.Apply("task_sessions.base_commit_sha", `ALTER TABLE task_sessions ADD COLUMN base_commit_sha TEXT DEFAULT ''`)
 	r.migrate.Apply("workspaces.default_config_agent_profile_id", `ALTER TABLE workspaces ADD COLUMN default_config_agent_profile_id TEXT DEFAULT ''`)
 	r.migrate.Apply("task_sessions.task_environment_id", `ALTER TABLE task_sessions ADD COLUMN task_environment_id TEXT DEFAULT ''`)
@@ -1091,6 +1096,7 @@ func (r *Repository) initTaskSchema() error {
 		setup_script TEXT DEFAULT '',
 		cleanup_script TEXT DEFAULT '',
 		dev_script TEXT DEFAULT '',
+		worktree_files TEXT DEFAULT '[]',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		deleted_at TIMESTAMP,

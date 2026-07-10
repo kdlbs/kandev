@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -11,7 +12,48 @@ import (
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 )
+
+// marshalWorktreeFiles serializes a repository's worktree file list to the JSON
+// text stored in the repositories.worktree_files column. A nil/empty list is
+// persisted as "[]".
+func marshalWorktreeFiles(files []models.WorktreeFile) string {
+	if len(files) == 0 {
+		return "[]"
+	}
+	data, err := json.Marshal(files)
+	if err != nil {
+		return "[]"
+	}
+	return string(data)
+}
+
+// unmarshalWorktreeFiles parses the JSON text from worktree_files back into a
+// slice, normalizing each file's mode and dropping blank paths. Blank or
+// malformed values (including pre-feature rows and the old string-array format)
+// yield an empty slice.
+func unmarshalWorktreeFiles(raw string) []models.WorktreeFile {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	var files []models.WorktreeFile
+	if err := json.Unmarshal([]byte(trimmed), &files); err != nil {
+		return nil
+	}
+	out := make([]models.WorktreeFile, 0, len(files))
+	for _, f := range files {
+		if strings.TrimSpace(f.Path) == "" {
+			continue
+		}
+		out = append(out, models.WorktreeFile{
+			Path: f.Path,
+			Mode: string(worktree.NormalizeFileMaterializeMode(f.Mode)),
+		})
+	}
+	return out
+}
 
 // CreateRepository creates a new repository
 func (r *Repository) CreateRepository(ctx context.Context, repository *models.Repository) error {
@@ -25,29 +67,54 @@ func (r *Repository) CreateRepository(ctx context.Context, repository *models.Re
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO repositories (
 			id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_owner,
-			provider_name, default_branch, worktree_branch_prefix, pull_before_worktree, setup_script, cleanup_script, dev_script, created_at, updated_at, deleted_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			provider_name, default_branch, worktree_branch_prefix, pull_before_worktree, setup_script, cleanup_script, dev_script,
+			worktree_files, created_at, updated_at, deleted_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), repository.ID, repository.WorkspaceID, repository.Name, repository.SourceType, repository.LocalPath, repository.Provider,
 		repository.ProviderRepoID, repository.ProviderOwner, repository.ProviderName, repository.DefaultBranch, repository.WorktreeBranchPrefix,
-		dialect.BoolToInt(repository.PullBeforeWorktree), repository.SetupScript, repository.CleanupScript, repository.DevScript, repository.CreatedAt, repository.UpdatedAt, repository.DeletedAt)
+		dialect.BoolToInt(repository.PullBeforeWorktree), repository.SetupScript, repository.CleanupScript, repository.DevScript,
+		marshalWorktreeFiles(repository.WorktreeFiles),
+		repository.CreatedAt, repository.UpdatedAt, repository.DeletedAt)
 
 	return err
 }
 
-// GetRepository retrieves a repository by ID
-func (r *Repository) GetRepository(ctx context.Context, id string) (*models.Repository, error) {
-	repository := &models.Repository{}
+// repositoryColumns is the shared SELECT column list for repository rows, in the
+// order expected by scanRepository.
+const repositoryColumns = `id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_owner,
+	provider_name, default_branch, worktree_branch_prefix, pull_before_worktree, setup_script, cleanup_script, dev_script,
+	worktree_files, created_at, updated_at, deleted_at`
 
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_owner,
-		       provider_name, default_branch, worktree_branch_prefix, pull_before_worktree, setup_script, cleanup_script, dev_script, created_at, updated_at, deleted_at
-		FROM repositories WHERE id = ? AND deleted_at IS NULL
-	`), id).Scan(
+// rowScanner abstracts *sql.Row and *sql.Rows so a single scan routine serves
+// both single-row and iterating queries.
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+// scanRepository decodes one repository row, converting the stored JSON file
+// list and normalizing the materialization mode.
+func scanRepository(s rowScanner) (*models.Repository, error) {
+	repository := &models.Repository{}
+	var worktreeFiles string
+	err := s.Scan(
 		&repository.ID, &repository.WorkspaceID, &repository.Name, &repository.SourceType, &repository.LocalPath,
 		&repository.Provider, &repository.ProviderRepoID, &repository.ProviderOwner, &repository.ProviderName,
-		&repository.DefaultBranch, &repository.WorktreeBranchPrefix, &repository.PullBeforeWorktree, &repository.SetupScript, &repository.CleanupScript, &repository.DevScript, &repository.CreatedAt, &repository.UpdatedAt, &repository.DeletedAt,
+		&repository.DefaultBranch, &repository.WorktreeBranchPrefix, &repository.PullBeforeWorktree, &repository.SetupScript,
+		&repository.CleanupScript, &repository.DevScript, &worktreeFiles,
+		&repository.CreatedAt, &repository.UpdatedAt, &repository.DeletedAt,
 	)
+	if err != nil {
+		return nil, err
+	}
+	repository.WorktreeFiles = unmarshalWorktreeFiles(worktreeFiles)
+	return repository, nil
+}
 
+// GetRepository retrieves a repository by ID
+func (r *Repository) GetRepository(ctx context.Context, id string) (*models.Repository, error) {
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(
+		`SELECT `+repositoryColumns+` FROM repositories WHERE id = ? AND deleted_at IS NULL`), id)
+	repository, err := scanRepository(row)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("repository not found: %s", id)
 	}
@@ -61,11 +128,14 @@ func (r *Repository) UpdateRepository(ctx context.Context, repository *models.Re
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE repositories SET
 			name = ?, source_type = ?, local_path = ?, provider = ?, provider_repo_id = ?, provider_owner = ?,
-			provider_name = ?, default_branch = ?, worktree_branch_prefix = ?, pull_before_worktree = ?, setup_script = ?, cleanup_script = ?, dev_script = ?, updated_at = ?
+			provider_name = ?, default_branch = ?, worktree_branch_prefix = ?, pull_before_worktree = ?, setup_script = ?, cleanup_script = ?, dev_script = ?,
+			worktree_files = ?, updated_at = ?
 		WHERE id = ? AND deleted_at IS NULL
 	`), repository.Name, repository.SourceType, repository.LocalPath, repository.Provider, repository.ProviderRepoID,
 		repository.ProviderOwner, repository.ProviderName, repository.DefaultBranch, repository.WorktreeBranchPrefix, dialect.BoolToInt(repository.PullBeforeWorktree),
-		repository.SetupScript, repository.CleanupScript, repository.DevScript, repository.UpdatedAt, repository.ID)
+		repository.SetupScript, repository.CleanupScript, repository.DevScript,
+		marshalWorktreeFiles(repository.WorktreeFiles),
+		repository.UpdatedAt, repository.ID)
 	if err != nil {
 		return err
 	}
@@ -95,11 +165,8 @@ func (r *Repository) DeleteRepository(ctx context.Context, id string) error {
 
 // ListRepositories returns all repositories for a workspace
 func (r *Repository) ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error) {
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_owner,
-		       provider_name, default_branch, worktree_branch_prefix, pull_before_worktree, setup_script, cleanup_script, dev_script, created_at, updated_at, deleted_at
-		FROM repositories WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY created_at DESC
-	`), workspaceID)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(
+		`SELECT `+repositoryColumns+` FROM repositories WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY created_at DESC`), workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -107,12 +174,7 @@ func (r *Repository) ListRepositories(ctx context.Context, workspaceID string) (
 
 	var result []*models.Repository
 	for rows.Next() {
-		repository := &models.Repository{}
-		err := rows.Scan(
-			&repository.ID, &repository.WorkspaceID, &repository.Name, &repository.SourceType, &repository.LocalPath,
-			&repository.Provider, &repository.ProviderRepoID, &repository.ProviderOwner, &repository.ProviderName,
-			&repository.DefaultBranch, &repository.WorktreeBranchPrefix, &repository.PullBeforeWorktree, &repository.SetupScript, &repository.CleanupScript, &repository.DevScript, &repository.CreatedAt, &repository.UpdatedAt, &repository.DeletedAt,
-		)
+		repository, err := scanRepository(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -124,17 +186,25 @@ func (r *Repository) ListRepositories(ctx context.Context, workspaceID string) (
 // GetRepositoryByProviderInfo finds a repository by workspace, provider, owner, and name.
 // Returns nil, nil if not found.
 func (r *Repository) GetRepositoryByProviderInfo(ctx context.Context, workspaceID, provider, owner, name string) (*models.Repository, error) {
-	repository := &models.Repository{}
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_owner,
-		       provider_name, default_branch, worktree_branch_prefix, pull_before_worktree, setup_script, cleanup_script, dev_script, created_at, updated_at, deleted_at
-		FROM repositories
-		WHERE workspace_id = ? AND provider = ? AND provider_owner = ? AND provider_name = ? AND deleted_at IS NULL
-	`), workspaceID, provider, owner, name).Scan(
-		&repository.ID, &repository.WorkspaceID, &repository.Name, &repository.SourceType, &repository.LocalPath,
-		&repository.Provider, &repository.ProviderRepoID, &repository.ProviderOwner, &repository.ProviderName,
-		&repository.DefaultBranch, &repository.WorktreeBranchPrefix, &repository.PullBeforeWorktree, &repository.SetupScript, &repository.CleanupScript, &repository.DevScript, &repository.CreatedAt, &repository.UpdatedAt, &repository.DeletedAt,
-	)
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(
+		`SELECT `+repositoryColumns+` FROM repositories
+		WHERE workspace_id = ? AND provider = ? AND provider_owner = ? AND provider_name = ? AND deleted_at IS NULL`),
+		workspaceID, provider, owner, name)
+	repository, err := scanRepository(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return repository, err
+}
+
+// GetRepositoryByLocalPath finds a non-deleted repository by its local_path.
+// Returns nil, nil if not found. Used to resolve repository config during
+// worktree creation, where only the repository path (not its ID) is available.
+func (r *Repository) GetRepositoryByLocalPath(ctx context.Context, localPath string) (*models.Repository, error) {
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(
+		`SELECT `+repositoryColumns+` FROM repositories WHERE local_path = ? AND deleted_at IS NULL`),
+		localPath)
+	repository, err := scanRepository(row)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

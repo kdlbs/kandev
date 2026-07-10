@@ -23,6 +23,7 @@ import type {
   ListWorkflowTemplatesResponse,
   WorkflowTemplate,
   StepDefinition,
+  WorktreeFile,
 } from "@/lib/types/http";
 
 const { apiBaseUrl } = getBackendConfig();
@@ -213,6 +214,7 @@ export async function createRepositoryAction(payload: {
   setup_script: string;
   cleanup_script: string;
   dev_script: string;
+  worktree_files: WorktreeFile[];
 }) {
   return fetchJson<Repository>(
     `${apiBaseUrl}/api/v1/workspaces/${payload.workspace_id}/repositories`,
@@ -232,6 +234,7 @@ export async function createRepositoryAction(payload: {
         setup_script: payload.setup_script,
         cleanup_script: payload.cleanup_script,
         dev_script: payload.dev_script,
+        worktree_files: payload.worktree_files,
       }),
     },
   );

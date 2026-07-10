@@ -55,9 +55,17 @@ type RepositoryDTO struct {
 	SetupScript          string                `json:"setup_script"`
 	CleanupScript        string                `json:"cleanup_script"`
 	DevScript            string                `json:"dev_script"`
+	WorktreeFiles        []WorktreeFileDTO     `json:"worktree_files"`
 	CreatedAt            time.Time             `json:"created_at"`
 	UpdatedAt            time.Time             `json:"updated_at"`
 	Scripts              []RepositoryScriptDTO `json:"scripts,omitempty"`
+}
+
+// WorktreeFileDTO is a single file materialized into new worktrees, with its own
+// copy/symlink mode.
+type WorktreeFileDTO struct {
+	Path string `json:"path"`
+	Mode string `json:"mode"`
 }
 
 type RepositoryScriptDTO struct {
@@ -443,9 +451,21 @@ func FromRepository(repository *models.Repository) RepositoryDTO {
 		SetupScript:          repository.SetupScript,
 		CleanupScript:        repository.CleanupScript,
 		DevScript:            repository.DevScript,
+		WorktreeFiles:        worktreeFilesToDTO(repository.WorktreeFiles),
 		CreatedAt:            repository.CreatedAt,
 		UpdatedAt:            repository.UpdatedAt,
 	}
+}
+
+// worktreeFilesToDTO maps the model file list to DTOs, always returning a
+// non-nil slice so the JSON payload is an array (never null) and the frontend
+// can treat it as a list without null checks.
+func worktreeFilesToDTO(files []models.WorktreeFile) []WorktreeFileDTO {
+	out := make([]WorktreeFileDTO, 0, len(files))
+	for _, f := range files {
+		out = append(out, WorktreeFileDTO{Path: f.Path, Mode: f.Mode})
+	}
+	return out
 }
 
 func FromRepositoryScript(script *models.RepositoryScript) RepositoryScriptDTO {

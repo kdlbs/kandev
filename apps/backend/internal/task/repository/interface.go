@@ -177,6 +177,7 @@ type RepositoryEntityRepository interface {
 	ListRepositoryScripts(ctx context.Context, repositoryID string) ([]*models.RepositoryScript, error)
 	ListScriptsByRepositoryIDs(ctx context.Context, repoIDs []string) (map[string][]*models.RepositoryScript, error)
 	GetRepositoryByProviderInfo(ctx context.Context, workspaceID, provider, owner, name string) (*models.Repository, error)
+	GetRepositoryByLocalPath(ctx context.Context, localPath string) (*models.Repository, error)
 }
 
 // ExecutorRepository handles executor CRUD, executor profiles, and running state.
