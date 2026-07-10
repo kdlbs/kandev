@@ -137,7 +137,9 @@ func (p *Poller) checkIssueWatches(ctx context.Context) {
 		instanceID, newIssues, err := p.service.CheckIssueWatch(ctx, w)
 		if err != nil {
 			p.logger.Warn("sentry poller: check issue watch failed",
-				zap.String("watch_id", w.ID), zap.Error(err))
+				zap.String("watch_id", w.ID),
+				zap.String("instance_id", instanceID),
+				zap.Error(err))
 			continue
 		}
 		for _, issue := range newIssues {
