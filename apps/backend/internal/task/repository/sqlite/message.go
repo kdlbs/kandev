@@ -406,7 +406,7 @@ func (r *Repository) GetPendingActionsBySessionIDs(ctx context.Context, sessionI
 				       ) AS rn
 				FROM task_session_messages
 				WHERE task_session_id IN (`+strings.Join(placeholders, ",")+`)
-			)
+			) ranked
 			WHERE rn = 1
 		),
 		pending_clarifications AS (

@@ -516,12 +516,16 @@ func (b bootStateBuilder) workflowSnapshotState(ctx context.Context, workflow *t
 		b.logBootError("list home workflow tasks", err)
 		return nil, false
 	}
-	taskStates := make([]map[string]any, 0, len(tasks))
+	visibleTasks := make([]*taskmodels.Task, 0, len(tasks))
 	for _, task := range tasks {
 		if task == nil || task.IsEphemeral || task.WorkflowStepID == "" {
 			continue
 		}
-		taskStates = append(taskStates, mapKanbanTaskState(taskdto.FromTask(task)))
+		visibleTasks = append(visibleTasks, task)
+	}
+	taskStates := make([]map[string]any, 0, len(visibleTasks))
+	for _, task := range b.taskDTOsWithSessionInfo(ctx, visibleTasks) {
+		taskStates = append(taskStates, mapKanbanTaskState(task))
 	}
 	return map[string]any{
 		"workflowId":   workflow.ID,
