@@ -129,6 +129,80 @@ func TestRepositoryCopyFiles_DefaultEmpty(t *testing.T) {
 	}
 }
 
+// TestRepositoryStartupPrompt_RoundTrip verifies the startup_prompt column
+// survives create / update / get / list; guards against regressions in the
+// SQL projection lists across those queries.
+func TestRepositoryStartupPrompt_RoundTrip(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-sp")
+
+	prompt := "Read {{TICKET_URL}} and start work.\nAcceptance criteria are in the ticket."
+	in := &models.Repository{
+		ID:            "repo-sp-1",
+		WorkspaceID:   "ws-sp",
+		Name:          "with-startup-prompt",
+		SourceType:    "local",
+		StartupPrompt: prompt,
+	}
+	if err := repo.CreateRepository(ctx, in); err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+
+	got, err := repo.GetRepository(ctx, in.ID)
+	if err != nil {
+		t.Fatalf("get repository: %v", err)
+	}
+	if got.StartupPrompt != prompt {
+		t.Errorf("after create, StartupPrompt = %q, want %q", got.StartupPrompt, prompt)
+	}
+
+	got.StartupPrompt = "Only {{TASK_TITLE}} left."
+	if err := repo.UpdateRepository(ctx, got); err != nil {
+		t.Fatalf("update repository: %v", err)
+	}
+	afterUpdate, err := repo.GetRepository(ctx, in.ID)
+	if err != nil {
+		t.Fatalf("get after update: %v", err)
+	}
+	if afterUpdate.StartupPrompt != "Only {{TASK_TITLE}} left." {
+		t.Errorf("after update, StartupPrompt = %q", afterUpdate.StartupPrompt)
+	}
+
+	list, err := repo.ListRepositories(ctx, "ws-sp")
+	if err != nil {
+		t.Fatalf("list repositories: %v", err)
+	}
+	if len(list) != 1 || list[0].StartupPrompt != "Only {{TASK_TITLE}} left." {
+		t.Errorf("ListRepositories StartupPrompt mismatch: %+v", list)
+	}
+}
+
+// TestRepositoryStartupPrompt_DefaultEmpty guards against a nil-scan panic on
+// legacy rows created before the startup_prompt column existed.
+func TestRepositoryStartupPrompt_DefaultEmpty(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-sp-def")
+
+	in := &models.Repository{
+		ID:          "repo-sp-def",
+		WorkspaceID: "ws-sp-def",
+		Name:        "no-startup-prompt",
+		SourceType:  "local",
+	}
+	if err := repo.CreateRepository(ctx, in); err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+	got, err := repo.GetRepository(ctx, in.ID)
+	if err != nil {
+		t.Fatalf("get repository: %v", err)
+	}
+	if got.StartupPrompt != "" {
+		t.Errorf("default StartupPrompt = %q, want empty", got.StartupPrompt)
+	}
+}
+
 // TestRunMigrations_Idempotent verifies that re-running migrations on an
 // already-migrated schema does not error (Apply swallows "duplicate column"
 // failures by design).

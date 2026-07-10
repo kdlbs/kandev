@@ -476,13 +476,22 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, code, err.Error(), nil)
 	}
 
+	// When the caller supplied no description, fall back to the target
+	// repository's startup_prompt (if any). Ticket placeholders resolve only
+	// from parent-inherited metadata (parent_id: "self" or an explicit parent);
+	// unresolved placeholder lines are dropped by ResolveStartupPrompt.
+	description := req.Description
+	if description == "" {
+		description = h.resolveStartupPromptForMCP(ctx, req.ParentID, req.Title, repos)
+	}
+
 	task, err := h.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
 		ParentID:               req.ParentID,
 		WorkspaceID:            req.WorkspaceID,
 		WorkflowID:             req.WorkflowID,
 		WorkflowStepID:         req.WorkflowStepID,
 		Title:                  req.Title,
-		Description:            req.Description,
+		Description:            description,
 		Repositories:           repos,
 		BlockedBy:              req.BlockedBy,
 		AssigneeAgentProfileID: req.AssigneeAgentProfileID,
@@ -641,6 +650,65 @@ func inheritedRepoInputs(src []*models.TaskRepository) []service.TaskRepositoryI
 		})
 	}
 	return repos
+}
+
+// ticketMetadataKeys are the keys copied from a parent task's metadata onto
+// startup-prompt resolution so subtasks created via `parent_id: "self"` inherit
+// their parent's ticket context (Jira issue key/URL or Linear identifier/URL).
+var ticketMetadataKeys = []string{
+	"jira_issue_key",
+	"jira_issue_url",
+	"linear_issue_identifier",
+	"linear_issue_url",
+}
+
+// resolveStartupPromptForMCP looks up the first-listed repository's
+// startup_prompt and resolves it using the parent task's ticket metadata (when
+// a parent is present) and the new task's title. Returns empty string when no
+// repo is resolvable or when the repo has no startup_prompt.
+func (h *Handlers) resolveStartupPromptForMCP(ctx context.Context, parentID, taskTitle string, repos []service.TaskRepositoryInput) string {
+	repoID := firstRepoID(repos)
+	if repoID == "" || h.taskSvc == nil {
+		return ""
+	}
+	metadata := h.inheritedTicketMetadata(ctx, parentID)
+	return h.taskSvc.ResolveRepositoryStartupPrompt(ctx, repoID, taskTitle, metadata)
+}
+
+// firstRepoID returns the first non-empty RepositoryID in the resolved repo
+// list. Empty repos (e.g. local_path / github_url that haven't been resolved
+// yet) are skipped; the resolver treats an empty ID as "no prompt to apply".
+func firstRepoID(repos []service.TaskRepositoryInput) string {
+	for _, r := range repos {
+		if r.RepositoryID != "" {
+			return r.RepositoryID
+		}
+	}
+	return ""
+}
+
+// inheritedTicketMetadata returns the parent task's ticket-related metadata
+// keys so a startup prompt using {{TICKET_ID}} / {{TICKET_URL}} resolves for
+// subtasks created via `parent_id: "self"`. Returns nil when there is no
+// parent or the parent lookup fails.
+func (h *Handlers) inheritedTicketMetadata(ctx context.Context, parentID string) map[string]interface{} {
+	if parentID == "" || h.taskSvc == nil {
+		return nil
+	}
+	parent, err := h.taskSvc.GetTask(ctx, parentID)
+	if err != nil || parent == nil || parent.Metadata == nil {
+		return nil
+	}
+	var inherited map[string]interface{}
+	for _, key := range ticketMetadataKeys {
+		if v, ok := parent.Metadata[key]; ok {
+			if inherited == nil {
+				inherited = make(map[string]interface{}, len(ticketMetadataKeys))
+			}
+			inherited[key] = v
+		}
+	}
+	return inherited
 }
 
 type mcpAutoStartConfig struct {

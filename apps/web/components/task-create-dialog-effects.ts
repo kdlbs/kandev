@@ -23,6 +23,7 @@ import {
 } from "@/components/task-create-dialog-autopick";
 import { useMultiRepoGuardEffect } from "@/components/task-create-dialog-multi-repo-guard";
 import { useRepositoryAutoSelectEffect } from "@/components/task-create-dialog-repository-autopick";
+import { useRepositoryStartupPromptPrefillEffect } from "@/components/task-create-dialog-startup-prompt";
 import { computeSelectedRepoCount } from "@/components/task-create-dialog-computed";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
@@ -613,6 +614,7 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
     workflows,
   );
   useGitHubUrlErrorEffect(fs, open);
+  useRepositoryStartupPromptPrefillEffect(fs, open, repositories, fs.taskName);
 }
 
 // Reset row.branch on every "switch to local executor" transition so the

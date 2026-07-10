@@ -73,6 +73,7 @@ function buildDraftRepo(
     cleanup_script: "",
     dev_script: "",
     copy_files: "",
+    startup_prompt: "",
     created_at: "",
     updated_at: "",
     scripts: [],

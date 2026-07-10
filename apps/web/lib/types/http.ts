@@ -197,6 +197,7 @@ export type Repository = {
   cleanup_script: string;
   dev_script: string;
   copy_files: string;
+  startup_prompt: string;
   created_at: string;
   updated_at: string;
 };

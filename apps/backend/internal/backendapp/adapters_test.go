@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	githubsvc "github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/repoclone"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -397,3 +398,97 @@ func TestWrapGitHubTaskIssueStoreError(t *testing.T) {
 // jiraSecretAdapter Set/Exists branching is tested in
 // internal/integrations/secretadapter/secretadapter_test.go now that the
 // upsert helper lives there.
+
+// TestIssueTaskCreator_StartupPromptOverridesSourceDescription verifies the
+// spec rule: for watcher-created tasks, a repository's non-empty
+// startup_prompt REPLACES the source's default description. Jira/Linear watchers
+// build `req.Description` from an interpolated per-integration fallback; if a
+// repository opts in via startup_prompt the resolved prompt wins.
+func TestIssueTaskCreator_StartupPromptOverridesSourceDescription(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+
+	workspace, err := harness.taskSvc.CreateWorkspace(ctx, &taskservice.CreateWorkspaceRequest{Name: "watcher-ws"})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	workflow, err := harness.taskSvc.CreateWorkflow(ctx, &taskservice.CreateWorkflowRequest{
+		WorkspaceID: workspace.ID,
+		Name:        "Kanban",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	repo, err := harness.taskSvc.CreateRepository(ctx, &taskservice.CreateRepositoryRequest{
+		WorkspaceID:   workspace.ID,
+		Name:          "with-prompt",
+		SourceType:    "local",
+		StartupPrompt: "Read {{TICKET_URL}} and start work.",
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+
+	adapter := &issueTaskCreatorAdapter{svc: harness.taskSvc}
+	task, err := adapter.CreateIssueTask(ctx, &orchestrator.IssueTaskRequest{
+		WorkspaceID: workspace.ID,
+		WorkflowID:  workflow.ID,
+		Title:       "[PROJ-42] Fix flaky test",
+		Description: "source watcher default description",
+		Metadata: map[string]interface{}{
+			"jira_issue_key": "PROJ-42",
+			"jira_issue_url": "https://x.atlassian.net/browse/PROJ-42",
+		},
+		Repositories: []orchestrator.IssueTaskRepository{{RepositoryID: repo.ID}},
+	})
+	if err != nil {
+		t.Fatalf("CreateIssueTask: %v", err)
+	}
+	want := "Read https://x.atlassian.net/browse/PROJ-42 and start work."
+	if task.Description != want {
+		t.Errorf("description = %q, want %q (startup_prompt should override source default)", task.Description, want)
+	}
+}
+
+// TestIssueTaskCreator_NoStartupPromptFallsBackToSource verifies that when the
+// repository has no startup_prompt, the source's per-integration description
+// (interpolateJiraPrompt / interpolateLinearPrompt output) is preserved.
+func TestIssueTaskCreator_NoStartupPromptFallsBackToSource(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+
+	workspace, err := harness.taskSvc.CreateWorkspace(ctx, &taskservice.CreateWorkspaceRequest{Name: "watcher-ws-fallback"})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	workflow, err := harness.taskSvc.CreateWorkflow(ctx, &taskservice.CreateWorkflowRequest{
+		WorkspaceID: workspace.ID,
+		Name:        "Kanban",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	repo, err := harness.taskSvc.CreateRepository(ctx, &taskservice.CreateRepositoryRequest{
+		WorkspaceID: workspace.ID,
+		Name:        "no-prompt",
+		SourceType:  "local",
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+
+	adapter := &issueTaskCreatorAdapter{svc: harness.taskSvc}
+	task, err := adapter.CreateIssueTask(ctx, &orchestrator.IssueTaskRequest{
+		WorkspaceID:  workspace.ID,
+		WorkflowID:   workflow.ID,
+		Title:        "[PROJ-42] Fix flaky test",
+		Description:  "source watcher default description",
+		Repositories: []orchestrator.IssueTaskRepository{{RepositoryID: repo.ID}},
+	})
+	if err != nil {
+		t.Fatalf("CreateIssueTask: %v", err)
+	}
+	if task.Description != "source watcher default description" {
+		t.Errorf("description = %q, want source default (no startup_prompt to override)", task.Description)
+	}
+}

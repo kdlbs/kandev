@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/scriptengine"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
@@ -547,6 +548,7 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 		CleanupScript:        req.CleanupScript,
 		DevScript:            req.DevScript,
 		CopyFiles:            req.CopyFiles,
+		StartupPrompt:        req.StartupPrompt,
 	}
 
 	// Auto-detect GitHub provider info from git remote if not provided
@@ -701,6 +703,9 @@ func applyRepositoryUpdates(repository *models.Repository, req *UpdateRepository
 	if req.CopyFiles != nil {
 		repository.CopyFiles = *req.CopyFiles
 	}
+	if req.StartupPrompt != nil {
+		repository.StartupPrompt = *req.StartupPrompt
+	}
 	return nil
 }
 
@@ -728,6 +733,23 @@ func (s *Service) DeleteRepository(ctx context.Context, id string) error {
 
 func (s *Service) ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error) {
 	return s.repoEntities.ListRepositories(ctx, workspaceID)
+}
+
+// ResolveRepositoryStartupPrompt returns the given repository's StartupPrompt
+// with {{TICKET_*}} / {{TASK_TITLE}} placeholders substituted from the task's
+// title and metadata. Lines whose ticket placeholders never resolve are
+// dropped (see scriptengine.ResolveStartupPrompt). Returns empty string when
+// the repository has no startup prompt, when the repository lookup fails, or
+// when repositoryID is empty — callers treat "" as "no prompt to apply".
+func (s *Service) ResolveRepositoryStartupPrompt(ctx context.Context, repositoryID, taskTitle string, metadata map[string]interface{}) string {
+	if repositoryID == "" {
+		return ""
+	}
+	repo, err := s.repoEntities.GetRepository(ctx, repositoryID)
+	if err != nil || repo == nil || repo.StartupPrompt == "" {
+		return ""
+	}
+	return scriptengine.ResolveStartupPrompt(repo.StartupPrompt, taskTitle, metadata)
 }
 
 // CountActiveSessionsByRepository returns the number of agent sessions in an

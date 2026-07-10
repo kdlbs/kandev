@@ -21,6 +21,7 @@ function repo(overrides: Partial<Repository>): Repository {
     cleanup_script: "",
     dev_script: "",
     copy_files: "",
+    startup_prompt: "",
     created_at: "",
     updated_at: "",
     ...overrides,
