@@ -172,4 +172,14 @@ describe("useMobilePanelHandlers request cancellation", () => {
     expect(firstOptions.signal.aborted).toBe(true);
     expect(secondOptions.signal.aborted).toBe(false);
   });
+
+  it("aborts stale chat file requests when the session changes", () => {
+    const { result, rerender } = renderHandlers();
+    act(() => result.current.handleOpenFileFromChat(CHAT_LINK_PATH));
+    const firstOptions = fetchAndOpenFileMock.mock.calls[0]?.[4] as { signal: AbortSignal };
+
+    rerender({ sid: "s2" });
+
+    expect(firstOptions.signal.aborted).toBe(true);
+  });
 });

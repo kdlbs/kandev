@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useCallback, useRef, useState } from "react";
+import React, { useEffect, useMemo, useCallback, useLayoutEffect, useRef, useState } from "react";
 import { ScrollArea } from "@kandev/ui/scroll-area";
 import type { FileTreeNode, OpenFileTab } from "@/lib/types/backend";
 import { useSession } from "@/hooks/domains/session/use-session";
@@ -105,7 +105,7 @@ function useFileBrowserHandlers(
   const [activeFolderPath, setActiveFolderPath] = useState<string>("");
   const openFileAbortRef = useRef<AbortController | null>(null);
 
-  useEffect(
+  useLayoutEffect(
     () => () => {
       openFileAbortRef.current?.abort();
       openFileAbortRef.current = null;

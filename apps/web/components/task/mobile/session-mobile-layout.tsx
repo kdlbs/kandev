@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { SessionMobileTopBar } from "./session-mobile-top-bar";
 import { SessionMobileBottomNav } from "./session-mobile-bottom-nav";
 import { SessionTaskSwitcherSheet } from "./session-task-switcher-sheet";
@@ -285,7 +285,7 @@ export function useMobilePanelHandlers({
     setSelectedFile(null);
   }
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     latestRequestIdRef.current += 1;
     openFileAbortRef.current?.abort();
     openFileAbortRef.current = null;
