@@ -71,7 +71,7 @@ Connect Kandev to the tools your team already uses — pull issues into the kanb
 | Agent | Launch |
 |:-------:|:----------:|
 | **Claude Code** | `npx -y @agentclientprotocol/claude-agent-acp` |
-| **Codex** | `npx -y @zed-industries/codex-acp` |
+| **Codex** | `npx -y @agentclientprotocol/codex-acp` |
 | **GitHub Copilot** | `npx -y @github/copilot --acp` |
 | **Gemini CLI** | `npx -y @google/gemini-cli --acp` |
 | **Amp** | `npx -y amp-acp` |
