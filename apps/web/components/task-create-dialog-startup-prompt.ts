@@ -41,8 +41,12 @@ export function useRepositoryStartupPromptPrefillEffect(
       return;
     }
     const currentValue = descriptionInputRef.current?.getValue() ?? "";
-    const isUntouched = currentValue === "" || currentValue === lastAppliedRef.current;
-    if (!isUntouched) {
+    // Only compare against the last prompt we wrote. Treating "" as untouched
+    // re-fills the prompt after the user has intentionally cleared it — every
+    // taskName keystroke would then undo the clear. lastAppliedRef starts as
+    // "", so the initial-open case where the input is still empty still
+    // triggers the first fill.
+    if (currentValue !== lastAppliedRef.current) {
       return;
     }
     const resolved = resolveStartupPromptForManualDialog(startupPrompt, taskName);
