@@ -314,13 +314,6 @@ func TestHTTP_TestConnection_OK(t *testing.T) {
 
 func TestHTTP_CopyConfig_ReturnsWrappedList(t *testing.T) {
 	ctrl, router, _ := newTestController(t)
-	probed := make(chan struct{}, 4)
-	ctrl.service.SetProbeHook(func() {
-		select {
-		case probed <- struct{}{}:
-		default:
-		}
-	})
 	seedInstance(t, ctrl, "ws-src", "SaaS", "sec")
 	w := do(router, http.MethodPost, "/api/v1/sentry/config/copy?workspace_id=ws-src",
 		`{"targetWorkspaceId":"ws-dst"}`)
@@ -335,11 +328,6 @@ func TestHTTP_CopyConfig_ReturnsWrappedList(t *testing.T) {
 	}
 	if len(resp.Instances) != 1 || resp.Instances[0].WorkspaceID != "ws-dst" {
 		t.Errorf("copied = %+v", resp.Instances)
-	}
-	select {
-	case <-probed:
-	case <-time.After(2 * time.Second):
-		t.Fatal("async probe did not fire")
 	}
 }
 
@@ -483,4 +471,31 @@ func TestRegisterRoutes_AcceptsNilDispatcher(t *testing.T) {
 	}, logger.Default())
 	dispatcher := ws.NewDispatcher()
 	RegisterRoutes(router, dispatcher, svc, logger.Default())
+}
+
+// TestHTTP_TriggerIssueWatch_AmbiguousUnboundIs4xx pins the P2 fix: a manual
+// trigger of an unbound watch that resolves ambiguously (multiple healthy
+// instances) is routed through the issue-watch error mapper, yielding a 4xx
+// (ErrInvalidConfig → 400) rather than a bare 500.
+func TestHTTP_TriggerIssueWatch_AmbiguousUnboundIs4xx(t *testing.T) {
+	ctrl, router, _ := newTestController(t)
+	ctx := context.Background()
+	a := seedInstance(t, ctrl, "ws-1", "A", "tok")
+	b := seedInstance(t, ctrl, "ws-1", "B", "tok")
+	now := time.Now().UTC()
+	for _, id := range []string{a.ID, b.ID} {
+		if err := ctrl.service.store.UpdateAuthHealthForInstance(ctx, id, true, "", now); err != nil {
+			t.Fatalf("mark healthy: %v", err)
+		}
+	}
+	// Unbound watch: no SentryInstanceID → resolves ambiguously across the two
+	// healthy instances.
+	w := newTestIssueWatch("ws-1")
+	if err := ctrl.service.store.CreateIssueWatch(ctx, w); err != nil {
+		t.Fatalf("seed unbound watch: %v", err)
+	}
+	resp := do(router, http.MethodPost, "/api/v1/sentry/watches/issue/"+w.ID+"/trigger?workspace_id=ws-1", "")
+	if resp.Code < 400 || resp.Code >= 500 {
+		t.Fatalf("expected 4xx for ambiguous unbound-watch trigger, got %d body=%s", resp.Code, resp.Body.String())
+	}
 }

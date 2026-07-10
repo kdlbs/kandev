@@ -1,6 +1,7 @@
 package sentry
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -77,6 +78,10 @@ func (c *MockController) setAuthHealth(ctx *gin.Context) {
 		return
 	}
 	if err := c.store.UpdateAuthHealthForInstance(ctx.Request.Context(), instanceID, req.OK, req.Error, time.Now().UTC()); err != nil {
+		if errors.Is(err, ErrInstanceNotFound) {
+			writeErr(ctx, http.StatusNotFound, err.Error())
+			return
+		}
 		writeErr(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}

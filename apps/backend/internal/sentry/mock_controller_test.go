@@ -84,3 +84,18 @@ func TestMockController_SetAuthResult_AllowsEmptyInstanceID(t *testing.T) {
 		t.Errorf("candidate auth result = %+v, want seeded failure", result)
 	}
 }
+
+// TestMockController_SetAuthHealth_MissingInstance404 pins the P2 fix: seeding
+// auth-health for a missing/misspelled instance returns 404 (not {set:true}),
+// so E2E seeding fails fast instead of silently succeeding.
+func TestMockController_SetAuthHealth_MissingInstance404(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	ctrl := NewMockController(NewMockClient(), newTestStore(t), logger.Default())
+	ctrl.RegisterRoutes(router)
+
+	resp := do(router, http.MethodPut, "/api/v1/sentry/mock/auth-health?instanceId=ghost", `{"ok":true}`)
+	if resp.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404; body=%s", resp.Code, resp.Body.String())
+	}
+}

@@ -203,7 +203,7 @@ func (s *Service) CreateInstance(ctx context.Context, workspaceID string, req *C
 		}
 	}
 	s.invalidateClient(cfg.ID)
-	go s.RecordAuthHealthForInstance(context.Background(), cfg.ID)
+	go s.RecordAuthHealthForInstance(context.WithoutCancel(ctx), cfg.ID)
 	return s.GetInstance(ctx, workspaceID, cfg.ID)
 }
 
@@ -258,7 +258,7 @@ func (s *Service) UpdateInstance(ctx context.Context, workspaceID, id string, re
 		}
 	}
 	s.invalidateClient(id)
-	go s.RecordAuthHealthForInstance(context.Background(), id)
+	go s.RecordAuthHealthForInstance(context.WithoutCancel(ctx), id)
 	return s.GetInstance(ctx, workspaceID, id)
 }
 
@@ -290,6 +290,22 @@ func (s *Service) DeleteInstance(ctx context.Context, workspaceID, id string) er
 	count, err := s.store.CountWatchesForInstance(ctx, id)
 	if err != nil {
 		return err
+	}
+	// The workspace's sole instance also backs every unbound (NULL
+	// sentry_instance_id) watch: resolveWatchInstanceID resolves those to it at
+	// poll time, so deleting it would strand them. Count them as in-use too.
+	// When more than one instance remains, unbound watches stay resolvable, so
+	// they are not attributed to this delete.
+	instances, err := s.store.ListInstances(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	if len(instances) == 1 {
+		unbound, err := s.store.CountUnboundIssueWatchesInWorkspace(ctx, workspaceID)
+		if err != nil {
+			return err
+		}
+		count += unbound
 	}
 	if count > 0 {
 		return ErrInstanceInUse{WatchCount: count}

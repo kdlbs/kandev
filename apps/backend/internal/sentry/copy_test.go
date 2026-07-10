@@ -4,23 +4,12 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/kandev/kandev/internal/common/logger"
 )
-
-// drainProbe waits for one async auth-health probe fired by a copy/create write.
-func drainProbe(t *testing.T, f *svcFixture) {
-	t.Helper()
-	select {
-	case <-f.probed:
-	case <-time.After(2 * time.Second):
-		t.Fatalf("async probe hook did not fire within 2s")
-	}
-}
 
 func TestCopyConfig_CopiesInstancesAndSecrets(t *testing.T) {
 	f := newSvcFixture(t)
@@ -33,8 +22,6 @@ func TestCopyConfig_CopiesInstancesAndSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("copy: %v", err)
 	}
-	drainProbe(t, f)
-	drainProbe(t, f)
 
 	if len(copied) != 2 {
 		t.Fatalf("expected 2 copied instances, got %d", len(copied))
@@ -312,7 +299,6 @@ func TestCopyConfig_DedupNamesWithInUseTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("copy: %v", err)
 	}
-	drainProbe(t, f)
 	if len(copied) != 1 || copied[0].Name != "SaaS (2)" {
 		t.Fatalf("expected one deduped copy 'SaaS (2)', got %+v", copied)
 	}

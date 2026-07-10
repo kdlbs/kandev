@@ -120,7 +120,7 @@ func (c *Controller) httpTriggerIssueWatch(ctx *gin.Context) {
 	}
 	instanceID, issues, err := c.service.CheckIssueWatch(ctx.Request.Context(), w)
 	if err != nil {
-		c.writeClientError(ctx, err)
+		c.writeIssueWatchError(ctx, err)
 		return
 	}
 	for _, issue := range issues {

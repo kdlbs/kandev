@@ -117,8 +117,14 @@ func TestService_UpdateIssueWatch_PartialPatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if updated.Prompt != "updated" || updated.Filter.OrgSlug != "acme" || updated.WorkspaceID != created.WorkspaceID {
-		t.Errorf("unexpected mutation: %+v", updated)
+	if updated.Prompt != "updated" {
+		t.Errorf("prompt not updated: got %q, want %q", updated.Prompt, "updated")
+	}
+	if updated.Filter.OrgSlug != "acme" {
+		t.Errorf("filter changed by prompt-only patch: got orgSlug %q, want %q", updated.Filter.OrgSlug, "acme")
+	}
+	if updated.WorkspaceID != created.WorkspaceID {
+		t.Errorf("workspace id changed: got %q, want %q", updated.WorkspaceID, created.WorkspaceID)
 	}
 	empty := SearchFilter{}
 	if _, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{Filter: &empty}); !errors.Is(err, ErrInvalidConfig) {

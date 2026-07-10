@@ -823,15 +823,38 @@ func (s *Store) CountWatchesForInstance(ctx context.Context, instanceID string) 
 	return n, nil
 }
 
+// CountUnboundIssueWatchesInWorkspace counts watches in a workspace that are not
+// bound to any instance (sentry_instance_id IS NULL). resolveWatchInstanceID
+// resolves these legacy/migrated watches to the workspace's sole instance at
+// poll time, so deleting that sole instance would strand them.
+func (s *Store) CountUnboundIssueWatchesInWorkspace(ctx context.Context, workspaceID string) (int, error) {
+	var n int
+	if err := s.ro.GetContext(ctx, &n,
+		`SELECT COUNT(*) FROM sentry_issue_watches WHERE workspace_id = ? AND sentry_instance_id IS NULL`, workspaceID); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 // UpdateAuthHealthForInstance records the result of a credential probe on one
 // instance row.
 func (s *Store) UpdateAuthHealthForInstance(ctx context.Context, id string, ok bool, errMsg string, checkedAt time.Time) error {
-	_, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, `
 		UPDATE sentry_configs
 		SET last_checked_at = ?, last_ok = ?, last_error = ?
 		WHERE id = ?`,
 		checkedAt, ok, errMsg, id)
-	return err
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrInstanceNotFound
+	}
+	return nil
 }
 
 // HasConfig reports whether any instance exists. Used by the auth-health poller

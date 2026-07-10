@@ -247,3 +247,45 @@ func TestStore_UpdateAuthHealthForInstance(t *testing.T) {
 		t.Errorf("expected failure recorded, got %+v", got)
 	}
 }
+
+func TestStore_CountUnboundIssueWatchesInWorkspace(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	inst := testInstance("ws-1", "A")
+	if err := store.CreateInstance(ctx, inst); err != nil {
+		t.Fatalf("create instance: %v", err)
+	}
+	// A bound watch must not count.
+	bound := newTestIssueWatch("ws-1")
+	bound.SentryInstanceID = inst.ID
+	if err := store.CreateIssueWatch(ctx, bound); err != nil {
+		t.Fatalf("create bound watch: %v", err)
+	}
+	// Two unbound (NULL sentry_instance_id) watches in ws-1 must count.
+	for range 2 {
+		if err := store.CreateIssueWatch(ctx, newTestIssueWatch("ws-1")); err != nil {
+			t.Fatalf("create unbound watch: %v", err)
+		}
+	}
+	// An unbound watch in another workspace must not leak in.
+	if err := store.CreateIssueWatch(ctx, newTestIssueWatch("ws-2")); err != nil {
+		t.Fatalf("create other-workspace watch: %v", err)
+	}
+	n, err := store.CountUnboundIssueWatchesInWorkspace(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("expected 2 unbound watches in ws-1, got %d", n)
+	}
+}
+
+// TestStore_UpdateAuthHealthForInstance_MissingInstance pins the zero-rows path:
+// probing a non-existent instance surfaces ErrInstanceNotFound so the mock
+// seed endpoint can fail fast instead of silently reporting success.
+func TestStore_UpdateAuthHealthForInstance_MissingInstance(t *testing.T) {
+	store := newTestStore(t)
+	if err := store.UpdateAuthHealthForInstance(context.Background(), "ghost", true, "", time.Now().UTC()); !errors.Is(err, ErrInstanceNotFound) {
+		t.Errorf("expected ErrInstanceNotFound for missing instance, got %v", err)
+	}
+}

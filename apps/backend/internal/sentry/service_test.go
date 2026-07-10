@@ -741,3 +741,42 @@ func TestService_ClientFor_InvalidateDuringBuild(t *testing.T) {
 		t.Errorf("expected factory called at least twice after invalidation, got %d", got)
 	}
 }
+
+// TestService_DeleteInstance_SoleInstanceCountsUnboundWatches pins the P1 fix:
+// deleting a workspace's sole instance must be refused while unbound (NULL
+// sentry_instance_id) watches exist, because resolveWatchInstanceID resolves
+// them to that instance at poll time. The unbound watch does not trip the FK
+// (its instance id is NULL), so the service must count it explicitly.
+func TestService_DeleteInstance_SoleInstanceCountsUnboundWatches(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	inst := f.seedInstance(t, "ws-1", "A", "t")
+	// Unbound watch: no SentryInstanceID → NULL in the DB.
+	if err := f.store.CreateIssueWatch(ctx, newTestIssueWatch("ws-1")); err != nil {
+		t.Fatalf("create unbound watch: %v", err)
+	}
+	err := f.svc.DeleteInstance(ctx, "ws-1", inst.ID)
+	var inUse ErrInstanceInUse
+	if !errors.As(err, &inUse) {
+		t.Fatalf("expected ErrInstanceInUse for sole instance with unbound watch, got %v", err)
+	}
+	if inUse.WatchCount != 1 {
+		t.Errorf("expected unbound watch counted (1), got %d", inUse.WatchCount)
+	}
+}
+
+// TestService_DeleteInstance_UnboundNotCountedWhenMultipleInstances is the
+// complement: with a second instance present, an unbound watch stays resolvable
+// after one instance is removed, so it must not block that delete.
+func TestService_DeleteInstance_UnboundNotCountedWhenMultipleInstances(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	a := f.seedInstance(t, "ws-1", "A", "t")
+	f.seedInstance(t, "ws-1", "B", "t")
+	if err := f.store.CreateIssueWatch(ctx, newTestIssueWatch("ws-1")); err != nil {
+		t.Fatalf("create unbound watch: %v", err)
+	}
+	if err := f.svc.DeleteInstance(ctx, "ws-1", a.ID); err != nil {
+		t.Fatalf("expected delete to succeed with a second instance present, got %v", err)
+	}
+}

@@ -108,20 +108,23 @@ func (s *Service) createCopiedInstances(ctx context.Context, targetWorkspaceID s
 	return copied, nil
 }
 
-// finalizeCopiedInstances invalidates cached clients and kicks off async
-// health probes only after every instance in the request has been copied.
+// finalizeCopiedInstances invalidates the cached clients for the freshly copied
+// instances. It deliberately fires no per-instance auth-health probe here: a
+// workspace may hold arbitrarily many instances, so probing each copy inline
+// would burst an unbounded number of goroutines and outbound Sentry calls.
+// The copied instances instead get their first health check from the bounded
+// background auth-health poller (RecordAuthHealth, concurrency-capped) on its
+// next cycle.
 func (s *Service) finalizeCopiedInstances(copied []*SentryConfig) {
 	for _, cfg := range copied {
 		s.invalidateClient(cfg.ID)
 	}
-	for _, cfg := range copied {
-		go s.RecordAuthHealthForInstance(context.Background(), cfg.ID)
-	}
 }
 
 // copyInstance duplicates a prepared source instance into the target workspace
-// with a name deduped against used (which it updates) and a rekeyed secret. The
-// caller starts health probes after every copy succeeds.
+// with a name deduped against used (which it updates) and a rekeyed secret.
+// Health probing is left to the bounded background poller (see
+// finalizeCopiedInstances).
 func (s *Service) copyInstance(ctx context.Context, targetWorkspaceID string, input copyInput, used map[string]struct{}) (*SentryConfig, error) {
 	cfg := &SentryConfig{
 		WorkspaceID: targetWorkspaceID,
