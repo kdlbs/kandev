@@ -3,7 +3,12 @@ package controller
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/discovery"
@@ -36,6 +41,7 @@ type fakeStore struct {
 	nextAgentID  int
 	nextProfID   int
 	getByNameErr error
+	listProfErr  map[string]error
 }
 
 func newFakeStore() *fakeStore {
@@ -155,6 +161,11 @@ func (f *fakeStore) GetAgentProfileIncludingDeleted(ctx context.Context, id stri
 }
 
 func (f *fakeStore) ListAgentProfiles(_ context.Context, agentID string) ([]*models.AgentProfile, error) {
+	if f.listProfErr != nil {
+		if err, ok := f.listProfErr[agentID]; ok {
+			return nil, err
+		}
+	}
 	return f.profiles[agentID], nil
 }
 
@@ -211,7 +222,18 @@ func newReconciler(t *testing.T, st *fakeStore, caps *fakeCapReader, ag agents.A
 	if err := reg.Register(ag); err != nil {
 		t.Fatalf("register: %v", err)
 	}
+	reg.MarkLoaded()
 	return NewProfileReconciler(caps, reg, st, log)
+}
+
+func newObserverLogger(t *testing.T) (*logger.Logger, *observer.ObservedLogs) {
+	t.Helper()
+	core, logs := observer.New(zapcore.DebugLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("NewFromZap: %v", err)
+	}
+	return log, logs
 }
 
 func TestProfileReconciler_SeedsDefaultProfile(t *testing.T) {
@@ -343,6 +365,169 @@ func TestProfileReconciler_CleansOrphanProfiles(t *testing.T) {
 	}
 	if len(st.softDeleted) != 1 || st.softDeleted[0] != orphanProfile.ID {
 		t.Fatalf("expected orphan profile to be soft-deleted, got %v", st.softDeleted)
+	}
+}
+
+func TestProfileReconciler_SkipsOrphanCleanupUntilRegistryReady(t *testing.T) {
+	st := newFakeStore()
+	orphanAgent := &models.Agent{Name: "removed-old-agent"}
+	_ = st.CreateAgent(context.Background(), orphanAgent)
+	orphanProfile := &models.AgentProfile{
+		AgentID: orphanAgent.ID,
+		Name:    "legacy",
+		Model:   "x",
+	}
+	_ = st.CreateAgentProfile(context.Background(), orphanProfile)
+
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	reg := registry.NewRegistry(log)
+	ag := &mockInferenceAgent{id: "claude-acp", displayName: "Claude", enabled: true}
+	if err := reg.Register(ag); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	r := NewProfileReconciler(&fakeCapReader{caps: map[string]hostutility.AgentCapabilities{}}, reg, st, log)
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(st.softDeleted) != 0 {
+		t.Fatalf("expected not-ready registry cleanup to fail closed, got soft-deletes %v", st.softDeleted)
+	}
+}
+
+func TestProfileReconciler_SkipsOrphanCleanupWhenEnabledRegistryEmpty(t *testing.T) {
+	st := newFakeStore()
+	claudeAgent := &models.Agent{Name: "claude-acp"}
+	_ = st.CreateAgent(context.Background(), claudeAgent)
+	claudeProfile := &models.AgentProfile{
+		AgentID: claudeAgent.ID,
+		Name:    "Claude",
+		Model:   "claude-sonnet",
+	}
+	_ = st.CreateAgentProfile(context.Background(), claudeProfile)
+	codexAgent := &models.Agent{Name: "codex-acp"}
+	_ = st.CreateAgent(context.Background(), codexAgent)
+	codexProfile := &models.AgentProfile{
+		AgentID: codexAgent.ID,
+		Name:    "Codex",
+		Model:   "gpt-5",
+	}
+	_ = st.CreateAgentProfile(context.Background(), codexProfile)
+
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	reg := registry.NewRegistry(log)
+	reg.MarkLoaded()
+	r := NewProfileReconciler(&fakeCapReader{caps: map[string]hostutility.AgentCapabilities{}}, reg, st, log)
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(st.softDeleted) != 0 {
+		t.Fatalf("expected empty registry cleanup to fail closed, got soft-deletes %v", st.softDeleted)
+	}
+	if len(st.profiles[claudeAgent.ID]) != 1 || len(st.profiles[codexAgent.ID]) != 1 {
+		t.Fatalf("expected live profiles to remain, got claude=%d codex=%d",
+			len(st.profiles[claudeAgent.ID]), len(st.profiles[codexAgent.ID]))
+	}
+}
+
+func TestProfileReconciler_SkipsOrphanCleanupWhenBatchExceedsSafetyLimit(t *testing.T) {
+	st := newFakeStore()
+	for i := 1; i <= 4; i++ {
+		orphanAgent := &models.Agent{Name: "removed-old-agent-" + itoa(i)}
+		_ = st.CreateAgent(context.Background(), orphanAgent)
+		orphanProfile := &models.AgentProfile{
+			AgentID: orphanAgent.ID,
+			Name:    "legacy",
+			Model:   "x",
+		}
+		_ = st.CreateAgentProfile(context.Background(), orphanProfile)
+	}
+
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	reg := registry.NewRegistry(log)
+	reg.LoadDefaults()
+	r := NewProfileReconciler(&fakeCapReader{caps: map[string]hostutility.AgentCapabilities{}}, reg, st, log)
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(st.softDeleted) != 0 {
+		t.Fatalf("expected oversized cleanup batch to fail closed, got soft-deletes %v", st.softDeleted)
+	}
+}
+
+func TestProfileReconciler_SkipsOrphanCleanupWhenCandidateProfileListFails(t *testing.T) {
+	st := newFakeStore()
+	failingAgent := &models.Agent{Name: "removed-old-agent-failing"}
+	_ = st.CreateAgent(context.Background(), failingAgent)
+	st.listProfErr = map[string]error{
+		failingAgent.ID: errors.New("database locked"),
+	}
+	deletableAgent := &models.Agent{Name: "removed-old-agent-deletable"}
+	_ = st.CreateAgent(context.Background(), deletableAgent)
+	deletableProfile := &models.AgentProfile{
+		AgentID: deletableAgent.ID,
+		Name:    "legacy",
+		Model:   "x",
+	}
+	_ = st.CreateAgentProfile(context.Background(), deletableProfile)
+
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	reg := registry.NewRegistry(log)
+	reg.LoadDefaults()
+	r := NewProfileReconciler(&fakeCapReader{caps: map[string]hostutility.AgentCapabilities{}}, reg, st, log)
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(st.softDeleted) != 0 {
+		t.Fatalf("expected profile-list failure to fail closed, got soft-deletes %v", st.softDeleted)
+	}
+}
+
+func TestProfileReconciler_LogsOrphanCleanupSummary(t *testing.T) {
+	st := newFakeStore()
+	orphanAgent := &models.Agent{Name: "removed-old-agent"}
+	_ = st.CreateAgent(context.Background(), orphanAgent)
+	orphanProfile := &models.AgentProfile{
+		AgentID: orphanAgent.ID,
+		Name:    "legacy",
+		Model:   "x",
+	}
+	_ = st.CreateAgentProfile(context.Background(), orphanProfile)
+
+	log, logs := newObserverLogger(t)
+	reg := registry.NewRegistry(log)
+	reg.LoadDefaults()
+	r := NewProfileReconciler(&fakeCapReader{caps: map[string]hostutility.AgentCapabilities{}}, reg, st, log)
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	entries := logs.FilterMessage("orphan cleanup summary").All()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 summary log, got %d", len(entries))
+	}
+	fields := entries[0].ContextMap()
+	if fields["db_agent_count"] != int64(1) {
+		t.Errorf("db_agent_count = %v, want 1", fields["db_agent_count"])
+	}
+	if fields["orphan_agent_count"] != int64(1) {
+		t.Errorf("orphan_agent_count = %v, want 1", fields["orphan_agent_count"])
+	}
+	if fields["profiles_deleted_count"] != int64(1) {
+		t.Errorf("profiles_deleted_count = %v, want 1", fields["profiles_deleted_count"])
+	}
+	if fields["skipped"] != false {
+		t.Errorf("skipped = %v, want false", fields["skipped"])
 	}
 }
 

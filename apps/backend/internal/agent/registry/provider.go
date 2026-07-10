@@ -56,6 +56,7 @@ func Provide(log *logger.Logger) (*Registry, func() error, error) {
 		}
 		registerRealProvidersProber(reg, log)
 	}
+	reg.MarkLoaded()
 
 	return reg, func() error { return nil }, nil
 }

@@ -53,6 +53,9 @@ func TestProvide_MockAgentModes(t *testing.T) {
 				t.Fatalf("Provide() error: %v", err)
 			}
 			defer cleanup() //nolint:errcheck
+			if !reg.IsLoaded() {
+				t.Fatal("Provide should return a loaded registry")
+			}
 
 			// Check mock-agent presence and enabled state
 			mock, hasMock := reg.Get("mock-agent")
