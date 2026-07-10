@@ -99,6 +99,9 @@ func (r *Repository) runMigrations() error {
 	// Per-file worktree materialization (copy | symlink). JSON list column;
 	// default '[]' preserves current behavior (no files materialized).
 	r.migrate.Apply("repositories.worktree_files", `ALTER TABLE repositories ADD COLUMN worktree_files TEXT DEFAULT '[]'`)
+	// Index the path used by GetRepositoryByLocalPath (worktree creation resolves
+	// config by path when the launch request has no RepositoryID).
+	r.migrate.Apply("repositories.local_path.index", `CREATE INDEX IF NOT EXISTS idx_repositories_local_path ON repositories(local_path)`)
 	r.migrate.Apply("repositories.worktree_branch_template", `ALTER TABLE repositories ADD COLUMN worktree_branch_template TEXT DEFAULT 'feature/{title}-{suffix}'`)
 	r.migrate.Apply("repositories.worktree_branch_template.backfill", `UPDATE repositories SET worktree_branch_template = COALESCE(NULLIF(TRIM(worktree_branch_prefix), ''), 'feature/') || '{title}-{suffix}'`)
 

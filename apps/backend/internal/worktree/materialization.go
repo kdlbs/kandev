@@ -87,14 +87,37 @@ func MaterializeWorktreeFiles(srcRoot, destRoot string, files []FileSpec) error 
 }
 
 // materializeFile places a single repo-relative file into destRoot.
-func materializeFile(mode FileMaterializeMode, srcRoot, destRoot, relPath string) error {
+// ErrInvalidWorktreeFilePath is returned by CleanWorktreeFilePath for paths that
+// are absolute, escape the repository root, or target the reserved .git entry.
+var ErrInvalidWorktreeFilePath = errors.New("invalid worktree file path")
+
+// CleanWorktreeFilePath validates a configured worktree-file path and returns
+// its cleaned, repository-relative form. Empty/"." inputs return ("", nil) so
+// callers can skip them. Absolute paths, parent-directory traversal, and the
+// reserved .git admin path are rejected with ErrInvalidWorktreeFilePath so the
+// same rules apply at save time (service validation) and at materialization.
+func CleanWorktreeFilePath(relPath string) (string, error) {
 	cleanRel := filepath.Clean(strings.TrimSpace(relPath))
 	if cleanRel == "" || cleanRel == "." {
-		return nil
+		return "", nil
 	}
 	if filepath.IsAbs(cleanRel) || cleanRel == ".." ||
 		strings.HasPrefix(cleanRel, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("worktree file %q escapes repository root", relPath)
+		return "", fmt.Errorf("%w: %q escapes repository root", ErrInvalidWorktreeFilePath, relPath)
+	}
+	if cleanRel == ".git" || strings.HasPrefix(cleanRel, ".git"+string(filepath.Separator)) {
+		return "", fmt.Errorf("%w: %q targets the reserved .git path", ErrInvalidWorktreeFilePath, relPath)
+	}
+	return cleanRel, nil
+}
+
+func materializeFile(mode FileMaterializeMode, srcRoot, destRoot, relPath string) error {
+	cleanRel, err := CleanWorktreeFilePath(relPath)
+	if err != nil {
+		return err
+	}
+	if cleanRel == "" {
+		return nil
 	}
 
 	src := filepath.Join(srcRoot, cleanRel)
@@ -162,6 +185,16 @@ func copyDir(src, dest string) error {
 		info, err := d.Info()
 		if err != nil {
 			return err
+		}
+		// WalkDir does not follow symlinks: it reports them as non-dir entries
+		// with the symlink bit set. Recreate the link rather than opening it
+		// (which would EISDIR on symlinked dirs or copy with wrong perms).
+		if info.Mode()&os.ModeSymlink != 0 {
+			linkTarget, readErr := os.Readlink(path)
+			if readErr != nil {
+				return fmt.Errorf("read symlink %q: %w", path, readErr)
+			}
+			return os.Symlink(linkTarget, target)
 		}
 		if d.IsDir() {
 			return os.MkdirAll(target, info.Mode().Perm())

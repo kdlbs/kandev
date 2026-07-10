@@ -745,7 +745,12 @@ func applyRepositoryUpdates(repository *models.Repository, req *UpdateRepository
 func validateAndNormalizeWorktreeFiles(files []models.WorktreeFile) ([]models.WorktreeFile, error) {
 	out := make([]models.WorktreeFile, 0, len(files))
 	for _, f := range files {
-		path := strings.TrimSpace(f.Path)
+		// Reject absolute/traversal/.git paths at save time so an invalid entry
+		// can't be persisted and then break every subsequent worktree creation.
+		path, err := worktree.CleanWorktreeFilePath(f.Path)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %s", ErrInvalidRepositorySettings, err)
+		}
 		if path == "" {
 			continue
 		}

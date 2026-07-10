@@ -912,6 +912,23 @@ func TestService_CreateRepository_InvalidWorktreeFileMode(t *testing.T) {
 	}
 }
 
+func TestService_CreateRepository_InvalidWorktreeFilePath(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+
+	for _, bad := range []string{"/etc/passwd", "../secret", ".git/config"} {
+		_, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+			WorkspaceID:   "ws-1",
+			Name:          "Test Repo",
+			WorktreeFiles: []models.WorktreeFile{{Path: bad, Mode: "copy"}},
+		})
+		if !errors.Is(err, ErrInvalidRepositorySettings) {
+			t.Fatalf("path %q: expected ErrInvalidRepositorySettings, got %v", bad, err)
+		}
+	}
+}
+
 func TestService_UpdateRepository_InvalidWorktreeFileMode(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

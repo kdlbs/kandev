@@ -5,7 +5,7 @@ import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import type { Repository, WorktreeFile } from "@/lib/types/http";
+import type { Repository, WorktreeFile, WorktreeFileMode } from "@/lib/types/http";
 
 export type RepositoryWorktreeFilesProps = {
   repositoryId: string;
@@ -34,12 +34,14 @@ export function RepositoryWorktreeFiles({
   const files = worktreeFiles ?? [];
 
   const addFile = () =>
-    onUpdate(repositoryId, { worktree_files: [...files, { path: "", mode: "copy" }] });
+    onUpdate(repositoryId, {
+      worktree_files: [...files, { path: "", mode: "copy" as WorktreeFileMode }],
+    });
   const removeFile = (index: number) =>
     onUpdate(repositoryId, { worktree_files: files.filter((_, i) => i !== index) });
   const changePath = (index: number, path: string) =>
     onUpdate(repositoryId, { worktree_files: replaceAt(files, index, { path }) });
-  const changeMode = (index: number, mode: string) =>
+  const changeMode = (index: number, mode: WorktreeFileMode) =>
     onUpdate(repositoryId, { worktree_files: replaceAt(files, index, { mode }) });
 
   return (
@@ -65,14 +67,22 @@ export function RepositoryWorktreeFiles({
       ) : (
         <div className="space-y-2">
           {files.map((file, index) => (
-            <div key={index} className="flex items-center gap-2">
+            // Key by path for filled rows so removing a middle row doesn't shift
+            // input focus/cursor; empty (new) rows fall back to index.
+            <div
+              key={file.path ? `p:${file.path}` : `new:${index}`}
+              className="flex items-center gap-2"
+            >
               <Input
                 value={file.path ?? ""}
                 onChange={(e) => changePath(index, e.target.value)}
                 placeholder=".env.local"
                 className="font-mono text-sm"
               />
-              <Select value={file.mode || "copy"} onValueChange={(v) => changeMode(index, v)}>
+              <Select
+                value={file.mode || "copy"}
+                onValueChange={(v) => changeMode(index, v as WorktreeFileMode)}
+              >
                 <SelectTrigger className="w-36 shrink-0">
                   <SelectValue />
                 </SelectTrigger>
@@ -86,6 +96,7 @@ export function RepositoryWorktreeFiles({
                 variant="ghost"
                 size="icon"
                 className="cursor-pointer"
+                aria-label="Remove file"
                 onClick={() => removeFile(index)}
               >
                 <IconX className="h-4 w-4" />

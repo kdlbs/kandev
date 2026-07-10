@@ -205,9 +205,11 @@ export type Repository = {
 };
 
 /** A single file materialized into new worktrees. `mode` is "copy" or "symlink". */
+export type WorktreeFileMode = "copy" | "symlink";
+
 export type WorktreeFile = {
   path: string;
-  mode: string;
+  mode: WorktreeFileMode;
 };
 
 export type RepositoryScript = {

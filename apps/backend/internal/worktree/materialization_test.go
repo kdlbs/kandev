@@ -211,6 +211,43 @@ func TestMaterializeWorktreeFiles_RejectsTraversal(t *testing.T) {
 	}
 }
 
+// The reserved .git admin path must never be materialized (it would clobber the
+// worktree's git metadata via os.RemoveAll on the destination).
+func TestMaterializeWorktreeFiles_RejectsGitPath(t *testing.T) {
+	src := t.TempDir()
+	dest := t.TempDir()
+	writeFile(t, filepath.Join(src, ".git", "config"), "x")
+
+	for _, bad := range []string{".git", ".git/config"} {
+		err := MaterializeWorktreeFiles(src, dest, []FileSpec{{Path: bad, Mode: FileMaterializeCopy}})
+		if !errors.Is(err, ErrInvalidWorktreeFilePath) {
+			t.Fatalf("path %q: expected ErrInvalidWorktreeFilePath, got %v", bad, err)
+		}
+	}
+}
+
+// copyDir must recreate symlinks inside a copied directory rather than following
+// them (which would EISDIR on symlinked dirs or copy with wrong perms).
+func TestMaterializeWorktreeFiles_CopyDirPreservesInnerSymlink(t *testing.T) {
+	src := t.TempDir()
+	dest := t.TempDir()
+	writeFile(t, filepath.Join(src, "cfg", "real.env"), "K=V")
+	if err := os.Symlink("real.env", filepath.Join(src, "cfg", "link.env")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	if err := MaterializeWorktreeFiles(src, dest, []FileSpec{{Path: "cfg", Mode: FileMaterializeCopy}}); err != nil {
+		t.Fatalf("MaterializeWorktreeFiles: %v", err)
+	}
+	info, err := os.Lstat(filepath.Join(dest, "cfg", "link.env"))
+	if err != nil {
+		t.Fatalf("lstat copied link: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("inner symlink was not preserved as a symlink")
+	}
+}
+
 func TestMaterializeWorktreeFiles_EmptyListNoop(t *testing.T) {
 	src := t.TempDir()
 	dest := t.TempDir()

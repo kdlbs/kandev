@@ -2,10 +2,60 @@ package sqlite
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
+	"github.com/jmoiron/sqlx"
+
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+// TestRepositoryEntity_WorktreeFilesReplay opens the same on-disk database twice
+// through NewWithDB (which re-runs initSchema + idempotent migrations), exercising
+// the same-database replay path for the worktree_files column and confirming a
+// persisted repository still round-trips its worktree file config after replay.
+func TestRepositoryEntity_WorktreeFilesReplay(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "replay.db")
+
+	open := func() (*Repository, func()) {
+		conn, err := db.OpenSQLite(dbPath)
+		if err != nil {
+			t.Fatalf("open sqlite: %v", err)
+		}
+		sqlxDB := sqlx.NewDb(conn, "sqlite3")
+		repo, err := NewWithDB(sqlxDB, sqlxDB, nil)
+		if err != nil {
+			t.Fatalf("NewWithDB: %v", err)
+		}
+		return repo, func() { _ = sqlxDB.Close() }
+	}
+
+	repo1, close1 := open()
+	seedWorkspace(t, repo1, "ws-1")
+	in := &models.Repository{
+		WorkspaceID:   "ws-1",
+		Name:          "replayed",
+		SourceType:    "local",
+		WorktreeFiles: []models.WorktreeFile{{Path: ".env", Mode: "symlink"}},
+	}
+	if err := repo1.CreateRepository(ctx, in); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	close1()
+
+	// Reopen the same database: migrations replay must be a no-op and data intact.
+	repo2, close2 := open()
+	defer close2()
+	got, err := repo2.GetRepository(ctx, in.ID)
+	if err != nil {
+		t.Fatalf("GetRepository after replay: %v", err)
+	}
+	if len(got.WorktreeFiles) != 1 || got.WorktreeFiles[0] != (models.WorktreeFile{Path: ".env", Mode: "symlink"}) {
+		t.Fatalf("worktree files not preserved across replay: %+v", got.WorktreeFiles)
+	}
+}
 
 func TestRepositoryEntity_WorktreeFilesRoundtrip(t *testing.T) {
 	repo := newRepoForEntityTests(t)
