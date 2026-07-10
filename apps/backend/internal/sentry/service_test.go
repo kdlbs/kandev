@@ -482,6 +482,49 @@ func TestService_UpdateInstance_SecretSetFailureInvalidatesRacedClient(t *testin
 	}
 }
 
+// TestService_UpdateInstance_SecretSetFailureSkipsRollbackOnConcurrentWrite
+// pins the fix for a rollback that blindly restored the `previous` row
+// snapshot even when a second, concurrent UpdateInstance had landed on the
+// same instance between this request's own row write and its failed secret
+// write — silently discarding that other write. The rollback must detect
+// that the persisted row no longer matches what this request itself wrote
+// and skip the restore, while still returning this request's own secretErr.
+func TestService_UpdateInstance_SecretSetFailureSkipsRollbackOnConcurrentWrite(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	created := f.seedInstance(t, "ws-1", "Original", "old-token")
+
+	injected := errors.New("secret store unavailable")
+	f.secrets.setErr = injected
+	f.secrets.setHook = func() {
+		// Runs after this UpdateInstance call has already persisted its own
+		// "Replacement" row but before its secret write fails — simulating a
+		// second UpdateInstance request landing on the same instance during
+		// that exact window and winning the race.
+		concurrent := *created
+		concurrent.Name = "ConcurrentWinner"
+		concurrent.AuthMethod = AuthMethodAuthToken
+		concurrent.URL = "https://concurrent.example.com"
+		if err := f.store.UpdateInstance(context.Background(), &concurrent); err != nil {
+			t.Fatalf("simulate concurrent update: %v", err)
+		}
+	}
+
+	if _, err := f.svc.UpdateInstance(ctx, "ws-1", created.ID, &UpdateConfigRequest{
+		Name: "Replacement", URL: "https://replacement.example.com", Secret: "new-token",
+	}); !errors.Is(err, injected) {
+		t.Fatalf("expected injected secret error, got %v", err)
+	}
+
+	stored, err := f.store.GetInstance(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("reload instance after failed update: %v", err)
+	}
+	if stored == nil || stored.Name != "ConcurrentWinner" || stored.URL != "https://concurrent.example.com" {
+		t.Fatalf("rollback clobbered the concurrent write: %+v", stored)
+	}
+}
+
 func TestService_DeleteInstance_RemovesSecretAndCache(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()

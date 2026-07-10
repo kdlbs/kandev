@@ -81,4 +81,32 @@ describe("SentryIssueDialog", () => {
     expect((screen.getByLabelText("Query") as HTMLInputElement).value).toBe("");
     expect(screen.queryByText("Stale workspace issue")).toBeNull();
   });
+
+  it("clears a stuck loading state when a workspace change interrupts an in-flight search", async () => {
+    mockAvailability();
+    vi.mocked(listSentryProjects).mockResolvedValue({
+      projects: [{ id: "project-1", slug: "web", name: "Web", orgSlug: "acme" }],
+    } as never);
+    const pendingSearch = new Promise<never>(() => {});
+    vi.mocked(searchSentryIssues).mockReturnValue(pendingSearch);
+
+    const view = render(
+      <SentryIssueDialog open={true} onOpenChange={vi.fn()} workspaceId="workspace-1" />,
+    );
+
+    await waitFor(() => {
+      expect((screen.getByLabelText("Organization") as HTMLInputElement).value).toBe("acme");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    await waitFor(() => {
+      expect(document.querySelector(".animate-spin")).not.toBeNull();
+    });
+
+    view.rerender(
+      <SentryIssueDialog open={true} onOpenChange={vi.fn()} workspaceId="workspace-2" />,
+    );
+
+    expect(document.querySelector(".animate-spin")).toBeNull();
+  });
 });

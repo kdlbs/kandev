@@ -232,9 +232,26 @@ func (s *Service) UpdateInstance(ctx context.Context, workspaceID, id string, re
 	if req.Secret != "" && s.secrets != nil {
 		if err := s.secrets.Set(ctx, secretKeyForInstance(id), "Sentry auth token", req.Secret); err != nil {
 			secretErr := fmt.Errorf("store sentry secret: %w", err)
-			if rollbackErr := s.store.UpdateInstance(context.WithoutCancel(ctx), &previous); rollbackErr != nil {
-				s.invalidateClient(id)
-				return nil, errors.Join(secretErr, fmt.Errorf("rollback sentry instance update: %w", rollbackErr))
+			rollbackCtx := context.WithoutCancel(ctx)
+			// Re-fetch the persisted row rather than blindly restoring
+			// `previous`: a second UpdateInstance may have landed on this
+			// instance between our own row write above and this failed
+			// secret write. Only roll back when the row still matches
+			// exactly what this request wrote — otherwise restoring
+			// `previous` would silently discard that other write.
+			current, rereadErr := s.store.GetInstance(rollbackCtx, id)
+			switch {
+			case rereadErr != nil:
+				s.log.Warn("sentry: skipped update rollback, could not reload instance",
+					zap.String("instance_id", id), zap.Error(rereadErr))
+			case current == nil || !instanceMetadataMatches(current, &updated):
+				s.log.Warn("sentry: skipped update rollback, instance changed concurrently",
+					zap.String("instance_id", id))
+			default:
+				if rollbackErr := s.store.UpdateInstance(rollbackCtx, &previous); rollbackErr != nil {
+					s.invalidateClient(id)
+					return nil, errors.Join(secretErr, fmt.Errorf("rollback sentry instance update: %w", rollbackErr))
+				}
 			}
 			s.invalidateClient(id)
 			return nil, secretErr
@@ -243,6 +260,19 @@ func (s *Service) UpdateInstance(ctx context.Context, workspaceID, id string, re
 	s.invalidateClient(id)
 	go s.RecordAuthHealthForInstance(context.Background(), id)
 	return s.GetInstance(ctx, workspaceID, id)
+}
+
+// instanceMetadataMatches reports whether current's mutable columns — the
+// ones Store.UpdateInstance persists (name, auth_method, url) — still equal
+// what this request itself wrote in written. It backs UpdateInstance's
+// rollback: a mismatch means a concurrent UpdateInstance landed on the same
+// row since, so restoring a stale `previous` snapshot would clobber it. The
+// last_* health columns are owned by the async poller and are intentionally
+// excluded from the comparison.
+func instanceMetadataMatches(current, written *SentryConfig) bool {
+	return current.Name == written.Name &&
+		current.AuthMethod == written.AuthMethod &&
+		current.URL == written.URL
 }
 
 // DeleteInstance removes an instance, its secret, and its cached client. It

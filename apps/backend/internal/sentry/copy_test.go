@@ -130,7 +130,74 @@ func TestCopyConfig_PartialSecretSetFailureRollsBackAllCopiedSecrets(t *testing.
 	}
 }
 
-func TestRollbackCopiedInstances_DeletesSecretAfterRowDeleteFailure(t *testing.T) {
+// TestCopyConfig_RollbackKeepsInUseInstanceIntact pins the fix: rollback must
+// only delete a copied instance's secret when that instance's row delete
+// actually succeeded. Here the first copied instance becomes referenced by a
+// watch created concurrently (mid-copy), so its DeleteInstance call fails
+// with ErrInstanceInUse during rollback; its row and secret must survive
+// untouched while the still-cleanly-deletable second instance is fully
+// removed.
+func TestCopyConfig_RollbackKeepsInUseInstanceIntact(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	const src, dst = "ws-src", "ws-dst"
+	f.seedInstance(t, src, "First", "sec-first")
+	f.seedInstance(t, src, "Second", "sec-second")
+
+	injected := errors.New("secret store unavailable")
+	f.secrets.setErr = injected
+	f.secrets.setErrAfter = 1 // Let the first copied secret succeed; fail the second.
+	var (
+		watchAttached bool
+		firstCopiedID string
+	)
+	f.secrets.setHook = func() {
+		if watchAttached {
+			return
+		}
+		watchAttached = true
+		targets, err := f.store.ListInstances(ctx, dst)
+		if err != nil || len(targets) != 1 {
+			t.Fatalf("expected exactly 1 copied instance before concurrent watch injection, got %d err=%v", len(targets), err)
+		}
+		firstCopiedID = targets[0].ID
+		watch := newTestIssueWatch(dst)
+		watch.SentryInstanceID = firstCopiedID
+		if err := f.store.CreateIssueWatch(ctx, watch); err != nil {
+			t.Fatalf("attach concurrent watch to first copied instance: %v", err)
+		}
+	}
+
+	_, err := f.svc.CopyConfigToWorkspace(ctx, src, dst)
+	if !errors.Is(err, injected) {
+		t.Fatalf("expected injected secret error, got %v", err)
+	}
+	var inUse ErrInstanceInUse
+	if !errors.As(err, &inUse) {
+		t.Fatalf("expected joined ErrInstanceInUse from rollback row-delete failure, got %v", err)
+	}
+
+	target, err := f.svc.ListInstances(ctx, dst)
+	if err != nil {
+		t.Fatalf("list target after failed copy: %v", err)
+	}
+	if len(target) != 1 || target[0].ID != firstCopiedID {
+		t.Fatalf("expected only the in-use first copied instance to survive rollback, got %+v", target)
+	}
+	if secret, err := f.secrets.Reveal(ctx, secretKeyForInstance(firstCopiedID)); err != nil || secret != "sec-first" {
+		t.Errorf("expected first copied instance's secret intact after row-delete failure, got secret=%q err=%v", secret, err)
+	}
+	if got := f.secrets.count(); got != 3 {
+		t.Errorf("expected 3 secrets to survive rollback (2 source + first copied instance's), got %d", got)
+	}
+}
+
+// TestRollbackCopiedInstances_KeepsRowAndSecretIntactAfterRowDeleteFailure pins
+// the fix: when a copied instance's row delete fails (e.g. it became
+// referenced by a watch created concurrently, tripping ErrInstanceInUse),
+// rollback must leave that instance's row AND secret fully intact rather than
+// deleting the secret out from under a still-live row.
+func TestRollbackCopiedInstances_KeepsRowAndSecretIntactAfterRowDeleteFailure(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
 	created := f.seedInstance(t, "ws-dst", "Copied", "sec-copied")
@@ -156,8 +223,11 @@ func TestRollbackCopiedInstances_DeletesSecretAfterRowDeleteFailure(t *testing.T
 	if !errors.As(err, &inUse) {
 		t.Fatalf("expected joined row cleanup error, got %v", err)
 	}
-	if exists, err := f.secrets.Exists(ctx, secretKeyForInstance(created.ID)); err != nil || exists {
-		t.Errorf("secret remains after row cleanup failure: exists=%t err=%v", exists, err)
+	if _, err := f.store.GetInstance(ctx, created.ID); err != nil {
+		t.Errorf("row deleted despite failed row cleanup: %v", err)
+	}
+	if secret, err := f.secrets.Reveal(ctx, secretKeyForInstance(created.ID)); err != nil || secret != "sec-copied" {
+		t.Errorf("secret not intact after row cleanup failure: secret=%q err=%v", secret, err)
 	}
 	entries := observed.All()
 	if len(entries) != 1 || entries[0].Message != "sentry: copy rollback cleanup failed" {

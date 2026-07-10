@@ -142,7 +142,11 @@ func (s *Service) copyInstance(ctx context.Context, targetWorkspaceID string, in
 }
 
 // rollbackCopiedInstances removes only instances created by the current copy
-// request. It continues after cleanup errors so every created row is attempted.
+// request. It continues after cleanup errors so every created row is
+// attempted, and only deletes a copied secret once its row delete actually
+// succeeded — if DeleteInstance fails (e.g. the instance became referenced by
+// a watch created concurrently, returning ErrInstanceInUse), that instance's
+// row and secret are left fully intact rather than orphaning a live row.
 func (s *Service) rollbackCopiedInstances(ctx context.Context, copied []*SentryConfig, cause error) error {
 	cleanupCtx := context.WithoutCancel(ctx)
 	var rollbackErrs []error
@@ -153,6 +157,7 @@ func (s *Service) rollbackCopiedInstances(ctx context.Context, copied []*SentryC
 		}
 		if err := s.store.DeleteInstance(cleanupCtx, cfg.ID); err != nil {
 			rollbackErrs = append(rollbackErrs, fmt.Errorf("rollback copied sentry instance %q: %w", cfg.ID, err))
+			continue
 		}
 		if s.secrets != nil {
 			key := secretKeyForInstance(cfg.ID)

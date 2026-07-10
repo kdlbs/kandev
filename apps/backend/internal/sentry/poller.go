@@ -134,7 +134,7 @@ func (p *Poller) checkIssueWatches(ctx context.Context) {
 		if !isIssueWatchDue(w, time.Now()) {
 			continue
 		}
-		newIssues, err := p.service.CheckIssueWatch(ctx, w)
+		instanceID, newIssues, err := p.service.CheckIssueWatch(ctx, w)
 		if err != nil {
 			p.logger.Warn("sentry poller: check issue watch failed",
 				zap.String("watch_id", w.ID), zap.Error(err))
@@ -145,7 +145,7 @@ func (p *Poller) checkIssueWatches(ctx context.Context) {
 				zap.String("watch_id", w.ID),
 				zap.String("short_id", issue.ShortID),
 				zap.String("title", issue.Title))
-			p.service.publishNewSentryIssueEvent(ctx, w, issue)
+			p.service.publishNewSentryIssueEvent(ctx, w, instanceID, issue)
 		}
 	}
 }

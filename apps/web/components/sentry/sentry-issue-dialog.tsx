@@ -119,6 +119,10 @@ function useDialogState(open: boolean, workspaceId?: string): DialogState {
     setIsLast(true);
     setError(null);
     setConfigLoaded(false);
+    // Invalidating the sequence makes the in-flight search's `finally` skip
+    // setLoading(false) by design (its result is now stale) — so this reset
+    // must clear loading itself, or the dialog is stuck loading forever.
+    setLoading(false);
     searchSeq.current++;
   }, []);
 

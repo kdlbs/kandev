@@ -2,6 +2,7 @@ package sentry
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -401,6 +402,52 @@ func TestMigration_RekeyDoesNotSeedLaterSecretlessInstance(t *testing.T) {
 		t.Fatalf("check later instance secret: %v", err)
 	} else if exists {
 		t.Fatal("later secretless instance inherited a stale legacy token")
+	}
+}
+
+// TestMigration_RekeyRetriesOriginalInstanceDespiteLaterAddition ensures a
+// transient secret-store failure on the original migrated instance's rekey
+// does not permanently strand it once a later, unrelated instance is added to
+// the same workspace before the next restart: only the later instance is
+// excluded from ever inheriting the legacy token, not the legitimate original.
+func TestMigration_RekeyRetriesOriginalInstanceDespiteLaterAddition(t *testing.T) {
+	db := openMigrationDB(t)
+	seedWorkspaceScopedSchema(t, db)
+	ctx := context.Background()
+	secrets := newFakeSecretStore()
+	if err := secrets.Set(ctx, SecretKeyForWorkspace("ws-1"), "tok", "workspace-token"); err != nil {
+		t.Fatalf("seed workspace token: %v", err)
+	}
+
+	secrets.setErr = errors.New("secret store unavailable")
+	svc, _, err := Provide(db, db, secrets, nil, logger.Default())
+	if err != nil {
+		t.Fatalf("first Provide: %v", err)
+	}
+	instances, err := svc.Store().ListInstances(ctx, "ws-1")
+	if err != nil || len(instances) != 1 {
+		t.Fatalf("list ws-1 instances: %v %+v", err, instances)
+	}
+	original := instances[0]
+	if exists, _ := secrets.Exists(ctx, secretKeyForInstance(original.ID)); exists {
+		t.Fatal("expected the first rekey attempt to fail, but the instance key already exists")
+	}
+
+	later := testInstance("ws-1", "Later")
+	if err := svc.Store().CreateInstance(ctx, later); err != nil {
+		t.Fatalf("create later secretless instance: %v", err)
+	}
+
+	secrets.setErr = nil
+	if _, _, err := Provide(db, db, secrets, nil, logger.Default()); err != nil {
+		t.Fatalf("restart Provide: %v", err)
+	}
+
+	if exists, err := secrets.Exists(ctx, secretKeyForInstance(original.ID)); err != nil || !exists {
+		t.Fatalf("expected the original instance to recover its legacy token once the transient failure cleared, exists=%v err=%v", exists, err)
+	}
+	if exists, err := secrets.Exists(ctx, secretKeyForInstance(later.ID)); err != nil || exists {
+		t.Fatalf("later secretless instance must still never inherit the legacy token, exists=%v err=%v", exists, err)
 	}
 }
 

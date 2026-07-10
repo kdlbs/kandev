@@ -118,13 +118,13 @@ func (c *Controller) httpTriggerIssueWatch(ctx *gin.Context) {
 		writeErr(ctx, http.StatusNotFound, ErrIssueWatchNotFound.Error())
 		return
 	}
-	issues, err := c.service.CheckIssueWatch(ctx.Request.Context(), w)
+	instanceID, issues, err := c.service.CheckIssueWatch(ctx.Request.Context(), w)
 	if err != nil {
 		c.writeClientError(ctx, err)
 		return
 	}
 	for _, issue := range issues {
-		c.service.publishNewSentryIssueEvent(ctx.Request.Context(), w, issue)
+		c.service.publishNewSentryIssueEvent(ctx.Request.Context(), w, instanceID, issue)
 	}
 	ctx.JSON(http.StatusOK, gin.H{"published": len(issues)})
 }

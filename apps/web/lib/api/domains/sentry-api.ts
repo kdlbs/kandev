@@ -166,18 +166,21 @@ export async function testSentryConnection(
 }
 
 // copySentryInstances copies every instance (and its credential) from the
-// source workspace in `workspace_id` into the target workspace in the JSON
-// body, returning the newly-created instances.
+// source workspace (options.workspaceId) into the target workspace in the
+// JSON body, returning the newly-created instances. The source workspace is
+// authoritative for this route, so options.workspaceId is required —
+// mirrors copyGitHubWorkspaceSettings's convention for consistency.
 export async function copySentryInstances(
   targetWorkspaceId: string,
-  options?: ApiRequestOptions & { workspaceId?: string },
+  options: { workspaceId: string } & ApiRequestOptions,
 ) {
+  const { workspaceId: sourceWorkspaceId, ...requestOptions } = options;
   const payload: Pick<CopySentryConfigRequest, "targetWorkspaceId"> = { targetWorkspaceId };
   const res = await fetchJson<{ instances: SentryConfig[] }>(
-    withParams(`${BASE}/config/copy`, { workspace_id: options?.workspaceId ?? "" }),
+    withParams(`${BASE}/config/copy`, { workspace_id: sourceWorkspaceId }),
     {
-      ...options,
-      init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
+      ...requestOptions,
+      init: { ...(requestOptions.init ?? {}), method: "POST", body: JSON.stringify(payload) },
     },
   );
   return res.instances ?? [];

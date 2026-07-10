@@ -109,7 +109,7 @@ beforeEach(() => {
       {
         id: instanceId,
         slug: instanceId === PRIMARY_INSTANCE_ID ? "frontend" : "backend",
-        name: "",
+        name: instanceId === PRIMARY_INSTANCE_ID ? "Frontend" : "Backend",
         orgSlug: instanceId === PRIMARY_INSTANCE_ID ? "acme" : "globex",
       },
     ],

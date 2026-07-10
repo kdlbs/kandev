@@ -82,11 +82,16 @@ func migrateLegacySecret(store *Store, secrets SecretStore, log *logger.Logger) 
 	}
 }
 
-// migrateInstanceSecrets rekeys a legacy workspace token only to its sole
-// instance. The pre-instance schema allowed exactly one config per workspace,
-// so a later second instance is not a migration target and must never inherit
-// the old token. Completed rekeys remove the legacy keys; cardinality guards
-// also make a restart safe if a cleanup attempt previously failed.
+// migrateInstanceSecrets rekeys a legacy workspace token only to the earliest
+// (oldest by creation) instance in that workspace. The pre-instance schema
+// allowed exactly one config per workspace, so that oldest instance is the
+// migration's true target; a later second instance must never inherit the
+// old token. Eligibility keys off creation order rather than current
+// workspace cardinality, so a transient secret-store failure on the oldest
+// instance's own rekey can still be retried on a later restart even after a
+// second instance has since been added to the same workspace. Completed
+// rekeys remove the legacy keys; cardinality guards also make a restart safe
+// if a cleanup attempt previously failed.
 func migrateInstanceSecrets(store *Store, secrets SecretStore, log *logger.Logger) {
 	if secrets == nil {
 		return
@@ -98,18 +103,35 @@ func migrateInstanceSecrets(store *Store, secrets SecretStore, log *logger.Logge
 		log.Warn("sentry: list instances for secret migration failed", zap.Error(err))
 		return
 	}
-	instancesByWorkspace := make(map[string]int, len(instances))
-	for _, inst := range instances {
-		instancesByWorkspace[inst.WorkspaceID]++
-	}
+	oldestPerWorkspace := oldestInstanceIDPerWorkspace(instances)
 	allowSingleton := len(instances) == 1
 	for _, inst := range instances {
-		if instancesByWorkspace[inst.WorkspaceID] != 1 {
+		if oldestPerWorkspace[inst.WorkspaceID] != inst.ID {
 			continue
 		}
 		rekeyInstanceSecret(ctx, secrets, inst, allowSingleton, log)
 	}
 	cleanupLegacyInstanceSecretKeys(ctx, secrets, instances, log)
+}
+
+// oldestInstanceIDPerWorkspace returns, for each workspace, the ID of its
+// earliest-created instance — the only instance ever eligible to inherit that
+// workspace's legacy pre-instance secret. Ties (identical CreatedAt) resolve
+// by the lexicographically smaller ID so the choice is deterministic.
+func oldestInstanceIDPerWorkspace(instances []*SentryConfig) map[string]string {
+	oldest := make(map[string]*SentryConfig, len(instances))
+	for _, inst := range instances {
+		cur, ok := oldest[inst.WorkspaceID]
+		if !ok || inst.CreatedAt.Before(cur.CreatedAt) ||
+			(inst.CreatedAt.Equal(cur.CreatedAt) && inst.ID < cur.ID) {
+			oldest[inst.WorkspaceID] = inst
+		}
+	}
+	out := make(map[string]string, len(oldest))
+	for workspaceID, inst := range oldest {
+		out[workspaceID] = inst.ID
+	}
+	return out
 }
 
 func rekeyInstanceSecret(ctx context.Context, secrets SecretStore, inst *SentryConfig, allowSingleton bool, log *logger.Logger) {

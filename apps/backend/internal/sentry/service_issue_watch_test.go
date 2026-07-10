@@ -261,7 +261,7 @@ func TestService_CheckIssueWatch_FiltersAlreadySeen(t *testing.T) {
 	if _, err := f.store.ReserveIssueWatchTask(ctx, w.ID, "PROJ-2", "https://sentry.io/issues/PROJ-2"); err != nil {
 		t.Fatalf("seed reservation: %v", err)
 	}
-	got, err := f.svc.CheckIssueWatch(ctx, w)
+	_, got, err := f.svc.CheckIssueWatch(ctx, w)
 	if err != nil {
 		t.Fatalf("check: %v", err)
 	}
@@ -293,7 +293,7 @@ func TestService_CheckIssueWatch_StampsLastPolledOnError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if _, err := f.svc.CheckIssueWatch(ctx, w); err == nil {
+	if _, _, err := f.svc.CheckIssueWatch(ctx, w); err == nil {
 		t.Error("expected error from search to surface to caller")
 	}
 	refreshed, _ := f.store.GetIssueWatch(ctx, w.ID)
@@ -318,7 +318,7 @@ func TestService_CheckIssueWatch_ClearsLastErrorAfterSuccess(t *testing.T) {
 	}
 
 	f.client.withSearchResults(nil)
-	if _, err := f.svc.CheckIssueWatch(ctx, w); err != nil {
+	if _, _, err := f.svc.CheckIssueWatch(ctx, w); err != nil {
 		t.Fatalf("check recovered watch: %v", err)
 	}
 	reloaded, err := f.store.GetIssueWatch(ctx, w.ID)
@@ -354,9 +354,12 @@ func TestService_CheckIssueWatch_ResolvesSoleInstance(t *testing.T) {
 	if w.SentryInstanceID != "" {
 		t.Fatalf("expected unbound watch, got instance %q", w.SentryInstanceID)
 	}
-	got, err := f.svc.CheckIssueWatch(ctx, w)
+	gotInstanceID, got, err := f.svc.CheckIssueWatch(ctx, w)
 	if err != nil {
 		t.Fatalf("check unbound watch: %v", err)
+	}
+	if gotInstanceID != inst.ID {
+		t.Errorf("resolved instance = %q, want sole instance %q", gotInstanceID, inst.ID)
 	}
 	if len(got) != 1 || got[0].ShortID != "PROJ-1" {
 		t.Fatalf("expected sole-instance resolution to return PROJ-1, got %+v", got)
@@ -438,7 +441,7 @@ func TestService_CheckIssueWatch_UnboundNoInstanceStampsError(t *testing.T) {
 	if err := f.store.CreateIssueWatch(ctx, w); err != nil {
 		t.Fatalf("seed watch: %v", err)
 	}
-	if _, err := f.svc.CheckIssueWatch(ctx, w); err == nil {
+	if _, _, err := f.svc.CheckIssueWatch(ctx, w); err == nil {
 		t.Error("expected an error when no instance can be resolved")
 	}
 	refreshed, _ := f.store.GetIssueWatch(ctx, w.ID)

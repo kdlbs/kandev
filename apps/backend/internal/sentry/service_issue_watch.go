@@ -179,24 +179,27 @@ func (s *Service) ResetIssueWatch(ctx context.Context, watchID string) (int, err
 	return res.TasksDeleted, err
 }
 
-// CheckIssueWatch runs the watch's filter once and returns the issues that
-// haven't been turned into tasks yet. last_polled_at is stamped regardless of
-// whether the search succeeded — a failing search still counts as "we tried".
+// CheckIssueWatch runs the watch's filter once and returns the Sentry
+// instance actually polled (resolved via resolveWatchInstanceID — never
+// w.SentryInstanceID directly, which is empty for an unbound legacy watch)
+// plus the issues that haven't been turned into tasks yet. last_polled_at is
+// stamped regardless of whether the search succeeded — a failing search
+// still counts as "we tried".
 //
 // Concurrency note: callers must tolerate being handed an issue that gets
 // stolen by a concurrent reserver. The duplicate publish is harmless — the
 // second reserver loses the INSERT OR IGNORE race in the orchestrator and
 // bails. Same pattern as the Linear / Jira watchers.
-func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*SentryIssue, error) {
+func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) (string, []*SentryIssue, error) {
 	defer s.stampWatchLastPolled(w.ID)
 	instanceID, err := s.resolveWatchInstanceID(ctx, w)
 	if err != nil {
 		s.stampWatchError(w.ID, err.Error())
-		return nil, err
+		return "", nil, err
 	}
 	client, err := s.clientForInstance(ctx, instanceID)
 	if err != nil {
-		return nil, err
+		return instanceID, nil, err
 	}
 	// Intentionally reads only the first page per tick (bounded-page-per-tick
 	// invariant, matching the Linear/Jira watchers). SearchIssues sorts results
@@ -204,14 +207,14 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*Sentry
 	// on page one and are not missed by the single-page read.
 	res, err := client.SearchIssues(ctx, w.Filter, "")
 	if err != nil {
-		return nil, err
+		return instanceID, nil, err
 	}
 	seen, err := s.store.ListSeenIssueShortIDs(ctx, w.ID)
 	if err != nil {
 		// Skip this tick rather than treat a failed dedup read as "nothing seen":
 		// a nil map would let the whole page (up to 100 issues) publish as events.
 		// The next tick retries with a working dedup set.
-		return nil, fmt.Errorf("load dedup set for watch %s: %w", w.ID, err)
+		return instanceID, nil, fmt.Errorf("load dedup set for watch %s: %w", w.ID, err)
 	}
 	out := make([]*SentryIssue, 0, len(res.Issues))
 	for i := range res.Issues {
@@ -222,7 +225,7 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*Sentry
 		out = append(out, &issue)
 	}
 	s.clearWatchError(w.ID)
-	return out, nil
+	return instanceID, out, nil
 }
 
 // stampWatchLastPolled writes the current timestamp using a fresh background
@@ -325,9 +328,11 @@ func (s *Service) ReleaseIssueWatchTask(ctx context.Context, watchID, shortID st
 }
 
 // publishNewSentryIssueEvent emits the orchestrator-facing event for one
-// freshly-observed issue. No-op when the event bus is not wired (tests, early
-// boot).
-func (s *Service) publishNewSentryIssueEvent(ctx context.Context, w *IssueWatch, issue *SentryIssue) {
+// freshly-observed issue. instanceID must be the instance actually polled
+// (CheckIssueWatch's resolved return value) rather than w.SentryInstanceID,
+// which is empty for an unbound legacy watch. No-op when the event bus is not
+// wired (tests, early boot).
+func (s *Service) publishNewSentryIssueEvent(ctx context.Context, w *IssueWatch, instanceID string, issue *SentryIssue) {
 	s.mu.Lock()
 	eb := s.eventBus
 	s.mu.Unlock()
@@ -337,7 +342,7 @@ func (s *Service) publishNewSentryIssueEvent(ctx context.Context, w *IssueWatch,
 	evt := bus.NewEvent(events.SentryNewIssue, "sentry", &NewSentryIssueEvent{
 		IssueWatchID:      w.ID,
 		WorkspaceID:       w.WorkspaceID,
-		SentryInstanceID:  w.SentryInstanceID,
+		SentryInstanceID:  instanceID,
 		WorkflowID:        w.WorkflowID,
 		WorkflowStepID:    w.WorkflowStepID,
 		RepositoryID:      w.RepositoryID,
