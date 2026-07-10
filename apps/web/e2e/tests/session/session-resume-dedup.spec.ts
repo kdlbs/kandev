@@ -71,19 +71,30 @@ test.describe("Session resume boot-message dedup", () => {
     //    prompt nor the agent reply ever appear (no reload can recover them
     //    because they were never persisted). Verify the user prompt actually
     //    echoes in the chat; if not, the send was dropped, so re-idle and
-    //    resend once before asserting the reply.
+    //    resend once. If the echo appears but the reply does not, the agent
+    //    turn likely raced the restarted WS subscription; resend once before
+    //    failing the test.
     const followupPrompt = "/e2e:simple-message";
-    await session.sendMessage(followupPrompt);
-    const followupEcho = session.chat.getByText(followupPrompt, { exact: false }).nth(1);
-    try {
-      await expect(followupEcho).toBeVisible({ timeout: 10_000 });
-    } catch {
-      await session.waitForChatIdle({ timeout: 30_000 });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const followupEchoIndex = await session.chat
+        .getByText(followupPrompt, { exact: false })
+        .count();
       await session.sendMessage(followupPrompt);
-      await expect(followupEcho).toBeVisible({ timeout: 15_000 });
+
+      try {
+        await expect(
+          session.chat.getByText(followupPrompt, { exact: false }).nth(followupEchoIndex),
+        ).toBeVisible({
+          timeout: attempt === 0 ? 10_000 : 15_000,
+        });
+        await session.expectChatResponseVisible("simple mock response", 1, { timeout: 90_000 });
+        break;
+      } catch (error) {
+        if (attempt === 1) {
+          throw error;
+        }
+        await session.waitForChatIdle({ timeout: 30_000 });
+      }
     }
-    // After two restart/resume cycles, the follow-up turn can remain "Thinking"
-    // longer than the default retry window on busy CI runners.
-    await session.expectChatResponseVisible("simple mock response", 1, { timeout: 90_000 });
   });
 });

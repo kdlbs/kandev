@@ -37,6 +37,10 @@ const STATUS_BADGE: Record<
   succeeded: { variant: "default", label: "Succeeded" },
   failed: { variant: "destructive", label: "Failed" },
   skipped: { variant: "outline", label: "Skipped" },
+  // The generating task was archived or no longer exists — its outcome is
+  // unknown, so this is deliberately distinct from succeeded/failed rather
+  // than guessing one. See internal/automation.RunStatusCancelled.
+  cancelled: { variant: "outline", label: "Cancelled" },
 };
 
 type RunRowProps = {

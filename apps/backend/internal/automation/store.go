@@ -12,6 +12,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+
+	"github.com/kandev/kandev/internal/db"
 )
 
 // Store provides SQLite persistence for automations.
@@ -435,18 +437,60 @@ func (s *Store) updateRunTerminalStatus(ctx context.Context, taskID string, stat
 	return err
 }
 
-// ListRuns returns recent runs for an automation.
+// ListRuns returns recent runs for an automation. A task_created run whose
+// generated task has been archived or no longer exists is reported as
+// cancelled — the task's outcome is unknown and it's no longer outstanding
+// work — without touching runs that already reached a real terminal
+// status. Falls back to the raw stored status when the tasks table isn't
+// present (isolated automation-only tests; production always has it,
+// migrated by the task repository before automation triggers can fire).
 func (s *Store) ListRuns(ctx context.Context, automationID string, limit int) ([]*AutomationRun, error) {
 	if limit <= 0 {
 		limit = 50
 	}
+	runs, err := s.listRunsWithTaskState(ctx, automationID, limit)
+	if db.IsMissingTableError(err) {
+		runs, err = s.listRunsRaw(ctx, automationID, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range runs {
+		r.TriggerData = json.RawMessage(r.TriggerDataJSON)
+	}
+	return runs, nil
+}
+
+func (s *Store) listRunsWithTaskState(ctx context.Context, automationID string, limit int) ([]*AutomationRun, error) {
+	// Assumes a task_created run always carries a non-empty ar.task_id: the
+	// sole production write path (orchestrator's recordSuccessRun) sets
+	// TaskID and Status together in the same INSERT. If that's ever
+	// violated, the LEFT JOIN never matches an empty task_id against a
+	// real task row, so the run falls into the "no live task" branch below
+	// and displays as cancelled rather than its raw stored status —
+	// reachable today only through the e2e run-seeding endpoint, never in
+	// production.
+	var runs []*AutomationRun
+	err := s.ro.SelectContext(ctx, &runs, `
+		SELECT ar.id, ar.automation_id, ar.trigger_id, ar.trigger_type, ar.task_id,
+			CASE
+				WHEN ar.status = ? AND (t.id IS NULL OR t.archived_at IS NOT NULL) THEN ?
+				ELSE ar.status
+			END AS status,
+			ar.dedup_key, ar.trigger_data, ar.error_message, ar.created_at
+		FROM automation_runs ar
+		LEFT JOIN tasks t ON t.id = ar.task_id
+		WHERE ar.automation_id = ?
+		ORDER BY ar.created_at DESC LIMIT ?`,
+		string(RunStatusTaskCreated), string(RunStatusCancelled), automationID, limit)
+	return runs, err
+}
+
+func (s *Store) listRunsRaw(ctx context.Context, automationID string, limit int) ([]*AutomationRun, error) {
 	var runs []*AutomationRun
 	err := s.ro.SelectContext(ctx, &runs,
 		`SELECT * FROM automation_runs WHERE automation_id = ? ORDER BY created_at DESC LIMIT ?`,
 		automationID, limit)
-	for _, r := range runs {
-		r.TriggerData = json.RawMessage(r.TriggerDataJSON)
-	}
 	return runs, err
 }
 
@@ -462,8 +506,36 @@ func (s *Store) HasRunWithDedupKey(ctx context.Context, automationID, dedupKey s
 	return count > 0, err
 }
 
-// CountActiveRuns returns the number of runs with task_created status for an automation.
+// CountActiveRuns returns the number of runs with task_created status for
+// an automation whose generated task is still open. A task_created run
+// whose task was archived or deleted no longer represents outstanding
+// work — the user closed it out some other way — so it must not keep
+// counting against max_concurrent_runs forever. Falls back to a plain
+// count when the tasks table isn't present (isolated automation-only
+// tests; production always has it).
 func (s *Store) CountActiveRuns(ctx context.Context, automationID string) (int, error) {
+	count, err := s.countActiveRunsWithTaskState(ctx, automationID)
+	if db.IsMissingTableError(err) {
+		return s.countActiveRunsRaw(ctx, automationID)
+	}
+	return count, err
+}
+
+func (s *Store) countActiveRunsWithTaskState(ctx context.Context, automationID string) (int, error) {
+	// Same non-empty-task_id assumption as listRunsWithTaskState above: an
+	// empty ar.task_id never matches a real task row either, so such a run
+	// silently falls out of the active count below instead of erroring.
+	var count int
+	err := s.ro.GetContext(ctx, &count, `
+		SELECT COUNT(*) FROM automation_runs ar
+		LEFT JOIN tasks t ON t.id = ar.task_id
+		WHERE ar.automation_id = ? AND ar.status = ?
+			AND t.id IS NOT NULL AND t.archived_at IS NULL`,
+		automationID, string(RunStatusTaskCreated))
+	return count, err
+}
+
+func (s *Store) countActiveRunsRaw(ctx context.Context, automationID string) (int, error) {
 	var count int
 	err := s.ro.GetContext(ctx, &count,
 		`SELECT COUNT(*) FROM automation_runs WHERE automation_id = ? AND status = ?`,

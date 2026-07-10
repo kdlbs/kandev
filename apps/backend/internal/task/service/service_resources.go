@@ -526,27 +526,32 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 	if prefix == "" {
 		prefix = worktree.DefaultBranchPrefix
 	}
+	template := worktree.NormalizeBranchNameTemplate(req.WorktreeBranchTemplate)
+	if err := worktree.ValidateBranchNameTemplate(template); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidRepositorySettings, err)
+	}
 	pullBeforeWorktree := true
 	if req.PullBeforeWorktree != nil {
 		pullBeforeWorktree = *req.PullBeforeWorktree
 	}
 	repository := &models.Repository{
-		ID:                   uuid.New().String(),
-		WorkspaceID:          req.WorkspaceID,
-		Name:                 req.Name,
-		SourceType:           sourceType,
-		LocalPath:            req.LocalPath,
-		Provider:             req.Provider,
-		ProviderRepoID:       req.ProviderRepoID,
-		ProviderOwner:        req.ProviderOwner,
-		ProviderName:         req.ProviderName,
-		DefaultBranch:        req.DefaultBranch,
-		WorktreeBranchPrefix: prefix,
-		PullBeforeWorktree:   pullBeforeWorktree,
-		SetupScript:          req.SetupScript,
-		CleanupScript:        req.CleanupScript,
-		DevScript:            req.DevScript,
-		CopyFiles:            req.CopyFiles,
+		ID:                     uuid.New().String(),
+		WorkspaceID:            req.WorkspaceID,
+		Name:                   req.Name,
+		SourceType:             sourceType,
+		LocalPath:              req.LocalPath,
+		Provider:               req.Provider,
+		ProviderRepoID:         req.ProviderRepoID,
+		ProviderOwner:          req.ProviderOwner,
+		ProviderName:           req.ProviderName,
+		DefaultBranch:          req.DefaultBranch,
+		WorktreeBranchPrefix:   prefix,
+		WorktreeBranchTemplate: template,
+		PullBeforeWorktree:     pullBeforeWorktree,
+		SetupScript:            req.SetupScript,
+		CleanupScript:          req.CleanupScript,
+		DevScript:              req.DevScript,
+		CopyFiles:              req.CopyFiles,
 	}
 
 	// Auto-detect GitHub provider info from git remote if not provided
@@ -690,6 +695,13 @@ func applyRepositoryUpdates(repository *models.Repository, req *UpdateRepository
 			return fmt.Errorf("%w: %s", ErrInvalidRepositorySettings, err)
 		}
 		repository.WorktreeBranchPrefix = prefix
+	}
+	if req.WorktreeBranchTemplate != nil {
+		template := worktree.NormalizeBranchNameTemplate(*req.WorktreeBranchTemplate)
+		if err := worktree.ValidateBranchNameTemplate(template); err != nil {
+			return fmt.Errorf("%w: %s", ErrInvalidRepositorySettings, err)
+		}
+		repository.WorktreeBranchTemplate = template
 	}
 	if req.PullBeforeWorktree != nil {
 		repository.PullBeforeWorktree = *req.PullBeforeWorktree

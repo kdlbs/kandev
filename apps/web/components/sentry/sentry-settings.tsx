@@ -430,10 +430,14 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
   );
 }
 
-export function SentryIntegrationPage() {
+type SentryIntegrationPageProps = {
+  workspaceId?: string;
+};
+
+export function SentryIntegrationPage({ workspaceId }: SentryIntegrationPageProps = {}) {
   return (
     <div className="space-y-8">
-      <WorkspaceScopedSection>
+      <WorkspaceScopedSection workspaceId={workspaceId}>
         {(workspaceId) => <SentryConnectionSection key={workspaceId} workspaceId={workspaceId} />}
       </WorkspaceScopedSection>
       <SentryIssueWatchersSection />

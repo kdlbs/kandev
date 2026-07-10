@@ -21,6 +21,8 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	promptservice "github.com/kandev/kandev/internal/prompts/service"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -99,21 +101,30 @@ type MessageQueuer interface {
 	TakeQueued(ctx context.Context, sessionID string) (*messagequeue.QueuedMessage, bool)
 }
 
+// PromptReferenceResolver expands saved prompt references that appear inside
+// agent-sent prompts while preserving the original @mentions in the visible
+// prompt body.
+type PromptReferenceResolver interface {
+	ResolvePromptReferences(ctx context.Context, content string) ([]promptservice.PromptReferenceExpansion, error)
+}
+
 // Handlers provides MCP WebSocket handlers.
 type Handlers struct {
-	taskSvc          *service.Service
-	workflowCtrl     *workflowctrl.Controller
-	clarificationSvc ClarificationService
-	sessionCanceller SessionCanceller
-	inputPauser      ClarificationInputPauser
-	messageCreator   MessageCreator
-	sessionRepo      SessionRepository
-	taskRepo         TaskRepository
-	eventBus         EventBus
-	planService      *service.PlanService
-	sessionLauncher  SessionLauncher
-	messageQueue     MessageQueuer
-	logger           *logger.Logger
+	taskSvc            *service.Service
+	workflowCtrl       *workflowctrl.Controller
+	clarificationSvc   ClarificationService
+	sessionCanceller   SessionCanceller
+	inputPauser        ClarificationInputPauser
+	messageCreator     MessageCreator
+	sessionRepo        SessionRepository
+	taskRepo           TaskRepository
+	eventBus           EventBus
+	planService        *service.PlanService
+	walkthroughService *service.WalkthroughService
+	sessionLauncher    SessionLauncher
+	messageQueue       MessageQueuer
+	promptResolver     PromptReferenceResolver
+	logger             *logger.Logger
 
 	// Config-mode dependencies (optional, set via SetConfigDeps)
 	workflowSvc       *workflowsvc.Service
@@ -141,23 +152,25 @@ func NewHandlers(
 	taskRepo TaskRepository,
 	eventBus EventBus,
 	planService *service.PlanService,
+	walkthroughService *service.WalkthroughService,
 	sessionLauncher SessionLauncher,
 	messageQueue MessageQueuer,
 	log *logger.Logger,
 ) *Handlers {
 	return &Handlers{
-		taskSvc:          taskSvc,
-		workflowCtrl:     workflowCtrl,
-		clarificationSvc: clarificationSvc,
-		sessionCanceller: sessionCanceller,
-		messageCreator:   messageCreator,
-		sessionRepo:      sessionRepo,
-		taskRepo:         taskRepo,
-		eventBus:         eventBus,
-		planService:      planService,
-		sessionLauncher:  sessionLauncher,
-		messageQueue:     messageQueue,
-		logger:           log.WithFields(zap.String("component", "mcp-handlers")),
+		taskSvc:            taskSvc,
+		workflowCtrl:       workflowCtrl,
+		clarificationSvc:   clarificationSvc,
+		sessionCanceller:   sessionCanceller,
+		messageCreator:     messageCreator,
+		sessionRepo:        sessionRepo,
+		taskRepo:           taskRepo,
+		eventBus:           eventBus,
+		planService:        planService,
+		walkthroughService: walkthroughService,
+		sessionLauncher:    sessionLauncher,
+		messageQueue:       messageQueue,
+		logger:             log.WithFields(zap.String("component", "mcp-handlers")),
 	}
 }
 
@@ -165,6 +178,10 @@ func NewHandlers(
 // a clarification tool call ends without delivering an answer to the agent.
 func (h *Handlers) SetClarificationInputPauser(pauser ClarificationInputPauser) {
 	h.inputPauser = pauser
+}
+
+func (h *Handlers) SetPromptReferenceResolver(resolver PromptReferenceResolver) {
+	h.promptResolver = resolver
 }
 
 // SetConfigDeps sets the config-mode dependencies for agent-native configuration handlers.
@@ -199,8 +216,16 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPGetTaskPlan, h.handleGetTaskPlan)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPlan, h.handleUpdateTaskPlan)
 	d.RegisterFunc(ws.ActionMCPDeleteTaskPlan, h.handleDeleteTaskPlan)
+	d.RegisterFunc(ws.ActionMCPShowWalkthrough, h.handleShowWalkthrough)
+	d.RegisterFunc(ws.ActionMCPGetWalkthrough, h.handleGetWalkthrough)
+	d.RegisterFunc(ws.ActionMCPDeleteWalkthrough, h.handleDeleteWalkthrough)
+	// Plain (non-MCP) action so the web UI can backfill the current walkthrough
+	// on mount — live task.walkthrough.created events can fire before the page's
+	// WS subscription is established. Reuses the same read handler.
+	d.RegisterFunc(ws.ActionTaskWalkthroughGet, h.handleGetWalkthrough)
+	d.RegisterFunc(ws.ActionTaskWalkthroughDelete, h.handleDeleteWalkthrough)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
-	count := 17
+	count := 23
 
 	// Config-mode handlers (registered when config deps are set)
 	if h.workflowSvc != nil {
@@ -401,6 +426,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		WorkspaceID            string               `json:"workspace_id"`
 		WorkflowID             string               `json:"workflow_id"`
 		WorkflowStepID         string               `json:"workflow_step_id"`
+		WorkspaceMode          string               `json:"workspace_mode"`
 		Title                  string               `json:"title"`
 		Description            string               `json:"description"`
 		AgentProfileID         string               `json:"agent_profile_id"`
@@ -429,7 +455,9 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "description is required for subtasks: it is the sub-agent's initial prompt and the only context it receives to start working", nil)
 	}
 
-	// Resolve repositories and inherit workspace/workflow from parent if needed.
+	// Resolve repositories and default workspace/workflow from parent if needed.
+	explicitWorkspaceID := req.WorkspaceID != ""
+	explicitWorkflowID := req.WorkflowID != ""
 	resolved, err := h.resolveTaskRepositories(ctx, req.ParentID, req.SourceTaskID, req.Repositories)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
@@ -446,12 +474,15 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			repos[i].BaseBranch = req.BaseBranch
 		}
 	}
-	if req.WorkspaceID == "" {
-		req.WorkspaceID = resolved.WorkspaceID
-	}
-	if req.WorkflowID == "" {
-		req.WorkflowID = resolved.WorkflowID
-	}
+	req.WorkspaceID, req.WorkflowID, req.WorkflowStepID = applyMCPTaskScopeDefaults(
+		req.ParentID,
+		req.WorkspaceID,
+		req.WorkflowID,
+		req.WorkflowStepID,
+		explicitWorkspaceID,
+		explicitWorkflowID,
+		resolved,
+	)
 
 	// Auto-resolve workspace/workflow when not provided and there's exactly one option.
 	if req.WorkspaceID == "" && h.taskSvc != nil {
@@ -475,6 +506,20 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.WorkflowID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
 	}
+	if code, message, err := h.validateMCPWorkflowWorkspace(ctx, req.WorkflowID, req.WorkspaceID); code != "" {
+		if err != nil && h.logger != nil {
+			h.logger.Error("failed to validate MCP workflow workspace",
+				zap.String("workflow_id", req.WorkflowID),
+				zap.String("workspace_id", req.WorkspaceID),
+				zap.Error(err))
+		}
+		return ws.NewError(msg.ID, msg.Action, code, message, nil)
+	}
+
+	workspacePolicy, err := h.resolveMCPWorkspacePolicy(req.ParentID, req.WorkspaceMode)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
 
 	pendingTask := &models.Task{
 		ParentID:       req.ParentID,
@@ -490,6 +535,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 		return ws.NewError(msg.ID, msg.Action, code, err.Error(), nil)
 	}
+	metadata = mergeMCPMetadata(metadata, workspacePolicy.MetadataBlock())
 
 	task, err := h.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
 		ParentID:               req.ParentID,
@@ -513,6 +559,18 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)
 	}
 
+	if h.handoffSvc != nil && workspacePolicy.NeedsAttachment() {
+		if attachErr := h.handoffSvc.AttachWorkspacePolicy(ctx, task.ID, req.ParentID, workspacePolicy); attachErr != nil {
+			h.logger.Error("attach workspace policy; rolling back task creation",
+				zap.String("task_id", task.ID), zap.Error(attachErr))
+			if delErr := h.taskSvc.DeleteTask(ctx, task.ID); delErr != nil {
+				h.logger.Error("rollback delete failed; task left in inconsistent state",
+					zap.String("task_id", task.ID), zap.Error(delErr))
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to attach workspace policy: "+attachErr.Error(), nil)
+		}
+	}
+
 	// Auto-start agent session asynchronously only if requested
 	if startAgent && h.sessionLauncher != nil {
 		h.launchAutoStartTask(ctx, task, launchConfig)
@@ -530,11 +588,11 @@ type taskRepoResult struct {
 
 // resolveTaskRepositories builds the repository list for a new task.
 //
-// For subtasks (parentID set) workspace and workflow always come from the
-// parent. Explicit repositories override the parent's repos when supplied,
-// otherwise the parent's repos are inherited verbatim — letting an agent
-// spin up a subtask that targets a sibling repo while staying in the same
-// workspace/workflow.
+// For subtasks (parentID set), workspace and workflow default from the parent
+// when the caller omits explicit scope. Explicit repositories override the
+// parent's repos when supplied, otherwise the parent's repos are inherited
+// verbatim — letting an agent spin up a subtask that targets a sibling repo
+// while staying in the same workspace/workflow by default.
 //
 // For top-level tasks (parentID empty) explicit repos win over source-task
 // inheritance; workspace falls back to the source task when available.
@@ -598,6 +656,94 @@ func (h *Handlers) resolveTaskRepositories(
 	}
 
 	return taskRepoResult{}, nil
+}
+
+const (
+	mcpWorkspaceModeInheritParent = "inherit_parent"
+	mcpWorkspaceModeNewWorkspace  = "new_workspace"
+)
+
+func (h *Handlers) resolveMCPWorkspacePolicy(parentID, workspaceMode string) (service.WorkspacePolicy, error) {
+	mode := strings.TrimSpace(workspaceMode)
+	if mode == "" && parentID != "" {
+		mode = mcpWorkspaceModeInheritParent
+	}
+	if mode == "" {
+		return service.WorkspacePolicy{}, nil
+	}
+
+	switch mode {
+	case mcpWorkspaceModeInheritParent:
+		if parentID == "" {
+			return service.WorkspacePolicy{}, fmt.Errorf("workspace_mode=%s requires parent_id", mcpWorkspaceModeInheritParent)
+		}
+	case mcpWorkspaceModeNewWorkspace:
+	default:
+		return service.WorkspacePolicy{}, fmt.Errorf("invalid workspace_mode: %s (allowed: inherit_parent, new_workspace)", mode)
+	}
+
+	return service.WorkspacePolicy{Mode: mode}, nil
+}
+
+func mergeMCPMetadata(base, extra map[string]interface{}) map[string]interface{} {
+	if len(extra) == 0 {
+		return base
+	}
+	if base == nil {
+		base = map[string]interface{}{}
+	}
+	for k, v := range extra {
+		base[k] = v
+	}
+	return base
+}
+
+func applyMCPTaskScopeDefaults(parentID, workspaceID, workflowID, workflowStepID string, explicitWorkspaceID, explicitWorkflowID bool, resolved taskRepoResult) (string, string, string) {
+	if parentID == "" {
+		return firstNonEmptyString(workspaceID, resolved.WorkspaceID), firstNonEmptyString(workflowID, resolved.WorkflowID), workflowStepID
+	}
+
+	workspaceID = firstNonEmptyString(workspaceID, resolved.WorkspaceID)
+	if workflowID == "" && !explicitWorkspaceID {
+		workflowID = resolved.WorkflowID
+	}
+	// A caller-supplied step is only safe when the caller also supplies the
+	// workflow it belongs to. Otherwise the target workflow is inherited or
+	// auto-resolved and the step can straddle workflow boundaries.
+	if !explicitWorkflowID {
+		workflowStepID = ""
+	}
+	return workspaceID, workflowID, workflowStepID
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func (h *Handlers) validateMCPWorkflowWorkspace(ctx context.Context, workflowID, workspaceID string) (string, string, error) {
+	if h.taskSvc == nil || workflowID == "" || workspaceID == "" {
+		return "", "", nil
+	}
+	workflow, err := h.taskSvc.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		if isMCPWorkflowNotFoundError(err) {
+			return ws.ErrorCodeValidation, fmt.Sprintf("workflow_id %q was not found", workflowID), nil
+		}
+		return ws.ErrorCodeInternalError, "Failed to validate workflow_id", err
+	}
+	if workflow.WorkspaceID != workspaceID {
+		return ws.ErrorCodeValidation, fmt.Sprintf("workflow_id %q belongs to workspace_id %q, not %q", workflowID, workflow.WorkspaceID, workspaceID), nil
+	}
+	return "", "", nil
+}
+
+func isMCPWorkflowNotFoundError(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "workflow not found")
 }
 
 // explicitRepoInputsWithDefaults maps the MCP-side explicit repo list to
@@ -999,9 +1145,19 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
 
+	var state *v1.TaskState
+	if req.State != nil {
+		normalized := normalizeTaskState(*req.State)
+		if !isValidTaskState(normalized) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "invalid task state: "+*req.State, nil)
+		}
+		state = &normalized
+	}
+
 	task, err := h.taskSvc.UpdateTask(ctx, req.TaskID, &service.UpdateTaskRequest{
 		Title:       req.Title,
 		Description: req.Description,
+		State:       state,
 	})
 	if err != nil {
 		h.logger.Error("failed to update task", zap.Error(err))
@@ -1439,7 +1595,8 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 			"failed to get session for task: "+err.Error(), nil)
 	}
 
-	wrappedPrompt, senderMeta := wrapAgentMessage(req.Prompt, senderTask, req.SenderSessionID)
+	prompt := h.appendPromptReferenceExpansionContext(ctx, req.Prompt)
+	wrappedPrompt, senderMeta := wrapAgentMessage(prompt, senderTask, req.SenderSessionID)
 
 	result, err := h.dispatchTaskMessage(ctx, req.TaskID, session, wrappedPrompt, senderMeta)
 	if err != nil {
@@ -1457,6 +1614,41 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		"session_id": result.sessionID,
 		"status":     result.status,
 	})
+}
+
+func (h *Handlers) appendPromptReferenceExpansionContext(ctx context.Context, prompt string) string {
+	if h.promptResolver == nil {
+		return prompt
+	}
+	if !strings.Contains(prompt, "@") {
+		return prompt
+	}
+	expansions, err := h.promptResolver.ResolvePromptReferences(ctx, prompt)
+	if err != nil {
+		h.logger.Warn("failed to resolve prompt references for message_task", zap.Error(err))
+		return prompt
+	}
+	if len(expansions) == 0 {
+		return prompt
+	}
+	return prompt + "\n\n" + sysprompt.Wrap(formatPromptReferenceExpansions(expansions))
+}
+
+func formatPromptReferenceExpansions(expansions []promptservice.PromptReferenceExpansion) string {
+	var b strings.Builder
+	b.WriteString("EXPANDED PROMPT REFERENCES: The message above references saved prompts by @name. ")
+	b.WriteString("Use these expansions as hidden context while preserving the original @mentions.")
+	for _, expansion := range expansions {
+		b.WriteString("\n\n### @")
+		b.WriteString(sanitizePromptExpansionSystemText(expansion.Name))
+		b.WriteString("\n")
+		b.WriteString(sanitizePromptExpansionSystemText(expansion.Content))
+	}
+	return b.String()
+}
+
+func sanitizePromptExpansionSystemText(value string) string {
+	return strings.ReplaceAll(value, sysprompt.TagEnd, "")
 }
 
 // handleGetTaskConversation returns paginated conversation history for a task.
@@ -2535,6 +2727,88 @@ func (h *Handlers) handleDeleteTaskPlan(ctx context.Context, msg *ws.Message) (*
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
+}
+
+// handleShowWalkthrough creates or replaces a task's agent-authored code walkthrough.
+func (h *Handlers) handleShowWalkthrough(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		TaskID string                   `json:"task_id"`
+		Title  string                   `json:"title"`
+		Steps  []models.WalkthroughStep `json:"steps"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if len(req.Steps) == 0 {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "at least one step is required", nil)
+	}
+
+	wt, err := h.walkthroughService.ShowWalkthrough(ctx, service.ShowWalkthroughRequest{
+		TaskID: req.TaskID,
+		Title:  req.Title,
+		Steps:  req.Steps,
+	})
+	if err != nil {
+		if errors.Is(err, service.ErrTaskIDRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+		}
+		if errors.Is(err, service.ErrInvalidWalkthrough) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to save walkthrough: "+err.Error(), nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, wt)
+}
+
+// parseTaskIDPayload unmarshals a `{task_id}` payload, returning a ready error
+// response (non-nil) when the payload is malformed.
+func parseTaskIDPayload(msg *ws.Message) (string, *ws.Message, error) {
+	var req struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		m, e := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+		return "", m, e
+	}
+	return req.TaskID, nil, nil
+}
+
+// handleGetWalkthrough retrieves a task's walkthrough.
+func (h *Handlers) handleGetWalkthrough(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	taskID, errMsg, errErr := parseTaskIDPayload(msg)
+	if errMsg != nil || errErr != nil {
+		return errMsg, errErr
+	}
+	wt, err := h.walkthroughService.GetWalkthrough(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, service.ErrTaskIDRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get walkthrough", nil)
+	}
+	if wt == nil {
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{})
+	}
+	return ws.NewResponse(msg.ID, msg.Action, wt)
+}
+
+// handleDeleteWalkthrough deletes a task's walkthrough.
+func (h *Handlers) handleDeleteWalkthrough(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	taskID, errMsg, errErr := parseTaskIDPayload(msg)
+	if errMsg != nil || errErr != nil {
+		return errMsg, errErr
+	}
+	switch err := h.walkthroughService.DeleteWalkthrough(ctx, taskID); {
+	case err == nil:
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
+	case errors.Is(err, service.ErrTaskIDRequired):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	case errors.Is(err, service.ErrTaskWalkthroughNotFound):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task walkthrough not found", nil)
+	default:
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete walkthrough: "+err.Error(), nil)
+	}
 }
 
 // handleClarificationTimeout is called by agentctl when the agent's MCP client

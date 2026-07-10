@@ -197,3 +197,60 @@ func TestFireTrigger_ConcurrencyCapCheckError_DoesNotAdvanceLastEvaluatedAt(t *t
 		t.Fatal("expected LastEvaluatedAt to remain nil after a concurrency-cap check error, got non-nil")
 	}
 }
+
+// TestFireTrigger_ArchivedTaskRun_DoesNotBlockConcurrencyCap reproduces the
+// reported bug end to end: an automation-generated task that gets archived
+// (manually, via auto-archive, or via cascade) before its run is otherwise
+// finalized left the run stuck at task_created forever, permanently pinning
+// max_concurrent_runs=1 automations at their cap with no way to schedule
+// again. A run whose task is archived no longer represents outstanding
+// work and must not count toward the cap.
+func TestFireTrigger_ArchivedTaskRun_DoesNotBlockConcurrencyCap(t *testing.T) {
+	svc := newTestService(t)
+	createTasksTable(t, svc.store)
+	ctx := context.Background()
+
+	a := &Automation{
+		WorkspaceID:       "ws-1",
+		Name:              "Daily rebase",
+		WorkflowID:        "wf-1",
+		WorkflowStepID:    "s-1",
+		Enabled:           true,
+		MaxConcurrentRuns: 1,
+	}
+	if err := svc.store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ := json.Marshal(ScheduledTriggerConfig{CronExpression: "@daily"})
+	trig := &AutomationTrigger{AutomationID: a.ID, Type: TriggerTypeScheduled, Config: cfg, Enabled: true}
+	if err := svc.store.CreateTrigger(ctx, trig); err != nil {
+		t.Fatal(err)
+	}
+
+	insertTask(t, svc.store, "task-archived", true)
+	if err := svc.store.CreateRun(ctx, &AutomationRun{
+		AutomationID: a.ID,
+		TriggerID:    trig.ID,
+		TriggerType:  TriggerTypeScheduled,
+		Status:       RunStatusTaskCreated,
+		TaskID:       "task-archived",
+		DedupKey:     "prior-run",
+		TriggerData:  json.RawMessage(`{}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), "new-run"); err != nil {
+		t.Fatalf("FireTrigger returned error: %v", err)
+	}
+
+	runs, err := svc.store.ListRuns(ctx, a.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range runs {
+		if r.Status == RunStatusSkipped {
+			t.Fatalf("expected the new trigger to fire instead of skip for the cap; runs=%+v", runs)
+		}
+	}
+}

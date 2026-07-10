@@ -161,6 +161,13 @@ type CreateRequest struct {
 	// If empty, the default prefix is used.
 	WorktreeBranchPrefix string
 
+	// WorktreeBranchTemplate is the template to use for the worktree branch name.
+	// If empty, the default template is used.
+	WorktreeBranchTemplate string
+
+	// WorktreeBranchTicket is the external ticket value used by branch templates.
+	WorktreeBranchTicket string
+
 	// PullBeforeWorktree indicates whether to pull from remote before creating the worktree.
 	PullBeforeWorktree bool
 

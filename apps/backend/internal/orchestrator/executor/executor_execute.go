@@ -800,6 +800,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	if executorNeedsResolvedCredentials(execConfig.ExecutorType) {
 		e.applyContainerCredentials(ctx, req, metadata)
 	}
+	req.WorktreeBranchTicket = worktree.TicketForBranchName(task.Identifier, metadata)
 
 	metadata, err := e.applyRepositoryConfig(req, task, repoInfo, execConfig, metadata)
 	if err != nil {
@@ -812,6 +813,9 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	// (mirroring the primary) for downstream code that has not been migrated.
 	if len(allRepos) > 1 {
 		req.Repositories = buildRepoSpecs(allRepos)
+		for i := range req.Repositories {
+			req.Repositories[i].WorktreeBranchTicket = req.WorktreeBranchTicket
+		}
 	}
 
 	// Activate config-mode MCP tools when config_mode is set in session metadata.
@@ -858,13 +862,14 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 	out := make([]RepoSpec, 0, len(allRepos))
 	for _, info := range allRepos {
 		spec := RepoSpec{
-			RepositoryID:         info.RepositoryID,
-			RepositoryPath:       info.RepositoryPath,
-			BaseBranch:           info.BaseBranch,
-			CheckoutBranch:       info.CheckoutBranch,
-			PRNumber:             info.PRNumber,
-			WorktreeBranchPrefix: info.WorktreeBranchPrefix,
-			PullBeforeWorktree:   info.PullBeforeWorktree,
+			RepositoryID:           info.RepositoryID,
+			RepositoryPath:         info.RepositoryPath,
+			BaseBranch:             info.BaseBranch,
+			CheckoutBranch:         info.CheckoutBranch,
+			PRNumber:               info.PRNumber,
+			WorktreeBranchPrefix:   info.WorktreeBranchPrefix,
+			WorktreeBranchTemplate: info.WorktreeBranchTemplate,
+			PullBeforeWorktree:     info.PullBeforeWorktree,
 		}
 		if info.Repository != nil {
 			spec.RepoName = info.Repository.Name
@@ -1015,6 +1020,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.CheckoutBranch = repoInfo.CheckoutBranch
 		req.PRNumber = repoInfo.PRNumber
 		req.WorktreeBranchPrefix = repoInfo.WorktreeBranchPrefix
+		req.WorktreeBranchTemplate = repoInfo.WorktreeBranchTemplate
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
 		if repoInfo.Repository != nil {
 			req.DefaultBranch = repoInfo.Repository.DefaultBranch

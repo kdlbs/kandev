@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -36,6 +37,19 @@ type Config struct {
 
 // DefaultBranchPrefix is used when no repository-specific prefix is provided.
 const DefaultBranchPrefix = "feature/"
+
+// DefaultBranchNameTemplate is the branch template used for new repositories.
+const DefaultBranchNameTemplate = "feature/{title}-{suffix}"
+
+// BranchNameTemplateInput contains the values available to branch name templates.
+// Users write literal prefixes directly in Template; {prefix} is not supported.
+type BranchNameTemplateInput struct {
+	Template string
+	TaskID   string
+	Title    string
+	Ticket   string
+	Suffix   string
+}
 
 // Validate validates the configuration and returns an error if invalid.
 func (c *Config) Validate() error {
@@ -161,18 +175,94 @@ func NormalizeBranchPrefix(prefix string) string {
 	return trimmed
 }
 
+// NormalizeBranchNameTemplate trims and falls back to the default template.
+func NormalizeBranchNameTemplate(template string) string {
+	trimmed := strings.TrimSpace(template)
+	if trimmed == "" {
+		return DefaultBranchNameTemplate
+	}
+	return trimmed
+}
+
+// ValidateBranchNameTemplate ensures a branch template can render to a safe git branch.
+func ValidateBranchNameTemplate(template string) error {
+	_, err := RenderTaskBranchName(BranchNameTemplateInput{
+		Template: template,
+		TaskID:   "task-123",
+		Title:    "Example task",
+		Ticket:   "TICKET-123",
+		Suffix:   "abc",
+	})
+	return err
+}
+
+// RenderTaskBranchName applies a repository branch-name template and validates
+// that the rendered value is safe to pass to git as a local branch name.
+func RenderTaskBranchName(input BranchNameTemplateInput) (string, error) {
+	template := NormalizeBranchNameTemplate(input.Template)
+
+	title := SanitizeForBranch(input.Title, 20)
+	if title == "" {
+		title = SanitizeForBranch(input.TaskID, 20)
+	}
+	if title == "" {
+		title = "task"
+	}
+
+	titleFull := SanitizeForBranch(input.Title, 80)
+	if titleFull == "" {
+		titleFull = SanitizeForBranch(input.TaskID, 80)
+	}
+	if titleFull == "" {
+		titleFull = "task"
+	}
+
+	taskID := SanitizeForBranch(input.TaskID, 80)
+	ticket := SanitizeForBranch(input.Ticket, 80)
+	suffix := SanitizeForBranch(input.Suffix, 16)
+
+	replacements := map[string]string{
+		"{title}":      title,
+		"{title_full}": titleFull,
+		"{task_id}":    taskID,
+		"{ticket}":     ticket,
+		"{issue_key}":  ticket,
+		"{suffix}":     suffix,
+	}
+	rendered := template
+	for placeholder, value := range replacements {
+		rendered = strings.ReplaceAll(rendered, placeholder, value)
+	}
+	rendered = strings.TrimSpace(rendered)
+	if !isSafeRenderedBranchName(rendered) {
+		return "", fmt.Errorf("invalid branch name")
+	}
+	return rendered, nil
+}
+
 // TaskBranchNameWithSuffix builds the per-task branch name from a caller-supplied suffix.
 // The caller is responsible for generating the suffix (e.g. SmallSuffix(3)) so that
 // naming is deterministic when the suffix is derived externally.
 func TaskBranchNameWithSuffix(taskTitle, taskID, prefix, suffix string) string {
-	sanitized := SanitizeForBranch(taskTitle, 20)
-	if sanitized == "" {
-		sanitized = SanitizeForBranch(taskID, 20)
+	normalizedPrefix := branchPrefixWithSeparator(prefix)
+	branch, err := RenderTaskBranchName(BranchNameTemplateInput{
+		Template: normalizedPrefix + "{title}-{suffix}",
+		TaskID:   taskID,
+		Title:    taskTitle,
+		Suffix:   suffix,
+	})
+	if err == nil {
+		return branch
 	}
-	if sanitized == "" {
-		sanitized = "task"
+	return normalizedPrefix + "task-" + suffix
+}
+
+func branchPrefixWithSeparator(prefix string) string {
+	normalizedPrefix := NormalizeBranchPrefix(prefix)
+	if !strings.HasSuffix(normalizedPrefix, "/") && !strings.HasSuffix(normalizedPrefix, "-") {
+		normalizedPrefix += "-"
 	}
-	return NormalizeBranchPrefix(prefix) + sanitized + "-" + suffix
+	return normalizedPrefix
 }
 
 // ValidateBranchPrefix ensures a prefix contains only safe branch characters.
@@ -191,6 +281,81 @@ func ValidateBranchPrefix(prefix string) error {
 		return fmt.Errorf("invalid branch prefix")
 	}
 	return nil
+}
+
+var renderedBranchNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]*$`)
+
+func isSafeRenderedBranchName(branch string) bool {
+	if branch == "" || len(branch) > 255 {
+		return false
+	}
+	if strings.Contains(branch, "..") || strings.Contains(branch, "@{") {
+		return false
+	}
+	if strings.Contains(branch, "//") || strings.HasSuffix(branch, "/") {
+		return false
+	}
+	for _, component := range strings.Split(branch, "/") {
+		if component == "" ||
+			strings.HasPrefix(component, ".") ||
+			strings.HasSuffix(component, ".") ||
+			strings.HasSuffix(component, ".lock") {
+			return false
+		}
+	}
+	return renderedBranchNameRegex.MatchString(branch)
+}
+
+// TicketForBranchName resolves the stable external ticket value used by branch templates.
+func TicketForBranchName(identifier string, metadata map[string]any) string {
+	if trimmed := strings.TrimSpace(identifier); trimmed != "" {
+		return trimmed
+	}
+	if value := metadataString(metadata, "jira_issue_key"); value != "" {
+		return value
+	}
+	if value := metadataString(metadata, "linear_issue_identifier"); value != "" {
+		return value
+	}
+	if repo := metadataString(metadata, "issue_repo"); repo != "" {
+		if number := metadataNumberString(metadata, "issue_number"); number != "" {
+			return SanitizeForBranch(repo+"-"+number, 80)
+		}
+	}
+	if repo := metadataString(metadata, "pr_repo"); repo != "" {
+		if number := metadataNumberString(metadata, "pr_number"); number != "" {
+			return SanitizeForBranch(repo+"-"+number, 80)
+		}
+	}
+	return ""
+}
+
+func metadataString(metadata map[string]any, key string) string {
+	if metadata == nil {
+		return ""
+	}
+	if value, ok := metadata[key].(string); ok {
+		return strings.TrimSpace(value)
+	}
+	return ""
+}
+
+func metadataNumberString(metadata map[string]any, key string) string {
+	if metadata == nil {
+		return ""
+	}
+	switch value := metadata[key].(type) {
+	case int:
+		return strconv.Itoa(value)
+	case int64:
+		return strconv.FormatInt(value, 10)
+	case float64:
+		return strconv.FormatInt(int64(value), 10)
+	case string:
+		return strings.TrimSpace(value)
+	default:
+		return ""
+	}
 }
 
 const branchSuffixAlphabet = "abcdefghijklmnopqrstuvwxyz0123456789"

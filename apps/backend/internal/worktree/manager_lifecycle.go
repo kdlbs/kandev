@@ -637,16 +637,30 @@ func parseCheckedOutPath(gitOutput string) string {
 func (m *Manager) buildWorktreeNames(req CreateRequest) (dirName, branchName string) {
 	dirSuffix := uuid.New().String()[:8] // Use first 8 chars of UUID for worktree dir uniqueness
 	branchSuffix := SmallSuffix(3)
-	prefix := NormalizeBranchPrefix(req.WorktreeBranchPrefix)
 
 	if req.TaskTitle != "" {
 		// Use semantic naming: {sanitized-title}_{suffix}
 		dirName = SemanticWorktreeName(req.TaskTitle, dirSuffix)
-		branchName = TaskBranchNameWithSuffix(req.TaskTitle, req.TaskID, prefix, branchSuffix)
 	} else {
 		// Fallback to task ID based naming
 		dirName = req.TaskID + "_" + dirSuffix
-		branchName = TaskBranchNameWithSuffix("", req.TaskID, prefix, branchSuffix)
+	}
+	branchName = TaskBranchNameWithSuffix(req.TaskTitle, req.TaskID, req.WorktreeBranchPrefix, branchSuffix)
+	if req.WorktreeBranchTemplate != "" {
+		if rendered, err := RenderTaskBranchName(BranchNameTemplateInput{
+			Template: req.WorktreeBranchTemplate,
+			TaskID:   req.TaskID,
+			Title:    req.TaskTitle,
+			Ticket:   req.WorktreeBranchTicket,
+			Suffix:   branchSuffix,
+		}); err == nil {
+			branchName = rendered
+		} else {
+			m.logger.Warn("worktree branch template render failed; using fallback branch name",
+				zap.String("task_id", req.TaskID),
+				zap.String("template", req.WorktreeBranchTemplate),
+				zap.Error(err))
+		}
 	}
 	return dirName, branchName
 }

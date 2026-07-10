@@ -35,14 +35,14 @@ test.describe("GitHub workspace settings", () => {
       },
     ]);
 
-    await testPage.goto("/settings/integrations/github");
-    await expect(testPage.getByTestId("integration-workspace-switcher")).toBeVisible();
+    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
+    await expect(testPage.getByTestId("github-integration-heading")).toBeVisible();
 
     await testPage.getByTestId("github-scope-mode").click();
     await testPage.getByRole("option", { name: "Selected repositories" }).click();
     await testPage.getByTestId("github-scope-repos-input").fill("kdlbs/kandev");
     await testPage.getByTestId("github-scope-save").click();
-    await expect(testPage.getByText("GitHub workspace settings saved")).toBeVisible({
+    await expect(testPage.getByText("GitHub workspace settings saved").last()).toBeVisible({
       timeout: 10_000,
     });
 
@@ -66,5 +66,68 @@ test.describe("GitHub workspace settings", () => {
     await expect(testPage.getByText("kdlbs/kandev#6101")).toBeVisible();
     await expect(testPage.getByText("Out of scope PR")).toHaveCount(0);
     await expect(testPage.getByText("other/repo#6102")).toHaveCount(0);
+  });
+
+  test("repository scope save only submits fields for the active mode", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("test-user");
+
+    await testPage.goto("/settings/integrations/github");
+    await expect(testPage.getByTestId("github-integration-heading")).toBeVisible();
+
+    await testPage.getByTestId("github-scope-mode").click();
+    await testPage.getByRole("option", { name: "Selected repositories" }).click();
+    await testPage.getByTestId("github-scope-repos-input").fill("kdlbs/kandev");
+    await testPage.getByTestId("github-scope-mode").click();
+    await testPage.getByRole("option", { name: "Organizations" }).click();
+    await testPage.getByTestId("github-scope-orgs-input").fill("kdlbs");
+    await testPage.getByTestId("github-scope-save").click();
+    await expect(testPage.getByText("GitHub workspace settings saved").last()).toBeVisible({
+      timeout: 10_000,
+    });
+
+    const firstSettingsResponse = await apiClient.rawRequest(
+      "GET",
+      `/api/v1/github/workspace-settings?workspace_id=${seedData.workspaceId}`,
+    );
+    expect(firstSettingsResponse.status).toBe(200);
+    const firstSettings = (await firstSettingsResponse.json()) as {
+      repo_scope_mode: string;
+      repo_scope_orgs: string[];
+      repo_scope_repos: Array<{ owner: string; name: string }>;
+    };
+    expect(firstSettings.repo_scope_mode).toBe("orgs");
+    expect(firstSettings.repo_scope_orgs).toEqual(["kdlbs"]);
+    expect(firstSettings.repo_scope_repos).toEqual([]);
+
+    await testPage.getByTestId("github-scope-mode").click();
+    await testPage.getByRole("option", { name: "Selected repositories" }).click();
+    await testPage.getByTestId("github-scope-repos-input").fill("not-a-repo");
+    await testPage.getByTestId("github-scope-mode").click();
+    await testPage.getByRole("option", { name: "Organizations" }).click();
+    await testPage.getByTestId("github-scope-save").click();
+    await expect(testPage.getByText("GitHub workspace settings saved").last()).toBeVisible({
+      timeout: 10_000,
+    });
+
+    const secondSettingsResponse = await apiClient.rawRequest(
+      "GET",
+      `/api/v1/github/workspace-settings?workspace_id=${seedData.workspaceId}`,
+    );
+    expect(secondSettingsResponse.status).toBe(200);
+    const secondSettings = (await secondSettingsResponse.json()) as {
+      repo_scope_mode: string;
+      repo_scope_orgs: string[];
+      repo_scope_repos: Array<{ owner: string; name: string }>;
+    };
+    expect(secondSettings.repo_scope_mode).toBe("orgs");
+    expect(secondSettings.repo_scope_orgs).toEqual(["kdlbs"]);
+    expect(secondSettings.repo_scope_repos).toEqual([]);
   });
 });

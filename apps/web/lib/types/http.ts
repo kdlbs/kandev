@@ -192,6 +192,7 @@ export type Repository = {
   default_branch: string;
   scripts?: RepositoryScript[];
   worktree_branch_prefix: string;
+  worktree_branch_template?: string;
   pull_before_worktree: boolean;
   setup_script: string;
   cleanup_script: string;

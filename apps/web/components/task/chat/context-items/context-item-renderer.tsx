@@ -9,6 +9,7 @@ import { PlanCommentItem } from "./plan-comment-item";
 import { ImageItem } from "./image-item";
 import { FileAttachmentItem } from "./file-attachment-item";
 import { PRFeedbackItem } from "./pr-feedback-item";
+import { WalkthroughCommentItem } from "./walkthrough-comment-item";
 
 export function ContextItemRenderer({
   item,
@@ -34,5 +35,7 @@ export function ContextItemRenderer({
       return <FileAttachmentItem item={item} />;
     case "pr-feedback":
       return <PRFeedbackItem item={item} />;
+    case "walkthrough-comment":
+      return <WalkthroughCommentItem item={item} />;
   }
 }

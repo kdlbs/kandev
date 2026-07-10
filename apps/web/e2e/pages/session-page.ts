@@ -608,9 +608,9 @@ export class SessionPage {
     return this.page.getByTestId("pr-multi-popover");
   }
 
-  /** A single PR tab inside the multi-PR aggregate popover, by repo + PR number. */
-  prMultiPopoverTab(repo: string, prNumber: number): Locator {
-    return this.page.getByTestId(`pr-popover-tab-${repo}-${prNumber}`);
+  /** A single PR tab inside the multi-PR aggregate popover, by owner + repo + PR number. */
+  prMultiPopoverTab(owner: string, repo: string, prNumber: number): Locator {
+    return this.page.getByTestId(`pr-popover-tab-${owner}-${repo}-${prNumber}`);
   }
 
   /**
@@ -828,6 +828,44 @@ export class SessionPage {
    */
   async clickSessionChatTab(): Promise<void> {
     await this.page.locator('[data-testid^="session-tab-"]').first().click();
+  }
+
+  /** Main Changes-panel button that asks the agent to create a walkthrough. */
+  changesRequestWalkthroughButton(): Locator {
+    return this.changes.getByTestId("changes-request-walkthrough");
+  }
+
+  /** Compact request button in the expanded Review Changes toolbar. */
+  reviewRequestWalkthroughButton(): Locator {
+    return this.page.getByTestId("review-request-walkthrough");
+  }
+
+  walkthroughLauncher(): Locator {
+    return this.page.getByTestId("walkthrough-launcher");
+  }
+
+  walkthroughDiscardButton(): Locator {
+    return this.page.getByTestId("walkthrough-discard");
+  }
+
+  walkthroughDiscardDialog(): Locator {
+    return this.page.getByRole("alertdialog", { name: "Discard walkthrough?" });
+  }
+
+  walkthroughFloating(): Locator {
+    return this.page.getByTestId("walkthrough-floating");
+  }
+
+  walkthroughStepHeader(): Locator {
+    return this.walkthroughFloating().getByTestId("walkthrough-step-header");
+  }
+
+  walkthroughStepBody(): Locator {
+    return this.walkthroughFloating().getByTestId("walkthrough-step-body");
+  }
+
+  walkthroughEditorRange(): Locator {
+    return this.page.getByTestId("walkthrough-editor-range");
   }
 
   /** PR files section within the changes panel. */

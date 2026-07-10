@@ -560,7 +560,7 @@ function TaskMenuButton({ visible }: { visible: boolean }) {
         "self-center shrink-0 flex items-center transition-opacity duration-100",
         visible
           ? "opacity-100"
-          : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto",
+          : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto [@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto",
       )}
     >
       <button

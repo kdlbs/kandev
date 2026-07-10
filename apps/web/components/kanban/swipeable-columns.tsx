@@ -5,6 +5,7 @@ import useEmblaCarousel from "embla-carousel-react";
 import { KanbanColumn, WorkflowStep } from "../kanban-column";
 import { Task } from "../kanban-card";
 import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
+import type { KanbanExternalLinkAvailability } from "../kanban-external-link-availability";
 
 type SwipeableColumnsProps = {
   steps: WorkflowStep[];
@@ -24,6 +25,7 @@ type SwipeableColumnsProps = {
   onToggleSelect?: (taskId: string) => void;
   onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
+  externalLinkAvailability: KanbanExternalLinkAvailability;
 };
 
 /** Two-way sync between Embla's carousel position and the external activeIndex. */
@@ -80,6 +82,7 @@ export function SwipeableColumns({
   onToggleSelect,
   onSelectRange,
   isMultiSelectMode,
+  externalLinkAvailability,
 }: SwipeableColumnsProps) {
   // Stable options to avoid Embla reinitializing on every activeIndex change
   const [initialIndex] = useState(activeIndex);
@@ -137,6 +140,7 @@ export function SwipeableColumns({
               onToggleSelect={onToggleSelect}
               onSelectRange={onSelectRange}
               isMultiSelectMode={isMultiSelectMode}
+              externalLinkAvailability={externalLinkAvailability}
               hideHeader
             />
           </div>

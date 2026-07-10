@@ -13,10 +13,12 @@ import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
 import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
 import { EditableCard } from "@/components/settings/editable-card";
+import { RepositoryBranchTemplateHelp } from "@/components/settings/repository-branch-template-help";
 import { DeleteRepositoryDialog } from "@/components/settings/repository-delete-dialog";
 import { CopyFilesField } from "@/components/settings/repository-copy-files-help";
 import { getRepositoryActiveSessionCountAction } from "@/app/actions/workspaces";
 import type { Repository, RepositoryScript } from "@/lib/types/http";
+import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
 
 type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
 
@@ -29,7 +31,7 @@ type RepositoryBasicFieldsProps = RepoFieldsBaseProps & {
   repositoryName: string;
   repositoryLocalPath: string;
   sourceType: string;
-  worktreeBranchPrefix: string;
+  worktreeBranchTemplate: string;
   pullBeforeWorktree: boolean;
 };
 
@@ -39,7 +41,7 @@ function RepositoryBasicFields({
   repositoryName,
   repositoryLocalPath,
   sourceType,
-  worktreeBranchPrefix,
+  worktreeBranchTemplate,
   pullBeforeWorktree,
 }: RepositoryBasicFieldsProps) {
   return (
@@ -63,19 +65,17 @@ function RepositoryBasicFields({
           />
         </div>
       </div>
-
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
-          <Label>Worktree Branch Prefix</Label>
+          <div className="flex items-center gap-1.5">
+            <Label>Worktree Branch Template</Label>
+            <RepositoryBranchTemplateHelp />
+          </div>
           <Input
-            value={worktreeBranchPrefix}
-            onChange={(e) => onUpdate(repositoryId, { worktree_branch_prefix: e.target.value })}
-            placeholder="feature/"
+            value={worktreeBranchTemplate}
+            onChange={(e) => onUpdate(repositoryId, { worktree_branch_template: e.target.value })}
+            placeholder={defaultWorktreeBranchTemplate}
           />
-          <p className="text-xs text-muted-foreground">
-            Used for new worktree branches. Leave empty to use the default. Branches are generated
-            as {"{prefix}{sanitized-title}-{rand}"}.
-          </p>
         </div>
         <div className="space-y-2">
           <Label htmlFor={`repo-pull-before-${repositoryId}`}>Worktree Sync</Label>
@@ -94,9 +94,6 @@ function RepositoryBasicFields({
               >
                 Always pull before creating a new worktree
               </Label>
-              <p className="text-xs text-muted-foreground">
-                Keeps the base branch up to date with the remote before spawning new sessions.
-              </p>
             </div>
           </div>
         </div>
@@ -296,7 +293,9 @@ function RepositoryEditView({
             repositoryName={repository.name ?? ""}
             repositoryLocalPath={repository.local_path ?? ""}
             sourceType={repository.source_type}
-            worktreeBranchPrefix={repository.worktree_branch_prefix ?? ""}
+            worktreeBranchTemplate={
+              repository.worktree_branch_template ?? defaultWorktreeBranchTemplate
+            }
             pullBeforeWorktree={repository.pull_before_worktree ?? true}
           />
 
@@ -368,7 +367,6 @@ function buildRepoScriptsSummary(repository: RepositoryWithScripts) {
 
 function buildRepoPreviewData(repository: RepositoryWithScripts) {
   const repositoryName = repository.name ?? "";
-  const worktreeBranchPrefix = repository.worktree_branch_prefix ?? "";
   const sourceLabel = repository.source_type === "local" ? "Local" : "Remote";
   const subtitle =
     repository.source_type === "local"
@@ -378,7 +376,6 @@ function buildRepoPreviewData(repository: RepositoryWithScripts) {
         "Remote repository";
   return {
     repositoryName,
-    worktreeBranchPrefix,
     sourceLabel,
     subtitle,
     ...buildRepoScriptsSummary(repository),
@@ -394,7 +391,6 @@ function RepositoryPreview({
 }: RepositoryPreviewProps) {
   const {
     repositoryName,
-    worktreeBranchPrefix,
     scriptsCount,
     hasSetupScript,
     hasCleanupScript,
@@ -419,11 +415,6 @@ function RepositoryPreview({
                 <Badge variant="secondary" className="text-xs">
                   {sourceLabel}
                 </Badge>
-                {worktreeBranchPrefix.trim() && worktreeBranchPrefix.trim() !== "feature/" ? (
-                  <Badge variant="outline" className="text-xs">
-                    {worktreeBranchPrefix.trim()}
-                  </Badge>
-                ) : null}
                 {isDirty && <UnsavedChangesBadge />}
               </div>
               <div className="text-xs text-muted-foreground mt-1 truncate">{subtitle}</div>

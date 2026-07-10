@@ -624,10 +624,10 @@ describe("PRStatusChip — multiple PRs", () => {
       });
       expect(document.querySelector(DRAWER_SELECTOR)).not.toBeNull();
       expect(document.querySelector("[data-testid='pr-multi-popover']")).not.toBeNull();
-      // One tab per PR (testid is repo-scoped so same-number PRs on
-      // different repos stay unique).
-      expect(document.querySelector("[data-testid='pr-popover-tab-demo-1']")).not.toBeNull();
-      expect(document.querySelector("[data-testid='pr-popover-tab-demo-2']")).not.toBeNull();
+      // One tab per PR (testid is owner+repo-scoped so same-number PRs on
+      // different repos, or repos sharing a name across owners, stay unique).
+      expect(document.querySelector("[data-testid='pr-popover-tab-acme-demo-1']")).not.toBeNull();
+      expect(document.querySelector("[data-testid='pr-popover-tab-acme-demo-2']")).not.toBeNull();
     });
   });
 });

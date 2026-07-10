@@ -48,9 +48,11 @@ function panelState(overrides: Record<string, unknown> = {}) {
     prompts: [],
     pendingPRFeedback: [],
     planComments: [],
+    walkthroughComments: [],
     planModeEnabled: false,
     handleClearPRFeedback: vi.fn(),
     clearSessionPlanComments: vi.fn(),
+    handleClearWalkthroughComments: vi.fn(),
     clearEphemeral: vi.fn(),
     addContextFile: vi.fn(),
     ...overrides,
@@ -208,9 +210,11 @@ describe("passthrough chat composer cleanup", () => {
       planModeEnabled: true,
       pendingPRFeedback: [{ id: "feedback-1" }],
       planComments: [{ id: "plan-comment-1" }],
+      walkthroughComments: [{ id: "walkthrough-comment-1" }],
     }) as unknown as {
       handleClearPRFeedback: ReturnType<typeof vi.fn>;
       clearSessionPlanComments: ReturnType<typeof vi.fn>;
+      handleClearWalkthroughComments: ReturnType<typeof vi.fn>;
       clearEphemeral: ReturnType<typeof vi.fn>;
       addContextFile: ReturnType<typeof vi.fn>;
     };
@@ -219,6 +223,7 @@ describe("passthrough chat composer cleanup", () => {
 
     expect(state.handleClearPRFeedback).toHaveBeenCalledTimes(1);
     expect(state.clearSessionPlanComments).toHaveBeenCalledTimes(1);
+    expect(state.handleClearWalkthroughComments).toHaveBeenCalledTimes(1);
     expect(state.clearEphemeral).toHaveBeenCalledWith(SESSION_ID);
     expect(state.addContextFile).toHaveBeenCalledWith(SESSION_ID, {
       path: PLAN_CONTEXT_PATH,

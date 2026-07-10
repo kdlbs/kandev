@@ -1,0 +1,264 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+)
+
+func createTestWalkthroughService(t *testing.T) (*WalkthroughService, *MockEventBus, *sqliterepo.Repository) {
+	t.Helper()
+	_, eventBus, repo := createTestService(t)
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	svc := NewWalkthroughService(repo, eventBus, log)
+	return svc, eventBus, repo
+}
+
+func sampleSteps() []models.WalkthroughStep {
+	return []models.WalkthroughStep{
+		{Title: "Entry", File: "main.go", Line: 10, Text: "Program starts here"},
+		{File: "server.go", Line: 42, LineEnd: 50, Text: "Routes registered"},
+	}
+}
+
+func TestWalkthroughService_ShowWalkthrough_Create(t *testing.T) {
+	svc, eventBus, repo := createTestWalkthroughService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-1")
+
+	wt, err := svc.ShowWalkthrough(ctx, ShowWalkthroughRequest{
+		TaskID: "task-1",
+		Title:  "Tour",
+		Steps:  sampleSteps(),
+	})
+	if err != nil {
+		t.Fatalf("ShowWalkthrough failed: %v", err)
+	}
+	if wt.TaskID != "task-1" || wt.Title != "Tour" {
+		t.Fatalf("unexpected walkthrough: %+v", wt)
+	}
+	if len(wt.Steps) != 2 || wt.Steps[0].File != "main.go" {
+		t.Fatalf("steps not persisted: %+v", wt.Steps)
+	}
+	if wt.CreatedBy != "agent" {
+		t.Fatalf("expected agent author, got %q", wt.CreatedBy)
+	}
+
+	findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskWalkthroughCreated)
+}
+
+func TestWalkthroughService_ShowWalkthrough_Replace(t *testing.T) {
+	svc, eventBus, repo := createTestWalkthroughService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-1")
+
+	first, err := svc.ShowWalkthrough(ctx, ShowWalkthroughRequest{TaskID: "task-1", Steps: sampleSteps()})
+	if err != nil {
+		t.Fatalf("first ShowWalkthrough failed: %v", err)
+	}
+	eventBus.ClearEvents()
+
+	second, err := svc.ShowWalkthrough(ctx, ShowWalkthroughRequest{
+		TaskID: "task-1",
+		Steps:  []models.WalkthroughStep{{File: "only.go", Line: 1, Text: "single"}},
+	})
+	if err != nil {
+		t.Fatalf("second ShowWalkthrough failed: %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("replace should keep same id: %s vs %s", first.ID, second.ID)
+	}
+	if len(second.Steps) != 1 || second.Steps[0].File != "only.go" {
+		t.Fatalf("steps not replaced: %+v", second.Steps)
+	}
+
+	got, err := svc.GetWalkthrough(ctx, "task-1")
+	if err != nil || got == nil || len(got.Steps) != 1 {
+		t.Fatalf("GetWalkthrough after replace = %+v, err %v", got, err)
+	}
+	findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskWalkthroughUpdated)
+}
+
+func TestWalkthroughService_ShowWalkthrough_ConcurrentInsertPublishesUpdated(t *testing.T) {
+	eventBus := NewMockEventBus()
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	svc := NewWalkthroughService(&concurrentCreateWalkthroughRepo{}, eventBus, log)
+
+	wt, err := svc.ShowWalkthrough(context.Background(), ShowWalkthroughRequest{
+		TaskID: "task-1",
+		Steps:  sampleSteps(),
+	})
+	if err != nil {
+		t.Fatalf("ShowWalkthrough failed: %v", err)
+	}
+	if !wt.CreatedAt.Before(wt.UpdatedAt) {
+		t.Fatalf("expected repository to return an updated existing row, got created_at=%v updated_at=%v", wt.CreatedAt, wt.UpdatedAt)
+	}
+	findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskWalkthroughUpdated)
+}
+
+func TestWalkthroughService_ShowWalkthrough_Validation(t *testing.T) {
+	svc, _, repo := createTestWalkthroughService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-1")
+
+	if _, err := svc.ShowWalkthrough(ctx, ShowWalkthroughRequest{Steps: sampleSteps()}); err == nil {
+		t.Fatal("expected error for missing task_id")
+	}
+	if _, err := svc.ShowWalkthrough(ctx, ShowWalkthroughRequest{TaskID: "task-1"}); err == nil {
+		t.Fatal("expected error for empty steps")
+	} else if !errors.Is(err, ErrInvalidWalkthrough) {
+		t.Fatalf("expected ErrInvalidWalkthrough for empty steps, got %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		steps []models.WalkthroughStep
+	}{
+		{
+			name:  "empty file",
+			steps: []models.WalkthroughStep{{File: "  ", Line: 1, Text: "x"}},
+		},
+		{
+			name:  "empty text",
+			steps: []models.WalkthroughStep{{File: "a.go", Line: 1, Text: "  "}},
+		},
+		{
+			name:  "non-positive line",
+			steps: []models.WalkthroughStep{{File: "a.go", Line: 0, Text: "x"}},
+		},
+		{
+			name:  "line_end before line",
+			steps: []models.WalkthroughStep{{File: "a.go", Line: 5, LineEnd: 4, Text: "x"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := svc.ShowWalkthrough(ctx, ShowWalkthroughRequest{TaskID: "task-1", Steps: tt.steps}); err == nil {
+				t.Fatalf("expected validation error for %s", tt.name)
+			} else if !errors.Is(err, ErrInvalidWalkthrough) {
+				t.Fatalf("expected ErrInvalidWalkthrough for %s, got %v", tt.name, err)
+			}
+		})
+	}
+}
+
+func TestWalkthroughService_ShowWalkthrough_TrimsInput(t *testing.T) {
+	svc, _, repo := createTestWalkthroughService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-1")
+
+	wt, err := svc.ShowWalkthrough(ctx, ShowWalkthroughRequest{
+		TaskID: "task-1",
+		Title:  "  Tour  ",
+		Steps: []models.WalkthroughStep{{
+			Title: "  Intro  ",
+			Repo:  "  repo-a  ",
+			File:  "  main.go  ",
+			Line:  7,
+			Text:  "  explanation  ",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("ShowWalkthrough failed: %v", err)
+	}
+	if wt.Title != "Tour" {
+		t.Fatalf("expected trimmed title, got %q", wt.Title)
+	}
+	step := wt.Steps[0]
+	if step.Title != "Intro" || step.Repo != "repo-a" || step.File != "main.go" || step.Text != "explanation" {
+		t.Fatalf("expected trimmed step fields, got %+v", step)
+	}
+}
+
+func TestWalkthroughService_GetMissing(t *testing.T) {
+	svc, _, repo := createTestWalkthroughService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-1")
+
+	got, err := svc.GetWalkthrough(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetWalkthrough failed: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil for missing walkthrough, got %+v", got)
+	}
+}
+
+func TestWalkthroughService_Delete(t *testing.T) {
+	svc, eventBus, repo := createTestWalkthroughService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-1")
+
+	if _, err := svc.ShowWalkthrough(ctx, ShowWalkthroughRequest{TaskID: "task-1", Steps: sampleSteps()}); err != nil {
+		t.Fatalf("seed walkthrough failed: %v", err)
+	}
+	eventBus.ClearEvents()
+
+	if err := svc.DeleteWalkthrough(ctx, "task-1"); err != nil {
+		t.Fatalf("DeleteWalkthrough failed: %v", err)
+	}
+	got, err := svc.GetWalkthrough(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetWalkthrough after delete failed: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil after delete, got %+v", got)
+	}
+	findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskWalkthroughDeleted)
+
+	if err := svc.DeleteWalkthrough(ctx, "task-1"); err != ErrTaskWalkthroughNotFound {
+		t.Fatalf("expected ErrTaskWalkthroughNotFound, got %v", err)
+	}
+}
+
+func TestWalkthroughService_Delete_ConcurrentDeleteReturnsNotFound(t *testing.T) {
+	eventBus := NewMockEventBus()
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	svc := NewWalkthroughService(&concurrentDeleteWalkthroughRepo{}, eventBus, log)
+
+	if err := svc.DeleteWalkthrough(context.Background(), "task-1"); err != ErrTaskWalkthroughNotFound {
+		t.Fatalf("expected ErrTaskWalkthroughNotFound, got %v", err)
+	}
+	if got := len(eventBus.GetPublishedEvents()); got != 0 {
+		t.Fatalf("expected no delete event after concurrent delete, got %d", got)
+	}
+}
+
+type concurrentCreateWalkthroughRepo struct{}
+
+func (r *concurrentCreateWalkthroughRepo) GetTaskWalkthrough(ctx context.Context, taskID string) (*models.TaskWalkthrough, error) {
+	return nil, nil
+}
+
+func (r *concurrentCreateWalkthroughRepo) CreateTaskWalkthrough(ctx context.Context, wt *models.TaskWalkthrough) error {
+	now := time.Now().UTC()
+	wt.ID = "existing-walkthrough"
+	wt.CreatedAt = now.Add(-time.Minute)
+	wt.UpdatedAt = now
+	return nil
+}
+
+func (r *concurrentCreateWalkthroughRepo) DeleteTaskWalkthrough(ctx context.Context, taskID string) error {
+	return nil
+}
+
+type concurrentDeleteWalkthroughRepo struct{}
+
+func (r *concurrentDeleteWalkthroughRepo) GetTaskWalkthrough(ctx context.Context, taskID string) (*models.TaskWalkthrough, error) {
+	return &models.TaskWalkthrough{ID: "gone", TaskID: taskID, Steps: sampleSteps()}, nil
+}
+
+func (r *concurrentDeleteWalkthroughRepo) CreateTaskWalkthrough(ctx context.Context, wt *models.TaskWalkthrough) error {
+	return nil
+}
+
+func (r *concurrentDeleteWalkthroughRepo) DeleteTaskWalkthrough(ctx context.Context, taskID string) error {
+	return ErrTaskWalkthroughNotFound
+}

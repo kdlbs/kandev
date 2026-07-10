@@ -40,25 +40,26 @@ type WorkspaceDTO struct {
 }
 
 type RepositoryDTO struct {
-	ID                   string                `json:"id"`
-	WorkspaceID          string                `json:"workspace_id"`
-	Name                 string                `json:"name"`
-	SourceType           string                `json:"source_type"`
-	LocalPath            string                `json:"local_path"`
-	Provider             string                `json:"provider"`
-	ProviderRepoID       string                `json:"provider_repo_id"`
-	ProviderOwner        string                `json:"provider_owner"`
-	ProviderName         string                `json:"provider_name"`
-	DefaultBranch        string                `json:"default_branch"`
-	WorktreeBranchPrefix string                `json:"worktree_branch_prefix"`
-	PullBeforeWorktree   bool                  `json:"pull_before_worktree"`
-	SetupScript          string                `json:"setup_script"`
-	CleanupScript        string                `json:"cleanup_script"`
-	DevScript            string                `json:"dev_script"`
-	CopyFiles            string                `json:"copy_files"`
-	CreatedAt            time.Time             `json:"created_at"`
-	UpdatedAt            time.Time             `json:"updated_at"`
-	Scripts              []RepositoryScriptDTO `json:"scripts,omitempty"`
+	ID                     string                `json:"id"`
+	WorkspaceID            string                `json:"workspace_id"`
+	Name                   string                `json:"name"`
+	SourceType             string                `json:"source_type"`
+	LocalPath              string                `json:"local_path"`
+	Provider               string                `json:"provider"`
+	ProviderRepoID         string                `json:"provider_repo_id"`
+	ProviderOwner          string                `json:"provider_owner"`
+	ProviderName           string                `json:"provider_name"`
+	DefaultBranch          string                `json:"default_branch"`
+	WorktreeBranchPrefix   string                `json:"worktree_branch_prefix"`
+	WorktreeBranchTemplate string                `json:"worktree_branch_template"`
+	PullBeforeWorktree     bool                  `json:"pull_before_worktree"`
+	SetupScript            string                `json:"setup_script"`
+	CleanupScript          string                `json:"cleanup_script"`
+	DevScript              string                `json:"dev_script"`
+	CopyFiles              string                `json:"copy_files"`
+	CreatedAt              time.Time             `json:"created_at"`
+	UpdatedAt              time.Time             `json:"updated_at"`
+	Scripts                []RepositoryScriptDTO `json:"scripts,omitempty"`
 }
 
 type RepositoryScriptDTO struct {
@@ -435,24 +436,25 @@ func FromWorkspace(workspace *models.Workspace) WorkspaceDTO {
 
 func FromRepository(repository *models.Repository) RepositoryDTO {
 	return RepositoryDTO{
-		ID:                   repository.ID,
-		WorkspaceID:          repository.WorkspaceID,
-		Name:                 repository.Name,
-		SourceType:           repository.SourceType,
-		LocalPath:            repository.LocalPath,
-		Provider:             repository.Provider,
-		ProviderRepoID:       repository.ProviderRepoID,
-		ProviderOwner:        repository.ProviderOwner,
-		ProviderName:         repository.ProviderName,
-		DefaultBranch:        repository.DefaultBranch,
-		WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
-		PullBeforeWorktree:   repository.PullBeforeWorktree,
-		SetupScript:          repository.SetupScript,
-		CleanupScript:        repository.CleanupScript,
-		DevScript:            repository.DevScript,
-		CopyFiles:            repository.CopyFiles,
-		CreatedAt:            repository.CreatedAt,
-		UpdatedAt:            repository.UpdatedAt,
+		ID:                     repository.ID,
+		WorkspaceID:            repository.WorkspaceID,
+		Name:                   repository.Name,
+		SourceType:             repository.SourceType,
+		LocalPath:              repository.LocalPath,
+		Provider:               repository.Provider,
+		ProviderRepoID:         repository.ProviderRepoID,
+		ProviderOwner:          repository.ProviderOwner,
+		ProviderName:           repository.ProviderName,
+		DefaultBranch:          repository.DefaultBranch,
+		WorktreeBranchPrefix:   repository.WorktreeBranchPrefix,
+		WorktreeBranchTemplate: repository.WorktreeBranchTemplate,
+		PullBeforeWorktree:     repository.PullBeforeWorktree,
+		SetupScript:            repository.SetupScript,
+		CleanupScript:          repository.CleanupScript,
+		DevScript:              repository.DevScript,
+		CopyFiles:              repository.CopyFiles,
+		CreatedAt:              repository.CreatedAt,
+		UpdatedAt:              repository.UpdatedAt,
 	}
 }
 

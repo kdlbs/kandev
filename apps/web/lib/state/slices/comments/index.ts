@@ -5,6 +5,7 @@ export {
   type PlanComment,
   type FileEditorComment,
   type PRFeedbackComment,
+  type WalkthroughComment,
   type AnnotationSide,
   type CommentsState,
   type CommentsActions,
@@ -13,11 +14,13 @@ export {
   isPlanComment,
   isFileEditorComment,
   isPRFeedbackComment,
+  isWalkthroughComment,
 } from "./types";
 export {
   formatReviewCommentsAsMarkdown,
   formatPlanCommentsAsMarkdown,
   formatPRFeedbackAsMarkdown,
+  formatWalkthroughCommentsAsMarkdown,
   formatCommentsForMessage,
 } from "./format";
 export {

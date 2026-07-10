@@ -6,6 +6,7 @@ const APP_PATH = "src/app.ts";
 const MISSING_PATH = "src/missing.ts";
 const WORKTREE_PATH = "/worktree";
 const WORKTREE_APP_PATH = "/worktree/src/app.ts";
+const REPO = "frontend";
 
 vi.mock("@/components/editors/monaco/monaco-init", () => ({
   getMonacoInstance,
@@ -31,6 +32,7 @@ describe("scrollEditorIfMounted", () => {
   afterEach(() => {
     getMonacoInstance.mockReset();
     consumePendingCursorPosition(APP_PATH);
+    consumePendingCursorPosition(APP_PATH, REPO);
     consumePendingCursorPosition(MISSING_PATH);
   });
 
@@ -45,6 +47,45 @@ describe("scrollEditorIfMounted", () => {
     expect(editor.revealLineInCenter).toHaveBeenCalledWith(42);
     expect(editor.focus).toHaveBeenCalledTimes(1);
     expect(consumePendingCursorPosition(APP_PATH)).toBeUndefined();
+  });
+
+  it("falls back to a path-segment suffix match when the worktree path is unknown", () => {
+    const editor = createEditor(WORKTREE_APP_PATH);
+    getMonacoInstance.mockReturnValue({ editor: { getEditors: () => [editor] } });
+    setPendingCursorPosition(APP_PATH, 12, 1);
+
+    expect(scrollEditorIfMounted(APP_PATH, null, 42, 3)).toBe(true);
+
+    expect(editor.setPosition).toHaveBeenCalledWith({ lineNumber: 42, column: 3 });
+    expect(editor.revealLineInCenter).toHaveBeenCalledWith(42);
+    expect(editor.focus).toHaveBeenCalledTimes(1);
+    expect(consumePendingCursorPosition(APP_PATH)).toBeUndefined();
+  });
+
+  it("requires the repo segment when repo-scoped fallback scrolling", () => {
+    const wrongRepoEditor = createEditor("/worktree/backend/src/app.ts");
+    const repoEditor = createEditor("/worktree/frontend/src/app.ts");
+    getMonacoInstance.mockReturnValue({
+      editor: { getEditors: () => [wrongRepoEditor, repoEditor] },
+    });
+    setPendingCursorPosition(APP_PATH, 12, 1, REPO);
+
+    expect(scrollEditorIfMounted(APP_PATH, null, 42, 3, REPO)).toBe(true);
+
+    expect(wrongRepoEditor.setPosition).not.toHaveBeenCalled();
+    expect(repoEditor.setPosition).toHaveBeenCalledWith({ lineNumber: 42, column: 3 });
+    expect(consumePendingCursorPosition(APP_PATH, REPO)).toBeUndefined();
+  });
+
+  it("does not suffix-scroll a repo-scoped request into an unscoped model path", () => {
+    const editor = createEditor(WORKTREE_APP_PATH);
+    getMonacoInstance.mockReturnValue({ editor: { getEditors: () => [editor] } });
+    setPendingCursorPosition(APP_PATH, 12, 1, REPO);
+
+    expect(scrollEditorIfMounted(APP_PATH, null, 42, 3, REPO)).toBe(false);
+
+    expect(editor.setPosition).not.toHaveBeenCalled();
+    expect(consumePendingCursorPosition(APP_PATH, REPO)).toEqual({ line: 12, column: 1 });
   });
 
   it("returns false when no mounted Monaco editor matches the path", () => {

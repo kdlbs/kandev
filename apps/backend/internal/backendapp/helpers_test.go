@@ -118,6 +118,82 @@ func TestAppendAgentctlStatusMessage_IncludesWorkspacePathForReload(t *testing.T
 	}
 }
 
+func TestResolveRepositoryIDForSessionSubpathMatchesSanitizedRepositoryName(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "backendapp-session.db")
+	dbConn, err := db.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	repo, err := sqlitetaskrepo.NewWithDB(sqlxDB, sqlxDB, nil)
+	if err != nil {
+		t.Fatalf("new task repo: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlxDB.Close() })
+
+	log, err := logger.NewLogger(logger.LoggingConfig{
+		Level:      "error",
+		Format:     "console",
+		OutputPath: "stdout",
+	})
+	if err != nil {
+		t.Fatalf("NewLogger: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if _, err := sqlxDB.Exec(sqlxDB.Rebind(`
+		INSERT INTO workspaces (id, name, created_at, updated_at)
+		VALUES (?, ?, ?, ?)
+	`), "workspace-1", "Workspace", now, now); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if _, err := sqlxDB.Exec(sqlxDB.Rebind(`
+		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), "task-1", "workspace-1", "Test task", now, now); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	if _, err := sqlxDB.Exec(sqlxDB.Rebind(`
+		INSERT INTO task_sessions (id, task_id, started_at, updated_at)
+		VALUES (?, ?, ?, ?)
+	`), "session-1", "task-1", now, now); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID:                     "repo-1",
+		WorkspaceID:            "workspace-1",
+		Name:                   "kdlbs/kandev",
+		SourceType:             "remote",
+		Provider:               "github",
+		ProviderOwner:          "kdlbs",
+		ProviderName:           "kandev",
+		DefaultBranch:          "main",
+		WorktreeBranchPrefix:   "feature/",
+		WorktreeBranchTemplate: "feature/{title}-{suffix}",
+		PullBeforeWorktree:     true,
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
+		ID:             "session-worktree-1",
+		SessionID:      "session-1",
+		WorktreeID:     "worktree-1",
+		RepositoryID:   "repo-1",
+		WorktreePath:   "/tmp/worktree",
+		WorktreeBranch: "feature/test",
+		BranchSlug:     "test",
+		Position:       0,
+	}); err != nil {
+		t.Fatalf("CreateTaskSessionWorktree: %v", err)
+	}
+
+	got := resolveRepositoryIDForSessionSubpath(ctx, repo, "session-1", "kdlbs-kandev", log)
+	if got != "repo-1" {
+		t.Fatalf("resolveRepositoryIDForSessionSubpath = %q, want repo-1", got)
+	}
+}
+
 func TestStopLifecycleManagerAllowsAgentctlInstanceCleanupWindow(t *testing.T) {
 	log, err := logger.NewLogger(logger.LoggingConfig{
 		Level:      "error",

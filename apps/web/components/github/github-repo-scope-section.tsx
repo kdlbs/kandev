@@ -11,7 +11,11 @@ import {
   fetchGitHubWorkspaceSettings,
   updateGitHubWorkspaceSettings,
 } from "@/lib/api/domains/github-api";
-import type { GitHubRepoScopeMode, RepoFilter } from "@/lib/types/github";
+import type {
+  GitHubRepoScopeMode,
+  RepoFilter,
+  UpdateGitHubWorkspaceSettingsRequest,
+} from "@/lib/types/github";
 
 function splitCSV(value: string): string[] {
   return value
@@ -124,8 +128,8 @@ export function GitHubRepoScopeSection({ workspaceId }: { workspaceId: string })
   const parsedRepos = useMemo(() => parseRepoFilters(repos), [repos]);
   const invalidRepos = useMemo(() => {
     const entries = splitCSV(repos);
-    return entries.length > 0 && parsedRepos.length !== entries.length;
-  }, [parsedRepos.length, repos]);
+    return mode === "repos" && entries.length > 0 && parsedRepos.length !== entries.length;
+  }, [mode, parsedRepos.length, repos]);
 
   useEffect(() => {
     let cancelled = false;
@@ -156,12 +160,17 @@ export function GitHubRepoScopeSection({ workspaceId }: { workspaceId: string })
     }
     setSaving(true);
     try {
-      const updated = await updateGitHubWorkspaceSettings({
+      const payload: UpdateGitHubWorkspaceSettingsRequest = {
         workspace_id: workspaceId,
         repo_scope_mode: mode,
-        repo_scope_orgs: splitCSV(orgs),
-        repo_scope_repos: parsedRepos,
-      });
+      };
+      if (mode === "orgs") {
+        payload.repo_scope_orgs = splitCSV(orgs);
+      }
+      if (mode === "repos") {
+        payload.repo_scope_repos = parsedRepos;
+      }
+      const updated = await updateGitHubWorkspaceSettings(payload);
       setMode(updated.repo_scope_mode);
       setOrgs((updated.repo_scope_orgs ?? []).join(", "));
       setRepos(repoFiltersToInput(updated.repo_scope_repos ?? []));

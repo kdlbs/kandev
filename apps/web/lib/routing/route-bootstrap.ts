@@ -44,14 +44,12 @@ type SettingsWorkspaceItem = {
 
 export function resolveSettingsActiveWorkspaceId(
   workspaceItems: SettingsWorkspaceItem[],
-  requestedWorkspaceId: string | null,
   activeCookieWorkspaceId: string | null,
   settingsWorkspaceId: string | null,
 ): string | null {
   const kanbanWorkspaceItems = workspaceItems.filter((workspace) => !workspace.office_workflow_id);
 
   return (
-    workspaceItems.find((workspace) => workspace.id === requestedWorkspaceId)?.id ??
     kanbanWorkspaceItems.find((workspace) => workspace.id === activeCookieWorkspaceId)?.id ??
     kanbanWorkspaceItems.find((workspace) => workspace.id === settingsWorkspaceId)?.id ??
     kanbanWorkspaceItems[0]?.id ??

@@ -852,6 +852,65 @@ func TestService_CreateRepository_DefaultWorktreeBranchPrefix(t *testing.T) {
 	}
 }
 
+func TestService_CreateRepository_DefaultWorktreeBranchTemplate(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID: "ws-1",
+		Name:        "Test Repo",
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository failed: %v", err)
+	}
+	if created.WorktreeBranchTemplate != worktree.DefaultBranchNameTemplate {
+		t.Fatalf("expected default template %q, got %q", worktree.DefaultBranchNameTemplate, created.WorktreeBranchTemplate)
+	}
+
+	stored, err := repo.GetRepository(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetRepository failed: %v", err)
+	}
+	if stored.WorktreeBranchTemplate != worktree.DefaultBranchNameTemplate {
+		t.Fatalf("expected stored template %q, got %q", worktree.DefaultBranchNameTemplate, stored.WorktreeBranchTemplate)
+	}
+}
+
+func TestService_UpdateRepository_WorktreeBranchTemplate(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID: "ws-1",
+		Name:        "Test Repo",
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository failed: %v", err)
+	}
+
+	template := "feature/{ticket}-{title}"
+	updated, err := svc.UpdateRepository(ctx, created.ID, &UpdateRepositoryRequest{
+		WorktreeBranchTemplate: &template,
+	})
+	if err != nil {
+		t.Fatalf("UpdateRepository failed: %v", err)
+	}
+	if updated.WorktreeBranchTemplate != template {
+		t.Fatalf("expected template %q, got %q", template, updated.WorktreeBranchTemplate)
+	}
+
+	stored, err := repo.GetRepository(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetRepository failed: %v", err)
+	}
+	if stored.WorktreeBranchTemplate != template {
+		t.Fatalf("expected stored template %q, got %q", template, stored.WorktreeBranchTemplate)
+	}
+}
+
 func TestService_CreateRepository_PullBeforeWorktreeFalse(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

@@ -172,6 +172,19 @@ func provideGateway(
 				githubSvc.AssociatePRByURL(ctx, sessionID, taskID, repositoryID, prURL, branch)
 			})
 		}
+		gitHandlers.SetOnBranchRenamed(func(ctx context.Context, sessionID, newName, repo string) {
+			repositoryID := resolveRepositoryIDForSessionSubpath(ctx, taskRepo, sessionID, repo, log)
+			if repositoryID == "" {
+				return
+			}
+			if err := taskRepo.UpdateTaskSessionWorktreeBranchByRepository(ctx, sessionID, repositoryID, newName); err != nil {
+				log.Warn("failed to update renamed branch snapshot",
+					zap.String("session_id", sessionID),
+					zap.String("repository_id", repositoryID),
+					zap.String("branch", newName),
+					zap.Error(err))
+			}
+		})
 		gitHandlers.SetOnGitOperationFailed(func(ctx context.Context, sessionID, taskID, operation, errorOutput string) {
 			fixPrompt := fmt.Sprintf("The git %s command failed with the following error:\n\n```\n%s\n```\n\nPlease fix the issues reported above.", operation, errorOutput)
 			if _, err := taskSvc.CreateMessage(ctx, &taskservice.CreateMessageRequest{

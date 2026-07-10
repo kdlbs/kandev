@@ -164,6 +164,109 @@ func TestService_ResolvePromptContentFallsBack(t *testing.T) {
 	}
 }
 
+func TestService_ResolvePromptReferencesRecursive(t *testing.T) {
+	svc, cleanup := createService(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if _, err := svc.CreatePrompt(ctx, "outer", "Before @middle after"); err != nil {
+		t.Fatalf("seed outer: %v", err)
+	}
+	if _, err := svc.CreatePrompt(ctx, "middle", "Middle says @inner"); err != nil {
+		t.Fatalf("seed middle: %v", err)
+	}
+	if _, err := svc.CreatePrompt(ctx, "inner", "Resolved inner"); err != nil {
+		t.Fatalf("seed inner: %v", err)
+	}
+
+	got, err := svc.ResolvePromptReferences(ctx, "Please run @outer")
+	if err != nil {
+		t.Fatalf("resolve references: %v", err)
+	}
+	want := []PromptReferenceExpansion{
+		{Name: "outer", Content: "Before @middle after"},
+		{Name: "middle", Content: "Middle says @inner"},
+		{Name: "inner", Content: "Resolved inner"},
+	}
+	if got == nil || len(got) != len(want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got[%d]=%#v, want %#v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestService_ResolvePromptReferencesSkipsListWithoutAtMention(t *testing.T) {
+	svc := NewService(panicListPromptsRepo{})
+
+	got, err := svc.ResolvePromptReferences(context.Background(), "plain text")
+	if err != nil {
+		t.Fatalf("resolve references: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("got %#v, want empty expansions", got)
+	}
+}
+
+func TestService_ResolvePromptReferencesSkipsUnknownInlineAndCycles(t *testing.T) {
+	svc, cleanup := createService(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if _, err := svc.CreatePrompt(ctx, "outer", "Outer @inner"); err != nil {
+		t.Fatalf("seed outer: %v", err)
+	}
+	if _, err := svc.CreatePrompt(ctx, "inner", "Inner @outer"); err != nil {
+		t.Fatalf("seed inner: %v", err)
+	}
+
+	got, err := svc.ResolvePromptReferences(ctx, "email a@outer @missing @outer")
+	if err != nil {
+		t.Fatalf("resolve references: %v", err)
+	}
+	want := []PromptReferenceExpansion{
+		{Name: "outer", Content: "Outer @inner"},
+		{Name: "inner", Content: "Inner @outer"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got[%d]=%#v, want %#v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestService_ResolvePromptReferencesMatchesStoredNames(t *testing.T) {
+	svc, cleanup := createService(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if _, err := svc.CreatePrompt(ctx, "Daily", "Short daily prompt"); err != nil {
+		t.Fatalf("seed daily: %v", err)
+	}
+	if _, err := svc.CreatePrompt(ctx, "Daily Summary", "Summarize the work."); err != nil {
+		t.Fatalf("seed daily summary: %v", err)
+	}
+
+	got, err := svc.ResolvePromptReferences(ctx, "Please run @Daily Summary.")
+	if err != nil {
+		t.Fatalf("resolve references: %v", err)
+	}
+	want := []PromptReferenceExpansion{{Name: "Daily Summary", Content: "Summarize the work."}}
+	if len(got) != len(want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got[%d]=%#v, want %#v", i, got[i], want[i])
+		}
+	}
+}
+
 // raceRepo simulates a TOCTOU loss against the SQLite UNIQUE index: the
 // pre-check sees no row, but the write fails because a concurrent insert
 // landed first. The service must translate that into ErrPromptAlreadyExists
@@ -172,6 +275,14 @@ type raceRepo struct {
 	promptstore.Repository
 	createErr error
 	updateErr error
+}
+
+type panicListPromptsRepo struct {
+	promptstore.Repository
+}
+
+func (panicListPromptsRepo) ListPrompts(context.Context) ([]*models.Prompt, error) {
+	panic("ListPrompts should not be called")
 }
 
 func (r *raceRepo) GetPromptByID(_ context.Context, id string) (*models.Prompt, error) {

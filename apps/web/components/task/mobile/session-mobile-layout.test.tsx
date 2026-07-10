@@ -29,6 +29,7 @@ const OTHER_FILE: OpenFileTab = {
 };
 
 const CHAT_LINK_PATH = "src/chat-link.ts";
+const REPO = "frontend";
 
 function renderHandlers(initialSid: string | null = "s1") {
   const handlePanelChange = vi.fn();
@@ -63,6 +64,7 @@ describe("useMobilePanelHandlers", () => {
       CHAT_LINK_PATH,
       expect.any(Function),
       expect.any(Function),
+      { repo: undefined, signal: expect.objectContaining({ aborted: false }) },
     );
 
     const openFile = fetchAndOpenFileMock.mock.calls[0]?.[2] as (file: OpenFileTab) => void;
@@ -70,6 +72,19 @@ describe("useMobilePanelHandlers", () => {
 
     expect(result.current.selectedFile).toEqual(MOCK_FILE);
     expect(handlePanelChange).toHaveBeenCalledWith("files");
+  });
+
+  it("passes repo through when opening a walkthrough file from mobile", () => {
+    const { result } = renderHandlers();
+    act(() => result.current.handleOpenFileFromChat(CHAT_LINK_PATH, REPO));
+
+    expect(fetchAndOpenFileMock).toHaveBeenCalledWith(
+      "s1",
+      CHAT_LINK_PATH,
+      expect.any(Function),
+      expect.any(Function),
+      { repo: REPO, signal: expect.objectContaining({ aborted: false }) },
+    );
   });
 
   it("handleOpenFileFromChat no-ops when no active session", () => {
@@ -116,6 +131,7 @@ describe("useMobilePanelHandlers", () => {
       CHAT_LINK_PATH,
       expect.any(Function),
       expect.any(Function),
+      { repo: undefined, signal: expect.objectContaining({ aborted: false }) },
     );
 
     // Simulate session switch before the async callback fires
@@ -137,5 +153,33 @@ describe("useMobilePanelHandlers", () => {
       result.current.handleOpenFile(OTHER_FILE);
     });
     expect(result.current.selectedFile).toEqual(OTHER_FILE);
+  });
+});
+
+describe("useMobilePanelHandlers request cancellation", () => {
+  beforeEach(() => {
+    fetchAndOpenFileMock.mockReset();
+  });
+
+  it("aborts stale chat file requests when a newer one starts", () => {
+    const { result } = renderHandlers();
+    act(() => result.current.handleOpenFileFromChat(CHAT_LINK_PATH));
+    const firstOptions = fetchAndOpenFileMock.mock.calls[0]?.[4] as { signal: AbortSignal };
+
+    act(() => result.current.handleOpenFileFromChat("src/newer.ts"));
+    const secondOptions = fetchAndOpenFileMock.mock.calls[1]?.[4] as { signal: AbortSignal };
+
+    expect(firstOptions.signal.aborted).toBe(true);
+    expect(secondOptions.signal.aborted).toBe(false);
+  });
+
+  it("aborts stale chat file requests when the session changes", () => {
+    const { result, rerender } = renderHandlers();
+    act(() => result.current.handleOpenFileFromChat(CHAT_LINK_PATH));
+    const firstOptions = fetchAndOpenFileMock.mock.calls[0]?.[4] as { signal: AbortSignal };
+
+    rerender({ sid: "s2" });
+
+    expect(firstOptions.signal.aborted).toBe(true);
   });
 });

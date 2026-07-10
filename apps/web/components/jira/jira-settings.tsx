@@ -670,10 +670,10 @@ export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) 
   );
 }
 
-export function JiraIntegrationPage() {
+export function JiraIntegrationPage({ workspaceId }: { workspaceId?: string } = {}) {
   return (
     <div className="space-y-8">
-      <WorkspaceScopedSection>
+      <WorkspaceScopedSection workspaceId={workspaceId}>
         {(workspaceId) => <JiraConnectionSection key={workspaceId} workspaceId={workspaceId} />}
       </WorkspaceScopedSection>
       <JiraIssueWatchersSection />

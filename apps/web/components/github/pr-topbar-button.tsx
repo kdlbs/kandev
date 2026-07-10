@@ -34,6 +34,7 @@ import {
   isPRWaitingOnBranchProtection,
 } from "@/components/github/pr-task-icon";
 import { prTaskKey } from "@/components/github/pr-detail-panel";
+import { prIdentitySlug } from "@/components/github/pr-utils";
 import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS, PRCIPopover } from "@/components/github/pr-ci-popover";
 import { MultiPRCIPopover } from "@/components/github/multi-pr-ci-popover";
 import { useAppStore } from "@/components/state-provider";
@@ -307,7 +308,7 @@ function MultiPRMenuContent({ prs }: { prs: TaskPR[] }) {
           key={pr.id}
           onClick={() => addPRPanel(prTaskKey(pr), activeSessionId)}
           className="cursor-pointer gap-2"
-          data-testid={`pr-topbar-menu-item-${pr.pr_number}`}
+          data-testid={`pr-topbar-menu-item-${prIdentitySlug(pr)}`}
         >
           <IconGitPullRequest className={`h-4 w-4 shrink-0 ${getPRStatusColor(pr)}`} />
           <div className="flex flex-col min-w-0 flex-1">

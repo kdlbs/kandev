@@ -109,6 +109,7 @@ type TurnService interface {
 // payloads itself.
 type TaskEventPublisher interface {
 	PublishTaskUpdated(ctx context.Context, task *models.Task)
+	PublishTaskStateChanged(ctx context.Context, task *models.Task, oldState v1.TaskState)
 }
 
 // WorkflowStepGetter retrieves workflow step information for prompt building.
@@ -608,6 +609,13 @@ func (s *Service) publishTaskUpdated(ctx context.Context, task *models.Task) {
 		return
 	}
 	s.taskEvents.PublishTaskUpdated(ctx, task)
+}
+
+func (s *Service) publishTaskStateChanged(ctx context.Context, task *models.Task, oldState v1.TaskState) {
+	if s.taskEvents == nil || task == nil {
+		return
+	}
+	s.taskEvents.PublishTaskStateChanged(ctx, task, oldState)
 }
 
 // StepRequiresCompletionSignal reports whether the workflow step bound to taskID

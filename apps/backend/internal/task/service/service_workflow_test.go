@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -13,7 +14,8 @@ import (
 )
 
 type fakeWorkflowStepGetter struct {
-	steps map[string]*wfmodels.WorkflowStep
+	steps   map[string]*wfmodels.WorkflowStep
+	nextErr error
 }
 
 func (f *fakeWorkflowStepGetter) GetStep(_ context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
@@ -24,12 +26,19 @@ func (f *fakeWorkflowStepGetter) GetStep(_ context.Context, stepID string) (*wfm
 }
 
 func (f *fakeWorkflowStepGetter) GetNextStepByPosition(_ context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error) {
+	if f.nextErr != nil {
+		return nil, f.nextErr
+	}
+	var next *wfmodels.WorkflowStep
 	for _, step := range f.steps {
-		if step.WorkflowID == workflowID && step.Position == currentPosition+1 {
-			return step, nil
+		if step.WorkflowID != workflowID || step.Position <= currentPosition {
+			continue
+		}
+		if next == nil || step.Position < next.Position {
+			next = step
 		}
 	}
-	return nil, nil
+	return next, nil
 }
 
 type testStepNotFound struct{}
@@ -138,6 +147,175 @@ func TestService_MoveTaskAllowsPendingReviewWhenSessionIdle(t *testing.T) {
 	if moved.Task.WorkflowStepID != "step-review-target" {
 		t.Fatalf("expected step-review-target, got %s", moved.Task.WorkflowStepID)
 	}
+}
+
+func TestService_MoveTaskToTerminalStepCompletesTask(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
+	getter.steps["step-done"] = &wfmodels.WorkflowStep{
+		ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2,
+	}
+	createMoveTask(t, ctx, repo, "task-terminal", "wf-source", "step-source", nil)
+	eventBus.ClearEvents()
+
+	moved, err := svc.MoveTask(ctx, "task-terminal", "wf-source", "step-done", 0)
+	if err != nil {
+		t.Fatalf("MoveTask: %v", err)
+	}
+	if moved.Task.State != v1.TaskStateCompleted {
+		t.Fatalf("moved task state = %q, want COMPLETED", moved.Task.State)
+	}
+
+	task, err := repo.GetTask(ctx, "task-terminal")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.State != v1.TaskStateCompleted {
+		t.Fatalf("persisted task state = %q, want COMPLETED", task.State)
+	}
+	findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskStateChanged)
+}
+
+func TestService_MoveTaskToTerminalStepPreservesTerminalFailureStates(t *testing.T) {
+	cases := []struct {
+		name  string
+		state v1.TaskState
+	}{
+		{name: "failed", state: v1.TaskStateFailed},
+		{name: "cancelled", state: v1.TaskStateCancelled},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _, repo := createTestService(t)
+			ctx := context.Background()
+			seedMoveWorkflows(t, ctx, repo)
+			seedMoveSteps(svc)
+			getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
+			getter.steps["step-done"] = &wfmodels.WorkflowStep{
+				ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2,
+			}
+			createMoveTask(t, ctx, repo, "task-terminal-"+tc.name, "wf-source", "step-source", nil)
+			task, err := repo.GetTask(ctx, "task-terminal-"+tc.name)
+			if err != nil {
+				t.Fatalf("GetTask: %v", err)
+			}
+			task.State = tc.state
+			must(t, repo.UpdateTask(ctx, task))
+
+			moved, err := svc.MoveTask(ctx, task.ID, "wf-source", "step-done", 0)
+			if err != nil {
+				t.Fatalf("MoveTask: %v", err)
+			}
+			if moved.Task.State != tc.state {
+				t.Fatalf("moved task state = %q, want %q", moved.Task.State, tc.state)
+			}
+
+			task, err = repo.GetTask(ctx, task.ID)
+			if err != nil {
+				t.Fatalf("GetTask: %v", err)
+			}
+			if task.State != tc.state {
+				t.Fatalf("persisted task state = %q, want %q", task.State, tc.state)
+			}
+		})
+	}
+}
+
+func TestService_MoveTaskFailsWhenTerminalStatusLookupFails(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
+	getter.nextErr = errors.New("next step lookup failed")
+	createMoveTask(t, ctx, repo, "task-terminal-lookup-error", "wf-source", "step-source", nil)
+
+	_, err := svc.MoveTask(ctx, "task-terminal-lookup-error", "wf-source", "step-review-target", 0)
+	if err == nil {
+		t.Fatalf("expected move to fail when terminal status lookup fails")
+	}
+
+	task, err := repo.GetTask(ctx, "task-terminal-lookup-error")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.WorkflowStepID != "step-source" {
+		t.Fatalf("task moved despite lookup error: %s", task.WorkflowStepID)
+	}
+}
+
+func TestService_MoveTaskOutOfTerminalStepReopensTask(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
+	getter.steps["step-done"] = &wfmodels.WorkflowStep{
+		ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2,
+	}
+	createMoveTask(t, ctx, repo, "task-reopened", "wf-source", "step-done", nil)
+	task, err := repo.GetTask(ctx, "task-reopened")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	task.State = v1.TaskStateCompleted
+	must(t, repo.UpdateTask(ctx, task))
+	eventBus.ClearEvents()
+
+	moved, err := svc.MoveTask(ctx, "task-reopened", "wf-source", "step-source", 0)
+	if err != nil {
+		t.Fatalf("MoveTask: %v", err)
+	}
+	if moved.Task.State != v1.TaskStateTODO {
+		t.Fatalf("moved task state = %q, want TODO", moved.Task.State)
+	}
+
+	task, err = repo.GetTask(ctx, "task-reopened")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.State != v1.TaskStateTODO {
+		t.Fatalf("persisted task state = %q, want TODO", task.State)
+	}
+	findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskStateChanged)
+}
+
+func TestService_ApproveSessionToTerminalStepCompletesTask(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
+	getter.steps["step-done"] = &wfmodels.WorkflowStep{
+		ID: "step-done", WorkflowID: "wf-source", Name: "Approved", Position: 2,
+	}
+	createMoveTask(t, ctx, repo, "task-approved", "wf-source", "step-review-target", nil)
+	createMoveSession(t, ctx, repo, "session-approved", "task-approved", models.TaskSessionStateWaitingForInput, models.ReviewStatusPending)
+	eventBus.ClearEvents()
+
+	result, err := svc.ApproveSession(ctx, "session-approved")
+	if err != nil {
+		t.Fatalf("ApproveSession: %v", err)
+	}
+	if result.Task == nil || result.Task.WorkflowStepID != "step-done" {
+		t.Fatalf("approved task step = %+v, want step-done", result.Task)
+	}
+	if result.Task.State != v1.TaskStateCompleted {
+		t.Fatalf("approved task state = %q, want COMPLETED", result.Task.State)
+	}
+
+	task, err := repo.GetTask(ctx, "task-approved")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.State != v1.TaskStateCompleted {
+		t.Fatalf("persisted task state = %q, want COMPLETED", task.State)
+	}
+	findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskStateChanged)
 }
 
 func TestService_MoveTaskRejectsRunningSession(t *testing.T) {
@@ -259,6 +437,76 @@ func TestService_BulkMoveTasksUpdatedEventIncludesSourceWorkflow(t *testing.T) {
 	}
 	if got := updatedData["old_workflow_id"]; got != "wf-source" {
 		t.Fatalf("old_workflow_id = %v, want wf-source", got)
+	}
+}
+
+func TestService_BulkMoveTasksToTerminalStepCompletesTasks(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
+	getter.steps["step-done"] = &wfmodels.WorkflowStep{
+		ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2,
+	}
+	createMoveTask(t, ctx, repo, "task-bulk-terminal", "wf-source", "step-source", nil)
+	eventBus.ClearEvents()
+
+	_, err := svc.BulkMoveTasks(ctx, "wf-source", "step-source", "wf-source", "step-done")
+	if err != nil {
+		t.Fatalf("BulkMoveTasks: %v", err)
+	}
+
+	task, err := repo.GetTask(ctx, "task-bulk-terminal")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.State != v1.TaskStateCompleted {
+		t.Fatalf("bulk-moved task state = %q, want COMPLETED", task.State)
+	}
+	findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskStateChanged)
+}
+
+func TestService_BulkMoveTasksToTerminalStepPreservesTerminalFailureStates(t *testing.T) {
+	cases := []struct {
+		name  string
+		state v1.TaskState
+	}{
+		{name: "failed", state: v1.TaskStateFailed},
+		{name: "cancelled", state: v1.TaskStateCancelled},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _, repo := createTestService(t)
+			ctx := context.Background()
+			seedMoveWorkflows(t, ctx, repo)
+			seedMoveSteps(svc)
+			getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
+			getter.steps["step-done"] = &wfmodels.WorkflowStep{
+				ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2,
+			}
+			createMoveTask(t, ctx, repo, "task-bulk-terminal-"+tc.name, "wf-source", "step-source", nil)
+			task, err := repo.GetTask(ctx, "task-bulk-terminal-"+tc.name)
+			if err != nil {
+				t.Fatalf("GetTask: %v", err)
+			}
+			task.State = tc.state
+			must(t, repo.UpdateTask(ctx, task))
+
+			_, err = svc.BulkMoveTasks(ctx, "wf-source", "step-source", "wf-source", "step-done")
+			if err != nil {
+				t.Fatalf("BulkMoveTasks: %v", err)
+			}
+
+			task, err = repo.GetTask(ctx, task.ID)
+			if err != nil {
+				t.Fatalf("GetTask: %v", err)
+			}
+			if task.State != tc.state {
+				t.Fatalf("bulk-moved task state = %q, want %q", task.State, tc.state)
+			}
+		})
 	}
 }
 

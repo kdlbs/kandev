@@ -305,6 +305,7 @@ export const FileEditorPanel = memo(function FileEditorPanel({
           isSaving={savingFiles.has(fileKey)}
           sessionId={activeSessionId || undefined}
           worktreePath={worktreePath}
+          repo={repo}
           enableComments={!!activeSessionId}
           markdownPreview={isMarkdown ? markdownPreview : false}
           onToggleMarkdownPreview={isMarkdown ? onToggleMarkdownPreview : undefined}

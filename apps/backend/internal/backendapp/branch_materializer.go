@@ -135,19 +135,21 @@ func (b *branchMaterializer) prepareMaterializeRequest(
 	}
 	slug := deriveBranchSlugForRow(tr)
 	req := worktree.CreateRequest{
-		TaskID:               taskID,
-		SessionID:            session.ID,
-		TaskTitle:            task.Title,
-		RepositoryID:         repo.ID,
-		RepositoryPath:       repo.LocalPath,
-		BaseBranch:           tr.BaseBranch,
-		FallbackBaseBranch:   repo.DefaultBranch,
-		CheckoutBranch:       tr.CheckoutBranch,
-		WorktreeBranchPrefix: repo.WorktreeBranchPrefix,
-		PullBeforeWorktree:   repo.PullBeforeWorktree,
-		TaskDirName:          env.TaskDirName,
-		RepoName:             repo.Name,
-		BranchSlug:           slug,
+		TaskID:                 taskID,
+		SessionID:              session.ID,
+		TaskTitle:              task.Title,
+		RepositoryID:           repo.ID,
+		RepositoryPath:         repo.LocalPath,
+		BaseBranch:             tr.BaseBranch,
+		FallbackBaseBranch:     repo.DefaultBranch,
+		CheckoutBranch:         tr.CheckoutBranch,
+		WorktreeBranchPrefix:   repo.WorktreeBranchPrefix,
+		WorktreeBranchTemplate: repo.WorktreeBranchTemplate,
+		WorktreeBranchTicket:   worktree.TicketForBranchName(task.Identifier, task.Metadata),
+		PullBeforeWorktree:     repo.PullBeforeWorktree,
+		TaskDirName:            env.TaskDirName,
+		RepoName:               repo.Name,
+		BranchSlug:             slug,
 	}
 	return req, env, session, slug, true, nil
 }

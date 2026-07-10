@@ -8,6 +8,11 @@ import { getFilesPanelScrollPosition, setFilesPanelScrollPosition } from "@/lib/
 import type { useToast } from "@/components/toast-provider";
 import type { useFileBrowserTree } from "./file-browser-hooks";
 
+export type FetchAndOpenFileOptions = {
+  repo?: string;
+  signal?: AbortSignal;
+};
+
 /** Hook for scroll position persistence in the file browser. */
 export function useScrollPersistence(
   sessionId: string,
@@ -116,17 +121,23 @@ export async function fetchAndOpenFile(
   path: string,
   onOpenFile: (file: OpenFileTab) => void,
   toast: ReturnType<typeof useToast>["toast"],
+  options: FetchAndOpenFileOptions = {},
 ) {
+  const { repo, signal } = options;
   try {
+    if (signal?.aborted) return;
     const client = getWebSocketClient();
     if (!client) return;
-    const response: FileContentResponse = await requestFileContent(client, sessionId, path);
+    const response: FileContentResponse = await requestFileContent(client, sessionId, path, repo);
+    if (signal?.aborted) return;
     const { calculateHash } = await import("@/lib/utils/file-diff");
     const hash = await calculateHash(response.content);
+    if (signal?.aborted) return;
     const name = path.split("/").pop() || path;
     onOpenFile({
       path,
       name,
+      repo,
       content: response.content,
       originalContent: response.content,
       originalHash: hash,
@@ -134,6 +145,7 @@ export async function fetchAndOpenFile(
       isBinary: response.is_binary,
     });
   } catch (error) {
+    if (signal?.aborted) return;
     const reason = error instanceof Error ? error.message : "Unknown error";
     toast({ title: "Failed to open file", description: reason, variant: "error" });
   }

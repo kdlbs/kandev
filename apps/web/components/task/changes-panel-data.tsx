@@ -27,6 +27,8 @@ import {
   buildRepoNameById,
 } from "./changes-panel-helpers";
 import type { OpenDiffOptions } from "./changes-diff-target";
+import type { WalkthroughPromptFile } from "@/lib/walkthrough-request";
+import { buildWalkthroughPromptFiles } from "@/lib/walkthrough-prompt-files";
 
 function useChangesPanelStoreData() {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
@@ -242,8 +244,19 @@ export function useChangesPanelData() {
     () => buildPrByRepoMap(taskPRsForMap, repoNameById, pendingByRepo),
     [taskPRsForMap, repoNameById, pendingByRepo],
   );
+  const walkthroughPromptFiles = useMemo<WalkthroughPromptFile[]>(
+    () =>
+      buildWalkthroughPromptFiles({
+        unstagedFiles,
+        stagedFiles,
+        committedFiles: git.statusLoaded ? git.cumulativeDiff?.files : null,
+        prFiles: prData.prFiles,
+      }),
+    [git.cumulativeDiff?.files, git.statusLoaded, prData.prFiles, stagedFiles, unstagedFiles],
+  );
   return {
     activeTaskId,
+    activeSessionId,
     git,
     baseBranchDisplay,
     baseBranchByRepo,
@@ -259,6 +272,7 @@ export function useChangesPanelData() {
     repoDisplayName,
     prByRepo,
     existingPrUrl,
+    walkthroughPromptFiles,
     ...prData,
   };
 }

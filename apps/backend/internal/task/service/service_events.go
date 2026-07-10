@@ -21,6 +21,12 @@ func (s *Service) PublishTaskUpdated(ctx context.Context, task *models.Task) {
 	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
 }
 
+// PublishTaskStateChanged publishes a task.state_changed event for callers
+// that mutate task state outside the normal task service update path.
+func (s *Service) PublishTaskStateChanged(ctx context.Context, task *models.Task, oldState v1.TaskState) {
+	s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
+}
+
 // PublishTaskDeleted publishes a task.deleted event for the given task.
 // Used by cascade-delete callers (HandoffService.DeleteTaskTree) that
 // bypass Service.DeleteTask and therefore would otherwise leave WS

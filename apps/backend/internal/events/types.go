@@ -69,6 +69,13 @@ const (
 	TaskPlanReverted        = "task_plan.reverted"
 )
 
+// Event types for task walkthroughs (agent-authored guided code tours)
+const (
+	TaskWalkthroughCreated = "task_walkthrough.created"
+	TaskWalkthroughUpdated = "task_walkthrough.updated"
+	TaskWalkthroughDeleted = "task_walkthrough.deleted"
+)
+
 // Event types for session turns
 const (
 	TurnStarted   = "turn.started"

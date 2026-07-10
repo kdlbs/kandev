@@ -11,6 +11,7 @@ const (
 	postgresDuplicateColumn = "42701"
 	postgresDuplicateTable  = "42P07"
 	postgresDuplicateObject = "42710"
+	postgresUndefinedTable  = "42P01"
 	sqliteAlreadyExistsText = " already exists"
 )
 
@@ -53,4 +54,21 @@ func isSQLiteDuplicateObjectMessage(s string) bool {
 		strings.HasPrefix(s, "index ") && strings.Contains(s, sqliteAlreadyExistsText) ||
 		strings.HasPrefix(s, "trigger ") && strings.Contains(s, sqliteAlreadyExistsText) ||
 		strings.HasPrefix(s, "view ") && strings.Contains(s, sqliteAlreadyExistsText)
+}
+
+// IsMissingTableError reports whether err means a query referenced a table
+// that does not exist in this database — e.g. a cross-domain JOIN against a
+// table owned by another package's schema that hasn't been initialised yet
+// (isolated unit tests that only set up one domain's tables). Callers use
+// this to fall back to a query that doesn't need the missing table, rather
+// than failing outright.
+func IsMissingTableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == postgresUndefinedTable
+	}
+	return strings.Contains(err.Error(), "no such table")
 }

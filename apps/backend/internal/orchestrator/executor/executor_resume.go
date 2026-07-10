@@ -35,15 +35,16 @@ func isTerminalSessionState(state models.TaskSessionState) bool {
 
 // repoInfo holds resolved repository details for agent launch.
 type repoInfo struct {
-	RepositoryID         string
-	RepositoryPath       string
-	BaseBranch           string
-	CheckoutBranch       string
-	PRNumber             int // GitHub PR number when CheckoutBranch is a PR head; sourced from task_repositories.metadata["pr_number"].
-	Position             int
-	WorktreeBranchPrefix string
-	PullBeforeWorktree   bool
-	Repository           *models.Repository
+	RepositoryID           string
+	RepositoryPath         string
+	BaseBranch             string
+	CheckoutBranch         string
+	PRNumber               int // GitHub PR number when CheckoutBranch is a PR head; sourced from task_repositories.metadata["pr_number"].
+	Position               int
+	WorktreeBranchPrefix   string
+	WorktreeBranchTemplate string
+	PullBeforeWorktree     bool
+	Repository             *models.Repository
 }
 
 // resolvePrimaryRepoInfo fetches and resolves the primary repository info for a task.
@@ -130,6 +131,7 @@ func (e *Executor) resolveTaskRepoInfo(ctx context.Context, tr *models.TaskRepos
 	info.Repository = repo
 	info.RepositoryPath = repo.LocalPath
 	info.WorktreeBranchPrefix = repo.WorktreeBranchPrefix
+	info.WorktreeBranchTemplate = repo.WorktreeBranchTemplate
 	info.PullBeforeWorktree = repo.PullBeforeWorktree
 	if info.BaseBranch == "" && repo.DefaultBranch != "" {
 		info.BaseBranch = repo.DefaultBranch
@@ -543,6 +545,7 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 	if len(session.Worktrees) > 0 && session.Worktrees[0].WorktreeID != "" {
 		metadata["worktree_id"] = session.Worktrees[0].WorktreeID
 	}
+	req.WorktreeBranchTicket = worktree.TicketForBranchName(task.Identifier, metadata)
 
 	execConfig := e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
 
@@ -776,6 +779,9 @@ func (e *Executor) applyResumeMultiRepoConfig(ctx context.Context, task *v1.Task
 	}
 	if len(allRepos) > 1 {
 		req.Repositories = buildRepoSpecs(allRepos)
+		for i := range req.Repositories {
+			req.Repositories[i].WorktreeBranchTicket = req.WorktreeBranchTicket
+		}
 		req.TaskDirName = resolveResumeTaskDirName(existingEnv, task)
 	}
 	return nil
@@ -807,6 +813,7 @@ func (e *Executor) applyResumeWorktreeConfig(
 		req.PRNumber = prNumberFromMetadata(primaryTaskRepo.Metadata)
 	}
 	req.WorktreeBranchPrefix = repository.WorktreeBranchPrefix
+	req.WorktreeBranchTemplate = repository.WorktreeBranchTemplate
 	req.PullBeforeWorktree = repository.PullBeforeWorktree
 	// Worktree manager requires TaskDirName and RepoName. Mirror the
 	// initial-launch path (applyRepositoryConfig) so resumes of single-repo

@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -12,7 +13,16 @@ const defaultAsyncTurnCompleteIdle = 5 * time.Second
 // asyncTurnCompleteIdle is the debounce window. Tests shorten it via
 // setAsyncTurnCompleteIdleForTest; do not add t.Parallel() to tests that call
 // that helper, or they will race each other on this global.
-var asyncTurnCompleteIdle = defaultAsyncTurnCompleteIdle
+var (
+	asyncTurnCompleteIdleMu sync.RWMutex
+	asyncTurnCompleteIdle   = defaultAsyncTurnCompleteIdle
+)
+
+func currentAsyncTurnCompleteIdle() time.Duration {
+	asyncTurnCompleteIdleMu.RLock()
+	defer asyncTurnCompleteIdleMu.RUnlock()
+	return asyncTurnCompleteIdle
+}
 
 func isAsyncTurnContentEvent(event AgentEvent) bool {
 	switch event.Type {
@@ -37,7 +47,7 @@ func (a *Adapter) maybeScheduleAsyncTurnComplete(event AgentEvent) {
 		return
 	}
 
-	delay := asyncTurnCompleteIdle
+	delay := currentAsyncTurnCompleteIdle()
 	a.asyncTurnMu.Lock()
 	finalizer := a.asyncTurnFinalizers[event.SessionID]
 	if finalizer == nil {
@@ -119,7 +129,7 @@ func (a *Adapter) emitCurrentAsyncTurnComplete(sessionID string, seq uint64, pro
 
 	a.logger.Info("emitting synthetic complete event for idle async ACP turn",
 		zap.String("session_id", sessionID),
-		zap.Duration("idle", asyncTurnCompleteIdle))
+		zap.Duration("idle", currentAsyncTurnCompleteIdle()))
 	a.sendUpdate(AgentEvent{
 		Type:      streams.EventTypeComplete,
 		SessionID: sessionID,

@@ -365,7 +365,7 @@ func (r *Repository) ListChildCompletionRows(ctx context.Context, parentID strin
 	}
 	var rows []models.ChildCompletionRow
 	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
-		SELECT id, state, title, updated_at
+		SELECT id, state, title, workflow_step_id, updated_at
 		FROM tasks
 		WHERE parent_id = ? AND archived_at IS NULL AND is_ephemeral = 0
 		ORDER BY created_at ASC, id ASC

@@ -18,6 +18,9 @@ var ErrExecutorRunningNotFound = errors.New("executor running not found")
 // ErrTaskSessionNotFound is returned when no task session record exists.
 var ErrTaskSessionNotFound = errors.New("task session not found")
 
+// ErrTaskWalkthroughNotFound is returned when no walkthrough record exists.
+var ErrTaskWalkthroughNotFound = errors.New("task walkthrough not found")
+
 // ErrExecutorNotFound is returned by the executor repository when no
 // executor row exists for the given ID. Callers should use errors.Is to
 // distinguish "row doesn't exist" (404 semantically) from transport-level
@@ -361,10 +364,12 @@ type Task struct {
 // ChildCompletionRow is the compact active-child projection used to decide
 // whether a parent task's on_children_completed trigger is ready to fire.
 type ChildCompletionRow struct {
-	ID        string       `json:"id" db:"id"`
-	State     v1.TaskState `json:"state" db:"state"`
-	Title     string       `json:"title" db:"title"`
-	UpdatedAt time.Time    `json:"updated_at" db:"updated_at"`
+	ID                   string       `json:"id" db:"id"`
+	State                v1.TaskState `json:"state" db:"state"`
+	Title                string       `json:"title" db:"title"`
+	WorkflowStepID       string       `json:"workflow_step_id" db:"workflow_step_id"`
+	TerminalWorkflowStep bool         `json:"terminal_workflow_step"` // computed by annotateTerminalChildSteps, not a DB column
+	UpdatedAt            time.Time    `json:"updated_at" db:"updated_at"`
 }
 
 // IsTerminalTaskState reports whether a task state means no further child work
@@ -770,20 +775,21 @@ type Repository struct {
 	// populated after the repo is cloned/synced on the agent host.
 	LocalPath string `json:"local_path"`
 	// Provider fields describe the upstream source (e.g. github/gitlab) for future syncing.
-	Provider             string     `json:"provider"`
-	ProviderRepoID       string     `json:"provider_repo_id"`
-	ProviderOwner        string     `json:"provider_owner"`
-	ProviderName         string     `json:"provider_name"`
-	DefaultBranch        string     `json:"default_branch"`
-	WorktreeBranchPrefix string     `json:"worktree_branch_prefix"`
-	PullBeforeWorktree   bool       `json:"pull_before_worktree"`
-	SetupScript          string     `json:"setup_script"`
-	CleanupScript        string     `json:"cleanup_script"`
-	DevScript            string     `json:"dev_script"`
-	CopyFiles            string     `json:"copy_files"`
-	CreatedAt            time.Time  `json:"created_at"`
-	UpdatedAt            time.Time  `json:"updated_at"`
-	DeletedAt            *time.Time `json:"deleted_at,omitempty"`
+	Provider               string     `json:"provider"`
+	ProviderRepoID         string     `json:"provider_repo_id"`
+	ProviderOwner          string     `json:"provider_owner"`
+	ProviderName           string     `json:"provider_name"`
+	DefaultBranch          string     `json:"default_branch"`
+	WorktreeBranchPrefix   string     `json:"worktree_branch_prefix"`
+	WorktreeBranchTemplate string     `json:"worktree_branch_template"`
+	PullBeforeWorktree     bool       `json:"pull_before_worktree"`
+	SetupScript            string     `json:"setup_script"`
+	CleanupScript          string     `json:"cleanup_script"`
+	DevScript              string     `json:"dev_script"`
+	CopyFiles              string     `json:"copy_files"`
+	CreatedAt              time.Time  `json:"created_at"`
+	UpdatedAt              time.Time  `json:"updated_at"`
+	DeletedAt              *time.Time `json:"deleted_at,omitempty"`
 }
 
 // RepositoryScript represents a custom script for a repository
@@ -1147,6 +1153,32 @@ type TaskPlanRevision struct {
 	RevertOfRevisionID *string   `json:"revert_of_revision_id,omitempty"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"` // bumps on coalesce merge
+}
+
+// TaskWalkthrough is an agent-authored guided code tour attached to a task.
+// It is the "what & where" of a review narration: an ordered list of Steps,
+// each anchored to a concrete repo/file/line, rendered as popovers over the
+// review diff. Mirrors the TaskPlan artifact pattern (one per task, agent-authored).
+type TaskWalkthrough struct {
+	ID        string            `json:"id"`
+	TaskID    string            `json:"task_id"`
+	Title     string            `json:"title"`
+	Steps     []WalkthroughStep `json:"steps"`
+	CreatedBy string            `json:"created_by"` // always "agent"
+	CreatedAt time.Time         `json:"created_at"`
+	UpdatedAt time.Time         `json:"updated_at"`
+}
+
+// WalkthroughStep is a single anchored stop in a TaskWalkthrough. Text is
+// markdown shown in the popover; File/Line locate the anchor inside the diff
+// (Repo disambiguates in multi-repo reviews, LineEnd optionally spans a range).
+type WalkthroughStep struct {
+	Title   string `json:"title,omitempty"`
+	Repo    string `json:"repo,omitempty"`
+	File    string `json:"file"`
+	Line    int    `json:"line"`
+	LineEnd int    `json:"line_end,omitempty"`
+	Text    string `json:"text"`
 }
 
 // TaskDocument represents a named document (plan, spec, notes, etc.) associated with a task.

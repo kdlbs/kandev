@@ -5,6 +5,7 @@ import { IconGitPullRequest } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { PRCIPopover } from "@/components/github/pr-ci-popover";
 import { getPRStatusColor, pickDefaultPR } from "@/components/github/pr-task-icon";
+import { prIdentitySlug } from "@/components/github/pr-utils";
 import { usePRFeedbackBackgroundSync } from "@/hooks/domains/github/use-pr-ci-popover";
 import type { TaskPR } from "@/lib/types/github";
 
@@ -18,8 +19,16 @@ function PRFeedbackWarmer({ pr }: { pr: TaskPR }) {
   return null;
 }
 
+/**
+ * DOM id for a PR tab's roving-tabindex button.
+ *
+ * @param uid - The popover instance's `useId()` value, so ids stay unique
+ *   across multiple popovers mounted at once.
+ * @param pr - The PR the tab renders; identity-scoped so two PRs never
+ *   collide within one popover.
+ */
 function prTabDomId(uid: string, pr: TaskPR): string {
-  return `${uid}-pr-tab-${pr.repo}-${pr.pr_number}`;
+  return `${uid}-pr-tab-${prIdentitySlug(pr)}`;
 }
 
 function PRTab({
@@ -45,7 +54,7 @@ function PRTab({
       tabIndex={active ? 0 : -1}
       aria-selected={active}
       aria-controls={panelId}
-      data-testid={`pr-popover-tab-${pr.repo}-${pr.pr_number}`}
+      data-testid={`pr-popover-tab-${prIdentitySlug(pr)}`}
       data-active={active ? "true" : "false"}
       onClick={() => onSelect(pr)}
       className={cn(

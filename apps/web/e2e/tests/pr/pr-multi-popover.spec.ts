@@ -142,14 +142,23 @@ test.describe("Multi-PR CI popover", () => {
     await expect(session.prTopbarPopoverAggregate()).toBeVisible({ timeout: 10_000 });
 
     // Default tab = worst status: failing web#42, not first-created green api#77.
-    await expect(session.prMultiPopoverTab("web", 42)).toHaveAttribute("data-active", "true");
-    await expect(session.prMultiPopoverTab("api", 77)).toHaveAttribute("data-active", "false");
+    await expect(session.prMultiPopoverTab(OWNER, "web", 42)).toHaveAttribute(
+      "data-active",
+      "true",
+    );
+    await expect(session.prMultiPopoverTab(OWNER, "api", 77)).toHaveAttribute(
+      "data-active",
+      "false",
+    );
     // Body shows the failing PR's bucket groups (failed group present).
     await expect(session.prCheckGroup("failed")).toBeVisible();
 
     // Switch to the green PR: failed group disappears, passed shows 4.
-    await session.prMultiPopoverTab("api", 77).click();
-    await expect(session.prMultiPopoverTab("api", 77)).toHaveAttribute("data-active", "true");
+    await session.prMultiPopoverTab(OWNER, "api", 77).click();
+    await expect(session.prMultiPopoverTab(OWNER, "api", 77)).toHaveAttribute(
+      "data-active",
+      "true",
+    );
     await expect(session.prCheckGroup("failed")).toHaveCount(0);
     await expect(session.prCheckGroupCount("passed")).toHaveText("4");
   });
@@ -179,7 +188,10 @@ test.describe("Multi-PR CI popover", () => {
 
     await chip.hover();
     await expect(session.prTopbarPopoverAggregate()).toBeVisible({ timeout: 10_000 });
-    await expect(session.prMultiPopoverTab("web", 42)).toHaveAttribute("data-active", "true");
+    await expect(session.prMultiPopoverTab(OWNER, "web", 42)).toHaveAttribute(
+      "data-active",
+      "true",
+    );
   });
 
   test("clicking the multi-PR button still opens the dropdown with per-PR rows", async ({
@@ -200,7 +212,36 @@ test.describe("Multi-PR CI popover", () => {
     const session = await openTaskAndWait(testPage, apiClient, seed, title);
 
     await session.prTopbarButton().click();
-    await expect(testPage.getByTestId("pr-topbar-menu-item-42")).toBeVisible();
-    await expect(testPage.getByTestId("pr-topbar-menu-item-77")).toBeVisible();
+    await expect(testPage.getByTestId(`pr-topbar-menu-item-${OWNER}-web-42`)).toBeVisible();
+    await expect(testPage.getByTestId(`pr-topbar-menu-item-${OWNER}-api-77`)).toBeVisible();
+  });
+
+  test('selecting a different PR from the "+" add-panel menu opens its own tab', async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const title = "Multi Popover Add Panel Tabs";
+    const seed = await seedTask(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      title,
+    );
+    await associateTwoPRs(apiClient, seed.taskId);
+    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+
+    // Auto-shown panel defaults to the primary/first-associated PR (web#42).
+    await expect(session.prDetailTab()).toHaveCount(1, { timeout: 15_000 });
+
+    // Regression: selecting the OTHER PR from the "+" add-panel menu must
+    // open a second, distinct tab instead of repurposing the auto-shown one.
+    // (Dedup when re-selecting the same PR is covered by the
+    // runAutoPRPanelEffect / addPRPanel unit tests.)
+    await session.addPanelButton().click();
+    await testPage.getByTestId(`add-panel-pr-item-${OWNER}-api-77`).click();
+    await expect(session.prDetailTab()).toHaveCount(2, { timeout: 15_000 });
   });
 });
