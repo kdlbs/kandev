@@ -113,6 +113,8 @@ export function PassthroughToolbar({
     chatInputRef,
   });
   const showProceed = !!planActions.proceedStepName && !isAgentBusy;
+  const implementPlanHandler =
+    isAgentBusy || !panelState.planModeEnabled ? undefined : planActions.implementPlanHandler;
 
   // Derive open state: auto-close when pending comments are cleared
   const commentsOpen = commentsOpenState && pendingCount > 0;
@@ -170,7 +172,7 @@ export function PassthroughToolbar({
           taskId={taskId}
           isMoving={planActions.isMoving}
           isSending={isSending}
-          onImplementPlan={planActions.implementPlanHandler}
+          onImplementPlan={implementPlanHandler}
         />
       )}
 
