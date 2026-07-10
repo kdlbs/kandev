@@ -38,43 +38,48 @@ vi.mock("./dockview-layout-builders", () => ({
   focusOrAddPanel: vi.fn(),
 }));
 
-vi.mock("./layout-manager", () => ({
-  SIDEBAR_GROUP: "sidebar",
-  CENTER_GROUP: "center",
-  RIGHT_TOP_GROUP: "right-top",
-  RIGHT_BOTTOM_GROUP: "right-bottom",
-  TERMINAL_DEFAULT_ID: "terminal",
-  LAYOUT_SIDEBAR_RATIO: 0.2,
-  LAYOUT_RIGHT_RATIO: 0.25,
-  LAYOUT_PINNED_MIN_PX: 200,
-  computeSidebarMaxPx: vi.fn(() => 350),
-  computeRightMaxPx: vi.fn(() => 500),
-  getPresetLayout: vi.fn(() => ({ columns: [] })),
-  applyLayout: vi.fn(() => ({
-    sidebarGroupId: "g-sidebar",
-    centerGroupId: "g-center",
-    rightTopGroupId: "g-right-top",
-    rightBottomGroupId: "g-right-bottom",
-  })),
-  getPinnedWidth: vi.fn(() => 350),
-  getRootSplitview: vi.fn(() => null),
-  fromDockviewApi: vi.fn(() => ({ columns: [] })),
-  filterEphemeral: vi.fn((s: unknown) => s),
-  defaultLayout: vi.fn(() => ({ columns: [] })),
-  mergeCurrentPanelsIntoPreset: vi.fn((_api: unknown, preset: unknown) => preset),
-  toSerializedDockview: vi.fn((s: unknown) => s),
-  injectIntentPanels: vi.fn(),
-  applyActivePanelOverrides: vi.fn(),
-  resolveNamedIntent: vi.fn(),
-  setPinnedTarget: vi.fn(),
-  clearPinnedTarget: vi.fn(),
-  getPinnedTarget: vi.fn(() => undefined),
-  layoutStructuresMatch: vi.fn(() => false),
-  savedLayoutMatchesLive: vi.fn(() => false),
-}));
+vi.mock("./layout-manager", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./layout-manager")>();
+  return {
+    ...actual,
+    SIDEBAR_GROUP: "sidebar",
+    CENTER_GROUP: "center",
+    RIGHT_TOP_GROUP: "right-top",
+    RIGHT_BOTTOM_GROUP: "right-bottom",
+    TERMINAL_DEFAULT_ID: "terminal",
+    LAYOUT_SIDEBAR_RATIO: 0.2,
+    LAYOUT_RIGHT_RATIO: 0.25,
+    LAYOUT_PINNED_MIN_PX: 200,
+    computeSidebarMaxPx: vi.fn(() => 350),
+    computeRightMaxPx: vi.fn(() => 500),
+    getPresetLayout: vi.fn(() => ({ columns: [] })),
+    applyLayout: vi.fn(() => ({
+      sidebarGroupId: "g-sidebar",
+      centerGroupId: "g-center",
+      rightTopGroupId: "g-right-top",
+      rightBottomGroupId: "g-right-bottom",
+    })),
+    getPinnedWidth: vi.fn(() => 350),
+    getRootSplitview: vi.fn(() => null),
+    fromDockviewApi: vi.fn(() => ({ columns: [] })),
+    filterEphemeral: vi.fn((s: unknown) => s),
+    defaultLayout: vi.fn(() => ({ columns: [] })),
+    mergeCurrentPanelsIntoPreset: vi.fn((_api: unknown, preset: unknown) => preset),
+    toSerializedDockview: vi.fn((s: unknown) => s),
+    injectIntentPanels: vi.fn(),
+    applyActivePanelOverrides: vi.fn(),
+    resolveNamedIntent: vi.fn(),
+    setPinnedTarget: vi.fn(),
+    clearPinnedTarget: vi.fn(),
+    getPinnedTarget: vi.fn(() => undefined),
+    layoutStructuresMatch: vi.fn(() => false),
+    savedLayoutMatchesLive: vi.fn(() => false),
+  };
+});
 
 import { setEnvLayout } from "@/lib/local-storage";
 import { persistEnvLayoutNow, useDockviewStore } from "./dockview-store";
+import { applyLayout } from "./layout-manager";
 
 function makeApi(snapshot: object = { columns: [] }): DockviewApi {
   return {
@@ -243,6 +248,56 @@ describe("applyBuiltInPreset — persistence at call site", () => {
 
 describe("applyCustomLayout — persistence at call site", () => {
   beforeEach(resetStoreForIntegration);
+
+  it("retargets saved session chat panels to the active session", async () => {
+    const api = makeStoreApi();
+    useDockviewStore.setState({ api, currentLayoutEnvId: "env-custom" });
+
+    const layoutWithOldSession = {
+      id: "simple",
+      name: "Simple",
+      layout: {
+        columns: [
+          {
+            id: "center",
+            groups: [
+              {
+                panels: [
+                  {
+                    id: "session:s-old",
+                    component: "chat",
+                    title: "Agent",
+                    tabComponent: "sessionTab",
+                    params: { sessionId: "s-old" },
+                  },
+                ],
+                activePanel: "session:s-old",
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    (
+      useDockviewStore.getState().applyCustomLayout as (
+        layout: ApplyCustomLayoutArg,
+        opts: { activeSessionId: string },
+      ) => void
+    )(layoutWithOldSession as unknown as ApplyCustomLayoutArg, { activeSessionId: "s-new" });
+
+    await flushRaf();
+
+    const appliedState = vi.mocked(applyLayout).mock.calls.at(-1)?.[1];
+    const panel = appliedState?.columns[0]?.groups[0]?.panels[0];
+    expect(panel).toMatchObject({
+      id: "session:s-new",
+      component: "chat",
+      tabComponent: "sessionTab",
+      params: { sessionId: "s-new" },
+    });
+    expect(appliedState?.columns[0]?.groups[0]?.activePanel).toBe("session:s-new");
+  });
 
   it("persists the env layout after isRestoringLayout clears", async () => {
     const api = makeStoreApi();

@@ -26,9 +26,11 @@ import {
   defaultLayout,
   mergeCurrentPanelsIntoPreset,
   toSerializedDockview,
+  normalizeReusableSessionPanels,
+  materializeReusableChatPanel,
 } from "./layout-manager";
 import type { BuiltInPreset, LayoutState, LayoutGroupIds } from "./layout-manager";
-import { performEnvSwitch } from "./dockview-env-switch";
+import { performEnvSwitch, replaceStaleSessionPanels } from "./dockview-env-switch";
 import { enforcePinnedTargets } from "./dockview-pinned-enforce";
 import {
   injectIntentPanels,
@@ -114,6 +116,10 @@ export type SavedLayoutConfig = {
   createdAt: string;
 };
 
+export type ApplyCustomLayoutOptions = {
+  activeSessionId?: string | null;
+};
+
 type DockviewStore = {
   api: DockviewApi | null;
   setApi: (api: DockviewApi | null) => void;
@@ -174,7 +180,7 @@ type DockviewStore = {
   applyBuiltInPreset: (preset: BuiltInPreset, resetWidths?: boolean) => void;
   defaultPreset: BuiltInPreset;
   setDefaultPreset: (preset: BuiltInPreset) => void;
-  applyCustomLayout: (layout: SavedLayoutConfig) => void;
+  applyCustomLayout: (layout: SavedLayoutConfig, opts?: ApplyCustomLayoutOptions) => void;
   captureCurrentLayout: () => Record<string, unknown>;
   isRestoringLayout: boolean;
   /** ID of the task environment whose layout is currently rendered. Layouts are
@@ -472,8 +478,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       if (!api) return;
       const liveWidths = captureLiveWidths(api, set);
       preserveChatScrollDuringLayout();
-      // Capture dimensions before layout change — api.width can become stale
-      // inside the rAF callback after dockview serialization
+      // Capture before layout change; api.width can become stale in rAF.
       const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
       set({ isRestoringLayout: true });
       const presetState = getPresetLayout(preset);
@@ -518,7 +523,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
         }
       });
     },
-    applyCustomLayout: (layout: SavedLayoutConfig) => {
+    applyCustomLayout: (layout: SavedLayoutConfig, opts?: ApplyCustomLayoutOptions) => {
       const { api } = get();
       if (!api) return;
       const liveWidths = captureLiveWidths(api, set);
@@ -530,13 +535,18 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       if (!state?.columns) {
         try {
           api.fromJSON(layout.layout as unknown as SerializedDockview);
+          replaceStaleSessionPanels(api, opts?.activeSessionId ?? null);
           set(applyLayoutFixups(api));
         } catch (e) {
           console.warn("applyCustomLayout: old-format restore failed:", e);
           oldFormatRestoreFailed = true;
         }
       } else {
-        const ids = applyLayout(api, state, liveWidths, safeWidth, safeHeight);
+        const activeState = materializeReusableChatPanel(
+          normalizeReusableSessionPanels(state),
+          opts?.activeSessionId ?? null,
+        );
+        const ids = applyLayout(api, activeState, liveWidths, safeWidth, safeHeight);
         set(ids);
       }
       const hasSidebar = !!api.getPanel("sidebar");
@@ -557,14 +567,16 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
         }
       });
     },
-    captureCurrentLayout: (): Record<string, unknown> => {
-      const { api } = get();
-      if (!api) return {};
-      const state = fromDockviewApi(api);
-      const filtered = filterEphemeral(state);
-      return filtered as unknown as Record<string, unknown>;
-    },
+    captureCurrentLayout: () => captureReusableLayout(get),
   };
+}
+
+function captureReusableLayout(get: StoreGet): Record<string, unknown> {
+  const { api } = get();
+  if (!api) return {};
+  const state = fromDockviewApi(api);
+  const filtered = filterEphemeral(state);
+  return normalizeReusableSessionPanels(filtered) as unknown as Record<string, unknown>;
 }
 
 /** Restore a saved maximize state from sessionStorage onto the dockview API. */

@@ -58,6 +58,13 @@ export { computeColumnWidths, computeGroupHeights, getPinnedWidth } from "./sizi
 // Serializer
 export { toSerializedDockview, fromDockviewApi, filterEphemeral } from "./serializer";
 
+// Session panel normalization for reusable saved layouts
+export {
+  isSessionChatPanel,
+  normalizeReusableSessionPanels,
+  materializeReusableChatPanel,
+} from "./session-panels";
+
 // Applier
 export {
   applyLayout,

@@ -196,7 +196,7 @@ function removeEphemeralPanels(api: DockviewApi, keepSessionId: string | null): 
  * File-editors/diffs/browser/etc. are NEVER touched here — they
  * legitimately belong to this env's saved state.
  */
-function replaceStaleSessionPanels(api: DockviewApi, keepSessionId: string | null): void {
+export function replaceStaleSessionPanels(api: DockviewApi, keepSessionId: string | null): void {
   const keepId = keepSessionId ? `session:${keepSessionId}` : null;
   // keepId=null (sessionless task) → strips all session panels, unlike the
   // fast path's shouldRemoveDuringSwitch which keeps them. In practice

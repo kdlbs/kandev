@@ -236,17 +236,21 @@ export function LayoutPresetSelector() {
   const applyBuiltInPreset = useDockviewStore((s) => s.applyBuiltInPreset);
   const applyCustomLayout = useDockviewStore((s) => s.applyCustomLayout);
   const savedLayouts = useAppStore((s) => s.userSettings.savedLayouts);
+  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
 
   const handleApplyCustom = useCallback(
     (layout: SavedLayout) =>
-      applyCustomLayout({
-        id: layout.id,
-        name: layout.name,
-        isDefault: layout.is_default,
-        layout: layout.layout,
-        createdAt: layout.created_at,
-      }),
-    [applyCustomLayout],
+      applyCustomLayout(
+        {
+          id: layout.id,
+          name: layout.name,
+          isDefault: layout.is_default,
+          layout: layout.layout,
+          createdAt: layout.created_at,
+        },
+        { activeSessionId },
+      ),
+    [activeSessionId, applyCustomLayout],
   );
 
   const handleDeleteLayout = useCallback(

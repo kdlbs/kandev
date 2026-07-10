@@ -660,6 +660,7 @@ export class ApiClient {
     default_utility_agent_id?: string;
     default_utility_model?: string;
     sidebar_views?: unknown[];
+    saved_layouts?: unknown[];
     kanban_view_mode?: string;
     tasks_list_sort?: string;
     tasks_list_group?: string;
