@@ -132,8 +132,8 @@ function sourceDataAttrs(range: SourceLineRange | null) {
   };
 }
 
-function isInteractiveSourceClickTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
+export function isInteractiveSourceClickTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
   return Boolean(
     target.closest("a, button, input, textarea, select, [role='button'], [contenteditable]"),
   );
