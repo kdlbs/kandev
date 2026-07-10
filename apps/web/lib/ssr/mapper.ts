@@ -45,6 +45,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         })),
         primarySessionId: task.primary_session_id ?? undefined,
         primarySessionState: task.primary_session_state ?? undefined,
+        primarySessionPendingAction: task.primary_session_pending_action ?? undefined,
         sessionCount: task.session_count ?? undefined,
         reviewStatus: task.review_status ?? undefined,
         parentTaskId: task.parent_id ?? undefined,

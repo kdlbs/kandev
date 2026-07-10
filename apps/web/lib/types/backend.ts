@@ -14,6 +14,8 @@ import type {
   SidebarViewDraftApi,
   SidebarTaskPrefsApi,
   TaskCreateLastUsedApi,
+  TaskPendingAction,
+  TaskSessionState,
   StepEvents,
   TaskState,
   ToolStatus,
@@ -80,6 +82,8 @@ export type TaskEventPayload = {
     position?: number;
   }>;
   primary_session_id?: string | null;
+  primary_session_state?: TaskSessionState | null;
+  primary_session_pending_action?: TaskPendingAction | null;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   archived_at?: string | null;

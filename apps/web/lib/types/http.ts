@@ -147,6 +147,8 @@ export type TaskSessionState =
   | "FAILED"
   | "CANCELLED";
 
+export type TaskPendingAction = "clarification" | "permission";
+
 export type Workflow = {
   id: WorkflowId;
   workspace_id: WorkspaceId;
@@ -278,6 +280,7 @@ export type Task = {
   repositories?: TaskRepository[];
   primary_session_id?: SessionId | null;
   primary_session_state?: TaskSessionState | null;
+  primary_session_pending_action?: TaskPendingAction | null;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primary_executor_id?: string | null;

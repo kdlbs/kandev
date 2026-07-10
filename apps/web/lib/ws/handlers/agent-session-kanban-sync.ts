@@ -28,9 +28,20 @@ function patchTaskPrimarySessionState(
   let changed = false;
   const nextTasks = tasks.map((task) => {
     if (task.id !== taskId || task.primarySessionId !== sessionId) return task;
-    if (task.primarySessionState === newState) return task;
+    const nextPendingAction =
+      newState === "WAITING_FOR_INPUT" ? task.primarySessionPendingAction : undefined;
+    if (
+      task.primarySessionState === newState &&
+      task.primarySessionPendingAction === nextPendingAction
+    ) {
+      return task;
+    }
     changed = true;
-    return { ...task, primarySessionState: newState };
+    return {
+      ...task,
+      primarySessionState: newState,
+      primarySessionPendingAction: nextPendingAction,
+    };
   });
   return changed ? nextTasks : tasks;
 }

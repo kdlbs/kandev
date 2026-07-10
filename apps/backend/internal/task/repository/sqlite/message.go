@@ -377,6 +377,89 @@ func (r *Repository) FindPendingClarificationMessagesBySessionID(ctx context.Con
 	return result, err
 }
 
+// GetPendingActionsBySessionIDs returns the compact pending-action projection
+// for sessions whose task-list state needs to render before messages are loaded.
+func (r *Repository) GetPendingActionsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error) {
+	result := make(map[string]models.TaskPendingAction)
+	if len(sessionIDs) == 0 {
+		return result, nil
+	}
+	placeholders := make([]string, len(sessionIDs))
+	args := make([]interface{}, 0, len(sessionIDs)*2)
+	for i, id := range sessionIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	for _, id := range sessionIDs {
+		args = append(args, id)
+	}
+	statusExpr := dialect.JSONExtract(r.ro.DriverName(), "m.metadata", "status")
+	query := fmt.Sprintf(`
+		WITH latest_message AS (
+			SELECT task_session_id, turn_id
+			FROM (
+				SELECT task_session_id,
+				       turn_id,
+				       ROW_NUMBER() OVER (
+				         PARTITION BY task_session_id
+				         ORDER BY created_at DESC, id DESC
+				       ) AS rn
+				FROM task_session_messages
+				WHERE task_session_id IN (`+strings.Join(placeholders, ",")+`)
+			)
+			WHERE rn = 1
+		),
+		pending_clarifications AS (
+			SELECT DISTINCT m.task_session_id, 'clarification' AS action
+			FROM task_session_messages m
+			WHERE m.task_session_id IN (`+strings.Join(placeholders, ",")+`)
+			  AND m.type = 'clarification_request'
+			  AND COALESCE(%s, '') IN ('', 'pending')
+		),
+		latest_permissions AS (
+			SELECT m.task_session_id,
+			       COALESCE(%s, '') AS status,
+			       ROW_NUMBER() OVER (
+			         PARTITION BY m.task_session_id
+			         ORDER BY m.created_at DESC, m.id DESC
+			       ) AS rn
+			FROM task_session_messages m
+			JOIN latest_message latest
+			  ON latest.task_session_id = m.task_session_id
+			 AND latest.turn_id = m.turn_id
+			WHERE m.type = 'permission_request'
+		)
+		SELECT task_session_id, action
+		FROM pending_clarifications
+		UNION ALL
+		SELECT task_session_id, 'permission' AS action
+		FROM latest_permissions
+		WHERE rn = 1 AND status IN ('', 'pending')
+	`, statusExpr, statusExpr)
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var sessionID, action string
+		if err := rows.Scan(&sessionID, &action); err != nil {
+			return nil, err
+		}
+		if action == string(models.TaskPendingActionClarification) {
+			result[sessionID] = models.TaskPendingActionClarification
+			continue
+		}
+		if _, hasClarification := result[sessionID]; hasClarification {
+			continue
+		}
+		if action == string(models.TaskPendingActionPermission) {
+			result[sessionID] = models.TaskPendingActionPermission
+		}
+	}
+	return result, rows.Err()
+}
+
 // FindMessageByPendingIDAndQuestion finds the message for a specific (pending_id,
 // question_id) pair within a session. Used to flip per-question status (answered /
 // rejected) on multi-question clarification bundles. The persistence layer stores

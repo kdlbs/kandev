@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
@@ -133,6 +134,71 @@ func TestPublishTaskUpdated_EmitsNullPrimarySessionFieldsWhenNoPrimaryExists(t *
 	}
 	if value, ok := data["primary_session_state"]; !ok || value != nil {
 		t.Fatalf("primary_session_state = %#v, want explicit nil", value)
+	}
+	if value, ok := data["primary_session_pending_action"]; !ok || value != nil {
+		t.Fatalf("primary_session_pending_action = %#v, want explicit nil", value)
+	}
+}
+
+func TestPublishTaskUpdated_EmitsPrimarySessionPendingAction(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	task := &models.Task{
+		ID:             "task-1",
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "step-1",
+		Title:          "T",
+		Priority:       "medium",
+	}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:        "session-1",
+		TaskID:    task.ID,
+		State:     models.TaskSessionStateWaitingForInput,
+		IsPrimary: true,
+		StartedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID:            "turn-1",
+		TaskSessionID: "session-1",
+		TaskID:        task.ID,
+	}); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID:            "message-1",
+		TaskSessionID: "session-1",
+		TaskID:        task.ID,
+		TurnID:        "turn-1",
+		AuthorType:    models.MessageAuthorAgent,
+		Content:       "question",
+		Type:          models.MessageTypeClarificationRequest,
+		Metadata:      map[string]interface{}{"status": "pending"},
+		CreatedAt:     now,
+	}); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	eventBus.ClearEvents()
+
+	svc.PublishTaskUpdated(ctx, task)
+
+	data := singlePublishedEventData(t, eventBus)
+	if value := data["primary_session_pending_action"]; value != "clarification" {
+		t.Fatalf("primary_session_pending_action = %#v, want clarification", value)
 	}
 }
 

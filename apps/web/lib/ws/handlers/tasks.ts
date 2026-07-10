@@ -42,6 +42,12 @@ function mergeTaskUpdate(
   ) {
     merged.primarySessionState = existing.primarySessionState;
   }
+  if (
+    !hasPayloadField(payload, "primary_session_pending_action") &&
+    nextTask.primarySessionPendingAction === undefined
+  ) {
+    merged.primarySessionPendingAction = existing.primarySessionPendingAction;
+  }
   return merged;
 }
 

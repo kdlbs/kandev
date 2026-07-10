@@ -528,6 +528,15 @@ const (
 	PermissionStatusExpired PermissionStatus = "expired"
 )
 
+// TaskPendingAction is the compact task-list projection for a primary session
+// blocked on user input.
+type TaskPendingAction string
+
+const (
+	TaskPendingActionClarification TaskPendingAction = "clarification"
+	TaskPendingActionPermission    TaskPendingAction = "permission"
+)
+
 // Message represents a message in a task session
 type Message struct {
 	ID            string                 `json:"id"`

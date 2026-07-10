@@ -203,6 +203,9 @@ func (m *mockRepository) FindMessageByPendingIDAndQuestion(ctx context.Context, 
 func (m *mockRepository) FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error) {
 	return nil, nil
 }
+func (m *mockRepository) GetPendingActionsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error) {
+	return make(map[string]models.TaskPendingAction), nil
+}
 func (m *mockRepository) UpdateMessage(ctx context.Context, message *models.Message) error {
 	return nil
 }

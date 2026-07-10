@@ -113,7 +113,10 @@ function toSidebarItem(
   const repoSlug = task.repositoryId ? ctx.repositorySlugById.get(task.repositoryId) : undefined;
   // Sidebar shows just one slot; pick the primary PR (first by created_at).
   const pr = ctx.taskPRsByTaskId[task.id]?.[0];
-  const pending = readPendingFlags(ctx.pendingFlags, task.primarySessionId);
+  const pending = readPendingFlags(ctx.pendingFlags, task.primarySessionId, {
+    primarySessionState: resolvedSessionState,
+    primarySessionPendingAction: task.primarySessionPendingAction,
+  });
 
   const diffStats = resolveDiffStats(
     sessionInfo.diffStats,

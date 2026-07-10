@@ -22,7 +22,12 @@ import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { useTaskMultiSelectStore } from "@/hooks/use-task-multi-select";
 import { repositorySlug } from "@/lib/repository-slug";
 import { formatUserHomePath } from "@/lib/utils";
-import { repositoryId as toRepositoryId, type Repository, type TaskState } from "@/lib/types/http";
+import {
+  repositoryId as toRepositoryId,
+  type Repository,
+  type TaskPendingAction,
+  type TaskState,
+} from "@/lib/types/http";
 
 export interface Task {
   id: string;
@@ -42,6 +47,7 @@ export interface Task {
    * finished — the workflow may leave the task in IN_PROGRESS for review.
    */
   primarySessionState?: string | null;
+  primarySessionPendingAction?: TaskPendingAction | null;
   reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primaryExecutorId?: string | null;
   primaryExecutorType?: string | null;

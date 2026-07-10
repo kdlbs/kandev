@@ -106,6 +106,10 @@ func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tas
 	if err != nil {
 		return nil, err
 	}
+	pendingActionsBySession, err := pendingActionsForWaitingPrimarySessions(ctx, svc, primarySessionInfoMap)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]dto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
 		sessions := sessionsByTask[task.ID]
@@ -133,12 +137,14 @@ func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tas
 			si.agentName,
 			si.workingDirectory,
 			si.sessionState,
+			pendingActionPtr(si.sessionID, pendingActionsBySession),
 		))
 	}
 	return result, nil
 }
 
 type sessionInfoFields struct {
+	sessionID        *string
 	reviewStatus     models.ReviewStatus
 	sessionState     *string
 	executorID       *string
@@ -152,6 +158,10 @@ func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
 	var si sessionInfoFields
 	if info == nil {
 		return si
+	}
+	if info.ID != "" {
+		val := info.ID
+		si.sessionID = &val
 	}
 	si.reviewStatus = info.ReviewStatus
 	if info.State != "" {
@@ -181,6 +191,38 @@ func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
 		}
 	}
 	return si
+}
+
+func pendingActionsForWaitingPrimarySessions(
+	ctx context.Context,
+	svc *service.Service,
+	primarySessionInfoMap map[string]*models.TaskSession,
+) (map[string]models.TaskPendingAction, error) {
+	sessionIDs := make([]string, 0, len(primarySessionInfoMap))
+	for _, info := range primarySessionInfoMap {
+		if info != nil && info.State == models.TaskSessionStateWaitingForInput {
+			sessionIDs = append(sessionIDs, info.ID)
+		}
+	}
+	if len(sessionIDs) == 0 {
+		return map[string]models.TaskPendingAction{}, nil
+	}
+	return svc.GetPendingActionsForSessions(ctx, sessionIDs)
+}
+
+func pendingActionPtr(
+	sessionID *string,
+	pendingActionsBySession map[string]models.TaskPendingAction,
+) *string {
+	if sessionID == nil {
+		return nil
+	}
+	action, ok := pendingActionsBySession[*sessionID]
+	if !ok {
+		return nil
+	}
+	value := string(action)
+	return &value
 }
 
 func (h *TaskHandlers) toTaskDTOsWithSessionInfo(ctx context.Context, tasks []*models.Task) ([]dto.TaskDTO, error) {
