@@ -52,7 +52,7 @@ function MobileChatPanelContent({
   activeTaskId: string | null;
   isPassthroughMode: boolean;
   effectiveSessionId: string | null;
-  onOpenFile: (path: string) => void;
+  onOpenFile: (path: string, repo?: string) => void;
 }) {
   if (!activeTaskId) {
     return (
@@ -240,7 +240,7 @@ function MobileReviewDialogMount({
   sessionId: string | null;
   review: ReturnType<typeof useReviewDialog>;
   activeTaskId: string | null;
-  onSelectWalkthroughFile: (path: string) => void;
+  onSelectWalkthroughFile: (path: string, repo?: string) => void;
 }) {
   if (!sessionId) return null;
   return (
@@ -289,7 +289,7 @@ export function useMobilePanelHandlers({
   }, [effectiveSessionId]);
 
   const handleOpenFileFromChat = useCallback(
-    (path: string) => {
+    (path: string, repo?: string) => {
       if (!effectiveSessionId) return;
       const requestId = (latestRequestIdRef.current += 1);
       void fetchAndOpenFile(
@@ -301,6 +301,7 @@ export function useMobilePanelHandlers({
           handlePanelChange("files");
         },
         toast,
+        repo,
       );
     },
     [effectiveSessionId, handlePanelChange, toast],

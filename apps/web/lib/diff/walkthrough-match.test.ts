@@ -28,6 +28,19 @@ describe("walkthroughFileMatches", () => {
         { file: "main.ts", repo: FRONTEND },
       ),
     ).toBe(false);
+    expect(
+      walkthroughStepMatchesFile({ path: WEB_MAIN }, { file: "main.ts", repo: FRONTEND }),
+    ).toBe(false);
+  });
+
+  it("does not match repo-scoped files when the step omits repo", () => {
+    expect(walkthroughStepMatchesFile({ path: WEB_MAIN }, { file: "main.ts" })).toBe(true);
+    expect(
+      walkthroughStepMatchesFile(
+        { path: WEB_MAIN, repository_name: FRONTEND },
+        { file: "main.ts" },
+      ),
+    ).toBe(false);
   });
 
   it("rejects repo-less matches when the same suffix exists in multiple repos", () => {

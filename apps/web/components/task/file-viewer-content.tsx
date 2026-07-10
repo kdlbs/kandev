@@ -13,10 +13,11 @@ import { cn } from "@/lib/utils";
 type FileViewerContentProps = {
   path: string;
   content: string;
+  repo?: string;
   className?: string;
 };
 
-export function FileViewerContent({ path, content, className }: FileViewerContentProps) {
+export function FileViewerContent({ path, content, repo, className }: FileViewerContentProps) {
   const langExt = getCodeMirrorExtensionFromPath(path);
   const extensions: Extension[] = [EditorView.lineWrapping, EditorView.editable.of(false)];
   if (langExt) {
@@ -30,6 +31,7 @@ export function FileViewerContent({ path, content, className }: FileViewerConten
     view: editorView,
     editorAreaRef: areaRef,
     path,
+    repo,
   });
 
   // Consume a pending cursor position (set by chat read/edit file links before
@@ -37,17 +39,20 @@ export function FileViewerContent({ path, content, className }: FileViewerConten
   // centered. No pending entry → no scroll, so normal file browsing stays at
   // the top. Desktop's Monaco consumes the same entry; on mobile there is no
   // Monaco, so this CodeMirror viewer must consume it instead.
-  const scrollToPendingLine = useCallback((view: EditorView, filePath: string) => {
-    const pending = consumePendingCursorPosition(filePath);
-    if (!pending) return;
-    const totalLines = view.state.doc.lines;
-    const clampedLine = Math.min(Math.max(pending.line, 1), totalLines);
-    const pos = view.state.doc.line(clampedLine).from;
-    view.dispatch({
-      selection: { anchor: pos },
-      effects: EditorView.scrollIntoView(pos, { y: "center" }),
-    });
-  }, []);
+  const scrollToPendingLine = useCallback(
+    (view: EditorView, filePath: string) => {
+      const pending = consumePendingCursorPosition(filePath, repo);
+      if (!pending) return;
+      const totalLines = view.state.doc.lines;
+      const clampedLine = Math.min(Math.max(pending.line, 1), totalLines);
+      const pos = view.state.doc.line(clampedLine).from;
+      view.dispatch({
+        selection: { anchor: pos },
+        effects: EditorView.scrollIntoView(pos, { y: "center" }),
+      });
+    },
+    [repo],
+  );
 
   const handleCreateEditor = useCallback(
     (view: EditorView) => {

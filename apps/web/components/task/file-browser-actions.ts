@@ -116,17 +116,19 @@ export async function fetchAndOpenFile(
   path: string,
   onOpenFile: (file: OpenFileTab) => void,
   toast: ReturnType<typeof useToast>["toast"],
+  repo?: string,
 ) {
   try {
     const client = getWebSocketClient();
     if (!client) return;
-    const response: FileContentResponse = await requestFileContent(client, sessionId, path);
+    const response: FileContentResponse = await requestFileContent(client, sessionId, path, repo);
     const { calculateHash } = await import("@/lib/utils/file-diff");
     const hash = await calculateHash(response.content);
     const name = path.split("/").pop() || path;
     onOpenFile({
       path,
       name,
+      repo,
       content: response.content,
       originalContent: response.content,
       originalHash: hash,

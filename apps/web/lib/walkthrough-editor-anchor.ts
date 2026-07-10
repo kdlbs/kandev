@@ -31,7 +31,38 @@ function emit() {
   for (const listener of listeners) listener();
 }
 
+function rectsEqual(a: WalkthroughViewportRect, b: WalkthroughViewportRect): boolean {
+  return (
+    a.left === b.left &&
+    a.top === b.top &&
+    a.right === b.right &&
+    a.bottom === b.bottom &&
+    a.width === b.width &&
+    a.height === b.height
+  );
+}
+
+function anchorsEqual(
+  a: WalkthroughEditorAnchor | null,
+  b: WalkthroughEditorAnchor | null,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.key === b.key &&
+    a.taskId === b.taskId &&
+    a.stepIndex === b.stepIndex &&
+    a.file === b.file &&
+    a.repo === b.repo &&
+    a.line === b.line &&
+    a.lineEnd === b.lineEnd &&
+    a.container === b.container &&
+    rectsEqual(a.rect, b.rect)
+  );
+}
+
 export function setWalkthroughEditorAnchor(anchor: WalkthroughEditorAnchor | null): void {
+  if (anchorsEqual(currentAnchor, anchor)) return;
   currentAnchor = anchor;
   emit();
 }

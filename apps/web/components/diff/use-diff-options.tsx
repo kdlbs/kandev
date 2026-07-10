@@ -39,7 +39,7 @@ const DIFF_UNSAFE_CSS = `
     line-height: 24px !important;
   }
   [data-selected-line]:is([data-line], [data-line-annotation]) {
-    box-shadow: inset 2px 0 0 var(--primary);
+    box-shadow: inset 2px 0 0 var(--primary) !important;
   }
   [data-separator='metadata'],
   [data-separator]:empty {

@@ -16,10 +16,15 @@ function fileKey(file: WalkthroughPromptFile): string {
   return `${file.repository_name ?? file.repositoryName ?? ""}\0${file.path}\0${file.source ?? ""}`;
 }
 
+function escapePromptFilePart(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll("\r", "\\r").replaceAll("\n", "\\n");
+}
+
 function formatPromptFile(file: WalkthroughPromptFile): string {
-  const repo = file.repository_name ?? file.repositoryName ?? "";
-  const source = file.source ? ` [${file.source}]` : "";
-  return repo ? `${repo}:${file.path}${source}` : `${file.path}${source}`;
+  const repo = escapePromptFilePart(file.repository_name ?? file.repositoryName ?? "");
+  const path = escapePromptFilePart(file.path);
+  const source = file.source ? ` [${escapePromptFilePart(file.source)}]` : "";
+  return repo ? `${repo}:${path}${source}` : `${path}${source}`;
 }
 
 export function formatChangedFilesForWalkthroughPrompt(files: WalkthroughPromptFile[]): string {

@@ -315,6 +315,25 @@ function useReviewDialogHandlers(opts: ReviewDialogHandlerOptions) {
   };
 }
 
+function useRepositoryNameToId() {
+  const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
+  return useMemo(() => {
+    const m = new Map<string, string>();
+    for (const list of Object.values(reposByWorkspace)) {
+      for (const r of list) m.set(r.name, r.id);
+    }
+    return m;
+  }, [reposByWorkspace]);
+}
+
+function useFilteredReviewFiles(allFiles: ReviewFile[], filter: string) {
+  return useMemo(() => {
+    if (!filter.trim()) return allFiles;
+    const q = filter.toLowerCase();
+    return allFiles.filter((f) => f.path.toLowerCase().includes(q));
+  }, [allFiles, filter]);
+}
+
 function useReviewDialogState(props: ReviewDialogProps) {
   const {
     open,
@@ -345,28 +364,12 @@ function useReviewDialogState(props: ReviewDialogProps) {
     () => buildAllFiles(gitStatusFiles, cumulativeDiff, prDiffFiles),
     [gitStatusFiles, cumulativeDiff, prDiffFiles],
   );
-  const filteredFiles = useMemo(() => {
-    if (!filter.trim()) return allFiles;
-    const q = filter.toLowerCase();
-    return allFiles.filter((f) => f.path.toLowerCase().includes(q));
-  }, [allFiles, filter]);
+  const filteredFiles = useFilteredReviewFiles(allFiles, filter);
   const { reviewedFiles, staleFiles } = useMemo(
     () => computeReviewSets(allFiles, reviews),
     [allFiles, reviews],
   );
-  // Build a `repository_name` → `repositoryId` map from the workspace repos
-  // slice. Comments store `repositoryId` (UUID) but ReviewFiles carry
-  // `repository_name` (e.g. "kandev"); the dialog needs both to scope the
-  // per-repo comment counts. Falls back to an empty map (legacy single-repo
-  // counts by path only).
-  const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
-  const repositoryNameToId = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const list of Object.values(reposByWorkspace)) {
-      for (const r of list) m.set(r.name, r.id);
-    }
-    return m;
-  }, [reposByWorkspace]);
+  const repositoryNameToId = useRepositoryNameToId();
   const commentCountByFile = useMemo(
     () => computeCommentCounts(byId, sessionCommentIds, allFiles, repositoryNameToId),
     [byId, sessionCommentIds, allFiles, repositoryNameToId],
@@ -399,6 +402,17 @@ function useReviewDialogState(props: ReviewDialogProps) {
     onOpenChange,
     sessionId,
   });
+  const handleToggleSplitView = useCallback(
+    (split: boolean) => {
+      setSplitView(split);
+      handlers.handleToggleSplitView(split);
+    },
+    [handlers.handleToggleSplitView],
+  );
+  const handleSelectFile = useCallback(
+    (path: string) => handlers.handleSelectFile(path, setSelectedFile),
+    [handlers.handleSelectFile],
+  );
 
   return {
     selectedFile,
@@ -417,11 +431,8 @@ function useReviewDialogState(props: ReviewDialogProps) {
     fileRefs,
     getPendingComments,
     markCommentsSent,
-    handleToggleSplitView: (split: boolean) => {
-      setSplitView(split);
-      handlers.handleToggleSplitView(split);
-    },
-    handleSelectFile: (path: string) => handlers.handleSelectFile(path, setSelectedFile),
+    handleToggleSplitView,
+    handleSelectFile,
     handleToggleReviewed: handlers.handleToggleReviewed,
     handleSendComments: handlers.handleSendComments,
     handleDiscard: handlers.handleDiscard,
@@ -436,6 +447,8 @@ function useReviewDialogState(props: ReviewDialogProps) {
 function useWalkthroughFileSelection(
   open: boolean,
   allFiles: ReviewFile[],
+  filter: string,
+  setFilter: (value: string) => void,
   handleSelectFile: (key: string) => void,
 ) {
   const step = useAppStore((state) => {
@@ -448,8 +461,11 @@ function useWalkthroughFileSelection(
   useEffect(() => {
     if (!open || !step) return;
     const file = allFiles.find((f) => walkthroughStepMatchesFile(f, step, allFiles));
-    if (file) handleSelectFile(reviewFileKey(file));
-  }, [open, step, allFiles, handleSelectFile]);
+    if (!file) return;
+    const q = filter.trim().toLowerCase();
+    if (q && !file.path.toLowerCase().includes(q)) setFilter("");
+    handleSelectFile(reviewFileKey(file));
+  }, [open, step, allFiles, filter, setFilter, handleSelectFile]);
 }
 
 export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps) {
@@ -463,7 +479,7 @@ export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps)
   });
   const splitRowRef = useRef<HTMLDivElement>(null);
   const sidebar = useReviewSidebarResize(splitRowRef, open);
-  useWalkthroughFileSelection(open, s.allFiles, s.handleSelectFile);
+  useWalkthroughFileSelection(open, s.allFiles, s.filter, s.setFilter, s.handleSelectFile);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

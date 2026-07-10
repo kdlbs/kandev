@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -48,9 +49,7 @@ func TestWalkthroughService_ShowWalkthrough_Create(t *testing.T) {
 		t.Fatalf("expected agent author, got %q", wt.CreatedBy)
 	}
 
-	if findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskWalkthroughCreated) == nil {
-		t.Fatalf("expected %s event", events.TaskWalkthroughCreated)
-	}
+	findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskWalkthroughCreated)
 }
 
 func TestWalkthroughService_ShowWalkthrough_Replace(t *testing.T) {
@@ -82,9 +81,7 @@ func TestWalkthroughService_ShowWalkthrough_Replace(t *testing.T) {
 	if err != nil || got == nil || len(got.Steps) != 1 {
 		t.Fatalf("GetWalkthrough after replace = %+v, err %v", got, err)
 	}
-	if findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskWalkthroughUpdated) == nil {
-		t.Fatalf("expected %s event on replace", events.TaskWalkthroughUpdated)
-	}
+	findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskWalkthroughUpdated)
 }
 
 func TestWalkthroughService_ShowWalkthrough_Validation(t *testing.T) {
@@ -97,6 +94,8 @@ func TestWalkthroughService_ShowWalkthrough_Validation(t *testing.T) {
 	}
 	if _, err := svc.ShowWalkthrough(ctx, ShowWalkthroughRequest{TaskID: "task-1"}); err == nil {
 		t.Fatal("expected error for empty steps")
+	} else if !errors.Is(err, ErrInvalidWalkthrough) {
+		t.Fatalf("expected ErrInvalidWalkthrough for empty steps, got %v", err)
 	}
 
 	tests := []struct {
@@ -124,6 +123,8 @@ func TestWalkthroughService_ShowWalkthrough_Validation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if _, err := svc.ShowWalkthrough(ctx, ShowWalkthroughRequest{TaskID: "task-1", Steps: tt.steps}); err == nil {
 				t.Fatalf("expected validation error for %s", tt.name)
+			} else if !errors.Is(err, ErrInvalidWalkthrough) {
+				t.Fatalf("expected ErrInvalidWalkthrough for %s, got %v", tt.name, err)
 			}
 		})
 	}
@@ -184,13 +185,14 @@ func TestWalkthroughService_Delete(t *testing.T) {
 	if err := svc.DeleteWalkthrough(ctx, "task-1"); err != nil {
 		t.Fatalf("DeleteWalkthrough failed: %v", err)
 	}
-	got, _ := svc.GetWalkthrough(ctx, "task-1")
+	got, err := svc.GetWalkthrough(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetWalkthrough after delete failed: %v", err)
+	}
 	if got != nil {
 		t.Fatalf("expected nil after delete, got %+v", got)
 	}
-	if findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskWalkthroughDeleted) == nil {
-		t.Fatalf("expected %s event", events.TaskWalkthroughDeleted)
-	}
+	findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskWalkthroughDeleted)
 
 	if err := svc.DeleteWalkthrough(ctx, "task-1"); err != ErrTaskWalkthroughNotFound {
 		t.Fatalf("expected ErrTaskWalkthroughNotFound, got %v", err)

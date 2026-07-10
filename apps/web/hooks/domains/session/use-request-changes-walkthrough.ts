@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { listPrompts } from "@/lib/api";
-import { appendToQueue } from "@/lib/api/domains/queue-api";
+import { queueMessage } from "@/lib/api/domains/queue-api";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import {
   buildChangesWalkthroughPrompt,
@@ -42,7 +42,7 @@ async function queueWalkthroughRequest(params: {
   content: string;
   planModeEnabled: boolean;
 }) {
-  await appendToQueue({
+  await queueMessage({
     session_id: params.sessionId,
     task_id: params.taskId,
     content: params.content,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildWalkthroughRangeDecorations,
+  clampWalkthroughRangeToLineCount,
   getWalkthroughEditorRange,
 } from "./use-monaco-walkthrough-range";
 
@@ -32,5 +33,14 @@ describe("buildWalkthroughRangeDecorations", () => {
     expect(decorations[0].range).toMatchObject({ startLineNumber: 2, endLineNumber: 2 });
     expect(decorations[1].range).toMatchObject({ startLineNumber: 3, endLineNumber: 3 });
     expect(decorations[0].options.className).toBe("monaco-walkthrough-line");
+  });
+});
+
+describe("clampWalkthroughRangeToLineCount", () => {
+  it("clamps stale walkthrough ranges to the current Monaco model line count", () => {
+    expect(clampWalkthroughRangeToLineCount({ startLine: 20, endLine: 24 }, 12)).toEqual({
+      startLine: 12,
+      endLine: 12,
+    });
   });
 });

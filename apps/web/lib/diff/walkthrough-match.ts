@@ -37,9 +37,9 @@ export function walkthroughFileMatches(diffPath: string, stepFile: string): bool
 
 function repositoryMatches(file: WalkthroughTargetFile, step: WalkthroughTargetStep): boolean {
   const stepRepo = normalizeRepo(step.repo);
-  if (!stepRepo) return true;
   const fileRepo = normalizeRepo(file.repository_name);
-  if (!fileRepo) return true;
+  if (!stepRepo) return !fileRepo;
+  if (!fileRepo) return false;
   return fileRepo === stepRepo;
 }
 

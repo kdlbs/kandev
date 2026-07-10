@@ -133,4 +133,13 @@ describe("buildWalkthroughSelectedLines", () => {
       ),
     ).toBeNull();
   });
+
+  it("defaults line_end to line when the walkthrough step has no line_end", () => {
+    expect(
+      buildWalkthroughSelectedLines(
+        { path: "apps/web/main.ts", repository_name: "frontend" },
+        { file: "main.ts", repo: "frontend", line: 15, text: "see this" },
+      ),
+    ).toEqual({ side: "additions", start: 15, end: 15 });
+  });
 });

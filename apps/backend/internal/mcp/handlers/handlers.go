@@ -2631,6 +2631,9 @@ func (h *Handlers) handleShowWalkthrough(ctx context.Context, msg *ws.Message) (
 		if errors.Is(err, service.ErrTaskIDRequired) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 		}
+		if errors.Is(err, service.ErrInvalidWalkthrough) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to save walkthrough: "+err.Error(), nil)
 	}
 

@@ -115,7 +115,11 @@ function ReviewWalkthroughButton({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span tabIndex={disabled ? 0 : undefined} aria-label={disabled ? tooltip : undefined}>
+        <span
+          className="inline-flex"
+          tabIndex={disabled ? 0 : undefined}
+          aria-label={disabled ? tooltip : undefined}
+        >
           <Button
             size="sm"
             variant="ghost"
@@ -123,7 +127,6 @@ function ReviewWalkthroughButton({
             aria-label="Walk me through these review changes"
             data-testid="review-request-walkthrough"
             disabled={disabled}
-            title={tooltip}
             onClick={onRequestWalkthrough}
           >
             <IconRoute className="h-4 w-4" />

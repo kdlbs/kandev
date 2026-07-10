@@ -329,6 +329,23 @@ describe("KandevToolMessage walkthrough renderer", () => {
     expect(html).toContain("1 step");
     expect(html).toContain("Review handler");
   });
+
+  it("includes repo anchors in walkthrough step locations", () => {
+    const html = renderToStaticMarkup(
+      <KandevToolMessage
+        comment={kandevToolCall({
+          status: "running",
+          toolName: "show_walkthrough_kandev",
+          input: {
+            title: CHANGE_TOUR,
+            steps: [{ ...step, repo: "backend" }],
+          },
+        })}
+      />,
+    );
+
+    expect(html).toContain("backend:apps/backend/internal/mcp/handlers.go:42-45");
+  });
 });
 
 // Unset status is treated as pending by parsePermission.

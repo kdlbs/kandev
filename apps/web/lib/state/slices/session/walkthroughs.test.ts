@@ -85,6 +85,16 @@ describe("walkthrough slice", () => {
     expect(store.getState().walkthroughs.activeStepByTaskId[TASK_ID]).toBe(0);
   });
 
+  it("replacing with a different tour resets the active step", () => {
+    const store = makeStore();
+    store.getState().setWalkthrough(TASK_ID, makeWalkthrough());
+    store.getState().setWalkthroughActiveStep(TASK_ID, 2);
+
+    store.getState().setWalkthrough(TASK_ID, makeWalkthrough({ id: "wt-2" }));
+
+    expect(store.getState().walkthroughs.activeStepByTaskId[TASK_ID]).toBe(0);
+  });
+
   it("setWalkthrough(null) resets the active step to 0", () => {
     const store = makeStore();
     store.getState().setWalkthrough(TASK_ID, makeWalkthrough());

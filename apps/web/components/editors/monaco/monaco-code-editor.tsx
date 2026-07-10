@@ -118,6 +118,7 @@ function useMonacoCodeEditorSetup(props: MonacoCodeEditorProps) {
     vcsDiff,
     sessionId,
     worktreePath,
+    repo,
     enableComments = false,
     onChange,
     onSave,
@@ -127,6 +128,7 @@ function useMonacoCodeEditorSetup(props: MonacoCodeEditorProps) {
   const language = getMonacoLanguage(path);
   const state = useMonacoEditorComments({
     path,
+    repo,
     enableComments,
     sessionId,
     wrapperRef,

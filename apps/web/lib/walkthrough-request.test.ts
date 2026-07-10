@@ -32,6 +32,20 @@ describe("buildChangesWalkthroughPrompt", () => {
     expect(prompt).toContain("5 more file(s) omitted");
   });
 
+  it("escapes file metadata line breaks before prompt interpolation", () => {
+    const files = [
+      {
+        path: "src/app.ts\n- injected",
+        repository_name: "web\nrepo",
+        source: "pr\rsource",
+      },
+    ];
+
+    expect(formatChangedFilesForWalkthroughPrompt(files)).toContain(
+      "- web\\nrepo:src/app.ts\\n- injected [pr\\rsource]",
+    );
+  });
+
   it("keeps the changed file list visible when a customized prompt omits the placeholder", () => {
     const prompt = buildChangesWalkthroughPrompt("CUSTOM_WITHOUT_PLACEHOLDER", [
       { path: "src/app.ts", source: "committed" },

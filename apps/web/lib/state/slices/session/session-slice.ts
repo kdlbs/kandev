@@ -359,11 +359,13 @@ function buildWalkthroughActions(set: ImmerSet, get: ImmerGet) {
         get().walkthroughs.lastSeenUpdatedAtByTaskId[taskId] === undefined;
       const storedLastSeen = shouldHydrateLastSeen ? getWalkthroughLastSeen(taskId) : null;
       set((draft) => {
+        const previous = draft.walkthroughs.byTaskId[taskId];
         draft.walkthroughs.byTaskId[taskId] = walkthrough;
         // Clamp the active step into the new step range (defaults to 0). A
         // replaced/shorter tour must not leave the pointer past the last step.
         const steps = walkthrough?.steps.length ?? 0;
-        const current = draft.walkthroughs.activeStepByTaskId[taskId] ?? 0;
+        const isReplacement = previous?.id !== walkthrough?.id;
+        const current = isReplacement ? 0 : (draft.walkthroughs.activeStepByTaskId[taskId] ?? 0);
         draft.walkthroughs.activeStepByTaskId[taskId] =
           steps === 0 ? 0 : Math.min(current, steps - 1);
         if (shouldHydrateLastSeen && storedLastSeen !== null) {

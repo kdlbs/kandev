@@ -62,9 +62,10 @@ function stepLocation(step: WalkthroughStepLike): string | null {
   const file = pickString(step, "file");
   const line = pickNumber(step, "line");
   if (!file || !line) return null;
+  const repo = pickString(step, "repo");
   const lineEnd = pickNumber(step, "line_end");
   const lineLabel = lineEnd && lineEnd !== line ? `${line}-${lineEnd}` : `${line}`;
-  return `${file}:${lineLabel}`;
+  return `${repo ? `${repo}:` : ""}${file}:${lineLabel}`;
 }
 
 function stepPreview(step: WalkthroughStepLike): string | null {

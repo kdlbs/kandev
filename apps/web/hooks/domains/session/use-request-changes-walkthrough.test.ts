@@ -2,7 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockRequest = vi.fn();
-const mockAppendToQueue = vi.fn();
+const mockQueueMessage = vi.fn();
 const mockAddMessage = vi.fn();
 const mockToast = vi.fn();
 const mockListPrompts = vi.fn();
@@ -19,7 +19,7 @@ vi.mock("@/components/toast-provider", () => ({
 }));
 
 vi.mock("@/lib/api/domains/queue-api", () => ({
-  appendToQueue: (...args: unknown[]) => mockAppendToQueue(...args),
+  queueMessage: (...args: unknown[]) => mockQueueMessage(...args),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -96,7 +96,7 @@ describe("useRequestChangesWalkthrough", () => {
     expect(sentContent).toContain("CUSTOM_WALKTHROUGH_PROMPT");
     expect(mockListPrompts).toHaveBeenCalledWith({ cache: "no-store" });
     expect(mockAddMessage).toHaveBeenCalledWith(expect.objectContaining({ id: "msg-1" }));
-    expect(mockAppendToQueue).not.toHaveBeenCalled();
+    expect(mockQueueMessage).not.toHaveBeenCalled();
     expect(mockToast).toHaveBeenCalledWith(
       expect.objectContaining({ title: "Walkthrough request sent" }),
     );
@@ -110,7 +110,7 @@ describe("useRequestChangesWalkthrough", () => {
       await result.current();
     });
 
-    expect(mockAppendToQueue).toHaveBeenCalledWith(
+    expect(mockQueueMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         session_id: "session-1",
         task_id: "task-1",
@@ -118,7 +118,7 @@ describe("useRequestChangesWalkthrough", () => {
         content: expect.stringMatching(/^@changes-walkthrough\n\nChanged files:/),
       }),
     );
-    const queuedContent = mockAppendToQueue.mock.calls[0]?.[0]?.content as string;
+    const queuedContent = mockQueueMessage.mock.calls[0]?.[0]?.content as string;
     expect(queuedContent).toContain("<kandev-system>");
     expect(queuedContent).toContain("CUSTOM_WALKTHROUGH_PROMPT");
     expect(mockRequest).not.toHaveBeenCalled();
@@ -135,7 +135,7 @@ describe("useRequestChangesWalkthrough", () => {
     });
 
     expect(mockRequest).not.toHaveBeenCalled();
-    expect(mockAppendToQueue).not.toHaveBeenCalled();
+    expect(mockQueueMessage).not.toHaveBeenCalled();
     expect(mockToast).toHaveBeenCalledWith(
       expect.objectContaining({ title: "Changes are still loading", variant: "error" }),
     );

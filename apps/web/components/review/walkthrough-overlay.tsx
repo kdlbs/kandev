@@ -18,6 +18,7 @@ import { deleteTaskWalkthrough, getTaskWalkthrough } from "@/lib/api/domains/wal
 import { WalkthroughFloatingWindow } from "@/components/diff/walkthrough-floating-window";
 import { clearOpenWalkthroughTaskId, setOpenWalkthroughTaskId } from "@/lib/walkthrough-open-state";
 import { cn } from "@kandev/ui/lib/utils";
+import type { TaskWalkthrough } from "@/lib/types/http";
 
 type WalkthroughOverlayProps = {
   /** The task whose walkthrough launcher should be shown. */
@@ -136,6 +137,45 @@ function DiscardWalkthroughDialog({
   );
 }
 
+function useWalkthroughBackfill(params: {
+  connectionStatus: string;
+  setWalkthrough: (taskId: string, walkthrough: TaskWalkthrough | null) => void;
+  taskId: string | null;
+  walkthrough: TaskWalkthrough | null | undefined;
+}) {
+  const { connectionStatus, setWalkthrough, taskId, walkthrough } = params;
+  const fetchedRef = useRef<Set<string>>(new Set());
+  const inFlightRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (
+      !taskId ||
+      walkthrough ||
+      connectionStatus !== "connected" ||
+      fetchedRef.current.has(taskId) ||
+      inFlightRef.current.has(taskId)
+    ) {
+      return;
+    }
+    let cancelled = false;
+    inFlightRef.current.add(taskId);
+    getTaskWalkthrough(taskId)
+      .then((wt) => {
+        if (cancelled) return;
+        if (wt) {
+          fetchedRef.current.add(taskId);
+          setWalkthrough(taskId, wt);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        inFlightRef.current.delete(taskId);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [connectionStatus, setWalkthrough, taskId, walkthrough]);
+}
+
 /**
  * Task-level launcher for an agent-authored walkthrough. It (1) backfills the
  * walkthrough into the store on mount — a live `task.walkthrough.created` event
@@ -159,34 +199,7 @@ export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayP
   const [discarding, setDiscarding] = useState(false);
   const { toast } = useToast();
 
-  const fetchedRef = useRef<Set<string>>(new Set());
-  const inFlightRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    if (
-      !taskId ||
-      walkthrough ||
-      connectionStatus !== "connected" ||
-      fetchedRef.current.has(taskId) ||
-      inFlightRef.current.has(taskId)
-    ) {
-      return;
-    }
-    let cancelled = false;
-    inFlightRef.current.add(taskId);
-    getTaskWalkthrough(taskId)
-      .then((wt) => {
-        if (cancelled) return;
-        fetchedRef.current.add(taskId);
-        if (wt) setWalkthrough(taskId, wt);
-      })
-      .catch(() => {})
-      .finally(() => {
-        inFlightRef.current.delete(taskId);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [taskId, walkthrough, connectionStatus, setWalkthrough]);
+  useWalkthroughBackfill({ connectionStatus, setWalkthrough, taskId, walkthrough });
 
   useEffect(() => {
     if (!taskId || !open) return;

@@ -87,6 +87,7 @@ export function useCodeMirrorWalkthroughRange({
   useEffect(() => {
     const area = editorAreaRef.current;
     if (!view || !area || !range || !taskId || !step) {
+      didRevealRef.current = "";
       setBox(null);
       if (anchorKey) clearWalkthroughEditorAnchor(anchorKey);
       return;
@@ -97,7 +98,6 @@ export function useCodeMirrorWalkthroughRange({
       didRevealRef.current = revealKey;
       const startLine = linePosition(view, range.startLine);
       view.dispatch({
-        selection: { anchor: startLine.from },
         effects: EditorView.scrollIntoView(startLine.from, { y: "center" }),
       });
     }

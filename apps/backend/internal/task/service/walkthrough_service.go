@@ -17,6 +17,9 @@ import (
 // ErrTaskWalkthroughNotFound is returned when no walkthrough exists for a task.
 var ErrTaskWalkthroughNotFound = models.ErrTaskWalkthroughNotFound
 
+// ErrInvalidWalkthrough is returned when an agent submits a malformed walkthrough.
+var ErrInvalidWalkthrough = errors.New("invalid walkthrough")
+
 // Event-payload keys, hoisted to constants to satisfy goconst.
 const (
 	wtFieldTaskID    = "task_id"
@@ -102,7 +105,7 @@ func (s *WalkthroughService) ShowWalkthrough(ctx context.Context, req ShowWalkth
 
 func normalizeWalkthroughRequest(req ShowWalkthroughRequest) (string, []models.WalkthroughStep, error) {
 	if len(req.Steps) == 0 {
-		return "", nil, errors.New("at least one step is required")
+		return "", nil, invalidWalkthroughError("at least one step is required")
 	}
 
 	title := strings.TrimSpace(req.Title)
@@ -121,21 +124,25 @@ func normalizeWalkthroughRequest(req ShowWalkthroughRequest) (string, []models.W
 			Text:    strings.TrimSpace(raw.Text),
 		}
 		if step.File == "" {
-			return "", nil, fmt.Errorf("step %d file is required", i+1)
+			return "", nil, invalidWalkthroughError("step %d file is required", i+1)
 		}
 		if step.Text == "" {
-			return "", nil, fmt.Errorf("step %d text is required", i+1)
+			return "", nil, invalidWalkthroughError("step %d text is required", i+1)
 		}
 		if step.Line <= 0 {
-			return "", nil, fmt.Errorf("step %d line must be positive", i+1)
+			return "", nil, invalidWalkthroughError("step %d line must be positive", i+1)
 		}
 		if step.LineEnd != 0 && step.LineEnd < step.Line {
-			return "", nil, fmt.Errorf("step %d line_end must be greater than or equal to line", i+1)
+			return "", nil, invalidWalkthroughError("step %d line_end must be greater than or equal to line", i+1)
 		}
 		steps = append(steps, step)
 	}
 
 	return title, steps, nil
+}
+
+func invalidWalkthroughError(format string, args ...interface{}) error {
+	return fmt.Errorf("%w: %s", ErrInvalidWalkthrough, fmt.Sprintf(format, args...))
 }
 
 // GetWalkthrough returns a task's walkthrough, or nil, nil when none exists.

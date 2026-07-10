@@ -1,7 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   computeWalkthroughConnectorPath,
+  getWalkthroughEditorAnchor,
   isWalkthroughAnchorTargetVisible,
+  setWalkthroughEditorAnchor,
+  subscribeWalkthroughEditorAnchor,
   type WalkthroughViewportRect,
 } from "./walkthrough-editor-anchor";
 
@@ -67,5 +70,31 @@ describe("isWalkthroughAnchorTargetVisible", () => {
 
     container.remove();
     other.remove();
+  });
+});
+
+describe("setWalkthroughEditorAnchor", () => {
+  it("does not notify subscribers when the anchor did not change", () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeWalkthroughEditorAnchor(listener);
+    const anchor = {
+      key: "task:0:repo:file.ts",
+      taskId: "task",
+      stepIndex: 0,
+      file: "file.ts",
+      repo: "repo",
+      line: 1,
+      lineEnd: 2,
+      rect: rect({ left: 10, top: 20 }),
+      container: document.createElement("div"),
+    };
+
+    setWalkthroughEditorAnchor(anchor);
+    setWalkthroughEditorAnchor({ ...anchor, rect: { ...anchor.rect } });
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(getWalkthroughEditorAnchor()).toEqual(anchor);
+    setWalkthroughEditorAnchor(null);
+    unsubscribe();
   });
 });

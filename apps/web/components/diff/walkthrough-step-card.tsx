@@ -138,6 +138,63 @@ export function useHasActiveWalkthroughStep(): boolean {
   });
 }
 
+function useWalkthroughStepFeedback(params: {
+  activeStep: number;
+  activeTaskId: string | null;
+  sessionId: string | null | undefined;
+  step: WalkthroughStep | undefined;
+  stepCount: number;
+  walkthrough: TaskWalkthrough | null | undefined;
+}) {
+  const { activeStep, activeTaskId, sessionId, step, stepCount, walkthrough } = params;
+  const addComment = useCommentsStore((s) => s.addComment);
+  const { runComment } = useRunComment({ sessionId: sessionId ?? null, taskId: activeTaskId });
+  const { toast } = useToast();
+  const buildComment = (text: string): WalkthroughComment | null => {
+    if (!sessionId || !activeTaskId || !walkthrough || !step) return null;
+    return buildWalkthroughComment({
+      sessionId,
+      taskId: activeTaskId,
+      walkthrough,
+      step,
+      activeStep,
+      stepCount,
+      text,
+    });
+  };
+  const showMissingSessionError = () => {
+    toast({ title: "No active session for walkthrough note", variant: "error" });
+  };
+  const addWalkthroughFeedback = (text: string) => {
+    const comment = buildComment(text);
+    if (!comment) {
+      showMissingSessionError();
+      return;
+    }
+    addComment(comment);
+    toast({ title: "Walkthrough note added", variant: "success" });
+  };
+  const runWalkthroughFeedback = (text: string) => {
+    const comment = buildComment(text);
+    if (!comment) {
+      showMissingSessionError();
+      return;
+    }
+    addComment(comment);
+    void runComment(comment)
+      .then(({ queued }) => {
+        toast({
+          title: queued ? "Walkthrough note queued" : "Walkthrough note sent",
+          variant: "success",
+        });
+      })
+      .catch(() => {
+        toast({ title: "Failed to send walkthrough note", variant: "error" });
+      });
+  };
+  return { addWalkthroughFeedback, runWalkthroughFeedback };
+}
+
 /**
  * The shared inner card body (header, markdown, Prev/Next, ask box) used by both
  * the inline diff-anchored card and the editor-mode floating window. Reads all
@@ -162,54 +219,24 @@ export function WalkthroughStepInner({
   );
   const setActiveStep = useAppStore((s) => s.setWalkthroughActiveStep);
   const markSeen = useAppStore((s) => s.markWalkthroughSeen);
-  const addComment = useCommentsStore((s) => s.addComment);
-  const { runComment } = useRunComment({ sessionId, taskId: activeTaskId });
   const { openFile: defaultOpenFile } = useFileEditors();
   const openFile = onSelectFile ?? defaultOpenFile;
-  const { toast } = useToast();
+  const stepCount = walkthrough?.steps.length ?? 0;
+  const step = walkthrough?.steps[activeStep];
+  const { addWalkthroughFeedback, runWalkthroughFeedback } = useWalkthroughStepFeedback({
+    activeStep,
+    activeTaskId,
+    sessionId,
+    step,
+    stepCount,
+    walkthrough,
+  });
   useEffect(() => {
     if (activeTaskId && walkthrough) markSeen(activeTaskId);
   }, [activeTaskId, walkthrough, markSeen]);
   if (!activeTaskId || !walkthrough) return null;
-  const stepCount = walkthrough.steps.length;
-  const step = walkthrough.steps[activeStep];
   if (!step) return null;
   const lineLabel = step.line_end ? `Lines ${step.line}–${step.line_end}` : `Line ${step.line}`;
-  const buildComment = (text: string): WalkthroughComment | null => {
-    if (!sessionId) return null;
-    return buildWalkthroughComment({
-      sessionId,
-      taskId: activeTaskId,
-      walkthrough,
-      step,
-      activeStep,
-      stepCount,
-      text,
-    });
-  };
-
-  const addWalkthroughFeedback = (text: string) => {
-    const comment = buildComment(text);
-    if (!comment) return;
-    addComment(comment);
-    toast({ title: "Walkthrough note added", variant: "success" });
-  };
-
-  const runWalkthroughFeedback = (text: string) => {
-    const comment = buildComment(text);
-    if (!comment) return;
-    addComment(comment);
-    void runComment(comment)
-      .then(({ queued }) => {
-        toast({
-          title: queued ? "Walkthrough note queued" : "Walkthrough note sent",
-          variant: "success",
-        });
-      })
-      .catch(() => {
-        toast({ title: "Failed to send walkthrough note", variant: "error" });
-      });
-  };
 
   return (
     <div className="flex max-h-[calc(100dvh-2rem)] flex-col rounded-xl border-l-2 border-primary/60 border border-border bg-card shadow-lg sm:max-h-[min(78vh,720px)]">
@@ -231,7 +258,7 @@ export function WalkthroughStepInner({
       />
       <div className="px-4 pb-3 pt-1">
         <CommentForm
-          key={activeStep}
+          key={`${walkthrough.id}:${activeStep}`}
           onSubmit={addWalkthroughFeedback}
           onSubmitAndRun={runWalkthroughFeedback}
           onCancel={() => {}}

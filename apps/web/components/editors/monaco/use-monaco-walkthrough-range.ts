@@ -43,6 +43,16 @@ export function buildWalkthroughRangeDecorations(
   return decorations;
 }
 
+export function clampWalkthroughRangeToLineCount(
+  range: WalkthroughEditorRange,
+  lineCount: number | null | undefined,
+): WalkthroughEditorRange {
+  if (!lineCount || lineCount < 1) return range;
+  const startLine = Math.min(Math.max(range.startLine, 1), lineCount);
+  const endLine = Math.min(Math.max(range.endLine, startLine), lineCount);
+  return { startLine, endLine };
+}
+
 function rectFromViewport(left: number, top: number, width: number, height: number) {
   return { left, top, width, height, right: left + width, bottom: top + height };
 }
@@ -100,6 +110,11 @@ export function useMonacoWalkthroughRange({
     () => getWalkthroughEditorRange({ path, repository_name: repo }, step),
     [path, repo, step],
   );
+  const clampedRange = useMemo(
+    () =>
+      range ? clampWalkthroughRangeToLineCount(range, editor?.getModel()?.getLineCount()) : null,
+    [editor, range],
+  );
   const anchorKey = taskId ? `${taskId}:${stepIndex}:${repo ?? ""}:${path}` : "";
 
   useEffect(() => {
@@ -112,13 +127,15 @@ export function useMonacoWalkthroughRange({
   }, [editor]);
 
   useEffect(() => {
-    decorationsRef.current?.set(buildWalkthroughRangeDecorations(range));
-    if (editor && range) editor.revealLinesInCenter(range.startLine, range.endLine);
-  }, [editor, range]);
+    decorationsRef.current?.set(buildWalkthroughRangeDecorations(clampedRange));
+    if (editor && clampedRange) {
+      editor.revealLinesInCenter(clampedRange.startLine, clampedRange.endLine);
+    }
+  }, [clampedRange, editor]);
 
   useEffect(() => {
     const area = editorAreaRef.current;
-    if (!editor || !area || !range || !taskId || !step) {
+    if (!editor || !area || !clampedRange || !taskId || !step) {
       setBox(null);
       if (anchorKey) clearWalkthroughEditorAnchor(anchorKey);
       return;
@@ -128,7 +145,7 @@ export function useMonacoWalkthroughRange({
     const update = () => {
       if (frame !== null) cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        const measured = measureRangeBox(editor, area, range);
+        const measured = measureRangeBox(editor, area, clampedRange);
         if (!measured) {
           setBox(null);
           clearWalkthroughEditorAnchor(anchorKey);
@@ -147,8 +164,8 @@ export function useMonacoWalkthroughRange({
           stepIndex,
           file: step.file,
           repo: step.repo,
-          line: range.startLine,
-          lineEnd: range.endLine,
+          line: clampedRange.startLine,
+          lineEnd: clampedRange.endLine,
           rect: measured.viewportRect,
           container: editorDom ?? undefined,
         });
@@ -171,7 +188,7 @@ export function useMonacoWalkthroughRange({
       window.removeEventListener("resize", update);
       clearWalkthroughEditorAnchor(anchorKey);
     };
-  }, [anchorKey, editor, editorAreaRef, path, range, step, stepIndex, taskId]);
+  }, [anchorKey, clampedRange, editor, editorAreaRef, path, step, stepIndex, taskId]);
 
   return box;
 }
