@@ -40,12 +40,12 @@ function storeState(sessionState: string, planMode = false) {
   };
 }
 
-function renderRequestHook(files = [{ path: "src/app.ts", source: "uncommitted" }]) {
+function renderRequestHook(ready = true) {
   return renderHook(() =>
     useRequestChangesWalkthrough({
       taskId: "task-1",
       sessionId: "session-1",
-      files,
+      ready,
     }),
   );
 }
@@ -59,7 +59,7 @@ describe("useRequestChangesWalkthrough", () => {
         {
           id: "builtin-changes-walkthrough",
           name: "changes-walkthrough",
-          content: "CUSTOM_WALKTHROUGH_PROMPT\n{{changed_files}}\nshow_walkthrough_kandev",
+          content: "CUSTOM_WALKTHROUGH_PROMPT\nshow_walkthrough_kandev",
           builtin: true,
         },
       ],
@@ -87,13 +87,16 @@ describe("useRequestChangesWalkthrough", () => {
       expect.objectContaining({
         task_id: "task-1",
         session_id: "session-1",
-        content: expect.stringMatching(/^@changes-walkthrough\n\nChanged files:/),
+        content: expect.stringMatching(/^@changes-walkthrough\n\n<kandev-system>/),
       }),
       10000,
     );
     const sentContent = mockRequest.mock.calls[0]?.[1]?.content as string;
     expect(sentContent).toContain("<kandev-system>");
     expect(sentContent).toContain("CUSTOM_WALKTHROUGH_PROMPT");
+    expect(sentContent).not.toContain("Diff context:");
+    expect(sentContent).not.toContain("Base branch:");
+    expect(sentContent).not.toContain("Base commit:");
     expect(mockListPrompts).toHaveBeenCalledWith({ cache: "no-store" });
     expect(mockAddMessage).toHaveBeenCalledWith(expect.objectContaining({ id: "msg-1" }));
     expect(mockQueueMessage).not.toHaveBeenCalled();
@@ -115,7 +118,7 @@ describe("useRequestChangesWalkthrough", () => {
         session_id: "session-1",
         task_id: "task-1",
         plan_mode: true,
-        content: expect.stringMatching(/^@changes-walkthrough\n\nChanged files:/),
+        content: expect.stringMatching(/^@changes-walkthrough\n\n<kandev-system>/),
       }),
     );
     const queuedContent = mockQueueMessage.mock.calls[0]?.[0]?.content as string;
@@ -127,8 +130,8 @@ describe("useRequestChangesWalkthrough", () => {
     );
   });
 
-  it("does not send a low-context prompt before changed files are loaded", async () => {
-    const { result } = renderRequestHook([]);
+  it("does not send a low-context prompt before diff context is ready", async () => {
+    const { result } = renderRequestHook(false);
 
     await act(async () => {
       await result.current();

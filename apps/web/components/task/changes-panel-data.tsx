@@ -27,8 +27,6 @@ import {
   buildRepoNameById,
 } from "./changes-panel-helpers";
 import type { OpenDiffOptions } from "./changes-diff-target";
-import type { WalkthroughPromptFile } from "@/lib/walkthrough-request";
-import { buildWalkthroughPromptFiles } from "@/lib/walkthrough-prompt-files";
 
 function useChangesPanelStoreData() {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
@@ -211,6 +209,10 @@ function useChangesPanelPRData() {
   return { prDiffFiles, prCommitsList, hasPRFiles, hasPRCommits, prFiles };
 }
 
+function hasCumulativeFiles(files: Record<string, unknown> | null | undefined): boolean {
+  return Object.keys(files ?? {}).length > 0;
+}
+
 export function useChangesPanelData() {
   const { activeTaskId, activeSessionId, baseBranch, existingPrUrl } = useChangesPanelStoreData();
   const baseBranchByRepo = useBaseBranchByRepo(activeTaskId);
@@ -244,16 +246,11 @@ export function useChangesPanelData() {
     () => buildPrByRepoMap(taskPRsForMap, repoNameById, pendingByRepo),
     [taskPRsForMap, repoNameById, pendingByRepo],
   );
-  const walkthroughPromptFiles = useMemo<WalkthroughPromptFile[]>(
-    () =>
-      buildWalkthroughPromptFiles({
-        unstagedFiles,
-        stagedFiles,
-        committedFiles: git.statusLoaded ? git.cumulativeDiff?.files : null,
-        prFiles: prData.prFiles,
-      }),
-    [git.cumulativeDiff?.files, git.statusLoaded, prData.prFiles, stagedFiles, unstagedFiles],
-  );
+  const walkthroughRequestReady =
+    unstagedFiles.length > 0 ||
+    stagedFiles.length > 0 ||
+    (git.statusLoaded && hasCumulativeFiles(git.cumulativeDiff?.files)) ||
+    prData.prFiles.length > 0;
   return {
     activeTaskId,
     activeSessionId,
@@ -272,7 +269,7 @@ export function useChangesPanelData() {
     repoDisplayName,
     prByRepo,
     existingPrUrl,
-    walkthroughPromptFiles,
+    walkthroughRequestReady,
     ...prData,
   };
 }

@@ -468,14 +468,27 @@ function useWalkthroughFileSelection(
   }, [open, step, allFiles, filter, setFilter, handleSelectFile]);
 }
 
+function useReviewDialogWalkthroughRequest({
+  sessionId,
+  allFiles,
+}: {
+  sessionId: string;
+  allFiles: ReviewFile[];
+}) {
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  return useRequestChangesWalkthrough({
+    taskId: activeTaskId,
+    sessionId,
+    ready: allFiles.length > 0,
+  });
+}
+
 export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps) {
   const { open, onOpenChange, sessionId, baseBranch, onOpenFile } = props;
   const s = useReviewDialogState(props);
-  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const handleRequestWalkthrough = useRequestChangesWalkthrough({
-    taskId: activeTaskId,
+  const handleRequestWalkthrough = useReviewDialogWalkthroughRequest({
     sessionId,
-    files: s.allFiles,
+    allFiles: s.allFiles,
   });
   const splitRowRef = useRef<HTMLDivElement>(null);
   const sidebar = useReviewSidebarResize(splitRowRef, open);

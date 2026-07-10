@@ -35,8 +35,7 @@ func isChangesWalkthroughRequest(prompt string) bool {
 	legacyPrompt := strings.Contains(cmd, changesWalkthroughPromptMarker) &&
 		strings.Contains(cmd, "show_walkthrough_kandev") &&
 		strings.Contains(cmd, "Available changed files:")
-	promptReference := strings.Contains(cmd, "@changes-walkthrough") &&
-		strings.Contains(cmd, "Changed files:")
+	promptReference := strings.Contains(cmd, "@changes-walkthrough")
 	return legacyPrompt || promptReference
 }
 

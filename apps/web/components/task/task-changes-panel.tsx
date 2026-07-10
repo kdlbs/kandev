@@ -169,15 +169,12 @@ function persistAutoMarkSetting(checked: boolean) {
   updateUserSettings(payload, { cache: "no-store" }).catch(() => {});
 }
 
-function useReviewWalkthroughRequest(
-  activeSessionId: string | null | undefined,
-  allFiles: ReviewFile[],
-) {
+function useWalkthroughRequest(activeSessionId: string | null | undefined, allFiles: ReviewFile[]) {
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
   return useRequestChangesWalkthrough({
     taskId: activeTaskId,
     sessionId: activeSessionId,
-    files: allFiles,
+    ready: allFiles.length > 0,
   });
 }
 
@@ -485,7 +482,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
     handleToggleAutoMark,
     handleFixComments,
   } = useChangesActions(activeSessionId, allFiles, wordWrapProp);
-  const handleRequestWalkthrough = useReviewWalkthroughRequest(activeSessionId, allFiles);
+  const handleRequestWalkthrough = useWalkthroughRequest(activeSessionId, allFiles);
   const { visibleFiles, visibleFileRefs, reviewedCount, totalCount, progressPercent } =
     useVisibleDiffState({
       allFiles,

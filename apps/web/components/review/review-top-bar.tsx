@@ -225,7 +225,13 @@ export const ReviewTopBar = memo(function ReviewTopBar({
         disabled={requestWalkthroughDisabled}
       />
       <VcsSplitButton sessionId={sessionId} baseBranch={baseBranch} />
-      <Button size="sm" variant="ghost" className="px-2 cursor-pointer" onClick={onClose}>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="px-2 cursor-pointer"
+        onClick={onClose}
+        aria-label="Close review"
+      >
         <IconX className="h-4 w-4" />
       </Button>
     </div>

@@ -26,7 +26,7 @@ const ChangesPanel = memo(function ChangesPanel(props: ChangesPanelProps) {
   const requestWalkthrough = useRequestChangesWalkthrough({
     taskId: data.activeTaskId,
     sessionId: data.activeSessionId,
-    files: data.walkthroughPromptFiles,
+    ready: data.walkthroughRequestReady,
   });
   if (isArchived) return <ArchivedPanelPlaceholder />;
   return (
@@ -44,7 +44,7 @@ const ChangesPanel = memo(function ChangesPanel(props: ChangesPanelProps) {
         onOpenDiffAll={props.onOpenDiffAll}
         onOpenReview={props.onOpenReview}
         onRequestWalkthrough={requestWalkthrough}
-        requestWalkthroughDisabled={data.walkthroughPromptFiles.length === 0}
+        requestWalkthroughDisabled={!data.walkthroughRequestReady}
         repoNames={data.git.repoNames}
         perRepoStatus={data.git.perRepoStatus}
         onRepoPull={data.repoCallbacks.onRepoPull}

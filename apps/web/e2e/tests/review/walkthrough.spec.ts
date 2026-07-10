@@ -52,12 +52,15 @@ async function customizeChangesWalkthroughPrompt(
       "Please create an agent-authored walkthrough of the current changes using `show_walkthrough_kandev`.",
       "",
       "Walkthrough requirements:",
+      "- Inspect the changed files yourself instead of relying on UI-provided paths.",
+      "- For PR tasks, compare the PR head against the PR base branch.",
+      "- For non-PR tasks, compare against the task or repository base.",
+      "- The first walkthrough step must contextualize the whole change.",
+      "- Anchor the first step to the most representative changed line or range.",
+      "- Include an `ELI5:` line in the first step text.",
       "- Use `line_end` whenever a logical explanation spans multiple lines.",
       "- For PR-only files, do not assume the PR head is checked out locally.",
       "- Keep each step concise and direct. Do not include a `Justification:` preamble.",
-      "",
-      "Available changed files:",
-      "{{changed_files}}",
     ].join("\n"),
   });
   return () => apiClient.updatePrompt(prompt!.id, { content: originalContent });
@@ -97,8 +100,10 @@ test.describe("Code walkthrough", () => {
       await expect(session.activeChat()).toContainText("@changes-walkthrough", {
         timeout: 15_000,
       });
-      await expect(session.activeChat()).toContainText("Changed files:");
-      await expect(session.activeChat()).toContainText("walkthrough_a.txt [");
+      await expect(session.activeChat()).not.toContainText("Diff context:");
+      await expect(session.activeChat()).not.toContainText("Base branch:");
+      await expect(session.activeChat()).not.toContainText("Changed files:");
+      await expect(session.activeChat()).not.toContainText("walkthrough_a.txt [");
       await expect(session.activeChat()).not.toContainText("E2E_CUSTOM_CHANGES_WALKTHROUGH");
       await expect(session.activeChat()).toContainText("Walkthrough: Tour of the change", {
         timeout: 45_000,
@@ -110,7 +115,8 @@ test.describe("Code walkthrough", () => {
 
       const card = await openWalkthrough(testPage);
       await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 1 / 5");
-      await expect(card.getByTestId("walkthrough-step-body")).toContainText("Step 1");
+      await expect(card.getByTestId("walkthrough-step-title")).toContainText("Overview");
+      await expect(card.getByTestId("walkthrough-step-body")).toContainText("ELI5:");
       await expect(session.walkthroughEditorRange()).toBeVisible({ timeout: 15_000 });
     } finally {
       await restorePrompt();
@@ -137,15 +143,17 @@ test.describe("Code walkthrough", () => {
       await expect(request).toHaveAttribute("aria-label", "Walk me through these review changes");
       await request.click();
 
-      await testPage.keyboard.press("Escape");
+      await dialog.getByRole("button", { name: "Close review" }).click();
       await expect(dialog).toBeHidden({ timeout: 15_000 });
       await session.showSessionContext();
 
       await expect(session.activeChat()).toContainText("@changes-walkthrough", {
         timeout: 15_000,
       });
-      await expect(session.activeChat()).toContainText("Changed files:");
-      await expect(session.activeChat()).toContainText("walkthrough_a.txt [");
+      await expect(session.activeChat()).not.toContainText("Diff context:");
+      await expect(session.activeChat()).not.toContainText("Base branch:");
+      await expect(session.activeChat()).not.toContainText("Changed files:");
+      await expect(session.activeChat()).not.toContainText("walkthrough_a.txt [");
       await expect(session.activeChat()).not.toContainText("E2E_CUSTOM_CHANGES_WALKTHROUGH");
       await expect(session.activeChat()).toContainText("walkthrough-request complete", {
         timeout: 45_000,
@@ -166,7 +174,8 @@ test.describe("Code walkthrough", () => {
     const body = card.getByTestId("walkthrough-step-body");
 
     await expect(header).toContainText("Step 1 / 5");
-    await expect(body).toContainText("Step 1");
+    await expect(card.getByTestId("walkthrough-step-title")).toContainText("Overview");
+    await expect(body).toContainText("ELI5:");
     await expect(card.getByTestId("walkthrough-step-file")).toContainText("walkthrough_a.txt");
     await expect(card.getByTestId("walkthrough-prev")).toBeDisabled();
 

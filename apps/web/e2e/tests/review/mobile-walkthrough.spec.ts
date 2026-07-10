@@ -88,6 +88,8 @@ test.describe("Mobile code walkthrough", () => {
     const card = session.walkthroughFloating();
     await expect(card).toBeVisible({ timeout: 30_000 });
     await expect(card).toHaveAttribute("data-mobile-variant", "bottom-sheet");
+    await expect(card.getByTestId("walkthrough-step-title")).toContainText("Overview");
+    await expect(card.getByTestId("walkthrough-step-body")).toContainText("ELI5:");
     await expect(session.walkthroughEditorRange()).toBeVisible({ timeout: 15_000 });
   });
 

@@ -124,9 +124,6 @@ func TestIsChangesWalkthroughRequest(t *testing.T) {
 	promptReference := strings.Join([]string{
 		"@changes-walkthrough",
 		"",
-		"Changed files:",
-		"- src/app.ts [uncommitted]",
-		"",
 		"<kandev-system>",
 		"EXPANDED PROMPT REFERENCES",
 		"### @changes-walkthrough",

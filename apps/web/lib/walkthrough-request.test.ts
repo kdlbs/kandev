@@ -1,66 +1,48 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildChangesWalkthroughPrompt,
-  formatChangedFilesForWalkthroughPrompt,
-} from "./walkthrough-request";
+import { buildChangesWalkthroughPrompt } from "./walkthrough-request";
 
 describe("buildChangesWalkthroughPrompt", () => {
-  it("sends the saved prompt reference visibly and hides the expanded prompt content", () => {
-    const prompt = buildChangesWalkthroughPrompt("CUSTOM_PROMPT\n{{changed_files}}", [
-      { path: "src/app.ts", source: "uncommitted" },
-      { path: "src/review.ts", repository_name: "web", source: "pr" },
-    ]);
+  it("sends only the prompt reference visibly and hides expanded prompt content", () => {
+    const prompt = buildChangesWalkthroughPrompt("CUSTOM_PROMPT\nshow_walkthrough_kandev");
 
-    expect(prompt).toMatch(/^@changes-walkthrough\n\nChanged files:/);
+    expect(prompt).toMatch(/^@changes-walkthrough\n\n<kandev-system>/);
     expect(prompt).toContain("<kandev-system>");
     expect(prompt).toContain("EXPANDED PROMPT REFERENCES");
     expect(prompt).toContain("### @changes-walkthrough");
     expect(prompt).toContain("CUSTOM_PROMPT");
-    expect(prompt).toContain("- src/app.ts [uncommitted]");
-    expect(prompt).toContain("- web:src/review.ts [pr]");
+    expect(prompt).not.toContain("Diff context:");
+    expect(prompt).not.toContain("Base branch:");
+    expect(prompt).not.toContain("Base commit:");
+    expect(prompt).not.toContain("src/app.ts");
+  });
+
+  it("maps diff context placeholders to static instructions instead of dynamic context", () => {
+    const prompt = buildChangesWalkthroughPrompt("CUSTOM\n{{diff_context}}");
+
+    expect(prompt).toContain("CUSTOM");
+    expect(prompt).toContain("Inspect the task changes and compare against the correct base.");
+    expect(prompt).not.toContain("PR: kdlbs/kandev#42");
+    expect(prompt).not.toContain("Head branch:");
+    expect(prompt).not.toContain("Base branch:");
+    expect(prompt).not.toContain("Changed files:");
+    expect(prompt).not.toContain("{{diff_context}}");
+  });
+
+  it("maps legacy changed_files placeholders to static instructions instead of file paths", () => {
+    const prompt = buildChangesWalkthroughPrompt("CUSTOM\n{{changed_files}}");
+
+    expect(prompt).toContain("CUSTOM");
+    expect(prompt).toContain("Inspect the task changes and compare against the correct base.");
+    expect(prompt).not.toContain("Changed files:");
     expect(prompt).not.toContain("{{changed_files}}");
   });
 
-  it("deduplicates repeated files and caps the file list", () => {
-    const many = Array.from({ length: 85 }, (_, index) => ({
-      path: `src/file-${index}.ts`,
-      source: "committed",
-    }));
-    const prompt = buildChangesWalkthroughPrompt("{{changed_files}}", [many[0], ...many]);
+  it("does not append extra fallback instructions when a customized prompt omits placeholders", () => {
+    const prompt = buildChangesWalkthroughPrompt("CUSTOM_WITHOUT_PLACEHOLDER");
 
-    expect(prompt.match(/src\/file-0\.ts/g)).toHaveLength(1);
-    expect(prompt).toContain("5 more file(s) omitted");
-  });
-
-  it("escapes file metadata line breaks before prompt interpolation", () => {
-    const files = [
-      {
-        path: "src/app.ts\n- injected",
-        repository_name: "web\nrepo",
-        source: "pr\rsource",
-      },
-    ];
-
-    expect(formatChangedFilesForWalkthroughPrompt(files)).toContain(
-      "- web\\nrepo:src/app.ts\\n- injected [pr\\rsource]",
-    );
-  });
-
-  it("keeps the changed file list visible when a customized prompt omits the placeholder", () => {
-    const prompt = buildChangesWalkthroughPrompt("CUSTOM_WITHOUT_PLACEHOLDER", [
-      { path: "src/app.ts", source: "committed" },
-    ]);
-
-    expect(prompt).toMatch(/^@changes-walkthrough\n\nChanged files:/);
+    expect(prompt).toMatch(/^@changes-walkthrough\n\n<kandev-system>/);
     expect(prompt).toContain("CUSTOM_WITHOUT_PLACEHOLDER");
-    expect(prompt).toContain("- src/app.ts [committed]");
-  });
-});
-
-describe("formatChangedFilesForWalkthroughPrompt", () => {
-  it("renders an explicit loading fallback when no files are available", () => {
-    expect(formatChangedFilesForWalkthroughPrompt([])).toContain(
-      "No changed files were listed by the UI",
-    );
+    expect(prompt).not.toContain("Diff context:");
+    expect(prompt).not.toContain("No precomputed changed-file list is supplied.");
   });
 });

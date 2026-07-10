@@ -164,9 +164,13 @@ func TestSQLiteRepository_BuiltinPrompts(t *testing.T) {
 	}
 	for _, want := range []string{
 		"show_walkthrough_kandev",
-		"{{changed_files}}",
+		"Inspect the changed files yourself",
+		"compare the PR head against the PR base branch",
+		"compare against the task/repository base",
 		"Use `line_end`",
 		"do not assume the PR head is checked out locally",
+		"first walkthrough step",
+		"ELI5:",
 	} {
 		if !strings.Contains(changesWalkthroughContent, want) {
 			t.Fatalf("expected changes-walkthrough prompt to contain %q, got:\n%s", want, changesWalkthroughContent)

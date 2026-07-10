@@ -38,7 +38,7 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
   const requestWalkthrough = useRequestChangesWalkthrough({
     taskId: data.activeTaskId,
     sessionId: data.activeSessionId,
-    files: data.walkthroughPromptFiles,
+    ready: data.walkthroughRequestReady,
   });
 
   // Track the previous selectedDiff to detect changes
@@ -107,7 +107,7 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
           onOpenDiffAll={handleOpenDiffAll}
           onOpenReview={handleOpenReview}
           onRequestWalkthrough={requestWalkthrough}
-          requestWalkthroughDisabled={data.walkthroughPromptFiles.length === 0}
+          requestWalkthroughDisabled={!data.walkthroughRequestReady}
           repoNames={data.git.repoNames}
           perRepoStatus={data.git.perRepoStatus}
           onRepoPull={data.repoCallbacks.onRepoPull}

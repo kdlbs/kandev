@@ -851,8 +851,8 @@ func walkthroughDemoArgs() map[string]interface{} {
 	return map[string]interface{}{
 		wtKeyTitle: "Tour of the change",
 		wtKeySteps: []map[string]interface{}{
-			wtStep("Entry point", "walkthrough_a.txt",
-				"Execution starts here. **Step 1** explains the entry point in file A.", 1, 0),
+			wtStep("Overview", "walkthrough_a.txt",
+				"Big picture: this tour explains how the sample changes connect across the touched files.\n\nELI5: first we show the map, then we explain each changed line.", 1, 0),
 			wtStep("The change in A", "walkthrough_a.txt",
 				"Step 2: this is WALKTHROUGH_CHANGE_A the tour narrates.", 2, 3),
 			wtStep("File B", "walkthrough_b.txt",

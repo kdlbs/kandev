@@ -7,7 +7,6 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import {
   buildChangesWalkthroughPrompt,
   CHANGES_WALKTHROUGH_PROMPT_NAME,
-  type WalkthroughPromptFile,
 } from "@/lib/walkthrough-request";
 import type { Message } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
@@ -15,7 +14,7 @@ import type { AppState } from "@/lib/state/store";
 type UseRequestChangesWalkthroughParams = {
   taskId: string | null | undefined;
   sessionId: string | null | undefined;
-  files: WalkthroughPromptFile[];
+  ready?: boolean;
 };
 
 function isAgentBusy(state: string | undefined): boolean {
@@ -75,7 +74,7 @@ async function sendWalkthroughRequest(params: {
 export function useRequestChangesWalkthrough({
   taskId,
   sessionId,
-  files,
+  ready = true,
 }: UseRequestChangesWalkthroughParams) {
   const storeApi = useAppStoreApi();
   const { toast } = useToast();
@@ -87,13 +86,13 @@ export function useRequestChangesWalkthrough({
     const activeSession = state.taskSessions.items[sessionId] ?? null;
     const shouldQueue = isAgentBusy(activeSession?.state);
     const planModeEnabled = state.chatInput.planModeBySessionId[sessionId] ?? false;
-    if (files.length === 0) {
+    if (!ready) {
       toast({ title: "Changes are still loading", variant: "error" });
       return;
     }
     try {
       const template = await loadChangesWalkthroughPromptTemplate();
-      const content = buildChangesWalkthroughPrompt(template, files);
+      const content = buildChangesWalkthroughPrompt(template);
       if (shouldQueue) {
         await queueWalkthroughRequest({
           taskId,
@@ -111,5 +110,5 @@ export function useRequestChangesWalkthrough({
       console.error("Failed to request walkthrough:", error);
       toast({ title: "Failed to request walkthrough", variant: "error" });
     }
-  }, [files, sessionId, storeApi, taskId, toast]);
+  }, [ready, sessionId, storeApi, taskId, toast]);
 }
