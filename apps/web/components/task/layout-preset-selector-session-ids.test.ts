@@ -37,4 +37,19 @@ describe("resolveLayoutApplySessionIds", () => {
     expect(loadSessions).not.toHaveBeenCalled();
     expect(result).toEqual([ACTIVE_SESSION_ID, SIBLING_SESSION_ID]);
   });
+
+  it("does not duplicate the active session when it is already loaded", async () => {
+    const loadSessions = vi.fn();
+
+    const result = await resolveLayoutApplySessionIds({
+      activeTaskId: "task-1",
+      activeSessionId: ACTIVE_SESSION_ID,
+      sessionsLoaded: true,
+      loadSessions,
+      getSessionsForTask: () => [{ id: ACTIVE_SESSION_ID }, { id: SIBLING_SESSION_ID }],
+    });
+
+    expect(loadSessions).not.toHaveBeenCalled();
+    expect(result).toEqual([ACTIVE_SESSION_ID, SIBLING_SESSION_ID]);
+  });
 });
