@@ -957,7 +957,7 @@ func TestWaitForPromptDone_TreatsPromptAbandonedAfterCancelAsCancelEscalated(t *
 	}
 }
 
-func TestSendPrompt_TreatsTriggerTimePromptAbandonedAfterCancelAsCancelEscalated(t *testing.T) {
+func TestSendPrompt_TriggerTimeCancelReleaseReturnsErrCancelEscalated(t *testing.T) {
 	mock := newMockAgentServer(t)
 	defer mock.Close()
 	mock.handler = func(msg ws.Message) *ws.Message {

@@ -669,12 +669,15 @@ func (sm *SessionManager) SendPrompt(
 				zap.String("execution_id", execution.ID),
 				zap.Error(retryErr))
 		}
+		if isCancelReleaseError(err.Error()) {
+			sm.logger.Info("prompt trigger abandoned after cancel; requeueing",
+				zap.String("execution_id", execution.ID),
+				zap.Error(err))
+			return nil, fmt.Errorf("failed to trigger prompt: %w: %w", err, ErrCancelEscalated)
+		}
 		sm.logger.Error("failed to trigger prompt",
 			zap.String("execution_id", execution.ID),
 			zap.Error(err))
-		if isCancelReleaseError(err.Error()) {
-			return nil, fmt.Errorf("failed to trigger prompt: %w: %w", err, ErrCancelEscalated)
-		}
 		return nil, fmt.Errorf("failed to trigger prompt: %w", err)
 	}
 
