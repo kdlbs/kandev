@@ -171,6 +171,9 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
     >
       <Card>
         <CardContent className="space-y-3 pt-6">
+          <h3 className="text-sm font-semibold" data-testid="sentry-instances-heading">
+            Instances
+          </h3>
           {loading && instances.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4 text-center">Loading…</p>
           ) : (

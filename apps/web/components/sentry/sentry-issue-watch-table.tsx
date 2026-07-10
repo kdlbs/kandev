@@ -11,14 +11,14 @@ import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useAppStore } from "@/components/state-provider";
 import type { SentryIssueWatch, SentrySearchFilter } from "@/lib/types/sentry";
 
 type SentryIssueWatchTableProps = {
   watches: SentryIssueWatch[];
-  // showWorkspace renders a Workspace column when the table aggregates rows
-  // from every workspace (install-wide settings page).
-  showWorkspace?: boolean;
+  // instanceName resolves a watch's bound sentryInstanceId to its display name.
+  // The table is workspace-scoped, so it shows which instance each watch polls
+  // (not which workspace it belongs to).
+  instanceName: (sentryInstanceId: string) => string;
   onEdit: (watch: SentryIssueWatch) => void;
   onDelete: (id: string, workspaceId: string) => void;
   onTrigger: (id: string, workspaceId: string) => void;
@@ -149,16 +149,13 @@ function WatchActions({
 
 export function SentryIssueWatchTable({
   watches,
-  showWorkspace,
+  instanceName,
   onEdit,
   onDelete,
   onTrigger,
   onReset,
   onToggleEnabled,
 }: SentryIssueWatchTableProps) {
-  const workspaces = useAppStore((s) => s.workspaces.items);
-  const workspaceName = (id: string) => workspaces.find((w) => w.id === id)?.name ?? id;
-
   if (watches.length === 0) {
     return (
       <p className="text-sm text-muted-foreground py-4 text-center">
@@ -171,7 +168,7 @@ export function SentryIssueWatchTable({
     <Table>
       <TableHeader>
         <TableRow>
-          {showWorkspace && <TableHead>Workspace</TableHead>}
+          <TableHead>Instance</TableHead>
           <TableHead>Filter</TableHead>
           <TableHead>Interval</TableHead>
           <TableHead>Last Polled</TableHead>
@@ -182,11 +179,9 @@ export function SentryIssueWatchTable({
       <TableBody>
         {watches.map((watch) => (
           <TableRow key={watch.id} className="cursor-pointer" onClick={() => onEdit(watch)}>
-            {showWorkspace && (
-              <TableCell className="text-xs text-muted-foreground">
-                {workspaceName(watch.workspaceId)}
-              </TableCell>
-            )}
+            <TableCell className="text-xs text-muted-foreground" data-testid="watch-instance">
+              {instanceName(watch.sentryInstanceId)}
+            </TableCell>
             <TableCell
               className="font-mono text-xs max-w-md truncate"
               title={summarizeFilter(watch.filter)}
