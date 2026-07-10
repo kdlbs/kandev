@@ -165,27 +165,33 @@ func (s *Service) TakeQueued(ctx context.Context, sessionID string) (*QueuedMess
 }
 
 // TakeQueuedEntry atomically removes and returns the entry identified by
-// entryID, regardless of its FIFO position. Returns nil, false when the
-// entry no longer exists (already drained or removed by a concurrent path).
-// Used by InterruptForPeerMessage to dispatch the specific message that
-// triggered the interrupt instead of whatever happens to be at the FIFO
-// head — see that function's doc comment.
-func (s *Service) TakeQueuedEntry(ctx context.Context, sessionID, entryID string) (*QueuedMessage, bool) {
+// entryID, regardless of its FIFO position. Returns nil, false, nil when
+// the entry no longer exists (already drained or removed by a concurrent
+// path); returns a non-nil error on a genuine repository failure — the two
+// are deliberately distinguished so InterruptForPeerMessage can treat "not
+// found" (safe to fall back to a FIFO-head drain) differently from "the
+// repository call itself failed" (unsafe to fall back: a transient error
+// here says nothing about which entry is actually at the FIFO head, and
+// falling back anyway risks dispatching the wrong message while still
+// reporting "sent" for the parent's — see InterruptForPeerMessage). Used by
+// InterruptForPeerMessage to dispatch the specific message that triggered
+// the interrupt instead of whatever happens to be at the FIFO head.
+func (s *Service) TakeQueuedEntry(ctx context.Context, sessionID, entryID string) (*QueuedMessage, bool, error) {
 	msg, err := s.repo.TakeByID(ctx, sessionID, entryID)
 	if err != nil {
 		s.logger.Error("take by id failed",
 			zap.String("session_id", sessionID),
 			zap.String("entry_id", entryID),
 			zap.Error(err))
-		return nil, false
+		return nil, false, err
 	}
 	if msg == nil {
-		return nil, false
+		return nil, false, nil
 	}
 	s.logger.Info("message dequeued by id",
 		zap.String("session_id", sessionID),
 		zap.String("entry_id", msg.ID))
-	return msg, true
+	return msg, true, nil
 }
 
 // UpdateMessage replaces the content (and optionally attachments) of a queued

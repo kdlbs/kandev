@@ -2675,9 +2675,14 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 // dispatch the older message while leaving the parent's urgent one parked
 // exactly as before the interrupt — defeating the point of interrupting at
 // all. If entryID is empty or was already taken by a concurrent path (lost
-// race with a normal turn-completion drain), this falls back to draining
-// whatever is at the FIFO head so the newly-idle session still picks
-// something up.
+// race with a normal turn-completion drain — a plain not-found result, not
+// a repository error), this falls back to draining whatever is at the
+// FIFO head so the newly-idle session still picks
+// something up. A genuine repository error on the targeted take is
+// propagated instead of falling back: an error says nothing about which
+// entry is actually at the FIFO head, and dispatching it anyway would risk
+// delivering the wrong message while the caller still reports "sent" for
+// the parent's (see queueThenInterruptTaskMessage's use of the bool).
 //
 // The returned bool reports whether THIS call actually dispatched a
 // message — false when skipped because a cancel was already in flight for
@@ -2705,7 +2710,10 @@ func (s *Service) InterruptForPeerMessage(ctx context.Context, taskID, sessionID
 	}
 
 	if entryID != "" && s.messageQueue != nil {
-		queuedMsg, ok := s.messageQueue.TakeQueuedEntry(ctx, sessionID, entryID)
+		queuedMsg, ok, err := s.messageQueue.TakeQueuedEntry(ctx, sessionID, entryID)
+		if err != nil {
+			return false, fmt.Errorf("take targeted queued message: %w", err)
+		}
 		if s.dispatchTakenQueuedMessage(ctx, sessionID, queuedMsg, ok) {
 			return true, nil
 		}

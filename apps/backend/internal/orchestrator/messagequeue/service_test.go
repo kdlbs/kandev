@@ -224,7 +224,8 @@ func TestTakeQueuedEntry(t *testing.T) {
 		_, err = svc.QueueMessage(ctx, "s", "t", "third", "", "u", false, nil)
 		require.NoError(t, err)
 
-		msg, ok := svc.TakeQueuedEntry(ctx, "s", second.ID)
+		msg, ok, err := svc.TakeQueuedEntry(ctx, "s", second.ID)
+		require.NoError(t, err)
 		require.True(t, ok)
 		assert.Equal(t, "second", msg.Content)
 
@@ -235,7 +236,8 @@ func TestTakeQueuedEntry(t *testing.T) {
 		assert.Equal(t, "third", status.Entries[1].Content)
 
 		// Taking the same id again finds nothing — it's already gone.
-		_, ok = svc.TakeQueuedEntry(ctx, "s", second.ID)
+		_, ok, err = svc.TakeQueuedEntry(ctx, "s", second.ID)
+		require.NoError(t, err)
 		assert.False(t, ok)
 	})
 
@@ -246,7 +248,8 @@ func TestTakeQueuedEntry(t *testing.T) {
 		agentEntry, err := svc.QueueMessageWithMetadata(ctx, "s", "t", "agent entry", "", QueuedByAgent, false, nil, nil)
 		require.NoError(t, err)
 
-		msg, ok := svc.TakeQueuedEntry(ctx, "s", agentEntry.ID)
+		msg, ok, err := svc.TakeQueuedEntry(ctx, "s", agentEntry.ID)
+		require.NoError(t, err)
 		require.True(t, ok)
 		assert.Equal(t, "agent entry", msg.Content)
 	})
@@ -258,15 +261,56 @@ func TestTakeQueuedEntry(t *testing.T) {
 		victim, err := svc.QueueMessage(ctx, "s-victim", "t", "victim entry", "", "u", false, nil)
 		require.NoError(t, err)
 
-		_, ok := svc.TakeQueuedEntry(ctx, "s-victim", "missing-id")
+		_, ok, err := svc.TakeQueuedEntry(ctx, "s-victim", "missing-id")
+		require.NoError(t, err)
 		assert.False(t, ok)
 
-		_, ok = svc.TakeQueuedEntry(ctx, "s-attacker", victim.ID)
+		_, ok, err = svc.TakeQueuedEntry(ctx, "s-attacker", victim.ID)
+		require.NoError(t, err)
 		assert.False(t, ok)
 
 		status := svc.GetStatus(ctx, "s-victim")
 		assert.Equal(t, 1, status.Count)
 	})
+
+	t.Run("propagates a genuine repository error instead of reporting not-found", func(t *testing.T) {
+		// A repository error (e.g. a transient DB failure) must not be
+		// collapsed into the same (nil, false) shape as a legitimate
+		// not-found — InterruptForPeerMessage treats the two differently
+		// (not-found falls back to a FIFO-head drain; an error propagates
+		// without a fallback, since the error says nothing about what is
+		// actually at the FIFO head).
+		log, err := logger.NewLogger(logger.LoggingConfig{
+			Level:      "error",
+			Format:     "console",
+			OutputPath: "stderr",
+		})
+		require.NoError(t, err)
+		wantErr := errors.New("db unavailable")
+		repo := &errInjectingRepository{Repository: NewMemoryRepository(), takeByIDErr: wantErr}
+		svc := NewService(repo, DefaultMaxPerSession, log)
+		ctx := context.Background()
+
+		msg, ok, err := svc.TakeQueuedEntry(ctx, "s", "some-id")
+		assert.Nil(t, msg)
+		assert.False(t, ok)
+		assert.ErrorIs(t, err, wantErr)
+	})
+}
+
+// errInjectingRepository wraps a Repository and returns a configured error
+// from TakeByID, letting tests exercise TakeQueuedEntry's error-propagation
+// path without needing a real repository failure.
+type errInjectingRepository struct {
+	Repository
+	takeByIDErr error
+}
+
+func (r *errInjectingRepository) TakeByID(ctx context.Context, sessionID, entryID string) (*QueuedMessage, error) {
+	if r.takeByIDErr != nil {
+		return nil, r.takeByIDErr
+	}
+	return r.Repository.TakeByID(ctx, sessionID, entryID)
 }
 
 func TestUpdateMessage(t *testing.T) {

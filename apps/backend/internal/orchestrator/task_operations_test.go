@@ -969,6 +969,84 @@ func TestInterruptForPeerMessage_BusySkipReturnsNotDispatchedWithoutError(t *tes
 	}
 }
 
+// erroringTakeByIDRepository wraps a messagequeue.Repository and returns a
+// configured error from TakeByID, letting orchestrator-level tests exercise
+// InterruptForPeerMessage's error-propagation path without needing a real
+// repository failure. All other methods forward to the embedded Repository.
+type erroringTakeByIDRepository struct {
+	messagequeue.Repository
+	takeByIDErr error
+}
+
+func (r *erroringTakeByIDRepository) TakeByID(context.Context, string, string) (*messagequeue.QueuedMessage, error) {
+	return nil, r.takeByIDErr
+}
+
+// TestInterruptForPeerMessage_TargetedTakeErrorPropagatesWithoutFIFOFallback
+// pins the error-vs-not-found distinction on the targeted take: a genuine
+// repository error (e.g. a transient DB failure) must propagate rather than
+// be treated like a benign "already taken" not-found. Falling back to the
+// FIFO head on a real error would risk dispatching the older sibling entry
+// instead of the parent's message while the caller still reports "sent"
+// for the parent's — the exact bug this whole path exists to fix, just
+// reached via an error instead of a race.
+func TestInterruptForPeerMessage_TargetedTakeErrorPropagatesWithoutFIFOFallback(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	taskRepo := newMockTaskRepo()
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	// Route the session's queue through an error-injecting repository so
+	// the targeted take fails; Insert/GetStatus still work normally against
+	// the same memory-backed store underneath.
+	wantErr := errors.New("db unavailable")
+	svc.messageQueue = messagequeue.NewService(
+		&erroringTakeByIDRepository{Repository: messagequeue.NewMemoryRepository(), takeByIDErr: wantErr},
+		messagequeue.DefaultMaxPerSession, testLogger(),
+	)
+
+	if _, err := svc.messageQueue.QueueMessage(
+		ctx, "session1", "task1", "older sibling message", "", messagequeue.QueuedByAgent, false, nil,
+	); err != nil {
+		t.Fatalf("queue older message: %v", err)
+	}
+	parentMsg, err := svc.messageQueue.QueueMessage(
+		ctx, "session1", "task1", "parent steer message", "", messagequeue.QueuedByAgent, false, nil,
+	)
+	if err != nil {
+		t.Fatalf("queue parent message: %v", err)
+	}
+
+	dispatched, err := svc.InterruptForPeerMessage(ctx, "task1", "session1", parentMsg.ID)
+	if err == nil {
+		t.Fatal("expected InterruptForPeerMessage to propagate the targeted-take error")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected error to wrap %v, got %v", wantErr, err)
+	}
+	if dispatched {
+		t.Fatal("expected InterruptForPeerMessage to report nothing dispatched on a targeted-take error")
+	}
+
+	agentMgr.mu.Lock()
+	prompts := append([]string(nil), agentMgr.capturedPrompts...)
+	agentMgr.mu.Unlock()
+	if len(prompts) != 0 {
+		t.Fatalf("expected no message to be dispatched via an unsafe FIFO fallback, got prompts=%v", prompts)
+	}
+
+	// Both entries remain queued — neither the parent's nor the older
+	// sibling's was dispatched.
+	status := svc.messageQueue.GetStatus(ctx, "session1")
+	if status.Count != 2 {
+		t.Fatalf("expected both entries to remain queued, count=%d entries=%+v", status.Count, status.Entries)
+	}
+}
+
 // --- StartCreatedSession ---
 
 func TestStartCreatedSession_WrongTask(t *testing.T) {
