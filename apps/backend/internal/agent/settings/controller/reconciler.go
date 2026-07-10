@@ -19,7 +19,7 @@ import (
 const (
 	// Orphan cleanup is startup hygiene, not a user-confirmed bulk action.
 	// Keep automatic batches small so registry bugs fail closed.
-	maxOrphanCleanupAgentTypesPerRun = 3
+	maxOrphanCleanupAgentTypesPerRun = 20
 	maxOrphanCleanupProfilesPerRun   = 10
 )
 
@@ -52,18 +52,19 @@ type orphanCleanupCandidate struct {
 }
 
 type orphanCleanupSummary struct {
-	enabledAgentCount       int
-	dbAgentCount            int
-	orphanAgentCount        int
-	profilesCandidateCount  int
-	profilesDeletedCount    int
-	profileListFailureCount int
-	skipped                 bool
-	skipReason              string
-	enabledAgentIDs         []string
-	orphanAgentNames        []string
-	maxAgentTypesPerRun     int
-	maxProfilesPerRun       int
+	enabledAgentCount        int
+	dbAgentCount             int
+	orphanAgentCount         int
+	profilesCandidateCount   int
+	profilesCandidatePartial bool
+	profilesDeletedCount     int
+	profileListFailureCount  int
+	skipped                  bool
+	skipReason               string
+	enabledAgentIDs          []string
+	orphanAgentNames         []string
+	maxAgentTypesPerRun      int
+	maxProfilesPerRun        int
 }
 
 // NewProfileReconciler constructs a reconciler.
@@ -186,6 +187,7 @@ func (r *ProfileReconciler) collectOrphanCleanupCandidates(
 		profiles, err := r.store.ListAgentProfiles(ctx, dbAgent.ID)
 		if err != nil {
 			summary.profileListFailureCount++
+			summary.profilesCandidatePartial = true
 			r.log.Warn("orphan cleanup: list profiles failed",
 				zap.String("agent_id", dbAgent.ID),
 				zap.String("agent_name", dbAgent.Name),
@@ -233,6 +235,7 @@ func (r *ProfileReconciler) logOrphanCleanupSummary(summary orphanCleanupSummary
 		zap.Int("db_agent_count", summary.dbAgentCount),
 		zap.Int("orphan_agent_count", summary.orphanAgentCount),
 		zap.Int("profiles_candidate_count", summary.profilesCandidateCount),
+		zap.Bool("profiles_candidate_partial", summary.profilesCandidatePartial),
 		zap.Int("profiles_deleted_count", summary.profilesDeletedCount),
 		zap.Int("profile_list_failure_count", summary.profileListFailureCount),
 		zap.Bool("skipped", summary.skipped),

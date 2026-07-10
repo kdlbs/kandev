@@ -437,7 +437,7 @@ func TestProfileReconciler_SkipsOrphanCleanupWhenEnabledRegistryEmpty(t *testing
 
 func TestProfileReconciler_SkipsOrphanCleanupWhenBatchExceedsSafetyLimit(t *testing.T) {
 	st := newFakeStore()
-	for i := 1; i <= 4; i++ {
+	for i := 1; i <= 21; i++ {
 		orphanAgent := &models.Agent{Name: "removed-old-agent-" + itoa(i)}
 		_ = st.CreateAgent(context.Background(), orphanAgent)
 		orphanProfile := &models.AgentProfile{
@@ -463,6 +463,34 @@ func TestProfileReconciler_SkipsOrphanCleanupWhenBatchExceedsSafetyLimit(t *test
 	}
 }
 
+func TestProfileReconciler_SkipsOrphanCleanupWhenProfileCountExceedsSafetyLimit(t *testing.T) {
+	st := newFakeStore()
+	orphanAgent := &models.Agent{Name: "removed-old-agent"}
+	_ = st.CreateAgent(context.Background(), orphanAgent)
+	for i := 1; i <= 11; i++ {
+		orphanProfile := &models.AgentProfile{
+			AgentID: orphanAgent.ID,
+			Name:    "legacy-" + itoa(i),
+			Model:   "x",
+		}
+		_ = st.CreateAgentProfile(context.Background(), orphanProfile)
+	}
+
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	reg := registry.NewRegistry(log)
+	reg.LoadDefaults()
+	r := NewProfileReconciler(&fakeCapReader{caps: map[string]hostutility.AgentCapabilities{}}, reg, st, log)
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(st.softDeleted) != 0 {
+		t.Fatalf("expected oversized profile batch to fail closed, got soft-deletes %v", st.softDeleted)
+	}
+}
+
 func TestProfileReconciler_SkipsOrphanCleanupWhenCandidateProfileListFails(t *testing.T) {
 	st := newFakeStore()
 	failingAgent := &models.Agent{Name: "removed-old-agent-failing"}
@@ -479,10 +507,7 @@ func TestProfileReconciler_SkipsOrphanCleanupWhenCandidateProfileListFails(t *te
 	}
 	_ = st.CreateAgentProfile(context.Background(), deletableProfile)
 
-	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
-	if err != nil {
-		t.Fatalf("logger: %v", err)
-	}
+	log, logs := newObserverLogger(t)
 	reg := registry.NewRegistry(log)
 	reg.LoadDefaults()
 	r := NewProfileReconciler(&fakeCapReader{caps: map[string]hostutility.AgentCapabilities{}}, reg, st, log)
@@ -491,6 +516,14 @@ func TestProfileReconciler_SkipsOrphanCleanupWhenCandidateProfileListFails(t *te
 	}
 	if len(st.softDeleted) != 0 {
 		t.Fatalf("expected profile-list failure to fail closed, got soft-deletes %v", st.softDeleted)
+	}
+	entries := logs.FilterMessage("orphan cleanup summary").All()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 summary log, got %d", len(entries))
+	}
+	fields := entries[0].ContextMap()
+	if fields["profiles_candidate_partial"] != true {
+		t.Errorf("profiles_candidate_partial = %v, want true", fields["profiles_candidate_partial"])
 	}
 }
 
@@ -525,6 +558,9 @@ func TestProfileReconciler_LogsOrphanCleanupSummary(t *testing.T) {
 	}
 	if fields["profiles_deleted_count"] != int64(1) {
 		t.Errorf("profiles_deleted_count = %v, want 1", fields["profiles_deleted_count"])
+	}
+	if fields["profiles_candidate_partial"] != false {
+		t.Errorf("profiles_candidate_partial = %v, want false", fields["profiles_candidate_partial"])
 	}
 	if fields["skipped"] != false {
 		t.Errorf("skipped = %v, want false", fields["skipped"])
