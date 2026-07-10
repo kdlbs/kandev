@@ -162,7 +162,7 @@ function SourceBlock({ tag, node, children, className, onClick, ...rest }: Sourc
   const range = sourceRangeFromNode(node);
   const comments = commentContext?.comments ?? [];
   const isCommented = range ? commentsOverlapRange(comments, range) : false;
-  const canRenderBadge = tag !== "blockquote";
+  const canRenderBadge = tag !== "blockquote" && tag !== "li";
   const hasCommentBadge = canRenderBadge && range ? commentsBeginInRange(comments, range) : false;
   const handleClick = (event: React.MouseEvent<HTMLElement>) => {
     onClick?.(event);
@@ -306,6 +306,7 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
   onTogglePreview,
 }: MarkdownPreviewContentProps) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const [overlayRoot, setOverlayRoot] = useState<HTMLElement | null>(null);
   const commentsEnabled = enableComments && !!sessionId;
   const commentState = useMarkdownPreviewComments({
@@ -324,10 +325,23 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
     }),
     [commentState.comments, commentState.showCommentsForRange],
   );
+  const dismissCommentOverlays = commentState.dismissOverlays;
 
   useEffect(() => {
     setOverlayRoot(document.body);
   }, []);
+
+  useEffect(() => {
+    if (!commentsEnabled) return;
+    const scrollElement = scrollRef.current;
+    const dismissOverlays = () => dismissCommentOverlays();
+    scrollElement?.addEventListener("scroll", dismissOverlays, { passive: true });
+    window.addEventListener("resize", dismissOverlays);
+    return () => {
+      scrollElement?.removeEventListener("scroll", dismissOverlays);
+      window.removeEventListener("resize", dismissOverlays);
+    };
+  }, [commentsEnabled, dismissCommentOverlays]);
 
   return (
     <div className="relative flex h-full flex-col" data-testid="markdown-preview">
@@ -338,7 +352,7 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
         commentsEnabled={commentsEnabled}
         onTogglePreview={onTogglePreview}
       />
-      <div className="flex-1 overflow-auto p-6">
+      <div ref={scrollRef} className="flex-1 overflow-auto p-6">
         <div ref={rootRef} className="markdown-body max-w-3xl" tabIndex={commentsEnabled ? 0 : -1}>
           <PreviewCommentContext.Provider value={previewCommentContextValue}>
             <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownPreviewComponents}>

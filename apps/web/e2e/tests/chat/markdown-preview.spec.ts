@@ -1,9 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
-import { type Locator, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import {
+  selectMarkdownPreviewRange,
+  selectMarkdownPreviewText,
+} from "../../helpers/markdown-preview";
 import { SessionPage } from "../../pages/session-page";
 
 const MARKDOWN_CONTENT = `# Hello World
@@ -80,50 +84,6 @@ async function openFileInCode(
   const editorTab = testPage.locator(`.dv-default-tab:has-text('${fileName}')`);
   await expect(editorTab).toBeVisible({ timeout: 10_000 });
   await expect(testPage.locator(".monaco-editor").first()).toBeVisible({ timeout: 10_000 });
-}
-
-async function selectMarkdownPreviewText(target: Locator): Promise<void> {
-  await target.evaluate((element) => {
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    const selection = window.getSelection();
-    if (!selection) throw new Error("Browser selection is unavailable");
-    selection.removeAllRanges();
-    selection.addRange(range);
-
-    const rect = element.getBoundingClientRect();
-    element.dispatchEvent(
-      new MouseEvent("mouseup", {
-        bubbles: true,
-        clientX: rect.left + rect.width / 2,
-        clientY: rect.bottom,
-      }),
-    );
-  });
-}
-
-async function selectMarkdownPreviewRange(start: Locator, end: Locator): Promise<void> {
-  await start.evaluate(
-    (startElement, endElement) => {
-      const range = document.createRange();
-      range.setStartBefore(startElement);
-      range.setEndAfter(endElement);
-      const selection = window.getSelection();
-      if (!selection) throw new Error("Browser selection is unavailable");
-      selection.removeAllRanges();
-      selection.addRange(range);
-
-      const rect = endElement.getBoundingClientRect();
-      endElement.dispatchEvent(
-        new MouseEvent("mouseup", {
-          bubbles: true,
-          clientX: rect.left + rect.width / 2,
-          clientY: rect.bottom,
-        }),
-      );
-    },
-    await end.elementHandle(),
-  );
 }
 
 test.describe("Markdown preview", () => {

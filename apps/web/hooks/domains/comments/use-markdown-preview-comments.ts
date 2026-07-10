@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type RefObject,
+  type SetStateAction,
+} from "react";
 import { useToast } from "@/components/toast-provider";
 import { useCommentsStore, type DiffComment } from "@/lib/state/slices/comments";
 import {
@@ -246,6 +254,65 @@ function useMarkdownCommentRangeView({
   );
 }
 
+function useClearDisabledMarkdownComments({
+  enabled,
+  clearCurrentSelection,
+  clearTextSelection,
+  closeCommentView,
+}: {
+  enabled: boolean;
+  clearCurrentSelection: (selection: MarkdownPreviewSelection | null) => void;
+  clearTextSelection: (selection: MarkdownPreviewSelection | null) => void;
+  closeCommentView: () => void;
+}) {
+  useEffect(() => {
+    if (enabled) return;
+    clearCurrentSelection(null);
+    clearTextSelection(null);
+    closeCommentView();
+  }, [clearCurrentSelection, clearTextSelection, closeCommentView, enabled]);
+}
+
+function useVisibleMarkdownCommentActions({
+  setCommentView,
+}: {
+  setCommentView: Dispatch<SetStateAction<MarkdownCommentView>>;
+}) {
+  const removeComment = useCommentsStore((s) => s.removeComment);
+  const updateComment = useCommentsStore((s) => s.updateComment);
+  const { toast } = useToast();
+  const removeVisibleComment = useCallback(
+    (commentId: string) => {
+      removeComment(commentId);
+      setCommentView((view) => {
+        if (!view) return view;
+        const nextComments = view.comments.filter((comment) => comment.id !== commentId);
+        return nextComments.length > 0 ? { ...view, comments: nextComments } : null;
+      });
+      toast({ title: "Comment deleted" });
+    },
+    [removeComment, setCommentView, toast],
+  );
+  const updateVisibleComment = useCallback(
+    (commentId: string, text: string) => {
+      updateComment(commentId, { text });
+      setCommentView((view) => {
+        if (!view) return view;
+        return {
+          ...view,
+          comments: view.comments.map((comment) =>
+            comment.id === commentId ? { ...comment, text } : comment,
+          ),
+        };
+      });
+      toast({ title: "Comment updated" });
+    },
+    [setCommentView, toast, updateComment],
+  );
+
+  return { removeVisibleComment, updateVisibleComment };
+}
+
 export function useMarkdownPreviewComments({
   path,
   repositoryId,
@@ -258,9 +325,6 @@ export function useMarkdownPreviewComments({
   const [textSelection, setTextSelection] = useState<MarkdownPreviewSelection | null>(null);
   const [commentView, setCommentView] = useState<MarkdownCommentView>(null);
   const comments = useDiffFileComments(sessionId ?? "", path, repositoryId ?? undefined);
-  const removeComment = useCommentsStore((s) => s.removeComment);
-  const updateComment = useCommentsStore((s) => s.updateComment);
-  const { toast } = useToast();
 
   const closeCommentView = useCallback(() => setCommentView(null), []);
   const { currentSelection, setCurrentSelection } = useMarkdownSelectionCapture({
@@ -283,18 +347,22 @@ export function useMarkdownPreviewComments({
     onOpenSelection: openComposer,
   });
 
-  useEffect(() => {
-    if (!enabled) {
-      setCurrentSelection(null);
-      setTextSelection(null);
-      closeCommentView();
-    }
-  }, [closeCommentView, enabled, setCurrentSelection]);
+  useClearDisabledMarkdownComments({
+    enabled,
+    clearCurrentSelection: setCurrentSelection,
+    clearTextSelection: setTextSelection,
+    closeCommentView,
+  });
 
   const closeComposer = useCallback(() => {
     setTextSelection(null);
     clearBrowserSelection();
   }, []);
+  const dismissOverlays = useCallback(() => {
+    setCurrentSelection(null);
+    setTextSelection(null);
+    closeCommentView();
+  }, [closeCommentView, setCurrentSelection]);
 
   const { submitComment, submitAndRunComment } = useMarkdownCommentSubmitters({
     path,
@@ -308,34 +376,9 @@ export function useMarkdownPreviewComments({
     comments,
     onShow: setCommentView,
   });
-  const removeVisibleComment = useCallback(
-    (commentId: string) => {
-      removeComment(commentId);
-      setCommentView((view) => {
-        if (!view) return view;
-        const nextComments = view.comments.filter((comment) => comment.id !== commentId);
-        return nextComments.length > 0 ? { ...view, comments: nextComments } : null;
-      });
-      toast({ title: "Comment deleted" });
-    },
-    [removeComment, toast],
-  );
-  const updateVisibleComment = useCallback(
-    (commentId: string, text: string) => {
-      updateComment(commentId, { text });
-      setCommentView((view) => {
-        if (!view) return view;
-        return {
-          ...view,
-          comments: view.comments.map((comment) =>
-            comment.id === commentId ? { ...comment, text } : comment,
-          ),
-        };
-      });
-      toast({ title: "Comment updated" });
-    },
-    [toast, updateComment],
-  );
+  const { removeVisibleComment, updateVisibleComment } = useVisibleMarkdownCommentActions({
+    setCommentView,
+  });
 
   return {
     comments,
@@ -350,5 +393,6 @@ export function useMarkdownPreviewComments({
     updateComment: updateVisibleComment,
     showCommentsForRange,
     closeCommentView,
+    dismissOverlays,
   };
 }
