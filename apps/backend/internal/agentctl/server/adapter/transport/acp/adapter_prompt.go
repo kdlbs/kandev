@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/coder/acp-go-sdk"
@@ -137,7 +138,7 @@ func (a *Adapter) sendPrompt(ctx context.Context, message string, attachments []
 	promptSpan.End()
 
 	if err != nil {
-		return err
+		return normalizePromptErrorAfterCancel(promptCtx, err)
 	}
 
 	// Drain queued ACP notifications before running the post-prompt sweeps and
@@ -203,6 +204,16 @@ func (a *Adapter) sendPrompt(ctx context.Context, message string, attachments []
 	})
 
 	return nil
+}
+
+func normalizePromptErrorAfterCancel(promptCtx context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(context.Cause(promptCtx), ErrTurnCancelNotAcknowledged) {
+		return errPromptAbandonedAfterCancel
+	}
+	return err
 }
 
 func (a *Adapter) buildPromptContentBlocks(message string, attachments []v1.MessageAttachment) []acp.ContentBlock {

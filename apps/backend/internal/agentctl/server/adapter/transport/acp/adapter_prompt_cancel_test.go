@@ -178,3 +178,13 @@ func TestWaitForPromptRPCAfterCancel_CancelsPromptCtxOnTimeout(t *testing.T) {
 			context.Cause(ctx))
 	}
 }
+
+func TestNormalizePromptErrorAfterCancel_MapsTimeoutCanceledRPCToAbandonedPrompt(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(ErrTurnCancelNotAcknowledged)
+
+	err := normalizePromptErrorAfterCancel(ctx, context.Canceled)
+	if !errors.Is(err, errPromptAbandonedAfterCancel) {
+		t.Fatalf("expected errPromptAbandonedAfterCancel, got %v", err)
+	}
+}

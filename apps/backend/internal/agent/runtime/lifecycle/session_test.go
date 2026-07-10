@@ -957,6 +957,44 @@ func TestWaitForPromptDone_TreatsPromptAbandonedAfterCancelAsCancelEscalated(t *
 	}
 }
 
+func TestSendPrompt_TreatsTriggerTimePromptAbandonedAfterCancelAsCancelEscalated(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+	mock.handler = func(msg ws.Message) *ws.Message {
+		if msg.Action == "agent.prompt" {
+			resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "prompt abandoned after cancel", nil)
+			return resp
+		}
+		return mock.defaultHandler(msg)
+	}
+
+	log := newSessionTestLogger()
+	sm := NewSessionManager(log, make(chan struct{}))
+
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+
+	ctx := context.Background()
+	if err := client.StreamUpdates(ctx, func(event agentctl.AgentEvent) {}, nil, nil); err != nil {
+		t.Fatalf("failed to connect stream: %v", err)
+	}
+	waitForWSConnected(t, mock)
+
+	execution := &AgentExecution{
+		ID:            "test-exec",
+		TaskID:        "test-task",
+		SessionID:     "test-session",
+		WorkspacePath: "/workspace",
+		agentctl:      client,
+		promptDoneCh:  make(chan PromptCompletionSignal, 1),
+	}
+
+	_, err := sm.SendPrompt(ctx, execution, "hello", false, nil, true)
+	if !errors.Is(err, ErrCancelEscalated) {
+		t.Fatalf("expected ErrCancelEscalated, got: %v", err)
+	}
+}
+
 // TestBuildEffectivePrompt_DoesNotInjectKandevContextOnResume verifies the
 // lifecycle layer no longer wraps follow-up prompts with the Kandev system
 // block. The orchestrator wraps the first prompt only; on resume the agent
